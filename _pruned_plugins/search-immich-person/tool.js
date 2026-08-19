@@ -4,7 +4,7 @@ class SkillImpl {
   async execute(args) {
     const http = require('http');
     const baseUrl = 'http://127.0.0.1:2283';
-    const apiKey = 'z187FBvMrb2ACGegqlesy6xNoX4E8PqVJPmUCfLE';
+    const apiKey = process.env.IMMICH_API_KEY;
     const name = args.name || 'ronny';
 
     return new Promise((resolve, reject) => {
