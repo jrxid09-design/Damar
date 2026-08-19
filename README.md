@@ -221,7 +221,35 @@ Hentikan semuanya dengan **Ctrl+C**.
 
 ## Konfigurasi (Console → Settings)
 
-Semua diatur dari **Console → Settings** dan disimpan lokal (gitignored).
+> **Instalasi bersih = "Aether versi kamu".** Repo ini TIDAK memuat satu pun
+> kredensial atau data pribadi. Saat pertama dijalankan, Aether membuat sendiri
+> folder `configs/` dan `data/` yang kosong — memori nol, watak dari titik awal.
+> Semua yang kamu isi tersimpan **lokal** dan sudah gitignored; ia tak akan
+> pernah ikut ter-commit.
+
+### Cara mengisi kredensial
+
+**Cara 1 — lewat Console (disarankan, tanpa menyentuh berkas).** Jalankan
+`npm run aether`, buka **Settings**, isi kolomnya. Aether menulis `configs/*.json`
+untukmu. Ini jalur termudah dan paling aman.
+
+**Cara 2 — menyalin berkas contoh.** Tiap layanan punya berkas `.example`.
+Salin ke nama tanpa `.example`, lalu isi nilaimu:
+
+```bash
+# contoh: provider AI cloud
+cp configs/providers.json.example configs/providers.json
+# lalu buka configs/providers.json, ganti GANTI_DENGAN_... dengan kunci aslimu
+```
+
+Contoh yang tersedia: `providers` (AI cloud), `binance` (crypto), `telegram`,
+`home` (Home Assistant), `immich` (foto/wajah), `voice` (STT/TTS).
+
+**Cara 3 — variabel lingkungan.** Sebagian integrasi bisa ditimpa tanpa berkas,
+mis. `AETHER_OLLAMA_URL=http://192.168.1.10:11434` (lihat `configs/integrations.json`).
+
+> Aether tetap hidup **tanpa satu pun kredensial** — pakai Ollama bila ada, atau
+> menunggu dikonfigurasi. Isi hanya layanan yang kamu pakai.
 
 ### Provider AI
 - **AI Lokal** — Ollama (base URL + model). Gratis & privat.
@@ -334,3 +362,11 @@ configs/               kredensial, setelan, keadaan batin (mind.json),
   **AI Lokal (Ollama)**.
 - **OpenClaw/Hermes skill gagal** → pastikan kedua agent berjalan & terkonfigurasi
   di `configs/integrations.json`.
+
+---
+
+## Lisensi
+
+Dirilis di bawah **MIT License** — lihat berkas [`LICENSE`](LICENSE). Bebas
+dipakai, dimodifikasi, dan disebarluaskan; sertakan pemberitahuan hak cipta.
+Perangkat lunak disediakan apa adanya, tanpa jaminan.

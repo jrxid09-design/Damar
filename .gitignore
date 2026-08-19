@@ -10,6 +10,7 @@ node_modules/
 # sudah menjadi bagian dari repo di develop.
 configs/*
 !configs/integrations.json
+!configs/*.example
 
 # --- DATA PRIBADI PER-INSTALASI: LOKAL SAJA ------------------------
 # Repo ini open-source. Semua di bawah adalah "Aether versi kamu":
