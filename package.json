@@ -22,7 +22,8 @@
     "learn": "node scripts/learn.js",
     "audit": "node scripts/audit-276.js --json",
     "test": "node --test --test-concurrency=1 --require ./tests/helpers/testEnv.js \"tests/**/*.test.js\"",
-    "test:safety": "node --test --test-concurrency=1 --require ./tests/helpers/testEnv.js \"tests/safety/*.test.js\""
+    "test:safety": "node --test --test-concurrency=1 --require ./tests/helpers/testEnv.js \"tests/safety/*.test.js\"",
+    "model:pull": "node scripts/pull-model.js"
   },
   "repository": {
     "type": "git",
@@ -47,6 +48,7 @@
     "express-validator": "^7.3.2",
     "mammoth": "^1.12.0",
     "node": "^26.5.1",
+    "node-llama-cpp": "^3.20.0",
     "node-pty": "^1.1.0",
     "ora": "^9.4.1",
     "pdf-parse": "^2.4.5",
@@ -63,6 +65,7 @@
     "nodemon": "^3.1.14"
   },
   "allowScripts": {
-    "sqlite3@6.0.1": true
+    "sqlite3@6.0.1": true,
+    "node-llama-cpp@3.20.0": true
   }
 }

@@ -342,6 +342,20 @@ class AIRuntimeService {
             builder.use("openai");
 
         }
+        else if (resolved.kind === "llamacpp") {
+
+            // Otak lokal langsung: bobot GGUF dimuat di proses daemon,
+            // tanpa Ollama/HTTP. contextSize dibatasi agar RAM di mesin
+            // CPU tidak meledak (KV-cache tumbuh dengan context).
+            const localCtx = Number(process.env.AETHER_LOCAL_NUM_CTX ?? 8192);
+            builder.provider("llamacpp", {
+                modelPath: resolved.model,
+                contextSize: Number.isFinite(localCtx) && localCtx > 0 ? localCtx : 8192
+            });
+
+            builder.use("llamacpp");
+
+        }
         else {
             builder.use("ollama");
         }

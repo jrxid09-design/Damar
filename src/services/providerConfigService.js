@@ -90,8 +90,19 @@ const PRESETS = {
         baseUrl: "http://localhost:11434",
         kind: "ollama",
         modelHint: "mis. llama3.2 (harus sudah di-pull)"
+    },
+    // Otak lokal langsung: bobot GGUF dimuat di proses daemon
+    // (node-llama-cpp), tanpa server terpisah seperti Ollama.
+    llamacpp: {
+        label: "Model lokal langsung (llama.cpp)",
+        baseUrl: "",
+        kind: "llamacpp",
+        modelHint: "nama berkas GGUF di models/ (mis. Qwen2.5-7B-Instruct-Q4_K_M.gguf)"
     }
 };
+
+/** Model bawaan bila belum diset — GGUF Qwen yang direkomendasikan. */
+const DEFAULT_LOCAL_MODEL = "Qwen2.5-7B-Instruct-Q4_K_M.gguf";
 
 const CONFIG_PATH = path.join(
     __dirname, "..", "..", "configs", "providers.json"
@@ -186,6 +197,20 @@ class ProviderConfigService {
             return ollama;
         }
 
+        // Otak lokal langsung (llama.cpp): model = nama berkas GGUF.
+        if (preset.kind === "llamacpp") {
+            const model =
+                process.env.AETHER_MODEL_PATH ||
+                config.llamacpp?.model ||
+                DEFAULT_LOCAL_MODEL;
+            return {
+                id: "llamacpp",
+                kind: "llamacpp",
+                label: preset.label,
+                model
+            };
+        }
+
         const p = config.providers?.[activeId] ?? {};
 
         // Key kosong → jatuh ke Ollama lokal (sesuai permintaan).
@@ -209,6 +234,15 @@ class ProviderConfigService {
 
         if (id === "ollama") {
             return this.setOllama({ baseUrl, model });
+        }
+
+        // Otak lokal: yang disimpan hanya nama berkas GGUF, tanpa key/URL.
+        if (id === "llamacpp") {
+            const config = this.read();
+            this.store.write({
+                llamacpp: { model: model !== undefined ? (model || null) : (config.llamacpp?.model ?? null) }
+            });
+            return this.read();
         }
 
         if (!PRESETS[id]) {

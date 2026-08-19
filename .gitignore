@@ -29,3 +29,7 @@ ROADMAP.md
 *-arsenal*.sh
 check-*.sh
 scripts/attack-*.sh
+
+# Model bobot lokal (GGUF) — jangan commit, unduh sendiri
+models/
+*.gguf

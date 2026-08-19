@@ -12,6 +12,8 @@ const {
     OllamaMapper
 } = require("./ollama");
 
+const { LlamaCppProvider } = require("./llamacpp");
+
 class AIProviderFactory {
 
     static create(type, options = {}) {
@@ -30,6 +32,11 @@ class AIProviderFactory {
 
             case "ollama":
                 return this.createOllama(options);
+
+            // Otak lokal in-process (node-llama-cpp) — pengganti Ollama.
+            case "llamacpp":
+            case "local":
+                return this.createLlamaCpp(options);
 
             default:
                 throw new Error(
@@ -127,6 +134,22 @@ class AIProviderFactory {
             defaultOptions: options.defaultOptions,
 
             keepAlive: options.keepAlive
+
+        });
+
+    }
+
+    static createLlamaCpp(options = {}) {
+
+        return new LlamaCppProvider({
+
+            context: options.context,
+
+            modelPath: options.modelPath,
+
+            contextSize: options.contextSize,
+
+            gpuLayers: options.gpuLayers
 
         });
 
