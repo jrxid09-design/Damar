@@ -33,6 +33,14 @@ const DESTRUCTIVE = new Set([
     "terminal_run",
     "kali_run",
 
+    // ---- Kendali HP (setara kendali desktop) ---------------------
+    "android_tap",
+    "android_swipe",
+    "android_type",
+    "android_key",
+    "android_open_app",
+    "android_shell",
+
     // ---- Mengubah mesin atau dunia fisik -------------------------
     "aetherSkills.home_control",
     "aetherSkills.device_on",

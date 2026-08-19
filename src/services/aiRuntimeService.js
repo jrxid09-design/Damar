@@ -644,6 +644,9 @@ class AIRuntimeService {
             // AI/ML — probe lingkungan riset (Python, framework, CUDA/GPU).
             ...require("../ml/tools").mlTools(),
 
+            // Android — kendali HP pemilik lewat ADB (ketuk/geser/ketik/app).
+            ...require("../android/tools").androidTools(),
+
             // Kesadaran — introspeksi keadaan batin, refleksi, empati.
             ...require("../consciousness/tools").consciousnessTools(),
 

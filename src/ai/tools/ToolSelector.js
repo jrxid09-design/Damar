@@ -123,6 +123,13 @@ const PROFILES = {
         "code_graph_query", "kali_run"
     ],
 
+    android: [
+        "android_devices", "android_screenshot", "android_tap", "android_swipe",
+        "android_type", "android_key", "android_open_app", "android_apps",
+        "android_notifications", "android_info", "android_connect", "android_shell",
+        "show_image"
+    ],
+
     sistem: [
         "world_describe", "terminal_list", "terminal_read", "terminal_run",
         "terminal_restart",
@@ -207,6 +214,7 @@ const PEMICU = {
     keamanan: ["keamanan", "security", "rentan", "kerentanan", "celah", "vulnerability", "audit keamanan", "hardening", "cve", "bocor", "kebocoran", "xss", "sql injection", "injeksi", "diretas", "peretas"],
     kali: ["kali", "nmap", "sqlmap", "metasploit", "msfconsole", "hydra", "nikto", "gobuster", "hashcat", "aircrack", "wireshark", "burp", "recon", "scan port", "pemindaian", "pentest", "penetration", "exploit", "eksploitasi", "payload", "reverse shell", "wifi", "brute force", "arsenal"],
     ml: ["ml", "machine learning", "deep learning", "model", "training", "latih", "dataset", "neural", "torch", "pytorch", "tensorflow", "transformer", "embedding", "fine-tune", "finetune", "inferensi", "gpu", "cuda", "eksperimen", "hyperparameter", "akurasi", "loss", "benchmark model", "rag", "llm", "arsitektur ai"],
+    android: ["android", "hp", "ponsel", "handphone", "smartphone", "adb", "layar hp", "ketuk", "tap", "swipe", "geser layar", "buka aplikasi", "buka app", "notifikasi hp", "screenshot hp", "tangkap layar", "whatsapp di hp", "kendalikan hp", "kontrol hp", "gawai"],
     sistem: ["jalankan", "perintah", "command", "docker", "npm", "proses", "restart", "disk", "memori sistem", "layanan", "terminal", "nas", "penyimpanan"],
     desktop: ["buka", "aplikasi", "notepad", "ketik", "tulis", "isi form", "form", "klik", "tekan", "layar", "jendela", "app"],
     memori: ["ingat", "catat", "lupa", "simpan", "kenal", "siapa", "hubungan", "terkait"],
