@@ -31,6 +31,7 @@ const DESTRUCTIVE = new Set([
     "aetherSkills.hermes_run",
     "aetherSkills.openclaw_do",
     "terminal_run",
+    "kali_run",
 
     // ---- Mengubah mesin atau dunia fisik -------------------------
     "aetherSkills.home_control",

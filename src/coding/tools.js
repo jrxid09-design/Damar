@@ -225,6 +225,88 @@ function codingTools() {
         }),
 
         new AITool({
+            name: "code_diff",
+            description:
+                "TINJAU perubahanmu sendiri SEBELUM commit: status file + diff unified. " +
+                "Gerbang wajib pada tugas non-sepele — baca diff-nya, cari rahasia yang " +
+                "ikut terbawa, perubahan yang tidak diminta, dan sisa kode debug. " +
+                "Balikan { status, diff, truncated }.",
+            parameters: {
+                type: "object",
+                properties: {
+                    project: { type: "string", description: "Path root proyek (opsional)." },
+                    staged: { type: "boolean", description: "true = diff yang sudah di-stage." },
+                    maxChars: { type: "number", description: "Batas panjang diff (default 12000)." }
+                }
+            },
+            execute: async ({ project, staged, maxChars }) => {
+                if (!await brain.patcher.isRepo(project)) return { ok: false, note: "Bukan repo git." };
+                const limit = Number.isFinite(maxChars) && maxChars > 0 ? maxChars : 12000;
+                const [status, diff] = await Promise.all([
+                    brain.patcher.status(project),
+                    brain.patcher.diff(project, { staged: !!staged })
+                ]);
+                return {
+                    ok: true,
+                    status: status || "(bersih)",
+                    truncated: diff.length > limit,
+                    diff: diff.slice(0, limit)
+                };
+            }
+        }),
+
+        new AITool({
+            name: "code_review",
+            description:
+                "TINJAU perubahan sendiri seperti reviewer: ambil diff lalu periksa " +
+                "rahasia yang ikut terbawa, sisa kode debug, pekerjaan tertunda, diff " +
+                "yang terlalu besar, dan logika yang berubah tanpa test. Jalankan " +
+                "SESUDAH code_test hijau dan SEBELUM code_commit. Balikan temuan " +
+                "ber-nomor-baris; level 'blok' berarti JANGAN commit sebelum dibereskan.",
+            parameters: {
+                type: "object",
+                properties: {
+                    project: { type: "string", description: "Path root proyek (opsional)." },
+                    staged: { type: "boolean", description: "true = tinjau perubahan yang sudah di-stage." }
+                }
+            },
+            execute: async ({ project, staged }) => {
+                if (!await brain.patcher.isRepo(project)) return { ok: false, note: "Bukan repo git." };
+                const [diff, status] = await Promise.all([
+                    brain.patcher.diff(project, { staged: !!staged }),
+                    brain.patcher.status(project)
+                ]);
+
+                // Berkas baru yang belum di-'git add' TIDAK muncul di git diff.
+                // Tanpa catatan ini tinjauan bisa berkata "bersih" padahal ada
+                // berkas yang belum pernah dibaca siapa pun.
+                const takDilacak = status.split(/\r?\n/)
+                    .filter(l => l.startsWith("?? "))
+                    .map(l => l.slice(3).trim())
+                    .filter(Boolean);
+
+                if (!diff.trim() && !takDilacak.length) {
+                    return { ok: true, note: staged ? "Tak ada perubahan ter-stage." : "Tak ada perubahan belum-commit.", findings: [] };
+                }
+
+                const hasil = diff.trim()
+                    ? brain.review.review(diff)
+                    : { ok: true, files: [], ditambah: 0, findings: [], dipangkas: false, ringkasan: "0 berkas terlacak berubah." };
+
+                if (takDilacak.length) {
+                    hasil.takDilacak = takDilacak;
+                    hasil.findings.push({
+                        level: "peringatan", rule: "belum-dilacak", file: takDilacak.join(", "), line: 0,
+                        teks: `${takDilacak.length} berkas baru belum di-git add`,
+                        catatan: "Belum terlihat di diff — 'git add' dulu lalu tinjau ulang dengan staged=true."
+                    });
+                }
+
+                return hasil;
+            }
+        }),
+
+        new AITool({
             name: "code_commit",
             description: "Commit perubahan SETELAH test hijau (stage semua). Kembalikan hasil commit.",
             parameters: {

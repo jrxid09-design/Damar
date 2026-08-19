@@ -8,6 +8,7 @@ const tester = require("./tester/testRunner");
 const bugMemory = require("./memory/bugMemory");
 const refactor = require("./refactor/Refactorer");
 const powershell = require("./analyzer/powershell");
+const review = require("./review/diffReviewer");
 
 /**
  * CodingBrain — pintu tunggal kemampuan software-engineering Aether.
@@ -33,6 +34,7 @@ class CodingBrain {
     get refactor() { return refactor; }
     get planner() { return planner; }
     get powershell() { return powershell; }
+    get review() { return review; }
 
     /**
      * Outline simbol satu file dgn urutan analisis Coding Brain: LSP dulu
@@ -96,6 +98,7 @@ class CodingBrain {
             refactor: true,  // refactoring otonom — Fase 8 ✔
             planner: true,   // fase planning (investigasi berbudget) ✔
             powershell: powershell.available(), // diagnostics PS (PSScriptAnalyzer)
+            review: true,    // tinjauan diff mekanis sebelum commit ✔
             memory: true     // MemoryEngine + bug memory ✔
         };
     }

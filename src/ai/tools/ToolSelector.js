@@ -105,7 +105,22 @@ const PROFILES = {
     coding: [
         "opencode_run", "think_deeply",
         "code_graph_query", "code_plan", "code_definition", "code_references",
-        "code_diagnostics", "code_test", "code_branch", "code_commit"
+        "code_diagnostics", "code_test", "code_branch", "code_diff", "code_review", "code_commit"
+    ],
+
+    keamanan: [
+        "sec_secret_scan", "sec_code_audit", "sec_dep_audit",
+        "code_review", "code_diff", "code_graph_query"
+    ],
+
+    kali: [
+        "kali_run", "kali_tools", "kali_which", "kali_status",
+        "terminal_run", "sec_code_audit"
+    ],
+
+    ml: [
+        "ml_env", "ml_run", "terminal_run", "code_plan",
+        "code_graph_query", "kali_run"
     ],
 
     sistem: [
@@ -189,6 +204,9 @@ const PEMICU = {
     kamera: ["kamera", "cctv", "lihat", "pantau", "wajah", "rekaman"],
     musik: ["lagu", "musik", "putar", "mainkan", "play", "youtube", "spotify", "dengar", "video klip", "nyanyi", "karaoke", "lagu anak", "potong bebek"],
     coding: ["kode", "code", "bug", "error", "test", "commit", "branch", "refactor", "fungsi", "berkas kode"],
+    keamanan: ["keamanan", "security", "rentan", "kerentanan", "celah", "vulnerability", "audit keamanan", "hardening", "cve", "bocor", "kebocoran", "xss", "sql injection", "injeksi", "diretas", "peretas"],
+    kali: ["kali", "nmap", "sqlmap", "metasploit", "msfconsole", "hydra", "nikto", "gobuster", "hashcat", "aircrack", "wireshark", "burp", "recon", "scan port", "pemindaian", "pentest", "penetration", "exploit", "eksploitasi", "payload", "reverse shell", "wifi", "brute force", "arsenal"],
+    ml: ["ml", "machine learning", "deep learning", "model", "training", "latih", "dataset", "neural", "torch", "pytorch", "tensorflow", "transformer", "embedding", "fine-tune", "finetune", "inferensi", "gpu", "cuda", "eksperimen", "hyperparameter", "akurasi", "loss", "benchmark model", "rag", "llm", "arsitektur ai"],
     sistem: ["jalankan", "perintah", "command", "docker", "npm", "proses", "restart", "disk", "memori sistem", "layanan", "terminal", "nas", "penyimpanan"],
     desktop: ["buka", "aplikasi", "notepad", "ketik", "tulis", "isi form", "form", "klik", "tekan", "layar", "jendela", "app"],
     memori: ["ingat", "catat", "lupa", "simpan", "kenal", "siapa", "hubungan", "terkait"],
