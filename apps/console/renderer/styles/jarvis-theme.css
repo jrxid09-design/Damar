@@ -1,0 +1,124 @@
+/* =============================================
+   JARVIS THEME - Aether Console
+   Dipasang SETELAH aether.tokens.css agar menimpa token kanonik.
+   Perangkat tanpa GPU -> efek ringan: tanpa backdrop-filter,
+   animasi hanya opacity/transform, glow memakai box-shadow tipis.
+   ================================================ */
+
+:root {
+    --j-amber:        #FFB300;
+    --j-amber-soft:   #FFD54F;
+    --j-gold:          #FFC107;
+    --j-orange:        #FF6D00;
+    --j-bg:             #07090C;
+    --j-panel:         #0C1116;
+    --j-panel-2:       #10161D;
+    --j-line:         rgba(255, 179, 0, 0.14);
+    --j-line-strong:  rgba(255, 179, 0, 0.30);
+    --j-text:         #F3E9D2;
+    --j-text-dim:     #9C8F6E;
+
+    /* OVERRIDE token kanonik Aether -> nuansa JARVIS */
+    --ae-void:            #07090C;
+    --ae-surface:         #0C1116;
+    --ae-surface-glass:   rgba(16, 22, 29, 0.72);
+    --ae-surface-elevated:rgba(20, 27, 35, 0.85);
+    --ae-cyan:        var(--j-amber);
+    --ae-blue:        var(--j-gold);
+    --ae-cyan-soft:   var(--j-amber-soft);
+    --ae-violet:      var(--j-orange);
+    --ae-violet-soft: #FF9E40;
+    --ae-white:       var(--j-text);
+    --ae-soft-white:  #EADFC4;
+    --ae-muted:       var(--j-text-dim);
+    --ae-disabled:    #5A5138;
+    --ae-success:  #7CFFB2;
+    --ae-warning:  var(--j-amber-soft);
+    --ae-error:    #FF4D4D;
+    --ae-critical: #FF1744;
+    --ae-info:     var(--j-gold);
+    --ae-line:        var(--j-line);
+    --ae-line-strong: var(--j-line-strong);
+    --ae-line-glow:   rgba(255, 179, 0, 0.42);
+    --accent-gradient: linear-gradient(120deg, var(--j-amber) 0%, var(--j-orange) 70%);
+    --neon-cyan: var(--j-amber);
+    --c-info:   var(--j-gold);
+    --c-ai:     var(--j-orange);
+    --c-ok:     #7CFFB2;
+    --c-proc:   var(--j-amber);
+    --c-danger: #FF4D4D;
+    --holo: 0 0 14px rgba(255, 179, 0, 0.28), 0 0 34px rgba(255, 109, 0, 0.14);
+}
+
+body {
+    background:
+        radial-gradient(ellipse 120% 80% at 50% -10%, rgba(255,179,0,0.05), transparent 60%),
+        var(--j-bg);
+}
+#shell { background: transparent; }
+
+#shell::before {
+    content: "";
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background: repeating-linear-gradient(0deg,
+        rgba(255,179,0,0.022) 0px, rgba(255,179,0,0.022) 1px,
+        transparent 1px, transparent 3px);
+}
+
+.titlebar {
+    background: linear-gradient(180deg, rgba(255,179,0,0.06), rgba(12,17,22,0.9));
+    border-bottom: 1px solid var(--j-line-strong);
+}
+.brand .name { color: var(--j-amber); letter-spacing: 0.18em; text-shadow: 0 0 10px rgba(255,179,0,0.4); }
+.brand .sub  { color: var(--j-orange); }
+.brand .mark { box-shadow: 0 0 12px rgba(255,179,0,0.55); border: 1px solid var(--j-amber); }
+
+.stop-btn { border: 1px solid rgba(255,77,77,0.5); color: #FF6B6B; }
+.stop-btn:hover { background: rgba(255,77,77,0.12); box-shadow: 0 0 14px rgba(255,23,68,0.35); }
+
+.apps-btn { border: 1px solid var(--j-line-strong); color: var(--j-amber); }
+.apps-btn:hover { box-shadow: var(--holo); }
+.apps-btn .dots i { background: var(--j-amber); }
+
+.stage { background: transparent; }
+
+.statusbar {
+    background: rgba(10,14,18,0.9);
+    border-top: 1px solid var(--j-line);
+    color: var(--j-text-dim);
+}
+
+.launcher { background: rgba(7,9,12,0.96); }
+.launcher h2, .hub-head { color: var(--j-text-dim); }
+.hub-head .hub-brand { color: var(--j-amber); text-shadow: 0 0 12px rgba(255,179,0,0.45); }
+.hub-head b { color: var(--j-orange); }
+
+.app-tile, .hub-card {
+    background: linear-gradient(160deg, rgba(255,179,0,0.05), rgba(12,17,22,0.6));
+    border: 1px solid var(--j-line);
+    transition: transform .14s ease, border-color .14s ease, box-shadow .14s ease;
+}
+.app-tile:hover, .hub-card:hover {
+    border-color: var(--j-amber);
+    box-shadow: var(--holo);
+}
+.app-tile .t, .hub-card .t { color: var(--j-text); }
+.app-tile .ico, .hub-card .ico { border: 1px solid var(--j-line-strong); background: rgba(255,179,0,0.06); }
+.app-tile .ico .icon { color: var(--j-amber); }
+
+.holo-fab {
+    background: radial-gradient(circle at 50% 40%, var(--j-amber-soft), var(--j-orange) 75%);
+    border: 1px solid var(--j-amber);
+    box-shadow: 0 0 18px rgba(255,179,0,0.5), 0 0 44px rgba(255,109,0,0.22);
+}
+.holo-fab:hover { box-shadow: 0 0 26px rgba(255,179,0,0.7), 0 0 60px rgba(255,109,0,0.3); }
+
+.wake-badge { background: rgba(12,17,22,0.9); border: 1px solid var(--j-line-strong); color: var(--j-amber); }
+.wake-badge .eq i { background: var(--j-amber); }
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: var(--j-panel); }
+::-webkit-scrollbar-thumb { background: #2A2113; border-radius: 6px; border: 2px solid var(--j-panel); }
+::-webkit-scrollbar-thumb:hover { background: var(--j-amber); }
+
+::selection { background: rgba(255,179,0,0.28); color: #FFF8E7; }

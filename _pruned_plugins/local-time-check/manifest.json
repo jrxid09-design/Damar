@@ -1,0 +1,20 @@
+{
+    "id": "local-time-check",
+    "name": "Cek Waktu Lokal",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Membaca waktu lokal perangkat saat ini langsung dari jam sistem Node.js tanpa perlu menjalankan perintah terminal eksternal, mengembalikan tanggal, jam, menit, detik, zona waktu, dan offset UTC dalam format yang mudah dibaca manusia maupun diolah program.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "manual",
+        "createdAt": "2026-08-16T07:23:00.901Z",
+        "spec": {
+            "raw": "class Tool {\n  constructor() {\n    this.name = 'getLocalTime';\n    this.description = 'Mengambil waktu lokal perangkat saat ini dari jam sistem, termasuk tanggal, jam, zona waktu, dan offset UTC.';\n    this.parameters = {\n      format: { type: 'string', description: 'Format keluaran: iso, readable, atau both (default).', required: false }\n    };\n  }\n  async execute(args) {\n    try {\n      const now = new Date();\n      const pad = (n) => String(n).padStart(2, '0');\n      const hari = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'][now.getDay()];\n      const bulan = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'][now.getMonth()];\n      const readable = hari + ', ' + now.getDate() + ' ' + bulan + ' ' + now.getFullYear() + ' pukul ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());\n      const offsetMin = -now.getTimezoneOffset();\n      const sign = offsetMin >= 0 ? '+' : '-';\n      const offset = 'UTC' + sign + pad(Math.floor(Math.abs(offsetMin) / 60)) + ':' + pad(Math.abs(offsetMin) % 60);\n      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown';\n      const hasil = {\n        iso: now.toISOString(),\n        readable: readable,\n        timezone: tz,\n        offset: offset,\n        unix: Math.floor(now.getTime() / 1000)\n      };\n      return { ok: true, hasil: hasil };\n    } catch (err) {\n      return { ok: false, error: String(err && err.message ? err.message : err) };\n    }\n  }\n}\nmodule.exports = [new Tool()];\n"
+        }
+    }
+}

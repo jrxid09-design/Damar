@@ -1,0 +1,181 @@
+/* =========================================================
+   Aether Console — fondasi visual
+   Gelap, berlapis, dengan aksen aurora dingin.
+   ========================================================= */
+
+:root {
+
+    /* Permukaan, dari paling dalam ke paling menonjol */
+    --bg-void:        #05060c;
+    --bg-deep:        #080a13;
+    --bg-panel:       rgba(19, 23, 38, 0.66);
+    --bg-panel-solid: #12162a;
+    --bg-raised:      rgba(31, 37, 60, 0.72);
+    --bg-inset:       rgba(6, 8, 16, 0.55);
+
+    /* Garis */
+    --line:        rgba(133, 162, 255, 0.11);
+    --line-strong: rgba(133, 162, 255, 0.22);
+    --line-glow:   rgba(120, 200, 255, 0.38);
+
+    /* Teks */
+    --text:        #e8ecff;
+    --text-muted:  #8d97bd;
+    --text-dim:    #5e6788;
+
+    /* Aksen */
+    --accent-1: #22d3ee;
+    --accent-2: #7c8cff;
+    --accent-3: #c084fc;
+    --accent-gradient: linear-gradient(120deg, var(--accent-1), var(--accent-2) 55%, var(--accent-3));
+
+    /* Status */
+    --ok:      #34d399;
+    --ok-dim:  rgba(52, 211, 153, 0.14);
+    --warn:    #fbbf24;
+    --warn-dim: rgba(251, 191, 36, 0.14);
+    --danger:  #fb7185;
+    --danger-dim: rgba(251, 113, 133, 0.14);
+    --idle:    #64748b;
+    --idle-dim: rgba(100, 116, 139, 0.14);
+
+    /* Bentuk */
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 18px;
+    --r-xl: 24px;
+    --r-pill: 999px;
+
+    /* Bayangan */
+    --shadow-panel: 0 18px 50px -22px rgba(0, 0, 0, 0.9);
+    --shadow-float: 0 24px 60px -20px rgba(0, 0, 0, 0.85);
+    --glow-accent: 0 0 0 1px rgba(124, 140, 255, 0.28), 0 8px 32px -10px rgba(124, 140, 255, 0.45);
+
+    /* Tipografi */
+    --font-ui: "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, -apple-system, sans-serif;
+    --font-mono: "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+
+    /* Gerak */
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --fast: 140ms var(--ease);
+    --base: 260ms var(--ease);
+    --slow: 480ms var(--ease);
+
+    --titlebar-h: 40px;
+    --statusbar-h: 30px;
+    --sidebar-w: 232px;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+}
+
+body {
+    background: var(--bg-void);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    user-select: none;
+}
+
+/* Lapisan aurora: dua gumpalan warna yang bergerak sangat lambat
+   di belakang seluruh antarmuka, memberi kesan "hidup" tanpa
+   mengganggu keterbacaan. */
+body::before {
+    content: "";
+    position: fixed;
+    inset: -30%;
+    z-index: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(38% 44% at 18% 12%, rgba(34, 211, 238, 0.16), transparent 62%),
+        radial-gradient(42% 46% at 82% 8%,  rgba(192, 132, 252, 0.14), transparent 64%),
+        radial-gradient(46% 50% at 62% 92%, rgba(124, 140, 255, 0.13), transparent 66%);
+    filter: blur(28px);
+    animation: aurora 26s var(--ease) infinite alternate;
+}
+
+/* Butiran halus supaya gradasi besar tidak terlihat "banding". */
+body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@keyframes aurora {
+    0%   { transform: translate3d(0, 0, 0) scale(1); }
+    50%  { transform: translate3d(2%, -2%, 0) scale(1.06); }
+    100% { transform: translate3d(-2%, 2%, 0) scale(1.02); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    body::before {
+        animation: none;
+    }
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
+
+}
+
+/* SVG inline tidak punya ukuran intrinsik — tanpa aturan ini ia
+   memuai memenuhi kontainer. Ukuran default dipatok di sini,
+   komponen tertentu boleh menimpanya. */
+.icon {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    vertical-align: -3px;
+}
+
+/* Scrollbar yang menyatu dengan tema */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(133, 162, 255, 0.16);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: var(--r-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(133, 162, 255, 0.3);
+    background-clip: padding-box;
+}
+
+::selection {
+    background: rgba(124, 140, 255, 0.32);
+}
+
+:focus-visible {
+    outline: 2px solid var(--accent-2);
+    outline-offset: 2px;
+}

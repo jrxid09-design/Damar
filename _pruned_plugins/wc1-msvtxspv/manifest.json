@@ -1,0 +1,20 @@
+{
+    "id": "wc1-msvtxspv",
+    "name": "WC1",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Uji bungkus class polos dengan execute args untuk skill otonomi.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "manual",
+        "createdAt": "2026-08-16T13:17:32.738Z",
+        "spec": {
+            "raw": "// Skill buatan Aether Skill Factory — jangan sunting manual.\nclass SkillImpl {\n async execute(args){ return { echo: args.inp }; } \n}\n\nclass Tool {\n    constructor() {\n        this._impl = new SkillImpl();\n        this.name = \"WCSATU\";\n        this.description = \"Uji bungkus class polos dengan execute args untuk skill otonomi.\";\n        this.parameters = {\n    inp: {\"type\":\"string\",\"description\":\"inp\",\"required\":true}\n        };\n    }\n    // Kontrak plugin: execute(context, params).\n    // Pilih sumber args yang benar: params utama; context\n    // kadang membawa args saat pemanggil legacy.\n    async execute(context, params) {\n        const args = (params && typeof params === 'object' && !Array.isArray(params) && Object.keys(params).length)\n            ? params\n            : (context && typeof context === 'object' && !Array.isArray(context) && Object.keys(context).length)\n                ? context\n                : {};\n        return this._impl.execute(args);\n    }\n}\nmodule.exports = [new Tool()];\n"
+        }
+    }
+}

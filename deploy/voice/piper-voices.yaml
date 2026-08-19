@@ -1,0 +1,52 @@
+# Pemetaan nama suara OpenAI -> model Piper, dipakai openedai-speech.
+#
+# Semua nama baku OpenAI diarahkan ke suara Indonesia yang sama
+# supaya Aether tetap berbunyi walau mengirim nama suara apa pun.
+# `id_news` adalah nama eksplisit yang dipakai configs/voice.json.
+#
+# Model single-speaker: kolom `speaker` sengaja dibiarkan kosong.
+tts-1:
+  id_news:
+    model: voices/id_ID-news_tts-medium.onnx
+    speaker:
+  alloy:
+    model: voices/id_ID-news_tts-medium.onnx
+    speaker:
+  echo:
+    model: voices/id_ID-news_tts-medium.onnx
+    speaker:
+  fable:
+    model: voices/id_ID-news_tts-medium.onnx
+    speaker:
+  onyx:
+    model: voices/id_ID-news_tts-medium.onnx
+    speaker:
+  nova:
+    model: voices/id_ID-news_tts-medium.onnx
+    speaker:
+  shimmer:
+    model: voices/id_ID-news_tts-medium.onnx
+    speaker:
+
+tts-1-hd:
+  id_news:
+    model: voices/id_ID-news_tts-medium.onnx
+    speaker:
+  alloy:
+    model: voices/id_ID-news_tts-medium.onnx
+    speaker:
+  echo:
+    model: voices/id_ID-news_tts-medium.onnx
+    speaker:
+  fable:
+    model: voices/id_ID-news_tts-medium.onnx
+    speaker:
+  onyx:
+    model: voices/id_ID-news_tts-medium.onnx
+    speaker:
+  nova:
+    model: voices/id_ID-news_tts-medium.onnx
+    speaker:
+  shimmer:
+    model: voices/id_ID-news_tts-medium.onnx
+    speaker:

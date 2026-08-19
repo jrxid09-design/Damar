@@ -1,0 +1,34 @@
+[
+  {
+    "area": "pengujian",
+    "change": "Uji offline §276 diganti: jalur keluar diputus pada lapisan socket di proses anak, lalu inferensi sungguhan dijalankan (tests/safety/offline.test.js + tests/helpers/offlineChild.js)",
+    "why": "Pemeriksaan lama melaporkan LULUS karena alasan yang salah. Ia menambal globalThis.fetch DI DALAM PROSES AUDIT SENDIRI lalu memanggil /api/tags — daftar model, bukan inferensi — sementara daemon yang seharusnya diuji berjalan di proses lain dan jaringannya tidak pernah disentuh. Bukti yang tercatat berbunyi 'jalur inferensi tetap terjawab' padahal tak ada satu pun inferensi yang berjalan. Ini persis kelas klaim sukses palsu yang dibangun VerificationEngine untuk menangkapnya, dan kali ini pelakunya adalah alat audit itu sendiri — dokumen yang justru dipakai sebagai sumber kebenaran di atas ingatan. Blokir dipasang di lapisan socket (net.Socket.prototype.connect + dns.lookup), bukan pada satu API, supaya fetch/undici, http, https, dan pustaka apa pun ikut terputus; menambal satu API hanya membuktikan API itu ditambal.",
+    "files": ["tests/safety/offline.test.js", "tests/helpers/offlineChild.js", "scripts/audit-276.js", "docs/roadmap.md", "docs/status.md"],
+    "verification": "Alat ukurnya dibuktikan lebih dulu: koneksi ke host non-lokal harus benar-benar gagal, dan localhost harus tetap hidup — kalau tidak, uji ini dinyatakan tidak membuktikan apa pun. Sesudah itu inferensi sungguhan menjawab 71 karakter ('Langit saat ini berwarna biru cerah...') dengan seluruh host non-lokal tak terjangkau. Tiga tes lulus, berkasnya selesai dalam 6,2 detik.",
+    "risks": "Yang terbukti: menjawab tidak membutuhkan host di luar mesin ini. Yang BELUM diuji: jaringan putus di tengah permintaan yang sedang berjalan, dan keadaan saat Ollama sendiri mati. Jaringan pengguna sengaja tidak pernah diputus sungguhan karena itu dapat memutus Tailscale dan akses pemilik ke mesinnya sendiri."
+  },
+  {
+    "area": "pengujian",
+    "change": "Inferensi offline dijalankan di proses anak, bukan sedang-proses",
+    "why": "Versi pertama menjalankannya di dalam proses tes. Ketiga tesnya lulus, tetapi berkasnya tidak pernah selesai — 400 detik dan masih menggantung. Dengan jalur keluar mati ada sesuatu di runtime yang belum melepas pegangannya; pada daemon yang memang hidup terus itu tak berakibat, tetapi di test runner ia menggantung seluruh suite. Proses anak juga lebih jujur sebagai uji: jaringannya mati sebelum satu pun modul Aether dimuat, jadi tidak ada koneksi yang sempat dibuka lebih dulu lalu dipakai ulang diam-diam. --test-force-exit sengaja TIDAK dipakai: itu menyembunyikan kebocoran handle di seluruh suite demi satu berkas.",
+    "files": ["tests/helpers/offlineChild.js", "tests/safety/offline.test.js"],
+    "verification": "Berkas uji selesai 6,2 detik dan keluar bersih; npm test penuh 182 tes lulus tanpa menggantung.",
+    "risks": "Pegangan yang tidak dilepas saat jalur keluar mati belum ditelusuri sampai akarnya — dihindari, bukan diperbaiki. Bila kelak daemon perlu dimatikan dengan bersih saat offline, ini akan muncul lagi."
+  },
+  {
+    "area": "proses",
+    "change": "Tes pemilih tool sempat diubah agar cocok dengan ToolSelector.js baru, lalu DIKEMBALIKAN seperti semula",
+    "why": "Tes 'urutan pendaftaran dipertahankan' memang merah, tetapi sebabnya bukan bug lama: ToolSelector.js ditulis ulang di disk pada 14:53:54 oleh sesi lain yang berjalan bersamaan — dari pemilih berbasis skor menjadi PROFIL tetap — sementara versi yang ter-commit masih yang lama. Menyesuaikan tes berarti mengesahkan penulisan ulang milik orang lain yang belum selesai dan belum di-commit, memakai commit ini sebagai stempel. Pemilik memutuskan mengembalikannya; yang menulis ulang pemilih itu yang berhak menetapkan kontraknya. Pelajaran yang lebih umum: sebelum memperbaiki tes merah, periksa dulu apakah yang berubah justru implementasinya, dan oleh siapa.",
+    "files": ["tests/safety/toolSelector.test.js"],
+    "verification": "git restore mengembalikan berkas tes ke keadaan ter-commit. ToolSelector.js yang ditulis ulang sengaja dibiarkan tidak ter-commit.",
+    "risks": "Selama penulisan ulang itu belum di-commit, npm test menunjukkan satu tes merah di pohon kerja. Itu keadaan sesi lain yang sedang berjalan, bukan kerusakan."
+  },
+  {
+    "area": "proses",
+    "change": "KOREKSI catatan #99: perubahan tes pemilih tool dibatalkan, jangan dipakai sebagai preseden",
+    "why": "Catatan #99 sebelumnya menyatakan tes pemilih tool 'diganti dengan kontrak yang sebenarnya berlaku' dan melaporkan 182 lulus. Itu tidak lagi berlaku: perubahannya dikembalikan atas keputusan pemilik. Catatan ini sengaja ditulis alih-alih menghapus, karena buildMemory hanya punya record dan recall — tidak ada hapus maupun supersede. Membiarkan catatan yang keliru berdiri sendiri berarti Aether kelak menjawab dari catatan yang salah, persis kegagalan yang ingin dihindari sistem ini.",
+    "files": ["docs/journal/2026-08-12-offline-benar-benar-diuji.json"],
+    "verification": "git status menunjukkan tests/safety/toolSelector.test.js bersih terhadap HEAD.",
+    "risks": "buildMemory belum punya cara menandai catatan sebagai digantikan; koreksi hanya berupa catatan baru yang mudah-mudahan ikut terpanggil bersama yang lama. Ini kekurangan nyata yang layak diperbaiki."
+  }
+]

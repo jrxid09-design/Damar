@@ -1,0 +1,20 @@
+{
+    "id": "search-immich-person",
+    "name": "search-immich-person",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Mencari data orang/person dari server Immich berdasarkan nama.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "manual",
+        "createdAt": "2026-08-16T18:17:05.406Z",
+        "spec": {
+            "raw": "// Skill buatan Aether Skill Factory — jangan sunting manual.\nclass SkillImpl {\n\n  async execute(args) {\n    const http = require('http');\n    const baseUrl = 'http://127.0.0.1:2283';\n    const apiKey = 'z187FBvMrb2ACGegqlesy6xNoX4E8PqVJPmUCfLE';\n    const name = args.name || 'ronny';\n\n    return new Promise((resolve, reject) => {\n      const req = http.get(`${baseUrl}/api/person?name=${encodeURIComponent(name)}`, {\n        headers: {\n          'x-api-key': apiKey,\n          'Accept': 'application/json'\n        }\n      }, (res) => {\n        let data = '';\n        res.on('data', chunk => data += chunk);\n        res.on('end', () => {\n          try {\n            const parsed = JSON.parse(data);\n            resolve(parsed);\n          } catch (e) {\n            resolve({ raw: data, error: e.message });\n          }\n        });\n      });\n      req.on('error', err => reject(err));\n    });\n  }\n\n}\n\nclass Tool {\n    constructor() {\n        this._impl = new SkillImpl();\n        this.name = \"SEARCHIMMICHPERSON\";\n        this.description = \"Mencari data orang/person dari server Immich berdasarkan nama.\";\n        this.parameters = {\n    name: {\"type\":\"string\",\"description\":\"Nama orang yang dicari\",\"required\":false}\n        };\n    }\n    // Kontrak plugin: execute(context, params).\n    // Pilih sumber args yang benar: params utama; context\n    // kadang membawa args saat pemanggil legacy.\n    async execute(context, params) {\n        const args = (params && typeof params === 'object' && !Array.isArray(params) && Object.keys(params).length)\n            ? params\n            : (context && typeof context === 'object' && !Array.isArray(context) && Object.keys(context).length)\n                ? context\n                : {};\n        return this._impl.execute(args);\n    }\n}\nmodule.exports = [new Tool()];\n"
+        }
+    }
+}

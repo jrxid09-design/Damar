@@ -1,0 +1,338 @@
+{
+  "app.js": {
+    "mtime": 1786808354.2663982,
+    "seen": 1786808724.6270778,
+    "ast_hash": "d54cd67c3c7538028c4a5b52158f6ed2",
+    "semantic_hash": ""
+  },
+  "lib/aetherOverlay.js": {
+    "mtime": 1786808222.6714456,
+    "seen": 1786808724.6270843,
+    "ast_hash": "449b959e8f593349e71e706ca0ec9585",
+    "semantic_hash": ""
+  },
+  "lib/aetherState.js": {
+    "mtime": 1786798175.0200632,
+    "seen": 1786808724.6270864,
+    "ast_hash": "bc8d41d1c874cb9d4f54dd522f5939e4",
+    "semantic_hash": ""
+  },
+  "lib/aiselect.js": {
+    "mtime": 1785485761.703413,
+    "seen": 1786808724.6270874,
+    "ast_hash": "99de7429301fd675cc7926927c2b48b1",
+    "semantic_hash": ""
+  },
+  "lib/api.js": {
+    "mtime": 1786785785.7726576,
+    "seen": 1786808724.627088,
+    "ast_hash": "728eeec5f920866937971ab45341f6b5",
+    "semantic_hash": ""
+  },
+  "lib/appHost.js": {
+    "mtime": 1785852506.2352724,
+    "seen": 1786808724.6270885,
+    "ast_hash": "2a95f00b2466b466de3cbf9595e19f5c",
+    "semantic_hash": ""
+  },
+  "lib/avatar/character/aether-geometry.json": {
+    "mtime": 1786796677.5840414,
+    "seen": 1786808724.6270895,
+    "ast_hash": "a7c76fc7bd815887a09d97e0e3f82dc4",
+    "semantic_hash": ""
+  },
+  "lib/avatar/entity.js": {
+    "mtime": 1786807764.621112,
+    "seen": 1786808724.62709,
+    "ast_hash": "adfed6f13b03910723746d494ba62b7a",
+    "semantic_hash": ""
+  },
+  "lib/avatar/states.js": {
+    "mtime": 1786796486.5663185,
+    "seen": 1786808724.6270905,
+    "ast_hash": "b546a67e3e676e28a7a7577c2ba6f78f",
+    "semantic_hash": ""
+  },
+  "lib/commandPalette.js": {
+    "mtime": 1785677058.111955,
+    "seen": 1786808724.6270912,
+    "ast_hash": "b7c3de0a0254b7cbe291d3e27dd43025",
+    "semantic_hash": ""
+  },
+  "lib/hologram.js": {
+    "mtime": 1786790853.7425022,
+    "seen": 1786808724.6270914,
+    "ast_hash": "992ad71a7b231398bc8a243e3a6c0409",
+    "semantic_hash": ""
+  },
+  "lib/icons.js": {
+    "mtime": 1786792832.3668895,
+    "seen": 1786808724.6270921,
+    "ast_hash": "095a2154ec9083393ee9520c7d324093",
+    "semantic_hash": ""
+  },
+  "lib/motion.js": {
+    "mtime": 1786790779.470094,
+    "seen": 1786808724.6270928,
+    "ast_hash": "695af1fbdbe65c6dcd834ceb168a6ae6",
+    "semantic_hash": ""
+  },
+  "lib/store.js": {
+    "mtime": 1785400023.0614958,
+    "seen": 1786808724.6270933,
+    "ast_hash": "763730f5999b1bdbc5350521ba99a8c2",
+    "semantic_hash": ""
+  },
+  "lib/terminalClient.js": {
+    "mtime": 1785564255.2457392,
+    "seen": 1786808724.6270938,
+    "ast_hash": "fd98af7d13ac5aedca2b1d729748d974",
+    "semantic_hash": ""
+  },
+  "lib/ui.js": {
+    "mtime": 1785403941.8806832,
+    "seen": 1786808724.6270947,
+    "ast_hash": "d5f6dd4900ba1c0d95756182e7d11b8f",
+    "semantic_hash": ""
+  },
+  "lib/viz/memoryGraph.js": {
+    "mtime": 1786791734.2108874,
+    "seen": 1786808724.6270952,
+    "ast_hash": "8f7b46f365bae61aff0749cb9b4135f2",
+    "semantic_hash": ""
+  },
+  "lib/viz/orbitalGauge.js": {
+    "mtime": 1786791753.808893,
+    "seen": 1786808724.6270957,
+    "ast_hash": "439869dfbacd827ba9a07e080aa2ef16",
+    "semantic_hash": ""
+  },
+  "lib/viz/timeline.js": {
+    "mtime": 1786791766.8163407,
+    "seen": 1786808724.6270964,
+    "ast_hash": "167ca7c9ee4a108cee612d2d4b9a3ef1",
+    "semantic_hash": ""
+  },
+  "lib/voice.js": {
+    "mtime": 1785486325.5745146,
+    "seen": 1786808724.6270967,
+    "ast_hash": "9460df130bd4a59855bf270be4ba087f",
+    "semantic_hash": ""
+  },
+  "lib/wakeword.js": {
+    "mtime": 1785852490.3969557,
+    "seen": 1786808724.6270974,
+    "ast_hash": "50aca0cad3eec61bb3a9c55faf9e42ab",
+    "semantic_hash": ""
+  },
+  "vendor/three.core.js": {
+    "mtime": 1785450656.514821,
+    "seen": 1786808724.6270976,
+    "ast_hash": "b2e7a8e645f93a5f3f50dfa3ab0ce439",
+    "semantic_hash": ""
+  },
+  "vendor/three.module.js": {
+    "mtime": 1785450637.3377442,
+    "seen": 1786808724.627098,
+    "ast_hash": "349f3ef05ce3c9b4017c650f81a1506e",
+    "semantic_hash": ""
+  },
+  "vendor/xterm/addon-fit.js": {
+    "mtime": 1785564167.8172417,
+    "seen": 1786808724.6270986,
+    "ast_hash": "25f0510074e274cfac85ffed228242dc",
+    "semantic_hash": ""
+  },
+  "vendor/xterm/addon-search.js": {
+    "mtime": 1785564167.8545542,
+    "seen": 1786808724.627099,
+    "ast_hash": "c122e9ae81ea99f275e5acc95a91500d",
+    "semantic_hash": ""
+  },
+  "vendor/xterm/xterm.js": {
+    "mtime": 1785564167.7346098,
+    "seen": 1786808724.6270998,
+    "ast_hash": "d7aaaef27ff18a0e8deff9b29439090e",
+    "semantic_hash": ""
+  },
+  "views/aether.js": {
+    "mtime": 1786791024.6502285,
+    "seen": 1786808724.6271002,
+    "ast_hash": "8cde08ae836c8bf04655b12a5c4f5e86",
+    "semantic_hash": ""
+  },
+  "views/agents.js": {
+    "mtime": 1785678704.588764,
+    "seen": 1786808724.6271007,
+    "ast_hash": "b9b6af1a7490e8a5e3fac9067d2fff73",
+    "semantic_hash": ""
+  },
+  "views/apps/connect.js": {
+    "mtime": 1785852539.1900053,
+    "seen": 1786808724.6271012,
+    "ast_hash": "54f85af7ddf15723612420536d6883ae",
+    "semantic_hash": ""
+  },
+  "views/apps/space.js": {
+    "mtime": 1786793946.867779,
+    "seen": 1786808724.6271017,
+    "ast_hash": "9773260cc59a828756254d574f5f4794",
+    "semantic_hash": ""
+  },
+  "views/apps/studio.js": {
+    "mtime": 1785852527.8281715,
+    "seen": 1786808724.627103,
+    "ast_hash": "801d3071d14cf86ffc05dc72fb46a3e3",
+    "semantic_hash": ""
+  },
+  "views/awareness.js": {
+    "mtime": 1785504751.9661086,
+    "seen": 1786808724.627104,
+    "ast_hash": "16461903b105086d0e57238db5ba40d7",
+    "semantic_hash": ""
+  },
+  "views/chat.js": {
+    "mtime": 1785677626.417668,
+    "seen": 1786808724.6271045,
+    "ast_hash": "035dde36b179b5d8208e05cd27c4099a",
+    "semantic_hash": ""
+  },
+  "views/companion.js": {
+    "mtime": 1785487114.1083066,
+    "seen": 1786808724.627105,
+    "ast_hash": "1eb0a945a118e78cfef055914924a5c6",
+    "semantic_hash": ""
+  },
+  "views/dashboard.js": {
+    "mtime": 1786808483.1756403,
+    "seen": 1786808724.6271055,
+    "ast_hash": "ce5f3ccdf52d86eb0557b8cc4d7ee4e3",
+    "semantic_hash": ""
+  },
+  "views/devices.js": {
+    "mtime": 1785485882.1533566,
+    "seen": 1786808724.627106,
+    "ast_hash": "7765f842ec0f8a69d9c2706f15e9d4b0",
+    "semantic_hash": ""
+  },
+  "views/family.js": {
+    "mtime": 1786795572.2043033,
+    "seen": 1786808724.6271067,
+    "ast_hash": "ac4758c0aedd53f8aabb613a48a03d14",
+    "semantic_hash": ""
+  },
+  "views/files.js": {
+    "mtime": 1785680046.5128272,
+    "seen": 1786808724.6271071,
+    "ast_hash": "e1a5db6ff5d66f2961282020656d3002",
+    "semantic_hash": ""
+  },
+  "views/home.js": {
+    "mtime": 1785678929.4186957,
+    "seen": 1786808724.6271076,
+    "ast_hash": "485b681202dabc5f9796ede375e91292",
+    "semantic_hash": ""
+  },
+  "views/integrations.js": {
+    "mtime": 1785400182.1941817,
+    "seen": 1786808724.627108,
+    "ast_hash": "8f02350ab6b154f60b56273d8d227b1d",
+    "semantic_hash": ""
+  },
+  "views/logs.js": {
+    "mtime": 1785400304.1287248,
+    "seen": 1786808724.6271086,
+    "ast_hash": "0924f7fa7bd8be1dbe61af9fdbf2f3e7",
+    "semantic_hash": ""
+  },
+  "views/memory.js": {
+    "mtime": 1786792888.8013651,
+    "seen": 1786808724.6271093,
+    "ast_hash": "846306ad4036480b0a27ee53bea56290",
+    "semantic_hash": ""
+  },
+  "views/models.js": {
+    "mtime": 1785751860.0683298,
+    "seen": 1786808724.62711,
+    "ast_hash": "28ebd18a7a7ebace72d53f7bfab3f8a0",
+    "semantic_hash": ""
+  },
+  "views/nas.js": {
+    "mtime": 1785682736.9030566,
+    "seen": 1786808724.627111,
+    "ast_hash": "4b8b74af04b0b2c73ffaf929118d6efd",
+    "semantic_hash": ""
+  },
+  "views/panels/runtimeStatusPanel.js": {
+    "mtime": 1785637862.8730621,
+    "seen": 1786808724.6271114,
+    "ast_hash": "a94c9155c23c1e606fa4dca7c1deef73",
+    "semantic_hash": ""
+  },
+  "views/panels/terminalPanel.js": {
+    "mtime": 1785637902.4906073,
+    "seen": 1786808724.627112,
+    "ast_hash": "e173b433adbdeb054d14738235a06963",
+    "semantic_hash": ""
+  },
+  "views/plugins.js": {
+    "mtime": 1785400281.8634121,
+    "seen": 1786808724.6271122,
+    "ast_hash": "597f6a8e2aa79ae75efab1b2db5232aa",
+    "semantic_hash": ""
+  },
+  "views/runtime.js": {
+    "mtime": 1785638050.7334561,
+    "seen": 1786808724.6271129,
+    "ast_hash": "68b8d2bd7a7441913d32ca9c132c9c61",
+    "semantic_hash": ""
+  },
+  "views/safety.js": {
+    "mtime": 1786785786.0939589,
+    "seen": 1786808724.6271136,
+    "ast_hash": "40d4f03d2e449394842928cf4480f59c",
+    "semantic_hash": ""
+  },
+  "views/settings.js": {
+    "mtime": 1785548757.4878407,
+    "seen": 1786808724.627114,
+    "ast_hash": "9250d96ba59aaf049a7d6ad76bdac88c",
+    "semantic_hash": ""
+  },
+  "views/skills.js": {
+    "mtime": 1785486580.6322262,
+    "seen": 1786808724.6271145,
+    "ast_hash": "b6ebc9162d6fc9448f5ea25e2218dcd0",
+    "semantic_hash": ""
+  },
+  "views/studio.js": {
+    "mtime": 1785451304.6032648,
+    "seen": 1786808724.627115,
+    "ast_hash": "329e67794be73f9a312c2f86e7d77262",
+    "semantic_hash": ""
+  },
+  "views/tools.js": {
+    "mtime": 1785680066.8464515,
+    "seen": 1786808724.6271155,
+    "ast_hash": "6353a80ad805b199849ca2c1dbf1fa2d",
+    "semantic_hash": ""
+  },
+  "views/vision.js": {
+    "mtime": 1786785786.143926,
+    "seen": 1786808724.627116,
+    "ast_hash": "5f1c76e5cb7aae1e651a636d1e78021d",
+    "semantic_hash": ""
+  },
+  "index.html": {
+    "mtime": 1786808468.7925406,
+    "seen": 1786808724.6271164,
+    "ast_hash": "154e711c58b97cb41866411ab324eb50",
+    "semantic_hash": ""
+  },
+  "lib/avatar/character/AETHER_CHARACTER_RULES.md": {
+    "mtime": 1786796596.8866117,
+    "seen": 1786808724.6271172,
+    "ast_hash": "81a3f4fb08feafc3d1ae622976ff085d",
+    "semantic_hash": ""
+  }
+}

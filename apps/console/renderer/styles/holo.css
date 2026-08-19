@@ -1,0 +1,279 @@
+/* =========================================================
+   AETHER — HOLOGRAPHIC PRIMITIVES (L2–L6)
+   Bahasa visual: holographic_glass + light_geometry.
+   Semua nilai dari aether.tokens.css — tidak ada warna hardcode.
+
+   Primitif:
+   .holo-surface   — basis material kaca holografik
+   .holo-panel     — panel informasi kontekstual
+   .holo-btn       — aksi
+   .holo-input     — input teks/perintah
+   .holo-chip      — indikator status kecil
+   .holo-stat      — metrik floating
+   .holo-notif     — komunikasi sistem
+   .holo-stream    — garis aliran data avatar→panel
+   ========================================================= */
+
+/* ---- Basis: holographic_glass -------------------------------- */
+.holo-surface {
+    position: relative;
+    background: var(--ae-surface-glass);
+    border: 1px solid var(--ae-line);
+    border-radius: var(--ae-radius);
+    backdrop-filter: blur(var(--ae-blur-panel));
+    -webkit-backdrop-filter: blur(var(--ae-blur-panel));
+    box-shadow: inset 0 1px 0 rgba(245, 251, 255, 0.04);
+}
+.holo-surface::before {
+    /* garis cahaya atas — "proyeksi" turun dari atas */
+    content: "";
+    position: absolute;
+    top: -1px; left: 12%; right: 12%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--ae-line-glow), transparent);
+    pointer-events: none;
+}
+
+/* ---- Panel ---------------------------------------------------- */
+.holo-panel {
+    background: var(--ae-surface-elevated);
+    border: 1px solid var(--ae-line-strong);
+    border-radius: var(--ae-radius);
+    backdrop-filter: blur(var(--ae-blur-context));
+    -webkit-backdrop-filter: blur(var(--ae-blur-context));
+    box-shadow: 0 8px 40px rgba(2, 3, 8, 0.55), var(--ae-glow-cyan-1);
+    transition: border-color var(--ae-motion-interaction),
+                box-shadow var(--ae-motion-interaction),
+                transform var(--ae-motion-system);
+}
+.holo-panel:hover {
+    border-color: var(--ae-line-glow);
+    box-shadow: 0 8px 40px rgba(2, 3, 8, 0.55), var(--ae-glow-cyan-2);
+}
+
+/* Panel memancar dari entitas (data-origin: arah sumber) */
+@keyframes holo-project {
+    from { opacity: 0; transform: translateY(10px) scale(.985); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes holo-retract {
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to   { opacity: 0; transform: translateY(8px) scale(.99); }
+}
+.holo-panel[data-origin],
+.holo-notif[data-origin] {
+    animation: holo-project var(--ae-motion-system) both;
+}
+.holo-panel.is-retracting { animation: holo-retract var(--ae-motion-interaction) both; }
+
+/* ---- Tombol ---------------------------------------------------- */
+.holo-btn {
+    display: inline-flex; align-items: center; gap: var(--space-2);
+    padding: 8px 14px;
+    font: 600 12px/1 var(--font-ui);
+    letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ae-cyan-soft);
+    background: rgba(0, 223, 255, 0.05);
+    border: 1px solid var(--ae-line-strong);
+    border-radius: var(--ae-radius);
+    clip-path: polygon(var(--ae-edge-cut) 0, 100% 0, 100% calc(100% - var(--ae-edge-cut)), calc(100% - var(--ae-edge-cut)) 100%, 0 100%, 0 var(--ae-edge-cut));
+    cursor: pointer;
+    transition: background var(--ae-motion-interaction),
+                border-color var(--ae-motion-interaction),
+                box-shadow var(--ae-motion-interaction),
+                color var(--ae-motion-interaction);
+}
+.holo-btn:hover {
+    background: rgba(0, 223, 255, 0.12);
+    border-color: var(--ae-line-glow);
+    color: var(--ae-white);
+    box-shadow: var(--ae-glow-cyan-2);
+}
+.holo-btn:active { transform: translateY(1px); }
+.holo-btn:disabled { color: var(--ae-disabled); border-color: var(--ae-line); background: transparent; cursor: default; }
+.holo-btn:focus-visible { outline: none; box-shadow: var(--ae-glow-focus); }
+
+.holo-btn.violet {
+    color: var(--ae-violet-soft);
+    background: rgba(124, 92, 255, 0.06);
+}
+.holo-btn.violet:hover { background: rgba(124, 92, 255, 0.14); box-shadow: var(--ae-glow-violet-2); color: var(--ae-white); }
+.holo-btn.danger {
+    color: #ff9db0;
+    background: rgba(255, 48, 79, 0.06);
+    border-color: rgba(255, 48, 79, 0.32);
+}
+.holo-btn.danger:hover { background: rgba(255, 48, 79, 0.16); border-color: rgba(255, 48, 79, 0.6); color: #ffd9e0; box-shadow: var(--ae-glow-error-2); }
+
+/* ---- Input ---------------------------------------------------- */
+.holo-input {
+    width: 100%;
+    padding: 10px 14px;
+    font: 400 14px/1.4 var(--font-ui);
+    color: var(--ae-white);
+    background: var(--ae-surface-glass);
+    border: 1px solid var(--ae-line-strong);
+    border-radius: var(--ae-radius);
+    backdrop-filter: blur(var(--ae-blur-panel));
+    transition: border-color var(--ae-motion-interaction), box-shadow var(--ae-motion-interaction);
+}
+.holo-input::placeholder { color: var(--ae-muted); }
+.holo-input:focus {
+    outline: none;
+    border-color: var(--ae-line-glow);
+    box-shadow: var(--ae-glow-focus);
+}
+
+/* ---- Chip status (indikator kecil bergaris cahaya) ------------- */
+.holo-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    font: 500 11px/1 var(--font-mono);
+    color: var(--ae-soft-white);
+    background: rgba(12, 22, 34, 0.35);
+    border: 1px solid var(--ae-line);
+    border-radius: var(--ae-radius-xs);
+    white-space: nowrap;
+}
+.holo-chip .d {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--ae-state-idle);
+    box-shadow: 0 0 6px var(--ae-state-idle);
+}
+.holo-chip.off { opacity: .45; }
+.holo-chip.off .d { background: var(--ae-state-offline); box-shadow: none; }
+
+/* ---- Notifikasi — muncul dari arah entitas --------------------- */
+.holo-notif {
+    position: relative;
+    padding: 12px 16px;
+    background: var(--ae-surface-elevated);
+    border: 1px solid var(--ae-line-strong);
+    border-left: 2px solid var(--ae-cyan);
+    border-radius: var(--ae-radius);
+    backdrop-filter: blur(var(--ae-blur-panel));
+    box-shadow: 0 10px 34px rgba(2, 3, 8, .6), var(--ae-glow-cyan-1);
+    animation: holo-project var(--ae-motion-system) both;
+}
+.holo-notif.ok      { border-left-color: var(--ae-success); }
+.holo-notif.warn    { border-left-color: var(--ae-warning); box-shadow: 0 10px 34px rgba(2,3,8,.6), var(--ae-glow-warning-2); }
+.holo-notif.err     { border-left-color: var(--ae-error);   box-shadow: 0 10px 34px rgba(2,3,8,.6), var(--ae-glow-error-2); }
+
+/* ---- Aliran data avatar → panel (garis cahaya) ----------------- */
+.holo-stream {
+    position: absolute;
+    width: 1px;
+    background: linear-gradient(180deg, transparent, var(--ae-line-glow) 40%, transparent);
+    transform-origin: top center;
+    animation: holo-stream-flow 2.2s ease-in-out infinite;
+    pointer-events: none;
+}
+@keyframes holo-stream-flow {
+    0%, 100% { opacity: .3; }
+    50%      { opacity: 1; }
+}
+
+/* ---- Data orb (metrik entitas) --------------------------------- */
+.holo-orb {
+    position: relative;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, var(--ae-cyan-soft), var(--ae-cyan) 60%, transparent);
+    box-shadow: var(--ae-glow-cyan-2);
+}
+.holo-orb::after {
+    content: "";
+    position: absolute; inset: -4px;
+    border: 1px solid var(--ae-line);
+    border-radius: 50%;
+    animation: holo-orb-ring 2.4s var(--ae-motion-ambient) infinite;
+}
+@keyframes holo-orb-ring {
+    0%, 100% { transform: scale(.9); opacity: .5; }
+    50%      { transform: scale(1.25); opacity: 1; }
+}
+
+/* ---- Fokus keyboard global (garis cahaya, bukan ring browser) -- */
+:focus-visible { outline: none; }
+.holo-surface:focus-visible,
+.holo-panel:focus-visible,
+.holo-btn:focus-visible,
+.holo-input:focus-visible {
+    box-shadow: var(--ae-glow-focus);
+    border-color: var(--ae-line-glow);
+}
+
+/* ---- Visualisasi kanonik (canvas viz) --------------------------- */
+.ae-memgraph, .ae-orbital-gauge, .ae-timeline {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+.ae-memgraph { cursor: default; touch-action: none; }
+.viz-host {
+    position: relative;
+    width: 100%;
+    min-height: 340px;
+    height: 340px;
+}
+.viz-host.tall { height: min(72vh, 760px); }
+.viz-host.slim { min-height: 110px; height: 110px; }
+.viz-gauges {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(84px, 1fr);
+    gap: var(--space-4);
+}
+.metric-viz {
+    display: contents;
+}
+#mv-gauges {
+    grid-column: span 2;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(76px, 1fr);
+    gap: var(--space-3);
+    align-items: center;
+}
+
+/* ---- Progressive disclosure: statistik ambient Beranda ----------- */
+.holo-stats.ambient {
+    opacity: .38;
+    filter: saturate(.55);
+    transition: opacity var(--ae-motion-interaction), filter var(--ae-motion-interaction);
+}
+.holo-stats {
+    transition: opacity var(--ae-motion-interaction), filter var(--ae-motion-interaction);
+}
+
+/* ---- Reduced motion: matikan SEMUA ambient & proyeksi ----------
+   Mode aksesibilitas sistemik: UI tetap lengkap tanpa satu gerak pun;
+   keadaan tetap terbaca lewat warna, teks, dan ikon.            */
+@media (prefers-reduced-motion: reduce) {
+    .holo-panel[data-origin], .holo-notif, .holo-stream, .holo-orb::after {
+        animation: none;
+    }
+    .holo-panel, .holo-btn, .holo-input, .holo-stats,
+    .holo-surface, .stop-btn.engaged, .holo-fab.listening {
+        transition-duration: 1ms;
+        animation-duration: 1ms;
+        animation-iteration-count: 1;
+    }
+}
+
+/* ---- Responsif kanonik: recompose, bukan sekadar menyusut -------- */
+/* Tablet: panel konteks menyempit, grid metrik melipat. */
+@media (max-width: 1100px) {
+    .viz-gauges, #mv-gauges { grid-auto-columns: minmax(64px, 1fr); }
+    .viz-host.tall { height: 380px; }
+}
+/* Mobile: pengalaman perintah terpusat Aether — satu kolom. */
+@media (max-width: 640px) {
+    .viz-gauges, #mv-gauges {
+        grid-auto-flow: row;
+        grid-auto-columns: 1fr;
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .viz-host.tall { height: 300px; }
+    .holo-btn { padding: 10px 16px; }   /* target sentuh ≥44px */
+    .holo-input { font-size: 16px; }     /* cegah zoom iOS */
+}

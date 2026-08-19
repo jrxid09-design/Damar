@@ -1,0 +1,978 @@
+/* =========================================================
+   Aether OS — lapisan CYBERPUNK + HOLOGRAM JARVIS
+   Dimuat paling akhir: menimpa token & chrome shell menjadi
+   antarmuka imersif "AI OS" (JARVIS). View lama tetap jalan &
+   ikut bertema lewat override variabel.
+   ========================================================= */
+
+:root {
+    /* Palet SEMANTIK — sinyal keadaan, bukan dekorasi (90% gelap, 2% neon). */
+    --c-info:   #35d6f0;   /* cyan   — informasi     */
+    --c-ai:     #9d6bff;   /* purple — reasoning/AI  */
+    --c-ok:     #34d399;   /* green  — online/sukses */
+    --c-proc:   #ff9d4a;   /* orange — processing    */
+    --c-danger: #ff5470;   /* red    — danger        */
+
+    --accent-1: var(--c-info);
+    --accent-2: var(--c-ai);
+    --accent-3: var(--c-ai);          /* magenta pensiun → ungu sbg aksen AI */
+    --neon-cyan: var(--c-info);
+    --neon-lime: var(--c-ok);
+    --accent-gradient: linear-gradient(120deg, var(--c-info), var(--c-ai));
+
+    --bg-void: #05070e;
+    --bg-deep: #070a12;
+    --line:        rgba(160, 190, 255, 0.10);
+    --line-strong: rgba(120, 200, 255, 0.20);
+    --line-glow:   rgba(53, 214, 240, 0.42);
+
+    /* Glow HALUS (blur, bukan shadow tajam). */
+    --holo: 0 0 18px rgba(53, 214, 240, 0.35), 0 0 44px rgba(157, 107, 255, 0.18);
+    /* Font HUD teknis — geometris yang tersedia offline (tanpa CDN).
+       Rajdhani/Orbitron dipertahankan sebagai pilihan bila user
+       memasangnya; fallback Segoe UI var. */
+    --font-hud: "Rajdhani", "Bahnschrift", "Segoe UI Semibold", "Segoe UI", var(--font-ui);
+}
+
+/* Latar: kabut gelap sangat halus (tanpa grid/scanline — bukan gaming). */
+body::before {
+    background:
+        radial-gradient(50% 45% at 18% 2%,  rgba(53, 214, 240, 0.10), transparent 60%),
+        radial-gradient(55% 50% at 50% 112%, rgba(157, 107, 255, 0.12), transparent 66%);
+    filter: blur(34px);
+}
+
+#shell { position: relative; z-index: 1; }
+
+/* ---- Titlebar ringkas (chrome disembunyikan) ------------------ */
+.titlebar {
+    background: linear-gradient(180deg, rgba(10,14,28,0.9), rgba(6,9,18,0.72));
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(14px);
+}
+.brand .name { letter-spacing: 0.28em; text-transform: uppercase; font-weight: 700;
+    background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.brand .sub { color: var(--neon-cyan); opacity: 0.7; letter-spacing: 0.2em; font-size: 10px; }
+
+/* Satu tombol APPS berbentuk hex — pengganti seluruh sidebar. */
+.apps-btn {
+    position: relative; height: 30px; padding: 0 16px 0 12px;
+    display: inline-flex; align-items: center; gap: 8px;
+    font: 600 12px/1 var(--font-hud); letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--neon-cyan); cursor: pointer;
+    background: rgba(20, 230, 255, 0.06);
+    border: 1px solid var(--line-strong);
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+    transition: all var(--fast);
+}
+.apps-btn:hover { background: rgba(20, 230, 255, 0.14); box-shadow: var(--holo); color: #dffbff; }
+.apps-btn .dots { display: grid; grid-template-columns: repeat(3, 3px); gap: 2px; }
+.apps-btn .dots i { width: 3px; height: 3px; background: currentColor; border-radius: 1px; }
+
+/* Tombol STOP — rem darurat, selalu terlihat (Konstitusi Pasal 2.1).
+   Bentuknya sengaja senada dengan APPS agar tidak berteriak saat
+   tenang, tetapi berubah tegas begitu rem tertarik. */
+.stop-btn {
+    position: relative; height: 30px; padding: 0 14px 0 11px; margin-right: 8px;
+    display: inline-flex; align-items: center; gap: 7px;
+    font: 700 12px/1 var(--font-hud); letter-spacing: 0.14em; text-transform: uppercase;
+    color: #ff9db0; cursor: pointer;
+    background: rgba(255, 84, 112, 0.07);
+    border: 1px solid rgba(255, 84, 112, 0.32);
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+    transition: all var(--fast);
+}
+.stop-btn:hover {
+    background: rgba(255, 84, 112, 0.18);
+    border-color: rgba(255, 84, 112, 0.6);
+    color: #ffd9e0;
+    box-shadow: 0 0 18px rgba(255, 84, 112, 0.35);
+}
+.stop-btn .ico {
+    width: 9px; height: 9px; background: currentColor;
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+}
+
+/* Saat berhenti: tombol menyala terang dan berdenyut — keadaan
+   terhenti tidak boleh luput dari perhatian. */
+.stop-btn.engaged {
+    color: #04070f;
+    background: var(--neon-cyan, #22d3ee);
+    border-color: var(--neon-cyan, #22d3ee);
+    animation: stop-pulse 1.8s ease-in-out infinite;
+}
+.stop-btn.engaged:hover { background: #67e8f9; color: #04070f; }
+.stop-btn.engaged .ico {
+    clip-path: polygon(0 0, 100% 50%, 0 100%);   /* jadi ikon "play" */
+}
+@keyframes stop-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.55); }
+    50%      { box-shadow: 0 0 0 7px rgba(34, 211, 238, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .stop-btn.engaged { animation: none; }
+}
+
+/* ---- Stage (area aplikasi) ------------------------------------ */
+.stage { position: relative; height: 100%; overflow: hidden; }
+.app-screen {
+    position: absolute; inset: 0; overflow: auto; padding: 22px 26px 34px;
+    opacity: 0; transform: translateY(8px) scale(0.995); pointer-events: none;
+    transition: opacity var(--base), transform var(--base);
+}
+.app-screen.active { opacity: 1; transform: none; pointer-events: auto; }
+.app-screen.core { padding: 0; overflow: hidden; }
+
+/* ---- HOLOGRAM home (core) -------------------------------------
+   Kanvas entitas FULL-BLEED, bukan kotak kecil di tengah.
+
+   Dua keluhan lama berasal dari satu sebab yang sama: kanvas dulu
+   hanya ±640px persegi, jadi (a) orb tampak kecil di layar 27" dan
+   (b) orb agen yang mengorbit sampai ±5 satuan dunia menabrak batas
+   kanvas lalu terpotong. Dengan kanvas selebar layar (bahkan melewati
+   tepi kiri & kanan), orb yang sama menjadi ±2× lebih besar dalam
+   piksel nyata DAN orbit agen punya ruang berlebih — tanpa mengubah
+   kamera 3D sama sekali.
+
+   Teks & kotak ketik melayang di atasnya (.holo-fore), tidak lagi
+   berebut ruang dengan kanvas.                                    */
+.holo-home { position: absolute; inset: 0; overflow: hidden; }
+
+.holo-canvas {
+    position: absolute;
+    top: 0; bottom: 0;
+    left: -16%; right: -16%;      /* lebih lebar dari layar: orbit agen aman */
+    z-index: 0;
+    pointer-events: none;
+    will-change: transform;
+}
+.holo-canvas > div,
+.holo-canvas canvas { width: 100% !important; height: 100% !important; }
+.holo-canvas canvas { filter: drop-shadow(0 0 46px rgba(20, 230, 255, 0.3)); }
+
+/* Lapisan depan: sapaan di atas kotak ketik, keduanya di tengah. */
+.holo-fore {
+    position: absolute; inset: 0; z-index: 1;
+    display: grid; grid-template-rows: 1fr auto;
+    justify-items: center; text-align: center;
+    pointer-events: none;
+}
+.holo-hero { align-self: end; padding-bottom: clamp(10px, 2.4vh, 34px); }
+.holo-dock { width: 100%; pointer-events: auto; }
+
+/* Kompatibilitas: .holo-stage lama (dipakai view lain) tetap hidup. */
+.holo-stage { position: relative; width: min(60vh, 560px); height: min(60vh, 560px);
+    display: grid; place-items: center; }
+.holo-stage canvas { filter: drop-shadow(0 0 30px rgba(20,230,255,0.35)); }
+
+/* 27" QHD (2560×1440): tipografi & kontrol ikut naik satu tingkat. */
+@media (min-width: 2200px) {
+    .holo-greet { font-size: 36px; }
+    .holo-sub { font-size: 14px; }
+    .holo-prompt input { height: 58px; font-size: 16px; }
+    .holo-prompt .mic { width: 42px; height: 42px; top: 8px; right: 8px; }
+}
+.holo-ring-deco { position: absolute; inset: -6% ; border-radius: 50%;
+    border: 1px solid rgba(20,230,255,0.14); pointer-events: none;
+    animation: holo-spin 34s linear infinite; }
+.holo-ring-deco.b { inset: 6%; border-color: rgba(255,59,212,0.12); animation-duration: 22s; animation-direction: reverse; }
+@keyframes holo-spin { to { transform: rotate(360deg); } }
+
+.holo-greet { font: 300 30px/1.2 var(--font-hud); letter-spacing: 0.02em; margin-top: 6px; }
+.holo-greet b { font-weight: 700; background: var(--accent-gradient);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+.holo-sub { color: var(--text-muted); font-size: 13px; letter-spacing: 0.06em; }
+
+/* Kotak ketik — neon MENGIKUTI lengkungan pil.
+   Sebelumnya cahaya dipasang pada <form>, sebuah persegi tanpa radius,
+   sehingga glow-nya menyudut sementara input-nya membulat: di tikungan
+   pil terlihat "kotak menempel". Cahaya kini hidup di elemen yang
+   memang melengkung (input & tombol mic); form hanya pembungkus. */
+.holo-prompt {
+    width: min(680px, 86%); margin: 0 auto 30px; position: relative;
+    background: none; border: 0; box-shadow: none; border-radius: var(--r-pill);
+}
+.holo-prompt input {
+    width: 100%; height: 52px; padding: 0 60px 0 22px;
+    background: rgba(8, 12, 24, 0.72); color: var(--text);
+    border: 1px solid var(--line-strong); border-radius: var(--r-pill);
+    font-size: 15px; outline: none; backdrop-filter: blur(10px);
+    box-shadow: inset 0 0 22px rgba(20, 230, 255, 0.06);
+    transition: box-shadow var(--fast), border-color var(--fast);
+}
+.holo-prompt input:focus {
+    border-color: var(--line-glow);
+    box-shadow:
+        inset 0 0 22px rgba(20, 230, 255, 0.12),
+        0 0 0 1px rgba(53, 214, 240, 0.35),
+        0 0 22px rgba(53, 214, 240, 0.3),
+        0 0 54px rgba(157, 107, 255, 0.18);
+}
+.holo-prompt .mic { position: absolute; right: 8px; top: 8px; width: 36px; height: 36px;
+    border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+    background: var(--accent-gradient); color: #04121a; border: none; box-shadow: var(--holo); }
+.holo-prompt .mic.live { animation: mic-pulse 1.1s ease-in-out infinite; }
+@keyframes mic-pulse { 0%,100%{ box-shadow: var(--holo);} 50%{ box-shadow: 0 0 0 10px rgba(20,230,255,0.12), var(--holo);} }
+
+/* Chip status cepat di bawah hologram. */
+.holo-stats { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-bottom: 18px; }
+
+/* Chip Beranda sengaja diikat ke .holo-stats: `.holo-chip` telanjang
+   juga didefinisikan di holo.css yang dimuat SESUDAH berkas ini, jadi
+   tanpa induk ini chip Beranda diam-diam mewarisi padding & font
+   generik dan berbeda dari rancangannya. */
+.holo-stats .holo-chip {
+    font: 600 11px/1 var(--font-hud); letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--text-muted); padding: 7px 12px; border: 1px solid var(--line);
+    border-radius: var(--r-pill); background: rgba(10, 14, 28, 0.5);
+    display: inline-flex; gap: 7px; align-items: center;
+}
+.holo-chip b { color: var(--neon-cyan); font-weight: 700; }
+.holo-chip .d { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.holo-chip.off .d { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+
+/* ---- APP LAUNCHER (satu tombol → semua) ----------------------- */
+.launcher { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+    background: radial-gradient(120% 100% at 50% 0%, rgba(8,12,24,0.86), rgba(4,6,15,0.96));
+    backdrop-filter: blur(16px); opacity: 0; pointer-events: none; transition: opacity var(--base); }
+.launcher.open { opacity: 1; pointer-events: auto; }
+.launcher-inner { width: min(940px, 92vw); max-height: 84vh; overflow-y: auto; padding: 6px 10px; }
+.launcher h2 { font: 300 14px/1 var(--font-hud); letter-spacing: 0.4em; text-transform: uppercase;
+    color: var(--neon-cyan); text-align: center; margin: 0 0 22px; text-shadow: var(--holo); }
+.app-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; }
+.app-tile { position: relative; padding: 20px 16px; cursor: pointer; text-align: left;
+    background: linear-gradient(160deg, rgba(18,24,44,0.7), rgba(8,11,22,0.6));
+    border: 1px solid var(--line); color: var(--text);
+    clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+    transition: transform var(--fast), border-color var(--fast), box-shadow var(--fast); overflow: hidden; }
+.app-tile:hover { transform: translateY(-3px); border-color: var(--line-glow); box-shadow: var(--holo); }
+.app-tile::after { content: ""; position: absolute; right: -30%; top: -30%; width: 80%; height: 80%;
+    background: radial-gradient(circle, var(--tile, var(--neon-cyan)), transparent 70%); opacity: 0.16; }
+.app-tile .ico { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
+    background: rgba(20,230,255,0.08); color: var(--tile, var(--neon-cyan)); margin-bottom: 14px;
+    border: 1px solid var(--line-strong); }
+.app-tile .ico .icon { width: 22px; height: 22px; }
+.app-tile .t { font: 600 14px/1.2 var(--font-hud); letter-spacing: 0.08em; }
+.app-tile .d { color: var(--text-dim); font-size: 11px; margin-top: 3px; }
+.launcher-close { position: absolute; top: 22px; right: 26px; }
+
+/* ---- Control Hub (bukan menu) — kartu app hidup --------------- */
+.hub-head { text-align: center; margin-bottom: 26px; font: 300 15px/1.4 var(--font-hud);
+    letter-spacing: 0.14em; color: var(--text-muted); }
+.hub-head .hub-brand { font-weight: 700; letter-spacing: 0.3em; color: var(--c-info);
+    background: var(--accent-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hub-head b { color: var(--c-ai); font-weight: 700; }
+.hub-cat { font: 600 10px/1 var(--font-hud); letter-spacing: 0.32em; text-transform: uppercase;
+    color: var(--text-dim); margin: 18px 2px 10px; }
+.hub-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(184px, 1fr)); gap: 12px; }
+
+.hub-card { position: relative; padding: 15px 15px 13px; cursor: pointer; text-align: left; overflow: hidden;
+    background: linear-gradient(165deg, rgba(20,26,44,0.6), rgba(9,12,22,0.55));
+    border: 1px solid var(--line); border-radius: 14px; color: var(--text);
+    transition: transform var(--fast), border-color var(--fast), box-shadow var(--fast), background var(--fast); }
+.hub-card:hover { transform: translateY(-2px); border-color: var(--line-glow); box-shadow: var(--holo);
+    background: linear-gradient(165deg, rgba(24,30,52,0.7), rgba(11,15,26,0.6)); }
+.hub-card.current { border-color: color-mix(in srgb, var(--tile) 55%, transparent); }
+.hub-card::after { content: ""; position: absolute; right: -24px; top: -24px; width: 70px; height: 70px;
+    background: radial-gradient(circle, var(--tile), transparent 70%); opacity: 0.12; pointer-events: none; }
+
+.hub-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 11px; }
+.hub-top .ico { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+    color: var(--tile); background: color-mix(in srgb, var(--tile) 12%, transparent); border: 1px solid var(--line-strong); }
+.hub-top .ico .icon { width: 18px; height: 18px; }
+
+/* Status dot semantik (data nyata) — kelasnya sendiri: .hub-dot.
+
+   Dulu titik ini memakai kelas `.stat`, padahal `.stat` juga dipakai
+   di seluruh aplikasi sebagai KARTU METRIK (Memori, Kesadaran, panel
+   runtime). Aturan `width:9px; height:9px; border-radius:50%` di sini
+   ikut mengenai kartu-kartu itu: semuanya menciut jadi lingkaran 9×9
+   piksel dan label serta angkanya meluber saling menimpa — sumber
+   terbesar "ikon & font tumpang tindih" di konsol. Nama kelas yang
+   berbeda menyelesaikannya untuk selamanya, tanpa perang !important. */
+.hub-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-dim); position: relative; flex: none; }
+.hub-dot::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; background: inherit; opacity: 0.25; }
+.hub-dot-ok { background: var(--c-ok); box-shadow: 0 0 8px var(--c-ok); }
+.hub-dot-ai { background: var(--c-ai); box-shadow: 0 0 8px var(--c-ai); }
+.hub-dot-proc { background: var(--c-proc); box-shadow: 0 0 8px var(--c-proc); animation: mic-pulse 1.3s ease-in-out infinite; }
+.hub-dot-danger { background: var(--c-danger); box-shadow: 0 0 8px var(--c-danger); }
+.hub-dot-idle { background: #46506b; }
+
+.hub-name { font: 600 14px/1.2 var(--font-hud); letter-spacing: 0.06em; display: flex; align-items: center; gap: 6px; }
+.hub-name .run { color: var(--c-ok); font-size: 8px; }
+.hub-desc { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+.hub-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 10px;
+    font: 600 10px/1 var(--font-hud); letter-spacing: 0.08em; }
+.hub-meta .ver { color: var(--text-dim); }
+.hub-meta .stt { color: var(--tile); }
+.hub-caps { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+.hub-caps span { font-size: 9px; letter-spacing: 0.06em; color: var(--text-muted);
+    padding: 2px 7px; border-radius: var(--r-pill); border: 1px solid var(--line); background: rgba(0,0,0,0.15); }
+
+/* ---- App host (tab konsolidasi) ------------------------------- */
+.apphost { height: 100%; display: flex; flex-direction: column; }
+.apphost-tabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.apphost-tab { display: inline-flex; align-items: center; gap: 8px; padding: 9px 15px;
+    font: 600 12px/1 var(--font-hud); letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--text-muted); background: rgba(12,16,30,0.55); cursor: pointer;
+    border: 1px solid var(--line); border-radius: var(--r-pill); transition: all var(--fast); }
+.apphost-tab .icon { width: 15px; height: 15px; }
+.apphost-tab:hover { color: var(--text); border-color: var(--line-strong); }
+.apphost-tab.active { color: #04121a; background: var(--accent-gradient); border-color: transparent; box-shadow: var(--holo); }
+.apphost-body { flex: 1; min-height: 0; }
+.apphost-panel { animation: fade-up var(--base); }
+@keyframes fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* App header (judul + kembali). */
+.app-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.app-head .back { width: 38px; height: 38px; display: grid; place-items: center; cursor: pointer;
+    color: var(--neon-cyan); background: rgba(20,230,255,0.06); border: 1px solid var(--line-strong);
+    clip-path: polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px); }
+.app-head .back:hover { background: rgba(20,230,255,0.14); box-shadow: var(--holo); }
+.app-head .title { font: 600 20px/1 var(--font-hud); letter-spacing: 0.12em; text-transform: uppercase; }
+.app-head .title small { display: block; font-size: 11px; letter-spacing: 0.2em; color: var(--text-dim); margin-top: 4px; }
+
+/* ---- Hologram mengambang (standby di mana saja) --------------- */
+.holo-fab { position: fixed; right: 22px; bottom: 46px; z-index: 40;
+    width: 66px; height: 66px; border-radius: 50%; cursor: pointer; padding: 0;
+    background: radial-gradient(circle at 50% 40%, rgba(20,230,255,0.22), rgba(8,12,24,0.85));
+    border: 1px solid var(--line-glow); box-shadow: var(--holo); overflow: hidden;
+    transition: transform var(--fast), box-shadow var(--fast); }
+.holo-fab:hover { transform: scale(1.06); }
+.holo-fab.listening { box-shadow: 0 0 0 8px rgba(20,230,255,0.1), var(--holo); animation: mic-pulse 1s ease-in-out infinite; }
+.holo-fab canvas { width: 100% !important; height: 100% !important; }
+
+/* Badge "mendengar" saat wake word aktif. */
+.wake-badge { position: fixed; left: 50%; bottom: 54px; transform: translateX(-50%) translateY(20px);
+    z-index: 50; padding: 10px 20px 10px 16px; display: inline-flex; align-items: center; gap: 10px;
+    font: 600 12px/1 var(--font-hud); letter-spacing: 0.18em; text-transform: uppercase; color: #dffbff;
+    background: rgba(8,12,24,0.85); border: 1px solid var(--line-glow); border-radius: var(--r-pill);
+    box-shadow: var(--holo); opacity: 0; pointer-events: none; transition: all var(--base); }
+.wake-badge.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.wake-badge .eq { display: inline-flex; gap: 2px; align-items: flex-end; height: 14px; }
+.wake-badge .eq i { width: 3px; background: var(--neon-cyan); border-radius: 2px; animation: eq 0.9s ease-in-out infinite; }
+.wake-badge .eq i:nth-child(2){ animation-delay: .15s; } .wake-badge .eq i:nth-child(3){ animation-delay: .3s; }
+.wake-badge .eq i:nth-child(4){ animation-delay: .45s; }
+@keyframes eq { 0%,100%{ height: 3px; } 50%{ height: 14px; } }
+
+/* ---- Statusbar HUD -------------------------------------------- */
+.statusbar { background: linear-gradient(0deg, rgba(6,9,18,0.92), rgba(8,12,24,0.6));
+    border-top: 1px solid var(--line); font-family: var(--font-hud); letter-spacing: 0.06em; }
+.statusbar .seg .lbl { text-transform: uppercase; font-size: 10px; letter-spacing: 0.14em; }
+.statusbar .seg.on .d { box-shadow: 0 0 8px var(--ok); }
+
+/* Sidebar lama disembunyikan sepenuhnya (nav → launcher). */
+.sidebar { display: none !important; }
+.body { grid-template-columns: 1fr !important; }
+
+/* =========================================================
+   Beranda — gerak halus (panggung & konstelasi kini di kanvas 3D)
+   ========================================================= */
+.holo-ring-deco { display: none; }        /* digantikan cincin di dalam kanvas */
+.holo-greet { animation: floaty 7s ease-in-out infinite; }
+@keyframes floaty { 0%,100%{ transform: translateY(0);} 50%{ transform: translateY(-4px);} }
+
+/* =========================================================
+   AETHER CHAT PANEL — percakapan di sisi kanan, hologram tetap
+   terlihat di kiri. Bukan overlay fullscreen yang menutupi.
+   ========================================================= */
+
+/* =========================================================
+   AETHER LIVE HOLOGRAM — panel chat mengambang
+   (definisi terkini ada di blok AETHER v3 di bawah)
+   ========================================================= */
+
+/* Area percakapan — gelembung mengambang tanpa wadah panel. */
+.ae-chat-convo {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    mask-image: linear-gradient(180deg, transparent 0, black 24px, black calc(100% - 8px), transparent);
+}
+.ae-chat-convo .ae-hint {
+    text-align: center; color: var(--ae-muted); font-size: 12.5px;
+    letter-spacing: 0.08em; padding: 28px 20px;
+}
+.ae-chat-msg {
+    display: flex;
+    animation: fade-up var(--base);
+    width: 100%;
+}
+.ae-chat-msg.u { justify-content: flex-end; padding-left: 15%; }
+/* Gelembung Aether tidak mepet tepi kiri panel: ia menjorok masuk,
+   dan ruang di kirinya menampung node cahaya di tepi gelembung. */
+.ae-chat-msg.a { justify-content: flex-start; padding-left: 14px; padding-right: 10%; }
+
+/* Gelembung: hologram murni — border cahaya, isi kaca tipis. */
+.ae-chat-msg .bub {
+    max-width: 100%;
+    padding: 12px 17px;
+    font-size: 13.5px; line-height: 1.6;
+    border-radius: var(--ae-radius);
+    backdrop-filter: blur(14px);
+    clip-path: polygon(var(--ae-edge-cut) 0, 100% 0, 100% calc(100% - var(--ae-edge-cut)), calc(100% - var(--ae-edge-cut)) 100%, 0 100%, 0 var(--ae-edge-cut));
+}
+.ae-chat-msg.u .bub {
+    background: linear-gradient(135deg, rgba(0, 223, 255, 0.13), rgba(124, 92, 255, 0.13));
+    border: 1px solid rgba(115, 237, 255, 0.32);
+    color: var(--ae-soft-white);
+    box-shadow: var(--ae-glow-cyan-1);
+}
+.ae-chat-msg.a .bub {
+    background: rgba(10, 16, 26, 0.55);
+    border: 1px solid var(--ae-line);
+    color: var(--ae-soft-white);
+    box-shadow: inset 0 0 24px rgba(0, 223, 255, 0.04);
+    position: relative;
+}
+/* Node cahaya kecil di tepi gelembung Aether — jejak koneksi. */
+.ae-chat-msg.a .bub::before {
+    content: "";
+    position: absolute; left: -4px; top: 14px;
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--ae-cyan);
+    box-shadow: 0 0 8px var(--ae-cyan);
+    opacity: .8;
+}
+
+
+
+/* =========================================================
+   AETHER v3 — BUBBLE MURNI + SWARM ORB
+   - Tidak ada ring/cincin/arc dekoratif di sekitar orb.
+   - Chat = hanya bubble di kanan; orb utama bergeser ke kiri.
+   - Footer statusbar dihapus (sudah terwakili chips di atas
+     kotak ketik dashboard).
+   ========================================================= */
+
+/* Hapus SEMUA efek ring & cincin (CSS lama & baru). */
+.holo-spectrum,
+.holo-data-ring,
+.holo-data-ring.b,
+.holo-ring-deco,
+.mc-core-ring { display: none !important; }
+
+/* Footer statusbar di bawah sudah terwakili chips dashboard. */
+.statusbar { display: none !important; }
+#shell { grid-template-rows: var(--titlebar-h) 1fr; }
+
+/* ---- Orb bergeser ke KIRI saat bubble muncul di kanan --------
+   Yang bergeser HANYA kanvas entitas. Sapaan, chip status, dan kotak
+   ketik tinggal di lapisan .holo-fore yang tidak ikut ditransformasi —
+   kotak ketik tetap tepat di tengah layar sepanjang sesi. Kanvas
+   sengaja lebih lebar dari layar, jadi geseran ini tidak menyingkap
+   tepi kosong di sisi kanan.                                     */
+.holo-canvas {
+    transition: transform 700ms cubic-bezier(.22, .9, .28, 1);
+}
+body.chat-open .holo-canvas {
+    transform: translateX(calc(-1 * clamp(120px, 12vw, 260px)));
+}
+@media (prefers-reduced-motion: reduce) {
+    .holo-canvas { transition: none; }
+}
+
+/* ---- Bubble chat: HANYA bubble (tanpa panel/inputbar) --------- */
+.ae-chat-panel {
+    position: fixed;
+    right: clamp(20px, 3vw, 44px);
+    top: 84px;
+    /* Gelembung menggantung JAUH di atas kotak ketik, bukan sejajar
+       dengannya: keduanya di ketinggian sama membuat mata bingung mana
+       yang harus dibaca dan mana yang harus diisi. */
+    bottom: clamp(210px, 22vh, 320px);
+    width: min(460px, 30vw);
+    z-index: 45;
+    display: flex;
+    flex-direction: column;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(14px) scale(.98);
+    transform-origin: top center;
+    transition: opacity var(--ae-motion-system), transform var(--ae-motion-system);
+}
+.ae-chat-panel.open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+
+/* Panel ini menampung paling banyak 3 gelembung (dibatasi di
+   aetherOverlay.js), jadi tumpukannya dijangkarkan ke BAWAH: yang
+   terbaru selalu paling dekat kotak ketik. Tanpa tombol tutup —
+   sesi memudar sendiri setelah satu menit senyap. */
+.ae-chat-panel .ae-chat-convo {
+    justify-content: flex-end;
+    overflow: hidden;             /* tak ada scroll: isinya memang cuma 3 */
+}
+
+/* ---- Sapaan berketik lambat + memudar saat sesi mulai --------- */
+.holo-greet .caret {
+    display: inline-block;
+    width: 2px; height: 0.95em;
+    margin-left: 3px;
+    vertical-align: -0.12em;
+    background: var(--ae-cyan, #00DFFF);
+    box-shadow: 0 0 8px rgba(0, 223, 255, 0.7);
+    animation: caret-blink 1s steps(1) infinite;
+}
+.holo-greet.typed .caret { display: none; }
+@keyframes caret-blink { 50% { opacity: 0; } }
+
+.holo-greet.fading,
+.holo-sub.fading {
+    animation: greet-fade 2.4s ease forwards;
+}
+@keyframes greet-fade {
+    0%   { opacity: 1; filter: blur(0); }
+    60%  { opacity: .55; }
+    100% { opacity: 0; filter: blur(3px); }
+}
+/* Setelah lenyap, lepas ruangnya agar orb bernapas lega. */
+.holo-greet.fading { animation: greet-fade 2.4s ease forwards; min-height: 0; }
+
+@media (max-width: 640px) {
+    body.chat-open .holo-canvas { transform: none; }
+    .ae-chat-panel {
+        left: 12px; right: 12px; width: auto;
+        top: 70px; bottom: 190px;
+    }
+}
+
+/* =========================================================
+   SCI-FI HUD ATMOSPHERE — JARVIS layer
+   ========================================================= */
+
+/* Grid holografik halus di belakang seluruh UI. */
+#shell::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+        linear-gradient(rgba(0, 223, 255, 0.028) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 223, 255, 0.028) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(circle at 50% 40%, black 30%, transparent 90%);
+}
+
+/* Scanline HUD bergerak dihapus (motion polish): gerak vertikal konstan
+   tanpa makna = kebisingan, bukan sinyal keadaan. */
+
+/* Vignette agar fokus ke tengah (hologram). */
+.stage::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(120% 90% at 50% 42%, transparent 55%, rgba(2, 3, 8, 0.55) 100%);
+}
+
+/* Panel bergaya HUD: sudut bersudut + garis cahaya. */
+.card, .panel, .aether-present .ap-card {
+    position: relative;
+    border: 1px solid var(--ae-line-strong);
+    background: var(--ae-surface-glass);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 0 0 1px rgba(0,223,255,0.04), 0 10px 40px rgba(0,0,0,0.5);
+}
+
+.card::before, .panel::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--ae-cyan), transparent);
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* Judul HUD dengan tracking lebar ala JARVIS. */
+.view-head h1, .card h2, .panel h2 {
+    font-family: var(--font-hud);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--ae-white);
+}
+
+/* Status pill dengan glow semantik. */
+.pill.ok     { box-shadow: 0 0 12px rgba(72,230,165,0.35); }
+.pill.warn   { box-shadow: 0 0 12px rgba(255,200,87,0.35); }
+.pill.danger { box-shadow: 0 0 12px rgba(255,48,79,0.4); }
+
+@media (prefers-reduced-motion: reduce) {
+    #shell::after { animation: none; display: none; }
+}
+
+/* ---- Sudut HUD (clipped corner) ala antarmuka JARVIS ---- */
+.card, .panel {
+    border-radius: var(--r-md);
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+
+/* Komponen penting memakai font display HUD. */
+.hud, .metric .val, .stat .val, .brand .name {
+    font-family: var(--font-hud);
+    letter-spacing: 0.1em;
+}
+
+/* =========================================================
+   JARVIS PARTICLE & SPECTRUM EFFECTS
+   ========================================================= */
+
+/* Partikel latar statis (motion polish): titik ambien TIDAK bergerak
+   terus-menerus — kehadirannya cukup; gerak partikel semantik hidup
+   di entitas 3D, bukan di latar CSS. */
+.stage::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+        radial-gradient(2px 2px at 20% 30%, rgba(0, 223, 255, 0.35) 50%, transparent 50%),
+        radial-gradient(2px 2px at 40% 70%, rgba(124, 92, 255, 0.28) 50%, transparent 50%),
+        radial-gradient(3px 3px at 60% 20%, rgba(0, 223, 255, 0.22) 50%, transparent 50%),
+        radial-gradient(2px 2px at 80% 60%, rgba(245, 251, 255, 0.18) 50%, transparent 50%),
+        radial-gradient(2px 2px at 10% 80%, rgba(124, 92, 255, 0.3) 50%, transparent 50%),
+        radial-gradient(1px 1px at 90% 10%, rgba(0, 223, 255, 0.28) 50%, transparent 50%),
+        radial-gradient(2px 2px at 30% 50%, rgba(245, 251, 255, 0.14) 50%, transparent 50%),
+        radial-gradient(1px 1px at 70% 90%, rgba(124, 92, 255, 0.35) 50%, transparent 50%);
+    background-size: 400px 400px;
+    opacity: 0.5;
+}
+
+
+@keyframes particle-drift {
+    0% { transform: translateY(0) rotate(0deg); }
+    100% { transform: translateY(-400px) rotate(360deg); }
+}
+
+/* Spektrum cahaya di tepi hologram */
+.holo-spectrum {
+    position: absolute;
+    inset: -20%;
+    border-radius: 50%;
+    background: conic-gradient(
+        from 0deg,
+        transparent 0deg,
+        rgba(53, 214, 240, 0.15) 60deg,
+        transparent 120deg,
+        rgba(157, 107, 255, 0.12) 180deg,
+        transparent 240deg,
+        rgba(53, 214, 240, 0.15) 300deg,
+        transparent 360deg
+    );
+    animation: holo-spin 12s linear infinite;
+    pointer-events: none;
+    filter: blur(20px);
+}
+
+/* Cincin data yang berputar di sekitar hologram */
+.holo-data-ring {
+    position: absolute;
+    inset: -8%;
+    border-radius: 50%;
+    border: 1px solid rgba(53, 214, 240, 0.15);
+    border-top-color: rgba(53, 214, 240, 0.5);
+    border-right-color: rgba(157, 107, 255, 0.3);
+    animation: holo-spin 8s linear infinite;
+    pointer-events: none;
+}
+.holo-data-ring.b {
+    inset: -14%;
+    animation-duration: 14s;
+    animation-direction: reverse;
+    border-top-color: rgba(157, 107, 255, 0.4);
+    border-bottom-color: rgba(53, 214, 240, 0.2);
+}
+
+/* Catatan motion: efek glitch acak & scanline HUD dihapus pada fase
+   motion-polish — gerak harus semantik, bukan dekorasi (spec motion). */
+
+/* Layar 27" 2560x1440: layout asimetris, tidak monoton di tengah */
+@media (min-width: 2200px) {
+    .app-screen:not(.core) {
+        padding: 32px 48px 48px;
+    }
+    
+    /* Dashboard menggunakan grid asimetris — konten menyebar, bukan menumpuk di tengah */
+    .mc-top {
+        grid-template-columns: 1.6fr 1.2fr 1fr !important;
+        gap: 24px !important;
+    }
+    
+    .mc-bento {
+        grid-template-columns: 1.8fr 1fr 1fr !important;
+        gap: 20px !important;
+    }
+    
+    /* Grid 2 kolom di bawah: lebih lebar, tidak sempit */
+    .grid.cols-2 {
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+    }
+    
+    /* Metrics lebih lebar */
+    .metrics {
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) !important;
+        gap: 16px !important;
+    }
+    
+    /* Panel safety lebih lebar */
+    #sf-body {
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+    
+    /* Chat panel lebih lebar di layar besar */
+    .ae-chat-panel {
+        width: min(540px, 28vw);
+    }
+    
+    /* View-head lebih lega */
+    .view-head {
+        margin-bottom: 28px;
+    }
+    .view-head h1 {
+        font-size: 24px;
+    }
+    
+    /* Panel-head lebih lega */
+    .panel-head {
+        margin-bottom: 18px;
+    }
+    
+    /* Tabel lebih lega */
+    .table th, .table td {
+        padding: 12px 16px;
+    }
+    
+    /* Log view lebih tinggi */
+    .log-view {
+        height: calc(100vh - var(--titlebar-h) - 160px);
+    }
+    
+    /* Chat layout lebih tinggi */
+    .chat-layout {
+        height: calc(100vh - var(--titlebar-h) - 110px);
+    }
+}
+
+/* Reduced motion: matikan semua efek berat */
+@media (prefers-reduced-motion: reduce) {
+    .stage::after,
+    .holo-spectrum,
+    .holo-data-ring,
+    .holo-thinking .holo-stage canvas {
+        animation: none !important;
+        display: none !important;
+    }
+}
+
+/* =========================================================
+   SAFETY PANEL — JARVIS security console
+   ========================================================= */
+
+.sf-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 20px;
+    align-items: start;
+}
+
+@media (max-width: 1200px) {
+    .sf-grid { grid-template-columns: 1fr; }
+}
+
+/* Kartu STOP — paling penting, paling besar */
+.sf-stop {
+    padding: 24px !important;
+}
+.sf-stop.engaged {
+    border-color: rgba(255, 84, 112, 0.4) !important;
+    box-shadow: 0 0 0 1px rgba(255, 84, 112, 0.1), 0 0 40px rgba(255, 84, 112, 0.1) !important;
+}
+.sf-stop-body {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+.sf-stop-icon {
+    width: 56px; height: 56px;
+    display: grid; place-items: center;
+    border-radius: 50%;
+    background: rgba(52, 211, 153, 0.1);
+    color: var(--ok);
+    flex: none;
+}
+.sf-stop.engaged .sf-stop-icon {
+    background: rgba(255, 84, 112, 0.1);
+    color: var(--danger);
+}
+.sf-stop-icon svg { width: 28px; height: 28px; }
+.sf-stop-info { flex: 1; }
+.sf-stop-label {
+    font: 600 11px/1 var(--font-hud);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+.sf-stop-state {
+    font: 700 28px/1.2 var(--font-hud);
+    letter-spacing: 0.04em;
+    margin-top: 4px;
+}
+.sf-stop-state.running { color: var(--ok); text-shadow: 0 0 20px rgba(52,211,153,0.3); }
+.sf-stop-state.stopped { color: var(--danger); text-shadow: 0 0 20px rgba(255,84,112,0.3); }
+.sf-stop-detail {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 6px;
+}
+.sf-stop-btn { flex: none; }
+
+/* Kartu Gerbang */
+.sf-gate { padding: 20px !important; }
+.sf-gate.disabled {
+    border-color: rgba(255, 200, 87, 0.35) !important;
+}
+.sf-gate-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 16px;
+}
+.sf-gate-icon {
+    width: 40px; height: 40px;
+    display: grid; place-items: center;
+    border-radius: 10px;
+    background: rgba(53, 214, 240, 0.1);
+    color: var(--neon-cyan);
+}
+.sf-gate-icon svg { width: 22px; height: 22px; }
+.sf-gate-title { flex: 1; }
+.sf-gate-label {
+    font: 600 11px/1 var(--font-hud);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+.sf-gate-state {
+    font: 700 18px/1.2 var(--font-hud);
+    margin-top: 3px;
+}
+.sf-gate-state.active { color: var(--ok); }
+.sf-gate-state.inactive { color: var(--warn); }
+
+.sf-gate-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.sf-gate-stat {
+    text-align: center;
+    padding: 12px 8px;
+    background: rgba(6, 10, 22, 0.5);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+}
+.sf-gate-stat-num {
+    font: 700 24px/1 var(--font-hud);
+    color: var(--text);
+}
+.sf-gate-stat-num.danger { color: var(--danger); }
+.sf-gate-stat-num.ok { color: var(--ok); }
+.sf-gate-stat-label {
+    font: 600 10px/1 var(--font-hud);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-top: 4px;
+}
+.sf-gate-desc {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin: 0;
+}
+.sf-gate-warning {
+    padding: 12px 14px;
+    background: rgba(255, 200, 87, 0.08);
+    border: 1px solid rgba(255, 200, 87, 0.25);
+    border-radius: var(--r-md);
+    font-size: 12.5px;
+    color: var(--warn);
+    line-height: 1.6;
+}
+
+/* Jejak audit */
+.sf-trail { max-height: 400px; overflow-y: auto; }
+.sf-trail-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    position: sticky;
+    top: 0;
+    background: inherit;
+    padding: 4px 0;
+    z-index: 1;
+}
+.sf-trail-alert {
+    font: 600 11px/1 var(--font-hud);
+    color: var(--warn);
+}
+.sf-trail-clean {
+    font: 600 11px/1 var(--font-hud);
+    color: var(--ok);
+}
+.sf-trail-list { display: flex; flex-direction: column; gap: 2px; }
+.sf-trail-row {
+    display: grid;
+    grid-template-columns: 50px 70px 1fr 70px 90px;
+    gap: 8px;
+    padding: 6px 8px;
+    font-size: 11.5px;
+    border-radius: 6px;
+    align-items: center;
+}
+.sf-trail-row:hover { background: rgba(133, 162, 255, 0.05); }
+.sf-trail-row.destructive { border-left: 2px solid var(--danger); }
+.sf-trail-time { font-family: var(--font-mono); color: var(--text-dim); }
+.sf-trail-risk {
+    font: 700 9px/1 var(--font-hud);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--danger);
+}
+.sf-trail-row:not(.destructive) .sf-trail-risk { color: var(--ok); }
+.sf-trail-tool {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+.sf-trail-outcome { font-weight: 600; }
+.sf-trail-verify { font-size: 10.5px; }
+
+/* Izin aktif */
+.sf-auth-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line);
+}
+.sf-auth-row:last-child { border-bottom: 0; }
+.sf-auth-tool { flex: 1; font-weight: 600; font-size: 12.5px; }
+.sf-auth-meta { font-size: 11px; color: var(--text-dim); font-family: var(--font-mono); }

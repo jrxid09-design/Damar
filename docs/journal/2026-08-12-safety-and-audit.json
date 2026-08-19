@@ -1,0 +1,90 @@
+[
+  {
+    "area": "keselamatan",
+    "change": "Rantai keselamatan diangkat ke src/core/safety/toolGuard.js dan dipakai kedua jalur tool (registry inti dan ToolExecutor jalur model)",
+    "why": "Aether punya DUA registry tool, bukan satu. Tool asli model (memori, rumah, WhatsApp, terminal, coding) didaftarkan di registry AI dan dijalankan langsung lewat tool.execute(), sehingga riskPolicy, loopGuard, pathPolicy, dan VerificationEngine tidak berlaku sama sekali — hanya kill switch yang menjaga. terminal_run dan code_commit berjalan tanpa otorisasi apa pun. Menyalin rantai ke jalur kedua akan menghasilkan dua definisi yang pasti menyimpang, jadi diangkat menjadi satu modul bersama.",
+    "files": ["src/core/safety/toolGuard.js", "src/ai/tools/ToolExecutor.js", "src/core/tools/ToolRegistry.js", "src/services/aiRuntimeService.js"],
+    "verification": "Pada daemon berjalan: model memilih terminal_run untuk menanyakan jam, ditolak dengan SAFETY_RISK_BLOCKED, lalu melaporkannya ke pengguna. Tes tests/safety/modelPathGuard.test.js mengunci perilaku ini.",
+    "risks": "Tool jembatan sengaja dilewati di ToolExecutor agar tidak dijaga dua kali; kalau penandaan bridge hilang, rem kebuntuan akan menghitung satu panggilan sebagai dua dan menahan tool sah terlalu cepat."
+  },
+  {
+    "area": "keselamatan",
+    "change": "Pola katalog risiko diubah ke pencocokan batas kata, dan 47 tool asli model didaftarkan eksplisit",
+    "why": "Pola lama mencocokkan substring: kata 'get' ada di dalam 'forget', sehingga memory_forget terbaca L0 — sekelas dengan menanyakan jam. Selain itu tak satu pun tool asli model ada di katalog, jadi semuanya jatuh ke default pesimistis L4, termasuk tool baca murni seperti code_hover. Cacat ini tak terasa selama rantai memang tidak ditegakkan; begitu ditegakkan, keduanya langsung berakibat.",
+    "files": ["src/core/safety/riskCatalog.js"],
+    "verification": "Tes regresi memastikan 'get' di dalam 'forget'/'budget'/'target' tidak lagi menurunkan risiko, dan setiap tool asli punya klasifikasi eksplisit.",
+    "risks": "Klasifikasi 47 tool ditetapkan dari deskripsi dan pembacaan kode, bukan dari pengamatan efek sampingnya."
+  },
+  {
+    "area": "keselamatan",
+    "change": "terminal_run diklasifikasikan L5, sama dengan run-command.runCommand, sehingga ditahan pada ambang bawaan",
+    "why": "Keduanya menjalankan perintah sembarang. Kemampuan yang sama tidak boleh punya dua tingkat izin hanya karena terdaftar di registry yang berbeda.",
+    "files": ["src/core/safety/riskCatalog.js"],
+    "verification": "Diuji langsung: permintaan yang memicu terminal_run ditolak, sementara alur lain tetap berjalan.",
+    "risks": "Ini mengubah perilaku bagi pemilik — terminal_run kini butuh izin lewat Panel Keamanan atau POST /safety/authorize."
+  },
+  {
+    "area": "memori",
+    "change": "Jejak audit yang bertahan di data/audit/*.jsonl, 14 hari, mencatat juga penolakan",
+    "why": "telemetry.publish() hanya memancarkan event tanpa menyimpannya. Tanpa klien SSE yang kebetulan tersambung, tidak ada catatan bahwa Aether menulis berkas, mengirim pesan, atau bahwa sebuah verifikasi gagal. Jejak audit yang hilang saat tak ada yang menonton bukan jejak audit. Penolakan ikut dicatat karena percobaan melewati batas justru yang paling perlu meninggalkan bekas.",
+    "files": ["src/core/safety/auditTrail.js", "src/core/safety/toolGuard.js", "apps/console/renderer/views/safety.js"],
+    "verification": "Pada daemon berjalan: penolakan terminal_run dan penulisan berkas terverifikasi 3/3 muncul di GET /safety/trail dan di Panel Keamanan.",
+    "risks": "Argumen sengaja tidak disalin apa adanya — hanya bentuknya, nilai dipotong 80 karakter. Mencatat demi keamanan tidak boleh menciptakan kebocorannya sendiri."
+  },
+  {
+    "area": "memori",
+    "change": "Batas pencatatan jejak audit ditetapkan L1 ke atas, bukan L2",
+    "why": "Versi pertama melewati L0 dan L1, sehingga penulisan berkas tidak tercatat sama sekali — terbukti saat percobaan langsung menghasilkan jejak kosong. Batas yang benar adalah 'apakah ada yang berubah di luar kepala Aether', bukan 'apakah berbahaya'. Menulis berkas mengubah disk dan pemilik berhak tahu.",
+    "files": ["src/core/safety/toolGuard.js"],
+    "verification": "Setelah diubah, filesystem.writeFile muncul di jejak dengan verifikasi verified 3/3.",
+    "risks": null
+  },
+  {
+    "area": "verifikasi",
+    "change": "Verifier git untuk code_commit, code_rollback, dan code_branch; gitPatcher.restore() diperbaiki agar berhenti mengklaim",
+    "why": "gitPatcher.restore() menelan kegagalan git dengan .catch(() => {}) lalu tetap mengembalikan { restored: [...] }. Rollback yang gagal total terbaca berhasil — dan fungsi ini dipanggil justru saat test merah, tepat ketika laporan palsu paling berbahaya. Verifier menanyai git lewat proses terpisah dari tool, karena menanyakan hasil pada tool yang sama sama saja dengan tidak memverifikasi.",
+    "files": ["src/core/verify/verifiers.js", "src/coding/patcher/gitPatcher.js"],
+    "verification": "Repo git sungguhan di direktori sementara membuktikan tiga klaim palsu tertangkap: commit yang tak pernah ada, rollback yang tak terjadi, branch yang tak dibuat.",
+    "risks": "code_test sengaja dibiarkan tanpa verifier — membuktikannya berarti menjalankan ulang seluruh test, mahal dan berefek samping."
+  },
+  {
+    "area": "runtime",
+    "change": "Daftar tool asli disatukan di aiRuntimeService.nativeTools(), dipakai perakitan awal dan penyegaran",
+    "why": "Daftar ditulis dua kali dan sudah menyimpang: perakitan awal melewatkan codingTools dan familyTools. Karena refreshTools() hanya berjalan saat event forge:changed, seluruh kemampuan coding Aether — graphify, Serena, test, commit, rollback — tak terlihat oleh model pada daemon yang baru dinyalakan.",
+    "files": ["src/services/aiRuntimeService.js"],
+    "verification": "Panel keamanan naik dari 105 ke 138 tool, dan model berhasil memanggil code_lsp_status yang sebelumnya mustahil ia sentuh.",
+    "risks": null
+  },
+  {
+    "area": "runtime",
+    "change": "Pemilih tool mencocokkan daftar 'selalu ikut' pada ruas terakhir nama; terminal_run dikeluarkan dari daftar itu",
+    "why": "Anggaran prompt hanya 32 dari 138 tool, jadi 106 dibuang tiap permintaan. Daftar lama menuliskan 'readFile' padahal model melihat 'filesystem__readFile' — pencocokan persis tidak pernah cocok, sehingga justru tool berkas kehilangan jaminannya diam-diam sementara komentar di atasnya menjanjikan sebaliknya. terminal_run dikeluarkan karena ia L5 dan ditahan: menjamin slot untuk tool yang akan ditolak memboroskan anggaran dan terbukti menuntun model memilihnya untuk hal sesederhana menanyakan jam.",
+    "files": ["src/ai/tools/ToolSelector.js"],
+    "verification": "Tes pertama di tests/safety/toolSelector.test.js memeriksa setiap entri benar-benar cocok dengan nama tool terdaftar — tes yang absen inilah sebabnya jaminan itu bisa mati tanpa ketahuan.",
+    "risks": "Skor kecocokan masih berbasis kata kunci; deskripsi tool berbahasa Inggris sementara pertanyaan pengguna berbahasa Indonesia, dijembatani peta HINTS yang perlu ditambah seiring waktu."
+  },
+  {
+    "area": "runtime",
+    "change": "Tool system.time mengembalikan waktu lokal beserta zona waktunya, bukan hanya toISOString()",
+    "why": "toISOString() selalu UTC tanpa penanda zona. Model membacanya sebagai jam setempat dan menjawab '18:22' ketika di sini pukul 01:22, bahkan sempat melabelinya 'WIB'. Salah tujuh jam dan disampaikan dengan yakin — lebih buruk daripada tidak menjawab, dan tidak ada verifier yang bisa menangkapnya karena toolnya memang 'berhasil'.",
+    "files": ["src/plugins/system.time/tool.js"],
+    "verification": "Setelah perbaikan, Aether menjawab '01.24 WIB, Rabu, 12 Agustus 2026' — cocok persis dengan jam sistem.",
+    "risks": "Medan `time` sengaja tetap ISO/UTC agar pemakai lama tidak berubah artinya."
+  },
+  {
+    "area": "planner",
+    "change": "ExecutionPlan menjadi DAG dengan dependensi, deteksi siklus, dan checkpoint atomik per langkah di data/plans/",
+    "why": "Loop tool tidak menyimpan apa pun: bila proses mati di tengah rantai panjang, tak ada jejak apa yang sudah terlanjur dikerjakan — pesan yang sudah terkirim, berkas yang sudah tertulis. Langkah yang berstatus 'running' saat mati dikembalikan ke 'pending' karena kita tidak tahu apakah ia sempat selesai.",
+    "files": ["src/agent/models/executionPlan.js", "src/agent/models/executionStep.js", "src/agent/planStore.js", "src/ai/executors/RuntimeExecutor.js"],
+    "verification": "Tes membuktikan permintaan yang mati meninggalkan checkpoint berisi langkah yang gagal, dan permintaan yang tuntas tidak meninggalkan puing.",
+    "risks": "Checkpoint mencatat apa yang sudah terjadi tetapi BELUM melanjutkan rantai secara otomatis. Itu disengaja: mengulang langkah berefek samping tanpa sepengetahuan pemilik melanggar Konstitusi Pasal 2.1."
+  },
+  {
+    "area": "pengujian",
+    "change": "Tes dialihkan ke direktori sementara lewat AETHER_AUDIT_DIR di tests/helpers/testEnv.js, dipasang sekali di npm test",
+    "why": "Tes menulis peristiwa palsu ke jejak audit produksi — 113 entri, mayoritas sampah tes. Jejak audit yang tercampur data tes tidak dapat dipercaya justru saat dibutuhkan untuk menelusuri kejadian nyata. Dipasang lewat --require karena setiap berkas tes berjalan di prosesnya sendiri: mengaturnya di satu berkas tidak melindungi yang lain.",
+    "files": ["tests/helpers/testEnv.js", "package.json", "src/core/safety/auditTrail.js"],
+    "verification": "Setelah npm test, data/audit tetap bersih.",
+    "risks": null
+  }
+]

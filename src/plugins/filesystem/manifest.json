@@ -1,0 +1,15 @@
+{
+    "id": "filesystem",
+    "version": "1.0.0",
+    "name": "Filesystem",
+    "description": "File and directory operations.",
+    "category": "system",
+    "entry": "index.js",
+    "author": "Aether",
+    "permissions": [],
+    "tags": [
+        "filesystem",
+        "file",
+        "directory"
+    ]
+}

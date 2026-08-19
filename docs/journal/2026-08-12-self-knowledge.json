@@ -1,0 +1,26 @@
+[
+  {
+    "area": "memori",
+    "change": "buildMemory + tool build_recall/build_remember + scripts/learn.js: Aether kini punya ingatan tentang bagaimana dirinya dibangun",
+    "why": "bugMemory sudah menyimpan pengalaman memperbaiki bug, tetapi tidak ada ingatan tentang keputusan arsitektur dan alasannya. Tanpa itu Aether hanya tahu keadaannya sekarang, bukan sebabnya, sehingga tidak punya pijakan saat memulihkan diri dan tidak bisa menjawab 'kenapa kamu begini'. Medan `why` diwajibkan karena perubahan berkas selalu bisa dibaca ulang dari git, sedangkan alasan sebuah keputusan hanya ada saat keputusan itu dibuat.",
+    "files": ["src/memory/buildMemory.js", "src/memory/tools/buildTools.js", "scripts/learn.js", "src/services/aiRuntimeService.js"],
+    "verification": "Dibuktikan pada daemon berjalan: ditanya 'kenapa terminal_run diblokir', Aether memanggil build_recall dan menjawab dengan alasan yang tercatat, bukan tebakan.",
+    "risks": "Batas yang harus dijaga: peristiwa mentah masuk jejak audit, pengetahuan masuk memori. Memasukkan setiap eksekusi tool ke memori semantik akan menenggelamkan recall dan justru merusak self-healing."
+  },
+  {
+    "area": "memori",
+    "change": "build_recall tidak mengklaim kecocokan; ia menyaring derau lalu melaporkan tingkat keyakinan beserta skornya",
+    "why": "Pencarian semantik selalu mengembalikan sesuatu. Kueri omong kosong murni memberi keywordScore 0 dan mudah disaring, tetapi kueri seperti 'topik yang tak pernah ada' justru berskor 2,04 — di atas hasil yang benar-benar relevan — karena terurai menjadi kata Indonesia umum yang memang muncul di catatan. Tidak ada ambang yang memisahkannya dengan andal, jadi mengklaim 'exact match' adalah kepastian yang tidak dimiliki sistemnya.",
+    "files": ["src/memory/buildMemory.js"],
+    "verification": "Tes membuktikan kueri tanpa kata yang cocok menghasilkan nol catatan dan pesan 'katakan tidak tahu', sementara hasil apa pun selalu membawa skor dan peringatan 'MUNGKIN relevan'.",
+    "risks": "Ambang derau 1,7 diambil dari pengamatan pada korpus kecil; perlu ditinjau ulang setelah jurnal tumbuh."
+  },
+  {
+    "area": "runtime",
+    "change": "Batas waktu dipindahkan ke tiap panggilan model; batas seluruh permintaan menjadi langit-langit 4x",
+    "why": "Batas 120 detik membungkus SELURUH loop tool, bukan tiap panggilan. Di inferensi CPU satu panggilan bisa 40-60 detik, sehingga permintaan yang memakai dua tool hampir pasti gagal — batas itu menghukum tepat perilaku yang kita inginkan, yaitu Aether memakai toolnya. Ditemukan saat pertanyaan 'kenapa terminal_run diblokir' dijawab daemon dengan 'Request timeout.'",
+    "files": ["src/ai/runtime/AIRuntime.js", "src/ai/executors/RuntimeExecutor.js"],
+    "verification": "Permintaan yang sama kemudian berhasil dalam 139 detik — melewati batas lama 120 detik. Tes memastikan tiga panggilan lambat berturut-turut tidak menumpuk jadi kegagalan, sementara satu panggilan yang benar-benar menggantung tetap dihentikan.",
+    "risks": "Langit-langit kini 8 menit untuk satu permintaan; permintaan yang macet total akan tertahan lebih lama sebelum menyerah."
+  }
+]

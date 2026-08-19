@@ -1,0 +1,30 @@
+node_modules/
+.env*
+*.log
+
+# --- Konfigurasi runtime: LOKAL SAJA -------------------------------
+# Berisi rahasia nyata (API key Binance, token Telegram/Home Assistant,
+# kunci provider LLM) dan sesi WhatsApp. Sempat ikut terlacak dan
+# ter-commit; sejak sini configs/ hanya hidup di mesin masing-masing.
+# integrations.json dikecualikan: isinya template tanpa rahasia dan
+# sudah menjadi bagian dari repo di develop.
+configs/*
+!configs/integrations.json
+
+# --- DATA PRIBADI PER-INSTALASI: LOKAL SAJA ------------------------
+# Repo ini open-source. Semua di bawah adalah "Aether versi kamu":
+# memori, keadaan batin, watak yang terbentuk, jejak, pembukuan. Saat
+# orang lain meng-install, semua dibuat ulang dari nol (kode auto-membuat
+# foldernya) sehingga mereka mendapat Aether versi mereka sendiri.
+data/
+downloads/
+logs/
+paceAether
+AETHER_STATE.json
+AETHER_SELF.md
+ROADMAP.md
+
+# Skrip lokal/eksperimen yang tak ikut rilis publik.
+*-arsenal*.sh
+check-*.sh
+scripts/attack-*.sh

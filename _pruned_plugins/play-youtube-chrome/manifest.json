@@ -1,0 +1,29 @@
+{
+    "id": "play-youtube-chrome",
+    "name": "Putar Musik YouTube lewat Chrome",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Membuka Google Chrome (atau browser default) dengan hasil pencarian YouTube untuk query yang diberikan.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-10T17:09:32.803Z",
+        "spec": {
+            "toolName": "playYoutubeChrome",
+            "description": "Membuka Google Chrome (atau browser default) dengan hasil pencarian YouTube untuk query yang diberikan.",
+            "parameters": {
+                "query": {
+                    "type": "string",
+                    "description": "Kata kunci pencarian di YouTube",
+                    "required": true
+                }
+            },
+            "code": "const { spawn } = require('child_process');\nconst platform = process.platform;\nlet cmd, argsArr;\nconst url = `https://www.youtube.com/results?search_query=${encodeURIComponent(args.query)}`;\nif (platform === 'win32') {\n  cmd = 'start';\n  argsArr = ['', url];\n} else if (platform === 'darwin') {\n  cmd = 'open';\n  argsArr = ['-a', 'Google Chrome', url];\n} else {\n  cmd = 'xdg-open';\n  argsArr = [url];\n}\nconst child = spawn(cmd, argsArr, { detached: true, stdio: 'ignore' });\nchild.unref();\nreturn { opened: true, url };"
+        }
+    }
+}

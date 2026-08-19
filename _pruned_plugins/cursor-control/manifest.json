@@ -1,0 +1,42 @@
+{
+    "id": "cursor-control",
+    "name": "Kontrol Kursor",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Menggerakkan kursor mouse ke koordinat (X, Y) dan melakukan klik tombol tertentu dengan jumlah klik yang ditentukan.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-10T17:21:35.476Z",
+        "spec": {
+            "toolName": "controlCursor",
+            "description": "Menggerakkan kursor mouse ke koordinat (X, Y) dan melakukan klik tombol tertentu dengan jumlah klik yang ditentukan.",
+            "parameters": {
+                "x": {
+                    "type": "number",
+                    "description": "Koordinat X layar (pixel dari tepi kiri)"
+                },
+                "y": {
+                    "type": "number",
+                    "description": "Koordinat Y layar (pixel dari tepi atas)"
+                },
+                "button": {
+                    "type": "string",
+                    "description": "Tombol mouse yang akan diklik: left, right, atau middle",
+                    "default": "left"
+                },
+                "clicks": {
+                    "type": "number",
+                    "description": "Jumlah kali klik dilakukan",
+                    "default": "1"
+                }
+            },
+            "code": "const { execSync } = require('child_process');\n// Pastikan xdotool terinstall di sistem\nconst x = Number(args.x);\nconst y = Number(args.y);\nconst btn = (args.button || 'left').toLowerCase();\nconst clicks = Math.max(1, Number(args.clicks) || 1);\n// Mapping tombol untuk xdotool\nlet xdotoolBtn = btn;\nif (btn === 'left') xdotoolBtn = 1;\nelse if (btn === 'right') xdotoolBtn = 3;\nelse if (btn === 'middle') xdotoolBtn = 2;\nelse xdotoolBtn = btn; // fallback to string\ntry {\n  const cmd = `xdotool mousemove --sync ${x} ${y} click --repeat ${clicks} ${xdotoolBtn}`;\n  execSync(cmd, { stdio: 'ignore' });\n  return { success: true, message: `Kursor dipindah ke (${x},${y}) dan ${btn} diklik ${clicks} kali` };\n} catch (err) {\n  return { success: false, error: err.message };\n}"
+        }
+    }
+}

@@ -1,0 +1,22 @@
+{
+    "id": "system.time",
+
+    "name": "System Time",
+
+    "version": "1.0.0",
+
+    "entry": "index.js",
+
+    "description": "Current system time.",
+
+    "category": "system",
+
+    "author": "Aether",
+
+    "permissions": [],
+
+    "tags": [
+        "time",
+        "clock"
+    ]
+}

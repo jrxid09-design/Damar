@@ -1,0 +1,20 @@
+{
+    "id": "wc2-msvtyav9",
+    "name": "WC2",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Uji kontrak registry penuh: execute context params lewat ToolRegistry dan ToolBus.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "manual",
+        "createdAt": "2026-08-16T13:17:56.260Z",
+        "spec": {
+            "raw": "// Skill buatan Aether Skill Factory — jangan sunting manual.\nclass SkillImpl {\n async execute(args){ return { upper: String(args.kata).toUpperCase(), len: String(args.kata).length }; } \n}\n\nclass Tool {\n    constructor() {\n        this._impl = new SkillImpl();\n        this.name = \"WCDUA\";\n        this.description = \"Uji kontrak registry penuh: execute context params lewat ToolRegistry dan ToolBus.\";\n        this.parameters = {\n    kata: {\"type\":\"string\",\"description\":\"kata\",\"required\":true}\n        };\n    }\n    // Kontrak plugin: execute(context, params).\n    // Pilih sumber args yang benar: params utama; context\n    // kadang membawa args saat pemanggil legacy.\n    async execute(context, params) {\n        const args = (params && typeof params === 'object' && !Array.isArray(params) && Object.keys(params).length)\n            ? params\n            : (context && typeof context === 'object' && !Array.isArray(context) && Object.keys(context).length)\n                ? context\n                : {};\n        return this._impl.execute(args);\n    }\n}\nmodule.exports = [new Tool()];\n"
+        }
+    }
+}

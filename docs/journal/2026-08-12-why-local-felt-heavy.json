@@ -1,0 +1,42 @@
+[
+  {
+    "area": "runtime",
+    "change": "Tool tidak dilampirkan sama sekali untuk pesan yang tidak menyinggung kemampuan apa pun (AETHER_TOOLS_WHEN_IDLE=backbone mengembalikan perilaku lama)",
+    "why": "Pemilik melaporkan model lokal terasa berat lewat Aether padahal ringan saat dipanggil langsung ke Ollama. Diukur dan terbukti: melampirkan tool punya harga TETAP 777 token — boilerplate template tool-calling llama3.1 — sebelum tool pertama ikut dihitung. Tanpa tool 12 token (1,8 dtk); dengan 6 tool 789 token (15,5 dtk); dengan 32 tool 1.577 token (34,2 dtk). Untuk sapaan, 789 token itu membeli nol manfaat dan langsung menjadi belasan detik.",
+    "files": ["src/ai/tools/ToolSelector.js"],
+    "verification": "Sapaan pada daemon berjalan turun dari 40,5/61,4/44,1 detik menjadi 12,7/14,0/13,9 detik, diukur tiga kali dalam keadaan panas. Tes memastikan pertanyaan waktu tetap membawa tool waktu dan permintaan rumah/WhatsApp/terminal tetap membawa toolnya.",
+    "risks": "Pesan yang mestinya diingat tetapi tidak menyentuh kata kunci apa pun tidak lagi membawa memory_remember, sehingga Aether tak bisa mengingat atas inisiatif sendiri pada pesan semacam itu. Peta HINTS perlu ditambah seiring waktu."
+  },
+  {
+    "area": "memori",
+    "change": "Catatan jurnal rekayasa (kind=build) tidak lagi disuntikkan ke system prompt percakapan biasa",
+    "why": "Terukur: sapaan 'Halo' menarik catatan build tentang sebuah berkas sumber ke dalam konteks percakapan. Catatan itu panjang, teknis, tak berguna bagi pengguna, dan di mesin lokal setiap tokennya dibayar dengan detik. Ia sudah tersedia sesuai permintaan lewat tool build_recall. Ini juga menjelaskan ragam prompt yang sebelumnya tak diketahui sebabnya: 'Halo' yang identik menghasilkan 1.356, 1.361, lalu 2.365 token — yang berubah adalah catatan build mana yang kebetulan tertarik.",
+    "files": ["src/memory/services/MemoryService.js"],
+    "verification": "Prompt sapaan kini stabil 1.214–1.224 token pada tiga percobaan berurutan, dari sebelumnya 1.356–2.365. Ada tes yang memastikan catatan build tidak masuk buildContext.",
+    "risks": null
+  },
+  {
+    "area": "memori",
+    "change": "build_recall berhenti menyaring relevansi dengan ambang; ia melaporkan skor kata dan skor makna beserta peringatan eksplisit",
+    "why": "Dua percobaan menyaring gagal, dan kegagalannya saling bertentangan. Ambang skor total 1,7 dikalibrasi pada korpus terisi lalu menolak kecocokan SAH di basis data kecil. Syarat keywordScore > 0 gagal sebaliknya: pencarian kata memakai BM25, dan istilah yang muncul di semua dokumen ber-IDF nol — di basis data berisi satu catatan, kecocokan teks yang PERSIS memberi keywordScore 0,000. Skor vektor pun tumpang tindih: catatan relevan 0,506-0,807 sementara kueri omong kosong mencapai 0,548. Tidak ada satu angka yang memisahkan keduanya di tumpukan ini, jadi menyaring dengan ambang yang tak dapat dipertanggungjawabkan hanya memindahkan kesalahan ke tempat yang lebih sulit dilihat.",
+    "files": ["src/memory/buildMemory.js"],
+    "verification": "Tes memastikan setiap hasil membawa peringatan 'MUNGKIN relevan', izin bagi model untuk mengaku tidak tahu, serta skor kata dan makna agar dapat dinilai sendiri.",
+    "risks": "build_recall dapat mengembalikan catatan yang tidak nyambung. Yang menahannya adalah peringatan di hasil dan deskripsi tool, bukan penyaringan."
+  },
+  {
+    "area": "pengujian",
+    "change": "Basis data memori tes dialihkan ke berkas sementara lewat AETHER_MEMORY_DB di tests/helpers/testEnv.js",
+    "why": "Tes buildMemory menitipkan 9 catatan palsu ke memori SUNGGUHAN. Karena memori disuntikkan ke system prompt, catatan 'Area: uji Perubahan: menaikkan ambang UJIBUILD...' benar-benar muncul sebagai konteks saat pengguna menyapa Aether. Kesalahan yang sama persis dengan jejak audit sebelumnya: tes menulis ke tempat produksi.",
+    "files": ["tests/helpers/testEnv.js", "tests/safety/buildMemory.test.js"],
+    "verification": "Sembilan artefak dikedaluwarsakan dengan lupa lunak (data tetap ada). npm test tidak lagi menyentuh data/memory.db.",
+    "risks": null
+  },
+  {
+    "area": "runtime",
+    "change": "Terukur: prompt dasar Aether ± 1.220 token, dengan prompt sistem 812 token sebagai penyumbang terbesar",
+    "why": "Dibutuhkan rincian sebelum memutuskan apa yang berikutnya dipangkas. Prompt sistem 3.247 karakter setara 812 token dibayar pada SETIAP permintaan, sekitar 17 detik pada laju 48,8 token/detik mesin ini. Sisanya injeksi memori 113-323 token.",
+    "files": ["src/services/aiRuntimeService.js"],
+    "verification": "Diukur langsung dari systemPrompt dan MemoryService.buildContext, dicocokkan dengan usage.promptTokens per permintaan.",
+    "risks": "Memangkas prompt sistem berarti mengubah kepribadian dan aturan perilaku Aether — keputusan pemilik, bukan keputusan teknis semata."
+  }
+]

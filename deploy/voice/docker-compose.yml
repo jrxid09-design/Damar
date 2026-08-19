@@ -1,0 +1,51 @@
+# Suara Aether — TTS neural (Kokoro) & STT (faster-whisper).
+#
+# Keduanya berbicara dialek OpenAI, format yang sudah dipakai
+# voiceService: POST /v1/audio/speech dan /v1/audio/transcriptions.
+#
+# Dijalankan manual:
+#   docker compose -f deploy/voice/docker-compose.yml up -d
+#
+# Nilai path diambil dari deploy/voice/.env yang DIBUAT otomatis
+# oleh Aether dari configs/nas.json (disk pilihanmu), sama seperti
+# stack Immich. PC ini tanpa GPU diskrit, jadi keduanya varian CPU.
+name: aether-voice
+
+services:
+  kokoro:
+    container_name: aether_kokoro
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    ports:
+      - '8880:8880'
+    restart: always
+
+  # Piper lewat openedai-speech — satu-satunya jalur suara BAHASA
+  # INDONESIA di sini. Kokoro punya 68 suara tapi tak satu pun
+  # berbahasa Indonesia, jadi kalimat Indonesia terdengar keinggris-
+  # inggrisan. Piper punya model id_ID yang mengucapkannya benar.
+  piper:
+    container_name: aether_piper
+    image: ghcr.io/matatonic/openedai-speech-min:latest
+    ports:
+      - '8881:8000'
+    volumes:
+      - ${PIPER_VOICE_LOCATION}:/app/voices
+      - ./piper-voices.yaml:/app/config/voice_to_speaker.yaml:ro
+    environment:
+      TTS_HOME: /app/voices
+      PRELOAD_MODEL: ''
+    restart: always
+
+  whisper:
+    container_name: aether_whisper
+    image: fedirz/faster-whisper-server:latest-cpu
+    ports:
+      - '8000:8000'
+    volumes:
+      # Model whisper diunduh sekali lalu dipakai ulang; disimpan di
+      # disk NAS supaya tidak membebani SSD sistem.
+      - ${VOICE_MODEL_LOCATION}:/root/.cache/huggingface
+    environment:
+      WHISPER__MODEL: ${STT_MODEL:-Systran/faster-whisper-base}
+      WHISPER__INFERENCE_DEVICE: cpu
+    restart: always

@@ -1,0 +1,44 @@
+{
+    "id": "press-button",
+    "name": "Tekan Tombol Cursor",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Menggerakkan kursor ke koordinat layar dan menekan tombol mouse (klik klik) menggunakan OpenClaw.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-10T17:14:40.137Z",
+        "spec": {
+            "toolName": "pressButton",
+            "description": "Menggerakkan kursor ke koordinat layar dan menekan tombol mouse (klik klik) menggunakan OpenClaw.",
+            "parameters": {
+                "x": {
+                    "type": "number",
+                    "description": "Koordinat X layar (0-1920)",
+                    "required": true
+                },
+                "y": {
+                    "type": "number",
+                    "description": "Koordinat Y layar (0-1080)",
+                    "required": true
+                },
+                "button": {
+                    "type": "string",
+                    "description": "Tombol mouse: left, right, middle (default left)",
+                    "required": false
+                },
+                "clicks": {
+                    "type": "number",
+                    "description": "Jumlah klik (default 1)",
+                    "required": false
+                }
+            },
+            "code": "// This skill delegates to OpenClaw to perform a mouse click at given coordinates.\n// We construct a task description for OpenClaw.\nconst task = `Gerakkan kursor ke (${args.x}, ${args.y}) lalu klik ${args.button || 'left'} ${args.clicks || 1} kali`;\nreturn { task };"
+        }
+    }
+}

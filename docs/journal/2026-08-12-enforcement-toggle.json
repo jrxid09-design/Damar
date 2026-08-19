@@ -1,0 +1,18 @@
+[
+  {
+    "area": "keselamatan",
+    "change": "Gerbang otorisasi risiko L0–L5 kini dapat dimatikan pemilik lewat POST /safety/enforcement dan tombol di Panel Keamanan, dengan opsi durasi yang menyalakannya kembali otomatis",
+    "why": "Permintaan pemilik: leveling risiko menyulitkan pengoperasian sehari-hari. Dibuat sebagai saklar eksplisit, bukan ambang palsu 'L6', supaya keadaannya terbaca jujur di status dan panel. Yang dimatikan HANYA gerbang izin — kill switch tetap berjalan karena Konstitusi Pasal 2.1 menuntut pemilik selalu dapat menghentikan Aether, dan sandbox jalur, rem kebuntuan, verifikasi, serta jejak audit adalah mekanisme terpisah yang tidak ikut mati. Tingkat risiko tetap dihitung dan tetap dicatat, sehingga mematikan penegakan tidak membuat Aether buta terhadap apa yang sedang ia lakukan.",
+    "files": ["src/core/safety/riskPolicy.js", "src/controllers/safetyController.js", "src/routes/api/v1/console.js", "apps/console/renderer/views/safety.js"],
+    "verification": "Diuji pada daemon berjalan: gerbang aktif → run-command.runCommand ditolak SAFETY_RISK_BLOCKED; gerbang dimatikan → perintah yang sama berjalan dan mengembalikan stdout, dengan laporan verifikasi TETAP menempel; gerbang dinyalakan lagi → ditolak kembali. Tes memastikan STOP, sandbox jalur, dan rem kebuntuan tetap menahan selagi gerbang mati.",
+    "risks": "Selagi dimatikan, 6 tool destruktif (hapus berkas, jalankan perintah bebas, terminal_run) tidak lagi ditahan. Perubahan saklar dicatat ke jejak audit beserta pelakunya dan durasinya, karena mematikan batas keamanan harus dapat ditelusuri berbulan kemudian."
+  },
+  {
+    "area": "pengujian",
+    "change": "Tes kedaluwarsa penegakan memakai durasi pecahan lewat jalur produksi, bukan menulis konfigurasi lewat instance JsonStore kedua",
+    "why": "JsonStore menyimpan cache per instance. Instance kedua yang menulis ke berkas tidak terlihat oleh instance milik riskPolicy, sehingga tes gagal padahal kodenya benar — alat ukurnya yang salah. Konsekuensi lain yang perlu diingat: mengubah configs/safety.json dari luar proses tidak akan terbaca daemon yang sedang berjalan.",
+    "files": ["tests/safety/enforcementToggle.test.js"],
+    "verification": "Tes lulus memakai minutes: 0.002 lalu menunggu 200 ms.",
+    "risks": null
+  }
+]

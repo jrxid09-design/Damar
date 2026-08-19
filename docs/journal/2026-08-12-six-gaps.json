@@ -1,0 +1,58 @@
+[
+  {
+    "area": "keselamatan",
+    "change": "codeSandbox: proses anak tidak lagi mewarisi rahasia; cwd terkurung ke akar proyek; batas waktu dan keluaran. Dipakai testRunner (npm run) dan tool run-command",
+    "why": "Aether dapat mengubah dan menjalankan kodenya sendiri, dan sampai kini itu terjadi di ruang yang sama persis dengan yang menjalankannya: exec dan execFile mewarisi SELURUH environment, termasuk AETHER_TOKEN dan kunci OpenRouter. Satu baris di skrip test package.json, atau satu perintah `set`, sudah cukup untuk membacanya. Environment disusun ulang dari daftar-IZIN, bukan disaring dari daftar-larang, supaya kunci berikutnya yang ditambahkan ke .env tidak bocor hanya karena tak ada yang ingat melarangnya.",
+    "files": ["src/core/safety/codeSandbox.js", "src/coding/tester/testRunner.js", "userPlugins/run-command/tool.js"],
+    "verification": "Tes ujung-ke-ujung menjalankan proses anak sungguhan dan memastikan AETHER_TOKEN terbaca 'TIDAK-ADA'. Jalur di luar akar proyek dikembalikan ke akar.",
+    "risks": "BUKAN jail sistem operasi. Perintah tetap berjalan dengan hak pengguna yang sama, tetap dapat menyentuh jaringan, dan tetap dapat membaca berkas di luar proyek lewat jalur mutlak — yang menahan itu pathPolicy, bukan modul ini. Menyebutnya 'sandbox penuh' akan menciptakan rasa aman yang tidak ditopang apa pun."
+  },
+  {
+    "area": "dunia",
+    "change": "WorldModel + tool world_describe: gambaran utuh mesin, disk, layanan, model termuat, dan keadaan rem — tiap fakta membawa sumber dan waktu pemeriksaan",
+    "why": "Aether sudah bisa MENANYAKAN lingkungannya satu per satu, tetapi tidak punya gambaran utuh, dan yang lebih penting tidak tahu KAPAN sesuatu terakhir diperiksa. Fakta tentang dunia menjadi basi: disk terisi, layanan mati, IP berubah. Menyajikannya tanpa waktu pemeriksaan membuat Aether berbicara tentang keadaan lama dengan nada sama percayanya dengan keadaan semenit lalu. Kegagalan memeriksa dilaporkan sebagai unknown beserta alasannya, bukan dihilangkan sehingga tampak tak ada masalah.",
+    "files": ["src/world/WorldModel.js", "src/world/tools.js"],
+    "verification": "Dipanggil model di daemon berjalan: melaporkan 3 disk dan 3 layanan hidup dengan angka yang cocok dengan sistem.",
+    "risks": "Potret di-cache 60 detik agar tidak membebani mesin yang sedang dipakai menjawab."
+  },
+  {
+    "area": "dunia",
+    "change": "os.platform() tidak lagi disajikan mentah ke model",
+    "why": "Nilai 'win32' adalah nama platform Node dan tetap 'win32' pada Windows 64-bit. Dibiarkan mentah, model membacanya sebagai '32-bit' dan menyampaikannya dengan yakin — terlihat langsung pada uji pertama: 'Windows 10 (32-bit)'. Kini nama sistem dipetakan dan arsitektur diambil dari os.arch().",
+    "files": ["src/world/WorldModel.js"],
+    "verification": "Keluaran berubah menjadi 'Windows 10.0.26200 (x64)'.",
+    "risks": null
+  },
+  {
+    "area": "planner",
+    "change": "planStore.triage(): langkah tertunda dipilah — L0 aman diulang sendiri, L1 ke atas menunggu izin pemilik",
+    "why": "Pemulihan yang berguna harus tahu APA yang aman diulang. Dasarnya tingkat risiko, bukan tebakan: L0 pembacaan murni tanpa efek samping, jadi mengulanginya paling buruk hanya boros waktu. Mulai L1 sesuatu berubah di luar Aether dan mengulang tanpa sepengetahuan pemilik dapat menulis atau mengirim dua kali (Pasal 2.1). Yang tak dikenal tingkatnya masuk daftar perlu-izin, bukan daftar aman.",
+    "files": ["src/agent/planStore.js"],
+    "verification": "Tes: rencana berisi memory_recall/writeFile/whatsapp_send/terminal_run terpilah tepat satu ke otomatis dan tiga ke perlu-izin; langkah yang sudah done tidak diulang sama sekali.",
+    "risks": "Melanjutkan sisanya masih manual — belum ada alur persetujuan di Console."
+  },
+  {
+    "area": "memori",
+    "change": "RelationService + tool memory_related: telusuri entitas yang berhubungan lewat memori bersama, satu dan dua lompatan",
+    "why": "Aether menyimpan entitas dan memori yang menyebut mereka, tetapi tidak pernah menelusuri hubungannya — sehingga ia bisa menjawab 'siapa Budi' dari satu catatan dan tetap tidak tahu bahwa Budi dan mobil biru muncul bersama enam kali, padahal itu sudah ada di basis datanya sendiri.",
+    "files": ["src/memory/services/RelationService.js", "src/world/tools.js"],
+    "verification": "Basis data bersih: tiga memori disemai, entitas terbentuk, dan kedua tetangga terbaca dengan angka kemunculan bersamanya.",
+    "risks": "Kaitan lemah: kemunculan bersama bukan bukti hubungan. Karena itu banyaknya dilaporkan apa adanya dan tool memerintahkan menyampaikannya sebagai pola yang terlihat, bukan fakta."
+  },
+  {
+    "area": "runtime",
+    "change": "Loop eksekusi menjalankan tool BACA (L0) yang tak saling bergantung secara bersamaan; tindakan berefek samping tetap berurutan",
+    "why": "Model kerap meminta beberapa tool sekaligus dalam satu balasan. Menjalankannya berurutan berarti menunggu satu per satu padahal tak saling bergantung — mahal di mesin yang tiap detiknya terasa. Tindakan berefek samping sengaja tidak diparalelkan: dua tulisan atau dua pesan yang berangkat bersamaan sulit ditelusuri dan bisa saling mendahului.",
+    "files": ["src/ai/executors/RuntimeExecutor.js"],
+    "verification": "Tes membuktikan tiga bacaan 80 ms tumpang tindih dan selesai di bawah 200 ms, sementara dua tindakan berefek samping tidak pernah tumpang tindih (puncak konkurensi tepat 1). Urutan hasil tetap sesuai permintaan model.",
+    "risks": null
+  },
+  {
+    "area": "proses",
+    "change": "Audit §276 kini 16/16, dan roadmap mencantumkan apa yang angka itu TIDAK berarti",
+    "why": "Implementasi dan pemeriksanya ditulis orang yang sama, jadi angka penuh berisiko menjadi cermin, bukan ukuran. Batas yang tersisa dicatat eksplisit di roadmap: sandbox bukan jail OS, offline diuji di tingkat proses, relasi hanya kemunculan bersama, paralel hanya untuk bacaan, melanjutkan rencana masih separuh. 1.0 bukan ketika tabel penuh centang, melainkan ketika batas-batas itu dipilih sadar — bukan ditemukan saat sesuatu gagal.",
+    "files": ["scripts/audit-276.js", "docs/roadmap.md"],
+    "verification": "npm run audit dijalankan terhadap daemon berjalan; setiap pemeriksaan menguji perilaku, bukan keberadaan berkas.",
+    "risks": "Pemeriksaan yang ditulis bersama implementasinya perlu ditinjau ulang oleh mata lain."
+  }
+]

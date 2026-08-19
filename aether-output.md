@@ -1,0 +1,1 @@
+Tulis index.html BARU tema kerajaan megah: Tailwind CDN + animate.css + Google Fonts Cinzel/Playfair, palet ungu tua/hitam/maroon/emas gradient, mahkota SVG di header, ornamen sudut emas, panel dengan border emas gradien, animasi shimmer/glow-pulse/fadeInUp stagger/counter/slide-in log (hanya transf

@@ -1,0 +1,32 @@
+[33mcommit 261e067dde09d399a1dd79fb119f64feb420f1bc[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mdevelop[m[33m, [m[1;31morigin/develop[m[33m)[m
+Author: Jsymp <Jrxid09@gmail.com>
+Date:   Wed Jul 29 12:10:07 2026 +0700
+
+    feat(agent): implement agent architecture and tool framework
+
+ src/agent/adapters/aetherAgent.js           | 54 [32m+++++++++++++++++++++++++++++[m
+ src/agent/adapters/hermesAdapter.js         | 24 [32m+++++++++++++[m
+ src/agent/adapters/openClawAdapter.js       | 24 [32m+++++++++++++[m
+ src/agent/agentContext.js                   | 19 [32m++++++++++[m
+ src/agent/agentProvider.js                  | 17 [32m+++++++++[m
+ src/agent/baseAgent.js                      | 17 [32m+++++++++[m
+ src/app.js                                  |  4 [32m+++[m
+ src/bootstrap/tools.js                      |  6 [32m++++[m
+ src/controllers/chatController.js           | 13 [32m++++[m[31m---[m
+ src/prompts/promptManager.js                | 23 [32m++++++++++++[m
+ src/prompts/prompts/assistant.md            | 12 [32m+++++++[m
+ src/prompts/prompts/coding.md               | 14 [32m++++++++[m
+ src/prompts/prompts/default.md              | 11 [32m++++++[m
+ src/prompts/prompts/translator.md           | 21 [32m+++++++++++[m
+ src/prompts/providers/filePromptProvider.js | 16 [32m+++++++++[m
+ src/providers/openRouterProvider.js         |  9 [32m++[m[31m---[m
+ src/services/chatService.js                 | 29 [32m+++++++++++++[m[31m---[m
+ src/test/toolTest.js                        | 13 [32m+++++++[m
+ src/testPrompt.js                           |  7 [32m++++[m
+ src/tools/base/baseTool.js                  | 19 [32m++++++++++[m
+ src/tools/executor/toolExecutor.js          | 18 [32m++++++++++[m
+ src/tools/implementations/timeTool.js       | 29 [32m++++++++++++++++[m
+ src/tools/index.js                          |  7 [32m++++[m
+ src/tools/registry/toolRegistry.js          | 39 [32m+++++++++++++++++++++[m
+ src/validators/chatValidator.js             |  6 [32m++++[m
+ 25 files changed, 436 insertions(+), 15 deletions(-)

@@ -1,0 +1,14 @@
+{
+    "id": "calculator",
+    "name": "Calculator",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "description": "Perform arithmetic calculations.",
+    "category": "utility",
+    "author": "Aether",
+    "permissions": [],
+    "tags": [
+        "math",
+        "calculator"
+    ]
+}

@@ -1,0 +1,20 @@
+{
+    "id": "local-time-reader",
+    "name": "Local Time Reader",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Membaca dan mengembalikan waktu lokal perangkat saat ini, termasuk tanggal lengkap, jam, menit, detik, zona waktu, offset UTC, serta nama hari dalam Bahasa Indonesia, tanpa ketergantungan jaringan atau paket eksternal apa pun.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "manual",
+        "createdAt": "2026-08-16T10:53:59.918Z",
+        "spec": {
+            "raw": "class Tool {\n  constructor() {\n    this.name = 'getLocalTime';\n    this.description = 'Mengembalikan waktu lokal perangkat saat ini: tanggal, jam, zona waktu, offset UTC, dan nama hari dalam Bahasa Indonesia. Tanpa jaringan, tanpa paket eksternal.';\n    this.parameters = {\n      format: { type: 'string', description: \"Opsional: 'iso' untuk ISO 8601, 'human' untuk kalimat Bahasa Indonesia (default).\", required: false }\n    };\n  }\n  async execute(args) {\n    const HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];\n    const BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];\n    const now = new Date();\n    const pad = (n) => String(n).padStart(2, '0');\n    const hari = HARI[now.getDay()];\n    const tanggal = now.getDate() + ' ' + BULAN[now.getMonth()] + ' ' + now.getFullYear();\n    const jam = pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());\n    const offsetMin = -now.getTimezoneOffset();\n    const sign = offsetMin >= 0 ? '+' : '-';\n    const offAbs = Math.abs(offsetMin);\n    const utcOffset = 'UTC' + sign + pad(Math.floor(offAbs / 60)) + ':' + pad(offAbs % 60);\n    const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone || utcOffset;\n    const human = hari + ', ' + tanggal + ' pukul ' + jam + ' (' + tzName + ', ' + utcOffset + ')';\n    return {\n      ok: true,\n      hasil: {\n        iso: now.toISOString(),\n        lokal: human,\n        epochMs: now.getTime(),\n        hari: hari,\n        tanggal: tanggal,\n        jam: jam,\n        zonaWaktu: tzName,\n        offsetUtc: utcOffset\n      }\n    };\n  }\n}\nmodule.exports = [new Tool()];\n"
+        }
+    }
+}

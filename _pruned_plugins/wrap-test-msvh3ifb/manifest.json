@@ -1,0 +1,20 @@
+{
+    "id": "wrap-test-msvh3ifb",
+    "name": "Wrap Test",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Uji pembungkusan kode class polos menjadi modul plugin yang diekspor sebagai array instance.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "manual",
+        "createdAt": "2026-08-16T07:18:04.323Z",
+        "spec": {
+            "raw": "class Tool {\n    constructor() {\n        this.name = \"wrapTest\";\n        this.description = \"Uji pembungkusan kode class polos menjadi modul plugin yang diekspor sebagai array instance.\";\n        this.parameters = {\n    inp: {\"type\":\"string\",\"description\":\"inp\",\"required\":true}\n        };\n    }\n async execute(a){ return { echo: a.inp }; } }\nmodule.exports = [new Tool()];\n"
+        }
+    }
+}

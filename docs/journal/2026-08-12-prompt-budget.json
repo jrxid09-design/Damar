@@ -1,0 +1,26 @@
+[
+  {
+    "area": "runtime",
+    "change": "Pemilih tool tidak lagi mengisi anggaran sampai penuh dengan tool berskor nol; anggaran menjadi batas atas, bukan target",
+    "why": "Diukur pada sistem sungguhan: kata 'halo' — sapaan yang tak butuh tool sama sekali — mengirim 32 definisi tool setara 1.910 token. Isinya openclaw, hermes, WhatsApp, kamera, dan device_toggle; tak satu pun relevan. Semuanya berskor nol dan terpilih semata karena urutan pendaftaran plugin, sebab sisa jatah diisi apa pun yang tersisa. Di inferensi CPU tiap token prompt dibayar dengan waktu, jadi tebakan acak itu langsung menjadi detik yang hilang.",
+    "files": ["src/ai/tools/ToolSelector.js"],
+    "verification": "Skema tool untuk 'halo' turun 1.910 -> 583 token (diukur langsung pada 140 tool terdaftar). Tes memastikan sapaan hanya membawa tulang punggung, sementara permintaan rumah/WhatsApp/terminal tetap membawa toolnya masing-masing.",
+    "risks": "Bergantung pada peta HINTS untuk menjembatani pertanyaan bahasa Indonesia ke deskripsi tool berbahasa Inggris. Permintaan yang tidak menyentuh satu pun kata kunci hanya akan menerima tulang punggung — peta itu perlu ditambah seiring kemampuan baru."
+  },
+  {
+    "area": "runtime",
+    "change": "Terukur: ukuran prompt adalah penentu utama latensi di perangkat ini, sekitar 73 ms per token",
+    "why": "Dibutuhkan angka nyata sebelum mengoptimalkan apa pun. Perbandingan pada daemon yang sama dan model yang sudah panas: sapaan 1.395 token prompt selesai 47,2 detik; permintaan multi-domain 3.415 token prompt selesai 195,5 detik. Selisih 2.020 token setara 148 detik.",
+    "files": [],
+    "verification": "Dua permintaan berturut-turut lewat POST /api/v1/console/ai/chat dengan usage.promptTokens dibaca per permintaan, bukan dari metrik kumulatif.",
+    "risks": "Ditemukan pula ragam yang belum dijelaskan: permintaan 'Halo' yang identik menghasilkan prompt 1.356, 1.361, dan 2.365 token pada tiga percobaan berurutan. Ada sesuatu yang kadang menyuntikkan sekitar 1.000 token konteks tambahan — belum diselidiki, dan berpotensi menjadi penghematan berikutnya yang besar."
+  },
+  {
+    "area": "pengujian",
+    "change": "Klaim percepatan 81,4 -> 43,3 detik DICABUT sebagai bukti; yang berlaku adalah pengukuran token",
+    "why": "Pengukuran 'sebelum' diambil tepat setelah restart daemon sehingga berpotensi memuat cold-load model, dan angkanya tidak konsisten dengan hubungan linear 73 ms/token yang terukur kemudian. Satu pasang angka dari kondisi yang berbeda bukan eksperimen terkendali, dan melaporkannya sebagai persentase perbaikan akan menyesatkan.",
+    "files": [],
+    "verification": "Pengukuran ulang tiga kali dalam keadaan panas memberi 40,5 / 61,4 / 44,1 detik untuk masukan yang sama — ragamnya sendiri lebih besar daripada yang pantas disebut hasil.",
+    "risks": null
+  }
+]

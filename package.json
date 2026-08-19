@@ -1,0 +1,68 @@
+{
+  "name": "aether",
+  "version": "1.0.0",
+  "description": "Aether adalah AI Assistant lokal yang dibangun untuk berjalan di server pribadi.",
+  "main": "index.js",
+  "bin": {
+    "aether": "src/cli/index.js"
+  },
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "start": "node --use-system-ca src/server.js",
+    "dev": "nodemon --exec \"node --use-system-ca\" src/server.js",
+    "aether": "node scripts/launch.js --console",
+    "aether:daemon": "node scripts/launch.js",
+    "cli": "node src/cli/index.js",
+    "cli:serve": "node src/cli/index.js --serve",
+    "console": "npm start --prefix apps/console",
+    "console:dev": "npm run dev --prefix apps/console",
+    "console:install": "npm install --prefix apps/console",
+    "learn": "node scripts/learn.js",
+    "audit": "node scripts/audit-276.js --json",
+    "test": "node --test --test-concurrency=1 --require ./tests/helpers/testEnv.js \"tests/**/*.test.js\"",
+    "test:safety": "node --test --test-concurrency=1 --require ./tests/helpers/testEnv.js \"tests/safety/*.test.js\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jrxid09-design/Aether.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/jrxid09-design/Aether/issues"
+  },
+  "homepage": "https://github.com/jrxid09-design/Aether#readme",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.24",
+    "axios": "^1.18.1",
+    "boxen": "^8.0.1",
+    "chalk": "^4.1.2",
+    "cli-table3": "^0.6.5",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-validator": "^7.3.2",
+    "mammoth": "^1.12.0",
+    "node": "^26.5.1",
+    "node-pty": "^1.1.0",
+    "ora": "^9.4.1",
+    "pdf-parse": "^2.4.5",
+    "pidusage": "^4.0.1",
+    "pip": "^0.0.1",
+    "qrcode": "^1.5.4",
+    "smartctl": "^1.0.0",
+    "sqlite3": "^6.0.1",
+    "tree-sitter-wasms": "^0.1.11",
+    "web-tree-sitter": "^0.22.6",
+    "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  },
+  "allowScripts": {
+    "sqlite3@6.0.1": true
+  }
+}

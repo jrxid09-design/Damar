@@ -1,0 +1,34 @@
+[
+  {
+    "area": "proses",
+    "change": "scripts/audit-276.js — enam belas pertanyaan verifikasi §276 diuji terhadap sistem yang berjalan, dijalankan lewat npm run audit",
+    "why": "Roadmap mencentang kotak berdasarkan niat, bukan bukti: seluruh 16 pertanyaan tertulis kosong padahal sebagian sudah berjalan dan teruji, sementara sebagian lain tidak sejelas yang dikira. Dokumen semacam itu menyesatkan pemiliknya sendiri (§222). Audit menuliskan buktinya ke docs/audit-276.json sehingga tabel roadmap dapat diturunkan dari pengukuran, bukan dari ingatan.",
+    "files": ["scripts/audit-276.js", "docs/roadmap.md", "docs/status.md", "package.json"],
+    "verification": "Dijalankan pada daemon berjalan: 10 lulus, 6 sebagian, 0 belum. Tiap hasil membawa bukti dan, bila belum utuh, menyebut persis apa yang kurang.",
+    "risks": "Audit menulis beberapa catatan penanda ke memori sungguhan setiap kali dijalankan (satu per pemeriksaan memori). Jumlahnya kecil, tetapi bila sering dijalankan perlu penanda kind sendiri agar mudah dibersihkan."
+  },
+  {
+    "area": "proses",
+    "change": "Audit versi pertama melaporkan 3 BELUM yang ternyata artefak alat ukur",
+    "why": "Pemeriksaan dijalankan di proses terpisah, sedangkan plugin dimuat dan runtime AI disiapkan saat daemon boot. Akibatnya registry terbaca kosong dan platform terbaca bukan-lokal — kesalahan alat ukur yang menyamar sebagai temuan sistem. Ini kesalahan yang sama dengan probe tool sebelumnya di sesi ini; polanya: memeriksa sistem hidup dari luar prosesnya.",
+    "files": ["scripts/audit-276.js"],
+    "verification": "Setelah pemeriksaan diarahkan ke HTTP daemon, ketiganya berubah menjadi SEBAGIAN/LULUS dengan bukti nyata: 80 tool plugin hidup, eksekusi tool lewat chokepoint berhasil, model aktif llama3.1 lokal.",
+    "risks": null
+  },
+  {
+    "area": "memori",
+    "change": "Asal-usul memori (sumber & keyakinan) ikut ke konteks yang disuntikkan, dan prompt memerintahkan menyampaikannya sebagai dugaan",
+    "why": "source, confidence, dan lastVerified sudah lama tersimpan tetapi tak satu pun sampai ke model. Akibatnya sesuatu yang DISIMPULKAN Aether terbaca sama meyakinkannya dengan sesuatu yang DIKATAKAN pengguna, dan saat ditanya ia tidak punya bahan untuk membedakannya. Penanda ditulis hemat: yang berasal dari pengguna tidak diberi penanda sama sekali, karena itulah keadaan normal dan tiap token dibayar dengan waktu di mesin lokal.",
+    "files": ["src/memory/services/MemoryService.js", "src/services/aiRuntimeService.js"],
+    "verification": "Audit §276 pertanyaan 'Dapat membedakan fakta dari inferensi?' berubah dari SEBAGIAN menjadi LULUS, diuji dengan menyimpan catatan bersumber coding-brain lalu memastikan penanda 'catatan Aether' benar-benar muncul di konteks.",
+    "risks": "Penanda hanya sampai ke prompt; belum ada yang memaksa model mematuhinya selain kalimat instruksi."
+  },
+  {
+    "area": "proses",
+    "change": "Roadmap dan status diselaraskan dengan ADR-006; catatan koeksistensi ADR-001 ditandai digantikan",
+    "why": "Kedua dokumen masih menggambarkan dua sistem berdampingan dengan Aether OS di C:\\Workspace\\AetherOS yang 'belum menjalankan apa pun', padahal ADR-006 sudah menggantinya dengan evolusi di tempat berbulan sebelumnya. Status yang salah tentang sistem mana yang otoritatif adalah jenis kesalahan yang paling berbahaya saat menelusuri masalah.",
+    "files": ["docs/roadmap.md", "docs/status.md"],
+    "verification": "Tabel milestone kini ditandai sebagai peta kemampuan, dengan npm run audit sebagai sumber kebenaran.",
+    "risks": null
+  }
+]
