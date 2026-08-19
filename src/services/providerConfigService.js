@@ -85,6 +85,17 @@ const PRESETS = {
         kind: "openai",
         modelHint: "isi baseUrl & model sesuai platformmu (mis. 9router)"
     },
+    // Jembatan Gemini web→API (ntthanh2603/gemini-web-to-api) — bisa
+    // GAMBAR. OpenAI-compatible, tanpa API key (autentikasi lewat cookie
+    // browser di kontainer). `keyless` supaya tak jatuh ke fallback saat
+    // dipilih tanpa mengisi key.
+    geminiwebapi: {
+        label: "GeminiWebApi (web→API, dukung gambar)",
+        baseUrl: "http://localhost:4981/openai/v1",
+        kind: "openai",
+        keyless: true,
+        modelHint: "mis. gemini-2.5-pro / gemini-advanced (autentikasi via cookie di kontainer)"
+    },
     ollama: {
         label: "Ollama (lokal)",
         baseUrl: "http://localhost:11434",
@@ -212,6 +223,20 @@ class ProviderConfigService {
         }
 
         const p = config.providers?.[activeId] ?? {};
+
+        // Provider keyless (mis. jembatan Gemini web→API): tak butuh API
+        // key — autentikasi terjadi di kontainer lewat cookie. Jangan
+        // jatuh ke fallback hanya karena key kosong.
+        if (preset.keyless) {
+            return {
+                id: activeId,
+                kind: "openai",
+                label: preset.label,
+                apiKey: p.apiKey || "not-needed",
+                baseUrl: p.baseUrl || preset.baseUrl,
+                model: p.model || null
+            };
+        }
 
         // Key kosong → jatuh ke Ollama lokal (sesuai permintaan).
         if (!p.apiKey) {
