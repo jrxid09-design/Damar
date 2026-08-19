@@ -30,6 +30,9 @@ export function createHologram({ maxFps = 30, stars = true } = {}) {
         pause: entity.pause,
         resume: entity.resume,
         destroy: entity.destroy,
+        rotate: entity.rotate,           // gestur tangan
+        zoom: entity.zoom,
+        resetView: entity.resetView,
         walkTo() {}, setMood() {}
     };
 }

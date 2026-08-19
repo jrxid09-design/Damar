@@ -3,6 +3,7 @@ import { api } from "../lib/api.js";
 import { icon } from "../lib/icons.js";
 import { esc, toast } from "../lib/ui.js";
 import { createHologram } from "../lib/hologram.js";
+import { createGestureControl } from "../lib/gesture/gestureControl.js";
 import { tts, MicRecorder } from "../lib/voice.js";
 
 /**
@@ -27,6 +28,7 @@ function conv() {
 }
 
 let avatar = null;
+let gesture = null;
 let recorder = null;
 let recording = false;
 let busy = false;
@@ -107,7 +109,14 @@ export const aether = {
 
         // Hologram JARVIS — entitas cahaya, bukan karakter.
         avatar = createHologram({ maxFps: 30 });
-        root.querySelector("#ae-avatar").appendChild(avatar.el);
+        const avatarHost = root.querySelector("#ae-avatar");
+        avatarHost.appendChild(avatar.el);
+
+        // Kontrol gestur tangan (tekan G) — kamera mati sampai diaktifkan.
+        gesture = createGestureControl(avatar, {
+            onStatus: (s) => { if (s.error) toast("Gestur: " + s.error); }
+        });
+        avatarHost.appendChild(gesture.el);
         setState(connected ? "idle" : "offline");
 
         renderTranscript(root);
@@ -216,6 +225,8 @@ export const aether = {
         recorder?.abort();
         recorder = null;
         recording = false;
+        gesture?.destroy();
+        gesture = null;
         avatar?.destroy();
         avatar = null;
     }

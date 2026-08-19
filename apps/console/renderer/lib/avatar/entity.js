@@ -106,8 +106,12 @@ export function createEntity({ maxFps = 60, particles = true } = {}) {
     camera.position.set(0, 0, 14.5);
     camera.lookAt(0, 0, 0);
 
+    // Gimbal membungkus root: kursor menggerakkan root, GESTUR TANGAN
+    // menggerakkan gimbal — dua sumber putaran tak saling menimpa.
+    const gimbal = new THREE.Group();
+    scene.add(gimbal);
     const root = new THREE.Group();
-    scene.add(root);
+    gimbal.add(root);
 
     const dotTex = makeDotTexture();
 
@@ -482,6 +486,20 @@ export function createEntity({ maxFps = 60, particles = true } = {}) {
     function pause() { running = false; }
     function resume() { running = true; }
 
+    // --- Kontrol gestur (dipakai HandTracker): putar gimbal, geser kamera.
+    const ZCAM_MIN = 8, ZCAM_MAX = 22;
+    function rotate(dTheta = 0, dPhi = 0) {
+        gimbal.rotation.y += dTheta;
+        gimbal.rotation.x = Math.max(-1.2, Math.min(1.2, gimbal.rotation.x + dPhi));
+    }
+    function zoom(factor = 1) {
+        camera.position.z = Math.max(ZCAM_MIN, Math.min(ZCAM_MAX, camera.position.z * factor));
+    }
+    function resetView() {
+        gimbal.rotation.set(0, 0, 0);
+        camera.position.z = 14.5;
+    }
+
     function destroy() {
         running = false;
         cancelAnimationFrame(raf);
@@ -502,6 +520,7 @@ export function createEntity({ maxFps = 60, particles = true } = {}) {
         get state() { return current; },
         setState, setLevel, setMouth,
         pause, resume, destroy,
+        rotate, zoom, resetView,
         walkTo() {}, setMood() {}
     };
 }
