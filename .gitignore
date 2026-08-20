@@ -36,3 +36,5 @@ models/
 
 # util lokal ekstrak cookie (jangan publish)
 .get-cookies.js
+
+nul

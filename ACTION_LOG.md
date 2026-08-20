@@ -65,3 +65,8 @@ Konvensi (mandat Ronny, 18 Agu 2026 09:34): SETIAP aksi perubahan = 1 commit che
 
 ## 2026-08-20 ~23:30 WIB — Checkpoint MCP client, auth TOTP, OpenAI route, Gemini provider, audio patch
 - Aether (aether@local): commit MCP client + auth TOTP + OpenAI route + Gemini provider + patch audio (show_audio) di mediaTools + dukungan kind:audio di renderer.
+
+## [2026-08-21 02:58] Clone flowsint
+- Aksi: git clone reconurge/flowsint -> C:\Users\jrxid\Downloads\flowsint (874 files)
+- Konteks: Repo OSINT (Flowsint) diposting akun Threads @anonymous_deadbeef (Andrejs Dudarevs / kurator). Clue dari user.
+- Checkpoint: Aether (aether@local)

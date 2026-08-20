@@ -268,6 +268,7 @@ async function ask(root, text) {
 
                 if (event === "chunk" && data.delta) {
                     assistant.content += data.delta;
+                    speakStream(data.delta);
                     renderTranscript(root);
                 }
                 else if (event === "error") {
@@ -282,7 +283,7 @@ async function ask(root, text) {
             toast(assistant.error, "danger");
         }
         else if (assistant.content.trim()) {
-            await speak(assistant.content);
+            speakStream("", true);
         }
         else {
             setState("idle");
@@ -307,6 +308,41 @@ async function ask(root, text) {
 }
 
 /** Ucapkan jawaban sambil menggerakkan mulut avatar. */
+﻿let _spkBuf = "";
+let speakQ = [];
+let _spkBusy = false;
+function speakStream(delta, flush) {
+  if (!prefs.autoSpeak || !tts.available()) { _spkBuf = ""; return; }
+  _spkBuf += delta || "";
+  if (flush) { const t = _spkBuf.trim(); _spkBuf = ""; if (t) speakQ.push(t); drainSpeak(); return; }
+  const re = /[^.!?]*[.!?]+/g;
+  let m;
+  while ((m = re.exec(_spkBuf))) {
+    const t = m[0].trim();
+    if (t) speakQ.push(t);
+    _spkBuf = _spkBuf.slice(m.index + m[0].length);
+    re.lastIndex = 0;
+  }
+  if (_spkBuf.length > 120) {
+    const sp = _spkBuf.lastIndexOf(" ");
+    if (sp > 30) { const t = _spkBuf.slice(0, sp).trim(); if (t) speakQ.push(t); _spkBuf = _spkBuf.slice(sp + 1); }
+  }
+  drainSpeak();
+}
+async function drainSpeak() {
+  if (_spkBusy) return;
+  _spkBusy = true;
+  while (speakQ.length) {
+    const t = speakQ.shift();
+    await new Promise((res) => {
+      setState("speaking");
+      tts.say(t, { ...voiceOptions(), robot: prefs.robot, onLevel: (l) => avatar?.setMouth(l), onEnd: res });
+    });
+  }
+  _spkBusy = false;
+  setState("idle");
+}
+
 async function speak(text) {
 
     if (!prefs.autoSpeak || !tts.available()) {
