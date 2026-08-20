@@ -62,3 +62,6 @@ Konvensi (mandat Ronny, 18 Agu 2026 09:34): SETIAP aksi perubahan = 1 commit che
 - Perbaikan: ~/.config/opencode/opencode.jsonc (WSL Ubuntu) limit.output 65536 -> 4096. Model default rootsys/glm-5.3 tetap (teruji OK).
 - Verifikasi: opencode run 'balas hanya kata OK' => jawab 'OK'. Token masih VALID (models=200).
 - PENTING: kuota rootsys hampir habis â€” request kecil lolos, besar ditolak. Butuh top-up/keys baru.
+
+## 2026-08-20 ~23:30 WIB — Checkpoint MCP client, auth TOTP, OpenAI route, Gemini provider, audio patch
+- Aether (aether@local): commit MCP client + auth TOTP + OpenAI route + Gemini provider + patch audio (show_audio) di mediaTools + dukungan kind:audio di renderer.
