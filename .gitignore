@@ -33,3 +33,6 @@ scripts/attack-*.sh
 # Model bobot lokal (GGUF) — jangan commit, unduh sendiri
 models/
 *.gguf
+
+# util lokal ekstrak cookie (jangan publish)
+.get-cookies.js

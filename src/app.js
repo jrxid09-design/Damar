@@ -27,6 +27,11 @@ app.use("/api/v1/console", require("./middleware/auth"));
 
 app.use("/", routes);
 
+// Endpoint MCP (Model Context Protocol) — ekspos tool Aether ke klien
+// MCP mana pun (Claude Desktop, agen lain, penghuni koloni). Tool
+// destruktif disembunyikan kecuali AETHER_MCP_ALLOW_DESTRUCTIVE=1.
+require("./mcp").attachMcp(app);
+
 const response = require("./utils/response");
 
 app.use((req, res) => {

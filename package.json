@@ -24,7 +24,8 @@
     "test": "node --test --test-concurrency=1 --require ./tests/helpers/testEnv.js \"tests/**/*.test.js\"",
     "test:safety": "node --test --test-concurrency=1 --require ./tests/helpers/testEnv.js \"tests/safety/*.test.js\"",
     "model:pull": "node scripts/pull-model.js",
-    "vision:gemini": "node scripts/gemini-webapi.js"
+    "vision:gemini": "node scripts/gemini-webapi.js",
+    "mcp:stdio": "node scripts/mcp-stdio.js"
   },
   "repository": {
     "type": "git",
