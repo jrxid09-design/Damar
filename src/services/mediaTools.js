@@ -1,4 +1,4 @@
-﻿const { AITool } = require("../ai/tools");
+const { AITool } = require("../ai/tools");
 
 const telemetry = require("./telemetryService");
 
@@ -11,13 +11,13 @@ const telemetry = require("./telemetryService");
  *
  * Tiga kategori:
  *
- *   1. Presentasi â€” dipancarkan sebagai event `aether:present`;
+ *   1. Presentasi Ã¢â‚¬â€ dipancarkan sebagai event `aether:present`;
  *      Console yang tersambung menampilkannya di jendela/panel.
  *
- *   2. Browsing â€” ambil halaman web & kembalikan isinya agar Aether
+ *   2. Browsing Ã¢â‚¬â€ ambil halaman web & kembalikan isinya agar Aether
  *      bisa membaca sumber yang valid (bukan mengarang jawaban).
  *
- *   3. Kendali perangkat â€” jembatan ke plugin desktop (cursor,
+ *   3. Kendali perangkat Ã¢â‚¬â€ jembatan ke plugin desktop (cursor,
  *      tombol, buka aplikasi) yang sudah ada.
  */
 function mediaTools() {
@@ -30,7 +30,7 @@ function mediaTools() {
             name: "show_image",
             description:
                 "Tampilkan sebuah gambar/foto ke pengguna di layar Console. " +
-                "Pakai saat pengguna meminta 'tunjukkan foto â€¦' atau hasil " +
+                "Pakai saat pengguna meminta 'tunjukkan foto Ã¢â‚¬Â¦' atau hasil " +
                 "pencarian Immich/kamera perlu diperlihatkan.",
             parameters: {
                 type: "object",
@@ -64,6 +64,41 @@ function mediaTools() {
         }),
 
         new AITool({
+            name: "show_audio",
+            description:
+                "Tampilkan/memutar sebuah file audio (mp3/wav/ogg/m4a) ke pengguna di Console. " +
+                "Pakai saat pengguna meminta memutar/memperlihatkan audio atau suara.",
+            parameters: {
+                type: "object",
+                properties: {
+                    url: { type: "string", description: "Path file audio lokal atau file:// URL." },
+                    caption: { type: "string", description: "Keterangan singkat." }
+                },
+                required: ["url"]
+            },
+            execute: async ({ url, caption }) => {
+                const fs = require("fs");
+                let displayUrl = url;
+                try {
+                    let p = null;
+                    if (url.startsWith("file://")) p = decodeURI(url.replace(/^file:\/\/\//, ""));
+                    else if (/^[A-Za-z]:[\\/]/.test(url) || url.startsWith("\\\\")) p = url;
+                    if (p) {
+                        const buf = fs.readFileSync(p);
+                        const ext = (p.split(".").pop() || "").toLowerCase();
+                        const mime = ({ mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", m4a: "audio/mp4", aac: "audio/aac", flac: "audio/flac" })[ext] || "audio/mpeg";
+                        displayUrl = "data:" + mime + ";base64," + buf.toString("base64");
+                    }
+                } catch (e) {
+                    console.error("[aether] show_audio: konversi lokal gagal:", String(e).slice(0, 200));
+                }
+                telemetry.publish("aether:present", {
+                    kind: "audio", url: displayUrl, caption: caption ?? null
+                });
+                return { ok: true, shown: "audio", url: displayUrl, converted: displayUrl !== url };
+            }
+        }),
+        new AITool({
             name: "show_video",
             description:
                 "Tampilkan sebuah video ke pengguna di layar Console. " +
@@ -89,7 +124,7 @@ function mediaTools() {
             description:
                 "Tampilkan CHART harga LIVE (crypto ATAU saham) di jendela popup " +
                 "Console (TradingView). Pakai saat pengguna minta 'tampilkan chart BTC', " +
-                "'grafik harga ETH', 'chart saham BBCA/AAPL'. Crypto tanpa bursa → Binance; " +
+                "'grafik harga ETH', 'chart saham BBCA/AAPL'. Crypto tanpa bursa â†’ Binance; " +
                 "saham sertakan bursa (mis. IDX:BBCA, NASDAQ:AAPL).",
             parameters: {
                 type: "object",
@@ -102,7 +137,7 @@ function mediaTools() {
             execute: async ({ symbol, interval }) => {
 
                 let s = String(symbol || "").trim().toUpperCase();
-                // Tanpa bursa → anggap crypto di Binance; koin polos → +USDT.
+                // Tanpa bursa â†’ anggap crypto di Binance; koin polos â†’ +USDT.
                 if (!s.includes(":")) {
                     const quotes = ["USDT", "USDC", "FDUSD", "BUSD", "TUSD", "BTC", "ETH", "BNB"];
                     const pair = s.replace(/[^A-Z0-9]/g, "");
@@ -127,7 +162,7 @@ function mediaTools() {
             name: "open_document",
             description:
                 "Buka dokumen/berkas (PDF, gambar, teks, dll) untuk pengguna " +
-                "di jendela baru. Pakai saat pengguna meminta 'buka berkas â€¦'.",
+                "di jendela baru. Pakai saat pengguna meminta 'buka berkas Ã¢â‚¬Â¦'.",
             parameters: {
                 type: "object",
                 properties: {
@@ -154,7 +189,7 @@ function mediaTools() {
             parameters: {
                 type: "object",
                 properties: {
-                    url: { type: "string", description: "URL lengkap (https://â€¦)." }
+                    url: { type: "string", description: "URL lengkap (https://Ã¢â‚¬Â¦)." }
                 },
                 required: ["url"]
             },
@@ -260,7 +295,7 @@ function mediaTools() {
             description:
                 "Buka aplikasi di komputer pengguna (browser, editor, dsb) " +
                 "secara langsung oleh Aether. Pakai saat pengguna meminta " +
-                "'buka aplikasi â€¦'.",
+                "'buka aplikasi Ã¢â‚¬Â¦'.",
             parameters: {
                 type: "object",
                 properties: {
@@ -282,8 +317,8 @@ function mediaTools() {
             name: "fill_form",
             description:
                 "Isi sebuah kolom/form pada aplikasi yang sedang terbuka, " +
-                "langsung oleh Aether. Pakai saat pengguna meminta 'isi form â€¦', " +
-                "'ketik â€¦ di kolom â€¦'.",
+                "langsung oleh Aether. Pakai saat pengguna meminta 'isi form Ã¢â‚¬Â¦', " +
+                "'ketik Ã¢â‚¬Â¦ di kolom Ã¢â‚¬Â¦'.",
             parameters: {
                 type: "object",
                 properties: {
@@ -370,7 +405,7 @@ function mediaTools() {
             name: "desktop_click",
             description:
                 "Klik mouse (left/right/middle) di posisi kursor sekarang, atau di " +
-                "koordinat (x,y) bila diberikan â€” langsung oleh Aether di Windows. " +
+                "koordinat (x,y) bila diberikan Ã¢â‚¬â€ langsung oleh Aether di Windows. " +
                 "Pakai untuk menekan tombol Play, memilih menu, dsb.",
             parameters: {
                 type: "object",

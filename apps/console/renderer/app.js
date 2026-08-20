@@ -737,7 +737,7 @@ function presentMedia(p) {
         return;
     }
 
-    if (!["image", "video", "document"].includes(p.kind)) return;
+    if (!["image", "video", "document", "audio"].includes(p.kind)) return;
 
     // --- Resolve URL yang BISA dimuat renderer ---------------------
     const src = resolveMediaSrc(p);
@@ -895,6 +895,11 @@ function openPresentPanel(p) {
         body = p.url
             ? `<video src="${esc(p.url)}" controls autoplay playsinline></video>`
             : `<div style="padding:40px;color:var(--warn)">Video tidak tersedia</div>`;
+    }
+    else if (p.kind === "audio") {
+        body = p.url
+            ? `<audio src="${esc(p.url)}" controls autoplay playsinline style="width:100%;max-width:520px"></audio>`
+            : `<div style="padding:40px;color:var(--warn)">Audio tidak tersedia</div>`;
     }
     else if (p.kind === "document") {
         body = p.url

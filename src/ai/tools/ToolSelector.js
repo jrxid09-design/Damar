@@ -289,6 +289,17 @@ function isAlways(tool) {
 }
 
 /**
+ * Apakah tool berasal dari server MCP eksternal.
+ *
+ * Nama bridge MCP: `mcp__{serverId}__{toolName}` (lihat McpClient).
+ * Mereka tidak masuk profil tetap (daftarnya dinamis), jadi dipilih
+ * terpisah di susun() berdasarkan skor kecocokan dengan pesan.
+ */
+function isExternal(tool) {
+    return String(tool?.name ?? "").startsWith("mcp__");
+}
+
+/**
  * Kata kunci per tool di luar nama/deskripsi, untuk menjembatani
  * bahasa sehari-hari ke nama tool teknis.
  */
@@ -455,10 +466,10 @@ function selectTools(tools = [], text = "", budget = 32) {
     //
     // Setel AETHER_TOOLS_WHEN_IDLE=backbone untuk selalu mengirim inti.
     if (!profil && !relevantAny(tools, haystack)) {
-        return idleMode() === "backbone" ? susun(tools, [], budget) : [];
+        return idleMode() === "backbone" ? susun(tools, [], budget, haystack) : [];
     }
 
-    return susun(tools, profil ? PROFILES[profil] : [], budget);
+    return susun(tools, profil ? PROFILES[profil] : [], budget, haystack);
 
 }
 
@@ -468,7 +479,7 @@ function selectTools(tools = [], text = "", budget = 32) {
  * Inti didahulukan supaya perpindahan profil hanya membatalkan cache
  * mulai titik perbedaan — bukan dari token pertama.
  */
-function susun(tools, tambahan, budget) {
+function susun(tools, tambahan, budget, haystack = "") {
 
     // Inti tidak boleh menghabiskan seluruh anggaran.
     //
@@ -511,12 +522,30 @@ function susun(tools, tambahan, budget) {
         ambil(nama);
     }
 
+    // Tool eksternal (MCP) — tak masuk profil tetap karena daftarnya
+    // dinamis (server luar hidup/mati). Mereka dilampirkan hanya bila
+    // skornya terhadap pesan > 0, urut skor menurun lalu nama agar
+    // stabil antar pesan yang sama (cache prefix prompt).
+    if (haystack) {
+        const eksternal = tools
+            .filter(t => isExternal(t) && !sudah.has(t.name))
+            .map(t => ({ t, nilai: score(t, haystack) }))
+            .filter(x => x.nilai > 0)
+            .sort((a, b) => b.nilai - a.nilai || String(a.t.name).localeCompare(String(b.t.name)));
+
+        for (const { t } of eksternal) {
+            if (out.length >= budget) break;
+            out.push(t);
+            sudah.add(t.name);
+        }
+    }
+
     return out;
 
 }
 
 module.exports = {
     selectTools, susun, chooseProfile,
-    ALWAYS, isAlways, tail,
+    ALWAYS, isAlways, isExternal, tail,
     CORE, PROFILES, PEMICU
 };

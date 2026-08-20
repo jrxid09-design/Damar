@@ -516,10 +516,19 @@ class WhatsAppService {
         this.sock?.sendPresenceUpdate?.("composing", jid).catch(() => {});
 
         try {
+            // Superadmin memakai jalur anggaran tool (ToolSelector via
+            // resolveTools) — sama dengan Telegram & Console. Admin/
+            // user tetap difilter peran. Lihat komentar di
+            // telegramService.converse untuk alasan lengkapnya.
+            let tools;
+            if (userRole === "superadmin") {
+                tools = undefined;
+            } else {
+                tools = roleService.toolsFor(userRole, aiRuntime.tools());
+            }
             const response = await aiRuntime.chat({
                 messages: session.map(({ role, content }) => ({ role, content })),
-                // Batasi tool yang terlihat model sesuai peran pengirim.
-                tools: roleService.toolsFor(userRole, aiRuntime.tools()),
+                tools,
                 channel: "whatsapp"
             });
             const answer = response.content?.trim() || "(tidak ada jawaban)";

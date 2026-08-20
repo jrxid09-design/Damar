@@ -32,6 +32,12 @@ app.use("/", routes);
 // destruktif disembunyikan kecuali AETHER_MCP_ALLOW_DESTRUCTIVE=1.
 require("./mcp").attachMcp(app);
 
+// Endpoint OpenAI-compatible (/v1/chat/completions) — jembatan otak
+// Aether untuk klien OpenAI, terutama penghuni koloni AetherGenesis
+// (Nyx, Viel, NODEK-01) lewat aether-entities/lib/mind.js. Otak penuh:
+// system prompt, memori, keadaan batin, tool-calling loop.
+app.use("/v1", require("./routes/v1openai"));
+
 const response = require("./utils/response");
 
 app.use((req, res) => {

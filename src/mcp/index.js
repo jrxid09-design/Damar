@@ -1,6 +1,7 @@
 const { createMcpHandler } = require("./mcpHandler");
 const { ToolRegistry } = require("../core/tools");
 const { riskOf } = require("../core/safety/riskCatalog");
+const { McpClient } = require("./mcpClient");
 
 /**
  * Pasang endpoint MCP Aether pada aplikasi Express.
@@ -11,6 +12,10 @@ const { riskOf } = require("../core/safety/riskCatalog");
  * Klien MCP (Claude Desktop, agen lain, penghuni koloni) memakai 140+
  * tool Aether lewat sini. Tool destruktif disembunyikan kecuali
  * AETHER_MCP_ALLOW_DESTRUCTIVE=1; eksekusi tetap lewat toolGuard.
+ *
+ * Aether juga bisa jadi KLIEN MCP (memakai server eksternal sebagai
+ * tool) — lihat mcpClientManager; dimulai otomatis oleh
+ * aiRuntimeService saat daemon boot.
  */
 function attachMcp(app) {
 
@@ -39,4 +44,4 @@ function attachMcp(app) {
     return handler;
 }
 
-module.exports = { attachMcp };
+module.exports = { attachMcp, McpClient };

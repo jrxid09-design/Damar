@@ -2,6 +2,7 @@ const path = require("node:path");
 
 const JsonStore = require("../core/config/JsonStore");
 const telemetry = require("./telemetryService");
+const totp = require("../core/auth/totp");
 
 /**
  * Jembatan Telegram — remote control Aether lewat Bot API.
@@ -13,12 +14,28 @@ const telemetry = require("./telemetryService");
  * Keamanan: tanpa allowlist, bot hanya menjawab /id (supaya pemilik
  * tahu chat id-nya). Dengan allowlist, hanya chat id terdaftar yang
  * boleh mengendalikan Aether.
+ *
+ * MODE PENUH (mirip Console): penghuni allowlist defaultnya berada di
+ * mode TERBATAS — chat biasa tanpa tool destruktif. Untuk membuka
+ * kemampuan penuh (tool-calling, terminal, file, dll.) ia memasukkan
+ * kode dari Google Authenticator lewat /masuk <kode>. Kode diverifikasi
+ * TOTP (RFC 6238); mode penuh berlaku beberapa jam lalu otomatis
+ * kembali terbatas. /keluar dapat mempercepatnya.
  */
 
 const store = new JsonStore(
     path.join(__dirname, "..", "..", "configs", "telegram.json"),
     { token: null, allowed: [], groups: [] }
 );
+
+/** Secret TOTP mode penuh (satu secret global — pemilik satu orang). */
+const TOTP_CONFIG_PATH =
+    process.env.AETHER_TOTP_CONFIG ||
+    path.join(__dirname, "..", "..", "configs", "totp.json");
+const totpStore = new JsonStore(TOTP_CONFIG_PATH, { secret: null, setupAt: null });
+
+/** Berapa lama mode penuh bertahan setelah /masuk berhasil (jam). */
+const FULL_MODE_TTL_HOURS = 8;
 
 class TelegramService {
 
@@ -38,6 +55,13 @@ class TelegramService {
 
         /** Chat terakhir yang aktif — untuk tool kirim media. */
         this.currentChatId = null;
+
+        /**
+         * Mode penuh per chat id: { chatId → expiryEpochMs }.
+         * Di map (bukan JsonStore) karena sifatnya sementara & tak
+         * perlu persisten lintas restart daemon.
+         */
+        this.fullModeUntil = new Map();
 
     }
 
@@ -204,6 +228,107 @@ class TelegramService {
 
     }
 
+    // ---- Mode penuh (TOTP) -----------------------------------------
+
+    /** Apakah chat ini sedang dalam mode penuh (sudah /masuk). */
+    inFullMode(chatId) {
+        const until = this.fullModeUntil.get(String(chatId));
+        if (!until) return false;
+        if (Date.now() >= until) {
+            this.fullModeUntil.delete(String(chatId));
+            return false;
+        }
+        return true;
+    }
+
+    /** Perintah TOTP & mode penuh; true bila pesan dikonsumsi. */
+    async handleFullModeCommand(chatId, text) {
+
+        const m = /^\/(masuk|keluar|totp)\b(?:\s+(\S+))?/i.exec(text);
+
+        if (!m) return false;
+
+        const cmd = m[1].toLowerCase();
+
+        // /totp setup — buat secret baru & tampilkan URL utk QR.
+        if (cmd === "totp") {
+
+            if ((m[2] ?? "").toLowerCase() !== "setup") {
+                await this.send(chatId,
+                    "Pemakaian: /totp setup — membuat secret baru untuk Google Authenticator."
+                );
+                return true;
+            }
+
+            const { secret, otpauthUrl } = totp.generateSecret({
+                account: String(chatId),
+                issuer: "Aether"
+            });
+
+            totpStore.write({ secret, setupAt: new Date().toISOString() });
+
+            await this.send(chatId,
+                "Secret TOTP baru dibuat. Scan QR dari URL ini dengan " +
+                "Google Authenticator (atau app TOTP lain):\n\n" +
+                otpauthUrl + "\n\n" +
+                "Secret manual (bila tak bisa scan):\n" + secret + "\n\n" +
+                "Setelah terpasang, kirim /masuk <kode 6-digit> untuk " +
+                "masuk mode penuh. Secret LAMA otomatis tidak berlaku."
+            );
+            return true;
+        }
+
+        // /keluar — turun dari mode penuh.
+        if (cmd === "keluar") {
+            const was = this.fullModeUntil.delete(String(chatId));
+            await this.send(chatId,
+                was ? "Mode penuh ditutup. Kembali ke mode terbatas."
+                    : "Kamu memang tidak sedang dalam mode penuh."
+            );
+            return true;
+        }
+
+        // /masuk <kode> — verifikasi TOTP, naik ke mode penuh.
+        const kode = (m[2] ?? "").replace(/\D/g, "");
+
+        if (!kode) {
+            await this.send(chatId,
+                "Kirim /masuk <kode 6-digit dari Google Authenticator> " +
+                "untuk membuka mode penuh. Belum punya secret? /totp setup."
+            );
+            return true;
+        }
+
+        const secret = totpStore.read().secret;
+
+        if (!secret) {
+            await this.send(chatId,
+                "TOTP belum disetup. Jalankan /totp setup dulu, scan " +
+                "QR-nya dengan Google Authenticator, lalu /masuk <kode>."
+            );
+            return true;
+        }
+
+        if (!totp.verify(secret, kode)) {
+            telemetry.publish("telegram:fullmode:denied", { chatId });
+            await this.send(chatId,
+                "Kode salah atau kedaluwarsa. Coba kode terbaru dari " +
+                "Google Authenticator-mu."
+            );
+            return true;
+        }
+
+        this.fullModeUntil.set(String(chatId), Date.now() + FULL_MODE_TTL_HOURS * 3600_000);
+        telemetry.publish("telegram:fullmode:granted", { chatId, hours: FULL_MODE_TTL_HOURS });
+
+        await this.send(chatId,
+            `Mode penuh aktif untuk ${FULL_MODE_TTL_HOURS} jam — Aether ` +
+            `di sini kini setara dengan Console (tool lengkap). ` +
+            `/keluar untuk menutup lebih awal.`
+        );
+        return true;
+    }
+
     async handle(msg) {
 
         const chatId = msg?.chat?.id;
@@ -231,6 +356,9 @@ class TelegramService {
 
         }
 
+        // Perintah mode penuh (TOTP) — diproses sebelum converse.
+        if (await this.handleFullModeCommand(chatId, text)) return;
+
         telemetry.publish("telegram:message", {
             chatId, preview: text.slice(0, 60)
         });
@@ -255,14 +383,40 @@ class TelegramService {
 
         try {
 
-            // Nomor Telegram bukan nomor WA; perlakuan peran memakai
-            // id chat. Bila allowlist aktif, pengirim sudah terverifikasi
-            // sebagai pemilik → superadmin.
-            const role = "superadmin";
+            // Peran ditentukan oleh MODE PENUH (TOTP), bukan otomatis
+            // superadmin. Tanpa /masuk, pemilik yang sudah di-allowlist
+            // pun hanya dapat mode "user" — chat biasa tanpa tool
+            // berbahaya — sama seperti anggota grup. Hanya setelah kode
+            // TOTP benar ia naik ke superadmin (tool lengkap, tool
+            // destruktif tetap lewat toolGuard).
+            const role = this.inFullMode(chatId) ? "superadmin" : "user";
+
+            // Superadmin (pemilik) memakai jalur anggaran tool yang sama
+            // dengan Console: tools dibiarkan undefined agar AIRuntime.
+            // resolveTools() menjalankan ToolSelector — memilih tool
+            // relevan sesuai pesan (profil) dan anggaran context.
+            //
+            // Dulu semua 160 tool dikirim mentah ke model lewat sini,
+            // sehingga skema tool saja menembus ribuan token. Ditambah
+            // system prompt (±2.600 token) + memori + keadaan batin +
+            // 20 giliran history, prompt "halo" yang sesederhana itu
+            // jebol context 8192 dan Qwen menolak dengan "context shift
+            // did not return a history that fits".
+            //
+            // Admin/user TETAP difilter peran: mereka tak boleh tool
+            // destruktif/konfigurasi. Subsettelah roleService.toolsFor
+            // dipilih sedikit (regex allowlist), jadi aman tanpa budget
+            // lebih lanjut.
+            let tools;
+            if (role === "superadmin") {
+                tools = undefined;   // biar resolveTools → selectTools
+            } else {
+                tools = roleService.toolsFor(role, aiRuntime.tools());
+            }
 
             const response = await aiRuntime.chat({
                 messages: session.map(({ role: r, content }) => ({ role: r, content })),
-                tools: roleService.toolsFor(role, aiRuntime.tools()),
+                tools,
                 channel: "telegram"
             });
 
@@ -382,7 +536,13 @@ class TelegramService {
             me: this.me ? { id: this.me.id, username: this.me.username } : null,
             allowed: [...this.allowedIds()],
             lastError: this.lastError,
-            startedAt: this.startedAt
+            startedAt: this.startedAt,
+            fullMode: {
+                totpConfigured: Boolean(totpStore.read().secret),
+                activeChats: [...this.fullModeUntil.entries()]
+                    .filter(([, until]) => Date.now() < until)
+                    .map(([chatId, until]) => ({ chatId, until: new Date(until).toISOString() }))
+            }
         };
 
     }

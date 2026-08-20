@@ -369,12 +369,19 @@ class AIRuntimeService {
 
         builder.registerTools(this.bridgePluginTools());
         builder.registerTools(this.nativeTools());
+        builder.registerTools(this.mcpTools());
 
         this.engine = builder.build();
 
         this.activePlatform = resolved;
 
         this.attachEvents();
+
+        // Nyalakan server MCP eksternal di latar belakang. Tool mereka
+        // masuk ke registry begitu handshake selesai (refreshTools),
+        // jadi boot daemon tidak menunggu konektor luar. Gagal satuan
+        // tidak menjatuhkan yang lain (lihat McpClientManager.start).
+        this._startMcpServers();
 
         telemetry.info(
             `AI runtime siap (platform=${resolved.label}, model=${resolved.model ?? "default"})` +
@@ -384,6 +391,35 @@ class AIRuntimeService {
         );
 
         return this;
+
+    }
+
+    /**
+     * Mulai konektor MCP eksternal, lalu segarkan registry tool.
+     * Dipanggil dari initialize() — tidak mengembalikan promise ke
+     * pemanggil supaya boot tetap sinkron. Kegagalan ditangkap di
+     * dalam McpClientManager; di sini hanya memastikan refreshTools
+     * berjalan setelah selesai agar tool eksternal terlihat model.
+     */
+    _startMcpServers() {
+
+        try {
+
+            const mcp = require("../mcp/mcpClientManager");
+
+            mcp.start()
+                .then(() => {
+                    const n = this.refreshTools();
+                    telemetry.info(`[mcp] ${mcp.status().bridgedTools} tool eksternal terbridging, total ${n} tool.`);
+                })
+                .catch(err => {
+                    telemetry.warn(`[mcp] gagal memulai server eksternal: ${err.message}`);
+                });
+
+        }
+        catch {
+            /* modul MCP tak ada — lewati */
+        }
 
     }
 
@@ -656,6 +692,22 @@ class AIRuntimeService {
 
     }
 
+    /**
+     * Tool dari server MCP eksternal (Aether sebagai MCP client).
+     *
+     * Dimulai secara asynchronous di initialize(); sampai selesai,
+     * daftar ini kosong. Setelah handshake semua server selesai,
+     * refreshTools() dipanggil ulang untuk memasukkannya ke registry.
+     */
+    mcpTools() {
+        try {
+            return require("../mcp/mcpClientManager").bridgeTools();
+        }
+        catch {
+            return [];
+        }
+    }
+
     /** Rakit ulang registry tool AI dari keadaan terkini. */
     refreshTools() {
 
@@ -668,6 +720,10 @@ class AIRuntimeService {
         const registry = new AIToolRegistry();
 
         for (const tool of this.bridgePluginTools()) {
+            registry.register(tool);
+        }
+
+        for (const tool of this.mcpTools()) {
             registry.register(tool);
         }
 
