@@ -7,7 +7,19 @@ class VoiceController {
     async status(req, res, next) {
 
         try {
-            return response.success(res, "Voice status", await voiceService.status());
+
+            // Status STT/TTS (voiceService) + status Voice Runtime (state
+            // machine, wake word, mic/speaker) — digabung satu laporan.
+            const service = await voiceService.status();
+
+            let runtime = null;
+            try {
+                runtime = require("../voice").runtime.status();
+            }
+            catch { /* voice runtime belum termuat → null */ }
+
+            return response.success(res, "Voice status", { ...service, runtime });
+
         }
         catch (error) {
             next(error);

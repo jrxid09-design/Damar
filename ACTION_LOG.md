@@ -4,6 +4,46 @@ Konvensi (mandat Ronny, 18 Agu 2026 09:34): SETIAP aksi perubahan = 1 commit che
 
 ---
 
+## 2026-08-21 (Voice Runtime — always-on assistant)
+
+### Mandat
+Aether jadi always-on AI assistant (FRIDAY/JARVIS/Siri) — TANPA merombak
+arsitektur, TANPA otak AI kedua, TANPA tool system duplikat.
+
+### Audit (Phase 0) — kesimpulan
+- `voiceService.js` sudah punya STT + TTS (edge-tts ArdiNeural + Kokoro).
+- Belum ada: wake-word, mic/speaker abstraction, state machine, VAD, always-on loop.
+- Voice = channel baru menuju `aiRuntime.chat({channel:"voice", tools:undefined})`.
+
+### Yang dibangun (src/voice/)
+- `config.js` — env AETHER_VOICE_* + JsonStore (tidak hardcode).
+- `stateMachine.js` — IDLE→WAKE→LISTENING→TRANSCRIBING→THINKING→EXECUTING→SPEAKING→IDLE, barge-in, reset.
+- `providers/wakeWord.js` — WakeWordProvider (keyword-match local, extensible).
+- `providers/audioInput.js` / `audioOutput.js` — mic/speaker abstraction (backend none|cli).
+- `providers/vad.js` — VAD silence-based (diam = selesai bicara).
+- `voiceSession.js` — jembatan ke aiRuntime (jalur sama; history via ChannelManager).
+- `voiceRuntime.js` — orchestrator loop + ack deterministik + graceful degradation.
+- Integrasi: `server.js` boot/shutdown (isolasi), `channelPrompt("voice")`,
+  `voiceController.status` diperluas dengan state machine.
+- `.env.example` + `docs/VOICE-RUNTIME.md`.
+
+### Prinsip yang dipatuhi
+Standby tidak panggil LLM; ack lokal; local-first; graceful degradation (mic/STT/
+TTS/wake gagal → daemon tetap hidup); safety/toolGuard tetap berlaku; tidak ada
+dependency native audio (default backend "none").
+
+### Verifikasi
+- 24 test hijau (tests/voice/voiceRuntime.test.js).
+- Smoke boot daemon → "Server listening" tanpa error (voice default nonaktif).
+
+### TO-DO berikutnya (docs/VOICE-RUNTIME.md)
+1. Wake-word engine sungguhan (Porcupine/Vosk/openWakeWord).
+2. STT streaming + VAD level audio (RMS).
+3. TTS streaming/chunked.
+4. Mic standby loop (rekam pendek → STT ringan → wake detect) di backend cli.
+
+---
+
 ## 2026-08-21 (evolusi kesadaran — adopsi teori kesadaran mesin)
 
 ### Mandat

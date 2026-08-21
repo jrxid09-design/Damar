@@ -79,6 +79,10 @@ pencari uang nyata — semuanya di balik satu daemon dengan **Console desktop**,
 - **Orang & wajah** — galeri Immich + pengenalan wajah (opsional).
 - **Suara** — TTS (suara OS atau neural mis. Kokoro) + STT (mis. faster-whisper) +
   avatar minibot.
+- **Voice Runtime (always-on)** — asisten suara seperti Siri/JARVIS: wake word
+  ("Aether"), acknowledgement deterministik, VAD, barge-in, dan jawaban dibacakan.
+  Channel menuju Aether Core yang sama (bukan otak kedua); local-first, graceful
+  degradation, nonaktif secara default.
 - **Proaktif** — brief keadaan rumah harian terjadwal, dikirim ke WhatsApp.
 - **Antarmuka** — Console desktop (Electron), CLI terminal, dan REST/SSE API.
 
@@ -340,6 +344,8 @@ src/
                        agentHub, orchestrator, automation, modelHealth, dst.
   channels/            abstraksi kanal — sesi percakapan persisten (SQLite)
                        + registry WhatsApp/Telegram + konteks permintaan
+  voice/               Voice Runtime — always-on assistant (wake word, VAD,
+                       state machine, provider mic/speaker/STT/TTS)
   plugins/             plugin bawaan + aetherSkills (50+ skill)
   memory/              skema, store, recall, embedding, dokumen
   cli/                 CLI terminal (tema, perintah, klien)

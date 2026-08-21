@@ -1003,6 +1003,12 @@ class AIRuntimeService {
                 "ditampilkan di layar.",
             cli: "terminal (CLI). Balas sebagai teks polos: tanpa tabel lebar dan tanpa " +
                 "media — pengguna hanya melihat karakter."
+            ,
+            voice: "SUARA (asisten always-on, seperti Siri/JARVIS). Balas SANGAT RINGKAS " +
+                "dan langsung — jawabanmu akan DIBACAKAN keras, bukan dibaca di layar. " +
+                "Satu-dua kalimat untuk tugas sederhana; jelaskan lebih panjang hanya bila " +
+                "benar-benar perlu. Jangan pakai daftar, tabel, markdown, atau emoji. " +
+                "Awali dengan kata kerja atau jawaban langsung, tanpa basa-basi."
         };
 
         const nama = String(channel ?? "").toLowerCase();

@@ -72,6 +72,17 @@ function bootSubsystems() {
         telemetry.warn(`Kanal gagal disiapkan: ${error.message}`);
     }
 
+    // Voice runtime (always-on assistant). Nonaktif secara default; bila
+    // diaktifkan dan gagal, daemon TETAP hidup — voice isolasi total.
+    try {
+        require("./voice").runtime.start().catch(error => {
+            telemetry.warn(`Voice gagal disiapkan: ${error.message}`);
+        });
+    }
+    catch (error) {
+        telemetry.warn(`Voice gagal disiapkan: ${error.message}`);
+    }
+
     try {
         aiRuntime.initialize();
     }
@@ -309,6 +320,7 @@ const shutdown = (signal) => {
     whatsapp.stop();
     try { require("./services/telegramService").stop(); } catch { /* abaikan */ }
     try { require("./channels").manager.stop(); } catch { /* abaikan */ }
+    try { require("./voice").runtime.stop(); } catch { /* abaikan */ }
     automation.stop();
     terminals.stop();
     try { require("./services/cryptoMonitorService").stop(); } catch { /* abaikan */ }
