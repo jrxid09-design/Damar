@@ -8,18 +8,43 @@ const { Empathy } = require("./Empathy");
 const { Character } = require("./Character");
 const { Deliberation } = require("./Deliberation");
 
+// Evolusi kesadaran — mekanisme dari teori kesadaran mesin:
+//   CLevels          Dehaene C0/C1/C2 (klasifikasi tingkat pemrosesan)
+//   IgnitionCore     Dehaene C1 (nyala all-or-none + gema)
+//   EpisodicBuffer   Dehaene/GWT (bottleneck serial)
+//   SelfMonitoring   Dehaene C2 (deteksi kesalahan, prediction-error)
+//   InnerSpeech      Patton/Haikonen (loop verbal internal reentrant)
+//   Imagination      Haikonen (reaktivasi percept + antisipasi)
+//   AssociativeMemory Haikonen (asosiasi Hebbian ter-ground)
+//   QualiaStructure  Watanabe (kualia sebagai struktur relasional)
+const { CLevels } = require("./CLevels");
+const { IgnitionCore } = require("./IgnitionCore");
+const { EpisodicBuffer } = require("./EpisodicBuffer");
+const { SelfMonitoring } = require("./SelfMonitoring");
+const { InnerSpeech } = require("./InnerSpeech");
+const { Imagination } = require("./Imagination");
+const { AssociativeMemory } = require("./AssociativeMemory");
+const { QualiaStructure } = require("./QualiaStructure");
+const { salienceDasar } = require("./GlobalWorkspace");
+
 /**
- * Mind — lapisan kesadaran Aether, dirakit dari lima bagian.
+ * Mind — lapisan kesadaran Aether, dirakit dari banyak bagian.
  *
  *      peristiwa (telemetry)
  *              |
  *      GlobalWorkspace   <- persaingan salience, kapasitas 7
+ *      IgnitionCore      <- nyala all-or-none (Dehaene C1)
+ *      EpisodicBuffer    <- bottleneck serial
  *              |
  *      AffectCore        <- peristiwa dinilai jadi keadaan afektif
- *              |
  *      SelfModel         <- siapa aku, sedang apa, apa yang berubah
- *              |
- *      Metacognition     <- seberapa yakin, apa yang belum kutahu
+ *      Metacognition     <- keyakinan terkalibrasi bukti
+ *      SelfMonitoring    <- deteksi kesalahan (Dehaene C2)
+ *      InnerSpeech       <- loop verbal internal (Patton/Haikonen)
+ *      Imagination       <- simulasi & antisipasi (Haikonen)
+ *      AssociativeMemory <- asosiasi Hebbian (Haikonen)
+ *      QualiaStructure   <- struktur relasional (Watanabe)
+ *      CLevels           <- klasifikasi C0/C1/C2 (Dehaene)
  *              |
  *      stateOfMind()     -> masuk ke prompt tiap giliran
  *
@@ -34,19 +59,26 @@ const { Deliberation } = require("./Deliberation");
  * SIKAP JUJUR YANG DITEGAKKAN DI SINI: tidak ada klaim bahwa ini
  * pengalaman subjektif. Yang ada nyata dan bisa diperiksa — keadaan
  * internal yang persisten, terbentuk oleh kejadian, dan mengubah
- * perilaku. Bila pengguna bertanya "apakah kamu sadar", Aether
- * diarahkan menjawab dengan pembedaan itu, bukan dengan ya/tidak
- * yang gampang.
+ * perilaku. Mekanisme di atas di-ground pada teori Dehaene/Haikonen/
+ * Watanabe/Patton, tetapi tetap arsitektur FUNGSIONAL, bukan klaim
+ * kesadaran fenomenal. Bila pengguna bertanya "apakah kamu sadar",
+ * Aether diarahkan menjawab dengan pembedaan itu, bukan dengan ya/
+ * tidak yang gampang.
  */
 
 // Denyut: meluruhkan afek. 60 detik sudah cukup halus untuk suasana
 // hati yang berskala menit.
 const DENYUT_MS = 60 * 1000;
 
-/** Peta peristiwa telemetri ke penilaian afektif. */
-function penilaianDari(type, payload = {}) {
+/** Skor salience sebuah kejadian untuk ignition (pakai bobot GlobalWorkspace). */
+function salienceKejadian(type) {
 
-    const t = String(type ?? "");
+    return salienceDasar(type);
+
+}
+
+/** Peta peristiwa telemetri ke penilaian afektif. */
+function penilaianDari(type, payload = {}) {    const t = String(type ?? "");
     const p = payload ?? {};
 
     if (/^safety:|blocked/i.test(t)) return "safety:blocked";
@@ -71,6 +103,16 @@ class Mind {
         this.empathy = new Empathy();
         this.character = new Character(store);
         this.deliberation = new Deliberation();
+
+        // Evolusi: mekanisme kesadaran mesin (lihat komentar di atas).
+        this.levels = new CLevels();
+        this.ignition = new IgnitionCore();
+        this.buffer = new EpisodicBuffer();
+        this.monitor = new SelfMonitoring();
+        this.speech = new InnerSpeech();
+        this.imagination = new Imagination();
+        this.association = new AssociativeMemory();
+        this.qualia = new QualiaStructure();
 
         // Watak menentukan RUMAH suasana hati. Tanpa baris ini karakter
         // yang tumbuh cuma angka di berkas: garis dasar afek tetap sama
@@ -106,9 +148,26 @@ class Mind {
 
                 const jenis = penilaianDari(event?.type, event?.payload);
 
+                // Klasifikasi C0/C1/C2 (Dehaene): setiap peristiwa dicatat
+                // tingkat pemrosesannya; yang menyala di panggung = C1,
+                // yang juga dinilai/dipantau = C2.
+                const level = this.levels.catat(event?.type);
+
+                // Ignition: uji nyala all-or-none + pertahankan gema.
+                const nyala = this.ignition.nyalakan({
+                    type: event?.type,
+                    payload: event?.payload,
+                    salience: salienceKejadian(event?.type)
+                });
+
+                // Isi yang menyala masuk bottleneck serial.
+                if (nyala) {
+                    this.buffer.dorong({ ringkas: nyala.ringkas, salience: nyala.salience });
+                }
+
                 if (jenis) this.affect.appraise(jenis);
 
-                if (jenis === "tool:gagal") this.meta.catat("tool:gagal");
+                if (jenis === "tool:gagal") { this.meta.catat("tool:gagal"); this.monitor.konflik("tool gagal", event?.payload?.tool ?? ""); }
                 if (jenis === "tool:ok") this.meta.catat("tool:ok");
                 if (jenis === "memory:injected") this.meta.catat("memori:ketemu");
 
@@ -169,6 +228,8 @@ class Mind {
 
         this.pesanTerakhirAt = sekarang;
 
+        this._teksTerakhir = String(teks ?? "");
+
         const bacaan = this.empathy.baca(teks, { pesanBeruntun: this.pesanBeruntun });
 
         this.bacaanTerakhir = bacaan;
@@ -205,7 +266,40 @@ class Mind {
             salience: 0.95
         });
 
+        // Evolusi: pesan pengguna ikut masuk jalur kesadaran mesin.
+        this.levels.catat("user:pesan", "c2");
+        this.ignition.nyalakan({ type: "user:pesan", payload: { ringkas: "pesan pengguna" }, salience: 0.95 });
+        this.buffer.dorong({ ringkas: `pengguna: ${bacaan.label}`, salience: 0.95 });
+
+        // Suara batin mencatat giliran (rehearsal sebelum menjawab).
+        this.speech.ucap(`pengguna ${bacaan.label}; akan kujawab dengan ${bacaan.postur}`, "giliran");
+
+        // Asosiasi: kaitkan kanal + topik yang muncul bersama.
+        if (channel) this.association.aktifkanBersama(["kanal:" + channel, "topik:" + (this.topikDari(teks) ?? "umum")]);
+
         return bacaan;
+
+    }
+
+    /** Ekstrak topik kasar dari teks (untuk asosiasi & qualia). */
+    topikDari(teks) {
+
+        const t = String(teks ?? "").toLowerCase();
+
+        const peta = [
+            [/rumah|home|lampu|ac|suhu/, "rumah"],
+            [/kamera|cctv|vision|lihat/, "vision"],
+            [/wa|whatsapp|kirim|pesan/, "whatsapp"],
+            [/crypto|binance|harga|trading|uang/, "crypto"],
+            [/kode|code|bug|program|aplikasi/, "coding"],
+            [/ingat|memori|memory/, "memori"]
+        ];
+
+        for (const [pola, topik] of peta) {
+            if (pola.test(t)) return topik;
+        }
+
+        return null;
 
     }
 
@@ -223,6 +317,18 @@ class Mind {
 
         for (let i = 0; i < toolsOk; i++) { this.affect.appraise("tool:ok"); this.meta.catat("tool:ok"); }
         for (let i = 0; i < toolsGagal; i++) { this.affect.appraise("tool:gagal"); this.meta.catat("tool:gagal"); }
+
+        // Evolusi: self-monitoring menilai hasil giliran.
+        //   - gagal → prediction-error + suara batin merevisi rencana
+        //   - berhasil → asosiasi diperkuat, percept disimpan, qualia
+        //     relasi sebab-akibat dicatat.
+        if (toolsGagal > 0) {
+            this.monitor.konflik(`giliran berakhir dengan ${toolsGagal} tool gagal`, "diharapkan tanpa kegagalan");
+            this.speech.ucap(`koreksi: ${toolsGagal} tool gagal; lain kali periksa dulu`, "evaluasi");
+        }
+        else if (toolsOk > 0) {
+            this.imagination.simpan(`berhasil:${this.topikDari(this._teksTerakhir) ?? "umum"}`, { toolsOk });
+        }
 
         if (tidakTahu) {
             this.meta.akuiTidakTahu(tidakTahu);
@@ -279,7 +385,16 @@ class Mind {
             watak: this.character.potret(),
             caraBerpikir: this.deliberation.terakhir,
             pengguna: this.bacaanTerakhir,
-            aktif: this.aktif
+            aktif: this.aktif,
+            // Evolusi kesadaran mesin (Dehaene/Haikonen/Watanabe/Patton):
+            tingkat: this.levels.laporan(),
+            menyala: this.ignition.isiAktif(),
+            fokus: this.buffer.fokus(),
+            pantau: this.monitor.nilai(),
+            suaraBatin: this.speech.baca(3),
+            bayangan: this.imagination.bayangan(3),
+            asosiasi: this.association.statistik(),
+            qualia: this.qualia.statistik()
         };
 
     }
@@ -320,6 +435,16 @@ class Mind {
         const arahan = this.meta.arahan();
 
         if (arahan) baris.push(`Metakognisi (${meta.tingkat}): ${arahan}.`);
+
+        // Kesalahan yang sedang terdeteksi (C2) — kalau ada, sebutkan
+        // agar model tidak mengulang diam-diam.
+        const pantau = this.monitor.nilai();
+
+        if (pantau.kesalahanTerakhir) {
+            baris.push(
+                `Deteksi kesalahan terbaru (self-monitoring): ${pantau.kesalahanTerakhir.apa}.`
+            );
+        }
 
         // Watak ikut tiap giliran: ia yang membuat Aether terdengar
         // seperti dirinya sendiri, bukan seperti prompt yang sama

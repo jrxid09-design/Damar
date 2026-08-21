@@ -10,6 +10,7 @@ const voiceController = require("../../../controllers/voiceController");
 const forgeController = require("../../../controllers/forgeController");
 const whatsappController = require("../../../controllers/whatsappController");
 const telegramController = require("../../../controllers/telegramController");
+const channelController = require("../../../controllers/channelController");
 const orchestratorController = require("../../../controllers/orchestratorController");
 const homeController = require("../../../controllers/homeController");
 const visionController = require("../../../controllers/visionController");
@@ -197,6 +198,12 @@ router.get("/telegram/status", telegramController.status);
 router.post("/telegram/config", telegramController.saveConfig);
 router.post("/telegram/test", telegramController.test);
 router.post("/telegram/reconnect", telegramController.reconnect);
+
+// ---- Kanal & sesi percakapan persisten --------------------------
+
+router.get("/channels", channelController.list);
+router.get("/channels/sessions", channelController.sessions);
+router.delete("/channels/sessions/:key", channelController.clearSession);
 
 // ---- Integrasi eksternal ---------------------------------------
 

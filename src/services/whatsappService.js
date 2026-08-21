@@ -63,9 +63,12 @@ class WhatsAppService {
         this.lastConnectedAt = null;
         this.waVersion = null;
 
-        /** Konteks percakapan ringkas per chat (jid). */
-        this.sessions = new Map();
-        /** Jendela sesi grup (jid â†’ kedaluwarsa ms). */
+        /**
+         * Sesi percakapan kini persisten (SQLite, lintas restart) lewat
+         * src/channels — bukan lagi Map dalam memori yang hilang saat
+         * daemon mati. Konteks obrolan bisa berlanjut setelah restart.
+         */
+        /** Jendela sesi grup (jid → kedaluwarsa ms). */
         this.groupSessions = new Map();
         /** Chat yang sedang dilayani â€” dibaca tool kirim media. */
         this.currentChatId = null;
@@ -364,6 +367,20 @@ class WhatsAppService {
         const jid = msg.key.remoteJid;
         const isGroup = jid.endsWith("@g.us");
         const senderJid = isGroup ? (msg.key.participant ?? "") : jid;
+
+        // Konteks permintaan: tool kirim-media membaca tujuan dari sini
+        // (AsyncLocalStorage), bukan variabel global yang saling menimpa.
+        const channels = require("../channels");
+
+        return channels.manager.runWithContext(
+            { channel: "whatsapp", chatId: jid, isGroup },
+            () => this._handle(msg, jid, isGroup, senderJid)
+        );
+
+    }
+
+    async _handle(msg, jid, isGroup, senderJid) {
+
         const text = this.extractText(msg).trim();
 
         // /id & /start selalu boleh (agar pengguna tahu id-nya).
@@ -497,7 +514,9 @@ class WhatsAppService {
             case "recall":
                 return this.sendRecall(jid, arg, msg);
             case "reset":
-                this.sessions.delete(jid);
+                await require("../channels").manager.forget(
+                    "whatsapp", jid, jid.endsWith("@g.us") ? "group" : "dm"
+                );
                 return this.send(jid, "Oke, konteks percakapan kukosongkan.", msg);
             default:
                 return this.send(jid, `Perintah tidak dikenal: /${cmd}`, msg);
@@ -508,10 +527,16 @@ class WhatsAppService {
     async converse(jid, text, msg, userRole = "superadmin") {
         const aiRuntime = require("./aiRuntimeService");
         const roleService = require("./roleService");
+        const { manager } = require("../channels");
+
+        const kind = jid.endsWith("@g.us") ? "group" : "dm";
+
         this.currentChatId = jid;
 
-        const session = this.sessions.get(jid) ?? [];
+        // Sesi persisten: muat riwayat + catat giliran pengguna.
+        const session = await manager.history("whatsapp", jid, kind);
         session.push({ role: "user", content: text });
+        await manager.remember("whatsapp", jid, { role: "user", content: text }, kind);
 
         this.sock?.sendPresenceUpdate?.("composing", jid).catch(() => {});
 
@@ -533,8 +558,7 @@ class WhatsAppService {
             });
             const answer = response.content?.trim() || "(tidak ada jawaban)";
             session.push({ role: "assistant", content: answer });
-            while (session.length > 20) session.shift();
-            this.sessions.set(jid, session);
+            await manager.remember("whatsapp", jid, { role: "assistant", content: answer }, kind);
             await this.send(jid, answer, msg);
         }
         catch (error) {

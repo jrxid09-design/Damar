@@ -103,6 +103,21 @@ function mimeOf(name) {
 /** Kanal yang sedang aktif: whatsapp | telegram | console. */
 function activeChannel() {
 
+    // Konteks permintaan (AsyncLocalStorage) menang — tujuan media yang
+    // benar walau dua obrolan berjalan bersamaan. Fallback warisan
+    // currentChatId dipakai hanya bila tak ada konteks aktif.
+    const ctx = require("../channels").manager.currentContext();
+
+    if (ctx?.channel === "whatsapp") {
+        const wa = require("./whatsappService");
+        if (wa.running) return { kind: "whatsapp", id: ctx.chatId };
+    }
+
+    if (ctx?.channel === "telegram") {
+        const tg = require("./telegramService");
+        if (tg.running) return { kind: "telegram", id: ctx.chatId };
+    }
+
     const wa = require("./whatsappService");
     if (wa.running && wa.currentChatId) {
         return { kind: "whatsapp", id: wa.currentChatId };

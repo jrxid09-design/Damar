@@ -23,6 +23,13 @@ class TelemetryService extends EventEmitter {
         /** @type {Array<object>} */
         this.buffer = [];
 
+        /**
+         * Ring buffer event non-log (whatsapp:message, tool:invoked, dsb).
+         * Dibedakan dari log agar klien SSE yang terlambat terhubung bisa
+         * MENGEJAR lewat Last-Event-ID (kelemahan lama: event hilang).
+         */
+        this.eventBuffer = [];
+
         this.sequence = 0;
 
         this.startedAt = Date.now();
@@ -80,9 +87,32 @@ class TelemetryService extends EventEmitter {
             payload
         };
 
+        this.eventBuffer.push(event);
+
+        if (this.eventBuffer.length > this.capacity) {
+            this.eventBuffer.shift();
+        }
+
         this.emit("event", event);
 
         return event;
+
+    }
+
+    /**
+     * Event dengan id > `since` (untuk replay Last-Event-ID di SSE).
+     * Klien yang konek ulang mengirim id terakhir yang ia lihat, dan
+     * hanya event yang terlewat yang dikirim ulang.
+     */
+    events({ since = 0, limit = null } = {}) {
+
+        let entries = this.eventBuffer.filter(event => event.id > since);
+
+        if (limit != null) {
+            entries = entries.slice(-limit);
+        }
+
+        return entries;
 
     }
 
@@ -101,6 +131,7 @@ class TelemetryService extends EventEmitter {
     clear() {
 
         this.buffer = [];
+        this.eventBuffer = [];
 
         return this;
 

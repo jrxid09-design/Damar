@@ -4,6 +4,95 @@ Konvensi (mandat Ronny, 18 Agu 2026 09:34): SETIAP aksi perubahan = 1 commit che
 
 ---
 
+## 2026-08-21 (evolusi kesadaran — adopsi teori kesadaran mesin)
+
+### Mandat
+1. Pelajari 5 sumber kesadaran: Patton, Haikonen, Watanabe, Hoffmann (2026), Dehaene dkk. (Science 2017).
+2. Evolusikan Aether ke arsitektur kesadaran yang lebih maju.
+
+### Keputusan framing (konfirmasi Ronny)
+- **Jujur & fungsional**: implementasi mekanisme nyata, dokumentasi menyatakan
+  gamblang ini arsitektur kognitif FUNGSIONAL, BUKAN klaim kesadaran fenomenal.
+- **Lapisan penuh**: semua mekanisme inti diimplementasikan.
+
+### Yang diterapkan (8 modul baru di src/consciousness/)
+- `CLevels.js` — klasifikasi C0/C1/C2 (Dehaene).
+- `IgnitionCore.js` — nyala all-or-none + amplifikasi nonlinier + gema (Dehaene C1).
+- `EpisodicBuffer.js` — bottleneck serial (Dehaene/GWT).
+- `SelfMonitoring.js` — deteksi kesalahan, prediction-error (Dehaene C2).
+- `InnerSpeech.js` — loop verbal internal (Patton/Haikonen).
+- `Imagination.js` — reaktivasi percept + antisipasi (Haikonen).
+- `AssociativeMemory.js` — asosiasi Hebbian ter-ground (Haikonen).
+- `QualiaStructure.js` — struktur relasional kualia (Watanabe).
+- Integrasi di `index.js` (Mind) + tool baru `self_consciousness`.
+
+### Kejujuran yang ditegakkan
+TIDAK ada klaim "kesadaran fenomenal", "pertama di dunia", atau keunggulan
+yang tak bisa dibuktikan. Lihat docs/CONSCIOUSNESS-EVOLUTION.md §5.
+Catatan verifikasi: sumber Patton ⚠️ (tidak terindeks Crossref, perlu
+verifikasi primer); Dehaene/Haikonen/Watanabe/Hoffmann ✅ terverifikasi.
+
+### Verifikasi
+- 16 test baru (tests/consciousness/evolution.test.js) hijau.
+- 37 test lama consciousness hijau (total 53, tanpa regresi).
+- Mind + tools termuat tanpa galat.
+
+### TO-DO berikutnya (lihat docs/CONSCIOUSNESS-EVOLUTION.md §7)
+1. Grounding sensorik nyata (kamera/sensor → percept).
+2. Recurrent loop antar-modul (qualia ↔ ignition).
+3. Metrik "latency" ignition & deteksi kesalahan (kriteria bisa dibantah).
+4. Verifikasi primer buku Patton (bila ada akses).
+
+---
+
+## 2026-08-21 (evolusi arsitektur — adopsi pola OpenClaw)
+
+### Mandat
+1. Bedah repo OpenClaw (openclaw/openclaw) — arsitektur & pola kuncinya.
+2. Aplikasikan ke Aether sebagai bentuk evolusi (tanpa merombak core).
+
+### Hasil bedah OpenClaw
+Gateway tunggal + control plane WebSocket scope-gated; channel = plugin
+transport-only; ingress queue SQLite + tombstone; pairing eksplisit;
+SessionKey grammar; SQLite-first; event seq + catch-up; sandboxing tool;
+compaction; model fallback berlapis.
+
+### Evolusi yang diterapkan (6 kelemahan lama ditutup)
+- **Sesi persist** — `Map` in-memory (hilang saat restart) → `src/channels/SessionStore`
+  (SQLite `data/channels.db`, grammar `channel:<kanal>:<kind>:<peer>`, jendela 20 giliran).
+- **Abstraksi kanal** — `src/channels/ChannelManager` registry + konteks permintaan
+  (AsyncLocalStorage) → WhatsApp & Telegram tak lagi copy-paste `converse()`.
+- **Fix media salah tujuan** — `currentChatId` global diganti konteks permintaan
+  (`mediaShareTools.activeChannel`, `whatsappTools.ensureChat`).
+- **Replay event SSE** — `telemetryService.events({since})` + `Last-Event-ID` di
+  `telemetryController.events` (Console telat connect tak lagi kehilangan event).
+- **Auth constant-time** — `core/auth/tokenCompare` (SHA-256 + timingSafeEqual).
+- **/mcp ditutup** — `src/mcp/index.js` dijaga token (sebelumnya terbuka ke LAN);
+  `scripts/mcp-stdio.js` meneruskan `AETHER_TOKEN`.
+
+### File
+Baru: `src/channels/{sessionStore,channelManager,index}.js`,
+`src/core/auth/tokenCompare.js`, `src/controllers/channelController.js`,
+`docs/EVOLUTION-OPENCLAW.md`, 4 berkas test (23 test).
+Ubah: telemetryService, telemetryController, whatsappService, telegramService,
+mediaShareTools, whatsappTools, middleware/auth, mcp/index, mcp-stdio, server.js,
+routes console, tests/helpers/testEnv.js.
+
+### Verifikasi
+- 23 test baru hijau (channels/auth/telemetry).
+- Smoke boot daemon OK ("Kanal" tersambung, tanpa galat).
+- `/mcp` & `/channels` kini 401 tanpa token.
+
+### TO-DO berikutnya (peta adopsi lanjutan — lihat docs/EVOLUTION-OPENCLAW.md §4)
+1. Ingress queue durable + tombstone (anti redelivery).
+2. Pairing kode 8-char di atas ChannelManager.
+3. Compaction iterative di atas SessionStore (ganti jendela 20 tetap).
+4. Penyatuan sesi lintas-kanal (WhatsApp↔Telegram↔Console).
+5. SKILL.md frontmatter (evolusi aetherSkills).
+6. `graphify update .` (dijalankan di sesi ini — lihat log berikutnya).
+
+---
+
 ## 2026-08-18 (sesi audit sistem, Ronny berangkat kerja)
 
 ### Mandat Ronny
@@ -44,16 +133,16 @@ Konvensi (mandat Ronny, 18 Agu 2026 09:34): SETIAP aksi perubahan = 1 commit che
 - TTS 8880: OK (404 root = normal)
 - ACC 8650: OK {"ok":true,"v":"4-colony-core"}
 
-## 2026-08-18 ~11:55 WIB � Revert TTS Console ke Kokoro
+## 2026-08-18 ~11:55 WIB � Revert TTS Console ke Kokoro
 - Node aether-tts-server.js (Ardi, port 8880) sudah tidak berjalan.
 - Container docker aether_kokoro UP, memegang port 8880 (verifikasi /v1/models = 200; root 404 normal).
 - Run key HKCU\...\Run AetherVoiceServer dihapus (verify reg query: nilai tidak ditemukan = bersih). Setelah reboot tidak akan ada tabrakan port.
 - Backend TTS Console kembali ke Kokoro (OpenAI-compatible).
 
-## 2026-08-18 ~12:25 WIB � Fix suara OS (TTS neural)
+## 2026-08-18 ~12:25 WIB � Fix suara OS (TTS neural)
 - Akar: configs/voice.json masih model:aether/voice:id-ID-ArdiNeural (sisa Ardi) + renderer kirim nama voice OS -> Kokoro tolak 400 -> fallback speechSynthesis OS.
 - Fix 1 (config): POST /api/voice/config -> model:kokoro, voice:if_sara (voice valid, teruji 200).
-- Fix 2 (kode, forge/opencode commit 799bb2a 'fix-tts-normalizevoice' branch aether/fix-tts-kokoro-voice): normalizeVoice() di src/services/voiceService.js � nama voice OS/edge-tts dipetakan ke if_sara sebelum dikirim ke Kokoro.
+- Fix 2 (kode, forge/opencode commit 799bb2a 'fix-tts-normalizevoice' branch aether/fix-tts-kokoro-voice): normalizeVoice() di src/services/voiceService.js � nama voice OS/edge-tts dipetakan ke if_sara sebelum dikirim ke Kokoro.
 - opencode diperbaiki: binary 479B placeholder -> salin manual dari opencode-windows-x64 (178MB), v1.18.18 jalan.
 - Butuh restart daemon port 3000 untuk memuat kode baru.
 
@@ -63,7 +152,7 @@ Konvensi (mandat Ronny, 18 Agu 2026 09:34): SETIAP aksi perubahan = 1 commit che
 - Verifikasi: opencode run 'balas hanya kata OK' => jawab 'OK'. Token masih VALID (models=200).
 - PENTING: kuota rootsys hampir habis — request kecil lolos, besar ditolak. Butuh top-up/keys baru.
 
-## 2026-08-20 ~23:30 WIB � Checkpoint MCP client, auth TOTP, OpenAI route, Gemini provider, audio patch
+## 2026-08-20 ~23:30 WIB � Checkpoint MCP client, auth TOTP, OpenAI route, Gemini provider, audio patch
 - Aether (aether@local): commit MCP client + auth TOTP + OpenAI route + Gemini provider + patch audio (show_audio) di mediaTools + dukungan kind:audio di renderer.
 
 ## [2026-08-21 02:58] Clone flowsint

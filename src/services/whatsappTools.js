@@ -9,6 +9,15 @@ const whatsapp = require("./whatsappService");
 function whatsappTools() {
 
     const ensureChat = () => {
+
+        // Konteks permintaan menang (AsyncLocalStorage) — tujuan yang
+        // benar saat dua obrolan berjalan bersamaan.
+        const ctx = require("../channels").manager.currentContext();
+
+        if (ctx?.channel === "whatsapp" && whatsapp.running) {
+            return ctx.chatId;
+        }
+
         if (!whatsapp.running || !whatsapp.currentChatId) {
             throw new Error("Tool ini hanya bisa dipakai saat sedang mengobrol via WhatsApp.");
         }

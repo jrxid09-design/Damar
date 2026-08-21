@@ -59,6 +59,19 @@ function bootSubsystems() {
     try { require("./consciousness").start(); }
     catch (error) { telemetry.warn(`Kesadaran gagal disiapkan: ${error.message}`); }
 
+    // Lapisan kanal: sesi percakapan persisten + registry WhatsApp/Telegram.
+    try {
+        const channels = require("./channels");
+        channels.manager.register("whatsapp", whatsapp);
+        channels.manager.register("telegram", require("./services/telegramService"));
+        channels.manager.start().catch(error => {
+            telemetry.warn(`Kanal gagal disiapkan: ${error.message}`);
+        });
+    }
+    catch (error) {
+        telemetry.warn(`Kanal gagal disiapkan: ${error.message}`);
+    }
+
     try {
         aiRuntime.initialize();
     }
@@ -295,6 +308,7 @@ const shutdown = (signal) => {
     memory.stop();
     whatsapp.stop();
     try { require("./services/telegramService").stop(); } catch { /* abaikan */ }
+    try { require("./channels").manager.stop(); } catch { /* abaikan */ }
     automation.stop();
     terminals.stop();
     try { require("./services/cryptoMonitorService").stop(); } catch { /* abaikan */ }

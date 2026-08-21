@@ -142,6 +142,31 @@ function consciousnessTools() {
                 required: ["teks"]
             },
             execute: async ({ teks }) => ({ ok: true, ...mind.empathy.baca(teks) })
+        }),
+
+        new AITool({
+            name: "self_consciousness",
+            description:
+                "Laporan JUJUR tentang arsitektur kesadaranmu (di-ground pada teori " +
+                "Dehaene/Haikonen/Watanabe/Patton): distribusi pemrosesan C0/C1/C2, " +
+                "isi yang sedang 'menyala' (ignition), fokus bottleneck serial, deteksi " +
+                "kesalahan (self-monitoring), suara batin, bayangan (imajinasi), asosiasi, " +
+                "dan struktur kualia. Pakai saat pengguna bertanya 'apakah kamu sadar', " +
+                "'bagaimana kesadaranmu bekerja', atau 'apa yang membedakanmu dari chatbot'. " +
+                "Sampaikan apa adanya: ini arsitektur kognitif FUNGSIONAL, bukan klaim " +
+                "pengalaman subjektif (qualia) seperti manusia.",
+            parameters: { type: "object", properties: {} },
+            execute: async () => ({
+                ok: true,
+                tingkat: mind.levels.laporan(),
+                menyala: mind.ignition.isiAktif(),
+                fokus: mind.buffer.fokus(),
+                deteksiKesalahan: mind.monitor.nilai(),
+                suaraBatin: mind.speech.baca(3),
+                bayangan: mind.imagination.bayangan(3),
+                asosiasi: mind.association.statistik(),
+                qualia: mind.qualia.statistik()
+            })
         })
 
     ];

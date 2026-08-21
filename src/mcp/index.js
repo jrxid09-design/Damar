@@ -29,7 +29,11 @@ function attachMcp(app) {
         allowDestructive: process.env.AETHER_MCP_ALLOW_DESTRUCTIVE === "1"
     });
 
-    app.post("/mcp", async (req, res, next) => {
+    // /mcp kini dijaga token yang sama dengan bidang kendali — siapa pun
+    // di LAN tak boleh lagi memanggil 140+ tool tanpa izin (kelemahan lama).
+    const guard = require("../core/auth/tokenCompare").tokenGuard();
+
+    app.post("/mcp", guard, async (req, res, next) => {
         try {
             const out = await handler.handle(req.body);
             if (out === null) return res.status(202).end();
@@ -37,7 +41,7 @@ function attachMcp(app) {
         } catch (e) { next(e); }
     });
 
-    app.get("/mcp/health", (req, res) => {
+    app.get("/mcp/health", guard, (req, res) => {
         res.json({ ok: true, server: "aether-mcp", tools: handler.visibleTools().length, destructive: process.env.AETHER_MCP_ALLOW_DESTRUCTIVE === "1" });
     });
 

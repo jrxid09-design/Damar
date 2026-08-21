@@ -50,9 +50,10 @@ class TelegramService {
         this.me = null;
         this.startedAt = null;
 
-        /** Sesi percakapan per chat id (20 giliran terakhir). */
-        this.sessions = new Map();
-
+        /**
+         * Sesi percakapan kini persisten (SQLite, lintas restart) lewat
+         * src/channels — bukan lagi Map dalam memori.
+         */
         /** Chat terakhir yang aktif — untuk tool kirim media. */
         this.currentChatId = null;
 
@@ -336,6 +337,18 @@ class TelegramService {
 
         if (!chatId || !text) return;
 
+        // Konteks permintaan (AsyncLocalStorage) untuk tool kirim-media.
+        const channels = require("../channels");
+
+        return channels.manager.runWithContext(
+            { channel: "telegram", chatId: String(chatId) },
+            () => this._handle(chatId, text)
+        );
+
+    }
+
+    async _handle(chatId, text) {
+
         // /id & /start selalu boleh — agar pemilik tahu chat id-nya.
         if (/^\/(id|start)\b/i.test(text)) {
 
@@ -356,6 +369,12 @@ class TelegramService {
 
         }
 
+        // /reset — kosongkan konteks percakapan (paritas WhatsApp).
+        if (/^\/reset\b/i.test(text)) {
+            await require("../channels").manager.forget("telegram", chatId, "dm");
+            return this.send(chatId, "Oke, konteks percakapan kukosongkan.");
+        }
+
         // Perintah mode penuh (TOTP) — diproses sebelum converse.
         if (await this.handleFullModeCommand(chatId, text)) return;
 
@@ -372,11 +391,14 @@ class TelegramService {
 
         const aiRuntime = require("./aiRuntimeService");
         const roleService = require("./roleService");
+        const { manager } = require("../channels");
 
         this.currentChatId = chatId;
 
-        const session = this.sessions.get(chatId) ?? [];
+        // Sesi persisten: muat riwayat + catat giliran pengguna.
+        const session = await manager.history("telegram", chatId, "dm");
         session.push({ role: "user", content: text });
+        await manager.remember("telegram", chatId, { role: "user", content: text }, "dm");
 
         // Penanda "mengetik…".
         this.api("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
@@ -423,8 +445,7 @@ class TelegramService {
             const answer = response.content?.trim() || "(tidak ada jawaban)";
 
             session.push({ role: "assistant", content: answer });
-            while (session.length > 20) session.shift();
-            this.sessions.set(chatId, session);
+            await manager.remember("telegram", chatId, { role: "assistant", content: answer }, "dm");
 
             await this.send(chatId, answer);
 

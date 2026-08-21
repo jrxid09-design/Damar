@@ -14,9 +14,17 @@
  *     }
  *   }
  *
- * Env: AETHER_MCP_URL (default http://127.0.0.1:3000/mcp).
+ * Env: AETHER_MCP_URL (default http://127.0.0.1:3000/mcp),
+ *      AETHER_TOKEN (opsional — diteruskan sebagai Bearer bila diset).
  */
 const URL = process.env.AETHER_MCP_URL || "http://127.0.0.1:3000/mcp";
+const TOKEN = process.env.AETHER_TOKEN;
+
+function headers() {
+    const h = { "Content-Type": "application/json" };
+    if (TOKEN) h["Authorization"] = `Bearer ${TOKEN}`;
+    return h;
+}
 
 let buf = "";
 process.stdin.setEncoding("utf8");
@@ -32,7 +40,7 @@ process.stdin.on("data", async chunk => {
         try { msg = JSON.parse(line); } catch { continue; }
 
         try {
-            const r = await fetch(URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg) });
+            const r = await fetch(URL, { method: "POST", headers: headers(), body: JSON.stringify(msg) });
             if (r.status === 202) continue;                    // notifikasi: tanpa balasan
             const text = await r.text();
             if (text) process.stdout.write(text.trim() + "\n");

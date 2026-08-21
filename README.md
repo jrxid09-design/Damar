@@ -98,6 +98,14 @@ berlandaskan teori yang bisa dijalankan (bukan puitis):
 | `Empathy` | Teori pikiran + emotional contagion | Baca valensi/kebutuhan pengguna → **sikap** yang tepat; menular tipis ke afek sendiri |
 | `Character` | Trait sebagai distribusi state (Fleeson) | Watak tumbuh lambat dari akibat; menggeser garis dasar afek & ambang berpikir |
 | `Deliberation` | Dua sistem (Kahneman), pemikiran ganda (Stanovich), premortem (Klein) | Menilai kapan berpikir dalam; menyisipkan protokol wajib ke prompt |
+| `CLevels` | C0/C1/C2 (Dehaene–Lau–Kouider 2017) | Klasifikasi tingkat pemrosesan: tak-sadar → siaran global → self-monitoring |
+| `IgnitionCore` | Global neuronal workspace (Dehaene) | Nyala all-or-none + amplifikasi nonlinier + gema (reverberation) |
+| `EpisodicBuffer` | Global workspace (Baars/Dehaene) | Bottleneck serial — isi diproses satu per satu, jejak urutan tercatat |
+| `SelfMonitoring` | Teori orde-tinggi (Dehaene C2) | Ekspektasi→hasil (prediction-error) + deteksi kontradiksi |
+| `InnerSpeech` | Inner speech (Patton, Haikonen) | Loop verbal internal: self-talk, rehearsal, revisi diri |
+| `Imagination` | Reaktivasi percept (Haikonen) | Simpan/ingat percept + komposisi skenario antisipasi (`simulated`) |
+| `AssociativeMemory` | Neuron asosiatif (Haikonen) | Asosiasi Hebbian ter-ground: ko-aktivasi memperkuat ikatan |
+| `QualiaStructure` | Qualia Structure (Watanabe) | Kualia sebagai struktur relasional antar representasi |
 
 Keadaan batin ikut ke tiap giliran lewat `Mind.stateOfMind()` dan bisa
 diintrospeksi lewat tool **`self_state`**, disimpan lewat **`self_reflect`**,
@@ -330,6 +338,8 @@ src/
   ai/                  AI runtime (builder, providers, executors, tools)
   services/            aiRuntime, binance, whatsapp, vision, home, immich,
                        agentHub, orchestrator, automation, modelHealth, dst.
+  channels/            abstraksi kanal — sesi percakapan persisten (SQLite)
+                       + registry WhatsApp/Telegram + konteks permintaan
   plugins/             plugin bawaan + aetherSkills (50+ skill)
   memory/              skema, store, recall, embedding, dokumen
   cli/                 CLI terminal (tema, perintah, klien)
