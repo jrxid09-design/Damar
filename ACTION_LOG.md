@@ -4,6 +4,27 @@ Konvensi (mandat Ronny, 18 Agu 2026 09:34): SETIAP aksi perubahan = 1 commit che
 
 ---
 
+## 2026-08-21 (Voice trigger "tepuk tangan 2x" — double clap)
+
+### Mandat
+Tambahkan trigger "tepuk tangan 2x" sebagai alternatif wake word "Aether".
+
+### Yang dibangun
+- `src/voice/providers/clapDetector.js` — `ClapDetector`: deteksi dua ledakan
+  suara pendek (transient) dalam jendela waktu, berbasis level audio (RMS 0..1).
+  Bekerja di level audio, bukan transkrip → standby TIDAK memanggil STT/LLM.
+- `voiceRuntime.js` — jalur wake bersama `_onWake(source)`; `clapDetect(rms, t)`
+  memicu transisi IDLE→WAKE_DETECTED + ack yang sama dengan wake word.
+- `config.js` — env `AETHER_VOICE_CLAP_*` (enabled/threshold/window/min-clap/min-gap).
+- `status()` — expose `clapEnabled` + `clapDetector`.
+- `.env.example`, `docs/VOICE-RUNTIME.md`, `README.md` diperbarui.
+
+### Verifikasi
+- 30 test hijau (tests/voice/voiceRuntime.test.js) — +6 test clap (2 dalam jendela
+  vs 1/terlalu jauh/bunyi panjang/noise + integrasi clap→WAKE).
+
+---
+
 ## 2026-08-21 (Voice Runtime — always-on assistant)
 
 ### Mandat

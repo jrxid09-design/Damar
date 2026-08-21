@@ -77,7 +77,14 @@ function voiceConfig() {
             envOr("AETHER_VOICE_ACK", "acknowledgement", "Ya?")
         ),
         // Bahasa STT (ISO, mis. "id").
-        language: String(envOr("AETHER_VOICE_LANGUAGE", "language", "id"))
+        language: String(envOr("AETHER_VOICE_LANGUAGE", "language", "id")),
+        // ---- Trigger "tepuk tangan 2x" (double clap) ----------------
+        // Trigger alternatif wake word; nonaktif secara default.
+        clapEnabled: bool("AETHER_VOICE_CLAP_ENABLED", "clapEnabled", false),
+        clapThreshold: num("AETHER_VOICE_CLAP_THRESHOLD", "clapThreshold", 0.6),
+        clapWindowMs: num("AETHER_VOICE_CLAP_WINDOW_MS", "clapWindowMs", 800),
+        clapMinClapMs: num("AETHER_VOICE_CLAP_MIN_CLAP_MS", "clapMinClapMs", 30),
+        clapMinGapMs: num("AETHER_VOICE_CLAP_MIN_GAP_MS", "clapMinGapMs", 100)
     };
 
 }

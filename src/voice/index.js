@@ -9,6 +9,7 @@ const { VoiceRuntime } = require("./voiceRuntime");
 const { VoiceSession } = require("./voiceSession");
 const { voiceConfig } = require("./config");
 const { StateMachine, STATES } = require("./stateMachine");
+const { ClapDetector } = require("./providers/clapDetector");
 
 const runtime = new VoiceRuntime();
 
@@ -18,5 +19,6 @@ module.exports = {
     VoiceSession,
     voiceConfig,
     StateMachine,
-    STATES
+    STATES,
+    ClapDetector
 };

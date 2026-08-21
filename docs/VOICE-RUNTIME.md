@@ -26,10 +26,22 @@ duplikat.
                                         ├─ config.js         env + JsonStore
                                         └─ providers/
                                            ├─ wakeWord.js     WakeWordProvider
+                                           ├─ clapDetector.js deteksi "tepuk 2x"
                                            ├─ audioInput.js   mic abstraction
                                            ├─ audioOutput.js  speaker abstraction
                                            └─ vad.js          VAD (silence-based)
 ```
+
+## Trigger wake (dua jalur)
+
+Aether bisa "dipanggil" lewat dua trigger, keduanya lokal & tanpa LLM saat standby:
+
+1. **Wake word** — kata panggil ("Aether"), lewat `WakeWordProvider`
+   (keyword-match; engine lain bisa disisipkan).
+2. **Tepuk tangan 2x (double clap)** — `ClapDetector`: dua ledakan suara
+   pendek (transient) dalam jendela waktu singkat, diukur dari level audio
+   (RMS 0..1). Bekerja di level audio, bukan transkrip — standby tetap
+   tidak memanggil STT/LLM. Nonaktif secara default.
 
 ## State machine
 
@@ -71,6 +83,11 @@ IDLE → WAKE_DETECTED → LISTENING → TRANSCRIBING → THINKING
 | `AETHER_VOICE_AUDIO_BACKEND` | `none` | `cli` untuk mic/speaker OS |
 | `AETHER_VOICE_ACK` | `Ya?` | Acknowledgement deterministik |
 | `AETHER_VOICE_LANGUAGE` | `id` | Bahasa STT |
+| `AETHER_VOICE_CLAP_ENABLED` | `false` | Aktifkan trigger tepuk 2x |
+| `AETHER_VOICE_CLAP_THRESHOLD` | `0.6` | Level RMS (0..1) = "bunyi keras" |
+| `AETHER_VOICE_CLAP_WINDOW_MS` | `800` | Jendela maks antar dua tepukan |
+| `AETHER_VOICE_CLAP_MIN_CLAP_MS` | `30` | Lebar minimum satu tepukan |
+| `AETHER_VOICE_CLAP_MIN_GAP_MS` | `100` | Jeda minimum antar tepukan |
 
 STT/TTS tetap membaca `AETHER_STT_URL` / `AETHER_TTS_URL` (endpoint
 OpenAI-compatible, local-first) — tidak ada konfigurasi suara baru yang
@@ -84,6 +101,8 @@ mendobel `voiceService`.
 ```json
 {
   "enabled": false, "state": "idle", "wakeWord": "aether",
+  "clapEnabled": false,
+  "clapDetector": { "provider": "local", "threshold": 0.6, "windowMs": 800 },
   "microphone": { "backend": "none", "available": false },
   "speaker":    { "backend": "none", "available": false },
   "sttProvider": "local", "ttsProvider": "local",
@@ -94,8 +113,9 @@ mendobel `voiceService`.
 
 ## Test
 
-`tests/voice/voiceRuntime.test.js` — 20 test: transisi state (legal & ilegal),
-barge-in, wake word (utuh vs substring), VAD (diam/touch), graceful degradation
+`tests/voice/voiceRuntime.test.js` — 30 test: transisi state (legal & ilegal),
+barge-in, wake word (utuh vs substring), deteksi tepuk 2x (2 dalam jendela vs
+1/terlalu jauh/bunyi panjang/noise), VAD (diam/touch), graceful degradation
 (mic/STT/TTS/model gagal), dan **VoiceSession memakai jalur aiRuntime yang sama**
 (`tools: undefined` → ToolSelector otomatis, `channel: "voice"`).
 

@@ -20,6 +20,7 @@ const { voiceConfig } = require("./config");
 const { StateMachine, STATES } = require("./stateMachine");
 const { VoiceSession } = require("./voiceSession");
 const { createWakeWordProvider } = require("./providers/wakeWord");
+const { ClapDetector } = require("./providers/clapDetector");
 const { AudioInput } = require("./providers/audioInput");
 const { AudioOutput } = require("./providers/audioOutput");
 const { VadDetector } = require("./providers/vad");
@@ -46,6 +47,13 @@ class VoiceRuntime extends EventEmitter {
         this.wake = createWakeWordProvider({
             provider: this.cfg.wakeProvider,
             wakeWord: this.cfg.wakeWord
+        });
+
+        this.clap = new ClapDetector({
+            threshold: this.cfg.clapThreshold,
+            windowMs: this.cfg.clapWindowMs,
+            minClapMs: this.cfg.clapMinClapMs,
+            minGapMs: this.cfg.clapMinGapMs
         });
 
         this.input = new AudioInput({ backend: this._inputBackend() });
@@ -161,15 +169,47 @@ class VoiceRuntime extends EventEmitter {
 
         const r = this.wake.detect(text);
 
-        if (r.detected && this.machine.current === STATES.IDLE) {
-            this.machine.transit(STATES.WAKE_DETECTED);
-            this.emit("wake", r);
-            telemetry.publish("voice:wake", { text: r.text });
-            // Acknowledgement deterministik (tanpa LLM) — cepat.
-            this._acknowledge();
+        if (r.detected) {
+            this._onWake({ source: "wakeword", text: r.text });
         }
 
         return r;
+
+    }
+
+    /**
+     * Titik masuk untuk trigger tepuk tangan 2x: beri sampel level audio
+     * (RMS 0..1) lalu periksa apakah double clap terdeteksi.
+     *
+     * @param {number} rms level audio 0..1
+     * @param {number} t waktu epoch ms (opsional)
+     * @returns {object} { detected, claps, gapMs }
+     */
+    clapDetect(rms, t = Date.now()) {
+
+        this.clap.feedLevel(rms, t);
+
+        const r = this.clap.detect(t);
+
+        if (r.detected) {
+            this._onWake({ source: "clap", gapMs: r.gapMs });
+        }
+
+        return r;
+
+    }
+
+    /** Jalur bersama saat sebuah trigger wake terpicu (IDLE → WAKE). */
+    _onWake({ source, text = null, gapMs = null }) {
+
+        if (this.machine.current !== STATES.IDLE) return;
+
+        this.machine.transit(STATES.WAKE_DETECTED);
+        this.emit("wake", { source, text, gapMs });
+        telemetry.publish("voice:wake", { source, text, gapMs });
+
+        // Acknowledgement deterministik (tanpa LLM) — cepat.
+        this._acknowledge();
 
     }
 
@@ -302,6 +342,8 @@ class VoiceRuntime extends EventEmitter {
             running: this.running,
             state: this.machine.current,
             wakeWord: c.wakeWord,
+            clapEnabled: c.clapEnabled,
+            clapDetector: this.clap.status(),
             microphone: this.input.status(),
             speaker: this.output.status(),
             sttProvider: c.sttProvider,
