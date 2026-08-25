@@ -47,8 +47,13 @@ function validateAdapter(adapter) {
  */
 function runDiscoveryCycle(schema, adapter) {
 
+    // Registrasi produsen adalah TINDAKAN OPERATOR (B§5a) — siklus
+    // discovery TIDAK mengangkat dirinya sendiri jadi tepercaya.
     validateAdapter(adapter);
-    schema.registerProducer(adapter.id);
+    if (!schema.isProducerRegistered(adapter.id)) {
+        throw fail("EMB_PRODUCER_NOT_REGISTERED",
+            `adapter '${adapter.id}' belum didaftarkan operator`);
+    }
     const step = adapter.next() ?? [];
 
     const results = [];

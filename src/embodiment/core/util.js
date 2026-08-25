@@ -14,15 +14,14 @@
 
 const crypto = require("node:crypto");
 
-/** Pembekuan mendalam — daun sekaligus cabang dibekukan. */
+/** Pembekuan mendalam — tetap menelusuri anak walau kulit sudah beku. */
 function deepFreeze(value) {
-    if (!value || typeof value !== "object" || Object.isFrozen(value)) {
-        return value;
-    }
+    if (!value || typeof value !== "object") return value;
+    if (!Object.isFrozen(value)) Object.freeze(value);
     for (const key of Object.keys(value)) {
         deepFreeze(value[key]);
     }
-    return Object.freeze(value);
+    return value;
 }
 
 /** Salinan struktur aman-JSON (tanpa referensi ke objek hidup). */

@@ -4,12 +4,12 @@
  * Sengaja kecil dan tanpa dependensi: node:os saja. Ia melaporkan
  * tubuh minimal host — HOST/CPU/MEMORY/NETWORK_INTERFACE — dengan
  * kejujuran identitas:
- *   - hostname  → "stable"   (berubah hanya saat operator mengganti)
- *   - cpu/mem   → "session"  (model/ukuran bisa berarti mesin lain)
- *   - interface → "stable" bila MAC nyata, "session" bila tak ada MAC
- *
- * Adapter Windows/audio/kamera/display penuh BUKAN bagian milestone ini;
- * mereka tinggal mengikuti kontrak yang sama (B§5a).
+ *   - hostname   → "stable"  (berubah hanya saat operator mengganti)
+ *   - cpu/mem    → "session" (model/ukuran bisa berarti mesin lain)
+ *   - interface  → "stable" hanya bila MAC nyata DAN unik dalam siklus;
+ *                  MAC ganda → kunci deterministik per-nama + klaim
+ *                  "session" yang jujur. Identitas akhir SELALU lewat
+ *                  canonicalDeviceId().
  */
 
 const os = require("node:os");
@@ -36,15 +36,15 @@ function createHostSelfDiscoveryAdapter(deps = {}) {
 
             const cpus = sys.cpus();
             const totalMem = sys.totalmem();
-
+            const hostKey = slug(sys.hostname());
             const hostId = canonicalDeviceId({
-                namespace: "host.os", stableKey: slug(sys.hostname())
+                namespace: "host.os", stableKey: hostKey
             });
-            const cpuId = canonicalDeviceId({
-                namespace: "host.os",
-                stableKey: `cpu-${sha256Hex(
-                    `${cpus[0]?.model ?? "unknown"}|${cpus.length}`).slice(0, 12)}`
-            });
+
+            // Kunci CPU konsisten antara deviceId dan identity.stableKey:
+            const cpuKey =
+                `cpu-${sha256Hex(
+                    `${cpus[0]?.model ?? "unknown"}|${cpus.length}`).slice(0, 12)}`;
 
             const descriptors = [
                 {
@@ -53,21 +53,21 @@ function createHostSelfDiscoveryAdapter(deps = {}) {
                     displayName: sys.hostname(),
                     identity: {
                         namespace: "host.os",
-                        stableKey: slug(sys.hostname()),
+                        stableKey: hostKey,
                         stability: IDENTITY_STABILITY.stable
                     },
                     capabilities: ["device.health.read"],
                     metadata: { platform: sys.platform(), arch: sys.arch() }
                 },
                 {
-                    deviceId: cpuId,
+                    deviceId: canonicalDeviceId({
+                        namespace: "host.os", stableKey: cpuKey
+                    }),
                     deviceClass: DEVICE_CLASSES.CPU,
                     displayName: cpus[0]?.model?.slice(0, 80) ?? "CPU",
                     identity: {
                         namespace: "host.os",
-                        stableKey: fallbackStableKey({
-                            model: cpus[0]?.model ?? "?", count: cpus.length
-                        }),
+                        stableKey: cpuKey,
                         stability: IDENTITY_STABILITY.session
                     },
                     capabilities: [],
@@ -87,32 +87,10 @@ function createHostSelfDiscoveryAdapter(deps = {}) {
                     capabilities: [],
                     metadata: { totalBytes: String(totalMem) }
                 },
-                ...Object.entries(sys.networkInterfaces()).flatMap(([name, addrs]) => {
-                    const mac = addrs?.find(a => a.mac && a.mac !== "00:00:00:00:00:00")?.mac;
-                    // Antarmuka internal loopback tidak dilaporkan — bukan
-                    // tepi tubuh yang sesungguhnya.
-                    if (!addrs?.some(a => !a.internal)) return [];
-                    const key = mac ? slug(mac)
-                        : fallbackStableKey({ name, kind: "no-mac" });
-                    return [{
-                        deviceId: `net.os:${key}`,
-                        deviceClass: DEVICE_CLASSES.NETWORK_INTERFACE,
-                        displayName: name,
-                        identity: {
-                            namespace: "net.os", stableKey: key,
-                            stability: mac
-                                ? IDENTITY_STABILITY.stable
-                                : IDENTITY_STABILITY.session
-                        },
-                        capabilities: ["network.observe"],
-                        relationships: [{ type: "attached_to", fromId: `net.os:${key}`, toId: hostId }],
-                        metadata: { name, hasMac: Boolean(mac) }
-                    }];
-                })
+                ...nicDescriptors(sys, hostId)
             ];
 
-            // relasi host → anak ditempelkan dari sisi anak (attached_to),
-            // CPU/memori juga dilampirkan ke host:
+            // Relasi host → anak ditempel dari sisi anak (attached_to):
             for (const d of descriptors) {
                 if (d.deviceId !== hostId && !d.relationships) {
                     d.relationships =
@@ -123,6 +101,55 @@ function createHostSelfDiscoveryAdapter(deps = {}) {
             return [{ discover: descriptors }];
         }
     });
+}
+
+/**
+ * Deskriptor antarmuka jaringan. Dua NIC dengan MAC sama TETAP dua
+ * perangkat: kunci memuat nama kanonik + MAC; bila MAC terduplikasi
+ * dalam satu siklus, kestabilan diturunkan jujur ke "session".
+ */
+function nicDescriptors(sys, hostId) {
+    const ifaces = Object.entries(sys.networkInterfaces())
+        .filter(([, addrs]) => addrs?.some(a => !a.internal));
+
+    // Hitung kemunculan tiap MAC non-kosong dalam siklus ini:
+    const macCounts = new Map();
+    for (const [, addrs] of ifaces) {
+        const mac = addrs.find(a => a.mac && a.mac !== "00:00:00:00:00:00")?.mac;
+        if (mac) macCounts.set(mac, (macCounts.get(mac) ?? 0) + 1);
+    }
+
+    return ifaces.map(([name, addrs]) => {
+        const mac = addrs.find(a => a.mac && a.mac !== "00:00:00:00:00:00")?.mac;
+        const macUnique = Boolean(mac) && macCounts.get(mac) === 1;
+
+        const stableKey = macUnique
+            ? `${slug(name)}-${slug(mac)}`
+            : fallbackStableKey({ name, mac: mac ?? null, kind: "ambiguous-nic" });
+
+        return {
+            deviceId: canonicalDeviceId({
+                namespace: "net.os", stableKey
+            }),
+            deviceClass: DEVICE_CLASSES.NETWORK_INTERFACE,
+            displayName: name,
+            identity: {
+                namespace: "net.os",
+                stableKey,
+                // Klaim jujur: "stable" hanya bila kombinasi nama+MAC
+                // benar-benar unik; selain itu sesi.
+                stability: macUnique
+                    ? IDENTITY_STABILITY.stable
+                    : IDENTITY_STABILITY.session
+            },
+            capabilities: ["network.observe"],
+            relationships: [{ type: "attached_to", fromId: null, toId: hostId }],
+            metadata: { name, hasMac: Boolean(mac), macShared: !macUnique }
+        };
+    }).map(d => ({
+        ...d,
+        relationships: d.relationships.map(r => ({ ...r, fromId: d.deviceId }))
+    }));
 }
 
 module.exports = { createHostSelfDiscoveryAdapter };

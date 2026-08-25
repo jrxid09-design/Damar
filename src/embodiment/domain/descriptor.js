@@ -57,9 +57,11 @@ function normalizeCapabilityClaim(raw) {
 
 /**
  * Normalisasi deskriptor mentah dari adapter menjadi rekaman beku.
- * `nowMs` dipakai untuk checkedAt kesehatan bila tidak disertakan.
+ * IDEM POTEN: menormalisasi hasil normalisasi menghasilkan byte yang
+ * sama — syarat agar digest durable stabil lintas siklus restore.
+ * (Stempel waktu kesehatan diisi penuh oleh jalur event, bukan di sini.)
  */
-function normalizeDescriptor(raw, { nowMs } = {}) {
+function normalizeDescriptor(raw) {
 
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
         throw fail("EMB_INVALID_DESCRIPTOR", "deskriptor bukan objek");
@@ -105,7 +107,8 @@ function normalizeDescriptor(raw, { nowMs } = {}) {
 
     const capabilities = (raw.capabilities ?? []).map(normalizeCapabilityClaim);
 
-    let health = { status: HEALTH_STATES.unknown };
+    // Bentuk kanonik PENUH sejak default — kunci idempotensi digest.
+    let health = { status: HEALTH_STATES.unknown, detail: null, checkedAt: null };
     if (raw.health != null) {
         if (!HEALTH_STATES[raw.health.status]) {
             throw fail("EMB_UNKNOWN_HEALTH_STATE",
@@ -116,8 +119,7 @@ function normalizeDescriptor(raw, { nowMs } = {}) {
             detail: raw.health.detail != null
                 ? String(raw.health.detail).slice(0, 200) : null,
             checkedAt: raw.health.checkedAt != null
-                ? String(raw.health.checkedAt).slice(0, 40)
-                : new Date(nowMs ?? Date.now()).toISOString()
+                ? String(raw.health.checkedAt).slice(0, 40) : null
         };
     }
 
@@ -134,6 +136,13 @@ function normalizeDescriptor(raw, { nowMs } = {}) {
         const keys = Object.keys(raw.metadata);
         if (keys.length > 32) {
             throw fail("EMB_METADATA_TOO_LARGE", "metadata > 32 field");
+        }
+        // Kunci prototipe berbahaya gagal-tutup — bukan hilang diam-diam.
+        for (const key of keys) {
+            if (key === "__proto__" || key === "constructor" || key === "prototype") {
+                throw fail("EMB_INVALID_METADATA",
+                    `kunci metadata terlarang: '${key}'`);
+            }
         }
         metadata = structuredMetadata(raw.metadata);
     }

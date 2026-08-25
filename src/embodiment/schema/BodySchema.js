@@ -1,38 +1,48 @@
 /**
- * BodySchema — skema tubuh komputasi kanonik (B§6).
+ * BodySchema — skema tubuh komputasi kepercayaan-keras (B§6, revisi v1).
  *
- * ATURAN TULIS TUNGGAL: satu-satunya cara mengubah state adalah
- * ingest(event). Event hanya diterima dari produsen TERDAFTAR
- * (discovery adapter / sensorium.core). Model bahasa, teks pengguna,
- * maupun referensi objek dari luar TIDAK punya jalur tulis — snapshot
- * dibekukan dan rekaman internal diganti-ganti utuh (immutable swap).
+ * ATURAN TULIS TUNGGAL + ATOMIK: satu-satunya cara mengubah state adalah
+ * ingest(event). Setiap event melalui dua fase:
+ *   1) PLAN  — seluruh validasi (bentuk, produsen, deskriptor, subjek,
+ *              relasi, klaim, keberadaan entitas) berjalan TANPA mutasi.
+ *   2) COMMIT— hanya bila plan lolos seluruhnya, state diubah.
+ * Jadi `accepted:false` SELALU berarti nol mutasi (byte-identik), dan
+ * `accepted:true` tidak pernah dibatalkan oleh kesalahan pelanggan hook.
  *
- * Event cacat / produsen asing tidak pernah bermutasi state diam-diam;
- * semuanya dicatat ke deadLetters untuk diagnosis.
+ * PRODUSEN INTI TIDAK-DAPAT-DIPALSUKAN: event kelas "core" hanya sah bila
+ * membawa token simbol privat modul ini (CORE_TOKEN). Objek event buatan
+ * pihak luar tidak mungkin memilikinya — penyamaan string "sensorium.core"
+ * saja tidak pernah cukup.
  *
- * Lapisan ini TANPA LLM, TANPA Console, TANPA otoritas: ia bisa hidup
- * sendirian di proses mana pun (invariant G).
+ * KONVERGENSI BEBAS URUTAN KEDATANGAN: konten deskriptor dan kehadiran
+ * (presence) masing-masing memakai urutan totalnya sendiri; himpunan
+ * observasi yang sama selalu berkonvergen ke state yang sama.
+ *
+ * Event cacat / produsen asing dicarta ke deadLetters — tidak pernah ada
+ * mutasi diam-diam.
  */
 
 const {
-    deepFreeze, structuredCopy, digestOf, fail,
-    realClock, clamp01
+    deepFreeze, structuredCopy, digestOf, canonicalJson, fail,
+    realClock
 } = require("../core/util");
 const { validateDeviceId } = require("../core/identity");
 const {
-    DEVICE_CLASSES, DEVICE_STATES, HEALTH_STATES, RELATIONSHIP_TYPES,
-    PREFERENCE_TYPES, isValidCapability, classifyCapability
+    DEVICE_CLASSES, DEVICE_STATES, HEALTH_STATES,
+    PREFERENCE_TYPES, RELATIONSHIP_TYPES, isValidCapability, classifyCapability
 } = require("../domain/types");
 const { assertCapability, normalizeDescriptor, normalizeCapabilityClaim }
     = require("../domain/descriptor");
 const {
-    EVENT_TYPES, CORE_SOURCE, makeEvent, validateEventShape
+    EVENT_TYPES, CORE_SOURCE, CORE_TOKEN, makeCoreEvent, validateEventShape
 } = require("../sensorium/events");
 
 const DEFAULTS = Object.freeze({
     observationCapacity: 32,     // observasi = EPHEMERAL, cincin terbatas
     deadLetterCapacity: 100,
-    journalCapacity: 4096
+    journalCapacity: 4096,
+    analysisRequestCapacity: 10_000,
+    subscriberErrorCapacity: 50
 });
 
 const STRUCTURAL_RELATIONSHIP_TYPES = Object.freeze([
@@ -42,7 +52,7 @@ const STRUCTURAL_RELATIONSHIP_TYPES = Object.freeze([
 
 const CHANNEL_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,119}$/;
 
-/** Urutan total antar-observasi deskriptor — bebas arah kedatangan. */
+/** Urutan total KONTEN antar-pengamatan deskriptor. */
 function newerWins(a, b) {
     // 1) confidence lebih tinggi menang
     if (a.confidence !== b.confidence) return a.confidence > b.confidence ? a : b;
@@ -52,6 +62,18 @@ function newerWins(a, b) {
     if (a.timestampMs !== b.timestampMs) return a.timestampMs > b.timestampMs ? a : b;
     // 4) digest kanonik lebih kecil menang — tie sempurna pun total
     return a.digest <= b.digest ? a : b;
+}
+
+/**
+ * Urutan total KEHADIRAN (presence) — independen dari urutan kedatangan.
+ * Terbaru menang; seri → confidence tinggi; seri → sumber kecil; tie
+ * sempurna → nama state kanonik terkecil ("offline" < "online" < "removed").
+ */
+function presenceWins(a, b) {
+    if (a.timestampMs !== b.timestampMs) return a.timestampMs > b.timestampMs ? a : b;
+    if (a.confidence !== b.confidence) return a.confidence > b.confidence ? a : b;
+    if (a.source !== b.source) return a.source < b.source ? a : b;
+    return a.state <= b.state ? a : b;
 }
 
 class BodySchema {
@@ -69,13 +91,14 @@ class BodySchema {
         this._lastDefaults = new Map();  // purpose -> resolved deviceId|null
         this._journal = [];
         this._deadLetters = [];
+        this._subscriberErrors = [];
         this._subscribers = new Set();
         this._deriving = false;
     }
 
-    /* ----------------------- jalur tulis tunggal ---------------------- */
+    /* -------------------- batas kepercayaan produsen ------------------- */
 
-    /** Daftarkan produsen observasi tepercaya (id adapter discovery). */
+    /** Daftarkan produsen observasi tepercaya — TINDAKAN OPERATOR. */
     registerProducer(source) {
         if (!/^[a-z][a-z0-9._-]{2,63}$/.test(String(source ?? ""))) {
             throw fail("EMB_INVALID_PRODUCER_ID", `id produsen tidak sah: '${source}'`);
@@ -84,9 +107,13 @@ class BodySchema {
         return this;
     }
 
+    isProducerRegistered(source) {
+        return this._producers.has(source);
+    }
+
     /**
-     * Satu-satunya pintu mutasi state. Tidak pernah melempar untuk input
-     * kotor — penolakan tercatat diagnostik (gagal-tutup tanpa drama).
+     * Satu-satunya pintu mutasi state. Atomik per event: penolakan
+     * tidak pernah meninggalkan state setengah jadi.
      */
     ingest(event) {
 
@@ -95,252 +122,201 @@ class BodySchema {
 
         const producerClass = EVENT_TYPES[event.type].producerClass;
 
-        if (producerClass === "core" && event.source !== CORE_SOURCE) {
-            return this._reject("event-inti-dari-sumber-asing", event);
-        }
-        if (producerClass === "adapter" && !this._producers.has(event.source)) {
-            // INVARIANT B/C: teks/referensi dari pihak tak-tepercaya
-            // tidak pernah sampai ke reducer.
-            return this._reject("produsen-tidak-terdaftar", event);
+        if (producerClass === "core") {
+            // Event inti hanya sah dari jalur internal bertoken.
+            if (event.source !== CORE_SOURCE) {
+                return this._reject("event-inti-dari-sumber-asing", event);
+            }
+            if (event[CORE_TOKEN] !== CORE_TOKEN) {
+                return this._reject("event-inti-tanpa-token", event);
+            }
+        } else {
+            // INVARIANT B/C: pihak tak-tepercaya tidak pernah sampai reducer;
+            // provenance sistem juga cadangan jalur inti.
+            if (!this._producers.has(event.source)) {
+                return this._reject("produsen-tidak-terdaftar", event);
+            }
+            if (event.provenance === "SYSTEM_EVENT") {
+                return this._reject("provenance-inti-dipalsukan", event);
+            }
         }
 
         try {
-            const result = this._apply(event);
+            const plan = this._plan(event);          // fase 1: validasi penuh
+            const result = this._commit(plan, event);// fase 2: mutasi sekali
 
-            if (this._journal.length >= this.config.journalCapacity) {
-                this._journal.shift();
-            }
-            this._journal.push(event);
+            this._pushJournal(event);
 
             if (!event.payload?.derived) {
-                this._deriveDefaultChanges(event);
+                this._deriveDefaultChanges();
             }
 
-            for (const fn of this._subscribers) {
-                fn(event, result);
-            }
+            // Notifikasi SETELAH komit; kegagalan callback terisolasi
+            // per pelanggan dan tidak pernah mengubah status event.
+            this._notify(event, result);
             return { accepted: true, ...result };
         } catch (err) {
             return this._reject(err.code || "applier-gagal", event);
         }
     }
 
-    _apply(event) {
+    /* ----------------------- fase 1: RENCANA --------------------------- */
+
+    /**
+     * Validasi menyeluruh TANPA menyentuh state hidup. Melempar (kode
+     * EMB_*) berarti event ditolak sebelum satu byte pun berubah.
+     */
+    _plan(event) {
         switch (event.type) {
-            case "DEVICE_DISCOVERED": return this._applyDiscovered(event, { allowNew: true });
-            case "DEVICE_CHANGED": return this._applyDiscovered(event, { allowNew: false });
-            case "DEVICE_ONLINE": return this._applyState(event, DEVICE_STATES.ONLINE);
-            case "DEVICE_OFFLINE": return this._applyState(event, DEVICE_STATES.OFFLINE);
-            case "DEVICE_REMOVED": return this._applyState(event, DEVICE_STATES.REMOVED);
-            case "DEVICE_HEALTH_CHANGED": return this._applyHealth(event);
-            case "CAPABILITY_DISCOVERED": return this._applyCapability(event);
-            case "SENSOR_OBSERVATION": return this._applyObservation(event);
-            case "DEVICE_DEFAULT_CHANGED": return this._applyPreference(event);
+            case "DEVICE_DISCOVERED":
+                return this._planDiscovered(event, { allowNew: true });
+            case "DEVICE_CHANGED":
+                return this._planDiscovered(event, { allowNew: false });
+            case "DEVICE_ONLINE":
+                return this._planPresence(event, DEVICE_STATES.ONLINE);
+            case "DEVICE_OFFLINE":
+                return this._planPresence(event, DEVICE_STATES.OFFLINE);
+            case "DEVICE_REMOVED":
+                return this._planPresence(event, DEVICE_STATES.REMOVED);
+            case "DEVICE_HEALTH_CHANGED": return this._planHealth(event);
+            case "CAPABILITY_DISCOVERED": return this._planCapability(event);
+            case "SENSOR_OBSERVATION": return this._planObservation(event);
+            case "DEVICE_DEFAULT_CHANGED": return this._planPreference(event);
             case "UNKNOWN_DEVICE_REQUIRES_ANALYSIS":
-                return this._applyAnalysisRequested(event);
+                return { kind: "analysis-requested" };
             default:
                 throw fail("EMB_UNKNOWN_EVENT_TYPE", `tipe tak tertangani: ${event.type}`);
         }
     }
 
-    /* ----------------------------- applier ---------------------------- */
-
-    _applyDiscovered(event, { allowNew }) {
+    _planDiscovered(event, { allowNew }) {
 
         const raw = event.payload.descriptor;
         if (!raw || typeof raw !== "object") {
             throw fail("EMB_INVALID_PAYLOAD", "payload.descriptor hilang");
         }
-        const descriptor = normalizeDescriptor(raw, { nowMs: event.timestampMs });
+        const descriptor = normalizeDescriptor(raw);
+
+        // Subjek event WAJIB identitas yang benar-benar dimutasi — jurnal
+        // forensik tidak boleh menunjuk A sambil mengubah B.
+        if (event.subject !== descriptor.deviceId) {
+            throw fail("EMB_SUBJECT_MISMATCH",
+                `subjek '${event.subject}' != deskriptor '${descriptor.deviceId}'`);
+        }
 
         const existing = this._devices.get(descriptor.deviceId);
-        let record = existing;
-
-        if (!existing) {
-            if (!allowNew) {
-                throw fail("EMB_DEVICE_UNKNOWN",
-                    `perangkat belum terdaftar: ${descriptor.deviceId}`);
-            }
-            record = {
-                descriptor,
-                meta: {
-                    confidence: event.confidence,
-                    source: event.source,
-                    timestampMs: event.timestampMs,
-                    digest: digestOf(descriptor)
-                },
-                capabilities: new Map(),
-                firstSeenAtMs: event.timestampMs,
-                lastSeenAtMs: event.timestampMs
-            };
-            this._devices.set(descriptor.deviceId, record);
-        } else {
-            // Pengamatan ulang menyiratkan kehadiran — state ikut laporan
-            // terbaru yang MENANG menurut urutan total.
-            const candidate = {
-                confidence: event.confidence,
-                source: event.source,
-                timestampMs: event.timestampMs,
-                digest: digestOf(descriptor)
-            };
-            if (newerWins(candidate, record.meta) === candidate) {
-                record.descriptor = descriptor;
-                record.meta = candidate;
-            } else if (record.descriptor.state !== descriptor.state) {
-                // Kehadiran itu temporal: pengamatan "terlihat lagi" SELALU
-                // menang untuk state (rediscovery memulihkan yang hilang),
-                // meski konten deskriptornya kalah urutan total.
-                record.descriptor = deepFreeze({
-                    ...record.descriptor, state: descriptor.state
-                });
-                record.meta = {
-                    ...record.meta, digest: digestOf(record.descriptor)
-                };
-            }
-            record.lastSeenAtMs = Math.max(record.lastSeenAtMs, event.timestampMs);
+        if (!existing && !allowNew) {
+            throw fail("EMB_DEVICE_UNKNOWN",
+                `perangkat belum terdaftar: ${descriptor.deviceId}`);
         }
 
-        for (const claim of descriptor.capabilities) {
-            this._mergeClaim(record, claim);
-        }
+        // Klaim kemampuan divalidasi ulang di sini (normalizeDescriptor
+        // sudah melakukannya; eksplisit demi kejelasan batas validasi).
+        const claims = descriptor.capabilities.map(c =>
+            normalizeCapabilityClaim(c));
 
-        for (const rel of event.payload.relationships ?? []) {
-            this._applyStructuralRelationship(rel, event);
-        }
+        // Seluruh relasi tervalidasi SEBELUM komit — ujung hantu ditolak.
+        const knownIds = new Set(this._devices.keys());
+        knownIds.add(descriptor.deviceId);   // perangkat baru ikut sah sebagai ujung 'from'
+        const relationships = (event.payload.relationships ?? []).map(rel =>
+            this._validateStructuralRelationship(rel, knownIds));
 
-        if (record.descriptor.deviceClass === DEVICE_CLASSES.UNKNOWN
-            && !this._analysisRequested.has(descriptor.deviceId)) {
-            this._emitAnalysisRequested(descriptor, event);
-        }
+        const candidate = deepFreeze({
+            confidence: event.confidence,
+            source: event.source,
+            timestampMs: event.timestampMs,
+            digest: digestOf(descriptor)
+        });
 
-        return { deviceId: descriptor.deviceId, isNew: !existing };
+        const presence = deepFreeze({
+            state: descriptor.state,
+            timestampMs: event.timestampMs,
+            confidence: event.confidence,
+            source: event.source
+        });
+
+        return {
+            kind: "device-content",
+            deviceId: descriptor.deviceId,
+            isNew: !existing,
+            descriptor, claims, candidate, presence, relationships
+        };
     }
 
-    _applyState(event, state) {
+    _planPresence(event, state) {
         const record = this._devices.get(event.subject);
-        if (!record) throw fail("EMB_DEVICE_UNKNOWN", `perangkat tidak dikenal: ${event.subject}`);
-        if (record.descriptor.state !== state) {
-            record.descriptor = deepFreeze({
-                ...record.descriptor, state
-            });
-            record.meta = { ...record.meta, digest: digestOf(record.descriptor) };
+        if (!record) {
+            throw fail("EMB_DEVICE_UNKNOWN",
+                `perangkat tidak dikenal: ${event.subject}`);
         }
-        return { deviceId: event.subject, state };
+        return {
+            kind: "presence",
+            deviceId: event.subject,
+            state,
+            proposal: deepFreeze({
+                state, timestampMs: event.timestampMs,
+                confidence: event.confidence, source: event.source
+            })
+        };
     }
 
-    _applyHealth(event) {
+    _planHealth(event) {
         const record = this._devices.get(event.subject);
-        if (!record) throw fail("EMB_DEVICE_UNKNOWN", `perangkat tidak dikenal: ${event.subject}`);
+        if (!record) {
+            throw fail("EMB_DEVICE_UNKNOWN",
+                `perangkat tidak dikenal: ${event.subject}`);
+        }
         const status = event.payload.health?.status;
         if (!HEALTH_STATES[status]) {
-            throw fail("EMB_UNKNOWN_HEALTH_STATE", `kesehatan tidak dikenal: '${status}'`);
+            throw fail("EMB_UNKNOWN_HEALTH_STATE",
+                `kesehatan tidak dikenal: '${status}'`);
         }
-        const health = deepFreeze({
-            status,
+        return {
+            kind: "health", deviceId: event.subject, status,
             detail: event.payload.health.detail != null
-                ? String(event.payload.health.detail).slice(0, 200) : null,
-            checkedAt: new Date(event.timestampMs).toISOString()
-        });
-        record.descriptor = deepFreeze({ ...record.descriptor, health });
-        record.meta = { ...record.meta, digest: digestOf(record.descriptor) };
-        return { deviceId: event.subject, health };
+                ? String(event.payload.health.detail).slice(0, 200) : null
+        };
     }
 
-    _applyCapability(event) {
+    _planCapability(event) {
         const record = this._devices.get(event.subject);
-        if (!record) throw fail("EMB_DEVICE_UNKNOWN", `perangkat tidak dikenal: ${event.subject}`);
-        const claim = normalizeCapabilityClaim(event.payload.capability);
-        this._mergeClaim(record, claim);
-        return { deviceId: event.subject, capability: claim.name };
-    }
-
-    _mergeClaim(record, incoming) {
-        const current = record.capabilities.get(incoming.name);
-        if (current) {
-            const better =
-                incoming.confidence > current.confidence ||
-                (incoming.confidence === current.confidence &&
-                    incoming.source <= current.source);
-            if (!better) return;
+        if (!record) {
+            throw fail("EMB_DEVICE_UNKNOWN",
+                `perangkat tidak dikenal: ${event.subject}`);
         }
-        record.capabilities.set(incoming.name, incoming);
-        record.descriptor = deepFreeze({
-            ...record.descriptor,
-            capabilities: [...record.capabilities.values()]
-        });
-        record.meta = { ...record.meta, digest: digestOf(record.descriptor) };
+        const claim = normalizeCapabilityClaim(event.payload.capability);
+        return { kind: "claim", deviceId: event.subject, claim };
     }
 
-    _applyObservation(event) {
+    _planObservation(event) {
         const record = this._devices.get(event.subject);
-        if (!record) throw fail("EMB_DEVICE_UNKNOWN", `observasi untuk perangkat tak dikenal`);
+        if (!record) {
+            throw fail("EMB_DEVICE_UNKNOWN", "observasi untuk perangkat tak dikenal");
+        }
         const channel = event.payload.channel;
         if (!channel || !CHANNEL_ID_PATTERN.test(String(channel.id ?? ""))) {
             throw fail("EMB_INVALID_CHANNEL", "kanal observasi tidak sah");
         }
         const classification = classifyCapability(String(channel.id));
-        if (!classification) {
+        // Sensor mengamati; ia tidak menyentuh kanal aktuasi (invariant F).
+        if (!classification || classification.direction !== "sensor") {
             throw fail("EMB_INVALID_CHANNEL",
-                `kanal bukan kemampuan sensor/aktuator: '${channel.id}'`);
+                `kanal observasi bukan sensor: '${channel.id}'`);
         }
         const sample = JSON.stringify(event.payload.sample ?? null);
         if (sample.length > 2048) {
             throw fail("EMB_OBSERVATION_TOO_LARGE", "sampel observasi > 2KB");
         }
-
-        if (!this._observations.has(channel.id)) {
-            this._observations.set(channel.id, []);
-        }
-        const ring = this._observations.get(channel.id);
-        if (ring.length >= this.config.observationCapacity) ring.shift();
-        ring.push(Object.freeze({
-            channelId: channel.id,
-            modality: classification.modality,
-            deviceId: event.subject,
-            sample: event.payload.sample ?? null,
-            confidence: event.confidence,
-            source: event.source,
-            atMs: event.timestampMs
-        }));
-        return { deviceId: event.subject, channelId: channel.id };
+        return {
+            kind: "observation", deviceId: event.subject,
+            channelId: channel.id, modality: classification.modality,
+            sample: event.payload.sample ?? null
+        };
     }
 
-    _applyStructuralRelationship(raw, event) {
-        if (!raw || typeof raw !== "object") {
-            throw fail("EMB_INVALID_RELATIONSHIP", "relasi bukan objek");
-        }
-        const { type, fromId, toId } = raw;
-        if (!STRUCTURAL_RELATIONSHIP_TYPES.includes(type)) {
-            throw fail("EMB_UNKNOWN_RELATIONSHIP_TYPE",
-                `tipe relasi struktural tidak dikenal: '${type}'`);
-        }
-        // Ujung 'from' wajib entitas yang sudah dikenal — tidak ada titik hantu.
-        if (!validateDeviceId(fromId) || !this._devices.has(fromId)) {
-            throw fail("EMB_RELATIONSHIP_DANGLING_FROM",
-                `ujung 'from' tidak dikenal: '${fromId}'`);
-        }
-        let target = null;
-        if (type === "provides") {
-            assertCapability(toId);           // target kemampuan, bukan entitas
-            target = `cap:${toId}`;
-        } else {
-            if (!validateDeviceId(toId) || !this._devices.has(toId)) {
-                throw fail("EMB_RELATIONSHIP_DANGLING_TO",
-                    `ujung 'to' tidak dikenal: '${toId}'`);
-            }
-            target = toId;
-        }
-        this._setRel(deepFreeze({
-            type, fromId, toId: target,
-            rank: Number.isFinite(raw.rank) ? raw.rank : null,
-            source: event.source,
-            observedAtMs: event.timestampMs
-        }));
-    }
-
-    _applyPreference(event) {
+    _planPreference(event) {
         const p = event.payload;
-        if (!p.explicit) return { passthrough: true };   // turunan: hanya jurnal
+        if (!p.explicit) return { kind: "passthrough" };   // turunan: hanya jurnal
 
         const kind = p.kind;
         if (!["default", "preferred", "fallback", "clear"].includes(kind)) {
@@ -349,52 +325,291 @@ class BodySchema {
         assertCapability(p.purpose);
 
         if (kind === "clear") {
-            for (const [key, rel] of [...this._rels]) {
-                if ([...PREFERENCE_TYPES].includes(rel.type)
-                    && rel.toId === `cap:${p.purpose}`
-                    && (p.deviceId == null || rel.fromId === p.deviceId)) {
-                    this._rels.delete(key);
-                }
-            }
-            return { cleared: true };
+            return { kind: "preference-clear", purpose: p.purpose, deviceId: p.deviceId ?? null };
         }
 
-        const relType = { default: "default_for", preferred: "preferred_for", fallback: "fallback_for" }[kind];
-
         if (!validateDeviceId(p.deviceId) || !this._devices.has(p.deviceId)) {
-            throw fail("EMB_DEVICE_UNKNOWN", `preferensi untuk perangkat tak dikenal: '${p.deviceId}'`);
+            throw fail("EMB_DEVICE_UNKNOWN",
+                `preferensi untuk perangkat tak dikenal: '${p.deviceId}'`);
         }
         if (!this._devices.get(p.deviceId).capabilities.has(p.purpose)) {
             throw fail("EMB_CAPABILITY_MISMATCH",
                 `${p.deviceId} tidak menyediakan ${p.purpose}`);
         }
+        return {
+            kind: "preference-set", purpose: p.purpose, deviceId: p.deviceId,
+            relType: { default: "default_for", preferred: "preferred_for", fallback: "fallback_for" }[kind],
+            rank: Number.isFinite(p.rank) ? p.rank : 0
+        };
+    }
 
-        if (kind === "default") {
+    /** Validasi relasi struktural — murni, tanpa mutasi. */
+    _validateStructuralRelationship(raw, knownIds) {
+        if (!raw || typeof raw !== "object") {
+            throw fail("EMB_INVALID_RELATIONSHIP", "relasi bukan objek");
+        }
+        const { type, fromId, toId } = raw;
+        if (!STRUCTURAL_RELATIONSHIP_TYPES.includes(type)) {
+            throw fail("EMB_UNKNOWN_RELATIONSHIP_TYPE",
+                `tipe relasi struktural tidak dikenal: '${type}'`);
+        }
+        if (!validateDeviceId(fromId) || !knownIds.has(fromId)) {
+            throw fail("EMB_RELATIONSHIP_DANGLING_FROM",
+                `ujung 'from' tidak dikenal: '${fromId}'`);
+        }
+        let target = null;
+        if (type === "provides") {
+            assertCapability(toId);           // target kemampuan, bukan entitas
+            target = `cap:${toId}`;
+        } else {
+            if (!validateDeviceId(toId) || !knownIds.has(toId)) {
+                throw fail("EMB_RELATIONSHIP_DANGLING_TO",
+                    `ujung 'to' tidak dikenal: '${toId}'`);
+            }
+            target = toId;
+        }
+        return deepFreeze({
+            type, fromId, toId: target,
+            rank: Number.isFinite(raw.rank) ? raw.rank : null,
+            observedAtMs: null   // diisi saat komit dari event
+        });
+    }
+
+    /* ------------------------ fase 2: KOMIT ---------------------------- */
+
+    _commit(plan, event) {
+        switch (plan.kind) {
+            case "device-content": return this._commitContent(plan, event);
+            case "presence": return this._commitPresence(plan);
+            case "health": return this._commitHealth(plan, event);
+            case "claim": return this._commitClaim(plan);
+            case "observation": return this._commitObservation(plan, event);
+            case "preference-set": return this._commitPreferenceSet(plan, event);
+            case "preference-clear": return this._commitPreferenceClear(plan);
+            case "analysis-requested":
+                this._analysisRequested.add(event.subject);
+                this._capAnalysisRequested();
+                return { analysisRequested: event.subject };
+            case "passthrough":
+                return { passthrough: true };
+            default:
+                throw fail("EMB_INTERNAL", `rencana tak dikenal: ${plan.kind}`);
+        }
+    }
+
+    _commitContent(plan, event) {
+
+        let record = this._devices.get(plan.deviceId);
+
+        if (!record) {
+            record = {
+                descriptor: plan.descriptor,
+                meta: plan.candidate,
+                presence: plan.presence,
+                capabilities: new Map(),
+                firstSeenAtMs: event.timestampMs,
+                lastSeenAtMs: event.timestampMs
+            };
+            this._devices.set(plan.deviceId, record);
+        } else {
+            // Konten: urutan total newerWins (bebas arah kedatangan).
+            if (newerWins(plan.candidate, record.meta) === plan.candidate) {
+                record.meta = plan.candidate;
+                record.descriptor = plan.descriptor;
+            }
+            // Kehadiran: urutan total presenceWins — pengamatan usang
+            // yang datang belakangan TIDAK bisa menimpa state segar.
+            record.presence = presenceWins(plan.presence, record.presence);
+            record.lastSeenAtMs =
+                Math.max(record.lastSeenAtMs, event.timestampMs);
+        }
+
+        for (const claim of plan.claims) this._installClaim(record, claim);
+        this._syncRecord(record);
+
+        // Hook RE untuk perangkat UNKNOWN baru — event turunan internal.
+        if (plan.isNew
+            && record.descriptor.deviceClass === DEVICE_CLASSES.UNKNOWN
+            && !this._analysisRequested.has(plan.deviceId)) {
+            this._emitAnalysisRequested(record.descriptor, event);
+        }
+
+        for (const rel of plan.relationships) {
+            this._setRel(deepFreeze({
+                ...rel, observedAtMs: event.timestampMs, source: event.source
+            }));
+        }
+
+        return { deviceId: plan.deviceId, isNew: plan.isNew };
+    }
+
+    _commitPresence(plan) {
+        const record = this._devices.get(plan.deviceId);
+        record.presence = presenceWins(plan.proposal, record.presence);
+        this._syncRecord(record);
+        return { deviceId: plan.deviceId, state: record.descriptor.state };
+    }
+
+    _commitHealth(plan, event) {
+        const record = this._devices.get(plan.deviceId);
+        const health = deepFreeze({
+            status: plan.status,
+            detail: plan.detail,
+            checkedAt: new Date(event.timestampMs).toISOString()
+        });
+        record.descriptor = deepFreeze({ ...record.descriptor, health });
+        record.meta = deepFreeze({
+            ...record.meta, digest: digestOf(record.descriptor)
+        });
+        return { deviceId: plan.deviceId, health };
+    }
+
+    _commitClaim(plan) {
+        const record = this._devices.get(plan.deviceId);
+        this._installClaim(record, plan.claim);
+        this._syncRecord(record);
+        return { deviceId: plan.deviceId, capability: plan.claim.name };
+    }
+
+    /**
+     * Gabungkan klaim secara deterministik: persis-sama = NO-OP; prioritas
+     * sama (confidence+sumber) diselesaikan lewat JSON kanonik terkecil —
+     * bukan urutan kedatangan.
+     */
+    _installClaim(record, incoming) {
+        const current = record.capabilities.get(incoming.name);
+        if (current) {
+            if (canonicalJson(current) === canonicalJson(incoming)) return;
+            const better =
+                incoming.confidence > current.confidence ||
+                (incoming.confidence === current.confidence &&
+                    incoming.source < current.source) ||
+                (incoming.confidence === current.confidence &&
+                    incoming.source === current.source &&
+                    canonicalJson(incoming) < canonicalJson(current));
+            if (!better) return;
+        }
+        record.capabilities.set(incoming.name, incoming);
+    }
+
+    /** Materialisasi kanonik: capabilities TERURUT nama (+tie kanonik). */
+    _syncRecord(record) {
+        const capabilities = [...record.capabilities.values()]
+            .sort((a, b) =>
+                a.name.localeCompare(b.name) ||
+                canonicalJson(a).localeCompare(canonicalJson(b)));
+
+        record.descriptor = deepFreeze({
+            ...record.descriptor,
+            state: record.presence.state,
+            capabilities
+        });
+        record.meta = deepFreeze({
+            ...record.meta, digest: digestOf(record.descriptor)
+        });
+    }
+
+    _commitObservation(plan, event) {
+        if (!this._observations.has(plan.channelId)) {
+            this._observations.set(plan.channelId, []);
+        }
+        const ring = this._observations.get(plan.channelId);
+        if (ring.length >= this.config.observationCapacity) ring.shift();
+        ring.push(Object.freeze({
+            channelId: plan.channelId,
+            modality: plan.modality,
+            deviceId: plan.deviceId,
+            sample: plan.sample,
+            confidence: event.confidence,
+            source: event.source,
+            atMs: event.timestampMs
+        }));
+        return { deviceId: plan.deviceId, channelId: plan.channelId };
+    }
+
+    _commitPreferenceSet(plan, event) {
+        if (plan.relType === "default_for") {
             for (const [key, rel] of [...this._rels]) {
-                if (rel.type === "default_for" && rel.toId === `cap:${p.purpose}`) {
+                if (rel.type === "default_for" && rel.toId === `cap:${plan.purpose}`) {
                     this._rels.delete(key);      // satu default per tujuan
                 }
             }
         }
         this._setRel(deepFreeze({
-            type: relType,
-            fromId: p.deviceId,
-            toId: `cap:${p.purpose}`,
-            rank: Number.isFinite(p.rank) ? p.rank : 0,
+            type: plan.relType,
+            fromId: plan.deviceId,
+            toId: `cap:${plan.purpose}`,
+            rank: plan.rank,
             source: event.source,
             observedAtMs: event.timestampMs
         }));
-        return { deviceId: p.deviceId, purpose: p.purpose, kind };
+        return { deviceId: plan.deviceId, purpose: plan.purpose };
     }
 
-    _applyAnalysisRequested(event) {
-        this._analysisRequested.add(event.subject);
-        return { analysisRequested: event.subject };
+    _commitPreferenceClear(plan) {
+        for (const [key, rel] of [...this._rels]) {
+            if ([...PREFERENCE_TYPES].includes(rel.type)
+                && rel.toId === `cap:${plan.purpose}`
+                && (plan.deviceId == null || rel.fromId === plan.deviceId)) {
+                this._rels.delete(key);
+            }
+        }
+        return { cleared: true };
+    }
+
+    /* ------------------ event inti (bertoken, internal) ---------------- */
+
+    /**
+     * Pabrik event inti — meneruskan ke makeCoreEvent() internal modul,
+     * satu-satunya sumber CORE_TOKEN di semesta.
+     */
+    _makeCoreEvent(type, subject, payload) {
+        return makeCoreEvent({ type, subject, payload, clock: this.clock });
+    }
+
+    _emitAnalysisRequested(descriptor, triggerEvent) {
+        const deviceId = descriptor.deviceId;
+        this._analysisRequested.add(deviceId);
+        this._capAnalysisRequested();
+
+        const derived = this._makeCoreEvent(
+            "UNKNOWN_DEVICE_REQUIRES_ANALYSIS", deviceId,
+            {
+                evidence: {
+                    descriptorDigest: digestOf(descriptor),
+                    deviceClass: descriptor.deviceClass,
+                    capabilities: descriptor.capabilities.map(c => c.name),
+                    provenance: {
+                        source: triggerEvent.source,
+                        confidence: triggerEvent.confidence,
+                        observedAt: triggerEvent.timestamp
+                    },
+                    identity: descriptor.identity,
+                    metadata: descriptor.metadata
+                }
+            });
+
+        this._pushJournal(derived);
+        this._notify(derived, {});
+    }
+
+    _capAnalysisRequested() {
+        if (this._analysisRequested.size > this.config.analysisRequestCapacity) {
+            const oldest = this._analysisRequested.values().next().value;
+            this._analysisRequested.delete(oldest);
+        }
+    }
+
+    _pushJournal(event) {
+        if (this._journal.length >= this.config.journalCapacity) {
+            this._journal.shift();
+        }
+        this._journal.push(event);
     }
 
     /* ------------------- derivasi default (tanpa LLM) ------------------ */
 
-    _deriveDefaultChanges(triggerEvent) {
+    _deriveDefaultChanges() {
         if (this._deriving) return;
         this._deriving = true;
         try {
@@ -409,80 +624,42 @@ class BodySchema {
                 const prev = this._lastDefaults.get(purpose) ?? null;
                 if (now === prev) continue;      // null→null bukan perubahan
                 this._lastDefaults.set(purpose, now);
-                const derived = makeEvent({
-                    type: "DEVICE_DEFAULT_CHANGED",
-                    source: CORE_SOURCE,
-                    provenance: "SYSTEM_EVENT",
-                    subject: now ?? prev,
-                    payload: {
+                const derived = this._makeCoreEvent(
+                    "DEVICE_DEFAULT_CHANGED",
+                    now ?? prev,
+                    {
                         derived: true,
                         purpose,
                         previousDeviceId: prev,
                         nextDeviceId: now
-                    },
-                    clock: this.clock
-                });
-                this._journal.push(derived);
-                for (const fn of this._subscribers) fn(derived, {});
+                    });
+                this._pushJournal(derived);
+                this._notify(derived, {});
             }
         } finally {
             this._deriving = false;
         }
     }
 
-    _emitAnalysisRequested(descriptor, triggerEvent) {
-        const deviceId = descriptor.deviceId;
-        this._analysisRequested.add(deviceId);
-        const derived = makeEvent({
-            type: "UNKNOWN_DEVICE_REQUIRES_ANALYSIS",
-            source: CORE_SOURCE,
-            provenance: "SYSTEM_EVENT",
-            subject: deviceId,
-            payload: {
-                evidence: {
-                    descriptorDigest: digestOf(descriptor),
-                    deviceClass: descriptor.deviceClass,
-                    capabilities: descriptor.capabilities.map(c => c.name),
-                    provenance: {
-                        source: triggerEvent.source,
-                        confidence: triggerEvent.confidence,
-                        observedAt: triggerEvent.timestamp
-                    },
-                    identity: descriptor.identity,
-                    metadata: descriptor.metadata
-                }
-            },
-            clock: this.clock
-        });
-        this._journal.push(derived);
-        for (const fn of this._subscribers) fn(derived, {});
-    }
-
     /* ------------------------- preferensi publik ----------------------- */
 
     /**
-     * Preferensi default/preferred/fallback adalah KEBIJAKAN operator,
-     * bukan fakta penemuan — karena itu masuk lewat event inti eksplisit,
-     * bukan lewat adapter. Tetap satu jalur tulis: ingest().
+     * Preferensi adalah KEBIJAKAN operator — masuk lewat event inti
+     * eksplisit (bertoken internal), bukan lewat adapter.
      */
     setPreference({ purpose, kind = "preferred", deviceId, rank }) {
-        const event = makeEvent({
-            type: "DEVICE_DEFAULT_CHANGED",
-            source: CORE_SOURCE,
-            provenance: "SYSTEM_EVENT",
-            subject: deviceId ?? `policy.operator:clear-${this.clock.nowMs() % 1e9}`,
-            payload: { explicit: true, kind, purpose, deviceId: deviceId ?? null, rank },
-            clock: this.clock
-        });
+        const event = this._makeCoreEvent(
+            "DEVICE_DEFAULT_CHANGED",
+            deviceId ?? `policy.operator:clear-${this.clock.nowMs() % 1e9}`,
+            { explicit: true, kind, purpose, deviceId: deviceId ?? null, rank });
         return this.ingest(event);
     }
 
     /* ------------------------------ kueri ------------------------------ */
 
     /**
-     * Potret keadaan beku — imutabel penuh. Perubahan skema SETELAH
-     * potret tidak pernah menyentuh potret lama (dan sebaliknya):
-     * rekaman internal selalu diganti utuh, tak pernah diubah di tempat.
+     * Potret keadaan beku — imutabel dan TERLEPAS (tidak beralias dengan
+     * state hidup maupun potret lain).
      */
     snapshot() {
         return freezeView({
@@ -600,7 +777,11 @@ class BodySchema {
     }
 
     deadLetters(limit = 50) {
-        return this._deadLetters.slice(-limit);
+        return deepFreeze(structuredCopy(this._deadLetters.slice(-limit)));
+    }
+
+    subscriberErrors(limit = 20) {
+        return deepFreeze(structuredCopy(this._subscriberErrors.slice(-limit)));
     }
 
     journal() { return deepFreeze(structuredCopy(this._journal)); }
@@ -624,37 +805,63 @@ class BodySchema {
 
     /**
      * Titik kait sistem saraf otonomik masa depan: pelanggan MENERIMA
-     * event beku dan HANYA bisa membaca. Tidak ada API aksi di sini —
-     * refleks produksi (mis. pindah ke mikrofon cadangan) adalah ranah
-     * kebijakan berikutnya yang tetap wajib lewat Authority.
+     * event beku dan HANYA bisa membaca. Kegagalan callback dicatat
+     * terpisah (subscriberErrors) dan TIDAK pernah menggugurkan event
+     * yang telah dikomit.
      */
     subscribe(fn) {
         this._subscribers.add(fn);
         return () => this._subscribers.delete(fn);
     }
 
+    _notify(event, result) {
+        for (const fn of [...this._subscribers]) {
+            try {
+                fn(event, result);
+            } catch (err) {
+                if (this._subscriberErrors.length >= this.config.subscriberErrorCapacity) {
+                    this._subscriberErrors.shift();
+                }
+                this._subscriberErrors.push(Object.freeze({
+                    atMs: this.clock.nowMs(),
+                    eventId: event.eventId,
+                    message: String(err?.message ?? err).slice(0, 200)
+                }));
+            }
+        }
+    }
+
     /* --------------------------- persistensi --------------------------- */
 
-    /** Serialisasi DURABLE saja — identitas/riwayat, bukan observasi. */
+    /**
+     * Serialisasi DURABLE, TERLEPAS PENUH (deep-detached): tidak ada satu
+     * pun objek hidup yang bocor ke hasil — pemanggil bebas memutasi
+     * hasilnya tanpa pernah menyentuh skema.
+     */
     serialize() {
-        return {
+        const detached = structuredCopy({
             version: 1,
-            producers: [...this._producers].sort(),
+            producers: [...this._producers]
+                .filter(p => p !== CORE_SOURCE).sort(),
             devices: [...this._devices.values()]
                 .sort((a, b) => a.descriptor.deviceId.localeCompare(b.descriptor.deviceId))
                 .map(r => ({
                     descriptor: r.descriptor,
                     meta: r.meta,
-                    capabilities: [...r.capabilities.values()],
+                    capabilities: [...r.capabilities.values()]
+                        .sort((a, b) =>
+                            a.name.localeCompare(b.name) ||
+                            canonicalJson(a).localeCompare(canonicalJson(b))),
                     firstSeenAtMs: r.firstSeenAtMs,
                     lastSeenAtMs: r.lastSeenAtMs
                 })),
-            relationships: structuredCopy([...this._rels.values()])
+            relationships: [...this._rels.values()]
                 .sort((a, b) => `${a.type}|${a.fromId}|${a.toId}`
                     .localeCompare(`${b.type}|${b.fromId}|${b.toId}`)),
             preferencesResolved: Object.fromEntries(
                 [...this._lastDefaults.entries()].sort())
-        };
+        });
+        return deepFreeze(detached);
     }
 
     digestDurable() { return digestOf(this.serialize()); }
@@ -664,24 +871,155 @@ class BodySchema {
         await this.store.save(this.serialize());
     }
 
-    /** Hidupkan kembali skema dari serialisasi (jalur tepercaya internal). */
+    /**
+     * Hidupkan kembali dari serialisasi — BATAS INPUT TIDAK TERPERCAYA.
+     *
+     * Kebijakan gagal-tutup (A): SATU SAJA baris cacat menolak SELURUH
+     * snapshot. Tidak ada karantina parsial — state tubuh yang setengah
+     * dipulihkan lebih berbahaya daripada mulai dari nol. Semua baris
+     * melewati validator yang SAMA dengan jalur ingest:
+     *   - normalizeDescriptor (whitelist, enum, deviceId kanonik)
+     *   - verifikasi digest per deskriptor (anti-tamper)
+     *   - klaim kemampuan dinormalisasi ulang
+     *   - relasi: tipe struktural + kedua ujung harus ada (tanpa hantu)
+     * Diagnostik lengkap dilampirkan pada error.details.
+     */
     static restore(data, { clock = realClock(), store = null } = {}) {
-        if (!data || data.version !== 1) {
-            throw fail("EMB_INVALID_SERIALIZATION", "serialisasi tidak dikenal");
+
+        const errors = [];
+        const rejectRow = (where, err) => {
+            errors.push(`${where}: ${err.code ?? "ERR"} — ${err.message}`);
+        };
+
+        if (!data || typeof data !== "object" || data.version !== 1) {
+            throw fail("EMB_INVALID_SERIALIZATION",
+                "serialisasi tidak dikenal (version !== 1)");
         }
+
+        // --- produsen -------------------------------------------------
+        const producers = [];
+        for (const p of Array.isArray(data.producers) ? data.producers : []) {
+            if (/^[a-z][a-z0-9._-]{2,63}$/.test(String(p))) producers.push(p);
+            else errors.push(`producers: id tidak sah '${p}'`);
+        }
+
+        // --- perangkat (divalidasi dulu ke panggung, belum dipasang) ---
+        const staged = new Map();
+        for (const [i, row] of (data.devices ?? []).entries()) {
+            try {
+                if (!row || typeof row !== "object") {
+                    throw fail("EMB_INVALID_DESCRIPTOR", `baris#${i} bukan objek`);
+                }
+                const descriptor = normalizeDescriptor(row.descriptor, {});
+                for (const c of descriptor.capabilities) {
+                    normalizeCapabilityClaim(c);
+                }
+                const meta = row.meta ?? {};
+                if (!Number.isFinite(Number(meta.confidence))
+                    || typeof meta.source !== "string"
+                    || meta.source.length === 0 || meta.source.length > 120
+                    || !Number.isInteger(meta.timestampMs)) {
+                    throw fail("EMB_INVALID_META", `baris#${i}: meta tidak sah`);
+                }
+                const recomputed = digestOf(descriptor);
+                if (meta.digest !== recomputed) {
+                    throw fail("EMB_DIGEST_MISMATCH",
+                        `baris#${i} (${descriptor.deviceId}): digest tidak cocok`);
+                }
+                if (!Number.isInteger(row.firstSeenAtMs)
+                    || !Number.isInteger(row.lastSeenAtMs)) {
+                    throw fail("EMB_INVALID_TIMESTAMPS",
+                        `baris#${i}: stempel waktu tidak sah`);
+                }
+                staged.set(descriptor.deviceId, {
+                    descriptor,
+                    meta: deepFreeze({
+                        confidence: Number(meta.confidence),
+                        source: meta.source,
+                        timestampMs: meta.timestampMs,
+                        digest: recomputed
+                    }),
+                    capabilities: new Map(descriptor.capabilities.map(c => [c.name, c])),
+                    firstSeenAtMs: row.firstSeenAtMs,
+                    lastSeenAtMs: row.lastSeenAtMs
+                });
+            } catch (err) {
+                rejectRow(`devices[${i}]`, err);
+            }
+        }
+
+        // --- relasi (kedua ujung wajib dikenal di panggung) ------------
+        const relationships = [];
+        for (const [i, rel] of (data.relationships ?? []).entries()) {
+            try {
+                if (!rel || typeof rel !== "object") {
+                    throw fail("EMB_INVALID_RELATIONSHIP", `relasi#${i} bukan objek`);
+                }
+                const type = rel.type;
+                if (!RELATIONSHIP_TYPES[type]) {
+                    throw fail("EMB_UNKNOWN_RELATIONSHIP_TYPE", `tipe '${type}'`);
+                }
+                if (!staged.has(rel.fromId)) {
+                    throw fail("EMB_RELATIONSHIP_DANGLING_FROM", `'${rel.fromId}'`);
+                }
+                let toId;
+                if (type === "provides") {
+                    assertCapability(rel.toId);
+                    toId = `cap:${rel.toId}`;
+                } else if ([...PREFERENCE_TYPES].includes(type)) {
+                    // Relasi preferensi juga durable (kebijakan operator);
+                    // bentuk tersimpan sudah berprefix "cap:".
+                    const rawTo = String(rel.toId ?? "").startsWith("cap:")
+                        ? rel.toId.slice(4) : rel.toId;
+                    assertCapability(rawTo);
+                    toId = `cap:${rawTo}`;
+                } else {
+                    if (!staged.has(rel.toId)) {
+                        throw fail("EMB_RELATIONSHIP_DANGLING_TO", `'${rel.toId}'`);
+                    }
+                    toId = rel.toId;
+                }
+                relationships.push(deepFreeze({
+                    type, fromId: rel.fromId, toId,
+                    rank: Number.isFinite(rel.rank) ? rel.rank : null,
+                    source: String(rel.source ?? "restored").slice(0, 120),
+                    observedAtMs: Number.isInteger(rel.observedAtMs)
+                        ? rel.observedAtMs : null
+                }));
+            } catch (err) {
+                rejectRow(`relationships[${i}]`, err);
+            }
+        }
+
+        // --- resolusi preferensi ---------------------------------------
+        const preferencesResolved = {};
+        for (const [purpose, deviceId] of Object.entries(data.preferencesResolved ?? {})) {
+            if (!isValidCapability(purpose)) {
+                errors.push(`preferencesResolved: tujuan tidak sah '${purpose}'`);
+            } else if (deviceId !== null && !staged.has(deviceId)) {
+                errors.push(`preferencesResolved: perangkat hilang '${deviceId}'`);
+            } else {
+                preferencesResolved[purpose] = deviceId;
+            }
+        }
+
+        // KEBIJAKAN A — satu saja cacat menolak seluruh snapshot.
+        if (errors.length > 0) {
+            const err = fail("EMB_INVALID_SERIALIZATION",
+                `snapshot ditolak gagal-tutup (${errors.length} temuan)`);
+            err.details = Object.freeze(errors);
+            throw err;
+        }
+
+        // Baru sekarang instalasi — semua tervalidasi, tanpa referensi
+        // objek milik pemanggil.
         const schema = new BodySchema({ clock, store });
-        for (const producer of data.producers ?? []) schema.registerProducer(producer);
-        for (const row of data.devices ?? []) {
-            schema._devices.set(row.descriptor.deviceId, {
-                descriptor: deepFreeze(row.descriptor),
-                meta: row.meta,
-                capabilities: new Map((row.capabilities ?? []).map(c => [c.name, c])),
-                firstSeenAtMs: row.firstSeenAtMs,
-                lastSeenAtMs: row.lastSeenAtMs
-            });
+        for (const p of producers) schema.registerProducer(p);
+        for (const [id, rec] of staged) {
+            schema._devices.set(id, rec);
         }
-        for (const rel of data.relationships ?? []) schema._setRel(deepFreeze(rel));
-        for (const [k, v] of Object.entries(data.preferencesResolved ?? {})) {
+        for (const rel of relationships) schema._setRel(rel);
+        for (const [k, v] of Object.entries(preferencesResolved)) {
             schema._lastDefaults.set(k, v);
         }
         return schema;
@@ -721,8 +1059,9 @@ class BodySchema {
     }
 }
 
+/** Salinan beku yang TERLEPAS — tidak pernah beralias dengan state hidup. */
 function freezeView(view) {
     return deepFreeze(structuredCopy(view));
 }
 
-module.exports = { BodySchema, newerWins };
+module.exports = { BodySchema, newerWins, presenceWins };
