@@ -23,7 +23,12 @@ app.use(require("./middleware/cors"));
 // untuk keperluan vision.
 app.use(express.json({ limit: "25mb" }));
 
-app.use("/api/v1/console", require("./middleware/auth"));
+// Permukaan Console: token = kredensial pemilik → peran superadmin
+// HANYA setelah autentikasi sukses (identitas berprovenance dari
+// tokenGuard; tanpa token permukaan terkunci — fail-closed C2).
+const { tokenGuard } = require("./core/auth/tokenCompare");
+app.use("/api/v1/console",
+    tokenGuard({ roleWhenAuthenticated: "superadmin", surface: "console" }));
 
 app.use("/", routes);
 

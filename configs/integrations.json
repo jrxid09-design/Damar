@@ -2,55 +2,8 @@
   "$comment": [
     "Konfigurasi sambungan Aether ke sistem luar.",
     "Setiap entri bisa ditimpa lewat environment variable:",
-    "  AETHER_<ID>_URL, AETHER_<ID>_KEY, AETHER_<ID>_ENABLED",
-    "Contoh saat deploy di PC rumah:",
-    "  AETHER_OLLAMA_URL=http://192.168.1.10:11434",
-    "",
-    "Nilai baseUrl/paths untuk openclaw dan hermes adalah default",
-    "yang wajar dan PERLU disesuaikan dengan instance sungguhan.",
-    "Konektor akan mencoba beberapa kandidat health path dan",
-    "melaporkan mana yang berhasil di detail.healthPath — salin",
-    "nilai itu ke paths.health agar tidak menebak lagi."
+    "  AETHER_<ID>_URL, AETHER_<ID>_KEY, AETHER_<ID>_ENABLED"
   ],
-
   "pollInterval": 15000,
-
-  "integrations": [
-    {
-      "id": "ollama",
-      "type": "ollama",
-      "label": "Ollama (Local AI)",
-      "baseUrl": "http://127.0.0.1:11434",
-      "enabled": true,
-      "timeout": 5000,
-      "metadata": {
-        "role": "primary-local-inference",
-        "note": "Jalan di PC rumah. Dari laptop, arahkan ke IP LAN PC."
-      }
-    },
-    {
-      "id": "openclaw",
-      "type": "openclaw",
-      "label": "OpenClaw",
-      "baseUrl": "http://127.0.0.1:18789",
-      "enabled": true,
-      "timeout": 5000,
-      "paths": {},
-      "metadata": {
-        "role": "assistant-gateway"
-      }
-    },
-    {
-      "id": "hermes",
-      "type": "hermes",
-      "label": "Hermes Agent",
-      "baseUrl": "http://127.0.0.1:8642",
-      "enabled": true,
-      "timeout": 5000,
-      "paths": {},
-      "metadata": {
-        "role": "agent-runtime"
-      }
-    }
-  ]
+  "integrations": []
 }

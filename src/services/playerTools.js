@@ -112,6 +112,58 @@ function playerTools() {
         }),
 
         new AITool({
+            name: "play_spotify",
+            description:
+                "Putar lagu/musik dari Spotify langsung di Console lewat embedded player — " +
+                "TANPA perlu membuka aplikasi Spotify. Mencari track/album/playlist " +
+                "berdasarkan judul/artis lalu memutarnya di player Console. " +
+                "Pakai saat pengguna minta 'putar di spotify', 'mainkan lagu … di spotify'.",
+            parameters: {
+                type: "object",
+                properties: {
+                    query: { type: "string", description: "Judul lagu/artis yang dicari (mis. 'bintang kecil')." },
+                    type: { type: "string", enum: ["track", "album", "playlist"], description: "Jenis konten (default track)." },
+                    artist: { type: "string", description: "Artis/pencipta (opsional, untuk hasil lebih akurat)." }
+                },
+                required: ["query"]
+            },
+            execute: async ({ query, type = "track", artist }) => {
+
+                const q = artist ? `${query} ${artist}` : query;
+                const results = await searchSpotify(q, String(type));
+
+                if (results.length === 0) {
+                    return { ok: false, error: `Tidak menemukan ${type} Spotify untuk "${q}". Coba play_youtube sebagai gantinya.` };
+                }
+
+                const top = results[0];
+
+                telemetry.publish("aether:present", {
+                    kind: "spotify",
+                    type: top.type,
+                    spotifyId: top.spotifyId,
+                    url: top.url,
+                    embedUrl: top.embedUrl,
+                    title: top.title,
+                    channel: top.artist,
+                    thumbnail: top.thumbnail,
+                    height: top.height,
+                    autoplay: true
+                });
+
+                return {
+                    ok: true,
+                    playing: top.title,
+                    artist: top.artist,
+                    url: top.url,
+                    spotifyId: top.spotifyId,
+                    alternatives: results.slice(1, 4).map(r => ({ title: r.title, url: r.url }))
+                };
+
+            }
+        }),
+
+        new AITool({
             name: "stop_media",
             description:
                 "Hentikan media yang sedang diputar di Console.",
@@ -299,6 +351,136 @@ async function searchYouTube(query, limit = 5) {
         }
         catch { /* coba instance berikutnya */ }
     }
+
+    return [];
+}
+
+// ---- Spotify search (tanpa API key) ------------------------------------
+
+const SPOTIFY_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+/** Bentuk hasil seragam untuk semua metode pencarian Spotify. */
+function spotifyItem(type, id, { title = null, artist = null, thumbnail = null } = {}) {
+    return {
+        type,
+        spotifyId: id,
+        url: `https://open.spotify.com/${type}/${id}`,
+        embedUrl: `https://open.spotify.com/embed/${type}/${id}?utm_source=aether`,
+        title: title ?? `Spotify ${type}`,
+        artist,
+        thumbnail,
+        height: type === "track" ? 152 : 380
+    };
+}
+
+/** Pencarian via Web API resmi memakai Bearer token siap pakai. */
+async function spotifyApiSearch(token, query, type, limit) {
+    const apiRes = await fetch(
+        `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=${type}&limit=${limit}`,
+        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(6000) }
+    );
+    if (!apiRes.ok) return [];
+    const data = await apiRes.json();
+    const items = (data[`${type}s`]?.items ?? []).map(item => spotifyItem(type, item.id, {
+        title: item.name,
+        artist: item.artists?.map(a => a.name).join(", ") ?? null,
+        thumbnail: item.album?.images?.[0]?.url
+            ?? item.images?.[0]?.url
+            ?? null
+    }));
+    return items;
+}
+
+/**
+ * Cari konten Spotify. Urutan metode:
+ *   1. Client Credentials resmi (SPOTIFY_CLIENT_ID/SECRET di .env) —
+ *      paling andal; cukup untuk PENCARIAN, tanpa login pengguna.
+ *   2. Token anonim web player — tanpa kredensial, kadang diblokir.
+ *   3. Scraping halaman pencarian open.spotify.com — daya tahan
+ *      terendah, hanya cadangan terakhir.
+ */
+async function searchSpotify(query, type = "track", limit = 5) {
+
+    // Method 1: Client Credentials → Web API resmi Spotify.
+    if (process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) {
+        try {
+            const cred = Buffer.from(
+                `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`
+            ).toString("base64");
+            const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
+                method: "POST",
+                headers: {
+                    Authorization: `Basic ${cred}`,
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: "grant_type=client_credentials",
+                signal: AbortSignal.timeout(6000)
+            });
+            if (tokenRes.ok) {
+                const { access_token } = await tokenRes.json();
+                if (access_token) return await spotifyApiSearch(access_token, query, type, limit);
+            }
+        } catch { /* coba method berikutnya */ }
+    }
+
+    // Method 2: token anonim web player.
+    try {
+        const tokenRes = await fetch(
+            "https://open.spotify.com/get_access_token?reason=transport&productType=web_player",
+            { headers: { "User-Agent": SPOTIFY_UA, Accept: "application/json" }, signal: AbortSignal.timeout(6000) }
+        );
+        if (tokenRes.ok) {
+            const { accessToken } = await tokenRes.json();
+            if (accessToken) return await spotifyApiSearch(accessToken, query, type, limit);
+        }
+    } catch { /* coba method berikutnya */ }
+
+    // Method 3: scraping HTML halaman pencarian open.spotify.com —
+    // kumpulkan ID unik dari URI yang tersemat di SSR payload.
+    try {
+        const searchUrl = `https://open.spotify.com/search/${encodeURIComponent(query)}`;
+        const res = await fetch(searchUrl, {
+            headers: { "User-Agent": SPOTIFY_UA, "Accept-Language": "en-US,en;q=0.9" },
+            signal: AbortSignal.timeout(8000)
+        });
+        if (res.ok) {
+            const html = await res.text();
+            const ids = [];
+            const idRegex = new RegExp(`spotify:(?:${type}):([0-9A-Za-z]{22})`, "g");
+            let match;
+            while ((match = idRegex.exec(html)) !== null) {
+                if (!ids.includes(match[1])) ids.push(match[1]);
+                if (ids.length >= limit) break;
+            }
+
+            // Fallback pattern: URL bentuk /track/ID di dalam JSON embed
+            if (ids.length === 0) {
+                const urlRegex = new RegExp(`open\\.spotify\\.com/(?:embed/)?${type}/([0-9A-Za-z]{22})`, "g");
+                while ((match = urlRegex.exec(html)) !== null) {
+                    if (!ids.includes(match[1])) ids.push(match[1]);
+                    if (ids.length >= limit) break;
+                }
+            }
+
+            if (ids.length > 0) {
+                // oEmbed publik: judul + thumbnail per item, tanpa auth.
+                const items = await Promise.all(ids.map(async id => {
+                    try {
+                        const oeRes = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(`https://open.spotify.com/${type}/${id}`)}`, {
+                            headers: { "User-Agent": SPOTIFY_UA },
+                            signal: AbortSignal.timeout(5000)
+                        });
+                        if (oeRes.ok) {
+                            const oe = await oeRes.json();
+                            return spotifyItem(type, id, { title: oe.title, thumbnail: oe.thumbnail_url });
+                        }
+                    } catch { /* pakai judul generik */ }
+                    return spotifyItem(type, id);
+                }));
+                return items;
+            }
+        }
+    } catch { /* beri tahu pemanggil kosong */ }
 
     return [];
 }

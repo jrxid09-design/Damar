@@ -6,10 +6,8 @@ const JsonStore = require("../core/config/JsonStore");
 /**
  * Vision — Aether "melihat" gambar (frame kamera/CCTV, foto).
  *
- * Memakai engine AI yang sama; hanya bentuk pesannya yang beda
- * karena multimodal:
- *   - Ollama: pesan { content, images:[base64] }  (mis. llava, qwen2-vl)
- *   - OpenAI-compatible: content array [{type:text},{type:image_url}]
+ * Memakai engine AI yang sama dengan bentuk pesan multimodal
+ * OpenAI-compatible: content array [{type:text},{type:image_url}].
  *
  * Model vision dipilih terpisah dari model chat (chat model belum
  * tentu bisa melihat). Diatur di Settings; tanpa model vision,
@@ -38,9 +36,8 @@ class VisionService {
         const aiRuntime = require("./aiRuntimeService");
         const kind = aiRuntime.activePlatform?.kind;
 
-        // Default aman: llava untuk Ollama lokal; kalau cloud,
-        // biarkan null agar pengguna memilih (nama model bervariasi).
-        return kind === "ollama" ? "llava" : null;
+        // Cloud: biarkan null agar pengguna memilih (nama model bervariasi).
+        return null;
 
     }
 
@@ -69,7 +66,7 @@ class VisionService {
      * @param {string} [opts.prompt]
      * @returns {Promise<{ text:string, model:string }>}
      */
-    async analyze({ imageBase64, mimeType = "image/jpeg", prompt } = {}) {
+    async analyze({ imageBase64, mimeType = "image/jpeg", prompt, exec = null } = {}) {
 
         if (!imageBase64) {
             throw new Error("Gambar kosong.");
@@ -83,8 +80,7 @@ class VisionService {
         // sering diam-diam membuang lampiran gambar). Utamakan jalur
         // yang benar-benar mengirim gambar ke model vision:
         //   1. API Gemini resmi, bila key Google tersedia
-        //   2. Ollama lokal (model vision seperti llava)
-        //   3. provider chat aktif (OpenAI-compatible) sebagai cadangan
+        //   2. provider chat aktif (OpenAI-compatible) sebagai cadangan
         const geminiKey = this.geminiKey();
 
         if (geminiKey) {
@@ -100,36 +96,38 @@ class VisionService {
 
         if (!model) {
             const error = new Error(
-                "Model vision belum diatur. Pilih model vision (mis. llava di Ollama, " +
-                "atau model vision cloud) di Settings → Vision."
+                "Model vision belum diatur. Pilih model vision cloud " +
+                "di Settings → Vision."
             );
             error.code = "VISION_NOT_CONFIGURED";
             throw error;
         }
 
         const aiRuntime = require("./aiRuntimeService");
-        const kind = aiRuntime.activePlatform?.kind ?? "ollama";
 
-        const message = kind === "ollama"
-            ? {
-                role: "user",
-                content: question,
-                images: [imageBase64]
-            }
-            : {
-                role: "user",
-                content: [
-                    { type: "text", text: question },
-                    {
-                        type: "image_url",
-                        image_url: { url: `data:${mimeType};base64,${imageBase64}` }
-                    }
-                ]
-            };
+        const message = {
+            role: "user",
+            content: [
+                { type: "text", text: question },
+                {
+                    type: "image_url",
+                    image_url: { url: `data:${mimeType};base64,${imageBase64}` }
+                }
+            ]
+        };
 
+        // N2-FINAL: giliran visi mewarisi otoritas pemanggil —
+        // TIDAK ada system implisit; tanpa exec → 'user'.
+        // A-FINAL/H1-CLOSURE: restriction delegasi (capabilitySet)
+        // menyeberang sebagai SATU identitas kanonik (`exec`) — bukan
+        // role+capabilitySet terpisah yang rawan terpotong di hop
+        // direct/fallback runtime.
+        const { resolveDelegator } = require("../ai/tools/Authorization");
+        const delegator = resolveDelegator(exec ?? null);
         const response = await aiRuntime.ensure().chat({
             messages: [message],
-            model
+            model,
+            ...(delegator ? { exec: delegator } : {})
         });
 
         telemetry.publish("vision:analyzed", {
@@ -230,28 +228,48 @@ class VisionService {
 
     }
 
-    /** Ambil gambar dari URL (snapshot CCTV/kamera) lalu analisis. */
-    async analyzeUrl({ url, prompt, headers = {} } = {}) {
+    /**
+     * Ambil gambar dari URL lalu analisis.
+     *
+     * D-FINAL — SSRF GUARD:
+     *   policy "public" (default)  → URL model/pengguna (describe_image):
+     *                                skema http(s), tolak loopback/RFC1918/
+     *                                link-local/metadata/IPv6-lokal,
+     *                                validasi DNS, redirect divalidasi
+     *                                per-hop, batas ukuran & waktu.
+     *   policy "trusted-lan"       → HANYA snapshot kamera/perangkat yang
+     *                                berasal dari registry internal
+     *                                (deviceService) — cek privat dilewati,
+     *                                batas skema/waktu/ukuran tetap.
+     * URL arbitrer dari argumen TIDAK PERNAH boleh memakai trusted-lan:
+     * kepercayaan menempel pada SUMBER URL, bukan pada pemanggil.
+     *
+     * @param {object} opts { url, prompt?, headers?, exec?,
+     *                        policy?="public"|"trusted-lan" }
+     */
+    async analyzeUrl({ url, prompt, headers = {}, exec = null, policy = "public" } = {}) {
 
         if (!url) {
             throw new Error("URL kamera kosong.");
         }
 
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 15000);
+        const ssrf = require("../core/safety/ssrfGuard");
 
         let imageBase64;
         let mimeType;
 
         try {
-            const response = await fetch(url, { headers, signal: controller.signal });
 
-            if (!response.ok) {
-                throw new Error(`Snapshot gagal (${response.status})`);
-            }
+            const { buffer, response } = await ssrf.guardedFetch(url, {
+                headers,
+                policy: policy === "trusted-lan" ? "trusted-lan" : "public",
+                timeoutMs: 15000,
+                maxBytes: 10 * 1024 * 1024,
+                requireImage: true
+            });
 
             mimeType = response.headers.get("content-type") || "image/jpeg";
-            imageBase64 = Buffer.from(await response.arrayBuffer()).toString("base64");
+            imageBase64 = buffer.toString("base64");
         }
         catch (error) {
             if (error.name === "AbortError") {
@@ -262,11 +280,8 @@ class VisionService {
             }
             throw error;
         }
-        finally {
-            clearTimeout(timer);
-        }
 
-        return this.analyze({ imageBase64, mimeType, prompt });
+        return this.analyze({ imageBase64, mimeType, prompt, exec });
 
     }
 

@@ -1,21 +1,20 @@
 const toolGuard = require("../../core/safety/toolGuard");
+const Authorization = require("./Authorization");
+const ArgumentValidator = require("./ArgumentValidator");
 
 /**
- * Titik tunggal yang dilalui setiap pemanggilan tool oleh model.
+ * Titik tunggu eksekusi setiap pemanggilan tool oleh model.
  *
- * Dulu di sini hanya ada kill switch, dengan asumsi sisa rantai
- * keselamatan sudah dijalankan `ToolRegistry.execute`. Asumsi itu
- * hanya benar untuk tool plugin yang dijembatani; tool asli model —
- * memori, rumah, WhatsApp, terminal, coding — didaftarkan langsung
- * ke registry AI dan tidak pernah menyentuh registry inti. Akibatnya
- * `terminal_run` dan `code_commit` berjalan tanpa otorisasi risiko,
- * tanpa rem kebuntuan, tanpa batas jalur, dan tanpa verifikasi.
+ * URUTAN GERBANG (invariant A — disclosure ≠ execution):
+ *   1. IDENTITAS wajib ada (fail-closed → 'user')
+ *   2. AUTHORIZATION.assertExecution — peran/trust/destruktif-kanal
+ *   3. ToolGuard (killSwitch → riskPolicy → loopGuard → pathPolicy)
+ *      untuk tool yang TIDAK terbukti dijaga registry intinya
  *
- * Sekarang rantai yang sama (`core/safety/toolGuard`) berlaku di
- * kedua jalur. Tool jembatan dilewati di sini justru supaya TIDAK
- * dijaga dua kali: penjagaan ganda membuat rem kebuntuan menghitung
- * satu panggilan sebagai dua, sehingga tool sah tertahan lebih cepat
- * daripada yang dirancang.
+ * Flag `bridged` tidak lagi berdiri sendiri (G7): ia harus dibuktikan
+ * — registry inti benar-benar memegang id itu DAN catatannya menandai
+ * guardedInternally (dipasang oleh aiRuntimeService.bridgePluginTools,
+ * bukan oleh objek sembarang). MCP tidak pernah memenuhinya.
  */
 class ToolExecutor {
 
@@ -25,19 +24,28 @@ class ToolExecutor {
 
     }
 
-    async execute(call) {
+    async execute(call, exec = null) {
+
+        // INVARIANT G: identitas selalu ada — tanpa identitas eksplisit
+        // pemanggil jatuh ke peran terendah (fail-closed).
+        const identity = Authorization.identity(exec ?? {});
 
         const tool = this.registry.get(call.name);
 
         if (!tool) {
 
-            throw new Error(`Tool '${call.name}' not found.`);
+            throw ArgumentValidator.make(
+                ArgumentValidator.CODES.TOOL_NOT_FOUND,
+                `Tool '${call.name}' not found.`
+            );
 
         }
 
-        // Tool jembatan membawa id registry intinya; registry itulah
-        // yang menjaga dan memverifikasinya sesaat lagi.
-        const bridged = Boolean(tool.bridged);
+        // 1+2. Otorisasi eksekusi — SEBELUM sentuhan apa pun.
+        Authorization.assertExecution(tool, identity);
+
+        // 3. ToolGuard untuk yang tak terbukti dijaga registry intinya.
+        const bridged = Authorization.proveBridgedGuarded(tool);
 
         if (!bridged) {
             toolGuard.before(call.name, call.arguments ?? {}, tool);
@@ -46,12 +54,12 @@ class ToolExecutor {
         let result;
 
         try {
-            result = await tool.execute(call.arguments);
+            result = await tool.execute(call.arguments, { exec: identity });
         }
         catch (error) {
 
             if (!bridged) {
-                toolGuard.failed(call.name, error);
+                toolGuard.failed(call.name, error, identity);
             }
 
             throw error;

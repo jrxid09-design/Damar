@@ -43,12 +43,12 @@ agar tetap hidup saat Console ditutup.
 
 | Halaman | Isi |
 |---|---|
-| **Dashboard** | Kartu kesiapan (daemon, Ollama, OpenClaw, Hermes, mic, kamera, sensor, tool), gauge CPU/RAM dengan sparkline, metrik AI, aktivitas terakhir. |
+| **Dashboard** | Kartu kesiapan (daemon, mic, kamera, sensor, tool), gauge CPU/RAM dengan sparkline, metrik AI, aktivitas terakhir. |
 | **Logs** | Aliran log realtime dari daemon lewat SSE, dengan filter level dan teks. |
 | **Chat** | Percakapan streaming token-per-token. Provider dan model bisa diganti dari sini. Model boleh memanggil tool plugin. |
-| **Models** | Daftar model tiap provider; untuk Ollama tampil ukuran, jumlah parameter, dan kuantisasi. Bisa menetapkan model default. |
+| **Models** | Daftar model tiap provider; untuk model lokal tampil ukuran, jumlah parameter, dan kuantisasi. Bisa menetapkan model default. |
 | **Plugins & Tools** | Plugin yang ter-load dan seluruh tool terdaftar. Tool bisa dijalankan manual dengan argumen JSON. |
-| **Integrations** | Status OpenClaw, hermes-agent, dan Ollama. Base URL bisa diubah sementara untuk uji coba. |
+| **Integrations** | Manajer MCP & otak eksternal. Base URL bisa diubah sementara untuk uji coba. |
 | **Devices** | Pilih mikrofon dan kamera (dengan level meter dan pratinjau langsung), atur sample rate, VAD, wake word, resolusi, dan interval tangkap. Kelola sensor berbasis endpoint HTTP. |
 | **Settings** | Alamat daemon, token, interval polling, kendali daemon lokal. |
 
@@ -64,7 +64,6 @@ Di **PC rumah**, isi `.env`:
 HOST=0.0.0.0
 PORT=3000
 AETHER_TOKEN=<token-acak-panjang>
-AETHER_OLLAMA_URL=http://localhost:11434
 ```
 
 Di **laptop**, buka Console → **Settings**:

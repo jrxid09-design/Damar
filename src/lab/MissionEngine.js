@@ -175,7 +175,7 @@ class MissionEngine {
      * constraint planner. Aether bebas menugaskan siapa pun; tabel
      * fase hanya memandu preferensi, bukan membatasi.
      */
-    async run(id, { actor = "user" } = {}) {
+    async run(id, { actor = "user", exec = null } = {}) {
 
         const mission = await this.get(id);
         if (!mission) throw new Error(`Misi ${id} tidak ditemukan.`);
@@ -258,7 +258,11 @@ class MissionEngine {
 
         try {
 
-            result = await orchestrator.run(contextual, onEvent);
+            // N2 Round-3 — INVARIAN DELEGI: misi berawal dari
+            // inisiator nyata (API/console) → warisi otoritasnya.
+            // Tidak ada grant di sini; grant internal hanya untuk
+            // pemanggil runtime yang benar-benar otonom.
+            result = await orchestrator.run(contextual, onEvent, { exec });
 
         }
         catch (error) {
@@ -441,14 +445,14 @@ class MissionEngine {
     }
 
     /** Lanjutkan misi di sesi OpenCode yang sama (§12). */
-    async resume(id, instruction, { actor = "user" } = {}) {
+    async resume(id, instruction, { actor = "user", exec = null } = {}) {
 
         const mission = await this.get(id);
         if (!mission) throw new Error(`Misi ${id} tidak ditemukan.`);
 
         if (!mission.opencodeSession) {
             // fallback: jalankan jalur misi normal
-            return this.run(id, { actor });
+            return this.run(id, { actor, exec });
         }
 
         const { runOpenCode } = require("../services/opencodeTools");

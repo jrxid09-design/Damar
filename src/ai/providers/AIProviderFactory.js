@@ -6,12 +6,6 @@ const {
     OpenRouterMapper
 } = require("./openrouter");
 
-const {
-    OllamaProvider,
-    OllamaClient,
-    OllamaMapper
-} = require("./ollama");
-
 const { LlamaCppProvider } = require("./llamacpp");
 
 class AIProviderFactory {
@@ -30,10 +24,7 @@ class AIProviderFactory {
             case "openai-compatible":
                 return this.createOpenAICompatible(options);
 
-            case "ollama":
-                return this.createOllama(options);
-
-            // Otak lokal in-process (node-llama-cpp) — pengganti Ollama.
+            // Otak lokal in-process (node-llama-cpp).
             case "llamacpp":
             case "local":
                 return this.createLlamaCpp(options);
@@ -98,46 +89,6 @@ class AIProviderFactory {
     });
 
 }
-
-    static createOllama(options = {}) {
-
-        const config = new AIProviderConfig({
-
-            baseUrl:
-                options.baseUrl ??
-                "http://localhost:11434",
-
-            timeout:
-                options.timeout,
-
-            headers:
-                options.headers
-
-        });
-
-        const mapper = new OllamaMapper();
-
-        const client = new OllamaClient({
-
-            httpClient: options.httpClient,
-
-            config
-
-        });
-
-        return new OllamaProvider({
-
-            client,
-
-            mapper,
-
-            defaultOptions: options.defaultOptions,
-
-            keepAlive: options.keepAlive
-
-        });
-
-    }
 
     static createLlamaCpp(options = {}) {
 

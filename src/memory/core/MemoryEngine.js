@@ -18,14 +18,16 @@ const stm = require("../stm/WorkingSet");
  * subsistem berikutnya lewat facade ini — bukan dengan menyentuh
  * penyimpanan langsung.
  *
- * Aturan kepemilikan: SEMUA penulis (Planner, Runtime, Skill, OpenClaw,
- * Hermes, Ponytail) kelak menulis lewat facade ini — memori milik
+ * Aturan kepemilikan: SEMUA penulis (Planner, Runtime, Skill,
+ * worker agent) kelak menulis lewat facade ini — memori milik
  * Aether Core, bukan runtime lain.
  */
 class MemoryEngine {
 
     /** Bungkus konteks pemanggil (siapa yang menulis/membaca). */
-    context({ writer = "aether", role = "superadmin", scope = null } = {}) {
+    // B-FIX: peran penulis memori bukan otoritas eksekusi — default
+    // least-privilege; pemanggil internal menyatakan perannya sendiri.
+    context({ writer = "aether", role = "runtime", scope = null } = {}) {
         return { writer, role, scope };
     }
 

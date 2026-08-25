@@ -12,6 +12,9 @@ const sessionController = require("../../../controllers/sessionController");
 // Bidang kendali yang dipakai Aether Console (aplikasi desktop).
 router.use("/console", require("./console"));
 
+// Device tertaut (companion) — pakai tools/skill Aether dari device lain.
+router.use("/companion", require("./companion"));
+
 router.get("/debug/messages", sessionController.debug);
 
 router.get("/sessions", sessionController.getAll);

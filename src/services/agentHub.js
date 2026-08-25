@@ -4,19 +4,13 @@ const telemetry = require("./telemetryService");
 const agentTools = require("../agent/agentTools");
 
 /**
- * AgentHub — menyatukan beberapa "pekerja" di bawah satu antarmuka.
+ * AgentHub — menyatukan beberapa "pekerja" dalam satu antarmuka.
  *
  * Aether bukan satu model saja; ia bisa mendelegasikan ke:
- *   - aether   : otak LLM lokal (reasoning + tool + memori)
- *   - openclaw : "tangan digital" — mengoperasikan aplikasi desktop
- *                yang tak punya API (klik, isi form, dsb)
- *   - hermes   : runtime agent untuk tugas berlapis
- *
- * OpenClaw & Hermes dipanggil lewat konektor integrasi yang sudah
- * ada. Karena instance sungguhannya belum bisa diverifikasi di sini,
- * pemanggilannya dibuat "gagal dengan anggun": agent offline
- * melaporkan status, bukan menjatuhkan orkestrasi.
+ *   - aether : otak LLM lokal (reasoning + tool + memori)
+ *   - 10 anak buah: spesialis berbasis peran di runtime yang sama
  */
+
 class AgentHub {
 
     /** Definisi semua agent yang bisa dipakai orkestrator. */
@@ -39,34 +33,6 @@ class AgentHub {
                     "Kenali wajah (Immich)",
                     "Kirim media WhatsApp",
                     "Buat skill sendiri"
-                ]
-            },
-            {
-                id: "openclaw",
-                label: "OpenClaw (otomasi desktop)",
-                kind: "actuator",
-                description:
-                    "Mengoperasikan aplikasi desktop/website tanpa API: klik tombol, " +
-                    "isi formulir, buka browser, tugas berulang di komputer. Pilih ini " +
-                    "untuk AKSI pada antarmuka yang tak bisa dilakukan lewat kode biasa.",
-                skills: [
-                    "Klik & isi formulir",
-                    "Operasikan aplikasi desktop",
-                    "Buka & kendalikan browser",
-                    "Tugas berulang di layar"
-                ]
-            },
-            {
-                id: "hermes",
-                label: "Hermes (agent runtime)",
-                kind: "agent",
-                description:
-                    "Menjalankan tugas agentik berlapis di runtime terpisah. Pilih ini " +
-                    "untuk pekerjaan panjang yang lebih cocok didelegasikan ke agent khusus.",
-                skills: [
-                    "Tugas agentik berlapis",
-                    "Orkestrasi tugas panjang",
-                    "Runtime agent terpisah"
                 ]
             },
 
@@ -189,13 +155,13 @@ class AgentHub {
     }
 
     /**
-     * Apakah agent-konektor (openclaw/hermes) sedang online — SINKRON,
+     * Apakah agent-konektor sedang online — SINKRON,
      * dari status terakhir yang diketahui, tanpa memanggil jaringan.
      *
-     * Dipakai untuk menyaring tool: bila openclaw offline, tool-tool
+     * Dipakai untuk menyaring tool: bila konektor offline, tool-tool
      * yang menuntutnya tidak perlu ditawarkan ke model — kalau tidak,
-     * model memilihnya lalu gagal dengan "openclaw sedang offline"
-     * sementara jalur langsung (open_app/desktop_type) tersedia.
+     * model memilihnya lalu gagal dengan "konektor sedang offline"
+     * sementara jalur langsung tersedia.
      *
      * Default TRUE bila status belum diketahui: jangan menyembunyikan
      * kemampuan hanya karena probe pertama belum jalan.
@@ -262,27 +228,32 @@ class AgentHub {
 
     /**
      * Jalankan satu tugas pada agent tertentu.
+     *
+     * `contextRefs` adalah port Context Intelligence untuk masa depan
+     * (Colony): director mengirim referensi ("project:x") alih-alih
+     * menyalin seluruh context; pipeline yang menyelesaikannya menjadi
+     * context minimal untuk worker.
+     *
+     * N2: `exec` = identitas eksekusi DELEGATOR. Delegasi tidak boleh
+     * menaikkan otoritas — worker mewarisi otoritas delegator.
+     *
      * @returns {Promise<{ ok, agent, output, error? }>}
      */
-    async run(agentId, task, { signal = null } = {}) {
+    async run(agentId, task, { signal = null, contextRefs = [], exec = null } = {}) {
 
         telemetry.publish("agent:run", { agent: agentId, task: String(task).slice(0, 80) });
 
         try {
 
             if (agentId === "aether") {
-                return { ok: true, agent: agentId, output: await this.runAether(task) };
+                return { ok: true, agent: agentId, output: await this.runAether(task, { contextRefs, exec }) };
             }
 
             // 10 anak buah: runtime Aether yang sama + bias peran.
             const worker = this.get(agentId);
 
             if (worker?.kind === "worker") {
-                return { ok: true, agent: agentId, output: await this.runWorker(worker, task) };
-            }
-
-            if (agentId === "openclaw" || agentId === "hermes") {
-                return { ok: true, agent: agentId, output: await this.runConnector(agentId, task, signal) };
+                return { ok: true, agent: agentId, output: await this.runWorker(worker, task, { contextRefs, exec }) };
             }
 
             throw new Error(`Agent tidak dikenal: ${agentId}`);
@@ -299,13 +270,69 @@ class AgentHub {
 
     }
 
-    async runAether(task) {
+    /**
+     * N2-FINAL — penafsir delegasi yang SUDAH diselesaikan oleh titik
+     * kanonik (Authorization.resolveDelegator). Hanya grant kanonik
+     * berprovenance 'autonomous:' yang menghasilkan 'system'; identitas
+     * biasa mewarisi perannya; tanpa keduanya → 'user' least-privilege.
+     */
+    delegatedRoleOf(exec) {
+        const { isCanonicalInternalGrant } = require("../ai/tools/Authorization");
+        if (isCanonicalInternalGrant(exec)) return "system";
+        const role = String(exec?.role ?? "").toLowerCase();
+        return role || "user";
+    }
+
+    /**
+     * A-FINAL — RUNTIME ASSERTION: restriction tidak boleh hilang
+     * di transit. Bila delegator membawa capabilitySet, permintaan
+     * ke runtime WAJIB membawanya juga. Pelanggaran = bug wiring,
+     * gagal-keras (fail-closed) sebelum otoritas bocor.
+     *
+     * M-1 CLOSURE: dulu precondition checker adalah Array.isArray
+     * sendiri — restriction berbentuk non-array (string id, Set
+     * programatik, hasil serialisasi rusak) MELOLEWATI asersi dan
+     * lenyap menjadi privileged + unrestricted. Kini state restriction
+     * dideteksi via Authorization.hasRestriction (malformed = PRESENT),
+     * normalisasi lewat toCapabilitySet (fail-closed), dan pelestarian
+     * diverifikasi arah: child hanya boleh SAMA atau LEBIH SEMPIT.
+     */
+    assertRestrictionsPreserved(exec, request) {
+        // M-1 CLOSURE: SATU mekanisme kanonik di Authorization —
+        // dipakai bersama batas fallback runtime; tidak ada lagi
+        // implementasi pelestarian lokal yang bisa menyimpang.
+        return require("../ai/tools/Authorization")
+            .assertRestrictionPreserved(exec, request);
+    }
+
+    async runAether(task, { contextRefs = [], exec = null } = {}) {
 
         const aiRuntime = require("./aiRuntimeService");
 
-        const response = await aiRuntime.chat({
-            messages: [{ role: "user", content: String(task) }]
-        });
+        // CRITICAL-1 FIX: capabilitySet delegasi IKUT ke runtime.
+        // Dulu hanya role/sessionId yang lewat — restriction watchdog
+        // lenyap di hop pertama dan worker melihat universe penuh.
+        const request = {
+            messages: [{ role: "user", content: String(task) }],
+            contextRefs,
+            // N2-FINAL: direktor mewarisi delegator; identitas hilang
+            // dari jalur tak-tepercaya = 'user', BUKAN system implisit.
+            role: this.delegatedRoleOf(exec),
+            sessionId: exec?.sessionId ?? "anon"
+        };
+
+        // M-1 CLOSURE: restriction ikut dalam bentuk yang SAH apa pun
+        // (array/string id/Set programatik); malformed = gagal-keras
+        // di sini, bukan lenyap lalu tertangkap asersi.
+        const runAetherSet = require("../ai/tools/Authorization")
+            .toCapabilitySet(exec?.capabilitySet);
+        if (runAetherSet) {
+            request.capabilitySet = runAetherSet;
+        }
+
+        this.assertRestrictionsPreserved(exec, request);
+
+        const response = await aiRuntime.chat(request);
 
         return response.content ?? "";
 
@@ -313,25 +340,53 @@ class AgentHub {
 
     /** Anak buah menjalankan tugas dengan bias peran DAN tool sesuai topiknya.
      *
-     * Sebelumnya worker hanya chat dengan bias peran — deklarasi
-     * `tools:` di agent-nya dekorasi. Sekarang tiap worker menerima
-     * PROFIL TOOL nyata (lihat src/agent/agentTools.js): agent riset
-     * dapat tool riset, agent sistem dapat tool sistem. Model tetap
-     * satu runtime Aether, jadi loop tool-calling, rem kebuntuan,
-     * dan jatuh-balik provider semua tetap berlaku.
+     * Seleksi kini lewat pipeline yang SAMA dengan chat biasa
+     * (ai/tools/Pipeline.js): tugas dinilai secara deterministik,
+     * lalu profil spesialis worker (agentTools.profileFor) masuk
+     * sebagai BOOST — menguntungkan tool khas perannya tanpa pernah
+     * menggantikan penilaian. Dulu daftar statis per worker dikirim
+     * mentah dan melewati seluruh mesin seleksi.
      *
      * Forge adalah kasus khusus: tugas menulis/mengubah kode
      * didelegasikan ke opencode lewat tool `opencode_run` — agent
      * coding sungguhan dengan editor penuh, bukan patch manual.
      */
-    async runWorker(agent, task) {
+    async runWorker(agent, task, { contextRefs = [], exec = null } = {}) {
 
         const aiRuntime = require("./aiRuntimeService");
+
+        // N2 Round-2 — DELEGI TIDAK MENAIKKAN OTORITAS, dan identitas
+        // hilang ≠ grant tepercaya. Lihat delegatedRoleOf().
+        const workerRole = this.delegatedRoleOf(exec);
+
+        // C-F — himpunan kapabilitas terbatas ikut ke SELEKSI: worker
+        // ber-delegasi terbatas tidak melihat kandidat di luar set.
+        // Pencocokan KANONIK (bukan tail) — satu mesin dengan gerbang
+        // eksekusi, jadi seleksi & otorisasi tidak pernah berbeda.
+        let universe = aiRuntime.tools();
+        const filterSet = require("../ai/tools/Authorization")
+            .toCapabilitySet(exec?.capabilitySet);
+        if (filterSet && filterSet.length) {
+            const { capSetWithin } = require("../ai/tools/Authorization");
+            universe = universe.filter(t => capSetWithin(t.name, filterSet));
+        }
 
         let tools = [];
 
         try {
-            tools = agentTools.toolsForWorker(aiRuntime.tools(), agent.id, agent.tools);
+            const Pipeline = require("../ai/tools/Pipeline");
+            const agentTools = require("../agent/agentTools");
+
+            tools = Pipeline.select({
+                tools: universe,
+                message: String(task),
+                // Seleksi memakai peran worker hasil penurunan —
+                // user yang mendelegasikan tidak melihat/mendapat
+                // tool privileged lewat jalur worker.
+                role: workerRole,
+                workerId: agent.id,
+                boost: agentTools.profileFor(agent.id)
+            }).tools;
         }
         catch { /* registry belum siap — jalan tanpa tool */ }
 
@@ -345,56 +400,34 @@ class AgentHub {
               `Tugas: ${String(task)}`
             : `[Peran: ${agent.label}]\n${agent.role}\n\nTugas: ${String(task)}`;
 
-        const response = await aiRuntime.chat({
+        const request = {
             messages: [{ role: "user", content: instruksi }],
-            tools
-        });
+            tools,
+            contextRefs,
+            // H7 Round-2 + N2: seleksi & eksekusi SATU identitas
+            // koheren yang DITURUNKAN dari delegator. workerId tetap
+            // penanda delegasi/telemetri — BUKAN sumber otoritas.
+            role: workerRole,
+            sessionId: exec?.sessionId
+                ? `${exec.sessionId}>worker:${agent.id}`
+                : `worker:${agent.id}`
+        };
+
+        // CRITICAL-1 FIX: restriction ikut ke runtime (sama dengan
+        // runAether) — worker terbatas tidak boleh kehilangan set-nya.
+        // CRITICAL-1 FIX + M-1 CLOSURE: restriction ikut ke runtime
+        // dalam bentuk sah apa pun; malformed fail-closed di sini.
+        const workerSet = require("../ai/tools/Authorization")
+            .toCapabilitySet(exec?.capabilitySet);
+        if (workerSet) {
+            request.capabilitySet = workerSet;
+        }
+
+        this.assertRestrictionsPreserved(exec, request);
+
+        const response = await aiRuntime.chat(request);
 
         return response.content ?? "";
-
-    }
-
-    async runConnector(agentId, task, signal) {
-
-        const connector = integrations.get(agentId);
-
-        if (!connector) {
-            throw new Error(`${agentId} belum dikonfigurasi di configs/integrations.json`);
-        }
-
-        if (connector.lastStatus?.online === false) {
-            throw new Error(`${agentId} sedang offline (${connector.baseUrl})`);
-        }
-
-        if (typeof connector.chat !== "function") {
-            throw new Error(`${agentId} tidak mendukung eksekusi tugas`);
-        }
-
-        // Konektor berbicara gaya OpenAI chat-completions; ambil teks
-        // jawabannya. Bentuk lain ditangani apa adanya.
-        const data = await connector.chat({
-            messages: [{ role: "user", content: String(task) }],
-            signal
-        });
-
-        return this.extractText(data);
-
-    }
-
-    extractText(data) {
-
-        if (typeof data === "string") {
-            return data;
-        }
-
-        return (
-            data?.choices?.[0]?.message?.content ??
-            data?.message?.content ??
-            data?.content ??
-            data?.output ??
-            data?.result ??
-            JSON.stringify(data)
-        );
 
     }
 

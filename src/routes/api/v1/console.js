@@ -11,6 +11,11 @@ const forgeController = require("../../../controllers/forgeController");
 const whatsappController = require("../../../controllers/whatsappController");
 const telegramController = require("../../../controllers/telegramController");
 const channelController = require("../../../controllers/channelController");
+const companionController = require("../../../companion/deviceController");
+const mcpController = require("../../../controllers/mcpController");
+const pulse = require("../../../autonomy/pulse");
+const watchdog = require("../../../autonomy/watchdog");
+const dream = require("../../../autonomy/dream");
 const orchestratorController = require("../../../controllers/orchestratorController");
 const homeController = require("../../../controllers/homeController");
 const visionController = require("../../../controllers/visionController");
@@ -84,6 +89,13 @@ router.post("/home/control", homeController.control);
 // supaya token HA tidak ikut ke renderer.
 router.get("/home/cameras", homeController.cameras);
 router.get("/home/camera/:id/snapshot", homeController.cameraSnapshot);
+
+// MQTT: broker, discovery perangkat, kendali langsung command topic.
+router.get("/home/mqtt/status", homeController.mqttStatus);
+router.post("/home/mqtt/config", homeController.mqttConfig);
+router.post("/home/mqtt/connect", homeController.mqttConnect);
+router.post("/home/mqtt/disconnect", homeController.mqttDisconnect);
+router.post("/home/mqtt/publish", homeController.mqttPublish);
 
 // ---- Vision ----------------------------------------------------
 
@@ -204,6 +216,32 @@ router.post("/telegram/reconnect", telegramController.reconnect);
 router.get("/channels", channelController.list);
 router.get("/channels/sessions", channelController.sessions);
 router.delete("/channels/sessions/:key", channelController.clearSession);
+
+// ---- MCP: kelola server eksternal + status ekspos ----------------
+
+router.get("/mcp/servers", mcpController.list);
+router.post("/mcp/servers", mcpController.save);
+router.delete("/mcp/servers/:id", mcpController.remove);
+router.post("/mcp/restart", mcpController.restart);
+
+// ---- Otonomi: pulse · watchdog · dream ---------------------------
+
+router.get("/pulse/latest", (req,res) => {
+    res.json({ success:true, message:"Pulse", data: pulse.latest() });
+});
+router.get("/watchdog/status", (req,res) => {
+    res.json({ success:true, message:"Watchdog", data: watchdog.status() });
+});
+router.get("/dream/status", (req,res) => {
+    res.json({ success:true, message:"Dream", data: dream.status() });
+});
+
+// ---- Device tertaut (companion) — manajemen oleh owner ----------
+
+router.post("/companion/pair", companionController.request);
+router.get("/companion/list", companionController.list);
+router.get("/companion/qr", companionController.qr);
+router.post("/companion/:id/revoke", companionController.revoke);
 
 // ---- Integrasi eksternal ---------------------------------------
 

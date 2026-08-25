@@ -6,7 +6,7 @@ class RuntimeOptions {
 
         defaultModel = null,
 
-        // Model lokal (Ollama) sering perlu waktu muat model
+        // Model lokal sering perlu waktu muat model
         // pertama kali, jadi ambangnya lebih longgar dari cloud.
         timeout = 120000,
 

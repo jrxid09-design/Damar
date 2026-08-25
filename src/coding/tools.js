@@ -24,7 +24,7 @@ function codingTools() {
             parameters: {
                 type: "object",
                 properties: {
-                    question: { type: "string", description: "Pertanyaan bahasa alami, mis. 'di mana konektor OpenClaw dipakai?'." },
+                    question: { type: "string", description: "Pertanyaan bahasa alami, mis. 'di mana konektor agent dipakai?'." },
                     project: { type: "string", description: "Path root proyek (opsional; default proyek daemon)." }
                 },
                 required: ["question"]
@@ -213,7 +213,7 @@ function codingTools() {
             parameters: {
                 type: "object",
                 properties: {
-                    name: { type: "string", description: "Nama branch, mis. 'aether/fix-openclaw-404'." },
+                    name: { type: "string", description: "Nama branch, mis. 'aether/fix-integration-404'." },
                     project: { type: "string", description: "Path root proyek (opsional)." }
                 },
                 required: ["name"]

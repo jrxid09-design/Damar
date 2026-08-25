@@ -27,9 +27,14 @@ const DESTRUCTIVE = new Set([
 
     // ---- Eksekusi sembarang / kehilangan data permanen -----------
     "filesystem.deleteFile",
+    // D Round-3: filesystem WRITES berefek samping — tidak boleh
+    // diklasifikasi sebagai baca murni (dua tulisan berbarengan sulit
+    // ditelusuri; RuntimeExecutor menyerialkannya).
+    "filesystem.writeFile",
+    "filesystem.moveFile",
+    "filesystem.copyFile",
+    "filesystem.createDirectory",
     "run-command.runCommand",
-    "aetherSkills.hermes_run",
-    "aetherSkills.openclaw_do",
     "terminal_run",
     "kali_run",
 
@@ -52,9 +57,6 @@ const DESTRUCTIVE = new Set([
     "aetherSkills.leave_home",
     "cursor-control.controlCursor",
     "press-button.pressButton",
-    "aetherSkills.openclaw_open_app",
-    "aetherSkills.openclaw_type",
-    "aetherSkills.openclaw_web",
     "add_hanriver_camera.addHanriverCamera",
     "terminal_restart",
     "terminal_stop",
@@ -75,6 +77,38 @@ const DESTRUCTIVE = new Set([
     "send_immich_photo",
     "send_file",
     "send_media_url",
+
+    // E-F — OUTBOUND MESSAGING & META-MUTATING: tidak pernah
+    // read-only/parallel-safe (efek eksternal tak dapat ditarik,
+    // atau mengubah kapabilitas Aether sendiri).
+    //
+    // Nama ditulis sebagai ID KANONIK TUNGGAL (tail-agnostic): entri
+    // "wa_send" mengklasifikasikan SEMUA bentuk live-nya — native
+    // "wa_send", bridged "aetherSkills__wa_send", registry
+    // "aetherSkills.wa_send". Klasifikasi lebih berat arahnya dari
+    // pada kurang (fail-closed); ini klasifikasi RISIKO, bukan
+    // primitif otorisasi.
+    "wa_send",
+    "wa_broadcast",
+    "wa_notify_owner",
+    "wa_send_image",
+    "wa_send_document",
+    "wa_send_sticker",
+    "whatsapp_send_photo",
+    "whatsapp_send_document",
+    "whatsapp_send_sticker",
+    "whatsapp_send",
+    "create_tool",
+    "activate_tool",
+    "remove_tool",
+    "skill_build",
+
+    // E-F — SKILL EKSTERNAL-VISIBLE / META-MUTATING (live ids):
+    // mengirim laporan keluar atau mengubah keadaan Aether sendiri.
+    "morning_briefing",
+    "daily_report",
+    "security_alert",
+    "watch_and_notify",
 
     // ---- OSINT (investigasi) ------------------------------------
     // Investigasi menyentuh data pihak ketiga; hanya untuk yang sah.
@@ -134,16 +168,30 @@ const PATTERNS = [
     anyOf("delete", "remove", "destroy", "wipe", "format", "drop", "purge", "uninstall"),
     anyOf("exec", "shell", "command", "spawn", "run", "sudo", "powershell", "bash"),
     anyOf("install", "restart", "shutdown", "reboot", "service", "registry", "kill"),
-    anyOf("control", "toggle", "switch", "press", "click", "type", "cursor", "activate")
+    // D-F: gerakan mouse = kendali desktop langsung (berefek ke UI).
+    anyOf("control", "toggle", "switch", "press", "click", "type", "cursor", "activate", "mouse")
 ];
 
 /**
  * Apakah sebuah tool destruktif.
  *
- * Urutan: deklarasi tool sendiri → katalog → pola nama → tidak.
- * Tool tak dikenal TIDAK dianggap berbahaya — gerbang yang menahan
- * segalanya hanya membuat Aether tidak bisa dipakai. Yang berbahaya
- * harus disebutkan namanya, bukan ditebak.
+ * E-F — klasifikasi terhadap ID KANONIK LIVE, bukan hanya string
+ * persis: setiap id dinormalisasi ke TIGA bentuk kandidat
+ *   1. apa adanya (nama model-facing, mis. "aetherSkills__wa_send")
+ *   2. bentuk dotted registry ("aetherSkills.wa_send")
+ *   3. tail kanonik ("wa_send") — ruas terakhir setelah "__"/"."/"-"
+ * lalu dicek ke katalog. Dulu katalog berisi nama bare sementara
+ * model menjalankan nama bridged — wa_send dsb. lolos sebagai
+ * "read-only" dan dua pesan keluar dirangkai paralel.
+ *
+ * Urutan: deklarasi tool sendiri → katalog (3 bentuk) → pola nama →
+ * tidak. Tool tak dikenal TIDAK dianggap berbahaya — gerbang yang
+ * menahan segalanya hanya membuat Aether tidak bisa dipakai. Yang
+ * berbahaya harus disebutkan namanya, bukan ditebak.
+ *
+ * CATATAN batas: ini KLASIFIKASI RISIKO (arah pesimis aman) — bukan
+ * primitif otorisasi; keanggotaan capabilitySet tetap kanonik-persis
+ * di Authorization (tail tidak pernah memberi izin).
  *
  * @param {string} id
  * @param {object} [tool] objek tool (untuk membaca deklarasinya)
@@ -158,20 +206,23 @@ function riskOf(id, tool = null) {
         return declared;
     }
 
-    if (DESTRUCTIVE.has(id)) {
-        return true;
-    }
+    const raw = String(id ?? "");
 
-    // Tool jembatan memakai `__` sebagai pemisah ruas
-    // (`aetherSkills__device_on`); katalog menuliskan bentuk titik.
-    const dotted = id.includes("__") ? id.replace(/__/g, ".") : id;
+    // Tiga bentuk kandidat dari SATU id live. Tail mengikuti semantik
+    // CapabilityIndex.tail: pemisah "__"/"." SAJA — garis bawah tunggal
+    // adalah bagian nama tool ("wa_send" bukan "wa" + "send").
+    const tailOf = s => String(s ?? "").split(/__|\./).pop();
 
-    if (dotted !== id && DESTRUCTIVE.has(dotted)) {
-        return true;
+    const dotted = raw.includes("__") ? raw.replace(/__/g, ".") : raw;
+
+    const candidates = new Set([raw, dotted, tailOf(raw), tailOf(dotted)]);
+
+    for (const candidate of candidates) {
+        if (DESTRUCTIVE.has(candidate)) return true;
     }
 
     for (const re of PATTERNS) {
-        if (re.test(id)) return true;
+        if (re.test(raw)) return true;
     }
 
     return false;

@@ -35,9 +35,13 @@ const telemetry = require("../../services/telemetryService");
  *
  * @returns {boolean} true bila tool ini destruktif
  */
-function before(id, args = {}, tool = null) {
+function before(id, args = {}, tool = null, exec = null) {
 
     let destructive = null;
+
+    // Scope rem kebuntuan = identitas eksekusi (H11): sesi/principal
+    // berbeda tidak saling memengaruhi.
+    const scope = exec?.sessionId ?? exec?.principalId ?? "global";
 
     try {
 
@@ -45,7 +49,7 @@ function before(id, args = {}, tool = null) {
 
         destructive = riskPolicy.assertAllowed(id, tool);
 
-        loopGuard.assertNotLooping(id, args);
+        loopGuard.assertNotLooping(id, args, scope);
 
         pathPolicy.assertToolPaths(id, args);
 
@@ -76,9 +80,11 @@ function before(id, args = {}, tool = null) {
 }
 
 /** Kegagalan berulang menandakan percobaan ulang tak menyentuh akarnya (§140). */
-function failed(id, error) {
+function failed(id, error, exec = null) {
 
-    loopGuard.recordFailure(id, error);
+    const scope = exec?.sessionId ?? exec?.principalId ?? "global";
+
+    loopGuard.recordFailure(id, error, scope);
 
     auditTrail.record({
         tool: id,

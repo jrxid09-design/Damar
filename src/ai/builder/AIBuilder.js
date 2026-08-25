@@ -14,7 +14,7 @@ const { AIProviderFactory } = require("../providers");
  * Builder untuk merakit AIEngine.
  *
  * Beberapa provider boleh didaftarkan sekaligus supaya Aether
- * Console bisa berpindah antara AI lokal (Ollama) dan cloud
+ * Console bisa berpindah antara AI lokal (llama.cpp) dan cloud
  * (OpenRouter) saat runtime tanpa merakit ulang engine.
  */
 class AIBuilder {
@@ -77,12 +77,6 @@ class AIBuilder {
     openRouter(options = {}) {
 
         return this.provider("openrouter", options);
-
-    }
-
-    ollama(options = {}) {
-
-        return this.provider("ollama", options);
 
     }
 

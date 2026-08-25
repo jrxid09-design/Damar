@@ -114,7 +114,6 @@ async function penyimpanan() {
 async function layanan() {
 
     const target = {
-        ollama: "http://localhost:11434/api/tags",
         aether: "http://localhost:3000/health",
         immich: "http://localhost:2283/api/server/ping"
     };
@@ -150,27 +149,21 @@ async function layanan() {
 
 async function kecerdasan() {
 
+    // Otak lokal kini in-process (node-llama-cpp) — statusnya dibaca
+    // dari runtime AI, bukan dari server luar.
     try {
-
-        const res = await fetch("http://localhost:11434/api/ps", {
-            signal: AbortSignal.timeout(3000)
-        });
-
-        const data = await res.json();
-
-        const models = (data.models ?? []).map(m =>
-            `${m.name} (ctx ${m.context_length ?? "?"}, ${(m.size / 1e9).toFixed(1)} GB)`
-        );
-
+        const runtime = require("../services/aiRuntimeService");
+        const engine = runtime.engine;
+        const loaded = Boolean(engine?.runtime?.currentProviderId);
         return {
-            termuat: models.length
-                ? fakta(models.join("; "), "ollama /api/ps")
-                : fakta("tidak ada model termuat", "ollama /api/ps")
+            termuat: fakta(
+                loaded ? `provider aktif: ${engine.runtime.currentProviderId}` : "belum ada provider lokal aktif",
+                "aiRuntimeService"
+            )
         };
-
     }
     catch (error) {
-        return { termuat: tidakDiketahui("ollama /api/ps", error.message) };
+        return { termuat: tidakDiketahui("aiRuntimeService", error.message) };
     }
 
 }

@@ -23,16 +23,55 @@ const router = express.Router();
  * dipetakan apa adanya, temperature/max_tokens diteruskan.
  */
 
-/** Autentikasi ringan: token opsional via env. */
+/**
+ * Autentikasi — FAIL-CLOSED (temuan C4).
+ *
+ * Endpoint ini terekspos ke jaringan. Dulu: token kosong = terbuka
+ * "untuk pengembangan" — persis pola fail-open yang dilarang.
+ *
+ * Kini:
+ *   - tanpa AETHER_TOKEN → 503 (endpoint tidak tersedia), BUKAN open;
+ *   - AETHER_UNSAFE_DEV_OPEN_API="1" satu-satunya pintu mode terbuka,
+ *     dengan peringatan keras saat boot (opt-in eksplisit, default aman);
+ *   - token valid → identitas eksekusi: role dari AETHER_API_ROLE
+ *     (default 'user' — API eksternal = hak minimum).
+ */
 function auth(req, res, next) {
-    const token = process.env.AETHER_TOKEN;
-    if (!token) return next();
+
     if (req.method === "OPTIONS") return next();
+
+    const token = process.env.AETHER_TOKEN;
+
+    if (!token) {
+
+        const devOpen = process.env.AETHER_UNSAFE_DEV_OPEN_API === "1";
+
+        if (!devOpen) {
+            return response.error(res,
+                "Layanan API terkunci: AETHER_TOKEN belum diset. " +
+                "Set token, atau setel AETHER_UNSAFE_DEV_OPEN_API=1 untuk mode pengembangan yang berisiko.",
+                503);
+        }
+
+        // Mode dev terbuka: identitas paling terbatas tetap dipakai.
+        req.execIdentity = { role: "user", channel: "api", sessionId: `api:${req.ip ?? "dev"}` };
+        return next();
+    }
+
     const header = req.headers.authorization ?? "";
     const provided = header.startsWith("Bearer ") ? header.slice(7).trim() : req.query.token;
+
     if (provided !== token) {
         return response.error(res, "Unauthorized. Sertakan header 'Authorization: Bearer <AETHER_TOKEN>'.", 401);
     }
+
+    // Identitas eksekusi untuk seluruh handler di router ini.
+    req.execIdentity = {
+        role: process.env.AETHER_API_ROLE ?? "user",
+        channel: "api",
+        sessionId: `api:${req.ip ?? "unknown"}`
+    };
+
     next();
 }
 
@@ -72,6 +111,9 @@ router.post("/chat/completions", async (req, res, next) => {
             messages,
             temperature,
             maxTokens: max_tokens,
+            // Identitas dari gerbang auth — role API default 'user'.
+            role: req.execIdentity?.role,
+            sessionId: req.execIdentity?.sessionId,
             // Tanpa channel: ini panggilan mesin-ke-mesin; kanal (console/
             // whatsapp/telegram) tidak berlaku, dan prompt kanal justru
             // akan membingungkan entitas koloni.

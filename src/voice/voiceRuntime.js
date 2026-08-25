@@ -64,6 +64,12 @@ class VoiceRuntime extends EventEmitter {
         this._timers = new Set();
         this._cancelled = false;
         this._speaking = false;
+        this._levelStream = null;      // handle stream level audio standby
+        this._lastVoiceAt = 0;         // RMS terakhir di atas ambang
+        this._burstSeen = false;
+        this._capturing = false;
+        this._lastWakeTry = 0;
+        this._autoReason = null;
         this.lastError = null;
 
     }
@@ -82,8 +88,18 @@ class VoiceRuntime extends EventEmitter {
 
     async start() {
 
-        if (!this.cfg.enabled) {
-            telemetry.info("[voice] nonaktif (AETHER_VOICE_ENABLED tidak diset).");
+        // "auto": aktif bila STT terkonfigurasi + perekam tersedia —
+        // wake word mustahil tanpa keduanya; jujur daripada diam mati.
+        let enabled = this.cfg.enabled;
+        if (enabled === "auto") {
+            const sttOk = require("../services/voiceService").sttConfigured;
+            enabled = sttOk; // recorder diverifikasi setelah probe di bawah
+            this._autoReason = sttOk ? null : "STT belum dikonfigurasi";
+        }
+
+        if (!enabled) {
+            telemetry.info("[voice] nonaktif (AETHER_VOICE_ENABLED=" +
+                this.cfg.enabledRaw + ").");
             return this;
         }
 
@@ -95,10 +111,24 @@ class VoiceRuntime extends EventEmitter {
         // Probe perangkat (graceful: gagal pun tetap lanjut).
         await Promise.allSettled([this.input.probe(), this.output.probe()]);
 
+        // auto tapi tak ada perekam → mati dengan alasan jelas.
+        if (this.cfg.enabled === "auto" && !this.input.available) {
+            this.enabled = false;
+            this.running = false;
+            this._autoReason = "perekam audio tidak tersedia";
+            telemetry.info("[voice] auto-nonaktif: " + this._autoReason);
+            return this;
+        }
+
         this.session.register();
+
+        // Standby stream: RMS dari mic untuk (a) deteksi tepuk tangan,
+        // (b) deteksi burst suara pemicu wake-word.
+        this._startStandbyStream();
 
         telemetry.publish("voice:started", {
             wakeWord: this.cfg.wakeWord,
+            clapEnabled: this.cfg.clapEnabled,
             mic: this.input.available,
             speaker: this.output.available
         });
@@ -115,12 +145,59 @@ class VoiceRuntime extends EventEmitter {
 
     }
 
+    /**
+     * Stream level standby: satu sumber RMS untuk clap + burst-wake.
+     * Hanya bekerja saat IDLE agar tidak mengganggu giliran aktif.
+     */
+    async _startStandbyStream() {
+
+        if (!this.input.available) return;
+
+        const stream = await this.input.startLevelStream((rms) => {
+
+            var now = Date.now();
+            if (rms > 0.055) this._lastVoiceAt = now;
+
+            if (this.machine.current !== STATES.IDLE) return;
+
+            if (this.cfg.clapEnabled) this.clapDetect(rms);
+
+            // Detektor burst: suara di atas ambang = calon ucapan.
+            if (rms > 0.055) {
+                this._burstSeen = true;
+            }
+            // Setelah burst selesai (senyap 350ms) dan belum sedang merekam,
+            // picu perekaman utterance untuk diperiksa wake word-nya.
+            if (this._burstSeen && !this._capturing &&
+                now - this._lastVoiceAt > 350 && now - (this._lastWakeTry || 0) > 2000) {
+                this._burstSeen = false;
+                this._lastWakeTry = now;
+                this._wakeCycle().catch(err => {
+                    this.lastError = err.message;
+                });
+            }
+
+        });
+
+        if (stream) {
+            this._levelStream = stream;
+            telemetry.info("[voice] standby stream aktif (wake word + tepuk).");
+        }
+
+    }
+
     async stop() {
 
         this.running = false;
 
         for (const t of this._timers) clearTimeout(t);
         this._timers.clear();
+
+        // Hentikan stream level audio standby.
+        if (this._levelStream) {
+            try { this._levelStream.stop(); } catch { /* abaikan */ }
+            this._levelStream = null;
+        }
 
         await this.output.stop();
         this.machine.reset();
@@ -178,12 +255,156 @@ class VoiceRuntime extends EventEmitter {
     }
 
     /**
-     * Titik masuk untuk trigger tepuk tangan 2x: beri sampel level audio
-     * (RMS 0..1) lalu periksa apakah double clap terdeteksi.
-     *
-     * @param {number} rms level audio 0..1
-     * @param {number} t waktu epoch ms (opsional)
-     * @returns {object} { detected, claps, gapMs }
+     * Siklus WAKE: utterance hasil burst → STT → cek wake word.
+     * Bila terdeteksi: ack (dibicarakan dulu, agar capture berikutnya tak
+     * menelan suara Aether sendiri) → lanjut siklus LISTEN perintah.
+     */
+    async _wakeCycle() {
+
+        this._capturing = true;
+
+        try {
+
+            const buf = await this._captureUtterance(4000);
+
+            if (!buf || buf.length < 20000) return;   // < ~0.6s audio: buang
+
+            const { text } = await this._transcribe(buf);
+            if (!text) return;
+
+            const r = this.wake.detect(text);
+
+            telemetry.publish("voice:wake-check", {
+                text: text.slice(0, 60),
+                detected: r.detected
+            });
+
+            if (!r.detected) return;   // percakapan orang lain — biarkan
+
+            // ---- WAKE! ----
+            this.machine.transit(STATES.WAKE_DETECTED);
+            this.emit("wake", { source: "wakeword", text });
+            telemetry.publish("voice:wake", { source: "wakeword", text });
+
+            // Ack dibicarakan DULU (blocking) supaya mic berikutnya tidak
+            // merekam suara Aether sendiri.
+            await this.speak(this.cfg.acknowledgement);
+
+            // Lalu buka sesi dengar untuk perintah.
+            await this._listenCycle();
+
+        }
+        catch (error) {
+            this.lastError = error.message;
+            telemetry.warn(`[voice] wake cycle gagal: ${error.message}`);
+        }
+        finally {
+            this._capturing = false;
+            this.machine.reset();
+        }
+
+    }
+
+    /**
+     * Siklus LISTEN: rekam perintah (maks maxListenMs, VAD senyap 1.2s)
+     * → STT → THINKING→SPEAKING via handleTranscript.
+     */
+    async _listenCycle() {
+
+        this.machine.transit(STATES.LISTENING);
+        setImmediate(() => {});   // biarkan transisi terserap
+
+        const buf = await this._captureUtterance(this.cfg.maxListenMs || 8000);
+
+        if (!buf || buf.length < 20000) {
+            this.speak("Sepertinya tak ada perintah.").catch(() => {});
+            this.machine.reset();
+            return;
+        }
+
+        this.machine.transit(STATES.TRANSCRIBING);
+
+        const { text } = await this._transcribe(buf);
+
+        if (!text) {
+            this.speak("Aku kurang menangkapnya.").catch(() => {});
+            this.machine.reset();
+            return;
+        }
+
+        await this.handleTranscript(text);   // THINKING→SPEAKING→IDLE di dalam
+
+    }
+
+    /**
+     * Rekam satu utterance: mulai sekarang, berhenti lebih awal bila
+     * senyap ≥1.2 dtk SETELAH ada suara, atau saat maxMs habis.
+     */
+    async _captureUtterance(maxMs = 4000) {
+
+        const cap = await this.input.startCapture({ durationMs: maxMs + 1500 });
+
+        if (!cap) return null;
+
+        this._capturing = true;
+
+        try {
+
+            return await new Promise(resolve => {
+
+                const startedAt = Date.now();
+                var spoke = false;
+
+                const iv = setInterval(() => {
+
+                    var now = Date.now();
+                    if (now - this._lastVoiceAt < 300) spoke = true;
+
+                    var silence = now - this._lastVoiceAt;
+                    var elapsed = now - startedAt;
+
+                    if ((spoke && silence > 1200) || elapsed > maxMs) {
+                        clearInterval(iv);
+                        cap.stop().then(resolve).catch(() => resolve(null));
+                    }
+
+                }, 120);
+
+                // Jaring pengaman
+                setTimeout(() => {
+                    clearInterval(iv);
+                    cap.stop().then(resolve).catch(() => resolve(null));
+                }, maxMs + 2500).unref?.();
+
+            });
+
+        }
+        finally {
+            this._capturing = false;
+        }
+
+    }
+
+    /** STT via voiceService (faster-whisper dsb). Gagal → teks kosong. */
+    async _transcribe(buf) {
+
+        try {
+            const voice = require("../services/voiceService");
+            const r = await voice.transcribe(buf, {
+                mimeType: "audio/wav",
+                language: this.cfg.language || "id"
+            });
+            return { text: (r.text || "").trim() };
+        }
+        catch (error) {
+            this.lastError = error.message;
+            telemetry.warn(`[voice] STT gagal: ${error.message}`);
+            return { text: "" };
+        }
+
+    }
+    /**
+     * Trigger tepuk tangan 2x: beri sampel RMS lalu periksa double clap.
      */
     clapDetect(rms, t = Date.now()) {
 
@@ -339,11 +560,15 @@ class VoiceRuntime extends EventEmitter {
 
         return {
             enabled: this.enabled,
+            enabledRaw: c.enabledRaw,
+            autoReason: this._autoReason,
+            capturing: this._capturing,
             running: this.running,
             state: this.machine.current,
             wakeWord: c.wakeWord,
             clapEnabled: c.clapEnabled,
             clapDetector: this.clap.status(),
+            clapStreamActive: Boolean(this._levelStream),
             microphone: this.input.status(),
             speaker: this.output.status(),
             sttProvider: c.sttProvider,

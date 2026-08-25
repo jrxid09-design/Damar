@@ -6,7 +6,7 @@ const terminals = require("./terminal/TerminalRuntime");
 
 /**
  * Runtime API — status terpadu semua runtime inti Aether untuk Runtime
- * Console (Hermes/OpenClaw/Docker/Ollama/Aether). Sumber:
+ * Console (Docker/Aether). Sumber:
  *   - kesehatan: agentHub / integrations (REST/health)
  *   - proses (pid/uptime/cpu/mem): terminal yang terikat by PURPOSE
  *   - Aether: proses daemon itu sendiri
@@ -23,9 +23,6 @@ const store = new JsonStore(
 
 const RUNTIMES = [
     { key: "aether", label: "Aether", purpose: "aether", owner: "system", self: true, restartPolicy: "managed" },
-    { key: "hermes", label: "Hermes", purpose: "hermes", owner: "system", integrationId: "hermes", command: "hermes serve", expect: "listening|ready|started", restartPolicy: "on-failure" },
-    { key: "openclaw", label: "OpenClaw", purpose: "openclaw", owner: "system", integrationId: "openclaw", command: "openclaw serve", expect: "listening|ready|started", restartPolicy: "on-failure" },
-    { key: "ollama", label: "Ollama", purpose: "ollama", owner: "system", integrationId: "ollama", command: "ollama serve", expect: "listening|Listening", restartPolicy: "on-failure" },
     { key: "docker", label: "Docker", purpose: "docker", owner: "system", command: null, restartPolicy: "never" }
 ];
 
@@ -60,12 +57,6 @@ async function healthMap() {
     try {
         const agentHub = require("../services/agentHub");
         for (const a of await agentHub.health()) map[a.id] = a.online === true;
-    }
-    catch { /* opsional */ }
-    try {
-        const { manager } = require("../integrations");
-        const o = manager.get?.("ollama");
-        if (o) map.ollama = o.lastStatus?.online === true;
     }
     catch { /* opsional */ }
     return map;
@@ -173,8 +164,7 @@ async function restart(key) {
 
 // Runtime inti yang dinyalakan otomatis saat daemon boot (bisa di-override
 // per-mesin di configs/runtimes.json → overrides[key].autostart = false).
-// OpenClaw sengaja TIDAK auto-serve (dijalankan normal/manual sesuai permintaan).
-const DEFAULT_AUTOSTART = { hermes: true, openclaw: false, ollama: true, docker: false };
+const DEFAULT_AUTOSTART = { docker: false };
 
 /**
  * Nyalakan runtime inti saat boot agar dashboard tak "DEGRADED" tiap

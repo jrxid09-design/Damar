@@ -4,7 +4,7 @@ const { promisify } = require("node:util");
 const pexec = promisify(execFile);
 
 /**
- * Kendali desktop langsung oleh Aether — tanpa OpenClaw.
+ * Kendali desktop langsung oleh Aether.
  *
  * Di Windows memakai PowerShell + UI Automation / WScript. Semua
  * aksi best-effort dan dilaporkan jujur: bila target tidak ketemu,

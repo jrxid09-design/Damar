@@ -54,7 +54,7 @@ function visionTools() {
                 required: ["camera"]
             },
 
-            execute: async ({ camera, question }) => {
+            execute: async ({ camera, question }, ctx) => {
 
                 const cams = deviceService.cameras();
 
@@ -73,7 +73,12 @@ function visionTools() {
                 const result = await vision.analyzeUrl({
                     url: cam.snapshotUrl,
                     headers: cam.headers ?? {},
-                    prompt: question
+                    prompt: question,
+                    // N2-FINAL: giliran visi mewarisi pemanggil tool.
+                    exec: ctx?.exec ?? null,
+                    // D-FINAL: URL dari REGISTRY kamera milik pemilik —
+                    // satu-satunya alasan kebijakan trusted-lan sah.
+                    policy: "trusted-lan"
                 });
 
                 return {

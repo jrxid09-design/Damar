@@ -3,7 +3,7 @@ const { AsyncLocalStorage } = require("node:async_hooks");
 const { SessionStore, sessionStore } = require("./sessionStore");
 
 /**
- * Abstraksi kanal — evolusi menuju pola "ChannelPlugin" OpenClaw.
+ * Abstraksi kanal — antarmuka seragam untuk semua jalur pesan.
  *
  * Sebelumnya WhatsApp & Telegram adalah dua service terpisah yang
  * menyalin logika `converse()` yang sama (±90% identik) dan menyimpan

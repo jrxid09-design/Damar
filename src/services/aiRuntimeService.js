@@ -39,7 +39,7 @@ const NON_CHAT_MODEL =
     /embedding|embed|aqa|imagen|\bveo\b|-image|image-|native-audio|\btts\b|text-to-speech|whisper|learnlm|gemma-3n/i;
 
 function isFreeModel(platform, id) {
-    if (platform === "groq" || platform === "ollama") return true;
+    if (platform === "groq" || platform === "llamacpp") return true;
     if (platform === "openrouter") return id.endsWith(":free");
     if (platform === "google") return /flash/i.test(id) && !/pro/i.test(id);
     return false;
@@ -214,9 +214,9 @@ class AIRuntimeService {
             "Kamu bebas merangkai beberapa tool berturut-turut untuk menuntaskan satu " +
             "permintaan (mis. cari dulu, hitung, lalu simpan). Utamakan menyelesaikan " +
             "tugas secara nyata dengan tool, bukan sekadar menjelaskan caranya.\n\n" +
-            "TERMINAL: untuk menjalankan proses/perintah (Hermes, Docker, npm, Python, " +
+            "TERMINAL: untuk menjalankan proses/perintah (Docker, npm, Python, " +
             "build, dll) JANGAN pernah membuat shell sementara. Pakai terminal_run atau " +
-            "terminal_restart dengan `purpose` yang stabil (mis. 'hermes','docker') — " +
+            "terminal_restart dengan `purpose` yang stabil (mis. 'docker','build') — " +
             "Aether akan memakai ulang terminal yang sudah ada atau membuat bila belum ada. " +
             "Untuk proses yang lama hidup, sertakan `expect` (regex) agar menunggu sampai " +
             "siap. Cek terminal_list dulu bila ragu, dan terminal_read untuk memeriksa log.\n\n" +
@@ -239,8 +239,8 @@ class AIRuntimeService {
             "signifikan/destruktif, buat checkpoint. Hal yang asing bukan hal yang mustahil — " +
             "asing artinya: cari atau ciptakan kapabilitasnya.\n" +
             // Daftar tool yang dilampirkan tiap giliran DIPILIH sesuai
-            // pesan (lihat ToolSelector) — bukan seluruh 142 tool.
-            // Model yang tidak tahu itu menyimpulkan tool yang tak
+            // pesan (lihat ai/tools/Pipeline.js) — bukan seluruh 200+
+            // tool. Model yang tidak tahu itu menyimpulkan tool yang tak
             // dilihatnya "tidak terpasang", lalu mengarang sebabnya
             // (backend mati, toggle di Console belum aktif) dan
             // menyuruh pengguna memperbaiki hal yang tidak rusak.
@@ -252,9 +252,12 @@ class AIRuntimeService {
             "tidak ada di daftarmu saat ini. Itu tebakan, dan hampir selalu salah.\n" +
             "- JANGAN menyuruh pengguna mengaktifkan toggle, me-restart Console, " +
             "atau memeriksa log untuk memunculkan tool. Bukan begitu cara kerjanya.\n" +
-            "- Bila tool yang kamu butuhkan tidak terlihat, PANGGIL capability_search " +
-            "dengan maksudmu; ia mencari di seluruh kemampuan Aether. Baru bila " +
-            "benar-benar tidak ada, buat dengan create_tool atau skill_build.\n" +
+            "- Bila daftarmu KOSONG, jawab langsung dari pengetahuanmu — jangan " +
+            "mengarang nama tool, jangan mencoba memanggil apa pun.\n" +
+            "- Bila daftarmu berisi tool tetapi kemampuan yang diminta tidak " +
+            "terlihat, PANGGIL tool_search dengan maksudmu; ia mencari seluruh " +
+            "kemampuan Aether dan schema tool temuanmu akan dilampirkan. Baru " +
+            "bila benar-benar tidak ada, buat dengan create_tool atau skill_build.\n" +
             "Kamu punya kemampuan yang sama di kanal mana pun — Console, WhatsApp, " +
             "Telegram, maupun CLI. Tidak ada kanal yang lebih terbatas.\n\n" +
 
@@ -305,28 +308,19 @@ class AIRuntimeService {
 
         const builder = new Aether.Builder();
 
-        // Ollama selalu terdaftar sebagai jaring pengaman lokal.
-        const ollamaCfg = providerConfig.read().ollama ?? {};
+        // Otak lokal (node-llama-cpp) selalu terdaftar sebagai jaring
+        // pengaman — bobot GGUF dimuat LAZY saat pertama dipakai, jadi
+        // mendaftarkannya di sini tidak memakan RAM bila hanya memakai
+        // provider cloud.
+        const localCtx = Number(process.env.AETHER_LOCAL_NUM_CTX ?? 8192);
 
-        // Context window untuk inferensi lokal. Daemon Ollama bisa
-        // memilih context sangat besar secara otomatis; di mesin
-        // tanpa GPU itu justru melipatgandakan pemakaian RAM dan
-        // membuat pemrosesan prompt melewati batas waktu. Nilai ini
-        // dikirim eksplisit tiap permintaan agar perilakunya sama
-        // di mesin mana pun.
-        const numCtx = Number(
-            process.env.AETHER_OLLAMA_NUM_CTX ??
-            ollamaCfg.numCtx ??
-            8192
-        );
-
-        builder.ollama({
-            baseUrl: ollamaCfg.baseUrl || "http://localhost:11434",
-            timeout: 120000,
-            defaultOptions: Number.isFinite(numCtx) && numCtx > 0
-                ? { num_ctx: numCtx }
-                : {},
-            keepAlive: process.env.AETHER_OLLAMA_KEEP_ALIVE || "30m"
+        // H6: simpan window model lokal yang BENAR-BENAR dikonfigurasi —
+        // sumber kebenaran untuk ContextBudget/ToolBudget.
+        this._localContextTokens =
+            Number.isFinite(localCtx) && localCtx > 0 ? localCtx : 8192;
+        builder.provider("llamacpp", {
+            modelPath: providerConfig.read().llamacpp?.model ?? null,
+            contextSize: Number.isFinite(localCtx) && localCtx > 0 ? localCtx : 8192
         });
 
         if (resolved.kind === "openai") {
@@ -344,27 +338,12 @@ class AIRuntimeService {
         }
         else if (resolved.kind === "llamacpp") {
 
-            // Otak lokal langsung: bobot GGUF dimuat di proses daemon,
-            // tanpa Ollama/HTTP. contextSize dibatasi agar RAM di mesin
-            // CPU tidak meledak (KV-cache tumbuh dengan context).
-            const localCtx = Number(process.env.AETHER_LOCAL_NUM_CTX ?? 8192);
-            builder.provider("llamacpp", {
-                modelPath: resolved.model,
-                contextSize: Number.isFinite(localCtx) && localCtx > 0 ? localCtx : 8192
-            });
-
             builder.use("llamacpp");
 
-        }
-        else {
-            builder.use("ollama");
         }
 
         if (resolved.model) {
             builder.defaultModel(resolved.model);
-        }
-        else if (resolved.kind === "ollama") {
-            builder.defaultModel(ollamaCfg.model || "llama3.2");
         }
 
         builder.registerTools(this.bridgePluginTools());
@@ -386,7 +365,7 @@ class AIRuntimeService {
         telemetry.info(
             `AI runtime siap (platform=${resolved.label}, model=${resolved.model ?? "default"})` +
             (resolved.fellBackFrom
-                ? ` — key ${resolved.fellBackFrom} kosong, pakai Ollama`
+                ? ` — key ${resolved.fellBackFrom} kosong, pakai otak lokal`
                 : "")
         );
 
@@ -484,11 +463,12 @@ class AIRuntimeService {
 
             });
 
-            // Menandai id registry inti: ToolExecutor melewati
-            // penjagaannya untuk tool ini supaya rantai keselamatan
-            // tidak berjalan dua kali (rem kebuntuan akan salah
-            // menghitung satu panggilan sebagai dua).
+            // Menandai id registry inti + BUKTI dijaga internally.
+            // Authorization.proveBridgedGuarded() mensyaratkan kedua
+            // flag + keanggotaan registry inti — flag boolean saja
+            // tidak lagi melewati rantai keselamatan (temuan G7).
             bridge.bridged = descriptor.id;
+            bridge.guardedInternally = true;
 
             return bridge;
 
@@ -687,7 +667,15 @@ class AIRuntimeService {
             ...require("../consciousness/tools").consciousnessTools(),
 
             // Cuan — pindai peluang, takar risiko, bukukan hasil nyata.
-            ...require("../money/tools").moneyTools()
+            ...require("../money/tools").moneyTools(),
+
+            // Meta — penemuan tool untuk model. Satu-satunya pintu
+            // disclosure dinamis: model yang butuh kemampuan di luar
+            // daftarnya mencari lewat sini, runtime yang melampirkan
+            // schema-nya (lihat RuntimeExecutor.discloseFromResults).
+            require("../ai/tools/toolSearch").createToolSearchTool({
+                getTools: () => this.tools()
+            })
         ];
 
     }
@@ -706,6 +694,39 @@ class AIRuntimeService {
         catch {
             return [];
         }
+    }
+
+    /**
+     * Window konteks model AKTIF (Phase 13) — dari metadata runtime,
+     * env hanya fallback. Tanpa hardcode nama model/provider.
+     *
+     * H6 Round-3 PRESEDENS (fallback TIDAK boleh memperbesar):
+     *   window model aktif yang DIKETAHUI
+     *     > konfigurasi provider/model tervalidasi
+     *     > fallback env
+     *     > null (default konservatif)
+     * AETHER_MODEL_CONTEXT_TOKENS tidak pernah boleh melampaui window
+     * nyata yang sudah diketahui; ia hanya boleh MENGECEKKNYA.
+     */
+    activeContextTokens() {
+
+        const envN = Number(process.env.AETHER_MODEL_CONTEXT_TOKENS);
+        const envWindow = Number.isFinite(envN) && envN > 0 ? envN : null;
+
+        // Model LOKAL punya window yang DIKONFIGURASI dan DIKETAHUI —
+        // H6 melarang substitusi diam ke default lebih besar.
+        const knownReal = this._localContextTokens > 0 &&
+            (this.activePlatform?.id === "llamacpp" || !process.env.AETHER_TOKEN)
+            ? this._localContextTokens
+            : null;
+
+        if (knownReal) {
+            return envWindow ? Math.min(envWindow, knownReal) : knownReal;
+        }
+
+        // Cloud: window tak diketahui → fallback env atau null.
+        return envWindow;
+
     }
 
     /** Rakit ulang registry tool AI dari keadaan terkini. */
@@ -792,7 +813,7 @@ class AIRuntimeService {
 
     async models() {
 
-        const platform = this.activePlatform?.id ?? "ollama";
+        const platform = this.activePlatform?.id ?? "lokal";
 
         return this.discoverModels(platform);
 
@@ -860,7 +881,7 @@ class AIRuntimeService {
         const r = this.activePlatform ?? {};
 
         if (r.kind !== "openai") {
-            return { ok: true };            // Ollama lokal: lewati uji jarak jauh
+            return { ok: true };            // Otak lokal: lewati uji jarak jauh
         }
 
         try {
@@ -944,7 +965,7 @@ class AIRuntimeService {
 
         if (next) {
             this.setDefaultModel(next.id);
-            if (platform !== "ollama") {
+            if (platform !== "llamacpp") {
                 try { require("./providerConfigService").setProvider(platform, { model: next.id }); }
                 catch { /* abaikan */ }
             }
@@ -1009,6 +1030,11 @@ class AIRuntimeService {
                 "Satu-dua kalimat untuk tugas sederhana; jelaskan lebih panjang hanya bila " +
                 "benar-benar perlu. Jangan pakai daftar, tabel, markdown, atau emoji. " +
                 "Awali dengan kata kerja atau jawaban langsung, tanpa basa-basi."
+            ,
+            device: "PERANGKAT TERTAUT (companion device — HP/laptop/tablet di jaringan " +
+                "yang sama). Balas jelas dan ringkas; ini layar kecil, hindari tabel lebar. " +
+                "Kamu memakai tools & skill yang sama seperti di PC ini — jalankan perintah " +
+                "pengguna apa adanya (tunduk pada pagar keamanan yang sama)."
         };
 
         const nama = String(channel ?? "").toLowerCase();
@@ -1111,7 +1137,7 @@ class AIRuntimeService {
              * prompt sistem.
              *
              * Isinya berubah pada hampir setiap permintaan, sedangkan
-             * prompt sistem dan definisi tool tidak. Ollama memakai
+             * prompt sistem dan definisi tool tidak. Inferensi lokal memakai
              * ulang prefix prompt di tingkat token: menaruh bagian
              * yang berubah di DEPAN membatalkan cache untuk semua yang
              * mengikutinya — termasuk seluruh blok tool.
@@ -1236,20 +1262,121 @@ ${blok}` }
 
     }
 
-    async chat({ messages, model, temperature, maxTokens, tools, channel }) {
+    /**
+     * CONTEXT INTELLIGENCE — rakit messages final untuk satu giliran.
+     *
+     * Jalur NEW (default): src/ai/context/Pipeline — sanitasi anti-
+     * explosion, jendela recent + riwayat relevan berperingkat,
+     * memori/batin lewat adapter existing, dedupe lintas sumber,
+     * anggaran model-aware, blok dinamis tetap ditempel ke pesan
+     * pengguna terakhir (pola cache yang sudah terbukti).
+     *
+     * Jalur LEGACY (`AETHER_CONTEXT_PIPELINE=legacy`): rantai lama
+     * withSystemPrompt → withMemory → withMind — utuh untuk rollback.
+     */
+    async assemble({ messages, channel = null, tools = null, contextRefs = [] }) {
+
+        const lastUser = [...(messages ?? [])].reverse().find(m => m.role === "user");
+
+        // Persepsi batin tetap berjalan di kedua jalur — stateOfMind
+        // membaca hasilnya.
+        if (lastUser && typeof lastUser.content === "string") {
+            try {
+                require("../consciousness").perceiveUser(lastUser.content, {
+                    channel,
+                    tools: tools ?? []
+                });
+            }
+            catch { /* persepsi gagal: lanjut */ }
+        }
+
+        const legacy = process.env.AETHER_CONTEXT_PIPELINE === "legacy";
+
+        if (legacy) {
+            const msgs = await this.withMind(messages, channel, tools);
+            return { messages: msgs, diagnostics: { mode: "legacy" } };
+        }
+
+        const Pipeline = require("../ai/context/Pipeline");
+
+        const { messages: finalMessages, systemContent, diagnostics } =
+            await Pipeline.select({
+                messages,
+                channel,
+                includeMind: true,
+                contextRefs,
+                aiRuntime: this,
+
+                // H6: jendela konteks model AKTIF ikut ke ContextBudget —
+                // env hanya fallback di dalam pipeline, bukan satu-satunya
+                // sumber.
+                contextTokens: this.activeContextTokens()
+            });
+
+        // System prompt dari pipeline; hormati system yang dikirim
+        // pemanggil (jalur API eksternal).
+        let out = finalMessages;
+
+        if (systemContent && !out.some(m => m.role === "system")) {
+            out = [{ role: "system", content: systemContent }, ...out];
+        }
+
+        return { messages: out, diagnostics: { ...diagnostics, mode: "pipeline" } };
+
+    }
+
+    async chat({ messages, model, temperature, maxTokens, tools, channel, role, signal, contextRefs, sessionId, ...exec0 }) {
 
         // Giliran baru = kesempatan bersih. Tanpa ini, jejak
         // kebuntuan dari permintaan sebelumnya ikut menghakimi
         // permintaan yang sama sekali berbeda (§140).
-        try { require("../core/safety/loopGuard").reset(); }
-        catch { /* jangan sampai menggagalkan chat */ }
+        // H4 Round-2: reset HANYA dengan scope eksplisit; tanpa
+        // sessionId, JANGAN menyentuh guard sama sekali.
+        if (sessionId) {
+            try { require("../core/safety/loopGuard").reset(sessionId); }
+            catch { /* jangan sampai menggagalkan chat */ }
+        }
 
-        const msgs = await this.withMind(messages, channel, tools);
-        const platform = this.activePlatform?.id ?? "ollama";
+        const assembled = await this.assemble({ messages, channel, tools, contextRefs });
+        const msgs = assembled.messages;
+        const platform = this.activePlatform?.id ?? "lokal";
         const first = this.resolveModel(model);
 
+        // Identitas eksekusi menyeberang ke runtime → executor → guard
+        // (invariant A/G): tanpa ini otorisasi eksekusi buta identitas.
+        //
+        // A-FINAL/H1-CLOSURE: pemanggil tepercaya (visionService,
+        // agentHub) boleh mengirim SATU identitas kanonik utuh (`exec`)
+        // sebagai dasar; pembawa legacy (role/capabilitySet di level
+        // atas) tetap dinormalisasi & dibekukan di sini. Restriction
+        // tidak pernah dibangun ulang dari potongan yang hilang.
+        const { toCapabilitySet } = require("../ai/tools/Authorization");
+        const baseExec = (exec0?.exec && typeof exec0.exec === "object")
+            ? exec0.exec : null;
+        // M-1 CLOSURE: satu sumber restriction di batas runtime —
+        // string id / iterable dinormalisasi sebagai NARROWING; bentuk
+        // tak dikenal THROW di sini (fail-closed), bukan dilucuti.
+        const capabilitySet = toCapabilitySet(
+            baseExec && baseExec.capabilitySet !== undefined
+                ? baseExec.capabilitySet
+                : exec0?.capabilitySet
+        );
+
+        const exec = {
+            ...(baseExec ?? {}),
+            role: role ?? baseExec?.role ?? null,
+            channel: channel ?? baseExec?.channel ?? null,
+            sessionId: sessionId ?? baseExec?.sessionId ?? `${channel ?? "local"}:${this.activePlatform?.model ?? "model"}`,
+            principalId: sessionId ?? baseExec?.principalId ?? "local-owner",
+            contextTokens: this.activeContextTokens(),
+            ...(capabilitySet ? { capabilitySet } : {})
+        };
+        if (!capabilitySet) {
+            delete exec.capabilitySet;   // buang bentuk mentah warisan baseExec
+        }
+
         try {
-            const res = await this.ensure().chat({ messages: msgs, model: first, temperature, maxTokens, tools });
+            const res = await this.ensure().chat({ messages: msgs, model: first, temperature, maxTokens, tools, channel, role, signal, exec });
             this._recordUsage(platform, res);
             return res;
         }
@@ -1261,14 +1388,15 @@ ${blok}` }
 
                 try {
                     // Retry sekali dengan model pengganti (tanpa interaksi pengguna).
-                    const res = await this.ensure().chat({ messages: msgs, model: next, temperature, maxTokens, tools });
+                    const res = await this.ensure().chat({ messages: msgs, model: next, temperature, maxTokens, tools, channel, role, signal, exec });
                     this._recordUsage(this.activePlatform?.id ?? platform, res);
                     return res;
                 }
                 catch (retryError) {
 
                     const local = await this.chatLocalFallback(
-                        { messages: msgs, temperature, maxTokens, tools },
+                        { messages: msgs, temperature, maxTokens, tools, exec,
+                          parentCapabilitySet: capabilitySet },
                         platform,
                         retryError
                     );
@@ -1282,7 +1410,8 @@ ${blok}` }
             }
 
             const local = await this.chatLocalFallback(
-                { messages: msgs, temperature, maxTokens, tools },
+                { messages: msgs, temperature, maxTokens, tools, exec,
+                  parentCapabilitySet: capabilitySet },
                 platform,
                 error
             );
@@ -1295,9 +1424,23 @@ ${blok}` }
 
     }
 
+    /** Nama model lokal untuk fallback: config → berkas GGUF pertama di models/. */
+    _localModelName() {
+        try {
+            const cfgModel = require("./providerConfigService").read().llamacpp?.model;
+            if (cfgModel) return cfgModel;
+            const dir = require("node:path").join(process.cwd(), "models");
+            const first = require("node:fs").readdirSync(dir)
+                .find(f => f.toLowerCase().endsWith(".gguf"));
+            return first ?? null;
+        }
+        catch { return null; }
+    }
+
     /**
-     * Jatuh-balik ke Ollama lokal saat provider cloud tidak bisa
-     * dipakai (kuota per menit habis, ditolak, atau internet mati).
+     * Jatuh-balik ke otak lokal (node-llama-cpp) saat provider cloud
+     * tidak bisa dipakai (kuota per menit habis, ditolak, atau
+     * internet mati).
      *
      * Inilah inti pengaturan hybrid: Aether tetap menjawab walau
      * layanan luar sedang tidak tersedia. Lebih lambat, tapi hidup.
@@ -1306,7 +1449,24 @@ ${blok}` }
      */
     async chatLocalFallback(request, platform, error) {
 
-        if (platform === "ollama") {
+        // M3 + M-1 CLOSURE — NESTED TURN BUKAN HOP PELUCUTAN:
+        // giliran fallback lokal mewarisi identitas kanonik parent
+        // (ganti provider ≠ ganti otoritas). Asersi memakai SATU
+        // mekanisme kanonik Authorization — bukan cek Array.isArray
+        // lokal yang fail-open:
+        //   parent PRESENT + child hilang → THROW;
+        //   parent [] = terkunci penuh dan TETAP dijaga (dulu .length
+        //   mematikan penjaga);
+        //   string/Set dinormalisasi, tak pernah dilucuti;
+        //   malformed → fail-closed; child ⊄ parent → THROW.
+        require("../ai/tools/Authorization")
+            .assertRestrictionPreserved(
+                { capabilitySet: request?.parentCapabilitySet },
+                { capabilitySet: request?.exec?.capabilitySet }
+            );
+        delete request.parentCapabilitySet;   // state asersi, bukan bagian request engine
+
+        if (platform === "llamacpp") {
             return null;
         }
 
@@ -1328,21 +1488,20 @@ ${blok}` }
 
         try {
 
-            const ollamaCfg =
-                require("./providerConfigService").read().ollama ?? {};
+            engine.use("llamacpp");
 
-            engine.use("ollama");
-
+            // exec ikut dalam spread — AIRuntime menormalkan ulang &
+            // membekukan restriction sebelum gerbang disklosur/eksekusi.
             const res = await engine.chat({
                 ...request,
-                model: ollamaCfg.model || "llama3.1:latest"
+                model: this._localModelName()
             });
 
-            this._recordUsage("ollama", res);
+            this._recordUsage("llamacpp", res);
 
             telemetry.warn(
                 `[AI fallback lokal] ${platform} tidak tersedia ` +
-                `(${status ?? error?.message ?? "?"}) → dijawab Ollama.`
+                `(${status ?? error?.message ?? "?"}) → dijawab otak lokal.`
             );
 
             return res;
@@ -1352,7 +1511,7 @@ ${blok}` }
         catch (localError) {
 
             telemetry.warn(
-                `[AI fallback lokal] Ollama juga gagal: ${localError.message}`
+                `[AI fallback lokal] otak lokal juga gagal: ${localError.message}`
             );
 
             return null;
@@ -1381,15 +1540,18 @@ ${blok}` }
         catch { /* pencatatan tak boleh menggagalkan chat */ }
     }
 
-    async *stream({ messages, model, temperature, maxTokens, tools, channel }) {
+    async *stream({ messages, model, temperature, maxTokens, tools, channel, role, signal, contextRefs, sessionId, ...exec0 }) {
 
         // Kesetaraan dengan chat(): giliran baru = kesempatan
         // bersih untuk rem kebuntuan (§140).
-        try { require("../core/safety/loopGuard").reset(); }
-        catch { /* jangan sampai menggagalkan stream */ }
+        if (sessionId) {
+            try { require("../core/safety/loopGuard").reset(sessionId); }
+            catch { /* jangan sampai menggagalkan stream */ }
+        }
 
-        const msgs = await this.withMind(messages, channel, tools);
-        const platform = this.activePlatform?.id ?? "ollama";
+        const assembled = await this.assemble({ messages, channel, tools, contextRefs });
+        const msgs = assembled.messages;
+        const platform = this.activePlatform?.id ?? "lokal";
         const first = this.resolveModel(model);
 
         // Pemakaian token diambil dari chunk terminal (usage ada
@@ -1397,8 +1559,37 @@ ${blok}` }
         let usage = null;
         let platformAktif = platform;
 
+        // A-FINAL/H1-CLOSURE (paritas dengan chat()): set dinormalisasi
+        // & dibekukan di batas runtime; identitas kanonik utuh (`exec`)
+        // dari pemanggil tepercaya menjadi dasar. Streaming bukan hop
+        // pelucutan.
+        const { toCapabilitySet } = require("../ai/tools/Authorization");
+        const baseExec = (exec0?.exec && typeof exec0.exec === "object")
+            ? exec0.exec : null;
+        // M-1 CLOSURE: satu sumber restriction di batas runtime —
+        // string id / iterable dinormalisasi sebagai NARROWING; bentuk
+        // tak dikenal THROW di sini (fail-closed), bukan dilucuti.
+        const capabilitySet = toCapabilitySet(
+            baseExec && baseExec.capabilitySet !== undefined
+                ? baseExec.capabilitySet
+                : exec0?.capabilitySet
+        );
+
+        const exec = {
+            ...(baseExec ?? {}),
+            role: role ?? baseExec?.role ?? null,
+            channel: channel ?? baseExec?.channel ?? null,
+            sessionId: sessionId ?? baseExec?.sessionId ?? `${channel ?? "local"}:${this.activePlatform?.model ?? "model"}`,
+            principalId: sessionId ?? baseExec?.principalId ?? "local-owner",
+            contextTokens: this.activeContextTokens(),
+            ...(capabilitySet ? { capabilitySet } : {})
+        };
+        if (!capabilitySet) {
+            delete exec.capabilitySet;   // buang bentuk mentah warisan baseExec
+        }
+
         const pancar = async function* (modelYangDipakai) {
-            for await (const chunk of this.ensure().stream({ messages: msgs, model: modelYangDipakai, temperature, maxTokens, tools, stream: true })) {
+            for await (const chunk of this.ensure().stream({ messages: msgs, model: modelYangDipakai, temperature, maxTokens, tools, stream: true, channel, role, signal, exec })) {
                 if (chunk?.usage) {
                     usage = chunk.usage;
                     try { require("./usageService").record(platformAktif, {

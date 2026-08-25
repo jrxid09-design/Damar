@@ -7,7 +7,7 @@
  * yang di-hardcode wajib — hanya kelas & preferensi.
  *
  * Failover (§40) memakai rantai fallback aiRuntimeService yang sudah
- * ada (provider cloud → provider lain → Ollama lokal).
+ * ada (provider cloud → provider lain → otak lokal llama.cpp).
  */
 
 /** Kelas tugas → kata kunci pemicu (bahasa user sehari-hari). */

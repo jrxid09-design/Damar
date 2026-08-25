@@ -20,15 +20,38 @@
 
 const PROTOCOL_VERSION = "2024-11-05";
 
-function createMcpHandler({ registry, isDestructive = () => false, allowDestructive = false, serverName = "aether", version = "2.0.0" } = {}) {
+function createMcpHandler({
+    registry,
+    isDestructive = () => false,
+    allowDestructive = false,
+    serverName = "aether",
+    version = "2.0.0",
+
+    /**
+     * H9 — PERMISSION-BEFORE-DISCLOSURE.
+     * Gerbang disklosur KANONIK (Authorization.disclosureFilter).
+     * Bisa diinjeksi untuk test; default ke modul asli supaya tidak ada
+     * daftar peran kedua yang bisa menyimpang.
+     */
+    disclosureFilter = (tools, exec) =>
+        require("../ai/tools/Authorization").disclosureFilter(tools, exec)
+} = {}) {
 
     if (!registry || typeof registry.describe !== "function") {
         throw new Error("mcpHandler butuh registry dengan describe()/has()/execute().");
     }
 
-    /** Tool yang boleh dilihat klien MCP. */
-    function visibleTools() {
-        return registry.describe()
+    /**
+     * Tool yang boleh dilihat klien MCP — untuk identitas eksekusi
+     * yang sama dengan tools/call (invariant A: disclosure dan
+     * eksekusi memakai satu kebenaran otorisasi kanonik).
+     * Tanpa identitas → fail-closed sebagai 'user' anonim.
+     */
+    function visibleTools(exec = null) {
+        const candidates = registry.describe()
+            .map(t => ({ ...t, name: t.id }));
+
+        return disclosureFilter(candidates, exec ?? {})
             .filter(t => allowDestructive || !isDestructive(t.id))
             .map(t => ({
                 name: t.id,
@@ -61,7 +84,7 @@ function createMcpHandler({ registry, isDestructive = () => false, allowDestruct
      * Tangani satu pesan JSON-RPC MCP. Balikan objek respons, atau null
      * untuk notifikasi (tak butuh balasan).
      */
-    async function handle(msg) {
+    async function handle(msg, ctx = null) {
         if (!msg || msg.jsonrpc !== "2.0") return rpcErr(msg?.id ?? null, -32600, "Invalid Request");
         const { id = null, method, params } = msg;
 
@@ -81,7 +104,9 @@ function createMcpHandler({ registry, isDestructive = () => false, allowDestruct
                 return rpcOk(id, {});
 
             case "tools/list":
-                return rpcOk(id, { tools: visibleTools() });
+                // H9: disklosur memakai identitas eksekusi yang sama
+                // dengan tools/call (ctx.exec dari tokenGuard).
+                return rpcOk(id, { tools: visibleTools(ctx?.exec) });
 
             case "tools/call": {
                 const name = params?.name;
@@ -91,7 +116,7 @@ function createMcpHandler({ registry, isDestructive = () => false, allowDestruct
                     return rpcOk(id, { content: [{ type: "text", text: `Tool '${name}' destruktif dan tak diizinkan lewat MCP (set AETHER_MCP_ALLOW_DESTRUCTIVE=1).` }], isError: true });
                 }
                 try {
-                    const result = await registry.execute(name, args, { source: "mcp" });
+                    const result = await registry.execute(name, args, { source: "mcp", exec: ctx?.exec });
                     return rpcOk(id, { content: [{ type: "text", text: stringify(result) }] });
                 } catch (e) {
                     return rpcOk(id, { content: [{ type: "text", text: "ERROR: " + (e?.message || String(e)) }], isError: true });

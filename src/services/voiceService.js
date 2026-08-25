@@ -80,6 +80,8 @@ class VoiceService {
     constructor() {
 
         this.lastError = null;
+        this.lastEngine = null;
+        this.lastTtsError = null;
 
     }
 
@@ -302,6 +304,8 @@ class VoiceService {
                     ? "neural (OpenAI-compatible)"
                     : "speechSynthesis (OS)"
             },
+            lastEngine: this.lastEngine,
+            lastTtsError: this.lastTtsError,
             hint: mati.length
                 ? `${mati.join(" & ")} terkonfigurasi tetapi servisnya tidak menjawab. ` +
                   "Jalankan: docker compose -f deploy/voice/docker-compose.yml up -d"
@@ -314,109 +318,135 @@ class VoiceService {
      * Hasilkan audio ucapan dari teks lewat backend TTS neural.
      * @returns {Promise<{ audio: Buffer, contentType: string }>}
      */
+    /**
+     * Hasilkan audio ucapan dengan RANTAI MESIN (jujur soal yang dipakai):
+     *   1. edge-tts (suara diminta/konfigurasi)
+     *   2. TTS neural kompatibel-OpenAI (Kokoro dll)
+     *   3. edge-tts fallback id-ID-ArdiNeural
+     * Semua gagal → error gabungan penyebab tiap mesin. TIDAK ada fallback
+     * diam-diam ke suara OS di sisi daemon.
+     */
     async speak(text, { voice = null, format = "mp3" } = {}) {
 
-        // Suara ARDI (edge-tts) — jalur terpisah, tak butuh Kokoro. Bila
-        // gagal (edge-tts tak ada dsb), jatuh ke TTS neural di bawah.
+        const attempts = [];
+
         const edgeVoice = resolveEdge(voice || this.ttsVoice);
+
         if (edgeVoice) {
             try {
                 const out = await edgeSpeak(text, edgeVoice);
-                telemetry.publish("voice:spoken", { chars: text.length, voice: edgeVoice });
-                return out;
+                this.lastEngine = "edge";
+                telemetry.publish("voice:spoken", { chars: text.length, voice: edgeVoice, engine: "edge" });
+                return { audio: out.audio, contentType: out.contentType, engine: "edge" };
             }
             catch (error) {
-                telemetry.warn(`[voice] edge-tts (${edgeVoice}) gagal: ${error.message}`);
-                if (!this.ttsConfigured) throw error;
+                attempts.push(`edge(${edgeVoice}): ${error.message}`);
+                telemetry.warn(`[voice] edge-tts gagal: ${error.message}`);
             }
         }
 
-        if (!this.ttsConfigured) {
-            const error = new Error(
-                "TTS neural belum dikonfigurasi. Set endpoint /v1/audio/speech " +
-                "(mis. Kokoro-FastAPI) di Settings, atau pakai suara OS."
-            );
-            error.code = "TTS_NOT_CONFIGURED";
-            throw error;
-        }
+        if (this.ttsConfigured) {
 
-        const headers = { "Content-Type": "application/json" };
-        if (this.ttsKey) {
-            headers.Authorization = `Bearer ${this.ttsKey}`;
-        }
+            try {
 
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 60000);
+                const headers = { "Content-Type": "application/json" };
+                if (this.ttsKey) headers.Authorization = `Bearer ${this.ttsKey}`;
 
-        try {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 60000);
 
-            const raw = voice || this.ttsVoice;
-            let resolvedVoice = this.ttsVoice;
-            if (raw && /^[a-z]{2}_[a-z0-9]+$/i.test(raw)) {
-                resolvedVoice = raw;
-            } else {
-                try {
-                    const base = new URL(this.ttsUrl).origin;
-                    const h = {};
-                    if (this.ttsKey) h.Authorization = `Bearer ${this.ttsKey}`;
-                    const r = await fetch(`${base}/v1/audio/voices`, {
-                        headers: h, signal: AbortSignal.timeout(3000)
-                    });
-                    if (r.ok) {
-                        const d = await r.json().catch(() => null);
-                        const list = Array.isArray(d?.voices) ? d.voices
-                            : Array.isArray(d) ? d : [];
-                        const ids = list.map(v =>
-                            typeof v === "string" ? v : (v.id ?? v.name)
-                        ).filter(Boolean);
-                        if (ids.includes(raw)) resolvedVoice = raw;
-                    }
-                } catch { /* ignore – fallback to config */ }
+                const raw = voice || this.ttsVoice;
+                let resolvedVoice = this.ttsVoice;
+
+                if (raw && /^[a-z]{2}_[a-z0-9]+$/i.test(raw)) {
+                    resolvedVoice = raw;
+                } else {
+                    try {
+                        const base = new URL(this.ttsUrl).origin;
+                        const h = {};
+                        if (this.ttsKey) h.Authorization = `Bearer ${this.ttsKey}`;
+                        const r = await fetch(`${base}/v1/audio/voices`, {
+                            headers: h, signal: AbortSignal.timeout(3000)
+                        });
+                        if (r.ok) {
+                            const d = await r.json().catch(() => null);
+                            const list = Array.isArray(d?.voices) ? d.voices
+                                : Array.isArray(d) ? d : [];
+                            const ids = list.map(v =>
+                                typeof v === "string" ? v : (v.id ?? v.name));
+                            if (ids.includes(raw)) resolvedVoice = raw;
+                        }
+                    } catch { /* pakai config */ }
+                }
+
+                const response = await fetch(this.ttsUrl, {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify({
+                        model: this.ttsModel,
+                        input: text,
+                        voice: resolvedVoice,
+                        response_format: format
+                    }),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timer);
+
+                if (!response.ok) {
+                    const detail = await response.text().catch(() => "");
+                    throw new Error(`menolak (${response.status}): ${detail.slice(0, 120)}`);
+                }
+
+                const audio = Buffer.from(await response.arrayBuffer());
+                this.lastEngine = "neural";
+
+                telemetry.publish("voice:spoken", {
+                    chars: text.length, voice: resolvedVoice, engine: "neural"
+                });
+
+                return {
+                    audio,
+                    contentType: response.headers.get("content-type") || `audio/${format}`,
+                    engine: "neural"
+                };
+
+            }
+            catch (error) {
+                const msg = error.name === "AbortError" ? "timeout" : error.message;
+                attempts.push(`neural(${this.ttsUrl}): ${msg}`);
+                telemetry.warn(`[voice] neural TTS gagal: ${msg}`);
             }
 
-            const response = await fetch(this.ttsUrl, {
-                method: "POST",
-                headers,
-                body: JSON.stringify({
-                    model: this.ttsModel,
-                    input: text,
-                    voice: resolvedVoice,
-                    response_format: format
-                }),
-                signal: controller.signal
-            });
-
-            if (!response.ok) {
-                const detail = await response.text().catch(() => "");
-                throw new Error(`Backend TTS menolak (${response.status}): ${detail.slice(0, 200)}`);
-            }
-
-            const audio = Buffer.from(await response.arrayBuffer());
-
-            telemetry.publish("voice:spoken", { chars: text.length, voice: voice || this.ttsVoice });
-
-            return {
-                audio,
-                contentType: response.headers.get("content-type") || `audio/${format}`
-            };
-
         }
 
-        catch (error) {
-            if (error.name === "AbortError") {
-                throw new Error("TTS melebihi batas waktu.");
+        if (edgeVoice !== "id-ID-ArdiNeural") {
+            try {
+                const out = await edgeSpeak(text, "id-ID-ArdiNeural");
+                this.lastEngine = "edge-fallback";
+                telemetry.publish("voice:spoken", {
+                    chars: text.length, voice: "id-ID-ArdiNeural", engine: "edge-fallback"
+                });
+                return { audio: out.audio, contentType: out.contentType, engine: "edge-fallback" };
             }
-            if (error instanceof TypeError) {
-                throw new Error(`Tidak bisa menghubungi backend TTS di ${this.ttsUrl}`);
+            catch (error) {
+                attempts.push("edge(Ardi): " + error.message);
             }
-            throw error;
         }
 
-        finally {
-            clearTimeout(timer);
-        }
+        this.lastEngine = null;
+        this.lastTtsError = attempts.join(" | ");
+
+        const err = new Error(
+            "Semua mesin TTS gagal → " +
+            (attempts.join(" | ") || "tidak ada yang dikonfigurasi") +
+            ". Pasang CLI edge-tts atau nyalakan backend neural."
+        );
+        err.code = "TTS_ALL_FAILED";
+        throw err;
 
     }
+
 
     /**
      * Transkripsi audio menjadi teks.

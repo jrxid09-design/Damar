@@ -1,4 +1,10 @@
 ﻿const ToolExecutor = require("../tools/ToolExecutor");
+const ArgumentValidator = require("../tools/ArgumentValidator");
+const SchemaMinimizer = require("../tools/SchemaMinimizer");
+const Budget = require("../tools/Budget");
+const { TurnController } = require("../tools/TurnController");
+const toolStats = require("../tools/ToolStats");
+const { canonicalRequestExec } = require("../runtime/requestIdentity");
 
 /**
  * Menjalankan satu request AI sampai selesai, termasuk
@@ -118,7 +124,16 @@ class RuntimeExecutor {
 
     async execute(request) {
 
+        // H1/CLOSURE: identitas kanonik juga untuk pemakaian executor
+        // langsung — loop tool (executeTools → request.exec) dan
+        // deferred disclosure memakai identitas yang SAMA dengan
+        // disklosur awal; capabilitySet tidak pernah tertinggal di sini.
+        request.exec = canonicalRequestExec(request);
+
         const plan = this.startPlan(request);
+
+        // Anggaran giliran: panggilan/waktu/pembatalan (di atas loopGuard).
+        const controller = new TurnController({ signal: request.signal });
 
         let iterations = 0;
 
@@ -133,6 +148,8 @@ class RuntimeExecutor {
         const maxRepeat = 4;
 
         while (iterations++ < this.maxToolIterations) {
+
+            controller.assertCanContinue();
 
             const response =
                 await this.callModel(request, iterations);
@@ -192,7 +209,7 @@ class RuntimeExecutor {
             }
 
             const results =
-                await this.executeTools(response, plan);
+                await this.executeTools(response, plan, controller, request.exec);
 
             this.appendToolMessages(
 
@@ -203,6 +220,21 @@ class RuntimeExecutor {
                 results
 
             );
+
+            // Disclosure: tool_search berhasil → lampirkan schema
+            // tool yang ditemukan pada putaran berikutnya.
+            this.discloseFromResults(request, results);
+
+            // Anggaran giliran habis → hentikan dengan jawaban yang
+            // jujur, bukan melempar dan membuang kerja sejauh ini.
+            if (controller.stopRequested) {
+                this.finishPlan(plan);
+                return {
+                    content: controller.stopReason,
+                    toolCalls: [],
+                    usage: response.usage ?? null
+                };
+            }
 
         }
 
@@ -261,7 +293,7 @@ class RuntimeExecutor {
      * tulisan atau dua pesan yang berangkat bersamaan sulit
      * ditelusuri dan bisa saling mendahului.
      */
-    async executeTools(response, plan = null) {
+    async executeTools(response, plan = null, controller = null, exec = null) {
 
         const calls = response.toolCalls ?? [];
 
@@ -275,12 +307,12 @@ class RuntimeExecutor {
             const sisa = calls.filter(c => !bacaan.includes(c));
 
             const hasilBaca = await Promise.all(
-                bacaan.map(call => this.runOne(call, plan))
+                bacaan.map(call => this.runOne(call, plan, controller, exec))
             );
 
             const hasilSisa = [];
             for (const call of sisa) {
-                hasilSisa.push(await this.runOne(call, plan));
+                hasilSisa.push(await this.runOne(call, plan, controller, exec));
             }
 
             // Urutan asli dipertahankan: model mencocokkan hasil
@@ -297,28 +329,96 @@ class RuntimeExecutor {
         const results = [];
 
         for (const call of calls) {
-            results.push(await this.runOne(call, plan));
+            results.push(await this.runOne(call, plan, controller, exec));
         }
 
         return results;
 
     }
 
-    /** Satu panggilan tool, tercatat di rencana dan tidak melempar. */
-    async runOne(call, plan = null) {
+    /**
+     * Satu panggilan tool, tercatat di rencana dan tidak melempar.
+     *
+     * Urutan gerbang (Phase 6):
+     *   anggaran giliran → TOOL_NOT_FOUND → VALIDATION_ERROR
+     *   → ToolGuard (POLICY_DENIED bila menolak) → eksekusi berbatas
+     *   waktu → klasifikasi EXECUTION_ERROR/TIMEOUT/CANCELLED.
+     * Semua kegagalan kembali ke model sebagai {error:{code,...}} —
+     * machine-readable, sehingga model bisa memperbaiki panggilannya.
+     */
+    async runOne(call, plan = null, controller = null, exec = null) {
 
         this.events?.emit("tool:started", call);
 
         const step = this.trackStart(plan, call);
 
+        const started = Date.now();
+
         try {
 
-            const result =
-                await this.toolExecutor.execute(call);
+            if (controller) controller.beginTool(call.name, call.arguments);
+
+            // 1. Tool harus ada (lookup di registry penuh, bukan
+            // hanya di daftar schema yang terlihat model).
+            const tool = this.toolExecutor?.registry?.get?.(call.name);
+
+            if (!tool) {
+                return this.failOne(step, call, controller,
+                    ArgumentValidator.make(
+                        ArgumentValidator.CODES.TOOL_NOT_FOUND,
+                        `Tool '${call.name}' tidak terdaftar. Gunakan tool_search untuk menemukan nama yang benar.`
+                    ), started);
+            }
+
+            // 2. OTORISASI SEBELUM VALIDASI ARGUMEN (L1/CLOSURE):
+            // pemanggil di luar set/peran menerima PERMISSION_DENIED
+            // tanpa pernah melihat schema/kebutuhan argumen tool yang
+            // dilarangnya. Pemanggil berizin tetap divalidasi normal.
+            // Penolakan otorisasi BUKAN penolakan anggaran — ditangkap
+            // tersendiri agar loop tool TIDAK berhenti (tanpa
+            // stopRequested) dan hasil tetap machine-readable.
+            try {
+                require("../tools/Authorization")
+                    .assertExecution(tool, exec ?? {});
+            }
+            catch (authError) {
+                return this.failOne(step, call, controller, authError, started);
+            }
+
+            // 3. Argumen divalidasi SEBELUM menyentuh apa pun.
+            const verdict = ArgumentValidator.validate(tool, call.arguments ?? {});
+
+            if (!verdict.ok) {
+                return this.failOne(step, call, controller, verdict.error, started);
+            }
+
+            call.arguments = verdict.args;
+
+        }
+        catch (error) {
+
+            // Penolakan anggaran (MAX_TOOL_CALLS / wall clock / cancel).
+            return this.failOne(step, call, controller, error, started,
+                { stopRequested: true });
+
+        }
+
+        let result;
+
+        try {
+
+            result = await this.withToolTimeout(
+                this.toolExecutor.execute(call, exec),
+                call.name
+            );
 
             this.events?.emit("tool:completed", result);
 
             this.trackDone(plan, step, result);
+
+            controller?.endTool(call.name, null);
+
+            toolStats.record(call.name, true, Date.now() - started);
 
             return result;
 
@@ -333,22 +433,158 @@ class RuntimeExecutor {
 
             this.trackFailed(plan, step, error);
 
-            // Kembalikan error ke model supaya bisa memutuskan
-            // langkah berikutnya, bukan menghentikan seluruh
-            // percakapan.
-            return {
-
-                toolCallId: call.id,
-
-                name: call.name,
-
-                result: {
-                    error: error.message
-                }
-
-            };
+            return this.failOne(step, call, controller, error, started);
 
         }
+
+    }
+
+    /** Batas waktu SATU panggilan tool — hang tak boleh menggantung giliran. */
+    withToolTimeout(promise, name) {
+
+        const ms = Number(process.env.AETHER_TOOL_TIMEOUT_MS) || 120_000;
+
+        if (!(ms > 0)) return promise;
+
+        return new Promise((resolve, reject) => {
+
+            const timer = setTimeout(() => {
+                reject(ArgumentValidator.make(
+                    ArgumentValidator.CODES.TIMEOUT,
+                    `Tool '${name}' melebihi ${Math.round(ms / 1000)} detik.`
+                ));
+            }, ms);
+
+            promise
+                .then(v => { clearTimeout(timer); resolve(v); })
+                .catch(e => { clearTimeout(timer); reject(e); });
+
+        });
+
+    }
+
+    /** Klasifikasikan error apa pun menjadi kode machine-readable. */
+    classify(error) {
+
+        if (!error) return ArgumentValidator.CODES.EXECUTION_ERROR;
+
+        if (error.toolError) return error.code;
+
+        if (error.name === "AbortError") return ArgumentValidator.CODES.CANCELLED;
+
+        const msg = String(error.code ?? "");
+
+        if (/LOOP_DETECTED|REPEATED_FAILURE|KILL_SWITCH|SAFETY_STOP|PATH_DENIED|DENIED/i.test(msg)) {
+            return ArgumentValidator.CODES.POLICY_DENIED;
+        }
+
+        if (/ETIMEDOUT|timeout/i.test(String(error.message ?? ""))) {
+            return ArgumentValidator.CODES.TIMEOUT;
+        }
+
+        return ArgumentValidator.CODES.EXECUTION_ERROR;
+
+    }
+
+    /**
+     * Susun hasil gagal terstruktur untuk model. Bila kegagalan
+     * berasal dari anggaran giliran, tandai controller agar loop
+     * berhenti setelah hasil ini dilampirkan.
+     */
+    failOne(step, call, controller, error, started, opts = {}) {
+
+        const code = this.classify(error);
+
+        // Round-2 (klaim-3): PENOLAKAN bukan kegagalan tool — jangan
+        // mencemari reliability rolling dengan noise otorisasi.
+        const AUTHZ_NOISE = new Set(["PERMISSION_DENIED", "POLICY_DENIED",
+            "CANCELLED", "TOOL_NOT_FOUND"]);
+
+        const countsAgainstReliability = !AUTHZ_NOISE.has(code);
+
+        controller?.endTool(call.name, code);
+
+        if (opts.stopRequested && controller) {
+            controller.stopRequested = true;
+            controller.stopReason =
+                `${error.message}`;
+        }
+
+        if (countsAgainstReliability) {
+            toolStats.record(call.name, false, Date.now() - started, code);
+        }
+
+        return {
+            toolCallId: call.id,
+            name: call.name,
+            result: {
+                error: {
+                    code,
+                    message: String(error.message ?? "tool gagal"),
+                    ...(error.details ? { details: error.details } : {})
+                }
+            }
+        };
+
+    }
+
+    /**
+     * Disclosure dinamis (Phase 8): hasil tool_search yang sukses
+     * membawa direktori nama; schema tool tersebut dilampirkan pada
+     * request agar model bisa langsung memanggilnya — tetap dalam
+     * anggaran skema, tanpa pernah mengirim seluruh katalog.
+     */
+    /**
+     * Deferred disclosure (invariant F): schema hanya menempel SETELAH
+     * lolos GERBANG DISKLOSUR YANG SAMA dengan Pipeline/tool_search
+     * (Authorization.disclosureFilter) — identitas dari request.exec.
+     * tool_search tidak bisa memperluas otorisasi, hanya meminta.
+     */
+    discloseFromResults(request, results = []) {
+
+        try {
+
+            const Authorization = require("../tools/Authorization");
+
+            for (const r of results) {
+
+                if (r?.name !== "tool_search") continue;
+
+                const dir = r.result?.directory;
+
+                if (!Array.isArray(dir) || !dir.length) continue;
+
+                const currentNames = new Set((request.tools ?? []).map(t => t.name));
+
+                // Universe kandidat mentah → gerbang disklosur yang sama.
+                const rawCandidates = dir
+                    .map(entry => this.toolRegistry?.get?.(entry.name))
+                    .filter(Boolean);
+
+                const eligible = Authorization.disclosureFilter(
+                    rawCandidates,
+                    request.exec ?? {}
+                );
+
+                const profile = Budget.profileFor(
+                    request.exec?.contextTokens ||
+                    Number(process.env.AETHER_MODEL_CONTEXT_TOKENS) ||
+                    32768
+                );
+
+                const additions = eligible
+                    .filter(full => !currentNames.has(full.name))
+                    .map(full => SchemaMinimizer.toView(full, profile));
+
+                if (additions.length) {
+                    request.tools = [...(request.tools ?? []), ...additions]
+                        .slice(0, Budget.HARD_CAP);
+                }
+
+            }
+
+        }
+        catch { /* disclosure bersifat tambahan; kegagalan tak mengeksekusi apa pun */ }
 
     }
 
@@ -425,27 +661,122 @@ class RuntimeExecutor {
      * halaman web yang diambil `http.get` masuk ke prompt persis
      * seperti perintah pengguna. Membungkusnya membuat model tahu
      * mana data dan mana wewenang.
+     *
+     * CONTEXT INTELLIGENCE (Phase 6): hasil besar TIDAK boleh
+     * terus diwariskan utuh ke setiap iterasi. Kompaksi head+tail
+     * dengan penanda ukuran; RAW tidak dibuang — ditulis ke
+     * logs/tool-observations/ untuk audit. Observasi identik dalam
+     * satu giliran didedupe (model tak perlu membaca salinan sama
+     * dua kali).
      */
-    boundContent(result) {
+    boundContent(result, request = null) {
 
         const raw = typeof result.result === "string"
             ? result.result
             : JSON.stringify(result.result);
 
+        // ---- Dedupe observasi (H5 Round-2): identitas memuat OUTCOME.
+        // Sukses & gagal dengan body sama TIDAK setara; kegagalan tidak
+        // pernah diganti teks netral — semantik loop/retry tetap utuh.
+        const isErrorResult =
+            result && typeof result.result === "object" &&
+            result.result !== null && "error" in result.result;
+
+        const errorCode = isErrorResult
+            ? (result.result.error?.code ?? "ERROR")
+            : "OK";
+
+        if (request) {
+            try {
+                request.__obsFingerprints = request.__obsFingerprints || new Map();
+
+                const fp = `${errorCode}:${result.name}:` +
+                    require("../../ai/context/Dedupe").fingerprint(raw);
+
+                if (raw.length > 80) {
+                    const seen = request.__obsFingerprints.get(fp);
+                    if (seen !== undefined) {
+
+                        if (isErrorResult) return raw;   // gagal: utuh selalu
+
+                        return JSON.stringify({
+                            deduped: true,
+                            status: "OK",
+                            tool: result.name,
+                            note: "hasil identik dengan observasi sebelumnya — tidak diulang"
+                        });
+                    }
+                    request.__obsFingerprints.set(fp, true);
+                }
+            }
+            catch { /* dedupe bersifat tambahan */ }
+        }
+
+        // ---- Kompaksi hasil raksasa --------------------------------
+        const MAX_CHARS = Number(process.env.AETHER_OBSERVATION_MAX_CHARS) || 4000;
+
+        let content = raw;
+
+        if (raw.length > MAX_CHARS) {
+            content = this.compactObservation(result, raw, MAX_CHARS);
+        }
+
         try {
 
             const boundary = require("../../core/safety/contentBoundary");
-            const kind = boundary.boundaryFor(result.name);
+            // H8 Round-2: DEFAULT = batas tool (hasil eksekusi = data,
+            // bukan otoritas). Peta eksplisit hanya menambah spesifik.
+            const kind = boundary.boundaryFor(result.name) ?? "tool";
 
             return kind
-                ? boundary.wrap(kind, raw, { source: result.name })
-                : raw;
+                ? boundary.wrap(kind, content, { source: result.name })
+                : content;
 
         }
         catch {
             // Kegagalan membungkus tidak boleh memutus loop tool.
-            return raw;
+            return content;
         }
+
+    }
+
+    /**
+     * Kompaksi head+tail; raw utuh dipersisten (best-effort) supaya
+     * debugging tetap bisa mengakses apa yang SEBENARNYA dikembalikan
+     * tool — bukan hanya potongan yang dilihat model.
+     */
+    compactObservation(result, raw, maxChars) {
+
+        const head = Math.floor(maxChars * 0.7);
+        const tail = Math.max(0, maxChars - head - 80);
+
+        let archived = null;
+
+        try {
+
+            const fs = require("node:fs");
+            const path = require("node:path");
+
+            const dir = path.join(process.cwd(), "logs", "tool-observations");
+
+            fs.mkdirSync(dir, { recursive: true });
+
+            const safe = String(result.name ?? "tool").replace(/[^a-z0-9_-]/gi, "_");
+
+            const file = path.join(dir, `${Date.now()}-${safe}.txt`);
+
+            fs.writeFileSync(file, raw, "utf8");
+
+            archived = path.relative(process.cwd(), file);
+
+        }
+        catch { /* arsip best-effort; kompaksi tetap jalan */ }
+
+        const note =
+            `\n[… ${raw.length - head - tail} karakter dipangkas; ` +
+            `raw: ${archived ?? "tidak terarsip"} …]\n`;
+
+        return raw.slice(0, head) + note + (tail > 0 ? raw.slice(-tail) : "");
 
     }
 
@@ -497,7 +828,7 @@ class RuntimeExecutor {
 
                 content:
 
-                    this.boundContent(result)
+                    this.boundContent(result, request)
 
             });
 
@@ -523,7 +854,13 @@ class RuntimeExecutor {
 
         const AIStreamChunk = require("../models/AIStreamChunk");
 
+        // H1/CLOSURE: paritas dengan execute() — streaming bukan hop
+        // pelucutan identitas.
+        request.exec = canonicalRequestExec(request);
+
         const plan = this.startPlan(request);
+
+        const controller = new TurnController({ signal: request.signal });
 
         let iterations = 0;
         let emptyRetries = 0;
@@ -533,6 +870,17 @@ class RuntimeExecutor {
         const maxRepeat = 4;
 
         while (iterations++ < this.maxToolIterations) {
+
+            try {
+                controller.assertCanContinue();
+            }
+            catch (error) {
+                yield new AIStreamChunk({
+                    content: error.message,
+                    isTerminal: true
+                });
+                return;
+            }
 
             const round = yield* this.streamRound(request, iterations);
 
@@ -612,9 +960,25 @@ class RuntimeExecutor {
             });
 
             const results =
-                await this.executeTools(round, plan);
+                await this.executeTools(round, plan, controller, request.exec);
 
             this.appendToolMessages(request, round, results);
+
+            // Disclosure: tool_search → schema tool terpilih ikut
+            // putaran berikutnya.
+            this.discloseFromResults(request, results);
+
+            if (controller.stopRequested) {
+                this.finishPlan(plan);
+                yield new AIStreamChunk({
+                    id: round.id,
+                    content:
+                        "Aku menghentikan langkah ini sesuai batas giliran: " +
+                        controller.stopReason,
+                    isTerminal: true
+                });
+                return;
+            }
 
         }
 
@@ -787,7 +1151,7 @@ class RuntimeExecutor {
      * Dua bentuk bisa tiba: fragmen mentah OpenAI-compatible
      * ({ index, id, function:{ name, arguments } } dengan argumen
      * string yang menyambung antar chunk) atau panggilan utuh
-     * bentuk AIToolCall (mapper Ollama memetakan sejak awal).
+     * bentuk AIToolCall (mapper lokal memetakan sejak awal).
      */
     mergeToolCallFragments(chunkToolCalls, fragments) {
 

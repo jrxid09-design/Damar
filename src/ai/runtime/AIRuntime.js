@@ -45,7 +45,10 @@ const {
 const RuntimeOptions = require("./RuntimeOptions");
 
 const { selectTools } = require("../tools/ToolSelector");
+const Pipeline = require("../tools/Pipeline");
+const SchemaMinimizer = require("../tools/SchemaMinimizer");
 const RuntimeMetrics = require("./RuntimeMetrics");
+const { canonicalRequestExec } = require("./requestIdentity");
 
 const {
     AIRequestStartedEvent,
@@ -237,6 +240,13 @@ getToolRegistry() {
 
 }
 
+// H1/CLOSURE — SATU identitas kanonik untuk SELURUH permintaan:
+// disklosur (resolveTools), eksekusi (executor → request.exec),
+// dan deferred disclosure membaca objek yang SAMA. capabilitySet
+// yang dikirim langsung ke runtime (jalur direct/fallback) ikut
+// ternormalisasi & dibekukan — tidak pernah hilang di resolveTools.
+request.exec = canonicalRequestExec(request);
+
 if (request.tools === undefined) {
 
     request.tools = this.resolveTools(request);
@@ -356,6 +366,10 @@ if (request.tools === undefined) {
 
     }
 
+    // H1/CLOSURE: paritas dengan chat() — jalur streaming bukan hop
+    // pelucutan identitas; capabilitySet langsung di request ikut.
+    request.exec = canonicalRequestExec(request);
+
     if (request.tools === undefined) {
 
         request.tools = this.resolveTools(request);
@@ -368,51 +382,124 @@ if (request.tools === undefined) {
 /**
  * Tool yang dikirim untuk satu permintaan.
  *
- * Seluruh tool tetap terdaftar dan bisa dieksekusi; yang dibatasi
- * hanya berapa banyak definisi yang ikut ke dalam prompt. Tanpa
- * batas ini prompt Aether menembus 11.000 token — terlalu berat
- * untuk model lokal dan ditolak provider gratis.
+ * Kini lewat TOOL INTELLIGENCE PIPELINE (lihat ai/tools/Pipeline.js):
+ * retrieval kapabilitas deterministik → filter peran/kanal → ranking
+ * stabil → anggaran konteks → schema minimum. Model hanya melihat
+ * tool yang relevan dengan pesan; seluruh tool tetap terdaftar dan
+ * bisa dieksekusi.
+ *
+ * INVARIANT G1: `request.tools` eksplisit dari pemanggil berarti
+ * "kandidat universe", BUKAN pintu melewati otorisasi — ia selalu
+ * diiriskan dengan universe berizin (Authorization.disclosureFilter)
+ * sebelum masuk anggaran.
+ *
+ * AETHER_TOOL_PIPELINE=legacy hanya mengganti ALGORITMA seleksi;
+ * gerbang otorisasi yang sama tetap dijalankan (invariant H1).
  */
 resolveTools(request) {
 
+    const Authorization = require("../tools/Authorization");
+
     let all = this.toolRegistry?.all() ?? [];
 
-    // Sembunyikan tool yang menuntut konektor OFFLINE.
+    // Universe berizin untuk identitas giliran ini (satu gerbang).
     //
-    // openclaw_* dijalankan lewat service OpenClaw (:18789). Bila
-    // service itu mati, menawarkan tool-nya ke model hanya menuntun ke
-    // kegagalan "openclaw sedang offline" — padahal jalur LANGSUNG
-    // (open_app, desktop_type, dst lewat PowerShell) tetap tersedia.
-    // Menyaringnya membuat model memilih jalur yang benar-benar bisa
-    // jalan, bukan yang kebetulan bernama menarik.
-    try {
-        const agentHub = require("../../services/agentHub");
-        if (!agentHub.connectorOnline("openclaw")) {
-            all = all.filter(t => !String(t.name ?? t.id ?? "").toLowerCase().includes("openclaw"));
+    // A-FINAL + H1/CLOSURE — IDENTITAS KANONIK: `request.exec` adalah
+    // identitas eksekusi yang dirakit runtime tepercaya (aiRuntimeService)
+    // dan SATU-SATUNYA sumber kebenaran. Bila exec absen, identitas
+    // kanonik dibangun dari pembawa otoritas level request (role/
+    // capabilitySet/channel/sessionId) lewat canonicalRequestExec —
+    // capabilitySet IKUT, dibekukan, dan tidak ada lagi jalur identitas
+    // role-only paralel yang bisa menjatuhkan restriction.
+    const exec = canonicalRequestExec(request) ?? {};
+
+    // M-1: restriction di sini sudah bentuk kanonik — malformed
+    // (bentuk tak dikenal dari request.exec mentah) gagal-keras di
+    // batas runtime, bukan ditafsirkan tanpa-batas di hilir.
+    const canonicalSet = Authorization.toCapabilitySet(exec.capabilitySet);
+
+    // Window konteks: dari identitas kanonik atau bentuk legacy request.
+    const activeWindow =
+        exec.contextTokens ??
+        request.execContextTokens ??
+        null;
+
+    const eligibleUniverse = Authorization.disclosureFilter(all, exec);
+
+    // G1: tools eksplisit pemanggil = kandidat, bukan bypass.
+    if (Array.isArray(request.tools)) {
+        const allowedNames = new Set(eligibleUniverse.map(t => t.name));
+        return request.tools.filter(t => allowedNames.has(t.name));
+    }
+
+    const legacy = process.env.AETHER_TOOL_PIPELINE === "legacy";
+
+    if (legacy) {
+
+        const budget = Number(
+            this.options.toolBudget ??
+            process.env.AETHER_TOOL_BUDGET ??
+            32
+        );
+
+        if (!Number.isFinite(budget) || budget <= 0) {
+            return eligibleUniverse.map(t => this.minimizedView(t));
         }
-    }
-    catch { /* jika status tak terbaca, tawarkan semua seperti biasa */ }
 
-    const budget = Number(
-        this.options.toolBudget ??
-        process.env.AETHER_TOOL_BUDGET ??
-        32
-    );
+        return selectTools(eligibleUniverse, this.lastUserText(request), budget);
 
-    if (!Number.isFinite(budget) || budget <= 0) {
-        return all;
     }
+
+    const { tools, diagnostics } = Pipeline.select({
+        tools: eligibleUniverse,
+        message: this.lastUserText(request),
+        historyTexts: this.historyTexts(request, 2),
+        channel: exec.channel ?? request.channel ?? null,
+        role: exec.role ?? request.role ?? null,
+        // B-FINAL + M-1: himpunan kapabilitas ikut ke pipeline dalam
+        // bentuk kanoniknya, sehingga segmen stabil & dinamis sama-sama
+        // tunduk pada set delegasi.
+        capabilitySet: canonicalSet,
+        usedTokens: estimateUsedTokens(request),
+        contextTokens: activeWindow
+    });
+
+    // Diagnostik giliran terakhir — untuk Console & pengujian.
+    this.lastSelection = diagnostics;
+
+    return tools;
+
+}
+
+lastUserText(request) {
 
     const lastUser = [...(request.messages ?? [])]
         .reverse()
         .find(message => message.role === "user");
 
-    const text = typeof lastUser?.content === "string"
-        ? lastUser.content
-        : "";
+    return typeof lastUser?.content === "string" ? lastUser.content : "";
 
-    return selectTools(all, text, budget);
+}
 
+historyTexts(request, count = 2) {
+
+    const texts = (request.messages ?? [])
+        .filter(message => message.role === "user" &&
+            typeof message.content === "string")
+        .map(message => message.content);
+
+    return texts.slice(Math.max(0, texts.length - 1 - count), -1);
+
+}
+
+/** Tampilan minimum untuk jalur legacy (schema tetap dipangkas). */
+minimizedView(tool) {
+    try {
+        return require("../tools/SchemaMinimizer").toView(tool);
+    }
+    catch {
+        return tool;
+    }
 }
 
 getEventEmitter() {
@@ -420,6 +507,19 @@ getEventEmitter() {
     return this.eventEmitter;
 
 }
+
+}
+
+/** Perkiraan token prompt yang sudah terpakai (system+riwayat+memori). */
+function estimateUsedTokens(request) {
+
+    try {
+        const chars = JSON.stringify(request.messages ?? []).length;
+        return Math.ceil(chars / 4);
+    }
+    catch {
+        return 0;
+    }
 
 }
 

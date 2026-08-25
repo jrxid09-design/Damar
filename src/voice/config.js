@@ -57,11 +57,25 @@ function num(envName, cfgKey, dflt) {
 
 }
 
+/** "auto" → null (diputuskan runtime setelah probe STT+recorder). */
+function boolOrAuto(v) {
+
+    if (String(v).toLowerCase() === "auto") return "auto";
+
+    if (typeof v === "boolean") return v;
+
+    return /^(1|true|yes|on)$/i.test(String(v));
+
+}
+
 /** Konfigurasi efektif Voice Runtime. */
 function voiceConfig() {
 
     return {
-        enabled: bool("AETHER_VOICE_ENABLED", "enabled", false),
+        // Tri-state: true/false/"auto". "auto" = aktif bila STT terkonfigurasi
+        // DAN perekam tersedia (ffmpeg/arecord) — wake word butuh keduanya.
+        enabledRaw: String(envOr("AETHER_VOICE_ENABLED", "enabled", "auto")).toLowerCase(),
+        enabled: boolOrAuto(envOr("AETHER_VOICE_ENABLED", "enabled", "auto")),
         wakeWord: String(envOr("AETHER_WAKE_WORD", "wakeWord", "aether")).toLowerCase(),
         wakeProvider: String(envOr("AETHER_VOICE_WAKE_PROVIDER", "wakeProvider", "local")),
         sttProvider: String(envOr("AETHER_VOICE_STT_PROVIDER", "sttProvider", "local")),
@@ -89,4 +103,4 @@ function voiceConfig() {
 
 }
 
-module.exports = { voiceConfig, store };
+module.exports = { voiceConfig, store, boolOrAuto };

@@ -33,8 +33,8 @@ async function verifyActive(resolved) {
 
     const active = aiRuntime.activePlatform ?? {};
 
-    if (resolved.kind === "ollama" || active.kind === "ollama") {
-        return { ok: true, note: "Ollama lokal aktif." };
+    if (resolved.kind === "llamacpp" || active.kind === "llamacpp") {
+        return { ok: true, note: "Otak lokal (llama.cpp) aktif." };
     }
 
     const platform = active.id;
@@ -94,13 +94,13 @@ class AIController {
 
     /**
      * Simpan setelan provider dari Settings lalu bangun ulang engine.
-     * Body: { active?, provider?:{id,apiKey?,baseUrl?,model?}, ollama?:{baseUrl,model} }
+     * Body: { active?, provider?:{id,apiKey?,baseUrl?,model?} }
      */
     async saveConfig(req, res, next) {
 
         try {
 
-            const { active, provider, ollama } = req.body ?? {};
+            const { active, provider } = req.body ?? {};
 
             if (provider?.id) {
                 providerConfig.setProvider(provider.id, {
@@ -108,10 +108,6 @@ class AIController {
                     baseUrl: provider.baseUrl,
                     model: provider.model
                 });
-            }
-
-            if (ollama) {
-                providerConfig.setOllama(ollama);
             }
 
             if (active) {
@@ -199,7 +195,7 @@ class AIController {
 
         try {
             aiRuntime.ensure();
-            const platform = aiRuntime.activePlatform?.id ?? "ollama";
+            const platform = aiRuntime.activePlatform?.id ?? "lokal";
             return response.success(res, "Verifikasi model", await aiRuntime.verifyAll(platform));
         }
         catch (error) {
@@ -268,7 +264,11 @@ class AIController {
                 model,
                 temperature,
                 maxTokens,
-                channel: channelOf(req)
+                channel: channelOf(req),
+                // Identitas BERPROVENANCE dari gerbang token (C2):
+                // role hanya superadmin bila kredensial pemilik sah.
+                role: req.authIdentity?.role ?? "user",
+                sessionId: req.authIdentity?.sessionId ?? `console:${channelOf(req)}`
             });
 
             return response.success(res, "Chat completed", result);

@@ -13,4 +13,5 @@ const { tokenGuard } = require("../core/auth/tokenCompare");
  *
  * Perbandingan token kini waktu-konstan (lih. core/auth/tokenCompare).
  */
-module.exports = tokenGuard();
+// Default permukaan generik: peran user setelah autentikasi.
+module.exports = tokenGuard({ surface: "api" });

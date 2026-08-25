@@ -1,16 +1,14 @@
 {
     "id": "aetherSkills",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "name": "Aether Skills",
-    "description": "50+ skill siap pakai: delegasi OpenClaw/Hermes, orkestrasi, WhatsApp, vision/CCTV, home automation, memori, dan alur komposit.",
+    "description": "50+ skill siap pakai: orkestrasi multi-agent, WhatsApp, vision/CCTV, home automation, memori, dan alur komposit.",
     "category": "core",
     "entry": "index.js",
     "author": "Aether",
     "permissions": [],
     "tags": [
         "skills",
-        "openclaw",
-        "hermes",
         "orchestrate",
         "whatsapp",
         "vision",

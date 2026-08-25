@@ -2,7 +2,7 @@
   {
     "area": "runtime",
     "change": "Tool tidak dilampirkan sama sekali untuk pesan yang tidak menyinggung kemampuan apa pun (AETHER_TOOLS_WHEN_IDLE=backbone mengembalikan perilaku lama)",
-    "why": "Pemilik melaporkan model lokal terasa berat lewat Aether padahal ringan saat dipanggil langsung ke Ollama. Diukur dan terbukti: melampirkan tool punya harga TETAP 777 token — boilerplate template tool-calling llama3.1 — sebelum tool pertama ikut dihitung. Tanpa tool 12 token (1,8 dtk); dengan 6 tool 789 token (15,5 dtk); dengan 32 tool 1.577 token (34,2 dtk). Untuk sapaan, 789 token itu membeli nol manfaat dan langsung menjadi belasan detik.",
+    "why": "Pemilik melaporkan model lokal terasa berat lewat Aether padahal ringan saat dipanggil langsung ke mesin inferensi. Diukur dan terbukti: melampirkan tool punya harga TETAP 777 token — boilerplate template tool-calling model chat — sebelum tool pertama ikut dihitung. Tanpa tool 12 token (1,8 dtk); dengan 6 tool 789 token (15,5 dtk); dengan 32 tool 1.577 token (34,2 dtk). Untuk sapaan, 789 token itu membeli nol manfaat dan langsung menjadi belasan detik.",
     "files": ["src/ai/tools/ToolSelector.js"],
     "verification": "Sapaan pada daemon berjalan turun dari 40,5/61,4/44,1 detik menjadi 12,7/14,0/13,9 detik, diukur tiga kali dalam keadaan panas. Tes memastikan pertanyaan waktu tetap membawa tool waktu dan permintaan rumah/WhatsApp/terminal tetap membawa toolnya.",
     "risks": "Pesan yang mestinya diingat tetapi tidak menyentuh kata kunci apa pun tidak lagi membawa memory_remember, sehingga Aether tak bisa mengingat atas inisiatif sendiri pada pesan semacam itu. Peta HINTS perlu ditambah seiring waktu."

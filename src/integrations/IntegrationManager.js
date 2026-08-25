@@ -3,15 +3,9 @@ const EventEmitter = require("node:events");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const OllamaConnector = require("./connectors/OllamaConnector");
-const OpenClawConnector = require("./connectors/OpenClawConnector");
-const HermesConnector = require("./connectors/HermesConnector");
 const AgentConnector = require("./connectors/AgentConnector");
 
 const CONNECTOR_TYPES = {
-    ollama: OllamaConnector,
-    openclaw: OpenClawConnector,
-    hermes: HermesConnector,
     agent: AgentConnector,
     http: AgentConnector
 };
@@ -29,8 +23,8 @@ const DEFAULT_CONFIG_PATH = path.join(
  * memantau kesiapannya secara berkala.
  *
  * Konfigurasi sengaja berbasis file supaya kode yang sama bisa
- * jalan di laptop (semua localhost) maupun di PC rumah (Ollama
- * lokal, agent di host lain) tanpa perubahan kode.
+ * jalan di laptop (semua localhost) maupun di PC rumah (layanan di
+ * host lain) tanpa perubahan kode.
  */
 class IntegrationManager extends EventEmitter {
 
@@ -143,7 +137,7 @@ class IntegrationManager extends EventEmitter {
      * Variabel lingkungan menang atas file konfigurasi supaya
      * deployment di PC rumah bisa mengubah alamat tanpa
      * menyentuh file yang ter-commit.
-     * Contoh: AETHER_OLLAMA_URL, AETHER_HERMES_KEY.
+     * Contoh: AETHER_AGENT_URL, AETHER_AGENT_KEY.
      */
     applyEnvOverrides(entry) {
 

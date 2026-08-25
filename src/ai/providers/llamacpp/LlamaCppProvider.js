@@ -6,7 +6,7 @@ const engine = require("./LlamaEngine");
 /**
  * Provider otak lokal in-process (node-llama-cpp / llama.cpp).
  *
- * Menggantikan Ollama sebagai jalur lokal: tak ada HTTP, model GGUF
+ * Jalur inferensi lokal: tanpa HTTP, model GGUF
  * dimuat langsung ke proses daemon. chat() menjalankan SATU putaran
  * model — bila model memanggil tool, panggilannya dikembalikan sebagai
  * toolCalls agar loop tool Aether (yang sudah ada) mengeksekusinya,
@@ -100,7 +100,7 @@ class LlamaCppProvider extends BaseAIProvider {
         });
     }
 
-    // ---- Kemampuan operasional (paritas dengan Ollama) ----------
+    // ---- Kemampuan operasional ---------------------------------
 
     async health() {
         return engine.status();

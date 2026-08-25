@@ -2,7 +2,7 @@
   {
     "area": "runtime",
     "change": "Pemilih tool tidak lagi mengisi anggaran sampai penuh dengan tool berskor nol; anggaran menjadi batas atas, bukan target",
-    "why": "Diukur pada sistem sungguhan: kata 'halo' — sapaan yang tak butuh tool sama sekali — mengirim 32 definisi tool setara 1.910 token. Isinya openclaw, hermes, WhatsApp, kamera, dan device_toggle; tak satu pun relevan. Semuanya berskor nol dan terpilih semata karena urutan pendaftaran plugin, sebab sisa jatah diisi apa pun yang tersisa. Di inferensi CPU tiap token prompt dibayar dengan waktu, jadi tebakan acak itu langsung menjadi detik yang hilang.",
+    "why": "Diukur pada sistem sungguhan: kata 'halo' — sapaan yang tak butuh tool sama sekali — mengirim 32 definisi tool setara 1.910 token. Isinya WhatsApp, kamera, dan device_toggle; tak satu pun relevan. Semuanya berskor nol dan terpilih semata karena urutan pendaftaran plugin, sebab sisa jatah diisi apa pun yang tersisa. Di inferensi CPU tiap token prompt dibayar dengan waktu, jadi tebakan acak itu langsung menjadi detik yang hilang.",
     "files": ["src/ai/tools/ToolSelector.js"],
     "verification": "Skema tool untuk 'halo' turun 1.910 -> 583 token (diukur langsung pada 140 tool terdaftar). Tes memastikan sapaan hanya membawa tulang punggung, sementara permintaan rumah/WhatsApp/terminal tetap membawa toolnya masing-masing.",
     "risks": "Bergantung pada peta HINTS untuk menjembatani pertanyaan bahasa Indonesia ke deskripsi tool berbahasa Inggris. Permintaan yang tidak menyentuh satu pun kata kunci hanya akan menerima tulang punggung — peta itu perlu ditambah seiring kemampuan baru."

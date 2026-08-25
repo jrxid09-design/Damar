@@ -12,7 +12,7 @@
  *   daftar tool BERUBAH           → prompt eval 7,6–12,5 dtk
  *   pertanyaan lain, tool sama    → prompt eval 0,39 dtk
  *
- * Ollama memakai ulang prefix prompt di tingkat token. Definisi tool
+ * Inferensi lokal memakai ulang prefix prompt di tingkat token. Definisi tool
  * berada di awal prompt, jadi mengganti daftarnya membatalkan cache
  * dan memaksa evaluasi ulang dari nol. Merakit daftar baru tiap
  * pesan berarti membayar 8–12 detik untuk menghemat beberapa ratus
@@ -157,7 +157,7 @@ const PROFILES = {
     // ditepati selektor.
     web: ["browse", "get", "post", "download"],
 
-    musik: ["play_youtube", "play_media", "search_music", "stop_media"],
+    musik: ["play_youtube", "play_spotify", "play_media", "search_music", "stop_media"],
 
     // Crypto/pasar. Tanpa profil ini "tampilkan chart live BTC"
     // tersangkut ke `galeri` (dipicu kata "tampilkan") dan model
@@ -296,7 +296,13 @@ function isAlways(tool) {
  * terpisah di susun() berdasarkan skor kecocokan dengan pesan.
  */
 function isExternal(tool) {
-    return String(tool?.name ?? "").startsWith("mcp__");
+    // H10: delegasi ke provenance kanonik.
+    try {
+        return require("./CapabilityIndex").provenanceOf(tool).external;
+    }
+    catch {
+        return String(tool?.name ?? "").startsWith("mcp__");
+    }
 }
 
 /**

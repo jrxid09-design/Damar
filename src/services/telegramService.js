@@ -390,7 +390,6 @@ class TelegramService {
     async converse(chatId, text) {
 
         const aiRuntime = require("./aiRuntimeService");
-        const roleService = require("./roleService");
         const { manager } = require("../channels");
 
         this.currentChatId = chatId;
@@ -413,33 +412,24 @@ class TelegramService {
             // destruktif tetap lewat toolGuard).
             const role = this.inFullMode(chatId) ? "superadmin" : "user";
 
-            // Superadmin (pemilik) memakai jalur anggaran tool yang sama
-            // dengan Console: tools dibiarkan undefined agar AIRuntime.
-            // resolveTools() menjalankan ToolSelector — memilih tool
-            // relevan sesuai pesan (profil) dan anggaran context.
+            // SEMUA peran kini lewat pipeline seleksi yang SAMA
+            // (ai/tools/Pipeline.js): retrieval → filter peran → ranking
+            // → anggaran konteks → schema minimum. Kanal hanya menyumbang
+            // identitas (channel + role), TIDAK membuat mesin seleksi
+            // sendiri.
             //
-            // Dulu semua 160 tool dikirim mentah ke model lewat sini,
-            // sehingga skema tool saja menembus ribuan token. Ditambah
-            // system prompt (±2.600 token) + memori + keadaan batin +
-            // 20 giliran history, prompt "halo" yang sesederhana itu
-            // jebol context 8192 dan Qwen menolak dengan "context shift
-            // did not return a history that fits".
-            //
-            // Admin/user TETAP difilter peran: mereka tak boleh tool
-            // destruktif/konfigurasi. Subsettelah roleService.toolsFor
-            // dipilih sedikit (regex allowlist), jadi aman tanpa budget
-            // lebih lanjut.
-            let tools;
-            if (role === "superadmin") {
-                tools = undefined;   // biar resolveTools → selectTools
-            } else {
-                tools = roleService.toolsFor(role, aiRuntime.tools());
-            }
-
+            // Dulu admin/user dikirimi daftar PENUH hasil filter regex —
+            // ratusan schema tanpa anggaran; superadmin dulu mengirim
+            // 160 tool mentah hingga context Qwen 8192 jebol. Keduanya
+            // tak terulang: role masuk pipeline sebagai pagar kelayakan,
+            // bukan daftar alternatif.
             const response = await aiRuntime.chat({
                 messages: session.map(({ role: r, content }) => ({ role: r, content })),
-                tools,
-                channel: "telegram"
+                tools: undefined,
+                role,
+                channel: "telegram",
+                // Identitas sesi untuk rem kebuntuan & audit scoped.
+                sessionId: `telegram:${chatId}`
             });
 
             const answer = response.content?.trim() || "(tidak ada jawaban)";

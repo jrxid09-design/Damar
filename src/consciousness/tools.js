@@ -89,9 +89,14 @@ function consciousnessTools() {
                 },
                 required: ["masalah"]
             },
-            execute: async ({ masalah, konteks }) => {
+            execute: async ({ masalah, konteks }, ctx = null) => {
 
                 const perintah = mind.deliberation.perintahMendalam(masalah, konteks ?? null);
+
+                // M3/CLOSURE — identitas giliran pemanggil (role +
+                // capabilitySet) ikut ke putaran renungan; nested turn
+                // bukan hop pelucutan restriction.
+                const turnExec = ctx?.exec ?? null;
 
                 try {
 
@@ -102,7 +107,8 @@ function consciousnessTools() {
                     // keamanan dan konfirmasi pengguna tidak terlewati.
                     const res = await runtime.chat({
                         messages: [{ role: "user", content: perintah }],
-                        temperature: 0.3
+                        temperature: 0.3,
+                        ...(turnExec ? { exec: turnExec } : {})
                     });
 
                     const isi = res?.content ?? res?.message?.content ?? String(res ?? "");

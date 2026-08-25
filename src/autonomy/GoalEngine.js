@@ -106,13 +106,53 @@ class GoalEngine {
     }
 
     /**
+     * N2-FINAL — derivasi delegasi tujuan HANYA lewat titik kanonik.
+     * `internal` tidak pernah bisa berasal dari arg model/tool.
+     */
+    resolveDelegator(exec, internal = false) {
+        const { resolveDelegator } = require("../ai/tools/Authorization");
+        return resolveDelegator(exec, internal === true, "goal");
+    }
+
+    /** Peran giliran LLM (planner/evaluator/spec) untuk satu delegasi. */
+    turnRole(delegator) {
+        const agentHub = require("../services/agentHub");
+        return agentHub.delegatedRoleOf(delegator);
+    }
+
+    /** A-FINAL + M-1: restriction delegasi ikut ke SETIAP giliran LLM
+     *  internal (planner/evaluator/spec) — giliran penalar pun tidak boleh
+     *  kehilangan capabilitySet. Normalisasi via toCapabilitySet: bentuk
+     *  tak dikenal fail-closed, id string/Set ikut sebagai narrowing —
+     *  tidak ada lagi jalur pelucutan diam-diam. */
+    turnRestrictions(delegator) {
+        const { toCapabilitySet } = require("../ai/tools/Authorization");
+        const set = toCapabilitySet(delegator?.capabilitySet);
+        return set ? { capabilitySet: set } : {};
+    }
+
+    /**
      * LOOP OTONOM — jalankan tujuan sampai selesai/batas.
      * Mengembalikan hasil akhir; state tersimpan di DB (§34 persist).
+     *
+     * N2 Round-3 — INVARIAN DELEGI:
+     *   effective delegated authority <= initiator authority.
+     * `exec` = identitas INISIATOR (manusia/model) yang mewarisi ke
+     * seluruh delegasi. `internal:true` HANYA boleh diset oleh kode
+     * runtime tepercaya (scheduler/pulse/self-healing) yang memanggil
+     * metode ini langsung — TIDAK pernah lewat arg tool/model: jalur
+     * goal_run tidak meneruskan field apa pun selain exec inisiatornya,
+     * sehingga grant tidak bisa dipalsukan lewat argumen model.
      */
-    async run(goalId, { actor = "user", budgetMs = null, onProgress = null } = {}) {
+    async run(goalId, { actor = "user", budgetMs = null, onProgress = null, exec = null, internal = false } = {}) {
 
         const goal = await this.get(goalId);
         if (!goal) throw new Error(`tujuan ${goalId} tidak ditemukan.`);
+
+        // Identitas delegasi untuk SELURUH loop ini. Inisiator nyata
+        // selalu menang; grant internal hanya dari pemanggil tepercaya
+        // yang secara eksplisit menandai dirinya.
+        const delegator = this.resolveDelegator(exec, internal === true);
 
         if (goal.status === "paused") {
             return { ok: false, error: "tujuan dijeda — lanjutkan dulu." };
@@ -162,7 +202,7 @@ class GoalEngine {
 
         // 3. PLAN — dekomposisi via LLM (fallback: rencana 1 langkah).
         emit("plan", "menyusun rencana");
-        const plan = await this.plan(goal, route);
+        const plan = await this.plan(goal, route, delegator);
 
         let steps = plan.steps ?? [];
         emit("plan_ready", { steps: steps.length });
@@ -193,7 +233,7 @@ class GoalEngine {
 
             emit("step", { n: iteration, action: String(step.action).slice(0, 80), tool: step.tool ?? null });
 
-            let outcome = await this.act(goal, step, null, remaining());
+            let outcome = await this.act(goal, step, null, remaining(), delegator);
 
             // Kegagalan → pemulihan berlapis (§33-34) → kapabilitas baru (§51).
             let recoveries = 0;
@@ -208,7 +248,10 @@ class GoalEngine {
                     error: outcome.error,
                     goalId,
                     action: step.action,
-                    requirement: step.action
+                    requirement: step.action,
+                    // N2-FINAL: pemulihan transitif mewarisi inisiator
+                    // tujuan — tidak pernah naik ke 'system' di sini.
+                    exec: delegator
                 });
 
                 outcome = recovery.outcome.ok
@@ -222,7 +265,7 @@ class GoalEngine {
 
                     skillCreations++;
 
-                    const creation = await this.createCapability(goal, step);
+                    const creation = await this.createCapability(goal, step, delegator);
 
                     if (creation?.capability?.meta?.sandboxOk) {
                         // Skill baru lulus sandbox — coba jalankan step
@@ -233,7 +276,7 @@ class GoalEngine {
                                 ? [`${creation.capability.name}.${creation.capability.meta.toolName}`]
                                 : []);
                         for (const name of names) {
-                            outcome = await this.act(goal, step, name);
+                            outcome = await this.act(goal, step, name, null, delegator);
                             if (outcome.ok) {
                                 outcome.createdSkill = creation.capability.name;
                                 break;
@@ -251,7 +294,7 @@ class GoalEngine {
 
             // EVALUATE — verifikasi hasil langkah (bukan percaya kata agent §19 spec Lab).
             const evaluation = outcome.ok
-                ? await this.evaluate(goal, step, outcome)
+                ? await this.evaluate(goal, step, outcome, delegator)
                 : { verdict: "fail", note: outcome.error ?? "langkah gagal" };
 
             results.push({
@@ -311,8 +354,9 @@ class GoalEngine {
 
     }
 
-    /** SATU AKSI: pilih tool bila belum ada → eksekusi via ToolBus. */
-    async act(goal, step, forcedTool = null, remainingMs = null) {
+    /** SATU AKSI: pilih tool bila belum ada → eksekusi via ToolBus.
+     * `delegator` = identitas inisiator tujuan (N2 Round-3). */
+    async act(goal, step, forcedTool = null, remainingMs = null, delegator = null) {
 
         let tool = forcedTool ?? step.tool ?? null;
         let args = step.args ?? {};
@@ -337,7 +381,7 @@ class GoalEngine {
         // Masih tidak ada tool → eksekusi via agent worker (agentHub)
         // yang memilih sendiri dari profil domainnya.
         if (!tool) {
-            return await this.runViaAgent(goal, step);
+            return await this.runViaAgent(goal, step, delegator);
         }
 
         // Argumen minimal: tugas sebagai instruksi generik.
@@ -345,7 +389,7 @@ class GoalEngine {
             args = guessArgs(tool, step.action);
             // Perintah terminal tak terekstrak → jangan tebak; pakai agent.
             if (args?.command === null) {
-                return await this.runViaAgent(goal, step);
+                return await this.runViaAgent(goal, step, delegator);
             }
         }
 
@@ -438,16 +482,22 @@ class GoalEngine {
     }
 
     /** Jalankan langkah via agent specialist (agentHub worker). */
-    async runViaAgent(goal, step) {
+    async runViaAgent(goal, step, delegator = null) {
 
         try {
 
             const agentHub = require("../services/agentHub");
             const agent = this.pickAgent(step.action);
 
+            // N2 Round-3 — INVARIAN: worker mewarisi inisiator tujuan.
+            // TIDAK ada grant di sini: tujuan yang berawal dari
+            // manusia/model mendelegasikan dengan otoritas inisiator.
+            // Grant internal hanya lahir di run() bila pemanggil
+            // runtime tepercaya menandai `internal:true`.
             const res = await agentHub.run(agent,
                 `[Tujuan: ${goal.title}]\nTugas: ${step.action}\n` +
-                `Sukses bila: ${step.successWhen ?? "tugas tuntas"}. Gunakan tool yang tersedia.`);
+                `Sukses bila: ${step.successWhen ?? "tugas tuntas"}. Gunakan tool yang tersedia.`,
+                { exec: delegator });
 
             await capabilities.recordUsage(`agent:${agent}`, { ok: res.ok, ms: 0, error: res.error });
 
@@ -503,7 +553,7 @@ class GoalEngine {
     }
 
     /** PLAN — LLM menyusun, runtime memvalidasi bentuknya. */
-    async plan(goal, route) {
+    async plan(goal, route, delegator = null) {
 
         const aiRuntime = require("../services/aiRuntimeService");
 
@@ -511,6 +561,9 @@ class GoalEngine {
 
             const res = await Promise.race([
                 aiRuntime.chat({
+                    // N2-FINAL: giliran planner mewarisi otoritas inisiator.
+                    role: this.turnRole(delegator),
+                    ...this.turnRestrictions(delegator),
                     messages: [{ role: "user", content: PROMPT_PLAN(goal) }],
                     ...(route.model ? { model: route.model } : {})
                 }),
@@ -548,7 +601,7 @@ class GoalEngine {
     }
 
     /** EVALUATE — model menilai hasil vs kriteria (ringkas, §32). */
-    async evaluate(goal, step, outcome) {
+    async evaluate(goal, step, outcome, delegator = null) {
 
         const aiRuntime = require("../services/aiRuntimeService");
 
@@ -556,6 +609,9 @@ class GoalEngine {
 
             const res = await Promise.race([
                 aiRuntime.chat({
+                    // N2-FINAL: evaluator mewarisi inisiator, bukan system.
+                    role: this.turnRole(delegator),
+                    ...this.turnRestrictions(delegator),
                     messages: [{ role: "user", content: PROMPT_EVALUATE(goal, step, outcome) }]
                 }),
                 new Promise((_, reject) => setTimeout(() => reject(new Error("eval timeout")), 45000))
@@ -603,7 +659,7 @@ class GoalEngine {
      * §51 ZERO-SHOT: buat kapabilitas yang hilang untuk sebuah langkah.
      * LLM menyusun spec; SkillFactory memvalidasi + sandbox + register.
      */
-    async createCapability(goal, step) {
+    async createCapability(goal, step, delegator = null) {
 
         try {
 
@@ -627,6 +683,9 @@ class GoalEngine {
                 const aiRuntime = require("../services/aiRuntimeService");
                 const res = await Promise.race([
                     aiRuntime.chat({
+                        // N2-FINAL: skill-spec mewarisi inisiator tujuan.
+                        role: this.turnRole(delegator),
+                        ...this.turnRestrictions(delegator),
                         messages: [{ role: "user", content: PROMPT_SKILL_SPEC(goal, step, gap.found[0]) }]
                     }),
                     new Promise((_, reject) => setTimeout(() => reject(new Error("skill-spec timeout")), 60000))
@@ -637,7 +696,7 @@ class GoalEngine {
             catch { /* jalur 2 */ }
 
             if (!spec?.id) {
-                spec = await this.specViaAgent(goal, step);
+                spec = await this.specViaAgent(goal, step, delegator);
                 if (spec?.id) await this.log(goal.id, "create_skill", "spec via agent", spec.id, [], true);
             }
 
@@ -670,14 +729,17 @@ class GoalEngine {
     }
 
     /** Spesifikasi skill via agent aether (fallback bila LLM langsung lambat). */
-    async specViaAgent(goal, step) {
+    async specViaAgent(goal, step, delegator = null) {
 
         try {
 
             const agentHub = require("../services/agentHub");
 
+            // N2 Round-3 — invarian delegasi: warisi inisiator tujuan,
+            // jangan pernah menciptakan grant di jalur turunan ini.
             const res = await Promise.race([
-                agentHub.run("aether", PROMPT_SKILL_SPEC(goal, step, null)),
+                agentHub.run("aether", PROMPT_SKILL_SPEC(goal, step, null),
+                    { exec: delegator }),
                 new Promise((_, reject) => setTimeout(() => reject(new Error("agent-spec timeout")), 90000))
             ]);
 

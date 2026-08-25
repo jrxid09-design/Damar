@@ -134,7 +134,11 @@ class ContextService {
     }
 
     /** Rangkum snapshot jadi narasi keadaan rumah oleh Aether. */
-    async brief() {
+    /**
+     * N2-FINAL — giliran narasi mewarisi otoritas pemanggil.
+     * Tanpa exec → 'user' least privilege; TIDAK ada system implisit.
+     */
+    async brief(exec = null) {
 
         const snap = await this.snapshot();
 
@@ -191,8 +195,16 @@ class ContextService {
             "bahasa Indonesia.\n\n" + lines.join("\n");
 
         try {
+            // N2-FINAL: satu-satunya sumber peran = titik kanonik.
+            const { resolveDelegator } = require("../ai/tools/Authorization");
+            const delegator = resolveDelegator(exec ?? null);
+            // M-1: restriction delegasi dalam bentuk sah apa pun.
+            const briefSet = require("../ai/tools/Authorization")
+                .toCapabilitySet(delegator?.capabilitySet);
             const response = await aiRuntime.chat({
-                messages: [{ role: "user", content: prompt }]
+                messages: [{ role: "user", content: prompt }],
+                role: delegator?.role ?? "user",
+                ...(briefSet ? { capabilitySet: briefSet } : {})
             });
             return { brief: response.content ?? "", snapshot: snap };
         }

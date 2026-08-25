@@ -8,7 +8,13 @@ class AITool {
 
         parameters = {},
 
-        execute
+        execute,
+
+        // Metadata kapabilitas (opsional): capabilities, keywords,
+        // domain, risk, sideEffects, readOnly, channels, roles,
+        // cost, latency, source, provider. Yang tidak diberi akan
+        // diturunkan otomatis oleh CapabilityIndex.
+        meta = {}
 
     }) {
 
@@ -31,6 +37,8 @@ class AITool {
         this.parameters = parameters;
 
         this.execute = execute;
+
+        this.meta = meta && typeof meta === "object" ? meta : {};
 
     }
 

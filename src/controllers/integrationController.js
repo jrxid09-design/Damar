@@ -2,6 +2,10 @@ const response = require("../utils/response");
 
 const { manager } = require("../integrations");
 
+// Integrasi lama disembunyikan dari Console — digantikan setup MCP.
+// Lihat mcpController.
+const HIDDEN_FROM_UI = new Set();
+
 class IntegrationController {
 
     list(req, res, next) {
@@ -9,7 +13,9 @@ class IntegrationController {
         try {
             return response.success(res, "Integrations", {
                 summary: manager.summary(),
-                integrations: manager.snapshot()
+                integrations: manager.snapshot().filter(
+                    i => !HIDDEN_FROM_UI.has(String(i.id ?? i.name))
+                )
             });
         }
         catch (error) {

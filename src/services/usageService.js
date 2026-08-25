@@ -46,7 +46,7 @@ function record(provider, { promptTokens = 0, completionTokens = 0 } = {}) {
     p.promptTokens += Number(promptTokens) || 0;
     p.completionTokens += Number(completionTokens) || 0;
 
-    if (name !== "ollama" && !p.warned && p.requests >= WARN_AT && !p.limited) {
+    if (name !== "lokal" && !p.warned && p.requests >= WARN_AT && !p.limited) {
         p.warned = true;
         alert(`⚠️ Pemakaian "${name}" hari ini sudah ${p.requests} request — mendekati limit harian model gratis. Siapkan provider cadangan.`);
     }

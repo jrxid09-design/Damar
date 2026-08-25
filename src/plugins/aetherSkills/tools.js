@@ -15,35 +15,47 @@ const memory = require("../../memory/services/MemoryService");
 
 const jid = n => `${String(n).replace(/\D/g, "")}@s.whatsapp.net`;
 
-/** Jalankan tugas di agent tertentu; lempar bila agent gagal/offline. */
-async function run(agent, task) {
-    const r = await agentHub.run(agent, task);
+/** Jalankan tugas di agent tertentu; lempar bila agent gagal/offline.
+ *  N2 Round-2: identitas eksekusi pemanggil tool (ctx.exec) diteruskan —
+ *  delegasi dari model mewarisi otoritas pemanggil, bukan 'system'. */
+async function run(agent, task, exec = null) {
+    const r = await agentHub.run(agent, task, { exec });
     if (!r.ok) throw new Error(r.error || `${agent} gagal / offline`);
     return r.output;
 }
 
 /** Orkestrasi lintas-agent (plan → eksekusi → sintesis) → teks akhir. */
-async function orchestrate(request) {
+async function orchestrate(request, exec = null) {
     let final = "";
     await orchestrator.run(request, ev => {
         if (ev.type === "final") final = ev.final ?? final;
-    });
+    }, { exec });
     return final;
 }
 
-/** Ambil snapshot kamera terdaftar lalu minta model vision membacanya. */
-async function seeCam(cameraId, prompt) {
+/** Ambil snapshot kamera terdaftar lalu minta model vision membacanya.
+ *  D-FINAL: URL berasal dari registry kamera pemilik → trusted-lan.
+ *  describe_image (URL dari argumen model/user) TETAP policy public. */
+async function seeCam(cameraId, prompt, exec = null) {
     const cam = devices.getCamera(cameraId);
     if (!cam) throw new Error(`Kamera '${cameraId}' tidak terdaftar.`);
-    const r = await vision.analyzeUrl({ url: cam.snapshotUrl, headers: cam.headers || {}, prompt });
+    const r = await vision.analyzeUrl({
+        url: cam.snapshotUrl,
+        headers: cam.headers || {},
+        prompt,
+        // N2-FINAL: giliran visi mewarisi pemanggil tool.
+        exec,
+        // D-FINAL: URL berasal dari registry kamera pemilik.
+        policy: "trusted-lan"
+    });
     return r.text;
 }
 
 /** Periksa semua kamera dengan satu pertanyaan vision. */
-async function sweep(prompt) {
+async function sweep(prompt, exec = null) {
     const out = [];
     for (const c of devices.cameras()) {
-        try { out.push({ camera: c.id, seen: await seeCam(c.id, prompt) }); }
+        try { out.push({ camera: c.id, seen: await seeCam(c.id, prompt, exec) }); }
         catch (e) { out.push({ camera: c.id, error: e.message }); }
     }
     return out;
@@ -64,22 +76,10 @@ const P = {
 
 const SKILLS = [
 
-    // ===== Delegasi & Orkestrasi (OpenClaw / Hermes / multi-agent) =====
-    { name: "openclaw_do", description: "Suruh OpenClaw mengoperasikan desktop/aplikasi tanpa API (klik, ketik, isi form). Untuk AKSI di antarmuka komputer.",
-      parameters: { task: P.task }, execute: a => run("openclaw", a.task) },
-    { name: "openclaw_open_app", description: "Minta OpenClaw membuka sebuah aplikasi/desktop program.",
-      parameters: { app: { type: "string", required: true, description: "Nama aplikasi." } }, execute: a => run("openclaw", `Buka aplikasi ${a.app}.`) },
-    { name: "openclaw_web", description: "Minta OpenClaw membuka URL di browser lalu melakukan sesuatu di halaman itu.",
-      parameters: { url: { type: "string", required: true }, task: { type: "string", required: true } }, execute: a => run("openclaw", `Buka ${a.url} di browser lalu ${a.task}.`) },
-    { name: "openclaw_type", description: "Minta OpenClaw mengetik teks di jendela yang sedang aktif.",
-      parameters: { text: P.text }, execute: a => run("openclaw", `Ketik teks berikut di jendela aktif:\n${a.text}`) },
-    { name: "hermes_run", description: "Delegasikan tugas agentik berlapis ke Hermes (runtime agent terpisah).",
-      parameters: { task: P.task }, execute: a => run("hermes", a.task) },
-    { name: "hermes_research", description: "Minta Hermes meneliti sebuah topik secara mendalam dan merangkum temuannya.",
-      parameters: { topic: { type: "string", required: true } }, execute: a => run("hermes", `Riset mendalam tentang "${a.topic}". Rangkum temuan penting dalam poin-poin.`) },
-    { name: "orchestrate", description: "Tugas kompleks lintas-agent: Aether menyusun rencana lalu memberi tiap langkah ke agent paling cocok (Aether/OpenClaw/Hermes) dan menyatukan hasilnya.",
-      parameters: { request: { type: "string", required: true } }, execute: a => orchestrate(a.request) },
-    { name: "agents_status", description: "Cek kesiapan semua agent (Aether/OpenClaw/Hermes) beserta skill-nya.",
+    // ===== Delegasi & Orkestrasi (multi-agent) =====
+    { name: "orchestrate", description: "Tugas kompleks lintas-agent: Aether menyusun rencana lalu memberi tiap langkah ke agent paling cocok (Aether & anak buahnya) dan menyatukan hasilnya.",
+      parameters: { request: { type: "string", required: true } }, execute: (a, ctx) => orchestrate(a.request, ctx?.exec) },
+    { name: "agents_status", description: "Cek kesiapan semua agent Aether beserta skill-nya.",
       parameters: {}, execute: () => agentHub.health() },
 
     // ===== WhatsApp =====
@@ -98,27 +98,27 @@ const SKILLS = [
 
     // ===== Vision / CCTV =====
     { name: "see_camera", description: "Lihat kamera/CCTV terdaftar dan jawab pertanyaan tentang isinya.",
-      parameters: { camera: P.camera, question: { type: "string" } }, execute: a => seeCam(a.camera, a.question || "Deskripsikan apa yang terlihat.").then(text => ({ camera: a.camera, text })) },
+      parameters: { camera: P.camera, question: { type: "string" } }, execute: (a, ctx) => seeCam(a.camera, a.question || "Deskripsikan apa yang terlihat.", ctx?.exec).then(text => ({ camera: a.camera, text })) },
     { name: "count_people_camera", description: "Hitung berapa orang yang terlihat di sebuah kamera.",
-      parameters: { camera: P.camera }, execute: a => seeCam(a.camera, "Ada berapa orang di gambar ini? Jawab angka saja bila bisa.").then(text => ({ text })) },
+      parameters: { camera: P.camera }, execute: (a, ctx) => seeCam(a.camera, "Ada berapa orang di gambar ini? Jawab angka saja bila bisa.", ctx?.exec).then(text => ({ text })) },
     { name: "read_camera_text", description: "Bacakan teks yang terlihat di sebuah kamera (mis. plat nomor, papan).",
-      parameters: { camera: P.camera }, execute: a => seeCam(a.camera, "Bacakan semua teks/angka yang terlihat.").then(text => ({ text })) },
+      parameters: { camera: P.camera }, execute: (a, ctx) => seeCam(a.camera, "Bacakan semua teks/angka yang terlihat.", ctx?.exec).then(text => ({ text })) },
     { name: "describe_image", description: "Analisis/deskripsikan gambar dari URL.",
-      parameters: { url: { type: "string", required: true }, question: { type: "string" } }, execute: a => vision.analyzeUrl({ url: a.url, prompt: a.question }).then(r => ({ text: r.text })) },
+      parameters: { url: { type: "string", required: true }, question: { type: "string" } }, execute: (a, ctx) => vision.analyzeUrl({ url: a.url, prompt: a.question, exec: ctx?.exec }).then(r => ({ text: r.text })) },
     { name: "list_cameras", description: "Daftar kamera/CCTV yang terdaftar.",
       parameters: {}, execute: () => ({ cameras: devices.cameras() }) },
     { name: "security_sweep", description: "Periksa SEMUA kamera sekaligus dan laporkan apa yang terlihat di tiap kamera.",
-      parameters: {}, execute: () => sweep("Deskripsikan singkat apa/siapa yang terlihat. Sebut bila ada aktivitas mencurigakan.").then(results => ({ results })) },
+      parameters: {}, execute: (a, ctx) => sweep("Deskripsikan singkat apa/siapa yang terlihat. Sebut bila ada aktivitas mencurigakan.", ctx?.exec).then(results => ({ results })) },
     { name: "security_alert", description: "Sapu semua kamera lalu KIRIM ringkasannya ke WhatsApp pemilik.",
-      parameters: {}, execute: async () => {
-          const r = await sweep("Ada aktivitas mencurigakan/orang tak dikenal? Jawab singkat.");
+      parameters: {}, execute: async (a, ctx) => {
+          const r = await sweep("Ada aktivitas mencurigakan/orang tak dikenal? Jawab singkat.", ctx?.exec);
           const msg = "🛡️ Laporan keamanan:\n" + r.map(x => `• ${x.camera}: ${x.seen || x.error}`).join("\n");
           const recipients = await whatsapp.broadcast(msg);
           return { recipients, results: r };
       } },
     { name: "watch_and_notify", description: "Lihat satu kamera lalu kirim hasilnya ke WhatsApp pemilik.",
-      parameters: { camera: P.camera, question: { type: "string" } }, execute: async a => {
-          const text = await seeCam(a.camera, a.question || "Deskripsikan yang terlihat.");
+      parameters: { camera: P.camera, question: { type: "string" } }, execute: async (a, ctx) => {
+          const text = await seeCam(a.camera, a.question || "Deskripsikan yang terlihat.", ctx?.exec);
           const recipients = await whatsapp.broadcast(`📷 ${a.camera}: ${text}`);
           return { text, recipients };
       } },
@@ -161,7 +161,7 @@ const SKILLS = [
 
     // ===== Kesadaran / konteks =====
     { name: "home_brief", description: "Aether merangkum keadaan rumah secara naratif (gaya sapaan).",
-      parameters: {}, execute: () => context.brief().then(r => ({ brief: r.brief })) },
+      parameters: {}, execute: (a, ctx) => context.brief(ctx?.exec).then(r => ({ brief: r.brief })) },
     { name: "full_context", description: "Snapshot lengkap seluruh sinyal rumah & sistem.",
       parameters: {}, execute: () => context.snapshot() },
     { name: "system_health", description: "Kesehatan sistem (CPU/RAM/uptime) tempat Aether berjalan.",
@@ -169,11 +169,11 @@ const SKILLS = [
 
     // ===== Komposit powerful (gabungan kemampuan) =====
     { name: "morning_briefing", description: "Susun brief keadaan rumah lalu kirim ke WhatsApp pemilik.",
-      parameters: {}, execute: async () => { const { brief } = await context.brief(); const recipients = await whatsapp.broadcast(`☀️ ${brief}`); return { brief, recipients }; } },
+      parameters: {}, execute: async (a, ctx) => { const { brief } = await context.brief(ctx?.exec); const recipients = await whatsapp.broadcast(`☀️ ${brief}`); return { brief, recipients }; } },
     { name: "daily_report", description: "Laporan harian: konteks + kesehatan sistem, dikirim ke WhatsApp.",
-      parameters: {}, execute: async () => { const { brief } = await context.brief(); const recipients = await whatsapp.broadcast(`📋 Laporan Aether:\n${brief}`); return { recipients }; } },
+      parameters: {}, execute: async (a, ctx) => { const { brief } = await context.brief(ctx?.exec); const recipients = await whatsapp.broadcast(`📋 Laporan Aether:\n${brief}`); return { recipients }; } },
     { name: "arrive_home", description: "Rutinitas datang: aktifkan scene (bila diberi) lalu kirim brief rumah ke WhatsApp.",
-      parameters: { scene: { type: "string", description: "scene HA opsional, mis. scene.pulang." } }, execute: async a => { let scene = null; if (a.scene) { await home.control(a.scene, "turn_on"); scene = a.scene; } const { brief } = await context.brief(); await whatsapp.broadcast(`🏠 Selamat datang.\n${brief}`); return { scene, done: true }; } },
+      parameters: { scene: { type: "string", description: "scene HA opsional, mis. scene.pulang." } }, execute: async (a, ctx) => { let scene = null; if (a.scene) { await home.control(a.scene, "turn_on"); scene = a.scene; } const { brief } = await context.brief(ctx?.exec); await whatsapp.broadcast(`🏠 Selamat datang.\n${brief}`); return { scene, done: true }; } },
     { name: "leave_home", description: "Rutinitas pergi: matikan perangkat yang diberikan lalu sapu kamera & kirim ringkasan.",
       parameters: { entities: { type: "string", description: "entity_id dipisah koma untuk dimatikan." } }, execute: async a => {
           const off = [];
@@ -182,20 +182,16 @@ const SKILLS = [
           await whatsapp.broadcast(`🚪 Rumah ditinggal. Dimatikan: ${off.join(", ") || "-"}\n` + r.map(x => `• ${x.camera}: ${x.seen || x.error}`).join("\n"));
           return { off, cameras: r };
       } },
-    { name: "research_and_send", description: "Hermes meneliti topik, hasilnya dikirim ke WhatsApp.",
-      parameters: { topic: { type: "string", required: true }, number: P.number }, execute: async a => { const out = await run("hermes", `Riset "${a.topic}" dan rangkum.`); await whatsapp.send(jid(a.number), out); return { sent: true }; } },
-    { name: "desktop_and_report", description: "OpenClaw menjalankan tugas desktop, hasil/laporannya dikirim ke WhatsApp.",
-      parameters: { task: P.task, number: P.number }, execute: async a => { const out = await run("openclaw", a.task); await whatsapp.send(jid(a.number), `🖥️ ${out}`); return { sent: true }; } },
     { name: "ask_home", description: "Tanya apa saja tentang rumah/tugas; Aether berorkestrasi memakai semua tool & agent untuk menjawab/menuntaskan.",
-      parameters: { question: { type: "string", required: true } }, execute: a => orchestrate(a.question).then(final => ({ answer: final })) },
+      parameters: { question: { type: "string", required: true } }, execute: (a, ctx) => orchestrate(a.question, ctx?.exec).then(final => ({ answer: final })) },
     { name: "summarize_and_remember", description: "Ringkas sebuah teks lalu simpan ringkasannya ke memori.",
-      parameters: { text: { type: "string", required: true } }, execute: async a => { const s = await run("aether", `Ringkas padat teks berikut:\n${a.text}`); await saveMemory(s, "semantic", 0.6); return { summary: s, saved: true }; } },
+      parameters: { text: { type: "string", required: true } }, execute: async (a, ctx) => { const s = await run("aether", `Ringkas padat teks berikut:\n${a.text}`, ctx?.exec); await saveMemory(s, "semantic", 0.6); return { summary: s, saved: true }; } },
     { name: "translate", description: "Terjemahkan teks ke bahasa target.",
-      parameters: { text: { type: "string", required: true }, to: { type: "string", required: true, description: "bahasa target, mis. Inggris." } }, execute: a => run("aether", `Terjemahkan ke ${a.to}, keluarkan terjemahannya saja:\n${a.text}`).then(t => ({ translation: t })) },
+      parameters: { text: { type: "string", required: true }, to: { type: "string", required: true, description: "bahasa target, mis. Inggris." } }, execute: (a, ctx) => run("aether", `Terjemahkan ke ${a.to}, keluarkan terjemahannya saja:\n${a.text}`, ctx?.exec).then(t => ({ translation: t })) },
     { name: "explain_camera_to_owner", description: "Lihat kamera, jelaskan dengan bahasa manusiawi, lalu kirim ke WhatsApp pemilik.",
-      parameters: { camera: P.camera }, execute: async a => { const raw = await seeCam(a.camera, "Deskripsikan detail."); const nice = await run("aether", `Sampaikan ini ke pemilik rumah dengan ramah & singkat: ${raw}`); await whatsapp.broadcast(`📷 ${a.camera}: ${nice}`); return { text: nice }; } },
+      parameters: { camera: P.camera }, execute: async (a, ctx) => { const raw = await seeCam(a.camera, "Deskripsikan detail.", ctx?.exec); const nice = await run("aether", `Sampaikan ini ke pemilik rumah dengan ramah & singkat: ${raw}`, ctx?.exec); await whatsapp.broadcast(`📷 ${a.camera}: ${nice}`); return { text: nice }; } },
     { name: "smart_reply", description: "Susun balasan yang tepat untuk sebuah pesan masuk (nada bisa diatur).",
-      parameters: { message: { type: "string", required: true }, tone: { type: "string", description: "mis. sopan, santai, tegas." } }, execute: a => run("aether", `Buat balasan (${a.tone || "sopan"}) untuk pesan ini:\n${a.message}`).then(reply => ({ reply })) }
+      parameters: { message: { type: "string", required: true }, tone: { type: "string", description: "mis. sopan, santai, tegas." } }, execute: (a, ctx) => run("aether", `Buat balasan (${a.tone || "sopan"}) untuk pesan ini:\n${a.message}`, ctx?.exec).then(reply => ({ reply })) }
 
 ];
 

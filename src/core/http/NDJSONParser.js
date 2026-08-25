@@ -1,7 +1,7 @@
 /**
  * Parser untuk response bergaya NDJSON / JSON-lines
  * (satu objek JSON utuh per baris) — format yang dipakai
- * Ollama untuk streaming, berbeda dari SSE milik OpenAI.
+ * sebagian backend lokal untuk streaming, berbeda dari SSE milik OpenAI.
  */
 class NDJSONParser {
 

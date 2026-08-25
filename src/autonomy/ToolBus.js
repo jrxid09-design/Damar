@@ -86,7 +86,7 @@ class ToolBus {
             const tools = require("../services/aiRuntimeService").tools();
             const hit = tools.find(t => t.name === name)
                 ?? tools.find(t => String(t.name).split(/__|\./).pop() === tail);
-            if (hit) return { kind: "ai", tool: hit, execute: (args) => hit.execute(args ?? {}) };
+            if (hit) return { kind: "ai", tool: hit, execute: (args, ctx) => hit.execute(args ?? {}, ctx) };
         }
         catch { /* belum siap */ }
 
@@ -130,9 +130,26 @@ class ToolBus {
         }
 
         // Substitusi: coba alternatif untuk kegagalan permanen.
+        // Argumen milik tool ASLI — substitusi hanya boleh jalan bila
+        // argumen itu sah untuk tool penggantinya (parameter wajib
+        // terpenuhi); kalau tidak, biarkan gagal daripada mengeksekusi
+        // tool lain dengan arti yang melenceng.
         let via = null;
         if (!outcome.ok && allowSubstitute) {
             for (const alt of (SUBSTITUTES[name] ?? [])) {
+
+                const altResolved = this.resolve(alt);
+
+                // Kompatibilitas dinilai validator otoritatif.
+                const altCheck = altResolved
+                    ? require("../ai/tools/ArgumentValidator").validate(altResolved.tool, args)
+                    : { ok: false };
+
+                if (!altCheck.ok) {
+                    attempts.push({ tool: alt, ok: false, substitute: true, skipped: "args-incompatible" });
+                    continue;
+                }
+
                 const sub = await this.tryOnce(alt, args, timeoutMs, context);
                 attempts.push({ tool: alt, ok: sub.ok, substitute: true });
                 if (sub.ok) {
@@ -143,14 +160,24 @@ class ToolBus {
             }
         }
 
-        this.record(name, outcome.ok, Date.now() - started, outcome.error);
+        // Akuntansi jujur (H6): keberhasilan B (substitusi) TIDAK boleh
+        // dikreditkan ke A. Masing-masing dicatat atas namanya sendiri;
+        // hasil agregat tetap dilaporkan dengan via=substitution.
+        if (via && outcome.ok) {
+            this.record(name, false, Date.now() - started, "SUBSTITUTED");
+            this.record(via, true, Date.now() - started, null);
+        }
+        else {
+            this.record(name, outcome.ok, Date.now() - started, outcome.error);
+        }
 
         return {
             ok: outcome.ok,
             result: outcome.result ?? null,
             error: outcome.error ?? null,
             tool: name,
-            via,
+            executedTool: via ?? name,
+            via: via ? "substitution" : null,
             attempts,
             durationMs: Date.now() - started
         };
@@ -165,16 +192,90 @@ class ToolBus {
             return { ok: false, error: `tool tidak ditemukan: ${name}` };
         }
 
-        // Validasi skema ringan: parameter required tak boleh kosong.
-        const verr = validateRequired(resolved.tool, args);
-        if (VERR_IS(verr)) {
-            return { ok: false, error: verr };
+        // GERBANG OTORISASI TUNGGAL (invariant J) — C1 FIXED:
+        //
+        // ToolBus TIDAK PERNAH memproduksi identitas. Dulu
+        // `context?.role ?? "system"` menjadikan wrapper model-facing
+        // (tool_exec) terowongan privilese: admin ditolak langsung
+        // terminal_run tetapi lolos lewat tool_exec.
+        //
+        // Aturan sekarang:
+        //   - identitas WAJIB datang dari pemanggil tepercaya
+        //     (ExecutionContext asli: ToolExecutor/GoalEngine internal);
+        //   - identitas hilang → Authorization.identity() jatuh ke
+        //     'user' (fail-closed), BUKAN system;
+        //   - delegasi hanya MENYEMPITKAN: wrapper boleh menandai
+        //     via/worker, tidak boleh menaikkan peran.
+        //
+        // L1/CLOSURE — OTORISASI SEBELUM VALIDASI ARGUMEN: pemanggil
+        // di luar set/peran menerima PERMISSION_DENIED tanpa sempat
+        // belajar schema argumen tool yang dilarangnya.
+        const Authorization = require("../ai/tools/Authorization");
+
+        // Grant kanonik otonom (symbol in-process, tak bisa dipalsukan
+        // JSON/model/HTTP) = batas runtime positif-teridentifikasi;
+        // kontrak resolveDelegator sama seperti agentHub.delegatedRoleOf:
+        // peran efektifnya 'system', TETAP terkunci capabilitySet-nya.
+        const execCtx = context?.exec ?? null;
+        const grantIsCanonical =
+            Authorization.isCanonicalInternalGrant(execCtx);
+
+        // M-1: identitas dengan restriction malformed = ditolak
+        // terstruktur (fail-closed), bukan melempar keluar dari bus.
+        let identity;
+        try {
+            identity = Authorization.identity({
+                ...(execCtx ?? {}),
+                role: execCtx?.role ??
+                    (grantIsCanonical ? "system" : context?.role),   // tanpa default istimewa lain
+                channel: execCtx?.channel ?? context?.channel ?? "toolbus",
+                sessionId: execCtx?.sessionId ?? context?.sessionId ?? `toolbus:${context?.mission ?? "adhoc"}`,
+                workerId: execCtx?.workerId ?? context?.agent ?? null,
+                missionId: context?.mission ?? null
+            });
+        }
+        catch (identityError) {
+            return { ok: false, error: `ditolak otorisasi: ${identityError.message}` };
+        }
+
+        try {
+            Authorization.assertExecution(resolved.tool, identity);
+        }
+        catch (error) {
+            return { ok: false, error: `ditolak otorisasi: ${error.message}` };
+        }
+
+        // Validasi OTORITATIF via ArgumentValidator V2 (satu validator,
+        // rekursif; dulu required-only duplikat di sini).
+        const verdict = require("../ai/tools/ArgumentValidator")
+            .validate(resolved.tool, args);
+
+        if (!verdict.ok) {
+            return { ok: false, error: verdict.error.message };
+        }
+
+        const validatedArgs = verdict.args;
+
+        // Rem kebuntuan scoped + rantai keselamatan untuk yang tak
+        // terbukti dijaga registry intinya (buktikan via Authorization).
+        const bridgedProven = Authorization.proveBridgedGuarded(resolved.tool);
+
+        if (resolved.kind === "ai" && !bridgedProven) {
+            try {
+                toolGuard.before(name, args, resolved.tool, { sessionId: context?.sessionId });
+            }
+            catch (error) {
+                return { ok: false, error: `ditolak kebijakan: ${error.message}` };
+            }
         }
 
         try {
 
+            // M3/CLOSURE: identitas giliran diteruskan ke tool AI —
+            // nested turn (mis. think_deeply) mewarisi role+capabilitySet
+            // pemanggil; restriction tidak jatuh di dalam bus.
             const value = await withTimeout(
-                resolved.execute(args),
+                resolved.execute(validatedArgs, { exec: identity }),
                 timeoutMs,
                 `ToolBus timeout ${name} (${timeoutMs}ms)`
             );
@@ -182,7 +283,7 @@ class ToolBus {
             // toolGuard.after untuk jalur AI-native (konsisten rantai
             // keselamatan; plugin sudah dijaga ToolRegistry).
             if (resolved.kind === "ai" && !resolved.tool.bridged) {
-                try { await toolGuard.after(name, args, value); }
+                try { await toolGuard.after(name, validatedArgs, value); }
                 catch (guardError) { return { ok: false, error: `ditolang verifikasi: ${guardError.message}` }; }
             }
 
@@ -206,6 +307,13 @@ class ToolBus {
         if (!ok) m.lastError = error;
 
         this.metrics.set(name, m);
+
+        // Ingatan operasional persisten — dipakai ranker seleksi
+        // secara konservatif (lihat ai/tools/ToolStats.js).
+        try {
+            require("../ai/tools/ToolStats").record(name, ok, ms);
+        }
+        catch { /* pencatatan tak boleh menggagalkan eksekusi */ }
 
         telemetry.publish("toolbus:exec", { tool: name, ok, ms });
 

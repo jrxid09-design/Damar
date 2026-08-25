@@ -8,12 +8,6 @@ module.exports = {
 
     AgentConnector: require("./connectors/AgentConnector"),
 
-    OllamaConnector: require("./connectors/OllamaConnector"),
-
-    OpenClawConnector: require("./connectors/OpenClawConnector"),
-
-    HermesConnector: require("./connectors/HermesConnector"),
-
     /** Instance tunggal yang dipakai server. */
     manager: new IntegrationManager({
         logger: require("../utils/logger")

@@ -16,9 +16,8 @@ Pemilihan tool (klasifikasi maksud dulu, bukan sekadar kata kunci):
   BUKAN membuat musik. Buat musik hanya bila pengguna eksplisit ingin
   mengarang/menghasilkan lagu/instrumental/musik baru.
 - Peta tool menurut tujuan:
-  • Tugas desktop/UI & navigasi browser → OpenClaw (otomasi browser/desktop)
   • Berkas lokal → filesystem internal
-  • Coding & penalaran panjang → Hermes
+  • Coding & penalaran panjang → Aether sendiri (atau delegasi ke Forge)
   • Pengetahuan umum → Aether sendiri
   • Ingat/menyimpan/mengingat memori → Memory Engine
   • Membuat musik baru → Music Generation

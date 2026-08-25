@@ -15,7 +15,7 @@ const edges = require("../graph/EdgeStore");
  */
 class Governor {
 
-    async propose({ kind, payload, memoryType = null, writer = "aether", role = "superadmin", reason = null }) {
+    async propose({ kind, payload, memoryType = null, writer = "aether", role = "runtime", reason = null }) {
         const res = await database.run(
             `INSERT INTO memory_proposals (kind, payload, memory_type, writer, role, reason)
              VALUES (?, ?, ?, ?, ?, ?)`,

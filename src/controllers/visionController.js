@@ -269,7 +269,11 @@ class VisionController {
             const result = await vision.analyzeUrl({
                 url: cam.snapshotUrl,
                 headers: cam.headers ?? {},
-                prompt: req.body?.prompt
+                prompt: req.body?.prompt,
+                // N2-FINAL: giliran visi mewarisi identitas pemanggil HTTP.
+                exec: req.authIdentity ?? null,
+                // D-FINAL: URL dari registry kamera pemilik → trusted-lan.
+                policy: "trusted-lan"
             });
 
             return response.success(res, "Analisis kamera selesai", {

@@ -94,9 +94,14 @@ class McpClient {
             this.proc.stderr?.setEncoding?.("utf8");
 
             this.proc.stdout.on("data", chunk => this._onData(chunk));
-            this.proc.on("exit", (code, signal) => this._failAll(
-                new Error(`MCP server '${this.id}' exit (code=${code} signal=${signal})`)
-            ));
+            this.proc.on("exit", (code, signal) => {
+                // G: server mati = TIDAK siap. Dulu hanya pending yang
+                // dibatalkan; flag _ready tetap true (readiness basi).
+                this._ready = false;
+                this._failAll(
+                    new Error(`MCP server '${this.id}' exit (code=${code} signal=${signal})`)
+                );
+            });
             this.proc.stderr?.on("data", () => { /* log ops, bukan protokol */ });
 
             // 1. initialize
@@ -166,12 +171,26 @@ class McpClient {
             const bridged = this._bridgedName(t.name);
             const client = this;
 
+            // Metadata eksternal = INPUT TIDAK TERPERCAYA (invariant D).
+            // Deskripsi dibatasi ketat sebelum menyentuh index/prompt;
+            // provenance (source/provider) selalu ditentukan INTERNAL.
+            const rawDesc = String(t.description ?? "").slice(0, 300);
+
             const tool = {
                 name: bridged,
-                description: t.description || `MCP tool ${t.name} dari server ${this.id}`,
+                description: rawDesc || `MCP tool ${t.name} dari server ${this.id}`,
                 parameters: t.inputSchema && typeof t.inputSchema === "object"
                     ? t.inputSchema
                     : { type: "object", properties: {} },
+                // Metadata first-class: pipeline seleksi membaca ini —
+                // tool MCP masuk discovery/ranking yang sama dengan
+                // tool native, tetap bertanda eksternal (penalti kecil
+                // saat ambigu, preferensi milik sendiri).
+                meta: {
+                    source: "mcp",
+                    provider: this.id,
+                    external: true
+                },
                 async execute(args) {
                     const raw = client._rawName(bridged);
                     return client.callTool(raw, args || {});
@@ -274,18 +293,30 @@ class McpClient {
         this._pending.clear();
     }
 
-    /** Hentikan child process. */
+    /**
+     * Hentikan child process.
+     *
+     * G: proses yang SUDAH mati tidak akan pernah memancarkan "exit"
+     * lagi — menunggu event itu membuat teardown menggantung selamanya
+     * (test suite macet ~168s). Cek exitCode/signalCode dulu; bila
+     * masih hidup baru SIGTERM → tunggu → SIGKILL.
+     */
     async stop() {
         this._ready = false;
         this._started = false;
         this._failAll(new Error(`MCP server '${this.id}' dihentikan.`));
         if (this.proc) {
-            try { this.proc.stdin?.end?.(); } catch { /* */ }
-            try { this.proc.kill("SIGTERM"); } catch { /* */ }
-            const force = setTimeout(() => {
-                try { this.proc?.kill("SIGKILL"); } catch { /* */ }
-            }, 2000);
-            await new Promise(r => this.proc.once("exit", () => { clearTimeout(force); r(); }));
+            const proc = this.proc;
+            try { proc.stdin?.end?.(); } catch { /* */ }
+
+            if (proc.exitCode === null && proc.signalCode === null) {
+                try { proc.kill("SIGTERM"); } catch { /* */ }
+                const force = setTimeout(() => {
+                    try { proc.kill("SIGKILL"); } catch { /* */ }
+                }, 2000);
+                await new Promise(r =>
+                    proc.once("exit", () => { clearTimeout(force); r(); }));
+            }
         }
         this.proc = null;
     }

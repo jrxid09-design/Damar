@@ -2,7 +2,7 @@ const HttpClient = require("../plugins/http/services/HttpClient");
 
 /**
  * Kontrak dasar untuk semua sistem eksternal yang disambungkan
- * ke Aether (runtime AI lokal, OpenClaw, hermes-agent, dst).
+ * ke Aether (runtime AI lokal, gateway agen, dst).
  *
  * Yang wajib disediakan turunan hanyalah `probe()`. Sisanya
  * opsional dan otomatis dilaporkan sebagai kapabilitas yang
@@ -12,7 +12,7 @@ class BaseConnector {
 
     /**
      * @param {object} options
-     * @param {string} options.id      identitas unik, mis. "ollama"
+     * @param {string} options.id      identitas unik
      * @param {string} options.label   nama tampilan di UI
      * @param {string} options.kind    "runtime" | "agent" | "service"
      * @param {string} options.baseUrl root HTTP instance

@@ -11,6 +11,12 @@ router.get("/", systemController.home);
 
 router.get("/health", systemController.health);
 
+// Halaman web untuk device tertaut (companion) — dibuka dari HP/laptop.
+router.get("/companion", (req, res) => {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(require("../companion/deviceWeb").html());
+});
+
 router.get("/error", (req, res, next) => {
   next(new AppError("Testing Global Error Handler", 500));
 });

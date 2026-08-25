@@ -62,16 +62,15 @@ pencari uang nyata — semuanya di balik satu daemon dengan **Console desktop**,
 - **Crypto (Binance)** — pantau harga/portofolio/posisi, analisa teknikal, chart
   **live** di popup Console (TradingView), alarm harga, bot sinyal, dan eksekusi
   order **dua langkah** (siapkan → konfirmasi pemilik).
-- **Otak fleksibel** — pilih **AI Lokal** (Ollama) atau **AI Provider** (OpenRouter,
+- **Otak fleksibel** — pilih **AI Lokal** (llama.cpp in-process) atau **AI Provider** (OpenRouter,
   OpenAI, Google AI Studio, Groq, atau custom OpenAI-compatible). Daftar model
   **dikurasi otomatis**: model gratis diutamakan, model non-chat/usang disaring,
   ada **verifikasi** + **fallback otomatis** bila model 404/deprecated.
 - **Memori jangka panjang** — SQLite + FTS5 + embedding (recall hibrida). Aether
   mengingat identitas, kebiasaan, perangkat, dan dokumen.
 - **Skills (50+)** — kemampuan siap pakai yang menggabungkan semua subsistem +
-  delegasi ke **OpenClaw** (otomasi desktop) & **Hermes** (agent runtime) +
-  **orkestrasi** multi-agent. Aether juga bisa **membuat skill sendiri** lewat
-  percakapan (draft → aktifkan).
+  **orkestrasi** multi-agent (10 anak buah spesialis). Aether juga bisa
+  **membuat skill sendiri** lewat percakapan (draft → aktifkan).
 - **WhatsApp** — chat pribadi & grup, balas saat di-mention/di-reply, analisis
   media masuk (gambar/stiker/voice note/dokumen), kirim media. Login via **QR**.
 - **Vision** — "melihat" kamera/CCTV & webcam, pratinjau live, terintegrasi ke chat.
@@ -83,6 +82,9 @@ pencari uang nyata — semuanya di balik satu daemon dengan **Console desktop**,
   ("Aether") atau tepuk tangan 2x, acknowledgement deterministik, VAD, barge-in,
   dan jawaban dibacakan. Channel menuju Aether Core yang sama (bukan otak kedua);
   local-first, graceful degradation, nonaktif secara default.
+- **Companion Devices** — kendalikan Aether dari device lain (HP/laptop/tablet)
+  di jaringan yang sama / Bluetooth PAN, memakai tools & skill yang sama. Pairing
+  kode 6 digit + token per device; device = client tipis ke Aether Core.
 - **Proaktif** — brief keadaan rumah harian terjadwal, dikirim ke WhatsApp.
 - **Antarmuka** — Console desktop (Electron), CLI terminal, dan REST/SSE API.
 
@@ -154,7 +156,7 @@ yang sungguh sedang berjalan, bukan mengarang.
                  │ Money       — pindai·takar risiko·bukukan (Binance) │
                  │ Skills/Plugins · Vision · Home · Immich · WhatsApp  │
                  │ Automation  — brief proaktif                        │
-                 │ AgentHub → Ollama / OpenClaw / Hermes · Orchestrator│
+                 │ AgentHub → 10 anak buah Aether · Orchestrator       │
                  └────────────────────────────────────────────────────┘
 ```
 
@@ -167,16 +169,15 @@ yang sungguh sedang berjalan, bukan mengarang.
 ## Prasyarat
 
 - **Node.js ≥ 18** dan **npm**.
-- Wajib: tidak ada. Aether tetap hidup tanpa API key (pakai Ollama bila ada,
-  atau menunggu dikonfigurasi).
+- Wajib: tidak ada. Aether tetap hidup tanpa API key (pakai model lokal
+  bila ada, atau menunggu dikonfigurasi).
 - Opsional (aktifkan sesuai kebutuhan):
-  - **Ollama** — AI lokal & embedding memori.
+  - **node-llama-cpp** — otak lokal in-process (GGUF di models/).
   - **API key** OpenRouter / OpenAI / Google AI Studio / Groq — AI cloud.
   - **WhatsApp** — paket `@whiskeysockets/baileys` + `qrcode`.
   - **Home Assistant** — kendali rumah (URL + long-lived token).
   - **Immich** / layanan wajah — foto & pengenalan wajah.
   - **Kokoro-FastAPI** (TTS neural) & **faster-whisper** (STT).
-  - **OpenClaw** & **Hermes** — otomasi desktop & agent runtime.
 
 ---
 
@@ -258,13 +259,13 @@ Contoh yang tersedia: `providers` (AI cloud), `binance` (crypto), `telegram`,
 `home` (Home Assistant), `immich` (foto/wajah), `voice` (STT/TTS).
 
 **Cara 3 — variabel lingkungan.** Sebagian integrasi bisa ditimpa tanpa berkas,
-mis. `AETHER_OLLAMA_URL=http://192.168.1.10:11434` (lihat `configs/integrations.json`).
+mis. `AETHER_AGENT_URL=http://192.168.1.10:9000` (lihat `configs/integrations.json`).
 
-> Aether tetap hidup **tanpa satu pun kredensial** — pakai Ollama bila ada, atau
+> Aether tetap hidup **tanpa satu pun kredensial** — pakai otak lokal bila ada, atau
 > menunggu dikonfigurasi. Isi hanya layanan yang kamu pakai.
 
 ### Provider AI
-- **AI Lokal** — Ollama (base URL + model). Gratis & privat.
+- **AI Lokal** — llama.cpp in-process (berkas GGUF di models/). Gratis & privat.
 - **AI Provider** — pilih platform, tempel **API key**, tekan **Muat** untuk
   daftar model (bertanda `free`), atau **Verifikasi** untuk menguji tiap model
   (✓ = benar-benar bisa dipakai). Model usang/non-chat disembunyikan; bila model
@@ -297,19 +298,69 @@ sendiri. Skill otomatis menjadi tool yang bisa dipanggil AI.
 1. **Ngobrol** (Chat Console / WhatsApp / CLI) — tulis maksudmu, Aether memilih
    skill sendiri. Contoh: *"lihat kamera dapur"*, *"kirim WA ke 62812…: …"*,
    *"nyalakan lampu ruang tamu"*, *"riset X lalu kirim ke WA-ku"*,
-   *"briefing pagi"*, *"buka Notepad ketik …"* (OpenClaw), tugas kompleks →
-   *"orkestrasikan: …"*.
+   *"briefing pagi"*, tugas kompleks → *"orkestrasikan: …"*.
 2. **Manual** — Console → **Skills & Studio → Terpasang** → pilih tool → isi
    parameter → Jalankan.
 3. **Buat skill baru** — minta Aether: *"buatkan skill untuk …"*. Ia membuat
    **draft**, lalu bertanya apakah diaktifkan (tolak = tersimpan sebagai draft).
 
-Kategori: delegasi OpenClaw/Hermes & orkestrasi, WhatsApp, vision/CCTV, home
-automation, memori, Immich, konteks, serta alur komposit (mis. `morning_briefing`,
-`arrive_home`, `leave_home`, `security_alert`, `research_and_send`).
+Kategori: orkestrasi multi-agent, WhatsApp, vision/CCTV, home automation,
+memori, Immich, konteks, serta alur komposit (mis. `morning_briefing`,
+`arrive_home`, `leave_home`, `security_alert`).
 
-> Skill OpenClaw/Hermes butuh kedua agent online; Home/Immich/Vision butuh
-> terkonfigurasi. Bila belum siap, skill membalas pesan error yang jelas.
+> Skill Home/Immich/Vision butuh layanan terkonfigurasi. Bila belum siap,
+> skill membalas pesan error yang jelas.
+
+---
+
+## Tool Intelligence
+
+Aether punya 200+ tool, tetapi model **hanya melihat beberapa tool yang
+relevan** dengan pesan itu. Seleksi lewat pipeline deterministik:
+capability retrieval → filter peran/kanal → ranking stabil → anggaran
+konteks → schema minimum → validasi argumen → ToolGuard → eksekusi →
+observasi (replan berbatas).
+
+- "halo" → nol tool; "jam berapa" → hanya waktu; "matikan lampu" → home.
+- Anggaran mengikuti ukuran konteks model (8K dapat jauh lebih sedikit
+  daripada 128K) — tanpa hardcode provider/model.
+- Argumen divalidasi sebelum eksekusi; error machine-readable
+  (`VALIDATION_ERROR`, `TIMEOUT`, `POLICY_DENIED`, …) sehingga model
+  bisa memperbaiki panggilannya.
+- `tool_search` satu-satunya pintu discovery: model mencari kemampuan,
+  runtime melampirkan schema-nya di putaran berikutnya.
+
+Benchmark (metodologi, registry sumber, versi dataset, token=ESTIMASI
+heuristic chars/4): **[docs/TOOL-INTELLIGENCE.md](docs/TOOL-INTELLIGENCE.md)**.
+
+```bash
+# V2 — REAL registry runtime + adversarial (utama)
+AETHER_BENCH_STUB_NATIVE=1 node scripts/benchmark-tool-intelligence-v2.js
+# V1 — fixture historis (regresi saja, bukan klaim produksi)
+node scripts/benchmark-tool-intelligence.js
+# Cache/prefix stability (+TTFT live opsional via AETHER_TTFT_URL)
+node scripts/benchmark-cache-stability.js
+```
+
+---
+
+## Context Intelligence
+
+Model tidak perlu tahu segalanya — juga untuk **informasi**. Setiap
+giliran, context dipilih lewat pipeline deterministik: sanitasi
+anti-explosion (≤40 pesan, ≤6.000 char/pesan) → recent window + riwayat
+lama relevan → memori/batin via adapter existing → dedupe lintas
+sumber → anggaran model-aware → kompresi struktural → rakitan
+cache-friendly (stabil di depan, dinamis di belakang).
+
+- "lanjutkan skema billing kemarin" mengangkat riwayat lama yang
+  relevan, bukan 40 pesan mentah.
+- Observasi tool raksasa dikompaksi; raw tetap diarsipkan untuk audit.
+- Required-context dijamin selamat (benchmark recall 1.00) dengan
+  reduksi token input −85% pada dataset 62 kasus.
+
+Detail + benchmark: **[docs/CONTEXT-INTELLIGENCE.md](docs/CONTEXT-INTELLIGENCE.md)**.
+Jalankan: `node scripts/benchmark-context-intelligence.js`.
 
 ---
 
@@ -346,6 +397,8 @@ src/
                        + registry WhatsApp/Telegram + konteks permintaan
   voice/               Voice Runtime — always-on assistant (wake word, VAD,
                        state machine, provider mic/speaker/STT/TTS)
+  companion/           device tertaut — pairing + registry device yang memakai
+                       tools/skill Aether dari device lain (LAN/Bluetooth PAN)
   plugins/             plugin bawaan + aetherSkills (50+ skill)
   memory/              skema, store, recall, embedding, dokumen
   cli/                 CLI terminal (tema, perintah, klien)
@@ -375,9 +428,7 @@ configs/               kredensial, setelan, keadaan batin (mind.json),
 - **Google AI `404`** → model usang; Aether otomatis pindah ke model kerja.
   Pilih model bertanda ✓/free, atau tekan **Verifikasi**.
 - **`429` kuota** → kuota harian provider habis; ganti model/provider atau pakai
-  **AI Lokal (Ollama)**.
-- **OpenClaw/Hermes skill gagal** → pastikan kedua agent berjalan & terkonfigurasi
-  di `configs/integrations.json`.
+  **AI Lokal (llama.cpp)**.
 
 ---
 

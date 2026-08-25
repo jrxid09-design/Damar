@@ -7,7 +7,7 @@ const sqlite3 = require("sqlite3");
  * Penyimpanan sesi percakapan lintas kanal — sumber kebenaran konteks
  * obrolan yang PERSISTEN (selamat dari restart daemon).
  *
- * Diadopsi dari pola "SQLite-first, no hidden state" milik OpenClaw:
+ * Prinsip "SQLite-first, no hidden state":
  * percakapan tak lagi disimpan di `Map` dalam memori (hilang saat
  * restart) melainkan di satu tabel SQLite dengan grammar kunci sesi
  * `channel:<kanal>:dm:<peer>` / `channel:<kanal>:group:<peer>`.
@@ -103,7 +103,7 @@ class SessionStore {
     }
 
     /**
-     * Grammar kunci sesi (terinspirasi SessionKey OpenClaw):
+     * Grammar kunci sesi yang stabil dan dapat diurai ulang:
      *   channel:<kanal>:dm:<peer>
      *   channel:<kanal>:group:<peer>
      */

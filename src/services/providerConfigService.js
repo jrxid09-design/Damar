@@ -9,7 +9,7 @@ const JsonStore = require("../core/config/JsonStore");
  *   - API key bisa dari platform mana pun (OpenRouter, OpenAI,
  *     Google AI Studio, Groq, 9router, atau custom apa saja).
  *   - Key TERISI  → Aether jalan lewat platform itu.
- *   - Key KOSONG  → Aether otomatis pakai Ollama lokal.
+ *   - Key KOSONG  → Aether otomatis pakai otak lokal (llama.cpp).
  *
  * Hampir semua platform berbicara protokol OpenAI-compatible
  * (/chat/completions), jadi cukup satu jenis klien yang dibedakan
@@ -96,14 +96,8 @@ const PRESETS = {
         keyless: true,
         modelHint: "mis. gemini-2.5-pro / gemini-advanced (autentikasi via cookie di kontainer)"
     },
-    ollama: {
-        label: "Ollama (lokal)",
-        baseUrl: "http://localhost:11434",
-        kind: "ollama",
-        modelHint: "mis. llama3.2 (harus sudah di-pull)"
-    },
     // Otak lokal langsung: bobot GGUF dimuat di proses daemon
-    // (node-llama-cpp), tanpa server terpisah seperti Ollama.
+    // (node-llama-cpp), tanpa server terpisah.
     llamacpp: {
         label: "Model lokal langsung (llama.cpp)",
         baseUrl: "",
@@ -126,7 +120,7 @@ class ProviderConfigService {
         this.store = new JsonStore(CONFIG_PATH, {
             active: null,
             providers: {},
-            ollama: { baseUrl: null, model: null },
+            llamacpp: { model: null },
             updatedAt: null
         });
 
@@ -165,21 +159,17 @@ class ProviderConfigService {
             };
         }
 
-        seeded.ollama = {
-            baseUrl:
-                process.env.AETHER_OLLAMA_URL ??
-                process.env.OLLAMA_URL ??
-                null,
-            model: process.env.OLLAMA_MODEL ?? null
+        seeded.llamacpp = {
+            model: process.env.AETHER_MODEL_PATH ?? null
         };
 
         // Provider aktif: ikuti AI_PROVIDER bila diset, kalau tidak
-        // pilih otomatis (openrouter bila ada key, else ollama).
+        // pilih otomatis (openrouter bila ada key, else otak lokal).
         const envProvider = (process.env.AI_PROVIDER ?? "").toLowerCase();
 
         seeded.active =
             PRESETS[envProvider] ? envProvider
-            : (process.env.OPENROUTER_API_KEY ? "openrouter" : "ollama");
+            : (process.env.OPENROUTER_API_KEY ? "openrouter" : "llamacpp");
 
         this.store.write(seeded);
 
@@ -187,26 +177,14 @@ class ProviderConfigService {
 
     /**
      * Resolusi provider yang BENAR-BENAR dipakai sekarang.
-     * Inilah aturan "key kosong → Ollama".
+     * Inilah aturan "key kosong → otak lokal (llama.cpp)".
      */
     resolveActive() {
 
         const config = this.read();
 
-        const activeId = config.active ?? "ollama";
-        const preset = PRESETS[activeId] ?? PRESETS.ollama;
-
-        const ollama = {
-            id: "ollama",
-            kind: "ollama",
-            label: PRESETS.ollama.label,
-            baseUrl: config.ollama?.baseUrl || PRESETS.ollama.baseUrl,
-            model: config.ollama?.model || "llama3.2"
-        };
-
-        if (preset.kind === "ollama") {
-            return ollama;
-        }
+        const activeId = config.active ?? "llamacpp";
+        const preset = PRESETS[activeId] ?? PRESETS.llamacpp;
 
         // Otak lokal langsung (llama.cpp): model = nama berkas GGUF.
         if (preset.kind === "llamacpp") {
@@ -238,9 +216,19 @@ class ProviderConfigService {
             };
         }
 
-        // Key kosong → jatuh ke Ollama lokal (sesuai permintaan).
+        // Key kosong → jatuh ke otak lokal (sesuai permintaan).
         if (!p.apiKey) {
-            return { ...ollama, fellBackFrom: activeId };
+            const model =
+                process.env.AETHER_MODEL_PATH ||
+                config.llamacpp?.model ||
+                DEFAULT_LOCAL_MODEL;
+            return {
+                id: "llamacpp",
+                kind: "llamacpp",
+                label: PRESETS.llamacpp.label,
+                model,
+                fellBackFrom: activeId
+            };
         }
 
         return {
@@ -256,10 +244,6 @@ class ProviderConfigService {
 
     /** Simpan setelan satu provider. */
     setProvider(id, { apiKey, baseUrl, model } = {}) {
-
-        if (id === "ollama") {
-            return this.setOllama({ baseUrl, model });
-        }
 
         // Otak lokal: yang disimpan hanya nama berkas GGUF, tanpa key/URL.
         if (id === "llamacpp") {
@@ -293,21 +277,6 @@ class ProviderConfigService {
 
     }
 
-    setOllama({ baseUrl, model } = {}) {
-
-        const config = this.read();
-
-        this.store.write({
-            ollama: {
-                baseUrl: baseUrl !== undefined ? (baseUrl || null) : config.ollama?.baseUrl ?? null,
-                model: model !== undefined ? (model || null) : config.ollama?.model ?? null
-            }
-        });
-
-        return this.read();
-
-    }
-
     setActive(id) {
 
         if (!PRESETS[id]) {
@@ -329,10 +298,6 @@ class ProviderConfigService {
 
         for (const [id, preset] of Object.entries(PRESETS)) {
 
-            if (preset.kind === "ollama") {
-                continue;
-            }
-
             const p = config.providers?.[id] ?? {};
 
             providers[id] = {
@@ -350,7 +315,7 @@ class ProviderConfigService {
         const resolved = this.resolveActive();
 
         return {
-            active: config.active ?? "ollama",
+            active: config.active ?? "llamacpp",
             resolved: {
                 id: resolved.id,
                 kind: resolved.kind,
@@ -358,13 +323,7 @@ class ProviderConfigService {
                 model: resolved.model,
                 fellBackFrom: resolved.fellBackFrom ?? null
             },
-            providers,
-            ollama: {
-                label: PRESETS.ollama.label,
-                baseUrl: config.ollama?.baseUrl || PRESETS.ollama.baseUrl,
-                model: config.ollama?.model || null,
-                modelHint: PRESETS.ollama.modelHint
-            }
+            providers
         };
 
     }

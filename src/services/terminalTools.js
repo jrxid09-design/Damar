@@ -41,7 +41,7 @@ function terminalTools() {
             parameters: {
                 type: "object",
                 properties: {
-                    purpose: { type: "string", description: "Kunci stabil terminal, mis. 'hermes','docker','build','python'." },
+                    purpose: { type: "string", description: "Kunci stabil terminal, mis. 'docker','build','python'." },
                     command: { type: "string", description: "Perintah yang dijalankan." },
                     expect: { type: "string", description: "Regex output yang ditunggu (opsional)." },
                     shell: { type: "string", description: "powershell|cmd|wsl|gitbash|bash (opsional)." },
@@ -61,7 +61,7 @@ function terminalTools() {
             description:
                 "Mulai ulang layanan di terminalnya: cari terminal by `purpose`, kirim Ctrl+C, " +
                 "lalu jalankan `command` lagi dan tunggu siap (`expect`). Buat baru bila belum " +
-                "ada. Contoh: purpose='hermes', command='hermes serve', expect='listening'.",
+                "ada. Contoh: purpose='build', command='npm run build', expect='compiled'.",
             parameters: {
                 type: "object",
                 properties: {

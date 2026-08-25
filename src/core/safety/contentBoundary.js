@@ -47,9 +47,23 @@ const LABELS = {
     message: "PESAN MASUK — dari pihak ketiga, bukan pemilik"
 };
 
-/** Nonce baru tiap pembungkusan; tidak dapat ditebak dari luar. */
-function nonce() {
-    return crypto.randomBytes(6).toString("hex");
+/**
+ * Id blok: hash konten — DETERMINISTIK.
+ *
+ * Dulu nonce acak per pembungkusan. Akibatnya dua giliran dengan
+ * konten identik menghasilkan prompt berbeda byte-per-byte: prefix
+ * cache inferensi lokal selalu batal dan pengujian determinisme tak
+ * mungkin. Keamanan batas TIDAK bergantung pada kerahasiaan id —
+ * ia bergantung pada neutralize(): konten di dalam blok tidak bisa
+ * memalsukan penanda penutup karena SEMUA pola [[AETHER…]] dari
+ * konten dinetralkan lebih dulu.
+ */
+function stableId(content) {
+    return crypto
+        .createHash("sha1")
+        .update(String(content ?? ""))
+        .digest("hex")
+        .slice(0, 12);
 }
 
 /**
@@ -88,7 +102,7 @@ function neutralize(text) {
  */
 function wrap(kind, content, meta = {}) {
 
-    const id = nonce();
+    const id = stableId(content);
     const label = LABELS[kind] ?? LABELS.document;
 
     const origin = meta.source
@@ -136,8 +150,6 @@ const EXTERNAL_OUTPUT = new Map([
     ["http.patch", "web"],
     ["http.download", "web"],
     ["filesystem.readFile", "file"],
-    ["aetherSkills.hermes_research", "web"],
-    ["aetherSkills.openclaw_web", "web"],
     ["youtube_trending.fetchTrending", "web"],
     ["weather.currentWeather", "web"],
     ["scan-screen.scanScreen", "document"],

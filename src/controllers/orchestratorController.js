@@ -47,11 +47,13 @@ class OrchestratorController {
 
         try {
 
+            // N2: identitas terautentikasi pemohon menjadi identitas
+            // delegasi — orkestrasi tidak boleh melebar ke 'system'.
             await orchestrator.run(String(request), (event) => {
                 if (!aborted) {
                     send(event.type, event);
                 }
-            });
+            }, { exec: req.authIdentity ?? null });
 
             if (!aborted) {
                 send("done", { ok: true });

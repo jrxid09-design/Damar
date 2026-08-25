@@ -40,7 +40,7 @@ class MemoryService {
         this.started = true;
 
         // Embedding diisi di latar belakang: memori yang masuk saat
-        // Ollama mati tetap tercatat, vektornya menyusul.
+        // Endpoint embedding mati tetap tercatat, vektornya menyusul.
         this.backfillTimer = setInterval(() => {
 
             EmbeddingService.backfill().catch(error => {
@@ -132,7 +132,7 @@ class MemoryService {
             await MemoryStore.supersede(supersedes, memory.id);
         }
 
-        // Coba embed langsung; kalau Ollama mati, backfill yang urus.
+        // Coba embed langsung; kalau endpoint mati, backfill yang urus.
         if (!memory.reinforced) {
             await EmbeddingService.embedMemory(memory).catch(() => false);
         }

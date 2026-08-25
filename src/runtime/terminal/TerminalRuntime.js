@@ -15,7 +15,7 @@ const telemetry = require("../../services/telemetryService");
  * menyusul tanpa mengubah manajer ini).
  *
  * Klasifikasi terminal:
- *   SYSTEM  — runtime inti (Hermes/OpenClaw/Ollama/Docker): tak bisa
+ *   SYSTEM  — runtime inti (Docker/dll): tak bisa
  *             ditutup tanpa force, boleh auto-restart, nama tetap.
  *   PROJECT — terkait proyek/tugas; nama tetap.
  *   USER    — dibuka pengguna; bisa rename & ditutup bebas.

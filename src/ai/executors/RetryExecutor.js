@@ -82,7 +82,15 @@ class RetryExecutor {
             "must be a string",
             "is required",
             "cannot be empty",
-            "maximum tool iterations"
+            "maximum tool iterations",
+            // Kegagalan tool terstruktur (Phase 6) tidak layak dicoba
+            // ulang di tingkat model: pembatalan, penolakan kebijakan,
+            // dan langit-langit giliran bukan salah provider.
+            "safety stop",
+            "dibatalkan",
+            "max_tool_calls",
+            "max_same_error",
+            "turn_wallclock"
         ];
 
         return !permanent.some(token => message.includes(token));

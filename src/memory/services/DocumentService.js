@@ -15,7 +15,7 @@ const telemetry = require("../../services/telemetryService");
  * Memasukkan dokumen ke dalam memori.
  *
  * Alurnya: ekstrak teks -> pecah jadi chunk -> simpan -> embed.
- * Embedding boleh gagal (Ollama mati) tanpa membatalkan ingest;
+ * Embedding boleh gagal (endpoint mati) tanpa membatalkan ingest;
  * dokumen tetap bisa dicari lewat kata kunci dan vektornya
  * menyusul lewat backfill.
  */
@@ -138,7 +138,7 @@ class DocumentService {
         );
 
         if (!vectors) {
-            // Ollama tak tersedia — backfill yang akan mengisinya.
+            // Endpoint embedding tak tersedia — backfill yang akan mengisinya.
             return 0;
         }
 

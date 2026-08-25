@@ -2,7 +2,7 @@ const agentHub = require("./agentHub");
 const telemetry = require("./telemetryService");
 
 /**
- * Orkestrator multi-agent (gaya Hermes-agent).
+ * Orkestrator multi-agent.
  *
  * Permintaan kompleks tidak dijawab satu tembakan, melainkan:
  *   1. RENCANA  — Aether-LLM memecah tugas jadi langkah, tiap
@@ -16,7 +16,7 @@ const telemetry = require("./telemetryService");
  */
 class Orchestrator {
 
-    async plan(request, agents) {
+    async plan(request, agents, { exec = null } = {}) {
 
         const aiRuntime = require("./aiRuntimeService");
 
@@ -30,8 +30,6 @@ class Orchestrator {
             `Agent tersedia:\n${roster}\n\n` +
             "Aturan:\n" +
             "- Gunakan agent 'aether' untuk berpikir/menulis/menghitung/memori.\n" +
-            "- Gunakan 'openclaw' HANYA untuk aksi di aplikasi/desktop.\n" +
-            "- Gunakan 'hermes' untuk tugas agentik yang lebih cocok didelegasikan.\n" +
             "- Anak buah Aether: vanta (riset/analisis), forge (coding), " +
             "nexus (sistem/infra), sera (vision), echo (suara), cipher (keamanan), " +
             "atlas (otomatisasi), mira (memori), pulse (monitoring), lumen (antarmuka).\n" +
@@ -40,8 +38,17 @@ class Orchestrator {
             '{"goal":"...","steps":[{"id":"s1","agent":"aether","task":"...","dependsOn":[]}]}\n\n' +
             `Permintaan pengguna: ${request}`;
 
+        // N2 Round-2 + M-1: perencana memakai peran delegator. Identitas
+        // hilang dari jalur model/eksternal = 'user' (least privilege);
+        // 'system' hanya lewat grant internal eksplisit.
+        // Restriction delegasi ikut via toCapabilitySet — malformed
+        // fail-closed, string/Set menyempit; tidak pernah dilucuti.
+        const A = require("../ai/tools/Authorization");
+        const planSet = A.toCapabilitySet(exec?.capabilitySet);
         const response = await aiRuntime.chat({
-            messages: [{ role: "user", content: prompt }]
+            messages: [{ role: "user", content: prompt }],
+            role: agentHub.delegatedRoleOf(exec),
+            ...(planSet ? { capabilitySet: planSet } : {})
         });
 
         return this.parsePlan(response.content, request);
@@ -110,10 +117,16 @@ class Orchestrator {
 
     /**
      * Jalankan orkestrasi penuh.
+     *
+     * N2: `exec` = identitas eksekusi pemohon. Seluruh delegasi
+     * (perencanaan + tiap langkah worker) mewarisi otoritas ini —
+     * user TIDAK bisa mendapat privilege 'system' lewat delegasi.
+     *
      * @param {string} request
      * @param {(event:object)=>void} [onEvent]
+     * @param {{exec?:object}} [opts] exec = identitas delegator
      */
-    async run(request, onEvent = () => {}) {
+    async run(request, onEvent = () => {}, { exec = null } = {}) {
 
         const emit = (event) => {
             onEvent(event);
@@ -127,7 +140,7 @@ class Orchestrator {
         let plan;
 
         try {
-            plan = await this.plan(request, agents);
+            plan = await this.plan(request, agents, { exec });
         }
         catch (error) {
             // Perencanaan gagal (mis. model tak tersedia) → langsung
@@ -157,7 +170,7 @@ class Orchestrator {
 
             const task = context ? `${step.task}\n\n${context}` : step.task;
 
-            const result = await agentHub.run(step.agent, task);
+            const result = await agentHub.run(step.agent, task, { exec });
 
             outputs[step.id] = result.ok
                 ? result.output
@@ -182,7 +195,7 @@ class Orchestrator {
             final = results[0].output;
         }
         else {
-            final = await this.synthesize(request, results);
+            final = await this.synthesize(request, results, { exec });
         }
 
         emit({ type: "final", final, steps: results });
@@ -191,7 +204,9 @@ class Orchestrator {
 
     }
 
-    async synthesize(request, results) {
+    // A-FINAL: giliran sintesis mewarisi identitas delegator —
+    // restriction (capabilitySet) ikut, bukan hop pelucutan.
+    async synthesize(request, results, { exec = null } = {}) {
 
         const aiRuntime = require("./aiRuntimeService");
 
@@ -207,8 +222,13 @@ class Orchestrator {
             `Hasil:\n${transcript}`;
 
         try {
+            const agentHub = require("./agentHub");
+            const A = require("../ai/tools/Authorization");
+            const synthSet = A.toCapabilitySet(exec?.capabilitySet);
             const response = await aiRuntime.chat({
-                messages: [{ role: "user", content: prompt }]
+                messages: [{ role: "user", content: prompt }],
+                role: agentHub.delegatedRoleOf(exec),
+                ...(synthSet ? { capabilitySet: synthSet } : {})
             });
             return response.content ?? transcript;
         }

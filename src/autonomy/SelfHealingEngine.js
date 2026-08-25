@@ -45,12 +45,47 @@ class SelfHealingEngine {
     /**
      * Pulihkan eksekusi tool yang gagal.
      *
-     * @param {object} ctx { tool, args, error, goalId?, missionCtx?, requirement? }
+     * N2-FINAL — INVARIAN OTORITAS:
+     *   - `ctx.exec` = identitas inisiator yang sampai ke pemulihan
+     *     (transitif dari GoalEngine dsb.) → DIWARISI; pemulihan tidak
+     *     pernah melebihinya.
+     *   - `ctx.internal === true` HANYA boleh diset batas runtime
+     *     otonom positif-teridentifikasi (watchdog/pulse/dream timer)
+     *     yang memanggil metode ini langsung — parameter fungsi
+     *     in-process, tak bisa berasal dari arg model/tool/HTTP.
+     *   - Grant 'system' dibuat HANYA oleh titik kanonik
+     *     Authorization.resolveDelegator — bukan di sini.
+     *
+     * @param {object} ctx { tool, args, error, goalId?, exec?, internal?, requirement? }
      * @returns strategi yang dijalankan + hasil akhir
      */
     async recover(ctx) {
 
-        const { tool, args = {}, error, goalId = null, action = null } = ctx;
+        const { tool, args = {}, error, goalId = null, action = null,
+                exec = null, internal = false, capabilitySet = null } = ctx;
+
+        const { resolveDelegator } = require("../ai/tools/Authorization");
+        let delegator = resolveDelegator(exec ?? null, internal === true, `heal:${goalId ?? "?"}`);
+
+        // C-F/A-FINAL + M-1 CLOSURE: capability set terbatas menempel
+        // pada delegasi — dinormalisasi & dibekukan lewat Authorization.
+        // Dulu gerbangnya Array.isArray + length>0: bentuk non-array
+        // LENYAP (fail-open M-1), dan array kosong ("terkunci penuh")
+        // ikut terlucuti menjadi tanpa-batas. Kini toCapabilitySet:
+        // malformed → throw; hadir (termasuk kosong) → SELALU menempel.
+        if (capabilitySet !== undefined && capabilitySet !== null) {
+            const inherited = require("../ai/tools/Authorization")
+                .toCapabilitySet(capabilitySet);
+            if (delegator) {
+                delegator = { ...delegator, capabilitySet: inherited };
+            }
+            else if (!internal) {
+                // Restriction tanpa delegator & tanpa batas otonom:
+                // bawa sebagai pembawa restriction murni (least-privilege).
+                delegator = resolveDelegator(
+                    { capabilitySet: inherited }, false, `heal:${goalId ?? "?"}`);
+            }
+        }
 
         const klass = this.classify(error);
         const attempts = [];
@@ -66,8 +101,11 @@ class SelfHealingEngine {
             try {
                 const agentHub = require("../services/agentHub");
                 const agentId = tool.slice(6) || "aether";
+                // Delegasi mewarisi inisiator ATAU grant kanonik dari
+                // batas otonom — tidak pernah diciptakan di sini.
                 const res = await agentHub.run(agentId,
-                    `${action ?? args?.task ?? "tugas"}\n\nPENTING: pastikan eksekusi benar-benar berhasil dan laporkan HASIL NYATA (bukan niat).`);
+                    `${action ?? args?.task ?? "tugas"}\n\nPENTING: pastikan eksekusi benar-benar berhasil dan laporkan HASIL NYATA (bukan niat).`,
+                    { exec: delegator });
                 outcome = { ok: res.ok, result: res.output, error: res.error };
                 attempts.push({ strategy: "agent-retry", ok: res.ok });
             }
@@ -84,8 +122,11 @@ class SelfHealingEngine {
 
             case "transient": {
                 // Retry agresif dengan backoff lebih panjang.
+                // M3/CLOSURE: identitas delegasi (exec/capabilitySet)
+                // IKUT ke ToolBus — pemulihan bukan hop pelucutan.
                 outcome = await toolBus.execute({
-                    name: tool, args, timeoutMs: 90000, retries: 3, context: { goal: goalId }
+                    name: tool, args, timeoutMs: 90000, retries: 3,
+                    context: { goal: goalId, exec: delegator }
                 });
                 attempts.push({ strategy: "retry-aggressive", ok: outcome.ok });
                 break;
@@ -126,8 +167,12 @@ class SelfHealingEngine {
             case "unknown":
             default: {
                 // Substitusi ekstra (ToolBus sudah mencoba satu lapis).
+                // M3/CLOSURE: identitas delegasi ikut juga di jalur
+                // substitusi — tool pengganti tunduk pada restriction
+                // yang sama, bukan lebih luas.
                 outcome = await toolBus.execute({
-                    name: tool, args, timeoutMs: 60000, retries: 1, allowSubstitute: true
+                    name: tool, args, timeoutMs: 60000, retries: 1, allowSubstitute: true,
+                    context: { goal: goalId, exec: delegator }
                 });
                 attempts.push({ strategy: "substitute", ok: outcome.ok, via: outcome.via });
 

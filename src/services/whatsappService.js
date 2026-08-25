@@ -524,9 +524,8 @@ class WhatsAppService {
     }
 
     /** Teruskan ke otak Aether (lengkap memori & tool sesuai peran). */
-    async converse(jid, text, msg, userRole = "superadmin") {
+    async converse(jid, text, msg, userRole = "user") {
         const aiRuntime = require("./aiRuntimeService");
-        const roleService = require("./roleService");
         const { manager } = require("../channels");
 
         const kind = jid.endsWith("@g.us") ? "group" : "dm";
@@ -541,20 +540,18 @@ class WhatsAppService {
         this.sock?.sendPresenceUpdate?.("composing", jid).catch(() => {});
 
         try {
-            // Superadmin memakai jalur anggaran tool (ToolSelector via
-            // resolveTools) — sama dengan Telegram & Console. Admin/
-            // user tetap difilter peran. Lihat komentar di
-            // telegramService.converse untuk alasan lengkapnya.
-            let tools;
-            if (userRole === "superadmin") {
-                tools = undefined;
-            } else {
-                tools = roleService.toolsFor(userRole, aiRuntime.tools());
-            }
+            // SEMUA peran lewat pipeline seleksi yang sama
+            // (ai/tools/Pipeline.js) — kanal hanya menyumbang konteks.
+            // Dulu admin/user dapat daftar penuh hasil filter regex
+            // (ratusan schema tanpa anggaran); kini role menjadi pagar
+            // di dalam pipeline, bukan jalur terpisah. Lihat komentar
+            // di telegramService.converse untuk alasan lengkapnya.
             const response = await aiRuntime.chat({
                 messages: session.map(({ role, content }) => ({ role, content })),
-                tools,
-                channel: "whatsapp"
+                tools: undefined,
+                role: userRole,
+                channel: "whatsapp",
+                sessionId: `whatsapp:${jid}`
             });
             const answer = response.content?.trim() || "(tidak ada jawaban)";
             session.push({ role: "assistant", content: answer });
@@ -568,7 +565,7 @@ class WhatsAppService {
 
     /** Media masuk: gambar/stiker â†’ vision, dokumen teks â†’ baca,
      *  audio (voice note) â†’ STT, video â†’ thumbnail. */
-    async handleMedia(jid, msg, kind, caption, userRole = "superadmin") {
+    async handleMedia(jid, msg, kind, caption, userRole = "user") {
         this.currentChatId = jid;
         this.sock?.sendPresenceUpdate?.("composing", jid).catch(() => {});
 
@@ -663,7 +660,7 @@ class WhatsAppService {
         }
     }
 
-    async replyWithMemory(jid, caption, seen, jenis, msg, userRole = "superadmin") {
+    async replyWithMemory(jid, caption, seen, jenis, msg, userRole = "user") {
         if (caption) {
             return this.converse(jid, `[Aether melihat ${jenis}: ${seen}]\n\nPertanyaan: ${caption}`, msg, userRole);
         }

@@ -114,6 +114,11 @@ class TelemetryController {
      * Aliran realtime untuk Console: log baru, perubahan status
      * integrasi, dan event tool. Heartbeat berkala menjaga koneksi
      * tidak diputus proxy/OS saat sedang sepi.
+     *
+     * Replay: klien boleh mengirim `Last-Event-ID` (header SSE standar)
+     * atau `?since=<id>`; event yang terlewat dikirim ulang sebelum
+     * berlangganan aliran live. Ini menutup kelemahan lama — Console
+     * yang terlambat connect kehilangan event status.
      */
     events(req, res) {
 
@@ -124,18 +129,38 @@ class TelemetryController {
             "X-Accel-Buffering": "no"
         });
 
+        const since = Number(
+            req.headers["last-event-id"] ?? req.query.since ?? 0
+        ) || 0;
+
         const send = (event, data) => {
+            if (data?.id != null) {
+                res.write(`id: ${data.id}\n`);
+            }
             res.write(`event: ${event}\n`);
             res.write(`data: ${JSON.stringify(data)}\n\n`);
         };
 
         send("hello", {
             connectedAt: new Date().toISOString(),
-            backlog: telemetry.logs({ limit: 50 })
+            backlog: telemetry.logs({ limit: 50 }),
+            lastEventId: telemetry.sequence,
+            replay: since > 0 ? telemetry.events({ since }).length : 0
         });
 
+        // Kejar event yang terlewat sebelum live (id > since).
+        if (since > 0) {
+            for (const missed of telemetry.events({ since })) {
+                send("event", missed);
+            }
+        }
+
         const onLog = entry => send("log", entry);
-        const onEvent = event => send("event", event);
+        const onEvent = event => {
+            // Jangan kirim ulang event yang sudah direplay.
+            if (event.id <= since) return;
+            send("event", event);
+        };
 
         telemetry.on("log", onLog);
         telemetry.on("event", onEvent);

@@ -201,7 +201,8 @@ class LabController {
 
     async missionRun(req, res, next) {
         try {
-            const result = await lab.missions.run(req.params.id, { actor: req.body?.actor ?? "user" });
+            // N2 Round-3: inisiator HTTP mewarisi otoritasnya ke misi.
+            const result = await lab.missions.run(req.params.id, { actor: req.body?.actor ?? "user", exec: req.authIdentity ?? null });
             return response.success(res, "Misi selesai", result);
         }
         catch (error) {
@@ -343,7 +344,7 @@ class LabController {
 
     async missionResume(req, res, next) {
         try {
-            const result = await lab.missions.resume(req.params.id, req.body?.instruction ?? "", {});
+            const result = await lab.missions.resume(req.params.id, req.body?.instruction ?? "", { exec: req.authIdentity ?? null });
             return response.success(res, "Lanjutan misi", result);
         }
         catch (error) { next(error); }
@@ -451,7 +452,7 @@ class LabController {
                 objective: exp.objective ?? exp.hypothesis
             });
             await lab.missions.transition(mission.id, "QUEUED");
-            const runResult = await lab.missions.run(mission.id);
+            const runResult = await lab.missions.run(mission.id, { exec: req.authIdentity ?? null });
             exp = await lab.experiments.complete(req.params.id, {
                 conclusion: String(runResult?.final ?? "").slice(0, 2000),
                 metrics: { missionId: mission.id }

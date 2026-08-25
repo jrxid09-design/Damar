@@ -41,23 +41,109 @@ function tokensEqual(provided, expected) {
 }
 
 /**
- * Middleware penjaga token opsional. Bila AETHER_TOKEN kosong, API
- * dibiarkan terbuka (pengembangan); bila diset, wajib cocok.
+ * N1 — bukti lokalitas klien dari TRANSPORT, bukan dari klien.
+ *
+ * Header Host dikendalikan klien sepenuhnya; `Host: localhost` dari
+ * mesin lain TIDAK boleh dihitung lokal. Sumber kebenaran: alamat
+ * remote socket (req.ip Express / req.socket.remoteAddress).
+ * Fail-closed: tanpa alamat → dianggap TIDAK lokal.
  */
-function tokenGuard() {
+function isLocalRequest(req) {
+
+    // socket.remoteAddress lebih dipilih daripada req.ip: req.ip bisa
+    // berasal dari header X-Forwarded-For (bila trust proxy aktif) —
+    // kembali dikendalikan klien. Alamat socket tidak bisa dipalsukan.
+    const raw = req.socket?.remoteAddress ?? req.ip ?? "";
+
+    const ip = String(raw).replace(/^::ffff:/i, "").toLowerCase();
+
+    return ip === "::1" || ip === "127.0.0.1";
+
+}
+
+/**
+ * G-FINAL — PERAN EKSTERNAL DIKUNCI PADA ENUM EKSTERNAL.
+ *
+ * AETHER_AUTH_ROLE / AETHER_MCP_ROLE / AETHER_UNSAFE_DEV_ROLE adalah
+ * STRING LINGKUNGAN — tidak boleh bisa mencetak otoritas runtime
+ * "system" di permukaan token/MCP. Nilai apa pun di luar enum
+ * eksternal (termasuk "system", typo, kosong) jatuh ke fallback
+ * least-privilege. 'system' tetap otoritas INTERNAL runtime: satu-
+ * satunya penciptanya Authorization.resolveDelegator lewat batas
+ * otonom in-process (internal:true + symbol) — TIDAK ada override
+ * environment menuju system, disengaja maupun tidak.
+ */
+const EXTERNAL_ROLES = Object.freeze(["user", "admin", "superadmin"]);
+
+function clampExternalRole(value, fallback = "user") {
+    const role = String(value ?? "").toLowerCase().trim();
+    return EXTERNAL_ROLES.includes(role) ? role : fallback;
+}
+
+/**
+ * Middleware penjaga token — FAIL-CLOSED (temuan C2 Round-2).
+ *
+ * Dulu: AETHER_TOKEN kosong → API terbuka "untuk pengembangan" sambil
+ * bind 0.0.0.0 (server.js:29) dan controller memberi role superadmin —
+ * fail-open penuh di permukaan LAN.
+ *
+ * Sekarang (permukaan terlindungi):
+ *   1. AETHER_TOKEN kosong → 503 SERVICE LOCKED, BUKAN open;
+ *   2. satu-satunya pintu dev: AETHER_UNSAFE_DEV_OPEN_API="1"
+ *      (eksplisit, default OFF, tak mungkin aktif karena lupa config);
+ *      peran dev diikat localhost kecuali ditinggikan eksplisit;
+ *   3. token sah → req.authIdentity { role, source:'token' } —
+ *      otoritas selalu berprovenance, tidak pernah implisit-superadmin.
+ *
+ * `roleWhenAuthenticated` ditentukan permukaan pemanggil (Console =
+ * pemilik lokal dengan token; API eksternal default 'user').
+ */
+function tokenGuard({ roleWhenAuthenticated = "user", surface = "api" } = {}) {
+
+    // Permukaan pemanggil juga dikunci: param kode pun tak boleh
+    // minta peran di luar enum eksternal (mis. "system").
+    const authRole = clampExternalRole(roleWhenAuthenticated, "user");
 
     return (req, res, next) => {
 
+        if (req.method === "OPTIONS") return next();
+
         const token = process.env.AETHER_TOKEN;
 
+        // ---- 1. Token belum diset: KUNCI, jangan buka ----------------
         if (!token) {
+
+            const devOpen = process.env.AETHER_UNSAFE_DEV_OPEN_API === "1";
+
+            if (!devOpen) {
+                return response.error(
+                    res,
+                    "Layanan terkunci: AETHER_TOKEN belum diset. " +
+                    "Set token, atau setel AETHER_UNSAFE_DEV_OPEN_API=1 " +
+                    "secara sadar untuk mode pengembangan berisiko.",
+                    503
+                );
+            }
+
+            // Mode dev eksplisit: identitas terbatas; superadmin dev
+            // hanya untuk klien yang BENAR-BENAR lokal (alamat socket,
+            // N1 — bukan header Host yang bisa dipalsukan).
+            const isLocal = isLocalRequest(req);
+
+            const devRole = isLocal
+                ? clampExternalRole(process.env.AETHER_UNSAFE_DEV_ROLE, "user")
+                : "user";
+
+            req.authIdentity = {
+                role: devRole,
+                source: `dev-open:${surface}`,
+                sessionId: `${surface}:dev:${req.ip ?? "local"}`
+            };
+
             return next();
         }
 
-        if (req.method === "OPTIONS") {
-            return next();
-        }
-
+        // ---- 2. Token diset: wajib cocok (waktu-konstan) -------------
         if (!tokensEqual(extractToken(req), token)) {
 
             return response.error(
@@ -68,10 +154,21 @@ function tokenGuard() {
 
         }
 
+        // ---- 3. Terautentikasi: identitas berprovenance ---------------
+        // G-FINAL: env tidak bisa mencetak "system" di sini — clamp.
+        req.authIdentity = {
+            role: clampExternalRole(process.env.AETHER_AUTH_ROLE, authRole),
+            source: `token:${surface}`,
+            sessionId: `${surface}:${req.ip ?? "unknown"}`
+        };
+
         next();
 
     };
 
 }
 
-module.exports = { tokensEqual, extractToken, tokenGuard };
+module.exports = {
+    tokensEqual, extractToken, tokenGuard, isLocalRequest,
+    EXTERNAL_ROLES, clampExternalRole
+};

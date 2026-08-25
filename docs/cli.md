@@ -59,7 +59,7 @@ Ketik apa saja untuk ngobrol. Baris berawalan `/` adalah perintah:
 | `/status` | Ringkasan kesiapan (CPU/RAM, provider, integrasi, memori) |
 | `/models` | Daftar model provider aktif |
 | `/model <id>` | Set model default |
-| `/provider <id>` | Ganti provider (ollama / openrouter) |
+| `/provider <id>` | Ganti provider (llamacpp / openrouter / groq / dst) |
 | `/recall <kata>` | Cari memori jangka panjang |
 | `/remember <teks>` | Simpan memori baru |
 | `/forget <id>` | Hapus satu memori (lihat id dari `/recall`) |

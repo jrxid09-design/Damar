@@ -56,7 +56,7 @@ function hash(value) {
  * Klitik dan akhiran umum bahasa Indonesia.
  *
  * "motornya" harus bisa menemukan "motor", dan pencarian vektor
- * tidak selalu tersedia (Ollama bisa mati), jadi pemenggalan
+ * tidak selalu tersedia (embedding opsional), jadi pemenggalan
  * ringan ini menutup celah paling sering terjadi tanpa perlu
  * stemmer penuh.
  */

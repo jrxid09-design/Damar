@@ -72,6 +72,18 @@ function bootSubsystems() {
         telemetry.warn(`Kanal gagal disiapkan: ${error.message}`);
     }
 
+    // Otonomi: pulse (kesadaran diri), watchdog (penyembuh diri),
+    // dream (konsolidasi mimpi jam 02:00). Semua gagal-anggun.
+    try { require("./autonomy/pulse").start(); } catch (e) {
+        telemetry.warn(`Pulse gagal: ${e.message}`);
+    }
+    try { require("./autonomy/watchdog").start(); } catch (e) {
+        telemetry.warn(`Watchdog gagal: ${e.message}`);
+    }
+    try { require("./autonomy/dream").start(); } catch (e) {
+        telemetry.warn(`Dream gagal: ${e.message}`);
+    }
+
     // Voice runtime (always-on assistant). Nonaktif secara default; bila
     // diaktifkan dan gagal, daemon TETAP hidup — voice isolasi total.
     try {
@@ -132,7 +144,19 @@ function bootSubsystems() {
     try { require("./services/cryptoBotService").start(); }
     catch (error) { telemetry.warn(`[crypto] bot gagal start: ${error.message}`); }
 
-    // Auto-nyalakan runtime inti (Hermes/OpenClaw/Ollama) agar dashboard tak
+    // MQTT rumah: sambung broker bila sudah dikonfigurasi (discovery HA
+    // + state realtime perangkat). Tanpa config = tetap diam.
+    try {
+        const mqttHome = require("./services/mqttService");
+        if (mqttHome.configured) {
+            mqttHome.connect().then(ok => {
+                if (!ok) telemetry.warn(`[home] MQTT gagal: ${mqttHome.lastError ?? "tidak diketahui"}`);
+            });
+        }
+    }
+    catch (error) { telemetry.warn(`[home] MQTT init gagal: ${error.message}`); }
+
+    // Auto-nyalakan runtime inti agar dashboard tak
     // "DEGRADED" tiap Aether dibuka. Ditunda agar terminal & health siap;
     // melewati yang sudah online. Bisa dimatikan di configs/runtimes.json.
     setTimeout(() => {
@@ -321,10 +345,15 @@ const shutdown = (signal) => {
     try { require("./services/telegramService").stop(); } catch { /* abaikan */ }
     try { require("./channels").manager.stop(); } catch { /* abaikan */ }
     try { require("./voice").runtime.stop(); } catch { /* abaikan */ }
+    try { require("./autonomy/pulse").stop(); } catch { /* abaikan */ }
+    try { require("./autonomy/watchdog").stop(); } catch { /* abaikan */ }
+    try { require("./autonomy/dream").stop(); } catch { /* abaikan */ }
     automation.stop();
     terminals.stop();
     try { require("./services/cryptoMonitorService").stop(); } catch { /* abaikan */ }
     try { require("./services/cryptoBotService").stop(); } catch { /* abaikan */ }
+    try { require("./services/homeService").stopWatcher(); } catch { /* abaikan */ }
+    try { require("./services/mqttService").disconnect(); } catch { /* abaikan */ }
     try { require("./consciousness").stop(); } catch { /* abaikan */ }
 
     if (server) {
@@ -352,7 +381,7 @@ process.on("unhandledRejection", (reason) => {
     telemetry.error(`Unhandled rejection: ${reason?.message ?? reason}`);
 });
 
-// Gangguan socket pada sambungan yang hidup lama (WhatsApp, Ollama
+// Gangguan socket pada sambungan yang hidup lama (WhatsApp, MCP,
 // keep-alive, integrasi) muncul sebagai error tanpa pemilik: tidak
 // ada state aplikasi yang rusak, hanya koneksi yang putus dan akan
 // tersambung lagi sendiri. Aether harus tetap hidup untuk itu.

@@ -7,32 +7,31 @@ const DocumentStore = require("../stores/DocumentStore");
 const telemetry = require("../../services/telemetryService");
 
 /**
- * Menghasilkan embedding lewat Ollama.
+ * Menghasilkan embedding lewat endpoint kompatibel (POST {model, input}
+ * → {embeddings}) — diatur via AETHER_EMBED_URL + AETHER_EMBED_MODEL.
  *
- * Titik desain terpenting: Ollama SERING tidak tersedia — saat
- * pengembangan di laptop, saat PC rumah reboot, saat model belum
- * diunduh. Karena itu embedding diperlakukan sebagai peningkatan
+ * Titik desain terpenting: endpoint ini OPSIONAL dan sering tidak
+ * tersedia. Karena itu embedding diperlakukan sebagai peningkatan
  * kualitas, bukan syarat: memori tetap tersimpan dan tetap bisa
  * dicari lewat kata kunci, lalu vektornya diisi belakangan begitu
- * Ollama hidup kembali.
+ * endpoint hidup. Tanpa konfigurasi, layanan ini netral (status
+ * "tidak dikonfigurasi") dan pencarian memori jalan tanpa vektor.
  */
 class EmbeddingService {
 
     constructor() {
 
         this.model =
-            process.env.AETHER_EMBED_MODEL ?? "nomic-embed-text";
+            process.env.AETHER_EMBED_MODEL ?? null;
 
         this.baseUrl = (
-            process.env.AETHER_OLLAMA_URL ??
-            process.env.OLLAMA_URL ??
-            "http://localhost:11434"
-        ).replace(/\/+$/, "");
+            process.env.AETHER_EMBED_URL ?? ""
+        ).replace(/\/+$/, "") || null;
 
         /** Status terakhir, supaya UI bisa menjelaskan kenapa kosong. */
-        this.available = null;
+        this.available = this.baseUrl ? null : false;
 
-        this.lastError = null;
+        this.lastError = this.baseUrl ? null : "endpoint embedding belum dikonfigurasi";
 
         this.lastCheckedAt = null;
 
@@ -43,6 +42,10 @@ class EmbeddingService {
 
         this.backfilling = false;
 
+    }
+
+    get configured() {
+        return Boolean(this.baseUrl && this.model);
     }
 
     setModel(model) {
@@ -64,6 +67,12 @@ class EmbeddingService {
      */
     async embed(input) {
 
+        if (!this.configured) {
+            this.available = false;
+            this.lastError = "endpoint embedding belum dikonfigurasi";
+            return null;
+        }
+
         const list = Array.isArray(input) ? input : [input];
 
         const cleaned = list.map(text => String(text ?? "").trim()).filter(Boolean);
@@ -73,7 +82,7 @@ class EmbeddingService {
         }
 
         const response = await HttpClient.post(
-            `${this.baseUrl}/api/embed`,
+            `${this.baseUrl}/embeddings`,
             {
                 body: { model: this.model, input: cleaned },
                 timeout: 60000
@@ -96,7 +105,12 @@ class EmbeddingService {
 
         }
 
-        const vectors = response.data?.embeddings;
+        // Bentuk OpenAI-compatible: { data: [{ embedding: [...] }] }.
+        // Bentuk { embeddings: [[...]] } tetap diterima untuk kompatibilitas.
+        const vectors = response.data?.embeddings
+            ?? (Array.isArray(response.data?.data)
+                ? response.data.data.map(d => d.embedding)
+                : null);
 
         if (!Array.isArray(vectors) || vectors.length === 0) {
 
@@ -163,7 +177,7 @@ class EmbeddingService {
      * Isi embedding yang tertinggal.
      *
      * Dipanggil berkala oleh MemoryService; sekali jalan dibatasi
-     * agar tidak memonopoli GPU saat Ollama juga melayani chat.
+     * agar tidak memonopoli CPU saat inferensi chat berjalan.
      */
     async backfill({ batch = 32, maxBatches = 4 } = {}) {
 
@@ -192,7 +206,7 @@ class EmbeddingService {
                 );
 
                 if (!vectors) {
-                    // Ollama mati di tengah jalan: hentikan, sisanya
+                    // Endpoint mati di tengah jalan: hentikan, sisanya
                     // akan terambil pada percobaan berikutnya.
                     return {
                         memories,

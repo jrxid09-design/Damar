@@ -2,6 +2,7 @@ const path = require("node:path");
 
 const telemetry = require("./telemetryService");
 const JsonStore = require("../core/config/JsonStore");
+const mqtt = require("./mqttService");
 
 /**
  * Home automation lewat Home Assistant.
@@ -30,6 +31,12 @@ class HomeService {
 
     constructor() {
         this.lastError = null;
+        // Watcher polling ringan untuk pembaruan realtime Console:
+        // membandingkan snapshot state, lalu menerbitkan event SSE
+        // `home:update` HANYA untuk entitas yang berubah.
+        this.watchTimer = null;
+        this.watchSnapshot = new Map();   // entity_id -> {state, ts}
+        this.lastWatchError = null;
     }
 
     cfg() {
@@ -157,12 +164,87 @@ class HomeService {
             domain: s.entity_id.split(".")[0],
             name: s.attributes?.friendly_name ?? s.entity_id,
             state: s.state,
-            attributes: s.attributes ?? {}
+            attributes: s.attributes ?? {},
+            source: "hass"
         }));
+
+        // Entitas MQTT murni (tak dikenal HA) ikut tampil. Duplikat
+        // dengan HA dihindari lewat key yang sama — entri HA menang
+        // karena biasanya lebih kaya atributnya.
+        const seen = new Set(entities.map(e => e.id));
+        for (const e of mqtt.entities()) {
+            if (!seen.has(e.key)) entities.push(e);
+        }
+
+        // Watcher menyala sejak data pertama berhasil diambil; ia yang
+        // membuat dashboard Console hidup tanpa tombol muat-ulang.
+        this.startWatcher();
 
         return domain
             ? entities.filter(e => e.domain === domain)
             : entities;
+
+    }
+
+    // ---- Watcher realtime (SSE `home:update`) -----------------------
+
+    startWatcher() {
+        if (this.watchTimer || !this.configured) return;
+        this.watchTimer = setInterval(() => {
+            this.watchTick().catch(() => {});
+        }, 8000);
+        if (typeof this.watchTimer.unref === "function") this.watchTimer.unref();
+    }
+
+    stopWatcher() {
+        if (this.watchTimer) clearInterval(this.watchTimer);
+        this.watchTimer = null;
+        this.watchSnapshot.clear();
+    }
+
+    async watchTick() {
+
+        try {
+            const states = await this.api("/states", { timeout: 7000 });
+            if (!Array.isArray(states)) return;
+
+            const fresh = new Map();
+            const changed = [];
+
+            for (const s of states) {
+                fresh.set(s.entity_id, { state: s.state, attrs: s.attributes ?? {} });
+                const prev = this.watchSnapshot.get(s.entity_id);
+                if (prev && prev.state !== s.state) {
+                    changed.push({
+                        id: s.entity_id,
+                        domain: s.entity_id.split(".")[0],
+                        state: s.state,
+                        attributes: s.attributes ?? {}
+                    });
+                }
+            }
+
+            // Entitas hilang dari HA (dihapus/di-rename) → ikut laporkan.
+            for (const [id, prev] of this.watchSnapshot) {
+                if (!fresh.has(id)) {
+                    changed.push({ id, state: "removed" });
+                }
+            }
+
+            this.watchSnapshot = fresh;
+            this.lastWatchError = null;
+
+            if (changed.length > 0) {
+                telemetry.publish("home:update", { entities: changed.slice(0, 50) });
+            }
+
+        }
+        catch (error) {
+            // Offline sesaat tidak menghentikan watcher; HA docker sering
+            // restart. Bila memang sudah tak dikonfigurasi, berhenti.
+            this.lastWatchError = error.message;
+            if (!this.configured) this.stopWatcher();
+        }
 
     }
 
@@ -193,9 +275,19 @@ class HomeService {
 
     /**
      * Kendali tingkat tinggi berbasis entity_id.
-     * action: on | off | toggle | brightness | temperature
+     * action: on | off | toggle | brightness | temperature | open | close | stop
+     * Entitas berprefix mqtt: dialihkan langsung ke command topic broker.
      */
     async control(entityId, action, value) {
+
+        // Perangkat MQTT murni - tanpa menyentuh HA.
+        if (String(entityId).startsWith("mqtt:")) {
+            const sent = await mqtt.control(entityId.slice(5), action, value);
+            if (!sent) {
+                throw new Error("Entitas MQTT tidak dikenal atau broker belum tersambung.");
+            }
+            return { via: "mqtt" };
+        }
 
         const domain = String(entityId).split(".")[0];
 
@@ -219,6 +311,21 @@ class HomeService {
                 "toggle",
                 { entity_id: entityId }
             );
+        }
+
+        // Tirai/pintu: buka-tutup = turn_on/turn_off lintas domain;
+        // stop butuh layanan khusus domain cover.
+        if (action === "open" || action === "close") {
+            const service = action === "open" ? "turn_on" : "turn_off";
+            return this.callService(
+                TOGGLEABLE.has(domain) ? domain : "homeassistant",
+                service,
+                { entity_id: entityId }
+            );
+        }
+
+        if (action === "stop" && domain === "cover") {
+            return this.callService("cover", "stop_cover", { entity_id: entityId });
         }
 
         if (action === "on" || action === "off") {

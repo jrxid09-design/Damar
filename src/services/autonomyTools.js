@@ -40,9 +40,17 @@ function autonomyTools() {
                 },
                 required: ["title"]
             },
-            execute: async ({ title, description, success_criteria, project_id }) => {
+            // N2 Round-3: identitas inisiator (dari ToolExecutor —
+            // BUKAN arg model) mewarisi ke seluruh loop otonom.
+            // goal_run TIDAK PERNAH menciptakan/meneruskan grant internal;
+            // field yang didestructure hanya schema parameters di atas,
+            // sehingga tidak ada jalur pemalsuan internalGrant via args.
+            execute: async ({ title, description, success_criteria, project_id }, ctx) => {
 
-                telemetry.publish("autonomy:goal_requested", { title });
+                telemetry.publish("autonomy:goal_requested", {
+                    title,
+                    initiatorRole: ctx?.exec?.role ?? "user"
+                });
 
                 const goal = await autonomy.goals.create({
                     title, description,
@@ -50,7 +58,7 @@ function autonomyTools() {
                     projectId: project_id ?? null
                 });
 
-                const result = await autonomy.goals.run(goal.id);
+                const result = await autonomy.goals.run(goal.id, { exec: ctx?.exec ?? null });
 
                 return {
                     ok: result.ok,
@@ -154,8 +162,13 @@ function autonomyTools() {
                 },
                 required: ["tool"]
             },
-            execute: async ({ tool, args = {}, timeout_ms, retries }) => {
+            // C1: identitas pemanggil diteruskan apa adanya (ctx.exec dari
+            // ToolExecutor). Wrapper TIDAK menciptakan otoritas — target
+            // aktual tetap diotorisasi dengan identitas asli, dan
+            // delegasi hanya bisa menyempitkan.
+            execute: async ({ tool, args = {}, timeout_ms, retries }, ctx = {}) => {
                 const r = await autonomy.toolBus.execute({
+                    context: { exec: ctx?.exec ?? null },
                     name: tool, args,
                     timeoutMs: timeout_ms ?? 60000,
                     retries: retries ?? 1

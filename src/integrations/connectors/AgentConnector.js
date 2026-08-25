@@ -43,7 +43,7 @@ class AgentConnector extends BaseConnector {
         /** Diisi setelah task pertama yang berhasil (auto-discovery). */
         this.resolvedChatPath = null;
 
-        /** Kandidat endpoint TASK — beda agent beda API (OpenClaw ≠ chat-LLM). */
+        /** Kandidat endpoint TASK — beda agent beda API. */
         this.chatCandidates = options.chatCandidates ?? [
             "/v1/chat/completions", "/api/chat", "/chat",
             "/api/run", "/run", "/api/task", "/api/execute", "/execute"
@@ -142,7 +142,7 @@ class AgentConnector extends BaseConnector {
 
     /**
      * Kirim tugas ke agent. Endpoint & bentuk body BERBEDA tiap agent:
-     * server chat-LLM pakai {messages}, sementara agent otomasi (OpenClaw)
+     * server chat-LLM pakai {messages}, sementara agent otomasi
      * biasanya pakai {instruction|prompt|task}. Karena itu:
      *   - path task: coba yang dikonfigurasi (paths.chat) dulu, lalu kandidat
      *     umum, dan INGAT yang berhasil (seperti health).

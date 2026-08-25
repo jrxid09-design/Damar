@@ -174,6 +174,137 @@ class AudioInput {
 
     }
 
+    /**
+     * Mulai stream level audio (RMS) dari mikrofon untuk deteksi real-time
+     * (mis. trigger tepuk tangan) — TANPA menyimpan berkas besar.
+     *
+     * ffmpeg/arecord menulis PCM mentah (s16le 16 kHz mono) ke stdout;
+     * kita baca per chunk, hitung RMS (0..1), lalu panggil onLevel(rms).
+     * Ini jalur standby yang ringan — tidak memanggil STT/LLM.
+     *
+     * @param {Function} onLevel dipanggil dengan nilai RMS 0..1 per chunk
+     * @returns {Promise<{stop: Function} | null>} null bila tak tersedia
+     */
+    async startLevelStream(onLevel) {
+
+        if (this.backend !== "cli") return null;
+
+        if (!this._recorder) {
+            await this.probe();
+        }
+
+        if (!this._recorder) return null;
+
+        if (typeof onLevel !== "function") return null;
+
+        const { spawn } = require("node:child_process");
+
+        const { args, cmd } = this._levelArgs();
+
+        const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+
+        this._child = child;
+
+        let carry = null; // 1 byte sisa antar-chunk (s16le = 2 byte/sampel)
+
+        const onData = (chunk) => {
+
+            // Gabungkan sisa chunk sebelumnya (maks 1 byte).
+            const buf = carry ? Buffer.concat([carry, chunk]) : chunk;
+
+            const n = buf.length - (buf.length % 2);
+
+            if (n <= 0) {
+                carry = buf.length % 2 ? buf.subarray(0, 1) : null;
+                return;
+            }
+
+            const rms = this._rms(buf.subarray(0, n));
+
+            carry = (buf.length - n) ? buf.subarray(n) : null;
+
+            try { onLevel(rms); }
+            catch { /* konsumen tidak boleh menjatuhkan stream */ }
+
+        };
+
+        child.stdout.on("data", onData);
+        child.once("error", () => { /* probe sudah memastikan; error di sini diam */ });
+        child.stdout.once("error", () => {});
+
+        return {
+            stop: () => {
+                try { child.kill("SIGKILL"); } catch { /* abaikan */ }
+                this._child = null;
+            }
+        };
+
+    }
+
+    /**
+     * Argumen untuk stream level: PCM s16le 16 kHz mono ke stdout.
+     * ffmpeg: -f s16le pipe:1 ; arecord: -t raw -f S16_LE stdout.
+     */
+    _levelArgs() {
+
+        if (this._recorder === "ffmpeg") {
+
+            const input = process.platform === "win32"
+                ? ["-f", "dshow", "-i", "audio=default"]
+                : ["-f", "alsa", "-i", "default"];
+
+            return {
+                cmd: "ffmpeg",
+                args: [
+                    ...input,
+                    "-ar", String(SAMPLE_RATE),
+                    "-ac", "1",
+                    "-f", "s16le",   // PCM mentah
+                    "pipe:1"
+                ]
+            };
+
+        }
+
+        // arecord: raw PCM ke stdout
+        return {
+            cmd: "arecord",
+            args: [
+                "-t", "raw",
+                "-f", "S16_LE",
+                "-r", String(SAMPLE_RATE),
+                "-c", "1"
+            ]
+        };
+
+    }
+
+    /**
+     * Hitung RMS 0..1 dari buffer PCM s16le (16-bit signed little-endian).
+     * Normalisasi terhadap amplitudo penuh (32768).
+     */
+    _rms(buf) {
+
+        const samples = buf.length / 2;
+
+        if (samples === 0) return 0;
+
+        let sum = 0;
+
+        for (let i = 0; i < buf.length; i += 2) {
+            const s = buf.readInt16LE(i);
+            sum += s * s;
+        }
+
+        const rms = Math.sqrt(sum / samples) / 32768;
+
+        // RMS mentah sering sangat kecil; tidak perlu penguatan di sini —
+        // threshold clap (default 0.6) mengukur ledakan relatif. Kembalikan
+        // nilai asli 0..1 agar konsumen punya kendali penuh.
+        return Math.min(1, Number(rms.toFixed(4)));
+
+    }
+
     status() {
         return { backend: this.backend, available: this.available, recorder: this._recorder };
     }

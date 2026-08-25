@@ -295,21 +295,29 @@ async function main() {
     // ---- 10. Dapat bekerja offline? ------------------------------
     await periksa("Dapat bekerja offline?", async () => {
 
-        const res = await fetch("http://localhost:11434/api/tags").catch(() => null);
-        const ollamaHidup = Boolean(res?.ok);
-        const models = ollamaHidup ? ((await res.json()).models ?? []).length : 0;
+        // Otak lokal kini in-process (node-llama-cpp): prasyaratnya
+        // berkas GGUF di models/, bukan server luar.
+        let models = 0;
+        try {
+            const fs = require("node:fs");
+            const pathMod = require("node:path");
+            models = fs.readdirSync(pathMod.join(__dirname, "..", "models"))
+                .filter(f => f.toLowerCase().endsWith(".gguf")).length;
+        }
+        catch { /* folder models/ tidak ada */ }
+        const modelLokalAda = models > 0;
 
         // Platform aktif hanya diketahui daemon yang berjalan.
         const cfg = await daemon("/ai/config");
-        const lokal = String(cfg?.resolved?.kind ?? "").includes("ollama");
+        const lokal = String(cfg?.resolved?.kind ?? "").includes("llamacpp");
 
         // Uji jalur keluar TANPA menyentuh jaringan pengguna:
         // memutusnya sungguhan dapat memutus Tailscale dan akses
         // mereka sendiri.
         //
         // Versi pertama pemeriksaan ini menambal globalThis.fetch di
-        // dalam proses audit sendiri lalu memanggil /api/tags — daftar
-        // model, bukan inferensi — sementara daemon yang diuji berjalan
+        // dalam proses audit sendiri lalu memanggil endpoint daftar
+        // model — bukan inferensi — sementara daemon yang diuji berjalan
         // di proses lain dan jaringannya tak pernah disentuh. Ia
         // melaporkan LULUS dengan bukti "jalur inferensi tetap
         // terjawab" padahal tidak ada inferensi yang berjalan: persis
@@ -336,7 +344,7 @@ async function main() {
         }
         catch { /* biarkan default */ }
 
-        const lulus = ollamaHidup && lokal && models > 0 && inferensi.ok;
+        const lulus = modelLokalAda && lokal && inferensi.ok;
 
         return {
             keadaan: lulus ? "LULUS" : "SEBAGIAN",
@@ -344,7 +352,7 @@ async function main() {
                 ? `model aktif "${cfg?.resolved?.model ?? "?"}" berjalan lokal; ${models} model terpasang; ` +
                   `dengan seluruh host non-lokal tak terjangkau, inferensi SUNGGUHAN menjawab ` +
                   `${inferensi.panjang} karakter ("${String(inferensi.cuplikan ?? "").slice(0, 40)}…")`
-                : `ollama hidup=${ollamaHidup}, platform lokal=${lokal}, model terpasang=${models}, ` +
+                : `model GGUF ada=${modelLokalAda} (${models} berkas), platform lokal=${lokal}, ` +
                   `inferensi offline=${inferensi.ok} (${inferensi.alasan ?? "-"})`,
             catatan: "inferensi dijalankan di proses anak yang jalur keluarnya diputus pada lapisan socket — jaringan pengguna tidak disentuh"
         };
@@ -439,7 +447,7 @@ async function main() {
         const toolGuard = require("../src/core/safety/toolGuard");
         const loopGuard = require("../src/core/safety/loopGuard");
 
-        loopGuard.reset();
+        loopGuard.resetAll();
         killSwitch.engage({ reason: "audit 276", actor: "audit" });
 
         let tertahan = false;

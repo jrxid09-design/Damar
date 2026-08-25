@@ -4,7 +4,7 @@ const fs = require("node:fs");
 /**
  * LlamaEngine — otak lokal Aether yang berjalan DI DALAM proses daemon.
  *
- * Tidak ada Ollama, tidak ada HTTP: node-llama-cpp menautkan llama.cpp
+ * Tanpa server eksternal: node-llama-cpp menautkan llama.cpp
  * langsung ke Node, memuat bobot GGUF dari disk, dan menghasilkan token
  * di proses yang sama. Satu model dimuat sekali lalu dipakai ulang —
  * memuat ulang tiap permintaan akan menghabiskan detik dan RAM.

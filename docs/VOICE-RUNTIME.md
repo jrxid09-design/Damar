@@ -58,6 +58,8 @@ IDLE → WAKE_DETECTED → LISTENING → TRANSCRIBING → THINKING
 1. **Aether Core independen dari UI** — Console boleh ditutup; voice daemon
    tetap hidup (bila diaktifkan).
 2. **Standby tidak memanggil LLM/cloud** — hanya wake-word detection lokal.
+   Deteksi tepuk tangan memakai **stream level audio (RMS)** dari mic: ffmpeg/arecord
+   menulis PCM mentah ke stdout, daemon menghitung RMS per chunk (tanpa STT/LLM).
 3. **Acknowledgement deterministik** — `"Ya?"` dihasilkan lokal, tanpa LLM.
 4. **Local-first** — STT/TTS lewat `voiceService` (faster-whisper, edge-tts/Kokoro).
 5. **Graceful degradation** — mic rusak / STT mati / TTS mati / wake engine gagal
@@ -113,9 +115,10 @@ mendobel `voiceService`.
 
 ## Test
 
-`tests/voice/voiceRuntime.test.js` — 30 test: transisi state (legal & ilegal),
+`tests/voice/voiceRuntime.test.js` — 34 test: transisi state (legal & ilegal),
 barge-in, wake word (utuh vs substring), deteksi tepuk 2x (2 dalam jendela vs
-1/terlalu jauh/bunyi panjang/noise), VAD (diam/touch), graceful degradation
+1/terlalu jauh/bunyi panjang/noise), RMS PCM (`_rms`), argumen stream level
+(ffmpeg/arecord), wiring stream→clapDetect, VAD (diam/touch), graceful degradation
 (mic/STT/TTS/model gagal), dan **VoiceSession memakai jalur aiRuntime yang sama**
 (`tools: undefined` → ToolSelector otomatis, `channel: "voice"`).
 
@@ -124,8 +127,9 @@ barge-in, wake word (utuh vs substring), deteksi tepuk 2x (2 dalam jendela vs
 1. **Wake-word engine sungguhan** (Porcupine/Vosk/openWakeWord) — sisipkan
    implementasi `WakeWordProvider` baru, set `AETHER_VOICE_WAKE_PROVIDER`.
 2. **STT streaming** + **VAD berbasis level audio** (RMS) saat backend audio
-   `cli` tersedia.
+   `cli` tersedia — RMS stream kini sudah mengalir ke ClapDetector; tinggal
+   dipakai juga oleh VAD untuk mendeteksi akhir ucapan secara akustik.
 3. **TTS streaming/chunked** — mulai bicara sebelum respons penuh selesai.
-4. **Wake-word dari mic terus-menerus** (loop rekam pendek → STT ringan → wake
-   detect) — saat ini `wakeDetect(text)` tersedia sebagai API; integrasi mic
-   standby bisa menyusul di backend `cli`.
+4. **Wake-word dari mic terus-menerus** — `wakeDetect(text)` masih API; integrasi
+   mic standby untuk wake word (STT ringan periodik) bisa menyusul, atau pakai
+   engine wake-word (item 1) yang bekerja langsung pada stream audio.

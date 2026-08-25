@@ -15,7 +15,8 @@ class ContextController {
 
     async brief(req, res, next) {
         try {
-            return response.success(res, "Context brief", await context.brief());
+            // N2-FINAL: giliran narasi mewarisi identitas pemanggil HTTP.
+            return response.success(res, "Context brief", await context.brief(req.authIdentity ?? null));
         }
         catch (error) {
             return response.error(res, error.message, 500);

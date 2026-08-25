@@ -218,13 +218,28 @@ function toolsForWorker(tools = [], agentId, deklarasiLama = []) {
 
 }
 
+/**
+ * Nama-nama tool yang MENANDAI spesialisasi seorang worker.
+ *
+ * Kini berupa HINT untuk pipeline seleksi (boost), bukan lagi
+ * penggantinya: tugas tetap dinilai lewat retrieval + ranking,
+ * profil hanya menguntungkan tool yang khas peran worker itu.
+ */
+function profileFor(agentId) {
+
+    const profil = WORKER_PROFILES[agentId] ?? [];
+
+    return [...profil];
+
+}
+
 /** Daftar profil worker yang dikenal. */
 function knownWorkers() {
     return Object.keys(WORKER_PROFILES);
 }
 
 module.exports = {
-    toolsForWorker, knownWorkers,
+    toolsForWorker, profileFor, knownWorkers,
     WORKER_PROFILES, CAPABILITY_ALIAS
 };
 

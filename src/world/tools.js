@@ -19,7 +19,7 @@ function worldTools() {
 
             description:
                 "Gambaran utuh lingkungan Aether saat ini: mesin, memori, disk, layanan " +
-                "(Ollama/Immich), model yang termuat, dan keadaan rem keselamatan — beserta " +
+                "(layanan lokal), model yang termuat, dan keadaan rem keselamatan — beserta " +
                 "KAPAN masing-masing terakhir diperiksa. Pakai saat pengguna bertanya tentang " +
                 "kondisi sistem, kapasitas, atau apakah sesuatu sedang berjalan.",
 
