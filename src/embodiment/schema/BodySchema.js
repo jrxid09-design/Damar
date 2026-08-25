@@ -76,6 +76,63 @@ function presenceWins(a, b) {
     return a.state <= b.state ? a : b;
 }
 
+/**
+ * Urutan total KESEHATAN — analog presence: pemeriksaan TERBARU menang;
+ * seri → sumber leksikografis kecil; tie sempurna → nama status kanonik
+ * terkecil. Waktu absolut (checkedAtMs) adalah kunci utama sehingga
+ * degradasi→pemulihan selalu konvergen bebas urutan kedatangan.
+ */
+function healthWins(a, b) {
+    if (!b) return a;
+    if (!a) return b;
+    if ((a.checkedAtMs ?? 0) !== (b.checkedAtMs ?? 0)) {
+        return (a.checkedAtMs ?? 0) > (b.checkedAtMs ?? 0) ? a : b;
+    }
+    if (a.source !== b.source) return (a.source ?? "") < (b.source ?? "") ? a : b;
+    return a.status <= b.status ? a : b;
+}
+
+/** Gabungkan klaim kemampuan secara deterministik (fungsi modul murni). */
+function _installClaim(record, incoming) {
+    const current = record.capabilities[incoming.name];
+    if (current) {
+        if (canonicalJson(current) === canonicalJson(incoming)) return;
+        const better =
+            incoming.confidence > current.confidence ||
+            (incoming.confidence === current.confidence &&
+                incoming.source < current.source) ||
+            (incoming.confidence === current.confidence &&
+                incoming.source === current.source &&
+                canonicalJson(incoming) < canonicalJson(current));
+        if (!better) return;
+    }
+    record.capabilities[incoming.name] = incoming;
+}
+
+/** Materialisasi kanonik: capabilities TERURUT + proyeksi state/kesehatan. */
+function _syncRecord(record) {
+    const capabilities = Object.values(record.capabilities)
+        .sort((a, b) =>
+            a.name.localeCompare(b.name) ||
+            canonicalJson(a).localeCompare(canonicalJson(b)));
+
+    // Proyeksi field kanonik ke deskriptor — kesehatan TIDAK pernah
+    // tertimpa konten karena sumbernya satu-satunya: record.health.
+    record.descriptor = deepFreeze({
+        ...record.descriptor,
+        state: record.presence.state,
+        health: {
+            status: record.health.status,
+            detail: record.health.detail,
+            checkedAt: record.health.checkedAt
+        },
+        capabilities
+    });
+    record.meta = deepFreeze({
+        ...record.meta, digest: digestOf(record.descriptor)
+    });
+}
+
 class BodySchema {
 
     constructor({ clock = realClock(), store = null, config = {} } = {}) {
@@ -141,23 +198,27 @@ class BodySchema {
             }
         }
 
+        // Hanya PLAN + COMMIT yang boleh menggugurkan event. Jurnal,
+        // derivasi, dan notifikasi berjalan SETELAH komit sah — kegagalan
+        // di sana tidak pernah menggolongkan event sebagai ditolak.
+        let result;
         try {
-            const plan = this._plan(event);          // fase 1: validasi penuh
-            const result = this._commit(plan, event);// fase 2: mutasi sekali
-
-            this._pushJournal(event);
-
-            if (!event.payload?.derived) {
-                this._deriveDefaultChanges();
-            }
-
-            // Notifikasi SETELAH komit; kegagalan callback terisolasi
-            // per pelanggan dan tidak pernah mengubah status event.
-            this._notify(event, result);
-            return { accepted: true, ...result };
+            const plan = this._plan(event);           // fase 1: validasi penuh
+            result = this._commit(plan, event);       // fase 2: mutasi sekali
         } catch (err) {
             return this._reject(err.code || "applier-gagal", event);
         }
+
+        this._pushJournal(event);
+
+        if (!event.payload?.derived) {
+            this._deriveDefaultChanges();
+        }
+
+        // Notifikasi SETELAH komit; kegagalan callback terisolasi
+        // per pelanggan dan tidak pernah mengubah status event.
+        this._notify(event, result);
+        return { accepted: true, ...result };
     }
 
     /* ----------------------- fase 1: RENCANA --------------------------- */
@@ -273,8 +334,16 @@ class BodySchema {
         }
         return {
             kind: "health", deviceId: event.subject, status,
-            detail: event.payload.health.detail != null
-                ? String(event.payload.health.detail).slice(0, 200) : null
+            // Proposal kesehatan KANONIK: waktu absolut + provenance,
+            // diselesaikan lewat healthWins saat komit.
+            health: deepFreeze({
+                status,
+                detail: event.payload.health.detail != null
+                    ? String(event.payload.health.detail).slice(0, 200) : null,
+                checkedAt: new Date(event.timestampMs).toISOString(),
+                checkedAtMs: event.timestampMs,
+                source: event.source
+            })
         };
     }
 
@@ -332,7 +401,7 @@ class BodySchema {
             throw fail("EMB_DEVICE_UNKNOWN",
                 `preferensi untuk perangkat tak dikenal: '${p.deviceId}'`);
         }
-        if (!this._devices.get(p.deviceId).capabilities.has(p.purpose)) {
+        if (!(p.purpose in this._devices.get(p.deviceId).capabilities)) {
             throw fail("EMB_CAPABILITY_MISMATCH",
                 `${p.deviceId} tidak menyediakan ${p.purpose}`);
         }
@@ -381,12 +450,13 @@ class BodySchema {
         switch (plan.kind) {
             case "device-content": return this._commitContent(plan, event);
             case "presence": return this._commitPresence(plan);
-            case "health": return this._commitHealth(plan, event);
+            case "health": return this._commitHealth(plan);
             case "claim": return this._commitClaim(plan);
             case "observation": return this._commitObservation(plan, event);
             case "preference-set": return this._commitPreferenceSet(plan, event);
             case "preference-clear": return this._commitPreferenceClear(plan);
             case "analysis-requested":
+                // Event inti sah: tandai permintaan analisis (idempoten).
                 this._analysisRequested.add(event.subject);
                 this._capAnalysisRequested();
                 return { analysisRequested: event.subject };
@@ -397,41 +467,79 @@ class BodySchema {
         }
     }
 
+    /**
+     * ATOMISITAS STRUKTURAL: mutator bekerja pada KLON terlepas; rekaman
+     * hidup hanya diganti SETELAH seluruh operasi yang bisa melempar
+     * selesai sukses. Kegagalan di tengah jalan tidak pernah menyisakan
+     * mutasi parsial — bahkan bila PLAN kelewatan satu field.
+     */
+    _mutateDevice(deviceId, mutator) {
+        const current = this._devices.get(deviceId);
+        if (!current) {
+            throw fail("EMB_DEVICE_UNKNOWN", `perangkat hilang saat komit: ${deviceId}`);
+        }
+        const candidate = structuredCopy(current);   // JSON-aman by design
+        mutator(candidate);
+        this._devices.set(deviceId, candidate);      // swap sekali, di akhir
+        return candidate;
+    }
+
+    _newRecord(plan, event) {
+        return {
+            descriptor: plan.descriptor,
+            meta: plan.candidate,
+            presence: plan.presence,
+            // Kesehatan = field kanonik TERPISAH (R2-B3): konten deskriptor
+            // tidak pernah bisa menghapusnya.
+            health: { status: HEALTH_STATES.unknown, detail: null,
+                      checkedAt: null, checkedAtMs: null, source: null },
+            capabilities: {},                // objek polos — JSON-aman
+            firstSeenAtMs: event.timestampMs,
+            lastSeenAtMs: event.timestampMs
+        };
+    }
+
     _commitContent(plan, event) {
 
-        let record = this._devices.get(plan.deviceId);
+        const existing = this._devices.get(plan.deviceId);
 
-        if (!record) {
-            record = {
-                descriptor: plan.descriptor,
-                meta: plan.candidate,
-                presence: plan.presence,
-                capabilities: new Map(),
-                firstSeenAtMs: event.timestampMs,
-                lastSeenAtMs: event.timestampMs
-            };
-            this._devices.set(plan.deviceId, record);
-        } else {
-            // Konten: urutan total newerWins (bebas arah kedatangan).
-            if (newerWins(plan.candidate, record.meta) === plan.candidate) {
-                record.meta = plan.candidate;
-                record.descriptor = plan.descriptor;
-            }
-            // Kehadiran: urutan total presenceWins — pengamatan usang
-            // yang datang belakangan TIDAK bisa menimpa state segar.
-            record.presence = presenceWins(plan.presence, record.presence);
-            record.lastSeenAtMs =
-                Math.max(record.lastSeenAtMs, event.timestampMs);
+        // Event analisis RE dihitung SEBELUM mutasi apa pun — bila
+        // pembuatannya melempar, belum ada satu byte pun berubah.
+        let analysisEvent = null;
+        if (plan.isNew
+            && plan.descriptor.deviceClass === DEVICE_CLASSES.UNKNOWN
+            && !this._analysisRequested.has(plan.deviceId)) {
+            analysisEvent = this._buildAnalysisRequested(plan.descriptor, event);
         }
 
-        for (const claim of plan.claims) this._installClaim(record, claim);
-        this._syncRecord(record);
+        if (!existing) {
+            const record = this._newRecord(plan, event);
+            for (const claim of plan.claims) _installClaim(record, claim);
+            _syncRecord(record);
+            this._devices.set(plan.deviceId, record);   // swap tunggal
+        } else {
+            this._mutateDevice(plan.deviceId, (rec) => {
+                // Konten: urutan total newerWins (bebas arah kedatangan).
+                if (newerWins(plan.candidate, rec.meta) === plan.candidate) {
+                    rec.meta = structuredCopy(plan.candidate);
+                    rec.descriptor = plan.descriptor;
+                }
+                // Kehadiran: presenceWins — usang tak bisa menimpa segar.
+                rec.presence = presenceWins(
+                    structuredCopy(plan.presence), rec.presence);
+                // Waktu observasi TEMPORAL, bukan urutan kedatangan:
+                rec.firstSeenAtMs = Math.min(rec.firstSeenAtMs, event.timestampMs);
+                rec.lastSeenAtMs = Math.max(rec.lastSeenAtMs, event.timestampMs);
+                for (const claim of plan.claims) _installClaim(rec, claim);
+                _syncRecord(rec);
+            });
+        }
 
-        // Hook RE untuk perangkat UNKNOWN baru — event turunan internal.
-        if (plan.isNew
-            && record.descriptor.deviceClass === DEVICE_CLASSES.UNKNOWN
-            && !this._analysisRequested.has(plan.deviceId)) {
-            this._emitAnalysisRequested(record.descriptor, event);
+        if (analysisEvent) {
+            this._analysisRequested.add(plan.deviceId);
+            this._capAnalysisRequested();
+            this._pushJournal(analysisEvent);
+            this._notify(analysisEvent, {});
         }
 
         for (const rel of plan.relationships) {
@@ -444,69 +552,28 @@ class BodySchema {
     }
 
     _commitPresence(plan) {
-        const record = this._devices.get(plan.deviceId);
-        record.presence = presenceWins(plan.proposal, record.presence);
-        this._syncRecord(record);
-        return { deviceId: plan.deviceId, state: record.descriptor.state };
+        const rec = this._mutateDevice(plan.deviceId, (rec) => {
+            rec.presence = presenceWins(structuredCopy(plan.proposal), rec.presence);
+            _syncRecord(rec);
+        });
+        return { deviceId: plan.deviceId, state: rec.descriptor.state };
     }
 
-    _commitHealth(plan, event) {
-        const record = this._devices.get(plan.deviceId);
-        const health = deepFreeze({
-            status: plan.status,
-            detail: plan.detail,
-            checkedAt: new Date(event.timestampMs).toISOString()
+    _commitHealth(plan) {
+        const rec = this._mutateDevice(plan.deviceId, (rec) => {
+            rec.health = healthWins(structuredCopy(plan.health), rec.health);
+            _syncRecord(rec);
         });
-        record.descriptor = deepFreeze({ ...record.descriptor, health });
-        record.meta = deepFreeze({
-            ...record.meta, digest: digestOf(record.descriptor)
-        });
-        return { deviceId: plan.deviceId, health };
+        return { deviceId: plan.deviceId,
+                 health: { status: rec.health.status, checkedAt: rec.health.checkedAt } };
     }
 
     _commitClaim(plan) {
-        const record = this._devices.get(plan.deviceId);
-        this._installClaim(record, plan.claim);
-        this._syncRecord(record);
+        this._mutateDevice(plan.deviceId, (rec) => {
+            _installClaim(rec, plan.claim);
+            _syncRecord(rec);
+        });
         return { deviceId: plan.deviceId, capability: plan.claim.name };
-    }
-
-    /**
-     * Gabungkan klaim secara deterministik: persis-sama = NO-OP; prioritas
-     * sama (confidence+sumber) diselesaikan lewat JSON kanonik terkecil —
-     * bukan urutan kedatangan.
-     */
-    _installClaim(record, incoming) {
-        const current = record.capabilities.get(incoming.name);
-        if (current) {
-            if (canonicalJson(current) === canonicalJson(incoming)) return;
-            const better =
-                incoming.confidence > current.confidence ||
-                (incoming.confidence === current.confidence &&
-                    incoming.source < current.source) ||
-                (incoming.confidence === current.confidence &&
-                    incoming.source === current.source &&
-                    canonicalJson(incoming) < canonicalJson(current));
-            if (!better) return;
-        }
-        record.capabilities.set(incoming.name, incoming);
-    }
-
-    /** Materialisasi kanonik: capabilities TERURUT nama (+tie kanonik). */
-    _syncRecord(record) {
-        const capabilities = [...record.capabilities.values()]
-            .sort((a, b) =>
-                a.name.localeCompare(b.name) ||
-                canonicalJson(a).localeCompare(canonicalJson(b)));
-
-        record.descriptor = deepFreeze({
-            ...record.descriptor,
-            state: record.presence.state,
-            capabilities
-        });
-        record.meta = deepFreeze({
-            ...record.meta, digest: digestOf(record.descriptor)
-        });
     }
 
     _commitObservation(plan, event) {
@@ -515,11 +582,13 @@ class BodySchema {
         }
         const ring = this._observations.get(plan.channelId);
         if (ring.length >= this.config.observationCapacity) ring.shift();
+        // Sample DILEPAS & dibekukan dalam — referensi pemanggil tidak
+        // boleh bisa memutasi cincin setelah ingest.
         ring.push(Object.freeze({
             channelId: plan.channelId,
             modality: plan.modality,
             deviceId: plan.deviceId,
-            sample: plan.sample,
+            sample: deepFreeze(structuredCopy(plan.sample)),
             confidence: event.confidence,
             source: event.source,
             atMs: event.timestampMs
@@ -567,13 +636,13 @@ class BodySchema {
         return makeCoreEvent({ type, subject, payload, clock: this.clock });
     }
 
-    _emitAnalysisRequested(descriptor, triggerEvent) {
-        const deviceId = descriptor.deviceId;
-        this._analysisRequested.add(deviceId);
-        this._capAnalysisRequested();
-
-        const derived = this._makeCoreEvent(
-            "UNKNOWN_DEVICE_REQUIRES_ANALYSIS", deviceId,
+    /**
+     * Bangun event analisis RE — MURNI (bisa melempar; penelepon wajib
+     * memanggilnya SEBELUM mutasi state apa pun).
+     */
+    _buildAnalysisRequested(descriptor, triggerEvent) {
+        return this._makeCoreEvent(
+            "UNKNOWN_DEVICE_REQUIRES_ANALYSIS", descriptor.deviceId,
             {
                 evidence: {
                     descriptorDigest: digestOf(descriptor),
@@ -588,9 +657,6 @@ class BodySchema {
                     metadata: descriptor.metadata
                 }
             });
-
-        this._pushJournal(derived);
-        this._notify(derived, {});
     }
 
     _capAnalysisRequested() {
@@ -746,7 +812,7 @@ class BodySchema {
         const channels = new Map();
         for (const record of this._devices.values()) {
             if (record.descriptor.state !== DEVICE_STATES.ONLINE) continue;
-            for (const claim of record.capabilities.values()) {
+            for (const claim of Object.values(record.capabilities)) {
                 const cls = classifyCapability(claim.name);
                 if (!cls || cls.direction !== direction) continue;
                 if (!channels.has(claim.name)) {
@@ -848,7 +914,9 @@ class BodySchema {
                 .map(r => ({
                     descriptor: r.descriptor,
                     meta: r.meta,
-                    capabilities: [...r.capabilities.values()]
+                    presence: r.presence,
+                    health: r.health,
+                    capabilities: Object.values(r.capabilities)
                         .sort((a, b) =>
                             a.name.localeCompare(b.name) ||
                             canonicalJson(a).localeCompare(canonicalJson(b))),
@@ -931,6 +999,45 @@ class BodySchema {
                     throw fail("EMB_INVALID_TIMESTAMPS",
                         `baris#${i}: stempel waktu tidak sah`);
                 }
+
+                // PRESENCE kanonik (R2-B1): direkonstruksi dari baris bila
+                // ada; fallback jujur = meta konten + state deskriptor.
+                const STATE_VALUES = Object.values(DEVICE_STATES);
+                const pr = row.presence ?? {};
+                const presenceState = STATE_VALUES.includes(pr.state)
+                    ? pr.state : descriptor.state;
+                const presence = {
+                    state: presenceState,
+                    timestampMs: Number.isInteger(pr.timestampMs)
+                        ? pr.timestampMs : meta.timestampMs,
+                    confidence: Number.isFinite(Number(pr.confidence))
+                        ? Number(pr.confidence) : Number(meta.confidence),
+                    source: typeof pr.source === "string" && pr.source
+                        ? pr.source.slice(0, 120) : meta.source
+                };
+                if (!STATE_VALUES.includes(presence.state)) {
+                    throw fail("EMB_UNKNOWN_DEVICE_STATE",
+                        `baris#${i}: presence state tidak sah`);
+                }
+                if (!Number.isInteger(presence.timestampMs)
+                    || !Number.isFinite(presence.confidence)) {
+                    throw fail("EMB_INVALID_META",
+                        `baris#${i}: presence tidak sah`);
+                }
+
+                // KESEHATAN kanonik (R2-B3): idem presence.
+                const hr = row.health ?? {};
+                const health = {
+                    status: HEALTH_STATES[hr.status] ?? HEALTH_STATES.unknown,
+                    detail: hr.detail != null ? String(hr.detail).slice(0, 200) : null,
+                    checkedAt: typeof hr.checkedAt === "string"
+                        && hr.checkedAt ? hr.checkedAt : null,
+                    checkedAtMs: Number.isInteger(hr.checkedAtMs)
+                        ? hr.checkedAtMs : null,
+                    source: typeof hr.source === "string" && hr.source
+                        ? hr.source.slice(0, 120) : null
+                };
+
                 staged.set(descriptor.deviceId, {
                     descriptor,
                     meta: deepFreeze({
@@ -939,7 +1046,10 @@ class BodySchema {
                         timestampMs: meta.timestampMs,
                         digest: recomputed
                     }),
-                    capabilities: new Map(descriptor.capabilities.map(c => [c.name, c])),
+                    presence: deepFreeze(presence),
+                    health: deepFreeze(health),
+                    capabilities: Object.fromEntries(
+                        descriptor.capabilities.map(c => [c.name, c])),
                     firstSeenAtMs: row.firstSeenAtMs,
                     lastSeenAtMs: row.lastSeenAtMs
                 });
@@ -1039,7 +1149,7 @@ class BodySchema {
                 confidence: record.meta.confidence,
                 observedAtMs: record.meta.timestampMs
             },
-            capabilities: [...record.capabilities.values()],
+            capabilities: Object.values(record.capabilities),
             firstSeenAtMs: record.firstSeenAtMs,
             lastSeenAtMs: record.lastSeenAtMs
         };
