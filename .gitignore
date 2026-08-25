@@ -38,3 +38,8 @@ models/
 .get-cookies.js
 
 nul
+
+# AETHERSELF — hanya dokumen kanonik yang di-commit; runtime output dikecualikan
+AetherSelf/evolution/experiments/*
+!AetherSelf/evolution/experiments/.gitkeep
+*.acc-scratch/
