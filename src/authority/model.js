@@ -8,7 +8,8 @@
  */
 
 const { canonicalCapabilityId, canonicalTokenList,
-        canonicalRestrictionSet } = require("./canonical");
+        canonicalRestrictionSet, restoreCanonicalRestrictionSet,
+        RESTRICTION_KINDS } = require("./canonical");
 const { canonicalJson, sha256, deepFreeze } = require("./canonical");
 
 const STATUS = Object.freeze({
@@ -35,8 +36,26 @@ const DENY_CODES = Object.freeze([
     "CAP_EXHAUSTED","CAP_GENERATION_STALE","CAP_ACTION_DENIED",
     "CAP_SCOPE_MISMATCH","CAP_PURPOSE_MISMATCH","CAP_IDENTITY_MISMATCH",
     "CAP_RESTRICTION_FAILED","CAP_BUDGET_EXHAUSTED","CAP_DELEGATION_DENIED",
-    "CAP_RATIFICATION_REQUIRED","CAP_MALFORMED"
+    "CAP_RATIFICATION_REQUIRED","CAP_MALFORMED",
+    "CAP_RATIFICATION_CONSUMED","CAP_DELEGATION_BUDGET_EXHAUSTED"
 ]);
+
+/**
+ * Normalisasi RestrictionSet untuk buildGrant (internal).
+ *
+ * Bentuk canonical object yang sudah pernah dipersist (hasil
+ * attenuateGrant / hydrate internal) direhidrasi via jalur TRUSTED
+ * restoreCanonicalRestrictionSet(). Input eksternal lain tetap masuk
+ * canonicalRestrictionSet() dan object polos DITOLAK (L-D1 fail-closed).
+ */
+function normalizeRestrictionsForBuild(input) {
+    if (input && typeof input === "object" &&
+        !Array.isArray(input) && !(input instanceof Set) &&
+        typeof input.kind === "string") {
+        return restoreCanonicalRestrictionSet(input);
+    }
+    return canonicalRestrictionSet(input);
+}
 
 /** Pabrik grant ternormalisasi — dipakai attenuation & ratification. */
 function buildGrant({
@@ -71,7 +90,7 @@ function buildGrant({
         actions: canonicalTokenList(actions, "actions"),
         scope: canonicalTokenList(scope, "scope"),
         allowedPurposes: canonicalTokenList(allowedPurposes, "allowedPurposes"),
-        restrictions: canonicalRestrictionSet(restrictions),
+        restrictions: normalizeRestrictionsForBuild(restrictions),
         maxExecutions: normalizeBudget(maxExecutions, kind),
         usedExecutions: 0,
         purpose: purpose ? String(purpose).slice(0, 200) : null,
@@ -139,6 +158,20 @@ const EVOLUTION_STATUS = Object.freeze([
     "APPROVED","REJECTED","APPLIED","ROLLED_BACK"
 ]);
 
+/**
+ * ProposalId WAJIB slug aman (§path-safety): lowercase [a-z0-9._-],
+ * tidak diawali/diakhiri separator, tanpa '..' — dipakai langsung
+ * sebagai nama berkas di AetherSelf/evolution/proposals.
+ */
+const PROPOSAL_ID_RE =
+    /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?)*$/;
+
+function isValidProposalId(id) {
+    return typeof id === "string" &&
+        id.length > 0 && id.length <= 120 &&
+        PROPOSAL_ID_RE.test(id);
+}
+
 function evolutionDigest(proposalCore) {
     // Digest mengikat REVISI proposal: perubahan material apapun pada
     // core menghasilkan digest berbeda -> ratifikasi lama stale (§E).
@@ -154,7 +187,11 @@ function buildEvolutionProposal({
     requestedAuthority = null,          // utk kind authority_expansion
     at
 }) {
-    if (!proposalId) throw new AuthorityMalformed("proposalId wajib");
+    if (!isValidProposalId(proposalId)) {
+        throw new AuthorityMalformed(
+            "proposalId harus slug aman [a-z0-9._-], maks 120, " +
+            "tanpa '..' atau separator di tepi");
+    }
     if (!problem || !proposedChange) {
         throw new AuthorityMalformed("proposal wajib punya problem & proposedChange");
     }
@@ -211,7 +248,9 @@ function buildRatification({
 module.exports = {
     STATUS, TRANSITIONS, canTransition, DENY_CODES,
     buildGrant, normalizeBudget, normalizeIdentityBinding,
+    normalizeRestrictionsForBuild,
     AuthorityMalformed,
     EVOLUTION_STATUS, buildEvolutionProposal, evolutionDigest,
-    buildRatification
+    buildRatification,
+    PROPOSAL_ID_RE, isValidProposalId
 };

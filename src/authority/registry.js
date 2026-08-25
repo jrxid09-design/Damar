@@ -1,11 +1,13 @@
 ﻿/**
- * AUTHORITY REGISTRY V1 â€” satu pintu lifecycle + keputusan otoritas.
+ * AUTHORITY REGISTRY V1 — satu pintu lifecycle + keputusan otoritas.
  *
  *   - REQUEST != GRANT ; PROPOSAL != AUTHORITY
- *   - Delegasi hanya via attenuateGrant (subset law)
- *   - Root grant baru HANYA dari OwnerRatification APPROVED yang
- *     ter-bind ke digest revisi proposal saat ini
- *   - consumeExecution atomik ; generation bump = bulk revoke instan
+ *   - Delegasi hanya via attenuateGrant (subset law, no-widening)
+ *   - Root grant baru HANYA dari OwnerRatification APPROVED yang ter-bind
+ *     ke digest+revisi proposal saat ratifikasi; grant dibangun eksklusif
+ *     dari ratification.approvedAuthority; satu ratifikasi = satu grant
+ *   - CapabilityId dikanonikalisasi di SETIAP entry point publik
+ *   - consumeExecution atomik anti-TOCTOU ; generation bump = bulk revoke
  */
 
 const crypto = require("node:crypto");
@@ -14,6 +16,7 @@ const { attenuateGrant } = require("./delegation");
 const { canonicalCapabilityId, canonicalTokenList,
         canonicalRestrictionSet,
         restoreCanonicalRestrictionSet,
+        canonicalJson, sha256,
         deepFreeze } = require("./canonical");
 
 class AuthorityRegistry {
@@ -34,7 +37,12 @@ class AuthorityRegistry {
         };
     }
 
-    /* ------------------------ GENERATION (Â§G) --------------------------- */
+    /** Kanonikalisasi CapabilityId utk semua entry point (L-D2). */
+    canonId(capabilityId) {
+        return canonicalCapabilityId(capabilityId);
+    }
+
+    /* ------------------------ GENERATION (§G) --------------------------- */
 
     async revokeSubjectGeneration(subject, actor = "owner") {
         const g = await this.store.bumpGeneration(subject, this.nowIso());
@@ -44,12 +52,15 @@ class AuthorityRegistry {
         return g;
     }
 
-    /* --------------------- RATIFIED ROOT GRANT (Â§E) ---------------------- */
+    /* --------------------- RATIFIED ROOT GRANT (§E) ---------------------- */
 
     /**
-     * SATU-SATUNYA jalur authority > previous. Ratifikasi wajib APPROVED
-     * dan ter-bind ke digest revisi proposal SAAT RATIFIKASI; bila proposal
-     * berubah material sesudahnya -> CAP_RATIFICATION_REQUIRED (stale).
+     * SATU-SATUNYA jalur authority > previous. Grant dibangun EKSKLUSIF
+     * dari ratification.approvedAuthority (immutable, di-bind ke digest +
+     * revisi proposal SAAT RATIFIKASI). requestedAuthority (bila disertakan)
+     * hanya assertion kesetaraan — tidak pernah sumber otoritas.
+     * Satu ratifikasi APPROVED = Paling banyak SATU root grant; replay
+     * ditolak CAP_RATIFICATION_CONSUMED.
      */
     async issueRatifiedRootGrant({ proposalId, requestedAuthority = null,
                                    ratificationId, actor = "owner" }) {
@@ -67,56 +78,118 @@ class AuthorityRegistry {
             return deny("CAP_RATIFICATION_REQUIRED",
                 "ratifikasi APPROVED tidak ditemukan");
         }
-        if (rat.proposalDigest !== proposal.digest) {
-            return deny("CAP_RATIFICATION_REQUIRED",
-                "digest proposal berubah setelah ratifikasi (stale)");
-        }
-        if (rat.expiryAt && Date.parse(rat.expiryAt) < this.clock.nowMs()) {
-            return deny("CAP_RATIFICATION_REQUIRED", "ratifikasi kedaluwarsa");
-        }
         if (rat.proposalId !== proposalId) {
             return deny("CAP_MALFORMED", "ratifikasi milik proposal lain");
         }
 
-        const requested = requestedAuthority ?? proposal.requestedAuthority;
-        if (!requested || !requested.capabilityId || !requested.subject ||
-            !Array.isArray(requested.actions) || !requested.actions.length) {
-            return deny("CAP_MALFORMED", "requestedAuthority tidak lengkap");
+        // Binding wajib: digest + revisi proposal saat ratifikasi.
+        const revisionNow = proposal.revision ?? 1;
+        if (rat.proposalDigest !== proposal.digest ||
+            (rat.proposalRevision ?? 1) !== revisionNow) {
+            return deny("CAP_RATIFICATION_REQUIRED",
+                "digest/revisi proposal berubah setelah ratifikasi (stale)");
+        }
+
+        const expiryMs = rat.expiryAt ? Date.parse(rat.expiryAt) : null;
+        if (rat.expiryAt && (Number.isNaN(expiryMs) ||
+                             expiryMs < this.clock.nowMs())) {
+            return deny("CAP_RATIFICATION_REQUIRED", "ratifikasi kedaluwarsa");
+        }
+
+        // Sumber otoritas TUNGGAL: approvedAuthority yang diratifikasi.
+        const approved = rat.approvedAuthority;
+        if (!approved || typeof approved !== "object" ||
+            Array.isArray(approved)) {
+            return deny("CAP_MALFORMED",
+                "ratifikasi tidak membawa approvedAuthority");
+        }
+
+        let approvedDigest;
+        try {
+            approvedDigest =
+                sha256(canonicalJson(JSON.parse(JSON.stringify(approved))));
+        } catch (error) {
+            return deny("CAP_MALFORMED",
+                "approvedAuthority tidak bisa dikanonikalisasi: " +
+                error.message);
+        }
+        if (rat.approvedAuthorityDigest !== approvedDigest) {
+            return deny("CAP_MALFORMED",
+                "approvedAuthority digest mismatch (tamper)");
+        }
+
+        // requestedAuthority hanya boleh sebagai equality assertion.
+        if (requestedAuthority !== null && requestedAuthority !== undefined) {
+            let requestedDigest;
+            try {
+                requestedDigest = sha256(canonicalJson(
+                    JSON.parse(JSON.stringify(requestedAuthority))));
+            } catch (error) {
+                return deny("CAP_MALFORMED",
+                    "requestedAuthority tidak bisa dikanonikalisasi: " +
+                    error.message);
+            }
+            if (requestedDigest !== approvedDigest) {
+                return deny("CAP_MALFORMED",
+                    "requestedAuthority != approvedAuthority " +
+                    "yang diratifikasi owner");
+            }
+        }
+
+        if (!approved.capabilityId || !approved.subject ||
+            !Array.isArray(approved.actions) || !approved.actions.length) {
+            return deny("CAP_MALFORMED", "approvedAuthority tidak lengkap");
         }
 
         const subjectGen =
-            await this.store.getGeneration(String(requested.subject));
+            await this.store.getGeneration(String(approved.subject));
 
         const grant = M.buildGrant({
-            capabilityId: requested.capabilityId,
+            capabilityId: approved.capabilityId,
             kind: "root",
-            subject: requested.subject,
+            subject: approved.subject,
             issuer: "owner-ratification:" + ratificationId.slice(0, 60),
-            actions: requested.actions,
-            scope: requested.scope ?? [],
-            allowedPurposes: requested.allowedPurposes ?? [],
-            restrictions: requested.restrictions ?? null,
-            maxExecutions: requested.maxExecutions ?? null,
+            actions: approved.actions,
+            scope: approved.scope ?? [],
+            allowedPurposes: approved.allowedPurposes ?? [],
+            restrictions: approved.restrictions ?? null,
+            maxExecutions: approved.maxExecutions ?? null,
             issuedAt: this.nowIso(),
-            notBefore: requested.notBefore ?? null,
-            expiresAt: requested.expiresAt ?? rat.expiryAt ?? null,
+            notBefore: approved.notBefore ?? null,
+            expiresAt: approved.expiresAt ?? rat.expiryAt ?? null,
             generation: subjectGen,
             delegationDepth: 0,
             remainingDelegationDepth:
-                Number.isInteger(requested.remainingDelegationDepth)
-                    ? requested.remainingDelegationDepth : 2,
-            purpose: requested.purpose ?? null,
-            identityBinding: requested.identityBinding ?? null,
+                Number.isInteger(approved.remainingDelegationDepth)
+                    ? approved.remainingDelegationDepth : 2,
+            purpose: approved.purpose ?? null,
+            identityBinding: approved.identityBinding ?? null,
             ratificationId,
-            extra: { proposalDigest: proposal.digest }
+            extra: { proposalDigest: proposal.digest,
+                     proposalRevision: revisionNow }
         });
 
-        await this.store.upsertCapability(grant.capabilityId,
-            grant.status, grant.generation, JSON.stringify(grant));
-        await this.store.appendEvent(this.ev("CAPABILITY_GRANTED",
-            grant.capabilityId, actor,
-            { kind: "root", ratificationId,
-              proposalDigest: proposal.digest }));
+        // ATOMIK: verifikasi ulang ratifikasi + tulis capability +
+        // konsumsi one-shot + event dalam satu transaksi store.
+        const result = await this.store.issueRootGrantAtomic({
+            capabilityId: grant.capabilityId,
+            status: grant.status,
+            generation: grant.generation,
+            payload: JSON.stringify(grant),
+            ratificationId,
+            expectProposalDigest: proposal.digest,
+            expectProposalRevision: revisionNow,
+            expectApprovedAuthorityDigest: approvedDigest,
+            events: [this.ev("CAPABILITY_GRANTED",
+                grant.capabilityId, actor,
+                { kind: "root", ratificationId,
+                  proposalDigest: proposal.digest,
+                  proposalRevision: revisionNow })]
+        });
+
+        if (!result.ok) {
+            return deny(result.reasonCode, result.detail);
+        }
 
         return { allowed: true, reasonCode: "GRANTED_ROOT",
                  decisionId: crypto.randomUUID(),
@@ -250,42 +323,95 @@ class AuthorityRegistry {
             grant
         };
     }
+
     /* ----------------------------- DELEGASI ----------------------------- */
 
     async delegate(parentCapabilityId, requested, actor = "delegator") {
 
-        const parent = await this.loadGrant(parentCapabilityId);
-        if (!parent.ok) return parent;                    // sudah Decision
+        const denyDecision = (reasonCode, detail, stage, violations = []) => ({
+            allowed: false, reasonCode, detail: detail ?? null, violations,
+            decisionId: crypto.randomUUID(), stage, grant: null });
 
-        const result = attenuateGrant(parent.grant, requested);
-        if (!result.ok) {
-            await this.store.appendEvent(this.ev(
-                "CAPABILITY_DELEGATION_DENIED", parentCapabilityId, actor,
-                { violations: result.violations }));
-            return {
-                allowed: false,
-                reasonCode: result.violations[0].reasonCode,
-                violations: result.violations,
-                decisionId: crypto.randomUUID(),
-                stage: "attenuation", grant: null
-            };
+        // Canonicalize id parent SEBELUM lookup apa pun (L-D2).
+        let parentId;
+        try {
+            parentId = canonicalCapabilityId(parentCapabilityId);
+        } catch (error) {
+            return denyDecision("CAP_MALFORMED", error.message, "normalize");
         }
 
-        const childGen = await this.store.getGeneration(result.grant.subject);
-        result.grant.generation = childGen;
+        const parent = await this.loadGrant(parentId);
+        if (!parent.ok) return parent;                    // sudah Decision
 
-        const grant = M.buildGrant(result.grant);
+        // Input wajib object; selain itu fail-closed Decision.
+        if (!requested || typeof requested !== "object" ||
+            Array.isArray(requested)) {
+            return denyDecision("CAP_MALFORMED",
+                "requested delegation tidak sah", "normalize");
+        }
 
-        await this.store.upsertCapability(grant.capabilityId,
-            grant.status, grant.generation, JSON.stringify(grant));
-        await this.store.appendEvent(this.ev("CAPABILITY_DELEGATED",
-            grant.capabilityId, actor,
-            { parentCapabilityId }));
+        try {
 
-        return { allowed: true, reasonCode: "DELEGATED",
-                 decisionId: crypto.randomUUID(),
-                 capabilityId: grant.capabilityId, grant };
+            const result = attenuateGrant(parent.grant, requested);
+            if (!result.ok) {
+                await this.store.appendEvent(this.ev(
+                    "CAPABILITY_DELEGATION_DENIED", parentId, actor,
+                    { violations: result.violations }));
+                return {
+                    allowed: false,
+                    reasonCode: result.violations[0].reasonCode,
+                    detail: null,
+                    violations: result.violations,
+                    decisionId: crypto.randomUUID(),
+                    stage: "attenuation", grant: null
+                };
+            }
 
+            const childGen =
+                await this.store.getGeneration(result.grant.subject);
+            result.grant.generation = childGen;
+
+            const grant = M.buildGrant(result.grant);
+
+            // ATOMIK: revalidasi parent + reservasi budget delegable +
+            // tulis child + event dalam satu transaksi store.
+            const commit = await this.store.delegateGrantAtomic({
+                childCapabilityId: grant.capabilityId,
+                childStatus: grant.status,
+                childGeneration: grant.generation,
+                childPayload: JSON.stringify(grant),
+                parentCapabilityId: parentId,
+                expectParentGeneration: parent.grant.generation,
+                reserveAmount: typeof grant.maxExecutions === "number"
+                    ? grant.maxExecutions : null,
+                events: [this.ev("CAPABILITY_DELEGATED",
+                    grant.capabilityId, actor,
+                    { parentCapabilityId: parentId,
+                      reservedBudget:
+                          typeof grant.maxExecutions === "number"
+                              ? grant.maxExecutions : null })]
+            });
+
+            if (!commit.ok) {
+                return denyDecision(commit.reasonCode, commit.detail,
+                    "commit");
+            }
+
+            return { allowed: true, reasonCode: "DELEGATED",
+                     decisionId: crypto.randomUUID(),
+                     capabilityId: grant.capabilityId, grant };
+
+        } catch (error) {
+            // Input malformed -> fail-closed Decision.
+            // Kegagalan store/injected (rollback tx) TETAP dilempar:
+            // pemanggil wajib tahu bahwa terjadi kegagalan persistensi,
+            // bukan sekadar penolakan otoritas.
+            if (error && typeof error.reasonCode === "string") {
+                return denyDecision(error.reasonCode,
+                    error.message, "attenuation");
+            }
+            throw error;
+        }
     }
 
     /* ------------------------------ LIFECYCLE ---------------------------- */
@@ -302,11 +428,19 @@ class AuthorityRegistry {
 
     async transition(id, toStatus, eventType, actor) {
 
-        const cap = await this.store.getCapability(id);
+        let capId;
+        try {
+            capId = canonicalCapabilityId(id);
+        } catch (error) {
+            return { ok: false, reasonCode: "CAP_MALFORMED",
+                     detail: error.message };
+        }
+
+        const cap = await this.store.getCapability(capId);
         if (!cap) return { ok: false, reasonCode: "CAP_NOT_FOUND" };
 
         if (!M.canTransition(cap.status, toStatus)) {
-            // REVOKED/EXPIRED/EXHAUSTED tidak boleh hidup lagi (Â§F).
+            // REVOKED/EXPIRED/EXHAUSTED tidak boleh hidup lagi (§F).
             return { ok: false,
                      reasonCode: toStatus === "ACTIVE"
                          ? (cap.status === "REVOKED" ? "CAP_REVOKED"
@@ -318,9 +452,9 @@ class AuthorityRegistry {
         const payload = JSON.parse(JSON.stringify(cap.payload));
         payload.status = toStatus;
 
-        await this.store.upsertCapability(id, toStatus, cap.generation,
+        await this.store.upsertCapability(capId, toStatus, cap.generation,
             JSON.stringify(payload));
-        await this.store.appendEvent(this.ev(eventType, id, actor,
+        await this.store.appendEvent(this.ev(eventType, capId, actor,
             { from: cap.status, to: toStatus }));
 
         return { ok: true, status: toStatus };
@@ -328,53 +462,39 @@ class AuthorityRegistry {
 
     /* ------------------------------- BUDGET ------------------------------ */
 
-    /** Atomik (Â§H): status/generation/expiry direvalidasi DALAM transaksi. */
+    /**
+     * Atomik anti-TOCTOU (§H): seluruh revalidasi (exists/ACTIVE/generation/
+     * notBefore/expiry/budget) dieksekusi DI DALAM operasi atomik store
+     * yang sama dengan penulisan ledger — revoke yang interleaved setelah
+     * precheck mana pun tetap menutup konsumsi.
+     */
     async consumeExecution(capabilityId, meta = {}) {
 
-        const cap = await this.store.getCapability(capabilityId);
-        if (!cap) return { allowed: false, reasonCode: "CAP_NOT_FOUND" };
-
-        const payload = cap.payload;
-
-        const curGen = await this.store.getGeneration(payload.subject);
-        if (curGen !== cap.generation)
-            return { allowed: false, reasonCode: "CAP_GENERATION_STALE" };
-        if (cap.status === "SUSPENDED")
-            return { allowed: false, reasonCode: "CAP_INACTIVE" };
-        if (cap.status === "REVOKED")
-            return { allowed: false, reasonCode: "CAP_REVOKED" };
-        if (cap.status === "EXHAUSTED")
-            return { allowed: false, reasonCode: "CAP_EXHAUSTED" };
-        if (cap.status === "EXPIRED")
-            return { allowed: false, reasonCode: "CAP_EXPIRED" };
-        const nowMs = this.clock.nowMs();
-        if (payload.expiresAt && nowMs > Date.parse(payload.expiresAt))
-            return { allowed: false, reasonCode: "CAP_EXPIRED" };
-
-        const result = await this.store.consumeExecution({
-            capabilityId,
-            maxExecutions: payload.maxExecutions,
-            at: this.nowIso(), meta
-        });
-        if (!result.ok)
-            return { allowed: false, reasonCode: "CAP_EXHAUSTED",
-                     used: result.used };
-
-        await this.store.appendEvent(this.ev("CAPABILITY_CONSUMED",
-            capabilityId, "registry",
-            { used: result.used, consumptionId: result.consumptionId }));
-
-        let exhausted = result.exhausted;
-        if (exhausted) {
-            payload.status = "EXHAUSTED";
-            await this.store.upsertCapability(capabilityId, "EXHAUSTED",
-                cap.generation, JSON.stringify(payload));
-            await this.store.appendEvent(this.ev("CAPABILITY_EXHAUSTED",
-                capabilityId, "registry", { maxExecutions: payload.maxExecutions }));
+        let capId;
+        try {
+            capId = canonicalCapabilityId(capabilityId);
+        } catch (error) {
+            return { allowed: false, reasonCode: "CAP_MALFORMED",
+                     detail: error.message };
         }
 
+        const result = await this.store.consumeExecutionAtomic({
+            capabilityId: capId,
+            at: this.nowIso(), meta, nowMs: this.clock.nowMs()
+        });
+
+        if (!result.ok) {
+            return { allowed: false, reasonCode: result.reasonCode,
+                     detail: result.detail ?? null,
+                     used: result.used };
+        }
+
+        const max = result.maxExecutions;
+
         return { allowed: true, used: result.used,
-                 remaining: payload.maxExecutions - result.used, exhausted };
+                 remaining: typeof max === "number"
+                     ? max - result.used : null,
+                 exhausted: result.exhausted };
     }
 
     /* ----------------------------- AUTHORIZE ----------------------------- */
@@ -490,7 +610,7 @@ class AuthorityRegistry {
         }
     }
 
-    /** Revalidasi pra-eksekusi utk material action (Â§K): revoke menutup. */
+    /** Revalidasi pra-eksekusi utk material action (§K): revoke menutup. */
     async revalidateExecution(snapshot) {
         if (!snapshot || !Object.isFrozen(snapshot)) {
             return { allowed: false, reasonCode: "CAP_MALFORMED",
@@ -509,9 +629,9 @@ class AuthorityRegistry {
                 detail: "revalidasi pasca-otorisasi gagal" };
     }
 
-    /* --------------------- EVOLUTION / EXPANSION (Â§D/N) ------------------ */
+    /* --------------------- EVOLUTION / EXPANSION (§D/N) ------------------ */
 
-    /** ACC/model boleh MENGAJUKAN â€” hasil = DRAFT, nol otoritas (Â§N). */
+    /** ACC/model boleh MENGAJUKAN — hasil = DRAFT, nol otoritas (§N). */
     async proposeEvolution(proposalInput, actor = "acc") {
 
         const proposal = M.buildEvolutionProposal({
@@ -564,30 +684,80 @@ class AuthorityRegistry {
         }
     }
 
-    /** Owner decision â€” mem-bind digest revisi SAAT RATIFIKASI (Â§E). */
+    /**
+     * Owner decision (§E). Ratifikasi mengikat SECARA IMMUTABLE:
+     *   proposalId + revisi + digest proposal + approvedAuthority
+     *   (+ digest kanonik approvedAuthority).
+     * Cognition/proposal TIDAK BISA menentukan authority yang berbeda
+     * dari yang diratifikasi owner.
+     */
     async ratify({ ratificationId, proposalId, ownerIdentity, decision,
                    expiryAt = null, supersedes = null }) {
 
+        const fail = (reasonCode, detail) => ({
+            applied: false, reasonCode, detail });
+
         const proposal = await this.store.getProposal(proposalId);
         if (!proposal) {
-            return { applied: false, reasonCode: "CAP_NOT_FOUND",
-                     detail: "proposal tidak ditemukan" };
+            return fail("CAP_NOT_FOUND", "proposal tidak ditemukan");
+        }
+
+        // Bind EXACT authority dari revisi proposal yang diratifikasi.
+        let approvedAuthority = null;
+        let approvedAuthorityDigest = null;
+
+        if (proposal.requestedAuthority) {
+            approvedAuthority =
+                JSON.parse(JSON.stringify(proposal.requestedAuthority));
+
+            // Validasi struktural fail-closed SEBELUM binding.
+            try {
+                canonicalCapabilityId(approvedAuthority.capabilityId);
+                if (!approvedAuthority.subject ||
+                    typeof approvedAuthority.subject !== "string") {
+                    throw new Error("subject wajib");
+                }
+                const acts = canonicalTokenList(
+                    approvedAuthority.actions ?? [], "actions");
+                if (!acts.length) throw new Error("actions wajib non-kosong");
+                if (approvedAuthority.maxExecutions !== undefined &&
+                    approvedAuthority.maxExecutions !== null) {
+                    const n = Number(approvedAuthority.maxExecutions);
+                    if (!Number.isInteger(n) || n <= 0) {
+                        throw new Error("maxExecutions harus integer > 0");
+                    }
+                }
+            } catch (error) {
+                return fail("CAP_MALFORMED",
+                    "requestedAuthority pada proposal tidak sah: " +
+                    error.message);
+            }
+
+            approvedAuthorityDigest =
+                sha256(canonicalJson(approvedAuthority));
         }
 
         const r = M.buildRatification({
             ratificationId, proposalId, ownerIdentity, decision,
-            approvedAuthority: null, expiryAt,
+            approvedAuthority, expiryAt,
             at: this.nowIso(), supersedes
         });
+
         const bound = Object.freeze({
-            ...r, proposalDigest: proposal.digest
+            ...r,
+            proposalDigest: proposal.digest,
+            proposalRevision: proposal.revision ?? 1,
+            approvedAuthority,
+            approvedAuthorityDigest
         });
 
         await this.store.upsertRatification(bound);
         await this.store.appendEvent(this.ev(
             decision === "APPROVED" ? "OWNER_RATIFIED" : "OWNER_REJECTED",
             null, ownerIdentity,
-            { ratificationId, proposalId, digest: bound.proposalDigest }));
+            { ratificationId, proposalId,
+              proposalRevision: bound.proposalRevision,
+              digest: bound.proposalDigest }));
 
         return { applied: true, ratification: bound };
 
@@ -601,4 +771,3 @@ class AuthorityRegistry {
 }
 
 module.exports = { AuthorityRegistry };
-

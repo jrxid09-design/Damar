@@ -1,6 +1,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+const { isValidProposalId } = require("../authority/model");
+
 /**
  * AETHERSELF SERVICE — satu resolver path kanonik (§Migration rule 5).
  *
@@ -159,10 +161,34 @@ function createAetherSelfService({
         return m ? Number(m[1]) : null;
     }
 
-    /** Tulis EvolutionProposal ke folder evolution/proposals (dokumen). */
+    /**
+     * Tulis EvolutionProposal ke folder evolution/proposals (dokumen).
+     *
+     * PATH-SAFETY (dua lapis, §path-safety):
+     *   1. proposalId wajib slug aman (validasi model).
+     *   2. Boundary filesystem: target di-resolve dan diverifikasi tetap
+     *      DI DALAM direktori proposals kanonik — tidak cukup bergantung
+     *      pada path.join.
+     */
     function writeEvolutionProposalDoc(proposal) {
-        const dir = path.join(canonicalDir, "evolution", "proposals");
-        const file = path.join(dir, `${proposal.proposalId}.md`);
+        if (!isValidProposalId(proposal?.proposalId)) {
+            throw new Error(
+                `proposalId tidak sah (slug [a-z0-9._-], maks 120): ` +
+                `'${String(proposal?.proposalId ?? "").slice(0, 80)}'`);
+        }
+
+        const dir = path.resolve(canonicalDir, "evolution", "proposals");
+        fs.mkdirSync(dir, { recursive: true });
+
+        const resolved = path.resolve(dir, `${proposal.proposalId}.md`);
+        const rel = path.relative(dir, resolved);
+        if (rel === "" || rel.startsWith("..") ||
+            path.isAbsolute(rel) || resolved.startsWith(`${dir}.`)) {
+            throw new Error(
+                "PERLANGKARAN PATH: proposalId keluar dari direktori " +
+                "proposals AetherSelf — penulisan ditolak.");
+        }
+
         const body = [
             `# EvolutionProposal ${proposal.proposalId}`,
             `- createdBy : ${proposal.createdBy}`,
@@ -179,8 +205,8 @@ function createAetherSelfService({
             "## RequiredCapabilities",
             ...(proposal.requiredCapabilities ?? []).map(c => `- ${c}`)
         ].join("\n");
-        fs.writeFileSync(file, body + "\n", "utf8");
-        return file;
+        fs.writeFileSync(resolved, body + "\n", "utf8");
+        return resolved;
     }
 
     return {
