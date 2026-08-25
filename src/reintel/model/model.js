@@ -143,7 +143,7 @@ function observedFact({ statement, evidenceIds = [], confidence = 1 }) {
         kind: FindingKind.OBSERVED_FACT,
         statement,
         evidenceIds: [...evidenceIds],
-        confidence: typeof confidence === "number" ? confidence : confidence
+        confidence
     };
 }
 

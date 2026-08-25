@@ -57,25 +57,33 @@ function deriveBehavioralClaims(evidence) {
     };
 
     for (const e of evidence) {
-        // Sinyal pola skrip.
-        const m = /^(\w+):\s/.exec(e.observation);
-        if (m && e.kind === "script_pattern") {
-            const claim = SCRIPT_CATEGORY_MAP[m[1]];
+        // Sinyal pola skrip: kategori diambil dari DATA TERSTRUKTUR.
+        // String observation tidak pernah di-parse ulang — konten skrip
+        // yang dikendalikan penyerang tidak bisa memalsukan kategori.
+        if (e.kind === "script_pattern") {
+            const category = e.structured?.category;
+            const claim = SCRIPT_CATEGORY_MAP[category];
             if (claim) add(claim, e.id, e.observation);
             continue;
         }
-        // Sinyal tabel import PE: "imports KERNEL32.dll: CreateFileW, ..."
+        // Sinyal tabel import PE: konsumsi DATA TERSTRUKTUR
+        // { dll, functions[] } — bukan string tampilan. Nama DLL/fungsi
+        // yang memuat ":" atau ", " tetap satu field literal sehingga
+        // tidak bisa mensintesis API palsu.
         if (e.kind === "import_table") {
-            const im = /^imports\s+(\S+?):\s*(.*)$/.exec(e.observation);
-            if (!im) continue;
-            const dll = im[1];
-            for (const rule of IMPORT_DLL_MAP) {
-                if (rule.re.test(dll)) add(rule.claim, e.id, e.observation);
+            const s = e.structured;
+            if (!s || s.kind !== "pe_imports") {
+                // Bukti tanpa data terstruktur = display-only; tidak
+                // boleh menjadi dasar klaim perilaku.
+                continue;
             }
-            const functions = im[2].split(", ").filter(Boolean);
-            for (const fn of functions) {
+            for (const rule of IMPORT_DLL_MAP) {
+                if (rule.re.test(s.dll)) add(rule.claim, e.id, e.observation);
+            }
+            for (const fn of s.functions) {
                 for (const rule of IMPORT_FUNCTION_MAP) {
-                    if (rule.re.test(fn)) add(rule.claim, e.id, `${dll}:${fn}`);
+                    if (rule.re.test(fn)) add(rule.claim, e.id,
+                        `${s.dll}:${fn}`);
                 }
             }
         }

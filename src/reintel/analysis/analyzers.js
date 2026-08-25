@@ -84,12 +84,20 @@ const peAnalyzer = defineAnalyzer({
         );
 
         // ---- imports ----------------------------------------------------
+        // DATA TERSTRUKTUR adalah sumber otoritatif inferensi; observation
+        // hanyalah tampilan. Nama DLL/fungsi dengan delimiter palsu tetap
+        // satu field literal dan tidak bisa menciptakan import tambahan.
         const importEvidenceIds = [];
         for (const imp of parsed.imports) {
             const id = ctx.addEvidence({
                 source: "pe-static",
                 kind: EvidenceKind.IMPORT_TABLE,
-                observation: `imports ${imp.dll}: ${imp.functions.join(", ") || "(kosong)"}`
+                observation: `imports ${imp.dll}: ${imp.functions.join(", ") || "(kosong)"}`,
+                structured: {
+                    kind: "pe_imports",
+                    dll: imp.dll,
+                    functions: [...imp.functions]
+                }
             });
             importEvidenceIds.push(id);
             ctx.addRelationship({
@@ -182,32 +190,36 @@ const scriptAnalyzer = defineAnalyzer({
             ctx.addObservedFact(`bahasa skrip terindikasi ${res.languageHint}`, [id]);
         }
 
-        for (const e of res.evidence) {
+        // Kategori TERSTRUKTUR adalah sumber inferensi; observation string
+        // hanya tampilan. URL untuk relasi REFERENCES juga diambil dari
+        // data terstruktur (bukan parsing ulang string tampilan).
+        for (const cat of res.categories) {
             const id = ctx.addEvidence({
                 source: "script-static",
-                kind: e.kind,
-                observation: e.observation,
-                location: e.location
+                kind: EvidenceKind.SCRIPT_PATTERN,
+                observation:
+                    `${cat.category}: ${cat.hits.map((h) => h.match).join(", ")}`,
+                location: { lines: cat.hits.slice(0, 5).map((h) => h.line) },
+                structured: {
+                    kind: "script_pattern_category",
+                    category: cat.category,
+                    matches: cat.hits.map((h) => h.match)
+                }
             });
-            if (/^url_reference/.test(e.observation)) {
-                for (const url of extractUrls(e.observation)) {
-                    ctx.addRelationship({
-                        type: RelationshipType.REFERENCES,
-                        target: url,
-                        note: "URL literal dalam skrip"
-                    });
+            if (cat.category === "url_reference") {
+                for (const h of cat.hits) {
+                    if (/^https?:\/\//.test(h.match)) {
+                        ctx.addRelationship({
+                            type: RelationshipType.REFERENCES,
+                            target: h.match,
+                            note: "URL literal dalam skrip"
+                        });
+                    }
                 }
             }
         }
     }
 });
-
-function extractUrls(observation) {
-    return observation.replace(/^url_reference:\s*/, "")
-        .split(", ")
-        .filter((u) => /^https?:\/\//.test(u))
-        .slice(0, 10);
-}
 
 // ---------------------------------------------------------------------
 // Strings extractor (untuk artifact biner)

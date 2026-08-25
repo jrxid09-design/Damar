@@ -35,7 +35,16 @@ const { HOOK_EVENTS } = require("./../hooks/futureHooks");
 const REPORT_SCHEMA_VERSION = 1;
 
 /**
- * Analisis artifact.
+ * Anggaran kerja KUMULATIF untuk seluruh pohon analisis dari satu root.
+ * Semua anak menarik dari objek yang SAMA — fan-out berbahaya tidak bisa
+ * menggandakan anggaran per-analisis. Deterministik: hitungan murni.
+ */
+function makeSharedWorkBudget() {
+    return { analyses: 0, bytes: 0 };
+}
+
+/**
+ * Analisis artifact (API publik).
  * @param {{path?: string, buffer?: Buffer, name?: string}} input
  * @param {{config?: object, overrides?: object, depth?: number,
  *          emit?: Function, nowEpochMs?: number,
@@ -43,11 +52,31 @@ const REPORT_SCHEMA_VERSION = 1;
  * @returns {Promise<object>} laporan deep-frozen.
  */
 async function analyzeArtifact(input, options = {}) {
+    // Root pohon: buat anggaran kumulatif baru. Panggilan rekursif internal
+    // menyuntikkan _shared agar seluruh pohon berbagi satu anggaran.
+    const shared = options._shared ?? makeSharedWorkBudget();
+    return analyzeInternal(input, options, shared);
+}
+
+async function analyzeInternal(input, options, shared) {
     const config = options.config ?? createReIntelConfig(undefined, options.overrides);
     const limits = config.limits;
     const bands = config.confidenceBands;
     const stagesExecuted = [];
     const diagnostics = [];
+    /** Kedalaman node ini dalam pohon analisis (root = 0). */
+    const depth = options.depth ?? 0;
+
+    // Satu slot analisis per node pohon — termasuk root. Root SELALU boleh
+    // jalan; hanya turunan yang bisa ditolak oleh anggaran kumulatif.
+    const isRoot = options._shared === undefined;
+    if (!isRoot && shared.analyses >= limits.maxTotalAnalyses) {
+        const err = new Error(
+            `REI_BUDGET_EXHAUSTED: anggaran kumulatif analisis (${limits.maxTotalAnalyses}) habis`);
+        err.code = "REI_BUDGET_EXHAUSTED";
+        throw err;
+    }
+    shared.analyses++;
 
     // ---- resolve sumber -------------------------------------------------
     let name = input.name ?? null;
@@ -81,14 +110,20 @@ async function analyzeArtifact(input, options = {}) {
         : sha256Buffer(buffer);
     const artifactId = deriveArtifactId(sha256, sizeBytes);
 
-    // ---- anggaran ukuran -------------------------------------------------
+    // ---- anggaran ukuran (per-node + kumulatif lintas pohon) -------------
+    // Byte artifact dihitung SEKALI ke anggaran kumulatif root.
+    shared.bytes += sizeBytes;
+    const cumulativeByteExhausted =
+        shared.bytes > limits.maxCumulativeAnalyzedBytes;
+
     if (sizeBytes > limits.maxFileBytes) {
         diagnostics.push({
             code: "BUDGET_LIMIT_REACHED",
             severity: "warning",
             message: `ukuran file ${sizeBytes} > anggaran maxFileBytes ${limits.maxFileBytes}; hanya identifikasi + hash`
         });
-    } else if (buffer === null && input.path !== undefined &&
+    } else if (!cumulativeByteExhausted && buffer === null &&
+               input.path !== undefined &&
                sizeBytes <= limits.maxDeepParseBytes) {
         buffer = readWholeFileBounded(input.path, sizeBytes);
     }
@@ -100,10 +135,46 @@ async function analyzeArtifact(input, options = {}) {
         });
         buffer = null;
     }
+    if (cumulativeByteExhausted) {
+        if (depth > 0 && buffer !== null) {
+            // Anak tidak boleh menambah beban deep-parse setelah anggaran
+            // byte kumulatif root jebol — analisis tetap valid sebagai parsial.
+            buffer = null;
+        }
+        // Terlihat di node mana pun yang menyentuh batas (root juga).
+        diagnostics.push({
+            code: "BUDGET_LIMIT_REACHED",
+            severity: "warning",
+            message: `anggaran byte kumulatif root terlampaui (${shared.bytes} > ${limits.maxCumulativeAnalyzedBytes}); deep-parse dibatasi`
+        });
+    }
 
     // ---- IDENTIFICATION ---------------------------------------------------
     stagesExecuted.push(AnalysisStage.IDENTIFICATION);
-    const idres = identifyArtifact(header, { name, sizeBytes }, limits, bands);
+    // Batas pertahanan: kegagalan identifikasi akibat byte hostile TIDAK
+    // BOLEH merusak API publik — degradasi aman ke UNKNOWN.
+    let idres;
+    try {
+        idres = identifyArtifact(header, { name, sizeBytes }, limits, bands);
+    } catch (err) {
+        diagnostics.push({
+            code: "IDENTIFICATION_FAILED",
+            severity: "error",
+            message: `identifikasi gagal aman atas byte hostile: ${String(err?.message).slice(0, 200)}`
+        });
+        idres = {
+            type: "UNKNOWN",
+            confidenceScore: 0.05,
+            basis: ["identification-failed"],
+            evidence: [{
+                source: "identification",
+                kind: "content_heuristic",
+                observation: "identifikasi gagal; klasifikasi aman UNKNOWN sampai dipelajari ulang"
+            }],
+            entropy: 0,
+            nonPrintableRatio: 1
+        };
+    }
 
     const descriptor = freezeDeep({
         artifactId,
@@ -157,21 +228,42 @@ async function analyzeArtifact(input, options = {}) {
     const behavioralClaims = deriveBehavioralClaims(res.evidence);
 
     // ---- embedded artifacts + rekursi berbudget ------------------------------
+    // Rekursi tunduk pada DUA anggaran independen:
+    //   - kedalaman (maxRecursionDepth) per rantai
+    //   - fan-out per node + slot analisis & byte KUMULATIF root (shared)
     const embeddedArtifacts = res.embeddedArtifacts;
     const embeddedAnalyses = [];
-    const depth = options.depth ?? 0;
     if (options.analyzeEmbedded !== false &&
         embeddedArtifacts.length > 0 &&
         depth < limits.maxRecursionDepth &&
         buffer !== null) {
-        const MAX_RECURSED = 4;
-        for (const emb of embeddedArtifacts.slice(0, MAX_RECURSED)) {
+        for (const emb of embeddedArtifacts.slice(0, limits.maxEmbeddedFanoutPerNode)) {
+            if (shared.analyses >= limits.maxTotalAnalyses) {
+                diagnostics.push({
+                    code: "BUDGET_LIMIT_REACHED",
+                    severity: "warning",
+                    message: `anggaran kumulatif analisis anak habis (${shared.analyses}/${limits.maxTotalAnalyses}); ${embeddedArtifacts.length} embedded tidak seluruhnya dianalisis`
+                });
+                break;
+            }
             try {
-                const child = await analyzeArtifact(
+                const child = await analyzeInternal(
                     { buffer: buffer.subarray(emb.offset), name: `embedded@${emb.offset}` },
-                    { ...options, depth: depth + 1 }
+                    { ...options, depth: depth + 1, _shared: shared },
+                    shared
                 );
                 embeddedAnalyses.push(child);
+                // Propagasi visibilitas: batas kumulatif yang kena di anak
+                // juga tampak di laporan orang tua.
+                for (const cd of child.diagnostics) {
+                    if (cd.code === "BUDGET_LIMIT_REACHED") {
+                        diagnostics.push({
+                            code: "BUDGET_LIMIT_REACHED",
+                            severity: "warning",
+                            message: `anak @${emb.offset}: ${cd.message}`
+                        });
+                    }
+                }
                 res.relationships.push({
                     id: `rel-emb-${emb.index}`,
                     type: "CONTAINS",
@@ -180,10 +272,13 @@ async function analyzeArtifact(input, options = {}) {
                 });
             } catch (err) {
                 diagnostics.push({
-                    code: "EMBEDDED_ANALYSIS_FAILED",
+                    code: err?.code === "REI_BUDGET_EXHAUSTED"
+                        ? "BUDGET_LIMIT_REACHED"
+                        : "EMBEDDED_ANALYSIS_FAILED",
                     severity: "warning",
-                    message: `analisis embedded @${emb.offset} gagal: ${String(err?.message).slice(0, 200)}`
+                    message: `analisis embedded @${emb.offset} berhenti: ${String(err?.message).slice(0, 200)}`
                 });
+                if (err?.code === "REI_BUDGET_EXHAUSTED") break;
             }
         }
     } else if (embeddedArtifacts.length > 0 && depth >= limits.maxRecursionDepth) {
@@ -260,6 +355,15 @@ async function analyzeArtifact(input, options = {}) {
             protocolCaptureAnalysisAvailable: false,
             note: "V0 statis saja; lihat hooks/futureHooks.js"
         }),
+        /** Transparansi anggaran kumulatif pohon (deterministik). */
+        workBudget: {
+            analysesUsedInTree: shared.analyses,
+            bytesProcessedInTree: shared.bytes,
+            limits: {
+                maxTotalAnalyses: limits.maxTotalAnalyses,
+                maxCumulativeAnalyzedBytes: limits.maxCumulativeAnalyzedBytes
+            }
+        },
         generatedAtEpochMs: options.nowEpochMs ?? null
     };
 

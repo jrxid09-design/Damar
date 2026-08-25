@@ -87,7 +87,45 @@ function readAsciiZ(buf, offset, maxLen = 512) {
 
 /** Flag apakah buffer tampak PE (MZ + signature PE\0\0 pada e_lfanew). */
 function looksLikePe(buf) {
-    return looksLikePeAt(buf, 0);
+    return probePeHeader(buf).ok;
+}
+
+/**
+ * Probe header PE dengan range-check PENUH — aman untuk artifact hostile.
+ * Tidak pernah melempar; setiap pembacaan fixed-offset diverifikasi batasnya
+ * SEBELUM dibaca. Dipakai identifikasi agar MZ terpotong tidak menyebabkan
+ * RangeError pada pembacaan karakteristik COFF.
+ */
+function probePeHeader(buf) {
+    try {
+        if (!buf || buf.length < DOS_HEADER_SIZE) {
+            return { ok: false, reason: "too-short" };
+        }
+        if (buf[0] !== 0x4d || buf[1] !== 0x5a) {
+            return { ok: false, reason: "no-mz" };
+        }
+        const lfaNew = u32(buf, 0x3c);
+        if (!Number.isInteger(lfaNew) ||
+            lfaNew < DOS_HEADER_SIZE ||
+            lfaNew + 4 + COFF_HEADER_SIZE > buf.length) {   // COFF utuh wajib muat
+            return { ok: false, reason: "coff-out-of-range" };
+        }
+        const sigOff = lfaNew;
+        if (!(buf[sigOff] === 0x50 && buf[sigOff + 1] === 0x45 &&
+              buf[sigOff + 2] === 0 && buf[sigOff + 3] === 0)) {
+            return { ok: false, reason: "no-pe-sig" };
+        }
+        // Karakteristik COFF berada di sigOff(+4 ukuran signature) + 18.
+        const characteristics = u16(buf, sigOff + 4 + 18);
+        return {
+            ok: true,
+            isDll: (characteristics & 0x2000) !== 0,
+            characteristics
+        };
+    } catch {
+        // Pertahanan terakhir: byte hostile tidak boleh mengganggu identifikasi.
+        return { ok: false, reason: "probe-error" };
+    }
 }
 
 /** Varian offset — untuk pemindaian embedded artifact. */
@@ -131,11 +169,15 @@ function parsePe(buffer, limits) {
     const isDll = (characteristics & 0x2000) !== 0;
 
     // ---- Optional header ---------------------------------------------
+    // SizeOfOptionalHeader adalah BATAS NYATA: setiap pembacaan field
+    // wajib berada di dalam [optOff, optEnd) DAN di dalam buffer.
     const optOff = coffOff + COFF_HEADER_SIZE;
-    if (sizeOfOptionalHeader < 2 || optOff + sizeOfOptionalHeader > buffer.length) {
+    const optEnd = optOff + sizeOfOptionalHeader;
+    if (sizeOfOptionalHeader < 2 || optEnd > buffer.length) {
         diag("PE_TRUNCATED", "optional header melewati akhir file");
         return { ok: false, diagnostics };
     }
+
     const optMagic = u16(buffer, optOff);
     let pe32Plus;
     if (optMagic === 0x20b) pe32Plus = true;
@@ -145,24 +187,53 @@ function parsePe(buffer, limits) {
         return { ok: false, diagnostics };
     }
 
+    // Bagian tetap minimum sebelum data directory (PE32+: 112, PE32: 96).
+    const minOptFixed = pe32Plus ? 112 : 96;
+    /** Field pada offset relatif optOff valid hanya jika muat dalam batas ganda. */
+    const canReadOpt = (relOffset, len) =>
+        relOffset >= 0 &&
+        optOff + relOffset + len <= optEnd &&          // dalam declared header
+        optOff + relOffset + len <= buffer.length;     // dalam buffer
+
+    if (!canReadOpt(minOptFixed - 4, 4)) {
+        diag("PE_TRUNCATED",
+            `SizeOfOptionalHeader=${sizeOfOptionalHeader} terlalu kecil untuk field wajib ${pe32Plus ? "PE32+" : "PE32"} (butuh >= ${minOptFixed})`);
+        return { ok: false, diagnostics };
+    }
+    if (!canReadOpt(16, 4)) {
+        diag("PE_TRUNCATED", "AddressOfEntryPoint di luar batas optional header");
+        return { ok: false, diagnostics };
+    }
+    if (!canReadOpt(68, 2)) {
+        diag("PE_TRUNCATED", "Subsystem di luar batas optional header");
+        return { ok: false, diagnostics };
+    }
+
     const addressOfEntryPoint = u32(buffer, optOff + 16);
-    const subsystemRaw = pe32Plus ? u16(buffer, optOff + 68) : u16(buffer, optOff + 68);
-    const numberOfRvaAndSizes = u32(buffer,
-        optOff + (pe32Plus ? 108 : 92));
-    const dataDirsOff = optOff + (pe32Plus ? 112 : 96);
+    const subsystemRaw = u16(buffer, optOff + 68);
+    const numberOfRvaAndSizes = canReadOpt(pe32Plus ? 108 : 92, 4)
+        ? u32(buffer, optOff + (pe32Plus ? 108 : 92))
+        : 0;
+    const dataDirsOff = optOff + minOptFixed;
     const dataDirSize = 8;
 
     const dataDirs = [];
-    const maxDataDirs = Math.min(numberOfRvaAndSizes, 16);
-    if (dataDirsOff + maxDataDirs * dataDirSize > buffer.length) {
-        diag("PE_TRUNCATED", "data directory melewati akhir file");
-        return { ok: false, diagnostics };
+    let maxDataDirs = Math.min(numberOfRvaAndSizes, 16);
+    const dirsLimit = Math.min(optEnd, buffer.length);
+    if (dataDirsOff + maxDataDirs * dataDirSize > dirsLimit) {
+        const fits = Math.max(0,
+            Math.floor((dirsLimit - dataDirsOff) / dataDirSize));
+        diag("PE_TRUNCATED",
+            `data directory terpotong: ${maxDataDirs} dideklarasikan, hanya ${fits} muat`);
+        maxDataDirs = Math.min(maxDataDirs, fits);
     }
     for (let i = 0; i < maxDataDirs; i++) {
+        const dOff = dataDirsOff + i * dataDirSize;
+        if (dOff + dataDirSize > buffer.length) break;   // pertahanan ganda
         dataDirs.push({
             name: DATA_DIR_NAMES[i] ?? `dir_${i}`,
-            rva: u32(buffer, dataDirsOff + i * dataDirSize),
-            size: u32(buffer, dataDirsOff + i * dataDirSize + 4)
+            rva: u32(buffer, dOff),
+            size: u32(buffer, dOff + 4)
         });
     }
 
@@ -244,7 +315,6 @@ function parsePe(buffer, limits) {
         if (descOff === null) {
             diag("PE_BAD_OFFSET", `RVA import directory tak terpetakan: 0x${importDir.rva.toString(16)}`);
         } else {
-            let budgetHit = false;
             for (let i = 0; i < limits.maxImportDlls; i++) {
                 const eo = descOff + i * IMPORT_DESCRIPTOR_SIZE;
                 if (eo + IMPORT_DESCRIPTOR_SIZE > fileSize) {
@@ -258,7 +328,6 @@ function parsePe(buffer, limits) {
 
                 if (imports.length >= limits.maxImports) {
                     diag("BUDGET_LIMIT_REACHED", "batas import tercapai; sisanya diabaikan");
-                    budgetHit = true;
                     break;
                 }
                 const dllName = safeAsciiAtRva(nameRva, 512);
@@ -279,17 +348,24 @@ function parsePe(buffer, limits) {
                     ? 0x8000000000000000n : 0x80000000n;
                 const tsize = pe32Plus ? 8 : 4;
                 for (let t = 0; t < limits.maxImports; t++) {
-                    if (toff + tsize > fileSize) {
-                        diag("PE_TRUNCATED", `thunk ${dllName} melewati akhir file`);
+                    // Validasi pembacaan ITERASI INI: toff + (t+1)*tsize.
+                    // Guard lama (toff + tsize) hanya mengamati iterasi 0 —
+                    // array thunk yang mencapai EOF tanpa terminator
+                    // membaca di luar batas.
+                    const readEnd = toff + (t + 1) * tsize;
+                    if (!Number.isSafeInteger(readEnd) || readEnd > fileSize) {
+                        diag("PE_TRUNCATED",
+                            `array thunk ${dllName} mencapai akhir file tanpa terminator; hasil parsial dipertahankan`);
                         break;
                     }
                     let thunkVal, isOrdinal, targetRva;
+                    const readAt = toff + t * tsize;
                     if (pe32Plus) {
-                        thunkVal = buffer.readBigUInt64LE(toff + t * tsize);
+                        thunkVal = buffer.readBigUInt64LE(readAt);
                         isOrdinal = (thunkVal & ordinalFlag) !== 0n;
                         targetRva = Number(thunkVal & 0x7fffffffn);
                     } else {
-                        thunkVal = BigInt(u32(buffer, toff + t * tsize));
+                        thunkVal = BigInt(u32(buffer, readAt));
                         isOrdinal = (thunkVal & ordinalFlag) !== 0n;
                         targetRva = Number(thunkVal & 0x7fffffffn);
                     }
@@ -384,4 +460,6 @@ const DATA_DIR_NAMES = Object.freeze([
     "iat", "delay_import_descriptor", "com_runtime_descriptor", "reserved"
 ]);
 
-module.exports = { parsePe, looksLikePe, looksLikePeAt, readAsciiZ, MACHINE_NAMES };
+module.exports = {
+    parsePe, looksLikePe, looksLikePeAt, probePeHeader, readAsciiZ, MACHINE_NAMES
+};

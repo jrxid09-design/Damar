@@ -42,6 +42,18 @@ const DEFAULTS = Object.freeze({
         maxEmbeddedArtifacts: 16,
         /** Kedalaman rekursi analisis embedded artifact. */
         maxRecursionDepth: 3,
+        /** Maksimum anak embedded yang dianalisis per node (fan-out). */
+        maxEmbeddedFanoutPerNode: 4,
+
+        /**
+         * Anggaran kerja KUMULATIF seluruh pohon analisis dari satu root.
+         * Semua node (root + turunan) berbagi hitungan yang sama — fan-out
+         * adversarial tidak bisa menggandakan anggaran per-analisis.
+         */
+        /** Slot analisis total (root + semua turunan) per pohon. */
+        maxTotalAnalyses: 24,
+        /** Total byte artifact yang diproses (hash/deep-parse) per pohon. */
+        maxCumulativeAnalyzedBytes: 128 * 1024 * 1024,
         /** Panjang maksimum literal yang disimpan sebagai bukti. */
         maxEvidenceLiteralChars: 256,
         /** Batas match per kategori pola skrip. */

@@ -60,13 +60,20 @@ function makeAnalysisContext({ descriptor, header, buffer, limits, bands }) {
         limits,
         bands,
 
-        addEvidence({ source, kind, observation, location }) {
+        /**
+         * Tambah bukti. `structured` (opsional) membawa DATA TERSTRUKTUR
+         * yang menjadi sumber otoritatif inferensi — string `observation`
+         * hanyalah tampilan dan tidak boleh di-parse ulang untuk menurunkan
+         * klaim (nama DLL/fungsi bisa memuat delimiter palsu).
+         */
+        addEvidence({ source, kind, observation, location, structured }) {
             const item = freezeDeep({
                 id: `ev-${String(++seq).padStart(4, "0")}`,
                 source,
                 kind,
                 observation,
-                ...(location ? { location: freezeDeep(location) } : {})
+                ...(location ? { location: freezeDeep(location) } : {}),
+                ...(structured ? { structured: freezeDeep(structured) } : {})
             });
             evidence.push(item);
             return item.id;

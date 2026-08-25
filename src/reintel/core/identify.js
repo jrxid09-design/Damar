@@ -17,7 +17,7 @@
 const {
     ArtifactType, EvidenceKind, freezeDeep
 } = require("../model/model");
-const { looksLikePe } = require("./pe");
+const { probePeHeader } = require("./pe");
 const { shannonEntropy } = require("./entropy");
 
 const MAGIC_CHECKS = [
@@ -108,21 +108,20 @@ function identifyArtifact(header, meta, limits, bands) {
     }
 
     if (magicHit?.label === "MZ") {
-        if (looksLikePe(header)) {
-            // Bedakan DLL vs EXE lewat karakteristik COFF (bit 0x2000).
-            const lfaNew = header.readUInt32LE(0x3c);
-            const characteristics = header.readUInt16LE(lfaNew + 4 + 18);
-            const isDll = (characteristics & 0x2000) !== 0;
-            type = isDll ? ArtifactType.PE_DLL : ArtifactType.PE_EXECUTABLE;
+        // Probe range-checked PENUH: MZ terpotong tidak boleh menyebabkan
+        // pembacaan di luar batas — degradasi aman ke BINARY + bukti.
+        const probe = probePeHeader(header);
+        if (probe.ok) {
+            type = probe.isDll ? ArtifactType.PE_DLL : ArtifactType.PE_EXECUTABLE;
             score = 0.95;
             ev(EvidenceKind.MAGIC_BYTES, `magic MZ + signature PE valid (${type})`);
             ev(EvidenceKind.HEADER_FIELD,
-                `COFF characteristics 0x${characteristics.toString(16)} → ${isDll ? "DLL" : "executable"}`);
+                `COFF characteristics 0x${probe.characteristics.toString(16)} → ${probe.isDll ? "DLL" : "executable"}`);
         } else {
             type = ArtifactType.BINARY;
             score = 0.5;
             ev(EvidenceKind.MAGIC_BYTES,
-                "magic MZ tanpa signature PE valid (DOS stub / self-extract?)");
+                `magic MZ tanpa struktur PE yang dapat divalidasi (${probe.reason}) — DOS stub / terpotong / korup`);
         }
         basis.push("magic:MZ");
     } else if (magicHit) {
@@ -187,16 +186,11 @@ function identifyArtifact(header, meta, limits, bands) {
     // extension-vs-klasifikasi wajib tampak.
     if (ext !== "" && magicHit) {
         const extImpliesText = isPlainTextExtension(ext);
-        const contradicts =
-            (extImpliesText && type !== ArtifactType.TEXT) ||
-            (!extImpliesText && false);
+        const contradicts = extImpliesText && type !== ArtifactType.TEXT;
         ev(EvidenceKind.EXTENSION,
             contradicts
                 ? `extension "${ext}" TIDAK SESUAI dengan klasifikasi struktural ${type} — extension tidak otoritatif`
                 : `extension "${ext}" (bukti sekunder)`);
-        if (contradicts) {
-            score = Math.min(score, 0.9); // tetap tinggi: struktur menang
-        }
     }
 
     return freezeDeep({

@@ -93,7 +93,6 @@ function analyzeScript(buffer, limits) {
     const categoryHits = new Map();
     const maxPerCat = limits.maxScriptMatchesPerCategory;
 
-    outer:
     for (let li = 0; li < lines.length && li <= 100000; li++) {
         const line = lines[li];
 
@@ -125,6 +124,13 @@ function analyzeScript(buffer, limits) {
         if (urlHits.length) categoryHits.set("url_reference", urlHits);
     }
 
+    // Kategori TERSTRUKTUR — sumber otoritatif inferensi. String tampilan
+    // di `evidence` tidak boleh di-parse ulang untuk menurunkan klaim.
+    const categories = [...categoryHits.entries()].map(([category, hits]) => ({
+        category,
+        hits: freezeDeep(hits)
+    }));
+
     for (const [category, hits] of categoryHits) {
         pushEvidence(
             EvidenceKind.SCRIPT_PATTERN,
@@ -136,6 +142,7 @@ function analyzeScript(buffer, limits) {
     return freezeDeep({
         languageHint,
         evidence,
+        categories,
         scannedChars: scanLen,
         truncated: scanLen < buffer.length
     });
