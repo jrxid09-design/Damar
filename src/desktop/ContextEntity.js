@@ -2,8 +2,10 @@
  * CONTEXT ENTITY — simpul semantik immutable dalam graf desktop.
  *
  * Entitas dibekukan (Object.freeze): perubahan observasi menghasilkan
- * revisi baru, bukan mutasi. Provenance dan confidence wajib ada agar
- * setiap penafsiran bisa ditelusuri kembali ke adapter sumbernya.
+ * versi kanonik baru, bukan mutasi. `provenance` selalu identitas
+ * adapter TERDAFTAR (fakta tepercaya yang dicap core — B5); klaim
+ * provenance dari payload event disimpan terpisah di
+ * `claimedProvenance` sebagai metadata tak tepercaya.
  */
 
 const { ENTITY_TYPE } = require("./types");
@@ -15,6 +17,7 @@ function create({
     attributes = {},
     confidence = 1,
     provenance,
+    claimedProvenance = null,
     observedAt = null,
     revision = 1
 }) {
@@ -39,6 +42,7 @@ function create({
         attributes: deepFreeze({ ...(attributes ?? {}) }),
         confidence: conf,
         provenance: String(provenance ?? "unknown"),
+        claimedProvenance: typeof claimedProvenance === "string" ? claimedProvenance : null,
         observedAt: Number.isFinite(observedAt) ? observedAt : null,
         revision: Math.max(1, Math.floor(revision)),
         invalid: false,
@@ -47,26 +51,9 @@ function create({
 
 }
 
-/** Versi baru entitas (revisi naik); entitas lama tidak diubah. */
-function withRevision(entity, patch, { observedAt } = {}) {
-    return create({
-        id: entity.id,
-        type: entity.type,
-        label: patch.label ?? entity.label,
-        attributes: patch.attributes ?? entity.attributes,
-        confidence: patch.confidence ?? entity.confidence,
-        provenance: entity.provenance,
-        observedAt: observedAt ?? entity.observedAt,
-        revision: entity.revision + 1
-    });
-}
-
-function markInvalid(entity, staleReason) {
-    return Object.freeze({
-        ...entity,
-        invalid: true,
-        staleReason: String(staleReason ?? "invalidated")
-    });
+/** Salinan ber-revisi (payload sama, nomor revisi naik). */
+function withRevision(entity, revision) {
+    return Object.freeze({ ...entity, revision: Math.max(1, Math.floor(revision)) });
 }
 
 function deepFreeze(value) {
@@ -79,4 +66,4 @@ function deepFreeze(value) {
     return value;
 }
 
-module.exports = { create, withRevision, markInvalid, deepFreeze };
+module.exports = { create, withRevision, deepFreeze };

@@ -1,12 +1,14 @@
 /**
- * CONTEXT OBSERVATION — validasi event observasi desktop.
+ * CONTEXT OBSERVATION — validasi struktural event observasi desktop.
  *
  * Setiap event dari adapter harus punya: observationId stabil,
- * timestamp, sumber (adapterId terdaftar + trusted), subject
- * ternormalisasi (boleh null), dan payload. Event cacat DITOLAK
- * secara diagnostik — tidak pernah diam-diam diperbaiki, karena
- * observasi yang "ditebak" akan mengotori realitas yang justru
- * ingin dijaga substrate ini.
+ * timestamp, sumber (adapterId — kepercayaan DITENTUKAN registrasi
+ * core, bukan klaim payload), subject ternormalisasi (boleh null),
+ * dan payload. Event cacat DITOLAK secara diagnostik — tidak pernah
+ * diam-diam diperbaiki.
+ *
+ * Batas ini HANYA bentuk. Keputusan semantik (kepercayaan sumber,
+ * kapabilitas, urutan kanonik, atomisitas) ada di DesktopContextCore.
  */
 
 const { DESKTOP_EVENT, ENTITY_TYPE, RELATIONSHIP } = require("./types");
@@ -64,7 +66,11 @@ function validate(raw) {
             label: String(e.label ?? ""),
             attributes: isPlainObject(e.attributes) ? e.attributes : {},
             confidence: normalizeConfidence(e.confidence),
-            provenance: String(e.provenance ?? `adapter:${raw.source.adapterId}`)
+            // Klaim provenance dari payload — TIDAK dipercaya sebagai
+            // identitas kanonik; core mencap provenance dari registrasi.
+            claimedProvenance: typeof e.provenance === "string" && e.provenance
+                ? e.provenance
+                : null
         });
     }
 
@@ -94,9 +100,7 @@ function validate(raw) {
             observationId: raw.observationId,
             timestamp,
             source: Object.freeze({
-                adapterId: raw.source.adapterId,
-                trusted: raw.source.trusted !== false,
-                provenance: String(raw.source.provenance ?? `adapter:${raw.source.adapterId}`)
+                adapterId: raw.source.adapterId
             }),
             subject: raw.subject ?? null,
             entities,

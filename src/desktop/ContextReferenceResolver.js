@@ -11,7 +11,7 @@
  * TIDAK menebak — mengembalikan status AMBIGUOUS beserta kandidat.
  */
 
-const { ENTITY_TYPE, REASON_CODE, TRANSITION } = require("./types");
+const { ENTITY_TYPE, REASON_CODE } = require("./types");
 
 const RESOLUTION_KIND = {
     ACTIVE_APPLICATION: "active_application",
@@ -154,7 +154,6 @@ function resolveRecentContext(view, constraints) {
         }
     }
 
-    void TRANSITION;
     return unavailable([], REASON_CODE.CONSTRAINT_UNMATCHED,
         "tidak ada entitas hidup dalam riwayat yang cocok constraint");
 }

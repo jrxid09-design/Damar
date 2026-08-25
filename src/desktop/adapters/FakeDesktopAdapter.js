@@ -5,40 +5,50 @@
  * eksplisit, emit hanya saat berjalan, id stabil lintas observasi,
  * metadata-first (tanpa byte gambar, tanpa clipboard history), dan
  * TANPA loop tangkapan-layar kontinu (tidak ada timer/polling di sini).
+ *
+ * Identitas observasi menyertakan nonce instance (B4):
+ *   fake-desktop:<instanceNonce>:<sequence>
+ * sehingga restart adapter tidak menabrak ID instance sebelumnya.
  */
 
+const crypto = require("node:crypto");
 const { DESKTOP_EVENT, ENTITY_TYPE, RELATIONSHIP } = require("../types");
 
 const ADAPTER_ID = "fake-desktop";
+
+/** Kapabilitas penuh untuk skenario pengujian. */
+const CAPABILITIES = Object.freeze([
+    "active_window_metadata",
+    "document_context",
+    "text_selection_metadata",
+    "file_selection",
+    "visual_reference_only",
+    "workspace_context",
+    "clipboard_metadata",
+    "context_invalidation"
+]);
 
 class FakeDesktopAdapter {
 
     /**
      * `emit` adalah sink yang diberikan host (biasanya core.ingest).
-     * Sequencer clock di-inject supaya deterministik penuh.
+     * Clock di-inject supaya deterministik penuh.
      */
-    constructor({ emit, clock = () => Date.now(), sequencer } = {}) {
+    constructor({ emit, clock = () => Date.now(), instanceNonce = null } = {}) {
         if (typeof emit !== "function") {
             throw new Error("FakeDesktopAdapter butuh sink emit.");
         }
         this._emit = emit;
         this._clock = clock;
-        let n = 0;
-        this._seq = sequencer ?? { nextId: (l) => `${ADAPTER_ID}-${l}-${String(++n).padStart(4, "0")}` };
+        this._nonce = instanceNonce ??
+            crypto.randomBytes(6).toString("hex");
+        this._seq = 0;
         this._running = false;
-
-        /** Kapabilitas metadata-only; sadapkan di tes anti-surveillance. */
-        this.capabilities = Object.freeze([
-            "active_window_metadata",
-            "document_context",
-            "text_selection_metadata",
-            "file_selection",
-            "visual_reference_only",
-            "workspace_context"
-        ]);
+        this.capabilities = CAPABILITIES;
     }
 
     get adapterId() { return ADAPTER_ID; }
+    get instanceNonce() { return this._nonce; }
     get isRunning() { return this._running; }
 
     start() {
@@ -236,15 +246,13 @@ class FakeDesktopAdapter {
     }
 
     _send(spec) {
-        void spec; // bentuk final disusun di bawah
+        this._seq += 1;
         return this._emit({
             type: spec.type,
-            observationId: this._seq.nextId("obs"),
+            observationId: `${ADAPTER_ID}:${this._nonce}:${String(this._seq).padStart(4, "0")}`,
             timestamp: this._clock(),
             source: {
-                adapterId: ADAPTER_ID,
-                trusted: true,
-                provenance: `adapter:${ADAPTER_ID}`
+                adapterId: ADAPTER_ID
             },
             subject: spec.subject ?? null,
             entities: spec.entities ?? [],
@@ -261,4 +269,4 @@ class FakeDesktopAdapter {
 
 }
 
-module.exports = { FakeDesktopAdapter, ADAPTER_ID };
+module.exports = { FakeDesktopAdapter, ADAPTER_ID, CAPABILITIES };
