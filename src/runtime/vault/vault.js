@@ -63,7 +63,8 @@ function createSecretVault(options = {}) {
     const own = (k) => (Object.prototype.hasOwnProperty.call(options, k) ? options[k] : undefined);
 
     function diag(op, secretId, outcome, detail) {
-        return diagnostics.record({ at: now() }, op, secretId, outcome, detail);
+        // Single-object contract (B4): fields land in their intended slots.
+        return diagnostics.record({ at: now(), op, secretId, outcome, detail });
     }
 
     function loadRecord(ref) {
@@ -158,13 +159,30 @@ function createSecretVault(options = {}) {
         return null;
     }
 
-    /** THE trusted disclosure path. Returns a SecretValue, never a string. */
+    /**
+     * THE trusted disclosure path. Returns a SecretValue, never a string.
+     *
+     * SCOPE LAW (B1): the scope inside a caller-supplied SecretRef is a
+     * CLAIM. The canonical record's scope is TRUTH. Scope-constrained
+     * resolution compares against the canonical record — and additionally
+     * requires the ref's claimed scope to match it, so a forged ref can
+     * never redefine a secret's canonical scope.
+     */
     function resolve(ref, resolveOptions = {}) {
         const { r, rec } = loadRecord(ref);
-        if (resolveOptions.expectedScope !== undefined &&
-            !scopeMod.scopeEquals(resolveOptions.expectedScope, r.scope)) {
-            diag("resolve", r.secretId, "denied:VAULT_SCOPE_MISMATCH");
-            return makeDeny(VAULT_ERROR_CODES.VAULT_SCOPE_MISMATCH, "cross-scope resolution denied");
+        if (resolveOptions.expectedScope !== undefined) {
+            if (!rec) {
+                diag("resolve", r.secretId, "denied:VAULT_NOT_FOUND");
+                return makeDeny(VAULT_ERROR_CODES.VAULT_NOT_FOUND, "secret does not exist");
+            }
+            if (!scopeMod.scopeEquals(resolveOptions.expectedScope, rec.scope)) {
+                diag("resolve", r.secretId, "denied:VAULT_SCOPE_MISMATCH");
+                return makeDeny(VAULT_ERROR_CODES.VAULT_SCOPE_MISMATCH, "cross-scope resolution denied");
+            }
+            if (!scopeMod.scopeEquals(r.scope, rec.scope)) {
+                diag("resolve", r.secretId, "denied:VAULT_SCOPE_MISMATCH");
+                return makeDeny(VAULT_ERROR_CODES.VAULT_SCOPE_MISMATCH, "forged reference scope denied");
+            }
         }
         const denied = denyFor(rec);
         if (denied) {
@@ -188,11 +206,23 @@ function createSecretVault(options = {}) {
         return makeOk(valueMod.secretValue(clear));
     }
 
-    /** Scoped resolution helper: refuses cross-scope lookups up front. */
+    /**
+     * Scoped resolution helper (B1 required shape):
+     *   1. parse/validate ref
+     *   2. load canonical record by secretId
+     *   3. compare expectedScope against the CANONICAL record scope
+     *   4. also require ref.scope == canonical scope (forged-ref defense)
+     *   5. only then resolve
+     */
     function resolveIn(scope, ref) {
         const s = scopeMod.coerceSecretScope(scope);
         const r = refs.coerceSecretRef(ref);
-        if (!scopeMod.scopeEquals(s, r.scope)) {
+        const rec = store.get(r.secretId);
+        if (!rec) {
+            diag("resolveIn", r.secretId, "denied:VAULT_NOT_FOUND");
+            return makeDeny(VAULT_ERROR_CODES.VAULT_NOT_FOUND, "secret does not exist");
+        }
+        if (!scopeMod.scopeEquals(s, rec.scope)) {
             diag("resolveIn", r.secretId, "denied:VAULT_SCOPE_MISMATCH");
             return makeDeny(VAULT_ERROR_CODES.VAULT_SCOPE_MISMATCH, "cross-scope resolution denied");
         }

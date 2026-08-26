@@ -5,10 +5,13 @@ const { invalidInput } = require("./errors");
 /**
  * Defensive redaction.
  *
- * The RedactionRegistry keeps a BOUNDED set of currently-active secret
- * value strings so that any text leaving the vault boundary (diagnostics,
- * error context, test-visible snapshots) can be scrubbed of accidental
- * value leakage. Entries are dropped on rotation/revoke/delete.
+ * TRUST BOUNDARY (advisory, binding): scrubText/scrubDeep are host-side
+ * hygiene tools for the vault's OWN outputs (diagnostics, error context,
+ * snapshots). They must NOT be exposed as an unrestricted
+ * credential-testing oracle to untrusted extensions or transports:
+ * observing whether scrubbed output changed reveals whether a guessed
+ * string was a tracked secret. Extension-facing surfaces may only ever
+ * receive already-scrubbed text, never the scrubber itself.
  *
  * The registry is a defense-in-depth sink, not a permission: values are
  * never exposed *because* they are registered here.
