@@ -9,8 +9,9 @@ const {
     isRefValue
 } = require("./ids");
 const { LedgerError, CODES } = require("./errors");
-const { canonicalJson } = require("./canonicalJson");
+const { CanonicalizationError, canonicalJson } = require("./canonicalJson");
 const { sanitizeMetadata } = require("./redact");
+const { snapshotEventInput } = require("./snapshot");
 
 /**
  * Audit Ledger V1 — event model.
@@ -189,16 +190,25 @@ const ALLOWED_INPUT_KEYS = Object.freeze([
 
 /**
  * Validate + normalize one append request into a frozen record shell.
+ *
+ * B1 BOUNDARY: the ENTIRE input is snapshotted into plain inert data
+ * ONCE (snapshotEventInput) before any semantic validation. Every read
+ * below — including "validate then store" pairs — operates on that
+ * snapshot exclusively, so a getter/Proxy returning different values
+ * across reads cannot split validated content from stored content.
  * Sequence/integrity fields are attached by the ledger, not here.
  *
  * @returns {object} frozen partial record (without sequence/integrity)
  */
-function buildEventRecord(input, bounds) {
-    if (input === null || typeof input !== "object" || Array.isArray(input)) {
+function buildEventRecord(rawInput, bounds) {
+    if (rawInput === null || typeof rawInput !== "object" || Array.isArray(rawInput)) {
         throw new LedgerError(CODES.NOT_APPENDABLE, "event input must be an object");
     }
 
-    // Reject non-own/injected keys as well as unknown ones.
+    // ---- single snapshot boundary (B1 + shared B2 budget) ----------
+    const { snapshot: input, budget } = snapshotEventInput(rawInput, bounds);
+
+    // ---- everything below reads ONLY the inert snapshot ------------
     const keys = Object.keys(input);
     for (const key of keys) {
         if (!ALLOWED_INPUT_KEYS.includes(key)) {
@@ -242,9 +252,11 @@ function buildEventRecord(input, bounds) {
 
     // Metadata goes through the redaction boundary LAST so secret-shaped
     // values cannot survive validation even when everything else is fine.
+    // The SAME traversal budget threads through snapshot + sanitization,
+    // keeping one global work bound per append (B2).
     let metadata;
     try {
-        metadata = sanitizeMetadata(input.metadata, bounds);
+        metadata = sanitizeMetadata(input.metadata, bounds, budget);
     }
     catch (error) {
         if (error instanceof LedgerError) throw error;
@@ -271,25 +283,42 @@ function buildEventRecord(input, bounds) {
     return record;
 }
 
-/** Digest core: everything except integrity block itself. */
+/**
+ * Digest core: everything except integrity block itself.
+ *
+ * Canonicalization failures are converted into the ledger's documented
+ * typed error contract (B3) instead of leaking internal
+ * CanonicalizationError to callers.
+ */
 function digestCore(record) {
-    return canonicalJson({
-        sequence: record.sequence,
-        eventId: record.eventId,
-        eventType: record.eventType,
-        source: record.source,
-        timestampMs: record.timestampMs,
-        outcome: record.outcome,
-        actor: record.actor,
-        subject: record.subject,
-        operation: record.operation,
-        generation: record.generation,
-        correlation: record.correlation,
-        evidenceRefs: record.evidenceRefs,
-        authorityRef: record.authorityRef,
-        causalParentId: record.causalParentId,
-        metadata: record.metadata
-    }, { maxDepth: 24 });
+    let canonical;
+    try {
+        canonical = canonicalJson({
+            sequence: record.sequence,
+            eventId: record.eventId,
+            eventType: record.eventType,
+            source: record.source,
+            timestampMs: record.timestampMs,
+            outcome: record.outcome,
+            actor: record.actor,
+            subject: record.subject,
+            operation: record.operation,
+            generation: record.generation,
+            correlation: record.correlation,
+            evidenceRefs: record.evidenceRefs,
+            authorityRef: record.authorityRef,
+            causalParentId: record.causalParentId,
+            metadata: record.metadata
+        }, { maxDepth: 24 });
+    }
+    catch (error) {
+        if (error instanceof CanonicalizationError) {
+            throw new LedgerError(CODES.INVALID_EVENT,
+                `record failed canonical serialization: ${error.message}`);
+        }
+        throw error;
+    }
+    return canonical;
 }
 
 module.exports = Object.freeze({

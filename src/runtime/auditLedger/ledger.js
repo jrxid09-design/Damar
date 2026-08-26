@@ -97,6 +97,14 @@ function createAuditLedger(options = {}) {
     /**
      * Commit a fully validated input. Throws LedgerError BEFORE any
      * mutation on invalid input (atomic). Returns the frozen record.
+     *
+     * B3 ATOMICITY: the next sequence value is COMPUTED
+     * (sequenceCounter + 1) but sequenceCounter is only advanced in the
+     * final commit phase, after normalization, canonical serialization,
+     * digest generation, and the durable persistence precondition have
+     * ALL succeeded. Rejected appends therefore never burn sequence
+     * numbers, and canonical state (sequence, lastDigest, records,
+     * indexes) is byte-identical before/after any rejection.
      */
     function commit(input, { durable = false } = {}) {
         // ---- validation phase: zero mutation -------------------------
@@ -109,8 +117,8 @@ function createAuditLedger(options = {}) {
         }
         if (shell.timestampMs === null) shell.timestampMs = clock();
 
-        sequenceCounter += 1;
-        shell.sequence = sequenceCounter;
+        const nextSequence = sequenceCounter + 1;
+        shell.sequence = nextSequence;
 
         // Hash chain over canonical serialization (corruption detection
         // ONLY — see integrity.js for binding semantics disclaimer).
@@ -120,12 +128,14 @@ function createAuditLedger(options = {}) {
             digest: sha256Hex(Buffer.from(digestCore(shell), "utf8"))
         });
 
+        // Freeze before the durability phase: the sink observes exactly
+        // what would be committed, and a frozen candidate can never be
+        // partially applied if persistence rejects.
         const record = deepFreeze(shell);
 
         // ---- durability phase (optional): still zero mutation --------
         if (durable) {
             if (!sink) {
-                sequenceCounter -= 1;
                 throw new LedgerError(CODES.NO_SINK,
                     "durable append requested but no persistence sink configured");
             }
@@ -137,14 +147,16 @@ function createAuditLedger(options = {}) {
                 }
             }
             catch (error) {
-                sequenceCounter -= 1;
                 if (error instanceof LedgerError) throw error;
                 throw new LedgerError(CODES.PERSIST_FAILED,
                     `persistence sink rejected append: ${error.message}`);
             }
         }
 
-        // ---- commit phase --------------------------------------------
+        // ---- commit phase: single atomic advance ---------------------
+        sequenceCounter = nextSequence;
+        lastDigest = record.integrity.digest;
+
         records.push(record);
         indexById.set(record.eventId, record);
         while (records.length > bounds.maxInMemoryEvents) {
@@ -152,7 +164,6 @@ function createAuditLedger(options = {}) {
             indexById.delete(evicted.eventId);
             evictedCount += 1;
         }
-        lastDigest = record.integrity.digest;
         acceptedCount += 1;
 
         return record;
@@ -204,17 +215,20 @@ function createAuditLedger(options = {}) {
             throw new LedgerError(CODES.NOT_APPENDABLE,
                 `correction target not found: ${String(targetEventId)}`);
         }
-        return commit({
+        // Only defined fields enter the input: the snapshot boundary
+        // rejects undefined values fail-closed.
+        const input = {
             eventType: RESERVED_EVENT_TYPES.CORRECTION,
             source: "audit.ledger",
-            subject: actor,
             causalParentId: target.eventId,
             metadata: {
                 targetEventId: target.eventId,
                 reason: typeof reason === "string" ? reason.slice(0, bounds.maxMetadataStringLength) : null,
                 ...(metadata && typeof metadata === "object" ? metadata : {})
             }
-        });
+        };
+        if (actor !== undefined && actor !== null) input.subject = actor;
+        return commit(input);
     }
 
     /**
@@ -227,10 +241,9 @@ function createAuditLedger(options = {}) {
             throw new LedgerError(CODES.NOT_APPENDABLE,
                 `supersede target not found: ${String(targetEventId)}`);
         }
-        return commit({
+        const input = {
             eventType: RESERVED_EVENT_TYPES.SUPERSESSION,
             source: "audit.ledger",
-            subject: actor,
             causalParentId: target.eventId,
             metadata: {
                 targetEventId: target.eventId,
@@ -238,7 +251,9 @@ function createAuditLedger(options = {}) {
                     typeof replacementEventId === "string" ? replacementEventId.slice(0, 64) : null,
                 reason: typeof reason === "string" ? reason.slice(0, bounds.maxMetadataStringLength) : null
             }
-        });
+        };
+        if (actor !== undefined && actor !== null) input.subject = actor;
+        return commit(input);
     }
 
     // ------------------------------------------------------------------

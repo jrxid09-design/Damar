@@ -60,15 +60,27 @@ function looksHighEntropy(value) {
 
 /**
  * Deep-sanitize a caller-supplied value into a bounded plain structure.
+ *
+ * B2: a GLOBAL node budget is threaded through every recursive branch,
+ * so shared-reference DAG amplification (16^N / 64^N shapes) hits a
+ * deterministic BOUNDS_EXCEEDED instead of exhausting CPU/memory.
+ * Cycle detection remains separate and explicit.
+ *
  * Throws (fail closed) on: functions/symbols/bigints/undefined, cyclic
- * structures, forbidden prototype keys, depth/key/array overruns.
+ * structures, forbidden prototype keys, depth/key/array/node overruns.
  */
 function sanitizeValue(
     value,
     bounds,
     ancestors = new WeakSet(),
-    depth = 0
+    depth = 0,
+    budget = { visited: 0 }
 ) {
+    budget.visited += 1;
+    if (budget.visited > bounds.maxMetadataNodes) {
+        throw new LedgerError(CODES.BOUNDS_EXCEEDED,
+            `metadata traversal exceeds global node budget (${bounds.maxMetadataNodes})`);
+    }
     if (depth > bounds.maxMetadataDepth) {
         throw new LedgerError(CODES.BOUNDS_EXCEEDED, `metadata nesting deeper than ${bounds.maxMetadataDepth}`);
     }
@@ -109,7 +121,7 @@ function sanitizeValue(
                 `metadata array exceeds ${bounds.maxMetadataArrayItems} items`);
         }
         ancestors.add(value);
-        const out = value.map((item) => sanitizeValue(item, bounds, ancestors, depth + 1));
+        const out = value.map((item) => sanitizeValue(item, bounds, ancestors, depth + 1, budget));
         ancestors.delete(value);
         return out;
     }
@@ -132,21 +144,23 @@ function sanitizeValue(
         }
         out[key] = looksLikeSecretKey(key)
             ? REDACTED
-            : sanitizeValue(value[key], bounds, ancestors, depth + 1);
+            : sanitizeValue(value[key], bounds, ancestors, depth + 1, budget);
     }
     return out;
 }
 
 /**
  * Sanitize a metadata object and enforce its canonical byte budget.
- * Returns a fresh frozen plain object, or undefined for empty input.
+ * Accepts an OPTIONAL shared traversal budget so callers can enforce one
+ * global work bound across snapshot + sanitization. Returns a fresh
+ * frozen plain object, or undefined for empty input.
  */
-function sanitizeMetadata(metadata, bounds) {
+function sanitizeMetadata(metadata, bounds, budget) {
     if (metadata === undefined || metadata === null) return undefined;
     if (typeof metadata !== "object" || Array.isArray(metadata)) {
         throw new LedgerError(CODES.INVALID_EVENT, "metadata must be an object");
     }
-    const clean = sanitizeValue(metadata, bounds);
+    const clean = sanitizeValue(metadata, bounds, new WeakSet(), 0, budget || { visited: 0 });
     if (clean === null || typeof clean !== "object" || Array.isArray(clean)) {
         throw new LedgerError(CODES.INVALID_EVENT, "metadata must sanitize to an object");
     }
