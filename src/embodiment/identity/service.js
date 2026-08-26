@@ -249,9 +249,15 @@ class DeviceIdentityService {
      * Step 3: OWNER confirms. Creates the pairing/trust relationship and
      * NOTHING else — zero Authority mutation, zero capability grant.
      * Returns a ONE-TIME binding credential for future session binds.
+     *
+     * B3 ATOMICITY: every precondition is validated BEFORE the first
+     * mutation. Any failure leaves device record, transaction,
+     * bindingDigest, history and trust state byte-identical.
      */
     ownerConfirm(pairingId, { actor = "owner" } = {}) {
         this._sweepExpired();
+
+        /* ---- validation gate (read-only) ---- */
         const tx = this._mustGetTx(pairingId);
         if (tx.state === "CONFIRMED") {
             throw fail("PID_ALREADY_CONFIRMED",
@@ -262,20 +268,29 @@ class DeviceIdentityService {
                 `transaksi dalam keadaan ${tx.state}; konfirmasi pemilik tidak berlaku`);
         }
         const rec = this._mustGet(tx.deviceId);
+        if (!canTransition(rec.pairingState, PAIRING_STATES.PAIRED)) {
+            // e.g. device desynchronized from its transaction — fail
+            // closed WITHOUT touching bindingDigest / tx / history.
+            throw fail("PID_INVALID_TRANSITION",
+                `transisi tidak sah: ${rec.pairingState} -> PAIRED`);
+        }
+        const confirmedAtMs = this.clock.nowMs();
+
+        /* ---- gate passed: mutate once, in full ---- */
         const bindingSecret = nowHex(24);
         rec.bindingDigest = sha256Hex(bindingSecret);
         tx.state = "CONFIRMED";
         tx.confirmedBy = String(actor).slice(0, 80);
         this._transition(rec, PAIRING_STATES.PAIRED);
         rec.activeTxId = null;
-        rec.lastSeenAtMs = this.clock.nowMs();
+        rec.lastSeenAtMs = confirmedAtMs;
         return {
             pairingId,
             deviceId: rec.deviceId,
             pairingState: rec.pairingState,
             trustState: rec.trustState,
             // Shown exactly once; only its digest is retained:
-            bindingCredential: { secret: bindingSecret, issuedAtMs: this.clock.nowMs() }
+            bindingCredential: { secret: bindingSecret, issuedAtMs: confirmedAtMs }
         };
     }
 
@@ -298,12 +313,25 @@ class DeviceIdentityService {
         return { pairingId, state: "FAILED" };
     }
 
-    /** Owner promotes/demotes trust WITHIN the relationship. Still not permission. */
+    /**
+     * Owner promotes/demotes trust WITHIN the relationship. Still not permission.
+     *
+     * B1 GATE: operates ONLY inside an ALREADY ESTABLISHED relationship
+     * (PAIRED/TRUSTED/LIMITED). It can NEVER establish pairing — the sole
+     * establishment path is UNPAIRED -> beginPairing -> valid challenge ->
+     * ownerConfirm -> PAIRED. Checked BEFORE any mutation: a denial here
+     * is zero-mutation by construction.
+     */
     setTrust(deviceId, level) {
         const rec = this._mustGet(deviceId);
         if (!["PAIRED", "TRUSTED", "LIMITED"].includes(level)) {
             throw fail("PID_INVALID_TRUST_LEVEL",
                 `level kepercayaan tidak sah untuk operasi ini: '${level}'`);
+        }
+        if (!["PAIRED", "TRUSTED", "LIMITED"].includes(rec.pairingState)) {
+            throw fail("PID_NO_ESTABLISHED_PAIRING",
+                `tidak ada relasi terjalin (keadaan ${rec.pairingState}); ` +
+                "setTrust tidak pernah menciptakan pairing");
         }
         this._transition(rec, level);
         return this.getIdentity(deviceId);
@@ -345,7 +373,8 @@ class DeviceIdentityService {
      * match). Any other claim of a deviceId is FORGERY: rejected, counted,
      * and never auto-bound.
      */
-    openSession({ deviceId, bindingSecret, sessionId = null } = {}) {        this._sweepExpired();
+    openSession({ deviceId, bindingSecret, sessionId = null } = {}) {
+        this._sweepExpired();
         const rec = this._mustGet(deviceId);
         if (!["PAIRED", "TRUSTED", "LIMITED"].includes(rec.pairingState)) {
             this._forgedSessionCount++;
@@ -471,11 +500,20 @@ class DeviceIdentityService {
      * Durable truth = identity records + pairing states + archived
      * transactions + binding digests. Sessions are EPHEMERAL and are
      * never serialized as canonical identity.
+     *
+     * B2 RULE: in-flight pairing (CHALLENGE_ISSUED /
+     * AWAITING_OWNER_CONFIRMATION) is TRANSIENT. Since pending
+     * transactions do not survive restart, their transient pairing
+     * state cannot become durable either. serialize() and restore()
+     * share ONE normalization rule (normalizeDurablePairingState +
+     * durableBindingDigest below) so the two boundaries can never
+     * disagree.
      */
     serialize() {
         const devices = [...this._devices.values()]
             .sort((a, b) => a.deviceId.localeCompare(b.deviceId))
             .map(r => {
+                const pairingState = normalizeDurablePairingState(r.pairingState);
                 const material = {
                     deviceId: r.deviceId,
                     displayName: r.displayName,
@@ -483,13 +521,14 @@ class DeviceIdentityService {
                     platform: r.platform,
                     instanceKeyDigest: r.instanceKeyDigest,
                     observedCapabilities: [...r.observedCapabilities],
-                    pairingState: r.pairingState,
-                    trustState: TRUST_BY_PAIRING_STATE[r.pairingState],
+                    pairingState,
+                    trustState: TRUST_BY_PAIRING_STATE[pairingState],
                     bodyRelation: r.bodyRelation,
                     presence: r.presence,
                     createdAtMs: r.createdAtMs,
                     lastSeenAtMs: r.lastSeenAtMs,
-                    bindingDigest: r.bindingDigest,
+                    bindingDigest:
+                        durableBindingDigest(pairingState, r.bindingDigest),
                     activeTxId: null,      // pending txs do not survive restart
                     history: structuredCopyList(r.history)
                 };
@@ -530,39 +569,60 @@ class DeviceIdentityService {
                 if (staged.has(row.deviceId)) {
                     throw fail("PID_DUPLICATE_DEVICE", `baris#${i}: deviceId duplikat`);
                 }
+
+                // B2: apply the SHARED normalization rule at the restore
+                // boundary. Transient pairing states from external or
+                // legacy snapshots normalize safely to UNPAIRED; a row
+                // whose digest was computed over the raw transient form
+                // then fails integrity below — deterministic rejection,
+                // never restored as live in-flight state.
+                const durable = {
+                    ...row,
+                    pairingState: normalizeDurablePairingState(row.pairingState),
+                    trustState: TRUST_BY_PAIRING_STATE[
+                        normalizeDurablePairingState(row.pairingState)],
+                    bindingDigest: durableBindingDigest(
+                        normalizeDurablePairingState(row.pairingState),
+                        row.bindingDigest)
+                };
+
                 const enumsOk =
-                    PAIRING_STATES[row.pairingState] != null
-                    && BODY_RELATIONS[row.bodyRelation] != null
-                    && PRESENCE_STATES[row.presence] != null;
+                    PAIRING_STATES[durable.pairingState] != null
+                    && BODY_RELATIONS[durable.bodyRelation] != null
+                    && PRESENCE_STATES[durable.presence] != null;
                 if (!enumsOk) {
                     throw fail("PID_INVALID_ENUM", `baris#${i}: enum tidak sah`);
                 }
-                const expectedTrust = TRUST_BY_PAIRING_STATE[row.pairingState];
-                if (row.trustState !== expectedTrust) {
+                const expectedTrust = TRUST_BY_PAIRING_STATE[durable.pairingState];
+                if (durable.trustState !== expectedTrust) {
                     throw fail("PID_TRUST_MISMATCH",
-                        `baris#${i}: trustState '${row.trustState}' tidak konsisten ` +
-                        `dengan pairingState '${row.pairingState}'`);
+                        `baris#${i}: trustState '${durable.trustState}' tidak konsisten ` +
+                        `dengan pairingState '${durable.pairingState}'`);
                 }
-                if (!Number.isInteger(row.createdAtMs) || !Number.isInteger(row.lastSeenAtMs)) {
+                if (!Number.isInteger(durable.createdAtMs)
+                    || !Number.isInteger(durable.lastSeenAtMs)) {
                     throw fail("PID_INVALID_TIMESTAMPS", `baris#${i}: stempel waktu tidak sah`);
                 }
-                if (row.bindingDigest != null
-                    && !/^[a-f0-9]{64}$/.test(String(row.bindingDigest))) {
+                if (durable.bindingDigest != null
+                    && !/^[a-f0-9]{64}$/.test(String(durable.bindingDigest))) {
                     throw fail("PID_INVALID_BINDING", `baris#${i}: bindingDigest tidak sah`);
                 }
-                sanitizeDisplayName(row.displayName, 120);   // shape check
-                for (const c of row.observedCapabilities) {
-                    if (!OBSERVED_CAPABILITIES[c]) {
-                        throw fail("PID_INVALID_CAPABILITY", `baris#${i}: kemampuan asing '${c}'`);
+                sanitizeDisplayName(durable.displayName, 120);   // shape check
+                for (const c of durable.observedCapabilities) {
+                    // own-property check: immune to prototype-chain keys
+                    if (!Object.prototype.hasOwnProperty.call(
+                        OBSERVED_CAPABILITIES, c)) {
+                        throw fail("PID_INVALID_CAPABILITY",
+                            `baris#${i}: kemampuan asing '${c}'`);
                     }
                 }
-                const material = { ...structuredCopyRow(row), rowDigest: undefined };
+                const material = { ...structuredCopyRow(durable), rowDigest: undefined };
                 delete material.rowDigest;
                 if (row.rowDigest !== digestOf(material)) {
                     throw fail("PID_DIGEST_MISMATCH",
-                        `baris#${i} (${row.deviceId}): integritas baris tidak cocok`);
+                        `baris#${i} (${durable.deviceId}): integritas baris tidak cocok`);
                 }
-                staged.set(row.deviceId, material);
+                staged.set(durable.deviceId, material);
             } catch (err) {
                 errors.push(`devices[${i}]: ${err.code ?? "ERR"} — ${err.message}`);
             }
@@ -596,7 +656,7 @@ class DeviceIdentityService {
             svc._devices.set(row.deviceId, {
                 ...row,
                 trustState: TRUST_BY_PAIRING_STATE[row.pairingState],
-                activeTxId: null,
+                activeTxId: null,          // never restored in-flight (B2)
                 history: row.history
             });
         }
@@ -746,6 +806,31 @@ class DeviceIdentityService {
 }
 
 /* ------------------------- pure module helpers ------------------------- */
+
+/**
+ * B2 — THE shared durability rule. In-flight pairing states are
+ * transient because their transactions are transient; they normalize to
+ * UNPAIRED at the persistence boundary. Both serialize() and restore()
+ * call this — the two boundaries cannot disagree.
+ */
+const TRANSIENT_PAIRING_STATES = Object.freeze(new Set([
+    PAIRING_STATES.CHALLENGE_ISSUED,
+    PAIRING_STATES.AWAITING_OWNER_CONFIRMATION
+]));
+
+function normalizeDurablePairingState(state) {
+    return TRANSIENT_PAIRING_STATES.has(state) ? PAIRING_STATES.UNPAIRED : state;
+}
+
+/** Binding credentials exist only on established relationships. */
+const ESTABLISHED_PAIRING_STATES = Object.freeze(new Set([
+    PAIRING_STATES.PAIRED, PAIRING_STATES.TRUSTED, PAIRING_STATES.LIMITED
+]));
+
+function durableBindingDigest(pairingState, bindingDigest) {
+    return ESTABLISHED_PAIRING_STATES.has(pairingState)
+        ? (bindingDigest ?? null) : null;
+}
 
 function sanitizeDisplayName(raw, maxLen) {
     if (raw == null) return "(tanpa nama)";
