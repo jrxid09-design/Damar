@@ -74,6 +74,7 @@ const DEFAULT_LIMITS = Object.freeze({
     maxLiveEntities: 400,
     maxStaleRetained: 200,
     maxRelationships: 1200,
+    maxScopedWinners: 256,
     maxDedupeIds: 1024,
     maxAttributeBytes: 2048,
     maxLabelChars: 512,
@@ -115,6 +116,7 @@ class DesktopContextCore {
             maxLiveEntities: clampInt(options.maxLiveEntities, 10, 100000, DEFAULT_LIMITS.maxLiveEntities),
             maxStaleRetained: clampInt(options.maxStaleRetained, 0, 100000, DEFAULT_LIMITS.maxStaleRetained),
             maxRelationships: clampInt(options.maxRelationships, 10, 500000, DEFAULT_LIMITS.maxRelationships),
+            maxScopedWinners: clampInt(options.maxScopedWinners, 4, 100000, DEFAULT_LIMITS.maxScopedWinners),
             maxDedupeIds: clampInt(options.maxDedupeIds, 10, 1000000, DEFAULT_LIMITS.maxDedupeIds),
             maxAttributeBytes: clampInt(options.maxAttributeBytes, 64, 1048576, DEFAULT_LIMITS.maxAttributeBytes),
             maxLabelChars: clampInt(options.maxLabelChars, 16, 65536, DEFAULT_LIMITS.maxLabelChars),
@@ -437,8 +439,34 @@ class DesktopContextCore {
             this.#removeRelationship(s, minKey);
         }
 
+        // -- 8b. batas ledger lingkup (repair round 2): scopedWinners
+        //        tumbuh per jendela yang pernah aktif; tanpa batas,
+        //        proteksi pemenangnya membuat cap entitas bocor.
+        //        Eviksi deterministik: lingkup dengan kunci aktivasi
+        //        TERLAMA dilepas; subjeknya dinyatakan mati eksplisit
+        //        (SCOPE_EVICTED) agar tidak bangkit sebagai entitas
+        //        tak berlingkup yang hidup. Proteksi ikut leher.
+        while (s.scopedWinners.size > this.#limits.maxScopedWinners) {
+            let minScope = null;
+            let minKey = null;
+            for (const [scope, entry] of s.scopedWinners) {
+                if (minKey === null || cmpKey(entry.key, minKey) < 0) {
+                    minKey = entry.key;
+                    minScope = scope;
+                }
+            }
+            const evicted = s.scopedWinners.get(minScope);
+            s.scopedWinners.delete(minScope);
+            if (evicted?.subjectId && s.entities.has(evicted.subjectId) &&
+                !s.dead.has(evicted.subjectId)) {
+                s.dead.set(evicted.subjectId, "SCOPE_EVICTED");
+            }
+        }
+
         // -- 9. batas entitas (B8): basi dulu, terlama dulu, lindungi -----
-        //      subjek ledger aktif.
+        //      subjek ledger aktif (set proteksi terikat oleh batas
+        //      globalWinners tetap + maxScopedWinners — bukan
+        //      windows-ever-seen).
         const entityCap = this.#limits.maxLiveEntities + this.#limits.maxStaleRetained;
         if (s.entities.size > entityCap) {
             const protectedIds = new Set();
@@ -524,8 +552,16 @@ class DesktopContextCore {
         const rel = s.relByKey.get(key);
         if (!rel) return;
         s.relByKey.delete(key);
-        s.idxFrom.get(rel.from)?.delete(key);
-        s.idxTo.get(rel.to)?.delete(key);
+        const fromSet = s.idxFrom.get(rel.from);
+        if (fromSet) {
+            fromSet.delete(key);
+            if (fromSet.size === 0) s.idxFrom.delete(rel.from);
+        }
+        const toSet = s.idxTo.get(rel.to);
+        if (toSet) {
+            toSet.delete(key);
+            if (toSet.size === 0) s.idxTo.delete(rel.to);
+        }
     }
 
     #evictEntity(s, id) {
@@ -535,6 +571,8 @@ class DesktopContextCore {
         s.dead.delete(id);
         for (const key of [...(s.idxFrom.get(id) ?? [])]) this.#removeRelationship(s, key);
         for (const key of [...(s.idxTo.get(id) ?? [])]) this.#removeRelationship(s, key);
+        s.idxFrom.delete(id);
+        s.idxTo.delete(id);
         for (const [kind, entry] of [...s.globalWinners]) {
             if (entry.subjectId === id) s.globalWinners.delete(kind);
         }
@@ -691,6 +729,7 @@ class DesktopContextCore {
         return {
             entities: this.#entities.size,
             relationships: this.#relByKey.size,
+            scopedWinners: this.#scopedWinners.size,
             dedupeIds: this.#seen.size,
             history: this.#history.length,
             version: this.#version

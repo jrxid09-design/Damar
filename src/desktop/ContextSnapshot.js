@@ -88,15 +88,17 @@ function build({ view, createdAt, maxSnapshotBytes = 65536 }) {
     const recentTransitions = view.recentTransitions.map((t) => ({ ...t }));
 
     const assemble = (transitions) => {
+        // Salinan FRESH per percobaan: deepFreeze tidak boleh menyentuh
+        // array kerja yang masih dipangkas (trim) di iterasi berikutnya.
         const content = {
             schemaVersion: SCHEMA_VERSION,
             createdAt,
             sourceVersion: view.version,
-            entities,
-            relationships,
-            active,
-            selectedFiles,
-            recentTransitions: transitions,
+            entities: entities.map((e) => ({ ...e })),
+            relationships: relationships.map((r) => ({ ...r })),
+            active: { ...active },
+            selectedFiles: selectedFiles.map((f) => ({ ...f })),
+            recentTransitions: transitions.map((t) => ({ ...t })),
             historyBound: view.historyBound,
             historyTruncated: view.historyTruncated
         };
@@ -104,24 +106,24 @@ function build({ view, createdAt, maxSnapshotBytes = 65536 }) {
             .update(stableStringify(content), "utf8")
             .digest("hex");
         return {
-            snapshot: ContextEntity.deepFreeze({
-                isContextSnapshot: true,
-                desktopContextId: `${ID_PREFIX}${hash}`,
-                ...content
-            })
+            isContextSnapshot: true,
+            desktopContextId: `${ID_PREFIX}${hash}`,
+            ...content
         };
     };
 
-    let built = assemble(recentTransitions);
-    let json = serialize(built.snapshot);
+    // Array kerja TERDETACH — dipangkas bebas, dibekukan hanya di akhir.
+    const workingTransitions = recentTransitions.map((t) => ({ ...t }));
+    let snapshot = assemble(workingTransitions);
+    let json = serialize(snapshot);
 
     // Batas byte snapshot (B8): buang transisi terlama sampai muat;
-    // tetap lebih besar → gagal tertutup.
+    // tetap lebih besar → gagal deterministik dengan SNAPSHOT_TOO_LARGE.
     while (Buffer.byteLength(json, "utf8") > maxSnapshotBytes &&
-           recentTransitions.length > 0) {
-        recentTransitions.shift();
-        built = assemble(recentTransitions);
-        json = serialize(built.snapshot);
+           workingTransitions.length > 0) {
+        workingTransitions.shift();
+        snapshot = assemble(workingTransitions);
+        json = serialize(snapshot);
     }
     if (Buffer.byteLength(json, "utf8") > maxSnapshotBytes) {
         const err = new Error(
@@ -130,7 +132,7 @@ function build({ view, createdAt, maxSnapshotBytes = 65536 }) {
         throw err;
     }
 
-    return built.snapshot;
+    return ContextEntity.deepFreeze(snapshot);
 }
 
 /** JSON aman (plain object) untuk audit/rebuild. */
