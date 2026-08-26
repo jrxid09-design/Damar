@@ -87,7 +87,10 @@ function validateResourceGovernorConfig(raw) {
         memory.processHeapUsedRatio ?? { elevated: 0.7, high: 0.82, critical: 0.92 },
         "memoryThresholds.processHeapUsedRatio"
     );
-    numInRange(memory.hostHardFloorBytes ?? 256 * 1024 * 1024, 0, 1e15, "memoryThresholds.hostHardFloorBytes");
+    const hostHardFloorBytes = numInRange(
+        memory.hostHardFloorBytes ?? 256 * 1024 * 1024,
+        0, 1e15, "memoryThresholds.hostHardFloorBytes"
+    );
 
     const eventLoopLagMs = orderedBands(
         raw.eventLoopLagMs ?? { elevated: 100, high: 250, critical: 750 },
@@ -126,7 +129,7 @@ function validateResourceGovernorConfig(raw) {
         maxQueue,
         leaseTtlMs,
         historyCapacity,
-        memoryThresholds: { hostUsedMemoryRatio, processHeapUsedRatio, hostHardFloorBytes: memory.hostHardFloorBytes },
+        memoryThresholds: { hostUsedMemoryRatio, processHeapUsedRatio, hostHardFloorBytes },
         eventLoopLagMs,
         demandMaxima: validatedDemandMaxima,
         heavyDemand: validatedHeavyDemand,

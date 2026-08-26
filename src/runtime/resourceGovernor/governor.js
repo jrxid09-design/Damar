@@ -248,6 +248,9 @@ class ResourceGovernor {
         if (!snapshot.observerHealthy) {
             return heavy ? { defer: REASONS.DEFERRED_OBSERVER_UNAVAILABLE } : null;
         }
+        if (band === PRESSURE_BANDS.UNKNOWN) {
+            return heavy ? { defer: REASONS.DEFERRED_OBSERVER_UNAVAILABLE } : null;
+        }
         if (band === PRESSURE_BANDS.CRITICAL) {
             return heavy ? { queue: REASONS.PRESSURE_CRITICAL_HEAVY } : null;
         }
