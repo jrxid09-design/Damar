@@ -29,6 +29,14 @@ const { createHostSelfDiscoveryAdapter }
     = require("./discovery/HostDiscoveryAdapter");
 const { createMemoryBodyStore, loadBodySchema }
     = require("./persistence/BodyStore");
+const {
+    DeviceIdentityService, IDENTITY_DEFAULTS
+} = require("./identity/service");
+const { ChallengeBroker } = require("./identity/challenge");
+const identityTypes = require("./identity/types");
+const {
+    createMemoryIdentityStore, persistIdentity, loadIdentity
+} = require("./identity/store");
 
 const domainTypes = require("./domain/types");
 const identity = require("./core/identity");
@@ -55,6 +63,13 @@ module.exports = {
 
     // persistensi
     createMemoryBodyStore, loadBodySchema,
+
+    // identitas & pairing perangkat (V1)
+    DeviceIdentityService, ChallengeBroker,
+    IDENTITY_DEFAULTS,
+    identityTypes,
+    createIdentityService(options = {}) { return new DeviceIdentityService(options); },
+    createMemoryIdentityStore, persistIdentity, loadIdentity,
 
     // kontrak murni (untuk adapter & pengujian masa depan)
     types: domainTypes,
