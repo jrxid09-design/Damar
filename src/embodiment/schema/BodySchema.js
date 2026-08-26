@@ -296,11 +296,29 @@ class BodySchema {
             source: event.source
         });
 
+        // Kesehatan bawaan-discovery (R3-B2): hanya bila adapter
+        // MENYERTAKAN status secara eksplisit. Ketiadaan field bukan
+        // laporan "unknown" dan tidak boleh menghapus riwayat kesehatan.
+        // Proposal masuk lewat healthWins yang SAMA dengan
+        // DEVICE_HEALTH_CHANGED — tidak ada dua algoritma gabungan.
+        let healthProposal = null;
+        if (raw.health != null && raw.health.status != null) {
+            healthProposal = deepFreeze({
+                status: descriptor.health.status,
+                detail: descriptor.health.detail,
+                checkedAt: descriptor.health.checkedAt
+                    ?? new Date(event.timestampMs).toISOString(),
+                checkedAtMs: event.timestampMs,
+                source: event.source
+            });
+        }
+
         return {
             kind: "device-content",
             deviceId: descriptor.deviceId,
             isNew: !existing,
-            descriptor, claims, candidate, presence, relationships
+            descriptor, claims, candidate, presence,
+            healthProposal, relationships
         };
     }
 
@@ -489,10 +507,13 @@ class BodySchema {
             descriptor: plan.descriptor,
             meta: plan.candidate,
             presence: plan.presence,
-            // Kesehatan = field kanonik TERPISAH (R2-B3): konten deskriptor
-            // tidak pernah bisa menghapusnya.
-            health: { status: HEALTH_STATES.unknown, detail: null,
-                      checkedAt: null, checkedAtMs: null, source: null },
+            // Kesehatan = field kanonik TERPISAH (R2-B3/R3-B2): diisi dari
+            // laporan discovery eksplisit bila ada; konten berikutnya tidak
+            // pernah bisa menghapusnya.
+            health: plan.healthProposal
+                ? structuredCopy(plan.healthProposal)
+                : { status: HEALTH_STATES.unknown, detail: null,
+                    checkedAt: null, checkedAtMs: null, source: null },
             capabilities: {},                // objek polos — JSON-aman
             firstSeenAtMs: event.timestampMs,
             lastSeenAtMs: event.timestampMs
@@ -527,6 +548,10 @@ class BodySchema {
                 // Kehadiran: presenceWins — usang tak bisa menimpa segar.
                 rec.presence = presenceWins(
                     structuredCopy(plan.presence), rec.presence);
+                if (plan.healthProposal) {
+                    rec.health = healthWins(
+                        structuredCopy(plan.healthProposal), rec.health);
+                }
                 // Waktu observasi TEMPORAL, bukan urutan kedatangan:
                 rec.firstSeenAtMs = Math.min(rec.firstSeenAtMs, event.timestampMs);
                 rec.lastSeenAtMs = Math.max(rec.lastSeenAtMs, event.timestampMs);
@@ -911,18 +936,28 @@ class BodySchema {
                 .filter(p => p !== CORE_SOURCE).sort(),
             devices: [...this._devices.values()]
                 .sort((a, b) => a.descriptor.deviceId.localeCompare(b.descriptor.deviceId))
-                .map(r => ({
-                    descriptor: r.descriptor,
-                    meta: r.meta,
-                    presence: r.presence,
-                    health: r.health,
-                    capabilities: Object.values(r.capabilities)
+                .map(r => {
+                    // Materi integritas = SELURUH baris durable kanonik
+                    // (R3-B1): descriptor, meta, presence, health,
+                    // capabilities, kedua stempel waktu. rowDigest
+                    // adalah deteksi KORUPSI (SHA-256 tak berkunci) —
+                    // bukan autentikasi maupun otorisasi.
+                    const capabilities = Object.values(r.capabilities)
                         .sort((a, b) =>
                             a.name.localeCompare(b.name) ||
-                            canonicalJson(a).localeCompare(canonicalJson(b))),
-                    firstSeenAtMs: r.firstSeenAtMs,
-                    lastSeenAtMs: r.lastSeenAtMs
-                })),
+                            canonicalJson(a).localeCompare(canonicalJson(b)));
+                    const material = {
+                        descriptor: r.descriptor,
+                        meta: r.meta,
+                        presence: r.presence,
+                        health: r.health,
+                        capabilities,
+                        firstSeenAtMs: r.firstSeenAtMs,
+                        lastSeenAtMs: r.lastSeenAtMs
+                    };
+                    return { ...structuredCopy(material),
+                             rowDigest: digestOf(material) };
+                }),
             relationships: [...this._rels.values()]
                 .sort((a, b) => `${a.type}|${a.fromId}|${a.toId}`
                     .localeCompare(`${b.type}|${b.fromId}|${b.toId}`)),
@@ -1000,43 +1035,124 @@ class BodySchema {
                         `baris#${i}: stempel waktu tidak sah`);
                 }
 
-                // PRESENCE kanonik (R2-B1): direkonstruksi dari baris bila
-                // ada; fallback jujur = meta konten + state deskriptor.
                 const STATE_VALUES = Object.values(DEVICE_STATES);
-                const pr = row.presence ?? {};
-                const presenceState = STATE_VALUES.includes(pr.state)
-                    ? pr.state : descriptor.state;
-                const presence = {
-                    state: presenceState,
-                    timestampMs: Number.isInteger(pr.timestampMs)
-                        ? pr.timestampMs : meta.timestampMs,
-                    confidence: Number.isFinite(Number(pr.confidence))
-                        ? Number(pr.confidence) : Number(meta.confidence),
-                    source: typeof pr.source === "string" && pr.source
-                        ? pr.source.slice(0, 120) : meta.source
-                };
-                if (!STATE_VALUES.includes(presence.state)) {
-                    throw fail("EMB_UNKNOWN_DEVICE_STATE",
-                        `baris#${i}: presence state tidak sah`);
-                }
-                if (!Number.isInteger(presence.timestampMs)
-                    || !Number.isFinite(presence.confidence)) {
-                    throw fail("EMB_INVALID_META",
-                        `baris#${i}: presence tidak sah`);
+                const HEALTH_VALUES = Object.values(HEALTH_STATES);
+                const isBadSource = (v) =>
+                    typeof v !== "string" || v.length === 0 || v.length > 120;
+
+                // PRESENCE (R3-B1) — KETAT. Fallback hanya untuk snapshot
+                // LEGACY yang BENAR-BENAR mengabaikan field; nilai salah
+                // yang DISERTAKAN tidak pernah didiamkan.
+                let presence;
+                const hasPresence = Object.prototype.hasOwnProperty.call(row, "presence");
+                if (!hasPresence) {
+                    // LEGACY: rekonstruksi deterministik dari meta+state.
+                    presence = deepFreeze({
+                        state: descriptor.state,
+                        timestampMs: meta.timestampMs,
+                        confidence: Number(meta.confidence),
+                        source: meta.source
+                    });
+                } else {
+                    const pr = row.presence;
+                    if (!pr || typeof pr !== "object") {
+                        throw fail("EMB_INVALID_PRESENCE", `baris#${i}: presence bukan objek`);
+                    }
+                    if (!STATE_VALUES.includes(pr.state)) {
+                        throw fail("EMB_INVALID_PRESENCE",
+                            `baris#${i}: presence.state tidak sah '${pr.state}'`);
+                    }
+                    if (!Number.isInteger(pr.timestampMs)) {
+                        throw fail("EMB_INVALID_PRESENCE",
+                            `baris#${i}: presence.timestampMs tidak sah`);
+                    }
+                    const conf = Number(pr.confidence);
+                    if (!Number.isFinite(conf) || conf < 0 || conf > 1) {
+                        throw fail("EMB_INVALID_PRESENCE",
+                            `baris#${i}: presence.confidence tidak sah`);
+                    }
+                    if (isBadSource(pr.source)) {
+                        throw fail("EMB_INVALID_PRESENCE",
+                            `baris#${i}: presence.source tidak sah`);
+                    }
+                    presence = deepFreeze({
+                        state: pr.state,
+                        timestampMs: pr.timestampMs,
+                        confidence: conf,
+                        source: pr.source
+                    });
                 }
 
-                // KESEHATAN kanonik (R2-B3): idem presence.
-                const hr = row.health ?? {};
-                const health = {
-                    status: HEALTH_STATES[hr.status] ?? HEALTH_STATES.unknown,
-                    detail: hr.detail != null ? String(hr.detail).slice(0, 200) : null,
-                    checkedAt: typeof hr.checkedAt === "string"
-                        && hr.checkedAt ? hr.checkedAt : null,
-                    checkedAtMs: Number.isInteger(hr.checkedAtMs)
-                        ? hr.checkedAtMs : null,
-                    source: typeof hr.source === "string" && hr.source
-                        ? hr.source.slice(0, 120) : null
-                };
+                // KESEHATAN (R3-B1) — ketat, idem presence.
+                let health;
+                const hasHealth = Object.prototype.hasOwnProperty.call(row, "health");
+                if (!hasHealth) {
+                    health = deepFreeze({
+                        status: HEALTH_STATES.unknown, detail: null,
+                        checkedAt: null, checkedAtMs: null, source: null
+                    });
+                } else {
+                    const hr = row.health;
+                    if (!hr || typeof hr !== "object") {
+                        throw fail("EMB_INVALID_HEALTH", `baris#${i}: health bukan objek`);
+                    }
+                    if (!HEALTH_VALUES.includes(hr.status)) {
+                        throw fail("EMB_INVALID_HEALTH",
+                            `baris#${i}: health.status tidak sah '${hr.status}'`);
+                    }
+                    if (hr.detail != null && typeof hr.detail !== "string") {
+                        throw fail("EMB_INVALID_HEALTH",
+                            `baris#${i}: health.detail tidak sah`);
+                    }
+                    const pairOk =
+                        (hr.checkedAt == null && hr.checkedAtMs == null) ||
+                        (typeof hr.checkedAt === "string" && hr.checkedAt.length > 0
+                            && Number.isInteger(hr.checkedAtMs));
+                    if (!pairOk) {
+                        throw fail("EMB_INVALID_HEALTH",
+                            `baris#${i}: health.checkedAt/checkedAtMs tidak konsisten`);
+                    }
+                    if (hr.source != null && isBadSource(hr.source)) {
+                        throw fail("EMB_INVALID_HEALTH",
+                            `baris#${i}: health.source tidak sah`);
+                    }
+                    health = deepFreeze({
+                        status: hr.status,
+                        detail: hr.detail ?? null,
+                        checkedAt: hr.checkedAt ?? null,
+                        checkedAtMs: hr.checkedAtMs ?? null,
+                        source: hr.source ?? null
+                    });
+                }
+
+                // INTEGRITAS BARIS PENUH (R3-B1): digest mencakup seluruh
+                // materi kanonik durable. Validator berjalan INDEPENDEN —
+                // data semantik-invalid tetap ditolak walau digestnya
+                // dihitung ulang. SHA-256 tak berkunci = deteksi korupsi,
+                // BUKAN autentikasi/otorisasi.
+                if (Object.prototype.hasOwnProperty.call(row, "rowDigest")) {
+                    const material = {
+                        descriptor,
+                        meta: { confidence: Number(meta.confidence),
+                                source: meta.source,
+                                timestampMs: meta.timestampMs,
+                                digest: recomputed },
+                        presence,
+                        health,
+                        capabilities: [...descriptor.capabilities]
+                            .sort((a, b) =>
+                                a.name.localeCompare(b.name) ||
+                                canonicalJson(a).localeCompare(canonicalJson(b))),
+                        firstSeenAtMs: row.firstSeenAtMs,
+                        lastSeenAtMs: row.lastSeenAtMs
+                    };
+                    if (row.rowDigest !== digestOf(material)) {
+                        throw fail("EMB_DIGEST_MISMATCH",
+                            `baris#${i} (${descriptor.deviceId}): integritas baris tidak cocok`);
+                    }
+                }
+                // Tanpa rowDigest = snapshot legacy sebelum field ini ada:
+                // integritas deskriptor tetap dijaga meta.digest di atas.
 
                 staged.set(descriptor.deviceId, {
                     descriptor,
@@ -1046,8 +1162,8 @@ class BodySchema {
                         timestampMs: meta.timestampMs,
                         digest: recomputed
                     }),
-                    presence: deepFreeze(presence),
-                    health: deepFreeze(health),
+                    presence,
+                    health,
                     capabilities: Object.fromEntries(
                         descriptor.capabilities.map(c => [c.name, c])),
                     firstSeenAtMs: row.firstSeenAtMs,
