@@ -24,6 +24,12 @@ const DEFAULT_BOUNDS = Object.freeze({
     maxMetadataStringLength: 512,
     /** Max nesting depth accepted inside metadata. */
     maxMetadataDepth: 6,
+    /**
+     * GLOBAL traversal node budget for one append's snapshot+sanitization
+     * work (B2): bounds total CPU/memory against shared-reference DAG
+     * amplification. Counts every visited node across ALL branches.
+     */
+    maxMetadataNodes: 4096,
     /** Max keys per metadata object level. */
     maxMetadataKeysPerLevel: 64,
     /** Max items per metadata array. */
@@ -60,6 +66,7 @@ function resolveBounds(override) {
         maxMetadataBytes: 65_536,
         maxMetadataStringLength: 8192,
         maxMetadataDepth: 16,
+        maxMetadataNodes: 1_048_576,
         maxMetadataKeysPerLevel: 256,
         maxMetadataArrayItems: 256,
         maxEvidenceRefs: 128,
