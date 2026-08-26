@@ -20,7 +20,8 @@ const { isAutoRestorable } = require("./classification");
 const RESTORE_OUTCOMES = Object.freeze({
     RESTORED: "RESTORED",
     FAILED_PREPARE: "FAILED_PREPARE",
-    FAILED_COMMIT: "FAILED_COMMIT"
+    FAILED_COMMIT: "FAILED_COMMIT",
+    PARTIALLY_ROLLED_BACK: "PARTIALLY_ROLLED_BACK"
 });
 
 async function executeRestore(decision, capsule, registry, ctx = {}) {
@@ -53,8 +54,9 @@ async function executeRestore(decision, capsule, registry, ctx = {}) {
                 outcome: RESTORE_OUTCOMES.FAILED_PREPARE,
                 capsuleId: m.capsuleId,
                 failedSectionId: entry.sectionId,
-                committedSections: [],
-                rolledBackSections: [],
+                committedSections: Object.freeze([]),
+                rolledBackSections: Object.freeze([]),
+                uncompensatedSections: Object.freeze([]),
                 diagnostics: diags.snapshot()
             });
         }
@@ -66,13 +68,18 @@ async function executeRestore(decision, capsule, registry, ctx = {}) {
             committed.push(provider.id);
         } catch (err) {
             diags.add("COMMIT_FAILED", { sectionId: provider.id, message: err.message?.slice(0, 256) });
-            const rolledBack = await rollbackCommitted(prepared, committed, diags);
+            const { rolledBack, uncompensated } = await rollbackCommitted(prepared, committed, diags);
+            const residualLive = uncompensated.slice().sort();
             return freeze({
-                outcome: RESTORE_OUTCOMES.FAILED_COMMIT,
+                outcome:
+                    residualLive.length > 0
+                        ? RESTORE_OUTCOMES.PARTIALLY_ROLLED_BACK
+                        : RESTORE_OUTCOMES.FAILED_COMMIT,
                 capsuleId: m.capsuleId,
                 failedSectionId: provider.id,
-                committedSections: [],
+                committedSections: Object.freeze(residualLive),
                 rolledBackSections: Object.freeze(rolledBack),
+                uncompensatedSections: Object.freeze(residualLive),
                 diagnostics: diags.snapshot()
             });
         }
@@ -87,6 +94,7 @@ async function executeRestore(decision, capsule, registry, ctx = {}) {
         failedSectionId: null,
         committedSections: Object.freeze(committed.slice().sort()),
         rolledBackSections: Object.freeze([]),
+        uncompensatedSections: Object.freeze([]),
         deferredSections: decision.deferredSections,
         requiresAuthorityRevalidation: decision.requiresAuthorityRevalidation,
         runtimeGenerationId: ctx.runtimeGenerationId ?? null,
@@ -109,6 +117,7 @@ async function abortAll(preparedList) {
 
 async function rollbackCommitted(prepared, committedIds, diags) {
     const rolledBack = [];
+    const uncompensated = [];
     for (const { provider, handle } of [...prepared].reverse()) {
         if (!committedIds.includes(provider.id)) {
             continue;
@@ -116,6 +125,7 @@ async function rollbackCommitted(prepared, committedIds, diags) {
         const undo = provider.rollbackRestore ?? provider.abortRestore;
         if (!undo) {
             diags.add("ROLLBACK_FAILED", { sectionId: provider.id, message: "no compensation defined" });
+            uncompensated.push(provider.id);
             continue;
         }
         try {
@@ -123,9 +133,10 @@ async function rollbackCommitted(prepared, committedIds, diags) {
             rolledBack.push(provider.id);
         } catch (err) {
             diags.add("ROLLBACK_FAILED", { sectionId: provider.id, message: err.message?.slice(0, 256) });
+            uncompensated.push(provider.id);
         }
     }
-    return rolledBack.sort();
+    return { rolledBack: rolledBack.sort(), uncompensated };
 }
 
 function refuse(collector) {
@@ -136,6 +147,7 @@ function refuse(collector) {
         failedSectionId: null,
         committedSections: Object.freeze([]),
         rolledBackSections: Object.freeze([]),
+        uncompensatedSections: Object.freeze([]),
         diagnostics: collector.snapshot()
     });
 }

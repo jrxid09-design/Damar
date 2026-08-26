@@ -252,6 +252,14 @@ class CheckpointBuilder {
 
         this.maybeFault(faults, "before-commit");
 
+        // Whole-capsule canonical size bound (manifest + all sections),
+        // computed over the exact bytes that would become durable.
+        const totalBytes = canonicalBytes(wire).byteLength;
+        if (totalBytes > this.config.maxCapsuleBytes) {
+            this.collector.add("CAPSULE_TOO_LARGE", { message: `canonical capsule is ${totalBytes} bytes` });
+            throw new RangeError("capsule exceeds maxCapsuleBytes");
+        }
+
         // Single atomic visibility point.
         const stored = this.store.commit(wire);
         this.status = CAPSULE_STATUS.COMPLETE;

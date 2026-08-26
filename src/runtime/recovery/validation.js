@@ -190,6 +190,17 @@ function validateCapsule(wire, registry, config) {
         }
     }
 
+    // Whole-capsule canonical size bound over the exact durable material
+    // (manifest including its digest + every section payload).
+    const totalBytes = canonicalBytes({ manifest: m, sections: wire.sections }).byteLength;
+    if (totalBytes > config.maxCapsuleBytes) {
+        return {
+            ok: false,
+            capsuleId: ctx.capsuleId,
+            diagnostics: finish(diags, "CAPSULE_TOO_LARGE", { message: `canonical capsule is ${totalBytes} bytes` })
+        };
+    }
+
     const material = buildMaterialForDigest(m);
     const actualManifestDigest = sha256Hex(canonicalBytes(material));
     if (!isValidDigestFormat(m.manifestDigest) || actualManifestDigest !== m.manifestDigest) {

@@ -32,7 +32,7 @@ function decide({ candidates, registry, config, requestedCapsuleId = null, polic
     }
     const bounded = candidates.slice(0, config.maxCandidateCapsules);
     if (candidates.length > config.maxCandidateCapsules) {
-        diags.add("CAPSULE_TOO_LARGE", { message: "candidate count exceeded bound; excess ignored" });
+        diags.add("CANDIDATE_COUNT_OVERFLOW", { message: "candidate count exceeded bound; excess ignored" });
     }
 
     // Determinism (R22): canonical order independent of arrival order.
@@ -41,6 +41,29 @@ function decide({ candidates, registry, config, requestedCapsuleId = null, polic
         if (r !== 0) return r;
         return a.manifest.capsuleId < b.manifest.capsuleId ? -1 : 1;
     });
+
+    // Lineage ambiguity is evaluated BEFORE any implicit branch choice.
+    // A fork or conflicting epoch must never be silently resolved by
+    // NEWEST_VALID; only an explicit capsuleId may pass through, with the
+    // ambiguity kept visible in reason codes and diagnostics.
+    const lineage = analyzeLineage(bounded, config);
+    for (const d of lineage.diagnostics) {
+        diags.add(d.code, d);
+    }
+    const ambiguityCodes = [];
+    if (lineage.hasFork) {
+        ambiguityCodes.push("LINEAGE_FORK");
+    }
+    if (lineage.diagnostics.some((d) => d.code === "LINEAGE_CONFLICTING_EPOCH")) {
+        ambiguityCodes.push("LINEAGE_CONFLICTING_EPOCH");
+    }
+    if (ambiguityCodes.length > 0 && requestedCapsuleId === null) {
+        for (const code of ambiguityCodes) {
+            diags.add(code, { message: "implicit selection refused on ambiguous lineage" });
+        }
+        return collectorRefuse(diags, ambiguityCodes);
+    }
+    const acknowledgeAmbiguity = ambiguityCodes.length > 0;
 
     let chosen = null;
     if (requestedCapsuleId !== null) {
@@ -79,10 +102,6 @@ function decide({ candidates, registry, config, requestedCapsuleId = null, polic
         return refuse(diags, "UNKNOWN", { capsuleId: chosen.manifest.capsuleId });
     }
 
-    const lineage = analyzeLineage(bounded, config);
-    for (const d of lineage.diagnostics) {
-        diags.add(d.code, d);
-    }
     if (lineage.hasCycle) {
         return refuse(diags, "LINEAGE_CYCLE", { capsuleId: chosen.manifest.capsuleId });
     }
@@ -144,6 +163,9 @@ function decide({ candidates, registry, config, requestedCapsuleId = null, polic
     if (outcome === DECISION_OUTCOMES.DEGRADED_RESTORE) {
         reasonCodes.push("DEGRADED_MISSING_OPTIONAL_SECTIONS");
     }
+    if (acknowledgeAmbiguity) {
+        reasonCodes.push(...ambiguityCodes);
+    }
     if (requiresAuthorityRevalidation) {
         reasonCodes.push("AUTHORITY_REVALIDATION_REQUIRED");
         diags.add("AUTHORITY_REVALIDATION_REQUIRED", { capsuleId: m.capsuleId });
@@ -169,12 +191,16 @@ function decide({ candidates, registry, config, requestedCapsuleId = null, polic
 
 function refuse(collector, code, details) {
     collector.add(code, details);
+    return collectorRefuse(collector, [code], details);
+}
+
+function collectorRefuse(collector, codes, details = {}) {
     return Object.freeze({
         outcome: DECISION_OUTCOMES.REFUSE,
         capsuleId: details?.capsuleId ?? null,
         epoch: null,
         runtimeGenerationId: null,
-        reasonCodes: Object.freeze([code]),
+        reasonCodes: Object.freeze([...codes]),
         degradedSections: Object.freeze([]),
         deferredSections: Object.freeze([]),
         requiresAuthorityRevalidation: false,

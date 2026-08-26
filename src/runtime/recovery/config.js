@@ -13,8 +13,6 @@ const DEFAULT_RECOVERY_CONFIG = Object.freeze({
     maxDiagnostics: 200,
     maxLineageDepth: 64,
     maxProviderCount: 32,
-    maxMetadataKeys: 32,
-    maxMetadataStringLength: 512,
     maxCheckpointReasonLength: 256,
     allowEphemeralCheckpoint: false
 });
