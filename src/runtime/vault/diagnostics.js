@@ -14,19 +14,38 @@ function createVaultDiagnostics(config) {
     let entries = [];
     const max = config.maxDiagnosticHistory;
 
-    function record(op, secretId, outcome, detail) {
-        const entry = Object.freeze({
-            at: op.at ?? null,
-            op: String(op).slice(0, 32),
-            secretId: secretId ?? null,
-            outcome: String(outcome).slice(0, 32),
-            detail: detail === undefined ? null : registry.scrubText(String(detail).slice(0, 256))
+    /**
+     * Single validated object parameter — no positional ambiguity (B4).
+     * Schema (all bounded, all scrubbed where textual):
+     *   { at, op, secretId, outcome, detail }
+     */
+    function record(entry) {
+        if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+            throw new TypeError("diagnostic entry must be an object");
+        }
+        const op = typeof entry.op === "string" ? entry.op.slice(0, 32) : "unknown";
+        const secretId = typeof entry.secretId === "string" ? entry.secretId.slice(0, 64) : null;
+        const outcome = typeof entry.outcome === "string"
+            ? entry.outcome.slice(0, 32)
+            : "unknown";
+        // Only the detail field is free-form text: it MUST pass through
+        // the redaction registry before storage.
+        const rawDetail = entry.detail === undefined || entry.detail === null
+            ? null
+            : String(entry.detail).slice(0, 256);
+        const detail = rawDetail === null ? null : registry.scrubText(rawDetail);
+        const frozen = Object.freeze({
+            at: Number.isSafeInteger(entry.at) ? entry.at : null,
+            op,
+            secretId,
+            outcome,
+            detail
         });
-        entries.push(entry);
+        entries.push(frozen);
         if (entries.length > max) {
             entries = entries.slice(-max);
         }
-        return entry;
+        return frozen;
     }
 
     function recent(limit) {

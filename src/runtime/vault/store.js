@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const { invalidInput } = require("./errors");
+const { VaultError } = require("./errors");
 const { assertSecretId, normalizeSecretIdInput } = require("./ids");
 const { buildSecretRecord } = require("./record");
 const { assertCipherAdapter, DETERMINISTIC_TEST_ADAPTER } = require("./cipher");
@@ -24,9 +25,9 @@ const { assertCipherAdapter, DETERMINISTIC_TEST_ADAPTER } = require("./cipher");
  */
 
 function conflict(code, message) {
-    const err = invalidInput(message);
-    err.code = code;
-    return err;
+    // Typed, immutable construction. Never mutate a VaultError after
+    // construction — instances are frozen (B2).
+    return new VaultError(code, message);
 }
 
 /**
@@ -46,6 +47,13 @@ function createMemorySecretStore() {
             const current = records.get(assertSecretId(record.secretId));
             if (current && current.version !== record.expectedVersion) {
                 throw conflict("VAULT_CONFLICT", "concurrent modification detected");
+            }
+            // Generation guard: even if versions coincide, a stale writer
+            // from a previous incarnation of this id can never overwrite
+            // a newly created record.
+            if (current && record.expectedVersion !== undefined && record.expectedVersion !== null &&
+                record.createdAt !== current.createdAt) {
+                throw conflict("VAULT_CONFLICT", "stale writer from previous record generation");
             }
             if (!current && record.expectedVersion !== undefined && record.expectedVersion !== null) {
                 throw conflict("VAULT_CONFLICT", "record vanished before update");
@@ -134,6 +142,18 @@ function createFileSecretStore(dirPath, options = {}) {
             const current = readRecord(record.secretId);
             if (current && current.version !== record.expectedVersion) {
                 throw conflict("VAULT_CONFLICT", "concurrent modification detected");
+            }
+            // Generation guard: a stale writer from a previous incarnation
+            // of this id must never overwrite a newly created record.
+            if (current && record.expectedVersion !== undefined && record.expectedVersion !== null &&
+                record.createdAt !== current.createdAt) {
+                throw conflict("VAULT_CONFLICT", "stale writer from previous record generation");
+            }
+            // Deletion is terminal for stale writers (B3): a put carrying
+            // an expectedVersion against a missing record can never
+            // recreate it — including its old envelope.
+            if (!current && record.expectedVersion !== undefined && record.expectedVersion !== null) {
+                throw conflict("VAULT_CONFLICT", "record vanished before update");
             }
             const nextVersion = (current ? current.version : 0) + 1;
             const next = buildSecretRecord({ ...record, version: nextVersion });
