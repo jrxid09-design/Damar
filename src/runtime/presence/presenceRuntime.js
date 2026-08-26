@@ -54,6 +54,8 @@ const DECISION_CODES = Object.freeze({
     REJECTED_STALE_GENERATION: "REJECTED_STALE_GENERATION",
     REJECTED_EXPIRED_TOKEN: "REJECTED_EXPIRED_TOKEN",
     REJECTED_INTERRUPTED_TOKEN: "REJECTED_INTERRUPTED_TOKEN",
+    REJECTED_TERMINAL_ACTIVITY: "REJECTED_TERMINAL_ACTIVITY",
+    REJECTED_UNKNOWN_ACTIVITY: "REJECTED_UNKNOWN_ACTIVITY",
     REJECTED_BOUND_EXCEEDED: "REJECTED_BOUND_EXCEEDED",
     REJECTED_UNKNOWN_TARGET: "REJECTED_UNKNOWN_TARGET",
     REJECTED_UNKNOWN_WAIT: "REJECTED_UNKNOWN_WAIT",
@@ -210,6 +212,7 @@ class PresenceRuntime {
                 liveExpired = true;
             }
         }
+        if (liveExpired) this._pruneActivityTombstones();
         if (liveExpired && this._state === LIFECYCLE.ACTIVE && this._liveActivityCount() === 0) {
             this._applyTransition({
                 to: LIFECYCLE.DORMANT,
@@ -234,6 +237,30 @@ class PresenceRuntime {
             if (record.status === "live") count += 1;
         }
         return count;
+    }
+
+    /**
+     * Batas kapasitas menghitung AKTIVITAS HIDUP saja (bukan ukuran map).
+     * Rekaman terminal (completed/expired/interrupted) dipertahankan hanya
+     * sebagai "tombstone" berbatas untuk idempotensi double-completion
+     * terkini; yang tertua dieviksi deterministik (urutan insert). Tanpa
+     * ini, penggunaan berulang normal akan permanen menghabiskan kuota.
+     */
+    _pruneActivityTombstones() {
+        const limit = this._config.maxActivityTombstones;
+        let terminal = 0;
+        for (const record of this._activities.values()) {
+            if (record.status !== "live") terminal += 1;
+        }
+        let excess = terminal - limit;
+        if (excess <= 0) return;
+        for (const [id, record] of this._activities) {
+            if (excess <= 0) break;
+            if (record.status !== "live") {
+                this._activities.delete(id);
+                excess -= 1;
+            }
+        }
     }
 
     _derivedResumeTarget() {
@@ -397,7 +424,7 @@ class PresenceRuntime {
         if (producer !== null && !isGenuineProducer(producer)) {
             return { ok: false, code: DECISION_CODES.REJECTED_INVALID_PRODUCER };
         }
-        if (this._activities.size >= this._config.maxActivities) {
+        if (this._liveActivityCount() >= this._config.maxActivities) {
             return {
                 ok: false,
                 code: DECISION_CODES.REJECTED_BOUND_EXCEEDED,
@@ -456,6 +483,7 @@ class PresenceRuntime {
             endedAtMs: null
         });
         this._counters.activitiesStarted += 1;
+        this._pruneActivityTombstones();
         this._journal.append({
             generation: this._generation,
             from: this._state,
@@ -494,7 +522,14 @@ class PresenceRuntime {
         }
         const record = this._activities.get(token.id);
         if (!record || record.token !== token) {
-            return { ok: false, code: DECISION_CODES.REJECTED_FORGED_TOKEN };
+            // Token genuin yang tak lagi dikenal = rekamannya sudah
+            // tereviksi dari jendela tombstone (bukan pemalsuan).
+            return {
+                ok: false,
+                code: isGenuineActivityToken(token)
+                    ? DECISION_CODES.REJECTED_UNKNOWN_ACTIVITY
+                    : DECISION_CODES.REJECTED_FORGED_TOKEN
+            };
         }
         if (record.status === "completed") {
             return { ok: true, code: DECISION_CODES.OK_ALREADY_COMPLETED };
@@ -510,6 +545,7 @@ class PresenceRuntime {
         record.status = "completed";
         record.endedAtMs = now;
         this._counters.activitiesCompleted += 1;
+        this._pruneActivityTombstones();
         this._journal.append({
             generation: this._generation,
             from: this._state,
@@ -554,8 +590,23 @@ class PresenceRuntime {
             return { ok: false, code: DECISION_CODES.REJECTED_STALE_GENERATION };
         }
         const record = this._activities.get(token.id);
-        if (!record || record.status !== "live") {
-            return { ok: false, code: DECISION_CODES.OK_NOOP };
+        if (!record || record.token !== token) {
+            // Identitas token sama ketatnya dengan endActivity: id cocok
+            // TIDAK cukup — objek token harus persis yang diterbitkan.
+            return {
+                ok: false,
+                code: DECISION_CODES.REJECTED_FORGED_TOKEN
+            };
+        }
+        // Token genuin tapi sudah terminal: deterministik, tanpa mutasi.
+        if (record.status !== "live") {
+            const code =
+                record.status === "expired"
+                    ? DECISION_CODES.REJECTED_EXPIRED_TOKEN
+                    : record.status === "interrupted"
+                        ? DECISION_CODES.REJECTED_INTERRUPTED_TOKEN
+                        : DECISION_CODES.REJECTED_TERMINAL_ACTIVITY;
+            return { ok: false, code };
         }
         this._counters.interruptionRecommendations += 1;
         const now = this._clock.nowMs();
@@ -773,29 +824,35 @@ class PresenceRuntime {
             return { ok: false, code: DECISION_CODES.REJECTED_INVALID_ARGUMENT, level };
         }
 
+        // Atomisitas: level hanya di-commit bila representasi degraded-nya
+        // juga berhasil — penolakan tidak meninggalkan setengah fakta.
+        const wantsReason =
+            level === RESOURCE_PRESSURE_LEVEL.HIGH || level === RESOURCE_PRESSURE_LEVEL.CRITICAL;
+        const hasReason = this._hasDegradedKind(DEGRADED_REASON.RESOURCE_PRESSURE);
         const previous = this._resourcePressure;
-        this._resourcePressure = level;
-        if ((level === RESOURCE_PRESSURE_LEVEL.HIGH || level === RESOURCE_PRESSURE_LEVEL.CRITICAL) &&
-            !this._hasDegradedKind(DEGRADED_REASON.RESOURCE_PRESSURE)) {
-            return this.reportDegradation({
+
+        if (wantsReason && !hasReason) {
+            const added = this.reportDegradation({
                 producer,
                 kind: DEGRADED_REASON.RESOURCE_PRESSURE,
                 detail: null,
                 cause: CAUSE.RESOURCE_PRESSURE
             });
+            if (!added.ok) return added;
+            this._resourcePressure = level;
+            return added;
         }
-        if (
-            (level === RESOURCE_PRESSURE_LEVEL.NORMAL ||
-                level === RESOURCE_PRESSURE_LEVEL.ELEVATED ||
-                level === RESOURCE_PRESSURE_LEVEL.UNKNOWN) &&
-            this._hasDegradedKind(DEGRADED_REASON.RESOURCE_PRESSURE)
-        ) {
-            return this.clearDegradation({
+        if (!wantsReason && hasReason) {
+            const removed = this.clearDegradation({
                 kind: DEGRADED_REASON.RESOURCE_PRESSURE,
                 detail: null,
                 producer
             });
+            if (!removed.ok) return removed;
+            this._resourcePressure = level;
+            return removed;
         }
+        this._resourcePressure = level;
         return { ok: true, code: DECISION_CODES.OK_RECORDED, previous, level };
     }
 
@@ -813,15 +870,33 @@ class PresenceRuntime {
     }
 
     completeRecovery(producer, reason = null) {
-        // Recovery Capsule melaporkan pulih penuh: alasan degradasi lama
-        // tidak lagi jujur dipertahankan — presence menghapusnya saat commit.
+        // Atomisitas: validasi produsen + edge/sebab DULU. Alasan degradasi
+        // hanya dihapus sebagai bagian dari commit (RECOVERY_COMPLETED =
+        // klaim "pulih penuh", representasi lama tak lagi jujur dipertahankan).
+        this._assertNotDestroyed();
+        this._sweepExpired();
+        const rejection = this._assertTrustedProducer(producer);
+        if (rejection) return { ok: false, code: rejection };
+        const invalid = this._validateTransition(CAUSE.RECOVERY_COMPLETED, LIFECYCLE.DORMANT);
+        if (invalid) return invalid;
         this._degradedReasons.clear();
-        return this._recoveryOp(producer, CAUSE.RECOVERY_COMPLETED, LIFECYCLE.DORMANT, reason);
+        return this._applyTransition({
+            to: LIFECYCLE.DORMANT,
+            cause: CAUSE.RECOVERY_COMPLETED,
+            producerId: producer.id,
+            reason: boundedText(reason)
+        });
     }
 
     degradeRecovery(producer, reason = null) {
-        // Pulih sebagian: pastikan representasi tetap DEGRADED dengan
-        // alasan eksplisit (RECOVERY_REQUIRED) bila belum ada.
+        // Atomisitas: validasi dulu; alasan eksplisit (RECOVERY_REQUIRED)
+        // baru ditambahkan saat commit — pulih sebagian tetap DEGRADED.
+        this._assertNotDestroyed();
+        this._sweepExpired();
+        const rejection = this._assertTrustedProducer(producer);
+        if (rejection) return { ok: false, code: rejection };
+        const invalid = this._validateTransition(CAUSE.RECOVERY_DEGRADED, LIFECYCLE.DEGRADED);
+        if (invalid) return invalid;
         if (this._degradedReasons.size === 0 && this._state !== LIFECYCLE.FAILED) {
             this._degradedReasons.set(`${DEGRADED_REASON.RECOVERY_REQUIRED}|`, Object.freeze({
                 kind: DEGRADED_REASON.RECOVERY_REQUIRED,
@@ -830,7 +905,12 @@ class PresenceRuntime {
             }));
             this._pushDiagnostic(`DEGRADED:${DEGRADED_REASON.RECOVERY_REQUIRED}|`);
         }
-        return this._recoveryOp(producer, CAUSE.RECOVERY_DEGRADED, LIFECYCLE.DEGRADED, reason);
+        return this._applyTransition({
+            to: LIFECYCLE.DEGRADED,
+            cause: CAUSE.RECOVERY_DEGRADED,
+            producerId: producer.id,
+            reason: boundedText(reason)
+        });
     }
 
     failRecovery(producer, reason = null) {
@@ -848,6 +928,28 @@ class PresenceRuntime {
             producerId: producer.id,
             reason: boundedText(reason)
         });
+    }
+
+    /**
+     * Pra-validasi transisi tanpa mutasi apa pun: target dikenal, edge
+     * ada, sebab sah untuk edge. Null = legal. Dipakai operasi yang perlu
+     * mutasi tambahan sebagai bagian dari commit yang sama.
+     */
+    _validateTransition(cause, to) {
+        const from = this._state;
+        if (!Object.prototype.hasOwnProperty.call(LIFECYCLE, to)) {
+            this._counters.transitionsRejected += 1;
+            return { ok: false, code: DECISION_CODES.REJECTED_UNKNOWN_TARGET, from, to };
+        }
+        if (!TRANSITIONS.has(from, to)) {
+            this._counters.transitionsRejected += 1;
+            return { ok: false, code: DECISION_CODES.REJECTED_INVALID_TRANSITION, from, to };
+        }
+        if (!TRANSITIONS.causesFor(from, to).has(cause)) {
+            this._counters.transitionsRejected += 1;
+            return { ok: false, code: DECISION_CODES.REJECTED_INVALID_CAUSE, from, to, cause };
+        }
+        return null;
     }
 
     // ------------------------------------------------------ boot/shutdown

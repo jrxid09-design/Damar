@@ -5,6 +5,7 @@
 
 const DEFAULT_PRESENCE_CONFIG = Object.freeze({
     maxActivities: 16,
+    maxActivityTombstones: 64,
     maxOwnerWaits: 8,
     maxDegradedReasons: 8,
     maxHistory: 256,
