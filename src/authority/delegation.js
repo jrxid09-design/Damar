@@ -15,12 +15,92 @@
  */
 const {
     canonicalCapabilityId, canonicalTokenList,
-    restrictionSubset
+    restrictionSubset, deepFreeze
 } = require("./canonical");
-const { normalizeIdentityBinding,
-        normalizeRestrictionsForBuild } = require("./model");
+const { normalizeRestrictionsForBuild } = require("./model");
 
 const IDENTITY_DIMENSIONS = ["channels", "sessionIds", "principals"];
+
+/**
+ * ATENUASI IDENTITY BINDING PER-DIMENSI (§attenuation-only).
+ *
+ * Untuk setiap dimensi (channels/sessionIds/principals):
+ *   - parent TIDAK mengikat dimensi  -> anak boleh mem-bind/narrow itu
+ *   - parent mengikat dimensi:
+ *       anak OMITS      -> warisi item parent
+ *       anak kirim []   -> DENY CAP_IDENTITY_MISMATCH (kosong != inherit)
+ *       anak subset     -> sah
+ *       anak lebih luas -> DENY CAP_IDENTITY_MISMATCH
+ *
+ * Object parsial di-MERGE per dimensi — TIDAK PERNAH menormalkan
+ * {} terkendali-parent menjadi null/unrestricted.
+ */
+function buildChildIdentityBinding(requestedBinding, parentBinding) {
+    const violations = [];
+
+    if (requestedBinding !== undefined && requestedBinding !== null &&
+        (typeof requestedBinding !== "object" ||
+         Array.isArray(requestedBinding))) {
+        violations.push({ field: "identityBinding",
+                          reasonCode: "CAP_MALFORMED",
+                          value: "harus object" });
+        return { binding: null, violations };
+    }
+
+    const parentDims = parentBinding ?? {};
+    const req = requestedBinding ?? {};
+    const merged = {};
+
+    for (const dim of IDENTITY_DIMENSIONS) {
+        const parentItems = Array.isArray(parentDims[dim])
+            ? parentDims[dim] : [];
+        const parentBound = parentItems.length > 0;
+
+        // Omitted (atau undefined/null) -> warisi dimensi parent.
+        if (!Object.prototype.hasOwnProperty.call(req, dim) ||
+            req[dim] === undefined || req[dim] === null) {
+            if (parentBound) merged[dim] = [...parentItems];
+            continue;
+        }
+
+        const raw = req[dim];
+        if (!Array.isArray(raw)) {
+            violations.push({ field: `identityBinding.${dim}`,
+                              reasonCode: "CAP_MALFORMED",
+                              value: "harus array" });
+            continue;
+        }
+
+        const items = [...new Set(raw.map(
+            x => String(x).trim().toLowerCase()).filter(Boolean))];
+
+        if (!items.length) {
+            if (parentBound) {
+                // [] eksplisit pada dimensi ter-ikat = melebar.
+                violations.push({ field: `identityBinding.${dim}`,
+                                  reasonCode: "CAP_IDENTITY_MISMATCH",
+                                  value: "(kosong)" });
+            }
+            continue;                    // dimensi bebas: kosong = no-op
+        }
+
+        if (parentBound) {
+            const wider = items.filter(x => !parentItems.includes(x));
+            if (wider.length) {
+                violations.push({ field: `identityBinding.${dim}`,
+                                  reasonCode: "CAP_IDENTITY_MISMATCH",
+                                  value: wider.join(",") });
+                continue;
+            }
+        }
+        merged[dim] = items;             // subset, atau parent bebas
+    }
+
+    return {
+        binding: Object.keys(merged).length ? deepFreeze(merged) : null,
+        violations
+    };
+}
 
 /** Temporal expiry compare (§absolute-time): epoch ms, NaN fail-closed. */
 function expiryViolations(parentExpiresAt, childExpiresAt) {
@@ -44,38 +124,6 @@ function expiryViolations(parentExpiresAt, childExpiresAt) {
         violations.push({ field: "expiry",
                           reasonCode: "CAP_DELEGATION_DENIED",
                           value: childExpiresAt });
-    }
-    return violations;
-}
-
-/**
- * Identity binding anak harus equal-or-narrower PER DIMENSI.
- * Dimensi yang tidak disebut anak mewarisi parent.
- * Parent tanpa binding = unbound; anak boleh menambahkan binding
- * (itu pempersempit). Kebalikannya tidak.
- */
-function identityBindingViolations(childBinding, parentBinding) {
-    const violations = [];
-    if (parentBinding === null || parentBinding === undefined) {
-        return violations;
-    }
-    if (childBinding === null || childBinding === undefined) {
-        return violations;
-    }
-    for (const dim of IDENTITY_DIMENSIONS) {
-        const parentItems = Array.isArray(parentBinding[dim])
-            ? parentBinding[dim] : [];
-        const childItems = Array.isArray(childBinding[dim])
-            ? childBinding[dim] : [];
-        if (!parentItems.length) continue;          // dimensi bebas -> boleh
-        const wider = childItems.filter(x => !parentItems.includes(x));
-        if (wider.length) {
-            violations.push({
-                field: `identityBinding.${dim}`,
-                reasonCode: "CAP_IDENTITY_MISMATCH",
-                value: wider.join(",")
-            });
-        }
     }
     return violations;
 }
@@ -118,12 +166,15 @@ function attenuateGrant(parent, requested) {
         parentCapabilityId: parent.capabilityId,
         rootCapabilityId: parent.rootCapabilityId,
         purpose: requested.purpose ?? null,
-        identityBinding: requested.identityBinding !== undefined &&
-                         requested.identityBinding !== null
-            ? normalizeIdentityBinding(requested.identityBinding)
-            : parent.identityBinding,
+        identityBinding: parent.identityBinding,
         ratificationId: null
     };
+
+    // Identity attenuation PER-DIMENSI: merge + subset law.
+    const ident = buildChildIdentityBinding(
+        requested.identityBinding, parent.identityBinding);
+    child.identityBinding = ident.binding;
+    violations.push(...ident.violations);
 
     // ---- LAW: subset enforcement ---------------------------------------
     for (const action of child.actions) {
@@ -169,10 +220,6 @@ function attenuateGrant(parent, requested) {
                           reasonCode: "CAP_RESTRICTION_FAILED" });
     }
 
-    // Identity binding: equal-or-narrower per dimensi.
-    violations.push(...identityBindingViolations(
-        child.identityBinding, parent.identityBinding));
-
     // Budget: delegated wajib finite & <= parent sisa kuota efektif.
     if (typeof child.maxExecutions !== "number") {
         if (typeof parent.maxExecutions === "number") {
@@ -206,4 +253,4 @@ function attenuateGrant(parent, requested) {
 }
 
 module.exports = { attenuateGrant, expiryViolations,
-                   identityBindingViolations };
+                   buildChildIdentityBinding };

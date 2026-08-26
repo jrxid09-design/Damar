@@ -46,8 +46,13 @@ const TERMINAL_NO_RESURRECT = Object.freeze({
 /**
  * Evaluasi konsumsi eksekusi (pure). Dipanggil DI DALAM bagian atomik
  * oleh kedua backend. maxExecutions null/undefined = unlimited.
+ *
+ * KONSERVASI ANGGARAN POHON (§budget-conservation): kapasitas eksekusi
+ * sebuah node = maxExecutions - used - outstandingChildReservations;
+ * reservasi anak MENGECAK kapasitas eksekusi node itu sendiri.
  */
-function evaluateConsumption({ capEntry, used, currentGeneration, nowMs }) {
+function evaluateConsumption({ capEntry, used, currentGeneration, nowMs,
+                               outstandingReservations = 0 }) {
     if (!capEntry) {
         return { ok: false, reasonCode: "CAP_NOT_FOUND" };
     }
@@ -85,7 +90,8 @@ function evaluateConsumption({ capEntry, used, currentGeneration, nowMs }) {
     }
 
     const max = payload.maxExecutions;
-    if (typeof max === "number" && used >= max) {
+    if (typeof max === "number" &&
+        used + Math.max(0, outstandingReservations) >= max) {
         return { ok: false, reasonCode: "CAP_EXHAUSTED", used };
     }
     return { ok: true };
@@ -132,6 +138,62 @@ function createMemoryAuthorityStore() {
     const ratifications = new Map();
     const proposals = new Map();
     const delegationReservations = new Map(); // childId -> {parent,amount,at}
+
+    // Satu operasi atomik memory pada satu waktu — mencegah interleave
+    // consume vs delegate pada await point di dalam composite.
+    let opChain = Promise.resolve();
+    function serialize(work) {
+        const next = opChain.then(work);
+        opChain = next.then(() => {}, () => {});
+        return next;
+    }
+
+    function reservationsFor(parentCapabilityId) {
+        let sum = 0;
+        for (const v of delegationReservations.values()) {
+            if (v.parent === parentCapabilityId) sum += v.amount;
+        }
+        return sum;
+    }
+
+    function usedFor(capabilityId) {
+        return consumption.filter(
+            c => c.capability_id === capabilityId).length;
+    }
+
+    /**
+     * Validasi konservasi terhadap SEMUA leluhur finite sampai root
+     * (§budget-conservation), dipakai dalam bagian atomik.
+     *
+     * Reservasi bersarang TIDAK dibebankan ulang ke leluhur (budget
+     * child sudah terpotong dari parent saat child dibuat); yang
+     * dicek adalah INVARIAN konservasi tiap simpul:
+     *   used(node) + outstandingReservations(node) <= maxExecutions(node)
+     * Pelanggaran = state korup/tamper -> delegasi ditolak.
+     */
+    function ancestorIntegrityViolation(startCapabilityId) {
+        let cursor = startCapabilityId;
+        let hops = 0;
+        while (cursor && hops++ < 64) {
+            const entry = caps.get(cursor) ?? null;
+            if (!entry) break;
+            const max = entry.payload?.maxExecutions;
+            if (typeof max === "number") {
+                const used = usedFor(cursor);
+                const reserved = reservationsFor(cursor);
+                if (used + reserved > max) {
+                    return { ok: false,
+                             reasonCode: "CAP_DELEGATION_BUDGET_EXHAUSTED",
+                             detail:
+                                 `inkonservasi anggaran pada '${cursor}': ` +
+                                 `terpakai ${used} + reservasi ${reserved} ` +
+                                 `> ${max}` };
+                }
+            }
+            cursor = entry.payload?.parentCapabilityId ?? null;
+        }
+        return null;
+    }
 
     const api = {
         backend: "memory",
@@ -203,7 +265,7 @@ function createMemoryAuthorityStore() {
          * Memory atomic-by-construction (sinkron antara await);
          * snapshot rollback bila langkah mana pun gagal.
          */
-        async issueRootGrantAtomic({ capabilityId, status, generation,
+        async _issueRootGrantMethodImpl({ capabilityId, status, generation,
                                      payload, ratificationId,
                                      expectProposalDigest,
                                      expectProposalRevision,
@@ -269,7 +331,7 @@ function createMemoryAuthorityStore() {
          * child + event. Total budget anak TIDAK bisa melebihi budget
          * parent (anti sibling-amplification).
          */
-        async delegateGrantAtomic({ childCapabilityId, childStatus,
+        async _delegateGrantMethodImpl({ childCapabilityId, childStatus,
                                     childGeneration, childPayload,
                                     parentCapabilityId,
                                     expectParentGeneration,
@@ -298,20 +360,35 @@ function createMemoryAuthorityStore() {
                              detail: "parent bergeneration saat commit" };
                 }
 
-                const reserved = [...delegationReservations.values()]
-                    .filter(v => v.parent === parentCapabilityId)
-                    .reduce((sum, v) => sum + v.amount, 0);
+                const reserved = reservationsFor(parentCapabilityId);
 
-                const parentMax = parent.payload?.maxExecutions;
-                if (typeof parentMax === "number" &&
-                    typeof reserveAmount === "number" &&
-                    reserveAmount > parentMax - reserved) {
-                    return { ok: false,
-                             reasonCode: "CAP_DELEGATION_BUDGET_EXHAUSTED",
-                             detail:
-                                 `delegable budget habis: ` +
-                                 `${reserved}/${parentMax} terpakai, ` +
-                                 `diminta ${reserveAmount}` };
+                if (typeof reserveAmount === "number") {
+                    // Kapasitas efektif parent (konsumsi sendiri +
+                    // reservasi anak mengurangi kuota delegasi):
+                    const parentMax = parent.payload?.maxExecutions;
+                    if (typeof parentMax === "number") {
+                        const remaining =
+                            parentMax - usedFor(parentCapabilityId) -
+                            reserved;
+                        if (reserveAmount > remaining) {
+                            return { ok: false,
+                                     reasonCode:
+                                         "CAP_DELEGATION_BUDGET_EXHAUSTED",
+                                     detail:
+                                         `delegable budget habis di ` +
+                                         `'${parentCapabilityId}': ` +
+                                         `terpakai ` +
+                                         `${usedFor(parentCapabilityId)} + ` +
+                                         `reservasi ${reserved} / ` +
+                                         `${parentMax}, diminta ` +
+                                         `${reserveAmount}` };
+                        }
+                    }
+                    // Invarian konservasi divalidasi terhadap SEMUA
+                    // leluhur finite sampai root, dalam tx yang sama.
+                    const integ = ancestorIntegrityViolation(
+                        parentCapabilityId);
+                    if (integ) return integ;
                 }
 
                 if (prevChild) {
@@ -347,13 +424,14 @@ function createMemoryAuthorityStore() {
          * notBefore/expiry/budget) terjadi pada unit atomik yang sama
          * dengan penulisan ledger konsumsi.
          */
-        async consumeExecutionAtomic({ capabilityId, at, meta, nowMs }) {
+        async _consumeExecutionMethodImpl({ capabilityId, at, meta, nowMs }) {
             const entry = caps.get(capabilityId) ?? null;
             const prevStatus = entry?.status ?? null;
             const eventsMark = events.length;
             const payload = entry?.payload ?? null;
-            const used = consumption.filter(
-                c => c.capability_id === capabilityId).length;
+            const used = usedFor(capabilityId);
+            const outstandingReservations =
+                reservationsFor(capabilityId);
             const curGen = entry
                 ? (generations.get(payload?.subject) ?? 0)
                 : undefined;
@@ -361,7 +439,7 @@ function createMemoryAuthorityStore() {
             try {
                 const verdict = evaluateConsumption({
                     capEntry: entry, used, currentGeneration: curGen,
-                    nowMs });
+                    nowMs, outstandingReservations });
                 if (!verdict.ok) {
                     return { ok: false, reasonCode: verdict.reasonCode,
                              detail: verdict.detail ?? null, used };
@@ -373,7 +451,8 @@ function createMemoryAuthorityStore() {
                 const newUsed = used + 1;
                 const max = payload.maxExecutions;
                 const exhausted =
-                    typeof max === "number" && newUsed === max;
+                    typeof max === "number" &&
+                    newUsed + Math.max(0, outstandingReservations) >= max;
 
                 if (exhausted) {
                     entry.status = "EXHAUSTED";
@@ -395,6 +474,17 @@ function createMemoryAuthorityStore() {
                 events.length = eventsMark;
                 throw error;
             }
+        },
+
+        /* Wrapper serial: setiap operasi atomik berjalan eksklusif. */
+        issueRootGrantAtomic(opts) {
+            return serialize(() => api._issueRootGrantMethodImpl(opts));
+        },
+        delegateGrantAtomic(opts) {
+            return serialize(() => api._delegateGrantMethodImpl(opts));
+        },
+        consumeExecutionAtomic(opts) {
+            return serialize(() => api._consumeExecutionMethodImpl(opts));
         }
     };
 
@@ -429,6 +519,52 @@ function createSqliteAuthorityStore(database) {
             try { await database.exec("ROLLBACK"); } catch {}
             throw error;
         }
+    }
+
+    async function reservationsFor(parentCapabilityId) {
+        const r = await database.get(
+            `SELECT COALESCE(SUM(amount),0) AS total
+               FROM capability_delegations
+              WHERE parent_capability_id=?`, [parentCapabilityId]);
+        return r.total;
+    }
+
+    async function usedFor(capabilityId) {
+        const r = await database.get(
+            `SELECT COUNT(*) AS n FROM capability_consumption
+              WHERE capability_id=?`, [capabilityId]);
+        return r.n;
+    }
+
+    /**
+     * Validasi konservasi terhadap SEMUA leluhur finite sampai root
+     * (lihat memori backend untuk semantik lengkap).
+     */
+    async function ancestorIntegrityViolation(startCapabilityId) {
+        let cursor = startCapabilityId;
+        let hops = 0;
+        while (cursor && hops++ < 64) {
+            const row = await database.get(
+                `SELECT payload FROM authority_capabilities
+                  WHERE capability_id=?`, [cursor]);
+            if (!row) break;
+            const nodePayload = JSON.parse(row.payload);
+            const max = nodePayload?.maxExecutions;
+            if (typeof max === "number") {
+                const used = await usedFor(cursor);
+                const reserved = await reservationsFor(cursor);
+                if (used + reserved > max) {
+                    return { ok: false,
+                             reasonCode: "CAP_DELEGATION_BUDGET_EXHAUSTED",
+                             detail:
+                                 `inkonservasi anggaran pada '${cursor}': ` +
+                                 `terpakai ${used} + reservasi ${reserved} ` +
+                                 `> ${max}` };
+                }
+            }
+            cursor = nodePayload?.parentCapabilityId ?? null;
+        }
+        return null;
     }
 
     function rollbackResult(value) {
@@ -675,17 +811,32 @@ function createSqliteAuthorityStore(database) {
                     [parentCapabilityId]);
                 const reserved = reservedRow.total;
 
-                const parentMax =
-                    JSON.parse(parentRow.payload).maxExecutions;
-                if (typeof parentMax === "number" &&
-                    typeof reserveAmount === "number" &&
-                    reserveAmount > parentMax - reserved) {
-                    throw rollbackResult({
-                        ok: false,
-                        reasonCode: "CAP_DELEGATION_BUDGET_EXHAUSTED",
-                        detail: `delegable budget habis: ${reserved}/` +
-                                `${parentMax} terpakai, diminta ` +
-                                `${reserveAmount}` });
+                if (typeof reserveAmount === "number") {
+                    // Kapasitas efektif parent (konsumsi sendiri +
+                    // reservasi anak mengurangi kuota delegasi):
+                    const parentMax =
+                        JSON.parse(parentRow.payload).maxExecutions;
+                    if (typeof parentMax === "number") {
+                        const used = await usedFor(parentCapabilityId);
+                        const remaining = parentMax - used - reserved;
+                        if (reserveAmount > remaining) {
+                            throw rollbackResult({
+                                ok: false,
+                                reasonCode:
+                                    "CAP_DELEGATION_BUDGET_EXHAUSTED",
+                                detail:
+                                    `delegable budget habis di ` +
+                                    `'${parentCapabilityId}': terpakai ` +
+                                    `${used} + reservasi ${reserved} / ` +
+                                    `${parentMax}, diminta ` +
+                                    `${reserveAmount}` });
+                        }
+                    }
+                    // Invarian konservasi terhadap SEMUA leluhur finite
+                    // sampai root, dalam transaksi yang sama.
+                    const integ = await ancestorIntegrityViolation(
+                        parentCapabilityId);
+                    if (integ) throw rollbackResult(integ);
                 }
 
                 const dup = await database.get(
@@ -752,10 +903,13 @@ function createSqliteAuthorityStore(database) {
                 const usedRow = await database.get(
                     `SELECT COUNT(*) AS n FROM capability_consumption
                       WHERE capability_id=?`, [capabilityId]);
+                const outstandingReservations =
+                    await reservationsFor(capabilityId);
 
                 const verdict = evaluateConsumption({
                     capEntry, used: usedRow.n,
-                    currentGeneration: curGen, nowMs });
+                    currentGeneration: curGen, nowMs,
+                    outstandingReservations });
                 if (!verdict.ok) {
                     throw rollbackResult({
                         ok: false, reasonCode: verdict.reasonCode,
@@ -772,7 +926,8 @@ function createSqliteAuthorityStore(database) {
                 const newUsed = usedRow.n + 1;
                 const max = capEntry.payload.maxExecutions;
                 const exhausted =
-                    typeof max === "number" && newUsed === max;
+                    typeof max === "number" &&
+                    newUsed + Math.max(0, outstandingReservations) >= max;
 
                 if (exhausted) {
                     await database.run(
