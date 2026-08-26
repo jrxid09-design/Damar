@@ -35,13 +35,15 @@ function validateGroupLimits(groupLimits) {
     if (groupLimits === null || typeof groupLimits !== "object" || Array.isArray(groupLimits)) {
         fail("groupLimits must be an object");
     }
-    const out = {};
+    const out = Object.create(null);
     for (const [name, limit] of Object.entries(groupLimits)) {
-        if (!KNOWN_GROUPS.includes(name)) fail(`unknown group "${name}" — group name set is closed`);
+        if (!KNOWN_GROUPS.includes(name) || name === "__proto__") {
+            fail(`unknown group "${name}" — group name set is closed`);
+        }
         out[name] = intInRange(limit, 1, 1024, `groupLimits.${name}`);
     }
     for (const g of KNOWN_GROUPS) {
-        if (!(g in out)) out[g] = out.default ?? 4;
+        if (!Object.prototype.hasOwnProperty.call(out, g)) out[g] = out.default ?? 4;
     }
     return out;
 }
@@ -98,6 +100,13 @@ function validateResourceGovernorConfig(raw) {
         expectedDurationMsMax: intInRange(demandMaxima.expectedDurationMsMax ?? 3600000, 1, Number.MAX_SAFE_INTEGER, "demandMaxima.expectedDurationMsMax")
     };
 
+    const heavyDemand = raw.heavyDemand ?? {};
+    const validatedHeavyDemand = {
+        memoryBytes: intInRange(heavyDemand.memoryBytes ?? 512 * 1024 * 1024, 1, Number.MAX_SAFE_INTEGER, "heavyDemand.memoryBytes"),
+        cpuWeight: numInRange(heavyDemand.cpuWeight ?? 80, 0, 100, "heavyDemand.cpuWeight"),
+        durationMs: intInRange(heavyDemand.durationMs ?? 600000, 1, Number.MAX_SAFE_INTEGER, "heavyDemand.durationMs")
+    };
+
     const aging = raw.aging ?? {};
     const validatedAging = {
         bonusPer10s: numInRange(aging.bonusPer10s ?? 5, 0, 100, "aging.bonusPer10s"),
@@ -120,6 +129,7 @@ function validateResourceGovernorConfig(raw) {
         memoryThresholds: { hostUsedMemoryRatio, processHeapUsedRatio, hostHardFloorBytes: memory.hostHardFloorBytes },
         eventLoopLagMs,
         demandMaxima: validatedDemandMaxima,
+        heavyDemand: validatedHeavyDemand,
         aging: validatedAging
     });
 }

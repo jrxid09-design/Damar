@@ -1,6 +1,7 @@
 "use strict";
 
 const os = require("node:os");
+const v8 = require("node:v8");
 const perfHooks = require("node:perf_hooks");
 
 class HostResourceObserver {
@@ -11,6 +12,12 @@ class HostResourceObserver {
 
     observe() {
         const mem = process.memoryUsage();
+        let heapLimitBytes = null;
+        try {
+            heapLimitBytes = v8.getHeapStatistics().heap_size_limit;
+        } catch {
+            heapLimitBytes = null;
+        }
         const sample = this._delayMonitor;
         let eventLoopLagMs = null;
         if (sample && typeof sample.mean === "number" && Number.isFinite(sample.mean)) {
@@ -23,7 +30,9 @@ class HostResourceObserver {
             rssBytes: mem.rss,
             heapUsedBytes: mem.heapUsed,
             heapTotalBytes: mem.heapTotal,
-            heapLimitBytes: Number.isFinite(mem.heapTotal) ? mem.heapTotal : null,
+            heapLimitBytes,
+            externalBytes: mem.external,
+            arrayBuffersBytes: mem.arrayBuffers,
             eventLoopLagMs,
             processUptimeSec: process.uptime()
         });

@@ -53,6 +53,7 @@ class ResourceGovernor {
     _observe() {
         try {
             const raw = this._observer.observe();
+            if (raw === null || typeof raw !== "object") throw new Error("observer returned malformed snapshot");
             const snap = {
                 observerHealthy: true,
                 totalMemBytes: raw.totalMemBytes,
@@ -60,6 +61,8 @@ class ResourceGovernor {
                 rssBytes: raw.rssBytes,
                 heapUsedBytes: raw.heapUsedBytes,
                 heapLimitBytes: raw.heapLimitBytes,
+                externalBytes: raw.externalBytes,
+                arrayBuffersBytes: raw.arrayBuffersBytes,
                 eventLoopLagMs: raw.eventLoopLagMs,
                 timestampMs: this._clock.nowMs()
             };
@@ -104,13 +107,19 @@ class ResourceGovernor {
         } catch (err) {
             return { error: this._decision(ADMISSION_OUTCOMES.REJECT_RESOURCE_LIMIT, REASONS.INVALID_DEMAND, idValue) };
         }
-        if (!(demand.concurrencyGroup in this.config.groupLimits)) {
+        if (!Object.prototype.hasOwnProperty.call(this.config.groupLimits, demand.concurrencyGroup)) {
             return { error: this._decision(ADMISSION_OUTCOMES.REJECT_RESOURCE_LIMIT, REASONS.UNKNOWN_GROUP, idValue) };
         }
         return { idValue, demand: freezeDeep(demand) };
     }
 
-    _isHeavy(cls) { return HEAVY_CLASSES.includes(cls); }
+    _isHeavy(demand) {
+        if (HEAVY_CLASSES.includes(demand.workloadClass)) return true;
+        const t = this.config.heavyDemand;
+        return demand.memoryBytesHint >= t.memoryBytes ||
+            demand.cpuWeight >= t.cpuWeight ||
+            demand.expectedDurationMs >= t.durationMs;
+    }
 
     _count(map, key) { return map.get(key) ?? 0; }
 
@@ -235,7 +244,7 @@ class ResourceGovernor {
 
     _pressureVerdict(demand, snapshot) {
         const band = snapshot.pressureBand;
-        const heavy = this._isHeavy(demand.workloadClass);
+        const heavy = this._isHeavy(demand);
         if (!snapshot.observerHealthy) {
             return heavy ? { defer: REASONS.DEFERRED_OBSERVER_UNAVAILABLE } : null;
         }
@@ -282,7 +291,7 @@ class ResourceGovernor {
         const snapshot = this._observe();
 
         const hostFree = isFiniteNumber(snapshot.freeMemBytes) ? snapshot.freeMemBytes : Infinity;
-        if (this._isHeavy(demand.workloadClass) && hostFree <= this.config.memoryThresholds.hostHardFloorBytes) {
+        if (this._isHeavy(demand) && hostFree <= this.config.memoryThresholds.hostHardFloorBytes) {
             const d = this._decision(ADMISSION_OUTCOMES.REJECT_RESOURCE_LIMIT, REASONS.MEMORY_HARD_CEILING, idValue);
             this._metrics.rejected++;
             this._record(idValue, demand, d, null);
@@ -493,6 +502,8 @@ class ResourceGovernor {
                 freeMemBytes: snapshot.freeMemBytes ?? null,
                 rssBytes: snapshot.rssBytes ?? null,
                 heapUsedBytes: snapshot.heapUsedBytes ?? null,
+                externalBytes: snapshot.externalBytes ?? null,
+                arrayBuffersBytes: snapshot.arrayBuffersBytes ?? null,
                 eventLoopLagMs: snapshot.eventLoopLagMs ?? null
             })
         });

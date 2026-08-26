@@ -13,20 +13,24 @@ function isWhitespaceContaminated(raw) {
     return false;
 }
 
-function canonicalizeWorkloadId(raw) {
-    if (typeof raw !== "string") {
+function assertCanonicalIdValue(value) {
+    if (typeof value !== "string") {
         throw new TypeError("workload id must be a string");
     }
-    if (isWhitespaceContaminated(raw)) {
+    if (isWhitespaceContaminated(value)) {
         throw new Error("INVALID_WORKLOAD_ID: whitespace not permitted");
     }
-    if (raw.length < MIN_LENGTH || raw.length > MAX_LENGTH) {
+    if (value.length < MIN_LENGTH || value.length > MAX_LENGTH) {
         throw new Error("INVALID_WORKLOAD_ID: length out of range");
     }
-    if (!ID_PATTERN.test(raw) || raw.includes("--")) {
-        throw new Error(`INVALID_WORKLOAD_ID: ${JSON.stringify(raw)} violates canonical grammar`);
+    if (!ID_PATTERN.test(value) || value.includes("--")) {
+        throw new Error(`INVALID_WORKLOAD_ID: ${JSON.stringify(value)} violates canonical grammar`);
     }
-    return raw;
+    return value;
+}
+
+function canonicalizeWorkloadId(raw) {
+    return assertCanonicalIdValue(raw);
 }
 
 function createWorkloadId(raw) {
@@ -44,11 +48,10 @@ function createWorkloadId(raw) {
 }
 
 function workloadIdToString(id) {
-    if (id === null || typeof id !== "object" || id.kind !== "WorkloadId" ||
-        id[BRAND] !== true || typeof id.value !== "string" || !ID_PATTERN.test(id.value)) {
+    if (id === null || typeof id !== "object" || id.kind !== "WorkloadId" || id[BRAND] !== true) {
         throw new Error("INVALID_WORKLOAD_ID: not an authentic canonical WorkloadId");
     }
-    return id.value;
+    return assertCanonicalIdValue(id.value);
 }
 
 function newWorkloadId(base, { seq = 0, entropy = "" } = {}) {
