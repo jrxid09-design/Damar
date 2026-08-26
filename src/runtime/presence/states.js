@@ -1,0 +1,256 @@
+/**
+ * Presence Runtime V0 — kanon status, sebab transisi, dan graf legal.
+ *
+ * Presence menjawab satu pertanyaan: "Aether sedang dalam kondisi apa
+ * sebagai entitas yang berjalan, mengapa demikian, dan transisi apa saja
+ * yang sah?" Presence BUKAN otoritas, BUKAN kognisi, BUKAN aktuation.
+ * Status presence tidak pernah menyiratkan izin apa pun.
+ */
+
+const LIFECYCLE = Object.freeze({
+    OFFLINE: "OFFLINE",
+    BOOTING: "BOOTING",
+    INITIALIZING: "INITIALIZING",
+    DORMANT: "DORMANT",
+    AWAKE: "AWAKE",
+    ACTIVE: "ACTIVE",
+    WAITING_FOR_OWNER: "WAITING_FOR_OWNER",
+    DEGRADED: "DEGRADED",
+    RECOVERING: "RECOVERING",
+    SHUTTING_DOWN: "SHUTTING_DOWN",
+    FAILED: "FAILED"
+});
+
+/** Mode aktivitas kanon di dalam ACTIVE. IDLE tidak pernah dimulai manual —
+ * IDLE adalah presentasi turunan saat tidak ada aktivitas hidup. */
+const ACTIVITY_MODE = Object.freeze({
+    IDLE: "IDLE",
+    ATTENDING: "ATTENDING",
+    LISTENING: "LISTENING",
+    THINKING: "THINKING",
+    SPEAKING: "SPEAKING"
+});
+
+/**
+ * Precedence presentasi (turun = makin dominan). Hanya untuk STATE
+ * PRESENTASI — bukan prioritas eksekusi. LISTENING > SPEAKING mendukung
+ * barge-in masa depan: saat pengguna mulai bicara, presentasi berpindah
+ * tanpa mematikan aktivitas SPEAKING di bawahnya.
+ */
+const ACTIVITY_PRESENTATION_PRECEDENCE = Object.freeze([
+    ACTIVITY_MODE.LISTENING,
+    ACTIVITY_MODE.SPEAKING,
+    ACTIVITY_MODE.THINKING,
+    ACTIVITY_MODE.ATTENDING,
+    ACTIVITY_MODE.IDLE
+]);
+
+const DEGRADED_REASON = Object.freeze({
+    MODEL_UNAVAILABLE: "MODEL_UNAVAILABLE",
+    RESOURCE_PRESSURE: "RESOURCE_PRESSURE",
+    SENSORIUM_UNAVAILABLE: "SENSORIUM_UNAVAILABLE",
+    INTERACTION_CHANNEL_UNAVAILABLE: "INTERACTION_CHANNEL_UNAVAILABLE",
+    RECOVERY_REQUIRED: "RECOVERY_REQUIRED",
+    DEPENDENCY_FAILURE: "DEPENDENCY_FAILURE",
+    UNKNOWN: "UNKNOWN"
+});
+
+const HEALTH = Object.freeze({
+    HEALTHY: "HEALTHY",
+    DEGRADED: "DEGRADED",
+    RECOVERING: "RECOVERING",
+    FAILED: "FAILED",
+    UNKNOWN: "UNKNOWN"
+});
+
+const RESOURCE_PRESSURE_LEVEL = Object.freeze({
+    NORMAL: "NORMAL",
+    ELEVATED: "ELEVATED",
+    HIGH: "HIGH",
+    CRITICAL: "CRITICAL",
+    UNKNOWN: "UNKNOWN"
+});
+
+/** Sebab transisi terstruktur. Sebab != otoritas. */
+const CAUSE = Object.freeze({
+    PROCESS_START: "PROCESS_START",
+    INITIALIZATION_STARTED: "INITIALIZATION_STARTED",
+    INITIALIZATION_COMPLETE: "INITIALIZATION_COMPLETE",
+    USER_SUMMON: "USER_SUMMON",
+    USER_DISMISS: "USER_DISMISS",
+    INTERACTION_RECEIVED: "INTERACTION_RECEIVED",
+    ACTIVITY_STARTED: "ACTIVITY_STARTED",
+    ACTIVITY_COMPLETED: "ACTIVITY_COMPLETED",
+    OWNER_DECISION_REQUIRED: "OWNER_DECISION_REQUIRED",
+    OWNER_DECISION_RESOLVED: "OWNER_DECISION_RESOLVED",
+    RESOURCE_PRESSURE: "RESOURCE_PRESSURE",
+    DEPENDENCY_UNAVAILABLE: "DEPENDENCY_UNAVAILABLE",
+    DEGRADATION_CLEARED: "DEGRADATION_CLEARED",
+    RECOVERY_STARTED: "RECOVERY_STARTED",
+    RECOVERY_COMPLETED: "RECOVERY_COMPLETED",
+    RECOVERY_DEGRADED: "RECOVERY_DEGRADED",
+    RECOVERY_FAILED: "RECOVERY_FAILED",
+    SHUTDOWN_REQUEST: "SHUTDOWN_REQUEST",
+    PROCESS_EXIT: "PROCESS_EXIT",
+    FATAL_FAILURE: "FATAL_FAILURE",
+    GENERATION_ADVANCED: "GENERATION_ADVANCED"
+});
+
+/**
+ * Tipe fakta ternormalisasi yang boleh masuk lewat port integrasi (P14).
+ * Fakta hanya merekam/memetakan lifecycle — tidak pernah memicu efek
+ * samping nyata di V0.
+ */
+const FACT_TYPE = Object.freeze({
+    INTERACTION_RECEIVED: "INTERACTION_RECEIVED",
+    RESOURCE_PRESSURE_REPORTED: "RESOURCE_PRESSURE_REPORTED",
+    RECOVERY_EVENT: "RECOVERY_EVENT",
+    HOST_EVENT: "HOST_EVENT",
+    SENSORIUM_EVENT: "SENSORIUM_EVENT",
+    VOICE_EVENT: "VOICE_EVENT",
+    VISUAL_PRESENCE_EVENT: "VISUAL_PRESENCE_EVENT",
+    AUTHORITY_NOTICE: "AUTHORITY_NOTICE"
+});
+
+/** Peristiwa host Windows masa depan (P25) — kontrak inersia saja. */
+const HOST_EVENT = Object.freeze({
+    STARTED: "STARTED",
+    SESSION_LOCKED: "SESSION_LOCKED",
+    SESSION_UNLOCKED: "SESSION_UNLOCKED",
+    SUSPENDING: "SUSPENDING",
+    RESUMED: "RESUMED",
+    SHUTDOWN_REQUESTED: "SHUTDOWN_REQUESTED"
+});
+
+// Graf transisi legal: kunci "FROM>TO". Transisi di luar graf ini gagal
+// tertutup (fail closed) — tidak ada setState("apa saja").
+const ALIVE_STATES = new Set([
+    LIFECYCLE.DORMANT,
+    LIFECYCLE.AWAKE,
+    LIFECYCLE.ACTIVE,
+    LIFECYCLE.WAITING_FOR_OWNER,
+    LIFECYCLE.DEGRADED,
+    LIFECYCLE.RECOVERING
+]);
+
+function buildEdges() {
+    const edges = [];
+    const add = (from, to, causes) => edges.push({ from, to, causes });
+    const alive = [...ALIVE_STATES];
+
+    add(LIFECYCLE.OFFLINE, LIFECYCLE.BOOTING, [CAUSE.PROCESS_START]);
+
+    add(LIFECYCLE.BOOTING, LIFECYCLE.INITIALIZING, [CAUSE.INITIALIZATION_STARTED]);
+    add(LIFECYCLE.BOOTING, LIFECYCLE.FAILED, [CAUSE.FATAL_FAILURE]);
+
+    add(LIFECYCLE.INITIALIZING, LIFECYCLE.DORMANT, [CAUSE.INITIALIZATION_COMPLETE]);
+    add(LIFECYCLE.INITIALIZING, LIFECYCLE.FAILED, [CAUSE.FATAL_FAILURE]);
+
+    add(LIFECYCLE.DORMANT, LIFECYCLE.AWAKE, [
+        CAUSE.USER_SUMMON,
+        CAUSE.INTERACTION_RECEIVED,
+        CAUSE.OWNER_DECISION_REQUIRED
+    ]);
+    add(LIFECYCLE.DORMANT, LIFECYCLE.RECOVERING, [CAUSE.RECOVERY_STARTED]);
+    add(LIFECYCLE.DORMANT, LIFECYCLE.FAILED, [CAUSE.FATAL_FAILURE]);
+
+    add(LIFECYCLE.AWAKE, LIFECYCLE.ACTIVE, [
+        CAUSE.ACTIVITY_STARTED,
+        CAUSE.INTERACTION_RECEIVED
+    ]);
+    add(LIFECYCLE.AWAKE, LIFECYCLE.WAITING_FOR_OWNER, [CAUSE.OWNER_DECISION_REQUIRED]);
+    add(LIFECYCLE.AWAKE, LIFECYCLE.DORMANT, [CAUSE.USER_DISMISS]);
+    add(LIFECYCLE.AWAKE, LIFECYCLE.RECOVERING, [CAUSE.RECOVERY_STARTED]);
+    add(LIFECYCLE.AWAKE, LIFECYCLE.FAILED, [CAUSE.FATAL_FAILURE]);
+
+    add(LIFECYCLE.ACTIVE, LIFECYCLE.WAITING_FOR_OWNER, [CAUSE.OWNER_DECISION_REQUIRED]);
+    add(LIFECYCLE.ACTIVE, LIFECYCLE.DORMANT, [
+        CAUSE.ACTIVITY_COMPLETED,
+        CAUSE.USER_DISMISS
+    ]);
+    add(LIFECYCLE.ACTIVE, LIFECYCLE.AWAKE, [CAUSE.USER_DISMISS]);
+    add(LIFECYCLE.ACTIVE, LIFECYCLE.RECOVERING, [CAUSE.RECOVERY_STARTED]);
+    add(LIFECYCLE.ACTIVE, LIFECYCLE.FAILED, [CAUSE.FATAL_FAILURE]);
+
+    add(LIFECYCLE.WAITING_FOR_OWNER, LIFECYCLE.ACTIVE, [CAUSE.OWNER_DECISION_RESOLVED]);
+    add(LIFECYCLE.WAITING_FOR_OWNER, LIFECYCLE.AWAKE, [CAUSE.OWNER_DECISION_RESOLVED]);
+    add(LIFECYCLE.WAITING_FOR_OWNER, LIFECYCLE.DORMANT, [
+        CAUSE.USER_DISMISS,
+        CAUSE.OWNER_DECISION_RESOLVED
+    ]);
+    add(LIFECYCLE.WAITING_FOR_OWNER, LIFECYCLE.RECOVERING, [CAUSE.RECOVERY_STARTED]);
+    add(LIFECYCLE.WAITING_FOR_OWNER, LIFECYCLE.FAILED, [CAUSE.FATAL_FAILURE]);
+
+    // Degradasi dari state hidup: presence merepresentasikan kegagalan
+    // tanpa menyelesaikannya. BOOTING/INITIALIZING mencatat alasan saja
+    // (health DEGRADED) tanpa lompat state — boot harus selesai jujur.
+    for (const from of [
+        LIFECYCLE.DORMANT,
+        LIFECYCLE.AWAKE,
+        LIFECYCLE.ACTIVE,
+        LIFECYCLE.WAITING_FOR_OWNER
+    ]) {
+        add(from, LIFECYCLE.DEGRADED, [
+            CAUSE.RESOURCE_PRESSURE,
+            CAUSE.DEPENDENCY_UNAVAILABLE
+        ]);
+    }
+
+    // Pulih dari DEGRADED: target resume diturunkan dari fakta hidup
+    // (aktivitas / owner wait / summoned), sehingga deterministik.
+    for (const target of [
+        LIFECYCLE.DORMANT,
+        LIFECYCLE.AWAKE,
+        LIFECYCLE.ACTIVE,
+        LIFECYCLE.WAITING_FOR_OWNER
+    ]) {
+        add(LIFECYCLE.DEGRADED, target, [CAUSE.DEGRADATION_CLEARED]);
+    }
+    add(LIFECYCLE.DEGRADED, LIFECYCLE.RECOVERING, [CAUSE.RECOVERY_STARTED]);
+    add(LIFECYCLE.DEGRADED, LIFECYCLE.FAILED, [CAUSE.FATAL_FAILURE]);
+
+    add(LIFECYCLE.RECOVERING, LIFECYCLE.DORMANT, [CAUSE.RECOVERY_COMPLETED]);
+    add(LIFECYCLE.RECOVERING, LIFECYCLE.DEGRADED, [CAUSE.RECOVERY_DEGRADED]);
+    add(LIFECYCLE.RECOVERING, LIFECYCLE.FAILED, [
+        CAUSE.RECOVERY_FAILED,
+        CAUSE.FATAL_FAILURE
+    ]);
+
+    for (const from of [...alive, LIFECYCLE.BOOTING, LIFECYCLE.INITIALIZING]) {
+        add(from, LIFECYCLE.SHUTTING_DOWN, [CAUSE.SHUTDOWN_REQUEST]);
+    }
+    add(LIFECYCLE.SHUTTING_DOWN, LIFECYCLE.OFFLINE, [CAUSE.PROCESS_EXIT]);
+
+    return edges;
+}
+
+const EDGES = buildEdges();
+
+const TRANSITIONS = (() => {
+    const map = new Map();
+    const causes = new Map();
+    for (const e of EDGES) {
+        const key = `${e.from}>${e.to}`;
+        map.set(key, true);
+        causes.set(key, new Set(e.causes));
+    }
+    return Object.freeze({
+        has: (from, to) => map.has(`${from}>${to}`),
+        causesFor: (from, to) => causes.get(`${from}>${to}`) || new Set(),
+        edgeCount: map.size
+    });
+})();
+
+module.exports = {
+    LIFECYCLE,
+    ACTIVITY_MODE,
+    ACTIVITY_PRESENTATION_PRECEDENCE,
+    DEGRADED_REASON,
+    HEALTH,
+    RESOURCE_PRESSURE_LEVEL,
+    CAUSE,
+    TRANSITIONS,
+    ALIVE_STATES,
+    FACT_TYPE,
+    HOST_EVENT
+};
