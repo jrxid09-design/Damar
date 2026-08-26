@@ -1125,12 +1125,25 @@ class BodySchema {
                     });
                 }
 
-                // INTEGRITAS BARIS PENUH (R3-B1): digest mencakup seluruh
-                // materi kanonik durable. Validator berjalan INDEPENDEN —
-                // data semantik-invalid tetap ditolak walau digestnya
-                // dihitung ulang. SHA-256 tak berkunci = deteksi korupsi,
-                // BUKAN autentikasi/otorisasi.
-                if (Object.prototype.hasOwnProperty.call(row, "rowDigest")) {
+                // INTEGRITAS BARIS PENUH (R3-B1/R3-B4): digest mencakup
+                // seluruh materi kanonik durable. Validator berjalan
+                // INDEPENDEN — data semantik-invalid tetap ditolak walau
+                // digestnya dihitung ulang. SHA-256 tak berkunci = deteksi
+                // korupsi, BUKAN autentikasi/otorisasi.
+                //
+                // ATURAN MODERN vs LEGACY (R4): baris yang membawa field
+                // durable modern (presence/health) TANPA rowDigest adalah
+                // tamu tanpa integritas — ditolak gagal-tutup. Jalur legacy
+                // hanya untuk baris yang benar-benar mengabaikan ketiganya.
+                const hasRowDigest =
+                    Object.prototype.hasOwnProperty.call(row, "rowDigest");
+                const hasModernDurable = hasPresence || hasHealth;
+                if (!hasRowDigest && hasModernDurable) {
+                    throw fail("EMB_DIGEST_MISSING",
+                        `baris#${i} (${descriptor.deviceId}): field durable modern ` +
+                        `tanpa integritas baris (rowDigest hilang)`);
+                }
+                if (hasRowDigest) {
                     const material = {
                         descriptor,
                         meta: { confidence: Number(meta.confidence),
@@ -1151,7 +1164,8 @@ class BodySchema {
                             `baris#${i} (${descriptor.deviceId}): integritas baris tidak cocok`);
                     }
                 }
-                // Tanpa rowDigest = snapshot legacy sebelum field ini ada:
+                // Tanpa rowDigest + tanpa presence/health = snapshot legacy
+                // sebelum field ini ada: jalur migrasi deterministik;
                 // integritas deskriptor tetap dijaga meta.digest di atas.
 
                 staged.set(descriptor.deviceId, {
