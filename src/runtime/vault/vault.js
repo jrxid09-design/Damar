@@ -6,7 +6,6 @@ const refs = require("./ref");
 const scopeMod = require("./scope");
 const valueMod = require("./value");
 const { buildSecretMetadata, SECRET_STATUSES } = require("./metadata");
-const { buildSecretRecord } = require("./record");
 const { digestOfValue } = require("./digest");
 const { createMemorySecretStore } = require("./store");
 const { DETERMINISTIC_TEST_ADAPTER } = require("./cipher");
@@ -107,7 +106,9 @@ function createSecretVault(options = {}) {
         try {
             cleartext = sv.revealBytes();
             const envelope = cipher.encrypt(cleartext);
-            const record = buildSecretRecord({
+            // CREATE INTENT — the store mints incarnationId + version.
+            // No store-owned lifecycle fields are passed here.
+            store.create({
                 secretId,
                 scope,
                 status: "active",
@@ -118,7 +119,6 @@ function createSecretVault(options = {}) {
                 valueDigest: digestOfValue(cleartext),
                 envelope
             });
-            store.put({ ...record });
         } finally {
             cleartext?.fill(0);
         }
@@ -370,14 +370,14 @@ function createSecretVault(options = {}) {
             return Object.freeze({ imported: false, reason: "already-present" });
         }
         assertCapacity(1);
-        store.put({
+        // CREATE INTENT — the store mints incarnationId + version.
+        store.create({
             secretId,
             scope,
             status: SECRET_STATUSES.evidence,
             label,
             createdAt: Number.isSafeInteger(evidence.createdAt) ? evidence.createdAt : now(),
-            rotationCount: 0,
-            expectedVersion: undefined
+            rotationCount: 0
         });
         diag("import-evidence", secretId, "ok");
         return Object.freeze({

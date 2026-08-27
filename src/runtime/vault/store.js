@@ -6,7 +6,7 @@ const path = require("node:path");
 const { invalidInput } = require("./errors");
 const { VaultError } = require("./errors");
 const { assertSecretId, normalizeSecretIdInput } = require("./ids");
-const { buildSecretRecord } = require("./record");
+const { buildSecretRecord, generateIncarnationId } = require("./record");
 const { assertCipherAdapter, DETERMINISTIC_TEST_ADAPTER } = require("./cipher");
 
 /**
@@ -14,20 +14,107 @@ const { assertCipherAdapter, DETERMINISTIC_TEST_ADAPTER } = require("./cipher");
  *
  * Contract (all synchronous in V1):
  *   get(secretId)            -> frozen record | null
- *   put(record)              -> frozen record  (optimistic version check)
+ *   create(createIntent)     -> frozen record  (CREATE ONLY)
+ *   put(record)              -> frozen record  (UPDATE ONLY)
  *   delete(secretId)         -> void
  *   listIds()                -> string[] (unsorted; caller sorts)
  *   describePersistence()    -> { kind, secure, guarantees }
  *
- * Optimistic concurrency: put() carries `expectedVersion` on the
- * record input; a mismatch throws VAULT_CONFLICT and mutates nothing.
- * This is what makes rotation atomic under races.
+ * SPLIT CREATE / UPDATE (R32):
+ *
+ *   create(createIntent) is the ONLY way a record comes into existence.
+ *   It requires the id to be ABSENT, mints a fresh incarnationId, and
+ *   forces version = 1. It MUST NOT accept a previously persisted
+ *   canonical record: store-owned lifecycle fields (incarnationId,
+ *   version, expectedVersion) are REJECTED, never silently overwritten.
+ *   This structurally prevents a captured stale canonical record from
+ *   being replayed as a new create (which would resurrect its envelope).
+ *
+ *   put(record) is UPDATE ONLY. It requires an explicit positive
+ *   expectedVersion, an existing record at exactly that version, and an
+ *   incoming incarnationId equal to the current incarnation. Every
+ *   violation throws VAULT_CONFLICT and mutates nothing.
+ *
+ * Optimistic concurrency is what makes rotation atomic under races.
  */
 
 function conflict(code, message) {
     // Typed, immutable construction. Never mutate a VaultError after
     // construction — instances are frozen (B2).
     return new VaultError(code, message);
+}
+
+/** Store-owned lifecycle fields a create intent must never carry. */
+const CREATE_FORBIDDEN_FIELDS = Object.freeze([
+    "incarnationId",
+    "version",
+    "expectedVersion"
+]);
+
+/**
+ * Validates that `input` is CREATE INTENT, not a persisted canonical
+ * record. A canonical persisted record carries store-owned lifecycle
+ * fields; their presence means the caller is attempting to replay an
+ * already-persisted record (including its envelope) as a fresh create.
+ */
+function assertCreateIntent(input) {
+    for (const key of CREATE_FORBIDDEN_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(input, key) && input[key] !== undefined && input[key] !== null) {
+            throw conflict("VAULT_CONFLICT", `create intent must not carry persisted field "${key}"`);
+        }
+    }
+}
+
+/**
+ * Shared create/update semantics used by BOTH memory and file stores so
+ * the two backends are structurally identical.
+ *
+ * @param {object} record  the incoming record (create intent or update)
+ * @param {(secretId: string) => object|null} getRecord
+ * @param {(record: object) => void} persist   called once, atomically
+ */
+function applyCreate(createIntent, getRecord, persist) {
+    assertCreateIntent(createIntent);
+    const secretId = assertSecretId(createIntent.secretId);
+    if (getRecord(secretId) !== null) {
+        throw conflict("VAULT_CONFLICT", "record already exists");
+    }
+    const next = buildSecretRecord({
+        ...createIntent,
+        incarnationId: generateIncarnationId(),
+        version: 1
+    });
+    persist(next);
+    return next;
+}
+
+function applyPut(record, getRecord, persist) {
+    const secretId = assertSecretId(record.secretId);
+    const expectedVersion = record.expectedVersion;
+    // UPDATE ONLY: a bare canonical record (no expectedVersion) and a
+    // create-style expectedVersion:0 are both invalid here.
+    if (expectedVersion === undefined || expectedVersion === null) {
+        throw conflict("VAULT_CONFLICT", "update requires an explicit expectedVersion");
+    }
+    if (!Number.isSafeInteger(expectedVersion) || expectedVersion <= 0) {
+        throw conflict("VAULT_CONFLICT", "expectedVersion must be a positive integer");
+    }
+    const current = getRecord(secretId);
+    if (current === null) {
+        throw conflict("VAULT_CONFLICT", "record vanished before update");
+    }
+    if (current.version !== expectedVersion) {
+        throw conflict("VAULT_CONFLICT", "concurrent modification detected");
+    }
+    // Incarnation guard: a stale writer from a previous creation lifetime
+    // can never overwrite the current record, even when version and
+    // createdAt coincide. incarnationId — NOT createdAt — is identity.
+    if (current.incarnationId !== record.incarnationId) {
+        throw conflict("VAULT_CONFLICT", "incarnationId mismatch");
+    }
+    const next = buildSecretRecord({ ...record, version: current.version + 1 });
+    persist(next);
+    return next;
 }
 
 /**
@@ -37,30 +124,20 @@ function conflict(code, message) {
  */
 function createMemorySecretStore() {
     let records = new Map();
+    const getRecord = (secretId) => records.get(assertSecretId(secretId)) ?? null;
     return Object.freeze({
         get(secretId) {
-            const id = assertSecretId(secretId);
-            const rec = records.get(id);
-            return rec ? rec : null;
+            return getRecord(secretId);
+        },
+        create(createIntent) {
+            return applyCreate(createIntent, getRecord, (next) => {
+                records.set(next.secretId, next);
+            });
         },
         put(record) {
-            const current = records.get(assertSecretId(record.secretId));
-            if (current && current.version !== record.expectedVersion) {
-                throw conflict("VAULT_CONFLICT", "concurrent modification detected");
-            }
-            // Generation guard: even if versions coincide, a stale writer
-            // from a previous incarnation of this id can never overwrite
-            // a newly created record.
-            if (current && record.expectedVersion !== undefined && record.expectedVersion !== null &&
-                record.createdAt !== current.createdAt) {
-                throw conflict("VAULT_CONFLICT", "stale writer from previous record generation");
-            }
-            if (!current && record.expectedVersion !== undefined && record.expectedVersion !== null) {
-                throw conflict("VAULT_CONFLICT", "record vanished before update");
-            }
-            const next = buildSecretRecord({ ...record, version: (current ? current.version : 0) + 1 });
-            records.set(next.secretId, next);
-            return next;
+            return applyPut(record, getRecord, (next) => {
+                records.set(next.secretId, next);
+            });
         },
         delete(secretId) {
             records.delete(assertSecretId(secretId));
@@ -129,40 +206,31 @@ function createFileSecretStore(dirPath, options = {}) {
         }
         // Envelope decryption happens ONLY in the resolver path, never
         // at load time, so metadata listing never touches cleartext.
+        // generate:false — a persisted record missing/malformed
+        // incarnationId must FAIL CLOSED, never be silently re-rolled
+        // (which would change record-lifetime identity across reopen).
         try {
-            return buildSecretRecord(parsed);
+            return buildSecretRecord(parsed, { generate: false });
         } catch (_) {
             throw conflict("VAULT_STORE_FAILURE", "stored record failed validation");
         }
     }
 
+    function persist(next) {
+        const payload = { ...next, envelope: next.envelope };
+        const file = fileFor(next.secretId);
+        const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+        fs.writeFileSync(tmp, JSON.stringify(payload), { mode: 0o600 });
+        fs.renameSync(tmp, file);
+    }
+
     return Object.freeze({
         get: readRecord,
+        create(createIntent) {
+            return applyCreate(createIntent, readRecord, persist);
+        },
         put(record) {
-            const current = readRecord(record.secretId);
-            if (current && current.version !== record.expectedVersion) {
-                throw conflict("VAULT_CONFLICT", "concurrent modification detected");
-            }
-            // Generation guard: a stale writer from a previous incarnation
-            // of this id must never overwrite a newly created record.
-            if (current && record.expectedVersion !== undefined && record.expectedVersion !== null &&
-                record.createdAt !== current.createdAt) {
-                throw conflict("VAULT_CONFLICT", "stale writer from previous record generation");
-            }
-            // Deletion is terminal for stale writers (B3): a put carrying
-            // an expectedVersion against a missing record can never
-            // recreate it — including its old envelope.
-            if (!current && record.expectedVersion !== undefined && record.expectedVersion !== null) {
-                throw conflict("VAULT_CONFLICT", "record vanished before update");
-            }
-            const nextVersion = (current ? current.version : 0) + 1;
-            const next = buildSecretRecord({ ...record, version: nextVersion });
-            const payload = { ...next, envelope: next.envelope };
-            const file = fileFor(next.secretId);
-            const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
-            fs.writeFileSync(tmp, JSON.stringify(payload), { mode: 0o600 });
-            fs.renameSync(tmp, file);
-            return next;
+            return applyPut(record, readRecord, persist);
         },
         delete(secretId) {
             const file = fileFor(assertSecretId(normalizeSecretIdInput(secretId)));
