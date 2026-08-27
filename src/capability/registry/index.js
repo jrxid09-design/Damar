@@ -23,8 +23,14 @@ const { KINDS, canonicalKind } = require("./kinds");
 const { AVAILABILITY, canonicalAvailability } = require("./availability");
 const { canonicalCapabilityId, canonicalProvenance, isValidCapabilityId, isValidProvenance, AUTHORITY_VOCABULARY } = require("./ids");
 const { GRAPH_BOUNDS } = require("./graph");
-const { REGISTRAR_DOMAINS, deriveProvenance, allowedKindsForDomain } = require("./registrar");
 
+/**
+ * NOTE: the registrar factory (`createCapabilityRegistrarFactory`) and the
+ * identity-establishment function (`establishIdentity`) are INTENTIONALLY not
+ * re-exported here. They are the runtime-owned composition-root boundary and
+ * live in `./registry`; trusted runtime composition imports them directly.
+ * The public surface exposes NO registrar mint surface and NO mint token.
+ */
 module.exports = {
     CapabilityRegistry,
     REGISTRY_DEFAULTS: DEFAULTS,
@@ -37,9 +43,6 @@ module.exports = {
     REASONS,
     KINDS,
     AVAILABILITY,
-    REGISTRAR_DOMAINS,
-    deriveProvenance,
-    allowedKindsForDomain,
     canonicalKind,
     canonicalAvailability,
     canonicalCapabilityId,

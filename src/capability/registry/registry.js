@@ -34,6 +34,28 @@ const { createRegistrar, assertKindDomainCorrespondence } = require("./registrar
 
 const DEFAULTS = Object.freeze({ maxCapabilities: 1024 });
 
+// ---------------------------------------------------------------------------
+// Registrar mint trust model (unforgeable capability).
+//
+// Trust derives from possession of an unforgeable capability token, NOT from
+// caller-supplied strings. Both the registrar-mint capability and the
+// established-identity capability are represented by tokens created in this
+// module's closure, compared by identity (===), and NEVER exported.
+//
+//   MINT_TOKEN         — gates registrar minting (WeakMap mintGates)
+//   identityTokens     — WeakSet of genuine established-identity tokens
+//
+// A caller cannot forge these by constructing an object, guessing a string,
+// importing an exported symbol, or cloning an existing descriptor/context:
+//   - Symbol("aether.capability.registrar.mint") !== MINT_TOKEN (identity)
+//   - a structurally identical object is a different identity
+//   - cloned objects are different identities
+// ---------------------------------------------------------------------------
+
+const MINT_TOKEN = Symbol("aether.capability.registrar.mint");
+const mintGates = new WeakMap();          // CapabilityRegistry -> mint gate fn
+const identityTokens = new WeakSet();     // genuine established-identity tokens
+
 const INCARNATION_PREFIX = "inc-";
 const INCARNATION_PATTERN = /^inc-[0-9a-f]{32}$/;
 
@@ -98,19 +120,23 @@ class CapabilityRegistry {
     constructor({ clock = { nowMs: () => Date.now() }, maxCapabilities } = {}) {
         this._clock = clock;
         this._maxCapabilities = maxCapabilities ?? DEFAULTS.maxCapabilities;
+
+        // Register the token-gated mint gate for this instance in module
+        // closure. It is NOT a property on the instance: arbitrary code cannot
+        // enumerate or reach it, and it rejects any token !== MINT_TOKEN.
+        mintGates.set(this, (token, domain, registrarId) => {
+            if (token !== MINT_TOKEN) {
+                throw fail(REASONS.INVALID_REGISTRAR,
+                    "forged registrar mint token; registrar creation requires a runtime-owned capability");
+            }
+            return createRegistrar((descriptorInput, provenance, opts) => {
+                return this.#admit(descriptorInput, provenance, opts);
+            }, { domain, registrarId });
+        });
     }
 
     _now() {
         try { return this._clock.nowMs(); } catch { return null; }
-    }
-
-    // ------------------------------------------------------- registrar model
-
-    /** Create a registrar bound to this registry's private admission path. */
-    createRegistrar({ domain, registrarId } = {}) {
-        return createRegistrar((descriptorInput, provenance, opts) => {
-            return this.#admit(descriptorInput, provenance, opts);
-        }, { domain, registrarId });
     }
 
     // ------------------------------------------------------ private admission
@@ -421,4 +447,87 @@ class CapabilityRegistry {
     }
 }
 
-module.exports = { CapabilityRegistry, DEFAULTS };
+// ---------------------------------------------------------------------------
+// Established-identity capability + registrar factory (composition root).
+//
+// These live in the same module closure as MINT_TOKEN and identityTokens, so
+// they can mint registrars and identities WITHOUT exporting any token. This is
+// the runtime-owned composition boundary: trusted runtime code calls
+// createCapabilityRegistrarFactory(registry) once at startup and hands
+// consumers ONLY the bound registrar (never the factory, never the token).
+// ---------------------------------------------------------------------------
+
+/**
+ * Establish a trusted identity for a provenance domain. Returns an opaque,
+ * unforgeable identity token (an object identity held in the module-closure
+ * identityTokens WeakSet). Only the owning subsystem, already in possession of
+ * an established identity, should produce the corresponding registrar.
+ *
+ * `domain` must be one of "core" | "extension" | "device" | "provider"; the
+ * `registrarId` is required for non-core domains.
+ */
+function establishIdentity(domain, registrarId) {
+    const token = { domain, registrarId };
+    identityTokens.add(token);
+    return Object.freeze(token);
+}
+
+function isEstablishedIdentity(token, domain) {
+    if (token === null || typeof token !== "object") return false;
+    if (!identityTokens.has(token)) return false;
+    return token.domain === domain;
+}
+
+/**
+ * Create the registrar factory bound to `registry`. The factory is the ONLY
+ * holder of the registrar-mint capability for that registry (via MINT_TOKEN in
+ * closure). It mints registrars only for identities that were established via
+ * establishIdentity — never from caller-supplied strings.
+ */
+function createCapabilityRegistrarFactory(registry) {
+    const gate = mintGates.get(registry);
+    if (typeof gate !== "function") {
+        throw fail(REASONS.INVALID_REGISTRAR,
+            "createCapabilityRegistrarFactory requires a valid CapabilityRegistry instance");
+    }
+
+    const mint = (domain, registrarId) => gate(MINT_TOKEN, domain, registrarId);
+
+    return Object.freeze({
+        createCoreRegistrar(runtimeIdentity) {
+            if (!isEstablishedIdentity(runtimeIdentity, "core")) {
+                throw fail(REASONS.INVALID_REGISTRAR,
+                    "core registrar requires a runtime-owned established identity");
+            }
+            return mint("core");
+        },
+        createExtensionRegistrar(establishedIdentity) {
+            if (!isEstablishedIdentity(establishedIdentity, "extension")) {
+                throw fail(REASONS.INVALID_REGISTRAR,
+                    "extension registrar requires an established extension identity");
+            }
+            return mint("extension", establishedIdentity.registrarId);
+        },
+        createDeviceRegistrar(establishedIdentity) {
+            if (!isEstablishedIdentity(establishedIdentity, "device")) {
+                throw fail(REASONS.INVALID_REGISTRAR,
+                    "device registrar requires an established device identity");
+            }
+            return mint("device", establishedIdentity.registrarId);
+        },
+        createProviderRegistrar(establishedIdentity) {
+            if (!isEstablishedIdentity(establishedIdentity, "provider")) {
+                throw fail(REASONS.INVALID_REGISTRAR,
+                    "provider registrar requires an established provider identity");
+            }
+            return mint("provider", establishedIdentity.registrarId);
+        }
+    });
+}
+
+module.exports = {
+    CapabilityRegistry,
+    DEFAULTS,
+    createCapabilityRegistrarFactory,
+    establishIdentity
+};
