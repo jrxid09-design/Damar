@@ -3,321 +3,75 @@
 /**
  * CAPABILITY REGISTRY V1 — CapabilityRegistry (canonical state owner).
  *
- * The single owner of canonical capability descriptions, provenance,
- * dependency relationships, and runtime availability observations.
+ * DESCRIPTIVE ONLY. This registry NEVER grants/authorizes/executes/actuates,
+ * never mints Authority state, and never alters Governor state.
  *
- * DESCRIPTIVE ONLY. This registry NEVER:
- *   - grants, ratifies, delegates, approves, or authorizes
- *   - executes, invokes, dispatches, or actuates anything
- *   - mints Authority state
- *   - alters Governor state
+ * available != authorized ; trusted != authorized ; provenance is evidence.
  *
- * Laws:
- *   available != authorized        registered != authorized
- *   trusted != authorized          provenance is evidence only
+ * LIFETIME MODEL:
+ *   capabilityId  = logical identity (stable across remove/re-register)
+ *   incarnationId = registry-minted lifetime identity (fresh every register)
+ *   generation    = ordering only inside one incarnation
  *
- * All mutation validates FIRST and mutates SECOND: a rejected operation
- * leaves canonical state byte-identical (no partial indexes, no reverse-edge
- * residue).
+ * Observations MUST carry the exact current incarnationId; a prior-lifetime
+ * observation is always rejected regardless of generation (ABA-safe).
  *
- * Duplicate policy: a duplicate id with materially different provenance is
- * rejected as a typed conflict; a duplicate id with identical provenance AND
- * an identical descriptor is a deterministic idempotent no-op. No
- * last-writer-wins privilege confusion.
+ * PROVENANCE MODEL: owned by registrars (runtime-created), never descriptors.
  *
- * Availability is generation-aware: a stale (older-generation) observation
- * is rejected and can never overwrite a newer observation.
+ * STATE PRIVACY: all canonical mutable internals are true JS private fields.
+ * Public getters/lists return detached inert snapshots.
  */
 
+const crypto = require("node:crypto");
+
 const { fail, REASONS } = require("./errors");
-const { parseCapabilityDescriptor } = require("./descriptor");
-const { canonicalCapabilityId, canonicalProvenance } = require("./ids");
+const { parseCapabilityDescriptor, parseObservationMetadata } = require("./descriptor");
+const { canonicalCapabilityId } = require("./ids");
 const { canonicalKind } = require("./kinds");
 const { canonicalAvailability } = require("./availability");
-const { wouldCreateCycle, collectAllCycles, resolveDependencyStatus, transitiveDependencies, GRAPH_BOUNDS } = require("./graph");
+const { wouldCreateCycle, collectAllCycles, resolveDependencyStatus, transitiveDependencies } = require("./graph");
+const { createRegistrar, assertKindDomainCorrespondence } = require("./registrar");
 
-const DEFAULTS = Object.freeze({
-    maxCapabilities: 1024
-});
+const DEFAULTS = Object.freeze({ maxCapabilities: 1024 });
 
-class CapabilityRegistry {
-    constructor({ clock = { nowMs: () => Date.now() }, maxCapabilities } = {}) {
-        this._clock = clock;
-        this._maxCapabilities = maxCapabilities ?? DEFAULTS.maxCapabilities;
-        /** @type {Map<string, object>} id -> { descriptor, availability, generation, observedAtMs } */
-        this._records = new Map();
-        // structural indexes (kept consistent atomically)
-        this._edges = new Map();          // id -> Set<dependency ids>
-        this._reverseEdges = new Map();   // depId -> Set<ids that depend on it>
-        this._byKind = new Map();         // kind -> Set<id>
-        this._byProvenance = new Map();   // provenance -> Set<id>
-    }
+const INCARNATION_PREFIX = "inc-";
+const INCARNATION_PATTERN = /^inc-[0-9a-f]{32}$/;
 
-    _now() {
-        try { return this._clock.nowMs(); } catch { return null; }
-    }
-
-    /** Deep-frozen detached view: callers can never reach internals. */
-    _frozenView(value) {
-        return value === undefined ? undefined : deepFreeze(structuredClone(value));
-    }
-
-    // ------------------------------------------------------------- register
-
-    /**
-     * Register a descriptor. Untrusted input is parsed/canonicalized exactly
-     * once. Validation (schema, duplicate, dependency, cycle, bounds) runs
-     * BEFORE any mutation.
-     */
-    register(descriptorInput, { source = "inline", availability, generation } = {}) {
-        const descriptor = parseCapabilityDescriptor(descriptorInput, { source, nowMs: this._now() });
-        const id = descriptor.id;
-
-        if (this._records.has(id)) {
-            const existing = this._records.get(id);
-            if (existing.descriptor.provenance !== descriptor.provenance) {
-                throw fail(REASONS.DUPLICATE_CONFLICT,
-                    `capability '${id}' already registered from different provenance`,
-                    { id, existingProvenance: existing.descriptor.provenance, newProvenance: descriptor.provenance });
-            }
-            if (canonicalDescriptorKey(existing.descriptor) === canonicalDescriptorKey(descriptor)) {
-                // identical id + provenance + descriptor => idempotent no-op
-                return Object.freeze({ registered: false, idempotent: true, id });
-            }
-            throw fail(REASONS.DUPLICATE_CONFLICT,
-                `capability '${id}' already registered with a materially different descriptor`,
-                { id, provenance: descriptor.provenance });
-        }
-        if (this._records.size >= this._maxCapabilities) {
-            throw fail(REASONS.REGISTRY_FULL, `registry bound reached (${this._maxCapabilities})`, { maxCapabilities: this._maxCapabilities });
-        }
-
-        // Dependency validation (read-only). Note: a MISSING dependency is
-        // permitted at registration — a capability may describe a dependency
-        // on something not yet registered; it is surfaced by
-        // resolveDependencyStatus, not rejected here. Only cycles are
-        // rejected below.
-        const deps = descriptor.dependencies;
-        for (const depId of deps) {
-            if (wouldCreateCycle(this._edges, id, depId)) {
-                throw fail(REASONS.DEPENDENCY_CYCLE,
-                    `registering '${id}' would create a dependency cycle via '${depId}'`,
-                    { id, depId });
-            }
-        }
-
-        // ---- mutate (atomic, after all validation) ----
-        const rec = {
-            descriptor,
-            availability: availability === undefined ? "UNKNOWN" : canonicalAvailability(availability),
-            generation: Number.isInteger(generation) ? generation : 0,
-            observedAtMs: this._now()
-        };
-        this._records.set(id, rec);
-        this._insertIndexes(id, descriptor, deps);
-
-        return Object.freeze({ registered: true, idempotent: false, id });
-    }
-
-    _insertIndexes(id, descriptor, deps) {
-        this._edges.set(id, new Set(deps));
-        for (const depId of deps) {
-            if (!this._reverseEdges.has(depId)) this._reverseEdges.set(depId, new Set());
-            this._reverseEdges.get(depId).add(id);
-        }
-        if (!this._byKind.has(descriptor.kind)) this._byKind.set(descriptor.kind, new Set());
-        this._byKind.get(descriptor.kind).add(id);
-        if (!this._byProvenance.has(descriptor.provenance)) this._byProvenance.set(descriptor.provenance, new Set());
-        this._byProvenance.get(descriptor.provenance).add(id);
-    }
-
-    _removeIndexes(id) {
-        const deps = this._edges.get(id);
-        if (deps) {
-            for (const depId of deps) {
-                const rev = this._reverseEdges.get(depId);
-                if (rev) { rev.delete(id); if (rev.size === 0) this._reverseEdges.delete(depId); }
-            }
-        }
-        this._edges.delete(id);
-        const rec = this._records.get(id);
-        if (rec) {
-            const kindSet = this._byKind.get(rec.descriptor.kind);
-            if (kindSet) { kindSet.delete(id); if (kindSet.size === 0) this._byKind.delete(rec.descriptor.kind); }
-            const provSet = this._byProvenance.get(rec.descriptor.provenance);
-            if (provSet) { provSet.delete(id); if (provSet.size === 0) this._byProvenance.delete(rec.descriptor.provenance); }
-        }
-    }
-
-    // --------------------------------------------------------------- remove
-
-    /**
-     * Remove a descriptor where allowed: only if no other registered
-     * capability depends on it. Otherwise reject with INVALID_DEPENDENCY,
-     * leaving state untouched.
-     */
-    remove(idOrRaw) {
-        const id = canonicalCapabilityId(idOrRaw);
-        if (!this._records.has(id)) {
-            throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
-        }
-        const dependents = this._reverseEdges.get(id);
-        if (dependents && dependents.size > 0) {
-            throw fail(REASONS.INVALID_DEPENDENCY,
-                `cannot remove '${id}': still depended on by ${[...dependents].sort().join(", ")}`,
-                { id, dependents: [...dependents].sort() });
-        }
-        this._removeIndexes(id);
-        this._records.delete(id);
-        return Object.freeze({ removed: true, id });
-    }
-
-    // -------------------------------------------------------------- queries
-
-    get(idOrRaw) {
-        const id = canonicalCapabilityId(idOrRaw);
-        const rec = this._records.get(id);
-        if (!rec) return null;
-        return this._frozenView(this._publicView(rec));
-    }
-
-    has(idOrRaw) {
-        try { return this._records.has(canonicalCapabilityId(idOrRaw)); } catch { return false; }
-    }
-
-    get size() { return this._records.size; }
-
-    list() {
-        return Object.freeze([...this._records.keys()].sort().map((k) => this._frozenView(this._publicView(this._records.get(k)))));
-    }
-
-    listByKind(kindRaw) {
-        const kind = canonicalKind(kindRaw);
-        const ids = this._byKind.get(kind) ?? new Set();
-        return Object.freeze([...ids].sort().map((k) => this._frozenView(this._publicView(this._records.get(k)))));
-    }
-
-    listByProvenance(provenanceRaw) {
-        const provenance = canonicalProvenance(provenanceRaw);
-        const ids = this._byProvenance.get(provenance) ?? new Set();
-        return Object.freeze([...ids].sort().map((k) => this._frozenView(this._publicView(this._records.get(k)))));
-    }
-
-    listBySource(sourceRaw) {
-        const source = String(sourceRaw);
-        const ids = [];
-        for (const [k, rec] of this._records) {
-            if (rec.descriptor.source === source) ids.push(k);
-        }
-        return Object.freeze(ids.sort().map((k) => this._frozenView(this._publicView(this._records.get(k)))));
-    }
-
-    // -------------------------------------------------- dependency lookup
-
-    getDependencies(idOrRaw) {
-        const id = canonicalCapabilityId(idOrRaw);
-        if (!this._records.has(id)) throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
-        return Object.freeze([...(this._edges.get(id) ?? new Set())].sort());
-    }
-
-    getDependents(idOrRaw) {
-        const id = canonicalCapabilityId(idOrRaw);
-        return Object.freeze([...(this._reverseEdges.get(id) ?? new Set())].sort());
-    }
-
-    resolveDependencyStatus(idOrRaw) {
-        const id = canonicalCapabilityId(idOrRaw);
-        if (!this._records.has(id)) throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
-        const deps = this._edges.get(id) ?? new Set();
-        return resolveDependencyStatus([...deps], (depId) => {
-            const rec = this._records.get(depId);
-            return rec ? { availability: rec.availability } : null;
-        });
-    }
-
-    /** Bounded forward transitive closure (all reachable ids). */
-    transitiveDependencies(idOrRaw) {
-        const id = canonicalCapabilityId(idOrRaw);
-        if (!this._records.has(id)) throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
-        return Object.freeze(transitiveDependencies(this._edges, id));
-    }
-
-    findAllDependencyCycles() {
-        return collectAllCycles(this._edges);
-    }
-
-    // ------------------------------------------------- availability observe
-
-    /**
-     * Observe availability. Generation-aware: a stale (older) generation is
-     * rejected and can never overwrite a newer observation. Availability is
-     * descriptive evidence only — it grants nothing.
-     */
-    observeAvailability(idOrRaw, availabilityRaw, { generation, observedAtMs = null } = {}) {
-        const id = canonicalCapabilityId(idOrRaw);
-        const rec = this._records.get(id);
-        if (!rec) throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
-        const availability = canonicalAvailability(availabilityRaw);
-
-        if (Number.isInteger(generation)) {
-            if (generation < rec.generation) {
-                throw fail(REASONS.STALE_OBSERVATION,
-                    `stale availability observation for '${id}' (generation ${generation} < current ${rec.generation})`,
-                    { id, generation, current: rec.generation });
-            }
-            if (generation === rec.generation && rec.availability === availability) {
-                return Object.freeze({ changed: false, id, availability, generation: rec.generation });
-            }
-        }
-
-        rec.availability = availability;
-        if (Number.isInteger(generation)) rec.generation = generation;
-        rec.observedAtMs = observedAtMs ?? this._now();
-        return Object.freeze({ changed: true, id, availability, generation: rec.generation });
-    }
-
-    getAvailability(idOrRaw) {
-        const id = canonicalCapabilityId(idOrRaw);
-        const rec = this._records.get(id);
-        if (!rec) throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
-        return Object.freeze({ availability: rec.availability, generation: rec.generation, observedAtMs: rec.observedAtMs });
-    }
-
-    // -------------------------------------------------------------- helpers
-
-    _publicView(rec) {
-        return { ...rec.descriptor, availability: rec.availability, generation: rec.generation, observedAtMs: rec.observedAtMs };
-    }
-
-    /** Deterministic serialization of canonical state (no live objects). */
-    serialize() {
-        const records = [];
-        for (const k of [...this._records.keys()].sort()) {
-            const rec = this._records.get(k);
-            records.push({
-                ...JSON.parse(JSON.stringify(rec.descriptor)),
-                availability: rec.availability,
-                generation: rec.generation,
-                observedAtMs: rec.observedAtMs
-            });
-        }
-        return deepFreeze({ schemaVersion: 1, capabilities: records });
-    }
-
-    getStats() {
-        return Object.freeze({
-            capabilities: this._records.size,
-            maxCapabilities: this._maxCapabilities,
-            edges: countSets(this._edges),
-            reverseEdges: countSets(this._reverseEdges)
-        });
-    }
+function mintIncarnationId() {
+    return `${INCARNATION_PREFIX}${crypto.randomBytes(16).toString("hex")}`;
 }
 
-function countSets(map) {
-    let n = 0;
-    for (const set of map.values()) n += set.size;
-    return n;
+function isValidIncarnationId(value) {
+    return typeof value === "string" && INCARNATION_PATTERN.test(value);
+}
+
+/** Map a registrar provenance to its closed trust domain. */
+function domainOf(provenance) {
+    if (provenance === "core/runtime" || provenance === "system") return "core";
+    const colon = provenance.indexOf(":");
+    return colon === -1 ? "core" : provenance.slice(0, colon);
+}
+
+function describeNumber(v) {
+    if (typeof v === "number") return String(v);
+    return typeof v;
+}
+
+function deepFreeze(obj) {
+    if (obj !== null && typeof obj === "object") {
+        for (const key of Object.getOwnPropertyNames(obj)) deepFreeze(obj[key]);
+        Object.freeze(obj);
+    }
+    return obj;
+}
+
+/** Detached deep-copy + deep-freeze of canonical plain data. */
+function frozenView(value) {
+    return value === undefined ? undefined : deepFreeze(structuredClone(value));
+}
+
+function stableEquals(a, b) {
+    return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function canonicalDescriptorKey(descriptor) {
@@ -328,12 +82,343 @@ function canonicalDescriptorKey(descriptor) {
     ]);
 }
 
-function deepFreeze(obj) {
-    if (obj !== null && typeof obj === "object") {
-        for (const key of Object.getOwnPropertyNames(obj)) deepFreeze(obj[key]);
-        Object.freeze(obj);
+function countSets(map) {
+    let n = 0;
+    for (const set of map.values()) n += set.size;
+    return n;
+}
+
+class CapabilityRegistry {
+    #records = new Map();
+    #edges = new Map();
+    #reverseEdges = new Map();
+    #byKind = new Map();
+    #byProvenance = new Map();
+
+    constructor({ clock = { nowMs: () => Date.now() }, maxCapabilities } = {}) {
+        this._clock = clock;
+        this._maxCapabilities = maxCapabilities ?? DEFAULTS.maxCapabilities;
     }
-    return obj;
+
+    _now() {
+        try { return this._clock.nowMs(); } catch { return null; }
+    }
+
+    // ------------------------------------------------------- registrar model
+
+    /** Create a registrar bound to this registry's private admission path. */
+    createRegistrar({ domain, registrarId } = {}) {
+        return createRegistrar((descriptorInput, provenance, opts) => {
+            return this.#admit(descriptorInput, provenance, opts);
+        }, { domain, registrarId });
+    }
+
+    // ------------------------------------------------------ private admission
+
+    #admit(descriptorInput, provenance, { serializedOnly } = {}) {
+        const isSerialized = typeof descriptorInput === "string" || descriptorInput instanceof Uint8Array;
+        if (serializedOnly && !isSerialized) {
+            throw fail(REASONS.OBJECT_INPUT_NOT_ALLOWED,
+                "untrusted registration requires bounded serialized JSON (string or Uint8Array); object input is only accepted via the trusted registrar boundary");
+        }
+
+        const descriptor = parseCapabilityDescriptor(descriptorInput, { source: provenance, nowMs: this._now() });
+
+        // kind/provenance correspondence must hold before any mutation.
+        assertKindDomainCorrespondence(descriptor.kind, domainOf(provenance));
+
+        // Bake authoritative (registrar-owned) provenance into the record.
+        const canonical = deepFreeze({ ...descriptor, provenance: Object.freeze(provenance) });
+        const id = canonical.id;
+
+        if (this.#records.has(id)) {
+            const existing = this.#records.get(id);
+            if (existing.descriptor.provenance !== canonical.provenance) {
+                throw fail(REASONS.DUPLICATE_CONFLICT,
+                    `capability '${id}' already registered from different provenance`,
+                    { id, existingProvenance: existing.descriptor.provenance, newProvenance: canonical.provenance });
+            }
+            if (canonicalDescriptorKey(existing.descriptor) === canonicalDescriptorKey(canonical)) {
+                return Object.freeze({
+                    registered: false, idempotent: true, id,
+                    incarnationId: existing.incarnationId, generation: existing.generation
+                });
+            }
+            throw fail(REASONS.DUPLICATE_CONFLICT,
+                `capability '${id}' already registered with a materially different descriptor`,
+                { id, provenance: canonical.provenance });
+        }
+        if (this.#records.size >= this._maxCapabilities) {
+            throw fail(REASONS.REGISTRY_FULL, `registry bound reached (${this._maxCapabilities})`, { maxCapabilities: this._maxCapabilities });
+        }
+
+        const deps = canonical.dependencies;
+        for (const depId of deps) {
+            if (wouldCreateCycle(this.#edges, id, depId)) {
+                throw fail(REASONS.DEPENDENCY_CYCLE,
+                    `registering '${id}' would create a dependency cycle via '${depId}'`,
+                    { id, depId });
+            }
+        }
+
+        // ---- mutate (atomic, after all validation) ----
+        const incarnationId = mintIncarnationId();
+        const rec = {
+            descriptor: canonical,
+            incarnationId,
+            availability: "UNKNOWN",
+            generation: 0,
+            observedAtMs: this._now(),
+            observation: Object.freeze({})
+        };
+        this.#records.set(id, rec);
+        this.#insertIndexes(id, canonical, deps);
+
+        return Object.freeze({ registered: true, idempotent: false, id, incarnationId, generation: 0 });
+    }
+
+    #insertIndexes(id, descriptor, deps) {
+        this.#edges.set(id, new Set(deps));
+        for (const depId of deps) {
+            if (!this.#reverseEdges.has(depId)) this.#reverseEdges.set(depId, new Set());
+            this.#reverseEdges.get(depId).add(id);
+        }
+        if (!this.#byKind.has(descriptor.kind)) this.#byKind.set(descriptor.kind, new Set());
+        this.#byKind.get(descriptor.kind).add(id);
+        if (!this.#byProvenance.has(descriptor.provenance)) this.#byProvenance.set(descriptor.provenance, new Set());
+        this.#byProvenance.get(descriptor.provenance).add(id);
+    }
+
+    #removeIndexes(id) {
+        const deps = this.#edges.get(id);
+        if (deps) {
+            for (const depId of deps) {
+                const rev = this.#reverseEdges.get(depId);
+                if (rev) { rev.delete(id); if (rev.size === 0) this.#reverseEdges.delete(depId); }
+            }
+        }
+        this.#edges.delete(id);
+        const rec = this.#records.get(id);
+        if (rec) {
+            const kindSet = this.#byKind.get(rec.descriptor.kind);
+            if (kindSet) { kindSet.delete(id); if (kindSet.size === 0) this.#byKind.delete(rec.descriptor.kind); }
+            const provSet = this.#byProvenance.get(rec.descriptor.provenance);
+            if (provSet) { provSet.delete(id); if (provSet.size === 0) this.#byProvenance.delete(rec.descriptor.provenance); }
+        }
+    }
+
+    // --------------------------------------------------------------- remove
+
+    remove(idOrRaw) {
+        const id = canonicalCapabilityId(idOrRaw);
+        if (!this.#records.has(id)) {
+            throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
+        }
+        const dependents = this.#reverseEdges.get(id);
+        if (dependents && dependents.size > 0) {
+            throw fail(REASONS.INVALID_DEPENDENCY,
+                `cannot remove '${id}': still depended on by ${[...dependents].sort().join(", ")}`,
+                { id, dependents: [...dependents].sort() });
+        }
+        this.#removeIndexes(id);
+        this.#records.delete(id);
+        return Object.freeze({ removed: true, id });
+    }
+
+    // -------------------------------------------------------------- queries
+
+    get(idOrRaw) {
+        const id = canonicalCapabilityId(idOrRaw);
+        const rec = this.#records.get(id);
+        if (!rec) return null;
+        return frozenView(this.#publicView(rec));
+    }
+
+    has(idOrRaw) {
+        try { return this.#records.has(canonicalCapabilityId(idOrRaw)); } catch { return false; }
+    }
+
+    get size() { return this.#records.size; }
+
+    list() {
+        return Object.freeze([...this.#records.keys()].sort().map((k) => frozenView(this.#publicView(this.#records.get(k)))));
+    }
+
+    listByKind(kindRaw) {
+        const kind = canonicalKind(kindRaw);
+        const ids = this.#byKind.get(kind) ?? new Set();
+        return Object.freeze([...ids].sort().map((k) => frozenView(this.#publicView(this.#records.get(k)))));
+    }
+
+    listByProvenance(provenanceRaw) {
+        const provenance = String(provenanceRaw).trim().toLowerCase();
+        const ids = [];
+        for (const [k, rec] of this.#records) {
+            if (rec.descriptor.provenance === provenance) ids.push(k);
+        }
+        return Object.freeze(ids.sort().map((k) => frozenView(this.#publicView(this.#records.get(k)))));
+    }
+
+    listBySource(sourceRaw) {
+        const source = String(sourceRaw);
+        const ids = [];
+        for (const [k, rec] of this.#records) {
+            if (rec.descriptor.source === source) ids.push(k);
+        }
+        return Object.freeze(ids.sort().map((k) => frozenView(this.#publicView(this.#records.get(k)))));
+    }
+
+    // -------------------------------------------------- dependency lookup
+
+    getDependencies(idOrRaw) {
+        const id = canonicalCapabilityId(idOrRaw);
+        if (!this.#records.has(id)) throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
+        return Object.freeze([...(this.#edges.get(id) ?? new Set())].sort());
+    }
+
+    getDependents(idOrRaw) {
+        const id = canonicalCapabilityId(idOrRaw);
+        return Object.freeze([...(this.#reverseEdges.get(id) ?? new Set())].sort());
+    }
+
+    resolveDependencyStatus(idOrRaw) {
+        const id = canonicalCapabilityId(idOrRaw);
+        if (!this.#records.has(id)) throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
+        const deps = this.#edges.get(id) ?? new Set();
+        return resolveDependencyStatus([...deps], (depId) => {
+            const rec = this.#records.get(depId);
+            return rec ? { availability: rec.availability } : null;
+        });
+    }
+
+    transitiveDependencies(idOrRaw) {
+        const id = canonicalCapabilityId(idOrRaw);
+        if (!this.#records.has(id)) throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
+        return Object.freeze(transitiveDependencies(this.#edges, id));
+    }
+
+    findAllDependencyCycles() {
+        return collectAllCycles(this.#edges);
+    }
+
+    // ------------------------------------------------- availability observe
+
+    observeAvailability(idOrRaw, availabilityRaw, { generation, incarnationId, observedAtMs = null, metadata } = {}) {
+        const id = canonicalCapabilityId(idOrRaw);
+        const rec = this.#records.get(id);
+        if (!rec) throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
+
+        // lifetime identity gate (before anything else)
+        if (!isValidIncarnationId(incarnationId)) {
+            throw fail(REASONS.INVALID_INCARNATION,
+                `availability observation for '${id}' requires the exact current incarnationId`, { id });
+        }
+        if (incarnationId !== rec.incarnationId) {
+            throw fail(REASONS.INVALID_INCARNATION,
+                `availability observation for '${id}' carries an old or unknown incarnationId`, { id });
+        }
+
+        // strict generation validation (before mutation)
+        if (!Number.isSafeInteger(generation) || generation < 0) {
+            throw fail(REASONS.INVALID_GENERATION,
+                `generation must be a nonnegative safe integer, got ${describeNumber(generation)}`,
+                { id, generation });
+        }
+
+        const availability = canonicalAvailability(availabilityRaw);
+        const nextMetadata = parseObservationMetadata(metadata);
+
+        // observedAtMs must be a finite number (or absent, in which case the
+        // trusted registry clock produces it). Reject functions/objects/etc.
+        if (observedAtMs !== null && observedAtMs !== undefined) {
+            if (typeof observedAtMs !== "number" || !Number.isFinite(observedAtMs)) {
+                throw fail(REASONS.MALFORMED_INPUT,
+                    `observedAtMs must be a finite number, got ${describeNumber(observedAtMs)}`,
+                    { id });
+            }
+        }
+        const nextObservedAtMs = observedAtMs ?? this._now();
+
+        if (generation < rec.generation) {
+            throw fail(REASONS.STALE_OBSERVATION,
+                `stale availability observation for '${id}' (generation ${generation} < current ${rec.generation})`,
+                { id, generation, current: rec.generation });
+        }
+
+        if (generation === rec.generation) {
+            const identical = rec.availability === availability
+                && stableEquals(rec.observation, nextMetadata)
+                && rec.observedAtMs === nextObservedAtMs;
+            if (identical) {
+                return Object.freeze({ changed: false, id, availability, generation: rec.generation, incarnationId: rec.incarnationId });
+            }
+            throw fail(REASONS.CONFLICTING_OBSERVATION,
+                `conflicting availability observation for '${id}' at generation ${generation}`,
+                { id, generation, currentAvailability: rec.availability, newAvailability: availability });
+        }
+
+        // generation > current => valid atomic update
+        rec.availability = availability;
+        rec.generation = generation;
+        rec.observedAtMs = nextObservedAtMs;
+        rec.observation = nextMetadata;
+        return Object.freeze({ changed: true, id, availability, generation: rec.generation, incarnationId: rec.incarnationId });
+    }
+
+    getAvailability(idOrRaw) {
+        const id = canonicalCapabilityId(idOrRaw);
+        const rec = this.#records.get(id);
+        if (!rec) throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
+        return Object.freeze({
+            availability: rec.availability,
+            generation: rec.generation,
+            observedAtMs: rec.observedAtMs,
+            incarnationId: rec.incarnationId
+        });
+    }
+
+    getIncarnationId(idOrRaw) {
+        const id = canonicalCapabilityId(idOrRaw);
+        const rec = this.#records.get(id);
+        if (!rec) throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
+        return rec.incarnationId;
+    }
+
+    // -------------------------------------------------------------- helpers
+
+    #publicView(rec) {
+        return {
+            ...rec.descriptor,
+            availability: rec.availability,
+            generation: rec.generation,
+            observedAtMs: rec.observedAtMs,
+            incarnationId: rec.incarnationId
+        };
+    }
+
+    serialize() {
+        const records = [];
+        for (const k of [...this.#records.keys()].sort()) {
+            const rec = this.#records.get(k);
+            records.push({
+                ...JSON.parse(JSON.stringify(rec.descriptor)),
+                availability: rec.availability,
+                generation: rec.generation,
+                observedAtMs: rec.observedAtMs,
+                incarnationId: rec.incarnationId
+            });
+        }
+        return deepFreeze({ schemaVersion: 1, capabilities: records });
+    }
+
+    getStats() {
+        return Object.freeze({
+            capabilities: this.#records.size,
+            maxCapabilities: this._maxCapabilities,
+            edges: countSets(this.#edges),
+            reverseEdges: countSets(this.#reverseEdges)
+        });
+    }
 }
 
 module.exports = { CapabilityRegistry, DEFAULTS };

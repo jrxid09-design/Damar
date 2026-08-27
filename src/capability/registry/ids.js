@@ -40,9 +40,26 @@ const RESERVED_SEGMENTS = Object.freeze(new Set([
     "__proto__", "constructor", "prototype", "proto"
 ]));
 
+/**
+ * Authority/policy-shaped vocabulary. These tokens, appearing anywhere in a
+ * provenance string (scheme, id, or any dotted segment) — case-insensitively
+ * — would read as self-asserted privilege. They are rejected at the boundary
+ * so a descriptor/registrar can never self-select an authority-shaped
+ * identity. This is IDENTITY hygiene, not an authorization decision.
+ */
+const AUTHORITY_VOCABULARY = Object.freeze(new Set([
+    "authority", "authorized", "authorization", "authorize", "authorisation",
+    "permission", "permissions", "permit", "permitted",
+    "owner", "owners", "admin", "administrator", "root", "superuser",
+    "trusted", "trust", "trusts", "approve", "approved", "approval",
+    "grant", "granted", "grants", "role", "roles",
+    "privilege", "privileged", "privileges"
+]));
+
 /** Provenance values that, if a caller asserted them, could be read as
  *  self-granted privilege. They are evidence words only and are rejected
- *  as caller-supplied provenance sources. */
+ *  as caller-supplied provenance sources. (Subset of AUTHORITY_VOCABULARY
+ *  retained for exact-value rejection clarity.) */
 const FORBIDDEN_PROVENANCE = Object.freeze(new Set([
     "authority", "owner", "root"
 ]));
@@ -122,6 +139,28 @@ function isValidCapabilityId(raw) {
  * grammar and rejects authority/owner/root self-assertion at the boundary.
  * Returns the normalized string.
  */
+/** Reject authority-shaped tokens case-insensitively at any segment of a
+ *  scoped provenance. Splits on the scheme colon and dotted segments. */
+function assertNoAuthorityTokens(value) {
+    // split into scheme (before colon) and every dotted segment of the rest
+    const segments = [];
+    const colon = value.indexOf(":");
+    if (colon === -1) {
+        segments.push(value);
+    } else {
+        segments.push(value.slice(0, colon));
+        segments.push(...value.slice(colon + 1).split("."));
+    }
+    for (const seg of segments) {
+        if (seg === "") continue;
+        if (AUTHORITY_VOCABULARY.has(seg)) {
+            throw fail(REASONS.FORBIDDEN_PROVENANCE,
+                `provenance contains authority-shaped token '${seg}' and is rejected`,
+                { received: truncate(value), token: seg });
+        }
+    }
+}
+
 function canonicalProvenance(raw) {
     if (typeof raw !== "string") {
         throw fail(REASONS.INVALID_PROVENANCE,
@@ -130,29 +169,18 @@ function canonicalProvenance(raw) {
     const value = raw.trim().toLowerCase();
     assertLength(value, PROV_MIN, PROV_MAX, "provenance", REASONS.INVALID_PROVENANCE);
 
+    // reject authority/owner/root-shaped tokens anywhere in the string
+    // (case-insensitive, at scheme / id / dotted-segment depth).
+    assertNoAuthorityTokens(value);
+
     // exact canonical core/runtime and system literals
     if (value === CORE_RUNTIME_PROVENANCE || value === SYSTEM_PROVENANCE) {
         return value;
     }
 
-    // forbidden self-asserted privilege words
-    if (FORBIDDEN_PROVENANCE.has(value)) {
-        throw fail(REASONS.INVALID_PROVENANCE_SCOPE,
-            `provenance '${value}' is a self-asserted privilege scope and is rejected`,
-            { received: truncate(value) });
-    }
-
     // scheme-scoped: scheme:<id>
     const colon = value.indexOf(":");
     if (colon === -1) {
-        // bare provenance that is not a recognized scope word
-        if (FORBIDDEN_PROVENANCE.has(value)) {
-            throw fail(REASONS.INVALID_PROVENANCE_SCOPE,
-                `provenance '${value}' is a self-asserted privilege scope and is rejected`);
-        }
-        // allow bare non-forbidden strings only if they look like a scoped id
-        // (single segment); strictly, provenance must be core/runtime, system,
-        // or scheme:<id>.
         throw fail(REASONS.INVALID_PROVENANCE,
             `provenance '${value}' must be core/runtime, system, or scheme:<id>`,
             { received: truncate(value) });
@@ -163,11 +191,6 @@ function canonicalProvenance(raw) {
         throw fail(REASONS.INVALID_PROVENANCE,
             `provenance scheme '${scheme}' is not recognized`,
             { received: truncate(scheme) });
-    }
-    // forbid forbidden words appearing as scheme or id
-    if (FORBIDDEN_PROVENANCE.has(scheme)) {
-        throw fail(REASONS.INVALID_PROVENANCE_SCOPE,
-            `provenance scheme '${scheme}' is a self-asserted privilege scope and is rejected`);
     }
     if (!rest || rest.length > CAP_MAX) {
         throw fail(REASONS.INVALID_PROVENANCE,
@@ -198,6 +221,7 @@ module.exports = {
     ID_PATTERN,
     RESERVED_SEGMENTS,
     FORBIDDEN_PROVENANCE,
+    AUTHORITY_VOCABULARY,
     PROVENANCE_SCHEMES,
     CORE_RUNTIME_PROVENANCE,
     SYSTEM_PROVENANCE,

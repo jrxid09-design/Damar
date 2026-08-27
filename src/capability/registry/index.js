@@ -17,17 +17,19 @@
  */
 
 const { CapabilityRegistry, DEFAULTS } = require("./registry");
-const { parseCapabilityDescriptor, DESCRIPTOR_SCHEMA_VERSION, BOUNDS: DESCRIPTOR_BOUNDS } = require("./descriptor");
+const { parseCapabilityDescriptor, parseObservationMetadata, DESCRIPTOR_SCHEMA_VERSION, BOUNDS: DESCRIPTOR_BOUNDS } = require("./descriptor");
 const { CapabilityRegistryError, REASONS } = require("./errors");
 const { KINDS, canonicalKind } = require("./kinds");
 const { AVAILABILITY, canonicalAvailability } = require("./availability");
-const { canonicalCapabilityId, canonicalProvenance, isValidCapabilityId, isValidProvenance } = require("./ids");
+const { canonicalCapabilityId, canonicalProvenance, isValidCapabilityId, isValidProvenance, AUTHORITY_VOCABULARY } = require("./ids");
 const { GRAPH_BOUNDS } = require("./graph");
+const { REGISTRAR_DOMAINS, deriveProvenance, allowedKindsForDomain } = require("./registrar");
 
 module.exports = {
     CapabilityRegistry,
     REGISTRY_DEFAULTS: DEFAULTS,
     parseCapabilityDescriptor,
+    parseObservationMetadata,
     DESCRIPTOR_SCHEMA_VERSION,
     DESCRIPTOR_BOUNDS,
     GRAPH_BOUNDS,
@@ -35,10 +37,14 @@ module.exports = {
     REASONS,
     KINDS,
     AVAILABILITY,
+    REGISTRAR_DOMAINS,
+    deriveProvenance,
+    allowedKindsForDomain,
     canonicalKind,
     canonicalAvailability,
     canonicalCapabilityId,
     canonicalProvenance,
     isValidCapabilityId,
-    isValidProvenance
+    isValidProvenance,
+    AUTHORITY_VOCABULARY
 };

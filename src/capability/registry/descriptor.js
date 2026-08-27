@@ -26,7 +26,7 @@
  */
 
 const { fail, REASONS } = require("./errors");
-const { canonicalCapabilityId, canonicalProvenance } = require("./ids");
+const { canonicalCapabilityId, AUTHORITY_VOCABULARY } = require("./ids");
 const { canonicalKind } = require("./kinds");
 const { canonicalAvailability } = require("./availability");
 
@@ -59,9 +59,15 @@ const AUTHORITY_SHAPED_FIELDS = Object.freeze(new Set([
     "isAuthority", "canAuthorize"
 ]));
 
+/**
+ * Descriptor is descriptive capability data ONLY. It must NOT carry an
+ * authoritative `provenance` field — provenance identity originates from the
+ * registrar/registration envelope, not the descriptor. A descriptor that
+ * supplies `provenance` is rejected (never silently ignored or overridden).
+ */
 const KNOWN_FIELDS = Object.freeze([
     "schemaVersion", "id", "kind", "provider", "source", "operations",
-    "requirements", "effects", "availability", "provenance", "dependencies",
+    "requirements", "effects", "availability", "dependencies",
     "metadata", "description"
 ]);
 
@@ -176,11 +182,30 @@ function detach(value, state) {
     return out;
 }
 
-/** Enforce metadata-specific bounds (depth, key/string length) on the
- *  already-detached (safe, acyclic, plain) metadata tree. */
+/** Enforce metadata-specific bounds (depth, key/string length) and reject
+ *  authority/policy-shaped keys (case-insensitive, at any nesting level) on
+ *  the already-detached (safe, acyclic, plain) metadata tree. */
 function enforceMetadataBounds(node) {
     const state = { nodes: 0, maxNodes: BOUNDS.MAX_METADATA_NODES };
     walkMetadata(node, 0, state);
+}
+
+/** Recursively reject authority/policy-shaped keys case-insensitively. */
+function assertNoAuthorityKeys(node) {
+    if (node === null || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+        for (const item of node) assertNoAuthorityKeys(item);
+        return;
+    }
+    for (const key of Object.getOwnPropertyNames(node)) {
+        const folded = key.toLowerCase();
+        if (AUTHORITY_VOCABULARY.has(folded)) {
+            throw fail(REASONS.AUTHORITY_METADATA,
+                `metadata key '${key}' is authority-shaped and is rejected`,
+                { key });
+        }
+        assertNoAuthorityKeys(node[key]);
+    }
 }
 
 function walkMetadata(node, depth, state) {
@@ -215,7 +240,26 @@ function parseMetadata(raw) {
     const state = { nodes: 0, maxNodes: BOUNDS.MAX_METADATA_NODES, path: new Set() };
     const detached = detach(raw, state);
     enforceMetadataBounds(detached);
+    assertNoAuthorityKeys(detached);
     return detached;
+}
+
+/**
+ * Parse and detach observation metadata (an inert, bounded, authority-free
+ * metadata bag carried alongside an availability observation). Returns a
+ * deep-frozen plain object; rejects functions, accessors, symbols, non-plain
+ * objects, cycles, bounds, and authority-shaped keys.
+ */
+function parseObservationMetadata(raw) {
+    if (raw === undefined || raw === null) return Object.freeze({});
+    if (!isPlainObject(raw)) {
+        throw fail(REASONS.MALFORMED_INPUT, "observation metadata must be a plain object");
+    }
+    const state = { nodes: 0, maxNodes: BOUNDS.MAX_METADATA_NODES, path: new Set() };
+    const detached = detach(raw, state);
+    enforceMetadataBounds(detached);
+    assertNoAuthorityKeys(detached);
+    return deepFreeze(detached);
 }
 
 function parseCapabilityDescriptor(input, { source = "inline", nowMs = null } = {}) {
@@ -250,8 +294,14 @@ function parseCapabilityDescriptor(input, { source = "inline", nowMs = null } = 
 
     for (const key of Object.getOwnPropertyNames(detached)) {
         if (!KNOWN_FIELDS.includes(key)) {
-            if (AUTHORITY_SHAPED_FIELDS.has(key)) {
+            if (AUTHORITY_SHAPED_FIELDS.has(key) || AUTHORITY_VOCABULARY.has(key.toLowerCase())) {
                 throw fail(REASONS.UNKNOWN_FIELD, `descriptor field '${key}' is an authority-shaped field and is rejected`);
+            }
+            // `provenance` is explicitly not a descriptor field: provenance
+            // identity originates from the registrar, never the descriptor.
+            if (key === "provenance") {
+                throw fail(REASONS.FORBIDDEN_PROVENANCE,
+                    `descriptor must not define authoritative provenance; register via a registrar`);
             }
             throw fail(REASONS.UNKNOWN_FIELD, `unknown descriptor field '${key}'`);
         }
@@ -263,7 +313,6 @@ function parseCapabilityDescriptor(input, { source = "inline", nowMs = null } = 
     const id = canonicalCapabilityId(detached.id);
     const kind = canonicalKind(requireString(detached.kind, "kind", 32));
     const provider = requireString(detached.provider, "provider", BOUNDS.MAX_PROVIDER_CHARS, { allowEmpty: true }) ?? "";
-    const provenance = canonicalProvenance(requireString(detached.provenance, "provenance", BOUNDS.MAX_PROVENANCE_CHARS));
     const description = requireString(detached.description, "description", BOUNDS.MAX_DESCRIPTION_CHARS, { optional: true, allowEmpty: true }) ?? "";
 
     const operations = boundedStringList(detached.operations, "operations", BOUNDS.MAX_OPERATIONS, BOUNDS.MAX_OPERATION_CHARS);
@@ -291,7 +340,6 @@ function parseCapabilityDescriptor(input, { source = "inline", nowMs = null } = 
         requirements: Object.freeze(requirements),
         effects: Object.freeze(effects),
         availability,
-        provenance,
         dependencies: Object.freeze(dependencies),
         metadata: deepFreeze(metadata),
         description,
@@ -307,4 +355,12 @@ function deepFreeze(obj) {
     return obj;
 }
 
-module.exports = { parseCapabilityDescriptor, DESCRIPTOR_SCHEMA_VERSION, BOUNDS, AUTHORITY_SHAPED_FIELDS, KNOWN_FIELDS, isPlainObject };
+module.exports = {
+    parseCapabilityDescriptor,
+    parseObservationMetadata,
+    DESCRIPTOR_SCHEMA_VERSION,
+    BOUNDS,
+    AUTHORITY_SHAPED_FIELDS,
+    KNOWN_FIELDS,
+    isPlainObject
+};
