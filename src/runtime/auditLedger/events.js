@@ -39,6 +39,55 @@ const ACTOR_KINDS = Object.freeze([
     "system", "agent", "user", "device", "extension", "service", "external"
 ]);
 
+/**
+ * R2: narrow wrapper that converts the native TypeError/RangeError thrown
+ * by ids.js coerce helpers into the ledger's stable typed LedgerError
+ * contract. Existing LedgerError passes through unchanged; only the two
+ * known validation error types are relabeled, so arbitrary programming
+ * errors are never misattributed to the caller. Predictable malformed
+ * caller input therefore NEVER surfaces as E_INTERNAL.
+ *
+ * @param {() => *} fn the coercion call to wrap
+ * @param {string} code stable CODES entry for the converted error
+ * @returns {*} the coerced value (throws LedgerError on failure)
+ */
+function safeCoerce(fn, code) {
+    try {
+        return fn();
+    }
+    catch (error) {
+        if (error instanceof LedgerError) throw error;
+        if (error instanceof TypeError || error instanceof RangeError) {
+            throw new LedgerError(code, error.message);
+        }
+        throw error; // not a predictable validation failure — leave untouched
+    }
+}
+
+/** AuditEvent eventId — safe coerced value (null when absent). */
+function coerceAuditEventIdSafe(rawInput, code = CODES.INVALID_EVENT) {
+    if (rawInput === undefined || rawInput === null) return null;
+    return safeCoerce(() => coerceAuditEventId(rawInput), code);
+}
+
+/** AuditEvent source — safe coerced value (null when absent). */
+function coerceSourceIdSafe(rawInput) {
+    if (rawInput === undefined || rawInput === null) return null;
+    return safeCoerce(() => coerceSourceId(rawInput), CODES.INVALID_EVENT);
+}
+
+/** AuditEvent generation ref — safe coerced value (undefined when absent). */
+function coerceGenerationRefSafe(rawInput) {
+    if (rawInput === undefined || rawInput === null) return undefined;
+    return safeCoerce(() => coerceGenerationRef(rawInput), CODES.INVALID_EVENT);
+}
+
+/** AuditEvent correlation ref — safe coerced value (undefined when absent). */
+function coerceCorrelationSafe(rawInput) {
+    if (rawInput === undefined || rawInput === null) return undefined;
+    return safeCoerce(() => coerceCorrelation(rawInput), CODES.INVALID_EVENT);
+}
+
 const EVIDENCE_KINDS = Object.freeze([
     "toolResult", "envelope", "checkpoint", "manifest",
     "digest", "document", "external"
@@ -218,11 +267,13 @@ function buildEventRecord(rawInput, bounds) {
 
     let eventId;
     if (input.eventId !== undefined && input.eventId !== null) {
-        eventId = coerceAuditEventId(input.eventId);
+        eventId = coerceAuditEventIdSafe(input.eventId);
+        // coerceAuditEventIdSafe returns null only when input is absent;
+        // the outer guard already ensures input is defined, so eventId is a string.
     }
 
     const eventType = coerceEventType(input.eventType, bounds);
-    const source = coerceSourceId(input.source);
+    const source = coerceSourceIdSafe(input.source);
     const timestampMs = coerceTimestamp(input.timestampMs);
 
     const actor = coerceActorSubject(input.actor, "actor");
@@ -239,15 +290,15 @@ function buildEventRecord(rawInput, bounds) {
 
     const generation = input.generation === undefined || input.generation === null
         ? undefined
-        : coerceGenerationRef(input.generation);
+        : coerceGenerationRefSafe(input.generation);
 
-    const correlation = coerceCorrelation(input.correlation);
+    const correlation = coerceCorrelationSafe(input.correlation);
     const evidenceRefs = coerceEvidenceRefs(input.evidenceRefs, bounds);
     const authorityRef = coerceAuthorityRef(input.authorityRef);
 
     let causalParentId;
     if (input.causalParentId !== undefined && input.causalParentId !== null) {
-        causalParentId = coerceAuditEventId(input.causalParentId);
+        causalParentId = coerceAuditEventIdSafe(input.causalParentId, CODES.MALFORMED_REF);
     }
 
     // Metadata goes through the redaction boundary LAST so secret-shaped

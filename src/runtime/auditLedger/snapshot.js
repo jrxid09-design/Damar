@@ -129,6 +129,10 @@ function snapshotValue(value, budget, ancestors, depth, bounds) {
             throw new LedgerError(CODES.INVALID_EVENT,
                 `accessor property not allowed in event input: "${key}"`);
         }
+        // R1: at top level only, own property value===undefined => absent
+        if (depth === 0 && descriptor.value === undefined) {
+            continue; // omit this field from snapshot (treated as absent)
+        }
         out[key] = snapshotValue(descriptor.value, budget, ancestors, depth + 1, bounds);
     }
     ancestors.delete(value);
