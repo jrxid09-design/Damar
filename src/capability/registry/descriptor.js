@@ -48,7 +48,8 @@ const BOUNDS = Object.freeze({
     MAX_METADATA_DEPTH: 8,
     MAX_METADATA_NODES: 512,
     MAX_METADATA_KEY_CHARS: 128,
-    MAX_METADATA_STRING_CHARS: 256
+    MAX_METADATA_STRING_CHARS: 256,
+    GLOBAL_MAX_ARRAY_LENGTH: 4096
 });
 
 const DANGEROUS_KEYS = Object.freeze(new Set(["__proto__", "constructor", "prototype"]));
@@ -154,6 +155,13 @@ function detach(value, state) {
     }
     if (Array.isArray(value)) {
         if (state.path.has(value)) throw fail(REASONS.CYCLIC_INPUT, "cyclic structure is not permitted in descriptors");
+        // Bound-check BEFORE any allocation/copy based on attacker-controlled
+        // length (a sparse array can report a huge length cheaply).
+        if (value.length > BOUNDS.GLOBAL_MAX_ARRAY_LENGTH) {
+            throw fail(REASONS.BOUND_EXCEEDED,
+                `array length ${value.length} exceeds global bound ${BOUNDS.GLOBAL_MAX_ARRAY_LENGTH}`,
+                { length: value.length, maxLength: BOUNDS.GLOBAL_MAX_ARRAY_LENGTH });
+        }
         state.path.add(value);
         const out = new Array(value.length);
         for (let i = 0; i < value.length; i++) out[i] = detach(value[i], state);
@@ -264,13 +272,15 @@ function parseObservationMetadata(raw) {
 
 function parseCapabilityDescriptor(input, { source = "inline", nowMs = null } = {}) {
     let body = input;
-    if (typeof input === "string" || input instanceof Uint8Array) {
-        const text = typeof input === "string" ? input : Buffer.from(input).toString("utf8");
-        if (Buffer.byteLength(text, "utf8") > BOUNDS.MAX_DESCRIPTOR_BYTES) {
-            throw fail(REASONS.BOUND_EXCEEDED, `descriptor exceeds ${BOUNDS.MAX_DESCRIPTOR_BYTES} bytes`, { bytes: Buffer.byteLength(text, "utf8") });
+    // Serialized boundary is STRING-ONLY (no instanceof / no typed-array brand
+    // check that could trigger a Proxy getPrototypeOf trap). Bytes are not
+    // accepted at the untrusted boundary.
+    if (typeof input === "string") {
+        if (Buffer.byteLength(input, "utf8") > BOUNDS.MAX_DESCRIPTOR_BYTES) {
+            throw fail(REASONS.BOUND_EXCEEDED, `descriptor exceeds ${BOUNDS.MAX_DESCRIPTOR_BYTES} bytes`, { bytes: Buffer.byteLength(input, "utf8") });
         }
         try {
-            body = JSON.parse(text);
+            body = JSON.parse(input);
         } catch {
             throw fail(REASONS.MALFORMED_JSON, "descriptor is not valid JSON", { source });
         }

@@ -16,7 +16,7 @@
  * This module imports no Authority, Governor, tool, or process/network code.
  */
 
-const { CapabilityRegistry, DEFAULTS } = require("./registry");
+const { CapabilityRegistry, DEFAULTS, createCapabilityRuntime } = require("./registry");
 const { parseCapabilityDescriptor, parseObservationMetadata, DESCRIPTOR_SCHEMA_VERSION, BOUNDS: DESCRIPTOR_BOUNDS } = require("./descriptor");
 const { CapabilityRegistryError, REASONS } = require("./errors");
 const { KINDS, canonicalKind } = require("./kinds");
@@ -25,14 +25,16 @@ const { canonicalCapabilityId, canonicalProvenance, isValidCapabilityId, isValid
 const { GRAPH_BOUNDS } = require("./graph");
 
 /**
- * NOTE: the registrar factory (`createCapabilityRegistrarFactory`) and the
- * identity-establishment function (`establishIdentity`) are INTENTIONALLY not
- * re-exported here. They are the runtime-owned composition-root boundary and
- * live in `./registry`; trusted runtime composition imports them directly.
- * The public surface exposes NO registrar mint surface and NO mint token.
+ * NOTE: the registrar mint capability (`MINT_TOKEN`), the identity
+ * establishment function (`establishIdentity`), and the registrar factory
+ * (`createCapabilityRegistrarFactory`) are INTENTIONALLY not exported from any
+ * module. They live only in `./registry`'s module closure. The single
+ * composition-root entry is `createCapabilityRuntime`, which returns only
+ * least-privilege registrars.
  */
 module.exports = {
     CapabilityRegistry,
+    createCapabilityRuntime,
     REGISTRY_DEFAULTS: DEFAULTS,
     parseCapabilityDescriptor,
     parseObservationMetadata,

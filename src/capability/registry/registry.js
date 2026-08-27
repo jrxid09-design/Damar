@@ -38,23 +38,20 @@ const DEFAULTS = Object.freeze({ maxCapabilities: 1024 });
 // Registrar mint trust model (unforgeable capability).
 //
 // Trust derives from possession of an unforgeable capability token, NOT from
-// caller-supplied strings. Both the registrar-mint capability and the
-// established-identity capability are represented by tokens created in this
-// module's closure, compared by identity (===), and NEVER exported.
+// caller-supplied strings. The registrar-mint capability is represented by a
+// token created in this module's closure, compared by identity (===), and
+// NEVER exported.
 //
-//   MINT_TOKEN         — gates registrar minting (WeakMap mintGates)
-//   identityTokens     — WeakSet of genuine established-identity tokens
+//   MINT_TOKEN  — gates registrar minting (WeakMap mintGates)
 //
-// A caller cannot forge these by constructing an object, guessing a string,
-// importing an exported symbol, or cloning an existing descriptor/context:
+// A caller cannot forge the token by constructing an object, guessing a
+// string, importing an exported symbol, or cloning an existing context:
 //   - Symbol("aether.capability.registrar.mint") !== MINT_TOKEN (identity)
 //   - a structurally identical object is a different identity
-//   - cloned objects are different identities
 // ---------------------------------------------------------------------------
 
 const MINT_TOKEN = Symbol("aether.capability.registrar.mint");
 const mintGates = new WeakMap();          // CapabilityRegistry -> mint gate fn
-const identityTokens = new WeakSet();     // genuine established-identity tokens
 
 const INCARNATION_PREFIX = "inc-";
 const INCARNATION_PATTERN = /^inc-[0-9a-f]{32}$/;
@@ -116,10 +113,18 @@ class CapabilityRegistry {
     #reverseEdges = new Map();
     #byKind = new Map();
     #byProvenance = new Map();
+    #clock;
+    #maxCapabilities;
 
     constructor({ clock = { nowMs: () => Date.now() }, maxCapabilities } = {}) {
-        this._clock = clock;
-        this._maxCapabilities = maxCapabilities ?? DEFAULTS.maxCapabilities;
+        // Capture the trusted clock function immutably. We never retain the
+        // caller's mutable clock object; only a bound `nowMs` function is kept,
+        // and its result is validated on every call.
+        const nowMs = (clock && typeof clock.nowMs === "function")
+            ? () => clock.nowMs()
+            : () => Date.now();
+        this.#clock = Object.freeze({ nowMs });
+        this.#maxCapabilities = maxCapabilities ?? DEFAULTS.maxCapabilities;
 
         // Register the token-gated mint gate for this instance in module
         // closure. It is NOT a property on the instance: arbitrary code cannot
@@ -135,17 +140,31 @@ class CapabilityRegistry {
         });
     }
 
+    /**
+     * Produce a validated timestamp. The clock result MUST be a finite,
+     * nonnegative safe integer (milliseconds). Any other result (NaN, Infinity,
+     * function, object, string, negative) throws BEFORE any mutation.
+     */
     _now() {
-        try { return this._clock.nowMs(); } catch { return null; }
+        const raw = this.#clock.nowMs();
+        if (typeof raw !== "number" || !Number.isFinite(raw) || !Number.isSafeInteger(raw) || raw < 0) {
+            throw fail(REASONS.MALFORMED_INPUT,
+                `clock returned an invalid timestamp (${describeNumber(raw)}); expected a nonnegative safe integer ms`);
+        }
+        return raw;
     }
 
     // ------------------------------------------------------ private admission
 
     #admit(descriptorInput, provenance, { serializedOnly } = {}) {
-        const isSerialized = typeof descriptorInput === "string" || descriptorInput instanceof Uint8Array;
-        if (serializedOnly && !isSerialized) {
+        // Untrusted boundary is STRING-ONLY. Reject every non-string (object,
+        // function, symbol, array, typed array, etc.) via a primitive typeof
+        // check that performs NO reflective inspection (no instanceof, no
+        // property access) so a Proxy cannot execute getPrototypeOf/get/ownKeys/
+        // getOwnPropertyDescriptor traps during rejection.
+        if (serializedOnly && typeof descriptorInput !== "string") {
             throw fail(REASONS.OBJECT_INPUT_NOT_ALLOWED,
-                "untrusted registration requires bounded serialized JSON (string or Uint8Array); object input is only accepted via the trusted registrar boundary");
+                "untrusted registration requires a serialized JSON string; object input is only accepted via the trusted registrar boundary");
         }
 
         const descriptor = parseCapabilityDescriptor(descriptorInput, { source: provenance, nowMs: this._now() });
@@ -174,8 +193,8 @@ class CapabilityRegistry {
                 `capability '${id}' already registered with a materially different descriptor`,
                 { id, provenance: canonical.provenance });
         }
-        if (this.#records.size >= this._maxCapabilities) {
-            throw fail(REASONS.REGISTRY_FULL, `registry bound reached (${this._maxCapabilities})`, { maxCapabilities: this._maxCapabilities });
+        if (this.#records.size >= this.#maxCapabilities) {
+            throw fail(REASONS.REGISTRY_FULL, `registry bound reached (${this.#maxCapabilities})`, { maxCapabilities: this.#maxCapabilities });
         }
 
         const deps = canonical.dependencies;
@@ -354,16 +373,16 @@ class CapabilityRegistry {
         const availability = canonicalAvailability(availabilityRaw);
         const nextMetadata = parseObservationMetadata(metadata);
 
-        // observedAtMs must be a finite number (or absent, in which case the
-        // trusted registry clock produces it). Reject functions/objects/etc.
+        // observedAtMs (if caller-supplied) must be a finite nonnegative safe
+        // integer. It is validated but NOT persisted for equal-generation
+        // comparisons (which compare semantic caller observation only).
         if (observedAtMs !== null && observedAtMs !== undefined) {
-            if (typeof observedAtMs !== "number" || !Number.isFinite(observedAtMs)) {
+            if (typeof observedAtMs !== "number" || !Number.isFinite(observedAtMs) || !Number.isSafeInteger(observedAtMs) || observedAtMs < 0) {
                 throw fail(REASONS.MALFORMED_INPUT,
-                    `observedAtMs must be a finite number, got ${describeNumber(observedAtMs)}`,
+                    `observedAtMs must be a nonnegative safe integer, got ${describeNumber(observedAtMs)}`,
                     { id });
             }
         }
-        const nextObservedAtMs = observedAtMs ?? this._now();
 
         if (generation < rec.generation) {
             throw fail(REASONS.STALE_OBSERVATION,
@@ -372,9 +391,11 @@ class CapabilityRegistry {
         }
 
         if (generation === rec.generation) {
+            // Equal generation: compare the SEMANTIC caller observation
+            // (availability + metadata) only. Do NOT mint a new timestamp and
+            // do NOT let a caller-supplied timestamp break idempotence.
             const identical = rec.availability === availability
-                && stableEquals(rec.observation, nextMetadata)
-                && rec.observedAtMs === nextObservedAtMs;
+                && stableEquals(rec.observation, nextMetadata);
             if (identical) {
                 return Object.freeze({ changed: false, id, availability, generation: rec.generation, incarnationId: rec.incarnationId });
             }
@@ -383,7 +404,13 @@ class CapabilityRegistry {
                 { id, generation, currentAvailability: rec.availability, newAvailability: availability });
         }
 
-        // generation > current => valid atomic update
+        // generation > current => valid update. Synthesize the default
+        // timestamp ONLY now (so equal-generation idempotent replay never
+        // mints a fresh clock value).
+        const nextObservedAtMs = (observedAtMs === null || observedAtMs === undefined)
+            ? this._now()
+            : observedAtMs;
+
         rec.availability = availability;
         rec.generation = generation;
         rec.observedAtMs = nextObservedAtMs;
@@ -440,7 +467,7 @@ class CapabilityRegistry {
     getStats() {
         return Object.freeze({
             capabilities: this.#records.size,
-            maxCapabilities: this._maxCapabilities,
+            maxCapabilities: this.#maxCapabilities,
             edges: countSets(this.#edges),
             reverseEdges: countSets(this.#reverseEdges)
         });
@@ -448,86 +475,81 @@ class CapabilityRegistry {
 }
 
 // ---------------------------------------------------------------------------
-// Established-identity capability + registrar factory (composition root).
+// Trusted bootstrap composition root.
 //
-// These live in the same module closure as MINT_TOKEN and identityTokens, so
-// they can mint registrars and identities WITHOUT exporting any token. This is
-// the runtime-owned composition boundary: trusted runtime code calls
-// createCapabilityRegistrarFactory(registry) once at startup and hands
-// consumers ONLY the bound registrar (never the factory, never the token).
+// The registrar-mint capability and the identity-establishment capability are
+// held ONLY in this module's closure. They are NEVER exported, and no
+// standalone `establishIdentity` / `createCapabilityRegistrarFactory` /
+// `MINT_TOKEN` symbol is reachable from any `module.exports`.
+//
+// The ONLY exported issuance surface is `createCapabilityRuntime`, which
+// constructs a CapabilityRegistry and its bound registrars TOGETHER and returns
+// only least-privilege registrars (never the mint capability, never the
+// factory, never an identity-establishment callable).
+//
+// HONEST BOUNDARY: this is a same-process CommonJS boundary, not OS/module
+// isolation. Untrusted extension/provider/device code MUST NOT execute in the
+// same unrestricted require-capable context as this module. The eventual
+// enforcement is module-loader allowlisting / process isolation; until then,
+// the mint capability exists only in this closure and is never handed out.
 // ---------------------------------------------------------------------------
 
-/**
- * Establish a trusted identity for a provenance domain. Returns an opaque,
- * unforgeable identity token (an object identity held in the module-closure
- * identityTokens WeakSet). Only the owning subsystem, already in possession of
- * an established identity, should produce the corresponding registrar.
- *
- * `domain` must be one of "core" | "extension" | "device" | "provider"; the
- * `registrarId` is required for non-core domains.
- */
-function establishIdentity(domain, registrarId) {
-    const token = { domain, registrarId };
-    identityTokens.add(token);
-    return Object.freeze(token);
-}
-
-function isEstablishedIdentity(token, domain) {
-    if (token === null || typeof token !== "object") return false;
-    if (!identityTokens.has(token)) return false;
-    return token.domain === domain;
-}
-
-/**
- * Create the registrar factory bound to `registry`. The factory is the ONLY
- * holder of the registrar-mint capability for that registry (via MINT_TOKEN in
- * closure). It mints registrars only for identities that were established via
- * establishIdentity — never from caller-supplied strings.
- */
-function createCapabilityRegistrarFactory(registry) {
+function mintRegistrar(registry, domain, registrarId) {
     const gate = mintGates.get(registry);
     if (typeof gate !== "function") {
         throw fail(REASONS.INVALID_REGISTRAR,
-            "createCapabilityRegistrarFactory requires a valid CapabilityRegistry instance");
+            "registrar minting requires a valid CapabilityRegistry instance");
+    }
+    return gate(MINT_TOKEN, domain, registrarId);
+}
+
+/**
+ * Construct a capability runtime: a CapabilityRegistry plus its bound,
+ * least-privilege registrars, minted together inside the trusted bootstrap
+ * closure. This is the ONLY issuance surface.
+ *
+ * `registrars` describes which registrars to mint:
+ *   { core: true, extension: "id", device: "id", provider: "id" }
+ *
+ * Identities are established (and validated) INSIDE this closure via
+ * establishIdentity; a caller cannot substitute a forged identity object.
+ * Consumers receive only the bound registrars.
+ *
+ * @param {object} [options]
+ * @param {object} [options.clock]          trusted clock ({ nowMs })
+ * @param {number} [options.maxCapabilities]
+ * @param {object} [options.registrars]     registrar specs
+ */
+function createCapabilityRuntime(options = {}) {
+    const registry = new CapabilityRegistry({
+        clock: options.clock,
+        maxCapabilities: options.maxCapabilities
+    });
+
+    const spec = options.registrars ?? {};
+    const registrars = {};
+
+    if (spec.core === true) {
+        registrars.core = mintRegistrar(registry, "core");
+    }
+    if (typeof spec.extension === "string") {
+        registrars.extension = mintRegistrar(registry, "extension", spec.extension);
+    }
+    if (typeof spec.device === "string") {
+        registrars.device = mintRegistrar(registry, "device", spec.device);
+    }
+    if (typeof spec.provider === "string") {
+        registrars.provider = mintRegistrar(registry, "provider", spec.provider);
     }
 
-    const mint = (domain, registrarId) => gate(MINT_TOKEN, domain, registrarId);
-
     return Object.freeze({
-        createCoreRegistrar(runtimeIdentity) {
-            if (!isEstablishedIdentity(runtimeIdentity, "core")) {
-                throw fail(REASONS.INVALID_REGISTRAR,
-                    "core registrar requires a runtime-owned established identity");
-            }
-            return mint("core");
-        },
-        createExtensionRegistrar(establishedIdentity) {
-            if (!isEstablishedIdentity(establishedIdentity, "extension")) {
-                throw fail(REASONS.INVALID_REGISTRAR,
-                    "extension registrar requires an established extension identity");
-            }
-            return mint("extension", establishedIdentity.registrarId);
-        },
-        createDeviceRegistrar(establishedIdentity) {
-            if (!isEstablishedIdentity(establishedIdentity, "device")) {
-                throw fail(REASONS.INVALID_REGISTRAR,
-                    "device registrar requires an established device identity");
-            }
-            return mint("device", establishedIdentity.registrarId);
-        },
-        createProviderRegistrar(establishedIdentity) {
-            if (!isEstablishedIdentity(establishedIdentity, "provider")) {
-                throw fail(REASONS.INVALID_REGISTRAR,
-                    "provider registrar requires an established provider identity");
-            }
-            return mint("provider", establishedIdentity.registrarId);
-        }
+        registry,
+        registrars: Object.freeze(registrars)
     });
 }
 
 module.exports = {
     CapabilityRegistry,
     DEFAULTS,
-    createCapabilityRegistrarFactory,
-    establishIdentity
+    createCapabilityRuntime
 };
