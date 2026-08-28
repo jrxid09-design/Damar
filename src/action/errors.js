@@ -54,7 +54,12 @@ const REASONS = Object.freeze({
     // gate / decision model (typed decision reasons live in the decision, but
     // these are used when the gate itself is asked to evaluate malformed
     // inputs rather than emit a decision)
-    INVALID_DECISION_STATE: "INVALID_DECISION_STATE"
+    INVALID_DECISION_STATE: "INVALID_DECISION_STATE",
+
+    // authentication trust boundary (fifth repair, Wave 4)
+    AUTH_FAILED: "AUTH_FAILED",
+    AUTH_VERIFIER_REQUIRED: "AUTH_VERIFIER_REQUIRED",
+    CALLER_BOOTSTRAP_REJECTED: "CALLER_BOOTSTRAP_REJECTED"
 });
 
 function fail(reasonCode, message, details = null) {

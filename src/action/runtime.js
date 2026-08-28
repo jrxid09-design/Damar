@@ -1,70 +1,109 @@
 "use strict";
 
 /**
- * ACTION AUTHORITY GATE V1 — trusted bootstrap composition (runtime-local
- * trust domain).
+ * ACTION AUTHORITY GATE V1 — runtime composition (fifth targeted repair,
+ * Wave 4: caller-owned auth bootstrap REMOVED).
  *
- * `createActionAuthorityRuntime` is the SINGLE trusted composition point,
- * created ONCE by trusted Aether bootstrap. Everything security-sensitive is
- * minted INSIDE this function's closure and is never caller-supplied:
+ * `createActionAuthorityRuntime` is the SINGLE trusted composition point for
+ * the EVALUATION runtime. It is created ONCE by trusted Aether bootstrap.
+ * Everything security-sensitive lives OUTSIDE this constructor's options and
+ * is never caller-supplied:
  *
- *   - runtime-local session trust domain:
- *       const sessionBrand = new WeakSet();      // closure-owned, NOT module-global
- *       const sessionIssuer  = mintSession(...)   // the ONLY adder to sessionBrand
- *       const sessionVerifier = isAuthSession(...) // the ONLY reader of sessionBrand
- *     reachable only through the one-time `bindAuthentication` capability,
- *     exercised by bootstrap DURING composition.
+ *   - AuthenticationDomain (src/action/authDomain.js), created SEPARATELY by
+ *     trusted bootstrap, owns:
+ *         authenticate(evidence)    -> AuthSessionCapability | null
+ *         the runtime/session-domain brand (closure-local WeakSet)
+ *         the ONLY session mint path (authenticate() success)
+ *         verifier capability
+ *     trusted bootstrap hands this runtime the ALREADY-BOUND
+ *     `authVerifier` only — the runtime never receives any mint, issuer, or
+ *     bootstrap callback.
  *   - canonical Authority evaluator (loadAndEvaluateAuthority, fixed require)
  *   - canonical evaluation brand verifier (isCanonicalAuthorityEvaluation)
  *   - sealed gate (PRIVATE closure helper below) over the canonical registry,
- *     the canonical evaluator, the canonical brand verifier, the runtime-local
- *     session verifier, and the hardened clock
+ *     the canonical evaluator, the canonical brand verifier, the domain
+ *     verifier capability, and the hardened clock
  *   - hardened clock capture (read-once function identity)
  *   - trusted scope resolvers (captured ONCE, detached from caller objects)
  *
  * RETURNED SURFACE (least privilege, exactly):
  *   admit(serializedProposal)  — canonical identity-free ActionIntent
  *   evaluate(intent, session)  — AuthorityDecision; accepts ONLY sessions
- *                                branded by THIS runtime's own domain
+ *                                proven by this runtime's AuthenticationDomain
  *
  * The returned surface contains NO issuer, NO mintSession, NO issueIdentity,
- * NO gate constructor, and NO evaluator/verifier hook. Downstream
- * extension/device/provider/channel code receives only admit/evaluate (plus,
- * where appropriate, ALREADY-AUTHENTICATED session capabilities that bootstrap
- * chose to pass it).
+ * NO bindAuthentication, NO onReady, NO gate constructor, and NO
+ * evaluator/verifier hook. Downstream extension/device/provider/channel code
+ * receives only admit/evaluate (plus, where appropriate,
+ * already-authenticated session capabilities that bootstrap chose to pass it).
+ *
+ * NO CALLER-OWNED AUTH BOOTSTRAP:
+ *   This constructor used to accept `onReady({ bindAuthentication })` and hand
+ *   the composer a session mint capability. That pattern violated the trust
+ *   model: the caller that constructed the runtime could mint authenticated
+ *   principals. That path is DELETED. The constructor now:
+ *     - REQUIRES a pre-bound `authVerifier` from trusted bootstrap
+ *     - REJECTS any caller-bootstrap option key (onReady, bindAuthentication,
+ *       mintSession, issueIdentity, issuer, sessionIssuer, sessionBrand,
+ *       authBrand, bootstrap, etc.) with CALLER_BOOTSTRAP_REJECTED
+ *     - exposes no callback of any kind
+ *
+ * NO CALLER PRINCIPAL FALLBACK (fail-closed authentication):
+ *   The identity used for an evaluation is taken ONLY from
+ *   `authVerifier.verify(session)` — a brand-first, zero-trap check against
+ *   the AuthenticationDomain's closure-local brand. If verification returns
+ *   null, identity is INVALID_IDENTITY and evaluation fails closed. The
+ *   runtime NEVER consults `session.principal`, `claimedPrincipal`,
+ *   `requestedPrincipal`, or any caller-supplied identity string as an
+ *   Authority identity. Requester identity claims are descriptive telemetry
+ *   only and are never used by the gate for trust.
  *
  * RUNTIME-LOCAL TRUST LAW (unforgeable object identity, never strings):
- *   runtimeA session -> accepted only by runtimeA
- *   runtimeB session -> rejected by runtimeA (and vice versa)
+ *   domainA session -> accepted only by the runtime composed over domainA
+ *   domainB session -> rejected by runtime A (and vice versa)
  *   a string field like runtimeId:"A" carries zero trust weight
  *
- * AUTHENTICATION BINDING: bootstrap passes `onReady({ bindAuthentication })`
- * and must call `bindAuthentication({ authenticate })` exactly once, where
- * `authenticate(creds) => principalRecord|null` is external trusted auth
- * infrastructure. `bindAuthentication` returns `{ mintSession }`, usable ONLY
- * by the closure that received it, to seal an authenticated transport identity
- * into THIS runtime's session domain. If bootstrap never binds authentication,
- * no session can ever be minted and every evaluate() fails closed on identity.
- *
  * PROCESS-ISOLATION LIMITATION (documented honestly): this is a same-process
- * CommonJS trust domain, not OS isolation. Any untrusted code with unrestricted
- * require() in this process can reach this module and compose its OWN runtime
- * over its OWN stores — but that runtime is a SEPARATE trust domain: it cannot
- * read the session brand of, mint for, or evaluate against any other runtime.
- * The public/downstream Lane 2 surface (src/action/index.js + direct module
- * requires) exposes no privileged issuer, no gate construction, and no
- * evaluator/verifier injection.
+ * CommonJS trust domain, not OS isolation. Any untrusted code with
+ * unrestricted require() in this process can reach this module and compose
+ * its OWN runtime over its OWN stores and its OWN AuthenticationDomain — but
+ * that runtime is a SEPARATE trust domain: it cannot read the session brand
+ * of, mint for, or evaluate against any other domain. The public/downstream
+ * Lane 2 surface exposes no privileged issuer, no gate construction, no
+ * evaluator/verifier injection, and NO caller-owned auth bootstrap.
  *
  *   VALID SHAPE != TRUSTED ORIGIN
- *   VALID ORIGIN IN RUNTIME A != TRUSTED IN RUNTIME B
+ *   VALID ORIGIN IN DOMAIN A != TRUSTED IN DOMAIN B
  */
 
 const { parseActionIntent, canonicalScope, validateTimestamp, isValidIncarnationId } = require("./intent");
 const { loadAndEvaluateAuthority, isCanonicalAuthorityEvaluation } = require("../authority/evaluate");
 const { captureClock } = require("./clock");
-const { sanitizeSessionFields } = require("./authSession");
 const { DECISION, GATE_REASONS, ALLOW_REASON, validateAuthorityEvaluation } = require("./gate");
 const { fail, REASONS } = require("./errors");
+
+// Any caller-supplied option key in this set is a caller-owned auth-bootstrap
+// surface and is rejected at composition. The historical pattern
+// (`onReady({ bindAuthentication }) => { mintSession }`) handed a mint
+// capability to the very caller constructing the runtime — a trust-model
+// violation. There must be NO such callback obtainable by a runtime caller.
+const CALLER_BOOTSTRAP_KEYS = Object.freeze([
+    "onReady",
+    "bindAuthentication",
+    "mintSession",
+    "issueIdentity",
+    "issueSession",
+    "issuer",
+    "sessionIssuer",
+    "sessionBrand",
+    "authBrand",
+    "authBinder",
+    "bootstrap",
+    "createAuthSessionIssuer",
+    "authSessionIssuer",
+    "bootstrapCapability",
+    "trustedBootstrap"
+]);
 
 function mapAuthorityReason(reasonCode) {
     if (reasonCode === "CAP_GENERATION_STALE") return GATE_REASONS.AUTHORITY_STATE_STALE;
@@ -83,44 +122,66 @@ function deepFreeze(obj) {
  * @param {object} options
  * @param {object} options.capabilityRuntime  Lane-1 `createCapabilityRuntime()` result
  * @param {object} options.authorityStore     Authority store (read methods)
+ * @param {object} options.authVerifier
+ *     ALREADY-BOUND verifier capability from trusted bootstrap's
+ *     AuthenticationDomain. Must expose `verify(session) -> principalString|null`
+ *     using a closure-local brand check (brand-first, zero-trap). The runtime
+ *     never mints, never authenticates, and never receives any mint callback.
  * @param {object} options.trustedScopeBindings
  *     closed mapping: { "<capabilityId>": { "<operation>": resolverFn } }
  * @param {object} [options.clock]
- * @param {function} [options.onReady]
- *     trusted bootstrap hook: called once with { bindAuthentication } during
- *     composition. bindAuthentication({ authenticate }) returns { mintSession };
- *     both capabilities are closure-scoped and never re-exported.
+ *     hardened clock (read-once function identity). Defaults to Date.now.
+ *
+ * @throws TypeError / ActionError(AUTH_VERIFIER_REQUIRED) if authVerifier is
+ *     not a pre-bound verifier capability.
+ * @throws ActionError(CALLER_BOOTSTRAP_REJECTED) if any caller-bootstrap
+ *     option key (onReady, bindAuthentication, mintSession, issuer, ...) is
+ *     present — there is NO caller-owned auth bootstrap path.
  */
-function createActionAuthorityRuntime({
-    capabilityRuntime,
-    authorityStore,
-    trustedScopeBindings = {},
-    clock = { nowMs: () => Date.now() },
-    onReady = null
-} = {}) {
+function createActionAuthorityRuntime(options = {}) {
+    const {
+        capabilityRuntime,
+        authorityStore,
+        authVerifier,
+        trustedScopeBindings = {},
+        clock = { nowMs: () => Date.now() }
+    } = options;
+
     if (!capabilityRuntime || !capabilityRuntime.registry || typeof capabilityRuntime.registry.get !== "function") {
         throw new TypeError("runtime requires a capabilityRuntime with .registry.get()");
     }
     if (!authorityStore || typeof authorityStore.getCapability !== "function") {
         throw new TypeError("runtime requires an authorityStore with getCapability()");
     }
-    const registry = capabilityRuntime.registry;
-    const capturedClock = captureClock(clock);
-
-    // ---- RUNTIME-LOCAL SESSION TRUST DOMAIN --------------------------------
-    // The brand WeakSet lives in THIS closure only. It is not module-global,
-    // not shared, not reachable from any other runtime or caller. Only the
-    // issuer sealed below adds to it; only the verifier below reads it.
-    const sessionBrand = new WeakSet();
-
-    function isAuthSession(v) {
-        if (v === null || typeof v !== "object") return false;
-        if (!sessionBrand.has(v)) return false;
-        // Only after brand membership do we inspect fields.
-        return typeof v.principal === "string" && v.principal.length > 0;
+    // Trust law: identity comes ONLY from a pre-bound AuthenticationDomain
+    // verifier capability. The runtime itself must NOT mint, authenticate, or
+    // receive any bootstrap callback. A missing or invalid authVerifier means
+    // no session can ever be trusted and every evaluate() fails closed on
+    // identity — but we also reject at composition so a misconfigured runtime
+    // fails loudly rather than silently evaluating as if unauthenticated.
+    if (!authVerifier || typeof authVerifier !== "object") {
+        throw fail(REASONS.AUTH_VERIFIER_REQUIRED, "runtime requires a pre-bound authVerifier capability");
+    }
+    if (typeof authVerifier.verify !== "function") {
+        throw fail(REASONS.AUTH_VERIFIER_REQUIRED, "authVerifier must expose verify(session)");
     }
 
-    let authBound = false;
+    // REJECT every caller-owned auth-bootstrap surface. There must be NO
+    // callback obtainable by a runtime caller that can mint authenticated
+    // principals. Passing any of these keys is a trust-model violation.
+    for (const key of CALLER_BOOTSTRAP_KEYS) {
+        // eslint-disable-next-line no-undefined
+        if (Object.prototype.hasOwnProperty.call(options, key) && options[key] !== undefined) {
+            throw fail(REASONS.CALLER_BOOTSTRAP_REJECTED,
+                `caller-owned auth bootstrap option '${key}' is forbidden; authentication is established by trusted bootstrap outside the runtime constructor`);
+        }
+    }
+
+    const registry = capabilityRuntime.registry;
+    const capturedClock = captureClock(clock);
+    // Capture the verifier FUNCTION IDENTITY exactly once (detached from the
+    // caller object). The runtime consults only this captured function.
+    const verifySession = authVerifier.verify;
 
     // ---- capture scope resolver FUNCTION IDENTITIES exactly once into a
     // detached, closure-owned Map. Caller mutation of trustedScopeBindings
@@ -141,7 +202,6 @@ function createActionAuthorityRuntime({
                 if (typeof resolver !== "function") {
                     throw new TypeError(`trustedScopeBindings['${capId}']['${op}'] must be a function`);
                 }
-                // capture the FUNCTION IDENTITY (bind not needed; resolver is pure)
                 opResolvers.set(op, resolver);
             }
             scopeLookup.set(capId, opResolvers);
@@ -220,16 +280,25 @@ function createActionAuthorityRuntime({
 
         const evaluatedAtMs = capturedClock.nowMs();
 
-        // Trusted identity MUST be branded by THIS runtime's session domain.
-        if (!isAuthSession(authSession)) {
-            return deny(intent, GATE_REASONS.INVALID_IDENTITY, "not a trusted auth session of this runtime", {}, evaluatedAtMs);
+        // Trusted identity MUST be proven by this runtime's AuthenticationDomain
+        // via the pre-bound verifier. BRAND-FIRST: verify() checks brand
+        // membership before any property access, so a hostile Proxy executes
+        // zero traps on rejection. There is NO fallback to caller identity:
+        // verify() returning null/undefined/false/malformed => INVALID_IDENTITY,
+        // regardless of any principal string the session object may carry.
+        const principal = verifySession(authSession);
+        if (typeof principal !== "string" || principal.length === 0) {
+            return deny(intent, GATE_REASONS.INVALID_IDENTITY, "not a trusted auth session of this runtime's AuthenticationDomain", {}, evaluatedAtMs);
         }
 
         const capabilityId = intent.capabilityId;
         const operation = intent.operation.trim().toLowerCase();
-        const principal = authSession.principal;
-        const channel = authSession.channel;
-        const sessionId = authSession.sessionId;
+        const channel = (authSession && typeof authSession === "object" && typeof authSession.channel === "string")
+            ? authSession.channel
+            : "";
+        const sessionId = (authSession && typeof authSession === "object" && typeof authSession.sessionId === "string")
+            ? authSession.sessionId
+            : "";
 
         const descriptor = registry.get(capabilityId);
         if (!descriptor) {
@@ -323,50 +392,8 @@ function createActionAuthorityRuntime({
         });
     }
 
-    // ---- ONE-TIME authentication binding (bootstrap-only capability) ----
-    function bindAuthentication({ authenticate } = {}) {
-        if (authBound) {
-            throw fail(REASONS.INVALID_DECISION_STATE, "authentication already bound for this runtime");
-        }
-        if (typeof authenticate !== "function") {
-            throw fail(REASONS.INVALID_DECISION_STATE, "bindAuthentication requires an authenticate function");
-        }
-        authBound = true;
-
-        // The issuer: seals an authenticated transport identity into THIS
-        // runtime's session domain. Returned ONLY to the closure that called
-        // bindAuthentication (i.e. trusted bootstrap); never placed on the
-        // runtime surface.
-        return Object.freeze({
-            mintSession(creds) {
-                const fields = sanitizeSessionFields(creds);
-                // Enrich from trusted authentication infrastructure: the
-                // principal is whatever the bound authenticate() established,
-                // never a caller-invented string.
-                const authed = authenticate(fields) ?? null;
-                const session = Object.freeze({
-                    principal: typeof authed?.principal === "string" && authed.principal ? authed.principal : fields.principal,
-                    sessionId: fields.sessionId,
-                    channel: fields.channel
-                });
-                sessionBrand.add(session);
-                return session;
-            }
-        });
-    }
-
-    // ---- optional trusted bootstrap hook ----
-    let authBinding = null;
-    if (typeof onReady === "function") {
-        onReady(Object.freeze({
-            bindAuthentication: (args) => {
-                authBinding = bindAuthentication(args);
-                return authBinding;
-            }
-        }));
-    }
-
-    // ---- least-privilege surface (NO issuer, NO minting, NO internals) ----
+    // ---- least-privilege surface (NO issuer, NO minting, NO bootstrap
+    // callback, NO internals) ----
     return Object.freeze({
         admit,
         evaluate: (intent, authSession) => evaluateGate(intent, authSession)
