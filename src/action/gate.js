@@ -3,23 +3,20 @@
 /**
  * ACTION AUTHORITY GATE V1 — ActionAuthorityGate.
  *
- * Consumes a canonical ActionIntent + a trusted RuntimeIdentityContext +
- * canonical Capability Registry state + canonical Authority state, and returns
- * a deterministic, immutable AuthorityDecision. It NEVER executes, invokes,
- * actuates, compensates, or verifies anything.
+ * Consumes a canonical ActionIntent + a BRANDED trusted RuntimeIdentityContext
+ * + canonical Capability Registry state + canonical Authority state, and
+ * returns a deterministic, immutable AuthorityDecision. It NEVER executes,
+ * invokes, actuates, compensates, or verifies anything.
  *
  * Closed decision model:
  *   ALLOW | DENY | OWNER_CONFIRMATION_REQUIRED
  *
- * IDENTITY: authority identity (principal/session/channel) comes ONLY from the
- * trusted RuntimeIdentityContext, never from the intent. An intent claiming a
- * subject/channel/session is rejected at parse/admission (identity-shaped
- * fields are not part of the intent schema).
- *
- * ABA SAFETY: the intent is bound to the exact capability incarnation at
- * ADMISSION. The gate requires the intent's incarnation to exactly equal the
- * registry's current incarnation (mismatch => DENY). An ALLOW decision is
- * bound to the exact authority generation of the canonical evaluation.
+ * TRUST ORIGIN: the gate is constructed ONLY by the trusted composition root
+ * (`createActionAuthorityRuntime`). It binds directly to the canonical
+ * authority evaluator and the identity/evaluation brand verifiers. It does NOT
+ * accept an arbitrary `{ evaluate() }` authorityContext, and it accepts ALLOW
+ * only from a BRANDED canonical AuthorityEvaluation (provenance that only the
+ * canonical evaluator can produce).
  *
  * OBSERVATIONAL: the gate mutates neither Authority nor Capability Registry.
  */
@@ -51,30 +48,33 @@ const GATE_REASONS = Object.freeze({
 
 function mapAuthorityReason(reasonCode) {
     if (reasonCode === "CAP_GENERATION_STALE") return GATE_REASONS.AUTHORITY_STATE_STALE;
-    // All other authority denials collapse to insufficient authority.
     return GATE_REASONS.AUTHORITY_INSUFFICIENT;
 }
 
 class ActionAuthorityGate {
-    constructor({ capabilityRegistry, authorityContext, clock = { nowMs: () => Date.now() } } = {}) {
+    /**
+     * @param {object} deps
+     * @param {object} deps.capabilityRegistry       Lane-1 CapabilityRegistry
+     * @param {function} deps.authorityEvaluator     (request) => branded evaluation
+     * @param {function} deps.isCanonicalEvaluation  (evaluation) => boolean (brand check)
+     * @param {object} [deps.clock]
+     */
+    constructor({ capabilityRegistry, authorityEvaluator, isCanonicalEvaluation, clock = { nowMs: () => Date.now() } } = {}) {
         if (!capabilityRegistry || typeof capabilityRegistry.get !== "function") {
             throw new TypeError("gate requires a capability registry with get()");
         }
-        if (!authorityContext || typeof authorityContext.evaluate !== "function") {
-            throw new TypeError("gate requires an authority context with evaluate()");
+        if (typeof authorityEvaluator !== "function") {
+            throw new TypeError("gate requires a canonical authorityEvaluator function");
+        }
+        if (typeof isCanonicalEvaluation !== "function") {
+            throw new TypeError("gate requires an isCanonicalEvaluation brand verifier");
         }
         this._registry = capabilityRegistry;
-        this._authority = authorityContext;
+        this._evaluate = authorityEvaluator;
+        this._isCanonical = isCanonicalEvaluation;
         this._clock = captureClock(clock);
     }
 
-    /**
-     * Evaluate a canonical ActionIntent against a trusted RuntimeIdentityContext.
-     * Returns a frozen AuthorityDecision. Never mutates anything.
-     *
-     * @param {object} intent  canonical evaluable ActionIntent (incarnation-bound)
-     * @param {object} runtimeIdentity  trusted RuntimeIdentityContext
-     */
     async evaluate(intent, runtimeIdentity) {
         if (!intent || typeof intent !== "object" ||
             typeof intent.intentId !== "string" ||
@@ -85,9 +85,9 @@ class ActionAuthorityGate {
 
         const evaluatedAtMs = this._clock.nowMs();
 
-        // Trusted identity is REQUIRED; absent/malformed => fail closed.
+        // Trusted identity MUST be branded (not shape-only).
         if (!isRuntimeIdentityContext(runtimeIdentity)) {
-            return this._deny(intent, GATE_REASONS.INVALID_IDENTITY, "no trusted runtime identity context", {}, evaluatedAtMs);
+            return this._deny(intent, GATE_REASONS.INVALID_IDENTITY, "not a trusted runtime identity context", {}, evaluatedAtMs);
         }
 
         const capabilityId = intent.capabilityId;
@@ -98,7 +98,6 @@ class ActionAuthorityGate {
             return this._deny(intent, GATE_REASONS.CAPABILITY_NOT_FOUND, `no such capability '${capabilityId}'`, {}, evaluatedAtMs);
         }
 
-        // Exact incarnation binding: intent MUST be bound, and MUST match current.
         const currentIncarnation = descriptor.incarnationId;
         const intentIncarnation = intent.capabilityIncarnationId;
         if (!isValidIncarnationId(intentIncarnation)) {
@@ -123,12 +122,12 @@ class ActionAuthorityGate {
             return this._deny(intent, GATE_REASONS.CAPABILITY_DEGRADED, `capability '${capabilityId}' is DEGRADED`, {}, evaluatedAtMs);
         }
 
-        // Authority evaluation (read-only). Canonical evaluator is the single
-        // source of truth; failures fail closed.
         const scope = Array.isArray(intent.scope) ? intent.scope : [];
+
+        // Canonical authority evaluation (single source of truth).
         let authResult;
         try {
-            authResult = await this._authority.evaluate({
+            authResult = await this._evaluate({
                 capabilityId,
                 action: operation,
                 scope,
@@ -166,7 +165,12 @@ class ActionAuthorityGate {
             }, evaluatedAtMs);
         }
 
-        // ---- strict positive-evaluation validation (blocker 5) ----
+        // A positive evaluation MUST be a branded canonical AuthorityEvaluation.
+        // Shape-valid but un-branded positive results are rejected (fail closed).
+        if (!this._isCanonical(authResult)) {
+            return this._deny(intent, GATE_REASONS.MALFORMED_AUTHORITY_EVALUATION, "not a canonical authority evaluation", {}, evaluatedAtMs);
+        }
+
         const snapshot = authResult.snapshot;
         const validationError = validateAuthorityEvaluation(authResult, {
             capabilityId, operation, scope,
@@ -206,8 +210,7 @@ class ActionAuthorityGate {
 
 /**
  * Validate that a positive AuthorityEvaluation exactly matches the request the
- * gate sent. Any missing/mismatched/malformed field => fail closed (returns an
- * error string), NEVER ALLOW.
+ * gate sent. Any missing/mismatched/malformed field => fail closed.
  */
 function validateAuthorityEvaluation(authResult, req) {
     if (authResult.allowed !== true) return "allowed !== true";
@@ -222,17 +225,13 @@ function validateAuthorityEvaluation(authResult, req) {
     }
     if (typeof s.subject !== "string" || s.subject.length === 0) return "missing subject";
 
-    // The evaluated principal must exactly match the trusted runtime identity
-    // principal (authority identity must never be substituted).
     if (typeof s.principal !== "string" || s.principal !== req.principal) {
         return "principal mismatch";
     }
 
-    // action must be present and match the requested operation
     const actions = Array.isArray(s.actions) ? s.actions.map((a) => String(a).trim().toLowerCase()) : [];
     if (!actions.includes(req.operation)) return "action mismatch";
 
-    // scope must exactly match what was requested (canonical)
     const reqScope = req.scope.map((t) => String(t).trim().toLowerCase()).sort();
     const snapScope = Array.isArray(s.scope) ? s.scope.map((t) => String(t).trim().toLowerCase()).sort() : [];
     if (JSON.stringify(snapScope) !== JSON.stringify(reqScope)) return "scope mismatch";

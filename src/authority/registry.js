@@ -13,7 +13,7 @@
 const crypto = require("node:crypto");
 const M = require("./model");
 const { attenuateGrant } = require("./delegation");
-const { evaluateAuthorityReadOnly } = require("./evaluate");
+const { loadAndEvaluateAuthority } = require("./evaluate");
 const { canonicalCapabilityId, canonicalTokenList,
         canonicalRestrictionSet,
         restoreCanonicalRestrictionSet,
@@ -505,8 +505,8 @@ class AuthorityRegistry {
 
         const atMs = (nowMs ?? this.clock.nowMs());
 
-        // Single canonical read-only evaluation (shared with Wave-4 Lane 2).
-        const result = await evaluateAuthorityReadOnly(this.store, {
+        // Single canonical evaluation (shared with Wave-4 Lane 2).
+        const result = await loadAndEvaluateAuthority(this.store, {
             capabilityId, action, scope, purpose, identity, nowMs: atMs
         });
 
@@ -521,33 +521,14 @@ class AuthorityRegistry {
             };
         }
 
-        const cap = await this.store.getCapability(canonicalCapabilityId(capabilityId));
-        const g = cap.payload;
         const capId = canonicalCapabilityId(capabilityId);
         const reqAction = String(action ?? "").trim().toLowerCase();
-        const reqScope = canonicalTokenList(scope, "scope");
-
-        const restrictions = restoreCanonicalRestrictionSet(g.restrictions);
-
         const decisionId = crypto.randomUUID();
+
+        // The canonical snapshot is the fully-rehydrated, branded evaluation.
         const snapshot = deepFreeze({
             decisionId,
-            capabilityId: capId,
-            subject: g.subject,
-            kind: g.kind,
-            actions: [...g.actions],
-            scope: [...reqScope],
-            allowedPurposes: [...g.allowedPurposes],
-            restrictions,
-            purpose: purpose ? String(purpose).trim().toLowerCase() : null,
-            identityBinding: g.identityBinding,
-            maxExecutions: g.maxExecutions,
-            expiresAt: g.expiresAt,
-            generation: cap.generation,
-            rootCapabilityId: g.rootCapabilityId,
-            parentCapabilityId: g.parentCapabilityId,
-            ratificationId: g.ratificationId,
-            issuedAt: g.issuedAt,
+            ...result.snapshot,
             authorizedAt: new Date(atMs).toISOString()
         });
 

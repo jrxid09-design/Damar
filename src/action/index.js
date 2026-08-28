@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * ACTION INTENT + AUTHORITY GATE V1 — public surface.
+ * ACTION INTENT + AUTHORITY GATE V1 — public surface (post trust-origin repair).
  *
  * DESCRIPTIVE + EVALUATIVE ONLY. Answers:
  *   1. what action is being proposed (ActionIntent)
@@ -9,50 +9,42 @@
  *
  * NEVER executes, invokes, actuates, compensates, or verifies.
  *
- * Trust boundary:
- *   - parseActionIntent / admitActionIntent is the UNTRUSTED serialized ingress.
- *   - ActionAuthorityGate.evaluate accepts a canonical intent + trusted
- *     RuntimeIdentityContext (identity never comes from the intent).
- *   - authority evaluation delegates to the CANONICAL shared evaluator
- *     (src/authority/evaluate.js), never a Lane-2 re-implementation.
+ * TRUST BOUNDARY (honest): the ONLY way to obtain trusted runtime surfaces is
+ * `createActionAuthorityRuntime`. Raw trust constructors (identity minting,
+ * scope resolver injection, generic authorityContext injection, evaluation
+ * branding) are NOT exported. `parseActionIntent` is the untrusted STRING-only
+ * serialized ingress.
  */
 
 const { parseActionIntent, canonicalScope, validateTimestamp, INTENT_SCHEMA_VERSION, BOUNDS: INTENT_BOUNDS, isValidIncarnationId } = require("./intent");
-const { createIntentAdmission } = require("./admission");
-const { createRuntimeIdentityContext, isRuntimeIdentityContext } = require("./runtimeIdentity");
-const { ActionAuthorityGate, DECISION, GATE_REASONS, ALLOW_REASON } = require("./gate");
-const { createReadOnlyAuthorityContext, DECISION_REASONS } = require("./authorityContext");
-const { captureClock } = require("./clock");
+const { isRuntimeIdentityContext } = require("./runtimeIdentity");
+const { isCanonicalAuthorityEvaluation, EVAL_REASONS } = require("../authority/evaluate");
+const { createActionAuthorityRuntime, DECISION, GATE_REASONS, ALLOW_REASON } = require("./runtime");
+const { ActionAuthorityGate } = require("./gate");
 const { ActionError, REASONS } = require("./errors");
 
 module.exports = {
-    // intent
+    // untrusted serialized ingress
     parseActionIntent,
-    createIntentAdmission,
     canonicalScope,
     validateTimestamp,
     INTENT_SCHEMA_VERSION,
     INTENT_BOUNDS,
     isValidIncarnationId,
 
-    // trusted identity
-    createRuntimeIdentityContext,
-    isRuntimeIdentityContext,
+    // trusted composition root (the only trust issuance surface)
+    createActionAuthorityRuntime,
 
-    // gate / decision
+    // decision / error contract (inert constants)
     ActionAuthorityGate,
     DECISION,
     GATE_REASONS,
     ALLOW_REASON,
-
-    // authority read-only context (integration adapter over shared evaluator)
-    createReadOnlyAuthorityContext,
-    DECISION_REASONS,
-
-    // clock
-    captureClock,
-
-    // error contract
     ActionError,
-    REASONS
+    REASONS,
+
+    // read-only brand/identity verifiers (no minting)
+    isRuntimeIdentityContext,
+    isCanonicalAuthorityEvaluation,
+    DECISION_REASONS: EVAL_REASONS
 };
