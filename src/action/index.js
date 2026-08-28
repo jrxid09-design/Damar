@@ -1,8 +1,12 @@
 "use strict";
 
 /**
- * ACTION INTENT + AUTHORITY GATE V1 — public surface (caller-owned auth
- * bootstrap REMOVED; fifth targeted repair, Wave 4).
+ * ACTION INTENT + AUTHORITY GATE V1 — public surface (caller-selectable
+ * verifier REMOVED; SIXTH targeted repair, Wave 4 Lane 2).
+ *
+ * CORE LAW:
+ *
+ *   caller-selectable verifier != authenticated identity authority
  *
  * DESCRIPTIVE + EVALUATIVE ONLY. Answers:
  *   1. what action is being proposed (ActionIntent)
@@ -10,67 +14,63 @@
  *
  * NEVER executes, invokes, actuates, compensates, or verifies.
  *
- * TRUST SPLIT (fifth repair):
+ * ─────────────────────────────────────────────────────────────────────────
+ * WHAT THIS PUBLIC SURFACE DOES NOT EXPOSE (sixth repair)
+ * ─────────────────────────────────────────────────────────────────────────
  *
- *   Trusted Aether bootstrap
- *       ↓
- *   createAuthenticationDomain({ authenticate })   [src/action/authDomain.js]
- *       ↓ owns: authenticate(...), the runtime/session-domain brand, the ONLY
- *               session mint path (authenticate() success), the verifier
- *               capability
- *       ↓
- *   trusted bootstrap creates ActionAuthorityRuntime using authDomain.verifier
- *       ↓
- *   downstream receives ONLY:  admit, evaluate
+ * NOT exported from here or any action submodule:
+ *   - createActionAuthorityRuntime   (composition is bootstrap-internal only)
+ *   - createAuthenticationDomain     (domain ownership is bootstrap-internal)
+ *   - createGate / raw auth verifier / auth-session brand / Authority evaluator
+ *     injection / canonical evaluation brand / identity/session minting
  *
- * `createActionAuthorityRuntime` REQUIRES a pre-bound `authVerifier`
- * capability (already established by trusted bootstrap's
- * AuthenticationDomain). It does NOT mint users, does NOT authenticate
- * arbitrary principal strings, and exposes NO caller-owned auth bootstrap:
- *   - no onReady / bindAuthentication / mintSession / issuer surface exists
- *     on the runtime, its constructor options, or any module export
- *   - any caller-bootstrap option key passed to the constructor is rejected
- *     at composition (CALLER_BOOTSTRAP_REJECTED)
- *   - authentication failure (null / undefined / false / malformed / throws)
- *     fails closed; there is NO fallback to caller-supplied identity
+ * Privileged composition lives in src/action/bootstrap.js, which is the ONE
+ * trusted Aether runtime composition layer. It binds the runtime/auth-domain
+ * factories one-shot per process and constructs canonical state (CapabilityRuntime,
+ * AuthorityStore, AuthenticationDomain, verifier) INSIDE its own closure. The
+ * public/downstream Action package exposes no factory through which a caller
+ * can construct another authority runtime over ANY state with a caller-selected
+ * verifier. A caller possessing canonical CapabilityRuntime + AuthorityStore
+ * references has NO API to wrap them in a runtime with its own verifier,
+ * because the runtime factory is not importable.
  *
- * NOT exported from here or any action submodule: createAuthSessionIssuer,
- * createGate, mintAuthSession, mintSession, issueIdentity, isAuthSession,
- * bindAuthentication, onReady, any session brand, any evaluation brand mint,
- * any evaluator/verifier injection hook, any runtime-identity minting.
+ *   attacker obtains canonical CapabilityRuntime
+ *   attacker obtains canonical AuthorityStore
+ *   attacker creates new action runtime around them  ← NO such surface exists
+ *   attacker selects verifier                       ← NO such surface exists
+ *   attacker impersonates victim                     ← impossible
  *
- * PROCESS-ISOLATION LIMITATION (documented, not hidden): this is a
- * same-process CommonJS trust domain, not OS isolation. A hypothetical
- * untrusted same-process actor with unrestricted require() could still reach
- * and run the trusted bootstrap module itself — that is a process/module
- * isolation limitation. What the Lane 2 surface guarantees is that it exposes
- * no privileged issuer or gate construction, no evaluator/verifier injection,
- * and NO caller-owned auth bootstrap callback.
+ * Downstream (Console, CLI, Telegram, WhatsApp, Companion, extensions,
+ * devices, providers) receives ONLY the bootstrap-issued least-privilege
+ * facade { admit, evaluate, authenticate, session } (or a narrower capability).
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * PROCESS / MODULE ISOLATION LIMITATION (documented, not hidden)
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ * This is a same-process CommonJS trust domain, NOT OS isolation. Node/CommonJS
+ * path hiding is NOT hard sandboxing against code that already has arbitrary
+ * same-process filesystem/require execution. What Lane 2 enforces is that the
+ * ordinary/downstream Action API exposes NO authority-composition primitive at
+ * all: canonical bootstrap owns composition, downstream receives least-
+ * privilege facades only. Untrusted executable extensions must eventually
+ * require loader allowlisting, sandboxing, workers/process isolation, or
+ * equivalent enforcement.
  */
 
 const { parseActionIntent, canonicalScope, validateTimestamp, INTENT_SCHEMA_VERSION, BOUNDS: INTENT_BOUNDS, isValidIncarnationId } = require("./intent");
 const { isCanonicalAuthorityEvaluation, EVAL_REASONS } = require("../authority/evaluate");
-const { createActionAuthorityRuntime, DECISION, GATE_REASONS, ALLOW_REASON } = require("./runtime");
-const { createAuthenticationDomain } = require("./authDomain");
+const { DECISION, GATE_REASONS, ALLOW_REASON } = require("./runtime");
 const { ActionError, REASONS } = require("./errors");
 
 module.exports = {
-    // untrusted serialized ingress
+    // untrusted serialized ingress + inert grammar
     parseActionIntent,
     canonicalScope,
     validateTimestamp,
     INTENT_SCHEMA_VERSION,
     INTENT_BOUNDS,
     isValidIncarnationId,
-
-    // trusted composition roots
-    //   createAuthenticationDomain: trusted-bootstrap-only AuthenticationDomain
-    //     factory (owns authenticate + session brand + mint + verifier)
-    //   createActionAuthorityRuntime: trusted-bootstrap-only evaluation
-    //     runtime factory; REQUIRES a pre-bound authVerifier, accepts NO
-    //     caller-owned auth bootstrap option
-    createAuthenticationDomain,
-    createActionAuthorityRuntime,
 
     // decision / error contract (inert constants)
     DECISION,
@@ -86,3 +86,10 @@ module.exports = {
     isCanonicalAuthorityEvaluation,
     DECISION_REASONS: EVAL_REASONS
 };
+
+// NOT exported: createActionAuthorityRuntime, createAuthenticationDomain,
+// createGate, mintAuthSession, mintSession, issueIdentity, isAuthSession,
+// bindAuthentication, onReady, any session brand, any evaluation brand,
+// evaluator/verifier injection hooks, runtime-identity minting. These live
+// only in src/action/bootstrap.js and the internal composition modules it
+// binds. See src/action/bootstrap.js for the canonical ownership graph.

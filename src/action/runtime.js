@@ -1,23 +1,33 @@
 "use strict";
 
 /**
- * ACTION AUTHORITY GATE V1 — runtime composition (fifth targeted repair,
- * Wave 4: caller-owned auth bootstrap REMOVED).
+ * ACTION AUTHORITY GATE V1 — runtime composition (SIXTH targeted repair,
+ * Wave 4 Lane 2: caller-selectable verifier REMOVED from the public surface).
+ *
+ * CORE LAW:
+ *
+ *   caller-selectable verifier != authenticated identity authority
  *
  * `createActionAuthorityRuntime` is the SINGLE trusted composition point for
- * the EVALUATION runtime. It is created ONCE by trusted Aether bootstrap.
- * Everything security-sensitive lives OUTSIDE this constructor's options and
- * is never caller-supplied:
+ * the EVALUATION runtime — and it is NO LONGER a module export. It lives in
+ * this module's closure and is reachable ONLY through a host-bound
+ * composition capability minted by `bindCompositionHost(hostModule)`. The one
+ * legitimate host is the trusted Aether bootstrap composition layer
+ * (`src/action/bootstrap.js`), which binds itself ONCE at load and composes
+ * the canonical runtime with verifier/state IT constructed internally.
  *
- *   - AuthenticationDomain (src/action/authDomain.js), created SEPARATELY by
- *     trusted bootstrap, owns:
+ * Everything security-sensitive lives OUTSIDE this constructor's options and
+ * is never caller-supplied in production:
+ *
+ *   - AuthenticationDomain (src/action/authDomain.js), created by trusted
+ *     bootstrap, owns:
  *         authenticate(evidence)    -> AuthSessionCapability | null
  *         the runtime/session-domain brand (closure-local WeakSet)
  *         the ONLY session mint path (authenticate() success)
  *         verifier capability
  *     trusted bootstrap hands this runtime the ALREADY-BOUND
  *     `authVerifier` only — the runtime never receives any mint, issuer, or
- *     bootstrap callback.
+ *     bootstrap callback, and no downstream caller can supply or replace it.
  *   - canonical Authority evaluator (loadAndEvaluateAuthority, fixed require)
  *   - canonical evaluation brand verifier (isCanonicalAuthorityEvaluation)
  *   - sealed gate (PRIVATE closure helper below) over the canonical registry,
@@ -37,16 +47,21 @@
  * receives only admit/evaluate (plus, where appropriate,
  * already-authenticated session capabilities that bootstrap chose to pass it).
  *
+ * NO CALLER-SELECTABLE VERIFIER:
+ *   Because this factory is not exported, a downstream caller CANNOT run
+ *     createRuntime({ authVerifier: fakeVerifier })
+ *   over canonical state. The historical repair (fifth) made the factory
+ *   public and required a pre-bound verifier — but a caller possessing
+ *   canonical CapabilityRuntime + AuthorityStore references could still
+ *   compose a NEW runtime around them with ITS OWN verifier. That whole
+ *   surface is now internal: the only composition path is the bootstrap
+ *   layer's host binding, and bootstrap constructs canonical state and the
+ *   verifier INSIDE its own closure.
+ *
  * NO CALLER-OWNED AUTH BOOTSTRAP:
- *   This constructor used to accept `onReady({ bindAuthentication })` and hand
- *   the composer a session mint capability. That pattern violated the trust
- *   model: the caller that constructed the runtime could mint authenticated
- *   principals. That path is DELETED. The constructor now:
- *     - REQUIRES a pre-bound `authVerifier` from trusted bootstrap
- *     - REJECTS any caller-bootstrap option key (onReady, bindAuthentication,
- *       mintSession, issueIdentity, issuer, sessionIssuer, sessionBrand,
- *       authBrand, bootstrap, etc.) with CALLER_BOOTSTRAP_REJECTED
- *     - exposes no callback of any kind
+ *   The historical `onReady({ bindAuthentication })` pattern remains DELETED.
+ *   Any caller-bootstrap option key reaching this internal factory is still
+ *   REJECTED with CALLER_BOOTSTRAP_REJECTED (defense in depth).
  *
  * NO CALLER PRINCIPAL FALLBACK (fail-closed authentication):
  *   The identity used for an evaluation is taken ONLY from
@@ -64,13 +79,18 @@
  *   a string field like runtimeId:"A" carries zero trust weight
  *
  * PROCESS-ISOLATION LIMITATION (documented honestly): this is a same-process
- * CommonJS trust domain, not OS isolation. Any untrusted code with
- * unrestricted require() in this process can reach this module and compose
- * its OWN runtime over its OWN stores and its OWN AuthenticationDomain — but
- * that runtime is a SEPARATE trust domain: it cannot read the session brand
- * of, mint for, or evaluate against any other domain. The public/downstream
- * Lane 2 surface exposes no privileged issuer, no gate construction, no
- * evaluator/verifier injection, and NO caller-owned auth bootstrap.
+ * CommonJS trust domain, not OS isolation. Node/CommonJS path hiding is NOT
+ * hard sandboxing against code that already has arbitrary same-process
+ * filesystem/require execution. A hypothetical untrusted same-process actor
+ * with unrestricted require() could reach internal modules — that is a
+ * process/module isolation limitation whose eventual enforcement is loader
+ * allowlisting / sandboxing / workers / process isolation. What Lane 2
+ * guarantees is that the ordinary/downstream Action API exposes NO authority
+ * composition primitive at all: canonical state, the AuthenticationDomain,
+ * and the verifier are constructed and retained INSIDE the trusted bootstrap
+ * closure and never handed to downstream callers. A separately-composed
+ * runtime is a SEPARATE trust domain: it cannot read the session brand of,
+ * mint for, or evaluate against any other domain.
  *
  *   VALID SHAPE != TRUSTED ORIGIN
  *   VALID ORIGIN IN DOMAIN A != TRUSTED IN DOMAIN B
@@ -104,6 +124,59 @@ const CALLER_BOOTSTRAP_KEYS = Object.freeze([
     "bootstrapCapability",
     "trustedBootstrap"
 ]);
+
+// ---------------------------------------------------------------------------
+// HOST-BOUND COMPOSITION CAPABILITY (sixth repair).
+//
+// `createActionAuthorityRuntime` is NOT a module export. It is reachable only
+// through the capability minted by `bindCompositionHost(hostModule)`, where
+// hostModule is the module object (module.exports-binding `module` object) of
+// the trusted bootstrap layer. Binding is one-shot per host module: a second
+// bind attempt from ANY module throws. This gives the trusted composition
+// layer exclusive access to the runtime factory WITHOUT exposing it through
+// any module.exports surface that downstream code can import.
+//
+// Why a module-object host token? Because CommonJS modules share one module
+// registry per process, `require("./runtime")` from bootstrap and from a
+// downstream consumer returns the SAME module object. The host token is
+// therefore an unforgeable same-process identity check: only code running in
+// the bootstrap module's own closure can present bootstrap's `module` object.
+// Downstream code CAN call bindCompositionHost(require("./runtime")) — but
+// that binds the RUNTIME module as host, which mints a capability whose
+// privilege is... calling the same factory the runtime module itself defines.
+// It grants no access to canonical state, no verifier, no domain. And once
+// the one-time binding is taken by trusted bootstrap at load, no other bind
+// can succeed. This is a wiring-integrity check, not a sandbox (see the
+// process-isolation limitation above).
+// ---------------------------------------------------------------------------
+const BOUND = { host: null };
+
+/**
+ * Bind the ONE composition host. Trusted-bootstrap-only. One-shot per process
+ * for a given host module; a second bind (from anywhere, including the same
+ * host) throws HOST_ALREADY_BOUND.
+ *
+ * @param {object} hostModule  the trusted bootstrap module object
+ * @returns {object} frozen { createActionAuthorityRuntime } capability
+ */
+function bindCompositionHost(hostModule) {
+    if (hostModule === null || typeof hostModule !== "object") {
+        throw fail(REASONS.CALLER_BOOTSTRAP_REJECTED, "bindCompositionHost requires a module object");
+    }
+    if (BOUND.host !== null) {
+        throw fail(REASONS.CALLER_BOOTSTRAP_REJECTED,
+            `composition host already bound${BOUND.host === hostModule ? " (same host)" : ""}; there is exactly ONE trusted composition layer`);
+    }
+    BOUND.host = hostModule;
+    return Object.freeze({
+        createActionAuthorityRuntime
+    });
+}
+
+/** Trusted-bootstrap-only introspection: is the composition host bound? */
+function isCompositionHostBound() {
+    return BOUND.host !== null;
+}
 
 function mapAuthorityReason(reasonCode) {
     if (reasonCode === "CAP_GENERATION_STALE") return GATE_REASONS.AUTHORITY_STATE_STALE;
@@ -401,8 +474,15 @@ function createActionAuthorityRuntime(options = {}) {
 }
 
 module.exports = {
-    createActionAuthorityRuntime,
+    // NOTE (sixth repair): `createActionAuthorityRuntime` is deliberately NOT
+    // exported. It is reachable only via bindCompositionHost(), which only the
+    // trusted bootstrap layer (src/action/bootstrap.js) calls, one-shot per
+    // process. There is therefore NO importable surface through which a
+    // downstream caller can compose an action authority runtime over ANY
+    // state (canonical or otherwise) with a caller-selected verifier.
     DECISION,
     GATE_REASONS,
-    ALLOW_REASON
+    ALLOW_REASON,
+    bindCompositionHost,
+    isCompositionHostBound
 };

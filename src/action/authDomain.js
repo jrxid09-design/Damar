@@ -1,14 +1,14 @@
 "use strict";
 
 /**
- * ACTION AUTHORITY GATE V1 — AuthenticationDomain (fifth targeted repair,
- * Wave 4: caller-owned auth bootstrap REMOVED).
+ * ACTION AUTHORITY GATE V1 — AuthenticationDomain (SIXTH targeted repair,
+ * Wave 4 Lane 2: caller-selectable verifier REMOVED).
  *
- * TRUST SPLIT (the core of this repair):
+ * TRUST SPLIT (sixth repair — AuthenticationDomain ownership):
  *
  *   1. AuthenticationDomain (THIS module)
- *        - created ONLY by trusted Aether bootstrap, OUTSIDE the public action
- *          runtime constructor
+ *        - created ONLY by trusted Aether bootstrap (src/action/bootstrap.js)
+ *          INSIDE its own closure, OUTSIDE any public API
  *        - owns authenticate(...): resolves external channel/session evidence
  *          to an authenticated principal record
  *        - owns the ONLY session mint path: authenticate() success is the sole
@@ -24,13 +24,24 @@
  *          strings, DOES NOT own any bootstrap callback
  *        - evaluates only sessions proven by this AuthenticationDomain
  *
- * WHAT DOES NOT EXIST ANYMORE (removed with the fifth repair):
+ * AUTHENTICATION DOMAIN OWNERSHIP LAW (Blocker 3, sixth repair):
+ *   `createAuthenticationDomain` is NOT a module export. A downstream caller
+ *   can no longer do
+ *       createAuthenticationDomain({ authenticate: () => ({principal:"victim"}) })
+ *   and use that domain as canonical identity authority. Canonical trust
+ *   depends on bootstrap OWNERSHIP (the domain is constructed inside the
+ *   trusted bootstrap closure), not on mere possession of the factory. A
+ *   caller-forged domain mints sessions valid only in the caller's own
+ *   separate trust domain — never in the canonical one.
+ *
+ * WHAT DOES NOT EXIST ANYMORE:
+ *   - the public `createAuthenticationDomain` export (sixth repair)
  *   - onReady, bindAuthentication, mintSession, issueIdentity, issuer —
  *     none of these exist on any action runtime surface, constructor option,
  *     or module export. The historical `onReady({ bindAuthentication })`
  *     hook that handed a mint capability to the caller composing the runtime
  *     is DELETED; authentication/session issuance is established entirely
- *     inside this module's closure by trusted bootstrap.
+ *     inside the trusted bootstrap closure.
  *
  * FAIL-CLOSED AUTHENTICATION LAW (no caller-principal fallback, ever):
  *   authenticate(evidence) returns
@@ -48,8 +59,8 @@
  *
  * PROCESS-ISOLATION LIMITATION (documented honestly): same-process CommonJS
  * trust domain, not OS isolation. An untrusted same-process actor with
- * unrestricted require() can compose its OWN domain — which grants no access
- * to any other domain's brand, mint path, or verifier.
+ * unrestricted require() can reach internal modules — but a domain it forges
+ * grants no access to any other domain's brand, mint path, or verifier.
  *
  *   VALID SHAPE != TRUSTED ORIGIN
  *   VALID ORIGIN IN DOMAIN A != TRUSTED IN DOMAIN B
@@ -218,4 +229,47 @@ function createAuthenticationDomain({ authenticate, clock = { nowMs: () => Date.
     });
 }
 
-module.exports = { createAuthenticationDomain, extractAuthenticatedPrincipal };
+// ---------------------------------------------------------------------------
+// HOST-BOUND COMPOSITION CAPABILITY (sixth repair).
+//
+// `createAuthenticationDomain` is NOT a module export. It is reachable only
+// through the capability minted by `bindAuthenticationHost(hostModule)`,
+// where hostModule is the module object of the trusted bootstrap layer.
+// Binding is one-shot per process: a second bind attempt from ANY module
+// throws HOST_ALREADY_BOUND. Downstream code therefore has no importable
+// surface through which it can create an AuthenticationDomain and present it
+// as canonical identity authority.
+//
+// `extractAuthenticatedPrincipal` is a PURE fail-closed predicate retained as
+// a normal export (it mints nothing and brands nothing).
+// ---------------------------------------------------------------------------
+const BOUND = { host: null };
+
+function bindAuthenticationHost(hostModule) {
+    if (hostModule === null || typeof hostModule !== "object") {
+        throw fail(REASONS.CALLER_BOOTSTRAP_REJECTED, "bindAuthenticationHost requires a module object");
+    }
+    if (BOUND.host !== null) {
+        throw fail(REASONS.CALLER_BOOTSTRAP_REJECTED,
+            `authentication host already bound${BOUND.host === hostModule ? " (same host)" : ""}; there is exactly ONE trusted authentication bootstrap`);
+    }
+    BOUND.host = hostModule;
+    return Object.freeze({
+        createAuthenticationDomain
+    });
+}
+
+/** Trusted-bootstrap-only introspection: is the authentication host bound? */
+function isAuthenticationHostBound() {
+    return BOUND.host !== null;
+}
+
+module.exports = {
+    // NOTE (sixth repair): `createAuthenticationDomain` is deliberately NOT
+    // exported. It is reachable only via bindAuthenticationHost(), which only
+    // the trusted bootstrap layer (src/action/bootstrap.js) calls, one-shot
+    // per process.
+    extractAuthenticatedPrincipal,
+    bindAuthenticationHost,
+    isAuthenticationHostBound
+};

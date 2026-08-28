@@ -4,6 +4,38 @@ Konvensi (mandat Ronny, 18 Agu 2026 09:34): SETIAP aksi perubahan = 1 commit che
 
 ---
 
+## 2026-08-28 (Action Authority — canonical bootstrap ownership, sixth targeted repair)
+
+### Mandat
+AETHER WAVE 4 — LANE 2, sixth targeted repair: hapus caller-selectable
+verifier dari permukaan Action publik. CORE LAW:
+`caller-selectable verifier != authenticated identity authority`.
+
+### Ditambahkan
+- `src/action/bootstrap.js` — SATU trusted composition layer: memilikikan
+  CapabilityRuntime + AuthorityStore + AuthenticationDomain + verifier
+  (semua dibangun DI DALAM closure-nya), mengekspos hanya facade
+  least-privilege `{ admit, evaluate, authenticate, session, ... }`; MENOLAK
+  semua opsi komposisi privilese (authVerifier/verifier/capabilityRuntime/
+  authorityStore/evaluator/gate/registry/store/...) dengan
+  CALLER_BOOTSTRAP_REJECTED.
+- `tests/action/canonicalBootstrap.test.js` (16) + `bootstrapHarness.js`
+  (trusted test bootstrap, mirror produksi).
+
+### Diubah
+- `src/action/runtime.js` — `createActionAuthorityRuntime` BUKAN module
+  export lagi; hanya reachable lewat `bindCompositionHost(module)` one-shot
+  per proses.
+- `src/action/authDomain.js` — `createAuthenticationDomain` BUKAN module
+  export lagi; hanya reachable lewat `bindAuthenticationHost(module)`
+  one-shot per proses.
+- `src/action/index.js` — publik tinggal: parseActionIntent, konstanta inert,
+  isCanonicalAuthorityEvaluation.
+- Semua test file action di-rewire ke trusted test bootstrap; storm +4
+  counter aktif; docs (ACTION-INTENT-AUTHORITY-GATE-V1.md) diperbarui.
+
+---
+
 ## 2026-08-23 (Tool Intelligence V2 — security hardening + benchmark REAL-registry)
 
 ### Mandat
