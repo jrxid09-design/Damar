@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * ACTION INTENT + AUTHORITY GATE V1 — public surface (post trust-origin repair).
+ * ACTION INTENT + AUTHORITY GATE V1 — public surface (sealed runtime composition).
  *
  * DESCRIPTIVE + EVALUATIVE ONLY. Answers:
  *   1. what action is being proposed (ActionIntent)
@@ -9,18 +9,20 @@
  *
  * NEVER executes, invokes, actuates, compensates, or verifies.
  *
- * TRUST BOUNDARY (honest): the ONLY way to obtain trusted runtime surfaces is
- * `createActionAuthorityRuntime`. Raw trust constructors (identity minting,
- * scope resolver injection, generic authorityContext injection, evaluation
- * branding) are NOT exported. `parseActionIntent` is the untrusted STRING-only
- * serialized ingress.
+ * TRUST BOUNDARY (honest): the ONLY trust issuance surface is
+ * `createActionAuthorityRuntime` (created once by trusted bootstrap). Identity
+ * comes from a BRANDED AuthSessionCapability minted by trusted authentication
+ * infrastructure (`createAuthSessionIssuer`, held by bootstrap, never injected
+ * downstream). Raw trust constructors (identity minting, scope resolver
+ * injection, generic authorityContext injection, evaluation branding, raw gate
+ * constructor) are NOT exported. `parseActionIntent` is the untrusted
+ * STRING-only serialized ingress.
  */
 
 const { parseActionIntent, canonicalScope, validateTimestamp, INTENT_SCHEMA_VERSION, BOUNDS: INTENT_BOUNDS, isValidIncarnationId } = require("./intent");
-const { isRuntimeIdentityContext } = require("./runtimeIdentity");
+const { createAuthSessionIssuer, isAuthSession } = require("./authSession");
 const { isCanonicalAuthorityEvaluation, EVAL_REASONS } = require("../authority/evaluate");
 const { createActionAuthorityRuntime, DECISION, GATE_REASONS, ALLOW_REASON } = require("./runtime");
-const { ActionAuthorityGate } = require("./gate");
 const { ActionError, REASONS } = require("./errors");
 
 module.exports = {
@@ -32,19 +34,21 @@ module.exports = {
     INTENT_BOUNDS,
     isValidIncarnationId,
 
-    // trusted composition root (the only trust issuance surface)
+    // trusted authentication infrastructure (bootstrap-only)
+    createAuthSessionIssuer,
+
+    // trusted composition root (the only runtime issuance surface)
     createActionAuthorityRuntime,
 
     // decision / error contract (inert constants)
-    ActionAuthorityGate,
     DECISION,
     GATE_REASONS,
     ALLOW_REASON,
     ActionError,
     REASONS,
 
-    // read-only brand/identity verifiers (no minting)
-    isRuntimeIdentityContext,
+    // read-only brand verifiers (no minting)
+    isAuthSession,
     isCanonicalAuthorityEvaluation,
     DECISION_REASONS: EVAL_REASONS
 };

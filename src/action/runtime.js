@@ -1,42 +1,46 @@
 "use strict";
 
 /**
- * ACTION AUTHORITY GATE V1 — trusted composition root.
+ * ACTION AUTHORITY GATE V1 — sealed runtime composition.
  *
- * `createActionAuthorityRuntime` is the SINGLE trusted composition point. It
- * constructs and binds, inside a trusted closure:
+ * `createActionAuthorityRuntime` is the SINGLE trusted composition point,
+ * created ONCE by trusted Aether bootstrap. It constructs and binds, inside a
+ * trusted closure:
  *
- *   - trusted RuntimeIdentity issuer (mintRuntimeIdentity, closure-only brand)
- *   - trusted capability-bound scope resolvers (closed mapping, caller cannot
- *     inject a resolver)
- *   - canonical Authority read-only evaluator (loadAndEvaluateAuthority)
- *   - ActionIntent admission
- *   - ActionAuthorityGate
+ *   - canonical CapabilityRegistry (read-only)
+ *   - canonical Authority evaluator (loadAndEvaluateAuthority)
+ *   - canonical brand verifier (isCanonicalAuthorityEvaluation)
+ *   - trusted capability-bound scope resolvers (captured ONCE, detached)
+ *   - sealed gate (closure-bound, no writable internals)
  *
- * and returns ONLY least-privilege surfaces. It does NOT expose raw trust
- * constructors, minting internals, or branding tokens. A caller cannot
- * manufacture authenticated identities, scope resolvers, canonical authority
- * contexts, or positive authority evaluation evidence from shape alone.
+ * and returns ONLY least-privilege surfaces:
+ *
+ *   admit(serializedProposal, authSession)   — returns a canonical intent
+ *   evaluate(intent, authSession)            — returns an AuthorityDecision
+ *
+ * IDENTITY: `admit`/`evaluate` accept a BRANDED AuthSessionCapability (minted
+ * by trusted authentication infrastructure). The runtime DERIVES the runtime
+ * identity internally; it never accepts a raw `{ principal }` string, and it
+ * does NOT expose `issueIdentity` / `mintSession` / any identity-minting
+ * surface. An arbitrary caller cannot mint a "victim" identity, and cannot bind
+ * a new runtime to canonical state to gain privileged identity issuance.
  *
  *   VALID SHAPE != TRUSTED ORIGIN
  */
 
 const { parseActionIntent, canonicalScope, validateTimestamp, isValidIncarnationId } = require("./intent");
-const { mintRuntimeIdentity, isRuntimeIdentityContext } = require("./runtimeIdentity");
 const { loadAndEvaluateAuthority, isCanonicalAuthorityEvaluation } = require("../authority/evaluate");
 const { captureClock } = require("./clock");
-const { ActionAuthorityGate, DECISION, GATE_REASONS, ALLOW_REASON } = require("./gate");
+const { createGate, DECISION, GATE_REASONS, ALLOW_REASON } = require("./gate");
 const { fail, REASONS } = require("./errors");
 
 /**
  * @param {object} options
  * @param {object} options.capabilityRuntime  Lane-1 `createCapabilityRuntime()` result
- *                                            (has .registry + .registrars)
  * @param {object} options.authorityStore     Authority store (read methods)
  * @param {object} options.trustedScopeBindings
  *     closed mapping: { "<capabilityId>": { "<operation>": resolverFn } }
- *     where resolverFn(args) -> string[] canonical scope tokens.
- * @param {object} [options.clock]            { nowMs }
+ * @param {object} [options.clock]
  */
 function createActionAuthorityRuntime({
     capabilityRuntime,
@@ -53,22 +57,40 @@ function createActionAuthorityRuntime({
     const registry = capabilityRuntime.registry;
     const capturedClock = captureClock(clock);
 
-    // Resolve the trusted, capability+operation-bound scope resolver (closed).
-    function resolveScopeResolver(capabilityId, operation) {
-        const capBindings = trustedScopeBindings[capabilityId];
-        if (capBindings && typeof capBindings === "object") {
-            const resolver = capBindings[operation];
-            if (typeof resolver === "function") return resolver;
+    // ---- capture scope resolver FUNCTION IDENTITIES exactly once into a
+    // detached, closure-owned Map. Caller mutation of trustedScopeBindings
+    // afterward has zero effect (we never re-read the caller's object). ----
+    const scopeLookup = new Map();   // capabilityId -> Map(operation -> resolverFn)
+    if (trustedScopeBindings !== null && trustedScopeBindings !== undefined) {
+        if (typeof trustedScopeBindings !== "object" || Array.isArray(trustedScopeBindings)) {
+            throw new TypeError("trustedScopeBindings must be a plain object mapping");
         }
-        return null;
+        for (const capId of Object.getOwnPropertyNames(trustedScopeBindings)) {
+            const opMap = trustedScopeBindings[capId];
+            if (opMap === null || typeof opMap !== "object" || Array.isArray(opMap)) {
+                throw new TypeError(`trustedScopeBindings['${capId}'] must be an object mapping operations to resolvers`);
+            }
+            const opResolvers = new Map();
+            for (const op of Object.getOwnPropertyNames(opMap)) {
+                const resolver = opMap[op];
+                if (typeof resolver !== "function") {
+                    throw new TypeError(`trustedScopeBindings['${capId}']['${op}'] must be a function`);
+                }
+                // capture the FUNCTION IDENTITY (bind not needed; resolver is pure)
+                opResolvers.set(op, resolver);
+            }
+            scopeLookup.set(capId, opResolvers);
+        }
     }
 
-    // ----- trusted runtime identity issuance (closure-bound) -----
-    function issueIdentity({ principal, sessionId = null, channel = null } = {}) {
-        return mintRuntimeIdentity({ principal, sessionId, channel });
+    function resolveScopeResolver(capabilityId, operation) {
+        const opResolvers = scopeLookup.get(capabilityId);
+        if (!opResolvers) return null;
+        const resolver = opResolvers.get(operation);
+        return (typeof resolver === "function") ? resolver : null;
     }
 
-    // ----- trusted intent admission -----
+    // ---- trusted intent admission (identity-free; session needed only at eval) ----
     function admit(serialized, { source = "inline" } = {}) {
         const parsed = parseActionIntent(serialized, { source, nowMs: capturedClock.nowMs() });
 
@@ -88,7 +110,6 @@ function createActionAuthorityRuntime({
             throw fail(REASONS.INVALID_INTENT, `capability '${capabilityId}' has no valid incarnation`);
         }
 
-        // Resolve canonical scope via the trusted bound resolver (fail closed).
         const resolver = resolveScopeResolver(capabilityId, operation);
         if (!resolver) {
             throw fail(REASONS.INVALID_INTENT, `no trusted scope binding for '${capabilityId}.${operation}'`);
@@ -111,21 +132,18 @@ function createActionAuthorityRuntime({
         });
     }
 
-    // ----- gate bound to the canonical evaluator (no injectable evaluate) -----
-    const gate = new ActionAuthorityGate({
-        capabilityRegistry: registry,
+    // ---- sealed gate (closure-bound; no writable internals) ----
+    const gate = createGate({
+        registry,
         authorityEvaluator: (request) => loadAndEvaluateAuthority(authorityStore, request, { nowMs: capturedClock.nowMs() }),
         isCanonicalEvaluation: isCanonicalAuthorityEvaluation,
         clock: capturedClock
     });
 
-    // ----- least-privilege surface -----
+    // ---- least-privilege surface (no identity minting) ----
     return Object.freeze({
         admit,
-        issueIdentity,
-        gate,
-        verifyIdentity: isRuntimeIdentityContext,
-        isCanonicalEvaluation: isCanonicalAuthorityEvaluation
+        evaluate: (intent, authSession) => gate.evaluate(intent, authSession)
     });
 }
 

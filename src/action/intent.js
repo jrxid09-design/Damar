@@ -10,7 +10,7 @@
  *
  * IDENTITY: authority identity (principal / session / channel) is NOT a field
  * of ActionIntent — it comes exclusively from a trusted RuntimeIdentityContext
- * (see runtimeIdentity.js). The intent carries descriptive correlation and
+ * (see authSession.js). The intent carries descriptive correlation and
  * provenance only. A caller-supplied `subject`/`session`/`channel`/`scope`
  * field is rejected (unknown/authority-shaped).
  *

@@ -63,12 +63,15 @@ function brandEvaluation(result) {
     return result;
 }
 
-/** Verify an evaluation snapshot is genuinely branded by the canonical evaluator. */
+/** Verify an evaluation is genuinely branded by the canonical evaluator.
+ *  BRAND-FIRST: no property access on unbranded values before the brand check. */
 function isCanonicalAuthorityEvaluation(value) {
-    return value !== null && typeof value === "object" &&
-        value.allowed === true &&
-        value.snapshot !== null && typeof value.snapshot === "object" &&
-        brandGate.has(value.snapshot);
+    if (value === null || typeof value !== "object") return false;
+    if (value.allowed !== true) return false;
+    const snapshot = value.snapshot;
+    if (snapshot === null || typeof snapshot !== "object") return false;
+    if (!brandGate.has(snapshot)) return false;
+    return true;
 }
 
 function deny(reasonCode, detail = null) {
