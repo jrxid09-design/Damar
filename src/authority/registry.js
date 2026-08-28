@@ -13,6 +13,7 @@
 const crypto = require("node:crypto");
 const M = require("./model");
 const { attenuateGrant } = require("./delegation");
+const { evaluateAuthorityReadOnly } = require("./evaluate");
 const { canonicalCapabilityId, canonicalTokenList,
         canonicalRestrictionSet,
         restoreCanonicalRestrictionSet,
@@ -504,73 +505,27 @@ class AuthorityRegistry {
 
         const atMs = (nowMs ?? this.clock.nowMs());
 
-        try {
-            var capId = canonicalCapabilityId(capabilityId);
-            var reqAction = String(action ?? "").trim().toLowerCase();
-            var reqScope = canonicalTokenList(scope, "scope");
-        } catch (error) {
-            return denyStage("CAP_MALFORMED", error.message, "normalize");
+        // Single canonical read-only evaluation (shared with Wave-4 Lane 2).
+        const result = await evaluateAuthorityReadOnly(this.store, {
+            capabilityId, action, scope, purpose, identity, nowMs: atMs
+        });
+
+        if (result.allowed !== true) {
+            return {
+                allowed: false,
+                reasonCode: result.reasonCode,
+                detail: result.detail ?? null,
+                decisionId: crypto.randomUUID(),
+                stage: stageOf(result.reasonCode),
+                snapshot: null
+            };
         }
 
-        const cap = await this.store.getCapability(capId);
-        if (!cap) return denyStage("CAP_NOT_FOUND", null, "lookup");
-
+        const cap = await this.store.getCapability(canonicalCapabilityId(capabilityId));
         const g = cap.payload;
-
-        const curGen = await this.store.getGeneration(g.subject);
-        if (curGen !== cap.generation)
-            return denyStage("CAP_GENERATION_STALE",
-                `gen ${cap.generation} != current ${curGen}`, "generation");
-
-        if (cap.status === "SUSPENDED")
-            return denyStage("CAP_INACTIVE", null, "status");
-        if (cap.status === "REVOKED")
-            return denyStage("CAP_REVOKED", null, "status");
-        if (cap.status === "EXHAUSTED")
-            return denyStage("CAP_BUDGET_EXHAUSTED", null, "budget");
-
-        if (g.notBefore && atMs < Date.parse(g.notBefore))
-            return denyStage("CAP_INACTIVE", g.notBefore, "notBefore");
-        if (g.expiresAt && atMs > Date.parse(g.expiresAt))
-            return denyStage("CAP_EXPIRED", g.expiresAt, "expiry");
-
-        if (!g.actions.includes(reqAction))
-            return denyStage("CAP_ACTION_DENIED", reqAction, "action");
-
-        for (const token of reqScope) {
-            if (g.scope.length && !g.scope.includes(token)) {
-                return denyStage("CAP_SCOPE_MISMATCH", token, "scope");
-            }
-        }
-
-        if (purpose !== null && purpose !== undefined) {
-            const p = String(purpose).trim().toLowerCase();
-            if (g.allowedPurposes.length && !g.allowedPurposes.includes(p)) {
-                return denyStage("CAP_PURPOSE_MISMATCH", p, "purpose");
-            }
-        } else if (g.allowedPurposes.length) {
-            return denyStage("CAP_PURPOSE_MISMATCH", "(kosong)", "purpose");
-        }
-
-        const ib = g.identityBinding;
-        if (ib) {
-            const channel = String(identity.channel ?? "").toLowerCase();
-            if (ib.channels?.length && !ib.channels.includes(channel))
-                return denyStage("CAP_IDENTITY_MISMATCH", "channel", "identity");
-            if (ib.sessionIds?.length &&
-                !ib.sessionIds.includes(String(identity.sessionId ?? "")))
-                return denyStage("CAP_IDENTITY_MISMATCH", "sessionId", "identity");
-            if (ib.principals?.length &&
-                !ib.principals.includes(String(identity.principal ?? "")))
-                return denyStage("CAP_IDENTITY_MISMATCH", "principal", "identity");
-        }
-
-        if (typeof g.maxExecutions === "number") {
-            const used = await this.store.countConsumption(capId);
-            if (used >= g.maxExecutions)
-                return denyStage("CAP_BUDGET_EXHAUSTED",
-                    `${used}/${g.maxExecutions}`, "budget");
-        }
+        const capId = canonicalCapabilityId(capabilityId);
+        const reqAction = String(action ?? "").trim().toLowerCase();
+        const reqScope = canonicalTokenList(scope, "scope");
 
         const restrictions = restoreCanonicalRestrictionSet(g.restrictions);
 
@@ -603,10 +558,21 @@ class AuthorityRegistry {
                  decisionId, capabilityId: capId, stage: "authorized",
                  snapshot };
 
-        function denyStage(reasonCode, detail, stage) {
-            return { allowed: false, reasonCode, detail: detail ?? null,
-                     decisionId: crypto.randomUUID(), stage,
-                     snapshot: null };
+        function stageOf(reasonCode) {
+            switch (reasonCode) {
+                case "CAP_MALFORMED": return "normalize";
+                case "CAP_NOT_FOUND": return "lookup";
+                case "CAP_GENERATION_STALE": return "generation";
+                case "CAP_INACTIVE": return "status";
+                case "CAP_REVOKED": return "status";
+                case "CAP_BUDGET_EXHAUSTED": return "budget";
+                case "CAP_EXPIRED": return "expiry";
+                case "CAP_ACTION_DENIED": return "action";
+                case "CAP_SCOPE_MISMATCH": return "scope";
+                case "CAP_PURPOSE_MISMATCH": return "purpose";
+                case "CAP_IDENTITY_MISMATCH": return "identity";
+                default: return "authorized";
+            }
         }
     }
 
