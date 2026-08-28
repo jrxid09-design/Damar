@@ -685,7 +685,60 @@ function createCanonicalActionFacade() {
     return canonical;
 }
 
+// ---------------------------------------------------------------------------
+// LANE 3 — CANONICAL ACTUATION COMPOSITION (private closure, bootstrap-owned).
+//
+// The Lane 3 dispatcher is composed over the canonical Lane 2 facade, with an
+// actuator registry whose registrar capability is owned by THIS closure.
+// Downstream NEVER receives the registrar: it receives only the frozen
+// { execute } capability. Fresh canonical Lane 2 revalidation happens INSIDE
+// execute() — there is no bearer-decision path and no caller-selectable
+// actuator.
+//
+// LANE 2 SEMANTICS UNCHANGED: this extension adds composition only; the
+// certified Lane 2 evaluate/admit surface is consumed, never modified.
+// ---------------------------------------------------------------------------
+
+const { composeDispatcher } = require("./actuation/dispatcher");
+const { buildActuatorRegistry } = require("./actuation/actuatorRegistry");
+
+// The ONE canonical dispatcher, created exactly once, lazily, on first use.
+let canonicalActuation = null;
+
+/**
+ * Create the canonical Lane 3 actuation facade (trusted-bootstrap-private).
+ * Takes NO options — the actuator registry, the dispatcher's clock, and the
+ * Lane 2 facade it revalidates against are all owned by this closure.
+ *
+ * @returns {object} frozen { execute }  (least privilege: execution only)
+ */
+function createCanonicalActuationFacade() {
+    if (arguments[0] !== undefined) {
+        throw fail(REASONS.CALLER_BOOTSTRAP_REJECTED,
+            "canonical actuation creation accepts NO options; the Lane 2 facade, actuator registry, registrar capability, and clock are bootstrap-owned");
+    }
+    if (canonicalActuation === null) {
+        const lane2Facade = createCanonicalActionFacade();
+        const actuatorRegistry = buildActuatorRegistry();
+        const dispatcher = composeDispatcher({
+            lane2Facade,
+            actuatorRegistry,
+            clock: { nowMs: () => Date.now() }
+        });
+        // Downstream receives ONLY execute. The registrar capability
+        // (registerActuator/removeActuator) stays in this closure for the
+        // trusted runtime layer's own actuator wiring (a later lane wires real
+        // actuators; Lane 3 ships the fabric + tests wire test actuators via
+        // the test-only harness).
+        canonicalActuation = Object.freeze({
+            execute: dispatcher.execute
+        });
+    }
+    return canonicalActuation;
+}
+
 module.exports = {
     createCanonicalActionFacade,
+    createCanonicalActuationFacade,
     PRIVILEGED_KEYS
 };
