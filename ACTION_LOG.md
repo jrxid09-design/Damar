@@ -4,6 +4,45 @@ Konvensi (mandat Ronny, 18 Agu 2026 09:34): SETIAP aksi perubahan = 1 commit che
 
 ---
 
+## 2026-08-28 (Action Authority — remove first-binder trust + caller authenticator + production seeding, seventh targeted repair)
+
+### Mandat
+AETHER WAVE 4 — LANE 2, seventh targeted repair. Codex menemukan 3 blocker:
+(1) bindCompositionHost/bindAuthenticationHost masih diekspor — first-import
+bisa mengakuisisi KEDUA factory privilese; (2) production bootstrap masih
+menerima caller-selected authenticate; (3) production facade masih expose
+grantAuthority/registerCapability/registry/registrars.
+
+### Perbaikan
+- BLOCKER 1: kedua binder DIHAPUS total dari semua export.
+  runtime.js + authDomain.js kini PURE non-privileged (vocabularies +
+  predicate murni saja). Kedua factory privilese didefinisikan DI DALAM
+  private closure src/action/bootstrap.js — tidak ada binder/token/host/
+  first-call-wins di mana pun.
+- BLOCKER 2: createCanonicalActionFacade() menerima NOL opsi —
+  authenticate/authenticator/authVerifier/verifyCredentials/resolvePrincipal
+  semuanya CALLER_BOOTSTRAP_REJECTED. Auth kanonik terikat ke FIXED
+  fail-closed adapter bootstrap-owned (Lane 2: selalu null, tak pernah
+  mint dari input caller).
+- BLOCKER 3: production facade = PERSIS { admit, evaluate, authenticate,
+  session }; grantAuthority/registerCapability/registry/registrars/store
+  DIHAPUS dari facade. Seeding pindah ke harness test-only.
+
+### Ditambahkan
+- `tests/action/canonicalOwnership.test.js` (13) — regression repair ketujuh
+  termasuk FRESH-PROCESS subprocess tests (attacker import sebelum bootstrap
+  → tidak ada yang diakuisisi).
+
+### Diubah
+- `src/action/bootstrap.js` — kedua factory di private closure; facade
+  singleton; fixed fail-closed auth adapter.
+- `src/action/runtime.js`, `src/action/authDomain.js` — pure non-privileged.
+- `tests/action/bootstrapHarness.js` — test-only composition harness
+  (mirror privat; tidak reachable dari src/action).
+- Storm +4 counter aktif; docs diperbarui.
+
+---
+
 ## 2026-08-28 (Action Authority — canonical bootstrap ownership, sixth targeted repair)
 
 ### Mandat

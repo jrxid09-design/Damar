@@ -1,12 +1,16 @@
 "use strict";
 
 /**
- * ACTION INTENT + AUTHORITY GATE V1 — public surface (caller-selectable
- * verifier REMOVED; SIXTH targeted repair, Wave 4 Lane 2).
+ * ACTION INTENT + AUTHORITY GATE V1 — public surface (first-binder trust +
+ * caller authenticator + facade seeding REMOVED; SEVENTH targeted repair,
+ * Wave 4 Lane 2).
  *
- * CORE LAW:
+ * CORE LAWS:
  *
  *   caller-selectable verifier != authenticated identity authority
+ *   FIRST-BINDER-WINS TRUST IS NOT TRUST
+ *   canonical authentication policy is bootstrap-owned, not
+ *   runtime-constructor-owned
  *
  * DESCRIPTIVE + EVALUATIVE ONLY. Answers:
  *   1. what action is being proposed (ActionIntent)
@@ -15,34 +19,40 @@
  * NEVER executes, invokes, actuates, compensates, or verifies.
  *
  * ─────────────────────────────────────────────────────────────────────────
- * WHAT THIS PUBLIC SURFACE DOES NOT EXPOSE (sixth repair)
+ * WHAT THIS PUBLIC SURFACE DOES NOT EXPOSE (seventh repair)
  * ─────────────────────────────────────────────────────────────────────────
  *
  * NOT exported from here or any action submodule:
- *   - createActionAuthorityRuntime   (composition is bootstrap-internal only)
- *   - createAuthenticationDomain     (domain ownership is bootstrap-internal)
+ *   - createActionAuthorityRuntime / createAuthenticationDomain
+ *     (privileged construction is bootstrap-private)
  *   - createGate / raw auth verifier / auth-session brand / Authority evaluator
  *     injection / canonical evaluation brand / identity/session minting
+ *   - ANY binder / token / host / first-call-wins composition surface:
+ *     bindCompositionHost, bindAuthenticationHost, bindHost, acquireHost,
+ *     registerHost, installHost, claimComposition, bootstrapBind, hostToken,
+ *     getFactory, getComposer — none of these exist anywhere. The sixth
+ *     repair's exported binders were themselves privileged composition APIs
+ *     (first-import code could acquire both privileged constructors); they
+ *     are REMOVED.
  *
- * Privileged composition lives in src/action/bootstrap.js, which is the ONE
- * trusted Aether runtime composition layer. It binds the runtime/auth-domain
- * factories one-shot per process and constructs canonical state (CapabilityRuntime,
- * AuthorityStore, AuthenticationDomain, verifier) INSIDE its own closure. The
- * public/downstream Action package exposes no factory through which a caller
- * can construct another authority runtime over ANY state with a caller-selected
- * verifier. A caller possessing canonical CapabilityRuntime + AuthorityStore
- * references has NO API to wrap them in a runtime with its own verifier,
- * because the runtime factory is not importable.
+ * Privileged construction (both factories) lives ONLY inside the trusted
+ * bootstrap layer's private closure (src/action/bootstrap.js). runtime.js and
+ * authDomain.js are now PURE NON-PRIVILEGED modules (inert vocabularies +
+ * pure non-authorizing predicates). The public/downstream Action package
+ * exposes no surface through which a caller can construct an authority
+ * runtime over ANY state, first-importer or otherwise.
  *
- *   attacker obtains canonical CapabilityRuntime
- *   attacker obtains canonical AuthorityStore
- *   attacker creates new action runtime around them  ← NO such surface exists
- *   attacker selects verifier                       ← NO such surface exists
- *   attacker impersonates victim                     ← impossible
+ *   attacker imports every action module before bootstrap  → nothing acquired
+ *   attacker imports after canonical bootstrap load        → nothing acquired
+ *   attacker creates new action runtime around canonical state ← NO surface
+ *   attacker selects verifier/authenticator                 ← NO surface
+ *   attacker impersonates victim                            ← impossible
  *
  * Downstream (Console, CLI, Telegram, WhatsApp, Companion, extensions,
  * devices, providers) receives ONLY the bootstrap-issued least-privilege
- * facade { admit, evaluate, authenticate, session } (or a narrower capability).
+ * production facade { admit, evaluate, authenticate, session } (or a narrower
+ * capability) from createCanonicalActionFacade(), which takes NO options and
+ * binds a FIXED fail-closed bootstrap-owned authentication adapter.
  *
  * ─────────────────────────────────────────────────────────────────────────
  * PROCESS / MODULE ISOLATION LIMITATION (documented, not hidden)
@@ -90,6 +100,8 @@ module.exports = {
 // NOT exported: createActionAuthorityRuntime, createAuthenticationDomain,
 // createGate, mintAuthSession, mintSession, issueIdentity, isAuthSession,
 // bindAuthentication, onReady, any session brand, any evaluation brand,
-// evaluator/verifier injection hooks, runtime-identity minting. These live
-// only in src/action/bootstrap.js and the internal composition modules it
-// binds. See src/action/bootstrap.js for the canonical ownership graph.
+// evaluator/verifier injection hooks, runtime-identity minting, and any
+// binder / token / host / first-call-wins composition surface. Privileged
+// composition (both factories) lives ONLY inside the trusted bootstrap
+// layer's private closure (src/action/bootstrap.js). See that module for the
+// canonical ownership graph.
