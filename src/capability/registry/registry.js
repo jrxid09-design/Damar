@@ -117,13 +117,23 @@ class CapabilityRegistry {
     #maxCapabilities;
 
     constructor({ clock = { nowMs: () => Date.now() }, maxCapabilities } = {}) {
-        // Capture the trusted clock function immutably. We never retain the
-        // caller's mutable clock object; only a bound `nowMs` function is kept,
-        // and its result is validated on every call.
-        const nowMs = (clock && typeof clock.nowMs === "function")
-            ? () => clock.nowMs()
-            : () => Date.now();
-        this.#clock = Object.freeze({ nowMs });
+        // Read `nowMs` EXACTLY ONCE from the caller-owned clock and capture its
+        // FUNCTION IDENTITY. We never retain the caller's clock object and never
+        // re-read `clock.nowMs` afterward: a later `clock.nowMs = ...` mutation
+        // cannot change which function the registry invokes. `bind(clock)`
+        // preserves `this` semantics at construction time without keeping a
+        // dynamic lookup path.
+        const suppliedNowMs = (clock && typeof clock === "object") ? clock.nowMs : undefined;
+        let capturedNowMs;
+        if (typeof suppliedNowMs === "function") {
+            capturedNowMs = suppliedNowMs.bind(clock);
+        } else if (suppliedNowMs === undefined) {
+            capturedNowMs = Date.now.bind(Date);
+        } else {
+            throw fail(REASONS.MALFORMED_INPUT,
+                `clock.nowMs must be a function, got ${typeof suppliedNowMs}`);
+        }
+        this.#clock = Object.freeze({ nowMs: capturedNowMs });
         this.#maxCapabilities = maxCapabilities ?? DEFAULTS.maxCapabilities;
 
         // Register the token-gated mint gate for this instance in module
