@@ -1,28 +1,24 @@
 "use strict";
 
 /**
- * ACTION AUTHORITY GATE V1 — sealed gate.
+ * ACTION AUTHORITY GATE V1 — inert decision vocabulary + pure fail-closed
+ * predicate. This module exports NO gate constructor of any kind.
  *
- * The gate is a CLOSURE-BOUND, frozen `{ evaluate }` surface. It closes over the
- * canonical authority evaluator, the canonical brand verifier, the capability
- * registry, and the hardened clock. There are NO writable internals:
+ * The gate itself is a PRIVATE CLOSURE HELPER inside the trusted runtime
+ * composition (`src/action/runtime.js`): it is constructed exactly once, inside
+ * the same closure that owns the runtime-local session brand/verifier, the
+ * canonical authority evaluator, the canonical evaluation brand verifier, the
+ * canonical capability registry, and the hardened clock. There is no module in
+ * this codebase from which `createGate` (or any equivalent gate mint) can be
+ * imported, so no caller can build a canonical-equivalent gate over an
+ * injected evaluator.
  *
- *   - no `_evaluate` / `_isCanonical` / `_registry` / `_clock` properties
- *   - no mutable callbacks
- *   - no exported raw gate constructor
- *
- * `evaluate(intent, authSession)` accepts a canonical ActionIntent + a BRANDED
- * AuthSessionCapability and returns a deterministic, immutable AuthorityDecision.
- * It NEVER executes, invokes, actuates, compensates, or verifies anything.
- *
- * Closed decision model:
- *   ALLOW | DENY | OWNER_CONFIRMATION_REQUIRED
+ * What lives here:
+ *   - DECISION / GATE_REASONS / ALLOW_REASON — inert frozen value vocabularies
+ *   - validateAuthorityEvaluation — PURE predicate: verifies a positive
+ *     AuthorityEvaluation exactly matches the request the gate sent. It never
+ *     authorizes, brands, or mints anything.
  */
-
-const { fail, REASONS } = require("./errors");
-const { isValidIncarnationId } = require("./intent");
-const { isAuthSession } = require("./authSession");
-const { captureClock } = require("./clock");
 
 const DECISION = Object.freeze({
     ALLOW: "ALLOW",
@@ -44,173 +40,12 @@ const GATE_REASONS = Object.freeze({
     MALFORMED_AUTHORITY_EVALUATION: "MALFORMED_AUTHORITY_EVALUATION"
 });
 
-function mapAuthorityReason(reasonCode) {
-    if (reasonCode === "CAP_GENERATION_STALE") return GATE_REASONS.AUTHORITY_STATE_STALE;
-    return GATE_REASONS.AUTHORITY_INSUFFICIENT;
-}
-
 const ALLOW_REASON = "AUTHORIZED";
 
-function deepFreeze(obj) {
-    if (obj !== null && typeof obj === "object") {
-        for (const key of Object.getOwnPropertyNames(obj)) deepFreeze(obj[key]);
-        Object.freeze(obj);
-    }
-    return obj;
-}
-
 /**
- * Build a SEALED gate. Returns a frozen `{ evaluate }` whose behavior is fixed
- * at construction (closure-bound). No internal is reachable or replaceable.
- *
- * @param {object} deps
- * @param {object} deps.registry                Lane-1 CapabilityRegistry (read-only)
- * @param {function} deps.authorityEvaluator    (request) => branded evaluation
- * @param {function} deps.isCanonicalEvaluation (evaluation) => boolean (brand)
- * @param {object} deps.clock                   captured hardened clock
- */
-function createGate({ registry, authorityEvaluator, isCanonicalEvaluation, clock } = {}) {
-    if (!registry || typeof registry.get !== "function") {
-        throw new TypeError("gate requires a capability registry with get()");
-    }
-    if (typeof authorityEvaluator !== "function") {
-        throw new TypeError("gate requires a canonical authorityEvaluator function");
-    }
-    if (typeof isCanonicalEvaluation !== "function") {
-        throw new TypeError("gate requires an isCanonicalEvaluation brand verifier");
-    }
-    const capturedClock = captureClock(clock);
-
-    const deny = (intent, reasonCode, detail = null, extra = {}, evaluatedAtMs) => deepFreeze({
-        decision: DECISION.DENY,
-        reasonCode,
-        detail,
-        intentId: intent.intentId,
-        capabilityId: intent.capabilityId,
-        operation: intent.operation,
-        evaluatedAtMs,
-        ...extra
-    });
-
-    async function evaluate(intent, authSession) {
-        if (!intent || typeof intent !== "object" ||
-            typeof intent.intentId !== "string" ||
-            typeof intent.capabilityId !== "string" ||
-            typeof intent.operation !== "string") {
-            throw fail(REASONS.INVALID_INTENT, "gate requires a canonical ActionIntent");
-        }
-
-        const evaluatedAtMs = capturedClock.nowMs();
-
-        // Trusted identity MUST be a branded AuthSessionCapability.
-        if (!isAuthSession(authSession)) {
-            return deny(intent, GATE_REASONS.INVALID_IDENTITY, "not a trusted auth session", {}, evaluatedAtMs);
-        }
-
-        const capabilityId = intent.capabilityId;
-        const operation = intent.operation.trim().toLowerCase();
-        const principal = authSession.principal;
-        const channel = authSession.channel;
-        const sessionId = authSession.sessionId;
-
-        const descriptor = registry.get(capabilityId);
-        if (!descriptor) {
-            return deny(intent, GATE_REASONS.CAPABILITY_NOT_FOUND, `no such capability '${capabilityId}'`, {}, evaluatedAtMs);
-        }
-
-        const currentIncarnation = descriptor.incarnationId;
-        const intentIncarnation = intent.capabilityIncarnationId;
-        if (!isValidIncarnationId(intentIncarnation)) {
-            return deny(intent, GATE_REASONS.CAPABILITY_INCARNATION_MISMATCH, "intent is not bound to a valid capability incarnation", {}, evaluatedAtMs);
-        }
-        if (intentIncarnation !== currentIncarnation) {
-            return deny(intent, GATE_REASONS.CAPABILITY_INCARNATION_MISMATCH,
-                `intent incarnation ${intentIncarnation} != current ${currentIncarnation}`,
-                { intentIncarnation, currentIncarnation }, evaluatedAtMs);
-        }
-
-        const declared = descriptor.operations || [];
-        if (!declared.includes(operation)) {
-            return deny(intent, GATE_REASONS.OPERATION_NOT_DECLARED, `operation '${operation}' not declared`, {}, evaluatedAtMs);
-        }
-
-        const availability = descriptor.availability;
-        if (availability === "UNAVAILABLE" || availability === "UNKNOWN") {
-            return deny(intent, GATE_REASONS.CAPABILITY_UNAVAILABLE, `capability '${capabilityId}' is ${availability}`, {}, evaluatedAtMs);
-        }
-        if (availability === "DEGRADED") {
-            return deny(intent, GATE_REASONS.CAPABILITY_DEGRADED, `capability '${capabilityId}' is DEGRADED`, {}, evaluatedAtMs);
-        }
-
-        const scope = Array.isArray(intent.scope) ? intent.scope : [];
-
-        let authResult;
-        try {
-            authResult = await authorityEvaluator({
-                capabilityId,
-                action: operation,
-                scope,
-                purpose: intent.purpose ?? null,
-                identity: { channel, sessionId, principal },
-                nowMs: evaluatedAtMs
-            });
-        } catch {
-            return deny(intent, GATE_REASONS.AUTHORITY_INSUFFICIENT, "authority evaluation failed", {}, evaluatedAtMs);
-        }
-
-        if (!authResult || typeof authResult !== "object") {
-            return deny(intent, GATE_REASONS.AUTHORITY_INSUFFICIENT, "authority context returned no result", {}, evaluatedAtMs);
-        }
-
-        if (authResult.allowed !== true) {
-            if (authResult.reasonCode === "OWNER_CONFIRMATION_REQUIRED") {
-                return deepFreeze({
-                    decision: DECISION.OWNER_CONFIRMATION_REQUIRED,
-                    reasonCode: GATE_REASONS.OWNER_CONFIRMATION_REQUIRED,
-                    intentId: intent.intentId,
-                    capabilityId,
-                    capabilityIncarnationId: currentIncarnation,
-                    operation,
-                    evaluatedAtMs
-                });
-            }
-            const reason = mapAuthorityReason(authResult.reasonCode);
-            return deny(intent, reason, `authority denied: ${authResult.reasonCode ?? "unknown"}`, {
-                authorityReasonCode: authResult.reasonCode ?? null
-            }, evaluatedAtMs);
-        }
-
-        if (!isCanonicalEvaluation(authResult)) {
-            return deny(intent, GATE_REASONS.MALFORMED_AUTHORITY_EVALUATION, "not a canonical authority evaluation", {}, evaluatedAtMs);
-        }
-
-        const snapshot = authResult.snapshot;
-        const validationError = validateAuthorityEvaluation(authResult, {
-            capabilityId, operation, scope, principal, evaluatedAtMs
-        });
-        if (validationError) {
-            return deny(intent, GATE_REASONS.MALFORMED_AUTHORITY_EVALUATION, validationError, {}, evaluatedAtMs);
-        }
-
-        return deepFreeze({
-            decision: DECISION.ALLOW,
-            reasonCode: ALLOW_REASON,
-            intentId: intent.intentId,
-            capabilityId,
-            capabilityIncarnationId: currentIncarnation,
-            operation,
-            principal,
-            authorityGeneration: snapshot.generation,
-            evaluatedAtMs
-        });
-    }
-
-    return Object.freeze({ evaluate });
-}
-
-/**
- * Validate that a positive AuthorityEvaluation exactly matches the request the
- * gate sent. Any missing/mismatched/malformed field => fail closed.
+ * PURE predicate. Validate that a positive AuthorityEvaluation exactly matches
+ * the request the gate sent. Any missing/mismatched/malformed field => fail
+ * closed (returns an error string; null means the shape is exact).
  */
 function validateAuthorityEvaluation(authResult, req) {
     if (authResult.allowed !== true) return "allowed !== true";
@@ -243,4 +78,5 @@ function validateAuthorityEvaluation(authResult, req) {
     return null;
 }
 
-module.exports = { createGate, DECISION, GATE_REASONS, ALLOW_REASON };
+// NO gate constructor. NO privileged composition hook. Nothing mintable.
+module.exports = { DECISION, GATE_REASONS, ALLOW_REASON, validateAuthorityEvaluation };

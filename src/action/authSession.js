@@ -1,31 +1,25 @@
 "use strict";
 
 /**
- * ACTION AUTHORITY GATE V1 — AuthSessionCapability (trusted authenticated session).
+ * ACTION AUTHORITY GATE V1 — session field sanitization (PURE ONLY).
  *
- * An AuthSessionCapability carries an UNFORGEABLE brand token held in this
- * module's closure. It represents an authenticated session established by
- * trusted runtime authentication/session infrastructure — NOT a caller-
- * supplied principal/session/channel string.
+ * TRUST-DOMAIN LAW: a session minted by runtime A is trusted ONLY by runtime A.
+ * This module deliberately contains NO brand, NO WeakSet, NO issuer, and NO
+ * verifier. The session brand + issuer + verifier are created INSIDE the
+ * trusted runtime composition closure (`src/action/runtime.js`) as
+ * closure-local state, so:
  *
- * The ONLY way to obtain an AuthSessionCapability is `createAuthSessionIssuer()`
- * (the trusted authentication infrastructure, held by Aether bootstrap and
- * never injected downstream as a minting surface). The ActionAuthorityRuntime
- * accepts an AuthSessionCapability and derives the RuntimeIdentity internally;
- * it never accepts a raw `{ principal }` object.
+ *   - no module-global session brand can exist (the Wave-3 blocker)
+ *   - no public/direct import can mint a session trusted by any canonical
+ *     runtime (the Wave-4 blocker)
+ *   - only the runtime's own issuer adds sessions to its own brand; only that
+ *     runtime's gate checks that brand
  *
- * BRAND-FIRST VERIFICATION: `isAuthSession` checks the brand (WeakSet
- * membership) BEFORE inspecting any fields, so a hostile Proxy cannot execute
- * get/getPrototypeOf/ownKeys/getOwnPropertyDescriptor/has/set traps during
- * rejection of an unbranded value.
- *
- *   VALID SHAPE != TRUSTED ORIGIN
+ * What remains here is a pure, non-authorizing input sanitizer for session
+ * fields. It never confers trust: its output is an ordinary unbranded object.
  */
 
 const { fail, REASONS } = require("./errors");
-
-const AUTH_SESSION_BRAND = Symbol("aether.action.authSession.brand");
-const authSessionBrands = new WeakSet();
 
 const MAX_PRINCIPAL_CHARS = 128;
 const MAX_SESSION_CHARS = 128;
@@ -44,47 +38,20 @@ function cleanToken(v, field, maxChars) {
 }
 
 /**
- * INTERNAL — mint an AuthSessionCapability. Called only by the trusted
- * authentication issuer (`createAuthSessionIssuer`). Not exported publicly.
+ * PURE — sanitize authenticated-session fields into a plain record.
+ * Returns an UNBRANDED object; branding happens only inside the trusted
+ * runtime composition closure. Throws typed ActionError on malformed input.
  */
-function mintAuthSession({ principal, sessionId = null, channel = null } = {}) {
+function sanitizeSessionFields({ principal, sessionId = null, channel = null } = {}) {
     const p = cleanToken(principal, "principal", MAX_PRINCIPAL_CHARS);
     if (!p) {
         throw fail(REASONS.INVALID_INTENT, "auth session requires a non-empty principal");
     }
-    const session = Object.freeze({
+    return {
         principal: p,
         sessionId: cleanToken(sessionId, "sessionId", MAX_SESSION_CHARS),
         channel: cleanToken(channel, "channel", MAX_CHANNEL_CHARS)
-    });
-    authSessionBrands.add(session);
-    return session;
+    };
 }
 
-/**
- * Create the trusted authentication session issuer. This is the authenticated
- * session infrastructure: it establishes sessions from authenticated transport
- * identity. It MUST be held only by trusted Aether bootstrap and never handed
- * to untrusted code as a minting surface.
- */
-function createAuthSessionIssuer() {
-    return Object.freeze({
-        mintSession({ principal, sessionId = null, channel = null } = {}) {
-            return mintAuthSession({ principal, sessionId, channel });
-        }
-    });
-}
-
-/**
- * BRAND-FIRST verification. Returns true only if `v` is a genuinely-branded
- * AuthSessionCapability. No property access / prototype check / coercion /
- * reflection happens on an unbranded value before the brand check.
- */
-function isAuthSession(v) {
-    if (v === null || typeof v !== "object") return false;
-    if (!authSessionBrands.has(v)) return false;
-    // Only after brand membership do we inspect fields.
-    return typeof v.principal === "string" && v.principal.length > 0;
-}
-
-module.exports = { createAuthSessionIssuer, mintAuthSession, isAuthSession };
+module.exports = { sanitizeSessionFields };

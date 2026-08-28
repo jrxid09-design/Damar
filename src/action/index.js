@@ -1,7 +1,8 @@
 "use strict";
 
 /**
- * ACTION INTENT + AUTHORITY GATE V1 — public surface (sealed runtime composition).
+ * ACTION INTENT + AUTHORITY GATE V1 — public surface (runtime-local trust
+ * domain, sealed).
  *
  * DESCRIPTIVE + EVALUATIVE ONLY. Answers:
  *   1. what action is being proposed (ActionIntent)
@@ -10,17 +11,25 @@
  * NEVER executes, invokes, actuates, compensates, or verifies.
  *
  * TRUST BOUNDARY (honest): the ONLY trust issuance surface is
- * `createActionAuthorityRuntime` (created once by trusted bootstrap). Identity
- * comes from a BRANDED AuthSessionCapability minted by trusted authentication
- * infrastructure (`createAuthSessionIssuer`, held by bootstrap, never injected
- * downstream). Raw trust constructors (identity minting, scope resolver
- * injection, generic authorityContext injection, evaluation branding, raw gate
- * constructor) are NOT exported. `parseActionIntent` is the untrusted
- * STRING-only serialized ingress.
+ * `createActionAuthorityRuntime`, which mints its runtime-local session
+ * brand/issuer/verifier and its sealed gate inside its own closure and
+ * returns ONLY { admit, evaluate }. Session issuance is bound exactly once
+ * through the trusted-bootstrap-only `onReady` / `bindAuthentication` hook
+ * during composition; downstream code never receives the issuer.
+ *
+ * NOT exported from here or any action submodule: createAuthSessionIssuer,
+ * createGate, mintAuthSession, any session brand, any evaluation brand mint,
+ * any evaluator/verifier injection hook, any runtime-identity minting.
+ *
+ * PROCESS-ISOLATION LIMITATION (documented, not hidden): this is a
+ * same-process CommonJS trust domain, not OS isolation. A hypothetical
+ * untrusted same-process actor with unrestricted require() could still reach
+ * and run the trusted bootstrap module itself — that is a process/module
+ * isolation limitation. What the Lane 2 surface guarantees is that it exposes
+ * no privileged issuer or gate construction and no injection hooks.
  */
 
 const { parseActionIntent, canonicalScope, validateTimestamp, INTENT_SCHEMA_VERSION, BOUNDS: INTENT_BOUNDS, isValidIncarnationId } = require("./intent");
-const { createAuthSessionIssuer, isAuthSession } = require("./authSession");
 const { isCanonicalAuthorityEvaluation, EVAL_REASONS } = require("../authority/evaluate");
 const { createActionAuthorityRuntime, DECISION, GATE_REASONS, ALLOW_REASON } = require("./runtime");
 const { ActionError, REASONS } = require("./errors");
@@ -34,9 +43,6 @@ module.exports = {
     INTENT_BOUNDS,
     isValidIncarnationId,
 
-    // trusted authentication infrastructure (bootstrap-only)
-    createAuthSessionIssuer,
-
     // trusted composition root (the only runtime issuance surface)
     createActionAuthorityRuntime,
 
@@ -47,8 +53,10 @@ module.exports = {
     ActionError,
     REASONS,
 
-    // read-only brand verifiers (no minting)
-    isAuthSession,
+    // read-only canonical evaluation brand verifier (no minting).
+    // NOTE: there is deliberately NO public isAuthSession — session brand
+    // verification is runtime-local by design; a module-global verifier would
+    // reintroduce the cross-runtime trust hole.
     isCanonicalAuthorityEvaluation,
     DECISION_REASONS: EVAL_REASONS
 };
