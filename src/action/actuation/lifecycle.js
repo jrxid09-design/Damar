@@ -1,7 +1,8 @@
 "use strict";
 
 /**
- * ACTION ACTUATION FABRIC V1 — execution lifecycle state machine (Lane 3).
+ * ACTION ACTUATION FABRIC V1 — lifecycle state-machine vocabulary (Lane 3,
+ * FIRST targeted repair: inert transition table ONLY — no tracker factory).
  *
  * States:
  *
@@ -19,13 +20,19 @@
  * HONEST TERMINAL SEMANTICS:
  *   - CANCELLED is only valid from pre-DISPATCHING states: once invocation
  *     has started, cancellation must not claim the real-world effect was
- *     prevented. Late cancellation is reported as CANCELLATION_TOO_LATE
- *     and the execution continues to its real outcome.
+ *     prevented.
  *   - TIMED_OUT preserves effect ambiguity: timeout != proof of no side
  *     effect. No silent retry.
+ *
+ * FIRST TARGETED REPAIR: `createLifecycleTracker` is NOT exported. The
+ * lifecycle tracker implementation lives ONLY inside the trusted bootstrap's
+ * private composition closure (src/action/bootstrap.js), exactly like every
+ * other privileged Lane 3 constructor. This module exports ONLY the frozen
+ * transition table + state vocabulary for downstream recognition (asking),
+ * never construction.
  */
 
-const { fail, REASONS, LIFECYCLE } = require("./errors");
+const { LIFECYCLE } = require("./errors");
 
 // Allowed transitions (deterministic; no skips except fail-closed paths).
 const TRANSITIONS = Object.freeze(new Map([
@@ -40,48 +47,34 @@ const TRANSITIONS = Object.freeze(new Map([
     [LIFECYCLE.CANCELLED, new Set()]
 ]));
 
-/**
- * Create a fresh lifecycle tracker for one execution. The tracker records the
- * ordered (state, atMs) trace used in results/evidence. It is owned by the
- * dispatcher and never handed to downstream callers.
- */
-function createLifecycleTracker(initialState = LIFECYCLE.CREATED) {
-    if (!TRANSITIONS.has(initialState)) {
-        throw fail(REASONS.MALFORMED_REQUEST, `invalid initial lifecycle state '${initialState}'`);
-    }
-    let state = initialState;
-    const trace = Object.freeze([{ state, atMs: null }].slice(0, 0)); // replaced below
-    const entries = [{ state, atMs: null }];
-    let frozenTrace = Object.freeze(entries.map((e) => Object.freeze({ ...e })));
-
-    return Object.freeze({
-        get state() { return state; },
-        get trace() { return frozenTrace; },
-        isTerminal() {
-            return TRANSITIONS.get(state).size === 0;
-        },
-        /** Whether cancellation is still honest (pre-invocation). */
-        canCancel() {
-            return state === LIFECYCLE.CREATED || state === LIFECYCLE.REVALIDATING || state === LIFECYCLE.READY;
-        },
-        /**
-         * Advance to `next` at timestamp `atMs`. Throws on an illegal
-         * transition (state machine violations are fail-closed).
-         */
-        advance(next, atMs) {
-            const allowed = TRANSITIONS.get(state);
-            if (!allowed || !allowed.has(next)) {
-                throw fail(REASONS.MALFORMED_REQUEST, `illegal lifecycle transition ${state} -> ${next}`);
-            }
-            if (typeof atMs !== "number" || !Number.isSafeInteger(atMs) || atMs < 0) {
-                throw fail(REASONS.MALFORMED_REQUEST, "lifecycle timestamp must be a nonnegative safe integer");
-            }
-            state = next;
-            entries.push({ state: next, atMs });
-            frozenTrace = Object.freeze(entries.map((e) => Object.freeze({ ...e })));
-            return state;
-        }
-    });
+/** PURE predicate — is `state` a valid lifecycle state? */
+function isLifecycleState(state) {
+    return typeof state === "string" && Object.prototype.hasOwnProperty.call(LIFECYCLE, state);
 }
 
-module.exports = { createLifecycleTracker, TRANSITIONS, LIFECYCLE };
+/** PURE predicate — is the transition from -> to legal? */
+function isLegalTransition(from, to) {
+    const allowed = TRANSITIONS.get(from);
+    return allowed !== undefined && allowed.has(to);
+}
+
+/** PURE predicate — does the state admit honest pre-dispatch cancellation? */
+function isCancellable(state) {
+    return state === LIFECYCLE.CREATED || state === LIFECYCLE.REVALIDATING || state === LIFECYCLE.READY;
+}
+
+/** PURE predicate — is the state terminal? */
+function isTerminal(state) {
+    const allowed = TRANSITIONS.get(state);
+    return allowed !== undefined && allowed.size === 0;
+}
+
+module.exports = {
+    // inert frozen vocabulary + pure predicates ONLY
+    LIFECYCLE,
+    TRANSITIONS,
+    isLifecycleState,
+    isLegalTransition,
+    isCancellable,
+    isTerminal
+};

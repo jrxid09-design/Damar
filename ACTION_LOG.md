@@ -4,6 +4,41 @@ Konvensi (mandat Ronny, 18 Agu 2026 09:34): SETIAP aksi perubahan = 1 commit che
 
 ---
 
+## 2026-08-28 (Actuation Fabric — first targeted repair: private composition + closure-private brands)
+
+### Mandat
+AETHER WAVE 4 — LANE 3 first targeted repair. Codex menemukan 2 blocker:
+(1) privileged constructors (buildActuatorRegistry / composeDispatcher /
+formExecutionRequest / createLifecycleTracker / result builders) diekspor
+langsung dari production submodules → rogue actuator registration exploit;
+(2) brand WeakSets + tokens (requestBrandSet / resultBrandSet /
+REQUEST_BRAND / RESULT_BRAND) diekspor dari errors.js → provenance-defeating
+brand mutation (`errors.requestBrandSet.add(forged)`).
+
+### Perbaikan
+- BLOCKER 1: semua konstruktor privilese Lane 3 dipindahkan KE DALAM closure
+  lexical private bootstrap.js (mirroring Lane 2 discipline). Modul produksi
+  actuation kini hanya inert vocabulary + pure predicates; direct import
+  tidak lagi mendapatkan factory mana pun.
+- BLOCKER 2: brand WeakSets + tokens closure-private di bootstrap.js; brand
+  membership hanya dibuat oleh former private bootstrap. Predikat brand
+  (`isCanonicalExecutionRequest`/`isCanonicalExecutionResult`) menjadi METHOD
+  pada facade actuation (Object.freeze, frozen, closure-bound) — downstream
+  BISA MENANYAKAN canonicality, TIDAK BISA MENYEBABKAN "make canonical".
+  Test harness memilikikan brand WeakSet test-domain sendiri (distinct
+  closure); production predicate menolak test-domain result.
+
+### Diuji
+- 34 tes keamanan (18 required + 10 brand + 6 structural DIRECT module.exports
+  scan).
+- Storm +4 counter aktif: directRegistryFactoryAcquired,
+  directDispatcherFactoryAcquired, exportedRequestBrandMutated,
+  exportedResultBrandMutated.
+- Lane 3: 36 tes, 0 failure. Lane 2: 89/89. Lane 1+Authority: 171/186
+  (15 sqlite3 pre-existing, identik baseline).
+
+---
+
 ## 2026-08-28 (Action Authority — remove first-binder trust + caller authenticator + production seeding, seventh targeted repair)
 
 ### Mandat

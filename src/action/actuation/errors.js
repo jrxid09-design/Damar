@@ -1,7 +1,9 @@
 "use strict";
 
 /**
- * ACTION ACTUATION FABRIC V1 — Lane 3 error + lifecycle-state contract.
+ * ACTION ACTUATION FABRIC V1 — Lane 3 error + lifecycle-state contract
+ * (FIRST targeted repair: inert vocabulary ONLY — no brand state, no
+ * factories, no mutation capability).
  *
  * Every rejection carries a stable `reasonCode` so callers branch on
  * machine-readable causes without parsing messages. All failures are
@@ -20,25 +22,18 @@
  * vocabulary deliberately contains no VERIFIED state and no
  * "effect-confirmed" reason: execution results record what the actuator
  * REPORTED, not what the real world was proven to contain.
+ *
+ * FIRST TARGETED REPAIR (Lane 3): canonical brand state is NOT here. Brand
+ * membership (request/result WeakSets) is established ONLY inside the
+ * trusted bootstrap's private composition closure (src/action/bootstrap.js)
+ * and read ONLY by the pure predicates in index.js. No export of this module
+ * (or any actuation module) exposes a WeakSet, Set, brand token, minting
+ * Symbol, or any add()/mark()/brand()/registerCanonical() mutation surface.
+ * Downstream can ASK "is this canonical?"; downstream cannot CAUSE "make
+ * this canonical".
  */
 
 const { ActionError } = require("../errors");
-
-// ---------------------------------------------------------------------------
-// CLOSURE-ONLY CANONICAL BRANDS (Lane 3).
-//
-// Brand WeakSets for canonical ExecutionRequest / ExecutionResult values. They
-// live in this module's closure, are populated ONLY by the privileged
-// formExecutionRequest / buildExecutionResult functions (dispatcher-private),
-// and read ONLY by the public PURE predicates isCanonicalExecutionRequest /
-// isCanonicalExecutionResult (index.js). Neither the tokens nor a mutation
-// surface is exported: a caller cannot manufacture a canonical request/result
-// by constructing a plain object, cloning a shape, or forging a Symbol.
-// ---------------------------------------------------------------------------
-const REQUEST_BRAND = Symbol("aether.action.actuation.request.brand");
-const RESULT_BRAND = Symbol("aether.action.actuation.result.brand");
-const requestBrandSet = new WeakSet();
-const resultBrandSet = new WeakSet();
 
 /**
  * LIFECYCLE STATES — the execution lifecycle state machine (see lifecycle.js).
@@ -138,10 +133,4 @@ function fail(reasonCode, message, details = null) {
     return new ActionError(reasonCode, message, details);
 }
 
-module.exports = {
-    LIFECYCLE, RESULT_STATE, REASONS, fail,
-    // closure-only brand state (populated by the privileged formers;
-    // read by the index.js PURE predicates; no mutation surface beyond this
-    // module + the two privileged formers)
-    REQUEST_BRAND, RESULT_BRAND, requestBrandSet, resultBrandSet
-};
+module.exports = { LIFECYCLE, RESULT_STATE, REASONS, fail };

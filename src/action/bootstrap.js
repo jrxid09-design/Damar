@@ -686,10 +686,27 @@ function createCanonicalActionFacade() {
 }
 
 // ---------------------------------------------------------------------------
-// LANE 3 — CANONICAL ACTUATION COMPOSITION (private closure, bootstrap-owned).
+// LANE 3 — CANONICAL ACTUATION COMPOSITION (FIRST targeted repair: ALL
+// privileged actuation implementation lives in THIS private lexical closure).
 //
-// The Lane 3 dispatcher is composed over the canonical Lane 2 facade, with an
-// actuator registry whose registrar capability is owned by THIS closure.
+// The actuation submodules (actuatorRegistry.js / dispatcher.js /
+// executionRequest.js / result.js / lifecycle.js) are now PURE NON-PRIVILEGED
+// vocabulary modules. The privileged constructors — buildActuatorRegistry,
+// composeDispatcher, formExecutionRequest, createLifecycleTracker,
+// buildExecutionResult, buildExecutionEvidence, sanitizeActuatorOutput — are
+// defined HERE, inside this module's own lexical scope, exactly like Lane 2's
+// composeActionAuthorityRuntime / composeAuthenticationDomain. They are
+// reachable through NO binder, NO token, NO host capability, NO first-call-
+// wins registry: acquiring them requires ALREADY executing inside this
+// closure. A direct import of any actuation submodule yields only inert
+// vocabulary + pure predicates.
+//
+// CANONICAL BRANDS (FIRST targeted repair): the request/result brand WeakSets
+// are declared HERE (closure-private). Brand membership is established ONLY
+// by the private formers below. No export of ANY module exposes the WeakSets,
+// the brand tokens, or any mutation surface. Downstream can ASK (via the pure
+// recognition predicates in actuation/index.js); downstream cannot CAUSE.
+//
 // Downstream NEVER receives the registrar: it receives only the frozen
 // { execute } capability. Fresh canonical Lane 2 revalidation happens INSIDE
 // execute() — there is no bearer-decision path and no caller-selectable
@@ -699,10 +716,857 @@ function createCanonicalActionFacade() {
 // certified Lane 2 evaluate/admit surface is consumed, never modified.
 // ---------------------------------------------------------------------------
 
-const { composeDispatcher } = require("./actuation/dispatcher");
-const { buildActuatorRegistry } = require("./actuation/actuatorRegistry");
+const crypto3 = require("node:crypto");
+const {
+    parseActionIntent: parseIntent3, canonicalScope: canonicalScope3,
+    validateTimestamp: validateTimestamp3, isValidIncarnationId: isValidIncarnation3
+} = require("./intent");
+const { DECISION: DECISION3 } = require("./gate");
+const { LIFECYCLE: LIFECYCLE3, RESULT_STATE: RESULT_STATE3, REASONS: REASONS3, fail: fail3 } = require("./actuation/errors");
+const { TRANSITIONS: TRANSITIONS3 } = require("./actuation/lifecycle");
+const {
+    DEFAULT_TIMEOUT_MS: DEFAULT_TIMEOUT3, MAX_TIMEOUT_MS: MAX_TIMEOUT3,
+    MIN_TIMEOUT_MS: MIN_TIMEOUT3, CALLER_EXECUTOR_KEYS: CALLER_EXECUTOR_KEYS3,
+    BEARER_DECISION_KEYS: BEARER_DECISION_KEYS3
+} = require("./actuation/dispatcher");
+const {
+    REQUEST_SCHEMA_VERSION: REQUEST_SCHEMA3, BOUNDS: REQUEST_BOUNDS3
+} = require("./actuation/executionRequest");
+const { READINESS: READINESS3 } = require("./actuation/actuatorRegistry");
 
-// The ONE canonical dispatcher, created exactly once, lazily, on first use.
+// ---- CANONICAL BRANDS (closure-private; FIRST targeted repair) -------------
+const REQUEST_BRAND3 = Symbol("aether.action.actuation.request.brand");
+const RESULT_BRAND3 = Symbol("aether.action.actuation.result.brand");
+const requestBrandSet3 = new WeakSet();
+const resultBrandSet3 = new WeakSet();
+
+function deepFreeze3(obj) {
+    if (obj !== null && typeof obj === "object") {
+        for (const key of Object.getOwnPropertyNames(obj)) deepFreeze3(obj[key]);
+        Object.freeze(obj);
+    }
+    return obj;
+}
+
+const ACTUATION_DANGEROUS_KEYS3 = Object.freeze(new Set(["__proto__", "constructor", "prototype"]));
+const ACTUATION_AUTHORITY_TOKENS3 = Object.freeze(new Set([
+    "authority", "authorized", "authorization", "authorisation",
+    "permission", "permissions", "approved", "approval", "approve",
+    "ownerapproved", "owner", "admin", "administrator", "root", "superuser",
+    "grant", "granted", "trusted", "trust", "privilege", "privileged",
+    "role", "roles", "canexecute", "allowed", "allow"
+]));
+
+function actuationIsPlainObject3(v) {
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+    const proto = Object.getPrototypeOf(v);
+    return proto === Object.prototype || proto === null;
+}
+
+function actuationDetach3(value, state) {
+    state.nodes++;
+    if (state.nodes > state.maxNodes) {
+        throw fail3(REASONS3.BOUND_EXCEEDED, `payload exceeds node budget (${state.maxNodes})`);
+    }
+    if (value === null) return null;
+    const t = typeof value;
+    if (t === "string" || t === "boolean") return value;
+    if (t === "number") {
+        if (!Number.isFinite(value)) throw fail3(REASONS3.MALFORMED_PAYLOAD, "numbers must be finite");
+        return value;
+    }
+    if (t === "function") throw fail3(REASONS3.FUNCTION_VALUE, "function values are not permitted");
+    if (t === "symbol" || t === "bigint" || t === "undefined") {
+        throw fail3(REASONS3.SYMBOL_VALUE, `${t} values are not permitted`);
+    }
+    if (Array.isArray(value)) {
+        if (state.path.has(value)) throw fail3(REASONS3.CYCLIC_INPUT, "cyclic structure is not permitted");
+        if (value.length > REQUEST_BOUNDS3.GLOBAL_MAX_ARRAY_LENGTH) {
+            throw fail3(REASONS3.BOUND_EXCEEDED, "array length exceeds global bound");
+        }
+        state.path.add(value);
+        const out = new Array(value.length);
+        for (let i = 0; i < value.length; i++) out[i] = actuationDetach3(value[i], state);
+        state.path.delete(value);
+        return out;
+    }
+    if (!actuationIsPlainObject3(value)) {
+        throw fail3(REASONS3.NON_PLAIN_OBJECT, "non-plain object is not permitted");
+    }
+    if (state.path.has(value)) throw fail3(REASONS3.CYCLIC_INPUT, "cyclic structure is not permitted");
+    state.path.add(value);
+    const out = {};
+    for (const key of Object.getOwnPropertyNames(value)) {
+        if (ACTUATION_DANGEROUS_KEYS3.has(key)) throw fail3(REASONS3.DANGEROUS_KEY, `dangerous key '${key}' in payload`);
+        const desc = Object.getOwnPropertyDescriptor(value, key);
+        if (desc && (desc.get || desc.set)) {
+            throw fail3(REASONS3.ACCESSOR_PROPERTY, `accessor property '${key}' is not permitted`);
+        }
+        out[key] = actuationDetach3(desc.value, state);
+    }
+    if (Object.getOwnPropertySymbols(value).length > 0) {
+        throw fail3(REASONS3.SYMBOL_VALUE, "symbol keys are not permitted");
+    }
+    state.path.delete(value);
+    return out;
+}
+
+function actuationAssertNoAuthorityKeys3(node) {
+    if (node === null || typeof node !== "object") return;
+    for (const key of Object.getOwnPropertyNames(node)) {
+        if (ACTUATION_AUTHORITY_TOKENS3.has(key.toLowerCase())) {
+            throw fail3(REASONS3.MALFORMED_REQUEST, `authority-shaped key '${key}' is forbidden in execution request metadata`);
+        }
+        const v = node[key];
+        if (v !== null && typeof v === "object") actuationAssertNoAuthorityKeys3(v);
+    }
+}
+
+function actuationRequireString3(value, field, maxChars, { optional = false, allowEmpty = false } = {}) {
+    if (value === undefined || value === null) {
+        if (optional) return "";
+        throw fail3(REASONS3.MALFORMED_REQUEST, `${field} is required`);
+    }
+    if (typeof value !== "string") {
+        throw fail3(REASONS3.MALFORMED_REQUEST, `${field} must be a string, got ${typeof value}`);
+    }
+    const s = value.trim();
+    if (!optional && !allowEmpty && s.length === 0) {
+        throw fail3(REASONS3.MALFORMED_REQUEST, `${field} must not be empty`);
+    }
+    if (s.length > maxChars) {
+        throw fail3(REASONS3.BOUND_EXCEEDED, `${field} exceeds ${maxChars} chars`);
+    }
+    return s;
+}
+
+function actuationRequireSafeInteger3(value, field) {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+        throw fail3(REASONS3.MALFORMED_REQUEST, `${field} must be a nonnegative safe integer`);
+    }
+    return value;
+}
+
+// ---- PRIVILEGED: canonical ExecutionRequest former (closure-private) ------
+function formExecutionRequest3(ctx) {
+    if (ctx === null || typeof ctx !== "object") {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "execution request context must be a plain object");
+    }
+
+    const intentId = actuationRequireString3(ctx.intentId, "intentId", REQUEST_BOUNDS3.MAX_INTENT_ID_CHARS);
+    const capabilityId = actuationRequireString3(ctx.capabilityId, "capabilityId", REQUEST_BOUNDS3.MAX_CAPABILITY_ID_CHARS);
+    const capabilityIncarnationId = actuationRequireString3(ctx.capabilityIncarnationId, "capabilityIncarnationId", REQUEST_BOUNDS3.MAX_INTENT_ID_CHARS);
+    if (!isValidIncarnation3(capabilityIncarnationId)) {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "capabilityIncarnationId is not a valid canonical incarnation id");
+    }
+    const operation = actuationRequireString3(ctx.operation, "operation", REQUEST_BOUNDS3.MAX_OPERATION_CHARS);
+    const principal = actuationRequireString3(ctx.principal, "principal", REQUEST_BOUNDS3.MAX_PRINCIPAL_CHARS);
+    if (!Array.isArray(ctx.scope)) {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "scope must be an array of canonical tokens");
+    }
+    const scope = canonicalScope3(ctx.scope);
+    const authorityGeneration = actuationRequireSafeInteger3(ctx.authorityGeneration, "authorityGeneration");
+    const admittedAtMs = actuationRequireSafeInteger3(ctx.admittedAtMs, "admittedAtMs");
+    const requestedAtMs = actuationRequireSafeInteger3(ctx.requestedAtMs, "requestedAtMs");
+    if (requestedAtMs < admittedAtMs) {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "requestedAtMs must be >= admittedAtMs");
+    }
+
+    const parametersState = { nodes: 0, maxNodes: REQUEST_BOUNDS3.MAX_METADATA_NODES, path: new Set() };
+    const parameters = (ctx.parameters === undefined || ctx.parameters === null)
+        ? deepFreeze3({})
+        : deepFreeze3(actuationDetach3(ctx.parameters, parametersState));
+    if (Object.getOwnPropertyNames(parameters).length > REQUEST_BOUNDS3.MAX_PARAMETERS_KEYS) {
+        throw fail3(REASONS3.BOUND_EXCEEDED, `parameters exceeds ${REQUEST_BOUNDS3.MAX_PARAMETERS_KEYS} keys`);
+    }
+
+    const metadataState = { nodes: 0, maxNodes: REQUEST_BOUNDS3.MAX_METADATA_NODES, path: new Set() };
+    const metadata = (ctx.metadata === undefined || ctx.metadata === null)
+        ? deepFreeze3({})
+        : deepFreeze3(actuationDetach3(ctx.metadata, metadataState));
+    actuationAssertNoAuthorityKeys3(metadata);
+
+    const executionId = crypto3.randomUUID();
+
+    const request = deepFreeze3({
+        schemaVersion: REQUEST_SCHEMA3,
+        executionId,
+        intentId,
+        capabilityId,
+        capabilityIncarnationId,
+        operation,
+        principal,
+        scope,
+        authorityGeneration,
+        admittedAtMs,
+        requestedAtMs,
+        parameters,
+        metadata
+    });
+    requestBrandSet3.add(request);
+    return request;
+}
+
+// ---- PRIVILEGED: lifecycle tracker (closure-private) -----------------------
+function createLifecycleTracker3(initialState = LIFECYCLE3.CREATED) {
+    if (!TRANSITIONS3.has(initialState)) {
+        throw fail3(REASONS3.MALFORMED_REQUEST, `invalid initial lifecycle state '${initialState}'`);
+    }
+    let state = initialState;
+    const entries = [{ state, atMs: null }];
+    let frozenTrace = Object.freeze(entries.map((e) => Object.freeze({ ...e })));
+
+    return Object.freeze({
+        get state() { return state; },
+        get trace() { return frozenTrace; },
+        isTerminal() {
+            return TRANSITIONS3.get(state).size === 0;
+        },
+        canCancel() {
+            return state === LIFECYCLE3.CREATED || state === LIFECYCLE3.REVALIDATING || state === LIFECYCLE3.READY;
+        },
+        advance(next, atMs) {
+            const allowed = TRANSITIONS3.get(state);
+            if (!allowed || !allowed.has(next)) {
+                throw fail3(REASONS3.MALFORMED_REQUEST, `illegal lifecycle transition ${state} -> ${next}`);
+            }
+            if (typeof atMs !== "number" || !Number.isSafeInteger(atMs) || atMs < 0) {
+                throw fail3(REASONS3.MALFORMED_REQUEST, "lifecycle timestamp must be a nonnegative safe integer");
+            }
+            state = next;
+            entries.push({ state: next, atMs });
+            frozenTrace = Object.freeze(entries.map((e) => Object.freeze({ ...e })));
+            return state;
+        }
+    });
+}
+
+// ---- PRIVILEGED: hostile-output sanitizer (closure-private) ----------------
+const RESULT_STRING_CHARS3 = 1024;
+const RESULT_KEYS3 = 64;
+const RESULT_DEPTH3 = 8;
+const RESULT_NODES3 = 512;
+
+function sanitizeActuatorOutput3(value) {
+    const state = { nodes: 0, path: new Set() };
+    function walk(v, depth) {
+        state.nodes++;
+        if (state.nodes > RESULT_NODES3) throw fail3(REASONS3.ACTUATOR_MALFORMED_RESULT, "actuator output exceeds node budget");
+        if (depth > RESULT_DEPTH3) throw fail3(REASONS3.ACTUATOR_MALFORMED_RESULT, "actuator output exceeds depth bound");
+        if (v === null) return null;
+        const t = typeof v;
+        if (t === "string") return v.length > RESULT_STRING_CHARS3 ? v.slice(0, RESULT_STRING_CHARS3) : v;
+        if (t === "boolean") return v;
+        if (t === "number") return Number.isFinite(v) ? v : null;
+        if (t === "bigint" || t === "symbol" || t === "undefined" || t === "function") return null;
+        if (v instanceof Error) {
+            return { name: String(v.name ?? "Error").slice(0, 64), message: String(v.message ?? "").slice(0, RESULT_STRING_CHARS3) };
+        }
+        if (!actuationIsPlainObject3(v) && !Array.isArray(v)) return null;
+        if (state.path.has(v)) return null;
+        state.path.add(v);
+        if (Array.isArray(v)) {
+            const out = v.slice(0, 256).map((x) => walk(x, depth + 1));
+            state.path.delete(v);
+            return out;
+        }
+        const out = {};
+        let keys = 0;
+        for (const key of Object.getOwnPropertyNames(v)) {
+            if (keys >= RESULT_KEYS3) break;
+            keys++;
+            const desc = Object.getOwnPropertyDescriptor(v, key);
+            if (!desc || desc.get || desc.set) continue;
+            const kk = key.length > 128 ? key.slice(0, 128) : key;
+            out[kk] = walk(desc.value, depth + 1);
+        }
+        state.path.delete(v);
+        return out;
+    }
+    return walk(value, 0);
+}
+
+// ---- PRIVILEGED: result/evidence builders (closure-private) ----------------
+function buildExecutionResult3({
+    executionRequest,
+    state,
+    actuatorId = "",
+    actuatorIncarnationId = "",
+    lifecycleTrace,
+    startedAtMs,
+    completedAtMs,
+    actuatorReport = null,
+    failureReason = "",
+    failureDetail = ""
+}) {
+    if (!executionRequest || typeof executionRequest !== "object" || typeof executionRequest.executionId !== "string") {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "buildExecutionResult requires a canonical ExecutionRequest");
+    }
+    if (!RESULT_STATE3[state]) {
+        throw fail3(REASONS3.MALFORMED_REQUEST, `invalid result state '${state}'`);
+    }
+    if (state === RESULT_STATE3.EXECUTED && failureReason) {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "EXECUTED result must not carry a failure reason");
+    }
+    if (state !== RESULT_STATE3.EXECUTED && !failureReason) {
+        throw fail3(REASONS3.MALFORMED_REQUEST, `non-EXECUTED result '${state}' must carry a failure reason`);
+    }
+    actuationRequireSafeInteger3(startedAtMs, "startedAtMs");
+    actuationRequireSafeInteger3(completedAtMs, "completedAtMs");
+    if (completedAtMs < startedAtMs) {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "completedAtMs must be >= startedAtMs");
+    }
+
+    const report = actuatorReport === null || actuatorReport === undefined
+        ? null
+        : deepFreeze3(sanitizeActuatorOutput3(actuatorReport));
+
+    const result = deepFreeze3({
+        schemaVersion: 1,
+        executionId: executionRequest.executionId,
+        intentId: executionRequest.intentId,
+        capabilityId: executionRequest.capabilityId,
+        capabilityIncarnationId: executionRequest.capabilityIncarnationId,
+        operation: executionRequest.operation,
+        principal: executionRequest.principal,
+        actuatorId,
+        actuatorIncarnationId,
+        state,
+        startedAtMs,
+        completedAtMs,
+        actuatorReport: report,
+        failureReason: failureReason || "",
+        failureDetail: failureDetail ? String(failureDetail).slice(0, RESULT_STRING_CHARS3) : "",
+        authorityGeneration: executionRequest.authorityGeneration,
+        lifecycleTrace,
+        // Explicit non-claims (Lane 3 does not verify; Lane 4 owns that):
+        verified: null,
+        verificationClaim: null
+    });
+    resultBrandSet3.add(result);
+    return result;
+}
+
+function buildExecutionEvidence3({ executionRequest, result, revalidation }) {
+    if (!result || typeof result !== "object") {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "buildExecutionEvidence requires a structured result");
+    }
+    return deepFreeze3({
+        schemaVersion: 1,
+        kind: "action.actuation.execution",
+        executionId: result.executionId,
+        intentId: result.intentId,
+        principal: result.principal,
+        capabilityId: result.capabilityId,
+        operation: result.operation,
+        scope: executionRequest.scope,
+        capabilityIncarnationId: result.capabilityIncarnationId,
+        actuatorId: result.actuatorId,
+        actuatorIncarnationId: result.actuatorIncarnationId,
+        authorityGeneration: revalidation.authorityGeneration,
+        revalidatedAtMs: revalidation.revalidatedAtMs,
+        startedAtMs: result.startedAtMs,
+        completedAtMs: result.completedAtMs,
+        state: result.state,
+        failureReason: result.failureReason,
+        lifecycleTrace: result.lifecycleTrace,
+        verified: null
+    });
+}
+
+// ---- PRIVILEGED: actuator registry (closure-private) -----------------------
+function buildActuatorRegistry3() {
+    const byId = new Map();
+    const byCap = new Map();
+
+    function canonicalOp3(op) {
+        return String(op ?? "").trim().toLowerCase();
+    }
+
+    function register({ capabilityId, operations, capabilityIncarnationId, actuatorId, invoke, readiness = "READY" }) {
+        if (typeof capabilityId !== "string" || capabilityId.length === 0) {
+            throw fail3(REASONS3.REGISTRATION_REJECTED, "actuator registration requires a non-empty capabilityId");
+        }
+        if (!Array.isArray(operations) || operations.length === 0) {
+            throw fail3(REASONS3.REGISTRATION_REJECTED, "actuator registration requires a non-empty operations array");
+        }
+        const ops = operations.map(canonicalOp3).filter((s) => s.length > 0);
+        if (ops.length === 0) {
+            throw fail3(REASONS3.REGISTRATION_REJECTED, "actuator registration requires a non-empty operations array");
+        }
+        if (typeof capabilityIncarnationId !== "string" || capabilityIncarnationId.length === 0) {
+            throw fail3(REASONS3.REGISTRATION_REJECTED, "actuator registration requires a capabilityIncarnationId");
+        }
+        if (typeof invoke !== "function") {
+            throw fail3(REASONS3.REGISTRATION_REJECTED, "actuator registration requires an invoke function");
+        }
+        if (!READINESS3[readiness]) {
+            throw fail3(REASONS3.REGISTRATION_REJECTED, `invalid readiness '${readiness}'`);
+        }
+
+        const id = (typeof actuatorId === "string" && actuatorId.length > 0)
+            ? actuatorId
+            : `act-${crypto3.randomUUID()}`;
+        const actuatorIncarnationId = `ainc-${crypto3.randomUUID()}`;
+
+        if (byId.has(id)) {
+            throw fail3(REASONS3.REGISTRATION_REJECTED, `actuator '${id}' is already registered; remove it first`);
+        }
+
+        const invokeFn = invoke.bind({});
+        const binding = Object.freeze({
+            capabilityId,
+            operations: Object.freeze(ops.slice()),
+            capabilityIncarnationId,
+            actuatorId: id,
+            actuatorIncarnationId,
+            readiness,
+            invoke: invokeFn
+        });
+
+        byId.set(id, binding);
+        let opMap = byCap.get(capabilityId);
+        if (!opMap) { opMap = new Map(); byCap.set(capabilityId, opMap); }
+        for (const op of ops) {
+            if (opMap.has(op)) {
+                byId.delete(id);
+                throw fail3(REASONS3.REGISTRATION_REJECTED, `actuator already registered for '${capabilityId}.${op}'`);
+            }
+            opMap.set(op, binding);
+        }
+        return binding;
+    }
+
+    function remove(actuatorId) {
+        const binding = byId.get(actuatorId);
+        if (!binding) return false;
+        byId.delete(actuatorId);
+        const opMap = byCap.get(binding.capabilityId);
+        if (opMap) {
+            for (const op of binding.operations) {
+                const cur = opMap.get(op);
+                if (cur && cur.actuatorId === actuatorId) opMap.delete(op);
+            }
+            if (opMap.size === 0) byCap.delete(binding.capabilityId);
+        }
+        return true;
+    }
+
+    function resolve(capabilityId, operation) {
+        const opMap = byCap.get(capabilityId);
+        if (!opMap) return null;
+        return opMap.get(canonicalOp3(operation)) ?? null;
+    }
+
+    function get(actuatorId) {
+        return byId.get(actuatorId) ?? null;
+    }
+
+    return Object.freeze({ register, remove, resolve, get });
+}
+
+// ---- PRIVILEGED: dispatcher (closure-private) ------------------------------
+function composeDispatcher3({
+    lane2Facade,
+    actuatorRegistry,
+    clock = { nowMs: () => Date.now() },
+    timeoutMs = DEFAULT_TIMEOUT3
+} = {}) {
+    if (!lane2Facade || typeof lane2Facade.admit !== "function" || typeof lane2Facade.evaluate !== "function") {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "dispatcher requires the Lane 2 facade (admit + evaluate)");
+    }
+    if (!actuatorRegistry || typeof actuatorRegistry.resolve !== "function") {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "dispatcher requires an actuator registry");
+    }
+    if (!clock || typeof clock.nowMs !== "function") {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "dispatcher requires a canonical clock");
+    }
+    if (typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < MIN_TIMEOUT3 || timeoutMs > MAX_TIMEOUT3) {
+        throw fail3(REASONS3.INVALID_TIMEOUT_CONFIG, `timeoutMs must be in [${MIN_TIMEOUT3}, ${MAX_TIMEOUT3}]`);
+    }
+
+    const inFlight = new Map();
+    const completed = new Map();
+    const COMPLETED_MAX = 4096;
+
+    function canonicalClockNow3() {
+        const v = clock.nowMs();
+        if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) {
+            throw fail3(REASONS3.MALFORMED_REQUEST, "canonical clock returned an invalid timestamp");
+        }
+        return v;
+    }
+
+    function noteCompleted(key, entry) {
+        if (completed.size >= COMPLETED_MAX) {
+            const firstKey = completed.keys().next().value;
+            if (firstKey !== undefined) completed.delete(firstKey);
+        }
+        completed.set(key, entry);
+    }
+
+    function computeContentKey3(intent, authSession, parameters, metadata) {
+        const paramsJson = parameters === undefined || parameters === null ? "{}" : JSON.stringify(parameters);
+        const metaJson = metadata === undefined || metadata === null ? "{}" : JSON.stringify(metadata);
+        const sessionKey = String(typeof authSession === "object" && authSession !== null ? (authSession.principal ?? "") + ":" + authSession.sessionId : "");
+        const scopeJson = JSON.stringify(intent.scope ?? []);
+        const key = `${intent.intentId}|${intent.capabilityId}|${intent.capabilityIncarnationId}|${intent.operation}|${sessionKey}|${scopeJson}|${crypto3.createHash("sha256").update(paramsJson).digest("hex").slice(0, 16)}|${crypto3.createHash("sha256").update(metaJson).digest("hex").slice(0, 16)}`;
+        return crypto3.createHash("sha256").update(key).digest("hex");
+    }
+
+    async function execute(p) {
+        if (p === null || typeof p !== "object") {
+            throw fail3(REASONS3.MALFORMED_REQUEST, "execute requires a request object");
+        }
+        for (const key of CALLER_EXECUTOR_KEYS3) {
+            if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
+                throw fail3(REASONS3.CALLER_EXECUTOR_REJECTED,
+                    `caller-executor option '${key}' is forbidden; the actuator is bootstrap-owned, never caller-selectable`);
+            }
+        }
+        for (const key of BEARER_DECISION_KEYS3) {
+            if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
+                throw fail3(REASONS3.CALLER_EXECUTOR_REJECTED,
+                    `authority-decision option '${key}' is forbidden; an AuthorityDecision is historical evidence, not a bearer execution token`);
+            }
+        }
+
+        const { intent, authSession } = p;
+        if (!intent || typeof intent !== "object" ||
+            typeof intent.intentId !== "string" ||
+            typeof intent.capabilityId !== "string" ||
+            typeof intent.operation !== "string" ||
+            typeof intent.capabilityIncarnationId !== "string") {
+            throw fail3(REASONS3.INVALID_INTENT, "execute requires a canonical ActionIntent");
+        }
+        if (!isValidIncarnation3(intent.capabilityIncarnationId)) {
+            throw fail3(REASONS3.INVALID_INTENT, "intent capabilityIncarnationId is not a valid canonical incarnation");
+        }
+        if (authSession === null || typeof authSession !== "object") {
+            throw fail3(REASONS3.INVALID_SESSION, "execute requires an authenticated session");
+        }
+
+        const requestedAtMs = canonicalClockNow3();
+        const lifecycle = createLifecycleTracker3(LIFECYCLE3.CREATED);
+        const admittedAtMs = intent.createdAtMs;
+
+        let provisionalRequest;
+        try {
+            provisionalRequest = formExecutionRequest3({
+                intentId: intent.intentId,
+                capabilityId: intent.capabilityId,
+                capabilityIncarnationId: intent.capabilityIncarnationId,
+                operation: intent.operation,
+                principal: "<pending-revalidation>",
+                scope: intent.scope,
+                authorityGeneration: 0,
+                admittedAtMs,
+                requestedAtMs,
+                parameters: p.parameters,
+                metadata: p.metadata
+            });
+        } catch (e) {
+            lifecycle.advance(LIFECYCLE3.FAILED, requestedAtMs);
+            throw e;
+        }
+
+        const contentKey = computeContentKey3(intent, authSession, p.parameters, p.metadata);
+        if (inFlight.has(contentKey)) {
+            return inFlight.get(contentKey).promise;
+        }
+        if (completed.has(contentKey)) {
+            return completed.get(contentKey).result;
+        }
+
+        const inFlightEntry = { promise: null, request: provisionalRequest, intentId: provisionalRequest.intentId };
+        inFlight.set(contentKey, inFlightEntry);
+        const runPromise = (async () => {
+            try {
+                return await runExecutionBody3(contentKey, intent, authSession, p, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs);
+            } finally {
+                inFlight.delete(contentKey);
+            }
+        })();
+        inFlightEntry.promise = runPromise;
+        return runPromise;
+    }
+
+    async function runExecutionBody3(contentKey, intent, authSession, p, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs) {
+        // ── PRE-ACTUATION REVALIDATION (the core invariant) ────────────
+        lifecycle.advance(LIFECYCLE3.REVALIDATING, canonicalClockNow3());
+
+        let freshDecision;
+        try {
+            freshDecision = await lane2Facade.evaluate(intent, authSession);
+        } catch (e) {
+            lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+            const result = buildExecutionResult3({
+                executionRequest: provisionalRequest,
+                state: RESULT_STATE3.FAILED,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: requestedAtMs,
+                completedAtMs: canonicalClockNow3(),
+                failureReason: REASONS3.AUTHORITY_REVALIDATION_REQUIRED,
+                failureDetail: "fresh canonical authority evaluation threw"
+            });
+            noteCompleted(contentKey, { result, request: provisionalRequest, intentId: provisionalRequest.intentId });
+            return result;
+        }
+
+        if (!freshDecision || freshDecision.decision !== DECISION3.ALLOW) {
+            lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+            const reasonCode = freshDecision ? freshDecision.reasonCode : "NO_DECISION";
+            const result = buildExecutionResult3({
+                executionRequest: provisionalRequest,
+                state: RESULT_STATE3.FAILED,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: requestedAtMs,
+                completedAtMs: canonicalClockNow3(),
+                failureReason: REASONS3.AUTHORITY_DENIED,
+                failureDetail: `fresh canonical evaluation denied: ${reasonCode}`
+            });
+            noteCompleted(contentKey, { result, request: provisionalRequest, intentId: provisionalRequest.intentId });
+            return result;
+        }
+
+        if (typeof freshDecision.capabilityIncarnationId === "string" &&
+            freshDecision.capabilityIncarnationId !== intent.capabilityIncarnationId) {
+            lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+            const result = buildExecutionResult3({
+                executionRequest: provisionalRequest,
+                state: RESULT_STATE3.FAILED,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: requestedAtMs,
+                completedAtMs: canonicalClockNow3(),
+                failureReason: REASONS3.CAPABILITY_INCARNATION_MISMATCH,
+                failureDetail: `intent incarnation ${intent.capabilityIncarnationId} != fresh ${freshDecision.capabilityIncarnationId}`
+            });
+            noteCompleted(contentKey, { result, request: provisionalRequest, intentId: provisionalRequest.intentId });
+            return result;
+        }
+
+        const principal = freshDecision.principal;
+        if (typeof principal !== "string" || principal.length === 0) {
+            lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+            const result = buildExecutionResult3({
+                executionRequest: provisionalRequest,
+                state: RESULT_STATE3.FAILED,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: requestedAtMs,
+                completedAtMs: canonicalClockNow3(),
+                failureReason: REASONS3.INVALID_IDENTITY,
+                failureDetail: "fresh canonical evaluation produced no principal"
+            });
+            noteCompleted(contentKey, { result, request: provisionalRequest, intentId: provisionalRequest.intentId });
+            return result;
+        }
+
+        const revalidation = {
+            principal,
+            authorityGeneration: freshDecision.authorityGeneration,
+            revalidatedAtMs: canonicalClockNow3()
+        };
+        let request;
+        try {
+            request = formExecutionRequest3({
+                intentId: intent.intentId,
+                capabilityId: intent.capabilityId,
+                capabilityIncarnationId: intent.capabilityIncarnationId,
+                operation: intent.operation,
+                principal,
+                scope: intent.scope,
+                authorityGeneration: freshDecision.authorityGeneration,
+                admittedAtMs,
+                requestedAtMs,
+                parameters: p.parameters,
+                metadata: p.metadata
+            });
+        } catch (e) {
+            lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+            throw e;
+        }
+
+        const binding = actuatorRegistry.resolve(intent.capabilityId, intent.operation);
+        if (!binding) {
+            lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+            const result = buildExecutionResult3({
+                executionRequest: request,
+                state: RESULT_STATE3.FAILED,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: requestedAtMs,
+                completedAtMs: canonicalClockNow3(),
+                failureReason: REASONS3.ACTUATOR_NOT_FOUND,
+                failureDetail: `no actuator registered for '${intent.capabilityId}.${intent.operation}'`
+            });
+            noteCompleted(contentKey, { result, request, intentId: request.intentId });
+            return result;
+        }
+        if (binding.capabilityIncarnationId !== intent.capabilityIncarnationId) {
+            lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+            const result = buildExecutionResult3({
+                executionRequest: request,
+                state: RESULT_STATE3.FAILED,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: requestedAtMs,
+                completedAtMs: canonicalClockNow3(),
+                failureReason: REASONS3.ACTUATOR_INCARNATION_MISMATCH,
+                failureDetail: `actuator binding capability incarnation ${binding.capabilityIncarnationId} != intent ${intent.capabilityIncarnationId}`
+            });
+            noteCompleted(contentKey, { result, request, intentId: request.intentId });
+            return result;
+        }
+        if (binding.readiness !== READINESS3.READY) {
+            lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+            const result = buildExecutionResult3({
+                executionRequest: request,
+                state: RESULT_STATE3.FAILED,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: requestedAtMs,
+                completedAtMs: canonicalClockNow3(),
+                failureReason: REASONS3.ACTUATOR_UNAVAILABLE,
+                failureDetail: `actuator readiness is ${binding.readiness}`
+            });
+            noteCompleted(contentKey, { result, request, intentId: request.intentId });
+            return result;
+        }
+
+        lifecycle.advance(LIFECYCLE3.READY, canonicalClockNow3());
+
+        const signal = p.signal;
+        if (signal && typeof signal.addEventListener === "function" && signal.aborted) {
+            lifecycle.advance(LIFECYCLE3.CANCELLED, canonicalClockNow3());
+            const result = buildExecutionResult3({
+                executionRequest: request,
+                state: RESULT_STATE3.CANCELLED,
+                actuatorId: binding.actuatorId,
+                actuatorIncarnationId: binding.actuatorIncarnationId,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: requestedAtMs,
+                completedAtMs: canonicalClockNow3(),
+                failureReason: REASONS3.CANCELLED_BEFORE_DISPATCH,
+                failureDetail: "cancelled before actuator invocation"
+            });
+            noteCompleted(contentKey, { result, request, intentId: request.intentId });
+            return result;
+        }
+
+        lifecycle.advance(LIFECYCLE3.DISPATCHING, canonicalClockNow3());
+        const dispatchStartMs = canonicalClockNow3();
+        const effectiveTimeout = (typeof p.timeoutMs === "number" && Number.isSafeInteger(p.timeoutMs) && p.timeoutMs >= MIN_TIMEOUT3 && p.timeoutMs <= MAX_TIMEOUT3)
+            ? p.timeoutMs : timeoutMs;
+
+        let cancelledDuringDispatch = false;
+        let invocationCount = 0;
+
+        const execPromise = (async () => {
+            invocationCount++;
+            return await binding.invoke({
+                executionId: request.executionId,
+                intentId: request.intentId,
+                capabilityId: request.capabilityId,
+                operation: request.operation,
+                principal: request.principal,
+                scope: request.scope,
+                parameters: request.parameters
+            });
+        })();
+
+        let timeoutHandle = null;
+        let timedOut = false;
+        const timeoutPromise = new Promise((resolve) => {
+            timeoutHandle = setTimeout(() => {
+                timedOut = true;
+                resolve(null);
+            }, effectiveTimeout);
+            if (typeof timeoutHandle.unref === "function") timeoutHandle.unref();
+        });
+
+        let cancelListener = null;
+        if (signal && typeof signal.addEventListener === "function") {
+            cancelListener = () => {
+                if (lifecycle.state === LIFECYCLE3.DISPATCHING && !timedOut) {
+                    cancelledDuringDispatch = true;
+                }
+            };
+            signal.addEventListener("abort", cancelListener);
+        }
+
+        let actuatorOutput = null;
+        let dispatchFailed = null;
+        try {
+            actuatorOutput = await Promise.race([execPromise, timeoutPromise]);
+            if (timedOut) {
+                lifecycle.advance(LIFECYCLE3.TIMED_OUT, canonicalClockNow3());
+                const result = buildExecutionResult3({
+                    executionRequest: request,
+                    state: RESULT_STATE3.TIMED_OUT,
+                    actuatorId: binding.actuatorId,
+                    actuatorIncarnationId: binding.actuatorIncarnationId,
+                    lifecycleTrace: lifecycle.trace,
+                    startedAtMs: dispatchStartMs,
+                    completedAtMs: canonicalClockNow3(),
+                    failureReason: REASONS3.TIMEOUT_EXCEEDED,
+                    failureDetail: `actuator exceeded ${effectiveTimeout}ms timeout; effect ambiguity preserved`
+                });
+                noteCompleted(contentKey, { result, request, intentId: request.intentId });
+                return result;
+            }
+        } catch (e) {
+            dispatchFailed = e;
+        } finally {
+            if (timeoutHandle) clearTimeout(timeoutHandle);
+            if (signal && typeof signal.removeEventListener === "function" && cancelListener) {
+                try { signal.removeEventListener("abort", cancelListener); } catch { /* best-effort */ }
+            }
+        }
+
+        if (dispatchFailed) {
+            lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+            const sanitized = sanitizeActuatorOutput3(dispatchFailed);
+            const result = buildExecutionResult3({
+                executionRequest: request,
+                state: RESULT_STATE3.FAILED,
+                actuatorId: binding.actuatorId,
+                actuatorIncarnationId: binding.actuatorIncarnationId,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: dispatchStartMs,
+                completedAtMs: canonicalClockNow3(),
+                actuatorReport: sanitized,
+                failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION,
+                failureDetail: "actuator invocation threw"
+            });
+            noteCompleted(contentKey, { result, request, intentId: request.intentId });
+            return result;
+        }
+
+        lifecycle.advance(LIFECYCLE3.EXECUTED, canonicalClockNow3());
+        const result = buildExecutionResult3({
+            executionRequest: request,
+            state: RESULT_STATE3.EXECUTED,
+            actuatorId: binding.actuatorId,
+            actuatorIncarnationId: binding.actuatorIncarnationId,
+            lifecycleTrace: lifecycle.trace,
+            startedAtMs: dispatchStartMs,
+            completedAtMs: canonicalClockNow3(),
+            actuatorReport: actuatorOutput
+        });
+        noteCompleted(contentKey, { result, request, intentId: request.intentId });
+        return result;
+    }
+
+    return Object.freeze({
+        execute,
+        registerActuator: actuatorRegistry.register,
+        removeActuator: actuatorRegistry.remove,
+        dispatcherState: Object.freeze({
+            inFlightCount: () => inFlight.size,
+            completedCount: () => completed.size,
+            timeoutMs: () => timeoutMs
+        })
+    });
+}
+
+// The ONE canonical actuation facade, created exactly once, lazily, on first use.
 let canonicalActuation = null;
 
 /**
@@ -719,19 +1583,39 @@ function createCanonicalActuationFacade() {
     }
     if (canonicalActuation === null) {
         const lane2Facade = createCanonicalActionFacade();
-        const actuatorRegistry = buildActuatorRegistry();
-        const dispatcher = composeDispatcher({
+        const actuatorRegistry = buildActuatorRegistry3();
+        const dispatcher = composeDispatcher3({
             lane2Facade,
             actuatorRegistry,
             clock: { nowMs: () => Date.now() }
         });
-        // Downstream receives ONLY execute. The registrar capability
-        // (registerActuator/removeActuator) stays in this closure for the
-        // trusted runtime layer's own actuator wiring (a later lane wires real
-        // actuators; Lane 3 ships the fabric + tests wire test actuators via
-        // the test-only harness).
+        // Downstream receives ONLY execute + the two PURE brand-recognition
+        // predicates. The predicates read THIS closure's brand WeakSets
+        // directly (closure-private, never exported as mutable state). The
+        // registrar capability (registerActuator/removeActuator) stays in this
+        // closure for the trusted runtime layer's own actuator wiring (a later
+        // lane wires real actuators; Lane 3 ships the fabric + tests wire test
+        // actuators via the test-only harness).
         canonicalActuation = Object.freeze({
-            execute: dispatcher.execute
+            execute: dispatcher.execute,
+
+            // PURE brand-recognition predicates — BRAND-FIRST: closure-only
+            // WeakSet membership decides. Downstream can ASK "is this
+            // canonical?"; downstream cannot CAUSE "make this canonical" (the
+            // brand WeakSets are closure-private; no export exposes them or
+            // any mutation capability).
+            isCanonicalExecutionRequest(value) {
+                if (value === null || typeof value !== "object") return false;
+                if (value.schemaVersion !== 1) return false;
+                if (typeof value.executionId !== "string" || value.executionId.length === 0) return false;
+                return requestBrandSet3.has(value);
+            },
+            isCanonicalExecutionResult(value) {
+                if (value === null || typeof value !== "object") return false;
+                if (value.schemaVersion !== 1) return false;
+                if (typeof value.executionId !== "string" || value.executionId.length === 0) return false;
+                return resultBrandSet3.has(value);
+            }
         });
     }
     return canonicalActuation;
