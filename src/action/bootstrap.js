@@ -1851,6 +1851,41 @@ function vSafeClassify4(value) {
     return "inert";
 }
 
+/**
+ * PLAIN-THENABLE WHOLE-OBJECT TRANSPORT REJECTION (TARGETED REPAIR 3).
+ *
+ * A plain (non-Proxy) object/array carrying an OWN property named `then` is
+ * a thenable-shaped observation transport surface. Even if JavaScript would
+ * never actually call it as a function, Lane 4 must treat it as an
+ * unsupported transport object because:
+ *   - it is semantically ambiguous with async transport (R2 contract);
+ *   - an accessor-backed `then` getter would execute behavior during native
+ *     assimilation if any caller ever let the value cross a Promise boundary;
+ *   - partial sanitization that SKIPS the `then` accessor and retains
+ *     sibling fields can manufacture apparently-valid evidence (VERIFIED_
+ *     SUCCESS) out of hostile input — the exact bug this repair closes.
+ *
+ * PRESENCE of an own `then` property is sufficient to fail closed: the
+ * ENTIRE observation value is rejected as `thenableTransport`, regardless
+ * of `then`'s value (data property, accessor, function, non-function,
+ * undefined, null). There is NO duck typing (no `typeof obj.then`),
+ * NO getter invocation, NO setter invocation. The check uses
+ * Object.getOwnPropertyDescriptor — which, on a value already proven
+ * non-Proxy by vSafeClassify4, performs NO attacker-controlled trap.
+ *
+ * Returns:
+ *   true  — the value has an own `then` property (transport-shaped: reject)
+ *   false — no own `then` property (safe to traverse)
+ * The caller is responsible for having already classified the value as a
+ * non-Proxy plain object/array.
+ */
+function vHasOwnThen4(v) {
+    // Object.getOwnPropertyDescriptor returns undefined for absent own props;
+    // it does NOT consult inherited or Proxy-trap semantics on a non-Proxy
+    // value. The `then` getter/setter is NEVER invoked.
+    return Object.getOwnPropertyDescriptor(v, "then") !== undefined;
+}
+
 // Hostile-input detachment for DECLARATIVE postcondition values, evidence
 // and compensation parameters: functions/symbols/accessors/class instances/
 // cycles/prototype-pollution keys are rejected (fail-closed), values are
@@ -1887,6 +1922,21 @@ function vDetach4(value, state) {
     if (cls === "hostile") {
         // Fail closed with a typed error. NEVER reinterpret as a world claim.
         throw fail4(VREASONS4.NON_PLAIN_OBJECT, "proxy-like or non-plain value is not permitted (zero-trap fail-closed)");
+    }
+    // TARGETED REPAIR 3: own-`then` whole-input rejection for
+    // postcondition/compensation-parameter payloads. An input carrying an
+    // OWN `then` property — data, accessor, function, non-function — is a
+    // transport-shaped surface and is rejected whole BEFORE recursive
+    // detachment (consistent with the observation transport rule). Descriptor
+    // lookup on a proven non-Proxy performs no traps; the getter is never
+    // invoked. This also catches accessor-backed `then` early (whereas the
+    // ACCESSOR_PROPERTY branch below would otherwise have rejected it for a
+    // different reason — this rule is structural, not duck-typed).
+    if (cls === "object" || cls === "array" || cls === "error") {
+        if (vHasOwnThen4(value)) {
+            throw fail4(VREASONS4.UNSUPPORTED_ASYNC_RAW_RETURN,
+                "thenable-shaped input is not permitted (own \"then\" property rejected whole)");
+        }
     }
     // cls is "array" | "object" — reflection is now safe (value is not a
     // Proxy and its prototype is genuinely Array/Object/null).
@@ -2168,6 +2218,10 @@ const V_EV_NODES4 = 512;
 // Sentinel returned for hostile values: the caller translates this into a
 // verifier-infrastructure ERROR, never a world claim.
 const V_HOSTILE_SENTINEL4 = Symbol("damar.action.verification.evidence.hostile");
+// Sentinel for own-`then` (thenable-shaped) observation transport values
+// (TARGETED REPAIR 3): the caller translates this into the typed
+// UNSUPPORTED_ASYNC_RAW_RETURN ERROR, never a world claim.
+const V_THENABLE_SENTINEL4 = Symbol("damar.action.verification.evidence.thenableTransport");
 
 function sanitizeEvidence4(value) {
     const state = { nodes: 0, path: new Set() };
@@ -2208,6 +2262,13 @@ function sanitizeEvidence4(value) {
         if (cls === "error") {
             // Native Error normalization (the classifier proved not a Proxy
             // and a static Error.prototype chain). No HasInstance gadget.
+            // TARGETED REPAIR 3: an Error carrying an OWN `then` property is
+            // transport-shaped and must be rejected whole — the Error branch
+            // must not become a bypass for the own-then rule. The descriptor
+            // check on a proven non-Proxy performs no traps.
+            if (vHasOwnThen4(v)) {
+                return V_THENABLE_SENTINEL4;
+            }
             return normalizeErrorName(v);
         }
         if (cls === "hostile") {
@@ -2216,6 +2277,18 @@ function sanitizeEvidence4(value) {
             // observation: the caller maps the sentinel to the verifier-
             // infrastructure ERROR state (never VERIFIED_SUCCESS/FAILURE).
             return V_HOSTILE_SENTINEL4;
+        }
+
+        // TARGETED REPAIR 3: own-`then` whole-object transport rejection.
+        // The value is now a non-Proxy plain object/array (cls is
+        // "array"|"object"); Object.getOwnPropertyDescriptor on a non-Proxy
+        // performs NO attacker-controlled trap. The `then` getter/setter is
+        // NEVER invoked. Presence of an own `then` — data property,
+        // accessor, function, non-function, undefined, null — is sufficient
+        // to reject the ENTIRE observation as thenable-shaped transport
+        // (recursive: a nested own-`then` poisons the whole observation).
+        if (vHasOwnThen4(v)) {
+            return V_THENABLE_SENTINEL4;
         }
 
         // cls is "array" | "object" — reflection is now safe (value is not a
@@ -2228,11 +2301,13 @@ function sanitizeEvidence4(value) {
             // Propagate poisoning: any hostile nested value poisons the
             // entire observation.
             if (out.some((x) => x === V_HOSTILE_SENTINEL4)) return V_HOSTILE_SENTINEL4;
+            if (out.some((x) => x === V_THENABLE_SENTINEL4)) return V_THENABLE_SENTINEL4;
             return out;
         }
         const out = {};
         let keys = 0;
         let poisoned = false;
+        let poisonedSentinel = V_HOSTILE_SENTINEL4;
         for (const key of Object.getOwnPropertyNames(v)) {
             if (keys >= V_EV_KEYS4) break;
             keys++;
@@ -2241,8 +2316,9 @@ function sanitizeEvidence4(value) {
             if (!desc || desc.get || desc.set) continue;
             const kk = key.length > 128 ? key.slice(0, 128) : key;
             const child = walk(desc.value, depth + 1);
-            if (child === V_HOSTILE_SENTINEL4) {
+            if (child === V_HOSTILE_SENTINEL4 || child === V_THENABLE_SENTINEL4) {
                 poisoned = true;
+                poisonedSentinel = child;
                 break;
             }
             out[kk] = child;
@@ -2250,12 +2326,13 @@ function sanitizeEvidence4(value) {
         state.path.delete(v);
         // Propagate poisoning: any hostile nested value poisons the entire
         // observation (fail closed at the top level as ERROR).
-        if (poisoned) return V_HOSTILE_SENTINEL4;
+        if (poisoned) return poisonedSentinel;
         return out;
     }
 
     const result = walk(value, 0);
     if (result === V_HOSTILE_SENTINEL4) return V_HOSTILE_SENTINEL4;
+    if (result === V_THENABLE_SENTINEL4) return V_THENABLE_SENTINEL4;
     return result;
 }
 
@@ -2489,6 +2566,16 @@ function createCanonicalVerificationFacade() {
                         finalize(Object.freeze({ kind: "throw", name: "Error", message: "invalid observation value delivered to sink" }));
                         return;
                     }
+                    // TARGETED REPAIR 3: own-`then` whole-object transport
+                    // rejection. A sink payload carrying an own `then`
+                    // property — data, accessor, function, non-function — is
+                    // thenable-shaped transport; reject the whole observation
+                    // BEFORE boxing as valid data. Descriptor check on a
+                    // proven non-Proxy performs no traps; no getter invoked.
+                    if ((cls === "object" || cls === "array") && vHasOwnThen4(rawEvidence)) {
+                        finalize(Object.freeze({ kind: "thenableTransport" }));
+                        return;
+                    }
                     finalize(Object.freeze({ kind: "value", value: rawEvidence }));
                 },
                 rejectObservation(err) {
@@ -2547,6 +2634,14 @@ function createCanonicalVerificationFacade() {
                 // "async via sink" signal. Do NOT finalize from the return
                 // value — the sink path owns completion (or the timeout
                 // fires). Fall through silently.
+            } else if (cls === "error" && vHasOwnThen4(rawReturn)) {
+                // TARGETED REPAIR 3: an Error carrying an OWN `then` property
+                // is transport-shaped and must be rejected whole BEFORE the
+                // Error-to-throw normalization (the Error branch must not
+                // bypass the own-then rule). Descriptor lookup on a proven
+                // non-Proxy performs no traps.
+                finalize(Object.freeze({ kind: "thenableTransport" }));
+                return;
             } else if (cls === "inert" || cls === "error") {
                 // observe returning a non-undefined inert value (function,
                 // symbol, bigint, non-finite number) or an Error object
@@ -2576,7 +2671,16 @@ function createCanonicalVerificationFacade() {
             //     (Duplicate: if the sink already finalized first, ignore;
             //     for the undefined sink-async signal, the sink/timeout owns
             //     completion.)
+            //     TARGETED REPAIR 3: a plain object/array carrying an OWN
+            //     `then` property is a thenable-shaped transport surface —
+            //     reject the whole observation BEFORE boxing it as valid
+            //     data. The descriptor check on a proven non-Proxy performs
+            //     no traps; the `then` getter/setter is never invoked.
             if (!finalized && rawReturn !== undefined) {
+                if ((cls === "object" || cls === "array" || cls === "error") && vHasOwnThen4(rawReturn)) {
+                    finalize(Object.freeze({ kind: "thenableTransport" }));
+                    return;
+                }
                 finalize(Object.freeze({ kind: "value", value: rawReturn }));
             }
         });
@@ -2761,6 +2865,19 @@ function createCanonicalVerificationFacade() {
             verificationState = VSTATE4.ERROR;
             observedEvidence = null;
             detail = `unsupported async observation transport (${VREASONS4.UNSUPPORTED_ASYNC_RAW_RETURN}); async observers must complete through the trusted sink`;
+        } else if (observation.kind === "thenableTransport") {
+            // TARGETED REPAIR 3: the observation value (or a nested value
+            // inside it) carried an OWN `then` property — a thenable-shaped
+            // transport surface. Lane 4 detected it via descriptor lookup
+            // (no trap invocation) and rejected the ENTIRE observation
+            // BEFORE boxing it as valid data. Fail closed: typed
+            // observation-transport ERROR — never VERIFIED_SUCCESS, never
+            // VERIFIED_FAILURE, never INCONCLUSIVE, never a compensation
+            // trigger. Partial sanitization (skipping the `then` field and
+            // retaining sibling data) is forbidden.
+            verificationState = VSTATE4.ERROR;
+            observedEvidence = null;
+            detail = `thenable-shaped observation transport rejected (${VREASONS4.UNSUPPORTED_ASYNC_RAW_RETURN}); own "then" property poisons the whole observation`;
         } else {
             // observation.kind === "value"
             const evidence = sanitizeEvidence4(observation.value);
@@ -2770,6 +2887,13 @@ function createCanonicalVerificationFacade() {
                 verificationState = VSTATE4.ERROR;
                 observedEvidence = null;
                 detail = HOSTILE_EVIDENCE_DETAIL4;
+            } else if (evidence === V_THENABLE_SENTINEL4) {
+                // TARGETED REPAIR 3: a NESTED own-`then` value inside the
+                // observation poisoned the whole observation during
+                // sanitization. Same whole-object rejection semantics.
+                verificationState = VSTATE4.ERROR;
+                observedEvidence = null;
+                detail = `thenable-shaped observation transport rejected (${VREASONS4.UNSUPPORTED_ASYNC_RAW_RETURN}); own "then" property poisons the whole observation`;
             } else if (evidence === null && observation.value !== null && observation.value !== undefined) {
                 // Unusable-but-benign observation output: not evidence.
                 verificationState = VSTATE4.INCONCLUSIVE;
