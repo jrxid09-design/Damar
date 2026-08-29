@@ -30,6 +30,8 @@ const REQUIRED_SUBDIRS = [
     ["evolution", "rejected"]
 ];
 
+const RUNTIME_STATE_RELATIVE = path.join("self-model", "runtime-state.json");
+
 function createDamarSelfService({
     canonicalDir = process.env.DAMARSELF_DIR ?? DEFAULT_CANONICAL_DIR,
     legacyDir = null,
@@ -176,6 +178,50 @@ function createDamarSelfService({
     }
 
     /**
+     * State runtime milik self-model, bukan store kedua di root proyek.
+     * File lama hanya dibaca sekali sebagai input migrasi; setelah state
+     * kanonik ada, file tersebut tidak lagi menjadi sumber runtime.
+     */
+    function readRuntimeState() {
+        ensureStructure();
+
+        const canonicalFile = path.join(canonicalDir, RUNTIME_STATE_RELATIVE);
+        if (fs.existsSync(canonicalFile)) {
+            try {
+                const value = JSON.parse(fs.readFileSync(canonicalFile, "utf8"));
+                return value && typeof value === "object" && !Array.isArray(value)
+                    ? value : {};
+            }
+            catch { return {}; }
+        }
+
+        const parent = path.dirname(canonicalDir);
+        for (const legacyName of ["DAMAR_STATE.json", "AETHER_STATE.json"]) {
+            const legacyFile = path.join(parent, legacyName);
+            if (!fs.existsSync(legacyFile)) continue;
+            try {
+                const value = JSON.parse(fs.readFileSync(legacyFile, "utf8"));
+                const adopted = value && typeof value === "object" && !Array.isArray(value)
+                    ? value : {};
+                writeRuntimeState(adopted);
+                return adopted;
+            }
+            catch { /* invalid legacy state is ignored, never trusted */ }
+        }
+
+        return {};
+    }
+
+    function writeRuntimeState(value) {
+        ensureStructure();
+        const file = path.join(canonicalDir, RUNTIME_STATE_RELATIVE);
+        const safe = value && typeof value === "object" && !Array.isArray(value)
+            ? value : {};
+        fs.writeFileSync(file, JSON.stringify(safe, null, 2) + "\n", "utf8");
+        return file;
+    }
+
+    /**
      * APPEND-ONLY journal: konten lama wajib tetap identik sebagai prefix;
      * pelanggaran = gagal sebelum menulis (§PAST EXPERIENCE PRESERVED).
      */
@@ -292,6 +338,7 @@ function createDamarSelfService({
         resolveCanonical, ensureStructure, migrateFromLegacy,
         adoptLegacySelfDir, defaultLegacyDir,
         readIdentityBytes, readJournalBytes, appendJournal,
+        readRuntimeState, writeRuntimeState,
         writeConstitutionPrinciples, readConstitutionVersion,
         writeEvolutionProposalDoc
     };
