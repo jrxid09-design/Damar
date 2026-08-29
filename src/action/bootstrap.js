@@ -2398,109 +2398,187 @@ function createCanonicalVerificationFacade() {
     }
 
     /**
-     * ZERO-TRAP observation runner. See the OBSERVING note in verify().
-     * Boxes the observation into a PLAIN frozen wrapper {kind, value?}
+     * ZERO-ASSIMILATION observation runner (TARGETED REPAIR 2).
+     *
+     * Boxes the observation outcome into a PLAIN frozen wrapper {kind, value?}
      * resolved through promises that NEVER contain an unclassified value:
-     *   - "value"  : benign/plain resolved value (or a hostile sentinel)
-     *   - "hostile": hostile raw return (Proxy / revoked / non-detached)
-     *   - "throw"  : observe threw (sanitized plain {name,message})
-     *   - "timeout": observe exceeded the bound
-     * Lane 4's classification of the resolved value uses ONLY typeof / === /
-     * internal-slot isProxy probes — zero attacker-controlled traps.
+     *   - "value"       : classified-safe evidence delivered synchronously or
+     *                     through the trusted sink
+     *   - "hostile"     : hostile evidence (Proxy / revoked / non-detached)
+     *   - "throw"       : observe threw / rejected (sanitized plain
+     *                     {name,message} only)
+     *   - "timeout"     : observation exceeded the bound
+     *   - "unsupported" : verifier used an UNSUPPORTED async transport (a
+     *                     Promise return), which would require native
+     *                     thenable assimilation of untrusted evidence
+     *
+     * NATIVE PROMISE ASSIMILATION IS NEVER USED ON UNTRUSTED EVIDENCE:
+     * the pre-R2 path called `promise.then(...)` on a genuine Promise
+     * returned by an async observer; V8 assimilates the promise's RESOLVED
+     * value by probing `.then` on it (PromiseResolveThenableJob), which
+     * executes a hostile Proxy's `get` trap BEFORE vSafeClassify4 ever sees
+     * the value. R2 removes every `then` call on values that can originate
+     * from the verifier:
+     *
+     *   SYNC OBSERVERS   observe(ctx) -> raw evidence: the raw return is
+     *                    classified immediately (zero-trap classifier) and
+     *                    boxed; it is NEVER passed through Promise.resolve /
+     *                    await / .then.
+     *   ASYNC OBSERVERS  observe(ctx, sink): the observer drives a
+     *                    bootstrap-owned trusted sink. The sink classifies
+     *                    the evidence SYNCHRONOUSLY at receipt — before any
+     *                    promise machinery can assimilate it — and stores
+     *                    only the classified box. The sink is frozen,
+     *                    closure-private, exactly-once, and cannot be
+     *                    replaced by the verifier. A Promise RETURN from the
+     *                    observer is UNSUPPORTED (fail closed to ERROR with
+     *                    UNSUPPORTED_ASYNC_RAW_RETURN semantics — never
+     *                    VERIFIED_SUCCESS / VERIFIED_FAILURE, never a
+     *                    compensation trigger).
+     *
+     * LATE / DUPLICATE COMPLETION: only the FIRST valid completion (before
+     * the timeout) finalizes the observation. Late or duplicate completions
+     * are ignored and can never mutate the canonical result or trigger
+     * compensation.
      */
     function vRunObservation4(binding, request, executionResult, timeoutMs) {
         return new Promise((resolve) => {
-            let done = false;
-            const finish = (box) => {
-                if (done) return;
-                done = true;
+            let finalized = false;
+            const finalize = (box) => {
+                if (finalized) return; // exactly-once; late/duplicate ignored
+                finalized = true;
+                clearTimeout(timeoutHandle);
                 resolve(box);
             };
 
-            // Timeout box (plain frozen; never carries an unclassified value).
             const timeoutHandle = setTimeout(() => {
-                finish(Object.freeze({ kind: "timeout" }));
+                finalize(Object.freeze({ kind: "timeout" }));
             }, timeoutMs);
             if (typeof timeoutHandle.unref === "function") timeoutHandle.unref();
 
+            // Trusted sink: bootstrap-owned, frozen, closure-private. Raw
+            // evidence is classified SYNCHRONOUSLY at receipt (before any
+            // promise machinery), and only the classified box is stored.
+            const observationCtx = Object.freeze({
+                verificationId: request.verificationId,
+                executionId: request.executionId,
+                intentId: request.intentId,
+                capabilityId: request.capabilityId,
+                operation: request.operation,
+                principal: request.principal,
+                scope: request.scope,
+                parameters: executionResult.parameters ?? null,
+                expectedPostcondition: request.expectedPostcondition
+            });
+
+            const sink = Object.freeze({
+                resolveEvidence(rawEvidence) {
+                    if (finalized) return; // duplicate/late completion ignored
+                    // Classify BEFORE storing: zero-trap gate only.
+                    const cls = vSafeClassify4(rawEvidence);
+                    if (cls === "hostile") {
+                        finalize(Object.freeze({ kind: "hostile" }));
+                        return;
+                    }
+                    if (cls === "inert" || cls === "error" || cls === "promise") {
+                        // Inert (fn/symbol/bigint/class instance) evidence and
+                        // Error objects delivered through the sink are not
+                        // observation values: map to throw/hostile per the
+                        // transport contract (a sink may not deliver Errors
+                        // as evidence — use rejectObservation).
+                        finalize(Object.freeze({ kind: "throw", name: "Error", message: "invalid observation value delivered to sink" }));
+                        return;
+                    }
+                    finalize(Object.freeze({ kind: "value", value: rawEvidence }));
+                },
+                rejectObservation(err) {
+                    if (finalized) return; // duplicate/late completion ignored
+                    // Sanitized plain error metadata only; the err object
+                    // itself is NEVER stored (its properties may be hostile).
+                    const e = (err !== null && typeof err === "object") ? err : null;
+                    const name = (e !== null && typeof e.name === "string") ? e.name.slice(0, 64) : "Error";
+                    const message = (e !== null && typeof e.message === "string") ? e.message.slice(0, V_EV_STRING_CHARS4) : "verifier rejected the observation";
+                    finalize(Object.freeze({ kind: "throw", name, message }));
+                }
+            });
+
             // (1) Synchronous observe call — capture the raw RETURN.
+            //     NEVER `Promise.resolve(observe())` / `await observe()`:
+            //     both assimilate the returned value's `.then`.
             let rawReturn;
             try {
-                rawReturn = binding.observe({
-                    verificationId: request.verificationId,
-                    executionId: request.executionId,
-                    intentId: request.intentId,
-                    capabilityId: request.capabilityId,
-                    operation: request.operation,
-                    principal: request.principal,
-                    scope: request.scope,
-                    parameters: executionResult.parameters ?? null,
-                    expectedPostcondition: request.expectedPostcondition
-                });
+                rawReturn = binding.observe(observationCtx, sink);
             } catch (e) {
-                clearTimeout(timeoutHandle);
-                finish(Object.freeze({
-                    kind: "throw",
-                    name: String((e && e.name) ?? "Error").slice(0, 64),
-                    message: String((e && e.message) ?? "").slice(0, V_EV_STRING_CHARS4)
-                }));
+                // observe threw synchronously: sanitized plain metadata only.
+                const name = ((e && typeof e.name === "string") ? e.name.slice(0, 64) : "Error");
+                const message = ((e && typeof e.message === "string") ? e.message.slice(0, V_EV_STRING_CHARS4) : "");
+                finalize(Object.freeze({ kind: "throw", name, message }));
                 return;
             }
 
             // (2) ZERO-TRAP classify the raw return. The ONLY operations on
-            //     rawReturn here are typeof / === / internal-slot probes.
-            //     Crucially: NO `.then` read. A thenable-check would probe a
-            //     hostile Proxy's get trap; the proxy gate replaces it.
+            //     rawReturn here are typeof / === / internal-slot probes —
+            //     NO `.then` read, NO `.then` call, NO assimilation.
+            //     A Promise return is UNSUPPORTED: awaiting it would require
+            //     native thenable assimilation of its eventual resolution,
+            //     which executes attacker-controlled `then` behavior before
+            //     Lane 4 can classify. Fail closed.
             const cls = vSafeClassify4(rawReturn);
             if (cls === "promise") {
-                // Genuine Promise from an async observer: await through the
-                // Promise's OWN then (a plain method on the trusted Promise
-                // object — no trap). The resolved value is re-classified
-                // before any use. (A hostile Proxy-wrapped promise was
-                // already rejected as "hostile" by the internal-slot gate.)
-                rawReturn.then(
-                    (resolved) => {
-                        clearTimeout(timeoutHandle);
-                        const rcls = vSafeClassify4(resolved);
-                        if (rcls === "hostile" || rcls === "error" || rcls === "promise") {
-                            finish(Object.freeze({ kind: "hostile" }));
-                            return;
-                        }
-                        finish(Object.freeze({ kind: "value", value: resolved }));
-                    },
-                    (err) => {
-                        clearTimeout(timeoutHandle);
-                        finish(Object.freeze({
-                            kind: "throw",
-                            name: String((err && err.name) ?? "Error").slice(0, 64),
-                            message: String((err && err.message) ?? "").slice(0, V_EV_STRING_CHARS4)
-                        }));
-                    }
-                );
+                // Unsupported async transport (raw Promise return). The
+                // observer must use the trusted sink for async completion.
+                // The Promise object itself is NEVER assimilated by Lane 4:
+                // no .then call, no await, no Promise.resolve. (If the
+                // verifier's own code already assimilated a hostile value
+                // internally, that execution belongs to the trusted
+                // verifier's process — Lane 4's transport stays clean.)
+                finalize(Object.freeze({ kind: "unsupported" }));
                 return;
             }
-            if (cls === "hostile" || cls === "error") {
-                // Hostile or Error-typed return (observe returning a thrown
-                // Error is a verifier infrastructure error). Box as hostile
-                // sentinel — the value itself is NEVER placed inside a promise.
-                clearTimeout(timeoutHandle);
-                finish(Object.freeze({ kind: "hostile" }));
+            if (cls === "hostile") {
+                // Hostile raw return (Proxy / revoked proxy / Proxy-wrapped
+                // thenable): rejected at the internal-slot gate with zero
+                // trap execution; never assimilated, never retained.
+                finalize(Object.freeze({ kind: "hostile" }));
                 return;
             }
-            if (cls !== "object" && cls !== "array" && cls !== "primitive" && cls !== "null") {
-                // Defensive: any unclassified shape is fail-closed.
-                clearTimeout(timeoutHandle);
-                finish(Object.freeze({ kind: "hostile" }));
+            if (rawReturn === undefined) {
+                // The observer returned undefined: this is the canonical
+                // "async via sink" signal. Do NOT finalize from the return
+                // value — the sink path owns completion (or the timeout
+                // fires). Fall through silently.
+            } else if (cls === "inert" || cls === "error") {
+                // observe returning a non-undefined inert value (function,
+                // symbol, bigint, non-finite number) or an Error object
+                // directly: an observer must not deliver these as a return
+                // value (use rejectObservation for errors). Classify-first
+                // means we never introspect these. Map to throw with
+                // sanitized metadata derived ONLY from zero-trap checks.
+                const name = ((rawReturn !== null && typeof rawReturn.name === "string") ? rawReturn.name.slice(0, 64) : "Error");
+                const message = ((rawReturn !== null && typeof rawReturn.message === "string") ? rawReturn.message.slice(0, V_EV_STRING_CHARS4) : "observer returned an unsupported value; async observers must use the trusted sink");
+                finalize(Object.freeze({ kind: "throw", name, message }));
+                return;
+            }
+            if (cls === "null") {
+                // observe returned null with no sink completion: treated as
+                // no observation (the sink path or a non-null return is
+                // required). If the sink already finalized, this is a no-op.
+                if (!finalized) {
+                    finalize(Object.freeze({ kind: "throw", name: "Error", message: "observer returned null without completing the trusted sink" }));
+                }
                 return;
             }
 
-            // (3) cls is now one of: "primitive" | "null" | "object" | "array".
-            //     (A "promise" was handled above.) For a synchronous return,
-            //     box the value directly — the wrapper has no `then` property,
-            //     so resolving the OUTER promise with the wrapper performs NO
-            //     `.then` probe on the contained value.
-            clearTimeout(timeoutHandle);
-            finish(Object.freeze({ kind: "value", value: rawReturn }));
+            // (3) cls is "primitive" | "object" | "array": synchronous raw
+            //     evidence. Box the value directly — the wrapper has no
+            //     `then` property, so resolving the OUTER promise with the
+            //     wrapper performs NO `.then` probe on the contained value.
+            //     (Duplicate: if the sink already finalized first, ignore;
+            //     for the undefined sink-async signal, the sink/timeout owns
+            //     completion.)
+            if (!finalized && rawReturn !== undefined) {
+                finalize(Object.freeze({ kind: "value", value: rawReturn }));
+            }
         });
     }
 
@@ -2669,6 +2747,20 @@ function createCanonicalVerificationFacade() {
             verificationState = VSTATE4.ERROR;
             observedEvidence = null;
             detail = HOSTILE_EVIDENCE_DETAIL4;
+        } else if (observation.kind === "unsupported") {
+            // TARGETED REPAIR 2: the observer used an UNSUPPORTED async
+            // transport (a raw Promise return). Awaiting it would require
+            // native thenable assimilation of its eventual resolution,
+            // which executes attacker-controlled `then` behavior before
+            // Lane 4 can classify the evidence. Fail closed: typed
+            // observation-transport ERROR — never VERIFIED_SUCCESS, never
+            // VERIFIED_FAILURE, never INCONCLUSIVE, and NEVER a
+            // compensation trigger. The returned Promise object itself was
+            // never assimilated by Lane 4 (no .then call, no await, no
+            // Promise.resolve).
+            verificationState = VSTATE4.ERROR;
+            observedEvidence = null;
+            detail = `unsupported async observation transport (${VREASONS4.UNSUPPORTED_ASYNC_RAW_RETURN}); async observers must complete through the trusted sink`;
         } else {
             // observation.kind === "value"
             const evidence = sanitizeEvidence4(observation.value);

@@ -147,6 +147,15 @@ const REASONS = Object.freeze({
     CALLER_VERIFIER_REJECTED: "CALLER_VERIFIER_REJECTED",
     EXECUTABLE_POSTCONDITION_REJECTED: "EXECUTABLE_POSTCONDITION_REJECTED",
 
+    // async observation transport trust boundary (TARGETED REPAIR 2)
+    // Verifier observers must NOT transport evidence through native Promise
+    // resolution (thenable assimilation executes attacker-controlled `then`
+    // traps before Lane 4 can classify). The canonical contract is:
+    //   sync observe() -> raw evidence (immediately routed to the classifier)
+    //   async observe(ctx, sink) -> drives sink.resolveEvidence / sink.rejectObservation
+    // A Promise-returning observer is UNSUPPORTED and is mapped to ERROR.
+    UNSUPPORTED_ASYNC_RAW_RETURN: "UNSUPPORTED_ASYNC_RAW_RETURN",
+
     // compensation trust boundary
     COMPENSATION_NOT_AUTHORIZED: "COMPENSATION_NOT_AUTHORIZED",
     COMPENSATION_PLAN_MALFORMED: "COMPENSATION_PLAN_MALFORMED",
