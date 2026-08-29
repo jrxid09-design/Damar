@@ -1606,15 +1606,13 @@ function createCanonicalActuationFacade() {
             // any mutation capability).
             isCanonicalExecutionRequest(value) {
                 if (value === null || typeof value !== "object") return false;
-                if (value.schemaVersion !== 1) return false;
-                if (typeof value.executionId !== "string" || value.executionId.length === 0) return false;
-                return requestBrandSet3.has(value);
+                if (!requestBrandSet3.has(value)) return false;
+                return true;
             },
             isCanonicalExecutionResult(value) {
                 if (value === null || typeof value !== "object") return false;
-                if (value.schemaVersion !== 1) return false;
-                if (typeof value.executionId !== "string" || value.executionId.length === 0) return false;
-                return resultBrandSet3.has(value);
+                if (!resultBrandSet3.has(value)) return false;
+                return true;
             }
         });
     }

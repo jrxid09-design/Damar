@@ -4,6 +4,29 @@ Konvensi (mandat Ronny, 18 Agu 2026 09:34): SETIAP aksi perubahan = 1 commit che
 
 ---
 
+## 2026-08-28 (Actuation Fabric — second targeted repair: brand-first hostile-object safety)
+
+### Mandat
+AETHER WAVE 4 — LANE 3 second targeted repair. Codex found a HIGH-severity
+predicate-ordering defect: production brand predicates inspected
+attacker-controlled properties (schemaVersion/executionId) BEFORE checking
+closure-private WeakSet membership, letting a hostile Proxy execute traps
+on a noncanonical object.
+
+### Perbaikan
+Brand predicates became BRAND-FIRST: WeakSet.has (zero-trap reference-identity
+check) is checked before ANY property read. Recognition of noncanonical
+objects executes ZERO attacker-controlled property access.
+
+### Diuji
++10 trap-counting tests (BF-1 through BF-11); storm +2 active counters
+(hostileRequestPredicateTrapExecution / hostileResultPredicateTrapExecution).
+Lane 3: 46 tests, 0 failures. Lane 2: 89/89. Lane 1+Authority: 171/186
+(15 sqlite3 pre-existing, identik baseline). Differential: pass.
+
+
+---
+
 ## 2026-08-28 (Actuation Fabric — first targeted repair: private composition + closure-private brands)
 
 ### Mandat
