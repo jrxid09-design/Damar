@@ -11,7 +11,7 @@
  *   emb.getEmbodimentSummary(body);
  *
  * BATAS ISOLASI MILESTONE:
- *   - TIDAK menulis AetherSelf / ACC / Presence / Voice.
+ *   - TIDAK menulis DamarSelf / ACC / Presence / Voice.
  *   - TIDAK ada jalur aktuasi produksi — kanal aktuator hanya
  *     DIDESKRIPSI, tidak pernah DIEKSEKUSI.
  *   - TIDAK me-require src/cognition maupun src/database.

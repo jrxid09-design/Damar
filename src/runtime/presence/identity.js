@@ -21,7 +21,7 @@ const PRODUCER_KIND = Object.freeze({
     HOST: "HOST"
 });
 
-const BRAND = Symbol("aether.presence.producer");
+const BRAND = Symbol("damar.presence.producer");
 
 let producerCounter = 0;
 

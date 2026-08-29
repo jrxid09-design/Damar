@@ -9,7 +9,7 @@ const telemetry = require("./telemetryService");
 const MAX_BYTES = 45 * 1024 * 1024;   // batas aman WA/Telegram
 
 /**
- * Tool kirim media — Aether bisa mengirim foto/video/dokumen dari
+ * Tool kirim media — Damar bisa mengirim foto/video/dokumen dari
  * galeri Immich, berkas lokal (NAS/disk komputer), atau URL ke chat
  * WhatsApp/Telegram yang sedang berlangsung, atau menampilkannya
  * di Console.
@@ -189,7 +189,7 @@ async function deliver(channel, { buffer, mime, name }, kind, caption) {
         url = null;
     }
 
-    telemetry.publish("aether:present", {
+    telemetry.publish("damar:present", {
         kind: kind === "image" ? "image" : kind === "video" ? "video" : "document",
         url,
         caption: caption ?? name,

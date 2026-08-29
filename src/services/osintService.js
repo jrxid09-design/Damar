@@ -5,7 +5,7 @@ const JsonStore = require("../core/config/JsonStore");
 const telemetry = require("./telemetryService");
 
 /**
- * Aether OSINT Engine — detektif & investigator digital.
+ * Damar OSINT Engine — detektif & investigator digital.
  *
  * Mengumpulkan, mengorelasikan, dan menganalisis informasi dari
  * sumber terbuka (OSINT) untuk investigasi yang sah. Semua sumber
@@ -28,7 +28,7 @@ const telemetry = require("./telemetryService");
  * bukti, dan kesimpulan yang bisa diekspor.
  */
 
-const FILE = process.env.AETHER_OSINT_FILE
+const FILE = process.env.DAMAR_OSINT_FILE
     || path.join(__dirname, "..", "..", "configs", "osint.json");
 
 const store = new JsonStore(FILE, { cases: {}, reports: {} });

@@ -69,7 +69,7 @@ router.get("/plugins", pluginController.list);
 router.get("/tools", pluginController.tools);
 router.post("/tools/:id/execute", pluginController.execute);
 
-// ---- Forge (Aether bikin tool sendiri / editor manual) ---------
+// ---- Forge (Damar bikin tool sendiri / editor manual) ---------
 
 router.get("/forge", forgeController.list);
 router.post("/forge", forgeController.create);
@@ -125,7 +125,7 @@ router.post("/people/search", peopleController.search);
 router.get("/agents", orchestratorController.agents);
 router.post("/orchestrate", orchestratorController.orchestrate);
 
-// ---- Aether Lab (laboratorium kolaboratif) ---------------------------
+// ---- Damar Lab (laboratorium kolaboratif) ---------------------------
 const labController = require("../../../controllers/labController");
 router.get("/lab/projects", labController.projectsList);
 router.post("/lab/projects", labController.projectCreate);
@@ -147,7 +147,7 @@ router.get("/lab/missions", labController.missionsList);
 router.post("/lab/missions", labController.missionCreate);
 router.get("/lab/missions/:id", labController.missionGet);
 router.post("/lab/missions/:id/run", labController.missionRun);
-// Terapkan hasil misi ke Aether utama (memori / Beranda / misi lanjutan / kode).
+// Terapkan hasil misi ke Damar utama (memori / Beranda / misi lanjutan / kode).
 router.post("/lab/missions/:id/apply", labController.missionApply);
 router.post("/lab/missions/:id/status", labController.missionTransition);
 router.post("/lab/missions/:id/resume", labController.missionResume);

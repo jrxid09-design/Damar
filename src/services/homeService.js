@@ -44,11 +44,11 @@ class HomeService {
     }
 
     get url() {
-        return (this.cfg().url || process.env.AETHER_HASS_URL || "")
+        return (this.cfg().url || process.env.DAMAR_HASS_URL || "")
             .replace(/\/+$/, "") || null;
     }
     get token() {
-        return this.cfg().token || process.env.AETHER_HASS_TOKEN || null;
+        return this.cfg().token || process.env.DAMAR_HASS_TOKEN || null;
     }
     get configured() {
         return Boolean(this.url && this.token);

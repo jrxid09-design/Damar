@@ -1,5 +1,5 @@
 /**
- * Error terstruktur Aether (§110).
+ * Error terstruktur Damar (§110).
  *
  * String exception tidak cukup: pemulihan yang benar butuh tahu
  * apakah sebuah kegagalan layak diulang, seberapa parah, dan apa
@@ -8,7 +8,7 @@
  * Dipakai di batas modul. Error bawaan Node tetap boleh di dalam
  * satu modul; yang menyeberang batas harus terstruktur.
  */
-class AetherError extends Error {
+class DamarError extends Error {
 
     /**
      * @param {object} spec
@@ -32,7 +32,7 @@ class AetherError extends Error {
 
         super(message);
 
-        this.name = "AetherError";
+        this.name = "DamarError";
         this.code = code;
         this.severity = severity;
         this.retryable = retryable;
@@ -59,4 +59,4 @@ class AetherError extends Error {
 
 }
 
-module.exports = AetherError;
+module.exports = DamarError;

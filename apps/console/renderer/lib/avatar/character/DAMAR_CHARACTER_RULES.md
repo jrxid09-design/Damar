@@ -1,6 +1,6 @@
-# AETHER CHARACTER — CANONICAL IMPLEMENTATION RULES
+# DAMAR CHARACTER — CANONICAL IMPLEMENTATION RULES
 
-Aether is a DIGITAL ENTITY. Aether is NOT a humanoid robot.
+Damar is a DIGITAL ENTITY. Damar is NOT a humanoid robot.
 The character must be constructed from independent floating holographic components.
 
 Sumber kebenaran: file JSON di direktori ini (schema, geometry, materials, state).
@@ -30,12 +30,12 @@ chrome, plastic robot shell, opaque armored material.
 Fragmen orbital TIDAK boleh dilebur jadi satu mesh — harus terlihat
 ruang negatif di antaranya.
 
-## WARNA (aether-materials.json)
+## WARNA (damar-materials.json)
 
 primary #00D9FF · secondary #0FAAFF · cognitive #7C5CFF ·
 highlight #E8FCFF · error #FF3B3B · recovery #21E6A4 · background #050814
 
-## STATE (aether-state.json)
+## STATE (damar-state.json)
 
 IDLE FOCUSED THINKING ANALYZING EXECUTING CURIOUS HAPPY UNDERSTANDING
 ALERT SURPRISED ERROR SLEEP RECOVERY

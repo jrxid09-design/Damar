@@ -27,15 +27,15 @@ const PHASE_FLOW = {
 
 /** Afinitas agent per fase (§5) — constraint deterministik untuk planner. */
 const PHASE_AGENTS = {
-    IDEA: ["aether", "vanta", "mira"],
-    RESEARCH: ["vanta", "mira", "aether"],
-    DESIGN: ["aether", "forge", "vanta"],
-    PROTOTYPE: ["forge", "nexus", "aether"],
-    IMPLEMENTATION: ["forge", "nexus", "atlas"],
-    TESTING: ["forge", "pulse", "cipher"],
-    VALIDATION: ["pulse", "cipher", "aether"],
-    RELEASE: ["nexus", "forge", "lumen"],
-    MAINTENANCE: ["pulse", "nexus", "cipher"]
+    IDEA: ["damar", "janaka", "sadewa"],
+    RESEARCH: ["janaka", "sadewa", "damar"],
+    DESIGN: ["damar", "puntadewa", "janaka"],
+    PROTOTYPE: ["nakula", "puntadewa", "damar"],
+    IMPLEMENTATION: ["nakula", "puntadewa", "sadewa"],
+    TESTING: ["nakula", "sadewa", "werkudara"],
+    VALIDATION: ["sadewa", "werkudara", "damar"],
+    RELEASE: ["nakula", "puntadewa", "sadewa"],
+    MAINTENANCE: ["sadewa", "nakula", "werkudara"]
 };
 
 class ProjectEngine {

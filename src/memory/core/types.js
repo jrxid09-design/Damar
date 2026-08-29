@@ -1,5 +1,5 @@
 /**
- * Memory Core — taksonomi tipe memori Aether.
+ * Memory Core — taksonomi tipe memori Damar.
  *
  * 11 tipe arsitektur dipetakan ke tipe penyimpanan yang SUDAH ADA di
  * MemoryStore (semantic/episodic/preference/procedural) + metadata scope,
@@ -8,7 +8,7 @@
  * Field:
  *   storeType  — baris tipe di MemoryStore yang dipakai.
  *   ltm        — kandidat memori jangka panjang (false = fana/workspace).
- *   tier       — kini selalu "auto": Aether diberi keleluasaan penuh
+ *   tier       — kini selalu "auto": Damar diberi keleluasaan penuh
  *                mengatur memorinya sendiri — tulis langsung commit,
  *                tanpa persetujuan/verifikasi pengguna (kebijakan
  *                pemilik, lihat Governor).

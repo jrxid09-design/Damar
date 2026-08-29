@@ -4,7 +4,7 @@ const toolBus = require("./ToolBus");
 const telemetry = require("../services/telemetryService");
 
 /**
- * CAPABILITY REGISTRY — pusat seluruh kapabilitas Aether (§35).
+ * CAPABILITY REGISTRY — pusat seluruh kapabilitas Damar (§35).
  *
  * Mendaftarkan SEMUA jenis kapabilitas: tool runtime, skill buatan
  * (forge/temporary), agent, model, instrumen Lab, connector eksternal.

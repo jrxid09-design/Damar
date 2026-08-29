@@ -13,7 +13,7 @@ const telemetry = require("../services/telemetryService");
  * inilah yang membuat terminal benar-benar "dibagi".
  *
  * URL : ws://host:port/api/v1/console/terminals/:id/stream?token=...
- * Auth: AETHER_TOKEN (bila diset) via query token / header Authorization.
+ * Auth: DAMAR_TOKEN (bila diset) via query token / header Authorization.
  *
  * Frame (JSON):
  *   server→klien : {t:"snapshot",data,meta} · {t:"data",data} · {t:"exit",code}
@@ -37,10 +37,10 @@ function attach(server) {
         if (!match) return;   // biarkan handler upgrade lain (mis. SSE tak pakai upgrade)
 
         // Auth: sama seperti bidang kendali REST.
-        if (process.env.AETHER_TOKEN) {
+        if (process.env.DAMAR_TOKEN) {
             const token = url.searchParams.get("token") ||
                 (req.headers["authorization"] || "").replace(/^Bearer\s+/i, "");
-            if (token !== process.env.AETHER_TOKEN) return reject(socket, 401);
+            if (token !== process.env.DAMAR_TOKEN) return reject(socket, 401);
         }
 
         const session = terminals.get(match[1]);

@@ -7,10 +7,10 @@ const telemetry = require("../../services/telemetryService");
 const pexec = promisify(execFile);
 
 /**
- * graphifyAdapter — mesin GRAF internal Aether (Coding Brain).
+ * graphifyAdapter — mesin GRAF internal Damar (Coding Brain).
  *
  * Membungkus CLI graphify (bukan menulis ulang): dependency/call/import/
- * architecture graph. Aether wajib memahami hubungan antar-file lewat ini
+ * architecture graph. Damar wajib memahami hubungan antar-file lewat ini
  * SEBELUM membuat patch. Degradasi anggun bila graphify belum terpasang.
  *
  * graphify sering TIDAK di PATH (uv tool di ~/.local/bin), jadi di-resolve

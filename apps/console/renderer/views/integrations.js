@@ -196,13 +196,13 @@ function notes() {
                 Untuk permanen, sunting
                 <span class="mono selectable">configs/integrations.json</span>
                 di mesin tempat daemon dijalankan, atau set environment variable
-                <span class="mono selectable">AETHER_&lt;ID&gt;_URL</span>.
+                <span class="mono selectable">DAMAR_&lt;ID&gt;_URL</span>.
             </p>
 
             <p style="margin:0">
                 Base URL untuk <strong>OpenClaw</strong> dan <strong>Hermes Agent</strong>
                 masih berupa default yang wajar, bukan hasil verifikasi ke instance
-                sungguhan. Aether mencoba beberapa kandidat health path lalu
+                sungguhan. Damar mencoba beberapa kandidat health path lalu
                 menampilkan yang berhasil pada kartu di atas — salin nilai itu ke
                 <span class="mono selectable">paths.health</span> agar tidak menebak lagi.
             </p>

@@ -19,7 +19,7 @@ const DEFAULT_CONFIG_PATH = path.join(
 );
 
 /**
- * Mengelola seluruh sambungan Aether ke sistem luar dan
+ * Mengelola seluruh sambungan Damar ke sistem luar dan
  * memantau kesiapannya secara berkala.
  *
  * Konfigurasi sengaja berbasis file supaya kode yang sama bisa
@@ -137,11 +137,11 @@ class IntegrationManager extends EventEmitter {
      * Variabel lingkungan menang atas file konfigurasi supaya
      * deployment di PC rumah bisa mengubah alamat tanpa
      * menyentuh file yang ter-commit.
-     * Contoh: AETHER_AGENT_URL, AETHER_AGENT_KEY.
+     * Contoh: DAMAR_AGENT_URL, DAMAR_AGENT_KEY.
      */
     applyEnvOverrides(entry) {
 
-        const prefix = `AETHER_${String(entry.id).toUpperCase()}`;
+        const prefix = `DAMAR_${String(entry.id).toUpperCase()}`;
 
         const url = process.env[`${prefix}_URL`];
         const key = process.env[`${prefix}_KEY`];

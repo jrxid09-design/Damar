@@ -3,7 +3,7 @@ const { AITool } = require("../ai/tools");
 const nas = require("./nasService");
 
 /**
- * Tool NAS untuk Aether: status penyimpanan, kesehatan disk (SMART),
+ * Tool NAS untuk Damar: status penyimpanan, kesehatan disk (SMART),
  * kontainer Docker, dan share SMB — semua dari mesin nyata.
  */
 function nasTools() {

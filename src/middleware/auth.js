@@ -5,10 +5,10 @@ const { tokenGuard } = require("../core/auth/tokenCompare");
  *
  * Saat daemon dijalankan di PC rumah, port-nya terbuka ke LAN —
  * siapa pun di jaringan yang sama bisa memanggil API ini. Set
- * AETHER_TOKEN di .env PC tersebut untuk menutupnya, lalu isi
- * token yang sama di Aether Console.
+ * DAMAR_TOKEN di .env PC tersebut untuk menutupnya, lalu isi
+ * token yang sama di Damar Console.
  *
- * Tanpa AETHER_TOKEN, API dibiarkan terbuka agar pengembangan di
+ * Tanpa DAMAR_TOKEN, API dibiarkan terbuka agar pengembangan di
  * laptop tetap ringan.
  *
  * Perbandingan token kini waktu-konstan (lih. core/auth/tokenCompare).

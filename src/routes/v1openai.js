@@ -4,7 +4,7 @@ const response = require("../utils/response");
 const router = express.Router();
 
 /**
- * Jembatan OpenAI-compatible di atas otak Aether.
+ * Jembatan OpenAI-compatible di atas otak Damar.
  *
  *   POST /v1/chat/completions   → aiRuntime.chat() (otak penuh:
  *                                 system prompt, memori, keadaan batin,
@@ -15,11 +15,11 @@ const router = express.Router();
  * mereka (GeminiWebApi :4981) mati — sehingga entitas tetap bisa
  * berpikir dengan model lokal Qwen in-process tanpa kontainer luar.
  *
- * Autentikasi: Bearer AETHER_TOKEN (bila diset) — sama seperti bidang
+ * Autentikasi: Bearer DAMAR_TOKEN (bila diset) — sama seperti bidang
  * kendali Console. Tanpa token, terbuka (untuk pengembangan).
  *
  * Format mengikuti skema OpenAI Chat Completions secukupnya:
- * model diabaikan (otak aktif Aether yang dipakai), messages
+ * model diabaikan (otak aktif Damar yang dipakai), messages
  * dipetakan apa adanya, temperature/max_tokens diteruskan.
  */
 
@@ -30,26 +30,26 @@ const router = express.Router();
  * "untuk pengembangan" — persis pola fail-open yang dilarang.
  *
  * Kini:
- *   - tanpa AETHER_TOKEN → 503 (endpoint tidak tersedia), BUKAN open;
- *   - AETHER_UNSAFE_DEV_OPEN_API="1" satu-satunya pintu mode terbuka,
+ *   - tanpa DAMAR_TOKEN → 503 (endpoint tidak tersedia), BUKAN open;
+ *   - DAMAR_UNSAFE_DEV_OPEN_API="1" satu-satunya pintu mode terbuka,
  *     dengan peringatan keras saat boot (opt-in eksplisit, default aman);
- *   - token valid → identitas eksekusi: role dari AETHER_API_ROLE
+ *   - token valid → identitas eksekusi: role dari DAMAR_API_ROLE
  *     (default 'user' — API eksternal = hak minimum).
  */
 function auth(req, res, next) {
 
     if (req.method === "OPTIONS") return next();
 
-    const token = process.env.AETHER_TOKEN;
+    const token = process.env.DAMAR_TOKEN;
 
     if (!token) {
 
-        const devOpen = process.env.AETHER_UNSAFE_DEV_OPEN_API === "1";
+        const devOpen = process.env.DAMAR_UNSAFE_DEV_OPEN_API === "1";
 
         if (!devOpen) {
             return response.error(res,
-                "Layanan API terkunci: AETHER_TOKEN belum diset. " +
-                "Set token, atau setel AETHER_UNSAFE_DEV_OPEN_API=1 untuk mode pengembangan yang berisiko.",
+                "Layanan API terkunci: DAMAR_TOKEN belum diset. " +
+                "Set token, atau setel DAMAR_UNSAFE_DEV_OPEN_API=1 untuk mode pengembangan yang berisiko.",
                 503);
         }
 
@@ -62,12 +62,12 @@ function auth(req, res, next) {
     const provided = header.startsWith("Bearer ") ? header.slice(7).trim() : req.query.token;
 
     if (provided !== token) {
-        return response.error(res, "Unauthorized. Sertakan header 'Authorization: Bearer <AETHER_TOKEN>'.", 401);
+        return response.error(res, "Unauthorized. Sertakan header 'Authorization: Bearer <DAMAR_TOKEN>'.", 401);
     }
 
     // Identitas eksekusi untuk seluruh handler di router ini.
     req.execIdentity = {
-        role: process.env.AETHER_API_ROLE ?? "user",
+        role: process.env.DAMAR_API_ROLE ?? "user",
         channel: "api",
         sessionId: `api:${req.ip ?? "unknown"}`
     };
@@ -77,7 +77,7 @@ function auth(req, res, next) {
 
 router.use(auth);
 
-/** GET /v1/models — daftar model (satu: otak aktif Aether). */
+/** GET /v1/models — daftar model (satu: otak aktif Damar). */
 router.get("/models", async (req, res, next) => {
     try {
         const aiRuntime = require("../services/aiRuntimeService");
@@ -85,9 +85,9 @@ router.get("/models", async (req, res, next) => {
         res.json({
             object: "list",
             data: [{
-                id: platform?.model || "aether-local",
+                id: platform?.model || "damar-local",
                 object: "model",
-                owned_by: "aether"
+                owned_by: "damar"
             }]
         });
     }
@@ -119,7 +119,7 @@ router.post("/chat/completions", async (req, res, next) => {
             // akan membingungkan entitas koloni.
         });
 
-        const model = aiRuntime.activePlatform?.model || "aether-local";
+        const model = aiRuntime.activePlatform?.model || "damar-local";
 
         res.json({
             id: "chatcmpl-" + Date.now().toString(36),
@@ -142,7 +142,7 @@ router.post("/chat/completions", async (req, res, next) => {
         // Format error ala OpenAI supaya klien (mind.js) menangkapnya
         // sebagai kegagalan HTTP, bukan crash parsing.
         res.status(500).json({
-            error: { message: error.message || "Aether gagal memproses.", type: "server_error", code: "500" }
+            error: { message: error.message || "Damar gagal memproses.", type: "server_error", code: "500" }
         });
     }
 });

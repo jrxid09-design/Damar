@@ -1,12 +1,12 @@
 import { icon } from "../lib/icons.js";
-import { aether as voiceView } from "./aether.js";
+import { damar as voiceView } from "./damar.js";
 import { chat as chatView } from "./chat.js";
 
 /**
- * Aether — satu layar untuk berinteraksi langsung dengan Aether,
+ * Damar — satu layar untuk berinteraksi langsung dengan Damar,
  * lewat suara (avatar minibot 3D + mic/TTS) maupun teks (chat).
  *
- * Menggabungkan dua view lama (Aether + Chat) jadi satu navigasi
+ * Menggabungkan dua view lama (Damar + Chat) jadi satu navigasi
  * dengan tab, memakai ulang render/mount masing-masing. Keduanya
  * berbagi otak & model yang sama; selektor "AI Lokal / AI Provider"
  * ada di tab Chat.
@@ -23,11 +23,11 @@ let mountedSub = null;
 
 export const companion = {
 
-    id: "aether",
-    label: "Aether",
+    id: "damar",
+    label: "Damar",
     icon: "orb",
-    title: "Aether",
-    subtitle: "Bicara dengan Aether — lewat suara atau teks.",
+    title: "Damar",
+    subtitle: "Bicara dengan Damar — lewat suara atau teks.",
 
     render(root) {
 
@@ -43,8 +43,8 @@ export const companion = {
 
             <div class="view-head">
                 <div>
-                    <h1>Aether</h1>
-                    <p>Bicara dengan Aether — lewat suara (avatar) atau teks.</p>
+                    <h1>Damar</h1>
+                    <p>Bicara dengan Damar — lewat suara (avatar) atau teks.</p>
                 </div>
                 <div class="actions">
                     <div class="seg" id="companion-tabs" style="margin:0">

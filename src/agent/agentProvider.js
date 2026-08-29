@@ -1,4 +1,4 @@
-const aetherAgent = require("./adapters/aetherAgent");
+const damarAgent = require("./adapters/damarAgent");
 
-// Satu penyedia agent: otak Aether sendiri.
-module.exports = aetherAgent;
+// Satu penyedia agent: otak Damar sendiri.
+module.exports = damarAgent;

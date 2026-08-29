@@ -2,7 +2,7 @@ import { api } from "../lib/api.js";
 import { esc, toast } from "../lib/ui.js";
 
 /**
- * Panel Keamanan — pusat kendali batas kemampuan Aether.
+ * Panel Keamanan — pusat kendali batas kemampuan Damar.
  *
  * Disederhanakan lagi: gerbang enam tingkat (L0–L5) lalu gerbang
  * tool destruktif sudah dihapus — guard selalu mengizinkan semua
@@ -24,7 +24,7 @@ export const safety = {
     label: "Keamanan",
     icon: "shield",
     title: "Keamanan",
-    subtitle: "Batas kemampuan Aether — apa yang boleh, apa yang ditahan.",
+    subtitle: "Batas kemampuan Damar — apa yang boleh, apa yang ditahan.",
 
     render(root) {
 
@@ -34,7 +34,7 @@ export const safety = {
             <div class="view-head">
                 <div>
                     <h1>Keamanan</h1>
-                    <p>Batas kemampuan Aether — apa yang boleh, apa yang ditahan.</p>
+                    <p>Batas kemampuan Damar — apa yang boleh, apa yang ditahan.</p>
                 </div>
                 <div class="actions">
                     <button class="btn" id="sf-refresh">Segarkan</button>
@@ -208,7 +208,7 @@ const VERIFY = {
     skipped:    { label: "—",               color: "var(--dim)" }
 };
 
-/** Jejak audit — apa yang benar-benar Aether lakukan. */
+/** Jejak audit — apa yang benar-benar Damar lakukan. */
 function trailCard(t) {
 
     if (!t) {
@@ -284,11 +284,11 @@ function wire() {
             try {
                 if (snapshot.engaged) {
                     await api.safetyRelease();
-                    toast("Aether dilanjutkan", "ok");
+                    toast("Damar dilanjutkan", "ok");
                 }
                 else {
                     await api.safetyStop("dihentikan dari panel Keamanan");
-                    toast("Aether dihentikan", "warn");
+                    toast("Damar dihentikan", "warn");
                 }
                 await load();
             }

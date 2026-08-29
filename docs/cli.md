@@ -1,6 +1,6 @@
-# Aether CLI
+# Damar CLI
 
-Antarmuka terminal untuk Aether. Perannya sama seperti Console
+Antarmuka terminal untuk Damar. Perannya sama seperti Console
 desktop — klien tipis ke daemon — tapi hidup di terminal: ngobrol
 dengan jawaban streaming, cek status, kelola model, telusuri
 memori, dan jalankan tool.
@@ -22,7 +22,7 @@ npm run cli
 Atau setelah `npm link` / instalasi global, langsung:
 
 ```bash
-aether
+damar
 ```
 
 ### Sekali jalan & pipa
@@ -30,13 +30,13 @@ aether
 Tanya satu hal lalu keluar (cocok untuk skrip):
 
 ```bash
-aether "ringkas status server hari ini"
+damar "ringkas status server hari ini"
 ```
 
 Baca dari pipa:
 
 ```bash
-echo "jam berapa sekarang?" | aether
+echo "jam berapa sekarang?" | damar
 ```
 
 ### Menyambung ke daemon lain
@@ -44,10 +44,10 @@ echo "jam berapa sekarang?" | aether
 Saat daemon berjalan di PC rumah, arahkan CLI dari laptop:
 
 ```bash
-aether --url http://192.168.1.20:3000 --token TOKEN_KAMU
+damar --url http://192.168.1.20:3000 --token TOKEN_KAMU
 ```
 
-Atau lewat environment: `AETHER_URL`, `AETHER_TOKEN`.
+Atau lewat environment: `DAMAR_URL`, `DAMAR_TOKEN`.
 
 ## Perintah
 
@@ -69,14 +69,14 @@ Ketik apa saja untuk ngobrol. Baris berawalan `/` adalah perintah:
 | `/clear` | Bersihkan layar |
 | `/exit` | Keluar |
 
-**Ctrl-C** saat Aether menjawab akan membatalkan jawaban itu, bukan
+**Ctrl-C** saat Damar menjawab akan membatalkan jawaban itu, bukan
 menutup CLI. Tekan lagi saat menganggur untuk keluar.
 
 ## Catatan
 
 - CLI dan Console memakai bidang kendali (`/api/v1/console`) yang
   sama, jadi keduanya selalu sinkron saat API berubah.
-- Konteks percakapan disimpan selama sesi berjalan supaya Aether
+- Konteks percakapan disimpan selama sesi berjalan supaya Damar
   nyambung antar pertanyaan; `/reset` mengosongkannya.
 - Injeksi memori otomatis tetap berlaku — jawaban pertama pun sudah
-  mempertimbangkan apa yang Aether ingat tentang kamu.
+  mempertimbangkan apa yang Damar ingat tentang kamu.

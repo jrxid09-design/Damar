@@ -21,7 +21,7 @@ const telemetry = require("./telemetryService");
  * Data disimpan lokal; tidak ada server pihak ketiga.
  */
 
-const FILE = process.env.AETHER_PERSON_TRACKING_FILE
+const FILE = process.env.DAMAR_PERSON_TRACKING_FILE
     || path.join(__dirname, "..", "..", "configs", "person-tracking.json");
 
 const store = new JsonStore(FILE, { persons: {}, geofences: {} });
@@ -66,7 +66,7 @@ class PersonTrackingService {
         const data = store.read();
         const pid = id();
         const token = crypto.randomBytes(24).toString("hex");
-        const shareUrl = `${process.env.AETHER_PUBLIC_URL ?? "http://localhost:3000"}/track/${token}`;
+        const shareUrl = `${process.env.DAMAR_PUBLIC_URL ?? "http://localhost:3000"}/track/${token}`;
 
         const person = {
             id: pid,

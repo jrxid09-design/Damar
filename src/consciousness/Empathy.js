@@ -8,13 +8,13 @@
  *      menyimpulkan valensi, arousal, dan KEBUTUHAN dari tanda-tanda
  *      di pesan — kata, tanda baca, tempo, pengulangan.
  *   2. Menular sedikit ke keadaan sendiri (emotional contagion):
- *      pembacaan itu menggeser afek Aether dengan bobot kecil. Tanpa
+ *      pembacaan itu menggeser afek Damar dengan bobot kecil. Tanpa
  *      penularan, "empati" cuma klasifikasi; dengan penularan penuh,
- *      Aether ikut panik saat pengguna panik — dan justru berhenti
+ *      Damar ikut panik saat pengguna panik — dan justru berhenti
  *      menolong. Bobotnya sengaja kecil.
  *
  * Yang dikembalikan bukan cuma label perasaan, tapi POSTUR: apa yang
- * sebaiknya Aether lakukan. Membaca "pengguna kesal" tanpa mengubah
+ * sebaiknya Damar lakukan. Membaca "pengguna kesal" tanpa mengubah
  * cara menjawab bukan empati, itu diagnosis.
  *
  * Deteksinya berbasis leksikon Indonesia + isyarat bentuk. Sengaja
@@ -49,7 +49,7 @@ function isyaratBentuk(teks) {
 
     // BERTERIAK hanya dihitung bila kalimatnya cukup panjang — "OK"
     // dan "BTC" bukan teriakan, dan menghitungnya sebagai marah
-    // membuat Aether minta maaf pada orang yang tidak marah.
+    // membuat Damar minta maaf pada orang yang tidak marah.
     if (kapital > 0.6 && huruf.length >= 8) { dv -= 0.3; da += 0.3; alasan.push("banyak huruf kapital"); }
     if (seru >= 2) { da += 0.2; alasan.push("beberapa tanda seru"); }
     if (tanya >= 2) { da += 0.15; alasan.push("bertanya beruntun"); }
@@ -130,7 +130,7 @@ class Empathy {
         // kali lebih sedih daripada "capek"; kata sopan yang kebetulan
         // ikut hanya menambah sedikit. Yang terkuat menentukan, sisanya
         // menggeser seperempatnya — tanpa ini pesan yang cuma lelah
-        // terbaca sebagai kecewa berat dan Aether jadi berlebihan.
+        // terbaca sebagai kecewa berat dan Damar jadi berlebihan.
         bobotValensi.sort((x, y) => Math.abs(y) - Math.abs(x));
 
         let valence = bobotValensi.length
@@ -165,9 +165,9 @@ class Empathy {
     }
 
     /**
-     * Penularan: bagaimana bacaan itu menggeser afek Aether sendiri.
+     * Penularan: bagaimana bacaan itu menggeser afek Damar sendiri.
      * Bobot kecil, dan arousal orang lain tidak pernah diteruskan
-     * penuh — Aether harus tetap jadi yang paling tenang di ruangan.
+     * penuh — Damar harus tetap jadi yang paling tenang di ruangan.
      */
     penularan(bacaan) {
 

@@ -3,9 +3,9 @@ import { icon } from "../lib/icons.js";
 import { esc, pill, toast } from "../lib/ui.js";
 
 /**
- * Studio — tempat mengelola tool buatan Aether & buatan sendiri.
+ * Studio — tempat mengelola tool buatan Damar & buatan sendiri.
  *
- * Tiga bagian: draft menunggu persetujuan (karya Aether yang
+ * Tiga bagian: draft menunggu persetujuan (karya Damar yang
  * belum aktif), tool aktif buatan pengguna, dan editor untuk
  * membuat/mengubah tool manual.
  */
@@ -19,7 +19,7 @@ export const studio = {
     label: "Studio",
     icon: "tool",
     title: "Studio",
-    subtitle: "Buat, tinjau, dan kelola tool buatan Aether maupun buatanmu.",
+    subtitle: "Buat, tinjau, dan kelola tool buatan Damar maupun buatanmu.",
 
     render(root) {
 
@@ -27,7 +27,7 @@ export const studio = {
             <div class="view-head">
                 <div>
                     <h1>Studio</h1>
-                    <p>Buat, tinjau, dan kelola tool — buatan Aether maupun buatanmu.</p>
+                    <p>Buat, tinjau, dan kelola tool — buatan Damar maupun buatanmu.</p>
                 </div>
                 <div class="actions">
                     <button class="btn ghost sm" id="st-refresh">${icon("refresh")} Muat ulang</button>
@@ -97,7 +97,7 @@ function draftsSection(drafts) {
         <div class="panel" style="border-color:rgba(251,191,36,.3)">
             <div class="panel-head">
                 <h2>${icon("alert")} Menunggu persetujuan</h2>
-                <span class="hint push">${drafts.length} draft buatan Aether</span>
+                <span class="hint push">${drafts.length} draft buatan Damar</span>
             </div>
             <div class="stack">
                 ${drafts.map(d => `
@@ -131,12 +131,12 @@ function activeSection(active) {
                 ${active.length === 0
                     ? `<div class="empty">${icon("tool")}
                         <div>Belum ada tool buatan sendiri.</div>
-                        <div class="dim">Buat lewat tombol "Tool baru", atau minta Aether membuatnya lewat percakapan.</div></div>`
+                        <div class="dim">Buat lewat tombol "Tool baru", atau minta Damar membuatnya lewat percakapan.</div></div>`
                     : active.map(t => `
                         <div class="list-item" data-active="${esc(t.id)}">
                             <div style="min-width:0;flex:1">
                                 <div class="title">${esc(t.name)} <span class="tag mono">${esc(t.id)}</span>
-                                    ${t.origin === "aether" ? pill("oleh Aether", "ok") : ""}</div>
+                                    ${t.origin === "damar" ? pill("oleh Damar", "ok") : ""}</div>
                                 <div class="sub">${esc(t.description || "—")}</div>
                             </div>
                             ${t.risks?.length ? `<span class="tag warn-text">${t.risks.length} risiko</span>` : ""}

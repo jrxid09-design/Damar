@@ -9,7 +9,7 @@ const telemetry = require("../services/telemetryService");
 const lab = require("../lab/LabService");
 
 /**
- * LabController — HTTP tipis untuk Aether Lab.
+ * LabController — HTTP tipis untuk Damar Lab.
  * Semua logika di src/lab/*; controller hanya memvalidasi &
  * membungkus response (mengikat this sekali di bawah).
  */
@@ -211,15 +211,15 @@ class LabController {
     }
 
     /**
-     * TERAPKAN hasil misi ke Aether utama.
+     * TERAPKAN hasil misi ke Damar utama.
      *
      * Tanpa ini Lab jadi ruangan tertutup: misi selesai, laporannya
-     * bagus, lalu berhenti di sana — Aether yang melayani Console,
+     * bagus, lalu berhenti di sana — Damar yang melayani Console,
      * WhatsApp, Telegram, dan CLI tidak tahu apa pun tentangnya, dan
      * pemiliknya harus menceritakan ulang. Empat sasaran, sesuai apa
      * yang sebenarnya ingin dilakukan dengan sebuah temuan:
      *
-     *   memory   — jadikan pengetahuan Aether (berlaku di semua kanal)
+     *   memory   — jadikan pengetahuan Damar (berlaku di semua kanal)
      *   beranda  — tampilkan sekarang sebagai popup di dashboard
      *   followup — ubah temuan jadi misi berikutnya yang bisa dijalankan
      *   code     — teruskan ke opencode agar patch-nya benar-benar ditulis
@@ -266,7 +266,7 @@ class LabController {
                         .catch(() => null);
                 }
 
-                return response.success(res, "Hasil masuk memori Aether", {
+                return response.success(res, "Hasil masuk memori Damar", {
                     memory: ingatan, document: dokumen
                 });
 
@@ -275,8 +275,8 @@ class LabController {
             if (target === "beranda") {
 
                 // Jalur yang sama dengan foto & pemutar lagu: renderer
-                // sudah mendengarkan aether:present dan membuka popup.
-                telemetry.publish("aether:present", {
+                // sudah mendengarkan damar:present dan membuka popup.
+                telemetry.publish("damar:present", {
                     kind: "text",
                     title: `Hasil misi: ${judul}`,
                     text: hasil,

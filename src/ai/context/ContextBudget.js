@@ -49,7 +49,7 @@ function compute({ contextTokens = null, stableTokens = 0, maxTools = 16 } = {})
 
     // H6 Round-3 PRESEDENS: window yang diketahui pemanggil MENANG;
     // env fallback TIDAK BOLEH memperbesarnya — hanya mengecekkan.
-    const envN = Number(process.env.AETHER_MODEL_CONTEXT_TOKENS);
+    const envN = Number(process.env.DAMAR_MODEL_CONTEXT_TOKENS);
     const envWindow = Number.isFinite(envN) && envN > 0 ? envN : null;
 
     let effective = contextTokens;

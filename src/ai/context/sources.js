@@ -11,7 +11,7 @@
  *                    sumber riwayat; SQLite session tetap pemilik data)
  *   memory         → MemoryService.buildContext (existing retrieval)
  *   mind           → consciousness.stateOfMind (existing)
- *   refs           → registry resolver tipis (port Colony/Lab)
+ *   refs           → registry resolver tipis (port Pandawa/Lab)
  *
  * Setiap adapter WAJIB tahan gagal: sumber opsional yang mati hanya
  * mengurangi kandidat, tidak pernah menjatuhkan giliran.
@@ -125,7 +125,7 @@ function olderHistory(messages, recentCount) {
         .map(m => ContextItem.create({
             source: "history",
             kind: ContextItem.KIND.RELEVANT_HISTORY,
-            content: `${m.role === "assistant" ? "Aether" : "Pengguna"}: ${m.content}`,
+            content: `${m.role === "assistant" ? "Damar" : "Pengguna"}: ${m.content}`,
             relevance: 0,          // diisi Relevance
             priority: 20,
             compressible: true,

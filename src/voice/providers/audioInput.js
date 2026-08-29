@@ -1,8 +1,8 @@
 /**
  * AudioInput — abstraksi mikrofon/input.
  *
- * Aether harus bisa mendengar dari: mic PC, USB, headset, Raspberry Pi,
- * Aether-USB, dsb — tanpa mengubah VoiceRuntime. Backend default "none"
+ * Damar harus bisa mendengar dari: mic PC, USB, headset, Raspberry Pi,
+ * Damar-USB, dsb — tanpa mengubah VoiceRuntime. Backend default "none"
  * (graceful: tidak crash bila alat audio tak ada). Backend "cli" merekam
  * lewat CLI lokal:
  *
@@ -95,7 +95,7 @@ class AudioInput {
         const fs = require("node:fs");
         const { spawn } = require("node:child_process");
 
-        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aether-mic-"));
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "damar-mic-"));
         const file = path.join(dir, "rec.wav");
 
         const seconds = Math.max(1, Math.ceil(durationMs / 1000));

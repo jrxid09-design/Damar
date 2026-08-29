@@ -27,11 +27,11 @@ class TurnController {
 
         this.startedAt = Date.now();
 
-        this.maxToolCalls = envInt("AETHER_MAX_TOOL_CALLS_PER_TURN", 12);
+        this.maxToolCalls = envInt("DAMAR_MAX_TOOL_CALLS_PER_TURN", 12);
 
-        this.maxRetriesPerTool = envInt("AETHER_MAX_RETRIES_PER_TOOL", 2);
+        this.maxRetriesPerTool = envInt("DAMAR_MAX_RETRIES_PER_TOOL", 2);
 
-        this.maxWallClockMs = envInt("AETHER_TURN_WALLCLOCK_MS", 300_000);
+        this.maxWallClockMs = envInt("DAMAR_TURN_WALLCLOCK_MS", 300_000);
 
         this.totalCalls = 0;
 

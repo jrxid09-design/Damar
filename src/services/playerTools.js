@@ -3,7 +3,7 @@ const { AITool } = require("../ai/tools");
 const telemetry = require("./telemetryService");
 
 /**
- * Tool media player — Aether bisa memutar musik & video langsung.
+ * Tool media player — Damar bisa memutar musik & video langsung.
  *
  * Bukan hanya mencarikan link: benar-benar memutar di Console
  * lewat embedded player. Mendukung YouTube, Spotify, Vimeo, SoundCloud,
@@ -55,7 +55,7 @@ function playerTools() {
                 const localPath = await downloadMedia(top.videoId);
                 const mediaId = localPath ? `${top.videoId}.mp4` : null;
 
-                telemetry.publish("aether:present", {
+                telemetry.publish("damar:present", {
                     kind: "youtube",
                     videoId: top.videoId,
                     mediaId,
@@ -100,7 +100,7 @@ function playerTools() {
                     return { ok: false, error: "URL tidak dikenali. Didukung: YouTube, Spotify, Vimeo, SoundCloud." };
                 }
 
-                telemetry.publish("aether:present", {
+                telemetry.publish("damar:present", {
                     kind: parsed.kind,
                     ...parsed,
                     autoplay
@@ -138,7 +138,7 @@ function playerTools() {
 
                 const top = results[0];
 
-                telemetry.publish("aether:present", {
+                telemetry.publish("damar:present", {
                     kind: "spotify",
                     type: top.type,
                     spotifyId: top.spotifyId,
@@ -170,7 +170,7 @@ function playerTools() {
             parameters: { type: "object", properties: {} },
             execute: async () => {
 
-                telemetry.publish("aether:present", { kind: "stop" });
+                telemetry.publish("damar:present", { kind: "stop" });
 
                 return { ok: true, stopped: true };
 
@@ -365,7 +365,7 @@ function spotifyItem(type, id, { title = null, artist = null, thumbnail = null }
         type,
         spotifyId: id,
         url: `https://open.spotify.com/${type}/${id}`,
-        embedUrl: `https://open.spotify.com/embed/${type}/${id}?utm_source=aether`,
+        embedUrl: `https://open.spotify.com/embed/${type}/${id}?utm_source=damar`,
         title: title ?? `Spotify ${type}`,
         artist,
         thumbnail,

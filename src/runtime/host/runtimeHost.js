@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * AETHER RUNTIME HOST V1 — host runtime persisten pengguna.
+ * DAMAR RUNTIME HOST V1 — host runtime persisten pengguna.
  *
  * Host menghidupkan createRuntimeCore() (komposisi tersertifikasi Wave 1+2)
  * dan menjadi pemilik lifecycle proses: BOOT → INITIALIZE → RECOVER →

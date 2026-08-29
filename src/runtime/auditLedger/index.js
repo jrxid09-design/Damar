@@ -4,7 +4,7 @@
  * AUDIT / PROVENANCE LEDGER V1 — public surface.
  *
  * Canonical, bounded, append-oriented observational record of what
- * happened across Aether subsystems. See docs/architecture/
+ * happened across Damar subsystems. See docs/architecture/
  * audit-ledger-v1.md for the binding design contract.
  *
  * LAWS (restated at the surface):

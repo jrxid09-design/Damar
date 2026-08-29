@@ -1,7 +1,7 @@
 const { makeEnvelope } = require("../core/envelope");
 
 /**
- * INTEROCEPTION (§23–§25) — kondisi operasional internal Aether.
+ * INTEROCEPTION (§23–§25) — kondisi operasional internal Damar.
  *
  * Setiap sampel WAJIB membedakan VALUE / STALE / UNKNOWN / ERROR
  * (§24/§80): sensor mati ≠ sehat.

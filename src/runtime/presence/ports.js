@@ -126,7 +126,7 @@ class VisualPresencePort extends PresencePort {
 /**
  * Port host runtime masa depan (P25): fakta siklus Windows. V0 TIDAK
  * mendaftarkan service dan TIDAK memanggil API Windows. Alur yang
- * dimaksudkan kelak: login Windows -> Runtime Aether menyala ->
+ * dimaksudkan kelak: login Windows -> Runtime Damar menyala ->
  * BOOTING -> INITIALIZING -> DORMANT.
  */
 class RuntimeHostPort extends PresencePort {

@@ -1,12 +1,12 @@
 /**
- * Ikon Aether — bahasa visual orbital & geometri berlian.
+ * Ikon Damar — bahasa visual orbital & geometri berlian.
  *
  * Console harus jalan sepenuhnya offline (dan di PC rumah tanpa
  * internet), jadi tidak ada icon font atau CDN — semuanya SVG
  * stroke 1.6px dengan viewBox 24 agar konsisten di segala ukuran.
  *
  * Bahasa ikon KANONIK (selaras avatar & hologram):
- *   - berlian/diamond  → inti kognitif, identitas Aether
+ *   - berlian/diamond  → inti kognitif, identitas Damar
  *   - orbit/arc        → relasi, siaran, konektivitas
  *   - heksagon         → sistem, processing
  *   - node jaringan    → memori & pengetahuan
@@ -16,10 +16,10 @@ const paths = {
 
     /* ---- Ikon APLIKASI (registry + launcher) ---------------------- */
 
-    // Beranda — inti Aether: diamond + orbit + tick kardinal.
+    // Beranda — inti Damar: diamond + orbit + tick kardinal.
     orb: '<circle cx="12" cy="12" r="8.6"/><path d="M12 7.2 16.8 12 12 16.8 7.2 12Z"/><path d="M12 3.4v1.7M12 18.9v1.7M3.4 12h1.7M18.9 12h1.7"/>',
 
-    // Aether (chat) — inti berlian memancarkan busur siaran.
+    // Damar (chat) — inti berlian memancarkan busur siaran.
     chat: '<path d="M12 6.6 17.4 12 12 17.4 6.6 12Z"/><path d="M8.7 3.9a8.6 8.6 0 0 0 0 16.2M15.3 3.9a8.6 8.6 0 0 1 0 16.2"/>',
 
     // Memori — inti berlapis (berlian dalam berlian): pengetahuan.
@@ -136,17 +136,17 @@ export function icon(name, className = "icon") {
 
 }
 
-/** Lambang Aether: berlian berlapis — gradasi kanonik cyan→violet. */
+/** Lambang Damar: berlian berlapis — gradasi kanonik cyan→violet. */
 export function brandMark(size = 20) {
 
     return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <defs>
-            <linearGradient id="aether-mark" x1="0" y1="0" x2="24" y2="24">
+            <linearGradient id="damar-mark" x1="0" y1="0" x2="24" y2="24">
                 <stop offset="0%" stop-color="#00DFFF"/>
                 <stop offset="100%" stop-color="#7C5CFF"/>
             </linearGradient>
         </defs>
-        <path d="M12 1.6 22.4 12 12 22.4 1.6 12Z" stroke="url(#aether-mark)" stroke-width="1.5" stroke-linejoin="round"/>
-        <path d="M12 6.4 17.6 12 12 17.6 6.4 12Z" fill="url(#aether-mark)" opacity="0.85"/>
+        <path d="M12 1.6 22.4 12 12 22.4 1.6 12Z" stroke="url(#damar-mark)" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M12 6.4 17.6 12 12 17.6 6.4 12Z" fill="url(#damar-mark)" opacity="0.85"/>
     </svg>`;
 }

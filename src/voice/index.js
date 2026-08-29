@@ -1,7 +1,7 @@
 /**
  * Titik masuk subsistem suara.
  *
- * VoiceRuntime = channel baru menuju Aether Core, bukan otak kedua.
+ * VoiceRuntime = channel baru menuju Damar Core, bukan otak kedua.
  * Lihat voiceRuntime.js untuk orchestrator; voiceSession.js untuk
  * jembatan ke aiRuntime (jalur yang sama dengan Telegram/WhatsApp).
  */

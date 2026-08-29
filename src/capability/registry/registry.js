@@ -46,11 +46,11 @@ const DEFAULTS = Object.freeze({ maxCapabilities: 1024 });
 //
 // A caller cannot forge the token by constructing an object, guessing a
 // string, importing an exported symbol, or cloning an existing context:
-//   - Symbol("aether.capability.registrar.mint") !== MINT_TOKEN (identity)
+//   - Symbol("damar.capability.registrar.mint") !== MINT_TOKEN (identity)
 //   - a structurally identical object is a different identity
 // ---------------------------------------------------------------------------
 
-const MINT_TOKEN = Symbol("aether.capability.registrar.mint");
+const MINT_TOKEN = Symbol("damar.capability.registrar.mint");
 const mintGates = new WeakMap();          // CapabilityRegistry -> mint gate fn
 
 const INCARNATION_PREFIX = "inc-";

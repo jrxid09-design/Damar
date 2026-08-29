@@ -4,7 +4,7 @@
  * TRAY PORT — kontrak system tray (fondasi).
  *
  * Tray secara konseptual mengekspos:
- *   - Aether status
+ *   - Damar status
  *   - Summon
  *   - Dismiss
  *   - Open Observatory

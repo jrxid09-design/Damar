@@ -1,12 +1,12 @@
 const path = require("node:path");
 
 const JsonStore = require("../config/JsonStore");
-const AetherError = require("./AetherError");
+const DamarError = require("./DamarError");
 
 /**
  * Kill switch global (§37, Konstitusi Pasal 2.1).
  *
- * Sebelum ini Aether tidak punya cara dihentikan. Sekali sebuah
+ * Sebelum ini Damar tidak punya cara dihentikan. Sekali sebuah
  * rangkaian tool berjalan, ia berjalan sampai selesai — tidak ada
  * rem. Untuk sistem yang tujuannya bertindak otonom, itu lubang
  * keamanan paling dasar.
@@ -29,9 +29,9 @@ const store = new JsonStore(
 /** Operasi yang tetap diizinkan saat berhenti: hanya baca keadaan. */
 const READ_ONLY_ALLOWLIST = new Set([
     "system_health",
-    "aetherSkills.system_health",
-    "aetherSkills.agents_status",
-    "aetherSkills.wa_status"
+    "damarSkills.system_health",
+    "damarSkills.agents_status",
+    "damarSkills.wa_status"
 ]);
 
 let listeners = [];
@@ -72,7 +72,7 @@ function engage({ reason = "permintaan pengguna", actor = "user" } = {}) {
 
 /**
  * Lepas rem. Sengaja tidak otomatis: hanya pemilik yang boleh
- * mengembalikan Aether ke keadaan dapat bertindak.
+ * mengembalikan Damar ke keadaan dapat bertindak.
  */
 function release({ actor = "user" } = {}) {
 
@@ -88,7 +88,7 @@ function release({ actor = "user" } = {}) {
 
 /**
  * Penjaga yang dipanggil sebelum tiap tindakan berefek samping.
- * Melempar AetherError bila rem tertarik.
+ * Melempar DamarError bila rem tertarik.
  *
  * @param {string} [operation] nama operasi, untuk pesan & allowlist
  */
@@ -104,10 +104,10 @@ function assertRunning(operation = "operasi") {
 
     const s = state();
 
-    throw new AetherError({
+    throw new DamarError({
         code: "SAFETY_STOP_ENGAGED",
         message:
-            `Aether dihentikan — "${operation}" tidak dijalankan. ` +
+            `Damar dihentikan — "${operation}" tidak dijalankan. ` +
             `Alasan: ${s.reason ?? "tidak disebutkan"}.`,
         severity: "info",
         retryable: false,

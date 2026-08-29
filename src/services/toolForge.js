@@ -6,14 +6,14 @@ const pluginLoader = require("../plugins/pluginLoader");
 const telemetry = require("./telemetryService");
 
 /**
- * ToolForge — tempat Aether (dan pengguna) membuat tool baru.
+ * ToolForge — tempat Damar (dan pengguna) membuat tool baru.
  *
  * Sebuah "tool spec" diubah menjadi folder plugin nyata
  * (manifest.json + tool.js), lalu di-load tanpa merestart daemon.
  *
  * Keamanan: kode buatan model TIDAK langsung jalan. Ia disimpan
  * sebagai DRAFT (di .drafts/, tidak di-scan loader) sampai
- * disetujui pengguna — kecuali AETHER_TOOL_AUTOAPPROVE=1.
+ * disetujui pengguna — kecuali DAMAR_TOOL_AUTOAPPROVE=1.
  * Penghapusan hanya menyentuh plugin di userPlugins (buatan
  * pengguna), tidak pernah plugin bawaan.
  */
@@ -32,7 +32,7 @@ class ToolForge {
             "http", "system.time", "weather"
         ]);
 
-        this.autoApprove = process.env.AETHER_TOOL_AUTOAPPROVE === "1";
+        this.autoApprove = process.env.DAMAR_TOOL_AUTOAPPROVE === "1";
 
     }
 
@@ -72,7 +72,7 @@ class ToolForge {
 
         const tool = spec.tool ?? {};
 
-        // Mode KODE PENUH: pengguna/Aether menulis seluruh tool.js
+        // Mode KODE PENUH: pengguna/Damar menulis seluruh tool.js
         // sendiri (boleh banyak tool, import, helper). Hanya perlu
         // id + isi berkas; nama/parameter tidak wajib.
         if (spec.raw || tool.raw) {
@@ -146,10 +146,13 @@ class ToolForge {
             entry: "index.js",
             category: spec.category ?? "user",
             description: spec.description ?? "",
-            author: spec.author ?? "aether-forge",
+            // Provenance untuk tool BARU. Manifest lama yang sudah
+            // tercatat "aether-forge" DIBIARKAN apa adanya — itu
+            // catatan sejarah siapa pembuatnya, bukan branding aktif.
+            author: spec.author ?? "damar-forge",
             permissions: spec.permissions ?? [],
             tags: spec.tags ?? ["user"],
-            // Jejak untuk membedakan karya Aether vs tulisan manual,
+            // Jejak untuk membedakan karya Damar vs tulisan manual,
             // plus spec asli agar tool bisa diedit ulang dari Console
             // tanpa harus mengurai tool.js.
             forge: {
@@ -191,7 +194,7 @@ class ToolForge {
             .map(line => (line ? `        ${line}` : ""))
             .join("\n");
 
-        return `// Dibuat oleh Aether ToolForge.
+        return `// Dibuat oleh Damar ToolForge.
 // Aman diedit tangan; ubah lalu muat ulang dari Console.
 
 class ${className} {
@@ -282,7 +285,7 @@ module.exports = [ new ${className}() ];
 
     /**
      * Buat tool. Default masuk sebagai draft (perlu persetujuan);
-     * `activate: true` (atau AETHER_TOOL_AUTOAPPROVE) langsung
+     * `activate: true` (atau DAMAR_TOOL_AUTOAPPROVE) langsung
      * mengaktifkannya.
      */
     create(spec, { activate = false } = {}) {
@@ -300,7 +303,7 @@ module.exports = [ new ${className}() ];
 
         // Tulis dulu ke lokasi sementara untuk verifikasi muat,
         // supaya draft/plugin rusak tidak pernah tersimpan.
-        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aether-forge-"));
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "damar-forge-"));
 
         try {
 

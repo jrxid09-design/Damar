@@ -1,5 +1,5 @@
 -- 006 AUTONOMY — capability registry, goal engine, checkpoints.
--- Fondasi runtime otonom Aether (transformasi autonomous §54).
+-- Fondasi runtime otonom Damar (transformasi autonomous §54).
 
 CREATE TABLE IF NOT EXISTS capabilities (
     id            TEXT PRIMARY KEY,          -- tool:<name> | skill:<id> | agent:<id> | model:<name> | connector:<id>

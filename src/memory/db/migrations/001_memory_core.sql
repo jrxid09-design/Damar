@@ -1,5 +1,5 @@
 -- ============================================================
--- Aether — Local Memory, skema inti
+-- Damar — Local Memory, skema inti
 --
 -- Tiga lapis yang saling menunjuk:
 --   entities   : "siapa/apa" — orang, kendaraan, ruangan, project

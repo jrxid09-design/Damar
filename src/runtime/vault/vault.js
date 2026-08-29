@@ -13,7 +13,7 @@ const { VAULT_ERROR_CODES, VaultError, invalidInput } = require("./errors");
 const { createVaultDiagnostics } = require("./diagnostics");
 
 /**
- * Aether Secret Vault V1 — CORE.
+ * Damar Secret Vault V1 — CORE.
  *
  * CONSTITUTIONAL LAWS (binding on every export):
  *  - Secret possession != Authority. The vault never grants capability,

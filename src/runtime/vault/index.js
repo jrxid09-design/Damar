@@ -1,14 +1,14 @@
 "use strict";
 
 /**
- * Aether Secret Vault V1 — CORE SUBSTRATE.
+ * Damar Secret Vault V1 — CORE SUBSTRATE.
  *
  * CONSTITUTIONAL INVARIANT: SECRETS != AUTHORITY.
  * Possession of a credential never implies permission to act. This
  * subsystem stores pointers and values; it grants no capability,
  * ratifies no action, authorizes no tool or device, and never mutates
  * Authority state. Components holding credentials still require
- * canonical Authority for any Aether action where Authority applies.
+ * canonical Authority for any Damar action where Authority applies.
  *
  * STORAGE GUARANTEES: values are persisted only as cipher-adapter
  * envelopes. No cryptography is invented here; platform adapters

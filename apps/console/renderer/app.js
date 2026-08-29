@@ -2,13 +2,13 @@ import { store } from "./lib/store.js";
 import { api } from "./lib/api.js";
 import { icon, brandMark } from "./lib/icons.js";
 import { $, esc, pill, toast } from "./lib/ui.js";
-import { aetherState } from "./lib/aetherState.js";
+import { damarState } from "./lib/damarState.js";
 import { agentBus } from "./lib/agentBus.js";
 import { showBubble } from "./lib/homeBubbles.js";
 
 import { createHologram } from "./lib/hologram.js";
 import { createWakeWord } from "./lib/wakeword.js";
-import { openOverlay, isOpen as overlayOpen, greetAndListen, close as closeOverlay } from "./lib/aetherOverlay.js";
+import { openOverlay, isOpen as overlayOpen, greetAndListen, close as closeOverlay } from "./lib/damarOverlay.js";
 
 import { buildStudioApp } from "./views/apps/studio.js";
 import { buildSpaceApp } from "./views/apps/space.js";
@@ -16,7 +16,7 @@ import { buildConnectApp } from "./views/apps/connect.js";
 import { labApp } from "./views/lab/labApp.js";
 
 // View mandiri (dipakai apa adanya sebagai "aplikasi").
-import { aether } from "./views/aether.js";
+import { damar } from "./views/damar.js";
 import { dashboard } from "./views/dashboard.js";
 import { memory } from "./views/memory.js";
 import { models } from "./views/models.js";
@@ -32,23 +32,23 @@ import { family } from "./views/family.js";
 
 const goHome = () => navigate("core");
 
-// Warna semantik KANONIK (dari aether.tokens.css): cyan=identitas,
+// Warna semantik KANONIK (dari damar.tokens.css): cyan=identitas,
 // violet=kognisi, hijau=ok, BIRU=processing (oranye bukan warna kanon).
 const CY = "#00DFFF", AI = "#7C5CFF", OK = "#48E6A5", PR = "#28AFFF";
 
-// Kategori Control Hub — Aether di pusat, sisanya "Applications".
+// Kategori Control Hub — Damar di pusat, sisanya "Applications".
 const CATEGORIES = ["Inti", "Kecerdasan", "Ruang", "Sistem"];
 
 /**
- * Registry APPLICATIONS. Tiap app = kapabilitas Aether dengan metadata OS:
+ * Registry APPLICATIONS. Tiap app = kapabilitas Damar dengan metadata OS:
  * category, version, capabilities, permissions, dependencies. Status runtime
  * (running/health) diturunkan LIVE dari overview di appStatus(). Menambah app
  * = satu entri (scalable). Status = fungsi murni (maintainable).
  */
 const APPS = [
-    { id: "core", label: "Beranda", icon: "orb", color: CY, desc: "Pusat entitas Aether", core: true, cat: "Inti",
+    { id: "core", label: "Beranda", icon: "orb", color: CY, desc: "Pusat entitas Damar", core: true, cat: "Inti",
       version: "3.0", caps: ["Suara", "Hologram", "Perintah"], perms: ["Mikrofon"], deps: [] },
-    { id: "chat", label: "Aether", icon: "chat", color: CY, desc: "Percakapan & reasoning", view: aether, cat: "Inti",
+    { id: "chat", label: "Damar", icon: "chat", color: CY, desc: "Percakapan & reasoning", view: damar, cat: "Inti",
       version: "3.0", caps: ["Chat", "Voice", "Streaming"], perms: ["AI", "Mikrofon"], deps: ["Model AI", "Memori"] },
     { id: "memory", label: "Memori", icon: "memory", color: AI, desc: "Ingatan jangka panjang", view: memory, cat: "Kecerdasan",
       version: "2.4", caps: ["Recall", "Graph", "Governance"], perms: ["Baca/Tulis memori"], deps: ["Model AI"] },
@@ -60,12 +60,12 @@ const APPS = [
       version: "1.2", caps: ["Konteks", "Sinyal"], perms: [], deps: ["Memori"] },
     { id: "space", label: "Ruang", icon: "home", color: OK, desc: "Rumah · Vision · NAS", view: buildSpaceApp(goHome), consolidated: true, cat: "Ruang",
       version: "2.1", caps: ["Smart Home", "Vision", "NAS"], perms: ["Kamera", "Berkas"], deps: ["Terhubung"] },
-    { id: "lab", label: "Laboratorium", icon: "flask", color: AI, desc: "Project bareng Aether & agents", view: labApp, cat: "Kecerdasan",
+    { id: "lab", label: "Laboratorium", icon: "flask", color: AI, desc: "Project bareng Damar & agents", view: labApp, cat: "Kecerdasan",
       version: "2.0", caps: ["Missions", "Agents", "Artifacts", "Experiments"], perms: ["Berkas", "Terminal"], deps: ["Model AI"] },
     // App "Terhubung" DIHAPUS — Perangkat & Integrasi kini jadi kategori
     // di Pengaturan (control-panel). opencode sudah terintegrasi sebagai
     // tool (opencode_run, dijembatani WSL).
-    { id: "family", label: "Aether OSINT", icon: "search", color: AI, desc: "Investigasi · Kebocoran · Telepon · Pelacakan", view: family, cat: "Kecerdasan",
+    { id: "family", label: "Damar OSINT", icon: "search", color: AI, desc: "Investigasi · Kebocoran · Telepon · Pelacakan", view: family, cat: "Kecerdasan",
       version: "2.0", caps: ["OSINT", "Breach", "Phone Intel", "Tracking"], perms: [], deps: [] },
     { id: "dashboard", label: "Panel Sistem", icon: "dashboard", color: CY, desc: "Metrik & ringkasan sistem", view: dashboard, cat: "Sistem",
       version: "1.5", caps: ["Metrik", "Ringkasan"], perms: [], deps: [] },
@@ -134,8 +134,8 @@ function refreshHoloPower() {
 
 // Semua hologram hidup (Beranda + fab) → disiarkan via bus keadaan.
 const holos = new Set();
-const holoState = (s) => aetherState.set(s);   // bus: avatar+UI+partikel koheren
-const holoLevel = (v) => aetherState.setLevel(v);
+const holoState = (s) => damarState.set(s);   // bus: avatar+UI+partikel koheren
+const holoLevel = (v) => damarState.setLevel(v);
 
 let pollTimer = null;
 let reconnectTimer = null;
@@ -152,13 +152,13 @@ function buildTitlebar() {
     $("#win-max").innerHTML = icon("maximize");
     $("#win-close").innerHTML = icon("close");
 
-    $("#win-min").addEventListener("click", () => window.aether.window.minimize());
-    $("#win-close").addEventListener("click", () => window.aether.window.close());
+    $("#win-min").addEventListener("click", () => window.damar.window.minimize());
+    $("#win-close").addEventListener("click", () => window.damar.window.close());
     $("#win-max").addEventListener("click", async () => {
-        const maximized = await window.aether.window.toggleMaximize();
+        const maximized = await window.damar.window.toggleMaximize();
         $("#win-max").innerHTML = icon(maximized ? "restore" : "maximize");
     });
-    window.aether.window.onState(({ maximized }) => {
+    window.damar.window.onState(({ maximized }) => {
         $("#win-max").innerHTML = icon(maximized ? "restore" : "maximize");
     });
 
@@ -200,8 +200,8 @@ function paintStopButton() {
     btn.classList.toggle("engaged", engaged);
     btn.querySelector(".txt").textContent = engaged ? "LANJUTKAN" : "STOP";
     btn.title = engaged
-        ? `Aether dihentikan — ${safetyState.reason ?? "tanpa alasan"}. Klik untuk melanjutkan.`
-        : "Hentikan Aether (semua tool & tugas otonom)";
+        ? `Damar dihentikan — ${safetyState.reason ?? "tanpa alasan"}. Klik untuk melanjutkan.`
+        : "Hentikan Damar (semua tool & tugas otonom)";
 
 }
 
@@ -213,14 +213,14 @@ async function toggleStop() {
 
         if (engaged) {
             await api.safetyRelease();
-            toast("Aether dilanjutkan", "ok");
+            toast("Damar dilanjutkan", "ok");
         }
         else {
             // Tanpa dialog konfirmasi: menghentikan adalah tindakan
             // AMAN dan dapat dibatalkan. Menaruh penghalang di depan
             // rem darurat justru berbahaya (§274).
             await api.safetyStop("dihentikan dari Console");
-            toast("Aether dihentikan — tool & tugas otonom berhenti", "warn");
+            toast("Damar dihentikan — tool & tugas otonom berhenti", "warn");
         }
 
     }
@@ -242,7 +242,7 @@ function buildLauncher() {
 
 /**
  * Control Hub — bukan menu, tapi pusat kendali: kartu app HIDUP berkategori,
- * status/health/versi diturunkan dari data nyata; Aether ditampilkan sebagai
+ * status/health/versi diturunkan dari data nyata; Damar ditampilkan sebagai
  * pengoordinasi. Dipanggil ulang saat poll agar status tetap live.
  */
 function renderHub() {
@@ -252,7 +252,7 @@ function renderHub() {
     const activeCount = APPS.filter(a => !a.core && appStatus(a).running).length;
     const header = document.getElementById("hub-head");
     if (header) header.innerHTML =
-        `<span class="hub-brand">AETHER</span> mengoordinasi <b>${activeCount}</b> aplikasi aktif`;
+        `<span class="hub-brand">DAMAR</span> mengoordinasi <b>${activeCount}</b> aplikasi aktif`;
 
     grid.innerHTML = CATEGORIES.map(cat => {
         const apps = APPS.filter(a => a.cat === cat);
@@ -288,7 +288,7 @@ function updateHubStatus() {
     const activeCount = APPS.filter(a => !a.core && appStatus(a).running).length;
     const header = document.getElementById("hub-head");
     if (header) header.innerHTML =
-        `<span class="hub-brand">AETHER</span> mengoordinasi <b>${activeCount}</b> aplikasi aktif`;
+        `<span class="hub-brand">DAMAR</span> mengoordinasi <b>${activeCount}</b> aplikasi aktif`;
 
     grid.querySelectorAll("[data-app]").forEach(btn => {
         const a = APPS.find(x => x.id === btn.dataset.app);
@@ -383,7 +383,7 @@ function mountStandalone(screen, app) {
 function greeting() {
     const h = new Date().getHours();
     const line = h < 5 ? "Selamat malam" : h < 11 ? "Selamat pagi" : h < 15 ? "Selamat siang" : h < 19 ? "Selamat sore" : "Selamat malam";
-    return { line, sub: "Ucapkan “Aether” atau ketik untuk memulai." };
+    return { line, sub: "Ucapkan “Damar” atau ketik untuk memulai." };
 }
 
 function renderCore(screen) {
@@ -406,7 +406,7 @@ function renderCore(screen) {
                 <div class="holo-dock">
                     <div class="holo-stats" id="core-stats" aria-live="polite"></div>
                     <form class="holo-prompt" id="core-prompt">
-                        <input type="text" autocomplete="off" placeholder="Tanya apa saja pada Aether…" />
+                        <input type="text" autocomplete="off" placeholder="Tanya apa saja pada Damar…" />
                         <button class="mic" type="button" id="core-mic" title="Bicara">${icon("mic")}</button>
                     </form>
                 </div>
@@ -422,14 +422,14 @@ function renderCore(screen) {
         coreHolo = createHologram({ maxFps: 20 });
         screen.querySelector("#core-holo").appendChild(coreHolo.el);
         holos.add(coreHolo);
-        aetherState.set(store.get().connected ? "idle" : "offline");
+        damarState.set(store.get().connected ? "idle" : "offline");
     }
     catch { coreHolo = null; }
 
     renderCoreStats();
 
     // Sapaan diketik perlahan — kemunculan yang tenang & hangat.
-    typeGreeting(screen, `${g.line}, aku Aether`);
+    typeGreeting(screen, `${g.line}, aku Damar`);
 
     // Mulai sesi (teks) → sapaan memudar perlahan, bubble muncul,
     // orb bergeser kiri. Input TETAP di kotak ketik dashboard ini.
@@ -442,7 +442,7 @@ function renderCore(screen) {
         fadeGreeting(screen);
         openOverlay({ text: v });
     });
-    // Mic: Aether ANTUSIAS menyapa lalu mendengar — sesi tetap
+    // Mic: Damar ANTUSIAS menyapa lalu mendengar — sesi tetap
     // berpusat di dashboard (kotak ketik + mic ini satu-satunya input).
     screen.querySelector("#core-mic").addEventListener("click", () => {
         fadeGreeting(screen);
@@ -459,7 +459,7 @@ function renderCore(screen) {
     }
 }
 
-/** Sapaan berketik lambat — muncul tenang, kata "Aether" ditebalkan. */
+/** Sapaan berketik lambat — muncul tenang, kata "Damar" ditebalkan. */
 function typeGreeting(screen, text) {
     const el = screen.querySelector("#core-greet");
     if (!el) return;
@@ -470,7 +470,7 @@ function typeGreeting(screen, text) {
     const step = () => {
         if (el.classList.contains("fading")) return;
         i++;
-        // 6 huruf terakhir ("Aether") masuk sebagai bagian tebal.
+        // 6 huruf terakhir ("Damar") masuk sebagai bagian tebal.
         const plain = text;
         const head = plain.slice(0, Math.min(i, plain.length - 6));
         const tail = i > plain.length - 6 ? `<b>${plain.slice(plain.length - 6)}</b>` : "";
@@ -513,7 +513,7 @@ function teardownCore() {
 }
 
 // =====================================================================
-// Wake word — Aether selalu standby
+// Wake word — Damar selalu standby
 // =====================================================================
 
 function initWake() {
@@ -521,7 +521,7 @@ function initWake() {
         onWake: () => {
             if (overlayOpen()) return;               // sudah dalam percakapan
             showWakeBadge();
-            holoState("curious");                    // Aether tersapa → antusias
+            holoState("curious");                    // Damar tersapa → antusias
             greetAndListen();                        // orb menyapa + dengar; bubble muncul
         },
         onError: () => { /* diam: 'not-allowed' dll — fab manual tetap ada */ }
@@ -585,7 +585,7 @@ function updateStatusBar(state) {
 
     if (!online || !o) {
         bar.innerHTML = seg("off", "Daemon", "terputus")
-            + `<span class="seg push"><span class="lbl">Aether OS</span></span>`;
+            + `<span class="seg push"><span class="lbl">Damar OS</span></span>`;
         return;
     }
 
@@ -598,7 +598,7 @@ function updateStatusBar(state) {
         + seg("", "Model", (o.ai.active ?? o.ai.defaultModel ?? "—").split("/").pop())
         + seg("", "Tools", o.tools.total)
         + seg("", "Uptime", durationShort(o.stats.daemon.uptime))
-        + `<span class="seg push"><span class="lbl">Aether OS</span><span class="val">v${esc(o.daemon.version)}</span></span>`;
+        + `<span class="seg push"><span class="lbl">Damar OS</span><span class="val">v${esc(o.daemon.version)}</span></span>`;
 }
 
 function durationShort(sec) {
@@ -671,15 +671,15 @@ function openEventStream() {
                 id: event.id, time: event.time, level: "event",
                 message: `${event.type} ${summarize(event.payload)}`
             });
-            if (event.type === "aether:present") presentMedia(event.payload);
+            if (event.type === "damar:present") presentMedia(event.payload);
             // Aktivitas multi-agent → orb agent di sekitar orb utama
             // (mendekat, menyalurkan energi, flash hasil).
             if (String(event.type ?? "").startsWith("orchestrator:")) {
                 agentBus.ingest(event.type, event.payload);
             }
-            // Aether Lab: event lab:* → mission control realtime.
+            // Damar Lab: event lab:* → mission control realtime.
             if (String(event.type ?? "").startsWith("lab:")) {
-                document.dispatchEvent(new CustomEvent("aether:lab-event", {
+                document.dispatchEvent(new CustomEvent("damar:lab-event", {
                     detail: { ...event.payload, type: String(event.type).slice(4) }
                 }));
             }
@@ -689,7 +689,7 @@ function openEventStream() {
 }
 
 /**
- * Aether meminta sesuatu DITAMPILKAN (gambar/video/dokumen) atau
+ * Damar meminta sesuatu DITAMPILKAN (gambar/video/dokumen) atau
  * DIBUKA (url/terminal) — bukan sekadar dijawab dengan teks.
  *
  * Media kini tampil sebagai BUBBLE di dashboard Beranda (transien,
@@ -702,13 +702,13 @@ function presentMedia(p) {
     if (!p) return;
 
     if (p.kind === "url" && p.url) {
-        window.aether?.shell?.open(p.url);
+        window.damar?.shell?.open(p.url);
         return;
     }
 
     if (p.kind === "terminal") {
         navigate("runtime");
-        toast(`Aether membuka terminal${p.command ? `: ${p.command}` : ""}`, "info");
+        toast(`Damar membuka terminal${p.command ? `: ${p.command}` : ""}`, "info");
         return;
     }
 
@@ -877,7 +877,7 @@ function makeDraggable(el, handle) {
 function openPresentPanel(p) {
 
     const popup = document.createElement("div");
-    popup.className = "aether-popup";
+    popup.className = "damar-popup";
 
     const title = p.title ?? p.caption ??
         ({ image: "Foto", video: "Video", document: "Dokumen", text: "Catatan" }[p.kind] ?? "Media");
@@ -954,8 +954,8 @@ function presentPlayer(p) {
     stopPlayer();
 
     const player = document.createElement("div");
-    player.id = "aether-player";
-    player.className = "aether-player";
+    player.id = "damar-player";
+    player.className = "damar-player";
 
     // URL yang BOLEH di-iframe. YouTube menolak /watch?v= (ERR_BLOCKED_BY_
     // RESPONSE lewat frame-ancestors) — hanya /embed/ID yang boleh. Itu
@@ -1040,7 +1040,7 @@ function presentPlayer(p) {
     const extBtn = player.querySelector(".ap-ext");
     if (extBtn && extUrl) {
         extBtn.addEventListener("click", () => {
-            try { window.aether?.shell?.open(extUrl); } catch { /* abaikan */ }
+            try { window.damar?.shell?.open(extUrl); } catch { /* abaikan */ }
         });
     }
 
@@ -1056,7 +1056,7 @@ function presentPlayer(p) {
 }
 
 function stopPlayer() {
-    const existing = document.getElementById("aether-player");
+    const existing = document.getElementById("damar-player");
     if (existing) existing.remove();
 }
 
@@ -1116,7 +1116,7 @@ async function main() {
     $("#holo-fab").innerHTML = brandMark(24);
 
     // Jeda/lanjut entitas saat overlay dibuka/ditutup (hemat daya).
-    document.addEventListener("aether:overlay", refreshHoloPower);
+    document.addEventListener("damar:overlay", refreshHoloPower);
 
     // Hemat GPU: saat jendela Console TIDAK fokus (pengguna di app lain),
     // hentikan semua animasi hologram. Saat fokus kembali, kembalikan ke
@@ -1132,11 +1132,11 @@ async function main() {
         setTimeout(() => greetAndListen(), 120);
     });
 
-    const saved = await window.aether.settings.get();
+    const saved = await window.damar.settings.get();
     store.set({ settings: saved });
     api.configure({ baseUrl: saved.daemonUrl, token: saved.token });
 
-    window.aether.daemon.onOutput(({ channel, text }) => {
+    window.damar.daemon.onOutput(({ channel, text }) => {
         for (const line of text.split(/\r?\n/)) {
             if (line.trim()) {
                 store.pushLog({
@@ -1147,12 +1147,12 @@ async function main() {
         }
     });
 
-    window.aether.daemon.onExit(({ code }) => {
+    window.damar.daemon.onExit(({ code }) => {
         store.patch("localDaemon", { running: false, pid: null });
         toast(`Daemon lokal berhenti (kode ${code})`, "warn");
     });
 
-    document.addEventListener("aether:reconnect", () => connect());
+    document.addEventListener("damar:reconnect", () => connect());
 
     navigate(location.hash.slice(1) || "core");
     updateChrome();

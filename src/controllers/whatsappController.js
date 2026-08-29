@@ -36,7 +36,7 @@ class WhatsAppController {
         }
     }
 
-    /** Daftar grup yang nomor Aether sudah tergabung. */
+    /** Daftar grup yang nomor Damar sudah tergabung. */
     async groups(req, res, next) {
         try {
             return response.success(res, "WhatsApp groups", { groups: await whatsapp.listGroups() });
@@ -60,7 +60,7 @@ class WhatsAppController {
             if (!whatsapp.running) {
                 return response.error(res, "WhatsApp belum tersambung.", 400);
             }
-            const count = await whatsapp.broadcast(req.body?.text ?? "Uji dari Aether Console ✅");
+            const count = await whatsapp.broadcast(req.body?.text ?? "Uji dari Damar Console ✅");
             return response.success(res, "Terkirim", { recipients: count });
         }
         catch (error) {

@@ -2,7 +2,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 
 /**
- * LlamaEngine — otak lokal Aether yang berjalan DI DALAM proses daemon.
+ * LlamaEngine — otak lokal Damar yang berjalan DI DALAM proses daemon.
  *
  * Tanpa server eksternal: node-llama-cpp menautkan llama.cpp
  * langsung ke Node, memuat bobot GGUF dari disk, dan menghasilkan token
@@ -101,7 +101,7 @@ class LlamaEngine {
 
     /** Model GGUF yang tersedia di direktori model (untuk UI/Console). */
     listModels(dir) {
-        const root = path.resolve(dir || process.env.AETHER_MODEL_DIR || "models");
+        const root = path.resolve(dir || process.env.DAMAR_MODEL_DIR || "models");
         let files = [];
         try { files = fs.readdirSync(root).filter(f => f.toLowerCase().endsWith(".gguf")); } catch { /* dir belum ada */ }
         return files.map(f => {

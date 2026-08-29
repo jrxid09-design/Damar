@@ -5,7 +5,7 @@ const deviceService = require("./deviceService");
 /**
  * Membaca sensor eksternal lewat HTTP.
  *
- * Aether tidak menyentuh hardware secara langsung supaya daemon
+ * Damar tidak menyentuh hardware secara langsung supaya daemon
  * tetap portabel: sensor apa pun — ESP32, Home Assistant, skrip
  * Python di PC rumah — cukup mengekspos satu endpoint JSON.
  */

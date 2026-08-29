@@ -132,7 +132,7 @@ async function after(id, args, result) {
 
         // Pembacaan murni yang tidak diverifikasi tidak dicatat —
         // hanya akan menenggelamkan jejak. Sisanya dicatat: ada yang
-        // berubah di luar kepala Aether, dan pemilik berhak melihatnya.
+        // berubah di luar kepala Damar, dan pemilik berhak melihatnya.
         if (report.risk === "destructive" || report.state !== "skipped") {
             auditTrail.record({
                 tool: id,

@@ -29,7 +29,7 @@ const MAX_ITERATIONS = 8;          // batas adaptasi per tujuan
 const MAX_SKILL_CREATIONS = 3;     // cegah pembuatan skill liar
 
 const PROMPT_PLAN = (goal) =>
-    `Kamu perencana otonom Aether. Tujuan: "${goal.title}"\n` +
+    `Kamu perencana otonom Damar. Tujuan: "${goal.title}"\n` +
     (goal.description ? `Deskripsi: ${goal.description}\n` : "") +
     "Susun rencana JSON: {\"steps\":[{\"n\":1,\"action\":\"...\",\"tool\":null,\"successWhen\":\"...\"}]}\n" +
     "Aturan: action = tugas konkret yang DISELESAIKAN TOOL (bukan 'laporkan ke pengguna' — laporan dibuat setelah loop). " +
@@ -50,7 +50,7 @@ const PROMPT_EVALUATE = (goal, step, outcome) => {
 };
 
 const PROMPT_SKILL_SPEC = (goal, step, finding) =>
-    `Aether butuh kapabilitas baru. Kebutuhan: "${step.action}" (konteks tujuan: "${goal.title}").\n` +
+    `Damar butuh kapabilitas baru. Kebutuhan: "${step.action}" (konteks tujuan: "${goal.title}").\n` +
     (finding?.note ? `Catatan: ${finding.note}\n` : "") +
     "Susun SPESIFIKASI skill JSON dengan bentuk: " +
     '{"id":"kebab-case","name":"Judul","description":"... (min 20 kata)",' +
@@ -165,7 +165,7 @@ class GoalEngine {
         // iterasi — satu tujuan bisa menggiling puluhan menit tanpa
         // pagar atas. Deadline ini memberi jaminan keras: loop berhenti
         // bersih begitu anggaran habis, apa pun yang sedang lambat.
-        const budget = Number(budgetMs ?? process.env.AETHER_GOAL_BUDGET_MS ?? 180000);
+        const budget = Number(budgetMs ?? process.env.DAMAR_GOAL_BUDGET_MS ?? 180000);
         const deadline = Date.now() + budget;
         const remaining = () => Math.max(0, deadline - Date.now());
 
@@ -540,15 +540,15 @@ class GoalEngine {
 
         const a = String(action ?? "").toLowerCase();
 
-        if (/kode|code|implement|bug|test/.test(a)) return "forge";
-        if (/riset|research|cari|analisis/.test(a)) return "vanta";
-        if (/sistem|server|docker|proses|jaringan/.test(a)) return "nexus";
-        if (/kamera|gambar|visual/.test(a)) return "sera";
-        if (/memori|ingat/.test(a)) return "mira";
-        if (/monitor|pantau|log/.test(a)) return "pulse";
-        if (/keamanan|audit/.test(a)) return "cipher";
+        if (/kode|code|implement|bug|test/.test(a)) return "nakula";
+        if (/riset|research|cari|analisis/.test(a)) return "janaka";
+        if (/sistem|server|docker|proses|jaringan/.test(a)) return "nakula";
+        if (/kamera|gambar|visual/.test(a)) return "nakula";
+        if (/memori|ingat/.test(a)) return "sadewa";
+        if (/monitor|pantau|log/.test(a)) return "sadewa";
+        if (/keamanan|audit/.test(a)) return "werkudara";
 
-        return "aether";
+        return "damar";
 
     }
 
@@ -674,7 +674,7 @@ class GoalEngine {
             // Spesifikasi skill — TIGA jalur berurutan (budget ketat
             // per jalur agar total tetap responsif):
             //   1. LLM langsung (60s) — cukup bila provider sehat
-            //   2. agent aether (90s) — jalur chat + fallback provider
+            //   2. agent damar (90s) — jalur chat + fallback provider
             //   3. opencode_run (10 menit) — model coding, paling andal
             //      untuk kode panjang (§14: tugas koding → model koding)
             let spec = null;
@@ -728,7 +728,7 @@ class GoalEngine {
 
     }
 
-    /** Spesifikasi skill via agent aether (fallback bila LLM langsung lambat). */
+    /** Spesifikasi skill via agent damar (fallback bila LLM langsung lambat). */
     async specViaAgent(goal, step, delegator = null) {
 
         try {
@@ -738,7 +738,7 @@ class GoalEngine {
             // N2 Round-3 — invarian delegasi: warisi inisiator tujuan,
             // jangan pernah menciptakan grant di jalur turunan ini.
             const res = await Promise.race([
-                agentHub.run("aether", PROMPT_SKILL_SPEC(goal, step, null),
+                agentHub.run("damar", PROMPT_SKILL_SPEC(goal, step, null),
                     { exec: delegator }),
                 new Promise((_, reject) => setTimeout(() => reject(new Error("agent-spec timeout")), 90000))
             ]);
@@ -899,7 +899,7 @@ function guessArgs(tool, action) {
 
     if (/^(browse|get)$/.test(tail)) return { url: firstUrl(action) ?? `https://duckduckgo.com/?q=${encodeURIComponent(action)}`, prompt: action };
     if (tail === "readFile") return { path: firstPath(action) ?? "package.json" };
-    if (tail === "writeFile") return { path: "aether-output.md", content: action };
+    if (tail === "writeFile") return { path: "damar-output.md", content: action };
     if (tail === "listDirectory") return { path: firstPath(action) ?? "." };
     if (tail === "terminal_run") return { purpose: "autonomy", command: extractCommand(action) };
     if (tail === "terminal_read") return { purpose: "autonomy" };

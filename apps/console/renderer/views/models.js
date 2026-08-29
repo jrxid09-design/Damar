@@ -9,7 +9,7 @@ export const models = {
     label: "Models",
     icon: "cpu",
     title: "Models",
-    subtitle: "Model yang tersedia pada AI yang dipakai Aether.",
+    subtitle: "Model yang tersedia pada AI yang dipakai Damar.",
 
     render(root) {
 
@@ -17,7 +17,7 @@ export const models = {
             <div class="view-head">
                 <div>
                     <h1>Models</h1>
-                    <p>Model yang tersedia pada AI yang sedang dipakai Aether.</p>
+                    <p>Model yang tersedia pada AI yang sedang dipakai Damar.</p>
                 </div>
                 <div class="actions">
                     <div class="seg" id="model-mode" style="margin:0"></div>
@@ -44,7 +44,7 @@ export const models = {
         const seg = root.querySelector("#model-mode");
         const body = root.querySelector("#model-body");
 
-        // Selektor "AI Lokal / AI Provider" — ganti otak Aether langsung.
+        // Selektor "AI Lokal / AI Provider" — ganti otak Damar langsung.
         await aiChoices.render(seg, () => load());
 
         const load = async () => {

@@ -1,6 +1,6 @@
 const crypto = require("node:crypto");
 
-const AetherError = require("./AetherError");
+const DamarError = require("./DamarError");
 
 /**
  * Deteksi kebuntuan V2 (§140) — SESSION-SCOPED + STICKY.
@@ -27,7 +27,7 @@ const WINDOW_MS = 60_000;
 const SAME_CALL_LIMIT = 4;
 const SAME_ERROR_LIMIT = 5;
 const MAX_TRACKED = 400;          // naik: kini per-scope
-const COOLDOWN_MS = Number(process.env.AETHER_LOOP_COOLDOWN_MS) || 30_000;
+const COOLDOWN_MS = Number(process.env.DAMAR_LOOP_COOLDOWN_MS) || 30_000;
 
 /** @type {Map<string, number[]>} scope::kunci → stempel waktu */
 const calls = new Map();
@@ -71,7 +71,7 @@ function throwLoop(toolId, kind, count, recovery) {
     // STICKY (H12): catat blokir AKTIF; jangan hapus jejak pemicunya.
     blocked.set(`${kind}:${toolId}`, Date.now() + COOLDOWN_MS);
 
-    throw new AetherError({
+    throw new DamarError({
         code: kind === "call" ? "LOOP_DETECTED" : "REPEATED_FAILURE",
         message:
             `Tool "${toolId}" ${kind === "call"
@@ -104,7 +104,7 @@ function assertNotLooping(toolId, args, scope = "global") {
     const until = blocked.get(`call:${key}`) ?? 0;
 
     if (now < until) {
-        throw new AetherError({
+        throw new DamarError({
             code: "LOOP_DETECTED",
             message:
                 `Tool "${toolId}" masih ditahan ${Math.ceil((until - now) / 1000)}s ` +
@@ -163,7 +163,7 @@ function recordFailure(toolId, error, scope = "global") {
 function reset(scope) {
 
     if (typeof scope !== "string" || !scope.trim()) {
-        throw new AetherError({
+        throw new DamarError({
             code: "INVALID_LOOPGUARD_SCOPE",
             message:
                 "loopGuard.reset() butuh scope eksplisit (sessionId/principalId). " +

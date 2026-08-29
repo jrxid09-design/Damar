@@ -3,7 +3,7 @@ import { icon } from "../lib/icons.js";
 import { esc, pill, toast } from "../lib/ui.js";
 
 /**
- * Aether OSINT — anak buah Aether, detektif digital.
+ * Damar OSINT — Pandawa — spesialis Damar, detektif digital.
  *
  * Empat pilar:
  *   1. Investigasi Cepat — email, username, telepon, domain (korelasi otomatis).
@@ -23,17 +23,17 @@ import { esc, pill, toast } from "../lib/ui.js";
 export const family = {
 
     id: "family",
-    label: "Aether OSINT",
+    label: "Damar OSINT",
     icon: "search",
-    title: "Aether OSINT",
-    subtitle: "Anak buah Aether — investigasi, kebocoran data, penipuan telepon, pelacakan.",
+    title: "Damar OSINT",
+    subtitle: "Pandawa — spesialis Damar — investigasi, kebocoran data, penipuan telepon, pelacakan.",
 
     render(root) {
         root.innerHTML = `
             <div class="view-head">
                 <div>
-                    <h1>Aether OSINT</h1>
-                    <p>Anak buah Aether — investigasi sah, bukan pelanggaran privasi.</p>
+                    <h1>Damar OSINT</h1>
+                    <p>Pandawa — spesialis Damar — investigasi sah, bukan pelanggaran privasi.</p>
                 </div>
                 <div class="actions">
                     <span class="pill ok"><span class="dot"></span>18 sumber terverifikasi</span>
@@ -365,7 +365,7 @@ async function viewCase(host, caseId) {
         const caseData = c.case ?? c;
 
         const modal = document.createElement("div");
-        modal.className = "aether-present show";
+        modal.className = "damar-present show";
         modal.innerHTML = `
             <div class="ap-card" style="max-width:min(800px,90vw);max-height:85vh;overflow-y:auto">
                 <button class="ap-close">✕</button>
@@ -689,7 +689,7 @@ async function renderTrack(host) {
                 <div class="osint-note">
                     ${icon("shield")}
                     <div>
-                        <b>Cara kerjanya:</b> Aether tidak menyadap nomor atau
+                        <b>Cara kerjanya:</b> Damar tidak menyadap nomor atau
                         membobol apa pun. Kamu mendaftarkan orangnya di sini, lalu
                         mendapat <b>satu tautan izin</b>. Orang itu membuka tautan
                         tersebut di ponselnya dan menekan "izinkan lokasi" —
@@ -804,7 +804,7 @@ async function viewTrackDetail(host, personId) {
         const person = p.person ?? p;
 
         const modal = document.createElement("div");
-        modal.className = "aether-present show";
+        modal.className = "damar-present show";
         modal.innerHTML = `
             <div class="ap-card" style="max-width:min(700px,90vw);max-height:85vh;overflow-y:auto">
                 <button class="ap-close">✕</button>
@@ -940,7 +940,7 @@ async function renderSocial(host) {
                     <h2>${icon("shield")} Cek Hoax</h2>
                     <span class="hint push">verifikasi sebelum sebarkan</span>
                 </div>
-                <!-- Cukup tautannya: Aether yang membuka, mengambil
+                <!-- Cukup tautannya: Damar yang membuka, mengambil
                      judul & isinya, lalu menilai. Menyuruh menyalin isi
                      artikel itu pekerjaan sia-sia, dan potongan pilihan
                      manusia biasanya kehilangan judulnya. -->

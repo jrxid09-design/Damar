@@ -17,8 +17,8 @@
 
 param(
     [ValidateSet("Simple", "Mirror", "Parity")][string]$Resiliency = "Mirror",
-    [string]$PoolName = "AetherPool",
-    [string]$DiskName = "AetherVolume",
+    [string]$PoolName = "DamarPool",
+    [string]$DiskName = "DamarVolume",
     [string]$DriveLetter = "N"
 )
 
@@ -41,4 +41,4 @@ $vd | Get-Disk | Initialize-Disk -PartitionStyle GPT -PassThru |
     Format-Volume -FileSystem NTFS -NewFileSystemLabel $DiskName -Confirm:$false | Out-Null
 
 Write-Host "Selesai. Pool '$PoolName' ($Resiliency) → drive ${DriveLetter}:" -ForegroundColor Green
-Write-Host "Di Console: NAS > Storage Manager > jadikan ${DriveLetter}: sebagai Storage Pool Aether."
+Write-Host "Di Console: NAS > Storage Manager > jadikan ${DriveLetter}: sebagai Storage Pool Damar."

@@ -93,7 +93,7 @@ class OpenRouterClient {
                 // stream. Default 30 dtk terlalu pendek: model reasoning
                 // (mis. glm-5.2) dengan prompt besar butuh ~30-40 dtk
                 // sampai token pertama, sehingga stream ter-abort dengan
-                // "This operation was aborted" dan Aether tampak diam.
+                // "This operation was aborted" dan Damar tampak diam.
                 timeout: 120000
 
             }

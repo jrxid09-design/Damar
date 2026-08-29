@@ -3,7 +3,7 @@ const path = require("node:path");
 /**
  * diffReviewer — tinjauan mekanis atas diff sebelum commit.
  *
- * Bukan pengganti penilaian Aether: ini menangkap hal yang mesin
+ * Bukan pengganti penilaian Damar: ini menangkap hal yang mesin
  * lebih andal melihatnya daripada model yang membaca ratusan baris —
  * rahasia yang ikut terbawa, sisa kode debug, perubahan logika tanpa
  * test. Temuan dikembalikan dengan nomor baris agar bisa ditindak,

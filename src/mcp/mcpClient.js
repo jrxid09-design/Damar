@@ -1,11 +1,11 @@
 const { spawn } = require("node:child_process");
 
 /**
- * McpClient — Aether sebagai KLIEN MCP (Model Context Protocol).
+ * McpClient — Damar sebagai KLIEN MCP (Model Context Protocol).
  *
- * Lawan dari mcpHandler (Aether sebagai server): di sini Aether
+ * Lawan dari mcpHandler (Damar sebagai server): di sini Damar
  * memanggil server MCP eksternal — Claude Desktop, agen lain,
- * alat pihak ketiga — dan mengekspos tool mereka ke model Aether
+ * alat pihak ketiga — dan mengekspos tool mereka ke model Damar
  * seolah itu tool native.
  *
  * Transport: stdio (newline-delimited JSON-RPC 2.0), sama seperti
@@ -108,7 +108,7 @@ class McpClient {
             const init = await this._request("initialize", {
                 protocolVersion: "2024-11-05",
                 capabilities: {},
-                clientInfo: { name: "aether", version: "2.0.0" }
+                clientInfo: { name: "damar", version: "2.0.0" }
             }, { timeout });
 
             this._serverInfo = init?.serverInfo ?? null;
@@ -197,7 +197,7 @@ class McpClient {
                 }
                 // TIDAK ada flag `bridged` di sini. Flag itu memberi tahu
                 // ToolExecutor "sudah dijaga registry inti" — benar untuk
-                // tool plugin Aether, SALAH untuk tool MCP: mereka tak
+                // tool plugin Damar, SALAH untuk tool MCP: mereka tak
                 // terdaftar di registry inti mana pun. Tanpa flag,
                 // toolGuard (kill switch, kebijakan risiko, rem kebuntuan,
                 // batas jalur, audit) berjalan penuh untuk tool eksternal.

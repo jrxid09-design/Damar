@@ -6,7 +6,7 @@ const { database, initialize } = require("../memory/db");
 const telemetry = require("../services/telemetryService");
 
 /**
- * SKILL FACTORY (§4-§5) — Aether membuat kapabilitas baru saat ada GAP.
+ * SKILL FACTORY (§4-§5) — Damar membuat kapabilitas baru saat ada GAP.
  *
  * Pipeline deterministik di runtime (§53: bukan di prompt):
  *
@@ -288,7 +288,7 @@ class SkillFactory {
 
     }
 
-    /** Daftar skill buatan Aether (forge + temporary). */
+    /** Daftar skill buatan Damar (forge + temporary). */
     async listSkills({ includeExpired = false } = {}) {
         const all = await capabilities.list({ kind: "skill" });
         return includeExpired ? all : all.filter(c => c.alive);
@@ -308,7 +308,7 @@ class SkillFactory {
 /**
  * Bungkus kode model menjadi modul plugin utuh.
  *
- * Kontrak plugin Aether: execute(context, params) — sedangkan model
+ * Kontrak plugin Damar: execute(context, params) — sedangkan model
  * lazim menulis class dengan execute(args). Strategi AMAN tanpa
  * membongkar isi class:
  *   1. Tulis class model apa adanya sebagai `SkillImpl`.
@@ -353,7 +353,7 @@ function wrapRaw(spec) {
     }
 
     return [
-        "// Skill buatan Aether Skill Factory — jangan sunting manual.",
+        "// Skill buatan Damar Skill Factory — jangan sunting manual.",
         impl,
         "",
         "class Tool {",

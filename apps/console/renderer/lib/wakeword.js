@@ -1,7 +1,7 @@
 import { MicRecorder } from "./voice.js";
 
 /**
- * Wake word "aether" — Aether selalu standby.
+ * Wake word "damar" — Damar selalu standby.
  *
  * DUA jalur:
  *   1. Web Speech API (SpeechRecognition) — ringan, tapi di Electron
@@ -9,7 +9,7 @@ import { MicRecorder } from "./voice.js";
  *      dibundel). Dipakai bila ada.
  *   2. Fallback WHISPER LOKAL — merekam jendela mic pendek beruntun lalu
  *      mentranskripsi lewat STT daemon (faster-whisper :8000), mencocokkan
- *      "aether". Inilah yang membuat wake-word benar-benar jalan di
+ *      "damar". Inilah yang membuat wake-word benar-benar jalan di
  *      Electron selama STT dikonfigurasi.
  *
  * Degradasi anggun: tanpa mic/STT, available()=false dan pengguna pakai
@@ -17,8 +17,8 @@ import { MicRecorder } from "./voice.js";
  */
 
 const VARIANTS = [
-    "aether", "either", "ether", "aither", "ather", "aetha", "aitha",
-    "eter", "eater", "hey aether", "ok aether", "hai aether"
+    "damar", "either", "ether", "aither", "ather", "aetha", "aitha",
+    "eter", "eater", "hey damar", "ok damar", "hai damar"
 ];
 
 const WINDOW_MS = 2600;      // panjang tiap jendela dengar

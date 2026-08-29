@@ -1,5 +1,5 @@
 /**
- * LabService — SATU PINTU Aether Lab (§43 deliverable).
+ * LabService — SATU PINTU Damar Lab (§43 deliverable).
  *
  * Facade di atas modul-modul lab; controller & AI tool hanya melihat
  * service ini. Eksekusi tetap mendelegasikan ke infrastruktur yang

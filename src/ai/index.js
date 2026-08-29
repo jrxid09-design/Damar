@@ -2,7 +2,7 @@ const AIBuilder = require("./builder/AIBuilder");
 
 module.exports = {
 
-    // Entry point utama: new Aether.Builder()...build()
+    // Entry point utama: new Damar.Builder()...build()
     Builder: AIBuilder,
 
     AIBuilder,

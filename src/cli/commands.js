@@ -3,7 +3,7 @@ const Table = require("cli-table3");
 const { c, symbols } = require("./theme");
 
 /**
- * Perintah slash dan alur chat untuk Aether CLI.
+ * Perintah slash dan alur chat untuk Damar CLI.
  *
  * Chat memakai endpoint streaming yang sama dengan Console, jadi
  * jawaban muncul token demi token — termasuk saat model memanggil
@@ -49,8 +49,8 @@ async function chat(session, text) {
     let answer = "";
     let printedHeader = false;
 
-    // Label aktor gaya agent-CLI: amber = Aether (identitas).
-    const label = `${c.amber("◆")} ${c.amber.bold("Aether")}`;
+    // Label aktor gaya agent-CLI: amber = Damar (identitas).
+    const label = `${c.amber("◆")} ${c.amber.bold("Damar")}`;
 
     try {
 

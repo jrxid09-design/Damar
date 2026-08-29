@@ -19,7 +19,7 @@ export const devices = {
     label: "Devices",
     icon: "mic",
     title: "Devices",
-    subtitle: "Mikrofon, kamera, dan sensor yang dipakai Aether.",
+    subtitle: "Mikrofon, kamera, dan sensor yang dipakai Damar.",
 
     render(root) {
 
@@ -27,7 +27,7 @@ export const devices = {
             <div class="view-head">
                 <div>
                     <h1>Devices</h1>
-                    <p>Mikrofon, kamera, dan sensor yang dipakai Aether.</p>
+                    <p>Mikrofon, kamera, dan sensor yang dipakai Damar.</p>
                 </div>
                 <div class="actions">
                     <button class="btn ghost sm" id="dev-permission">${icon("check")} Izinkan akses</button>
@@ -191,7 +191,7 @@ async function renderAudio(root) {
 
         <div class="field">
             <label>Wake word</label>
-            <input type="text" id="mic-wake" value="${esc(audio.wakeWord ?? "")}" placeholder="mis. hey aether">
+            <input type="text" id="mic-wake" value="${esc(audio.wakeWord ?? "")}" placeholder="mis. hey damar">
             <span class="help">Disimpan sebagai konfigurasi; deteksinya menyusul di fase Voice.</span>
         </div>
 

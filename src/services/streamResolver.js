@@ -7,7 +7,7 @@ const os = require("node:os");
 const pexec = promisify(execFile);
 
 /** Folder cache media terunduh. */
-const CACHE_DIR = path.join(os.tmpdir(), "aether-media");
+const CACHE_DIR = path.join(os.tmpdir(), "damar-media");
 
 /** Batas total cache. Di atas ini, berkas TERLAMA dihapus. */
 const CACHE_CAP_BYTES = 500 * 1024 * 1024;   // 500 MB

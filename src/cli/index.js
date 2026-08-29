@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Alias env lama AETHER_* -> DAMAR_* (deprecated; kanonik = DAMAR_*).
+require("../config/envCompat");
+
 const readline = require("node:readline");
 
 const DaemonClient = require("./client");
@@ -10,7 +13,7 @@ const commands = require("./commands");
 let sshTunnel = null;
 
 /**
- * Aether CLI — antarmuka terminal untuk Aether.
+ * Damar CLI — antarmuka terminal untuk Damar.
  *
  * Berperan sama seperti Console desktop: klien tipis ke daemon.
  * Ngobrol dengan streaming, cek status, kelola model, telusuri
@@ -32,12 +35,12 @@ function parseArgs(argv) {
             args.token = argv[++i];
         }
         else if (arg === "--ssh" || arg === "-s") {
-            // Remote: user@host[:remotePort] — daemon Aether di sana
+            // Remote: user@host[:remotePort] — daemon Damar di sana
             // dijangkau lewat terowongan SSH lokal.
             args.ssh = argv[++i];
         }
         else if (arg === "--serve") {
-            // Jalankan daemon CLI sendiri di port 3001 (AETHER_ROLE=cli)
+            // Jalankan daemon CLI sendiri di port 3001 (DAMAR_ROLE=cli)
             // — bisa bersamaan dengan daemon Console di 3000.
             args.serve = true;
         }
@@ -47,8 +50,8 @@ function parseArgs(argv) {
         else if (i === 0 && !arg.startsWith("-")) {
 
             // SUBCOMMAND global (hanya argumen pertama):
-            //   aether console → daemon + Console desktop (launcher)
-            //   aether cli     → REPL interaktif (perilaku default)
+            //   damar console → daemon + Console desktop (launcher)
+            //   damar cli     → REPL interaktif (perilaku default)
             if (arg === "console" || arg === "gui") {
                 args.mode = "console";
                 continue;
@@ -78,19 +81,19 @@ function parseArgs(argv) {
 function usage() {
 
     console.log(`
-${c.text("Aether CLI")}
+${c.text("Damar CLI")}
 
 ${c.muted("Pemakaian:")}
-  aether console              ${symbols.dot} daemon + Console desktop (GUI)
-  aether cli                  ${symbols.dot} mode interaktif terminal
-  aether "pertanyaan"         ${symbols.dot} tanya sekali lalu keluar
-  echo "teks" | aether        ${symbols.dot} baca dari pipa
-  aether --serve              ${symbols.dot} nyalakan daemon CLI (port 3001)
-  aether --ssh user@host      ${symbols.dot} remote: daemon Aether di host lain
+  damar console              ${symbols.dot} daemon + Console desktop (GUI)
+  damar cli                  ${symbols.dot} mode interaktif terminal
+  damar "pertanyaan"         ${symbols.dot} tanya sekali lalu keluar
+  echo "teks" | damar        ${symbols.dot} baca dari pipa
+  damar --serve              ${symbols.dot} nyalakan daemon CLI (port 3001)
+  damar --ssh user@host      ${symbols.dot} remote: daemon Damar di host lain
 
 ${c.muted("Opsi:")}
   -u, --url <url>              alamat daemon (default auto: 3001 → 3000)
-  -t, --token <token>          AETHER_TOKEN bila daemon dikunci
+  -t, --token <token>          DAMAR_TOKEN bila daemon dikunci
   -s, --ssh <user@host[:port]> sambungkan lewat terowongan SSH ke daemon
                                   remote (port daemon dianggap 3000)
   --serve                      jalankan daemon CLI sendiri — bisa
@@ -98,11 +101,11 @@ ${c.muted("Opsi:")}
   -h, --help                   tampilkan bantuan ini
 
 ${c.muted("Port per peran:")}
-  daemon Console  ${symbols.dot} 3000  (aether console / AETHER_ROLE=console)
-  daemon CLI      ${symbols.dot} 3001  (aether cli --serve / AETHER_ROLE=cli)
+  daemon Console  ${symbols.dot} 3000  (damar console / DAMAR_ROLE=console)
+  daemon CLI      ${symbols.dot} 3001  (damar cli --serve / DAMAR_ROLE=cli)
 
 ${c.muted("Env:")}
-  AETHER_URL, AETHER_TOKEN, AETHER_ROLE, PORT
+  DAMAR_URL, DAMAR_TOKEN, DAMAR_ROLE, PORT
 `);
 
 }
@@ -116,25 +119,25 @@ async function main() {
         return;
     }
 
-    // `aether console` — daemon + Console desktop via launcher.
+    // `damar console` — daemon + Console desktop via launcher.
     // Bisa dipanggil dari folder mana pun: launcher dijalankan di
-    // folder instalasi Aether (src/cli → root = ../..).
+    // folder instalasi Damar (src/cli → root = ../..).
     if (args.mode === "console") {
         const { spawn } = require("node:child_process");
         const path = require("node:path");
         const root = path.join(__dirname, "..", "..");
         const launcher = process.platform === "win32"
             ? spawn(process.execPath, [path.join(root, "scripts", "launch.js"), "--console"], {
-                cwd: root, stdio: "inherit", env: { ...process.env, AETHER_ROLE: "console" }
+                cwd: root, stdio: "inherit", env: { ...process.env, DAMAR_ROLE: "console" }
             })
             : spawn("node", [path.join(root, "scripts", "launch.js"), "--console"], {
-                cwd: root, stdio: "inherit", env: { ...process.env, AETHER_ROLE: "console" }
+                cwd: root, stdio: "inherit", env: { ...process.env, DAMAR_ROLE: "console" }
             });
         launcher.on("exit", code => process.exit(code ?? 0));
         return;
     }
 
-    // `aether cli` — perilaku sama dengan tanpa subcommand (REPL).
+    // `damar cli` — perilaku sama dengan tanpa subcommand (REPL).
 
     // --serve: nyalakan daemon CLI (port 3001) lalu sambungkan.
     if (args.serve) {
@@ -146,8 +149,8 @@ async function main() {
         );
         // Tunggu server siap sebelum klien menyapa.
         await new Promise(r => setTimeout(r, 1500));
-        process.env.AETHER_ROLE = "cli";
-        process.env.AETHER_URL = process.env.AETHER_URL || "http://localhost:3001";
+        process.env.DAMAR_ROLE = "cli";
+        process.env.DAMAR_URL = process.env.DAMAR_URL || "http://localhost:3001";
     }
 
     // --ssh: buka terowongan SSH ke daemon remote.
@@ -163,7 +166,7 @@ async function main() {
 
     const client = new DaemonClient({ url: args.url, token: args.token });
 
-    // Baca dari pipa bila ada (echo "..." | aether).
+    // Baca dari pipa bila ada (echo "..." | damar).
     const piped = await readPipedInput();
 
     const oneShot = args.once ?? piped;
@@ -265,7 +268,7 @@ function repl(session) {
         });
 
         rl.on("close", () => {
-            console.log(`\n${c.muted("  Sampai jumpa.")} ${symbols.aether}\n`);
+            console.log(`\n${c.muted("  Sampai jumpa.")} ${symbols.damar}\n`);
             resolve();
         });
 
@@ -289,7 +292,7 @@ function repl(session) {
 }
 
 /**
- * Terowongan SSH ke daemon Aether remote.
+ * Terowongan SSH ke daemon Damar remote.
  *
  * Bentuk target: user@host[:remotePort]  (remotePort default 3000).
  * Port lokal dipilih acak bebas; `ssh -N -L` dijalankan sebagai
@@ -385,14 +388,14 @@ async function ensureDaemon(client, { quiet = false } = {}) {
     }
 
     console.log(
-        `  ${symbols.err} ${c.danger("Daemon Aether tidak terjangkau di")} ${c.text(client.baseUrl)}\n`
+        `  ${symbols.err} ${c.danger("Daemon Damar tidak terjangkau di")} ${c.text(client.baseUrl)}\n`
     );
     console.log(`  ${c.muted("Jalankan daemon dulu di terminal lain:")}`);
-    console.log(`     ${c.amber("aether --serve")} ${c.dim("(daemon CLI, port 3001)")}\n`);
+    console.log(`     ${c.amber("damar --serve")} ${c.dim("(daemon CLI, port 3001)")}\n`);
     console.log(`  ${c.muted("Atau arahkan CLI ke alamat lain:")}`);
-    console.log(`     ${c.amber("aether --url http://192.168.1.20:3000")}\n`);
+    console.log(`     ${c.amber("damar --url http://192.168.1.20:3000")}\n`);
     console.log(`  ${c.muted("Daemon di mesin lain? Terowongan SSH:")}`);
-    console.log(`     ${c.amber("aether --ssh user@namahost")}\n`);
+    console.log(`     ${c.amber("damar --ssh user@namahost")}\n`);
 
     return false;
 

@@ -6,7 +6,7 @@ const engine = require("../../memory/core/MemoryEngine");
  * Setiap bug yang BERHASIL diperbaiki disimpan: Root Cause / Patch / File /
  * Lesson. Disimpan sebagai memori operasional agen (tipe "skills" =
  * auto-commit, bukan proposal ask-tier) lewat MemoryEngine — jadi memori
- * milik Aether Core & bisa di-recall sebelum menambal bug serupa.
+ * milik Damar Core & bisa di-recall sebelum menambal bug serupa.
  *
  * Alur: recall(gejala) SEBELUM investigasi → hemat tool budget; record()
  * SETELAH test hijau.

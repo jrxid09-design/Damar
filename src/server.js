@@ -1,11 +1,14 @@
 require("./events/listeners/loggerListener");
 
+// Alias env lama AETHER_* -> DAMAR_* (deprecated; kanonik = DAMAR_*).
+require("./config/envCompat");
+
 // Argumen eksplisit menang atas .env — diproses SEBELUM config/env
 // dibaca. Dipakai launcher/CLI untuk daemon per-peran:
 //   node src/server.js --role cli   → port 3001 (bersamaan 3000)
 for (let i = 2; i < process.argv.length; i++) {
     if (process.argv[i] === "--role" && process.argv[i + 1]) {
-        process.env.AETHER_ROLE = process.argv[++i];
+        process.env.DAMAR_ROLE = process.argv[++i];
     }
     else if (process.argv[i] === "--port" && process.argv[i + 1]) {
         process.env.PORT = process.argv[++i];
@@ -55,7 +58,7 @@ function bootSubsystems() {
     // Lapisan kesadaran: afek, perhatian, model-diri, metakognisi,
     // empati. Ia berlangganan bus telemetri, jadi harus hidup SEBELUM
     // subsistem lain mulai memancarkan peristiwa — kalau tidak, menit
-    // pertama Aether berjalan tanpa keadaan batin sama sekali.
+    // pertama Damar berjalan tanpa keadaan batin sama sekali.
     try { require("./consciousness").start(); }
     catch (error) { telemetry.warn(`Kesadaran gagal disiapkan: ${error.message}`); }
 
@@ -157,7 +160,7 @@ function bootSubsystems() {
     catch (error) { telemetry.warn(`[home] MQTT init gagal: ${error.message}`); }
 
     // Auto-nyalakan runtime inti agar dashboard tak
-    // "DEGRADED" tiap Aether dibuka. Ditunda agar terminal & health siap;
+    // "DEGRADED" tiap Damar dibuka. Ditunda agar terminal & health siap;
     // melewati yang sudah online. Bisa dimatikan di configs/runtimes.json.
     setTimeout(() => {
         try {
@@ -175,9 +178,9 @@ function bootSubsystems() {
         logger.error(`Terminal gateway gagal: ${error.message}`);
     }
 
-    if (!process.env.AETHER_TOKEN) {
+    if (!process.env.DAMAR_TOKEN) {
         telemetry.warn(
-            "AETHER_TOKEN belum diset — bidang kendali terbuka untuk siapa pun di jaringan ini."
+            "DAMAR_TOKEN belum diset — bidang kendali terbuka untuk siapa pun di jaringan ini."
         );
     }
 
@@ -221,12 +224,12 @@ function bootSubsystems() {
     try {
         const { c, symbols, hr } = require("./cli/theme");
         const base = `http://localhost:${config.port}`;
-        const tokenLine = process.env.AETHER_TOKEN
-            ? c.ok("aktif") : c.warn("terbuka — set AETHER_TOKEN untuk mengunci");
-        console.log("\n" + hr(`Aether siap${config.role ? ` · ${config.role}` : ""}`));
-        console.log(`  ${symbols.aether} Daemon       ${c.accent(base)}`);
-        console.log(`  ${symbols.aether} Console API  ${c.muted(base + "/api/v1/console/overview")}`);
-        console.log(`  ${symbols.aether} CLI          ${c.muted("npm run cli")}`);
+        const tokenLine = process.env.DAMAR_TOKEN
+            ? c.ok("aktif") : c.warn("terbuka — set DAMAR_TOKEN untuk mengunci");
+        console.log("\n" + hr(`Damar siap${config.role ? ` · ${config.role}` : ""}`));
+        console.log(`  ${symbols.damar} Daemon       ${c.accent(base)}`);
+        console.log(`  ${symbols.damar} Console API  ${c.muted(base + "/api/v1/console/overview")}`);
+        console.log(`  ${symbols.damar} CLI          ${c.muted("npm run cli")}`);
         console.log(`  ${symbols.dot} Token        ${tokenLine}`);
         console.log(hr() + "\n");
     }
@@ -257,7 +260,7 @@ function listen(port, attemptsLeft = autoPortAttempts()) {
         if (error.code === "EADDRINUSE") {
 
             // Port dipakai proses lain. Sering kali itu justru daemon
-            // Aether yang SUDAH jalan — bukan kesalahan fatal.
+            // Damar yang SUDAH jalan — bukan kesalahan fatal.
             if (attemptsLeft > 0) {
 
                 const next = port + 1;
@@ -276,7 +279,7 @@ function listen(port, attemptsLeft = autoPortAttempts()) {
                 `Port ${port} sedang dipakai dan tidak ada port pengganti.`
             );
             logger.error(
-                "Kemungkinan Aether sudah berjalan. Pilihan:"
+                "Kemungkinan Damar sudah berjalan. Pilihan:"
             );
             logger.error(
                 `  • Sambungkan Console ke daemon yang sudah ada (http://localhost:${port}).`
@@ -321,11 +324,11 @@ function listen(port, attemptsLeft = autoPortAttempts()) {
  *
  * Default 0 — lebih baik gagal dengan pesan jelas daripada diam-
  * diam pindah port dan bikin Console kehilangan daemon. Aktifkan
- * geser-otomatis hanya bila diminta lewat AETHER_PORT_AUTO.
+ * geser-otomatis hanya bila diminta lewat DAMAR_PORT_AUTO.
  */
 function autoPortAttempts() {
 
-    return process.env.AETHER_PORT_AUTO === "1" ? 10 : 0;
+    return process.env.DAMAR_PORT_AUTO === "1" ? 10 : 0;
 
 }
 
@@ -337,7 +340,7 @@ const shutdown = (signal) => {
 
     shuttingDown = true;
 
-    logger.info(`${signal} diterima, menghentikan Aether...`);
+    logger.info(`${signal} diterima, menghentikan Damar...`);
 
     integrations.stopPolling();
     memory.stop();
@@ -384,7 +387,7 @@ process.on("unhandledRejection", (reason) => {
 // Gangguan socket pada sambungan yang hidup lama (WhatsApp, MCP,
 // keep-alive, integrasi) muncul sebagai error tanpa pemilik: tidak
 // ada state aplikasi yang rusak, hanya koneksi yang putus dan akan
-// tersambung lagi sendiri. Aether harus tetap hidup untuk itu.
+// tersambung lagi sendiri. Damar harus tetap hidup untuk itu.
 const RECOVERABLE_NETWORK_ERRORS = new Set([
     "ECONNRESET",
     "EPIPE",
@@ -409,7 +412,7 @@ process.on("uncaughtException", (error) => {
     if (RECOVERABLE_NETWORK_ERRORS.has(error?.code)) {
 
         logger.warn(
-            `Koneksi terputus (${error.code}) — Aether tetap berjalan.`
+            `Koneksi terputus (${error.code}) — Damar tetap berjalan.`
         );
 
         return;

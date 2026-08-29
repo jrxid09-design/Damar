@@ -1,11 +1,11 @@
 /**
- * Aether Motion — registri gerak semantik terpusat.
+ * Damar Motion — registri gerak semantik terpusat.
  *
  * Prinsip (spesifikasi): gerak mengomunikasikan kecerdasan, kausalitas,
  * dan keadaan — TIDAK ADA animasi acak, tanpa bouncing berlebihan,
  * tanpa scaling tanpa makna.
  *
- * Token timing diambil dari CSS (aether.tokens.css) supaya satu sumber:
+ * Token timing diambil dari CSS (damar.tokens.css) supaya satu sumber:
  *   ambient 4000ms · interaction 160ms · cognitive 800ms ·
  *   system 240ms · critical 320ms
  */

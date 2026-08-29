@@ -1,17 +1,17 @@
 const path = require("node:path");
 const os = require("node:os");
 
-const AetherError = require("./AetherError");
+const DamarError = require("./DamarError");
 
 /**
  * Batas jalur berkas (§38, Konstitusi Pasal 9).
  *
  * Sebelum ini `filesystem.*` dapat menyentuh SELURUH disk: menulis
  * ke C:\Windows, membaca kunci SSH, atau menimpa konfigurasi
- * keselamatan Aether sendiri. Tingkat risiko sudah membatasi SIAPA
+ * keselamatan Damar sendiri. Tingkat risiko sudah membatasi SIAPA
  * yang boleh memanggil, tetapi tidak membatasi KE MANA.
  *
- * Pendekatannya sengaja daftar-tolak, bukan daftar-izin. Aether
+ * Pendekatannya sengaja daftar-tolak, bukan daftar-izin. Damar
  * ini bekerja lintas C:, D:, dan E: untuk pekerjaan nyata pemilik;
  * mengunci ke satu folder akan mematikan gunanya (§277). Yang
  * dilindungi adalah tempat yang kerusakannya tidak dapat ditarik
@@ -24,7 +24,7 @@ const HOME = os.homedir();
 const DENIED = [
 
     // Sistem operasi — kerusakan di sini tidak dapat dipulihkan
-    // oleh Aether sendiri.
+    // oleh Damar sendiri.
     "C:\\Windows",
     "C:\\Program Files",
     "C:\\Program Files (x86)",
@@ -47,18 +47,18 @@ const DENIED = [
 /**
  * Tidak ada lagi berkas yang khusus dikunci hanya-baca.
  *
- * Dulu Aether dilarang menulis ke configs/safety.json, konstitusi,
+ * Dulu Damar dilarang menulis ke configs/safety.json, konstitusi,
  * dan src/core lewat operasi otonom — supaya ia tidak dapat mengubah
  * kebijakan keselamatannya sendiri. Larangan itu dihapus atas
- * keputusan pemilik: Aether kini boleh mengubah runtime, kebijakan,
+ * keputusan pemilik: Damar kini boleh mengubah runtime, kebijakan,
  * dan konstitusinya sendiri (§37 self-extending). Yang menahannya
  * dari kerusakan tak terpulihkan bukan lagi larangan tulis, melainkan
  * git + CheckpointSystem — setiap perubahan bisa ditarik kembali.
  *
  * DENIED tetap ada, tetapi hanya untuk hal yang menimpanya TIDAK
- * menambah kemampuan Aether sama sekali: kredensial mentah (yang
+ * menambah kemampuan Damar sama sekali: kredensial mentah (yang
  * kebocorannya melanggar Pasal 9.1) dan inti sistem operasi (yang
- * kerusakannya membrick mesin, bukan memberdayakan Aether).
+ * kerusakannya membrick mesin, bukan memberdayakan Damar).
  */
 const READ_ONLY = [];
 
@@ -106,7 +106,7 @@ function assertPathAllowed(target, write = false) {
 
     for (const denied of DENIED) {
         if (within(abs, denied)) {
-            throw new AetherError({
+            throw new DamarError({
                 code: "PATH_DENIED",
                 message: `Jalur "${abs}" berada di area terlindungi dan tidak dapat diakses.`,
                 severity: "info",
@@ -122,10 +122,10 @@ function assertPathAllowed(target, write = false) {
 
     for (const ro of READ_ONLY) {
         if (within(abs, ro)) {
-            throw new AetherError({
+            throw new DamarError({
                 code: "PATH_READ_ONLY",
                 message:
-                    `Jalur "${abs}" hanya boleh dibaca. Aether tidak dapat mengubah ` +
+                    `Jalur "${abs}" hanya boleh dibaca. Damar tidak dapat mengubah ` +
                     `konstitusi, kebijakan keselamatan, atau runtime intinya sendiri.`,
                 severity: "info",
                 retryable: false,

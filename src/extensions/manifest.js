@@ -177,16 +177,21 @@ function parseRuntimeCompatibility(raw) {
     if (raw === undefined) return deepFreeze({});
     if (!isPlainObject(raw)) throw fail(REASONS.MALFORMED_INPUT, "'runtime' must be an object");
     const out = {};
+    // `aether` = ejaan LAMA dari `damar` (pra-rename). Diterima sebagai
+    // jalur migrasi lalu DINORMALKAN ke kunci kanonik, jadi descriptor
+    // tetap memiliki satu nama saja — bukan dua identitas runtime.
     for (const key of Object.getOwnPropertyNames(raw)) {
-        if (!["aether", "node"].includes(key)) {
+        if (!["damar", "aether", "node"].includes(key)) {
             throw fail(REASONS.UNKNOWN_FIELD, `unknown runtime field '${key}'`);
         }
         const v = raw[key];
         if (v === undefined) continue;
         if (typeof v !== "string") throw fail(REASONS.INVALID_VERSION_RANGE, `runtime.${key} must be string range`);
         probeRange(v);
-        out[key] = v.trim();
+        out[key === "aether" ? "damar" : key] = v.trim();
     }
+    // Kanonik menang bila keduanya ditulis, apa pun urutan kuncinya.
+    if (typeof raw.damar === "string") out.damar = raw.damar.trim();
     return deepFreeze(out);
 }
 

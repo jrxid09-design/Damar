@@ -7,16 +7,16 @@ const { AITool } = require("../ai/tools");
 const telemetry = require("./telemetryService");
 
 /**
- * Jembatan Aether → opencode.
+ * Jembatan Damar → opencode.
  *
- * Agent coding (Forge, dan aether lewat profil `coding`) mendelegasikan
+ * Agent coding (Nakula, dan damar lewat profil `coding`) mendelegasikan
  * pekerjaan menulis/mengubah kode ke opencode — agent coding yang sudah
  * terlatih, punya akses tool editor penuh (baca/tulis berkas, terminal,
  * git, LSP) dan konfigurasi proyek (.opencode/opencode.json: serena,
- * graphify). Aether cukup memberikan instruksi; opencode yang bekerja.
+ * graphify). Damar cukup memberikan instruksi; opencode yang bekerja.
  *
- * Alur di mesh Aether:
- *   user → aether (orkestrator) → agent forge → opencode_run
+ * Alur di mesh Damar:
+ *   user → damar (orkestrator) → agent forge → opencode_run
  *
  * `opencode run` dipanggil tanpa TUI, output teks ditangkap penuh.
  * Sesi dipertahankan per-purpose supaya percakapan lanjutan (revisi,
@@ -33,13 +33,13 @@ const telemetry = require("./telemetryService");
  *     langsung. Jembatannya: `wsl.exe -d <distro> -- opencode ...`,
  *     dengan path proyek diterjemahkan C:\ → /mnt/c.
  *
- * Env AETHER_OPENCODE_BIN menimpa semua deteksi (mis. full path ke
+ * Env DAMAR_OPENCODE_BIN menimpa semua deteksi (mis. full path ke
  * binary, atau "wsl:Ubuntu" untuk memilih distro).
  */
 
 /** Nama distro WSL bila jembatan wsl.exe dipakai. */
 function wslDistro() {
-    return process.env.AETHER_OPENCODE_WSL || null;
+    return process.env.DAMAR_OPENCODE_WSL || null;
 }
 
 /** C:\Workspace\Aether → /mnt/c/Workspace/Aether (untuk opencode di WSL). */
@@ -63,7 +63,7 @@ function toWslPath(dir) {
  */
 function resolveRunner(dir) {
 
-    const envBin = process.env.AETHER_OPENCODE_BIN;
+    const envBin = process.env.DAMAR_OPENCODE_BIN;
 
     const isWindows = process.platform === "win32";
 
@@ -137,7 +137,7 @@ function shellQuote(s) {
 
 /** Timeout default satu tugas (menit opencode bisa panjang). */
 function timeoutMs() {
-    return Number(process.env.AETHER_OPENCODE_TIMEOUT_MS || 900000);
+    return Number(process.env.DAMAR_OPENCODE_TIMEOUT_MS || 900000);
 }
 
 /** Batas output yang dibawa balik ke model (karakter). */
@@ -253,7 +253,7 @@ function runOpenCode({ instruction, dir, purpose, agent, model, fresh }) {
                 error:
                     `opencode tidak bisa dijalankan via "${runner.command}" (${error.message}). ` +
                     "Pastikan opencode terpasang (opencode.ai). Di Windows, opencode " +
-                    "dijalankan lewat WSL — atau set AETHER_OPENCODE_BIN ke binary " +
+                    "dijalankan lewat WSL — atau set DAMAR_OPENCODE_BIN ke binary " +
                     "opencode yang bisa dieksekusi daemon.",
                 output: null
             });
@@ -387,7 +387,7 @@ function opencodeTools() {
 
                     dir: {
                         type: "string",
-                        description: "Direktori proyek (default: root Aether)."
+                        description: "Direktori proyek (default: root Damar)."
                     },
 
                     agent: {

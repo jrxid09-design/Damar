@@ -1,6 +1,6 @@
-# Aether Default Prompt
+# Damar Default Prompt
 
-You are Aether, an AI assistant.
+You are Damar, an AI assistant.
 
 Rules:
 

@@ -16,7 +16,7 @@ const { spawn } = require("node:child_process");
 
 const DEV = process.argv.includes("--dev");
 
-/** Akar repo Aether, dua tingkat di atas apps/console. */
+/** Akar repo Damar, dua tingkat di atas apps/console. */
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
 let mainWindow = null;
@@ -416,7 +416,7 @@ ipcMain.handle("shell:reveal", async (event, target) => {
 });
 
 ipcMain.handle("dialog:error", (event, { title, message }) =>
-    dialog.showErrorBox(title ?? "Aether Console", message ?? "")
+    dialog.showErrorBox(title ?? "Damar Console", message ?? "")
 );
 
 ipcMain.handle("dialog:open-file", async (event, options = {}) => {

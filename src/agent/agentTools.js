@@ -31,8 +31,25 @@ const { CORE } = require("../ai/tools/ToolSelector");
  */
 const WORKER_PROFILES = {
 
-    // Vanta — riset, analisis, OSINT, web.
-    vanta: [
+    // Puntadewa — tata kelola, perencanaan, penilaian keputusan.
+    // Sengaja BACA-DOMINAN: perencana butuh melihat keadaan, bukan
+    // mengubahnya. PLAN != AUTHORITY.
+    puntadewa: [
+        "world_describe", "system_health", "home_state", "home_devices",
+        "memory_recall", "memory_related", "memory_documents",
+        "code_plan", "readFile", "listDirectory"
+    ],
+
+    // Werkudara — keamanan, pemodelan ancaman, audit.
+    werkudara: [
+        "osint_breach", "osint_hoax_trace", "osint_phone_assess",
+        "code_diagnostics", "code_graph_query",
+        "terminal_list", "terminal_run", "terminal_read",
+        "system_health", "readFile", "listDirectory"
+    ],
+
+    // Janaka — riset, intelijen, verifikasi fakta.
+    janaka: [
         "browse", "get", "post", "download",
         "osint_investigate", "osint_email", "osint_phone", "osint_username",
         "osint_domain", "osint_breach", "osint_hoax_check", "osint_social_network",
@@ -40,76 +57,40 @@ const WORKER_PROFILES = {
         "readFile", "listDirectory", "open_document"
     ],
 
-    // Forge — software engineering, didelegasikan ke opencode.
-    forge: [
+    // Nakula — rekayasa perangkat lunak, sistem/infra, otomatisasi,
+    // serta integrasi perangkat (vision, audio, kanal).
+    nakula: [
         "opencode_run",
         "code_graph_query", "code_graph_path", "code_graph_explain",
         "code_definition", "code_references", "code_diagnostics",
         "code_plan", "code_test", "code_check_syntax",
         "code_branch", "code_commit", "code_rollback",
         "code_symbol_index", "code_ast_outline", "code_hover",
-        "readFile", "writeFile", "listDirectory"
-    ],
-
-    // Nexus — sistem, infrastruktur, terminal, NAS.
-    nexus: [
         "terminal_list", "terminal_run", "terminal_read", "terminal_restart",
         "system_health", "nas_status", "nas_pools",
         "world_describe", "open_terminal", "open_url",
-        "readFile", "writeFile", "listDirectory"
-    ],
-
-    // Sera — vision, kamera, gambar, wajah.
-    sera: [
+        "get", "post", "download", "browse",
+        "home_state", "home_devices",
         "see_camera", "list_cameras", "count_people_camera",
         "describe_image", "show_image", "show_video",
         "search_photos", "find_people", "identify_face",
-        "photos_summary", "open_document"
-    ],
-
-    // Echo — suara & audio.
-    echo: [
+        "photos_summary", "open_document",
         "voice_status", "transcribe", "tts_speak",
-        "play_media", "play_youtube", "search_music", "stop_media"
-    ],
-
-    // Cipher — keamanan & audit.
-    cipher: [
-        "osint_breach", "osint_hoax_trace", "osint_phone_assess",
-        "code_diagnostics", "code_graph_query",
-        "terminal_list", "terminal_run", "terminal_read",
-        "system_health", "readFile", "listDirectory"
-    ],
-
-    // Atlas — otomatisasi alur kerja.
-    atlas: [
-        "get", "post", "download", "browse",
-        "terminal_run", "system_health",
-        "world_describe", "home_state", "home_devices",
+        "play_media", "play_youtube", "search_music", "stop_media",
+        "wa_send", "wa_status", "whatsapp_send_photo", "whatsapp_send_document",
+        "send_file", "send_immich_photo", "send_media_url",
         "readFile", "writeFile", "listDirectory"
     ],
 
-    // Mira — memori & pengetahuan.
-    mira: [
+    // Sadewa — memori, provenance, analisis, kontinuitas.
+    sadewa: [
         "memory_recall", "memory_remember", "memory_forget",
         "memory_related", "memory_entities", "memory_documents",
         "build_recall", "build_remember",
-        "search_photos", "find_people"
-    ],
-
-    // Pulse — monitoring & diagnostik.
-    pulse: [
+        "search_photos", "find_people",
         "system_health", "nas_status", "terminal_list", "terminal_read",
         "list_cameras", "home_state", "home_devices",
         "world_describe", "listDirectory"
-    ],
-
-    // Lumen — antarmuka & notifikasi per kanal.
-    lumen: [
-        "wa_send", "wa_status", "whatsapp_send_photo", "whatsapp_send_document",
-        "show_image", "show_video", "open_url",
-        "send_file", "send_immich_photo", "send_media_url",
-        "system_health"
     ]
 
 };
@@ -202,7 +183,7 @@ function susun(tools, namaDaftar) {
  * Tool untuk satu agent worker.
  *
  * @param {Array}  tools            seluruh tool di registry AI
- * @param {string} agentId          id worker (mis. "forge")
+ * @param {string} agentId          id worker Pandawa (mis. "nakula")
  * @param {string[]} deklarasiLama  `tools:` dari agentHub (opsional)
  * @returns {Array} tool inti + tool profil worker
  */

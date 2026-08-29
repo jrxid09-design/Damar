@@ -1,8 +1,8 @@
-import { aetherState } from "./aetherState.js";
+import { damarState } from "./damarState.js";
 import { createEntity } from "./avatar/entity.js";
 
 /**
- * Aether Entity — hologram kanonik.
+ * Damar Entity — hologram kanonik.
  *
  * PERINGATAN MIGRASI: implementasi visual lama (orb JARVIS generik)
  * digantikan oleh entitas kanonik di ./avatar/entity.js — kepala disc,
@@ -11,7 +11,7 @@ import { createEntity } from "./avatar/entity.js";
  *
  *   el, setState, setLevel, setMouth, pause, resume, destroy
  *
- * Warna & tempo keadaan kini bersumber dari aetherState.js (bus
+ * Warna & tempo keadaan kini bersumber dari damarState.js (bus
  * terpusat) — BUKAN tabel warna lokal, sehingga avatar, UI, dan
  * partikel selalu koheren.
  *
@@ -24,9 +24,9 @@ export function createHologram({ maxFps = 30, stars = true } = {}) {
 
     return {
         el: entity.el,
-        setState: (s) => { aetherState.set(s); },          // lewat bus
-        setLevel: (v) => { aetherState.setLevel(v); },
-        setMouth: (v) => { aetherState.setMouth(v); },
+        setState: (s) => { damarState.set(s); },          // lewat bus
+        setLevel: (v) => { damarState.setLevel(v); },
+        setMouth: (v) => { damarState.setMouth(v); },
         pause: entity.pause,
         resume: entity.resume,
         destroy: entity.destroy,

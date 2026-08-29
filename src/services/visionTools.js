@@ -4,10 +4,10 @@ const vision = require("./visionService");
 const deviceService = require("./deviceService");
 
 /**
- * Tool vision untuk Aether — membuatnya bisa "melihat".
+ * Tool vision untuk Damar — membuatnya bisa "melihat".
  *
  * "Lihat dapur", "ada siapa di ruang tamu?", "apakah kompor mati?"
- * → Aether mengambil snapshot kamera bernama lalu menganalisisnya
+ * → Damar mengambil snapshot kamera bernama lalu menganalisisnya
  * dengan model vision.
  */
 function visionTools() {

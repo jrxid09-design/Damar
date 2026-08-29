@@ -10,7 +10,7 @@ const JsonStore = require("../core/config/JsonStore");
  *
  * Banyak perangkat rumah (Tasmota, Zigbee2MQTT, ESPHome, Shelly,
  * Sonoff LAN) bicara langsung ke broker MQTT. Dengan menyambung ke
- * broker yang sama, Aether bisa:
+ * broker yang sama, Damar bisa:
  *   - menemukan perangkat lewat HA MQTT Discovery (`homeassistant/#`),
  *   - membaca state mereka REALTIME (tanpa polling REST),
  *   - mengendalikan lewat command topic (lebih cepat dari REST).
@@ -23,7 +23,7 @@ const JsonStore = require("../core/config/JsonStore");
  */
 const store = new JsonStore(
     path.join(__dirname, "..", "..", "configs", "mqtt.json"),
-    { url: null, username: null, password: null, clientId: null, base: "aether" }
+    { url: null, username: null, password: null, clientId: null, base: "damar" }
 );
 
 class MqttService {
@@ -44,17 +44,17 @@ class MqttService {
     }
 
     get url() {
-        const u = String(this.cfg().url || process.env.AETHER_MQTT_URL || "").trim();
+        const u = String(this.cfg().url || process.env.DAMAR_MQTT_URL || "").trim();
         return u ? u.replace(/\/+$/, "") : null;
     }
     get username() {
-        return this.cfg().username ?? process.env.AETHER_MQTT_USERNAME ?? null;
+        return this.cfg().username ?? process.env.DAMAR_MQTT_USERNAME ?? null;
     }
     get password() {
-        return this.cfg().password ?? process.env.AETHER_MQTT_PASSWORD ?? null;
+        return this.cfg().password ?? process.env.DAMAR_MQTT_PASSWORD ?? null;
     }
     get base() {
-        return String(this.cfg().base || "aether").replace(/\/+$/, "");
+        return String(this.cfg().base || "damar").replace(/\/+$/, "");
     }
     get configured() {
         return Boolean(this.url);
@@ -72,7 +72,7 @@ class MqttService {
             username: username !== undefined ? (username || null) : this.cfg().username,
             // password undefined = jangan ubah; "" = hapus (pola sama dgn token HA).
             password: password === undefined ? this.cfg().password : (password || null),
-            base: base !== undefined ? (base || "aether") : (this.cfg().base || "aether")
+            base: base !== undefined ? (base || "damar") : (this.cfg().base || "damar")
         });
 
         // Konfigurasi berubah -> sambung ulang agar efeknya langsung terasa.
@@ -133,7 +133,7 @@ class MqttService {
         }
 
         this.state = "connecting";
-        const clientId = this.cfg().clientId || `aether-${Date.now().toString(36)}`;
+        const clientId = this.cfg().clientId || `damar-${Date.now().toString(36)}`;
 
         return new Promise((resolve) => {
 

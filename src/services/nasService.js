@@ -115,7 +115,7 @@ async function smart() {
             available: false, devices: [],
             reason: e.code === "ENOENT"
                 ? "smartctl tak ditemukan. Install smartmontools atau pastikan smartctl.exe ada."
-                : "smartctl gagal dijalankan — di Windows pembacaan SMART butuh hak Administrator. Jalankan Aether sebagai Administrator."
+                : "smartctl gagal dijalankan — di Windows pembacaan SMART butuh hak Administrator. Jalankan Damar sebagai Administrator."
         };
     }
 
@@ -140,7 +140,7 @@ async function smart() {
 
     // Disk terdeteksi tapi atribut tak terbaca = hampir selalu soal hak admin.
     if (devices.length && out.length === 0) {
-        return { available: false, devices: [], reason: "Disk terdeteksi tapi SMART tak terbaca — jalankan Aether sebagai Administrator." };
+        return { available: false, devices: [], reason: "Disk terdeteksi tapi SMART tak terbaca — jalankan Damar sebagai Administrator." };
     }
     return { available: true, devices: out, bin };
 }
@@ -169,9 +169,9 @@ function network() {
     return out;
 }
 
-/** Status share SMB "AetherNAS" (akses file dari iPhone/perangkat lain). */
+/** Status share SMB "DamarNAS" (akses file dari iPhone/perangkat lain). */
 async function smb() {
-    const name = "AetherNAS";
+    const name = "DamarNAS";
     if (process.platform !== "win32") return { supported: false, shared: false, name };
     try {
         const { stdout } = await pexec("powershell", [

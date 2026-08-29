@@ -1,10 +1,10 @@
 import * as THREE from "../../vendor/three.module.js";
-import { aetherState } from "../aetherState.js";
+import { damarState } from "../damarState.js";
 import { agentBus } from "../agentBus.js";
 import { createAgentSwarm } from "./swarmOrbs.js";
 
 /**
- * AETHER SWARM ORB — entitas orb yang dibentuk oleh RIBUAN orb kecil.
+ * DAMAR SWARM ORB — entitas orb yang dibentuk oleh RIBUAN orb kecil.
  *
  * Desain (pivot dari orb padat):
  *   - TIDAK ADA lagi bola padat, kerangka, cincin data, atau arc —
@@ -20,7 +20,7 @@ import { createAgentSwarm } from "./swarmOrbs.js";
  *       - KURSOR: orb miring & bergeser mengikuti pointer; gerakan
  *         cepat menaikkan "excite" (partikel bergetar antusias).
  *       - MIC: saat state masuk "listening", excite melonjak +
- *         ledakan percikan — Aether menyapa dengan antusias.
+ *         ledakan percikan — Damar menyapa dengan antusias.
  *       - AUDIO: level mic/TTS menggembungkan swarm & memperterang.
  *
  * Palet per-state dari STATE_STYLE (amber identitas, cyan aktif,
@@ -298,9 +298,9 @@ export function createEntity({ maxFps = 60, particles = true } = {}) {
     const setLevel = () => { /* via bus */ };
     const setMouth = () => { };
 
-    // Masuk mode dengar → AETHER ANTUSIAS: lonjakan excite + ledakan
+    // Masuk mode dengar → DAMAR ANTUSIAS: lonjakan excite + ledakan
     // percikan sapaan (bukan sekadar ganti warna).
-    const unsub = aetherState.subscribe((s) => {
+    const unsub = damarState.subscribe((s) => {
         if (s === "listening" && current !== "listening") {
             excite = Math.min(1.9, excite + 1.5);
             sparkBudget += 130;
@@ -318,8 +318,8 @@ export function createEntity({ maxFps = 60, particles = true } = {}) {
         const t = now * 0.001;
         const st = styleOf(current);
         const tempo = st.tempo;
-        const lv = aetherState.level;    // suara user
-        const mo = aetherState.mouth;    // suara Aether
+        const lv = damarState.level;    // suara user
+        const mo = damarState.mouth;    // suara Damar
         const amp = Math.max(lv, mo);    // amplitudo gabungan
 
         // Excite meluruh; saat mendengar ada lantai tinggi (tetap semangat).

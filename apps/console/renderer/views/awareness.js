@@ -5,11 +5,11 @@ import { esc, duration } from "../lib/ui.js";
 /**
  * Kesadaran Ekosistem — bukan sekadar rumah.
  *
- * Seluruh domain yang Aether sadari (sistem, AI, memori, rumah, sensor,
+ * Seluruh domain yang Damar sadari (sistem, AI, memori, rumah, sensor,
  * kamera, orang, integrasi, agen, kanal, crypto) ditata MELINGKAR di
- * sekeliling reaktor inti Aether — ala kesadaran JARVIS, bukan grid
+ * sekeliling reaktor inti Damar — ala kesadaran JARVIS, bukan grid
  * panel admin. Tiap node bercahaya sesuai status; inti berdenyut dan
- * bila diketuk, Aether merangkum keadaan.
+ * bila diketuk, Damar merangkum keadaan.
  */
 
 export const awareness = {
@@ -18,14 +18,14 @@ export const awareness = {
     label: "Kesadaran",
     icon: "activity",
     title: "Kesadaran Ekosistem",
-    subtitle: "Semua domain jadi satu kesadaran — dan Aether memahaminya.",
+    subtitle: "Semua domain jadi satu kesadaran — dan Damar memahaminya.",
 
     render(root) {
         root.innerHTML = `
             <div class="view-head">
                 <div>
                     <h1>Kesadaran Ekosistem</h1>
-                    <p>Semua domain jadi satu kesadaran — dan Aether memahaminya.</p>
+                    <p>Semua domain jadi satu kesadaran — dan Damar memahaminya.</p>
                 </div>
                 <div class="actions">
                     <button class="btn ghost sm" id="aw-refresh">${icon("refresh")} Segarkan</button>
@@ -37,7 +37,7 @@ export const awareness = {
                     <div class="eco-rings"><span></span><span></span><span></span></div>
                     <button class="eco-core" id="aw-core">
                         <span class="eco-core-glow"></span>
-                        <span class="eco-core-label">AETHER</span>
+                        <span class="eco-core-label">DAMAR</span>
                         <span class="eco-core-sub" id="aw-core-sub">ekosistem</span>
                     </button>
                 </div>
@@ -152,11 +152,11 @@ async function brief(root) {
     const panel = root.querySelector("#aw-brief");
     panel.style.display = "";
     panel.innerHTML = `<div class="row"><span class="spinner"></span>
-        <span class="small muted">Aether merangkum kesadaran ekosistem…</span></div>`;
+        <span class="small muted">Damar merangkum kesadaran ekosistem…</span></div>`;
     try {
         const r = await api.contextBrief();
         panel.innerHTML = `
-            <div class="panel-head"><h2>${icon("orb")} Kata Aether</h2></div>
+            <div class="panel-head"><h2>${icon("orb")} Kata Damar</h2></div>
             <div class="bubble" style="max-width:none">${esc(r.brief)}</div>
             ${r.note ? `<div class="small dim" style="margin-top:6px">${esc(r.note)}</div>` : ""}`;
     }

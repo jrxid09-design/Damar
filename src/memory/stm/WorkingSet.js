@@ -1,9 +1,9 @@
 /**
- * Short-Term Memory (STM) — working set dalam-proses milik Aether Core.
+ * Short-Term Memory (STM) — working set dalam-proses milik Damar Core.
  *
  * Per "scope" (mis. chat/jid, tugas, sesi) menyimpan lima buffer:
  *   conversation — giliran percakapan bergulir
- *   scratchpad   — catatan sementara Aether saat berpikir
+ *   scratchpad   — catatan sementara Damar saat berpikir
  *   active       — konteks/entitas yang sedang difokuskan
  *   reasoning    — rencana, sub-tujuan, hasil antara
  *   tool         — pemanggilan tool + hasil (mis. ekor output terminal)

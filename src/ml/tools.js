@@ -2,7 +2,7 @@ const { AITool } = require("../ai/tools");
 const env = require("./env");
 
 /**
- * Tool AI/ML — Aether sebagai peneliti & insinyur ML.
+ * Tool AI/ML — Damar sebagai peneliti & insinyur ML.
  *
  * Sengaja SATU tool bukti (ml_env): eksperimen dijalankan lewat jalur
  * eksekusi yang sudah ada (terminal_run untuk Python, kali_run untuk

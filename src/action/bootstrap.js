@@ -735,8 +735,8 @@ const {
 const { READINESS: READINESS3 } = require("./actuation/actuatorRegistry");
 
 // ---- CANONICAL BRANDS (closure-private; FIRST targeted repair) -------------
-const REQUEST_BRAND3 = Symbol("aether.action.actuation.request.brand");
-const RESULT_BRAND3 = Symbol("aether.action.actuation.result.brand");
+const REQUEST_BRAND3 = Symbol("damar.action.actuation.request.brand");
+const RESULT_BRAND3 = Symbol("damar.action.actuation.result.brand");
 const requestBrandSet3 = new WeakSet();
 const resultBrandSet3 = new WeakSet();
 

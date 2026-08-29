@@ -3,7 +3,7 @@ const { database } = require("../db");
 /**
  * Penalaran lintas-relasi di graf memori (§276).
  *
- * Aether menyimpan entitas dan memori yang menyebut mereka, tetapi
+ * Damar menyimpan entitas dan memori yang menyebut mereka, tetapi
  * tidak pernah menelusuri hubungannya. Akibatnya ia bisa menjawab
  * "siapa Budi" dari satu catatan, dan tetap tidak tahu bahwa Budi
  * dan mobil biru itu muncul bersama enam kali — pengetahuan yang

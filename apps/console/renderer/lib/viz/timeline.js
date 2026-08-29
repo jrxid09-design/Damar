@@ -1,5 +1,5 @@
 /**
- * Aether Timeline — jejak temporal bercahaya (canvas 2D).
+ * Damar Timeline — jejak temporal bercahaya (canvas 2D).
  *
  * Spec: line = "thin luminous temporal path". Event = node emisif.
  * Hover = nilai eksak waktu. Tanpa animasi dekoratif.

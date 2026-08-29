@@ -5,11 +5,11 @@ const telemetry = require("../services/telemetryService");
 const terminals = require("./terminal/TerminalRuntime");
 
 /**
- * Runtime API — status terpadu semua runtime inti Aether untuk Runtime
- * Console (Docker/Aether). Sumber:
+ * Runtime API — status terpadu semua runtime inti Damar untuk Runtime
+ * Console (Docker/Damar). Sumber:
  *   - kesehatan: agentHub / integrations (REST/health)
  *   - proses (pid/uptime/cpu/mem): terminal yang terikat by PURPOSE
- *   - Aether: proses daemon itu sendiri
+ *   - Damar: proses daemon itu sendiri
  *
  * "Business state" tetap dari REST (bukan WS). Panel masa depan
  * (Logs/Metrics/Inspector) memakai ulang API ini.
@@ -22,7 +22,7 @@ const store = new JsonStore(
 );
 
 const RUNTIMES = [
-    { key: "aether", label: "Aether", purpose: "aether", owner: "system", self: true, restartPolicy: "managed" },
+    { key: "damar", label: "Damar", purpose: "damar", owner: "system", self: true, restartPolicy: "managed" },
     { key: "docker", label: "Docker", purpose: "docker", owner: "system", command: null, restartPolicy: "never" }
 ];
 
@@ -62,8 +62,20 @@ async function healthMap() {
     return map;
 }
 
+/**
+ * Kunci runtime EJAAN LAMA di configs/runtimes.json (pra-rename).
+ * Override milik pemilik yang sudah tersimpan tidak boleh diam-diam
+ * berhenti berlaku hanya karena identitas berganti nama.
+ * DEPRECATED — kunci kanonik `damar` selalu menang.
+ */
+const LEGACY_RUNTIME_KEY = { damar: "aether" };
+
 function cfg(key, field, fallback) {
-    return store.read().overrides?.[key]?.[field] ?? fallback;
+    const overrides = store.read().overrides;
+    const legacy = LEGACY_RUNTIME_KEY[key];
+    return overrides?.[key]?.[field]
+        ?? (legacy ? overrides?.[legacy]?.[field] : undefined)
+        ?? fallback;
 }
 
 async function status() {
@@ -122,7 +134,7 @@ async function status() {
 async function restart(key) {
     const r = RUNTIMES.find(x => x.key === key);
     if (!r) throw new Error(`Runtime tak dikenal: ${key}`);
-    if (r.self) throw new Error("Aether tidak bisa direstart dari sini.");
+    if (r.self) throw new Error("Damar tidak bisa direstart dari sini.");
 
     const command = cfg(key, "command", r.command);
     if (!command) throw new Error(`Belum ada perintah start untuk ${r.label} (atur di configs/runtimes.json).`);
@@ -168,7 +180,7 @@ const DEFAULT_AUTOSTART = { docker: false };
 
 /**
  * Nyalakan runtime inti saat boot agar dashboard tak "DEGRADED" tiap
- * Aether dibuka. Melewati yang sudah online (mis. dijalankan manual/
+ * Damar dibuka. Melewati yang sudah online (mis. dijalankan manual/
  * eksternal) dan yang tak punya perintah start. Best-effort per runtime.
  */
 async function autostart() {

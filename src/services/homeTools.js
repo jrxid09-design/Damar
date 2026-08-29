@@ -3,7 +3,7 @@ const { AITool } = require("../ai/tools");
 const home = require("./homeService");
 
 /**
- * Tool kendali rumah untuk Aether. Dengan ini Aether bisa
+ * Tool kendali rumah untuk Damar. Dengan ini Damar bisa
  * "nyalakan lampu ruang tamu", "matikan AC", "set kamar 24 derajat"
  * lewat percakapan — lewat Home Assistant.
  */

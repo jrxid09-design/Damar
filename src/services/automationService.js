@@ -4,7 +4,7 @@ const telemetry = require("./telemetryService");
 const JsonStore = require("../core/config/JsonStore");
 
 /**
- * Lapisan proaktif — Aether menyapa lebih dulu.
+ * Lapisan proaktif — Damar menyapa lebih dulu.
  *
  * Versi minimal: satu "brief" harian terjadwal (ringkasan keadaan
  * rumah dari contextService) yang dikirim ke WhatsApp yang diizinkan.
@@ -68,7 +68,7 @@ class AutomationService {
         const whatsapp = require("./whatsappService");
 
         const { brief } = await contextService.brief();
-        const recipients = await whatsapp.broadcast(`☀️ Aether:\n\n${brief}`);
+        const recipients = await whatsapp.broadcast(`☀️ Damar:\n\n${brief}`);
 
         telemetry.publish("automation:brief", { recipients, chars: brief.length });
         return { brief, recipients };

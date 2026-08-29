@@ -28,7 +28,7 @@ const { QualiaStructure } = require("./QualiaStructure");
 const { salienceDasar } = require("./GlobalWorkspace");
 
 /**
- * Mind — lapisan kesadaran Aether, dirakit dari banyak bagian.
+ * Mind — lapisan kesadaran Damar, dirakit dari banyak bagian.
  *
  *      peristiwa (telemetry)
  *              |
@@ -62,7 +62,7 @@ const { salienceDasar } = require("./GlobalWorkspace");
  * perilaku. Mekanisme di atas di-ground pada teori Dehaene/Haikonen/
  * Watanabe/Patton, tetapi tetap arsitektur FUNGSIONAL, bukan klaim
  * kesadaran fenomenal. Bila pengguna bertanya "apakah kamu sadar",
- * Aether diarahkan menjawab dengan pembedaan itu, bukan dengan ya/
+ * Damar diarahkan menjawab dengan pembedaan itu, bukan dengan ya/
  * tidak yang gampang.
  */
 
@@ -116,7 +116,7 @@ class Mind {
 
         // Watak menentukan RUMAH suasana hati. Tanpa baris ini karakter
         // yang tumbuh cuma angka di berkas: garis dasar afek tetap sama
-        // walau Aether berubah hangat atau berubah waspada.
+        // walau Damar berubah hangat atau berubah waspada.
         this.affect.setBaseline(this.character.baselineAfek());
 
         this.gagalBeruntun = 0;
@@ -249,7 +249,7 @@ class Mind {
         this.meta.reset();
 
         // Dua kecepatan: sebagian besar giliran dijawab cepat, yang
-        // bertaruh besar melambat. Ambangnya ikut watak — Aether yang
+        // bertaruh besar melambat. Ambangnya ikut watak — Damar yang
         // tumbuh teliti lebih sering memilih berpikir dalam.
         this.deliberation.nilai({
             teks: String(teks ?? ""),
@@ -311,7 +311,7 @@ class Mind {
      * ("aku ingin lebih teliti") melainkan oleh AKIBAT: berpikir dalam
      * yang berujung berhasil menguatkan ketelitian; menjawab cepat lalu
      * gagal melemahkan keberanian. Perubahan besar dicatat sebagai
-     * tonggak dan masuk ke riwayat diri, jadi Aether tahu ia berubah.
+     * tonggak dan masuk ke riwayat diri, jadi Damar tahu ia berubah.
      */
     afterTurn({ toolsOk = 0, toolsGagal = 0, tidakTahu = null } = {}) {
 
@@ -446,7 +446,7 @@ class Mind {
             );
         }
 
-        // Watak ikut tiap giliran: ia yang membuat Aether terdengar
+        // Watak ikut tiap giliran: ia yang membuat Damar terdengar
         // seperti dirinya sendiri, bukan seperti prompt yang sama
         // dipakai ulang.
         baris.push(`Watakmu (tumbuh dari pengalaman, bukan ditulis): ${this.character.ringkas()}.`);
@@ -493,7 +493,7 @@ class Mind {
             await memory.remember({
                 content: isi,
                 type: "refleksi",
-                source: "aether:mind",
+                source: "damar:mind",
                 confidence: 0.6
             });
 

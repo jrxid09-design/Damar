@@ -13,13 +13,18 @@ configs/*
 !configs/*.example
 
 # --- DATA PRIBADI PER-INSTALASI: LOKAL SAJA ------------------------
-# Repo ini open-source. Semua di bawah adalah "Aether versi kamu":
+# Repo ini open-source. Semua di bawah adalah "Damar versi kamu":
 # memori, keadaan batin, watak yang terbentuk, jejak, pembukuan. Saat
 # orang lain meng-install, semua dibuat ulang dari nol (kode auto-membuat
-# foldernya) sehingga mereka mendapat Aether versi mereka sendiri.
+# foldernya) sehingga mereka mendapat Damar versi mereka sendiri.
 data/
 downloads/
 logs/
+paceDamar
+DAMAR_STATE.json
+DAMAR_SELF.md
+# Ejaan LAMA (pra-rename Aether -> Damar): artefak runtime milik
+# instalasi lama tetap diabaikan, bukan dihapus.
 paceAether
 AETHER_STATE.json
 AETHER_SELF.md
@@ -39,7 +44,9 @@ models/
 
 nul
 
-# AETHERSELF — hanya dokumen kanonik yang di-commit; runtime output dikecualikan
-AetherSelf/evolution/experiments/*
-!AetherSelf/evolution/experiments/.gitkeep
+# DAMARSELF — hanya dokumen kanonik yang di-commit; runtime output dikecualikan
+DamarSelf/evolution/experiments/*
+!DamarSelf/evolution/experiments/.gitkeep
+# Arsip AetherSelf pra-rename (isinya sudah diadopsi ke DamarSelf).
+AetherSelf/
 *.acc-scratch/

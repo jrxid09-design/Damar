@@ -2,7 +2,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 
 /**
- * treeSitter — mesin AST internal Aether (Coding Brain, Fase 3).
+ * treeSitter — mesin AST internal Damar (Coding Brain, Fase 3).
  *
  * Parser UTAMA source code = Tree-sitter (WASM via web-tree-sitter +
  * grammar prebuilt tree-sitter-wasms). AST = SUMBER KEBENARAN; JANGAN

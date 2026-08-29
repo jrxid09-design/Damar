@@ -3,7 +3,7 @@ const breach = require("./src/services/breachService");
 const phoneIntel = require("./src/services/phoneIntelService");
 
 async function main() {
-    console.log("=== AETHER OSINT TEST ===\n");
+    console.log("=== DAMAR OSINT TEST ===\n");
 
     // 1. Analisis email
     console.log("1. ANALISIS EMAIL: ronny.snex@gmail.com");

@@ -56,7 +56,7 @@ class WeatherService extends BaseService {
         }
 
         // ==========================
-        // Mapping ke model Aether
+        // Mapping ke model Damar
         // ==========================
         const response = {
 

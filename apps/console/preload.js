@@ -7,7 +7,7 @@ const { contextBridge, ipcRenderer } = require("electron");
  * sistem harus lewat sini — daftar ini sengaja sempit dan tidak
  * meneruskan objek ipcRenderer mentah.
  */
-contextBridge.exposeInMainWorld("aether", {
+const bridge = {
 
     settings: {
         get: () => ipcRenderer.invoke("settings:get"),
@@ -59,4 +59,14 @@ contextBridge.exposeInMainWorld("aether", {
         openDirectory: () => ipcRenderer.invoke("dialog:open-directory")
     }
 
-});
+};
+
+// Nama kanonik.
+contextBridge.exposeInMainWorld("damar", bridge);
+
+// Alias EJAAN LAMA (pra-rename Aether → Damar). Objek yang SAMA,
+// bukan permukaan kedua: tidak ada kemampuan tambahan, tidak ada
+// state terpisah. Dipertahankan agar plugin renderer buatan pengguna
+// yang masih memanggil `window.aether.*` tidak putus.
+// DEPRECATED — lihat docs/architecture/DAMAR-IDENTITY-MIGRATION.md.
+contextBridge.exposeInMainWorld("aether", bridge);

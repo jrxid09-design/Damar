@@ -7,12 +7,12 @@ const JsonStore = require("../core/config/JsonStore");
  * Pencocokan wajah untuk CCTV/live — mengenali SIAPA di gambar.
  *
  * Vision model bisa mendeskripsikan orang, tapi mengenali identitas
- * butuh mesin embedding wajah. Aether memakai layanan wajah
+ * butuh mesin embedding wajah. Damar memakai layanan wajah
  * kompatibel-CompreFace (endpoint /api/v1/recognition/recognize)
- * yang bisa dijalankan lokal — cocok dengan filosofi Aether.
+ * yang bisa dijalankan lokal — cocok dengan filosofi Damar.
  *
  * Config (URL + API key) via Settings, gitignored, graceful.
- * Wajah didaftarkan/dilatih di layanan wajah itu; Aether hanya
+ * Wajah didaftarkan/dilatih di layanan wajah itu; Damar hanya
  * mencocokkan.
  */
 const store = new JsonStore(
@@ -27,11 +27,11 @@ class FaceService {
     }
 
     get url() {
-        return (this.cfg().url || process.env.AETHER_FACE_URL || "")
+        return (this.cfg().url || process.env.DAMAR_FACE_URL || "")
             .replace(/\/+$/, "") || null;
     }
     get key() {
-        return this.cfg().key || process.env.AETHER_FACE_KEY || null;
+        return this.cfg().key || process.env.DAMAR_FACE_KEY || null;
     }
     get configured() {
         return Boolean(this.url);
@@ -125,7 +125,7 @@ class FaceService {
 
     }
 
-    /** Ringkas hasil jadi kalimat untuk Aether/pengguna. */
+    /** Ringkas hasil jadi kalimat untuk Damar/pengguna. */
     describe(faces) {
         if (faces.length === 0) return "Tidak ada wajah terdeteksi.";
         const known = faces.filter(f => f.name).map(f => f.name);

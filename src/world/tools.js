@@ -18,7 +18,7 @@ function worldTools() {
             name: "world_describe",
 
             description:
-                "Gambaran utuh lingkungan Aether saat ini: mesin, memori, disk, layanan " +
+                "Gambaran utuh lingkungan Damar saat ini: mesin, memori, disk, layanan " +
                 "(layanan lokal), model yang termuat, dan keadaan rem keselamatan — beserta " +
                 "KAPAN masing-masing terakhir diperiksa. Pakai saat pengguna bertanya tentang " +
                 "kondisi sistem, kapasitas, atau apakah sesuatu sedang berjalan.",

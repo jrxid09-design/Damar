@@ -3,7 +3,7 @@ const { AITool } = require("../ai/tools");
 const whatsapp = require("./whatsappService");
 
 /**
- * Tool agar Aether bisa mengirim media saat mengobrol via WhatsApp —
+ * Tool agar Damar bisa mengirim media saat mengobrol via WhatsApp —
  * gambar, berkas, atau stiker — ke chat yang sedang dilayani.
  */
 function whatsappTools() {

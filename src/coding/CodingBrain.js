@@ -11,9 +11,9 @@ const powershell = require("./analyzer/powershell");
 const review = require("./review/diffReviewer");
 
 /**
- * CodingBrain — pintu tunggal kemampuan software-engineering Aether.
+ * CodingBrain — pintu tunggal kemampuan software-engineering Damar.
  *
- * Aether (orchestrator) tetap otak utama; CodingBrain menyatukan "mesin
+ * Damar (orchestrator) tetap otak utama; CodingBrain menyatukan "mesin
  * internal" (Graphify/Serena/Tree-sitter/LSP/Memory) di balik satu facade
  * modular. Diisi bertahap:
  *   graph    (Graphify)     — hubungan antar-file/simbol   ✔ Fase 1
@@ -68,7 +68,7 @@ class CodingBrain {
     async runFix({ project = process.cwd(), branch, applyPatch, verifySteps, experience } = {}) {
         if (!await patcher.isRepo(project)) return { ok: false, note: "Bukan repo git — tak bisa patch aman." };
         const base = await patcher.currentBranch(project);
-        const created = await patcher.createBranch(branch || `aether/fix-${Date.now()}`, project);
+        const created = await patcher.createBranch(branch || `damar/fix-${Date.now()}`, project);
 
         if (typeof applyPatch === "function") await applyPatch({ project, branch: created.branch });
 
@@ -78,7 +78,7 @@ class CodingBrain {
             return { ok: false, branch: created.branch, base, verdict, rolledBack: true };
         }
 
-        const committed = await patcher.commit(`fix(aether): ${branch || "patch otomatis"}`, project);
+        const committed = await patcher.commit(`fix(damar): ${branch || "patch otomatis"}`, project);
         if (experience) await bugMemory.record(experience).catch(() => {});
         return { ok: true, branch: created.branch, base, verdict, committed };
     }

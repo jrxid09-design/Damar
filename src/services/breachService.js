@@ -5,7 +5,7 @@ const JsonStore = require("../core/config/JsonStore");
 const telemetry = require("./telemetryService");
 
 /**
- * Aether Breach Service — cek kebocoran data GRATIS.
+ * Damar Breach Service — cek kebocoran data GRATIS.
  *
  * Sumber:
  *   1. LeakCheck.io Public API — gratis, tanpa key, rate limit wajar.
@@ -23,7 +23,7 @@ const telemetry = require("./telemetryService");
  * kata sandi mentah.
  */
 
-const FILE = process.env.AETHER_BREACH_FILE
+const FILE = process.env.DAMAR_BREACH_FILE
     || path.join(__dirname, "..", "..", "configs", "breach.json");
 
 const store = new JsonStore(FILE, { cache: {}, catalog: {} });
@@ -203,7 +203,7 @@ async function leakcheck(query) {
 
     try {
         const res = await fetch(`${LEAKCHECK_URL}?check=${encodeURIComponent(query)}`, {
-            headers: { "User-Agent": "Aether-OSINT/1.0" },
+            headers: { "User-Agent": "Damar-OSINT/1.0" },
             signal: AbortSignal.timeout(15000)
         });
 
@@ -246,7 +246,7 @@ async function proxynova(email) {
 
     try {
         const res = await fetch(`${PROXYNOVA_URL}?query=${encodeURIComponent(email)}`, {
-            headers: { "User-Agent": "Aether-OSINT/1.0" },
+            headers: { "User-Agent": "Damar-OSINT/1.0" },
             signal: AbortSignal.timeout(15000)
         });
 

@@ -15,12 +15,12 @@ export const tools = {
     label: "Tools",
     icon: "tool",
     title: "Tools",
-    subtitle: "Kapabilitas yang tersedia untuk Aether dan agent-nya.",
+    subtitle: "Kapabilitas yang tersedia untuk Damar dan agent-nya.",
 
     render(root) {
         root.innerHTML = `
             <div class="view-head">
-                <div><h1>Tools</h1><p>Kapabilitas yang tersedia untuk Aether dan agent-nya.</p></div>
+                <div><h1>Tools</h1><p>Kapabilitas yang tersedia untuk Damar dan agent-nya.</p></div>
                 <div class="actions">
                     <input type="text" id="tl-search" placeholder="Cari tool…" style="width:220px">
                     <button class="btn ghost sm" id="tl-refresh">${icon("refresh")} Muat ulang</button>

@@ -1,11 +1,11 @@
 /* =========================================================
-   AETHER — CANONICAL DESIGN TOKENS
+   DAMAR — CANONICAL DESIGN TOKENS
    Sumber kebenaran tunggal untuk warna, permukaan, dan
    token semantik. Dimuat PALING AKHIR agar menang atas
    tokens.css dan cyber.css tanpa menyentuh satu selektor pun.
 
    Dua lapis, disengaja:
-     1. Token KANONIK (--ae-*) — nilai dari spesifikasi Aether.
+     1. Token KANONIK (--ae-*) — nilai dari spesifikasi Damar.
         Inilah kebenarannya; komponen baru memakai ini.
      2. Alias LEGACY (--accent-1, --danger, ...) diikat ulang ke
         token kanonik. 50+ tempat memakai nama lama; mengganti
@@ -25,7 +25,7 @@
     --ae-surface-elevated:rgba(18, 30, 45, 0.60);   /* permukaan naik  */
 
     /* ---- KANONIK: identitas & kognisi --------------------- */
-    --ae-cyan:       #00DFFF;   /* identitas Aether, aktif normal */
+    --ae-cyan:       #00DFFF;   /* identitas Damar, aktif normal */
     --ae-blue:       #28AFFF;   /* aktif / pemrosesan / info      */
     --ae-cyan-soft:  #73EDFF;
     --ae-violet:     #7C5CFF;   /* kognisi, memori, proses dalam  */
@@ -119,7 +119,7 @@
     --ae-radius-sm: 3px;
     --ae-radius-md: 5px;
     --ae-radius: var(--ae-radius-sm);      /* default: tegas, bukan pill */
-    --ae-edge-cut: 10px;                   /* sudut terpotong khas Aether */
+    --ae-edge-cut: 10px;                   /* sudut terpotong khas Damar */
 
     /* ---- KANONIK: motion semantik --------------------------
        ambient    : lambat-terus-menerus (orbit, napas)

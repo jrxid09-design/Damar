@@ -2,7 +2,7 @@ const { AITool } = require("../ai/tools");
 const brain = require("./CodingBrain");
 
 /**
- * Tool AI Coding Brain — Aether memanggil "mesin internal" lewat sini.
+ * Tool AI Coding Brain — Damar memanggil "mesin internal" lewat sini.
  *
  * Fase 1: mesin GRAF (Graphify). Aturan (ditegakkan lewat deskripsi):
  * SEBELUM membuat patch, pahami dulu hubungan antar-file/simbol dengan
@@ -213,7 +213,7 @@ function codingTools() {
             parameters: {
                 type: "object",
                 properties: {
-                    name: { type: "string", description: "Nama branch, mis. 'aether/fix-integration-404'." },
+                    name: { type: "string", description: "Nama branch, mis. 'damar/fix-integration-404'." },
                     project: { type: "string", description: "Path root proyek (opsional)." }
                 },
                 required: ["name"]
@@ -342,7 +342,7 @@ function codingTools() {
             description:
                 "Cek language server mana yang TERPASANG (ts/js, python, json, yaml, html, css, " +
                 "markdown, bash) + health klien aktif. Pakai untuk tahu apakah analisis LSP " +
-                "tersedia; bila tidak, Aether otomatis pakai Tree-sitter/Serena.",
+                "tersedia; bila tidak, Damar otomatis pakai Tree-sitter/Serena.",
             parameters: { type: "object", properties: {} },
             execute: async () => ({ ok: true, installed: brain.lsp.installed(), health: brain.lsp.health() })
         }),
@@ -445,7 +445,7 @@ function codingTools() {
         new AITool({
             name: "code_doc_symbols",
             description:
-                "Document Symbols (LSP): outline simbol satu file. Bila LSP tak ada, Aether pakai " +
+                "Document Symbols (LSP): outline simbol satu file. Bila LSP tak ada, Damar pakai " +
                 "Tree-sitter otomatis (lewat brain.outline). Sumber ikut dilaporkan.",
             parameters: {
                 type: "object",

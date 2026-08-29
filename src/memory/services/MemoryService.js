@@ -15,7 +15,7 @@ const { truncate } = require("../util/text");
 /**
  * Muka depan lapisan memori.
  *
- * Semua bagian lain Aether — controller HTTP, tool AI, kelak
+ * Semua bagian lain Damar — controller HTTP, tool AI, kelak
  * penerima event CCTV/sensor — cukup bicara ke kelas ini dan tidak
  * perlu tahu soal FTS, vektor, atau resolusi entitas.
  */
@@ -196,7 +196,7 @@ class MemoryService {
                 ? ` [${item.entities.map(entity => entity.name).join(", ")}]`
                 : "";
 
-            // Asal-usul ikut, supaya Aether dapat membedakan apa yang
+            // Asal-usul ikut, supaya Damar dapat membedakan apa yang
             // DIKATAKAN pengguna dari apa yang ia simpulkan sendiri.
             // Medannya sudah lama ada di basis data, tetapi tidak
             // pernah sampai ke model — sehingga catatan hasil
@@ -521,9 +521,9 @@ class MemoryService {
 /**
  * Penanda asal-usul untuk satu baris memori (§13, §276).
  *
- * Aether menyimpan `source`, `confidence`, dan `lastVerified` sejak
+ * Damar menyimpan `source`, `confidence`, dan `lastVerified` sejak
  * lama, tetapi tak satu pun sampai ke model. Akibatnya sesuatu yang
- * DISIMPULKAN Aether terbaca sama meyakinkannya dengan sesuatu yang
+ * DISIMPULKAN Damar terbaca sama meyakinkannya dengan sesuatu yang
  * DIKATAKAN pengguna — dan ketika ditanya, ia tidak punya bahan
  * untuk membedakannya.
  *
@@ -539,7 +539,7 @@ function asalUsul(item) {
 
     // Kosong / "user" / "owner" = disampaikan pengguna: tanpa penanda.
     if (sumber && !/^(user|owner|pengguna)$/.test(sumber)) {
-        bagian.push(sumber === "coding-brain" ? "catatan Aether" : sumber);
+        bagian.push(sumber === "coding-brain" ? "catatan Damar" : sumber);
     }
 
     // Keyakinan di bawah penuh berarti ini kesimpulan, bukan kutipan.

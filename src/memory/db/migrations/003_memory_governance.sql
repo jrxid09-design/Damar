@@ -1,6 +1,6 @@
 -- Governance (subsistem 7): proposal + audit. Aditif.
 --
--- Aturan inti: Aether TAK PERNAH mengubah memori jangka panjang ber-tier
+-- Aturan inti: Damar TAK PERNAH mengubah memori jangka panjang ber-tier
 -- "ask" tanpa persetujuan eksplisit. Tulis ask-tier ditahan di sini sebagai
 -- PROPOSAL sampai pengguna menyetujui; audit mencatat setiap keputusan.
 
@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS memory_proposals (
     kind         TEXT    NOT NULL,                      -- memory|edge|update|forget
     payload      TEXT    NOT NULL,                      -- JSON aksi yang diusulkan
     memory_type  TEXT,
-    writer       TEXT    NOT NULL DEFAULT 'aether',
+    writer       TEXT    NOT NULL DEFAULT 'damar',
     role         TEXT    NOT NULL DEFAULT 'superadmin',
     status       TEXT    NOT NULL DEFAULT 'pending',    -- pending|approved|rejected
     reason       TEXT,

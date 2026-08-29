@@ -6,7 +6,7 @@ const terminals = require("../runtime/terminal/TerminalRuntime");
  * Tool AI untuk Terminal Runtime.
  *
  * Prinsip (ditegakkan lewat deskripsi + terminal_run/restart):
- * Aether TIDAK spawn shell sementara — ia cari terminal berdasarkan
+ * Damar TIDAK spawn shell sementara — ia cari terminal berdasarkan
  * PURPOSE yang stabil, pakai ulang bila ada, buat baru hanya bila perlu.
  *
  * SuperAdmin-only (shell = akses penuh mesin) — disaring roleService.

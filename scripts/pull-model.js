@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Unduh bobot model lokal (GGUF) untuk otak in-process Aether.
+ * Unduh bobot model lokal (GGUF) untuk otak in-process Damar.
  *
  *   node scripts/pull-model.js                 # model bawaan (Qwen2.5-7B Q4_K_M)
  *   node scripts/pull-model.js <url-gguf>      # model lain
@@ -17,7 +17,7 @@ const DEFAULT_URL =
 async function main() {
 
     const url = process.argv[2] || DEFAULT_URL;
-    const dir = path.resolve(process.env.AETHER_MODEL_DIR || "models");
+    const dir = path.resolve(process.env.DAMAR_MODEL_DIR || "models");
     fs.mkdirSync(dir, { recursive: true });
 
     const { createModelDownloader } = await import("node-llama-cpp");
@@ -33,7 +33,7 @@ async function main() {
     const file = await downloader.download();
 
     console.log(`\nSelesai: ${file}`);
-    console.log("Aktifkan sebagai otak Aether: set AI_PROVIDER=llamacpp (atau pilih di Console → Settings).");
+    console.log("Aktifkan sebagai otak Damar: set AI_PROVIDER=llamacpp (atau pilih di Console → Settings).");
 }
 
 main().catch(err => {

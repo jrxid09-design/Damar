@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 /**
- * configStore — CRUD configs/mcp.json (server MCP eksternal → tool Aether).
+ * configStore — CRUD configs/mcp.json (server MCP eksternal → tool Damar).
  *
  * Backend manajemennya sudah ada (mcpClientManager membaca berkas ini,
  * restart() menyalakan ulang semua + bridge tool). Yang belum ada adalah
@@ -10,7 +10,7 @@ const path = require("node:path");
  */
 const DEFAULT_FILE = path.join(process.cwd(), "configs", "mcp.json");
 
-function read(file = process.env.AETHER_MCP_CONFIG || DEFAULT_FILE) {
+function read(file = process.env.DAMAR_MCP_CONFIG || DEFAULT_FILE) {
 
     try {
         const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -22,7 +22,7 @@ function read(file = process.env.AETHER_MCP_CONFIG || DEFAULT_FILE) {
 
 }
 
-function write(servers, file = process.env.AETHER_MCP_CONFIG || DEFAULT_FILE) {
+function write(servers, file = process.env.DAMAR_MCP_CONFIG || DEFAULT_FILE) {
 
     const dir = path.dirname(file);
     fs.mkdirSync(dir, { recursive: true });

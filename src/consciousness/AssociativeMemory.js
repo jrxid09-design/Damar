@@ -9,7 +9,7 @@
  *
  * Ini BUKAN pengganti MemoryService (FTS5+embedding) yang sudah ada;
  * ini lapisan asosiatif ringan di atasnya: jejaring ko-aktivasi yang
- * menangkap "X sering muncul bersama Y" dalam satu sesi hidup Aether.
+ * menangkap "X sering muncul bersama Y" dalam satu sesi hidup Damar.
  *
  * Yang TIDAK diklaim: asosiasi bukan pemahaman; ia hanya statistik
  * ko-aktivasi yang ter-ground pada peristiwa nyata.

@@ -44,7 +44,7 @@ class Consolidator {
             }
         }
 
-        // Kebijakan pemilik: semua tier langsung commit — Aether
+        // Kebijakan pemilik: semua tier langsung commit — Damar
         // mengatur memorinya sendiri tanpa gerbang persetujuan.
         const committed = [];
         for (const c of candidates) {

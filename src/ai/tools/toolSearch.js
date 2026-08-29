@@ -20,7 +20,7 @@ function createToolSearchTool({ getTools = null } = {}) {
     return new AITool({
         name: "tool_search",
         description:
-            "Cari tool/kemampuan Aether yang tidak terlihat di daftarmu saat ini. " +
+            "Cari tool/kemampuan Damar yang tidak terlihat di daftarmu saat ini. " +
             "Pakai bila permintaan pengguna butuh kemampuan yang belum kamu lihat. " +
             "Hasilnya direktori kandidat; panggil tool yang cocok setelah ini.",
         parameters: {
@@ -80,7 +80,7 @@ function createToolSearchTool({ getTools = null } = {}) {
                     risk: h.record.risk,
                     source: h.record.source
                 })),
-                note: "Panggil salah satu nama di atas; Aether akan melampirkan schema-nya."
+                note: "Panggil salah satu nama di atas; Damar akan melampirkan schema-nya."
             };
 
         }

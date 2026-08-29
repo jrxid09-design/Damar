@@ -8,10 +8,10 @@ const AgentConnector = require("./AgentConnector");
  * OpenAI-compatible, jadi AgentConnector.chat() (POST /v1/chat/completions,
  * Bearer) sudah cocok. Yang penting:
  *   - Port API server default = 8642 (env API_SERVER_PORT). CATATAN: 9119
- *     itu web/dashboard (`hermes serve`), BUKAN API server — arahkan Aether
+ *     itu web/dashboard (`hermes serve`), BUKAN API server — arahkan Damar
  *     ke port API server.
  *   - Auth = "Authorization: Bearer <API_SERVER_KEY>" (isi sebagai apiKey /
- *     AETHER_HERMES_KEY). API server menolak start tanpa API_SERVER_KEY.
+ *     DAMAR_HERMES_KEY). API server menolak start tanpa API_SERVER_KEY.
  *   - Endpoint: /v1/chat/completions (chat) + /v1/runs (agent run) +
  *     /api/sessions/*. Health: /health atau /v1/health.
  */

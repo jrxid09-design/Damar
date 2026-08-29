@@ -1,10 +1,10 @@
 {
-  "name": "aether",
+  "name": "damar",
   "version": "1.0.0",
-  "description": "Aether adalah AI Assistant lokal yang dibangun untuk berjalan di server pribadi.",
+  "description": "Damar adalah AI Assistant lokal yang dibangun untuk berjalan di server pribadi.",
   "main": "index.js",
   "bin": {
-    "aether": "src/cli/index.js"
+    "damar": "src/cli/index.js"
   },
   "directories": {
     "doc": "docs"
@@ -12,8 +12,8 @@
   "scripts": {
     "start": "node --use-system-ca src/server.js",
     "dev": "nodemon --exec \"node --use-system-ca\" src/server.js",
-    "aether": "node scripts/launch.js --console",
-    "aether:daemon": "node scripts/launch.js",
+    "damar": "node scripts/launch.js --console",
+    "damar:daemon": "node scripts/launch.js",
     "cli": "node src/cli/index.js",
     "cli:serve": "node src/cli/index.js --serve",
     "console": "npm start --prefix apps/console",

@@ -3,14 +3,14 @@
 const buildMemory = require("../src/memory/buildMemory");
 
 /**
- * Ajari Aether tentang dirinya sendiri.
+ * Ajari Damar tentang dirinya sendiri.
  *
- * Setiap kali kita mengubah atau mengonfigurasi Aether, catatannya
- * masuk ke memori Aether lewat sini — sehingga ia tahu bagaimana ia
+ * Setiap kali kita mengubah atau mengonfigurasi Damar, catatannya
+ * masuk ke memori Damar lewat sini — sehingga ia tahu bagaimana ia
  * dibangun, bukan hanya keadaannya sekarang.
  *
- * Dijalankan manusia (atau agen yang sedang mengerjakan Aether),
- * bukan oleh Aether sendiri saat melayani permintaan.
+ * Dijalankan manusia (atau agen yang sedang mengerjakan Damar),
+ * bukan oleh Damar sendiri saat melayani permintaan.
  *
  *   node scripts/learn.js \
  *     --area keselamatan \
@@ -124,7 +124,7 @@ async function main() {
     }
 
     if (!args.dry) {
-        console.log(`\n${tersimpan} catatan masuk ke memori Aether.`);
+        console.log(`\n${tersimpan} catatan masuk ke memori Damar.`);
     }
 
 }

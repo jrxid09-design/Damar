@@ -18,7 +18,7 @@ const crypto = require("node:crypto");
  *
  * Verifier TIDAK boleh melempar. Kegagalan memeriksa berarti
  * "tidak terverifikasi", bukan "operasi gagal" — membedakan
- * keduanya penting supaya Aether tidak melapor palsu ke dua arah.
+ * keduanya penting supaya Damar tidak melapor palsu ke dua arah.
  */
 
 const check = (name, passed, detail = null) => ({ name, passed, detail });
@@ -117,7 +117,7 @@ const VERIFIERS = {
 
     // ---- Memori: klaim "sudah diingat" harus dapat dipanggil ulang
 
-    "aetherSkills.remember": async (args, result) => {
+    "damarSkills.remember": async (args, result) => {
 
         const text = args?.content ?? args?.text ?? args?.fact;
         if (!text) return { checks: [check("isi memori terbaca", false)] };
@@ -144,11 +144,11 @@ const VERIFIERS = {
     // Bukti sebenarnya adalah perangkatnya MELAPOR menyala — dibaca
     // lewat jalur berbeda (getState), bukan dari balikan perintah.
 
-    "aetherSkills.device_on":     (args) => deviceState(args, "on"),
-    "aetherSkills.device_off":    (args) => deviceState(args, "off"),
-    "aetherSkills.home_control":  (args) => deviceState(args, args?.action === "off" ? "off" : "on"),
+    "damarSkills.device_on":     (args) => deviceState(args, "on"),
+    "damarSkills.device_off":    (args) => deviceState(args, "off"),
+    "damarSkills.home_control":  (args) => deviceState(args, args?.action === "off" ? "off" : "on"),
 
-    "aetherSkills.device_toggle": async (args) => {
+    "damarSkills.device_toggle": async (args) => {
 
         // Toggle tidak punya keadaan akhir yang dapat diprediksi;
         // yang dapat dibuktikan hanya bahwa perangkatnya terbaca.
@@ -167,7 +167,7 @@ const VERIFIERS = {
 
     },
 
-    "aetherSkills.set_temperature": async (args) => {
+    "damarSkills.set_temperature": async (args) => {
 
         const id = entityOf(args);
         const wanted = Number(args?.value ?? args?.temperature);
@@ -196,9 +196,9 @@ const VERIFIERS = {
 
     // ---- Pesan: bukti diterima, bukan sekadar dikirim ------------
 
-    "aetherSkills.wa_send":     (args, result) => messageSent(result),
-    "aetherSkills.wa_broadcast": (args, result) => messageSent(result),
-    "aetherSkills.wa_notify_owner": (args, result) => messageSent(result),
+    "damarSkills.wa_send":     (args, result) => messageSent(result),
+    "damarSkills.wa_broadcast": (args, result) => messageSent(result),
+    "damarSkills.wa_notify_owner": (args, result) => messageSent(result),
     "whatsapp_send_photo":      (args, result) => messageSent(result),
     "whatsapp_send_document":   (args, result) => messageSent(result),
     "whatsapp_send_sticker":    (args, result) => messageSent(result),

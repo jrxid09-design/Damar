@@ -19,7 +19,7 @@ export const memory = {
     label: "Memory",
     icon: "brain",
     title: "Memory",
-    subtitle: "Apa yang diingat Aether tentang kamu dan rumahmu.",
+    subtitle: "Apa yang diingat Damar tentang kamu dan rumahmu.",
 
     render(root) {
 
@@ -27,7 +27,7 @@ export const memory = {
             <div class="view-head">
                 <div>
                     <h1>Memory</h1>
-                    <p>Apa yang diingat Aether tentang kamu dan rumahmu.</p>
+                    <p>Apa yang diingat Damar tentang kamu dan rumahmu.</p>
                 </div>
                 <div class="actions">
                     <button class="btn ghost sm" id="mem-backfill">${icon("cpu")} Isi embedding</button>
@@ -284,7 +284,7 @@ async function drawGraph(panel, root) {
                 <span class="hint push">violet = episodik · cyan = semantik · biru = prosedural</span>
             </div>
             <p class="small dim" style="margin:-6px 0 12px">
-                Aether adalah pusat; memori &amp; entitas mengorbit. Node terang = kepentingan tinggi.
+                Damar adalah pusat; memori &amp; entitas mengorbit. Node terang = kepentingan tinggi.
                 Arahkan kursor untuk isi eksak; klik untuk memilih.
             </p>
             <div class="viz-host tall" id="mem-graph"></div>
@@ -748,7 +748,7 @@ async function drawDocuments(panel, root) {
     const result = await api.documents();
 
     // Pemilih native tersedia hanya di dalam Console (Electron).
-    const hasPicker = Boolean(window.aether?.dialog?.openFile);
+    const hasPicker = Boolean(window.damar?.dialog?.openFile);
 
     panel.innerHTML = `
         <div class="panel">
@@ -865,7 +865,7 @@ async function drawDocuments(panel, root) {
         const button = event.currentTarget;
 
         if (hasPicker) {
-            const path = await window.aether.dialog.openFile();
+            const path = await window.damar.dialog.openFile();
             if (!path) return;                          // dibatalkan
             if (picked) picked.textContent = path;
             return ingest({ path }, button);
@@ -885,7 +885,7 @@ async function drawDocuments(panel, root) {
         const button = event.currentTarget;
 
         if (hasPicker) {
-            const dir = await window.aether.dialog.openDirectory();
+            const dir = await window.damar.dialog.openDirectory();
             if (!dir) return;                           // dibatalkan
             if (picked) picked.textContent = dir;
             return ingest({ directory: dir }, button);

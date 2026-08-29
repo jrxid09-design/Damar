@@ -3,7 +3,7 @@ const { AITool } = require("../ai/tools");
 const forge = require("./toolForge");
 
 /**
- * Tool yang membuat Aether bisa menambah kemampuannya sendiri.
+ * Tool yang membuat Damar bisa menambah kemampuannya sendiri.
  *
  * Alur yang diharapkan (ditegaskan lewat deskripsi tool):
  *   1. create_tool  → menyimpan DRAFT, menampilkan apa yang akan
@@ -24,7 +24,7 @@ function forgeTools() {
 
             description:
                 "Buat SKILL baru (disebut juga tool/plugin/kemampuan) untuk memperluas " +
-                "kemampuan Aether. WAJIB dipakai setiap kali pengguna minta dibuatkan " +
+                "kemampuan Damar. WAJIB dipakai setiap kali pengguna minta dibuatkan " +
                 "skill/tool/plugin atau butuh kemampuan yang belum ada (mis. 'buatkan " +
                 "skill untuk cek ping ke sebuah host'). JANGAN menuliskan kode di dalam " +
                 "chat — buat skill-nya lewat tool ini. Skill disimpan sebagai DRAFT dan " +
@@ -75,7 +75,7 @@ function forgeTools() {
                     id: args.id,
                     name: args.name,
                     description: args.description ?? "",
-                    origin: "aether",
+                    origin: "damar",
                     tool: {
                         name: args.tool_name,
                         description: args.description ?? "",

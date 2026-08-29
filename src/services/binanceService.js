@@ -4,7 +4,7 @@ const path = require("node:path");
 const JsonStore = require("../core/config/JsonStore");
 
 /**
- * Binance — mata & tangan Aether ke portofolio crypto.
+ * Binance — mata & tangan Damar ke portofolio crypto.
  *
  * MEMANTAU: harga, saldo Spot, posisi Futures (USDT-M) + PnL.
  * MENGEKSEKUSI: order beli/jual Spot & Futures — TAPI selalu lewat
@@ -80,10 +80,10 @@ class BinanceService {
 
     cfg() { return store.read(); }
 
-    get apiKey()   { return this.cfg().apiKey || process.env.AETHER_BINANCE_KEY || null; }
-    get secret()   { return this.cfg().secret || process.env.AETHER_BINANCE_SECRET || null; }
+    get apiKey()   { return this.cfg().apiKey || process.env.DAMAR_BINANCE_KEY || null; }
+    get secret()   { return this.cfg().secret || process.env.DAMAR_BINANCE_SECRET || null; }
     get testnet()  { return Boolean(this.cfg().testnet); }
-    get proxyUrl() { return this.cfg().proxyUrl || process.env.AETHER_BINANCE_PROXY || null; }
+    get proxyUrl() { return this.cfg().proxyUrl || process.env.DAMAR_BINANCE_PROXY || null; }
     get configured() { return Boolean(this.apiKey && this.secret); }
 
     base(market) {

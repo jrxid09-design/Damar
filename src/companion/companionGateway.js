@@ -1,5 +1,5 @@
 /**
- * CompanionGateway — pintu masuk device tertaut ke Aether Core.
+ * CompanionGateway — pintu masuk device tertaut ke Damar Core.
  *
  * Device TIDAK punya otak sendiri: ia meneruskan permintaan ke jalur AI
  * yang SAMA dengan Telegram/WhatsApp/Console/Voice — `aiRuntime.chat()`.
@@ -7,7 +7,7 @@
  * MCP tools, dan audit trail SEMUA otomatis berlaku. Tidak ada AI loop
  * kedua, tidak ada tool system duplikat.
  *
- * Device juga bisa memakai MCP server Aether langsung (POST /mcp) untuk
+ * Device juga bisa memakai MCP server Damar langsung (POST /mcp) untuk
  * daftar/panggil tool; gateway ini menambah jalur CHAT natural-language.
  */
 const { manager: channelManager } = require("../channels");
@@ -110,7 +110,7 @@ class CompanionGateway {
         const path = require("node:path");
         const crypto = require("node:crypto");
 
-        const dir = process.env.AETHER_COMPANION_UPLOAD_DIR
+        const dir = process.env.DAMAR_COMPANION_UPLOAD_DIR
             || path.join(process.cwd(), "data", "companion-uploads");
 
         fs.mkdirSync(dir, { recursive: true });
@@ -154,7 +154,7 @@ class CompanionGateway {
         // Hanya nama berkas polos — anti path-traversal.
         if (!/^[A-Za-z0-9_-]+\.[a-z0-9]{1,6}$/i.test(String(file))) return null;
 
-        const dir = process.env.AETHER_COMPANION_UPLOAD_DIR
+        const dir = process.env.DAMAR_COMPANION_UPLOAD_DIR
             || path.join(process.cwd(), "data", "companion-uploads");
 
         const full = path.join(dir, file);
@@ -182,7 +182,7 @@ class CompanionGateway {
 
     }
 
-    /** Daftar tool/skill yang tersedia (delegasi ke registry Aether). */
+    /** Daftar tool/skill yang tersedia (delegasi ke registry Damar). */
     tools() {
 
         try {

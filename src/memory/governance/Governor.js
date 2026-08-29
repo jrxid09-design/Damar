@@ -10,12 +10,12 @@ const edges = require("../graph/EdgeStore");
  * PROPOSAL. Pengguna menyetujui/menolak; approve barulah meng-commit ke
  * substrat (LTM/KG). Setiap langkah dicatat di memory_audit.
  *
- * Ini penegak aturan: "Aether tak pernah mengubah memori jangka panjang
+ * Ini penegak aturan: "Damar tak pernah mengubah memori jangka panjang
  * ask-tier tanpa persetujuan eksplisit."
  */
 class Governor {
 
-    async propose({ kind, payload, memoryType = null, writer = "aether", role = "runtime", reason = null }) {
+    async propose({ kind, payload, memoryType = null, writer = "damar", role = "runtime", reason = null }) {
         const res = await database.run(
             `INSERT INTO memory_proposals (kind, payload, memory_type, writer, role, reason)
              VALUES (?, ?, ?, ?, ?, ?)`,

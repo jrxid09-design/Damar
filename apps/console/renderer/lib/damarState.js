@@ -1,10 +1,10 @@
 /**
- * Aether State Bus — satu sumber kebenaran keadaan entitas.
+ * Damar State Bus — satu sumber kebenaran keadaan entitas.
  *
  * Semua konsumen (avatar runtime, partikel, chrome UI, voice viz)
  * berlangganan ke sini; TIDAK ADA yang menset warna state sendiri.
  *
- * Keadaan kanonik (dari spesifikasi UI/UX Aether):
+ * Keadaan kanonik (dari spesifikasi UI/UX Damar):
  *   idle      — cyan, napas tenang
  *   listening — cyan terang, partikel mengalir ke dalam
  *   thinking  — bias VIOLET (kognisi), denyut lebih cepat
@@ -43,7 +43,7 @@ let current = "idle";
 let level = 0;   // amplitudo mic (0..1)
 let mouth = 0;   // amplitudo TTS (0..1)
 
-export const aetherState = {
+export const damarState = {
 
     get state() { return current; },
     get level() { return level; },

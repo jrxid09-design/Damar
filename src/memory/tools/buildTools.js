@@ -5,7 +5,7 @@ const buildMemory = require("../buildMemory");
 /**
  * Tool "ingatan tentang diri sendiri".
  *
- * Aether tahu keadaannya sekarang, tetapi tidak tahu bagaimana ia
+ * Damar tahu keadaannya sekarang, tetapi tidak tahu bagaimana ia
  * sampai ke sana. Dua tool ini memberinya akses ke jurnal rekayasa:
  * keputusan apa yang diambil, mengapa, dan bagaimana dibuktikan.
  *
@@ -22,7 +22,7 @@ function buildTools() {
             name: "build_recall",
 
             description:
-                "Ingat BAGAIMANA Aether dibangun atau dikonfigurasi: keputusan arsitektur, " +
+                "Ingat BAGAIMANA Damar dibangun atau dikonfigurasi: keputusan arsitektur, " +
                 "alasan di baliknya, berkas yang terlibat, dan cara pembuktiannya. Pakai ini " +
                 "ketika pengguna bertanya kenapa sesuatu dirancang begini, ketika kamu perlu " +
                 "memahami bagian dirimu sendiri sebelum mengubahnya, atau saat memulihkan diri " +
@@ -54,7 +54,7 @@ function buildTools() {
             name: "build_remember",
 
             description:
-                "Simpan satu keputusan rekayasa tentang Aether sendiri, SETELAH terbukti " +
+                "Simpan satu keputusan rekayasa tentang Damar sendiri, SETELAH terbukti " +
                 "bekerja. Isi `why` dengan alasan sebenarnya — perubahan berkas bisa dibaca " +
                 "ulang dari git kapan saja, tetapi alasan sebuah keputusan hanya ada saat " +
                 "keputusan itu dibuat. Bukan untuk mencatat peristiwa biasa: setiap eksekusi " +
@@ -63,7 +63,7 @@ function buildTools() {
             parameters: {
                 type: "object",
                 properties: {
-                    area: { type: "string", description: "Bagian Aether, mis. 'keselamatan', 'memori', 'console'." },
+                    area: { type: "string", description: "Bagian Damar, mis. 'keselamatan', 'memori', 'console'." },
                     change: { type: "string", description: "Apa yang berubah." },
                     why: { type: "string", description: "Mengapa — akar masalah atau pertimbangannya." },
                     files: { type: "array", items: { type: "string" }, description: "Berkas utama yang tersentuh." },

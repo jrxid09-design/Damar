@@ -47,7 +47,7 @@ class TelemetryController {
                 }))
             ]);
 
-            return response.success(res, "Aether overview", {
+            return response.success(res, "Damar overview", {
 
                 daemon: {
                     name: config.appName,

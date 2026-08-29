@@ -386,7 +386,7 @@ class MemoryController {
      *   - gambar → URL data URI dikembalikan agar bisa dilampirkan
      *     ke pesan chat & dianalisis vision;
      *   - dokumen teks (pdf/docx/md/…) → di-ingest ke memori dokumen,
-     *     hasilnya bisa dirujuk Aether dalam percakapan.
+     *     hasilnya bisa dirujuk Damar dalam percakapan.
      */
     async upload(req, res, next) {
 
@@ -423,7 +423,7 @@ class MemoryController {
             const mime = mimeType ?? (isImage ? `image/${ext === ".jpg" ? "jpeg" : ext.slice(1)}` : "application/octet-stream");
 
             // Dokumen teks → langsung masuk memori dokumen agar bisa
-            // dirujuk Aether. Gagal ingest tidak fatal: berkas tetap ada.
+            // dirujuk Damar. Gagal ingest tidak fatal: berkas tetap ada.
             let ingested = null;
             if (!isImage) {
                 try {

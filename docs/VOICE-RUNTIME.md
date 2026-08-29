@@ -1,7 +1,7 @@
 # Voice Runtime — Always-On Assistant
 
-Aether sebagai asisten suara always-on (FRIDAY/JARVIS/Siri), dibangun sebagai
-**channel baru** menuju Aether Core — bukan otak AI kedua, bukan tool system
+Damar sebagai asisten suara always-on (FRIDAY/JARVIS/Siri), dibangun sebagai
+**channel baru** menuju Damar Core — bukan otak AI kedua, bukan tool system
 duplikat.
 
 > Prinsip inti: Voice hanyalah salah satu interface (seperti Telegram/WhatsApp/
@@ -14,7 +14,7 @@ duplikat.
 ## Arsitektur
 
 ```
-                    AETHER CORE (aiRuntimeService.chat)
+                    DAMAR CORE (aiRuntimeService.chat)
                          │
         ┌────────────────┼────────────────┬───────────────┐
      Telegram        WhatsApp        Console         VOICE
@@ -34,9 +34,9 @@ duplikat.
 
 ## Trigger wake (dua jalur)
 
-Aether bisa "dipanggil" lewat dua trigger, keduanya lokal & tanpa LLM saat standby:
+Damar bisa "dipanggil" lewat dua trigger, keduanya lokal & tanpa LLM saat standby:
 
-1. **Wake word** — kata panggil ("Aether"), lewat `WakeWordProvider`
+1. **Wake word** — kata panggil ("Damar"), lewat `WakeWordProvider`
    (keyword-match; engine lain bisa disisipkan).
 2. **Tepuk tangan 2x (double clap)** — `ClapDetector`: dua ledakan suara
    pendek (transient) dalam jendela waktu singkat, diukur dari level audio
@@ -55,7 +55,7 @@ IDLE → WAKE_DETECTED → LISTENING → TRANSCRIBING → THINKING
 
 ## Prinsip yang dipatuhi
 
-1. **Aether Core independen dari UI** — Console boleh ditutup; voice daemon
+1. **Damar Core independen dari UI** — Console boleh ditutup; voice daemon
    tetap hidup (bila diaktifkan).
 2. **Standby tidak memanggil LLM/cloud** — hanya wake-word detection lokal.
    Deteksi tepuk tangan memakai **stream level audio (RMS)** dari mic: ffmpeg/arecord
@@ -74,24 +74,24 @@ IDLE → WAKE_DETECTED → LISTENING → TRANSCRIBING → THINKING
 
 | Env | Default | Arti |
 |---|---|---|
-| `AETHER_VOICE_ENABLED` | `false` | Aktifkan voice runtime |
-| `AETHER_WAKE_WORD` | `aether` | Kata panggil |
-| `AETHER_VOICE_WAKE_PROVIDER` | `local` | Engine wake-word (keyword-match) |
-| `AETHER_VOICE_STT_PROVIDER` | `local` | STT (lewat voiceService) |
-| `AETHER_VOICE_TTS_PROVIDER` | `local` | TTS (lewat voiceService) |
-| `AETHER_VOICE_MAX_SESSION_MS` | `60000` | Batas total satu giliran |
-| `AETHER_VOICE_VAD_TIMEOUT_MS` | `1200` | Diam = selesai bicara |
-| `AETHER_VOICE_MAX_LISTEN_MS` | `10000` | Jaring pengaman rekaman |
-| `AETHER_VOICE_AUDIO_BACKEND` | `none` | `cli` untuk mic/speaker OS |
-| `AETHER_VOICE_ACK` | `Ya?` | Acknowledgement deterministik |
-| `AETHER_VOICE_LANGUAGE` | `id` | Bahasa STT |
-| `AETHER_VOICE_CLAP_ENABLED` | `false` | Aktifkan trigger tepuk 2x |
-| `AETHER_VOICE_CLAP_THRESHOLD` | `0.6` | Level RMS (0..1) = "bunyi keras" |
-| `AETHER_VOICE_CLAP_WINDOW_MS` | `800` | Jendela maks antar dua tepukan |
-| `AETHER_VOICE_CLAP_MIN_CLAP_MS` | `30` | Lebar minimum satu tepukan |
-| `AETHER_VOICE_CLAP_MIN_GAP_MS` | `100` | Jeda minimum antar tepukan |
+| `DAMAR_VOICE_ENABLED` | `false` | Aktifkan voice runtime |
+| `DAMAR_WAKE_WORD` | `damar` | Kata panggil |
+| `DAMAR_VOICE_WAKE_PROVIDER` | `local` | Engine wake-word (keyword-match) |
+| `DAMAR_VOICE_STT_PROVIDER` | `local` | STT (lewat voiceService) |
+| `DAMAR_VOICE_TTS_PROVIDER` | `local` | TTS (lewat voiceService) |
+| `DAMAR_VOICE_MAX_SESSION_MS` | `60000` | Batas total satu giliran |
+| `DAMAR_VOICE_VAD_TIMEOUT_MS` | `1200` | Diam = selesai bicara |
+| `DAMAR_VOICE_MAX_LISTEN_MS` | `10000` | Jaring pengaman rekaman |
+| `DAMAR_VOICE_AUDIO_BACKEND` | `none` | `cli` untuk mic/speaker OS |
+| `DAMAR_VOICE_ACK` | `Ya?` | Acknowledgement deterministik |
+| `DAMAR_VOICE_LANGUAGE` | `id` | Bahasa STT |
+| `DAMAR_VOICE_CLAP_ENABLED` | `false` | Aktifkan trigger tepuk 2x |
+| `DAMAR_VOICE_CLAP_THRESHOLD` | `0.6` | Level RMS (0..1) = "bunyi keras" |
+| `DAMAR_VOICE_CLAP_WINDOW_MS` | `800` | Jendela maks antar dua tepukan |
+| `DAMAR_VOICE_CLAP_MIN_CLAP_MS` | `30` | Lebar minimum satu tepukan |
+| `DAMAR_VOICE_CLAP_MIN_GAP_MS` | `100` | Jeda minimum antar tepukan |
 
-STT/TTS tetap membaca `AETHER_STT_URL` / `AETHER_TTS_URL` (endpoint
+STT/TTS tetap membaca `DAMAR_STT_URL` / `DAMAR_TTS_URL` (endpoint
 OpenAI-compatible, local-first) — tidak ada konfigurasi suara baru yang
 mendobel `voiceService`.
 
@@ -102,13 +102,13 @@ mendobel `voiceService`.
 
 ```json
 {
-  "enabled": false, "state": "idle", "wakeWord": "aether",
+  "enabled": false, "state": "idle", "wakeWord": "damar",
   "clapEnabled": false,
   "clapDetector": { "provider": "local", "threshold": 0.6, "windowMs": 800 },
   "microphone": { "backend": "none", "available": false },
   "speaker":    { "backend": "none", "available": false },
   "sttProvider": "local", "ttsProvider": "local",
-  "wakeWordProvider": { "provider": "local", "wakeWord": "aether" },
+  "wakeWordProvider": { "provider": "local", "wakeWord": "damar" },
   "activeSession": null
 }
 ```
@@ -125,7 +125,7 @@ barge-in, wake word (utuh vs substring), deteksi tepuk 2x (2 dalam jendela vs
 ## Peta lanjutan
 
 1. **Wake-word engine sungguhan** (Porcupine/Vosk/openWakeWord) — sisipkan
-   implementasi `WakeWordProvider` baru, set `AETHER_VOICE_WAKE_PROVIDER`.
+   implementasi `WakeWordProvider` baru, set `DAMAR_VOICE_WAKE_PROVIDER`.
 2. **STT streaming** + **VAD berbasis level audio** (RMS) saat backend audio
    `cli` tersedia — RMS stream kini sudah mengalir ke ClapDetector; tinggal
    dipakai juga oleh VAD untuk mendeteksi akhir ucapan secara akustik.

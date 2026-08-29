@@ -3,7 +3,7 @@ import * as THREE from "../../vendor/three.module.js";
 /**
  * SWARM ORB AGEN — 12 orb kecil "bersemanyam" di sekitar orb utama.
  *
- * Tiap orb mewakili satu agent (openclaw, hermes + 10 anak buah):
+ * Tiap orb mewakili satu agent (openclaw, hermes + lima Pandawa):
  *   - BEBAS   : mengambang pelan mengorbit orb utama dengan lintasan
  *               unik (warna khas agent), berkilau tenang.
  *   - ENERGI  : saat agent DIPAKAI (step:start), orb-nya terbang
@@ -24,16 +24,12 @@ import * as THREE from "../../vendor/three.module.js";
 export const AGENT_DEFS = [
     { id: "openclaw", label: "OpenClaw", hex: 0xFF7A59 },   // karang — tangan digital
     { id: "hermes",   label: "Hermes",   hex: 0xB892FF },   // ungu muda — runtime agen
-    { id: "vanta",    label: "Vanta",    hex: 0x5ED3F3 },   // biru es — riset
-    { id: "forge",    label: "Forge",    hex: 0xFFA23E },   // jingga — coding
-    { id: "nexus",    label: "Nexus",    hex: 0x6BF2A8 },   // hijau neon — sistem
-    { id: "sera",     label: "Sera",     hex: 0xFF8FD2 },   // merah muda — vision
-    { id: "echo",     label: "Echo",     hex: 0x7FD4FF },   // biru muda — suara
-    { id: "cipher",   label: "Cipher",   hex: 0x9AA7FF },   // indigo — keamanan
-    { id: "atlas",    label: "Atlas",    hex: 0xFFD166 },   // kuning — otomatisasi
-    { id: "mira",     label: "Mira",     hex: 0xFFB3C7 },   // rose — memori
-    { id: "pulse",    label: "Pulse",    hex: 0x4EE6C4 },   // toska — monitoring
-    { id: "lumen",    label: "Lumen",    hex: 0xC7F584 }    // lime — antarmuka
+    // ---- Pandawa: lima spesialis Damar ----------------------------
+    { id: "puntadewa", label: "Puntadewa", hex: 0xFFD166 },  // kuning — tata kelola & rencana
+    { id: "werkudara", label: "Werkudara", hex: 0x9AA7FF },  // indigo — keamanan
+    { id: "janaka",    label: "Janaka",    hex: 0x5ED3F3 },  // biru es — riset & intelijen
+    { id: "nakula",    label: "Nakula",    hex: 0xFFA23E },  // jingga — rekayasa & operasi
+    { id: "sadewa",    label: "Sadewa",    hex: 0xFFB3C7 }   // rose — memori & kontinuitas
 ];
 
 const OK_HEX = 0x21E6A4;    // hijau sukses

@@ -9,7 +9,7 @@ const pexec = promisify(execFile);
  * Insinyur ML yang baik tidak menebak apakah ada GPU, versi CUDA, atau
  * framework mana yang terpasang — ia memeriksa. Modul ini menjalankan
  * interpreter Python nyata dan melaporkan apa yang benar-benar ada,
- * supaya Aether tak pernah mengarang "training di GPU" di mesin yang
+ * supaya Damar tak pernah mengarang "training di GPU" di mesin yang
  * hanya punya CPU (§ integritas diagnosa).
  */
 
@@ -116,7 +116,7 @@ async function nvidia() {
 /**
  * Laporan lingkungan ML. Balikan { ok, python?, libs, cuda, gpu, catatan }.
  *
- * Ketiadaan Python BUKAN kegagalan Aether — dilaporkan apa adanya agar
+ * Ketiadaan Python BUKAN kegagalan Damar — dilaporkan apa adanya agar
  * pemilik tahu harus memasangnya, bukan diberi tebakan bahwa "torch
  * tidak terpasang" padahal interpreternya sendiri belum ada.
  */

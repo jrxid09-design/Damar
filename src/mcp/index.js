@@ -5,16 +5,16 @@ const { clampExternalRole } = require("../core/auth/tokenCompare");
 const { McpClient } = require("./mcpClient");
 
 /**
- * Pasang endpoint MCP Aether pada aplikasi Express.
+ * Pasang endpoint MCP Damar pada aplikasi Express.
  *
  *   POST /mcp         — JSON-RPC 2.0 (initialize / tools/list / tools/call)
  *   GET  /mcp/health  — cek + jumlah tool yang terekspos
  *
  * Klien MCP (Claude Desktop, agen lain, penghuni koloni) memakai 140+
- * tool Aether lewat sini. Tool destruktif disembunyikan kecuali
- * AETHER_MCP_ALLOW_DESTRUCTIVE=1; eksekusi tetap lewat toolGuard.
+ * tool Damar lewat sini. Tool destruktif disembunyikan kecuali
+ * DAMAR_MCP_ALLOW_DESTRUCTIVE=1; eksekusi tetap lewat toolGuard.
  *
- * Aether juga bisa jadi KLIEN MCP (memakai server eksternal sebagai
+ * Damar juga bisa jadi KLIEN MCP (memakai server eksternal sebagai
  * tool) — lihat mcpClientManager; dimulai otomatis oleh
  * aiRuntimeService saat daemon boot.
  */
@@ -41,17 +41,17 @@ function attachMcp(app) {
             }
         },
         isDestructive: (id) => !!riskOf(id),
-        allowDestructive: process.env.AETHER_MCP_ALLOW_DESTRUCTIVE === "1"
+        allowDestructive: process.env.DAMAR_MCP_ALLOW_DESTRUCTIVE === "1"
     });
 
     // Guard fail-closed + identitas berprovenance (C2); permukaan MCP
     // eksternal = hak minimum ('user') kecuali ditinggikan eksplisit.
-    // G-FINAL: AETHER_MCP_ROLE dikunci enum eksternal — tidak bisa
+    // G-FINAL: DAMAR_MCP_ROLE dikunci enum eksternal — tidak bisa
     // mencetak "system" di permukaan token.
     const guard = require("../core/auth/tokenCompare")
         .tokenGuard({
             roleWhenAuthenticated:
-                clampExternalRole(process.env.AETHER_MCP_ROLE, "user"),
+                clampExternalRole(process.env.DAMAR_MCP_ROLE, "user"),
             surface: "mcp"
         });
 
@@ -76,7 +76,7 @@ function attachMcp(app) {
 
     app.get("/mcp/health", guard, (req, res) => {
         // H9: jumlah tool kini identitas-spesifik (paritas disklosur).
-        res.json({ ok: true, server: "aether-mcp", tools: handler.visibleTools(req.mcpExec).length, destructive: process.env.AETHER_MCP_ALLOW_DESTRUCTIVE === "1" });
+        res.json({ ok: true, server: "damar-mcp", tools: handler.visibleTools(req.mcpExec).length, destructive: process.env.DAMAR_MCP_ALLOW_DESTRUCTIVE === "1" });
     });
 
     return handler;

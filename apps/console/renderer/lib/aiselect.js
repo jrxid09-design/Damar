@@ -5,7 +5,7 @@ import { toast } from "./ui.js";
 /**
  * Selektor "AI Lokal / AI Provider" yang dipakai bersama oleh
  * beberapa view (Chat, Models). Menyembunyikan detail id provider:
- * pengguna cukup memilih otak Aether antara lokal (Ollama) atau
+ * pengguna cukup memilih otak Damar antara lokal (Ollama) atau
  * cloud (provider ber-API-key).
  *
  * Mengubah pilihan = mengganti provider AKTIF daemon (bukan cuma

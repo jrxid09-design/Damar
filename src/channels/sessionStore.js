@@ -21,7 +21,7 @@ const MAX_TURNS = 20; // jendela giliran per sesi (setara perilaku lama)
 
 class SessionStore {
 
-    constructor(file = process.env.AETHER_CHANNEL_DB ?? DEFAULT_FILE) {
+    constructor(file = process.env.DAMAR_CHANNEL_DB ?? DEFAULT_FILE) {
 
         this.file = file;
 

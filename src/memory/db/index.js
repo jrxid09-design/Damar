@@ -10,12 +10,12 @@ const DEFAULT_FILE = path.join(
 );
 
 /**
- * Basis data memori dipisahkan dari data/aether.db yang menyimpan
+ * Basis data memori dipisahkan dari data/damar.db yang menyimpan
  * riwayat percakapan lama, supaya skema lama tidak perlu diubah
  * dan basis memori bisa dipindahkan/di-backup sendiri.
  */
 const database = new Database(
-    process.env.AETHER_MEMORY_DB ?? DEFAULT_FILE
+    process.env.DAMAR_MEMORY_DB ?? DEFAULT_FILE
 );
 
 let initialized = null;

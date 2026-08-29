@@ -4,10 +4,10 @@ const telemetry = require("./telemetryService");
 const JsonStore = require("../core/config/JsonStore");
 
 /**
- * Immich — mata Aether ke galeri foto.
+ * Immich — mata Damar ke galeri foto.
  *
  * Immich sudah punya pengenalan wajah & pencarian cerdas bawaan.
- * Aether memanfaatkannya: daftar orang (wajah bernama), cari foto
+ * Damar memanfaatkannya: daftar orang (wajah bernama), cari foto
  * per-orang, dan pencarian semantik ("foto saat ke Bandung naik
  * motor"). Auth pakai header x-api-key.
  *
@@ -26,11 +26,11 @@ class ImmichService {
     }
 
     get url() {
-        return (this.cfg().url || process.env.AETHER_IMMICH_URL || "")
+        return (this.cfg().url || process.env.DAMAR_IMMICH_URL || "")
             .replace(/\/+$/, "") || null;
     }
     get key() {
-        return this.cfg().key || process.env.AETHER_IMMICH_KEY || null;
+        return this.cfg().key || process.env.DAMAR_IMMICH_KEY || null;
     }
     get configured() {
         return Boolean(this.url && this.key);

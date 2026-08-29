@@ -1,6 +1,6 @@
-# AetherSelf (CANONICAL)
+# DamarSelf (CANONICAL)
 
-Folder ini adalah SATU-SATUNYA lokasi kanonik AetherSelf.
+Folder ini adalah SATU-SATUNYA lokasi kanonik DamarSelf.
 
 | Path | Arti | Sifat |
 |---|---|---|

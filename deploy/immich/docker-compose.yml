@@ -1,9 +1,9 @@
-# Immich — backup foto & video mandiri untuk NAS Aether.
-# Dikelola Aether (immichService) tapi bisa juga dijalankan manual:
+# Immich — backup foto & video mandiri untuk NAS Damar.
+# Dikelola Damar (immichService) tapi bisa juga dijalankan manual:
 #   docker compose -f deploy/immich/docker-compose.yml up -d
 #
 # Nilai path & password diambil dari deploy/immich/.env yang DIBUAT
-# otomatis oleh Aether dari configs/nas.json (disk pilihanmu).
+# otomatis oleh Damar dari configs/nas.json (disk pilihanmu).
 name: immich
 
 services:

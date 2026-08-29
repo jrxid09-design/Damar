@@ -7,7 +7,7 @@ const OllamaMapper = require("./OllamaMapper");
  *
  * Berbeda dengan provider cloud, provider ini juga membuka
  * kemampuan operasional (daftar model, model yang sedang
- * dimuat, unduh model) supaya Aether Console bisa mengelola
+ * dimuat, unduh model) supaya Damar Console bisa mengelola
  * runtime lokal tanpa perlu terminal.
  */
 class OllamaProvider extends BaseAIProvider {

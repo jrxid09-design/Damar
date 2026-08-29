@@ -4,22 +4,22 @@ const path = require("node:path");
 const { isValidProposalId } = require("../authority/model");
 
 /**
- * AETHERSELF SERVICE — satu resolver path kanonik (§Migration rule 5).
+ * DAMARSELF SERVICE — satu resolver path kanonik (§Migration rule 5).
  *
- * CANONICAL dir = <repoRoot>/AetherSelf (di-commit; identitas/jurnal/
+ * CANONICAL dir = <repoRoot>/DamarSelf (di-commit; identitas/jurnal/
  * konstitusi/self-model/evolution docs).
  *
  * TIDAK ADA lokasi kedua yang dianggap kanonik. migrateFromLegacy()
  * hanya menyalin byte-exact saat canonical kosong, lalu menandai folder
  * legacy dengan MIGRATED.md (best-effort) agar tidak jadi sumber ganda.
  *
- * SEMANTIC SEPARATION (load-bearing): seluruh isi AetherSelf adalah
+ * SEMANTIC SEPARATION (load-bearing): seluruh isi DamarSelf adalah
  * NARASI/pemahaman diri - BUKAN sumber otorisasi. Otoritas hanya lahir
  * dari src/authority (CapabilityGrant + OwnerRatification).
  */
 
 const DEFAULT_CANONICAL_DIR =
-    path.resolve(__dirname, "..", "..", "AetherSelf");
+    path.resolve(__dirname, "..", "..", "DamarSelf");
 
 const REQUIRED_SUBDIRS = [
     ["constitution"],
@@ -30,8 +30,8 @@ const REQUIRED_SUBDIRS = [
     ["evolution", "rejected"]
 ];
 
-function createAetherSelfService({
-    canonicalDir = process.env.AETHERSELF_DIR ?? DEFAULT_CANONICAL_DIR,
+function createDamarSelfService({
+    canonicalDir = process.env.DAMARSELF_DIR ?? DEFAULT_CANONICAL_DIR,
     legacyDir = null,
     clock = null
 } = {}) {
@@ -42,22 +42,81 @@ function createAetherSelfService({
         return canonicalDir;
     }
 
+    /**
+     * ADOPSI DIREKTORI LAMA — AetherSelf → DamarSelf (§rename).
+     *
+     * Kontinuitas autobiografis TIDAK BOLEH putus karena rename.
+     * Setiap berkas di direktori lama yang BELUM ada di kanonik
+     * disalin apa adanya; yang sudah ada tidak pernah ditimpa —
+     * jadi jurnal append-only tetap utuh sebagai prefix.
+     *
+     * Idempoten: pemanggilan kedua tidak menyalin apa pun lagi.
+     * Direktori lama ditandai MIGRATED.md agar tidak menjadi sumber
+     * kanonik kedua.
+     */
+    function adoptLegacySelfDir(legacyPath = defaultLegacyDir()) {
+
+        if (!legacyPath || !fs.existsSync(legacyPath)) return [];
+        if (path.resolve(legacyPath) === path.resolve(canonicalDir)) return [];
+
+        const copied = [];
+
+        const walk = (fromDir, toDir) => {
+            for (const entry of fs.readdirSync(fromDir, { withFileTypes: true })) {
+                if (entry.name === "MIGRATED.md") continue;
+                const from = path.join(fromDir, entry.name);
+                const to = path.join(toDir, entry.name);
+                if (entry.isDirectory()) {
+                    fs.mkdirSync(to, { recursive: true });
+                    walk(from, to);
+                }
+                else if (entry.isFile() && !fs.existsSync(to)) {
+                    fs.mkdirSync(path.dirname(to), { recursive: true });
+                    fs.copyFileSync(from, to);
+                    copied.push(path.relative(canonicalDir, to));
+                }
+            }
+        };
+
+        fs.mkdirSync(canonicalDir, { recursive: true });
+        walk(legacyPath, canonicalDir);
+
+        try {
+            fs.writeFileSync(path.join(legacyPath, "MIGRATED.md"),
+                "# MIGRATED\n\nDamarSelf kanonik kini:\n" +
+                `${canonicalDir}\n\nFolder ini adalah arsip dari masa ` +
+                "ketika sistem bernama Aether; tidak lagi dipakai runtime.\n",
+                "utf8");
+        } catch { /* read-only media: marker opsional */ }
+
+        return copied;
+
+    }
+
     /** Struktur minimal idempoten; file seed dibuat hanya bila absen. */
     function ensureStructure() {
+        // Adopsi lebih dulu: seed tidak boleh menutupi narasi lama.
+        //
+        // HANYA lokasi IMPLISIT (saudara `AetherSelf`) yang diadopsi
+        // otomatis. `legacyDir` yang diberikan pemanggil tetap jalur
+        // EKSPLISIT lewat migrateFromLegacy() — supaya laporan
+        // `copied` milik pemanggil tidak dicuri oleh adopsi otomatis.
+        try { adoptLegacySelfDir(implicitLegacyDir()); }
+        catch { /* adopsi best-effort; struktur tetap dibuat */ }
         for (const parts of REQUIRED_SUBDIRS) {
             fs.mkdirSync(path.join(canonicalDir, ...parts), { recursive: true });
         }
         const seeds = [
             [path.join(canonicalDir, "README.md"),
-             aetherSelfReadme()],
+             damarSelfReadme()],
             [path.join(canonicalDir, "constitution", "principles.md"),
              principlesSeed()],
             [path.join(canonicalDir, "self-model", "capabilities.md"),
-             "# Capabilities (self-perception)\n\n- Diisi oleh Aether; BUKAN state otorisasi.\n"],
+             "# Capabilities (self-perception)\n\n- Diisi oleh Damar; BUKAN state otorisasi.\n"],
             [path.join(canonicalDir, "self-model", "limitations.md"),
-             "# Limitations (self-perception)\n\n- Diisi oleh Aether.\n"],
+             "# Limitations (self-perception)\n\n- Diisi oleh Damar.\n"],
             [path.join(canonicalDir, "self-model", "goals.md"),
-             "# Goals (self-perception)\n\n- Diisi oleh Aether.\n"]
+             "# Goals (self-perception)\n\n- Diisi oleh Damar.\n"]
         ];
         for (const [file, content] of seeds) {
             if (!fs.existsSync(file)) {
@@ -89,7 +148,7 @@ function createAetherSelfService({
         // sumber kanonik kedua:
         try {
             fs.writeFileSync(path.join(legacyPath, "MIGRATED.md"),
-                "# MIGRATED\n\nCanonical AetherSelf kini:\n" +
+                "# MIGRATED\n\nCanonical DamarSelf kini:\n" +
                 `${canonicalDir}\n\nFile di folder ini adalah arsip ` +
                 "dan tidak lagi dipakai runtime.\n",
                 "utf8");
@@ -186,7 +245,7 @@ function createAetherSelfService({
             path.isAbsolute(rel) || resolved.startsWith(`${dir}.`)) {
             throw new Error(
                 "PERLANGKARAN PATH: proposalId keluar dari direktori " +
-                "proposals AetherSelf — penulisan ditolak.");
+                "proposals DamarSelf — penulisan ditolak.");
         }
 
         const body = [
@@ -209,8 +268,29 @@ function createAetherSelfService({
         return resolved;
     }
 
+    /**
+     * Lokasi direktori EJAAN LAMA yang layak diadopsi.
+     *
+     * Urutan: `legacyDir` eksplisit → `AETHERSELF_DIR` (bila memang
+     * menunjuk tempat lain) → saudara kanonik bernama `AetherSelf`.
+     * Mengembalikan null bila hasilnya sama dengan kanonik.
+     */
+    function implicitLegacyDir() {
+        const kandidat =
+            process.env.AETHERSELF_DIR
+            ?? path.resolve(path.dirname(canonicalDir), "AetherSelf");
+        return path.resolve(kandidat) === path.resolve(canonicalDir)
+            ? null
+            : kandidat;
+    }
+
+    function defaultLegacyDir() {
+        return legacyDir ?? implicitLegacyDir();
+    }
+
     return {
         resolveCanonical, ensureStructure, migrateFromLegacy,
+        adoptLegacySelfDir, defaultLegacyDir,
         readIdentityBytes, readJournalBytes, appendJournal,
         writeConstitutionPrinciples, readConstitutionVersion,
         writeEvolutionProposalDoc
@@ -218,11 +298,11 @@ function createAetherSelfService({
 
 }
 
-function aetherSelfReadme() {
+function damarSelfReadme() {
     return [
-        "# AetherSelf (CANONICAL)",
+        "# DamarSelf (CANONICAL)",
         "",
-        "Folder ini adalah SATU-SATUNYA lokasi kanonik AetherSelf.",
+        "Folder ini adalah SATU-SATUNYA lokasi kanonik DamarSelf.",
         "",
         "| Path | Arti | Sifat |",
         "|---|---|---|",
@@ -247,8 +327,8 @@ function principlesSeed() {
         "# Principles v1\n\n" +
         "1. Kejujuran di atas pujian.\n" +
         "2. Bukti di atas klaim.\n" +
-        "3. Pemilik memutuskan transisi besar; Aether mengusulkan & menjalankan.\n" +
+        "3. Pemilik memutuskan transisi besar; Damar mengusulkan & menjalankan.\n" +
         "4. Kognisi tidak pernah memberi otoritas.\n";
 }
 
-module.exports = { createAetherSelfService, DEFAULT_CANONICAL_DIR };
+module.exports = { createDamarSelfService, DEFAULT_CANONICAL_DIR };

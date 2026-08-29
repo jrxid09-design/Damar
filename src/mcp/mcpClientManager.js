@@ -4,9 +4,9 @@ const { McpClient } = require("./mcpClient");
 const JsonStore = require("../core/config/JsonStore");
 
 /**
- * McpClientManager — pemilik seluruh koneksi MCP klien Aether.
+ * McpClientManager — pemilik seluruh koneksi MCP klien Damar.
  *
- * Membaca configs/mcp.json (atau AETHER_MCP_SERVERS dari env sebagai
+ * Membaca configs/mcp.json (atau DAMAR_MCP_SERVERS dari env sebagai
  * JSON inline), menyalakan tiap server, melakukan handshake, lalu
  * mengekspos seluruh tool eksternal sebagai AITool terbridging.
  *
@@ -17,7 +17,7 @@ const JsonStore = require("../core/config/JsonStore");
  * Tool eksternal TIDAK didaftarkan ke registry inti (ToolRegistry)
  * — mereka hidup di registry AI dengan flag `bridged`, sehingga
  * ToolExecutor menjalankan toolGuard untuk mereka persis seperti
- * tool asli Aether (memori, terminal, coding): kill switch, kebijakan
+ * tool asli Damar (memori, terminal, coding): kill switch, kebijakan
  * risiko, rem kebuntuan, batas jalur, audit.
  *
  * Kegagalan satu server tidak menjatuhkan yang lain: masing-masing
@@ -28,7 +28,7 @@ class McpClientManager {
     constructor({ configFile = null } = {}) {
 
         this.configFile = configFile
-            || process.env.AETHER_MCP_CONFIG
+            || process.env.DAMAR_MCP_CONFIG
             || path.join(process.cwd(), "configs", "mcp.json");
 
         this.clients = new Map();     // id -> McpClient
@@ -39,7 +39,7 @@ class McpClientManager {
     /**
      * Konfigurasi server eksternal.
      *
-     * Urutan sumber: berkas configs/mcp.json → env AETHER_MCP_SERVERS
+     * Urutan sumber: berkas configs/mcp.json → env DAMAR_MCP_SERVERS
      * (JSON inline). Keduanya bisa hadir; berkas menang.
      */
     _config() {
@@ -57,9 +57,9 @@ class McpClientManager {
 
         let servers = read(this.configFile);
 
-        if (!servers && process.env.AETHER_MCP_SERVERS) {
+        if (!servers && process.env.DAMAR_MCP_SERVERS) {
             try {
-                const parsed = JSON.parse(process.env.AETHER_MCP_SERVERS);
+                const parsed = JSON.parse(process.env.DAMAR_MCP_SERVERS);
                 servers = Array.isArray(parsed) ? parsed : (parsed?.servers ?? null);
             }
             catch {

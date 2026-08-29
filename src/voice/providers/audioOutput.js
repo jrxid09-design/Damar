@@ -1,8 +1,8 @@
 /**
  * AudioOutput — abstraksi speaker/output.
  *
- * Aether harus bisa bicara lewat: speaker PC, headset, HDMI, Raspberry Pi,
- * Aether-USB, dsb. Backend default "none" (graceful). Backend "cli" memutar
+ * Damar harus bisa bicara lewat: speaker PC, headset, HDMI, Raspberry Pi,
+ * Damar-USB, dsb. Backend default "none" (graceful). Backend "cli" memutar
  * audio lewat CLI lokal sebagai PROSES (spawn) — sehingga bisa di-interrupt
  * (barge-in) lewat this._child.
  *
@@ -75,7 +75,7 @@ class AudioOutput {
         const fs = require("node:fs");
         const { spawn } = require("node:child_process");
 
-        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aether-spk-"));
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "damar-spk-"));
         const file = path.join(dir, "out.mp3");
 
         try {

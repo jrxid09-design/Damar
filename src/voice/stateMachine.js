@@ -4,7 +4,7 @@
  *   IDLE → WAKE_DETECTED → LISTENING → TRANSCRIBING → THINKING
  *        → EXECUTING → SPEAKING → IDLE
  *
- * Sifatnya adalah otoritas tunggal atas "di mana Aether sekarang".
+ * Sifatnya adalah otoritas tunggal atas "di mana Damar sekarang".
  * Semua transisi lewat `transit()`, yang memvalidasi agar tidak ada
  * lompatan ilegal (mis. dari IDLE langsung ke SPEAKING) dan mencatat
  * waktu masuk tiap status — dasar timeout & cancellation.

@@ -8,7 +8,7 @@ const telemetry = require("../../services/telemetryService");
 
 /**
  * Menghasilkan embedding lewat endpoint kompatibel (POST {model, input}
- * → {embeddings}) — diatur via AETHER_EMBED_URL + AETHER_EMBED_MODEL.
+ * → {embeddings}) — diatur via DAMAR_EMBED_URL + DAMAR_EMBED_MODEL.
  *
  * Titik desain terpenting: endpoint ini OPSIONAL dan sering tidak
  * tersedia. Karena itu embedding diperlakukan sebagai peningkatan
@@ -22,10 +22,10 @@ class EmbeddingService {
     constructor() {
 
         this.model =
-            process.env.AETHER_EMBED_MODEL ?? null;
+            process.env.DAMAR_EMBED_MODEL ?? null;
 
         this.baseUrl = (
-            process.env.AETHER_EMBED_URL ?? ""
+            process.env.DAMAR_EMBED_URL ?? ""
         ).replace(/\/+$/, "") || null;
 
         /** Status terakhir, supaya UI bisa menjelaskan kenapa kosong. */

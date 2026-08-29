@@ -10,7 +10,7 @@ const graph = require("../graph/graphifyAdapter");
  * find-replace teks. Alur aman selalu lewat loop eksekusi CodingBrain.runFix:
  *   branch → terapkan WorkspaceEdit → verify (lint+test) → commit bila hijau /
  *   rollback bila merah → segarkan graf. Bila language server tak ada →
- *   { available:false } (Aether tak menebak refactor tanpa jaminan semantik).
+ *   { available:false } (Damar tak menebak refactor tanpa jaminan semantik).
  *
  * Posisi API ini 0-based (native LSP); tool AI mengonversi dari 1-based.
  */
@@ -87,7 +87,7 @@ class Refactorer {
         const brain = require("../CodingBrain");                       // lazy: hindari siklus require
         const res = await brain.runFix({
             project,
-            branch: `aether/refactor-rename-${newName}-${Date.now() % 100000}`,
+            branch: `damar/refactor-rename-${newName}-${Date.now() % 100000}`,
             applyPatch: async () => { await this.applyWorkspaceEdit(pv.edit); },
             verifySteps
         });
@@ -115,7 +115,7 @@ class Refactorer {
 
         const brain = require("../CodingBrain");
         const res = await brain.runFix({
-            project, branch: `aether/refactor-${Date.now() % 100000}`,
+            project, branch: `damar/refactor-${Date.now() % 100000}`,
             applyPatch: async () => { await this.applyWorkspaceEdit(act.edit); },
             verifySteps
         });

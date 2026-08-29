@@ -23,9 +23,9 @@ Rules:
 
 ---
 
-# Aether Development Guide
+# Damar Development Guide
 
-Aether is an AI Runtime Framework.
+Damar is an AI Runtime Framework.
 
 Its long-term goal is to become:
 

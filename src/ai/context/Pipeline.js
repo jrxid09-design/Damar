@@ -25,9 +25,9 @@ const refs = require("./refs");
  */
 
 const LIMITS = {
-    MAX_INPUT_MESSAGES: Number(process.env.AETHER_CONTEXT_MAX_MESSAGES) || 40,
-    MAX_MESSAGE_CHARS: Number(process.env.AETHER_CONTEXT_MAX_MSG_CHARS) || 6000,
-    RECENT_MESSAGES: Number(process.env.AETHER_CONTEXT_RECENT) || 8,
+    MAX_INPUT_MESSAGES: Number(process.env.DAMAR_CONTEXT_MAX_MESSAGES) || 40,
+    MAX_MESSAGE_CHARS: Number(process.env.DAMAR_CONTEXT_MAX_MSG_CHARS) || 6000,
+    RECENT_MESSAGES: Number(process.env.DAMAR_CONTEXT_RECENT) || 8,
     RECENT_CHARS: 4000            // pengaman ekstra untuk satu pesan recent
 };
 
@@ -64,7 +64,7 @@ function sanitize(messages = []) {
  *   channel      "telegram"|"whatsapp"|...
  *   role         peran (untuk visibilitas kelak; saat ini passthrough)
  *   worker       {id,label} bila konteks untuk worker AgentHub
- *   contextRefs  ["project:x", ...] — port Colony
+ *   contextRefs  ["project:x", ...] — port Pandawa
  *   includeMind  bool (default true; voice mungkin ingin hemat)
  *   memoryFn     injeksi adapter memori (default adapter asli; dipakai
  *                benchmark/test untuk korpus deterministik)
@@ -200,7 +200,7 @@ async function select({
             // env hanya fallback di dalam compute, dan tak boleh memperbesar.
             contextTokens,
             stableTokens,
-            maxTools: Number(process.env.AETHER_TOOL_BUDGET) || undefined
+            maxTools: Number(process.env.DAMAR_TOOL_BUDGET) || undefined
         });
 
         // ---- 6. Isi kategori dengan anggaran + kompresi ---------------
@@ -238,7 +238,7 @@ async function select({
         // + cadangan output/margin TIDAK BOLEH melampaui window AKTIF.
         // Diukur pada estimasi serialized final, bukan anggaran kategori.
         const winProfile = Budget.profileFor(contextTokens
-            ?? (Number(process.env.AETHER_MODEL_CONTEXT_TOKENS) || undefined));
+            ?? (Number(process.env.DAMAR_MODEL_CONTEXT_TOKENS) || undefined));
 
         const hardCapCtx = winProfile.contextTokens - 1024 - 512;
 

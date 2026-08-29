@@ -1,5 +1,5 @@
 /**
- * Pulse — detak jantung otonom Aether.
+ * Pulse — detak jantung otonom Damar.
  *
  * Tiap 5 menit ia MERASA keadaannya sendiri (jumlah error sejak detak
  * terakhir, umur proses) dan MENILAI: normal atau anomali. Anomali tidak
@@ -57,7 +57,7 @@ class Pulse {
     }
 
     file() {
-        return process.env.AETHER_PULSE_FILE ||
+        return process.env.DAMAR_PULSE_FILE ||
             path.join(process.cwd(), "data", "pulse.json");
     }
 

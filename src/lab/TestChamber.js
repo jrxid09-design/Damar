@@ -6,7 +6,7 @@ const activity = require("./ActivityLog");
  * TestChamber — ruang verifikasi (§19).
  *
  * Misi yang masuk VERIFYING menjalankan test NYATA via tool code_test
- * yang terdaftar (runner test proyek Aether/terhubung). Tidak ada
+ * yang terdaftar (runner test proyek Damar/terhubung). Tidak ada
  * hasil palsu: gagal runner = gagal, dan itu tercatat.
  */
 
@@ -30,7 +30,7 @@ class TestChamber {
 
         const project = await database.get("SELECT * FROM lab_projects WHERE id=?", [projectId]);
 
-        // code_test = tool nyata di registry (runner test Aether).
+        // code_test = tool nyata di registry (runner test Damar).
         let result;
         let ok = false;
 
@@ -44,7 +44,7 @@ class TestChamber {
             }
 
             await activity.record({
-                type: "tool.started", projectId, missionId, agentId: "forge",
+                type: "tool.started", projectId, missionId, agentId: "nakula",
                 tool: "code_test", payload: { category }
             });
 
@@ -56,7 +56,7 @@ class TestChamber {
             ok = result?.failed == null || Number(result?.failed ?? 0) === 0;
 
             await activity.record({
-                type: "tool.completed", projectId, missionId, agentId: "forge",
+                type: "tool.completed", projectId, missionId, agentId: "nakula",
                 tool: "code_test", payload: { category, ok }
             });
 
@@ -64,7 +64,7 @@ class TestChamber {
         catch (error) {
 
             await activity.record({
-                type: "tool.failed", projectId, missionId, agentId: "forge",
+                type: "tool.failed", projectId, missionId, agentId: "nakula",
                 tool: "code_test", payload: { category, error: error.message }
             });
 

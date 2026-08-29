@@ -7,9 +7,9 @@ const personTracking = require("./personTrackingService");
 const socialIntel = require("./socialIntelService");
 
 /**
- * Tool AI untuk Aether OSINT — detektif & investigator digital.
+ * Tool AI untuk Damar OSINT — detektif & investigator digital.
  *
- * Aether bisa menganalisis email, username, telepon, domain,
+ * Damar bisa menganalisis email, username, telepon, domain,
  * mengecek kebocoran data gratis, menilai risiko penipuan telepon,
  * dan melacak lokasi orang yang opt-in.
  *

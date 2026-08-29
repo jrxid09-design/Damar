@@ -425,9 +425,9 @@ input[type="range"]::-webkit-slider-thumb {
     color: var(--text-muted);
 }
 
-/* ---- Panggung Aether (layar entitas) -------------------------------- */
+/* ---- Panggung Damar (layar entitas) -------------------------------- */
 
-.aether-stage {
+.damar-stage {
     display: grid;
     grid-template-columns: minmax(260px, 360px) 1fr;
     gap: 22px;
@@ -436,10 +436,10 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 @media (max-width: 900px) {
-    .aether-stage { grid-template-columns: 1fr; }
+    .damar-stage { grid-template-columns: 1fr; }
 }
 
-.aether-orb {
+.damar-orb {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -447,14 +447,14 @@ input[type="range"]::-webkit-slider-thumb {
     padding: 20px;
 }
 
-.aether-avatar-holder {
+.damar-avatar-holder {
     width: 260px;
     height: 260px;
     max-width: 60vw;
     filter: drop-shadow(0 18px 40px rgba(124, 140, 255, 0.35));
 }
 
-.aether-status {
+.damar-status {
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -467,7 +467,7 @@ input[type="range"]::-webkit-slider-thumb {
     backdrop-filter: blur(12px);
 }
 
-.aether-status .dot {
+.damar-status .dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
@@ -475,17 +475,17 @@ input[type="range"]::-webkit-slider-thumb {
     transition: background var(--base);
 }
 
-.aether-status[data-tone="ok"]     { color: var(--ok); }
-.aether-status[data-tone="ok"] .dot { background: var(--ok); animation: pulse 2s ease-in-out infinite; }
-.aether-status[data-tone="warn"]   { color: var(--warn); }
-.aether-status[data-tone="warn"] .dot { background: var(--warn); }
-.aether-status[data-tone="accent"] { color: var(--accent-1); }
-.aether-status[data-tone="accent"] .dot { background: var(--accent-1); animation: pulse 1.2s ease-in-out infinite; }
-.aether-status[data-tone="danger"] { color: var(--danger); }
-.aether-status[data-tone="danger"] .dot { background: var(--danger); }
-.aether-status[data-tone="muted"]  { color: var(--text-muted); }
+.damar-status[data-tone="ok"]     { color: var(--ok); }
+.damar-status[data-tone="ok"] .dot { background: var(--ok); animation: pulse 2s ease-in-out infinite; }
+.damar-status[data-tone="warn"]   { color: var(--warn); }
+.damar-status[data-tone="warn"] .dot { background: var(--warn); }
+.damar-status[data-tone="accent"] { color: var(--accent-1); }
+.damar-status[data-tone="accent"] .dot { background: var(--accent-1); animation: pulse 1.2s ease-in-out infinite; }
+.damar-status[data-tone="danger"] { color: var(--danger); }
+.damar-status[data-tone="danger"] .dot { background: var(--danger); }
+.damar-status[data-tone="muted"]  { color: var(--text-muted); }
 
-.aether-mic-level {
+.damar-mic-level {
     width: 160px;
     height: 5px;
     border-radius: var(--r-pill);
@@ -494,14 +494,14 @@ input[type="range"]::-webkit-slider-thumb {
     overflow: hidden;
 }
 
-.aether-mic-level .fill {
+.damar-mic-level .fill {
     height: 100%;
     width: 0%;
     background: linear-gradient(90deg, var(--ok), var(--accent-1));
     transition: width 70ms linear;
 }
 
-.aether-transcript {
+.damar-transcript {
     align-self: stretch;
     max-height: calc(100vh - var(--titlebar-h) - 230px);
     overflow-y: auto;
@@ -515,13 +515,13 @@ input[type="range"]::-webkit-slider-thumb {
     gap: 12px;
 }
 
-.aether-transcript .line {
+.damar-transcript .line {
     font-size: 14px;
     line-height: 1.6;
     user-select: text;
 }
 
-.aether-transcript .line .who {
+.damar-transcript .line .who {
     display: inline-block;
     min-width: 52px;
     font-size: 11px;
@@ -532,10 +532,10 @@ input[type="range"]::-webkit-slider-thumb {
     margin-right: 6px;
 }
 
-.aether-transcript .line.a { color: var(--text); }
-.aether-transcript .line.u { color: var(--text-muted); }
+.damar-transcript .line.a { color: var(--text); }
+.damar-transcript .line.u { color: var(--text-muted); }
 
-.aether-hint {
+.damar-hint {
     margin: auto;
     text-align: center;
     color: var(--text-dim);
@@ -543,7 +543,7 @@ input[type="range"]::-webkit-slider-thumb {
     max-width: 320px;
 }
 
-.aether-composer {
+.damar-composer {
     margin-top: 18px;
 }
 
@@ -1504,7 +1504,7 @@ input[type="range"]::-webkit-slider-thumb {
 /* AI Activity radial (dashboard). */
 .ai-radial { display: flex; align-items: center; gap: 20px; }
 /* Wadah minibot di kartu AI. Isinya SVG dari lib/avatar.js — sama
-   persis dengan yang tampil di layar Aether, jadi beranda dan layar
+   persis dengan yang tampil di layar Damar, jadi beranda dan layar
    percakapan menampilkan entitas yang satu dan sama. */
 .ai-orb {
     position: relative;
@@ -1738,14 +1738,14 @@ input[type="range"]::-webkit-slider-thumb {
 .cmdk .opt.active, .cmdk .opt:hover { background: linear-gradient(90deg, rgba(124,140,255,0.18), rgba(124,140,255,0.05)); color: var(--text); }
 .cmdk .none { padding: 24px; text-align: center; color: var(--text-dim); font-size: 12.5px; }
 
-/* ---- Aether present (media yang ditampilkan Aether) ------------- */
-.aether-present {
+/* ---- Damar present (media yang ditampilkan Damar) ------------- */
+.damar-present {
     position: fixed; inset: 0; z-index: 400; display: none;
     align-items: center; justify-content: center;
     background: rgba(4, 8, 18, 0.72); backdrop-filter: blur(6px);
 }
-.aether-present.show { display: flex; }
-.aether-present .ap-card {
+.damar-present.show { display: flex; }
+.damar-present .ap-card {
     position: relative; max-width: min(920px, 92vw); max-height: 88vh;
     background: var(--panel, #0b1120);
     border: 1px solid rgba(53, 214, 240, 0.35);
@@ -1754,22 +1754,22 @@ input[type="range"]::-webkit-slider-thumb {
     animation: ap-in 0.28s cubic-bezier(0.2, 0.9, 0.25, 1.2);
 }
 @keyframes ap-in { from { transform: scale(0.92) translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
-.aether-present .ap-body { display: flex; align-items: center; justify-content: center; max-height: 76vh; }
-.aether-present .ap-body img,
-.aether-present .ap-body video { max-width: 100%; max-height: 76vh; display: block; object-fit: contain; }
-.aether-present .ap-body iframe { width: min(880px, 88vw); height: 72vh; border: 0; background: #fff; }
-.aether-present .ap-caption {
+.damar-present .ap-body { display: flex; align-items: center; justify-content: center; max-height: 76vh; }
+.damar-present .ap-body img,
+.damar-present .ap-body video { max-width: 100%; max-height: 76vh; display: block; object-fit: contain; }
+.damar-present .ap-body iframe { width: min(880px, 88vw); height: 72vh; border: 0; background: #fff; }
+.damar-present .ap-caption {
     padding: 10px 16px; font-size: 12.5px; color: var(--text-dim, #8aa0c0);
     border-top: 1px solid rgba(53, 214, 240, 0.15);
 }
-.aether-present .ap-close {
+.damar-present .ap-close {
     position: absolute; top: 10px; right: 10px; z-index: 2;
     width: 30px; height: 30px; border-radius: 50%; border: 1px solid rgba(53,214,240,0.4);
     background: rgba(6, 12, 24, 0.8); color: var(--neon-cyan, #35d6f0);
     cursor: pointer; font-size: 13px; line-height: 1;
 }
-/* ---- Aether Player (embedded YouTube/Vimeo/SoundCloud) ---------- */
-.aether-player {
+/* ---- Damar Player (embedded YouTube/Vimeo/SoundCloud) ---------- */
+.damar-player {
     position: fixed;
     right: 24px;
     bottom: 100px;
@@ -1785,14 +1785,14 @@ input[type="range"]::-webkit-slider-thumb {
     transform: translateY(20px);
     transition: opacity 0.3s var(--ease), transform 0.3s var(--ease);
 }
-.aether-player.show {
+.damar-player.show {
     opacity: 1;
     transform: translateY(0);
 }
-.aether-player.minimized .ap-frame {
+.damar-player.minimized .ap-frame {
     display: none;
 }
-.aether-player .ap-header {
+.damar-player .ap-header {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -1800,29 +1800,29 @@ input[type="range"]::-webkit-slider-thumb {
     background: rgba(8, 12, 24, 0.8);
     border-bottom: 1px solid rgba(53, 214, 240, 0.15);
 }
-.aether-player .ap-info {
+.damar-player .ap-info {
     flex: 1;
     min-width: 0;
 }
-.aether-player .ap-title {
+.damar-player .ap-title {
     font: 600 13px/1.2 var(--font-hud);
     color: var(--text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.aether-player .ap-channel {
+.damar-player .ap-channel {
     font-size: 11px;
     color: var(--text-dim);
     margin-top: 2px;
 }
-.aether-player .ap-controls {
+.damar-player .ap-controls {
     display: flex;
     gap: 6px;
 }
-.aether-player .ap-ext,
-.aether-player .ap-min,
-.aether-player .ap-close {
+.damar-player .ap-ext,
+.damar-player .ap-min,
+.damar-player .ap-close {
     width: 26px; height: 26px;
     display: grid; place-items: center;
     border-radius: 50%;
@@ -1834,36 +1834,36 @@ input[type="range"]::-webkit-slider-thumb {
     line-height: 1;
     transition: all var(--fast);
 }
-.aether-player .ap-ext:hover,
-.aether-player .ap-min:hover,
-.aether-player .ap-close:hover {
+.damar-player .ap-ext:hover,
+.damar-player .ap-min:hover,
+.damar-player .ap-close:hover {
     background: rgba(53, 214, 240, 0.18);
     border-color: rgba(53,214,240,0.5);
 }
-.aether-player .ap-frame {
+.damar-player .ap-frame {
     aspect-ratio: 16/9;
     background: #000;
 }
-.aether-player .ap-frame iframe {
+.damar-player .ap-frame iframe {
     display: block;
 }
 
 /* Layar besar: player lebih besar */
 @media (min-width: 2200px) {
-    .aether-player {
+    .damar-player {
         width: 560px;
         right: 32px;
         bottom: 120px;
     }
 }
 
-.aether-present .ap-close:hover { background: rgba(53, 214, 240, 0.18); }
+.damar-present .ap-close:hover { background: rgba(53, 214, 240, 0.18); }
 
 /* ---- Popup mengambang universal (foto/video/dokumen/teks) --------
    Menggantikan overlay fullscreen-blur: tiap media muncul sebagai
    JENDELA kecil yang bisa digeser, di posisi acak (dijauhkan dari
    area chat). Beberapa popup boleh hidup bersamaan. */
-.aether-popup {
+.damar-popup {
     position: fixed;
     z-index: 440;
     width: max-content;
@@ -1877,8 +1877,8 @@ input[type="range"]::-webkit-slider-thumb {
     transform: translateY(12px);
     transition: opacity .25s var(--ease), transform .25s var(--ease);
 }
-.aether-popup.show { opacity: 1; transform: none; }
-.aether-popup .pp-header {
+.damar-popup.show { opacity: 1; transform: none; }
+.damar-popup .pp-header {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     padding: 8px 8px 8px 14px;
     cursor: grab;
@@ -1886,11 +1886,11 @@ input[type="range"]::-webkit-slider-thumb {
     background: rgba(6, 10, 20, 0.6);
     user-select: none;
 }
-.aether-popup .pp-title {
+.damar-popup .pp-title {
     font-size: 12.5px; font-weight: 600; color: var(--text-dim, #8aa0c0);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.aether-popup .pp-close {
+.damar-popup .pp-close {
     flex: none;
     width: 26px; height: 26px; border-radius: 50%;
     border: 1px solid rgba(53, 214, 240, 0.3);
@@ -1898,22 +1898,22 @@ input[type="range"]::-webkit-slider-thumb {
     color: var(--neon-cyan, #35d6f0);
     cursor: pointer; font-size: 13px; line-height: 1;
 }
-.aether-popup .pp-close:hover { background: rgba(53, 214, 240, 0.18); }
-.aether-popup .pp-body {
+.damar-popup .pp-close:hover { background: rgba(53, 214, 240, 0.18); }
+.damar-popup .pp-body {
     max-height: 68vh; overflow: auto;
     display: flex; align-items: center; justify-content: center;
 }
-.aether-popup .pp-body img,
-.aether-popup .pp-body video {
+.damar-popup .pp-body img,
+.damar-popup .pp-body video {
     display: block; max-width: 100%; max-height: 62vh; object-fit: contain;
 }
-.aether-popup .pp-body iframe {
+.damar-popup .pp-body iframe {
     width: min(520px, 74vw); height: 58vh; border: 0; background: #fff;
 }
-.aether-popup .ap-text { padding: 14px 16px; }
-.aether-popup .ap-text h3 { margin: 0 0 8px; font-size: 14px; }
-.aether-popup .ap-text-body { font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
-.aether-popup .pp-caption {
+.damar-popup .ap-text { padding: 14px 16px; }
+.damar-popup .ap-text h3 { margin: 0 0 8px; font-size: 14px; }
+.damar-popup .ap-text-body { font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.damar-popup .pp-caption {
     padding: 8px 14px; font-size: 12px; color: var(--text-dim, #8aa0c0);
     border-top: 1px solid rgba(53, 214, 240, 0.12);
 }

@@ -1,5 +1,5 @@
 /**
- * WakeWordProvider — deteksi kata panggil ("Aether").
+ * WakeWordProvider — deteksi kata panggil ("Damar").
  *
  * Abstraction: engine bisa diganti tanpa menyentuh VoiceRuntime.
  * Default "local" = keyword-match deterministik (tanpa model, tanpa
@@ -9,14 +9,14 @@
  * transkrip singkat (hasil STT ringan) atau teks input terhadap wake
  * word. Untuk engine wake-word sungguhan (Porcupine/Vosk/openWakeWord),
  * tinggal implementasi antarmuka yang sama dan set
- * AETHER_VOICE_WAKE_PROVIDER=<nama>.
+ * DAMAR_VOICE_WAKE_PROVIDER=<nama>.
  */
 
 class WakeWordProvider {
 
     /** @param {string} wakeWord kata panggil (lowercase) */
-    constructor({ wakeWord = "aether" } = {}) {
-        this.wakeWord = String(wakeWord ?? "aether").toLowerCase();
+    constructor({ wakeWord = "damar" } = {}) {
+        this.wakeWord = String(wakeWord ?? "damar").toLowerCase();
         this.name = "local";
     }
 
@@ -50,7 +50,7 @@ class WakeWordProvider {
 }
 
 /** Factory: pilih provider dari konfigurasi. */
-function createWakeWordProvider({ provider = "local", wakeWord = "aether" } = {}) {
+function createWakeWordProvider({ provider = "local", wakeWord = "damar" } = {}) {
 
     // Saat ini hanya "local"; engine lain bisa ditambahkan di sini.
     if (provider !== "local") {

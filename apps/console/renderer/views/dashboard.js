@@ -4,14 +4,14 @@ import { icon } from "../lib/icons.js";
 import { esc, relativeTime, truncateText, toast } from "../lib/ui.js";
 import { createOrbitalGauge } from "../lib/viz/orbitalGauge.js";
 import { createTimeline } from "../lib/viz/timeline.js";
-import { aetherState } from "../lib/aetherState.js";
+import { damarState } from "../lib/damarState.js";
 import { agentBus } from "../lib/agentBus.js";
 import { showBubble, wireTaskBubbles, clearBubbles } from "../lib/homeBubbles.js";
 import { chat } from "./chat.js";
 import { createHologram } from "../lib/hologram.js";
 
 /**
- * Dashboard — "Mission Control" Aether.
+ * Dashboard — "Mission Control" Damar.
  *
  * Satu layar yang menjawab dalam 3 detik: apakah sistem sehat, apa yang
  * sedang dikerjakan AI, apa yang menunggu keputusanku, dan bagaimana
@@ -39,7 +39,7 @@ export const dashboard = {
     label: "Dashboard",
     icon: "dashboard",
     title: "Mission Control",
-    subtitle: "Kendali seluruh sistem Aether dalam satu layar.",
+    subtitle: "Kendali seluruh sistem Damar dalam satu layar.",
 
     render(root) {
 
@@ -60,12 +60,12 @@ export const dashboard = {
                 <div class="mc-core-holo" id="mc-orb"></div>
                 <div class="mc-core-title">
                     <span class="hello">${greeting()} —</span>
-                    <h1>Aether <span class="dot">.</span></h1>
+                    <h1>Damar <span class="dot">.</span></h1>
                     <span class="mc-core-sub" id="mc-time">--:--</span>
                 </div>
             </div>
 
-            <!-- Busur kiri: sistem → aliran → sumber daya → anak buah
+            <!-- Busur kiri: sistem → aliran → sumber daya → Pandawa
                  (satu kolom stack, tanpa orbit bawah = tanpa scroll) -->
             <div class="mc-col left">
                 <div class="mc-float">
@@ -79,7 +79,7 @@ export const dashboard = {
                     <div class="mc-flow">${flow(state.logs)}</div>
                 </div>
                 <div class="mc-float">
-                    <div class="mc-float-head">${icon("orb")} <span>Anak Buah</span>
+                    <div class="mc-float-head">${icon("orb")} <span>Pandawa</span>
                         <b class="push" id="mc-agents-count">—</b></div>
                     <div id="mc-agents"><div class="mc-skeleton">Memuat…</div></div>
                 </div>
@@ -100,7 +100,7 @@ export const dashboard = {
             <!-- Busur kanan: kognisi -->
             <div class="mc-col right">
                 <div class="mc-float">
-                    <div class="mc-float-head">${icon("chat")} <span>Aether</span>
+                    <div class="mc-float-head">${icon("chat")} <span>Damar</span>
                         <b class="push">siap</b></div>
                     <div id="mc-chat"></div>
                 </div>
@@ -120,13 +120,13 @@ export const dashboard = {
         clearInterval(clockTimer);
         clockTimer = setInterval(() => tickClock(root), 1000);
 
-        // Entitas Aether — pusat lingkungan (via bus).
+        // Entitas Damar — pusat lingkungan (via bus).
         const orbEl = root.querySelector("#mc-orb");
         if (orbEl) {
             orb?.destroy();
             orb = createHologram({ maxFps: 60 });
             orbEl.appendChild(orb.el);
-            aetherState.set(store.get().connected ? "idle" : "offline");
+            damarState.set(store.get().connected ? "idle" : "offline");
         }
 
         // Visualisasi kanonik: gauge orbital + timeline.
@@ -231,7 +231,7 @@ async function systemStatus(o) {
 
 function statusRows(o) {
     const rows = [
-        { name: "Aether Core", on: true },
+        { name: "Damar Core", on: true },
         { name: "Memory Engine", on: true }
     ];
     for (const it of o.integrations.items) {
@@ -302,7 +302,7 @@ function disconnected(state) {
             <div class="empty">
                 ${icon("plug")}
                 <div style="font-size:14px;color:var(--text)">
-                    ${state.connecting ? "Menghubungkan ke daemon…" : "Belum terhubung ke daemon Aether"}
+                    ${state.connecting ? "Menghubungkan ke daemon…" : "Belum terhubung ke daemon Damar"}
                 </div>
                 <div>${state.lastError ? esc(state.lastError) : "Jalankan daemon lalu tekan Hubungkan di titlebar."}</div>
             </div>
@@ -317,16 +317,16 @@ async function enrichAgents(root) {
         const r = await api.agents();
         const list = r.agents ?? r.items ?? (Array.isArray(r) ? r : []);
         root.querySelector("#mc-agents-count").textContent =
-            list.length ? `${list.length} anak buah` : "belum ada";
+            list.length ? `${list.length} Pandawa` : "belum ada";
 
-        // Anak buah Aether: mereka mengorbit entitas. Agent yang belum
+        // Pandawa — spesialis Damar: mereka mengorbit entitas. Agent yang belum
         // dikonfigurasi/integrasi jujur ditandai "siaga" — bukan pura-pura
         // online. Status dari data nyata saja.
         host.innerHTML = list.length === 0
             ? `<div class="mc-skeleton">Belum ada agent terdaftar — tambahkan dari Studio.</div>`
             : list.map(a => {
                 const name = a.name ?? a.label ?? a.id ?? "Agent";
-                const role = a.role ?? a.kind ?? "anak buah";
+                const role = a.role ?? a.kind ?? "Pandawa";
                 const configured = !!(a.model || a.tools?.length || a.capabilities?.length);
                 const online = configured && (a.online ?? (a.status && a.status !== "offline"));
                 const status = online ? "aktif" : "siaga";
@@ -344,13 +344,13 @@ async function enrichAgents(root) {
             }).join("");
     }
     catch {
-        host.innerHTML = `<div class="mc-skeleton">Daftar anak buah tak tersedia.</div>`;
+        host.innerHTML = `<div class="mc-skeleton">Daftar Pandawa tak tersedia.</div>`;
         root.querySelector("#mc-agents-count").textContent = "—";
     }
 }
 
 async function enrichProposals(root) {
-    // Kebijakan baru: Aether mengatur memorinya sendiri — tidak ada
+    // Kebijakan baru: Damar mengatur memorinya sendiri — tidak ada
     // gerbang persetujuan. Panel ini kini menampilkan aktivitas memori
     // terbaru (APA yang sudah diingat), bukan apa yang menunggu.
     const host = root.querySelector("#mc-proposals");
@@ -365,7 +365,7 @@ async function enrichProposals(root) {
 
         // Sebaran per jenis dulu, baru isinya. Daftar potongan teks
         // tanpa ringkasan tidak menjawab pertanyaan yang sebenarnya
-        // ditanyakan panel ini: "Aether ini sudah tahu apa saja?"
+        // ditanyakan panel ini: "Damar ini sudah tahu apa saja?"
         const perJenis = {};
         for (const m of items) {
             const jenis = m.metadata?.memoryType ?? m.type ?? "lain";

@@ -3,11 +3,11 @@ const AIStreamChunk = require("../../models/AIStreamChunk");
 const AIToolCall = require("../../tools/AIToolCall");
 
 /**
- * Penerjemah antara format pesan Aether (gaya OpenAI) dan format
+ * Penerjemah antara format pesan Damar (gaya OpenAI) dan format
  * node-llama-cpp (ChatHistoryItem + ChatModelFunctions).
  *
  * Bagian tersulit: memasangkan setiap panggilan tool asisten dengan
- * HASILNYA. Aether menyimpan keduanya sebagai pesan terpisah
+ * HASILNYA. Damar menyimpan keduanya sebagai pesan terpisah
  * (assistant.tool_calls lalu role:"tool"), sedangkan node-llama-cpp
  * menuntut panggilan + hasil menyatu dalam satu item response model.
  */
@@ -30,7 +30,7 @@ class LlamaCppMapper {
     }
 
     /**
-     * messages Aether → ChatHistoryItem[] node-llama-cpp.
+     * messages Damar → ChatHistoryItem[] node-llama-cpp.
      *
      * Pesan role:"tool" TIDAK menjadi item sendiri — ia diserap ke item
      * model milik panggilan tool yang mendahuluinya.
@@ -81,7 +81,7 @@ class LlamaCppMapper {
         return null;                                         // hasil belum ada — model belum dijalankan
     }
 
-    /** tools Aether → ChatModelFunctions node-llama-cpp. */
+    /** tools Damar → ChatModelFunctions node-llama-cpp. */
     toFunctions(tools = []) {
         if (!Array.isArray(tools) || !tools.length) return undefined;
         const fns = {};

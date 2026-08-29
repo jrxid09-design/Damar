@@ -45,7 +45,7 @@ const INSTRUMENTS = [
     },
     {
         id: "knowledge", label: "Knowledge", icon: "brain",
-        description: "Dokumen & pengetahuan yang sudah dipelajari Aether.",
+        description: "Dokumen & pengetahuan yang sudah dipelajari Damar.",
         capabilities: ["document_reader", "data_analysis"],
         tools: ["memory_documents", "open_document"]
     },

@@ -1,13 +1,13 @@
 # Aktifkan share SMB folder NAS agar bisa diakses dari iPhone/perangkat lain.
 # JALANKAN SEBAGAI ADMINISTRATOR (klik kanan > Run with PowerShell as Admin),
-# atau: powershell -ExecutionPolicy Bypass -File share-smb.ps1 -Pool "D:\AetherNAS"
+# atau: powershell -ExecutionPolicy Bypass -File share-smb.ps1 -Pool "D:\DamarNAS"
 #
 # Setelah selesai, di iPhone: app Files > (...) > Connect to Server >
-#   smb://<IP-PC>/AetherNAS  > login akun Windows-mu.
+#   smb://<IP-PC>/DamarNAS  > login akun Windows-mu.
 
 param(
-    [string]$Pool = "D:\AetherNAS",
-    [string]$ShareName = "AetherNAS"
+    [string]$Pool = "D:\DamarNAS",
+    [string]$ShareName = "DamarNAS"
 )
 
 if (-not (Test-Path $Pool)) {

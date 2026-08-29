@@ -16,12 +16,12 @@ export const nas = {
     label: "NAS",
     icon: "server",
     title: "NAS",
-    subtitle: "DiskStation Aether — penyimpanan, aplikasi, dan kesehatan disk.",
+    subtitle: "DiskStation Damar — penyimpanan, aplikasi, dan kesehatan disk.",
 
     render(root) {
         root.innerHTML = `
             <div class="view-head">
-                <div><h1>NAS</h1><p>DiskStation Aether — penyimpanan, aplikasi, dan kesehatan disk.</p></div>
+                <div><h1>NAS</h1><p>DiskStation Damar — penyimpanan, aplikasi, dan kesehatan disk.</p></div>
                 <div class="actions"><button class="btn ghost sm" id="nas-refresh">${icon("refresh")} Muat ulang</button></div>
             </div>
             <div id="nas-body" class="stack"></div>`;
@@ -185,7 +185,7 @@ function raidPanel(pools) {
 
 function backupPanel(data, pool) {
     const list = data?.jobs ?? [];
-    const defDest = pool ? `${pool}\\backup` : "D:\\AetherNAS\\backup";
+    const defDest = pool ? `${pool}\\backup` : "D:\\DamarNAS\\backup";
     return `
         <div class="panel">
             <div class="panel-head"><h2>${icon("refresh")} Backup Terjadwal</h2>
@@ -240,7 +240,7 @@ function notifyPanel(cfg) {
 
 function smbPanel(s, pool) {
     const sh = s.smb || {};
-    const cmd = `powershell -ExecutionPolicy Bypass -File deploy\\nas\\share-smb.ps1 -Pool "${pool || "D:\\AetherNAS"}"`;
+    const cmd = `powershell -ExecutionPolicy Bypass -File deploy\\nas\\share-smb.ps1 -Pool "${pool || "D:\\DamarNAS"}"`;
     return `
         <div class="panel">
             <div class="panel-head"><h2>${icon("folder")} Akses File (SMB) — iPhone &amp; perangkat lain</h2>
@@ -254,7 +254,7 @@ function smbPanel(s, pool) {
             <div class="small">
                 <div style="font-weight:600;margin-bottom:4px">${icon("chat")} Dari iPhone (tanpa app tambahan)</div>
                 <div class="dim">App <strong>Files</strong> → titik-tiga (…) → <em>Connect to Server</em> →
-                    <span class="mono">smb://${esc(lastIp)}/${esc(sh.name || "AetherNAS")}</span> → login akun Windows.</div>
+                    <span class="mono">smb://${esc(lastIp)}/${esc(sh.name || "DamarNAS")}</span> → login akun Windows.</div>
             </div>
         </div>`;
 }
@@ -338,7 +338,7 @@ function wire(root, s) {
         const mount = root.querySelector("#nas-pool-vol").value;
         if (!mount) return toast("Pilih disk dulu.", "warn");
         const sep = mount.endsWith(":") ? "\\" : (mount.includes("\\") ? "\\" : "/");
-        const pool = `${mount}${sep}AetherNAS`;
+        const pool = `${mount}${sep}DamarNAS`;
         try { await api.nasSetConfig(pool); toast(`Pool NAS: ${pool}`, "ok"); draw(root); }
         catch (e) { toast(e.message, "danger"); }
     });

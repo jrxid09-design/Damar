@@ -8,7 +8,7 @@ const types = require("./types");
 const stm = require("../stm/WorkingSet");
 
 /**
- * MemoryEngine — pintu tunggal Memory Engine Aether (Aether Core).
+ * MemoryEngine — pintu tunggal Memory Engine Damar (Damar Core).
  *
  * Subsistem 1 (Memory Core): facade ADITIF di atas MemoryService yang
  * sudah ada. Menyatukan akses + membawa konteks penulis (writer/role/
@@ -20,14 +20,14 @@ const stm = require("../stm/WorkingSet");
  *
  * Aturan kepemilikan: SEMUA penulis (Planner, Runtime, Skill,
  * worker agent) kelak menulis lewat facade ini — memori milik
- * Aether Core, bukan runtime lain.
+ * Damar Core, bukan runtime lain.
  */
 class MemoryEngine {
 
     /** Bungkus konteks pemanggil (siapa yang menulis/membaca). */
     // B-FIX: peran penulis memori bukan otoritas eksekusi — default
     // least-privilege; pemanggil internal menyatakan perannya sendiri.
-    context({ writer = "aether", role = "runtime", scope = null } = {}) {
+    context({ writer = "damar", role = "runtime", scope = null } = {}) {
         return { writer, role, scope };
     }
 
@@ -70,7 +70,7 @@ class MemoryEngine {
 
     // ---- Knowledge Graph (subsistem 4) ---------------------------
     // Sisi bi-temporal. link/unlink kelak dapat dialihkan ke PROPOSAL
-    // untuk penulis non-Aether lewat Governance (subsistem 7).
+    // untuk penulis non-Damar lewat Governance (subsistem 7).
 
     get edges() { return edges; }
     link(edge) { return edges.link(edge); }
@@ -88,7 +88,7 @@ class MemoryEngine {
     consolidate(scope, opts = {}) { return consolidator.consolidate(scope, { engine: this, ...opts }); }
 
     // ---- Tulis (langsung commit) ---------------------------------
-    // Kebijakan pemilik: Aether diberi leluasa penuh mengatur memorinya
+    // Kebijakan pemilik: Damar diberi leluasa penuh mengatur memorinya
     // sendiri — SEMUA tipe langsung commit, tanpa proposal/persetujuan.
     // Governor tetap menyediakan API proposal untuk pengguna manual,
     // tapi jalur tulis AI tidak lagi melewatinya.
@@ -99,7 +99,7 @@ class MemoryEngine {
         const payload = {
             content,
             type: spec.storeType,
-            source: ctx.writer || "aether",
+            source: ctx.writer || "damar",
             importance: importance ?? (spec.sensitive ? 0.8 : 0.6),
             sensitive: sensitive ?? spec.sensitive,
             entities,

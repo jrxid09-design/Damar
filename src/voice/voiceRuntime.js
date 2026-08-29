@@ -11,7 +11,7 @@
  *   - Semua kegagalan (mic rusak, STT mati, TTS mati, wake engine mati)
  *     TIDAK BOLEH menjatuhkan daemon — graceful degradation.
  *
- * Default AETHER_VOICE_ENABLED=false: voice runtime pasif, daemon normal.
+ * Default DAMAR_VOICE_ENABLED=false: voice runtime pasif, daemon normal.
  */
 const { EventEmitter } = require("node:events");
 
@@ -77,11 +77,11 @@ class VoiceRuntime extends EventEmitter {
     _inputBackend() {
         // Backend audio dari env; default "cli" hanya bila diaktifkan
         // secara eksplisit, selain itu "none" (graceful).
-        return process.env.AETHER_VOICE_AUDIO_BACKEND === "cli" ? "cli" : "none";
+        return process.env.DAMAR_VOICE_AUDIO_BACKEND === "cli" ? "cli" : "none";
     }
 
     _outputBackend() {
-        return process.env.AETHER_VOICE_AUDIO_BACKEND === "cli" ? "cli" : "none";
+        return process.env.DAMAR_VOICE_AUDIO_BACKEND === "cli" ? "cli" : "none";
     }
 
     // ---- Lifecycle -------------------------------------------------
@@ -98,7 +98,7 @@ class VoiceRuntime extends EventEmitter {
         }
 
         if (!enabled) {
-            telemetry.info("[voice] nonaktif (AETHER_VOICE_ENABLED=" +
+            telemetry.info("[voice] nonaktif (DAMAR_VOICE_ENABLED=" +
                 this.cfg.enabledRaw + ").");
             return this;
         }
@@ -257,7 +257,7 @@ class VoiceRuntime extends EventEmitter {
     /**
      * Siklus WAKE: utterance hasil burst → STT → cek wake word.
      * Bila terdeteksi: ack (dibicarakan dulu, agar capture berikutnya tak
-     * menelan suara Aether sendiri) → lanjut siklus LISTEN perintah.
+     * menelan suara Damar sendiri) → lanjut siklus LISTEN perintah.
      */
     async _wakeCycle() {
 
@@ -287,7 +287,7 @@ class VoiceRuntime extends EventEmitter {
             telemetry.publish("voice:wake", { source: "wakeword", text });
 
             // Ack dibicarakan DULU (blocking) supaya mic berikutnya tidak
-            // merekam suara Aether sendiri.
+            // merekam suara Damar sendiri.
             await this.speak(this.cfg.acknowledgement);
 
             // Lalu buka sesi dengar untuk perintah.

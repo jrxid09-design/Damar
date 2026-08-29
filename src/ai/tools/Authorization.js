@@ -36,9 +36,9 @@ function rankOf(role) {
 /**
  * C-F/CANONICAL — id kapabilitas kanonik.
  *
- * Nama yang dijalankan model ("aetherSkills__wa_send",
+ * Nama yang dijalankan model ("damarSkills__wa_send",
  * "system__time__currentTime", "mcp__srv__tool") diuraikan ke id
- * registry intinya ("aetherSkills.wa_send", dst.). Nama native
+ * registry intinya ("damarSkills.wa_send", dst.). Nama native
  * tetap apa adanya. INILAH bentuk pembanding untuk OTORISASI:
  * pencocokan tail dihapus dari jalur keputusan (temuan tail-
  * collision: 'evil__system_health' tak boleh masuk grant berisi
@@ -278,7 +278,7 @@ function resolveDelegator(initiatorExec = null, internalOrigin = false, provenan
  * HTTP/MCP/model args, dan hanya bisa diciptakan modul ini. String
  * `source` adalah label telemetri semata — TIDAK pernah bukti trust.
  */
-const INTERNAL_GRANT_TOKEN = Symbol("aether.internalGrant");
+const INTERNAL_GRANT_TOKEN = Symbol("damar.internalGrant");
 
 /** Apakah sebuah delegasi berupa grant otonom kanonik. */
 function isCanonicalInternalGrant(exec) {

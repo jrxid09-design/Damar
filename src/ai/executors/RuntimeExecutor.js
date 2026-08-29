@@ -190,7 +190,7 @@ class RuntimeExecutor {
                 repeatCount++;
                 if (repeatCount >= maxRepeat) {
                     throw new Error(
-                        "Aether terdeteksi memanggil tool yang sama berulang " +
+                        "Damar terdeteksi memanggil tool yang sama berulang " +
                         "tanpa hasil baru, jadi dihentikan agar tidak loop liar. " +
                         "Perintah terakhir: " + fingerprint
                     );
@@ -442,7 +442,7 @@ class RuntimeExecutor {
     /** Batas waktu SATU panggilan tool — hang tak boleh menggantung giliran. */
     withToolTimeout(promise, name) {
 
-        const ms = Number(process.env.AETHER_TOOL_TIMEOUT_MS) || 120_000;
+        const ms = Number(process.env.DAMAR_TOOL_TIMEOUT_MS) || 120_000;
 
         if (!(ms > 0)) return promise;
 
@@ -568,7 +568,7 @@ class RuntimeExecutor {
 
                 const profile = Budget.profileFor(
                     request.exec?.contextTokens ||
-                    Number(process.env.AETHER_MODEL_CONTEXT_TOKENS) ||
+                    Number(process.env.DAMAR_MODEL_CONTEXT_TOKENS) ||
                     32768
                 );
 
@@ -713,7 +713,7 @@ class RuntimeExecutor {
         }
 
         // ---- Kompaksi hasil raksasa --------------------------------
-        const MAX_CHARS = Number(process.env.AETHER_OBSERVATION_MAX_CHARS) || 4000;
+        const MAX_CHARS = Number(process.env.DAMAR_OBSERVATION_MAX_CHARS) || 4000;
 
         let content = raw;
 
@@ -1277,16 +1277,16 @@ class RuntimeExecutor {
             text = text.replace(/,\s*([}\]])/g, "$1");
             try {
                 const parsed = JSON.parse(text);
-                console.error("[aether] parseArguments: argumen tool diperbaiki otomatis (JSON rusak).");
+                console.error("[damar] parseArguments: argumen tool diperbaiki otomatis (JSON rusak).");
                 return parsed;
             } catch (err2) {
                 // Coba lagi: newline/tab mentah di dalam string literal.
                 try {
                     const parsed = JSON.parse(escCtrl(text));
-                    console.error("[aether] parseArguments: argumen tool diperbaiki (escape kontrol).");
+                    console.error("[damar] parseArguments: argumen tool diperbaiki (escape kontrol).");
                     return parsed;
                 } catch (err3) {
-                    console.error("[aether] parseArguments GAGAL total:", String(err3).slice(0, 200), "| mentah:", String(args).slice(0, 300));
+                    console.error("[damar] parseArguments GAGAL total:", String(err3).slice(0, 200), "| mentah:", String(args).slice(0, 300));
                     return {};
                 }
             }

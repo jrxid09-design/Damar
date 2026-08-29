@@ -2,10 +2,10 @@ const { AITool } = require("../ai/tools");
 const kali = require("./bridge");
 
 /**
- * Tool Kali Linux — Aether menguasai arsenal Kali lewat satu jembatan.
+ * Tool Kali Linux — Damar menguasai arsenal Kali lewat satu jembatan.
  *
  * Bukan 600 pembungkus: nmap, sqlmap, hydra, metasploit, dan sisanya
- * adalah program baris-perintah. Yang Aether butuhkan adalah cara ANDAL
+ * adalah program baris-perintah. Yang Damar butuhkan adalah cara ANDAL
  * menjalankannya di dalam Kali dan tahu mana yang terpasang — sisanya
  * penguasaan sintaks tiap tool, yang ada di doktrin & pengetahuan model.
  *

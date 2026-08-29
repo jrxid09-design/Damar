@@ -1,8 +1,8 @@
 {
-  "name": "aether-console",
+  "name": "damar-console",
   "version": "0.1.0",
   "private": true,
-  "description": "Aether Console — panel kendali desktop untuk daemon Aether, AI lokal, dan agent terintegrasi.",
+  "description": "Damar Console — panel kendali desktop untuk daemon Damar, AI lokal, dan agent terintegrasi.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",

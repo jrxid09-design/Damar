@@ -4,7 +4,7 @@ const timestamp = () => {
 
 /**
  * Setiap log juga diteruskan ke telemetryService supaya muncul
- * realtime di panel Logs milik Aether Console. Require-nya lazy
+ * realtime di panel Logs milik Damar Console. Require-nya lazy
  * agar tidak terjadi siklus dependensi saat boot.
  */
 const forward = (level, message) => {

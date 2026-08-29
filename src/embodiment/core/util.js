@@ -2,7 +2,7 @@
  * Utilitas dasar lapisan embodiment (B§1).
  *
  * Lapisan ini SADAR DIRI SECARA JASMANI, bukan secara kognitif: ia hanya
- * mencatat fakta observasi tentang "tubuh" komputasi Aether. Semua nilai
+ * mencatat fakta observasi tentang "tubuh" komputasi Damar. Semua nilai
  * yang keluar dari modul ini dibekukan (frozen) agar tidak ada jalur tulis
  * diam-diam dari luar — model bahasa TIDAK PERNAH bisa memutasi state
  * otoritatif tubuh lewat referensi objek.

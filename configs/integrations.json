@@ -1,8 +1,8 @@
 {
   "$comment": [
-    "Konfigurasi sambungan Aether ke sistem luar.",
+    "Konfigurasi sambungan Damar ke sistem luar.",
     "Setiap entri bisa ditimpa lewat environment variable:",
-    "  AETHER_<ID>_URL, AETHER_<ID>_KEY, AETHER_<ID>_ENABLED"
+    "  DAMAR_<ID>_URL, DAMAR_<ID>_KEY, DAMAR_<ID>_ENABLED"
   ],
   "pollInterval": 15000,
   "integrations": []

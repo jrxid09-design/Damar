@@ -5,7 +5,7 @@ const face = require("./faceService");
 const deviceService = require("./deviceService");
 
 /**
- * Tool "orang & wajah" untuk Aether:
+ * Tool "orang & wajah" untuk Damar:
  *   - find_people / search_photos → galeri Immich (siapa & foto apa)
  *   - identify_face → kenali siapa di snapshot kamera (CCTV)
  */

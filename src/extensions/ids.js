@@ -18,8 +18,8 @@
 
 const { fail, REASONS } = require("./errors");
 
-const EXT_BRAND = Symbol("aether.extensions.extensionIdBrand");
-const PROJ_BRAND = Symbol("aether.extensions.projectIdBrand");
+const EXT_BRAND = Symbol("damar.extensions.extensionIdBrand");
+const PROJ_BRAND = Symbol("damar.extensions.projectIdBrand");
 
 const ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/;
 const MIN_LENGTH = 3;

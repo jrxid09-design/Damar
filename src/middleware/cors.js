@@ -1,5 +1,5 @@
 /**
- * CORS untuk Aether Console.
+ * CORS untuk Damar Console.
  *
  * Renderer Electron memuat berkas lewat file://, sehingga
  * Origin-nya "null" — tidak bisa dicocokkan dengan allowlist
@@ -20,17 +20,19 @@ module.exports = (req, res, next) => {
         "GET,POST,PUT,PATCH,DELETE,OPTIONS"
     );
 
-    // X-Aether-Channel WAJIB terdaftar di sini.
+    // X-Damar-Channel WAJIB terdaftar di sini.
     //
     // Header kustom apa pun memicu preflight, dan preflight yang tidak
     // mendaftarkannya membuat browser MEMBATALKAN permintaannya — bukan
     // sekadar membuang headernya. Karena Console menyertakan header ini
-    // di SETIAP panggilan (supaya Aether tahu percakapan berlangsung di
+    // di SETIAP panggilan (supaya Damar tahu percakapan berlangsung di
     // kanal mana), melewatkannya di sini akan mematikan seluruh Console
     // sekaligus, bukan satu fitur saja.
+    // X-Aether-Channel = ejaan LAMA, DEPRECATED; tetap didaftarkan
+    // supaya klien pra-rename tidak dibatalkan oleh preflight.
     res.setHeader(
         "Access-Control-Allow-Headers",
-        "Content-Type,Authorization,X-Aether-Channel"
+        "Content-Type,Authorization,X-Damar-Channel,X-Aether-Channel"
     );
 
     res.setHeader("Access-Control-Max-Age", "86400");

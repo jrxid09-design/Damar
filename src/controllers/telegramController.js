@@ -37,7 +37,7 @@ class TelegramController {
 
             const result = await telegram.send(
                 target,
-                "Aether terhubung ke Telegram. ✅"
+                "Damar terhubung ke Telegram. ✅"
             );
 
             return response.success(res, "Pesan uji terkirim", result);

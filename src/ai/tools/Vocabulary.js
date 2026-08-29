@@ -68,7 +68,7 @@ const TRIGGER_ACTION = {
 
 /**
  * Alias Inggris per domain — mencerminkan konvensi penamaan tool
- * Aether (potongan nama seperti "readFile", "currentTime",
+ * Damar (potongan nama seperti "readFile", "currentTime",
  * "see_camera"; deskripsi seperti "weather for a city").
  */
 const ALIAS = {

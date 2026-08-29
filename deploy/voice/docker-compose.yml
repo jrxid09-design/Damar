@@ -1,4 +1,4 @@
-# Suara Aether — TTS neural (Kokoro) & STT (faster-whisper).
+# Suara Damar — TTS neural (Kokoro) & STT (faster-whisper).
 #
 # Keduanya berbicara dialek OpenAI, format yang sudah dipakai
 # voiceService: POST /v1/audio/speech dan /v1/audio/transcriptions.
@@ -7,13 +7,13 @@
 #   docker compose -f deploy/voice/docker-compose.yml up -d
 #
 # Nilai path diambil dari deploy/voice/.env yang DIBUAT otomatis
-# oleh Aether dari configs/nas.json (disk pilihanmu), sama seperti
+# oleh Damar dari configs/nas.json (disk pilihanmu), sama seperti
 # stack Immich. PC ini tanpa GPU diskrit, jadi keduanya varian CPU.
-name: aether-voice
+name: damar-voice
 
 services:
   kokoro:
-    container_name: aether_kokoro
+    container_name: damar_kokoro
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
     ports:
       - '8880:8880'
@@ -24,7 +24,7 @@ services:
   # berbahasa Indonesia, jadi kalimat Indonesia terdengar keinggris-
   # inggrisan. Piper punya model id_ID yang mengucapkannya benar.
   piper:
-    container_name: aether_piper
+    container_name: damar_piper
     image: ghcr.io/matatonic/openedai-speech-min:latest
     ports:
       - '8881:8000'
@@ -37,7 +37,7 @@ services:
     restart: always
 
   whisper:
-    container_name: aether_whisper
+    container_name: damar_whisper
     image: fedirz/faster-whisper-server:latest-cpu
     ports:
       - '8000:8000'

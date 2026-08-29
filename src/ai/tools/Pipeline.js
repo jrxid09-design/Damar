@@ -32,7 +32,7 @@ const BACKBONE_TAILS = [
 
 function activeWindow(contextTokens) {
     return contextTokens
-        ?? (Number(process.env.AETHER_MODEL_CONTEXT_TOKENS) || undefined);
+        ?? (Number(process.env.DAMAR_MODEL_CONTEXT_TOKENS) || undefined);
 }
 
 function envInt(name, fallback) {
@@ -132,8 +132,8 @@ function select({
     // Kebijakan hybrid (H3 final): segmen stabil MENYUSUT mengikuti
     // anggaran; slot dinamis selalu tersedia minimal 25% (>=2).
     const effProfile = Budget.profileFor(contextTokens
-        ?? (Number(process.env.AETHER_MODEL_CONTEXT_TOKENS) || undefined));
-    const effMax = maxTools ?? envInt("AETHER_TOOL_BUDGET", undefined)
+        ?? (Number(process.env.DAMAR_MODEL_CONTEXT_TOKENS) || undefined));
+    const effMax = maxTools ?? envInt("DAMAR_TOOL_BUDGET", undefined)
         ?? effProfile.maxTools;
     const minDynamic = Math.max(2, Math.ceil(effMax * 0.25));
     const stableTake = Math.max(
@@ -192,8 +192,8 @@ function select({
         reservedCount: reservedSeg.length,
         overrides: {
             contextTokens: contextTokens
-                ?? (Number(process.env.AETHER_MODEL_CONTEXT_TOKENS) || undefined),
-            maxTools: maxTools ?? envInt("AETHER_TOOL_BUDGET", undefined)
+                ?? (Number(process.env.DAMAR_MODEL_CONTEXT_TOKENS) || undefined),
+            maxTools: maxTools ?? envInt("DAMAR_TOOL_BUDGET", undefined)
         }
     });
 

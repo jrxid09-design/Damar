@@ -1,5 +1,5 @@
 /* =========================================================
-   Aether OS — lapisan CYBERPUNK + HOLOGRAM JARVIS
+   Damar OS — lapisan CYBERPUNK + HOLOGRAM JARVIS
    Dimuat paling akhir: menimpa token & chrome shell menjadi
    antarmuka imersif "AI OS" (JARVIS). View lama tetap jalan &
    ikut bertema lewat override variabel.
@@ -374,13 +374,13 @@ body::before {
 @keyframes floaty { 0%,100%{ transform: translateY(0);} 50%{ transform: translateY(-4px);} }
 
 /* =========================================================
-   AETHER CHAT PANEL — percakapan di sisi kanan, hologram tetap
+   DAMAR CHAT PANEL — percakapan di sisi kanan, hologram tetap
    terlihat di kiri. Bukan overlay fullscreen yang menutupi.
    ========================================================= */
 
 /* =========================================================
-   AETHER LIVE HOLOGRAM — panel chat mengambang
-   (definisi terkini ada di blok AETHER v3 di bawah)
+   DAMAR LIVE HOLOGRAM — panel chat mengambang
+   (definisi terkini ada di blok DAMAR v3 di bawah)
    ========================================================= */
 
 /* Area percakapan — gelembung mengambang tanpa wadah panel. */
@@ -403,7 +403,7 @@ body::before {
     width: 100%;
 }
 .ae-chat-msg.u { justify-content: flex-end; padding-left: 15%; }
-/* Gelembung Aether tidak mepet tepi kiri panel: ia menjorok masuk,
+/* Gelembung Damar tidak mepet tepi kiri panel: ia menjorok masuk,
    dan ruang di kirinya menampung node cahaya di tepi gelembung. */
 .ae-chat-msg.a { justify-content: flex-start; padding-left: 14px; padding-right: 10%; }
 
@@ -429,7 +429,7 @@ body::before {
     box-shadow: inset 0 0 24px rgba(0, 223, 255, 0.04);
     position: relative;
 }
-/* Node cahaya kecil di tepi gelembung Aether — jejak koneksi. */
+/* Node cahaya kecil di tepi gelembung Damar — jejak koneksi. */
 .ae-chat-msg.a .bub::before {
     content: "";
     position: absolute; left: -4px; top: 14px;
@@ -442,7 +442,7 @@ body::before {
 
 
 /* =========================================================
-   AETHER v3 — BUBBLE MURNI + SWARM ORB
+   DAMAR v3 — BUBBLE MURNI + SWARM ORB
    - Tidak ada ring/cincin/arc dekoratif di sekitar orb.
    - Chat = hanya bubble di kanan; orb utama bergeser ke kiri.
    - Footer statusbar dihapus (sudah terwakili chips di atas
@@ -502,7 +502,7 @@ body.chat-open .holo-canvas {
 }
 
 /* Panel ini menampung paling banyak 3 gelembung (dibatasi di
-   aetherOverlay.js), jadi tumpukannya dijangkarkan ke BAWAH: yang
+   damarOverlay.js), jadi tumpukannya dijangkarkan ke BAWAH: yang
    terbaru selalu paling dekat kotak ketik. Tanpa tombol tutup —
    sesi memudar sendiri setelah satu menit senyap. */
 .ae-chat-panel .ae-chat-convo {
@@ -575,7 +575,7 @@ body.chat-open .holo-canvas {
 }
 
 /* Panel bergaya HUD: sudut bersudut + garis cahaya. */
-.card, .panel, .aether-present .ap-card {
+.card, .panel, .damar-present .ap-card {
     position: relative;
     border: 1px solid var(--ae-line-strong);
     background: var(--ae-surface-glass);

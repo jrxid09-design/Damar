@@ -116,7 +116,7 @@ class MissionEngine {
      * Transisi status misi — satu-satunya jalur mengubah status.
      * Transisi ilegal melempar error + event (dicatat, bukan ditelan §31).
      */
-    async transition(id, next, { reason = null, actor = "aether" } = {}) {
+    async transition(id, next, { reason = null, actor = "damar" } = {}) {
 
         await initialize();
 
@@ -172,7 +172,7 @@ class MissionEngine {
     /**
      * JALANKAN misi: delegasi penuh ke orchestrator yang ada, dengan
      * konteks project (fase → afinitas agent) disuntik sebagai
-     * constraint planner. Aether bebas menugaskan siapa pun; tabel
+     * constraint planner. Damar bebas menugaskan siapa pun; tabel
      * fase hanya memandu preferensi, bukan membatasi.
      */
     async run(id, { actor = "user", exec = null } = {}) {
@@ -467,7 +467,7 @@ class MissionEngine {
 
         await activity.record({
             type: "tool.completed", projectId: mission.projectId, missionId: id,
-            agentId: "forge", tool: "opencode_run",
+            agentId: "nakula", tool: "opencode_run",
             payload: { ok: result.ok, resume: true }
         });
 

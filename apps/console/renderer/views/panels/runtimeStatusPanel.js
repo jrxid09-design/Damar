@@ -4,7 +4,7 @@ import { esc, pill, toast, duration } from "../../lib/ui.js";
 
 /**
  * Panel Runtime Status — kartu tiap runtime inti (Hermes/OpenClaw/Docker/
- * Ollama/Aether) dari Runtime API (REST, poll). Terasa seperti service
+ * Ollama/Damar) dari Runtime API (REST, poll). Terasa seperti service
  * manager. Tanpa detail implementasi ke pengguna (label ramah + metrik).
  *
  * onOpenTerminal(purpose): dipanggil saat pengguna klik "Terminal" pada

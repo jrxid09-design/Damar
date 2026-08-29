@@ -393,7 +393,7 @@ if (request.tools === undefined) {
  * diiriskan dengan universe berizin (Authorization.disclosureFilter)
  * sebelum masuk anggaran.
  *
- * AETHER_TOOL_PIPELINE=legacy hanya mengganti ALGORITMA seleksi;
+ * DAMAR_TOOL_PIPELINE=legacy hanya mengganti ALGORITMA seleksi;
  * gerbang otorisasi yang sama tetap dijalankan (invariant H1).
  */
 resolveTools(request) {
@@ -432,13 +432,13 @@ resolveTools(request) {
         return request.tools.filter(t => allowedNames.has(t.name));
     }
 
-    const legacy = process.env.AETHER_TOOL_PIPELINE === "legacy";
+    const legacy = process.env.DAMAR_TOOL_PIPELINE === "legacy";
 
     if (legacy) {
 
         const budget = Number(
             this.options.toolBudget ??
-            process.env.AETHER_TOOL_BUDGET ??
+            process.env.DAMAR_TOOL_BUDGET ??
             32
         );
 

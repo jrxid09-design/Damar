@@ -55,7 +55,7 @@ const BODY_RELATIONS = Object.freeze([
 
 /**
  * Observation-only vocabulary. Presence of a name here describes what a
- * device ADVERTISES — it never means Aether may use it.
+ * device ADVERTISES — it never means Damar may use it.
  */
 const OBSERVED_CAPABILITIES = Object.freeze([
     "camera", "microphone", "location", "notifications",

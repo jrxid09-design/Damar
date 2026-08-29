@@ -423,7 +423,7 @@ export const chat = {
                     chip.innerHTML = `${icon(ikon)} ${esc(r.name ?? file.name)}`;
                     chip.title = r.kind === "image"
                         ? "Gambar akan dianalisis saat dikirim"
-                        : "Dokumen dimasukkan ke memori — Aether bisa merujuknya";
+                        : "Dokumen dimasukkan ke memori — Damar bisa merujuknya";
 
                     // Klik chip = lepas lampiran.
                     chip.addEventListener("click", () => {
@@ -506,7 +506,7 @@ function renderMessages() {
             <div class="empty">
                 ${icon("chat")}
                 <div style="font-size:14px;color:var(--text)">Mulai percakapan</div>
-                <div>Model bisa memanggil tool plugin Aether saat dibutuhkan.</div>
+                <div>Model bisa memanggil tool plugin Damar saat dibutuhkan.</div>
             </div>`;
 
         return;

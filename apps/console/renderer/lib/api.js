@@ -1,10 +1,10 @@
 /**
- * Klien untuk bidang kendali daemon Aether.
+ * Klien untuk bidang kendali daemon Damar.
  *
  * Semua permintaan lewat satu titik agar base URL, token, dan
  * penanganan error tidak tersebar di seluruh view.
  */
-class AetherApi {
+class DamarApi {
 
     constructor() {
 
@@ -41,9 +41,9 @@ class AetherApi {
 
         // Daemon melayani Console, CLI, WhatsApp, dan Telegram lewat
         // pintu yang sama, jadi hanya klien yang tahu ia siapa. Tanpa
-        // header ini Aether tak punya cara mengetahui percakapan
+        // header ini Damar tak punya cara mengetahui percakapan
         // sedang berlangsung di mana.
-        const headers = { "x-aether-channel": "console", ...extra };
+        const headers = { "x-damar-channel": "console", ...extra };
 
         if (this.token) {
             headers.Authorization = `Bearer ${this.token}`;
@@ -321,7 +321,7 @@ class AetherApi {
     labBrowse(id, rel = "")   { return this.request(`/lab/projects/${encodeURIComponent(id)}/browse?path=${encodeURIComponent(rel)}`); }
     labOpenVSCode(id)         { return this.request(`/lab/projects/${encodeURIComponent(id)}/vscode`, { method: "POST" }); }
 
-    // ---- Aether Lab v2 (laboratorium kolaboratif) ----------------------
+    // ---- Damar Lab v2 (laboratorium kolaboratif) ----------------------
 
     labProjectsV2()           { return this.request("/lab/projects"); }
     labProject(id)            { return this.request(`/lab/projects/${encodeURIComponent(id)}`); }
@@ -679,4 +679,4 @@ class AetherApi {
 
 }
 
-export const api = new AetherApi();
+export const api = new DamarApi();

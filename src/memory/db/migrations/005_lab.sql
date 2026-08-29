@@ -1,5 +1,5 @@
--- 005 AETHER LAB — project/mission/artifact/decision/experiment/event.
--- Laboratorium kolaboratif human + Aether + agents (lihat
+-- 005 DAMAR LAB — project/mission/artifact/decision/experiment/event.
+-- Laboratorium kolaboratif human + Damar + agents (lihat
 -- docs/aether-lab-audit.md). Semua tabel BARU; tidak menyentuh
 -- skema memori lama.
 
@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS lab_decisions (
     chosen      TEXT,
     reason      TEXT,
     evidence    TEXT NOT NULL DEFAULT '[]',
-    decision_maker TEXT NOT NULL DEFAULT 'aether', -- user|aether|user+aether|<agent>
+    decision_maker TEXT NOT NULL DEFAULT 'damar', -- user|damar|user+damar|<agent>
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

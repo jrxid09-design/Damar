@@ -1,7 +1,7 @@
 /* =========================================================
-   AETHER — HOLOGRAPHIC PRIMITIVES (L2–L6)
+   DAMAR — HOLOGRAPHIC PRIMITIVES (L2–L6)
    Bahasa visual: holographic_glass + light_geometry.
-   Semua nilai dari aether.tokens.css — tidak ada warna hardcode.
+   Semua nilai dari damar.tokens.css — tidak ada warna hardcode.
 
    Primitif:
    .holo-surface   — basis material kaca holografik
@@ -266,7 +266,7 @@
     .viz-gauges, #mv-gauges { grid-auto-columns: minmax(64px, 1fr); }
     .viz-host.tall { height: 380px; }
 }
-/* Mobile: pengalaman perintah terpusat Aether — satu kolom. */
+/* Mobile: pengalaman perintah terpusat Damar — satu kolom. */
 @media (max-width: 640px) {
     .viz-gauges, #mv-gauges {
         grid-auto-flow: row;

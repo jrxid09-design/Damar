@@ -1,12 +1,12 @@
 const engine = require("./core/MemoryEngine");
 
 /**
- * buildMemory — ingatan Aether tentang dirinya sendiri.
+ * buildMemory — ingatan Damar tentang dirinya sendiri.
  *
  * `bugMemory` sudah menyimpan pengalaman memperbaiki bug. Yang belum
- * ada adalah ingatan tentang **bagaimana Aether dibangun dan
+ * ada adalah ingatan tentang **bagaimana Damar dibangun dan
  * dikonfigurasi**: keputusan arsitektur, alasan di baliknya, dan cara
- * membuktikannya benar. Tanpa itu Aether tidak bisa menjawab
+ * membuktikannya benar. Tanpa itu Damar tidak bisa menjawab
  * "kenapa kamu begini?" dan tidak punya pijakan untuk memulihkan
  * dirinya sendiri — ia hanya tahu keadaan sekarang, bukan sebabnya.
  *
@@ -22,7 +22,7 @@ const engine = require("./core/MemoryEngine");
  * ditulis.
  *
  * Memakai jalur yang sama dengan bugMemory (MemoryEngine, tipe
- * "skills" = milik Aether Core, bukan proposal), supaya tidak ada
+ * "skills" = milik Damar Core, bukan proposal), supaya tidak ada
  * dua sistem memori yang harus dijaga selaras.
  */
 
@@ -34,7 +34,7 @@ class BuildMemory {
      * Simpan satu keputusan atau perubahan rekayasa.
      *
      * @param {object} entry
-     * @param {string} entry.area          bagian Aether, mis. "keselamatan"
+     * @param {string} entry.area          bagian Damar, mis. "keselamatan"
      * @param {string} entry.change        apa yang berubah
      * @param {string} entry.why           mengapa — bagian yang tak bisa dibaca dari git
      * @param {string[]} [entry.files]     berkas utama yang tersentuh

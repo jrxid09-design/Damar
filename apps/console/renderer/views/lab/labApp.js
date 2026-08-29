@@ -4,7 +4,7 @@ import { esc, toast } from "../../lib/ui.js";
 import { agentBus } from "../../lib/agentBus.js";
 
 /**
- * AETHER LAB — laboratorium kolaboratif (Mission Control).
+ * DAMAR LAB — laboratorium kolaboratif (Mission Control).
  *
  * Layout fullscreen (§27): CONTEXT RAIL kiri + area kerja kanan.
  * Satu-satunya sumber kebenaran = BACKEND (lab_events / lab_* via
@@ -68,7 +68,7 @@ export const labApp = {
         root.innerHTML = `
             <div class="lab-shell">
                 <aside class="lab-rail">
-                    <div class="lab-brand">${icon("flask")} <span>AETHER LAB</span></div>
+                    <div class="lab-brand">${icon("flask")} <span>DAMAR LAB</span></div>
                     <nav class="lab-nav" id="lab-nav">
                         ${SECTIONS.map(s => `
                             <button data-sec="${s.id}" class="${s.id === state.section ? "on" : ""}" title="${s.label}">
@@ -87,7 +87,7 @@ export const labApp = {
                     </header>
                     <section class="lab-body" id="lab-body"></section>
                     <footer class="lab-cmd">
-                        <input type="text" id="lab-goal" placeholder="Nyatakan tujuan — Aether menyusun misinya…"
+                        <input type="text" id="lab-goal" placeholder="Nyatakan tujuan — Damar menyusun misinya…"
                             autocomplete="off">
                         <button class="btn primary" id="lab-goal-go">${icon("play")} Jalankan</button>
                     </footer>
@@ -115,7 +115,7 @@ export const labApp = {
         // Hook SSE lab:* → live activity + agent bus (orb).
         if (!state.esHooked) {
             state.esHooked = true;
-            document.addEventListener("aether:lab-event", e => {
+            document.addEventListener("damar:lab-event", e => {
                 const evt = e.detail;
                 if (!evt) return;
                 state.activity = [evt, ...state.activity].slice(0, 120);
@@ -295,7 +295,7 @@ function drawProjects(host) {
         const dir = el.dataset.dir;
         if (!dir) return;
         try {
-            const r = await window.aether?.shell?.reveal?.(dir);
+            const r = await window.damar?.shell?.reveal?.(dir);
             if (r && r.ok === false) toast(`Tidak bisa membuka: ${r.error}`, "warn");
         }
         catch (error) { toast(error.message, "danger"); }
@@ -370,9 +370,9 @@ function drawMissionControl(host) {
                                 <!-- Tanpa baris ini Lab jadi ruangan tertutup:
                                      laporannya bagus lalu berhenti di sana. -->
                                 <div class="lab-apply">
-                                    <span class="lab-apply-label">Terapkan ke Aether:</span>
+                                    <span class="lab-apply-label">Terapkan ke Damar:</span>
                                     <button class="btn ghost sm" data-apply="memory" data-mid="${esc(current.id)}"
-                                        title="Aether di semua kanal jadi tahu isinya">${icon("memory")} Ingat ini</button>
+                                        title="Damar di semua kanal jadi tahu isinya">${icon("memory")} Ingat ini</button>
                                     <button class="btn ghost sm" data-apply="beranda" data-mid="${esc(current.id)}"
                                         title="Munculkan sebagai popup di dashboard">${icon("orb")} Tampilkan di Beranda</button>
                                     <button class="btn ghost sm" data-apply="followup" data-mid="${esc(current.id)}"
@@ -436,9 +436,9 @@ function drawMissionControl(host) {
         drawBody();
     }));
 
-    // Terapkan hasil misi ke Aether utama.
+    // Terapkan hasil misi ke Damar utama.
     const PESAN = {
-        memory: "Aether mengingat hasil ini — berlaku di Console, WhatsApp, Telegram, dan CLI.",
+        memory: "Damar mengingat hasil ini — berlaku di Console, WhatsApp, Telegram, dan CLI.",
         beranda: "Hasil dikirim ke Beranda.",
         followup: "Misi lanjutan dibuat — ada di riwayat, tinggal dijalankan.",
         code: "Diteruskan ke opencode."
@@ -587,7 +587,7 @@ async function drawMemory(host) {
     host.innerHTML = `
         <div class="lab-panel">
             <div class="lab-panel-head"><h2>Memory Lab</h2></div>
-            <p class="dim small">Apa yang Aether INGAT tentang project ini.</p>
+            <p class="dim small">Apa yang Damar INGAT tentang project ini.</p>
             <div class="lab-mem-list">
                 ${(s?.memories ?? []).map(m => `
                     <div class="lab-mem ${m.inProject ? "in" : ""}">
@@ -605,7 +605,7 @@ async function drawKnowledge(host) {
     host.innerHTML = `
         <div class="lab-panel">
             <div class="lab-panel-head"><h2>Knowledge Lab</h2></div>
-            <p class="dim small">Apa yang Aether KETAHUI untuk project ini (dokumen terindeks).</p>
+            <p class="dim small">Apa yang Damar KETAHUI untuk project ini (dokumen terindeks).</p>
             <div class="lab-mem-list">
                 ${(s?.knowledge ?? []).map(k => `
                     <div class="lab-mem in">
@@ -659,7 +659,7 @@ async function drawArtifacts(host) {
         </div>`;
 
     host.querySelectorAll(".lab-open-dir").forEach(el => el.addEventListener("click", async () => {
-        try { await window.aether?.shell?.reveal?.(el.dataset.dir); }
+        try { await window.damar?.shell?.reveal?.(el.dataset.dir); }
         catch (e) { toast(e.message, "danger"); }
     }));
 }
@@ -675,7 +675,7 @@ async function drawDecisions(host) {
                 <div class="lab-dec">
                     <b class="small">${esc(d.question)}</b>
                     <div class="small">→ <span class="ok-text">${esc(d.chosen ?? "?")}</span>
-                        <span class="dim">(${esc(d.decisionMaker ?? "aether")})</span></div>
+                        <span class="dim">(${esc(d.decisionMaker ?? "damar")})</span></div>
                     ${d.reason ? `<div class="dim small">${esc(String(d.reason).slice(0, 120))}</div>` : ""}
                 </div>`).join("") || '<div class="dim small">belum ada keputusan.</div>'}
         </div>`;

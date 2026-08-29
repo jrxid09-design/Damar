@@ -18,7 +18,7 @@ class CheckpointSystem {
      * Buat checkpoint.
      * @param {object} opts { scope: 'git'|'fs'|'config', target, label }
      * git  → commit otomatis di branch (bila repo)
-     * fs   → salin berkas/folder ke .aether-checkpoints/
+     * fs   → salin berkas/folder ke .damar-checkpoints/
      * config → salin berkas config
      */
     async create({ scope, target, label = null }) {
@@ -37,7 +37,7 @@ class CheckpointSystem {
                 snapshot.branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: dir, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
                 // Commit pekerjaan berjalan agar ada titik pulih yang jelas.
                 try {
-                    execSync('git add -A && git diff --cached --quiet || git commit -m "checkpoint: aether (otomatis)" --no-verify', { cwd: dir, stdio: ["ignore", "pipe", "ignore"] });
+                    execSync('git add -A && git diff --cached --quiet || git commit -m "checkpoint: damar (otomatis)" --no-verify', { cwd: dir, stdio: ["ignore", "pipe", "ignore"] });
                     snapshot.commit = execSync("git rev-parse HEAD", { cwd: dir, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
                 }
                 catch { /* tak ada perubahan */ }

@@ -10,7 +10,7 @@ const JsonStore = require("../core/config/JsonStore");
 const pexec = promisify(execFile);
 
 /**
- * Suara ARDI (buatan Aether) memakai edge-tts (Microsoft Neural,
+ * Suara ARDI (buatan Damar) memakai edge-tts (Microsoft Neural,
  * id-ID-ArdiNeural — pria Indonesia). Berbeda dari Kokoro: disintesis
  * lokal lewat CLI edge-tts, dikembalikan sebagai mp3 dan diputar di
  * Console seperti suara neural lain. resolveEdge menerjemahkan alias.
@@ -24,7 +24,7 @@ function resolveEdge(want) {
 }
 
 async function edgeSpeak(text, voice) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aether-edge-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "damar-edge-"));
     const out = path.join(dir, "s.mp3");
     try {
         await pexec(
@@ -91,29 +91,29 @@ class VoiceService {
     }
 
     get sttUrl() {
-        return this.cfg().stt?.url || process.env.AETHER_STT_URL || null;
+        return this.cfg().stt?.url || process.env.DAMAR_STT_URL || null;
     }
     get sttModel() {
-        return this.cfg().stt?.model || process.env.AETHER_STT_MODEL || "Systran/faster-whisper-base";
+        return this.cfg().stt?.model || process.env.DAMAR_STT_MODEL || "Systran/faster-whisper-base";
     }
     get sttKey() {
-        return this.cfg().stt?.key || process.env.AETHER_STT_KEY || null;
+        return this.cfg().stt?.key || process.env.DAMAR_STT_KEY || null;
     }
     get sttConfigured() {
         return Boolean(this.sttUrl);
     }
 
     get ttsUrl() {
-        return this.cfg().tts?.url || process.env.AETHER_TTS_URL || null;
+        return this.cfg().tts?.url || process.env.DAMAR_TTS_URL || null;
     }
     get ttsModel() {
-        return this.cfg().tts?.model || process.env.AETHER_TTS_MODEL || "kokoro";
+        return this.cfg().tts?.model || process.env.DAMAR_TTS_MODEL || "kokoro";
     }
     get ttsVoice() {
-        return this.cfg().tts?.voice || process.env.AETHER_TTS_VOICE || "af_heart";
+        return this.cfg().tts?.voice || process.env.DAMAR_TTS_VOICE || "af_heart";
     }
     get ttsKey() {
-        return this.cfg().tts?.key || process.env.AETHER_TTS_KEY || null;
+        return this.cfg().tts?.key || process.env.DAMAR_TTS_KEY || null;
     }
     get ttsConfigured() {
         return Boolean(this.ttsUrl);
@@ -252,7 +252,7 @@ class VoiceService {
                 const voices = list
                     .map(v => (typeof v === "string" ? { id: v, name: v } : { id: v.id ?? v.name, name: v.name ?? v.id }))
                     .filter(v => v.id);
-                // Suara Ardi (edge-tts, buatan Aether) selalu ikut di paling
+                // Suara Ardi (edge-tts, buatan Damar) selalu ikut di paling
                 // atas — disintesis di daemon, bukan dari container Kokoro.
                 voices.unshift({ id: "id-ID-ArdiNeural", name: "Ardi (edge-tts, ID pria)" });
                 if (voices.length) {
@@ -462,7 +462,7 @@ class VoiceService {
         if (!this.sttConfigured) {
 
             const error = new Error(
-                "STT belum dikonfigurasi. Set AETHER_STT_URL ke endpoint transcribe " +
+                "STT belum dikonfigurasi. Set DAMAR_STT_URL ke endpoint transcribe " +
                 "kompatibel-OpenAI (mis. faster-whisper-server) di mesin daemon."
             );
 

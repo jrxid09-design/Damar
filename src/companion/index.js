@@ -2,7 +2,7 @@
  * Titik masuk subsistem Companion (device tertaut).
  *
  * Device di jaringan yang sama / Bluetooth PAN bisa memakai tools & skill
- * Aether lewat jalur yang sudah ada (REST + MCP + chat). Lihat:
+ * Damar lewat jalur yang sudah ada (REST + MCP + chat). Lihat:
  *   - deviceRegistry.js   daftar device + kredensial per device
  *   - pairing.js          kode 6 digit + TTL (approval pemilik)
  *   - companionGateway.js jembatan chat → aiRuntime (channel "device")
@@ -17,7 +17,7 @@ const gateway = new CompanionGateway({ registry: deviceRegistry });
 
 /**
  * Middleware auth device: baca token device (Bearer) → set req.device.
- * Berbeda dari tokenGuard (AETHER_TOKEN): ini token per-device.
+ * Berbeda dari tokenGuard (DAMAR_TOKEN): ini token per-device.
  */
 function deviceAuth(req, res, next) {
 

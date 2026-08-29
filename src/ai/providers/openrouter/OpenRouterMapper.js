@@ -75,7 +75,7 @@ class OpenRouterMapper {
         if (request.tools?.length) {
 
             // Batas keras OpenAI-spec: array `tools` maksimum 128 item.
-            // resolveTools() biasanya sudah memangkas via AETHER_TOOL_BUDGET,
+            // resolveTools() biasanya sudah memangkas via DAMAR_TOOL_BUDGET,
             // tapi jalur yang melewati budget (mis. tools di-set eksplisit,
             // atau registry membengkak karena skill baru) bisa menembus 128
             // dan provider menolak dengan "maximum number of items is 128" —

@@ -4,7 +4,7 @@ const JsonStore = require("../core/config/JsonStore");
 const telemetry = require("./telemetryService");
 
 /**
- * Aether Phone Intelligence — analisis & mitigasi penipuan telepon.
+ * Damar Phone Intelligence — analisis & mitigasi penipuan telepon.
  *
  * Fitur:
  *   1. Lookup nomor: kode negara, carrier, jenis line (mobile/landline/VoIP/toll-free).
@@ -20,7 +20,7 @@ const telemetry = require("./telemetryService");
  * Prinsip: membantu korban penipuan, bukan melacak orang secara ilegal.
  */
 
-const FILE = process.env.AETHER_PHONE_INTEL_FILE
+const FILE = process.env.DAMAR_PHONE_INTEL_FILE
     || path.join(__dirname, "..", "..", "configs", "phone-intel.json");
 
 const store = new JsonStore(FILE, { blacklist: [], whitelist: [], history: {} });

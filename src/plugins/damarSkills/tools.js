@@ -77,9 +77,9 @@ const P = {
 const SKILLS = [
 
     // ===== Delegasi & Orkestrasi (multi-agent) =====
-    { name: "orchestrate", description: "Tugas kompleks lintas-agent: Aether menyusun rencana lalu memberi tiap langkah ke agent paling cocok (Aether & anak buahnya) dan menyatukan hasilnya.",
+    { name: "orchestrate", description: "Tugas kompleks lintas-agent: Damar menyusun rencana lalu memberi tiap langkah ke agent paling cocok (Damar & Pandawa) dan menyatukan hasilnya.",
       parameters: { request: { type: "string", required: true } }, execute: (a, ctx) => orchestrate(a.request, ctx?.exec) },
-    { name: "agents_status", description: "Cek kesiapan semua agent Aether beserta skill-nya.",
+    { name: "agents_status", description: "Cek kesiapan semua agent Damar beserta skill-nya.",
       parameters: {}, execute: () => agentHub.health() },
 
     // ===== WhatsApp =====
@@ -93,7 +93,7 @@ const SKILLS = [
       parameters: { number: P.number, url: { type: "string", required: true }, caption: { type: "string" } }, execute: async a => { await whatsapp.sendPhoto(jid(a.number), a.url, a.caption); return { sent: true }; } },
     { name: "wa_send_document", description: "Kirim dokumen/berkas (via URL) ke nomor WhatsApp.",
       parameters: { number: P.number, url: { type: "string", required: true }, caption: { type: "string" } }, execute: async a => { await whatsapp.sendDocument(jid(a.number), a.url, a.caption); return { sent: true }; } },
-    { name: "wa_status", description: "Status koneksi WhatsApp Aether (tersambung, nomor, dll).",
+    { name: "wa_status", description: "Status koneksi WhatsApp Damar (tersambung, nomor, dll).",
       parameters: {}, execute: () => whatsapp.status() },
 
     // ===== Vision / CCTV =====
@@ -142,7 +142,7 @@ const SKILLS = [
       parameters: {}, execute: () => home.health() },
 
     // ===== Memori =====
-    { name: "remember", description: "Simpan fakta ke memori jangka panjang Aether.",
+    { name: "remember", description: "Simpan fakta ke memori jangka panjang Damar.",
       parameters: { content: { type: "string", required: true } }, execute: a => saveMemory(a.content).then(m => ({ saved: true, id: m?.id })) },
     { name: "remember_person", description: "Ingat sesuatu tentang seseorang.",
       parameters: { name: { type: "string", required: true }, detail: { type: "string", required: true } }, execute: a => saveMemory(`${a.name}: ${a.detail}`, "semantic", 0.7).then(() => ({ saved: true })) },
@@ -160,18 +160,18 @@ const SKILLS = [
       parameters: {}, execute: () => immich.summary() },
 
     // ===== Kesadaran / konteks =====
-    { name: "home_brief", description: "Aether merangkum keadaan rumah secara naratif (gaya sapaan).",
+    { name: "home_brief", description: "Damar merangkum keadaan rumah secara naratif (gaya sapaan).",
       parameters: {}, execute: (a, ctx) => context.brief(ctx?.exec).then(r => ({ brief: r.brief })) },
     { name: "full_context", description: "Snapshot lengkap seluruh sinyal rumah & sistem.",
       parameters: {}, execute: () => context.snapshot() },
-    { name: "system_health", description: "Kesehatan sistem (CPU/RAM/uptime) tempat Aether berjalan.",
+    { name: "system_health", description: "Kesehatan sistem (CPU/RAM/uptime) tempat Damar berjalan.",
       parameters: {}, execute: () => context.snapshot().then(s => s.system) },
 
     // ===== Komposit powerful (gabungan kemampuan) =====
     { name: "morning_briefing", description: "Susun brief keadaan rumah lalu kirim ke WhatsApp pemilik.",
       parameters: {}, execute: async (a, ctx) => { const { brief } = await context.brief(ctx?.exec); const recipients = await whatsapp.broadcast(`☀️ ${brief}`); return { brief, recipients }; } },
     { name: "daily_report", description: "Laporan harian: konteks + kesehatan sistem, dikirim ke WhatsApp.",
-      parameters: {}, execute: async (a, ctx) => { const { brief } = await context.brief(ctx?.exec); const recipients = await whatsapp.broadcast(`📋 Laporan Aether:\n${brief}`); return { recipients }; } },
+      parameters: {}, execute: async (a, ctx) => { const { brief } = await context.brief(ctx?.exec); const recipients = await whatsapp.broadcast(`📋 Laporan Damar:\n${brief}`); return { recipients }; } },
     { name: "arrive_home", description: "Rutinitas datang: aktifkan scene (bila diberi) lalu kirim brief rumah ke WhatsApp.",
       parameters: { scene: { type: "string", description: "scene HA opsional, mis. scene.pulang." } }, execute: async (a, ctx) => { let scene = null; if (a.scene) { await home.control(a.scene, "turn_on"); scene = a.scene; } const { brief } = await context.brief(ctx?.exec); await whatsapp.broadcast(`🏠 Selamat datang.\n${brief}`); return { scene, done: true }; } },
     { name: "leave_home", description: "Rutinitas pergi: matikan perangkat yang diberikan lalu sapu kamera & kirim ringkasan.",
@@ -182,16 +182,16 @@ const SKILLS = [
           await whatsapp.broadcast(`🚪 Rumah ditinggal. Dimatikan: ${off.join(", ") || "-"}\n` + r.map(x => `• ${x.camera}: ${x.seen || x.error}`).join("\n"));
           return { off, cameras: r };
       } },
-    { name: "ask_home", description: "Tanya apa saja tentang rumah/tugas; Aether berorkestrasi memakai semua tool & agent untuk menjawab/menuntaskan.",
+    { name: "ask_home", description: "Tanya apa saja tentang rumah/tugas; Damar berorkestrasi memakai semua tool & agent untuk menjawab/menuntaskan.",
       parameters: { question: { type: "string", required: true } }, execute: (a, ctx) => orchestrate(a.question, ctx?.exec).then(final => ({ answer: final })) },
     { name: "summarize_and_remember", description: "Ringkas sebuah teks lalu simpan ringkasannya ke memori.",
-      parameters: { text: { type: "string", required: true } }, execute: async (a, ctx) => { const s = await run("aether", `Ringkas padat teks berikut:\n${a.text}`, ctx?.exec); await saveMemory(s, "semantic", 0.6); return { summary: s, saved: true }; } },
+      parameters: { text: { type: "string", required: true } }, execute: async (a, ctx) => { const s = await run("damar", `Ringkas padat teks berikut:\n${a.text}`, ctx?.exec); await saveMemory(s, "semantic", 0.6); return { summary: s, saved: true }; } },
     { name: "translate", description: "Terjemahkan teks ke bahasa target.",
-      parameters: { text: { type: "string", required: true }, to: { type: "string", required: true, description: "bahasa target, mis. Inggris." } }, execute: (a, ctx) => run("aether", `Terjemahkan ke ${a.to}, keluarkan terjemahannya saja:\n${a.text}`, ctx?.exec).then(t => ({ translation: t })) },
+      parameters: { text: { type: "string", required: true }, to: { type: "string", required: true, description: "bahasa target, mis. Inggris." } }, execute: (a, ctx) => run("damar", `Terjemahkan ke ${a.to}, keluarkan terjemahannya saja:\n${a.text}`, ctx?.exec).then(t => ({ translation: t })) },
     { name: "explain_camera_to_owner", description: "Lihat kamera, jelaskan dengan bahasa manusiawi, lalu kirim ke WhatsApp pemilik.",
-      parameters: { camera: P.camera }, execute: async (a, ctx) => { const raw = await seeCam(a.camera, "Deskripsikan detail.", ctx?.exec); const nice = await run("aether", `Sampaikan ini ke pemilik rumah dengan ramah & singkat: ${raw}`, ctx?.exec); await whatsapp.broadcast(`📷 ${a.camera}: ${nice}`); return { text: nice }; } },
+      parameters: { camera: P.camera }, execute: async (a, ctx) => { const raw = await seeCam(a.camera, "Deskripsikan detail.", ctx?.exec); const nice = await run("damar", `Sampaikan ini ke pemilik rumah dengan ramah & singkat: ${raw}`, ctx?.exec); await whatsapp.broadcast(`📷 ${a.camera}: ${nice}`); return { text: nice }; } },
     { name: "smart_reply", description: "Susun balasan yang tepat untuk sebuah pesan masuk (nada bisa diatur).",
-      parameters: { message: { type: "string", required: true }, tone: { type: "string", description: "mis. sopan, santai, tegas." } }, execute: (a, ctx) => run("aether", `Buat balasan (${a.tone || "sopan"}) untuk pesan ini:\n${a.message}`, ctx?.exec).then(reply => ({ reply })) }
+      parameters: { message: { type: "string", required: true }, tone: { type: "string", description: "mis. sopan, santai, tegas." } }, execute: (a, ctx) => run("damar", `Buat balasan (${a.tone || "sopan"}) untuk pesan ini:\n${a.message}`, ctx?.exec).then(reply => ({ reply })) }
 
 ];
 

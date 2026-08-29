@@ -15,7 +15,7 @@ const telemetry = require("./telemetryService");
  * yang jatuh tempo tiap 15 menit.
  */
 
-const FILE = process.env.AETHER_BACKUP_FILE
+const FILE = process.env.DAMAR_BACKUP_FILE
     || path.join(__dirname, "..", "..", "configs", "nas-backup.json");
 const store = new JsonStore(FILE, { jobs: [] });
 

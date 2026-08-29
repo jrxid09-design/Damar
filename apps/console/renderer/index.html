@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <!--
         CSP: default-src 'none' tetap ketat, tetapi img/media/frame
-        dilonggarkan ke http(s) karena media Aether datang dari DAEMON
+        dilonggarkan ke http(s) karena media Damar datang dari DAEMON
         (http://<host>:3000/vision/raw dll) dan dari EMBED pihak ketiga.
         Sebelumnya:
           - foto dari daemon terblokir (img-src tak izinkan http:), dan
@@ -21,18 +21,18 @@
                    font-src 'self';
                    frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://w.soundcloud.com https://open.spotify.com https://embed.music.apple.com https://s.tradingview.com https://www.tradingview.com;
                    connect-src http: https: ws: wss:;">
-    <title>Aether OS</title>
+    <title>Damar OS</title>
     <link rel="stylesheet" href="styles/tokens.css">
     <link rel="stylesheet" href="styles/layout.css">
     <link rel="stylesheet" href="styles/components.css">
     <link rel="stylesheet" href="vendor/xterm/xterm.css">
     <link rel="stylesheet" href="styles/cyber.css">
-    <!-- Token kanonik Aether: dimuat paling akhir sebagai sumber
+    <!-- Token kanonik Damar: dimuat paling akhir sebagai sumber
          kebenaran tunggal warna & permukaan. Hapus baris ini untuk
          mengembalikan palet lama. -->
-    <link rel="stylesheet" href="styles/aether.tokens.css">
+    <link rel="stylesheet" href="styles/damar.tokens.css">
     <link rel="stylesheet" href="styles/holo.css">
-    <link rel="stylesheet" href="styles/aether.chrome.css">
+    <link rel="stylesheet" href="styles/damar.chrome.css">
     <link rel="stylesheet" href="styles/jarvis-theme.css">
     <!-- iGPU BOOST: dimuat PALING AKHIR untuk menetralkan efek komposit
          mahal (blur, backdrop-filter, drop-shadow) tanpa menyentuh JS.
@@ -48,7 +48,7 @@
 
         <div class="brand">
             <span class="mark" id="brand-mark"></span>
-            <span class="name">Aether</span>
+            <span class="name">Damar</span>
             <span class="sub">OS</span>
         </div>
 
@@ -58,11 +58,11 @@
 
         <!--
             Tombol STOP selalu terlihat (Konstitusi Pasal 2.1).
-            Hak menghentikan Aether yang butuh terminal untuk dipakai
+            Hak menghentikan Damar yang butuh terminal untuk dipakai
             bukan hak yang sesungguhnya.
         -->
         <div class="drag-free">
-            <button class="stop-btn" id="stop-btn" title="Hentikan Aether (semua tool & tugas otonom)">
+            <button class="stop-btn" id="stop-btn" title="Hentikan Damar (semua tool & tugas otonom)">
                 <span class="ico"></span>
                 <span class="txt">STOP</span>
             </button>
@@ -101,7 +101,7 @@
     </div>
 
     <!-- ================= Hologram mengambang (standby) =========== -->
-    <button class="holo-fab" id="holo-fab" title="Aether — klik atau ucapkan “Aether”"></button>
+    <button class="holo-fab" id="holo-fab" title="Damar — klik atau ucapkan “Damar”"></button>
 
     <!-- ================= Badge "mendengar" ======================= -->
     <div class="wake-badge" id="wake-badge">
@@ -110,7 +110,7 @@
     </div>
 
     <!-- ================= Chat panel (sisi kanan) ================= -->
-    <!-- Dibangun oleh aetherOverlay.js — bukan overlay fullscreen -->
+    <!-- Dibangun oleh damarOverlay.js — bukan overlay fullscreen -->
 
 </div>
 

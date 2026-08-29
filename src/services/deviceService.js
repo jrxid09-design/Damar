@@ -33,7 +33,7 @@ const DEFAULTS = {
     },
 
     /**
-     * Sensor eksternal. Aether tidak membaca hardware langsung —
+     * Sensor eksternal. Damar tidak membaca hardware langsung —
      * tiap sensor dibaca lewat endpoint HTTP yang didefinisikan
      * di sini, sehingga sensor di PC rumah, ESP32, atau Home
      * Assistant diperlakukan sama.
@@ -42,7 +42,7 @@ const DEFAULTS = {
 
     /**
      * Kamera/CCTV. Tiap kamera punya URL snapshot (gambar diam)
-     * yang bisa diambil Aether untuk dianalisis model vision —
+     * yang bisa diambil Damar untuk dianalisis model vision —
      * mis. entitas kamera Home Assistant, RTSP-to-JPEG, atau IP cam.
      */
     cameras: [],

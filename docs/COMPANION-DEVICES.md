@@ -1,11 +1,11 @@
 # Companion Devices — Device Tertaut
 
-Aether bisa dikendalikan dari **device lain di jaringan yang sama** (HP,
+Damar bisa dikendalikan dari **device lain di jaringan yang sama** (HP,
 laptop, tablet) — atau Bluetooth PAN — sehingga device itu bisa memakai
 **tools & skill yang sama dengan PC ini**.
 
 > Prinsip inti: device adalah **client tipis**. Tidak ada otak AI kedua,
-> tidak ada tool system duplikat. Device memakai jalur Aether Core yang
+> tidak ada tool system duplikat. Device memakai jalur Damar Core yang
 > SUDAH ada: REST + MCP + chat (`aiRuntime.chat({ channel: "device" })`),
 > sehingga ToolSelector, memory, consciousness, MCP tools, dan audit trail
 > semuanya otomatis berlaku.
@@ -15,7 +15,7 @@ laptop, tablet) — atau Bluetooth PAN — sehingga device itu bisa memakai
 ## Arsitektur
 
 ```
-                    AETHER CORE (daemon :3000)
+                    DAMAR CORE (daemon :3000)
                          │  tools/skill/chat via REST + MCP + chat
         ┌────────────────┼────────────────┬────────────────┐
     Telegram       WhatsApp        Voice        DEVICE TERTAUT
@@ -78,7 +78,7 @@ di panggung — semua lainnya opsional:
   server (speaking) dimasukkan sebagai uniform; thinking = putaran cepat.
   Fallback CSS bila WebGL tak tersedia.
 - **Tahan orb = push-to-talk** — tekan-tahan untuk bicara, **lepas = kirim**.
-  Tahan saat Aether bicara = barge-in (TTS dipotong).
+  Tahan saat Damar bicara = barge-in (TTS dipotong).
 - **Kotak ketik menempel di panel chat** — panel chat opsional (☰); tidak ada
   lagi tombol mic terpisah dan quick chips (dihapus).
 - **STT live** — Web Speech API bila ada; fallback MediaRecorder →
@@ -88,7 +88,7 @@ di panggung — semua lainnya opsional:
 - **Setelan ⚙ kini bisa ganti OTAK AI** — pilih **provider** & **model** sama
   seperti Console (`/ai/providers`, `/ai/models`, `/ai/select`). Berguna saat
   kuota 429: pindah otak langsung dari HP.
-- Media dirender; lampiran 📎 diunggah & diberitahukan ke Aether.
+- Media dirender; lampiran 📎 diunggah & diberitahukan ke Damar.
 
 ## ⚠️ Mic butuh HTTPS (secure context)
 
@@ -120,7 +120,7 @@ Chat teks via ☰ tetap berfungsi tanpa HTTPS.
 | POST | `/api/v1/companion/chat` | device | Chat non-stream |
 | POST | `/api/v1/companion/chat/stream` | device | Chat SSE streaming |
 | POST | `/api/v1/companion/transcribe` | device | STT (audio base64) |
-| POST | `/api/v1/companion/tts` | device | TTS (suara Aether) |
+| POST | `/api/v1/companion/tts` | device | TTS (suara Damar) |
 | POST | `/api/v1/companion/upload` | device | Unggah lampiran |
 | GET | `/api/v1/companion/media/:file` | device (`?token=`) | Sajikan lampiran |
 | GET | `/api/v1/companion/tools` | device | Daftar tools/skill |
@@ -151,7 +151,7 @@ Console → **Devices** (panel "Device Tertaut"):
 ## Kalau semua URL tak merespon
 
 Itu tanda **daemon mati**, bukan masalah jaringan (`tailscale serve` hanya
-proxy ke `localhost:3000`). Di PC: jalankan `npm run aether`, pastikan
+proxy ke `localhost:3000`). Di PC: jalankan `npm run damar`, pastikan
 `http://localhost:3000/health` membalas JSON, maka kedua URL (LAN & ts.net)
 otomatis hidup. Cek `tailscale serve status`; bila kosong:
 `tailscale serve --bg 3000`.
@@ -175,7 +175,7 @@ jadi ditandai sebagai **peta lanjutan**.
 
 1. **Bluetooth BLE/classic** — streaming perintah lewat RFCOMM/GATT (butuh
    dependency native + uji di hardware nyata).
-2. **Discovery mDNS** — alternatif selain Tailscale (`_aether._tcp`).
+2. **Discovery mDNS** — alternatif selain Tailscale (`_damar._tcp`).
 3. **Per-device permission UI** — `allowedTools` dikelola dari Console.
 4. **STT server streaming penuh** — chunked ke faster-whisper.
 5. **Orb WebGL/shader** — kualitas LiveKit penuh bila mau naik kelas

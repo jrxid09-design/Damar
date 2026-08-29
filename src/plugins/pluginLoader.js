@@ -9,14 +9,14 @@ const {
 } = require("../core/tools");
 
 /**
- * Direktori plugin buatan pengguna / hasil karya Aether sendiri.
+ * Direktori plugin buatan pengguna / hasil karya Damar sendiri.
  *
  * Dipisah dari src/plugins (bawaan, ikut git) supaya tool yang
  * dibuat di rumah tidak tercampur dengan kode inti dan tidak
  * ikut ter-commit. Isinya di-scan bersama plugin bawaan.
  */
 const USER_ROOT =
-    process.env.AETHER_USER_PLUGINS ??
+    process.env.DAMAR_USER_PLUGINS ??
     path.join(__dirname, "..", "..", "userPlugins");
 
 class PluginLoader {

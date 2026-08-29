@@ -7,7 +7,7 @@ const crypto = require("node:crypto");
  * Implementasi murni node:crypto (HMAC-SHA1), tanpa dependensi
  * eksternal. Dipakai untuk mode penuh Telegram: pengguna masukkan
  * kode 6-digit dari app authenticator di HP-nya untuk membuka
- * kemampuan penuh Aether lewat Telegram — sama seperti Console.
+ * kemampuan penuh Damar lewat Telegram — sama seperti Console.
  *
  *   generateSecret()  → secret base32 20-byte + otpauth:// URL
  *                       untuk QR code (scan dengan Google Authenticator)
@@ -106,7 +106,7 @@ function currentCode(secret) {
  * URL ini bisa di-encode jadi QR (mis. pakai library `qrcode` atau
  * layanan online). Formatnya kompatibel Google Authenticator.
  */
-function generateSecret({ account = "aether", issuer = "Aether" } = {}) {
+function generateSecret({ account = "damar", issuer = "Damar" } = {}) {
     const raw = crypto.randomBytes(20);
     const secret = base32Encode(raw);
     const label = encodeURIComponent(`${issuer}:${account}`);

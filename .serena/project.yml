@@ -1,5 +1,5 @@
 # the name by which the project can be referenced within Serena/when chatting with the LLM.
-project_name: aether
+project_name: damar
 
 # list of additional paths to ignore in this project.
 # Same syntax as gitignore, so you can use * and **.

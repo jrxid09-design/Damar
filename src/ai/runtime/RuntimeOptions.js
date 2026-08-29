@@ -70,7 +70,7 @@ class RuntimeOptions {
 
         };
 
-        // Tanpa batas iterasi tool (praktis tak terbatas) — Aether boleh
+        // Tanpa batas iterasi tool (praktis tak terbatas) — Damar boleh
         // merangkai tool sebanyak yang dibutuhkan. Rem pengaman tetap ada:
         // RuntimeExecutor akan berhenti bila terdeteksi memanggil tool
         // yang sama berulang tanpa hasil baru (anti loop liar).

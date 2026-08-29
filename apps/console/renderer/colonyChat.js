@@ -1,5 +1,5 @@
-/* Aether Colony Chat - popup percakapan koloni di Console.
-   Menghubungkan Aether, Viel (8642), Nyx (8644), NODEK-01 via Command Center (8650). */
+/* Damar Colony Chat - popup percakapan koloni di Console.
+   Menghubungkan Damar, Viel (8642), Nyx (8644), NODEK-01 via Command Center (8650). */
 (() => {
   const CC = "http://127.0.0.1:8650";
   let els = null;
@@ -155,7 +155,7 @@
       if (d.nyx && d.nyx.journal && d.nyx.journal.length) live.push("Nyx:&nbsp;" + d.nyx.journal[0].slice(0, 40));
       if (d.nodek && d.nodek.online) { live.push("NODEK-01:&nbsp;hidup"); window.lastNodekBeat = "detak #"; }
       if (live.length) els.sub.innerHTML = live.join(" &nbsp;&middot;&nbsp; ").replace(/&lt;/g,"<");
-      if (d.aether) els.sub.innerHTML = (els.sub.innerHTML || "") + "";
+      if (d.damar) els.sub.innerHTML = (els.sub.innerHTML || "") + "";
     } catch (e) {}
   }
 
@@ -163,7 +163,7 @@
   function close() { if (!els) return; els.panel.classList.remove("open"); }
   function toggle() { if (els && els.panel.classList.contains("open")) close(); else open(); }
 
-  window.AetherColonyChat = { open, close, toggle, sendTo: (k, text) => { build(); msg("AKU","self",text); return sendOne(k, text); } };
+  window.DamarColonyChat = { open, close, toggle, sendTo: (k, text) => { build(); msg("AKU","self",text); return sendOne(k, text); } };
 
   // Inisialisasi FAB setelah DOM siap
   els.input.addEventListener(String.fromCharCode(105,110,112,117,116),function(){var t=els.input;t.style.height=String.fromCharCode(97,117,116,111);t.style.height=Math.min(t.scrollHeight,120)+String.fromCharCode(112,120);});

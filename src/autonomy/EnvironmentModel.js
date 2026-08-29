@@ -82,7 +82,7 @@ class EnvironmentModel {
 
     }
 
-    /** Proses inti Aether (node) — ringkas, tanpa ps spawn. */
+    /** Proses inti Damar (node) — ringkas, tanpa ps spawn. */
     async processes() {
         return {
             pid: process.pid,

@@ -6,7 +6,7 @@ const telemetry = require("./telemetryService");
 const binance = require("./binanceService");
 
 /**
- * Bot trading Aether — strategi otomatis di latar.
+ * Bot trading Damar — strategi otomatis di latar.
  *
  * Tiap bot memantau satu pasangan, menghitung sinyal teknikal (RSI +
  * tren SMA), dan bereaksi saat sinyal BERUBAH menjadi BELI/JUAL:
@@ -92,7 +92,7 @@ async function signalFor(symbol, interval) {
 }
 
 async function announce(text) {
-    try { telemetry.publish("aether:present", { kind: "text", title: "Bot Trading", text }); } catch { /* */ }
+    try { telemetry.publish("damar:present", { kind: "text", title: "Bot Trading", text }); } catch { /* */ }
     try { await require("./notifyService").send(text); } catch { /* */ }
     try { telemetry.info(`[bot] ${text}`); } catch { /* */ }
 }

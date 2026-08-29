@@ -23,7 +23,7 @@ function memoryTools() {
             name: "memory_remember",
 
             description:
-                "Simpan informasi ke memori jangka panjang Aether. Pakai ini ketika pengguna " +
+                "Simpan informasi ke memori jangka panjang Damar. Pakai ini ketika pengguna " +
                 "menyampaikan fakta tentang dirinya, rumahnya, perangkatnya, kebiasaannya, " +
                 "atau project yang sedang dikerjakan — sesuatu yang berguna diingat di " +
                 "percakapan berikutnya. Jangan dipakai untuk basa-basi atau hal sekali pakai. " +
@@ -91,7 +91,7 @@ function memoryTools() {
             name: "memory_recall",
 
             description:
-                "Cari di memori jangka panjang Aether. Pakai ini SEBELUM menjawab bila " +
+                "Cari di memori jangka panjang Damar. Pakai ini SEBELUM menjawab bila " +
                 "pertanyaan menyinggung hal yang pernah dibicarakan, kondisi rumah, " +
                 "perangkat, project, atau isi dokumen yang pernah dibaca. Lebih baik " +
                 "mencari lalu tidak menemukan apa-apa daripada menebak.",
@@ -176,7 +176,7 @@ function memoryTools() {
             name: "memory_entities",
 
             description:
-                "Lihat entitas yang dikenal Aether — orang, kendaraan, ruangan, perangkat, " +
+                "Lihat entitas yang dikenal Damar — orang, kendaraan, ruangan, perangkat, " +
                 "project. Pakai untuk memeriksa apakah sesuatu sudah dikenal sebelum " +
                 "bertanya ulang kepada pengguna.",
 
@@ -226,7 +226,7 @@ function memoryTools() {
             name: "memory_documents",
 
             description:
-                "Daftar dokumen yang sudah dibaca Aether (manual, datasheet, catatan). " +
+                "Daftar dokumen yang sudah dibaca Damar (manual, datasheet, catatan). " +
                 "Pakai untuk memberi tahu pengguna sumber apa saja yang tersedia.",
 
             parameters: {

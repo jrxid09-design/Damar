@@ -26,7 +26,7 @@ const {
     SCHEMA_VERSION
 } = require("./types");
 
-const ID_PREFIX = "aether-desktop-dctx-";
+const ID_PREFIX = "damar-desktop-dctx-";
 
 const SNAPSHOT_KEYS = Object.freeze([
     "isContextSnapshot", "schemaVersion", "desktopContextId", "createdAt",

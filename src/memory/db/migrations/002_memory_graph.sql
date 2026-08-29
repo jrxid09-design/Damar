@@ -1,8 +1,8 @@
--- Knowledge Graph (subsistem 4): sisi (edge) bi-temporal milik Aether Core.
+-- Knowledge Graph (subsistem 4): sisi (edge) bi-temporal milik Damar Core.
 -- Aditif — tabel baru, tak menyentuh tabel yang ada.
 --
 -- Bi-temporal: valid_from/valid_to = kapan fakta BERLAKU di dunia;
---              recorded_at/superseded_at = kapan Aether MENCATAT/menggantinya.
+--              recorded_at/superseded_at = kapan Damar MENCATAT/menggantinya.
 -- Simpul (subject/object) disimpan sebagai teks bebas dulu; penautan ke
 -- tabel entities menyusul bila perlu (ceiling: belum ada resolusi entitas).
 
@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS memory_edges (
     predicate     TEXT    NOT NULL,
     object        TEXT    NOT NULL,
     confidence    REAL    NOT NULL DEFAULT 1.0,
-    source        TEXT    NOT NULL DEFAULT 'aether',
+    source        TEXT    NOT NULL DEFAULT 'damar',
     metadata      TEXT    NOT NULL DEFAULT '{}',
     valid_from    TEXT    NOT NULL DEFAULT (datetime('now')),
     valid_to      TEXT,

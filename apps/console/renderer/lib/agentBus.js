@@ -1,4 +1,4 @@
-import { aetherState } from "./aetherState.js";
+import { damarState } from "./damarState.js";
 
 /**
  * Agent Bus — jembatan aktivitas multi-agent → visualisasi.
@@ -13,7 +13,7 @@ import { aetherState } from "./aetherState.js";
  *   final           → mood "success" | "error" (semua langkah ok?)
  *                     lalu kembali "idle" setelah sempat dipamerkan.
  *
- * Mood TIDAK menimpa sesi suara: saat Aether sedang mendengar atau
+ * Mood TIDAK menimpa sesi suara: saat Damar sedang mendengar atau
  * berbicara, perubahan mood ditahan supaya percakapan tetap koheren.
  */
 
@@ -33,17 +33,17 @@ const VOICE_STATES = ["listening", "speaking"];
 function setMood(m) {
 
     // Jangan menimpa sesi suara yang sedang berlangsung.
-    if (VOICE_STATES.includes(aetherState.state)) return;
+    if (VOICE_STATES.includes(damarState.state)) return;
 
-    aetherState.set(m);
+    damarState.set(m);
 
     clearTimeout(moodTimer);
 
     // Mood hasil (sukses/galat) dipajang sejenak, lalu bernapas normal.
     if (m === "success" || m === "error") {
         moodTimer = setTimeout(() => {
-            if (["success", "error"].includes(aetherState.state)) {
-                aetherState.set("idle");
+            if (["success", "error"].includes(damarState.state)) {
+                damarState.set("idle");
             }
         }, 2800);
     }

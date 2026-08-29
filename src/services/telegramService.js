@@ -5,15 +5,15 @@ const telemetry = require("./telemetryService");
 const totp = require("../core/auth/totp");
 
 /**
- * Jembatan Telegram — remote control Aether lewat Bot API.
+ * Jembatan Telegram — remote control Damar lewat Bot API.
  *
  * Long-polling (tanpa webhook): bot menarik pesan baru tiap beberapa
- * detik, meneruskannya ke core Aether yang sama dengan Console &
+ * detik, meneruskannya ke core Damar yang sama dengan Console &
  * WhatsApp (aiRuntimeService), lalu membalas hasilnya.
  *
  * Keamanan: tanpa allowlist, bot hanya menjawab /id (supaya pemilik
  * tahu chat id-nya). Dengan allowlist, hanya chat id terdaftar yang
- * boleh mengendalikan Aether.
+ * boleh mengendalikan Damar.
  *
  * MODE PENUH (mirip Console): penghuni allowlist defaultnya berada di
  * mode TERBATAS — chat biasa tanpa tool destruktif. Untuk membuka
@@ -30,7 +30,7 @@ const store = new JsonStore(
 
 /** Secret TOTP mode penuh (satu secret global — pemilik satu orang). */
 const TOTP_CONFIG_PATH =
-    process.env.AETHER_TOTP_CONFIG ||
+    process.env.DAMAR_TOTP_CONFIG ||
     path.join(__dirname, "..", "..", "configs", "totp.json");
 const totpStore = new JsonStore(TOTP_CONFIG_PATH, { secret: null, setupAt: null });
 
@@ -74,7 +74,7 @@ class TelegramService {
     resolveToken() {
         return (
             this.cfg().token ||
-            process.env.AETHER_TELEGRAM_TOKEN ||
+            process.env.DAMAR_TELEGRAM_TOKEN ||
             null
         );
     }
@@ -84,7 +84,7 @@ class TelegramService {
 
         const fromCfg = this.cfg().allowed ?? [];
 
-        const fromEnv = String(process.env.AETHER_TELEGRAM_ALLOWED ?? "")
+        const fromEnv = String(process.env.DAMAR_TELEGRAM_ALLOWED ?? "")
             .split(",")
             .map(s => s.trim())
             .filter(Boolean);
@@ -103,7 +103,7 @@ class TelegramService {
         const token = this.resolveToken();
 
         if (!token) {
-            const e = new Error("Token Telegram belum diatur (configs/telegram.json atau AETHER_TELEGRAM_TOKEN).");
+            const e = new Error("Token Telegram belum diatur (configs/telegram.json atau DAMAR_TELEGRAM_TOKEN).");
             e.code = "TELEGRAM_NOT_CONFIGURED";
             throw e;
         }
@@ -263,7 +263,7 @@ class TelegramService {
 
             const { secret, otpauthUrl } = totp.generateSecret({
                 account: String(chatId),
-                issuer: "Aether"
+                issuer: "Damar"
             });
 
             totpStore.write({ secret, setupAt: new Date().toISOString() });
@@ -323,7 +323,7 @@ class TelegramService {
         telemetry.publish("telegram:fullmode:granted", { chatId, hours: FULL_MODE_TTL_HOURS });
 
         await this.send(chatId,
-            `Mode penuh aktif untuk ${FULL_MODE_TTL_HOURS} jam — Aether ` +
+            `Mode penuh aktif untuk ${FULL_MODE_TTL_HOURS} jam — Damar ` +
             `di sini kini setara dengan Console (tool lengkap). ` +
             `/keluar untuk menutup lebih awal.`
         );
@@ -354,8 +354,8 @@ class TelegramService {
 
             return this.send(chatId,
                 `Halo! Chat id kamu: ${chatId}\n` +
-                `Tambahkan ke AETHER_TELEGRAM_ALLOWED atau configs/telegram.json ` +
-                `(field "allowed") untuk mengendalikan Aether.`
+                `Tambahkan ke DAMAR_TELEGRAM_ALLOWED atau configs/telegram.json ` +
+                `(field "allowed") untuk mengendalikan Damar.`
             );
 
         }
@@ -386,7 +386,7 @@ class TelegramService {
 
     }
 
-    /** Teruskan ke core Aether yang sama dengan Console & WhatsApp. */
+    /** Teruskan ke core Damar yang sama dengan Console & WhatsApp. */
     async converse(chatId, text) {
 
         const aiRuntime = require("./aiRuntimeService");

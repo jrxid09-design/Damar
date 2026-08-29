@@ -3,7 +3,7 @@ import { esc } from "./ui.js";
 import { agentBus } from "./agentBus.js";
 
 /**
- * HOME BUBBLES — respon transient Aether di dashboard Beranda.
+ * HOME BUBBLES — respon transient Damar di dashboard Beranda.
  *
  * Perilaku (revisi pemilik):
  *   - Maksimal 3 bubble — ke-4 menggeser tertua.
@@ -102,7 +102,7 @@ export function showBubble(opts = {}) {
     }
     else {
         el.innerHTML = `
-            <div class="hcb-who">${opts.role === "user" ? "Kamu" : "Aether"}</div>
+            <div class="hcb-who">${opts.role === "user" ? "Kamu" : "Damar"}</div>
             <div class="hcb-text"></div>`;
         const body = el.querySelector(".hcb-text");
         if (opts.html) body.innerHTML = opts.html;
@@ -145,7 +145,7 @@ export function showBubble(opts = {}) {
 }
 
 /**
- * Sambungkan agentBus → task bubble (timeline ikon saat Aether bekerja).
+ * Sambungkan agentBus → task bubble (timeline ikon saat Damar bekerja).
  */
 export function wireTaskBubbles({ onArchive } = {}) {
 

@@ -7,7 +7,7 @@ const path = require("node:path");
  * `telemetry.publish()` hanya memancarkan event — tidak menyimpannya.
  * Selama ini setiap `tool:execute` dan `tool:verify` lenyap kecuali
  * ada klien SSE yang kebetulan sedang tersambung. Artinya kalau
- * Console tidak terbuka, tidak ada catatan bahwa Aether menulis
+ * Console tidak terbuka, tidak ada catatan bahwa Damar menulis
  * berkas, mengirim pesan WhatsApp, atau bahwa sebuah verifikasi
  * gagal. Jejak audit yang hilang saat tak ada yang menonton bukan
  * jejak audit.
@@ -17,18 +17,18 @@ const path = require("node:path");
  * yang belum terbukti dibutuhkan (gerbang Ponytail §56).
  *
  * Kegagalan mencatat TIDAK pernah menjatuhkan eksekusi. Audit yang
- * membuat Aether berhenti bekerja akan dimatikan orang, dan audit
+ * membuat Damar berhenti bekerja akan dimatikan orang, dan audit
  * yang dimatikan tidak melindungi siapa pun.
  */
 
 /**
- * Lokasi jejak. Dapat dialihkan lewat `AETHER_AUDIT_DIR`.
+ * Lokasi jejak. Dapat dialihkan lewat `DAMAR_AUDIT_DIR`.
  *
  * Bukan kenyamanan: tes menulis peristiwa palsu, dan jejak audit
  * yang tercampur data tes tidak dapat dipercaya justru saat
  * dibutuhkan untuk menelusuri kejadian sungguhan.
  */
-const DIR = process.env.AETHER_AUDIT_DIR
+const DIR = process.env.DAMAR_AUDIT_DIR
     || path.join(__dirname, "..", "..", "..", "data", "audit");
 
 /** Simpan 14 hari. Cukup untuk menelusuri, tidak tumbuh selamanya. */

@@ -114,7 +114,7 @@ class SafetyController {
         telemetry.publish("safety:stop", { actor, reason, alreadyEngaged: result.alreadyEngaged });
         telemetry.warn(`[safety] STOP ditarik oleh ${actor} — ${reason}`);
 
-        return response.success(res, "Aether dihentikan", result);
+        return response.success(res, "Damar dihentikan", result);
 
     }
 
@@ -127,7 +127,7 @@ class SafetyController {
         telemetry.publish("safety:release", { actor, wasEngaged: result.wasEngaged });
         telemetry.info(`[safety] STOP dilepas oleh ${actor}`);
 
-        return response.success(res, "Aether dilanjutkan", result);
+        return response.success(res, "Damar dilanjutkan", result);
 
     }
 

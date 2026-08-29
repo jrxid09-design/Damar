@@ -4,7 +4,7 @@ const telemetry = require("./telemetryService");
 const JsonStore = require("../core/config/JsonStore");
 
 /**
- * Vision — Aether "melihat" gambar (frame kamera/CCTV, foto).
+ * Vision — Damar "melihat" gambar (frame kamera/CCTV, foto).
  *
  * Memakai engine AI yang sama dengan bentuk pesan multimodal
  * OpenAI-compatible: content array [{type:text},{type:image_url}].
@@ -27,7 +27,7 @@ class VisionService {
     /** Model vision aktif. Default masuk akal per jenis provider. */
     model() {
 
-        const configured = this.cfg().model || process.env.AETHER_VISION_MODEL;
+        const configured = this.cfg().model || process.env.DAMAR_VISION_MODEL;
 
         if (configured) {
             return configured;

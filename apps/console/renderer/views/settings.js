@@ -48,9 +48,9 @@ export const settings = {
                         <div class="field">
                             <label>Token akses</label>
                             <input type="password" id="set-token" value="${esc(s.token)}"
-                                placeholder="kosongkan bila AETHER_TOKEN tidak diset">
+                                placeholder="kosongkan bila DAMAR_TOKEN tidak diset">
                             <span class="help">
-                                Harus sama dengan <span class="mono">AETHER_TOKEN</span> di
+                                Harus sama dengan <span class="mono">DAMAR_TOKEN</span> di
                                 <span class="mono">.env</span> daemon. Tanpa token, siapa pun
                                 di jaringan yang sama bisa mengakses API.
                             </span>
@@ -113,7 +113,7 @@ export const settings = {
                                 dijalankan di PC rumah ia terjangkau seluruh perangkat pada LAN yang sama.
                             </p>
                             <p style="margin:0">
-                                Set <span class="mono selectable">AETHER_TOKEN</span> di berkas
+                                Set <span class="mono selectable">DAMAR_TOKEN</span> di berkas
                                 <span class="mono">.env</span> PC tersebut, lalu isikan token yang sama
                                 di kolom di samping. Tanpa itu, endpoint chat, eksekusi tool, dan
                                 filesystem terbuka tanpa autentikasi.
@@ -131,7 +131,7 @@ export const settings = {
 
     async mount(root) {
 
-        const status = await window.aether.daemon.status();
+        const status = await window.damar.daemon.status();
 
         root.querySelector("#local-path").textContent = status.entry;
 
@@ -155,19 +155,19 @@ export const settings = {
                 autoConnect: root.querySelector("#set-auto").checked
             };
 
-            const saved = await window.aether.settings.set(patch);
+            const saved = await window.damar.settings.set(patch);
 
             store.set({ settings: saved });
 
             toast("Pengaturan disimpan", "ok");
 
-            document.dispatchEvent(new CustomEvent("aether:reconnect"));
+            document.dispatchEvent(new CustomEvent("damar:reconnect"));
 
         });
 
         root.querySelector("#local-start").addEventListener("click", async () => {
 
-            const result = await window.aether.daemon.start();
+            const result = await window.damar.daemon.start();
 
             if (result.error) {
                 toast(result.error, "danger");
@@ -182,7 +182,7 @@ export const settings = {
 
                 toast("Daemon sudah berjalan di alamat ini — menyambungkan…", "ok");
 
-                document.dispatchEvent(new CustomEvent("aether:reconnect"));
+                document.dispatchEvent(new CustomEvent("damar:reconnect"));
 
                 return;
 
@@ -199,7 +199,7 @@ export const settings = {
 
             // Beri jeda agar server sempat listen sebelum disambung.
             setTimeout(
-                () => document.dispatchEvent(new CustomEvent("aether:reconnect")),
+                () => document.dispatchEvent(new CustomEvent("damar:reconnect")),
                 1800
             );
 
@@ -207,7 +207,7 @@ export const settings = {
 
         root.querySelector("#local-stop").addEventListener("click", async () => {
 
-            await window.aether.daemon.stop();
+            await window.damar.daemon.stop();
 
             updateLocal(false, null);
 
@@ -251,7 +251,7 @@ async function renderDaemonConfig(root) {
  */
 const CATEGORIES = [
     { id: "ai",         label: "AI & Model",       icon: "cpu",      desc: "Provider, API key, model" },
-    { id: "voice",      label: "Suara",            icon: "mic",      desc: "STT, TTS, suara Aether" },
+    { id: "voice",      label: "Suara",            icon: "mic",      desc: "STT, TTS, suara Damar" },
     { id: "home",       label: "Rumah & Perangkat",icon: "home",     desc: "Home Assistant" },
     { id: "people",     label: "Orang & Wajah",    icon: "search",   desc: "Pengenalan wajah" },
     { id: "channels",   label: "WhatsApp & Telegram", icon: "plug",  desc: "Kanal percakapan" },
@@ -374,7 +374,7 @@ function aiPanel(cfg) {
             </div>
 
             <div class="small muted" style="margin-bottom:6px">
-                Pilih otak Aether: <strong>AI Lokal</strong> (Ollama — gratis, privat,
+                Pilih otak Damar: <strong>AI Lokal</strong> (Ollama — gratis, privat,
                 jalan di mesin sendiri) atau <strong>AI Provider</strong> (cloud pakai
                 API key). Kosongkan key &amp; simpan untuk balik ke AI Lokal.
                 ${fellBack ? `<span class="warn-text"> (key ${esc(fellBack)} kosong, sekarang pakai AI Lokal)</span>` : ""}
@@ -480,7 +480,7 @@ function voicePanel(v) {
 
             <div class="row" style="margin-top:10px">
                 <button class="btn primary" id="voice-save">${icon("check")} Simpan suara</button>
-                <span class="small dim">efek robot diatur di layar Aether</span>
+                <span class="small dim">efek robot diatur di layar Damar</span>
             </div>
         </div>`;
 
@@ -779,11 +779,11 @@ function whatsappPanel(wa) {
                     <label>Nomor pribadi yang diizinkan</label>
                     <input type="text" id="wa-allowed" value="${esc((wa.allowed ?? []).join(", "))}"
                         placeholder="mis. 6281111, 6282222">
-                    <span class="help">Kirim <span class="mono">/id</span> ke Aether untuk tahu nomormu. Pisahkan koma. Tanpa ini chat pribadi ditolak.</span>
+                    <span class="help">Kirim <span class="mono">/id</span> ke Damar untuk tahu nomormu. Pisahkan koma. Tanpa ini chat pribadi ditolak.</span>
                 </div>
                 <div class="field">
                     <div class="row" style="align-items:center">
-                        <label style="flex:1">Grup tempat Aether tergabung</label>
+                        <label style="flex:1">Grup tempat Damar tergabung</label>
                         <button type="button" class="btn ghost sm" id="wa-groups-refresh" ${wa.connected ? "" : "disabled"}>${icon("refresh")} Muat grup</button>
                     </div>
                     <div id="wa-groups-list" class="small dim" style="margin-top:6px">
@@ -794,7 +794,7 @@ function whatsappPanel(wa) {
                     <label>Id grup (manual, opsional)</label>
                     <input type="text" id="wa-groups" value="${esc((wa.groups ?? []).join(", "))}"
                         placeholder="mis. 120363012345678901@g.us">
-                    <span class="help">Biasanya cukup pakai tombol di atas. Manual bila grup belum muncul. Di grup, Aether menjawab saat di-mention (sebut <em>Aether</em>) atau di-reply.</span>
+                    <span class="help">Biasanya cukup pakai tombol di atas. Manual bila grup belum muncul. Di grup, Damar menjawab saat di-mention (sebut <em>Damar</em>) atau di-reply.</span>
                 </div>
                 ${wa.lastError ? `<div class="small danger-text">${esc(wa.lastError)}</div>` : ""}
                 <div class="small dim" style="line-height:1.7">
@@ -842,7 +842,7 @@ function providerFields(cfg, mode, platformId) {
         <div class="field">
             <label>API key ${p.hasKey ? `<span class="dim">(tersimpan: ${esc(p.keyHint)})</span>` : ""}</label>
             <input type="password" id="ai-key" placeholder="${p.hasKey ? "isi untuk mengganti, kosongkan untuk pakai AI Lokal" : "tempel API key di sini"}">
-            <span class="help">Kosongkan &amp; simpan untuk menghapus key (Aether balik ke AI Lokal).</span>
+            <span class="help">Kosongkan &amp; simpan untuk menghapus key (Damar balik ke AI Lokal).</span>
         </div>
         <div class="field">
             <label>Base URL</label>
@@ -1006,7 +1006,7 @@ function wireAiPanel(root, cfg) {
                 6000
             );
             await renderDaemonConfig(root);
-            document.dispatchEvent(new CustomEvent("aether:reconnect"));
+            document.dispatchEvent(new CustomEvent("damar:reconnect"));
         }
 
         return result;
@@ -1094,7 +1094,7 @@ function wireWhatsappPanel(root) {
         catch (error) { box.textContent = error.message; return; }
         const groups = data.groups || [];
         if (!groups.length) {
-            box.textContent = "Tak ada grup terdeteksi (pastikan tersambung & Aether sudah masuk grup).";
+            box.textContent = "Tak ada grup terdeteksi (pastikan tersambung & Damar sudah masuk grup).";
             return;
         }
         box.innerHTML = groups.map(g => `
@@ -1225,7 +1225,7 @@ function automationPanel(a) {
                 <span class="push">${pill(a.enabled ? "aktif" : "mati", a.enabled ? "ok" : "idle")}</span>
             </div>
             <div class="small muted" style="margin-bottom:10px">
-                Aether menyapa lebih dulu: ringkasan keadaan rumah dikirim otomatis
+                Damar menyapa lebih dulu: ringkasan keadaan rumah dikirim otomatis
                 ke WhatsApp yang diizinkan pada jam yang kamu tentukan.
             </div>
             <div class="row wrap" style="gap:14px">

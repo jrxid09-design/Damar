@@ -3,7 +3,7 @@
 /**
  * CAPABILITY REGISTRY V1 — bounded canonical kind vocabulary.
  *
- * A small, closed set sufficient for future Aether. Unknown kinds fail
+ * A small, closed set sufficient for future Damar. Unknown kinds fail
  * closed. These labels describe WHAT a descriptor IS (shape of origin),
  * never whether it is permitted, trusted, or authorized.
  */

@@ -1,7 +1,7 @@
 const telemetry = require("./telemetryService");
 
 /**
- * notifyService — kanal notifikasi terpadu Aether.
+ * notifyService — kanal notifikasi terpadu Damar.
  *
  * Sekarang lewat WhatsApp (broadcast ke nomor pemilik yang sudah
  * diizinkan). Kanal lain (email/SMTP) bisa ditambah di sini tanpa

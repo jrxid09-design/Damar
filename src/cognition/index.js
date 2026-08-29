@@ -3,7 +3,7 @@
  *
  * Pemakaian:
  *   const { createAccCore } = require("../cognition");
- *   const acc = await createAccCore();            // mode dari AETHER_ACC
+ *   const acc = await createAccCore();            // mode dari DAMAR_ACC
  *   if (acc.mode === "shadow") { ... }
  *
  * Foundation TIDAK PERNAH me-require modul ini (arah dependensi §4):

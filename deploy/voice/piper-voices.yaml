@@ -1,7 +1,7 @@
 # Pemetaan nama suara OpenAI -> model Piper, dipakai openedai-speech.
 #
 # Semua nama baku OpenAI diarahkan ke suara Indonesia yang sama
-# supaya Aether tetap berbunyi walau mengirim nama suara apa pun.
+# supaya Damar tetap berbunyi walau mengirim nama suara apa pun.
 # `id_news` adalah nama eksplisit yang dipakai configs/voice.json.
 #
 # Model single-speaker: kolom `speaker` sengaja dibiarkan kosong.

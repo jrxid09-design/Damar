@@ -8,8 +8,8 @@ const JsonStore = require("../core/config/JsonStore");
  * Prinsip yang diminta pengguna:
  *   - API key bisa dari platform mana pun (OpenRouter, OpenAI,
  *     Google AI Studio, Groq, 9router, atau custom apa saja).
- *   - Key TERISI  → Aether jalan lewat platform itu.
- *   - Key KOSONG  → Aether otomatis pakai otak lokal (llama.cpp).
+ *   - Key TERISI  → Damar jalan lewat platform itu.
+ *   - Key KOSONG  → Damar otomatis pakai otak lokal (llama.cpp).
  *
  * Hampir semua platform berbicara protokol OpenAI-compatible
  * (/chat/completions), jadi cukup satu jenis klien yang dibedakan
@@ -160,7 +160,7 @@ class ProviderConfigService {
         }
 
         seeded.llamacpp = {
-            model: process.env.AETHER_MODEL_PATH ?? null
+            model: process.env.DAMAR_MODEL_PATH ?? null
         };
 
         // Provider aktif: ikuti AI_PROVIDER bila diset, kalau tidak
@@ -189,7 +189,7 @@ class ProviderConfigService {
         // Otak lokal langsung (llama.cpp): model = nama berkas GGUF.
         if (preset.kind === "llamacpp") {
             const model =
-                process.env.AETHER_MODEL_PATH ||
+                process.env.DAMAR_MODEL_PATH ||
                 config.llamacpp?.model ||
                 DEFAULT_LOCAL_MODEL;
             return {
@@ -219,7 +219,7 @@ class ProviderConfigService {
         // Key kosong → jatuh ke otak lokal (sesuai permintaan).
         if (!p.apiKey) {
             const model =
-                process.env.AETHER_MODEL_PATH ||
+                process.env.DAMAR_MODEL_PATH ||
                 config.llamacpp?.model ||
                 DEFAULT_LOCAL_MODEL;
             return {

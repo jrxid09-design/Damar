@@ -100,7 +100,7 @@ class SelfHealingEngine {
         if (String(tool ?? "").startsWith("agent:")) {
             try {
                 const agentHub = require("../services/agentHub");
-                const agentId = tool.slice(6) || "aether";
+                const agentId = tool.slice(6) || "damar";
                 // Delegasi mewarisi inisiator ATAU grant kanonik dari
                 // batas otonom — tidak pernah diciptakan di sini.
                 const res = await agentHub.run(agentId,

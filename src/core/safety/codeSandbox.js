@@ -1,12 +1,12 @@
 const path = require("node:path");
 
 /**
- * Batas untuk kode dan perintah yang dijalankan Aether (§38).
+ * Batas untuk kode dan perintah yang dijalankan Damar (§38).
  *
- * Aether dapat mengubah dan menjalankan kodenya sendiri. Sampai
+ * Damar dapat mengubah dan menjalankan kodenya sendiri. Sampai
  * sekarang itu terjadi di ruang yang sama persis dengan yang
  * menjalankannya: proses anak mewarisi SELURUH environment induk —
- * termasuk `AETHER_TOKEN`, kunci OpenRouter, dan kredensial lain —
+ * termasuk `DAMAR_TOKEN`, kunci OpenRouter, dan kredensial lain —
  * dan bebas bekerja di direktori mana pun.
  *
  * Yang dilakukan modul ini, dan jujur hanya ini:
@@ -17,7 +17,7 @@ const path = require("node:path");
  *      lolos.
  *   2. **Direktori kerja terkurung** ke akar proyek.
  *   3. **Batas waktu** supaya perintah yang menggantung tidak
- *      menahan Aether selamanya.
+ *      menahan Damar selamanya.
  *   4. **Batas keluaran** supaya proses cerewet tidak menghabiskan
  *      memori.
  *

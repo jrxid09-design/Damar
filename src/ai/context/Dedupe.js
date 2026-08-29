@@ -12,7 +12,7 @@
  */
 
 /** Label peran yang ditempelkan adapter riwayat — dibuang sebelum hash. */
-const ROLE_LABELS = /^(pengguna|user|aether|asisten|assistant)\s*[:\-–]\s*/i;
+const ROLE_LABELS = /^(pengguna|user|damar|asisten|assistant)\s*[:\-–]\s*/i;
 
 function fingerprint(text) {
 

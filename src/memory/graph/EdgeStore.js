@@ -12,7 +12,7 @@ const { database } = require("../db");
  */
 class EdgeStore {
 
-    async link({ subject, predicate, object, confidence = 1.0, source = "aether", metadata = {} }) {
+    async link({ subject, predicate, object, confidence = 1.0, source = "damar", metadata = {} }) {
         if (!subject || !predicate || !object) {
             throw new Error("Sisi butuh subject, predicate, dan object.");
         }

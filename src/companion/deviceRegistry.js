@@ -8,10 +8,10 @@ const telemetry = require("../services/telemetryService");
 
 /**
  * DeviceRegistry — daftar device tertaut (companion) yang boleh memakai
- * tools & skill Aether lewat jaringan (LAN / Bluetooth PAN).
+ * tools & skill Damar lewat jaringan (LAN / Bluetooth PAN).
  *
  * Tiap device punya KREDENSIAL SENDIRI (token acak) — bukan token utama
- * AETHER_TOKEN — sehingga bisa dicabut per device tanpa mengganggu yang
+ * DAMAR_TOKEN — sehingga bisa dicabut per device tanpa mengganggu yang
  * lain. Ini meniru model "device pairing" yang sudah dikenal (seperti
  * login multi-perangkat WhatsApp).
  *

@@ -5,13 +5,13 @@
  *     yang bergerak ORGANIK (noise multi-sinus acak) dan mengikuti SUARA:
  *     band bass/mid/treble dari frekuensi mic saat listening, dari audio
  *     TTS server saat speaking, denyut sintetis saat thinking.
- *   • TAHAN orb = push-to-talk; lepas = kirim. Barge-in: tahan saat Aether
+ *   • TAHAN orb = push-to-talk; lepas = kirim. Barge-in: tahan saat Damar
  *     bicara akan memotong TTS.
  *   • Kotak ketik tidak melayang lagi — ia bagian dari PANEL CHAT opsional
  *     (tombol ☰). Quick chips dihapus.
  *   • Setelan ⚙: ganti PROVIDER & MODEL AI (ala Console), mode suara,
  *     kecepatan, nama device, keluar.
- *   • Media dirender; lampiran 📎 diunggah & diberitahukan ke Aether.
+ *   • Media dirender; lampiran 📎 diunggah & diberitahukan ke Damar.
  *   • Mic butuh SECURE CONTEXT: bila dibuka via http://100.x… browser
  *     memblokirnya — halaman menuntun ke `tailscale serve`.
  *
@@ -24,7 +24,7 @@ return `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>AETHER · Companion</title>
+<title>DAMAR · Companion</title>
 <style>
     :root { --bg:#04070c; --cyan:#35e0ff; --cyan-dim:rgba(53,224,255,.32);
         --cyan-faint:rgba(53,224,255,.07); --text:#d7f4fb; --muted:#5d8794;
@@ -64,8 +64,8 @@ return `<!DOCTYPE html>
         scrollbar-width:thin; scrollbar-color:var(--cyan-dim) transparent; }
     .msg { max-width:88%; font-size:12.5px; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
     .msg.user { align-self:flex-end; color:#fff; border-right:2px solid var(--cyan); padding-right:9px; }
-    .msg.aether { align-self:flex-start; border-left:2px solid var(--cyan-dim); padding-left:9px; }
-    .msg.aether::before { content:"AETHER"; display:block; font-size:8px; letter-spacing:3px;
+    .msg.damar { align-self:flex-start; border-left:2px solid var(--cyan-dim); padding-left:9px; }
+    .msg.damar::before { content:"DAMAR"; display:block; font-size:8px; letter-spacing:3px;
                           color:var(--muted); margin-bottom:3px; }
     .msg img { max-width:100%; max-height:210px; margin-top:8px; border:1px solid var(--cyan-dim);
                border-radius:3px; cursor:pointer; display:block; }
@@ -132,7 +132,7 @@ return `<!DOCTYPE html>
 <body>
 
 <div class="top">
-    <div class="brand">Aether</div>
+    <div class="brand">Damar</div>
     <span class="status" id="status">LINK…</span>
     <button class="icobtn" id="btn-log" title="Chat">&#9776;</button>
     <button class="icobtn" id="btn-set" title="Setelan">&#9881;</button>
@@ -197,7 +197,7 @@ return `<!DOCTYPE html>
         </div>
 
         <div class="field">
-            <label>Suara balasan Aether</label>
+            <label>Suara balasan Damar</label>
             <div class="seg" id="tts-seg">
                 <button data-v="browser">Browser</button>
                 <button data-v="server">Server (Ardi)</button>
@@ -213,7 +213,7 @@ return `<!DOCTYPE html>
             <input type="text" id="set-name">
         </div>
         <div class="field" style="margin-top:16px">
-            <label style="color:var(--danger)">Panic — hentikan semua tool Aether</label>
+            <label style="color:var(--danger)">Panic — hentikan semua tool Damar</label>
             <input type="text" id="panic-confirm" placeholder="ketik STOP untuk konfirmasi"
                    style="border-color:rgba(255,84,112,.5)">
             <button class="bigbtn btn-danger" id="btn-panic">Tarik kill switch</button>
@@ -312,9 +312,25 @@ void main(){
 
     // ================= STATE =================
     var $ = function (id) { return document.getElementById(id); };
-    var TOKEN_KEY = "aether_companion_token";
-    var NAME_KEY = "aether_companion_name";
-    var SET_KEY = "aether_companion_settings";
+    var TOKEN_KEY = "damar_companion_token";
+    var NAME_KEY = "damar_companion_name";
+    var SET_KEY = "damar_companion_settings";
+
+    // Kunci EJAAN LAMA (pra-rename Aether -> Damar). Device yang sudah
+    // dipasangkan tidak boleh kehilangan token pairing-nya hanya karena
+    // identitas berganti nama: nilai lama diadopsi SEKALI ke kunci
+    // kanonik, tidak pernah menimpa nilai yang sudah ada.
+    // DEPRECATED - lihat docs/architecture/DAMAR-IDENTITY-MIGRATION.md.
+    function adoptLegacy(key) {
+        try {
+            if (localStorage.getItem(key) !== null) return;
+            var lama = localStorage.getItem(key.replace(/^damar_/, "aether_"));
+            if (lama !== null) localStorage.setItem(key, lama);
+        } catch (e) { /* storage tak tersedia: abaikan */ }
+    }
+    adoptLegacy(TOKEN_KEY);
+    adoptLegacy(NAME_KEY);
+    adoptLegacy(SET_KEY);
 
     var token = localStorage.getItem(TOKEN_KEY);
     var devName = localStorage.getItem(NAME_KEY) || "device";
@@ -356,7 +372,7 @@ void main(){
     // Amp & pita tetap dihitung di JS (mic FFT / TTS analyser / sintetis).
     var amp = 0.06, ampTarget = 0.06;
     var band = { bass: 0, mid: 0, treb: 0 };
-    var moodVal = 0, moodAro = 0;   // suasana hati Aether (polling /mood)
+    var moodVal = 0, moodAro = 0;   // suasana hati Damar (polling /mood)
     var audioCtx = null, micAnalyser = null, ttsAnalyser = null, freqBins = null;
 
     function ensureAudioCtx() {
@@ -806,7 +822,7 @@ void main(){
         addMsg("user", text);
         setMode("thinking");
 
-        var bubble = addMsg("aether", "");
+        var bubble = addMsg("damar", "");
         bubble.innerHTML = '<span class="caret"></span>';
         var acc = "";
 
@@ -933,7 +949,7 @@ void main(){
             })
             .catch(function (e) {
                 setStatus("UPLOAD GAGAL");
-                addMsg("aether", "[gagal unggah: " + e.message + "]");
+                addMsg("damar", "[gagal unggah: " + e.message + "]");
                 setMode("idle");
             });
 

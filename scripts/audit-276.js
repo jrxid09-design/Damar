@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Audit §276 — enam belas pertanyaan yang mendefinisikan Aether OS 1.0.
+ * Audit §276 — enam belas pertanyaan yang mendefinisikan Damar OS 1.0.
  *
  * Dijalankan terhadap sistem yang BENAR-BENAR berjalan, bukan
  * terhadap ingatan. Roadmap yang mencentang kotak berdasarkan niat
@@ -32,12 +32,12 @@ function catat(pertanyaan, keadaan, bukti, catatan = null) {
  */
 const BASE = "http://localhost:3000/api/v1/console";
 
-let TOKEN = process.env.AETHER_TOKEN || null;
+let TOKEN = process.env.DAMAR_TOKEN || null;
 
 if (!TOKEN) {
     try {
         TOKEN = (require("node:fs").readFileSync(".env", "utf8")
-            .match(/^AETHER_TOKEN=(.+)$/m) || [])[1]?.trim() || null;
+            .match(/^DAMAR_TOKEN=(.+)$/m) || [])[1]?.trim() || null;
     }
     catch { /* daemon mungkin tanpa token */ }
 }
@@ -325,7 +325,7 @@ async function main() {
         //
         // Sekarang inferensi sungguhan dijalankan di proses anak yang
         // jalur keluarnya mati pada lapisan SOCKET sejak sebelum modul
-        // Aether dimuat. Berkasnya dipakai bersama uji regresi
+        // Damar dimuat. Berkasnya dipakai bersama uji regresi
         // tests/safety/offline.test.js supaya blokirnya hanya ada satu
         // definisi.
         const { spawnSync } = require("node:child_process");
@@ -370,7 +370,7 @@ async function main() {
         const tanda = `audit-prov-${Date.now()}`;
 
         await engine.remember(
-            `Kesimpulan Aether tentang ${tanda} yang belum dipastikan.`,
+            `Kesimpulan Damar tentang ${tanda} yang belum dipastikan.`,
             { type: "skills", metadata: { kind: "observation" } },
             engine.context({ writer: "coding-brain" })
         );
@@ -378,7 +378,7 @@ async function main() {
         const ctx = await MemoryService.buildContext(tanda, { limit: 8, maxChars: 1800 });
         const teks = String(ctx.text ?? "");
 
-        const sampai = teks.includes(tanda) && /catatan Aether|perkiraan/.test(teks);
+        const sampai = teks.includes(tanda) && /catatan Damar|perkiraan/.test(teks);
 
         return {
             keadaan: sampai ? "LULUS" : "SEBAGIAN",
@@ -421,14 +421,14 @@ async function main() {
         // Rahasia tidak boleh terlihat oleh kode yang dijalankan.
         const sandbox = require("../src/core/safety/codeSandbox");
 
-        const semula = process.env.AETHER_TOKEN;
-        process.env.AETHER_TOKEN = "uji-audit";
+        const semula = process.env.DAMAR_TOKEN;
+        process.env.DAMAR_TOKEN = "uji-audit";
 
         let bocor;
-        try { bocor = sandbox.env().AETHER_TOKEN !== undefined; }
+        try { bocor = sandbox.env().DAMAR_TOKEN !== undefined; }
         finally {
-            if (semula === undefined) delete process.env.AETHER_TOKEN;
-            else process.env.AETHER_TOKEN = semula;
+            if (semula === undefined) delete process.env.DAMAR_TOKEN;
+            else process.env.DAMAR_TOKEN = semula;
         }
 
         return {
@@ -500,7 +500,7 @@ async function main() {
     // ---- Laporan -------------------------------------------------
     const lambang = { LULUS: "[LULUS]   ", SEBAGIAN: "[SEBAGIAN]", BELUM: "[BELUM]   " };
 
-    console.log("\n=== Audit §276 — Aether OS 1.0 ===\n");
+    console.log("\n=== Audit §276 — Damar OS 1.0 ===\n");
 
     for (const h of hasil) {
         console.log(`${lambang[h.keadaan]} ${h.pertanyaan}`);

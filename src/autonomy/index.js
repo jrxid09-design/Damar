@@ -1,5 +1,5 @@
 /**
- * AutonomyService — facade runtime otonom Aether (§53).
+ * AutonomyService — facade runtime otonom Damar (§53).
  *
  * Dipanggil oleh controller, AI tools, dan worker latar. Semua modul
  * memakai infrastruktur yang SUDAH ADA sebagai tulang punggung:

@@ -1,6 +1,6 @@
-# Aether Console
+# Damar Console
 
-Aplikasi desktop (Electron) untuk memantau dan mengendalikan daemon Aether:
+Aplikasi desktop (Electron) untuk memantau dan mengendalikan daemon Damar:
 kesiapan sistem, chat langsung dengan AI, manajemen model, plugin & tool,
 integrasi eksternal, serta konfigurasi mikrofon/kamera/sensor.
 
@@ -63,16 +63,16 @@ Di **PC rumah**, isi `.env`:
 ```
 HOST=0.0.0.0
 PORT=3000
-AETHER_TOKEN=<token-acak-panjang>
+DAMAR_TOKEN=<token-acak-panjang>
 ```
 
 Di **laptop**, buka Console → **Settings**:
 
 - Alamat daemon: `http://<ip-lan-pc>:3000`
-- Token akses: token yang sama dengan `AETHER_TOKEN`
+- Token akses: token yang sama dengan `DAMAR_TOKEN`
 
 > Daemon mendengarkan di `0.0.0.0`, jadi begitu berjalan di PC rumah ia
-> terjangkau semua perangkat pada LAN yang sama. Tanpa `AETHER_TOKEN`,
+> terjangkau semua perangkat pada LAN yang sama. Tanpa `DAMAR_TOKEN`,
 > endpoint chat, eksekusi tool, dan filesystem terbuka tanpa autentikasi.
 > Set token sebelum daemon dipakai di jaringan bersama.
 
@@ -102,7 +102,7 @@ lewat `preload.js`.
 
 ## Bidang kendali (Console API)
 
-Semua di bawah `/api/v1/console`. Bila `AETHER_TOKEN` diset, sertakan
+Semua di bawah `/api/v1/console`. Bila `DAMAR_TOKEN` diset, sertakan
 header `Authorization: Bearer <token>`.
 
 | Method | Endpoint | Guna |
@@ -135,7 +135,7 @@ header `Authorization: Bearer <token>`.
 
 ## Sensor
 
-Aether tidak membaca hardware secara langsung. Setiap sensor didefinisikan
+Damar tidak membaca hardware secara langsung. Setiap sensor didefinisikan
 sebagai endpoint HTTP yang mengembalikan JSON:
 
 ```json

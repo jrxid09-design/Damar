@@ -1,7 +1,7 @@
 import { api } from "./api.js";
 
 /**
- * Suara untuk Aether.
+ * Suara untuk Damar.
  *
  * Keluar (TTS): speechSynthesis milik OS — offline, tanpa server.
  * Masuk (STT): rekam mic → kirim ke daemon → teks.

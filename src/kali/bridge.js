@@ -5,7 +5,7 @@ const sandbox = require("../core/safety/codeSandbox");
 const pexec = promisify(execFile);
 
 /**
- * bridge — satu-satunya jalur Aether menjalankan Kali Linux.
+ * bridge — satu-satunya jalur Damar menjalankan Kali Linux.
  *
  * Kali di mesin Windows hidup sebagai distro WSL; di mesin Linux ia
  * mungkin sistem itu sendiri. Modul ini menyembunyikan perbedaan itu:
@@ -40,7 +40,7 @@ async function distro() {
 
     if (_distro !== undefined) return _distro || null;
 
-    if (process.env.AETHER_KALI_DISTRO) return (_distro = process.env.AETHER_KALI_DISTRO);
+    if (process.env.DAMAR_KALI_DISTRO) return (_distro = process.env.DAMAR_KALI_DISTRO);
 
     if (process.platform !== "win32") return (_distro = "");   // Linux: jalankan lokal
 
@@ -69,7 +69,7 @@ async function available() {
  * Jalankan satu perintah DI DALAM Kali.
  *
  * Rahasia daemon TIDAK diwariskan ke proses (sandbox.env) — satu tool
- * yang membaca AETHER_TOKEN dari environment cukup untuk membocorkannya.
+ * yang membaca DAMAR_TOKEN dari environment cukup untuk membocorkannya.
  * Login-shell (`bash -lc`) dipakai agar PATH tool Kali (/usr/bin,
  * /usr/sbin, dan paket apt) termuat.
  */
@@ -79,7 +79,7 @@ async function run(command, { timeout = 300000, cwd } = {}) {
 
     const d = await distro();
     if (process.platform === "win32" && !d) {
-        return { ok: false, error: "Distro Kali WSL tak ditemukan. Pasang: `wsl --install -d kali-linux`, atau set AETHER_KALI_DISTRO." };
+        return { ok: false, error: "Distro Kali WSL tak ditemukan. Pasang: `wsl --install -d kali-linux`, atau set DAMAR_KALI_DISTRO." };
     }
 
     const script = cwd ? `cd ${shq(cwd)} && ${command}` : command;

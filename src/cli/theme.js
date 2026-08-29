@@ -1,11 +1,11 @@
 const chalk = require("chalk");
 
 /**
- * Palet terminal Aether — disnap ke token KANONIK Console
- * (apps/console/renderer/styles/aether.tokens.css), bukan lagi
+ * Palet terminal Damar — disnap ke token KANONIK Console
+ * (apps/console/renderer/styles/damar.tokens.css), bukan lagi
  * gradien cyan→ungu generik:
  *
- *   amber  #FFB84D — identitas Aether (state idle / banner)
+ *   amber  #FFB84D — identitas Damar (state idle / banner)
  *   cyan   #00DFFF — aktif / sedang bekerja
  *   violet #7C5CFF — kognisi / berpikir
  *   hijau  #48E6A5 — sukses
@@ -34,7 +34,7 @@ c.accent2 = c.violet;
 c.accent3 = c.amber;
 
 const symbols = {
-    aether: c.amber("◆"),
+    damar: c.amber("◆"),
     you: c.cyanS("›"),
     ok: c.ok("✓"),
     warn: c.warn("!"),
@@ -72,7 +72,7 @@ function banner({ version = "", url = "", provider = "", model = "" } = {}) {
 
     return [
         "",
-        `  ${symbols.aether} ${c.amber.bold("AETHER")} ${c.muted("· personal AI daemon")}`,
+        `  ${symbols.damar} ${c.amber.bold("DAMAR")} ${c.muted("· personal AI daemon")}`,
         "",
         top,
         ...rows,

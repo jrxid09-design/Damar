@@ -944,3 +944,9 @@ routes console, tests/helpers/testEnv.js.
 - Aksi: git clone reconurge/flowsint -> C:\Users\jrxid\Downloads\flowsint (874 files)
 - Konteks: Repo OSINT (Flowsint) diposting akun Threads @anonymous_deadbeef (Andrejs Dudarevs / kurator). Clue dari user.
 - Checkpoint: Aether (aether@local)
+
+## [2026-08-29] Rename identitas: Aether -> Damar, kolektif spesialis -> Pandawa
+- Proyek ini semula dikembangkan sebagai **Aether** dan berganti nama menjadi **Damar** setelah Wave 4 Lane 3 (Actuation Fabric V1, base `559bd1f`). Kolektif spesialisnya kini bernama **Pandawa**: Puntadewa (tata kelola/perencanaan), Werkudara (keamanan), Janaka (riset/intelijen), Nakula (rekayasa/operasi), Sadewa (memori/analisis/kontinuitas).
+- Log ini SENGAJA tidak ditulis ulang: entri di atas dibuat ketika sistem masih bernama Aether, dan itu memang benar secara historis. Hal yang sama berlaku untuk `docs/journal/*`, `docs/adr/*`, snapshot audit, `graphify-out/`, `_pruned_plugins/`, dan berkas `*.bak*`.
+- Rincian lengkap (klasifikasi tiap referensi, alias kompatibilitas, migrasi persistensi, invariant keamanan yang tidak berubah): `docs/architecture/DAMAR-IDENTITY-MIGRATION.md`.
+- Riwayat Git TIDAK ditulis ulang.

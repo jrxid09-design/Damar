@@ -7,16 +7,16 @@ import { createGestureControl } from "../lib/gesture/gestureControl.js";
 import { tts, MicRecorder } from "../lib/voice.js";
 
 /**
- * Layar utama Aether sebagai entitas hidup.
+ * Layar utama Damar sebagai entitas hidup.
  *
  * Avatar minibot di tengah bereaksi terhadap alur percakapan
  * (menyimak → berpikir → berbicara), dengan suara masuk (mic)
- * dan keluar (TTS). Ini wajah Aether — bukan sekadar kotak chat.
+ * dan keluar (TTS). Ini wajah Damar — bukan sekadar kotak chat.
  */
 
 // Konteks percakapan bertahan selama aplikasi hidup (di luar
 // render agar tidak hilang saat pindah tab).
-// Chat aplikasi Aether TERHUBUNG dengan chat Beranda & Panel Sistem:
+// Chat aplikasi Damar TERHUBUNG dengan chat Beranda & Panel Sistem:
 // semua membaca/menulis store.chat.sessions[activeId].messages yang
 // sama, jadi riwayat konsisten di semua layar selama sesi tak ditutup.
 function conv() {
@@ -51,12 +51,12 @@ const STATUS = {
     offline:   { text: "Tidak terhubung", tone: "danger" }
 };
 
-export const aether = {
+export const damar = {
 
-    id: "aether",
-    label: "Aether",
+    id: "damar",
+    label: "Damar",
     icon: "orb",
-    title: "Aether",
+    title: "Damar",
     subtitle: "Ngobrol langsung — dengan suara atau teks.",
 
     render(root) {
@@ -66,7 +66,7 @@ export const aether = {
         root.innerHTML = `
             <div class="view-head">
                 <div>
-                    <h1>Aether</h1>
+                    <h1>Damar</h1>
                     <p>Ngobrol langsung — dengan suara atau teks.</p>
                 </div>
                 <div class="actions">
@@ -84,21 +84,21 @@ export const aether = {
                 </div>
             </div>
 
-            <div class="aether-stage">
+            <div class="damar-stage">
 
-                <div class="aether-orb">
-                    <div class="aether-avatar-holder" id="ae-avatar"></div>
-                    <div class="aether-status" id="ae-status">
+                <div class="damar-orb">
+                    <div class="damar-avatar-holder" id="ae-avatar"></div>
+                    <div class="damar-status" id="ae-status">
                         <span class="dot"></span><span class="label">Siap</span>
                     </div>
-                    <div class="aether-mic-level"><div class="fill" id="ae-level"></div></div>
+                    <div class="damar-mic-level"><div class="fill" id="ae-level"></div></div>
                 </div>
 
-                <div class="aether-transcript" id="ae-transcript"></div>
+                <div class="damar-transcript" id="ae-transcript"></div>
 
             </div>
 
-            <div class="composer aether-composer">
+            <div class="composer damar-composer">
                 <button class="mic-btn" id="ae-mic" title="Tekan untuk bicara">
                     ${icon("mic")}
                 </button>
@@ -133,7 +133,7 @@ export const aether = {
 
         // Muat preferensi tersimpan.
         try {
-            const saved = await window.aether.settings.get();
+            const saved = await window.damar.settings.get();
             if (saved.tts) {
                 Object.assign(prefs, saved.tts);
                 speakToggle.checked = prefs.autoSpeak;
@@ -164,8 +164,8 @@ export const aether = {
         if (!sttConfigured) {
             micBtn.classList.add("disabled");
             micBtn.title =
-                "Suara-masuk belum dikonfigurasi (set AETHER_STT_URL). " +
-                "Kamu tetap bisa mengetik, dan Aether tetap menjawab dengan suara.";
+                "Suara-masuk belum dikonfigurasi (set DAMAR_STT_URL). " +
+                "Kamu tetap bisa mengetik, dan Damar tetap menjawab dengan suara.";
         }
 
         input.addEventListener("input", () => {
@@ -197,7 +197,7 @@ export const aether = {
             savePrefs();
             // Cicip suara terpilih.
             if (prefs.autoSpeak) {
-                tts.say("Halo, aku Aether.", { ...voiceOptions(), robot: prefs.robot });
+                tts.say("Halo, aku Damar.", { ...voiceOptions(), robot: prefs.robot });
             }
         });
 
@@ -375,8 +375,8 @@ async function toggleMic(root) {
 
     if (!sttConfigured) {
         toast(
-            "Suara-masuk belum dikonfigurasi. Set AETHER_STT_URL di daemon. " +
-            "Sementara, ketik saja — Aether tetap menjawab dengan suara.",
+            "Suara-masuk belum dikonfigurasi. Set DAMAR_STT_URL di daemon. " +
+            "Sementara, ketik saja — Damar tetap menjawab dengan suara.",
             "warn",
             6000
         );
@@ -472,8 +472,8 @@ function renderTranscript(root) {
     const msgs = conv();
     if (msgs.length === 0) {
         host.innerHTML = `
-            <div class="aether-hint">
-                ${esc("Sapa Aether — tanya kabar server, minta ingat sesuatu, atau apa saja.")}
+            <div class="damar-hint">
+                ${esc("Sapa Damar — tanya kabar server, minta ingat sesuatu, atau apa saja.")}
             </div>`;
         return;
     }
@@ -481,7 +481,7 @@ function renderTranscript(root) {
     // Tampilkan beberapa giliran terakhir agar avatar tetap fokus.
     host.innerHTML = msgs.slice(-6).map(message => {
 
-        const who = message.role === "user" ? "Kamu" : "Aether";
+        const who = message.role === "user" ? "Kamu" : "Damar";
         const cls = message.role === "user" ? "u" : "a";
 
         const body = message.error
@@ -558,5 +558,5 @@ function voiceOptions() {
 }
 
 function savePrefs() {
-    window.aether.settings.set({ tts: { ...prefs } }).catch(() => {});
+    window.damar.settings.set({ tts: { ...prefs } }).catch(() => {});
 }

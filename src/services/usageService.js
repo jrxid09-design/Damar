@@ -7,7 +7,7 @@ const telemetry = require("./telemetryService");
  * token (bila diketahui), error, dan status "limit habis hari ini".
  *
  * Dipakai untuk: graf pemakaian harian di Console, pra-alert saat mendekati
- * limit provider gratis, dan penanda agar Aether beralih dari provider yang
+ * limit provider gratis, dan penanda agar Damar beralih dari provider yang
  * kuota hariannya habis. Disimpan lokal (gitignored).
  */
 
@@ -72,7 +72,7 @@ function markLimited(provider) {
     store.write(data);
     if (!was) {
         telemetry.warn(`[usage] provider ${name} limit harian habis.`);
-        alert(`⛔ Limit harian provider "${name}" habis. Aether beralih ke provider lain. Lihat pemakaian di Console → Models.`);
+        alert(`⛔ Limit harian provider "${name}" habis. Damar beralih ke provider lain. Lihat pemakaian di Console → Models.`);
     }
     return !was;
 }

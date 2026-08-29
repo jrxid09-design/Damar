@@ -1,7 +1,7 @@
 /**
  * Pemilih tool: PROFIL yang stabil, bukan rakitan per pesan.
  *
- * Aether mendaftarkan 142 tool. Mengirim semuanya membuat prompt
+ * Damar mendaftarkan 142 tool. Mengirim semuanya membuat prompt
  * menembus 10.000 token, jadi harus dipilih. Versi sebelumnya
  * merakit daftar segar untuk tiap pesan berdasarkan skor kecocokan —
  * hemat token, dan ternyata itu keputusan yang salah.
@@ -25,7 +25,7 @@
  * pertama dan sama persis di semua profil: berpindah profil hanya
  * membatalkan cache mulai titik perbedaannya, bukan dari awal.
  *
- * Setel AETHER_TOOL_BUDGET=0 untuk mematikan (kirim semua tool).
+ * Setel DAMAR_TOOL_BUDGET=0 untuk mematikan (kirim semua tool).
  */
 
 /**
@@ -42,7 +42,7 @@ const CORE = [
     "filesystem.writeFile",
     "filesystem.listDirectory",
     // Otonomi — selalu tersedia: gap kapabilitas adalah jalur kerja
-    // Aether, bukan kemampuan opsional (§2 fixed-capability thinking).
+    // Damar, bukan kemampuan opsional (§2 fixed-capability thinking).
     "goal_run",
     "capability_search",
     "skill_build",
@@ -59,7 +59,7 @@ const CORE = [
     // promptnya memang menjanjikan tool yang tak pernah dikirim.
     "create_tool",
     "activate_tool",
-    // Layar adalah saluran KELUARAN Aether di Console, bukan
+    // Layar adalah saluran KELUARAN Damar di Console, bukan
     // kemampuan sampingan.
     //
     // Dulu ketiganya hanya hidup di profil `galeri`, jadi permintaan
@@ -136,7 +136,7 @@ const PROFILES = {
         "system_health", "nas_status", "nas_pools"
     ],
 
-    // Pertanyaan tentang kemampuan Aether sendiri. Tanpa profil ini,
+    // Pertanyaan tentang kemampuan Damar sendiri. Tanpa profil ini,
     // "buatkan skill image generation" tersangkut ke profil `galeri`
     // (dipicu kata "gambar") dan model dikirimi tool foto — bukan
     // tool untuk membangun kemampuan.
@@ -226,7 +226,7 @@ const PEMICU = {
 };
 
 /**
- * Tool yang selalu disertakan — tulang punggung Aether.
+ * Tool yang selalu disertakan — tulang punggung Damar.
  *
  * Dicocokkan pada RUAS TERAKHIR nama, karena tool hidup dengan dua
  * gaya penamaan: tool asli memakai namanya sendiri (`memory_recall`),
@@ -262,7 +262,7 @@ const ALWAYS = new Set([
  *                sendiri, dengan bayaran ± 16 detik per pesan
  */
 function idleMode() {
-    return String(process.env.AETHER_TOOLS_WHEN_IDLE || "none").toLowerCase();
+    return String(process.env.DAMAR_TOOLS_WHEN_IDLE || "none").toLowerCase();
 }
 
 /**
@@ -470,7 +470,7 @@ function selectTools(tools = [], text = "", budget = 32) {
     // Yang penting: "tanpa tool" juga sebuah keadaan STABIL, jadi
     // obrolan beruntun tetap menikmati cache prefix.
     //
-    // Setel AETHER_TOOLS_WHEN_IDLE=backbone untuk selalu mengirim inti.
+    // Setel DAMAR_TOOLS_WHEN_IDLE=backbone untuk selalu mengirim inti.
     if (!profil && !relevantAny(tools, haystack)) {
         return idleMode() === "backbone" ? susun(tools, [], budget, haystack) : [];
     }

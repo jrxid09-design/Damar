@@ -1,6 +1,6 @@
 /**
- * Aether Character States — kanonik.
- * Sumber: character/aether-state.json (source of truth).
+ * Damar Character States — kanonik.
+ * Sumber: character/damar-state.json (source of truth).
  *
  * Setiap state mendefinisikan parameter per-komponen:
  *   eyes   : { shape, scale, rotation (deg), brightness, color? }
@@ -90,7 +90,7 @@ export const STATE_SPECS = {
     }
 };
 
-/** Warna entitas per-state (hierarki warna aether-materials.json). */
+/** Warna entitas per-state (hierarki warna damar-materials.json). */
 export const STATE_COLOR = {
     IDLE: 0x00D9FF,
     FOCUSED: 0x00D9FF,
@@ -140,7 +140,7 @@ export function resolveState(name) {
 
 /**
  * Bentuk mata → [scaleX, scaleY, rotFactor] (rotFactor: +1 kiri, -1 kanan).
- * Ekspresi murni geometri — tanpa wajah manusia (AETHER_CHARACTER_RULES).
+ * Ekspresi murni geometri — tanpa wajah manusia (DAMAR_CHARACTER_RULES).
  */
 export const EYE_SHAPES = {
     vertical_oval: [1, 1, 0],
@@ -175,7 +175,7 @@ export const PATTERN_WEIGHTS = {
 };
 
 /**
- * Transisi (aether-state.json transitionRules):
+ * Transisi (damar-state.json transitionRules):
  * default 450ms smooth-damped; ANY→ALERT/ERROR cepat; pulih perlahan.
  * Diimplementasikan sebagai time-constant τ per target state.
  */

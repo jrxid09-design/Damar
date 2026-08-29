@@ -1,5 +1,5 @@
 /**
- * Aether Memory Graph — jaringan pengetahuan kanonik (canvas 2D).
+ * Damar Memory Graph — jaringan pengetahuan kanonik (canvas 2D).
  *
  * Spec: memori harus tampak seperti jaringan pengetahuan cerdas,
  * BUKAN database:
@@ -8,12 +8,12 @@
  *   - procedural → node proses CYAN-BIRU
  *   - important  → luminositas lebih tinggi
  *   - entitas    → node orbit (orang/rumah/kendaraan…) + link
- *   - retrieval  → aliran partikel menuju pusat (Aether)
+ *   - retrieval  → aliran partikel menuju pusat (Damar)
  *
  * Interaksi: hover = nilai eksak; tanpa WebGL (aksesibel & murah).
  */
 
-import { aetherState } from "../aetherState.js";
+import { damarState } from "../damarState.js";
 
 const COLOR = {
     episodic:   "#7C5CFF",
@@ -30,7 +30,7 @@ export function createMemoryGraph(host) {
     const canvas = document.createElement("canvas");
     canvas.className = "ae-memgraph";
     canvas.setAttribute("role", "img");
-    canvas.setAttribute("aria-label", "Graf jaringan memori Aether");
+    canvas.setAttribute("aria-label", "Graf jaringan memori Damar");
     const ctx = canvas.getContext("2d");
     host.appendChild(canvas);
 
@@ -52,8 +52,8 @@ export function createMemoryGraph(host) {
         nodes = [];
         links = [];
 
-        // Pusat: Aether (cognitive core).
-        nodes.push({ id: "__aether", label: "Aether", type: "core", x: 0, y: 0, vx: 0, vy: 0, r: 13, fixed: true });
+        // Pusat: Damar (cognitive core).
+        nodes.push({ id: "__damar", label: "Damar", type: "core", x: 0, y: 0, vx: 0, vy: 0, r: 13, fixed: true });
 
         const entMap = new Map();
 
@@ -177,7 +177,7 @@ export function createMemoryGraph(host) {
             ctx.globalAlpha = n.type === "core" ? 1 : isHover ? 1 : 0.82;
             ctx.beginPath();
             if (n.type === "core") {
-                // Diamond — identitas Aether.
+                // Diamond — identitas Damar.
                 ctx.moveTo(x, y - n.r * 1.4); ctx.lineTo(x + n.r, y);
                 ctx.lineTo(x, y + n.r * 1.4); ctx.lineTo(x - n.r, y);
             } else {

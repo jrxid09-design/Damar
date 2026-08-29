@@ -11,7 +11,7 @@ const pexec = promisify(execFile);
  * immichDeployService — MEMASANG & mengelola Immich sebagai container
  * (berbeda dari immichService yang MEMAKAI Immich lewat API).
  *
- * Immich berjalan via Docker Compose. Aether menulis .env dari disk pool
+ * Immich berjalan via Docker Compose. Damar menulis .env dari disk pool
  * pilihan pengguna lalu menyalakan/mematikan stack. Tanpa Docker (mis.
  * laptop dev) status ditandai unavailable — bukan error fatal. Data
  * (foto/video + DB) di <pool>/immich, ikut disk NAS, bukan di repo.

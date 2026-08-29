@@ -9,7 +9,7 @@ const pexec = promisify(execFile);
 const OPTS = { timeout: 120000, windowsHide: true, maxBuffer: 32 * 1024 * 1024 };
 
 /**
- * auditor — mesin audit keamanan (Aether sebagai insinyur keamanan).
+ * auditor — mesin audit keamanan (Damar sebagai insinyur keamanan).
  *
  * Tiga pemeriksaan yang paling sering menemukan kerusakan nyata dan
  * bisa dibuktikan tanpa menebak: rahasia yang ter-commit, dependensi

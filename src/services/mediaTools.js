@@ -3,18 +3,18 @@ const { AITool } = require("../ai/tools");
 const telemetry = require("./telemetryService");
 
 /**
- * Tool media & aksi nyata Aether.
+ * Tool media & aksi nyata Damar.
  *
- * Aether tidak hanya menjawab dengan teks: ia bisa MENAMPILKAN
+ * Damar tidak hanya menjawab dengan teks: ia bisa MENAMPILKAN
  * gambar/video/dokumen di layar, MEMBUKA halaman web untuk riset,
  * dan MENGOPERASIKAN perangkat (buka aplikasi, isi form, klik).
  *
  * Tiga kategori:
  *
- *   1. Presentasi Ã¢â‚¬â€ dipancarkan sebagai event `aether:present`;
+ *   1. Presentasi Ã¢â‚¬â€ dipancarkan sebagai event `damar:present`;
  *      Console yang tersambung menampilkannya di jendela/panel.
  *
- *   2. Browsing Ã¢â‚¬â€ ambil halaman web & kembalikan isinya agar Aether
+ *   2. Browsing Ã¢â‚¬â€ ambil halaman web & kembalikan isinya agar Damar
  *      bisa membaca sumber yang valid (bukan mengarang jawaban).
  *
  *   3. Kendali perangkat Ã¢â‚¬â€ jembatan ke plugin desktop (cursor,
@@ -54,9 +54,9 @@ function mediaTools() {
                         displayUrl = "data:" + mime + ";base64," + buf.toString("base64");
                     }
                 } catch (e) {
-                    console.error("[aether] show_image: konversi lokal gagal:", String(e).slice(0, 200));
+                    console.error("[damar] show_image: konversi lokal gagal:", String(e).slice(0, 200));
                 }
-                telemetry.publish("aether:present", {
+                telemetry.publish("damar:present", {
                     kind: "image", url: displayUrl, caption: caption ?? null
                 });
                 return { ok: true, shown: "image", url: displayUrl, converted: displayUrl !== url };
@@ -90,9 +90,9 @@ function mediaTools() {
                         displayUrl = "data:" + mime + ";base64," + buf.toString("base64");
                     }
                 } catch (e) {
-                    console.error("[aether] show_audio: konversi lokal gagal:", String(e).slice(0, 200));
+                    console.error("[damar] show_audio: konversi lokal gagal:", String(e).slice(0, 200));
                 }
-                telemetry.publish("aether:present", {
+                telemetry.publish("damar:present", {
                     kind: "audio", url: displayUrl, caption: caption ?? null
                 });
                 return { ok: true, shown: "audio", url: displayUrl, converted: displayUrl !== url };
@@ -112,7 +112,7 @@ function mediaTools() {
                 required: ["url"]
             },
             execute: async ({ url, caption }) => {
-                telemetry.publish("aether:present", {
+                telemetry.publish("damar:present", {
                     kind: "video", url, caption: caption ?? null
                 });
                 return { ok: true, shown: "video", url };
@@ -150,7 +150,7 @@ function mediaTools() {
                     `symbol=${encodeURIComponent(s)}&interval=${encodeURIComponent(iv)}` +
                     "&theme=dark&style=1&locale=id&hideideas=1&hidesidetoolbar=0&withdateranges=1&allow_symbol_change=1";
 
-                telemetry.publish("aether:present", {
+                telemetry.publish("damar:present", {
                     kind: "chart", symbol: s, interval: iv, embedUrl, title: `Chart ${s}`
                 });
 
@@ -172,7 +172,7 @@ function mediaTools() {
                 required: ["path"]
             },
             execute: async ({ path, title }) => {
-                telemetry.publish("aether:present", {
+                telemetry.publish("damar:present", {
                     kind: "document", url: path, caption: title ?? null
                 });
                 return { ok: true, shown: "document", path };
@@ -194,7 +194,7 @@ function mediaTools() {
                 required: ["url"]
             },
             execute: async ({ url }) => {
-                telemetry.publish("aether:present", { kind: "url", url });
+                telemetry.publish("damar:present", { kind: "url", url });
                 return { ok: true, opened: url };
             }
         }),
@@ -220,7 +220,7 @@ function mediaTools() {
                 try {
 
                     const res = await fetch(String(url), {
-                        headers: { "User-Agent": "Aether/1.0 (+research)" },
+                        headers: { "User-Agent": "Damar/1.0 (+research)" },
                         signal: controller.signal,
                         redirect: "follow"
                     });
@@ -283,7 +283,7 @@ function mediaTools() {
                 }
             },
             execute: async ({ command, title }) => {
-                telemetry.publish("aether:present", {
+                telemetry.publish("damar:present", {
                     kind: "terminal", command: command ?? null, caption: title ?? null
                 });
                 return { ok: true, opened: "terminal", command: command ?? null };
@@ -294,7 +294,7 @@ function mediaTools() {
             name: "open_app",
             description:
                 "Buka aplikasi di komputer pengguna (browser, editor, dsb) " +
-                "secara langsung oleh Aether. Pakai saat pengguna meminta " +
+                "secara langsung oleh Damar. Pakai saat pengguna meminta " +
                 "'buka aplikasi Ã¢â‚¬Â¦'.",
             parameters: {
                 type: "object",
@@ -317,7 +317,7 @@ function mediaTools() {
             name: "fill_form",
             description:
                 "Isi sebuah kolom/form pada aplikasi yang sedang terbuka, " +
-                "langsung oleh Aether. Pakai saat pengguna meminta 'isi form Ã¢â‚¬Â¦', " +
+                "langsung oleh Damar. Pakai saat pengguna meminta 'isi form Ã¢â‚¬Â¦', " +
                 "'ketik Ã¢â‚¬Â¦ di kolom Ã¢â‚¬Â¦'.",
             parameters: {
                 type: "object",
@@ -339,7 +339,7 @@ function mediaTools() {
         new AITool({
             name: "desktop_type",
             description:
-                "Ketik teks ke jendela yang sedang aktif, langsung oleh Aether. " +
+                "Ketik teks ke jendela yang sedang aktif, langsung oleh Damar. " +
                 "Pakai saat pengguna meminta mengetik sesuatu di layar.",
             parameters: {
                 type: "object",
@@ -382,7 +382,7 @@ function mediaTools() {
             name: "desktop_mouse_move",
             description:
                 "Gerakkan kursor mouse ke koordinat layar (piksel absolut) " +
-                "langsung oleh Aether di Windows. Pakai untuk membidik tombol/area " +
+                "langsung oleh Damar di Windows. Pakai untuk membidik tombol/area " +
                 "sebelum mengklik. BUKAN xdotool (itu Linux dan gagal di sini).",
             parameters: {
                 type: "object",
@@ -405,7 +405,7 @@ function mediaTools() {
             name: "desktop_click",
             description:
                 "Klik mouse (left/right/middle) di posisi kursor sekarang, atau di " +
-                "koordinat (x,y) bila diberikan Ã¢â‚¬â€ langsung oleh Aether di Windows. " +
+                "koordinat (x,y) bila diberikan Ã¢â‚¬â€ langsung oleh Damar di Windows. " +
                 "Pakai untuk menekan tombol Play, memilih menu, dsb.",
             parameters: {
                 type: "object",

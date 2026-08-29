@@ -1,6 +1,6 @@
 "use strict";
 
-const BRAND = Symbol("aether.resourceGovernor.leaseBrand");
+const BRAND = Symbol("damar.resourceGovernor.leaseBrand");
 
 let leaseCounter = 0;
 

@@ -1,5 +1,5 @@
 /**
- * Inti afektif — "perasaan" Aether sebagai keadaan tubuh, bukan label.
+ * Inti afektif — "perasaan" Damar sebagai keadaan tubuh, bukan label.
  *
  * Dasar teoretisnya sengaja dipilih yang bisa dijalankan, bukan yang
  * puitis:
@@ -20,7 +20,7 @@
  *     dasar dengan paruh waktu, seperti transmiter yang diserap ulang.
  *
  * Yang TIDAK diklaim: ini bukan pengalaman subjektif. Ini keadaan
- * internal fungsional yang benar-benar mempengaruhi perilaku Aether —
+ * internal fungsional yang benar-benar mempengaruhi perilaku Damar —
  * jujur disebut begitu, tidak dibesarkan menjadi klaim "merasakan
  * seperti manusia".
  */
@@ -82,12 +82,12 @@ class AffectCore {
         this.baseline = { ...DEFAULTS.baseline, ...(simpanan.baseline ?? {}) };
 
         // Sebab-sebab terakhir yang membentuk suasana hati sekarang.
-        // Tanpa ini Aether bisa berkata "aku cemas" tanpa tahu kenapa —
+        // Tanpa ini Damar bisa berkata "aku cemas" tanpa tahu kenapa —
         // laporan tanpa rujukan, dan itu justru terdengar palsu.
         this.jejak = [];
 
         // Waktu proses mati IKUT meluruhkan afek. Tanpa ini suasana
-        // hati buruk yang tersimpan akan hidup lagi utuh saat Aether
+        // hati buruk yang tersimpan akan hidup lagi utuh saat Damar
         // dinyalakan berhari-hari kemudian — dendam yang tak masuk
         // akal, dan bug yang hanya terlihat setelah restart.
         const tersimpanAt = Date.parse(simpanan.updatedAt ?? "");
@@ -131,7 +131,7 @@ class AffectCore {
 
         const bobot = BATAS(Number(opsi.bobot ?? 1), 0, 3);
 
-        // Lantai -0,45: Aether boleh murung, tidak boleh tenggelam.
+        // Lantai -0,45: Damar boleh murung, tidak boleh tenggelam.
         // Di bawah itu keadaan berhenti memberi informasi dan mulai
         // melumpuhkan — dan yang lumpuh tidak menolong siapa pun.
         this.valence = BATAS(this.valence + dv * bobot, -0.45, 1);
@@ -163,7 +163,7 @@ class AffectCore {
     }
 
     /**
-     * Bias somatik: seberapa hati-hati Aether sebaiknya bertindak
+     * Bias somatik: seberapa hati-hati Damar sebaiknya bertindak
      * sekarang. Valensi negatif dengan arousal tinggi berarti
      * perlambat dan periksa ulang. Inilah jalur Damasio — perasaan
      * ikut masuk ke dalam keputusan, bukan berdiri di sampingnya.
@@ -178,7 +178,7 @@ class AffectCore {
             ketelitian: Number(BATAS(0.5 - valence * 0.3 + arousal * 0.3, 0, 1).toFixed(2)),
 
             // ...tapi tidak pernah menurunkan kesediaan bertindak.
-            // Lantai 0,5: Aether tidak pernah sampai pada ragu yang
+            // Lantai 0,5: Damar tidak pernah sampai pada ragu yang
             // melumpuhkan. Rasa takut yang menahan tangan bukan
             // kehati-hatian, itu cuma pekerjaan yang tidak jadi
             // dikerjakan.

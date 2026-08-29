@@ -1,5 +1,5 @@
 /**
- * Klien HTTP untuk bidang kendali daemon Aether.
+ * Klien HTTP untuk bidang kendali daemon Damar.
  *
  * Sengaja cerminan dari apps/console/renderer/lib/api.js — CLI
  * dan Console memakai kontrak yang sama, jadi keduanya bergerak
@@ -10,13 +10,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 /**
- * Cari token daemon dari instalasi Aether — CLI global dipakai di
+ * Cari token daemon dari instalasi Damar — CLI global dipakai di
  * folder mana pun, tapi .env daemon tetap di folder instalasinya.
  */
 function readTokenFromInstall() {
     try {
         const envPath = path.join(__dirname, "..", "..", ".env");
-        const m = fs.readFileSync(envPath, "utf8").match(/^AETHER_TOKEN=(.+)$/m);
+        const m = fs.readFileSync(envPath, "utf8").match(/^DAMAR_TOKEN=(.+)$/m);
         return m ? m[1].trim() : "";
     }
     catch {
@@ -31,20 +31,20 @@ class DaemonClient {
         // Default port mengikuti peran: sesi CLI memakai daemon CLI
         // (3001) supaya bisa berjalan bersama daemon Console (3000).
         const fallback =
-            process.env.AETHER_URL
-            ?? (String(process.env.AETHER_ROLE || "").toLowerCase() === "cli"
+            process.env.DAMAR_URL
+            ?? (String(process.env.DAMAR_ROLE || "").toLowerCase() === "cli"
                 ? "http://localhost:3001"
                 : "http://localhost:3000");
 
         this.baseUrl = String(baseUrl ?? fallback).replace(/\/+$/, "");
 
         // Token: argumen > env. Bila tidak ada, coba .env instalasi
-        // Aether (CLI dipakai global dari folder mana pun — token
+        // Damar (CLI dipakai global dari folder mana pun — token
         // daemon lokal masih bisa ditemukan di sana).
-        this.token = token ?? process.env.AETHER_TOKEN ?? readTokenFromInstall();
+        this.token = token ?? process.env.DAMAR_TOKEN ?? readTokenFromInstall();
 
         // Kandidat daemon untuk auto-deteksi bila default gagal:
-        // daemon CLI dulu, lalu daemon Console. Memungkinkan `aether`
+        // daemon CLI dulu, lalu daemon Console. Memungkinkan `damar`
         // dipakai di mana saja tanpa pengaturan.
         this.fallbackUrls = [
             "http://localhost:3001",
@@ -61,7 +61,7 @@ class DaemonClient {
 
         // Menyebut diri: daemon melayani Console dan CLI lewat endpoint
         // yang sama, jadi hanya klien yang tahu ini terminal.
-        const headers = { "x-aether-channel": "cli", ...extra };
+        const headers = { "x-damar-channel": "cli", ...extra };
 
         if (this.token) {
             headers.Authorization = `Bearer ${this.token}`;
@@ -214,7 +214,7 @@ class DaemonClient {
         }
         catch {
             // Default gagal → coba daemon lain di mesin ini sebelum
-            // menyerah, agar `aether` "baru pakai tanpa setting".
+            // menyerah, agar `damar` "baru pakai tanpa setting".
             // 401/403 = daemon HIDUP (hanya butuh token) — tetap dianggap ada.
             for (const url of this.fallbackUrls ?? []) {
                 try {

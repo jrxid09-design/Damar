@@ -29,8 +29,24 @@ const { fail } = require("./errors");
 const DEFAULTS = Object.freeze({
     maxResults: 256,
     maxManifestBytes: BOUNDS.MAX_MANIFEST_BYTES,
-    manifestFileName: "aether-extension.json"
+    manifestFileName: "damar-extension.json"
 });
+
+/**
+ * Nama manifest EJAAN LAMA (pra-rename Aether → Damar).
+ *
+ * Ekstensi pihak ketiga yang sudah terpasang di disk memakai nama
+ * ini. Dipakai HANYA sebagai cadangan saat pemanggil tidak menimpa
+ * `manifestFileName` dan berkas kanonik tidak ada — jadi tidak ada
+ * dua kontrak aktif, hanya satu jalur migrasi.
+ *
+ * Semantik discovery tidak berubah: tetap satu tingkat kedalaman,
+ * urutan deterministik, `scanned` dihitung sekali per direktori,
+ * dan `NO_MANIFEST` tetap muncul bila kedua ejaan tidak ada.
+ *
+ * DEPRECATED — lihat docs/architecture/DAMAR-IDENTITY-MIGRATION.md.
+ */
+const LEGACY_MANIFEST_FILE = "aether-extension.json";
 
 /**
  * @param {object} options
@@ -62,7 +78,14 @@ function discoverExtensions({ roots = [], maxResults = DEFAULTS.maxResults, mani
             if (found.size >= maxResults) break;
             if (!entry.isDirectory()) continue;
             const sourcePath = path.join(String(root), entry.name);
-            const result = readManifestAt(path.join(sourcePath, manifestFileName), sourcePath);
+            let result = readManifestAt(path.join(sourcePath, manifestFileName), sourcePath);
+            // Cadangan ejaan lama: HANYA bila nama kanonik dipakai dan
+            // berkasnya memang tidak ada (bukan terlalu besar/tak terbaca).
+            if (result.problem
+                && result.problem.kind === "NO_MANIFEST"
+                && manifestFileName === DEFAULTS.manifestFileName) {
+                result = readManifestAt(path.join(sourcePath, LEGACY_MANIFEST_FILE), sourcePath);
+            }
             scanned += 1;
             if (result.problem) {
                 problems.push(result.problem);

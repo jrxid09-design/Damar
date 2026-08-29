@@ -19,7 +19,7 @@ const binance = require("../services/binanceService");
  *   3. JURNAL. Tiap ide dicatat beserta HASILNYA. Tanpa ini "jago cari
  *      uang" cuma klaim: strategi yang kelihatan pintar di layar dan
  *      rugi di rekening akan terus dipakai karena tak ada yang
- *      menghitung. Jurnal membuat Aether bisa dibantah oleh angkanya
+ *      menghitung. Jurnal membuat Damar bisa dibantah oleh angkanya
  *      sendiri.
  *
  * Yang JUJUR disebut di muka: tidak ada pemindai yang menjamin untung.

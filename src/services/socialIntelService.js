@@ -5,7 +5,7 @@ const JsonStore = require("../core/config/JsonStore");
 const telemetry = require("./telemetryService");
 
 /**
- * Aether Social Intelligence — analisis akun sosial media.
+ * Damar Social Intelligence — analisis akun sosial media.
  *
  * Fitur:
  *   1. Bot detection — apakah akun asli atau bot (skor 0-100).
@@ -26,7 +26,7 @@ const telemetry = require("./telemetryService");
  *   - Fact-check: katalog klaim + sumber terpercaya.
  */
 
-const FILE = process.env.AETHER_SOCIAL_INTEL_FILE
+const FILE = process.env.DAMAR_SOCIAL_INTEL_FILE
     || path.join(__dirname, "..", "..", "configs", "social-intel.json");
 
 const store = new JsonStore(FILE, { traces: {}, factChecks: {}, networks: {} });
@@ -328,7 +328,7 @@ async function traceComments(username, { platforms = 15 } = {}) {
     // isinya.
     //
     // Versi lama mengambil halaman HTML profil dengan User-Agent
-    // "Aether-OSINT/1.0", menganggap "status 200 = ada komentar", lalu
+    // "Damar-OSINT/1.0", menganggap "status 200 = ada komentar", lalu
     // mengorek teks dengan regex <p>/<div class=comment>. Tiga hal
     // membuatnya selalu nihil: situs-situs itu menolak atau menyajikan
     // dinding login untuk klien non-browser; halaman modern merakit
@@ -720,7 +720,7 @@ function checkHoax(claim) {
         score: hoaxScore,
         explanation: "Tidak ditemukan di katalog fakta. Analisis heuristik: " +
             (hoaxScore >= 50 ? "mengandung kata-kata yang sering muncul di misinformasi." : "tidak ada pola misinformasi yang jelas."),
-        source: "Aether heuristik",
+        source: "Damar heuristik",
         matchedKeyword: null,
         warning: "Selalu verifikasi ke sumber terpercaya sebelum menyebarkan."
     };
@@ -782,7 +782,7 @@ async function traceSpreader(claim) {
     for (const platform of SEARCH_PLATFORMS) {
         try {
             const res = await fetch(platform.searchUrl, {
-                headers: { "User-Agent": "Mozilla/5.0 (compatible; Aether-OSINT/1.0)" },
+                headers: { "User-Agent": "Mozilla/5.0 (compatible; Damar-OSINT/1.0)" },
                 signal: AbortSignal.timeout(10000)
             });
 

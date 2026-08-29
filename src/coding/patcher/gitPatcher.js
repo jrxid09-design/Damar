@@ -35,7 +35,7 @@ class GitPatcher {
 
     /** Buat branch kerja untuk sebuah tugas (aman; tak menyentuh main). */
     async createBranch(name, project = process.cwd()) {
-        const safe = String(name).trim().replace(/[^\w./-]+/g, "-").slice(0, 80) || `aether/${Date.now()}`;
+        const safe = String(name).trim().replace(/[^\w./-]+/g, "-").slice(0, 80) || `damar/${Date.now()}`;
         await git(["checkout", "-b", safe], project);
         telemetry.info(`[coding/patch] branch: ${safe}`);
         return { branch: safe };
@@ -45,7 +45,7 @@ class GitPatcher {
     async commit(message, project = process.cwd(), { all = true } = {}) {
         if (all) await git(["add", "-A"], project);
         try {
-            const out = await git(["commit", "-m", String(message || "chore: perubahan Aether")], project);
+            const out = await git(["commit", "-m", String(message || "chore: perubahan Damar")], project);
             return { committed: true, out };
         }
         catch (e) { return { committed: false, out: e.message }; }

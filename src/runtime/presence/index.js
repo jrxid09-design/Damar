@@ -1,7 +1,7 @@
 /**
  * Presence Runtime V0 — pintu masuk publik.
  *
- * Presence lifecycle kanon Aether: apa state entitas yang berjalan,
+ * Presence lifecycle kanon Damar: apa state entitas yang berjalan,
  * mengapa demikian, dan transisi apa yang legal. Lihat
  * docs/architecture/PRESENCE-RUNTIME-V0.md.
  */

@@ -53,7 +53,7 @@ const EVAL_REASONS = Object.freeze({
 });
 
 // Unforgeable brand token for canonical positive evaluations (closure-only).
-const EVAL_BRAND = Symbol("aether.authority.evaluation.brand");
+const EVAL_BRAND = Symbol("damar.authority.evaluation.brand");
 const brandGate = new WeakSet();  // registered branded evaluation objects
 
 function brandEvaluation(result) {

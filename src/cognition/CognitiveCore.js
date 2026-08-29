@@ -12,8 +12,8 @@ const ExperienceEncoder = require("./autobiography/ExperienceEncoder");
 /**
  * COGNITIVE CORE (§43–§45/§59) — orkestrator shadow-only.
  *
- * AETHER_ACC=off  → semua metode no-op (nol jejak, §109).
- * AETHER_ACC=shadow → observasi/persist/appraise/workspace/witness/
+ * DAMAR_ACC=off  → semua metode no-op (nol jejak, §109).
+ * DAMAR_ACC=shadow → observasi/persist/appraise/workspace/witness/
  *                     predict/encode. TIDAK PERNAH: memilih tool,
  *                     mengubah permission/capabilitySet/role, mengeksekusi
  *                     aksi, mengubah routing/safety (§4 spesifikasi).

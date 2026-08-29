@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Aether Recovery Capsule V0 — RECOVERY SUBSTRATE.
+ * Damar Recovery Capsule V0 — RECOVERY SUBSTRATE.
  *
  * CONSTITUTIONAL INVARIANT: RECOVERY != AUTHORITY.
  * A capsule may preserve EVIDENCE that authority existed; it can never

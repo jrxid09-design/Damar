@@ -14,7 +14,7 @@ const JsonStore = require("../core/config/JsonStore");
  * lalu tempel di WhatsApp > Perangkat Tertaut > Tautkan dengan nomor.
  *
  * Keamanan: hanya melayani nomor yang diizinkan (privat) dan grup
- * yang didaftarkan (di grup Aether menjawab saat di-mention/di-reply).
+ * yang didaftarkan (di grup Damar menjawab saat di-mention/di-reply).
  *
  * ponytail: Baileys dep berat tapi tak terhindarkan (protokol WA
  * Web bukan "beberapa baris"); di-require malas agar daemon tetap
@@ -161,7 +161,7 @@ class WhatsAppService {
             auth: state,
             logger: silentLogger,
             printQRInTerminal: false,
-            browser: Browsers.ubuntu("Aether"),
+            browser: Browsers.ubuntu("Damar"),
             markOnlineOnConnect: false,
             syncFullHistory: false
         });
@@ -417,7 +417,7 @@ class WhatsAppService {
             jid, group: isGroup, preview: text.slice(0, 60)
         });
 
-        // Peran pengirim menentukan tool yang boleh dipakai Aether.
+        // Peran pengirim menentukan tool yang boleh dipakai Damar.
         const role = require("./roleService").roleOf(senderJid.split("@")[0].split(":")[0]);
 
         const media = this.mediaType(msg);
@@ -457,14 +457,17 @@ class WhatsAppService {
     }
 
     /**
-     * Apakah pesan grup ditujukan ke Aether? Cukup salah satu:
-     *  1) teks memuat kata "aether" (tanpa perlu mention/reply),
-     *  2) reply ke pesan bot, 3) mention @Aether.
+     * Apakah pesan grup ditujukan ke Damar? Cukup salah satu:
+     *  1) teks memuat kata "damar" (tanpa perlu mention/reply),
+     *  2) reply ke pesan bot, 3) mention @Damar.
      * Deteksi nomor bot toleran (device-suffix / format lid).
      */
     isTriggered(msg, text) {
         // 1) Kata pemicu â€” jalur utama & paling andal.
-        if (/aether/i.test(text || "")) return true;
+        //    "aether" = nama LAMA, diterima sebagai kompatibilitas
+        //    sapaan; ia menuju identitas yang SAMA (Damar), bukan
+        //    identitas kedua. DEPRECATED.
+        if (/damar|aether/i.test(text || "")) return true;
 
         const m = msg.message || {};
         const ctx =
@@ -481,7 +484,7 @@ class WhatsAppService {
 
         // 2) Reply ke pesan bot.
         if (meNums.has(norm(ctx.participant))) return true;
-        // 3) Mention @Aether.
+        // 3) Mention @Damar.
         if ((ctx.mentionedJid ?? []).some(j => meNums.has(norm(j)))) return true;
 
         return false;
@@ -523,7 +526,7 @@ class WhatsAppService {
         }
     }
 
-    /** Teruskan ke otak Aether (lengkap memori & tool sesuai peran). */
+    /** Teruskan ke otak Damar (lengkap memori & tool sesuai peran). */
     async converse(jid, text, msg, userRole = "user") {
         const aiRuntime = require("./aiRuntimeService");
         const { manager } = require("../channels");
@@ -662,7 +665,7 @@ class WhatsAppService {
 
     async replyWithMemory(jid, caption, seen, jenis, msg, userRole = "user") {
         if (caption) {
-            return this.converse(jid, `[Aether melihat ${jenis}: ${seen}]\n\nPertanyaan: ${caption}`, msg, userRole);
+            return this.converse(jid, `[Damar melihat ${jenis}: ${seen}]\n\nPertanyaan: ${caption}`, msg, userRole);
         }
         return this.send(jid, seen, msg);
     }
@@ -679,7 +682,7 @@ class WhatsAppService {
     /**
      * Ekstrak teks dari dokumen (PDF/DOCX/dsb) lewat extractor memori.
      * Ditulis ke berkas sementara karena extractor bekerja pada path,
-     * lalu dihapus lagi — isi dokumen tidak disimpan Aether.
+     * lalu dihapus lagi — isi dokumen tidak disimpan Damar.
      */
     async extractDocument(buffer, name) {
 
@@ -689,7 +692,7 @@ class WhatsAppService {
         const ext = (name.match(/\.[a-z0-9]+$/i)?.[0] ?? ".bin").toLowerCase();
         const tmp = require("node:path").join(
             os.tmpdir(),
-            `aether-wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`
+            `damar-wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`
         );
 
         await fsp.writeFile(tmp, buffer);
@@ -787,7 +790,7 @@ class WhatsAppService {
     }
 
     /**
-     * Daftar grup yang nomor Aether SUDAH tergabung â€” supaya di Settings
+     * Daftar grup yang nomor Damar SUDAH tergabung â€” supaya di Settings
      * pengguna tinggal memilih grup mana yang diizinkan (tanpa ketik id).
      */
     async listGroups() {
@@ -828,7 +831,7 @@ class WhatsAppService {
         }
         catch { /* opsional */ }
         await this.send(jid,
-            `Aether aktif âœ…\nCPU ${s.cpu.usage}% Â· RAM ${s.memory.usedPercent}%` +
+            `Damar aktif âœ…\nCPU ${s.cpu.usage}% Â· RAM ${s.memory.usedPercent}%` +
             `\nUptime ${Math.round(s.daemon.uptime / 60)} menit${providerLine}`, msg);
     }
 

@@ -3,7 +3,7 @@ import { icon } from "../lib/icons.js";
 import { esc, pill, toast } from "../lib/ui.js";
 
 /**
- * Vision — Aether melihat kamera/CCTV & webcam.
+ * Vision — Damar melihat kamera/CCTV & webcam.
  *
  * Tiga bagian: model vision (mis. llava di Ollama), analisis
  * langsung dari webcam (tangkap frame → analisis), dan kelola
@@ -33,7 +33,7 @@ export const vision = {
     label: "Vision",
     icon: "camera",
     title: "Vision",
-    subtitle: "Aether melihat — analisis kamera, CCTV, dan webcam.",
+    subtitle: "Damar melihat — analisis kamera, CCTV, dan webcam.",
 
     render(root) {
 
@@ -41,7 +41,7 @@ export const vision = {
             <div class="view-head">
                 <div>
                     <h1>Vision</h1>
-                    <p>Aether melihat — analisis kamera, CCTV, dan webcam.</p>
+                    <p>Damar melihat — analisis kamera, CCTV, dan webcam.</p>
                 </div>
             </div>
 
@@ -52,7 +52,7 @@ export const vision = {
                     <div class="panel">
                         <div class="panel-head"><h2>${icon("camera")} Webcam</h2></div>
                         <div class="video-frame" id="vis-frame">
-                            <div class="placeholder">Tekan "Nyalakan" untuk pratinjau,<br>lalu "Analisis" agar Aether melihat.</div>
+                            <div class="placeholder">Tekan "Nyalakan" untuk pratinjau,<br>lalu "Analisis" agar Damar melihat.</div>
                         </div>
                         <div class="row" style="margin-top:10px">
                             <button class="btn sm" id="vis-cam-on">${icon("play")} Nyalakan</button>
@@ -77,7 +77,7 @@ export const vision = {
                             </div>
                             <button class="btn primary sm" id="cam-add" style="margin-top:8px">${icon("plus")} Tambah kamera</button>
                             <div class="small dim" style="margin-top:10px">
-                                ${icon("chat")} Terhubung ke Chat: minta Aether
+                                ${icon("chat")} Terhubung ke Chat: minta Damar
                                 <em>"lihat kamera dapur"</em> — ia otomatis memakai kamera ini.
                             </div>
                         </div>
@@ -279,7 +279,7 @@ async function drawCameras(root) {
             row.querySelector("[data-see]").addEventListener("click", async () => {
                 const out = row.querySelector("[data-out]");
                 out.style.display = "block";
-                out.innerHTML = `<span class="spinner"></span> <span class="muted">Aether sedang melihat…</span>`;
+                out.innerHTML = `<span class="spinner"></span> <span class="muted">Damar sedang melihat…</span>`;
                 try {
                     const r = await api.seeCamera(id);
                     out.innerHTML = `<div class="small">${esc(r.text)}</div><div class="small dim mono" style="margin-top:4px">${esc(r.model)}</div>`;
@@ -407,7 +407,7 @@ function stopCam(root) {
     if (root) {
         const frame = root.querySelector("#vis-frame");
         if (frame) {
-            frame.innerHTML = `<div class="placeholder">Tekan "Nyalakan" untuk pratinjau,<br>lalu "Analisis" agar Aether melihat.</div>`;
+            frame.innerHTML = `<div class="placeholder">Tekan "Nyalakan" untuk pratinjau,<br>lalu "Analisis" agar Damar melihat.</div>`;
         }
     }
 }
@@ -431,7 +431,7 @@ async function analyzeWebcam(root) {
 
     const out = root.querySelector("#vis-result");
     out.style.display = "block";
-    out.innerHTML = `<span class="spinner"></span> <span class="muted">Aether sedang melihat…</span>`;
+    out.innerHTML = `<span class="spinner"></span> <span class="muted">Damar sedang melihat…</span>`;
 
     try {
         const r = await api.visionAnalyze({

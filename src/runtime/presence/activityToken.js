@@ -6,7 +6,7 @@
  * ke generasi — token dari generasi lama gagal (STALE_GENERATION).
  */
 
-const TOKEN_BRAND = Symbol("aether.presence.activityToken");
+const TOKEN_BRAND = Symbol("damar.presence.activityToken");
 
 let activityCounter = 0;
 

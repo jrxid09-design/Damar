@@ -1,7 +1,7 @@
 const os = require("node:os");
 
 /**
- * Alamat akses companion — di mana device bisa mencapai Aether.
+ * Alamat akses companion — di mana device bisa mencapai Damar.
  *
  * Klasifikasi interface jaringan:
  *   - tailscale : IP di rentang CGNAT 100.64.0.0/10 (100.64–100.127)

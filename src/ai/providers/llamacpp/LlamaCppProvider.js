@@ -9,7 +9,7 @@ const engine = require("./LlamaEngine");
  * Jalur inferensi lokal: tanpa HTTP, model GGUF
  * dimuat langsung ke proses daemon. chat() menjalankan SATU putaran
  * model — bila model memanggil tool, panggilannya dikembalikan sebagai
- * toolCalls agar loop tool Aether (yang sudah ada) mengeksekusinya,
+ * toolCalls agar loop tool Damar (yang sudah ada) mengeksekusinya,
  * lalu memanggil chat() lagi dengan hasilnya. Provider ini tidak
  * menjalankan tool sendiri.
  */
@@ -18,8 +18,8 @@ class LlamaCppProvider extends BaseAIProvider {
     constructor({ context, modelPath, contextSize, gpuLayers, mapper = new LlamaCppMapper() } = {}) {
         super(context);
         this.mapper = mapper;
-        this.modelDir = process.env.AETHER_MODEL_DIR || "models";
-        this.modelPath = modelPath || process.env.AETHER_MODEL_PATH || null;
+        this.modelDir = process.env.DAMAR_MODEL_DIR || "models";
+        this.modelPath = modelPath || process.env.DAMAR_MODEL_PATH || null;
         this.contextSize = contextSize;
         this.gpuLayers = gpuLayers;
     }
@@ -29,7 +29,7 @@ class LlamaCppProvider extends BaseAIProvider {
     /** Path model efektif: request.model (nama/berkas) menimpa bawaan. */
     _resolveModel(requestModel) {
         const pick = requestModel || this.modelPath;
-        if (!pick) throw new Error("Model lokal belum dipilih. Set AETHER_MODEL_PATH atau config providers.llamacpp.model.");
+        if (!pick) throw new Error("Model lokal belum dipilih. Set DAMAR_MODEL_PATH atau config providers.llamacpp.model.");
         // Nama berkas polos → cari di direktori model; path → apa adanya.
         if (!pick.includes("/") && !pick.includes("\\")) return path.join(this.modelDir, pick);
         return pick;
@@ -58,7 +58,7 @@ class LlamaCppProvider extends BaseAIProvider {
 
     /**
      * Streaming: node-llama-cpp memberi token lewat callback (push),
-     * sedangkan Aether menariknya (pull). Jembatani lewat antrean kecil —
+     * sedangkan Damar menariknya (pull). Jembatani lewat antrean kecil —
      * teks mengalir saat diproduksi, lalu satu chunk penutup membawa
      * toolCalls + done.
      */

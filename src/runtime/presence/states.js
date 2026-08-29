@@ -1,7 +1,7 @@
 /**
  * Presence Runtime V0 — kanon status, sebab transisi, dan graf legal.
  *
- * Presence menjawab satu pertanyaan: "Aether sedang dalam kondisi apa
+ * Presence menjawab satu pertanyaan: "Damar sedang dalam kondisi apa
  * sebagai entitas yang berjalan, mengapa demikian, dan transisi apa saja
  * yang sah?" Presence BUKAN otoritas, BUKAN kognisi, BUKAN aktuation.
  * Status presence tidak pernah menyiratkan izin apa pun.

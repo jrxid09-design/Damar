@@ -54,7 +54,7 @@ function parseName(name) {
 
 const STOPWORDS = new Set([
     "the", "and", "for", "with", "this", "that", "from", "into", "yang",
-    "dengan", "untuk", "pada", "adalah", "tool", "tools", "aether"
+    "dengan", "untuk", "pada", "adalah", "tool", "tools", "damar"
 ]);
 
 /** Kata signifikan (≥4 huruf), sadar camelCase, plus bentuk dasar jamak. */

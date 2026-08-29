@@ -1,4 +1,4 @@
--- ACC C0 — Aether Cognitive Core (shadow-only).
+-- ACC C0 — Damar Cognitive Core (shadow-only).
 --
 -- Prinsip:
 --   * COGNITION NEVER GRANTS AUTHORITY — tabel di sini menyimpan state

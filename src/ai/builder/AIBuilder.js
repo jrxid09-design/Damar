@@ -13,7 +13,7 @@ const { AIProviderFactory } = require("../providers");
 /**
  * Builder untuk merakit AIEngine.
  *
- * Beberapa provider boleh didaftarkan sekaligus supaya Aether
+ * Beberapa provider boleh didaftarkan sekaligus supaya Damar
  * Console bisa berpindah antara AI lokal (llama.cpp) dan cloud
  * (OpenRouter) saat runtime tanpa merakit ulang engine.
  */

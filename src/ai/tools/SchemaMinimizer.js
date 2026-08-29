@@ -16,7 +16,7 @@
  *     properti yang tersisa — schema invalid dulu karena required
  *     bisa menunjuk properti yang terbuang), items, nested object
  *
- *   FALLBACK KE SCHEMA PENUH (ditandai `x-aether-full: true`):
+ *   FALLBACK KE SCHEMA PENUH (ditandai `x-damar-full: true`):
  *     $ref / oneOf / anyOf / allOf / not — provider umum tak konsisten;
  *     daripada menyembunyikan constraint eksekusi, kirim utuh.
  *     Kedalaman/jumlah node melampaui batas → fallback utuh juga
@@ -94,7 +94,7 @@ function minimizeProperty(spec = {}, opts, depth = 0) {
         nodeCount(spec).n > MAX_NODES;
 
     if (needsFull) {
-        return { ...spec, "x-aether-full": true };
+        return { ...spec, "x-damar-full": true };
     }
 
     const out = {};

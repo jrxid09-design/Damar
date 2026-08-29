@@ -1,11 +1,11 @@
 import { store } from "./store.js";
 import { api } from "./api.js";
 import { esc, toast } from "./ui.js";
-import { aetherState } from "./aetherState.js";
+import { damarState } from "./damarState.js";
 import { tts, MicRecorder } from "./voice.js";
 
 /**
- * Aether Chat — gelembung percakapan MURNI di sisi kanan.
+ * Damar Chat — gelembung percakapan MURNI di sisi kanan.
  *
  * - TIDAK ada panel, statusline, maupun kotak ketik/kirim di sini:
  *   seluruh interaksi (teks & mic) hanya lewat kotak ketik dan mic
@@ -13,11 +13,11 @@ import { tts, MicRecorder } from "./voice.js";
  * - Saat bubble muncul, orb utama otomatis MENGGESER KE KIRI agar
  *   tidak terhalang (body.chat-open). Kotak ketik TIDAK ikut bergeser.
  * - TANPA tombol tutup: sesi ini transien. Ia lenyap sendiri setelah
- *   satu menit tanpa aktivitas (dari pengguna maupun Aether), dan
+ *   satu menit tanpa aktivitas (dari pengguna maupun Damar), dan
  *   ditutup begitu pemilik pindah aplikasi. Esc tetap ada sebagai
  *   jalan keluar cepat lewat papan ketik.
  * - Maksimal 3 gelembung terlihat; yang lebih tua menggulung keluar.
- *   Riwayat penuh tetap hidup di aplikasi Aether (chat).
+ *   Riwayat penuh tetap hidup di aplikasi Damar (chat).
  */
 
 /** Berapa banyak gelembung boleh terlihat sekaligus. */
@@ -86,7 +86,7 @@ let idleTimer = null;
 function touchIdle() {
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-        // Jangan potong Aether yang masih bekerja atau sedang mendengar.
+        // Jangan potong Damar yang masih bekerja atau sedang mendengar.
         if (busy || recording) { touchIdle(); return; }
         close();
     }, IDLE_TTL_MS);
@@ -104,15 +104,15 @@ export async function openOverlay({ text = null, voice = false } = {}) {
     build();
     els.root.classList.add("open");
     document.body.classList.add("chat-open");     // orb utama bergeser kiri
-    document.dispatchEvent(new CustomEvent("aether:overlay", { detail: { open: true } }));
+    document.dispatchEvent(new CustomEvent("damar:overlay", { detail: { open: true } }));
 
-    aetherState.set(store.get().connected ? "idle" : "offline");
+    damarState.set(store.get().connected ? "idle" : "offline");
     render();
     touchIdle();
 
     // Preferensi suara + kesiapan STT.
     try {
-        const saved = await window.aether.settings.get();
+        const saved = await window.damar.settings.get();
         if (saved.tts) Object.assign(prefs, saved.tts);
     } catch { /* default */ }
     await tts.load();
@@ -140,7 +140,7 @@ export function close() {
     recorder?.abort(); recorder = null; recording = false;
     els.root.classList.remove("open");
     document.body.classList.remove("chat-open");
-    document.dispatchEvent(new CustomEvent("aether:overlay", { detail: { open: false } }));
+    document.dispatchEvent(new CustomEvent("damar:overlay", { detail: { open: false } }));
 }
 
 export function isOpen() { return !!els && els.root.classList.contains("open"); }
@@ -154,12 +154,12 @@ export async function greetAndListen() {
     build();
     document.body.classList.add("chat-open");
     els.root.classList.add("open");
-    aetherState.set(store.get().connected ? "curious" : "offline");
+    damarState.set(store.get().connected ? "curious" : "offline");
     render();
     touchIdle();
 
     try {
-        const saved = await window.aether.settings.get();
+        const saved = await window.damar.settings.get();
         if (saved.tts) Object.assign(prefs, saved.tts);
     } catch { /* default */ }
     await tts.load();
@@ -181,14 +181,14 @@ export async function greetAndListen() {
 
 async function ask(text) {
 
-    if (!store.get().connected) { toast("Belum terhubung ke daemon.", "warn"); aetherState.set("offline"); return; }
+    if (!store.get().connected) { toast("Belum terhubung ke daemon.", "warn"); damarState.set("offline"); return; }
 
     busy = true;
     conv().push({ role: "user", content: text });
     const assistant = { role: "assistant", content: "" };
     conv().push(assistant);
     render();
-    aetherState.set("thinking");
+    damarState.set("thinking");
 
     try {
         await api.streamChat(
@@ -202,32 +202,32 @@ async function ask(text) {
             }
         );
 
-        if (assistant.error) { aetherState.set("error"); toast(assistant.error, "danger"); }
+        if (assistant.error) { damarState.set("error"); toast(assistant.error, "danger"); }
         else if (assistant.content.trim()) { await speak(assistant.content); }
-        else { aetherState.set("idle"); }
+        else { damarState.set("idle"); }
     }
     catch (error) {
-        assistant.error = error.message; render(); aetherState.set("error"); toast(error.message, "danger");
+        assistant.error = error.message; render(); damarState.set("error"); toast(error.message, "danger");
     }
     finally {
         busy = false;
-        if (aetherState.state !== "error" && !recording) aetherState.set("idle");
+        if (damarState.state !== "error" && !recording) damarState.set("idle");
     }
 }
 
 async function speak(text) {
     if (!prefs.autoSpeak || !tts.available()) {
-        aetherState.set("idle");
+        damarState.set("idle");
         if (voiceMode && sttConfigured) startListening();
         return;
     }
-    aetherState.set("speaking");
+    damarState.set("speaking");
     await tts.say(text, {
         voice: prefs.voiceName, rate: prefs.rate ?? 1, pitch: 1, robot: prefs.robot,
-        onLevel: (v) => aetherState.setMouth(v),
+        onLevel: (v) => damarState.setMouth(v),
         onEnd: () => {
-            aetherState.setMouth(0);
-            aetherState.set("idle");
+            damarState.setMouth(0);
+            damarState.set("idle");
             if (voiceMode && sttConfigured) startListening();   // lanjut dengar (hands-free)
         }
     });
@@ -240,9 +240,9 @@ async function startListening() {
     if (!sttConfigured) {
         voiceMode = false;
         toast(sttHint
-            ?? "Suara-masuk belum diset (AETHER_STT_URL). Ketik saja — Aether tetap menjawab bersuara.",
+            ?? "Suara-masuk belum diset (DAMAR_STT_URL). Ketik saja — Damar tetap menjawab bersuara.",
             "warn", 7000);
-        aetherState.set("idle");
+        damarState.set("idle");
         return;
     }
     try {
@@ -250,7 +250,7 @@ async function startListening() {
         recorder = new MicRecorder({ language: "id" });
         let loudAt = 0, heard = false;
         recorder.onLevel = (v) => {
-            aetherState.setLevel(v);
+            damarState.setLevel(v);
             const now = Date.now();
             if (v > 0.14) { loudAt = now; heard = true; }
             if (heard && now - loudAt > 1400) finishListening();
@@ -258,27 +258,27 @@ async function startListening() {
         await recorder.start();
         recording = true;
         touchIdle();
-        aetherState.set("listening");
-        aetherState.set("listening");
+        damarState.set("listening");
+        damarState.set("listening");
         vad = setTimeout(() => { if (!heard) finishListening(); }, 8000);
     }
-    catch (error) { toast(`Mikrofon: ${error.message}`, "danger"); aetherState.set("idle"); }
+    catch (error) { toast(`Mikrofon: ${error.message}`, "danger"); damarState.set("idle"); }
 }
 
 async function finishListening() {
     if (!recorder) return;
     recording = false;
     stopVad();
-    aetherState.setLevel(0);
-    aetherState.set("thinking");
-    aetherState.set("thinking");
+    damarState.setLevel(0);
+    damarState.set("thinking");
+    damarState.set("thinking");
     try {
         const { text } = await recorder.stopAndTranscribe();
         recorder = null;
         if (text?.trim()) await ask(text.trim());
-        else { aetherState.set("idle"); if (voiceMode && sttConfigured) startListening(); }
+        else { damarState.set("idle"); if (voiceMode && sttConfigured) startListening(); }
     }
-    catch (error) { toast(error.message, "danger"); aetherState.set("idle"); }
+    catch (error) { toast(error.message, "danger"); damarState.set("idle"); }
 }
 
 function stopVad() { if (vad) { clearTimeout(vad); vad = null; } }
@@ -298,7 +298,7 @@ function render() {
     const host = els.convo;
     const msgs = conv();
     if (msgs.length === 0) {
-        host.innerHTML = `<div class="ae-hint">Tanyakan apa saja pada Aether…</div>`;
+        host.innerHTML = `<div class="ae-hint">Tanyakan apa saja pada Damar…</div>`;
         return;
     }
     // Hanya beberapa gelembung terakhir yang terlihat; riwayat penuh

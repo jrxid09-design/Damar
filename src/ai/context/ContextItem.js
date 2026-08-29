@@ -23,7 +23,7 @@ const KIND = {
     MIND: "mind",                   // keadaan batin (dinamis tiap giliran)
     WORKER: "worker",               // instruksi peran worker AgentHub
     TOOL_OBSERVATION: "tool_observation",
-    REFS: "refs"                    // hasil resolveContextRefs (port Colony)
+    REFS: "refs"                    // hasil resolveContextRefs (port Pandawa)
 };
 
 /** Perkiraan token teks polos: panjang / 4 (cukup untuk anggaran). */

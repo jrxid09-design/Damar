@@ -5,7 +5,7 @@
     "entry": "index.js",
     "description": "Perform arithmetic calculations.",
     "category": "utility",
-    "author": "Aether",
+    "author": "Damar",
     "permissions": [],
     "tags": [
         "math",

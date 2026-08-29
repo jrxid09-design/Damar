@@ -1,10 +1,13 @@
 "use strict";
 
+// Alias env lama AETHER_* -> DAMAR_* (deprecated; kanonik = DAMAR_*).
+require("../../config/envCompat");
+
 /**
- * AetherRuntime entry — host runtime berdiri sendiri TANPA Console/Electron.
+ * DamarRuntime entry — host runtime berdiri sendiri TANPA Console/Electron.
  *
- * Menuju masa depan AetherRuntime.exe: proses ini cukup dipanggil langsung
- * (node src/runtime/host/main.js) dan Aether tetap hidup di DORMANT meski
+ * Menuju masa depan DamarRuntime.exe: proses ini cukup dipanggil langsung
+ * (node src/runtime/host/main.js) dan Damar tetap hidup di DORMANT meski
  * Console tertutup. Observatory/Console kelak menjadi KLIEN status runtime,
  * bukan prasyaratnya. Belum ada packaging.
  */
@@ -17,7 +20,7 @@ const { createHotkeyPort, DEFAULT_SUMMON_COMBO } = require("./ports/hotkeyPort")
 async function main() {
     const host = await createRuntimeHost({
         coreOptions: {
-            wave1: { aetherSelfDir: process.env.AETHER_HOST_SELF_DIR ?? null }
+            wave1: { damarSelfDir: process.env.DAMAR_HOST_SELF_DIR ?? null }
         }
     });
 
@@ -37,15 +40,15 @@ async function main() {
             return { ok: false, code: "COMMAND_UNKNOWN" };
         }
     });
-    hotkeys.register({ combo: process.env.AETHER_SUMMON_HOTKEY ?? DEFAULT_SUMMON_COMBO });
+    hotkeys.register({ combo: process.env.DAMAR_SUMMON_HOTKEY ?? DEFAULT_SUMMON_COMBO });
 
     const tray = createTrayControllerForHost(host);
 
-    console.log(`[aether-runtime-host] v${host.version} phase=${host.phase} ` +
+    console.log(`[damar-runtime-host] v${host.version} phase=${host.phase} ` +
         `presence=${host.core.presence.lifecycleState} pid=${process.pid}`);
 
     const shutdown = (signal) => {
-        console.log(`[aether-runtime-host] ${signal} → graceful shutdown`);
+        console.log(`[damar-runtime-host] ${signal} → graceful shutdown`);
         try { hotkeys.close(); } catch { /* idempoten */ }
         try { if (bridge) bridge.detach(); } catch { /* idempoten */ }
         host.requestShutdown({ reason: `signal:${signal}` });
@@ -59,7 +62,7 @@ async function main() {
 
 if (require.main === module) {
     main().catch((error) => {
-        console.error("[aether-runtime-host] boot gagal:", error.message);
+        console.error("[damar-runtime-host] boot gagal:", error.message);
         process.exit(1);
     });
 }

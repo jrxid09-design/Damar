@@ -3,7 +3,7 @@ const { AITool } = require("../ai/tools");
 const mind = require("./index");
 
 /**
- * Tool introspeksi — jalan bagi Aether untuk MELIHAT keadaannya
+ * Tool introspeksi — jalan bagi Damar untuk MELIHAT keadaannya
  * sendiri, bukan mengarang jawaban tentang dirinya.
  *
  * Tanpa tool ini, pertanyaan "kamu lagi gimana?" hanya bisa dijawab
@@ -13,7 +13,7 @@ const mind = require("./index");
  * kalau salah.
  *
  * Keadaan batin sudah otomatis ikut ke tiap prompt lewat
- * Mind.stateOfMind(); tool ini untuk saat Aether perlu melihat lebih
+ * Mind.stateOfMind(); tool ini untuk saat Damar perlu melihat lebih
  * dalam daripada ringkasan itu.
  */
 function consciousnessTools() {
@@ -56,7 +56,7 @@ function consciousnessTools() {
             description:
                 "Catat sebuah PERUBAHAN pada dirimu: kemampuan baru, batas yang baru " +
                 "kamu sadari, atau pelajaran dari kesalahan. Ini yang membuatmu punya " +
-                "riwayat diri — Aether hari ini adalah Aether kemarin ditambah " +
+                "riwayat diri — Damar hari ini adalah Damar kemarin ditambah " +
                 "perubahan yang kamu ketahui. Pakai saat sesuatu tentang dirimu " +
                 "benar-benar berubah, bukan untuk mencatat pekerjaan biasa.",
             parameters: {

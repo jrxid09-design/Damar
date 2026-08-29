@@ -1,6 +1,6 @@
 /* =============================================
-   JARVIS THEME - Aether Console
-   Dipasang SETELAH aether.tokens.css agar menimpa token kanonik.
+   JARVIS THEME - Damar Console
+   Dipasang SETELAH damar.tokens.css agar menimpa token kanonik.
    Perangkat tanpa GPU -> efek ringan: tanpa backdrop-filter,
    animasi hanya opacity/transform, glow memakai box-shadow tipis.
    ================================================ */
@@ -18,7 +18,7 @@
     --j-text:         #F3E9D2;
     --j-text-dim:     #9C8F6E;
 
-    /* OVERRIDE token kanonik Aether -> nuansa JARVIS */
+    /* OVERRIDE token kanonik Damar -> nuansa JARVIS */
     --ae-void:            #07090C;
     --ae-surface:         #0C1116;
     --ae-surface-glass:   rgba(16, 22, 29, 0.72);

@@ -6,7 +6,7 @@ const mcpClientManager = require("../mcp/mcpClientManager");
 /**
  * McpController — kelola MCP langsung dari Console:
  *
- *   - SERVER  : tool Aether (140+) diekspos ke klien mana pun — status,
+ *   - SERVER  : tool Damar (140+) diekspos ke klien mana pun — status,
  *               jumlah tool terlihat, flag destruktif.
  *   - CLIENT  : server MCP eksternal dijadikan tool (CRUD + restart).
  *
@@ -23,7 +23,7 @@ class McpController {
             const { ToolRegistry } = require("../core/tools");
 
             const allowDestructive =
-                process.env.AETHER_MCP_ALLOW_DESTRUCTIVE === "1";
+                process.env.DAMAR_MCP_ALLOW_DESTRUCTIVE === "1";
 
             const allTools = ToolRegistry.describe();
             const visible = allTools.filter(t => allowDestructive || !riskOf(t.id));
@@ -42,7 +42,7 @@ class McpController {
 
             return response.success(res, "MCP", {
                 server: {
-                    name: "aether",
+                    name: "damar",
                     exposed: visible.length,
                     total: allTools.length,
                     destructiveHidden: !allowDestructive

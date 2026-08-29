@@ -1,7 +1,7 @@
 /**
  * ACC C0 — konfigurasi terpusat dan feature flag.
  *
- * AETHER_ACC = "off" (default) | "shadow".
+ * DAMAR_ACC = "off" (default) | "shadow".
  * OFF: nol komputasi state di atas inisialisasi opsional — tanpa perubahan
  * perilaku, prompt, tool selection, routing.
  * SHADOW: observasi/persist/appraise/workspace/witness/predict/encode,
@@ -145,7 +145,7 @@ const DEFAULTS = Object.freeze({
 
 function createACCConfig(env = process.env, overrides = {}) {
 
-    const rawMode = String(env.AETHER_ACC ?? "off").toLowerCase();
+    const rawMode = String(env.DAMAR_ACC ?? "off").toLowerCase();
 
     const mode = MODES.includes(rawMode) ? rawMode : "off";
 

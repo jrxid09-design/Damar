@@ -1,7 +1,7 @@
 /**
  * Dream — konsolidasi mimpi di jam sunyi.
  *
- * Sekali sehari (jam 02:00) Aether "bermimpi": ia menimbang kembali
+ * Sekali sehari (jam 02:00) Damar "bermimpi": ia menimbang kembali
  * ingatan yang menua (consolidate), lalu menulis refleksi tentang apa
  * yang ia pelajari hari itu ke memori. Ini bukan sekadar cron — ini
  * bagian dari siklus hidup entitas: pengalaman siang dicerna malam,
@@ -36,7 +36,7 @@ class Dream {
     }
 
     file() {
-        return process.env.AETHER_DREAM_FILE ||
+        return process.env.DAMAR_DREAM_FILE ||
             path.join(process.cwd(), "data", "dreams.json");
     }
 

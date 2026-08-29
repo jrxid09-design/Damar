@@ -7,7 +7,7 @@ const telemetry = require("../../services/telemetryService");
 const pexec = promisify(execFile);
 
 /**
- * serenaAdapter — mesin SIMBOL internal Aether (Coding Brain, Fase 2).
+ * serenaAdapter — mesin SIMBOL internal Damar (Coding Brain, Fase 2).
  *
  * Serena bekerja lewat MCP/HTTP-server, bukan invoke tool satu-kali. Yang
  * bisa dipakai daemon langsung & deterministik = CLI `serena project`:
@@ -59,12 +59,12 @@ class SerenaAdapter {
     /**
      * Query ke Serena project-server HTTP (opsional; harus dijalankan
      * terpisah: `serena start-project-server`). Endpoint/port dikonfigurasi
-     * lewat env AETHER_SERENA_URL. Best-effort; kontrak HTTP dikunci saat
+     * lewat env DAMAR_SERENA_URL. Best-effort; kontrak HTTP dikunci saat
      * server dipakai.
      */
     async queryServer(pathname, body = {}) {
-        const base = process.env.AETHER_SERENA_URL;
-        if (!base) throw new Error("Project-server Serena tak dikonfigurasi (set AETHER_SERENA_URL & jalankan `serena start-project-server`).");
+        const base = process.env.DAMAR_SERENA_URL;
+        if (!base) throw new Error("Project-server Serena tak dikonfigurasi (set DAMAR_SERENA_URL & jalankan `serena start-project-server`).");
         const res = await fetch(`${base.replace(/\/+$/, "")}${pathname}`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body), signal: AbortSignal.timeout(30000)

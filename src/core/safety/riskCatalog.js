@@ -1,9 +1,9 @@
 /**
  * Katalog risiko tool — bentuk paling sederhana: destruktif atau tidak.
  *
- * Sebelumnya Aether memakai enam tingkat (L0–L5). Enam tingkat itu
+ * Sebelumnya Damar memakai enam tingkat (L0–L5). Enam tingkat itu
  * membawa beban: setiap tool baru harus diklasifikasi, setiap ambang
- * harus dipahami, dan hierarki tingkat membuat Aether sulit
+ * harus dipahami, dan hierarki tingkat membuat Damar sulit
  * dikontrol. Kini hanya ada satu pertanyaan:
  *
  *   "Bisakah tindakan ini menghapus data, mengeksekusi perintah
@@ -47,14 +47,14 @@ const DESTRUCTIVE = new Set([
     "android_shell",
 
     // ---- Mengubah mesin atau dunia fisik -------------------------
-    "aetherSkills.home_control",
-    "aetherSkills.device_on",
-    "aetherSkills.device_off",
-    "aetherSkills.device_toggle",
-    "aetherSkills.scene_activate",
-    "aetherSkills.set_temperature",
-    "aetherSkills.arrive_home",
-    "aetherSkills.leave_home",
+    "damarSkills.home_control",
+    "damarSkills.device_on",
+    "damarSkills.device_off",
+    "damarSkills.device_toggle",
+    "damarSkills.scene_activate",
+    "damarSkills.set_temperature",
+    "damarSkills.arrive_home",
+    "damarSkills.leave_home",
     "cursor-control.controlCursor",
     "press-button.pressButton",
     "add_hanriver_camera.addHanriverCamera",
@@ -80,12 +80,12 @@ const DESTRUCTIVE = new Set([
 
     // E-F — OUTBOUND MESSAGING & META-MUTATING: tidak pernah
     // read-only/parallel-safe (efek eksternal tak dapat ditarik,
-    // atau mengubah kapabilitas Aether sendiri).
+    // atau mengubah kapabilitas Damar sendiri).
     //
     // Nama ditulis sebagai ID KANONIK TUNGGAL (tail-agnostic): entri
     // "wa_send" mengklasifikasikan SEMUA bentuk live-nya — native
-    // "wa_send", bridged "aetherSkills__wa_send", registry
-    // "aetherSkills.wa_send". Klasifikasi lebih berat arahnya dari
+    // "wa_send", bridged "damarSkills__wa_send", registry
+    // "damarSkills.wa_send". Klasifikasi lebih berat arahnya dari
     // pada kurang (fail-closed); ini klasifikasi RISIKO, bukan
     // primitif otorisasi.
     "wa_send",
@@ -104,7 +104,7 @@ const DESTRUCTIVE = new Set([
     "skill_build",
 
     // E-F — SKILL EKSTERNAL-VISIBLE / META-MUTATING (live ids):
-    // mengirim laporan keluar atau mengubah keadaan Aether sendiri.
+    // mengirim laporan keluar atau mengubah keadaan Damar sendiri.
     "morning_briefing",
     "daily_report",
     "security_alert",
@@ -161,7 +161,7 @@ const anyOf = (...words) => {
 
 /**
  * Pola cadangan untuk tool yang belum terdaftar — termasuk tool
- * yang dibuat Aether sendiri lewat forge. Sengaja pesimistis: yang
+ * yang dibuat Damar sendiri lewat forge. Sengaja pesimistis: yang
  * tidak dikenal dan terdengar berbahaya dianggap berbahaya.
  */
 const PATTERNS = [
@@ -177,8 +177,8 @@ const PATTERNS = [
  *
  * E-F — klasifikasi terhadap ID KANONIK LIVE, bukan hanya string
  * persis: setiap id dinormalisasi ke TIGA bentuk kandidat
- *   1. apa adanya (nama model-facing, mis. "aetherSkills__wa_send")
- *   2. bentuk dotted registry ("aetherSkills.wa_send")
+ *   1. apa adanya (nama model-facing, mis. "damarSkills__wa_send")
+ *   2. bentuk dotted registry ("damarSkills.wa_send")
  *   3. tail kanonik ("wa_send") — ruas terakhir setelah "__"/"."/"-"
  * lalu dicek ke katalog. Dulu katalog berisi nama bare sementara
  * model menjalankan nama bridged — wa_send dsb. lolos sebagai
@@ -186,7 +186,7 @@ const PATTERNS = [
  *
  * Urutan: deklarasi tool sendiri → katalog (3 bentuk) → pola nama →
  * tidak. Tool tak dikenal TIDAK dianggap berbahaya — gerbang yang
- * menahan segalanya hanya membuat Aether tidak bisa dipakai. Yang
+ * menahan segalanya hanya membuat Damar tidak bisa dipakai. Yang
  * berbahaya harus disebutkan namanya, bukan ditebak.
  *
  * CATATAN batas: ini KLASIFIKASI RISIKO (arah pesimis aman) — bukan

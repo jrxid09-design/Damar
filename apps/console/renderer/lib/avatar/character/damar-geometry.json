@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "aether-geometry-v1",
+  "$id": "damar-geometry-v1",
   "definitions": {
     "interfaceHead": {
       "type": "object",

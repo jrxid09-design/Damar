@@ -4,12 +4,12 @@ const activity = require("./ActivityLog");
 
 /**
  * DecisionLog — catatan keputusan arsitektural (§21).
- * Mencegah Aether lupa MENGAPA sebuah keputusan diambil.
+ * Mencegah Damar lupa MENGAPA sebuah keputusan diambil.
  */
 
 class DecisionLog {
 
-    async create({ projectId, missionId = null, question, options = [], chosen = null, reason = null, evidence = [], decisionMaker = "aether" }) {
+    async create({ projectId, missionId = null, question, options = [], chosen = null, reason = null, evidence = [], decisionMaker = "damar" }) {
 
         await initialize();
 

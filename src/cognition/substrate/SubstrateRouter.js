@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
  * (§40–§42, §97).
  *
  * C0: router HANYA mengobservasi & mencatat pergantian substrate —
- * tidak ada policy switching otonom. Identitas Aether ≠ model.
+ * tidak ada policy switching otonom. Identitas Damar ≠ model.
  *
  * CognitiveRequest memakai jalur identitas kanonik foundation dengan
  * capabilitySet=[] DIBEKUKAN (menggunakan ulang invariant M-1):

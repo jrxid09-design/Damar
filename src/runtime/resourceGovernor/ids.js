@@ -1,6 +1,6 @@
 "use strict";
 
-const BRAND = Symbol("aether.resourceGovernor.workloadIdBrand");
+const BRAND = Symbol("damar.resourceGovernor.workloadIdBrand");
 const ID_PATTERN = /^[a-z][a-z0-9]{0,49}(-[a-z0-9]{1,50}){0,7}$/;
 const MIN_LENGTH = 3;
 const MAX_LENGTH = 64;

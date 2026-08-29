@@ -1,7 +1,7 @@
 /**
  * RE Intelligence V0 — konfigurasi terpusat dan feature flag.
  *
- * AETHER_REINTEL = "on" (default) | "off".
+ * DAMAR_REINTEL = "on" (default) | "off".
  * Semua anggaran (budget) analisis ada DI SINI — tidak ada konstanta
  * tuning yang tersebar di file sumber. Anggaran bersifat DETERMINISTIK
  * (hitungan elemen, bukan waktu-dinding) agar analisis berulang
@@ -74,7 +74,7 @@ const DEFAULTS = Object.freeze({
  * Mode "off" tidak mengubah perilaku modul lain — modul ini berdiri sendiri.
  */
 function createReIntelConfig(env = process.env, overrides = {}) {
-    const rawMode = String(env.AETHER_REINTEL ?? "on").toLowerCase();
+    const rawMode = String(env.DAMAR_REINTEL ?? "on").toLowerCase();
     const mode = MODES.includes(rawMode) ? rawMode : "on";
 
     const limits = Object.freeze({

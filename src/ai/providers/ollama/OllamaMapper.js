@@ -3,7 +3,7 @@ const AIStreamChunk = require("../../models/AIStreamChunk");
 const AIToolCall = require("../../tools/AIToolCall");
 
 /**
- * Menerjemahkan AIRequest/AIResponse internal Aether
+ * Menerjemahkan AIRequest/AIResponse internal Damar
  * ke/dari format /api/chat milik Ollama.
  */
 class OllamaMapper {
@@ -73,7 +73,7 @@ class OllamaMapper {
     /**
      * Ollama memakai `images` (base64) untuk input vision dan
      * tidak mengenal `content` berbentuk array. Bentuk pesan
-     * multimodal Aether diratakan di sini.
+     * multimodal Damar diratakan di sini.
      */
     toMessages(messages = []) {
 

@@ -5,13 +5,13 @@
  *
  * Menyusun subsystem TERSERTIFIKASI Wave 1 tanpa mengubah semantiknya:
  *
- *   Authority (+AetherSelf)  83a503c
+ *   Authority (+DamarSelf)  83a503c
  *   Sensorium + Body Schema  ab29145
  *   Semantic Desktop         3876688
  *   RE Intelligence          bd8a482
  *
  * HUKUM INTEGRASI (load-bearing):
- *   - Observasi/konteks/temuan RE/proposal kognisi/catatan AetherSelf
+ *   - Observasi/konteks/temuan RE/proposal kognisi/catatan DamarSelf
  *     TIDAK PERNAH menjadi otoritas. Satu-satunya jalur authority baru
  *     adalah API kanonik src/authority via OwnerRatification.
  *   - Modul ini hanya MEMREFERENSI canonical owners (§canonical-state);
@@ -28,7 +28,7 @@ const embodiment = require("../embodiment");
 const desktop = require("../desktop");
 const reintel = require("../reintel");
 const cognition = require("../cognition");
-const { createAetherSelfService } = require("../services/aetherSelfService");
+const { createDamarSelfService } = require("../services/damarSelfService");
 
 const VERSION = "1.0.0-wave1";
 
@@ -55,8 +55,8 @@ async function createEmbodiedCore({
     accOverrides = {},
     reintelInstance = null,
     reintelOverrides = {},
-    aetherSelfService = null,
-    aetherSelfDir = null,
+    damarSelfService = null,
+    damarSelfDir = null,
     env = process.env
 } = {}) {
 
@@ -96,10 +96,10 @@ async function createEmbodiedCore({
         overrides: reintelOverrides
     });
 
-    // ---- AetherSelf: pemilik KANONIK identitas autobiografis ----------
-    const selfSvc = aetherSelfService ??
-        createAetherSelfService(
-            aetherSelfDir ? { canonicalDir: aetherSelfDir } : {});
+    // ---- DamarSelf: pemilik KANONIK identitas autobiografis ----------
+    const selfSvc = damarSelfService ??
+        createDamarSelfService(
+            damarSelfDir ? { canonicalDir: damarSelfDir } : {});
 
     // ---- Port observasi satu arah (inert) -----------------------------
     // Hasil TIDAK pernah diteruskan ke authority oleh komposisi ini.
@@ -127,7 +127,7 @@ async function createEmbodiedCore({
             desktop: { version: context.version },
             reintel: { version: re.version },
             acc: { mode: acc.mode },
-            aetherSelf: { canonicalDir: selfSvc.resolveCanonical() }
+            damarSelf: { canonicalDir: selfSvc.resolveCanonical() }
         });
     }
 
@@ -144,7 +144,7 @@ async function createEmbodiedCore({
         desktop: context,
         reintel: re,
         acc,
-        aetherSelf: selfSvc,
+        damarSelf: selfSvc,
 
         // Inert one-way observation ports:
         observeEmbodiment,

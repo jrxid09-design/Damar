@@ -4,7 +4,7 @@ const { riskOf } = require("../safety/riskCatalog");
 /**
  * Verification Engine (§46, §192, Konstitusi Pasal 5).
  *
- * Aether tidak boleh melaporkan keberhasilan yang belum
+ * Damar tidak boleh melaporkan keberhasilan yang belum
  * diverifikasi. Sebelum ini, "tool selesai tanpa melempar error"
  * dianggap sama dengan "tindakan berhasil" — dua hal yang sangat
  * berbeda ketika sebuah tool menulis ke jalur yang salah, atau

@@ -6,13 +6,13 @@ const telemetry = require("./telemetryService");
 const binance = require("./binanceService");
 
 /**
- * Auto-monitor crypto — Aether mengawasi harga tanpa diminta dan
+ * Auto-monitor crypto — Damar mengawasi harga tanpa diminta dan
  * memberi tahu saat ambang tercapai.
  *
  * Alarm disimpan lokal (bertahan restart). Loop memeriksa harga tiap
  * INTERVAL memakai data publik (data-api.binance.vision — tak butuh
  * proxy). Saat kondisi terpenuhi: tandai terpicu (sekali, tak spam),
- * tampilkan popup di Console (aether:present) + kirim notifikasi
+ * tampilkan popup di Console (damar:present) + kirim notifikasi
  * (WhatsApp bila aktif).
  */
 
@@ -71,7 +71,7 @@ async function fire(alarm, price) {
         (alarm.note ? ` — ${alarm.note}` : "");
 
     // Popup di Console (kind text didukung present).
-    try { telemetry.publish("aether:present", { kind: "text", title: "Alarm Crypto", text: teks }); }
+    try { telemetry.publish("damar:present", { kind: "text", title: "Alarm Crypto", text: teks }); }
     catch { /* abaikan */ }
 
     // Notifikasi lintas kanal (WhatsApp bila aktif).

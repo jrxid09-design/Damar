@@ -6,7 +6,7 @@ const pexec = promisify(execFile);
 const OPTS = { timeout: 30000, windowsHide: true, maxBuffer: 32 * 1024 * 1024 };
 
 /**
- * adb — kendali perangkat Android untuk Aether, lewat Android Debug
+ * adb — kendali perangkat Android untuk Damar, lewat Android Debug
  * Bridge yang sudah terpasang.
  *
  * Semua perintah butuh perangkat terhubung (USB dengan USB-debugging,
@@ -15,7 +15,7 @@ const OPTS = { timeout: 30000, windowsHide: true, maxBuffer: 32 * 1024 * 1024 };
  * gerbang konfirmasi), seperti kendali desktop.
  */
 
-const ADB = process.env.AETHER_ADB_BIN || "adb";
+const ADB = process.env.DAMAR_ADB_BIN || "adb";
 
 async function adb(args, { timeout } = {}) {
     const { stdout, stderr } = await pexec(ADB, args, { ...OPTS, ...(timeout ? { timeout } : {}) });

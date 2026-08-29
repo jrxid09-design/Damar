@@ -10,7 +10,7 @@ const telemetry = require("../services/telemetryService");
  *
  * Console dan CLI sama-sama bicara ke endpoint HTTP yang sama, jadi
  * hanya klien yang tahu bedanya — ia menyebut dirinya lewat body
- * `channel` atau header `x-aether-channel`. Klien lama yang tidak
+ * `channel` atau header `x-damar-channel`. Klien lama yang tidak
  * menyebut apa-apa dianggap Console: itu pemakaian terbanyak, dan
  * salah tebak di sini hanya membuat satu kalimat konteks jadi
  * kurang tepat, bukan menggagalkan permintaan.
@@ -19,7 +19,13 @@ const KANAL_SAH = new Set(["console", "cli", "whatsapp", "telegram"]);
 
 function channelOf(req) {
     const raw = String(
-        req.body?.channel ?? req.get?.("x-aether-channel") ?? ""
+        req.body?.channel
+        ?? req.get?.("x-damar-channel")
+        // Ejaan LAMA (pra-rename) tetap dibaca supaya klien lama tidak
+        // putus. DEPRECATED — kanonik: x-damar-channel. Header ini
+        // hanya memilih KONTEKS kanal; ia tidak pernah memberi otoritas.
+        ?? req.get?.("x-aether-channel")
+        ?? ""
     ).toLowerCase().trim();
     return KANAL_SAH.has(raw) ? raw : "console";
 }

@@ -157,7 +157,7 @@ class DeviceController {
 
             const { answer } = await gateway.chat(device, text);
 
-            return response.success(res, "Aether", { answer });
+            return response.success(res, "Damar", { answer });
 
         }
         catch (error) {
@@ -237,7 +237,7 @@ class DeviceController {
 
     }
 
-    /** Suasana hati Aether → orb device ikut mewarnai. */
+    /** Suasana hati Damar → orb device ikut mewarnai. */
     mood(req, res, next) {
 
         try {
@@ -369,7 +369,7 @@ class DeviceController {
 
     }
 
-    /** TTS untuk device: teks → audio mp3 (suara Aether dari server). */
+    /** TTS untuk device: teks → audio mp3 (suara Damar dari server). */
     async tts(req, res, next) {
 
         try {

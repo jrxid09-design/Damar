@@ -7,9 +7,9 @@
 --
 -- Yang benar-benar hilang:
 --
---   1. KIND — Aether tidak dapat membedakan "yang saya lihat" dari
+--   1. KIND — Damar tidak dapat membedakan "yang saya lihat" dari
 --      "yang saya simpulkan". Tanpa ini, dugaan dan pengamatan
---      punya bobot yang sama saat diambil kembali, dan Aether bisa
+--      punya bobot yang sama saat diambil kembali, dan Damar bisa
 --      menyampaikan tebakannya sendiri sebagai fakta.
 --
 --   2. VALID_FROM — hanya ada valid_until, jadi masa berlaku sebuah
@@ -26,7 +26,7 @@ ALTER TABLE memories ADD COLUMN kind TEXT NOT NULL DEFAULT 'observation';
 -- | system_state | external
 --
 -- Default 'observation' dipilih sengaja: memori lama memang berasal
--- dari percakapan yang teramati, bukan kesimpulan Aether sendiri.
+-- dari percakapan yang teramati, bukan kesimpulan Damar sendiri.
 -- Menandainya 'fact' akan mengklaim kepastian yang tak pernah diuji.
 
 ALTER TABLE memories ADD COLUMN valid_from TEXT;

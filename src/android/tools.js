@@ -2,7 +2,7 @@ const { AITool } = require("../ai/tools");
 const adb = require("./adb");
 
 /**
- * Tool kendali Android — Aether mengoperasikan HP pemilik lewat ADB.
+ * Tool kendali Android — Damar mengoperasikan HP pemilik lewat ADB.
  *
  * Butuh HP terhubung (USB-debugging) atau `android_connect` (nirkabel).
  * Aksi ketuk/geser/ketik/shell destruktif → lewat gerbang konfirmasi
@@ -79,7 +79,7 @@ function androidTools() {
 
         new AITool({
             name: "android_key",
-            description: "Tekan tombol sistem via keyevent. Contoh keycode: HOME, BACK, ENTER, APP_SWITCH, POWER, VOLUME_UP, VOLUME_DOWN, MENU. (Aether menambah prefix KEYCODE_ otomatis bila perlu.)",
+            description: "Tekan tombol sistem via keyevent. Contoh keycode: HOME, BACK, ENTER, APP_SWITCH, POWER, VOLUME_UP, VOLUME_DOWN, MENU. (Damar menambah prefix KEYCODE_ otomatis bila perlu.)",
             parameters: {
                 type: "object",
                 properties: { keycode: { type: "string", description: "mis. HOME / BACK / ENTER / KEYCODE_HOME." }, serial: { type: "string" } },

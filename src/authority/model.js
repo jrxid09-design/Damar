@@ -161,7 +161,7 @@ const EVOLUTION_STATUS = Object.freeze([
 /**
  * ProposalId WAJIB slug aman (§path-safety): lowercase [a-z0-9._-],
  * tidak diawali/diakhiri separator, tanpa '..' — dipakai langsung
- * sebagai nama berkas di AetherSelf/evolution/proposals.
+ * sebagai nama berkas di DamarSelf/evolution/proposals.
  */
 const PROPOSAL_ID_RE =
     /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?)*$/;

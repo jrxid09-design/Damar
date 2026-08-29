@@ -3,9 +3,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 /**
- * Model dunia tempat Aether tinggal (Milestone 0.7).
+ * Model dunia tempat Damar tinggal (Milestone 0.7).
  *
- * Aether sudah bisa MENANYAKAN lingkungannya satu per satu — ada tool
+ * Damar sudah bisa MENANYAKAN lingkungannya satu per satu — ada tool
  * untuk disk, untuk Docker, untuk perangkat rumah. Yang belum ada
  * adalah gambaran utuh: apa saja yang ada, sedang bagaimana
  * keadaannya, dan **kapan terakhir itu benar-benar diperiksa**.
@@ -13,7 +13,7 @@ const path = require("node:path");
  * Perbedaan terakhir itu yang membuatnya model, bukan sekadar
  * kumpulan pembacaan. Fakta tentang dunia menjadi basi: disk terisi,
  * layanan mati, IP berubah. Menyajikannya tanpa waktu pemeriksaan
- * membuat Aether berbicara tentang keadaan tahun lalu dengan nada
+ * membuat Damar berbicara tentang keadaan tahun lalu dengan nada
  * yang sama percayanya dengan keadaan semenit lalu.
  *
  * Karena itu setiap fakta membawa `checkedAt` dan `source`, dan
@@ -86,7 +86,7 @@ async function penyimpanan() {
 
     const out = {};
 
-    // Hanya disk yang benar-benar dipakai Aether, bukan seluruh sistem.
+    // Hanya disk yang benar-benar dipakai Damar, bukan seluruh sistem.
     for (const huruf of ["C", "D", "E"]) {
 
         const akar = `${huruf}:\\`;
@@ -114,7 +114,7 @@ async function penyimpanan() {
 async function layanan() {
 
     const target = {
-        aether: "http://localhost:3000/health",
+        damar: "http://localhost:3000/health",
         immich: "http://localhost:2283/api/server/ping"
     };
 

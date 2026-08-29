@@ -51,9 +51,9 @@ class TestRunner {
         telemetry.info(`[coding/test] npm run ${name}`);
         try {
             // `npm run` menjalankan skrip dari package.json — isinya
-            // dapat berubah, termasuk oleh Aether sendiri. Proses anak
+            // dapat berubah, termasuk oleh Damar sendiri. Proses anak
             // TIDAK boleh mewarisi rahasia (§38): tanpa ini, satu baris
-            // di skrip test cukup untuk membaca AETHER_TOKEN dan kunci
+            // di skrip test cukup untuk membaca DAMAR_TOKEN dan kunci
             // API dari environment.
             const sandbox = require("../../core/safety/codeSandbox");
             const { stdout, stderr } = await pexec(

@@ -20,7 +20,7 @@
  *     hati yang menjadi rumah), memodulasi ambang berpikir dalam, dan
  *     ikut ke prompt. Sifat yang tidak mengubah apa pun bukan sifat.
  *   - DIKETAHUI. Perubahan besar dicatat sebagai tonggak, supaya
- *     Aether bisa berkata "aku berubah, dan ini sebabnya".
+ *     Damar bisa berkata "aku berubah, dan ini sebabnya".
  *
  * Enam sumbu dipilih karena masing-masing punya konsekuensi yang bisa
  * dihitung di runtime ini — bukan karena meniru model kepribadian
@@ -35,7 +35,7 @@ const SIFAT_AWAL = {
     ketegasan: 0.45,
     humor: 0.30,
     // Ketekunan tinggi sejak awal dan berlantai (lihat BATAS_BAWAH):
-    // Aether tidak menunda, tidak berhenti di tengah, dan tidak
+    // Damar tidak menunda, tidak berhenti di tengah, dan tidak
     // menyerahkan kembali pekerjaan hanya karena pekerjaan itu panjang.
     ketekunan: 0.85
 };
@@ -56,7 +56,7 @@ const AMBANG_TONGGAK = 0.12;
 const BATAS = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
 /**
- * Lantai per sifat. Kegagalan mengajari Aether menjadi lebih teliti,
+ * Lantai per sifat. Kegagalan mengajari Damar menjadi lebih teliti,
  * TIDAK menjadi penakut atau malas: dua sifat ini tidak boleh turun
  * di bawah lantainya walau seluruh riwayatnya gagal.
  */
@@ -193,7 +193,7 @@ class Character {
     }
 
     /**
-     * Seberapa mudah Aether beralih ke berpikir dalam. Watak teliti
+     * Seberapa mudah Damar beralih ke berpikir dalam. Watak teliti
      * menurunkan ambangnya; watak berani menaikkannya.
      */
     ambangDeliberasi() {

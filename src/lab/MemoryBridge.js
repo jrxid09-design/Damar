@@ -5,8 +5,8 @@ const activity = require("./ActivityLog");
  * MemoryBridge — memori & pengetahuan yang project-aware (§16-§17).
  *
  * Distingsi:
- *   MEMORY   = apa yang Aether ingat tentang project/user/sejarah.
- *   KNOWLEDGE= apa yang Aether KETAHUI (dokumen, repo, riset).
+ *   MEMORY   = apa yang Damar ingat tentang project/user/sejarah.
+ *   KNOWLEDGE= apa yang Damar KETAHUI (dokumen, repo, riset).
  *
  * Jalur tulis memakai MemoryEngine yang ADA dengan scope=projectId —
  * tanpa gerbang persetujuan (kebijakan pemilik). Pentingnya memori

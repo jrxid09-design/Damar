@@ -1,5 +1,5 @@
 /**
- * HandTracker — kontrol gestur tangan (webcam) untuk Console Aether.
+ * HandTracker — kontrol gestur tangan (webcam) untuk Console Damar.
  *
  * Diadaptasi dari Ultron (SAGAR-TAMANG/ultron-by-sagar-builds,
  * lib/handTracker.ts, MIT). Pinch 1 tangan = putar; pinch 2 tangan

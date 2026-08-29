@@ -32,7 +32,7 @@ class NasController {
     // ---- Notifikasi & pemantau ----------------------------------
 
     async testNotify(req, res, next) {
-        try { return response.success(res, "Uji notifikasi", await notify.send("🔔 Uji notifikasi Aether NAS — kanal WhatsApp aktif.")); }
+        try { return response.success(res, "Uji notifikasi", await notify.send("🔔 Uji notifikasi Damar NAS — kanal WhatsApp aktif.")); }
         catch (error) { return response.error(res, error.message, 400); }
     }
 

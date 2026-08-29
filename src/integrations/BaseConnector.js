@@ -2,7 +2,7 @@ const HttpClient = require("../plugins/http/services/HttpClient");
 
 /**
  * Kontrak dasar untuk semua sistem eksternal yang disambungkan
- * ke Aether (runtime AI lokal, gateway agen, dst).
+ * ke Damar (runtime AI lokal, gateway agen, dst).
  *
  * Yang wajib disediakan turunan hanyalah `probe()`. Sisanya
  * opsional dan otomatis dilaporkan sebagai kapabilitas yang

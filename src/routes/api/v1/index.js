@@ -9,10 +9,10 @@ const validate = require("../../../middleware/validate");
 const chatController = require("../../../controllers/chatController");
 const sessionController = require("../../../controllers/sessionController");
 
-// Bidang kendali yang dipakai Aether Console (aplikasi desktop).
+// Bidang kendali yang dipakai Damar Console (aplikasi desktop).
 router.use("/console", require("./console"));
 
-// Device tertaut (companion) — pakai tools/skill Aether dari device lain.
+// Device tertaut (companion) — pakai tools/skill Damar dari device lain.
 router.use("/companion", require("./companion"));
 
 router.get("/debug/messages", sessionController.debug);
@@ -37,7 +37,7 @@ router.post(
 );
 
 router.get("/", (req, res) => {
-  response.success(res, "Aether API v1");
+  response.success(res, "Damar API v1");
 });
 
 router.get("/version", systemController.version);

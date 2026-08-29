@@ -5,7 +5,7 @@ module.exports = {
   home(req, res) {
     response.success(
       res,
-      "Welcome to Aether",
+      "Welcome to Damar",
       systemService.getSystemInfo()
     );
   },

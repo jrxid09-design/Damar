@@ -3,7 +3,7 @@ const BaseConnector = require("../BaseConnector");
 const NDJSONParser = require("../../core/http/NDJSONParser");
 
 /**
- * Konektor untuk daemon Ollama — sumber AI lokal Aether.
+ * Konektor untuk daemon Ollama — sumber AI lokal Damar.
  *
  * Berbagi endpoint yang sama dengan OllamaProvider, tetapi
  * dipakai untuk keperluan monitoring/manajemen (status, daftar

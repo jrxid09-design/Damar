@@ -12,7 +12,7 @@ const telemetry = require("../../services/telemetryService");
  * (spawn stdio + JSON-RPC), workspace per-proyek (dibuat otomatis saat
  * proyek dibuka), cache klien (multi-project), health check, auto-restart
  * saat server mati, deteksi kapabilitas server, dan FALLBACK anggun bila
- * server tak terpasang (kembalikan { available:false } — Aether lalu
+ * server tak terpasang (kembalikan { available:false } — Damar lalu
  * memakai Serena/Tree-sitter).
  *
  * Urutan analisis Coding Brain: Graphify → Serena → LSP → Tree-sitter →

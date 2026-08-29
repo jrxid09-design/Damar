@@ -1,11 +1,11 @@
 /**
- * mcpHandler — jembatan MCP (Model Context Protocol) untuk Aether.
+ * mcpHandler — jembatan MCP (Model Context Protocol) untuk Damar.
  *
- * Mengekspos registry tool Aether (140+ tool) ke klien MCP mana pun —
+ * Mengekspos registry tool Damar (140+ tool) ke klien MCP mana pun —
  * Claude Desktop, agen lain, atau penghuni koloni — lewat JSON-RPC 2.0
  * (initialize / tools/list / tools/call). Pola diadopsi dari FRIDAY
  * (friday-tony-stark: server MCP mengekspos tool; agen memakainya),
- * tapi di sini sumbernya registry Aether yang sudah ada.
+ * tapi di sini sumbernya registry Damar yang sudah ada.
  *
  * Keselamatan berlapis:
  *   - registry.execute() tetap melewati toolGuard (pagar risiko,
@@ -24,7 +24,7 @@ function createMcpHandler({
     registry,
     isDestructive = () => false,
     allowDestructive = false,
-    serverName = "aether",
+    serverName = "damar",
     version = "2.0.0",
 
     /**
@@ -113,7 +113,7 @@ function createMcpHandler({
                 const args = params?.arguments ?? {};
                 if (!name || !registry.has(name)) return rpcErr(id, -32602, `Tool tidak dikenal: ${name}`);
                 if (!allowDestructive && isDestructive(name)) {
-                    return rpcOk(id, { content: [{ type: "text", text: `Tool '${name}' destruktif dan tak diizinkan lewat MCP (set AETHER_MCP_ALLOW_DESTRUCTIVE=1).` }], isError: true });
+                    return rpcOk(id, { content: [{ type: "text", text: `Tool '${name}' destruktif dan tak diizinkan lewat MCP (set DAMAR_MCP_ALLOW_DESTRUCTIVE=1).` }], isError: true });
                 }
                 try {
                     const result = await registry.execute(name, args, { source: "mcp", exec: ctx?.exec });

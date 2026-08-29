@@ -159,7 +159,7 @@ class VisionController {
                 return response.error(res, "Berkas tidak ditemukan.", 404);
             }
 
-            // Jalur yang diizinkan: folder kerja Aether (downloads/,
+            // Jalur yang diizinkan: folder kerja Damar (downloads/,
             // data/) — cukup untuk media yang dihasilkan tool. Path
             // sistem sensitif tetap ditolak oleh pathPolicy.
             const allowedRoots = [

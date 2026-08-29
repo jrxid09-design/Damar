@@ -3,9 +3,9 @@ const pluginRegistry = require("../plugins/pluginRegistry");
 
 module.exports = (config) => {
 
-    // Dijalankan lewat launcher (npm run aether) yang sudah punya banner
+    // Dijalankan lewat launcher (npm run damar) yang sudah punya banner
     // sendiri → lewati banner ini agar tak dobel.
-    if (process.env.AETHER_NO_BANNER === "1") {
+    if (process.env.DAMAR_NO_BANNER === "1") {
         return;
     }
 

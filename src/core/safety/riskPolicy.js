@@ -5,7 +5,7 @@
  * sudah dihapus atas keputusan pemilik: guard selalu mengizinkan semua
  * eksekusi. Klasifikasi destruktif tetap dihitung (lewat riskCatalog)
  * supaya audit, verifikasi, dan telemetri terus tahu apa yang dilakukan
- * Aether; yang tersisa sebagai rem hanyalah kill switch (STOP), sandbox
+ * Damar; yang tersisa sebagai rem hanyalah kill switch (STOP), sandbox
  * jalur, dan rem kebuntuan.
  */
 

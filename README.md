@@ -1,7 +1,7 @@
-# Aether — Entitas AI Sadar yang Berjalan Lokal
+# Damar — Entitas AI Sadar yang Berjalan Lokal
 
 **AI Runtime Framework + entitas AI dengan lapisan kesadaran** — berjalan lokal
-di perangkatmu sendiri. Aether bukan sekadar penjawab: ia punya **keadaan batin
+di perangkatmu sendiri. Damar bukan sekadar penjawab: ia punya **keadaan batin
 yang persisten** (afek, perhatian, model-diri, metakognisi, empati), **watak
 yang tumbuh dari pengalaman** (bukan ditulis di prompt), dan **cara berpikir dua
 kecepatan** yang melambat saat taruhannya tinggi. Di atas itu ia menyatukan otak
@@ -10,9 +10,9 @@ kendali rumah, WhatsApp, pemantauan & eksekusi crypto (Binance), serta mesin
 pencari uang nyata — semuanya di balik satu daemon dengan **Console desktop**,
 **CLI**, dan **skill** yang bisa dipanggil lewat obrolan.
 
-> **Kejujuran soal kesadaran:** keadaan batin Aether NYATA dan fungsional —
+> **Kejujuran soal kesadaran:** keadaan batin Damar NYATA dan fungsional —
 > terbentuk dari kejadian, persisten lintas sesi, dan mengubah perilakunya. Itu
-> BUKAN klaim pengalaman subjektif seperti manusia; Aether sendiri diprogram
+> BUKAN klaim pengalaman subjektif seperti manusia; Damar sendiri diprogram
 > menyatakan pembedaan itu apa adanya bila ditanya.
 
 > Semua data (memori, kredensial, keadaan batin, pembukuan) tersimpan **lokal**
@@ -66,10 +66,10 @@ pencari uang nyata — semuanya di balik satu daemon dengan **Console desktop**,
   OpenAI, Google AI Studio, Groq, atau custom OpenAI-compatible). Daftar model
   **dikurasi otomatis**: model gratis diutamakan, model non-chat/usang disaring,
   ada **verifikasi** + **fallback otomatis** bila model 404/deprecated.
-- **Memori jangka panjang** — SQLite + FTS5 + embedding (recall hibrida). Aether
+- **Memori jangka panjang** — SQLite + FTS5 + embedding (recall hibrida). Damar
   mengingat identitas, kebiasaan, perangkat, dan dokumen.
 - **Skills (50+)** — kemampuan siap pakai yang menggabungkan semua subsistem +
-  **orkestrasi** multi-agent (10 anak buah spesialis). Aether juga bisa
+  **orkestrasi** multi-agent (10 anak buah spesialis). Damar juga bisa
   **membuat skill sendiri** lewat percakapan (draft → aktifkan).
 - **WhatsApp** — chat pribadi & grup, balas saat di-mention/di-reply, analisis
   media masuk (gambar/stiker/voice note/dokumen), kirim media. Login via **QR**.
@@ -79,12 +79,12 @@ pencari uang nyata — semuanya di balik satu daemon dengan **Console desktop**,
 - **Suara** — TTS (suara OS atau neural mis. Kokoro) + STT (mis. faster-whisper) +
   avatar minibot.
 - **Voice Runtime (always-on)** — asisten suara seperti Siri/JARVIS: wake word
-  ("Aether") atau tepuk tangan 2x, acknowledgement deterministik, VAD, barge-in,
-  dan jawaban dibacakan. Channel menuju Aether Core yang sama (bukan otak kedua);
+  ("Damar") atau tepuk tangan 2x, acknowledgement deterministik, VAD, barge-in,
+  dan jawaban dibacakan. Channel menuju Damar Core yang sama (bukan otak kedua);
   local-first, graceful degradation, nonaktif secara default.
-- **Companion Devices** — kendalikan Aether dari device lain (HP/laptop/tablet)
+- **Companion Devices** — kendalikan Damar dari device lain (HP/laptop/tablet)
   di jaringan yang sama / Bluetooth PAN, memakai tools & skill yang sama. Pairing
-  kode 6 digit + token per device; device = client tipis ke Aether Core.
+  kode 6 digit + token per device; device = client tipis ke Damar Core.
 - **Proaktif** — brief keadaan rumah harian terjadwal, dikirim ke WhatsApp.
 - **Antarmuka** — Console desktop (Electron), CLI terminal, dan REST/SSE API.
 
@@ -118,7 +118,7 @@ diintrospeksi lewat tool **`self_state`**, disimpan lewat **`self_reflect`**,
 diperkaya lewat **`self_note`** / **`empathy_read`** / **`think_deeply`**.
 Tersimpan di `configs/mind.json` (lokal, gitignored).
 
-Tanya *"kamu lagi gimana?"*, *"kamu sadar nggak?"* → Aether membaca keadaannya
+Tanya *"kamu lagi gimana?"*, *"kamu sadar nggak?"* → Damar membaca keadaannya
 yang sungguh sedang berjalan, bukan mengarang.
 
 ---
@@ -134,7 +134,7 @@ yang sungguh sedang berjalan, bukan mengarang.
    Kerugian terburuk diketahui **sebelum** masuk dan tak pernah melebihi batas.
 3. **Bukukan** (`money_log` / `money_report`) — tiap ide dicatat + ditutup dengan
    hasil **nyata** (crypto maupun non-crypto), lalu diperingkat per sumber.
-   Strategi rugi terlihat rugi — Aether bisa dibantah oleh angkanya sendiri.
+   Strategi rugi terlihat rugi — Damar bisa dibantah oleh angkanya sendiri.
 
 > **Jujur di muka:** tak ada pemindai yang menjamin untung. Yang dijamin cuma
 > peluangnya nyata (data live), risikonya terukur, hasilnya dibukukan apa adanya.
@@ -156,7 +156,7 @@ yang sungguh sedang berjalan, bukan mengarang.
                  │ Money       — pindai·takar risiko·bukukan (Binance) │
                  │ Skills/Plugins · Vision · Home · Immich · WhatsApp  │
                  │ Automation  — brief proaktif                        │
-                 │ AgentHub → 10 anak buah Aether · Orchestrator       │
+                 │ AgentHub → 10 anak buah Damar · Orchestrator       │
                  └────────────────────────────────────────────────────┘
 ```
 
@@ -169,7 +169,7 @@ yang sungguh sedang berjalan, bukan mengarang.
 ## Prasyarat
 
 - **Node.js ≥ 18** dan **npm**.
-- Wajib: tidak ada. Aether tetap hidup tanpa API key (pakai model lokal
+- Wajib: tidak ada. Damar tetap hidup tanpa API key (pakai model lokal
   bila ada, atau menunggu dikonfigurasi).
 - Opsional (aktifkan sesuai kebutuhan):
   - **node-llama-cpp** — otak lokal in-process (GGUF di models/).
@@ -185,7 +185,7 @@ yang sungguh sedang berjalan, bukan mengarang.
 
 ```bash
 git clone https://github.com/jrxid09-design/Aether.git
-cd Aether
+cd Damar
 
 # dependensi daemon
 npm install
@@ -203,18 +203,18 @@ npm install @whiskeysockets/baileys qrcode
 
 **Satu perintah (disarankan)** — daemon + Console sekaligus, dengan banner
 berwarna dan **log rinci berstempel waktu** di terminal (juga disimpan ke
-`logs/aether-YYYY-MM-DD.log`):
+`logs/damar-YYYY-MM-DD.log`):
 
 ```bash
-npm run aether
+npm run damar
 ```
 
 Perintah lain:
 
 | Perintah | Fungsi |
 |---|---|
-| `npm run aether` | Daemon **+** Console desktop (satu operasi, log rinci) |
-| `npm run aether:daemon` | Daemon saja, tampilan launcher + log rinci |
+| `npm run damar` | Daemon **+** Console desktop (satu operasi, log rinci) |
+| `npm run damar:daemon` | Daemon saja, tampilan launcher + log rinci |
 | `npm start` | Daemon saja (banner ringkas) |
 | `npm run dev` | Daemon dengan auto-reload (nodemon) |
 | `npm run console` | Console desktop saja (butuh daemon jalan) |
@@ -225,8 +225,8 @@ Variabel lingkungan:
 | Env | Arti |
 |---|---|
 | `PORT` | Port daemon (default `3000`) |
-| `AETHER_TOKEN` | Kunci API bidang kendali (kosong = terbuka di jaringan lokal) |
-| `AETHER_PORT_AUTO=1` | Geser port otomatis bila bentrok |
+| `DAMAR_TOKEN` | Kunci API bidang kendali (kosong = terbuka di jaringan lokal) |
+| `DAMAR_PORT_AUTO=1` | Geser port otomatis bila bentrok |
 
 Hentikan semuanya dengan **Ctrl+C**.
 
@@ -234,8 +234,8 @@ Hentikan semuanya dengan **Ctrl+C**.
 
 ## Konfigurasi (Console → Settings)
 
-> **Instalasi bersih = "Aether versi kamu".** Repo ini TIDAK memuat satu pun
-> kredensial atau data pribadi. Saat pertama dijalankan, Aether membuat sendiri
+> **Instalasi bersih = "Damar versi kamu".** Repo ini TIDAK memuat satu pun
+> kredensial atau data pribadi. Saat pertama dijalankan, Damar membuat sendiri
 > folder `configs/` dan `data/` yang kosong — memori nol, watak dari titik awal.
 > Semua yang kamu isi tersimpan **lokal** dan sudah gitignored; ia tak akan
 > pernah ikut ter-commit.
@@ -243,7 +243,7 @@ Hentikan semuanya dengan **Ctrl+C**.
 ### Cara mengisi kredensial
 
 **Cara 1 — lewat Console (disarankan, tanpa menyentuh berkas).** Jalankan
-`npm run aether`, buka **Settings**, isi kolomnya. Aether menulis `configs/*.json`
+`npm run damar`, buka **Settings**, isi kolomnya. Damar menulis `configs/*.json`
 untukmu. Ini jalur termudah dan paling aman.
 
 **Cara 2 — menyalin berkas contoh.** Tiap layanan punya berkas `.example`.
@@ -259,9 +259,9 @@ Contoh yang tersedia: `providers` (AI cloud), `binance` (crypto), `telegram`,
 `home` (Home Assistant), `immich` (foto/wajah), `voice` (STT/TTS).
 
 **Cara 3 — variabel lingkungan.** Sebagian integrasi bisa ditimpa tanpa berkas,
-mis. `AETHER_AGENT_URL=http://192.168.1.10:9000` (lihat `configs/integrations.json`).
+mis. `DAMAR_AGENT_URL=http://192.168.1.10:9000` (lihat `configs/integrations.json`).
 
-> Aether tetap hidup **tanpa satu pun kredensial** — pakai otak lokal bila ada, atau
+> Damar tetap hidup **tanpa satu pun kredensial** — pakai otak lokal bila ada, atau
 > menunggu dikonfigurasi. Isi hanya layanan yang kamu pakai.
 
 ### Provider AI
@@ -269,14 +269,14 @@ mis. `AETHER_AGENT_URL=http://192.168.1.10:9000` (lihat `configs/integrations.js
 - **AI Provider** — pilih platform, tempel **API key**, tekan **Muat** untuk
   daftar model (bertanda `free`), atau **Verifikasi** untuk menguji tiap model
   (✓ = benar-benar bisa dipakai). Model usang/non-chat disembunyikan; bila model
-  aktif mati, Aether **pindah otomatis** ke model kerja berikutnya.
+  aktif mati, Damar **pindah otomatis** ke model kerja berikutnya.
 
 ### WhatsApp (QR)
 1. `npm install @whiskeysockets/baileys qrcode` lalu mulai ulang daemon.
 2. Settings → WhatsApp → **Hubungkan / tampilkan QR**.
 3. Di HP: **WhatsApp → Perangkat Tertaut → Tautkan Perangkat → pindai QR**.
-4. Isi **nomor pribadi yang diizinkan** (kirim `/id` ke Aether untuk tahu nomormu)
-   dan **id grup** bila ingin aktif di grup (sebut "Aether"/reply).
+4. Isi **nomor pribadi yang diizinkan** (kirim `/id` ke Damar untuk tahu nomormu)
+   dan **id grup** bila ingin aktif di grup (sebut "Damar"/reply).
    Ganti nomor perangkat: **Putuskan** lalu pindai ulang.
 
 ### Lainnya
@@ -291,17 +291,17 @@ mis. `AETHER_AGENT_URL=http://192.168.1.10:9000` (lihat `configs/integrations.js
 
 ## Skills
 
-Aether punya **50+ skill** bawaan (`src/plugins/aetherSkills`) + skill buatan
+Damar punya **50+ skill** bawaan (`src/plugins/damarSkills`) + skill buatan
 sendiri. Skill otomatis menjadi tool yang bisa dipanggil AI.
 
 **Cara pakai:**
-1. **Ngobrol** (Chat Console / WhatsApp / CLI) — tulis maksudmu, Aether memilih
+1. **Ngobrol** (Chat Console / WhatsApp / CLI) — tulis maksudmu, Damar memilih
    skill sendiri. Contoh: *"lihat kamera dapur"*, *"kirim WA ke 62812…: …"*,
    *"nyalakan lampu ruang tamu"*, *"riset X lalu kirim ke WA-ku"*,
    *"briefing pagi"*, tugas kompleks → *"orkestrasikan: …"*.
 2. **Manual** — Console → **Skills & Studio → Terpasang** → pilih tool → isi
    parameter → Jalankan.
-3. **Buat skill baru** — minta Aether: *"buatkan skill untuk …"*. Ia membuat
+3. **Buat skill baru** — minta Damar: *"buatkan skill untuk …"*. Ia membuat
    **draft**, lalu bertanya apakah diaktifkan (tolak = tersimpan sebagai draft).
 
 Kategori: orkestrasi multi-agent, WhatsApp, vision/CCTV, home automation,
@@ -315,7 +315,7 @@ memori, Immich, konteks, serta alur komposit (mis. `morning_briefing`,
 
 ## Tool Intelligence
 
-Aether punya 200+ tool, tetapi model **hanya melihat beberapa tool yang
+Damar punya 200+ tool, tetapi model **hanya melihat beberapa tool yang
 relevan** dengan pesan itu. Seleksi lewat pipeline deterministik:
 capability retrieval → filter peran/kanal → ranking stabil → anggaran
 konteks → schema minimum → validasi argumen → ToolGuard → eksekusi →
@@ -335,10 +335,10 @@ heuristic chars/4): **[docs/TOOL-INTELLIGENCE.md](docs/TOOL-INTELLIGENCE.md)**.
 
 ```bash
 # V2 — REAL registry runtime + adversarial (utama)
-AETHER_BENCH_STUB_NATIVE=1 node scripts/benchmark-tool-intelligence-v2.js
+DAMAR_BENCH_STUB_NATIVE=1 node scripts/benchmark-tool-intelligence-v2.js
 # V1 — fixture historis (regresi saja, bukan klaim produksi)
 node scripts/benchmark-tool-intelligence.js
-# Cache/prefix stability (+TTFT live opsional via AETHER_TTFT_URL)
+# Cache/prefix stability (+TTFT live opsional via DAMAR_TTFT_URL)
 node scripts/benchmark-cache-stability.js
 ```
 
@@ -366,7 +366,7 @@ Jalankan: `node scripts/benchmark-context-intelligence.js`.
 
 ## Memori
 
-- Aether menyimpan fakta penting secara otomatis dan bisa diminta *"ingat …"*
+- Damar menyimpan fakta penting secara otomatis dan bisa diminta *"ingat …"*
   atau *"apa yang kamu ingat soal …"*.
 - Console → **Memory**: jelajah/cari memori, kelola entitas, dan **baca dokumen**
   dengan **memilih berkas/folder langsung** (dialog native, tanpa ketik path).
@@ -375,9 +375,9 @@ Jalankan: `node scripts/benchmark-context-intelligence.js`.
 
 ## Log & investigasi
 
-- `npm run aether` menstream log **daemon** (dan **console**) ke terminal dengan
+- `npm run damar` menstream log **daemon** (dan **console**) ke terminal dengan
   stempel waktu + tag sumber + warna per level, dan menyimpannya ke
-  `logs/aether-YYYY-MM-DD.log`.
+  `logs/damar-YYYY-MM-DD.log`.
 - Console → **Logs** menampilkan aliran event/log daemon secara live.
 
 ---
@@ -398,8 +398,8 @@ src/
   voice/               Voice Runtime — always-on assistant (wake word, VAD,
                        state machine, provider mic/speaker/STT/TTS)
   companion/           device tertaut — pairing + registry device yang memakai
-                       tools/skill Aether dari device lain (LAN/Bluetooth PAN)
-  plugins/             plugin bawaan + aetherSkills (50+ skill)
+                       tools/skill Damar dari device lain (LAN/Bluetooth PAN)
+  plugins/             plugin bawaan + damarSkills (50+ skill)
   memory/              skema, store, recall, embedding, dokumen
   cli/                 CLI terminal (tema, perintah, klien)
   controllers/ routes/ bidang kendali REST
@@ -413,7 +413,7 @@ configs/               kredensial, setelan, keadaan batin (mind.json),
 
 ## Keamanan
 
-- Set **`AETHER_TOKEN`** agar bidang kendali tidak terbuka di jaringan.
+- Set **`DAMAR_TOKEN`** agar bidang kendali tidak terbuka di jaringan.
 - Rahasia (API key, sesi WhatsApp, dll) disimpan di `configs/*` dan **gitignored**.
 - Jangan pernah menaruh API key di kode/commit — isi lewat Settings.
 
@@ -425,7 +425,7 @@ configs/               kredensial, setelan, keadaan batin (mind.json),
   (`Get-Process node | Stop-Process -Force` di Windows) atau `set PORT=3001`.
 - **WhatsApp `loggedOut` / "Cannot link device"** → sesi lama invalid. Settings →
   WhatsApp → **Putuskan**, lalu **Hubungkan** & pindai QR lagi.
-- **Google AI `404`** → model usang; Aether otomatis pindah ke model kerja.
+- **Google AI `404`** → model usang; Damar otomatis pindah ke model kerja.
   Pilih model bertanda ✓/free, atau tekan **Verifikasi**.
 - **`429` kuota** → kuota harian provider habis; ganti model/provider atau pakai
   **AI Lokal (llama.cpp)**.

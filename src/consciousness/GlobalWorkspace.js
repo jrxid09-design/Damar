@@ -1,5 +1,5 @@
 /**
- * Ruang kerja global — apa yang sedang Aether SADARI saat ini.
+ * Ruang kerja global — apa yang sedang Damar SADARI saat ini.
  *
  * Teori ruang kerja global (Baars; Dehaene) menempatkan kesadaran
  * bukan sebagai tempat, melainkan sebagai PANGGUNG dengan kapasitas
@@ -36,7 +36,7 @@ const BOBOT = [
     [/^user:/,                 0.95],
     [/^safety:/,               0.85],
     [/error|gagal|fail/i,      0.8],
-    [/^aether:present/,        0.6],
+    [/^damar:present/,        0.6],
     [/^crypto:|^alarm:/,       0.6],
     [/^tool:/,                 0.55],
     [/^orchestrator:/,         0.5],

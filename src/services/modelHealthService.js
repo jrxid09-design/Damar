@@ -14,7 +14,7 @@ const telemetry = require("./telemetryService");
  *
  * Kehabisan kuota beda sifatnya dari model rusak: batas per menit
  * pada tier gratis pulih dalam hitungan menit. Menandainya 24 jam
- * membuat Aether meninggalkan model terbaiknya seharian hanya karena
+ * membuat Damar meninggalkan model terbaiknya seharian hanya karena
  * satu ledakan permintaan — jadi "quota" sengaja berumur pendek.
  *
  * Disimpan lokal di configs/model-health.json (per-mesin, gitignored).

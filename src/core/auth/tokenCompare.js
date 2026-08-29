@@ -64,7 +64,7 @@ function isLocalRequest(req) {
 /**
  * G-FINAL — PERAN EKSTERNAL DIKUNCI PADA ENUM EKSTERNAL.
  *
- * AETHER_AUTH_ROLE / AETHER_MCP_ROLE / AETHER_UNSAFE_DEV_ROLE adalah
+ * DAMAR_AUTH_ROLE / DAMAR_MCP_ROLE / DAMAR_UNSAFE_DEV_ROLE adalah
  * STRING LINGKUNGAN — tidak boleh bisa mencetak otoritas runtime
  * "system" di permukaan token/MCP. Nilai apa pun di luar enum
  * eksternal (termasuk "system", typo, kosong) jatuh ke fallback
@@ -83,13 +83,13 @@ function clampExternalRole(value, fallback = "user") {
 /**
  * Middleware penjaga token — FAIL-CLOSED (temuan C2 Round-2).
  *
- * Dulu: AETHER_TOKEN kosong → API terbuka "untuk pengembangan" sambil
+ * Dulu: DAMAR_TOKEN kosong → API terbuka "untuk pengembangan" sambil
  * bind 0.0.0.0 (server.js:29) dan controller memberi role superadmin —
  * fail-open penuh di permukaan LAN.
  *
  * Sekarang (permukaan terlindungi):
- *   1. AETHER_TOKEN kosong → 503 SERVICE LOCKED, BUKAN open;
- *   2. satu-satunya pintu dev: AETHER_UNSAFE_DEV_OPEN_API="1"
+ *   1. DAMAR_TOKEN kosong → 503 SERVICE LOCKED, BUKAN open;
+ *   2. satu-satunya pintu dev: DAMAR_UNSAFE_DEV_OPEN_API="1"
  *      (eksplisit, default OFF, tak mungkin aktif karena lupa config);
  *      peran dev diikat localhost kecuali ditinggikan eksplisit;
  *   3. token sah → req.authIdentity { role, source:'token' } —
@@ -108,18 +108,18 @@ function tokenGuard({ roleWhenAuthenticated = "user", surface = "api" } = {}) {
 
         if (req.method === "OPTIONS") return next();
 
-        const token = process.env.AETHER_TOKEN;
+        const token = process.env.DAMAR_TOKEN;
 
         // ---- 1. Token belum diset: KUNCI, jangan buka ----------------
         if (!token) {
 
-            const devOpen = process.env.AETHER_UNSAFE_DEV_OPEN_API === "1";
+            const devOpen = process.env.DAMAR_UNSAFE_DEV_OPEN_API === "1";
 
             if (!devOpen) {
                 return response.error(
                     res,
-                    "Layanan terkunci: AETHER_TOKEN belum diset. " +
-                    "Set token, atau setel AETHER_UNSAFE_DEV_OPEN_API=1 " +
+                    "Layanan terkunci: DAMAR_TOKEN belum diset. " +
+                    "Set token, atau setel DAMAR_UNSAFE_DEV_OPEN_API=1 " +
                     "secara sadar untuk mode pengembangan berisiko.",
                     503
                 );
@@ -131,7 +131,7 @@ function tokenGuard({ roleWhenAuthenticated = "user", surface = "api" } = {}) {
             const isLocal = isLocalRequest(req);
 
             const devRole = isLocal
-                ? clampExternalRole(process.env.AETHER_UNSAFE_DEV_ROLE, "user")
+                ? clampExternalRole(process.env.DAMAR_UNSAFE_DEV_ROLE, "user")
                 : "user";
 
             req.authIdentity = {
@@ -148,7 +148,7 @@ function tokenGuard({ roleWhenAuthenticated = "user", surface = "api" } = {}) {
 
             return response.error(
                 res,
-                "Unauthorized. Sertakan header 'Authorization: Bearer <AETHER_TOKEN>'.",
+                "Unauthorized. Sertakan header 'Authorization: Bearer <DAMAR_TOKEN>'.",
                 401
             );
 
@@ -157,7 +157,7 @@ function tokenGuard({ roleWhenAuthenticated = "user", surface = "api" } = {}) {
         // ---- 3. Terautentikasi: identitas berprovenance ---------------
         // G-FINAL: env tidak bisa mencetak "system" di sini — clamp.
         req.authIdentity = {
-            role: clampExternalRole(process.env.AETHER_AUTH_ROLE, authRole),
+            role: clampExternalRole(process.env.DAMAR_AUTH_ROLE, authRole),
             source: `token:${surface}`,
             sessionId: `${surface}:${req.ip ?? "unknown"}`
         };

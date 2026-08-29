@@ -2,12 +2,12 @@
  * Jembatan model-diri (B§7) — proyeksi BACA-SAJA.
  *
  * getEmbodimentSummary() menerjemahkan BodySchema menjadi ringkasan
- * terstruktur yang kelak dibaca AetherSelf: "ini telingaku, ini mataku,
+ * terstruktur yang kelak dibaca DamarSelf: "ini telingaku, ini mataku,
  * ini layarku". Proyeksi ini TIDAK memberi referensi ke state hidup
  * dan TIDAK menyediakan metode mutasi apa pun — model bahasa boleh
  * MELIHAT tubuhnya, tidak pernah MENYENTUHNYA.
  *
- * Catatan V0: modul ini sengaja TIDAK menulis ke AetherSelf/ACC.
+ * Catatan V0: modul ini sengaja TIDAK menulis ke DamarSelf/ACC.
  */
 
 const { deepFreeze } = require("../core/util");

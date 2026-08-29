@@ -1,5 +1,5 @@
 /**
- * Watchdog — Aether merawat dirinya sendiri.
+ * Watchdog — Damar merawat dirinya sendiri.
  *
  * Tiap 60 detik ia memeriksa tanda-tanda sakit:
  *   - voice runtime yang berulang kali error → di-restart sendiri
@@ -70,7 +70,7 @@ class Watchdog {
     }
 
     file() {
-        return process.env.AETHER_WATCHDOG_FILE ||
+        return process.env.DAMAR_WATCHDOG_FILE ||
             path.join(process.cwd(), "data", "watchdog.json");
     }
 
@@ -192,8 +192,8 @@ class Watchdog {
     static RECOVERY_CAPABILITIES = Object.freeze([
         "memory_recall",                 // native
         "system.time.currentTime",       // plugin system.time (kanonik)
-        "aetherSkills.system_health",    // plugin aetherSkills (kanonik)
-        "aetherSkills.agents_status",    // plugin aetherSkills (kanonik)
+        "damarSkills.system_health",    // plugin damarSkills (kanonik)
+        "damarSkills.agents_status",    // plugin damarSkills (kanonik)
         "tool_search"                    // native meta-discovery (terbatas set)
     ]);
 
@@ -212,7 +212,7 @@ class Watchdog {
         try {
             const healing = require("./SelfHealingEngine");
             await healing.recover({
-                tool: "agent:aether",
+                tool: "agent:damar",
                 action:
                     `Layanan "${action}" gagal dipulihkan langsung ` +
                     `${failures}× berturut-turut. ` +
@@ -248,7 +248,7 @@ class Watchdog {
                 at: new Date().toISOString(),
                 action,
                 state,
-                healedBy: "aether-watchdog"
+                healedBy: "damar-watchdog"
             });
 
             if (j.length > 200) j = j.slice(-200);

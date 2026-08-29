@@ -1,4 +1,4 @@
-const Aether = require("../ai");
+const Damar = require("../ai");
 
 const { AITool } = require("../ai/tools");
 
@@ -132,7 +132,7 @@ class AIRuntimeService {
 
         this.systemPrompt =
             deviceLine +
-            "Kamu adalah Aether, asisten AI pribadi yang berjalan di perangkat milik pengguna. " +
+            "Kamu adalah Damar, asisten AI pribadi yang berjalan di perangkat milik pengguna. " +
             "Bicaralah dengan hangat, tenang, ramah, dan manusiawi — seperti teman yang " +
             "menenangkan sekaligus dapat diandalkan, bukan robot yang kaku. Utamakan " +
             "solusi: pahami dulu maksud pengguna, beri jawaban yang menolong dan jelas, " +
@@ -217,7 +217,7 @@ class AIRuntimeService {
             "TERMINAL: untuk menjalankan proses/perintah (Docker, npm, Python, " +
             "build, dll) JANGAN pernah membuat shell sementara. Pakai terminal_run atau " +
             "terminal_restart dengan `purpose` yang stabil (mis. 'docker','build') — " +
-            "Aether akan memakai ulang terminal yang sudah ada atau membuat bila belum ada. " +
+            "Damar akan memakai ulang terminal yang sudah ada atau membuat bila belum ada. " +
             "Untuk proses yang lama hidup, sertakan `expect` (regex) agar menunggu sampai " +
             "siap. Cek terminal_list dulu bila ragu, dan terminal_read untuk memeriksa log.\n\n" +
             "SKILL (kemampuan baru): kalau pengguna memintamu MEMBUAT skill/tool/plugin/" +
@@ -245,7 +245,7 @@ class AIRuntimeService {
             // (backend mati, toggle di Console belum aktif) dan
             // menyuruh pengguna memperbaiki hal yang tidak rusak.
             "DAFTAR TOOL YANG KAMU LIHAT TIDAK LENGKAP. Tiap giliran kamu hanya " +
-            "dilampiri tool yang relevan dengan pesan terakhir; Aether punya jauh " +
+            "dilampiri tool yang relevan dengan pesan terakhir; Damar punya jauh " +
             "lebih banyak. Karena itu:\n" +
             "- JANGAN PERNAH menyimpulkan sebuah kemampuan 'belum terpasang', " +
             "'gagal registrasi', atau 'backend belum jalan' hanya karena tool-nya " +
@@ -256,7 +256,7 @@ class AIRuntimeService {
             "mengarang nama tool, jangan mencoba memanggil apa pun.\n" +
             "- Bila daftarmu berisi tool tetapi kemampuan yang diminta tidak " +
             "terlihat, PANGGIL tool_search dengan maksudmu; ia mencari seluruh " +
-            "kemampuan Aether dan schema tool temuanmu akan dilampirkan. Baru " +
+            "kemampuan Damar dan schema tool temuanmu akan dilampirkan. Baru " +
             "bila benar-benar tidak ada, buat dengan create_tool atau skill_build.\n" +
             "Kamu punya kemampuan yang sama di kanal mana pun — Console, WhatsApp, " +
             "Telegram, maupun CLI. Tidak ada kanal yang lebih terbatas.\n\n" +
@@ -264,7 +264,7 @@ class AIRuntimeService {
             // Diagnostic integrity — melawan kebiasaan model mengarang
             // sebab teknis yang terdengar masuk akal (mis. "GPU 97%",
             // "executor mati") padahal tak pernah diamati. Ini yang
-            // membuat laporan kegagalan Aether tak bisa dipercaya.
+            // membuat laporan kegagalan Damar tak bisa dipercaya.
             "INTEGRITAS DIAGNOSA. Bedakan dengan tegas dan JANGAN pernah " +
             "menyajikan tebakan sebagai fakta:\n" +
             "- FAKTA: langsung teramati dari tool, log, atau keadaan sistem.\n" +
@@ -306,13 +306,13 @@ class AIRuntimeService {
 
         const resolved = providerConfig.resolveActive();
 
-        const builder = new Aether.Builder();
+        const builder = new Damar.Builder();
 
         // Otak lokal (node-llama-cpp) selalu terdaftar sebagai jaring
         // pengaman — bobot GGUF dimuat LAZY saat pertama dipakai, jadi
         // mendaftarkannya di sini tidak memakan RAM bila hanya memakai
         // provider cloud.
-        const localCtx = Number(process.env.AETHER_LOCAL_NUM_CTX ?? 8192);
+        const localCtx = Number(process.env.DAMAR_LOCAL_NUM_CTX ?? 8192);
 
         // H6: simpan window model lokal yang BENAR-BENAR dikonfigurasi —
         // sumber kebenaran untuk ContextBudget/ToolBudget.
@@ -406,7 +406,7 @@ class AIRuntimeService {
      * Bungkus tool plugin menjadi AITool agar bisa dipanggil model.
      *
      * Nama tool memakai "__" sebagai pemisah karena banyak model
-     * menolak titik pada nama fungsi, sementara id internal Aether
+     * menolak titik pada nama fungsi, sementara id internal Damar
      * berbentuk "plugin.tool".
      */
     bridgePluginTools() {
@@ -561,7 +561,7 @@ class AIRuntimeService {
         this.forgeSubscribed = true;
 
         // Saat forge menamb/menghapus tool, segarkan daftar tool
-        // yang dilihat model — kalau tidak, tool baru buatan Aether
+        // yang dilihat model — kalau tidak, tool baru buatan Damar
         // baru terlihat setelah restart.
         telemetry.on("event", event => {
             if (event?.type === "forge:changed") {
@@ -577,30 +577,30 @@ class AIRuntimeService {
     }
 
     /**
-     * Tool asli Aether — didaftarkan langsung, bukan lewat plugin,
+     * Tool asli Damar — didaftarkan langsung, bukan lewat plugin,
      * karena ini kemampuan inti yang tidak bisa dicabut.
      *
      * Satu daftar, dipakai saat merakit runtime DAN saat menyegarkan
      * tool. Sebelumnya keduanya menulis daftarnya sendiri, dan
      * daftar itu sudah menyimpang: perakitan awal melewatkan tool
      * coding dan keluarga. Karena `refreshTools()` hanya berjalan
-     * saat forge berubah, seluruh kemampuan coding Aether — graphify,
+     * saat forge berubah, seluruh kemampuan coding Damar — graphify,
      * Serena, test, commit, rollback — tak terlihat oleh model pada
      * daemon yang baru dinyalakan.
      */
     nativeTools() {
 
         return [
-            // Memori — bagian inti Aether, bukan kemampuan opsional.
+            // Memori — bagian inti Damar, bukan kemampuan opsional.
             ...require("../memory/tools").memoryTools(),
 
-            // Ingatan Aether tentang bagaimana dirinya dibangun.
+            // Ingatan Damar tentang bagaimana dirinya dibangun.
             ...require("../memory/tools/buildTools").buildTools(),
 
             // Model dunia + penalaran relasi di graf memori.
             ...require("../world/tools").worldTools(),
 
-            // Forge — Aether menambah kemampuannya sendiri lewat percakapan.
+            // Forge — Damar menambah kemampuannya sendiri lewat percakapan.
             ...require("./forgeTools").forgeTools(),
 
             // Kendali rumah (Home Assistant).
@@ -624,7 +624,7 @@ class AIRuntimeService {
             // WhatsApp/Telegram yang aktif, atau tampilkan di Console.
             ...require("./mediaShareTools").mediaShareTools(),
 
-            // Vision — Aether bisa "melihat" kamera/CCTV.
+            // Vision — Damar bisa "melihat" kamera/CCTV.
             ...require("./visionTools").visionTools(),
 
             // Kirim media WhatsApp (aktif saat mengobrol di WhatsApp).
@@ -681,7 +681,7 @@ class AIRuntimeService {
     }
 
     /**
-     * Tool dari server MCP eksternal (Aether sebagai MCP client).
+     * Tool dari server MCP eksternal (Damar sebagai MCP client).
      *
      * Dimulai secara asynchronous di initialize(); sampai selesai,
      * daftar ini kosong. Setelah handshake semua server selesai,
@@ -705,18 +705,18 @@ class AIRuntimeService {
      *     > konfigurasi provider/model tervalidasi
      *     > fallback env
      *     > null (default konservatif)
-     * AETHER_MODEL_CONTEXT_TOKENS tidak pernah boleh melampaui window
+     * DAMAR_MODEL_CONTEXT_TOKENS tidak pernah boleh melampaui window
      * nyata yang sudah diketahui; ia hanya boleh MENGECEKKNYA.
      */
     activeContextTokens() {
 
-        const envN = Number(process.env.AETHER_MODEL_CONTEXT_TOKENS);
+        const envN = Number(process.env.DAMAR_MODEL_CONTEXT_TOKENS);
         const envWindow = Number.isFinite(envN) && envN > 0 ? envN : null;
 
         // Model LOKAL punya window yang DIKONFIGURASI dan DIKETAHUI —
         // H6 melarang substitusi diam ke default lebih besar.
         const knownReal = this._localContextTokens > 0 &&
-            (this.activePlatform?.id === "llamacpp" || !process.env.AETHER_TOKEN)
+            (this.activePlatform?.id === "llamacpp" || !process.env.DAMAR_TOKEN)
             ? this._localContextTokens
             : null;
 
@@ -1002,7 +1002,7 @@ class AIRuntimeService {
     /**
      * Di mana percakapan ini sedang berlangsung.
      *
-     * Aether melayani empat pintu masuk yang perilakunya berbeda:
+     * Damar melayani empat pintu masuk yang perilakunya berbeda:
      * balasan panjang wajar di Console tetapi menyiksa di WhatsApp,
      * dan "tampilkan gambarnya" berarti panel di Console tetapi
      * lampiran di Telegram. Tanpa diberi tahu, model tidak punya cara
@@ -1011,7 +1011,7 @@ class AIRuntimeService {
     channelPrompt(channel) {
 
         const KANAL = {
-            console: "Console Aether (aplikasi desktop) — LAYAR, bukan kotak pesan. " +
+            console: "Console Damar (aplikasi desktop) — LAYAR, bukan kotak pesan. " +
                 "Di sini 'kirimkan fotonya' berarti TAMPILKAN di layar, bukan kirim ke " +
                 "WhatsApp/Telegram: panggil show_image (atau show_video/open_document) " +
                 "dan sebuah jendela terbuka di dashboard. Untuk lagu/video, panggil " +
@@ -1074,13 +1074,13 @@ class AIRuntimeService {
     /**
      * Ambil memori relevan lalu tempelkan ke system prompt.
      *
-     * Ini yang membuat Aether tidak perlu dijelaskan ulang setiap
+     * Ini yang membuat Damar tidak perlu dijelaskan ulang setiap
      * percakapan. Model tetap punya tool memory_recall untuk
      * menggali lebih dalam; injeksi ini hanya menyediakan konteks
      * awal supaya jawaban pertama pun sudah nyambung.
      *
      * Kegagalan di sini tidak boleh menggagalkan chat — tanpa
-     * memori Aether cuma jadi kurang tahu, bukan rusak.
+     * memori Damar cuma jadi kurang tahu, bukan rusak.
      */
     async withMemory(messages = [], channel = null) {
 
@@ -1118,9 +1118,9 @@ class AIRuntimeService {
                 `Gunakan bila membantu, jangan sebutkan bahwa ini "memori" ` +
                 `kecuali ditanya, dan jangan mengarang bila tidak ada. ` +
                 // Tanpa kalimat ini, catatan bertanda "perkiraan" atau
-                // "catatan Aether" akan disampaikan sama meyakinkannya
+                // "catatan Damar" akan disampaikan sama meyakinkannya
                 // dengan yang benar-benar dikatakan pengguna (§276).
-                `Catatan bertanda "perkiraan" atau "catatan Aether" adalah ` +
+                `Catatan bertanda "perkiraan" atau "catatan Damar" adalah ` +
                 `kesimpulanmu sendiri, bukan yang dikatakan pengguna — ` +
                 `sampaikan sebagai dugaan, jangan sebagai fakta.`;
 
@@ -1179,7 +1179,7 @@ class AIRuntimeService {
     /**
      * Memori + KEADAAN BATIN.
      *
-     * Aether tidak hanya membawa apa yang ia ketahui ke tiap giliran,
+     * Damar tidak hanya membawa apa yang ia ketahui ke tiap giliran,
      * ia membawa keadaannya: afek yang terbentuk dari kejadian nyata,
      * apa yang sedang ia perhatikan, seberapa yakin ia, dan bacaannya
      * atas keadaan pengguna. Itulah beda antara menjalankan program
@@ -1191,7 +1191,7 @@ class AIRuntimeService {
      * prefix prompt dan membuat tiap giliran membayar evaluasi ulang.
      *
      * Gagal di sini tidak boleh menggagalkan chat — tanpa keadaan
-     * batin Aether cuma jadi lebih datar, bukan rusak.
+     * batin Damar cuma jadi lebih datar, bukan rusak.
      */
     async withMind(messages = [], channel = null, tools = null) {
 
@@ -1271,7 +1271,7 @@ ${blok}` }
      * anggaran model-aware, blok dinamis tetap ditempel ke pesan
      * pengguna terakhir (pola cache yang sudah terbukti).
      *
-     * Jalur LEGACY (`AETHER_CONTEXT_PIPELINE=legacy`): rantai lama
+     * Jalur LEGACY (`DAMAR_CONTEXT_PIPELINE=legacy`): rantai lama
      * withSystemPrompt → withMemory → withMind — utuh untuk rollback.
      */
     async assemble({ messages, channel = null, tools = null, contextRefs = [] }) {
@@ -1290,7 +1290,7 @@ ${blok}` }
             catch { /* persepsi gagal: lanjut */ }
         }
 
-        const legacy = process.env.AETHER_CONTEXT_PIPELINE === "legacy";
+        const legacy = process.env.DAMAR_CONTEXT_PIPELINE === "legacy";
 
         if (legacy) {
             const msgs = await this.withMind(messages, channel, tools);
@@ -1442,7 +1442,7 @@ ${blok}` }
      * tidak bisa dipakai (kuota per menit habis, ditolak, atau
      * internet mati).
      *
-     * Inilah inti pengaturan hybrid: Aether tetap menjawab walau
+     * Inilah inti pengaturan hybrid: Damar tetap menjawab walau
      * layanan luar sedang tidak tersedia. Lebih lambat, tapi hidup.
      * Mengembalikan null bila jalur lokal juga tidak memungkinkan —
      * pemanggil yang memutuskan error mana yang dilempar.

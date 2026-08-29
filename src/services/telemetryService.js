@@ -3,9 +3,9 @@ const EventEmitter = require("node:events");
 const os = require("node:os");
 
 /**
- * Sumber kebenaran untuk apa yang terjadi di dalam Aether saat ini.
+ * Sumber kebenaran untuk apa yang terjadi di dalam Damar saat ini.
  *
- * Menyimpan log terbaru di ring buffer (bukan file) supaya Aether
+ * Menyimpan log terbaru di ring buffer (bukan file) supaya Damar
  * Console bisa langsung menampilkan riwayat begitu terhubung —
  * tanpa itu, panel log selalu kosong sampai kejadian berikutnya.
  */

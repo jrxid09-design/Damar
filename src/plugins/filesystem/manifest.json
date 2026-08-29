@@ -5,7 +5,7 @@
     "description": "File and directory operations.",
     "category": "system",
     "entry": "index.js",
-    "author": "Aether",
+    "author": "Damar",
     "permissions": [],
     "tags": [
         "filesystem",

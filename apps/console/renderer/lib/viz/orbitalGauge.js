@@ -1,5 +1,5 @@
 /**
- * Aether Orbital Gauge — indikator orbital minimal (canvas 2D).
+ * Damar Orbital Gauge — indikator orbital minimal (canvas 2D).
  *
  * Spec data_visualization.gauge: "minimal orbital indicator" —
  * cincin busur tipis bercahaya, BUKAN speedometer generik.

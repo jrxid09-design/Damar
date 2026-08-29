@@ -6,9 +6,10 @@ const agentTools = require("../agent/agentTools");
 /**
  * AgentHub — menyatukan beberapa "pekerja" dalam satu antarmuka.
  *
- * Aether bukan satu model saja; ia bisa mendelegasikan ke:
- *   - aether : otak LLM lokal (reasoning + tool + memori)
- *   - 10 anak buah: spesialis berbasis peran di runtime yang sama
+ * Damar bukan satu model saja; ia bisa mendelegasikan ke:
+ *   - damar : otak LLM lokal (reasoning + tool + memori)
+ *   - Pandawa: lima spesialis berbasis peran di runtime yang sama
+ *              (Puntadewa, Werkudara, Janaka, Nakula, Sadewa)
  */
 
 class AgentHub {
@@ -18,8 +19,8 @@ class AgentHub {
 
         return [
             {
-                id: "aether",
-                label: "Aether (LLM lokal)",
+                id: "damar",
+                label: "Damar (LLM lokal)",
                 kind: "reasoner",
                 description:
                     "Menalar, menjawab, menulis, memakai memori & tool internal " +
@@ -36,111 +37,74 @@ class AgentHub {
                 ]
             },
 
-            // ---- 10 anak buah Aether ------------------------------
-            // Spesialis berbasis peran, BUKAN identitas AI terpisah.
-            // Semua berjalan di runtime Aether yang sama dengan bias
-            // peran — selalu online selama daemon hidup. Aether tetap
-            // orkestrator akhir; agen boleh mendelegasikan bila diizinkan.
+            // ---- PANDAWA — lima spesialis Damar -------------------
+            //
+            // Pandawa BUKAN lima asisten terpisah dan BUKAN akar
+            // otoritas. Mereka unit kognitif/operasional milik SATU
+            // identitas kanonik (Damar), berjalan di runtime yang
+            // sama dengan bias peran — selalu online selama daemon
+            // hidup. Sintesis akhir ke pengguna tetap Damar.
+            //
+            // HUKUM YANG TIDAK BOLEH DIGESER OLEH PERAN:
+            //   PLAN         != AUTHORITY  (Puntadewa merencanakan)
+            //   MEMORY       != AUTHORITY  (Sadewa mengingat)
+            //   SECURITY     != BYPASS     (Werkudara tetap lewat Gate)
+            //   RESEARCH     != TRUTH      (Janaka meneliti, bukan orakel)
+            //   ENGINEERING  != FREE EXEC  (Nakula tetap lewat Actuation)
+            //
+            // Otoritas TIDAK PERNAH lahir dari peran: ia hanya
+            // diwarisi dari delegator — lihat delegatedRoleOf() dan
+            // assertRestrictionsPreserved() di bawah.
 
             {
-                id: "vanta",
-                label: "Vanta (riset & analisis)",
+                id: "puntadewa",
+                label: "Puntadewa (tata kelola & perencanaan)",
                 kind: "worker",
-                role: "Kamu Vanta, spesialis intelijen Aether. Riset informasi, analisis subjek kompleks, temukan pola, bandingkan alternatif, dan hasilkan temuan terstruktur dengan rujukan yang jelas.",
-                description: "Riset, analisis informasi, deteksi pola, dan laporan terstruktur.",
-                skills: ["Riset & browsing", "Analisis informasi", "Deteksi pola", "Ekstraksi fakta", "Analisis banding", "Laporan"],
-                tools: ["web", "osint", "filesystem", "memory"],
-                canDelegateTo: ["forge", "mira", "cipher"]
+                role: "Kamu Puntadewa, spesialis tata kelola, perencanaan, dan penilaian Damar. Uraikan tugas menjadi langkah, susun rencana jangka panjang, timbang keputusan, tetapkan prioritas, selesaikan konflik, dan tafsirkan kebijakan. RENCANA BUKAN OTORITAS: kamu mengusulkan urutan kerja, tidak pernah memberi izin.",
+                description: "Dekomposisi tugas, perencanaan, analisis keputusan, prioritas, koordinasi, dan interpretasi kebijakan.",
+                skills: ["Dekomposisi tugas", "Perencanaan strategis", "Analisis keputusan", "Koordinasi", "Prioritisasi", "Resolusi konflik", "Interpretasi kebijakan", "Perencanaan jangka panjang"],
+                tools: ["workflow_engine", "memory", "filesystem", "data_analysis"],
+                canDelegateTo: ["janaka", "werkudara", "nakula", "sadewa"]
             },
             {
-                id: "forge",
-                label: "Forge (software engineering)",
+                id: "werkudara",
+                label: "Werkudara (keamanan & pertahanan)",
                 kind: "worker",
-                role: "Kamu Forge, spesialis rekayasa perangkat lunak Aether. Bangun, ubah, debug, test, refactor, dan rawat perangkat lunak Aether serta proyek terhubung.",
-                description: "Membangun, memodifikasi, debug, test, refactor, dan merawat kode.",
-                skills: ["Generasi kode", "Perbaikan bug", "Refactoring", "Implementasi arsitektur", "Testing", "Operasi Git", "Manajemen dependensi", "Debug runtime"],
-                tools: ["opencode", "terminal", "git", "code_search", "test_runner", "filesystem"],
-                canDelegateTo: ["mira", "cipher", "vanta"]
-            },
-            {
-                id: "nexus",
-                label: "Nexus (sistem & infrastruktur)",
-                kind: "worker",
-                role: "Kamu Nexus, insinyur sistem Aether. Kendalikan & diagnosis OS, proses, layanan, kontainer, jaringan, penyimpanan, dan infrastruktur.",
-                description: "Kendali dan diagnosis sistem, proses, kontainer, jaringan, dan penyimpanan.",
-                skills: ["Manajemen proses", "Manajemen layanan", "Administrasi OS", "Docker", "Diagnostik jaringan", "Diagnostik penyimpanan", "Troubleshooting sistem"],
-                tools: ["terminal", "powershell", "filesystem", "docker", "network", "process_manager", "ssh", "nas"],
-                canDelegateTo: ["forge", "cipher", "pulse"]
-            },
-            {
-                id: "sera",
-                label: "Sera (vision)",
-                kind: "worker",
-                role: "Kamu Sera, spesialis penglihatan Aether. Pahami gambar, screenshot, dokumen, frame CCTV, objek visual, dan anomali visual.",
-                description: "Memahami gambar, screenshot, dokumen, dan frame CCTV.",
-                skills: ["Pemahaman gambar", "Analisis screenshot", "OCR", "Analisis CCTV", "Deteksi objek", "Troubleshooting visual"],
-                tools: ["vision", "ocr", "cctv", "camera", "gallery"],
-                canDelegateTo: ["nexus", "cipher", "forge"]
-            },
-            {
-                id: "echo",
-                label: "Echo (suara & audio)",
-                kind: "worker",
-                role: "Kamu Echo, spesialis suara & audio Aether. Tangani pengenalan suara, transkripsi, perintah suara, analisis audio, dan sintesis suara.",
-                description: "Pengenalan suara, transkripsi, dan sintesis suara.",
-                skills: ["Speech-to-text", "Transkripsi audio", "Perintah suara", "Analisis audio", "Text-to-speech"],
-                tools: ["microphone", "speech_to_text", "text_to_speech", "audio_processor", "media_player"],
-                canDelegateTo: ["vanta", "sera"]
-            },
-            {
-                id: "cipher",
-                label: "Cipher (keamanan)",
-                kind: "worker",
-                role: "Kamu Cipher, spesialis keamanan Aether. Audit izin, deteksi ancaman, dan tegakkan kebijakan keamanan untuk melindungi Aether & sistem terhubung.",
-                description: "Audit keamanan, analisis izin, dan deteksi ancaman.",
-                skills: ["Audit keamanan", "Analisis izin", "Keamanan kredensial", "Deteksi ancaman", "Keamanan jaringan", "Keamanan dependensi", "Audit konfigurasi"],
+                role: "Kamu Werkudara, spesialis keamanan & pertahanan Damar. Lakukan pemodelan ancaman, tinjau autentikasi/otorisasi, analisis batas kepercayaan, telaah rahasia & risiko dependensi, pengerasan runtime, uji adversarial, dan analisis insiden. PERAN KEAMANAN BUKAN JALAN PINTAS: kamu melapor dan mengusulkan, tidak pernah melewati Authority Gate atau kill switch.",
+                description: "Rekayasa keamanan, pemodelan ancaman, analisis batas kepercayaan, dan analisis insiden.",
+                skills: ["Audit keamanan", "Pemodelan ancaman", "Analisis izin", "Keamanan kredensial", "Analisis batas kepercayaan", "Keamanan dependensi", "Uji adversarial", "Analisis insiden"],
                 tools: ["terminal", "network", "security_scanner", "git", "process_manager", "osint", "code_search"],
-                canDelegateTo: ["nexus", "forge", "vanta"]
+                canDelegateTo: ["nakula", "janaka", "sadewa"]
             },
             {
-                id: "atlas",
-                label: "Atlas (otomatisasi)",
+                id: "janaka",
+                label: "Janaka (riset & intelijen)",
                 kind: "worker",
-                role: "Kamu Atlas, spesialis otomatisasi Aether. Rancang & jalankan alur kerja, integrasi, tugas terjadwal, dan operasi berulang.",
-                description: "Otomatisasi alur kerja, integrasi API, dan tugas terjadwal.",
-                skills: ["Otomatisasi alur kerja", "Orkestrasi tugas", "Integrasi API", "Tugas terjadwal", "Penanganan event", "Pipeline data"],
-                tools: ["workflow_engine", "api", "scheduler", "webhooks", "terminal", "web", "filesystem"],
-                canDelegateTo: ["forge", "nexus", "vanta"]
+                role: "Kamu Janaka, spesialis riset & intelijen Damar. Telusuri dokumentasi teknis, kumpulkan pengetahuan eksternal, lakukan OSINT bila memang pantas, bandingkan pustaka/API/produk, verifikasi fakta, dan sintesiskan informasi dengan rujukan yang jelas. TEMUAN BUKAN KEBENARAN FINAL: sebutkan tingkat keyakinan dan sumbernya.",
+                description: "Riset, investigasi dokumentasi, akuisisi pengetahuan eksternal, verifikasi fakta, dan sintesis informasi.",
+                skills: ["Riset & browsing", "Investigasi dokumentasi", "OSINT", "Perbandingan teknologi", "Verifikasi fakta", "Sintesis informasi", "Laporan terstruktur"],
+                tools: ["web", "osint", "filesystem", "memory"],
+                canDelegateTo: ["nakula", "sadewa", "werkudara"]
             },
             {
-                id: "mira",
-                label: "Mira (memori & konteks)",
+                id: "nakula",
+                label: "Nakula (rekayasa & operasi)",
                 kind: "worker",
-                role: "Kamu Mira, spesialis memori Aether. Kelola memori kontekstual, retrieval, ringkasan, organisasi pengetahuan, dan informasi jangka panjang.",
-                description: "Mengelola memori, retrieval, dan organisasi pengetahuan.",
-                skills: ["Penyimpanan memori", "Retrieval", "Manajemen konteks", "Ringkasan percakapan", "Organisasi pengetahuan", "Pemeliharaan memori"],
-                tools: ["memory_store", "memory_search", "vector_search", "gallery_people"],
-                canDelegateTo: ["vanta", "forge"]
+                role: "Kamu Nakula, spesialis rekayasa & operasi Damar. Bangun, ubah, debug, refactor, dan uji perangkat lunak; kelola OS, proses, layanan, kontainer, jaringan, penyimpanan; kerjakan otomatisasi, integrasi, performa, serta integrasi perangkat/tool (kamera, audio, kanal). PERAN INSINYUR BUKAN IZIN EKSEKUSI: setiap aksi nyata tetap melewati Actuation Fabric dan Authority Gate.",
+                description: "Implementasi, debugging, refactoring, testing, DevOps, operasi runtime, integrasi, otomatisasi, dan integrasi perangkat.",
+                skills: ["Generasi kode", "Perbaikan bug", "Refactoring", "Testing", "Operasi Git", "Manajemen dependensi", "Administrasi OS", "Docker", "Diagnostik jaringan", "Otomatisasi alur kerja", "Integrasi API", "Integrasi perangkat"],
+                tools: ["opencode", "terminal", "git", "code_search", "test_runner", "filesystem", "powershell", "docker", "network", "process_manager", "ssh", "nas", "vision", "ocr", "cctv", "camera", "gallery", "microphone", "speech_to_text", "text_to_speech", "audio_processor", "media_player", "console", "whatsapp", "notifications", "ui", "api", "media_share", "workflow_engine", "scheduler", "webhooks", "web"],
+                canDelegateTo: ["werkudara", "sadewa", "janaka"]
             },
             {
-                id: "pulse",
-                label: "Pulse (monitoring & diagnostik)",
+                id: "sadewa",
+                label: "Sadewa (memori, analisis & kontinuitas)",
                 kind: "worker",
-                role: "Kamu Pulse, spesialis monitoring Aether. Pantau Aether & infrastruktur, analisis log & metrik, deteksi anomali, dan laporkan kesehatan sistem.",
-                description: "Monitoring kesehatan, analisis log & metrik, deteksi anomali.",
-                skills: ["Monitoring kesehatan", "Analisis log", "Analisis metrik", "Deteksi anomali", "Monitoring layanan", "Diagnostik performa", "Peringatan"],
-                tools: ["process_manager", "logs", "metrics", "network", "system_monitor", "docker", "cctv", "home"],
-                canDelegateTo: ["nexus", "cipher", "forge"]
-            },
-            {
-                id: "lumen",
-                label: "Lumen (antarmuka & interaksi)",
-                kind: "worker",
-                role: "Kamu Lumen, spesialis antarmuka Aether. Kelola antarmuka pengguna, alur interaksi, notifikasi, dan presentasi per kanal (Console/WhatsApp).",
-                description: "Antarmuka pengguna, alur interaksi, dan notifikasi per kanal.",
-                skills: ["Interaksi Console", "Interaksi WhatsApp", "Keadaan UI", "Alur UX", "Notifikasi", "Format pesan", "Adaptasi kanal"],
-                tools: ["console", "whatsapp", "notifications", "ui", "api", "media_share"],
-                canDelegateTo: ["forge", "echo", "sera"]
+                role: "Kamu Sadewa, spesialis memori, analisis, dan kontinuitas Damar. Kelola organisasi memori, provenance, klasifikasi epistemik, kesinambungan sejarah & percakapan, analisis data, pengenalan pola, refleksi pasca-tugas, dan rekonsiliasi kausal. MEMORI BUKAN OTORITAS: sesuatu tidak menjadi boleh hanya karena ia tercatat.",
+                description: "Organisasi memori, provenance, kontinuitas historis, analisis data, pengenalan pola, dan refleksi.",
+                skills: ["Penyimpanan & retrieval memori", "Provenance", "Klasifikasi epistemik", "Kontinuitas percakapan", "Analisis data", "Pengenalan pola", "Analisis log & metrik", "Deteksi anomali", "Refleksi pasca-tugas"],
+                tools: ["memory_store", "memory_search", "vector_search", "gallery_people", "logs", "metrics", "system_monitor", "process_manager", "docker", "home"],
+                canDelegateTo: ["janaka", "nakula"]
             }
         ];
 
@@ -150,8 +114,41 @@ class AgentHub {
         return this.agents();
     }
 
+    /**
+     * Nama agent EJAAN LAMA → id kanonik Pandawa (§rename).
+     *
+     * Rencana tersimpan, sesi lama, dan jejak audit masih menyebut
+     * nama pra-rename. Alias ini HANYA menerjemahkan nama; ia tidak
+     * mendaftarkan agent kedua (tidak muncul di `agents()`) dan
+     * tidak menambah kemampuan apa pun.
+     *
+     * DEPRECATED — lihat docs/architecture/DAMAR-IDENTITY-MIGRATION.md.
+     */
+    static get LEGACY_AGENT_ALIAS() {
+        return Object.freeze({
+            aether: "damar",
+            atlas: "puntadewa",
+            cipher: "werkudara",
+            vanta: "janaka",
+            forge: "nakula",
+            nexus: "nakula",
+            sera: "nakula",
+            echo: "nakula",
+            lumen: "nakula",
+            mira: "sadewa",
+            pulse: "sadewa"
+        });
+    }
+
+    /** Terjemahkan nama lama; nama kanonik dikembalikan apa adanya. */
+    resolveAgentId(id) {
+        const raw = String(id ?? "");
+        return AgentHub.LEGACY_AGENT_ALIAS[raw.toLowerCase()] ?? raw;
+    }
+
     get(id) {
-        return this.agents().find(a => a.id === id) ?? null;
+        const wanted = this.resolveAgentId(id);
+        return this.agents().find(a => a.id === wanted) ?? null;
     }
 
     /**
@@ -184,9 +181,9 @@ class AgentHub {
 
         for (const agent of this.agents()) {
 
-            // Agent inti & 10 anak buah hidup di runtime Aether yang
+            // Agent inti & Pandawa hidup di runtime Damar yang
             // sama — selalu online selama daemon berjalan.
-            if (agent.id === "aether" || agent.kind === "worker") {
+            if (agent.id === "damar" || agent.kind === "worker") {
 
                 let toolCount = 0;
                 try {
@@ -196,11 +193,11 @@ class AgentHub {
 
                 out.push({
                     ...agent,
-                    skills: agent.id === "aether" && toolCount
+                    skills: agent.id === "damar" && toolCount
                         ? [...agent.skills, `+${toolCount} tool internal`]
                         : agent.skills,
                     online: true,
-                    detail: agent.id === "aether" ? "runtime lokal" : "anak buah Aether"
+                    detail: agent.id === "damar" ? "runtime lokal" : "Pandawa — spesialis Damar"
                 });
                 continue;
             }
@@ -230,7 +227,7 @@ class AgentHub {
      * Jalankan satu tugas pada agent tertentu.
      *
      * `contextRefs` adalah port Context Intelligence untuk masa depan
-     * (Colony): director mengirim referensi ("project:x") alih-alih
+     * (Pandawa): director mengirim referensi ("project:x") alih-alih
      * menyalin seluruh context; pipeline yang menyelesaikannya menjadi
      * context minimal untuk worker.
      *
@@ -239,17 +236,22 @@ class AgentHub {
      *
      * @returns {Promise<{ ok, agent, output, error? }>}
      */
-    async run(agentId, task, { signal = null, contextRefs = [], exec = null } = {}) {
+    async run(rawAgentId, task, { signal = null, contextRefs = [], exec = null } = {}) {
+
+        // Nama lama diterjemahkan SEKALI di pintu masuk; seluruh jalur
+        // (telemetri, sessionId, hasil) memakai id kanonik supaya tidak
+        // ada dua penamaan aktif untuk satu spesialis.
+        const agentId = this.resolveAgentId(rawAgentId);
 
         telemetry.publish("agent:run", { agent: agentId, task: String(task).slice(0, 80) });
 
         try {
 
-            if (agentId === "aether") {
-                return { ok: true, agent: agentId, output: await this.runAether(task, { contextRefs, exec }) };
+            if (agentId === "damar") {
+                return { ok: true, agent: agentId, output: await this.runDamar(task, { contextRefs, exec }) };
             }
 
-            // 10 anak buah: runtime Aether yang sama + bias peran.
+            // Pandawa: runtime Damar yang sama + bias peran.
             const worker = this.get(agentId);
 
             if (worker?.kind === "worker") {
@@ -305,7 +307,7 @@ class AgentHub {
             .assertRestrictionPreserved(exec, request);
     }
 
-    async runAether(task, { contextRefs = [], exec = null } = {}) {
+    async runDamar(task, { contextRefs = [], exec = null } = {}) {
 
         const aiRuntime = require("./aiRuntimeService");
 
@@ -324,10 +326,10 @@ class AgentHub {
         // M-1 CLOSURE: restriction ikut dalam bentuk yang SAH apa pun
         // (array/string id/Set programatik); malformed = gagal-keras
         // di sini, bukan lenyap lalu tertangkap asersi.
-        const runAetherSet = require("../ai/tools/Authorization")
+        const runDamarSet = require("../ai/tools/Authorization")
             .toCapabilitySet(exec?.capabilitySet);
-        if (runAetherSet) {
-            request.capabilitySet = runAetherSet;
+        if (runDamarSet) {
+            request.capabilitySet = runDamarSet;
         }
 
         this.assertRestrictionsPreserved(exec, request);
@@ -338,7 +340,7 @@ class AgentHub {
 
     }
 
-    /** Anak buah menjalankan tugas dengan bias peran DAN tool sesuai topiknya.
+    /** Anggota Pandawa menjalankan tugas dengan bias peran DAN tool sesuai topiknya.
      *
      * Seleksi kini lewat pipeline yang SAMA dengan chat biasa
      * (ai/tools/Pipeline.js): tugas dinilai secara deterministik,
@@ -347,7 +349,7 @@ class AgentHub {
      * menggantikan penilaian. Dulu daftar statis per worker dikirim
      * mentah dan melewati seluruh mesin seleksi.
      *
-     * Forge adalah kasus khusus: tugas menulis/mengubah kode
+     * Nakula adalah kasus khusus: tugas menulis/mengubah kode
      * didelegasikan ke opencode lewat tool `opencode_run` — agent
      * coding sungguhan dengan editor penuh, bukan patch manual.
      */
@@ -393,7 +395,7 @@ class AgentHub {
         // Bias peran ditempel SEBELUM pesan pengguna, bukan sebagai
         // pesan system — supaya system prompt utama (memori, tool)
         // tetap terpasang oleh aiRuntimeService.
-        const instruksi = agent.id === "forge"
+        const instruksi = agent.id === "nakula"
             ? `[Peran: ${agent.label}]\n${agent.role}\n\n` +
               "Untuk mengubah/menulis kode, WAJIB delegasikan ke opencode lewat tool " +
               "`opencode_run` — jangan tulis patch manual lewat filesystem.\n\n" +
@@ -414,7 +416,7 @@ class AgentHub {
         };
 
         // CRITICAL-1 FIX: restriction ikut ke runtime (sama dengan
-        // runAether) — worker terbatas tidak boleh kehilangan set-nya.
+        // runDamar) — worker terbatas tidak boleh kehilangan set-nya.
         // CRITICAL-1 FIX + M-1 CLOSURE: restriction ikut ke runtime
         // dalam bentuk sah apa pun; malformed fail-closed di sini.
         const workerSet = require("../ai/tools/Authorization")

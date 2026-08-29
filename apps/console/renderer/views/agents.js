@@ -5,7 +5,7 @@ import { esc, pill, markdown, toast } from "../lib/ui.js";
 /**
  * Agents — orkestrasi multi-agent.
  *
- * Menampilkan kesiapan tiap agent (Aether/OpenClaw/Hermes) dan
+ * Menampilkan kesiapan tiap agent (Damar/OpenClaw/Hermes) dan
  * sebuah konsol untuk memberi tugas kompleks yang dipecah lalu
  * dieksekusi lintas agent, dengan prosesnya terlihat langsung.
  */
@@ -16,7 +16,7 @@ export const agents = {
     label: "Agents",
     icon: "activity",
     title: "Agents",
-    subtitle: "Beri tugas kompleks — Aether memecah & mengoordinasikan agent.",
+    subtitle: "Beri tugas kompleks — Damar memecah & mengoordinasikan agent.",
 
     render(root) {
 
@@ -24,7 +24,7 @@ export const agents = {
             <div class="view-head">
                 <div>
                     <h1>Agents</h1>
-                    <p>Beri tugas kompleks — Aether memecah &amp; mengoordinasikan agent.</p>
+                    <p>Beri tugas kompleks — Damar memecah &amp; mengoordinasikan agent.</p>
                 </div>
                 <div class="actions">
                     <button class="btn ghost sm" id="ag-refresh">${icon("refresh")} Cek agent</button>
@@ -174,8 +174,8 @@ async function drawHealth(root) {
             </div>`).join("")
             + `<div class="panel" style="grid-column:1/-1">
                 <div class="small muted">${icon("activity")}
-                    Aether mengoordinasikan <strong>ketiga agent</strong>: ia menyusun rencana,
-                    lalu memberi tiap langkah ke agent yang paling cocok (menalar ke Aether,
+                    Damar mengoordinasikan <strong>ketiga agent</strong>: ia menyusun rencana,
+                    lalu memberi tiap langkah ke agent yang paling cocok (menalar ke Damar,
                     aksi antarmuka ke OpenClaw, tugas berlapis ke Hermes) dan menyatukan hasilnya.
                 </div>
             </div>`;

@@ -12,7 +12,7 @@ const OPTS = { windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout: 60000 };
  * Full LSP PowerShell (PowerShell Editor Services) berat & rapuh dipasang
  * standalone. Untuk diagnostics/lint dipakai PSScriptAnalyzer — linter resmi
  * PS (yang PSES pakai di baliknya juga). Modul disimpan di lokasi milik
- * Aether (~/.aether/psmodules) & diimpor via path eksplisit (menghindari
+ * Damar (~/.damar/psmodules) & diimpor via path eksplisit (menghindari
  * jalur modul CurrentUser yang sering ter-redirect OneDrive di Windows).
  *
  * Outline simbol PS memakai PARSER AST BAWAAN PowerShell
@@ -24,7 +24,7 @@ const SEVERITY = { 0: "information", 1: "warning", 2: "error", 3: "parse-error" 
 
 function moduleManifest() {
     const home = process.env.USERPROFILE || process.env.HOME || "";
-    const base = path.join(home, ".aether", "psmodules", "PSScriptAnalyzer");
+    const base = path.join(home, ".damar", "psmodules", "PSScriptAnalyzer");
     try {
         const versions = fs.readdirSync(base).filter(v => /^\d/.test(v)).sort().reverse();
         for (const v of versions) {
@@ -53,7 +53,7 @@ class PowerShellAnalyzer {
      */
     async analyze(file) {
         const manifest = moduleManifest();
-        if (!manifest) return { available: false, note: "PSScriptAnalyzer belum terpasang (~/.aether/psmodules)." };
+        if (!manifest) return { available: false, note: "PSScriptAnalyzer belum terpasang (~/.damar/psmodules)." };
         if (!fs.existsSync(file)) return { available: true, ok: false, error: `File tak ada: ${file}` };
 
         const script =

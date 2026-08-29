@@ -3,7 +3,7 @@ const path = require("node:path");
 const JsonStore = require("../core/config/JsonStore");
 
 /**
- * Peran pengguna Aether (ditegakkan pada jalur WhatsApp).
+ * Peran pengguna Damar (ditegakkan pada jalur WhatsApp).
  *
  *   superadmin — kendali penuh tanpa batas (pemilik).
  *   admin      — operasional harian; TAK bisa ubah konfigurasi inti

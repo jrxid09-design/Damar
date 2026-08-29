@@ -3,14 +3,14 @@ const telemetry = require("./telemetryService");
 /**
  * Kesadaran kontekstual rumah.
  *
- * Menyatukan sinyal dari SEMUA subsistem Aether menjadi satu
- * snapshot — inilah yang membuat Aether memahami rumah sebagai
+ * Menyatukan sinyal dari SEMUA subsistem Damar menjadi satu
+ * snapshot — inilah yang membuat Damar memahami rumah sebagai
  * satu kesatuan, bukan data terpisah. Setiap sumber diambil
  * dengan aman: subsistem yang belum diatur/offline hanya
  * dilaporkan "tidak tersedia", tidak menggagalkan yang lain.
  *
- * brief() meminta Aether merangkum snapshot itu jadi narasi
- * keadaan rumah (gaya "ringkasan pulang kerja" di visi Aether).
+ * brief() meminta Damar merangkum snapshot itu jadi narasi
+ * keadaan rumah (gaya "ringkasan pulang kerja" di visi Damar).
  */
 class ContextService {
 
@@ -133,7 +133,7 @@ class ContextService {
         return deviceService.readiness();
     }
 
-    /** Rangkum snapshot jadi narasi keadaan rumah oleh Aether. */
+    /** Rangkum snapshot jadi narasi keadaan rumah oleh Damar. */
     /**
      * N2-FINAL — giliran narasi mewarisi otoritas pemanggil.
      * Tanpa exec → 'user' least privilege; TIDAK ada system implisit.
@@ -176,7 +176,7 @@ class ContextService {
 
         if (snap.agents?.agents) {
             const on = snap.agents.agents.filter(a => a.online).map(a => a.id).join(", ");
-            lines.push(`Agent siap: ${on || "hanya aether"}.`);
+            lines.push(`Agent siap: ${on || "hanya damar"}.`);
         }
 
         if (snap.cameras?.total) {

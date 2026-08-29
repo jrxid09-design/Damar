@@ -23,7 +23,7 @@ function autonomyTools() {
         new AITool({
             name: "goal_run",
             description:
-                "Jalankan TUJUAN OTONOM sampai tuntas: Aether menyusun rencana, memilih tool/agent, " +
+                "Jalankan TUJUAN OTONOM sampai tuntas: Damar menyusun rencana, memilih tool/agent, " +
                 "mengeksekusi, memverifikasi, memulihkan kegagalan, dan MENCIPATAKAN kapabilitas baru " +
                 "bila belum ada (skill factory + sandbox). Pakai untuk tugas berlapis/tak dikenal — " +
                 "bukan untuk pertanyaan biasa. Kembalikan laporan langkah ketika selesai.",

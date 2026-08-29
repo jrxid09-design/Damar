@@ -1,9 +1,9 @@
 /**
- * CONTEXT REFS — port tipis untuk Colony/Lab/Initiative (fase depan).
+ * CONTEXT REFS — port tipis untuk Pandawa/Lab/Initiative (fase depan).
  *
  * Kontrak: pemanggil boleh mengirim
  *
- *   contextRefs: ["project:aether", "decision:xyz", "artifact:abc"]
+ *   contextRefs: ["project:damar", "decision:xyz", "artifact:abc"]
  *
  * dan pipeline mengubahnya menjadi ContextItems berbatas. Sumber
  * project/artifact BELUM ada di repo — jadi modul ini hanyalah

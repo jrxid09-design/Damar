@@ -4,7 +4,7 @@ class ApplicationOptions {
 
         this.name =
             options.name ??
-            "Aether";
+            "Damar";
 
         this.version =
             options.version ??

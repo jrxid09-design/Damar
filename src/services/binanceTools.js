@@ -6,7 +6,7 @@ const monitor = require("./cryptoMonitorService");
 const bot = require("./cryptoBotService");
 
 /**
- * Tool crypto Aether (Binance) — MEMANTAU & MENGEKSEKUSI.
+ * Tool crypto Damar (Binance) — MEMANTAU & MENGEKSEKUSI.
  *
  * Eksekusi order memakai pola DUA-LANGKAH yang wajib:
  *   1. crypto_prepare_order  -> menyiapkan order, TIDAK mengirim apa pun,
@@ -282,7 +282,7 @@ function binanceTools() {
         new AITool({
             name: "crypto_set_alert",
             description:
-                "Pasang alarm harga: Aether memantau di latar dan memberi tahu (popup " +
+                "Pasang alarm harga: Damar memantau di latar dan memberi tahu (popup " +
                 "Console + WhatsApp bila aktif) saat harga menembus ambang. Pakai saat " +
                 "pengguna minta 'kabari kalau BTC di atas X', 'ingatkan kalau ETH turun ke Y'.",
             parameters: {

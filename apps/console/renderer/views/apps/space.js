@@ -7,7 +7,7 @@ import { nas } from "../nas.js";
  * Ruang — Rumah + Vision + NAS.
  *
  * OSINT sengaja TIDAK ada di sini: ia sudah punya aplikasi sendiri
- * (Aether OSINT), jadi tab kembar hanya membingungkan.
+ * (Damar OSINT), jadi tab kembar hanya membingungkan.
  */
 export function buildSpaceApp(onBack) {
     return createApp({

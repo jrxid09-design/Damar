@@ -4,7 +4,7 @@ import { studio } from "./studio.js";
 
 /**
  * Skills & Studio — satu layar untuk seluruh "skill" (kemampuan)
- * Aether: yang terpasang & bisa dipanggil, draft buatan Aether yang
+ * Damar: yang terpasang & bisa dipanggil, draft buatan Damar yang
  * menunggu persetujuan, dan editor untuk membuat/mengubah sendiri.
  *
  * Menggabungkan dua view lama (Plugins & Tools + Studio) lewat tab,
@@ -26,7 +26,7 @@ export const skills = {
     label: "Skills & Studio",
     icon: "tool",
     title: "Skills & Studio",
-    subtitle: "Kemampuan Aether — terpasang, draft, dan editor.",
+    subtitle: "Kemampuan Damar — terpasang, draft, dan editor.",
 
     render(root) {
 
@@ -41,7 +41,7 @@ export const skills = {
             <div class="view-head">
                 <div>
                     <h1>Skills &amp; Studio</h1>
-                    <p>Kemampuan (skill) Aether — yang terpasang, draft menunggu
+                    <p>Kemampuan (skill) Damar — yang terpasang, draft menunggu
                        persetujuan, dan editor untuk membuatnya sendiri.</p>
                 </div>
             </div>

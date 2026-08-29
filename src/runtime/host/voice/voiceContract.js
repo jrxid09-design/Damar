@@ -17,7 +17,7 @@
  *   - Barge-in mengikuti semantik Presence: recommendInterruption()
  *     hanyalah REKOMENDASI (INTERRUPTION_RECOMMENDED); implementasi
  *     cancellation ada di tangan pemilik aktivitas.
- *   - Identitas suara kanonik: Aether (Ardi) — id-ID-ArdiNeural,
+ *   - Identitas suara kanonik: Damar (Ardi) — id-ID-ArdiNeural,
  *     rate -8%, pitch -12Hz.
  */
 
@@ -26,7 +26,7 @@ const presenceMod = require("../../presence");
 const ACTIVITY = presenceMod.ACTIVITY_MODE;
 
 const CANONICAL_VOICE_IDENTITY = Object.freeze({
-    persona: "Aether (Ardi)",
+    persona: "Damar (Ardi)",
     voice: "id-ID-ArdiNeural",
     rate: "-8%",
     pitch: "-12Hz"

@@ -5,7 +5,7 @@ const PlanExecutor = require("../executor/planExecutor");
 const Reasoner = require("../reasoning/reasoner");
 const Reflection = require("../reflection/reflectionEngine");
 
-class AetherAgent {
+class DamarAgent {
 
     constructor() {
 
@@ -34,4 +34,4 @@ class AetherAgent {
 
 }
 
-module.exports = new AetherAgent();
+module.exports = new DamarAgent();

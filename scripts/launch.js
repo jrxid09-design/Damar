@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 
+// Alias env lama AETHER_* -> DAMAR_* (deprecated; kanonik = DAMAR_*).
+require("../src/config/envCompat");
+
 /**
- * Aether launcher — SATU perintah untuk menjalankan daemon (+ Console),
+ * Damar launcher — SATU perintah untuk menjalankan daemon (+ Console),
  * dengan tampilan senada CLI dan log rinci berstempel waktu di terminal
  * sekaligus tersimpan ke logs/ untuk investigasi.
  *
- *   npm run aether          → daemon + Console desktop
- *   npm run aether:daemon   → daemon saja
+ *   npm run damar          → daemon + Console desktop
+ *   npm run damar:daemon   → daemon saja
  *
  * Ctrl+C menghentikan semuanya dengan tertib.
  */
@@ -24,7 +27,7 @@ const withConsole = process.argv.includes("--console");
 // ---- Berkas log (riwayat rinci) ------------------------------------
 const logDir = path.join(ROOT, "logs");
 fs.mkdirSync(logDir, { recursive: true });
-const logFile = path.join(logDir, `aether-${new Date().toISOString().slice(0, 10)}.log`);
+const logFile = path.join(logDir, `damar-${new Date().toISOString().slice(0, 10)}.log`);
 const logStream = fs.createWriteStream(logFile, { flags: "a" });
 
 // Baris bising yang tak perlu tampil di terminal: daftar per-tool tiap plugin
@@ -66,7 +69,7 @@ function launch(cmd, args, tag, color) {
         cwd: ROOT,
         shell: cmd === "npm" && process.platform === "win32",
         // Launcher sudah punya banner sendiri → daemon jangan cetak banner lagi.
-        env: { ...process.env, AETHER_NO_BANNER: "1" }
+        env: { ...process.env, DAMAR_NO_BANNER: "1" }
     });
     pipe(child, tag, color);
     child.on("exit", (code) => {
@@ -82,7 +85,7 @@ let stopping = false;
 function shutdown(reason) {
     if (stopping) return;
     stopping = true;
-    process.stdout.write(`\n${clock()} ${c.muted(`menghentikan Aether (${reason})…`)}\n`);
+    process.stdout.write(`\n${clock()} ${c.muted(`menghentikan Damar (${reason})…`)}\n`);
     for (const ch of children) { try { ch.kill(); } catch { /* sudah mati */ } }
     logStream.end();
     setTimeout(() => process.exit(0), 800);
@@ -95,7 +98,7 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 let version = "";
 try { version = "v" + require("../package.json").version; } catch { /* opsional */ }
 
-console.log(banner(version).replace("Aether CLI", "Aether Launcher"));
+console.log(banner(version).replace("Damar CLI", "Damar Launcher"));
 console.log(hr(withConsole ? "daemon + console" : "daemon"));
 console.log(`  ${symbols.dot} Log rinci     ${c.muted(path.relative(ROOT, logFile))}`);
 console.log(`  ${symbols.dot} Hentikan      ${c.muted("Ctrl+C")}\n`);
