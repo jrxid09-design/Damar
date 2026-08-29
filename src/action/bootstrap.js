@@ -1619,8 +1619,1002 @@ function createCanonicalActuationFacade() {
     return canonicalActuation;
 }
 
+const crypto4 = require("node:crypto");
+
+// ---------------------------------------------------------------------------
+// LANE 4 — CANONICAL VERIFICATION + COMPENSATION COMPOSITION.
+//
+// ALL privileged verification/compensation implementation lives in THIS
+// private lexical closure, exactly like Lane 2's
+// composeActionAuthorityRuntime / composeAuthenticationDomain and Lane 3's
+// actuation formers. The verification submodules (verification/*.js) are PURE
+// NON-PRIVILEGED vocabulary modules. The privileged constructors —
+// buildVerifierRegistry, composeVerification, formVerificationRequest,
+// buildVerificationResult, formCompensationPlan, buildCompensationResult,
+// sanitizeEvidence, evaluatePostcondition — are defined HERE, inside this
+// module's own lexical scope. They are reachable through NO binder, NO token,
+// NO host capability, NO first-call-wins registry: acquiring them requires
+// ALREADY executing inside this closure.
+//
+// CANONICAL BRANDS: the verification-request / verification-result /
+// compensation-plan brand WeakSets are declared HERE (closure-private).
+// Brand membership is established ONLY by the private formers below. No
+// export of ANY module exposes the WeakSets, the brand tokens, or any
+// mutation surface. Downstream can ASK (via the pure recognition predicates
+// on the facade); downstream cannot CAUSE.
+//
+// CORE LAWS (Lane 4):
+//
+//   EXECUTED != VERIFIED            — a Lane 3 EXECUTED result is input to
+//                                     verification, never proof of truth.
+//   ACTUATOR REPORT != WORLD TRUTH  — verification observes the world via
+//                                     bootstrap-owned verifiers only.
+//   TIMEOUT != NO SIDE EFFECT       — verification timeout yields TIMED_OUT /
+//                                     INCONCLUSIVE, never success/failure.
+//   AUDIT != CURRENT TRUTH          — evidence is historical record only.
+//   MEMORY != CURRENT TRUTH
+//   MODEL CLAIM != VERIFICATION     — no caller/object can mint a claim.
+//   PLAN != AUTHORITY               — a CompensationPlan is descriptive.
+//   COMPENSATION != ROLLBACK GUARANTEE — restoration is claimed only by a
+//                                     fresh verification with VERIFIED_SUCCESS.
+//
+// COMPENSATION IS A NEW ACTION: compensation NEVER calls a compensator
+// function directly from a verification failure. The canonical compensate()
+// path (1) requires the source verification state recorded inside THIS
+// closure (never a caller-presented result), (2) forms an immutable
+// CompensationPlan, (3) admits a fresh canonical ActionIntent for the
+// compensation action, (4) routes it through the Lane 3 canonical facade
+// execute() — which performs fresh Lane 2 revalidation — and (5) requires a
+// separate fresh verification of the compensation's own postcondition before
+// any restoration claim. A previous ALLOW for the original action does NOT
+// authorize compensation; the Lane 2 gate re-evaluates the compensation
+// action against current authority.
+//
+// IDEMPOTENCE: process-local exact-once scopes for verification
+// (verificationId) and compensation (compensationId) are documented as
+// PROCESS-LOCAL; a duplicate id returns the SAME canonical record instead of
+// re-observing or re-actuating.
+// ---------------------------------------------------------------------------
+
+const {
+    VERIFICATION_STATE: VSTATE4, COMPENSATION_STATE: CSTATE4,
+    LIFECYCLE: VLIFECYCLE4, REASONS: VREASONS4, fail: fail4
+} = require("./verification/errors");
+const {
+    POSTCONDITION_OPS: VOPS4, POSTCONDITION_KIND: VKIND4,
+    POSTCONDITION_SCHEMA_VERSION: VPOST_SCHEMA4,
+    isValidPostconditionPath: isValidPostPath4
+} = require("./verification/postcondition");
+const {
+    VERIFICATION_REQUEST_SCHEMA_VERSION: VREQ_SCHEMA4,
+    VERIFICATION_RESULT_SCHEMA_VERSION: VRES_SCHEMA4,
+    COMPENSATION_PLAN_SCHEMA_VERSION: CPLAN_SCHEMA4,
+    COMPENSATION_RESULT_SCHEMA_VERSION: CRES_SCHEMA4,
+    BOUNDS: VBOUNDS4,
+    DEFAULT_VERIFY_TIMEOUT_MS: DEFAULT_VTIMEOUT4,
+    MIN_VERIFY_TIMEOUT_MS: MIN_VTIMEOUT4,
+    MAX_VERIFY_TIMEOUT_MS: MAX_VTIMEOUT4,
+    isValidVerifyTimeoutMs: isValidVTimeout4
+} = require("./verification/schema");
+const { READINESS: VREADINESS4 } = require("./verification/verifierRegistry");
+const { RESULT_STATE: RESULT_STATE3b } = require("./actuation/errors");
+
+const REQUEST_BRAND4 = Symbol("damar.action.verification.request.brand");
+const RESULT_BRAND4 = Symbol("damar.action.verification.result.brand");
+const PLAN_BRAND4 = Symbol("damar.action.verification.plan.brand");
+const vRequestBrandSet4 = new WeakSet();
+const vResultBrandSet4 = new WeakSet();
+const vPlanBrandSet4 = new WeakSet();
+
+function deepFreeze4(obj) {
+    if (obj !== null && typeof obj === "object") {
+        for (const key of Object.getOwnPropertyNames(obj)) deepFreeze4(obj[key]);
+        Object.freeze(obj);
+    }
+    return obj;
+}
+
+function vIsPlainObject4(v) {
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+    const proto = Object.getPrototypeOf(v);
+    return proto === Object.prototype || proto === null;
+}
+
+const V_DANGEROUS_KEYS4 = Object.freeze(new Set(["__proto__", "constructor", "prototype"]));
+
+// Hostile-input detachment for DECLARATIVE postcondition values, evidence
+// and compensation parameters: functions/symbols/accessors/class instances/
+// cycles/prototype-pollution keys are rejected (fail-closed), values are
+// bounded and detached from caller mutations.
+function vDetach4(value, state) {
+    state.nodes++;
+    if (state.nodes > state.maxNodes) {
+        throw fail4(VREASONS4.BOUND_EXCEEDED, `payload exceeds node budget (${state.maxNodes})`);
+    }
+    if (value === null) return null;
+    const t = typeof value;
+    if (t === "string" || t === "boolean") return value;
+    if (t === "number") {
+        if (!Number.isFinite(value)) throw fail4(VREASONS4.MALFORMED_PAYLOAD, "numbers must be finite");
+        return value;
+    }
+    if (t === "function") throw fail4(VREASONS4.FUNCTION_VALUE, "function values are not permitted");
+    if (t === "symbol" || t === "bigint" || t === "undefined") {
+        throw fail4(VREASONS4.SYMBOL_VALUE, `${t} values are not permitted`);
+    }
+    if (Array.isArray(value)) {
+        if (state.path.has(value)) throw fail4(VREASONS4.CYCLIC_INPUT, "cyclic structure is not permitted");
+        if (value.length > VBOUNDS4.GLOBAL_MAX_ARRAY_LENGTH) {
+            throw fail4(VREASONS4.BOUND_EXCEEDED, "array length exceeds global bound");
+        }
+        state.path.add(value);
+        const out = new Array(value.length);
+        for (let i = 0; i < value.length; i++) out[i] = vDetach4(value[i], state);
+        state.path.delete(value);
+        return out;
+    }
+    if (!vIsPlainObject4(value)) {
+        throw fail4(VREASONS4.NON_PLAIN_OBJECT, "non-plain object is not permitted");
+    }
+    if (state.path.has(value)) throw fail4(VREASONS4.CYCLIC_INPUT, "cyclic structure is not permitted");
+    state.path.add(value);
+    const out = {};
+    for (const key of Object.getOwnPropertyNames(value)) {
+        if (V_DANGEROUS_KEYS4.has(key)) throw fail4(VREASONS4.DANGEROUS_KEY, `dangerous key '${key}' in payload`);
+        const desc = Object.getOwnPropertyDescriptor(value, key);
+        if (desc && (desc.get || desc.set)) {
+            throw fail4(VREASONS4.ACCESSOR_PROPERTY, `accessor property '${key}' is not permitted`);
+        }
+        out[key] = vDetach4(desc.value, state);
+    }
+    if (Object.getOwnPropertySymbols(value).length > 0) {
+        throw fail4(VREASONS4.SYMBOL_VALUE, "symbol keys are not permitted");
+    }
+    state.path.delete(value);
+    return out;
+}
+
+function vRequireString4(value, field, maxChars, { optional = false, allowEmpty = false } = {}) {
+    if (value === undefined || value === null) {
+        if (optional) return "";
+        throw fail4(VREASONS4.MALFORMED_REQUEST, `${field} is required`);
+    }
+    if (typeof value !== "string") {
+        throw fail4(VREASONS4.MALFORMED_REQUEST, `${field} must be a string, got ${typeof value}`);
+    }
+    const s = value.trim();
+    if (!optional && !allowEmpty && s.length === 0) {
+        throw fail4(VREASONS4.MALFORMED_REQUEST, `${field} must not be empty`);
+    }
+    if (s.length > maxChars) {
+        throw fail4(VREASONS4.BOUND_EXCEEDED, `${field} exceeds ${maxChars} chars`);
+    }
+    return s;
+}
+
+function vRequireSafeInteger4(value, field) {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+        throw fail4(VREASONS4.MALFORMED_REQUEST, `${field} must be a nonnegative safe integer`);
+    }
+    return value;
+}
+
+// ---- DECLARATIVE POSTCONDITION: canonical former + evaluator (private) ----
+function formExpectedPostcondition4(raw) {
+    if (raw === undefined || raw === null) {
+        throw fail4(VREASONS4.MALFORMED_REQUEST, "expectedPostcondition is required");
+    }
+    if (typeof raw === "function" || typeof raw === "symbol" || typeof raw === "bigint") {
+        throw fail4(VREASONS4.EXECUTABLE_POSTCONDITION_REJECTED,
+            "expected postcondition must be declarative; executable values are rejected");
+    }
+    if (!vIsPlainObject4(raw)) {
+        throw fail4(VREASONS4.NON_PLAIN_OBJECT, "expected postcondition must be a plain declarative object");
+    }
+    // TRAP-BEARING PROXY REJECTION: a Proxy whose traps fire during plain
+    // structural inspection is hostile; transparent data is detached below
+    // (sanitized, never retained raw). We detect trap activity by comparing
+    // own-property enumeration under two independent protocols.
+    let expectedOwnKeys = null;
+    try {
+        expectedOwnKeys = Object.getOwnPropertyNames(raw).length;
+    } catch (e) {
+        throw fail4(VREASONS4.NON_PLAIN_OBJECT, "hostile postcondition object (ownKeys inspection failed)");
+    }
+    if (expectedOwnKeys === 0 && Object.keys(raw).length !== 0) {
+        // getOwnPropertyNames vs enumerable-keys disagreement => trap-bearing.
+        throw fail4(VREASONS4.NON_PLAIN_OBJECT, "hostile postcondition object (inconsistent key enumeration)");
+    }
+
+    let detached;
+    try {
+        const state = { nodes: 0, maxNodes: VBOUNDS4.MAX_PARAMETERS_NODES, path: new Set() };
+        detached = vDetach4(raw, state);
+    } catch (e) {
+        if (e && typeof e.reasonCode === "string") throw e;
+        // Hostile trap threw mid-detach => typed fail-closed rejection.
+        throw fail4(VREASONS4.NON_PLAIN_OBJECT, "hostile postcondition object rejected during detachment");
+    }
+    return vFinishPostcondition4(detached);
+}
+
+function vFinishPostcondition4(detached) {
+
+    if (detached.schemaVersion !== undefined && detached.schemaVersion !== VPOST_SCHEMA4) {
+        throw fail4(VREASONS4.MALFORMED_REQUEST, `unsupported postcondition schemaVersion ${JSON.stringify(detached.schemaVersion)}`);
+    }
+    if (detached.kind !== undefined && detached.kind !== VKIND4) {
+        throw fail4(VREASONS4.MALFORMED_REQUEST, `unsupported postcondition kind ${JSON.stringify(detached.kind)}`);
+    }
+
+    const expect = {};
+    let expectCount = 0;
+    if (detached.expect !== undefined && detached.expect !== null) {
+        if (!vIsPlainObject4(detached.expect)) {
+            throw fail4(VREASONS4.MALFORMED_REQUEST, "postcondition expect must be a plain object");
+        }
+        for (const [path, rule] of Object.entries(detached.expect)) {
+            expectCount++;
+            if (expectCount > VBOUNDS4.MAX_EXPECT_ENTRIES) {
+                throw fail4(VREASONS4.BOUND_EXCEEDED, `postcondition expect exceeds ${VBOUNDS4.MAX_EXPECT_ENTRIES} entries`);
+            }
+            if (!isValidPostPath4(path)) {
+                throw fail4(VREASONS4.DANGEROUS_KEY, `invalid postcondition path '${String(path).slice(0, 64)}'`);
+            }
+            if (!vIsPlainObject4(rule)) {
+                throw fail4(VREASONS4.MALFORMED_REQUEST, `postcondition rule for '${path}' must be a declarative object`);
+            }
+            const op = rule.op;
+            if (!VOPS4 || !Object.values(VOPS4).includes(op)) {
+                throw fail4(VREASONS4.MALFORMED_REQUEST, `postcondition rule for '${path}' has invalid op`);
+            }
+            const ruleOut = { op };
+            if ("value" in rule) {
+                const valueState = { nodes: 0, maxNodes: VBOUNDS4.MAX_VALUE_NODES, path: new Set() };
+                ruleOut.value = vDetach4(rule.value, valueState);
+            }
+            expect[path] = Object.freeze(ruleOut);
+        }
+    }
+
+    const forbid = {};
+    let forbidCount = 0;
+    if (detached.forbid !== undefined && detached.forbid !== null) {
+        if (!vIsPlainObject4(detached.forbid)) {
+            throw fail4(VREASONS4.MALFORMED_REQUEST, "postcondition forbid must be a plain object");
+        }
+        for (const [path, value] of Object.entries(detached.forbid)) {
+            forbidCount++;
+            if (forbidCount > VBOUNDS4.MAX_EXPECT_ENTRIES) {
+                throw fail4(VREASONS4.BOUND_EXCEEDED, `postcondition forbid exceeds ${VBOUNDS4.MAX_EXPECT_ENTRIES} entries`);
+            }
+            if (!isValidPostPath4(path)) {
+                throw fail4(VREASONS4.DANGEROUS_KEY, `invalid postcondition forbid path '${String(path).slice(0, 64)}'`);
+            }
+            const valueState = { nodes: 0, maxNodes: VBOUNDS4.MAX_VALUE_NODES, path: new Set() };
+            forbid[path] = vDetach4(value, valueState);
+        }
+    }
+
+    if (expectCount === 0 && forbidCount === 0) {
+        // A vacuous postcondition must never be able to mint VERIFIED_SUCCESS.
+        throw fail4(VREASONS4.MALFORMED_REQUEST,
+            "expected postcondition must contain at least one expect or forbid rule (vacuous postconditions are rejected)");
+    }
+
+    return deepFreeze4({ schemaVersion: VPOST_SCHEMA4, kind: VKIND4, expect: deepFreeze4(expect), forbid: deepFreeze4(forbid) });
+}
+
+/** Read a dotted path from a plain object; returns { found, value }. */
+function vReadPath4(obj, path) {
+    const segments = String(path).split(".");
+    let cur = obj;
+    for (const seg of segments) {
+        if (cur === null || cur === undefined) return { found: false, value: undefined };
+        if (typeof cur !== "object") return { found: false, value: undefined };
+        if (!Object.prototype.hasOwnProperty.call(cur, seg)) return { found: false, value: undefined };
+        cur = cur[seg];
+    }
+    return { found: true, value: cur };
+}
+
+/**
+ * Canonical postcondition evaluator (private). Pure: evaluates the
+ * declarative expectation against sanitized evidence.
+ *   "matched"    — every expect rule satisfied AND every forbid rule clean
+ *   "mismatched" — at least one explicit rule violated
+ *   "insufficient" — evidence did not contain a path needed to decide
+ * Returns one of those strings, or throws only on internal contract bugs.
+ */
+function evaluatePostcondition4(postcondition, evidence) {
+    if (!postcondition || typeof postcondition !== "object") return "insufficient";
+    const ev = (evidence === null || evidence === undefined || typeof evidence !== "object")
+        ? {} : evidence;
+
+    let sawAny = false;
+
+    for (const [path, rule] of Object.entries(postcondition.expect ?? {})) {
+        sawAny = true;
+        const { found, value } = vReadPath4(ev, path);
+        const op = rule.op;
+        if (op === VOPS4.EXISTS) {
+            if (!found) return "insufficient";
+            if (value === null || value === undefined) return "mismatched";
+            continue;
+        }
+        if (op === VOPS4.ABSENT) {
+            if (found && value !== null && value !== undefined) return "mismatched";
+            continue;
+        }
+        if (op === VOPS4.IN) {
+            if (!found) return "insufficient";
+            const options = Array.isArray(rule.value) ? rule.value : [];
+            if (!options.some((o) => o === value)) return "mismatched";
+            continue;
+        }
+        if (op === VOPS4.TYPE) {
+            if (!found) return "insufficient";
+            const t = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+            if (t !== rule.value) return "mismatched";
+            continue;
+        }
+        if (!found) return "insufficient";
+        if (op === VOPS4.EQ) {
+            if (value !== rule.value) return "mismatched";
+        } else if (op === VOPS4.NE) {
+            if (value === rule.value) return "mismatched";
+        } else if (op === VOPS4.GT || op === VOPS4.GTE || op === VOPS4.LT || op === VOPS4.LTE) {
+            if (typeof value !== "number" || typeof rule.value !== "number") return "mismatched";
+            if (op === VOPS4.GT && !(value > rule.value)) return "mismatched";
+            if (op === VOPS4.GTE && !(value >= rule.value)) return "mismatched";
+            if (op === VOPS4.LT && !(value < rule.value)) return "mismatched";
+            if (op === VOPS4.LTE && !(value <= rule.value)) return "mismatched";
+        } else {
+            return "insufficient";
+        }
+    }
+
+    for (const [path, forbiddenValue] of Object.entries(postcondition.forbid ?? {})) {
+        sawAny = true;
+        const { found, value } = vReadPath4(ev, path);
+        // forbid: { path: X } — the path, if present, must not equal X.
+        // (To require a path be entirely absent, use
+        // expect: { path: { op: "absent" } }.)
+        if (found && value === forbiddenValue) return "mismatched";
+    }
+
+    if (!sawAny) return "insufficient";
+    return "matched";
+}
+
+// ---- HOSTILE EVIDENCE SANITIZER (private; observation safety) --------------
+// Observation functions may return hostile values. Normalize + sanitize:
+// NO raw Proxy/accessor/class-instance retention, bounded depth/size/keys,
+// Errors reduced to name+message. Sanitization NEVER throws for hostile
+// content shapes (fail-closed means "not retained", not "crash"), except for
+// internal budget breach of the verifier's own output which maps to a
+// verifier-infrastructure ERROR (never VERIFIED_FAILURE).
+const V_EV_STRING_CHARS4 = 1024;
+const V_EV_KEYS4 = 64;
+const V_EV_DEPTH4 = 8;
+const V_EV_NODES4 = 512;
+
+function sanitizeEvidence4(value) {
+    const state = { nodes: 0, path: new Set() };
+    function walk(v, depth) {
+        state.nodes++;
+        if (state.nodes > V_EV_NODES4 || depth > V_EV_DEPTH4) return null;
+        if (v === null) return null;
+        const t = typeof v;
+        if (t === "string") return v.length > V_EV_STRING_CHARS4 ? v.slice(0, V_EV_STRING_CHARS4) : v;
+        if (t === "boolean") return v;
+        if (t === "number") return Number.isFinite(v) ? v : null;
+        if (t === "bigint" || t === "symbol" || t === "undefined" || t === "function") return null;
+        if (v instanceof Error) {
+            return {
+                name: String(v.name ?? "Error").slice(0, 64),
+                message: String(v.message ?? "").slice(0, V_EV_STRING_CHARS4)
+            };
+        }
+        if (!vIsPlainObject4(v) && !Array.isArray(v)) return null;
+        if (state.path.has(v)) return null;
+        state.path.add(v);
+        if (Array.isArray(v)) {
+            const out = v.slice(0, 256).map((x) => walk(x, depth + 1));
+            state.path.delete(v);
+            return out;
+        }
+        const out = {};
+        let keys = 0;
+        for (const key of Object.getOwnPropertyNames(v)) {
+            if (keys >= V_EV_KEYS4) break;
+            keys++;
+            if (V_DANGEROUS_KEYS4.has(key)) continue;
+            const desc = Object.getOwnPropertyDescriptor(v, key);
+            if (!desc || desc.get || desc.set) continue;
+            const kk = key.length > 128 ? key.slice(0, 128) : key;
+            out[kk] = walk(desc.value, depth + 1);
+        }
+        state.path.delete(v);
+        return out;
+    }
+    return walk(value, 0);
+}
+
+// ---- PRIVILEGED: verifier registry (closure-private) -----------------------
+function buildVerifierRegistry4() {
+    const byId = new Map();
+    const byCap = new Map();
+
+    function canonicalOp(op) {
+        return String(op ?? "").trim().toLowerCase();
+    }
+
+    function register({ capabilityId, operations, capabilityIncarnationId, verifierId, observe, readiness = "READY" }) {
+        if (typeof capabilityId !== "string" || capabilityId.length === 0) {
+            throw fail4(VREASONS4.REGISTRATION_REJECTED, "verifier registration requires a non-empty capabilityId");
+        }
+        if (!Array.isArray(operations) || operations.length === 0 ||
+            operations.map(canonicalOp).filter((s) => s.length > 0).length === 0) {
+            throw fail4(VREASONS4.REGISTRATION_REJECTED, "verifier registration requires a non-empty operations array");
+        }
+        if (typeof capabilityIncarnationId !== "string" || capabilityIncarnationId.length === 0) {
+            throw fail4(VREASONS4.REGISTRATION_REJECTED, "verifier registration requires a capabilityIncarnationId");
+        }
+        if (typeof observe !== "function") {
+            throw fail4(VREASONS4.REGISTRATION_REJECTED, "verifier registration requires an observe function");
+        }
+        if (!VREADINESS4[readiness]) {
+            throw fail4(VREASONS4.REGISTRATION_REJECTED, `invalid readiness '${readiness}'`);
+        }
+
+        const id = (typeof verifierId === "string" && verifierId.length > 0)
+            ? verifierId
+            : `ver-${crypto4.randomUUID()}`;
+        const verifierIncarnationId = `vinc-${crypto4.randomUUID()}`;
+
+        if (byId.has(id)) {
+            throw fail4(VREASONS4.REGISTRATION_REJECTED, `verifier '${id}' is already registered; remove it first`);
+        }
+
+        // Function identity captured ONCE (bind to a stable detached receiver).
+        const observeFn = observe.bind({});
+        const ops = operations.map(canonicalOp).filter((s) => s.length > 0);
+        const binding = Object.freeze({
+            capabilityId,
+            operations: Object.freeze(ops.slice()),
+            capabilityIncarnationId,
+            verifierId: id,
+            verifierIncarnationId,
+            readiness,
+            observe: observeFn
+        });
+
+        byId.set(id, binding);
+        let opMap = byCap.get(capabilityId);
+        if (!opMap) { opMap = new Map(); byCap.set(capabilityId, opMap); }
+        for (const op of ops) {
+            if (opMap.has(op)) {
+                byId.delete(id);
+                throw fail4(VREASONS4.REGISTRATION_REJECTED, `verifier already registered for '${capabilityId}.${op}'`);
+            }
+            opMap.set(op, binding);
+        }
+        return binding;
+    }
+
+    function remove(verifierId) {
+        const binding = byId.get(verifierId);
+        if (!binding) return false;
+        byId.delete(verifierId);
+        const opMap = byCap.get(binding.capabilityId);
+        if (opMap) {
+            for (const op of binding.operations) {
+                const cur = opMap.get(op);
+                if (cur && cur.verifierId === verifierId) opMap.delete(op);
+            }
+            if (opMap.size === 0) byCap.delete(binding.capabilityId);
+        }
+        return true;
+    }
+
+    function resolve(capabilityId, operation) {
+        const opMap = byCap.get(capabilityId);
+        if (!opMap) return null;
+        return opMap.get(canonicalOp(operation)) ?? null;
+    }
+
+    function get(verifierId) {
+        return byId.get(verifierId) ?? null;
+    }
+
+    return Object.freeze({ register, remove, resolve, get });
+}
+
+// ---- LANE 4 — CANONICAL VERIFICATION + COMPENSATION COMPOSITION ------------
+
+let canonicalVerification = null;
+
+/**
+ * Create the canonical Lane 4 verification/compensation facade
+ * (trusted-bootstrap-private). Takes NO options — the verifier registry,
+ * registrar capability, observation functions, postcondition evaluator, and
+ * the Lane 3 facade it routes compensation through are all owned by this
+ * closure. Caller-selected verifiers/compensators are structurally
+ * impossible to inject.
+ *
+ * @returns {object} frozen least-privilege facade, EXACTLY:
+ *     { verify, compensate, isCanonicalVerificationRequest,
+ *       isCanonicalVerificationResult, isCanonicalCompensationPlan }
+ */
+function createCanonicalVerificationFacade() {
+    if (arguments[0] !== undefined) {
+        throw fail(VREASONS4.CALLER_EXECUTOR_REJECTED,
+            "canonical verification creation accepts NO options; the verifier registry, observation functions, postcondition evaluator, and the Lane 3 facade are bootstrap-owned");
+    }
+    if (canonicalVerification !== null) return canonicalVerification;
+
+    const lane3Facade = createCanonicalActuationFacade();
+    const verifierRegistry = buildVerifierRegistry4();
+
+    // Process-local exact-once scopes (documented as PROCESS-LOCAL).
+    const verificationsById = new Map();  // verificationId -> { result, request }
+    const compensationById = new Map();   // compensationId -> record
+    const VERIFICATION_MAX = 4096;
+    const COMPENSATION_MAX = 4096;
+
+    function noteVerification(id, rec) {
+        if (verificationsById.size >= VERIFICATION_MAX) {
+            const first = verificationsById.keys().next().value;
+            if (first !== undefined) verificationsById.delete(first);
+        }
+        verificationsById.set(id, rec);
+    }
+
+    function canonicalClockNow4() {
+        const v = Date.now();
+        if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) {
+            throw fail4(VREASONS4.MALFORMED_REQUEST, "canonical clock returned an invalid timestamp");
+        }
+        return v;
+    }
+
+    // ---- verify(): the ONLY downstream verification capability -------------
+    async function verify(p) {
+        if (p === null || typeof p !== "object") {
+            throw fail4(VREASONS4.MALFORMED_REQUEST, "verify requires a request object");
+        }
+        // Caller-selected verifier/compensator/executor keys are forbidden.
+        for (const key of CALLER_VERIFIER_KEYS4) {
+            if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
+                throw fail4(VREASONS4.CALLER_VERIFIER_REJECTED,
+                    `caller-verifier option '${key}' is forbidden; the verifier is bootstrap-owned, never caller-selectable`);
+            }
+        }
+        for (const key of CALLER_COMPENSATOR_KEYS4) {
+            if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
+                throw fail4(VREASONS4.CALLER_EXECUTOR_REJECTED,
+                    `caller-compensator option '${key}' is forbidden; compensation is a canonical action routed through Lane 3`);
+            }
+        }
+
+        const executionResult = p.executionResult;
+        // BRAND-FIRST: only canonical Lane 3 ExecutionResults are verifiable.
+        if (!isCanonicalExecutionResult4(executionResult)) {
+            throw fail4(VREASONS4.NOT_CANONICAL_EXECUTION_RESULT,
+                "verification requires a canonical Lane 3 ExecutionResult; arbitrary result-shaped objects, JSON clones, and foreign-domain results are not verifiable");
+        }
+
+        // Foreign-domain guard: the result must carry the canonical Lane 3
+        // result shape AND state vocabulary (a cloned brand check already
+        // fails above; this belt-and-braces check keeps the contract explicit).
+        if (typeof executionResult.executionId !== "string" ||
+            !executionResult.executionId ||
+            (executionResult.state !== undefined &&
+             !Object.values(RESULT_STATE3b).includes(executionResult.state))) {
+            throw fail4(VREASONS4.FOREIGN_DOMAIN_RESULT,
+                "execution result carries a foreign/non-canonical shape");
+        }
+
+        const expectedPostcondition = formExpectedPostcondition4(p.expectedPostcondition);
+        const timeoutMs = (p.timeoutMs === undefined) ? DEFAULT_VTIMEOUT4
+            : (isValidVTimeout4(p.timeoutMs) ? p.timeoutMs
+                : (() => { throw fail4(VREASONS4.INVALID_TIMEOUT_CONFIG, `verify timeoutMs must be in [${MIN_VTIMEOUT4}, ${MAX_VTIMEOUT4}]`); })());
+
+        // Resolve the bootstrap-owned verifier binding for this capability.op.
+        const binding = verifierRegistry.resolve(executionResult.capabilityId, executionResult.operation);
+        if (!binding) {
+            throw fail4(VREASONS4.VERIFIER_NOT_FOUND,
+                `no verifier registered for '${executionResult.capabilityId}.${executionResult.operation}'`);
+        }
+        // Incarnation discipline: verifier binding must match the capability
+        // incarnation the execution ran under (ABA-safe).
+        if (binding.capabilityIncarnationId !== executionResult.capabilityIncarnationId) {
+            throw fail4(VREASONS4.VERIFIER_INCARNATION_MISMATCH,
+                `verifier binding capability incarnation ${binding.capabilityIncarnationId} != result ${executionResult.capabilityIncarnationId}`);
+        }
+        if (binding.readiness !== VREADINESS4.READY) {
+            throw fail4(VREASONS4.VERIFIER_UNAVAILABLE, `verifier readiness is ${binding.readiness}`);
+        }
+
+        const verificationId = crypto4.randomUUID();
+        if (verificationsById.has(verificationId)) {
+            throw fail4(VREASONS4.DUPLICATE_VERIFICATION_ID, "duplicate verificationId");
+        }
+
+        const requestedAtMs = canonicalClockNow4();
+        const request = deepFreeze4({
+            schemaVersion: VREQ_SCHEMA4,
+            verificationId,
+            executionId: executionResult.executionId,
+            intentId: executionResult.intentId,
+            capabilityId: executionResult.capabilityId,
+            capabilityIncarnationId: executionResult.capabilityIncarnationId,
+            operation: executionResult.operation,
+            principal: executionResult.principal,
+            scope: deepFreeze4(Array.isArray(executionResult.scope) ? executionResult.scope.slice() : []),
+            actuatorId: executionResult.actuatorId,
+            actuatorIncarnationId: executionResult.actuatorIncarnationId,
+            authorityGeneration: executionResult.authorityGeneration,
+            verifierId: binding.verifierId,
+            verifierIncarnationId: binding.verifierIncarnationId,
+            expectedPostcondition,
+            requestedAtMs,
+            timeoutMs
+        });
+        vRequestBrandSet4.add(request);
+
+        // Duplicate suppression by executionId+postcondition content: a
+        // concurrent verify of the same execution with the same expectation
+        // must not produce duplicate observer effects where the observer has
+        // side effects.
+        const dupKey = crypto4.createHash("sha256").update(JSON.stringify({
+            e: request.executionId,
+            v: request.verifierIncarnationId,
+            p: request.expectedPostcondition
+        })).digest("hex");
+        const existing = verificationsById.get(dupKey);
+        if (existing) return existing.result;
+
+        const rec = { request, result: null };
+        verificationsById.set(dupKey, rec);
+        verificationsById.set(verificationId, rec);
+
+        // ---- OBSERVING ----
+        const observedAtMs = canonicalClockNow4();
+        let observation = null;
+        let verifierErrored = null;
+        try {
+            observation = await Promise.race([
+                binding.observe({
+                    verificationId: request.verificationId,
+                    executionId: request.executionId,
+                    intentId: request.intentId,
+                    capabilityId: request.capabilityId,
+                    operation: request.operation,
+                    principal: request.principal,
+                    scope: request.scope,
+                    parameters: executionResult.parameters ?? null,
+                    expectedPostcondition: request.expectedPostcondition
+                }),
+                new Promise((resolve) => {
+                    const h = setTimeout(() => resolve(TIMEOUT_SENTINEL4), timeoutMs);
+                    if (typeof h.unref === "function") h.unref();
+                })
+            ]);
+        } catch (e) {
+            verifierErrored = e;
+        }
+
+        let verificationState;
+        let observedEvidence = null;
+        let detail = "";
+
+        if (verifierErrored !== null) {
+            // VERIFIER ERROR != VERIFIED FAILURE — infrastructure error is
+            // classified separately; the world was not measured.
+            verificationState = VSTATE4.ERROR;
+            observedEvidence = sanitizeEvidence4(verifierErrored);
+            detail = "verifier infrastructure error";
+        } else if (observation === TIMEOUT_SENTINEL4) {
+            // VERIFICATION TIMEOUT: truth could not be established within the
+            // bound. NOT success, NOT failure, NOT "no side effect".
+            verificationState = VSTATE4.TIMED_OUT;
+            detail = `verification exceeded ${timeoutMs}ms; ambiguity preserved`;
+        } else {
+            const evidence = sanitizeEvidence4(observation);
+            if (evidence === null && observation !== null && observation !== undefined) {
+                // Hostile/unusable observation output: not evidence.
+                verificationState = VSTATE4.INCONCLUSIVE;
+                detail = "observation could not be normalized into evidence";
+            } else {
+                observedEvidence = evidence;
+                const verdict = evaluatePostcondition4(request.expectedPostcondition, evidence);
+                if (verdict === "matched") {
+                    verificationState = VSTATE4.VERIFIED_SUCCESS;
+                } else if (verdict === "mismatched") {
+                    verificationState = VSTATE4.VERIFIED_FAILURE;
+                } else {
+                    // Missing/ambiguous evidence stays INCONCLUSIVE — never
+                    // collapsed into success or failure.
+                    verificationState = VSTATE4.INCONCLUSIVE;
+                    detail = "evidence missing or ambiguous for expected postcondition";
+                }
+            }
+        }
+
+        const result = deepFreeze4({
+            schemaVersion: VRES_SCHEMA4,
+            verificationId: request.verificationId,
+            executionId: request.executionId,
+            intentId: request.intentId,
+            capabilityId: request.capabilityId,
+            capabilityIncarnationId: request.capabilityIncarnationId,
+            operation: request.operation,
+            principal: request.principal,
+            actuatorId: request.actuatorId,
+            actuatorIncarnationId: request.actuatorIncarnationId,
+            authorityGeneration: request.authorityGeneration,
+            verifierId: request.verifierId,
+            verifierIncarnationId: request.verifierIncarnationId,
+            expectedPostcondition: request.expectedPostcondition,
+            observedEvidence: deepFreeze4(observedEvidence),
+            observationMethod: request.verifierId,
+            verificationState,
+            observedAtMs,
+            verifiedAtMs: canonicalClockNow4(),
+            detail
+        });
+        vResultBrandSet4.add(result);
+        rec.result = result;
+        return result;
+    }
+
+    // ---- compensate(): a NEW canonical action; never a direct call --------
+    async function compensate(p) {
+        if (p === null || typeof p !== "object") {
+            throw fail4(VREASONS4.MALFORMED_REQUEST, "compensate requires a request object");
+        }
+        for (const key of CALLER_VERIFIER_KEYS4) {
+            if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
+                throw fail4(VREASONS4.CALLER_VERIFIER_REJECTED,
+                    `caller-verifier option '${key}' is forbidden`);
+            }
+        }
+        for (const key of CALLER_COMPENSATOR_KEYS4) {
+            if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
+                throw fail4(VREASONS4.CALLER_EXECUTOR_REJECTED,
+                    `caller-compensator option '${key}' is forbidden; compensation routes through the canonical Lane 3 facade`);
+            }
+        }
+
+        // The compensation trigger must be a canonical verification result
+        // produced by THIS closure (never a caller-forged lookalike).
+        const source = p.verification;
+        if (!vResultBrandSet4.has(source) || source === null || typeof source !== "object") {
+            throw fail4(VREASONS4.NOT_CANONICAL_EXECUTION_RESULT,
+                "compensation requires a canonical VerificationResult produced by this runtime");
+        }
+        // The verified state must itself indicate compensation is warranted.
+        // Verifier timeout, INCONCLUSIVE, and ERROR states do NOT trigger
+        // compensation (ambiguity is preserved, not resolved by re-actuation).
+        if (source.verificationState !== VSTATE4.VERIFIED_FAILURE) {
+            throw fail4(VREASONS4.COMPENSATION_NOT_INDICATED,
+                `verification state '${source.verificationState}' does not indicate compensation; only VERIFIED_FAILURE does`);
+        }
+
+        // Plan inputs must be declarative plain values.
+        const planCapabilityId = vRequireString4(p.capabilityId, "capabilityId", VBOUNDS4.MAX_CAPABILITY_ID_CHARS);
+        const planOperation = vRequireString4(p.operation, "operation", VBOUNDS4.MAX_OPERATION_CHARS);
+        const planPrincipal = vRequireString4(p.principal, "principal", VBOUNDS4.MAX_PRINCIPAL_CHARS);
+        const planScope = canonicalScope3(Array.isArray(p.scope) ? p.scope : []);
+        const paramsState = { nodes: 0, maxNodes: VBOUNDS4.MAX_PARAMETERS_NODES, path: new Set() };
+        const planParameters = (p.parameters === undefined || p.parameters === null)
+            ? deepFreeze4({}) : deepFreeze4(vDetach4(p.parameters, paramsState));
+        if (Object.getOwnPropertyNames(planParameters).length > VBOUNDS4.MAX_COMPENSATION_PARAMETERS_KEYS) {
+            throw fail4(VREASONS4.BOUND_EXCEEDED, `compensation parameters exceed ${VBOUNDS4.MAX_COMPENSATION_PARAMETERS_KEYS} keys`);
+        }
+        const reason = vRequireString4(p.reason, "reason", VBOUNDS4.MAX_COMPENSATION_REASON_CHARS);
+
+        // IDEMPOTENCE: a caller may pin compensationId for exact-once retries.
+        const compensationId = (p.compensationId === undefined || p.compensationId === null)
+            ? crypto4.randomUUID()
+            : vRequireString4(p.compensationId, "compensationId", VBOUNDS4.MAX_VERIFICATION_ID_CHARS);
+        const existingRecord = compensationById.get(compensationId);
+        if (existingRecord) {
+            // Same id => SAME record; never a duplicate actuation.
+            return existingRecord.result;
+        }
+
+        const createdAtMs = canonicalClockNow4();
+        const plan = deepFreeze4({
+            schemaVersion: CPLAN_SCHEMA4,
+            compensationId,
+            sourceVerificationId: source.verificationId,
+            sourceExecutionId: source.executionId,
+            principal: planPrincipal,
+            capabilityId: planCapabilityId,
+            capabilityIncarnationId: null,
+            operation: planOperation,
+            scope: planScope,
+            parameters: planParameters,
+            reason,
+            createdAtMs
+        });
+        vPlanBrandSet4.add(plan);
+
+        const record = { plan, result: null };
+        compensationById.set(compensationId, record);
+
+        // ---- COMPENSATION IS A NEW ACTION -------------------------------
+        // (1) admit a fresh canonical ActionIntent for the compensation,
+        // (2) route through the Lane 3 facade execute() — which performs
+        //     fresh Lane 2 revalidation against CURRENT authority,
+        // (3) report execution state; restoration is NEVER claimed here.
+        let intent;
+        try {
+            intent = lane3FacadeAdmit4({
+                capabilityId: planCapabilityId,
+                operation: planOperation,
+                arguments: planParameters
+            });
+        } catch (e) {
+            const result = deepFreeze4({
+                schemaVersion: CRES_SCHEMA4,
+                compensationId,
+                sourceVerificationId: plan.sourceVerificationId,
+                sourceExecutionId: plan.sourceExecutionId,
+                state: CSTATE4.FAILED,
+                executionResult: null,
+                detail: `compensation intent rejected at admission: ${String(e?.reasonCode ?? e?.message ?? "error").slice(0, 256)}`,
+                restored: null
+            });
+            record.result = result;
+            return result;
+        }
+
+        const session = planPrincipal ? lane3Session4(planPrincipal) : null;
+        let executionResult = null;
+        if (!session) {
+            const result = deepFreeze4({
+                schemaVersion: CRES_SCHEMA4,
+                compensationId,
+                sourceVerificationId: plan.sourceVerificationId,
+                sourceExecutionId: plan.sourceExecutionId,
+                state: CSTATE4.FAILED,
+                executionResult: null,
+                detail: "compensation session could not be established (fail-closed)",
+                restored: null
+            });
+            record.result = result;
+            return result;
+        }
+
+        try {
+            executionResult = await lane3Facade.execute({
+                intent,
+                authSession: session,
+                parameters: planParameters
+            });
+        } catch (e) {
+            const result = deepFreeze4({
+                schemaVersion: CRES_SCHEMA4,
+                compensationId,
+                sourceVerificationId: plan.sourceVerificationId,
+                sourceExecutionId: plan.sourceExecutionId,
+                state: CSTATE4.FAILED,
+                executionResult: null,
+                detail: `compensation dispatch failed: ${String(e?.reasonCode ?? e?.message ?? "error").slice(0, 256)}`,
+                restored: null
+            });
+            record.result = result;
+            return result;
+        }
+
+        const executedOk = executionResult && executionResult.state === "EXECUTED";
+        const result = deepFreeze4({
+            schemaVersion: CRES_SCHEMA4,
+            compensationId,
+            sourceVerificationId: plan.sourceVerificationId,
+            sourceExecutionId: plan.sourceExecutionId,
+            state: executedOk ? CSTATE4.EXECUTED : CSTATE4.FAILED,
+            executionResult,
+            detail: executedOk
+                ? "compensation action executed through canonical Lane 3; restoration NOT claimed until a fresh verification succeeds"
+                : "compensation action did not execute",
+            // COMPENSATION != ROLLBACK GUARANTEE: restored is null here. Only
+            // a SEPARATE fresh verification of the compensation's own
+            // postcondition returning VERIFIED_SUCCESS may ever claim
+            // restoration — and even then it is verified per-postcondition,
+            // never a blanket rollback.
+            restored: null
+        });
+        record.result = result;
+        return result;
+    }
+
+    // ---- Lane 2/Lane 3 canonical routing helpers (closure-private) --------
+    // admit a compensation intent + mint a session through the canonical
+    // Lane 2 facade. The canonical action facade fails closed on
+    // authentication, so compensation through THIS production closure fails
+    // closed at the session step unless a trusted lane wires real auth —
+    // exactly like every other canonical action path.
+    function lane3FacadeAdmit4({ capabilityId, operation, arguments: args }) {
+        const lane2 = createCanonicalActionFacade();
+        const serialized = JSON.stringify({
+            schemaVersion: 1,
+            capabilityId,
+            operation,
+            arguments: args
+        });
+        return lane2.admit(serialized, { source: "lane4-compensation" });
+    }
+
+    function lane3Session4(principal) {
+        // The canonical authentication path is bootstrap-owned and
+        // FAILS CLOSED (canonicalAuthAdapter returns null). Compensation
+        // therefore cannot mint a session from caller input — mirroring the
+        // production trust model until real auth infrastructure is wired INTO
+        // the bootstrap by a later lane. Tests exercise the full authorized
+        // path through the test-only harness (tests/verification/harness.js).
+        try {
+            const lane2 = createCanonicalActionFacade();
+            return lane2.session({ claimedPrincipal: principal });
+        } catch {
+            return null;
+        }
+    }
+
+    canonicalVerification = Object.freeze({
+        // least-privilege downstream surface
+        verify,
+        compensate,
+
+        // PURE brand-recognition predicates — BRAND-FIRST: closure-only
+        // WeakSet membership decides before any property read.
+        isCanonicalVerificationRequest(value) {
+            if (value === null || typeof value !== "object") return false;
+            if (!vRequestBrandSet4.has(value)) return false;
+            return true;
+        },
+        isCanonicalVerificationResult(value) {
+            if (value === null || typeof value !== "object") return false;
+            if (!vResultBrandSet4.has(value)) return false;
+            return true;
+        },
+        isCanonicalCompensationPlan(value) {
+            if (value === null || typeof value !== "object") return false;
+            if (!vPlanBrandSet4.has(value)) return false;
+            return true;
+        }
+    });
+    return canonicalVerification;
+}
+
+// Options that must NEVER be accepted from a verify/compensate caller: the
+// verifier/compensator functions are bootstrap-owned and captured at trusted
+// registration time.
+const CALLER_VERIFIER_KEYS4 = Object.freeze([
+    "verifier", "verifierFn", "observe", "observeFn", "sensor", "sensorFn",
+    "predicate", "predicateFn", "evaluator", "evaluatorFn", "checker",
+    "checkFn", "postconditionFn", "verifyFn"
+]);
+const CALLER_COMPENSATOR_KEYS4 = Object.freeze([
+    "compensator", "compensatorFn", "rollback", "rollbackFn", "repair",
+    "repairFn", "undo", "undoFn", "restore", "restoreFn", "compensateFn"
+]);
+const TIMEOUT_SENTINEL4 = Symbol("damar.action.verification.timeout");
+
+// The ONE canonical verification facade, created exactly once, lazily.
+function isCanonicalExecutionResult4(value) {
+    // Reuse the Lane 3 brand check through the canonical actuation facade —
+    // the ONLY trusted path to brand membership.
+    return createCanonicalActuationFacade().isCanonicalExecutionResult(value);
+}
+
 module.exports = {
     createCanonicalActionFacade,
     createCanonicalActuationFacade,
+    createCanonicalVerificationFacade,
     PRIVILEGED_KEYS
 };
