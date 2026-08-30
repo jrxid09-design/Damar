@@ -302,18 +302,18 @@ function resolveDelegator(initiatorExec = null, internalOrigin = false, provenan
  * `source` adalah label telemetri semata — TIDAK pernah bukti trust.
  */
 const INTERNAL_GRANT_TOKEN = Symbol("damar.internalGrant");
-const internalGrant = require("./internalGrant");
+const internalGrantDomain = require("./internalGrant").createInternalGrantDomain();
 
 /** Apakah sebuah delegasi berupa grant otonom kanonik. */
 function isCanonicalInternalGrant(exec) {
     if (exec === null || typeof exec !== "object" || utilTypes.isProxy(exec)) {
         return false;
     }
-    return internalGrant.isCanonicalInternalGrant(exec);
+    return false;
 }
 
 function isToolAuthorizedByGrant(exec, toolName) {
-    return internalGrant.isToolAuthorizedByGrant(exec, toolName);
+    return false;
 }
 
 /** Klasifikasi internal — metadata eksternal TIDAK ikut menentukan. */

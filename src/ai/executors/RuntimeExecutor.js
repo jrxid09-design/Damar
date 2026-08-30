@@ -5,6 +5,8 @@ const Budget = require("../tools/Budget");
 const { TurnController } = require("../tools/TurnController");
 const toolStats = require("../tools/ToolStats");
 const { canonicalRequestExec } = require("../runtime/requestIdentity");
+const { createInternalGrantDomain } = require("../tools/internalGrant");
+const executorGrantDomains = new WeakMap();
 
 /**
  * Menjalankan satu request AI sampai selesai, termasuk
@@ -39,6 +41,13 @@ class RuntimeExecutor {
         this.events = options.events ?? null;
 
         this.logger = options.logger ?? null;
+
+        const grantDomain = options.grantDomain ?? createInternalGrantDomain();
+        if (!grantDomain || typeof grantDomain.isCanonicalInternalGrant !== "function" ||
+            typeof grantDomain.isToolAuthorizedByGrant !== "function") {
+            throw new TypeError("invalid trusted execution grant domain");
+        }
+        executorGrantDomains.set(this, grantDomain);
 
     }
 
@@ -128,7 +137,10 @@ class RuntimeExecutor {
         // langsung — loop tool (executeTools → request.exec) dan
         // deferred disclosure memakai identitas yang SAMA dengan
         // disklosur awal; capabilitySet tidak pernah tertinggal di sini.
-        request.exec = canonicalRequestExec(request);
+        const domain = executorGrantDomains.get(this);
+        request.exec = domain.isCanonicalInternalGrant(request.exec)
+            ? request.exec
+            : canonicalRequestExec(request);
 
         const plan = this.startPlan(request);
 
@@ -184,10 +196,9 @@ class RuntimeExecutor {
             // MODEL TOOL CALL != AUTHORITY. Provider output is untrusted;
             // only the canonical in-process grant may cross this final sink.
             // Empty/omitted tools, role, and channel are never permission.
-            const Authorization = require("../tools/Authorization");
             const calls = response.toolCalls || [];
-            if (!Authorization.isCanonicalInternalGrant(request.exec) ||
-                !calls.every(call => Authorization.isToolAuthorizedByGrant(
+            if (!domain.isCanonicalInternalGrant(request.exec) ||
+                !calls.every(call => domain.isToolAuthorizedByGrant(
                     request.exec, call.name || call.function?.name))) {
                 this.finishPlan(plan);
                 return { ...response, toolCalls: [], finishReason: response.finishReason ?? "stop" };
@@ -869,7 +880,10 @@ class RuntimeExecutor {
 
         // H1/CLOSURE: paritas dengan execute() — streaming bukan hop
         // pelucutan identitas.
-        request.exec = canonicalRequestExec(request);
+        const domain = executorGrantDomains.get(this);
+        request.exec = domain.isCanonicalInternalGrant(request.exec)
+            ? request.exec
+            : canonicalRequestExec(request);
 
         const plan = this.startPlan(request);
 
@@ -933,10 +947,9 @@ class RuntimeExecutor {
 
             // Keep streaming parity with execute(): never announce or run a
             // provider tool call without canonical trusted execution context.
-            const Authorization = require("../tools/Authorization");
             const calls = round.toolCalls || [];
-            if (!Authorization.isCanonicalInternalGrant(request.exec) ||
-                !calls.every(call => Authorization.isToolAuthorizedByGrant(
+            if (!domain.isCanonicalInternalGrant(request.exec) ||
+                !calls.every(call => domain.isToolAuthorizedByGrant(
                     request.exec, call.name || call.function?.name))) {
                 this.finishPlan(plan);
                 yield new AIStreamChunk({
