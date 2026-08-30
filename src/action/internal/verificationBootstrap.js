@@ -111,20 +111,15 @@ const { fail, REASONS } = require("../errors");
 // re-observing or re-actuating.
 // ---------------------------------------------------------------------------
 
-// CANONICAL BRANDS (closure-private within this trusted module; per-
-// composition provenance is established by the formers below). Brand
-// membership means "produced by the trusted createCanonicalVerificationComposition
-// function" — a result from ANY composition instance (production or
-// test-supplied-verifiers) is canonical, because the composition function
-// IS the trusted production code. Foreign-domain results (e.g. the
-// test-domain mirror harness in tests/verification/harness.js) are NOT
-// branded and therefore NOT canonical.
-const REQUEST_BRAND4 = Symbol("damar.action.verification.request.brand");
-const RESULT_BRAND4 = Symbol("damar.action.verification.result.brand");
-const PLAN_BRAND4 = Symbol("damar.action.verification.plan.brand");
-const vRequestBrandSet4 = new WeakSet();
-const vResultBrandSet4 = new WeakSet();
-const vPlanBrandSet4 = new WeakSet();
+// CANONICAL BRANDS (TARGETED REPAIR 5): the brand WeakSets are PER-COMPOSITION
+// — declared fresh inside createCanonicalVerificationComposition so every
+// composition instance owns an INDEPENDENT provenance domain. Artifacts minted
+// by composition A are NOT canonical to composition B (cross-composition
+// forgery is structurally impossible). COMPOSITION INSTANCE != SHARED TRUST
+// DOMAIN. The brand Symbols previously declared here carried ZERO
+// authenticity (they were never used as membership proof) and have been
+// REMOVED: membership in the per-instance WeakSet is the only authority-
+// bearing provenance proof.
 
 // Options that must NEVER be accepted from a verify/compensate caller: the
 // verifier/compensator functions are bootstrap-owned and captured at trusted
@@ -917,6 +912,19 @@ function createCanonicalVerificationComposition({
     const compensationById = new Map();   // compensationId -> record
     const VERIFICATION_MAX = 4096;
     const COMPENSATION_MAX = 4096;
+
+    // ---- PER-COMPOSITION PROVENANCE DOMAIN (TARGETED REPAIR 5) ------------
+    // Fresh WeakSets per composition invocation: every composition instance
+    // owns an INDEPENDENT trust domain. A request/result/plan minted by THIS
+    // composition is canonical ONLY to THIS composition — cross-composition
+    // artifacts are rejected by every other composition's predicates, the
+    // compensate() provenance check, and (for the canonical application
+    // composition) by the production facade. All formers, predicates, and
+    // the compensation source check below close over THESE instance-local
+    // sets. No module-global canonical membership store exists.
+    const vRequestBrandSet4 = new WeakSet();
+    const vResultBrandSet4 = new WeakSet();
+    const vPlanBrandSet4 = new WeakSet();
 
     function noteVerification(id, rec) {
         if (verificationsById.size >= VERIFICATION_MAX) {
