@@ -2,6 +2,7 @@ const { WebSocketServer } = require("ws");
 
 const terminals = require("../runtime/terminal/TerminalRuntime");
 const telemetry = require("../services/telemetryService");
+const { LEGACY_ACTION_ROUTE_DISABLED } = require("../manager/legacyBoundary");
 
 /**
  * Gateway WebSocket — HANYA I/O terminal (bukan lifecycle).
@@ -36,6 +37,11 @@ function attach(server) {
         const match = url.pathname.match(PATH_RE);
         if (!match) return;   // biarkan handler upgrade lain (mis. SSE tak pakai upgrade)
 
+        // The legacy PTY stream is an external write/signal/resize surface;
+        // it has no canonical Manager request or Lane 2/3 revalidation.
+        // Reject before looking up or attaching to a terminal session.
+        return reject(socket, 403, LEGACY_ACTION_ROUTE_DISABLED);
+
         // Auth: sama seperti bidang kendali REST.
         if (process.env.DAMAR_TOKEN) {
             const token = url.searchParams.get("token") ||
@@ -52,8 +58,8 @@ function attach(server) {
     telemetry.info("[terminal] WebSocket gateway aktif: /api/v1/console/terminals/:id/stream");
 }
 
-function reject(socket, code) {
-    try { socket.write(`HTTP/1.1 ${code} \r\n\r\n`); socket.destroy(); } catch { /* abaikan */ }
+function reject(socket, code, reason = "") {
+    try { socket.write(`HTTP/1.1 ${code} \r\nX-Damar-Route: ${reason}\r\n\r\n`); socket.destroy(); } catch { /* abaikan */ }
 }
 
 function bind(ws, session) {

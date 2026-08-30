@@ -1,6 +1,7 @@
 const response = require("../utils/response");
 
 const terminals = require("../runtime/terminal/TerminalRuntime");
+const { rejectLegacyActionRoute } = require("../manager/legacyBoundary");
 
 class TerminalController {
 
@@ -18,6 +19,7 @@ class TerminalController {
 
     create(req, res, next) {
         try {
+            rejectLegacyActionRoute("Console terminal");
             const {
                 shell, cwd, name, cols, rows,
                 owner, purpose, terminalType, createdBy, restartPolicy, persistent, target, elevated
@@ -41,6 +43,7 @@ class TerminalController {
 
     input(req, res, next) {
         try {
+            rejectLegacyActionRoute("Console terminal");
             terminals.write(req.params.id, req.body?.data ?? "");
             return response.success(res, "OK", { ok: true });
         }
@@ -49,6 +52,7 @@ class TerminalController {
 
     signal(req, res, next) {
         try {
+            rejectLegacyActionRoute("Console terminal");
             terminals.signal(req.params.id, req.body?.name ?? "SIGINT");
             return response.success(res, "Sinyal terkirim", { ok: true });
         }
@@ -57,6 +61,7 @@ class TerminalController {
 
     resize(req, res, next) {
         try {
+            rejectLegacyActionRoute("Console terminal");
             const { cols, rows } = req.body ?? {};
             return response.success(res, "Resize", terminals.resize(req.params.id, cols, rows));
         }
@@ -65,6 +70,7 @@ class TerminalController {
 
     async execute(req, res, next) {
         try {
+            rejectLegacyActionRoute("Console terminal");
             const { command, expect, timeoutMs } = req.body ?? {};
             if (!command) return response.error(res, "Field 'command' wajib.", 400);
             return response.success(res, "Selesai", await terminals.execute(req.params.id, command, { expect, timeoutMs }));
@@ -74,6 +80,7 @@ class TerminalController {
 
     rename(req, res, next) {
         try {
+            rejectLegacyActionRoute("Console terminal");
             return response.success(res, "Diubah", terminals.rename(req.params.id, req.body?.name ?? ""));
         }
         catch (error) { return response.error(res, error.message, 400); }
@@ -81,6 +88,7 @@ class TerminalController {
 
     remove(req, res, next) {
         try {
+            rejectLegacyActionRoute("Console terminal");
             const force = req.query.force === "true" || req.body?.force === true;
             return response.success(res, "Ditutup", { closed: terminals.close(req.params.id, { force }) });
         }

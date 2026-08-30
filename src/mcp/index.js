@@ -3,6 +3,7 @@ const { ToolRegistry } = require("../core/tools");
 const { riskOf } = require("../core/safety/riskCatalog");
 const { clampExternalRole } = require("../core/auth/tokenCompare");
 const { McpClient } = require("./mcpClient");
+const { rejectLegacyActionRoute } = require("../manager/legacyBoundary");
 
 /**
  * Pasang endpoint MCP Damar pada aplikasi Express.
@@ -20,24 +21,16 @@ const { McpClient } = require("./mcpClient");
  */
 function attachMcp(app) {
 
-    // H9: /mcp KONVERGEN ke choke point otorisasi yang sama. Eksekusi
-    // tools/call kini melewati Authorization.assertExecution dengan
-    // identitas berprovenance dari tokenGuard — bukan lagi jalur samping
-    // yang memanggil registry langsung.
-    const Authorization = require("../ai/tools/Authorization");
-
     const handler = createMcpHandler({
         registry: {
             describe: () => ToolRegistry.describe(),
             has: (id) => ToolRegistry.has(id),
             execute: (id, args, ctx) => {
-                // Gerbang eksekusi tunggal — identitas dari req.authIdentity
-                // (dipasang tokenGuard); MCP client = peran terbatas.
-                Authorization.assertExecution(
-                    { name: id },
-                    ctx?.exec ?? { role: "user", channel: "mcp" }
-                );
-                return ToolRegistry.execute(id, args, { source: "mcp", exec: ctx?.exec });
+                // The legacy MCP tools/call contract accepts an arbitrary
+                // registry id and bypasses Manager → Lane 2 → Lane 3.
+                // Keep discovery available, but fail before authorization or
+                // registry execution until a trusted Manager adapter exists.
+                rejectLegacyActionRoute("MCP tool");
             }
         },
         isDestructive: (id) => !!riskOf(id),

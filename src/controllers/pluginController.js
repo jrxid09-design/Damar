@@ -5,6 +5,7 @@ const pluginRegistry = require("../plugins/pluginRegistry");
 const { ToolRegistry } = require("../core/tools");
 
 const telemetry = require("../services/telemetryService");
+const { rejectLegacyActionRoute } = require("../manager/legacyBoundary");
 
 class PluginController {
 
@@ -48,6 +49,10 @@ class PluginController {
     async execute(req, res, next) {
 
         try {
+
+            // The old endpoint accepts an arbitrary ToolRegistry id and
+            // bypasses Manager → Lane 2 → Lane 3. Fail closed before lookup.
+            rejectLegacyActionRoute("Console plugin");
 
             const { id } = req.params;
 
