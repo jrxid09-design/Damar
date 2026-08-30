@@ -6,8 +6,8 @@ const router = express.Router();
 const { chatValidation } = require("../../../validators/chatValidator");
 const validate = require("../../../middleware/validate");
 
-const chatController = require("../../../controllers/chatController");
 const sessionController = require("../../../controllers/sessionController");
+const { rejectLegacyActionMiddleware } = require("../../../manager/legacyBoundary");
 
 // Bidang kendali yang dipakai Damar Console (aplikasi desktop).
 router.use("/console", require("./console"));
@@ -33,7 +33,7 @@ router.post(
   "/chat",
   chatValidation,
   validate,
-  chatController.chat
+  rejectLegacyActionMiddleware("legacy agent chat")
 );
 
 router.get("/", (req, res) => {

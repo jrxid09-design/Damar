@@ -1,4 +1,5 @@
 const express = require("express");
+const { rejectLegacyActionMiddleware } = require("../../../manager/legacyBoundary");
 
 const aiController = require("../../../controllers/aiController");
 const integrationController = require("../../../controllers/integrationController");
@@ -32,6 +33,11 @@ const personalController = require("../../../controllers/personalController");
 const osintController = require("../../../controllers/osintController");
 
 const router = express.Router();
+const managerOnly = rejectLegacyActionMiddleware("Console action");
+const homeManagerOnly = rejectLegacyActionMiddleware("home/device action");
+const labManagerOnly = rejectLegacyActionMiddleware("Lab action");
+const automationManagerOnly = rejectLegacyActionMiddleware("automation action");
+const mcpManagerOnly = rejectLegacyActionMiddleware("MCP administration action");
 
 // ---- Dashboard & telemetri ------------------------------------
 
@@ -53,12 +59,12 @@ router.get("/events", telemetryController.events);
 // ---- AI runtime ------------------------------------------------
 
 router.get("/ai/config", aiController.config);
-router.post("/ai/config", aiController.saveConfig);
+router.post("/ai/config", managerOnly);
 router.get("/ai/providers", aiController.providers);
-router.post("/ai/provider", aiController.selectProvider);
+router.post("/ai/provider", managerOnly);
 router.get("/ai/models", aiController.models);
 router.post("/ai/models/verify", aiController.verifyModels);
-router.post("/ai/model", aiController.selectModel);
+router.post("/ai/model", managerOnly);
 router.get("/ai/metrics", aiController.metrics);
 router.post("/ai/chat", aiController.chat);
 router.post("/ai/stream", aiController.stream);
@@ -72,19 +78,19 @@ router.post("/tools/:id/execute", pluginController.execute);
 // ---- Forge (Damar bikin tool sendiri / editor manual) ---------
 
 router.get("/forge", forgeController.list);
-router.post("/forge", forgeController.create);
+router.post("/forge", managerOnly);
 router.get("/forge/:id", forgeController.read);
-router.post("/forge/:id/approve", forgeController.approve);
-router.post("/forge/:id/reject", forgeController.reject);
-router.delete("/forge/:id", forgeController.remove);
+router.post("/forge/:id/approve", managerOnly);
+router.post("/forge/:id/reject", managerOnly);
+router.delete("/forge/:id", managerOnly);
 
 // ---- Home automation -------------------------------------------
 
 router.get("/home/status", homeController.status);
 router.get("/home/config", homeController.config);
-router.post("/home/config", homeController.saveConfig);
+router.post("/home/config", homeManagerOnly);
 router.get("/home/devices", homeController.devices);
-router.post("/home/control", homeController.control);
+router.post("/home/control", homeManagerOnly);
 // CCTV Home Assistant: daftarnya, dan gambarnya diteruskan daemon
 // supaya token HA tidak ikut ke renderer.
 router.get("/home/cameras", homeController.cameras);
@@ -92,10 +98,10 @@ router.get("/home/camera/:id/snapshot", homeController.cameraSnapshot);
 
 // MQTT: broker, discovery perangkat, kendali langsung command topic.
 router.get("/home/mqtt/status", homeController.mqttStatus);
-router.post("/home/mqtt/config", homeController.mqttConfig);
-router.post("/home/mqtt/connect", homeController.mqttConnect);
-router.post("/home/mqtt/disconnect", homeController.mqttDisconnect);
-router.post("/home/mqtt/publish", homeController.mqttPublish);
+router.post("/home/mqtt/config", homeManagerOnly);
+router.post("/home/mqtt/connect", homeManagerOnly);
+router.post("/home/mqtt/disconnect", homeManagerOnly);
+router.post("/home/mqtt/publish", homeManagerOnly);
 
 // ---- Vision ----------------------------------------------------
 
@@ -104,53 +110,53 @@ router.get("/vision/config", visionController.config);
 router.get("/vision/raw", visionController.rawFile);
 // Proksi gambar Immich (daemon menambahkan x-api-key; <img> tak bisa).
 router.get("/vision/immich", visionController.immichProxy);
-router.post("/vision/config", visionController.saveConfig);
+router.post("/vision/config", managerOnly);
 router.post("/vision/analyze", visionController.analyze);
 router.get("/cameras", visionController.cameras);
-router.post("/cameras", visionController.addCamera);
-router.delete("/cameras/:id", visionController.removeCamera);
+router.post("/cameras", homeManagerOnly);
+router.delete("/cameras/:id", homeManagerOnly);
 router.get("/cameras/:id/snapshot", visionController.snapshot);
-router.post("/cameras/:id/see", visionController.seeCamera);
+router.post("/cameras/:id/see", homeManagerOnly);
 
 // ---- Orang & wajah (Immich + face-match) -----------------------
 
 router.get("/people/status", peopleController.status);
-router.post("/people/immich", peopleController.saveImmich);
-router.post("/people/face", peopleController.saveFace);
+router.post("/people/immich", managerOnly);
+router.post("/people/face", managerOnly);
 router.get("/people", peopleController.people);
 router.post("/people/search", peopleController.search);
 
 // ---- Multi-agent orkestrasi ------------------------------------
 
 router.get("/agents", orchestratorController.agents);
-router.post("/orchestrate", orchestratorController.orchestrate);
+router.post("/orchestrate", managerOnly);
 
 // ---- Damar Lab (laboratorium kolaboratif) ---------------------------
 const labController = require("../../../controllers/labController");
 router.get("/lab/projects", labController.projectsList);
-router.post("/lab/projects", labController.projectCreate);
+router.post("/lab/projects", labManagerOnly);
 router.get("/lab/projects/:id", labController.projectGet);
-router.post("/lab/projects/:id/activate", labController.projectPhase); // kompat v1
-router.patch("/lab/projects/:id", labController.projectUpdate);
-router.delete("/lab/projects/:id", labController.projectRemove);
+router.post("/lab/projects/:id/activate", labManagerOnly); // kompat v1
+router.patch("/lab/projects/:id", labManagerOnly);
+router.delete("/lab/projects/:id", labManagerOnly);
 router.get("/lab/projects/:id/browse", labController.projectBrowse);
-router.post("/lab/projects/:id/vscode", labController.projectOpenVSCode);
+router.post("/lab/projects/:id/vscode", labManagerOnly);
 router.get("/lab/projects/:id/timeline", labController.projectTimeline);
-router.post("/lab/projects/:id/phase", labController.projectPhase);
-router.post("/lab/projects/:id/memory", labController.memoryRemember);
+router.post("/lab/projects/:id/phase", labManagerOnly);
+router.post("/lab/projects/:id/memory", labManagerOnly);
 router.get("/lab/projects/:id/memory", labController.memoryRecall);
 router.get("/lab/projects/:id/memory/summary", labController.memorySummary);
-router.post("/lab/projects/:id/knowledge", labController.knowledgeIngest);
-router.post("/lab/projects/:id/snapshots", labController.snapshotCreate);
+router.post("/lab/projects/:id/knowledge", labManagerOnly);
+router.post("/lab/projects/:id/snapshots", labManagerOnly);
 router.get("/lab/projects/:id/snapshots", labController.snapshotsList);
 router.get("/lab/missions", labController.missionsList);
-router.post("/lab/missions", labController.missionCreate);
+router.post("/lab/missions", labManagerOnly);
 router.get("/lab/missions/:id", labController.missionGet);
-router.post("/lab/missions/:id/run", labController.missionRun);
+router.post("/lab/missions/:id/run", labManagerOnly);
 // Terapkan hasil misi ke Damar utama (memori / Beranda / misi lanjutan / kode).
-router.post("/lab/missions/:id/apply", labController.missionApply);
-router.post("/lab/missions/:id/status", labController.missionTransition);
-router.post("/lab/missions/:id/resume", labController.missionResume);
+router.post("/lab/missions/:id/apply", labManagerOnly);
+router.post("/lab/missions/:id/status", labManagerOnly);
+router.post("/lab/missions/:id/resume", labManagerOnly);
 router.get("/lab/activity", labController.activityList);
 router.get("/lab/agents", labController.agentsBoard);
 router.get("/lab/instruments", labController.instrumentsList);
@@ -159,13 +165,13 @@ router.get("/lab/instruments", labController.instrumentsList);
 const graphController = require("../../../controllers/graphController");
 router.get("/graph/coding", graphController.coding);
 router.get("/lab/artifacts", labController.artifactsList);
-router.post("/lab/artifacts", labController.artifactCreate);
+router.post("/lab/artifacts", labManagerOnly);
 router.get("/lab/decisions", labController.decisionsList);
-router.post("/lab/decisions", labController.decisionCreate);
+router.post("/lab/decisions", labManagerOnly);
 router.get("/lab/experiments", labController.experimentsList);
-router.post("/lab/experiments", labController.experimentCreate);
-router.post("/lab/experiments/:id/run", labController.experimentRun);
-router.post("/lab/tests", labController.testRun);
+router.post("/lab/experiments", labManagerOnly);
+router.post("/lab/experiments/:id/run", labManagerOnly);
+router.post("/lab/tests", labManagerOnly);
 
 // ---- WhatsApp --------------------------------------------------
 
@@ -189,40 +195,40 @@ router.delete("/terminals/:id", terminalController.remove);
 // ---- Peran pengguna (SuperAdmin/Admin/User) --------------------
 
 router.get("/roles", roleController.status);
-router.post("/roles", roleController.saveConfig);
+router.post("/roles", managerOnly);
 
 // ---- Proaktif (brief terjadwal) --------------------------------
 
 router.get("/automation/status", automationController.status);
-router.post("/automation/config", automationController.saveConfig);
-router.post("/automation/run", automationController.run);
+router.post("/automation/config", automationManagerOnly);
+router.post("/automation/run", automationManagerOnly);
 
 // ---- WhatsApp --------------------------------------------------
 
 router.get("/whatsapp/status", whatsappController.status);
 router.get("/whatsapp/groups", whatsappController.groups);
-router.post("/whatsapp/config", whatsappController.saveConfig);
-router.post("/whatsapp/connect", whatsappController.connect);
-router.post("/whatsapp/logout", whatsappController.logout);
-router.post("/whatsapp/test", whatsappController.test);
+router.post("/whatsapp/config", managerOnly);
+router.post("/whatsapp/connect", managerOnly);
+router.post("/whatsapp/logout", managerOnly);
+router.post("/whatsapp/test", managerOnly);
 
 router.get("/telegram/status", telegramController.status);
-router.post("/telegram/config", telegramController.saveConfig);
-router.post("/telegram/test", telegramController.test);
-router.post("/telegram/reconnect", telegramController.reconnect);
+router.post("/telegram/config", managerOnly);
+router.post("/telegram/test", managerOnly);
+router.post("/telegram/reconnect", managerOnly);
 
 // ---- Kanal & sesi percakapan persisten --------------------------
 
 router.get("/channels", channelController.list);
 router.get("/channels/sessions", channelController.sessions);
-router.delete("/channels/sessions/:key", channelController.clearSession);
+router.delete("/channels/sessions/:key", managerOnly);
 
 // ---- MCP: kelola server eksternal + status ekspos ----------------
 
 router.get("/mcp/servers", mcpController.list);
-router.post("/mcp/servers", mcpController.save);
-router.delete("/mcp/servers/:id", mcpController.remove);
-router.post("/mcp/restart", mcpController.restart);
+router.post("/mcp/servers", mcpManagerOnly);
+router.delete("/mcp/servers/:id", mcpManagerOnly);
+router.post("/mcp/restart", mcpManagerOnly);
 
 // ---- Otonomi: pulse · watchdog · dream ---------------------------
 
@@ -238,66 +244,66 @@ router.get("/dream/status", (req,res) => {
 
 // ---- Device tertaut (companion) — manajemen oleh owner ----------
 
-router.post("/companion/pair", companionController.request);
+router.post("/companion/pair", managerOnly);
 router.get("/companion/list", companionController.list);
 router.get("/companion/qr", companionController.qr);
-router.post("/companion/:id/revoke", companionController.revoke);
+router.post("/companion/:id/revoke", managerOnly);
 
 // ---- Integrasi eksternal ---------------------------------------
 
 router.get("/integrations", integrationController.list);
-router.post("/integrations/check", integrationController.checkAll);
-router.post("/integrations/:id/check", integrationController.check);
-router.patch("/integrations/:id", integrationController.update);
+router.post("/integrations/check", managerOnly);
+router.post("/integrations/:id/check", managerOnly);
+router.patch("/integrations/:id", managerOnly);
 router.get("/integrations/:id/models", integrationController.models);
 
 // ---- Memori jangka panjang -------------------------------------
 
 router.get("/memory/stats", memoryController.stats);
 router.get("/memory", memoryController.list);
-router.post("/memory", memoryController.remember);
+router.post("/memory", managerOnly);
 router.post("/memory/recall", memoryController.recall);
-router.post("/memory/consolidate", memoryController.consolidate);
+router.post("/memory/consolidate", managerOnly);
 router.get("/memory/embeddings", memoryController.embeddingStatus);
-router.post("/memory/embeddings/backfill", memoryController.backfill);
+router.post("/memory/embeddings/backfill", managerOnly);
 
 router.get("/memory/entities", memoryController.entities);
-router.post("/memory/entities", memoryController.createEntity);
+router.post("/memory/entities", managerOnly);
 router.get("/memory/entities/:id", memoryController.entity);
-router.patch("/memory/entities/:id", memoryController.updateEntity);
-router.delete("/memory/entities/:id", memoryController.removeEntity);
+router.patch("/memory/entities/:id", managerOnly);
+router.delete("/memory/entities/:id", managerOnly);
 
 router.get("/memory/documents", memoryController.documents);
-router.post("/memory/documents", memoryController.ingest);
-router.post("/memory/upload", memoryController.upload);
+router.post("/memory/documents", managerOnly);
+router.post("/memory/upload", managerOnly);
 router.get("/memory/documents/:id/chunks", memoryController.documentChunks);
-router.delete("/memory/documents/:id", memoryController.removeDocument);
+router.delete("/memory/documents/:id", managerOnly);
 
 // Governance: proposal memori ask-tier + audit. Sebelum "/memory/:id".
 router.get("/memory/proposals", memoryController.proposals);
-router.post("/memory/proposals/:id/approve", memoryController.approveProposal);
-router.post("/memory/proposals/:id/reject", memoryController.rejectProposal);
+router.post("/memory/proposals/:id/approve", managerOnly);
+router.post("/memory/proposals/:id/reject", managerOnly);
 router.get("/memory/audit", memoryController.audit);
 
 // Rute ber-parameter ditaruh paling akhir agar tidak menelan
 // "/memory/entities" dan kawan-kawan.
 router.get("/memory/:id", memoryController.get);
-router.patch("/memory/:id", memoryController.update);
-router.delete("/memory/:id", memoryController.forget);
+router.patch("/memory/:id", managerOnly);
+router.delete("/memory/:id", managerOnly);
 
 // ---- Suara (STT) -----------------------------------------------
 
 router.get("/voice/status", voiceController.status);
 router.get("/voice/config", voiceController.config);
 router.get("/voice/voices", voiceController.voices);
-router.post("/voice/config", voiceController.saveConfig);
+router.post("/voice/config", managerOnly);
 router.post("/voice/transcribe", voiceController.transcribe);
-router.post("/voice/speak", voiceController.speak);
+router.post("/voice/speak", managerOnly);
 
 // Crypto (Binance): config + uji koneksi untuk panel Settings.
 const cryptoController = require("../../../controllers/cryptoController");
 router.get("/crypto/config", cryptoController.config);
-router.post("/crypto/config", cryptoController.saveConfig);
+router.post("/crypto/config", managerOnly);
 router.get("/crypto/status", cryptoController.status);
 
 // Sajikan media terunduh (mp4) untuk <video> Console. Auth via header
@@ -309,9 +315,9 @@ router.get("/media/:id", mediaController.serve);
 // ---- Perangkat (mic / kamera / sensor) -------------------------
 
 router.get("/devices", deviceController.get);
-router.put("/devices", deviceController.update);
-router.post("/devices/sensors", deviceController.addSensor);
-router.delete("/devices/sensors/:id", deviceController.removeSensor);
+router.put("/devices", managerOnly);
+router.post("/devices/sensors", managerOnly);
+router.delete("/devices/sensors/:id", managerOnly);
 router.get("/devices/sensors/readings", deviceController.readSensors);
 
 // ---- Kebocoran Data (gratis, tanpa key) ---------------------------
@@ -323,19 +329,19 @@ router.post("/osint/breach/summary", osintController.breachSummary);
 
 router.post("/osint/phone/analyze", osintController.phoneAnalyze);
 router.post("/osint/phone/assess", osintController.phoneAssess);
-router.post("/osint/phone/blacklist/add", osintController.phoneBlacklistAdd);
-router.post("/osint/phone/blacklist/remove", osintController.phoneBlacklistRemove);
-router.post("/osint/phone/whitelist/add", osintController.phoneWhitelistAdd);
+router.post("/osint/phone/blacklist/add", managerOnly);
+router.post("/osint/phone/blacklist/remove", managerOnly);
+router.post("/osint/phone/whitelist/add", managerOnly);
 router.get("/osint/phone/list", osintController.phoneList);
 
 // ---- Pelacakan Orang (opt-in) --------------------------------------
 
 router.get("/osint/track/list", osintController.personList);
-router.post("/osint/track/register", osintController.personRegister);
-router.post("/osint/track/update", osintController.personUpdate);
+router.post("/osint/track/register", managerOnly);
+router.post("/osint/track/update", managerOnly);
 router.get("/osint/track/:id", osintController.personDetail);
-router.post("/osint/track/:id/revoke", osintController.personRevoke);
-router.post("/osint/track/geofence", osintController.personGeofenceAdd);
+router.post("/osint/track/:id/revoke", managerOnly);
+router.post("/osint/track/geofence", managerOnly);
 router.get("/osint/track/geofence/list", osintController.personGeofenceList);
 router.get("/osint/track/geofence/:id/check", osintController.personGeofenceCheck);
 router.get("/osint/track/nearby", osintController.personNearby);
@@ -348,21 +354,21 @@ router.post("/osint/username", osintController.username);
 router.post("/osint/domain", osintController.domain);
 router.get("/osint/platforms", osintController.platforms);
 
-router.post("/osint/cases", osintController.caseCreate);
+router.post("/osint/cases", managerOnly);
 router.get("/osint/cases", osintController.caseList);
 router.get("/osint/cases/:id", osintController.caseDetail);
-router.post("/osint/cases/:id/findings", osintController.caseAddFinding);
-router.post("/osint/cases/:id/evidence", osintController.caseAddEvidence);
-router.post("/osint/cases/:id/close", osintController.caseClose);
-router.delete("/osint/cases/:id", osintController.caseDelete);
+router.post("/osint/cases/:id/findings", managerOnly);
+router.post("/osint/cases/:id/evidence", managerOnly);
+router.post("/osint/cases/:id/close", managerOnly);
+router.delete("/osint/cases/:id", managerOnly);
 router.get("/osint/cases/:id/export", osintController.caseExport);
 
 // ---- Social Intelligence -------------------------------------------
 
-router.post("/osint/social/bot", osintController.socialBot);
-router.post("/osint/social/comments", osintController.socialComments);
-router.post("/osint/social/location", osintController.socialLocation);
-router.post("/osint/social/network", osintController.socialNetwork);
+router.post("/osint/social/bot", managerOnly);
+router.post("/osint/social/comments", managerOnly);
+router.post("/osint/social/location", managerOnly);
+router.post("/osint/social/network", managerOnly);
 router.post("/osint/hoax/check", osintController.hoaxCheck);
 router.post("/osint/hoax/trace", osintController.hoaxTrace);
 
@@ -370,17 +376,17 @@ router.post("/osint/hoax/trace", osintController.hoaxTrace);
 
 router.get("/nas/status", nasController.status);
 router.get("/nas/config", nasController.config);
-router.post("/nas/config", nasController.setConfig);
+router.post("/nas/config", managerOnly);
 router.get("/nas/immich", nasController.immichStatus);
-router.post("/nas/immich/up", nasController.immichUp);
-router.post("/nas/immich/down", nasController.immichDown);
+router.post("/nas/immich/up", managerOnly);
+router.post("/nas/immich/down", managerOnly);
 router.get("/nas/pools", nasController.pools);
 router.get("/nas/backup", nasController.backups);
-router.post("/nas/backup", nasController.addBackup);
-router.post("/nas/backup/:id/run", nasController.runBackup);
-router.delete("/nas/backup/:id", nasController.removeBackup);
-router.post("/nas/notify/test", nasController.testNotify);
-router.post("/nas/monitor/check", nasController.monitorCheck);
+router.post("/nas/backup", managerOnly);
+router.post("/nas/backup/:id/run", managerOnly);
+router.delete("/nas/backup/:id", managerOnly);
+router.post("/nas/notify/test", managerOnly);
+router.post("/nas/monitor/check", managerOnly);
 
 // ---- Files (penjelajah berkas lokal, read-only) ----------------
 
@@ -391,8 +397,8 @@ router.get("/files", filesController.list);
 router.get("/ai/usage", aiController.usage);
 
 router.get("/weather", personalController.weather);
-router.post("/weather/config", personalController.weatherConfig);
+router.post("/weather/config", managerOnly);
 router.get("/profile", personalController.profile);
-router.post("/profile", personalController.saveProfile);
+router.post("/profile", managerOnly);
 
 module.exports = router;

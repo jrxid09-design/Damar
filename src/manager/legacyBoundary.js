@@ -12,7 +12,16 @@ function rejectLegacyActionRoute(surface) {
     throw error;
 }
 
+function rejectLegacyActionMiddleware(surface) {
+    return (_req, res) => res.status(503).json({
+        success: false,
+        code: LEGACY_ACTION_ROUTE_DISABLED,
+        message: `External ${surface} action ingress is disabled; use the canonical Damar Manager`
+    });
+}
+
 module.exports = Object.freeze({
     LEGACY_ACTION_ROUTE_DISABLED,
-    rejectLegacyActionRoute
+    rejectLegacyActionRoute,
+    rejectLegacyActionMiddleware
 });

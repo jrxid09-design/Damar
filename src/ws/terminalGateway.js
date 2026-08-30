@@ -40,7 +40,7 @@ function attach(server) {
         // The legacy PTY stream is an external write/signal/resize surface;
         // it has no canonical Manager request or Lane 2/3 revalidation.
         // Reject before looking up or attaching to a terminal session.
-        return reject(socket, 403, LEGACY_ACTION_ROUTE_DISABLED);
+        return reject(socket, 503, LEGACY_ACTION_ROUTE_DISABLED);
 
         // Auth: sama seperti bidang kendali REST.
         if (process.env.DAMAR_TOKEN) {
