@@ -64,10 +64,13 @@ function pipe(child, tag, color) {
 const children = [];
 
 function launch(cmd, args, tag, color) {
-    // shell hanya untuk npm (npm.cmd di Windows); `node` tak perlu → hindari DEP0190.
-    const child = spawn(cmd, args, {
+    const isWindowsNpm = cmd === "npm" && process.platform === "win32";
+    const executable = isWindowsNpm ? (process.env.ComSpec || "cmd.exe") : cmd;
+    const spawnArgs = isWindowsNpm ? ["/d", "/s", "/c", "npm.cmd", ...args] : args;
+
+    const child = spawn(executable, spawnArgs, {
         cwd: ROOT,
-        shell: cmd === "npm" && process.platform === "win32",
+        shell: false,
         // Launcher sudah punya banner sendiri → daemon jangan cetak banner lagi.
         env: { ...process.env, DAMAR_NO_BANNER: "1" }
     });
