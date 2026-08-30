@@ -47,11 +47,29 @@ class RuntimeExecutor {
             typeof grantDomain.isToolAuthorizedByGrant !== "function") {
             throw new TypeError("invalid trusted execution grant domain");
         }
-        executorGrantDomains.set(this, grantDomain);
+        executorGrantDomains.set(this, {
+            domain: grantDomain,
+            externallySelected: options.grantDomain !== undefined
+        });
 
     }
 
     setToolRegistry(registry) {
+
+        if (this.toolRegistry) {
+            throw new Error("RuntimeExecutor tool registry is already bound");
+        }
+
+        // An explicitly selected grant domain is suitable only for an
+        // isolated composition.  It may not be paired with the canonical
+        // production AIToolRegistry.
+        const binding = executorGrantDomains.get(this);
+        if (binding?.externallySelected) {
+            const { AIToolRegistry } = require("../tools");
+            if (registry instanceof AIToolRegistry) {
+                throw new Error("caller-selected grant domain cannot bind production registry");
+            }
+        }
 
         this.toolRegistry = registry;
 
@@ -137,7 +155,7 @@ class RuntimeExecutor {
         // langsung — loop tool (executeTools → request.exec) dan
         // deferred disclosure memakai identitas yang SAMA dengan
         // disklosur awal; capabilitySet tidak pernah tertinggal di sini.
-        const domain = executorGrantDomains.get(this);
+        const domain = executorGrantDomains.get(this).domain;
         request.exec = domain.isCanonicalInternalGrant(request.exec)
             ? request.exec
             : canonicalRequestExec(request);
@@ -880,7 +898,7 @@ class RuntimeExecutor {
 
         // H1/CLOSURE: paritas dengan execute() — streaming bukan hop
         // pelucutan identitas.
-        const domain = executorGrantDomains.get(this);
+        const domain = executorGrantDomains.get(this).domain;
         request.exec = domain.isCanonicalInternalGrant(request.exec)
             ? request.exec
             : canonicalRequestExec(request);
