@@ -119,6 +119,8 @@ function curateModels(platform, rawModels = []) {
  */
 class AIRuntimeService {
 
+    #registryOwner;
+
     constructor() {
 
         this.engine = null;
@@ -363,6 +365,7 @@ class AIRuntimeService {
         builder.registerTools(this.mcpTools());
 
         this.engine = builder.build();
+        this.#registryOwner = builder.registryOwner;
 
         this.activePlatform = resolved;
 
@@ -748,25 +751,26 @@ class AIRuntimeService {
             return 0;
         }
 
-        const { AIToolRegistry } = require("../ai/tools");
-
-        const registry = new AIToolRegistry();
+        const tools = [];
 
         for (const tool of this.bridgePluginTools()) {
-            registry.register(tool);
+            tools.push(tool);
         }
 
         for (const tool of this.mcpTools()) {
-            registry.register(tool);
+            tools.push(tool);
         }
 
         for (const tool of this.nativeTools()) {
-            registry.register(tool);
+            tools.push(tool);
         }
 
-        this.engine.runtime.setToolRegistry(registry);
+        if (!this.#registryOwner || typeof this.#registryOwner.replaceSnapshot !== "function") {
+            throw new Error("AI runtime registry owner is unavailable");
+        }
+        this.#registryOwner.replaceSnapshot(tools);
 
-        return registry.all().length;
+        return tools.length;
 
     }
 

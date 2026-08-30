@@ -7,6 +7,7 @@ const {
 } = require("../events");
 
 const runtimeRegistries = new WeakMap();
+const mutableRuntimes = new WeakSet();
 
 const {
 
@@ -94,8 +95,11 @@ class AIRuntime extends BaseComponent {
     this.eventEmitter =
         new AIEventEmitter();
 
-    const toolRegistry = new AIToolRegistry();
+    const toolRegistry = options.toolRegistry instanceof AIToolRegistry
+        ? options.toolRegistry
+        : new AIToolRegistry();
     runtimeRegistries.set(this, toolRegistry);
+    if (!(options.toolRegistry instanceof AIToolRegistry)) mutableRuntimes.add(this);
 
     this.executor =
         new RuntimeExecutor(
@@ -120,6 +124,10 @@ class AIRuntime extends BaseComponent {
         );
 
     this.executor.setToolRegistry(toolRegistry);
+
+    if (options.toolRegistry instanceof AIToolRegistry) {
+        this.setToolRegistry = undefined;
+    }
 
     this.retryExecutor =
         new RetryExecutor(this.options.retry);
@@ -218,16 +226,15 @@ class AIRuntime extends BaseComponent {
     }
 
     setToolRegistry(registry) {
-    if (!registry || typeof registry.all !== "function") {
-        throw new TypeError("invalid tool registry");
+        if (!mutableRuntimes.has(this)) throw new TypeError("canonical runtime registry is owner-controlled");
+        if (!registry || typeof registry.all !== "function") throw new TypeError("invalid tool registry");
+        const current = runtimeRegistries.get(this);
+        for (const tool of current.all()) current.unregister(tool.name);
+        for (const tool of registry.all()) current.register(tool);
+        return this;
     }
-    runtimeRegistries.get(this).replaceSnapshot(registry.all());
 
-    return this;
-
-}
-
-listTools() {
+    listTools() {
     return runtimeRegistries.get(this).all().map(tool => ({
         name: tool.name,
         description: tool.description ?? null,

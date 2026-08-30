@@ -7,6 +7,7 @@ const AIRuntime = require("../runtime/AIRuntime");
 const RuntimeOptions = require("../runtime/RuntimeOptions");
 
 const { AIToolRegistry } = require("../tools");
+const { createOwnedAIToolRegistry } = require("../tools/AIToolRegistry");
 
 const { AIProviderFactory } = require("../providers");
 
@@ -34,7 +35,9 @@ class AIBuilder {
 
         this._options = {};
 
-        this.toolRegistry = new AIToolRegistry();
+        const ownedRegistry = createOwnedAIToolRegistry();
+        this.toolRegistry = ownedRegistry.registry;
+        this.registryOwner = ownedRegistry.owner;
 
         this.middlewares = [];
 
@@ -165,6 +168,7 @@ class AIBuilder {
             options.maxToolIterations = this._options.maxToolIterations;
         }
 
+        options.toolRegistry = this.toolRegistry;
         const runtime = new AIRuntime(this.context, options);
 
         const engine = new AIEngine(runtime);
@@ -187,8 +191,6 @@ class AIBuilder {
         if (this._defaultModel) {
             runtime.setDefaultModel(this._defaultModel);
         }
-
-        runtime.setToolRegistry(this.toolRegistry);
 
         for (const middleware of this.middlewares) {
             runtime.useMiddleware(middleware);
