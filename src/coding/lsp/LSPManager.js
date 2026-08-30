@@ -126,8 +126,16 @@ class LangServer {
     async _start() {
         const bin = resolveBin(this.cfg.bins[0]);
         if (!bin) throw new Error(`Language server tak terpasang: ${this.cfg.bins[0]}`);
-        const proc = spawn(bin, this.cfg.args, {
-            cwd: this.project, windowsHide: true, shell: process.platform === "win32",
+        const isWindowsCmd = process.platform === "win32" && /\.cmd$/i.test(bin);
+        const executable = isWindowsCmd ? (process.env.ComSpec || "cmd.exe") : bin;
+        const spawnArgs = isWindowsCmd
+            ? ["/d", "/s", "/c", bin, ...this.cfg.args]
+            : this.cfg.args;
+
+        const proc = spawn(executable, spawnArgs, {
+            cwd: this.project,
+            windowsHide: true,
+            shell: false,
             stdio: ["pipe", "pipe", "pipe"]
         });
         proc.stderr.on("data", () => { /* buang; sebagian server cerewet */ });

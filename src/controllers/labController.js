@@ -86,10 +86,39 @@ class LabController {
             if (!project.dir) return response.error(res, "Project tak punya folder kerja.", 400);
 
             const { spawn } = require("node:child_process");
-            // `code <dir>` membuka folder. shell:true agar skrip 'code' di
-            // PATH terpakai; detached+unref agar tak memblokir daemon.
-            const child = spawn("code", [project.dir], {
-                detached: true, stdio: "ignore", shell: true, windowsHide: true
+            const path = require("node:path");
+            const fs = require("node:fs");
+
+            let executable = "code";
+
+            if (process.platform === "win32") {
+                const localAppData = process.env.LOCALAPPDATA;
+
+                const codeExe = localAppData
+                    ? path.join(
+                        localAppData,
+                        "Programs",
+                        "Microsoft VS Code",
+                        "Code.exe"
+                    )
+                    : null;
+
+                if (!codeExe || !fs.existsSync(codeExe)) {
+                    return response.error(
+                        res,
+                        "VS Code tidak ditemukan.",
+                        500
+                    );
+                }
+
+                executable = codeExe;
+            }
+
+            const child = spawn(executable, [project.dir], {
+                detached: true,
+                stdio: "ignore",
+                shell: false,
+                windowsHide: true
             });
             child.on("error", () => { /* 'code' tak ada di PATH → diabaikan */ });
             child.unref();
