@@ -304,7 +304,10 @@ const INTERNAL_GRANT_TOKEN = Symbol("damar.internalGrant");
 
 /** Apakah sebuah delegasi berupa grant otonom kanonik. */
 function isCanonicalInternalGrant(exec) {
-    return exec?.[INTERNAL_GRANT_TOKEN] === true;
+    if (exec === null || typeof exec !== "object" || utilTypes.isProxy(exec)) {
+        return false;
+    }
+    return exec[INTERNAL_GRANT_TOKEN] === true;
 }
 
 /** Klasifikasi internal — metadata eksternal TIDAK ikut menentukan. */

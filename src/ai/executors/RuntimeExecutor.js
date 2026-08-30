@@ -180,6 +180,16 @@ class RuntimeExecutor {
                 return response;
 
             }
+
+            // MODEL TOOL CALL != AUTHORITY. Provider output is untrusted;
+            // only the canonical in-process grant may cross this final sink.
+            // Empty/omitted tools, role, and channel are never permission.
+            const Authorization = require("../tools/Authorization");
+            if (!Authorization.isCanonicalInternalGrant(request.exec)) {
+                this.finishPlan(plan);
+                return { ...response, toolCalls: [], finishReason: response.finishReason ?? "stop" };
+            }
+
             const fingerprint = JSON.stringify(
                 (response.toolCalls || []).map(call => [
                     call.name || call.function?.name,
@@ -917,6 +927,24 @@ class RuntimeExecutor {
                 return;
 
             }
+
+            // Keep streaming parity with execute(): never announce or run a
+            // provider tool call without canonical trusted execution context.
+            const Authorization = require("../tools/Authorization");
+            if (!Authorization.isCanonicalInternalGrant(request.exec)) {
+                this.finishPlan(plan);
+                yield new AIStreamChunk({
+                    id: round.id,
+                    model: round.model,
+                    provider: round.provider,
+                    delta: "",
+                    toolCalls: [],
+                    finishReason: "stop",
+                    done: true
+                });
+                return;
+            }
+
             const fingerprint = JSON.stringify(
                 (round.toolCalls || []).map(call => [
                     call.name || call.function?.name,
