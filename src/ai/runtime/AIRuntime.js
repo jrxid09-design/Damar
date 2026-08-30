@@ -6,6 +6,8 @@ const {
 
 } = require("../events");
 
+const runtimeRegistries = new WeakMap();
+
 const {
 
     MiddlewarePipeline
@@ -92,8 +94,8 @@ class AIRuntime extends BaseComponent {
     this.eventEmitter =
         new AIEventEmitter();
 
-    this.toolRegistry =
-        new AIToolRegistry();
+    const toolRegistry = new AIToolRegistry();
+    runtimeRegistries.set(this, toolRegistry);
 
     this.executor =
         new RuntimeExecutor(
@@ -116,6 +118,8 @@ class AIRuntime extends BaseComponent {
 
             }
         );
+
+    this.executor.setToolRegistry(toolRegistry);
 
     this.retryExecutor =
         new RetryExecutor(this.options.retry);
@@ -214,18 +218,21 @@ class AIRuntime extends BaseComponent {
     }
 
     setToolRegistry(registry) {
-
-    this.toolRegistry = registry;
-
-    this.executor.setToolRegistry(registry);
+    if (!registry || typeof registry.all !== "function") {
+        throw new TypeError("invalid tool registry");
+    }
+    runtimeRegistries.get(this).replaceSnapshot(registry.all());
 
     return this;
 
 }
 
-getToolRegistry() {
-
-    return this.toolRegistry;
+listTools() {
+    return runtimeRegistries.get(this).all().map(tool => ({
+        name: tool.name,
+        description: tool.description ?? null,
+        parameters: tool.parameters ?? null
+    }));
 
 }
 
@@ -400,7 +407,7 @@ resolveTools(request) {
 
     const Authorization = require("../tools/Authorization");
 
-    let all = this.toolRegistry?.all() ?? [];
+    let all = runtimeRegistries.get(this)?.all() ?? [];
 
     // Universe berizin untuk identitas giliran ini (satu gerbang).
     //

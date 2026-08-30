@@ -105,9 +105,9 @@ class AIEngine {
 
     }
 
-    getToolRegistry() {
+    listTools() {
 
-        return this.runtime.getToolRegistry();
+        return this.runtime.listTools();
 
     }
 

@@ -1,14 +1,16 @@
+const snapshots = new WeakMap();
+
 class AIToolRegistry {
 
     constructor() {
 
-        this.tools = new Map();
+        snapshots.set(this, new Map());
 
     }
 
     register(tool) {
 
-        this.tools.set(tool.name, tool);
+        snapshots.get(this).set(tool.name, tool);
 
         return this;
 
@@ -16,7 +18,7 @@ class AIToolRegistry {
 
     unregister(name) {
 
-        this.tools.delete(name);
+        snapshots.get(this).delete(name);
 
         return this;
 
@@ -24,19 +26,31 @@ class AIToolRegistry {
 
     has(name) {
 
-        return this.tools.has(name);
+        return snapshots.get(this).has(name);
 
     }
 
     get(name) {
 
-        return this.tools.get(name);
+        return snapshots.get(this).get(name);
 
     }
 
     all() {
 
-        return [...this.tools.values()];
+        return [...snapshots.get(this).values()];
+
+    }
+
+    replaceSnapshot(tools) {
+        if (!Array.isArray(tools)) throw new TypeError("tools must be an array");
+        const next = new Map();
+        for (const tool of tools) {
+            if (!tool || typeof tool.name !== "string") throw new TypeError("invalid tool");
+            next.set(tool.name, tool);
+        }
+        snapshots.set(this, next);
+        return this;
 
     }
 

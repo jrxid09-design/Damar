@@ -1027,8 +1027,7 @@ class AIRuntimeService {
     /** AITool aktif saat ini (dipakai penyaringan berdasarkan peran). */
     tools() {
         try {
-            const reg = this.ensure().runtime.getToolRegistry?.() ?? this.ensure().runtime.toolRegistry;
-            return reg?.all?.() ?? [];
+            return this.ensure().runtime.listTools?.() ?? [];
         }
         catch {
             return [];
