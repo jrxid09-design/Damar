@@ -7,12 +7,15 @@ function freezeSet(values) {
 }
 
 const INTERACTION_ORIGINS = Object.freeze([
+  "CONSOLE",
+  "CLI",
   "VOICE",
   "PRESENCE",
   "HOTKEY",
   "OBSERVATORY",
   "TELEGRAM",
   "WHATSAPP",
+  "COMPANION",
   "API",
   "SYSTEM",
   "TEST"

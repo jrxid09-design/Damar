@@ -31,6 +31,10 @@ function createInteractionBus(options) {
 
   const interactions = new Map();
   const ledger = new Map();
+  // Canonical envelopes are formed only after a registered transport has
+  // supplied provenance.  Keep recognition instance-local so a validated
+  // plain object, copy, or foreign bus envelope cannot cross this boundary.
+  const canonicalEnvelopeSet = new WeakSet();
   const diagnostics = [];
   let pendingCount = 0;
 
@@ -189,6 +193,7 @@ function createInteractionBus(options) {
     }
 
     const digest = interactionDigest(envelope);
+    canonicalEnvelopeSet.add(envelope);
 
     let session;
     try {
@@ -635,6 +640,11 @@ function createInteractionBus(options) {
     return sessions.snapshot();
   }
 
+  function isCanonicalEnvelope(value) {
+    if (value === null || typeof value !== "object") return false;
+    return canonicalEnvelopeSet.has(value);
+  }
+
   return Object.freeze({
     bounds,
     registerTransport,
@@ -648,6 +658,7 @@ function createInteractionBus(options) {
     getStatus,
     getInteractionTrace,
     getSessionSnapshot,
+    isCanonicalEnvelope,
     routeForKind
   });
 }
