@@ -11,7 +11,11 @@ const {
   validatePayload,
   validateContextRef,
   validateAuthEvidence,
-  validateBoundedRecord
+  validateBoundedRecord,
+  isSafeArray,
+  safeArrayLength,
+  mapSafeArray,
+  readOwnData
 } = require("./payloads");
 
 const ENVELOPE_SCHEMA_VERSION = 1;
@@ -97,24 +101,28 @@ function buildEnvelope(spec, bounds) {
   const payload = validatePayload(kind, spec.payload, bounds);
 
   let contextRefs = [];
-  if (spec.contextRefs !== undefined) {
-    if (!Array.isArray(spec.contextRefs) || spec.contextRefs.length > bounds.maxContextRefs) {
+  const rawContextRefs = Object.prototype.hasOwnProperty.call(spec, "contextRefs")
+    ? readOwnData(spec, "contextRefs") : undefined;
+  if (rawContextRefs !== undefined) {
+    if (!isSafeArray(rawContextRefs) || safeArrayLength(rawContextRefs, "contextRefs") > bounds.maxContextRefs) {
       throw new BusError("BOUNDS_EXCEEDED", "too many contextRefs", { field: "contextRefs" });
     }
-    contextRefs = Object.freeze(spec.contextRefs.map(validateContextRef));
+    contextRefs = Object.freeze(mapSafeArray(rawContextRefs, "contextRefs", validateContextRef));
   }
 
   let authEvidenceRefs = [];
-  if (spec.authEvidenceRefs !== undefined) {
+  const rawAuthEvidenceRefs = Object.prototype.hasOwnProperty.call(spec, "authEvidenceRefs")
+    ? readOwnData(spec, "authEvidenceRefs") : undefined;
+  if (rawAuthEvidenceRefs !== undefined) {
     if (
-      !Array.isArray(spec.authEvidenceRefs) ||
-      spec.authEvidenceRefs.length > bounds.maxAuthEvidenceRefs
+      !isSafeArray(rawAuthEvidenceRefs) ||
+      safeArrayLength(rawAuthEvidenceRefs, "authEvidenceRefs") > bounds.maxAuthEvidenceRefs
     ) {
       throw new BusError("BOUNDS_EXCEEDED", "too many authEvidenceRefs", {
         field: "authEvidenceRefs"
       });
     }
-    authEvidenceRefs = Object.freeze(spec.authEvidenceRefs.map(validateAuthEvidence));
+    authEvidenceRefs = Object.freeze(mapSafeArray(rawAuthEvidenceRefs, "authEvidenceRefs", validateAuthEvidence));
   }
 
   const metadata = validateBoundedRecord(spec, "metadata", bounds, "envelope") || {};

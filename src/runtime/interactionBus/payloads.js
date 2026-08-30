@@ -97,11 +97,7 @@ function isSafeArray(value) {
 
 function mapSafeArray(value, field, mapper) {
   if (!isSafeArray(value)) fail("PAYLOAD_FIELD_INVALID", { scope: field, field });
-  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
-  const length = lengthDescriptor && lengthDescriptor.value;
-  if (!Number.isSafeInteger(length) || length < 0) {
-    fail("PAYLOAD_FIELD_INVALID", { scope: field, field });
-  }
+  const length = safeArrayLength(value, field);
   const out = [];
   for (let i = 0; i < length; i += 1) {
     const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
@@ -109,6 +105,16 @@ function mapSafeArray(value, field, mapper) {
     out.push(mapper(descriptor.value, i));
   }
   return out;
+}
+
+function safeArrayLength(value, field) {
+  if (!isSafeArray(value)) fail("PAYLOAD_FIELD_INVALID", { scope: field, field });
+  const descriptor = Object.getOwnPropertyDescriptor(value, "length");
+  const length = descriptor && descriptor.value;
+  if (!Number.isSafeInteger(length) || length < 0) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: field, field });
+  }
+  return length;
 }
 
 function fail(code, detail) {
@@ -416,6 +422,8 @@ module.exports = {
   validateContextRef,
   validateBoundedRecord,
   isSafeArray,
+  safeArrayLength,
+  mapSafeArray,
   readOwnData,
   FORBIDDEN_META_KEYS,
   META_KEY_RE,
