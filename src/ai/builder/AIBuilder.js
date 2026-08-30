@@ -38,6 +38,8 @@ class AIBuilder {
         const ownedRegistry = createOwnedAIToolRegistry();
         this.toolRegistry = ownedRegistry.registry;
         this.registryOwner = ownedRegistry.owner;
+        this.stagedTools = [];
+        this.registryOwner = ownedRegistry.owner;
 
         this.middlewares = [];
 
@@ -126,7 +128,7 @@ class AIBuilder {
 
     registerTool(tool) {
 
-        this.toolRegistry.register(tool);
+        this.stagedTools.push(tool);
 
         return this;
 
@@ -135,7 +137,7 @@ class AIBuilder {
     registerTools(tools = []) {
 
         for (const tool of tools) {
-            this.toolRegistry.register(tool);
+            this.stagedTools.push(tool);
         }
 
         return this;
@@ -163,6 +165,8 @@ class AIBuilder {
         const httpClient = this.httpClient || HttpClient;
 
         const options = new RuntimeOptions(this._options);
+
+        this.registryOwner.replaceSnapshot(this.stagedTools);
 
         if (this._options.maxToolIterations != null) {
             options.maxToolIterations = this._options.maxToolIterations;
