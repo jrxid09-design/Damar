@@ -3,16 +3,66 @@
 const { BusError } = require("./errors");
 const { assertCanonicalId } = require("./ids");
 const { assertEnum } = require("./enums");
+const { types: utilTypes } = require("node:util");
+
+function isProxy(value) {
+  try {
+    return utilTypes.isProxy(value);
+  } catch {
+    return true;
+  }
+}
+
+function hasOnlyDataProperties(value) {
+  if (isProxy(value)) return false;
+  let names;
+  let symbols;
+  try {
+    names = Object.getOwnPropertyNames(value);
+    symbols = Object.getOwnPropertySymbols(value);
+  } catch {
+    return false;
+  }
+  if (symbols.length > 0) return false;
+  for (const name of names) {
+    let descriptor;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(value, name);
+    } catch {
+      return false;
+    }
+    if (!descriptor || !("value" in descriptor)) return false;
+  }
+  return true;
+}
+
+function readOwnData(value, key) {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (!descriptor || !("value" in descriptor)) {
+    throw new BusError("PAYLOAD_FIELD_INVALID", "accessor fields are not accepted", { field: key });
+  }
+  return descriptor.value;
+}
 
 function canonicalize(value) {
   if (value === null || typeof value !== "object") {
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
-    return `[${value.map(canonicalize).join(",")}]`;
+    if (!isSafeArray(value)) fail("PAYLOAD_FIELD_INVALID", { scope: "canonicalize" });
+    const items = [];
+    for (let i = 0; i < value.length; i += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
+      if (!descriptor) fail("PAYLOAD_FIELD_INVALID", { scope: "canonicalize", field: i });
+      items.push(canonicalize(descriptor.value));
+    }
+    return `[${items.join(",")}]`;
+  }
+  if (!isPlainObject(value) || !hasOnlyDataProperties(value)) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "canonicalize" });
   }
   const keys = Object.keys(value).sort();
-  const body = keys.map((k) => `${JSON.stringify(k)}:${canonicalize(value[k])}`).join(",");
+  const body = keys.map((k) => `${JSON.stringify(k)}:${canonicalize(readOwnData(value, k))}`).join(",");
   return `{${body}}`;
 }
 
@@ -24,8 +74,41 @@ function isPlainObject(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
-  const proto = Object.getPrototypeOf(value);
+  if (!hasOnlyDataProperties(value)) return false;
+  let proto;
+  try {
+    proto = Object.getPrototypeOf(value);
+  } catch {
+    return false;
+  }
   return proto === Object.prototype || proto === null;
+}
+
+function isSafeArray(value) {
+  if (!Array.isArray(value) || isProxy(value)) return false;
+  let proto;
+  try {
+    proto = Object.getPrototypeOf(value);
+  } catch {
+    return false;
+  }
+  return proto === Array.prototype && hasOnlyDataProperties(value);
+}
+
+function mapSafeArray(value, field, mapper) {
+  if (!isSafeArray(value)) fail("PAYLOAD_FIELD_INVALID", { scope: field, field });
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+  const length = lengthDescriptor && lengthDescriptor.value;
+  if (!Number.isSafeInteger(length) || length < 0) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: field, field });
+  }
+  const out = [];
+  for (let i = 0; i < length; i += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
+    if (!descriptor) fail("PAYLOAD_FIELD_INVALID", { scope: field, field: i });
+    out.push(mapper(descriptor.value, i));
+  }
+  return out;
 }
 
 function fail(code, detail) {
@@ -197,10 +280,11 @@ function validateMessagePayload(raw, bounds) {
   }
   let attachments;
   if (raw.attachments !== undefined) {
-    if (!Array.isArray(raw.attachments) || raw.attachments.length > bounds.maxAttachments) {
+    const attachmentInput = readOwnData(raw, "attachments");
+    if (!isSafeArray(attachmentInput) || attachmentInput.length > bounds.maxAttachments) {
       fail("BOUNDS_EXCEEDED", { scope: "MESSAGE", field: "attachments" });
     }
-    attachments = Object.freeze(raw.attachments.map((a) => validateAttachment(a, bounds)));
+    attachments = Object.freeze(mapSafeArray(attachmentInput, "attachments", (a) => validateAttachment(a, bounds)));
   }
   let replyToInteractionId;
   if (raw.replyToInteractionId !== undefined) {
@@ -208,10 +292,11 @@ function validateMessagePayload(raw, bounds) {
   }
   let referenceIds;
   if (raw.referenceIds !== undefined) {
-    if (!Array.isArray(raw.referenceIds) || raw.referenceIds.length > bounds.maxContextRefs) {
+    const referenceInput = readOwnData(raw, "referenceIds");
+    if (!isSafeArray(referenceInput) || referenceInput.length > bounds.maxContextRefs) {
       fail("BOUNDS_EXCEEDED", { scope: "MESSAGE", field: "referenceIds" });
     }
-    referenceIds = Object.freeze(raw.referenceIds.map((id) => assertCanonicalId("interactionId", id)));
+    referenceIds = Object.freeze(mapSafeArray(referenceInput, "referenceIds", (id) => assertCanonicalId("interactionId", id)));
   }
   return Object.freeze({
     text,
@@ -231,17 +316,16 @@ function validateCommandPayload(raw, bounds) {
   }
   let args;
   if (raw.arguments !== undefined) {
-    if (!Array.isArray(raw.arguments) || raw.arguments.length > bounds.maxCommandArgs) {
+    const argumentInput = readOwnData(raw, "arguments");
+    if (!isSafeArray(argumentInput) || argumentInput.length > bounds.maxCommandArgs) {
       fail("BOUNDS_EXCEEDED", { scope: "COMMAND", field: "arguments" });
     }
-    args = Object.freeze(
-      raw.arguments.map((arg) => {
+    args = Object.freeze(mapSafeArray(argumentInput, "arguments", (arg) => {
         if (typeof arg !== "string" || arg.length > 256) {
           fail("PAYLOAD_FIELD_INVALID", { scope: "COMMAND", field: "arguments" });
         }
         return arg;
-      })
-    );
+      }));
   }
   const namedArguments = validateBoundedRecord(raw, "namedArguments", bounds, "COMMAND");
   return Object.freeze({ command: raw.command, arguments: args, namedArguments });
@@ -331,6 +415,8 @@ module.exports = {
   validateAuthEvidence,
   validateContextRef,
   validateBoundedRecord,
+  isSafeArray,
+  readOwnData,
   FORBIDDEN_META_KEYS,
   META_KEY_RE,
   COMMAND_NAME_RE,

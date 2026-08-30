@@ -5,6 +5,7 @@ const { resolveBounds } = require("./config");
 const { assertCanonicalId } = require("./ids");
 const { TERMINAL_STATES } = require("./enums");
 const { buildEnvelope, interactionDigest } = require("./envelope");
+const { isPlainObject } = require("./payloads");
 const { InteractionStream } = require("./streams");
 const { createSessionRegistry } = require("./sessions");
 const { createHandlerRegistry, routeForKind } = require("./routing");
@@ -122,7 +123,7 @@ function createInteractionBus(options) {
   }
 
   function submit(request) {
-    if (!request || typeof request !== "object") {
+    if (!isPlainObject(request)) {
       return rejection("SUBMIT_INVALID");
     }
     let transport;
@@ -454,7 +455,7 @@ function createInteractionBus(options) {
   }
 
   function requestCancellation(request) {
-    if (!request || typeof request !== "object") {
+    if (!isPlainObject(request)) {
       return Object.freeze({ accepted: false, reason: "CANCEL_INVALID" });
     }
     let sessionId;

@@ -65,6 +65,12 @@ const ENVELOPE_FIELDS = Object.freeze([
 ]);
 
 function buildEnvelope(spec, bounds) {
+  // The envelope former is also directly exported for deterministic tests and
+  // local composition. Reject an accessor/Proxy-bearing spec before reading
+  // even the timestamp or provenance fields.
+  if (!isPlainObject(spec)) {
+    throw new BusError("ENVELOPE_INPUT_INVALID", "envelope spec must be an accessor-free plain object");
+  }
   const now = spec.receivedAt;
   if (!Number.isSafeInteger(now) || now <= 0) {
     throw new BusError("INVALID_TIME", "receivedAt must be a positive epoch-ms integer");

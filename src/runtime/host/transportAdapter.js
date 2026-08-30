@@ -14,13 +14,21 @@
  */
 
 const MAX_COUNTERS = 64;
+const { isPlainObject, readOwnData } = require("../interactionBus/payloads");
 
 const SESSION_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+
+function optionalOwn(value, key) {
+    return Object.prototype.hasOwnProperty.call(value, key)
+        ? readOwnData(value, key)
+        : undefined;
+}
 
 /** Turunkan sessionId kanonik (`ses_...`) dari string eksternal apa pun.
  * Deterministik agar sesi per user/channel stabil antar peristiwa. */
 function slugSessionId(raw) {
-    const base = String(raw ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    if (typeof raw !== "string") return null;
+    const base = raw.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     const cleaned = base.replace(/^-+|-+$/g, "").slice(0, 62);
     if (SESSION_SLUG_RE.test(cleaned)) return `ses_${cleaned}`;
     return null;
@@ -35,17 +43,20 @@ function fallbackSessionId(prefix = "anon") {
 }
 
 function defaultNormalize(rawEvent) {
-    if (rawEvent === null || typeof rawEvent !== "object" || Array.isArray(rawEvent)) {
+    if (!isPlainObject(rawEvent)) {
         return { ok: false, code: "EVENT_INVALID" };
     }
-    const text = typeof rawEvent.text === "string" ? rawEvent.text.trim() : "";
+    const textValue = optionalOwn(rawEvent, "text");
+    const text = typeof textValue === "string" ? textValue.trim() : "";
     if (!text) return { ok: false, code: "EVENT_TEXT_EMPTY" };
-    const identity = typeof rawEvent.userId === "string" ? rawEvent.userId.slice(0, 128) : null;
-    let sessionId = rawEvent.sessionId === undefined || rawEvent.sessionId === null
+    const userIdValue = optionalOwn(rawEvent, "userId");
+    const sessionValue = optionalOwn(rawEvent, "sessionId");
+    const identity = typeof userIdValue === "string" ? userIdValue.slice(0, 128) : null;
+    let sessionId = sessionValue === undefined || sessionValue === null
         ? null
-        : (typeof rawEvent.sessionId === "string" && rawEvent.sessionId.startsWith("ses_")
-            ? rawEvent.sessionId
-            : slugSessionId(rawEvent.sessionId));
+        : (typeof sessionValue === "string" && sessionValue.startsWith("ses_")
+            ? sessionValue
+            : slugSessionId(sessionValue));
     if (!sessionId) sessionId = slugSessionId(identity) ?? fallbackSessionId("ext");
     return {
         ok: true,
