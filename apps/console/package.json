@@ -9,7 +9,7 @@
     "dev": "electron . --dev"
   },
   "devDependencies": {
-    "electron": "^33.2.0"
+    "electron": "^44.0.0"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
