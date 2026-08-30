@@ -11,7 +11,7 @@ const telemetry = require("./telemetryService");
 // callers must be fenced here rather than relying on each transport handler.
 const EXTERNAL_AI_CHANNELS = new Set([
     "console", "cli", "telegram", "whatsapp", "device", "companion",
-    "api", "voice", "mcp"
+    "api", "voice", "mcp", "external"
 ]);
 
 function externalAiChannel(channel) {
@@ -781,6 +781,30 @@ class AIRuntimeService {
     }
 
     // ---- Operasi yang dipakai controller -------------------------
+
+    /**
+     * Kognisi eksternal tanpa tool.
+     *
+     * This is the only shared entrypoint for externally supplied prompts that
+     * do not become Manager actions. The fixed channel and empty tool list
+     * are owned here; callers cannot re-enable RuntimeExecutor or ToolRegistry
+     * by omission, role, or an injected tools value.
+     */
+    async cognition({ messages, model, temperature, maxTokens, role, signal, contextRefs, sessionId, exec } = {}) {
+        return this.chat({
+            messages,
+            model,
+            temperature,
+            maxTokens,
+            role,
+            signal,
+            contextRefs,
+            sessionId,
+            exec,
+            channel: "external",
+            tools: []
+        });
+    }
 
     async providers() {
 

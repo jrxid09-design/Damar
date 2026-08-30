@@ -124,9 +124,11 @@ class VisionService {
         // direct/fallback runtime.
         const { resolveDelegator } = require("../ai/tools/Authorization");
         const delegator = resolveDelegator(exec ?? null);
-        const response = await aiRuntime.ensure().chat({
+        const response = await aiRuntime.cognition({
             messages: [message],
             model,
+            // Vision Analyze is external cognition only. A model proposal
+            // must be converted into a Manager action by a separate caller.
             ...(delegator ? { exec: delegator } : {})
         });
 

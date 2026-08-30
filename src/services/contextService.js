@@ -198,13 +198,12 @@ class ContextService {
             // N2-FINAL: satu-satunya sumber peran = titik kanonik.
             const { resolveDelegator } = require("../ai/tools/Authorization");
             const delegator = resolveDelegator(exec ?? null);
-            // M-1: restriction delegasi dalam bentuk sah apa pun.
-            const briefSet = require("../ai/tools/Authorization")
-                .toCapabilitySet(delegator?.capabilitySet);
-            const response = await aiRuntime.chat({
+            const response = await aiRuntime.cognition({
                 messages: [{ role: "user", content: prompt }],
-                role: delegator?.role ?? "user",
-                ...(briefSet ? { capabilitySet: briefSet } : {})
+                // Context Brief is external cognition only. Route identity
+                // may shape the narrative but never enables model tooling.
+                role: "user",
+                sessionId: delegator?.sessionId ?? "external:context-brief"
             });
             return { brief: response.content ?? "", snapshot: snap };
         }

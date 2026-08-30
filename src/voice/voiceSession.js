@@ -2,9 +2,9 @@
  * VoiceSession — satu putaran interaksi suara.
  *
  * Ini JEMBATAN ke AI Runtime yang SAMA dengan Telegram/WhatsApp/Console:
- * ia memanggil aiRuntime.chat({ messages, tools: undefined, channel: "voice" })
- * sehingga ToolSelector, context budgeting, memory, mind/consciousness,
- * MCP tools, dan audit trail SEMUA berjalan otomatis — tanpa AI loop kedua.
+ * ia memanggil aiRuntime.cognition(), sehingga context budgeting, memory,
+ * mind/consciousness, and audit trail remain available without granting
+ * external tool execution or a second AI loop.
  *
  * Sesi suara punya konteks persisten lewat ChannelManager (SessionStore
  * SQLite): channel "voice", peer "owner". Riwayat obrolan suara selamat
@@ -41,8 +41,8 @@ class VoiceSession {
     /**
      * Kirim transkrip ke AI Runtime dan kembalikan balasan teks.
      *
-     * tools: undefined → AIRuntime.resolveTools() menjalankan ToolSelector
-     * (jalur superadmin, sama dengan Telegram/Console).
+     * cognition() fixes an external channel and an empty tool set. An action
+     * proposal must enter the Damar Manager and Lane 2–4 path separately.
      *
      * @param {string} text transkrip perintah pengguna
      * @returns {Promise<{ answer: string }>}
@@ -60,10 +60,9 @@ class VoiceSession {
         const answer = await channelManager.runWithContext(
             { channel: "voice", chatId: PEER },
             async () => {
-                const res = await aiRuntime.chat({
+                const res = await aiRuntime.cognition({
                     messages: history.map(({ role, content }) => ({ role, content })),
-                    tools: undefined,
-                    channel: "voice"
+                    sessionId: `voice:${PEER}`
                 });
                 return res.content?.trim() || "(tidak ada jawaban)";
             }

@@ -324,7 +324,8 @@ class TelegramService {
 
         await this.send(chatId,
             `Mode penuh aktif untuk ${FULL_MODE_TTL_HOURS} jam — Damar ` +
-            `di sini kini setara dengan Console (tool lengkap). ` +
+            `di sini kini setara dengan Console untuk kognisi; aksi tetap ` +
+            `memerlukan jalur Manager. ` +
             `/keluar untuk menutup lebih awal.`
         );
         return true;
