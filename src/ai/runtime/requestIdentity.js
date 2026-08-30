@@ -28,6 +28,11 @@ function canonicalRequestExec(request) {
     let exec;
 
     if (request.exec && typeof request.exec === "object") {
+        if (Authorization.isCanonicalInternalGrant(request.exec)) {
+            // Preserve identity provenance.  Copying a grant would create a
+            // foreign object and must never turn into an execution context.
+            return request.exec;
+        }
         // M-1 rev4 — CABANG INI DULU BYPASS KANONISASI SEPENUHNYA:
         // capabilitySet mutable dari pemanggil lolos sampai ke tepi
         // provider. Kini jalur exec pun dinormalisasi.

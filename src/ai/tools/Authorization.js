@@ -263,14 +263,15 @@ function resolveDelegator(initiatorExec = null, internalOrigin = false, provenan
         return initiatorExec;
     }
 
-    // 2+3. Batas otonom eksplisit → satu-satunya penciptaan grant.
+    // 2+3. Batas otonom eksplisit is descriptive metadata only.  It is
+    // deliberately NOT an execution grant: a boolean supplied to this
+    // public resolver must never mint a bearer capability.
     if (internalOrigin === true) {
-        return {
-            [INTERNAL_GRANT_TOKEN]: true,
+        return Object.freeze({
             // source hanya LABEL TELEMETRI — bukan bukti kepercayaan.
             source: `autonomous:${String(provenance || "runtime").slice(0, 40)}`,
             sessionId: String(provenance || "runtime").slice(0, 60)
-        };
+        });
     }
 
     // M-1 CLOSURE — pembawa restriction tanpa peran: inisiator yang
@@ -301,13 +302,18 @@ function resolveDelegator(initiatorExec = null, internalOrigin = false, provenan
  * `source` adalah label telemetri semata — TIDAK pernah bukti trust.
  */
 const INTERNAL_GRANT_TOKEN = Symbol("damar.internalGrant");
+const internalGrant = require("./internalGrant");
 
 /** Apakah sebuah delegasi berupa grant otonom kanonik. */
 function isCanonicalInternalGrant(exec) {
     if (exec === null || typeof exec !== "object" || utilTypes.isProxy(exec)) {
         return false;
     }
-    return exec[INTERNAL_GRANT_TOKEN] === true;
+    return internalGrant.isCanonicalInternalGrant(exec);
+}
+
+function isToolAuthorizedByGrant(exec, toolName) {
+    return internalGrant.isToolAuthorizedByGrant(exec, toolName);
 }
 
 /** Klasifikasi internal — metadata eksternal TIDAK ikut menentukan. */
@@ -544,6 +550,7 @@ function proveBridgedGuarded(tool) {
 module.exports = {
     ROLE_RANK, identity, rankOf, isPrivileged,
     resolveDelegator, isCanonicalInternalGrant,
+    isToolAuthorizedByGrant,
     canonicalCapabilityId, normalizeCapabilitySet, intersectCapabilitySets,
     toCapabilitySet, hasRestriction, assertRestrictionPreserved,
     capSetWithin,

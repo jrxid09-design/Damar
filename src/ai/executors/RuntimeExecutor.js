@@ -185,7 +185,10 @@ class RuntimeExecutor {
             // only the canonical in-process grant may cross this final sink.
             // Empty/omitted tools, role, and channel are never permission.
             const Authorization = require("../tools/Authorization");
-            if (!Authorization.isCanonicalInternalGrant(request.exec)) {
+            const calls = response.toolCalls || [];
+            if (!Authorization.isCanonicalInternalGrant(request.exec) ||
+                !calls.every(call => Authorization.isToolAuthorizedByGrant(
+                    request.exec, call.name || call.function?.name))) {
                 this.finishPlan(plan);
                 return { ...response, toolCalls: [], finishReason: response.finishReason ?? "stop" };
             }
@@ -931,7 +934,10 @@ class RuntimeExecutor {
             // Keep streaming parity with execute(): never announce or run a
             // provider tool call without canonical trusted execution context.
             const Authorization = require("../tools/Authorization");
-            if (!Authorization.isCanonicalInternalGrant(request.exec)) {
+            const calls = round.toolCalls || [];
+            if (!Authorization.isCanonicalInternalGrant(request.exec) ||
+                !calls.every(call => Authorization.isToolAuthorizedByGrant(
+                    request.exec, call.name || call.function?.name))) {
                 this.finishPlan(plan);
                 yield new AIStreamChunk({
                     id: round.id,
