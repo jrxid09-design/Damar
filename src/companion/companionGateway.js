@@ -3,9 +3,9 @@
  *
  * Device TIDAK punya otak sendiri: ia meneruskan permintaan ke jalur AI
  * yang SAMA dengan Telegram/WhatsApp/Console/Voice — `aiRuntime.chat()`.
- * Dengan begitu ToolSelector, context budgeting, memory, consciousness,
- * MCP tools, dan audit trail SEMUA otomatis berlaku. Tidak ada AI loop
- * kedua, tidak ada tool system duplikat.
+ * Context budgeting, memory, consciousness, and audit trail remain shared;
+ * external tool execution is fenced at the runtime boundary and is never
+ * granted by the Companion channel.
  *
  * Device juga bisa memakai MCP server Damar langsung (POST /mcp) untuk
  * daftar/panggil tool; gateway ini menambah jalur CHAT natural-language.
@@ -28,7 +28,7 @@ class CompanionGateway {
         return this.registry?.authenticate(token) ?? null;
     }
 
-    /** Jalur chat: teks → aiRuntime (channel "device"). */
+    /** Jalur chat: teks → cognition-only aiRuntime (channel "device"). */
     async chat(device, text) {
 
         const aiRuntime = this.aiRuntime ?? require("../services/aiRuntimeService");
@@ -45,7 +45,7 @@ class CompanionGateway {
             async () => {
                 const res = await aiRuntime.chat({
                     messages: history.map(({ role, content }) => ({ role, content })),
-                    tools: undefined, // → ToolSelector otomatis
+                    tools: undefined, // external boundary strips tool execution
                     channel: "device"
                 });
                 return res.content?.trim() || "(tidak ada jawaban)";
@@ -62,7 +62,7 @@ class CompanionGateway {
     /**
      * Jalur chat STREAMING (SSE): delta dikirim ke onDelta seiring token
      * datang; giliran tetap dipersist utuh di akhir. Jalur AI-nya SAMA
-     * (aiRuntime.stream → withMind → ToolSelector), hanya transportnya
+     * (aiRuntime.stream → withMind), with external tools fenced, only transport
      * yang mengalir.
      *
      * @returns {Promise<{answer}>} jawaban lengkap setelah stream selesai
@@ -83,7 +83,7 @@ class CompanionGateway {
             async () => {
                 for await (const chunk of aiRuntime.stream({
                     messages: history.map(({ role, content }) => ({ role, content })),
-                    tools: undefined,
+                    tools: undefined, // external boundary strips tool execution
                     channel: "device"
                 })) {
                     if (chunk?.delta) {

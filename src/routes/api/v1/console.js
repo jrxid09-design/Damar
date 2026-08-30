@@ -45,7 +45,7 @@ const mcpManagerOnly = rejectLegacyActionMiddleware("MCP administration action")
 // terjangkau walau bagian lain sedang bermasalah.
 router.get("/safety", safetyController.status);
 router.post("/safety/stop", safetyController.stop);
-router.post("/safety/release", safetyController.release);
+router.post("/safety/release", managerOnly);
 router.get("/safety/trail", safetyController.trail);
 router.get("/safety/risk/:id", safetyController.riskOfTool);
 

@@ -120,6 +120,11 @@ class SafetyController {
 
     release(req, res) {
 
+        if (req?.canonicalManagerControl !== true) {
+            return response.error(res,
+                "Safety release requires canonical Manager control.", 503);
+        }
+
         const actor = req.body?.actor || "user";
 
         const result = killSwitch.release({ actor });

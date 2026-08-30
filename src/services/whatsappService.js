@@ -526,7 +526,7 @@ class WhatsAppService {
         }
     }
 
-    /** Teruskan ke otak Damar (lengkap memori & tool sesuai peran). */
+    /** Teruskan ke kognisi Damar; external chat tidak mengeksekusi tool. */
     async converse(jid, text, msg, userRole = "user") {
         const aiRuntime = require("./aiRuntimeService");
         const { manager } = require("../channels");
@@ -543,12 +543,8 @@ class WhatsAppService {
         this.sock?.sendPresenceUpdate?.("composing", jid).catch(() => {});
 
         try {
-            // SEMUA peran lewat pipeline seleksi yang sama
-            // (ai/tools/Pipeline.js) — kanal hanya menyumbang konteks.
-            // Dulu admin/user dapat daftar penuh hasil filter regex
-            // (ratusan schema tanpa anggaran); kini role menjadi pagar
-            // di dalam pipeline, bukan jalur terpisah. Lihat komentar
-            // di telegramService.converse untuk alasan lengkapnya.
+            // Kanal hanya menyumbang konteks dan identitas. Batas AI eksternal
+            // bersama menghapus tool sebelum provider/runtime digunakan.
             const response = await aiRuntime.chat({
                 messages: session.map(({ role, content }) => ({ role, content })),
                 tools: undefined,
@@ -880,6 +876,5 @@ class WhatsAppService {
 }
 
 module.exports = new WhatsAppService();
-
 
 

@@ -1,14 +1,15 @@
 const express = require("express");
 const response = require("../utils/response");
+const { clampExternalRole } = require("../core/auth/tokenCompare");
 
 const router = express.Router();
 
 /**
  * Jembatan OpenAI-compatible di atas otak Damar.
  *
- *   POST /v1/chat/completions   → aiRuntime.chat() (otak penuh:
- *                                 system prompt, memori, keadaan batin,
- *                                 tool-calling loop)
+ *   POST /v1/chat/completions   → aiRuntime.chat() (kognisi saja:
+ *                                 system prompt, memori, keadaan batin;
+ *                                 tool execution is disabled at the external boundary)
  *
  * Dipakai penghuni koloni AetherGenesis (Viel, NODEK-01, Nyx) lewat
  * aether-entities/lib/mind.js sebagai JATUH-BALIK saat otak utama
@@ -33,8 +34,8 @@ const router = express.Router();
  *   - tanpa DAMAR_TOKEN → 503 (endpoint tidak tersedia), BUKAN open;
  *   - DAMAR_UNSAFE_DEV_OPEN_API="1" satu-satunya pintu mode terbuka,
  *     dengan peringatan keras saat boot (opt-in eksplisit, default aman);
- *   - token valid → identitas eksekusi: role dari DAMAR_API_ROLE
- *     (default 'user' — API eksternal = hak minimum).
+ *   - token valid → identitas eksekusi: DAMAR_API_ROLE is clamped to the
+ *     external role enum (default 'user' — API eksternal = hak minimum).
  */
 function auth(req, res, next) {
 
@@ -67,7 +68,7 @@ function auth(req, res, next) {
 
     // Identitas eksekusi untuk seluruh handler di router ini.
     req.execIdentity = {
-        role: process.env.DAMAR_API_ROLE ?? "user",
+        role: clampExternalRole(process.env.DAMAR_API_ROLE, "user"),
         channel: "api",
         sessionId: `api:${req.ip ?? "unknown"}`
     };
@@ -111,12 +112,14 @@ router.post("/chat/completions", async (req, res, next) => {
             messages,
             temperature,
             maxTokens: max_tokens,
+            tools: [],
+            channel: "api",
             // Identitas dari gerbang auth — role API default 'user'.
-            role: req.execIdentity?.role,
+            role: clampExternalRole(req.execIdentity?.role, "user"),
             sessionId: req.execIdentity?.sessionId,
-            // Tanpa channel: ini panggilan mesin-ke-mesin; kanal (console/
-            // whatsapp/telegram) tidak berlaku, dan prompt kanal justru
-            // akan membingungkan entitas koloni.
+            // External API calls are cognition-only. Any model tool proposal
+            // is advisory and must be normalized into a Manager action by a
+            // separately authorized integration; it is never executed here.
         });
 
         const model = aiRuntime.activePlatform?.model || "damar-local";

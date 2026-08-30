@@ -6,6 +6,18 @@ const { ToolRegistry } = require("../core/tools");
 
 const telemetry = require("./telemetryService");
 
+// External conversations are cognition-only in Lane 5 V1. `tools: undefined`
+// means "select the default eligible tools" inside AIRuntime, so channel
+// callers must be fenced here rather than relying on each transport handler.
+const EXTERNAL_AI_CHANNELS = new Set([
+    "console", "cli", "telegram", "whatsapp", "device", "companion",
+    "api", "voice", "mcp"
+]);
+
+function externalAiChannel(channel) {
+    return EXTERNAL_AI_CHANNELS.has(String(channel ?? "").toLowerCase());
+}
+
 /**
  * Kurasi daftar model per platform: utamakan model GRATIS & yang
  * benar-benar bisa dipakai untuk chat, sembunyikan model non-chat
@@ -1327,6 +1339,11 @@ ${blok}` }
 
     async chat({ messages, model, temperature, maxTokens, tools, channel, role, signal, contextRefs, sessionId, ...exec0 }) {
 
+        // A model-produced tool call is advisory only at an external
+        // boundary. No external channel may reach RuntimeExecutor's tool
+        // loop; action requests must enter through Damar Manager instead.
+        const effectiveTools = externalAiChannel(channel) ? [] : tools;
+
         // Giliran baru = kesempatan bersih. Tanpa ini, jejak
         // kebuntuan dari permintaan sebelumnya ikut menghakimi
         // permintaan yang sama sekali berbeda (§140).
@@ -1337,7 +1354,7 @@ ${blok}` }
             catch { /* jangan sampai menggagalkan chat */ }
         }
 
-        const assembled = await this.assemble({ messages, channel, tools, contextRefs });
+        const assembled = await this.assemble({ messages, channel, tools: effectiveTools, contextRefs });
         const msgs = assembled.messages;
         const platform = this.activePlatform?.id ?? "lokal";
         const first = this.resolveModel(model);
@@ -1376,7 +1393,7 @@ ${blok}` }
         }
 
         try {
-            const res = await this.ensure().chat({ messages: msgs, model: first, temperature, maxTokens, tools, channel, role, signal, exec });
+            const res = await this.ensure().chat({ messages: msgs, model: first, temperature, maxTokens, tools: effectiveTools, channel, role, signal, exec });
             this._recordUsage(platform, res);
             return res;
         }
@@ -1388,14 +1405,14 @@ ${blok}` }
 
                 try {
                     // Retry sekali dengan model pengganti (tanpa interaksi pengguna).
-                    const res = await this.ensure().chat({ messages: msgs, model: next, temperature, maxTokens, tools, channel, role, signal, exec });
+                    const res = await this.ensure().chat({ messages: msgs, model: next, temperature, maxTokens, tools: effectiveTools, channel, role, signal, exec });
                     this._recordUsage(this.activePlatform?.id ?? platform, res);
                     return res;
                 }
                 catch (retryError) {
 
                     const local = await this.chatLocalFallback(
-                        { messages: msgs, temperature, maxTokens, tools, exec,
+                        { messages: msgs, temperature, maxTokens, tools: effectiveTools, exec,
                           parentCapabilitySet: capabilitySet },
                         platform,
                         retryError
@@ -1410,7 +1427,7 @@ ${blok}` }
             }
 
             const local = await this.chatLocalFallback(
-                { messages: msgs, temperature, maxTokens, tools, exec,
+                { messages: msgs, temperature, maxTokens, tools: effectiveTools, exec,
                   parentCapabilitySet: capabilitySet },
                 platform,
                 error
@@ -1542,6 +1559,8 @@ ${blok}` }
 
     async *stream({ messages, model, temperature, maxTokens, tools, channel, role, signal, contextRefs, sessionId, ...exec0 }) {
 
+        const effectiveTools = externalAiChannel(channel) ? [] : tools;
+
         // Kesetaraan dengan chat(): giliran baru = kesempatan
         // bersih untuk rem kebuntuan (§140).
         if (sessionId) {
@@ -1549,7 +1568,7 @@ ${blok}` }
             catch { /* jangan sampai menggagalkan stream */ }
         }
 
-        const assembled = await this.assemble({ messages, channel, tools, contextRefs });
+        const assembled = await this.assemble({ messages, channel, tools: effectiveTools, contextRefs });
         const msgs = assembled.messages;
         const platform = this.activePlatform?.id ?? "lokal";
         const first = this.resolveModel(model);
@@ -1589,7 +1608,7 @@ ${blok}` }
         }
 
         const pancar = async function* (modelYangDipakai) {
-            for await (const chunk of this.ensure().stream({ messages: msgs, model: modelYangDipakai, temperature, maxTokens, tools, stream: true, channel, role, signal, exec })) {
+            for await (const chunk of this.ensure().stream({ messages: msgs, model: modelYangDipakai, temperature, maxTokens, tools: effectiveTools, stream: true, channel, role, signal, exec })) {
                 if (chunk?.usage) {
                     usage = chunk.usage;
                     try { require("./usageService").record(platformAktif, {

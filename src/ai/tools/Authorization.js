@@ -1,5 +1,6 @@
 const telemetry = require("../../services/telemetryService");
 const ArgumentValidator = require("./ArgumentValidator");
+const { types: utilTypes } = require("node:util");
 
 /**
  * AUTHORIZATION — SATU titik cek otorisasi Tool Intelligence.
@@ -96,13 +97,35 @@ function toCapabilitySet(value) {
         return Object.freeze(s ? [s] : []);
     }
 
-    if (Array.isArray(value)) return normalizeCapabilitySet(value);
+    // Internal-slot classification must precede every property/iterator
+    // operation. External identity objects may be hostile Proxies.
+    if (utilTypes.isProxy(value)) {
+        throw new Error("PELANGGARAN INVARIAN: Proxy capabilitySet ditolak");
+    }
 
-    // Iterable non-array (mis. Set dari pembangun grant programatik):
-    // dipertahankan sebagai NARROWING, bukan dilucuti.
-    if (typeof value[Symbol.iterator] === "function") {
+    if (Array.isArray(value)) {
+        const safe = [];
+        for (let i = 0; i < value.length; i++) {
+            const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
+            if (!descriptor) continue;
+            if (!Object.prototype.hasOwnProperty.call(descriptor, "value")) {
+                throw new Error("PELANGGARAN INVARIAN: capabilitySet accessor ditolak");
+            }
+            if (typeof descriptor.value === "string" && descriptor.value.trim()) {
+                safe.push(descriptor.value);
+            }
+        }
+        return normalizeCapabilitySet(safe);
+    }
+
+    // Only the built-in Set internal slot is accepted. Never read an
+    // attacker-controlled Symbol.iterator or constructor property.
+    if (utilTypes.isSet(value)) {
         try {
-            return normalizeCapabilitySet([...value]);
+            const values = [];
+            const iterator = Set.prototype.values.call(value);
+            for (const item of iterator) values.push(item);
+            return normalizeCapabilitySet(values);
         }
         catch {
             /* jatuh ke fail-closed di bawah */
@@ -110,8 +133,7 @@ function toCapabilitySet(value) {
     }
 
     throw new Error(
-        "PELANGGARAN INVARIAN: bentuk capabilitySet tidak dikenal " +
-        `(${value?.constructor?.name ?? typeof value}) — restriction ` +
+        "PELANGGARAN INVARIAN: bentuk capabilitySet tidak dikenal — restriction " +
         "tidak boleh ditafsirkan sebagai tanpa-batas (fail-closed)."
     );
 }
@@ -524,4 +546,3 @@ module.exports = {
     capSetWithin,
     classify, disclosureFilter, assertExecution, proveBridgedGuarded
 };
-

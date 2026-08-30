@@ -5,7 +5,7 @@
  * Damar lewat jalur yang sudah ada (REST + MCP + chat). Lihat:
  *   - deviceRegistry.js   daftar device + kredensial per device
  *   - pairing.js          kode 6 digit + TTL (approval pemilik)
- *   - companionGateway.js jembatan chat → aiRuntime (channel "device")
+ *   - companionGateway.js jembatan chat kognitif → aiRuntime (channel "device")
  */
 const { DeviceRegistry } = require("./deviceRegistry");
 const { Pairing } = require("./pairing");

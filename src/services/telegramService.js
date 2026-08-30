@@ -406,23 +406,12 @@ class TelegramService {
 
             // Peran ditentukan oleh MODE PENUH (TOTP), bukan otomatis
             // superadmin. Tanpa /masuk, pemilik yang sudah di-allowlist
-            // pun hanya dapat mode "user" — chat biasa tanpa tool
-            // berbahaya — sama seperti anggota grup. Hanya setelah kode
-            // TOTP benar ia naik ke superadmin (tool lengkap, tool
-            // destruktif tetap lewat toolGuard).
+            // pun hanya dapat mode "user". External channel chat is
+            // cognition-only; any action must enter the Damar Manager.
             const role = this.inFullMode(chatId) ? "superadmin" : "user";
 
-            // SEMUA peran kini lewat pipeline seleksi yang SAMA
-            // (ai/tools/Pipeline.js): retrieval → filter peran → ranking
-            // → anggaran konteks → schema minimum. Kanal hanya menyumbang
-            // identitas (channel + role), TIDAK membuat mesin seleksi
-            // sendiri.
-            //
-            // Dulu admin/user dikirimi daftar PENUH hasil filter regex —
-            // ratusan schema tanpa anggaran; superadmin dulu mengirim
-            // 160 tool mentah hingga context Qwen 8192 jebol. Keduanya
-            // tak terulang: role masuk pipeline sebagai pagar kelayakan,
-            // bukan daftar alternatif.
+            // The channel supplies context and identity only. The shared
+            // external AI boundary strips tools before provider/runtime use.
             const response = await aiRuntime.chat({
                 messages: session.map(({ role: r, content }) => ({ role: r, content })),
                 tools: undefined,
