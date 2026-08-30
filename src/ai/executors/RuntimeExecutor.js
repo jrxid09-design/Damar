@@ -7,6 +7,8 @@ const toolStats = require("../tools/ToolStats");
 const { canonicalRequestExec } = require("../runtime/requestIdentity");
 const { createInternalGrantDomain } = require("../tools/internalGrant");
 const executorGrantDomains = new WeakMap();
+const executorRegistries = new WeakMap();
+const executorToolExecutors = new WeakMap();
 
 /**
  * Menjalankan satu request AI sampai selesai, termasuk
@@ -19,10 +21,6 @@ class RuntimeExecutor {
     constructor(service, options = {}) {
 
         this.service = service;
-
-        this.toolRegistry = null;
-
-        this.toolExecutor = null;
 
         this.maxToolIterations =
             options.maxToolIterations ?? Number.MAX_SAFE_INTEGER;
@@ -56,7 +54,7 @@ class RuntimeExecutor {
 
     setToolRegistry(registry) {
 
-        if (this.toolRegistry) {
+        if (executorRegistries.has(this)) {
             throw new Error("RuntimeExecutor tool registry is already bound");
         }
 
@@ -71,10 +69,8 @@ class RuntimeExecutor {
             }
         }
 
-        this.toolRegistry = registry;
-
-        this.toolExecutor =
-            new ToolExecutor(registry);
+        executorRegistries.set(this, registry);
+        executorToolExecutors.set(this, new ToolExecutor(registry));
 
         return this;
 
@@ -242,7 +238,8 @@ class RuntimeExecutor {
                 repeatCount = 0;
             }
 
-            if (!this.toolExecutor) {
+            const toolExecutor = executorToolExecutors.get(this);
+            if (!toolExecutor) {
 
                 throw new Error(
                     "Model requested a tool call but no tool registry is configured."
@@ -402,7 +399,7 @@ class RuntimeExecutor {
 
             // 1. Tool harus ada (lookup di registry penuh, bukan
             // hanya di daftar schema yang terlihat model).
-            const tool = this.toolExecutor?.registry?.get?.(call.name);
+            const tool = executorRegistries.get(this)?.get?.(call.name);
 
             if (!tool) {
                 return this.failOne(step, call, controller,
@@ -450,7 +447,7 @@ class RuntimeExecutor {
         try {
 
             result = await this.withToolTimeout(
-                this.toolExecutor.execute(call, exec),
+                executorToolExecutors.get(this).execute(call, exec),
                 call.name
             );
 
@@ -600,7 +597,7 @@ class RuntimeExecutor {
 
                 // Universe kandidat mentah → gerbang disklosur yang sama.
                 const rawCandidates = dir
-                    .map(entry => this.toolRegistry?.get?.(entry.name))
+                    .map(entry => executorRegistries.get(this)?.get?.(entry.name))
                     .filter(Boolean);
 
                 const eligible = Authorization.disclosureFilter(
@@ -1006,7 +1003,7 @@ class RuntimeExecutor {
                 repeatCount = 0;
             }
 
-            if (!this.toolExecutor) {
+            if (!executorToolExecutors.get(this)) {
                 throw new Error(
                     "Model requested a tool call but no tool registry is configured."
                 );
