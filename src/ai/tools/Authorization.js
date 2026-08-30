@@ -302,7 +302,6 @@ function resolveDelegator(initiatorExec = null, internalOrigin = false, provenan
  * `source` adalah label telemetri semata — TIDAK pernah bukti trust.
  */
 const INTERNAL_GRANT_TOKEN = Symbol("damar.internalGrant");
-const internalGrantDomain = require("./internalGrant").createInternalGrantDomain();
 
 /** Apakah sebuah delegasi berupa grant otonom kanonik. */
 function isCanonicalInternalGrant(exec) {
