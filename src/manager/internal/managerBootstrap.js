@@ -1,15 +1,6 @@
 "use strict";
 
-const CANONICAL_MEDIA_CONTEXTS = new WeakSet();
-
-function createCanonicalMediaContext(attachments) {
-    if (!Array.isArray(attachments) || !Object.isFrozen(attachments) || attachments.length > 8) {
-        throw new TypeError("MEDIA_CONTEXT_INVALID");
-    }
-    const context = Object.freeze({ attachments });
-    CANONICAL_MEDIA_CONTEXTS.add(context);
-    return context;
-}
+const { isCanonicalMediaContext } = require("./mediaContext");
 
 /**
  * DAMAR MANAGER — TRUSTED INTERNAL COMPOSITION (Lane 5, TARGETED lessons from
@@ -536,7 +527,7 @@ function createDamarManagerComposition({
         }
         const principal = authenticatedPrincipal;
 
-        if (mediaContext !== undefined && (!mediaContext || typeof mediaContext !== "object" || require("node:util").types.isProxy(mediaContext) || !CANONICAL_MEDIA_CONTEXTS.has(mediaContext))) {
+        if (mediaContext !== undefined && !isCanonicalMediaContext(mediaContext)) {
             throw new TypeError("MEDIA_CONTEXT_INVALID");
         }
         if (mediaContext && capturedMediaProcessor) {
@@ -859,4 +850,4 @@ function createDamarManagerComposition({
     });
 }
 
-module.exports = { createDamarManagerComposition, createCanonicalMediaContext };
+module.exports = { createDamarManagerComposition };

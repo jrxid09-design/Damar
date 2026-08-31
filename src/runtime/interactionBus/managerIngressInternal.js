@@ -18,7 +18,7 @@
 const { createTransportAdapter, slugSessionId, fallbackSessionId } = require("../host/transportAdapter");
 const { createInteractionBus } = require("./interactionBus");
 const { CHANNEL_ADAPTERS } = require("../../manager/channels");
-const { createCanonicalMediaContext } = require("../../manager/internal/managerBootstrap");
+const { createCanonicalMediaContext } = require("../../manager/internal/mediaContext");
 
 const CHANNELS = Object.freeze({
   console: Object.freeze({ origin: "CONSOLE", transportId: "channel.console" }),
@@ -135,6 +135,17 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null }
       const claimedIdentity = envelope.provenance.claimedIdentity;
       const peer = claimedIdentity && typeof claimedIdentity.id === "string"
         ? claimedIdentity.id.slice(0, 128) : "";
+      // InteractionBus preserves absent optional payload fields as explicit
+      // `undefined` slots.  Manager deliberately rejects undefined during
+      // hostile-input detachment, so project the canonical payload into a
+      // closed, omission-preserving Manager input.
+      const managerPayload = Object.freeze({
+        text: envelope.payload.text,
+        ...(envelope.payload.language === undefined ? {} : { language: envelope.payload.language }),
+        ...(envelope.payload.attachments === undefined ? {} : { attachments: envelope.payload.attachments }),
+        ...(envelope.payload.replyToInteractionId === undefined ? {} : { replyToInteractionId: envelope.payload.replyToInteractionId }),
+        ...(envelope.payload.referenceIds === undefined ? {} : { referenceIds: envelope.payload.referenceIds })
+      });
       const managerInput = {
         interactionId: envelope.interactionId,
         channelType,
@@ -142,8 +153,11 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null }
         peer,
         sessionId: envelope.sessionId,
         correlationId: envelope.correlationId || `cor_${envelope.interactionId.slice(3)}`,
-        payload: envelope.payload,
-        metadata: envelope.metadata
+        payload: managerPayload,
+        // Manager's hostile-input detacher correctly rejects explicit
+        // undefined values.  The canonical envelope may omit metadata, so
+        // preserve absence rather than manufacturing an undefined field.
+        ...(envelope.metadata === undefined ? {} : { metadata: envelope.metadata })
       };
       const adapter = channelAdapter(channelType);
       context.stream.emit("START", { interactionId: envelope.interactionId });
