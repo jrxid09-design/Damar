@@ -115,6 +115,8 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null }
   }
 
   const adapters = new Map();
+  const mediaPorts = mediaSubsystem && typeof mediaSubsystem.__capabilityFactory === "function"
+    ? mediaSubsystem.__capabilityFactory(bus) : null;
   for (const [channel, descriptor] of Object.entries(CHANNELS)) {
     const adapterDefinition = channelAdapter(channel);
     adapters.set(channel, createTransportAdapter({
@@ -153,20 +155,22 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null }
       };
       const adapter = channelAdapter(channelType);
       context.stream.emit("START", { interactionId: envelope.interactionId });
-      const access = envelope.payload.attachments && context.issueMediaAccess
-        ? Object.freeze(envelope.payload.attachments.map((a) => context.issueMediaAccess(a.attachmentId, "manager-processing")))
+      const access = envelope.payload.attachments && (mediaPorts || context.issueMediaAccess)
+        ? Object.freeze(envelope.payload.attachments.map((a) => context.issueMediaAccess
+          ? context.issueMediaAccess(a.attachmentId, "manager-processing")
+          : mediaPorts.issueScopedAccess(envelope, a.attachmentId, "manager-processing")))
         : Object.freeze([]);
-      const mediaContext = createMediaContext(envelope.payload.attachments && context.readMediaAccess
+      const mediaContext = createMediaContext(envelope.payload.attachments && mediaPorts
           ? envelope.payload.attachments.map((a, i) => Object.freeze({
               attachmentId: a.attachmentId,
-              read: () => context.readMediaAccess(access[i], "manager-processing")
+              read: () => mediaPorts.readScopedAccess(access[i], "manager-processing")
             })) : []);
       try {
         const result = await manager.handle(managerInput, Object.freeze({ mediaContext }));
         context.stream.emit("FINAL", adapter.renderOutbound(result));
         context.stream.emit("COMPLETE", { interactionId: envelope.interactionId });
       } finally {
-        if (mediaSubsystem && !mediaSubsystem.testOnly) for (const handle of access) mediaSubsystem.releaseAccess(handle);
+        if (mediaPorts) for (const handle of access) mediaPorts.releaseScopedAccess(handle);
       }
     }
   });
