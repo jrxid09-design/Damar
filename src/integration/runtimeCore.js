@@ -27,6 +27,7 @@ const governorMod = require("../runtime/resourceGovernor");
 const recovery = require("../runtime/recovery");
 const ib = require("../runtime/interactionBus");
 const presence = require("../runtime/presence");
+const path = require("node:path");
 
 const VERSION = "2.0.0-wave2";
 
@@ -69,6 +70,8 @@ async function createRuntimeCore({
     busClock = null,
     busIdFactory = null,
     busBounds = undefined,
+    mediaStorageRoot = path.join(os.homedir(), ".damar", "media-v1"),
+    mediaLimits = undefined,
     // ---- Recovery ----
     recoverySystem = null,
     generationLedger = null,
@@ -129,10 +132,16 @@ async function createRuntimeCore({
     });
 
     // ---- InteractionBus: pemilik KANONIK interaction lifecycle --------
+    const mediaSubsystem = ib.createMediaSubsystem({
+        storageRoot: mediaStorageRoot,
+        limits: mediaLimits
+    });
+    await mediaSubsystem.ready;
     const busInstance = bus ?? ib.createInteractionBus({
         clock: busClock ?? (() => Date.now()),
         idFactory: busIdFactory ?? ib.createCryptoIdFactory(),
-        bounds: busBounds
+        bounds: busBounds,
+        mediaIngress: mediaSubsystem
     });
 
     // ---- Recovery Capsule: pemilik KANONIK restart continuity ---------
@@ -187,6 +196,11 @@ async function createRuntimeCore({
         presence: rt,
         presenceProducers: Object.freeze(producers),
         bus: busInstance,
+        media: Object.freeze({
+            ingest: mediaSubsystem.ingest,
+            ingestMany: mediaSubsystem.ingestMany,
+            resolver: mediaSubsystem.resolver
+        }),
         recovery: Object.freeze({
             system, ledger, tracker,
             checkpoint: recovery.checkpoint,

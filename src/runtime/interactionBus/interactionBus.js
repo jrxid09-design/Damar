@@ -26,6 +26,7 @@ function createInteractionBus(options) {
   const bounds = resolveBounds(opts.bounds);
   const ambiguityPolicy = opts.handlerAmbiguityPolicy;
   const mediaVerifier = opts.mediaIngress && opts.mediaIngress.isCanonicalMediaReference;
+  const mediaBinder = opts.mediaIngress && opts.mediaIngress.bindInteraction;
 
   const transports = createTransportRegistry();
   const handlers = createHandlerRegistry(ambiguityPolicy);
@@ -197,6 +198,7 @@ function createInteractionBus(options) {
 
     const digest = interactionDigest(envelope);
     canonicalEnvelopeSet.add(envelope);
+    if (typeof mediaBinder === "function") mediaBinder(envelope);
 
     let session;
     try {

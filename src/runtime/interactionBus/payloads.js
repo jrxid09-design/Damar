@@ -184,11 +184,14 @@ function validateAttachment(value, bounds, isCanonicalMediaReference) {
     fail("FOREIGN_MEDIA_REFERENCE", { scope: "attachment" });
   }
   rejectForbiddenFields(value, [
-    "attachmentId", "kind", "declaredMimeType", "detectedMimeType", "fileName",
+    "attachmentId", "mediaId", "kind", "declaredMimeType", "detectedMimeType", "fileName",
     "sizeBytes", "sha256", "sourceChannel", "storageRef", "metadata",
     "ingestedAt", "detectionConfidence"
   ], "attachment");
   assertCanonicalId("attachmentId", value.attachmentId);
+  if (typeof value.mediaId !== "string" || !/^med_[a-f0-9]{32}$/.test(value.mediaId)) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "mediaId" });
+  }
   if (!["image", "document", "audio", "video", "archive", "binary"].includes(value.kind)) {
     fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "kind" });
   }
@@ -204,7 +207,7 @@ function validateAttachment(value, bounds, isCanonicalMediaReference) {
   if (typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256)) {
     fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "sha256" });
   }
-  if (typeof value.storageRef !== "string" || value.storageRef !== `media:sha256:${value.sha256}`) {
+  if (typeof value.storageRef !== "string" || value.storageRef !== `media:${value.mediaId}`) {
     fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "storageRef" });
   }
   const name = value.fileName;
@@ -212,7 +215,7 @@ function validateAttachment(value, bounds, isCanonicalMediaReference) {
     fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "fileName" });
   }
   return Object.freeze({
-    attachmentId: value.attachmentId, kind: value.kind,
+    attachmentId: value.attachmentId, mediaId: value.mediaId, kind: value.kind,
     declaredMimeType: value.declaredMimeType, detectedMimeType: value.detectedMimeType,
     fileName: name, sizeBytes: value.sizeBytes, sha256: value.sha256,
     sourceChannel: value.sourceChannel, storageRef: value.storageRef,

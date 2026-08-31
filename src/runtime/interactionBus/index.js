@@ -13,6 +13,8 @@ const transportsMod = require("./transports");
 const futureTransports = require("./futureTransports");
 const managerIngress = require("./managerIngress");
 const mediaIngress = require("../mediaIngress");
+const os = require("node:os");
+const path = require("node:path");
 
 function createSystemClock() {
   return function systemClock() {
@@ -21,12 +23,12 @@ function createSystemClock() {
 }
 
 function createProductionBus(options) {
+  if (options !== undefined) throw new TypeError("production bus accepts no caller bindings");
+  const subsystem = mediaIngress.createMediaSubsystem({ storageRoot: path.join(os.homedir(), ".damar", "media-v1") });
   return createInteractionBus({
     clock: createSystemClock(),
     idFactory: ids.createCryptoIdFactory(),
-    bounds: options && options.bounds,
-    handlerAmbiguityPolicy: options && options.handlerAmbiguityPolicy,
-    mediaIngress: options && options.mediaIngress
+    mediaIngress: subsystem
   });
 }
 

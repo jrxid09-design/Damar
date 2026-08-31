@@ -1,205 +1,43 @@
 "use strict";
+const crypto=require("node:crypto"),fsp=require("node:fs/promises"),path=require("node:path"),{types}=require("node:util");
+const {sniffMime,mediaKind}=require("./mime"),{CODES,MediaIngressError}=require("./errors");
+const CATALOG_VERSION=1, DEFAULT_LIMITS=Object.freeze({maxAttachmentBytes:25*1024*1024,maxAttachmentsPerInteraction:8,maxAggregateBytes:50*1024*1024,maxFilenameLength:180,maxMetadataBytes:2048,maxMetadataKeys:24,maxSniffBytes:8192,maxChunkBytes:1024*1024,idleTimeoutMs:15000,overallTimeoutMs:120000,maxCatalogRecords:10000,maxStartupScavenge:256,stagingMaxAgeMs:86400000});
+const MIME=/^[\w!#$&^_.+-]{1,127}\/[\w!#$&^_.+-]{1,127}$/,MID=/^med_[a-f0-9]{32}$/,HASH=/^[a-f0-9]{64}$/,STAGE=/^stage_[a-f0-9]{32}\.partial$/,CHANNELS=new Set(["console","cli","telegram","whatsapp","companion","camera","audio","http","api"]),RESERVED=/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+function fail(c,m){throw new MediaIngressError(c,m)} function proxy(v){try{return types.isProxy(v)}catch{return true}}
+function plain(v){if(v===null||typeof v!=="object"||Array.isArray(v)||proxy(v))return false;let p,n,s;try{p=Object.getPrototypeOf(v);n=Object.getOwnPropertyNames(v);s=Object.getOwnPropertySymbols(v)}catch{return false}return(p===Object.prototype||p===null)&&!s.length&&n.every(k=>{const d=Object.getOwnPropertyDescriptor(v,k);return d&&"value" in d})}
+function own(v,k){const d=Object.getOwnPropertyDescriptor(v,k);return d&&"value" in d?d.value:undefined}
+function limitsFor(v){if(v!==undefined&&!plain(v))fail(CODES.INVALID_INPUT,"limits rejected");const r={...DEFAULT_LIMITS};for(const k of Object.keys(DEFAULT_LIMITS)){const x=v&&own(v,k);if(x!==undefined)r[k]=x;if(!Number.isSafeInteger(r[k])||r[k]<=0)fail(CODES.INVALID_INPUT,"invalid bound")}return Object.freeze(r)}
+function filename(v,m){if(typeof v!=="string"||!v.length||v.length>m||/[\\/:\0-\x1f\x7f]/.test(v)||v==="."||v===".."||v.endsWith(".")||v.endsWith(" ")||RESERVED.test(v)||path.isAbsolute(v)||/^[A-Za-z]:/.test(v))fail(CODES.INVALID_FILENAME,"filename rejected");return v.normalize("NFC")}
+function metadata(v,l){if(v===undefined)return Object.freeze({});if(!plain(v))fail(CODES.INVALID_METADATA,"metadata rejected");const n=Object.getOwnPropertyNames(v);if(n.length>l.maxMetadataKeys)fail(CODES.INVALID_METADATA,"metadata bounded");const o=Object.create(null);for(const k of n){const x=own(v,k);if(!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(k)||!(x===null||typeof x==="string"||typeof x==="boolean"||typeof x==="number"&&Number.isFinite(x)))fail(CODES.INVALID_METADATA,"metadata rejected");o[k]=x}if(Buffer.byteLength(JSON.stringify(o))>l.maxMetadataBytes)fail(CODES.INVALID_METADATA,"metadata bounded");return Object.freeze(o)}
+function confidence(m){return m==="application/octet-stream"?"unknown":m==="text/plain"||m==="application/json"?"text-heuristic":"weak-signature"}
+function descriptor(r){return Object.freeze({attachmentId:r.attachmentId,mediaId:r.mediaId,kind:r.kind,declaredMimeType:r.declaredMimeType,detectedMimeType:r.detectedMimeType,fileName:r.fileName,sizeBytes:r.sizeBytes,sha256:r.sha256,sourceChannel:r.sourceChannel,storageRef:`media:${r.mediaId}`,metadata:Object.freeze(Object.assign(Object.create(null),r.metadata)),ingestedAt:r.ingestedAt,detectionConfidence:r.detectionConfidence})}
+function validRecord(r){return plain(r)&&r.schemaVersion===1&&MID.test(r.mediaId)&&/^att_[a-f0-9]{32}$/.test(r.attachmentId)&&HASH.test(r.sha256)&&r.objectName===`${r.sha256}.blob`&&Number.isSafeInteger(r.sizeBytes)&&r.sizeBytes>=0&&MIME.test(r.detectedMimeType)&&["image","document","audio","video","archive","binary"].includes(r.kind)&&Number.isSafeInteger(r.ingestedAt)}
 
-const crypto = require("node:crypto");
-const fs = require("node:fs");
-const fsp = require("node:fs/promises");
-const path = require("node:path");
-const { types: utilTypes } = require("node:util");
-const { sniffMime, mediaKind } = require("./mime");
-const { CODES, MediaIngressError } = require("./errors");
-
-const DEFAULT_LIMITS = Object.freeze({
-  maxAttachmentBytes: 25 * 1024 * 1024,
-  maxAttachmentsPerInteraction: 8,
-  maxAggregateBytes: 50 * 1024 * 1024,
-  maxFilenameLength: 180,
-  maxMetadataBytes: 2048,
-  maxMetadataKeys: 24,
-  maxSniffBytes: 8192
-});
-const LIMIT_KEYS = Object.freeze(Object.keys(DEFAULT_LIMITS));
-const MIME_RE = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$/;
-const CHANNELS = new Set(["console", "cli", "telegram", "whatsapp", "companion", "camera", "audio", "http", "api"]);
-const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
-
-function fail(code, message, details) { throw new MediaIngressError(code, message, details); }
-function safeObject(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value) || utilTypes.isProxy(value)) return false;
-  if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) return false;
-  if (Object.getOwnPropertySymbols(value).length) return false;
-  return Object.getOwnPropertyNames(value).every((key) => {
-    const d = Object.getOwnPropertyDescriptor(value, key);
-    return d && Object.prototype.hasOwnProperty.call(d, "value");
-  });
+function createMediaSubsystem(options){
+ if(!plain(options))fail(CODES.INVALID_INPUT,"options rejected");const rv=own(options,"storageRoot");if(typeof rv!=="string"||!path.isAbsolute(rv))fail(CODES.INVALID_INPUT,"absolute storage root required");
+ const root=path.resolve(rv),limits=limitsFor(own(options,"limits")),clock=typeof own(options,"clock")==="function"?own(options,"clock"):Date.now,dirs=Object.freeze({objects:path.join(root,"objects"),staging:path.join(root,"staging"),catalog:path.join(root,"catalog")});
+ const admission=new WeakSet,streams=new WeakSet,bindings=new WeakMap,interactionBindings=new Map,catalog=new Map,diagnostics=[];let pinned;
+ async function checkDir(d,real){const s=await fsp.lstat(d);if(!s.isDirectory()||s.isSymbolicLink())fail(CODES.STORAGE_ESCAPE,"reparse storage rejected");if(path.resolve(await fsp.realpath(d))!==path.resolve(real))fail(CODES.STORAGE_ESCAPE,"storage escaped")}
+ async function parents(){if(!pinned)fail(CODES.STORAGE_FAILURE,"not initialized");await checkDir(root,pinned.root);for(const k of Object.keys(dirs))await checkDir(dirs[k],pinned[k])}
+ async function syncDir(d){let h;try{h=await fsp.open(d,"r");await h.sync()}catch{}finally{if(h)await h.close().catch(()=>{})}}
+ async function hashFile(file,size){const s=await fsp.lstat(file);if(!s.isFile()||s.isSymbolicLink()||s.size!==size)fail(CODES.INTEGRITY_FAILURE,"stored size/type mismatch");const h=crypto.createHash("sha256"),f=await fsp.open(file,"r");try{const b=Buffer.allocUnsafe(Math.min(65536,Math.max(1,size)));let pos=0;while(pos<size){const x=await f.read(b,0,Math.min(b.length,size-pos),pos);if(!x.bytesRead)fail(CODES.INTEGRITY_FAILURE,"short read");h.update(b.subarray(0,x.bytesRead));pos+=x.bytesRead}}finally{await f.close()}return h.digest("hex")}
+ async function verify(r){await parents();const file=path.join(dirs.objects,r.objectName);if(path.resolve(await fsp.realpath(path.dirname(file)))!==pinned.objects)fail(CODES.STORAGE_ESCAPE,"object parent changed");if(await hashFile(file,r.sizeBytes)!==r.sha256)fail(CODES.INTEGRITY_FAILURE,"stored hash mismatch");return file}
+ async function init(){await fsp.mkdir(root,{recursive:true});for(const d of Object.values(dirs))await fsp.mkdir(d,{recursive:true});const rs=await fsp.lstat(root);if(!rs.isDirectory()||rs.isSymbolicLink())fail(CODES.STORAGE_ESCAPE,"root rejected");pinned=Object.freeze({root:await fsp.realpath(root),objects:await fsp.realpath(dirs.objects),staging:await fsp.realpath(dirs.staging),catalog:await fsp.realpath(dirs.catalog)});if(path.resolve(pinned.root)!==root||path.dirname(pinned.objects)!==pinned.root||path.dirname(pinned.staging)!==pinned.root||path.dirname(pinned.catalog)!==pinned.root)fail(CODES.STORAGE_ESCAPE,"layout escaped");await parents();const cutoff=clock()-limits.stagingMaxAgeMs,names=(await fsp.readdir(dirs.staging)).slice(0,limits.maxStartupScavenge);for(const n of names)if(STAGE.test(n)){const f=path.join(dirs.staging,n),s=await fsp.lstat(f).catch(()=>null);if(s&&s.isFile()&&!s.isSymbolicLink()&&s.mtimeMs<cutoff)await fsp.unlink(f).catch(()=>{})}const manifests=(await fsp.readdir(dirs.catalog)).filter(n=>/^med_[a-f0-9]{32}\.json$/.test(n));if(manifests.length>limits.maxCatalogRecords)fail(CODES.STORAGE_FAILURE,"catalog bounded");for(const n of manifests){const t=await fsp.readFile(path.join(dirs.catalog,n),"utf8");if(Buffer.byteLength(t)>limits.maxMetadataBytes+4096)fail(CODES.INVALID_DESCRIPTOR,"manifest bounded");let r;try{r=JSON.parse(t)}catch{fail(CODES.INVALID_DESCRIPTOR,"manifest JSON rejected")}if(!validRecord(r)||`${r.mediaId}.json`!==n)fail(CODES.INVALID_DESCRIPTOR,"manifest schema rejected");r=Object.freeze({...r,metadata:Object.freeze(Object.assign(Object.create(null),plain(r.metadata)?r.metadata:{}))});catalog.set(r.mediaId,r)}}
+ const ready=init();
+ function createTrustedByteSource(iterable,cancel){if(iterable===null||typeof iterable!=="object"||proxy(iterable))fail(CODES.UNSUPPORTED_SOURCE,"adapter source rejected");const m=iterable[Symbol.asyncIterator];if(typeof m!=="function")fail(CODES.UNSUPPORTED_SOURCE,"async source required");const s=Object.freeze({iterable,cancel:typeof cancel==="function"?cancel:null});streams.add(s);return s}
+ function plan(source){if(source&&typeof source==="object"&&proxy(source))fail(CODES.UNSUPPORTED_SOURCE,"proxy source rejected");if(Buffer.isBuffer(source))return{one:source};if(source instanceof Uint8Array)return{one:source};if(source&&typeof source==="object"&&streams.has(source))return{stream:source};fail(CODES.UNSUPPORTED_SOURCE,"external source must be bytes")}
+ async function timedNext(it,deadline,signal){if(signal&&signal.aborted)fail(CODES.CANCELLED,"cancelled");const ms=Math.min(limits.idleTimeoutMs,deadline-Date.now());if(ms<=0)fail(CODES.TIMEOUT,"timed out");let timer,fn;const timeout=new Promise((_,rej)=>timer=setTimeout(()=>rej(new MediaIngressError(CODES.TIMEOUT,"timed out")),ms)),abort=signal?new Promise((_,rej)=>{fn=()=>rej(new MediaIngressError(CODES.CANCELLED,"cancelled"));signal.addEventListener("abort",fn,{once:true})}):new Promise(()=>{});try{return await Promise.race([it.next(),timeout,abort])}finally{clearTimeout(timer);if(signal&&fn)signal.removeEventListener("abort",fn)}}
+ async function stage(spec){await ready;await parents();if(!plain(spec))fail(CODES.INVALID_INPUT,"spec rejected");const fileName=filename(own(spec,"fileName"),limits.maxFilenameLength),ch=own(spec,"sourceChannel"),decl=own(spec,"declaredMimeType"),meta=metadata(own(spec,"metadata"),limits),expected=own(spec,"expectedSizeBytes"),signal=own(spec,"signal");if(typeof ch!=="string"||!CHANNELS.has(ch.toLowerCase()))fail(CODES.INVALID_INPUT,"channel rejected");if(decl!==undefined&&decl!==null&&(typeof decl!=="string"||!MIME.test(decl)))fail(CODES.INVALID_INPUT,"MIME rejected");if(expected!==undefined&&(!Number.isSafeInteger(expected)||expected<0||expected>limits.maxAttachmentBytes))fail(CODES.OVERSIZE,"declared bound");if(signal!==undefined&&(signal===null||typeof signal!=="object"||proxy(signal)||typeof AbortSignal!=="function"||!(signal instanceof AbortSignal)))fail(CODES.INVALID_INPUT,"signal rejected");const p=plan(own(spec,"source")),token=crypto.randomBytes(16).toString("hex"),stagePath=path.join(dirs.staging,`stage_${token}.partial`),f=await fsp.open(stagePath,"wx",0o600),hash=crypto.createHash("sha256"),sniff=[];let size=0,sniffed=0;
+  async function consume(c){if(c===null||typeof c!=="object"||proxy(c)||!(Buffer.isBuffer(c)||c instanceof Uint8Array))fail(CODES.PARTIAL_READ,"chunk rejected");const n=c.byteLength,remaining=limits.maxAttachmentBytes-size;if(!Number.isSafeInteger(n)||n<0||n>limits.maxChunkBytes||n>remaining)fail(CODES.OVERSIZE,"chunk exceeds budget");if(sniffed<limits.maxSniffBytes){const x=c.subarray(0,Math.min(n,limits.maxSniffBytes-sniffed));sniff.push(Buffer.from(x));sniffed+=x.byteLength}hash.update(c);let o=0;while(o<n){const w=await f.write(c,o,n-o);if(!w.bytesWritten)fail(CODES.PARTIAL_READ,"partial write");o+=w.bytesWritten}size+=n}
+  try{if(p.one)await consume(p.one);else{const it=p.stream.iterable[Symbol.asyncIterator](),deadline=Date.now()+limits.overallTimeoutMs;try{for(;;){const x=await timedNext(it,deadline,signal);if(x.done)break;await consume(x.value)}}catch(e){if(typeof it.return==="function")await it.return().catch(()=>{});if(p.stream.cancel)await Promise.resolve(p.stream.cancel()).catch(()=>{});throw e}}if(expected!==undefined&&expected!==size)fail(CODES.PARTIAL_READ,"size mismatch");await f.sync();const st=await f.stat();if(!st.isFile()||st.size!==size)fail(CODES.PARTIAL_READ,"stage mismatch");await f.close();const sha256=hash.digest("hex"),detectedMimeType=sniffMime(Buffer.concat(sniff));return{stagePath,sizeBytes:size,sha256,objectName:`${sha256}.blob`,fileName,sourceChannel:ch.toLowerCase(),declaredMimeType:decl||null,detectedMimeType,kind:mediaKind(detectedMimeType),metadata:meta,detectionConfidence:confidence(detectedMimeType)}}catch(e){await f.close().catch(()=>{});await fsp.unlink(stagePath).catch(()=>{});throw e instanceof MediaIngressError?e:new MediaIngressError(CODES.PARTIAL_READ,"read interrupted")}}
+ async function manifest(r){const tmp=path.join(dirs.staging,`stage_${crypto.randomBytes(16).toString("hex")}.partial`),target=path.join(dirs.catalog,`${r.mediaId}.json`),f=await fsp.open(tmp,"wx",0o600);try{await f.writeFile(JSON.stringify(r));await f.sync();await f.close();await fsp.rename(tmp,target);await syncDir(dirs.catalog)}catch(e){await f.close().catch(()=>{});await fsp.unlink(tmp).catch(()=>{});throw e}}
+ async function commit(stages){await parents();const objects=[],manifests=[],records=[];try{for(const s of stages){const target=path.join(dirs.objects,s.objectName);try{await fsp.lstat(target);if(await hashFile(target,s.sizeBytes)!==s.sha256)fail(CODES.INTEGRITY_FAILURE,"dedup corrupt");await fsp.unlink(s.stagePath)}catch(e){if(e instanceof MediaIngressError)throw e;if(e.code!=="ENOENT")throw e;await parents();await fsp.rename(s.stagePath,target);objects.push(target);await syncDir(dirs.objects)}const r=Object.freeze({schemaVersion:1,mediaId:`med_${crypto.randomBytes(16).toString("hex")}`,attachmentId:`att_${crypto.randomBytes(16).toString("hex")}`,sha256:s.sha256,sizeBytes:s.sizeBytes,detectedMimeType:s.detectedMimeType,declaredMimeType:s.declaredMimeType,kind:s.kind,fileName:s.fileName,sourceChannel:s.sourceChannel,metadata:s.metadata,ingestedAt:clock(),detectionConfidence:s.detectionConfidence,objectName:s.objectName});await manifest(r);manifests.push(path.join(dirs.catalog,`${r.mediaId}.json`));records.push(r);catalog.set(r.mediaId,r)}return Object.freeze(records.map(r=>{const d=descriptor(r);admission.add(d);return d}))}catch(e){for(const s of stages)await fsp.unlink(s.stagePath).catch(()=>{});for(const m of manifests)await fsp.unlink(m).catch(()=>{});for(const r of records)catalog.delete(r.mediaId);const used=new Set([...catalog.values()].map(r=>r.objectName));for(const o of objects)if(!used.has(path.basename(o)))await fsp.unlink(o).catch(()=>{});throw e instanceof MediaIngressError?e:new MediaIngressError(CODES.STORAGE_FAILURE,"commit failed")}}
+ async function ingestMany(specs){if(!Array.isArray(specs)||proxy(specs)||specs.length>limits.maxAttachmentsPerInteraction)fail(CODES.AGGREGATE_EXCEEDED,"count bounded");const staged=[];let total=0;try{for(const s of specs){const x=await stage(s);staged.push(x);total+=x.sizeBytes;if(total>limits.maxAggregateBytes)fail(CODES.AGGREGATE_EXCEEDED,"aggregate bounded")}return await commit(staged)}catch(e){for(const x of staged)await fsp.unlink(x.stagePath).catch(()=>{});diagnostics.push(Object.freeze({at:clock(),result:"rejected",failureClass:e.code||CODES.STORAGE_FAILURE}));throw e}}
+ async function ingest(s){return(await ingestMany([s]))[0]} function isCanonicalMediaReference(v){return v!==null&&typeof v==="object"&&admission.has(v)}
+ function bindInteraction(env){const a=env&&env.payload&&env.payload.attachments;if(!a)return;const m=new Map;for(const x of a)m.set(x.attachmentId,x.mediaId);bindings.set(env,m);interactionBindings.set(env.interactionId,m);while(interactionBindings.size>4096)interactionBindings.delete(interactionBindings.keys().next().value)}
+ async function resolve(env,id){await ready;const m=env&&typeof env==="object"?bindings.get(env):null,mid=m&&typeof id==="string"?m.get(id):null;if(!mid)fail(CODES.FOREIGN_REFERENCE,"not interaction bound");return durable(mid)}
+ async function resolveInteraction(interactionId,id){await ready;const m=typeof interactionId==="string"?interactionBindings.get(interactionId):null,mid=m&&typeof id==="string"?m.get(id):null;if(!mid)fail(CODES.FOREIGN_REFERENCE,"not interaction bound");return durable(mid)}
+ async function durable(mid){await ready;if(typeof mid!=="string"||!MID.test(mid)||!catalog.has(mid))fail(CODES.FOREIGN_REFERENCE,"not catalog bound");const r=catalog.get(mid),file=await verify(r);return Object.freeze({descriptor:descriptor(r),bytes:await fsp.readFile(file)})}
+ return Object.freeze({ready,limits,ingest,ingestMany,createTrustedByteSource,isCanonicalMediaReference,bindInteraction,resolver:Object.freeze({resolve,resolveInteraction,resolveDurable:durable}),getDiagnostics:()=>Object.freeze(diagnostics.slice())})
 }
-function own(value, key) {
-  const d = Object.getOwnPropertyDescriptor(value, key);
-  return d && Object.prototype.hasOwnProperty.call(d, "value") ? d.value : undefined;
-}
-function resolveLimits(input) {
-  if (input !== undefined && !safeObject(input)) fail(CODES.INVALID_INPUT, "limits must be inert data");
-  const limits = { ...DEFAULT_LIMITS };
-  for (const key of LIMIT_KEYS) {
-    const value = input === undefined ? undefined : own(input, key);
-    if (value !== undefined) limits[key] = value;
-    if (!Number.isSafeInteger(limits[key]) || limits[key] <= 0) fail(CODES.INVALID_INPUT, "invalid media bound", { field: key });
-  }
-  return Object.freeze(limits);
-}
-function validateName(value, max) {
-  if (typeof value !== "string" || value.length < 1 || value.length > max || /[\\/\u0000-\u001f\u007f]/u.test(value) || value === "." || value === ".." || value.endsWith(".") || value.endsWith(" ") || RESERVED.test(value) || path.isAbsolute(value)) {
-    fail(CODES.INVALID_FILENAME, "filename metadata is unsafe");
-  }
-  return value.normalize("NFC");
-}
-function validateMetadata(value, limits) {
-  if (value === undefined) return Object.freeze({});
-  if (!safeObject(value)) fail(CODES.INVALID_METADATA, "metadata must be inert data");
-  const keys = Object.getOwnPropertyNames(value);
-  if (keys.length > limits.maxMetadataKeys) fail(CODES.INVALID_METADATA, "metadata exceeds key bound");
-  const out = Object.create(null);
-  for (const key of keys) {
-    if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key)) fail(CODES.INVALID_METADATA, "metadata key rejected");
-    const item = own(value, key);
-    if (!(item === null || typeof item === "string" || typeof item === "boolean" || (typeof item === "number" && Number.isFinite(item)))) fail(CODES.INVALID_METADATA, "metadata value rejected");
-    out[key] = item;
-  }
-  if (Buffer.byteLength(JSON.stringify(out), "utf8") > limits.maxMetadataBytes) fail(CODES.INVALID_METADATA, "metadata exceeds byte bound");
-  return Object.freeze(out);
-}
-function safeDescriptor(source, values) {
-  return Object.freeze({
-    attachmentId: values.attachmentId,
-    kind: values.kind,
-    declaredMimeType: values.declaredMimeType,
-    detectedMimeType: values.detectedMimeType,
-    fileName: values.fileName,
-    sizeBytes: values.sizeBytes,
-    sha256: values.sha256,
-    sourceChannel: source,
-    storageRef: values.storageRef,
-    metadata: values.metadata,
-    ingestedAt: values.ingestedAt,
-    detectionConfidence: values.detectedMimeType === "application/octet-stream" ? "unknown" : "signature"
-  });
-}
-
-function createMediaIngress(options) {
-  if (!safeObject(options)) fail(CODES.INVALID_INPUT, "media ingress options must be inert data");
-  const rootValue = own(options, "storageRoot");
-  if (typeof rootValue !== "string" || !path.isAbsolute(rootValue)) fail(CODES.INVALID_INPUT, "storageRoot must be an absolute Damar-controlled path");
-  const storageRoot = path.resolve(rootValue);
-  const limits = resolveLimits(own(options, "limits"));
-  const references = new WeakSet();
-  const diagnostics = [];
-  const now = typeof own(options, "clock") === "function" ? own(options, "clock") : Date.now;
-  const idFactory = typeof own(options, "idFactory") === "function" ? own(options, "idFactory") : () => crypto.randomUUID().replace(/-/g, "");
-
-  function record(result, detail) {
-    diagnostics.push(Object.freeze({ at: now(), result, ...detail }));
-    while (diagnostics.length > 100) diagnostics.shift();
-  }
-  async function init() { await fsp.mkdir(path.join(storageRoot, "objects"), { recursive: true }); await fsp.mkdir(path.join(storageRoot, "tmp"), { recursive: true }); }
-  function sourceIterable(source) {
-    if (Buffer.isBuffer(source)) return (async function* () { yield Buffer.from(source); }());
-    if (source && typeof source[Symbol.asyncIterator] === "function") return source;
-    fail(CODES.UNSUPPORTED_SOURCE, "source must be a Buffer or async iterable");
-  }
-  async function ingest(spec) {
-    const started = now();
-    if (!safeObject(spec)) fail(CODES.INVALID_INPUT, "ingress spec must be inert data");
-    const fileName = validateName(own(spec, "fileName"), limits.maxFilenameLength);
-    const sourceChannel = own(spec, "sourceChannel");
-    if (typeof sourceChannel !== "string" || !CHANNELS.has(sourceChannel.toLowerCase())) fail(CODES.INVALID_INPUT, "sourceChannel rejected");
-    const declared = own(spec, "declaredMimeType");
-    if (declared !== undefined && declared !== null && (typeof declared !== "string" || !MIME_RE.test(declared))) fail(CODES.INVALID_INPUT, "declared MIME rejected");
-    const metadata = validateMetadata(own(spec, "metadata"), limits);
-    const expectedSize = own(spec, "expectedSizeBytes");
-    if (expectedSize !== undefined && (!Number.isSafeInteger(expectedSize) || expectedSize < 0 || expectedSize > limits.maxAttachmentBytes)) fail(CODES.OVERSIZE, "declared size exceeds attachment bound");
-    await init();
-    const tempId = idFactory();
-    if (typeof tempId !== "string" || !/^[A-Za-z0-9_-]{8,128}$/.test(tempId)) fail(CODES.STORAGE_FAILURE, "internal id generation failed");
-    const tempPath = path.join(storageRoot, "tmp", `${tempId}.partial`);
-    const hash = crypto.createHash("sha256");
-    const sniff = [];
-    let sniffLength = 0;
-    let size = 0;
-    let handle;
-    let phase = "storage";
-    try {
-      handle = await fsp.open(tempPath, "wx", 0o600);
-      phase = "reading";
-      for await (const rawChunk of sourceIterable(own(spec, "source"))) {
-        if (!(Buffer.isBuffer(rawChunk) || rawChunk instanceof Uint8Array)) fail(CODES.PARTIAL_READ, "stream yielded non-byte data");
-        const chunk = Buffer.from(rawChunk);
-        size += chunk.length;
-        if (size > limits.maxAttachmentBytes) fail(CODES.OVERSIZE, "attachment exceeds byte bound");
-        if (sniffLength < limits.maxSniffBytes) {
-          const part = chunk.subarray(0, limits.maxSniffBytes - sniffLength);
-          sniff.push(Buffer.from(part)); sniffLength += part.length;
-        }
-        hash.update(chunk);
-        let offset = 0;
-        while (offset < chunk.length) {
-          const { bytesWritten } = await handle.write(chunk, offset, chunk.length - offset);
-          if (bytesWritten <= 0) fail(CODES.PARTIAL_READ, "partial storage write");
-          offset += bytesWritten;
-        }
-      }
-      phase = "storage";
-      if (expectedSize !== undefined && size !== expectedSize) fail(CODES.PARTIAL_READ, "received size differs from declared size");
-      await handle.sync();
-      const stored = await handle.stat();
-      if (!stored.isFile() || stored.size !== size) fail(CODES.PARTIAL_READ, "stored byte count mismatch");
-      await handle.close(); handle = undefined;
-      const sha256 = hash.digest("hex");
-      const detectedMimeType = sniffMime(Buffer.concat(sniff));
-      const objectDir = path.join(storageRoot, "objects", sha256.slice(0, 2));
-      const finalPath = path.join(objectDir, sha256);
-      await fsp.mkdir(objectDir, { recursive: true });
-      try { await fsp.rename(tempPath, finalPath); }
-      catch (error) {
-        if (error.code === "EEXIST") await fsp.unlink(tempPath);
-        else throw error;
-      }
-      const descriptor = safeDescriptor(sourceChannel.toLowerCase(), {
-        attachmentId: `att_${tempId}`,
-        kind: mediaKind(detectedMimeType), declaredMimeType: declared || null, detectedMimeType,
-        fileName, sizeBytes: size, sha256, storageRef: `media:sha256:${sha256}`,
-        metadata, ingestedAt: now()
-      });
-      references.add(descriptor);
-      record("accepted", { attachmentId: descriptor.attachmentId, sizeBytes: size, kind: descriptor.kind, sha256, sourceChannel: descriptor.sourceChannel, durationMs: Math.max(0, now() - started) });
-      return descriptor;
-    } catch (error) {
-      if (handle) await handle.close().catch(() => {});
-      await fsp.unlink(tempPath).catch(() => {});
-      const wrapped = error instanceof MediaIngressError ? error : new MediaIngressError(phase === "reading" ? CODES.PARTIAL_READ : CODES.STORAGE_FAILURE, phase === "reading" ? "media read interrupted" : "media storage failed");
-      record("rejected", { failureClass: wrapped.code, durationMs: Math.max(0, now() - started) });
-      throw wrapped;
-    }
-  }
-  async function ingestMany(specs) {
-    if (!Array.isArray(specs) || utilTypes.isProxy(specs) || specs.length > limits.maxAttachmentsPerInteraction) fail(CODES.AGGREGATE_EXCEEDED, "attachment count exceeds bound");
-    let aggregate = 0; const out = [];
-    for (const spec of specs) {
-      const expected = safeObject(spec) ? own(spec, "expectedSizeBytes") : undefined;
-      if (Number.isSafeInteger(expected) && aggregate + expected > limits.maxAggregateBytes) fail(CODES.AGGREGATE_EXCEEDED, "aggregate bytes exceed bound");
-      const descriptor = await ingest(spec); aggregate += descriptor.sizeBytes;
-      if (aggregate > limits.maxAggregateBytes) fail(CODES.AGGREGATE_EXCEEDED, "aggregate bytes exceed bound");
-      out.push(descriptor);
-    }
-    return Object.freeze(out);
-  }
-  function isCanonicalMediaReference(value) { return value !== null && typeof value === "object" && references.has(value); }
-  function assertCanonicalMediaReference(value) { if (!isCanonicalMediaReference(value)) fail(CODES.FOREIGN_REFERENCE, "foreign media reference rejected"); return value; }
-  function openReadStream(value) {
-    const ref = assertCanonicalMediaReference(value);
-    const finalPath = path.join(storageRoot, "objects", ref.sha256.slice(0, 2), ref.sha256);
-    return fs.createReadStream(finalPath, { flags: "r" });
-  }
-  function getDiagnostics() { return Object.freeze(diagnostics.slice()); }
-  return Object.freeze({ limits, ingest, ingestMany, isCanonicalMediaReference, assertCanonicalMediaReference, openReadStream, getDiagnostics });
-}
-
-module.exports = { createMediaIngress, DEFAULT_LIMITS, MediaIngressError, CODES };
+module.exports={createMediaSubsystem,createMediaIngress:createMediaSubsystem,DEFAULT_LIMITS,CATALOG_VERSION,MediaIngressError,CODES};

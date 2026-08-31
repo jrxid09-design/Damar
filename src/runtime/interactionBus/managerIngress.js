@@ -18,6 +18,9 @@
 const { createTransportAdapter, slugSessionId, fallbackSessionId } = require("../host/transportAdapter");
 const { createInteractionBus } = require("./interactionBus");
 const { createCryptoIdFactory } = require("./ids");
+const { createMediaSubsystem } = require("../mediaIngress");
+const os = require("node:os");
+const path = require("node:path");
 const { CHANNEL_ADAPTERS } = require("../../manager/channels");
 
 const CHANNELS = Object.freeze({
@@ -98,7 +101,7 @@ function channelAdapter(channel) {
  * and InteractionBus.  The caller receives only transport ingestion and
  * response projection; no Lane 2/3/4 dependency is exposed.
  */
-function createManagerInteractionIngress({ bus, manager } = {}) {
+function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null } = {}) {
   if (!bus || typeof bus.registerTransport !== "function" ||
       typeof bus.registerHandler !== "function" || typeof bus.submit !== "function" ||
       typeof bus.isCanonicalEnvelope !== "function") {
@@ -136,6 +139,7 @@ function createManagerInteractionIngress({ bus, manager } = {}) {
       const peer = claimedIdentity && typeof claimedIdentity.id === "string"
         ? claimedIdentity.id.slice(0, 128) : "";
       const managerInput = {
+        interactionId: envelope.interactionId,
         channelType,
         channelId: envelope.provenance.transportId,
         peer,
@@ -163,8 +167,23 @@ function createManagerInteractionIngress({ bus, manager } = {}) {
     return Object.freeze(adapter.renderOutbound(managerResult));
   }
 
+  async function ingestAttachments(channel, rawEvent, attachmentSpecs) {
+    if (!mediaSubsystem) throw new TypeError("MEDIA_SUBSYSTEM_NOT_BOUND");
+    const attachments = await mediaSubsystem.ingestMany(attachmentSpecs);
+    if (!safeRawEvent(rawEvent).ok) return Object.freeze({ accepted: false, code: "EVENT_INVALID" });
+    const normalized = {
+      text: dataField(rawEvent, "text"), userId: dataField(rawEvent, "userId"),
+      sessionId: dataField(rawEvent, "sessionId"), metadata: dataField(rawEvent, "metadata"),
+      replyToInteractionId: dataField(rawEvent, "replyToInteractionId"),
+      referenceIds: dataField(rawEvent, "referenceIds"), attachments
+    };
+    const result = adapters.get(channel).ingestExternalEvent(normalized);
+    return Object.freeze({ ...result, attachmentIds: Object.freeze(attachments.map((a) => a.attachmentId)) });
+  }
+
   return Object.freeze({
     ingest,
+    ingestAttachments,
     render,
     channels: Object.freeze(Object.keys(CHANNELS)),
     transportSnapshot: () => Object.freeze([...adapters.values()].map((a) => a.snapshot()))
@@ -172,16 +191,22 @@ function createManagerInteractionIngress({ bus, manager } = {}) {
 }
 
 function createProductionManagerInteractionIngress() {
+  if (arguments.length !== 0) throw new TypeError("production ingress accepts no caller bindings");
   // Lazy requires avoid making the inert InteractionBus vocabulary depend on
   // Manager bootstrap during ordinary module loading.
   const { createDamarManager } = require("../../manager/bootstrap");
-  return createManagerInteractionIngress({
-    bus: createInteractionBus({
+  const mediaSubsystem = createMediaSubsystem({ storageRoot: path.join(os.homedir(), ".damar", "media-v1") });
+  const bus = createInteractionBus({
       clock: () => Date.now(),
-      idFactory: createCryptoIdFactory()
-    }),
-    manager: createDamarManager()
+      idFactory: createCryptoIdFactory(),
+      mediaIngress: mediaSubsystem
+    });
+  const ingress = createManagerInteractionIngress({
+    bus,
+    manager: createDamarManager(),
+    mediaSubsystem
   });
+  return Object.freeze({ ...ingress, mediaResolver: mediaSubsystem.resolver });
 }
 
 module.exports = Object.freeze({
