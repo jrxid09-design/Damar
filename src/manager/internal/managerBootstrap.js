@@ -1,5 +1,16 @@
 "use strict";
 
+const CANONICAL_MEDIA_CONTEXTS = new WeakSet();
+
+function createCanonicalMediaContext(attachments) {
+    if (!Array.isArray(attachments) || !Object.isFrozen(attachments) || attachments.length > 8) {
+        throw new TypeError("MEDIA_CONTEXT_INVALID");
+    }
+    const context = Object.freeze({ attachments });
+    CANONICAL_MEDIA_CONTEXTS.add(context);
+    return context;
+}
+
 /**
  * DAMAR MANAGER — TRUSTED INTERNAL COMPOSITION (Lane 5, TARGETED lessons from
  * Lane 4 R5: composition == provenance domain).
@@ -231,16 +242,6 @@ function createDamarManagerComposition({
     const capturedLane4 = lane4;
     const capturedPlanner = planner;
     const capturedMediaProcessor = mediaProcessor;
-    const mediaContextBrandSet = new WeakSet();
-
-    function createCanonicalMediaContext(attachments) {
-        if (!Array.isArray(attachments) || !Object.isFrozen(attachments) || attachments.length > 8) {
-            throw new TypeError("MEDIA_CONTEXT_INVALID");
-        }
-        const context = Object.freeze({ attachments });
-        mediaContextBrandSet.add(context);
-        return context;
-    }
 
     // Channel adapters: frozen snapshots, keyed by channel type. Composition-
     // time-only wiring; after composition NO caller can register/replace.
@@ -535,7 +536,7 @@ function createDamarManagerComposition({
         }
         const principal = authenticatedPrincipal;
 
-        if (mediaContext !== undefined && (!mediaContext || typeof mediaContext !== "object" || require("node:util").types.isProxy(mediaContext) || !Object.isFrozen(mediaContext) || !Array.isArray(mediaContext.attachments) || !Object.isFrozen(mediaContext.attachments) || mediaContext.attachments.length > 8)) {
+        if (mediaContext !== undefined && (!mediaContext || typeof mediaContext !== "object" || require("node:util").types.isProxy(mediaContext) || !CANONICAL_MEDIA_CONTEXTS.has(mediaContext))) {
             throw new TypeError("MEDIA_CONTEXT_INVALID");
         }
         if (mediaContext && capturedMediaProcessor) {
@@ -858,4 +859,4 @@ function createDamarManagerComposition({
     });
 }
 
-module.exports = { createDamarManagerComposition };
+module.exports = { createDamarManagerComposition, createCanonicalMediaContext };

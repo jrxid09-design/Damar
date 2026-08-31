@@ -18,6 +18,7 @@
 const { createTransportAdapter, slugSessionId, fallbackSessionId } = require("../host/transportAdapter");
 const { createInteractionBus } = require("./interactionBus");
 const { CHANNEL_ADAPTERS } = require("../../manager/channels");
+const { createCanonicalMediaContext } = require("../../manager/internal/managerBootstrap");
 
 const CHANNELS = Object.freeze({
   console: Object.freeze({ origin: "CONSOLE", transportId: "channel.console" }),
@@ -32,13 +33,6 @@ const ORIGIN_TO_CHANNEL = Object.freeze(Object.fromEntries(
 ));
 
 const OWN = Object.prototype.hasOwnProperty;
-const MEDIA_CONTEXT_BRAND = new WeakSet();
-
-function createMediaContext(entries) {
-  const context = Object.freeze({ attachments: Object.freeze(entries) });
-  MEDIA_CONTEXT_BRAND.add(context);
-  return context;
-}
 
 function dataField(value, key) {
   if (!OWN.call(value, key)) return undefined;
@@ -156,11 +150,11 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null }
       const access = envelope.payload.attachments && context.issueMediaAccess
         ? Object.freeze(envelope.payload.attachments.map((a) => context.issueMediaAccess(a.attachmentId, "manager-processing")))
         : Object.freeze([]);
-      const mediaContext = createMediaContext(envelope.payload.attachments && context.readMediaAccess
+      const mediaContext = createCanonicalMediaContext(Object.freeze(envelope.payload.attachments && context.readMediaAccess
           ? envelope.payload.attachments.map((a, i) => Object.freeze({
               attachmentId: a.attachmentId,
               read: () => context.readMediaAccess(access[i], "manager-processing")
-            })) : []);
+            })) : []));
       try {
         const result = await manager.handle(managerInput, Object.freeze({ mediaContext }));
         context.stream.emit("FINAL", adapter.renderOutbound(result));
