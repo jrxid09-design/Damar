@@ -439,14 +439,10 @@ function createDamarManagerComposition({
     const outcomeForExecution = (state) => require("../../manager/errors").outcomeForExecutionState(state, MOUTCOME);
 
     // ---- handle(): the ONLY downstream request capability ------------------
-    async function handle(input, { signal, mediaAccess, mediaContext } = {}) {
+    async function handle(input, { signal, mediaContext } = {}) {
         // Lane 2 media is an internal, least-privilege processing input.  The
         // canonical envelope remains inert; Manager accepts only the already
         // issued per-attachment handles and never receives a resolver/store.
-        if (mediaAccess !== undefined &&
-            (!Array.isArray(mediaAccess) || !Object.isFrozen(mediaAccess) || mediaAccess.length > 8)) {
-            throw new TypeError("MEDIA_ACCESS_CONTEXT_INVALID");
-        }
         const startedAtMs = canonicalNow();
         let request;
         try {
@@ -469,7 +465,7 @@ function createDamarManagerComposition({
         inFlightByCorrelation.set(request.correlationId, entry);
         const runPromise = (async () => {
             try {
-                return await runHandleBody(request, entry, startedAtMs, signal, mediaAccess, mediaContext);
+                return await runHandleBody(request, entry, startedAtMs, signal, mediaContext);
             } finally {
                 inFlightByCorrelation.delete(request.correlationId);
             }
@@ -478,7 +474,7 @@ function createDamarManagerComposition({
         return runPromise;
     }
 
-    async function runHandleBody(request, entry, startedAtMs, signal, mediaAccess, mediaContext) {
+    async function runHandleBody(request, entry, startedAtMs, signal, mediaContext) {
         const now = () => canonicalNow();
 
         // ---- 1. CANCELLATION CHECK (pre-authentication) --------------------

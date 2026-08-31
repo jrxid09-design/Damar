@@ -26,7 +26,7 @@ const { createEmbodiedCore } = require("./embodiedCore");
 const governorMod = require("../runtime/resourceGovernor");
 const recovery = require("../runtime/recovery");
 const ib = require("../runtime/interactionBus");
-const { createMediaSubsystem } = require("../runtime/mediaIngress/subsystem");
+const { createMediaSubsystem, takePrivatePorts } = require("../runtime/mediaIngress/subsystem");
 const presence = require("../runtime/presence");
 const path = require("node:path");
 
@@ -143,11 +143,20 @@ async function createRuntimeCore({
         limits: mediaLimits
     });
     await mediaSubsystem.ready;
-    const busInstance = ib.createInteractionBus({
+    const canonicalMediaPorts = takePrivatePorts(mediaSubsystem);
+    let busInstance;
+    const busMediaPorts = Object.freeze({
+        bindAcceptedInteraction: (envelope) => canonicalMediaPorts.bindAcceptedInteraction(busInstance, envelope),
+        issueScopedAccess: canonicalMediaPorts.issueScopedAccess,
+        readScopedAccess: canonicalMediaPorts.readScopedAccess,
+        releaseScopedAccess: canonicalMediaPorts.releaseScopedAccess
+    });
+    busInstance = ib.createInteractionBus({
         clock: busClock ?? (() => Date.now()),
         idFactory: busIdFactory ?? ib.createCryptoIdFactory(),
         bounds: busBounds,
-        mediaIngress: mediaSubsystem
+        mediaIngress: mediaSubsystem,
+        mediaPorts: busMediaPorts
     });
     let channelIngress = null;
     if (!bus && enableManagerIngress) {

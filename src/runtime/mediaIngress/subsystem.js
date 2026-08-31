@@ -1,6 +1,7 @@
 "use strict";
 const crypto=require("node:crypto"),fsp=require("node:fs/promises"),fs=require("node:fs"),path=require("node:path"),{types}=require("node:util");
 const {sniffMime,mediaKind}=require("./mime"),{CODES,MediaIngressError}=require("./errors");
+const PRIVATE_PORTS=new WeakMap();
 const CATALOG_VERSION=1, DEFAULT_LIMITS=Object.freeze({maxAttachmentBytes:25*1024*1024,maxAttachmentsPerInteraction:8,maxAggregateBytes:50*1024*1024,maxFilenameLength:180,maxMetadataBytes:2048,maxMetadataKeys:24,maxSniffBytes:8192,maxChunkBytes:1024*1024,idleTimeoutMs:15000,overallTimeoutMs:120000,cleanupTimeoutMs:100,maxCatalogRecords:10000,maxRelations:10000,maxStartupScavenge:256,stagingMaxAgeMs:86400000,maxBindings:4096,accessTtlMs:300000});
 const MIME=/^[\w!#$&^_.+-]{1,127}\/[\w!#$&^_.+-]{1,127}$/,MID=/^med_[a-f0-9]{32}$/,HASH=/^[a-f0-9]{64}$/,STAGE=/^stage_[a-f0-9]{32}\.partial$/,CHANNELS=new Set(["console","cli","telegram","whatsapp","companion","camera","audio","http","api"]),PURPOSES=new Set(["manager-processing","restart-processing"]),RESERVED=/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 function fail(c,m){throw new MediaIngressError(c,m)} function proxy(v){try{return types.isProxy(v)}catch{return true}}
@@ -51,8 +52,15 @@ function createMediaSubsystem(options){
  async function readAccess(h,purpose="manager-processing"){await ready;if(h===null||typeof h!=="object"||!handles.has(h))fail(CODES.FOREIGN_REFERENCE,"foreign media access handle");const s=handleState.get(h);if(!s||s.released||clock()>h.expiresAt||s.purpose!==purpose)fail(CODES.FOREIGN_REFERENCE,"media access purpose mismatch");const r=catalog.get(s.mediaId);if(!r)fail(CODES.INVALID_DESCRIPTOR,"trusted media record unavailable");return Object.freeze({descriptor:descriptor(r),bytes:await readRecord(r)})}
  function releaseAccess(h){if(h===null||typeof h!=="object"||!handles.has(h))return false;const s=handleState.get(h);if(!s||s.released)return false;s.released=true;return true}
  async function rollbackReferences(refs){if(!safeArray(refs))fail(CODES.INVALID_INPUT,"rollback references rejected");const records=[];for(let i=0;i<refs.length;i++){const ref=Object.getOwnPropertyDescriptor(refs,String(i)).value;if(!admission.has(ref))fail(CODES.FOREIGN_REFERENCE,"rollback reference foreign");const r=catalog.get(ref.mediaId);if(r)records.push(r)}const unlock=await acquireHashes(records);try{for(const r of records){catalog.delete(r.mediaId);await fsp.unlink(path.join(dirs.catalog,`${r.mediaId}.json`)).catch(()=>{});const shared=[...catalog.values()].some(x=>x.objectName===r.objectName);if(!shared)await fsp.unlink(path.join(dirs.objects,r.objectName)).catch(()=>{})}}finally{unlock()}}
- const result={ready,limits,ingest,ingestMany,ingestChannelMany,getDiagnostics:()=>Object.freeze(diagnostics.slice())};
+ const result=Object.freeze({ready,limits,ingest,ingestMany,ingestChannelMany,getDiagnostics:()=>Object.freeze(diagnostics.slice())});
+ const ports=Object.freeze({
+  bindAcceptedInteraction:(bus,env)=>{if(!bus||typeof bus.isCanonicalEnvelope!=="function"||!bus.isCanonicalEnvelope(env))fail(CODES.FOREIGN_REFERENCE,"accepted envelope required");return bindInteraction(env)},
+  issueScopedAccess:issueAccess,readScopedAccess:readAccess,releaseScopedAccess:releaseAccess,
+  releaseTransient:(interactionId)=>{if(typeof interactionId!=="string")return false;return interactionBindings.delete(interactionId)}
+ });
+ PRIVATE_PORTS.set(result,ports);
  if(testMode)result.testOnly=Object.freeze({createTrustedByteSource});
- return Object.freeze(result)
+ return result
 }
-module.exports={createMediaSubsystem,createMediaIngress:createMediaSubsystem,DEFAULT_LIMITS,CATALOG_VERSION,MediaIngressError,CODES};
+function takePrivatePorts(facade){const p=PRIVATE_PORTS.get(facade);if(!p)fail(CODES.FOREIGN_REFERENCE,"foreign media facade");return p}
+module.exports={createMediaSubsystem,createMediaIngress:createMediaSubsystem,takePrivatePorts,DEFAULT_LIMITS,CATALOG_VERSION,MediaIngressError,CODES};

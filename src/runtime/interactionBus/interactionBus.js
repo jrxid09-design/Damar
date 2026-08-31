@@ -26,9 +26,10 @@ function createInteractionBus(options) {
   const bounds = resolveBounds(opts.bounds);
   const ambiguityPolicy = opts.handlerAmbiguityPolicy;
   const mediaVerifier = opts.mediaIngress && opts.mediaIngress.isCanonicalMediaReference;
-  const mediaBinder = opts.mediaIngress && opts.mediaIngress.bindInteraction;
-  const mediaIssuer = opts.mediaIngress && opts.mediaIngress.issueAccess;
-  const mediaReader = opts.mediaIngress && opts.mediaIngress.readAccess;
+  const mediaPorts = opts.mediaPorts || null;
+  const mediaBinder = mediaPorts && mediaPorts.bindAcceptedInteraction;
+  const mediaIssuer = mediaPorts && mediaPorts.issueScopedAccess;
+  const mediaReader = mediaPorts && mediaPorts.readScopedAccess;
 
   const transports = createTransportRegistry();
   const handlers = createHandlerRegistry(ambiguityPolicy);
@@ -400,6 +401,7 @@ function createInteractionBus(options) {
         ? (attachmentId, purpose) => mediaIssuer(record.envelope, attachmentId, purpose)
         : null,
       readMediaAccess: typeof mediaReader === "function" ? mediaReader : null,
+      releaseMediaAccess: typeof mediaPorts?.releaseScopedAccess === "function" ? mediaPorts.releaseScopedAccess : null,
       acknowledgeCancellation: () => acknowledgeCancellation(record.interactionId)
     });
 
