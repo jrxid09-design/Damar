@@ -26,6 +26,7 @@ const { createEmbodiedCore } = require("./embodiedCore");
 const governorMod = require("../runtime/resourceGovernor");
 const recovery = require("../runtime/recovery");
 const ib = require("../runtime/interactionBus");
+const { createMediaSubsystem } = require("../runtime/mediaIngress/subsystem");
 const presence = require("../runtime/presence");
 const path = require("node:path");
 
@@ -80,6 +81,10 @@ async function createRuntimeCore({
     recoveryConfigOverrides = {}
 } = {}) {
 
+    if (bus !== null) {
+        throw new TypeError("canonical runtime owns the InteractionBus and MediaSubsystem");
+    }
+
     // ---- Wave 1 canonical owners --------------------------------------
     const core = await createEmbodiedCore(wave1);
 
@@ -133,12 +138,12 @@ async function createRuntimeCore({
     });
 
     // ---- InteractionBus: pemilik KANONIK interaction lifecycle --------
-    const mediaSubsystem = ib.createMediaSubsystem({
+    const mediaSubsystem = createMediaSubsystem({
         storageRoot: mediaStorageRoot,
         limits: mediaLimits
     });
     await mediaSubsystem.ready;
-    const busInstance = bus ?? ib.createInteractionBus({
+    const busInstance = ib.createInteractionBus({
         clock: busClock ?? (() => Date.now()),
         idFactory: busIdFactory ?? ib.createCryptoIdFactory(),
         bounds: busBounds,
@@ -147,7 +152,7 @@ async function createRuntimeCore({
     let channelIngress = null;
     if (!bus && enableManagerIngress) {
         const { createDamarManager } = require("../manager/bootstrap");
-        channelIngress = ib.createManagerInteractionIngress({
+        channelIngress = require("../runtime/interactionBus/managerIngressInternal").createManagerInteractionIngress({
             bus: busInstance,
             manager: createDamarManager(),
             mediaSubsystem

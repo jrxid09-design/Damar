@@ -11,8 +11,6 @@ const sessions = require("./sessions");
 const routing = require("./routing");
 const transportsMod = require("./transports");
 const futureTransports = require("./futureTransports");
-const managerIngress = require("./managerIngress");
-const mediaIngress = require("../mediaIngress");
 
 function createSystemClock() {
   return function systemClock() {
@@ -44,6 +42,4 @@ module.exports = {
   CAPABILITY_NAMES: transportsMod.CAPABILITY_NAMES,
   KIND_CAPABILITY_REQUIREMENTS: transportsMod.KIND_CAPABILITY_REQUIREMENTS,
   futureTransports,
-  ...managerIngress,
-  ...mediaIngress
 };
