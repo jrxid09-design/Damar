@@ -15,6 +15,7 @@ const DEFAULT_BOUNDS = Object.freeze({
   maxContextRefs: 16,
   maxAuthEvidenceRefs: 8,
   maxAttachments: 8,
+  maxAttachmentAggregateBytes: 50 * 1024 * 1024,
   maxCommandArgs: 16,
   maxClaimedFields: 8,
   maxSessionHistory: 64,

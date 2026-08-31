@@ -25,6 +25,7 @@ function createInteractionBus(options) {
   }
   const bounds = resolveBounds(opts.bounds);
   const ambiguityPolicy = opts.handlerAmbiguityPolicy;
+  const mediaVerifier = opts.mediaIngress && opts.mediaIngress.isCanonicalMediaReference;
 
   const transports = createTransportRegistry();
   const handlers = createHandlerRegistry(ambiguityPolicy);
@@ -184,7 +185,8 @@ function createInteractionBus(options) {
             claimedMetadata: request.claimedMetadata
           }
         },
-        bounds
+        bounds,
+        mediaVerifier
       );
     } catch (error) {
       if (error instanceof BusError) {

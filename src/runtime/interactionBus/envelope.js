@@ -68,7 +68,7 @@ const ENVELOPE_FIELDS = Object.freeze([
   "provenance"
 ]);
 
-function buildEnvelope(spec, bounds) {
+function buildEnvelope(spec, bounds, mediaVerifier) {
   // The envelope former is also directly exported for deterministic tests and
   // local composition. Reject an accessor/Proxy-bearing spec before reading
   // even the timestamp or provenance fields.
@@ -98,7 +98,7 @@ function buildEnvelope(spec, bounds) {
     generation = assertCanonicalId("runtimeGenerationId", spec.generation);
   }
 
-  const payload = validatePayload(kind, spec.payload, bounds);
+  const payload = validatePayload(kind, spec.payload, bounds, mediaVerifier);
 
   let contextRefs = [];
   const rawContextRefs = Object.prototype.hasOwnProperty.call(spec, "contextRefs")

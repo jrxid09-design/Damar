@@ -178,50 +178,48 @@ function validateBoundedRecord(raw, key, bounds, what) {
 const MEDIA_TYPE_RE = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$/;
 const CONTENT_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-function validateAttachment(value, bounds) {
-  if (!isPlainObject(value)) {
-    fail("PAYLOAD_FIELD_INVALID", { scope: "attachment" });
+function validateAttachment(value, bounds, isCanonicalMediaReference) {
+  if (!isPlainObject(value)) fail("PAYLOAD_FIELD_INVALID", { scope: "attachment" });
+  if (typeof isCanonicalMediaReference !== "function" || !isCanonicalMediaReference(value)) {
+    fail("FOREIGN_MEDIA_REFERENCE", { scope: "attachment" });
   }
-  rejectForbiddenFields(
-    value,
-    ["attachmentId", "mediaType", "sizeBytes", "contentRef", "name"],
-    "attachment"
-  );
+  rejectForbiddenFields(value, [
+    "attachmentId", "kind", "declaredMimeType", "detectedMimeType", "fileName",
+    "sizeBytes", "sha256", "sourceChannel", "storageRef", "metadata",
+    "ingestedAt", "detectionConfidence"
+  ], "attachment");
   assertCanonicalId("attachmentId", value.attachmentId);
-  if (typeof value.mediaType !== "string" || !MEDIA_TYPE_RE.test(value.mediaType)) {
-    fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "mediaType" });
+  if (!["image", "document", "audio", "video", "archive", "binary"].includes(value.kind)) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "kind" });
   }
-  if (!Number.isSafeInteger(value.sizeBytes) || value.sizeBytes < 0 || value.sizeBytes > bounds.maxPayloadBytes) {
+  if (value.declaredMimeType !== null && (typeof value.declaredMimeType !== "string" || !MEDIA_TYPE_RE.test(value.declaredMimeType))) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "declaredMimeType" });
+  }
+  if (typeof value.detectedMimeType !== "string" || !MEDIA_TYPE_RE.test(value.detectedMimeType)) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "detectedMimeType" });
+  }
+  if (!Number.isSafeInteger(value.sizeBytes) || value.sizeBytes < 0) {
     fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "sizeBytes" });
   }
-  if (
-    typeof value.contentRef !== "string" ||
-    !CONTENT_REF_RE.test(value.contentRef) ||
-    value.contentRef.includes("..")
-  ) {
-    fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "contentRef" });
+  if (typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256)) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "sha256" });
   }
-  const name = value.name;
-  if (
-    typeof name !== "string" ||
-    name.length === 0 ||
-    name.length > 128 ||
-    /[\\/\u0000-\u001F]/.test(name) ||
-    name === "." ||
-    name === ".." ||
-    name.startsWith(".")
-  ) {
-    fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "name" });
+  if (typeof value.storageRef !== "string" || value.storageRef !== `media:sha256:${value.sha256}`) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "storageRef" });
+  }
+  const name = value.fileName;
+  if (typeof name !== "string" || name.length === 0 || name.length > 180 || /[\\/\u0000-\u001F]/.test(name)) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "attachment", field: "fileName" });
   }
   return Object.freeze({
-    attachmentId: value.attachmentId,
-    mediaType: value.mediaType,
-    sizeBytes: value.sizeBytes,
-    contentRef: value.contentRef,
-    name
+    attachmentId: value.attachmentId, kind: value.kind,
+    declaredMimeType: value.declaredMimeType, detectedMimeType: value.detectedMimeType,
+    fileName: name, sizeBytes: value.sizeBytes, sha256: value.sha256,
+    sourceChannel: value.sourceChannel, storageRef: value.storageRef,
+    metadata: Object.freeze({ ...value.metadata }), ingestedAt: value.ingestedAt,
+    detectionConfidence: value.detectionConfidence
   });
 }
-
 const PROVIDER_RE = /^[a-z][a-z0-9_]{1,31}$/;
 
 function validateAuthEvidence(value) {
@@ -267,7 +265,7 @@ function validateContextRef(value) {
   return Object.freeze({ type: value.type, ref: value.ref });
 }
 
-function validateMessagePayload(raw, bounds) {
+function validateMessagePayload(raw, bounds, mediaVerifier) {
   rejectForbiddenFields(
     raw,
     ["text", "language", "attachments", "replyToInteractionId", "referenceIds"],
@@ -290,7 +288,15 @@ function validateMessagePayload(raw, bounds) {
     if (!isSafeArray(attachmentInput) || attachmentInput.length > bounds.maxAttachments) {
       fail("BOUNDS_EXCEEDED", { scope: "MESSAGE", field: "attachments" });
     }
-    attachments = Object.freeze(mapSafeArray(attachmentInput, "attachments", (a) => validateAttachment(a, bounds)));
+    let aggregate = 0;
+    attachments = Object.freeze(mapSafeArray(attachmentInput, "attachments", (a) => {
+      const attachment = validateAttachment(a, bounds, mediaVerifier);
+      aggregate += attachment.sizeBytes;
+      if (!Number.isSafeInteger(aggregate) || aggregate > bounds.maxAttachmentAggregateBytes) {
+        fail("BOUNDS_EXCEEDED", { scope: "MESSAGE", field: "attachmentBytes" });
+      }
+      return attachment;
+    }));
   }
   let replyToInteractionId;
   if (raw.replyToInteractionId !== undefined) {
@@ -397,7 +403,7 @@ const PAYLOAD_VALIDATORS = {
   CONTEXT_REFERENCE: validateContextReferencePayload
 };
 
-function validatePayload(kind, raw, bounds) {
+function validatePayload(kind, raw, bounds, mediaVerifier) {
   const validator = PAYLOAD_VALIDATORS[kind];
   if (!validator) {
     fail("KIND_HAS_NO_PAYLOAD_SCHEMA", { kind });
@@ -405,7 +411,7 @@ function validatePayload(kind, raw, bounds) {
   if (!isPlainObject(raw)) {
     fail("PAYLOAD_NOT_OBJECT", { kind });
   }
-  const payload = validator(raw, bounds);
+  const payload = validator(raw, bounds, mediaVerifier);
   if (byteLength(canonicalize(payload)) > bounds.maxPayloadBytes) {
     fail("BOUNDS_EXCEEDED", { scope: kind, field: "payloadBytes" });
   }
