@@ -138,14 +138,11 @@ async function createRuntimeCore({
     });
 
     // ---- InteractionBus: pemilik KANONIK interaction lifecycle --------
-    const canonicalOwner = Object.freeze({});
     const mediaSubsystem = createMediaSubsystem({
         storageRoot: mediaStorageRoot,
-        limits: mediaLimits,
-        canonicalOwner
+        limits: mediaLimits
     });
     await mediaSubsystem.ready;
-    const mediaContinuation = Object.freeze({ restore: (interactionId, attachmentId, purpose) => mediaSubsystem.__internalRestore(interactionId, attachmentId, purpose) });
     const busInstance = ib.createInteractionBus({
         clock: busClock ?? (() => Date.now()),
         idFactory: busIdFactory ?? ib.createCryptoIdFactory(),
@@ -196,7 +193,6 @@ async function createRuntimeCore({
             } catch {
                 // runtime sudah destroyed / state terminal — tetap idempoten
             }
-            mediaSubsystem.__internalRelease();
             rt.destroy();
             shutDown = true;
         }

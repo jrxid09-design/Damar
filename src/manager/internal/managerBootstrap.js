@@ -439,7 +439,7 @@ function createDamarManagerComposition({
     const outcomeForExecution = (state) => require("../../manager/errors").outcomeForExecutionState(state, MOUTCOME);
 
     // ---- handle(): the ONLY downstream request capability ------------------
-    async function handle(input, { signal, mediaAccess } = {}) {
+    async function handle(input, { signal, mediaAccess, mediaContext } = {}) {
         // Lane 2 media is an internal, least-privilege processing input.  The
         // canonical envelope remains inert; Manager accepts only the already
         // issued per-attachment handles and never receives a resolver/store.
@@ -469,7 +469,7 @@ function createDamarManagerComposition({
         inFlightByCorrelation.set(request.correlationId, entry);
         const runPromise = (async () => {
             try {
-                return await runHandleBody(request, entry, startedAtMs, signal, mediaAccess);
+                return await runHandleBody(request, entry, startedAtMs, signal, mediaAccess, mediaContext);
             } finally {
                 inFlightByCorrelation.delete(request.correlationId);
             }
@@ -478,7 +478,7 @@ function createDamarManagerComposition({
         return runPromise;
     }
 
-    async function runHandleBody(request, entry, startedAtMs, signal) {
+    async function runHandleBody(request, entry, startedAtMs, signal, mediaAccess, mediaContext) {
         const now = () => canonicalNow();
 
         // ---- 1. CANCELLATION CHECK (pre-authentication) --------------------
@@ -523,6 +523,14 @@ function createDamarManagerComposition({
             });
         }
         const principal = authenticatedPrincipal;
+
+        if (mediaContext && Array.isArray(mediaContext.attachments)) {
+            for (const attachment of mediaContext.attachments) {
+                if (attachment && typeof attachment.read === "function") {
+                    await attachment.read();
+                }
+            }
+        }
 
         // ---- 3. NON-ACTION COGNITION (no Lane 2/3 entry) -------------------
         if (!requiresActionFabric(request.requestClass)) {
