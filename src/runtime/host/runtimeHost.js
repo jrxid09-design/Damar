@@ -80,7 +80,10 @@ async function createRuntimeHost({
 
     // ------------------------------------------------------- INITIALIZE
     phaseMachine.transitionTo(HOST_PHASE.INITIALIZING, "compose-runtime-core");
-    const core = await coreFactory(coreOptions);
+    const effectiveCoreOptions = coreFactory === createRuntimeCore && conversationHandler === null
+        ? { ...coreOptions, enableManagerIngress: true }
+        : coreOptions;
+    const core = await coreFactory(effectiveCoreOptions);
     const rt = core.presence;
     const producers = core.presenceProducers;
 
@@ -124,12 +127,14 @@ async function createRuntimeHost({
         handler: (envelope, ctx) => handleStatusInteraction(envelope, ctx)
     });
 
-    bus.registerHandler({
-        route: "CONVERSATION",
-        supportedKinds: ["MESSAGE", "CONTEXT_REFERENCE"],
-        priority: 0,
-        handler: conversationHandler ?? defaultConversationHandler
-    });
+    if (conversationHandler !== null || !core.channels) {
+        bus.registerHandler({
+            route: "CONVERSATION",
+            supportedKinds: ["MESSAGE", "CONTEXT_REFERENCE"],
+            priority: 0,
+            handler: conversationHandler ?? defaultConversationHandler
+        });
+    }
 
     async function handleControlInteraction(envelope, ctx) {
         const stream = ctx.stream;
@@ -451,6 +456,7 @@ async function createRuntimeHost({
         detachTransportAdapter,
         getTransportAdaptersSnapshot,
         submitLocal,
+        channels: core.channels,
 
         health,
         status,

@@ -17,10 +17,6 @@
 
 const { createTransportAdapter, slugSessionId, fallbackSessionId } = require("../host/transportAdapter");
 const { createInteractionBus } = require("./interactionBus");
-const { createCryptoIdFactory } = require("./ids");
-const { createMediaSubsystem } = require("../mediaIngress");
-const os = require("node:os");
-const path = require("node:path");
 const { CHANNEL_ADAPTERS } = require("../../manager/channels");
 
 const CHANNELS = Object.freeze({
@@ -150,7 +146,10 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null }
       };
       const adapter = channelAdapter(channelType);
       context.stream.emit("START", { interactionId: envelope.interactionId });
-      const result = await manager.handle(managerInput);
+      const access = envelope.payload.attachments && context.issueMediaAccess
+        ? Object.freeze(envelope.payload.attachments.map((a) => context.issueMediaAccess(a.attachmentId, "manager-processing")))
+        : Object.freeze([]);
+      const result = await manager.handle(managerInput, Object.freeze({ mediaAccess: access, readMediaAccess: context.readMediaAccess }));
       context.stream.emit("FINAL", adapter.renderOutbound(result));
       context.stream.emit("COMPLETE", { interactionId: envelope.interactionId });
     }
@@ -169,15 +168,19 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null }
 
   async function ingestAttachments(channel, rawEvent, attachmentSpecs) {
     if (!mediaSubsystem) throw new TypeError("MEDIA_SUBSYSTEM_NOT_BOUND");
-    const attachments = await mediaSubsystem.ingestMany(attachmentSpecs);
-    if (!safeRawEvent(rawEvent).ok) return Object.freeze({ accepted: false, code: "EVENT_INVALID" });
+    const eventCheck = safeRawEvent(rawEvent);
+    if (!eventCheck.ok) return Object.freeze({ accepted: false, code: eventCheck.code });
+    const adapter = adapters.get(channel);
+    if (!adapter) return Object.freeze({ accepted: false, code: "CHANNEL_NOT_SUPPORTED" });
+    const attachments = await mediaSubsystem.ingestChannelMany(channel, attachmentSpecs);
     const normalized = {
       text: dataField(rawEvent, "text"), userId: dataField(rawEvent, "userId"),
       sessionId: dataField(rawEvent, "sessionId"), metadata: dataField(rawEvent, "metadata"),
       replyToInteractionId: dataField(rawEvent, "replyToInteractionId"),
       referenceIds: dataField(rawEvent, "referenceIds"), attachments
     };
-    const result = adapters.get(channel).ingestExternalEvent(normalized);
+    const result = adapter.ingestExternalEvent(normalized);
+    if (!result.accepted) await mediaSubsystem.rollbackReferences(attachments);
     return Object.freeze({ ...result, attachmentIds: Object.freeze(attachments.map((a) => a.attachmentId)) });
   }
 
@@ -191,22 +194,7 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null }
 }
 
 function createProductionManagerInteractionIngress() {
-  if (arguments.length !== 0) throw new TypeError("production ingress accepts no caller bindings");
-  // Lazy requires avoid making the inert InteractionBus vocabulary depend on
-  // Manager bootstrap during ordinary module loading.
-  const { createDamarManager } = require("../../manager/bootstrap");
-  const mediaSubsystem = createMediaSubsystem({ storageRoot: path.join(os.homedir(), ".damar", "media-v1") });
-  const bus = createInteractionBus({
-      clock: () => Date.now(),
-      idFactory: createCryptoIdFactory(),
-      mediaIngress: mediaSubsystem
-    });
-  const ingress = createManagerInteractionIngress({
-    bus,
-    manager: createDamarManager(),
-    mediaSubsystem
-  });
-  return Object.freeze({ ...ingress, mediaResolver: mediaSubsystem.resolver });
+  throw new TypeError("production Manager ingress is owned by createRuntimeHost");
 }
 
 module.exports = Object.freeze({

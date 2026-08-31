@@ -72,6 +72,7 @@ async function createRuntimeCore({
     busBounds = undefined,
     mediaStorageRoot = path.join(os.homedir(), ".damar", "media-v1"),
     mediaLimits = undefined,
+    enableManagerIngress = false,
     // ---- Recovery ----
     recoverySystem = null,
     generationLedger = null,
@@ -143,6 +144,15 @@ async function createRuntimeCore({
         bounds: busBounds,
         mediaIngress: mediaSubsystem
     });
+    let channelIngress = null;
+    if (!bus && enableManagerIngress) {
+        const { createDamarManager } = require("../manager/bootstrap");
+        channelIngress = ib.createManagerInteractionIngress({
+            bus: busInstance,
+            manager: createDamarManager(),
+            mediaSubsystem
+        });
+    }
 
     // ---- Recovery Capsule: pemilik KANONIK restart continuity ---------
     const system = recoverySystem ??
@@ -196,11 +206,8 @@ async function createRuntimeCore({
         presence: rt,
         presenceProducers: Object.freeze(producers),
         bus: busInstance,
-        media: Object.freeze({
-            ingest: mediaSubsystem.ingest,
-            ingestMany: mediaSubsystem.ingestMany,
-            resolver: mediaSubsystem.resolver
-        }),
+        channels: channelIngress,
+        media: Object.freeze({ getDiagnostics: mediaSubsystem.getDiagnostics }),
         recovery: Object.freeze({
             system, ledger, tracker,
             checkpoint: recovery.checkpoint,

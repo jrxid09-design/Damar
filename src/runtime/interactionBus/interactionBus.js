@@ -27,6 +27,8 @@ function createInteractionBus(options) {
   const ambiguityPolicy = opts.handlerAmbiguityPolicy;
   const mediaVerifier = opts.mediaIngress && opts.mediaIngress.isCanonicalMediaReference;
   const mediaBinder = opts.mediaIngress && opts.mediaIngress.bindInteraction;
+  const mediaIssuer = opts.mediaIngress && opts.mediaIngress.issueAccess;
+  const mediaReader = opts.mediaIngress && opts.mediaIngress.readAccess;
 
   const transports = createTransportRegistry();
   const handlers = createHandlerRegistry(ambiguityPolicy);
@@ -198,7 +200,6 @@ function createInteractionBus(options) {
 
     const digest = interactionDigest(envelope);
     canonicalEnvelopeSet.add(envelope);
-    if (typeof mediaBinder === "function") mediaBinder(envelope);
 
     let session;
     try {
@@ -257,6 +258,7 @@ function createInteractionBus(options) {
     interactions.set(interactionId, record);
     bump("accepted");
     bumpOrigin(envelope.origin);
+    if (typeof mediaBinder === "function") mediaBinder(envelope);
 
     if (envelope.deadline && envelope.deadline.expiredAtReceipt) {
       expireRecord(record, "EXPIRED_ON_ARRIVAL");
@@ -384,6 +386,10 @@ function createInteractionBus(options) {
     const handlerContext = Object.freeze({
       envelope: record.envelope,
       stream,
+      issueMediaAccess: typeof mediaIssuer === "function"
+        ? (attachmentId, purpose) => mediaIssuer(record.envelope, attachmentId, purpose)
+        : null,
+      readMediaAccess: typeof mediaReader === "function" ? mediaReader : null,
       acknowledgeCancellation: () => acknowledgeCancellation(record.interactionId)
     });
 

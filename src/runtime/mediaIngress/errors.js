@@ -17,6 +17,7 @@ const CODES = Object.freeze({
   INTEGRITY_FAILURE: "MEDIA_INTEGRITY_FAILURE",
   TIMEOUT: "MEDIA_TIMEOUT",
   CANCELLED: "MEDIA_CANCELLED"
+  ,CATALOG_FULL: "MEDIA_CATALOG_FULL"
 });
 
 class MediaIngressError extends Error {
