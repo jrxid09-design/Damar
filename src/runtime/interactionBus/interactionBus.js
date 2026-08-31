@@ -258,7 +258,17 @@ function createInteractionBus(options) {
     interactions.set(interactionId, record);
     bump("accepted");
     bumpOrigin(envelope.origin);
-    if (typeof mediaBinder === "function") mediaBinder(envelope);
+    if (typeof mediaBinder === "function") {
+      try {
+        mediaBinder(envelope);
+      } catch (error) {
+        interactions.delete(interactionId);
+        ledger.delete(interactionId);
+        counters.accepted = Math.max(0, counters.accepted - 1);
+        counters.byOrigin[envelope.origin] = Math.max(0, (counters.byOrigin[envelope.origin] || 1) - 1);
+        return rejection("MEDIA_RELATION_FAILURE", { interactionId });
+      }
+    }
 
     if (envelope.deadline && envelope.deadline.expiredAtReceipt) {
       expireRecord(record, "EXPIRED_ON_ARRIVAL");

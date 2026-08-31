@@ -149,9 +149,13 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null }
       const access = envelope.payload.attachments && context.issueMediaAccess
         ? Object.freeze(envelope.payload.attachments.map((a) => context.issueMediaAccess(a.attachmentId, "manager-processing")))
         : Object.freeze([]);
-      const result = await manager.handle(managerInput, Object.freeze({ mediaAccess: access, readMediaAccess: context.readMediaAccess }));
-      context.stream.emit("FINAL", adapter.renderOutbound(result));
-      context.stream.emit("COMPLETE", { interactionId: envelope.interactionId });
+      try {
+        const result = await manager.handle(managerInput, Object.freeze({ mediaAccess: access, readMediaAccess: context.readMediaAccess }));
+        context.stream.emit("FINAL", adapter.renderOutbound(result));
+        context.stream.emit("COMPLETE", { interactionId: envelope.interactionId });
+      } finally {
+        if (mediaSubsystem && !mediaSubsystem.testOnly) for (const handle of access) mediaSubsystem.releaseAccess(handle);
+      }
     }
   });
 
