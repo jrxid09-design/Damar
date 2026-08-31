@@ -161,6 +161,7 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null }
         context.stream.emit("COMPLETE", { interactionId: envelope.interactionId });
       } finally {
         if (typeof context.releaseMediaAccess === "function") for (const handle of access) context.releaseMediaAccess(handle);
+        if (typeof context.releaseMediaBinding === "function") context.releaseMediaBinding();
       }
     }
   });

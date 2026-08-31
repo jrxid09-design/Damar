@@ -402,6 +402,7 @@ function createInteractionBus(options) {
         : null,
       readMediaAccess: typeof mediaReader === "function" ? mediaReader : null,
       releaseMediaAccess: typeof mediaPorts?.releaseScopedAccess === "function" ? mediaPorts.releaseScopedAccess : null,
+      releaseMediaBinding: typeof mediaPorts?.releaseTransient === "function" ? () => mediaPorts.releaseTransient(record.envelope.interactionId) : null,
       acknowledgeCancellation: () => acknowledgeCancellation(record.interactionId)
     });
 

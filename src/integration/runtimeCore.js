@@ -149,7 +149,8 @@ async function createRuntimeCore({
         bindAcceptedInteraction: (envelope) => canonicalMediaPorts.bindAcceptedInteraction(busInstance, envelope),
         issueScopedAccess: canonicalMediaPorts.issueScopedAccess,
         readScopedAccess: canonicalMediaPorts.readScopedAccess,
-        releaseScopedAccess: canonicalMediaPorts.releaseScopedAccess
+        releaseScopedAccess: canonicalMediaPorts.releaseScopedAccess,
+        releaseTransient: canonicalMediaPorts.releaseTransient
     });
     busInstance = ib.createInteractionBus({
         clock: busClock ?? (() => Date.now()),
