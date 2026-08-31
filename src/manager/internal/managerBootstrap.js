@@ -192,7 +192,8 @@ function deepFreezeM(obj) {
  */
 function createDamarManagerComposition({
     deps,
-    trustedChannelAdapters = []
+    trustedChannelAdapters = [],
+    mediaProcessor = null
 } = {}) {
     if (deps === null || typeof deps !== "object") {
         throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "manager composition requires deps");
@@ -213,6 +214,9 @@ function createDamarManagerComposition({
     if (planner !== null && typeof planner !== "function") {
         throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "deps.planner must be a function or null");
     }
+    if (mediaProcessor !== null && typeof mediaProcessor !== "function") {
+        throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "mediaProcessor must be a function or null");
+    }
     if (!Array.isArray(trustedChannelAdapters)) {
         throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "trustedChannelAdapters must be an array");
     }
@@ -226,6 +230,17 @@ function createDamarManagerComposition({
     const capturedLane3 = lane3;
     const capturedLane4 = lane4;
     const capturedPlanner = planner;
+    const capturedMediaProcessor = mediaProcessor;
+    const mediaContextBrandSet = new WeakSet();
+
+    function createCanonicalMediaContext(attachments) {
+        if (!Array.isArray(attachments) || !Object.isFrozen(attachments) || attachments.length > 8) {
+            throw new TypeError("MEDIA_CONTEXT_INVALID");
+        }
+        const context = Object.freeze({ attachments });
+        mediaContextBrandSet.add(context);
+        return context;
+    }
 
     // Channel adapters: frozen snapshots, keyed by channel type. Composition-
     // time-only wiring; after composition NO caller can register/replace.
@@ -523,12 +538,8 @@ function createDamarManagerComposition({
         if (mediaContext !== undefined && (!mediaContext || typeof mediaContext !== "object" || require("node:util").types.isProxy(mediaContext) || !Object.isFrozen(mediaContext) || !Array.isArray(mediaContext.attachments) || !Object.isFrozen(mediaContext.attachments) || mediaContext.attachments.length > 8)) {
             throw new TypeError("MEDIA_CONTEXT_INVALID");
         }
-        if (mediaContext && Array.isArray(mediaContext.attachments)) {
-            for (const attachment of mediaContext.attachments) {
-                if (attachment && typeof attachment.read === "function") {
-                    await attachment.read();
-                }
-            }
+        if (mediaContext && capturedMediaProcessor) {
+            await capturedMediaProcessor(Object.freeze({ request, mediaContext }));
         }
 
         // ---- 3. NON-ACTION COGNITION (no Lane 2/3 entry) -------------------
