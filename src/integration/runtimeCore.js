@@ -138,30 +138,15 @@ async function createRuntimeCore({
     });
 
     // ---- InteractionBus: pemilik KANONIK interaction lifecycle --------
-    let mediaRuntimePair = null;
-    const mediaSubsystem = createMediaSubsystem({
+    const mediaDomain = createMediaSubsystem({
         storageRoot: mediaStorageRoot,
         limits: mediaLimits,
-        runtimePortReceiver: (pair) => { mediaRuntimePair = pair; }
+        atomicDomain: true,
+        busOptions: { clock: busClock ?? (() => Date.now()), idFactory: busIdFactory ?? ib.createCryptoIdFactory(), bounds: busBounds }
     });
+    const mediaSubsystem = mediaDomain.media;
     await mediaSubsystem.ready;
-    let busInstance;
-    let canonicalMediaPorts = null;
-    const busMediaPorts = Object.freeze({
-        bindAcceptedInteraction: (envelope) => canonicalMediaPorts.bindAcceptedInteraction(envelope),
-        issueScopedAccess: (...args) => canonicalMediaPorts.issueScopedAccess(...args),
-        readScopedAccess: (...args) => canonicalMediaPorts.readScopedAccess(...args),
-        releaseScopedAccess: (...args) => canonicalMediaPorts.releaseScopedAccess(...args),
-        releaseTransient: (...args) => canonicalMediaPorts.releaseTransient(...args)
-    });
-    busInstance = ib.createInteractionBus({
-        clock: busClock ?? (() => Date.now()),
-        idFactory: busIdFactory ?? ib.createCryptoIdFactory(),
-        bounds: busBounds,
-        mediaIngress: mediaSubsystem,
-        mediaPorts: busMediaPorts
-    });
-    canonicalMediaPorts = mediaRuntimePair.pairWithBus(busInstance);
+    const busInstance = mediaDomain.bus;
     let channelIngress = null;
     if (!bus && enableManagerIngress) {
         const { createDamarManager } = require("../manager/bootstrap");
