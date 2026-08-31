@@ -32,6 +32,13 @@ const ORIGIN_TO_CHANNEL = Object.freeze(Object.fromEntries(
 ));
 
 const OWN = Object.prototype.hasOwnProperty;
+const MEDIA_CONTEXT_BRAND = new WeakSet();
+
+function createMediaContext(entries) {
+  const context = Object.freeze({ attachments: Object.freeze(entries) });
+  MEDIA_CONTEXT_BRAND.add(context);
+  return context;
+}
 
 function dataField(value, key) {
   if (!OWN.call(value, key)) return undefined;
@@ -149,15 +156,13 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null }
       const access = envelope.payload.attachments && context.issueMediaAccess
         ? Object.freeze(envelope.payload.attachments.map((a) => context.issueMediaAccess(a.attachmentId, "manager-processing")))
         : Object.freeze([]);
-      const mediaContext = Object.freeze({
-        attachments: Object.freeze(envelope.payload.attachments && context.readMediaAccess
+      const mediaContext = createMediaContext(envelope.payload.attachments && context.readMediaAccess
           ? envelope.payload.attachments.map((a, i) => Object.freeze({
               attachmentId: a.attachmentId,
               read: () => context.readMediaAccess(access[i], "manager-processing")
-            })) : [])
-      });
+            })) : []);
       try {
-        const result = await manager.handle(managerInput, Object.freeze({ mediaContext, mediaAccess: access, readMediaAccess: context.readMediaAccess }));
+        const result = await manager.handle(managerInput, Object.freeze({ mediaContext }));
         context.stream.emit("FINAL", adapter.renderOutbound(result));
         context.stream.emit("COMPLETE", { interactionId: envelope.interactionId });
       } finally {

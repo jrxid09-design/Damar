@@ -524,6 +524,9 @@ function createDamarManagerComposition({
         }
         const principal = authenticatedPrincipal;
 
+        if (mediaContext !== undefined && (!mediaContext || typeof mediaContext !== "object" || !Object.isFrozen(mediaContext) || !Array.isArray(mediaContext.attachments) || !Object.isFrozen(mediaContext.attachments) || mediaContext.attachments.length > 8)) {
+            throw new TypeError("MEDIA_CONTEXT_INVALID");
+        }
         if (mediaContext && Array.isArray(mediaContext.attachments)) {
             for (const attachment of mediaContext.attachments) {
                 if (attachment && typeof attachment.read === "function") {
