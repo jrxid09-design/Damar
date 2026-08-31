@@ -524,7 +524,7 @@ function createDamarManagerComposition({
         }
         const principal = authenticatedPrincipal;
 
-        if (mediaContext !== undefined && (!mediaContext || typeof mediaContext !== "object" || !Object.isFrozen(mediaContext) || !Array.isArray(mediaContext.attachments) || !Object.isFrozen(mediaContext.attachments) || mediaContext.attachments.length > 8)) {
+        if (mediaContext !== undefined && (!mediaContext || typeof mediaContext !== "object" || require("node:util").types.isProxy(mediaContext) || !Object.isFrozen(mediaContext) || !Array.isArray(mediaContext.attachments) || !Object.isFrozen(mediaContext.attachments) || mediaContext.attachments.length > 8)) {
             throw new TypeError("MEDIA_CONTEXT_INVALID");
         }
         if (mediaContext && Array.isArray(mediaContext.attachments)) {
