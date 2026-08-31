@@ -18,7 +18,6 @@
 const { createTransportAdapter, slugSessionId, fallbackSessionId } = require("../host/transportAdapter");
 const { createInteractionBus } = require("./interactionBus");
 const { CHANNEL_ADAPTERS } = require("../../manager/channels");
-const { createCanonicalMediaContext } = require("../../manager/internal/mediaContext");
 
 const CHANNELS = Object.freeze({
   console: Object.freeze({ origin: "CONSOLE", transportId: "channel.console" }),
@@ -98,7 +97,7 @@ function channelAdapter(channel) {
  * and InteractionBus.  The caller receives only transport ingestion and
  * response projection; no Lane 2/3/4 dependency is exposed.
  */
-function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null } = {}) {
+function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, mediaContextMint = null } = {}) {
   if (!bus || typeof bus.registerTransport !== "function" ||
       typeof bus.registerHandler !== "function" || typeof bus.submit !== "function" ||
       typeof bus.isCanonicalEnvelope !== "function") {
@@ -164,7 +163,7 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null }
       const access = envelope.payload.attachments && context.issueMediaAccess
         ? Object.freeze(envelope.payload.attachments.map((a) => context.issueMediaAccess(a.attachmentId, "manager-processing")))
         : Object.freeze([]);
-      const mediaContext = createCanonicalMediaContext(Object.freeze(envelope.payload.attachments && context.readMediaAccess
+      const mediaContext = mintMediaContext(Object.freeze(envelope.payload.attachments && context.readMediaAccess
           ? envelope.payload.attachments.map((a, i) => Object.freeze({
               attachmentId: a.attachmentId,
               read: () => context.readMediaAccess(access[i], "manager-processing")
@@ -190,6 +189,8 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null }
     const adapter = channelAdapter(channel);
     return Object.freeze(adapter.renderOutbound(managerResult));
   }
+  if (mediaContextMint !== null && typeof mediaContextMint !== "function") throw new TypeError("MANAGER_INGRESS_MEDIA_CONTEXT_INVALID");
+  const mintMediaContext = mediaContextMint || (() => { throw new TypeError("MANAGER_INGRESS_MEDIA_CONTEXT_UNBOUND"); });
 
   async function ingestAttachments(channel, rawEvent, attachmentSpecs) {
     if (!mediaSubsystem) throw new TypeError("MEDIA_SUBSYSTEM_NOT_BOUND");

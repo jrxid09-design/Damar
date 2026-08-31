@@ -11,6 +11,9 @@ const { createSessionRegistry } = require("./sessions");
 const { createHandlerRegistry, routeForKind } = require("./routing");
 const { createTransportRegistry } = require("./transports");
 
+const CANONICAL_BUSES = new WeakSet();
+function isCanonicalInteractionBus(value) { return value !== null && typeof value === "object" && CANONICAL_BUSES.has(value); }
+
 const HISTORY_LIMIT = 16;
 
 function createInteractionBus(options) {
@@ -402,7 +405,7 @@ function createInteractionBus(options) {
         : null,
       readMediaAccess: typeof mediaReader === "function" ? mediaReader : null,
       releaseMediaAccess: typeof mediaPorts?.releaseScopedAccess === "function" ? mediaPorts.releaseScopedAccess : null,
-      releaseMediaBinding: typeof mediaPorts?.releaseTransient === "function" ? () => mediaPorts.releaseTransient(record.envelope.interactionId) : null,
+      releaseMediaBinding: typeof mediaPorts?.releaseTransient === "function" ? () => mediaPorts.releaseTransient(record.envelope) : null,
       acknowledgeCancellation: () => acknowledgeCancellation(record.interactionId)
     });
 
@@ -669,7 +672,7 @@ function createInteractionBus(options) {
     return canonicalEnvelopeSet.has(value);
   }
 
-  return Object.freeze({
+  const facade = Object.freeze({
     bounds,
     registerTransport,
     registerHandler,
@@ -685,6 +688,8 @@ function createInteractionBus(options) {
     isCanonicalEnvelope,
     routeForKind
   });
+  CANONICAL_BUSES.add(facade);
+  return facade;
 }
 
-module.exports = { createInteractionBus };
+module.exports = { createInteractionBus, isCanonicalInteractionBus };

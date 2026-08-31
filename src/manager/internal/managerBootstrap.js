@@ -1,6 +1,6 @@
 "use strict";
 
-const { isCanonicalMediaContext } = require("./mediaContext");
+const { createMediaContextAuthority } = require("./mediaContext");
 
 /**
  * DAMAR MANAGER — TRUSTED INTERNAL COMPOSITION (Lane 5, TARGETED lessons from
@@ -195,7 +195,8 @@ function deepFreezeM(obj) {
 function createDamarManagerComposition({
     deps,
     trustedChannelAdapters = [],
-    mediaProcessor = null
+    mediaProcessor = null,
+    mediaContextAuthority = createMediaContextAuthority()
 } = {}) {
     if (deps === null || typeof deps !== "object") {
         throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "manager composition requires deps");
@@ -219,6 +220,9 @@ function createDamarManagerComposition({
     if (mediaProcessor !== null && typeof mediaProcessor !== "function") {
         throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "mediaProcessor must be a function or null");
     }
+    if (!mediaContextAuthority || typeof mediaContextAuthority.recognize !== "function") {
+        throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "mediaContextAuthority is invalid");
+    }
     if (!Array.isArray(trustedChannelAdapters)) {
         throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "trustedChannelAdapters must be an array");
     }
@@ -233,6 +237,7 @@ function createDamarManagerComposition({
     const capturedLane4 = lane4;
     const capturedPlanner = planner;
     const capturedMediaProcessor = mediaProcessor;
+    const recognizeMediaContext = mediaContextAuthority.recognize;
 
     // Channel adapters: frozen snapshots, keyed by channel type. Composition-
     // time-only wiring; after composition NO caller can register/replace.
@@ -527,7 +532,7 @@ function createDamarManagerComposition({
         }
         const principal = authenticatedPrincipal;
 
-        if (mediaContext !== undefined && !isCanonicalMediaContext(mediaContext)) {
+        if (mediaContext !== undefined && !recognizeMediaContext(mediaContext)) {
             throw new TypeError("MEDIA_CONTEXT_INVALID");
         }
         if (mediaContext && capturedMediaProcessor) {

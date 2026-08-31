@@ -26,7 +26,7 @@ const { createEmbodiedCore } = require("./embodiedCore");
 const governorMod = require("../runtime/resourceGovernor");
 const recovery = require("../runtime/recovery");
 const ib = require("../runtime/interactionBus");
-const { createMediaSubsystem, takePrivatePorts } = require("../runtime/mediaIngress/subsystem");
+const { createMediaSubsystem } = require("../runtime/mediaIngress/subsystem");
 const presence = require("../runtime/presence");
 const path = require("node:path");
 
@@ -138,19 +138,21 @@ async function createRuntimeCore({
     });
 
     // ---- InteractionBus: pemilik KANONIK interaction lifecycle --------
+    let mediaRuntimePair = null;
     const mediaSubsystem = createMediaSubsystem({
         storageRoot: mediaStorageRoot,
-        limits: mediaLimits
+        limits: mediaLimits,
+        runtimePortReceiver: (pair) => { mediaRuntimePair = pair; }
     });
     await mediaSubsystem.ready;
-    const canonicalMediaPorts = takePrivatePorts(mediaSubsystem);
     let busInstance;
+    let canonicalMediaPorts = null;
     const busMediaPorts = Object.freeze({
-        bindAcceptedInteraction: (envelope) => canonicalMediaPorts.bindAcceptedInteraction(busInstance, envelope),
-        issueScopedAccess: canonicalMediaPorts.issueScopedAccess,
-        readScopedAccess: canonicalMediaPorts.readScopedAccess,
-        releaseScopedAccess: canonicalMediaPorts.releaseScopedAccess,
-        releaseTransient: canonicalMediaPorts.releaseTransient
+        bindAcceptedInteraction: (envelope) => canonicalMediaPorts.bindAcceptedInteraction(envelope),
+        issueScopedAccess: (...args) => canonicalMediaPorts.issueScopedAccess(...args),
+        readScopedAccess: (...args) => canonicalMediaPorts.readScopedAccess(...args),
+        releaseScopedAccess: (...args) => canonicalMediaPorts.releaseScopedAccess(...args),
+        releaseTransient: (...args) => canonicalMediaPorts.releaseTransient(...args)
     });
     busInstance = ib.createInteractionBus({
         clock: busClock ?? (() => Date.now()),
@@ -159,13 +161,17 @@ async function createRuntimeCore({
         mediaIngress: mediaSubsystem,
         mediaPorts: busMediaPorts
     });
+    canonicalMediaPorts = mediaRuntimePair.pairWithBus(busInstance);
     let channelIngress = null;
     if (!bus && enableManagerIngress) {
         const { createDamarManager } = require("../manager/bootstrap");
+        const { createMediaContextAuthority } = require("../manager/internal/mediaContext");
+        const mediaContextAuthority = createMediaContextAuthority();
         channelIngress = require("../runtime/interactionBus/managerIngressInternal").createManagerInteractionIngress({
             bus: busInstance,
             manager: createDamarManager(),
-            mediaSubsystem
+            mediaSubsystem,
+            mediaContextMint: mediaContextAuthority.mint
         });
     }
 
