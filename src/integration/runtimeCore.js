@@ -26,7 +26,7 @@ const { createEmbodiedCore } = require("./embodiedCore");
 const governorMod = require("../runtime/resourceGovernor");
 const recovery = require("../runtime/recovery");
 const ib = require("../runtime/interactionBus");
-const { createCanonicalMediaSubsystem } = require("../runtime/mediaIngress/subsystem");
+const { createMediaSubsystem } = require("../runtime/mediaIngress/subsystem");
 const presence = require("../runtime/presence");
 const path = require("node:path");
 
@@ -138,12 +138,14 @@ async function createRuntimeCore({
     });
 
     // ---- InteractionBus: pemilik KANONIK interaction lifecycle --------
-    const mediaOwner = createCanonicalMediaSubsystem({
+    const canonicalOwner = Object.freeze({});
+    const mediaSubsystem = createMediaSubsystem({
         storageRoot: mediaStorageRoot,
-        limits: mediaLimits
+        limits: mediaLimits,
+        canonicalOwner
     });
-    const mediaSubsystem = mediaOwner.media;
     await mediaSubsystem.ready;
+    const mediaContinuation = Object.freeze({ restore: (interactionId, attachmentId, purpose) => mediaSubsystem.__internalRestore(interactionId, attachmentId, purpose) });
     const busInstance = ib.createInteractionBus({
         clock: busClock ?? (() => Date.now()),
         idFactory: busIdFactory ?? ib.createCryptoIdFactory(),
@@ -194,7 +196,7 @@ async function createRuntimeCore({
             } catch {
                 // runtime sudah destroyed / state terminal — tetap idempoten
             }
-            mediaOwner.release();
+            mediaSubsystem.__internalRelease();
             rt.destroy();
             shutDown = true;
         }
