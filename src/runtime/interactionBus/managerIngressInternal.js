@@ -16,6 +16,7 @@
  */
 
 const { createTransportAdapter, slugSessionId, fallbackSessionId } = require("../host/transportAdapter");
+const { mintPeerProvenance } = require("../sessionContinuity/continuity");
 const { createInteractionBus } = require("./interactionBus");
 const { CHANNEL_ADAPTERS } = require("../../manager/channels");
 
@@ -115,7 +116,7 @@ function channelAdapter(channel) {
  * across runtime restarts.  The continuity domain is inert: it mints no
  * authority, and channel claims remain evidence only.
  */
-function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, mediaContextMint = null, sessionContinuity = null } = {}) {
+function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, mediaContextMint = null, sessionContinuity = null, historyRecorder = undefined } = {}) {
   if (!bus || typeof bus.registerTransport !== "function" ||
       typeof bus.registerHandler !== "function" || typeof bus.submit !== "function" ||
       typeof bus.isCanonicalEnvelope !== "function") {
@@ -163,6 +164,18 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
       const claimedIdentity = envelope.provenance.claimedIdentity;
       const peer = claimedIdentity && typeof claimedIdentity.id === "string"
         ? claimedIdentity.id.slice(0, 128) : "";
+      // DSC-005: trusted continuity provenance.  The canonical envelope
+      // carries the identity that the TRUSTED normalization seam (the same
+      // seam that minted the peer provenance) placed in provenance; the
+      // continuity identity is re-derived from it — never from caller
+      // metadata claims.  Envelope-free or unbound events get no continuity.
+      let continuitySessionId = continuityByInteraction.get(envelope.interactionId) ?? null;
+      if (continuitySessionId === null && sessionContinuity && peer !== "") {
+        const resolution = sessionContinuity.resolveChannel({
+          provenance: mintPeerProvenance(channelType, peer)
+        });
+        if (resolution.resolved) continuitySessionId = resolution.sessionId;
+      }
       // InteractionBus preserves absent optional payload fields as explicit
       // `undefined` slots.  Manager deliberately rejects undefined during
       // hostile-input detachment, so project the canonical payload into a
@@ -179,7 +192,13 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
         channelType,
         channelId: envelope.provenance.transportId,
         peer,
+        // DSC-005: transport session (ses_*) stays the bus transport-session
+        // identity; the canonical continuity identity (dsc_*) is passed as
+        // TRUSTED provenance minted by the continuity resolver at this seam
+        // — never from caller-provided metadata.  Manager can distinguish
+        // the two; neither is authority.
         sessionId: envelope.sessionId,
+        ...(continuitySessionId === null ? {} : { continuitySessionId }),
         correlationId: envelope.correlationId || `cor_${envelope.interactionId.slice(3)}`,
         payload: managerPayload,
         // Manager's hostile-input detacher correctly rejects explicit
@@ -207,50 +226,135 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
         context.stream.emit("FINAL", rendered);
         context.stream.emit("COMPLETE", { interactionId: envelope.interactionId });
         waiter?.resolve(rendered);
+        // DSC-004: atomic terminal commit owned by the continuity domain —
+        // session + current incarnation + interaction identity verified in
+        // ONE transition.  Idempotent; stale/duplicate attempts change
+        // nothing.  Failures are contained (they must not break the bus
+        // handler that has already completed its canonical stream).
+        if (sessionContinuity && continuitySessionId !== null) {
+          try {
+            sessionContinuity.commitTerminalOutcome({
+              sessionId: continuitySessionId,
+              interactionId: envelope.interactionId,
+              generation: sessionContinuity.currentIncarnation(continuitySessionId) ?? 0,
+              state: "COMPLETED"
+            });
+          } catch {
+            // terminal commit is best-effort after canonical completion;
+            // ownership checks inside the domain decide idempotently.
+          }
+          // DSC-005: logical-conversation continuity.  Record the exchange
+          // under the trusted dsc_* logical key through the EXISTING
+          // channel/history seam (ChannelManager) — never a parallel history
+          // system, never auto-merging legacy per-channel records.  Fail-soft:
+          // history storage problems must never break canonical flow.
+          if (typeof recordContinuityTurn === "function") {
+            try {
+              await recordContinuityTurn({
+                continuitySessionId,
+                channel: channelType,
+                userText: typeof envelope.payload.text === "string" ? envelope.payload.text : "",
+                assistantDetail: typeof rendered.detail === "string" ? rendered.detail : ""
+              });
+            } catch {
+              // fail-soft: continuity history is best-effort
+            }
+          }
+        }
       } catch (error) {
         waiter?.reject(error);
         throw error;
       } finally {
         pending.delete(envelope.interactionId);
-        if (typeof context.releaseMediaAccess === "function") for (const handle of access) context.releaseMediaAccess(handle);
+        continuityByInteraction.delete(envelope.interactionId);
+        if (typeof context.releaseMediaAccess === "function") for (const handle of access) releaseHandleSafe(context, handle);
         if (typeof context.releaseMediaBinding === "function") context.releaseMediaBinding();
       }
     }
   });
 
+  function releaseHandleSafe(context, handle) {
+    try { context.releaseMediaAccess(handle); } catch { /* idempotent */ }
+  }
+
   // ------------------------------------------------------------------
-  // Wave 5 Lane 4 — canonical session continuity resolution.
+  // DSC-005 — logical-conversation history through the EXISTING seam.
+  //
+  // The trusted composition may inject a history recorder bound to the
+  // canonical ChannelManager (src/channels).  Default: the canonical
+  // channelManager instance, keyed by the trusted dsc_* logical key.
+  // Unbound/legacy channels continue unchanged; nothing is auto-merged.
+  // ------------------------------------------------------------------
+  let recordContinuityTurn = null;
+  if (historyRecorder !== undefined) {
+    if (historyRecorder !== null && typeof historyRecorder !== "function") {
+      throw new TypeError("MANAGER_INGRESS_HISTORY_RECORDER_INVALID");
+    }
+    recordContinuityTurn = historyRecorder;
+  } else {
+    recordContinuityTurn = async ({ continuitySessionId, channel, userText, assistantDetail }) => {
+      const { channelManager } = require("../../channels");
+      await channelManager.continuityRemember(continuitySessionId, {
+        role: "user", content: String(userText).slice(0, 4096)
+      }, { channel });
+      await channelManager.continuityRemember(continuitySessionId, {
+        role: "assistant", content: String(assistantDetail).slice(0, 4096)
+      }, { channel });
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // Wave 5 Lane 4 (repair R1) — canonical session continuity resolution.
   //
   // TRANSPORT ID != DAMAR IDENTITY: the canonical Damar session (dsc_*) is
-  // resolved from the runtime-derived channel/peer evidence at this seam,
-  // so one conversation continues coherently across channels and across
-  // runtime restarts while every submission still goes through the SAME
-  // InteractionBus and the SAME Manager.  The bus session remains
-  // transport-scoped (its one-transport-per-session anti-hijack law is
-  // untouched); the CANONICAL identity is what the Manager sees.
+  // resolved at this TRUSTED normalization seam, so one conversation
+  // continues coherently across channels and across runtime restarts while
+  // every submission still goes through the SAME InteractionBus and the
+  // SAME Manager.  The bus session remains transport-scoped (its
+  // one-transport-per-session anti-hijack law is untouched).
+  //
+  // DSC-001: binding keys derive from TRUSTED PEER PROVENANCE minted HERE
+  // (the transport normalization boundary) — the EXACT peer string the
+  // transport supplies, case- and punctuation-preserving.  The raw event
+  // userId field is read ONCE at this boundary and becomes provenance;
+  // nothing downstream can forge or re-derive it.  Events WITHOUT a
+  // non-empty exact peer id fail closed for continuity (no shared "anon").
+  //
+  // DSC-003: a resolved-but-not-resumed (RESTORED) session is resumed
+  // EXPLICITLY here — a safe, generation-advancing act — before the event
+  // flows onward, so stale pre-restart work stays stale.
   //
   // Nothing here authenticates or authorizes: channel claims remain
   // provenance evidence, and resolution is by BINDING POLICY only.
   // ------------------------------------------------------------------
+  const continuityByInteraction = new Map(); // ix_* → trusted continuity provenance
+
   function resolveContinuitySession(channel, rawEvent) {
     if (!sessionContinuity) return null;
     const rawUserId = dataField(rawEvent, "userId");
-    const claimedIdentity = typeof rawUserId === "string" ? rawUserId.slice(0, 128) : null;
-    let resolution = sessionContinuity.resolveChannel({ channel, claimedIdentity });
+    // DSC-001.4: missing/untrusted peer identity → NO continuity identity
+    // (fail closed).  The event still flows through the canonical bus path
+    // with its transport-scoped session only.
+    if (typeof rawUserId !== "string" || rawUserId.length === 0) {
+      return { resolved: false, reason: "PEER_PROVENANCE_MISSING" };
+    }
+    const exactPeer = rawUserId.slice(0, 128);
+    const provenance = mintPeerProvenance(channel, exactPeer);
+    let resolution = sessionContinuity.resolveChannel({ provenance });
     if (resolution.resolved && !resolution.resumed) {
-      // Restored-after-restart session: the canonical ingress owns the
-      // explicit resume act — a NEW incarnation is minted here, so stale
-      // pre-restart work stays stale (GENERATION OWNERSHIP).
+      // RESTORED != RESUMED: the canonical ingress owns the explicit resume
+      // act — a NEW incarnation is minted here (safe + generation-advancing),
+      // so stale pre-restart work stays stale.
       sessionContinuity.resumeSession({ sessionId: resolution.sessionId });
-      resolution = sessionContinuity.resolveChannel({ channel, claimedIdentity });
+      resolution = sessionContinuity.resolveChannel({ provenance });
     }
     if (resolution.resolved) return resolution;
-    // No binding yet: create the canonical session and bind this channel.
-    // This is identity continuity, not privilege: the new binding mints no
-    // authority and cannot steal an existing binding (fail-closed there).
+    // No binding yet: create the canonical session and bind this trusted
+    // peer.  This is identity continuity, not privilege: the new binding
+    // mints no authority and cannot steal an existing binding (fail-closed).
     const created = sessionContinuity.createSession({});
-    sessionContinuity.bindChannel({ sessionId: created.sessionId, channel, claimedIdentity });
-    return sessionContinuity.resolveChannel({ channel, claimedIdentity });
+    sessionContinuity.bindChannel({ sessionId: created.sessionId, provenance });
+    return sessionContinuity.resolveChannel({ provenance });
   }
 
   function ingest(channel, rawEvent) {
@@ -262,7 +366,11 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
       if (continuity && continuity.resolved) canonicalSessionId = continuity.sessionId;
     }
     const outcome = adapter.ingestExternalEvent(rawEvent);
-    if (canonicalSessionId !== null && outcome.accepted) {
+    if (outcome.accepted && canonicalSessionId !== null) {
+      // Keep the trusted continuity identity reachable by interaction id for
+      // response projection; the CONVERSATION handler re-derives it from the
+      // canonical envelope provenance (same trusted seam, no caller control).
+      continuityByInteraction.set(outcome.interactionId, canonicalSessionId);
       return Object.freeze({ ...outcome, canonicalSessionId });
     }
     return Object.freeze(outcome);
@@ -329,13 +437,49 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
     return Object.freeze({ ...result, attachmentIds: Object.freeze(attachments.map((a) => a.attachmentId)) });
   }
 
+  // ---- DSC-003: trusted lifecycle hooks for the RuntimeHost composition ---
+  // Boot restore + shutdown flush + inert status.  These are TRUSTED
+  // composition-seam operations (host lifecycle only); they are not exposed
+  // to channel callers and confer no authority.
+  async function restoreContinuity() {
+    if (!sessionContinuity || typeof sessionContinuity.restore !== "function") {
+      return Object.freeze({ restored: false, degraded: false, reason: "CONTINUITY_UNBOUND" });
+    }
+    return sessionContinuity.restore();
+  }
+
+  async function flushContinuity() {
+    if (!sessionContinuity || typeof sessionContinuity.persist !== "function") {
+      return Object.freeze({ persisted: false, reason: "CONTINUITY_UNBOUND" });
+    }
+    return sessionContinuity.persist();
+  }
+
+  function continuityStatus() {
+    if (!sessionContinuity || typeof sessionContinuity.snapshotDiagnostics !== "function") {
+      return Object.freeze({ bound: false });
+    }
+    return Object.freeze({ bound: true, ...sessionContinuity.snapshotDiagnostics() });
+  }
+
+  function getSessionContinuityId(channel, rawEvent) {
+    if (!sessionContinuity) return null;
+    const resolution = resolveContinuitySession(channel, rawEvent);
+    return resolution && resolution.resolved ? resolution.sessionId : null;
+  }
+
   return Object.freeze({
     ingest,
     request,
     ingestAttachments,
     render,
     channels: Object.freeze(Object.keys(CHANNELS)),
-    transportSnapshot: () => Object.freeze([...adapters.values()].map((a) => a.snapshot()))
+    transportSnapshot: () => Object.freeze([...adapters.values()].map((a) => a.snapshot())),
+    // trusted lifecycle seam (composition root / RuntimeHost only)
+    restoreContinuity,
+    flushContinuity,
+    continuityStatus,
+    getSessionContinuityId
   });
 }
 

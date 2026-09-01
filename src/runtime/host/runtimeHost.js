@@ -100,6 +100,23 @@ async function createRuntimeHost({
         phaseMachine.transitionTo(HOST_PHASE.FAILED, `recovery:${recoveryPass.code}`);
         return buildFailedHost({ phaseMachine, failureCode: recoveryPass.code });
     }
+
+    // ---------------------------------------- CONTINUITY BOOT RESTORE (Lane 4)
+    // DSC-003: during the canonical RECOVER phase, the host loads and
+    // validates durable session-continuity state through the trusted
+    // ingress composition (core.channels).  Restored sessions come back
+    // CLOSED (RESTORED != RESUMED).  Corrupt/oversized state fails CLOSED:
+    // the domain degrades to a fresh continuity domain — never a partial
+    // resurrection, never a failed boot.
+    if (core.channels && typeof core.channels.restoreContinuity === "function") {
+        try {
+            await core.channels.restoreContinuity();
+        } catch {
+            // Fail-closed degradation is decided inside the domain; a hard
+            // fault here must not prevent boot.
+        }
+    }
+
     phaseMachine.transitionTo(HOST_PHASE.READY, "ready-dormant");
 
     // ------------------------------------------------------------- BUS
@@ -280,6 +297,9 @@ async function createRuntimeHost({
             governor: safe(() => core.governor.getResourceStatus()) ?? null,
             bus: safe(() => bus.getStatus()) ?? null,
             recovery: safe(() => core.recovery.tracker.getRecoveryStatus()) ?? null,
+            continuity: safe(() => (core.channels && typeof core.channels.continuityStatus === "function"
+                ? core.channels.continuityStatus()
+                : null)) ?? null,
             localTransport: localTransportId,
             shuttingDown: shutDown
         };
@@ -354,6 +374,23 @@ async function createRuntimeHost({
         }
         adapters.clear();
 
+        // ------------------------------------ CONTINUITY SHUTDOWN FLUSH (Lane 4)
+        // DSC-003: graceful shutdown FLUSHES the durable continuity snapshot.
+        // It NEVER deletes persisted state (destructive reset is a separate
+        // explicit administrative operation on the domain).
+        let continuityFlush = null;
+        if (core.channels && typeof core.channels.flushContinuity === "function") {
+            try {
+                // The flush is fire-and-forget from the synchronous shutdown
+                // path; contain its failure explicitly so a late persistence
+                // error can never become an unhandled rejection.
+                continuityFlush = core.channels.flushContinuity();
+                if (continuityFlush && typeof continuityFlush.then === "function") {
+                    continuityFlush.catch(() => Object.freeze({ failed: true, code: "FLUSH_CONTAINED" }));
+                }
+            } catch { /* flush best-effort; snapshot already persisted per mutation */ }
+        }
+
         try {
             rt.requestShutdown(producers.host, String(reason).slice(0, 200));
         } catch { /* presence sudah terminal */ }
@@ -365,7 +402,7 @@ async function createRuntimeHost({
         } catch { /* core sudah shutdown */ }
 
         phaseMachine.transitionTo(HOST_PHASE.TERMINATED, "terminated");
-        return Object.freeze({ shutDown: true, idempotent: false, reason });
+        return Object.freeze({ shutDown: true, idempotent: false, reason, continuityFlush });
     }
 
     // ------------------------------------------------------- FAIL/RECOVER

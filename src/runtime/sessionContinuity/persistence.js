@@ -11,14 +11,16 @@
  *   PERSISTED STATE != LIVE AUTHORITY
  *
  * Durability follows the established atomic pattern (staging file + fsync +
- * rename), mirroring src/runtime/mediaIngress/subsystem.js without depending
- * on it.  A crash at any point leaves either the previous complete snapshot
- * or the new complete snapshot — never a half-written one.
+ * rename + directory sync where supported), mirroring
+ * src/runtime/mediaIngress/subsystem.js without depending on it.  A crash at
+ * any point leaves either the previous complete snapshot or the new complete
+ * snapshot — never a half-written one.
  */
 
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
+const crypto = require("node:crypto");
 const { types } = require("node:util");
 
 const SNAPSHOT_VERSION = 1;
@@ -28,14 +30,14 @@ const SESSION_FIELDS = Object.freeze([
   "sessionId", "createdAt", "updatedAt", "incarnation",
   "resumeMetadata", "terminalAt", "channels"
 ]);
-const BINDING_FIELDS = Object.freeze(["channel", "peerKey", "boundAt", "generation"]);
+const BINDING_FIELDS = Object.freeze(["channel", "peer", "boundAt", "generation"]);
+const TERMINAL_ENTRY_FIELDS = Object.freeze(["sessionId", "state", "generation", "at"]);
 const SNAPSHOT_LIMITS = Object.freeze({
   maxSessions: 4096,
   maxBindingsPerSession: 16,
   maxTerminalInteractions: 2048,
   maxResumeMetadataBytes: 2048,
-  maxSnapshotBytes: 512 * 1024,
-  maxTerminalCount: 4096
+  maxSnapshotBytes: 512 * 1024
 });
 
 function fail(code, message, details) {
@@ -68,10 +70,14 @@ function safeInteger(value, min, max) {
   return Number.isSafeInteger(value) && value >= min && value <= max;
 }
 
+const CHANNEL_RE = /^[a-z][a-z0-9_]{0,31}$/;
+const DSC_RE = /^dsc_[a-z0-9][a-z0-9_-]{0,62}$/;
+const IX_RE = /^ix_[a-z0-9][a-z0-9_-]{0,62}$/;
+const META_KEY_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+
 /**
- * In-memory continuity store (default).  Injectable for tests and for a
- * future durable backend; the contract is synchronous snapshots +
- * asynchronous durable flush.
+ * In-memory continuity store (tests / inert default).  Injectable; the
+ * production composition selects the durable file store (DSC-003).
  */
 function createMemoryContinuityStore() {
   let snapshot = null;
@@ -82,10 +88,61 @@ function createMemoryContinuityStore() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Durable file store (DSC-003 + persistence hygiene)
+// ---------------------------------------------------------------------------
+
+/** Directory sync where the platform supports it; a documented no-op where
+ * it does not (Windows/EPERM etc. — same policy as mediaIngress). */
+async function syncDirectory(directory) {
+  let handle;
+  try {
+    handle = await fsp.open(directory, "r");
+    await handle.sync();
+  } catch (error) {
+    if (process.platform === "win32" &&
+        ["EINVAL", "ENOTSUP", "EISDIR", "EPERM"].includes(error?.code)) {
+      return false; // platform constraint, not an anomaly
+    }
+    throw error;
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+  }
+  return true;
+}
+
+/** Reconcile abandoned staging files (crash leftovers) from previous runs.
+ * Bounded; anomalies (non-staging names, symlinks) are ignored, not
+ * executed.  Returns the number of reclaimed staging files. */
+async function cleanupAbandonedStaging(directory, maxScan = 64) {
+  let reclaimed = 0;
+  let entries;
+  try {
+    entries = await fsp.readdir(directory);
+  } catch {
+    return 0;
+  }
+  const staging = entries.filter((name) => name.startsWith(".cont_") && name.endsWith(".tmp"));
+  for (const name of staging.slice(0, maxScan)) {
+    const target = path.join(directory, name);
+    try {
+      const stat = await fsp.lstat(target);
+      // Fail closed on anomalies: only plain files are reclaimed.
+      if (stat.isFile() && !stat.isSymbolicLink()) {
+        await fsp.unlink(target);
+        reclaimed += 1;
+      }
+    } catch {
+      // already gone / race — acceptable
+    }
+  }
+  return reclaimed;
+}
+
 /**
  * Durable file store: one bounded JSON snapshot per continuity domain,
  * written atomically.  Malformed/oversized snapshots on disk fail CLOSED
- * (load returns { corrupt: true } and the caller must degrade to a fresh
+ * (load returns { corrupt: true } and the caller degrades to a fresh
  * continuity domain — never resurrect unvalidated state).
  */
 function createFileContinuityStore(file) {
@@ -95,6 +152,9 @@ function createFileContinuityStore(file) {
   const directory = path.dirname(file);
   return Object.freeze({
     async load() {
+      // Hygiene: reclaim abandoned staging from a crashed previous run
+      // BEFORE reading (bounded, fail-closed on anomalies).
+      await cleanupAbandonedStaging(directory);
       let raw;
       try {
         raw = await fsp.readFile(file, "utf8");
@@ -119,7 +179,10 @@ function createFileContinuityStore(file) {
         fail("SNAPSHOT_TOO_LARGE", "continuity snapshot exceeds the persistence bound");
       }
       await fsp.mkdir(directory, { recursive: true });
-      const staging = path.join(directory, `.cont_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2)}.tmp`);
+      const staging = path.join(
+        directory,
+        `.cont_${process.pid}_${Date.now()}_${crypto.randomBytes(8).toString("hex")}.tmp`
+      );
       const handle = await fsp.open(staging, "wx", 0o600);
       try {
         await handle.writeFile(serialized, "utf8");
@@ -129,6 +192,8 @@ function createFileContinuityStore(file) {
       }
       try {
         fs.renameSync(staging, file);
+        // Hygiene: make the rename itself durable where the platform allows.
+        await syncDirectory(directory);
       } catch (error) {
         await fsp.unlink(staging).catch(() => {});
         throw error;
@@ -153,10 +218,9 @@ function validateSnapshot(raw) {
     return { corrupt: true, reason: "SNAPSHOT_NOT_PLAIN" };
   }
   const fields = Object.getOwnPropertyNames(raw);
-  if (fields.length !== 3 || !fields.every((k) => ["schemaVersion", "savedAt", "sessions", "terminal"].includes(k))) {
-    if (fields.length !== 4 || !fields.every((k) => ["schemaVersion", "savedAt", "sessions", "terminal"].includes(k))) {
-      return { corrupt: true, reason: "SNAPSHOT_FIELDS_INVALID" };
-    }
+  const allowedTop = ["schemaVersion", "savedAt", "sessions", "terminal"];
+  if (fields.length !== allowedTop.length || !fields.every((k) => allowedTop.includes(k))) {
+    return { corrupt: true, reason: "SNAPSHOT_FIELDS_INVALID" };
   }
   if (raw.schemaVersion !== SNAPSHOT_VERSION) {
     return { corrupt: true, reason: "SNAPSHOT_VERSION_UNSUPPORTED" };
@@ -180,7 +244,7 @@ function validateSnapshot(raw) {
     if (names.length !== SESSION_FIELDS.length || !SESSION_FIELDS.every((k) => names.includes(k))) {
       return { corrupt: true, reason: "SESSION_ENTRY_FIELDS_INVALID" };
     }
-    if (typeof entry.sessionId !== "string" || !/^dsc_[a-z0-9][a-z0-9_-]{0,62}$/.test(entry.sessionId)) {
+    if (typeof entry.sessionId !== "string" || !DSC_RE.test(entry.sessionId)) {
       return { corrupt: true, reason: "SESSION_ENTRY_ID_INVALID" };
     }
     if (seenSessionIds.has(entry.sessionId)) {
@@ -203,7 +267,7 @@ function validateSnapshot(raw) {
         return { corrupt: true, reason: "SESSION_ENTRY_METADATA_NOT_PLAIN" };
       }
       for (const key of Object.getOwnPropertyNames(entry.resumeMetadata)) {
-        if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key)) {
+        if (!META_KEY_RE.test(key)) {
           return { corrupt: true, reason: "SESSION_ENTRY_METADATA_KEY_INVALID" };
         }
         const value = entry.resumeMetadata[key];
@@ -233,17 +297,20 @@ function validateSnapshot(raw) {
           !BINDING_FIELDS.every((k) => bindingNames.includes(k))) {
         return { corrupt: true, reason: "BINDING_ENTRY_FIELDS_INVALID" };
       }
-      if (typeof binding.channel !== "string" || !/^[a-z][a-z0-9_]{0,31}$/.test(binding.channel)) {
+      if (typeof binding.channel !== "string" || !CHANNEL_RE.test(binding.channel)) {
         return { corrupt: true, reason: "BINDING_ENTRY_CHANNEL_INVALID" };
       }
-      if (typeof binding.peerKey !== "string" || binding.peerKey.length === 0 || binding.peerKey.length > 128) {
+      // EXACT peer string (DSC-001): non-empty, bounded, no control chars,
+      // no NUL (the composite-key separator).
+      if (typeof binding.peer !== "string" || binding.peer.length === 0 || binding.peer.length > 128 ||
+          /[\u0000-\u001f]/.test(binding.peer)) {
         return { corrupt: true, reason: "BINDING_ENTRY_PEER_INVALID" };
       }
       if (!safeInteger(binding.boundAt, 0, Number.MAX_SAFE_INTEGER) ||
           !safeInteger(binding.generation, 1, 1_000_000_000)) {
         return { corrupt: true, reason: "BINDING_ENTRY_GENERATION_INVALID" };
       }
-      const composite = `${binding.channel} ${binding.peerKey}`;
+      const composite = `${binding.channel}\u0000${binding.peer}`;
       if (seenBindings.has(composite)) {
         return { corrupt: true, reason: "BINDING_ENTRY_DUPLICATE" };
       }
@@ -260,44 +327,44 @@ function validateSnapshot(raw) {
       channels: Object.freeze(channels)
     });
   }
-  let terminal = Object.freeze([]);
-  if (raw.terminal !== undefined) {
-    if (!plain(raw.terminal) || !hasOnlyDataProperties(raw.terminal)) {
-      return { corrupt: true, reason: "TERMINAL_LEDGER_NOT_PLAIN" };
+  if (!plain(raw.terminal)) {
+    return { corrupt: true, reason: "TERMINAL_LEDGER_NOT_PLAIN" };
+  }
+  const entries = Object.getOwnPropertyNames(raw.terminal);
+  if (entries.length > SNAPSHOT_LIMITS.maxTerminalInteractions) {
+    return { corrupt: true, reason: "TERMINAL_LEDGER_OVERFLOW" };
+  }
+  const out = {};
+  for (const interactionId of entries) {
+    if (!IX_RE.test(interactionId)) {
+      return { corrupt: true, reason: "TERMINAL_LEDGER_KEY_INVALID" };
     }
-    const entries = Object.getOwnPropertyNames(raw.terminal);
-    if (entries.length > SNAPSHOT_LIMITS.maxTerminalInteractions) {
-      return { corrupt: true, reason: "TERMINAL_LEDGER_OVERFLOW" };
+    const record = raw.terminal[interactionId];
+    if (!plain(record) || !hasOnlyDataProperties(record)) {
+      return { corrupt: true, reason: "TERMINAL_LEDGER_ENTRY_NOT_PLAIN" };
     }
-    const out = {};
-    for (const interactionId of entries) {
-      if (!/^ix_[a-z0-9][a-z0-9_-]{0,62}$/.test(interactionId)) {
-        return { corrupt: true, reason: "TERMINAL_LEDGER_KEY_INVALID" };
-      }
-      const record = raw.terminal[interactionId];
-      if (!plain(record) || !hasOnlyDataProperties(record)) {
-        return { corrupt: true, reason: "TERMINAL_LEDGER_ENTRY_NOT_PLAIN" };
-      }
-      const recordNames = Object.getOwnPropertyNames(record);
-      if (recordNames.length !== 3 || !recordNames.every((k) => ["state", "generation", "at"].includes(k))) {
-        return { corrupt: true, reason: "TERMINAL_LEDGER_ENTRY_FIELDS_INVALID" };
-      }
-      if (!["COMPLETED", "FAILED", "CANCELLED", "EXPIRED"].includes(record.state)) {
-        return { corrupt: true, reason: "TERMINAL_LEDGER_ENTRY_STATE_INVALID" };
-      }
-      if (!safeInteger(record.generation, 1, 1_000_000_000) ||
-          !safeInteger(record.at, 0, Number.MAX_SAFE_INTEGER)) {
-        return { corrupt: true, reason: "TERMINAL_LEDGER_ENTRY_INVALID" };
-      }
-      out[interactionId] = Object.freeze({ ...record });
+    const recordNames = Object.getOwnPropertyNames(record);
+    if (recordNames.length !== TERMINAL_ENTRY_FIELDS.length ||
+        !TERMINAL_ENTRY_FIELDS.every((k) => recordNames.includes(k))) {
+      return { corrupt: true, reason: "TERMINAL_LEDGER_ENTRY_FIELDS_INVALID" };
     }
-    terminal = Object.freeze(out);
+    if (!["COMPLETED", "FAILED", "CANCELLED", "EXPIRED"].includes(record.state)) {
+      return { corrupt: true, reason: "TERMINAL_LEDGER_ENTRY_STATE_INVALID" };
+    }
+    if (!DSC_RE.test(record.sessionId)) {
+      return { corrupt: true, reason: "TERMINAL_LEDGER_ENTRY_SESSION_INVALID" };
+    }
+    if (!safeInteger(record.generation, 1, 1_000_000_000) ||
+        !safeInteger(record.at, 0, Number.MAX_SAFE_INTEGER)) {
+      return { corrupt: true, reason: "TERMINAL_LEDGER_ENTRY_INVALID" };
+    }
+    out[interactionId] = Object.freeze({ ...record });
   }
   return Object.freeze({
     schemaVersion: SNAPSHOT_VERSION,
     savedAt: raw.savedAt,
     sessions: Object.freeze(sessions),
-    terminal
+    terminal: Object.freeze(out)
   });
 }
 
@@ -314,7 +381,7 @@ function buildSnapshot(now, sessions, terminal) {
       terminalAt: session.terminalAt,
       channels: session.channels.map((binding) => ({
         channel: binding.channel,
-        peerKey: binding.peerKey,
+        peer: binding.peer,
         boundAt: binding.boundAt,
         generation: binding.generation
       }))
@@ -325,6 +392,7 @@ function buildSnapshot(now, sessions, terminal) {
   for (const [interactionId, record] of terminal.entries()) {
     if (terminalCount >= SNAPSHOT_LIMITS.maxTerminalInteractions) break;
     terminalOut[interactionId] = {
+      sessionId: record.sessionId,
       state: record.state,
       generation: record.generation,
       at: record.at
@@ -344,11 +412,14 @@ module.exports = Object.freeze({
   SNAPSHOT_LIMITS,
   SESSION_FIELDS,
   BINDING_FIELDS,
+  TERMINAL_ENTRY_FIELDS,
   createMemoryContinuityStore,
   createFileContinuityStore,
   validateSnapshot,
   buildSnapshot,
-  // Internal fail helper shared with the domain module.
+  // hygiene helpers (internal/test-visible)
+  _syncDirectory: syncDirectory,
+  _cleanupAbandonedStaging: cleanupAbandonedStaging,
   _fail: fail,
   _plain: plain,
   _hasOnlyDataProperties: hasOnlyDataProperties

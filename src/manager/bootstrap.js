@@ -80,17 +80,52 @@ function createDamarManager() {
  * with one Manager media-context brand and expose only channel ingestion.
  * No context mint, processor registry, or Manager dependency escapes.
  *
- * Wave 5 Lane 4: the composition root owns the canonical session-continuity
- * domain for this ingress composition (identity continuity across channels
- * and restarts).  The continuity domain is inert identity machinery — it
- * mints no authority and never reaches the Manager facade. */
-function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionContinuity = null } = {}) {
+ * Wave 5 Lane 4 (repair R1, DSC-003): the composition root owns the durable
+ * session-continuity domain for this ingress composition.  The durable
+ * snapshot location defaults to the canonical per-user runtime state
+ * directory (os.homedir()/.damar/continuity-v1.json) and is overridable via
+ * DAMAR_CONTINUITY_STATE (absolute path) or explicitly disabled with
+ * DAMAR_CONTINUITY_STATE=memory.  The domain persists on every durable
+ * mutation (no timer loops) and flushes on shutdown WITHOUT deleting the
+ * persisted snapshot.  The continuity domain is inert identity machinery —
+ * it mints no authority and never reaches the Manager facade. */
+function resolveProductionContinuityStore() {
+    const setting = process.env.DAMAR_CONTINUITY_STATE;
+    if (setting === "memory") return null;
+    if (typeof setting === "string" && setting.length > 0) {
+        return require("node:path").resolve(setting);
+    }
+    const os = require("node:os");
+    const path = require("node:path");
+    return path.join(os.homedir(), ".damar", "continuity-v1.json");
+}
+
+function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionContinuity = null, continuityStoreFile = undefined } = {}) {
     const manager = createDamarManager();
-    const continuity = sessionContinuity !== null && sessionContinuity !== undefined
+    let continuity = sessionContinuity !== null && sessionContinuity !== undefined
         ? sessionContinuity
-        : require("../runtime/sessionContinuity").createSessionContinuity({
-            idFactory: require("../runtime/sessionContinuity").createCryptoContinuityIdFactory()
-        });
+        : null;
+    if (continuity === null) {
+        const sessionContinuityMod = require("../runtime/sessionContinuity");
+        const storeFile = continuityStoreFile !== undefined
+            ? continuityStoreFile
+            : resolveProductionContinuityStore();
+        if (storeFile === null) {
+            // Explicit inert mode (DAMAR_CONTINUITY_STATE=memory): continuity
+            // identity is still resolved, but nothing is durable.
+            continuity = sessionContinuityMod.createSessionContinuity({
+                idFactory: sessionContinuityMod.createCryptoContinuityIdFactory()
+            });
+        } else {
+            // Production default: durable file store, persisted at every
+            // durable-state mutation (no timer loops).
+            continuity = sessionContinuityMod.createSessionContinuity({
+                idFactory: sessionContinuityMod.createCryptoContinuityIdFactory(),
+                store: sessionContinuityMod.createFileContinuityStore(storeFile),
+                persistOnMutation: true
+            });
+        }
+    }
     return require("../runtime/interactionBus/managerIngressInternal").createManagerInteractionIngress({
         bus,
         manager,

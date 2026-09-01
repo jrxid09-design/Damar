@@ -287,6 +287,18 @@ function createDamarManagerComposition({
         }
         const channelId = mRequireString(input.channelId, "channelId", MBOUNDS.MAX_CHANNEL_ID_CHARS);
         const sessionId = mRequireString(input.sessionId, "sessionId", MBOUNDS.MAX_CHANNEL_ID_CHARS);
+        // DSC-005 (Wave 5 Lane 4): trusted continuity provenance.  The
+        // canonical ingress may supply the Damar continuity identity
+        // (dsc_*) SEPARATE from the transport-scoped ses_* session id.
+        // It is INERT PROVENANCE ONLY: never a principal, never authority,
+        // never usable to elevate request class.  Bounded + shape-checked.
+        let continuitySessionId = null;
+        if (input.continuitySessionId !== undefined && input.continuitySessionId !== null) {
+            continuitySessionId = mRequireString(input.continuitySessionId, "continuitySessionId", MBOUNDS.MAX_CHANNEL_ID_CHARS);
+            if (!/^dsc_[a-z0-9][a-z0-9_-]{0,62}$/.test(continuitySessionId)) {
+                throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "continuitySessionId must be a canonical dsc_* identity");
+            }
+        }
         const peer = mRequireString(input.peer ?? "", "peer", MBOUNDS.MAX_CHANNEL_ID_CHARS, { optional: true, allowEmpty: true });
         const correlationId = mRequireString(input.correlationId ?? sessionId, "correlationId", MBOUNDS.MAX_CORRELATION_CHARS, { optional: true, allowEmpty: true });
         const receivedAtMs = input.receivedAtMs === undefined
@@ -393,6 +405,10 @@ function createDamarManagerComposition({
             channelType,
             channelId,
             sessionProvenance: deepFreezeM({ channelType, sessionId, peer }),
+            // DSC-005: continuity identity is recorded as INERT PROVENANCE
+            // (nullable), distinct from the transport session id.  It is
+            // NEVER a principal and NEVER an authority input.
+            continuitySessionId,
             correlationId,
             receivedAtMs,
             payload: detachedPayload,

@@ -74,6 +74,12 @@ async function createRuntimeCore({
     mediaStorageRoot = path.join(os.homedir(), ".damar", "media-v1"),
     mediaLimits = undefined,
     enableManagerIngress = false,
+    // ---- Session continuity (Wave 5 Lane 4, DSC-003) ----
+    // Durable continuity snapshot location for the canonical Manager
+    // ingress composition.  undefined → production default resolution
+    // (env override / ~/.damar/continuity-v1.json) owned by the manager
+    // bootstrap; null → inert in-memory continuity (tests only).
+    continuityStoreFile = undefined,
     // ---- Recovery ----
     recoverySystem = null,
     generationLedger = null,
@@ -151,7 +157,8 @@ async function createRuntimeCore({
     if (!bus && enableManagerIngress) {
         channelIngress = require("../manager/bootstrap").createDamarManagerIngressDomain({
             bus: busInstance,
-            mediaSubsystem
+            mediaSubsystem,
+            ...(continuityStoreFile === undefined ? {} : { continuityStoreFile })
         });
     }
 

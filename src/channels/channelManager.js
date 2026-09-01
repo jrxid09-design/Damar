@@ -80,6 +80,53 @@ class ChannelManager {
 
     }
 
+    /**
+     * Wave 5 Lane 4 (DSC-005): logical conversation key for a trusted
+     * continuity identity (dsc_*).  Cross-channel continuity lets the
+     * canonical context/history layer select the SAME logical conversation
+     * where policy explicitly binds those channels to the same dsc_*.
+     *
+     * This EXTENDS the existing per-channel seam; it does not replace it:
+     *   - existing per-channel history remains valid and unchanged;
+     *   - continuity-aware interactions key by `dsc:<id>`;
+     *   - no migration of historical channel records happens here.
+     */
+    continuityKey(continuitySessionId) {
+
+        if (typeof continuitySessionId !== "string" ||
+            !/^dsc_[a-z0-9][a-z0-9_-]{0,62}$/.test(continuitySessionId)) {
+            throw new TypeError("CHANNEL_MANAGER_CONTINUITY_ID_INVALID");
+        }
+
+        return `dsc:${continuitySessionId}`;
+
+    }
+
+    /** Riwayat percakapan logis (lintas kanal) milik satu identitas dsc_*. */
+    continuityHistory(continuitySessionId) {
+
+        return this.store.load(this.continuityKey(continuitySessionId));
+
+    }
+
+    /** Catat satu giliran ke percakapan logis milik identitas dsc_*. */
+    continuityRemember(continuitySessionId, turn, meta = {}) {
+
+        return this.store.append(
+            this.continuityKey(continuitySessionId),
+            turn,
+            { channel: meta.channel ?? "continuity", kind: "logical", peer: String(continuitySessionId) }
+        );
+
+    }
+
+    /** Kosongkan percakapan logis (perintah /reset pada sesi kanonik). */
+    continuityForget(continuitySessionId) {
+
+        return this.store.clear(this.continuityKey(continuitySessionId));
+
+    }
+
     history(channel, peer, kind = "dm") {
 
         return this.store.load(this.sessionKey(channel, peer, kind));
