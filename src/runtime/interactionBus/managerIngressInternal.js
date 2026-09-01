@@ -43,7 +43,7 @@ function dataField(value, key) {
   return descriptor.value;
 }
 
-function safeRawEvent(raw) {
+function safeRawEvent(raw, channel) {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     return { ok: false, code: "EVENT_INVALID" };
   }
@@ -69,12 +69,22 @@ function safeRawEvent(raw) {
   const attachments = dataField(raw, "attachments");
   const replyToInteractionId = dataField(raw, "replyToInteractionId");
   const referenceIds = dataField(raw, "referenceIds");
+  // Wave 5 Lane 4: the bus session is TRANSPORT-SCOPED — the same peer
+  // evidence on two different channels must NOT collide on one bus session
+  // (the bus one-transport-per-session law stays intact).  Canonical
+  // cross-channel identity lives in the session-continuity domain (dsc_*),
+  // resolved separately at this seam.
+  const channelScope = typeof channel === "string" && CHANNELS[channel]
+    ? channel
+    : "channel";
   return {
     ok: true,
     kind: "MESSAGE",
     sessionId: (typeof rawSessionId === "string" && rawSessionId.startsWith("ses_"))
       ? rawSessionId
-      : slugSessionId(rawSessionId) || slugSessionId(userId) || fallbackSessionId("channel"),
+      : slugSessionId(rawSessionId)
+        || slugSessionId(`${channelScope}-${userId ?? ""}`)
+        || fallbackSessionId(channelScope),
     claimedIdentity: typeof userId === "string" ? userId.slice(0, 128) : null,
     metadata,
     payload: {
@@ -97,8 +107,15 @@ function channelAdapter(channel) {
  * Create an isolated ingress composition around an already-created Manager
  * and InteractionBus.  The caller receives only transport ingestion and
  * response projection; no Lane 2/3/4 dependency is exposed.
+ *
+ * Wave 5 Lane 4: an OPTIONAL canonical session-continuity domain may be
+ * injected by the trusted composition root.  When present, ingress events
+ * are resolved to the canonical Damar session (dsc_*) BEFORE bus.submit so
+ * that the same conversation continues coherently across channels and
+ * across runtime restarts.  The continuity domain is inert: it mints no
+ * authority, and channel claims remain evidence only.
  */
-function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, mediaContextMint = null } = {}) {
+function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, mediaContextMint = null, sessionContinuity = null } = {}) {
   if (!bus || typeof bus.registerTransport !== "function" ||
       typeof bus.registerHandler !== "function" || typeof bus.submit !== "function" ||
       typeof bus.isCanonicalEnvelope !== "function") {
@@ -107,17 +124,27 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
   if (!manager || typeof manager.handle !== "function") {
     throw new TypeError("MANAGER_INGRESS_MANAGER_INVALID");
   }
+  if (sessionContinuity !== null && sessionContinuity !== undefined) {
+    if (typeof sessionContinuity.resolveChannel !== "function" ||
+        typeof sessionContinuity.createSession !== "function" ||
+        typeof sessionContinuity.bindChannel !== "function") {
+      throw new TypeError("MANAGER_INGRESS_SESSION_CONTINUITY_INVALID");
+    }
+  }
 
   const adapters = new Map();
   const pending = new Map();
   for (const [channel, descriptor] of Object.entries(CHANNELS)) {
     const adapterDefinition = channelAdapter(channel);
+    // Wave 5 Lane 4: the normalizer is channel-scoped so the transport-
+    // scoped bus session is derived per channel (no cross-channel bus
+    // session collisions); canonical identity is resolved separately.
     adapters.set(channel, createTransportAdapter({
       bus,
       transportId: descriptor.transportId,
       origin: descriptor.origin,
       capabilities: { acceptsText: true, supportsBinaryAttachments: true },
-      normalize: safeRawEvent
+      normalize: (rawEvent) => safeRawEvent(rawEvent, channel)
     }));
     if (!adapterDefinition) throw new TypeError("CHANNEL_ADAPTER_MISSING");
   }
@@ -191,10 +218,54 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
     }
   });
 
+  // ------------------------------------------------------------------
+  // Wave 5 Lane 4 — canonical session continuity resolution.
+  //
+  // TRANSPORT ID != DAMAR IDENTITY: the canonical Damar session (dsc_*) is
+  // resolved from the runtime-derived channel/peer evidence at this seam,
+  // so one conversation continues coherently across channels and across
+  // runtime restarts while every submission still goes through the SAME
+  // InteractionBus and the SAME Manager.  The bus session remains
+  // transport-scoped (its one-transport-per-session anti-hijack law is
+  // untouched); the CANONICAL identity is what the Manager sees.
+  //
+  // Nothing here authenticates or authorizes: channel claims remain
+  // provenance evidence, and resolution is by BINDING POLICY only.
+  // ------------------------------------------------------------------
+  function resolveContinuitySession(channel, rawEvent) {
+    if (!sessionContinuity) return null;
+    const rawUserId = dataField(rawEvent, "userId");
+    const claimedIdentity = typeof rawUserId === "string" ? rawUserId.slice(0, 128) : null;
+    let resolution = sessionContinuity.resolveChannel({ channel, claimedIdentity });
+    if (resolution.resolved && !resolution.resumed) {
+      // Restored-after-restart session: the canonical ingress owns the
+      // explicit resume act — a NEW incarnation is minted here, so stale
+      // pre-restart work stays stale (GENERATION OWNERSHIP).
+      sessionContinuity.resumeSession({ sessionId: resolution.sessionId });
+      resolution = sessionContinuity.resolveChannel({ channel, claimedIdentity });
+    }
+    if (resolution.resolved) return resolution;
+    // No binding yet: create the canonical session and bind this channel.
+    // This is identity continuity, not privilege: the new binding mints no
+    // authority and cannot steal an existing binding (fail-closed there).
+    const created = sessionContinuity.createSession({});
+    sessionContinuity.bindChannel({ sessionId: created.sessionId, channel, claimedIdentity });
+    return sessionContinuity.resolveChannel({ channel, claimedIdentity });
+  }
+
   function ingest(channel, rawEvent) {
     const adapter = adapters.get(channel);
     if (!adapter) return Object.freeze({ accepted: false, code: "CHANNEL_NOT_SUPPORTED" });
-    return Object.freeze(adapter.ingestExternalEvent(rawEvent));
+    let canonicalSessionId = null;
+    if (sessionContinuity) {
+      const continuity = resolveContinuitySession(channel, rawEvent);
+      if (continuity && continuity.resolved) canonicalSessionId = continuity.sessionId;
+    }
+    const outcome = adapter.ingestExternalEvent(rawEvent);
+    if (canonicalSessionId !== null && outcome.accepted) {
+      return Object.freeze({ ...outcome, canonicalSessionId });
+    }
+    return Object.freeze(outcome);
   }
 
   function request(channel, rawEvent, { signal } = {}) {
@@ -236,7 +307,7 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
 
   async function ingestAttachments(channel, rawEvent, attachmentSpecs) {
     if (!mediaSubsystem) throw new TypeError("MEDIA_SUBSYSTEM_NOT_BOUND");
-    const eventCheck = safeRawEvent(rawEvent);
+    const eventCheck = safeRawEvent(rawEvent, channel);
     if (!eventCheck.ok) return Object.freeze({ accepted: false, code: eventCheck.code });
     const adapter = adapters.get(channel);
     if (!adapter) return Object.freeze({ accepted: false, code: "CHANNEL_NOT_SUPPORTED" });

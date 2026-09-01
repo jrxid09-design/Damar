@@ -78,14 +78,25 @@ function createDamarManager() {
 
 /** Trusted runtime composition: pair one Bus/MediaIngress ownership domain
  * with one Manager media-context brand and expose only channel ingestion.
- * No context mint, processor registry, or Manager dependency escapes. */
-function createDamarManagerIngressDomain({ bus, mediaSubsystem } = {}) {
+ * No context mint, processor registry, or Manager dependency escapes.
+ *
+ * Wave 5 Lane 4: the composition root owns the canonical session-continuity
+ * domain for this ingress composition (identity continuity across channels
+ * and restarts).  The continuity domain is inert identity machinery — it
+ * mints no authority and never reaches the Manager facade. */
+function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionContinuity = null } = {}) {
     const manager = createDamarManager();
+    const continuity = sessionContinuity !== null && sessionContinuity !== undefined
+        ? sessionContinuity
+        : require("../runtime/sessionContinuity").createSessionContinuity({
+            idFactory: require("../runtime/sessionContinuity").createCryptoContinuityIdFactory()
+        });
     return require("../runtime/interactionBus/managerIngressInternal").createManagerInteractionIngress({
         bus,
         manager,
         mediaSubsystem,
-        mediaContextMint: canonicalMediaContextAuthority.mint
+        mediaContextMint: canonicalMediaContextAuthority.mint,
+        sessionContinuity: continuity
     });
 }
 
