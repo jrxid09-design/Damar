@@ -38,6 +38,7 @@ const { fail, REASONS } = require("../action/errors");
 
 // The ONE canonical application Manager, created exactly once, lazily.
 let canonicalManager = null;
+let canonicalMediaContextAuthority = null;
 
 /**
  * Create the canonical application Damar Manager facade. Takes NO options.
@@ -51,6 +52,9 @@ function createDamarManager() {
             "canonical manager creation accepts NO options; the Lane 2/3/4 facades, planner, and channel adapters are bootstrap-owned");
     }
     if (canonicalManager === null) {
+        const { createMediaContextAuthority } = require("./internal/mediaContext");
+        const { createRealtimeMultimodalProcessor } = require("../runtime/realtimeMultimodal");
+        canonicalMediaContextAuthority = createMediaContextAuthority();
         canonicalManager = createDamarManagerComposition({
             deps: {
                 // Canonical certified fabric singletons (bootstrap-owned).
@@ -64,7 +68,9 @@ function createDamarManager() {
             },
             // Trusted built-in normalizers only; no caller-controlled registry
             // or adapter injection is exposed by this bootstrap.
-            trustedChannelAdapters: CHANNEL_ADAPTERS.slice()
+            trustedChannelAdapters: CHANNEL_ADAPTERS.slice(),
+            mediaProcessor: createRealtimeMultimodalProcessor(),
+            mediaContextAuthority: canonicalMediaContextAuthority
         });
     }
     return canonicalManager;
@@ -74,25 +80,12 @@ function createDamarManager() {
  * with one Manager media-context brand and expose only channel ingestion.
  * No context mint, processor registry, or Manager dependency escapes. */
 function createDamarManagerIngressDomain({ bus, mediaSubsystem } = {}) {
-    const { createMediaContextAuthority } = require("./internal/mediaContext");
-    const { createRealtimeMultimodalProcessor } = require("../runtime/realtimeMultimodal");
-    const mediaContextAuthority = createMediaContextAuthority();
-    const manager = createDamarManagerComposition({
-        deps: {
-            lane2: createCanonicalActionFacade(),
-            lane3: createCanonicalActuationFacade(),
-            lane4: createCanonicalVerificationFacade(),
-            planner: null
-        },
-        trustedChannelAdapters: CHANNEL_ADAPTERS.slice(),
-        mediaProcessor: createRealtimeMultimodalProcessor(),
-        mediaContextAuthority
-    });
+    const manager = createDamarManager();
     return require("../runtime/interactionBus/managerIngressInternal").createManagerInteractionIngress({
         bus,
         manager,
         mediaSubsystem,
-        mediaContextMint: mediaContextAuthority.mint
+        mediaContextMint: canonicalMediaContextAuthority.mint
     });
 }
 

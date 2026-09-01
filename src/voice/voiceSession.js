@@ -2,9 +2,7 @@
  * VoiceSession — satu putaran interaksi suara.
  *
  * Ini JEMBATAN ke AI Runtime yang SAMA dengan Telegram/WhatsApp/Console:
- * ia memanggil aiRuntime.cognition(), sehingga context budgeting, memory,
- * mind/consciousness, and audit trail remain available without granting
- * external tool execution or a second AI loop.
+ * ia menyerahkan interaksi ke InteractionBus/Manager kanonik.
  *
  * Sesi suara punya konteks persisten lewat ChannelManager (SessionStore
  * SQLite): channel "voice", peer "owner". Riwayat obrolan suara selamat
@@ -19,8 +17,16 @@ const PEER = "owner";
 
 class VoiceSession {
 
-    constructor({ aiRuntime = null } = {}) {
-        this.aiRuntime = aiRuntime ?? null;
+    constructor({ interactionIngress = null } = {}) {
+        this.interactionIngress = interactionIngress;
+    }
+
+    bindInteractionIngress(interactionIngress) {
+        if (!interactionIngress || typeof interactionIngress.request !== "function") {
+            throw new TypeError("VOICE_INTERACTION_INGRESS_INVALID");
+        }
+        this.interactionIngress = interactionIngress;
+        return this;
     }
 
     /** Muat riwayat suara (persisten). */
@@ -47,9 +53,8 @@ class VoiceSession {
      * @param {string} text transkrip perintah pengguna
      * @returns {Promise<{ answer: string }>}
      */
-    async think(text) {
-
-        const aiRuntime = this.aiRuntime ?? require("../services/aiRuntimeService");
+    async think(text, { signal } = {}) {
+        if (!this.interactionIngress) throw new Error("VOICE_INTERACTION_INGRESS_UNBOUND");
 
         const history = await this.history();
 
@@ -57,16 +62,18 @@ class VoiceSession {
         await this.remember("user", text);
 
         // Konteks permintaan: tool kirim-media & sejenisnya tahu ini dari voice.
-        const answer = await channelManager.runWithContext(
+        const rendered = await channelManager.runWithContext(
             { channel: "voice", chatId: PEER },
-            async () => {
-                const res = await aiRuntime.cognition({
-                    messages: history.map(({ role, content }) => ({ role, content })),
-                    sessionId: `voice:${PEER}`
-                });
-                return res.content?.trim() || "(tidak ada jawaban)";
-            }
+            () => this.interactionIngress.request("voice", {
+                text,
+                userId: PEER,
+                sessionId: `ses_voice-${PEER}`,
+                metadata: { historyTurns: history.length }
+            }, { signal })
         );
+        const answer = typeof rendered?.detail === "string" && rendered.detail.trim()
+            ? rendered.detail.trim()
+            : (rendered?.outcomeLabel || "(tidak ada jawaban)");
 
         await this.remember("assistant", answer);
 

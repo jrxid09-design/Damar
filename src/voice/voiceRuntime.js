@@ -27,7 +27,7 @@ const { VadDetector } = require("./providers/vad");
 
 class VoiceRuntime extends EventEmitter {
 
-    constructor({ config = voiceConfig, session = null } = {}) {
+    constructor({ config = voiceConfig, session = null, interactionIngress = null } = {}) {
 
         super();
         this.setMaxListeners(20);
@@ -37,7 +37,11 @@ class VoiceRuntime extends EventEmitter {
         this.enabled = false;
         this.running = false;
 
-        this.session = session ?? new VoiceSession();
+        this.session = session ?? new VoiceSession({ interactionIngress });
+        this._interactionHost = null;
+        this._turnController = null;
+        this._turnGeneration = 0;
+        this._activeCapture = null;
 
         this.machine = new StateMachine((from, to) => {
             this.emit("state", { from, to });
@@ -120,6 +124,10 @@ class VoiceRuntime extends EventEmitter {
             return this;
         }
 
+        if (!this.session.interactionIngress && typeof this.session.bindInteractionIngress === "function") {
+            this._interactionHost = await require("../runtime/host/runtimeHost").createRuntimeHost();
+            this.session.bindInteractionIngress(this._interactionHost.channels);
+        }
         this.session.register();
 
         // Standby stream: RMS dari mic untuk (a) deteksi tepuk tangan,
@@ -189,6 +197,11 @@ class VoiceRuntime extends EventEmitter {
     async stop() {
 
         this.running = false;
+        this._cancelActiveTurn();
+        if (this._activeCapture) {
+            try { await this._activeCapture.stop(); } catch { /* already stopped */ }
+            this._activeCapture = null;
+        }
 
         for (const t of this._timers) clearTimeout(t);
         this._timers.clear();
@@ -200,6 +213,10 @@ class VoiceRuntime extends EventEmitter {
         }
 
         await this.output.stop();
+        if (this._interactionHost) {
+            this._interactionHost.shutdown("voice-runtime-stop");
+            this._interactionHost = null;
+        }
         this.machine.reset();
 
         telemetry.publish("voice:stopped", {});
@@ -261,15 +278,16 @@ class VoiceRuntime extends EventEmitter {
      */
     async _wakeCycle() {
 
+        const turn = this._beginTurn();
         this._capturing = true;
 
         try {
 
-            const buf = await this._captureUtterance(4000);
+            const buf = await this._captureUtterance(4000, { signal: turn.controller.signal });
 
             if (!buf || buf.length < 20000) return;   // < ~0.6s audio: buang
 
-            const { text } = await this._transcribe(buf);
+            const { text } = await this._transcribe(buf, { signal: turn.controller.signal });
             if (!text) return;
 
             const r = this.wake.detect(text);
@@ -288,10 +306,10 @@ class VoiceRuntime extends EventEmitter {
 
             // Ack dibicarakan DULU (blocking) supaya mic berikutnya tidak
             // merekam suara Damar sendiri.
-            await this.speak(this.cfg.acknowledgement);
+            await this.speak(this.cfg.acknowledgement, { signal: turn.controller.signal, generation: turn.generation });
 
             // Lalu buka sesi dengar untuk perintah.
-            await this._listenCycle();
+            await this._listenCycle({ signal: turn.controller.signal });
 
         }
         catch (error) {
@@ -309,12 +327,12 @@ class VoiceRuntime extends EventEmitter {
      * Siklus LISTEN: rekam perintah (maks maxListenMs, VAD senyap 1.2s)
      * → STT → THINKING→SPEAKING via handleTranscript.
      */
-    async _listenCycle() {
+    async _listenCycle({ signal } = {}) {
 
         this.machine.transit(STATES.LISTENING);
         setImmediate(() => {});   // biarkan transisi terserap
 
-        const buf = await this._captureUtterance(this.cfg.maxListenMs || 8000);
+        const buf = await this._captureUtterance(this.cfg.maxListenMs || 8000, { signal });
 
         if (!buf || buf.length < 20000) {
             this.speak("Sepertinya tak ada perintah.").catch(() => {});
@@ -324,7 +342,7 @@ class VoiceRuntime extends EventEmitter {
 
         this.machine.transit(STATES.TRANSCRIBING);
 
-        const { text } = await this._transcribe(buf);
+        const { text } = await this._transcribe(buf, { signal });
 
         if (!text) {
             this.speak("Aku kurang menangkapnya.").catch(() => {});
@@ -340,11 +358,12 @@ class VoiceRuntime extends EventEmitter {
      * Rekam satu utterance: mulai sekarang, berhenti lebih awal bila
      * senyap ≥1.2 dtk SETELAH ada suara, atau saat maxMs habis.
      */
-    async _captureUtterance(maxMs = 4000) {
+    async _captureUtterance(maxMs = 4000, { signal } = {}) {
 
         const cap = await this.input.startCapture({ durationMs: maxMs + 1500 });
 
         if (!cap) return null;
+        this._activeCapture = cap;
 
         this._capturing = true;
 
@@ -355,6 +374,15 @@ class VoiceRuntime extends EventEmitter {
                 const startedAt = Date.now();
                 var spoke = false;
 
+                let settled = false;
+                const finish = () => {
+                    if (settled) return;
+                    settled = true;
+                    clearInterval(iv);
+                    clearTimeout(safety);
+                    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+                    cap.stop().then(resolve).catch(() => resolve(null));
+                };
                 const iv = setInterval(() => {
 
                     var now = Date.now();
@@ -364,36 +392,37 @@ class VoiceRuntime extends EventEmitter {
                     var elapsed = now - startedAt;
 
                     if ((spoke && silence > 1200) || elapsed > maxMs) {
-                        clearInterval(iv);
-                        cap.stop().then(resolve).catch(() => resolve(null));
+                        finish();
                     }
 
                 }, 120);
 
                 // Jaring pengaman
-                setTimeout(() => {
-                    clearInterval(iv);
-                    cap.stop().then(resolve).catch(() => resolve(null));
-                }, maxMs + 2500).unref?.();
+                const safety = setTimeout(finish, maxMs + 2500);
+                safety.unref?.();
+                const onAbort = signal ? finish : null;
+                if (onAbort) signal.addEventListener("abort", onAbort, { once: true });
 
             });
 
         }
         finally {
             this._capturing = false;
+            if (this._activeCapture === cap) this._activeCapture = null;
         }
 
     }
 
     /** STT via voiceService (faster-whisper dsb). Gagal → teks kosong. */
-    async _transcribe(buf) {
+    async _transcribe(buf, { signal } = {}) {
 
         try {
             const voice = require("../services/voiceService");
             const r = await voice.transcribe(buf, {
                 mimeType: "audio/wav",
                 language: this.cfg.language || "id",
-                localOnly: true
+                localOnly: true,
+                signal
             });
             return { text: (r.text || "").trim() };
         }
@@ -431,15 +460,19 @@ class VoiceRuntime extends EventEmitter {
         telemetry.publish("voice:wake", { source, text, gapMs });
 
         // Acknowledgement deterministik (tanpa LLM) — cepat.
-        this._acknowledge();
+        const turn = this._beginTurn();
+        this._acknowledge(turn);
 
     }
 
-    _acknowledge() {
+    _acknowledge(turn) {
         // "Ya?" / "Siap." — deterministic, local, langsung.
         this.emit("ack", this.cfg.acknowledgement);
         telemetry.publish("voice:ack", { ack: this.cfg.acknowledgement });
-        this.speak(this.cfg.acknowledgement).catch(() => {});
+        this.speak(this.cfg.acknowledgement, {
+            signal: turn?.controller.signal,
+            generation: turn?.generation
+        }).catch(() => {});
     }
 
     // ---- Tahapan interaksi ----------------------------------------
@@ -468,27 +501,33 @@ class VoiceRuntime extends EventEmitter {
 
         if (!text) return { answer: null, skipped: true };
 
+        const { controller, generation } = this._beginTurn();
         this.machine.transit(STATES.THINKING);
 
         try {
 
-            const { answer } = await this.session.think(text);
+            const { answer } = await this.session.think(text, { signal: controller.signal });
+            if (controller.signal.aborted || generation !== this._turnGeneration) return { answer: null, cancelled: true };
 
             this.machine.transit(STATES.SPEAKING);
 
             this.emit("answer", answer);
             telemetry.publish("voice:answer", { chars: answer.length });
 
-            await this.speak(answer);
+            await this.speak(answer, { signal: controller.signal, generation });
 
             return { answer };
 
         }
         catch (error) {
 
+            if (controller.signal.aborted || generation !== this._turnGeneration) return { answer: null, cancelled: true };
             this.lastError = error.message;
             telemetry.warn(`[voice] putaran gagal: ${error.message}`);
-            this.machine.reset();
+            if (generation === this._turnGeneration) {
+                this._turnController = null;
+                this.machine.reset();
+            }
             return { answer: null, error: error.message };
 
         }
@@ -503,7 +542,7 @@ class VoiceRuntime extends EventEmitter {
      * Ucapkan teks lewat TTS (voiceService) lalu putar lewat AudioOutput.
      * Graceful: kegagalan TTS/speaker TIDAK melempar ke pemanggil loop.
      */
-    async speak(text) {
+    async speak(text, { signal = null, generation = this._turnGeneration } = {}) {
 
         this._speaking = true;
         this._cancelled = false;
@@ -517,10 +556,11 @@ class VoiceRuntime extends EventEmitter {
             // putar hasilnya — dan barge-in bisa membatalkan pemutaran.
             const { audio } = await voice.speak(text, {
                 voice: voice.ttsVoice,
-                localOnly: true
+                localOnly: true,
+                signal
             });
 
-            if (this._cancelled) return;
+            if (this._cancelled || signal?.aborted || generation !== this._turnGeneration) return;
 
             await this.output.play(audio);
 
@@ -542,6 +582,11 @@ class VoiceRuntime extends EventEmitter {
     async interrupt() {
 
         this._cancelled = true;
+        this._cancelActiveTurn();
+        if (this._activeCapture) {
+            try { await this._activeCapture.stop(); } catch { /* already stopped */ }
+            this._activeCapture = null;
+        }
 
         await this.output.stop();
 
@@ -552,6 +597,20 @@ class VoiceRuntime extends EventEmitter {
         this.emit("interrupt");
         telemetry.publish("voice:interrupt", {});
 
+    }
+
+    _cancelActiveTurn() {
+        this._turnGeneration += 1;
+        if (this._turnController) this._turnController.abort();
+        this._turnController = null;
+    }
+
+    _beginTurn() {
+        this._cancelActiveTurn();
+        const controller = new AbortController();
+        const generation = ++this._turnGeneration;
+        this._turnController = controller;
+        return { controller, generation };
     }
 
     // ---- Status ----------------------------------------------------

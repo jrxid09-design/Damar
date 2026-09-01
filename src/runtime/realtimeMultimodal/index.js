@@ -85,7 +85,7 @@ function frozenResult(attachmentId, kind, status, code) {
     return Object.freeze({ attachmentId, kind, status, code });
 }
 
-async function boundedRead(read, signal, timeoutMs) {
+async function boundedOperation(operation, signal, timeoutMs) {
     if (signal?.aborted) fail("MULTIMODAL_CANCELLED");
     let timer;
     let onAbort;
@@ -98,7 +98,13 @@ async function boundedRead(read, signal, timeoutMs) {
         signal.addEventListener("abort", onAbort, { once: true });
     }) : new Promise(() => {});
     try {
-        return await Promise.race([read(), timeout, aborted]);
+        const observed = Promise.resolve().then(operation).then(
+            value => ({ ok: true, value }),
+            error => ({ ok: false, error })
+        );
+        const outcome = await Promise.race([observed, timeout, aborted]);
+        if (!outcome.ok) throw outcome.error;
+        return outcome.value;
     }
     finally {
         clearTimeout(timer);
@@ -132,7 +138,7 @@ function createRealtimeMultimodalProcessor({ processors = {}, limits } = {}) {
             if (!read || !("value" in read) || typeof read.value !== "function" || !id || !("value" in id)) {
                 fail("MULTIMODAL_CONTEXT_INVALID");
             }
-            const content = await boundedRead(read.value, signal, bounds.processorTimeoutMs);
+            const content = await boundedOperation(read.value, signal, bounds.processorTimeoutMs);
             if (!content || !plain(content.descriptor) || !Buffer.isBuffer(content.bytes)) fail("MULTIMODAL_READ_INVALID");
             const descriptor = content.descriptor;
             if (descriptor.attachmentId !== id.value) fail("MULTIMODAL_DESCRIPTOR_MISMATCH");
@@ -157,7 +163,11 @@ function createRealtimeMultimodalProcessor({ processors = {}, limits } = {}) {
             if (signal?.aborted) fail("MULTIMODAL_CANCELLED");
             const scopedBytes = Buffer.from(content.bytes);
             try {
-                await provider(Object.freeze({ descriptor, bytes: scopedBytes, request, signal }));
+                await boundedOperation(
+                    () => provider(Object.freeze({ descriptor, bytes: scopedBytes, request, signal })),
+                    signal,
+                    bounds.processorTimeoutMs
+                );
             }
             finally {
                 scopedBytes.fill(0);

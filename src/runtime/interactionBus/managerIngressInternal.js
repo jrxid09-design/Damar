@@ -109,6 +109,7 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
   }
 
   const adapters = new Map();
+  const pending = new Map();
   for (const [channel, descriptor] of Object.entries(CHANNELS)) {
     const adapterDefinition = channelAdapter(channel);
     adapters.set(channel, createTransportAdapter({
@@ -169,11 +170,21 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
               attachmentId: a.attachmentId,
               read: () => context.readMediaAccess(access[i], "manager-processing")
             })) : []));
+      // submit() dispatches synchronously; yield once so request() can attach
+      // its private waiter and cancellation controller by interaction id.
+      await Promise.resolve();
+      const waiter = pending.get(envelope.interactionId);
       try {
-        const result = await manager.handle(managerInput, Object.freeze({ mediaContext }));
-        context.stream.emit("FINAL", adapter.renderOutbound(result));
+        const result = await manager.handle(managerInput, Object.freeze({ mediaContext, signal: waiter?.controller.signal }));
+        const rendered = Object.freeze(adapter.renderOutbound(result));
+        context.stream.emit("FINAL", rendered);
         context.stream.emit("COMPLETE", { interactionId: envelope.interactionId });
+        waiter?.resolve(rendered);
+      } catch (error) {
+        waiter?.reject(error);
+        throw error;
       } finally {
+        pending.delete(envelope.interactionId);
         if (typeof context.releaseMediaAccess === "function") for (const handle of access) context.releaseMediaAccess(handle);
         if (typeof context.releaseMediaBinding === "function") context.releaseMediaBinding();
       }
@@ -184,6 +195,36 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
     const adapter = adapters.get(channel);
     if (!adapter) return Object.freeze({ accepted: false, code: "CHANNEL_NOT_SUPPORTED" });
     return Object.freeze(adapter.ingestExternalEvent(rawEvent));
+  }
+
+  function request(channel, rawEvent, { signal } = {}) {
+    if (signal?.aborted) {
+      return Promise.reject(Object.assign(new Error("VOICE_INTERACTION_CANCELLED"), { code: "VOICE_INTERACTION_CANCELLED" }));
+    }
+    const submitted = ingest(channel, rawEvent);
+    if (!submitted.accepted) {
+      return Promise.reject(Object.assign(new Error(submitted.code), { code: submitted.code }));
+    }
+    const controller = new AbortController();
+    return new Promise((resolve, reject) => {
+      let onAbort = null;
+      const cleanup = () => { if (onAbort) signal.removeEventListener("abort", onAbort); };
+      if (signal) {
+        onAbort = () => {
+          controller.abort();
+          cleanup();
+          reject(Object.assign(new Error("VOICE_INTERACTION_CANCELLED"), { code: "VOICE_INTERACTION_CANCELLED" }));
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+      pending.set(submitted.interactionId, {
+        controller,
+        resolve: value => { cleanup(); resolve(value); },
+        reject: error => { cleanup(); reject(error); }
+      });
+      try { bus.pump(); }
+      catch (error) { pending.delete(submitted.interactionId); cleanup(); reject(error); }
+    });
   }
 
   function render(channel, managerResult) {
@@ -219,6 +260,7 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
 
   return Object.freeze({
     ingest,
+    request,
     ingestAttachments,
     render,
     channels: Object.freeze(Object.keys(CHANNELS)),

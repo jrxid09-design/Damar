@@ -338,7 +338,7 @@ class VoiceService {
      * Semua gagal → error gabungan penyebab tiap mesin. TIDAK ada fallback
      * diam-diam ke suara OS di sisi daemon.
      */
-    async speak(text, { voice = null, format = "mp3", localOnly = false } = {}) {
+    async speak(text, { voice = null, format = "mp3", localOnly = false, signal = null } = {}) {
 
         const attempts = [];
 
@@ -359,13 +359,17 @@ class VoiceService {
 
         if (this.ttsConfigured && (!localOnly || isLocalEndpoint(this.ttsUrl))) {
 
+            let timer = null;
+            let onAbort = null;
             try {
 
                 const headers = { "Content-Type": "application/json" };
                 if (this.ttsKey) headers.Authorization = `Bearer ${this.ttsKey}`;
 
                 const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 60000);
+                timer = setTimeout(() => controller.abort(), 60000);
+                onAbort = signal ? () => controller.abort() : null;
+                if (onAbort) signal.addEventListener("abort", onAbort, { once: true });
 
                 const raw = voice || this.ttsVoice;
                 let resolvedVoice = this.ttsVoice;
@@ -403,8 +407,6 @@ class VoiceService {
                     signal: controller.signal
                 });
 
-                clearTimeout(timer);
-
                 if (!response.ok) {
                     const detail = await response.text().catch(() => "");
                     throw new Error(`menolak (${response.status}): ${detail.slice(0, 120)}`);
@@ -428,6 +430,10 @@ class VoiceService {
                 const msg = error.name === "AbortError" ? "timeout" : error.message;
                 attempts.push(`neural(${this.ttsUrl}): ${msg}`);
                 telemetry.warn(`[voice] neural TTS gagal: ${msg}`);
+            }
+            finally {
+                clearTimeout(timer);
+                if (onAbort) signal.removeEventListener("abort", onAbort);
             }
 
         }
@@ -469,7 +475,7 @@ class VoiceService {
      * @param {string} [opts.language]  kode ISO, mis. "id"
      * @returns {Promise<{ text: string }>}
      */
-    async transcribe(audio, { mimeType = "audio/webm", language = "id", localOnly = false } = {}) {
+    async transcribe(audio, { mimeType = "audio/webm", language = "id", localOnly = false, signal = null } = {}) {
 
         if (!this.sttConfigured) {
 
@@ -522,6 +528,8 @@ class VoiceService {
         const controller = new AbortController();
 
         const timer = setTimeout(() => controller.abort(), 60000);
+        const onAbort = signal ? () => controller.abort() : null;
+        if (onAbort) signal.addEventListener("abort", onAbort, { once: true });
 
         try {
 
@@ -578,6 +586,7 @@ class VoiceService {
 
         finally {
             clearTimeout(timer);
+            if (onAbort) signal.removeEventListener("abort", onAbort);
         }
 
     }
