@@ -23,6 +23,18 @@ function resolveEdge(want) {
     return null;
 }
 
+function isLocalEndpoint(value) {
+    try {
+        const url = new URL(value);
+        return (url.protocol === "http:" || url.protocol === "https:") &&
+            (url.hostname === "localhost" || url.hostname === "127.0.0.1" ||
+                url.hostname === "::1" || url.hostname === "[::1]");
+    }
+    catch {
+        return false;
+    }
+}
+
 async function edgeSpeak(text, voice) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "damar-edge-"));
     const out = path.join(dir, "s.mp3");
@@ -326,13 +338,13 @@ class VoiceService {
      * Semua gagal → error gabungan penyebab tiap mesin. TIDAK ada fallback
      * diam-diam ke suara OS di sisi daemon.
      */
-    async speak(text, { voice = null, format = "mp3" } = {}) {
+    async speak(text, { voice = null, format = "mp3", localOnly = false } = {}) {
 
         const attempts = [];
 
         const edgeVoice = resolveEdge(voice || this.ttsVoice);
 
-        if (edgeVoice) {
+        if (edgeVoice && !localOnly) {
             try {
                 const out = await edgeSpeak(text, edgeVoice);
                 this.lastEngine = "edge";
@@ -345,7 +357,7 @@ class VoiceService {
             }
         }
 
-        if (this.ttsConfigured) {
+        if (this.ttsConfigured && (!localOnly || isLocalEndpoint(this.ttsUrl))) {
 
             try {
 
@@ -420,7 +432,7 @@ class VoiceService {
 
         }
 
-        if (edgeVoice !== "id-ID-ArdiNeural") {
+        if (!localOnly && edgeVoice !== "id-ID-ArdiNeural") {
             try {
                 const out = await edgeSpeak(text, "id-ID-ArdiNeural");
                 this.lastEngine = "edge-fallback";
@@ -457,7 +469,7 @@ class VoiceService {
      * @param {string} [opts.language]  kode ISO, mis. "id"
      * @returns {Promise<{ text: string }>}
      */
-    async transcribe(audio, { mimeType = "audio/webm", language = "id" } = {}) {
+    async transcribe(audio, { mimeType = "audio/webm", language = "id", localOnly = false } = {}) {
 
         if (!this.sttConfigured) {
 
@@ -470,6 +482,12 @@ class VoiceService {
 
             throw error;
 
+        }
+
+        if (localOnly && !isLocalEndpoint(this.sttUrl)) {
+            const error = new Error("Canonical voice STT requires a local endpoint.");
+            error.code = "STT_LOCAL_REQUIRED";
+            throw error;
         }
 
         if (!audio || audio.length === 0) {

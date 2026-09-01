@@ -536,7 +536,7 @@ function createDamarManagerComposition({
             throw new TypeError("MEDIA_CONTEXT_INVALID");
         }
         if (mediaContext && capturedMediaProcessor) {
-            await capturedMediaProcessor(Object.freeze({ request, mediaContext }));
+            await capturedMediaProcessor(Object.freeze({ request, mediaContext, signal }));
         }
 
         // ---- 3. NON-ACTION COGNITION (no Lane 2/3 entry) -------------------

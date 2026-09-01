@@ -57,7 +57,8 @@ const CHANNEL_TYPES = Object.freeze({
     CLI: "cli",
     TELEGRAM: "telegram",
     WHATSAPP: "whatsapp",
-    COMPANION: "companion"
+    COMPANION: "companion",
+    VOICE: "voice"
 });
 
 const BOUNDS = Object.freeze({

@@ -3,7 +3,7 @@
 /**
  * DAMAR MANAGER — built-in channel normalizers (Lane 5).
  *
- * These are INERT declarative adapters for the five active channel classes.
+ * These are INERT declarative adapters for the active channel classes.
  * They shape transport payloads into normalized request material and render
  * outbound projections. They:
  *
@@ -73,7 +73,7 @@ function renderCommon(managerResult) {
 }
 
 /**
- * The five built-in adapter definitions (inert; wired through the trusted
+ * The built-in adapter definitions (inert; wired through the trusted
  * composition only). Each adapter is channel-specific ONLY in transport
  * decoding/presentation — the semantic classification is shared.
  */
@@ -100,6 +100,11 @@ const CHANNEL_ADAPTERS = Object.freeze([
     },
     {
         channelType: CHANNEL_TYPES.COMPANION,
+        normalizeInbound: normalizeCommon,
+        renderOutbound: renderCommon
+    },
+    {
+        channelType: CHANNEL_TYPES.VOICE,
         normalizeInbound: normalizeCommon,
         renderOutbound: renderCommon
     }

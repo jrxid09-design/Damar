@@ -149,14 +149,9 @@ async function createRuntimeCore({
     const busInstance = mediaDomain.bus;
     let channelIngress = null;
     if (!bus && enableManagerIngress) {
-        const { createDamarManager } = require("../manager/bootstrap");
-        const { createMediaContextAuthority } = require("../manager/internal/mediaContext");
-        const mediaContextAuthority = createMediaContextAuthority();
-        channelIngress = require("../runtime/interactionBus/managerIngressInternal").createManagerInteractionIngress({
+        channelIngress = require("../manager/bootstrap").createDamarManagerIngressDomain({
             bus: busInstance,
-            manager: createDamarManager(),
-            mediaSubsystem,
-            mediaContextMint: mediaContextAuthority.mint
+            mediaSubsystem
         });
     }
 

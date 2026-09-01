@@ -24,7 +24,8 @@ const CHANNELS = Object.freeze({
   cli: Object.freeze({ origin: "CLI", transportId: "channel.cli" }),
   telegram: Object.freeze({ origin: "TELEGRAM", transportId: "channel.telegram" }),
   whatsapp: Object.freeze({ origin: "WHATSAPP", transportId: "channel.whatsapp" }),
-  companion: Object.freeze({ origin: "COMPANION", transportId: "channel.companion" })
+  companion: Object.freeze({ origin: "COMPANION", transportId: "channel.companion" }),
+  voice: Object.freeze({ origin: "VOICE", transportId: "channel.voice" })
 });
 
 const ORIGIN_TO_CHANNEL = Object.freeze(Object.fromEntries(

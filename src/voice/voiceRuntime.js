@@ -392,7 +392,8 @@ class VoiceRuntime extends EventEmitter {
             const voice = require("../services/voiceService");
             const r = await voice.transcribe(buf, {
                 mimeType: "audio/wav",
-                language: this.cfg.language || "id"
+                language: this.cfg.language || "id",
+                localOnly: true
             });
             return { text: (r.text || "").trim() };
         }
@@ -463,7 +464,7 @@ class VoiceRuntime extends EventEmitter {
      */
     async handleTranscript(transcript) {
 
-        const text = String(transcript ?? "").trim();
+        const text = typeof transcript === "string" ? transcript.trim() : "";
 
         if (!text) return { answer: null, skipped: true };
 
@@ -515,7 +516,8 @@ class VoiceRuntime extends EventEmitter {
             // utuh; di masa depan bisa di-chunk. Untuk sekarang, kita
             // putar hasilnya — dan barge-in bisa membatalkan pemutaran.
             const { audio } = await voice.speak(text, {
-                voice: voice.ttsVoice
+                voice: voice.ttsVoice,
+                localOnly: true
             });
 
             if (this._cancelled) return;

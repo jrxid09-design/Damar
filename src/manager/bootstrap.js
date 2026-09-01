@@ -70,4 +70,30 @@ function createDamarManager() {
     return canonicalManager;
 }
 
-module.exports = { createDamarManager };
+/** Trusted runtime composition: pair one Bus/MediaIngress ownership domain
+ * with one Manager media-context brand and expose only channel ingestion.
+ * No context mint, processor registry, or Manager dependency escapes. */
+function createDamarManagerIngressDomain({ bus, mediaSubsystem } = {}) {
+    const { createMediaContextAuthority } = require("./internal/mediaContext");
+    const { createRealtimeMultimodalProcessor } = require("../runtime/realtimeMultimodal");
+    const mediaContextAuthority = createMediaContextAuthority();
+    const manager = createDamarManagerComposition({
+        deps: {
+            lane2: createCanonicalActionFacade(),
+            lane3: createCanonicalActuationFacade(),
+            lane4: createCanonicalVerificationFacade(),
+            planner: null
+        },
+        trustedChannelAdapters: CHANNEL_ADAPTERS.slice(),
+        mediaProcessor: createRealtimeMultimodalProcessor(),
+        mediaContextAuthority
+    });
+    return require("../runtime/interactionBus/managerIngressInternal").createManagerInteractionIngress({
+        bus,
+        manager,
+        mediaSubsystem,
+        mediaContextMint: mediaContextAuthority.mint
+    });
+}
+
+module.exports = { createDamarManager, createDamarManagerIngressDomain };
