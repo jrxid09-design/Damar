@@ -127,23 +127,18 @@ class VoiceRuntime extends EventEmitter {
         if (!this.session.interactionIngress && typeof this.session.bindInteractionIngress === "function") {
             this._interactionHost = await require("../runtime/host/runtimeHost").createRuntimeHost();
             this.session.bindInteractionIngress(this._interactionHost.channels);
-            // DSC-R3-001 / DSC-R3-006: bind the voice transport peer handle
-            // through the TRUSTED runtime seam.  Voice continuity is
-            // DEVICE/RUNTIME-SCOPED (one local Damar owner per voice
-            // runtime) — explicitly NOT physical-speaker identity.  The
-            // handle is minted by the trusted transport peer scope and is
-            // not constructible from raw events.
-            const transportPeer = require("../runtime/sessionContinuity/transportPeer");
-            const voiceScope = transportPeer.createTransportPeerScope({
-                channel: "voice",
-                supported: true,
-                scope: "RUNTIME_OWNER",
-                detail: "voice runtime local-owner device scope"
-            });
-            const bind = this._interactionHost.bindTransportPeerHandle(
-                "voice",
-                voiceScope.mint("voice-runtime-owner")
-            );
+            // DSC-R4-001/003/006: bind the voice transport peer through the
+            // PRIVATE canonical RuntimeHost transport composition seam.  The
+            // voice runtime does NOT mint a scope or a handle itself, and it
+            // supplies NO identity string — the RuntimeHost composition mints
+            // the canonical runtime-owner peer internally.  Voice continuity
+            // is DEVICE/RUNTIME-SCOPED (one local Damar owner per voice
+            // runtime) — explicitly NOT physical-speaker identity.  A raw
+            // event can never reach this seam.
+            const composition = this._interactionHost._continuityComposition;
+            const bind = composition && typeof composition.bindCanonicalTransportPeer === "function"
+                ? composition.bindCanonicalTransportPeer("voice")
+                : { ok: false, code: "TRANSPORT_PEER_SEAM_UNAVAILABLE" };
             if (!bind.ok) {
                 // Fail closed: voice continuity simply stays unbound; the
                 // ordinary ses_* interaction path continues.

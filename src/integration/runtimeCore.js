@@ -208,10 +208,13 @@ async function createRuntimeCore({
     // through the TRUSTED SINK (a closure the host passed in) — NOT through
     // any property of the returned core object.  The host keeps them in
     // private closure state; ordinary core consumers never see them.
+    // DSC-R4-002/004: there is NO trusted linker — cross-channel owner-
+    // confirmed linking is UNSUPPORTED (no canonical owner trust root), so
+    // only the private lifecycle facade and the private transport-binding
+    // composition seam are delivered.
     if (trustedContinuitySink && channelIngress) {
         trustedContinuitySink(Object.freeze({
             lifecycle: channelIngress.lifecycle,
-            linker: channelIngress.continuityLinker,
             composition: channelIngress.composition
         }));
     }

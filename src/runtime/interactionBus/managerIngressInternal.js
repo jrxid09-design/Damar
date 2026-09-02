@@ -167,7 +167,7 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
       throw new TypeError("MANAGER_INGRESS_TRUSTED_CONTINUITY_REQUIRED");
     }
     if (peerScopes === null || peerScopes === undefined ||
-        typeof peerScopes.scope !== "function" ||
+        typeof peerScopes.mintCanonical !== "function" ||
         typeof peerScopes.support !== "function") {
       throw new TypeError("MANAGER_INGRESS_TRANSPORT_PEER_SCOPES_REQUIRED");
     }
@@ -441,17 +441,23 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
     : null;
 
   /**
-   * TRUSTED seam: bind the current transport peer handle for a channel.
-   * Invoked by the canonical transport runtime (voice runtime start,
-   * console runtime start) — NEVER by raw events.  The handle must be minted
-   * by a trusted transport peer scope; unsupported channels are rejected
+   * TRUSTED seam: bind the CURRENT canonical runtime-owner transport peer
+   * for a channel.  Invoked ONLY by the RuntimeHost's private canonical
+   * transport binder (which the canonical VoiceRuntime adapter drives at
+   * start) — NEVER by raw events, and NEVER with a caller-supplied handle.
+   *
+   * DSC-R4-001: this seam takes NO handle argument.  The handle is minted
+   * by the trusted composition's OWN per-channel scope via
+   * `peerScopes.mintCanonical(channel)` — the same private scope whose
+   * per-scope brand recognizes it.  An ordinary caller can neither reach
+   * this seam nor substitute a foreign handle.  UNSUPPORTED channels throw
    * (fail closed).
    */
-  function bindTransportPeer(channel, handle) {
-    const scope = peerScopes.scope(channel);
-    if (!scope || !scope.isHandle(handle)) {
-      throw Object.assign(new Error("TRANSPORT_PEER_UNTRUSTED"), { code: "TRANSPORT_PEER_UNTRUSTED" });
+  function bindCanonicalTransportPeer(channel) {
+    if (!peerScopes || typeof peerScopes.mintCanonical !== "function") {
+      throw Object.assign(new Error("TRANSPORT_PEER_SEAM_UNAVAILABLE"), { code: "TRANSPORT_PEER_SEAM_UNAVAILABLE" });
     }
+    const handle = peerScopes.mintCanonical(channel); // throws if unsupported
     activeTransportPeers.set(channel, handle);
     return Object.freeze({ channel, peer: handle.peer, scope: handle.scope, bound: true });
   }
@@ -665,10 +671,10 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
         return continuity && continuity.resolution && continuity.resolution.resolved
           ? continuity.resolution.sessionId : null;
       },
-      // TRUSTED seam for the canonical transport runtime to bind its
-      // runtime-owned peer handle (DSC-R3-001).  NOT reachable from raw
-      // events; requires a scope-minted handle.
-      bindTransportPeer,
+      // TRUSTED no-argument seam for the canonical transport runtime to bind
+      // its runtime-owned peer (DSC-R4-001).  NOT reachable from raw events;
+      // the handle is minted by the composition's own per-channel scope.
+      bindCanonicalTransportPeer,
       // Honest per-transport support verdict (for diagnostics).
       transportSupport: (channel) => peerScopes.support(channel)
     })

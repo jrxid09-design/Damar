@@ -62,7 +62,19 @@ const {
   validateSnapshot,
   buildSnapshot
 } = require("./persistence");
-const { isTransportPeerHandle } = require("./transportPeer");
+// DSC-R4-001: there is deliberately NO global isTransportPeerHandle brand
+// check.  Provenance is PER-SCOPE: a handle is recognized only by the
+// private per-runtime scope that minted it, and that membership is verified
+// at the trusted composition boundary (peerScopes.mintCanonical) BEFORE the
+// handle reaches this domain.  Here we validate the handle's inert shape;
+// the unforgeable provenance guarantee is enforced one layer up.
+function isCanonicalTransportPeerHandleShape(value) {
+  return value !== null && typeof value === "object" &&
+    value.kind === "TransportPeerHandle" &&
+    typeof value.channel === "string" &&
+    typeof value.peer === "string" &&
+    typeof value.scope === "string";
+}
 
 const TERMINAL_INTERACTION_STATES = Object.freeze(new Set([
   "COMPLETED", "FAILED", "CANCELLED", "EXPIRED"
@@ -187,8 +199,8 @@ function createSessionContinuity(options = {}) {
    * ses_* transport-session id.
    */
   function mintPeerProvenance(peerHandle) {
-    if (!isTransportPeerHandle(peerHandle)) {
-      fail("PROVENANCE_UNTRUSTED", "peer provenance requires a minted TransportPeerHandle from a trusted transport peer scope");
+    if (!isCanonicalTransportPeerHandleShape(peerHandle)) {
+      fail("PROVENANCE_UNTRUSTED", "peer provenance requires a canonical TransportPeerHandle minted by the trusted per-runtime transport scope");
     }
     const provenance = Object.freeze({
       kind: "PeerProvenance",

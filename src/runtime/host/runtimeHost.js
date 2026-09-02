@@ -351,78 +351,42 @@ async function createRuntimeHost({
     }
 
     /**
-     * DSC-R3-001 TRUSTED RUNTIME SEAM: bind the current transport peer
-     * handle for a channel.  Only a handle minted by a trusted transport
-     * peer scope is accepted (WeakSet-branded; raw callers cannot produce
-     * one).  Invoked by the canonical transport runtime (voice runtime
-     * start, console runtime start) — never by channel events.
+     * DSC-R4-001/003 PRIVATE CANONICAL TRANSPORT BINDER.
+     *
+     * This is the ONLY way a transport's runtime-owner peer is bound for
+     * continuity.  It is NOT part of the ordinary returned host facade — it
+     * is a private composition closure, reachable ONLY by the canonical
+     * transport adapter that the RuntimeHost composition itself drives
+     * (today: the VoiceRuntime canonical adapter at start()).
+     *
+     * The handle is minted by the TRUSTED COMPOSITION's OWN per-channel
+     * scope (the same private scope that recognizes it), through the
+     * composition's no-argument `bindCanonicalTransportPeer` seam.  This host
+     * method supplies NOTHING but a channel name — no peer value, no handle,
+     * no identity string.  Consequently:
+     *
+     *   - an ordinary module can never mint or select the continuity peer;
+     *   - a foreign/test scope's handle is never involved (the composition
+     *     mints and recognizes through ONE per-runtime scope);
+     *   - a raw event / channel payload / model output can never reach this.
+     *
+     * Fail-closed: an UNSUPPORTED channel (telegram/whatsapp/console per the
+     * honest matrix) mints nothing and binds nothing.
      */
-    function bindTransportPeerHandle(channel, handle) {
+    function bindCanonicalTransportPeer(channel) {
         const composition = continuityLifecycleHandles ? continuityLifecycleHandles.composition : null;
-        if (!composition || typeof composition.bindTransportPeer !== "function") {
+        if (!composition || typeof composition.bindCanonicalTransportPeer !== "function") {
             return { ok: false, code: "TRANSPORT_PEER_SEAM_UNAVAILABLE" };
         }
         try {
-            const result = composition.bindTransportPeer(channel, handle);
+            const result = composition.bindCanonicalTransportPeer(channel);
             return { ok: true, ...result };
         } catch (error) {
             return { ok: false, code: error?.code ?? "TRANSPORT_PEER_BIND_FAILED" };
         }
     }
 
-    /**
-     * DSC-R2-006 REAL PRODUCTION TRUSTED LINK WORKFLOW.
-     *
-     * Links two owner-confirmed transport endpoints onto the same canonical
-     * continuity identity through the CANONICAL Device Identity & Pairing
-     * V1 owner-confirmation flow:
-     *
-     *   Device Identity ownerConfirm (verified: CONFIRMED pairing tx +
-     *   PAIRED trust state for both devices)
-     *   → each device carries a trusted transport binding registration
-     *     (registerContinuityTransportBinding — explicit trusted act,
-     *     never from event payload)
-     *   → private continuity linker (fail-closed conflict semantics)
-     *
-     * Links continuity identity ONLY — never principal, authority,
-     * capability, or permission.  Raw channel events, the ordinary
-     * host.channels facade, Manager payload, and model output can NEVER
-     * reach this operation.
-     */
-    function linkContinuityViaPairing({ identityService, pairings } = {}) {
-        const linker = continuityLifecycleHandles ? continuityLifecycleHandles.linker : null;
-        if (!linker || typeof linker.linkContinuityViaPairing !== "function") {
-            return { ok: false, code: "CONTINUITY_LINK_SEAM_UNAVAILABLE" };
-        }
-        try {
-            const result = linker.linkContinuityViaPairing({ identityService, pairings });
-            return { ok: true, ...result };
-        } catch (error) {
-            return { ok: false, code: error?.code ?? "CONTINUITY_LINK_FAILED", message: error?.message };
-        }
-    }
-
-    /**
-     * TRUSTED registration of a transport binding for an owner-confirmed
-     * device (companion to linkContinuityViaPairing).  Explicit trusted
-     * act; the peer value must be the runtime-owned transport identity
-     * (e.g. the voice/console runtime-owner scope value), never event
-     * payload text.
-     */
-    function registerContinuityTransportBinding({ identityService, deviceId, channel, peer } = {}) {
-        const linker = continuityLifecycleHandles ? continuityLifecycleHandles.linker : null;
-        if (!linker || typeof linker.registerTransportBinding !== "function") {
-            return { ok: false, code: "CONTINUITY_LINK_SEAM_UNAVAILABLE" };
-        }
-        try {
-            const result = linker.registerTransportBinding({ identityService, deviceId, channel, peer });
-            return { ok: true, ...result };
-        } catch (error) {
-            return { ok: false, code: error?.code ?? "CONTINUITY_LINK_FAILED", message: error?.message };
-        }
-    }
-
-    /** Honest per-transport continuity support verdict. */
+    /** Honest per-transport continuity support verdict (safe diagnostic). */
     function transportContinuitySupport(channel) {
         const composition = continuityLifecycleHandles ? continuityLifecycleHandles.composition : null;
         if (!composition || typeof composition.transportSupport !== "function") {
@@ -644,14 +608,13 @@ async function createRuntimeHost({
         getTransportAdaptersSnapshot,
         submitLocal,
         channels: core.channels,
-        // DSC-R3-001: trusted runtime transport-peer seam (scope-minted
-        // handles only; raw events can never satisfy it).
-        bindTransportPeerHandle,
+        // DSC-R4-003: the ordinary host facade exposes NO continuity trust
+        // administration.  The ONLY continuity-related member retained here
+        // is the safe, read-only per-transport support diagnostic.  Binding
+        // the canonical transport peer happens exclusively through the
+        // PRIVATE composition seam (_continuityComposition, below), which the
+        // canonical VoiceRuntime adapter drives — never an ordinary caller.
         transportContinuitySupport,
-        // DSC-R2-006: owner-confirmed trusted link workflow (Device
-        // Identity & Pairing V1 verification; unreachable from raw events).
-        linkContinuityViaPairing,
-        registerContinuityTransportBinding,
 
         health,
         status,
@@ -663,7 +626,21 @@ async function createRuntimeHost({
         recoverNow,
 
         // Referensi kanonik (read-only untuk pemeriksaan/pengujian):
-        core
+        core,
+
+        // DSC-R4-001/003 PRIVATE CANONICAL TRANSPORT COMPOSITION SEAM.
+        // Deliberately separated from the ordinary interaction/presence/
+        // lifecycle facade above (underscore-prefixed, frozen).  This is NOT
+        // a public admin API: it is the private adapter seam through which
+        // the canonical VoiceRuntime binds its runtime-owner continuity peer
+        // at start().  It accepts no handle, no peer value, and no identity
+        // string — only a channel name — and mints the peer internally from
+        // the runtime-owned canonical mint.  An ordinary holder of `host`
+        // cannot use it to choose an arbitrary continuity peer, and no raw
+        // event / channel payload / model output can reach it.
+        _continuityComposition: Object.freeze({
+            bindCanonicalTransportPeer
+        })
     });
 
     return host;
