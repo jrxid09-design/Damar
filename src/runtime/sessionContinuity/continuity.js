@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * DAMAR SESSION CONTINUITY — canonical domain (Wave 5 Lane 4, repair R1).
+ * DAMAR SESSION CONTINUITY — canonical domain (Wave 5 Lane 4, repair R2).
  *
  * A Damar session belongs to DAMAR, not to one transport.  This module owns
  * the CANONICAL session identity (`dsc_*`), the deterministic cross-channel
@@ -15,41 +15,42 @@
  *                                      token, capability, or principal.
  *   CHANNEL != IDENTITY            — transport ids are BINDINGS/EVIDENCE.
  *   TRANSPORT ID != DAMAR IDENTITY  — canonical ids are minted only here.
- *   PEER PROVENANCE IS TRUSTED-INPUT-ONLY (DSC-001):
- *                                      binding keys derive ONLY from a
- *                                      peer-provenance value minted at the
- *                                      trusted transport normalization
- *                                      boundary.  Raw event fields (userId,
- *                                      claimed ids) are NEVER treated as
- *                                      identity for binding.
+ *   TRUSTED PROVENANCE IS COMPOSITION-OWNED (DSC-R1-001/006):
+ *                                      peer provenance can be minted ONLY
+ *                                      by the trusted composition closure
+ *                                      (trustedLifecycle hook).  There is NO
+ *                                      public mint, NO public trusted
+ *                                      controller, NO resolver escape hatch.
  *   PEER PROVENANCE IS EXACT        — no case folding, no punctuation
- *                                      destruction, no shared "anon".
+ *                                      destruction, no shared "anon";
+ *                                      bounded by UTF-8 BYTES.
  *   SESSION BINDING != AUTHORITY    — binding a channel mints no privilege.
  *   CHANNEL SWITCH != PRIVILEGE ESCALATION.
  *   PERSISTED STATE != LIVE AUTHORITY — resume reconstructs inert continuity
  *                                      data only; capabilities/authorities are
  *                                      NEVER serialized or resurrected.
- *   NO MUTABLE STATE ESCAPES (DSC-002) — no public method returns or accepts
- *                                      a mutable canonical record or callback
- *                                      into one; all views are frozen inert
+ *   NO MUTABLE STATE ESCAPES        — all public views are frozen inert
  *                                      projections; all mutations are closed
  *                                      operations that validate BEFORE they
  *                                      mutate.
- *   ATOMIC TERMINAL OWNERSHIP (DSC-004) — a terminal outcome is committed in
- *                                      ONE internal transition that verifies
- *                                      session, incarnation, and interaction
- *                                      identity together.
- *   OLD WORK MUST NOT MUTATE NEW INCARNATION STATE.
+ *   OLD WORK MUST NOT MUTATE NEW INCARNATION — terminal commits must carry
+ *                                      the incarnation captured at ADMISSION,
+ *                                      never re-read at completion (DSC-R1-002).
  *   RESTORED != RESUMED             — restore yields CLOSED sessions; resume
  *                                      is an explicit generation-advancing act.
  *   RESUMED != AUTHORIZED           — resume mints no privilege of any kind.
+ *   BUS SESSION != DAMAR CONTINUITY SESSION.
+ *
+ * TRUST ARCHITECTURE (repair R2): createSessionContinuity accepts an OPTIONAL
+ * `trustedLifecycle` hook supplied by the trusted composition root.  That hook
+ * receives the private controller (restore/persist/shutdown/transfer/reset)
+ * and the provenance mint.  NOTHING trusted is reachable from the returned
+ * facade, from module exports, or via any token/resolver.
  *
  * This module contains NO model calls, NO tool calls, NO actuators, and no
  * second channel router: canonical flow remains
  *   channel → RuntimeHost → InteractionBus → Manager.
  */
-
-const crypto = require("node:crypto");
 
 const {
   assertCanonicalContinuitySessionId,
@@ -71,7 +72,7 @@ const DEFAULT_BOUNDS = Object.freeze({
   maxBindingsPerSession: 16,
   maxTerminalInteractions: 1024,
   maxResumeMetadataBytes: 2048,
-  maxPeerKeyBytes: 128
+  maxPeerBytes: 128
 });
 
 function fail(code, message, details) {
@@ -98,11 +99,8 @@ function isPlainData(value) {
   return true;
 }
 
-/**
- * Validate and FREEZE resume metadata.  Identical closed-data rules on every
- * mutation (creation, resume, update) — not only at persistence time.
- * Returns a frozen inert copy or null.
- */
+/** Validate and FREEZE resume metadata (same closed-data rules on every
+ * mutation).  Returns a frozen inert copy or null. */
 function validResumeMetadata(metadata) {
   if (metadata === undefined || metadata === null) return Object.freeze({});
   if (!isPlainData(metadata)) return null;
@@ -123,65 +121,34 @@ function validResumeMetadata(metadata) {
 }
 
 // ---------------------------------------------------------------------------
-// DSC-001 — TRUSTED PEER PROVENANCE
+// TRUSTED PEER PROVENANCE (DSC-R1-001 / DSC-R1-006)
 //
-// A PeerProvenance is minted ONLY at the trusted transport normalization
-// boundary (managerIngressInternal safeRawEvent seam → this module's mint
-// entrypoint).  It carries an EXACT peer string (case/punctuation preserved)
-// that the transport itself supplied through its trusted normalization path.
-// Raw caller fields never reach binding derivation directly.
+// PeerProvenance is minted ONLY inside createSessionContinuity's closure and
+// handed ONLY to the trustedLifecycle hook supplied by the composition root.
+// The mint derives from RUNTIME-OWNED transport evidence — the exact peer
+// string the canonical transport adapter produced (authenticated Telegram
+// sender/chat id, WhatsApp JID, runtime console identity, voice session
+// identity).  It is NEVER derived from raw caller event fields.
 //
-// The mint is deliberately one-way: the provenance token is an opaque
-// branded record recognized by identity in a closure-private WeakSet, so a
-// forged lookalike object cannot become trusted provenance.
+// Branding is closure-private (WeakSet), so no module consumer can forge a
+// provenance record, and no public mint exists at all.
 // ---------------------------------------------------------------------------
 
-const MINTED_PROVENANCE = new WeakSet();
-
-/** Mint trusted peer provenance at the trusted normalization boundary.
- * EXACT peer string required — no normalization, no case folding. */
-function mintPeerProvenance(channel, peer) {
-  if (typeof channel !== "string" || !/^[a-z][a-z0-9_]{0,31}$/.test(channel)) {
-    fail("PROVENANCE_CHANNEL_INVALID", "channel must be a canonical channel name");
-  }
-  // DSC-001.4: missing/untrusted peer identity must NOT collapse into a
-  // shared identity.  Peer must be an exact non-empty bounded non-blank
-  // string (whitespace-only ids are "missing" for continuity purposes).
-  if (typeof peer !== "string" || peer.length === 0 || peer.length > 128 || peer.trim().length === 0) {
-    fail("PROVENANCE_PEER_INVALID", "peer provenance requires an exact non-empty bounded peer string");
-  }
-  const provenance = Object.freeze({
-    kind: "PeerProvenance",
-    channel,
-    peer,
-    key: `${channel}\u0000${peer}`
-  });
-  MINTED_PROVENANCE.add(provenance);
-  return provenance;
-}
-
-function isPeerProvenance(value) {
-  return value !== null && typeof value === "object" && MINTED_PROVENANCE.has(value);
-}
-
-function requirePeerProvenance(value, what) {
-  if (!isPeerProvenance(value)) {
-    fail("PROVENANCE_UNTRUSTED", `${what || "operation"} requires trusted peer provenance`);
-  }
-  return value;
-}
-
 /**
- * createSessionContinuity({ clock, idFactory, store, persistOnMutation })
+ * createSessionContinuity({ clock, idFactory, store, persistOnMutation,
+ *                            trustedLifecycle })
  *
  * All dependencies are injected; the domain owns no globals, no timers, and
  * no authority.  `store` is the inert persistence contract from
- * persistence.js (memory store default for tests; the production
- * composition selects a durable file store — DSC-003).
+ * persistence.js.  `trustedLifecycle` is the OPTIONAL trusted hook: a
+ * function ({ controller, mintPeerProvenance }) => void called ONCE at
+ * construction by the trusted composition root to capture the private
+ * controller.  If omitted, the domain simply has no trusted consumer —
+ * provenance can never be minted and no binding can ever form (fail closed).
  *
- * DSC-003: `persistOnMutation` makes every durable-state mutation commit
- * the bounded snapshot through the store at the mutation point (no timer
- * loops).  Persistence failures are reported, never silently swallowed.
+ * DSC-R1-005: persistence uses a bounded COALESCING scheduler — at most one
+ * active write; mutations only mark state dirty; the writer re-checks and
+ * re-writes while dirty.  O(1) scheduling state regardless of mutation count.
  */
 function createSessionContinuity(options = {}) {
   const clock = typeof options.clock === "function" ? options.clock : () => Date.now();
@@ -194,8 +161,10 @@ function createSessionContinuity(options = {}) {
     throw new TypeError("SESSION_CONTINUITY_STORE_INVALID");
   }
   const persistOnMutation = options.persistOnMutation === true;
-  let persistChain = Promise.resolve();
-  let lastPersistError = null;
+  const trustedLifecycle = options.trustedLifecycle;
+  if (trustedLifecycle !== undefined && typeof trustedLifecycle !== "function") {
+    throw new TypeError("SESSION_CONTINUITY_TRUSTED_LIFECYCLE_INVALID");
+  }
 
   // ---- live inert state (NEVER escapes this closure) ---------------------
   const sessions = new Map();          // dsc_* → session record
@@ -204,6 +173,46 @@ function createSessionContinuity(options = {}) {
   let persistedGeneration = 0;
   let restored = false;
   let degradedReason = null;
+  let shutDown = false;
+
+  // ---- trusted peer provenance (closure-private brand) -------------------
+  const MINTED_PROVENANCE = new WeakSet();
+
+  /**
+   * TRUSTED-ONLY: mint peer provenance from RUNTIME-OWNED transport
+   * evidence.  The peer string must be the exact transport identity
+   * (case/punctuation meaningful and preserved).  Bounded by UTF-8 BYTES.
+   */
+  function mintPeerProvenance(channel, peer) {
+    if (typeof channel !== "string" || !/^[a-z][a-z0-9_]{0,31}$/.test(channel)) {
+      fail("PROVENANCE_CHANNEL_INVALID", "channel must be a canonical channel name");
+    }
+    // Missing/untrusted peer evidence must NOT collapse into a shared
+    // identity: an exact, non-blank, byte-bounded string is required.
+    if (typeof peer !== "string" || peer.length === 0 ||
+        Buffer.byteLength(peer, "utf8") > DEFAULT_BOUNDS.maxPeerBytes ||
+        peer.trim().length === 0) {
+      fail("PROVENANCE_PEER_INVALID", "peer provenance requires runtime-owned exact peer evidence bounded by UTF-8 bytes");
+    }
+    if (/[\u0000-\u001f\u007f]/.test(peer)) {
+      fail("PROVENANCE_PEER_INVALID", "peer evidence must not contain control characters");
+    }
+    const provenance = Object.freeze({
+      kind: "PeerProvenance",
+      channel,
+      peer,
+      key: `${channel}\u0000${peer}`
+    });
+    MINTED_PROVENANCE.add(provenance);
+    return provenance;
+  }
+
+  function requirePeerProvenance(value, what) {
+    if (value === null || typeof value !== "object" || !MINTED_PROVENANCE.has(value)) {
+      fail("PROVENANCE_UNTRUSTED", `${what || "operation"} requires trusted peer provenance`);
+    }
+    return value;
+  }
 
   function touchSession(session, now) {
     session.updatedAt = now;
@@ -219,38 +228,133 @@ function createSessionContinuity(options = {}) {
     }
   }
 
-  // ---- persistence (DSC-003: mutation-bound commit point) -----------------
-  async function persist() {
-    const snapshot = buildSnapshot(clock(), sessions, terminal);
-    persistedGeneration = snapshot.savedAt;
-    await store.persist(snapshot);
-    lastPersistError = null;
-    return Object.freeze({ persisted: true, savedAt: snapshot.savedAt });
+  // ---------------------------------------------------------------------------
+  // DSC-R1-005B — bounded COALESCING persistence scheduler.
+  //
+  //   mutation → markDirty()
+  //   at most ONE writer is ever active
+  //   writer: snapshot latest state → write → re-check dirty → maybe rewrite
+  //
+  // Scheduling state is O(1): { dirty, writing, idleResolvers[], lastError }.
+  // `whenPersisted()` resolves only when currently-known dirty state is
+  // durable.  Failures are surfaced (lastError) and contained; the next
+  // mutation retries.
+  // ---------------------------------------------------------------------------
+  const scheduler = {
+    dirty: false,
+    writing: false,
+    started: false,
+    idleResolvers: [],
+    lastError: null
+  };
+
+  function markDirty() {
+    if (!persistOnMutation) return;
+    scheduler.dirty = true;
+    scheduler.started = true;
+    ensureWriter();
   }
 
-  /** Serialize persistence of sequential mutations and record failures. */
-  function persistAfterMutation(label) {
-    if (!persistOnMutation) return;
-    persistChain = persistChain.then(() => persist()).catch((error) => {
-      lastPersistError = {
-        label: String(label).slice(0, 64),
-        code: error && error.code ? String(error.code) : "PERSIST_FAILURE",
-        at: clock()
-      };
+  function ensureWriter() {
+    if (scheduler.writing || !scheduler.dirty || shutDown) return;
+    scheduler.writing = true;
+    scheduler.started = true;
+    // The writer runs detached but fully contained: no unhandled rejection.
+    (async () => {
+      try {
+        while (scheduler.dirty && !shutDown) {
+          scheduler.dirty = false;
+          const snapshot = buildSnapshot(clock(), sessions, terminal);
+          try {
+            await store.persist(snapshot);
+            persistedGeneration = snapshot.savedAt;
+            scheduler.lastError = null;
+          } catch (error) {
+            // Surface deterministically; the NEXT mutation re-arms the
+            // writer.  Never retry in a loop.
+            scheduler.lastError = {
+              code: error && error.code ? String(error.code) : "PERSIST_FAILURE",
+              at: clock()
+            };
+            scheduler.dirty = true;
+            break;
+          }
+        }
+      } finally {
+        scheduler.writing = false;
+        if (!scheduler.dirty) {
+          const waiters = scheduler.idleResolvers;
+          scheduler.idleResolvers = [];
+          for (const resolve of waiters) resolve();
+        }
+        // If dirty state remains (failure or new mutations during unwind),
+        // it is re-armed ONLY by the next mutation or an explicit flush —
+        // never by an unbounded self-retriggering loop.
+      }
+    })();
+  }
+
+  /** Resolve when all currently-known dirty state is durable. */
+  function whenPersisted() {
+    if (!persistOnMutation) return Promise.resolve();
+    if (!scheduler.dirty && !scheduler.writing) return Promise.resolve();
+    // If the writer cannot run (e.g. shutdown latched), perform the flush
+    // directly so the caller never parks forever.
+    if (shutDown || (!scheduler.writing && !scheduler.started)) {
+      return (async () => {
+        const snapshot = buildSnapshot(clock(), sessions, terminal);
+        try {
+          await store.persist(snapshot);
+          persistedGeneration = snapshot.savedAt;
+          scheduler.dirty = false;
+          scheduler.lastError = null;
+        } finally {
+          const waiters = scheduler.idleResolvers;
+          scheduler.idleResolvers = [];
+          for (const resolve of waiters) resolve();
+        }
+      })();
+    }
+    return new Promise((resolve) => {
+      scheduler.idleResolvers.push(resolve);
     });
+  }
+
+  /** Await the write of the CURRENT state (shutdown seam). */
+  async function flushOnce() {
+    if (!persistOnMutation) {
+      // Even in non-durable mode a flush writes once for callers that ask.
+      const snapshot = buildSnapshot(clock(), sessions, terminal);
+      await store.persist(snapshot);
+      persistedGeneration = snapshot.savedAt;
+      return Object.freeze({ persisted: true, savedAt: snapshot.savedAt });
+    }
+    scheduler.dirty = true;
+    ensureWriter();
+    await whenPersisted();
+    if (scheduler.lastError !== null && scheduler.dirty) {
+      // The writer stopped on a failure; surface it deterministically.
+      const error = new Error(`[PERSIST_FAILURE] ${scheduler.lastError.code}`);
+      error.name = "SessionContinuityError";
+      error.code = scheduler.lastError.code;
+      throw error;
+    }
+    return Object.freeze({ persisted: true, savedAt: persistedGeneration });
   }
 
   function getPersistenceStatus() {
     return Object.freeze({
       persistOnMutation,
-      lastPersistError: lastPersistError === null ? null : Object.freeze({ ...lastPersistError }),
-      pendingWrites: 0
+      dirty: persistOnMutation && scheduler.dirty,
+      writerActive: scheduler.writing,
+      pendingWrites: scheduler.writing ? 1 : (scheduler.dirty ? 1 : 0),
+      lastError: scheduler.lastError === null ? null : Object.freeze({ ...scheduler.lastError })
     });
   }
 
-  /** Await all queued mutation-bound persistence (tests / shutdown seam). */
-  function whenPersisted() {
-    return persistChain;
+  /** Explicit snapshot commit (trusted lifecycle / tests). */
+  async function persist() {
+    return flushOnce();
   }
 
   /**
@@ -271,10 +375,7 @@ function createSessionContinuity(options = {}) {
       restored = false;
       degradedReason = raw.reason || "SNAPSHOT_CORRUPT";
       return Object.freeze({
-        restored: false,
-        degraded: true,
-        reason: degradedReason,
-        sessions: 0
+        restored: false, degraded: true, reason: degradedReason, sessions: 0
       });
     }
     const verdict = validateSnapshot(raw);
@@ -282,10 +383,7 @@ function createSessionContinuity(options = {}) {
       restored = false;
       degradedReason = verdict.reason;
       return Object.freeze({
-        restored: false,
-        degraded: true,
-        reason: verdict.reason,
-        sessions: 0
+        restored: false, degraded: true, reason: verdict.reason, sessions: 0
       });
     }
     sessions.clear();
@@ -310,14 +408,10 @@ function createSessionContinuity(options = {}) {
     }
     restored = true;
     degradedReason = null;
-    return Object.freeze({
-      restored: true,
-      degraded: false,
-      sessions: sessions.size
-    });
+    return Object.freeze({ restored: true, degraded: false, sessions: sessions.size });
   }
 
-  // ---- inert views (DSC-002: frozen projections only) ---------------------
+  // ---- inert views (frozen projections only) ------------------------------
   function projectSession(session) {
     return Object.freeze({
       sessionId: session.sessionId,
@@ -331,10 +425,9 @@ function createSessionContinuity(options = {}) {
     });
   }
 
-  // ---- canonical identity ----------------------------------------------
-  /** Mint a NEW canonical session.  Canonical ids never collide with
-   * transport ids because they are minted here, deterministically bounded. */
+  // ---- canonical identity -------------------------------------------------
   function createSession({ resumeMetadata } = {}) {
+    if (shutDown) fail("DOMAIN_SHUTDOWN", "continuity domain is shut down");
     const metadata = validResumeMetadata(resumeMetadata);
     if (metadata === null) {
       fail("RESUME_METADATA_INVALID", "resume metadata must be bounded inert data");
@@ -356,7 +449,7 @@ function createSessionContinuity(options = {}) {
       state: "ACTIVE"
     };
     sessions.set(sessionId, session);
-    persistAfterMutation("createSession");
+    markDirty();
     return Object.freeze({
       sessionId,
       incarnation: session.incarnation,
@@ -372,14 +465,12 @@ function createSessionContinuity(options = {}) {
     return projectSession(session);
   }
 
-  // ---- cross-channel bindings (DSC-001: provenance-gated) -----------------
+  // ---- cross-channel bindings (trusted-provenance gated) ------------------
   /**
    * Bind a trusted channel peer to a canonical session.  Deterministic for
    * the same trusted provenance.  A binding CANNOT be stolen: binding a
-   * channel+peer already bound to a DIFFERENT session fails closed
-   * (BINDING_CONFLICT) on the public path.  Trusted transfer is available
-   * ONLY through the trusted internal seam (`trustedTransferBinding`), which
-   * the composition root may call; arbitrary channel callers cannot reach it.
+   * channel+peer already bound to a DIFFERENT session fails closed.
+   * Binding TRANSFER exists only on the private trusted controller.
    */
   function bindChannel({ sessionId, provenance } = {}) {
     assertCanonicalContinuitySessionId(sessionId);
@@ -417,64 +508,12 @@ function createSessionContinuity(options = {}) {
       bindingIndex.set(key, sessionId);
     }
     touchSession(session, now);
-    persistAfterMutation("bindChannel");
+    markDirty();
     return Object.freeze({
       sessionId,
       channel: provenance.channel,
       peer: provenance.peer,
       generation: session.incarnation
-    });
-  }
-
-  /**
-   * TRUSTED-ONLY seam: transfer a binding between canonical sessions (e.g.
-   * explicit cross-session unification by trusted runtime policy).  This is
-   * NOT on the public inert facade; the composition root decides whether to
-   * expose it.  Even here it mints no authority — it only moves identity
-   * continuity.
-   */
-  function trustedTransferBinding({ provenance, toSessionId } = {}) {
-    requirePeerProvenance(provenance, "trustedTransferBinding");
-    assertCanonicalContinuitySessionId(toSessionId);
-    const target = sessions.get(toSessionId);
-    if (!target) {
-      fail("SESSION_NOT_FOUND", "cannot transfer a binding to an unknown session");
-    }
-    if (target.terminalAt !== null) {
-      fail("SESSION_TERMINAL", "cannot transfer a binding to a terminal session");
-    }
-    const key = provenance.key;
-    const previous = bindingIndex.get(key);
-    const now = clock();
-    if (previous && previous !== toSessionId) {
-      const previousSession = sessions.get(previous);
-      if (previousSession) {
-        previousSession.channels = previousSession.channels.filter(
-          (b) => compositeBindingKey(b) !== key
-        );
-        touchSession(previousSession, now);
-      }
-    }
-    const alreadyBound = target.channels.some((b) => compositeBindingKey(b) === key);
-    if (!alreadyBound) {
-      if (target.channels.length >= DEFAULT_BOUNDS.maxBindingsPerSession) {
-        fail("BINDING_LIMIT_EXCEEDED", "session binding bound reached");
-      }
-      target.channels.push({
-        channel: provenance.channel,
-        peer: provenance.peer,
-        boundAt: now,
-        generation: target.incarnation
-      });
-    }
-    bindingIndex.set(key, toSessionId);
-    touchSession(target, now);
-    persistAfterMutation("trustedTransferBinding");
-    return Object.freeze({
-      channel: provenance.channel,
-      peer: provenance.peer,
-      fromSessionId: previous && previous !== toSessionId ? previous : null,
-      toSessionId
     });
   }
 
@@ -495,16 +534,14 @@ function createSessionContinuity(options = {}) {
     session.channels = session.channels.filter((b) => compositeBindingKey(b) !== key);
     bindingIndex.delete(key);
     touchSession(session, now);
-    persistAfterMutation("unbindChannel");
+    markDirty();
     return Object.freeze({ sessionId, channel: provenance.channel, peer: provenance.peer });
   }
 
   /**
    * Resolve a trusted channel event to its canonical session WITHOUT minting
    * authority: resolution is scoped to this domain, keyed by trusted peer
-   * provenance ONLY.  Caller-supplied session id claims are inert evidence
-   * and are IGNORED for selection (DSC-001: they can never select a session
-   * the binding policy does not already own).
+   * provenance ONLY.
    */
   function resolveChannel({ provenance } = {}) {
     requirePeerProvenance(provenance, "resolveChannel");
@@ -530,14 +567,7 @@ function createSessionContinuity(options = {}) {
     });
   }
 
-  // ---- restart / resume -------------------------------------------------
-  /**
-   * Resume a session after restart (or from a restored CLOSED state).
-   * Resume is an EXPLICIT lifecycle act that enters a NEW incarnation:
-   * stale pre-restart work stamped with an older incarnation can no longer
-   * write session state, and the resumed session owns its new lifecycle.
-   * RESUMED != AUTHORIZED: resume mints nothing.
-   */
+  // ---- restart / resume ----------------------------------------------------
   function resumeSession({ sessionId, resumeMetadata } = {}) {
     assertCanonicalContinuitySessionId(sessionId);
     const session = sessions.get(sessionId);
@@ -559,13 +589,11 @@ function createSessionContinuity(options = {}) {
     session.incarnation += 1;
     session.state = "ACTIVE";
     session.resumeMetadata = metadata;
-    // Bindings remain evidence but are re-stamped to the new incarnation so
-    // stale binding writes cannot replace the newer generation's ownership.
     for (const binding of session.channels) {
       binding.generation = session.incarnation;
     }
     touchSession(session, now);
-    persistAfterMutation("resumeSession");
+    markDirty();
     return Object.freeze({
       sessionId: session.sessionId,
       incarnation: session.incarnation,
@@ -575,9 +603,8 @@ function createSessionContinuity(options = {}) {
     });
   }
 
-  /** Closed metadata update (DSC-002): validated inert input, internal
-   * mutation, frozen inert result.  Requires the CURRENT incarnation — old
-   * work can never mutate a new incarnation. */
+  /** Closed metadata update: validated inert input, internal mutation,
+   * frozen inert result.  Requires the CURRENT incarnation. */
   function updateResumeMetadata({ sessionId, generation, resumeMetadata } = {}) {
     assertCanonicalContinuitySessionId(sessionId);
     if (!Number.isSafeInteger(generation) || generation < 1) {
@@ -603,7 +630,7 @@ function createSessionContinuity(options = {}) {
     }
     session.resumeMetadata = candidate;
     touchSession(session, clock());
-    persistAfterMutation("updateResumeMetadata");
+    markDirty();
     return Object.freeze({
       sessionId: session.sessionId,
       incarnation: session.incarnation,
@@ -625,23 +652,18 @@ function createSessionContinuity(options = {}) {
     session.terminalAt = now;
     session.state = "CLOSED";
     touchSession(session, now);
-    persistAfterMutation("closeSession");
+    markDirty();
     return Object.freeze({ sessionId, terminalAt: now, reason: String(reason).slice(0, 64) });
   }
 
-  // ---- generation / stale-work safety -----------------------------------
+  // ---- generation / stale-work safety --------------------------------------
   function currentIncarnation(sessionId) {
     if (!isCanonicalContinuitySessionId(sessionId)) return null;
     const session = sessions.get(sessionId);
     return session ? session.incarnation : null;
   }
 
-  /**
-   * DSC-002: verify a stamped generation against the session's CURRENT
-   * incarnation WITHOUT exposing mutable state.  Returns a frozen verdict.
-   * (The old applyWithIncarnation(mutator) callback API is REMOVED — no
-   * public path may mutate canonical records through a caller callback.)
-   */
+  /** Pure frozen verdict — no mutable state access. */
   function checkIncarnation({ sessionId, generation } = {}) {
     if (!isCanonicalContinuitySessionId(sessionId)) {
       return Object.freeze({ ok: false, reason: "SESSION_NOT_FOUND" });
@@ -662,18 +684,35 @@ function createSessionContinuity(options = {}) {
     return Object.freeze({ ok: true, sessionId, currentGeneration: session.incarnation });
   }
 
-  // ---- DSC-004: ATOMIC TERMINAL TRANSITION -------------------------------
+  // ---- DSC-R1-002 + DSC-004: ADMISSION-CAPTURED OWNERSHIP -----------------
   /**
-   * The ONE terminal commit transition.  In a single internal operation it
-   * verifies: the session exists, the session state permits the transition,
-   * the expected incarnation is current (OLD WORK MUST NOT MUTATE NEW
-   * INCARNATION TERMINAL STATE), and the interaction has not already
-   * terminally completed; then it records the terminal result and persists
-   * when durable state changed.
-   *
-   * Duplicate terminal attempts are idempotent.  Stale incarnations fail
-   * WITHOUT mutating terminal state.  There is no other public path that
-   * records terminal state.
+   * Capture the immutable ownership tuple for an interaction AT ADMISSION.
+   * The returned incarnation is the incarnation CURRENT at admission; the
+   * ingress must carry it through execution and use it at completion —
+   * NEVER re-read currentIncarnation() later.
+   */
+  function captureAdmissionOwnership({ sessionId } = {}) {
+    assertCanonicalContinuitySessionId(sessionId);
+    const session = sessions.get(sessionId);
+    if (!session) {
+      fail("SESSION_NOT_FOUND", "cannot capture admission ownership for an unknown session");
+    }
+    if (session.terminalAt !== null) {
+      fail("SESSION_TERMINAL", "terminal sessions cannot admit work");
+    }
+    return Object.freeze({
+      sessionId: session.sessionId,
+      incarnationAtAdmission: session.incarnation
+    });
+  }
+
+  /**
+   * The ONE terminal commit transition.  `generation` MUST be the ADMISSION
+   * incarnation carried by the in-flight interaction — completing old work
+   * after a resume yields STALE_GENERATION and never mutates the new
+   * incarnation's terminal state.  In one internal transition: verify
+   * session existence, session state, current incarnation == admission
+   * incarnation, interaction non-duplication; then record + persist.
    */
   function commitTerminalOutcome({ sessionId, interactionId, generation, state } = {}) {
     assertCanonicalContinuitySessionId(sessionId);
@@ -690,14 +729,11 @@ function createSessionContinuity(options = {}) {
     if (!session) {
       fail("SESSION_NOT_FOUND", "cannot commit a terminal outcome for an unknown session");
     }
-    // Session-state ownership: terminal sessions can never receive more work.
     if (session.terminalAt !== null) {
       fail("SESSION_TERMINAL", "terminal sessions cannot receive terminal outcomes");
     }
     const existing = terminal.get(interactionId);
     if (existing) {
-      // Idempotent containment: the FIRST terminal state wins; later
-      // attempts (including stale async resolve/reject) change nothing.
       return Object.freeze({
         interactionId,
         sessionId: existing.sessionId,
@@ -706,9 +742,8 @@ function createSessionContinuity(options = {}) {
         idempotent: true
       });
     }
-    // Incarnation ownership: stale generations fail WITHOUT mutation.
     if (generation !== session.incarnation) {
-      fail("STALE_GENERATION", "terminal outcome is stamped with a stale session incarnation", {
+      fail("STALE_GENERATION", "terminal outcome carries a stale admission incarnation", {
         sessionId,
         currentGeneration: session.incarnation,
         presentedGeneration: generation
@@ -724,7 +759,7 @@ function createSessionContinuity(options = {}) {
       generation,
       at: clock()
     });
-    persistAfterMutation("commitTerminalOutcome");
+    markDirty();
     return Object.freeze({ interactionId, sessionId, state, recorded: true, idempotent: false });
   }
 
@@ -735,10 +770,9 @@ function createSessionContinuity(options = {}) {
   }
 
   /**
-   * Contain a stale async resolve/reject arriving after restart: the outcome
-   * is accepted only if the session is live AND the presented incarnation is
-   * current AND the interaction is not already terminal.  This is a pure
-   * check — the terminal commit itself is `commitTerminalOutcome`.
+   * Containment check for a stale async resolve/reject: accepted only if the
+   * session is live, the presented (admission) incarnation is current, and
+   * the interaction is not already terminal.
    */
   function acceptAsyncOutcome({ interactionId, sessionId, generation } = {}) {
     const session = sessions.get(sessionId);
@@ -755,7 +789,7 @@ function createSessionContinuity(options = {}) {
     return Object.freeze({ accepted: true });
   }
 
-  // ---- diagnostics ------------------------------------------------------
+  // ---- diagnostics -----------------------------------------------------------
   function snapshotDiagnostics() {
     return Object.freeze({
       schemaVersion: SNAPSHOT_VERSION,
@@ -769,67 +803,126 @@ function createSessionContinuity(options = {}) {
     });
   }
 
-  /**
-   * DSC-003: graceful shutdown FLUSHES the durable snapshot.  It NEVER
-   * deletes persisted state (destructive reset is a separate explicit
-   * administrative operation — `resetDurableState`).  In-memory state is
-   * released.
-   */
-  async function shutdown() {
-    await persistChain;
+  // ---------------------------------------------------------------------------
+  // Graceful shutdown (shared by the public facade and the trusted
+  // controller): flush ALL currently-known dirty state, release memory,
+  // NEVER delete persisted state.  Awaitable.
+  // ---------------------------------------------------------------------------
+  async function domainShutdown() {
+    // Flush ALL currently-known dirty state BEFORE latching the shutdown
+    // flag (the flag legitimately stops future mutation scheduling).
     let flushed = null;
-    if (persistOnMutation) {
-      try {
-        flushed = await persist();
-      } catch (error) {
-        flushed = Object.freeze({ failed: true, code: error?.code ?? "PERSIST_FAILURE" });
+    try {
+      scheduler.dirty = true;
+      ensureWriter();
+      await whenPersisted();
+      if (scheduler.dirty && scheduler.lastError === null) {
+        // Writer stopped (e.g. failure loop): perform one direct final write.
+        const snapshot = buildSnapshot(clock(), sessions, terminal);
+        await store.persist(snapshot);
+        persistedGeneration = snapshot.savedAt;
+        scheduler.dirty = false;
       }
-    } else {
-      try {
-        flushed = await persist();
-      } catch (error) {
-        flushed = Object.freeze({ failed: true, code: error?.code ?? "PERSIST_FAILURE" });
-      }
+      flushed = Object.freeze({ persisted: true, savedAt: persistedGeneration });
+    } catch (error) {
+      flushed = Object.freeze({ failed: true, code: error?.code ?? "PERSIST_FAILURE" });
     }
+    shutDown = true;
     sessions.clear();
     bindingIndex.clear();
     terminal.clear();
+    // Release any waiters still parked.
+    const waiters = scheduler.idleResolvers;
+    scheduler.idleResolvers = [];
+    for (const resolve of waiters) resolve();
     return Object.freeze({ shutdown: true, flushed });
   }
 
-  /** EXPLICIT destructive administrative reset (not normal shutdown). */
-  async function resetDurableState() {
-    if (typeof store.clear === "function") {
-      await store.clear();
-    }
-    sessions.clear();
-    bindingIndex.clear();
-    terminal.clear();
-    return Object.freeze({ reset: true });
-  }
-
-  // ---- trusted internal controller ---------------------------------------
-  // The trusted composition root may capture this controller to perform
-  // lifecycle integration (boot restore, shutdown flush, binding transfer).
-  // It is NOT part of the public inert facade: the controller token is a
-  // frozen opaque value resolvable only through the closure-private
-  // resolver exported for the composition root.
+  // ---------------------------------------------------------------------------
+  // PRIVATE TRUSTED CONTROLLER — handed ONLY to the trustedLifecycle hook.
+  // Never returned from the facade, never exported from the module, and
+  // reachable by no token/resolver mechanism whatsoever.
+  // ---------------------------------------------------------------------------
   const trustedController = Object.freeze({
     restore,
     persist,
-    shutdown,
+    shutdown: domainShutdown,
     mintPeerProvenance,
-    // Trusted-only binding transfer (explicit cross-session unification).
-    // Never exposed on the public facade; never reachable by channel events.
-    trustedTransferBinding,
-    resetDurableState
+    // TRUSTED-ONLY binding transfer (explicit cross-session unification).
+    trustedTransferBinding({ provenance, toSessionId } = {}) {
+      requirePeerProvenance(provenance, "trustedTransferBinding");
+      assertCanonicalContinuitySessionId(toSessionId);
+      const target = sessions.get(toSessionId);
+      if (!target) {
+        fail("SESSION_NOT_FOUND", "cannot transfer a binding to an unknown session");
+      }
+      if (target.terminalAt !== null) {
+        fail("SESSION_TERMINAL", "cannot transfer a binding to a terminal session");
+      }
+      const key = provenance.key;
+      const previous = bindingIndex.get(key);
+      const now = clock();
+      if (previous && previous !== toSessionId) {
+        const previousSession = sessions.get(previous);
+        if (previousSession) {
+          previousSession.channels = previousSession.channels.filter(
+            (b) => compositeBindingKey(b) !== key
+          );
+          touchSession(previousSession, now);
+        }
+      }
+      const alreadyBound = target.channels.some((b) => compositeBindingKey(b) === key);
+      if (!alreadyBound) {
+        if (target.channels.length >= DEFAULT_BOUNDS.maxBindingsPerSession) {
+          fail("BINDING_LIMIT_EXCEEDED", "session binding bound reached");
+        }
+        target.channels.push({
+          channel: provenance.channel,
+          peer: provenance.peer,
+          boundAt: now,
+          generation: target.incarnation
+        });
+      }
+      bindingIndex.set(key, toSessionId);
+      touchSession(target, now);
+      markDirty();
+      return Object.freeze({
+        channel: provenance.channel,
+        peer: provenance.peer,
+        fromSessionId: previous && previous !== toSessionId ? previous : null,
+        toSessionId
+      });
+    },
+    // EXPLICIT destructive administrative reset — private, composition-only.
+    async resetDurableState() {
+      if (typeof store.clear === "function") {
+        await store.clear();
+      }
+      sessions.clear();
+      bindingIndex.clear();
+      terminal.clear();
+      return Object.freeze({ reset: true });
+    }
   });
 
-  const publicFacade = Object.freeze({
+  if (trustedLifecycle !== undefined) {
+    try {
+      trustedLifecycle(trustedController);
+    } catch (error) {
+      // A broken trusted hook must not leave a half-constructed domain.
+      throw new TypeError("SESSION_CONTINUITY_TRUSTED_LIFECYCLE_FAULT");
+    }
+  }
+
+  // ---- PUBLIC INERT FACADE ---------------------------------------------------
+  // DSC-R1-001/003: NO __trusted, NO provenance mint, NO resetDurableState,
+  // NO trusted transfer, NO resolver.  Bounded continuity operations only.
+  return Object.freeze({
     // canonical identity
     createSession,
     getSession,
-    // cross-channel bindings (trusted-provenance gated)
+    // cross-channel bindings (trusted-provenance gated; provenance can only
+    // be minted by the trusted composition closure via trustedLifecycle)
     bindChannel,
     unbindChannel,
     resolveChannel,
@@ -838,10 +931,11 @@ function createSessionContinuity(options = {}) {
     closeSession,
     persist,
     restore,
-    // generation ownership (pure checks; no mutable state access)
+    // generation ownership (pure checks; admission capture)
     currentIncarnation,
     checkIncarnation,
-    // terminal lifecycle (atomic ownership)
+    captureAdmissionOwnership,
+    // terminal lifecycle (atomic, admission-incarnation-owned)
     commitTerminalOutcome,
     getTerminalInteraction,
     acceptAsyncOutcome,
@@ -851,44 +945,15 @@ function createSessionContinuity(options = {}) {
     snapshotDiagnostics,
     getPersistenceStatus,
     whenPersisted,
-    shutdown,
-    // EXPLICIT destructive administrative reset (never normal shutdown)
-    resetDurableState
+    // graceful shutdown (non-destructive; flushes)
+    shutdown: domainShutdown
   });
-
-  return Object.freeze({
-    ...publicFacade,
-    // Trusted composition seam (composition root only).  A WeakSet brand
-    // prevents arbitrary callers from forging the controller: only the
-    // closure that created the domain can mint a controller token.
-    __trusted: Object.freeze({
-      controller: mintTrustedController(trustedController, publicFacade)
-    })
-  });
-}
-
-// Trusted-controller brand: closure-private per domain instance.
-const CONTROLLER_TOKENS = new WeakMap();
-function mintTrustedController(controller, facade) {
-  const token = Object.freeze({ kind: "SessionContinuityTrustedController" });
-  CONTROLLER_TOKENS.set(token, { controller, facade });
-  return token;
-}
-function resolveTrustedController(token) {
-  const entry = CONTROLLER_TOKENS.get(token);
-  return entry ? entry.controller : null;
 }
 
 module.exports = Object.freeze({
   createSessionContinuity,
-  // Trusted-boundary helpers (used by the trusted normalization seam)
-  mintPeerProvenance,
-  isPeerProvenance,
-  // Inert vocabulary
+  // Inert vocabulary ONLY — deliberately NO mintPeerProvenance, NO
+  // isPeerProvenance, NO _resolveTrustedController, NO trusted tokens.
   TERMINAL_INTERACTION_STATES,
-  DEFAULT_BOUNDS,
-  // Internal repair-time helper for the composition root
-  _resolveTrustedController: resolveTrustedController,
-  _fail: fail,
-  _validResumeMetadata: validResumeMetadata
+  DEFAULT_BOUNDS
 });

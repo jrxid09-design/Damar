@@ -139,17 +139,72 @@ async function cleanupAbandonedStaging(directory, maxScan = 64) {
   return reclaimed;
 }
 
+// ---------------------------------------------------------------------------
+// Same-process durable-store OWNERSHIP (default-store ambiguity closure).
+//
+// Multiple createRuntimeHost() compositions in ONE process can accidentally
+// target the same durable snapshot path.  Cross-process/Mesh locking is
+// explicitly OUT OF SCOPE; this is a narrow process-local registry: exactly
+// one active durable owner per normalized absolute path.  A second accidental
+// owner fails closed with a typed ownership error.  Ownership is released on
+// completed store shutdown.  Memory-mode stores are unaffected.
+// ---------------------------------------------------------------------------
+const ACTIVE_FILE_STORE_OWNERS = new Map(); // normalized path → store handle
+
+function acquireFileStoreOwnership(normalizedPath, storeHandle) {
+  if (ACTIVE_FILE_STORE_OWNERS.has(normalizedPath)) {
+    const error = new Error(
+      `[CONTINUITY_STORE_OWNED] durable continuity store is already owned by another active composition in this process: ${normalizedPath}`
+    );
+    error.name = "SessionContinuityError";
+    error.code = "CONTINUITY_STORE_OWNED";
+    error.details = { path: normalizedPath };
+    throw error;
+  }
+  ACTIVE_FILE_STORE_OWNERS.set(normalizedPath, storeHandle);
+}
+
+function releaseFileStoreOwnership(normalizedPath, storeHandle) {
+  if (ACTIVE_FILE_STORE_OWNERS.get(normalizedPath) === storeHandle) {
+    ACTIVE_FILE_STORE_OWNERS.delete(normalizedPath);
+    return true;
+  }
+  return false;
+}
+
+function isFileStoreOwned(normalizedPath) {
+  return ACTIVE_FILE_STORE_OWNERS.has(normalizedPath);
+}
+
 /**
  * Durable file store: one bounded JSON snapshot per continuity domain,
  * written atomically.  Malformed/oversized snapshots on disk fail CLOSED
  * (load returns { corrupt: true } and the caller degrades to a fresh
  * continuity domain — never resurrect unvalidated state).
+ *
+ * Same-process ownership: constructing a second file store over the SAME
+ * absolute path while the first is still active fails closed with
+ * CONTINUITY_STORE_OWNED.  Ownership is released by store.shutdown().
  */
 function createFileContinuityStore(file) {
   if (typeof file !== "string" || file.length === 0 || !path.isAbsolute(file)) {
     throw new TypeError("CONTINUITY_STORE_FILE_INVALID");
   }
-  const directory = path.dirname(file);
+  const normalizedPath = path.resolve(file);
+  const directory = path.dirname(normalizedPath);
+  // Same-process ownership: exactly one active durable owner per path.
+  acquireFileStoreOwnership(normalizedPath, null);
+  let released = false;
+  function releaseOwnershipOnce() {
+    if (released) return;
+    released = true;
+    releaseFileStoreOwnership(normalizedPath, ACTIVE_FILE_STORE_OWNERS.get(normalizedPath));
+  }
+  const storeHandle = Object.freeze({
+    path: normalizedPath,
+    shutdown() { releaseOwnershipOnce(); }
+  });
+  ACTIVE_FILE_STORE_OWNERS.set(normalizedPath, storeHandle);
   return Object.freeze({
     async load() {
       // Hygiene: reclaim abandoned staging from a crashed previous run
@@ -157,7 +212,7 @@ function createFileContinuityStore(file) {
       await cleanupAbandonedStaging(directory);
       let raw;
       try {
-        raw = await fsp.readFile(file, "utf8");
+        raw = await fsp.readFile(normalizedPath, "utf8");
       } catch (error) {
         if (error && error.code === "ENOENT") return null;
         return { corrupt: true, reason: "READ_FAILED" };
@@ -191,7 +246,7 @@ function createFileContinuityStore(file) {
         await handle.close().catch(() => {});
       }
       try {
-        fs.renameSync(staging, file);
+        fs.renameSync(staging, normalizedPath);
         // Hygiene: make the rename itself durable where the platform allows.
         await syncDirectory(directory);
       } catch (error) {
@@ -201,9 +256,14 @@ function createFileContinuityStore(file) {
       return Object.freeze({ persisted: true });
     },
     async clear() {
-      await fsp.unlink(file).catch((error) => {
+      await fsp.unlink(normalizedPath).catch((error) => {
         if (!error || error.code !== "ENOENT") throw error;
       });
+    },
+    /** Release same-process ownership (idempotent, non-destructive). */
+    async shutdown() {
+      releaseOwnershipOnce();
+      return Object.freeze({ released: true });
     }
   });
 }
@@ -300,10 +360,12 @@ function validateSnapshot(raw) {
       if (typeof binding.channel !== "string" || !CHANNEL_RE.test(binding.channel)) {
         return { corrupt: true, reason: "BINDING_ENTRY_CHANNEL_INVALID" };
       }
-      // EXACT peer string (DSC-001): non-empty, bounded, no control chars,
-      // no NUL (the composite-key separator).
-      if (typeof binding.peer !== "string" || binding.peer.length === 0 || binding.peer.length > 128 ||
-          /[\u0000-\u001f]/.test(binding.peer)) {
+      // EXACT peer string (DSC-001 + peer byte-bound): non-empty, bounded by
+      // actual UTF-8 BYTES (not JS characters), no control chars, no NUL
+      // (the composite-key separator).  Fail closed — never truncate.
+      if (typeof binding.peer !== "string" || binding.peer.length === 0 ||
+          Buffer.byteLength(binding.peer, "utf8") > 128 ||
+          /[\u0000-\u001f\u007f]/.test(binding.peer)) {
         return { corrupt: true, reason: "BINDING_ENTRY_PEER_INVALID" };
       }
       if (!safeInteger(binding.boundAt, 0, Number.MAX_SAFE_INTEGER) ||

@@ -105,6 +105,8 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
     let continuity = sessionContinuity !== null && sessionContinuity !== undefined
         ? sessionContinuity
         : null;
+    let trustedContinuity = null;
+    let continuityStoreHandle = null;
     if (continuity === null) {
         const sessionContinuityMod = require("../runtime/sessionContinuity");
         const storeFile = continuityStoreFile !== undefined
@@ -114,24 +116,60 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
             // Explicit inert mode (DAMAR_CONTINUITY_STATE=memory): continuity
             // identity is still resolved, but nothing is durable.
             continuity = sessionContinuityMod.createSessionContinuity({
-                idFactory: sessionContinuityMod.createCryptoContinuityIdFactory()
+                idFactory: sessionContinuityMod.createCryptoContinuityIdFactory(),
+                // DSC-R1-001: the trusted controller is captured HERE, inside
+                // the trusted composition closure, and never escapes.
+                trustedLifecycle(controller) {
+                    trustedContinuity = Object.freeze({
+                        mintPeerProvenance: controller.mintPeerProvenance
+                    });
+                }
             });
         } else {
-            // Production default: durable file store, persisted at every
-            // durable-state mutation (no timer loops).
+            // Production default: durable file store (same-process ownership
+            // enforced), persisted through a bounded coalescing scheduler.
+            const store = sessionContinuityMod.createFileContinuityStore(storeFile);
+            continuityStoreHandle = store;
             continuity = sessionContinuityMod.createSessionContinuity({
                 idFactory: sessionContinuityMod.createCryptoContinuityIdFactory(),
-                store: sessionContinuityMod.createFileContinuityStore(storeFile),
-                persistOnMutation: true
+                store,
+                persistOnMutation: true,
+                // DSC-R1-001: the trusted controller is captured HERE, inside
+                // the trusted composition closure, and never escapes.
+                trustedLifecycle(controller) {
+                    trustedContinuity = Object.freeze({
+                        mintPeerProvenance: controller.mintPeerProvenance
+                    });
+                }
             });
         }
     }
+    // DSC-R1-006: RUNTIME-OWNED peer evidence provider.  This is the trusted
+    // composition's per-channel transport identity extraction.  For the
+    // canonical ingress channels, the runtime-owned evidence field is
+    // `trustedPeerEvidence` — set ONLY by trusted transport adapters that
+    // themselves derived the identity from the transport layer (authenticated
+    // Telegram sender/chat id, WhatsApp JID from the transport, runtime-owned
+    // console/voice identity).  The raw caller `userId` field is deliberately
+    // NOT consulted: caller-supplied text can never establish continuity
+    // identity.
+    const peerEvidenceProvider = (channel, rawEvent) => {
+        if (rawEvent === null || typeof rawEvent !== "object") return "";
+        const descriptor = Object.getOwnPropertyDescriptor(rawEvent, "trustedPeerEvidence");
+        if (!descriptor || !("value" in descriptor)) return "";
+        const evidence = descriptor.value;
+        if (typeof evidence !== "string") return "";
+        return evidence;
+    };
     return require("../runtime/interactionBus/managerIngressInternal").createManagerInteractionIngress({
         bus,
         manager,
         mediaSubsystem,
         mediaContextMint: canonicalMediaContextAuthority.mint,
-        sessionContinuity: continuity
+        sessionContinuity: continuity,
+        trustedContinuity,
+        peerEvidenceProvider,
+        continuityStoreHandle
     });
 }
 

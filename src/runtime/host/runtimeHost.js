@@ -357,14 +357,20 @@ async function createRuntimeHost({
         return shutdown(reason);
     }
 
-    /** Idempoten. Mematikan aktivitas presence, adapter, lalu core. */
+    /** Idempoten. Mematikan aktivitas presence, adapter, lalu core.
+     *
+     * DSC-R1-005: the returned result is an AWAITABLE thenable —
+     * `await host.shutdown(...)` resolves only after durable continuity
+     * state is flushed.  Synchronous callers keep the previous contract:
+     * the result object still exposes `shutDown` / `idempotent` / `reason`
+     * immediately. */
     function shutdown(reason = "SHUTDOWN") {
         if (shutDown) {
-            return Object.freeze({ shutDown: true, idempotent: true, reason });
+            return buildShutdownResult(Object.freeze({ shutDown: true, idempotent: true, reason }), Promise.resolve({ flushed: true, idempotent: true }));
         }
         if (phaseMachine.isTerminal()) {
             shutDown = true;
-            return Object.freeze({ shutDown: true, idempotent: true, reason });
+            return buildShutdownResult(Object.freeze({ shutDown: true, idempotent: true, reason }), Promise.resolve({ flushed: true, idempotent: true }));
         }
         shutDown = true;
         phaseMachine.transitionTo(HOST_PHASE.SHUTTING_DOWN, reason);
@@ -375,21 +381,21 @@ async function createRuntimeHost({
         adapters.clear();
 
         // ------------------------------------ CONTINUITY SHUTDOWN FLUSH (Lane 4)
-        // DSC-003: graceful shutdown FLUSHES the durable continuity snapshot.
-        // It NEVER deletes persisted state (destructive reset is a separate
-        // explicit administrative operation on the domain).
-        let continuityFlush = null;
-        if (core.channels && typeof core.channels.flushContinuity === "function") {
-            try {
-                // The flush is fire-and-forget from the synchronous shutdown
-                // path; contain its failure explicitly so a late persistence
-                // error can never become an unhandled rejection.
-                continuityFlush = core.channels.flushContinuity();
-                if (continuityFlush && typeof continuityFlush.then === "function") {
-                    continuityFlush.catch(() => Object.freeze({ failed: true, code: "FLUSH_CONTAINED" }));
+        // DSC-R1-005: graceful shutdown FLUSHES the durable continuity
+        // snapshot and NEVER deletes persisted state (destructive reset is
+        // a separate explicit administrative operation on the domain).  The
+        // flush is fully awaited by the returned thenable; late failures
+        // are contained so they can never become unhandled rejections.
+        const continuityFlushPromise = (async () => {
+            if (core.channels && typeof core.channels.shutdownContinuity === "function") {
+                try {
+                    return await core.channels.shutdownContinuity();
+                } catch {
+                    return Object.freeze({ failed: true, code: "FLUSH_CONTAINED" });
                 }
-            } catch { /* flush best-effort; snapshot already persisted per mutation */ }
-        }
+            }
+            return null;
+        })();
 
         try {
             rt.requestShutdown(producers.host, String(reason).slice(0, 200));
@@ -402,7 +408,35 @@ async function createRuntimeHost({
         } catch { /* core sudah shutdown */ }
 
         phaseMachine.transitionTo(HOST_PHASE.TERMINATED, "terminated");
-        return Object.freeze({ shutDown: true, idempotent: false, reason, continuityFlush });
+        return buildShutdownResult(
+            Object.freeze({ shutDown: true, idempotent: false, reason }),
+            continuityFlushPromise
+        );
+    }
+
+    /** Freeze a shutdown result that is BOTH synchronously inspectable and
+     * awaitable (awaits durable continuity flush). */
+    function buildShutdownResult(syncShape, flushPromise) {
+        let promise = null;
+        const result = Object.freeze({
+            ...syncShape,
+            get continuityFlush() { return flushPromise; },
+            then(onFulfilled, onRejected) {
+                if (!promise) {
+                    promise = (async () => {
+                        let flushed = null;
+                        try {
+                            flushed = await flushPromise;
+                        } catch {
+                            flushed = Object.freeze({ failed: true, code: "FLUSH_CONTAINED" });
+                        }
+                        return Object.freeze({ ...syncShape, continuityFlush: flushed });
+                    })();
+                }
+                return promise.then(onFulfilled, onRejected);
+            }
+        });
+        return result;
     }
 
     // ------------------------------------------------------- FAIL/RECOVER

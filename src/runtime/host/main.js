@@ -47,15 +47,18 @@ async function main() {
     console.log(`[damar-runtime-host] v${host.version} phase=${host.phase} ` +
         `presence=${host.core.presence.lifecycleState} pid=${process.pid}`);
 
-    const shutdown = (signal) => {
+    const shutdown = async (signal) => {
         console.log(`[damar-runtime-host] ${signal} → graceful shutdown`);
         try { hotkeys.close(); } catch { /* idempoten */ }
         try { if (bridge) bridge.detach(); } catch { /* idempoten */ }
-        host.requestShutdown({ reason: `signal:${signal}` });
+        // DSC-R1-005: await the durable continuity flush BEFORE exiting.
+        try {
+            await host.requestShutdown({ reason: `signal:${signal}` });
+        } catch { /* contained: snapshot already persisted per mutation */ }
         process.exit(0);
     };
-    process.on("SIGINT", () => shutdown("SIGINT"));
-    process.on("SIGTERM", () => shutdown("SIGTERM"));
+    process.on("SIGINT", () => { void shutdown("SIGINT"); });
+    process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
 
     return { host, hotkeys, tray, bridge };
 }

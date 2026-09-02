@@ -299,6 +299,30 @@ function createDamarManagerComposition({
                 throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "continuitySessionId must be a canonical dsc_* identity");
             }
         }
+        // DSC-R1-004: prior logical-conversation turns read by the trusted
+        // ingress through the EXISTING ChannelManager seam (dsc:* key).
+        // INERT CONTEXT PROVENANCE ONLY — it is never a principal, never
+        // authority, and never participates in request classification.
+        // Bounded: at most 20 turns, each role/content bounded inertly.
+        let continuityContext = null;
+        if (input.continuityContext !== undefined && input.continuityContext !== null) {
+            if (!Array.isArray(input.continuityContext) || input.continuityContext.length > 20) {
+                throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "continuityContext must be a bounded array of at most 20 turns");
+            }
+            const turns = [];
+            for (const turn of input.continuityContext) {
+                if (turn === null || typeof turn !== "object" || Array.isArray(turn)) {
+                    throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "continuityContext turn must be a plain object");
+                }
+                if (Object.getOwnPropertySymbols(turn).length > 0) {
+                    throw mfail(MREASONS.SYMBOL_VALUE, "symbol keys are not permitted");
+                }
+                const role = turn.role === "assistant" ? "assistant" : "user";
+                const content = typeof turn.content === "string" ? turn.content.slice(0, 4096) : "";
+                turns.push({ role, content });
+            }
+            continuityContext = deepFreezeM(turns);
+        }
         const peer = mRequireString(input.peer ?? "", "peer", MBOUNDS.MAX_CHANNEL_ID_CHARS, { optional: true, allowEmpty: true });
         const correlationId = mRequireString(input.correlationId ?? sessionId, "correlationId", MBOUNDS.MAX_CORRELATION_CHARS, { optional: true, allowEmpty: true });
         const receivedAtMs = input.receivedAtMs === undefined
@@ -409,6 +433,9 @@ function createDamarManagerComposition({
             // (nullable), distinct from the transport session id.  It is
             // NEVER a principal and NEVER an authority input.
             continuitySessionId,
+            // DSC-R1-004: prior logical-conversation turns as INERT context
+            // provenance (nullable).  Never a principal, never authority.
+            continuityContext,
             correlationId,
             receivedAtMs,
             payload: detachedPayload,

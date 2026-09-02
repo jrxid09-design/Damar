@@ -211,8 +211,12 @@ class VoiceRuntime extends EventEmitter {
 
         await this.output.stop();
         if (this._interactionHost) {
-            this._interactionHost.shutdown("voice-runtime-stop");
+            const hostToStop = this._interactionHost;
             this._interactionHost = null;
+            // DSC-R1-005: await the durable continuity flush (and contain
+            // any failure) before releasing the voice-owned host.
+            try { await hostToStop.shutdown("voice-runtime-stop"); }
+            catch { /* idempoten / contained */ }
         }
         this.machine.reset();
 

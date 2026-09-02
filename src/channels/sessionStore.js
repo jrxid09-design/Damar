@@ -1,7 +1,19 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const sqlite3 = require("sqlite3");
+/**
+ * sqlite3 is loaded LAZILY (first open()) so the SessionStore/ChannelManager
+ * module graph stays loadable in environments without the native module
+ * (tests inject a store through the existing ChannelManager constructor
+ * seam; production always has sqlite3 installed).
+ */
+let sqlite3 = null;
+function sqlite3Module() {
+    if (sqlite3 === null) {
+        sqlite3 = require("sqlite3");
+    }
+    return sqlite3;
+}
 
 /**
  * Penyimpanan sesi percakapan lintas kanal — sumber kebenaran konteks
@@ -41,7 +53,7 @@ class SessionStore {
 
             fs.mkdirSync(path.dirname(this.file), { recursive: true });
 
-            this.db = new sqlite3.Database(this.file, error => {
+            this.db = new (sqlite3Module().Database)(this.file, error => {
 
                 if (error) {
                     return reject(error);
