@@ -214,7 +214,13 @@ async function createRuntimeCore({
         presence: rt,
         presenceProducers: Object.freeze(producers),
         bus: busInstance,
-        channels: channelIngress,
+        // DSC-R2-005: `channels` is the ORDINARY channel facade (interaction
+        // only).  The trusted continuity lifecycle facade lives on
+        // `continuityLifecycle` and is consumed by the RuntimeHost lifecycle
+        // (RECOVER restore / shutdown flush), never by channel code.
+        channels: channelIngress ? channelIngress.channels : null,
+        continuityLifecycle: channelIngress ? channelIngress.lifecycle : null,
+        continuityLinker: channelIngress ? channelIngress.continuityLinker : null,
         media: Object.freeze({ getDiagnostics: mediaSubsystem.getDiagnostics }),
         recovery: Object.freeze({
             system, ledger, tracker,

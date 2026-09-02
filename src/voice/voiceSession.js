@@ -61,13 +61,20 @@ class VoiceSession {
         history.push({ role: "user", content: text });
         await this.remember("user", text);
 
+        // DSC-R2-001: the voice runtime owns this session handle.  The
+        // runtime-minted transport-scoped session id (`ses_*`, established
+        // by the InteractionBus for the voice channel scope) is the
+        // RUNTIME-OWNED identity for continuity — raw `userId` text is never
+        // trusted as continuity evidence.
+        const runtimeVoiceSessionId = `ses_voice-${PEER}`;
+
         // Konteks permintaan: tool kirim-media & sejenisnya tahu ini dari voice.
         const rendered = await channelManager.runWithContext(
             { channel: "voice", chatId: PEER },
             () => this.interactionIngress.request("voice", {
                 text,
                 userId: PEER,
-                sessionId: `ses_voice-${PEER}`,
+                sessionId: runtimeVoiceSessionId,
                 metadata: { historyTurns: history.length }
             }, { signal })
         );
@@ -78,7 +85,6 @@ class VoiceSession {
         await this.remember("assistant", answer);
 
         return { answer };
-
     }
 
     /**

@@ -103,14 +103,14 @@ async function createRuntimeHost({
 
     // ---------------------------------------- CONTINUITY BOOT RESTORE (Lane 4)
     // DSC-003: during the canonical RECOVER phase, the host loads and
-    // validates durable session-continuity state through the trusted
-    // ingress composition (core.channels).  Restored sessions come back
-    // CLOSED (RESTORED != RESUMED).  Corrupt/oversized state fails CLOSED:
-    // the domain degrades to a fresh continuity domain — never a partial
-    // resurrection, never a failed boot.
-    if (core.channels && typeof core.channels.restoreContinuity === "function") {
+    // validates durable session-continuity state through the TRUSTED
+    // continuity lifecycle facade (DSC-R2-005: NOT the ordinary channel
+    // facade).  Restored sessions come back CLOSED (RESTORED != RESUMED).
+    // Corrupt/oversized state fails CLOSED: the domain degrades to a fresh
+    // continuity domain — never a partial resurrection, never a failed boot.
+    if (core.continuityLifecycle && typeof core.continuityLifecycle.restoreContinuity === "function") {
         try {
-            await core.channels.restoreContinuity();
+            await core.continuityLifecycle.restoreContinuity();
         } catch {
             // Fail-closed degradation is decided inside the domain; a hard
             // fault here must not prevent boot.
@@ -297,8 +297,8 @@ async function createRuntimeHost({
             governor: safe(() => core.governor.getResourceStatus()) ?? null,
             bus: safe(() => bus.getStatus()) ?? null,
             recovery: safe(() => core.recovery.tracker.getRecoveryStatus()) ?? null,
-            continuity: safe(() => (core.channels && typeof core.channels.continuityStatus === "function"
-                ? core.channels.continuityStatus()
+            continuity: safe(() => (core.continuityLifecycle && typeof core.continuityLifecycle.continuityStatus === "function"
+                ? core.continuityLifecycle.continuityStatus()
                 : null)) ?? null,
             localTransport: localTransportId,
             shuttingDown: shutDown
@@ -357,20 +357,39 @@ async function createRuntimeHost({
         return shutdown(reason);
     }
 
-    /** Idempoten. Mematikan aktivitas presence, adapter, lalu core.
+    /**
+     * Idempoten. Mematikan aktivitas presence, adapter, lalu core.
      *
-     * DSC-R1-005: the returned result is an AWAITABLE thenable —
-     * `await host.shutdown(...)` resolves only after durable continuity
-     * state is flushed.  Synchronous callers keep the previous contract:
-     * the result object still exposes `shutDown` / `idempotent` / `reason`
-     * immediately. */
+     * DSC-R2-004: SHARED SHUTDOWN COMPLETION.  The FIRST invocation creates
+     * ONE canonical shutdown completion; every subsequent call JOINS that
+     * same completion until it settles — no caller ever observes "shutdown
+     * complete" while the final durability flush is still active.
+     *
+     * Synchronous callers may inspect the returned status object's
+     * shutDown / idempotent / reason fields immediately (status is cleanly
+     * separated from completion); awaiting the result resolves only after
+     * the durable continuity flush settles (success or deterministic
+     * failure — never a hang).
+     */
+    let shutdownCompletion = null;
+
+    function whenShutdownSettled() {
+        if (shutdownCompletion === null) return Promise.resolve(null);
+        return shutdownCompletion;
+    }
+
     function shutdown(reason = "SHUTDOWN") {
-        if (shutDown) {
-            return buildShutdownResult(Object.freeze({ shutDown: true, idempotent: true, reason }), Promise.resolve({ flushed: true, idempotent: true }));
+        if (shutdownCompletion !== null) {
+            // DSC-R2-004: JOIN the outstanding canonical completion — do NOT
+            // report an immediate "already shut down" while the flush is
+            // still active.  (Once the completion has settled this is a fast
+            // join of the resolved value.)
+            return buildShutdownResult(Object.freeze({ shutDown: true, idempotent: true, reason }), shutdownCompletion);
         }
         if (phaseMachine.isTerminal()) {
             shutDown = true;
-            return buildShutdownResult(Object.freeze({ shutDown: true, idempotent: true, reason }), Promise.resolve({ flushed: true, idempotent: true }));
+            shutdownCompletion = Promise.resolve(null);
+            return buildShutdownResult(Object.freeze({ shutDown: true, idempotent: true, reason }), shutdownCompletion);
         }
         shutDown = true;
         phaseMachine.transitionTo(HOST_PHASE.SHUTTING_DOWN, reason);
@@ -381,21 +400,27 @@ async function createRuntimeHost({
         adapters.clear();
 
         // ------------------------------------ CONTINUITY SHUTDOWN FLUSH (Lane 4)
-        // DSC-R1-005: graceful shutdown FLUSHES the durable continuity
-        // snapshot and NEVER deletes persisted state (destructive reset is
-        // a separate explicit administrative operation on the domain).  The
-        // flush is fully awaited by the returned thenable; late failures
-        // are contained so they can never become unhandled rejections.
-        const continuityFlushPromise = (async () => {
-            if (core.channels && typeof core.channels.shutdownContinuity === "function") {
+        // DSC-R1-005 + DSC-R2-002/003/004: graceful shutdown FLUSHES the
+        // durable continuity snapshot through the TRUSTED lifecycle facade
+        // (DSC-R2-005) and NEVER deletes persisted state.  The flush:
+        //   - is fully awaited by the shared completion;
+        //   - releases the durable store's same-process ownership only
+        //     AFTER the final flush settles (DSC-R2-002);
+        //   - resolves with a deterministic failure result on disk error —
+        //     never a hang (DSC-R2-003).
+        shutdownCompletion = (async () => {
+            if (core.continuityLifecycle && typeof core.continuityLifecycle.shutdownContinuity === "function") {
                 try {
-                    return await core.channels.shutdownContinuity();
+                    return await core.continuityLifecycle.shutdownContinuity();
                 } catch {
                     return Object.freeze({ failed: true, code: "FLUSH_CONTAINED" });
                 }
             }
             return null;
         })();
+        // Contain: the canonical completion never rejects; failure is
+        // carried in the resolved result.
+        shutdownCompletion.catch(() => {});
 
         try {
             rt.requestShutdown(producers.host, String(reason).slice(0, 200));
@@ -410,30 +435,30 @@ async function createRuntimeHost({
         phaseMachine.transitionTo(HOST_PHASE.TERMINATED, "terminated");
         return buildShutdownResult(
             Object.freeze({ shutDown: true, idempotent: false, reason }),
-            continuityFlushPromise
+            shutdownCompletion
         );
     }
 
-    /** Freeze a shutdown result that is BOTH synchronously inspectable and
-     * awaitable (awaits durable continuity flush). */
-    function buildShutdownResult(syncShape, flushPromise) {
-        let promise = null;
+    /**
+     * Wrap a synchronous status shape with the SHARED shutdown completion.
+     * Awaiting the result joins the SAME canonical completion for every
+     * caller; the synchronous fields remain immediately inspectable
+     * (status is cleanly separated from completion).
+     */
+    function buildShutdownResult(syncShape, completionPromise) {
         const result = Object.freeze({
             ...syncShape,
-            get continuityFlush() { return flushPromise; },
+            get continuityFlush() { return completionPromise; },
             then(onFulfilled, onRejected) {
-                if (!promise) {
-                    promise = (async () => {
-                        let flushed = null;
-                        try {
-                            flushed = await flushPromise;
-                        } catch {
-                            flushed = Object.freeze({ failed: true, code: "FLUSH_CONTAINED" });
-                        }
-                        return Object.freeze({ ...syncShape, continuityFlush: flushed });
-                    })();
-                }
-                return promise.then(onFulfilled, onRejected);
+                return (async () => {
+                    let flushed = null;
+                    try {
+                        flushed = await completionPromise;
+                    } catch {
+                        flushed = Object.freeze({ failed: true, code: "FLUSH_CONTAINED" });
+                    }
+                    return Object.freeze({ ...syncShape, continuityFlush: flushed });
+                })().then(onFulfilled, onRejected);
             }
         });
         return result;
@@ -534,6 +559,7 @@ async function createRuntimeHost({
 
         requestShutdown,
         shutdown,
+        whenShutdownSettled,
         fail,
         recoverNow,
 

@@ -100,7 +100,89 @@ function resolveProductionContinuityStore() {
     return path.join(os.homedir(), ".damar", "continuity-v1.json");
 }
 
-function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionContinuity = null, continuityStoreFile = undefined } = {}) {
+/**
+ * DSC-R2-001 — TRANSPORT IDENTITY REGISTRY (trusted composition-owned).
+ *
+ * The trusted composition registers, AT COMPOSITION TIME, the
+ * TRANSPORT-OWNED canonical peer identity derivation for each supported
+ * channel.  Entries are closure-branded: no caller can forge one, and the
+ * raw event object is NEVER consulted for trust evidence — the registered
+ * extractor may only correlate the event to identity the runtime itself
+ * established (e.g. the transport-scoped bus session ses_* the
+ * InteractionBus minted for this channel).
+ *
+ * Trust boundary:
+ *   transport-specific adapter (registered extractor)
+ *   → runtime-owned canonical peer identity
+ *   → private continuity provenance mint
+ *   → Manager ingress
+ *
+ * Channels WITHOUT a registered extractor fail closed for continuity (no
+ * binding); the ordinary ses_* interaction path continues unchanged.
+ */
+function createTransportIdentityRegistry() {
+    const REGISTERED = new WeakMap(); // extractor fn → branded
+    const extractors = new Map();     // channel name → extractor fn
+    return Object.freeze({
+        /** Register the transport-owned identity extractor for a channel.
+         * TRUSTED COMPOSITION ONLY. */
+        register(channel, extractor) {
+            if (typeof channel !== "string" || !/^[a-z][a-z0-9_]{0,31}$/.test(channel)) {
+                throw new TypeError("TRANSPORT_IDENTITY_CHANNEL_INVALID");
+            }
+            if (typeof extractor !== "function") {
+                throw new TypeError("TRANSPORT_IDENTITY_EXTRACTOR_INVALID");
+            }
+            extractors.set(channel, extractor);
+            REGISTERED.set(extractor, true);
+            return Object.freeze({ channel, registered: true });
+        },
+        /** Resolve the transport-owned identity for an event.  Returns ""
+         * (fail closed) when the channel has no registered extractor or the
+         * extractor yields no trustworthy identity. */
+        resolve(channel, rawEvent) {
+            const extractor = extractors.get(channel);
+            if (!extractor || REGISTERED.get(extractor) !== true) return "";
+            try {
+                const identity = extractor(rawEvent);
+                return typeof identity === "string" ? identity : "";
+            } catch {
+                return "";
+            }
+        },
+        has(channel) {
+            return extractors.has(channel);
+        }
+    });
+}
+
+/**
+ * DSC-R2-001 — canonical transport-owned identity extractors.
+ *
+ * Each extractor derives identity ONLY from runtime-established state:
+ * the transport-scoped bus session (ses_*) that the InteractionBus itself
+ * minted for this channel.  The raw event's payload fields are never read
+ * for trust purposes — the event's sessionId, when the RUNTIME minted it,
+ * is the runtime-owned handle for this channel's peer stream.  Transports
+ * that authenticate at the transport layer (Telegram API sender id,
+ * WhatsApp JID from the socket, paired device identity) register richer
+ * extractors through this same trusted seam as those transports are wired.
+ */
+function defaultTransportIdentityExtractors() {
+    const extractorFor = (rawEvent) => {
+        const sessionId = Object.getOwnPropertyDescriptor(rawEvent ?? {}, "sessionId");
+        if (!sessionId || typeof sessionId.value !== "string") return "";
+        return sessionId.value.startsWith("ses_") ? sessionId.value : "";
+    };
+    return {
+        telegram: extractorFor,
+        whatsapp: extractorFor,
+        console: extractorFor,
+        voice: extractorFor
+    };
+}
+
+function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionContinuity = null, continuityStoreFile = undefined, transportIdentityRegistry = undefined } = {}) {
     const manager = createDamarManager();
     let continuity = sessionContinuity !== null && sessionContinuity !== undefined
         ? sessionContinuity
@@ -121,13 +203,15 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
                 // the trusted composition closure, and never escapes.
                 trustedLifecycle(controller) {
                     trustedContinuity = Object.freeze({
-                        mintPeerProvenance: controller.mintPeerProvenance
+                        mintPeerProvenance: controller.mintPeerProvenance,
+                        trustedLinkContinuity: controller.trustedLinkContinuity
                     });
                 }
             });
         } else {
             // Production default: durable file store (same-process ownership
-            // enforced), persisted through a bounded coalescing scheduler.
+            // enforced until the final flush settles), persisted through a
+            // bounded coalescing epoch scheduler.
             const store = sessionContinuityMod.createFileContinuityStore(storeFile);
             continuityStoreHandle = store;
             continuity = sessionContinuityMod.createSessionContinuity({
@@ -138,38 +222,85 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
                 // the trusted composition closure, and never escapes.
                 trustedLifecycle(controller) {
                     trustedContinuity = Object.freeze({
-                        mintPeerProvenance: controller.mintPeerProvenance
+                        mintPeerProvenance: controller.mintPeerProvenance,
+                        trustedLinkContinuity: controller.trustedLinkContinuity
                     });
                 }
             });
         }
     }
-    // DSC-R1-006: RUNTIME-OWNED peer evidence provider.  This is the trusted
-    // composition's per-channel transport identity extraction.  For the
-    // canonical ingress channels, the runtime-owned evidence field is
-    // `trustedPeerEvidence` — set ONLY by trusted transport adapters that
-    // themselves derived the identity from the transport layer (authenticated
-    // Telegram sender/chat id, WhatsApp JID from the transport, runtime-owned
-    // console/voice identity).  The raw caller `userId` field is deliberately
-    // NOT consulted: caller-supplied text can never establish continuity
-    // identity.
-    const peerEvidenceProvider = (channel, rawEvent) => {
-        if (rawEvent === null || typeof rawEvent !== "object") return "";
-        const descriptor = Object.getOwnPropertyDescriptor(rawEvent, "trustedPeerEvidence");
-        if (!descriptor || !("value" in descriptor)) return "";
-        const evidence = descriptor.value;
-        if (typeof evidence !== "string") return "";
-        return evidence;
-    };
-    return require("../runtime/interactionBus/managerIngressInternal").createManagerInteractionIngress({
+
+    // DSC-R2-001: the transport identity registry.  The trusted composition
+    // (or a trusted caller supplying transportIdentityRegistry) registers
+    // TRANSPORT-OWNED extractors.  Raw caller events can NEVER register or
+    // forge entries.
+    const transportIdentity = transportIdentityRegistry !== undefined && transportIdentityRegistry !== null
+        ? transportIdentityRegistry
+        : (() => {
+            const registry = createTransportIdentityRegistry();
+            for (const [channel, extractor] of Object.entries(defaultTransportIdentityExtractors())) {
+                registry.register(channel, extractor);
+            }
+            return registry;
+        })();
+
+    const ingress = require("../runtime/interactionBus/managerIngressInternal").createManagerInteractionIngress({
         bus,
         manager,
         mediaSubsystem,
         mediaContextMint: canonicalMediaContextAuthority.mint,
         sessionContinuity: continuity,
         trustedContinuity,
-        peerEvidenceProvider,
+        transportIdentity,
         continuityStoreHandle
+    });
+
+    // DSC-R2-006: the TRUSTED CONTINUITY LINKER — a narrow, explicit,
+    // composition-owned operation.  It is NOT reachable from raw channel
+    // events, the ordinary host.channels facade, Manager payload, or the
+    // public continuity facade.  It requires TRUSTED transport identity for
+    // BOTH endpoints, and it links CONTINUITY IDENTITY ONLY — never
+    // authority.  No automatic matching by username/phone/userId text ever
+    // occurs: every link is explicit.
+    const continuityLinker = Object.freeze({
+        /**
+         * Explicitly link two trusted transport endpoints onto the same
+         * canonical continuity identity.
+         *
+         * @param {object} endpointA { channel, identity } — TRUSTED identity
+         *        for endpoint A (runtime-owned transport identity).
+         * @param {object} endpointB { channel, identity } — same contract.
+         */
+        linkContinuity({ endpointA, endpointB } = {}) {
+            const verifyEndpoint = (endpoint) => {
+                if (endpoint === null || typeof endpoint !== "object") {
+                    throw Object.assign(new TypeError("CONTINUITY_LINK_ENDPOINT_INVALID"), { code: "CONTINUITY_LINK_ENDPOINT_INVALID" });
+                }
+                const channel = endpoint.channel;
+                const identity = endpoint.identity;
+                if (typeof channel !== "string" || !transportIdentity.has(channel)) {
+                    throw Object.assign(new Error("CONTINUITY_LINK_CHANNEL_UNTRUSTED"), { code: "CONTINUITY_LINK_CHANNEL_UNTRUSTED" });
+                }
+                if (typeof identity !== "string" || identity.length === 0) {
+                    throw Object.assign(new Error("CONTINUITY_LINK_IDENTITY_UNTRUSTED"), { code: "CONTINUITY_LINK_IDENTITY_UNTRUSTED" });
+                }
+                return { channel, identity };
+            };
+            const a = verifyEndpoint(endpointA);
+            const b = verifyEndpoint(endpointB);
+            if (a.channel === b.channel && a.identity === b.identity) {
+                throw Object.assign(new Error("CONTINUITY_LINK_ENDPOINTS_IDENTICAL"), { code: "CONTINUITY_LINK_ENDPOINTS_IDENTICAL" });
+            }
+            const provenanceA = trustedContinuity.mintPeerProvenance(a.channel, a.identity);
+            const provenanceB = trustedContinuity.mintPeerProvenance(b.channel, b.identity);
+            return trustedContinuity.trustedLinkContinuity({ provenanceA, provenanceB });
+        }
+    });
+
+    return Object.freeze({
+        ...ingress,
+        // DSC-R2-006: trusted composition-only linking workflow.
+        continuityLinker
     });
 }
 

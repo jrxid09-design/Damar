@@ -140,16 +140,34 @@ async function cleanupAbandonedStaging(directory, maxScan = 64) {
 }
 
 // ---------------------------------------------------------------------------
-// Same-process durable-store OWNERSHIP (default-store ambiguity closure).
+// Same-process durable-store OWNERSHIP (DSC-R2-002).
 //
 // Multiple createRuntimeHost() compositions in ONE process can accidentally
 // target the same durable snapshot path.  Cross-process/Mesh locking is
 // explicitly OUT OF SCOPE; this is a narrow process-local registry: exactly
-// one active durable owner per normalized absolute path.  A second accidental
-// owner fails closed with a typed ownership error.  Ownership is released on
-// completed store shutdown.  Memory-mode stores are unaffected.
+// one active durable owner per normalized absolute path.
+//
+// DSC-R2-002: ownership is held UNTIL FINAL FLUSH COMPLETES.  The owning
+// store releases the registry entry only inside the settled completion of
+// its shutdown (after the final write attempt has conclusively ended),
+// never synchronously at shutdown-call time.  A second composition
+// attempting the same path while the first is still flushing fails closed
+// with CONTINUITY_STORE_OWNED.
 // ---------------------------------------------------------------------------
 const ACTIVE_FILE_STORE_OWNERS = new Map(); // normalized path → store handle
+
+/** DSC-R2-002/#6: normalize an absolute path for ownership comparison.
+ * Absolute form + separator normalization always; on win32 the path is
+ * ALSO lowercased because NTFS path comparison is case-insensitive. */
+function normalizeStorePath(file) {
+  let normalized = path.resolve(file);
+  // Separator normalization: forward slashes to platform separators.
+  normalized = normalized.split("/").join(path.sep);
+  if (process.platform === "win32") {
+    normalized = normalized.toLowerCase();
+  }
+  return normalized;
+}
 
 function acquireFileStoreOwnership(normalizedPath, storeHandle) {
   if (ACTIVE_FILE_STORE_OWNERS.has(normalizedPath)) {
@@ -182,29 +200,27 @@ function isFileStoreOwned(normalizedPath) {
  * (load returns { corrupt: true } and the caller degrades to a fresh
  * continuity domain — never resurrect unvalidated state).
  *
- * Same-process ownership: constructing a second file store over the SAME
- * absolute path while the first is still active fails closed with
- * CONTINUITY_STORE_OWNED.  Ownership is released by store.shutdown().
+ * Same-process ownership (DSC-R2-002): constructing a second file store
+ * over the SAME normalized path while the first is still active (including
+ * while its shutdown flush is in flight) fails closed with
+ * CONTINUITY_STORE_OWNED.  Ownership is released ONLY when the final
+ * shutdown flush settles (success OR deterministic failure) — by
+ * `store.finalizeShutdown()`, called by the trusted lifecycle owner.
  */
 function createFileContinuityStore(file) {
   if (typeof file !== "string" || file.length === 0 || !path.isAbsolute(file)) {
     throw new TypeError("CONTINUITY_STORE_FILE_INVALID");
   }
-  const normalizedPath = path.resolve(file);
-  const directory = path.dirname(normalizedPath);
+  const normalizedPath = normalizeStorePath(file);
+  const directory = path.dirname(path.resolve(file));
   // Same-process ownership: exactly one active durable owner per path.
   acquireFileStoreOwnership(normalizedPath, null);
-  let released = false;
-  function releaseOwnershipOnce() {
-    if (released) return;
-    released = true;
-    releaseFileStoreOwnership(normalizedPath, ACTIVE_FILE_STORE_OWNERS.get(normalizedPath));
-  }
   const storeHandle = Object.freeze({
     path: normalizedPath,
-    shutdown() { releaseOwnershipOnce(); }
+    kind: "SessionContinuityStoreHandle"
   });
   ACTIVE_FILE_STORE_OWNERS.set(normalizedPath, storeHandle);
+  let finalized = false;
   return Object.freeze({
     async load() {
       // Hygiene: reclaim abandoned staging from a crashed previous run
@@ -212,7 +228,7 @@ function createFileContinuityStore(file) {
       await cleanupAbandonedStaging(directory);
       let raw;
       try {
-        raw = await fsp.readFile(normalizedPath, "utf8");
+        raw = await fsp.readFile(path.resolve(file), "utf8");
       } catch (error) {
         if (error && error.code === "ENOENT") return null;
         return { corrupt: true, reason: "READ_FAILED" };
@@ -246,7 +262,7 @@ function createFileContinuityStore(file) {
         await handle.close().catch(() => {});
       }
       try {
-        fs.renameSync(staging, normalizedPath);
+        fs.renameSync(staging, path.resolve(file));
         // Hygiene: make the rename itself durable where the platform allows.
         await syncDirectory(directory);
       } catch (error) {
@@ -256,14 +272,20 @@ function createFileContinuityStore(file) {
       return Object.freeze({ persisted: true });
     },
     async clear() {
-      await fsp.unlink(normalizedPath).catch((error) => {
+      await fsp.unlink(path.resolve(file)).catch((error) => {
         if (!error || error.code !== "ENOENT") throw error;
       });
     },
-    /** Release same-process ownership (idempotent, non-destructive). */
-    async shutdown() {
-      releaseOwnershipOnce();
-      return Object.freeze({ released: true });
+    /**
+     * DSC-R2-002: release same-process ownership.  Called ONLY by the
+     * trusted lifecycle owner AFTER the final flush has conclusively ended
+     * (success or deterministic failure).  Idempotent, non-destructive.
+     */
+    async finalizeShutdown() {
+      if (finalized) return Object.freeze({ released: false, alreadyFinalized: true });
+      finalized = true;
+      const released = releaseFileStoreOwnership(normalizedPath, storeHandle);
+      return Object.freeze({ released });
     }
   });
 }
@@ -482,6 +504,8 @@ module.exports = Object.freeze({
   // hygiene helpers (internal/test-visible)
   _syncDirectory: syncDirectory,
   _cleanupAbandonedStaging: cleanupAbandonedStaging,
+  _normalizeStorePath: normalizeStorePath,
+  _isFileStoreOwned: isFileStoreOwned,
   _fail: fail,
   _plain: plain,
   _hasOnlyDataProperties: hasOnlyDataProperties

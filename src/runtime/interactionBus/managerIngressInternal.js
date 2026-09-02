@@ -108,21 +108,30 @@ function channelAdapter(channel) {
  * and InteractionBus.  The caller receives only transport ingestion and
  * response projection; no Lane 2/3/4 dependency is exposed.
  *
- * Wave 5 Lane 4 (repair R2): an OPTIONAL canonical session-continuity pair
- * may be injected by the trusted composition root:
+ * Wave 5 Lane 4 (repair R3, DSC-R2-001/005/006): the TRUSTED COMPOSITION
+ * supplies:
  *
  *   sessionContinuity        — the PUBLIC inert continuity facade
- *   trustedContinuity        — { mintPeerProvenance } held ONLY by the
- *                              trusted composition closure (DSC-R1-001/006)
+ *   trustedContinuity        — { mintPeerProvenance, trustedLinkContinuity }
+ *                              held ONLY by the trusted composition closure
+ *   transportIdentity        — a TransportIdentityRegistry that the trusted
+ *                              composition itself populated from
+ *                              TRANSPORT-OWNED identity derivation
  *
- * Peer provenance is minted EXCLUSIVELY from RUNTIME-OWNED transport
- * evidence supplied by the trusted composition's peerEvidenceProvider
- * (per-channel transport-owned identity extraction).  Raw caller event
- * fields (userId etc.) are NEVER sufficient to establish continuity
- * identity.  The continuity domain is inert: it mints no authority, and
- * channel claims remain evidence only.
+ * DSC-R2-001: peer provenance is minted EXCLUSIVELY from TRANSPORT-OWNED
+ * identity registered at composition time.  The raw event object is NEVER
+ * consulted for continuity trust evidence — no field (trustedPeerEvidence,
+ * continuitySessionId, canonicalSessionId, userId, peerKey, dscId, or any
+ * other) on a raw caller event can establish continuity identity.  The
+ * registered transport identity is an internal branded object that no
+ * caller can construct through host.channels.ingest().
+ *
+ * DSC-R2-005: the ORDINARY channel facade exposes ONLY channel interaction
+ * operations.  Global continuity lifecycle (restore/flush/shutdown/status)
+ * lives on a SEPARATE trusted-lifecycle facade returned to the trusted
+ * composition root only.
  */
-function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, mediaContextMint = null, sessionContinuity = null, trustedContinuity = null, peerEvidenceProvider = null, historyRecorder = undefined, historyProvider = undefined, continuityStoreHandle = null } = {}) {
+function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, mediaContextMint = null, sessionContinuity = null, trustedContinuity = null, transportIdentity = null, historyRecorder = undefined, historyProvider = undefined, continuityStoreHandle = null } = {}) {
   if (!bus || typeof bus.registerTransport !== "function" ||
       typeof bus.registerHandler !== "function" || typeof bus.submit !== "function" ||
       typeof bus.isCanonicalEnvelope !== "function") {
@@ -140,19 +149,22 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
     }
   }
   if (continuityStoreHandle !== null && continuityStoreHandle !== undefined) {
-    if (typeof continuityStoreHandle.shutdown !== "function") {
+    if (typeof continuityStoreHandle.shutdown !== "function" &&
+        typeof continuityStoreHandle.finalizeShutdown !== "function") {
       throw new TypeError("MANAGER_INGRESS_CONTINUITY_STORE_HANDLE_INVALID");
     }
   }
-  // DSC-R1-001/006: continuity REQUIRES the trusted provenance mint.  A
-  // facade without the trusted mint can never form bindings (fail closed).
+  // DSC-R1-001/006 + DSC-R2-001: continuity REQUIRES the trusted provenance
+  // mint AND a trusted transport-identity registry.  Without both, no
+  // binding can ever form (fail closed).
   if (sessionContinuity) {
     if (trustedContinuity === null || trustedContinuity === undefined ||
         typeof trustedContinuity.mintPeerProvenance !== "function") {
       throw new TypeError("MANAGER_INGRESS_TRUSTED_CONTINUITY_REQUIRED");
     }
-    if (typeof peerEvidenceProvider !== "function") {
-      throw new TypeError("MANAGER_INGRESS_PEER_EVIDENCE_PROVIDER_REQUIRED");
+    if (transportIdentity === null || transportIdentity === undefined ||
+        typeof transportIdentity.resolve !== "function") {
+      throw new TypeError("MANAGER_INGRESS_TRANSPORT_IDENTITY_REQUIRED");
     }
   }
 
@@ -377,7 +389,7 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
   }
 
   // ------------------------------------------------------------------
-  // Wave 5 Lane 4 (repair R2) — canonical session continuity resolution.
+  // Wave 5 Lane 4 (repair R3) — canonical session continuity resolution.
   //
   // TRANSPORT ID != DAMAR IDENTITY: the canonical Damar session (dsc_*) is
   // resolved at this TRUSTED seam, so one conversation continues coherently
@@ -386,13 +398,23 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
   // session remains transport-scoped (its one-transport-per-session
   // anti-hijack law is untouched).
   //
-  // DSC-R1-006: peer provenance is minted EXCLUSIVELY from RUNTIME-OWNED
-  // transport evidence obtained through the trusted composition's
-  // peerEvidenceProvider (per-channel transport-owned identity extraction:
-  // authenticated Telegram sender/chat identity, WhatsApp JID from the
-  // transport layer, runtime-owned console/voice identity).  Raw event
-  // userId and other caller-provided metadata are NEVER sufficient to
-  // establish continuity identity — they are ignored entirely here.
+  // DSC-R2-001: peer provenance is minted EXCLUSIVELY from TRANSPORT-OWNED
+  // identity REGISTERED in the trusted composition's TransportIdentity
+  // registry at composition time.  The RAW EVENT OBJECT IS NEVER CONSULTED:
+  // no raw payload field (trustedPeerEvidence, continuitySessionId,
+  // canonicalSessionId, userId, peerKey, dscId, or any other) can establish
+  // continuity identity.  The registry entry is a closure-branded object
+  // that no caller can construct through the public ingest surface.
+  //
+  // Trust boundary (conceptual):
+  //   transport-specific adapter
+  //   → runtime-owned canonical peer identity (registered)
+  //   → private continuity provenance mint
+  //   → Manager ingress
+  //
+  // If a transport has no registered trusted identity, continuity binding
+  // for that transport FAILS CLOSED — the ordinary ses_* interaction path
+  // continues unchanged.
   //
   // DSC-R1-002: admission ownership (sessionId + incarnationAtAdmission) is
   // captured at ADMISSION and carried through execution; terminal commits
@@ -411,11 +433,13 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
 
   function resolveContinuitySession(channel, rawEvent) {
     if (!sessionContinuity || !mintPeerProvenance) return null;
-    // RUNTIME-OWNED evidence only: the trusted provider decides whether the
-    // transport itself produced trustworthy peer identity for this event.
-    const evidence = peerEvidenceProvider(channel, rawEvent);
+    // TRANSPORT-OWNED evidence ONLY: look up the identity the trusted
+    // composition registered for this channel.  The raw event is passed
+    // solely so the registry MAY correlate by bus-session identity derived
+    // from runtime state — never by reading raw payload fields.
+    const evidence = transportIdentity.resolve(channel, rawEvent);
     if (typeof evidence !== "string" || evidence.length === 0) {
-      // No trustworthy runtime-owned peer evidence → NO continuity binding.
+      // No trustworthy transport-owned identity → NO continuity binding.
       // The ordinary ses_* interaction path continues unchanged.
       return { resolved: false, reason: "PEER_EVIDENCE_UNTRUSTED" };
     }
@@ -529,72 +553,94 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
     return Object.freeze({ ...result, attachmentIds: Object.freeze(attachments.map((a) => a.attachmentId)) });
   }
 
-  // ---- DSC-003 + DSC-R1-005: trusted lifecycle hooks for the RuntimeHost
-  // composition.  Boot restore + shutdown flush + inert status.  These are
-  // TRUSTED composition-seam operations (host lifecycle only); they are not
-  // exposed to channel callers and confer no authority.
-  async function restoreContinuity() {
-    if (!sessionContinuity || typeof sessionContinuity.restore !== "function") {
-      return Object.freeze({ restored: false, degraded: false, reason: "CONTINUITY_UNBOUND" });
-    }
-    return sessionContinuity.restore();
-  }
-
-  async function flushContinuity() {
-    if (!sessionContinuity || typeof sessionContinuity.persist !== "function") {
-      return Object.freeze({ persisted: false, reason: "CONTINUITY_UNBOUND" });
-    }
-    return sessionContinuity.persist();
-  }
-
-  /**
-   * DSC-R1-005: graceful continuity shutdown — AWAITED.  Flushes all
-   * currently-known dirty state through the bounded scheduler, releases the
-   * durable store's same-process ownership, and NEVER deletes persisted
-   * state.  Awaitable so RuntimeHost.shutdown() can guarantee durability.
-   * The ownership release happens SYNCHRONOUSLY at call time so a stopped
-   * composition never blocks the next composition in the same process.
-   */
-  function shutdownContinuity() {
-    // Synchronous ownership release first (idempotent, non-destructive).
-    if (continuityStoreHandle && typeof continuityStoreHandle.shutdown === "function") {
-      try { continuityStoreHandle.shutdown(); } catch { /* idempotent */ }
-    }
-    return (async () => {
+  // ------------------------------------------------------------------
+  // DSC-R2-005 — TRUSTED LIFECYCLE FACADE (separate from the ordinary
+  // channel facade).  Global continuity lifecycle operations (boot restore,
+  // global flush, shutdown, privileged status) live HERE and are returned to
+  // the TRUSTED COMPOSITION ROOT ONLY — never on the ordinary channel
+  // facade that channel code receives.  RuntimeHost RECOVER/shutdown invoke
+  // these private hooks directly.
+  //
+  // DSC-R2-002: the durable store's same-process ownership is released
+  // ONLY after the final flush settles (store.finalizeShutdown), so a
+  // second composition cannot acquire the same path while this one is
+  // still writing.
+  // ------------------------------------------------------------------
+  let continuityShutdownStarted = false;
+  const trustedLifecycleFacade = Object.freeze({
+    async restoreContinuity() {
+      if (!sessionContinuity || typeof sessionContinuity.restore !== "function") {
+        return Object.freeze({ restored: false, degraded: false, reason: "CONTINUITY_UNBOUND" });
+      }
+      return sessionContinuity.restore();
+    },
+    async flushContinuity() {
+      if (!sessionContinuity || typeof sessionContinuity.persist !== "function") {
+        return Object.freeze({ persisted: false, reason: "CONTINUITY_UNBOUND" });
+      }
+      return sessionContinuity.persist();
+    },
+    /**
+     * DSC-R1-005 + DSC-R2-002/004: graceful continuity shutdown — AWAITED
+     * with SHARED completion.  Flushes all currently-known dirty state
+     * through the bounded epoch scheduler (deterministic failure on disk
+     * error — never a hang), releases the durable store's same-process
+     * ownership ONLY after the final flush settles, and NEVER deletes
+     * persisted state.
+     */
+    async shutdownContinuity() {
       if (!sessionContinuity || typeof sessionContinuity.shutdown !== "function") {
         return Object.freeze({ shutdown: false, reason: "CONTINUITY_UNBOUND" });
       }
-      return sessionContinuity.shutdown();
-    })();
-  }
-
-  function continuityStatus() {
-    if (!sessionContinuity || typeof sessionContinuity.snapshotDiagnostics !== "function") {
-      return Object.freeze({ bound: false });
+      continuityShutdownStarted = true;
+      let result;
+      try {
+        result = await sessionContinuity.shutdown();
+      } catch (error) {
+        result = Object.freeze({ shutdown: true, flushed: { failed: true, code: error?.code ?? "PERSIST_FAILURE" } });
+      }
+      // DSC-R2-002: ownership release AFTER the final flush conclusively
+      // ended — success OR deterministic failure.
+      if (continuityStoreHandle && typeof continuityStoreHandle.finalizeShutdown === "function") {
+        try { await continuityStoreHandle.finalizeShutdown(); } catch { /* idempotent */ }
+      }
+      return result;
+    },
+    continuityStatus() {
+      if (!sessionContinuity || typeof sessionContinuity.snapshotDiagnostics !== "function") {
+        return Object.freeze({ bound: false });
+      }
+      return Object.freeze({ bound: true, ...sessionContinuity.snapshotDiagnostics() });
     }
-    return Object.freeze({ bound: true, ...sessionContinuity.snapshotDiagnostics() });
-  }
+  });
 
-  function getSessionContinuityId(channel, rawEvent) {
-    if (!sessionContinuity) return null;
-    const continuity = resolveContinuitySession(channel, rawEvent);
-    return continuity && continuity.resolution && continuity.resolution.resolved
-      ? continuity.resolution.sessionId : null;
-  }
-
-  return Object.freeze({
+  // ---- ORDINARY CHANNEL FACADE (DSC-R2-005: interaction only) -------------
+  // Channel code receives ONLY what it needs to interact.  NO restore, NO
+  // global flush, NO global shutdown, NO privileged lifecycle status, and
+  // NO arbitrary-event continuity resolution escape hatch.
+  const ordinaryChannelFacade = Object.freeze({
     ingest,
     request,
     ingestAttachments,
     render,
     channels: Object.freeze(Object.keys(CHANNELS)),
-    transportSnapshot: () => Object.freeze([...adapters.values()].map((a) => a.snapshot())),
-    // trusted lifecycle seam (composition root / RuntimeHost only)
-    restoreContinuity,
-    flushContinuity,
-    shutdownContinuity,
-    continuityStatus,
-    getSessionContinuityId
+    transportSnapshot: () => Object.freeze([...adapters.values()].map((a) => a.snapshot()))
+  });
+
+  return Object.freeze({
+    // The ordinary facade handed to channel code (host.channels).
+    channels: ordinaryChannelFacade,
+    // The trusted lifecycle facade, returned ONLY to the trusted
+    // composition root (never exposed on host.channels).
+    lifecycle: trustedLifecycleFacade,
+    // Internal composition surface for trusted tests (not channel-facing).
+    composition: Object.freeze({
+      resolveContinuityId(channel, rawEvent) {
+        const continuity = resolveContinuitySession(channel, rawEvent);
+        return continuity && continuity.resolution && continuity.resolution.resolved
+          ? continuity.resolution.sessionId : null;
+      }
+    })
   });
 }
 

@@ -229,36 +229,84 @@ function createSessionContinuity(options = {}) {
   }
 
   // ---------------------------------------------------------------------------
-  // DSC-R1-005B — bounded COALESCING persistence scheduler.
+  // DSC-R2-003 + DSC-R2-007 — bounded COALESCING persistence scheduler with
+  // EPOCH-BASED SHARED DURABILITY PROMISES.
   //
-  //   mutation → markDirty()
+  //   mutation → markDirty() → (re)open a durability epoch
   //   at most ONE writer is ever active
   //   writer: snapshot latest state → write → re-check dirty → maybe rewrite
   //
-  // Scheduling state is O(1): { dirty, writing, idleResolvers[], lastError }.
-  // `whenPersisted()` resolves only when currently-known dirty state is
-  // durable.  Failures are surfaced (lastError) and contained; the next
-  // mutation retries.
+  // Waiter semantics (DSC-R2-007): every whenPersisted() caller JOINS the
+  // single shared promise of the CURRENT epoch — internal retention is O(1)
+  // (one promise object per epoch), no matter how many callers join.  When
+  // the epoch settles, ALL joined callers observe the same result.
+  //
+  // Failure semantics (DSC-R2-003): a write failure REJECTS the epoch's
+  // shared promise — every waiter of that epoch settles with a deterministic
+  // failure.  A later mutation opens a NEW epoch with a NEW shared promise;
+  // already-failed waiters are never retroactively turned into successes.
+  //
+  // Durability contract:
+  //   create/update/bind/... success   → in-memory mutation accepted (NOT a
+  //                                      guaranteed disk commit)
+  //   whenPersisted()                  → durability of the state known at
+  //                                      call time (success or deterministic
+  //                                      failure)
+  //   shutdown()                       → final durability or deterministic
+  //                                      failure result
   // ---------------------------------------------------------------------------
   const scheduler = {
     dirty: false,
     writing: false,
-    started: false,
-    idleResolvers: [],
+    epoch: 0,
+    epochShared: null,      // shared promise for the current epoch (O(1))
+    epochSettled: true,
     lastError: null
   };
+
+  // Settler for the CURRENT epoch (closure-private, single slot — O(1)).
+  let settleEpoch = null;
+
+  /** Open (or keep) the current durability epoch and return its SHARED
+   * promise.  All joiners observe the same settlement. */
+  function openEpoch() {
+    if (scheduler.epochShared === null || scheduler.epochSettled) {
+      scheduler.epoch += 1;
+      scheduler.epochSettled = false;
+      scheduler.epochShared = new Promise((resolve, reject) => {
+        settleEpoch = (ok, value) => {
+          if (scheduler.epochSettled) return;
+          scheduler.epochSettled = true;
+          if (ok) resolve(value);
+          else reject(value);
+        };
+      });
+      // The shared promise is joined by internal callers too; attach a
+      // contained catch so an unobserved epoch failure can never surface as
+      // an unhandled rejection.
+      scheduler.epochShared.catch(() => {});
+    }
+    return scheduler.epochShared;
+  }
+
+  function settleEpochSuccess() {
+    if (settleEpoch) settleEpoch(true, Object.freeze({ persisted: true, epoch: scheduler.epoch, savedAt: persistedGeneration }));
+  }
+
+  function settleEpochFailure(error) {
+    if (settleEpoch) settleEpoch(false, error);
+  }
 
   function markDirty() {
     if (!persistOnMutation) return;
     scheduler.dirty = true;
-    scheduler.started = true;
+    openEpoch();
     ensureWriter();
   }
 
   function ensureWriter() {
     if (scheduler.writing || !scheduler.dirty || shutDown) return;
     scheduler.writing = true;
-    scheduler.started = true;
     // The writer runs detached but fully contained: no unhandled rejection.
     (async () => {
       try {
@@ -270,70 +318,73 @@ function createSessionContinuity(options = {}) {
             persistedGeneration = snapshot.savedAt;
             scheduler.lastError = null;
           } catch (error) {
-            // Surface deterministically; the NEXT mutation re-arms the
-            // writer.  Never retry in a loop.
+            // DSC-R2-003: surface the failure, settle EVERY waiter of this
+            // epoch with a deterministic failure, and return to a coherent
+            // idle/error state.  The next mutation opens a NEW epoch.
             scheduler.lastError = {
               code: error && error.code ? String(error.code) : "PERSIST_FAILURE",
               at: clock()
             };
             scheduler.dirty = true;
+            const failure = new Error(`[PERSIST_FAILURE] ${scheduler.lastError.code}`);
+            failure.name = "SessionContinuityError";
+            failure.code = scheduler.lastError.code;
+            settleEpochFailure(failure);
             break;
           }
         }
+        // Durable quiescence: settle the epoch as success when nothing is
+        // left dirty (either never dirty, or all writes completed).
+        if (!scheduler.dirty) {
+          settleEpochSuccess();
+        }
       } finally {
         scheduler.writing = false;
-        if (!scheduler.dirty) {
-          const waiters = scheduler.idleResolvers;
-          scheduler.idleResolvers = [];
-          for (const resolve of waiters) resolve();
-        }
-        // If dirty state remains (failure or new mutations during unwind),
-        // it is re-armed ONLY by the next mutation or an explicit flush —
-        // never by an unbounded self-retriggering loop.
+        // If dirty state remains (failure case), it is re-armed ONLY by the
+        // next mutation or an explicit flush — never by a self-retriggering
+        // loop.
       }
     })();
   }
 
-  /** Resolve when all currently-known dirty state is durable. */
+  /**
+   * DSC-R2-003/#2: resolve or reject when the durability of the state known
+   * at call time is settled.  Joins the CURRENT epoch's shared promise —
+   * internal retention stays O(1) regardless of caller count.
+   */
   function whenPersisted() {
     if (!persistOnMutation) return Promise.resolve();
-    if (!scheduler.dirty && !scheduler.writing) return Promise.resolve();
-    // If the writer cannot run (e.g. shutdown latched), perform the flush
-    // directly so the caller never parks forever.
-    if (shutDown || (!scheduler.writing && !scheduler.started)) {
+    if (scheduler.epochSettled && !scheduler.dirty && !scheduler.writing) {
+      return Promise.resolve(Object.freeze({ persisted: true, epoch: scheduler.epoch, savedAt: persistedGeneration }));
+    }
+    if (shutDown && !scheduler.writing) {
+      // Shutdown latched with no writer: perform the final write directly
+      // so the caller never parks forever.
       return (async () => {
         const snapshot = buildSnapshot(clock(), sessions, terminal);
-        try {
-          await store.persist(snapshot);
-          persistedGeneration = snapshot.savedAt;
-          scheduler.dirty = false;
-          scheduler.lastError = null;
-        } finally {
-          const waiters = scheduler.idleResolvers;
-          scheduler.idleResolvers = [];
-          for (const resolve of waiters) resolve();
-        }
+        await store.persist(snapshot);
+        persistedGeneration = snapshot.savedAt;
+        scheduler.dirty = false;
+        scheduler.lastError = null;
+        return Object.freeze({ persisted: true, epoch: scheduler.epoch, savedAt: persistedGeneration });
       })();
     }
-    return new Promise((resolve) => {
-      scheduler.idleResolvers.push(resolve);
-    });
+    return openEpoch();
   }
 
   /** Await the write of the CURRENT state (shutdown seam). */
   async function flushOnce() {
     if (!persistOnMutation) {
-      // Even in non-durable mode a flush writes once for callers that ask.
       const snapshot = buildSnapshot(clock(), sessions, terminal);
       await store.persist(snapshot);
       persistedGeneration = snapshot.savedAt;
       return Object.freeze({ persisted: true, savedAt: snapshot.savedAt });
     }
     scheduler.dirty = true;
+    openEpoch();
     ensureWriter();
-    await whenPersisted();
+    await openEpoch();
     if (scheduler.lastError !== null && scheduler.dirty) {
-      // The writer stopped on a failure; surface it deterministically.
       const error = new Error(`[PERSIST_FAILURE] ${scheduler.lastError.code}`);
       error.name = "SessionContinuityError";
       error.code = scheduler.lastError.code;
@@ -347,7 +398,9 @@ function createSessionContinuity(options = {}) {
       persistOnMutation,
       dirty: persistOnMutation && scheduler.dirty,
       writerActive: scheduler.writing,
-      pendingWrites: scheduler.writing ? 1 : (scheduler.dirty ? 1 : 0),
+      // Truthful: at most ONE shared epoch promise exists at any time.
+      pendingWrites: scheduler.writing || scheduler.dirty ? 1 : 0,
+      epoch: scheduler.epoch,
       lastError: scheduler.lastError === null ? null : Object.freeze({ ...scheduler.lastError })
     });
   }
@@ -804,38 +857,65 @@ function createSessionContinuity(options = {}) {
   }
 
   // ---------------------------------------------------------------------------
-  // Graceful shutdown (shared by the public facade and the trusted
-  // controller): flush ALL currently-known dirty state, release memory,
-  // NEVER delete persisted state.  Awaitable.
+  // Graceful shutdown (DSC-R2-003 + DSC-R2-004).
+  //
+  // SHARED COMPLETION: the first invocation creates ONE canonical shutdown
+  // completion promise; every subsequent call JOINS that same completion
+  // until it settles.  No caller observes "shutdown complete" while the
+  // final flush is still active.
+  //
+  // DETERMINISTIC FAILURE: a final-write disk error resolves the completion
+  // with a flushed:{failed:true, code} result — never a hang.
+  //
+  // Never deletes persisted state.  The durable store's same-process
+  // ownership is released by the TRUSTED LIFECYCLE OWNER through
+  // store.finalizeShutdown() only after this completion settles.
   // ---------------------------------------------------------------------------
-  async function domainShutdown() {
-    // Flush ALL currently-known dirty state BEFORE latching the shutdown
-    // flag (the flag legitimately stops future mutation scheduling).
-    let flushed = null;
-    try {
-      scheduler.dirty = true;
-      ensureWriter();
-      await whenPersisted();
-      if (scheduler.dirty && scheduler.lastError === null) {
-        // Writer stopped (e.g. failure loop): perform one direct final write.
-        const snapshot = buildSnapshot(clock(), sessions, terminal);
-        await store.persist(snapshot);
-        persistedGeneration = snapshot.savedAt;
-        scheduler.dirty = false;
-      }
-      flushed = Object.freeze({ persisted: true, savedAt: persistedGeneration });
-    } catch (error) {
-      flushed = Object.freeze({ failed: true, code: error?.code ?? "PERSIST_FAILURE" });
+  let shutdownCompletion = null;
+
+  function domainShutdown() {
+    if (shutdownCompletion === null) {
+      shutdownCompletion = (async () => {
+        // Flush ALL currently-known dirty state BEFORE latching the shutdown
+        // flag (the flag legitimately stops future mutation scheduling).
+        let flushed = null;
+        try {
+          if (persistOnMutation) {
+            scheduler.dirty = true;
+            openEpoch();
+            ensureWriter();
+            await openEpoch();
+          }
+          if (scheduler.dirty || !persistOnMutation) {
+            // Writer stopped on failure (or non-durable mode): perform one
+            // direct final write so the outcome is conclusive.
+            const snapshot = buildSnapshot(clock(), sessions, terminal);
+            await store.persist(snapshot);
+            persistedGeneration = snapshot.savedAt;
+            scheduler.dirty = false;
+          }
+          flushed = Object.freeze({ persisted: true, savedAt: persistedGeneration });
+        } catch (error) {
+          flushed = Object.freeze({ failed: true, code: error?.code ?? "PERSIST_FAILURE" });
+          // DSC-R2-003: settle any still-open epoch deterministically.
+          const failure = new Error(`[PERSIST_FAILURE] ${error?.code ?? "PERSIST_FAILURE"}`);
+          failure.name = "SessionContinuityError";
+          failure.code = error?.code ?? "PERSIST_FAILURE";
+          settleEpochFailure(failure);
+        }
+        shutDown = true;
+        sessions.clear();
+        bindingIndex.clear();
+        terminal.clear();
+        // Settle any epoch still open (e.g. parked before shutdown began).
+        settleEpochSuccess();
+        return Object.freeze({ shutdown: true, flushed });
+      })();
+      // Contain: the canonical completion itself never rejects; failure is
+      // carried in the resolved result (deterministic failure return).
+      shutdownCompletion.catch(() => {});
     }
-    shutDown = true;
-    sessions.clear();
-    bindingIndex.clear();
-    terminal.clear();
-    // Release any waiters still parked.
-    const waiters = scheduler.idleResolvers;
-    scheduler.idleResolvers = [];
-    for (const resolve of waiters) resolve();
-    return Object.freeze({ shutdown: true, flushed });
+    return shutdownCompletion;
   }
 
   // ---------------------------------------------------------------------------
@@ -848,6 +928,83 @@ function createSessionContinuity(options = {}) {
     persist,
     shutdown: domainShutdown,
     mintPeerProvenance,
+    /**
+     * DSC-R2-006: TRUSTED-ONLY explicit continuity LINK.  Binds BOTH
+     * trusted peer provenances to the SAME canonical session (endpoint B
+     * joins endpoint A's session).  Composition-only; never reachable from
+     * raw events, the ordinary facade, or Manager payload.  Links
+     * continuity identity ONLY — never authority.
+     */
+    trustedLinkContinuity({ provenanceA, provenanceB } = {}) {
+      requirePeerProvenance(provenanceA, "trustedLinkContinuity");
+      requirePeerProvenance(provenanceB, "trustedLinkContinuity");
+      const keyA = provenanceA.key;
+      const keyB = provenanceB.key;
+      if (keyA === keyB) {
+        fail("LINK_ENDPOINTS_IDENTICAL", "continuity link endpoints must differ");
+      }
+      const ownerA = bindingIndex.get(keyA);
+      const ownerB = bindingIndex.get(keyB);
+      // Resolve/choose the target canonical session: A's if bound, else B's,
+      // else mint a new one.
+      let target = ownerA ? sessions.get(ownerA) : null;
+      if (!target && ownerB) target = sessions.get(ownerB);
+      if (!target) {
+        target = {
+          sessionId: idFactory.next(),
+          createdAt: clock(),
+          updatedAt: clock(),
+          incarnation: 1,
+          resumeMetadata: Object.freeze({}),
+          terminalAt: null,
+          channels: [],
+          state: "ACTIVE"
+        };
+        assertCanonicalContinuitySessionId(target.sessionId);
+        sessions.set(target.sessionId, target);
+      }
+      if (target.terminalAt !== null) {
+        fail("SESSION_TERMINAL", "cannot link onto a terminal session");
+      }
+      const now = clock();
+      const attached = [];
+      for (const [provenance, key, previousOwner] of [
+        [provenanceA, keyA, ownerA],
+        [provenanceB, keyB, ownerB]
+      ]) {
+        // Detach the binding from any OTHER session it currently owns.
+        if (previousOwner && previousOwner !== target.sessionId) {
+          const previousSession = sessions.get(previousOwner);
+          if (previousSession) {
+            previousSession.channels = previousSession.channels.filter(
+              (b) => compositeBindingKey(b) !== key
+            );
+            touchSession(previousSession, now);
+          }
+        }
+        const alreadyBound = target.channels.some((b) => compositeBindingKey(b) === key);
+        if (!alreadyBound) {
+          if (target.channels.length >= DEFAULT_BOUNDS.maxBindingsPerSession) {
+            fail("BINDING_LIMIT_EXCEEDED", "session binding bound reached");
+          }
+          target.channels.push({
+            channel: provenance.channel,
+            peer: provenance.peer,
+            boundAt: now,
+            generation: target.incarnation
+          });
+          bindingIndex.set(key, target.sessionId);
+          attached.push(Object.freeze({ channel: provenance.channel, peer: provenance.peer }));
+        }
+      }
+      target.state = "ACTIVE";
+      touchSession(target, now);
+      markDirty();
+      return Object.freeze({
+        sessionId: target.sessionId,
+        linked: Object.freeze(attached)
+      });
+    },
     // TRUSTED-ONLY binding transfer (explicit cross-session unification).
     trustedTransferBinding({ provenance, toSessionId } = {}) {
       requirePeerProvenance(provenance, "trustedTransferBinding");
