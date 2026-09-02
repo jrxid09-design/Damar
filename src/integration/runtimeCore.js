@@ -80,6 +80,8 @@ async function createRuntimeCore({
     // (env override / ~/.damar/continuity-v1.json) owned by the manager
     // bootstrap; null → inert in-memory continuity (tests only).
     continuityStoreFile = undefined,
+    // DSC-R3-004: private trusted sink for continuity lifecycle handles
+    trustedContinuitySink = null,
     // ---- Recovery ----
     recoverySystem = null,
     generationLedger = null,
@@ -202,6 +204,18 @@ async function createRuntimeCore({
         return Object.freeze({ shutDown: true, reason });
     }
 
+    // DSC-R3-004: hand the trusted continuity handles to the RuntimeHost
+    // through the TRUSTED SINK (a closure the host passed in) — NOT through
+    // any property of the returned core object.  The host keeps them in
+    // private closure state; ordinary core consumers never see them.
+    if (trustedContinuitySink && channelIngress) {
+        trustedContinuitySink(Object.freeze({
+            lifecycle: channelIngress.lifecycle,
+            linker: channelIngress.continuityLinker,
+            composition: channelIngress.composition
+        }));
+    }
+
     return Object.freeze({
         version: VERSION,
 
@@ -214,13 +228,12 @@ async function createRuntimeCore({
         presence: rt,
         presenceProducers: Object.freeze(producers),
         bus: busInstance,
-        // DSC-R2-005: `channels` is the ORDINARY channel facade (interaction
-        // only).  The trusted continuity lifecycle facade lives on
-        // `continuityLifecycle` and is consumed by the RuntimeHost lifecycle
-        // (RECOVER restore / shutdown flush), never by channel code.
+        // DSC-R3-004: `channels` is the ORDINARY channel facade
+        // (interaction only).  The trusted continuity lifecycle facade and
+        // the trusted linker are carried to the RuntimeHost through the
+        // private trusted composition channel (below) — deliberately NOT
+        // attached to this public core object.
         channels: channelIngress ? channelIngress.channels : null,
-        continuityLifecycle: channelIngress ? channelIngress.lifecycle : null,
-        continuityLinker: channelIngress ? channelIngress.continuityLinker : null,
         media: Object.freeze({ getDiagnostics: mediaSubsystem.getDiagnostics }),
         recovery: Object.freeze({
             system, ledger, tracker,

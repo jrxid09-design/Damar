@@ -108,30 +108,34 @@ function channelAdapter(channel) {
  * and InteractionBus.  The caller receives only transport ingestion and
  * response projection; no Lane 2/3/4 dependency is exposed.
  *
- * Wave 5 Lane 4 (repair R3, DSC-R2-001/005/006): the TRUSTED COMPOSITION
+ * Wave 5 Lane 4 (repair R4, DSC-R3-001/004): the TRUSTED COMPOSITION
  * supplies:
  *
  *   sessionContinuity        — the PUBLIC inert continuity facade
  *   trustedContinuity        — { mintPeerProvenance, trustedLinkContinuity }
  *                              held ONLY by the trusted composition closure
- *   transportIdentity        — a TransportIdentityRegistry that the trusted
- *                              composition itself populated from
- *                              TRANSPORT-OWNED identity derivation
+ *   peerScopes               — the trusted TRANSPORT PEER SCOPE registry
+ *                              (runtime-owned TransportPeerHandle mints)
  *
- * DSC-R2-001: peer provenance is minted EXCLUSIVELY from TRANSPORT-OWNED
- * identity registered at composition time.  The raw event object is NEVER
- * consulted for continuity trust evidence — no field (trustedPeerEvidence,
- * continuitySessionId, canonicalSessionId, userId, peerKey, dscId, or any
- * other) on a raw caller event can establish continuity identity.  The
- * registered transport identity is an internal branded object that no
- * caller can construct through host.channels.ingest().
+ * DSC-R3-001: peer provenance is minted EXCLUSIVELY from
+ * TransportPeerHandles minted by the trusted transport peer scopes.  The
+ * RAW EVENT OBJECT IS NEVER CONSULTED for continuity trust evidence — no
+ * field (sessionId, ses_*, trustedPeerEvidence, continuitySessionId,
+ * canonicalSessionId, userId, peerKey, dscId, chatId, or any other) on a
+ * raw caller event can establish continuity identity.  Handles are
+ * WeakSet-branded capabilities that no caller can construct, emulate, or
+ * inject through the public ingest surface.
+ *
+ * Channels WITHOUT a supported trusted peer scope FAIL CLOSED for
+ * continuity (honest per-transport support matrix in transportPeer.js);
+ * the ordinary ses_* interaction path continues unchanged.
  *
  * DSC-R2-005: the ORDINARY channel facade exposes ONLY channel interaction
  * operations.  Global continuity lifecycle (restore/flush/shutdown/status)
  * lives on a SEPARATE trusted-lifecycle facade returned to the trusted
  * composition root only.
  */
-function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, mediaContextMint = null, sessionContinuity = null, trustedContinuity = null, transportIdentity = null, historyRecorder = undefined, historyProvider = undefined, continuityStoreHandle = null } = {}) {
+function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, mediaContextMint = null, sessionContinuity = null, trustedContinuity = null, peerScopes = null, historyRecorder = undefined, historyProvider = undefined, continuityStoreHandle = null } = {}) {
   if (!bus || typeof bus.registerTransport !== "function" ||
       typeof bus.registerHandler !== "function" || typeof bus.submit !== "function" ||
       typeof bus.isCanonicalEnvelope !== "function") {
@@ -154,17 +158,18 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
       throw new TypeError("MANAGER_INGRESS_CONTINUITY_STORE_HANDLE_INVALID");
     }
   }
-  // DSC-R1-001/006 + DSC-R2-001: continuity REQUIRES the trusted provenance
-  // mint AND a trusted transport-identity registry.  Without both, no
-  // binding can ever form (fail closed).
+  // DSC-R1-001/006 + DSC-R3-001: continuity REQUIRES the trusted provenance
+  // mint AND the trusted transport peer scopes.  Without both, no binding
+  // can ever form (fail closed).
   if (sessionContinuity) {
     if (trustedContinuity === null || trustedContinuity === undefined ||
         typeof trustedContinuity.mintPeerProvenance !== "function") {
       throw new TypeError("MANAGER_INGRESS_TRUSTED_CONTINUITY_REQUIRED");
     }
-    if (transportIdentity === null || transportIdentity === undefined ||
-        typeof transportIdentity.resolve !== "function") {
-      throw new TypeError("MANAGER_INGRESS_TRANSPORT_IDENTITY_REQUIRED");
+    if (peerScopes === null || peerScopes === undefined ||
+        typeof peerScopes.scope !== "function" ||
+        typeof peerScopes.support !== "function") {
+      throw new TypeError("MANAGER_INGRESS_TRANSPORT_PEER_SCOPES_REQUIRED");
     }
   }
 
@@ -389,7 +394,8 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
   }
 
   // ------------------------------------------------------------------
-  // Wave 5 Lane 4 (repair R3) — canonical session continuity resolution.
+  // ------------------------------------------------------------------
+  // Wave 5 Lane 4 (repair R4) — canonical session continuity resolution.
   //
   // TRANSPORT ID != DAMAR IDENTITY: the canonical Damar session (dsc_*) is
   // resolved at this TRUSTED seam, so one conversation continues coherently
@@ -398,23 +404,25 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
   // session remains transport-scoped (its one-transport-per-session
   // anti-hijack law is untouched).
   //
-  // DSC-R2-001: peer provenance is minted EXCLUSIVELY from TRANSPORT-OWNED
-  // identity REGISTERED in the trusted composition's TransportIdentity
-  // registry at composition time.  The RAW EVENT OBJECT IS NEVER CONSULTED:
-  // no raw payload field (trustedPeerEvidence, continuitySessionId,
-  // canonicalSessionId, userId, peerKey, dscId, or any other) can establish
-  // continuity identity.  The registry entry is a closure-branded object
-  // that no caller can construct through the public ingest surface.
+  // DSC-R3-001: peer provenance is minted EXCLUSIVELY from
+  // TransportPeerHandles minted by the trusted transport peer scopes.
+  // The RAW EVENT OBJECT IS NEVER CONSULTED — no field on a raw caller
+  // event can establish continuity identity.  Handles are WeakSet-branded
+  // capabilities; a raw public ingest object cannot emulate one by shape.
+  //
+  // The CURRENT trusted handle for each channel is held in RUNTIME-OWNED
+  // state (activeTransportPeers), set ONLY through the trusted
+  // bindTransportPeer seam below (invoked by the canonical transport
+  // runtime — e.g. the voice runtime binding its device-scoped owner
+  // handle at start, the console runtime binding the local owner handle).
+  // Per honest support matrix: telegram/whatsapp have NO supported scope
+  // today, so their continuity FAILS CLOSED while ses_* continues.
   //
   // Trust boundary (conceptual):
-  //   transport-specific adapter
-  //   → runtime-owned canonical peer identity (registered)
+  //   canonical transport runtime
+  //   → runtime-owned TransportPeerHandle (trusted bind)
   //   → private continuity provenance mint
   //   → Manager ingress
-  //
-  // If a transport has no registered trusted identity, continuity binding
-  // for that transport FAILS CLOSED — the ordinary ses_* interaction path
-  // continues unchanged.
   //
   // DSC-R1-002: admission ownership (sessionId + incarnationAtAdmission) is
   // captured at ADMISSION and carried through execution; terminal commits
@@ -427,23 +435,41 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
   // provenance evidence, and resolution is by BINDING POLICY only.
   // ------------------------------------------------------------------
   const continuityByInteraction = new Map(); // ix_* → admission ownership tuple
+  const activeTransportPeers = new Map();    // channel → TransportPeerHandle
   const mintPeerProvenance = trustedContinuity
     ? trustedContinuity.mintPeerProvenance
     : null;
 
+  /**
+   * TRUSTED seam: bind the current transport peer handle for a channel.
+   * Invoked by the canonical transport runtime (voice runtime start,
+   * console runtime start) — NEVER by raw events.  The handle must be minted
+   * by a trusted transport peer scope; unsupported channels are rejected
+   * (fail closed).
+   */
+  function bindTransportPeer(channel, handle) {
+    const scope = peerScopes.scope(channel);
+    if (!scope || !scope.isHandle(handle)) {
+      throw Object.assign(new Error("TRANSPORT_PEER_UNTRUSTED"), { code: "TRANSPORT_PEER_UNTRUSTED" });
+    }
+    activeTransportPeers.set(channel, handle);
+    return Object.freeze({ channel, peer: handle.peer, scope: handle.scope, bound: true });
+  }
+
   function resolveContinuitySession(channel, rawEvent) {
     if (!sessionContinuity || !mintPeerProvenance) return null;
-    // TRANSPORT-OWNED evidence ONLY: look up the identity the trusted
-    // composition registered for this channel.  The raw event is passed
-    // solely so the registry MAY correlate by bus-session identity derived
-    // from runtime state — never by reading raw payload fields.
-    const evidence = transportIdentity.resolve(channel, rawEvent);
-    if (typeof evidence !== "string" || evidence.length === 0) {
-      // No trustworthy transport-owned identity → NO continuity binding.
-      // The ordinary ses_* interaction path continues unchanged.
-      return { resolved: false, reason: "PEER_EVIDENCE_UNTRUSTED" };
+    // RUNTIME-OWNED evidence ONLY: the currently bound trusted handle for
+    // this channel.  The raw event parameter is deliberately UNUSED for
+    // trust purposes.
+    void rawEvent;
+    const handle = activeTransportPeers.get(channel);
+    if (!handle) {
+      // No trusted transport peer bound for this channel → NO continuity
+      // binding (fail closed, honest support matrix).  The ordinary ses_*
+      // interaction path continues unchanged.
+      return { resolved: false, reason: "TRANSPORT_PEER_UNBOUND" };
     }
-    const provenance = mintPeerProvenance(channel, evidence);
+    const provenance = mintPeerProvenance(handle);
     let resolution = sessionContinuity.resolveChannel({ provenance });
     if (resolution.resolved && !resolution.resumed) {
       // RESTORED != RESUMED: the canonical ingress owns the explicit resume
@@ -465,7 +491,6 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
       provenance
     };
   }
-
   function ingest(channel, rawEvent) {
     const adapter = adapters.get(channel);
     if (!adapter) return Object.freeze({ accepted: false, code: "CHANNEL_NOT_SUPPORTED" });
@@ -639,7 +664,13 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
         const continuity = resolveContinuitySession(channel, rawEvent);
         return continuity && continuity.resolution && continuity.resolution.resolved
           ? continuity.resolution.sessionId : null;
-      }
+      },
+      // TRUSTED seam for the canonical transport runtime to bind its
+      // runtime-owned peer handle (DSC-R3-001).  NOT reachable from raw
+      // events; requires a scope-minted handle.
+      bindTransportPeer,
+      // Honest per-transport support verdict (for diagnostics).
+      transportSupport: (channel) => peerScopes.support(channel)
     })
   });
 }

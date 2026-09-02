@@ -62,6 +62,7 @@ const {
   validateSnapshot,
   buildSnapshot
 } = require("./persistence");
+const { isTransportPeerHandle } = require("./transportPeer");
 
 const TERMINAL_INTERACTION_STATES = Object.freeze(new Set([
   "COMPLETED", "FAILED", "CANCELLED", "EXPIRED"
@@ -179,29 +180,22 @@ function createSessionContinuity(options = {}) {
   const MINTED_PROVENANCE = new WeakSet();
 
   /**
-   * TRUSTED-ONLY: mint peer provenance from RUNTIME-OWNED transport
-   * evidence.  The peer string must be the exact transport identity
-   * (case/punctuation meaningful and preserved).  Bounded by UTF-8 BYTES.
+   * TRUSTED-ONLY: mint peer provenance from a RUNTIME-OWNED
+   * TransportPeerHandle (see transportPeer.js).  DSC-R3-001: the ONLY
+   * accepted evidence input is a handle minted inside a trusted transport
+   * peer scope — never a raw string, never a raw event field, never a
+   * ses_* transport-session id.
    */
-  function mintPeerProvenance(channel, peer) {
-    if (typeof channel !== "string" || !/^[a-z][a-z0-9_]{0,31}$/.test(channel)) {
-      fail("PROVENANCE_CHANNEL_INVALID", "channel must be a canonical channel name");
-    }
-    // Missing/untrusted peer evidence must NOT collapse into a shared
-    // identity: an exact, non-blank, byte-bounded string is required.
-    if (typeof peer !== "string" || peer.length === 0 ||
-        Buffer.byteLength(peer, "utf8") > DEFAULT_BOUNDS.maxPeerBytes ||
-        peer.trim().length === 0) {
-      fail("PROVENANCE_PEER_INVALID", "peer provenance requires runtime-owned exact peer evidence bounded by UTF-8 bytes");
-    }
-    if (/[\u0000-\u001f\u007f]/.test(peer)) {
-      fail("PROVENANCE_PEER_INVALID", "peer evidence must not contain control characters");
+  function mintPeerProvenance(peerHandle) {
+    if (!isTransportPeerHandle(peerHandle)) {
+      fail("PROVENANCE_UNTRUSTED", "peer provenance requires a minted TransportPeerHandle from a trusted transport peer scope");
     }
     const provenance = Object.freeze({
       kind: "PeerProvenance",
-      channel,
-      peer,
-      key: `${channel}\u0000${peer}`
+      channel: peerHandle.channel,
+      peer: peerHandle.peer,
+      scope: peerHandle.scope,
+      key: `${peerHandle.channel}\u0000${peerHandle.peer}`
     });
     MINTED_PROVENANCE.add(provenance);
     return provenance;
@@ -300,6 +294,11 @@ function createSessionContinuity(options = {}) {
   function markDirty() {
     if (!persistOnMutation) return;
     scheduler.dirty = true;
+    // DSC-R3-002 CASE B: a NEW mutation opens a NEW durability epoch; the
+    // previous failure's error state belongs to the failed epoch only.
+    // Clearing it here lets the new epoch attempt recovery on its own
+    // merits (whenPersisted of the failed epoch stays settled as failure).
+    scheduler.lastError = null;
     openEpoch();
     ensureWriter();
   }
@@ -354,6 +353,18 @@ function createSessionContinuity(options = {}) {
    */
   function whenPersisted() {
     if (!persistOnMutation) return Promise.resolve();
+    // DSC-R3-002 CASE A: a durability failure has been recorded and NO new
+    // mutation has occurred since (dirty is the failure remnant, the writer
+    // is idle, the epoch settled).  The recorded failure IS the durability
+    // result for all state known at call time: settle DETERMINISTICALLY.
+    // Never open a fresh inert epoch with no writer.
+    if (scheduler.lastError !== null && !scheduler.writing &&
+        scheduler.epochSettled && scheduler.dirty) {
+      const failure = new Error(`[PERSIST_FAILURE] ${scheduler.lastError.code}`);
+      failure.name = "SessionContinuityError";
+      failure.code = scheduler.lastError.code;
+      return Promise.reject(failure);
+    }
     if (scheduler.epochSettled && !scheduler.dirty && !scheduler.writing) {
       return Promise.resolve(Object.freeze({ persisted: true, epoch: scheduler.epoch, savedAt: persistedGeneration }));
     }
@@ -369,6 +380,10 @@ function createSessionContinuity(options = {}) {
         return Object.freeze({ persisted: true, epoch: scheduler.epoch, savedAt: persistedGeneration });
       })();
     }
+    // Normal path: join the CURRENT epoch's shared promise (the epoch's
+    // writer is armed by markDirty/flushOnce; there is always a live or
+    // pending writer on this path because epochSettled-with-idle-writer is
+    // handled above).
     return openEpoch();
   }
 
@@ -945,10 +960,34 @@ function createSessionContinuity(options = {}) {
       }
       const ownerA = bindingIndex.get(keyA);
       const ownerB = bindingIndex.get(keyB);
-      // Resolve/choose the target canonical session: A's if bound, else B's,
-      // else mint a new one.
-      let target = ownerA ? sessions.get(ownerA) : null;
-      if (!target && ownerB) target = sessions.get(ownerB);
+      // DSC-R3-005: FAIL-CLOSED conflict semantics.  If either endpoint is
+      // already bound to a LIVE dsc session (other than one the OTHER
+      // endpoint already owns — i.e. an already-linked pair re-linking
+      // idempotently), the link is REJECTED with a typed conflict.  NO
+      // SILENT TRANSFER: an existing binding is never detached by a link.
+      // (Explicit transfer, if ever needed, must be a distinct owner-
+      // confirmed operation; this repair deliberately provides none.)
+      const liveOwnerA = ownerA && sessions.has(ownerA) ? ownerA : null;
+      const liveOwnerB = ownerB && sessions.has(ownerB) ? ownerB : null;
+      if (liveOwnerA && liveOwnerB && liveOwnerA !== liveOwnerB) {
+        fail("LINK_CONFLICT", "both endpoints are already bound to different live continuity sessions", {
+          endpointA: { channel: provenanceA.channel, peer: provenanceA.peer, boundSessionId: liveOwnerA },
+          endpointB: { channel: provenanceB.channel, peer: provenanceB.peer, boundSessionId: liveOwnerB }
+        });
+      }
+      if (liveOwnerA && liveOwnerB && liveOwnerA === liveOwnerB) {
+        // Idempotent: already linked to each other's session.
+        const existing = sessions.get(liveOwnerA);
+        return Object.freeze({
+          sessionId: liveOwnerA,
+          linked: Object.freeze([]),
+          idempotent: true
+        });
+      }
+      // Resolve/choose the target canonical session: the bound endpoint's
+      // session if exactly one is bound, else mint a new one.
+      let target = liveOwnerA ? sessions.get(liveOwnerA) : null;
+      if (!target && liveOwnerB) target = sessions.get(liveOwnerB);
       if (!target) {
         target = {
           sessionId: idFactory.next(),
@@ -968,22 +1007,11 @@ function createSessionContinuity(options = {}) {
       }
       const now = clock();
       const attached = [];
-      for (const [provenance, key, previousOwner] of [
-        [provenanceA, keyA, ownerA],
-        [provenanceB, keyB, ownerB]
-      ]) {
-        // Detach the binding from any OTHER session it currently owns.
-        if (previousOwner && previousOwner !== target.sessionId) {
-          const previousSession = sessions.get(previousOwner);
-          if (previousSession) {
-            previousSession.channels = previousSession.channels.filter(
-              (b) => compositeBindingKey(b) !== key
-            );
-            touchSession(previousSession, now);
-          }
-        }
+      for (const [provenance, key] of [[provenanceA, keyA], [provenanceB, keyB]]) {
+        // Only UNBOUND endpoints are attached here — conflict semantics above
+        // guarantee no live binding is ever detached or reassigned.
         const alreadyBound = target.channels.some((b) => compositeBindingKey(b) === key);
-        if (!alreadyBound) {
+        if (!alreadyBound && !bindingIndex.has(key)) {
           if (target.channels.length >= DEFAULT_BOUNDS.maxBindingsPerSession) {
             fail("BINDING_LIMIT_EXCEEDED", "session binding bound reached");
           }

@@ -80,8 +80,17 @@ async function createRuntimeHost({
 
     // ------------------------------------------------------- INITIALIZE
     phaseMachine.transitionTo(HOST_PHASE.INITIALIZING, "compose-runtime-core");
+    // DSC-R3-004: PRIVATE closure state for the trusted continuity
+    // lifecycle/linker handles.  They are delivered by the core factory
+    // through the trusted sink below and NEVER attached to the returned
+    // host facade or to core.
+    let continuityLifecycleHandles = null;
+    const continuitySink = coreFactory === createRuntimeCore
+        ? (handles) => { continuityLifecycleHandles = handles; }
+        : null;
+
     const effectiveCoreOptions = coreFactory === createRuntimeCore && conversationHandler === null
-        ? { ...coreOptions, enableManagerIngress: true }
+        ? { ...coreOptions, enableManagerIngress: true, trustedContinuitySink: continuitySink }
         : coreOptions;
     const core = await coreFactory(effectiveCoreOptions);
     const rt = core.presence;
@@ -108,9 +117,10 @@ async function createRuntimeHost({
     // facade).  Restored sessions come back CLOSED (RESTORED != RESUMED).
     // Corrupt/oversized state fails CLOSED: the domain degrades to a fresh
     // continuity domain — never a partial resurrection, never a failed boot.
-    if (core.continuityLifecycle && typeof core.continuityLifecycle.restoreContinuity === "function") {
+    const continuityLifecycle = continuityLifecycleHandles ? continuityLifecycleHandles.lifecycle : null;
+    if (continuityLifecycle && typeof continuityLifecycle.restoreContinuity === "function") {
         try {
-            await core.continuityLifecycle.restoreContinuity();
+            await continuityLifecycle.restoreContinuity();
         } catch {
             // Fail-closed degradation is decided inside the domain; a hard
             // fault here must not prevent boot.
@@ -297,8 +307,8 @@ async function createRuntimeHost({
             governor: safe(() => core.governor.getResourceStatus()) ?? null,
             bus: safe(() => bus.getStatus()) ?? null,
             recovery: safe(() => core.recovery.tracker.getRecoveryStatus()) ?? null,
-            continuity: safe(() => (core.continuityLifecycle && typeof core.continuityLifecycle.continuityStatus === "function"
-                ? core.continuityLifecycle.continuityStatus()
+            continuity: safe(() => (continuityLifecycle && typeof continuityLifecycle.continuityStatus === "function"
+                ? continuityLifecycle.continuityStatus()
                 : null)) ?? null,
             localTransport: localTransportId,
             shuttingDown: shutDown
@@ -338,6 +348,87 @@ async function createRuntimeHost({
         return Object.freeze(
             [...adapters.values()].map((a) => a.snapshot())
         );
+    }
+
+    /**
+     * DSC-R3-001 TRUSTED RUNTIME SEAM: bind the current transport peer
+     * handle for a channel.  Only a handle minted by a trusted transport
+     * peer scope is accepted (WeakSet-branded; raw callers cannot produce
+     * one).  Invoked by the canonical transport runtime (voice runtime
+     * start, console runtime start) — never by channel events.
+     */
+    function bindTransportPeerHandle(channel, handle) {
+        const composition = continuityLifecycleHandles ? continuityLifecycleHandles.composition : null;
+        if (!composition || typeof composition.bindTransportPeer !== "function") {
+            return { ok: false, code: "TRANSPORT_PEER_SEAM_UNAVAILABLE" };
+        }
+        try {
+            const result = composition.bindTransportPeer(channel, handle);
+            return { ok: true, ...result };
+        } catch (error) {
+            return { ok: false, code: error?.code ?? "TRANSPORT_PEER_BIND_FAILED" };
+        }
+    }
+
+    /**
+     * DSC-R2-006 REAL PRODUCTION TRUSTED LINK WORKFLOW.
+     *
+     * Links two owner-confirmed transport endpoints onto the same canonical
+     * continuity identity through the CANONICAL Device Identity & Pairing
+     * V1 owner-confirmation flow:
+     *
+     *   Device Identity ownerConfirm (verified: CONFIRMED pairing tx +
+     *   PAIRED trust state for both devices)
+     *   → each device carries a trusted transport binding registration
+     *     (registerContinuityTransportBinding — explicit trusted act,
+     *     never from event payload)
+     *   → private continuity linker (fail-closed conflict semantics)
+     *
+     * Links continuity identity ONLY — never principal, authority,
+     * capability, or permission.  Raw channel events, the ordinary
+     * host.channels facade, Manager payload, and model output can NEVER
+     * reach this operation.
+     */
+    function linkContinuityViaPairing({ identityService, pairings } = {}) {
+        const linker = continuityLifecycleHandles ? continuityLifecycleHandles.linker : null;
+        if (!linker || typeof linker.linkContinuityViaPairing !== "function") {
+            return { ok: false, code: "CONTINUITY_LINK_SEAM_UNAVAILABLE" };
+        }
+        try {
+            const result = linker.linkContinuityViaPairing({ identityService, pairings });
+            return { ok: true, ...result };
+        } catch (error) {
+            return { ok: false, code: error?.code ?? "CONTINUITY_LINK_FAILED", message: error?.message };
+        }
+    }
+
+    /**
+     * TRUSTED registration of a transport binding for an owner-confirmed
+     * device (companion to linkContinuityViaPairing).  Explicit trusted
+     * act; the peer value must be the runtime-owned transport identity
+     * (e.g. the voice/console runtime-owner scope value), never event
+     * payload text.
+     */
+    function registerContinuityTransportBinding({ identityService, deviceId, channel, peer } = {}) {
+        const linker = continuityLifecycleHandles ? continuityLifecycleHandles.linker : null;
+        if (!linker || typeof linker.registerTransportBinding !== "function") {
+            return { ok: false, code: "CONTINUITY_LINK_SEAM_UNAVAILABLE" };
+        }
+        try {
+            const result = linker.registerTransportBinding({ identityService, deviceId, channel, peer });
+            return { ok: true, ...result };
+        } catch (error) {
+            return { ok: false, code: error?.code ?? "CONTINUITY_LINK_FAILED", message: error?.message };
+        }
+    }
+
+    /** Honest per-transport continuity support verdict. */
+    function transportContinuitySupport(channel) {
+        const composition = continuityLifecycleHandles ? continuityLifecycleHandles.composition : null;
+        if (!composition || typeof composition.transportSupport !== "function") {
+            return { supported: false, scope: null, reason: "SEAM_UNAVAILABLE" };
+        }
+        return composition.transportSupport(channel);
     }
 
     /** Submit langsung dari transport lokal (runtime API eksplisit).
@@ -409,9 +500,9 @@ async function createRuntimeHost({
         //   - resolves with a deterministic failure result on disk error —
         //     never a hang (DSC-R2-003).
         shutdownCompletion = (async () => {
-            if (core.continuityLifecycle && typeof core.continuityLifecycle.shutdownContinuity === "function") {
+            if (continuityLifecycle && typeof continuityLifecycle.shutdownContinuity === "function") {
                 try {
-                    return await core.continuityLifecycle.shutdownContinuity();
+                    return await continuityLifecycle.shutdownContinuity();
                 } catch {
                     return Object.freeze({ failed: true, code: "FLUSH_CONTAINED" });
                 }
@@ -553,6 +644,14 @@ async function createRuntimeHost({
         getTransportAdaptersSnapshot,
         submitLocal,
         channels: core.channels,
+        // DSC-R3-001: trusted runtime transport-peer seam (scope-minted
+        // handles only; raw events can never satisfy it).
+        bindTransportPeerHandle,
+        transportContinuitySupport,
+        // DSC-R2-006: owner-confirmed trusted link workflow (Device
+        // Identity & Pairing V1 verification; unreachable from raw events).
+        linkContinuityViaPairing,
+        registerContinuityTransportBinding,
 
         health,
         status,

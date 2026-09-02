@@ -101,88 +101,50 @@ function resolveProductionContinuityStore() {
 }
 
 /**
- * DSC-R2-001 — TRANSPORT IDENTITY REGISTRY (trusted composition-owned).
+ * DSC-R3-001: the trusted TRANSPORT PEER SCOPE registry.  Each supported
+ * channel has a scope created HERE, inside the trusted composition, from
+ * RUNTIME-OWNED semantics (see transportPeer.js for the honest support
+ * matrix).  A scope mints branded TransportPeerHandle capabilities that
+ * the continuity domain is the only consumer of.  Raw events can NEVER
+ * mint, forge, or emulate a handle: the mint is not exported, and the
+ * WeakSet brand cannot be matched by shape.
  *
- * The trusted composition registers, AT COMPOSITION TIME, the
- * TRANSPORT-OWNED canonical peer identity derivation for each supported
- * channel.  Entries are closure-branded: no caller can forge one, and the
- * raw event object is NEVER consulted for trust evidence — the registered
- * extractor may only correlate the event to identity the runtime itself
- * established (e.g. the transport-scoped bus session ses_* the
- * InteractionBus minted for this channel).
- *
- * Trust boundary:
- *   transport-specific adapter (registered extractor)
- *   → runtime-owned canonical peer identity
- *   → private continuity provenance mint
- *   → Manager ingress
- *
- * Channels WITHOUT a registered extractor fail closed for continuity (no
- * binding); the ordinary ses_* interaction path continues unchanged.
+ * HONEST SUPPORT MATRIX (fail-closed by default):
+ *   telegram : UNSUPPORTED (claimed chatId only; no transport-authenticated
+ *              sender identity wired into the canonical ingress today).
+ *   whatsapp : UNSUPPORTED (claimed telemetry JID only; same gap).
+ *   console  : SUPPORTED — RUNTIME_OWNER scope (the local operator surface;
+ *              DEVICE/RUNTIME-SCOPED, not human-peer identity).
+ *   voice    : SUPPORTED — RUNTIME_OWNER scope (the local owner audio
+ *              surface; DEVICE/RUNTIME-SCOPED voice continuity, not
+ *              physical-speaker identity).
  */
-function createTransportIdentityRegistry() {
-    const REGISTERED = new WeakMap(); // extractor fn → branded
-    const extractors = new Map();     // channel name → extractor fn
+function createTrustedTransportPeerScopes() {
+    const transportPeer = require("../runtime/sessionContinuity/transportPeer");
+    const scopes = new Map();
+    for (const [channel, verdict] of Object.entries(transportPeer.TRANSPORT_CONTINUITY_SUPPORT)) {
+        if (verdict.supported === true) {
+            scopes.set(channel, transportPeer.createTransportPeerScope({
+                channel,
+                supported: true,
+                scope: verdict.scope,
+                detail: verdict.detail
+            }));
+        }
+    }
     return Object.freeze({
-        /** Register the transport-owned identity extractor for a channel.
-         * TRUSTED COMPOSITION ONLY. */
-        register(channel, extractor) {
-            if (typeof channel !== "string" || !/^[a-z][a-z0-9_]{0,31}$/.test(channel)) {
-                throw new TypeError("TRANSPORT_IDENTITY_CHANNEL_INVALID");
-            }
-            if (typeof extractor !== "function") {
-                throw new TypeError("TRANSPORT_IDENTITY_EXTRACTOR_INVALID");
-            }
-            extractors.set(channel, extractor);
-            REGISTERED.set(extractor, true);
-            return Object.freeze({ channel, registered: true });
+        /** Resolve the trusted peer scope for a channel (null = unsupported). */
+        scope(channel) {
+            return scopes.get(channel) ?? null;
         },
-        /** Resolve the transport-owned identity for an event.  Returns ""
-         * (fail closed) when the channel has no registered extractor or the
-         * extractor yields no trustworthy identity. */
-        resolve(channel, rawEvent) {
-            const extractor = extractors.get(channel);
-            if (!extractor || REGISTERED.get(extractor) !== true) return "";
-            try {
-                const identity = extractor(rawEvent);
-                return typeof identity === "string" ? identity : "";
-            } catch {
-                return "";
-            }
-        },
-        has(channel) {
-            return extractors.has(channel);
+        /** Honest verdict lookup (also exposed to the ingress seam). */
+        support(channel) {
+            return transportPeer.transportContinuitySupport(channel);
         }
     });
 }
 
-/**
- * DSC-R2-001 — canonical transport-owned identity extractors.
- *
- * Each extractor derives identity ONLY from runtime-established state:
- * the transport-scoped bus session (ses_*) that the InteractionBus itself
- * minted for this channel.  The raw event's payload fields are never read
- * for trust purposes — the event's sessionId, when the RUNTIME minted it,
- * is the runtime-owned handle for this channel's peer stream.  Transports
- * that authenticate at the transport layer (Telegram API sender id,
- * WhatsApp JID from the socket, paired device identity) register richer
- * extractors through this same trusted seam as those transports are wired.
- */
-function defaultTransportIdentityExtractors() {
-    const extractorFor = (rawEvent) => {
-        const sessionId = Object.getOwnPropertyDescriptor(rawEvent ?? {}, "sessionId");
-        if (!sessionId || typeof sessionId.value !== "string") return "";
-        return sessionId.value.startsWith("ses_") ? sessionId.value : "";
-    };
-    return {
-        telegram: extractorFor,
-        whatsapp: extractorFor,
-        console: extractorFor,
-        voice: extractorFor
-    };
-}
-
-function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionContinuity = null, continuityStoreFile = undefined, transportIdentityRegistry = undefined } = {}) {
+function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionContinuity = null, continuityStoreFile = undefined, transportPeerScopes = undefined } = {}) {
     const manager = createDamarManager();
     let continuity = sessionContinuity !== null && sessionContinuity !== undefined
         ? sessionContinuity
@@ -195,12 +157,9 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
             ? continuityStoreFile
             : resolveProductionContinuityStore();
         if (storeFile === null) {
-            // Explicit inert mode (DAMAR_CONTINUITY_STATE=memory): continuity
-            // identity is still resolved, but nothing is durable.
+            // Explicit inert mode (DAMAR_CONTINUITY_STATE=memory).
             continuity = sessionContinuityMod.createSessionContinuity({
                 idFactory: sessionContinuityMod.createCryptoContinuityIdFactory(),
-                // DSC-R1-001: the trusted controller is captured HERE, inside
-                // the trusted composition closure, and never escapes.
                 trustedLifecycle(controller) {
                     trustedContinuity = Object.freeze({
                         mintPeerProvenance: controller.mintPeerProvenance,
@@ -218,8 +177,6 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
                 idFactory: sessionContinuityMod.createCryptoContinuityIdFactory(),
                 store,
                 persistOnMutation: true,
-                // DSC-R1-001: the trusted controller is captured HERE, inside
-                // the trusted composition closure, and never escapes.
                 trustedLifecycle(controller) {
                     trustedContinuity = Object.freeze({
                         mintPeerProvenance: controller.mintPeerProvenance,
@@ -230,78 +187,182 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
         }
     }
 
-    // DSC-R2-001: the transport identity registry.  The trusted composition
-    // (or a trusted caller supplying transportIdentityRegistry) registers
-    // TRANSPORT-OWNED extractors.  Raw caller events can NEVER register or
-    // forge entries.
-    const transportIdentity = transportIdentityRegistry !== undefined && transportIdentityRegistry !== null
-        ? transportIdentityRegistry
-        : (() => {
-            const registry = createTransportIdentityRegistry();
-            for (const [channel, extractor] of Object.entries(defaultTransportIdentityExtractors())) {
-                registry.register(channel, extractor);
-            }
-            return registry;
-        })();
+    // Trusted transport bindings for owner-confirmed devices (composition-
+    // closure state; per composition instance).
+    const transportBindings = new Map();
 
-    const ingress = require("../runtime/interactionBus/managerIngressInternal").createManagerInteractionIngress({
-        bus,
-        manager,
-        mediaSubsystem,
-        mediaContextMint: canonicalMediaContextAuthority.mint,
-        sessionContinuity: continuity,
-        trustedContinuity,
-        transportIdentity,
-        continuityStoreHandle
-    });
+    // DSC-R3-001: the trusted transport peer scopes (runtime-owned handle
+    // mints).  Raw caller events can never mint, register, or forge these.
+    const peerScopes = transportPeerScopes !== undefined && transportPeerScopes !== null
+        ? transportPeerScopes
+        : createTrustedTransportPeerScopes();
 
-    // DSC-R2-006: the TRUSTED CONTINUITY LINKER — a narrow, explicit,
-    // composition-owned operation.  It is NOT reachable from raw channel
-    // events, the ordinary host.channels facade, Manager payload, or the
-    // public continuity facade.  It requires TRUSTED transport identity for
-    // BOTH endpoints, and it links CONTINUITY IDENTITY ONLY — never
-    // authority.  No automatic matching by username/phone/userId text ever
-    // occurs: every link is explicit.
-    const continuityLinker = Object.freeze({
-        /**
-         * Explicitly link two trusted transport endpoints onto the same
-         * canonical continuity identity.
-         *
-         * @param {object} endpointA { channel, identity } — TRUSTED identity
-         *        for endpoint A (runtime-owned transport identity).
-         * @param {object} endpointB { channel, identity } — same contract.
-         */
-        linkContinuity({ endpointA, endpointB } = {}) {
-            const verifyEndpoint = (endpoint) => {
-                if (endpoint === null || typeof endpoint !== "object") {
-                    throw Object.assign(new TypeError("CONTINUITY_LINK_ENDPOINT_INVALID"), { code: "CONTINUITY_LINK_ENDPOINT_INVALID" });
+    // DSC-R3-003: CONSTRUCTION-FAILURE OWNERSHIP ROLLBACK.  The store
+    // ownership was acquired above; if ANY later construction step throws,
+    // release it before rethrowing so the durable path is never leaked.
+    let constructionComplete = false;
+    try {
+        const ingress = require("../runtime/interactionBus/managerIngressInternal").createManagerInteractionIngress({
+            bus,
+            manager,
+            mediaSubsystem,
+            mediaContextMint: canonicalMediaContextAuthority.mint,
+            sessionContinuity: continuity,
+            trustedContinuity,
+            peerScopes,
+            continuityStoreHandle
+        });
+
+        // DSC-R2-006: the TRUSTED CONTINUITY LINK WORKFLOW, bound to the
+        // canonical Device Identity & Pairing owner-confirmation flow (see
+        // linkContinuityViaPairing below).  linkContinuity itself requires
+        // ALREADY-MINTED TransportPeerHandles for BOTH endpoints — handles
+        // only the trusted transport scopes can produce.  It links
+        // continuity identity ONLY, never authority, and conflicts fail
+        // closed (DSC-R3-005).
+        const continuityLinker = Object.freeze({
+            /**
+             * Link two trusted transport endpoints (each an already-minted
+             * TransportPeerHandle from a trusted transport peer scope) onto
+             * the same canonical continuity identity.  Composition-owned;
+             * NOT reachable from raw events, host.channels, or Manager
+             * payload.
+             */
+            linkContinuity({ endpointA, endpointB } = {}) {
+                const verifyHandle = (handle, label) => {
+                    if (handle === null || typeof handle !== "object") {
+                        throw Object.assign(new TypeError("CONTINUITY_LINK_ENDPOINT_INVALID"), { code: "CONTINUITY_LINK_ENDPOINT_INVALID" });
+                    }
+                    const scope = peerScopes.scope(handle.channel);
+                    if (handle.kind !== "TransportPeerHandle" || !scope || !scope.isHandle(handle)) {
+                        throw Object.assign(new Error("CONTINUITY_LINK_HANDLE_UNTRUSTED"), { code: "CONTINUITY_LINK_HANDLE_UNTRUSTED" });
+                    }
+                    return handle;
+                };
+                const handleA = verifyHandle(endpointA, "A");
+                const handleB = verifyHandle(endpointB, "B");
+                if (handleA.channel === handleB.channel && handleA.peer === handleB.peer) {
+                    throw Object.assign(new Error("CONTINUITY_LINK_ENDPOINTS_IDENTICAL"), { code: "CONTINUITY_LINK_ENDPOINTS_IDENTICAL" });
                 }
-                const channel = endpoint.channel;
-                const identity = endpoint.identity;
-                if (typeof channel !== "string" || !transportIdentity.has(channel)) {
+                const provenanceA = trustedContinuity.mintPeerProvenance(handleA);
+                const provenanceB = trustedContinuity.mintPeerProvenance(handleB);
+                return trustedContinuity.trustedLinkContinuity({ provenanceA, provenanceB });
+            },
+            /**
+             * DSC-R2-006 REAL PRODUCTION WORKFLOW: link two trusted
+             * transport endpoints through the CANONICAL Device Identity &
+             * Pairing V1 owner-confirmation flow.
+             *
+             * The caller supplies a DeviceIdentityService whose devices are
+             * ALREADY owner-confirmed (PAIRED) for both endpoints, plus the
+             * pairing transaction ids that confirmed them.  The workflow:
+             *
+             *   Device Identity ownerConfirm (done, verified below)
+             *   → pairing transactions CONFIRMED for deviceIdA / deviceIdB
+             *   → each device is PAIRED (owner-confirmed trust state)
+             *   → each device carries a registered transport peer binding
+             *     (channel + runtime-owned peer value, recorded by trusted
+             *     registration — NOT from event payload)
+             *   → mint TransportPeerHandles from the trusted scopes
+             *   → private continuity link (fail-closed on conflict)
+             *
+             * It mints NO principal, authority, capability, or permission.
+             */
+            linkContinuityViaPairing({ identityService, pairings } = {}) {
+                const { DeviceIdentityService } = require("../embodiment/identity/service");
+                if (!(identityService instanceof DeviceIdentityService)) {
+                    throw Object.assign(new TypeError("CONTINUITY_LINK_IDENTITY_SERVICE_INVALID"), { code: "CONTINUITY_LINK_IDENTITY_SERVICE_INVALID" });
+                }
+                if (pairings === null || typeof pairings !== "object" || Array.isArray(pairings)) {
+                    throw Object.assign(new TypeError("CONTINUITY_LINK_PAIRINGS_INVALID"), { code: "CONTINUITY_LINK_PAIRINGS_INVALID" });
+                }
+                const resolveEndpoint = (pairingId, label) => {
+                    if (typeof pairingId !== "string" || pairingId.length === 0) {
+                        throw Object.assign(new Error("CONTINUITY_LINK_PAIRING_INVALID"), { code: "CONTINUITY_LINK_PAIRING_INVALID" });
+                    }
+                    // Serialize() exposes CONFIRMED transactions: the canonical
+                    // proof that ownerConfirm happened for this pairing.
+                    const confirmed = identityService.serialize().transactions.find(
+                        (t) => t.pairingId === pairingId && t.state === "CONFIRMED"
+                    );
+                    if (!confirmed) {
+                        throw Object.assign(new Error("CONTINUITY_LINK_PAIRING_UNCONFIRMED"), { code: "CONTINUITY_LINK_PAIRING_UNCONFIRMED" });
+                    }
+                    const identity = identityService.getIdentity(confirmed.deviceId);
+                    if (!identity || identity.pairingState !== "PAIRED") {
+                        throw Object.assign(new Error("CONTINUITY_LINK_DEVICE_UNPAIRED"), { code: "CONTINUITY_LINK_DEVICE_UNPAIRED" });
+                    }
+                    // The trusted registration of the transport binding for this
+                    // owner-confirmed device.  Registration is an explicit
+                    // trusted act (see registerTransportBinding); event payload
+                    // is never consulted.
+                    const binding = transportBindings.get(confirmed.deviceId);
+                    if (!binding) {
+                        throw Object.assign(new Error("CONTINUITY_LINK_TRANSPORT_BINDING_MISSING"), { code: "CONTINUITY_LINK_TRANSPORT_BINDING_MISSING" });
+                    }
+                    const scope = peerScopes.scope(binding.channel);
+                    if (!scope) {
+                        throw Object.assign(new Error("CONTINUITY_LINK_CHANNEL_UNTRUSTED"), { code: "CONTINUITY_LINK_CHANNEL_UNTRUSTED" });
+                    }
+                    // Mint the runtime-owned handle from the REGISTERED peer
+                    // value (trusted registration, not event text).
+                    return scope.mint(binding.peer);
+                };
+                const handleA = resolveEndpoint(pairings.endpointA, "A");
+                const handleB = resolveEndpoint(pairings.endpointB, "B");
+                if (handleA.channel === handleB.channel && handleA.peer === handleB.peer) {
+                    throw Object.assign(new Error("CONTINUITY_LINK_ENDPOINTS_IDENTICAL"), { code: "CONTINUITY_LINK_ENDPOINTS_IDENTICAL" });
+                }
+                const provenanceA = trustedContinuity.mintPeerProvenance(handleA);
+                const provenanceB = trustedContinuity.mintPeerProvenance(handleB);
+                return trustedContinuity.trustedLinkContinuity({ provenanceA, provenanceB });
+            },
+            /**
+             * TRUSTED registration of a transport peer binding for an
+             * owner-confirmed device.  This is the explicit act that
+             * connects a PAIRED device to its runtime-owned transport
+             * identity value (e.g. the voice runtime owner scope value, the
+             * console owner scope value).  The peer value must come from
+             * trusted runtime state, never from event payload.
+             */
+            registerTransportBinding({ identityService, deviceId, channel, peer } = {}) {
+                const { DeviceIdentityService } = require("../embodiment/identity/service");
+                if (!(identityService instanceof DeviceIdentityService)) {
+                    throw Object.assign(new TypeError("CONTINUITY_LINK_IDENTITY_SERVICE_INVALID"), { code: "CONTINUITY_LINK_IDENTITY_SERVICE_INVALID" });
+                }
+                if (typeof deviceId !== "string" || deviceId.length === 0) {
+                    throw Object.assign(new Error("CONTINUITY_LINK_DEVICE_INVALID"), { code: "CONTINUITY_LINK_DEVICE_INVALID" });
+                }
+                const scope = peerScopes.scope(channel);
+                if (!scope) {
                     throw Object.assign(new Error("CONTINUITY_LINK_CHANNEL_UNTRUSTED"), { code: "CONTINUITY_LINK_CHANNEL_UNTRUSTED" });
                 }
-                if (typeof identity !== "string" || identity.length === 0) {
-                    throw Object.assign(new Error("CONTINUITY_LINK_IDENTITY_UNTRUSTED"), { code: "CONTINUITY_LINK_IDENTITY_UNTRUSTED" });
+                // Validate the peer value through the scope mint (bounds,
+                // charset) WITHOUT retaining the handle.
+                scope.mint(peer);
+                const identity = identityService.getIdentity(deviceId);
+                if (!identity || identity.pairingState !== "PAIRED") {
+                    throw Object.assign(new Error("CONTINUITY_LINK_DEVICE_UNPAIRED"), { code: "CONTINUITY_LINK_DEVICE_UNPAIRED" });
                 }
-                return { channel, identity };
-            };
-            const a = verifyEndpoint(endpointA);
-            const b = verifyEndpoint(endpointB);
-            if (a.channel === b.channel && a.identity === b.identity) {
-                throw Object.assign(new Error("CONTINUITY_LINK_ENDPOINTS_IDENTICAL"), { code: "CONTINUITY_LINK_ENDPOINTS_IDENTICAL" });
+                transportBindings.set(deviceId, Object.freeze({ channel, peer }));
+                return Object.freeze({ deviceId, channel, registered: true });
             }
-            const provenanceA = trustedContinuity.mintPeerProvenance(a.channel, a.identity);
-            const provenanceB = trustedContinuity.mintPeerProvenance(b.channel, b.identity);
-            return trustedContinuity.trustedLinkContinuity({ provenanceA, provenanceB });
-        }
-    });
+        });
 
-    return Object.freeze({
-        ...ingress,
-        // DSC-R2-006: trusted composition-only linking workflow.
-        continuityLinker
-    });
+        constructionComplete = true;
+        return Object.freeze({
+            ...ingress,
+            continuityLinker
+        });
+    } catch (error) {
+        // DSC-R3-003: release the acquired durable-store ownership so a
+        // failed composition never leaks the path.  No active writer exists
+        // during construction, so the release is safe.
+        if (!constructionComplete && continuityStoreHandle !== null && typeof continuityStoreHandle.finalizeShutdown === "function") {
+            try { continuityStoreHandle.finalizeShutdown(); } catch { /* best-effort rollback */ }
+        }
+        throw error;
+    }
 }
 
 module.exports = { createDamarManager, createDamarManagerIngressDomain };
