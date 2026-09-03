@@ -55,8 +55,13 @@ class RfManager {
      */
     addReplaySource({ id, sensorId, filePath, format = null, maxRateHz, location = null } = {}) {
         if (!id || this.sources.has(id)) return { ok: false, reason: `sumber '${id}' tidak valid/duplikat` };
-        const source = new ReplayRfSource({ id, sensorId, filePath, format, maxRateHz });
-        if (location && isValidPoint(location)) this._sourceLocations.set(id, location);
+        // Lokasi sensor WAJIB: observasi RF tanpa lokasi tidak dapat
+        // ditindaklanjuti dalam sistem spasial (dan watch menuntut geo).
+        if (!location || !isValidPoint(location)) {
+            return { ok: false, reason: "sumber RF butuh location {lat,lon} sensor yang valid" };
+        }
+        const source = new ReplayRfSource({ id, sensorId, filePath, format, maxRateHz, clock: this.clock });
+        this._sourceLocations.set(id, location);
         this.sources.set(id, source);
         return { ok: true, source };
     }
@@ -71,11 +76,15 @@ class RfManager {
             return { ok: false, reason: "AUTHORIZED_LOCAL_SOURCE ditolak: allowLocalUdp=false (fail-closed pra-Lane4)" };
         }
         if (!id || this.sources.has(id)) return { ok: false, reason: `sumber '${id}' tidak valid/duplikat` };
+        // Lokasi sensor WAJIB (sistem spasial; watch menuntut geo).
+        if (!location || !isValidPoint(location)) {
+            return { ok: false, reason: "sumber RF butuh location {lat,lon} sensor yang valid" };
+        }
         const source = new UdpRfSource({
             id, sensorId, bindAddress, bindPort, maxRateHz, allowLocalUdp: true,
             onFrame: (frame) => this.processUdpFrame(id, frame)
         });
-        if (location && isValidPoint(location)) this._sourceLocations.set(id, location);
+        this._sourceLocations.set(id, location);
         this.sources.set(id, source);
         return { ok: true, source };
     }
