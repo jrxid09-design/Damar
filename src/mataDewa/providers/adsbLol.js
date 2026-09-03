@@ -62,7 +62,7 @@ function createAdsbLolProvider() {
             const point = isValidPoint(bounds) ? bounds : { lat: -6.2, lon: 106.8 }; // default Jakarta region
             const url = `${BASE_URL}/v2/lat/${point.lat.toFixed(3)}/lon/${point.lon.toFixed(3)}/dist/${DEFAULT_RADIUS_NM}`;
             const nowMs = Date.now();
-            const data = await fetchJson(url);
+            const data = await fetchJson(url, { allowedHosts: ["api.adsb.lol"] });
             const list = Array.isArray(data?.ac) ? data.ac : [];
             return list.map(ac => toObservation(ac, nowMs)).filter(Boolean);
         }

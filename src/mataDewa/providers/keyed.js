@@ -38,7 +38,7 @@ function createTomTomProvider() {
         async poll({ bounds, credential }) {
             if (!isValidPoint(bounds)) return [];
             const url = `https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?point=${bounds.lat},${bounds.lon}&key=${encodeURIComponent(credential)}`;
-            const data = await fetchJson(url, { timeoutMs: 10000 });
+            const data = await fetchJson(url, { timeoutMs: 10000, allowedHosts: ["api.tomtom.com"] });
             const flow = data?.flowSegmentData;
             if (!flow) return [];
             return [{
@@ -89,7 +89,7 @@ function createFirmsProvider() {
             const north = (bounds.lat + 2).toFixed(2);
             const east = (bounds.lon + 2).toFixed(2);
             const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${encodeURIComponent(credential)}/VIIRS_SNPP_NRT/${west},${south},${east},${north}/1`;
-            const text = await fetchText(url, { timeoutMs: 15000 });
+            const text = await fetchText(url, { timeoutMs: 15000, allowedHosts: ["firms.modaps.eosdis.nasa.gov"] });
             const lines = String(text).split(/\r?\n/).filter(l => l.trim());
             if (lines.length < 2) return [];
             const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
@@ -208,7 +208,7 @@ async function mintOpenSkyToken(credential) {
     const data = await fetchPostJson(
         "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token",
         body.toString(),
-        { timeoutMs: 10000 }
+        { timeoutMs: 10000, allowedHosts: ["auth.opensky-network.org"] }
     );
     if (!data?.access_token) throw new Error("OpenSky token gagal di-mint");
     return data.access_token;

@@ -54,7 +54,7 @@ function createUsgsProvider() {
         license: "public domain (USGS)",
         fallbacks: [],
         async poll() {
-            const data = await fetchJson(FEED_URL);
+            const data = await fetchJson(FEED_URL, { allowedHosts: ["earthquake.usgs.gov"] });
             const features = Array.isArray(data?.features) ? data.features : [];
             return features.map(toObservation).filter(Boolean);
         }
