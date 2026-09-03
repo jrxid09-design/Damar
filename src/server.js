@@ -141,7 +141,10 @@ function bootSubsystems() {
     try {
         const mataDewa = require("./mataDewa");
         const service = mataDewa.getService({
-            credentialsFilePath: require("path").join(process.cwd(), "data", "mataDewa", "credentials.json")
+            credentialsFilePath: require("path").join(process.cwd(), "data", "mataDewa", "credentials.json"),
+            // MD-001: publisher perintah UI visual-only terikat pada aliran
+            // event Damar yang sudah ada (telemetryService → SSE Console).
+            telemetry: telemetry
         });
         require("./mataDewa/providers").registerKeylessProviders(service);
         service.registerKeyedProviders();
