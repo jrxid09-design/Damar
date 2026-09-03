@@ -24,15 +24,30 @@ const SCOPE = Object.freeze({ kind: "provider", key: "matadewa" });
  * Registry kredensial — providerId → SecretRef string.
  * Persisten di jalur lokal yang di-ignore (data/mataDewa/credentials.json);
  * fallback memori untuk tes.
+ *
+ * MD-007 FAIL CLOSED PRA-INTEGRASI:
+ *  - Penyimpanan kredensial HANYA lewat Secret Vault kanonik yang
+ *    DIKOMPOSISI EKSPLISIT oleh trusted composition. Tanpa komposisi
+ *    eksplisit, setCredential/removeCredential/resolveCredential MENOLAK
+ *    dengan VAULT_NOT_COMPOSED — tidak ada vault uji internal yang
+ *    diam-diam dipakai menyimpan kredensial pemilik.
+ *  - Vault yang terkomposisi dengan cipher TIDAK AMAN (mis. adapter uji
+ *    deterministik) juga DITOLAK (VAULT_CIPHER_NOT_SECURE): kredensial
+ *    nyata tidak pernah disimpan di vault yang jujur menyatakan dirinya
+ *    mudah didekode siapa pun dengan akses file.
+ *  - providerId divalidasi terhadap skema kredensial Mata Dewa.
  */
 class MataDewaCredentialStore {
 
     /**
      * @param {{ vault?: object, filePath?: string|null }} options
-     *   vault: instance Secret Vault Damar (createSecretVault).
+     *   vault: instance Secret Vault Damar (createSecretVault) — WAJIB
+     *   eksplisit dari trusted composition; tanpa ini store fail-closed.
      *   filePath: null → hanya memori (tes/default aman).
      */
     constructor({ vault = null, filePath = null } = {}) {
+        // MD-007: hanya vault yang diberikan EKSPLISIT yang boleh dipakai.
+        this.vaultExplicit = vault !== null && vault !== undefined;
         this.vault = vault ?? createSecretVault({ now: () => Date.now() });
         this.filePath = filePath;
         /** @type {Map<string, string>} providerId → secretref string */
@@ -52,12 +67,47 @@ class MataDewaCredentialStore {
         }
     }
 
+    /** MD-007: vault terkomposisi eksplisit DAN cipher-nya aman? */
+    _vaultReady() {
+        if (!this.vaultExplicit) {
+            return { ok: false, code: "VAULT_NOT_COMPOSED" };
+        }
+        try {
+            const cipher = this.vault.stats?.().cipher;
+            if (cipher && cipher.secure === false) {
+                return { ok: false, code: "VAULT_CIPHER_NOT_SECURE" };
+            }
+        }
+        catch {
+            return { ok: false, code: "VAULT_CIPHER_NOT_SECURE" };
+        }
+        return { ok: true };
+    }
+
     /**
      * Simpan kredensial provider ke vault + simpan referensinya.
-     * @returns {{ ok, refString?, reason? }}
+     * FAIL CLOSED pra-integrasi (MD-007): tanpa vault kanonik terkomposisi
+     * eksplisit, atau dengan cipher tidak aman → ditolak dengan kode jujur.
+     * @returns {{ ok, refString?, reason?, code? }}
      */
     setCredential(providerId, value, { label = null } = {}) {
-        if (!providerId || typeof value !== "string" || !value.trim()) {
+        const readiness = this._vaultReady();
+        if (!readiness.ok) {
+            return {
+                ok: false,
+                code: readiness.code,
+                reason: readiness.code === "VAULT_NOT_COMPOSED"
+                    ? "Secret Vault kanonik tidak terkomposisi (trusted composition) — " +
+                        "penyimpanan kredensial fail-closed pra-integrasi (MD-007)"
+                    : "cipher vault tidak aman (mis. adapter uji deterministik) — " +
+                        "kredensial nyata tidak pernah disimpan di vault tidak aman (MD-007)"
+            };
+        }
+        if (!providerId || typeof providerId !== "string" ||
+            !Object.prototype.hasOwnProperty.call(OPTIONAL_PROVIDER_CREDENTIALS, providerId)) {
+            return { ok: false, code: "PROVIDER_UNKNOWN", reason: "provider tidak dikenal dalam skema kredensial Mata Dewa" };
+        }
+        if (typeof value !== "string" || !value.trim()) {
             return { ok: false, reason: "providerId + value wajib" };
         }
         const created = this.vault.create({
@@ -71,8 +121,12 @@ class MataDewaCredentialStore {
         return { ok: true, refString };
     }
 
-    /** Hapus kredensial (revoke di vault + hapus ref). */
+    /** Hapus kredensial (revoke di vault + hapus ref). Fail closed tanpa vault. */
     removeCredential(providerId) {
+        const readiness = this._vaultReady();
+        if (!readiness.ok) {
+            return { ok: false, code: readiness.code, reason: "vault kanonik tidak terkomposisi — kredensial tidak dapat diubah (MD-007)" };
+        }
         const refString = this.refs.get(providerId);
         if (!refString) return { ok: false, reason: "tidak ada kredensial untuk provider ini" };
         try {
@@ -94,11 +148,19 @@ class MataDewaCredentialStore {
 
     /**
      * Resolver untuk ProviderRegistry (jahitan credentialResolver).
-     * Gagal = { ok:false, code:"credentials_absent" } — jujur, tanpa bypass.
+     * Semantik jujur (MD-007):
+     *  - tanpa kredensial terkonfigurasi → "credentials_absent" (tidak ada
+     *    yang harus di-resolve — informasi paling akurat untuk UI);
+     *  - kredensial ada TAPI vault kanonik tidak terkomposisi →
+     *    "VAULT_NOT_COMPOSED" (fail-closed, tidak menembus).
      */
     resolveCredential = async (providerId) => {
         const refString = this.refs.get(providerId);
         if (!refString) return { ok: false, code: "credentials_absent" };
+        const readiness = this._vaultReady();
+        if (!readiness.ok) {
+            return { ok: false, code: readiness.code };
+        }
         try {
             // resolveIn menerima string SecretRef dan menegakkan scope.
             const resolved = this.vault.resolveIn(SCOPE, refString);

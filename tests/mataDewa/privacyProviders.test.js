@@ -62,7 +62,8 @@ test("PRIVACY: tidak ada koordinat menara privat — hanya fixture sintetis", ()
 });
 
 test("PRIVACY: kredensial tidak pernah muncul di SecretRef string / persist", async () => {
-    const store = new MataDewaCredentialStore({});
+    const { createTestVault } = require("../helpers/testVault");
+    const store = new MataDewaCredentialStore({ vault: createTestVault() });
     const secret = "SUPER-SECRET-VALUE-xyz";
     store.setCredential("firms", secret);
     // Ref opaque.
@@ -73,7 +74,8 @@ test("PRIVACY: kredensial tidak pernah muncul di SecretRef string / persist", as
 });
 
 test("PRIVACY: scrub — tidak ada method store yang mengekspos nilai dalam list/dump", async () => {
-    const store = new MataDewaCredentialStore({});
+    const { createTestVault } = require("../helpers/testVault");
+    const store = new MataDewaCredentialStore({ vault: createTestVault() });
     store.setCredential("firms", "SECRET-123");
     const dump = JSON.stringify({ list: store.listProviderIds(), has: store.hasCredential("firms") });
     assert.equal(dump.includes("SECRET-123"), false);

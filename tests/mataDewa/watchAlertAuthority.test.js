@@ -165,7 +165,9 @@ test("AUTHORITY: governed action menolak dieksekusi langsung (fail-closed)", asy
 });
 
 test("CREDENTIALS: vault seam — SecretRef opaque, resolve ter-scope, tanpa bypass", async () => {
-    const store = new MataDewaCredentialStore({}); // memori (tes)
+    // MD-007: vault HARUS dikomposisi eksplisit (trusted composition uji).
+    const { createTestVault } = require("../helpers/testVault");
+    const store = new MataDewaCredentialStore({ vault: createTestVault() });
     const set = store.setCredential("tomtom", "synthetic-key-abc");
     assert.equal(set.ok, true);
     // RefString TIDAK mengandung nilai.
@@ -186,7 +188,8 @@ test("CREDENTIALS: vault seam — SecretRef opaque, resolve ter-scope, tanpa byp
 });
 
 test("CREDENTIALS: availability mode — ZERO sampai kredensial PLUS/PRO terpasang", () => {
-    const store = new MataDewaCredentialStore({});
+    const { createTestVault } = require("../helpers/testVault");
+    const store = new MataDewaCredentialStore({ vault: createTestVault() });
     assert.equal(store.availabilityMode([
         { id: "tomtom", requiresCredential: true, credentialTier: "PRO" },
         { id: "firms", requiresCredential: true, credentialTier: "PLUS" }
