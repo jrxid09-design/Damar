@@ -109,6 +109,13 @@ class MataDewaService {
         // Kamera publik/berotorisasi (fail-closed; MediaIngress di sisi Damar).
         const { CameraRegistry } = require("./media/cctv");
         this.cameraRegistry = options.cameraRegistry ?? new CameraRegistry();
+
+        // MD-001: batas perintah UI visual-only — Publisher terikat pada
+        // event stream Damar yang sudah ada (telemetryService). Renderer
+        // menerima navigasi mode lewat SSE yang sama; TIDAK ada server kedua.
+        const { createUiCommandPublisher } = require("./uiCommands");
+        this.uiCommandPublisher = options.uiCommandPublisher ??
+            (options.telemetry ? createUiCommandPublisher(options.telemetry) : null);
     }
 
     /** Daftarkan provider (keyless/berkunci). Aman dipanggil sebelum start. */
@@ -257,13 +264,26 @@ class MataDewaService {
     /**
      * Ubah mode UI konseptual. Ini HANYA mengubah state permukaan — inti
      * headless (watch/alert) tidak bergantung padanya.
+     *
+     * MD-001: perubahan mode yang sah (dari capability executor Manager /
+     * komposisi kanonik) diteruskan ke renderer lewat batas perintah UI
+     * visual-only. Penolakan pengiriman tidak menggagalkan state — state
+     * inti tetap dicatat, delivery dilaporkan jujur.
      */
     setUiMode(mode) {
         if (!Object.values(UI_MODE).includes(mode)) {
             return { ok: false, reason: `ui mode tidak dikenal: ${mode}` };
         }
         this.uiMode = mode;
-        return { ok: true, uiMode: this.uiMode };
+        let delivered = false;
+        let deliveryReason = null;
+        if (this.uiCommandPublisher) {
+            const wireMode = mode === UI_MODE.MATA_DEWA ? "mata-dewa" : "normal";
+            const sent = this.uiCommandPublisher.publishUiCommand("ui.mode.set", { mode: wireMode });
+            delivered = sent.ok === true;
+            deliveryReason = sent.ok ? null : (sent.reason ?? "publish_failed");
+        }
+        return { ok: true, uiMode: this.uiMode, delivered, deliveryReason };
     }
 
     activateMode() { return this.setUiMode(UI_MODE.MATA_DEWA); }

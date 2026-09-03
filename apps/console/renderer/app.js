@@ -14,6 +14,7 @@ import { buildStudioApp } from "./views/apps/studio.js";
 import { buildSpaceApp } from "./views/apps/space.js";
 import { buildConnectApp } from "./views/apps/connect.js";
 import { labApp } from "./views/lab/labApp.js";
+import { setUiCommandNavigator, handleMataDewaUiCommandEvent } from "./views/mataDewa/uiCommands.js";
 
 // View mandiri (dipakai apa adanya sebagai "aplikasi").
 import { damar } from "./views/damar.js";
@@ -675,6 +676,13 @@ function openEventStream() {
                 message: `${event.type} ${summarize(event.payload)}`
             });
             if (event.type === "damar:present") presentMedia(event.payload);
+            // MD-001: perintah UI visual-only dari Manager/capability →
+            // navigasi mode di aplikasi yang SAMA (allowlist mirror).
+            if (event.type === "damar:ui-command") {
+                const applied = handleMataDewaUiCommandEvent(event.payload);
+                if (!applied.ok) console.warn("[ui-command] ditolak:", applied.reason);
+                return;
+            }
             // Aktivitas multi-agent → orb agent di sekitar orb utama
             // (mendekat, menyalurkan energi, flash hasil).
             if (String(event.type ?? "").startsWith("orchestrator:")) {
@@ -1104,6 +1112,11 @@ async function main() {
 
     buildTitlebar();
     buildLauncher();
+
+    // MD-001: navigasi milik aplikasi diregistrasi ke batas perintah UI
+    // (allowlist mirror) — perintah visual-only dari Manager mengubah layar
+    // aplikasi yang SAMA, tanpa jendela/runtime kedua.
+    setUiCommandNavigator((id) => navigate(id));
 
     // Ctrl+K → launcher (pencarian/nav terpadu). Escape → tutup.
     document.addEventListener("keydown", e => {
