@@ -16,6 +16,9 @@ const accessClass = require("./spatial/accessClass");
 const epistemic = require("./spatial/epistemic");
 const observationModel = require("./observations/observation");
 const eventModel = require("./events/event");
+const fusion = require("./events/fusion");
+const coverage = require("./coverage/coverage");
+const { SpatialTimeline } = require("./timeline/timeline");
 
 let singleton = null;
 
@@ -63,5 +66,9 @@ module.exports = {
     epistemic,
     // Model
     observationModel,
-    eventModel
+    eventModel,
+    // Spatial core
+    fusion,
+    coverage,
+    SpatialTimeline
 };
