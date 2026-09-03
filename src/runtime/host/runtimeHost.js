@@ -52,15 +52,31 @@ function defaultClock() {
 }
 
 /**
- * buildRuntimeHost — internal composition builder.  Returns BOTH the
- * ordinary host AND a per-composition voice-activation token.  The public
- * facade (createRuntimeHost) discards the token; only the canonical Voice
- * composition (composeRuntimeHostWithVoiceActivation) retains it.
+ * createRuntimeHost({ coreOptions?, coreFactory?, conversationHandler?,
+ *                     clock?, busBounds?, localTransportId? })
+ *
+ * The ORDINARY public RuntimeHost factory — the ONLY host factory in Damar
+ * (exactly ONE RuntimeHost implementation).  It accepts ONLY ordinary
+ * dependency-injection options and returns ONLY the ordinary host.  It has
+ * NO option capable of receiving a privileged continuity capability (no
+ * activation closure, no binder, no transport scope, no peer handle, no
+ * mint, no continuity controller, no trusted callback) — PUBLIC
+ * createRuntimeHost MUST NOT DISTRIBUTE A PRIVILEGED CONTINUITY CAPABILITY.
+ *
+ * DSC-R7-002 LIFECYCLE OWNERSHIP: the host itself owns continuity
+ * lifecycle.  The trusted composition payload delivered by the core factory
+ * through the continuity sink is captured into the host's PRIVATE closure —
+ * and, when the canonical VoiceRuntime composes a host through its lexical
+ * coreFactory pass-through, the host ALSO chains a capture of the payload so
+ * the voice composition can activate voice continuity.  For an ORDINARY
+ * host (public factory, canonical core factory) a caller-supplied
+ * trustedContinuitySink inside coreOptions is NEVER honored: the host
+ * installs its own, so a public caller cannot intercept it.
  *
  * Semua dependensi dapat disuntik untuk pengujian. Tanpa Console, tanpa
  * Electron, tanpa aktuator, tanpa transport wajib.
  */
-async function buildRuntimeHost({
+async function createRuntimeHost({
     coreOptions = {},
     coreFactory = createRuntimeCore,
     conversationHandler = null,
@@ -82,18 +98,32 @@ async function buildRuntimeHost({
 
     // ------------------------------------------------------- INITIALIZE
     phaseMachine.transitionTo(HOST_PHASE.INITIALIZING, "compose-runtime-core");
-    // DSC-R3-004: PRIVATE closure state for the trusted continuity
-    // lifecycle/linker handles.  They are delivered by the core factory
-    // through the trusted sink below and NEVER attached to the returned
-    // host facade or to core.
+    // DSC-R3-004 + DSC-R7-002: PRIVATE closure state for the trusted
+    // continuity lifecycle/composition handles.  They are delivered by the
+    // core factory through the continuity sink and NEVER attached to the
+    // returned host facade or to core.
     let continuityLifecycleHandles = null;
-    const continuitySink = coreFactory === createRuntimeCore
-        ? (handles) => { continuityLifecycleHandles = handles; }
+    // DSC-R7-002 SINK CHAINING: the host ALWAYS installs its own sink and
+    // captures the trusted payload into private closure.  If the canonical
+    // Voice composition (voiceRuntime.js, through its lexical coreFactory
+    // pass-through) supplied a coreOptions.trustedContinuitySink, the host
+    // CHAINS that callback after its own capture — that composition alone
+    // can then receive the payload.  For an ORDINARY host (canonical core
+    // factory) a caller-supplied sink is NEVER honored: the host overrides
+    // it, so a public caller cannot intercept the trusted payload.
+    const canonicalCoreFactory = coreFactory === createRuntimeCore;
+    const voiceSink = !canonicalCoreFactory && coreOptions && typeof coreOptions.trustedContinuitySink === "function"
+        ? coreOptions.trustedContinuitySink
         : null;
-
-    const effectiveCoreOptions = coreFactory === createRuntimeCore && conversationHandler === null
+    const continuitySink = (handles) => {
+        continuityLifecycleHandles = handles;
+        if (voiceSink) {
+            try { voiceSink(handles); } catch { /* composition fault: fail closed */ }
+        }
+    };
+    const effectiveCoreOptions = canonicalCoreFactory && conversationHandler === null
         ? { ...coreOptions, enableManagerIngress: true, trustedContinuitySink: continuitySink }
-        : coreOptions;
+        : { ...coreOptions, trustedContinuitySink: continuitySink };
     const core = await coreFactory(effectiveCoreOptions);
     const rt = core.presence;
     const producers = core.presenceProducers;
@@ -638,74 +668,6 @@ async function buildRuntimeHost({
         core
     });
 
-    // DSC-R6-001: register the canonical voice-continuity ACTIVATION closure
-    // in a MODULE-PRIVATE registry keyed by a per-composition token object.
-    // The closure is NEVER attached to the returned host facade, host.core,
-    // host.channels, any Symbol, any resolver, or any payload.  The ONLY way
-    // to retrieve it is to hold the exact token object created HERE and to
-    // call the module-private retrieval seam below — and that token is
-    // returned ONLY to the canonical Voice composition module
-    // (runtimeHostVoice.js), never to the ordinary createRuntimeHost caller.
-    const activationToken = Object.freeze({ kind: "VoiceActivationToken" });
-    VOICE_ACTIVATION_REGISTRY.set(activationToken, activateCanonicalVoiceContinuity);
-
-    return Object.freeze({ host, activationToken });
-}
-
-// ---------------------------------------------------------------------------
-// DSC-R6-001 — MODULE-PRIVATE VOICE ACTIVATION REGISTRY.
-//
-// This registry maps a per-composition token object -> the runtime's
-// canonical voice-continuity activation closure.  It is module-private: the
-// ordinary public `createRuntimeHost` facade does NOT return the token, so
-// no ordinary caller can ever retrieve an activation closure.  Only the
-// canonical Voice composition module (runtimeHostVoice.js) — which is given
-// the token by its own internal factory — can retrieve and use it.
-//
-// ORDINARY IMPORTER != TRUSTED VOICE COMPOSITION
-// HOST POSSESSION != CONTINUITY ADMINISTRATION
-// CAPTURE CALLBACK != AUTHORIZATION
-// ---------------------------------------------------------------------------
-const VOICE_ACTIVATION_REGISTRY = new WeakMap();
-
-/**
- * Module-private retrieval seam.  NOT on the ordinary public surface;
- * reachable only by runtimeHostVoice.js through the internal export below.
- * Returns the activation closure for a valid token, or null.  The token is a
- * per-composition object (not a string, not reconstructible by shape or
- * naming), so possession of the public host or of any ordinary import yields
- * nothing.
- */
-function retrieveVoiceActivation(token) {
-    if (token === null || typeof token !== "object") return null;
-    return VOICE_ACTIVATION_REGISTRY.get(token) ?? null;
-}
-
-/**
- * CANONICAL VOICE COMPOSITION ENTRY POINT (internal).  Creates a RuntimeHost
- * and returns BOTH the ordinary host AND the per-composition activation
- * token.  This is the ONLY path that yields the token; it is consumed
- * exclusively by the canonical Voice composition module (runtimeHostVoice.js).
- * Ordinary callers use createRuntimeHost, which discards the token.
- */
-async function composeRuntimeHostWithVoiceActivation(options = {}) {
-    const { host, activationToken } = await buildRuntimeHost(options);
-    return Object.freeze({ host, activationToken });
-}
-
-/**
- * createRuntimeHost — the ORDINARY public RuntimeHost factory.  Accepts ONLY
- * ordinary dependency-injection options and returns ONLY the ordinary host.
- * It deliberately discards the per-composition voice-activation token, so NO
- * ordinary caller can ever obtain a privileged continuity capability —
- * PUBLIC createRuntimeHost MUST NOT DISTRIBUTE A PRIVILEGED CONTINUITY
- * CAPABILITY.  There is NO option (voiceActivation / continuityActivation /
- * bindVoice / trustedSink / internal / admin / capture / adapter / …) capable
- * of receiving one; unknown options are simply ignored and never elevate
- * privilege.
- */
-async function createRuntimeHost(options = {}) {
-    const { host } = await buildRuntimeHost(options);
     return host;
 }
 
@@ -756,17 +718,5 @@ module.exports = Object.freeze({
     LOCAL_TRANSPORT_ID,
     governorMod,
     ib,
-    presenceMod,
-    // INTERNAL CANONICAL VOICE COMPOSITION SEAM — NOT part of the public host
-    // facade (src/runtime/host/index.js does NOT re-export it).  Consumed
-    // ONLY by the canonical Voice composition module (./runtimeHostVoice.js).
-    // Exposes NO identity selection, NO handle, NO scope, NO controller —
-    // only (a) an internal factory returning a per-composition activation
-    // token alongside the ordinary host, and (b) a token-gated retrieval
-    // yielding the runtime-local zero-argument activation closure.  Ordinary
-    // callers use createRuntimeHost (above), which yields no token.
-    _voiceComposition: Object.freeze({
-        composeRuntimeHostWithVoiceActivation,
-        retrieveVoiceActivation
-    })
+    presenceMod
 });

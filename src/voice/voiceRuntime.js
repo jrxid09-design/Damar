@@ -25,6 +25,83 @@ const { AudioInput } = require("./providers/audioInput");
 const { AudioOutput } = require("./providers/audioOutput");
 const { VadDetector } = require("./providers/vad");
 
+// ---------------------------------------------------------------------------
+// DSC-R7-001/002 — GENUINE LEXICAL OWNERSHIP of the canonical Voice host
+// composition and the voice-continuity activation primitive.
+//
+// LAW:
+//   PUBLIC MODULE IMPORT != CONTINUITY ADMINISTRATION.
+//   DEEP IMPORT != TRUST PROOF.
+//   ORDINARY IMPORTER != TRUSTED VOICE COMPOSITION.
+//
+// Everything privileged lives ONLY in THIS module's lexical scope.  The
+// export surface of this module is exactly { VoiceRuntime }.  An ordinary
+// importer (deep require of this file, of runtimeHost.js, or of any other
+// production module) can never obtain: the canonical voice host-composition
+// factory, the voice-continuity activation closure, or any token / resolver
+// / handle / scope / binder / mint.
+//
+// MECHANISM: the canonical composition calls the ordinary public
+// createRuntimeHost with (a) a LEXICAL coreFactory pass-through that marks
+// the composition canonical, and (b) a LEXICAL sink capture in coreOptions.
+// runtimeHost.js chains the sink for canonical compositions only.  The
+// captured payload + host live in a MODULE-PRIVATE WeakMap keyed by the
+// VoiceRuntime instance — never on an own property of the runtime or of
+// the host — so reflection over a VoiceRuntime instance (Object.keys /
+// getOwnPropertyNames / getOwnPropertySymbols) reveals no privileged
+// primitive.  stop() awaits the host shutdown then DELETES the WeakMap
+// entry: the capability ceases to exist with its runtime and can never
+// cross runtimes.
+// ---------------------------------------------------------------------------
+const hostMod = require("../runtime/host/runtimeHost");
+
+/** Module-private per-runtime composition state (instance -> capability). */
+const VOICE_COMPOSITION = new WeakMap();
+
+/**
+ * LEXICAL, module-private coreFactory pass-through.  Marks the composition
+ * as the canonical Voice composition so runtimeHost.js chains the voice
+ * sink; composes the SAME single RuntimeHost implementation (no second
+ * host).  NOT exported.
+ */
+function voiceCoreFactory(coreOptions) {
+    return require("../integration/runtimeCore").createRuntimeCore(coreOptions);
+}
+
+/**
+ * LEXICAL, module-private: activate the canonical voice continuity identity
+ * (voice-runtime-owner; RUNTIME_OWNER / DEVICE-RUNTIME-SCOPED) for THIS
+ * runtime.  Zero identity input; returns inert diagnostics ONLY ({ok, code,
+ * terminal}) — never a scope, handle, mint, controller, domain, linker,
+ * secret, or capability object.  Fails closed when the runtime is no longer
+ * operational (shutdown requested / shutting down / terminated) — TERMINAL
+ * RUNTIME != ACTIVATABLE RUNTIME — or when no composition payload exists
+ * (never composed / already destroyed at stop).
+ */
+function activateVoiceContinuityLexical(state) {
+    if (state === null || typeof state !== "object") {
+        return Object.freeze({ ok: false, code: "VOICE_COMPOSITION_UNAVAILABLE" });
+    }
+    const { host, payload } = state;
+    const phase = typeof host?.phase === "string" ? host.phase : null;
+    let shuttingDown = false;
+    try { shuttingDown = host.status().shuttingDown === true; } catch { /* inert */ }
+    if (phase !== "READY" || shuttingDown) {
+        return Object.freeze({ ok: false, code: "HOST_NOT_OPERATIONAL", terminal: true });
+    }
+    const composition = payload && typeof payload === "object" ? payload.composition : null;
+    if (!composition || typeof composition.bindCanonicalTransportPeer !== "function") {
+        return Object.freeze({ ok: false, code: "TRANSPORT_PEER_SEAM_UNAVAILABLE" });
+    }
+    try {
+        composition.bindCanonicalTransportPeer("voice");
+        return Object.freeze({ ok: true });
+    } catch (error) {
+        return Object.freeze({ ok: false, code: error && error.code ? error.code : "TRANSPORT_PEER_BIND_FAILED" });
+    }
+}
+
+
 class VoiceRuntime extends EventEmitter {
 
     constructor({ config = voiceConfig, session = null, interactionIngress = null } = {}) {
@@ -38,13 +115,13 @@ class VoiceRuntime extends EventEmitter {
         this.running = false;
 
         this.session = session ?? new VoiceSession({ interactionIngress });
-        this._interactionHost = null;
-        // DSC-R6-001: the canonical Voice composition handle (module-private
-        // boundary).  The voice-continuity activation closure lives ONLY in
-        // runtimeHostVoice.js module-private state — never on this runtime's
-        // public surface, never on the returned RuntimeHost, and never
-        // reconstructible by an ordinary importer.
-        this._voiceCompositionHandle = null;
+        // DSC-R7-001/002: NO privileged state on own properties.  The
+        // composed host and the activation capability live in the
+        // module-private VOICE_COMPOSITION WeakMap (keyed by this instance)
+        // — invisible to Object.keys / getOwnPropertyNames /
+        // getOwnPropertySymbols over this instance.  A read-only prototype
+        // getter below exposes the ORDINARY host facade (interaction only)
+        // for application use.
         this._turnController = null;
         this._turnGeneration = 0;
         this._activeCapture = null;
@@ -90,6 +167,16 @@ class VoiceRuntime extends EventEmitter {
         return process.env.DAMAR_VOICE_AUDIO_BACKEND === "cli" ? "cli" : "none";
     }
 
+    /**
+     * DSC-R7-001: read-only application-facing access to the ORDINARY host
+     * facade (interaction only — no continuity administration, no
+     * activation capability).  Returns null before start() / after stop().
+     */
+    get interactionHost() {
+        const state = VOICE_COMPOSITION.get(this);
+        return state ? state.host : null;
+    }
+
     _outputBackend() {
         return process.env.DAMAR_VOICE_AUDIO_BACKEND === "cli" ? "cli" : "none";
     }
@@ -131,26 +218,35 @@ class VoiceRuntime extends EventEmitter {
         }
 
         if (!this.session.interactionIngress && typeof this.session.bindInteractionIngress === "function") {
-            // DSC-R6-001: the CANONICAL Voice composition creates the
-            // RuntimeHost through the module-private composition boundary
-            // (runtimeHostVoice.js).  The ordinary public createRuntimeHost
-            // is NOT used and yields no continuity capability.  The
-            // voice-continuity activation closure is owned ONLY by this
-            // canonical composition and invoked through its module-private
-            // seam — it is never read off the returned host facade.
-            const voiceComposition = require("../runtime/host/runtimeHostVoice");
-            this._voiceCompositionHandle = await voiceComposition.createCanonicalVoiceRuntimeHost();
-            this._interactionHost = this._voiceCompositionHandle.host;
-            this.session.bindInteractionIngress(this._interactionHost.channels);
-            // DSC-R4-001/006 + DSC-R6-001: activate the canonical voice
-            // continuity identity through the canonical composition's
-            // module-private seam.  The voice runtime mints no scope, no
-            // handle, and supplies NO identity string — the RuntimeHost
-            // composition mints the canonical runtime-owner peer internally.
-            // Voice continuity is DEVICE/RUNTIME-SCOPED (one local Damar
-            // owner per voice runtime) — explicitly NOT physical-speaker
-            // identity.  The returned value is inert diagnostics only.
-            const bind = voiceComposition.activateVoiceContinuity(this._voiceCompositionHandle);
+            // DSC-R7-001/002 CANONICAL VOICE COMPOSITION (lexical): compose
+            // the host with the LEXICAL coreFactory pass-through + LEXICAL
+            // sink capture.  The sink must be registered BEFORE the host is
+            // constructed, and the host chains it for canonical compositions
+            // only (see runtimeHost.js DSC-R7-002).  The payload and host
+            // live ONLY in the module-private WeakMap — never on own
+            // properties, never exported.
+            const coreOptions = { enableManagerIngress: true };
+            let compositionPayload = null;
+            coreOptions.trustedContinuitySink = (handles) => { compositionPayload = handles; };
+            const host = await hostMod.createRuntimeHost({
+                coreOptions,
+                // The lexical pass-through factory marks this composition as
+                // the canonical Voice composition (the host chains the
+                // voice sink capture) — the SAME single RuntimeHost
+                // implementation (no second host).
+                coreFactory: voiceCoreFactory
+            });
+            VOICE_COMPOSITION.set(this, Object.freeze({ host, payload: compositionPayload }));
+            this.session.bindInteractionIngress(host.channels);
+            // DSC-R4-001/006 + DSC-R7-001: activate the canonical voice
+            // continuity identity through the LEXICAL module-private
+            // closure.  The voice runtime mints no scope, no handle, and
+            // supplies NO identity string — the composition mints the
+            // canonical runtime-owner peer internally.  Voice continuity is
+            // DEVICE/RUNTIME-SCOPED (one local Damar owner per voice
+            // runtime) — explicitly NOT physical-speaker identity.  The
+            // returned value is inert diagnostics only.
+            const bind = activateVoiceContinuityLexical(VOICE_COMPOSITION.get(this));
             if (!bind.ok) {
                 // Fail closed: voice continuity simply stays unbound; the
                 // ordinary ses_* interaction path continues.
@@ -239,9 +335,13 @@ class VoiceRuntime extends EventEmitter {
         }
 
         await this.output.stop();
-        if (this._interactionHost) {
-            const hostToStop = this._interactionHost;
-            this._interactionHost = null;
+        const state = VOICE_COMPOSITION.get(this);
+        if (state) {
+            const hostToStop = state.host;
+            // DSC-R7-001: the capability is DESTROYED with its runtime — the
+            // WeakMap entry is deleted so no activation primitive survives
+            // the stop, even by instance reflection.
+            VOICE_COMPOSITION.delete(this);
             // DSC-R1-005: await the durable continuity flush (and contain
             // any failure) before releasing the voice-owned host.
             try { await hostToStop.shutdown("voice-runtime-stop"); }
@@ -715,3 +815,4 @@ class VoiceRuntime extends EventEmitter {
 }
 
 module.exports = { VoiceRuntime };
+
