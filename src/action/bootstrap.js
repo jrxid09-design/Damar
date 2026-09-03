@@ -572,10 +572,49 @@ function composeActionAuthorityRuntime({
  * trusted auth infrastructure INTO THIS MODULE (never via a constructor
  * option). Every authenticate() => null; every evaluate() on a session is
  * INVALID_IDENTITY fail-closed.
+ *
+ * Wave 5 Lane 4: the canonical Owner/Admin proof verifier is installed by the
+ * SEALED Owner trust composition root through the module-private slot below.
+ * The slot is module-private state; the adapter calls it ONLY for canonical
+ * proof evidence and fail-closes otherwise.  There is deliberately NO public
+ * configuration option on createCanonicalActionFacade and NO enumerable
+ * setter on the production facade.  The sealed root installs the verifier at
+ * canonical composition time; once installed the slot is first-wins and a
+ * later replacement is rejected, so an ordinary importer cannot substitute a
+ * verifier of its own after the canonical composition has run.
  */
+let ownerAuthVerifier = null;
+let ownerAuthVerifierInstalled = false;
+
+/**
+ * MODULE-PRIVATE, NON-ENUMERABLE — reachable ONLY by the sealed Owner trust
+ * composition root (src/authority/ownerTrustComposition), never by public DI
+ * or a caller-controlled callback.  First-wins: a second installation attempt
+ * is ignored, so the canonical composition (which runs at startup) cannot be
+ * displaced by later code.
+ */
+function setOwnerAuthVerifierInternal(verifier) {
+    if (ownerAuthVerifierInstalled) {
+        return false; // first-wins: never displaced
+    }
+    if (typeof verifier !== "function") {
+        throw fail(REASONS.AUTH_VERIFIER_REQUIRED,
+            "Owner auth verifier must be a function");
+    }
+    ownerAuthVerifier = verifier;
+    ownerAuthVerifierInstalled = true;
+    return true;
+}
+
 function canonicalAuthAdapter(evidence) {
-    void evidence;
-    return null;
+    if (ownerAuthVerifier === null) {
+        return null; // fail closed: no owner-auth infrastructure installed
+    }
+    try {
+        return ownerAuthVerifier(evidence);
+    } catch {
+        return null; // fail closed: verifier fault never mints
+    }
 }
 
 // Any caller-supplied option key in this set is a privileged composition or
@@ -1697,3 +1736,14 @@ module.exports = {
     createCanonicalVerificationFacade,
     PRIVILEGED_KEYS
 };
+
+// Non-enumerable internal seam for the sealed Owner trust composition root
+// (src/authority/ownerTrustComposition).  NOT on the public production facade
+// { admit, evaluate, authenticate, session }; NOT reachable by public DI; and
+// first-wins so the canonical composition cannot be displaced by later code.
+Object.defineProperty(module.exports, "_setOwnerAuthVerifier", {
+    value: setOwnerAuthVerifierInternal,
+    enumerable: false,
+    writable: false,
+    configurable: false
+});
