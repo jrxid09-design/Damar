@@ -73,14 +73,47 @@ async function compose(stateFile) {
     // The per-composition Owner/Admin auth verifier (bound to THIS
     // composition's registry/verifier, never the module-global singleton).
     const authVerifier = makeAuthVerifier(registry, proofVerifier);
+    const ownerRatify = makeRatifyAsOwner(registry, proofVerifier);
 
-    return Object.freeze({ registry, proofVerifier, firstOwnerBootstrap, authVerifier, store });
+    return Object.freeze({ registry, proofVerifier, firstOwnerBootstrap, authVerifier, ratifyAsOwner: ownerRatify, store });
+}
+
+/** Composition-bound Owner ratification gate. */
+function makeRatifyAsOwner(registry, proofVerifier) {
+    return async function ratifyAsOwner({ authorityRegistry, proof, ratification } = {}) {
+        if (!authorityRegistry || typeof authorityRegistry.ratify !== "function") {
+            return Object.freeze({ applied: false, reasonCode: "OT_AUTHORITY_INVALID" });
+        }
+        if (!proof || typeof proof !== "object" || !ratification || typeof ratification !== "object") {
+            return Object.freeze({ applied: false, reasonCode: "OT_PROOF_REQUIRED" });
+        }
+        const verdict = proofVerifier.verifyProof({
+            nonce: proof.nonce,
+            signature: proof.signature,
+            expectedPurpose: "owner-proof"
+        });
+        if (!verdict.ok) {
+            return Object.freeze({ applied: false, reasonCode: verdict.code ?? "OT_PROOF_INVALID" });
+        }
+        const owner = registry.getOwner();
+        if (!owner || owner.principalId !== verdict.principalId ||
+            registry.principalState(verdict.principalId) !== "ACTIVE") {
+            return Object.freeze({ applied: false, reasonCode: "OT_NOT_OWNER" });
+        }
+        return authorityRegistry.ratify({
+            ratificationId: ratification.ratificationId,
+            proposalId: ratification.proposalId,
+            ownerIdentity: verdict.principalId,
+            decision: ratification.decision,
+            expiryAt: ratification.expiryAt ?? null,
+            supersedes: ratification.supersedes ?? null
+        });
+    };
 }
 
 /** Shared verifier factory (used by both the canonical singleton and
  *  per-composition roots). */
-function makeAuthVerifier(registry, proofVerifier) {
-    return function ownerAuthVerifier(evidence) {
+function makeAuthVerifier(registry, proofVerifier) {    return function ownerAuthVerifier(evidence) {
         if (evidence === null || typeof evidence !== "object" || Array.isArray(evidence)) {
             return null;
         }
@@ -138,6 +171,37 @@ async function ensureCanonicalComposed() {
 }
 
 /**
+ * OWNER RATIFICATION BRIDGE (Stage 5) — the ONLY canonical production path for
+ * Owner ratification into the existing AuthorityRegistry.
+ *
+ * `AuthorityRegistry.ratify({ ownerIdentity })` historically accepted an
+ * unconstrained owner identity STRING.  This bridge hardens the canonical
+ * production path: ratification requires a GENUINE authenticated active Owner
+ * result — a proof-of-possession verified against the canonical registry —
+ * NOT a caller-supplied identity string.
+ *
+ *   ratifyAsOwner({
+ *     authorityRegistry,          // the canonical AuthorityRegistry
+ *     proof: { credentialId, nonce, signature },   // owner-proof evidence
+ *     ratification: { ratificationId, proposalId, decision, expiryAt?, supersedes? }
+ *   })
+ *
+ * The bridge verifies the proof via the composition's proof verifier (real
+ * Ed25519 check, one-use, purpose-bound, expiring), asserts the principal is
+ * the ACTIVE Owner, and only then delegates to authorityRegistry.ratify with
+ * ownerIdentity = the VERIFIED principalId.  A raw ownerIdentity string, a
+ * fake proof, a replay, or a revoked/not-active principal is rejected.
+ * AuthorityRegistry grant semantics are NOT redesigned — this is a sealed
+ * gate in front of the existing ratify.
+ */
+async function ratifyAsOwner(args = {}) {
+    if (canonicalComposition === null) {
+        return Object.freeze({ applied: false, reasonCode: "OT_NOT_COMPOSED" });
+    }
+    return canonicalComposition.ratifyAsOwner(args);
+}
+
+/**
  * resolveOwnerAuthVerifier() — the canonical proof verifier that
  * action/bootstrap.js's bootstrap-owned adapter consults at composition time.
  *
@@ -187,6 +251,7 @@ module.exports = Object.freeze({
     resolveOwnerAuthVerifier,
     composeOwnerTrustForTest,
     ensureCanonicalComposed,
+    ratifyAsOwner,
     canonicalChallenge,
     BOOTSTRAP_PURPOSE,
     BOOTSTRAP_CONTEXT
