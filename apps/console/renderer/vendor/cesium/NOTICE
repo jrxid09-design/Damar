@@ -1,0 +1,11 @@
+CesiumJS
+========
+Vendored CesiumJS 1.124.0 (bundled to IIFE via esbuild for the embedded
+Mata Dewa spatial surface).
+
+CesiumJS is licensed under the Apache License 2.0.
+Copyright 2011-2024 Cesium GS, Inc. and contributors.
+Upstream: https://github.com/CesiumGS/cesium
+
+Static runtime assets (Assets/, Widgets/, Workers/, ThirdParty/) are the
+unmodified CesiumJS build outputs required by the library at runtime.
