@@ -262,9 +262,9 @@ function freqMhzToChannel(freqMhz) {
 class RfSource {
     /**
      * @param {{ id: string, kind: string, sensorId: string,
-     *           maxRateHz?: number }} options
+     *           maxRateHz?: number, clock?: { nowMs(): number } }} options
      */
-    constructor({ id, kind, sensorId, maxRateHz = CAPTURE_LIMITS.DEFAULT_MAX_RATE_HZ }) {
+    constructor({ id, kind, sensorId, maxRateHz = CAPTURE_LIMITS.DEFAULT_MAX_RATE_HZ, clock = null }) {
         if (!id || typeof id !== "string") throw new TypeError("RfSource butuh id");
         if (!Object.values(SOURCE_KIND).includes(kind)) {
             throw new TypeError(`jenis sumber tidak dikenal: ${kind}`);
@@ -275,6 +275,10 @@ class RfSource {
         this.id = id;
         this.kind = kind;
         this.sensorId = sensorId;
+        // Jam sumber mengikuti trusted composition (tes memakai jam tetap);
+        // default = dinding. Replay men-stamp waktu dari jam INI, bukan
+        // Date.now() mentah, agar tidak pernah "masa depan" vs layanan.
+        this.clock = clock && typeof clock.nowMs === "function" ? clock : { nowMs: () => Date.now() };
         this.maxRateHz = Number.isFinite(maxRateHz) && maxRateHz > 0
             ? Math.min(maxRateHz, 1000) : CAPTURE_LIMITS.DEFAULT_MAX_RATE_HZ;
 
@@ -336,8 +340,8 @@ class RfSource {
  * Dipakai untuk kalibrasi, uji, dan demo tanpa perangkat.
  */
 class ReplayRfSource extends RfSource {
-    constructor({ id, sensorId, filePath, format = null, maxRateHz } = {}) {
-        super({ id, kind: SOURCE_KIND.REPLAY, sensorId, maxRateHz });
+    constructor({ id, sensorId, filePath, format = null, maxRateHz, clock = null } = {}) {
+        super({ id, kind: SOURCE_KIND.REPLAY, sensorId, maxRateHz, clock });
         this.filePath = filePath;
         this.format = format ?? (String(filePath).endsWith(".ndjson") ? "ndjson" : "esp-csi-csv");
     }
@@ -364,7 +368,7 @@ class ReplayRfSource extends RfSource {
         // µs sejak boot). Waktu dinding dihitung mundur dari NOW pada saat
         // load: frame terakhir ≈ sekarang, frame lebih awal mundur sesuai
         // cadence maxRateHz — seluruh timeline di masa lampau, monotonik.
-        const wallNow = Date.now();
+        const wallNow = this.clock.nowMs();
 
         const stream = fs.createReadStream(this.filePath, { encoding: "utf8" });
         const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
