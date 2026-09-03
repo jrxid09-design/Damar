@@ -11,6 +11,7 @@
 
 const { SEVERITY, canonicalSeverity, severityAtLeast, describeEventFreshness } = require("../events/event");
 const { evaluateLightningRisk, HAZARD_TYPE, buildAssetHazardEvent } = require("./lightning");
+const { evaluateRfPresenceRisk, HAZARD_TYPE: RF_HAZARD } = require("./rfPresence");
 const { isValidPoint } = require("../spatial/geo");
 
 const EVENT_LIFECYCLE = Object.freeze({
@@ -21,7 +22,8 @@ const EVENT_LIFECYCLE = Object.freeze({
 });
 
 const HAZARD_EVALUATORS = {
-    [HAZARD_TYPE.LIGHTNING]: evaluateLightningRisk
+    [HAZARD_TYPE.LIGHTNING]: evaluateLightningRisk,
+    [RF_HAZARD.RF_PRESENCE]: evaluateRfPresenceRisk
 };
 
 class WatchEngine {
@@ -195,4 +197,4 @@ class WatchEngine {
     get isRunning() { return this.running; }
 }
 
-module.exports = { WatchEngine, EVENT_LIFECYCLE, HAZARD_TYPE, HAZARD_EVALUATORS };
+module.exports = { WatchEngine, EVENT_LIFECYCLE, HAZARD_TYPE, RF_HAZARD, HAZARD_EVALUATORS };

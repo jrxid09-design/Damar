@@ -23,6 +23,7 @@ const observationModel = require("./observations/observation");
 const eventModel = require("./events/event");
 const fusion = require("./events/fusion");
 const coverage = require("./coverage/coverage");
+const rf = require("./rf/rfManager");
 const { SpatialTimeline } = require("./timeline/timeline");
 
 /**
@@ -60,5 +61,6 @@ module.exports = Object.freeze({
     // Spatial core
     fusion,
     coverage,
+    rf,
     SpatialTimeline
 });

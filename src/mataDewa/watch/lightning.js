@@ -137,9 +137,10 @@ function buildAssetHazardEvent(asset, evaluation, { hazardType = HAZARD_TYPE.LIG
             assetName: asset.metadata?.name ?? null,
             riskState: evaluation.riskState,
             ring: evaluation.ring,
-            nearestStrikeM: evaluation.nearestStrikeM,
-            strikeCount: evaluation.strikeCount,
-            stale: evaluation.stale
+            // MD-005: undefined ditolak kanonikalisasi — normalisasi ke null.
+            nearestStrikeM: evaluation.nearestStrikeM ?? evaluation.nearestSensorM ?? null,
+            strikeCount: evaluation.strikeCount ?? evaluation.presenceCount ?? null,
+            stale: evaluation.stale ?? null
         }
     }, { nowMs });
     return enriched.ok ? enriched.event : null;

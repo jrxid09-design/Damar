@@ -18,7 +18,8 @@ const { CAPABILITY_FAMILIES: CAP } = require("../capabilities/index");
 /** Aksi read-only yang boleh dieksekusi langsung (masih ter-scope). */
 const READONLY_ACTIONS = new Set([
     CAP.VIEW_FLY_TO, CAP.VIEW_ZOOM, CAP.VIEW_GLOBE, CAP.ENTITY_INSPECT,
-    CAP.HAZARD_QUERY, CAP.ROUTE_INSPECT, CAP.TIMELINE_QUERY, CAP.CCTV_INSPECT
+    CAP.HAZARD_QUERY, CAP.ROUTE_INSPECT, CAP.TIMELINE_QUERY, CAP.CCTV_INSPECT,
+    CAP.RF_OBSERVE
 ]);
 
 /** Aksi visual yang mengubah state UI saja (bukan dunia nyata). */
@@ -134,6 +135,12 @@ async function executeDaemonAction(capabilityId, args = {}, service = null) {
             const obs = service.observations.get(args.observationId);
             if (!obs) return { ok: false, reason: "observasi tidak ditemukan" };
             return { ok: true, result: { observation: obs } };
+        }
+        case CAP.RF_OBSERVE: {
+            // Read-only: status RF + estimasi terbaru per sesi. TIDAK ada
+            // klaim identitas/pose — hanya presence/motion INFERRED.
+            if (!service.rfManager) return { ok: false, reason: "RF sensing tidak terkomposisi" };
+            return { ok: true, result: service.rfManager.status() };
         }
         default:
             return { ok: false, reason: `aksi daemon tidak didukung: ${capabilityId}` };

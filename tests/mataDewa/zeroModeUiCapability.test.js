@@ -94,9 +94,9 @@ test("Cesium tervendor: bundle + notice Apache-2.0 ada", () => {
     assert.match(notice, /Apache License 2\.0/);
 });
 
-test("CAPABILITY: 21 kemampuan terdaftar di canonical registry (kind provider)", () => {
+test("CAPABILITY: 22 kemampuan terdaftar di canonical registry (kind provider)", () => {
     const { runtime, registered } = buildMataDewaCapabilityRuntime({ clock: { nowMs: () => NOW } });
-    assert.equal(registered.length, 21);
+    assert.equal(registered.length, 22);
     for (const r of registered) {
         assert.equal(r.registered, true);
         assert.match(r.id, /^mata_dewa\./);
