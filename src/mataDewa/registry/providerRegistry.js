@@ -76,6 +76,13 @@ class ProviderRegistry {
             fallbacks: Object.freeze(Array.isArray(descriptor.fallbacks) ? descriptor.fallbacks.slice() : []),
             poll: typeof descriptor.poll === "function" ? descriptor.poll : null,
             healthy: typeof descriptor.healthy === "function" ? descriptor.healthy : null,
+            // Permukaan on-demand tambahan (mis. computeRoute, reverseGeocode)
+            // diteruskan apa adanya agar engine bisa memakainya tanpa menembus
+            // registry. Hanya fungsi murni provider, bukan otoritas.
+            extras: Object.freeze(Object.fromEntries(
+                Object.entries(descriptor)
+                    .filter(([k, v]) => typeof v === "function" && k !== "poll" && k !== "healthy")
+            )),
             // Keadaan runtime (tidak dibekukan — diperbarui saat poll).
             state: PROVIDER_STATE.UNAVAILABLE,
             failureReason: "not_polled_yet",
@@ -83,6 +90,12 @@ class ProviderRegistry {
             lastSuccessAt: null,
             consecutiveFailures: 0
         };
+
+        // Sediakan fungsi on-demand langsung pada objek provider (mis.
+        // computeRoute, reverseGeocode) agar engine memakainya lewat satu pintu.
+        for (const [name, fn] of Object.entries(provider.extras)) {
+            provider[name] = fn;
+        }
 
         this.providers.set(id, provider);
         return Object.freeze({
@@ -160,9 +173,11 @@ class ProviderRegistry {
             return { ok: false, providerId: id, state: PROVIDER_STATE.UNAVAILABLE, observations: [], failureReason: "unknown_provider" };
         }
         if (typeof p.poll !== "function") {
-            p.state = PROVIDER_STATE.UNAVAILABLE;
-            p.failureReason = "no_poll_handler";
-            return { ok: false, providerId: id, state: p.state, observations: [], failureReason: p.failureReason };
+            // Provider on-demand (mis. routing/geocode) tanpa feed periodik:
+            // tersedia atas permintaan, tidak menghasilkan observasi periodik.
+            p.state = PROVIDER_STATE.AVAILABLE;
+            p.failureReason = null;
+            return { ok: true, providerId: id, state: p.state, observations: [], failureReason: null, onDemand: true };
         }
 
         const credential = await this._resolveCredential(p);

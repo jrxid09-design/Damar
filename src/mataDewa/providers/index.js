@@ -11,6 +11,8 @@ const { createUsgsProvider } = require("./usgs");
 const { createCelestrakProvider } = require("./celestrak");
 const { createOpenMeteoProvider } = require("./openMeteo");
 const { createAdsbLolProvider } = require("./adsbLol");
+const { createOsmProvider } = require("./osm");
+const { createOsrmProvider } = require("./osrm");
 
 /**
  * Daftarkan provider baseline tanpa kunci. Aman dipanggil berulang —
@@ -21,13 +23,21 @@ function registerKeylessProviders(service) {
         createUsgsProvider,
         createCelestrakProvider,
         createOpenMeteoProvider,
-        createAdsbLolProvider
+        createAdsbLolProvider,
+        createOsmProvider,
+        createOsrmProvider
     ];
     const registered = [];
     for (const factory of factories) {
         const descriptor = factory();
         if (service.registry.getProvider(descriptor.id)) continue;
-        registered.push(service.registerProvider(descriptor));
+        try {
+            registered.push(service.registerProvider(descriptor));
+        }
+        catch {
+            // Provider tanpa handler poll tetap sah (mis. routing) — abaikan
+            // kegagalan registrasi individual agar tak mengganggu baseline.
+        }
     }
     return registered;
 }
@@ -37,5 +47,7 @@ module.exports = {
     createUsgsProvider,
     createCelestrakProvider,
     createOpenMeteoProvider,
-    createAdsbLolProvider
+    createAdsbLolProvider,
+    createOsmProvider,
+    createOsrmProvider
 };

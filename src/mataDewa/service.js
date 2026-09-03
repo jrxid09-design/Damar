@@ -98,8 +98,10 @@ class MataDewaService {
         // Poll awal HANYA provider tanpa kredensial agar status boot jujur:
         // keyless yang berhasil → READY; yang gagal → DEGRADED. Provider
         // berkunci tidak dipaksa di boot (kredensial mungkin belum terpasang).
+        // Provider on-demand tanpa poll (mis. routing) ditandai tersedia
+        // oleh registry (pollProvider menandai mereka AVAILABLE).
         const keyless = [...this.registry.providers.values()]
-            .filter(p => !p.requiresCredential && typeof p.poll === "function");
+            .filter(p => !p.requiresCredential);
         await Promise.allSettled(keyless.map(p => this.registry.pollProvider(p.id, {})));
 
         this._refreshMode();
