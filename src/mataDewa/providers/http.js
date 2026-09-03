@@ -1,115 +1,96 @@
 /**
- * Guardrails HTTP provider Mata Dewa.
+ * HTTP provider Mata Dewa — ADAPTER tipis ke SATU batas jaringan kanonik
+ * Damar (src/core/safety/ssrfGuard.js). MD-002 repair.
  *
- * Setiap panggilan upstream melewati sini: timeout, batas ukuran respons,
- * User-Agent yang jujur, dan penolakan host privat/loopback (mitigasi SSRF).
- * Tidak ada pengambilan URL arbitrer dari luar allowlist provider.
+ * HUKUM:
+ *  - TIDAK ada implementasi SSRF Mata Dewa sendiri. Semua permintaan
+ *    upstream melewati guardedFetch kanonik:
+ *      • allowlist host per penyedia (allowRedirectHost per hop)
+ *      • HTTPS diwajibkan untuk provider publik
+ *      • loopback/RFC1918/link-local/metadata/CGNAT/unspecified ditolak
+ *      • IPv4-mapped IPv6 dievaluasi ulang sebagai IPv4
+ *      • ADDRESS PINNING: alamat yang divalidasi = alamat yang dipakai
+ *        koneksi (anti DNS rebinding pada level koneksi, bukan sekadar
+ *        dns.lookup ganda)
+ *      • SETIAP hop redirect divalidasi ulang penuh (tanpa follow buta)
+ *      • batas byte STREAMING (bukan length-check setelah .text())
+ *      • stall deadline antar-chunk (anti slowloris)
+ *  - DUA kelas sumber — model ancaman BERBEDA, tidak saling melemahkan:
+ *      PUBLIC_REMOTE_PROVIDER  (policy "public"): hanya alamat publik.
+ *      AUTHORIZED_LOCAL_SOURCE (policy "trusted-lan"): endpoint lokal
+ *      milik pemilik HANYA melalui otorisasi kanonik Damar (registry
+ *      perangkat/Lane 4). Sebelum trust itu ada, pemanggil TIDAK bisa
+ *      memilih policy sendiri — fail closed (lihat authorizedLocalFetch).
+ *  - Raw URL CCTV/kamera TIDAK pernah berarti otorisasi (lihat cctv.js).
  */
 
-const dns = require("node:dns").promises;
-const net = require("node:net");
-
-const DEFAULT_TIMEOUT_MS = 12000;
-const DEFAULT_MAX_BYTES = 4 * 1024 * 1024; // 4 MB
+const ssrfGuard = require("../../core/safety/ssrfGuard");
 
 const USER_AGENT = "damar-mata-dewa/1.0 (+https://github.com/jrxid09-design/Aether)";
+const DEFAULT_TIMEOUT_MS = 12000;
+const DEFAULT_MAX_BYTES = 4 * 1024 * 1024; // 4 MB
+const DEFAULT_STALL_MS = 8000;
 
-function isPrivateIp(ip) {
-    if (net.isIPv6(ip)) {
-        const lower = ip.toLowerCase();
-        return lower === "::1" || lower.startsWith("fc") || lower.startsWith("fd") ||
-            lower.startsWith("fe80") || lower === "::";
-    }
-    const parts = ip.split(".").map(Number);
-    if (parts.length !== 4 || parts.some(n => !Number.isInteger(n))) return true;
-    const [a, b] = parts;
-    return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) ||
-        (a === 192 && b === 168) || (a === 169 && b === 254) || a === 0;
+/** Host yang diizinkan per kebijakan penyedia publik (allowlist ketat). */
+function makeHostAllowlist(hosts) {
+    const normalized = new Set(
+        (hosts ?? []).map(h => String(h).toLowerCase().replace(/\.$/, "")));
+    return (host) => normalized.has(String(host).toLowerCase().replace(/\.$/, ""));
 }
 
-async function assertPublicHost(url) {
-    let hostname;
-    try {
-        hostname = new URL(url).hostname;
-    }
-    catch {
-        throw new Error("url tidak valid");
-    }
-    // IPv6 literal datang berkurung ([::1]) — lepas kurung sebelum cek.
-    if (hostname.startsWith("[") && hostname.endsWith("]")) {
-        const ip = hostname.slice(1, -1);
-        if (net.isIP(ip) && isPrivateIp(ip)) throw new Error("host privat/loopback ditolak");
-        throw new Error("host bukan publik yang diizinkan"); // literal IPv6 non-privat tetap tidak diizinkan
-    }
-    if (net.isIP(hostname)) {
-        if (isPrivateIp(hostname)) throw new Error("host privat/loopback ditolak");
-        return hostname;
-    }
-    const { address } = await dns.lookup(hostname);
-    if (isPrivateIp(address)) throw new Error("host privat/loopback ditolak");
-    return hostname;
+function baseHeaders(headers) {
+    return { "User-Agent": USER_AGENT, Accept: "*/*", ...(headers ?? {}) };
+}
+
+function toText(result) {
+    return result.buffer.toString("utf8");
 }
 
 /**
- * Fetch teks/JSON dengan guardrails. Mengembalikan body mentah (string).
- * Melempar Error dengan pesan ringkas bila gagal (untuk failureReason).
- *
+ * GET teks/JSON ke provider publik — SATU batas kanonik, streaming-bound.
  * @param {string} url
- * @param {{ timeoutMs?: number, maxBytes?: number, headers?: object, skipSsrfCheck?: boolean }} opts
+ * @param {{ timeoutMs?, maxBytes?, stallTimeoutMs?, headers?,
+ *           expectedContentType?: "json"|"text"|null,
+ *           allowedHosts?: string[] }} opts
  */
 async function fetchText(url, opts = {}) {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
-
-    // Skip SSRF check hanya untuk tes (inject host lokal). Default SELALU cek.
-    if (opts.skipSsrfCheck !== true) {
-        await assertPublicHost(url);
-    }
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-        const response = await fetch(url, {
-            signal: controller.signal,
-            headers: { "User-Agent": USER_AGENT, Accept: "*/*", ...(opts.headers ?? {}) },
-            redirect: "follow"
-        });
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-        const reader = response.body?.getReader?.();
-        if (!reader) {
-            const text = await response.text();
-            if (text.length > maxBytes) throw new Error("respons melebihi batas ukuran");
-            return text;
-        }
-        const chunks = [];
-        let received = 0;
-        for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            received += value.byteLength;
-            if (received > maxBytes) {
-                try { await reader.cancel(); } catch { /* abaikan */ }
-                throw new Error("respons melebihi batas ukuran");
+        // Allowlist ORIGIN yang ketat: host yang disetujui penyedia,
+        // bukan sembarang host publik.
+        if (opts.allowedHosts) {
+            const originHost = new URL(url).hostname.toLowerCase().replace(/\.$/, "");
+            const allow = makeHostAllowlist(opts.allowedHosts);
+            if (!allow(originHost)) {
+                throw new Error(`host di luar allowlist penyedia ditolak: ${originHost}`);
             }
-            chunks.push(value);
         }
-        const buffer = Buffer.concat(chunks.map(c => Buffer.from(c)));
-        return buffer.toString("utf8");
+        const result = await ssrfGuard.guardedFetch(url, {
+            policy: "public",
+            timeoutMs,
+            maxBytes,
+            stallTimeoutMs: opts.stallTimeoutMs ?? DEFAULT_STALL_MS,
+            headers: baseHeaders(opts.headers),
+            expectedContentType: opts.expectedContentType === undefined
+                ? null : opts.expectedContentType,
+            allowRedirectHost: opts.allowedHosts
+                ? makeHostAllowlist(opts.allowedHosts) : null
+        });
+        return toText(result);
     }
     catch (error) {
-        if (error.name === "AbortError") throw new Error(`timeout setelah ${timeoutMs}ms`);
-        throw error;
-    }
-    finally {
-        clearTimeout(timer);
+        throw new Error(simplifyNetworkError(error));
     }
 }
 
 /** Fetch JSON dengan guardrails (parse aman; lempar bila malformed). */
 async function fetchJson(url, opts = {}) {
-    const text = await fetchText(url, opts);
+    const text = await fetchText(url, {
+        ...opts,
+        expectedContentType: opts.expectedContentType === undefined
+            ? "json" : opts.expectedContentType
+    });
     try {
         return JSON.parse(text);
     }
@@ -119,44 +100,44 @@ async function fetchJson(url, opts = {}) {
 }
 
 /**
- * POST urlencoded/JSON dengan guardrails yang sama. Mengembalikan body teks.
+ * POST urlencoded/JSON dengan batas kanonik yang SAMA. Mengembalikan teks.
  * @param {string} url
  * @param {string|object} body  string (urlencoded) atau objek (di-JSON-kan)
- * @param {{ timeoutMs?: number, maxBytes?: number, form?: boolean }} opts
+ * @param {{ timeoutMs?, maxBytes?, headers?, form?: boolean, allowedHosts? }} opts
  */
 async function fetchPost(url, body, opts = {}) {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
-    if (opts.skipSsrfCheck !== true) {
-        await assertPublicHost(url);
-    }
     const isForm = opts.form !== false && typeof body === "string";
     const payload = typeof body === "string" ? body : JSON.stringify(body);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-        const response = await fetch(url, {
+        if (opts.allowedHosts) {
+            const originHost = new URL(url).hostname.toLowerCase().replace(/\.$/, "");
+            const allow = makeHostAllowlist(opts.allowedHosts);
+            if (!allow(originHost)) {
+                throw new Error(`host di luar allowlist penyedia ditolak: ${originHost}`);
+            }
+        }
+        const result = await ssrfGuard.guardedFetch(url, {
+            policy: "public",
             method: "POST",
-            signal: controller.signal,
-            headers: {
-                "User-Agent": USER_AGENT,
-                "Content-Type": isForm ? "application/x-www-form-urlencoded" : "application/json",
-                Accept: "application/json"
-            },
             body: payload,
-            redirect: "follow"
+            timeoutMs,
+            maxBytes,
+            stallTimeoutMs: opts.stallTimeoutMs ?? DEFAULT_STALL_MS,
+            headers: {
+                ...baseHeaders(opts.headers),
+                "Content-Type": isForm
+                    ? "application/x-www-form-urlencoded" : "application/json"
+            },
+            expectedContentType: null,
+            allowRedirectHost: opts.allowedHosts
+                ? makeHostAllowlist(opts.allowedHosts) : null
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const text = await response.text();
-        if (text.length > maxBytes) throw new Error("respons melebihi batas ukuran");
-        return text;
+        return toText(result);
     }
     catch (error) {
-        if (error.name === "AbortError") throw new Error(`timeout setelah ${timeoutMs}ms`);
-        throw error;
-    }
-    finally {
-        clearTimeout(timer);
+        throw new Error(simplifyNetworkError(error));
     }
 }
 
@@ -170,4 +151,30 @@ async function fetchPostJson(url, body, opts = {}) {
     }
 }
 
-module.exports = { fetchText, fetchJson, fetchPost, fetchPostJson, assertPublicHost, isPrivateIp, USER_AGENT };
+/**
+ * AUTHORIZED_LOCAL_SOURCE — fail closed pra-Lane4.
+ *
+ * Endpoint lokal (RFC1918/kamera LAN/sensor) butuh otorisasi kanonik
+ * Damar (registry perangkat tepercaya / trust Lane 4 tersertifikasi).
+ * Pemanggil TIDAK BISA memilih kebijakan sendiri; hingga integrasi
+ * itu ada, fungsi ini MENOLAK dengan alasan eksplisit.
+ */
+async function authorizedLocalFetch() {
+    throw new Error("AUTHORIZED_LOCAL_SOURCE ditolak: OWNER_TRUST_NOT_INTEGRATED " +
+        "(post-Lane4: otorisasi kanonik perangkat lokal diwajibkan)");
+}
+
+function simplifyNetworkError(error) {
+    const msg = String(error?.message ?? error);
+    // Pesan panjang upstream diringkas untuk failureReason provider.
+    return msg.length > 240 ? msg.slice(0, 240) : msg;
+}
+
+module.exports = {
+    fetchText, fetchJson, fetchPost, fetchPostJson,
+    authorizedLocalFetch,
+    // Ekspos terbatas untuk pengujian/diagnostik — BUKAN pengganti guard.
+    isPrivateIp: ssrfGuard.isPrivateAddress,
+    addressClass: ssrfGuard.addressClass,
+    USER_AGENT
+};

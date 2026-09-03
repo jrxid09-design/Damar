@@ -81,7 +81,7 @@ function createCelestrakProvider({ group = DEFAULT_GROUP } = {}) {
         fallbacks: [],
         async poll() {
             const url = `${BASE_URL}?GROUP=${encodeURIComponent(group)}&FORMAT=tle`;
-            const text = await fetchText(url);
+            const text = await fetchText(url, { allowedHosts: ["celestrak.org"] });
             return parseTleCatalog(text);
         }
     };

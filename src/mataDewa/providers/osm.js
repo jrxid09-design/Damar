@@ -33,7 +33,7 @@ async function reverseGeocode(point) {
         format: "jsonv2",
         zoom: "14"
     });
-    const data = await fetchJson(`${NOMINATIM_REVERSE}?${params}`, { timeoutMs: 8000 });
+    const data = await fetchJson(`${NOMINATIM_REVERSE}?${params}`, { timeoutMs: 8000, allowedHosts: ["nominatim.openstreetmap.org"] });
     if (!data || data.error) return null;
     return {
         id: `place_${data.place_id ?? `${point.lat.toFixed(3)}_${point.lon.toFixed(3)}`}`,
@@ -61,7 +61,7 @@ async function nearbyFeatures(point, { radiusM = 2000, filter = "node[\"amenity\
     let lastError = null;
     for (const mirror of OVERPASS_MIRRORS) {
         try {
-            const data = await fetchPostJson(mirror, body, { timeoutMs: 20000 });
+            const data = await fetchPostJson(mirror, body, { timeoutMs: 20000, allowedHosts: ["overpass-api.de", "overpass.kumi.systems", "lz4.overpass-api.de"] });
             return normalizeOverpass(data, point);
         }
         catch (error) {

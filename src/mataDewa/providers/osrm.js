@@ -28,7 +28,7 @@ async function computeRoute(waypoints, { profile = "car" } = {}) {
     const osrmProfile = OSRM_PROFILE[profile] ?? "driving";
     const coords = waypoints.map(p => `${p.lon},${p.lat}`).join(";");
     const url = `${BASE}/${service}/route/v1/${osrmProfile}/${coords}?overview=full&geometries=geojson&alternatives=false&steps=false`;
-    const data = await fetchJson(url, { timeoutMs: 15000 });
+    const data = await fetchJson(url, { timeoutMs: 15000, allowedHosts: ["routing.openstreetmap.de"] });
     const route = data?.routes?.[0];
     if (!route) return { ok: false, reason: "rute tidak ditemukan" };
     const geometry = (route.geometry?.coordinates ?? [])

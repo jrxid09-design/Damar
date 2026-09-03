@@ -370,7 +370,21 @@ function destroyDispatcher(agent) {
  * @param {string} rawUrl
  * @param {object} opts { headers?, policy?="public", maxBytes?,
  *                        timeoutMs?, requireImage?=false,
+ *                        method?="GET", body?, contentType?,
+ *                        expectedContentType? ("image"|"json"|"text"|null),
+ *                        stallTimeoutMs?, allowRedirectHost?,
  *                        _fetch? (injeksi tes), _lookup? (injeksi tes) }
+ *
+ * Tambahan (additif, default mempertahankan perilaku lama):
+ *   - method/body/contentType     : POST/form untuk endpoint token OAuth.
+ *   - expectedContentType         : "image" (default lama, via requireImage),
+ *                                   "json"/"text" (tuntut tipe tertentu),
+ *                                   null (jangan tuntut apa pun).
+ *   - stallTimeoutMs              : deadline antar-chunk body (anti
+ *                                   slowloris); 0 = nonaktif.
+ *   - allowRedirectHost(host)     : kebijakan host tambahan per hop —
+ *                                   redirect ke host di luar kebijakan
+ *                                   penyedia ditolak.
  */
 async function guardedFetch(rawUrl, opts = {}) {
 
@@ -386,10 +400,18 @@ async function guardedFetch(rawUrl, opts = {}) {
         ? Number(opts.timeoutMs) : DEFAULT_TIMEOUT_MS;
     const maxBytes = Number(opts.maxBytes) > 0
         ? Number(opts.maxBytes) : DEFAULT_MAX_BYTES;
+    const stallTimeoutMs = Number(opts.stallTimeoutMs) > 0
+        ? Number(opts.stallTimeoutMs) : 0;
+    const allowRedirectHost = typeof opts.allowRedirectHost === "function"
+        ? opts.allowRedirectHost : null;
+    const method = typeof opts.method === "string" && opts.method.length > 0
+        ? String(opts.method).toUpperCase() : "GET";
+    const hasBody = opts.body !== undefined && opts.body !== null && method !== "GET" && method !== "HEAD";
 
     const doFetch = opts._fetch ?? ((u, i) => fetch(u, i));
 
     let current = String(rawUrl);
+    const originHost = parseUrlOrThrow(current).hostname.toLowerCase();
 
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
 
@@ -400,6 +422,17 @@ async function guardedFetch(rawUrl, opts = {}) {
             parseUrlOrThrow(current),
             { lookup, policy, isOrigin: hop === 0 }
         );
+
+        // Redirect target harus tetap dalam kebijakan host penyedia
+        // bila pemanggil mendeklarasikannya (hop > 0 saja).
+        if (hop > 0 && allowRedirectHost) {
+            const hopHost = target.url.hostname.toLowerCase();
+            if (!allowRedirectHost(hopHost)) {
+                destroyDispatcher(null);
+                throw new Error(
+                    `Redirect ke host di luar kebijakan ditolak: ${hopHost}`);
+            }
+        }
 
         const agent = target.isLiteral
             ? null                              // literal: tak ada yang bisa berpindah
@@ -426,9 +459,11 @@ async function guardedFetch(rawUrl, opts = {}) {
         let res;
         try {
             res = await doFetchHop(target.url.toString(), {
+                method,
                 headers: opts.headers ?? {},
                 redirect: "manual",         // SETIAP hop divalidasi ulang
                 signal: controller.signal,
+                ...(hasBody ? { body: opts.body } : {}),
                 ...(agent ? { dispatcher: agent } : {})
             });
         }
@@ -459,9 +494,13 @@ async function guardedFetch(rawUrl, opts = {}) {
             throw new Error(`Snapshot gagal (${res.status})`);
         }
 
-        // Content-type: gambar diharapkan (opsional dimatikan).
+        // Content-type: tuntutan pemanggil (gambar default lama; json/text
+        // untuk API penyedia; null = tidak menuntut).
         const contentType = res.headers.get("content-type") ?? "";
-        if (opts.requireImage !== false &&
+        const expectImage = opts.expectedContentType === undefined
+            ? opts.requireImage !== false
+            : opts.expectedContentType === "image";
+        if (expectImage &&
             !contentType.toLowerCase().startsWith("image/")) {
             res.body?.cancel?.().catch?.(() => {});
             destroyDispatcher(agent);
@@ -470,10 +509,23 @@ async function guardedFetch(rawUrl, opts = {}) {
                 "bukan gambar."
             );
         }
+        for (const expectation of ["json", "text"]) {
+            if (opts.expectedContentType === expectation &&
+                !contentType.toLowerCase().includes(expectation)) {
+                res.body?.cancel?.().catch?.(() => {});
+                destroyDispatcher(agent);
+                throw new Error(
+                    `Konten '${contentType.split(";")[0] || "tidak diketahui"}' ` +
+                    `bukan ${expectation} yang diharapkan.`
+                );
+            }
+        }
 
         try {
 
             // Batas ukuran: baca bertahap, abort saat melampaui.
+            // (Kounter menghitung byte ter-dekompresi — undici men-
+            // dekompresi gzip/deflate transparan sebelum stream.)
             const reader = res.body?.getReader?.();
 
             if (!reader) {
@@ -484,16 +536,40 @@ async function guardedFetch(rawUrl, opts = {}) {
 
             const chunks = [];
             let total = 0;
+            let stallTimer = null;
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                total += value.byteLength;
-                if (total > maxBytes) {
-                    await reader.cancel().catch(() => {});
-                    throw new Error("Respons melebihi batas ukuran.");
+            const clearStall = () => {
+                if (stallTimer !== null) { clearTimeout(stallTimer); stallTimer = null; }
+            };
+            const stallGuard = () => {
+                if (stallTimeoutMs <= 0) return null;
+                return new Promise((_, reject) => {
+                    stallTimer = setTimeout(
+                        () => reject(new Error(`Respons berhenti mengalir (stall > ${stallTimeoutMs}ms)`)),
+                        stallTimeoutMs);
+                    if (typeof stallTimer.unref === "function") stallTimer.unref();
+                });
+            };
+
+            try {
+                while (true) {
+                    const read = reader.read();
+                    const step = stallTimeoutMs > 0
+                        ? await Promise.race([read, stallGuard()])
+                        : await read;
+                    clearStall();
+                    const { done, value } = step;
+                    if (done) break;
+                    total += value.byteLength;
+                    if (total > maxBytes) {
+                        await reader.cancel().catch(() => {});
+                        throw new Error("Respons melebihi batas ukuran.");
+                    }
+                    chunks.push(Buffer.from(value));
                 }
-                chunks.push(Buffer.from(value));
+            }
+            finally {
+                clearStall();
             }
 
             return { response: res, buffer: Buffer.concat(chunks) };

@@ -74,7 +74,7 @@ function createOpenMeteoProvider() {
                 current: "temperature_2m,precipitation,rain,weather_code,wind_speed_10m",
                 timezone: "auto"
             });
-            const data = await fetchJson(`${BASE_URL}?${params}`);
+            const data = await fetchJson(`${BASE_URL}?${params}`, { allowedHosts: ["api.open-meteo.com"] });
             const obs = toObservation(point, data);
             return obs ? [obs] : [];
         }
