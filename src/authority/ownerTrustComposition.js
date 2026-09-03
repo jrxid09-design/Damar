@@ -35,6 +35,7 @@ const {
     createProofVerifier,
     createFirstOwnerBootstrap,
     createPrincipalBindings,
+    createChannelBinders,
     canonicalChallenge,
     BOOTSTRAP_PURPOSE,
     BOOTSTRAP_CONTEXT
@@ -76,10 +77,11 @@ async function compose(stateFile) {
     const authVerifier = makeAuthVerifier(registry, proofVerifier);
     const ownerRatify = makeRatifyAsOwner(registry, proofVerifier);
     const principalBindings = createPrincipalBindings({ registry, proofVerifier });
+    const channelBinders = createChannelBinders({ registry, proofVerifier });
 
     return Object.freeze({
         registry, proofVerifier, firstOwnerBootstrap, authVerifier,
-        ratifyAsOwner: ownerRatify, principalBindings, store
+        ratifyAsOwner: ownerRatify, principalBindings, channelBinders, store
     });
 }
 

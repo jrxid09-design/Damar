@@ -402,15 +402,19 @@ async function createOwnerTrustRegistry({ store = null, clock = () => Date.now()
         if (state.bindings.size >= MAX_BINDINGS) {
             throw fail("OT_BOUND_EXCEEDED", "binding bound reached");
         }
+        const now = clock();
         // Conflicting active binding for the same (kind, peer) to a DIFFERENT
         // principal is rejected (channel account reassignment must not silently
-        // transfer trust).
+        // transfer trust).  A fresh ceremony by the SAME principal SUPERSEDES
+        // the previous binding for that peer — one active binding per peer.
         for (const b of state.bindings.values()) {
-            if (b.kind === kind && b.peer === peer && b.revokedAtMs === null && b.principalId !== principalId) {
-                throw fail("OT_BINDING_CONFLICT", "peer is already bound to another principal");
+            if (b.kind === kind && b.peer === peer && b.revokedAtMs === null) {
+                if (b.principalId !== principalId) {
+                    throw fail("OT_BINDING_CONFLICT", "peer is already bound to another principal");
+                }
+                state.bindings.set(b.bindingId, Object.freeze({ ...b, revokedAtMs: now }));
             }
         }
-        const now = clock();
         state.generation += 1;
         const gen = state.generation;
         const bindingId = randomId("bind");
