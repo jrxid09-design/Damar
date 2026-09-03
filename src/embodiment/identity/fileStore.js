@@ -64,6 +64,15 @@ function createFileIdentityStore(filePath, options = {}) {
     // In-process write queue: overlapping saves never interleave.
     let writing = false;
     const queue = [];
+
+    /**
+     * TF-007 cleanup helper: remove a leftover tmp file on failure so a
+     * failed save never leaves orphan debris behind.
+     */
+    function cleanupTmp(tmp) {
+        try { fs.unlinkSync(tmp); } catch { /* best-effort cleanup */ }
+    }
+
     function drain() {
         if (writing) return;
         writing = true;
@@ -71,12 +80,28 @@ function createFileIdentityStore(filePath, options = {}) {
             while (queue.length > 0) {
                 const payload = queue.shift();
                 const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-                fs.writeFileSync(tmp, payload, { mode: 0o600 });
-                if (fsync) {
-                    const fd = fs.openSync(tmp, "r");
-                    try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+                try {
+                    fs.writeFileSync(tmp, payload, { mode: 0o600 });
+                    if (fsync) {
+                        // TF-002 WINDOWS FSYNC: open the tmp file with a
+                        // portable read-write descriptor ("r+") so fsyncSync
+                        // succeeds on Windows (a read-only "r" descriptor
+                        // yields EPERM there).  The write is complete before
+                        // rename; atomic replacement is preserved.
+                        const fd = fs.openSync(tmp, "r+");
+                        try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+                        // TF-007 honest durability: fsync of the FILE is
+                        // best-effort power-loss durability.  We do NOT
+                        // overclaim directory-metadata durability, which is
+                        // not reliably supported across platforms.
+                    }
+                    fs.renameSync(tmp, filePath);
+                } catch (error) {
+                    // TF-007: a failed save cleans its tmp file and reports
+                    // the failure; the last committed snapshot is untouched.
+                    cleanupTmp(tmp);
+                    throw invalid(`gagal menulis snapshot identitas: ${error.message}`);
                 }
-                fs.renameSync(tmp, filePath);
             }
         } finally {
             writing = false;
@@ -121,8 +146,17 @@ function createFileIdentityStore(filePath, options = {}) {
             let raw;
             try {
                 raw = fs.readFileSync(filePath, "utf8");
-            } catch {
-                return null; // no durable snapshot yet
+            } catch (error) {
+                // TF-004 READ FAILURE: ONLY true file-not-found (ENOENT) may
+                // mean "no snapshot yet".  Permission errors, a directory
+                // path, I/O failures, or any other read error are NOT "fresh
+                // state" — an initialized-but-unreadable state must never be
+                // interpreted as a clean slate.  Fail closed.
+                if (error && error.code === "ENOENT") {
+                    return null; // genuinely no durable snapshot yet
+                }
+                throw invalid(
+                    `gagal membaca snapshot identitas (${error && error.code ? error.code : "IO"})`);
             }
             let data;
             try {

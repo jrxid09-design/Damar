@@ -85,6 +85,36 @@ function createAuditLedger(options = {}) {
     let rejectedCount = 0;
     let evictedCount = 0;
 
+    // TF-001 RESTART CONTINUATION: the canonical ledger is the ONE
+    // sequence/digest owner.  When the caller supplies a verified durable
+    // tail (from the persistence sink's describeDurable()), the ledger
+    // RESUMES from it so the next append is exactly previousSequence + 1
+    // with prevDigest equal to the durable last digest.  The sink holds no
+    // sequence authority — it only reports verified durable state.
+    if (options.resume !== undefined && options.resume !== null) {
+        const resume = options.resume;
+        if (typeof resume !== "object" || Array.isArray(resume)) {
+            throw new LedgerError(CODES.INVALID_EVENT,
+                "resume tail must be an object { lastSequence, lastDigest }");
+        }
+        const resumeSeq = resume.lastSequence;
+        const resumeDigest = resume.lastDigest;
+        if (resumeSeq !== null && resumeSeq !== undefined) {
+            if (!Number.isSafeInteger(resumeSeq) || resumeSeq < 0) {
+                throw new LedgerError(CODES.INVALID_EVENT,
+                    "resume.lastSequence must be a non-negative integer");
+            }
+            sequenceCounter = resumeSeq;
+        }
+        if (resumeDigest !== null && resumeDigest !== undefined) {
+            if (typeof resumeDigest !== "string" || !/^[0-9a-f]{64}$/.test(resumeDigest)) {
+                throw new LedgerError(CODES.INVALID_EVENT,
+                    "resume.lastDigest must be a sha256 hex digest");
+            }
+            lastDigest = resumeDigest;
+        }
+    }
+
     function assertSink(candidate) {
         if (typeof candidate !== "object" || candidate === null ||
             typeof candidate.append !== "function") {

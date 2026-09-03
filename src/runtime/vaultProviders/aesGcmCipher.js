@@ -66,25 +66,101 @@ function fail(code, message) {
     return new VaultError(code, message);
 }
 
+/** TF-006: strict canonical Base64 decode — reject any invalid/ignored
+ *  characters (including surrounding whitespace) instead of silently
+ *  tolerating them. */
+function decodeBase64Strict(text) {
+    if (typeof text !== "string") return null;
+    // No trimming-then-accept: any leading/trailing whitespace or junk is a
+    // rejection, not a silent normalization.
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(text) || text.length % 4 !== 0) {
+        return null;
+    }
+    let buf;
+    try {
+        buf = Buffer.from(text, "base64");
+    } catch {
+        return null;
+    }
+    // Round-trip check: re-encoding must reproduce the canonical input
+    // (guards against silently dropped invalid characters).
+    if (buf.toString("base64") !== text) {
+        return null;
+    }
+    return buf;
+}
+
+/** TF-006: defensive copy so caller mutation cannot alter the active key,
+ *  with a best-effort zeroization of the temporary source buffer. */
+function defensiveKeyCopy(buf) {
+    const copy = Buffer.allocUnsafe(KEY_BYTES);
+    buf.copy(copy, 0, 0, KEY_BYTES);
+    return copy;
+}
+
 /** Strictly validate + normalize supplied key material to a 32-byte Buffer. */
 function coerceKeyMaterial(raw, source) {
     let buf = null;
     if (Buffer.isBuffer(raw)) {
         buf = raw;
     } else if (typeof raw === "string" && raw.length > 0) {
-        const trimmed = raw.trim();
-        // Accept hex (64 chars) or base64.
-        if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
-            buf = Buffer.from(trimmed, "hex");
+        // Reject surrounding whitespace/junk outright (TF-006): only a clean
+        // hex string or a clean canonical Base64 string is acceptable.
+        if (raw !== raw.trim()) {
+            buf = null;
+        } else if (/^[0-9a-fA-F]{64}$/.test(raw)) {
+            buf = Buffer.from(raw, "hex");
         } else {
-            try { buf = Buffer.from(trimmed, "base64"); } catch { buf = null; }
+            buf = decodeBase64Strict(raw);
         }
     }
     if (!Buffer.isBuffer(buf) || buf.length !== KEY_BYTES) {
         throw fail("VAULT_CIPHER_REQUIRED",
             `vault production cipher: key material from ${source} must decode to exactly ${KEY_BYTES} bytes`);
     }
-    return buf;
+    const key = defensiveKeyCopy(buf);
+    // Best-effort zeroization of the temporary decoded buffer.
+    try { buf.fill(0); } catch { /* best-effort */ }
+    return key;
+}
+
+/**
+ * TF-005 KEY-FILE PROTECTION (honest platform behavior).
+ *
+ * POSIX: the key file MUST be a regular file with no group/world access
+ * (mode bits must not include 0o077).  Unsafe protection fails closed.
+ *
+ * Windows: POSIX mode bits are NOT an ACL and do NOT prove protection.
+ * We do NOT falsely claim POSIX mode == ACL protection.  A Windows key
+ * file is therefore GATED: it is accepted ONLY when the caller explicitly
+ * acknowledges the platform protection is externally managed
+ * (options.allowPlatformManagedKeyFile === true); otherwise it fails
+ * closed and the caller must use a separately trusted runtime key
+ * provider (keyMaterial / DAMAR_VAULT_MASTER_KEY).  We do not invent
+ * insecure ACL parsing.
+ */
+function assertKeyFileProtection(filePath) {
+    let stat;
+    try {
+        stat = fs.statSync(filePath);
+    } catch (error) {
+        throw fail("VAULT_CIPHER_REQUIRED",
+            `vault production cipher: key file is unreadable (${error.code ?? "IO"})`);
+    }
+    if (!stat.isFile()) {
+        throw fail("VAULT_CIPHER_REQUIRED",
+            "vault production cipher: key path is not a regular file");
+    }
+    if (process.platform !== "win32") {
+        // POSIX: reject group/world-readable key files.
+        const mode = stat.mode & 0o777;
+        if ((mode & 0o077) !== 0) {
+            throw fail("VAULT_CIPHER_REQUIRED",
+                "vault production cipher: key file is group/world-accessible " +
+                `(mode ${mode.toString(8)}); refusing unsafe protection`);
+        }
+    }
+    return stat;
 }
 
 /**
@@ -97,6 +173,15 @@ function resolveKeyMaterial(options) {
         return coerceKeyMaterial(options.keyMaterial, "keyMaterial option");
     }
     if (typeof options.keyFile === "string" && options.keyFile.length > 0) {
+        // TF-005 Windows gating: a Windows key file is accepted only when
+        // the caller explicitly qualifies it as externally managed.
+        if (process.platform === "win32" && options.allowPlatformManagedKeyFile !== true) {
+            throw fail("VAULT_CIPHER_REQUIRED",
+                "vault production cipher: keyFile on Windows is not accepted " +
+                "without allowPlatformManagedKeyFile:true (POSIX mode is not " +
+                "ACL protection).  Use a separately trusted runtime key provider.");
+        }
+        assertKeyFileProtection(options.keyFile);
         let raw;
         try {
             raw = fs.readFileSync(options.keyFile, "utf8");

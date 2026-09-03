@@ -137,6 +137,35 @@ function createFileAuditSink(filePath, options = {}) {
 
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
 
+    // TF-003 SINGLE-WRITER OWNERSHIP: an exclusive lock file guards the
+    // canonical sink file so two active sink owners (in this process or
+    // cooperating local processes) cannot own the same file and append
+    // conflicting tail state.  The lock is acquired atomically
+    // (create-exclusive) and is NOT a distributed lock service — it is the
+    // narrow local ownership the existing single-process runtime expects.
+    // Candidate-tail validation remains mandatory even with ownership.
+    const lockPath = `${filePath}.lock`;
+    let lockFd = null;
+    let lockHeld = false;
+    try {
+        // "wx" = O_CREAT|O_EXCL|O_WRONLY: fails if the lock already exists.
+        lockFd = fs.openSync(lockPath, "wx");
+        lockHeld = true;
+    } catch (error) {
+        if (error && (error.code === "EEXIST" || error.code === "EPERM" || error.code === "EACCES")) {
+            throw new LedgerError(CODES.PERSIST_FAILED,
+                "audit sink file is already owned by another active writer");
+        }
+        throw failPersist(`audit sink lock acquisition failed: ${error.message}`);
+    }
+
+    function releaseLock() {
+        if (!lockHeld) return;
+        lockHeld = false;
+        try { if (lockFd !== null) fs.closeSync(lockFd); } catch { /* best-effort */ }
+        try { fs.unlinkSync(lockPath); } catch { /* best-effort */ }
+    }
+
     // ---- load + verify existing tail (restart continuation) ----------
     let tail = { lastSequence: 0, lastDigest: null, count: 0 };
     let corrupt = false;
@@ -196,6 +225,12 @@ function createFileAuditSink(filePath, options = {}) {
          * Persist one frozen audit record.  Synchronous; throws
          * LedgerError(PERSIST_FAILED) on any failure so the ledger rejects
          * the append atomically (no false durable success).
+         *
+         * TF-001 CANDIDATE-TAIL VALIDATION: even with single-writer
+         * ownership, every candidate is validated against the CURRENT
+         * durable tail — sequence must be exactly tail+1 and prevDigest
+         * must equal the durable last digest.  Skipped/duplicate sequence,
+         * wrong prevDigest, and wrong self-digest are all rejected.
          */
         append(record) {
             if (corrupt) {
@@ -211,6 +246,27 @@ function createFileAuditSink(filePath, options = {}) {
             if (seenEventIds.has(record.eventId)) {
                 throw failPersist("duplicate eventId in durable audit sink");
             }
+            // ---- candidate-tail validation (TF-001) --------------------
+            if (!Number.isSafeInteger(record.sequence)) {
+                throw failPersist("audit record sequence must be an integer");
+            }
+            if (record.sequence !== tail.lastSequence + 1) {
+                throw failPersist(
+                    `audit sequence must continue the durable tail exactly ` +
+                    `(expected ${tail.lastSequence + 1}, got ${record.sequence})`);
+            }
+            const prevDigest = record.integrity && record.integrity.prevDigest !== undefined
+                ? record.integrity.prevDigest
+                : undefined;
+            if (prevDigest !== tail.lastDigest) {
+                throw failPersist("audit prevDigest does not match the durable tail digest");
+            }
+            // The record's own self-digest must be valid for its content.
+            try {
+                verifySelfDigest(record);
+            } catch (error) {
+                throw failPersist(`audit record failed integrity validation: ${error.message}`);
+            }
             let line;
             try {
                 line = serializeRecordLine(record);
@@ -225,7 +281,7 @@ function createFileAuditSink(filePath, options = {}) {
             }
             seenEventIds.add(record.eventId);
             tail = {
-                lastSequence: Number.isSafeInteger(record.sequence) ? record.sequence : tail.lastSequence,
+                lastSequence: record.sequence,
                 lastDigest: record.integrity && typeof record.integrity.digest === "string"
                     ? record.integrity.digest
                     : tail.lastDigest,
@@ -247,12 +303,33 @@ function createFileAuditSink(filePath, options = {}) {
             });
         },
 
+        /**
+         * Verified resume seed for the canonical ledger (TF-001).  The sink
+         * holds no sequence authority — it only reports verified durable
+         * tail state; the canonical createAuditLedger resumes from it.
+         */
+        verifiedTail() {
+            if (corrupt) {
+                throw failPersist(
+                    `cannot resume from a corrupt audit sink: ${corruptReason}`);
+            }
+            return Object.freeze({
+                lastSequence: tail.lastSequence,
+                lastDigest: tail.lastDigest
+            });
+        },
+
         /** Read back the verified stored records (bounded, for continuation/tests). */
         readAll() {
             if (!fs.existsSync(filePath)) return Object.freeze([]);
             const raw = fs.readFileSync(filePath, "utf8");
             const lines = raw.split("\n").filter((l) => l.trim().length > 0);
             return Object.freeze(lines.map((l) => parseRecordLine(l)));
+        },
+
+        /** Release the single-writer lock (TF-003).  Idempotent. */
+        close() {
+            releaseLock();
         }
     };
 
