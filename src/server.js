@@ -383,7 +383,8 @@ const shutdown = (signal) => {
     try { require("./consciousness").stop(); } catch { /* abaikan */ }
     try {
         const mataDewa = require("./mataDewa");
-        if (mataDewa.getService()) mataDewa.getService().shutdown();
+        const mdInstance = mataDewa.getService();
+        if (mdInstance) mdInstance.shutdown();
     } catch { /* abaikan */ }
 
     if (server) {

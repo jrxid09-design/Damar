@@ -7,6 +7,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const md = require("../../src/mataDewa");
+const composition = require("../../src/mataDewa/composition");
 const { MataDewaService, SUBSYSTEM_STATE } = require("../../src/mataDewa/service");
 const { buildMataDewaCapabilityRuntime, CAPABILITY_FAMILIES } = require("../../src/mataDewa/capabilities/index");
 
@@ -14,9 +15,11 @@ const NOW = 1759500000000;
 const REPO_ROOT = path.join(__dirname, "..", "..");
 
 test("ZERO MODE: boot dengan NOL kunci pihak ketiga → READY + baseline bermakna", async () => {
-    md.resetService();
+    // MD-008: komposisi tersegel — penggantian singleton hanya lewat
+    // seam test-only di composition.js (tidak ada lagi di permukaan publik).
+    composition.resetMataDewaServiceForTests();
     const fresh = new MataDewaService({ clock: { nowMs: () => Date.now() } });
-    md.setService(fresh);
+    composition.setMataDewaServiceForTests(fresh);
     require("../../src/mataDewa/providers").registerKeylessProviders(fresh);
     const status = await fresh.start();
     assert.equal(status.state, SUBSYSTEM_STATE.READY);
@@ -186,6 +189,7 @@ test("LIFECYCLE: no new public listener in production boot path", () => {
     assert.ok(mataDewaBoot, "boot Mata Dewa harus ada di server.js");
     assert.equal(/listen\(/.test(mataDewaBoot[0]), false);
     assert.match(serverSrc, /mataDewa\.getService\(\{\s*credentialsFilePath/);
-    // Shutdown memanggil shutdown Mata Dewa.
-    assert.match(serverSrc, /getService\(\)\.shutdown\(\)/);
+    // Shutdown memanggil shutdown Mata Dewa (MD-008: tanpa chained call
+    // pada getter publik — instance diambil sekali lewat komposisi tersegel).
+    assert.match(serverSrc, /mdInstance\.shutdown\(\)/);
 });
