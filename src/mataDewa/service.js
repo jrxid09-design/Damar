@@ -18,6 +18,7 @@ const { AlertEngine } = require("./alert/alertEngine");
 const { AssetRegistry } = require("./assets/assetRegistry");
 const { SpatialTimeline } = require("./timeline/timeline");
 const { HAZARD_TYPE } = require("./watch/lightning");
+const { normalizeObservation } = require("./observations/observation");
 
 const SUBSYSTEM_STATE = Object.freeze({
     NEW: "new",
@@ -89,6 +90,14 @@ class MataDewaService {
         this.alertEngine = options.alertEngine ?? new AlertEngine({
             clock: this.clock,
             deliver: options.alertDeliver ?? null
+        });
+
+        // RF sensing — sumber + sesi hanya dari trusted composition
+        // (MD-008 spirit; UDP wajib allowLocalUdp eksplisit, replay offline).
+        const { buildRfManager } = require("./rf/rfManager");
+        this.rfManager = options.rfManager ?? buildRfManager({
+            clock: this.clock,
+            allowLocalUdp: options.allowLocalUdp === true
         });
 
         // Kredensial provider — SATU jahitan ke Secret Vault kanonik Damar.
@@ -229,6 +238,27 @@ class MataDewaService {
         }
     }
 
+    /**
+     * Ingest observasi dari sumber LOKAL tepercaya (mis. RF sensing) —
+     * jalur kanonik yang SAMA dengan observasi provider, tidak ada
+     * jalan pintas. Mengembalikan jumlah yang diterima.
+     */
+    ingestLocalObservations(observations) {
+        const list = Array.isArray(observations) ? observations : [];
+        const accepted = [];
+        for (const item of list) {
+            if (!item || item.schemaVersion === undefined) {
+                // input mentah — normalisasi ketat dulu (reject-not-clamp)
+                const normalized = normalizeObservation(item, { nowMs: this.clock.nowMs() });
+                if (normalized.ok) accepted.push(normalized.observation);
+                continue;
+            }
+            accepted.push(item); // sudah kanonik dari rfManager
+        }
+        this._ingestObservations(accepted);
+        return accepted.length;
+    }
+
     /** Observasi terkini dalam radius dari sebuah titik (memakai indeks). */
     observationsNear(point, radiusM) {
         if (!isValidPoint(point) || !(radiusM >= 0)) return [];
@@ -243,6 +273,13 @@ class MataDewaService {
      */
     async fetchHazardObservations(hazardType) {
         try {
+            // RF presence: observasi lokal RF sudah di-ingest; jangan
+            // dipoll provider (RF bukan provider jaringan — satu batas lokal).
+            if (hazardType === "rf_presence") {
+                const rfObs = [...this.observations.values()].filter(
+                    o => o.type === "rf.presence_estimate" || o.type === "rf.motion_estimate");
+                return rfObs;
+            }
             const { observations } = await this.registry.pollTypes([hazardType], {});
             this._ingestObservations(observations);
             return observations;
@@ -313,6 +350,7 @@ class MataDewaService {
                 activeEvents: this.watchEngine.listActiveEvents().length
             },
             alerts: this.alertEngine.stats,
+            rf: this.rfManager ? this.rfManager.status() : null,
             degradationReasons: this.degradationReasons.slice(),
             lastPollStatuses: this.lastPollStatuses.slice()
         };
@@ -339,6 +377,10 @@ class MataDewaService {
         try {
             if (this.watchEngine && typeof this.watchEngine.stop === "function") {
                 try { await this.watchEngine.stop(); } catch { /* watch opsional */ }
+            }
+            // RF: hentikan sumber UDP (replay tidak punya handle terbuka).
+            if (this.rfManager && typeof this.rfManager.stop === "function") {
+                try { this.rfManager.stop(); } catch { /* rf opsional */ }
             }
             this.observationIndex.clear();
             this.observations.clear();

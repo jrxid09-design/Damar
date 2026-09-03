@@ -32,7 +32,8 @@ const CAPABILITY_FAMILIES = Object.freeze({
     ROUTE_INSPECT: "mata_dewa.route.inspect",
     TIMELINE_QUERY: "mata_dewa.timeline.query",
     ASSET_IMPORT: "mata_dewa.asset.import",
-    CCTV_INSPECT: "mata_dewa.cctv.inspect"
+    CCTV_INSPECT: "mata_dewa.cctv.inspect",
+    RF_OBSERVE: "mata_dewa.rf.observe"
 });
 
 /**
@@ -62,7 +63,8 @@ const CAPABILITY_DESCRIPTORS = Object.freeze([
     { id: CAPABILITY_FAMILIES.ROUTE_INSPECT, operations: ["inspect"], effects: [], description: "Analisis koridor rute terhadap bahaya/aset (read-only)." },
     { id: CAPABILITY_FAMILIES.TIMELINE_QUERY, operations: ["query"], effects: [], description: "Query riwayat spasial (apa yang berubah di sini)." },
     { id: CAPABILITY_FAMILIES.ASSET_IMPORT, operations: ["import"], effects: ["asset_registry"], description: "Impor aset lokal generik (KML/KMZ/CSV/GeoJSON) via Action Fabric." },
-    { id: CAPABILITY_FAMILIES.CCTV_INSPECT, operations: ["inspect"], effects: [], description: "Inspeksi frame kamera publik/berotorisasi via MediaIngress." }
+    { id: CAPABILITY_FAMILIES.CCTV_INSPECT, operations: ["inspect"], effects: [], description: "Inspeksi frame kamera publik/berotorisasi via MediaIngress." },
+    { id: CAPABILITY_FAMILIES.RF_OBSERVE, operations: ["observe"], effects: [], description: "Inspeksi status sumber RF + estimasi presence/motion terbaru (read-only; bukan klaim identitas)." }
 ]);
 
 /**
