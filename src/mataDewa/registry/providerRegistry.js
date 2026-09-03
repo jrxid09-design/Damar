@@ -83,18 +83,39 @@ class ProviderRegistry {
                 Object.entries(descriptor)
                     .filter(([k, v]) => typeof v === "function" && k !== "poll" && k !== "healthy")
             )),
+            // MD-009: kapabilitas provider yang JUJUR — stub (tanpa poll,
+            // tanpa on-demand, tanpa probe) TIDAK PERNAH bisa jadi AVAILABLE.
+            capabilities: Object.freeze({
+                periodic: typeof descriptor.poll === "function",
+                onDemand: Object.entries(descriptor).some(
+                    ([k, v]) => typeof v === "function" && k !== "poll" && k !== "healthy"),
+                probe: typeof descriptor.healthy === "function"
+            }),
             // Keadaan runtime (tidak dibekukan — diperbarui saat poll).
             state: PROVIDER_STATE.UNAVAILABLE,
             failureReason: "not_polled_yet",
             lastPollAt: null,
             lastSuccessAt: null,
+            lastProbedAt: null,
             consecutiveFailures: 0
         };
 
         // Sediakan fungsi on-demand langsung pada objek provider (mis.
-        // computeRoute, reverseGeocode) agar engine memakainya lewat satu pintu.
+        // computeRoute, reverseGeocode) agar engine memakainya lewat satu
+        // pintu. MD-009: pemanggilan yang berhasil = BUKTI HIDUP; yang
+        // gagal = BUKTI MATI — state provider ikut diperbarui.
         for (const [name, fn] of Object.entries(provider.extras)) {
-            provider[name] = fn;
+            provider[name] = async (...args) => {
+                try {
+                    const result = await fn(...args);
+                    this.noteOnDemandSuccess(id);
+                    return result;
+                }
+                catch (error) {
+                    this.noteOnDemandFailure(id, error?.message ?? "on_demand_failed");
+                    throw error;
+                }
+            };
         }
 
         this.providers.set(id, provider);
@@ -124,6 +145,13 @@ class ProviderRegistry {
     describe(id) {
         const p = this.providers.get(id);
         if (!p) return null;
+        // MD-009: ketersediaan EFEKTIF — AVAILABLE yang sudah basi (sukses
+        // terakhir jauh melampaui jendela kesegaran) dilaporkan DEGRADED
+        // dengan penanda stale; state mentah tetap diekspos untuk audit.
+        const stale = this.isStale(id);
+        const availability = (p.state === PROVIDER_STATE.AVAILABLE && stale)
+            ? PROVIDER_STATE.DEGRADED
+            : p.state;
         return {
             id: p.id,
             label: p.label,
@@ -132,8 +160,12 @@ class ProviderRegistry {
             accessClass: p.accessClass,
             requiresCredential: p.requiresCredential,
             credentialTier: p.requiresCredential ? p.credentialTier : null,
-            availability: p.state,
-            failureReason: p.state === PROVIDER_STATE.AVAILABLE ? null : p.failureReason,
+            availability,
+            stale,
+            capabilities: p.capabilities,
+            failureReason: availability === PROVIDER_STATE.AVAILABLE
+                ? null
+                : (p.failureReason ?? (stale ? "success_stale" : null)),
             coverage: p.coverage,
             freshnessMs: p.freshnessMs,
             quality: p.quality,
@@ -142,6 +174,7 @@ class ProviderRegistry {
             fallbacks: p.fallbacks,
             lastPollAt: p.lastPollAt,
             lastSuccessAt: p.lastSuccessAt,
+            lastProbedAt: p.lastProbedAt,
             consecutiveFailures: p.consecutiveFailures
         };
     }
@@ -162,6 +195,89 @@ class ProviderRegistry {
     }
 
     /**
+     * MD-009: probe jujur satu provider (on-demand / stub).
+     *  - Stub (tanpa poll, tanpa on-demand, tanpa probe) → TIDAK PERNAH
+     *    AVAILABLE; alasan eksplisit "not_implemented".
+     *  - Ada hook healthy() → jalankan; hasilnya menentukan state.
+     *  - On-demand tanpa hook → tetap UNAVAILABLE "not_proven_yet"
+     *    sampai pemanggilan on-demand pertama yang berhasil (lihat
+     *    noteOnDemandSuccess).
+     * TIDAK PERNAH melempar.
+     */
+    async probeProvider(id) {
+        const p = this.providers.get(id);
+        const nowMs = this.clock.nowMs();
+        if (!p) {
+            return { ok: false, providerId: id, state: PROVIDER_STATE.UNAVAILABLE, failureReason: "unknown_provider" };
+        }
+        p.lastProbedAt = nowMs;
+        if (!p.capabilities.periodic && !p.capabilities.onDemand && !p.capabilities.probe) {
+            p.state = PROVIDER_STATE.UNAVAILABLE;
+            p.failureReason = "not_implemented";
+            return { ok: false, providerId: id, state: p.state, failureReason: p.failureReason };
+        }
+        if (p.capabilities.probe) {
+            try {
+                const verdict = await p.healthy();
+                if (verdict === true) {
+                    p.state = PROVIDER_STATE.AVAILABLE;
+                    p.failureReason = null;
+                    p.lastSuccessAt = p.lastSuccessAt ?? nowMs;
+                    return { ok: true, providerId: id, state: p.state, failureReason: null };
+                }
+                p.state = PROVIDER_STATE.UNAVAILABLE;
+                p.failureReason = "health_probe_failed";
+                return { ok: false, providerId: id, state: p.state, failureReason: p.failureReason };
+            }
+            catch {
+                p.state = PROVIDER_STATE.UNAVAILABLE;
+                p.failureReason = "health_probe_failed";
+                return { ok: false, providerId: id, state: p.state, failureReason: p.failureReason };
+            }
+        }
+        // On-demand tanpa hook probe: belum terbukti.
+        if (p.state !== PROVIDER_STATE.AVAILABLE) {
+            p.state = PROVIDER_STATE.UNAVAILABLE;
+            p.failureReason = "not_proven_yet";
+        }
+        return { ok: false, providerId: id, state: p.state, failureReason: p.failureReason };
+    }
+
+    /** MD-009: on-demand sukses pertama = bukti hidup yang sah. */
+    noteOnDemandSuccess(id, nowMs = this.clock.nowMs()) {
+        const p = this.providers.get(id);
+        if (!p) return false;
+        if (!p.capabilities.onDemand) return false;
+        p.state = PROVIDER_STATE.AVAILABLE;
+        p.failureReason = null;
+        p.lastSuccessAt = nowMs;
+        return true;
+    }
+
+    /** MD-009: on-demand gagal = bukti mati yang sah. */
+    noteOnDemandFailure(id, reason = "on_demand_failed", nowMs = this.clock.nowMs()) {
+        const p = this.providers.get(id);
+        if (!p) return false;
+        if (!p.capabilities.onDemand) return false;
+        p.consecutiveFailures += 1;
+        p.state = p.consecutiveFailures >= 2 ? PROVIDER_STATE.UNAVAILABLE : PROVIDER_STATE.DEGRADED;
+        p.failureReason = String(reason).slice(0, 200);
+        return true;
+    }
+
+    /** MD-009: apakah sukses terakhir provider sudah basi (stale)? */
+    isStale(id, { maxStalenessMs = null } = {}) {
+        const p = this.providers.get(id);
+        if (!p) return false;
+        if (p.state !== PROVIDER_STATE.AVAILABLE) return false;
+        if (p.lastSuccessAt === null) return false;
+        const window = Number.isFinite(maxStalenessMs)
+            ? maxStalenessMs
+            : Math.max((p.freshnessMs ?? 0) * 10, 30 * 60 * 1000);
+        return (this.clock.nowMs() - p.lastSuccessAt) > window;
+    }
+
+    /**
      * Poll satu provider; normalisasi hasilnya ke SpatialObservation.
      * Mengembalikan { ok, providerId, state, observations, failureReason }.
      * TIDAK PERNAH melempar — kegagalan provider ditangkap dan dilaporkan.
@@ -172,12 +288,25 @@ class ProviderRegistry {
         if (!p) {
             return { ok: false, providerId: id, state: PROVIDER_STATE.UNAVAILABLE, observations: [], failureReason: "unknown_provider" };
         }
+        // MD-009: stub jujur TIDAK PERNAH AVAILABLE — alasan eksplisit.
+        if (!p.capabilities.periodic && !p.capabilities.onDemand && !p.capabilities.probe) {
+            p.state = PROVIDER_STATE.UNAVAILABLE;
+            p.failureReason = "not_implemented";
+            p.lastPollAt = nowMs;
+            return { ok: false, providerId: id, state: p.state, observations: [], failureReason: p.failureReason };
+        }
         if (typeof p.poll !== "function") {
             // Provider on-demand (mis. routing/geocode) tanpa feed periodik:
-            // tersedia atas permintaan, tidak menghasilkan observasi periodik.
-            p.state = PROVIDER_STATE.AVAILABLE;
-            p.failureReason = null;
-            return { ok: true, providerId: id, state: p.state, observations: [], failureReason: null, onDemand: true };
+            // TIDAK ditandai AVAILABLE tanpa bukti — probe/hasil on-demand
+            // pertama yang membuktikan (MD-009).
+            return this.probeProvider(id).then((probe) => ({
+                ok: probe.ok,
+                providerId: id,
+                state: probe.state,
+                observations: [],
+                failureReason: probe.failureReason,
+                onDemand: true
+            }));
         }
 
         const credential = await this._resolveCredential(p);
@@ -186,6 +315,17 @@ class ProviderRegistry {
             p.failureReason = credential.code;
             p.lastPollAt = nowMs;
             return { ok: false, providerId: id, state: p.state, observations: [], failureReason: p.failureReason };
+        }
+
+        // MD-009: probe kesehatan (bila ada) MENGEREMI poll — provider
+        // dengan health check gagal TIDAK ditandai AVAILABLE walau poll
+        // kebetulan berhasil (kepercayaan mengikuti bukti terburuk).
+        if (p.capabilities.probe) {
+            const probe = await this.probeProvider(id);
+            if (!probe.ok) {
+                p.lastPollAt = nowMs;
+                return { ok: false, providerId: id, state: probe.state, observations: [], failureReason: probe.failureReason };
+            }
         }
 
         try {
