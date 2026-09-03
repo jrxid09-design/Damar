@@ -34,6 +34,7 @@ const {
     createOwnerTrustStore,
     createProofVerifier,
     createFirstOwnerBootstrap,
+    createPrincipalBindings,
     canonicalChallenge,
     BOOTSTRAP_PURPOSE,
     BOOTSTRAP_CONTEXT
@@ -74,8 +75,12 @@ async function compose(stateFile) {
     // composition's registry/verifier, never the module-global singleton).
     const authVerifier = makeAuthVerifier(registry, proofVerifier);
     const ownerRatify = makeRatifyAsOwner(registry, proofVerifier);
+    const principalBindings = createPrincipalBindings({ registry, proofVerifier });
 
-    return Object.freeze({ registry, proofVerifier, firstOwnerBootstrap, authVerifier, ratifyAsOwner: ownerRatify, store });
+    return Object.freeze({
+        registry, proofVerifier, firstOwnerBootstrap, authVerifier,
+        ratifyAsOwner: ownerRatify, principalBindings, store
+    });
 }
 
 /** Composition-bound Owner ratification gate. */

@@ -23,6 +23,7 @@ const {
     BOOTSTRAP_PURPOSE,
     BOOTSTRAP_CONTEXT
 } = require("./bootstrap");
+const { createPrincipalBindings, normalizePeer, TRANSPORTS } = require("./bindings");
 
 module.exports = Object.freeze({
     ...types,
@@ -32,6 +33,9 @@ module.exports = Object.freeze({
     createProofVerifier,
     canonicalChallenge,
     createFirstOwnerBootstrap,
+    createPrincipalBindings,
+    normalizePeer,
+    TRANSPORTS,
     BOOTSTRAP_PURPOSE,
     BOOTSTRAP_CONTEXT
 });
