@@ -13,6 +13,11 @@ const { ProviderRegistry, PROVIDER_STATE } = require("./registry/providerRegistr
 const { MATA_DEWA_MODE, PROVIDER_ACCESS_MODE } = require("./config");
 const { GridIndex } = require("./spatial/gridIndex");
 const { isValidPoint, haversineMeters } = require("./spatial/geo");
+const { WatchEngine } = require("./watch/watchEngine");
+const { AlertEngine } = require("./alert/alertEngine");
+const { AssetRegistry } = require("./assets/assetRegistry");
+const { SpatialTimeline } = require("./timeline/timeline");
+const { HAZARD_TYPE } = require("./watch/lightning");
 
 const SUBSYSTEM_STATE = Object.freeze({
     NEW: "new",
@@ -70,6 +75,21 @@ class MataDewaService {
         this.lastPollStatuses = [];
         this.degradationReasons = [];
         this._shutdownRequested = false;
+
+        // Engine headless (dimiliki Damar; watch/alert tetap hidup tanpa UI).
+        this.assetRegistry = options.assetRegistry ?? new AssetRegistry();
+        this.timeline = options.timeline ?? new SpatialTimeline({ clock: this.clock });
+        this.watchEngine = options.watchEngine ?? new WatchEngine({
+            assetRegistry: this.assetRegistry,
+            clock: this.clock,
+            pollIntervalMs: options.watchPollIntervalMs ?? 5 * 60 * 1000,
+            hazardWindowMs: options.hazardWindowMs ?? 15 * 60 * 1000,
+            onAlert: options.onAlert ?? null
+        });
+        this.alertEngine = options.alertEngine ?? new AlertEngine({
+            clock: this.clock,
+            deliver: options.alertDeliver ?? null
+        });
     }
 
     /** Daftarkan provider (keyless/berkunci). Aman dipanggil sebelum start. */
@@ -119,6 +139,14 @@ class MataDewaService {
                 this.degradationReasons.push("no_provider_available_at_boot");
             }
         }
+
+        // Mesin watch headless menyala bersama Mata Dewa (mode WATCH aktif),
+        // tanpa bergantung UI. Kegagalan satu tick tidak mematikan apa pun.
+        try { this.watchEngine.start(); }
+        catch (error) {
+            this.degradationReasons.push(`watch_engine_start_failed: ${error.message}`);
+        }
+
         return this.status();
     }
 
@@ -151,6 +179,7 @@ class MataDewaService {
             if (obs.geometry?.type === "point") {
                 this.observationIndex.insert(obs.id, obs.geometry, obs.type);
             }
+            this.timeline.record(obs, { kind: "observation" });
         }
         // Cache terbatas: buang yang paling lama diterima bila melebihi batas.
         if (this.observations.size > this.maxObservations) {
@@ -170,6 +199,30 @@ class MataDewaService {
         return this.observationIndex.queryRadius(point, radiusM)
             .map(hit => ({ observation: this.observations.get(hit.id), distanceM: hit.distanceM }))
             .filter(x => x.observation);
+    }
+
+    /**
+     * Ambil observasi hazard dari provider (jembatan Watch Engine → registry).
+     * Kegagalan provider TIDAK menjatuhkan watch (mengembalikan array kosong).
+     */
+    async fetchHazardObservations(hazardType) {
+        try {
+            const { observations } = await this.registry.pollTypes([hazardType], {});
+            this._ingestObservations(observations);
+            return observations;
+        }
+        catch {
+            return [];
+        }
+    }
+
+    /**
+     * Jalankan satu putaran watch secara eksplisit (juga dipakai tes/Manager).
+     */
+    async runWatchOnce() {
+        return this.watchEngine.tick(
+            (hazardType) => this.fetchHazardObservations(hazardType)
+        );
     }
 
     /**
@@ -203,6 +256,14 @@ class MataDewaService {
             providers: this.registry.listProviders(),
             providerCount: this.registry.size,
             observationCount: this.observations.size,
+            assetCount: this.assetRegistry.size,
+            watch: {
+                running: this.watchEngine.isRunning,
+                lastRunAtMs: this.watchEngine.lastRunAtMs,
+                lastRunStats: this.watchEngine.lastRunStats,
+                activeEvents: this.watchEngine.listActiveEvents().length
+            },
+            alerts: this.alertEngine.stats,
             degradationReasons: this.degradationReasons.slice(),
             lastPollStatuses: this.lastPollStatuses.slice()
         };
