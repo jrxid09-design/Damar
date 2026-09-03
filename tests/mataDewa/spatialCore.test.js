@@ -33,17 +33,28 @@ test("OBSERVATION: koordinat di luar rentang ditolak", () => {
     assert.equal(bad.ok, false);
 });
 
-test("OBSERVATION: normalisasi lengkap — confidence clamp + akses + frozen", () => {
+test("OBSERVATION: normalisasi lengkap — confidence reject (bukan clamp) + akses + frozen", () => {
+    // MD-005: confidence di luar [0,1] DITOLAK — tidak pernah di-clamp.
+    const rejected = observationModel.normalizeObservation({
+        source: "usgs", type: "earthquake",
+        location: { lat: -6.6, lon: 106.8 },
+        observedAt: NOW - 5000, confidence: 7,
+        attributes: { mag: 4.2 },
+        attribution: "USGS"
+    }, { nowMs: NOW });
+    assert.equal(rejected.ok, false);
+    assert.match(String(rejected.reason ?? ""), /di luar rentang/);
+
     const result = observationModel.normalizeObservation({
         source: "usgs", type: "earthquake",
         location: { lat: -6.6, lon: 106.8 },
-        observedAt: NOW - 5000, confidence: 7, // clamp ke 1
+        observedAt: NOW - 5000, confidence: 0.84,
         attributes: { mag: 4.2 },
         attribution: "USGS"
     }, { nowMs: NOW });
     assert.equal(result.ok, true);
     const obs = result.observation;
-    assert.equal(obs.confidence, 1);
+    assert.equal(obs.confidence, 0.84);
     assert.equal(obs.accessClass, "PUBLIC");
     assert.equal(obs.receivedAt, NOW);
     assert.equal(Object.isFrozen(obs), true);
