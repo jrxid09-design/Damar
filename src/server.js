@@ -135,10 +135,16 @@ function bootSubsystems() {
 
     // Mata Dewa: kecerdasan spasial tertanam (headless core). Boot gagal-
     // anggun — kegagalan provider menurunkan status, bukan menjatuhkan Damar.
+    // Provider berkunci (PLUS/PRO) terdaftar tapi jujur "credentials_absent"
+    // sampai pemilik memasangnya via vault (data/mataDewa/credentials.json,
+    // di-ignore — tidak pernah di-commit).
     try {
         const mataDewa = require("./mataDewa");
-        const service = mataDewa.getService();
+        const service = mataDewa.getService({
+            credentialsFilePath: require("path").join(process.cwd(), "data", "mataDewa", "credentials.json")
+        });
         require("./mataDewa/providers").registerKeylessProviders(service);
+        service.registerKeyedProviders();
         service.start().catch(error => {
             telemetry.warn(`Mata Dewa gagal disiapkan: ${error.message}`);
         });

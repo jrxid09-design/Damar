@@ -108,6 +108,42 @@ class MataDewaController {
         }
         catch (error) { next(error); }
     }
+
+    // ---- Kredensial provider (vault kanonik; nilai TIDAK pernah kembali) --
+
+    credentials(req, res, next) {
+        try {
+            const store = service().credentialStore;
+            return response.success(res, "Kredensial Mata Dewa", {
+                configuredProviders: store.listProviderIds(),
+                availabilityMode: store.availabilityMode(service().registry.listProviders())
+            });
+        }
+        catch (error) { next(error); }
+    }
+
+    /** Pasang kredensial provider ke vault. Nilai tidak pernah dikembalikan. */
+    setCredential(req, res, next) {
+        try {
+            const { providerId, value } = req.body ?? {};
+            const store = service().credentialStore;
+            const result = store.setCredential(providerId, value);
+            if (!result.ok) return response.error(res, result.reason, 400);
+            return response.success(res, "Kredensial tersimpan di vault (SecretRef saja)", {
+                providerId, configured: true
+            });
+        }
+        catch (error) { next(error); }
+    }
+
+    removeCredential(req, res, next) {
+        try {
+            const result = service().credentialStore.removeCredential(req.params.providerId);
+            if (!result.ok) return response.error(res, result.reason, 404);
+            return response.success(res, "Kredensial dihapus", { providerId: req.params.providerId });
+        }
+        catch (error) { next(error); }
+    }
 }
 
 module.exports = new MataDewaController();

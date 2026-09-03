@@ -405,8 +405,11 @@ router.get("/matadewa/providers", mataDewaController.providers);
 router.post("/matadewa/ask", mataDewaController.ask);
 router.get("/matadewa/near", mataDewaController.near);
 router.get("/matadewa/surface", mataDewaController.surface);
-router.post("/matadewa/mode/activate", mataDewaManagerOnly);
-router.post("/matadewa/mode/deactivate", mataDewaManagerOnly);
+router.post("/matadewa/mode/activate", mataDewaManagerOnly, mataDewaController.activate);
+router.post("/matadewa/mode/deactivate", mataDewaManagerOnly, mataDewaController.deactivate);
+router.get("/matadewa/credentials", mataDewaController.credentials);
+router.post("/matadewa/credentials/:providerId", mataDewaManagerOnly, mataDewaController.setCredential);
+router.delete("/matadewa/credentials/:providerId", mataDewaManagerOnly, mataDewaController.removeCredential);
 
 // ---- Cuaca & profil (dashboard) --------------------------------
 
