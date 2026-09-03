@@ -50,3 +50,23 @@ DamarSelf/evolution/experiments/*
 # Arsip AetherSelf pra-rename (isinya sudah diadopsi ke DamarSelf).
 AetherSelf/
 *.acc-scratch/
+
+# --- MATA DEWA — DATA PRIBADI SPASIAL: LOKAL SAJA, JANGAN PERNAH COMMIT ---
+# Peta menara PLN UPT Bogor milik pengguna (My Maps) dan seluruh hasil
+# ekstraksinya — koordinat, nama menara, metadata situs, layer, deskripsi —
+# adalah DATA PRIBADI PENGGUNA. Tidak boleh masuk git / source / tests /
+# fixtures / docs / contoh / screenshot / log / artefak rilis. Hanya impor
+# generik lokal yang didukung; repo memakai fixture SINTETIS.
+private-data/
+local-data/private/
+*.private.kml
+*.private.kmz
+*.private.csv
+*.private.geojson
+*.private.json
+# Cache disk provider Mata Dewa (boleh berisi hasil query lokasi nyata).
+.mata-dewa-cache/
+# Vault lokal (jangan pernah commit rahasia provider).
+.mata-dewa-vault/
+# State runtime Mata Dewa (watch policy, aset hasil impor privat).
+data/mataDewa/
