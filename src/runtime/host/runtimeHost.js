@@ -64,13 +64,24 @@ async function createRuntimeHost({
     conversationHandler = null,
     clock = defaultClock(),
     busBounds = undefined,
-    localTransportId = LOCAL_TRANSPORT_ID
+    localTransportId = LOCAL_TRANSPORT_ID,
+    // DSC-R5-001: OPTIONAL composition-only capture hook.  This is NOT a
+    // public option for ordinary host consumers — it is the private channel
+    // through which the TRUSTED Voice composition captures the canonical
+    // voice-continuity activation closure AT CONSTRUCTION TIME.  The
+    // activation closure is invoked with (activate) ONCE here and is NEVER
+    // attached to the returned host facade, host.core, or host.channels.
+    // Ordinary callers omit it; an ordinary host holder can never obtain it.
+    voiceActivation = null
 } = {}) {
     if (typeof coreFactory !== "function") {
         throw new TypeError("HOST_CORE_FACTORY_INVALID");
     }
     if (conversationHandler !== null && typeof conversationHandler !== "function") {
         throw new TypeError("HOST_CONVERSATION_HANDLER_INVALID");
+    }
+    if (voiceActivation !== null && typeof voiceActivation !== "function") {
+        throw new TypeError("HOST_VOICE_ACTIVATION_INVALID");
     }
 
     const phaseMachine = new HostPhaseMachine();
@@ -351,35 +362,33 @@ async function createRuntimeHost({
     }
 
     /**
-     * DSC-R4-001/003 PRIVATE CANONICAL TRANSPORT BINDER.
+     * DSC-R4-001/003 + DSC-R5-001 PRIVATE CANONICAL VOICE ACTIVATION.
      *
-     * This is the ONLY way a transport's runtime-owner peer is bound for
-     * continuity.  It is NOT part of the ordinary returned host facade — it
-     * is a private composition closure, reachable ONLY by the canonical
-     * transport adapter that the RuntimeHost composition itself drives
-     * (today: the VoiceRuntime canonical adapter at start()).
+     * This module-private closure is the ONLY way the canonical voice
+     * continuity identity (voice-runtime-owner) is activated.  It is:
      *
-     * The handle is minted by the TRUSTED COMPOSITION's OWN per-channel
-     * scope (the same private scope that recognizes it), through the
-     * composition's no-argument `bindCanonicalTransportPeer` seam.  This host
-     * method supplies NOTHING but a channel name — no peer value, no handle,
-     * no identity string.  Consequently:
+     *   - ZERO-ARGUMENT and VOICE-ONLY: it activates exactly one fixed
+     *     runtime-owned identity; the caller supplies no channel, no peer
+     *     value, no handle, and no identity string;
+     *   - NEVER attached to the returned host facade, host.core, or
+     *     host.channels — it is delivered ONLY to the trusted Voice
+     *     composition through the construction-time `voiceActivation`
+     *     capture hook;
+     *   - backed by the TRUSTED COMPOSITION's OWN per-channel scope (the
+     *     same private scope that mints and recognizes the handle).
      *
-     *   - an ordinary module can never mint or select the continuity peer;
-     *   - a foreign/test scope's handle is never involved (the composition
-     *     mints and recognizes through ONE per-runtime scope);
-     *   - a raw event / channel payload / model output can never reach this.
-     *
-     * Fail-closed: an UNSUPPORTED channel (telegram/whatsapp/console per the
-     * honest matrix) mints nothing and binds nothing.
+     * Consequently an ordinary RuntimeHost holder can NEVER activate voice
+     * continuity itself, and a raw event / channel payload / model output
+     * can never reach this closure.  VOICE STARTUP MAY ACTIVATE VOICE
+     * CONTINUITY; ORDINARY RUNTIMEHOST HOLDER MAY NOT.
      */
-    function bindCanonicalTransportPeer(channel) {
+    function activateCanonicalVoiceContinuity() {
         const composition = continuityLifecycleHandles ? continuityLifecycleHandles.composition : null;
         if (!composition || typeof composition.bindCanonicalTransportPeer !== "function") {
             return { ok: false, code: "TRANSPORT_PEER_SEAM_UNAVAILABLE" };
         }
         try {
-            const result = composition.bindCanonicalTransportPeer(channel);
+            const result = composition.bindCanonicalTransportPeer("voice");
             return { ok: true, ...result };
         } catch (error) {
             return { ok: false, code: error?.code ?? "TRANSPORT_PEER_BIND_FAILED" };
@@ -608,12 +617,12 @@ async function createRuntimeHost({
         getTransportAdaptersSnapshot,
         submitLocal,
         channels: core.channels,
-        // DSC-R4-003: the ordinary host facade exposes NO continuity trust
-        // administration.  The ONLY continuity-related member retained here
-        // is the safe, read-only per-transport support diagnostic.  Binding
-        // the canonical transport peer happens exclusively through the
-        // PRIVATE composition seam (_continuityComposition, below), which the
-        // canonical VoiceRuntime adapter drives — never an ordinary caller.
+        // DSC-R4-003 + DSC-R5-001: the ordinary host facade exposes NO
+        // continuity trust administration and NO continuity activation seam.
+        // The ONLY continuity-related member retained here is the safe,
+        // read-only per-transport support diagnostic.  There is deliberately
+        // NO `_continuityComposition` (or any renamed equivalent) on this
+        // object: HOST POSSESSION != CONTINUITY ADMINISTRATION.
         transportContinuitySupport,
 
         health,
@@ -626,22 +635,18 @@ async function createRuntimeHost({
         recoverNow,
 
         // Referensi kanonik (read-only untuk pemeriksaan/pengujian):
-        core,
-
-        // DSC-R4-001/003 PRIVATE CANONICAL TRANSPORT COMPOSITION SEAM.
-        // Deliberately separated from the ordinary interaction/presence/
-        // lifecycle facade above (underscore-prefixed, frozen).  This is NOT
-        // a public admin API: it is the private adapter seam through which
-        // the canonical VoiceRuntime binds its runtime-owner continuity peer
-        // at start().  It accepts no handle, no peer value, and no identity
-        // string — only a channel name — and mints the peer internally from
-        // the runtime-owned canonical mint.  An ordinary holder of `host`
-        // cannot use it to choose an arbitrary continuity peer, and no raw
-        // event / channel payload / model output can reach it.
-        _continuityComposition: Object.freeze({
-            bindCanonicalTransportPeer
-        })
+        core
     });
+
+    // DSC-R5-001: deliver the canonical voice-continuity ACTIVATION closure
+    // to the TRUSTED Voice composition ONLY, through the composition-time
+    // capture hook — NEVER through the returned host facade.  The closure is
+    // a module-private function; it is not reachable from host, host.core,
+    // host.channels, any Symbol, any resolver, or any payload.  Only the
+    // composition that explicitly opted in at construction receives it.
+    if (voiceActivation !== null) {
+        voiceActivation(activateCanonicalVoiceContinuity);
+    }
 
     return host;
 }

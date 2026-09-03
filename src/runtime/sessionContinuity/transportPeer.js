@@ -24,14 +24,15 @@
  *     two different identities unless explicitly linked;
  *   - non-authoritative: it confers zero privilege.
  *
- * DSC-R4-001 PROVENANCE MODEL (load-bearing):
+ * DSC-R4-001 + DSC-R5-003 PROVENANCE MODEL (load-bearing):
  *
- *   createTransportPeerScope is NOT part of the ordinary public module API.
- *   The ONLY minting path is the private `mintCanonicalTransportPeerHandle`
- *   seam below, which the RuntimeHost composition drives for a channel whose
- *   honest verdict is SUPPORTED.  That seam creates ONE fresh scope per
- *   mint; the handle carries NO caller-supplied identity — the peer value is
- *   a fixed RUNTIME-OWNED constant, never a raw event field.
+ *   There is NO public scope factory and NO public trust mint.  The ONLY
+ *   minting path is the canonical `mintCanonicalTransportPeerHandle` in the
+ *   SEPARATE internal module `transportPeerInternal.js` (not re-exported by
+ *   the package index), which the RuntimeHost composition drives for a
+ *   channel whose honest verdict is SUPPORTED.  That mint creates ONE fresh
+ *   scope per call; the handle carries NO caller-supplied identity — the
+ *   peer value is a fixed RUNTIME-OWNED constant, never a raw event field.
  *
  *   Because provenance is per-scope (a scope accepts ONLY handles it minted
  *   itself), and because ordinary callers can neither obtain the canonical
@@ -127,97 +128,6 @@ function canonicalRuntimePeerValue(channel) {
   return `${channel}-runtime-owner`;
 }
 
-/**
- * PRIVATE TRUSTED MINT (DSC-R4-001).
- *
- * Creates a FRESH per-runtime scope for `channel` and mints the canonical
- * runtime-owner TransportPeerHandle from it.  Returns BOTH the scope (the
- * only object that will ever recognize this handle) and the handle, so the
- * RuntimeHost composition can keep them bound together in private closure
- * state.
- *
- * This function is NOT exported from the module.  It is reachable ONLY by the
- * canonical RuntimeHost transport composition.  An ordinary module can never
- * call it, can never obtain the returned scope, and therefore can never mint
- * a handle the canonical composition accepts.
- *
- * Fail-closed: an UNSUPPORTED channel throws; the caller cannot mint a peer
- * for a channel the honest matrix does not support.
- */
-function mintCanonicalTransportPeerHandle(channel) {
-  if (typeof channel !== "string" || !CHANNEL_NAME_RE.test(channel)) {
-    throw Object.assign(new TypeError("TRANSPORT_PEER_CHANNEL_INVALID"), { code: "TRANSPORT_PEER_CHANNEL_INVALID" });
-  }
-  const verdict = TRANSPORT_CONTINUITY_SUPPORT[channel];
-  if (!verdict || verdict.supported !== true) {
-    throw Object.assign(new Error("TRANSPORT_PEER_UNSUPPORTED"), { code: "TRANSPORT_PEER_UNSUPPORTED" });
-  }
-  const brand = new WeakSet(); // SCOPE-PRIVATE provenance brand (DSC-R4-001)
-  const peerValue = canonicalRuntimePeerValue(channel);
-  if (!peerValueIsValid(peerValue)) {
-    throw Object.assign(new Error("TRANSPORT_PEER_INVALID"), { code: "TRANSPORT_PEER_INVALID" });
-  }
-  const handle = Object.freeze({
-    kind: "TransportPeerHandle",
-    channel,
-    peer: peerValue,
-    scope: verdict.scope
-  });
-  brand.add(handle);
-  const scope = Object.freeze({
-    channel,
-    supported: true,
-    scope: verdict.scope,
-    /** This scope recognizes ONLY handles it minted itself. */
-    isHandle(value) {
-      return value !== null && typeof value === "object" && brand.has(value);
-    }
-  });
-  return Object.freeze({ scope, handle });
-}
-
-/**
- * ISOLATED COMPONENT-TEST FACTORY (DSC-R4-001).  NOT a production mint.
- *
- * Creates a standalone per-scope TransportPeerScope for isolated unit tests
- * of the continuity DOMAIN (provenance/link/conflict semantics).  The scope
- * mints handles branded by its OWN private WeakSet — per-scope provenance,
- * identical to the canonical mint.  Because provenance is per-scope, a
- * handle minted here is NEVER recognized by the canonical RuntimeHost
- * composition's scopes (a different scope object, a different brand), so
- * exposing this factory cannot weaken the production trust boundary.
- *
- * The canonical RuntimeHost composition does NOT use this factory; it uses
- * the private `mintCanonicalTransportPeerHandle` seam.
- */
-function createTestTransportPeerScope({ channel, scope: scopeName = "TEST" } = {}) {
-  if (typeof channel !== "string" || !CHANNEL_NAME_RE.test(channel)) {
-    throw Object.assign(new TypeError("TRANSPORT_PEER_SCOPE_CHANNEL_INVALID"), { code: "TRANSPORT_PEER_SCOPE_CHANNEL_INVALID" });
-  }
-  const brand = new WeakSet(); // SCOPE-PRIVATE provenance brand
-  return Object.freeze({
-    channel,
-    scope: scopeName,
-    mint(peerValue) {
-      if (!peerValueIsValid(peerValue)) {
-        throw Object.assign(new Error("TRANSPORT_PEER_INVALID"), { code: "TRANSPORT_PEER_INVALID" });
-      }
-      const handle = Object.freeze({
-        kind: "TransportPeerHandle",
-        channel,
-        peer: peerValue,
-        scope: scopeName
-      });
-      brand.add(handle);
-      return handle;
-    },
-    /** This scope recognizes ONLY handles it minted itself. */
-    isHandle(value) {
-      return value !== null && typeof value === "object" && brand.has(value);
-    }
-  });
-}
-
 /** Honest fail-closed verdict lookup for a channel. */
 function transportContinuitySupport(channel) {
   if (typeof channel !== "string" || !CHANNEL_NAME_RE.test(channel)) {
@@ -229,14 +139,32 @@ function transportContinuitySupport(channel) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// DSC-R5-003 — EXPORT HYGIENE.
+//
+// The ORDINARY production export surface exposes ONLY the honest support
+// verdict vocabulary and the shared peer-value validator (used by the
+// canonical internal mint).  It deliberately exposes NO trust-mint and NO
+// scope-construction factory:
+//
+//   - the canonical trust mint lives in the SEPARATE internal module
+//     `transportPeerInternal.js`, which the package index does NOT re-export
+//     and which only the canonical RuntimeHost transport composition
+//     (manager/bootstrap.js) imports;
+//   - test-scope construction lives OUTSIDE the production tree
+//     (tests/helpers/testTransportPeer.js).
+//
+// Ordinary production callers depend only on the read-only verdicts below.
+// ---------------------------------------------------------------------------
 module.exports = Object.freeze({
-  // DSC-R4-001: the trusted mint is PRIVATE — it is exposed only to the
-  // canonical RuntimeHost composition through this internal binding.  It is
-  // NOT a general-purpose public scope factory.
-  mintCanonicalTransportPeerHandle,
-  // Isolated component-test factory (per-scope provenance; never accepted by
-  // the canonical composition).  See createTestTransportPeerScope above.
-  createTestTransportPeerScope,
   transportContinuitySupport,
-  TRANSPORT_CONTINUITY_SUPPORT
+  TRANSPORT_CONTINUITY_SUPPORT,
+  // Shared internal helpers consumed by transportPeerInternal.js (the
+  // canonical mint).  These are inert validators/constants — they confer no
+  // minting capability by themselves.
+  _internal: Object.freeze({
+    CHANNEL_NAME_RE,
+    peerValueIsValid,
+    canonicalRuntimePeerValue
+  })
 });

@@ -125,6 +125,10 @@ function resolveProductionContinuityStore() {
  *              physical-speaker identity).
  */
 function createTrustedTransportPeerScopes() {
+    // DSC-R5-003: the canonical trust mint is imported from the INTERNAL
+    // composition entry point (NOT the public transportPeer surface, which
+    // exposes only read-only verdicts).  This is the SOLE production caller.
+    const { mintCanonicalTransportPeerHandle } = require("../runtime/sessionContinuity/transportPeerInternal");
     const transportPeer = require("../runtime/sessionContinuity/transportPeer");
     // channel -> { scope, handle } minted ONCE by the private canonical mint.
     // The SAME scope object both mints and recognizes the handle, so
@@ -134,7 +138,7 @@ function createTrustedTransportPeerScopes() {
         if (!canonical.has(channel)) {
             const verdict = transportPeer.transportContinuitySupport(channel);
             if (!verdict || verdict.supported !== true) return null;
-            canonical.set(channel, transportPeer.mintCanonicalTransportPeerHandle(channel));
+            canonical.set(channel, mintCanonicalTransportPeerHandle(channel));
         }
         return canonical.get(channel);
     };
