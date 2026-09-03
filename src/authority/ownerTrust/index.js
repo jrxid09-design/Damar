@@ -25,6 +25,7 @@ const {
 } = require("./bootstrap");
 const { createPrincipalBindings, normalizePeer, TRANSPORTS } = require("./bindings");
 const { createChannelBinders } = require("./binders");
+const { createContinuityLinker, parseSessionKey, LINKABLE_CHANNELS } = require("./continuity");
 
 module.exports = Object.freeze({
     ...types,
@@ -36,6 +37,9 @@ module.exports = Object.freeze({
     createFirstOwnerBootstrap,
     createPrincipalBindings,
     createChannelBinders,
+    createContinuityLinker,
+    parseSessionKey,
+    LINKABLE_CHANNELS,
     normalizePeer,
     TRANSPORTS,
     BOOTSTRAP_PURPOSE,
