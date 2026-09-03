@@ -133,6 +133,20 @@ function bootSubsystems() {
         telemetry.warn(`Telegram gagal disiapkan: ${error.message}`);
     }
 
+    // Mata Dewa: kecerdasan spasial tertanam (headless core). Boot gagal-
+    // anggun — kegagalan provider menurunkan status, bukan menjatuhkan Damar.
+    try {
+        const mataDewa = require("./mataDewa");
+        const service = mataDewa.getService();
+        require("./mataDewa/providers").registerKeylessProviders(service);
+        service.start().catch(error => {
+            telemetry.warn(`Mata Dewa gagal disiapkan: ${error.message}`);
+        });
+    }
+    catch (error) {
+        telemetry.warn(`Mata Dewa gagal disiapkan: ${error.message}`);
+    }
+
     // Lapisan proaktif: brief harian terjadwal (aktif bila diset di Settings).
     automation.start();
 
@@ -358,6 +372,10 @@ const shutdown = (signal) => {
     try { require("./services/homeService").stopWatcher(); } catch { /* abaikan */ }
     try { require("./services/mqttService").disconnect(); } catch { /* abaikan */ }
     try { require("./consciousness").stop(); } catch { /* abaikan */ }
+    try {
+        const mataDewa = require("./mataDewa");
+        if (mataDewa.getService()) mataDewa.getService().shutdown();
+    } catch { /* abaikan */ }
 
     if (server) {
         server.close(() => process.exit(0));
