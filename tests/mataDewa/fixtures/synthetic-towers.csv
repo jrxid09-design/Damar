@@ -1,0 +1,6 @@
+id,type,name,lat,lon,region
+SYN-T-001,tower,Tower Alpha (synthetic),-6.5900,106.8000,watch-region-a
+SYN-T-002,tower,Tower Bravo (synthetic),-6.6150,106.8250,watch-region-a
+SYN-T-003,tower,Tower Charlie (synthetic),-6.6400,106.7900,watch-region-b
+SYN-T-004,bts,BTS Delta (synthetic),-6.6650,106.8300,watch-region-b
+SYN-T-005,substation,Substation Echo (synthetic),-6.6800,106.8600,watch-region-b
