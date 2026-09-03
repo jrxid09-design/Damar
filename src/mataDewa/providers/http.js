@@ -35,6 +35,12 @@ async function assertPublicHost(url) {
     catch {
         throw new Error("url tidak valid");
     }
+    // IPv6 literal datang berkurung ([::1]) — lepas kurung sebelum cek.
+    if (hostname.startsWith("[") && hostname.endsWith("]")) {
+        const ip = hostname.slice(1, -1);
+        if (net.isIP(ip) && isPrivateIp(ip)) throw new Error("host privat/loopback ditolak");
+        throw new Error("host bukan publik yang diizinkan"); // literal IPv6 non-privat tetap tidak diizinkan
+    }
     if (net.isIP(hostname)) {
         if (isPrivateIp(hostname)) throw new Error("host privat/loopback ditolak");
         return hostname;

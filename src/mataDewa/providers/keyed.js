@@ -199,18 +199,17 @@ async function mintOpenSkyToken(credential) {
     if (!credential?.client_id || !credential?.client_secret) {
         throw new Error("OpenSky client_id/client_secret tidak lengkap");
     }
+    const { fetchPostJson } = require("./http");
     const body = new URLSearchParams({
         grant_type: "client_credentials",
         client_id: credential.client_id,
         client_secret: credential.client_secret
     });
-    const data = await fetchJson("https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token", {
-        timeoutMs: 10000
-    }).catch(async () => {
-        // POST form diperlukan untuk token endpoint.
-        const { fetchPostJson } = require("./http");
-        return fetchPostJson("https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token", body.toString(), { timeoutMs: 10000 });
-    });
+    const data = await fetchPostJson(
+        "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token",
+        body.toString(),
+        { timeoutMs: 10000 }
+    );
     if (!data?.access_token) throw new Error("OpenSky token gagal di-mint");
     return data.access_token;
 }

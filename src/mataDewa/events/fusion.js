@@ -132,7 +132,7 @@ function fuseObservations(observations, opts = {}) {
                     visited.add(j);
                 }
             }
-            if (cluster.length >= (opts.minClusterSize ?? 1)) {
+            if (cluster.length >= (opts.minClusterSize ?? 2)) {
                 const fused = fuseCluster(cluster, { type: group[i].type, ...opts });
                 if (fused.ok) events.push(fused.event);
                 else unclustered.push(...cluster);
