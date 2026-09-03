@@ -1,0 +1,8 @@
+{
+  "id": "mataDewa",
+  "name": "Mata Dewa",
+  "version": "1.0.0",
+  "description": "Kecerdasan spasial Damar: query bahaya, riwayat spasial, aset, provider (read-only; aksi governed lewat Action Fabric)",
+  "entry": "index.js",
+  "enabled": true
+}
