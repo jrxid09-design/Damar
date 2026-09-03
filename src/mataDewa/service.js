@@ -90,6 +90,25 @@ class MataDewaService {
             clock: this.clock,
             deliver: options.alertDeliver ?? null
         });
+
+        // Kredensial provider — SATU jahitan ke Secret Vault kanonik Damar.
+        // Tidak ada store kedua; konfigurasi hanya menyimpan SecretRef.
+        const { MataDewaCredentialStore } = require("./credentials");
+        this.credentialStore = options.credentialStore ??
+            new MataDewaCredentialStore({
+                vault: options.vault ?? null,
+                filePath: options.credentialsFilePath ?? null
+            });
+        // Registry memakai resolver vault (fail-closed tanpa kredensial).
+        if (options.credentialResolver) {
+            this.registry.credentialResolver = options.credentialResolver;
+        } else {
+            this.registry.credentialResolver = this.credentialStore.resolveCredential;
+        }
+
+        // Kamera publik/berotorisasi (fail-closed; MediaIngress di sisi Damar).
+        const { CameraRegistry } = require("./media/cctv");
+        this.cameraRegistry = options.cameraRegistry ?? new CameraRegistry();
     }
 
     /** Daftarkan provider (keyless/berkunci). Aman dipanggil sebelum start. */
@@ -158,6 +177,16 @@ class MataDewaService {
             : hasPlus ? MATA_DEWA_MODE.PLUS
             : MATA_DEWA_MODE.ZERO;
         return this.mode;
+    }
+
+    /**
+     * Daftarkan provider opsional berkunci (PLUS/PRO). Mereka melapor
+     * UNAVAILABLE "credentials_absent" secara jujur sampai kredensial
+     * terpasang via vault — core tetap hidup keyless.
+     */
+    registerKeyedProviders() {
+        const { registerKeyedProviders } = require("./providers/keyed");
+        return registerKeyedProviders(this);
     }
 
     /**
