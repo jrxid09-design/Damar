@@ -112,4 +112,56 @@ async function fetchJson(url, opts = {}) {
     }
 }
 
-module.exports = { fetchText, fetchJson, assertPublicHost, isPrivateIp, USER_AGENT };
+/**
+ * POST urlencoded/JSON dengan guardrails yang sama. Mengembalikan body teks.
+ * @param {string} url
+ * @param {string|object} body  string (urlencoded) atau objek (di-JSON-kan)
+ * @param {{ timeoutMs?: number, maxBytes?: number, form?: boolean }} opts
+ */
+async function fetchPost(url, body, opts = {}) {
+    const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
+    if (opts.skipSsrfCheck !== true) {
+        await assertPublicHost(url);
+    }
+    const isForm = opts.form !== false && typeof body === "string";
+    const payload = typeof body === "string" ? body : JSON.stringify(body);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await fetch(url, {
+            method: "POST",
+            signal: controller.signal,
+            headers: {
+                "User-Agent": USER_AGENT,
+                "Content-Type": isForm ? "application/x-www-form-urlencoded" : "application/json",
+                Accept: "application/json"
+            },
+            body: payload,
+            redirect: "follow"
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const text = await response.text();
+        if (text.length > maxBytes) throw new Error("respons melebihi batas ukuran");
+        return text;
+    }
+    catch (error) {
+        if (error.name === "AbortError") throw new Error(`timeout setelah ${timeoutMs}ms`);
+        throw error;
+    }
+    finally {
+        clearTimeout(timer);
+    }
+}
+
+async function fetchPostJson(url, body, opts = {}) {
+    const text = await fetchPost(url, body, opts);
+    try {
+        return JSON.parse(text);
+    }
+    catch {
+        throw new Error("respons malformed (bukan JSON)");
+    }
+}
+
+module.exports = { fetchText, fetchJson, fetchPost, fetchPostJson, assertPublicHost, isPrivateIp, USER_AGENT };
