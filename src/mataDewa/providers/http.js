@@ -100,6 +100,45 @@ async function fetchJson(url, opts = {}) {
 }
 
 /**
+ * GET bytes BINARY-SAFE ke provider publik — batas kanonik yang SAMA.
+ * MD-004: frame kamera adalah biner; tidak boleh melewati konversi
+ * string UTF-8 (korupsi byte). Mengembalikan Buffer mentah.
+ * @param {string} url
+ * @param {{ timeoutMs?, maxBytes?, stallTimeoutMs?, headers?,
+ *           expectedContentType?: "image"|"json"|"text"|null,
+ *           allowedHosts?: string[] }} opts
+ * @returns {Promise<Buffer>}
+ */
+async function fetchBuffer(url, opts = {}) {
+    const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
+    try {
+        if (opts.allowedHosts) {
+            const originHost = new URL(url).hostname.toLowerCase().replace(/\.$/, "");
+            const allow = makeHostAllowlist(opts.allowedHosts);
+            if (!allow(originHost)) {
+                throw new Error(`host di luar allowlist penyedia ditolak: ${originHost}`);
+            }
+        }
+        const result = await ssrfGuard.guardedFetch(url, {
+            policy: "public",
+            timeoutMs,
+            maxBytes,
+            stallTimeoutMs: opts.stallTimeoutMs ?? DEFAULT_STALL_MS,
+            headers: baseHeaders(opts.headers),
+            expectedContentType: opts.expectedContentType === undefined
+                ? null : opts.expectedContentType,
+            allowRedirectHost: opts.allowedHosts
+                ? makeHostAllowlist(opts.allowedHosts) : null
+        });
+        return result.buffer;
+    }
+    catch (error) {
+        throw new Error(simplifyNetworkError(error));
+    }
+}
+
+/**
  * POST urlencoded/JSON dengan batas kanonik yang SAMA. Mengembalikan teks.
  * @param {string} url
  * @param {string|object} body  string (urlencoded) atau objek (di-JSON-kan)
@@ -171,7 +210,7 @@ function simplifyNetworkError(error) {
 }
 
 module.exports = {
-    fetchText, fetchJson, fetchPost, fetchPostJson,
+    fetchText, fetchJson, fetchPost, fetchPostJson, fetchBuffer,
     authorizedLocalFetch,
     // Ekspos terbatas untuk pengujian/diagnostik — BUKAN pengganti guard.
     isPrivateIp: ssrfGuard.isPrivateAddress,

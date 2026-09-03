@@ -133,17 +133,24 @@ test("LOCATION: tanpa izin → degrade jujur; FOLLOW ME butuh otorisasi", async 
     assert.equal(loc.followMe, false);
 });
 
-test("CCTV: hanya publik/berotorisasi; RESTRICTED fail-closed", () => {
+test("CCTV: hanya publik; otorisasi pemilik fail-closed pra-Lane4 (MD-004)", () => {
     const cams = new CameraRegistry();
-    cams.registerPublicCamera({ id: "pub1", label: "Public", location: { lat: -6.6, lon: 106.8 }, snapshotUrl: "http://example.invalid/snap.jpg" });
-    cams.registerAuthorizedCamera({ id: "auth1", label: "Mine", location: { lat: -6.6, lon: 106.8 }, snapshotUrl: "http://192.168.1.50/snap.jpg" });
+    cams.registerPublicCamera({ id: "pub1", label: "Public", location: { lat: -6.6, lon: 106.8 }, snapshotUrl: "https://example.invalid/snap.jpg" });
+    // MD-004: registrasi kamera "milik pemilik" oleh pemanggil arbitrer
+    // DITOLAK — tidak ada permukaan API yang memalsukan otorisasi.
+    const denied = cams.registerAuthorizedCamera({ id: "auth1", label: "Mine", location: { lat: -6.6, lon: 106.8 }, snapshotUrl: "http://192.168.1.50/snap.jpg" });
+    assert.equal(denied.ok, false);
+    assert.equal(denied.code, "OWNER_TRUST_NOT_INTEGRATED");
+    assert.equal(cams.get("cctv_auth1"), null);
     assert.equal(cams.canFetch("cctv_pub1").ok, true);
-    assert.equal(cams.canFetch("cctv_auth1").ok, true);
     assert.equal(cams.canFetch("cctv_unknown").ok, false);
-    // Descriptor media mengarah ke MediaIngress Damar, bukan router kedua.
+    // Descriptor media mengarah ke MediaIngress Damar, bukan router kedua;
+    // INERT — tidak membawa URL mentah (bukan fetch token).
     const descriptor = frameMediaDescriptor(cams.get("cctv_pub1"));
     assert.equal(descriptor.instruction, "ingest_via_media_ingress");
     assert.equal(descriptor.sourceChannel, "camera");
+    assert.equal(descriptor.snapshotUrl, undefined);
+    assert.equal(descriptor.mediaRef, "mataDewa.cctv:cctv_pub1");
 });
 
 test("AUTHORITY: governed action menolak dieksekusi langsung (fail-closed)", async () => {
