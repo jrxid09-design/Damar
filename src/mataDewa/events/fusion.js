@@ -9,6 +9,7 @@
 
 const { isValidPoint, haversineMeters, destinationPoint, bearingDegrees, isFiniteNumber } = require("../spatial/geo");
 const { EPISTEMIC_STATUS } = require("../spatial/epistemic");
+const { independentGroupCount, independenceGroupOf } = require("../spatial/lineage");
 const { createEvent, SEVERITY } = require("./event");
 
 /**
@@ -28,6 +29,17 @@ function areCompatible(a, b, {
     const timeGap = Math.abs((a.observedAt ?? 0) - (b.observedAt ?? 0));
     if (timeGap > maxTimeGapMs) return false;
     return true;
+}
+
+/**
+ * Apakah kandidat kompatibel dengan KLUSTER SEBAGAI KESELURUHAN?
+ * MD-006 anti-bridge: kandidat harus kompatibel dengan SETIAP anggota
+ * (dan tidak melebarkan envelope ruang/waktu kluster melebihi ambang),
+ * bukan cukup dekat ke SATU anggota. A-B-C chaining (A dekat B, B dekat C,
+ * A tidak kompatibel C) tidak lagi memaksa satu event.
+ */
+function isCompatibleWithCluster(candidate, cluster, opts) {
+    return cluster.every(member => areCompatible(member, candidate, opts));
 }
 
 /**
@@ -73,12 +85,15 @@ function fuseCluster(observations, {
         }, 0);
     }
 
-    const sources = independentSourceCount(observations);
-    // Confidence: rata-rata confidence observasi, dinaikkan oleh independensi
-    // sumber (dibatasi ≤ 0.99), diturunkan bila sumber tunggal.
+    // MD-006: kemandirian dari lineage (independenceGroup), bukan dari
+    // perbedaan string sumber — cermin upstream yang sama dihitung SATU.
+    const groups = independentGroupCount(observations);
+    // Confidence: rata-rata confidence observasi, dinaikkan oleh grup
+    // kemandirian yang BENAR-BENAR berbeda (dibatasi ≤ 0.99), diturunkan
+    // bila grup tunggal.
     const meanConfidence = observations.reduce((s, o) => s + (o.confidence ?? 0.5), 0) / observations.length;
-    const independenceBonus = Math.min(0.2, (sources - 1) * 0.1);
-    const confidence = Math.min(0.99, meanConfidence * (sources > 1 ? 1 : 0.85) + independenceBonus);
+    const independenceBonus = Math.min(0.2, (groups - 1) * 0.1);
+    const confidence = Math.min(0.99, meanConfidence * (groups > 1 ? 1 : 0.85) + independenceBonus);
 
     const eventType = type ?? observations[0].type ?? "generic";
 
@@ -97,8 +112,19 @@ function fuseCluster(observations, {
             source: o.source,
             type: o.type,
             observedAt: o.observedAt,
-            attribution: o.attribution ?? null
+            attribution: o.attribution ?? null,
+            // Keturunan bukti: grup kemandirian per observasi — audit
+            // bisa melihat berapa sumber INDEPENDEN yang benar-benar
+            // mendukung event ini.
+            independenceGroup: independenceGroupOf(o)
         })),
+        lineage: {
+            kind: "derived",
+            providerId: `fusion:${eventType}`,
+            providerFamily: "mata-dewa-fusion",
+            independenceGroup: [...new Set(observations.map(independenceGroupOf))].sort().join("+"),
+            upstreamDataset: null
+        },
         createdAt: nowMs
     });
 }
@@ -127,7 +153,9 @@ function fuseObservations(observations, opts = {}) {
             visited.add(i);
             for (let j = i + 1; j < group.length; j++) {
                 if (visited.has(j)) continue;
-                if (cluster.some(member => areCompatible(member, group[j], opts))) {
+                // MD-006 anti-bridge: kompatibel dengan KLUSTER SEBAGAI
+                // KESELURUHAN, bukan hanya satu anggota.
+                if (isCompatibleWithCluster(group[j], cluster, opts)) {
                     cluster.push(group[j]);
                     visited.add(j);
                 }
