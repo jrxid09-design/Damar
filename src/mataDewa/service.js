@@ -1,0 +1,250 @@
+/**
+ * Mata Dewa Service — runtime spasial headless milik Damar.
+ *
+ * SATU lifecycle dengan Damar: dibuat saat Damar boot, berhenti saat Damar
+ * berhenti. Tidak ada langkah peluncuran pengguna, tidak ada port publik
+ * kedua, tidak ada aplikasi kedua. Inti headless tetap berjalan walau mode UI
+ * MATA_DEWA sedang tertutup (UI state ≠ core monitoring state).
+ *
+ * Lifecycle: start → ready / degraded → shutdown → status.
+ */
+
+const { ProviderRegistry, PROVIDER_STATE } = require("./registry/providerRegistry");
+const { MATA_DEWA_MODE, PROVIDER_ACCESS_MODE } = require("./config");
+const { GridIndex } = require("./spatial/gridIndex");
+const { isValidPoint, haversineMeters } = require("./spatial/geo");
+
+const SUBSYSTEM_STATE = Object.freeze({
+    NEW: "new",
+    STARTING: "starting",
+    READY: "ready",
+    DEGRADED: "degraded",
+    SHUTTING_DOWN: "shutting_down",
+    TERMINATED: "terminated"
+});
+
+/** Mode UI konseptual Damar. */
+const UI_MODE = Object.freeze({
+    NORMAL: "NORMAL",
+    MATA_DEWA: "MATA_DEWA",
+    SETTINGS: "SETTINGS",
+    CONSOLE: "CONSOLE"
+});
+
+/** Mode operasi konseptual Mata Dewa. */
+const OPERATING_MODE = Object.freeze({
+    ASK: "ASK",     // query spasial sesuai permintaan
+    WATCH: "WATCH", // pemantauan persisten terkontrol kebijakan
+    ALERT: "ALERT"  // notifikasi kejadian proaktif berbasis bukti
+});
+
+class MataDewaService {
+
+    /**
+     * @param {{
+     *   clock?: { nowMs(): number },
+     *   credentialResolver?: Function,
+     *   maxObservations?: number,
+     *   observationIndexCellM?: number
+     * }} options
+     */
+    constructor(options = {}) {
+        this.clock = options.clock ?? { nowMs: () => Date.now() };
+        this.state = SUBSYSTEM_STATE.NEW;
+        this.mode = MATA_DEWA_MODE.ZERO;
+        this.uiMode = UI_MODE.NORMAL;
+        this.operatingModes = new Set([OPERATING_MODE.ASK]); // ASK selalu tersedia
+        this.maxObservations = Number.isFinite(options.maxObservations)
+            ? options.maxObservations : 50000;
+
+        this.registry = new ProviderRegistry({
+            clock: this.clock,
+            credentialResolver: options.credentialResolver ?? null
+        });
+
+        // Indeks spasial observasi terkini (untuk watch/fusion; commit 5/6).
+        this.observationIndex = new GridIndex(options.observationIndexCellM ?? 25000);
+        /** @type {Map<string, object>} observasi terkini per id */
+        this.observations = new Map();
+
+        this.lastPollStatuses = [];
+        this.degradationReasons = [];
+        this._shutdownRequested = false;
+    }
+
+    /** Daftarkan provider (keyless/berkunci). Aman dipanggil sebelum start. */
+    registerProvider(descriptor) {
+        if (this.state === SUBSYSTEM_STATE.TERMINATED) {
+            throw new Error("Mata Dewa sudah berhenti — tidak dapat mendaftarkan provider");
+        }
+        return this.registry.registerProvider(descriptor);
+    }
+
+    /**
+     * Mulai Mata Dewa. Boot tidak pernah melempar karena provider gagal —
+     * kegagalan provider menurunkan status ke DEGRADED, bukan mematikan Damar.
+     */
+    async start() {
+        if (this.state === SUBSYSTEM_STATE.READY || this.state === SUBSYSTEM_STATE.DEGRADED) {
+            return this.status();
+        }
+        if (this.state === SUBSYSTEM_STATE.TERMINATED) {
+            throw new Error("Mata Dewa sudah terminated — buat instance baru");
+        }
+        this.state = SUBSYSTEM_STATE.STARTING;
+        this._shutdownRequested = false;
+        this.degradationReasons = [];
+
+        // Poll awal HANYA provider tanpa kredensial agar status boot jujur:
+        // keyless yang berhasil → READY; yang gagal → DEGRADED. Provider
+        // berkunci tidak dipaksa di boot (kredensial mungkin belum terpasang).
+        const keyless = [...this.registry.providers.values()]
+            .filter(p => !p.requiresCredential && typeof p.poll === "function");
+        await Promise.allSettled(keyless.map(p => this.registry.pollProvider(p.id, {})));
+
+        this._refreshMode();
+
+        // Boot berhasil bila SUBSISTEM hidup, walau semua provider absen.
+        const anyAvailable = this.registry.listProviders()
+            .some(p => p.availability === PROVIDER_STATE.AVAILABLE);
+        const anyRegistered = this.registry.size > 0;
+
+        if (!anyRegistered) {
+            this.state = SUBSYSTEM_STATE.READY; // inti tetap hidup tanpa provider
+        } else {
+            this.state = anyAvailable ? SUBSYSTEM_STATE.READY : SUBSYSTEM_STATE.DEGRADED;
+            if (!anyAvailable) {
+                this.degradationReasons.push("no_provider_available_at_boot");
+            }
+        }
+        return this.status();
+    }
+
+    _refreshMode() {
+        const described = this.registry.listProviders();
+        const hasPro = described.some(p => p.credentialTier === "PRO" && p.availability === PROVIDER_STATE.AVAILABLE);
+        const hasPlus = described.some(p => p.credentialTier === "PLUS" && p.availability === PROVIDER_STATE.AVAILABLE);
+        this.mode = hasPro ? MATA_DEWA_MODE.PRO
+            : hasPlus ? MATA_DEWA_MODE.PLUS
+            : MATA_DEWA_MODE.ZERO;
+        return this.mode;
+    }
+
+    /**
+     * Query spasial sesuai permintaan (mode ASK). Poll tipe yang diminta,
+     * simpan ke indeks terbatas, kembalikan observasi + status provider.
+     */
+    async ask({ types = [], bounds = null } = {}) {
+        this._assertOperational();
+        const { observations, statuses } = await this.registry.pollTypes(types, { bounds });
+        this._ingestObservations(observations);
+        this.lastPollStatuses = statuses;
+        this._refreshMode();
+        return { observations, providerStatuses: statuses, mode: this.mode };
+    }
+
+    _ingestObservations(observations) {
+        for (const obs of observations) {
+            this.observations.set(obs.id, obs);
+            if (obs.geometry?.type === "point") {
+                this.observationIndex.insert(obs.id, obs.geometry, obs.type);
+            }
+        }
+        // Cache terbatas: buang yang paling lama diterima bila melebihi batas.
+        if (this.observations.size > this.maxObservations) {
+            const sorted = [...this.observations.values()]
+                .sort((a, b) => a.receivedAt - b.receivedAt);
+            const excess = this.observations.size - this.maxObservations;
+            for (let i = 0; i < excess; i++) {
+                this.observations.delete(sorted[i].id);
+                this.observationIndex.remove(sorted[i].id);
+            }
+        }
+    }
+
+    /** Observasi terkini dalam radius dari sebuah titik (memakai indeks). */
+    observationsNear(point, radiusM) {
+        if (!isValidPoint(point) || !(radiusM >= 0)) return [];
+        return this.observationIndex.queryRadius(point, radiusM)
+            .map(hit => ({ observation: this.observations.get(hit.id), distanceM: hit.distanceM }))
+            .filter(x => x.observation);
+    }
+
+    /**
+     * Ubah mode UI konseptual. Ini HANYA mengubah state permukaan — inti
+     * headless (watch/alert) tidak bergantung padanya.
+     */
+    setUiMode(mode) {
+        if (!Object.values(UI_MODE).includes(mode)) {
+            return { ok: false, reason: `ui mode tidak dikenal: ${mode}` };
+        }
+        this.uiMode = mode;
+        return { ok: true, uiMode: this.uiMode };
+    }
+
+    activateMode() { return this.setUiMode(UI_MODE.MATA_DEWA); }
+    deactivateMode() { return this.setUiMode(UI_MODE.NORMAL); }
+
+    _assertOperational() {
+        if (this.state === SUBSYSTEM_STATE.TERMINATED || this.state === SUBSYSTEM_STATE.SHUTTING_DOWN) {
+            throw new Error("Mata Dewa sedang berhenti");
+        }
+    }
+
+    /** Status ringkas untuk UI/Manager/health. */
+    status() {
+        return {
+            state: this.state,
+            mode: this.mode,
+            uiMode: this.uiMode,
+            operatingModes: [...this.operatingModes],
+            providers: this.registry.listProviders(),
+            providerCount: this.registry.size,
+            observationCount: this.observations.size,
+            degradationReasons: this.degradationReasons.slice(),
+            lastPollStatuses: this.lastPollStatuses.slice()
+        };
+    }
+
+    health() {
+        return {
+            state: this.state,
+            healthy: this.state === SUBSYSTEM_STATE.READY || this.state === SUBSYSTEM_STATE.DEGRADED,
+            mode: this.mode,
+            degraded: this.state === SUBSYSTEM_STATE.DEGRADED
+        };
+    }
+
+    /**
+     * Berhenti bersama Damar. Idempoten; menghentikan mesin watch (commit 6)
+     * dan membersihkan indeks. Tidak pernah melempar saat shutdown.
+     */
+    async shutdown() {
+        if (this.state === SUBSYSTEM_STATE.TERMINATED) return { terminated: true };
+        if (this._shutdownRequested) return { terminated: false, already: true };
+        this._shutdownRequested = true;
+        this.state = SUBSYSTEM_STATE.SHUTTING_DOWN;
+        try {
+            if (this.watchEngine && typeof this.watchEngine.stop === "function") {
+                try { await this.watchEngine.stop(); } catch { /* watch opsional */ }
+            }
+            this.observationIndex.clear();
+            this.observations.clear();
+            this.state = SUBSYSTEM_STATE.TERMINATED;
+            return { terminated: true };
+        }
+        catch {
+            this.state = SUBSYSTEM_STATE.TERMINATED;
+            return { terminated: true };
+        }
+    }
+}
+
+module.exports = {
+    MataDewaService,
+    SUBSYSTEM_STATE,
+    UI_MODE,
+    OPERATING_MODE,
+    MATA_DEWA_MODE,
+    PROVIDER_ACCESS_MODE
+};

@@ -25,6 +25,7 @@ import { awareness } from "./views/awareness.js";
 import { logs } from "./views/logs.js";
 import { settings } from "./views/settings.js";
 import { family } from "./views/family.js";
+import { mataDewa } from "./views/mataDewa/view.js";
 
 // =====================================================================
 // Registry APLIKASI — semua navigasi lama hidup di App Launcher (1 tombol)
@@ -60,6 +61,8 @@ const APPS = [
       version: "1.2", caps: ["Konteks", "Sinyal"], perms: [], deps: ["Memori"] },
     { id: "space", label: "Ruang", icon: "home", color: OK, desc: "Rumah · Vision · NAS", view: buildSpaceApp(goHome), consolidated: true, cat: "Ruang",
       version: "2.1", caps: ["Smart Home", "Vision", "NAS"], perms: ["Kamera", "Berkas"], deps: ["Terhubung"] },
+    { id: "mata-dewa", label: "Mata Dewa", icon: "activity", color: OK, desc: "Globe · Lapisan · Aset · Bahaya", view: mataDewa, cat: "Ruang",
+      version: "1.0", caps: ["Globe", "Lapisan", "Watch", "Alert"], perms: ["Lokasi (opt-in)"], deps: [] },
     { id: "lab", label: "Laboratorium", icon: "flask", color: AI, desc: "Project bareng Damar & agents", view: labApp, cat: "Kecerdasan",
       version: "2.0", caps: ["Missions", "Agents", "Artifacts", "Experiments"], perms: ["Berkas", "Terminal"], deps: ["Model AI"] },
     // App "Terhubung" DIHAPUS — Perangkat & Integrasi kini jadi kategori

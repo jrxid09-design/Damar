@@ -31,6 +31,7 @@ const nasController = require("../../../controllers/nasController");
 const filesController = require("../../../controllers/filesController");
 const personalController = require("../../../controllers/personalController");
 const osintController = require("../../../controllers/osintController");
+const mataDewaController = require("../../../controllers/mataDewaController");
 
 const router = express.Router();
 const managerOnly = rejectLegacyActionMiddleware("Console action");
@@ -391,6 +392,21 @@ router.post("/nas/monitor/check", managerOnly);
 // ---- Files (penjelajah berkas lokal, read-only) ----------------
 
 router.get("/files", filesController.list);
+
+// ---- Mata Dewa (kecerdasan spasial tertanam) --------------------
+// Read-only: status/health/mode/providers/ask/near/surface boleh untuk
+// Console terautentikasi. Perubahan state (aktivasi mode) lewat managerOnly
+// supaya tetap di bawah otoritas Manager kanonik.
+const mataDewaManagerOnly = rejectLegacyActionMiddleware("Mata Dewa action");
+router.get("/matadewa/status", mataDewaController.status);
+router.get("/matadewa/health", mataDewaController.health);
+router.get("/matadewa/mode", mataDewaController.mode);
+router.get("/matadewa/providers", mataDewaController.providers);
+router.post("/matadewa/ask", mataDewaController.ask);
+router.get("/matadewa/near", mataDewaController.near);
+router.get("/matadewa/surface", mataDewaController.surface);
+router.post("/matadewa/mode/activate", mataDewaManagerOnly);
+router.post("/matadewa/mode/deactivate", mataDewaManagerOnly);
 
 // ---- Cuaca & profil (dashboard) --------------------------------
 
