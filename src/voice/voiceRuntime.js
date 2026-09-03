@@ -39,13 +39,12 @@ class VoiceRuntime extends EventEmitter {
 
         this.session = session ?? new VoiceSession({ interactionIngress });
         this._interactionHost = null;
-        // DSC-R5-001: PRIVATE voice-continuity activation closure, captured
-        // from the trusted RuntimeHost composition at start().  It is a
-        // module/instance-private field — never exposed on the returned
-        // RuntimeHost, never derived from event/model/user payload, and not
-        // reconstructible by shape or naming.  Ordinary RuntimeHost holders
-        // never receive it.
-        this._continuityActivation = null;
+        // DSC-R6-001: the canonical Voice composition handle (module-private
+        // boundary).  The voice-continuity activation closure lives ONLY in
+        // runtimeHostVoice.js module-private state — never on this runtime's
+        // public surface, never on the returned RuntimeHost, and never
+        // reconstructible by an ordinary importer.
+        this._voiceCompositionHandle = null;
         this._turnController = null;
         this._turnGeneration = 0;
         this._activeCapture = null;
@@ -132,27 +131,26 @@ class VoiceRuntime extends EventEmitter {
         }
 
         if (!this.session.interactionIngress && typeof this.session.bindInteractionIngress === "function") {
-            // DSC-R5-001: the trusted Voice composition creates the RuntimeHost
-            // WITH a composition-private capture hook.  The canonical
-            // voice-continuity ACTIVATION closure is delivered ONLY into this
-            // VoiceRuntime's private field — it is NEVER read back off the
-            // returned host facade (there is no such property).  Ordinary
-            // RuntimeHost holders receive no activation capability.
-            this._interactionHost = await require("../runtime/host/runtimeHost").createRuntimeHost({
-                voiceActivation: (activate) => { this._continuityActivation = activate; }
-            });
+            // DSC-R6-001: the CANONICAL Voice composition creates the
+            // RuntimeHost through the module-private composition boundary
+            // (runtimeHostVoice.js).  The ordinary public createRuntimeHost
+            // is NOT used and yields no continuity capability.  The
+            // voice-continuity activation closure is owned ONLY by this
+            // canonical composition and invoked through its module-private
+            // seam — it is never read off the returned host facade.
+            const voiceComposition = require("../runtime/host/runtimeHostVoice");
+            this._voiceCompositionHandle = await voiceComposition.createCanonicalVoiceRuntimeHost();
+            this._interactionHost = this._voiceCompositionHandle.host;
             this.session.bindInteractionIngress(this._interactionHost.channels);
-            // DSC-R4-001/006 + DSC-R5-001: activate the canonical voice
-            // continuity identity through the PRIVATE captured closure.  The
-            // voice runtime mints no scope, no handle, and supplies NO
-            // identity string — the RuntimeHost composition mints the
-            // canonical runtime-owner peer internally.  Voice continuity is
-            // DEVICE/RUNTIME-SCOPED (one local Damar owner per voice
-            // runtime) — explicitly NOT physical-speaker identity.
-            const activate = this._continuityActivation;
-            const bind = typeof activate === "function"
-                ? activate()
-                : { ok: false, code: "TRANSPORT_PEER_SEAM_UNAVAILABLE" };
+            // DSC-R4-001/006 + DSC-R6-001: activate the canonical voice
+            // continuity identity through the canonical composition's
+            // module-private seam.  The voice runtime mints no scope, no
+            // handle, and supplies NO identity string — the RuntimeHost
+            // composition mints the canonical runtime-owner peer internally.
+            // Voice continuity is DEVICE/RUNTIME-SCOPED (one local Damar
+            // owner per voice runtime) — explicitly NOT physical-speaker
+            // identity.  The returned value is inert diagnostics only.
+            const bind = voiceComposition.activateVoiceContinuity(this._voiceCompositionHandle);
             if (!bind.ok) {
                 // Fail closed: voice continuity simply stays unbound; the
                 // ordinary ses_* interaction path continues.
