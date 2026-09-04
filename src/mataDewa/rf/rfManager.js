@@ -22,6 +22,10 @@ const { RfProcessingSession } = require("./processing");
 const { normalizeObservation, OBSERVATION_TYPE } = require("../observations/observation");
 const { LINEAGE_KIND } = require("../spatial/lineage");
 const { isValidPoint } = require("../spatial/geo");
+const {
+    registerRfTrustComposition, mintRfLiveTrustFor, sealObservationAsTrustedLive
+} = require("./rfTrust");
+const { RfCalibration, CALIBRATION_STATE } = require("./calibration");
 
 const RF_UNITS = Object.freeze({
     MOTION_ENERGY: "motion_energy_variance",
@@ -42,11 +46,18 @@ class RfManager {
         this.sessions = new Map();
         /** @type {Map<string, {lat:number,lon:number}>} lokasi sensor */
         this._sourceLocations = new Map();
+        /** @type {Map<string, RfCalibration>} kalibrasi per sumber (MD-014) */
+        this._calibrations = new Map();
         /** @type {CsiRingBuffer} */
         this.frameHistory = new CsiRingBuffer();
         this.observationsProduced = 0;
         this.observationsRejected = 0;
         this.lastSourceStatuses = [];
+
+        // MD-010: komposisi ini mendaftarkan diri sebagai pemegang kemampuan
+        // mint live-trust. Kemampuan mint tidak pernah diekspor ke publik.
+        registerRfTrustComposition(this);
+        this._mintLiveTrust = mintRfLiveTrustFor(this);
     }
 
     /**
@@ -150,6 +161,16 @@ class RfManager {
                 location: this._sourceLocations.get(source.id) ?? null
             });
             this.sessions.set(source.id, session);
+            // MD-014: kalibrasi terikat pada binding penuh — sensor, sesi,
+            // sourceKind, dan channel bila diketahui. Replay dan live UDP
+            // TIDAK PERNAH berbagi baseline (sourceKind bagian dari binding).
+            this._calibrations.set(source.id, new RfCalibration({
+                sensorId: source.sensorId,
+                captureSession: session.captureSession,
+                sourceKind: source.kind,
+                channel: source.lastFrame?.channel ?? null,
+                clock: this.clock
+            }));
         }
         return session;
     }
@@ -157,6 +178,16 @@ class RfManager {
     /** Frame → sesi → estimasi → observasi kanonik (atau null). */
     _frameToObservation(source, session, frame) {
         const estimate = session.update(frame);
+        // MD-014: kalibrasi mengikuti setiap frame; energi frame dimasukkan
+        // ke head window dan baseline difinalisasi dari sampel terkumpul.
+        const calibration = this._calibrations.get(source.id);
+        if (calibration) {
+            calibration.recordFrameEnergy(estimate ? estimate.motionEnergy : null);
+            if (calibration.state === CALIBRATION_STATE.COLLECTING ||
+                calibration.state === CALIBRATION_STATE.UNCALIBRATED) {
+                calibration.finalizeBaseline();
+            }
+        }
         if (!estimate) return { estimate: null, observation: null };
         const obs = this._estimateToObservation(source, session, estimate);
         return obs ? { estimate, observation: obs } : { estimate, observation: null };
@@ -171,6 +202,13 @@ class RfManager {
             : (estimate.presence
                 ? OBSERVATION_TYPE.RF_PRESENCE_ESTIMATE
                 : OBSERVATION_TYPE.RF_MOTION_ESTIMATE);
+
+        // MD-014: metadata kalibrasi bounded (state/generation/quality) —
+        // TANPA raw buffer. Tidak ada angka direkayasa bila belum sah.
+        const calibration = this._calibrations.get(source.id);
+        const calibrationMeta = calibration
+            ? calibration.observationMetadata()
+            : { calibrationState: "uncalibrated", calibrationGeneration: 0, calibrationQuality: null };
 
         const result = normalizeObservation({
             source: `mataDewa.rf:${source.sensorId}`,
@@ -188,6 +226,8 @@ class RfManager {
             attributes: {
                 sensorId: source.sensorId,
                 captureSession: session.captureSession,
+                sourceKind: source.kind,
+                ...calibrationMeta,
                 ...(session.location
                     ? { sensorLat: session.location.lat, sensorLon: session.location.lon, presence: estimate.presence ?? null }
                     : { presence: estimate.presence ?? null }),
@@ -212,11 +252,36 @@ class RfManager {
             this.observationsRejected += 1;
             return null;
         }
+        // MD-010: HANYA sumber live UDP yang menerima trust seal opaque —
+        // dan HANYA bila kalibrasi terikat sumber ini sah (CALIBRATED).
+        // Replay TIDAK PERNAH menerima seal.
+        if (source.kind === SOURCE_KIND.UDP && calibration &&
+            calibration.isUsableForProductionInference({ nowMs })) {
+            try {
+                const seal = this._mintLiveTrust({
+                    sensorId: source.sensorId,
+                    captureSession: session.captureSession
+                });
+                sealObservationAsTrustedLive(result.observation, seal);
+            }
+            catch { /* tanpa seal = tidak dipercaya live (fail closed) */ }
+        }
         return result.observation;
     }
 
     _refreshSourceStatuses() {
         this.lastSourceStatuses = [...this.sources.values()].map(s => s.describe());
+    }
+
+    /**
+     * MD-014: invalidasi kalibrasi eksplisit (reconnect, ganti channel/config,
+     * recalibration manual). Binding berubah → generation naik, baseline baru.
+     */
+    invalidateCalibration(sourceId, { reason = "binding_changed" } = {}) {
+        const calibration = this._calibrations.get(sourceId);
+        if (!calibration) return { ok: false, reason: "kalibrasi tidak dikenal" };
+        const described = calibration.invalidate({ reason });
+        return { ok: true, calibration: described };
     }
 
     status() {
@@ -229,7 +294,8 @@ class RfManager {
                 size: this.frameHistory.size,
                 dropped: this.frameHistory.dropped
             },
-            sessions: [...this.sessions.values()].map(s => s.describe())
+            sessions: [...this.sessions.values()].map(s => s.describe()),
+            calibrations: [...this._calibrations.values()].map(c => c.describe())
         };
     }
 
