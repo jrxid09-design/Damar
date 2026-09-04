@@ -332,9 +332,13 @@ test("RF watch: hanya presence=true + geo-located + INFERRED yang menaikkan seve
         ...over
     }, { nowMs: NOW }).observation;
 
+    // MD-010: observasi TANPA trusted live seal (dibuat publik) maksimal
+    // "watch" — coarse/experimental, tidak pernah produksi-critical.
     const good = evaluateRfPresenceRisk(asset, [mk()], { nowMs: NOW, windowMs: 30000 });
     assert.ok(good);
-    assert.equal(good.severity, "critical");
+    assert.equal(good.riskState, "watch");
+    assert.equal(good.severity, "watch");
+    assert.equal(good.productionAlert, false);
 
     // presence=false → tidak menaikkan.
     const absent = evaluateRfPresenceRisk(asset, [mk({ attributes: { presence: false, sensorLat: -6.6, sensorLon: 106.8 } })], { nowMs: NOW, windowMs: 30000 });
@@ -348,13 +352,19 @@ test("RF watch: hanya presence=true + geo-located + INFERRED yang menaikkan seve
     const wrongEpistemic = mk({ epistemic: "OBSERVED" });
     assert.equal(evaluateRfPresenceRisk(asset, [wrongEpistemic], { nowMs: NOW, windowMs: 30000 }), null);
 
-    // Stale → tidak critical.
+    // F: sensor di 0,0 tetap geo-valid (bukan gagal truthiness).
+    const zeroPoint = mk({ attributes: { presence: true, sensorLat: 0, sensorLon: 0 } });
+    // Jauh dari aset (-6.6,106.8) → di luar radius, bukan ditolak truthiness.
+    const zeroEval = evaluateRfPresenceRisk(asset, [zeroPoint], { nowMs: NOW, windowMs: 30000 });
+    assert.equal(zeroEval, null);
+
+    // Stale → tetap watch (tidak pernah naik).
     const stale = mk({ observedAt: NOW - 29 * 1000 });
     const staleEval = evaluateRfPresenceRisk(asset, [stale], { nowMs: NOW, windowMs: 30000 });
     assert.ok(staleEval);
     assert.notEqual(staleEval.severity, "critical");
 
-    // Confidence rendah → tidak critical.
+    // Confidence rendah → tetap watch.
     const lowConf = mk({ confidence: 0.3 });
     const lowEval = evaluateRfPresenceRisk(asset, [lowConf], { nowMs: NOW, windowMs: 30000 });
     assert.ok(lowEval);

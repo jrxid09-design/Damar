@@ -184,11 +184,13 @@ function estimatePresence(motion, { quietBaseline = null, baselineMultiplier = 4
 /**
  * Ekstrak baseline tenang dari beberapa frame awal (kalibrasi otomatis).
  * Mengembalikan motion energy median dari awal; null jika belum cukup.
+ * D6: tidak ada parameter sampleMs palsu — jendela kalibrasi dinyatakan
+ * dalam FRAME (head window), bukan waktu dinding yang tidak pernah dipakai.
  */
-function estimateQuietBaseline(windowFrames, { sampleMs = 30 * 60 * 1000, nowMs = Date.now() } = {}) {
+function estimateQuietBaseline(windowFrames, { baselineHeadFrames = 30 } = {}) {
     if (!Array.isArray(windowFrames) || windowFrames.length < MIN_WINDOW_FRAMES) return null;
-    // Gunakan frame paling awal sebagai calibration window.
-    const head = windowFrames.slice(0, Math.min(windowFrames.length, 30));
+    // Gunakan frame paling awal sebagai calibration window (bounded).
+    const head = windowFrames.slice(0, Math.min(windowFrames.length, Math.max(MIN_WINDOW_FRAMES, baselineHeadFrames)));
     const energy = computeMotionEnergy(head);
     if (!energy) return null;
     return energy.motionEnergy;
