@@ -629,6 +629,32 @@ const PRIVILEGED_KEYS = Object.freeze([
 // The ONE canonical runtime, created exactly once, lazily, on first use.
 let canonical = null;
 
+// ---------------------------------------------------------------------------
+// MATA DEWA VISUAL MODE (MD-011) — built-in capability + actuator wiring.
+//
+// A3/A7: the wiring record is passed LEXICALLY through THIS canonical
+// composition (Lane 2 closure → Lane 3 closure, same trusted module — never
+// through a global, a public export, or a mutable module cache). No other
+// module can read or write this record; test harnesses keep their own trust
+// domains and wire via the production wiring module against their OWN
+// registries.
+// ---------------------------------------------------------------------------
+let canonicalMataDewaWiring = null;
+
+/** Production lexical resolver (A4/A5): canonical MataDewaService at invoke
+ *  time — pure getter, no creation, no public DI seam. Absence is a TRANSIENT
+ *  runtime condition → actuator fails closed MATA_DEWA_SERVICE_UNAVAILABLE;
+ *  it never crashes the runtime and never fabricates a service. */
+function resolveCanonicalMataDewaService() {
+    try {
+        const { getMataDewaService } = require("../mataDewa/composition");
+        return getMataDewaService();
+    }
+    catch {
+        return null;
+    }
+}
+
 /**
  * Create the canonical production Action facade. Takes NO options — canonical
  * authentication policy is bootstrap-owned and the fixed fail-closed adapter
@@ -654,13 +680,36 @@ function createCanonicalActionFacade() {
             clock: { nowMs: () => Date.now() }
         });
 
+        // ---- MATA DEWA (MD-011/A7/A8): wire the built-in visual-mode
+        //      capabilities + trusted scope bindings HERE, inside the
+        //      canonical composition. Failure is a composition
+        //      misconfiguration → LOUD typed error (never swallowed into a
+        //      later CAPABILITY_NOT_FOUND). No authority is granted here. ----
+        let canonicalTrustedScopeBindings = {};
+        try {
+            const {
+                wireMataDewaVisualModeCapabilities, VISUAL_MODE_SCOPE_BINDINGS
+            } = require("../mataDewa/capabilities/visualModeWiring");
+            const wiring = wireMataDewaVisualModeCapabilities({
+                registrar: capabilityRuntime.registrars.core
+            });
+            canonicalMataDewaWiring = wiring;
+            canonicalTrustedScopeBindings = VISUAL_MODE_SCOPE_BINDINGS;
+        }
+        catch (error) {
+            canonicalMataDewaWiring = null;
+            throw Object.assign(
+                new Error(`MATA_DEWA_WIRING_FAILED: gagal wire capability visual mode di komposisi kanonik: ${error?.message ?? error}`),
+                { code: "MATA_DEWA_WIRING_FAILED", cause: error });
+        }
+
         // ---- INTERNAL composition only. The verifier is captured inside this
         //      closure; it is never handed to a caller. ----
         const rt = composeActionAuthorityRuntime({
             capabilityRuntime,
             authorityStore,
             authVerifier: authDomain.verifier,
-            trustedScopeBindings: {},
+            trustedScopeBindings: canonicalTrustedScopeBindings,
             clock: { nowMs: () => Date.now() }
         });
 
@@ -1584,6 +1633,25 @@ function createCanonicalActuationFacade() {
     if (canonicalActuation === null) {
         const lane2Facade = createCanonicalActionFacade();
         const actuatorRegistry = buildActuatorRegistry3();
+        // ---- MATA DEWA (MD-011/A7): register the built-in UI-mode actuator
+        //      over the CANONICAL actuator registry, using the wiring record
+        //      handed LEXICALLY from the canonical Lane 2 closure above (same
+        //      trusted module; no global, no public seam, no registry-bridge).
+        //      Service resolution is LAZY at invoke time (production lexical
+        //      resolver); transient absence fails closed at the actuator. ----
+        if (canonicalMataDewaWiring === null) {
+            throw Object.assign(
+                new Error("MATA_DEWA_WIRING_FAILED: canonical Lane 2 wiring record tidak ada saat komposisi actuator"),
+                { code: "MATA_DEWA_WIRING_FAILED" });
+        }
+        const {
+            wireMataDewaVisualModeActuators
+        } = require("../mataDewa/capabilities/visualModeWiring");
+        wireMataDewaVisualModeActuators({
+            actuatorRegistry,
+            wiring: canonicalMataDewaWiring,
+            resolveService: resolveCanonicalMataDewaService
+        });
         const dispatcher = composeDispatcher3({
             lane2Facade,
             actuatorRegistry,

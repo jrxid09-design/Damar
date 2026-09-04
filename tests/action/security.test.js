@@ -87,6 +87,15 @@ test("structural: action module imports no executors, authority mutators, fs/net
                 ((isActuation || isVerification || isInternal) && /^\/?(\.\.\/)*(intent|gate|clock|errors|authDomain|authSession|verification\/errors|verification\/postcondition|verification\/schema|verification\/verifierRegistry|actuation\/errors)$/.test(target.replace(".js", ""))) ||
                 ((isActuation || isInternal) && /^\/?(\.\.\/)*(intent|gate|clock|errors|authDomain|authSession)$/.test(target.replace(".js", ""))) ||
                 (isBootstrap && (target === "../capability/registry" || target === "../authority/store" || target === "./internal/verificationBootstrap")) ||
+                // MD-011: the canonical bootstrap wires the built-in Mata
+                // Dewa visual-mode capabilities + actuators. These requires
+                // pull capability metadata + a lazy read-only service getter
+                // ONLY — no executors, no authority mutators, no fs/network
+                // (the wiring module is separately scanned by the FORBIDDEN
+                // patterns above only for action files; mataDewa wiring
+                // laws are asserted in tests/mataDewa/visualModeWiring.test.js).
+                (isBootstrap && target === "../mataDewa/capabilities/visualModeWiring") ||
+                (isBootstrap && target === "../mataDewa/composition") ||
                 (isActuatorRegistry && target === "../../capability/registry/ids");
             assert.ok(ok, `${file}: unexpected external require '${target}'`);
         }
