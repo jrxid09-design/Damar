@@ -85,6 +85,50 @@ class MataDewaCredentialStore {
     }
 
     /**
+     * Integrasi 1 (post-Lane4): sambungkan Secret Vault kanonik DARI
+     * komposisi trust tersertifikasi (dipanggil SEKALI dari komposisi
+     * produksi, setelah boot). Fail-closed:
+     *   - hanya SEKALI (re-attach ditolak — komposisi tidak bisa diganti),
+     *   - cipher tidak aman (adapter uji deterministik) ditolak,
+     *   - ref lama yang sudah ada diuji resolve ulang; ref yang tidak
+     *     bisa diselesaikan dihapus dari peta ref (tidak pernah
+     *     menyeberang ke vault asing).
+     */
+    attachVault(vault) {
+        if (this.vaultExplicit) {
+            return { ok: false, code: "VAULT_ALREADY_BOUND", reason: "vault kanonik sudah terikat sekali — komposisi tidak dapat diganti" };
+        }
+        if (!vault || typeof vault.create !== "function" || typeof vault.resolveIn !== "function") {
+            return { ok: false, code: "VAULT_INVALID", reason: "objek vault kanonik tidak sah" };
+        }
+        try {
+            const cipher = vault.stats?.().cipher;
+            if (!cipher || cipher.secure === false) {
+                return { ok: false, code: "VAULT_CIPHER_NOT_SECURE", reason: "cipher vault tidak aman — ditolak di produksi (MD-007)" };
+            }
+        }
+        catch {
+            return { ok: false, code: "VAULT_CIPHER_NOT_SECURE", reason: "cipher vault tidak aman — ditolak di produksi (MD-007)" };
+        }
+        this.vault = vault;
+        this.vaultExplicit = true;
+        // Ref lama (file persist) diuji ulang terhadap vault kanonik BARU;
+        // ref yang tidak bisa diselesaikan dihapus — tidak pernah
+        // menyeberang ke vault asing (resolveIn menegakkan scope).
+        for (const [id, refString] of [...this.refs.entries()]) {
+            try {
+                const resolved = this.vault.resolveIn(SCOPE, refString);
+                if (!resolved || resolved.ok === false) this.refs.delete(id);
+            }
+            catch {
+                this.refs.delete(id);
+            }
+        }
+        this._persist();
+        return { ok: true, attached: true };
+    }
+
+    /**
      * Simpan kredensial provider ke vault + simpan referensinya.
      * FAIL CLOSED pra-integrasi (MD-007): tanpa vault kanonik terkomposisi
      * eksplisit, atau dengan cipher tidak aman → ditolak dengan kode jujur.
