@@ -736,8 +736,19 @@ function createCanonicalActionFacade() {
             const wiring = wireMataDewaVisualModeCapabilities({
                 registrar: capabilityRuntime.registrars.core
             });
-            canonicalTrustedScopeBindings = VISUAL_MODE_SCOPE_BINDINGS;
-            canonicalWiringRecord = wiring;
+            // Lane 5 integrasi (post-Lane4): capability RF TERISTIMEWA
+            // didaftarkan dengan pola MD-011 yang sama — DESKRIPTIF saja
+            // (tanpa grant). Scope bindings diperluas; record wiring RF
+            // dilampirkan pada record kanonik untuk Lane 3. Kegagalan =
+            // kesalahan komposisi (LOUD), bukan CAPABILITY_NOT_FOUND diam.
+            const {
+                registerRfControlCapabilities, RF_CONTROL_SCOPE_BINDINGS
+            } = require("../mataDewa/capabilities/rfControlWiring");
+            const rfWiring = registerRfControlCapabilities({
+                registrar: capabilityRuntime.registrars.core
+            });
+            canonicalTrustedScopeBindings = { ...VISUAL_MODE_SCOPE_BINDINGS, ...RF_CONTROL_SCOPE_BINDINGS };
+            canonicalWiringRecord = Object.freeze({ visual: wiring, rfControl: rfWiring });
         }
         catch (error) {
             throw Object.assign(
@@ -1697,7 +1708,19 @@ function createCanonicalActuationFacade() {
         } = require("../mataDewa/capabilities/visualModeWiring");
         wireMataDewaVisualModeActuators({
             actuatorRegistry,
-            wiring: canonicalWiringRecord,
+            wiring: canonicalWiringRecord.visual,
+            resolveService: resolveCanonicalMataDewaService
+        });
+        // Lane 5 integrasi (post-Lane4): actuator RF TERISTIMEWA di atas
+        // registry actuator kanonik yang SAMA — pola MD-011 identik. Tidak
+        // ada otoritas yang diberikan di sini; tanpa grant ratifikasi
+        // Owner, Lane 2 evaluate tetap DENY (fail closed).
+        const {
+            wireMataDewaRfControlActuators
+        } = require("../mataDewa/capabilities/rfControlWiring");
+        wireMataDewaRfControlActuators({
+            actuatorRegistry,
+            wiring: canonicalWiringRecord.rfControl,
             resolveService: resolveCanonicalMataDewaService
         });
         const dispatcher = composeDispatcher3({

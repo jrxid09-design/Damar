@@ -33,7 +33,14 @@ const CAPABILITY_FAMILIES = Object.freeze({
     TIMELINE_QUERY: "mata_dewa.timeline.query",
     ASSET_IMPORT: "mata_dewa.asset.import",
     CCTV_INSPECT: "mata_dewa.cctv.inspect",
-    RF_OBSERVE: "mata_dewa.rf.observe"
+    RF_OBSERVE: "mata_dewa.rf.observe",
+    // Lane 5 integrasi post-Lane4: mutasi RF TERISTIMEWA (Integrasi 4).
+    // Registrasi sini DESKRIPTIF — otoritas tetap milik Authority kanonik.
+    RF_LISTENER_ENABLE: "mata_dewa.rf.listener.enable",
+    RF_LISTENER_DISABLE: "mata_dewa.rf.listener.disable",
+    RF_DEVICE_ENROLL: "mata_dewa.rf.device.enroll",
+    RF_DEVICE_REVOKE: "mata_dewa.rf.device.revoke",
+    RF_CALIBRATION_RESET: "mata_dewa.rf.calibration.reset"
 });
 
 /**
