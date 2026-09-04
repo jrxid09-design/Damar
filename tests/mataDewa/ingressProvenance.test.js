@@ -24,9 +24,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { MataDewaService } = require("../../src/mataDewa/service");
 const { normalizeObservation, OBSERVATION_TYPE } = require("../../src/mataDewa/observations/observation");
-const {
-    isTrustedLiveRfObservation, rfSourceModeOf, createRfIngestChannel
-} = require("../../src/mataDewa/rf/rfTrust");
+const { rfSourceModeOf, createRfTrustDomain } = require("../../src/mataDewa/rf/rfTrust");
 const { evaluateRfPresenceRisk } = require("../../src/mataDewa/watch/rfPresence");
 const { RfManager } = require("../../src/mataDewa/rf/rfManager");
 
@@ -162,7 +160,9 @@ test("MD-012: non-array / null items are safe no-ops", () => {
 });
 
 // ---------------------------------------------------------------------------
-// MD-010 — C1/C4: string lineage is NEVER live trust
+// MD-010 — C1/C4: string lineage is NEVER live trust (repaired architecture:
+// trust = instance-local domain, composition-owned; verifier returns
+// INTERNAL metadata or null — a forgeable seal object no longer exists)
 // ---------------------------------------------------------------------------
 
 test("MD-010: public caller with upstreamDataset 'udp' is NOT trusted live", () => {
@@ -176,16 +176,17 @@ test("MD-010: public caller with upstreamDataset 'udp' is NOT trusted live", () 
     service.ingestLocalObservations([fake]);
     const stored = [...service.observations.values()][0];
     assert.equal(rfSourceModeOf(stored), "LIVE", "string says udp, but classification is just a label");
-    assert.equal(isTrustedLiveRfObservation(stored), false,
-        "STRING LINEAGE != LIVE TRUST — no seal exists");
+    assert.equal(service.verifyTrustedLiveRf(stored), null,
+        "STRING LINEAGE != LIVE TRUST — public ingress never mints");
 });
 
 test("MD-010: public caller with sourceKind 'live' / simulated:false is NOT trusted live", () => {
+    const service = makeService();
     const fake = normalizeObservation(rawObservation({
         type: OBSERVATION_TYPE.RF_PRESENCE_ESTIMATE,
         attributes: { presence: true, sensorLat: -6.2, sensorLon: 106.8, sourceKind: "live", simulated: false }
     }), { nowMs: NOW }).observation;
-    assert.equal(isTrustedLiveRfObservation(fake), false);
+    assert.equal(service.verifyTrustedLiveRf(fake), null);
 });
 
 test("MD-010: public ingress NEVER carries live trust even with every forgeable marker", () => {
@@ -201,21 +202,34 @@ test("MD-010: public ingress NEVER carries live trust even with every forgeable 
     }), { nowMs: NOW }).observation;
     service.ingestLocalObservations([forged]);
     const stored = [...service.observations.values()][0];
-    assert.equal(isTrustedLiveRfObservation(stored), false,
-        "public ingress cannot mint the opaque trust marker");
+    assert.equal(service.verifyTrustedLiveRf(stored), null,
+        "public ingress cannot mint — no caller-shaped proof exists");
 });
 
-test("MD-010: JSON clone of a trusted RF observation loses internal live trust on public re-injection", async () => {
-    // Produce a genuinely sealed observation via the trusted RF manager path
-    // (replay has no seal; use direct seal through the manager's internal mint
-    // for the LIVE-equivalent proof, then JSON round-trip it).
+test("MD-010: no forgeable seal/ingest surface exists anywhere public", () => {
+    const trustModule = require("../../src/mataDewa/rf/rfTrust");
+    // The forgeable API is GONE from the module surface:
+    for (const forbidden of ["sealObservationAsTrustedLive", "isTrustedLiveRfObservation",
+        "createRfIngestChannel", "registerRfTrustComposition", "mintRfLiveTrustFor"]) {
+        assert.equal(forbidden in trustModule, false, `${forbidden} must not exist`);
+    }
     const service = makeService();
-    // rfManager without UDP still creates calibrations; for a sealed object we
-    // exercise the seal store identity law directly through the trust module's
-    // public verifier: clone → new identity → untrusted.
+    // No ingest channel property is attached to the canonical manager.
+    assert.equal("ingestChannel" in service.rfManager, false);
+    // The service exposes ONLY read-only verify — no write/trust API.
+    assert.equal(typeof service.verifyTrustedLiveRf, "function");
+    for (const key of Object.getOwnPropertyNames(Object.getPrototypeOf(service))) {
+        assert.equal(/seal|mint|trust.*(set|mark|grant)|mark.*trust/i.test(key), false,
+            `no public trust-writing API: ${key}`);
+    }
+});
+
+test("MD-010: JSON clone of a trusted observation loses trust (identity-keyed domain)", async () => {
+    // Canonical-path equivalent: mark a frozen canonical observation in the
+    // composition's own trust domain, then JSON round-trip it.
+    const service = makeService();
     const dir = require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "rf-trust-"));
     const file = require("node:path").join(dir, "live.csi.csv");
-    // (live seal mint is composition-private; the verifier side proves the clone law)
     const { espCsiLine } = makeRfFixtures();
     require("node:fs").writeFileSync(file, Array.from({ length: 40 }, (_, i) => espCsiLine({ seed: i + 1 })).join("\n") + "\n");
     const manager = new RfManager({ clock: { nowMs: () => NOW }, allowLocalUdp: false });
@@ -226,13 +240,14 @@ test("MD-010: JSON clone of a trusted RF observation loses internal live trust o
     assert.ok(collected.length > 0);
     const replayObs = collected[collected.length - 1];
     // Replay observations are never trusted live.
-    assert.equal(isTrustedLiveRfObservation(replayObs), false);
-    // JSON clone → same JSON content, but a DIFFERENT identity: trust (if any
-    // had existed) cannot survive serialization; public re-injection is plain.
+    assert.equal(service.verifyTrustedLiveRf(replayObs), null);
+    // JSON clone → different identity: trust cannot survive serialization;
+    // public re-injection is plain (stored, never trusted).
     const clone = JSON.parse(JSON.stringify(replayObs));
-    assert.equal(isTrustedLiveRfObservation(clone), false);
+    assert.equal(service.verifyTrustedLiveRf(clone), null);
     assert.equal(service.ingestLocalObservations([clone]), 1,
         "clone is canonically valid — but carries zero live trust");
+    assert.equal(service.verifyTrustedLiveRf([...service.observations.values()][0]), null);
 });
 
 // ---------------------------------------------------------------------------
@@ -300,16 +315,19 @@ test("MD-010: replay result is explicitly distinguishable from live alert state"
     assert.equal(liveEval.productionAlert, false, "untrusted live path is watch-only");
 });
 
-test("MD-010: trusted ingest channel is internal-only and rejects foreign services", () => {
-    assert.throws(() => createRfIngestChannel({ nope: true }), /canonical MataDewaService/);
-    assert.throws(() => createRfIngestChannel(null), /canonical MataDewaService/);
+test("MD-010: canonical composition exposes ONLY the read-only verifier", () => {
     const service = makeService();
-    const channel = createRfIngestChannel(service);
-    assert.equal(channel.kind, "rf-trusted-ingest");
-    // The channel forwards to the strict internal path (still validates shape).
-    const legit = normalizeObservation(rawObservation(), { nowMs: NOW }).observation;
-    assert.equal(channel.ingest([legit]), 1);
-    assert.equal(channel.ingest([{ hostile: true }]), 0);
+    // Read-only verifier is a function; returns null for untrusted.
+    assert.equal(typeof service.verifyTrustedLiveRf, "function");
+    assert.equal(service.verifyTrustedLiveRf(null), null);
+    assert.equal(service.rfTrustStatus().kind, "rf-trust-domain");
+    // Canonical manager carries no public ingest channel / mint surface.
+    assert.equal("ingestChannel" in service.rfManager, false);
+    assert.equal(service.rfManager._trustedRfSubmit !== null, true,
+        "canonical manager holds the lexical submit closure");
+    // A directly constructed manager has NO submit capability at all.
+    const foreign = new RfManager({ clock: { nowMs: () => NOW } });
+    assert.equal(foreign._trustedRfSubmit, null);
 });
 
 // ---- shared RF fixture helper (mirror rfSensing.test.js) ---------------------

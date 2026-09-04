@@ -34,16 +34,21 @@ class WatchEngine {
      *   clock?: { nowMs(): number },
      *   pollIntervalMs?: number,
      *   hazardWindowMs?: number,
-     *   onAlert?: (alert: object) => void
+     *   onAlert?: (alert: object) => void,
+     *   verifyTrustedLive?: null | ((observation: object) => object|null)
      * }} options
      */
-    constructor({ assetRegistry, clock = { nowMs: () => Date.now() }, pollIntervalMs = 5 * 60 * 1000, hazardWindowMs = 15 * 60 * 1000, onAlert = null } = {}) {
+    constructor({ assetRegistry, clock = { nowMs: () => Date.now() }, pollIntervalMs = 5 * 60 * 1000, hazardWindowMs = 15 * 60 * 1000, onAlert = null, verifyTrustedLive = null } = {}) {
         if (!assetRegistry) throw new TypeError("WatchEngine butuh assetRegistry");
         this.assetRegistry = assetRegistry;
         this.clock = clock;
         this.pollIntervalMs = pollIntervalMs;
         this.hazardWindowMs = hazardWindowMs;
         this.onAlert = typeof onAlert === "function" ? onAlert : null;
+        // MD-016: verifikator read-only trust kanonik (metadata internal).
+        // Tanpa verifikator → evaluasi RF tidak pernah bisa escalasi
+        // produksi (fail closed); watch coarse tetap tersedia.
+        this.verifyTrustedLive = typeof verifyTrustedLive === "function" ? verifyTrustedLive : null;
 
         /** id aset → { lastAlertAtMs, lastSeverity, lastEventId } */
         this.alertState = new Map();
@@ -120,7 +125,7 @@ class WatchEngine {
                 if (!evaluator) continue; // hazard belum punya evaluator jujur → tidak dipura-pura
                 const observations = observationsByType.get(hazardType) ?? [];
                 evaluated.hazards += 1;
-                const evaluation = evaluator(asset, observations, { nowMs, windowMs: this.hazardWindowMs });
+                const evaluation = evaluator(asset, observations, { nowMs, windowMs: this.hazardWindowMs, verifyTrustedLive: this.verifyTrustedLive });
                 if (!evaluation) continue;
 
                 if (!severityAtLeast(evaluation.severity, canonicalSeverity(policy.minSeverity))) continue;

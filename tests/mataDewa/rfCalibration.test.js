@@ -26,7 +26,7 @@ const {
     buildCalibrationQuality
 } = require("../../src/mataDewa/rf/calibration");
 const { RfManager } = require("../../src/mataDewa/rf/rfManager");
-const { isTrustedLiveRfObservation } = require("../../src/mataDewa/rf/rfTrust");
+const { MataDewaService } = require("../../src/mataDewa/service");
 
 const NOW = 1_700_000_000_000;
 
@@ -264,7 +264,7 @@ test("MD-014: explicit invalidation raises generation; new baseline is a new bin
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("MD-014: replay NEVER receives a live trust seal even when calibrated", async () => {
+test("MD-014: replay NEVER receives a live trust mark even when calibrated", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rf-cal3-"));
     const file = path.join(dir, "ok.csi.csv");
     fs.writeFileSync(file, Array.from({ length: 40 }, (_, i) => espCsiLine({ seed: i + 1 })).join("\n") + "\n");
@@ -274,8 +274,11 @@ test("MD-014: replay NEVER receives a live trust seal even when calibrated", asy
     await manager.loadReplay("r1", { onObservations: (obs) => collected.push(obs) });
     const cal = manager.status().calibrations[0];
     assert.equal(cal.state, CALIBRATION_STATE.CALIBRATED, "replay reached CALIBRATED");
+    // Verify against a service's canonical domain: replay is never marked —
+    // even with a binding carrying a perfectly CALIBRATED declaration.
+    const service = new MataDewaService({ clock: { nowMs: () => NOW } });
     for (const obs of collected) {
-        assert.equal(isTrustedLiveRfObservation(obs), false,
+        assert.equal(service.verifyTrustedLiveRf(obs), null,
             "CALIBRATED replay is still REPLAY — no live trust, ever");
     }
     fs.rmSync(dir, { recursive: true, force: true });

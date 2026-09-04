@@ -85,7 +85,8 @@ class MataDewaService {
             clock: this.clock,
             pollIntervalMs: options.watchPollIntervalMs ?? 5 * 60 * 1000,
             hazardWindowMs: options.hazardWindowMs ?? 15 * 60 * 1000,
-            onAlert: options.onAlert ?? null
+            onAlert: options.onAlert ?? null,
+            verifyTrustedLive: null // diisi di bawah, setelah trust domain berdiri
         });
         this.alertEngine = options.alertEngine ?? new AlertEngine({
             clock: this.clock,
@@ -94,22 +95,57 @@ class MataDewaService {
 
         // RF sensing — sumber + sesi hanya dari trusted composition
         // (MD-008 spirit; UDP wajib allowLocalUdp eksplisit, replay offline).
+        // MD-015/016/017: SATU trust domain instance-lokal dibuat DI SINI —
+        // komposisi kanonik adalah satu-satunya pemilik. Kemampuan mint
+        // (markTrustedLive) TIDAK pernah disimpan di service/manager/index/
+        // global — hanya closure ingest internal di bawah yang memegangnya.
+        const { createRfTrustDomain } = require("./rf/rfTrust");
+        const rfTrustDomain = createRfTrustDomain({ clock: this.clock });
+
+        /**
+         * Kanal ingest INTERNAL tepercaya (closure leksikal komposisi).
+         * Dipanggil HANYA oleh RfManager kanonik yang menerima callback
+         * ini dari komposisi. Alur (MD-017): normalisasi penuh → objek
+         * kanonik beku BARU → mark trust pada objek PERSIS yang disimpan
+         * → simpan. Trust terbentuk SETELAH kanonikalisasi pada objek
+         * tersimpan — re-normalisasi tidak pernah yatimkan trust.
+         *
+         * Mark gagal (kalibrasi belum CALIBRATED, binding tak sah, replay)
+         * → observasi TETAP disimpan sebagai bukti TIDAK-dipercaya-live
+         * (terlihat coarse di watch, tidak pernah produksi-alert). Channel
+         * ini tidak pernah menjadi jalur pentingan trust.
+         */
+        const trustedRfIngest = (observations, binding) => {
+            const list = Array.isArray(observations) ? observations : [observations];
+            let accepted = 0;
+            for (const item of list) {
+                const normalized = normalizeObservation(item, { nowMs: this.clock.nowMs() });
+                if (!normalized.ok) continue;
+                const canonical = normalized.observation;
+                rfTrustDomain.markTrustedLive(canonical, binding);
+                this._ingestObservations([canonical]);
+                accepted += 1;
+            }
+            return accepted;
+        };
+
         const { buildRfManager } = require("./rf/rfManager");
         this.rfManager = options.rfManager ?? buildRfManager({
             clock: this.clock,
-            allowLocalUdp: options.allowLocalUdp === true
+            allowLocalUdp: options.allowLocalUdp === true,
+            trustedRfSubmit: (observation, binding) =>
+                trustedRfIngest(observation, binding)
         });
-        // MD-010: kanal ingest INTERNAL tepercaya RFManager → service.
-        // Kanal dibuat LEKSIKAL di komposisi kanonik ini dan hanya dipegang
-        // rfManager — bukan permukaan publik. Observasi yang masuk lewat
-        // kanal ini sudah ternormalisasi ketat oleh rfManager dan (untuk
-        // live UDP) membawa trust seal opaque. Ingress publik TETAP tidak
-        // dipercaya: string lineage tidak pernah menjadi live trust.
-        try {
-            const { createRfIngestChannel } = require("./rf/rfTrust");
-            this.rfManager.ingestChannel = createRfIngestChannel(this);
+        // Verifikator read-only + diagnostik (satu-satunya yang sampai ke
+        // watch/status). Kemampuan mark TIDAK pernah lewat sini.
+        this._rfTrustVerify = (observation) => rfTrustDomain.verifyTrustedLive(observation);
+        this._rfTrustDiagnostics = () => rfTrustDomain.diagnostics();
+        // MD-016: watch memakai verifikator read-only yang sama (metadata
+        // internal). Kalau komposisi membawa WatchEngine eksternal, verifikator
+        // tetap dilekatkan (read-only; bukan kemampuan mint).
+        if (this.watchEngine && typeof this.watchEngine === "object") {
+            this.watchEngine.verifyTrustedLive = this._rfTrustVerify;
         }
-        catch { /* tanpa kanal: observasi RF tidak di-ingest otomatis (fail closed) */ }
 
         // Kredensial provider — SATU jahitan ke Secret Vault kanonik Damar.
         // Tidak ada store kedua; konfigurasi hanya menyimpan SecretRef.
@@ -125,7 +161,6 @@ class MataDewaService {
         } else {
             this.registry.credentialResolver = this.credentialStore.resolveCredential;
         }
-
         // Kamera publik/berotorisasi (fail-closed; MediaIngress di sisi Damar).
         const { CameraRegistry } = require("./media/cctv");
         this.cameraRegistry = options.cameraRegistry ?? new CameraRegistry();
@@ -270,28 +305,24 @@ class MataDewaService {
     }
 
     /**
-     * MD-010/C2: kanal ingest INTERNAL tepercaya (hanya dipegang kanal
-     * leksikal rfTrust yang dibuat di komposisi kanonik ini). Observasi
-     * sudah ternormalisasi ketat oleh rfManager; method ini meneruskan
-     * TANPA membuka jalur publik dan TANPA mempercayai input mentah —
-     * item yang gagal pemeriksaan bentuk minimum ditolak.
+     * MD-015/Repair 3: verifikator read-only untuk watch produksi.
+     * Mengembalikan metadata trust INTERNAL (dari WeakMap domain kanonik),
+     * atau null bila objek tidak dipercaya live. Watch membandingkan
+     * metadata internal ini dengan metadata kalibrasi yang DIDEKLARASI
+     * observasi — mismatch → fail closed (string caller != trust).
      *
-     * Live trust dari seal opaque rfTrust DIBAWA OLEH OBJEK (property
-     * Symbol non-enumerable): JSON clone kehilangan seal → observasi
-     * yang dikloning dan dimasukkan lewat ingress publik otomatis
-     * kembali tidak dipercaya.
+     * HUKUM: metadata ini HIDUP di closure komposisi kanonik; tidak ada
+     * jalur publik untuk menulisnya (tidak ada setTrusted, tidak ada
+     * seal dari caller).
      */
-    _ingestTrustedObservations(observations) {
-        const list = Array.isArray(observations) ? observations : [];
-        const accepted = [];
-        for (const item of list) {
-            // Bentuk minimum tetap diverifikasi (defense in depth) — kanal
-            // tepercaya tidak berarti item bebas validasi.
-            const normalized = normalizeObservation(item, { nowMs: this.clock.nowMs() });
-            if (normalized.ok) accepted.push(normalized.observation);
-        }
-        this._ingestObservations(accepted);
-        return accepted.length;
+    verifyTrustedLiveRf(observation) {
+        if (!this._rfTrustVerify) return null;
+        return this._rfTrustVerify(observation);
+    }
+
+    /** Diagnostik trust domain (bounded, read-only; untuk status/tests). */
+    rfTrustStatus() {
+        return this._rfTrustDiagnostics ? this._rfTrustDiagnostics() : null;
     }
 
     /** Observasi terkini dalam radius dari sebuah titik (memakai indeks). */

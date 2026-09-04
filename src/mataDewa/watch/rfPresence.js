@@ -3,7 +3,7 @@
 /**
  * RF presence → hazard evaluator (Phase B, honest).
  *
- * HUKUM KLaim:
+ * HUKUM KLAIM:
  *  - RF presence estimate TIDAK pernah menjadi klaim identitas/pose/
  *    vital. Evaluator hanya menaikkan severity bila observasi RF
  *    presence/motion INFERRED yang GEO-terletak (sensor punya lokasi
@@ -13,38 +13,97 @@
  *  - Confidence rendah / stale → severity tidak dinaikkan.
  *  - Ring kebijakan per-aset tetap sumber kebenaran radius (bukan angka
  *    universal).
+ *
+ * MD-015/016/017 (FOURTH REPAIR) — STRICT PRODUCTION WATCH GATE:
+ *  - TRUSTED LIVE != AUTHORITY, CALIBRATED STRING != VALID CALIBRATION.
+ *  - Escalasi produksi (warning/critical) menuntut SEMUA bukti POSITIF:
+ *      1. provenance trusted-live kanonik (verifier komposisi — BUKAN
+ *         field caller, BUKAN string lineage, BUKAN bentuk objek);
+ *      2. calibrationState === CALIBRATED (persyaratan positif — ABSEN
+ *         berarti reject; bukan "kalau ada dan bukan calibrated");
+ *      3. generation sah (safe integer > 0) dan SAMA dengan metadata
+ *         internal trust;
+ *      4. sensorId SAMA dengan metadata internal;
+ *      5. captureSession SAMA dengan metadata internal;
+ *      6. sourceKind SAMA dengan metadata internal;
+ *      7. channel/config SAMA bila diketahui;
+ *      8. kalibrasi segar pada saat evaluasi (now <= expiresAt dari
+ *         metadata internal — bukan field caller);
+ *      9. observasi segar (dalam jendela watch);
+ *     10. kualitas kalibrasi acceptable (sampleCount/baseline/noise dari
+ *         metadata internal).
+ *  - Metadata trust HIDUP di WeakMap domain kanonik (Repair 3): watch
+ *    membandingkan metadata yang DIDEKLARASI observasi dengan metadata
+ *    INTERNAL verifier — mismatch/NaN/Infinity/absen → FAIL CLOSED.
+ *  - Tanpa verifikator (engine test/evaluasi terisolasi) → tidak ada
+ *    escalasi produksi sama sekali (fail closed).
+ *  - REPLAY/SIMULASI TIDAK PERNAH alert produksi; hasil replay eksplisit
+ *    { simulation: true, productionAlert: false, sourceMode: "REPLAY" }
+ *    dengan severity dibatasi WATCH (Repair 5, dipertahankan).
  */
 
 const { haversineMeters, isFiniteNumber } = require("../spatial/geo");
 const { SEVERITY } = require("../events/event");
 const { EPISTEMIC_STATUS } = require("../spatial/epistemic");
-const { isTrustedLiveRfObservation, rfSourceModeOf } = require("../rf/rfTrust");
+const { rfSourceModeOf } = require("../rf/rfTrust");
 const { CALIBRATION_STATE } = require("../rf/calibration");
 
 const HAZARD_TYPE = Object.freeze({
     RF_PRESENCE: "rf_presence"
 });
 
-/** State kalibrasi yang dianggap cukup matang untuk escalasi produksi. */
-const PRODUCTION_READY_STATES = Object.freeze(new Set([CALIBRATION_STATE.CALIBRATED]));
+/**
+ * Verdict produksi untuk SATU observasi (MD-016: persyaratan positif penuh).
+ * Mengembalikan metadata trust internal bila SEMUA bukti sah, atau null.
+ * Setiap langkah fail-closed: absen/malformed/stale/mismatch/NaN/Infinity
+ * → null (observasi tetap boleh terlihat sebagai watch coarse).
+ */
+function productionLiveVerdict(obs, verifyTrustedLive, nowMs, windowMs) {
+    if (typeof verifyTrustedLive !== "function") return null;
+    const trusted = verifyTrustedLive(obs);
+    if (!trusted || typeof trusted !== "object") return null;
+
+    // (1) provenance sudah diverifikasi verifier (WeakMap identitas objek).
+    // (3) generation sah.
+    if (!Number.isSafeInteger(trusted.calibrationGeneration) || trusted.calibrationGeneration <= 0) return null;
+    // (8) freshness kalibrasi dari metadata INTERNAL.
+    if (!isFiniteNumber(trusted.calibrationValidatedAtMs) || trusted.calibrationValidatedAtMs < 0) return null;
+    if (!isFiniteNumber(trusted.calibrationTtlMs) || trusted.calibrationTtlMs <= 0) return null;
+    const expiresAt = trusted.calibrationValidatedAtMs + trusted.calibrationTtlMs;
+    if (!isFiniteNumber(expiresAt) || nowMs > expiresAt) return null;
+    // (10) kualitas kalibrasi dari metadata INTERNAL.
+    const q = trusted.calibrationQuality;
+    if (!q || typeof q !== "object") return null;
+    if (!Number.isSafeInteger(q.sampleCount) || q.sampleCount <= 0) return null;
+    if (!isFiniteNumber(q.baselineMetric) || q.baselineMetric < 0) return null;
+    if (!isFiniteNumber(q.noiseMetric) || q.noiseMetric < 0) return null;
+
+    // Perbandingan metadata DIDEKLARASI vs INTERNAL (Repair 3).
+    // (2) calibrationState positif: bukan "kalau ada", TAPI wajib === CALIBRATED.
+    if (obs.attributes?.calibrationState !== CALIBRATION_STATE.CALIBRATED) return null;
+    // (3) generation cocok.
+    if (obs.attributes?.calibrationGeneration !== trusted.calibrationGeneration) return null;
+    // (4)(5)(6) binding sensor/sesi/sumber cocok.
+    if (obs.attributes?.sensorId !== trusted.sensorId) return null;
+    if (obs.attributes?.captureSession !== trusted.captureSession) return null;
+    if (obs.attributes?.sourceKind !== trusted.sourceKind) return null;
+    // (7) channel/config cocok bila diketahui.
+    const declaredChannel = obs.attributes?.channel ?? null;
+    if ((trusted.channel ?? null) !== (declaredChannel ?? null)) return null;
+    // (9) observasi segar.
+    if (!isFiniteNumber(obs.observedAt) || obs.observedAt < nowMs - windowMs) return null;
+
+    return trusted;
+}
 
 /**
  * @param {object} asset aset dengan watchPolicy.rings
  * @param {Array<object>} rfObservations observasi rf.presence_estimate /
  *        rf.motion_estimate yang BERLOKASI (sensor location)
+ * @param {{ nowMs?: number, windowMs?: number, verifyTrustedLive?: Function }} opts
  * @returns {object|null} evaluation { riskState, ring, severity, evidence, ... }
- *
- * MD-010/C3: observasi REPLAY/SIMULASI TIDAK PERNAH menghasilkan alert
- * produksi normal. Evaluasi replay mengembalikan struktur eksplisit
- * { simulation: true, sourceMode: "REPLAY", productionAlert: false }
- * dengan severity dibatasi WATCH — tidak pernah memicu escalation produksi.
- *
- * MD-014/D5: hanya trusted LIVE provenance + kalibrasi CALIBRATED sah
- * yang boleh mengeskalasi ke warning/critical produksi. Tanpa itu,
- * estimasi tetap boleh terlihat sebagai watch (coarse, eksperimental)
- * tapi tidak pernah produksi-critical.
  */
-function evaluateRfPresenceRisk(asset, rfObservations, { nowMs = Date.now(), windowMs = 30 * 1000 } = {}) {
+function evaluateRfPresenceRisk(asset, rfObservations, { nowMs = Date.now(), windowMs = 30 * 1000, verifyTrustedLive = null } = {}) {
     if (!asset?.geometry || asset.geometry.type !== "point") return null;
     if (!Array.isArray(rfObservations) || rfObservations.length === 0) return null;
 
@@ -63,13 +122,10 @@ function evaluateRfPresenceRisk(asset, rfObservations, { nowMs = Date.now(), win
         if (!isFiniteNumber(obs.attributes?.sensorLat) || !isFiniteNumber(obs.attributes?.sensorLon)) continue;
         if (obs.attributes.sensorLat < -90 || obs.attributes.sensorLat > 90) continue;
         if (obs.attributes.sensorLon < -180 || obs.attributes.sensorLon > 180) continue;
-        // MD-014: kalibrasi belum matang → tidak ada escalasi (data tetap
-        // terlihat sebagai watch coarse, tidak pernah produksi-alert).
-        const calState = obs.attributes?.calibrationState;
-        if (calState !== undefined && !PRODUCTION_READY_STATES.has(calState)) continue;
         const sensorPoint = { lat: obs.attributes.sensorLat, lon: obs.attributes.sensorLon };
         const d = haversineMeters(asset.geometry, sensorPoint);
         if (!isFiniteNumber(d) || d > maxRadiusM) continue;
+        // (9) observasi freshness.
         if (!isFiniteNumber(obs.observedAt) || obs.observedAt < windowStart) continue;
         // Presence true = sinyal; motion-only tanpa presence tidak dinaikkan.
         if (obs.type === "rf.presence_estimate" && obs.attributes?.presence !== true) continue;
@@ -77,7 +133,7 @@ function evaluateRfPresenceRisk(asset, rfObservations, { nowMs = Date.now(), win
     }
     if (inWindow.length === 0) return null;
 
-    // MD-010/C3: REPLAY tidak pernah alert produksi normal.
+    // MD-010/C3: REPLAY tidak pernah alert produksi normal (Repair 5).
     const replayInWindow = inWindow.filter(x => rfSourceModeOf(x.obs) === "REPLAY");
     if (replayInWindow.length > 0) {
         return {
@@ -116,16 +172,14 @@ function evaluateRfPresenceRisk(asset, rfObservations, { nowMs = Date.now(), win
     }
     if (stale) ringName = watchRing?.name ?? ringName;
 
-    // MD-010/C1+C4: escalasi produksi (warning/critical) hanya dari
-    // trusted LIVE provenance (seal opaque mint kanonik). Estimasi tanpa
-    // seal tetap boleh watch — coarse/experimental — tapi tidak pernah
-    // produksi-alert, walau field-lineage apa pun diklaim caller.
-    const trustedLive = inWindow.filter(x =>
-        isTrustedLiveRfObservation(x.obs, {
-            sensorId: x.obs.attributes?.sensorId ?? null,
-            captureSession: x.obs.attributes?.captureSession ?? null
-        }));
-    if (trustedLive.length === 0 && (riskState === "warning" || riskState === "critical")) {
+    // MD-016 STRICT GATE: escalasi produksi (warning/critical) HANYA dari
+    // observasi yang lulus SEMUA persyaratan positif (verdict penuh di
+    // atas). Tanpa verifikator / tanpa trust / kalibrasi absen-atau-tak-
+    // sah → dibatasi watch (coarse, eksperimental), TIDAK pernah produksi-
+    // alert. Persyaratan POSITIF: absence IS rejection.
+    const productionCapable = inWindow.some(x =>
+        productionLiveVerdict(x.obs, verifyTrustedLive, nowMs, windowMs) !== null);
+    if (!productionCapable && (riskState === "warning" || riskState === "critical")) {
         riskState = "watch";
         ringName = watchRing?.name ?? ringName;
     }
@@ -152,4 +206,4 @@ function evaluateRfPresenceRisk(asset, rfObservations, { nowMs = Date.now(), win
     };
 }
 
-module.exports = { evaluateRfPresenceRisk, HAZARD_TYPE };
+module.exports = { evaluateRfPresenceRisk, HAZARD_TYPE, productionLiveVerdict };
