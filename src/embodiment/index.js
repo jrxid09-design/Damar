@@ -35,7 +35,7 @@ const {
 const { ChallengeBroker } = require("./identity/challenge");
 const identityTypes = require("./identity/types");
 const {
-    createMemoryIdentityStore, persistIdentity, loadIdentity
+    createMemoryIdentityStore, persistIdentity, loadIdentity, createFileIdentityStore
 } = require("./identity/store");
 
 const domainTypes = require("./domain/types");
@@ -70,6 +70,7 @@ module.exports = {
     identityTypes,
     createIdentityService(options = {}) { return new DeviceIdentityService(options); },
     createMemoryIdentityStore, persistIdentity, loadIdentity,
+    createFileIdentityStore,
 
     // kontrak murni (untuk adapter & pengujian masa depan)
     types: domainTypes,

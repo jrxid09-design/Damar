@@ -63,10 +63,22 @@ function bootSubsystems() {
     catch (error) { telemetry.warn(`Kesadaran gagal disiapkan: ${error.message}`); }
 
     // Lapisan kanal: sesi percakapan persisten + registry WhatsApp/Telegram.
+    // Setiap service dibungkus ingress adapter Owner Trust (Wave 5 Lane 4):
+    // provenance peer di-mint dari konteks transport asli saat trafik datang
+    // (OT-006) — ID mentah dari payload pesan tidak pernah jadi bukti.
     try {
         const channels = require("./channels");
-        channels.manager.register("whatsapp", whatsapp);
-        channels.manager.register("telegram", require("./services/telegramService"));
+        const { ensureCanonicalComposed } = require("./authority/ownerTrustComposition");
+        ensureCanonicalComposed().then((comp) => {
+            channels.manager.register("whatsapp", comp.ingress.attachWhatsappIngress({ service: whatsapp }));
+            channels.manager.register("telegram", comp.ingress.attachTelegramIngress({ service: require("./services/telegramService") }));
+        }).catch(error => {
+            // Fail-open untuk TRANSPORT (chat tetap jalan); trust tetap tertutup
+            // karena tanpa provenance yang di-mint tidak ada yang bisa bind/auth.
+            telemetry.warn(`Ingress provenance gagal disiapkan: ${error.message}`);
+            channels.manager.register("whatsapp", whatsapp);
+            channels.manager.register("telegram", require("./services/telegramService"));
+        });
         channels.manager.start().catch(error => {
             telemetry.warn(`Kanal gagal disiapkan: ${error.message}`);
         });

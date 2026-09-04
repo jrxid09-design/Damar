@@ -26,6 +26,7 @@ const redact = require("./redact");
 const integrity = require("./integrity");
 const ledger = require("./ledger");
 const ports = require("./ports");
+const { createFileAuditSink } = require("./fileSink");
 
 module.exports = Object.freeze({
     createAuditLedger: ledger.createAuditLedger,
@@ -44,5 +45,8 @@ module.exports = Object.freeze({
     sanitizeMetadata: redact.sanitizeMetadata,
     sha256Hex: integrity.sha256Hex,
     isValidDigestFormat: integrity.isValidDigestFormat,
-    AuditPersistencePort: ports.AuditPersistencePort
+    AuditPersistencePort: ports.AuditPersistencePort,
+    // Durable append-only JSONL sink for the existing ledger persistence
+    // port (ordinary configuration, NOT privilege).
+    createFileAuditSink
 });

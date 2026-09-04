@@ -136,6 +136,13 @@ class DaemonClient {
     memoryStats()       { return this.request("/memory/stats", { timeout: 25000 }); }
     integrations()      { return this.request("/integrations"); }
 
+    // ---- Owner Trust (Wave 5 Lane 4) ----
+    trustStatus()       { return this.request("/owner-trust/status", { timeout: 25000 }); }
+    trustBootstrapBegin(body) { return this.request("/owner-trust/bootstrap/begin", { method: "POST", body, timeout: 25000 }); }
+    trustBootstrapComplete(body) { return this.request("/owner-trust/bootstrap/complete", { method: "POST", body, timeout: 25000 }); }
+    trustBindConsole()  { return this.request("/owner-trust/bind-console", { method: "POST", body: {} }); }
+    trustLinkPolicy(enabled) { return this.request("/owner-trust/link-policy", { method: "POST", body: { enabled } }); }
+
     /**
      * Chat streaming. Memanggil onChunk untuk tiap potongan SSE.
      * Body fetch di Node adalah ReadableStream web; SSE diurai
