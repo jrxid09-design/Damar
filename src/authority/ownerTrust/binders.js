@@ -1,14 +1,20 @@
 "use strict";
 
 /**
- * CHANNEL AUTHENTICATION BINDERS (Wave 5 Lane 4, Stages 8-10).
+ * CHANNEL AUTHENTICATION BINDERS (Wave 5 Lane 4, Stages 8-10; OT-006).
  *
  * One narrow canonical binder per transport: Console, Telegram, WhatsApp.
  * Each binder is the seam between the transport adapter (which owns the
- * peer evidence) and the Owner trust domain.  The binder NEVER trusts a
- * caller-supplied ID: the transport adapter must present its OWN verified
- * peer evidence, and a binding ceremony requires an ALREADY authenticated
- * Owner/Admin proof.
+ * peer evidence) and the Owner trust domain.
+ *
+ * RAW STRING != TRUSTED PEER HANDLE:
+ *   Every bind()/authenticate() call accepts ONLY a branded
+ *   TransportPeerProvenance object minted INTERNALLY by the canonical
+ *   transport adapter at the moment real traffic arrived.  Raw chatId/JID
+ *   strings from callers, model-produced objects, plain look-alike objects,
+ *   and clones/JSON round-trips are structurally rejected — the brand lives
+ *   in a module-closure WeakSet plus a non-exported symbol, so shape alone
+ *   cannot counterfeit it.
  *
  * LAWS (binding):
  *   LOCAL != OWNER.            (Console)
@@ -24,11 +30,11 @@
  *     environment variable that directly says owner=true is honored.
  *
  * Telegram (Stage 9) / WhatsApp (Stage 10):
- *   - Only transport-owned sender/chat evidence that the bridge can reliably
- *     obtain (telegram sender id / whatsapp JID as delivered by the transport
- *     adapter) may be bound and authenticated.
- *   - Raw user-supplied IDs in message payloads are NOT proof and never reach
- *     the binder as evidence — the transport adapter attests the peer.
+ *   - Only transport-owned sender/chat evidence minted by the canonical
+ *     adapter (telegram chat id / whatsapp JID as delivered by the transport
+ *     library) may be bound and authenticated.
+ *   - Raw user-supplied IDs in message payloads are NOT proof and never
+ *     reach the binder as evidence — the adapter attests the peer.
  *   - The binding ceremony requires an authenticated Owner/Admin proof.
  *   - After binding, the peer authenticates the principal ONLY when the
  *     canonical peer identity matches, the binding is active, the principal
@@ -41,8 +47,7 @@
  */
 
 const { createPrincipalBindings } = require("./bindings");
-
-const CHANNEL_PEER_MAX = 128;
+const { verifyTransportPeerProvenance } = require("./provenance");
 
 function fail(code, message) {
     const error = new Error(`[${code}] ${message || code}`);
@@ -50,34 +55,34 @@ function fail(code, message) {
     return error;
 }
 
-function assertPeerEvidence(peer, label) {
-    if (typeof peer !== "string" || peer.length === 0 || peer.length > CHANNEL_PEER_MAX) {
-        throw fail("OT_PEER_INVALID", `${label} peer evidence malformed`);
+/** Require a genuine provenance view; throws OT_PROVENANCE_INVALID. */
+function requireProvenance(provenance, label) {
+    const view = verifyTransportPeerProvenance(provenance);
+    if (!view) {
+        throw fail("OT_PROVENANCE_INVALID",
+            `${label} requires canonical peer provenance (raw strings are not evidence)`);
     }
-    if (!/^[\x21-\x7E]+$/.test(peer)) {
-        throw fail("OT_PEER_INVALID", `${label} peer evidence contains forbidden characters`);
-    }
-    return peer;
+    return view;
 }
 
 /**
- * createChannelBinders({ registry, proofVerifier, policy })
+ * createChannelBinders({ registry, proofVerifier })
  *
  *   registry       — OwnerTrustRegistry.
  *   proofVerifier  — sealed proof verifier.
- *   policy         — optional { allowedChannelPairs?: Set<string> } used by the
- *                    continuity linker; binders only enforce their own
- *                    transport rules.
  */
-function createChannelBinders({ registry, proofVerifier, policy = null } = {}) {
+function createChannelBinders({ registry, proofVerifier } = {}) {
     const bindings = createPrincipalBindings({ registry, proofVerifier });
 
     /**
      * Shared binding ceremony: an ALREADY authenticated Owner/Admin proof +
-     * transport-owned peer evidence.  The proof principal must be ACTIVE.
+     * canonical provenance.  The proof principal must be ACTIVE.
      */
-    async function ceremonyBind({ proof, purpose, transport, peer, deviceId = null }) {
-        return bindings.bindTransportPeer({ proof, purpose, transport, peer, deviceId });
+    async function ceremonyBind({ proof, purpose, provenance, deviceId = null }) {
+        const view = requireProvenance(provenance, "binding ceremony");
+        return bindings.bindTransportPeer({
+            proof, purpose, provenance, deviceId
+        });
     }
 
     // ---------------------------------------------------------------------
@@ -87,36 +92,33 @@ function createChannelBinders({ registry, proofVerifier, policy = null } = {}) {
         transport: "console",
 
         /**
-         * Bind a console context (local process/device evidence) to a
-         * principal.  LOCAL != OWNER: the local evidence is transport/context
-         * ONLY — the ceremony still requires an authenticated Owner/Admin
-         * proof.  `localContext` is descriptive metadata recorded verbatim;
-         * it NEVER substitutes for proof.
+         * Bind a console session to a principal.  LOCAL != OWNER: the local
+         * provenance is transport/context ONLY — the ceremony still requires
+         * an authenticated Owner/Admin proof.
          */
-        async bind({ proof, purpose, localContext, deviceId = null }) {
-            const peer = localContext === undefined || localContext === null
-                ? "console:local"
-                : `console:${assertPeerEvidence(String(localContext), "console")}`;
-            return ceremonyBind({ proof, purpose, transport: "console", peer, deviceId });
+        async bind({ proof, purpose, provenance, deviceId = null }) {
+            const view = requireProvenance(provenance, "console binding");
+            if (view.transport !== "console") {
+                throw fail("OT_PROVENANCE_TRANSPORT_MISMATCH", "provenance is not console evidence");
+            }
+            return ceremonyBind({ proof, purpose, provenance, deviceId });
         },
 
         /**
-         * Authenticate the local console context.  Requires an ACTIVE binding
-         * (which itself was created only through a proven ceremony).
-         * The result is a TEMPORARY authentication fact: generation-checked
-         * and revocation-checked on EVERY call — never a standing
-         * "console is Owner" state.  No environment variable is consulted.
-         * Malformed evidence fails closed with a verdict (never throws).
+         * Authenticate the local console session from canonical provenance.
+         * Requires an ACTIVE binding (which itself was created only through a
+         * proven ceremony).  The result is a TEMPORARY authentication fact:
+         * generation-checked and revocation-checked on EVERY call — never a
+         * standing "console is Owner" state.  No environment variable is
+         * consulted.  Malformed evidence fails closed with a verdict (never
+         * throws).
          */
-        authenticate({ localContext } = {}) {
-            try {
-                const peer = localContext === undefined || localContext === null
-                    ? "console:local"
-                    : `console:${assertPeerEvidence(String(localContext), "console")}`;
-                return bindings.authenticateTransportPeer({ transport: "console", peer });
-            } catch (error) {
-                return Object.freeze({ ok: false, code: error.code ?? "OT_PEER_INVALID" });
+        authenticate({ provenance } = {}) {
+            const view = verifyTransportPeerProvenance(provenance);
+            if (!view || view.transport !== "console") {
+                return Object.freeze({ ok: false, code: "OT_PROVENANCE_INVALID" });
             }
+            return bindings.authenticateTransportPeer({ provenance });
         }
     });
 
@@ -127,32 +129,30 @@ function createChannelBinders({ registry, proofVerifier, policy = null } = {}) {
         transport: "telegram",
 
         /**
-         * Bind a Telegram peer.  `peer` MUST be the transport-owned sender
-         * evidence (as delivered by the Telegram transport adapter), not a
-         * raw ID the user typed into a message.  The ceremony requires an
-         * already authenticated Owner/Admin proof.
+         * Bind a Telegram peer.  `provenance` MUST be minted by the canonical
+         * Telegram ingress adapter from the transport library's own update
+         * context, not from a raw ID the user typed into a message.  The
+         * ceremony requires an already authenticated Owner/Admin proof.
          */
-        async bind({ proof, purpose, senderPeer, deviceId = null }) {
-            return ceremonyBind({
-                proof, purpose, transport: "telegram",
-                peer: assertPeerEvidence(senderPeer, "telegram"), deviceId
-            });
+        async bind({ proof, purpose, provenance, deviceId = null }) {
+            const view = requireProvenance(provenance, "telegram binding");
+            if (view.transport !== "telegram") {
+                throw fail("OT_PROVENANCE_TRANSPORT_MISMATCH", "provenance is not telegram evidence");
+            }
+            return ceremonyBind({ proof, purpose, provenance, deviceId });
         },
 
         /**
-         * Authenticate a Telegram peer from transport-owned evidence.
+         * Authenticate a Telegram peer from canonical provenance.
          * Spoofed/raw IDs simply have no active binding -> fail closed.
          * Malformed evidence fails closed with a verdict (never throws).
          */
-        authenticate({ senderPeer }) {
-            try {
-                return bindings.authenticateTransportPeer({
-                    transport: "telegram",
-                    peer: assertPeerEvidence(senderPeer, "telegram")
-                });
-            } catch (error) {
-                return Object.freeze({ ok: false, code: error.code ?? "OT_PEER_INVALID" });
+        authenticate({ provenance }) {
+            const view = verifyTransportPeerProvenance(provenance);
+            if (!view || view.transport !== "telegram") {
+                return Object.freeze({ ok: false, code: "OT_PROVENANCE_INVALID" });
             }
+            return bindings.authenticateTransportPeer({ provenance });
         }
     });
 
@@ -163,30 +163,28 @@ function createChannelBinders({ registry, proofVerifier, policy = null } = {}) {
         transport: "whatsapp",
 
         /**
-         * Bind a WhatsApp peer (transport-owned JID evidence).  The ceremony
-         * requires an already authenticated Owner/Admin proof.  Phone/JID
-         * alone is never Owner.
+         * Bind a WhatsApp peer (canonical provenance over the transport-owned
+         * JID evidence).  The ceremony requires an already authenticated
+         * Owner/Admin proof.  Phone/JID alone is never Owner.
          */
-        async bind({ proof, purpose, jid, deviceId = null }) {
-            return ceremonyBind({
-                proof, purpose, transport: "whatsapp",
-                peer: assertPeerEvidence(jid, "whatsapp"), deviceId
-            });
+        async bind({ proof, purpose, provenance, deviceId = null }) {
+            const view = requireProvenance(provenance, "whatsapp binding");
+            if (view.transport !== "whatsapp") {
+                throw fail("OT_PROVENANCE_TRANSPORT_MISMATCH", "provenance is not whatsapp evidence");
+            }
+            return ceremonyBind({ proof, purpose, provenance, deviceId });
         },
 
         /**
-         * Authenticate a WhatsApp peer from transport-owned JID evidence.
+         * Authenticate a WhatsApp peer from canonical provenance.
          * Malformed evidence fails closed with a verdict (never throws).
          */
-        authenticate({ jid }) {
-            try {
-                return bindings.authenticateTransportPeer({
-                    transport: "whatsapp",
-                    peer: assertPeerEvidence(jid, "whatsapp")
-                });
-            } catch (error) {
-                return Object.freeze({ ok: false, code: error.code ?? "OT_PEER_INVALID" });
+        authenticate({ provenance }) {
+            const view = verifyTransportPeerProvenance(provenance);
+            if (!view || view.transport !== "whatsapp") {
+                return Object.freeze({ ok: false, code: "OT_PROVENANCE_INVALID" });
             }
+            return bindings.authenticateTransportPeer({ provenance });
         }
     });
 

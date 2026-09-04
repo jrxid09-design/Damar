@@ -105,7 +105,7 @@ async function createOwnerTrustRegistry({ store = null, clock = () => Date.now()
     function emitAudit(eventType, metadata) {
         if (typeof audit !== "function") return;
         try {
-            audit({ eventType, source: "authority.ownerTrust", metadata });
+            audit({ eventType, source: "authority.ownertrust", metadata });
         } catch { /* audit failure must never break the trust flow */ }
     }
 

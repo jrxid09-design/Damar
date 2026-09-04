@@ -26,16 +26,25 @@
  *   device, generation, verification method, lifecycle, proof reference.
  *   NEVER stores raw credentials/proofs.
  *
+ *   RAW STRING != TRUSTED PEER HANDLE (OT-006): transport binding and
+ *   authentication accept ONLY a branded TransportPeerProvenance object
+ *   minted INTERNALLY by a canonical transport adapter at real ingress.
+ *   Caller-supplied raw chatId/JID strings, model-produced objects, and
+ *   cloned/reconstructed shapes are structurally rejected — they never
+ *   reach the binding or the authentication path.
+ *
  *   CHANNEL ACCOUNT REASSIGNMENT: an old account binding never transfers
  *   trust automatically — rebinding the same peer to another principal is
  *   rejected while the old binding is active; a revoked binding still lets
  *   the transport work as a transport but principal authentication fails.
  *
- * TRANSPORT ID != DAMAR PRINCIPAL: the peer string is transport-owned
- * evidence (e.g. telegram:12345 / whatsapp:…@s.whatsapp.net), never a raw
- * caller-supplied ID as proof.  The binding CEREMONY requires an
- * authenticated Owner/Admin proof; the peer alone can never bind itself.
+ * TRANSPORT ID != DAMAR PRINCIPAL: the peer is transport-owned evidence
+ * carried by the provenance object, never a raw caller-supplied ID as
+ * proof.  The binding CEREMONY requires an authenticated Owner/Admin proof;
+ * the peer alone can never bind itself.
  */
+
+const { verifyTransportPeerProvenance } = require("./provenance");
 
 const PEER_MAX = 128;
 const TRANSPORTS = Object.freeze(["console", "telegram", "whatsapp"]);
@@ -181,40 +190,47 @@ function createPrincipalBindings({ registry, proofVerifier }) {
     }
 
     /**
-     * STAGE 7 — bind a transport peer to a principal.  The ceremony requires
-     * an ALREADY authenticated Owner/Admin proof; the peer is transport-owned
-     * evidence recorded verbatim (never a raw ID treated as proof).
-     * Conflicting active binding of the same peer to another principal is
-     * rejected by the registry (no silent trust transfer).
+     * STAGE 7 — bind a transport peer to a principal.  `provenance` MUST be
+     * a branded TransportPeerProvenance minted by a canonical transport
+     * adapter at real ingress (OT-006): raw strings, plain objects, and
+     * clones are structurally rejected.  The ceremony requires an ALREADY
+     * authenticated Owner/Admin proof; the peer is transport-owned evidence
+     * recorded via its canonical fingerprint (never a raw ID treated as
+     * proof).  Conflicting active binding of the same peer to another
+     * principal is rejected by the registry (no silent trust transfer).
      */
-    async function bindTransportPeer({ proof, purpose, transport, peer, deviceId = null }) {
+    async function bindTransportPeer({ proof, purpose, provenance, deviceId = null }) {
         const principalId = requireAuthenticatedPrincipal({ proof, purpose });
-        const normalized = normalizePeer({ transport, peer });
+        const view = verifyTransportPeerProvenance(provenance);
+        if (!view) {
+            throw fail("OT_PROVENANCE_INVALID",
+                "transport binding requires canonical peer provenance (raw strings are not evidence)");
+        }
         return registry.addBinding({
             principalId,
             kind: "transport",
-            peer: normalized,
+            peer: `${view.transport}:${view.peerKey}`,
             deviceId: deviceId ?? null,
-            method: `${transport}-ceremony:${purpose}`,
+            method: `${view.transport}-ceremony:${purpose}`,
             proofRef: null
         });
     }
 
     /**
-     * STAGE 7/8-10 — authenticate a transport peer.  The transport adapter
-     * presents its OWN verified peer evidence; this looks up the active
-     * binding and checks generation + principal state.  Returns
+     * STAGE 7/8-10 — authenticate a transport peer.  Accepts ONLY canonical
+     * provenance (OT-006); looks up the active binding and checks
+     * generation + principal state.  Returns
      * { ok, principalId } or { ok:false, code }.  A revoked binding still
      * leaves the transport working — it only stops principal authentication.
      */
-    function authenticateTransportPeer({ transport, peer }) {
-        let normalized;
-        try {
-            normalized = normalizePeer({ transport, peer });
-        } catch (error) {
-            return Object.freeze({ ok: false, code: error.code ?? "OT_PEER_INVALID" });
+    function authenticateTransportPeer({ provenance }) {
+        const view = verifyTransportPeerProvenance(provenance);
+        if (!view) {
+            return Object.freeze({ ok: false, code: "OT_PROVENANCE_INVALID" });
         }
-        const binding = registry.findBinding({ kind: "transport", peer: normalized });
+        const binding = registry.findBinding({
+            kind: "transport", peer: `${view.transport}:${view.peerKey}`
+        });
         if (!binding) {
             return Object.freeze({ ok: false, code: "OT_PEER_NOT_BOUND" });
         }

@@ -144,26 +144,112 @@ function createFileAuditSink(filePath, options = {}) {
     // (create-exclusive) and is NOT a distributed lock service — it is the
     // narrow local ownership the existing single-process runtime expects.
     // Candidate-tail validation remains mandatory even with ownership.
+    //
+    // TF-007 STALE-LOCK RECOVERY: the lock records its owner pid.  A lock
+    // whose owner process no longer exists (crashed writer) is reclaimed
+    // through an ownership-validated atomic replace + re-verify — a LIVE
+    // writer is never stolen (fail closed), and an unreadable lock fails
+    // closed for manual inspection.  Age alone is never a reason to steal.
     const lockPath = `${filePath}.lock`;
-    let lockFd = null;
     let lockHeld = false;
+
+    function readLockFile() {
+        try {
+            const data = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+            if (data === null || typeof data !== "object" ||
+                data.v !== 1 || !Number.isSafeInteger(data.pid) || data.pid <= 0) {
+                return { present: true, valid: false };
+            }
+            return { present: true, valid: true, pid: data.pid };
+        } catch (error) {
+            if (error && error.code === "ENOENT") return { present: false };
+            return { present: true, valid: false };
+        }
+    }
+
+    function pidAlive(pid) {
+        try {
+            process.kill(pid, 0);
+            return true;
+        } catch (error) {
+            // EPERM: the process exists but is owned by someone else —
+            // treat as alive (conservative).
+            return error && error.code === "EPERM";
+        }
+    }
+
+    function writeLockContent(fd) {
+        fs.writeFileSync(fd, JSON.stringify({
+            v: 1, pid: process.pid, acquiredAtMs: Date.now()
+        }), { encoding: "utf8" });
+    }
+
+    function failOwned() {
+        return new LedgerError(CODES.PERSIST_FAILED,
+            "audit sink file is already owned by another active writer");
+    }
+
     try {
         // "wx" = O_CREAT|O_EXCL|O_WRONLY: fails if the lock already exists.
-        lockFd = fs.openSync(lockPath, "wx");
+        const fd = fs.openSync(lockPath, "wx");
+        try { writeLockContent(fd); } finally { fs.closeSync(fd); }
         lockHeld = true;
     } catch (error) {
         if (error && (error.code === "EEXIST" || error.code === "EPERM" || error.code === "EACCES")) {
-            throw new LedgerError(CODES.PERSIST_FAILED,
-                "audit sink file is already owned by another active writer");
+            const current = readLockFile();
+            if (!current.present) {
+                // Vanished between the failed open and the read: one clean
+                // retry through the same create-exclusive path.
+                try {
+                    const fd = fs.openSync(lockPath, "wx");
+                    try { writeLockContent(fd); } finally { fs.closeSync(fd); }
+                    lockHeld = true;
+                } catch (retryError) {
+                    if (retryError && (retryError.code === "EEXIST" || retryError.code === "EPERM" || retryError.code === "EACCES")) {
+                        throw failOwned();
+                    }
+                    throw failPersist(`audit sink lock acquisition failed: ${retryError.message}`);
+                }
+            } else if (!current.valid) {
+                // Unreadable/corrupt lock: fail closed; operator inspects.
+                throw new LedgerError(CODES.PERSIST_FAILED,
+                    "audit sink lock file is unreadable; manual inspection required");
+            } else if (pidAlive(current.pid)) {
+                throw failOwned();
+            } else {
+                // STALE (dead writer): ownership-validated reclaim — unique
+                // temp + atomic rename, then RE-VERIFY the lock now records
+                // OUR pid (a competing reclaimer wins and we fail closed).
+                const claim = JSON.stringify({
+                    v: 1, pid: process.pid, acquiredAtMs: Date.now()
+                });
+                const tmp = `${lockPath}.claim-${process.pid}-${Math.random().toString(16).slice(2, 10)}`;
+                fs.writeFileSync(tmp, claim, { encoding: "utf8", mode: 0o600 });
+                try {
+                    fs.renameSync(tmp, lockPath);
+                } catch (renameError) {
+                    try { fs.unlinkSync(tmp); } catch { /* best effort */ }
+                    throw failPersist(`audit sink lock reclaim failed: ${renameError.message}`);
+                }
+                const after = readLockFile();
+                if (!after.valid || after.pid !== process.pid) {
+                    throw failOwned();
+                }
+                lockHeld = true;
+            }
+        } else {
+            throw failPersist(`audit sink lock acquisition failed: ${error.message}`);
         }
-        throw failPersist(`audit sink lock acquisition failed: ${error.message}`);
     }
 
     function releaseLock() {
         if (!lockHeld) return;
         lockHeld = false;
-        try { if (lockFd !== null) fs.closeSync(lockFd); } catch { /* best-effort */ }
-        try { fs.unlinkSync(lockPath); } catch { /* best-effort */ }
+        // Ownership-checked unlink: never delete a foreign lock.
+        const current = readLockFile();
+        if (current.present && current.valid && current.pid === process.pid) {
+            try { fs.unlinkSync(lockPath); } catch { /* best-effort */ }
+        }
     }
 
     // ---- load + verify existing tail (restart continuation) ----------

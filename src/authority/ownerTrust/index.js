@@ -25,7 +25,12 @@ const {
 } = require("./bootstrap");
 const { createPrincipalBindings, normalizePeer, TRANSPORTS } = require("./bindings");
 const { createChannelBinders } = require("./binders");
-const { createContinuityLinker, parseSessionKey, LINKABLE_CHANNELS } = require("./continuity");
+const { createContinuityLinker, LINKABLE_CHANNELS } = require("./continuity");
+const { parseSessionKeyPart } = require("./sessionKeys");
+const { createTrustAuditGate } = require("./trustAuditGate");
+const { createTransportProvenanceIssuer, verifyTransportPeerProvenance } = require("./provenance");
+const initAnchor = require("./initAnchor");
+const reservation = require("./reservation");
 
 module.exports = Object.freeze({
     ...types,
@@ -38,8 +43,13 @@ module.exports = Object.freeze({
     createPrincipalBindings,
     createChannelBinders,
     createContinuityLinker,
-    parseSessionKey,
+    parseSessionKeyPart,
     LINKABLE_CHANNELS,
+    createTrustAuditGate,
+    createTransportProvenanceIssuer,
+    verifyTransportPeerProvenance,
+    initAnchor,
+    reservation,
     normalizePeer,
     TRANSPORTS,
     BOOTSTRAP_PURPOSE,

@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * TRUSTED CROSS-CHANNEL CONTINUITY LINKER (Wave 5 Lane 4, Stage 11).
+ * TRUSTED CROSS-CHANNEL CONTINUITY LINKER (Wave 5 Lane 4, Stage 11; OT-006).
  *
  * Extends Session Continuity ONLY to link AUTHENTICATED conversation sessions
  * bound to the SAME verified principal, subject to an Owner-controlled policy
@@ -9,16 +9,27 @@
  * authorization that the continuity engine consumes — it does not redesign
  * session storage and never moves conversation context itself.
  *
+ * RAW STRING != TRUSTED PEER HANDLE (OT-006):
+ *   Authorization requires canonical TransportPeerProvenance for EVERY
+ *   session being linked — the Owner must be LIVE on every channel at
+ *   authorize time.  Session keys alone are never evidence.
+ *
  * LAWS (binding):
  *   SESSION CONTINUITY != AUTHENTICATION.
- *     A continued/linked session is NEVER proof of authentication: EVERY
- *     session key in a link is re-authenticated through the CURRENT transport
- *     binding (active, principal ACTIVE, principal generation current) at
- *     authorization time.  A stale/revoked/not-active peer fails the whole
- *     link fail-closed.
+ *     A continued/linked session is NEVER proof of authentication:
+ *       - at AUTHORIZATION time every participating session must present
+ *         live canonical provenance that authenticates to the same ACTIVE
+ *         principal;
+ *       - at CONSUMPTION time the consuming channel must present live
+ *         canonical provenance again; the other channels are re-checked as
+ *         PERSISTED bindings (active, generation-current, principal ACTIVE).
+ *         Live re-minting of provenance for a channel with no current
+ *         traffic is impossible by construction — pretending otherwise
+ *         would fabricate evidence, so the honest contract is: live proof
+ *         for the speaking channel, persisted trust for the silent ones.
  *   PERSISTED TRUST != LIVE AUTHENTICATION.
  *     Continuity history from a previous epoch confers nothing; only the
- *     live binding check counts.
+ *     live binding check counts for the consuming channel.
  *   LINKAGE IS POLICY-GATED BY THE OWNER:
  *     Cross-channel linking is DISABLED by default.  Enabling/disabling it is
  *     a trust mutation that requires an authenticated Owner proof — a model
@@ -29,39 +40,19 @@
  * closed rather than being linked on unauthenticated evidence.
  */
 
+const crypto = require("node:crypto");
+
+const { parseSessionKeyPart, LINKABLE_CHANNELS } = require("./sessionKeys");
+const { verifyTransportPeerProvenance } = require("./provenance");
+
 const LINK_TTL_MS = 60_000;
 const MIN_SESSIONS = 2;
 const MAX_SESSIONS = 4;
-const LINKABLE_CHANNELS = Object.freeze(["console", "telegram", "whatsapp"]);
 
 function fail(code, message) {
     const error = new Error(`[${code}] ${message || code}`);
     error.code = code;
     return error;
-}
-
-/** Parse `channel:<kanal>:<kind>:<peer>` (SessionStore.sessionKey grammar). */
-function parseSessionKey(key) {
-    if (typeof key !== "string" || key.length === 0 || key.length > 256) {
-        throw fail("OT_SESSION_KEY_INVALID", "session key malformed");
-    }
-    const parts = key.split(":");
-    if (parts.length < 4 || parts[0] !== "channel") {
-        throw fail("OT_SESSION_KEY_INVALID", "session key grammar mismatch");
-    }
-    const channel = parts[1];
-    const kind = parts[2];
-    const peer = parts.slice(3).join(":");
-    if (!LINKABLE_CHANNELS.includes(channel)) {
-        throw fail("OT_CHANNEL_NOT_LINKABLE", `channel '${channel}' has no canonical binder`);
-    }
-    if (kind !== "dm" && kind !== "group") {
-        throw fail("OT_SESSION_KEY_INVALID", "session kind must be dm|group");
-    }
-    if (typeof peer !== "string" || peer.length === 0) {
-        throw fail("OT_SESSION_KEY_INVALID", "session peer empty");
-    }
-    return { channel, kind, peer };
 }
 
 /**
@@ -128,14 +119,31 @@ function createContinuityLinker({ registry, principalBindings, clock = () => Dat
         return Object.freeze({ enabled: linkPolicyEnabled, generation: policyGeneration });
     }
 
+    /** Persisted-binding re-check for a non-live session (consume time). */
+    function persistedCheck(sessionKey) {
+        const { channel, peer } = parseSessionKeyPart(sessionKey);
+        const binding = registry.findBinding({ kind: "transport", peer: `${channel}:${peer}` });
+        if (!binding) return "OT_PEER_NOT_BOUND";
+        if (binding.revokedAtMs !== null) return "OT_BINDING_REVOKED";
+        const principal = registry.getPrincipal(binding.principalId);
+        if (!principal || !Number.isSafeInteger(principal.generation) ||
+            binding.generation < principal.generation) {
+            return "OT_GENERATION_STALE";
+        }
+        if (registry.principalState(binding.principalId) !== "ACTIVE") {
+            return "OT_PRINCIPAL_NOT_ACTIVE";
+        }
+        return null;
+    }
+
     /**
-     * Authorize linking conversation sessions.  EVERY session key is
-     * re-authenticated NOW through its current transport binding; all must
-     * resolve to the SAME verified ACTIVE principal.  Returns a one-use,
-     * expiring link authorization for the continuity engine, or a fail-closed
-     * verdict.
+     * Authorize linking conversation sessions.  EVERY session key must be
+     * paired with LIVE canonical provenance (minted by its transport adapter
+     * at current ingress) that authenticates to the SAME verified ACTIVE
+     * principal.  Returns a one-use, expiring link authorization for the
+     * continuity engine, or a fail-closed verdict.
      */
-    function authorizeLink({ sessionKeys } = {}) {
+    function authorizeLink({ sessionKeys, provenances } = {}) {
         const now = clock();
         sweepExpired(now);
         if (!Array.isArray(sessionKeys)) {
@@ -144,23 +152,39 @@ function createContinuityLinker({ registry, principalBindings, clock = () => Dat
         if (sessionKeys.length < MIN_SESSIONS || sessionKeys.length > MAX_SESSIONS) {
             return Object.freeze({ ok: false, code: "OT_LINK_BOUND" });
         }
+        if (!Array.isArray(provenances)) {
+            return Object.freeze({ ok: false, code: "OT_LINK_INVALID" });
+        }
         if (!linkPolicyEnabled) {
             return Object.freeze({ ok: false, code: "OT_LINK_POLICY_DISABLED" });
         }
         const parsed = [];
         for (const key of sessionKeys) {
             try {
-                parsed.push({ key, ...parseSessionKey(key) });
+                parsed.push({ key, ...parseSessionKeyPart(key) });
             } catch (error) {
                 return Object.freeze({ ok: false, code: error.code ?? "OT_SESSION_KEY_INVALID" });
             }
         }
-        // LIVE re-authentication of EVERY peer — continuity is never proof.
+        // Index live provenance by (transport, peerKey) — keyed by the
+        // ORIGINAL object so the binder's brand check re-verifies it.
+        const live = new Map();
+        for (const p of provenances) {
+            const view = verifyTransportPeerProvenance(p);
+            if (!view) {
+                return Object.freeze({ ok: false, code: "OT_PROVENANCE_INVALID" });
+            }
+            live.set(`${view.transport}\u0000${view.peerKey}`, p);
+        }
+        // LIVE re-authentication of EVERY participating peer — continuity is
+        // never proof, and a session key alone is never evidence.
         let principalId = null;
         for (const s of parsed) {
-            const auth = principalBindings.authenticateTransportPeer({
-                transport: s.channel, peer: s.peer
-            });
+            const original = live.get(`${s.channel}\u0000${s.peer}`);
+            if (!original) {
+                return Object.freeze({ ok: false, code: "OT_LINK_PROVENANCE_MISSING" });
+            }
+            const auth = principalBindings.authenticateTransportPeer({ provenance: original });
             if (!auth.ok) {
                 return Object.freeze({ ok: false, code: auth.code ?? "OT_LINK_UNAUTHENTICATED" });
             }
@@ -174,7 +198,6 @@ function createContinuityLinker({ registry, principalBindings, clock = () => Dat
         if (registry.principalState(principalId) !== "ACTIVE") {
             return Object.freeze({ ok: false, code: "OT_PRINCIPAL_NOT_ACTIVE" });
         }
-        const crypto = require("node:crypto");
         const linkId = `link-${crypto.randomBytes(12).toString("hex")}`;
         const expiresAtMs = now + LINK_TTL_MS;
         links.set(linkId, Object.freeze({
@@ -188,9 +211,13 @@ function createContinuityLinker({ registry, principalBindings, clock = () => Dat
 
     /**
      * Continuity engine consumes a link authorization EXACTLY once, before
-     * expiry.  A consumed/expired/unknown link fails closed.
+     * expiry, from the LIVE channel: `provenance` is the canonical
+     * provenance minted by the consuming transport adapter.  A
+     * consumed/expired/unknown link or a non-authenticating consuming
+     * channel fails closed.  Other participating sessions are re-checked as
+     * persisted bindings (active, generation-current, principal ACTIVE).
      */
-    function consumeLink({ linkId } = {}) {
+    function consumeLink({ linkId, provenance } = {}) {
         const now = clock();
         sweepExpired(now);
         const link = links.get(linkId);
@@ -204,17 +231,34 @@ function createContinuityLinker({ registry, principalBindings, clock = () => Dat
             links.delete(linkId);
             return Object.freeze({ ok: false, code: "OT_LINK_EXPIRED" });
         }
-        // LIVE re-authentication at consumption time: PERSISTED TRUST !=
-        // LIVE AUTHENTICATION.  Every bound peer must STILL authenticate to
-        // the SAME ACTIVE principal — a binding revoked, staled by
-        // generation, or left inactive between authorization and consumption
-        // invalidates the link fail-closed.
+        // LIVE re-authentication of the CONSUMING channel: PERSISTED TRUST !=
+        // LIVE AUTHENTICATION.
+        const auth = principalBindings.authenticateTransportPeer({ provenance });
+        if (!auth.ok || auth.principalId !== link.principalId) {
+            links.delete(linkId);
+            return Object.freeze({ ok: false, code: "OT_LINK_REVOKED" });
+        }
+        // The consuming provenance must correspond to one of the linked
+        // sessions (no linking consumption from an unrelated peer).
+        const view = verifyTransportPeerProvenance(provenance);
+        const consumingKey = `${view.transport}\u0000${view.peerKey}`;
+        let isParticipant = false;
         for (const key of link.sessionKeys) {
-            const { channel, peer } = parseSessionKey(key);
-            const auth = principalBindings.authenticateTransportPeer({ transport: channel, peer });
-            if (!auth.ok || auth.principalId !== link.principalId) {
+            const { channel, peer } = parseSessionKeyPart(key);
+            if (`${channel}\u0000${peer}` === consumingKey) { isParticipant = true; break; }
+        }
+        if (!isParticipant) {
+            links.delete(linkId);
+            return Object.freeze({ ok: false, code: "OT_LINK_FOREIGN_CHANNEL" });
+        }
+        // Persisted re-check for every OTHER session.
+        for (const key of link.sessionKeys) {
+            const { channel, peer } = parseSessionKeyPart(key);
+            if (`${channel}\u0000${peer}` === consumingKey) continue;
+            const problem = persistedCheck(key);
+            if (problem !== null) {
                 links.delete(linkId);
-                return Object.freeze({ ok: false, code: "OT_LINK_REVOKED" });
+                return Object.freeze({ ok: false, code: problem });
             }
         }
         if (!linkPolicyEnabled || registry.principalState(link.principalId) !== "ACTIVE") {
@@ -233,4 +277,4 @@ function createContinuityLinker({ registry, principalBindings, clock = () => Dat
     });
 }
 
-module.exports = Object.freeze({ createContinuityLinker, parseSessionKey, LINKABLE_CHANNELS });
+module.exports = Object.freeze({ createContinuityLinker, LINKABLE_CHANNELS });

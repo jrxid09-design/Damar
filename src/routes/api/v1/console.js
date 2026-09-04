@@ -38,6 +38,7 @@ const homeManagerOnly = rejectLegacyActionMiddleware("home/device action");
 const labManagerOnly = rejectLegacyActionMiddleware("Lab action");
 const automationManagerOnly = rejectLegacyActionMiddleware("automation action");
 const mcpManagerOnly = rejectLegacyActionMiddleware("MCP administration action");
+const ownerTrustController = require("./controllers/ownerTrustController");
 
 // ---- Dashboard & telemetri ------------------------------------
 
@@ -400,5 +401,12 @@ router.get("/weather", personalController.weather);
 router.post("/weather/config", managerOnly);
 router.get("/profile", personalController.profile);
 router.post("/profile", managerOnly);
+
+// ---- Owner Trust (Wave 5 Lane 4) --------------------------------
+router.get("/owner-trust/status", ownerTrustController.trustStatus);
+router.post("/owner-trust/bootstrap/begin", ownerTrustController.bootstrapBegin);
+router.post("/owner-trust/bootstrap/complete", ownerTrustController.bootstrapComplete);
+router.post("/owner-trust/bind-console", ownerTrustController.bindConsole);
+router.post("/owner-trust/link-policy", ownerTrustController.setLinkPolicy);
 
 module.exports = router;

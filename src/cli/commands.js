@@ -359,6 +359,62 @@ const COMMANDS = {
         }
     },
 
+    trust: {
+        desc: "status Owner Trust (state, owner, bindings, audit)",
+        async run(session) {
+
+            const s = await session.client.trustStatus();
+            if (!s.ok) throw new Error(s.message ?? "trust status gagal");
+            const rows = [
+                ["state", s.state],
+                ["bootstrapped", String(s.bootstrapped)],
+                ["generation", String(s.generation)],
+                ["owner", s.owner ? s.owner.principalId : "-"],
+                ["admins", s.admins.length ? s.admins.map(a => a.principalId).join(", ") : "-"],
+                ["bindings", String(s.bindings.length)],
+                ["link policy", s.linkPolicy.enabled ? "enabled" : "disabled"],
+                ["audit", s.audit.ok ? "ok" : `DEGRADED (${s.audit.rejected} rejected)`],
+                ["durable", String(s.durable)]
+            ];
+            console.log("\n" + rows.map(([k, v]) =>
+                `  ${c.muted(k.padEnd(14))} ${c.text(v)}`).join("\n") + "\n");
+
+        }
+    },
+
+    "owner-provision": {
+        desc: "bootstrap Owner pertama (vault-mode; kunci tidak pernah keluar)",
+        async run(session, arg) {
+
+            const principalId = arg.trim() || "owner";
+            const st = await session.client.trustStatus();
+            if (st.ok && st.bootstrapped) {
+                console.log(`  ${symbols.warn} ${c.warn("Owner sudah terdaftar")} (${st.owner?.principalId ?? "?"}) — bootstrap permanen tertutup.`);
+                return;
+            }
+            const b = await session.client.trustBootstrapBegin({ principalId });
+            if (!b.ok) throw new Error(b.message ?? "bootstrap begin gagal");
+            console.log(`  ${c.muted("ceremony")} ${b.ceremonyId}`);
+            console.log(`  ${c.muted("challenge")} ${b.challenge.nonce.slice(0, 16)}… (expires ${new Date(b.expiresAtMs).toLocaleTimeString()})`);
+            const done = await session.client.trustBootstrapComplete({ ceremonyId: b.ceremonyId });
+            if (!done.ok) throw new Error(done.message ?? "bootstrap complete gagal");
+            console.log(`  ${symbols.ok} ${c.ok(`Owner '${done.principalId}' aktif`)} (generation ${done.generation})`);
+            console.log(`  ${c.dim("Kunci root disegel di Vault; tidak pernah keluar dari daemon.")}`);
+
+        }
+    },
+
+    "owner-bind": {
+        desc: "bind sesi console ini ke Owner (bukti ditandatangani daemon)",
+        async run(session) {
+
+            const r = await session.client.trustBindConsole();
+            if (!r.ok) throw new Error(r.message ?? "bind gagal");
+            console.log(`  ${symbols.ok} ${c.ok("Console session bound")} (${r.bindingId}, generation ${r.generation})`);
+
+        }
+    },
+
     exit: {
         desc: "keluar",
         run() {
