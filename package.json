@@ -61,6 +61,7 @@
     "qrcode": "^1.5.4",
     "sqlite3": "^6.0.1",
     "tree-sitter-wasms": "^0.1.11",
+    "undici": "^6.28.0",
     "web-tree-sitter": "^0.22.6",
     "ws": "^8.21.1"
   },
