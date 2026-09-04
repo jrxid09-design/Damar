@@ -106,7 +106,12 @@ async function fetchJson(url, opts = {}) {
  * @param {string} url
  * @param {{ timeoutMs?, maxBytes?, stallTimeoutMs?, headers?,
  *           expectedContentType?: "image"|"json"|"text"|null,
- *           allowedHosts?: string[] }} opts
+ *           allowedHosts?: string[],
+ *           policy?: "public"|"trusted-lan" }} opts
+ *   policy: default "public" (satu-satunya nilai untuk pemanggil arbitrer).
+ *   "trusted-lan" HANYA sah di jalur akuisisi kamera berotorisasi yang
+ *   sudah melewati jembatan trust kanonik (cctv.js) — bukan pilihan
+ *   pemanggil arbitrer.
  * @returns {Promise<Buffer>}
  */
 async function fetchBuffer(url, opts = {}) {
@@ -121,7 +126,7 @@ async function fetchBuffer(url, opts = {}) {
             }
         }
         const result = await ssrfGuard.guardedFetch(url, {
-            policy: "public",
+            policy: opts.policy === "trusted-lan" ? "trusted-lan" : "public",
             timeoutMs,
             maxBytes,
             stallTimeoutMs: opts.stallTimeoutMs ?? DEFAULT_STALL_MS,
