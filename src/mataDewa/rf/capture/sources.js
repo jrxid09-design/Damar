@@ -174,10 +174,12 @@ function parseJsonIntArray(text) {
     const values = new Int16Array(parsed.length);
     for (let i = 0; i < parsed.length; i++) {
         const v = parsed[i];
-        if (typeof v !== "number" || !Number.isFinite(v)) {
-            return { ok: false, reason: `elemen ${i} bukan angka finite` };
+        // E2: I/Q wajib INTEGER sah — desimal (1.5), NaN, Infinity,
+        // 1e999 TIDAK pernah dibulatkan/dipotong jadi sampel CSI sah.
+        if (typeof v !== "number" || !Number.isInteger(v) || !Number.isFinite(v)) {
+            return { ok: false, reason: `elemen ${i} bukan integer sah: ${String(v)}` };
         }
-        values[i] = Math.round(v);
+        values[i] = v;
     }
     return { ok: true, values };
 }
@@ -201,7 +203,11 @@ function parseRuviewFrame(buffer) {
         return { ok: false, reason: "magic ADR-018 tidak cocok" };
     }
     const nodeId = buffer.readUInt8(4);
-    const antennas = buffer.readUInt8(5) || 1;
+    // E1: antenna count 0 TIDAK pernah diam-diam jadi 1 — reject.
+    const antennas = buffer.readUInt8(5);
+    if (antennas === 0) {
+        return { ok: false, reason: "antenna count 0 tidak sah" };
+    }
     const subcarriers = buffer.readUInt16LE(6);
     const freqMhz = buffer.readUInt32LE(8);
     const seq = buffer.readUInt32LE(12);
@@ -211,10 +217,22 @@ function parseRuviewFrame(buffer) {
     if (subcarriers === 0 || subcarriers > CAPTURE_LIMITS.MAX_SUBCARRIERS) {
         return { ok: false, reason: `jumlah subcarrier di luar batas: ${subcarriers}` };
     }
+    // E1: aritmetika panjang yang mustahil (perkalian meluap jauh dari
+    // batas frame) ditolak sebelum dipakai.
+    const perSubBytes = 2 * antennas;
+    const requiredBytes = ADR018_HEADER_SIZE + subcarriers * perSubBytes;
+    if (!Number.isSafeInteger(requiredBytes) || requiredBytes > CAPTURE_LIMITS.MAX_FRAME_BYTES) {
+        return { ok: false, reason: "aritmetika panjang frame tidak masuk akal" };
+    }
     const iqBytes = buffer.length - ADR018_HEADER_SIZE;
-    const availablePairs = Math.floor(iqBytes / (2 * antennas));
+    const availablePairs = Math.floor(iqBytes / perSubBytes);
     if (availablePairs < subcarriers) {
         return { ok: false, reason: `payload I/Q kurang: butuh ${subcarriers}, ada ${availablePairs}` };
+    }
+    // E1: payload di luar yang didokumentasikan = byte ekor asing → REJECT
+    // (bounded parsing; tidak ada silent tolerance payload liar).
+    if (buffer.length !== requiredBytes) {
+        return { ok: false, reason: `panjang frame tidak persis: butuh ${requiredBytes}, dapat ${buffer.length} (payload ekor tidak diizinkan)` };
     }
 
     const amplitude = new Float32Array(subcarriers);

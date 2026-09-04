@@ -33,6 +33,27 @@ const {
 
 const SCHEMA_VERSION = 1;
 
+/** Kunci prototype-hostil + accessor: REJECT di pintu masuk (MD-005). */
+const HOSTILE_INPUT_KEYS = Object.freeze(new Set(["__proto__", "constructor", "prototype"]));
+
+/**
+ * Pemeriksaan pintu masuk: objek input TIDAK boleh membawa kunci
+ * prototype-hostil atau property accessor (getter/setter) — REJECT tanpa
+ * mengeksekusi getter apa pun (MD-012: tidak ada bypass level atas;
+ * deepCanonicalize hanya mencakup field bersarang).
+ */
+function assertSafeInputObject(input) {
+    for (const key of Object.getOwnPropertyNames(input)) {
+        if (HOSTILE_INPUT_KEYS.has(key)) {
+            throw new CanonError(`kunci prototype-hostil '${key}' ditolak`);
+        }
+        const descriptor = Object.getOwnPropertyDescriptor(input, key);
+        if (descriptor && (descriptor.get !== undefined || descriptor.set !== undefined)) {
+            throw new CanonError(`accessor property '${key}' ditolak (getter tidak pernah dieksekusi)`);
+        }
+    }
+}
+
 /** Jenis observasi yang dikenal (bebas diperluas provider). */
 const OBSERVATION_TYPE = Object.freeze({
     EARTHQUAKE: "earthquake",
@@ -116,6 +137,9 @@ function normalizeObservation(input = {}, { nowMs = Date.now(), futureSkewMs = C
         if (input === null || typeof input !== "object") {
             return { ok: false, reason: "input wajib objek" };
         }
+        // Pintu masuk ketat: kunci hostil + accessor DITOLAK sebelum baca
+        // (MD-012: level atas TIDAK bypass; getter tidak pernah dieksekusi).
+        assertSafeInputObject(input);
 
         // Geometry: dari field geometry atau location; WAJIB.
         let geometry;

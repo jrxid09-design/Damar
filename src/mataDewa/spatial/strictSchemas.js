@@ -18,6 +18,9 @@
 
 const OWN = Object.prototype.hasOwnProperty;
 
+/** Kunci prototype-hostil: SELALU reject (bukan drop, bukan re-assign). */
+const DANGEROUS_KEYS = Object.freeze(new Set(["__proto__", "constructor", "prototype"]));
+
 // Batas kanonikalisasi (bukan batas impor — ini batas rekaman kanonik).
 const CANON_LIMITS = Object.freeze({
     MAX_DEPTH: 6,
@@ -101,6 +104,10 @@ function deepCanonicalize(value, { depth = 0, state = { nodes: 0 }, limits = CAN
         const out = {};
         for (const key of keys) {
             if (byteLengthOf(key) > 128) throw new CanonError("kunci atribut > 128 bytes");
+            // Prototype trick: kunci __proto__/constructor/prototype pada
+            // input DITOLAK KERAS — tidak pernah menular ke rekaman kanonik
+            // (bukan diam-diam mengganti prototype objek hasil).
+            if (DANGEROUS_KEYS.has(key)) throw new CanonError(`kunci prototype-hostil '${key}' ditolak`);
             out[key] = deepCanonicalize(readOwn(value, key), { depth: depth + 1, state, limits });
         }
         return Object.freeze(out);
