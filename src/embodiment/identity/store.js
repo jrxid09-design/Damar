@@ -9,6 +9,7 @@
 
 const { fail, structuredCopy } = require("../core/util");
 const { DeviceIdentityService } = require("./service");
+const { createFileIdentityStore } = require("./fileStore");
 
 function createMemoryIdentityStore() {
     let saved = null;
@@ -31,4 +32,4 @@ async function loadIdentity({ store, clock, config, entropy, body } = {}) {
     return DeviceIdentityService.restore(data, { clock, config, entropy, body });
 }
 
-module.exports = { createMemoryIdentityStore, persistIdentity, loadIdentity };
+module.exports = { createMemoryIdentityStore, persistIdentity, loadIdentity, createFileIdentityStore };

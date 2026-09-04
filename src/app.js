@@ -27,6 +27,23 @@ app.use(express.json({ limit: "25mb" }));
 // HANYA setelah autentikasi sukses (identitas berprovenance dari
 // tokenGuard; tanpa token permukaan terkunci — fail-closed C2).
 const { tokenGuard } = require("./core/auth/tokenCompare");
+// Owner Trust (Wave 5 Lane 4): mint per-request console provenance so the
+// trust domain can authenticate the console surface from transport-owned
+// evidence minted at real ingress (never from caller payloads).
+const { ensureCanonicalComposed } = require("./authority/ownerTrustComposition");
+const ownerTrustProvenance = (async () => {
+    try {
+        const comp = await ensureCanonicalComposed();
+        return comp.ingress.consoleProvenanceMiddleware();
+    } catch { return null; }
+})();
+app.use("/api/v1/console",
+    (req, res, next) => {
+        Promise.resolve(ownerTrustProvenance).then((mw) => {
+            if (typeof mw === "function") return mw(req, res, next);
+            next();
+        }).catch(next);
+    });
 app.use("/api/v1/console",
     tokenGuard({ roleWhenAuthenticated: "superadmin", surface: "console" }));
 
