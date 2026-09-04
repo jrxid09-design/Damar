@@ -99,6 +99,17 @@ class MataDewaService {
             clock: this.clock,
             allowLocalUdp: options.allowLocalUdp === true
         });
+        // MD-010: kanal ingest INTERNAL tepercaya RFManager → service.
+        // Kanal dibuat LEKSIKAL di komposisi kanonik ini dan hanya dipegang
+        // rfManager — bukan permukaan publik. Observasi yang masuk lewat
+        // kanal ini sudah ternormalisasi ketat oleh rfManager dan (untuk
+        // live UDP) membawa trust seal opaque. Ingress publik TETAP tidak
+        // dipercaya: string lineage tidak pernah menjadi live trust.
+        try {
+            const { createRfIngestChannel } = require("./rf/rfTrust");
+            this.rfManager.ingestChannel = createRfIngestChannel(this);
+        }
+        catch { /* tanpa kanal: observasi RF tidak di-ingest otomatis (fail closed) */ }
 
         // Kredensial provider — SATU jahitan ke Secret Vault kanonik Damar.
         // Tidak ada store kedua; konfigurasi hanya menyimpan SecretRef.
@@ -239,21 +250,45 @@ class MataDewaService {
     }
 
     /**
-     * Ingest observasi dari sumber LOKAL tepercaya (mis. RF sensing) —
-     * jalur kanonik yang SAMA dengan observasi provider, tidak ada
-     * jalan pintas. Mengembalikan jumlah yang diterima.
+     * Ingest observasi dari pemanggil PUBLIK (MD-012 ketat).
+     *
+     * HUKUM: SCHEMA VERSION != TRUST. SHAPE != TRUST. SETIAP item publik —
+     * termasuk yang tampak "sudah kanonik" (schemaVersion ada, JSON clone,
+     * look-alike) — MELEWATI normalisasi ketat penuh. Tidak ada bypass.
+     * Re-kanonikalisasi observasi kanonik yang sah bersifat idempoten.
+     * Kembalikan jumlah yang diterima.
      */
     ingestLocalObservations(observations) {
         const list = Array.isArray(observations) ? observations : [];
         const accepted = [];
         for (const item of list) {
-            if (!item || item.schemaVersion === undefined) {
-                // input mentah — normalisasi ketat dulu (reject-not-clamp)
-                const normalized = normalizeObservation(item, { nowMs: this.clock.nowMs() });
-                if (normalized.ok) accepted.push(normalized.observation);
-                continue;
-            }
-            accepted.push(item); // sudah kanonik dari rfManager
+            const normalized = normalizeObservation(item, { nowMs: this.clock.nowMs() });
+            if (normalized.ok) accepted.push(normalized.observation);
+        }
+        this._ingestObservations(accepted);
+        return accepted.length;
+    }
+
+    /**
+     * MD-010/C2: kanal ingest INTERNAL tepercaya (hanya dipegang kanal
+     * leksikal rfTrust yang dibuat di komposisi kanonik ini). Observasi
+     * sudah ternormalisasi ketat oleh rfManager; method ini meneruskan
+     * TANPA membuka jalur publik dan TANPA mempercayai input mentah —
+     * item yang gagal pemeriksaan bentuk minimum ditolak.
+     *
+     * Live trust dari seal opaque rfTrust DIBAWA OLEH OBJEK (property
+     * Symbol non-enumerable): JSON clone kehilangan seal → observasi
+     * yang dikloning dan dimasukkan lewat ingress publik otomatis
+     * kembali tidak dipercaya.
+     */
+    _ingestTrustedObservations(observations) {
+        const list = Array.isArray(observations) ? observations : [];
+        const accepted = [];
+        for (const item of list) {
+            // Bentuk minimum tetap diverifikasi (defense in depth) — kanal
+            // tepercaya tidak berarti item bebas validasi.
+            const normalized = normalizeObservation(item, { nowMs: this.clock.nowMs() });
+            if (normalized.ok) accepted.push(normalized.observation);
         }
         this._ingestObservations(accepted);
         return accepted.length;
