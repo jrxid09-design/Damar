@@ -68,18 +68,60 @@ class CameraRegistry {
     }
 
     /**
-     * MD-004: permintaan otorisasi kamera MILIK-OWNER → FAIL CLOSED
-     * pra-Lane4. Pemanggil arbitrer TIDAK BISA menandai kamera sebagai
-     * AUTHORIZED_DEVICE dengan URL semaunya; integrasi trust perangkat
-     * kanonik (Lane 4 tersertifikasi) wajib ada dulu.
+     * MD-004 + Integrasi 2 (post-Lane4): permintaan otorisasi kamera
+     * MILIK-OWNER hanya sah lewat jembatan trust kanonik. Pemanggil tanpa
+     * jembatan tetap DITOLAK dengan OWNER_TRUST_NOT_INTEGRATED (tidak ada
+     * permukaan API yang memalsukan otorisasi perangkat); pemanggil DENGAN
+     * jembatan harus membuktikan principal Owner/Admin terautentikasi +
+     * binding perangkat kanonik aktif, lalu menerima token SEALED dari
+     * jembatan — string/flag pemanggil tidak pernah cukup.
      */
-    registerAuthorizedCamera() {
-        return {
-            ok: false,
-            code: "OWNER_TRUST_NOT_INTEGRATED",
-            reason: "otorisasi kamera pemilik belum terintegrasi (post-Lane4) — " +
-                "tidak ada permukaan API yang memalsukan otorisasi perangkat"
-        };
+    registerAuthorizedCamera({ id, label, location, snapshotUrl, metadata = {}, deviceId = null, authorization = null, cameraAuthorizer = null } = {}) {
+        if (!id || !snapshotUrl) {
+            return { ok: false, code: "OWNER_TRUST_NOT_INTEGRATED", reason: "kamera butuh id + snapshotUrl terdaftar" };
+        }
+        // Jalur pra-integrasi: tanpa jembatan kanonik, selalu ditolak.
+        if (!cameraAuthorizer || typeof cameraAuthorizer.mintCameraRegistrationToken !== "function" ||
+            typeof cameraAuthorizer.verifySealedToken !== "function") {
+            return {
+                ok: false,
+                code: "OWNER_TRUST_NOT_INTEGRATED",
+                reason: "otorisasi kamera pemilik belum terintegrasi (post-Lane4) — " +
+                    "tidak ada permukaan API yang memalsukan otorisasi perangkat"
+            };
+        }
+        // Argumen otorisasi dari pemanggil (authorized/force/accessClass
+        // dll.) TIDAK PERNAH bermakna otoritatif — diabaikan keras.
+        if (!deviceId || typeof deviceId !== "string") {
+            return { ok: false, code: "CAMERA_DEVICE_BINDING_REQUIRED", reason: "deviceId wajib (binding perangkat kanonik)" };
+        }
+        const mint = cameraAuthorizer.mintCameraRegistrationToken({ evidence: authorization, deviceId });
+        if (!mint.ok) {
+            return { ok: false, code: mint.code ?? "PRINCIPAL_NOT_AUTHENTICATED", reason: mint.reason ?? "otorisasi jembatan ditolak" };
+        }
+        if (!cameraAuthorizer.verifySealedToken(mint.token, deviceId)) {
+            return { ok: false, code: "CAMERA_AUTHORIZATION_SEAL_INVALID", reason: "token otorisasi tidak sah" };
+        }
+        let parsed;
+        try {
+            parsed = new URL(String(snapshotUrl));
+        }
+        catch {
+            return { ok: false, code: "CAMERA_URL_INVALID", reason: "snapshotUrl tidak sah" };
+        }
+        if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+            return { ok: false, code: "CAMERA_URL_INVALID", reason: "snapshotUrl tidak sah" };
+        }
+        const registered = this._register({
+            id, label, location,
+            snapshotUrl: parsed.toString(),
+            metadata: { ...metadata, deviceId },
+            accessClass: CAMERA_ACCESS.AUTHORIZED_DEVICE
+        });
+        if (registered.ok) {
+            registered.camera.trust = Object.freeze({ deviceId, principalId: mint.token.principalId });
+        }
+        return registered;
     }
 
     _register({ id, label, location, snapshotUrl, metadata, accessClass }) {
@@ -130,14 +172,25 @@ class CameraRegistry {
 
     /**
      * Apakah frame kamera ini boleh diambil sekarang. Fail-closed:
-     * RESTRICTED/UNAVAILABLE selalu ditolak; AUTHORIZED_DEVICE pun tidak
-     * pernah ada (registrasinya ditolak) — tidak ada bypass.
+     * RESTRICTED/UNAVAILABLE selalu ditolak; AUTHORIZED_DEVICE butuh
+     * keputusan otorisasi jembatan kanonik (Integrasi 2) — keputusan
+     * dihitung dari binding perangkat OwnerTrust pada saat bertanya, jadi
+     * revokasi berlaku segera; tidak ada bypass.
      */
-    canFetch(id) {
+    canFetch(id, { authorization = null, cameraAuthorizer = null } = {}) {
         const camera = this.cameras.get(id);
         if (!camera) return { ok: false, reason: "kamera tidak terdaftar" };
         if (camera.cameraAccess !== CAMERA_ACCESS.PUBLIC) {
-            return { ok: false, reason: `akses ${camera.cameraAccess} — fail-closed, tidak ditembus` };
+            if (camera.cameraAccess !== CAMERA_ACCESS.AUTHORIZED_DEVICE) {
+                return { ok: false, reason: `akses ${camera.cameraAccess} — fail-closed, tidak ditembus` };
+            }
+            if (!cameraAuthorizer || typeof cameraAuthorizer.authorizeCameraFrame !== "function") {
+                return { ok: false, reason: "akses AUTHORIZED_DEVICE — jembatan trust kanonik tidak terkomposisi (fail-closed)" };
+            }
+            const verdict = cameraAuthorizer.authorizeCameraFrame({ camera, evidence: authorization });
+            if (!verdict.ok) {
+                return { ok: false, reason: verdict.reason ?? "otorisasi jembatan ditolak", code: verdict.code };
+            }
         }
         const host = camera.metadata?.snapshotHost;
         if (!host) {
@@ -239,6 +292,65 @@ async function acquirePublicCameraFrame(cameraRegistry, cameraId, opts = {}) {
     return { ok: true, bytes: buffer, contentType: "image/jpeg", mediaDescriptor: descriptor, mediaIngest };
 }
 
+/**
+ * Integrasi 2 (post-Lane4): akuisisi frame kamera AUTHORIZED_DEVICE milik
+ * pemilik — HANYA lewat jembatan trust kanonik. Alur wajib:
+ * otorisasi jembatan (principal Owner/Admin terautentikasi + binding
+ * perangkat aktif, revokasi berlaku segera) → batas jaringan kanonik
+ * dengan kebijakan trusted-lan (host kamera = satu-satunya allowlist,
+ * redirect lintas host ditolak) → bytes bounded → deskriptor inert +
+ * ingest MediaIngress kanonik bila terkomposisi.
+ * Tanpa jembatan → fail closed (tidak ada akses LAN dari pemanggil arbitrer).
+ */
+async function acquireAuthorizedCameraFrame(cameraRegistry, cameraId, { authorization = null, cameraAuthorizer = null, mediaIngress = null, maxBytes, timeoutMs } = {}) {
+    const verdict = cameraRegistry.canFetch(cameraId, { authorization, cameraAuthorizer });
+    if (!verdict.ok) {
+        return { ok: false, code: verdict.code ?? "CAMERA_NOT_AUTHORIZED", reason: verdict.reason };
+    }
+    const camera = verdict.camera;
+    const snapshotUrl = camera.metadata?.snapshotUrl;
+    const snapshotHost = camera.metadata?.snapshotHost;
+    if (!snapshotUrl || !snapshotHost) {
+        return { ok: false, code: "CAMERA_SNAPSHOT_MISSING", reason: "kamera tanpa snapshot terdaftar" };
+    }
+
+    const { fetchBuffer } = require("../providers/http");
+    const bounded = Number.isFinite(maxBytes) && maxBytes > 0
+        ? Math.min(maxBytes, MAX_FRAME_BYTES) : MAX_FRAME_BYTES;
+
+    // Kebijakan AUTHORIZED_LOCAL_SOURCE: host terdaftar = satu-satunya
+    // allowlist; policy trusted-lan hanya sah di jalur ini (jembatan sudah
+    // mengotorisasi), redirect ke host berbeda tetap ditolak.
+    let buffer;
+    try {
+        buffer = await fetchBuffer(snapshotUrl, {
+            policy: "trusted-lan",
+            allowedHosts: [snapshotHost],
+            maxBytes: bounded,
+            timeoutMs: timeoutMs ?? DEFAULT_FRAME_TIMEOUT_MS,
+            expectedContentType: "image"
+        });
+    }
+    catch (error) {
+        return { ok: false, code: "SNAPSHOT_FETCH_FAILED", reason: String(error.message).slice(0, 240) };
+    }
+    const descriptor = Object.freeze({
+        ...frameMediaDescriptor(camera),
+        capturedAtMs: Date.now(),
+        sizeBytes: buffer.length
+    });
+
+    const mediaIngest = mediaIngress
+        ? await tryIngestViaMediaIngress(mediaIngress, camera, buffer, descriptor)
+        : {
+            ok: false,
+            code: "MEDIA_INGRESS_NOT_COMPOSED",
+            reason: "MediaIngress kanonik Damar belum dikomposisi di daemon — (inert, tidak ada link kedua)"
+        };
+
+    return { ok: true, bytes: buffer, contentType: "image/jpeg", mediaDescriptor: descriptor, mediaIngest };
+}
+
 /** Inert: stringify bytes sekaligus menghindari getter hostil. */
 async function tryIngestViaMediaIngress(mediaIngress, camera, buffer, descriptor) {
     if (!mediaIngress || typeof mediaIngress.ingest !== "function") {
@@ -270,6 +382,7 @@ module.exports = {
     CAMERA_ACCESS,
     frameMediaDescriptor,
     acquirePublicCameraFrame,
+    acquireAuthorizedCameraFrame,
     tryIngestViaMediaIngress,
     requiresAuthorization
 };

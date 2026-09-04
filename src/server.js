@@ -163,6 +163,22 @@ function bootSubsystems() {
         service.start().catch(error => {
             telemetry.warn(`Mata Dewa gagal disiapkan: ${error.message}`);
         });
+        // Lane 5 integrasi (post-Lane4): jembatan trust kanonik dipasang
+        // SETELAH komposisi OwnerTrust tersertifikasi selesai (async). Boot
+        // tetap graceful — kegagalan integrasi menurunkan status (fail
+        // closed), bukan menjatuhkan Damar. Sebelum jembatan terpasang,
+        // semua permukaan berotorisasi Mata Dewa tetap menolak
+        // (OWNER_TRUST_NOT_INTEGRATED / RF_DEVICE_GATE_NOT_COMPOSED).
+        require("./authority/ownerTrustComposition").ensureCanonicalComposed()
+            .then((comp) => {
+                const { buildMataDewaTrustBridges, attachMataDewaTrustBridges } = require("./mataDewa/trust/composition");
+                const bridges = buildMataDewaTrustBridges(comp);
+                attachMataDewaTrustBridges(service, bridges);
+                telemetry.info?.("Mata Dewa: jembatan trust kanonik terpasang (post-Lane4)");
+            })
+            .catch((error) => {
+                telemetry.warn(`Mata Dewa: jembatan trust kanonik gagal terpasang (fail-closed): ${error.message}`);
+            });
     }
     catch (error) {
         telemetry.warn(`Mata Dewa gagal disiapkan: ${error.message}`);

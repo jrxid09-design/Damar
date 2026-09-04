@@ -122,6 +122,27 @@ class MataDewaService {
                 const normalized = normalizeObservation(item, { nowMs: this.clock.nowMs() });
                 if (!normalized.ok) continue;
                 const canonical = normalized.observation;
+                // Integrasi 3 (post-Lane4): gerbang otorisasi perangkat EKSTERNAL.
+                // Hanya sumber LIVE (udp) yang bisa jadi kandidat produksi-live;
+                // replay/simulasi tetap non-produksi by-design (binding replay).
+                // Tanpa gerbang terkomposisi (komposisi pra-integrasi/uji),
+                // semantik audited core berlaku apa adanya.
+                if (canonical.attributes?.sourceKind === "udp") {
+                    const gate = this._rfDeviceGateAccessor?.() ?? null;
+                    if (gate) {
+                        const verdict = gate.authorizeLiveBinding({
+                            sensorId: canonical.attributes?.sensorId,
+                            sourceKind: "udp"
+                        });
+                        if (!verdict.ok) {
+                            // Bukti tetap disimpan sebagai TIDAK-dipercaya-live
+                            // (terlihat coarse di watch, tidak pernah alert).
+                            this._ingestObservations([canonical]);
+                            accepted += 1;
+                            continue;
+                        }
+                    }
+                }
                 rfTrustDomain.markTrustedLive(canonical, binding);
                 this._ingestObservations([canonical]);
                 accepted += 1;
@@ -140,6 +161,27 @@ class MataDewaService {
         // watch/status). Kemampuan mark TIDAK pernah lewat sini.
         this._rfTrustVerify = (observation) => rfTrustDomain.verifyTrustedLive(observation);
         this._rfTrustDiagnostics = () => rfTrustDomain.diagnostics();
+
+        // ---- Integrasi 3/4 (post-Lane4): gerbang perangkat + permukaan
+        // kontrol TERISTIMEWA. Gerbang berasal dari komposisi trust kanonik
+        // (attachMataDewaTrustBridges) — tanpa itu, live UDP tidak pernah
+        // menjadi kandidat produksi-live di komposisi produksi. Permukaan
+        // rfControl non-enumerable: HANYA actuator Action Fabric kanonik
+        // yang memegangnya (Lane 3 execute), bukan otoritas publik.
+        this._rfDeviceGateAccessor = () => this._trustBridges?.rfDeviceTrustGate ?? null;
+        const { createRfControlSurface } = require("./trust/rfControlSurface");
+        const rfControl = createRfControlSurface({
+            service: this,
+            gateAccessor: this._rfDeviceGateAccessor,
+            auditAccessor: () => this._trustBridges?.audit ?? null,
+            allowLocalUdp: options.allowLocalUdp === true
+        });
+        Object.defineProperty(this, "rfControl", {
+            value: Object.freeze(rfControl),
+            enumerable: false,
+            writable: false,
+            configurable: false
+        });
         // MD-016: watch memakai verifikator read-only yang sama (metadata
         // internal). Kalau komposisi membawa WatchEngine eksternal, verifikator
         // tetap dilekatkan (read-only; bukan kemampuan mint).
