@@ -94,7 +94,13 @@ test("structural: action module imports no executors, authority mutators, fs/net
                 // (the wiring module is separately scanned by the FORBIDDEN
                 // patterns above only for action files; mataDewa wiring
                 // laws are asserted in tests/mataDewa/visualModeWiring.test.js).
+                // Lane 5 integration: the RF control wiring follows the
+                // identical MD-011 pattern (descriptive capability metadata
+                // + actuator binding over the service's internal control
+                // surface; NO grants, NO authority mutators — laws asserted
+                // in tests/mataDewa/trustIntegration.test.js).
                 (isBootstrap && target === "../mataDewa/capabilities/visualModeWiring") ||
+                (isBootstrap && target === "../mataDewa/capabilities/rfControlWiring") ||
                 (isBootstrap && target === "../mataDewa/composition") ||
                 (isActuatorRegistry && target === "../../capability/registry/ids");
             assert.ok(ok, `${file}: unexpected external require '${target}'`);
