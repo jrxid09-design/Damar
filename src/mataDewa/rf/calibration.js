@@ -278,6 +278,31 @@ class RfCalibration {
             quality: this._quality
         });
     }
+
+    /**
+     * Deklarasi kalibrasi untuk binding live-trust (MD-015/016/017).
+     * Hanya CALIBRATED sah yang mengembalikan deklarasi (null selain itu)
+     * — COLLECTING/STALE/NOISY/INVALID/RECALIBRATION_REQUIRED TIDAK pernah
+     * membentuk bukti live. Semua field sudah strict (finite, bounded)
+     * dari buildCalibrationQuality; pemanggil (RfManager kanonik) memakai
+     * ini sebagai calibration-portion dari binding trusted.
+     */
+    trustedDeclaration() {
+        if (this._state !== CALIBRATION_STATE.CALIBRATED || !this._quality) {
+            return null;
+        }
+        return Object.freeze({
+            state: CALIBRATION_STATE.CALIBRATED,
+            generation: this.generation,
+            validatedAtMs: this._quality.lastValidatedAtMs,
+            ttlMs: this._quality.ttlMs,
+            quality: Object.freeze({
+                sampleCount: this._quality.sampleCount,
+                baselineMetric: this._quality.baselineMetric,
+                noiseMetric: this._quality.noiseMetric
+            })
+        });
+    }
 }
 
 module.exports = Object.freeze({

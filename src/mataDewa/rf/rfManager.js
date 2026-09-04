@@ -22,9 +22,6 @@ const { RfProcessingSession } = require("./processing");
 const { normalizeObservation, OBSERVATION_TYPE } = require("../observations/observation");
 const { LINEAGE_KIND } = require("../spatial/lineage");
 const { isValidPoint } = require("../spatial/geo");
-const {
-    registerRfTrustComposition, mintRfLiveTrustFor, sealObservationAsTrustedLive
-} = require("./rfTrust");
 const { RfCalibration, CALIBRATION_STATE } = require("./calibration");
 
 const RF_UNITS = Object.freeze({
@@ -35,11 +32,27 @@ const RF_UNITS = Object.freeze({
 class RfManager {
 
     /**
-     * @param {{ clock?: { nowMs(): number }, allowLocalUdp?: boolean }} options
+     * @param {{
+     *   clock?: { nowMs(): number },
+     *   allowLocalUdp?: boolean,
+     *   trustedRfSubmit?: null | ((observation: object, binding: object) => object)
+     * }} options
+     *
+     * MD-015/1E: `trustedRfSubmit` HANYA diberikan oleh komposisi kanonik
+     * (MataDewaService). RfManager yang dibuat langsung TIDAK punya
+     * kemampuan ini → ia boleh memparsing/memproses/menguji, tetapi TIDAK
+     * PERNAH dapat menciptakan bukti live produksi kanonik (fail closed).
+     * Callback dilewatkan sebagai closure — TIDAK dijadikan properti publik,
+     * TIDAK diekspor lewat status()/describe().
      */
-    constructor({ clock = { nowMs: () => Date.now() }, allowLocalUdp = false } = {}) {
+    constructor({ clock = { nowMs: () => Date.now() }, allowLocalUdp = false, trustedRfSubmit = null } = {}) {
         this.clock = clock;
         this.allowLocalUdp = allowLocalUdp === true;
+        // MD-015: kemampuan submit live HANYA lewat callback leksikal dari
+        // komposisi kanonik. Bukan mint di manager — manager TIDAK PERNAH
+        // memegang kemampuan menandai; ia hanya mengirimkan bukti + binding,
+        // dan domain kanonik yang memutuskan (validasi + mark + store).
+        this._trustedRfSubmit = typeof trustedRfSubmit === "function" ? trustedRfSubmit : null;
         /** @type {Map<string, RfSource>} */
         this.sources = new Map();
         /** @type {Map<string, RfProcessingSession>} */
@@ -53,11 +66,6 @@ class RfManager {
         this.observationsProduced = 0;
         this.observationsRejected = 0;
         this.lastSourceStatuses = [];
-
-        // MD-010: komposisi ini mendaftarkan diri sebagai pemegang kemampuan
-        // mint live-trust. Kemampuan mint tidak pernah diekspor ke publik.
-        registerRfTrustComposition(this);
-        this._mintLiveTrust = mintRfLiveTrustFor(this);
     }
 
     /**
@@ -227,6 +235,9 @@ class RfManager {
                 sensorId: source.sensorId,
                 captureSession: session.captureSession,
                 sourceKind: source.kind,
+                channel: source.kind === SOURCE_KIND.UDP
+                    ? (Number.isFinite(source.lastFrame?.channel) ? source.lastFrame.channel : null)
+                    : null,
                 ...calibrationMeta,
                 ...(session.location
                     ? { sensorLat: session.location.lat, sensorLon: session.location.lon, presence: estimate.presence ?? null }
@@ -252,19 +263,27 @@ class RfManager {
             this.observationsRejected += 1;
             return null;
         }
-        // MD-010: HANYA sumber live UDP yang menerima trust seal opaque —
-        // dan HANYA bila kalibrasi terikat sumber ini sah (CALIBRATED).
-        // Replay TIDAK PERNAH menerima seal.
-        if (source.kind === SOURCE_KIND.UDP && calibration &&
-            calibration.isUsableForProductionInference({ nowMs })) {
+        // MD-015/MD-017: TIDAK ada seal pra-penyimpanan di sini. Objek ini
+        // BUKAN objek yang disimpan service (service menormalkan ulang →
+        // objek baru). SEMUA bukti dikirim ke komposisi kanonik lewat
+        // callback tepercaya — PRODUSEN HANYA MENGIRIM; OTORITAS (mint
+        // domain) YANG MEMUTUSKAN: service menormalkan, meng-frozen,
+        // menandai objek tersimpan BILA binding sah, lalu menyimpan.
+        // sourceKind REPLAY/SIMULASI ditolak keras di mint (Repair 5) —
+        // penegakan di otoritas, bukan di produsen. Tanpa callback
+        // (RfManager langsung) → tidak ada bukti live kanonik (fail closed).
+        if (this._trustedRfSubmit) {
             try {
-                const seal = this._mintLiveTrust({
+                this._trustedRfSubmit(result.observation, {
                     sensorId: source.sensorId,
-                    captureSession: session.captureSession
+                    captureSession: session.captureSession,
+                    sourceKind: source.kind,
+                    channel: Number.isFinite(source.lastFrame?.channel)
+                        ? source.lastFrame.channel : null,
+                    calibration: calibration ? calibration.trustedDeclaration() : null
                 });
-                sealObservationAsTrustedLive(result.observation, seal);
             }
-            catch { /* tanpa seal = tidak dipercaya live (fail closed) */ }
+            catch { /* kegagalan submit tidak mengubah observasi (fail closed) */ }
         }
         return result.observation;
     }
