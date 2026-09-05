@@ -162,26 +162,17 @@ class MataDewaService {
         this._rfTrustVerify = (observation) => rfTrustDomain.verifyTrustedLive(observation);
         this._rfTrustDiagnostics = () => rfTrustDomain.diagnostics();
 
-        // ---- Integrasi 3/4 (post-Lane4): gerbang perangkat + permukaan
-        // kontrol TERISTIMEWA. Gerbang berasal dari komposisi trust kanonik
-        // (attachMataDewaTrustBridges) — tanpa itu, live UDP tidak pernah
-        // menjadi kandidat produksi-live di komposisi produksi. Permukaan
-        // rfControl non-enumerable: HANYA actuator Action Fabric kanonik
-        // yang memegangnya (Lane 3 execute), bukan otoritas publik.
+        // ---- Integrasi 3/4 (post-Lane4): gerbang perangkat dari komposisi
+        // trust kanonik (attachMataDewaTrustBridges) — tanpa itu, live UDP
+        // tidak pernah menjadi kandidat produksi-live di komposisi produksi.
+        // MD-019: permukaan kontrol RF TERISTIMEWA TIDAK hidup di service.
+        // Ia lahir HANYA di dalam komposisi trust (closure modul jembatan)
+        // dan dijangkau actuator Action Fabric lewat resolusi leksikal —
+        // bukan lewat properti service apa pun, enumerable maupun tidak.
         this._rfDeviceGateAccessor = () => this._trustBridges?.rfDeviceTrustGate ?? null;
-        const { createRfControlSurface } = require("./trust/rfControlSurface");
-        const rfControl = createRfControlSurface({
-            service: this,
-            gateAccessor: this._rfDeviceGateAccessor,
-            auditAccessor: () => this._trustBridges?.audit ?? null,
-            allowLocalUdp: options.allowLocalUdp === true
-        });
-        Object.defineProperty(this, "rfControl", {
-            value: Object.freeze(rfControl),
-            enumerable: false,
-            writable: false,
-            configurable: false
-        });
+        // Komposisi-level UDP flag (satu pintu) dibaca permukaan kontrol
+        // pada saat attach trust (sumber kebenaran yang sama).
+        this._allowLocalUdp = options.allowLocalUdp === true;
         // MD-016: watch memakai verifikator read-only yang sama (metadata
         // internal). Kalau komposisi membawa WatchEngine eksternal, verifikator
         // tetap dilekatkan (read-only; bukan kemampuan mint).

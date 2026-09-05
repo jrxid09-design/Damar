@@ -68,6 +68,7 @@ const {
     currentPeerProvenance
 } = require("./ownerTrust/transportAdapters");
 const { createAuditLedger, createFileAuditSink } = require("../runtime/auditLedger");
+const { brandCanonicalComposition } = require("./ownerTrust/canonicalCompositionBrand");
 const { createSecretVault } = require("../runtime/vault");
 const { createFileSecretStore } = require("../runtime/vault/store");
 const { createProductionCipherAdapter } = require("../runtime/vaultProviders");
@@ -122,7 +123,13 @@ let compositionPromise = null;
  *   <dir>/ownertrust-initialized.json — OT-002 initialization anchor
  *   <dir>/ownertrust-bootstrap.lock   — OT-003 ceremony reservation
  */
-async function compose(stateFile, { forTest = false } = {}) {
+async function compose(stateFile, { forTest = false, ledgerOverride = null } = {}) {
+    // MD-018 test-only seam: an explicit ledger override (Mata Dewa audit
+    // sink test scenarios) is honored ONLY for forTest compositions. The
+    // production path never carries this option — fail loudly otherwise.
+    if (ledgerOverride !== null && ledgerOverride !== undefined && forTest !== true) {
+        throw new TypeError("OT_LEDGER_OVERRIDE_PRODUCTION_REJECTED: ledger override hanya untuk komposisi forTest");
+    }
     const clock = () => Date.now();
     const durable = stateFile !== null;
     const dir = durable ? path.dirname(stateFile) : null;
@@ -247,10 +254,19 @@ async function compose(stateFile, { forTest = false } = {}) {
         }
     }
 
-    return Object.freeze({
+    // MD-018: brand the composition BEFORE it leaves this module — a sealed
+    // WeakSet membership that duck-typed lookalikes (spread copies, forged
+    // registries) can never obtain. Downstream trust consumers (Mata Dewa
+    // bridges) reject unbranded compositions.
+    //
+    // Test-only ledger exposure: the ownerTrust audit gate above keeps its
+    // own (real) ledger; only the comp.ledger read by the Mata Dewa audit
+    // sink switches to the override, mirroring a genuine sink failure.
+    const effectiveLedger = (forTest === true && ledgerOverride) ? ledgerOverride : ledger;
+    return brandCanonicalComposition(Object.freeze({
         registry, proofVerifier, firstOwnerBootstrap, authVerifier,
         ratifyAsOwner: ownerRatify, principalBindings, channelBinders,
-        continuityLinker, store, vault, auditGate, ledger, ingress,
+        continuityLinker, store, vault, auditGate, ledger: effectiveLedger, ingress,
         auditSink, selfSignOwnerProof,
         testMint,
         /** Release the audit sink's single-writer lock (graceful shutdown). */
@@ -258,7 +274,7 @@ async function compose(stateFile, { forTest = false } = {}) {
             if (auditSink) auditSink.close();
         },
         durable
-    });
+    }));
 }
 
 /** Composition-bound Owner ratification gate. */
@@ -406,8 +422,9 @@ function resolveOwnerAuthVerifier() {
  * This does NOT install anything into the canonical auth adapter; it returns
  * the composition so the sealed host composition can wire it.
  */
-async function composeOwnerTrustForTest({ stateFile = null } = {}) {
-    return compose(stateFile === null ? null : path.resolve(stateFile), { forTest: true });
+async function composeOwnerTrustForTest({ stateFile = null, ledgerOverride = null } = {}) {
+    return compose(stateFile === null ? null : path.resolve(stateFile),
+        { forTest: true, ledgerOverride });
 }
 
 module.exports = Object.freeze({

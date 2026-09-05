@@ -32,6 +32,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { createRfDeviceTrustGate } = require("./rfDeviceTrust");
 const { createProductionCipherAdapter } = require("../../runtime/vaultProviders");
+const { verifyTransportPeerProvenance } = require("../../authority/ownerTrust/provenance");
+const { isCanonicalComposition } = require("../../authority/ownerTrust/canonicalCompositionBrand");
+
+/** MD-018: objek bridges TERSERTIFIKASI — hanya buildMataDewaTrustBridges. */
+const canonicalBridgeInstances = new WeakSet();
 
 const CAMERA_AUTHZ_KIND = "mata-dewa.camera.authorization.v1";
 
@@ -60,13 +65,16 @@ function sanitizeAuditMetadata(metadata) {
  *   - binding perangkat aktif kind "device" untuk deviceId kamera,
  *   - principalId binding = principal terautentikasi.
  */
-function createCctvAuthorizer({ registry, authVerifier, audit } = {}) {
+function createCctvAuthorizer({ registry, authVerifier, channelBinders = null, audit } = {}) {
     if (!registry || typeof registry.findBinding !== "function" ||
         typeof registry.principalState !== "function") {
         throw new TypeError("CAMERA_AUTHORIZER_INVALID: registry OwnerTrust kanonik wajib ada");
     }
     if (typeof authVerifier !== "function") {
         throw new TypeError("CAMERA_AUTHORIZER_INVALID: authVerifier kanonik wajib ada");
+    }
+    if (channelBinders !== null && typeof channelBinders !== "object") {
+        throw new TypeError("CAMERA_AUTHORIZER_INVALID: channelBinders kanonik wajib objek/null");
     }
 
     function deviceBindingActive(deviceId) {
@@ -85,11 +93,12 @@ function createCctvAuthorizer({ registry, authVerifier, audit } = {}) {
 
     /**
      * Autentikasi principal dari evidence kanonik. Menerima:
-     *   - { proof }         → bukti kepemilikan Owner/Admin (authVerifier)
-     *   - { principalId, viaChannel, provenance } → binding kanal yang SUDAH
-     *     diautentikasi upstream oleh binder tersertifikasi (viaChannel
-     *     konsol/telegram/whatsapp). provenance = bukti transport milik
-     *     ingress kanonik — BUKAN payload pemanggil.
+     *   - { proof }       → bukti kepemilikan Owner/Admin (authVerifier)
+     *   - { provenance }  → bukti transport peer KANONIK (di-mint oleh
+     *     ingress adapter tersertifikasi, bukan payload pemanggil).
+     *     Verdict dihitung oleh BINDER kanal tersertifikasi — pemanggil
+     *     tidak pernah menyumbang principalId/kanal (MD-020): klaim
+     *     "saya Owner via console" dari pemanggil tidak ada di kontrak.
      * Mengembalikan { ok, principalId, role } atau { ok:false, reason }.
      */
     function authenticate(evidence = {}) {
@@ -109,16 +118,22 @@ function createCctvAuthorizer({ registry, authVerifier, audit } = {}) {
             const role = owner && owner.principalId === result.principal ? "owner" : "admin";
             return { ok: true, principalId: result.principal, role };
         }
-        const { principalId, viaChannel } = evidence;
-        if (!isNonEmptyString(principalId, 128) || !isNonEmptyString(viaChannel, 32)) {
-            return { ok: false, reason: "evidence otorisasi tidak sah" };
+        // MD-020: evidence kanal = canonical TransportPeerProvenance yang
+        // diverifikasi binder tersertifikasi. Klaim principalId/kanal dari
+        // pemanggil TIDAK dipertimbangkan (tidak ada viaChannel).
+        const view = verifyTransportPeerProvenance(evidence.provenance);
+        if (!view) {
+            return { ok: false, reason: "provenance transport tidak kanonik" };
         }
-        if (!["console", "telegram", "whatsapp"].includes(viaChannel)) {
-            return { ok: false, reason: "kanal tidak dikenal" };
+        const binder = channelBinders?.[view.transport];
+        if (!binder || typeof binder.authenticate !== "function") {
+            return { ok: false, reason: `kanal ${view.transport} tidak tersertifikasi` };
         }
-        // principalId di sini HARUS berasal dari autentikasi kanal kanonik
-        // (binder tersertifikasi) di lapisan atas; jembatan memverifikasi
-        // ulang status principal + keanggotaan binding perangkat di bawah.
+        const verdict = binder.authenticate({ provenance: evidence.provenance });
+        if (!verdict || verdict.ok !== true || typeof verdict.principalId !== "string") {
+            return { ok: false, reason: `kanal ${view.transport}: ${verdict?.code ?? "OT_AUTH_FAILED"}` };
+        }
+        const principalId = verdict.principalId;
         const state = registry.principalState(principalId);
         if (state !== "ACTIVE") {
             return { ok: false, reason: `principal ${state}` };
@@ -259,13 +274,17 @@ function createMataDewaAuditSink({ ledger } = {}) {
  *   komposisi root produksi; bila tidak diberikan, vault komposisi dipakai.
  */
 function buildMataDewaTrustBridges(comp, { vault, mediaIngress = null, clock = { nowMs: () => Date.now() } } = {}) {
-    if (!comp || !comp.registry || !comp.authVerifier) {
-        throw new TypeError("TRUST_BRIDGES_INVALID: komposisi OwnerTrust kanonik wajib ada");
+    // MD-018: authority source must be the certified composition itself.
+    // A duck-typed lookalike ({ ...comp, registry: forged }) is rejected
+    // here — the WeakSet brand is unforgeable by construction.
+    if (!isCanonicalComposition(comp)) {
+        throw new TypeError("TRUST_BRIDGES_INVALID: komposisi OwnerTrust kanonik (ter-brand) wajib ada");
     }
     const audit = comp.ledger ? createMataDewaAuditSink({ ledger: comp.ledger }) : null;
     const cameraAuthorizer = createCctvAuthorizer({
         registry: comp.registry,
         authVerifier: comp.authVerifier,
+        channelBinders: comp.channelBinders ?? null,
         audit
     });
     const rfDeviceTrustGate = createRfDeviceTrustGate({
@@ -273,7 +292,7 @@ function buildMataDewaTrustBridges(comp, { vault, mediaIngress = null, clock = {
         clock,
         audit
     });
-    return Object.freeze({
+    const bridges = Object.freeze({
         registry: comp.registry,
         authVerifier: comp.authVerifier,
         vault: vault !== undefined ? vault : (comp.vault ?? null),
@@ -283,16 +302,33 @@ function buildMataDewaTrustBridges(comp, { vault, mediaIngress = null, clock = {
         rfDeviceTrustGate,
         mediaIngress
     });
+    // MD-018: bridges yang lahir dari pabrik ini saja yang boleh menempel
+    // ke service (attach memverifikasi brand; objek tiruan ditolak).
+    canonicalBridgeInstances.add(bridges);
+    return bridges;
 }
 
 /**
  * Lampirkan bridges ke service Mata Dewa (dipanggil sekali dari komposisi).
  * Vault disambungkan ke credential store (Integrasi 1) dengan fail-closed
  * bila cipher tidak aman di produksi.
+ *
+ * MD-019: permukaan kontrol RF TERISTIMEWA lahir DI SINI — di dalam
+ * closure modul jembatan, bukan sebagai properti service (enumerable
+ * maupun tidak). Pemanggil arbitrer tidak bisa mengintip/meniru service
+ * untuk mendapatkannya; satu-satunya jalan produksi tetap Action Intent →
+ * Authority kanonik → Actuation Fabric → actuator → resolusi leksikal.
+ * Permukaan di-cache per-service (WeakMap) agar state listener live
+ * (enable/disable/revoke) persisten antar invoke actuator.
  */
+const rfControlSurfacesByService = new WeakMap();
+
 function attachMataDewaTrustBridges(service, bridges) {
     if (!service || typeof service !== "object" || !service.credentialStore) {
         throw new TypeError("ATTACH_TRUST_INVALID: service Mata Dewa wajib ada");
+    }
+    if (!canonicalBridgeInstances.has(bridges)) {
+        throw new TypeError("ATTACH_TRUST_INVALID: bridges bukan hasil buildMataDewaTrustBridges kanonik (MD-018)");
     }
     if (bridges.vault) {
         const attach = typeof service.credentialStore.attachVault === "function"
@@ -303,6 +339,14 @@ function attachMataDewaTrustBridges(service, bridges) {
                 { code: "MATA_DEWA_VAULT_BIND_FAILED" });
         }
     }
+    const { createRfControlSurface } = require("./rfControlSurface");
+    const rfControl = createRfControlSurface({
+        service,
+        gateAccessor: () => bridges.rfDeviceTrustGate ?? null,
+        auditAccessor: () => bridges.audit ?? null,
+        allowLocalUdp: service._allowLocalUdp === true
+    });
+    rfControlSurfacesByService.set(service, Object.freeze(rfControl));
     Object.defineProperty(service, "_trustBridges", {
         value: Object.freeze(bridges),
         enumerable: false,
@@ -312,9 +356,21 @@ function attachMataDewaTrustBridges(service, bridges) {
     return service;
 }
 
+/**
+ * MD-019: resolusi LEXICAL permukaan kontrol RF untuk actuator Action
+ * Fabric. Hanya service yang pernah menerima attach trust kanonik punya
+ * permukaan; tanpa itu → null (fail-closed di actuator). Tidak ada jalur
+ * pembuatan on-demand: permukaan tidak pernah bisa di-mint dari service
+ * kosong.
+ */
+function resolveMataDewaRfControlSurface(service) {
+    return rfControlSurfacesByService.get(service) ?? null;
+}
+
 module.exports = Object.freeze({
     buildMataDewaTrustBridges,
     attachMataDewaTrustBridges,
+    resolveMataDewaRfControlSurface,
     createCctvAuthorizer,
     createMataDewaAuditSink,
     sanitizeAuditMetadata,
