@@ -314,16 +314,13 @@ function buildMataDewaTrustBridges(comp, { vault, mediaIngress = null, clock = {
  * Vault disambungkan ke credential store (Integrasi 1) dengan fail-closed
  * bila cipher tidak aman di produksi.
  *
- * MD-019: permukaan kontrol RF TERISTIMEWA lahir DI SINI — di dalam
- * closure modul jembatan, bukan sebagai properti service (enumerable
- * maupun tidak). Pemanggil arbitrer tidak bisa mengintip/meniru service
- * untuk mendapatkannya; satu-satunya jalan produksi tetap Action Intent →
- * Authority kanonik → Actuation Fabric → actuator → resolusi leksikal.
- * Permukaan di-cache per-service (WeakMap) agar state listener live
- * (enable/disable/revoke) persisten antar invoke actuator.
+ * MD-019: permukaan kontrol RF TERISTIMEWA TIDAK pernah lahir di sini dan
+ * TIDAK pernah disimpan di service. Service hanya menerima `_trustBridges`
+ * (non-enumerable, satu kali) — gerbang perangkat + sink audit yang
+ * kemudian dibaca permukaan kontrol pada saat actuator RF diciptakan di
+ * closure modul wiring (rfControlWiring). Tidak ada resolver yang diekspor
+ * dari modul mana pun.
  */
-const rfControlSurfacesByService = new WeakMap();
-
 function attachMataDewaTrustBridges(service, bridges) {
     if (!service || typeof service !== "object" || !service.credentialStore) {
         throw new TypeError("ATTACH_TRUST_INVALID: service Mata Dewa wajib ada");
@@ -340,14 +337,6 @@ function attachMataDewaTrustBridges(service, bridges) {
                 { code: "MATA_DEWA_VAULT_BIND_FAILED" });
         }
     }
-    const { createRfControlSurface } = require("./rfControlSurface");
-    const rfControl = createRfControlSurface({
-        service,
-        gateAccessor: () => bridges.rfDeviceTrustGate ?? null,
-        auditAccessor: () => bridges.audit ?? null,
-        allowLocalUdp: service._allowLocalUdp === true
-    });
-    rfControlSurfacesByService.set(service, Object.freeze(rfControl));
     Object.defineProperty(service, "_trustBridges", {
         value: Object.freeze(bridges),
         enumerable: false,
@@ -357,21 +346,9 @@ function attachMataDewaTrustBridges(service, bridges) {
     return service;
 }
 
-/**
- * MD-019: resolusi LEXICAL permukaan kontrol RF untuk actuator Action
- * Fabric. Hanya service yang pernah menerima attach trust kanonik punya
- * permukaan; tanpa itu → null (fail-closed di actuator). Tidak ada jalur
- * pembuatan on-demand: permukaan tidak pernah bisa di-mint dari service
- * kosong.
- */
-function resolveMataDewaRfControlSurface(service) {
-    return rfControlSurfacesByService.get(service) ?? null;
-}
-
 module.exports = Object.freeze({
     buildMataDewaTrustBridges,
     attachMataDewaTrustBridges,
-    resolveMataDewaRfControlSurface,
     createCctvAuthorizer,
     createMataDewaAuditSink,
     sanitizeAuditMetadata,

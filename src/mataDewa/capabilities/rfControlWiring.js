@@ -18,13 +18,52 @@
  *     di-sanitasi); scope kosong untuk operasi tanpa target resource.
  *   - Wiring gagal = KESALAHAN KOMPOSISI (typed error, tidak diam-diam).
  *   - TIDAK ada control plane RF kedua: actuator HANYA memanggil permukaan
- *     kontrol RF yang hidup di closure komposisi trust kanonik (MD-019,
- *     resolusi leksikal — bukan properti service), dan permukaan itu hanya
- *     bisa dijangkau lewat Lane 3 execute.
+ *     kontrol RF yang hidup di closure modul wiring ini (MD-019). Permukaan
+ *     itu lahir DI SINI — saat actuator dipasang — bukan sebagai properti
+ *     service, bukan lewat resolver ekspor modul mana pun. Pemanggil
+ *     arbitrer (model output/route/MCP) tidak punya jalur ke permukaan:
+ *     satu-satunya jalan produksi adalah Action Intent → Authority kanonik
+ *     → Actuation Fabric → actuator → sini.
  */
 
 const { CAPABILITY_FAMILIES } = require("./index");
-const { resolveMataDewaRfControlSurface } = require("../trust/composition");
+const { createRfControlSurface } = require("../trust/rfControlSurface");
+
+/**
+ * MD-019: permukaan kontrol RF per-service, PRIVATE ke closure modul ini.
+ *
+ * Permukaan diciptakan LAZY pada invoke pertama setelah service menerima
+ * attach trust kanonik (`_trustBridges` terpasang satu kali oleh
+ * attachMataDewaTrustBridges; non-enumerable, non-configurable). Service
+ * TIDAK PERNAH memegang permukaan; TIDAK ada WeakMap/resolver yang
+ * diekspor; tidak ada fungsi impor mana pun yang mengembalikan permukaan.
+ * Satu-satunya pemegang referensi adalah closure actuator di bawah —
+ * actuator yang lahir dari wireMataDewaRfControlActuators (registri
+ * actuator kanonik Lane 3).
+ *
+ * `service._trustBridges` dibaca karena DI SITULAH komposisi trust kanonik
+ * menitipkan gerbang perangkat + sink audit saat attach; tanpa attach
+ * (ZERO mode / belum terintegrasi) → null → actuator fail-closed
+ * MATA_DEWA_SERVICE_UNAVAILABLE.
+ */
+const rfControlSurfacesByService = new WeakMap();
+
+function surfaceForService(service) {
+    if (!service || typeof service !== "object" || !service._trustBridges) {
+        return null;
+    }
+    let surface = rfControlSurfacesByService.get(service);
+    if (!surface) {
+        surface = Object.freeze(createRfControlSurface({
+            service,
+            gateAccessor: () => service._trustBridges?.rfDeviceTrustGate ?? null,
+            auditAccessor: () => service._trustBridges?.audit ?? null,
+            allowLocalUdp: service._allowLocalUdp === true
+        }));
+        rfControlSurfacesByService.set(service, surface);
+    }
+    return surface;
+}
 
 const RF_CONTROL_CAPABILITIES = Object.freeze([
     Object.freeze({
@@ -157,10 +196,11 @@ function registerRfControlCapabilities({ registrar } = {}) {
 /**
  * Wire actuator RF control ke registry actuator kanonik (Lane 3 komposisi).
  * Setiap invoke: service diselesaikan LAZY; permukaan kontrol RF hidup di
- * closure komposisi trust kanonik (MD-019) — service TIDAK pernah
- * memegangnya, dan tidak ada jalur pembuatan on-demand dari pemanggil.
- * Actuator menjangkaunya lewat resolusi LEXICAL modul jembatan satu-satunya.
- * Argumen dijepit ke allowlist per operasi (fail-closed).
+ * closure modul ini (MD-019) — diciptakan hanya untuk service yang sudah
+ * menerima attach trust kanonik, dan hanya dirujuk oleh closure actuator
+ * di bawah. Service TIDAK pernah memegangnya; TIDAK ada resolver yang
+ * diekspor dari modul mana pun. Argumen dijepit ke allowlist per operasi
+ * (fail-closed).
  */
 function wireMataDewaRfControlActuators({ actuatorRegistry, wiring, resolveService } = {}) {
     if (!actuatorRegistry || typeof actuatorRegistry.register !== "function") {
@@ -208,9 +248,12 @@ function wireMataDewaRfControlActuators({ actuatorRegistry, wiring, resolveServi
                         clean[key] = parameters[key];
                     }
                 }
-                // MD-019: permukaan kontrol tidak pernah properti service —
-                // hanya jembatan trust kanonik yang memegangnya (lexical).
-                const rfControl = resolveMataDewaRfControlSurface(resolved);
+                // MD-019: permukaan kontrol TIDAK pernah properti service,
+                // TIDAK diekspor modul mana pun, TIDAK bisa di-mint dari
+                // pemanggil — hanya closure modul ini (surfaceForService,
+                // private) yang memegangnya, dan hanya untuk service yang
+                // sudah menerima attach trust kanonik.
+                const rfControl = surfaceForService(resolved);
                 if (!rfControl || typeof rfControl[operation] !== "function") {
                     return { ok: false, reason: MATA_DEWA_SERVICE_UNAVAILABLE };
                 }
