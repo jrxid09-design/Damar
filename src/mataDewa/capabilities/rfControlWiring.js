@@ -18,11 +18,13 @@
  *     di-sanitasi); scope kosong untuk operasi tanpa target resource.
  *   - Wiring gagal = KESALAHAN KOMPOSISI (typed error, tidak diam-diam).
  *   - TIDAK ada control plane RF kedua: actuator HANYA memanggil permukaan
- *     kontrol internal service kanonik (rfControl), dan permukaan itu
- *     hanya bisa dijangkau lewat Lane 3 execute.
+ *     kontrol RF yang hidup di closure komposisi trust kanonik (MD-019,
+ *     resolusi leksikal — bukan properti service), dan permukaan itu hanya
+ *     bisa dijangkau lewat Lane 3 execute.
  */
 
 const { CAPABILITY_FAMILIES } = require("./index");
+const { resolveMataDewaRfControlSurface } = require("../trust/composition");
 
 const RF_CONTROL_CAPABILITIES = Object.freeze([
     Object.freeze({
@@ -154,9 +156,11 @@ function registerRfControlCapabilities({ registrar } = {}) {
 
 /**
  * Wire actuator RF control ke registry actuator kanonik (Lane 3 komposisi).
- * Setiap invoke: service diselesaikan LAZY; permukaan kontrol internal
- * `rfControl` wajib ada (non-enumerable, bukan otoritas publik); argumen
- * dijepit ke allowlist per operasi.
+ * Setiap invoke: service diselesaikan LAZY; permukaan kontrol RF hidup di
+ * closure komposisi trust kanonik (MD-019) — service TIDAK pernah
+ * memegangnya, dan tidak ada jalur pembuatan on-demand dari pemanggil.
+ * Actuator menjangkaunya lewat resolusi LEXICAL modul jembatan satu-satunya.
+ * Argumen dijepit ke allowlist per operasi (fail-closed).
  */
 function wireMataDewaRfControlActuators({ actuatorRegistry, wiring, resolveService } = {}) {
     if (!actuatorRegistry || typeof actuatorRegistry.register !== "function") {
@@ -190,11 +194,11 @@ function wireMataDewaRfControlActuators({ actuatorRegistry, wiring, resolveServi
                 catch {
                     return { ok: false, reason: MATA_DEWA_SERVICE_UNAVAILABLE };
                 }
-                if (!resolved || !resolved.rfControl || typeof resolved.rfControl[operation] !== "function") {
+                if (!resolved || typeof resolved !== "object") {
                     return { ok: false, reason: MATA_DEWA_SERVICE_UNAVAILABLE };
                 }
                 // Allowlist argumen: kunci asing (terutama token otoritas)
-                // ditolak fail-closed.
+                // ditolak fail-closed — sebelum resolusi permukaan.
                 const clean = {};
                 if (parameters && typeof parameters === "object") {
                     for (const key of Object.keys(parameters)) {
@@ -204,7 +208,13 @@ function wireMataDewaRfControlActuators({ actuatorRegistry, wiring, resolveServi
                         clean[key] = parameters[key];
                     }
                 }
-                return resolved.rfControl[operation](clean);
+                // MD-019: permukaan kontrol tidak pernah properti service —
+                // hanya jembatan trust kanonik yang memegangnya (lexical).
+                const rfControl = resolveMataDewaRfControlSurface(resolved);
+                if (!rfControl || typeof rfControl[operation] !== "function") {
+                    return { ok: false, reason: MATA_DEWA_SERVICE_UNAVAILABLE };
+                }
+                return rfControl[operation](clean);
             }
         }));
     }

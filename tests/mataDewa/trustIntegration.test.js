@@ -35,9 +35,14 @@ const { createProductionCipherAdapter } = require("../../src/runtime/vaultProvid
 const {
     buildMataDewaTrustBridges,
     attachMataDewaTrustBridges,
+    resolveMataDewaRfControlSurface,
     createCctvAuthorizer
 } = require("../../src/mataDewa/trust/composition");
 const { createRfDeviceTrustGate } = require("../../src/mataDewa/trust/rfDeviceTrust");
+const {
+    RF_CONTROL_CAPABILITIES,
+    wireMataDewaRfControlActuators
+} = require("../../src/mataDewa/capabilities/rfControlWiring");
 const { getService } = require("../../src/mataDewa/index.js");
 const { CameraRegistry, CAMERA_ACCESS } = require("../../src/mataDewa/media/cctv");
 const { CAPABILITY_FAMILIES } = require("../../src/mataDewa/capabilities/index");
@@ -54,8 +59,8 @@ function signChallenge(comp, { purpose, credentialId, nonce, context }, privateK
 }
 
 /** Komposisi OwnerTrust lengkap: bootstrap → credential live → proof helper. */
-async function makeOwnerComp({ stateFile = null } = {}) {
-    const comp = await composeOwnerTrustForTest({ stateFile });
+async function makeOwnerComp({ stateFile = null, ledgerOverride = null } = {}) {
+    const comp = await composeOwnerTrustForTest({ stateFile, ledgerOverride });
     const b = await comp.firstOwnerBootstrap.begin({ principalId: "owner-int" });
     await comp.firstOwnerBootstrap.complete({ ceremonyId: b.ceremonyId });
     const kp = crypto.generateKeyPairSync("ed25519");
@@ -430,13 +435,62 @@ test("I4: argumen berbentuk otoritas ditolak di admission (tidak ada bypass)", a
     assert.throws(() => facade.admit(ser, { source: "test" }), /authority-shaped/);
 });
 
-test("I4: actuator RF memanggil permukaan kontrol internal; fail-closed tanpa gerbang", async () => {
+test("I4/MD-019: permukaan kontrol TIDAK hidup di service; actuator lewat resolusi leksikal", async () => {
+    resetServiceSingleton();
+    const { comp } = await makeOwnerComp();
+    // Tanpa attach trust: service tidak memegang permukaan apa pun —
+    // enumerable maupun tidak — dan tidak ada jalur pembuatan on-demand.
+    const svc = makeService();
+    assert.equal(svc.rfControl, undefined);
+    assert.equal(resolveMataDewaRfControlSurface(svc), null);
+    assert.equal(Object.getOwnPropertyNames(svc).includes("rfControl"), false);
+    await svc.shutdown();
+
+    // Setelah attach trust kanonik: permukaan hidup di closure komposisi
+    // trust; service tetap tidak memegangnya.
+    const svc2 = makeService({ allowLocalUdp: true });
+    const bridges = makeBridges(comp);
+    attachMataDewaTrustBridges(svc2, bridges);
+    assert.equal(svc2.rfControl, undefined);
+    const surface = resolveMataDewaRfControlSurface(svc2);
+    assert.ok(surface && typeof surface.enable === "function");
+    // Fail-closed tanpa binding perangkat OwnerTrust aktif: gerbang ada
+    // (dibawa bridges), tapi enroll menuntut binding kanonik (Integrasi 3).
+    assert.equal(surface.enroll({ sensorId: "x", deviceId: "d" }).code, "RF_DEVICE_NOT_BOUND");
+    await svc2.shutdown();
+    comp.close();
+});
+
+/** Actuator binding produksi + registry actuator test-domain minimal. */
+function makeActuatorBindings({ svc }) {
+    const registered = [];
+    const bindings = wireMataDewaRfControlActuators({
+        actuatorRegistry: {
+            register(spec) {
+                const binding = Object.freeze({ ...spec, invoke: spec.invoke });
+                registered.push(binding);
+                return binding;
+            }
+        },
+        wiring: { capabilities: Object.fromEntries(RF_CONTROL_CAPABILITIES.map((d) => [d.id, { id: d.id, incarnationId: `inc-${d.id}` }])) },
+        resolveService: () => svc
+    });
+    return { bindings, registered };
+}
+
+test("I4/MD-019: actuator RF fail-closed tanpa komposisi trust (resolusi leksikal → null)", async () => {
     resetServiceSingleton();
     const svc = makeService();
-    // Permukaan kontrol non-enumerable: tidak di permukaan publik.
-    assert.equal(Object.keys(svc).includes("rfControl"), false);
-    assert.equal(svc.rfControl.enable({ sensorId: "x" }).code, "AUTHORIZED_LOCAL_SOURCE_REJECTED");
-    assert.equal(svc.rfControl.enroll({ sensorId: "x", deviceId: "d" }).code, "RF_DEVICE_GATE_NOT_COMPOSED");
+    const { bindings } = makeActuatorBindings({ svc });
+    const enrollBinding = bindings.find((b) => b.actuatorId === "act-matadewa-rf-enroll");
+    const enableBinding = bindings.find((b) => b.actuatorId === "act-matadewa-rf-enable");
+    assert.equal((await enrollBinding.invoke({ parameters: { sensorId: "x", deviceId: "d" } })).reason,
+        "MATA_DEWA_SERVICE_UNAVAILABLE");
+    assert.equal((await enableBinding.invoke({ parameters: { sensorId: "x", location: { lat: 1, lon: 2 } } })).reason,
+        "MATA_DEWA_SERVICE_UNAVAILABLE");
+    // Argumen asing (token otoritas) tetap ditolak allowlist.
+    assert.equal((await enrollBinding.invoke({ parameters: { sensorId: "x", deviceId: "d", grant: "all" } })).reason,
+        "argument 'grant' tidak sah untuk enroll");
     await svc.shutdown();
 });
 
@@ -455,26 +509,35 @@ test("I4: enable listener butuh perangkat TRUSTED + allowLocalUdp + audit", asyn
     await comp.principalBindings.bindOwnerDevice({
         proof: proof(), deviceId: dev.deviceId, bindingSecret, identityService: svcIdentity
     });
+    const { bindings } = makeActuatorBindings({ svc });
+    const byOp = Object.fromEntries(bindings.map((b) => [b.actuatorId, b]));
 
-    // Belum enroll → enable ditolak.
-    assert.equal(svc.rfControl.enable({ sensorId: "rf-e1", location: { lat: -6.6, lon: 106.8 } }).code,
-        "RF_DEVICE_NOT_TRUSTED");
-    // Enroll → enable sah.
-    assert.equal(svc.rfControl.enroll({ sensorId: "rf-e1", deviceId: dev.deviceId }).ok, true);
-    const enabled = svc.rfControl.enable({
-        sensorId: "rf-e1", bindPort: 0, location: { lat: -6.6, lon: 106.8 }
+    // Belum enroll → enable ditolak (lewat jalur actuator).
+    assert.equal((await byOp["act-matadewa-rf-enable"].invoke({
+        parameters: { sensorId: "rf-e1", location: { lat: -6.6, lon: 106.8 } }
+    })).code, "RF_DEVICE_NOT_TRUSTED");
+    // Enroll → enable sah (lewat jalur actuator).
+    assert.equal((await byOp["act-matadewa-rf-enroll"].invoke({
+        parameters: { sensorId: "rf-e1", deviceId: dev.deviceId }
+    })).ok, true);
+    const enabled = await byOp["act-matadewa-rf-enable"].invoke({
+        parameters: { sensorId: "rf-e1", bindPort: 0, location: { lat: -6.6, lon: 106.8 } }
     });
     assert.equal(enabled.ok, true);
     // Tanpa allowLocalUdp (komposisi lain) → ditolak.
     const svc2 = makeService({ allowLocalUdp: false });
     const bridges2 = makeBridges(comp);
     attachMataDewaTrustBridges(svc2, bridges2);
-    assert.equal(svc2.rfControl.enable({ sensorId: "rf-e1", location: { lat: -6.6, lon: 106.8 } }).code,
-        "AUTHORIZED_LOCAL_SOURCE_REJECTED");
+    const { bindings: bindings2 } = makeActuatorBindings({ svc: svc2 });
+    assert.equal((await bindings2.find((b) => b.actuatorId === "act-matadewa-rf-enable").invoke({
+        parameters: { sensorId: "rf-e1", location: { lat: -6.6, lon: 106.8 } }
+    })).code, "AUTHORIZED_LOCAL_SOURCE_REJECTED");
     await svc2.shutdown();
     // Revoke → listener langsung mati.
-    assert.equal(svc.rfControl.revoke({ sensorId: "rf-e1", reason: "test" }).ok, true);
-    assert.deepEqual(svc.rfControl.liveSources(), []);
+    assert.equal((await byOp["act-matadewa-rf-revoke"].invoke({
+        parameters: { sensorId: "rf-e1", reason: "test" }
+    })).ok, true);
+    assert.deepEqual(resolveMataDewaRfControlSurface(svc).liveSources(), []);
     await svc.shutdown();
     comp.close();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -535,9 +598,11 @@ test("I6: setiap keputusan tercatat; tidak ada materi rahasia di record", async 
         proof: proof(), deviceId: dev.deviceId, bindingSecret, identityService: svcIdentity
     });
 
-    svc.rfControl.enroll({ sensorId: "rf-a1", deviceId: dev.deviceId });
-    svc.rfControl.enable({ sensorId: "rf-a1", location: { lat: -6.6, lon: 106.8 } });
-    svc.rfControl.revoke({ sensorId: "rf-a1", reason: "audit-test" });
+    const { bindings } = makeActuatorBindings({ svc });
+    const byOp = Object.fromEntries(bindings.map((b) => [b.actuatorId, b]));
+    await byOp["act-matadewa-rf-enroll"].invoke({ parameters: { sensorId: "rf-a1", deviceId: dev.deviceId } });
+    await byOp["act-matadewa-rf-enable"].invoke({ parameters: { sensorId: "rf-a1", location: { lat: -6.6, lon: 106.8 } } });
+    await byOp["act-matadewa-rf-revoke"].invoke({ parameters: { sensorId: "rf-a1", reason: "audit-test" } });
 
     const events = comp.ledger.list({}, { limit: 10000 });
     const types = events.map((e) => e.eventType);
@@ -554,7 +619,12 @@ test("I6: setiap keputusan tercatat; tidak ada materi rahasia di record", async 
 
 test("I6: audit gagal → mutasi ditolak (fail closed)", async () => {
     resetServiceSingleton();
-    const { comp, proof } = await makeOwnerComp();
+    // Ledger yang selalu menolak — hanya sink Mata Dewa; registry OwnerTrust
+    // punya audit gate-nya sendiri, jadi binding Owner di bawah tetap sah.
+    // MD-018: override disumbangkan lewat seam komposisi (ledgerOverride
+    // forTest) — bukan lewat spread komposisi yang kini tidak ter-brand.
+    const failingLedger = { appendSafe: () => ({ ok: false, code: "LEDGER_FULL" }) };
+    const { comp, proof } = await makeOwnerComp({ ledgerOverride: failingLedger });
     const svcIdentity = require("../../src/embodiment").createIdentityService({});
     const dev = svcIdentity.registerIdentity({ namespace: "channel", stableKey: "rf-audit2", displayName: "RFAudit2" });
     const pairing = svcIdentity.beginPairing(dev.deviceId);
@@ -563,14 +633,16 @@ test("I6: audit gagal → mutasi ditolak (fail closed)", async () => {
     await comp.principalBindings.bindOwnerDevice({
         proof: proof(), deviceId: dev.deviceId, bindingSecret, identityService: svcIdentity
     });
-    // Ledger yang selalu menolak — hanya sink Mata Dewa; registry OwnerTrust
-    // punya audit gate-nya sendiri, jadi binding di atas tetap sah.
-    const failingLedger = { appendSafe: () => ({ ok: false, code: "LEDGER_FULL" }) };
-    const bridges = buildMataDewaTrustBridges({ ...comp, ledger: failingLedger }, { vault: null });
+    const bridges = makeBridges(comp);
     const svc = makeService({ allowLocalUdp: true });
     attachMataDewaTrustBridges(svc, bridges);
-    // Enrollment dengan sink audit gagal → ditolak (fail closed).
-    assert.equal(svc.rfControl.enroll({ sensorId: "rf-a2", deviceId: dev.deviceId }).code, "LEDGER_FULL");
+    // Enrollment dengan sink audit gagal → ditolak (fail closed) — lewat
+    // jalur actuator kanonik (MD-019).
+    const { bindings } = makeActuatorBindings({ svc });
+    const enrollBinding = bindings.find((b) => b.actuatorId === "act-matadewa-rf-enroll");
+    assert.equal((await enrollBinding.invoke({
+        parameters: { sensorId: "rf-a2", deviceId: dev.deviceId }
+    })).code, "LEDGER_FULL");
     await svc.shutdown();
     comp.close();
 });
@@ -587,7 +659,13 @@ test("I7: ZERO mode tanpa trust/vault/RF hardware — core hidup, semua fail-clo
     assert.equal(st.mode, "ZERO");
     assert.ok(["ready", "degraded"].includes(svc.state), `state: ${svc.state}`);
     // Semua permukaan berotorisasi fail-closed tanpa komposisi trust.
-    assert.equal(svc.rfControl.enroll({ sensorId: "x", deviceId: "d" }).code, "RF_DEVICE_GATE_NOT_COMPOSED");
+    // MD-019: permukaan kontrol tidak hidup di service; actuator menjangkau
+    // resolusi leksikal → null → MATA_DEWA_SERVICE_UNAVAILABLE.
+    assert.equal(resolveMataDewaRfControlSurface(svc), null);
+    const { bindings } = makeActuatorBindings({ svc });
+    assert.equal((await bindings.find((b) => b.actuatorId === "act-matadewa-rf-enroll").invoke({
+        parameters: { sensorId: "x", deviceId: "d" }
+    })).reason, "MATA_DEWA_SERVICE_UNAVAILABLE");
     assert.equal(svc.credentialStore.setCredential("firms", "v").code, "VAULT_NOT_COMPOSED");
     const cams = new CameraRegistry();
     assert.equal(cams.registerAuthorizedCamera({ id: "x", snapshotUrl: "http://127.0.0.1/x.jpg" }).code,
@@ -597,4 +675,69 @@ test("I7: ZERO mode tanpa trust/vault/RF hardware — core hidup, semua fail-clo
     const h = svc.health();
     assert.ok(h.ok !== false);
     await svc.shutdown();
+});
+
+// ---------------------------------------------------------------------------
+// MD-018 — BRAND KOMPOSISI KANONIK (authority palsu ≠ sumber trust)
+// ---------------------------------------------------------------------------
+
+test("MD-018: jembatan menolak komposisi tiruan (spread/duck-typed, brand hilang)", async () => {
+    const { comp } = await makeOwnerComp();
+    // Salinan spread: shape identik, brand WeakSet hilang → ditolak.
+    assert.throws(() => buildMataDewaTrustBridges({ ...comp }), /TRUST_BRIDGES_INVALID/);
+    // Lookalike duck-typed penuh (registry/authVerifier asli dipinjam) → ditolak.
+    const fake = { ...comp, registry: comp.registry, authVerifier: comp.authVerifier };
+    assert.throws(() => buildMataDewaTrustBridges(fake), /TRUST_BRIDGES_INVALID/);
+    assert.throws(() => buildMataDewaTrustBridges(null), /TRUST_BRIDGES_INVALID/);
+    // Komposisi kanonik asli → diterima (kontrol positif).
+    const bridges = buildMataDewaTrustBridges(comp, { vault: null });
+    assert.ok(bridges.rfDeviceTrustGate && bridges.cameraAuthorizer);
+    comp.close();
+});
+
+test("MD-018: attach menolak bridges tiruan; hanya bridges pabrik kanonik menempel", async () => {
+    resetServiceSingleton();
+    const { comp } = await makeOwnerComp();
+    const svc = makeService();
+    const realBridges = makeBridges(comp);
+    // Bridges palsu (spread + shape sama) → ditolak attach.
+    assert.throws(() => attachMataDewaTrustBridges(svc, { ...realBridges }), /ATTACH_TRUST_INVALID/);
+    assert.equal(svc._trustBridges, undefined);
+    assert.equal(resolveMataDewaRfControlSurface(svc), null);
+    // Bridges kanonik → menempel (kontrol positif).
+    attachMataDewaTrustBridges(svc, realBridges);
+    assert.ok(svc._trustBridges);
+    assert.equal(resolveMataDewaRfControlSurface(svc) !== null, true);
+    await svc.shutdown();
+    comp.close();
+});
+
+// ---------------------------------------------------------------------------
+// MD-020 — OTORISASI KAMERA VIA BINDER TERSERTIFIKASI (bukan klaim pemanggil)
+// ---------------------------------------------------------------------------
+
+test("MD-020: klaim principalId/viaChannel dari pemanggil bukan lagi kontrak", async () => {
+    const { comp } = await makeOwnerComp();
+    const authorizer = makeBridges(comp).cameraAuthorizer;
+    // Bentuk evidence lama (principalId/viaChannel disumbang pemanggil) →
+    // ditolak, meski principalId-nya nyata.
+    assert.equal(authorizer.authenticate({ principalId: "owner-int", viaChannel: "console" }).ok, false);
+    assert.equal(authorizer.authenticate({ principalId: "owner-int", viaChannel: "telegram", provenance: {} }).ok, false);
+    // Provenance asing yang tidak pernah di-mint → bukan bukti kanonik.
+    assert.equal(authorizer.authenticate({ provenance: { transport: "console", peerKey: "local" } }).ok, false);
+    comp.close();
+});
+
+test("MD-020: provenance kanonik + binder tersertifikasi → Owner; peer asing ditolak", async () => {
+    const { comp, proof } = await makeOwnerComp();
+    const B = comp.channelBinders;
+    await B.console.bind({ proof: proof(), purpose: "owner-proof", provenance: comp.testMint.console("local") });
+    const authorizer = makeBridges(comp).cameraAuthorizer;
+    const auth = authorizer.authenticate({ provenance: comp.testMint.console("local") });
+    assert.equal(auth.ok, true);
+    assert.equal(auth.principalId, "owner-int");
+    assert.equal(auth.role, "owner");
+    // Peer lain di kanal yang sama → bukan Owner (ditolak binder).
+    assert.equal(authorizer.authenticate({ provenance: comp.testMint.console("other-peer") }).ok, false);
+    comp.close();
 });
