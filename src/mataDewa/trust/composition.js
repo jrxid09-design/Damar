@@ -33,7 +33,7 @@ const path = require("node:path");
 const { createRfDeviceTrustGate } = require("./rfDeviceTrust");
 const { createProductionCipherAdapter } = require("../../runtime/vaultProviders");
 const { verifyTransportPeerProvenance } = require("../../authority/ownerTrust/provenance");
-const { isCanonicalComposition } = require("../../authority/ownerTrust/canonicalCompositionBrand");
+const { isCanonicalOwnerTrustComposition } = require("../../authority/ownerTrustComposition");
 
 /** MD-018: objek bridges TERSERTIFIKASI — hanya buildMataDewaTrustBridges. */
 const canonicalBridgeInstances = new WeakSet();
@@ -276,8 +276,9 @@ function createMataDewaAuditSink({ ledger } = {}) {
 function buildMataDewaTrustBridges(comp, { vault, mediaIngress = null, clock = { nowMs: () => Date.now() } } = {}) {
     // MD-018: authority source must be the certified composition itself.
     // A duck-typed lookalike ({ ...comp, registry: forged }) is rejected
-    // here — the WeakSet brand is unforgeable by construction.
-    if (!isCanonicalComposition(comp)) {
+    // here — the WeakSet brand (lexical to ownerTrustComposition) is
+    // unforgeable by construction, and no importable function can mint it.
+    if (!isCanonicalOwnerTrustComposition(comp)) {
         throw new TypeError("TRUST_BRIDGES_INVALID: komposisi OwnerTrust kanonik (ter-brand) wajib ada");
     }
     const audit = comp.ledger ? createMataDewaAuditSink({ ledger: comp.ledger }) : null;
