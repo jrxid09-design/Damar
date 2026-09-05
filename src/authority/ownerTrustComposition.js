@@ -68,7 +68,6 @@ const {
     currentPeerProvenance
 } = require("./ownerTrust/transportAdapters");
 const { createAuditLedger, createFileAuditSink } = require("../runtime/auditLedger");
-const { brandCanonicalComposition } = require("./ownerTrust/canonicalCompositionBrand");
 const { createSecretVault } = require("../runtime/vault");
 const { createFileSecretStore } = require("../runtime/vault/store");
 const { createProductionCipherAdapter } = require("../runtime/vaultProviders");
@@ -111,6 +110,32 @@ function provisionVaultMasterKey(keyPath) {
 // ---------------------------------------------------------------------------
 let canonicalComposition = null;
 let compositionPromise = null;
+
+// ---------------------------------------------------------------------------
+// MD-018 — canonical OwnerTrust composition brand (lexical, never exported).
+//
+// The WeakSet lives in THIS module's closure. Only the real canonical
+// compose() path mints membership (canonicalCompositions.add below). No
+// production-importable function can mint a canonical composition: arbitrary
+// same-process code cannot brand a fake/foreign/look-alike composition and
+// pass it into Mata Dewa trust composition.
+//
+// Consumers that only need to VERIFY canonical membership (e.g. the Mata
+// Dewa trust bridge factory) receive the read-only predicate
+// isCanonicalOwnerTrustComposition, which can only test membership — it
+// cannot add, mark, mint, or brand anything.
+// ---------------------------------------------------------------------------
+const canonicalCompositions = new WeakSet();
+
+/**
+ * READ-ONLY brand verification. Returns true ONLY for compositions minted by
+ * the real canonical compose() path in this module. Never mints/brands:
+ * the WeakSet is closure-private and no mutation capability is exported.
+ */
+function isCanonicalOwnerTrustComposition(candidate) {
+    return candidate !== null && typeof candidate === "object" &&
+        canonicalCompositions.has(candidate);
+}
 
 /**
  * Build the sealed composition.  `stateFile` is the durable ownerTrust
@@ -257,13 +282,14 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null } = {
     // MD-018: brand the composition BEFORE it leaves this module — a sealed
     // WeakSet membership that duck-typed lookalikes (spread copies, forged
     // registries) can never obtain. Downstream trust consumers (Mata Dewa
-    // bridges) reject unbranded compositions.
+    // bridges) reject unbranded compositions. The mint is lexical to this
+    // module: compose() is the ONLY code that can add to the WeakSet.
     //
     // Test-only ledger exposure: the ownerTrust audit gate above keeps its
     // own (real) ledger; only the comp.ledger read by the Mata Dewa audit
     // sink switches to the override, mirroring a genuine sink failure.
     const effectiveLedger = (forTest === true && ledgerOverride) ? ledgerOverride : ledger;
-    return brandCanonicalComposition(Object.freeze({
+    const comp = Object.freeze({
         registry, proofVerifier, firstOwnerBootstrap, authVerifier,
         ratifyAsOwner: ownerRatify, principalBindings, channelBinders,
         continuityLinker, store, vault, auditGate, ledger: effectiveLedger, ingress,
@@ -274,7 +300,9 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null } = {
             if (auditSink) auditSink.close();
         },
         durable
-    }));
+    });
+    canonicalCompositions.add(comp);
+    return comp;
 }
 
 /** Composition-bound Owner ratification gate. */
@@ -434,6 +462,7 @@ module.exports = Object.freeze({
     ensureCanonicalComposed,
     ratifyAsOwner,
     canonicalChallenge,
+    isCanonicalOwnerTrustComposition,
     BOOTSTRAP_PURPOSE,
     BOOTSTRAP_CONTEXT
 });
