@@ -23,7 +23,8 @@ const http = require("node:http");
 
 const {
     composeOwnerTrustForTest,
-    canonicalChallenge
+    canonicalChallenge,
+    isCanonicalOwnerTrustComposition
 } = require("../../src/authority/ownerTrustComposition");
 const { AuthorityRegistry } = require("../../src/authority/registry");
 const authorityStore = require("../../src/authority/store");
@@ -35,7 +36,6 @@ const { createProductionCipherAdapter } = require("../../src/runtime/vaultProvid
 const {
     buildMataDewaTrustBridges,
     attachMataDewaTrustBridges,
-    resolveMataDewaRfControlSurface,
     createCctvAuthorizer
 } = require("../../src/mataDewa/trust/composition");
 const { createRfDeviceTrustGate } = require("../../src/mataDewa/trust/rfDeviceTrust");
@@ -435,29 +435,121 @@ test("I4: argumen berbentuk otoritas ditolak di admission (tidak ada bypass)", a
     assert.throws(() => facade.admit(ser, { source: "test" }), /authority-shaped/);
 });
 
-test("I4/MD-019: permukaan kontrol TIDAK hidup di service; actuator lewat resolusi leksikal", async () => {
+test("I4/MD-019: permukaan kontrol TIDAK hidup di service; tidak ada resolver ekspor", async () => {
     resetServiceSingleton();
     const { comp } = await makeOwnerComp();
-    // Tanpa attach trust: service tidak memegang permukaan apa pun —
-    // enumerable maupun tidak — dan tidak ada jalur pembuatan on-demand.
+    // Permukaan kontrol tidak boleh dapat di-mint dari service — enumerable
+    // maupun tidak — dan tidak ada resolver yang diekspor modul mana pun.
     const svc = makeService();
     assert.equal(svc.rfControl, undefined);
-    assert.equal(resolveMataDewaRfControlSurface(svc), null);
     assert.equal(Object.getOwnPropertyNames(svc).includes("rfControl"), false);
+    assert.deepEqual(Object.getOwnPropertySymbols(svc).length, 0);
+    // Tidak ada resolver permukaan di ekspor jembatan trust.
+    const trustCompositionExports = Object.keys(
+        require("../../src/mataDewa/trust/composition"));
+    for (const banned of ["resolveMataDewaRfControlSurface", "getRfControlSurface",
+        "resolveRfMutationSurface", "getRfAdmin", "lookupRfControl", "getPrivateRfControl"]) {
+        assert.equal(trustCompositionExports.includes(banned), false, `${banned} tidak boleh diekspor`);
+    }
+    // Tidak ada resolver permukaan di ekspor modul wiring RF.
+    const wiringExports = Object.keys(require("../../src/mataDewa/capabilities/rfControlWiring"));
+    for (const banned of ["resolveMataDewaRfControlSurface", "getRfControlSurface",
+        "resolveRfMutationSurface", "getRfAdmin", "lookupRfControl", "getPrivateRfControl",
+        "surfaceForService", "rfControlSurfacesByService"]) {
+        assert.equal(wiringExports.includes(banned), false, `${banned} tidak boleh diekspor`);
+    }
+    // Tanpa attach trust, actuator fail-closed (permukaan tidak ada).
+    assert.equal((await makeActuatorBindings({ svc }).bindings
+        .find((b) => b.actuatorId === "act-matadewa-rf-enroll").invoke({
+            parameters: { sensorId: "x", deviceId: "d" }
+        })).reason, "MATA_DEWA_SERVICE_UNAVAILABLE");
     await svc.shutdown();
 
-    // Setelah attach trust kanonik: permukaan hidup di closure komposisi
-    // trust; service tetap tidak memegangnya.
+    // Setelah attach trust kanonik: service tetap tidak memegang permukaan.
     const svc2 = makeService({ allowLocalUdp: true });
     const bridges = makeBridges(comp);
     attachMataDewaTrustBridges(svc2, bridges);
     assert.equal(svc2.rfControl, undefined);
-    const surface = resolveMataDewaRfControlSurface(svc2);
-    assert.ok(surface && typeof surface.enable === "function");
-    // Fail-closed tanpa binding perangkat OwnerTrust aktif: gerbang ada
-    // (dibawa bridges), tapi enroll menuntut binding kanonik (Integrasi 3).
-    assert.equal(surface.enroll({ sensorId: "x", deviceId: "d" }).code, "RF_DEVICE_NOT_BOUND");
+    assert.equal(Object.getOwnPropertyNames(svc2).includes("rfControl"), false);
+    // Gerbang kanonik menempel (non-enumerable) — sumber kebenaran untuk
+    // permukaan yang lahir di closure modul wiring saat actuator dipasang.
+    assert.ok(svc2._trustBridges?.rfDeviceTrustGate);
+    // Fail-closed tanpa binding perangkat OwnerTrust aktif: actuator
+    // menjangkau gerbang (dibawa bridges), tapi enroll menuntut binding
+    // kanonik (Integrasi 3) — deny melalui jalur actuator produksi.
+    const enrollResult = await makeActuatorBindings({ svc: svc2 }).bindings
+        .find((b) => b.actuatorId === "act-matadewa-rf-enroll").invoke({
+            parameters: { sensorId: "x", deviceId: "d" }
+        });
+    assert.equal(enrollResult.code, "RF_DEVICE_NOT_BOUND");
     await svc2.shutdown();
+    comp.close();
+});
+
+test("I4/MD-019: jalur impor gaya controller/plugin/tool tidak dapat meraih permukaan RF", async () => {
+    resetServiceSingleton();
+    const { comp } = await makeOwnerComp();
+    const svc = makeService({ allowLocalUdp: true });
+    attachMataDewaTrustBridges(svc, makeBridges(comp));
+
+    // Impor gaya tool/plugin terhadap modul publik — semuanya tidak boleh
+    // mengekspor resolver/permukaan, tidak boleh ada jalur pembuatan
+    // on-demand dari service publik.
+    const publicMataDewa = require("../../src/mataDewa");
+    assert.equal(publicMataDewa.getService(), svc);
+    const toolVisibleExports = new Set([
+        ...Object.keys(publicMataDewa),
+        ...Object.keys(require("../../src/mataDewa/index.js")),
+        ...Object.keys(require("../../src/mataDewa/trust/composition")),
+        ...Object.keys(require("../../src/mataDewa/capabilities/rfControlWiring")),
+        ...Object.keys(require("../../src/mataDewa/composition"))
+    ]);
+    for (const banned of ["resolveMataDewaRfControlSurface", "getRfControlSurface",
+        "getPrivateRfControl", "resolveRfMutationSurface", "getRfAdmin", "lookupRfControl",
+        "rfControlSurfacesByService", "surfaceForService"]) {
+        assert.equal(toolVisibleExports.has(banned), false, `ekspor publik tidak boleh memuat ${banned}`);
+    }
+    // Service publik tidak memegang permukaan (properti, simbol, non-enum).
+    assert.equal(svc.rfControl, undefined);
+    assert.equal(Object.getOwnPropertyNames(svc).includes("rfControl"), false);
+    assert.equal(Object.getOwnPropertyNames(svc).includes("_rfControl"), false);
+    assert.equal(Object.getOwnPropertySymbols(svc).includes(Symbol.for("rfControl")), false);
+    // Tidak ada nested reference yang membuka permukaan dari service: semua
+    // nilai properti (dangkal) bukan permukaan RF.
+    for (const key of Object.getOwnPropertyNames(svc)) {
+        const v = svc[key];
+        if (v && typeof v === "object" && typeof v.enable === "function" &&
+            typeof v.revoke === "function" && typeof v.recalibrate === "function") {
+            assert.fail(`properti service ${key} mengekspos permukaan RF`);
+        }
+    }
+    // Permukaan TIDAK bisa di-mint dari service kosong (belum attach).
+    await svc.shutdown();
+    resetServiceSingleton();
+    const svc0 = getService({ allowLocalUdp: true });
+    assert.equal(svc0.rfControl, undefined);
+    assert.ok(!svc0._trustBridges);
+    // Semua modul yang bisa diimpor tidak mengekspor mint/resolver.
+    for (const mod of [
+        "../../src/mataDewa",
+        "../../src/mataDewa/index.js",
+        "../../src/mataDewa/composition",
+        "../../src/mataDewa/trust/composition",
+        "../../src/mataDewa/capabilities/rfControlWiring"
+    ]) {
+        const exported = Object.keys(require(mod));
+        for (const banned of ["resolveMataDewaRfControlSurface", "getRfControlSurface",
+            "getPrivateRfControl", "resolveRfMutationSurface", "getRfAdmin", "lookupRfControl",
+            "createRfControlSurface"]) {
+            if (mod === "../../src/mataDewa/capabilities/rfControlWiring") {
+                assert.equal(exported.includes("createRfControlSurface"), false,
+                    "modul wiring tidak mengekspor pabrik permukaan");
+            }
+            assert.equal(exported.includes(banned), false, `${mod} tidak boleh mengekspor ${banned}`);
+        }
+    }
+    await svc0.shutdown();
+    resetServiceSingleton();
     comp.close();
 });
 
@@ -478,7 +570,7 @@ function makeActuatorBindings({ svc }) {
     return { bindings, registered };
 }
 
-test("I4/MD-019: actuator RF fail-closed tanpa komposisi trust (resolusi leksikal → null)", async () => {
+test("I4/MD-019: actuator RF fail-closed tanpa komposisi trust (permukaan tidak lahir)", async () => {
     resetServiceSingleton();
     const svc = makeService();
     const { bindings } = makeActuatorBindings({ svc });
@@ -533,11 +625,16 @@ test("I4: enable listener butuh perangkat TRUSTED + allowLocalUdp + audit", asyn
         parameters: { sensorId: "rf-e1", location: { lat: -6.6, lon: 106.8 } }
     })).code, "AUTHORIZED_LOCAL_SOURCE_REJECTED");
     await svc2.shutdown();
-    // Revoke → listener langsung mati.
+    // Revoke → listener langsung mati (sumber live dihapus dari rfManager).
     assert.equal((await byOp["act-matadewa-rf-revoke"].invoke({
         parameters: { sensorId: "rf-e1", reason: "test" }
     })).ok, true);
-    assert.deepEqual(resolveMataDewaRfControlSurface(svc).liveSources(), []);
+    assert.equal(svc.rfManager.sources.has("rf_udp_rf-e1"), false);
+    // Re-enable setelah revoke → ditolak (device REVOKED, fail-closed).
+    const reEnable = await byOp["act-matadewa-rf-enable"].invoke({
+        parameters: { sensorId: "rf-e1", location: { lat: -6.6, lon: 106.8 } }
+    });
+    assert.equal(reEnable.ok, false);
     await svc.shutdown();
     comp.close();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -659,9 +756,9 @@ test("I7: ZERO mode tanpa trust/vault/RF hardware — core hidup, semua fail-clo
     assert.equal(st.mode, "ZERO");
     assert.ok(["ready", "degraded"].includes(svc.state), `state: ${svc.state}`);
     // Semua permukaan berotorisasi fail-closed tanpa komposisi trust.
-    // MD-019: permukaan kontrol tidak hidup di service; actuator menjangkau
-    // resolusi leksikal → null → MATA_DEWA_SERVICE_UNAVAILABLE.
-    assert.equal(resolveMataDewaRfControlSurface(svc), null);
+    // MD-019: permukaan kontrol tidak hidup di service; tanpa attach trust,
+    // actuator tidak dapat menjangkau permukaan → MATA_DEWA_SERVICE_UNAVAILABLE.
+    assert.equal(svc.rfControl, undefined);
     const { bindings } = makeActuatorBindings({ svc });
     assert.equal((await bindings.find((b) => b.actuatorId === "act-matadewa-rf-enroll").invoke({
         parameters: { sensorId: "x", deviceId: "d" }
@@ -703,12 +800,60 @@ test("MD-018: attach menolak bridges tiruan; hanya bridges pabrik kanonik menemp
     // Bridges palsu (spread + shape sama) → ditolak attach.
     assert.throws(() => attachMataDewaTrustBridges(svc, { ...realBridges }), /ATTACH_TRUST_INVALID/);
     assert.equal(svc._trustBridges, undefined);
-    assert.equal(resolveMataDewaRfControlSurface(svc), null);
-    // Bridges kanonik → menempel (kontrol positif).
+    assert.equal(svc.rfControl, undefined);
+    // Bridges kanonik → menempel (kontrol positif); service tetap tidak
+    // memegang permukaan kontrol apa pun.
     attachMataDewaTrustBridges(svc, realBridges);
     assert.ok(svc._trustBridges);
-    assert.equal(resolveMataDewaRfControlSurface(svc) !== null, true);
+    assert.equal(svc.rfControl, undefined);
     await svc.shutdown();
+    comp.close();
+});
+
+test("MD-018: tidak ada mint brand yang bisa diimpor; fake tidak bisa di-brand", async () => {
+    const { comp } = await makeOwnerComp();
+    // Setiap nama mint/mark/register yang lazim → tidak callable / tidak ada
+    // di ekspor komposisi kanonik, dan modul brand lama sudah dihapus.
+    const otc = require("../../src/authority/ownerTrustComposition");
+    for (const name of ["brandCanonicalComposition", "markCanonicalComposition",
+        "mintCanonicalComposition", "registerCanonicalComposition",
+        "addCanonicalComposition"]) {
+        assert.equal(otc[name], undefined, `${name} tidak boleh diekspor`);
+    }
+    for (const subpath of ["ownerTrust/canonicalCompositionBrand",
+        "ownerTrust/brand"]) {
+        assert.throws(() => require(`../../src/authority/${subpath}`),
+            /Cannot find module/, `modul ${subpath} harus sudah dihapus`);
+    }
+    // Predikat read-only tidak bisa menambahkan keanggotaan: memanggilnya
+    // dengan objek apa pun TIDAK mengubah status apa pun.
+    const fake = { ...comp, registry: comp.registry, authVerifier: comp.authVerifier };
+    const wrapper = Object.create(comp);
+    assert.equal(isCanonicalOwnerTrustComposition(fake), false);
+    assert.equal(isCanonicalOwnerTrustComposition(wrapper), false);
+    assert.equal(isCanonicalOwnerTrustComposition(comp), true);
+    // Spread/wrapper tetap ditolak oleh jembatan (verifikasi menyeluruh).
+    assert.throws(() => buildMataDewaTrustBridges(fake, { vault: null }), /TRUST_BRIDGES_INVALID/);
+    assert.throws(() => buildMataDewaTrustBridges(wrapper, { vault: null }), /TRUST_BRIDGES_INVALID/);
+    // Kontrol positif: komposisi asli diterima.
+    const bridges = buildMataDewaTrustBridges(comp, { vault: null });
+    assert.ok(bridges.rfDeviceTrustGate);
+    comp.close();
+});
+
+test("MD-018: komposisi asing tanpa mint tidak pernah bisa menjadi kanonik", async () => {
+    const { comp } = await makeOwnerComp();
+    // Komposisi independen (dari modul lain) yang TIDAK lahir dari compose()
+    // di ownerTrustComposition — bentuk apa pun — tidak akan di-brand.
+    const foreign = {
+        registry: comp.registry,
+        authVerifier: comp.authVerifier,
+        firstOwnerBootstrap: comp.firstOwnerBootstrap,
+        principalBindings: comp.principalBindings,
+        channelBinders: comp.channelBinders
+    };
+    assert.equal(isCanonicalOwnerTrustComposition(foreign), false);
+    assert.throws(() => buildMataDewaTrustBridges(foreign, { vault: null }), /TRUST_BRIDGES_INVALID/);
     comp.close();
 });
 
