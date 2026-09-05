@@ -166,12 +166,12 @@ class MataDewaService {
         // trust kanonik (attachMataDewaTrustBridges) — tanpa itu, live UDP
         // tidak pernah menjadi kandidat produksi-live di komposisi produksi.
         // MD-019: permukaan kontrol RF TERISTIMEWA TIDAK hidup di service.
-        // Ia lahir HANYA di dalam komposisi trust (closure modul jembatan)
-        // dan dijangkau actuator Action Fabric lewat resolusi leksikal —
-        // bukan lewat properti service apa pun, enumerable maupun tidak.
+        // Service hanya membawa `_trustBridges` (non-enumerable, satu kali);
+        // permukaan lahir di closure modul wiring actuator (rfControlWiring)
+        // dan tidak pernah diekspor / tidak bisa di-mint dari pemanggil.
         this._rfDeviceGateAccessor = () => this._trustBridges?.rfDeviceTrustGate ?? null;
         // Komposisi-level UDP flag (satu pintu) dibaca permukaan kontrol
-        // pada saat attach trust (sumber kebenaran yang sama).
+        // pada saat actuator diciptakan (sumber kebenaran yang sama).
         this._allowLocalUdp = options.allowLocalUdp === true;
         // MD-016: watch memakai verifikator read-only yang sama (metadata
         // internal). Kalau komposisi membawa WatchEngine eksternal, verifikator
