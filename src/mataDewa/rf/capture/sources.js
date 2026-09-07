@@ -25,6 +25,7 @@
 
 const fs = require("node:fs");
 const readline = require("node:readline");
+const { RfSequenceGuard } = require("../rfSequenceGuard");
 
 // ---- Batas capture --------------------------------------------------------
 
@@ -517,6 +518,7 @@ class UdpRfSource extends RfSource {
         this._allowLocalUdp = allowLocalUdp === true;
         this.onFrame = typeof onFrame === "function" ? onFrame : null;
         this._socket = null;
+        this._sequenceGuard = new RfSequenceGuard();
     }
 
     _assertBindable() {
@@ -555,6 +557,11 @@ class UdpRfSource extends RfSource {
         socket.on("message", (msg) => {
             const result = parseRuviewFrame(msg);
             if (!result.ok) {
+                this.framesDropped += 1;
+                return;
+            }
+            const sequence = this._sequenceGuard.accept(result.frame.sequence);
+            if (!sequence.ok) {
                 this.framesDropped += 1;
                 return;
             }

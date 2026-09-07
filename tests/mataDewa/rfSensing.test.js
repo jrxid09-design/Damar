@@ -37,6 +37,7 @@ const {
     estimatePresence, RfProcessingSession
 } = require("../../src/mataDewa/rf/processing");
 const { RfManager } = require("../../src/mataDewa/rf/rfManager");
+const { RfSequenceGuard } = require("../../src/mataDewa/rf/rfSequenceGuard");
 const { evaluateRfPresenceRisk } = require("../../src/mataDewa/watch/rfPresence");
 const { normalizeObservation, OBSERVATION_TYPE } = require("../../src/mataDewa/observations/observation");
 
@@ -215,6 +216,21 @@ test("RF UDP: fail-closed tanpa allowLocalUdp; non-loopback ditolak", async () =
     const r3 = await ok.start();
     assert.equal(r3.ok, true);
     ok.stop();
+});
+
+test("RF sequence guard: replay, out-of-order, dan wrap ditolak/diterima deterministik", () => {
+    const guard = new RfSequenceGuard();
+    assert.equal(guard.accept(10).ok, true);
+    assert.equal(guard.accept(10).reason, "RF_SEQUENCE_REPLAY");
+    assert.equal(guard.accept(9).reason, "RF_SEQUENCE_OUT_OF_ORDER");
+    assert.equal(guard.accept(11).ok, true);
+
+    const wrap = new RfSequenceGuard();
+    assert.equal(wrap.accept(0xffffffff).ok, true);
+    assert.equal(wrap.accept(0).ok, true, "uint32 wrap maju sah");
+    assert.equal(wrap.accept(0xffffffff).reason, "RF_SEQUENCE_OUT_OF_ORDER");
+    assert.equal(guard.accept(-1).reason, "RF_SEQUENCE_INVALID");
+    assert.equal(guard.describe().rejected, 3);
 });
 
 // ---- Processing ---------------------------------------------------------------
