@@ -87,7 +87,12 @@ class EntityModelFederation {
     resolve(entityId, { sessionOverride = null, workOverride = null } = {}) { const key = entity(entityId); return this.route(workOverride || sessionOverride || this.assignments.get(key)?.primaryRoute || { providerId: "wises-d1", modelId: "Wises-D1" }); }
     async invoke(entityId, request, { sessionOverride = null, workOverride = null } = {}) {
         const key = entity(entityId); const assignment = this.assignments.get(key); const routes = [workOverride, sessionOverride, assignment?.primaryRoute, ...(assignment?.configuredFallbacks || [])].filter(Boolean).map(x => this.route(x)); const attempts = []; for (const route of routes) { try { const result = await this.providers.invoke(route.providerId, { ...request, model: route.modelId, entityId: key }); return { ...result, entityId: key, requestedRoute: route, actualRoute: route, fallback: false, attempts }; } catch (error) { attempts.push({ route, failureClass: classifyFailure(error) }); } }
-        const local = await this.wises.invoke({ ...request, entityId: key, model: "Wises-D1" }); return { ...local, entityId: key, actualRoute: { providerId: "wises-d1", modelId: "Wises-D1" }, fallback: true, attempts };
+        try {
+            const local = await this.wises.invoke({ ...request, entityId: key, model: "Wises-D1" });
+            return { ...local, entityId: key, actualRoute: { providerId: "wises-d1", modelId: "Wises-D1" }, fallback: true, attempts };
+        } catch (error) {
+            return { entityId: key, actualRoute: { providerId: "wises-d1", modelId: "Wises-D1" }, fallback: true, degraded: true, failureClass: classifyFailure(error), attempts };
+        }
     }
 }
 
