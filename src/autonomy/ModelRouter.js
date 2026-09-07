@@ -115,6 +115,16 @@ class ModelRouter {
 
     }
 
+    assignEntity(entityId, assignment, { federation } = {}) {
+        if (!federation || typeof federation.assign !== "function") throw new TypeError("MODEL_FEDERATION_REQUIRED");
+        return federation.assign(entityId, assignment);
+    }
+
+    routeEntity(entityId, { federation, sessionOverride = null, workOverride = null } = {}) {
+        if (!federation || typeof federation.resolve !== "function") throw new TypeError("MODEL_FEDERATION_REQUIRED");
+        return federation.resolve(entityId, { sessionOverride, workOverride });
+    }
+
     classes() {
         return TASK_CLASSES.map(({ id, desc }) => ({ id, desc }));
     }
