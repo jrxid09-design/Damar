@@ -18,6 +18,7 @@
 const { createTransportAdapter, slugSessionId, fallbackSessionId } = require("../host/transportAdapter");
 const { createInteractionBus } = require("./interactionBus");
 const { CHANNEL_ADAPTERS } = require("../../manager/channels");
+const pandawaIdentity = require("../../services/pandawaIdentity");
 
 const CHANNELS = Object.freeze({
   console: Object.freeze({ origin: "CONSOLE", transportId: "channel.console" }),
@@ -242,6 +243,7 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
       // closed, omission-preserving Manager input.
       const managerPayload = Object.freeze({
         text: envelope.payload.text,
+        targetEntity: pandawaIdentity.resolveTarget(envelope.payload.text).id,
         ...(envelope.payload.language === undefined ? {} : { language: envelope.payload.language }),
         ...(envelope.payload.attachments === undefined ? {} : { attachments: envelope.payload.attachments }),
         ...(envelope.payload.replyToInteractionId === undefined ? {} : { replyToInteractionId: envelope.payload.replyToInteractionId }),
