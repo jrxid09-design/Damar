@@ -5,6 +5,8 @@ const agentTools = require("../agent/agentTools");
 const pandawaIdentity = require("./pandawaIdentity");
 const { createPandawaSessionRegistry } = require("../runtime/interactionBus/pandawaSessions");
 const pandawaDelegation = require("./pandawaDelegation");
+const pandawaOrchestrator = require("./pandawaOrchestrator");
+const pandawaColony = require("./pandawaColony");
 
 /**
  * AgentHub — menyatukan beberapa "pekerja" dalam satu antarmuka.
@@ -178,6 +180,9 @@ class AgentHub {
     resumePandawaSession(sessionId, options) { return this.pandawaSessions().resume(sessionId, options); }
     createPandawaDelegation(options) { return pandawaDelegation.createDelegation(options); }
     acceptPandawaDelegation(delegation, options) { return pandawaDelegation.acceptDelegation(delegation, options); }
+    createPandawaWorkGraph(options) { return pandawaOrchestrator.createWorkGraph(options); }
+    runPandawaWorkGraph(graph, options) { return pandawaOrchestrator.runGraph(graph, options); }
+    createPandawaColony(options) { return pandawaColony.createColony(options); }
 
     get(id) {
         const wanted = this.resolveAgentId(id);
@@ -414,6 +419,8 @@ class AgentHub {
 const pandawaIdentity = require("./pandawaIdentity");
 const { createPandawaSessionRegistry } = require("../runtime/interactionBus/pandawaSessions");
 const pandawaDelegation = require("./pandawaDelegation");
+const pandawaOrchestrator = require("./pandawaOrchestrator");
+const pandawaColony = require("./pandawaColony");
 
             tools = Pipeline.select({
                 tools: universe,
