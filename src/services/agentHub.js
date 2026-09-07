@@ -2,6 +2,9 @@ const { manager: integrations } = require("../integrations");
 const telemetry = require("./telemetryService");
 
 const agentTools = require("../agent/agentTools");
+const pandawaIdentity = require("./pandawaIdentity");
+const { createPandawaSessionRegistry } = require("../runtime/interactionBus/pandawaSessions");
+const pandawaDelegation = require("./pandawaDelegation");
 
 /**
  * AgentHub — menyatukan beberapa "pekerja" dalam satu antarmuka.
@@ -58,6 +61,7 @@ class AgentHub {
 
             {
                 id: "puntadewa",
+                entityId: "pandawa:puntadewa",
                 label: "Puntadewa (tata kelola & perencanaan)",
                 kind: "worker",
                 role: "Kamu Puntadewa, spesialis tata kelola, perencanaan, dan penilaian Damar. Uraikan tugas menjadi langkah, susun rencana jangka panjang, timbang keputusan, tetapkan prioritas, selesaikan konflik, dan tafsirkan kebijakan. RENCANA BUKAN OTORITAS: kamu mengusulkan urutan kerja, tidak pernah memberi izin.",
@@ -68,6 +72,7 @@ class AgentHub {
             },
             {
                 id: "werkudara",
+                entityId: "pandawa:werkudara",
                 label: "Werkudara (keamanan & pertahanan)",
                 kind: "worker",
                 role: "Kamu Werkudara, spesialis keamanan & pertahanan Damar. Lakukan pemodelan ancaman, tinjau autentikasi/otorisasi, analisis batas kepercayaan, telaah rahasia & risiko dependensi, pengerasan runtime, uji adversarial, dan analisis insiden. PERAN KEAMANAN BUKAN JALAN PINTAS: kamu melapor dan mengusulkan, tidak pernah melewati Authority Gate atau kill switch.",
@@ -78,7 +83,8 @@ class AgentHub {
             },
             {
                 id: "janaka",
-                label: "Janaka (riset & intelijen)",
+                entityId: "pandawa:janaka",
+                label: "Janaka (rekayasa & implementasi)",
                 kind: "worker",
                 role: "Kamu Janaka, spesialis riset & intelijen Damar. Telusuri dokumentasi teknis, kumpulkan pengetahuan eksternal, lakukan OSINT bila memang pantas, bandingkan pustaka/API/produk, verifikasi fakta, dan sintesiskan informasi dengan rujukan yang jelas. TEMUAN BUKAN KEBENARAN FINAL: sebutkan tingkat keyakinan dan sumbernya.",
                 description: "Riset, investigasi dokumentasi, akuisisi pengetahuan eksternal, verifikasi fakta, dan sintesis informasi.",
@@ -88,7 +94,8 @@ class AgentHub {
             },
             {
                 id: "nakula",
-                label: "Nakula (rekayasa & operasi)",
+                entityId: "pandawa:nakula",
+                label: "Nakula (data & analitik)",
                 kind: "worker",
                 role: "Kamu Nakula, spesialis rekayasa & operasi Damar. Bangun, ubah, debug, refactor, dan uji perangkat lunak; kelola OS, proses, layanan, kontainer, jaringan, penyimpanan; kerjakan otomatisasi, integrasi, performa, serta integrasi perangkat/tool (kamera, audio, kanal). PERAN INSINYUR BUKAN IZIN EKSEKUSI: setiap aksi nyata tetap melewati Actuation Fabric dan Authority Gate.",
                 description: "Implementasi, debugging, refactoring, testing, DevOps, operasi runtime, integrasi, otomatisasi, dan integrasi perangkat.",
@@ -98,7 +105,8 @@ class AgentHub {
             },
             {
                 id: "sadewa",
-                label: "Sadewa (memori, analisis & kontinuitas)",
+                entityId: "pandawa:sadewa",
+                label: "Sadewa (riset & verifikasi)",
                 kind: "worker",
                 role: "Kamu Sadewa, spesialis memori, analisis, dan kontinuitas Damar. Kelola organisasi memori, provenance, klasifikasi epistemik, kesinambungan sejarah & percakapan, analisis data, pengenalan pola, refleksi pasca-tugas, dan rekonsiliasi kausal. MEMORI BUKAN OTORITAS: sesuatu tidak menjadi boleh hanya karena ia tercatat.",
                 description: "Organisasi memori, provenance, kontinuitas historis, analisis data, pengenalan pola, dan refleksi.",
@@ -124,6 +132,10 @@ class AgentHub {
      *
      * DEPRECATED — lihat docs/architecture/DAMAR-IDENTITY-MIGRATION.md.
      */
+    static get PANDAWA_ALIAS() {
+        return Object.freeze({ yudistira: "puntadewa", bima: "werkudara", arjuna: "janaka" });
+    }
+
     static get LEGACY_AGENT_ALIAS() {
         return Object.freeze({
             aether: "damar",
@@ -143,8 +155,29 @@ class AgentHub {
     /** Terjemahkan nama lama; nama kanonik dikembalikan apa adanya. */
     resolveAgentId(id) {
         const raw = String(id ?? "");
-        return AgentHub.LEGACY_AGENT_ALIAS[raw.toLowerCase()] ?? raw;
+        return AgentHub.PANDAWA_ALIAS[raw.toLowerCase()] ?? AgentHub.LEGACY_AGENT_ALIAS[raw.toLowerCase()] ?? raw;
     }
+
+    resolveTarget(value) {
+        const target = pandawaIdentity.resolveTarget(value);
+        return target.id === "damar" || target.id === "pandawa:colony"
+            ? target : Object.freeze({ ...target, agentId: this.resolveAgentId(target.agentId) });
+    }
+
+    identityOf(id) {
+        const target = pandawaIdentity.resolve(id);
+        return target ? Object.freeze({ ...target }) : null;
+    }
+
+    pandawaSessions(options) {
+        if (!this._pandawaSessions) this._pandawaSessions = createPandawaSessionRegistry(options);
+        return this._pandawaSessions;
+    }
+
+    createPandawaSession(options) { return this.pandawaSessions().create(options); }
+    resumePandawaSession(sessionId, options) { return this.pandawaSessions().resume(sessionId, options); }
+    createPandawaDelegation(options) { return pandawaDelegation.createDelegation(options); }
+    acceptPandawaDelegation(delegation, options) { return pandawaDelegation.acceptDelegation(delegation, options); }
 
     get(id) {
         const wanted = this.resolveAgentId(id);
@@ -378,6 +411,9 @@ class AgentHub {
         try {
             const Pipeline = require("../ai/tools/Pipeline");
             const agentTools = require("../agent/agentTools");
+const pandawaIdentity = require("./pandawaIdentity");
+const { createPandawaSessionRegistry } = require("../runtime/interactionBus/pandawaSessions");
+const pandawaDelegation = require("./pandawaDelegation");
 
             tools = Pipeline.select({
                 tools: universe,
