@@ -5,6 +5,10 @@ const identity = require("../../services/pandawaIdentity");
 const STATES = new Set(["OFFLINE", "IDLE", "LISTENING", "THINKING", "WORKING", "WAITING", "BLOCKED", "DELEGATING", "REVIEWING"]);
 const MAX_REFS = 32;
 
+// F-03: creation-bound identity/scope fields are IMMUTABLE through update().
+// update() accepts only stateful fields (allowlist, fail-closed otherwise).
+const UPDATE_ALLOWED = new Set(["state", "activeTaskId", "contextRefs", "surface", "channel"]);
+
 function createPandawaSessionRegistry({ now = () => Date.now(), maxSessions = 256 } = {}) {
   const sessions = new Map();
 
@@ -30,7 +34,10 @@ function createPandawaSessionRegistry({ now = () => Date.now(), maxSessions = 25
       surface: typeof surface === "string" ? surface.slice(0, 64) : null,
       channel: typeof channel === "string" ? channel.slice(0, 64) : null,
       state: "IDLE", activeTaskId: null, contextRefs: boundedRefs(contextRefs),
-      memoryNamespace: memoryNamespace || target.id, authorityContextRef: null,
+      // memoryNamespace is creation-bound to the canonical target: a Pandawa
+      // session can never start life in another entity's namespace.
+      memoryNamespace: memoryNamespace === target.id ? memoryNamespace : target.id,
+      authorityContextRef: null,
       createdAt: at, lastActiveAt: at, generation: 1
     });
     sessions.set(sessionId, record);
@@ -49,11 +56,31 @@ function createPandawaSessionRegistry({ now = () => Date.now(), maxSessions = 25
     return next;
   }
 
-  function update(sessionId, patch = {}) {
+  // F-03: bounded, owner-authorized update. Caller must present the
+  // canonical ownerUserId; identity/scope fields are never mutable here
+  // and any caller-supplied authority context is discarded.
+  function update(sessionId, patch = {}, { ownerUserId } = {}) {
     const current = get(sessionId);
     if (!current) throw new TypeError("PANDAWA_SESSION_NOT_FOUND");
-    if (patch.state !== undefined && !STATES.has(patch.state)) throw new TypeError("PANDAWA_STATE_INVALID");
-    const next = Object.freeze({ ...current, ...patch, sessionId: current.sessionId, targetEntity: current.targetEntity, lastActiveAt: now(), authorityContextRef: null });
+    if (typeof ownerUserId !== "string" || ownerUserId !== current.ownerUserId) throw new TypeError("PANDAWA_SESSION_UPDATE_DENIED");
+    if (patch === null || typeof patch !== "object" || Array.isArray(patch)) throw new TypeError("PANDAWA_SESSION_PATCH_INVALID");
+    for (const key of Object.keys(patch)) {
+      if (!UPDATE_ALLOWED.has(key)) throw new TypeError(`PANDAWA_SESSION_FIELD_IMMUTABLE:${key}`);
+    }
+    const bounded = {};
+    if (patch.state !== undefined) { if (!STATES.has(patch.state)) throw new TypeError("PANDAWA_STATE_INVALID"); bounded.state = patch.state; }
+    if (patch.activeTaskId !== undefined) { if (patch.activeTaskId !== null && (typeof patch.activeTaskId !== "string" || patch.activeTaskId.length > 128)) throw new TypeError("PANDAWA_TASK_ID_INVALID"); bounded.activeTaskId = patch.activeTaskId; }
+    if (patch.contextRefs !== undefined) bounded.contextRefs = boundedRefs(patch.contextRefs);
+    if (patch.surface !== undefined) { if (patch.surface !== null && (typeof patch.surface !== "string" || patch.surface.length > 64)) throw new TypeError("PANDAWA_SURFACE_INVALID"); bounded.surface = patch.surface; }
+    if (patch.channel !== undefined) { if (patch.channel !== null && (typeof patch.channel !== "string" || patch.channel.length > 64)) throw new TypeError("PANDAWA_CHANNEL_INVALID"); bounded.channel = patch.channel; }
+    // sessionId / targetEntity / ownerUserId / memoryNamespace /
+    // parentDamarSessionId / createdAt / generation are carried from
+    // `current` only — spread of `patch` is never applied. Authority
+    // context can never be (re)introduced through update.
+    const next = Object.freeze({
+      ...current, ...bounded,
+      lastActiveAt: now(), authorityContextRef: null
+    });
     sessions.set(sessionId, next);
     return next;
   }
