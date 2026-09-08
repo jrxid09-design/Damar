@@ -125,6 +125,7 @@ class AIRuntimeService {
 
         this.engine = null;
         this.modelFederation = null;
+        this._configuredFederation = null;
 
         // Kesadaran perangkat — dihitung dari OS nyata, bukan diasumsikan.
         // Tanpa ini model kerap menyarankan perintah Linux (xdotool, apt,
@@ -335,7 +336,8 @@ class AIRuntimeService {
             Number.isFinite(localCtx) && localCtx > 0 ? localCtx : 8192;
         builder.provider("llamacpp", {
             modelPath: providerConfig.read().llamacpp?.model ?? null,
-            contextSize: Number.isFinite(localCtx) && localCtx > 0 ? localCtx : 8192
+            contextSize: Number.isFinite(localCtx) && localCtx > 0 ? localCtx : 8192,
+            gpuLayers: Number(process.env.DAMAR_LOCAL_GPU_LAYERS ?? 0)
         });
 
         if (resolved.kind === "openai") {
@@ -369,6 +371,8 @@ class AIRuntimeService {
         this.#registryOwner = builder.registryOwner;
 
         this.activePlatform = resolved;
+        this._configureCanonicalFederation(resolved);
+        if (this._configuredFederation) this.modelFederation = this._configuredFederation;
 
         this.attachEvents();
 
@@ -387,6 +391,63 @@ class AIRuntimeService {
 
         return this;
 
+    }
+
+    _configureCanonicalFederation(resolved) {
+        const path = require("node:path");
+        const { createSecretVault } = require("../runtime/vault");
+        const { ProviderFederation, EntityModelFederation } = require("./modelFederation");
+        const { WisesRuntime } = require("./wisesRuntime");
+        const modelPath = resolved.model && path.isAbsolute(resolved.model)
+            ? resolved.model
+            : (resolved.model ? path.resolve(process.env.DAMAR_MODEL_DIR || "models", resolved.model) : null);
+        const modelId = modelPath ? path.basename(modelPath, path.extname(modelPath)) : "UNSPECIFIED_LOCAL_MODEL";
+        const profile = {
+            survivalRole: "system-local-survival",
+            runtimeId: "node-llama-cpp",
+            runtimeVersion: "3.20.0",
+            providerId: "local-llama-cpp",
+            adapterId: "local-llama-cpp",
+            modelId,
+            modelDisplayName: modelId === "UNSPECIFIED_LOCAL_MODEL" ? "Unspecified local model" : modelId.replaceAll("-", " "),
+            artifactPath: modelPath,
+            artifactDigest: process.env.DAMAR_LOCAL_ARTIFACT_DIGEST || null
+        };
+        const local = new WisesRuntime({
+            profile,
+            infer: async (messages, context) => {
+                const engine = this.ensure();
+                const previous = engine.activeProviderId;
+                try {
+                    engine.use("llamacpp");
+                    const input = Array.isArray(messages) ? messages : [{ role: "user", content: String(messages ?? "") }];
+                    const result = await engine.chat({ messages: input, model: profile.artifactPath, maxTokens: context?.maxTokens ?? 256, temperature: context?.temperature ?? 0, tools: [] });
+                    return result.content ?? "";
+                } finally {
+                    if (previous && previous !== "llamacpp") { try { engine.use(previous); } catch {} }
+                }
+            }
+        });
+        const providers = new ProviderFederation({ vault: createSecretVault() });
+        let defaultRoute = null;
+        if (resolved.kind === "openai") {
+            providers.addProvider({
+                providerId: resolved.id,
+                displayName: resolved.label,
+                baseUrl: resolved.baseUrl,
+                keys: resolved.apiKey ? [resolved.apiKey] : [],
+                privacyClass: "EXTERNAL_CLOUD",
+                adapter: { invoke: async request => {
+                    const engine = this.ensure();
+                    const previous = engine.activeProviderId;
+                    try { engine.use(resolved.id); return await engine.chat({ ...request, model: request.model, tools: [] }); }
+                    finally { if (previous && previous !== resolved.id) { try { engine.use(previous); } catch {} } }
+                } }
+            });
+            defaultRoute = { providerId: resolved.id, modelId: resolved.model || "default" };
+        }
+        this.modelFederation = new EntityModelFederation({ providers, wises: local, defaultRoute });
+        return this.modelFederation;
     }
 
     /**
@@ -1365,8 +1426,8 @@ ${blok}` }
 
     }
 
-    configureModelFederation(federation) { if (!federation || typeof federation.invoke !== "function") throw new TypeError("MODEL_FEDERATION_INVALID"); this.modelFederation = federation; return Object.freeze({ configured: true }); }
-    clearModelFederation() { this.modelFederation = null; }
+    configureModelFederation(federation) { if (!federation || typeof federation.invoke !== "function") throw new TypeError("MODEL_FEDERATION_INVALID"); this._configuredFederation = federation; this.modelFederation = federation; return Object.freeze({ configured: true }); }
+    clearModelFederation() { this._configuredFederation = null; this.modelFederation = null; }
 
     async chat({ messages, model, temperature, maxTokens, tools, channel, role, signal, contextRefs, sessionId, entityId, entityProjection, continuation, sessionModelOverride, workModelOverride, ...exec0 }) {
 
@@ -1423,7 +1484,12 @@ ${blok}` }
             delete exec.capabilitySet;   // buang bentuk mentah warisan baseExec
         }
 
-        if (this.modelFederation && entityId) { return this.modelFederation.invoke(entityId, { messages: msgs, role, sessionId, entityProjection: { ...(entityProjection ?? {}), sessionId, contextRefs }, continuation }, { sessionOverride: sessionModelOverride, workOverride: workModelOverride }); }
+        if (this.modelFederation && entityId) {
+            const modelRouter = require("../autonomy/ModelRouter");
+            const routed = modelRouter.routeEntity(entityId, { federation: this.modelFederation, sessionOverride: sessionModelOverride, workOverride: workModelOverride });
+            const explicitRoute = sessionModelOverride || workModelOverride || (routed.providerId !== this.modelFederation.wises.profile.providerId ? routed : null);
+            return this.modelFederation.invoke(entityId, { messages: msgs, role, sessionId, maxTokens, temperature, entityProjection: { ...(entityProjection ?? {}), sessionId, contextRefs }, continuation }, { sessionOverride: explicitRoute, workOverride: workModelOverride });
+        }
 
         try {
             const res = await this.ensure().chat({ messages: msgs, model: first, temperature, maxTokens, tools: effectiveTools, channel, role, signal, exec });
@@ -1640,7 +1706,7 @@ ${blok}` }
             delete exec.capabilitySet;   // buang bentuk mentah warisan baseExec
         }
 
-        if (this.modelFederation && entityId) { const result = await this.modelFederation.invoke(entityId, { messages: msgs, role, sessionId, entityProjection: { ...(entityProjection ?? {}), sessionId, contextRefs }, continuation }, { sessionOverride: sessionModelOverride, workOverride: workModelOverride }); yield { content: result.content ?? "", entityId: result.entityId ?? entityId, provider: result.provider, model: result.model, fallback: result.fallback === true, degraded: result.degraded === true, provenance: result.provenance ?? null }; return; }
+        if (this.modelFederation && entityId) { const modelRouter = require("../autonomy/ModelRouter"); const routed = modelRouter.routeEntity(entityId, { federation: this.modelFederation, sessionOverride: sessionModelOverride, workOverride: workModelOverride }); const explicitRoute = sessionModelOverride || workModelOverride || (routed.providerId !== this.modelFederation.wises.profile.providerId ? routed : null); const result = await this.modelFederation.invoke(entityId, { messages: msgs, role, sessionId, maxTokens, temperature, entityProjection: { ...(entityProjection ?? {}), sessionId, contextRefs }, continuation }, { sessionOverride: explicitRoute, workOverride: workModelOverride }); yield { content: result.content ?? "", entityId: result.entityId ?? entityId, provider: result.provider, model: result.model, fallback: result.fallback === true, degraded: result.degraded === true, provenance: result.provenance ?? null }; return; }
 
         const pancar = async function* (modelYangDipakai) {
             for await (const chunk of this.ensure().stream({ messages: msgs, model: modelYangDipakai, temperature, maxTokens, tools: effectiveTools, stream: true, channel, role, signal, exec })) {
