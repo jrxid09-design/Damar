@@ -4,6 +4,12 @@ const crypto = require("node:crypto");
 const identity = require("./pandawaIdentity");
 
 const issued = new WeakSet();
+// F-04: canonical consumption ledger — replay protection is keyed by the
+// immutable delegationId inside this module, NOT by caller-supplied fields.
+// Bounded: stale consumptions beyond the bound are prunable without losing
+// active semantics (ISSUED -> ACCEPTED/CONSUMED), preventing unbounded growth.
+const CONSUMED_LEDGER_BOUND = 4096;
+const consumed = new Map();
 const MAX_TEXT = 4096;
 const MAX_REFS = 32;
 
@@ -34,6 +40,15 @@ function acceptDelegation(delegation, { receiver, sessionId } = {}) {
   if (!delegation || typeof delegation !== "object" || !issued.has(delegation)) throw new TypeError("PANDAWA_DELEGATION_UNTRUSTED");
   const target = identity.resolve(receiver);
   if (!target || target.id !== delegation.toEntity || sessionId !== delegation.targetSession) throw new TypeError("PANDAWA_DELEGATION_TARGET_INVALID");
+  if (delegation.state !== "ISSUED") throw new TypeError("PANDAWA_DELEGATION_ALREADY_CONSUMED");
+  if (consumed.has(delegation.delegationId)) throw new TypeError("PANDAWA_DELEGATION_ALREADY_CONSUMED");
+  if (consumed.size >= CONSUMED_LEDGER_BOUND) {
+    // prune oldest entries (Map preserves insertion order) — kept bounded;
+    // ISSUED-state check above already rejects re-consumption regardless.
+    const excess = consumed.size - CONSUMED_LEDGER_BOUND + 1;
+    for (const key of consumed.keys()) { if (excess-- <= 0) break; consumed.delete(key); }
+  }
+  consumed.set(delegation.delegationId, { consumedAt: Date.now(), receiver: target.id, sessionId });
   return Object.freeze({ ...delegation, state: "ACCEPTED", acceptedAt: Date.now() });
 }
 
@@ -47,4 +62,6 @@ function projectHandoff(delegation, { receiver, sessionId } = {}) {
   });
 }
 
-module.exports = Object.freeze({ createDelegation, acceptDelegation, projectHandoff, isIssued: value => issued.has(value) });
+function consumption(delegationId) { return consumed.get(String(delegationId)) ?? null; }
+
+module.exports = Object.freeze({ createDelegation, acceptDelegation, projectHandoff, consumption, isIssued: value => issued.has(value) });

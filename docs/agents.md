@@ -10,23 +10,27 @@ kolektif lima spesialis miliknya, lalu mengoordinasikan hasilnya.
                          ▼
                       Pandawa
                          │
-   ┌────────────┬────────┼────────┬────────────┐
-   ▼            ▼        ▼        ▼            ▼
-Puntadewa   Werkudara  Janaka   Nakula      Sadewa
-tata kelola  keamanan   riset   rekayasa   memori &
-& rencana  & pertahanan & intel & operasi  kontinuitas
+   ┌────────────┬─────────┼─────────┬────────────┐
+   ▼            ▼         ▼         ▼            ▼
+Puntadewa   Werkudara   Janaka    Nakula      Sadewa
+strategi &  keamanan &  rekayasa  data, stat  riset, bukti
+sintesis &  infrastruk  & koding  & numerik   & verifikasi
+arbitrase   & resiliensi& debug    & RF/spasial& provenance
 ```
 
 ## Agent
 
-| Agent | Peran |
+Peran eksekutable diproyeksikan dari satu sumber kanonik
+(`pandawaIdentity.ROLE_PROFILES`) — tidak ada salinan kedua.
+
+| Agent | Peran kanonik |
 |---|---|
 | **damar** | Otak LLM lokal: menalar, menulis, menghitung, memakai memori & tool internal. Default untuk berpikir. |
-| **puntadewa** | Tata kelola, perencanaan & penilaian: dekomposisi tugas, rencana jangka panjang, analisis keputusan, koordinasi, prioritisasi, resolusi konflik, interpretasi kebijakan. |
-| **werkudara** | Keamanan & pertahanan: pemodelan ancaman, tinjauan autentikasi/otorisasi, analisis batas kepercayaan, telaah rahasia & risiko dependensi, pengerasan runtime, uji adversarial, analisis insiden. |
-| **janaka** | Riset & intelijen: investigasi dokumentasi, akuisisi pengetahuan eksternal, OSINT, perbandingan pustaka/API/produk, verifikasi fakta, sintesis informasi. |
-| **nakula** | Rekayasa & operasi: implementasi, debugging, refactoring, testing, DevOps, operasi runtime, kontainer/layanan, integrasi, otomatisasi, performa, integrasi perangkat/tool. |
-| **sadewa** | Memori, analisis & kontinuitas: organisasi memori, provenance, klasifikasi epistemik, kontinuitas historis & percakapan, analisis data, pengenalan pola, refleksi pasca-tugas. |
+| **puntadewa** | Strategi, sintesis, arbitrase, perencanaan: dekomposisi tujuan, rencana bertingkat, sintesis lintas-pandangan, arbitrase konflik prioritas, prioritisasi. |
+| **werkudara** | Keamanan, infrastruktur, resiliensi, telaah adversarial: pemodelan ancaman, telaah izin, pengerasan infrastruktur, uji adversarial, uji ketahanan, analisis insiden. |
+| **janaka** | Rekayasa, koding, arsitektur, implementasi, debugging: rancang arsitektur, bangun/refactor perangkat lunak, debug, uji, kelola perubahan kode. |
+| **nakula** | Data, statistik, numerik, RF, analitik spasial: metrik, model statistik, analisis numerik, telaah sinyal/RF, analisis spasial-visual. |
+| **sadewa** | Riset, bukti, verifikasi, provenance: penelusuran sumber, pengumpulan bukti, verifikasi klaim, provenance artefak, klasifikasi epistemik. |
 
 Semua agent hidup di runtime Damar yang sama — selalu online selama
 daemon berjalan. Sintesis akhir ke pengguna tetap **Damar**; Pandawa
@@ -39,11 +43,11 @@ anggota yang mendapat kewenangan tambahan karena perannya:
 
 | Hukum | Artinya |
 |---|---|
-| `PLAN != AUTHORITY` | Puntadewa menyusun rencana; rencana tidak memberi izin. |
-| `MEMORY != AUTHORITY` | Sadewa menyediakan konteks & provenance; sesuatu tidak menjadi boleh hanya karena tercatat. |
+| `PLAN != AUTHORITY` | Puntadewa menyusun rencana & mengarbitrase; rencana/arbitrase tidak memberi izin. |
+| `EVIDENCE != TRUTH` | Sadewa mengumpulkan bukti & memverifikasi; temuan wajib membawa sumber, provenance & tingkat keyakinan. |
 | `SECURITY != BYPASS` | Werkudara meninjau keamanan; ia tetap tunduk pada Authority Gate dan kill switch. |
-| `RESEARCH != TRUTH` | Janaka meneliti; temuan wajib membawa sumber & tingkat keyakinan. |
-| `ENGINEERING != FREE EXEC` | Nakula merekayasa; setiap aksi nyata tetap melewati Actuation Fabric. |
+| `ENGINEERING != FREE EXEC` | Janaka merekayasa; setiap aksi nyata tetap melewati Actuation Fabric. |
+| `ANALYTICS != FREE EXEC` | Nakula menganalisis data; temuan analitik bukan izin aksi nyata. |
 | `MODEL CLAIM != AUTHORITY` | Model menentukan CARA berpikir, bukan SIAPA Damar. |
 | `CHANNEL != AUTHORITY` | Kanal memilih konteks, bukan hak. |
 

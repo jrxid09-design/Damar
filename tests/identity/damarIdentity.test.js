@@ -194,12 +194,13 @@ test("6-7: kolektif spesialis aktif adalah Pandawa dengan lima nama persis", () 
 
 test("8: tiap anggota Pandawa memegang domain yang benar", () => {
 
+    // F-05: domain kanonik Lane 6 (ROLE_PROFILES pandawaIdentity).
     const domain = {
-        puntadewa: /tata kelola|perencanaan/i,
-        werkudara: /keamanan|pertahanan/i,
-        janaka: /riset|intelijen/i,
-        nakula: /rekayasa|operasi/i,
-        sadewa: /memori|kontinuitas/i
+        puntadewa: /strategi|sintesis|arbitrase|perencanaan/i,
+        werkudara: /keamanan|infrastruktur|resiliensi|adversarial/i,
+        janaka: /rekayasa|koding|arsitektur|implementasi|debugging/i,
+        nakula: /data|statistik|numerik|RF|spasial/i,
+        sadewa: /riset|bukti|verifikasi|provenance/i
     };
 
     for (const id of PANDAWA) {

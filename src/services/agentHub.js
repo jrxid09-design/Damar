@@ -50,72 +50,43 @@ class AgentHub {
             // sama dengan bias peran — selalu online selama daemon
             // hidup. Sintesis akhir ke pengguna tetap Damar.
             //
+            // F-05: semantik peran eksekutable DIPROYEKSIKAN dari
+            // pemilik kanonik tunggal (pandawaIdentity.ROLE_PROFILES).
+            // AgentHub tidak lagi meng-hardcode peran — tidak ada
+            // salinan kedua yang bisa basi. ROLE != AUTHORITY.
+            //
             // HUKUM YANG TIDAK BOLEH DIGESER OLEH PERAN:
             //   PLAN         != AUTHORITY  (Puntadewa merencanakan)
-            //   MEMORY       != AUTHORITY  (Sadewa mengingat)
+            //   EVIDENCE     != TRUTH      (Sadewa memverifikasi)
             //   SECURITY     != BYPASS     (Werkudara tetap lewat Gate)
-            //   RESEARCH     != TRUTH      (Janaka meneliti, bukan orakel)
-            //   ENGINEERING  != FREE EXEC  (Nakula tetap lewat Actuation)
+            //   ENGINEERING  != FREE EXEC  (Janaka tetap lewat Actuation)
+            //   ANALYTICS    != FREE EXEC  (Nakula tetap lewat Actuation)
             //
             // Otoritas TIDAK PERNAH lahir dari peran: ia hanya
             // diwarisi dari delegator — lihat delegatedRoleOf() dan
             // assertRestrictionsPreserved() di bawah.
 
-            {
-                id: "puntadewa",
-                entityId: "pandawa:puntadewa",
-                label: "Puntadewa (tata kelola & perencanaan)",
-                kind: "worker",
-                role: "Kamu Puntadewa, spesialis tata kelola, perencanaan, dan penilaian Damar. Uraikan tugas menjadi langkah, susun rencana jangka panjang, timbang keputusan, tetapkan prioritas, selesaikan konflik, dan tafsirkan kebijakan. RENCANA BUKAN OTORITAS: kamu mengusulkan urutan kerja, tidak pernah memberi izin.",
-                description: "Dekomposisi tugas, perencanaan, analisis keputusan, prioritas, koordinasi, dan interpretasi kebijakan.",
-                skills: ["Dekomposisi tugas", "Perencanaan strategis", "Analisis keputusan", "Koordinasi", "Prioritisasi", "Resolusi konflik", "Interpretasi kebijakan", "Perencanaan jangka panjang"],
-                tools: ["workflow_engine", "memory", "filesystem", "data_analysis"],
-                canDelegateTo: ["janaka", "werkudara", "nakula", "sadewa"]
-            },
-            {
-                id: "werkudara",
-                entityId: "pandawa:werkudara",
-                label: "Werkudara (keamanan & pertahanan)",
-                kind: "worker",
-                role: "Kamu Werkudara, spesialis keamanan & pertahanan Damar. Lakukan pemodelan ancaman, tinjau autentikasi/otorisasi, analisis batas kepercayaan, telaah rahasia & risiko dependensi, pengerasan runtime, uji adversarial, dan analisis insiden. PERAN KEAMANAN BUKAN JALAN PINTAS: kamu melapor dan mengusulkan, tidak pernah melewati Authority Gate atau kill switch.",
-                description: "Rekayasa keamanan, pemodelan ancaman, analisis batas kepercayaan, dan analisis insiden.",
-                skills: ["Audit keamanan", "Pemodelan ancaman", "Analisis izin", "Keamanan kredensial", "Analisis batas kepercayaan", "Keamanan dependensi", "Uji adversarial", "Analisis insiden"],
-                tools: ["terminal", "network", "security_scanner", "git", "process_manager", "osint", "code_search"],
-                canDelegateTo: ["nakula", "janaka", "sadewa"]
-            },
-            {
-                id: "janaka",
-                entityId: "pandawa:janaka",
-                label: "Janaka (rekayasa & implementasi)",
-                kind: "worker",
-                role: "Kamu Janaka, spesialis riset & intelijen Damar. Telusuri dokumentasi teknis, kumpulkan pengetahuan eksternal, lakukan OSINT bila memang pantas, bandingkan pustaka/API/produk, verifikasi fakta, dan sintesiskan informasi dengan rujukan yang jelas. TEMUAN BUKAN KEBENARAN FINAL: sebutkan tingkat keyakinan dan sumbernya.",
-                description: "Riset, investigasi dokumentasi, akuisisi pengetahuan eksternal, verifikasi fakta, dan sintesis informasi.",
-                skills: ["Riset & browsing", "Investigasi dokumentasi", "OSINT", "Perbandingan teknologi", "Verifikasi fakta", "Sintesis informasi", "Laporan terstruktur"],
-                tools: ["web", "osint", "filesystem", "memory"],
-                canDelegateTo: ["nakula", "sadewa", "werkudara"]
-            },
-            {
-                id: "nakula",
-                entityId: "pandawa:nakula",
-                label: "Nakula (data & analitik)",
-                kind: "worker",
-                role: "Kamu Nakula, spesialis rekayasa & operasi Damar. Bangun, ubah, debug, refactor, dan uji perangkat lunak; kelola OS, proses, layanan, kontainer, jaringan, penyimpanan; kerjakan otomatisasi, integrasi, performa, serta integrasi perangkat/tool (kamera, audio, kanal). PERAN INSINYUR BUKAN IZIN EKSEKUSI: setiap aksi nyata tetap melewati Actuation Fabric dan Authority Gate.",
-                description: "Implementasi, debugging, refactoring, testing, DevOps, operasi runtime, integrasi, otomatisasi, dan integrasi perangkat.",
-                skills: ["Generasi kode", "Perbaikan bug", "Refactoring", "Testing", "Operasi Git", "Manajemen dependensi", "Administrasi OS", "Docker", "Diagnostik jaringan", "Otomatisasi alur kerja", "Integrasi API", "Integrasi perangkat"],
-                tools: ["opencode", "terminal", "git", "code_search", "test_runner", "filesystem", "powershell", "docker", "network", "process_manager", "ssh", "nas", "vision", "ocr", "cctv", "camera", "gallery", "microphone", "speech_to_text", "text_to_speech", "audio_processor", "media_player", "console", "whatsapp", "notifications", "ui", "api", "media_share", "workflow_engine", "scheduler", "webhooks", "web"],
-                canDelegateTo: ["werkudara", "sadewa", "janaka"]
-            },
-            {
-                id: "sadewa",
-                entityId: "pandawa:sadewa",
-                label: "Sadewa (riset & verifikasi)",
-                kind: "worker",
-                role: "Kamu Sadewa, spesialis memori, analisis, dan kontinuitas Damar. Kelola organisasi memori, provenance, klasifikasi epistemik, kesinambungan sejarah & percakapan, analisis data, pengenalan pola, refleksi pasca-tugas, dan rekonsiliasi kausal. MEMORI BUKAN OTORITAS: sesuatu tidak menjadi boleh hanya karena ia tercatat.",
-                description: "Organisasi memori, provenance, kontinuitas historis, analisis data, pengenalan pola, dan refleksi.",
-                skills: ["Penyimpanan & retrieval memori", "Provenance", "Klasifikasi epistemik", "Kontinuitas percakapan", "Analisis data", "Pengenalan pola", "Analisis log & metrik", "Deteksi anomali", "Refleksi pasca-tugas"],
-                tools: ["memory_store", "memory_search", "vector_search", "gallery_people", "logs", "metrics", "system_monitor", "process_manager", "docker", "home"],
-                canDelegateTo: ["janaka", "nakula"]
-            }
+            ...["puntadewa", "werkudara", "janaka", "nakula", "sadewa"].map(workerId => {
+                const entityId = `pandawa:${workerId}`;
+                const profile = pandawaIdentity.roleProfile(entityId);
+                return {
+                    id: workerId,
+                    entityId,
+                    kind: "worker",
+                    label: profile.label,
+                    role: profile.mandate,
+                    description: profile.description,
+                    skills: [...profile.skills],
+                    // Deklarasi lama diterjemahkan lewat alias kapabilitas
+                    // di agentTools (CAPABILITY_ALIAS) — profil boost
+                    // kanonik tetap WORKER_PROFILES di agentTools.
+                    tools: [...profile.domains],
+                    canDelegateTo: workerId === "puntadewa"
+                        ? ["janaka", "werkudara", "nakula", "sadewa"]
+                        : ["puntadewa", "janaka", "werkudara", "nakula", "sadewa"].filter(x => x !== workerId)
+                };
+            })
+
         ];
 
     }
@@ -378,18 +349,10 @@ class AgentHub {
 
     }
 
-    /** Anggota Pandawa menjalankan tugas dengan bias peran DAN tool sesuai topiknya.
-     *
-     * Seleksi kini lewat pipeline yang SAMA dengan chat biasa
-     * (ai/tools/Pipeline.js): tugas dinilai secara deterministik,
-     * lalu profil spesialis worker (agentTools.profileFor) masuk
-     * sebagai BOOST — menguntungkan tool khas perannya tanpa pernah
-     * menggantikan penilaian. Dulu daftar statis per worker dikirim
-     * mentah dan melewati seluruh mesin seleksi.
-     *
-     * Nakula adalah kasus khusus: tugas menulis/mengubah kode
-     * didelegasikan ke opencode lewat tool `opencode_run` — agent
-     * coding sungguhan dengan editor penuh, bukan patch manual.
+    /** Janaka adalah kasus khusus (F-05: rekayasa/koding kanonik):
+     * tugas menulis/mengubah kode didelegasikan ke opencode lewat tool
+     * `opencode_run` — agent coding sungguhan dengan editor penuh,
+     * bukan patch manual.
      */
     async runWorker(agent, task, { contextRefs = [], exec = null } = {}) {
 
@@ -438,7 +401,7 @@ const pandawaColony = require("./pandawaColony");
         // Bias peran ditempel SEBELUM pesan pengguna, bukan sebagai
         // pesan system — supaya system prompt utama (memori, tool)
         // tetap terpasang oleh aiRuntimeService.
-        const instruksi = agent.id === "nakula"
+        const instruksi = agent.id === "janaka"
             ? `[Peran: ${agent.label}]\n${agent.role}\n\n` +
               "Untuk mengubah/menulis kode, WAJIB delegasikan ke opencode lewat tool " +
               "`opencode_run` — jangan tulis patch manual lewat filesystem.\n\n" +
