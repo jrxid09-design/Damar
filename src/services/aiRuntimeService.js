@@ -124,6 +124,7 @@ class AIRuntimeService {
     constructor() {
 
         this.engine = null;
+        this.modelFederation = null;
 
         // Kesadaran perangkat — dihitung dari OS nyata, bukan diasumsikan.
         // Tanpa ini model kerap menyarankan perintah Linux (xdotool, apt,
@@ -1364,7 +1365,10 @@ ${blok}` }
 
     }
 
-    async chat({ messages, model, temperature, maxTokens, tools, channel, role, signal, contextRefs, sessionId, ...exec0 }) {
+    configureModelFederation(federation) { if (!federation || typeof federation.invoke !== "function") throw new TypeError("MODEL_FEDERATION_INVALID"); this.modelFederation = federation; return Object.freeze({ configured: true }); }
+    clearModelFederation() { this.modelFederation = null; }
+
+    async chat({ messages, model, temperature, maxTokens, tools, channel, role, signal, contextRefs, sessionId, entityId, entityProjection, continuation, sessionModelOverride, workModelOverride, ...exec0 }) {
 
         // A model-produced tool call is advisory only at an external
         // boundary. No external channel may reach RuntimeExecutor's tool
@@ -1418,6 +1422,8 @@ ${blok}` }
         if (!capabilitySet) {
             delete exec.capabilitySet;   // buang bentuk mentah warisan baseExec
         }
+
+        if (this.modelFederation && entityId) { return this.modelFederation.invoke(entityId, { messages: msgs, role, sessionId, entityProjection: { ...(entityProjection ?? {}), sessionId, contextRefs }, continuation }, { sessionOverride: sessionModelOverride, workOverride: workModelOverride }); }
 
         try {
             const res = await this.ensure().chat({ messages: msgs, model: first, temperature, maxTokens, tools: effectiveTools, channel, role, signal, exec });
@@ -1584,7 +1590,7 @@ ${blok}` }
         catch { /* pencatatan tak boleh menggagalkan chat */ }
     }
 
-    async *stream({ messages, model, temperature, maxTokens, tools, channel, role, signal, contextRefs, sessionId, ...exec0 }) {
+    async *stream({ messages, model, temperature, maxTokens, tools, channel, role, signal, contextRefs, sessionId, entityId, entityProjection, continuation, sessionModelOverride, workModelOverride, ...exec0 }) {
 
         const effectiveTools = externalAiChannel(channel) ? [] : tools;
 
@@ -1633,6 +1639,8 @@ ${blok}` }
         if (!capabilitySet) {
             delete exec.capabilitySet;   // buang bentuk mentah warisan baseExec
         }
+
+        if (this.modelFederation && entityId) { const result = await this.modelFederation.invoke(entityId, { messages: msgs, role, sessionId, entityProjection: { ...(entityProjection ?? {}), sessionId, contextRefs }, continuation }, { sessionOverride: sessionModelOverride, workOverride: workModelOverride }); yield { content: result.content ?? "", entityId: result.entityId ?? entityId, provider: result.provider, model: result.model, fallback: result.fallback === true, degraded: result.degraded === true, provenance: result.provenance ?? null }; return; }
 
         const pancar = async function* (modelYangDipakai) {
             for await (const chunk of this.ensure().stream({ messages: msgs, model: modelYangDipakai, temperature, maxTokens, tools: effectiveTools, stream: true, channel, role, signal, exec })) {

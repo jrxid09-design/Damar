@@ -74,9 +74,9 @@ class ProviderFederation {
         throw last || Object.assign(new Error("PROVIDER_UNAVAILABLE"), { failureClass: "PROVIDER_UNAVAILABLE" });
     }
     _provider(idv) { const p = this.providers.get(String(idv).toLowerCase()); if (!p) throw Object.assign(new Error("PROVIDER_NOT_FOUND"), { failureClass: "PROVIDER_UNAVAILABLE" }); return p; }
-    _nextCredential(p) { p.credentialState ??= []; const candidates = p.credentialRefs.map((_, i) => i).filter(i => p.credentialState[i] !== "INVALID" && p.credentialState[i] !== "COOLDOWN"); return candidates[0] ?? 0; }
-    _success(p, index = null) { p.failures = 0; p.circuit = "CLOSED"; p.healthState = "HEALTHY"; if (index !== null) { p.credentialState ??= []; p.credentialState[index] = "HEALTHY"; } }
-    _failure(p, error, index = null) { const kind = classifyFailure(error); p.failures++; p.healthState = kind === "RATE_LIMIT" ? "RATE_LIMITED" : "DEGRADED"; p.credentialState ??= []; if (index !== null) p.credentialState[index] = kind === "AUTH_FAILURE" ? "INVALID" : kind === "RATE_LIMIT" ? "COOLDOWN" : "DEGRADED"; if (p.failures >= this.failureThreshold) { p.circuit = "OPEN"; p.cooldownUntil = this.now() + this.cooldownMs; p.healthState = "CIRCUIT_OPEN"; } return { ok: false, providerId: p.providerId, failureClass: kind, healthState: p.healthState }; }
+    _nextCredential(p) { p.credentialState ??= []; p.credentialCooldownUntil ??= []; const now = this.now(); const candidates = p.credentialRefs.map((_, i) => i).filter(i => !["INVALID", "COOLDOWN", "DEGRADED"].includes(p.credentialState[i]) || now >= (p.credentialCooldownUntil[i] ?? 0)); return candidates[0] ?? 0; }
+    _success(p, index = null) { p.failures = 0; p.circuit = "CLOSED"; p.healthState = "HEALTHY"; if (index !== null) { p.credentialState ??= []; p.credentialState[index] = "HEALTHY"; p.credentialCooldownUntil ??= []; p.credentialCooldownUntil[index] = 0; } }
+    _failure(p, error, index = null) { const kind = classifyFailure(error); p.failures++; p.healthState = kind === "RATE_LIMIT" ? "RATE_LIMITED" : "DEGRADED"; p.credentialState ??= []; p.credentialCooldownUntil ??= []; if (index !== null) { p.credentialState[index] = kind === "AUTH_FAILURE" ? "INVALID" : kind === "RATE_LIMIT" ? "COOLDOWN" : "DEGRADED"; p.credentialCooldownUntil[index] = this.now() + this.cooldownMs; } if (p.failures >= this.failureThreshold) { p.circuit = "OPEN"; p.cooldownUntil = this.now() + this.cooldownMs; p.healthState = "CIRCUIT_OPEN"; } return { ok: false, providerId: p.providerId, failureClass: kind, healthState: p.healthState }; }
 }
 
 class EntityModelFederation {
@@ -88,7 +88,7 @@ class EntityModelFederation {
     async invoke(entityId, request, { sessionOverride = null, workOverride = null } = {}) {
         const key = entity(entityId); const assignment = this.assignments.get(key); const routes = [workOverride, sessionOverride, assignment?.primaryRoute, ...(assignment?.configuredFallbacks || [])].filter(Boolean).map(x => this.route(x)); const attempts = []; for (const route of routes) { try { const result = await this.providers.invoke(route.providerId, { ...request, model: route.modelId, entityId: key }); return { ...result, entityId: key, requestedRoute: route, actualRoute: route, fallback: false, attempts }; } catch (error) { attempts.push({ route, failureClass: classifyFailure(error) }); } }
         try {
-            const local = await this.wises.invoke({ ...request, entityId: key, model: "Wises-D1" });
+            const local = await this.wises.invoke({ ...request, entityId: key, model: "Wises-D1", entityProjection: boundedEntityProjection(key, request) });
             return { ...local, entityId: key, actualRoute: { providerId: "wises-d1", modelId: "Wises-D1" }, fallback: true, attempts };
         } catch (error) {
             return { entityId: key, actualRoute: { providerId: "wises-d1", modelId: "Wises-D1" }, fallback: true, degraded: true, failureClass: classifyFailure(error), attempts };
@@ -96,4 +96,6 @@ class EntityModelFederation {
     }
 }
 
-module.exports = Object.freeze({ FAILURE_CLASSES, HEALTH, ROUTING_MODES, PRIVACY, parseKeys, classifyFailure, ProviderFederation, EntityModelFederation });
+function boundedEntityProjection(entityId, request = {}) { const source = request.entityProjection && typeof request.entityProjection === "object" ? request.entityProjection : {}; const list = value => Array.isArray(value) ? value.slice(0, 32).filter(v => typeof v === "string").map(v => v.slice(0, 256)) : []; const continuation = request.continuation && typeof request.continuation === "object" ? request.continuation : {}; const completed = list(continuation.completedActionRefs); const verified = list(continuation.verifiedActionRefs); const pending = list(continuation.pendingActionRefs).filter(v => !completed.includes(v) && !verified.includes(v)); return Object.freeze({ entityId, displayName: typeof source.displayName === "string" ? source.displayName.slice(0, 128) : null, role: typeof source.role === "string" ? source.role.slice(0, 128) : null, sessionId: typeof source.sessionId === "string" ? source.sessionId.slice(0, 256) : null, taskRef: typeof source.taskRef === "string" ? source.taskRef.slice(0, 256) : null, contextRefs: list(source.contextRefs), skillRefs: list(source.skillRefs), continuation: Object.freeze({ workRef: typeof continuation.workRef === "string" ? continuation.workRef.slice(0, 256) : null, phase: typeof continuation.phase === "string" ? continuation.phase.slice(0, 64) : null, completedActionRefs: completed, verifiedActionRefs: verified, pendingActionRefs: pending, resultRefs: list(continuation.resultRefs) }) }); }
+
+module.exports = Object.freeze({ FAILURE_CLASSES, HEALTH, ROUTING_MODES, PRIVACY, parseKeys, classifyFailure, boundedEntityProjection, ProviderFederation, EntityModelFederation });
