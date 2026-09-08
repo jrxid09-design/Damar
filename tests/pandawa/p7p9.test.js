@@ -43,13 +43,13 @@ test("P8: assignments and overrides preserve entity identity", () => {
     assert.equal(federation.resolve("Arjuna").modelId, "code");
     assert.equal(federation.resolve("pandawa:janaka", { sessionOverride: { providerId: "alpha", modelId: "review" } }).modelId, "review");
     assert.equal(federation.describe("janaka").entityId, "pandawa:janaka");
-    assert.equal(federation.describe("janaka").systemFallback, "wises-d1");
+    assert.deepEqual(federation.describe("janaka").systemFallback, { survivalRole: "system-local-survival", providerId: "local-runtime", modelId: "UNSPECIFIED_LOCAL_MODEL" });
 });
 
 test("P9: configured route failure falls back to the same entity through Wises", async () => {
     const providers = new ProviderFederation({ vault: createTestVault() });
     providers.addProvider({ providerId: "bad", displayName: "Bad", baseUrl: "http://bad", keys: ["key"], adapter: createFaultAdapter("500") });
-    const wises = new WisesRuntime({ infer: async (messages, context) => `${context?.entityId ?? "canary"}:local` });
+    const wises = new WisesRuntime({ profile: { providerId: "wises-d1", modelId: "Wises-D1", runtimeId: "wises-local", modelDisplayName: "Wises-D1" }, infer: async (messages, context) => `${context?.entityId ?? "canary"}:local` });
     const federation = new EntityModelFederation({ providers, wises });
     federation.assign("pandawa:janaka", { primaryRoute: { providerId: "bad", modelId: "x" } });
     const response = await federation.invoke("pandawa:janaka", { messages: [{ role: "user", content: "hi" }] });

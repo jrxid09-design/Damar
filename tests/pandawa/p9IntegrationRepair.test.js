@@ -10,7 +10,7 @@ const { WisesRuntime } = require("../../src/services/wisesRuntime");
 function federation({ adapter, infer, recoveryProvider = null, now = () => 0 } = {}) {
     const providers = new ProviderFederation({ vault: createTestVault(), now, cooldownMs: 1000, failureThreshold: 20 });
     providers.addProvider({ providerId: "remote", displayName: "Remote", baseUrl: "http://remote", keys: ["k"], adapter });
-    const wises = new WisesRuntime({ infer, recovery: recoveryProvider, maxRecoveryAttempts: 1, now });
+    const wises = new WisesRuntime({ profile: { providerId: "wises-d1", modelId: "Wises-D1", runtimeId: "wises-local", modelDisplayName: "Wises-D1" }, infer, recovery: recoveryProvider, maxRecoveryAttempts: 1, now });
     const f = new EntityModelFederation({ providers, wises });
     f.assign("pandawa:janaka", { primaryRoute: { providerId: "remote", modelId: "remote-model" } });
     return { providers, f, wises };
@@ -67,4 +67,22 @@ test("P9 repair: completed action remains completed in fallback continuation", a
     assert.equal(result.content, "continued-without-replay");
     assert.equal(actionExecutions, 1);
     assert.deepEqual(localContext.entityProjection.continuation.pendingActionRefs, []);
+});
+
+
+test("P9 provenance: llama.cpp profile reports actual runtime and model", async () => {
+    const runtime = new WisesRuntime({ profile: { survivalRole: "system-local-survival", runtimeId: "node-llama-cpp", providerId: "local-llama-cpp", modelId: "Qwen2.5-7B-Instruct-Q4_K_M", modelDisplayName: "Qwen2.5-7B-Instruct-Q4_K_M", artifactDigest: "digest", runtimeVersion: "3.20.0" }, infer: async () => "local" });
+    const result = await runtime.invoke({ entityId: "pandawa:janaka", messages: [] });
+    assert.equal(result.provider, "local-llama-cpp");
+    assert.equal(result.model, "Qwen2.5-7B-Instruct-Q4_K_M");
+    assert.equal(result.provenance.runtimeId, "node-llama-cpp");
+    assert.equal(result.provenance.survivalRole, "system-local-survival");
+    assert.equal(result.provenance.entityId, "pandawa:janaka");
+});
+
+test("P9 provenance: explicit Wises profile remains available", async () => {
+    const runtime = new WisesRuntime({ profile: { providerId: "wises-d1", modelId: "Wises-D1", runtimeId: "wises-local" }, infer: async () => "local" });
+    const result = await runtime.invoke({ entityId: "damar", messages: [] });
+    assert.equal(result.provider, "wises-d1");
+    assert.equal(result.model, "Wises-D1");
 });
