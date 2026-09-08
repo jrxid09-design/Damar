@@ -27,6 +27,7 @@ const restore = require("./restore");
 const { GenerationLedger } = require("./generation");
 const { RecoveryStatusTracker } = require("./status");
 const ports = require("./ports");
+const wisesProvider = require("./wisesProvider");
 
 module.exports = Object.freeze({
     ids,
@@ -46,5 +47,6 @@ module.exports = Object.freeze({
     restore,
     GenerationLedger,
     RecoveryStatusTracker,
-    ports
+    ports,
+    wisesProvider
 });
