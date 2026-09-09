@@ -43,16 +43,28 @@ const EPISODE_DEFAULTS = Object.freeze({
 });
 
 class DistributedRecoveryCoordinator {
-    constructor({ trust, checkpointVerifier = null, config = {}, nowMs = () => Date.now() } = {}) {
-        if (!trust) throw new TypeError("coordinator requires trust plane");
-        this.trust = trust;
-        this.checkpointVerifier = checkpointVerifier; // fn(checkpoint, {isNodeTrusted}) — frozen L2 verifier wired in
-        this.config = Object.freeze({ ...EPISODE_DEFAULTS, ...config });
-        this.nowMs = nowMs;
-        /** episodeId -> episode */
-        this._episodes = new Map();
-        this._consumedRecoveryNonces = new Set();
-    }
+ /**
+ * W6-05 REPAIR: `checkpointVerifier` is MANDATORY. Construction without a
+ * canonical verifier (the frozen L2 checkpoint verifier or a composition
+ * that includes it) fails CLOSED — there is no default path that can reach
+ * CHECKPOINT_TRANSFERRED without verification.
+ * Episodes bind: episodeId + generation + source + destination + checkpoint
+ * digest; payloads carry a one-use recovery nonce.
+ */
+ constructor({ trust, checkpointVerifier, config = {}, nowMs = () => Date.now() } = {}) {
+ if (!trust) throw new TypeError("coordinator requires trust plane");
+ if (typeof checkpointVerifier !== "function") {
+ // W6-05: FAIL CLOSED — no verifier, no recovery coordinator
+ throw new TypeError("coordinator requires a canonical checkpointVerifier (W6-05: verification is mandatory, no default path)");
+ }
+ this.trust = trust;
+ this.checkpointVerifier = checkpointVerifier;
+ this.config = Object.freeze({ ...EPISODE_DEFAULTS, ...config });
+ this.nowMs = nowMs;
+ /** episodeId -> episode */
+ this._episodes = new Map();
+ this._consumedRecoveryNonces = new Set();
+ }
 
     /**
      * Start a recovery episode for a failed node. Peer eligibility is a
@@ -67,6 +79,7 @@ class DistributedRecoveryCoordinator {
         const episodeId = `drec-${crypto.randomBytes(16).toString("hex")}`;
         const generation = `drecgen-${crypto.randomBytes(16).toString("hex")}`;
         const episode = {
+            checkpointVerifier: this.checkpointVerifier,
             episodeId, generation,
             failedNodeId: failed,
             continuityIncarnation: continuityIncarnation ? String(continuityIncarnation).slice(0, 128) : null,
@@ -119,31 +132,97 @@ class DistributedRecoveryCoordinator {
      * Uses the frozen L2 checkpoint verifier: expiry/revocation/digest/
      * incarnation all fail closed. Recovery nonce prevents replayed payloads.
      */
-    transferCheckpoint(episodeId, { checkpoint, recoveryNonce } = {}) {
-        const ep = this._require(episodeId);
-        if (!ep.selectedPeer) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "peer not selected");
-        if (this._consumedRecoveryNonces.has(recoveryNonce)) throw meshFailure(MESH_ERRORS.MESH_REPLAY, "recovery payload replayed");
- // verify via the frozen L2 verifier (fail-closed on stale/tampered).
- // The SOURCE node is the FAILED node — untrusted-by-definition for this
- // episode; the verifier's trust callback therefore checks that the source
- // is not explicitly REVOKED/QUARANTINED (a revoked node's state is poison).
- if (this.checkpointVerifier) {
- this.checkpointVerifier(checkpoint, { isNodeTrusted: (nodeId) => {
+ /**
+ * W6-05: checkpoint payload sanitizer — rejects authority grants, raw
+ * secrets, reusable leases, and completed-action-resurrected-as-pending
+ * BEFORE any state transition.
+ */
+ _sanitizeCheckpointPayload(checkpoint) {
+ const FORBIDDEN = new Set(["authoritygrant", "authority", "grants", "rawsecret", "secret", "secrets", "vaultvalue", "lease", "leases", "executionlease", "reusablelease"]);
+ const pending = checkpoint.pendingCognitiveWork ?? [];
+ const completed = new Set(checkpoint.verifiedCompletedActionRefs ?? []);
+ for (const item of pending) {
+ if (completed.has(item)) {
+ throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, `checkpoint resurrects completed action '${String(item).slice(0, 48)}' as pending (MODEL RECOVERY != ACTION REPLAY)`);
+ }
+ }
+ const seen = new WeakSet();
+ const walk = (node, path) => {
+ if (node === null || typeof node !== "object") return;
+ if (seen.has(node)) return;
+ seen.add(node);
+ for (const key of Object.keys(node)) {
+ if (FORBIDDEN.has(String(key).toLowerCase())) {
+ throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, `checkpoint carries forbidden field '${key.slice(0, 32)}' at ${path} (authority/secret/lease payloads never transfer)`);
+ }
+ walk(node[key], `${path}.${key}`);
+ }
+ };
+ walk(checkpoint, "$");
+ }
+
+ /**
+ * W6-05: the recovery nonce is BOUND to the full episode context:
+ * drec episode + recovery generation + source + destination + checkpoint
+ * digest. A nonce for another episode/source/destination/payload fails.
+ */
+ recoveryNonceBindingFor(ep, checkpoint) {
+ if (!checkpoint || typeof checkpoint.integrityDigest !== "string") {
+ throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "checkpoint integrityDigest required for nonce binding");
+ }
+ return sha256Hex({
+ episodeId: ep.episodeId, generation: ep.generation,
+ sourceNodeId: checkpoint.sourceNodeId,
+ destinationNodeId: ep.selectedPeer,
+ checkpointDigest: checkpoint.integrityDigest
+ }).slice(0, 48);
+ }
+
+ transferCheckpoint(episodeId, { checkpoint, recoveryNonce } = {}) {
+ const ep = this._require(episodeId);
+ if (!ep.selectedPeer) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "peer not selected");
+ // W6-05: the selected PEER must STILL hold RECOVERY_PEER under the CURRENT
+ // generation at transfer time (peer may have died/been revoked mid-flight
+ // — fail closed instead of transferring to an untrusted destination).
+ this.trust.authorize({
+ nodeId: ep.selectedPeer, scope: "RECOVERY_PEER",
+ trustGeneration: this.trust.snapshot(ep.selectedPeer)?.trustGeneration
+ });
+ // W6-05: MANDATORY verification — no verifier means the coordinator could
+ // not be constructed; double enforcement here (fail-closed on tamper,
+ // stale generation, wrong source, authority/secret payloads).
+ this._sanitizeCheckpointPayload(checkpoint);
+ // trust gate: the FAILED source node must not be explicitly revoked —
+ // a revoked node's state is poison; a merely failed node's last checkpoint
+ // is the legitimate recovery payload.
+ const srcSnap = this.trust.snapshot(checkpoint.sourceNodeId);
+ if (srcSnap && (srcSnap.state === "REVOKED" || srcSnap.state === "QUARANTINED")) {
+ throw meshFailure(MESH_ERRORS.NODE_REVOKED, "checkpoint source node is revoked/quarantined — state is poison");
+ }
+ // nonce binding: episode + generation + source + destination + digest
+ const expectedNonce = this.recoveryNonceBindingFor(ep, checkpoint);
+ if (String(recoveryNonce ?? "") !== expectedNonce) {
+ throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "recovery nonce does not match episode+generation+source+destination+checkpointDigest binding");
+ }
+ if (this._consumedRecoveryNonces.has(expectedNonce)) throw meshFailure(MESH_ERRORS.MESH_REPLAY, "recovery payload replayed");
+ if (typeof ep.checkpointVerifier !== "function") {
+ throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "canonical checkpoint verifier unavailable — FAIL CLOSED");
+ }
+ ep.checkpointVerifier(checkpoint, { isNodeTrusted: (nodeId) => {
  try {
  const snap = this.trust.snapshot(nodeId);
  return Boolean(snap && snap.state !== "REVOKED" && snap.state !== "QUARANTINED");
  } catch { return false; }
  } });
+ this._consumedRecoveryNonces.add(expectedNonce);
+ if (this._consumedRecoveryNonces.size > this.config.maxConsumedRecoveryNonces) {
+ const first = this._consumedRecoveryNonces.values().next().value;
+ this._consumedRecoveryNonces.delete(first);
  }
-        this._consumedRecoveryNonces.add(recoveryNonce);
-        if (this._consumedRecoveryNonces.size > this.config.maxConsumedRecoveryNonces) {
-            const first = this._consumedRecoveryNonces.values().next().value;
-            this._consumedRecoveryNonces.delete(first);
-        }
-        ep.checkpoint = Object.freeze({ ...checkpoint });
-        this._transition(ep, "CHECKPOINT_TRANSFERRED");
-        return this.snapshot(episodeId);
-    }
+ ep.checkpoint = Object.freeze({ ...checkpoint });
+ this._transition(ep, "CHECKPOINT_TRANSFERRED");
+ return this.snapshot(episodeId);
+ }
 
     /** Trust revalidation on the peer: peer's RECOVERY_PEER scope still valid. */
     revalidateTrust(episodeId) {
