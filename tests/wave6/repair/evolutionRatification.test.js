@@ -149,8 +149,9 @@ test("W6-06: observation bounds enforced on a live canary", async () => {
  // byte bound: a huge value string is rejected
  const canary2 = pipeline.startCanary({ proposalId: "bounded-2", ratification: ratified.ratification, candidateArtifactDigest: CANDIDATE });
  assert.throws(() => canary2.observe({ metric: "big", value: "x".repeat(9999) }), (e) => e.code === "BOUNDS_EXCEEDED");
- // active canary cap: maxActiveCanaries=3 — canary(1) canary2(2) canary3(3),
- // the FOURTH active canary is rejected
+ // active canary cap: canary(1) canary2(2) — canary3 is the 3rd (at cap),
+ // a FOURTH active canary is rejected
+ const canary3 = pipeline.startCanary({ proposalId: "bounded-2", ratification: ratified.ratification, candidateArtifactDigest: CANDIDATE });
  assert.throws(() => pipeline.startCanary({ proposalId: "bounded-2", ratification: ratified.ratification, candidateArtifactDigest: CANDIDATE }), (e) => e.code === "BOUNDS_EXCEEDED");
  // rollback frees capacity
  canary3.rollback({ reason: "test" });
