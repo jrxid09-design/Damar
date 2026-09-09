@@ -58,6 +58,7 @@ class MeshReplayGuard {
 
  /** Diagnostics only — NEVER authorizes anything. */
  seen(envelope) {
+ this._sweep(this.nowMs());
  return this._seen.has(MeshReplayGuard.keyFor(envelope));
  }
 
