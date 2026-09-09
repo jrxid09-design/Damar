@@ -28,10 +28,13 @@ test("readiness canary is one-shot and user requests do not re-run it", async ()
 
     for (let i = 0; i < 6; i++) await local.invoke({ entityId: "damar", messages: [] });
 
-    assert.equal(canaries, 1);
-    assert.equal(users, 6);
-    assert.equal(local.snapshot().state, "READY_WARM");
-    assert.equal(local.snapshot().readiness.generation, 1);
+ assert.equal(canaries, 1);
+ assert.equal(users, 6);
+ assert.equal(local.snapshot().state, "READY_WARM");
+ // RA4-02: readiness lifecycle identity is an opaque exact-safe token.
+ assert.match(local.snapshot().readiness.epoch, /^wrtep_[0-9a-f]{32}$/);
+ assert.equal(local.snapshot().readiness.token, local.snapshot().readiness.epoch);
+ assert.equal(typeof local.snapshot().readiness.generation, "undefined", "numeric generation counter removed");
 });
 
 test("readiness is single-flight for concurrent first requests", async () => {

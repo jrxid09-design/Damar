@@ -119,8 +119,81 @@ test("RA3-02 12: serialization does not lose generation identity", () => {
  assert.equal(typeof roundTrip.generation, "string");
  // The deserialized copy is NOT the module-minted object: acceptance must
  // still reject it (untrusted), proving identity travels as DATA only.
- assert.throws(() => ACCEPT(roundCase(roundTrip)), /UNTRUSTED/);
+ assert.throws(() => ACCEPT(roundTrip), /UNTRUSTED/);
  // And the original still accepts normally.
  assert.equal(ACCEPT(d).state, "ACCEPTED");
- function roundCase(x) { return x; }
+});
+
+// ============ RA4-01: bounded rotation diagnostic ============
+// LAW: DIAGNOSTIC COUNTER != SECURITY STATE.
+
+test("RA4-01 B: many repeated saturations keep the diagnostic bounded (saturating, no lifetime accumulation)", () => {
+ const bound = delegation.CONSUMED_LEDGER_BOUND;
+ const maxDiag = delegation.MAX_DIAGNOSTIC_ROTATIONS;
+ assert.equal(typeof maxDiag, "number");
+ assert.ok(Number.isSafeInteger(maxDiag) && maxDiag > 0 && maxDiag <= 1024, "hard diagnostic maximum");
+ // Drive far more rotations than the diagnostic maximum.
+ const rounds = maxDiag + 8;
+ for (let r = 0; r < rounds; r++) {
+ for (let i = 0; i < bound + 2; i++) ACCEPT(issue());
+ }
+ const diag = delegation.epochRotations();
+ assert.ok(diag <= maxDiag, `diagnostic saturated at hard maximum (diag=${diag}, max=${maxDiag})`);
+ assert.ok(delegation.ledgerSize() <= bound, "ledger still bounded");
+ // The diagnostic NEVER rides on unsafe numeric growth: it is capped.
+ assert.ok(diag < Number.MAX_SAFE_INTEGER / 2);
+});
+
+test("RA4-01 C+D: diagnostic saturation does NOT stop security epoch rotation; old issuances stay rejected", () => {
+ const bound = delegation.CONSUMED_LEDGER_BOUND;
+ const maxDiag = delegation.MAX_DIAGNOSTIC_ROTATIONS;
+ // Push the diagnostic to saturation first.
+ for (let r = 0; r < maxDiag + 4; r++) {
+ for (let i = 0; i < bound + 2; i++) ACCEPT(issue());
+ }
+ const diagSaturated = delegation.epochRotations();
+ // New issuances to track across a FURTHER rotation.
+ const consumed = issue();
+ ACCEPT(consumed);
+ const unused = issue(); // issued, never accepted
+ const consumedEpoch = consumed.generation;
+ const unusedEpoch = unused.generation;
+ const epochAtCapture = delegation.currentEpoch();
+ // One more saturation -> epoch MUST rotate even though diagnostic is maxed.
+ for (let i = 0; i < bound + 2; i++) ACCEPT(issue());
+ assert.notEqual(delegation.currentEpoch(), epochAtCapture, "security epoch keeps rotating independently of the saturated diagnostic");
+ assert.throws(() => ACCEPT(consumed), /STALE|ALREADY_CONSUMED/, "old consumed issuance remains rejected (C)");
+ assert.throws(() => ACCEPT(unused), /STALE/, "old unused prior-epoch issuance remains rejected (D)");
+ assert.notEqual(consumedEpoch, delegation.currentEpoch());
+ assert.notEqual(unusedEpoch, delegation.currentEpoch());
+});
+
+test("RA4-01 E+F: security epoch identity changes independently of the diagnostic counter; no numeric diagnostic participates in security", () => {
+ const bound = delegation.CONSUMED_LEDGER_BOUND;
+ const maxDiag = delegation.MAX_DIAGNOSTIC_ROTATIONS;
+ // Saturate the diagnostic completely.
+ for (let r = 0; r < maxDiag + 2; r++) {
+ for (let i = 0; i < bound + 2; i++) ACCEPT(issue());
+ }
+ const diagAtSaturation = delegation.epochRotations();
+ const epochA = delegation.currentEpoch();
+ const dA = issue();
+ // Another rotation: epoch identity changes while the diagnostic stays saturated.
+ for (let i = 0; i < bound + 2; i++) ACCEPT(issue());
+ const epochB = delegation.currentEpoch();
+ assert.notEqual(epochA, epochB, "security epoch identity keeps changing (F)");
+ assert.equal(delegation.epochRotations(), diagAtSaturation, "diagnostic is saturated and unchanged (E)");
+ // The security epoch is the opaque identity, NOT the diagnostic number (G).
+ assert.match(epochB, /^pdlep_[0-9a-f]{32}$/);
+ assert.equal(typeof epochB, "string");
+ assert.notEqual(epochB, delegation.epochRotations());
+ // Issuance binding uses the opaque identity, never the diagnostic counter.
+ const dNew = issue();
+ assert.equal(dNew.generation, epochB);
+ assert.notEqual(dNew.generation, delegation.epochRotations());
+ assert.equal(ACCEPT(dNew).state, "ACCEPTED");
+ assert.throws(() => ACCEPT(dNew), /ALREADY_CONSUMED/);
+ // No numeric diagnostic value can stand in for the epoch in any comparison.
+ assert.equal(delegation.epochRotations() !== epochB, true);
+ assert.equal(String(delegation.epochRotations()) === epochB, false);
 });

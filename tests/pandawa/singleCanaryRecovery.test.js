@@ -75,7 +75,7 @@ test("RA3-01 C: warm crash -> restart -> new epoch with exactly ONE canary -> re
  assert.equal(restarts, 1, "restart occurred");
  const snap = local.snapshot();
  assert.equal(snap.state, "READY_WARM");
- assert.ok(snap.readiness.epoch > epochBefore, "new readiness epoch created");
+ assert.notEqual(snap.readiness.epoch, epochBefore, "new opaque readiness token minted (RA4-02 exact identity)");
  assert.equal(canaries, 1, "recovery epoch ran exactly ONE cognitive canary (not two)");
  assert.equal(result.content, "recovered-answer");
  assert.equal(users, 3, "warm call + failed user call + one retry");
@@ -163,6 +163,6 @@ test("RA3-01 F: profile/model change -> new epoch with exactly one canary", asyn
 
  const snap = local.snapshot();
  assert.equal(snap.readiness.modelId, "replacement-model");
- assert.ok(snap.readiness.epoch > epochBefore, "profile change created a new epoch");
+ assert.notEqual(snap.readiness.epoch, epochBefore, "profile change minted a new opaque readiness token (RA4-02)");
  assert.equal(canaries, 1, "new epoch ran exactly ONE cognitive canary");
 });
