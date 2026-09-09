@@ -538,15 +538,24 @@ class GoalEngine {
 
     pickAgent(action) {
 
+        // RC-03: routing runtime mengikuti semantik peran kanonik
+        // (pandawaIdentity.ROLE_PROFILES) — Janaka = rekayasa/koding,
+        // Nakula = data/statistik/RF/spasial-visual (termasuk metrik),
+        // Sadewa = riset/bukti/verifikasi, Werkudara = keamanan/
+        // infrastruktur/resiliensi. Memori adalah inti Damar, bukan
+        // kepemilikan Pandawa.
         const a = String(action ?? "").toLowerCase();
 
-        if (/kode|code|implement|bug|test/.test(a)) return "nakula";
-        if (/riset|research|cari|analisis/.test(a)) return "janaka";
-        if (/sistem|server|docker|proses|jaringan/.test(a)) return "nakula";
-        if (/kamera|gambar|visual/.test(a)) return "nakula";
-        if (/memori|ingat/.test(a)) return "sadewa";
-        if (/monitor|pantau|log/.test(a)) return "sadewa";
-        if (/keamanan|audit/.test(a)) return "werkudara";
+        if (/keamanan|security|audit|infrastruktur|server|docker|jaringan|resiliensi/.test(a)) return "werkudara";
+        if (/kode|code|implement|bug|test|refactor|arsitektur|architecture/.test(a)) return "janaka";
+        if (/kamera|gambar|visual|spasial|rf|penglihatan/.test(a)) return "nakula";
+        if (/riset|research|verifikasi|bukti|evidence|provenance|cari/.test(a)) return "sadewa";
+        if (/analisis|data|statistik|numerik/.test(a)) return "nakula";
+        if (/sistem|proses|monitor|pantau|log/.test(a)) return "werkudara";
+
+        // Memori/ingat adalah inti Damar (alat memori natively milik
+        // damar), bukan kepemilikan Pandawa mana pun.
+        if (/memori|ingat/.test(a)) return "damar";
 
         return "damar";
 

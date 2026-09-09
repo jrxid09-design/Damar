@@ -9,7 +9,7 @@ const telemetry = require("./telemetryService");
 /**
  * Jembatan Damar → opencode.
  *
- * Agent coding (Nakula, dan damar lewat profil `coding`) mendelegasikan
+ * Agent coding (Janaka, dan damar lewat profil `coding`) mendelegasikan
  * pekerjaan menulis/mengubah kode ke opencode — agent coding yang sudah
  * terlatih, punya akses tool editor penuh (baca/tulis berkas, terminal,
  * git, LSP) dan konfigurasi proyek (.opencode/opencode.json: serena,

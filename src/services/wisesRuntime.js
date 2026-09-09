@@ -163,32 +163,53 @@ class WisesRuntime {
             if (this.state !== "READY_WARM") await this.recover();
         }
         if (this.state !== "READY_WARM") throw Object.assign(new Error("LOCAL_RUNTIME_NOT_READY"), { failureClass: "LOCAL_RUNTIME_FAILURE" });
-        let result;
-        try { result = await this._infer(messages, { entityId, role, entityProjection, continuation, maxTokens, temperature }); }
-        catch (error) { this.invalidateReadiness("INFERENCE_FAILURE"); throw error; }
-        if (result === undefined || result === null || result === "") {
-            this.invalidateReadiness("LOCAL_RUNTIME_EMPTY_RESPONSE");
-            throw Object.assign(new Error("LOCAL_RUNTIME_EMPTY_RESPONSE"), { failureClass: "LOCAL_RUNTIME_FAILURE" });
-        }
-        return {
-            content: result,
-            provider: this.profile.providerId,
-            model: this.profile.modelId,
-            readiness: this.state,
-            provenance: {
-                entityId,
-                local: true,
-                survivalRole: this.profile.survivalRole,
-                runtimeId: this.profile.runtimeId,
-                runtimeVersion: this.profile.runtimeVersion,
-                modelId: this.profile.modelId,
-                modelDisplayName: this.profile.modelDisplayName,
-                artifactPath: this.profile.artifactPath,
-                artifactDigest: this.profile.artifactDigest,
-                readiness: this.readinessInfo,
-                continuation: continuation ? { phase: continuation.phase ?? null, completedActionRefs: continuation.completedActionRefs ?? [] } : null
+        // RC-01: a warm inference failure must NOT bypass recovery. Canonical
+        // sequence per request: READY_WARM -> user inference -> failure ->
+        // invalidate readiness -> bounded Recovery Capsule (restart -> real
+        // canary -> readiness re-check) -> retry the ORIGINAL user inference.
+        // Bounded: at most maxRecoveryAttempts recovery invocations and one
+        // retry per successful recovery per request — infer/fail/recover can
+        // never loop forever. The retry reuses the caller's continuation
+        // untouched: MODEL RECOVERY != ACTION REPLAY (completed/verified
+        // actions are never re-executed here; WisesRuntime runs no actions).
+        const maxRetries = this.maxRecoveryAttempts;
+        for (let attempt = 0; ; attempt++) {
+            let result;
+            try { result = await this._infer(messages, { entityId, role, entityProjection, continuation, maxTokens, temperature }); }
+            catch (error) {
+                this.invalidateReadiness("INFERENCE_FAILURE");
+                if (attempt >= maxRetries || !(await this.recover())) {
+                    throw Object.assign(new Error("LOCAL_RUNTIME_FAILURE"), { failureClass: "LOCAL_RUNTIME_FAILURE", cause: String(error.message || error) });
+                }
+                continue;
             }
-        };
+            if (result === undefined || result === null || result === "") {
+                this.invalidateReadiness("LOCAL_RUNTIME_EMPTY_RESPONSE");
+                if (attempt >= maxRetries || !(await this.recover())) {
+                    throw Object.assign(new Error("LOCAL_RUNTIME_EMPTY_RESPONSE"), { failureClass: "LOCAL_RUNTIME_FAILURE" });
+                }
+                continue;
+            }
+            return {
+                content: result,
+                provider: this.profile.providerId,
+                model: this.profile.modelId,
+                readiness: this.state,
+                provenance: {
+                    entityId,
+                    local: true,
+                    survivalRole: this.profile.survivalRole,
+                    runtimeId: this.profile.runtimeId,
+                    runtimeVersion: this.profile.runtimeVersion,
+                    modelId: this.profile.modelId,
+                    modelDisplayName: this.profile.modelDisplayName,
+                    artifactPath: this.profile.artifactPath,
+                    artifactDigest: this.profile.artifactDigest,
+                    readiness: this.readinessInfo,
+                    continuation: continuation ? { phase: continuation.phase ?? null, completedActionRefs: continuation.completedActionRefs ?? [] } : null
+                }
+            };
+        }
     }
 }
 
