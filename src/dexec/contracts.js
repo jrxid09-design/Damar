@@ -50,59 +50,64 @@ const TRANSITIONS = Object.freeze({
 });
 
 const LEASE_DEFAULTS = Object.freeze({
-    defaultTtlMs: 60_000,
-    maxLeases: 1024
+ defaultTtlMs: 60_000,
+ maxLeases: 1024
 });
 
 /**
  * Mint an ExecutionLease. ALL binding inputs are mandatory and validated:
  * an unbounded or generic lease cannot exist by construction.
- * `authorityDecisionDigest` binds the lease to the canonical Authority
- * decision (the lease NEVER carries or replaces authority itself).
+ * `authorityDecisionDigest` binds the lease to a canonical Authority
+ * DECISION ARTIFACT (W6-02: minted by the authority adapter from a BRANDED
+ * canonical evaluation — never a caller-supplied string). The lease NEVER
+ * carries or replaces authority itself.
+ * `authorityBinding` (optional) embeds the artifact core for target-side
+ * re-verification.
  */
 function mintExecutionLease({
-    actionIntentId, actionIntentCanonical, capabilityId, capabilityIncarnationId,
-    toolId, targetNodeId, requestingNodeId, trustGeneration,
-    ttlMs = null, authorityDecisionDigest,
-    nowMs = Date.now()
+ actionIntentId, actionIntentCanonical, capabilityId, capabilityIncarnationId,
+ toolId, targetNodeId, requestingNodeId, trustGeneration,
+ ttlMs = null, authorityDecisionDigest, authorityBinding = null,
+ nowMs = Date.now()
 } = {}) {
-    if (typeof actionIntentId !== "string" || actionIntentId.length === 0 || actionIntentId.length > 128) {
-        throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "actionIntentId required (<=128)");
-    }
-    if (typeof actionIntentCanonical !== "string" || actionIntentCanonical.length === 0 || actionIntentCanonical.length > 4096) {
-        throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "actionIntentCanonical (deterministic encoding) required");
-    }
-    for (const [v, name] of [[capabilityId, "capabilityId"], [toolId, "toolId"]]) {
-        if (typeof v !== "string" || v.length === 0 || v.length > 256) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, `${name} required (<=256)`);
-    }
-    const target = ids.check.nodeId(targetNodeId);
-    const requester = ids.check.nodeId(requestingNodeId);
-    if (target === requester) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "self-lease rejected (target == requesting node)");
-    const gen = ids.check.trustGeneration(trustGeneration);
-    if (typeof authorityDecisionDigest !== "string" || !/^[0-9a-f]{64}$/.test(authorityDecisionDigest)) {
-        throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "authorityDecisionDigest must be 64 hex (lease != authority; it references the canonical decision)");
-    }
-    const ttl = Number.isFinite(ttlMs) && ttlMs > 0 ? Math.floor(ttlMs) : LEASE_DEFAULTS.defaultTtlMs;
-    const actionDigest = sha256Hex(actionIntentCanonical);
-    const executionNonce = crypto.randomBytes(16).toString("hex");
-    const leaseId = `dlease-${crypto.randomBytes(16).toString("hex")}`;
-    return Object.freeze({
-        leaseId,
-        schemaVersion: 1,
-        actionIntentId: String(actionIntentId).slice(0, 128),
-        actionDigest, // binds the EXACT intent — any change invalidates the lease
-        capabilityId: String(capabilityId).slice(0, 256),
-        capabilityIncarnationId: capabilityIncarnationId ? String(capabilityIncarnationId).slice(0, 64) : null,
-        toolId: String(toolId).slice(0, 256),
-        targetNodeId: target,
-        requestingNodeId: requester,
-        trustGeneration: gen,
-        authorityDecisionDigest,
-        executionNonce,
-        oneUse: true,
-        issuedAtMs: Math.floor(nowMs),
-        expiresAtMs: Math.floor(nowMs) + ttl
-    });
+ if (typeof actionIntentId !== "string" || actionIntentId.length === 0 || actionIntentId.length > 128) {
+ throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "actionIntentId required (<=128)");
+ }
+ if (typeof actionIntentCanonical !== "string" || actionIntentCanonical.length === 0 || actionIntentCanonical.length > 4096) {
+ throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "actionIntentCanonical (deterministic encoding) required");
+ }
+ for (const [v, name] of [[capabilityId, "capabilityId"], [toolId, "toolId"]]) {
+ if (typeof v !== "string" || v.length === 0 || v.length > 256) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, `${name} required (<=256)`);
+ }
+ const target = ids.check.nodeId(targetNodeId);
+ const requester = ids.check.nodeId(requestingNodeId);
+ if (target === requester) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "self-lease rejected (target == requesting node)");
+ const gen = ids.check.trustGeneration(trustGeneration);
+ if (typeof authorityDecisionDigest !== "string" || !/^[0-9a-f]{64}$/.test(authorityDecisionDigest)) {
+ throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "authorityDecisionDigest must be the digest of a canonical Authority decision artifact (lease != authority; it references the canonical decision)");
+ }
+ const ttl = Number.isFinite(ttlMs) && ttlMs > 0 ? Math.floor(ttlMs) : LEASE_DEFAULTS.defaultTtlMs;
+ const actionDigest = sha256Hex(actionIntentCanonical);
+ const executionNonce = crypto.randomBytes(16).toString("hex");
+ const leaseId = `dlease-${crypto.randomBytes(16).toString("hex")}`;
+ return Object.freeze({
+ leaseId,
+ schemaVersion: 1,
+ actionIntentId: String(actionIntentId).slice(0, 128),
+ actionDigest, // binds the EXACT intent — any change invalidates the lease
+ capabilityId: String(capabilityId).slice(0, 256),
+ capabilityIncarnationId: capabilityIncarnationId ? String(capabilityIncarnationId).slice(0, 64) : null,
+ toolId: String(toolId).slice(0, 256),
+ targetNodeId: target,
+ requestingNodeId: requester,
+ trustGeneration: gen,
+ authorityDecisionDigest,
+ authorityBinding: authorityBinding && typeof authorityBinding === "object" ? Object.freeze({ ...authorityBinding }) : null,
+ executionNonce,
+ oneUse: true,
+ issuedAtMs: Math.floor(nowMs),
+ expiresAtMs: Math.floor(nowMs) + ttl
+ });
 }
 
 /**

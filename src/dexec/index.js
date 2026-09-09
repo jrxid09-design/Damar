@@ -9,10 +9,16 @@
  */
 
 const contracts = require("./contracts");
+const { createCanonicalAuthorityBridge } = require("./authorityBridge");
+const { LeaseConsumptionLedger } = require("./leaseLedger");
+const authorityAdapter = require("./authorityAdapter");
 const { DistributedExecutionRouter, PRIVACY_CLASSES, DEFAULT_LOCALITY } = require("./router");
 
 module.exports = Object.freeze({
     contracts,
+    createCanonicalAuthorityBridge,
+    LeaseConsumptionLedger,
+    authorityAdapter,
     DistributedExecutionRouter,
     PRIVACY_CLASSES,
     DEFAULT_LOCALITY,
