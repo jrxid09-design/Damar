@@ -30,13 +30,18 @@ const MESH_ERRORS = Object.freeze([
     "PAYLOAD_DIGEST_MISMATCH",
     "AUTHENTICITY_INVALID",
     "TRANSPORT_SPOOF",
-    // registry / presence
-    "NODE_UNKNOWN",
-    "NODE_REGISTRY_FULL",
-    "REGISTRY_UPDATE_REJECTED",
-    "ROUTE_UNAVAILABLE",
-    // bounds
-    "BOUNDS_EXCEEDED"
+ // registry / presence
+ "NODE_UNKNOWN",
+ "NODE_REGISTRY_FULL",
+ "REGISTRY_UPDATE_REJECTED",
+ "ROUTE_UNAVAILABLE",
+ // edge / resilience / evolution
+ "EDGE_RESOURCE_EXHAUSTED",
+ "EXECUTION_STATE_UNKNOWN",
+ "RECOVERY_EXHAUSTED",
+ "EVOLUTION_NOT_APPROVED",
+ // bounds
+ "BOUNDS_EXCEEDED"
 ].reduce((m, e) => (m[e] = e, m), {}));
 
 class MeshError extends Error {
