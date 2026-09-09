@@ -128,19 +128,26 @@ class WisesRuntime {
         return this.describe();
     }
 
-    async recover() {
-        if (this.recoveryPromise) return this.recoveryPromise;
+ async recover() {
+ // RA3-01 single-canary ownership: this method performs STRUCTURAL
+ // recovery only (invalidate readiness -> provider restart -> request
+ // readiness verification). The provider runs no cognitive inference;
+ // readiness() below executes the ONE canonical cognitive canary of
+ // the new recovery epoch (invariant: CANARY_COUNT <= 1 per epoch).
+ if (this.recoveryPromise) return this.recoveryPromise;
         if (!this.recovery || typeof this.recovery.restart !== "function" || this.recoveryAttempts >= this.maxRecoveryAttempts || this.now() - this.lastRecoveryAt < this.recoveryCooldownMs) return false;
         this.recoveryPromise = (async () => {
             this.recoveryAttempts++;
             this.lastRecoveryAt = this.now();
             this.invalidateReadiness("RECOVERY_RESTART");
             this.state = "STARTING";
-            try {
-                await this.recovery.restart();
-                const status = await this.readiness();
-                return String(status.state).startsWith("READY");
-            } catch (error) {
+ try {
+ await this.recovery.restart();
+ // RA3-01: readiness() re-check is the ONE cognitive canary of this
+ // new epoch (provider ran structural recovery only — no inference).
+ const status = await this.readiness();
+ return String(status.state).startsWith("READY");
+ } catch (error) {
                 this.state = "FAILED";
                 this.lastError = String(error.message || error);
                 return false;
@@ -163,15 +170,18 @@ class WisesRuntime {
             if (this.state !== "READY_WARM") await this.recover();
         }
         if (this.state !== "READY_WARM") throw Object.assign(new Error("LOCAL_RUNTIME_NOT_READY"), { failureClass: "LOCAL_RUNTIME_FAILURE" });
-        // RC-01: a warm inference failure must NOT bypass recovery. Canonical
-        // sequence per request: READY_WARM -> user inference -> failure ->
-        // invalidate readiness -> bounded Recovery Capsule (restart -> real
-        // canary -> readiness re-check) -> retry the ORIGINAL user inference.
-        // Bounded: at most maxRecoveryAttempts recovery invocations and one
-        // retry per successful recovery per request — infer/fail/recover can
-        // never loop forever. The retry reuses the caller's continuation
-        // untouched: MODEL RECOVERY != ACTION REPLAY (completed/verified
-        // actions are never re-executed here; WisesRuntime runs no actions).
+// RC-01: a warm inference failure must NOT bypass recovery. Canonical
+// sequence per request: READY_WARM -> user inference -> failure ->
+// invalidate readiness -> bounded Recovery Capsule (structural restart ->
+// readiness re-check) -> retry the ORIGINAL user inference.
+// RA3-01: each epoch (cold, post-recovery, post-profile-change) runs
+// exactly ONE real cognitive canary — the readiness() re-check below;
+// warm user requests run zero readiness canaries (CANARY_COUNT <= 1).
+// Bounded: at most maxRecoveryAttempts recovery invocations and one
+// retry per successful recovery per request — infer/fail/recover can
+// never loop forever. The retry reuses the caller's continuation
+// untouched: MODEL RECOVERY != ACTION REPLAY (completed/verified
+// actions are never re-executed here; WisesRuntime runs no actions).
         const maxRetries = this.maxRecoveryAttempts;
         for (let attempt = 0; ; attempt++) {
             let result;

@@ -46,11 +46,15 @@ test("RC-02 3: concurrent double acceptance — exactly one succeeds", async () 
 });
 
 test("RC-02 4-7: spread copy, forged object, wrong target, wrong session all reject", () => {
-    const d = issue();
-    assert.throws(() => delegation.acceptDelegation({ ...d }, { receiver: "werkudara", sessionId: "ses_dst" }), /UNTRUSTED/);
-    assert.throws(() => delegation.acceptDelegation({ ...d, state: "ISSUED", generation: delegation.currentEpoch() }, { receiver: "werkudara", sessionId: "ses_dst" }), /UNTRUSTED/);
-    assert.throws(() => delegation.acceptDelegation(d, { receiver: "janaka", sessionId: "ses_dst" }), /TARGET_INVALID/);
-    assert.throws(() => delegation.acceptDelegation(d, { receiver: "werkudara", sessionId: "ses_other" }), /TARGET_INVALID/);
+ const d = issue();
+ assert.throws(() => delegation.acceptDelegation({ ...d }, { receiver: "werkudara", sessionId: "ses_dst" }), /UNTRUSTED/);
+ assert.throws(() => delegation.acceptDelegation({ ...d, state: "ISSUED", generation: delegation.currentEpoch() }, { receiver: "werkudara", sessionId: "ses_dst" }), /UNTRUSTED/);
+ // RA3-02: forged generation/epoch field on an untrusted object is
+ // rejected before epoch identity even matters (UNTRUSTED wins — the
+ // caller can never forge membership in the issued set).
+ assert.throws(() => delegation.acceptDelegation({ ...d, state: "ISSUED", generation: "pdlep_forged" }, { receiver: "werkudara", sessionId: "ses_dst" }), /UNTRUSTED/);
+ assert.throws(() => delegation.acceptDelegation(d, { receiver: "janaka", sessionId: "ses_dst" }), /TARGET_INVALID/);
+ assert.throws(() => delegation.acceptDelegation(d, { receiver: "werkudara", sessionId: "ses_other" }), /TARGET_INVALID/);
 });
 
 test("RC-02 8+9: filling the ledger beyond the bound never throws and stays bounded", () => {
@@ -100,12 +104,16 @@ test("RC-02 10: replaying an OLD consumed delegation after saturation is REJECTE
 });
 
 test("RC-02 11: module state remains bounded after saturation", () => {
-    const bound = delegation.CONSUMED_LEDGER_BOUND;
-    for (let i = 0; i < bound + 16; i++) {
-        delegation.acceptDelegation(issue(), { receiver: "werkudara", sessionId: "ses_dst" });
-    }
-    assert.ok(delegation.ledgerSize() <= bound, "no unbounded Set/Map growth");
-    assert.ok(Number.isSafeInteger(delegation.currentEpoch()));
+ const bound = delegation.CONSUMED_LEDGER_BOUND;
+ for (let i = 0; i < bound + 16; i++) {
+ delegation.acceptDelegation(issue(), { receiver: "werkudara", sessionId: "ses_dst" });
+ }
+ assert.ok(delegation.ledgerSize() <= bound, "no unbounded Set/Map growth");
+ // RA3-02: epoch identity is an opaque unguessable string, not a Number —
+ // no numeric precision ever participates in replay validity.
+ const epoch = delegation.currentEpoch();
+ assert.equal(typeof epoch, "string");
+ assert.match(epoch, /^pdlep_[0-9a-f]{32}$/, "opaque 128-bit epoch identity");
 });
 
 test("RC-02 12: expired delegation rejects as EXPIRED — fail-closed by validity, not by missing tombstone", () => {
@@ -131,9 +139,9 @@ test("RC-02: expiry-pruned tombstones cannot resurrect their issuance", () => {
     // Fast-forward beyond the delegation validity window so its tombstone
     // becomes prunable, then force a prune cycle by saturating the ledger
     // with FRESH delegations that all expire later than it.
-    const future = delegation.currentEpoch();
-    assert.ok(future >= 1);
-    const bound = delegation.CONSUMED_LEDGER_BOUND;
+ const future = delegation.currentEpoch();
+ assert.equal(typeof future, "string");
+ const bound = delegation.CONSUMED_LEDGER_BOUND;
     for (let i = 0; i < bound; i++) {
         delegation.acceptDelegation(issue(), { receiver: "werkudara", sessionId: "ses_dst" });
     }

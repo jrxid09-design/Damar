@@ -50,13 +50,15 @@ test("P9 repair: credential traversal reaches K5 after invalid, rate-limited, ti
 });
 
 test("P9 repair: local recovery hook is bounded and restores inference", async () => {
-    let available = false;
-    const provider = recovery.wisesProvider.createWisesRecoveryProvider({ maxAttempts: 1, restart: async () => { available = true; }, canary: async () => { if (!available) throw new Error("still-down"); } });
-    const runtime = new WisesRuntime({ infer: async () => { if (!available) throw new Error("down"); return "recovered"; }, recovery: provider, maxRecoveryAttempts: 1 });
-    const response = await runtime.invoke({ messages: [], entityId: "damar" });
-    assert.equal(response.content, "recovered");
-    assert.equal(runtime.snapshot().recoveryAttempts, 0);
-    assert.equal(provider.snapshot().attempts, 1);
+ let available = false;
+ // RA3-01: structural recovery only — no provider-level cognitive canary;
+ // WisesRuntime readiness runs the single canary of the recovery epoch.
+ const provider = recovery.wisesProvider.createWisesRecoveryProvider({ maxAttempts: 1, restart: async () => { available = true; } });
+ const runtime = new WisesRuntime({ infer: async (messages, context) => { if (!available) throw new Error("down"); return context?.readinessCanary ? "READY" : "recovered"; }, recovery: provider, maxRecoveryAttempts: 1 });
+ const response = await runtime.invoke({ messages: [], entityId: "damar" });
+ assert.equal(response.content, "recovered");
+ assert.equal(runtime.snapshot().recoveryAttempts, 0);
+ assert.equal(provider.snapshot().attempts, 1);
 });
 
 test("P9 repair: completed action remains completed in fallback continuation", async () => {

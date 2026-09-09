@@ -33,9 +33,11 @@ async function main() {
     }
     check("profil tool 10 worker", semuaLengkap, ringkas.join(" "));
 
-    // Nakula WAJIB punya opencode_run.
+    // RA3-03: Janaka (kanonik engineering) WAJIB punya opencode_run; Nakula (kanonik data/analitik) TIDAK.
     const nakulaTools = toolsForWorker(all, "nakula", []).map(t => t.name);
-    check("nakula punya opencode_run", nakulaTools.includes("opencode_run"));
+const janakaTools = toolsForWorker(all, "janaka", []).map(t => t.name);
+check("janaka punya opencode_run", janakaTools.includes("opencode_run"));
+    check("nakula TIDAK punya opencode_run (kanonik: data/analitik, bukan engineering)", !nakulaTools.includes("opencode_run"));
 
     // --- 2. AgentHub.get / health -------------------------------
     const agentHub = require("../src/services/agentHub");
@@ -71,15 +73,15 @@ async function main() {
         check("opencode_run membaca package.json", false, e.message);
     }
 
-    // --- 5. Nakula → mendelegasikan coding ke opencode ------------
+    // --- 5. Janaka → mendelegasikan coding ke opencode ------------
     try {
-        const r = await agentHub.run("nakula",
+        const r = await agentHub.run("janaka",
             "Pakai tool opencode_run untuk membaca package.json proyek ini, lalu jawab satu baris: nama dan versi proyek.");
         const ok = r.ok && /damar/i.test(r.output ?? "");
-        check("Nakula → opencode_run", ok, JSON.stringify(r.output ?? "").slice(0, 80));
+        check("Janaka → opencode_run", ok, JSON.stringify(r.output ?? "").slice(0, 80));
     }
     catch (e) {
-        check("Nakula → opencode_run", false, e.message);
+        check("Janaka → opencode_run", false, e.message);
     }
 
     // --- 6. Memori: tulis langsung tanpa proposal ----------------

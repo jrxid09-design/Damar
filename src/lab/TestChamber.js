@@ -1,13 +1,18 @@
-const { initialize, database } = require("../memory/db");
+﻿const { initialize, database } = require("../memory/db");
 
 const activity = require("./ActivityLog");
 
 /**
- * TestChamber — ruang verifikasi (§19).
+ * TestChamber — ruang verifikasi (A19).
  *
  * Misi yang masuk VERIFYING menjalankan test NYATA via tool code_test
  * yang terdaftar (runner test proyek Damar/terhubung). Tidak ada
  * hasil palsu: gagal runner = gagal, dan itu tercatat.
+ *
+ * RA3-03: eksekusi code_test adalah kerja rekayasa/debugging — atribusi
+ * activity log mengikuti peran kanonik Janaka (engineering/coding/
+ * debugging), bukan Nakula (data/statistik/numerik/RF/spasial).
+ * ROLE != AUTHORITY: atribusi ini metadata pelacakan, bukan grant.
  */
 
 class TestChamber {
@@ -44,7 +49,7 @@ class TestChamber {
             }
 
             await activity.record({
-                type: "tool.started", projectId, missionId, agentId: "nakula",
+                type: "tool.started", projectId, missionId, agentId: "janaka",
                 tool: "code_test", payload: { category }
             });
 
@@ -56,7 +61,7 @@ class TestChamber {
             ok = result?.failed == null || Number(result?.failed ?? 0) === 0;
 
             await activity.record({
-                type: "tool.completed", projectId, missionId, agentId: "nakula",
+                type: "tool.completed", projectId, missionId, agentId: "janaka",
                 tool: "code_test", payload: { category, ok }
             });
 
@@ -64,7 +69,7 @@ class TestChamber {
         catch (error) {
 
             await activity.record({
-                type: "tool.failed", projectId, missionId, agentId: "nakula",
+                type: "tool.failed", projectId, missionId, agentId: "janaka",
                 tool: "code_test", payload: { category, error: error.message }
             });
 
