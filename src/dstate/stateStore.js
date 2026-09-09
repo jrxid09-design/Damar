@@ -54,9 +54,19 @@ class DistributedStateStore {
      * Apply an inbound (or locally built) envelope with reconciliation.
      * Returns { accepted, resolved, superseded, conflict, outgoing }.
      */
-    applyRemote(envelope) {
-        if (!envelope || typeof envelope !== "object") throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "envelope required");
-        if (envelope.expiryMs <= this.nowMs()) throw meshFailure(MESH_ERRORS.MESSAGE_EXPIRED, "state revision expired");
+ applyRemote(envelope) {
+ if (!envelope || typeof envelope !== "object") throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "envelope required");
+ // Integrity gate: the digest binds stateType+stateKey+revisionId+payload.
+ // A tampered/re-encoded revision (payload changed, digest stale) NEVER
+ // enters reconciliation — it fails closed before any duplicate check.
+ const recomputed = require("../mesh/canonical").sha256Hex({
+ stateType: envelope.stateType, stateKey: envelope.stateKey,
+ revisionId: envelope.revisionId, payload: envelope.payload ?? null
+ });
+ if (recomputed !== envelope.integrityDigest) {
+ throw meshFailure(MESH_ERRORS.PAYLOAD_DIGEST_MISMATCH, "state revision integrity digest mismatch (tampered)");
+ }
+ if (envelope.expiryMs <= this.nowMs()) throw meshFailure(MESH_ERRORS.MESSAGE_EXPIRED, "state revision expired");
         const key = String(envelope.stateKey).slice(0, 256);
         let entry = this._keys.get(key);
         if (!entry) {
