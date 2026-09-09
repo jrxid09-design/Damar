@@ -128,10 +128,11 @@ class DistributedExecutionRouter {
             if (c.offline && !localPreferred) continue;
             for (const scope of ["COMPUTE", "TOOL_EXECUTION"]) {
                 try {
+                    if (process.env.W6_DEBUG) { const s = this.trust.snapshot(c.nodeId); console.error(JSON.stringify({node: c.nodeId.slice(0,10), scope, snapState: s?.state, snapGen: s?.trustGeneration?.slice(0,10)})); }
                     this.trust.authorize({ nodeId: c.nodeId, scope, trustGeneration: this.trust.snapshot(c.nodeId)?.trustGeneration });
                     eligible.push({ ...c, scope });
                     break;
-                } catch { /* try next scope */ }
+                } catch (e) { if (process.env.W6_DEBUG) console.error(JSON.stringify({authFail: e.message.slice(0, 80)})); }
             }
         }
         if (eligible.length === 0) {
