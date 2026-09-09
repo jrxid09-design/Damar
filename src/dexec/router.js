@@ -1,26 +1,23 @@
 "use strict";
 
 /**
- * WAVE 6 L3 — DistributedExecutionRouter + execution lifecycle store.
+ * WAVE 6 L3/R1 — DistributedExecutionRouter (REPAIRED: W6-02, W6-03).
  *
- * Placement: AFTER the canonical Authority gate, BEFORE actuation dispatch.
- * The router NEVER grants authority — it selects a trusted node for an
- * already-authorized intent and mints a bound lease.
+ * PLACEMENT: AFTER the canonical Authority gate, BEFORE actuation dispatch.
  *
- * Eligibility (hard constraints, in order):
- *   1. node registered + liveness not OFFLINE (unless local fallback allowed)
- *   2. trust scope (COMPUTE or TOOL_EXECUTION) authorized under CURRENT generation
- *   3. capability available on node (advertisement matches capabilityId+incarnation)
- * Hard constraints can NEVER be bypassed by score.
+ * W6-02 REPAIR: the router NO LONGER accepts a caller-supplied
+ * `authorityDecisionDigest`. It REQUIRES an `authorityBridge` (narrow
+ * adapter to the frozen canonical Authority owner) and calls
+ * `bridge.authorize(...)` itself with the frozen ActionIntent. The lease's
+ * authority digest is DERIVED from the branded canonical evaluation
+ * snapshot. CALLER-PROVIDED DIGEST != AUTHORITY.
  *
- * Routing score (deterministic, only among ELIGIBLE nodes): resource headroom,
- * data locality, privacy fit, latency, reliability history. Privacy: input
- * carrying PRIVATE/SECRET_REFERENCE data only routes to nodes with matching
- * locality permission.
+ * W6-03 REPAIR: lease consumption is performed by a MANDATORY
+ * LeaseConsumptionLedger owned by this router (verify+consume as ONE
+ * operation before any EXECUTING transition). No optional caller ledger.
  *
- * UNKNOWN_EXECUTION_STATE: timeout-after-dispatch does NOT retry — it moves
- * the execution to UNKNOWN; verification/compensation decides (FAILOVER !=
- * ACTION REPLAY).
+ * Routing: eligibility-first (advertisement, privacy locality, liveness,
+ * trust scope) — score can NEVER bypass trust/authority.
  */
 
 const crypto = require("node:crypto");
@@ -28,10 +25,11 @@ const ids = require("../mesh/ids");
 const { meshFailure, MESH_ERRORS } = require("../mesh/errors");
 const contracts = require("./contracts");
 const { sha256Hex } = require("../mesh/canonical");
+const { mintAuthorityArtifact, verifyAuthorityArtifact } = require("./authorityAdapter");
+const { LeaseConsumptionLedger } = require("./leaseLedger");
 
 const PRIVACY_CLASSES = Object.freeze(["PUBLIC", "INTERNAL", "PRIVATE", "SECRET_REFERENCE"].reduce((m, c) => (m[c] = c, m), {}));
 
-/** Node locality permission: which privacy classes may be routed to it. */
 const DEFAULT_LOCALITY = Object.freeze({
     DESKTOP_PRIMARY: ["PUBLIC", "INTERNAL", "PRIVATE", "SECRET_REFERENCE"],
     DESKTOP_SECONDARY: ["PUBLIC", "INTERNAL", "PRIVATE", "SECRET_REFERENCE"],
@@ -49,25 +47,39 @@ const DEFAULTS = Object.freeze({
 });
 
 class DistributedExecutionRouter {
-    constructor({ trust, registry, config = {}, nowMs = () => Date.now(), authorityDecisionDigest = null } = {}) {
+    /**
+     * @param {object} deps
+     * @param {object} deps.authorityBridge MANDATORY (W6-02): narrow adapter to the
+     *        frozen canonical Authority owner exposing
+     *        `authorize({ evaluation, actionIntentId, actionIntentCanonical, capabilityId, toolId, targetNodeId, ttlMs })`
+     *        and `verifyArtifact(...)`. The router never manufactures authority.
+     * @param {object} [deps.leaseLedger] optional injected consumption ledger;
+     *        a router-private ledger is created when absent (still mandatory semantically).
+     */
+    constructor({ trust, registry, authorityBridge, config = {}, nowMs = () => Date.now() } = {}) {
         if (!trust) throw new TypeError("router requires trust plane");
         if (!registry) throw new TypeError("router requires node registry");
+        if (!authorityBridge || typeof authorityBridge.authorize !== "function" || typeof authorityBridge.verifyArtifact !== "function") {
+            // W6-02: fail-closed — no bridge, no routing (no caller digest path exists)
+            throw new TypeError("router requires an authorityBridge adapter to the frozen canonical Authority owner (CALLER-SUPPLIED DIGESTS ARE NOT AUTHORITY)");
+        }
         this.trust = trust;
         this.registry = registry;
+        this.authorityBridge = authorityBridge;
         this.config = Object.freeze({ ...DEFAULTS, ...config });
         this.nowMs = nowMs;
-        this.authorityDecisionDigest = authorityDecisionDigest; // injected trusted digest source
-        /** nodeId -> { advertisement } */
         this._advertisements = new Map();
-        /** executionId -> execution record */
         this._executions = new Map();
-        /** consumed one-use nonces (bounded) */
-        this._consumedNonces = new Set();
-        /** nodeId -> reliability { success, failure } (bounded per node) */
+        // W6-03: THE mandatory consumption owner (single instance per router)
+        this.leaseLedger = new LeaseConsumptionLedger({ config: { maxEntries: this.config.maxConsumedNonces }, nowMs });
         this._reliability = new Map();
     }
 
-    /** Node capability advertisement — availability metadata ONLY. */
+    bindLocalNodeId(nodeId) {
+        this._localNodeId = ids.check.nodeId(nodeId);
+        return this;
+    }
+
     advertise({ nodeId, capabilities, resources = {}, profile = "DESKTOP_PRIMARY" }) {
         const checked = ids.check.nodeId(nodeId);
         if (!Array.isArray(capabilities)) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "capabilities must be an array");
@@ -97,82 +109,108 @@ class DistributedExecutionRouter {
     }
 
     /**
-     * Route an ALREADY-AUTHORIZED intent.
-     * `authorizedIntent` = { actionIntentId, canonical, capabilityId, capabilityIncarnationId, toolId, input, privacyClass, localPreferred }
-     * Returns { execution, targetNodeId, lease, request } or throws typed failure.
+     * Route an intent through canonical authority provenance.
+     *
+     * @param {object} p
+     * @param {object} p.intent FROZEN ActionIntent (from the canonical action
+     *        owner's parseActionIntent) — the ONLY intent form accepted.
+     * @param {object} p.evaluation BRANDED canonical Authority evaluation
+     *        (from loadAndEvaluateAuthority). Caller-supplied digests are
+     *        structurally impossible: the digest is derived from the branded
+     *        snapshot by the authority adapter.
      */
-    route(authorizedIntent, { authorityDecisionDigest = null, ttlMs = null } = {}) {
-        if (!authorizedIntent || typeof authorizedIntent !== "object") throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "authorizedIntent required");
-        const { actionIntentId, canonical, capabilityId, capabilityIncarnationId, toolId, input = {}, privacyClass = "INTERNAL", localPreferred = false } = authorizedIntent;
-        const digestSource = authorityDecisionDigest ?? this.authorityDecisionDigest;
-        if (!digestSource) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "router requires an authority decision digest (lease references canonical authority)");
+ route({ intent, evaluation, toolId = null, privacyClass = "INTERNAL", localPreferred = false, preferredNodeId = null, ttlMs = null } = {}) {
+ if (!intent || typeof intent !== "object" || !intent.intentId || !intent.capabilityId || !intent.operation) {
+ throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "frozen ActionIntent required (parse via the canonical action owner)");
+ }
+ // W6-02: BRAND CHECK FIRST — before any eligibility/score work, so a
+ // forged evaluation can never ride on an unrelated failure mode.
+ if (!evaluation || !this.authorityBridge.isCanonicalAuthorityEvaluation(evaluation)) {
+ throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "branded canonical Authority evaluation required (caller-supplied authority digests are rejected)");
+ }
+ const capabilityId = intent.capabilityId;
+ // toolId is RESOLVED by capability resolution (Capability Registry) and
+ // passed in; it is BOUND into the authority artifact so a resolved tool
+ // cannot be swapped after authorization.
+ const tool = toolId ?? `tool.${capabilityId}`;
+        const input = intent.arguments ?? {};
+        const actionIntentCanonical = JSON.stringify({
+            capabilityId: intent.capabilityId, operation: intent.operation,
+            arguments: intent.arguments ?? {}, correlationId: intent.correlationId ?? "",
+            createdAtMs: intent.createdAtMs ?? null
+        });
         const privacy = PRIVACY_CLASSES[privacyClass] ? privacyClass : "INTERNAL";
-        // ---- hard eligibility ----
-        const candidates = [];
-        for (const [nodeId, adv] of this._advertisements) {
-            // availability (this node advertises the capability+tool)
-            const cap = adv.capabilities.find(c => c.capabilityId === String(capabilityId).slice(0, 256) && c.toolId === String(toolId).slice(0, 256));
-            if (!cap || cap.health !== "HEALTHY") continue;
-            // privacy locality
-            const allowed = DEFAULT_LOCALITY[adv.profile] ?? DEFAULT_LOCALITY.TEMPORARY_NODE;
-            if (!allowed.includes(privacy)) continue;
-            // liveness: OFFLINE nodes excluded unless nothing else is eligible (handled below)
-            const reg = this.registry.lookup(nodeId);
-            if (!reg) continue;
-            candidates.push({ nodeId, adv, cap, reg, offline: reg.liveness === "OFFLINE" });
-        }
-        if (candidates.length === 0) throw meshFailure(MESH_ERRORS.ROUTE_UNAVAILABLE, `no node advertises capability '${String(capabilityId).slice(0, 64)}' with privacy '${privacy}'`);
-        // trust scope under CURRENT generation — the trust plane decides, not the score
-        const eligible = [];
-        for (const c of candidates) {
-            if (c.offline && !localPreferred) continue;
-            for (const scope of ["COMPUTE", "TOOL_EXECUTION"]) {
-                try {
-                    if (process.env.W6_DEBUG) { const s = this.trust.snapshot(c.nodeId); console.error(JSON.stringify({node: c.nodeId.slice(0,10), scope, snapState: s?.state, snapGen: s?.trustGeneration?.slice(0,10)})); }
-                    this.trust.authorize({ nodeId: c.nodeId, scope, trustGeneration: this.trust.snapshot(c.nodeId)?.trustGeneration });
-                    eligible.push({ ...c, scope });
-                    break;
-                } catch (e) { if (process.env.W6_DEBUG) console.error(JSON.stringify({authFail: e.message.slice(0, 80)})); }
-            }
-        }
-        if (eligible.length === 0) {
-            // local fallback: if the local node itself advertises it, route locally
-            throw meshFailure(MESH_ERRORS.NODE_UNTRUSTED, "no eligible trusted node for execution");
-        }
- // ---- deterministic score among eligible ----
- const scored = eligible.map(c => ({
- ...c,
- score: this._score(c, { privacy, localPreferred, preferredNodeId: authorizedIntent.preferredNodeId ?? null })
- })).sort((a, b) => b.score - a.score || (a.nodeId < b.nodeId ? -1 : 1));
- const winner = scored[0];
- // ---- mint lease + execution record ----
- // Local execution: no remote lease exists — local actuation proceeds under
- // the SAME authority decision through the frozen actuation path.
- const isLocal = this._localNodeId && winner.nodeId === this._localNodeId;
- const lease = isLocal ? null : contracts.mintExecutionLease({
- actionIntentId,
- actionIntentCanonical: canonical,
- capabilityId, capabilityIncarnationId, toolId,
- targetNodeId: winner.nodeId,
- requestingNodeId: this._localNodeId,
- trustGeneration: this.trust.snapshot(winner.nodeId)?.trustGeneration,
- ttlMs,
- authorityDecisionDigest: digestSource,
- nowMs: this.nowMs()
+ // ---- W6-02: canonical authority provenance FIRST (Authority -> Capability
+ // -> Router). The bridge mints the artifact from the BRANDED evaluation;
+ // digest derived from the snapshot. Wrong capability/action/tool fail
+ // HERE, before any node selection. Target binding is re-verified for the
+ // winner node after selection. ----
+ const artifact = this.authorityBridge.authorize({
+ evaluation, actionIntentId: intent.intentId, actionIntentCanonical,
+ capabilityId, toolId: tool, targetNodeId: this._localNodeId, ttlMs
  });
- const request = isLocal
- ? Object.freeze({ schemaVersion: 1, executionId: `dexec-${crypto.randomBytes(16).toString("hex")}`, lease: null, actionDigest: sha256Hex(canonical), inputDigest: sha256Hex(input ?? {}), input: input ?? {}, expectedCapability: capabilityId, toolIdentity: toolId, deadlineMs: this.nowMs() + this.config.dispatchTimeoutMs, verificationRequirements: Object.freeze({}), state: "DISPATCHED", localExecution: true })
- : contracts.buildExecutionRequest({ lease, input });
- const execution = {
- executionId: request.executionId,
- actionIntentId: String(actionIntentId).slice(0, 128),
- targetNodeId: winner.nodeId,
- lease,
- request,
- state: "LEASED",
- stateHistory: [{ state: "LEASED", atMs: this.nowMs(), details: isLocal ? "local execution (no remote lease)" : null }],
- privacy
- };
+ // ---- hard eligibility (never score-bypassable) ----
+ const candidates = [];
+ for (const [nodeId, adv] of this._advertisements) {
+ const cap = adv.capabilities.find(c => c.capabilityId === String(capabilityId).slice(0, 256) && c.toolId === String(tool).slice(0, 256));
+ if (!cap || cap.health !== "HEALTHY") continue;
+ const allowed = DEFAULT_LOCALITY[adv.profile] ?? DEFAULT_LOCALITY.TEMPORARY_NODE;
+ if (!allowed.includes(privacy)) continue;
+ const reg = this.registry.lookup(nodeId);
+ if (!reg) continue;
+ candidates.push({ nodeId, adv, cap, reg, offline: reg.liveness === "OFFLINE" });
+ }
+ if (candidates.length === 0) throw meshFailure(MESH_ERRORS.ROUTE_UNAVAILABLE, `no node advertises capability '${String(capabilityId).slice(0, 64)}' with privacy '${privacy}'`);
+ const eligible = [];
+ for (const c of candidates) {
+ if (c.offline && !localPreferred) continue;
+ for (const scope of ["COMPUTE", "TOOL_EXECUTION"]) {
+ try {
+ this.trust.authorize({ nodeId: c.nodeId, scope, trustGeneration: this.trust.snapshot(c.nodeId)?.trustGeneration });
+ eligible.push({ ...c, scope });
+ break;
+ } catch { /* try next scope */ }
+ }
+ }
+ if (eligible.length === 0) {
+ throw meshFailure(MESH_ERRORS.NODE_UNTRUSTED, "no eligible trusted node for execution");
+ }
+ const scored = eligible.map(c => ({ ...c, score: this._score(c, { privacy, localPreferred, preferredNodeId }) }))
+ .sort((a, b) => b.score - a.score || (a.nodeId < b.nodeId ? -1 : 1));
+ const winner = scored[0];
+ // re-bind + re-verify the artifact to the WINNER node (defense in depth)
+ const winnerArtifact = this.authorityBridge.authorize({
+ evaluation, actionIntentId: intent.intentId, actionIntentCanonical,
+ capabilityId, toolId: tool, targetNodeId: winner.nodeId, ttlMs
+ });
+ verifyAuthorityArtifact(winnerArtifact, { actionIntentCanonical, capabilityId, toolId: tool, targetNodeId: winner.nodeId, nowMs: this.nowMs() });
+
+        const isLocal = this._localNodeId && winner.nodeId === this._localNodeId;
+        const lease = isLocal ? null : contracts.mintExecutionLease({
+            actionIntentId: intent.intentId,
+            actionIntentCanonical,
+            capabilityId, capabilityIncarnationId: winner.cap.incarnationId, toolId: tool,
+            targetNodeId: winner.nodeId,
+            requestingNodeId: this._localNodeId,
+            trustGeneration: this.trust.snapshot(winner.nodeId)?.trustGeneration,
+            ttlMs,
+            authorityDecisionDigest: artifact.decisionDigest,
+            authorityBinding: artifact.core,
+            nowMs: this.nowMs()
+        });
+        const request = isLocal
+            ? Object.freeze({ schemaVersion: 1, executionId: `dexec-${crypto.randomBytes(16).toString("hex")}`, lease: null, authorityArtifact: winnerArtifact, actionDigest: sha256Hex(actionIntentCanonical), inputDigest: sha256Hex(input ?? {}), input: input ?? {}, expectedCapability: capabilityId, toolIdentity: tool, deadlineMs: this.nowMs() + this.config.dispatchTimeoutMs, verificationRequirements: Object.freeze({}), state: "DISPATCHED", localExecution: true })
+            : Object.freeze({ ...contracts.buildExecutionRequest({ lease, input }), authorityArtifact: winnerArtifact });
+        const execution = {
+            executionId: request.executionId,
+            actionIntentId: intent.intentId,
+            targetNodeId: winner.nodeId,
+            lease, request, authorityArtifact: winnerArtifact,
+            actionIntentCanonical,
+            state: "LEASED",
+            stateHistory: [{ state: "LEASED", atMs: this.nowMs(), details: isLocal ? "local execution (no remote lease)" : null }],
+            privacy
+        };
         if (this._executions.size >= this.config.maxExecutionsTracked) {
             const oldest = [...this._executions.entries()].sort((a, b) => a[1].stateHistory[0].atMs - b[1].stateHistory[0].atMs)[0];
             this._executions.delete(oldest[0]);
@@ -182,20 +220,41 @@ class DistributedExecutionRouter {
             executionId: request.executionId,
             targetNodeId: winner.nodeId,
             score: winner.score,
-            lease, request,
-            transition: (to) => this.transition(request.executionId, to)
+            lease, request, authorityArtifact: winnerArtifact,
+            transition: (to) => this.transition(request.executionId, to),
+            /** W6-03: consume the lease on the target boundary (verify+consume atomic) */
+            consumeOnTarget: ({ localNodeId, currentTrustGeneration }) => this.consumeLeaseOnTarget(request.executionId, { localNodeId, currentTrustGeneration })
         });
     }
 
-    bindLocalNodeId(nodeId) {
- this._localNodeId = ids.check.nodeId(nodeId);
- return this;
- }
+    /**
+     * W6-03: VERIFY + CONSUME as one atomic operation through the mandatory
+     * consumption ledger. The transition to EXECUTING REQUIRES consumption.
+     */
+    consumeLeaseOnTarget(executionId, { localNodeId, currentTrustGeneration }) {
+        const ex = this._executions.get(executionId);
+        if (!ex) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "unknown execution");
+        if (!ex.lease) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "local execution consumes no remote lease");
+        const consumed = this.leaseLedger.consume(ex.lease, {
+            localNodeId, currentTrustGeneration,
+            actionIntentCanonical: ex.actionIntentCanonical,
+            capabilityId: ex.lease.capabilityId,
+            toolId: ex.lease.toolId
+        });
+        return Object.freeze(consumed);
+    }
 
- /** Mark dispatch/ack/execute/results. Legal transitions enforced. */
     transition(executionId, to, details = null) {
         const ex = this._executions.get(executionId);
         if (!ex) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "unknown execution");
+        // W6-03: entering EXECUTING on a leased remote execution REQUIRES the
+        // lease to have been consumed via the mandatory ledger first.
+        if (to === "EXECUTING" && ex.lease) {
+            const nonce = String(ex.lease.executionNonce ?? "");
+            if (!this.leaseLedger.has(nonce)) {
+                throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "lease not consumed — EXECUTING requires verify+consume through the mandatory consumption ledger (W6-03)");
+            }
+        }
         if (!contracts.TRANSITIONS[ex.state]?.includes(to)) {
             throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, `illegal transition ${ex.state} -> ${String(to).slice(0, 24)}`);
         }
@@ -212,11 +271,6 @@ class DistributedExecutionRouter {
         return this.snapshot(executionId);
     }
 
-    /**
-     * Timeout after dispatch: the action MAY have executed on the remote node.
-     * NEVER retried blindly — execution enters UNKNOWN; verification or
-     * compensation must resolve it (FAILOVER != ACTION REPLAY).
-     */
     markUnknown(executionId, { reason = "dispatch timeout — outcome uncertain" } = {}) {
         const ex = this._executions.get(executionId);
         if (!ex) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "unknown execution");
@@ -235,36 +289,31 @@ class DistributedExecutionRouter {
         }) : null;
     }
 
- verifyRemoteResult(executionId, result) {
- const ex = this._executions.get(executionId);
- if (!ex) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "unknown execution");
- const verified = contracts.verifyExecutionResult(ex.request, result, { nowMs: this.nowMs() });
- // flow through the legal transition path to the terminal verified/failed state
- if (ex.state !== "SUCCEEDED" && ex.state !== "FAILED") {
- this.transition(executionId, verified.state);
- }
- this.transition(executionId, verified.state === "SUCCEEDED" ? "VERIFIED" : "COMPENSATED");
- return verified;
- }
+    verifyRemoteResult(executionId, result) {
+        const ex = this._executions.get(executionId);
+        if (!ex) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "unknown execution");
+        const verified = contracts.verifyExecutionResult(ex.request, result, { nowMs: this.nowMs() });
+        if (ex.state !== "SUCCEEDED" && ex.state !== "FAILED") {
+            this.transition(executionId, verified.state);
+        }
+        this.transition(executionId, verified.state === "SUCCEEDED" ? "VERIFIED" : "COMPENSATED");
+        return verified;
+    }
 
     size() { return this._executions.size; }
 
- _score(c, { privacy, localPreferred, preferredNodeId = null }) {
- // deterministic: headroom(0-40) + latency(0-25) + reliability(0-25) + locality bonus(10)
- const res = c.adv.resources ?? {};
- const headroom = Number.isFinite(res.headroomScore) ? Math.max(0, Math.min(40, res.headroomScore)) : 20;
- const latency = Math.max(0, Math.min(25, Math.round((100 - c.cap.latencyScore) / 4)));
- const rel = this._reliability.get(c.nodeId) ?? { success: 0, failure: 0 };
- const total = rel.success + rel.failure;
- const reliability = total === 0 ? 12 : Math.round(25 * (rel.success / total));
- const locality = localPreferred && c.offline === false ? 0 : 10;
- // privacy fit bonus: PRIVATE data prefers nodes with PRIVATE permission
- const privacyBonus = (privacy === "PRIVATE" || privacy === "SECRET_REFERENCE") && (DEFAULT_LOCALITY[c.adv.profile] ?? []).includes("SECRET_REFERENCE") ? 5 : 0;
- // placement preference is SCHEDULING HINT only — eligibility was already
- // enforced (trust/scope/availability/locality). HINT != AUTHORITY.
- const preference = preferredNodeId && c.nodeId === preferredNodeId ? 50 : 0;
- return headroom + latency + reliability + locality + privacyBonus + preference;
- }
+    _score(c, { privacy, localPreferred, preferredNodeId = null }) {
+        const res = c.adv.resources ?? {};
+        const headroom = Number.isFinite(res.headroomScore) ? Math.max(0, Math.min(40, res.headroomScore)) : 20;
+        const latency = Math.max(0, Math.min(25, Math.round((100 - c.cap.latencyScore) / 4)));
+        const rel = this._reliability.get(c.nodeId) ?? { success: 0, failure: 0 };
+        const total = rel.success + rel.failure;
+        const reliability = total === 0 ? 12 : Math.round(25 * (rel.success / total));
+        const locality = localPreferred && c.offline === false ? 0 : 10;
+        const privacyBonus = (privacy === "PRIVATE" || privacy === "SECRET_REFERENCE") && (DEFAULT_LOCALITY[c.adv.profile] ?? []).includes("SECRET_REFERENCE") ? 5 : 0;
+        const preference = preferredNodeId && c.nodeId === preferredNodeId ? 50 : 0;
+        return headroom + latency + reliability + locality + privacyBonus + preference;
+    }
 }
 
 module.exports = Object.freeze({ DistributedExecutionRouter, PRIVACY_CLASSES, DEFAULT_LOCALITY, DEFAULTS });
