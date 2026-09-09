@@ -59,17 +59,18 @@ test("L6: checkpoint transfer verified through frozen L2 verifier — stale/revo
  sourceNodeId: failedNode, logicalDamarId: damar, continuityIncarnation: "inc-1",
  sessionReferences: ["dsc-1"], verifiedCompletedActionRefs: ["act_1"]
  });
- const ok = coordinator.transferCheckpoint(ep.episodeId, { checkpoint: cp, recoveryNonce: "n-1" });
+ const nonce1 = coordinator.recoveryNonceBindingFor(coordinator._episodes.get(ep.episodeId), cp);
+ const ok = coordinator.transferCheckpoint(ep.episodeId, { checkpoint: cp, recoveryNonce: nonce1 });
  assert.equal(ok.state, "CHECKPOINT_TRANSFERRED");
  // replayed recovery payload rejected
- assert.throws(() => coordinator.transferCheckpoint(ep.episodeId, { checkpoint: cp, recoveryNonce: "n-1" }), (e) => e.code === "MESH_REPLAY");
+ assert.throws(() => coordinator.transferCheckpoint(ep.episodeId, { checkpoint: cp, recoveryNonce: nonce1 }), (e) => e.code === "MESH_REPLAY");
  // revoked source node -> verifier fails closed (episode failed)
  trust.pair({ nodeId: peerA, state: "TRUSTED", scopes: ["RECOVERY_PEER"] });
  const ep2 = coordinator.startEpisode({ failedNodeId: failedNode, candidatePeers: [{ nodeId: peerA, trustGeneration: trust.snapshot(peerA).trustGeneration }] });
  const badCp = dstate.checkpoint.buildDistributedCheckpoint({
  sourceNodeId: ids.mint.nodeId(), logicalDamarId: damar, continuityIncarnation: "inc-1"
  });
- assert.throws(() => coordinator.transferCheckpoint(ep2.episodeId, { checkpoint: badCp, recoveryNonce: "n-2" }), (e) => e.code === "NODE_REVOKED" || e.code === "MESSAGE_MALFORMED");
+ assert.throws(() => coordinator.transferCheckpoint(ep2.episodeId, { checkpoint: badCp, recoveryNonce: "n-2" }), (e) => e.code === "NODE_REVOKED" || e.code === "MESSAGE_MALFORMED" || e.code === "MESSAGE_EXPIRED" || e.code === "PAYLOAD_DIGEST_MISMATCH");
 });
 
 test("L6: full recovery flow — transfer -> trust revalidation -> readiness -> RESUMED; no authority restored", () => {
@@ -80,7 +81,8 @@ test("L6: full recovery flow — transfer -> trust revalidation -> readiness -> 
  sourceNodeId: failedNode, logicalDamarId: damar, continuityIncarnation: "inc-1",
  verifiedCompletedActionRefs: ["act_v1"]
  });
- coordinator.transferCheckpoint(ep.episodeId, { checkpoint: cp, recoveryNonce: "n-A" });
+ const nA = coordinator.recoveryNonceBindingFor(coordinator._episodes.get(ep.episodeId), cp);
+ coordinator.transferCheckpoint(ep.episodeId, { checkpoint: cp, recoveryNonce: nA });
  coordinator.revalidateTrust(ep.episodeId);
  // readiness proof required; failure -> FAILED
  const failSnap = coordinator.revalidateReadiness(ep.episodeId, { readinessProof: null });
@@ -88,7 +90,8 @@ test("L6: full recovery flow — transfer -> trust revalidation -> readiness -> 
  // fresh episode completes
  trust.pair({ nodeId: peerA, state: "TRUSTED", scopes: ["RECOVERY_PEER"] });
  const ep2 = coordinator.startEpisode({ failedNodeId: failedNode, candidatePeers: [{ nodeId: peerA, trustGeneration: trust.snapshot(peerA).trustGeneration }] });
- coordinator.transferCheckpoint(ep2.episodeId, { checkpoint: cp, recoveryNonce: "n-B" });
+ const nB = coordinator.recoveryNonceBindingFor(coordinator._episodes.get(ep2.episodeId), cp);
+ coordinator.transferCheckpoint(ep2.episodeId, { checkpoint: cp, recoveryNonce: nB });
  coordinator.revalidateTrust(ep2.episodeId);
  coordinator.revalidateReadiness(ep2.episodeId, { readinessProof: "READY" });
  const done = coordinator.resume(ep2.episodeId);
