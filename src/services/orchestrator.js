@@ -1,5 +1,20 @@
 const agentHub = require("./agentHub");
 const telemetry = require("./telemetryService");
+const pandawaIdentity = require("./pandawaIdentity");
+
+/**
+ * RC-03: deskripsi spesialis Pandawa untuk prompt perencana diturunkan
+ * dari pemilik kanonik tunggal (pandawaIdentity.ROLE_PROFILES) — bukan
+ * tabel peran tulisan tangan kedua yang bisa basi.
+ */
+function pandawaRosterLine() {
+    return pandawaIdentity.records()
+        .map(record => {
+            const profile = pandawaIdentity.roleProfile(record.id);
+            return `- ${record.agentId} (${profile.label}): ${profile.description}`;
+        })
+        .join("\n");
+}
 
 /**
  * Orkestrator multi-agent.
@@ -30,10 +45,7 @@ class Orchestrator {
             `Agent tersedia:\n${roster}\n\n` +
             "Aturan:\n" +
             "- Gunakan agent 'damar' untuk berpikir/menulis/menghitung/memori.\n" +
-            "- Pandawa, lima spesialis Damar: puntadewa (tata kelola/" +
-            "perencanaan), werkudara (keamanan), janaka (riset/intelijen), " +
-            "nakula (rekayasa/operasi/perangkat), sadewa (memori/analisis/" +
-            "kontinuitas).\n" +
+            `- Pandawa, lima spesialis Damar (semantik kanonik):\n${pandawaRosterLine()}\n` +
             "- Pandawa adalah unit spesialis MILIK Damar, bukan asisten " +
             "terpisah: jawaban akhir tetap disintesis sebagai Damar.\n" +
             "- Kalau permintaannya sederhana, cukup SATU langkah 'damar'.\n" +
@@ -244,4 +256,4 @@ class Orchestrator {
 
 }
 
-module.exports = new Orchestrator();
+module.exports = Object.assign(new Orchestrator(), { pandawaRosterLine });

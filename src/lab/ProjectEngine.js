@@ -25,17 +25,22 @@ const PHASE_FLOW = {
     MAINTENANCE: ["TESTING", "IMPLEMENTATION"]
 };
 
-/** Afinitas agent per fase (§5) — constraint deterministik untuk planner. */
+/**
+ * Afinitas agent per fase (§5) — constraint deterministik untuk planner.
+ * RC-03: mengikuti semantik peran kanonik (pandawaIdentity.ROLE_PROFILES):
+ * Janaka = rekayasa, Nakula = data/analitik/uji numerik, Sadewa = riset/
+ * bukti/validasi, Werkudara = keamanan/resiliensi, Puntadewa = strategi.
+ */
 const PHASE_AGENTS = {
-    IDEA: ["damar", "janaka", "sadewa"],
-    RESEARCH: ["janaka", "sadewa", "damar"],
+    IDEA: ["damar", "puntadewa", "sadewa"],
+    RESEARCH: ["sadewa", "damar", "puntadewa"],
     DESIGN: ["damar", "puntadewa", "janaka"],
-    PROTOTYPE: ["nakula", "puntadewa", "damar"],
-    IMPLEMENTATION: ["nakula", "puntadewa", "sadewa"],
-    TESTING: ["nakula", "sadewa", "werkudara"],
+    PROTOTYPE: ["janaka", "puntadewa", "damar"],
+    IMPLEMENTATION: ["janaka", "puntadewa", "sadewa"],
+    TESTING: ["janaka", "werkudara", "nakula"],
     VALIDATION: ["sadewa", "werkudara", "damar"],
-    RELEASE: ["nakula", "puntadewa", "sadewa"],
-    MAINTENANCE: ["sadewa", "nakula", "werkudara"]
+    RELEASE: ["janaka", "puntadewa", "werkudara"],
+    MAINTENANCE: ["werkudara", "janaka", "nakula"]
 };
 
 class ProjectEngine {
@@ -147,11 +152,15 @@ class ProjectEngine {
 
     /** Agent yang cocok untuk fase proyek (constraint routing §25). */
     agentsForPhase(phase) {
-        return PHASE_AGENTS[String(phase ?? "IDEA").toUpperCase()] ?? PHASE_AGENTS.IDEA;
+        return [...(PHASE_AGENTS[String(phase ?? "IDEA").toUpperCase()] ?? PHASE_AGENTS.IDEA)];
     }
 
     phases() {
-        return { list: PHASES, flow: PHASE_FLOW, agents: PHASE_AGENTS };
+        return {
+            list: [...PHASES],
+            flow: Object.fromEntries(Object.entries(PHASE_FLOW).map(([k, v]) => [k, [...v]])),
+            agents: Object.fromEntries(Object.entries(PHASE_AGENTS).map(([k, v]) => [k, [...v]]))
+        };
     }
 
     /** Ringkasan isi project: missions/artifacts/decisions counts. */

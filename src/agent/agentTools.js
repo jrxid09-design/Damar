@@ -25,13 +25,20 @@ const { CORE } = require("../ai/tools/ToolSelector");
 /**
  * Profil tool per worker.
  *
+ * RC-03: spesialisasi tiap worker diproyeksikan dari semantik peran
+ * kanonik (pandawaIdentity.ROLE_PROFILES) — Janaka = rekayasa/koding,
+ * Nakula = data/statistik/RF/spasial, Sadewa = riset/bukti/verifikasi.
+ * Tidak ada kepemilikan legacy (Janaka riset, Nakula engineering,
+ * Sadewa memori) yang tersisa di profil eksekutable ini. Peran hanya
+ * memengaruhi PROFIL/HINT tool yang relevan — ROLE != AUTHORITY.
+ *
  * Nama ditulis GAYA BEBAS ("readFile" cocok dengan "filesystem.readFile"
  * maupun "filesystem__readFile") — pencocokan dilakukan oleh `tail()`
  * milik ToolSelector, sama seperti mekanisme profil chat utama.
  */
 const WORKER_PROFILES = {
 
-    // Puntadewa — tata kelola, perencanaan, penilaian keputusan.
+    // Puntadewa — strategi, sintesis, arbitrase, perencanaan (kanonik).
     // Sengaja BACA-DOMINAN: perencana butuh melihat keadaan, bukan
     // mengubahnya. PLAN != AUTHORITY.
     puntadewa: [
@@ -40,7 +47,7 @@ const WORKER_PROFILES = {
         "code_plan", "readFile", "listDirectory"
     ],
 
-    // Werkudara — keamanan, pemodelan ancaman, audit.
+    // Werkudara — keamanan, infrastruktur, resiliensi, telaah adversarial.
     werkudara: [
         "osint_breach", "osint_hoax_trace", "osint_phone_assess",
         "code_diagnostics", "code_graph_query",
@@ -48,49 +55,39 @@ const WORKER_PROFILES = {
         "system_health", "readFile", "listDirectory"
     ],
 
-    // Janaka — riset, intelijen, verifikasi fakta.
+    // Janaka — rekayasa, koding, arsitektur, implementasi, debugging
+    // (kanonik; bukan lagi pemilik riset/intelijen/OSINT).
     janaka: [
-        "browse", "get", "post", "download",
-        "osint_investigate", "osint_email", "osint_phone", "osint_username",
-        "osint_domain", "osint_breach", "osint_hoax_check", "osint_social_network",
-        "memory_documents", "memory_entities", "memory_related",
-        "readFile", "listDirectory", "open_document"
-    ],
-
-    // Nakula — rekayasa perangkat lunak, sistem/infra, otomatisasi,
-    // serta integrasi perangkat (vision, audio, kanal).
-    nakula: [
         "opencode_run",
         "code_graph_query", "code_graph_path", "code_graph_explain",
         "code_definition", "code_references", "code_diagnostics",
         "code_plan", "code_test", "code_check_syntax",
         "code_branch", "code_commit", "code_rollback",
         "code_symbol_index", "code_ast_outline", "code_hover",
-        "terminal_list", "terminal_run", "terminal_read", "terminal_restart",
-        "system_health", "nas_status", "nas_pools",
-        "world_describe", "open_terminal", "open_url",
-        "get", "post", "download", "browse",
-        "home_state", "home_devices",
-        "see_camera", "list_cameras", "count_people_camera",
-        "describe_image", "show_image", "show_video",
-        "search_photos", "find_people", "identify_face",
-        "photos_summary", "open_document",
-        "voice_status", "transcribe", "tts_speak",
-        "play_media", "play_youtube", "search_music", "stop_media",
-        "wa_send", "wa_status", "whatsapp_send_photo", "whatsapp_send_document",
-        "send_file", "send_immich_photo", "send_media_url",
-        "readFile", "writeFile", "listDirectory"
+        "terminal_list", "terminal_run", "terminal_read",
+        "system_health", "readFile", "writeFile", "listDirectory"
     ],
 
-    // Sadewa — memori, provenance, analisis, kontinuitas.
+    // Nakula — data, statistik, numerik, RF, analitik spasial-visual
+    // (kanonik; bukan lagi pemilik engineering/operasi).
+    nakula: [
+        "memory_related", "memory_documents",
+        "system_health", "nas_status", "nas_pools",
+        "see_camera", "list_cameras", "count_people_camera",
+        "describe_image", "show_image", "show_video",
+        "search_photos", "find_people", "identify_face", "photos_summary",
+        "open_document", "readFile", "listDirectory"
+    ],
+
+    // Sadewa — riset, bukti, verifikasi, provenance (kanonik; bukan
+    // lagi pemilik memori/kontinuitas — memori adalah inti bersama).
     sadewa: [
-        "memory_recall", "memory_remember", "memory_forget",
-        "memory_related", "memory_entities", "memory_documents",
-        "build_recall", "build_remember",
-        "search_photos", "find_people",
-        "system_health", "nas_status", "terminal_list", "terminal_read",
-        "list_cameras", "home_state", "home_devices",
-        "world_describe", "listDirectory"
+        "browse", "get", "download",
+        "osint_investigate", "osint_email", "osint_phone", "osint_username",
+        "osint_domain", "osint_breach", "osint_hoax_check", "osint_hoax_trace",
+        "osint_social_network",
+        "memory_recall", "memory_related", "memory_documents", "memory_entities",
+        "open_document", "readFile", "listDirectory"
     ]
 
 };
