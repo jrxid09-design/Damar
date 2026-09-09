@@ -171,30 +171,106 @@ class ShadowEvaluation {
 }
 
 /**
- * Bounded canary deployment — only AFTER an APPROVED proposal. Scope and
- * time limited; rollback mandatory and always available.
+ * W6-01 REPAIR — bounded canary deployment requiring CANONICAL RATIFICATION.
+ *
+ * `proposalStatus: "APPROVED"` caller strings are NOT authority. The canary
+ * requires a ratification object produced by the frozen Evolution Authority
+ * path (`AuthorityRegistry.ratify()` output: decision APPROVED + proposalId
+ * + proposalDigest + proposalRevision + approvedAuthorityDigest binding)
+ * AND the proposal object itself as stored by this pipeline.
  */
+const EVOLUTION_BOUNDS = Object.freeze({
+    maxActiveCanaries: 3,
+    maxObservationsPerCanary: 100,
+    maxObservationBytesPerCanary: 64 * 1024,
+    maxObservationBytes: 8192,
+    maxCanaryHistory: 32
+});
+
 class CanaryDeployment {
-    constructor({ proposalId, proposalStatus, scope = {}, ttlMs = null, nowMs = () => Date.now() } = {}) {
-        if (proposalStatus !== "APPROVED") {
-            // SELF-IMPROVEMENT != SELF-AUTHORIZATION: no approval, no canary
-            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, `proposal '${String(proposalId).slice(0, 64)}' is '${String(proposalStatus).slice(0, 32)}', not APPROVED`);
+    constructor({
+        proposalId, proposal, ratification, candidateArtifactDigest,
+        scope = {}, ttlMs = null, nowMs = () => Date.now(), activeCanaryCount = 0,
+        maxActiveCanaries = EVOLUTION_BOUNDS.maxActiveCanaries
+    } = {}) {
+        // W6-01: unknown proposal + "APPROVED" string -> reject
+        if (!proposal || proposal.proposalId !== String(proposalId ?? "").slice(0, 128)) {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, `canary references proposal '${String(proposalId ?? "(none)").slice(0, 64)}' which does not exist in the evolution pipeline (caller-asserted approval rejected)`);
+        }
+        if (!ratification || typeof ratification !== "object" || ratification.decision !== "APPROVED") {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, "canary requires a canonical APPROVED ratification from the frozen Evolution Authority");
+        }
+        if (typeof ratification.ratificationId !== "string" || ratification.ratificationId.length === 0 || ratification.ratificationId.length > 120) {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, "ratification malformed (not produced by the canonical Authority path)");
+        }
+        if (ratification.proposalId !== proposal.proposalId) {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, "ratification belongs to a different proposal");
+        }
+        if (ratification.proposalDigest !== proposal.digest) {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, "ratification proposalDigest does not match the current proposal revision (stale/tampered)");
+        }
+        if ((ratification.proposalRevision ?? 1) !== (proposal.revision ?? 1)) {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, "ratification revision does not match the current proposal revision (stale)");
+        }
+        if (!ratification.approvedAuthority || typeof ratification.approvedAuthority !== "object") {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, "ratification carries no approvedAuthority (nothing was ratified)");
+        }
+        const recomputed = sha256Hex(ratification.approvedAuthority);
+        if (ratification.approvedAuthorityDigest && ratification.approvedAuthorityDigest !== recomputed) {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, "ratification approvedAuthority digest mismatch (tampered)");
+        }
+        const candidateDigest = String(candidateArtifactDigest ?? "").slice(0, 64);
+        const ratifiedCandidate = ratification.approvedAuthority.candidateArtifactDigest
+            ?? ratification.approvedAuthority.candidateDigest ?? null;
+        if (!ratifiedCandidate || ratifiedCandidate !== candidateDigest) {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, "ratification is bound to a different candidate artifact");
+        }
+        const expMs = ratification.expiryAt ? Date.parse(ratification.expiryAt) : null;
+        if (ratification.expiryAt && (Number.isNaN(expMs) || expMs <= nowMs())) {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, "ratification expired");
+        }
+        // W6-06: active canary cap enforced by the caller's counter
+        if (!Number.isInteger(activeCanaryCount) || activeCanaryCount < 0) {
+            throw new TypeError("activeCanaryCount must be a non-negative integer");
+        }
+        if (activeCanaryCount >= maxActiveCanaries) {
+            throw meshFailure(MESH_ERRORS.BOUNDS_EXCEEDED, `active canary cap (${maxActiveCanaries}) reached`);
         }
         this.canaryId = `dcanary-${crypto.randomBytes(12).toString("hex")}`;
-        this.proposalId = String(proposalId).slice(0, 128);
+        this.proposalId = proposal.proposalId;
+        this.proposalDigest = proposal.digest;
+        this.ratificationId = ratification.ratificationId;
+        this.candidateArtifactDigest = candidateDigest;
         this.scope = boundedMap(scope);
         this.state = "DEPLOYED";
         this.deployedAtMs = Math.floor(nowMs());
         this.expiresAtMs = this.deployedAtMs + (Number.isFinite(ttlMs) && ttlMs > 0 ? Math.floor(ttlMs) : EXPERIENCE_DEFAULTS.canaryTtlMs);
         this.observations = [];
+        this._observedBytes = 0;
         this.nowMs = nowMs;
     }
 
-    observe({ metric, value } = {}) {
-        if (this.state !== "DEPLOYED") throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "canary not DEPLOYED");
-        this.observations.push({ atMs: this.nowMs(), metric: String(metric).slice(0, 64), value: Number.isFinite(value) ? value : String(value).slice(0, 64) });
-        return this.observations.length;
-    }
+ observe({ metric, value } = {}) {
+ if (this.state !== "DEPLOYED") throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "canary not DEPLOYED");
+ if (this.observations.length >= EVOLUTION_BOUNDS.maxObservationsPerCanary) {
+ throw meshFailure(MESH_ERRORS.BOUNDS_EXCEEDED, `canary observation cap (${EVOLUTION_BOUNDS.maxObservationsPerCanary}) reached`);
+ }
+ // W6-06: byte bound is computed on the RAW input BEFORE truncation — a
+ // huge payload can never sneak in via the bounded string coercion.
+ const rawEntry = { atMs: this.nowMs(), metric: metric ?? "", value: value ?? "" };
+ const rawBytes = Buffer.byteLength(JSON.stringify(rawEntry), "utf8");
+ if (rawBytes > EVOLUTION_BOUNDS.maxObservationBytes) {
+ throw meshFailure(MESH_ERRORS.BOUNDS_EXCEEDED, `single observation exceeds byte bound (${rawBytes} > ${EVOLUTION_BOUNDS.maxObservationBytes})`);
+ }
+ const entry = { atMs: this.nowMs(), metric: String(metric).slice(0, 64), value: Number.isFinite(value) ? value : String(value).slice(0, 64) };
+ const bytes = Buffer.byteLength(JSON.stringify(entry), "utf8");
+ this._observedBytes += bytes;
+ if (this._observedBytes > EVOLUTION_BOUNDS.maxObservationBytesPerCanary) {
+ throw meshFailure(MESH_ERRORS.BOUNDS_EXCEEDED, "canary observation byte budget exhausted");
+ }
+ this.observations.push(entry);
+ return this.observations.length;
+ }
 
     rollback({ reason } = {}) {
         if (this.state !== "DEPLOYED") throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "canary not DEPLOYED");
@@ -205,7 +281,7 @@ class CanaryDeployment {
 
     promote() {
         if (this.state !== "DEPLOYED") throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "canary not DEPLOYED");
-        if (Date.now() > this.expiresAtMs) { this.state = "EXPIRED"; throw meshFailure(MESH_ERRORS.MESSAGE_EXPIRED, "canary TTL expired — promote rejected, roll back instead"); }
+        if (this.nowMs() > this.expiresAtMs) { this.state = "EXPIRED"; throw meshFailure(MESH_ERRORS.MESSAGE_EXPIRED, "canary TTL expired — promote rejected, roll back instead"); }
         this.state = "PROMOTED";
         return Object.freeze({ canaryId: this.canaryId, state: this.state });
     }
@@ -216,11 +292,14 @@ class CanaryDeployment {
  * authority model builder; approval happens ONLY via the existing registry.
  */
 class EvolutionPipeline {
-    constructor({ authorityModel, config = {}, nowMs = () => Date.now() } = {}) {
+    constructor({ authorityModel, authorityRegistry = null, config = {}, nowMs = () => Date.now() } = {}) {
         if (!authorityModel || typeof authorityModel.buildEvolutionProposal !== "function") {
             throw new TypeError("EvolutionPipeline requires the frozen authority model (buildEvolutionProposal) — no parallel authority");
         }
         this.authorityModel = authorityModel;
+        // W6-01: when the frozen AuthorityRegistry is bound, proposals are
+        // created THROUGH it so canary ratification digests match exactly.
+        this.authorityRegistry = authorityRegistry;
         this.config = Object.freeze({ ...EXPERIENCE_DEFAULTS, ...config });
         this.nowMs = nowMs;
         this.experiences = new LearningSignals(this.config);
@@ -245,27 +324,40 @@ class EvolutionPipeline {
     }
 
     /**
-     * Create a proposal THROUGH THE FROZEN AUTHORITY BUILDER (DRAFT status —
-     * proposal != approval). Poisoned/malicious evidence is rejected here.
+     * W6-01 REPAIR: proposals are created through the FROZEN AuthorityRegistry
+     * (`proposeEvolution`) when a registry is bound — the pipeline stores the
+     * SAME canonical object the registry ratified, so ratification digests
+     * match exactly. Without a bound registry, the frozen builder is used
+     * directly, and canaries still require registry ratification.
      */
-    createProposal({ proposalId, createdBy, evidence, kind = "routing_preference", problem, proposedChange, affectedSubsystems = [], rollbackPlan = "", testPlan = "" } = {}) {
-        if (this._proposals.size >= this.config.maxProposals) throw meshFailure(MESH_ERRORS.BOUNDS_EXCEEDED, "proposal table full");
-        // poisoning guards: evidence must reference real experience signal windows
-        if (!evidence || !Array.isArray(evidence.signalKeys) || evidence.signalKeys.length === 0) {
-            throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "proposal requires evidence.signalKeys from real learning windows");
-        }
-        for (const k of evidence.signalKeys.slice(0, 8)) {
-            const rec = this.experiences.recommendation(String(k).slice(0, 160));
-            if (!rec) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, `evidence references unknown signal window '${String(k).slice(0, 64)}' (poisoned or fabricated evidence)`);
-        }
-        const proposal = this.authorityModel.buildEvolutionProposal({
-            proposalId, createdBy, kind, problem, proposedChange,
-            affectedSubsystems, rollbackPlan, testPlan,
-            evidenceRefs: evidence.signalKeys.slice(0, 8)
-        });
-        this._proposals.set(proposal.proposalId, proposal);
-        return Object.freeze({ ...proposal, law: "EVOLUTION PROPOSAL != EVOLUTION APPROVAL — DRAFT requires owner ratification via the frozen AuthorityRegistry" });
-    }
+ async createProposal({ proposalId, createdBy, evidence, kind = "routing_preference", problem, proposedChange, affectedSubsystems = [], rollbackPlan = "", testPlan = "", requestedAuthority = null } = {}) {
+ if (this._proposals.size >= this.config.maxProposals) throw meshFailure(MESH_ERRORS.BOUNDS_EXCEEDED, "proposal table full");
+ // poisoning guards: evidence must reference real experience signal windows
+ if (!evidence || !Array.isArray(evidence.signalKeys) || evidence.signalKeys.length === 0) {
+ throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "proposal requires evidence.signalKeys from real learning windows");
+ }
+ for (const k of evidence.signalKeys.slice(0, 8)) {
+ const rec = this.experiences.recommendation(String(k).slice(0, 160));
+ if (!rec) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, `evidence references unknown signal window '${String(k).slice(0, 64)}' (poisoned or fabricated evidence)`);
+ }
+ let proposal;
+ if (this.authorityRegistry && typeof this.authorityRegistry.proposeEvolution === "function") {
+ proposal = await this.authorityRegistry.proposeEvolution({
+ proposalId, createdBy, kind, problem, proposedChange,
+ affectedSubsystems, rollbackPlan, testPlan,
+ evidenceRefs: evidence.signalKeys.slice(0, 8),
+ requestedAuthority
+ }, createdBy ?? "evolution-pipeline");
+ } else {
+ proposal = this.authorityModel.buildEvolutionProposal({
+ proposalId, createdBy, kind, problem, proposedChange,
+ affectedSubsystems, rollbackPlan, testPlan,
+ evidenceRefs: evidence.signalKeys.slice(0, 8)
+ });
+ }
+ this._proposals.set(proposal.proposalId, proposal);
+ return Object.freeze({ ...proposal, law: "EVOLUTION PROPOSAL != EVOLUTION APPROVAL — DRAFT requires owner ratification via the frozen AuthorityRegistry" });
+ }
 
     startShadow(candidateId) {
         if (this._shadows.size >= this.config.maxShadowRuns) throw meshFailure(MESH_ERRORS.BOUNDS_EXCEEDED, "shadow run table full");
@@ -275,13 +367,30 @@ class EvolutionPipeline {
     }
 
     /**
-     * Canary deployment: gated on proposalStatus === APPROVED. The caller
-     * passes the status from the frozen AuthorityRegistry — the pipeline
-     * itself CANNOT approve.
+     * W6-01 REPAIR: canary requires a CANONICAL RATIFICATION bound to a
+     * proposal that EXISTS in this pipeline. `proposalStatus: "APPROVED"` is
+     * structurally gone — there is no caller-asserted approval parameter.
+     * The ratification must be the frozen-authority object and must bind the
+     * candidate artifact digest.
      */
-    startCanary({ proposalId, proposalStatus, scope = {}, ttlMs = null }) {
-        const canary = new CanaryDeployment({ proposalId, proposalStatus, scope, ttlMs, nowMs: this.nowMs });
+    startCanary({ proposalId, ratification, candidateArtifactDigest, scope = {}, ttlMs = null }) {
+        const proposal = this._proposals.get(String(proposalId ?? "").slice(0, 128));
+        if (!proposal) {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, `unknown proposal '${String(proposalId ?? "").slice(0, 64)}' — caller-asserted approval rejected`);
+        }
+        const canary = new CanaryDeployment({
+            proposalId, proposal, ratification, candidateArtifactDigest,
+            scope, ttlMs, nowMs: this.nowMs,
+            activeCanaryCount: [...this._canaries.values()].filter(c => c.state === "DEPLOYED").length,
+            maxActiveCanaries: EVOLUTION_BOUNDS.maxActiveCanaries
+        });
         this._canaries.set(canary.canaryId, canary);
+        if (this._canaries.size > EVOLUTION_BOUNDS.maxCanaryHistory) {
+            // bounded history: reclaim oldest non-DEPLOYED first, else oldest
+            let reclaim = [...this._canaries.entries()].find(([, c]) => c.state !== "DEPLOYED");
+            if (!reclaim) reclaim = [...this._canaries.entries()].sort((a, b) => a[1].deployedAtMs - b[1].deployedAtMs)[0];
+            this._canaries.delete(reclaim[0]);
+        }
         return canary;
     }
 
@@ -311,5 +420,5 @@ function rejectSecrets(obj) { boundedMap(obj); }
 
 module.exports = Object.freeze({
     buildExperienceRecord, LearningSignals, ShadowEvaluation, CanaryDeployment, EvolutionPipeline,
-    EXPERIENCE_DEFAULTS, SHADOW_STATES, CANARY_STATES
+    EXPERIENCE_DEFAULTS, SHADOW_STATES, CANARY_STATES, EVOLUTION_BOUNDS
 });

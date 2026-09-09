@@ -4,6 +4,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const evo = require("../../../src/evolution");
 const authorityModel = require("../../../src/authority/model");
+const { sha256Hex } = require("../../../src/mesh/canonical");
+const CANDIDATE = sha256Hex({ candidate: "wave6-test" });
 
 /**
  * WAVE 6 L7 — governed evolution.
@@ -50,10 +52,10 @@ test("L7: learning signals — recommendations only, never policy change", () =>
  assert.equal(rec.enact, undefined);
 });
 
-test("L7: proposals — built via FROZEN authority builder, DRAFT status, evidence poisoning rejected", () => {
+test("L7: proposals — built via FROZEN authority builder, DRAFT status, evidence poisoning rejected", async () => {
  const pipeline = new evo.EvolutionPipeline({ authorityModel });
  fillExperiences(pipeline, { seed: "b" });
- const proposal = pipeline.createProposal({
+ const proposal = await pipeline.createProposal({
  proposalId: "wave6-routing-pref-b", createdBy: "evolution-pipeline",
  problem: "provider prov-b shows elevated latency",
  proposedChange: "shift coding routing preference toward alternative provider",
@@ -64,12 +66,12 @@ test("L7: proposals — built via FROZEN authority builder, DRAFT status, eviden
  assert.equal(proposal.kind, "routing_preference");
  assert.match(proposal.law, /EVOLUTION PROPOSAL != EVOLUTION APPROVAL/);
  // poisoned evidence: unknown signal window
- assert.throws(() => pipeline.createProposal({
+ await assert.rejects(() => pipeline.createProposal({
  proposalId: "poisoned-1", createdBy: "attacker", problem: "x", proposedChange: "y",
  evidence: { signalKeys: ["fabricated|cap-x|prov-x"] }
  }), (e) => /poisoned or fabricated/.test(e.message));
  // proposal without evidence at all
- assert.throws(() => pipeline.createProposal({
+ await assert.rejects(() => pipeline.createProposal({
  proposalId: "no-evidence", createdBy: "attacker", problem: "x", proposedChange: "y", evidence: null
  }), (e) => e.code === "MESSAGE_MALFORMED");
 });
@@ -92,22 +94,42 @@ test("L7: shadow evaluation — divergence measured, zero action influence", () 
  assert.throws(() => shadow.compare({ canonicalDecision: {}, shadowDecision: {} }), (e) => e.code === "MESSAGE_MALFORMED");
 });
 
-test("L7: canary requires APPROVED proposal — self-authorization structurally impossible", () => {
+test("L7: canary requires APPROVED proposal — self-authorization structurally impossible", async () => {
  const pipeline = new evo.EvolutionPipeline({ authorityModel });
- assert.throws(() => pipeline.startCanary({ proposalId: "p1", proposalStatus: "DRAFT" }), (e) => e.code === "EVOLUTION_NOT_APPROVED");
- assert.throws(() => pipeline.startCanary({ proposalId: "p1", proposalStatus: "AWAITING_RATIFICATION" }), (e) => e.code === "EVOLUTION_NOT_APPROVED");
- assert.throws(() => pipeline.startCanary({ proposalId: "p1", proposalStatus: "REJECTED" }), (e) => e.code === "EVOLUTION_NOT_APPROVED");
- // approved -> canary deploys with TTL + rollback
- const canary = pipeline.startCanary({ proposalId: "p2", proposalStatus: "APPROVED", scope: { node: "dnode-x", capability: "routing" } });
+ assert.throws(() => pipeline.startCanary({ proposalId: "p1", ratification: null }), (e) => e.code === "EVOLUTION_NOT_APPROVED");
+
+ // inline proposal objects are REJECTED: the proposal must exist in the
+ // pipeline (registered via the frozen registry) — no direct-object bypass
+ assert.throws(() => pipeline.startCanary({ proposalId: "p2", proposal: { proposalId: "p2", digest: "d".repeat(64), revision: 1 }, ratification: { decision: "APPROVED", ratificationId: "r1", proposalId: "p2", proposalDigest: "d".repeat(64), proposalRevision: 1, approvedAuthority: { candidateArtifactDigest: CANDIDATE }, approvedAuthorityDigest: sha256Hex({ candidateArtifactDigest: CANDIDATE }) }, candidateArtifactDigest: CANDIDATE }), (e) => /unknown proposal|caller-asserted/.test(e.message));
+ // canonical path: registry-bound pipeline + registry ratification
+ const { AuthorityRegistry } = require("../../../src/authority/registry");
+ const { createMemoryAuthorityStore } = require("../../../src/authority/store");
+ const store = createMemoryAuthorityStore();
+ const registry = new AuthorityRegistry({ store, clock: { nowIso: () => new Date(1_000_000).toISOString() } });
+ pipeline.authorityRegistry = registry;
+ // register the exact signal window the proposal's evidence references
+ pipeline.recordExperience(evo.buildExperienceRecord({ taskType: "coding", selectedCapability: "cap", selectedProvider: "prov", result: "succeeded", verification: "verified", latencyMs: 100 }));
+ for (let i = 0; i < 23; i++) pipeline.recordExperience(evo.buildExperienceRecord({ taskType: "coding", selectedCapability: "cap", selectedProvider: "prov", result: "succeeded", verification: "verified", latencyMs: 120 }));
+ await registry.proposeEvolution({
+ proposalId: "canary-e2e", createdBy: "owner", kind: "routing_preference",
+ problem: "latency", proposedChange: "shift", affectedSubsystems: ["routing"],
+ requestedAuthority: { capabilityId: "code.test", subject: "damar", actions: ["execute"], candidateArtifactDigest: CANDIDATE }
+ }, "owner");
+ await pipeline.createProposal({
+ proposalId: "canary-e2e", createdBy: "owner", kind: "routing_preference",
+ problem: "latency", proposedChange: "shift", evidence: { signalKeys: ["coding|cap|prov"] }, rollbackPlan: "r", testPlan: "t",
+ requestedAuthority: { capabilityId: "code.test", subject: "damar", actions: ["execute"], candidateArtifactDigest: CANDIDATE }
+ });
+ const ratified = await registry.ratify({ ratificationId: "r-e2e", proposalId: "canary-e2e", ownerIdentity: "owner", decision: "APPROVED" });
+ const canary = pipeline.startCanary({ proposalId: "canary-e2e", ratification: ratified.ratification, candidateArtifactDigest: CANDIDATE, scope: { node: "dnode-x", capability: "routing" } });
  assert.equal(canary.state, "DEPLOYED");
  canary.observe({ metric: "error_rate", value: 0.01 });
  // rollback always available
  const rb = canary.rollback({ reason: "error rate drift" });
  assert.equal(rb.state, "ROLLED_BACK");
  // promoted canary also enforces TTL
- const canary2 = pipeline.startCanary({ proposalId: "p3", proposalStatus: "APPROVED", ttlMs: 10 });
+ const canary2 = pipeline.startCanary({ proposalId: "canary-e2e", ratification: { ...ratified.ratification, ratificationId: "r-e2e-2" }, candidateArtifactDigest: CANDIDATE, ttlMs: 10 });
  canary2.observe({ metric: "error_rate", value: 0 });
- // expired (simulate by mtime manipulation not possible — TTL enforced at promote via wall clock; use direct check)
  assert.equal(canary2.expiresAtMs > canary2.deployedAtMs, true);
  const promoted = canary2.promote();
  assert.equal(promoted.state, "PROMOTED");
