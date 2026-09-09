@@ -168,14 +168,18 @@ test("L1: envelope replay rejected; different messageId accepted; ledger bounded
     assert.throws(() => replayGuard.accept({ ...env1 }), (e) => e.code === "MESH_REPLAY");
     // different id passes
     assert.ok(replayGuard.accept(mk()));
-    // bounded: exceed cap, size stays at cap
+    // bounded + fail-closed: unique-ID flood with LIVE entries rejects at cap
+    let saturated = 0;
     for (let i = 0; i < 9000; i++) {
-        replayGuard.accept(mesh.envelope.buildEnvelope({
-            messageType: "ECHO", sourceNodeId: remote.nodeId, destinationNodeId: local.nodeId,
-            logicalDamarId: local.logicalDamarId, trustGeneration: ids.mint.trustGeneration(), payload: { n: i }
-        }));
+        try {
+            replayGuard.accept(mesh.envelope.buildEnvelope({
+                messageType: "ECHO", sourceNodeId: remote.nodeId, destinationNodeId: local.nodeId,
+                logicalDamarId: local.logicalDamarId, trustGeneration: ids.mint.trustGeneration(), payload: { n: i }, ttlMs: 600_000
+            }));
+        } catch (e) { if (e.code === "BOUNDS_EXCEEDED") saturated++; }
     }
     assert.ok(replayGuard.size() <= 8192);
+    assert.ok(saturated > 0, "flood rejected fail-closed at cap");
 });
 
 test("L1: message expiry rejected fail-closed; wrong destination rejected", () => {
