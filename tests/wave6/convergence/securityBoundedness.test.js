@@ -48,16 +48,20 @@ test("S-AUDIT: no unbounded Map/Set growth — every collection has a bounded op
  assert.ok(bounded, `${rel} has unbounded Map (no cap/reclaim pattern)`);
  }
  }
- // live behavior: replay ledger caps
+ // live behavior: replay ledger caps — flood is fail-closed, memory bounded
  const guard = new mesh.MeshReplayGuard({ config: { maxEntries: 4 } });
  const a = ids.mint.nodeId(); const b = ids.mint.nodeId();
+ let boundedRejections = 0;
  for (let i = 0; i < 40; i++) {
+ try {
  guard.accept(mesh.envelope.buildEnvelope({
  messageType: "ECHO", sourceNodeId: a, destinationNodeId: b,
- logicalDamarId: ids.mint.logicalDamarId(), trustGeneration: ids.mint.trustGeneration(), payload: { i }
+ logicalDamarId: ids.mint.logicalDamarId(), trustGeneration: ids.mint.trustGeneration(), payload: { i }, ttlMs: 600_000
  }));
+ } catch (e) { if (e.code === "BOUNDS_EXCEEDED") boundedRejections++; }
  }
  assert.ok(guard.size() <= 4);
+ assert.ok(boundedRejections > 0, "flood admissions rejected fail-closed at cap (no live eviction)");
 });
 
 test("S-AUDIT: replay defense across all planes (mesh message, lease nonce, recovery payload, state revision)", () => {

@@ -11,6 +11,20 @@ const edge = require("../../../src/edge");
 const evo = require("../../../src/evolution");
 const authorityModel = require("../../../src/authority/model");
 const ids = mesh.ids;
+const { loadAndEvaluateAuthority, isCanonicalAuthorityEvaluation } = require("../../../src/authority/evaluate");
+const { createMemoryAuthorityStore } = require("../../../src/authority/store");
+// R7: produce a BRANDED canonical evaluation through the frozen Authority owner.
+async function makeBrandedEvaluation({ capabilityId, action, subject = "damar" } = {}) {
+    const store = createMemoryAuthorityStore();
+    await store.upsertCapability(capabilityId, "ACTIVE", 0, {
+        subject, capabilityId, kind: "root", actions: [action], scope: ["."],
+        allowedPurposes: [], maxExecutions: null, issuedAt: new Date().toISOString(),
+        generation: 0, delegationDepth: 0, identityBinding: null, restrictions: { kind: "unrestricted" }
+    });
+    const evaluation = await loadAndEvaluateAuthority(store, { capabilityId, action, scope: ["."], nowMs: 1_000_000 });
+    if (!isCanonicalAuthorityEvaluation(evaluation)) throw new Error("evaluation not branded");
+    return evaluation;
+}
 const damar = ids.mint.logicalDamarId();
 
 /**
@@ -49,7 +63,7 @@ function buildNodeStack({ label, profile }) {
  }),
  circuits: new dresil.CircuitBreakers(),
  policy: new dresil.ReplicationPolicy(),
- dexecRouter: new dexec.DistributedExecutionRouter({ trust, registry, authorityDecisionDigest: "b".repeat(64) })
+ dexecRouter: new dexec.DistributedExecutionRouter({ trust, registry, authorityBridge: dexec.createCanonicalAuthorityBridge() })
  };
 }
 
@@ -64,7 +78,7 @@ function connectAll(stacks) {
  }
 }
 
-test("W6-1: normal three-node operation — trust, scoped state replication, routing", () => {
+test("W6-1: normal three-node operation — trust, scoped state replication, routing", async () => {
  const A = buildNodeStack({ label: "NODE_A", profile: "DESKTOP_PRIMARY" });
  const B = buildNodeStack({ label: "NODE_B", profile: "SERVER_PRIVATE" });
  const C = buildNodeStack({ label: "NODE_C", profile: "PORTABLE_CORE" });
@@ -98,8 +112,9 @@ test("W6-1: normal three-node operation — trust, scoped state replication, rou
  A.dexecRouter.advertise({ nodeId: B.identity.nodeId, profile: "SERVER_PRIVATE", capabilities: [{ capabilityId: "code.test", toolId: "code_test", latencyScore: 30 }] });
  A.dexecRouter.bindLocalNodeId(A.identity.nodeId);
  const out = A.dexecRouter.route({
- actionIntentId: "i1", canonical: JSON.stringify({ op: "code.test" }),
- capabilityId: "code.test", toolId: "code_test", input: {}, privacyClass: "INTERNAL",
+ intent: { intentId: "i1", capabilityId: "code.test", operation: "test", arguments: {}, correlationId: "c1", createdAtMs: 1 },
+ evaluation: await makeBrandedEvaluation({ capabilityId: "code.test", action: "test" }),
+ toolId: "code_test", privacyClass: "INTERNAL",
  preferredNodeId: B.identity.nodeId
  });
  assert.equal(out.targetNodeId, B.identity.nodeId);
@@ -108,7 +123,7 @@ test("W6-1: normal three-node operation — trust, scoped state replication, rou
  assert.ok(A.auditRecords.filter(r => r.type === "mesh.ingest_accepted").length >= 0);
 });
 
-test("W6-2/3: primary crash mid-task — portable continues continuity; uncertain action NEVER replayed", () => {
+test("W6-2/3: primary crash mid-task — portable continues continuity; uncertain action NEVER replayed", async () => {
  const A = buildNodeStack({ label: "NODE_A", profile: "DESKTOP_PRIMARY" });
  const C = buildNodeStack({ label: "NODE_C", profile: "PORTABLE_CORE" });
  connectAll([A, C]);
@@ -124,7 +139,8 @@ test("W6-2/3: primary crash mid-task — portable continues continuity; uncertai
 // C holds its own RECOVERY_PEER scope (it is the recovery host)
 C.trust.pair({ nodeId: C.identity.nodeId, state: "TRUSTED", scopes: ["RECOVERY_PEER"], ttlMs: 3600000 });
  const ep = C.recovery.startEpisode({ failedNodeId: A.identity.nodeId, continuityIncarnation: "dsc_inc_A1", candidatePeers: [{ nodeId: C.identity.nodeId, trustGeneration: C.trust.snapshot(C.identity.nodeId).trustGeneration }] });
- C.recovery.transferCheckpoint(ep.episodeId, { checkpoint: cp, recoveryNonce: "n1" });
+  const n1 = C.recovery.recoveryNonceBindingFor(C.recovery._episodes.get(ep.episodeId), cp);
+  C.recovery.transferCheckpoint(ep.episodeId, { checkpoint: cp, recoveryNonce: n1 });
  C.recovery.revalidateTrust(ep.episodeId);
  C.recovery.revalidateReadiness(ep.episodeId, { readinessProof: "READY" });
  const done = C.recovery.resume(ep.episodeId);
@@ -285,10 +301,10 @@ test("W6-13: malicious/stale replica sends old state — rejected by causal/revi
  assert.throws(() => store.applyRemote(tampered), (e) => e.code === "MESSAGE_MALFORMED" || e.code === "PAYLOAD_DIGEST_MISMATCH");
 });
 
-test("W6-14: evolution proposal from poisoned experience — rejected; W6-15: shadow mode has no action influence", () => {
+test("W6-14: evolution proposal from poisoned experience — rejected; W6-15: shadow mode has no action influence", async () => {
  const pipeline = new evo.EvolutionPipeline({ authorityModel });
  // poisoning attempt: proposal citing fabricated signal window
- assert.throws(() => pipeline.createProposal({
+ await assert.rejects(() => pipeline.createProposal({
  proposalId: "evil-1", createdBy: "poisoner", problem: "x", proposedChange: "y",
  evidence: { signalKeys: ["fake|cap|prov"] }
  }), (e) => /poisoned or fabricated/.test(e.message));
@@ -308,7 +324,7 @@ test("W6-14: evolution proposal from poisoned experience — rejected; W6-15: sh
  }
 });
 
-test("W6-16: node resource exhaustion — workload rerouted elsewhere, no authority change", () => {
+test("W6-16: node resource exhaustion — workload rerouted elsewhere, no authority change", async () => {
  const A = buildNodeStack({ label: "NODE_A", profile: "DESKTOP_PRIMARY" });
  const B = buildNodeStack({ label: "NODE_B", profile: "SERVER_PRIVATE" });
  connectAll([A, B]);
@@ -318,7 +334,8 @@ test("W6-16: node resource exhaustion — workload rerouted elsewhere, no author
  A.dexecRouter.advertise({ nodeId: A.identity.nodeId, profile: "DESKTOP_PRIMARY", capabilities: [{ capabilityId: "code.test", toolId: "code_test", latencyScore: 90 }], resources: { headroomScore: 0 } });
  A.dexecRouter.advertise({ nodeId: B.identity.nodeId, profile: "SERVER_PRIVATE", capabilities: [{ capabilityId: "code.test", toolId: "code_test", latencyScore: 20 }], resources: { headroomScore: 40 } });
  const out = A.dexecRouter.route({
- actionIntentId: "i-reroute", canonical: JSON.stringify({ op: "code.test" }),
+  intent: { intentId: "i-reroute", capabilityId: "code.test", operation: "test", arguments: {}, correlationId: "rr", createdAtMs: 1 },
+  evaluation: await makeBrandedEvaluation({ capabilityId: "code.test", action: "test" }),
  capabilityId: "code.test", toolId: "code_test", input: {}, privacyClass: "INTERNAL"
  });
  assert.equal(out.targetNodeId, B.identity.nodeId, "exhausted node loses the score, authority untouched");
@@ -347,14 +364,15 @@ test("W6-18: ALL trusted nodes unavailable — controlled degraded survival, no 
  const runtime = new edge.PortableCoreRuntime({ identity: C.identity, profileDef, trust: C.trust });
  // no peers reachable; execution routing unavailable (typed failure, not fake success)
  assert.throws(() => C.dexecRouter.route({
- actionIntentId: "i-off", canonical: "{}", capabilityId: "x", toolId: "x", input: {}
- }), (e) => e.code === "ROUTE_UNAVAILABLE");
+  intent: { intentId: "i-off", capabilityId: "x", operation: "op", arguments: {}, correlationId: "", createdAtMs: 1 },
+  evaluation: null, toolId: "x"
+ }), (e) => e.code === "MESSAGE_MALFORMED" || e.code === "ROUTE_UNAVAILABLE");
  // core continues bounded survival operation
  assert.equal(runtime.level, "EDGE_OFFLINE");
  runtime.audit("degraded survival operation");
  assert.ok(runtime.stats().auditBuffered >= 1);
  // typed failure envelope, no stack
- try { C.dexecRouter.route({ actionIntentId: "i", canonical: "{}", capabilityId: "x", toolId: "x" }); } catch (e) {
+ try { C.dexecRouter.route({ intent: { intentId: "i", capabilityId: "x", operation: "op", arguments: {}, correlationId: "", createdAtMs: 1 }, evaluation: null, toolId: "x" }); } catch (e) {
  assert.ok(!String(e.message).includes("at "));
  }
 });
