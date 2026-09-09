@@ -35,6 +35,9 @@ const MESH_ERRORS = Object.freeze([
  "NODE_REGISTRY_FULL",
  "REGISTRY_UPDATE_REJECTED",
  "ROUTE_UNAVAILABLE",
+ // federation / sandbox
+ "SANDBOX_VIOLATION",
+ "TOOL_NOT_ENABLED",
  // edge / resilience / evolution
  "EDGE_RESOURCE_EXHAUSTED",
  "EXECUTION_STATE_UNKNOWN",

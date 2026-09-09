@@ -37,9 +37,12 @@ const { MeshPairingAdapter } = require("./meshPairing");
 const { MeshAuditBridge } = require("./meshAuditBridge");
 const { PARTITION_CLASSES, PARTITION_POLICY, partitionClassFor, BOUNDS } = require("./meshPolicy");
 
+const MESH_ERRORS_FLAT = MESH_ERRORS;
+
 module.exports = Object.freeze({
     ids, canonical: { canonicalize, canonicalJson, canonicalBytes, sha256Hex },
-    errors: { MESH_ERRORS, MeshError, meshFailure, isMeshFailure },
+    errors: { MESH_ERRORS: MESH_ERRORS_FLAT, MeshError, meshFailure, isMeshFailure },
+    MESH_ERRORS: MESH_ERRORS_FLAT,
     meshIdentity: { mintNodeIdentity, adoptNodeIdentity, coerceNodeIdentity },
     NodeRegistry, LIVENESS_STATES,
     NodeTrust, TRUST_STATES, TRUST_SCOPES, TERMINAL_STATES,
