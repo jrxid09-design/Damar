@@ -1,6 +1,19 @@
 "use strict";
 
 const fs = require("node:fs");
+const crypto = require("node:crypto");
+
+// RA4-02: readiness lifecycle identity is an OPAQUE, exact-safe token
+// (wrtep_<32 hex> from crypto.randomBytes), NOT a numeric counter.
+// A numeric `readinessEpoch++` loses precision beyond Number.MAX_SAFE_INTEGER:
+// at that boundary invalidation stopped changing the epoch identity, so a
+// stale in-flight readiness canary could publish READY_WARM after
+// invalidation. Exact string identity (`!==`) has no arithmetic semantics:
+// EVERY invalidation mints a fresh token, so a stale readiness result can
+// never establish READY_WARM, no matter how many invalidations occur.
+// SECURITY LAW: READINESS TOKEN != AUTHORITY — the token is lifecycle
+// identity only; only the CURRENT token is retained (no unbounded history).
+function newReadinessToken() { return `wrtep_${crypto.randomBytes(16).toString("hex")}`; }
 
 const DEFAULT_PROFILE = Object.freeze({
     survivalRole: "system-local-survival",
@@ -52,16 +65,20 @@ class WisesRuntime {
         this.lastError = "NOT_CONFIGURED";
         this.readinessPromise = null;
         this.recoveryPromise = null;
-        this.readinessEpoch = 0;
-        this.readinessGeneration = 0;
+        this.readinessToken = newReadinessToken();
         this.readinessInfo = null;
     }
 
     async readiness() {
         if (this.state === "READY_WARM" && this.readinessInfo) return this.snapshot();
-        if (this.readinessPromise) return this.readinessPromise;
-        const epoch = this.readinessEpoch;
-        const promise = (async () => {
+        // RA4-02 single-flight: concurrent callers sharing the CURRENT token
+        // share one readiness operation/canary. An old-token promise is never
+        // reused as valid readiness for a newer token — the token capture
+        // below discards any result that was invalidated mid-flight.
+        const promise = this.readinessPromise;
+        if (promise && promise.token === this.readinessToken) return promise.promise;
+        const capturedToken = this.readinessToken;
+        const wrapped = (async () => {
             if (this.artifactPath && !fs.existsSync(this.artifactPath)) {
                 this.state = "FAILED";
                 this.lastError = "ARTIFACT_MISSING";
@@ -76,13 +93,16 @@ class WisesRuntime {
             try {
                 if (this.runtime?.canary) await this.runtime.canary();
                 else await this._infer([{ role: "user", content: "Reply only: READY" }], { readinessCanary: true, maxTokens: 8, temperature: 0 });
-                if (epoch !== this.readinessEpoch) throw Object.assign(new Error("READINESS_INVALIDATED"), { failureClass: "LOCAL_RUNTIME_FAILURE" });
+                // RA4-02 SECURITY PROPERTY: a stale readiness result must
+                // NEVER establish READY_WARM after invalidation. Exact
+                // identity comparison — no arithmetic, no precision.
+                if (capturedToken !== this.readinessToken) throw Object.assign(new Error("READINESS_INVALIDATED"), { failureClass: "LOCAL_RUNTIME_FAILURE" });
                 this.state = "READY_WARM";
                 this.lastError = null;
                 this.recoveryAttempts = 0;
                 this.readinessInfo = Object.freeze({
-                    generation: ++this.readinessGeneration,
-                    epoch,
+                    token: capturedToken,
+                    epoch: capturedToken,
                     canaryAtMs: this.now(),
                     canaryResult: "PASS",
                     runtimeId: this.profile.runtimeId,
@@ -93,15 +113,21 @@ class WisesRuntime {
                     artifactDigest: this.profile.artifactDigest
                 });
             } catch (error) {
-                this.state = "FAILED";
-                this.lastError = String(error.message || error);
-                this.readinessInfo = null;
+                // Only the CURRENT token may publish failure state for its own
+                // epoch; a stale attempt leaves the newer lifecycle untouched.
+                if (capturedToken === this.readinessToken) {
+                    this.state = "FAILED";
+                    this.lastError = String(error.message || error);
+                    this.readinessInfo = null;
+                }
             }
             return this.snapshot();
         })();
-        this.readinessPromise = promise;
-        try { return await promise; }
-        finally { if (this.readinessPromise === promise) this.readinessPromise = null; }
+        wrapped.token = capturedToken;
+        const entry = { token: capturedToken, promise: wrapped };
+        this.readinessPromise = entry;
+        try { return await wrapped; }
+        finally { if (this.readinessPromise === entry) this.readinessPromise = null; }
     }
 
     snapshot() {
@@ -111,7 +137,13 @@ class WisesRuntime {
     describe() { return Object.freeze({ ...this.profile, readiness: this.state, readinessInfo: this.readinessInfo }); }
 
     invalidateReadiness(reason = "READINESS_INVALIDATED") {
-        this.readinessEpoch++;
+        // RA4-02: every invalidation mints a FRESH opaque readiness token —
+        // exact-safe identity that can never collide with a prior token.
+        // Covers ALL invalidation sources (restart, profile/model change,
+        // inference failure, shutdown, Recovery Capsule restart, explicit
+        // calls): no path merely mutates state while retaining the old
+        // token, so every prior in-flight readiness attempt becomes stale.
+        this.readinessToken = newReadinessToken();
         this.readinessInfo = null;
         this.state = "FAILED";
         this.lastError = reason;

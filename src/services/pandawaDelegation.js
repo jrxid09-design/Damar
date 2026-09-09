@@ -32,13 +32,23 @@ const issued = new WeakSet();
 // is unguessable (crypto.randomBytes), immutable once minted into the
 // frozen delegation, and survives JSON serialization losslessly. State
 // stays bounded: only the CURRENT epoch identity is retained (one
-// string); no epoch history, no replay archive.
+// string); no epoch history, no replay archive. (RA4-01: the rotation
+// diagnostic is a bounded saturating counter, never security state.)
 const CONSUMED_LEDGER_BOUND = 4096;
 const DELEGATION_TTL_MS = boundTtlMs(Number(process.env.PANDAWA_DELEGATION_TTL_MS ?? 1800000));
 const consumed = new Map();
 const MAX_TEXT = 4096;
 const MAX_REFS = 32;
-let rotations = 0;
+// RA4-01: rotation diagnostics are a BOUNDED, SATURATING, NON-AUTHORITATIVE
+// counter. LAW: DIAGNOSTIC COUNTER != SECURITY STATE. This value never
+// participates in issuance identity, replay/validity/trust decisions, epoch
+// equality, or pruning correctness — the security epoch is the opaque
+// unguessable identity above. Attacker-driven saturation can advance the
+// diagnostic only to the hard maximum; lifetime accumulation is
+// intentionally not preserved and its saturation changes no security
+// behavior (epoch rotation continues normally).
+const MAX_DIAGNOSTIC_ROTATIONS = 256;
+let rotations = 0; // saturating: min(rotations + 1, MAX_DIAGNOSTIC_ROTATIONS)
 
 function newEpochId() { return `pdlep_${crypto.randomBytes(16).toString("hex")}`; }
 let epochId = newEpochId();
@@ -56,6 +66,8 @@ function text(value, name) {
 
 function currentEpoch() { return epochId; }
 
+// RA4-01: bounded diagnostic only — saturates at MAX_DIAGNOSTIC_ROTATIONS.
+// NON-AUTHORITATIVE: never used for identity, replay, trust, or pruning.
 function epochRotations() { return rotations; }
 
 function ledgerSize() { return consumed.size; }
@@ -113,7 +125,7 @@ function acceptDelegation(delegation, { receiver, sessionId, now = Date.now() } 
  // unsafe numeric precision: the fresh opaque identity can never
  // compare equal to any previous one.
  epochId = newEpochId();
- rotations++;
+ rotations = Math.min(rotations + 1, MAX_DIAGNOSTIC_ROTATIONS); // bounded diagnostic (RA4-01)
  consumed.clear();
  }
  }
@@ -137,6 +149,7 @@ module.exports = Object.freeze({
  createDelegation, acceptDelegation, projectHandoff, consumption,
  isIssued: value => issued.has(value),
  ledgerSize, currentEpoch, epochRotations,
+ MAX_DIAGNOSTIC_ROTATIONS,
  CONSUMED_LEDGER_BOUND,
  DELEGATION_TTL_MS
 });
