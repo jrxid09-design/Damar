@@ -465,11 +465,14 @@ class MissionEngine {
             fresh: false
         });
 
-        await activity.record({
-            type: "tool.completed", projectId: mission.projectId, missionId: id,
-            agentId: "nakula", tool: "opencode_run",
-            payload: { ok: result.ok, resume: true }
-        });
+ await activity.record({
+ type: "tool.completed", projectId: mission.projectId, missionId: id,
+ // RA3-03: opencode_run adalah kerja rekayasa/koding — atribusi
+ // eksekusi mengikuti peran kanonik Janaka (engineering/coding),
+ // bukan Nakula (data/statistik/RF/spasial). ROLE != AUTHORITY.
+ agentId: "janaka", tool: "opencode_run",
+ payload: { ok: result.ok, resume: true }
+ });
 
         return result;
 

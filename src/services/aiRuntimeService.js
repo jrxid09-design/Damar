@@ -414,40 +414,29 @@ class AIRuntimeService {
             artifactPath: modelPath,
             artifactDigest: process.env.DAMAR_LOCAL_ARTIFACT_DIGEST || null
         };
-        // F-01 — canonical Recovery Capsule wiring: the production local
-        // survival runtime carries the bounded recovery provider (restart ->
-        // canary -> readiness re-check, attempts capped) so a real local
-        // failure can recover through the canonical path. No second
-        // recovery manager is created here.
-        const recoveryProvider = createWisesRecoveryProvider({
-            maxAttempts: Math.max(0, Math.min(3, Number(process.env.DAMAR_LOCAL_RECOVERY_MAX_ATTEMPTS ?? 1))),
-            restart: async () => {
-                // Restart the local inference substrate in place: dispose the
-                // loaded GGUF/context so the next canary re-loads it. Called
-                // only after an inference failure (no in-flight generation —
-                // LlamaEngine serializes generations on its own queue), so
-                // no restart loop and no new recovery manager.
-                const { LlamaEngine } = require("../ai/providers/llamacpp");
-                await LlamaEngine._dispose();
-            },
-            canary: async () => {
-                // Bounded canary: a minimal real inference proves the
-                // substrate actually answers before readiness re-check.
-                const engine = this.ensure();
-                const previous = engine.activeProviderId;
-                try {
-                    engine.use("llamacpp");
-                    const result = await engine.chat({
-                        messages: [{ role: "user", content: "Reply only: READY" }],
-                        model: profile.artifactPath,
-                        maxTokens: 8, temperature: 0, tools: []
-                    });
-                    if (!result?.content) throw new Error("RECOVERY_CANARY_EMPTY");
-                } finally {
-                    if (previous && previous !== "llamacpp") { try { engine.use(previous); } catch { /* best-effort restore */ } }
-                }
-            }
-        });
+ // F-01 — canonical Recovery Capsule wiring: the production local
+ // survival runtime carries the bounded recovery provider so a real
+ // local failure can recover through the canonical path. No second
+ // recovery manager is created here.
+ //
+ // RA3-01 single-canary ownership: the provider performs STRUCTURAL
+ // recovery only (in-place substrate dispose). The ONE canonical
+ // cognitive canary per runtime/model/recovery epoch is executed by
+ // WisesRuntime.readiness() — a provider-level real inference canary
+ // is forbidden (WISES_PROVIDER_CANARY_FORBIDDEN), so a recovery epoch
+ // runs exactly ONE real canary, not two.
+ const recoveryProvider = createWisesRecoveryProvider({
+ maxAttempts: Math.max(0, Math.min(3, Number(process.env.DAMAR_LOCAL_RECOVERY_MAX_ATTEMPTS ?? 1))),
+ restart: async () => {
+ // Restart the local inference substrate in place: dispose the
+ // loaded GGUF/context so the next readiness canary re-loads it. Called
+ // only after an inference failure (no in-flight generation —
+ // LlamaEngine serializes generations on its own queue), so
+ // no restart loop and no new recovery manager.
+ const { LlamaEngine } = require("../ai/providers/llamacpp");
+ await LlamaEngine._dispose();
+ }
+ });
         const local = new WisesRuntime({
             profile,
             recovery: recoveryProvider,
