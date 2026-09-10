@@ -14,31 +14,28 @@ const crypto = require("node:crypto");
 const M = require("./model");
 const { attenuateGrant } = require("./delegation");
 const { loadAndEvaluateAuthority } = require("./evaluate");
+const { isCanonicalAuthorityRegistry } = require("./canonicalOwnership");
 const { canonicalCapabilityId, canonicalTokenList,
         canonicalRestrictionSet,
         restoreCanonicalRestrictionSet,
         canonicalJson, sha256,
         deepFreeze } = require("./canonical");
 
-// W6-R2-01: module-private ownership brand. ONLY instances constructed
-// through this class are canonical Evolution Authority owners. The brand
-// WeakSet is closure-private and can NEVER be reproduced by matching
-// fields, cloning, spreading, or serializing (SERIALIZED SECURITY OBJECT
-// != LIVE AUTHORITY; DUCK TYPE != TRUST).
-const CANONICAL_AUTHORITY_REGISTRIES = new WeakSet();
-
-/** Brand-first ownership check — no property access before the brand check. */
-function isCanonicalAuthorityRegistry(value) {
-    return value !== null && typeof value === "object" &&
-        CANONICAL_AUTHORITY_REGISTRIES.has(value);
-}
+// W6-R2-01/R3-01: ownership brand is NOT established at construction. An
+// AuthorityRegistry becomes canonical ONLY when produced by
+// createCanonicalAuthorityRegistry (composition-root closure). `new
+// AuthorityRegistry(...)` from ANY caller yields a NON-canonical registry
+// that can never capture production authority. isCanonicalAuthorityRegistry
+// is re-exported here for downstream modules that legitimately predicate
+// ownership before trusting an Evolution/Authority object.
 
 class AuthorityRegistry {
 
     constructor({ store, clock }) {
         this.store = store;
         this.clock = clock;
-        CANONICAL_AUTHORITY_REGISTRIES.add(this);
+        // R3-01: NO canonical brand here. `new` yields a non-canonical
+        // registry usable only for local/test purposes.
     }
 
     /**

@@ -59,10 +59,13 @@ function createDistributedNodeRuntime({
     registry.register({ identity, displayName: `node-${identity.nodeId.slice(6, 12)}` });
     router.bindLocalNodeId(identity.nodeId);
     const presence = new mesh.MeshPresence({ registry });
-    // R2-02: bind the canonical AuthorityRegistry owner (first-wins, brand
-    // checked). Without this, routing fails closed at route time.
+    // R3-01: install the canonical AuthorityRegistry owner. The seam accepts
+    // ONLY an AuthorityRegistry produced by createCanonicalAuthorityRegistry
+    // (composition-root ownership, brand verified). A caller-created
+    // `new AuthorityRegistry(...)` is NEVER canonical and can never capture
+    // authority. Without installation, routing fails closed at route time.
     if (authorityRegistry !== null && authorityRegistry !== undefined) {
-        dexec.bindCanonicalAuthorityRegistry(authorityRegistry);
+        dexec.installCanonicalAuthorityRegistry(authorityRegistry);
     }
     // C: node advertisement entries reference canonical capability ids
     const dexecRouter = new dexec.DistributedExecutionRouter({ trust, registry });

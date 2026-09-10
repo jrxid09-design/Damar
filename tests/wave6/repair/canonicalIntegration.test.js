@@ -6,7 +6,7 @@ const path = require("node:path");
 const { createDistributedNodeRuntime, createGovernedExternalToolExecutor } = require("../../../src/integration/wave6Production");
 const { parseActionIntent } = require("../../../src/action/intent");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
-const { AuthorityRegistry } = require("../../../src/authority/registry");
+const { createCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
 const dexec = require("../../../src/dexec");
 const dresil = require("../../../src/dresil");
 const federationMod = require("../../../src/federation");
@@ -17,10 +17,11 @@ const ids = mesh.ids;
  * W6-07 — canonical production integration tests (Manager -> Authority ->
  * Capability -> Router -> Lease -> Verification; no direct paths).
  *
- * R2-02: authority flows EXCLUSIVELY through the module-private canonical
- * source bound once to the canonical AuthorityRegistry (resolved live at
- * route time). R2-07: governed external tool execution requires a canonical
- * router claim — no caller-shaped authority, no toolFn bypass.
+ * R2-02/R3-01: authority flows EXCLUSIVELY through the module-private canonical
+ * source; the canonical registry is produced by the composition-root factory
+ * (resolved live at route time). R2-07/R3-03: governed external tool execution
+ * requires a canonical router claim — no caller-shaped authority, no toolFn
+ * bypass, no public sandbox launcher.
  */
 
 const NOOP_TOOL = path.resolve(__dirname, "../../../src/federation/noopTool.js");
@@ -31,8 +32,12 @@ async function intentFor({ capabilityId = "code.test", operation = "test" } = {}
         schemaVersion: 1, capabilityId, operation, arguments: { scope: "." }, correlationId: "corr"
     }), { nowMs: 1_000_000 });
     if (!canonicalBound) {
+        // R3-01: composition-root factory (NOT `new AuthorityRegistry`).
         const store = createMemoryAuthorityStore();
-        const registry = new AuthorityRegistry({ store, clock: { nowIso: () => new Date(1_000_000).toISOString() } });
+        const registry = createCanonicalAuthorityRegistry({
+            store,
+            clock: { nowIso: () => new Date(1_000_000).toISOString(), nowMs: () => 1_000_000 }
+        });
         await registry.proposeEvolution({
             proposalId: "e2e-grant", createdBy: "owner", kind: "authority_expansion",
             problem: "grant", proposedChange: "grant",
@@ -40,7 +45,7 @@ async function intentFor({ capabilityId = "code.test", operation = "test" } = {}
         }, "owner");
         await registry.ratify({ ratificationId: "rat-e2e", proposalId: "e2e-grant", ownerIdentity: "owner", decision: "APPROVED" });
         await registry.issueRatifiedRootGrant({ proposalId: "e2e-grant", ratificationId: "rat-e2e", actor: "owner" });
-        dexec.bindCanonicalAuthorityRegistry(registry);
+        dexec.installCanonicalAuthorityRegistry(registry);
         canonicalBound = true;
     }
     return intent;

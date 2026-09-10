@@ -8,15 +8,15 @@ const ids = mesh.ids;
 const { parseActionIntent } = require("../../../src/action/intent");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
 const { loadAndEvaluateAuthority } = require("../../../src/authority/evaluate");
-const { AuthorityRegistry, isCanonicalAuthorityRegistry } = require("../../../src/authority/registry");
-const { bindCanonicalAuthorityRegistry } = require("../../../src/dexec/authoritySource");
+const { AuthorityRegistry } = require("../../../src/authority/registry");
+const { createCanonicalAuthorityRegistry, isCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
 
 /**
- * W6-02 / R2-02 — canonical authority provenance + W6-03 lease consumption.
+ * W6-02 / R2-02 / R3-01 — canonical authority provenance + lease consumption.
  * Authority is resolved via LIVE evaluation through the module-private
- * canonical source (bound exactly once to the canonical AuthorityRegistry).
- * There is no caller-supplied digest, no caller-supplied bridge, no
- * caller-supplied evaluation object.
+ * canonical source. The canonical registry is produced by the composition-root
+ * factory `createCanonicalAuthorityRegistry` (R3-01: `new AuthorityRegistry`
+ * is NEVER canonical). No caller-supplied digest/bridge/evaluation object.
  */
 
 const damar = ids.mint.logicalDamarId();
@@ -29,19 +29,22 @@ async function canonicalIntent({ capabilityId = "code.test", operation = "test",
  const intent = parseActionIntent(JSON.stringify({
  schemaVersion: 1, capabilityId, operation, arguments: { scope: "." }, correlationId: "corr-1"
  }), { nowMs: 1_000_000 });
- if (!canonicalBound) {
- const store = createMemoryAuthorityStore();
- const registry = new AuthorityRegistry({ store, clock: { nowIso: () => new Date(1_000_000).toISOString() } });
- await registry.proposeEvolution({
- proposalId: "e2e-grant", createdBy: "owner", kind: "authority_expansion",
- problem: "grant", proposedChange: "grant",
- requestedAuthority: { capabilityId, subject, actions: [operation], scope: ["."], maxExecutions: 100 }
- }, "owner");
- await registry.ratify({ ratificationId: "rat-e2e", proposalId: "e2e-grant", ownerIdentity: "owner", decision: "APPROVED" });
- await registry.issueRatifiedRootGrant({ proposalId: "e2e-grant", ratificationId: "rat-e2e", actor: "owner" });
- bindCanonicalAuthorityRegistry(registry);
- canonicalBound = true;
- }
+if (!canonicalBound) {
+  const store = createMemoryAuthorityStore();
+  // R3-01: composition-root factory (NOT `new AuthorityRegistry`).
+  const registry = createCanonicalAuthorityRegistry({
+  store, clock: { nowIso: () => new Date(1_000_000).toISOString(), nowMs: () => 1_000_000 }
+  });
+  await registry.proposeEvolution({
+  proposalId: "e2e-grant", createdBy: "owner", kind: "authority_expansion",
+  problem: "grant", proposedChange: "grant",
+  requestedAuthority: { capabilityId, subject, actions: [operation], scope: ["."], maxExecutions: 100 }
+  }, "owner");
+  await registry.ratify({ ratificationId: "rat-e2e", proposalId: "e2e-grant", ownerIdentity: "owner", decision: "APPROVED" });
+  await registry.issueRatifiedRootGrant({ proposalId: "e2e-grant", ratificationId: "rat-e2e", actor: "owner" });
+  dexec.installCanonicalAuthorityRegistry(registry);
+  canonicalBound = true;
+  }
  return intent;
 }
 
@@ -102,13 +105,26 @@ test("W6-02: canonical authority DENY -> route fails with typed error", async ()
  );
 });
 
-test("W6-02: router cannot be constructed before canonical authority is bound — but bind is first-wins", () => {
- // already bound by prior test (module singleton); verify bind is idempotent
- const store = createMemoryAuthorityStore();
- const registry = new AuthorityRegistry({ store, clock: { nowIso: () => new Date(1_000_000).toISOString() } });
- assert.throws(() => bindCanonicalAuthorityRegistry(registry), /already bound/);
- // brand check
- assert.ok(isCanonicalAuthorityRegistry(registry));
+test("R3-01: `new AuthorityRegistry` is NOT canonical; install rejects non-composition-root instances", () => {
+  // R3-01: construction does NOT confer canonical provenance.
+  const store = createMemoryAuthorityStore();
+  const callerRegistry = new AuthorityRegistry({ store, clock: { nowIso: () => new Date(1_000_000).toISOString() } });
+  // A caller-created instance must NOT pass the brand predicate.
+  assert.equal(isCanonicalAuthorityRegistry(callerRegistry), false,
+    "caller-created AuthorityRegistry must not be canonical (R3-01)");
+  // The install seam must reject it — it can never capture production authority.
+  assert.throws(() => dexec.installCanonicalAuthorityRegistry(callerRegistry),
+    /composition-root ownership/);
+  // Cloning/spreading/serializing a canonical instance is also NOT canonical
+  // even when a canonical instance already exists (WeakSet identity brand):
+  // construct a fresh non-canonical registry and confirm the predicate stays false.
+  assert.equal(isCanonicalAuthorityRegistry({ ...callerRegistry }), false);
+  assert.equal(isCanonicalAuthorityRegistry(JSON.parse(JSON.stringify(callerRegistry))), false);
+  // A monkey-patched clone cannot be installed either.
+  const patched = Object.create(null);
+  Object.assign(patched, callerRegistry);
+  assert.equal(isCanonicalAuthorityRegistry(patched), false);
+  assert.throws(() => dexec.installCanonicalAuthorityRegistry(patched), /composition-root ownership/);
 });
 
 test("W6-02: wrong capability / wrong tool / wrong target rejected after authorization", async () => {

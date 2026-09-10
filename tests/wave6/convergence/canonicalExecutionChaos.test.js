@@ -6,22 +6,22 @@ const path = require("node:path");
 const { createDistributedNodeRuntime, createGovernedExternalToolExecutor } = require("../../../src/integration/wave6Production");
 const { parseActionIntent } = require("../../../src/action/intent");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
-const { AuthorityRegistry } = require("../../../src/authority/registry");
+const { createCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
 const dexec = require("../../../src/dexec");
 const federationMod = require("../../../src/federation");
 const mesh = require("../../../src/mesh");
 const ids = mesh.ids;
 
 /**
- * W6-R2-06 / R2-CHAOS-01 — REAL canonical ingress + end-to-end chaos.
+ * W6-R2-06/R3-01 / R2-CHAOS-01 — REAL canonical ingress + end-to-end chaos.
  *
  * The ONLY production ingress for distributed execution is the canonical
  * node runtime (`createDistributedNodeRuntime`):
  *
  *   ActionIntent (frozen parseActionIntent) ->
- *   LIVE canonical Authority evaluation (bound AuthorityRegistry) ->
+ *   LIVE canonical Authority evaluation (composition-root registry) ->
  *   capability resolution -> DistributedExecutionRouter ->
- *   governed execution claim -> sandbox (child process) -> verification.
+ *   governed execution claim -> sandbox (AppContainer) -> verification.
  *
  * No direct model->node path, no caller-supplied evaluation/artifact, no
  * toolFn bypass. Chaos scenarios (revoke, replay, mutation, relocation,
@@ -30,9 +30,9 @@ const ids = mesh.ids;
 
 const NOOP_TOOL = path.resolve(__dirname, "../../../src/federation/noopTool.js");
 
-// ---- ONE shared canonical registry is bound ONCE per process (first-wins).
-// Each test uses its OWN capability id so live revocations never leak across
-// tests. The LIVE canonical owner is the same instance for every node. ----
+// ---- ONE shared canonical registry is produced by the composition-root
+// factory ONCE per process (R3-01). Each test uses its OWN capability id so
+// live revocations never leak across tests. ----
 let canonicalStore = null;
 let canonicalRegistry = null;
 let canonicalBound = false;
@@ -40,11 +40,13 @@ let canonicalBound = false;
 async function bindCanonical() {
     if (canonicalBound) return canonicalRegistry;
     const store = createMemoryAuthorityStore();
-    const registry = new AuthorityRegistry({ store, clock: { nowIso: () => new Date(1_000_000).toISOString() } });
+    // R3-01: composition-root factory (NOT `new AuthorityRegistry`).
+    const registry = createCanonicalAuthorityRegistry({
+        store,
+        clock: { nowIso: () => new Date(1_000_000).toISOString(), nowMs: () => 1_000_000 }
+    });
     canonicalStore = store;
     canonicalRegistry = registry;
-    // separate capability ids so live revocations in one test never leak into
-    // another (the canonical binding is process-wide first-wins)
     for (const capabilityId of ["code.test", "chaos.test", "chaos2.test"]) {
         await canonicalRegistry.proposeEvolution({
             proposalId: `grant-${capabilityId}`, createdBy: "owner", kind: "authority_expansion",
@@ -54,7 +56,7 @@ async function bindCanonical() {
         await canonicalRegistry.ratify({ ratificationId: `rat-${capabilityId}`, proposalId: `grant-${capabilityId}`, ownerIdentity: "owner", decision: "APPROVED" });
         await canonicalRegistry.issueRatifiedRootGrant({ proposalId: `grant-${capabilityId}`, ratificationId: `rat-${capabilityId}`, actor: "owner" });
     }
-    dexec.bindCanonicalAuthorityRegistry(canonicalRegistry);
+    dexec.installCanonicalAuthorityRegistry(canonicalRegistry);
     canonicalBound = true;
     return canonicalRegistry;
 }

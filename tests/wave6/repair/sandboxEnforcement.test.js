@@ -7,10 +7,9 @@ const path = require("node:path");
 const mesh = require("../../../src/mesh");
 const ids = mesh.ids;
 const dexec = require("../../../src/dexec");
-const { bindCanonicalAuthorityRegistry } = require("../../../src/dexec/authoritySource");
+const { createCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
 const { parseActionIntent } = require("../../../src/action/intent");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
-const { AuthorityRegistry } = require("../../../src/authority/registry");
 const federation = require("../../../src/federation");
 const { createGovernedExternalToolExecutor } = require("../../../src/integration/wave6Production");
 const { APPCONTAINER_NAME, HOST_EXE } = require("../../../src/federation/appContainerSandbox");
@@ -40,8 +39,13 @@ async function canonicalIntent({ capabilityId = "code.test", operation = "test" 
         schemaVersion: 1, capabilityId, operation, arguments: { scope: "." }, correlationId: "corr"
     }), { nowMs: 1_000_000 });
     if (!canonicalBound) {
+        // R3-01: the canonical registry comes from the composition-root factory
+        // (NOT `new AuthorityRegistry`, which is non-canonical).
         const store = createMemoryAuthorityStore();
-        const registry = new AuthorityRegistry({ store, clock: { nowIso: () => new Date(1_000_000).toISOString() } });
+        const registry = createCanonicalAuthorityRegistry({
+            store,
+            clock: { nowIso: () => new Date(1_000_000).toISOString(), nowMs: () => 1_000_000 }
+        });
         await registry.proposeEvolution({
             proposalId: "sbox-grant", createdBy: "owner", kind: "authority_expansion",
             problem: "grant", proposedChange: "grant",
@@ -49,7 +53,7 @@ async function canonicalIntent({ capabilityId = "code.test", operation = "test" 
         }, "owner");
         await registry.ratify({ ratificationId: "rat", proposalId: "sbox-grant", ownerIdentity: "owner", decision: "APPROVED" });
         await registry.issueRatifiedRootGrant({ proposalId: "sbox-grant", ratificationId: "rat", actor: "owner" });
-        bindCanonicalAuthorityRegistry(registry);
+        dexec.installCanonicalAuthorityRegistry(registry);
         canonicalBound = true;
     }
     return intent;

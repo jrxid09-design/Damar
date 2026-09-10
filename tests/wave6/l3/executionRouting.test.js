@@ -7,8 +7,7 @@ const mesh = require("../../../src/mesh");
 const ids = mesh.ids;
 const { parseActionIntent } = require("../../../src/action/intent");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
-const { AuthorityRegistry } = require("../../../src/authority/registry");
-const { bindCanonicalAuthorityRegistry } = require("../../../src/dexec/authoritySource");
+const { createCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
 
 /**
  * WAVE 6 L3 — distributed capability & execution routing.
@@ -16,9 +15,10 @@ const { bindCanonicalAuthorityRegistry } = require("../../../src/dexec/authority
  * intent+node+generation+nonce; forged/expired/wrong leases fail closed;
  * UNKNOWN state never blind-retries; no authority transfer.
  *
- * R2-02: authority provenance flows EXCLUSIVELY through the module-private
- * canonical source bound once to the canonical AuthorityRegistry — there is
- * no caller-supplied evaluation, bridge, or digest in the API.
+ * R2-02/R3-01: authority provenance flows EXCLUSIVELY through the module-private
+ * canonical source; the canonical registry is produced by the composition-root
+ * factory (NOT `new AuthorityRegistry`). No caller-supplied evaluation, bridge,
+ * or digest in the API.
  */
 
 const damar = ids.mint.logicalDamarId();
@@ -27,14 +27,17 @@ const remoteId = ids.mint.nodeId();
 
 let canonicalBound = false;
 
-/** Bind the canonical AuthorityRegistry once; return a frozen ActionIntent. */
+/** Install the canonical AuthorityRegistry once; return a frozen ActionIntent. */
 async function canonicalIntent({ capabilityId = "code.test", operation = "test", subject = "damar" } = {}) {
     const intent = parseActionIntent(JSON.stringify({
         schemaVersion: 1, capabilityId, operation, arguments: { scope: "." }, correlationId: "corr-1"
     }), { nowMs: 1_000_000 });
     if (!canonicalBound) {
         const store = createMemoryAuthorityStore();
-        const registry = new AuthorityRegistry({ store, clock: { nowIso: () => new Date(1_000_000).toISOString() } });
+        const registry = createCanonicalAuthorityRegistry({
+            store,
+            clock: { nowIso: () => new Date(1_000_000).toISOString(), nowMs: () => 1_000_000 }
+        });
         await registry.proposeEvolution({
             proposalId: "grant", createdBy: "owner", kind: "authority_expansion",
             problem: "grant", proposedChange: "grant",
@@ -42,7 +45,7 @@ async function canonicalIntent({ capabilityId = "code.test", operation = "test",
         }, "owner");
         await registry.ratify({ ratificationId: "rat", proposalId: "grant", ownerIdentity: "owner", decision: "APPROVED" });
         await registry.issueRatifiedRootGrant({ proposalId: "grant", ratificationId: "rat", actor: "owner" });
-        bindCanonicalAuthorityRegistry(registry);
+        dexec.installCanonicalAuthorityRegistry(registry);
         canonicalBound = true;
     }
     return intent;
