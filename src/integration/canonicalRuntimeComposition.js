@@ -183,7 +183,9 @@ async function buildRuntimeCoreInternal({
     recoverySystem = null,
     generationLedger = null,
     statusTracker = null,
-    recoveryConfigOverrides = {}
+    recoveryConfigOverrides = {},
+    // ---- Wave 6 Repair3: narrow distributed lane-3 seam (optional) ----
+    wave6Distributed = null
 } = {}, onCompositionPayload = null) {
 
     if (bus !== null) {
@@ -257,7 +259,11 @@ async function buildRuntimeCoreInternal({
         channelIngress = require("../manager/bootstrap").createDamarManagerIngressDomain({
             bus: busInstance,
             mediaSubsystem,
-            ...(continuityStoreFile === undefined ? {} : { continuityStoreFile })
+            ...(continuityStoreFile === undefined ? {} : { continuityStoreFile }),
+            // R3-04: narrow Wave 6 lane-3 seam is optional; when provided by
+            // the host composition it routes AUTHORIZED intents through
+            // distributed execution. Absent = frozen behavior.
+            ...(wave6Distributed === null || wave6Distributed === undefined ? {} : { wave6Distributed })
         });
     }
 
@@ -364,7 +370,8 @@ async function buildRuntimeHostInternal({
     conversationHandler = null,
     clock = defaultClock(),
     busBounds = undefined,
-    localTransportId = LOCAL_TRANSPORT_ID
+    localTransportId = LOCAL_TRANSPORT_ID,
+    wave6Distributed = null
 } = {}, privileged = null) {
     // DSC-R8-001: EVERY caller-supplied coreFactory is treated as untrusted.
     // Function identity is NOT a trust signal.  The canonical Voice
@@ -407,7 +414,8 @@ async function buildRuntimeHostInternal({
         // the sole CONVERSATION route.
         core = await buildRuntimeCoreInternal({
             ...sanitizeCoreOptions(coreOptions),
-            enableManagerIngress: conversationHandler === null
+            enableManagerIngress: conversationHandler === null,
+            ...(wave6Distributed === null || wave6Distributed === undefined ? {} : { wave6Distributed })
         }, onCompositionPayload);
     } else {
         // Caller-controlled factory: ALWAYS untrusted.  Pass SANITIZED

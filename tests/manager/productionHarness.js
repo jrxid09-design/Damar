@@ -50,7 +50,10 @@ async function makeManagerHarness({
     // Contract tests may supply this at composition time only.  It is never
     // forwarded from RuntimeHost, a channel adapter, or a Manager request.
     authenticate = undefined,
-    withAdapters = true
+    withAdapters = true,
+    // R3-04: optional narrow Wave 6 lane-3 seam (route authorized intents
+    // through distributed execution). Null = frozen behavior.
+    wave6Distributed = null
 } = {}) {
     // Lane 3 actuation harness (canonical execution results for this domain)
     const lane3h = await makeActuationHarness({ scopeBindings, ...(authenticate ? { authenticate } : {}) });
@@ -73,7 +76,8 @@ async function makeManagerHarness({
         },
         trustedChannelAdapters: withAdapters ? CHANNEL_ADAPTERS.slice() : [],
         mediaProcessor,
-        mediaContextAuthority
+        mediaContextAuthority,
+        ...(wave6Distributed ? { wave6Distributed } : {})
     });
 
     return {
