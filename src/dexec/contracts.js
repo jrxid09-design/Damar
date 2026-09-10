@@ -111,30 +111,39 @@ function mintExecutionLease({
 }
 
 /**
- * Verify a lease at the TARGET node before execution. Fail-closed on:
- * expiry, wrong node, wrong trust generation, action digest change,
- * capability/tool mismatch, reuse (one-use nonce).
- * `consumedNonces` = the target node's bounded consumed-nonce ledger.
+ * W6-R2-03 REPAIR: DIAGNOSTIC-ONLY structural validation.
+ *
+ * STRUCTURAL VALIDITY != EXECUTION AUTHORIZATION.
+ * This helper performs pure field-shape validation and returns
+ * { structurallyValid: true } — NEVER `verified: true`. The result cannot
+ * be consumed by the execution path (execution authorization flows
+ * EXCLUSIVELY through LeaseConsumptionLedger.verifyAndConsume on the
+ * target node). No replay state exists here; no default Set/Map.
  */
-function verifyExecutionLease(lease, {
-    localNodeId, currentTrustGeneration, actionIntentCanonical,
-    capabilityId, toolId, consumedNonces = new Set(), nowMs = Date.now()
+function inspectExecutionLeaseStructure(lease, {
+ localNodeId, currentTrustGeneration, actionIntentCanonical,
+ capabilityId, toolId, nowMs = Date.now()
 } = {}) {
-    if (!lease || typeof lease !== "object") throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "lease required");
-    if (lease.schemaVersion !== 1) throw meshFailure(MESH_ERRORS.SCHEMA_VERSION_UNSUPPORTED, "unsupported lease schemaVersion");
-    const recomputed = sha256Hex(actionIntentCanonical);
-    if (recomputed !== lease.actionDigest) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "action digest mismatch — intent changed after authorization");
-    if (lease.targetNodeId !== ids.check.nodeId(localNodeId)) throw meshFailure(MESH_ERRORS.DESTINATION_MISMATCH, "lease bound to a different node");
-    if (lease.trustGeneration !== ids.check.trustGeneration(currentTrustGeneration)) throw meshFailure(MESH_ERRORS.TRUST_GENERATION_STALE, "lease trust generation stale");
-    if (lease.capabilityId !== String(capabilityId).slice(0, 256)) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "capability mismatch");
-    if (lease.toolId !== String(toolId).slice(0, 256)) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "tool mismatch");
-    const now = Math.floor(nowMs);
-    if (!Number.isFinite(lease.expiresAtMs) || lease.expiresAtMs <= now) throw meshFailure(MESH_ERRORS.MESSAGE_EXPIRED, "lease expired");
-    if (lease.oneUse) {
-        if (consumedNonces.has(lease.executionNonce)) throw meshFailure(MESH_ERRORS.MESH_REPLAY, "lease nonce already consumed (one-use)");
-        consumedNonces.add(lease.executionNonce);
-    }
-    return Object.freeze({ verified: true, leaseId: lease.leaseId, executionId: `dexec-${lease.executionNonce}` });
+ const problems = [];
+ if (!lease || typeof lease !== "object") problems.push("lease missing");
+ else {
+ if (lease.schemaVersion !== 1) problems.push("unsupported lease schemaVersion");
+ const recomputed = sha256Hex(actionIntentCanonical ?? "");
+ if (recomputed !== lease.actionDigest) problems.push("action digest mismatch — intent changed after authorization");
+ if (lease.targetNodeId !== ids.check.nodeId(localNodeId)) problems.push("lease bound to a different node");
+ if (lease.trustGeneration !== ids.check.trustGeneration(currentTrustGeneration)) problems.push("lease trust generation stale");
+ if (lease.capabilityId !== String(capabilityId ?? "").slice(0, 256)) problems.push("capability mismatch");
+ if (lease.toolId !== String(toolId ?? "").slice(0, 256)) problems.push("tool mismatch");
+ const now = Math.floor(nowMs);
+ if (!Number.isFinite(lease.expiresAtMs) || lease.expiresAtMs <= now) problems.push("lease expired");
+ }
+ return Object.freeze({
+ structurallyValid: problems.length === 0,
+ problems: Object.freeze(problems),
+ // explicit marker that this is NOT an execution authorization
+ diagnosticOnly: true,
+ note: "STRUCTURAL VALIDITY != EXECUTION AUTHORIZATION — execution requires LeaseConsumptionLedger.verifyAndConsume"
+ });
 }
 
 /**
@@ -191,6 +200,6 @@ function buildExecutionResult(request, { state, output = null, completedAtMs = D
 
 module.exports = Object.freeze({
     EXECUTION_STATES, TRANSITIONS, TERMINAL_STATES, LEASE_DEFAULTS,
-    mintExecutionLease, verifyExecutionLease,
+    mintExecutionLease, inspectExecutionLeaseStructure,
     buildExecutionRequest, buildExecutionResult, verifyExecutionResult
 });

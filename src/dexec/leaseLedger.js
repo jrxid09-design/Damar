@@ -42,6 +42,14 @@ class LeaseConsumptionLedger {
      * mismatch; on success the lease can NEVER be consumed again on this
      * node (replay fails closed).
      */
+    /**
+     * W6-R2-03: verifyAndConsume is THE execution-authorization operation.
+     * Alias of consume() for semantic clarity at execution boundaries.
+     */
+    verifyAndConsume(lease, opts) {
+        return this.consume(lease, opts);
+    }
+
     consume(lease, {
         localNodeId, currentTrustGeneration, actionIntentCanonical,
         capabilityId, toolId, nowMs = null
