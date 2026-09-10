@@ -337,8 +337,9 @@ class DistributedExecutionRouter {
         if (!ex) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "claim execution record missing");
         // R2-07: the CURRENT trust generation is resolved from the router's
         // OWN trust plane (never a caller-supplied number) so stale-generation
-        // revocation is enforced at the execution boundary.
-        const at = localNodeId ?? this._localNodeId ?? claim.targetNodeId;
+        // revocation is enforced at the execution boundary. The execution
+        // boundary is the claim's TARGET node (the node that runs the tool).
+        const at = localNodeId ?? claim.targetNodeId;
         const generation = currentTrustGeneration ?? this.trust.snapshot(at)?.trustGeneration ?? null;
         let consumedLease = null;
         if (ex.lease) {
