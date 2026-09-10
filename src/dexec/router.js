@@ -29,6 +29,17 @@ const { verifyAuthorityArtifact } = require("./authorityAdapter");
 const { LeaseConsumptionLedger } = require("./leaseLedger");
 const { getCanonicalAuthorityBridge } = require("./authoritySource");
 
+// W6-R2-07: module-private ownership brand. ONLY routers constructed through
+// this class are canonical execution owners. The executor accepts a router
+// ONLY through this brand (duck-typed/cloned routers rejected).
+const CANONICAL_EXECUTION_ROUTERS = new WeakSet();
+
+/** Brand-first canonical router check (no property access before the brand). */
+function isCanonicalExecutionRouter(value) {
+    return value !== null && typeof value === "object" &&
+        CANONICAL_EXECUTION_ROUTERS.has(value);
+}
+
 const PRIVACY_CLASSES = Object.freeze(["PUBLIC", "INTERNAL", "PRIVATE", "SECRET_REFERENCE"].reduce((m, c) => (m[c] = c, m), {}));
 
 const DEFAULT_LOCALITY = Object.freeze({
@@ -65,9 +76,9 @@ class DistributedExecutionRouter {
         if (!registry) throw new TypeError("router requires node registry");
         this.trust = trust;
         this.registry = registry;
-        // R2-02: the canonical authority bridge comes from the module-private
-        // source (bound exactly once to the canonical registry). No parameter.
-        this.authorityBridge = getCanonicalAuthorityBridge();
+        // R2-02: authority provenance is resolved LIVE at route time from the
+        // module-private canonical source (bound exactly once to the canonical
+        // registry). No constructor parameter, no cached caller bridge.
         this.config = Object.freeze({ ...DEFAULTS, ...config });
         this.nowMs = nowMs;
         this._advertisements = new Map();
@@ -75,6 +86,12 @@ class DistributedExecutionRouter {
         // W6-03: THE mandatory consumption owner (single instance per router)
         this.leaseLedger = new LeaseConsumptionLedger({ config: { maxEntries: this.config.maxConsumedNonces }, nowMs });
         this._reliability = new Map();
+        // W6-R2-07: pending canonical-execution claims for the governed
+        // external executor. A claim is created from LIVE canonical authority
+        // + the mandatory ledger, is single-use, and binds candidate/tool/
+        // target/action digest. The executor can consume a claim ONLY once.
+        this._claims = new Map();
+        CANONICAL_EXECUTION_ROUTERS.add(this);
     }
 
     bindLocalNodeId(nodeId) {
@@ -122,13 +139,15 @@ class DistributedExecutionRouter {
      *        snapshot by the authority adapter.
      */
  async route({ intent, toolId = null, privacyClass = "INTERNAL", localPreferred = false, preferredNodeId = null, ttlMs = null, subject = "damar" } = {}) {
- if (!intent || typeof intent !== "object" || !intent.intentId || !intent.capabilityId || !intent.operation) {
- throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "frozen ActionIntent required (parse via the canonical action owner)");
- }
- // R2-02: authority is resolved by the module-private canonical bridge via
- // LIVE evaluation against the bound canonical AuthorityRegistry store.
- // There is NO caller-supplied evaluation and NO caller-supplied digest.
- const capabilityId = intent.capabilityId;
+  if (!intent || typeof intent !== "object" || !intent.intentId || !intent.capabilityId || !intent.operation) {
+  throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "frozen ActionIntent required (parse via the canonical action owner)");
+  }
+  // R2-02: authority provenance is resolved LIVE from the module-private
+  // canonical source at ROUTE TIME (bound exactly once to the canonical
+  // AuthorityRegistry). If the canonical owner is not bound, routing fails
+  // closed — no caller-supplied evaluation, bridge, or digest exists.
+  const authorityBridge = getCanonicalAuthorityBridge();
+  const capabilityId = intent.capabilityId;
  // toolId is RESOLVED by capability resolution (Capability Registry) and
  // passed in; it is BOUND into the authority artifact so a resolved tool
  // cannot be swapped after authorization.
@@ -143,7 +162,7 @@ class DistributedExecutionRouter {
  // ---- R2-02: canonical authority provenance FIRST (Authority -> Capability
  // -> Router). The bridge performs a LIVE evaluation against the canonical
  // store and mints the artifact from the BRANDED evaluation snapshot. ----
- const artifact = await this.authorityBridge.authorize({
+ const artifact = await authorityBridge.authorize({
  intent, capabilityId, toolId: tool, targetNodeId: this._localNodeId, ttlMs, subject
  });
  // ---- hard eligibility (never score-bypassable) ----
@@ -176,7 +195,7 @@ class DistributedExecutionRouter {
  .sort((a, b) => b.score - a.score || (a.nodeId < b.nodeId ? -1 : 1));
  const winner = scored[0];
  // re-bind + re-verify the artifact to the WINNER node (defense in depth)
- const winnerArtifact = await this.authorityBridge.authorize({
+ const winnerArtifact = await authorityBridge.authorize({
  intent, capabilityId, toolId: tool, targetNodeId: winner.nodeId, ttlMs, subject
  });
  verifyAuthorityArtifact(winnerArtifact, { actionIntentCanonical, capabilityId, toolId: tool, targetNodeId: winner.nodeId, nowMs: this.nowMs() });
@@ -238,6 +257,116 @@ class DistributedExecutionRouter {
             toolId: ex.lease.toolId
         });
         return Object.freeze(consumed);
+    }
+
+    /**
+     * W6-R2-07: create a governed external execution claim.
+     *
+     * The claim is the ONLY way the governed external tool executor can obtain
+     * execution authorization. The CALLER never supplies an authority artifact
+     * or a consumed-lease marker: the router performs LIVE canonical authority
+     * evaluation (via the module-private canonical source) and mints the
+     * authority artifact from the BRANDED evaluation itself. The tool facts
+     * (candidateId, toolName, toolArtifactPath, sandboxNeeds) are BOUND into
+     * the claim BEFORE routing, so they cannot be swapped after authorization.
+     * Single-use: `consumeGovernedClaim` transitions PENDING -> CONSUMED.
+     */
+    async claimGovernedExecution({
+        intent, toolId = null, candidateId, toolName, toolArtifactPath = null,
+        privacyClass = "INTERNAL", localPreferred = false, preferredNodeId = null,
+        ttlMs = null, subject = "damar", sandboxNeeds = null
+    } = {}) {
+        if (typeof candidateId !== "string" || candidateId.length === 0) {
+            throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "candidateId required for governed execution claim");
+        }
+        if (typeof toolName !== "string" || toolName.length === 0) {
+            throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "toolName required for governed execution claim");
+        }
+        // LIVE canonical authority + routing (throws AUTHORITY_DENIED / NODE_UNTRUSTED)
+        const routed = await this.route({ intent, toolId, privacyClass, localPreferred, preferredNodeId, ttlMs, subject });
+        const claimId = `dclaim-${crypto.randomBytes(16).toString("hex")}`;
+        this._claims.set(claimId, {
+            claimId,
+            status: "PENDING",
+            executionId: routed.executionId,
+            candidateId: String(candidateId).slice(0, 128),
+            toolName: String(toolName).slice(0, 128),
+            toolArtifactPath: toolArtifactPath ? String(toolArtifactPath).slice(0, 1024) : null,
+            sandboxNeeds: Object.freeze({
+                needsNetwork: Object.freeze((sandboxNeeds?.needsNetwork ?? []).map(x => String(x).slice(0, 256)).slice(0, 16)),
+                needsFilesystem: Object.freeze((sandboxNeeds?.needsFilesystem ?? []).map(x => String(x).slice(0, 512)).slice(0, 16)),
+                needsProcessSpawn: sandboxNeeds?.needsProcessSpawn === true,
+                needsSecrets: sandboxNeeds?.needsSecrets === true
+            }),
+            targetNodeId: routed.targetNodeId,
+            decisionDigest: routed.authorityArtifact.decisionDigest,
+            authorityArtifact: routed.authorityArtifact,
+            createdAtMs: this.nowMs()
+        });
+        if (this._claims.size > this.config.maxExecutionsTracked) {
+            const oldest = [...this._claims.entries()].sort((a, b) => a[1].createdAtMs - b[1].createdAtMs)[0];
+            if (oldest) this._claims.delete(oldest[0]);
+        }
+        return Object.freeze({
+            claimId,
+            executionId: routed.executionId,
+            targetNodeId: routed.targetNodeId,
+            decisionDigest: routed.authorityArtifact.decisionDigest,
+            candidateId: String(candidateId).slice(0, 128),
+            toolName: String(toolName).slice(0, 128)
+        });
+    }
+
+    /**
+     * W6-R2-07: consume a governed execution claim at the execution boundary.
+     *
+     * This is the ONE authorization operation for governed external tool
+     * execution: for leased (remote) executions the mandatory ledger performs
+     * verify+consume atomically; for local executions one-use is enforced by
+     * the claim state machine. Returns the BOUND facts (never a caller-shaped
+     * authority object). Throws typed failures on every mismatch — a replay,
+     * a wrong node, or a forged claimId fails closed.
+     */
+    consumeGovernedClaim(claimId, { localNodeId = null, currentTrustGeneration = null } = {}) {
+        const claim = this._claims.get(String(claimId ?? ""));
+        if (!claim) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "unknown governed execution claim");
+        if (claim.status !== "PENDING") {
+            throw meshFailure(MESH_ERRORS.MESH_REPLAY, "governed execution claim already consumed (one-use)");
+        }
+        const ex = this._executions.get(claim.executionId);
+        if (!ex) throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "claim execution record missing");
+        // R2-07: the CURRENT trust generation is resolved from the router's
+        // OWN trust plane (never a caller-supplied number) so stale-generation
+        // revocation is enforced at the execution boundary.
+        const at = localNodeId ?? this._localNodeId ?? claim.targetNodeId;
+        const generation = currentTrustGeneration ?? this.trust.snapshot(at)?.trustGeneration ?? null;
+        let consumedLease = null;
+        if (ex.lease) {
+            // remote boundary: verify+consume through the mandatory ledger
+            consumedLease = this.leaseLedger.consume(ex.lease, {
+                localNodeId: at,
+                currentTrustGeneration: generation,
+                actionIntentCanonical: ex.actionIntentCanonical,
+                capabilityId: ex.lease.capabilityId,
+                toolId: ex.lease.toolId
+            });
+        } else if (localNodeId !== null && localNodeId !== claim.targetNodeId) {
+            throw meshFailure(MESH_ERRORS.DESTINATION_MISMATCH, "local claim consumed on a different node");
+        }
+        claim.status = "CONSUMED";
+        claim.consumedAtMs = this.nowMs();
+        return Object.freeze({
+            claimId: claim.claimId,
+            executionId: claim.executionId,
+            candidateId: claim.candidateId,
+            toolName: claim.toolName,
+            toolArtifactPath: claim.toolArtifactPath,
+            sandboxNeeds: claim.sandboxNeeds,
+            targetNodeId: claim.targetNodeId,
+            decisionDigest: claim.decisionDigest,
+            authorityArtifact: claim.authorityArtifact,
+            consumedLease
+        });
     }
 
     transition(executionId, to, details = null) {
@@ -312,4 +441,4 @@ class DistributedExecutionRouter {
     }
 }
 
-module.exports = Object.freeze({ DistributedExecutionRouter, PRIVACY_CLASSES, DEFAULT_LOCALITY, DEFAULTS });
+module.exports = Object.freeze({ DistributedExecutionRouter, isCanonicalExecutionRouter, PRIVACY_CLASSES, DEFAULT_LOCALITY, DEFAULTS });
