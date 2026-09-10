@@ -7,25 +7,26 @@
  * authority decisions; they never replace them. REMOTE EXECUTION !=
  * AUTHORITY TRANSFER; UNKNOWN_EXECUTION_STATE never blind-retries.
  *
- * W6-R2-02: there is NO public authority-bridge factory. Authority
- * provenance is bound exactly once by the canonical bootstrap through
- * `bindCanonicalAuthorityRegistry` (brand-checked against the canonical
- * AuthorityRegistry owner) and resolved LIVE at route time.
+ * W6-R2-02/R3-01: there is NO public authority-bridge factory and NO exported
+ * first-bind surface. The canonical AuthorityRegistry is produced by the
+ * composition-root factory (`createCanonicalAuthorityRegistry`) and installed
+ * by the production composition seam; routing resolves authority LIVE at
+ * route time against that single owner.
  */
 
 const contracts = require("./contracts");
-const { bindCanonicalAuthorityRegistry, isCanonicalAuthorityBound, getCanonicalAuthorityBridge } = require("./authoritySource");
+const { installCanonicalAuthorityRegistry, isCanonicalAuthorityBound, getCanonicalAuthorityBridge } = require("./authoritySource");
 const { LeaseConsumptionLedger } = require("./leaseLedger");
 const authorityAdapter = require("./authorityAdapter");
 const { DistributedExecutionRouter, isCanonicalExecutionRouter, PRIVACY_CLASSES, DEFAULT_LOCALITY } = require("./router");
 
 module.exports = Object.freeze({
     contracts,
-    // W6-R2-02: canonical authority binding (bootstrap-owned) — the
-    // module-private bridge getter is NOT exported; consumers bind the
-    // canonical registry and construct routers (or use the canonical
-    // RuntimeHost composition).
-    bindCanonicalAuthorityRegistry,
+    // W6-R3-01: NO exported first-bind surface. installCanonicalAuthorityRegistry
+    // accepts ONLY an AuthorityRegistry produced by createCanonicalAuthorityRegistry
+    // (brand verified, composition-root ownership), so a caller-created registry
+    // can never capture authority.
+    installCanonicalAuthorityRegistry,
     isCanonicalAuthorityBound,
     LeaseConsumptionLedger,
     authorityAdapter,

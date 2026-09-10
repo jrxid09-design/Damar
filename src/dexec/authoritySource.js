@@ -17,23 +17,26 @@
  */
 
 const { loadAndEvaluateAuthority, isCanonicalAuthorityEvaluation } = require("../authority/evaluate");
-const { isCanonicalAuthorityRegistry } = require("../authority/registry");
+const { isCanonicalAuthorityRegistry } = require("../authority/canonicalOwnership");
 const { mintAuthorityArtifact } = require("./authorityAdapter");
 
 let _canonicalRegistry = null; // the ONE canonical AuthorityRegistry instance
 
 /**
- * Bind the canonical AuthorityRegistry instance. MUST be called by the
- * canonical bootstrap/composition owner before any router is constructed.
- * First-wins; a second bind attempt throws (the canonical owner cannot be
- * displaced by later code).
+ * R3-01 REPAIR: there is NO public first-bind surface. The canonical registry
+ * is captured ONLY when the real application composition root produces it via
+ * createCanonicalAuthorityRegistry(...) and hands the result to this internal
+ * seam. `registry` must be brand-verified (composition-root produced). A
+ * caller-created `new AuthorityRegistry(...)` is NOT canonical, so it cannot
+ * capture the authority source. First-wins still protects displacement, but
+ * the only installable object is the factory-produced owner.
  */
-function bindCanonicalAuthorityRegistry(registry) {
+function installCanonicalAuthorityRegistry(registry) {
     if (!isCanonicalAuthorityRegistry(registry)) {
-        throw new TypeError("bindCanonicalAuthorityRegistry requires a canonical AuthorityRegistry instance (brand check failed)");
+        throw new TypeError("installCanonicalAuthorityRegistry requires a canonical AuthorityRegistry produced by createCanonicalAuthorityRegistry (composition-root ownership)");
     }
     if (_canonicalRegistry !== null && _canonicalRegistry !== registry) {
-        throw new Error("canonical AuthorityRegistry already bound (first bind wins; the canonical owner cannot be displaced)");
+        throw new Error("canonical AuthorityRegistry already bound (the production composition cannot be displaced)");
     }
     _canonicalRegistry = registry;
     return true;
@@ -51,7 +54,7 @@ function isCanonicalAuthorityBound() {
  */
 function getCanonicalAuthorityBridge() {
     if (_canonicalRegistry === null) {
-        throw new Error("canonical AuthorityRegistry not yet bound — router construction before canonical bootstrap is forbidden (R2-02)");
+        throw new Error("canonical AuthorityRegistry not yet bound — router construction before canonical bootstrap is forbidden (R3-01)");
     }
     const registry = _canonicalRegistry;
     return Object.freeze({
@@ -105,7 +108,7 @@ function getCanonicalAuthorityBridge() {
 }
 
 module.exports = Object.freeze({
-    bindCanonicalAuthorityRegistry,
+    installCanonicalAuthorityRegistry,
     isCanonicalAuthorityBound,
     getCanonicalAuthorityBridge
 });
