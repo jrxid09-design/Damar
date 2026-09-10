@@ -24,8 +24,9 @@ function rig() {
  // the failed node was a member (DISCOVERED at minimum) before its failure —
  // a node with NO trust record at all cannot have produced a real checkpoint
  trust.pair({ nodeId: failedNode, state: "DISCOVERED", scopes: [] });
- const cpVerifier = (cp, opts) => dstate.checkpoint.verifyCheckpoint(cp, opts);
- const coordinator = dresil.createDistributedRecoveryCoordinator({ trust, checkpointVerifier: cpVerifier });
+ // R2-04: the factory closure-binds the frozen canonical checkpoint verifier
+ // (no injectable verifier parameter exists)
+ const coordinator = dresil.createDistributedRecoveryCoordinator({ trust });
  const circuits = new dresil.CircuitBreakers();
  const policy = new dresil.ReplicationPolicy();
  return { trust, registry, coordinator, circuits, policy };

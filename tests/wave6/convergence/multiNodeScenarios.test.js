@@ -11,19 +11,32 @@ const edge = require("../../../src/edge");
 const evo = require("../../../src/evolution");
 const authorityModel = require("../../../src/authority/model");
 const ids = mesh.ids;
-const { loadAndEvaluateAuthority, isCanonicalAuthorityEvaluation } = require("../../../src/authority/evaluate");
+const { parseActionIntent } = require("../../../src/action/intent");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
-// R7: produce a BRANDED canonical evaluation through the frozen Authority owner.
-async function makeBrandedEvaluation({ capabilityId, action, subject = "damar" } = {}) {
-    const store = createMemoryAuthorityStore();
-    await store.upsertCapability(capabilityId, "ACTIVE", 0, {
-        subject, capabilityId, kind: "root", actions: [action], scope: ["."],
-        allowedPurposes: [], maxExecutions: null, issuedAt: new Date().toISOString(),
-        generation: 0, delegationDepth: 0, identityBinding: null, restrictions: { kind: "unrestricted" }
-    });
-    const evaluation = await loadAndEvaluateAuthority(store, { capabilityId, action, scope: ["."], nowMs: 1_000_000 });
-    if (!isCanonicalAuthorityEvaluation(evaluation)) throw new Error("evaluation not branded");
-    return evaluation;
+const { AuthorityRegistry } = require("../../../src/authority/registry");
+const { bindCanonicalAuthorityRegistry } = require("../../../src/dexec/authoritySource");
+
+// R2-02: the canonical AuthorityRegistry is bound ONCE per process; routing
+// resolves authority LIVE against it (no caller-supplied evaluation).
+let canonicalBound = false;
+async function canonicalIntent({ capabilityId = "code.test", operation = "test", subject = "damar" } = {}) {
+    const intent = parseActionIntent(JSON.stringify({
+        schemaVersion: 1, capabilityId, operation, arguments: { scope: "." }, correlationId: `corr-${capabilityId}`
+    }), { nowMs: 1_000_000 });
+    if (!canonicalBound) {
+        const store = createMemoryAuthorityStore();
+        const registry = new AuthorityRegistry({ store, clock: { nowIso: () => new Date(1_000_000).toISOString() } });
+        await registry.proposeEvolution({
+            proposalId: "grant", createdBy: "owner", kind: "authority_expansion",
+            problem: "grant", proposedChange: "grant",
+            requestedAuthority: { capabilityId: "code.test", subject: "damar", actions: ["test"], scope: ["."], maxExecutions: 500 }
+        }, "owner");
+        await registry.ratify({ ratificationId: "rat", proposalId: "grant", ownerIdentity: "owner", decision: "APPROVED" });
+        await registry.issueRatifiedRootGrant({ proposalId: "grant", ratificationId: "rat", actor: "owner" });
+        bindCanonicalAuthorityRegistry(registry);
+        canonicalBound = true;
+    }
+    return intent;
 }
 const damar = ids.mint.logicalDamarId();
 
@@ -57,13 +70,13 @@ function buildNodeStack({ label, profile }) {
  };
  SWITCH.set(identity.nodeId, (frame, peerLabel) => router.ingest({ frame, transportPeer: peerLabel }));
  return {
- label, identity, registry, trust, router, presence, peer, auditRecords, audit,
- recovery: dresil.createDistributedRecoveryCoordinator({
- trust, checkpointVerifier: (cp, opts) => dstate.checkpoint.verifyCheckpoint(cp, opts)
- }),
- circuits: new dresil.CircuitBreakers(),
- policy: new dresil.ReplicationPolicy(),
- dexecRouter: new dexec.DistributedExecutionRouter({ trust, registry, authorityBridge: dexec.createCanonicalAuthorityBridge() })
+  label, identity, registry, trust, router, presence, peer, auditRecords, audit,
+  // R2-04: recovery coordinator factory closure-binds the canonical verifier
+  recovery: dresil.createDistributedRecoveryCoordinator({ trust }),
+  circuits: new dresil.CircuitBreakers(),
+  policy: new dresil.ReplicationPolicy(),
+  // R2-02: no authorityBridge parameter — the canonical source is live
+  dexecRouter: new dexec.DistributedExecutionRouter({ trust, registry })
  };
 }
 
@@ -111,11 +124,10 @@ test("W6-1: normal three-node operation — trust, scoped state replication, rou
  A.dexecRouter.advertise({ nodeId: A.identity.nodeId, profile: "DESKTOP_PRIMARY", capabilities: [{ capabilityId: "code.test", toolId: "code_test" }] });
  A.dexecRouter.advertise({ nodeId: B.identity.nodeId, profile: "SERVER_PRIVATE", capabilities: [{ capabilityId: "code.test", toolId: "code_test", latencyScore: 30 }] });
  A.dexecRouter.bindLocalNodeId(A.identity.nodeId);
- const out = A.dexecRouter.route({
- intent: { intentId: "i1", capabilityId: "code.test", operation: "test", arguments: {}, correlationId: "c1", createdAtMs: 1 },
- evaluation: await makeBrandedEvaluation({ capabilityId: "code.test", action: "test" }),
- toolId: "code_test", privacyClass: "INTERNAL",
- preferredNodeId: B.identity.nodeId
+ const out = await A.dexecRouter.route({
+  intent: await canonicalIntent(),
+  toolId: "code_test", privacyClass: "INTERNAL",
+  preferredNodeId: B.identity.nodeId
  });
  assert.equal(out.targetNodeId, B.identity.nodeId);
  assert.match(out.lease.leaseId, /^dlease-/);
@@ -315,8 +327,8 @@ test("W6-14: evolution proposal from poisoned experience — rejected; W6-15: sh
  for (let i = 0; i < 25; i++) shadow.compare({ canonicalDecision: { p: "prov" }, shadowDecision: { p: i % 6 === 0 ? "prov-alt" : "prov" } });
  const summary = shadow.complete();
  assert.equal(summary.actionInfluence, "NONE — shadow decisions are never dispatched");
- // unapproved canary structurally impossible
- assert.throws(() => pipeline.startCanary({ proposalId: summary.candidateId, proposalStatus: "DRAFT" }), (e) => e.code === "EVOLUTION_NOT_APPROVED");
+ // unapproved canary structurally impossible (R2-01: startCanary is async, live lookup)
+ await assert.rejects(() => pipeline.startCanary({ proposalId: summary.candidateId }), (e) => e.code === "EVOLUTION_NOT_APPROVED");
  function fill(pl, cap, prov, n) {
  for (let i = 0; i < n; i++) {
  pl.recordExperience(evo.buildExperienceRecord({ taskType: "coding", selectedCapability: cap, selectedProvider: prov, result: "succeeded", verification: "verified", latencyMs: 120 }));
@@ -333,10 +345,9 @@ test("W6-16: node resource exhaustion — workload rerouted elsewhere, no author
  A.dexecRouter.bindLocalNodeId(A.identity.nodeId);
  A.dexecRouter.advertise({ nodeId: A.identity.nodeId, profile: "DESKTOP_PRIMARY", capabilities: [{ capabilityId: "code.test", toolId: "code_test", latencyScore: 90 }], resources: { headroomScore: 0 } });
  A.dexecRouter.advertise({ nodeId: B.identity.nodeId, profile: "SERVER_PRIVATE", capabilities: [{ capabilityId: "code.test", toolId: "code_test", latencyScore: 20 }], resources: { headroomScore: 40 } });
- const out = A.dexecRouter.route({
-  intent: { intentId: "i-reroute", capabilityId: "code.test", operation: "test", arguments: {}, correlationId: "rr", createdAtMs: 1 },
-  evaluation: await makeBrandedEvaluation({ capabilityId: "code.test", action: "test" }),
- capabilityId: "code.test", toolId: "code_test", input: {}, privacyClass: "INTERNAL"
+ const out = await A.dexecRouter.route({
+  intent: await canonicalIntent(),
+  capabilityId: "code.test", toolId: "code_test", input: {}, privacyClass: "INTERNAL"
  });
  assert.equal(out.targetNodeId, B.identity.nodeId, "exhausted node loses the score, authority untouched");
  // circuits opened on A do not escalate anything
@@ -358,21 +369,21 @@ test("W6-17: recovery peer fails during recovery — bounded second peer attempt
  assert.ok(snap.state === "FAILED" || snap.peerAttempts <= 2, "bounded attempts enforced");
 });
 
-test("W6-18: ALL trusted nodes unavailable — controlled degraded survival, no fake success", () => {
+test("W6-18: ALL trusted nodes unavailable — controlled degraded survival, no fake success", async () => {
  const C = buildNodeStack({ label: "NODE_C", profile: "PORTABLE_CORE" });
  const profileDef = edge.buildEdgeRuntimeProfile({ profile: "PORTABLE_CORE", network: "OFFLINE" });
  const runtime = new edge.PortableCoreRuntime({ identity: C.identity, profileDef, trust: C.trust });
  // no peers reachable; execution routing unavailable (typed failure, not fake success)
- assert.throws(() => C.dexecRouter.route({
-  intent: { intentId: "i-off", capabilityId: "x", operation: "op", arguments: {}, correlationId: "", createdAtMs: 1 },
-  evaluation: null, toolId: "x"
- }), (e) => e.code === "MESSAGE_MALFORMED" || e.code === "ROUTE_UNAVAILABLE");
+ await assert.rejects(C.dexecRouter.route({
+  intent: await canonicalIntent({ capabilityId: "nocap.test", operation: "op" }),
+  toolId: "x"
+ }), (e) => e.code === "MESSAGE_MALFORMED" || e.code === "ROUTE_UNAVAILABLE" || e.failureClass === "AUTHORITY_DENIED");
  // core continues bounded survival operation
  assert.equal(runtime.level, "EDGE_OFFLINE");
  runtime.audit("degraded survival operation");
  assert.ok(runtime.stats().auditBuffered >= 1);
  // typed failure envelope, no stack
- try { C.dexecRouter.route({ intent: { intentId: "i", capabilityId: "x", operation: "op", arguments: {}, correlationId: "", createdAtMs: 1 }, evaluation: null, toolId: "x" }); } catch (e) {
- assert.ok(!String(e.message).includes("at "));
+ try { await C.dexecRouter.route({ intent: await canonicalIntent(), toolId: "x" }); } catch (e) {
+  assert.ok(!String(e.message).includes("at "));
  }
 });
