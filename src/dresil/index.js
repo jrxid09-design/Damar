@@ -4,12 +4,12 @@
  * WAVE 6 L6 — public surface (Lane 6: Replication, Resilience & Autonomous Recovery).
  */
 
-const { DistributedRecoveryCoordinator, EPISODE_STATES, EPISODE_TRANSITIONS } = require("./recoveryCoordinator");
+const { createDistributedRecoveryCoordinator, EPISODE_STATES, EPISODE_TRANSITIONS } = require("./recoveryCoordinator");
 const { CircuitBreakers, CIRCUIT_STATES } = require("./circuits");
 const { ReplicationPolicy, replicaQuorum } = require("./replicationPolicy");
 
 module.exports = Object.freeze({
-    DistributedRecoveryCoordinator, EPISODE_STATES, EPISODE_TRANSITIONS,
+    createDistributedRecoveryCoordinator, EPISODE_STATES, EPISODE_TRANSITIONS,
     CircuitBreakers, CIRCUIT_STATES,
     ReplicationPolicy, replicaQuorum,
     laws: Object.freeze({

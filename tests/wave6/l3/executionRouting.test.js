@@ -248,7 +248,7 @@ test("L3: no authority transfer — lease carries authority reference, not autho
  // trust revoke after lease mint -> lease verification fails stale (no lingering permission)
  const genBefore = out.lease.trustGeneration;
  trust.revoke(remoteId, { reason: "revoke between lease and execution" });
- assert.throws(() => dexec.contracts.verifyExecutionLease(out.lease, {
+ assert.throws(() => router.leaseLedger.consume(out.lease, {
  localNodeId: remoteId, currentTrustGeneration: trust.snapshot(remoteId).trustGeneration,
  actionIntentCanonical: canonicalOf(intent), capabilityId: "code.test", toolId: "code_test",
  consumedNonces: new Set()

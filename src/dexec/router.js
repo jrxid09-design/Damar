@@ -25,8 +25,9 @@ const ids = require("../mesh/ids");
 const { meshFailure, MESH_ERRORS } = require("../mesh/errors");
 const contracts = require("./contracts");
 const { sha256Hex } = require("../mesh/canonical");
-const { mintAuthorityArtifact, verifyAuthorityArtifact } = require("./authorityAdapter");
+const { verifyAuthorityArtifact } = require("./authorityAdapter");
 const { LeaseConsumptionLedger } = require("./leaseLedger");
+const { getCanonicalAuthorityBridge } = require("./authoritySource");
 
 const PRIVACY_CLASSES = Object.freeze(["PUBLIC", "INTERNAL", "PRIVATE", "SECRET_REFERENCE"].reduce((m, c) => (m[c] = c, m), {}));
 
@@ -48,24 +49,25 @@ const DEFAULTS = Object.freeze({
 
 class DistributedExecutionRouter {
     /**
-     * @param {object} deps
-     * @param {object} deps.authorityBridge MANDATORY (W6-02): narrow adapter to the
-     *        frozen canonical Authority owner exposing
-     *        `authorize({ evaluation, actionIntentId, actionIntentCanonical, capabilityId, toolId, targetNodeId, ttlMs })`
-     *        and `verifyArtifact(...)`. The router never manufactures authority.
-     * @param {object} [deps.leaseLedger] optional injected consumption ledger;
-     *        a router-private ledger is created when absent (still mandatory semantically).
+     * W6-02 / R2-02 REPAIR: the router receives NO injectable authority
+     * bridge/callback. Authority provenance is resolved through the
+     * module-private canonical source (`authoritySource.js`), which is bound
+     * exactly once to the canonical `AuthorityRegistry` instance (brand
+     * verified via closure-private WeakSet in the frozen authority owner)
+     * and performs LIVE evaluation via the frozen
+     * `loadAndEvaluateAuthority` primitive at route time.
+     *
+     * CALLER-SUPPLIED BRIDGE != CANONICAL AUTHORITY.
+     * DUCK TYPE != TRUST.
      */
-    constructor({ trust, registry, authorityBridge, config = {}, nowMs = () => Date.now() } = {}) {
+    constructor({ trust, registry, config = {}, nowMs = () => Date.now() } = {}) {
         if (!trust) throw new TypeError("router requires trust plane");
         if (!registry) throw new TypeError("router requires node registry");
-        if (!authorityBridge || typeof authorityBridge.authorize !== "function" || typeof authorityBridge.verifyArtifact !== "function") {
-            // W6-02: fail-closed — no bridge, no routing (no caller digest path exists)
-            throw new TypeError("router requires an authorityBridge adapter to the frozen canonical Authority owner (CALLER-SUPPLIED DIGESTS ARE NOT AUTHORITY)");
-        }
         this.trust = trust;
         this.registry = registry;
-        this.authorityBridge = authorityBridge;
+        // R2-02: the canonical authority bridge comes from the module-private
+        // source (bound exactly once to the canonical registry). No parameter.
+        this.authorityBridge = getCanonicalAuthorityBridge();
         this.config = Object.freeze({ ...DEFAULTS, ...config });
         this.nowMs = nowMs;
         this._advertisements = new Map();
@@ -119,35 +121,30 @@ class DistributedExecutionRouter {
      *        structurally impossible: the digest is derived from the branded
      *        snapshot by the authority adapter.
      */
- route({ intent, evaluation, toolId = null, privacyClass = "INTERNAL", localPreferred = false, preferredNodeId = null, ttlMs = null } = {}) {
+ async route({ intent, toolId = null, privacyClass = "INTERNAL", localPreferred = false, preferredNodeId = null, ttlMs = null, subject = "damar" } = {}) {
  if (!intent || typeof intent !== "object" || !intent.intentId || !intent.capabilityId || !intent.operation) {
  throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "frozen ActionIntent required (parse via the canonical action owner)");
  }
- // W6-02: BRAND CHECK FIRST — before any eligibility/score work, so a
- // forged evaluation can never ride on an unrelated failure mode.
- if (!evaluation || !this.authorityBridge.isCanonicalAuthorityEvaluation(evaluation)) {
- throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "branded canonical Authority evaluation required (caller-supplied authority digests are rejected)");
- }
+ // R2-02: authority is resolved by the module-private canonical bridge via
+ // LIVE evaluation against the bound canonical AuthorityRegistry store.
+ // There is NO caller-supplied evaluation and NO caller-supplied digest.
  const capabilityId = intent.capabilityId;
  // toolId is RESOLVED by capability resolution (Capability Registry) and
  // passed in; it is BOUND into the authority artifact so a resolved tool
  // cannot be swapped after authorization.
  const tool = toolId ?? `tool.${capabilityId}`;
-        const input = intent.arguments ?? {};
-        const actionIntentCanonical = JSON.stringify({
-            capabilityId: intent.capabilityId, operation: intent.operation,
-            arguments: intent.arguments ?? {}, correlationId: intent.correlationId ?? "",
-            createdAtMs: intent.createdAtMs ?? null
-        });
-        const privacy = PRIVACY_CLASSES[privacyClass] ? privacyClass : "INTERNAL";
- // ---- W6-02: canonical authority provenance FIRST (Authority -> Capability
- // -> Router). The bridge mints the artifact from the BRANDED evaluation;
- // digest derived from the snapshot. Wrong capability/action/tool fail
- // HERE, before any node selection. Target binding is re-verified for the
- // winner node after selection. ----
- const artifact = this.authorityBridge.authorize({
- evaluation, actionIntentId: intent.intentId, actionIntentCanonical,
- capabilityId, toolId: tool, targetNodeId: this._localNodeId, ttlMs
+ const input = intent.arguments ?? {};
+ const actionIntentCanonical = JSON.stringify({
+ capabilityId: intent.capabilityId, operation: intent.operation,
+ arguments: intent.arguments ?? {}, correlationId: intent.correlationId ?? "",
+ createdAtMs: intent.createdAtMs ?? null
+ });
+ const privacy = PRIVACY_CLASSES[privacyClass] ? privacyClass : "INTERNAL";
+ // ---- R2-02: canonical authority provenance FIRST (Authority -> Capability
+ // -> Router). The bridge performs a LIVE evaluation against the canonical
+ // store and mints the artifact from the BRANDED evaluation snapshot. ----
+ const artifact = await this.authorityBridge.authorize({
+ intent, capabilityId, toolId: tool, targetNodeId: this._localNodeId, ttlMs, subject
  });
  // ---- hard eligibility (never score-bypassable) ----
  const candidates = [];
@@ -179,9 +176,8 @@ class DistributedExecutionRouter {
  .sort((a, b) => b.score - a.score || (a.nodeId < b.nodeId ? -1 : 1));
  const winner = scored[0];
  // re-bind + re-verify the artifact to the WINNER node (defense in depth)
- const winnerArtifact = this.authorityBridge.authorize({
- evaluation, actionIntentId: intent.intentId, actionIntentCanonical,
- capabilityId, toolId: tool, targetNodeId: winner.nodeId, ttlMs
+ const winnerArtifact = await this.authorityBridge.authorize({
+ intent, capabilityId, toolId: tool, targetNodeId: winner.nodeId, ttlMs, subject
  });
  verifyAuthorityArtifact(winnerArtifact, { actionIntentCanonical, capabilityId, toolId: tool, targetNodeId: winner.nodeId, nowMs: this.nowMs() });
 

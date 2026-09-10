@@ -66,7 +66,7 @@ function createDistributedNodeRuntime({
     }));
     dexecRouter.advertise({ nodeId: identity.nodeId, profile, capabilities: caps });
     // D: recovery coordinator REQUIRES the frozen checkpoint verifier
-    const recovery = new dresil.DistributedRecoveryCoordinator({
+    const recovery = dresil.createDistributedRecoveryCoordinator({
         trust,
         checkpointVerifier: (cp, opts) => dstate.checkpoint.verifyCheckpoint(cp, opts)
     });

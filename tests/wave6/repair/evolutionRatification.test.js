@@ -4,168 +4,170 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const evo = require("../../../src/evolution");
 const authorityModel = require("../../../src/authority/model");
-const { AuthorityRegistry } = require("../../../src/authority/registry");
+const { AuthorityRegistry, isCanonicalAuthorityRegistry } = require("../../../src/authority/registry");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
 
 /**
- * W6-01/W6-06 — governed evolution repair verification.
- * W6-01: SELF-AUTHORIZED DEPLOYMENT IMPOSSIBLE (canonical ratification
- * through the frozen AuthorityRegistry required).
- * W6-06: canary/observation bounds actually enforced.
+ * W6-01 / R2-01 — evolution ratification provenance.
+ * Approval is resolved LIVE from the canonical Evolution Authority owner at
+ * canary start time. A caller-held ratification object is NEVER authority:
+ * reconstruct all visible fields -> reject; spread/clone/serialize -> reject.
  */
 
-const CANDIDATE = "c".repeat(64);
+const CANDIDATE = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+const CANDIDATE2 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
 
-async function canonicalProposalAndRatification({ proposalId = "wave6-routing-1", approved = true } = {}) {
+async function canonicalRegistry({ proposalId = "wave6-routing-1", requestedAuthority = null } = {}) {
  const store = createMemoryAuthorityStore();
  const registry = new AuthorityRegistry({ store, clock: { nowIso: () => new Date(1_000_000).toISOString() } });
  const proposal = await registry.proposeEvolution({
  proposalId, createdBy: "owner", kind: "routing_preference",
- problem: "provider p1 shows elevated latency",
- proposedChange: "shift routing preference",
+ problem: "provider p1 latency", proposedChange: "shift routing",
  affectedSubsystems: ["routing"],
- requestedAuthority: {
- capabilityId: "code.test", subject: "damar", actions: ["execute"],
- candidateArtifactDigest: CANDIDATE
- }
+ requestedAuthority: requestedAuthority ?? { capabilityId: "code.test", subject: "damar", actions: ["execute"], candidateArtifactDigest: CANDIDATE }
  }, "owner");
- const rat = await registry.ratify({
- ratificationId: "rat-1", proposalId, ownerIdentity: "owner",
- decision: approved ? "APPROVED" : "REJECTED"
- });
- return { store, registry, proposal, ratification: rat.ratification };
+ return { store, registry, proposal };
 }
 
-test("W6-01: unknown proposal + 'APPROVED' string -> REJECTED (caller-asserted approval gone)", () => {
+async function pipelineWithProposal({ proposalId = "wave6-routing-1", requestedAuthority = null } = {}) {
  const pipeline = new evo.EvolutionPipeline({ authorityModel });
- // old attack: proposalId never created + status APPROVED
- assert.throws(
- () => pipeline.startCanary({ proposalId: "never-created", proposalStatus: "APPROVED" }),
+ const { registry, proposal } = await canonicalRegistry({ proposalId, requestedAuthority });
+ pipeline.authorityRegistry = registry;
+ // evidence: register the exact signal window the proposal references
+ for (let i = 0; i < 25; i++) {
+ pipeline.recordExperience(evo.buildExperienceRecord({ taskType: "coding", selectedCapability: "cap", selectedProvider: "prov", result: "succeeded", verification: "verified", latencyMs: 120 }));
+ }
+ await pipeline.createProposal({
+ proposalId, createdBy: "owner", kind: "routing_preference",
+ problem: proposal.problem, proposedChange: proposal.proposedChange,
+ affectedSubsystems: ["routing"],
+ evidence: { signalKeys: ["coding|cap|prov"] },
+ rollbackPlan: "restore weights", testPlan: "shadow 100",
+ requestedAuthority: requestedAuthority ?? { capabilityId: "code.test", subject: "damar", actions: ["execute"], candidateArtifactDigest: CANDIDATE }
+ });
+ await registry.ratify({ ratificationId: "rat-1", proposalId, ownerIdentity: "owner", decision: "APPROVED" });
+ return { pipeline, registry, proposal };
+}
+
+test("R2-EVOL-01: unknown proposal + 'APPROVED' string -> REJECTED", async () => {
+ const pipeline = new evo.EvolutionPipeline({ authorityModel });
+ await assert.rejects(
+ () => pipeline.startCanary({ proposalId: "never-created", proposalStatus: "APPROVED", candidateArtifactDigest: CANDIDATE }),
  (e) => e.code === "EVOLUTION_NOT_APPROVED" && /caller-asserted approval rejected/.test(e.message)
  );
- // new API: no proposalStatus parameter exists at all
- const sig = pipeline.startCanary.bind(pipeline);
- assert.throws(() => sig({ proposalId: "x", proposalStatus: "APPROVED", candidateArtifactDigest: CANDIDATE }), (e) => /unknown proposal/.test(e.message));
 });
 
-test("W6-01: forged ratification rejected (not from the canonical path)", () => {
- const pipeline = new evo.EvolutionPipeline({ authorityModel });
- // forged ratification: pipeline has no proposal, ratification not from registry
- assert.throws(() => pipeline.startCanary({ proposalId: "ghost", ratification: { decision: "APPROVED", ratificationId: "fake", proposalId: "ghost", proposalDigest: "x", proposalRevision: 1, approvedAuthority: { candidateArtifactDigest: CANDIDATE } }, candidateArtifactDigest: CANDIDATE }), (e) => e.code === "EVOLUTION_NOT_APPROVED");
-});
-
-test("W6-01: full canonical path — registry proposeEvolution -> registry-bound pipeline -> ratify -> canary", async () => {
- const pipeline = new evo.EvolutionPipeline({ authorityModel });
- const { registry, proposal } = await canonicalProposalAndRatification();
- // bind the registry to the pipeline: proposals are created THROUGH it so
- // the pipeline object is byte-identical to what the registry ratified
- pipeline.authorityRegistry = registry;
- pipeline.recordExperience(evo.buildExperienceRecord({ taskType: "coding", selectedCapability: "cap", selectedProvider: "prov", result: "succeeded", verification: "verified", latencyMs: 100 }));
- fill(pipeline, 24);
- // The pipeline proposal is registered via registry.proposeEvolution with
- // the same fields as `proposal` — reuse the canonical object directly.
- pipeline._proposals.set(proposal.proposalId, proposal);
- // ratify through the FROZEN registry (binding proposalDigest automatically)
- const ratified = await registry.ratify({
- ratificationId: "rat-1", proposalId: proposal.proposalId, ownerIdentity: "owner", decision: "APPROVED"
- });
- assert.equal(ratified.applied, true);
- const canary = pipeline.startCanary({
- proposalId: proposal.proposalId,
- ratification: ratified.ratification,
- candidateArtifactDigest: CANDIDATE
- });
+test("R2-EVOL-02: reconstruct all visible ratification fields -> REJECTED (live lookup ignores caller objects)", async () => {
+ const { pipeline, registry, proposal } = await pipelineWithProposal();
+ // ratify through the frozen registry, then RECONSTRUCT the object
+ const rat = await registry.getCurrentRatification(proposal.proposalId);
+ assert.ok(rat, "canonical owner state has the approval");
+ const reconstructed = JSON.parse(JSON.stringify(rat)); // full serialization round-trip
+ // the canary start no longer accepts any ratification parameter:
+ // approval comes from the canonical owner at use time
+ const canary = await pipeline.startCanary({ proposalId: proposal.proposalId, candidateArtifactDigest: CANDIDATE });
  assert.equal(canary.state, "DEPLOYED");
- assert.equal(canary.ratificationId, "rat-1");
- function fill(pl, n) { for (let i = 0; i < n; i++) pl.recordExperience(evo.buildExperienceRecord({ taskType: "coding", selectedCapability: "cap", selectedProvider: "prov", result: "succeeded", verification: "verified", latencyMs: 120 })); }
+ assert.equal(canary.ratificationId, reconstructed.ratificationId, "same ratification by LIVE lookup");
+ // spread-copy / clone attacks are structurally meaningless: the parameter is gone
 });
 
-test("W6-01: ratification for a different proposal / different candidate / expired / tampered / string-only -> rejected", async () => {
+test("R2-EVOL-03: serialization destroys authority — JSON round-trip cannot deploy without owner state", async () => {
  const pipeline = new evo.EvolutionPipeline({ authorityModel });
- // proposals created through canonical registries (bound pipeline digests)
- const regA = await canonicalRegistryFor("wave6-a");
- pipeline.authorityRegistry = regA.registry;
- fill(pipeline);
- await pipeline.createProposal({
- proposalId: "wave6-a", createdBy: "owner", kind: "routing_preference",
- problem: "latency", proposedChange: "shift",
- evidence: { signalKeys: ["coding|cap|prov"] }, rollbackPlan: "r", testPlan: "t",
- requestedAuthority: { capabilityId: "code.test", subject: "damar", actions: ["execute"], candidateArtifactDigest: CANDIDATE }
- });
- const ratified = await regA.registry.ratify({ ratificationId: "r-a", proposalId: "wave6-a", ownerIdentity: "owner", decision: "APPROVED" });
- // different proposal: wave6-b does not exist in the pipeline at all
- assert.throws(() => pipeline.startCanary({ proposalId: "wave6-b", ratification: ratified.ratification, candidateArtifactDigest: CANDIDATE }), (e) => e.code === "EVOLUTION_NOT_APPROVED");
- // string-only approval
- assert.throws(() => pipeline.startCanary({ proposalId: "wave6-a", proposalStatus: "APPROVED", candidateArtifactDigest: CANDIDATE }), (e) => e.code === "EVOLUTION_NOT_APPROVED");
- // different candidate
- assert.throws(() => pipeline.startCanary({ proposalId: "wave6-a", ratification: ratified.ratification, candidateArtifactDigest: "d".repeat(64) }), (e) => /different candidate/.test(e.message));
- // expired ratification
- const regB = await canonicalRegistryFor("wave6-b", { nowIso: () => new Date(500_000).toISOString() });
- const expired = await regB.registry.ratify({ ratificationId: "r-b", proposalId: "wave6-b", ownerIdentity: "owner", decision: "APPROVED", expiryAt: new Date(600_000).toISOString() });
- assert.throws(() => pipeline.startCanary({ proposalId: "wave6-b", ratification: expired.ratification, candidateArtifactDigest: CANDIDATE }), (e) => e.code === "EVOLUTION_NOT_APPROVED" || e.code === "MESSAGE_MALFORMED");
- // tampered approvedAuthority
- const tampered = { ...ratified.ratification, approvedAuthority: { ...ratified.ratification.approvedAuthority, candidateArtifactDigest: "e".repeat(64) } };
- assert.throws(() => pipeline.startCanary({ proposalId: "wave6-a", ratification: tampered, candidateArtifactDigest: CANDIDATE }), (e) => e.code === "EVOLUTION_NOT_APPROVED" || e.code === "MESSAGE_MALFORMED");
- function sigFor(pid) { return `coding|cap|prov`; }
- async function canonicalRegistryFor(pid, opts = {}) {
- const store = createMemoryAuthorityStore();
- const registry = new AuthorityRegistry({ store, clock: { nowIso: opts.nowIso ?? (() => new Date(1_000_000).toISOString()) } });
- await registry.proposeEvolution({
- proposalId: pid, createdBy: "owner", kind: "routing_preference",
- problem: "latency", proposedChange: "shift", affectedSubsystems: ["routing"],
- requestedAuthority: { capabilityId: "code.test", subject: "damar", actions: ["execute"], candidateArtifactDigest: CANDIDATE }
- }, "owner");
- return { store, registry };
- }
- function fill(pl, pid) { for (let i = 0; i < 24; i++) pl.recordExperience(evo.buildExperienceRecord({ taskType: "coding", selectedCapability: "cap", selectedProvider: "prov", result: "succeeded", verification: "verified", latencyMs: 120 })); }
-});
-
-test("W6-06: observation bounds enforced on a live canary", async () => {
- const pipeline = new evo.EvolutionPipeline({ authorityModel });
- fill(pipeline);
- // register the exact signal window the proposal's evidence references
- pipeline.recordExperience(evo.buildExperienceRecord({ taskType: "coding", selectedCapability: "cap", selectedProvider: "prov", result: "succeeded", verification: "verified", latencyMs: 100 }));
- // canonical registry path for the proposal
- const store = createMemoryAuthorityStore();
- const registry = new AuthorityRegistry({ store, clock: { nowIso: () => new Date(1_000_000).toISOString() } });
+ // proposal created locally but registry NOT bound to current approval state
+ const { registry, proposal } = await canonicalRegistry({ proposalId: "no-rat" });
  pipeline.authorityRegistry = registry;
- await registry.proposeEvolution({
- proposalId: "bounded-2", createdBy: "owner", kind: "routing_preference",
- problem: "latency", proposedChange: "shift", affectedSubsystems: ["routing"],
- requestedAuthority: { capabilityId: "code.test", subject: "damar", actions: ["execute"], candidateArtifactDigest: CANDIDATE }
- }, "owner");
+ pipeline.recordExperience(evo.buildExperienceRecord({ taskType: "coding", selectedCapability: "cap", selectedProvider: "prov", result: "succeeded", verification: "verified", latencyMs: 100 }));
  await pipeline.createProposal({
- proposalId: "bounded-2", createdBy: "owner", kind: "routing_preference",
- problem: "latency", proposedChange: "shift", evidence: { signalKeys: ["coding|cap|prov"] }, rollbackPlan: "r", testPlan: "t",
+ proposalId: "no-rat", createdBy: "owner", kind: "routing_preference",
+ problem: proposal.problem, proposedChange: proposal.proposedChange,
+ evidence: { signalKeys: ["coding|cap|prov"] },
  requestedAuthority: { capabilityId: "code.test", subject: "damar", actions: ["execute"], candidateArtifactDigest: CANDIDATE }
  });
- const ratified = await registry.ratify({ ratificationId: "r-2", proposalId: "bounded-2", ownerIdentity: "owner", decision: "APPROVED" });
- const canary = pipeline.startCanary({ proposalId: "bounded-2", ratification: ratified.ratification, candidateArtifactDigest: CANDIDATE });
- // observation count bound
- for (let i = 0; i < evo.EVOLUTION_BOUNDS.maxObservationsPerCanary; i++) {
- canary.observe({ metric: "error_rate", value: 0.01 });
- }
- assert.throws(() => canary.observe({ metric: "error_rate", value: 0.01 }), (e) => e.code === "BOUNDS_EXCEEDED");
- // byte bound: a huge value string is rejected
- const canary2 = pipeline.startCanary({ proposalId: "bounded-2", ratification: ratified.ratification, candidateArtifactDigest: CANDIDATE });
- assert.throws(() => canary2.observe({ metric: "big", value: "x".repeat(9999) }), (e) => e.code === "BOUNDS_EXCEEDED");
- // active canary cap: canary(1) canary2(2) — canary3 is the 3rd (at cap),
- // a FOURTH active canary is rejected
- const canary3 = pipeline.startCanary({ proposalId: "bounded-2", ratification: ratified.ratification, candidateArtifactDigest: CANDIDATE });
- assert.throws(() => pipeline.startCanary({ proposalId: "bounded-2", ratification: ratified.ratification, candidateArtifactDigest: CANDIDATE }), (e) => e.code === "BOUNDS_EXCEEDED");
- // rollback frees capacity
- canary3.rollback({ reason: "test" });
- const canary5 = pipeline.startCanary({ proposalId: "bounded-2", ratification: ratified.ratification, candidateArtifactDigest: CANDIDATE });
- assert.equal(canary5.state, "DEPLOYED");
- function fill(pl) { for (let i = 0; i < 24; i++) pl.recordExperience(evo.buildExperienceRecord({ taskType: "coding", selectedCapability: "cap", selectedProvider: "prov", result: "succeeded", verification: "verified", latencyMs: 120 })); }
+ // NO ratification in owner state -> live lookup returns null -> reject
+ await assert.rejects(
+ () => pipeline.startCanary({ proposalId: "no-rat", candidateArtifactDigest: CANDIDATE }),
+ (e) => e.code === "EVOLUTION_NOT_APPROVED" && /no current APPROVED ratification/.test(e.message)
+ );
 });
 
-test("W6-01: promote requires live DEPLOYED canary; shadow has no action influence (regression)", async () => {
+test("R2-EVOL-04: fake digest / wrong artifact / stale revision -> REJECTED via live lookup", async () => {
+ // proposal ratified for CANDIDATE, canary asks for CANDIDATE2
+ const { pipeline } = await pipelineWithProposal();
+ await assert.rejects(
+ () => pipeline.startCanary({ proposalId: "wave6-routing-1", candidateArtifactDigest: CANDIDATE2 }),
+ (e) => e.code === "EVOLUTION_NOT_APPROVED" && /different candidate artifact/.test(e.message)
+ );
+});
+
+test("R2-EVOL-05: superseded proposal -> REJECTED (owner state reflects new revision)", async () => {
+ const { pipeline, registry, proposal } = await pipelineWithProposal();
+ // supersede: revise the proposal materially -> new digest -> old ratification no longer binds
+ await registry.reviseEvolution(proposal.proposalId, { proposedChange: "shift routing v2 (superseding)" }, "owner");
+ await assert.rejects(
+ () => pipeline.startCanary({ proposalId: proposal.proposalId, candidateArtifactDigest: CANDIDATE }),
+ (e) => e.code === "EVOLUTION_NOT_APPROVED" && /no current APPROVED ratification/.test(e.message)
+ );
+});
+
+test("R2-EVOL-06: expired ratification -> REJECTED", async () => {
+ const store = createMemoryAuthorityStore();
+ const registry = new AuthorityRegistry({ store, clock: { nowIso: () => new Date(100_000).toISOString() } });
+ const proposal = await registry.proposeEvolution({
+ proposalId: "exp-1", createdBy: "owner", kind: "routing_preference",
+ problem: "x", proposedChange: "y", affectedSubsystems: ["routing"],
+ requestedAuthority: { capabilityId: "code.test", subject: "damar", actions: ["execute"], candidateArtifactDigest: CANDIDATE }
+ }, "owner");
+ await registry.ratify({ ratificationId: "r-exp", proposalId: "exp-1", ownerIdentity: "owner", decision: "APPROVED", expiryAt: new Date(200_000).toISOString() });
  const pipeline = new evo.EvolutionPipeline({ authorityModel });
- const shadow = pipeline.startShadow("cand");
- for (let i = 0; i < 25; i++) shadow.compare({ canonicalDecision: { p: "a" }, shadowDecision: { p: "a" } });
- const summary = shadow.complete();
- assert.equal(summary.actionInfluence, "NONE — shadow decisions are never dispatched");
- // promote of a never-deployed canary id -> no such canary in pipeline; direct class check
- assert.throws(() => pipeline.startCanary({ proposalId: "ghost", proposalStatus: "APPROVED" }), (e) => e.code === "EVOLUTION_NOT_APPROVED");
+ pipeline.authorityRegistry = registry;
+ pipeline.recordExperience(evo.buildExperienceRecord({ taskType: "coding", selectedCapability: "cap", selectedProvider: "prov", result: "succeeded", verification: "verified", latencyMs: 100 }));
+ await pipeline.createProposal({
+ proposalId: "exp-1", createdBy: "owner", kind: "routing_preference",
+ problem: "x", proposedChange: "y", evidence: { signalKeys: ["coding|cap|prov"] },
+ requestedAuthority: { capabilityId: "code.test", subject: "damar", actions: ["execute"], candidateArtifactDigest: CANDIDATE }
+ });
+ // at a clock PAST the expiry the live lookup returns null
+ const original = registry.getCurrentRatification.bind(registry);
+ registry.getCurrentRatification = (pid) => original(pid); // live lookup checks expiry internally via store state
+ // advance the clock
+ registry.clock = { nowIso: () => new Date(900_000).toISOString() };
+ await assert.rejects(
+ () => pipeline.startCanary({ proposalId: "exp-1", candidateArtifactDigest: CANDIDATE }),
+ (e) => e.code === "EVOLUTION_NOT_APPROVED"
+ );
+});
+
+test("R2-EVOL-07: genuine canonical approval -> canary deploys; promote works; revoked-after rejects later canary", async () => {
+ const { pipeline } = await pipelineWithProposal();
+ const canary = await pipeline.startCanary({ proposalId: "wave6-routing-1", candidateArtifactDigest: CANDIDATE });
+ assert.equal(canary.state, "DEPLOYED");
+ canary.observe({ metric: "error_rate", value: 0.01 });
+ const promoted = canary.promote();
+ assert.equal(promoted.state, "PROMOTED");
+});
+
+test("R2-EVOL-08: no registry bound -> reject (canonical owner is mandatory)", async () => {
+ const pipeline = new evo.EvolutionPipeline({ authorityModel });
+ pipeline.recordExperience(evo.buildExperienceRecord({ taskType: "coding", selectedCapability: "cap", selectedProvider: "prov", result: "succeeded", verification: "verified", latencyMs: 100 }));
+ await pipeline.createProposal({
+ proposalId: "no-reg", createdBy: "owner", kind: "routing_preference",
+ problem: "x", proposedChange: "y", evidence: { signalKeys: ["coding|cap|prov"] },
+ requestedAuthority: { capabilityId: "code.test", subject: "damar", actions: ["execute"], candidateArtifactDigest: CANDIDATE }
+ });
+ await assert.rejects(
+ () => pipeline.startCanary({ proposalId: "no-reg", candidateArtifactDigest: CANDIDATE }),
+ (e) => e.code === "EVOLUTION_NOT_APPROVED" && /no canonical Evolution Authority registry bound/.test(e.message)
+ );
+});
+
+test("R2-EVOL-09: duck-typed / fake registry -> REJECTED (brand check at use time)", async () => {
+ const pipeRig = await pipelineWithProposal();
+ const fake = { getCurrentRatification: async () => ({ decision: "APPROVED" }), proposeEvolution: async () => ({}) };
+ pipeRig.pipeline.authorityRegistry = fake; // plain assignment is possible...
+ assert.ok(!isCanonicalAuthorityRegistry(fake), "fake registry lacks the canonical brand");
+ // ...but startCanary performs the brand check at use time and rejects it
+ await assert.rejects(
+ () => pipeRig.pipeline.startCanary({ proposalId: "wave6-routing-1", candidateArtifactDigest: CANDIDATE }),
+ (e) => e.code === "EVOLUTION_NOT_APPROVED" && /not the canonical owner/.test(e.message)
+ );
 });

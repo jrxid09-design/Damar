@@ -252,6 +252,12 @@ function createMemoryAuthorityStore() {
         },
 
         async upsertProposal(p) { proposals.set(p.proposalId, p); },
+        async findRatificationByProposal(pid) {
+            for (const r of ratifications.values()) {
+                if (r.proposalId === pid) return JSON.parse(JSON.stringify(r));
+            }
+            return null;
+        },
         async getProposal(pid) { return proposals.get(pid) ?? null; },
 
         async getDelegationReservations(parentCapabilityId) {
@@ -670,6 +676,16 @@ function createSqliteAuthorityStore(database) {
             const payload = JSON.parse(r.payload);
             return { ...payload, proposalDigest: r.proposalDigest,
                      decision: r.decision };
+        },
+        async findRatificationByProposal(pid) {
+            const r = await database.get(
+                `SELECT ratification_id, proposal_digest AS proposalDigest, decision, payload
+                   FROM owner_ratifications WHERE proposal_id=? AND decision='APPROVED'
+                  ORDER BY rowid DESC LIMIT 1`, [pid]);
+            if (!r) return null;
+            const payload = JSON.parse(r.payload);
+            return { ...payload, ratificationId: r.ratification_id,
+                     proposalDigest: r.proposalDigest, decision: r.decision };
         },
 
         async upsertProposal(p) {

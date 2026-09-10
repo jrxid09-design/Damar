@@ -42,12 +42,25 @@ const EPISODE_DEFAULTS = Object.freeze({
     checkpointTtlMs: 24 * 3600 * 1000
 });
 
+/**
+ * W6-R2-04 REPAIR: `createDistributedRecoveryCoordinator` is the ONLY
+ * production construction path. It CLOSES OVER the canonical frozen
+ * checkpoint verifier (dstate.checkpoint.verifyCheckpoint) — the verifier
+ * is NOT an injectable parameter, so a caller can never substitute
+ * `() => true`. There is no constructor export.
+ */
+function createDistributedRecoveryCoordinator({ trust, config = {}, nowMs = () => Date.now() } = {}) {
+ if (!trust) throw new TypeError("coordinator requires trust plane");
+ // canonical frozen checkpoint verifier — bound by closure, not injection
+ const canonicalVerifier = (checkpoint, opts = {}) => require("../dstate/checkpoint").verifyCheckpoint(checkpoint, opts);
+ return new DistributedRecoveryCoordinator({ trust, checkpointVerifier: canonicalVerifier, config, nowMs });
+}
+
 class DistributedRecoveryCoordinator {
  /**
- * W6-05 REPAIR: `checkpointVerifier` is MANDATORY. Construction without a
- * canonical verifier (the frozen L2 checkpoint verifier or a composition
- * that includes it) fails CLOSED — there is no default path that can reach
- * CHECKPOINT_TRANSFERRED without verification.
+ * W6-R2-04: construction is via createDistributedRecoveryCoordinator only
+ * (the class is not exported). `checkpointVerifier` is closure-bound to the
+ * canonical frozen verifier — no injectable callback exists.
  * Episodes bind: episodeId + generation + source + destination + checkpoint
  * digest; payloads carry a one-use recovery nonce.
  */
@@ -297,4 +310,4 @@ class DistributedRecoveryCoordinator {
     }
 }
 
-module.exports = Object.freeze({ DistributedRecoveryCoordinator, EPISODE_STATES, EPISODE_TRANSITIONS, EPISODE_DEFAULTS });
+module.exports = Object.freeze({ createDistributedRecoveryCoordinator, EPISODE_STATES, EPISODE_TRANSITIONS, EPISODE_DEFAULTS });

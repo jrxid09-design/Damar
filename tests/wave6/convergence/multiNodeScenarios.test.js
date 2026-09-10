@@ -58,7 +58,7 @@ function buildNodeStack({ label, profile }) {
  SWITCH.set(identity.nodeId, (frame, peerLabel) => router.ingest({ frame, transportPeer: peerLabel }));
  return {
  label, identity, registry, trust, router, presence, peer, auditRecords, audit,
- recovery: new dresil.DistributedRecoveryCoordinator({
+ recovery: dresil.createDistributedRecoveryCoordinator({
  trust, checkpointVerifier: (cp, opts) => dstate.checkpoint.verifyCheckpoint(cp, opts)
  }),
  circuits: new dresil.CircuitBreakers(),

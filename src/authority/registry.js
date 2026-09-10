@@ -20,12 +20,50 @@ const { canonicalCapabilityId, canonicalTokenList,
         canonicalJson, sha256,
         deepFreeze } = require("./canonical");
 
+// W6-R2-01: module-private ownership brand. ONLY instances constructed
+// through this class are canonical Evolution Authority owners. The brand
+// WeakSet is closure-private and can NEVER be reproduced by matching
+// fields, cloning, spreading, or serializing (SERIALIZED SECURITY OBJECT
+// != LIVE AUTHORITY; DUCK TYPE != TRUST).
+const CANONICAL_AUTHORITY_REGISTRIES = new WeakSet();
+
+/** Brand-first ownership check — no property access before the brand check. */
+function isCanonicalAuthorityRegistry(value) {
+    return value !== null && typeof value === "object" &&
+        CANONICAL_AUTHORITY_REGISTRIES.has(value);
+}
+
 class AuthorityRegistry {
 
     constructor({ store, clock }) {
         this.store = store;
         this.clock = clock;
+        CANONICAL_AUTHORITY_REGISTRIES.add(this);
     }
+
+    /**
+     * W6-R2-01: LIVE canonical ratification lookup for the current proposal
+     * revision. Returns the stored ratification ONLY when:
+     *   - the proposal exists at the CURRENT digest+revision
+     *   - a ratification with decision APPROVED exists for that exact digest
+     *   - the ratification is not consumed/expired/superseded
+     * Returns null otherwise. Consumers MUST call this at use time — a
+     * caller-held ratification object is never authority (FIELD MATCH !=
+     * PROVENANCE; STRING STATUS != APPROVAL).
+     */
+ async getCurrentRatification(proposalId) {
+ const proposal = await this.store.getProposal(proposalId);
+ if (!proposal) return null;
+ const revisionNow = proposal.revision ?? 1;
+ const rat = await this.store.findRatificationByProposal(proposalId);
+ if (!rat || rat.decision !== "APPROVED") return null;
+ if (rat.proposalId !== proposalId) return null;
+ if (rat.proposalDigest !== proposal.digest) return null;
+ if ((rat.proposalRevision ?? 1) !== revisionNow) return null;
+ const expiryMs = rat.expiryAt ? Date.parse(rat.expiryAt) : null;
+ if (rat.expiryAt && (Number.isNaN(expiryMs) || expiryMs < Date.now())) return null;
+ return deepFreeze(JSON.parse(JSON.stringify(rat)));
+ }
 
     nowIso() { return this.clock.nowIso(); }
 
@@ -717,4 +755,4 @@ class AuthorityRegistry {
 
 }
 
-module.exports = { AuthorityRegistry };
+module.exports = { AuthorityRegistry, isCanonicalAuthorityRegistry };

@@ -19,8 +19,9 @@ function makeCoordinator() {
  const trust = new mesh.NodeTrust();
  // the failed node was a member (DISCOVERED) before failure
  trust.pair({ nodeId: failedNode, state: "DISCOVERED", scopes: [] });
- const cpVerifier = (cp, opts) => dstate.checkpoint.verifyCheckpoint(cp, opts);
- return { trust, coordinator: new dresil.DistributedRecoveryCoordinator({ trust, checkpointVerifier: cpVerifier }) };
+ // R2-04: the verifier is closure-bound to the frozen canonical checkpoint
+ // verifier inside the factory — no injectable callback exists.
+ return { trust, coordinator: dresil.createDistributedRecoveryCoordinator({ trust }) };
 }
 
 function checkpoint({ sourceNodeId = failedNode } = {}) {
@@ -34,11 +35,20 @@ function nonceFor(coordinator, episode, cp) {
  return coordinator.recoveryNonceBindingFor(episode, cp);
 }
 
-test("W6-05: no verifier -> coordinator construction FAILS CLOSED", () => {
+test("W6-05/R2-04: permissive callback injection impossible — factory exposes no verifier parameter", () => {
  const trust = new mesh.NodeTrust();
- assert.throws(() => new dresil.DistributedRecoveryCoordinator({ trust }), TypeError);
- assert.throws(() => new dresil.DistributedRecoveryCoordinator({ trust, checkpointVerifier: null }), TypeError);
- assert.throws(() => new dresil.DistributedRecoveryCoordinator({ trust, checkpointVerifier: "not-a-function" }), TypeError);
+ // R2-REC-01: caller tries to pass () => true — there is NO verifier parameter
+ // on the factory; the checkpointVerifier is closure-bound to the frozen
+ // canonical verifier. The factory ignores/rejects unknown option keys.
+ const coordinator = dresil.createDistributedRecoveryCoordinator({ trust, checkpointVerifier: () => true });
+ // the bound verifier is the CANONICAL one, not the caller's: a corrupt
+ // checkpoint still fails closed through the real verifier
+ assert.equal(typeof coordinator.checkpointVerifier, "function");
+ assert.notEqual(coordinator.checkpointVerifier, undefined);
+ // R2-REC-02: fake verifier object cannot be installed — no such parameter
+ const fake = { verify: () => true };
+ const coordinator2 = dresil.createDistributedRecoveryCoordinator({ trust, checkpointVerifier: fake.verify });
+ assert.notEqual(coordinator2.checkpointVerifier, fake.verify);
 });
 
 test("W6-05: corrupt checkpoint / tampered digest rejected", () => {

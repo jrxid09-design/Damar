@@ -25,7 +25,7 @@ function rig() {
  // a node with NO trust record at all cannot have produced a real checkpoint
  trust.pair({ nodeId: failedNode, state: "DISCOVERED", scopes: [] });
  const cpVerifier = (cp, opts) => dstate.checkpoint.verifyCheckpoint(cp, opts);
- const coordinator = new dresil.DistributedRecoveryCoordinator({ trust, checkpointVerifier: cpVerifier });
+ const coordinator = dresil.createDistributedRecoveryCoordinator({ trust, checkpointVerifier: cpVerifier });
  const circuits = new dresil.CircuitBreakers();
  const policy = new dresil.ReplicationPolicy();
  return { trust, registry, coordinator, circuits, policy };

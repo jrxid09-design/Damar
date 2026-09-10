@@ -25,6 +25,7 @@
 
 const crypto = require("node:crypto");
 const { meshFailure, MESH_ERRORS } = require("../mesh/errors");
+const { isCanonicalAuthorityRegistry } = require("../authority/registry");
 const { sha256Hex } = require("../mesh/canonical");
 
 const SHADOW_STATES = Object.freeze(["RUNNING", "COMPLETED", "ABORTED"].reduce((m, s) => (m[s] = s, m), {}));
@@ -367,19 +368,46 @@ class EvolutionPipeline {
     }
 
     /**
-     * W6-01 REPAIR: canary requires a CANONICAL RATIFICATION bound to a
-     * proposal that EXISTS in this pipeline. `proposalStatus: "APPROVED"` is
-     * structurally gone — there is no caller-asserted approval parameter.
-     * The ratification must be the frozen-authority object and must bind the
-     * candidate artifact digest.
+     * W6-01 / R2-01 REPAIR: canary requires LIVE canonical approval.
+     *
+     * No caller-supplied ratification object is accepted — ALL visible
+     * ratification fields/digests are reconstructable (R2-01: reconstruct
+     * all visible fields -> reject). Approval is resolved from the bound
+     * canonical Evolution Authority registry at USE TIME via
+     * `getCurrentRatification(proposalId)`, which re-checks:
+     *   proposal exists, digest+revision current, APPROVED decision,
+     *   not expired, not superseded/consumed, bound to the requested
+     *   candidate artifact digest.
+     *
+     * SERIALIZED SECURITY OBJECT != LIVE AUTHORITY; FIELD MATCH != PROVENANCE.
      */
-    startCanary({ proposalId, ratification, candidateArtifactDigest, scope = {}, ttlMs = null }) {
-        const proposal = this._proposals.get(String(proposalId ?? "").slice(0, 128));
+    async startCanary({ proposalId, candidateArtifactDigest, scope = {}, ttlMs = null }) {
+        const key = String(proposalId ?? "").slice(0, 128);
+        const proposal = this._proposals.get(key);
         if (!proposal) {
-            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, `unknown proposal '${String(proposalId ?? "").slice(0, 64)}' — caller-asserted approval rejected`);
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, `unknown proposal '${key.slice(0, 64)}' — caller-asserted approval rejected`);
+        }
+        if (!this.authorityRegistry || typeof this.authorityRegistry.getCurrentRatification !== "function") {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, "no canonical Evolution Authority registry bound — canary approval cannot be resolved from canonical owner state");
+        }
+        if (!isCanonicalAuthorityRegistry(this.authorityRegistry)) {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, "bound authority registry is not the canonical owner (duck-typed/bridged object rejected)");
+        }
+        // LIVE canonical lookup — at use time, from owner state
+        const currentRat = await this.authorityRegistry.getCurrentRatification(key);
+        if (!currentRat) {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, `no current APPROVED ratification for proposal '${key.slice(0, 64)}' in canonical owner state (stale/revoked/superseded/expired/never-ratified)`);
+        }
+        // candidate binding verified against the LIVE owner record
+        const candidateDigest = String(candidateArtifactDigest ?? "").slice(0, 64);
+        const ratifiedCandidate = currentRat.approvedAuthority?.candidateArtifactDigest
+            ?? currentRat.approvedAuthority?.candidateDigest ?? null;
+        if (!ratifiedCandidate || ratifiedCandidate !== candidateDigest) {
+            throw meshFailure(MESH_ERRORS.EVOLUTION_NOT_APPROVED, "canonical ratification is bound to a different candidate artifact");
         }
         const canary = new CanaryDeployment({
-            proposalId, proposal, ratification, candidateArtifactDigest,
+            proposalId: key, proposal,
+            ratification: currentRat, candidateArtifactDigest: candidateDigest,
             scope, ttlMs, nowMs: this.nowMs,
             activeCanaryCount: [...this._canaries.values()].filter(c => c.state === "DEPLOYED").length,
             maxActiveCanaries: EVOLUTION_BOUNDS.maxActiveCanaries

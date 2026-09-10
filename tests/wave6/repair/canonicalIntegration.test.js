@@ -99,7 +99,7 @@ test("W6-07 C: capability advertisement references canonical capability ids; ava
 
 test("W6-07 D: recovery REQUIRES the frozen checkpoint verifier (construction fail-closed)", () => {
  const trust = new mesh.NodeTrust();
- assert.throws(() => new dresil.DistributedRecoveryCoordinator({ trust }), TypeError);
+ assert.throws(() => dresil.createDistributedRecoveryCoordinator({ trust }), TypeError);
  const ok = createDistributedNodeRuntime({ logicalDamarId: ids.mint.logicalDamarId(), capabilityIds: [] });
  assert.equal(typeof ok.recovery.checkpointVerifier, "function");
 });
