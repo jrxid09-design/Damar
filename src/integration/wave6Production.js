@@ -106,29 +106,148 @@ function createDistributedNodeRuntime({
 }
 
 /**
- * F (W6-R2-05 REPAIR): REAL sandbox via child process + Node permission
- * model. The external tool runs in a spawned Node child with:
- *   --permission (permission system ON Ã¢â‚¬â€ default DENY)
- *   --allow-fs-read only for sandbox-declared roots + tool artifact + node_modules
- *   --allow-fs-write only for tool-declared write roots
- *   NO --allow-child-process (process spawn denied at V8 level)
- *   NO --allow-worker (worker threads denied)
- *   scrubbed environment (only explicit scoped secrets/material Ã¢â‚¬â€ never
- *   the full parent env)
- *   runtime timeout (process killed)
- *   output capped
- * Network is NOT enforceable by the Node permission model (documented
- * limitation); network-declaring tools FAIL CLOSED at admission unless the
- * deployment explicitly accepts non-enforced network and documents it.
+ * F (W6-R3-02/03 REPAIR): REAL sandbox via Windows AppContainer.
+ *
+ * The untrusted external tool runs inside a spawned Node child placed in a
+ * Windows AppContainer with ZERO package capabilities and LOW integrity.
+ * Raw TCP/UDP/DNS (loopback 127.0.0.1/localhost/::1, LAN, public, DNS) is
+ * DENIED BY THE WINDOWS KERNEL (WFP AppContainer enforcement) — independently
+ * proven: a process in this AppContainer cannot connect to 127.0.0.1,
+ * localhost, ::1, a LAN address, a public IP, or resolve DNS. Node's
+ * --permission has NO network enforcement (proven) and is NOT used as the
+ * isolation boundary here.
+ *
+ * The child's module surface is additionally narrowed by the sandbox shim
+ * (vm require= node: builtins + curated core allowlist only; ambient env
+ * scrubbed before tool code). Filesystem/process are denied by AppContainer;
+ * only directories explicitly ACL'd by the host are readable.
+ *
+ * launchSandboxedTool is NOT returned on the executor surface (R3-03). The
+ * ONLY production external-tool entry point is execute({ claimId, ... }) via
+ * the canonical governed claim.
  */
-const { spawn } = require("node:child_process");
+const { APPCONTAINER_NAME, HOST_EXE: SANDBOX_HOST_EXE } = require("../federation/appContainerSandbox");
+const { SHIM_SOURCE } = require("../federation/sandboxShim");
+const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
+const crypto = require("node:crypto");
+const { spawn } = require("node:child_process");
 
 const SANDBOX_DEFAULTS = Object.freeze({
     timeoutMs: 30_000,
-    maxOutputBytes: 256 * 1024,
-    nodeExecutable: process.execPath
+    maxOutputBytes: 256 * 1024
 });
+
+// ---- private AppContainer launch primitive (R3-03: closure-private) ----
+function stageIntoPackage({ nodeExecutable, toolArtifactPath, runName }) {
+    const root = path.join(os.homedir(), "AppData", "Local", "Packages", APPCONTAINER_NAME);
+    if (!fs.existsSync(root)) {
+        throw meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
+            "AppContainer package folder missing — sandbox host unavailable (R3-02 fail-closed)");
+    }
+    const dir = path.join(root, "run-" + runName);
+    fs.mkdirSync(dir, { recursive: true });
+    const stagedNode = path.join(dir, "node.exe");
+    fs.copyFileSync(nodeExecutable, stagedNode);
+    const stagedTool = path.join(dir, path.basename(String(toolArtifactPath)) || "tool.js");
+    fs.copyFileSync(toolArtifactPath, stagedTool);
+    return { dir, stagedNode, stagedTool };
+}
+
+function launchAppContainerTool({
+    toolArtifactPath,
+    toolArgs = {},
+    envMaterial = {},
+    nodeExecutable = process.execPath,
+    timeoutMs = 30_000,
+    runName = crypto.randomBytes(8).toString("hex")
+} = {}) {
+    return new Promise((resolve, reject) => {
+        if (process.platform !== "win32") {
+            return reject(meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
+                "AppContainer sandbox requires Windows (R3-02)"));
+        }
+        if (!fs.existsSync(SANDBOX_HOST_EXE)) {
+            return reject(meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
+                "native/sandbox-host/sandbox-host.exe missing — governed external execution fails closed (R3-03)"));
+        }
+        let staged;
+        try {
+            staged = stageIntoPackage({ nodeExecutable, toolArtifactPath, runName });
+        } catch (e) {
+            return reject(e instanceof Error && e.code ? e : meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
+                "failed to stage sandbox payload: " + String(e.message).slice(0, 160)));
+        }
+        const outFile = path.join(staged.dir, "out.json");
+        const argsJson = JSON.stringify(toolArgs ?? {});
+        const envJson = JSON.stringify(envMaterial ?? {});
+        const hostArgs = [
+            "--app-container", APPCONTAINER_NAME,
+            "--node", staged.stagedNode,
+            "--entry", "__eval__",
+            "--cwd", staged.dir,
+            "--read", staged.dir,
+            "--write", staged.dir,
+            "--timeout-ms", String(Math.floor(Number(timeoutMs) || 30000)),
+            "--",
+            SHIM_SOURCE,
+            staged.stagedTool,
+            outFile,
+            argsJson,
+            envJson
+        ];
+        const child = spawn(SANDBOX_HOST_EXE, hostArgs, {
+            stdio: ["ignore", "pipe", "pipe"],
+            windowsHide: true
+        });
+        let stderrChunk = "";
+        let killed = false;
+        child.stderr.on("data", d => {
+            stderrChunk += d.toString();
+            if (Buffer.byteLength(stderrChunk, "utf8") > 64 * 1024) { killed = true; child.kill("SIGKILL"); }
+        });
+        child.on("error", err => {
+            if (killed) return;
+            reject(meshFailure(MESH_ERRORS.SANDBOX_VIOLATION, "sandbox-host spawn failed: " + String(err.message).slice(0, 140)));
+        });
+        child.on("close", code => {
+            if (killed) return reject(meshFailure(MESH_ERRORS.BOUNDS_EXCEEDED, "sandbox output exceeded cap"));
+            if (code === 124) return reject(meshFailure(MESH_ERRORS.MESSAGE_EXPIRED, `sandbox timeout (${timeoutMs}ms)`));
+            let raw;
+            try {
+                raw = fs.readFileSync(outFile, "utf8");
+            } catch {
+                const tail = stderrChunk.slice(-200).trim();
+                return reject(meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
+                    `sandbox produced no result (host code=${code}) ${tail}`));
+            }
+            if (Buffer.byteLength(raw, "utf8") > 256 * 1024) {
+                return reject(meshFailure(MESH_ERRORS.BOUNDS_EXCEEDED, "sandbox result exceeds output cap"));
+            }
+            let parsed;
+            try {
+                parsed = JSON.parse(raw);
+            } catch {
+                return reject(meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "sandbox produced non-JSON result"));
+            }
+            if (parsed && parsed.ok === true) {
+                return resolve(Object.freeze({
+                    ok: true,
+                    output: parsed.output ?? null,
+                    sandboxPid: Number(parsed.pid) || 0,
+                    mechanism: "AppContainer",
+                    sandboxId: APPCONTAINER_NAME
+                }));
+            }
+            if (parsed && String(parsed.error).indexOf("OUTPUT_EXCEEDS_CAP") >= 0) {
+                return reject(meshFailure(MESH_ERRORS.BOUNDS_EXCEEDED, "sandbox result exceeds output cap"));
+            }
+            return reject(meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
+                `sandbox error: ${String((parsed && parsed.error) || "unknown").slice(0, 300)}`));
+        });
+    });
+}
 
 function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandboxRoots = {}, executionRouter = null }) {
     if (!federation || typeof federation.isToolEnabled !== "function") throw new TypeError("federation required");
@@ -162,88 +281,24 @@ function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandbox
         return violations;
     }
 
-    /**
-     * REAL sandbox launch: the tool runs in a spawned Node child with the
-     * Node permission model enforcing default-deny fs/child-process/worker.
-     * Environment is scrubbed (only explicit scoped material). Timeout kills.
-     * Output capped. Tool mutation after validation -> re-quarantined.
-     */
-    function launchSandboxedTool({ toolModulePath, toolArgs, fsReadAllowlist, fsWriteAllowlist, timeoutMs = null, envMaterial = {} }) {
-        return new Promise((resolve, reject) => {
-            const resolved = path.resolve(toolModulePath);
-            const readAllow = ["node_modules", resolved, ...(fsReadAllowlist ?? [])].map(p => path.resolve(p));
-            const writeAllow = (fsWriteAllowlist ?? []).map(p => path.resolve(p));
-            // build permission flags Ã¢â‚¬â€ NO --allow-child-process, NO --allow-worker
-            const permissionFlags = ["--permission", "--no-warnings"];
-            for (const p of readAllow) permissionFlags.push(`--allow-fs-read=${p}`);
-            for (const p of writeAllow) permissionFlags.push(`--allow-fs-write=${p}`);
-            // scrubbed environment: NEVER inherit the parent env
-            const sandboxEnv = {
-                NODE_ENV: "sandbox",
-                DAMAR_SANDBOX: "1",
-                SANDBOX_TOOL_ARGS: JSON.stringify(toolArgs ?? {}),
-                SANDBOX_TOOL_MODULE: resolved,
-                ...envMaterial // explicit scoped material ONLY
-            };
-            const entryScript = path.resolve(__dirname, "..", "federation", "sandboxEntry.js");
-            const child = spawn(config.nodeExecutable, [...permissionFlags, entryScript], {
-                cwd: sandboxRoots.workspace ?? process.cwd(),
-                env: sandboxEnv,
-                stdio: ["ignore", "pipe", "pipe"],
-                timeout: timeoutMs ?? config.timeoutMs,
-                killSignal: "SIGKILL",
-                windowsHide: true
-            });
-            let stdout = "", stderr = "";
-            let killed = false;
-            const totalBytes = () => Buffer.byteLength(stdout, "utf8") + Buffer.byteLength(stderr, "utf8");
-            child.stdout.on("data", d => {
-                stdout += d.toString();
-                if (totalBytes() > config.maxOutputBytes) { killed = true; child.kill("SIGKILL"); reject(meshFailure(MESH_ERRORS.BOUNDS_EXCEEDED, "sandbox output exceeded cap")); }
-            });
-            child.stderr.on("data", d => { stderr += d.toString(); });
-            child.on("error", err => reject(meshFailure(MESH_ERRORS.SANDBOX_VIOLATION, `sandbox spawn failed: ${String(err.message).slice(0, 120)}`)));
-            child.on("close", (code, signal) => {
-                if (killed) return; // already rejected
-                // non-zero exit with stderr: the tool failed inside the sandbox
-                // (permission denial, module error, invariant violation)
-                if (typeof code === "number" && code !== 0) {
-                    const reason = stderr.slice(0, 300);
-                    return reject(meshFailure(MESH_ERRORS.SANDBOX_VIOLATION, `sandbox exited code=${code}: ${reason}`));
-                }
-                // W6-R2-05: timeout kill — on Windows, spawn's built-in timeout
-                // kills with TerminateProcess and close fires code=0/signal=null
-                // with empty stdout; treat empty stdout as timeout/empty-output
-                if (signal === "SIGKILL" || !stdout.trim()) {
-                    return reject(meshFailure(MESH_ERRORS.MESSAGE_EXPIRED, `sandbox timeout or empty output (signal=${signal}, code=${code})`));
-                }
-                try {
-                    const parsed = JSON.parse(stdout);
-                    // unwrap the sandbox entry wrapper — return the tool's output directly
-                    resolve(Object.freeze({ ok: true, output: parsed.output ?? null, sandboxPid: child.pid }));
-                } catch {
-                    reject(meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "sandbox produced non-JSON output"));
-                }
-            });
-        });
-    }
-
     return Object.freeze({
         id: "governed-external-executor",
         checkSandboxViolations,
-        launchSandboxedTool,
         /**
-         * R2-07: execute a governed external tool.
+         * R3-03: NO public launchSandboxedTool. The ONLY production
+         * external-tool entry point is execute({ claimId, ... }) through the
+         * canonical governed claim. The private AppContainer launch primitive
+         * is not exported and is not reachable through any public surface.
          *
-         * NO caller-shaped authority exists in this API: the caller can ONLY
-         * present a `claimId` produced by the canonical router
-         * (`claimGovernedExecution`). The router resolves authority via LIVE
-         * canonical evaluation and consumes the one-use lease/claim at this
-         * boundary; the executor receives the BOUND facts from the claim.
+         * R2-07/R3-05: execute a governed external tool.
          *
-         * `toolArtifactPath`, `candidateId`, `toolName`, `args` and sandbox
-         * needs are validated against the claim — swapping any of them after
-         * authorization fails closed.
+         * NO caller-shaped authority / sandbox launcher / toolFn exists in
+         * this API: the caller can ONLY present a `claimId` produced by the
+         * canonical router (`claimGovernedExecution`). The router resolves
+         * authority via LIVE canonical evaluation and consumes the one-use
+         * lease/claim at this boundary; the executor receives the BOUND facts
+         * from the claim. The tool code is loaded by the AppContainer sandbox
+         * from the claim-bound artifact path (not by this process).
          */
         async execute({ claimId, args = {}, envMaterial = {} } = {}) {
             // 1. the claim is the ONLY authority entry point
@@ -266,21 +321,28 @@ function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandbox
                 needsNetwork: [], needsFilesystem: [], needsProcessSpawn: false, needsSecrets: false
             };
             const violations = checkSandboxViolations(sandboxNeeds);
-            // R2-05: network is NOT enforceable by the Node permission model —
-            // fail CLOSED for untrusted tools that declare network needs
-            if (sandboxNeeds.needsNetwork.length > 0 && sandboxPolicy.networkEnforcement !== "NON_ENFORCED_ACCEPTED") {
-                violations.push("network need declared but network egress is not enforceable in this sandbox (fail-closed)");
+            // R3-02: network EGRESS is actually denied by the AppContainer
+            // kernel. A network-declaring tool is still rejected at admission
+            // unless the deployment explicitly opts into NON_ENFORCED_ACCEPTED
+            // (documented acceptance of the residual). The default remains
+            // fail-closed at admission; even where network is refused by the
+            // kernel, we do not silently change policy.
+            if (sandboxNeeds.needsNetwork.length > 0 &&
+                sandboxPolicy.networkEnforcement !== "NON_ENFORCED_ACCEPTED" &&
+                sandboxPolicy.networkEnforcement !== "APP_CONTAINER_DENY") {
+                violations.push("network need declared but not permitted by sandbox policy (R3-02)");
             }
             if (violations.length > 0) {
                 throw meshFailure(MESH_ERRORS.SANDBOX_VIOLATION, `sandbox violations: ${violations.slice(0, 3).join("; ")}`);
             }
-            // 5. REAL sandbox launch (code comes from the claim-bound artifact path)
-            const result = await launchSandboxedTool({
-                toolModulePath: claim.toolArtifactPath ?? path.resolve(__dirname, "..", "federation", "noopTool.js"),
+            // 5. REAL AppContainer sandbox launch (private primitive). Tool
+            //    code comes from the claim-bound artifact path; this process
+            //    never loads tool code itself.
+            const result = await launchAppContainerTool({
+                toolArtifactPath: claim.toolArtifactPath,
                 toolArgs: args,
-                fsReadAllowlist: sandboxNeeds.needsFilesystem ?? [],
-                fsWriteAllowlist: sandboxPolicy.fsWrite ?? [],
-                envMaterial
+                envMaterial,
+                timeoutMs: config.timeoutMs
             });
             return Object.freeze({
                 ok: true,
@@ -289,10 +351,9 @@ function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandbox
                 executionId: claim.executionId,
                 decisionDigest: claim.decisionDigest,
                 consumedLease: claim.consumedLease ? claim.consumedLease.executionId : null,
-                sandbox: { pid: result.sandboxPid }
+                sandbox: { pid: result.sandboxPid, mechanism: result.mechanism, sandboxId: result.sandboxId }
             });
-        },
-        launchSandboxedTool
+        }
     });
 }
 
