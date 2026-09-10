@@ -196,7 +196,8 @@ function createDamarManagerComposition({
     deps,
     trustedChannelAdapters = [],
     mediaProcessor = null,
-    mediaContextAuthority = createMediaContextAuthority()
+    mediaContextAuthority = createMediaContextAuthority(),
+    wave6Distributed = null              // R3-04: optional narrow Wave 6 lane-3 seam (default null = frozen behavior)
 } = {}) {
     if (deps === null || typeof deps !== "object") {
         throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "manager composition requires deps");
@@ -226,6 +227,16 @@ function createDamarManagerComposition({
     if (!Array.isArray(trustedChannelAdapters)) {
         throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "trustedChannelAdapters must be an array");
     }
+    // R3-04: optional narrow Wave 6 lane-3 seam. Null (default) = frozen
+    // behavior identical to prior lanes. If provided, it must expose
+    // tryDistributed(intent, parameters) => Promise<{distributed:boolean}>.
+    if (wave6Distributed !== null && wave6Distributed !== undefined) {
+        if (typeof wave6Distributed !== "object" ||
+            typeof wave6Distributed.tryDistributed !== "function") {
+            throw mfail(MREASONS.INVALID_MANAGER_REQUEST,
+                "wave6Distributed seam must expose tryDistributed(intent, parameters)");
+        }
+    }
 
     // ---- PER-COMPOSITION PROVENANCE DOMAIN (Lane 4 R5 lesson) -------------
     const mRequestBrandSet = new WeakSet();
@@ -237,6 +248,7 @@ function createDamarManagerComposition({
     const capturedLane4 = lane4;
     const capturedPlanner = planner;
     const capturedMediaProcessor = mediaProcessor;
+    const capturedWave6 = wave6Distributed ?? null;
     const recognizeMediaContext = mediaContextAuthority.recognize;
 
     // Channel adapters: frozen snapshots, keyed by channel type. Composition-
@@ -718,20 +730,68 @@ function createDamarManagerComposition({
         }
         entry.lifecycle = MLC.DISPATCHED;
         let executionResult = null;
-        try {
-            executionResult = await capturedLane3.execute({
-                intent,
-                authSession: session,
-                parameters: proposal.arguments ?? {}
-            });
-        } catch (e) {
+        // R3-04: when the Wave 6 lane-3 seam is wired (RuntimeHost composition),
+        // prefer distributed execution for an AUTHORIZED intent. A distributed
+        // success returns the actuator-shaped result (executionId present).
+        // A distributed effort that FAILS is reported FAILED (no silent local
+        // fallback that could double-authorize). A non-eligible result
+        // ({ distributed: false }) falls back to the frozen local Lane 3.
+        let wave6Attempted = false;
+        let wave6Error = null;
+        if (capturedWave6 !== null) {
+            try {
+                const wave6Outcome = await capturedWave6.tryDistributed({
+                    intent,
+                    parameters: proposal.arguments ?? {}
+                });
+                if (wave6Outcome && wave6Outcome.distributed === true) {
+                    // Wave 6 distributed execution succeeded.
+                    if (wave6Outcome.error) {
+                        wave6Attempted = true;
+                        wave6Error = wave6Outcome.error;
+                    } else {
+                        wave6Attempted = true;
+                        executionResult = {
+                            executionId: wave6Outcome.executionId,
+                            state: RESULT_STATE_L3.EXECUTED,
+                            output: wave6Outcome.output ?? null,
+                            distributed: true,
+                            targetNodeId: wave6Outcome.targetNodeId ?? null
+                        };
+                    }
+                }
+            } catch (e) {
+                wave6Attempted = true;
+                wave6Error = String(e?.reasonCode ?? e?.message ?? "error").slice(0, 256);
+            }
+        }
+        if (wave6Attempted && !executionResult) {
+            // A Wave 6 attempt failed — report FAILED (do not re-dispatch
+            // locally; that could execute the side effect twice).
             return formManagerResult({
                 request, lifecycleState: MLC.FAILED, outcome: MOUTCOME.FAILED,
                 actionIntentId: intent.intentId, authorityEvidence,
-                detail: `actuation dispatch failed: ${String(e?.reasonCode ?? e?.message ?? "error").slice(0, 256)}`,
+                detail: `distributed execution failed: ${wave6Error ?? "unknown"}`,
                 startedAtMs, completedAtMs: now(),
                 errorReason: MREASONS.ACTUATION_REJECTED
             });
+        }
+        if (!executionResult) {
+            try {
+                executionResult = await capturedLane3.execute({
+                    intent,
+                    authSession: session,
+                    parameters: proposal.arguments ?? {}
+                });
+            } catch (e) {
+                return formManagerResult({
+                    request, lifecycleState: MLC.FAILED, outcome: MOUTCOME.FAILED,
+                    actionIntentId: intent.intentId, authorityEvidence,
+                    detail: `actuation dispatch failed: ${String(e?.reasonCode ?? e?.message ?? "error").slice(0, 256)}`,
+                    startedAtMs, completedAtMs: now(),
+                    errorReason: MREASONS.ACTUATION_REJECTED
+                });
+            }
         }
         const executionId = executionResult?.executionId ?? null;
 
