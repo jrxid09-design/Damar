@@ -430,10 +430,15 @@ function createWave6Lane3Facade({
                     decisionDigest: result.decisionDigest ?? null,
                     output: result.output ?? null
                 });
-            } catch {
-                // Any Wave 6 routing/claim/execute failure is reported FAILED;
-                // the Manager never falls back to local execution (double-let).
-                return Object.freeze({ distributed: true, error: "WAVE6_ROUTE_FAILED" });
+            } catch (e) {
+                // Any Wave 6 routing/claim/execute failure is reported FAILED
+                // with the real reason; the Manager never falls back to local
+                // execution (double-let).
+                return Object.freeze({
+                    distributed: true,
+                    error: "WAVE6_ROUTE_FAILED",
+                    reason: String((e && (e.reasonCode || e.message)) || "unknown").slice(0, 200)
+                });
             }
         }
     });
