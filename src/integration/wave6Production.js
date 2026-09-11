@@ -356,93 +356,13 @@ function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandbox
     });
 }
 
-/**
- * W6-R3-04/05 — WAVE 6 ACTUATION SEAM for the canonical Manager.
- *
- * The frozen Manager (src/manager) owns the ONLY downstream request
- * capability. This seam is a NARROW hook placed at the Manager's Lane-3 (real
- * actuation dispatch) boundary: after LANE 2 AUTHORITY ALLOW, the Manager may
- * route the intent through Wave 6 distributed execution when eligible,
- * otherwise local execution proceeds unchanged.
- *
- * This facade is OPT-IN via `createWave6Lane3Facade({ ... })`. When the
- * RuntimeHost composition threads a `wave6` handle, the Manager iterates
- * across adopted node runtimes; if a canonical router is eligible it issues a
- * governed claim and consumes it (one-use). Otherwise it falls back to the
- * frozen Lane 3 execute.
- *
- * It never manufactures authority and never bypasses Verification: the
- * Manager still hands the result to Lane 4 (Verification) after this returns.
- */
-function createWave6Lane3Facade({
-    route = null,                 // async (intent, params) => { targetNodeId, ... } | null
-    claim = null,                 // async ({ intent, toolId, sandboxNeeds, toolArtifactPath }) => claimId | null
-    execute = null                // async ({ claimId, args, envMaterial }) => result
-} = {}) {
-    if (route !== null && typeof route !== "function") {
-        throw new TypeError("createWave6Lane3Facade: route must be a function or null");
-    }
-    if (claim !== null && typeof claim !== "function") {
-        throw new TypeError("createWave6Lane3Facade: claim must be a function or null");
-    }
-    if (execute !== null && typeof execute !== "function") {
-        throw new TypeError("createWave6Lane3Facade: execute must be a function or null");
-    }
-    return Object.freeze({
-        disabled: route === null,
-        /**
-         * Prefer Wave 6 distributed execution for an authorized intent.
-         * Returns { distributed: true, executionId, targetNodeId, decisionDigest }
-         * or { distributed: false } so the Manager falls back to local Lane 3.
-         */
-        async tryDistributed({ intent, parameters = {} }) {
-            if (route === null || claim === null || execute === null) {
-                return Object.freeze({ distributed: false });
-            }
-            try {
-                const routed = await route(intent, parameters);
-                if (!routed || !routed.targetNodeId) {
-                    // Not eligible for distributed execution — the Manager may
-                    // fall back to local Lane 3 (safe: no remote side effect).
-                    return Object.freeze({ distributed: false });
-                }
-                const claimId = await claim({
-                    intent,
-                    toolId: routed.toolId ?? `tool.${intent.capabilityId}`,
-                    sandboxNeeds: routed.sandboxNeeds ?? {},
-                    toolArtifactPath: routed.toolArtifactPath ?? null
-                });
-                if (!claimId) {
-                    // Routing resolved a remote target but no claim could be
-                    // created — FAILED, never a silent local fallback (that
-                    // could double-authorize/redirect an authorized side effect).
-                    return Object.freeze({ distributed: true, error: "WAVE6_CLAIM_FAILED" });
-                }
-                const result = await execute({ claimId, args: intent.arguments ?? parameters });
-                return Object.freeze({
-                    distributed: true,
-                    executionId: result.executionId ?? null,
-                    targetNodeId: routed.targetNodeId,
-                    decisionDigest: result.decisionDigest ?? null,
-                    output: result.output ?? null
-                });
-            } catch (e) {
-                // Any Wave 6 routing/claim/execute failure is reported FAILED
-                // with the real reason; the Manager never falls back to local
-                // execution (double-let).
-                return Object.freeze({
-                    distributed: true,
-                    error: "WAVE6_ROUTE_FAILED",
-                    reason: String((e && (e.reasonCode || e.message)) || "unknown").slice(0, 200)
-                });
-            }
-        }
-    });
-}
-
 module.exports = Object.freeze({
     createDistributedNodeRuntime,
     createGovernedExternalToolExecutor,
-    createWave6Lane3Facade,
     APPCONTAINER_NAME: require("../federation/appContainerSandbox").APPCONTAINER_NAME
+    // R4-04: `createWave6Lane3Facade` (caller-controlled callback facade) is
+    // REMOVED from production surfaces. The Manager's Lane-3 distributed seam
+    // accepts only a BRANDED adapter (wave6AdapterBrand), and the production
+    // RuntimeHost composition NEVER accepts caller callbacks. Tests construct a
+    // seam via tests/manager/productionHarness.js (test-only, branded).
 });

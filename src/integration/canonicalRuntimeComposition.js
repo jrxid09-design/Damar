@@ -370,9 +370,17 @@ async function buildRuntimeHostInternal({
     conversationHandler = null,
     clock = defaultClock(),
     busBounds = undefined,
-    localTransportId = LOCAL_TRANSPORT_ID,
-    wave6Distributed = null
+    localTransportId = LOCAL_TRANSPORT_ID
 } = {}, privileged = null) {
+    // R4-04: the public RuntimeHost factory REJECTS the caller-supplied
+    // Wave 6 execution option (no ordinary production option can inject a
+    // distributed-execution seam / callbacks). The canonical Wave 6 lane-3
+    // adapter is constructed inside the production composition only; caller
+    // callbacks are never accepted here.
+    const firstOpts = (arguments[0] === null || arguments[0] === undefined) ? {} : arguments[0];
+    if (typeof firstOpts.wave6Distributed !== "undefined") {
+        throw new TypeError("HOST_WAVE6_DISTRIBUTED_REJECTED: RuntimeHost does not accept a wave6Distributed option (R4-04)");
+    }
     // DSC-R8-001: EVERY caller-supplied coreFactory is treated as untrusted.
     // Function identity is NOT a trust signal.  The canonical Voice
     // composition does NOT go through the public `coreFactory` boundary at
@@ -414,8 +422,7 @@ async function buildRuntimeHostInternal({
         // the sole CONVERSATION route.
         core = await buildRuntimeCoreInternal({
             ...sanitizeCoreOptions(coreOptions),
-            enableManagerIngress: conversationHandler === null,
-            ...(wave6Distributed === null || wave6Distributed === undefined ? {} : { wave6Distributed })
+            enableManagerIngress: conversationHandler === null
         }, onCompositionPayload);
     } else {
         // Caller-controlled factory: ALWAYS untrusted.  Pass SANITIZED
@@ -1700,6 +1707,10 @@ class VoiceRuntime extends EventEmitter {
  * { lifecycle, composition } or bindCanonicalTransportPeer.
  */
 async function createRuntimeCore(options = {}) {
+    // R4-04: no public facade accepts a caller-supplied Wave 6 lane-3 seam.
+    if (options && typeof options.wave6Distributed !== "undefined") {
+        throw new TypeError("HOST_WAVE6_DISTRIBUTED_REJECTED: RuntimeCore does not accept a wave6Distributed option (R4-04)");
+    }
     return buildRuntimeCoreInternal(sanitizeCoreOptions(options), null);
 }
 

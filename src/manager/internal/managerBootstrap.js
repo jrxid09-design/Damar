@@ -197,7 +197,7 @@ function createDamarManagerComposition({
     trustedChannelAdapters = [],
     mediaProcessor = null,
     mediaContextAuthority = createMediaContextAuthority(),
-    wave6Distributed = null              // R3-04: optional narrow Wave 6 lane-3 seam (default null = frozen behavior)
+    wave6Distributed = null              // R4-04: brand-validated Wave 6 lane-3 adapter (default null = frozen behavior)
 } = {}) {
     if (deps === null || typeof deps !== "object") {
         throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "manager composition requires deps");
@@ -227,14 +227,15 @@ function createDamarManagerComposition({
     if (!Array.isArray(trustedChannelAdapters)) {
         throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "trustedChannelAdapters must be an array");
     }
-    // R3-04: optional narrow Wave 6 lane-3 seam. Null (default) = frozen
-    // behavior identical to prior lanes. If provided, it must expose
-    // tryDistributed(intent, parameters) => Promise<{distributed:boolean}>.
+    // R4-04: ONLY a BRANDED canonical Wave 6 adapter may occupy the Lane-3
+    // distributed-execution seam. A duck-typed / caller-controlled object
+    // ({ tryDistributed } or any callback facade) is REJECTED — it can never
+    // reach the Manager's execution boundary.
+    const { isCanonicalWave6ExecutionAdapter } = require("./wave6AdapterBrand");
     if (wave6Distributed !== null && wave6Distributed !== undefined) {
-        if (typeof wave6Distributed !== "object" ||
-            typeof wave6Distributed.tryDistributed !== "function") {
+        if (!isCanonicalWave6ExecutionAdapter(wave6Distributed)) {
             throw mfail(MREASONS.INVALID_MANAGER_REQUEST,
-                "wave6Distributed seam must expose tryDistributed(intent, parameters)");
+                "wave6Distributed must be a BRANDED canonical Wave 6 execution adapter (R4-04: caller-supplied seam rejected)");
         }
     }
 
