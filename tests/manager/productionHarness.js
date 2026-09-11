@@ -24,9 +24,89 @@
 
 const { createDamarManagerComposition } = require("../../src/manager/internal/managerBootstrap");
 const { createMediaContextAuthority } = require("../../src/manager/internal/mediaContext");
+const { __brandWave6Adapter, isCanonicalWave6ExecutionAdapter } = require("../../src/manager/internal/wave6AdapterBrand");
 const { makeActuationHarness } = require("../actuation/harness");
 const { makeVerificationHarness } = require("../verification/harness");
 const { CHANNEL_ADAPTERS } = require("../../src/manager/channels");
+
+/**
+ * TEST-ONLY: brand a test-supplied Wave 6 lane-3 adapter for injection through
+ * the composition seam. NOT part of production surfaces. The production
+ * RuntimeHost composition uses its OWN internal concrete adapter (branded the
+ * same way inside the composition closure) — never caller callbacks.
+ */
+function brandTestWave6Adapter(adapter) {
+    if (adapter === null || typeof adapter !== "object" ||
+        typeof adapter.tryDistributed !== "function") {
+        throw new TypeError("brandTestWave6Adapter requires { tryDistributed }");
+    }
+    return __brandWave6Adapter(adapter);
+}
+
+/**
+ * TEST-ONLY Wave 6 lane-3 facade builder (former production
+ * `createWave6Lane3Facade`). R4-04 removed the caller-controlled callback
+ * facade from the production/public surface; tests that need a seam to probe
+ * the Manager's Lane-3 boundary construct one HERE and brand it via
+ * brandTestWave6Adapter. This is composition-time test privilege only — it is
+ * never a production export and can never be reached by a RuntimeHost/channel.
+ */
+function createTestWave6Lane3Facade({
+    route = null,
+    claim = null,
+    execute = null
+} = {}) {
+    if (route !== null && typeof route !== "function") {
+        throw new TypeError("createTestWave6Lane3Facade: route must be a function or null");
+    }
+    if (claim !== null && typeof claim !== "function") {
+        throw new TypeError("createTestWave6Lane3Facade: claim must be a function or null");
+    }
+    if (execute !== null && typeof execute !== "function") {
+        throw new TypeError("createTestWave6Lane3Facade: execute must be a function or null");
+    }
+    const adapter = Object.freeze({
+        disabled: route === null,
+        async tryDistributed({ intent, parameters = {} }) {
+            if (route === null || claim === null || execute === null) {
+                return Object.freeze({ distributed: false });
+            }
+            try {
+                const routed = await route(intent, parameters);
+                if (!routed || !routed.targetNodeId) {
+                    return Object.freeze({ distributed: false });
+                }
+                const claimId = await claim({
+                    intent,
+                    toolId: routed.toolId ?? `tool.${intent.capabilityId}`,
+                    sandboxNeeds: routed.sandboxNeeds ?? {},
+                    toolArtifactPath: routed.toolArtifactPath ?? null
+                });
+                if (!claimId) {
+                    return Object.freeze({ distributed: true, error: "WAVE6_CLAIM_FAILED" });
+                }
+                const result = await execute({ claimId, args: intent.arguments ?? parameters });
+                return Object.freeze({
+                    distributed: true,
+                    executionId: result.executionId ?? null,
+                    targetNodeId: routed.targetNodeId,
+                    decisionDigest: result.decisionDigest ?? null,
+                    output: result.output ?? null
+                });
+            } catch (e) {
+                return Object.freeze({
+                    distributed: true,
+                    error: "WAVE6_ROUTE_FAILED",
+                    reason: String((e && (e.reasonCode || e.message)) || "unknown").slice(0, 200)
+                });
+            }
+        }
+    });
+    return Object.freeze({
+        ...adapter,
+        disabled: adapter.disabled
+    });
+}
 
 /**
  * Build a production-path Manager harness:
@@ -51,8 +131,9 @@ async function makeManagerHarness({
     // forwarded from RuntimeHost, a channel adapter, or a Manager request.
     authenticate = undefined,
     withAdapters = true,
-    // R3-04: optional narrow Wave 6 lane-3 seam (route authorized intents
-    // through distributed execution). Null = frozen behavior.
+    // R4-04: brand-validated Wave 6 lane-3 adapter (injected via test-only
+    // brandTestWave6Adapter). Null = frozen behavior. Duck-typed objects are
+    // rejected by the Manager composition itself.
     wave6Distributed = null
 } = {}) {
     // Lane 3 actuation harness (canonical execution results for this domain)
@@ -77,7 +158,7 @@ async function makeManagerHarness({
         trustedChannelAdapters: withAdapters ? CHANNEL_ADAPTERS.slice() : [],
         mediaProcessor,
         mediaContextAuthority,
-        ...(wave6Distributed ? { wave6Distributed } : {})
+        ...(wave6Distributed ? { wave6Distributed: brandTestWave6Adapter(wave6Distributed) } : {})
     });
 
     return {
@@ -89,4 +170,4 @@ async function makeManagerHarness({
     };
 }
 
-module.exports = { makeManagerHarness };
+module.exports = { makeManagerHarness, brandTestWave6Adapter, createTestWave6Lane3Facade, isCanonicalWave6ExecutionAdapter };

@@ -6,7 +6,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { createRuntimeHost } = require("../../../src/runtime/host/runtimeHost");
-const { createWave6Lane3Facade, createDistributedNodeRuntime, createGovernedExternalToolExecutor } = require("../../../src/integration/wave6Production");
+const { createDistributedNodeRuntime, createGovernedExternalToolExecutor } = require("../../../src/integration/wave6Production");
+const { createTestWave6Lane3Facade } = require("../../manager/productionHarness");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
 const { makeCanonicalAuthorityRoot } = require("../repair/testCanonicalRoot");
 const dexec = require("../../../src/dexec");
@@ -77,7 +78,7 @@ function makeEnabledTool() {
 }
 
 async function makeSeam(A, fed, snap, toolPath) {
-    return createWave6Lane3Facade({
+    return createTestWave6Lane3Facade({
         route: async (intent) => {
             const r = await A.dexecRouter.route({ intent, toolId: "tool.code.cap", privacyClass: "INTERNAL", preferredNodeId: A.identity.nodeId });
             return { targetNodeId: r.targetNodeId, toolId: "tool.code.cap", toolArtifactPath: toolPath, sandboxNeeds: {} };
@@ -199,7 +200,7 @@ test("R3-06-B: chaos via Manager seam — ONE claim, ONE consume, replay/revoke 
 });
 
 test("R3-06-B2: ineligible route -> Manager falls back to local Lane 3 (no distributed)", async (t) => {
-    const wave6 = createWave6Lane3Facade({ route: async () => null, claim: async () => "x", execute: async () => ({}) });
+    const wave6 = createTestWave6Lane3Facade({ route: async () => null, claim: async () => "x", execute: async () => ({}) });
     const out = await wave6.tryDistributed({ intent: authorizedIntent("b2"), parameters: {} });
     assert.equal(out.distributed, false, "ineligible -> local fallback permitted by Manager");
 });

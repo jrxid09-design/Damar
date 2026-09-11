@@ -39,26 +39,26 @@ const { fail, REASONS } = require("../action/errors");
 // The ONE canonical application Manager, created exactly once, lazily.
 let canonicalManager = null;
 let canonicalMediaContextAuthority = null;
-// R3-04: narrow Wave 6 lane-3 seam installed by the canonical composition root
-// (RuntimeHost) BEFORE the Manager singleton is first created. It routes
-// AUTHORIZED intents through distributed execution. Absent = frozen behavior.
+// R4-04: canonical Wave 6 lane-3 adapter installed by the canonical composition
+// root (RuntimeHost) BEFORE the Manager singleton is first created. It is
+// BRANDED (wave6AdapterBrand) so a duck-typed/caller-controlled object can
+// never occupy the seam. Absent = frozen behavior.
 let canonicalWave6Seam = null;
 
 /**
- * R3-04: install the Wave 6 distributed lane-3 seam on the canonical Manager.
- * Composition-root only; MUST be called before the first createDamarManager().
- * Null removes the seam (frozen behavior). Returns true.
+ * R4-04: install the canonical Wave 6 lane-3 adapter on the canonical Manager.
+ * Composition-root/internal only — MUST be called before the first
+ * createDamarManager(). Only an adapter already BRANDED by wave6AdapterBrand is
+ * accepted (duck-typed callbacks rejected). NOT exported from the public
+ * manager surface.
  */
 function installCanonicalWave6Seam(seam) {
-    if (seam !== null && seam !== undefined &&
-        typeof seam.tryDistributed !== "function") {
+    const { isCanonicalWave6ExecutionAdapter } = require("./internal/wave6AdapterBrand");
+    if (seam !== null && seam !== undefined && !isCanonicalWave6ExecutionAdapter(seam)) {
         throw fail(REASONS.CALLER_BOOTSTRAP_REJECTED,
-            "installCanonicalWave6Seam requires a { tryDistributed } seam or null");
+            "installCanonicalWave6Seam requires a BRANDED canonical Wave 6 adapter (R4-04)");
     }
     if (canonicalManager !== null) {
-        // Fail closed: installing after the singleton exists would not affect
-        // the already-captured lane3; report honestly instead of silently
-        // pretending the seam is active.
         throw fail(REASONS.CALLER_BOOTSTRAP_REJECTED,
             "installCanonicalWave6Seam must be called before createDamarManager()");
     }
@@ -195,8 +195,9 @@ function createTrustedTransportPeerScopes() {
 }
 
 function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionContinuity = null, continuityStoreFile = undefined, transportPeerScopes = undefined, wave6Distributed = null } = {}) {
-    // R3-04: install the Wave 6 lane-3 seam BEFORE the singleton Manager is
-    // composed so `createDamarManager()` (NO options) can capture it.
+    // R4-04: install the (BRANDED) Wave 6 lane-3 adapter BEFORE the singleton
+    // Manager is composed. A duck-typed adapter is rejected by the brand check
+    // in installCanonicalWave6Seam.
     if (wave6Distributed !== null && wave6Distributed !== undefined) {
         installCanonicalWave6Seam(wave6Distributed);
     }
@@ -315,4 +316,10 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
     }
 }
 
-module.exports = { createDamarManager, createDamarManagerIngressDomain, installCanonicalWave6Seam };
+module.exports = Object.freeze({
+    createDamarManager,
+    createDamarManagerIngressDomain
+    // R4-04: installCanonicalWave6Seam is intentionally NOT exported from the
+    // public manager surface. Only the production composition closure (which
+    // brands the adapter via wave6AdapterBrand) installs it.
+});
