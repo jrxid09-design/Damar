@@ -7,26 +7,26 @@
  * authority decisions; they never replace them. REMOTE EXECUTION !=
  * AUTHORITY TRANSFER; UNKNOWN_EXECUTION_STATE never blind-retries.
  *
- * W6-R2-02/R3-01: there is NO public authority-bridge factory and NO exported
- * first-bind surface. The canonical AuthorityRegistry is produced by the
- * composition-root factory (`createCanonicalAuthorityRegistry`) and installed
- * by the production composition seam; routing resolves authority LIVE at
- * route time against that single owner.
+ * W6-R2-02/R3-01/R4-01: there is NO public authority-bridge factory, NO
+ * exported canonical factory, NO installer, and NO first-bind surface. The
+ * canonical AuthorityRegistry is constructed + marked + installed exclusively
+ * inside `src/authority/canonicalComposition.js` (deep-internal composition
+ * closure). Routing resolves authority LIVE at route time against that single
+ * module-private owner.
  */
 
 const contracts = require("./contracts");
-const { installCanonicalAuthorityRegistry, isCanonicalAuthorityBound, getCanonicalAuthorityBridge } = require("./authoritySource");
+const { isCanonicalAuthorityBound, getCanonicalAuthorityBridge } = require("./authoritySource");
 const { LeaseConsumptionLedger } = require("./leaseLedger");
 const authorityAdapter = require("./authorityAdapter");
 const { DistributedExecutionRouter, isCanonicalExecutionRouter, PRIVACY_CLASSES, DEFAULT_LOCALITY } = require("./router");
 
 module.exports = Object.freeze({
     contracts,
-    // W6-R3-01: NO exported first-bind surface. installCanonicalAuthorityRegistry
-    // accepts ONLY an AuthorityRegistry produced by createCanonicalAuthorityRegistry
-    // (brand verified, composition-root ownership), so a caller-created registry
-    // can never capture authority.
-    installCanonicalAuthorityRegistry,
+    // R4-01: installCanonicalAuthorityRegistry is NOT exported here. It lives
+    // inside dexec/authoritySource.js and is invoked only by the production
+    // composition closure (canonicalComposition.js) which is itself not part
+    // of any public/package export surface.
     isCanonicalAuthorityBound,
     LeaseConsumptionLedger,
     authorityAdapter,

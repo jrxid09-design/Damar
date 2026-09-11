@@ -45,8 +45,7 @@ function createDistributedNodeRuntime({
     localNodeId = null,              // adopt existing opaque node id (restore)
     profile = "DESKTOP_PRIMARY",
     capabilityIds = [],              // canonical capability ids this node advertises
-    auditSink = null,                // frozen Audit Ledger port
-    authorityRegistry = null         // canonical AuthorityRegistry instance (R2-02)
+    auditSink = null                 // frozen Audit Ledger port
 } = {}) {
     const registry = new mesh.NodeRegistry();
     const trust = new mesh.NodeTrust();
@@ -59,14 +58,11 @@ function createDistributedNodeRuntime({
     registry.register({ identity, displayName: `node-${identity.nodeId.slice(6, 12)}` });
     router.bindLocalNodeId(identity.nodeId);
     const presence = new mesh.MeshPresence({ registry });
-    // R3-01: install the canonical AuthorityRegistry owner. The seam accepts
-    // ONLY an AuthorityRegistry produced by createCanonicalAuthorityRegistry
-    // (composition-root ownership, brand verified). A caller-created
-    // `new AuthorityRegistry(...)` is NEVER canonical and can never capture
-    // authority. Without installation, routing fails closed at route time.
-    if (authorityRegistry !== null && authorityRegistry !== undefined) {
-        dexec.installCanonicalAuthorityRegistry(authorityRegistry);
-    }
+    // R4-01: NO authorityRegistry parameter and NO installer call here. The
+    // canonical Authority owner is constructed+marked+installed exclusively
+    // inside the production composition root (canonicalComposition.js). The
+    // router resolves LIVE against that module-private source at route time;
+    // before the composition installs it, routing fails closed.
     // C: node advertisement entries reference canonical capability ids
     const dexecRouter = new dexec.DistributedExecutionRouter({ trust, registry });
     dexecRouter.bindLocalNodeId(identity.nodeId);
