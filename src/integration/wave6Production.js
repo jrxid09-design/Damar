@@ -259,7 +259,60 @@ function ensureCompositionProvisioning() {
     return compositionProvisionPromise;
 }
 
-function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandboxRoots = {}, executionRouter = null }) {
+/**
+ * R4-07 — GOVERNED CLAIM MATERIAL BINDING.
+ *
+ * The external-tool environment is NEVER supplied by the caller of execute().
+ * No `envMaterial` parameter exists on the production path: a caller cannot
+ * inject arbitrary environment variables, secrets, or resource scopes into an
+ * execution. Material is resolved INTERNALLY at the executor boundary from the
+ * CLAIM-BOUND `sandboxNeeds` (the declared + authorized scopes) against a
+ * composition-owned, frozen material table captured at construction.
+ *
+ *   claim.sandboxNeeds =
+ *     { needsNetwork, needsFilesystem, needsProcessSpawn, needsSecrets }
+ *     -> resolveEnvMaterial(claim, materialNode)
+ *
+ * The resolver returns ONLY the env sub-table for scopes that were declared in
+ * the claim AND whitelisted in the composition's frozen material table. If a
+ * scope asks for secrets and none is authorized, the key is simply absent
+ * (fail-closed minimum). The native AppContainer env block + shim
+ * deny-by-default remain the final gate.
+ *
+ * If a caller passes `envMaterial` to execute() it is REJECTED (the parameter
+ * no longer exists in the production signature).
+ */
+function resolveEnvMaterial(claim, materialTable) {
+    const out = {};
+    const needs = (claim && claim.sandboxNeeds) || {};
+    const needSecrets = needs.needsSecrets === true;
+    const needFs = Array.isArray(needs.needsFilesystem) ? needs.needsFilesystem.map((p) => String(p).slice(0, 256)) : [];
+    const fsKeys = [];
+    for (const root of needFs) {
+        // Only allow a material path if the claim actually asked for this
+        // filesystem scope; the material table is the ONLY value source.
+        if (materialTable.filesystem) {
+            for (const [k, v] of Object.entries(materialTable.filesystem)) {
+                if (typeof k === "string" && k.length > 0 && String(root).startsWith(k)) {
+                    fsKeys.push([k, v]);
+                }
+            }
+        }
+    }
+    if (needSecrets && materialTable.secrets) {
+        for (const [k, v] of Object.entries(materialTable.secrets)) {
+            if (typeof k === "string" && k.length > 0 && typeof v === "string") {
+                out[k] = v;
+            }
+        }
+    }
+    for (const [k, v] of fsKeys) {
+        if (typeof v === "string") out[k] = v;
+    }
+    return out;
+}
+
+function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandboxRoots = {}, executionRouter = null, material = null }) {
     if (!federation || typeof federation.isToolEnabled !== "function") throw new TypeError("federation required");
     if (!sandboxPolicy || typeof sandboxPolicy !== "object") throw new TypeError("sandboxPolicy required");
     // R2-07: the executor is driven by a BRANDED canonical execution router.
@@ -273,6 +326,15 @@ function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandbox
     const spawnerAllowed = sandboxPolicy.processSpawn === true;
     const secretsAllowed = sandboxPolicy.secrets === true;
     const config = Object.freeze({ ...SANDBOX_DEFAULTS, ...(sandboxPolicy.config ?? {}) });
+    // R4-07: frozen composition-owned material table. Callers of execute()
+    // cannot supply env. Validators only pass a material on the constructor
+    // (test composition privilege).
+    const materialTable = material && typeof material === "object"
+        ? Object.freeze({
+            filesystem: Object.freeze((material.filesystem ?? {})),
+            secrets: Object.freeze((material.secrets ?? {}))
+          })
+        : Object.freeze({ filesystem: Object.freeze({}), secrets: Object.freeze({}) });
 
     function checkSandboxViolations({ needsNetwork = [], needsFilesystem = [], needsProcessSpawn = false, needsSecrets = false }) {
         const violations = [];
@@ -323,7 +385,14 @@ function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandbox
          * from the claim. The tool code is loaded by the AppContainer sandbox
          * from the claim-bound artifact path (not by this process).
          */
-        async execute({ claimId, args = {}, envMaterial = {} } = {}) {
+        async execute({ claimId, args = {} } = {}) {
+            // R4-07: NO caller envMaterial parameter exists. A caller that
+            // attempts to smuggle an `envMaterial` key is rejected explicitly.
+            if (arguments[0] && typeof arguments[0] === "object" &&
+                Object.prototype.hasOwnProperty.call(arguments[0], "envMaterial")) {
+                throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED,
+                    "governed execution does not accept caller envMaterial (R4-07: material is claim-bound)");
+            }
             // 1. the claim is the ONLY authority entry point
             if (typeof claimId !== "string" || claimId.length === 0) {
                 throw meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "governed execution requires a claimId from the canonical router (no caller-shaped authority)");
@@ -371,7 +440,7 @@ function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandbox
             const result = await launchAppContainerTool({
                 toolArtifactPath: claim.toolArtifactPath,
                 toolArgs: args,
-                envMaterial,
+                envMaterial: resolveEnvMaterial(claim, materialTable),
                 timeoutMs: config.timeoutMs
             });
             return Object.freeze({

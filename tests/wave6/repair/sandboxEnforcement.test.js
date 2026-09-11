@@ -328,10 +328,14 @@ test("R3-SBOX: tool mutation after validation -> execution rejected", { skip: !c
     await assert.rejects(executor.execute({ claimId: claim.claimId }), (e) => e.code === "TOOL_NOT_ENABLED");
 });
 
-test("R3-SBOX-07: executor accepts ONLY claimId/args/envMaterial (no toolFn / launcher / caller authority)", () => {
+test("R4-07: executor accepts ONLY claimId/args (no caller envMaterial / toolFn / launcher / caller authority)", () => {
     const { executor } = makeExecutor();
     const fnParams = executor.execute.toString();
     assert.ok(!/toolFn|authorityArtifact|launchSandboxedTool/.test(fnParams), "executor API must not accept caller authority or open a raw launcher");
+    // R4-07: caller envMaterial is gone — material is claim-bound and resolved
+    // internally from the claim's sandboxNeeds.
+    assert.ok(!/envMaterial/.test(fnParams.split("{")[1] || fnParams),
+        "executor signature must not contain caller envMaterial (R4-07)");
 });
 
 test("R3-SBOX-08: launchSandboxedTool not exported anywhere reachable", () => {

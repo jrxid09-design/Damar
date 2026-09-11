@@ -27,7 +27,7 @@ const { SHIM_SOURCE } = require("../../../src/federation/sandboxShim");
  * and that the AppContainer profile name cannot be substituted.
  */
 
-test("R3-10: executor accepts ONLY claimId/args/envMaterial (no RPC method/name injection surface)", () => {
+test("R4-07: executor accepts ONLY claimId/args (no caller envMaterial / RPC / injection surface)", () => {
     const executor = createGovernedExternalToolExecutor({
         federation: { isToolEnabled: () => false },
         sandboxPolicy: { network: [], filesystem: [] }
@@ -41,13 +41,28 @@ test("R3-10: executor accepts ONLY claimId/args/envMaterial (no RPC method/name 
     const names = opener[1].split(",").map(s => s.trim().split("=")[0].trim()).filter(Boolean);
     assert.ok(names.includes("claimId"), "claimId is the sole authority entry");
     assert.ok(names.includes("args"), "args accepted");
-    assert.ok(names.includes("envMaterial"), "envMaterial accepted");
-    // ONLY those three + nothing else
-    assert.ok(names.every(n => ["claimId", "args", "envMaterial"].includes(n)),
+    // R4-07: caller envMaterial is GONE — material is claim-bound and resolved
+    // internally. The signature must NOT include envMaterial.
+    assert.ok(!names.includes("envMaterial"), "envMaterial must NOT appear in execute signature (R4-07)");
+    // ONLY claimId + args + nothing else
+    assert.ok(names.every(n => ["claimId", "args"].includes(n)),
         "no extra parameters on execute: " + names.join(","));
     // No toolFn / authorityArtifact / consumed / launch parameter.
     assert.ok(!/toolFn/.test(executeSrc.slice(0, executeSrc.indexOf("{", executeSrc.indexOf("{") + 1))), "no toolFn accepted");
     assert.equal(typeof executor.execute, "function");
+});
+
+test("R4-07: executor REJECTS a caller that smuggles envMaterial", async () => {
+    const executor = createGovernedExternalToolExecutor({
+        federation: { isToolEnabled: () => true },
+        sandboxPolicy: { network: [], filesystem: [], processSpawn: false, secrets: false }
+    });
+    await assert.rejects(
+        () => executor.execute({ claimId: "anything", args: {}, envMaterial: { LEAK: "x" } }),
+        (e) => e.code === "MESSAGE_MALFORMED" &&
+            /does not accept caller envMaterial/.test(e.message),
+        "smuggled envMaterial must be rejected (R4-07)"
+    );
 });
 
 test("R3-10: AppContainer profile name is fixed; caller cannot choose/rename sandbox", () => {
