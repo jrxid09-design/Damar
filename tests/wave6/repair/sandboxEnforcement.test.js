@@ -140,6 +140,66 @@ module.exports = function(args) {
     }
 });
 
+test("R4-03: native host launches with an OWNED env block — secret families never reach the sandbox", { skip: !canRun }, async () => {
+    // R4-03: the native host builds its OWN environment block before
+    // CreateProcess (never NULL/inherit-raw). Secret-bearing env families
+    // (API_KEY, TOKEN, PASSWORD, AWS_*, etc.) are stripped at the process
+    // boundary; the deny-by-default shim allowlist removes the rest before
+    // tool code. Probe verifies key-value material that must NEVER surface.
+    const probeTool = path.join(path.dirname(NOOP_TOOL), "env_secret_probe.js");
+    fs.writeFileSync(probeTool, `
+"use strict";
+module.exports = function(args) {
+    return {
+        damar: process.env.DAMAR_TEST_SECRET || null,
+        aws: process.env.AWS_ACCESS_KEY_ID || null,
+        token: process.env.SUPER_SECRET_TOKEN || null,
+        pass: process.env.DB_PASSWORD || null,
+        apiKey: process.env.APP_API_KEY || null,
+        user: process.env.USERPROFILE || null,
+        nodeEnv: process.env.NODE_ENV || null
+    };
+};
+`);
+    try {
+        // Load secret markers into the PARENT env so the child COULD inherit
+        // them if the native host passed a raw block. They must never surface.
+        const prev = Object.fromEntries(
+            ["DAMAR_TEST_SECRET", "AWS_ACCESS_KEY_ID", "SUPER_SECRET_TOKEN", "DB_PASSWORD", "APP_API_KEY"]
+                .filter(k => k in process.env).map(k => [k, process.env[k]])
+        );
+        for (const k of Object.keys(prev)) delete process.env[k];
+        process.env.DAMAR_TEST_SECRET = "R4-DAMAR-LEAK";
+        process.env.AWS_ACCESS_KEY_ID = "AKIA-R4-LEAK";
+        process.env.SUPER_SECRET_TOKEN = "R4-TOKEN-LEAK";
+        process.env.DB_PASSWORD = "R4-PASS-LEAK";
+        process.env.APP_API_KEY = "R4-KEY-LEAK";
+        try {
+            const { snap, executor, router } = makeExecutor();
+            const { claim } = await claimFor({ executor, router, snap, toolArtifactPath: probeTool });
+            const result = await executor.execute({ claimId: claim.claimId, args: {} });
+            const output = result.output ?? {};
+            assert.equal(output.damar, null, "DAMAR_* secret not visible inside sandbox");
+            assert.equal(output.aws, null, "AWS credential not visible inside sandbox");
+            assert.equal(output.token, null, "token family not visible inside sandbox");
+            assert.equal(output.pass, null, "password family not visible inside sandbox");
+            assert.equal(output.apiKey, null, "API key family not visible inside sandbox");
+            assert.equal(output.nodeEnv, "sandbox", "sandbox marker present");
+            // Execution still succeeded with the owned block.
+            assert.equal(result.ok, true);
+        } finally {
+            for (const k of Object.keys(prev)) process.env[k] = prev[k];
+            delete process.env.DAMAR_TEST_SECRET;
+            delete process.env.AWS_ACCESS_KEY_ID;
+            delete process.env.SUPER_SECRET_TOKEN;
+            delete process.env.DB_PASSWORD;
+            delete process.env.APP_API_KEY;
+        }
+    } finally {
+        fs.unlinkSync(probeTool);
+    }
+});
+
 test("R3-SBOX-02: filesystem traversal rejected at admission", { skip: !canRun }, async () => {
     const { snap, executor, router } = makeExecutor({ sandboxPolicy: { filesystem: [] } });
     const { claim } = await claimFor({
