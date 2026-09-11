@@ -125,7 +125,7 @@ function createDistributedNodeRuntime({
  * ONLY production external-tool entry point is execute({ claimId, ... }) via
  * the canonical governed claim.
  */
-const { APPCONTAINER_NAME, HOST_EXE: SANDBOX_HOST_EXE } = require("../federation/appContainerSandbox");
+const { APPCONTAINER_NAME, HOST_EXE: SANDBOX_HOST_EXE, ensureSandboxRuntimeReady, sandboxProvisioningStatus } = require("../federation/appContainerSandbox");
 const { SHIM_SOURCE } = require("../federation/sandboxShim");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -248,6 +248,17 @@ function launchAppContainerTool({
     });
 }
 
+let compositionProvisionPromise = null;
+function ensureCompositionProvisioning() {
+    if (!compositionProvisionPromise) {
+        compositionProvisionPromise = ensureSandboxRuntimeReady().then(
+            () => true,
+            (e) => { compositionProvisionPromise = null; throw e; }
+        );
+    }
+    return compositionProvisionPromise;
+}
+
 function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandboxRoots = {}, executionRouter = null }) {
     if (!federation || typeof federation.isToolEnabled !== "function") throw new TypeError("federation required");
     if (!sandboxPolicy || typeof sandboxPolicy !== "object") throw new TypeError("sandboxPolicy required");
@@ -283,6 +294,19 @@ function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandbox
     return Object.freeze({
         id: "governed-external-executor",
         checkSandboxViolations,
+        /**
+         * R4-02: provisioning status of the AppContainer runtime (honest,
+         * no side effects; `await ensureSandboxedRuntimeReady()` outside the
+         * executor for an explicit preflight).
+         */
+        sandboxProvisioningStatus,
+        /**
+         * R4-02: explicit provisioning preflight (single-flight, tamper-aware).
+         * The executor does NOT require the caller to call this before
+         * execute() — execute() performs a fail-closed provisioning check
+         * internally — but the composition may use it to fail fast at boot.
+         */
+        ensureSandboxRuntimeReady,
         /**
          * R3-03: NO public launchSandboxedTool. The ONLY production
          * external-tool entry point is execute({ claimId, ... }) through the
@@ -336,7 +360,14 @@ function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandbox
             }
             // 5. REAL AppContainer sandbox launch (private primitive). Tool
             //    code comes from the claim-bound artifact path; this process
-            //    never loads tool code itself.
+            //    never loads tool code itself. R4-02: provisioning is verified
+            //    FAIL-CLOSED before launch — profile exists, zero caps, and
+            //    the frozen helper binary is untampered (single-flight probe).
+            const provisioned = await ensureCompositionProvisioning().catch((e) => null);
+            if (provisioned !== true) {
+                throw meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
+                    "sandbox runtime not provisioned (R4-02 fail-closed): " + String(provisioned?.message || ("not ready")).slice(0, 160));
+            }
             const result = await launchAppContainerTool({
                 toolArtifactPath: claim.toolArtifactPath,
                 toolArgs: args,

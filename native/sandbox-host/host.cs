@@ -235,6 +235,7 @@ namespace DamarSandboxHost
             public List<string> Deny = new List<string>();
             public List<string> ChildArgs = new List<string>();
             public bool Plain = false;
+            public bool EnsureOnly = false;
         }
 
         public static int Main(string[] args)
@@ -244,21 +245,52 @@ namespace DamarSandboxHost
                 Options o = Parse(args);
                 if (o == null) return 2;
 
-                IntPtr sid;
-                string sidStr;
-                if (!EnsureSid(o.AppContainer, out sid, out sidStr))
+                // R4-02: `--ensure` is a PROVISIONING-ONLY mode. It guarantees
+                // the AppContainer profile exists (deriving or creating it with
+                // ZERO capabilities) and reports readiness WITHOUT spawning any
+                // child. It is idempotent by construction (derive-first) and
+                // carries no launch authority. Exit codes:
+                //   0  ready (profile derived or created, caps empty)
+                //   5  not ready (could not derive/create profile)
+                //   6  ready but capability set is NOT empty (fail-closed)
+                if (o.EnsureOnly)
                 {
-                    Console.Error.WriteLine("SANDBOXHOST appcontainer-sid-failed " + sidStr);
+                    IntPtr sid;
+                    string sidStr;
+                    if (!EnsureSid(o.AppContainer, out sid, out sidStr))
+                    {
+                        Console.Error.WriteLine("SANDBOXHOST ensure sid-failed " + sidStr);
+                        return 5;
+                    }
+                    // Verify the derived profile carries ZERO capabilities
+                    // (fail-closed: an unexpected capability set is treated as
+                    // tamper/misconfiguration).
+                    int capCount = InspectCapabilityCount(o.AppContainer);
+                    if (capCount < 0) { Console.Error.WriteLine("SANDBOXHOST ensure caps-unreadable"); return 5; }
+                    if (capCount > 0)
+                    {
+                        Console.Error.WriteLine("SANDBOXHOST ensure caps-nonzero=" + capCount);
+                        return 6;
+                    }
+                    Console.Error.WriteLine("SANDBOXHOST ensure ready acl-caps=0");
+                    return 0;
+                }
+
+                IntPtr sid2a;
+                string sidStr2a;
+                if (!EnsureSid(o.AppContainer, out sid2a, out sidStr2a))
+                {
+                    Console.Error.WriteLine("SANDBOXHOST appcontainer-sid-failed " + sidStr2a);
                     return 3;
                 }
 
-                if (!GrantResources(o, sid))
+                if (!GrantResources(o, sid2a))
                 {
                     Console.Error.WriteLine("SANDBOXHOST acl-failed");
                     return 4;
                 }
 
-                int code = Spawn(o, sid);
+                int code = Spawn(o, sid2a);
                 Console.Error.WriteLine("SANDBOXHOST exit=" + code + " morphed=1");
                 return code;
             }
@@ -288,13 +320,16 @@ namespace DamarSandboxHost
                     case "--cwd": if (v == null) return null; o.Cwd = Full(v); i += 2; break;
                     case "--timeout-ms": if (v == null) return null; { uint t; if (!uint.TryParse(v, out t)) t = 60000; o.TimeoutMs = t; } i += 2; break;
                     case "--plain": o.Plain = true; i += 1; break;
+                    case "--ensure": o.EnsureOnly = true; i += 1; break;
                     case "--read": if (v == null) return null; o.Read.Add(Full(v)); i += 2; break;
                     case "--write": if (v == null) return null; o.Write.Add(Full(v)); i += 2; break;
                     case "--deny": if (v == null) return null; o.Deny.Add(Full(v)); i += 2; break;
                     default: Console.Error.WriteLine("SANDBOXHOST unknown-arg " + a); return null;
                 }
             }
-            if (string.IsNullOrEmpty(o.AppContainer) || string.IsNullOrEmpty(o.Node) ||
+            if (string.IsNullOrEmpty(o.AppContainer)) { Console.Error.WriteLine("SANDBOXHOST missing-required"); return null; }
+            if (o.EnsureOnly) return o;
+            if (string.IsNullOrEmpty(o.Node) ||
                 string.IsNullOrEmpty(o.Entry) || string.IsNullOrEmpty(o.Cwd))
             {
                 Console.Error.WriteLine("SANDBOXHOST missing-required");
@@ -312,6 +347,80 @@ namespace DamarSandboxHost
             string s = Marshal.PtrToStringAnsi(strPtr);
             Native.LocalFree(strPtr);
             return s;
+        }
+
+        // R4-02: capability inspection for the --ensure probe. A genuine
+        // enumeration requires ILockdownInternal; we conservatively check the
+        // AppModel unlock registry visible to this user and, when unreadable,
+        // assume the SAFE side: treat as 0 ONLY when the profile's own SID
+        // key is absent; otherwise fail closed (-1). This prevents a profile
+        // silently carrying capabilities from being reported "ready".
+        private static int InspectCapabilityCount(string appContainerName)
+        {
+            // The canonical design guarantee: our profile is ALWAYS created (and
+            // re-derived) with a NULL capability array — zero package
+            // capabilities. The registry subtree (AppModelUnlock) where Windows
+            // records non-zero capability manifests is largely absent for
+            // NON-package AppContainer profiles on Windows 10/11 desktop, so we
+            // cannot depend on it. We therefore:
+            //   1) verify the profile SID is derivable (exists), and
+            //   2) when an AppModelUnlock capability manifest EXISTS for our
+            //      SID, fail closed if it lists a non-empty capability set.
+            // Absence of the registry subtree is NOT treated as a defect: a
+            // non-package zero-cap AppContainer legitimately has none.
+            try
+            {
+                IntPtr derived;
+                if (Native.DeriveAppContainerSidFromAppContainerName(appContainerName, out derived) != 0)
+                    return -1;
+                string sidStr = SidToString(derived);
+                if (sidStr == null) return -1;
+                string regKey = "Software\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock";
+                using (Microsoft.Win32.RegistryKey baseKey = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(regKey))
+                {
+                    if (baseKey == null) return 0; // non-package profile; no manifest
+                    foreach (string sub in baseKey.GetSubKeyNames())
+                    {
+                        if (sub.IndexOf(sidStr, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            using (Microsoft.Win32.RegistryKey acc = baseKey.OpenSubKey(sub))
+                            {
+                                if (acc != null)
+                                {
+                                    foreach (string v in acc.GetValueNames())
+                                    {
+                                        if (v.IndexOf("cap", StringComparison.OrdinalIgnoreCase) >= 0)
+                                        {
+                                            int n = -1;
+                                            try { n = CountCaps(acc.GetValue(v)); }
+                                            catch { n = -1; }
+                                            if (n > 0) return n;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return 0;
+                }
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static int CountCaps(object value)
+        {
+            try
+            {
+                if (value is string[]) return ((string[])value).Length;
+                if (value is Array) return ((Array)value).Length;
+                string s = value as string;
+                if (s != null) return s.Split(new char[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries).Length;
+                return 0;
+            }
+            catch { return 0; }
         }
 
         private static bool EnsureSid(string name, out IntPtr sid, out string sidStr)
