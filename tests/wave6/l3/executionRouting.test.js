@@ -7,7 +7,7 @@ const mesh = require("../../../src/mesh");
 const ids = mesh.ids;
 const { parseActionIntent } = require("../../../src/action/intent");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
-const { makeCanonicalAuthorityRoot } = require("../../repair/testCanonicalRoot");
+const { makeCanonicalAuthorityRoot } = require("../repair/testCanonicalRoot");
 
 /**
  * WAVE 6 L3 — distributed capability & execution routing.
