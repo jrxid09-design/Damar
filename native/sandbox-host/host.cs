@@ -573,18 +573,36 @@ namespace DamarSandboxHost
                 Console.Error.WriteLine("SANDBOXHOST DEBUG_CMD=" + cmd.ToString());
             }
 
-            // AppContainer CreateProcess rejects a hand-built env block with
-// ERROR_ENVVAR_NOT_FOUND (203) on this runtime. Inherit the parent env; the
-// sandbox shim scrubs ambient secrets BEFORE tool code runs, and the kernel
-// denies network/fs/process regardless (proven by the isolation probes).
-IntPtr envPtr = IntPtr.Zero;
+            // R4-03: environment strategy — empirical findings from the Repair4 probe:
+//   - A hand-built MINIMAL env block (even + PATH/PATHEXT/USERNAME/
+//     COMPUTERNAME) is ALWAYS rejected by AppContainer CreateProcess with
+//     ERROR_ENVVAR_NOT_FOUND (203), because Windows expands %VAR%
+//     references inside the block against the block itself; the block must
+//     therefore contain the full transitive closure of referenced variables.
+//   - A FULL rebuilt copy of the parent environment succeeds; the sandbox
+//     SHIM then applies the deny-by-default scrub BEFORE any tool code runs
+//     (only the curated allowlist survives; proven by DAMAR_SECRET leak
+//     probes). This equals the R4-03 guarantee at the tool-code boundary:
+//     the native host never passes a NULL/empty block, and the effective
+//     environment visible to tool code is implicit-empty by default.
+//   - SANDBOXHOST_ENV_MODE allows overriding for experiments:
+//     full (default: owned block, secret-families scrubbed) /
+//     minimal (debug only) / inherit (previous R3 path).
+//   - R3-03 note: the block shared with the child is the HOST's scrubbed
+//     process env at spawn time; child processes (if any) inherit the same
+//     scrubbed env. Secrets are not in it (see sandboxShim ALLOW_ENV).
+            string envMode = Environment.GetEnvironmentVariable("SANDBOXHOST_ENV_MODE");
+            IntPtr envPtr = IntPtr.Zero;
+            if (envMode == "minimal") envPtr = BuildEnvPtr(o, false);
+            else if (envMode == "inherit") envPtr = IntPtr.Zero; // probe/back-compat only
+            else envPtr = BuildEnvPtr(o, true); // DEFAULT: owned + secret-scrubbed block
 
             Native.PROCESS_INFORMATION pi;
             bool ok = Native.CreateProcess(o.Plain ? o.Node : null, cmd, IntPtr.Zero, IntPtr.Zero, true,
                 Native.CREATE_NO_WINDOW | Native.CREATE_UNICODE_ENVIRONMENT | (o.Plain ? 0 : Native.EXTENDED_STARTUPINFO_PRESENT),
                 envPtr, o.Cwd, ref si, out pi);
 
-            Marshal.FreeHGlobal(envPtr);
+            if (envPtr != IntPtr.Zero) Marshal.FreeHGlobal(envPtr);
 
             if (!ok)
             {
@@ -627,9 +645,42 @@ IntPtr envPtr = IntPtr.Zero;
             return exit;
         }
 
-        private static IntPtr BuildEnvPtr(Options o)
+        private static IntPtr BuildEnvPtr(Options o, bool fullCopy = false)
         {
             var vs = new Dictionary<string, string>();
+            if (fullCopy)
+            {
+                // R4-03: build an OWNED environment block from the parent env,
+                // EXCLUDING secret-bearing families. This is the default path:
+                // we never pass NULL and we never forward keys that commonly
+                // carry credentials (API keys, tokens, passwords, DAMAR_*,
+                // cloud/CI secrets). Defense in depth at the process boundary;
+                // the shim's deny-by-default allowlist is the final gate right
+                // before tool code runs.
+                string[] secretFamilies = new string[] {
+                    "SECRET", "TOKEN", "PASSWORD", "PASSWD", "API_KEY", "APIKEY",
+                    "ACCESS_KEY", "CREDENTIAL", "AUTH", "PRIVATE_KEY", "BEARER",
+                    "DAMAR", "AWS_", "AZURE", "GOOGLE", "OPENAI", "ANTHROPIC",
+                    "GITHUB_TOKEN", "GITLAB", "NPM_TOKEN", "CF_", "DATABASE_URL",
+                    "_KEY", "_PASS", "_TOKEN", "SLACK", "WEBHOOK"
+                };
+                foreach (System.Collections.DictionaryEntry de in Environment.GetEnvironmentVariables())
+                {
+                    string k = de.Key == null ? "" : de.Key.ToString();
+                    string v = de.Value == null ? "" : de.Value.ToString();
+                    if (k.Length == 0) continue;
+                    bool secret = false;
+                    foreach (string f in secretFamilies)
+                    {
+                        if (k.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0) { secret = true; break; }
+                    }
+                    if (secret) continue;
+                    vs[k] = v;
+                }
+                vs["NODE_ENV"] = "sandbox";
+                vs["DAMAR_SANDBOX"] = "1";
+                return buildBlock(vs, o);
+            }
             vs["NODE_ENV"] = "sandbox";
             vs["DAMAR_SANDBOX"] = "1";
             // point temp at a writable sandbox root
@@ -644,6 +695,25 @@ IntPtr envPtr = IntPtr.Zero;
                 string v = Environment.GetEnvironmentVariable(k);
                 if (v != null) vs[k] = v;
             }
+            // R4-03 bisect: SANDBOXHOST_ENV_EXTRA="A,B,C" copies additional
+            // parent keys into the minimal block so we can empirically find the
+            // smallest set AppContainer CreateProcess requires on this runtime.
+            string extraCfg = Environment.GetEnvironmentVariable("SANDBOXHOST_ENV_EXTRA");
+            if (!string.IsNullOrEmpty(extraCfg))
+            {
+                foreach (string raw in extraCfg.Split(','))
+                {
+                    string k = raw.Trim();
+                    if (k.Length == 0) continue;
+                    string v = Environment.GetEnvironmentVariable(k);
+                    if (v != null) vs[k] = v;
+                }
+            }
+            return buildBlock(vs, o);
+        }
+
+        private static IntPtr buildBlock(Dictionary<string, string> vs, Options o)
+        {
             StringBuilder sb = new StringBuilder();
             foreach (var kv in vs) { sb.Append(kv.Key).Append('=').Append(kv.Value).Append('\0'); }
             sb.Append('\0');
