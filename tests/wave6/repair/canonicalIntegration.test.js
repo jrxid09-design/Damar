@@ -6,7 +6,7 @@ const path = require("node:path");
 const { createDistributedNodeRuntime, createGovernedExternalToolExecutor } = require("../../../src/integration/wave6Production");
 const { parseActionIntent } = require("../../../src/action/intent");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
-const { createCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
+const { makeCanonicalAuthorityRoot } = require("./testCanonicalRoot");
 const dexec = require("../../../src/dexec");
 const dresil = require("../../../src/dresil");
 const federationMod = require("../../../src/federation");
@@ -32,9 +32,9 @@ async function intentFor({ capabilityId = "code.test", operation = "test" } = {}
         schemaVersion: 1, capabilityId, operation, arguments: { scope: "." }, correlationId: "corr"
     }), { nowMs: 1_000_000 });
     if (!canonicalBound) {
-        // R3-01: composition-root factory (NOT `new AuthorityRegistry`).
+        // R4-01: canonical root from deep-internal composition (test harness).
         const store = createMemoryAuthorityStore();
-        const registry = createCanonicalAuthorityRegistry({
+        const { owner: registry } = await makeCanonicalAuthorityRoot({
             store,
             clock: { nowIso: () => new Date(1_000_000).toISOString(), nowMs: () => 1_000_000 }
         });
@@ -45,7 +45,6 @@ async function intentFor({ capabilityId = "code.test", operation = "test" } = {}
         }, "owner");
         await registry.ratify({ ratificationId: "rat-e2e", proposalId: "e2e-grant", ownerIdentity: "owner", decision: "APPROVED" });
         await registry.issueRatifiedRootGrant({ proposalId: "e2e-grant", ratificationId: "rat-e2e", actor: "owner" });
-        dexec.installCanonicalAuthorityRegistry(registry);
         canonicalBound = true;
     }
     return intent;

@@ -6,7 +6,7 @@ const path = require("node:path");
 const { createDistributedNodeRuntime, createGovernedExternalToolExecutor } = require("../../../src/integration/wave6Production");
 const { parseActionIntent } = require("../../../src/action/intent");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
-const { createCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
+const { makeCanonicalAuthorityRoot } = require("../repair/testCanonicalRoot");
 const dexec = require("../../../src/dexec");
 const federationMod = require("../../../src/federation");
 const mesh = require("../../../src/mesh");
@@ -40,8 +40,8 @@ let canonicalBound = false;
 async function bindCanonical() {
     if (canonicalBound) return canonicalRegistry;
     const store = createMemoryAuthorityStore();
-    // R3-01: composition-root factory (NOT `new AuthorityRegistry`).
-    const registry = createCanonicalAuthorityRegistry({
+    // R4-01: canonical root from deep-internal composition (test harness).
+    const { owner: registry } = await makeCanonicalAuthorityRoot({
         store,
         clock: { nowIso: () => new Date(1_000_000).toISOString(), nowMs: () => 1_000_000 }
     });
@@ -56,7 +56,6 @@ async function bindCanonical() {
         await canonicalRegistry.ratify({ ratificationId: `rat-${capabilityId}`, proposalId: `grant-${capabilityId}`, ownerIdentity: "owner", decision: "APPROVED" });
         await canonicalRegistry.issueRatifiedRootGrant({ proposalId: `grant-${capabilityId}`, ratificationId: `rat-${capabilityId}`, actor: "owner" });
     }
-    dexec.installCanonicalAuthorityRegistry(canonicalRegistry);
     canonicalBound = true;
     return canonicalRegistry;
 }
@@ -69,11 +68,13 @@ function intentFor(capabilityId) {
 }
 
 function nodePair(registry, logicalDamarId) {
+    // R4-01: no authorityRegistry param — the canonical root is installed by
+    // the composition harness (bindCanonical) and the router resolves live.
     const A = createDistributedNodeRuntime({
-        logicalDamarId, profile: "DESKTOP_PRIMARY", capabilityIds: ["code.test", "chaos.test"], authorityRegistry: registry
+        logicalDamarId, profile: "DESKTOP_PRIMARY", capabilityIds: ["code.test", "chaos.test"]
     });
     const B = createDistributedNodeRuntime({
-        logicalDamarId, profile: "SERVER_PRIVATE", capabilityIds: ["code.test", "chaos.test", "chaos2.test"], authorityRegistry: registry
+        logicalDamarId, profile: "SERVER_PRIVATE", capabilityIds: ["code.test", "chaos.test", "chaos2.test"]
     });
     A.registry.register({ identity: B.identity });
     A.trust.pair({ nodeId: B.identity.nodeId, state: "TRUSTED", scopes: ["COMPUTE", "TOOL_EXECUTION"], ttlMs: 3600_000 });

@@ -8,7 +8,7 @@ const path = require("node:path");
 const { createRuntimeHost } = require("../../../src/runtime/host/runtimeHost");
 const { createWave6Lane3Facade, createDistributedNodeRuntime, createGovernedExternalToolExecutor } = require("../../../src/integration/wave6Production");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
-const { createCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
+const { makeCanonicalAuthorityRoot } = require("../repair/testCanonicalRoot");
 const dexec = require("../../../src/dexec");
 const federationMod = require("../../../src/federation");
 const mesh = require("../../../src/mesh");
@@ -39,7 +39,8 @@ let sharedBound = false;
 async function canonicalOwner() {
     if (sharedBound) return sharedRegistry;
     const store = createMemoryAuthorityStore();
-    const registry = createCanonicalAuthorityRegistry({
+    // R4-01: canonical root from deep-internal composition (test harness).
+    const { owner: registry } = await makeCanonicalAuthorityRoot({
         store,
         clock: { nowIso: () => new Date().toISOString(), nowMs: () => Date.now() }
     });
@@ -52,15 +53,12 @@ async function canonicalOwner() {
     const issued = await registry.issueRatifiedRootGrant({ proposalId: "chaos-grant", ratificationId: "rat-c", actor: "owner" });
     if (!issued.allowed) throw new Error("chaos grant failed: " + issued.reasonCode);
     sharedRegistry = registry;
-    if (!sharedBound) {
-        dexec.installCanonicalAuthorityRegistry(registry);
-        sharedBound = true;
-    }
+    sharedBound = true;
     return registry;
 }
 
 function makeNodeA(registry) {
-    const A = createDistributedNodeRuntime({ logicalDamarId: ids.mint.logicalDamarId(), profile: "DESKTOP_PRIMARY", capabilityIds: ["code.cap"], authorityRegistry: registry });
+    const A = createDistributedNodeRuntime({ logicalDamarId: ids.mint.logicalDamarId(), profile: "DESKTOP_PRIMARY", capabilityIds: ["code.cap"] });
     if (!A || !A.dexecRouter) {
         throw new Error("createDistributedNodeRuntime did not produce dexecRouter: " + JSON.stringify(Object.keys(A || {})));
     }

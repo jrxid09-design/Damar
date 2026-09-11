@@ -7,7 +7,7 @@ const mesh = require("../../../src/mesh");
 const ids = mesh.ids;
 const { parseActionIntent } = require("../../../src/action/intent");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
-const { createCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
+const { makeCanonicalAuthorityRoot } = require("../../repair/testCanonicalRoot");
 
 /**
  * WAVE 6 L3 — distributed capability & execution routing.
@@ -34,7 +34,9 @@ async function canonicalIntent({ capabilityId = "code.test", operation = "test",
     }), { nowMs: 1_000_000 });
     if (!canonicalBound) {
         const store = createMemoryAuthorityStore();
-        const registry = createCanonicalAuthorityRegistry({
+        // R4-01: canonical root comes from the deep-internal composition (via
+        // test-only harness). No public factory/installer exists.
+        const { owner: registry } = await makeCanonicalAuthorityRoot({
             store,
             clock: { nowIso: () => new Date(1_000_000).toISOString(), nowMs: () => 1_000_000 }
         });
@@ -45,7 +47,6 @@ async function canonicalIntent({ capabilityId = "code.test", operation = "test",
         }, "owner");
         await registry.ratify({ ratificationId: "rat", proposalId: "grant", ownerIdentity: "owner", decision: "APPROVED" });
         await registry.issueRatifiedRootGrant({ proposalId: "grant", ratificationId: "rat", actor: "owner" });
-        dexec.installCanonicalAuthorityRegistry(registry);
         canonicalBound = true;
     }
     return intent;

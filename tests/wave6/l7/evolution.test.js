@@ -104,11 +104,11 @@ test("L7: canary requires APPROVED proposal — self-authorization structurally 
  // pipeline (registered via the frozen registry) — no direct-object bypass
  await assert.rejects(() => pipeline.startCanary({ proposalId: "p2", proposal: { proposalId: "p2", digest: "d".repeat(64), revision: 1 }, ratification: { decision: "APPROVED", ratificationId: "r1", proposalId: "p2", proposalDigest: "d".repeat(64), proposalRevision: 1, approvedAuthority: { candidateArtifactDigest: CANDIDATE }, approvedAuthorityDigest: sha256Hex({ candidateArtifactDigest: CANDIDATE }) }, candidateArtifactDigest: CANDIDATE }), (e) => /unknown proposal|caller-asserted/.test(e.message));
 // canonical path: registry-bound pipeline + registry ratification
-  const { createCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
+  const { makeCanonicalAuthorityRoot } = require("../repair/testCanonicalRoot");
   const { createMemoryAuthorityStore } = require("../../../src/authority/store");
   const store = createMemoryAuthorityStore();
-  // R3-01: composition-root factory (NOT `new AuthorityRegistry`).
-  const registry = createCanonicalAuthorityRegistry({
+  // R4-01: canonical root from deep-internal composition (test harness).
+  const { owner: registry } = await makeCanonicalAuthorityRoot({
   store, clock: { nowIso: () => new Date(1_000_000).toISOString(), nowMs: () => 1_000_000 }
   });
  // R2-01: canary approval resolves at USE time from the bound canonical

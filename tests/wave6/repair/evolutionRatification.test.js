@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const evo = require("../../../src/evolution");
 const authorityModel = require("../../../src/authority/model");
 const { isCanonicalAuthorityRegistry } = require("../../../src/authority/registry");
-const { createCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
+const { makeCanonicalAuthorityRoot } = require("./testCanonicalRoot");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
 
 /**
@@ -20,9 +20,14 @@ const CANDIDATE2 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 
 async function canonicalRegistry({ proposalId = "wave6-routing-1", requestedAuthority = null } = {}) {
  const store = createMemoryAuthorityStore();
- // R3-01: composition-root factory (NOT `new AuthorityRegistry`).
- const registry = createCanonicalAuthorityRegistry({
- store, clock: { nowIso: () => new Date(1_000_000).toISOString(), nowMs: () => 1_000_000 }
+ // R4-01: canonical root from deep-internal composition (test harness).
+ // These evolution tests need a CANONICALLY-BRANDED owner for pipeline brand
+ // checks only; they do NOT need this owner to be the distributed-execution
+ // authority source (which is first-wins, bound by the routing suites).
+ // installDistributed:false still brands the instance canonical.
+ const { owner: registry } = await makeCanonicalAuthorityRoot({
+ store, clock: { nowIso: () => new Date(1_000_000).toISOString(), nowMs: () => 1_000_000 },
+ installDistributed: false
  });
  const proposal = await registry.proposeEvolution({
  proposalId, createdBy: "owner", kind: "routing_preference",
@@ -114,10 +119,11 @@ test("R2-EVOL-05: superseded proposal -> REJECTED (owner state reflects new revi
 });
 
 test("R2-EVOL-06: expired ratification -> REJECTED", async () => {
-  const store = createMemoryAuthorityStore();
-  const registry = createCanonicalAuthorityRegistry({
-  store, clock: { nowIso: () => new Date(100_000).toISOString(), nowMs: () => 100_000 }
-  });
+   const store = createMemoryAuthorityStore();
+   const { owner: registry } = await makeCanonicalAuthorityRoot({
+   store, clock: { nowIso: () => new Date(100_000).toISOString(), nowMs: () => 100_000 },
+   installDistributed: false
+   });
  const proposal = await registry.proposeEvolution({
  proposalId: "exp-1", createdBy: "owner", kind: "routing_preference",
  problem: "x", proposedChange: "y", affectedSubsystems: ["routing"],

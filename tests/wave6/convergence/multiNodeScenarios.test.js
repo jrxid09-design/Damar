@@ -13,11 +13,12 @@ const authorityModel = require("../../../src/authority/model");
 const ids = mesh.ids;
 const { parseActionIntent } = require("../../../src/action/intent");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
-const { createCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
+const { makeCanonicalAuthorityRoot } = require("../repair/testCanonicalRoot");
 
-// R3-01: the canonical AuthorityRegistry is produced by the composition-root
-// factory and installed ONCE per process; routing resolves authority LIVE
-// against it (no caller-supplied evaluation, no exported first-bind).
+// R4-01: the canonical AuthorityRegistry is constructed+marked+installed inside
+// the deep-internal composition (via test harness) ONCE per process; routing
+// resolves authority LIVE against it (no caller-supplied evaluation, no
+// exported factory/installer).
 let canonicalBound = false;
 async function canonicalIntent({ capabilityId = "code.test", operation = "test", subject = "damar" } = {}) {
     const intent = parseActionIntent(JSON.stringify({
@@ -25,7 +26,7 @@ async function canonicalIntent({ capabilityId = "code.test", operation = "test",
     }), { nowMs: 1_000_000 });
     if (!canonicalBound) {
         const store = createMemoryAuthorityStore();
-        const registry = createCanonicalAuthorityRegistry({
+        const { owner: registry } = await makeCanonicalAuthorityRoot({
             store,
             clock: { nowIso: () => new Date(1_000_000).toISOString(), nowMs: () => 1_000_000 }
         });
@@ -36,7 +37,6 @@ async function canonicalIntent({ capabilityId = "code.test", operation = "test",
         }, "owner");
         await registry.ratify({ ratificationId: "rat", proposalId: "grant", ownerIdentity: "owner", decision: "APPROVED" });
         await registry.issueRatifiedRootGrant({ proposalId: "grant", ratificationId: "rat", actor: "owner" });
-        dexec.installCanonicalAuthorityRegistry(registry);
         canonicalBound = true;
     }
     return intent;

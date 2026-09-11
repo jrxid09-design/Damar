@@ -7,7 +7,7 @@ const path = require("node:path");
 const mesh = require("../../../src/mesh");
 const ids = mesh.ids;
 const dexec = require("../../../src/dexec");
-const { createCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
+const { makeCanonicalAuthorityRoot } = require("./testCanonicalRoot");
 const { parseActionIntent } = require("../../../src/action/intent");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
 const federation = require("../../../src/federation");
@@ -39,10 +39,9 @@ async function canonicalIntent({ capabilityId = "code.test", operation = "test" 
         schemaVersion: 1, capabilityId, operation, arguments: { scope: "." }, correlationId: "corr"
     }), { nowMs: 1_000_000 });
     if (!canonicalBound) {
-        // R3-01: the canonical registry comes from the composition-root factory
-        // (NOT `new AuthorityRegistry`, which is non-canonical).
+        // R4-01: canonical root from deep-internal composition (test harness).
         const store = createMemoryAuthorityStore();
-        const registry = createCanonicalAuthorityRegistry({
+        const { owner: registry } = await makeCanonicalAuthorityRoot({
             store,
             clock: { nowIso: () => new Date(1_000_000).toISOString(), nowMs: () => 1_000_000 }
         });
@@ -53,7 +52,6 @@ async function canonicalIntent({ capabilityId = "code.test", operation = "test" 
         }, "owner");
         await registry.ratify({ ratificationId: "rat", proposalId: "sbox-grant", ownerIdentity: "owner", decision: "APPROVED" });
         await registry.issueRatifiedRootGrant({ proposalId: "sbox-grant", ratificationId: "rat", actor: "owner" });
-        dexec.installCanonicalAuthorityRegistry(registry);
         canonicalBound = true;
     }
     return intent;

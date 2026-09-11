@@ -3,93 +3,92 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { AuthorityRegistry } = require("../../../src/authority/registry");
-const { createCanonicalAuthorityRegistry, isCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
+const { isCanonicalAuthorityRegistry } = require("../../../src/authority/canonicalOwnership");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
-const { installCanonicalAuthorityRegistry } = require("../../../src/dexec/authoritySource");
 const dexec = require("../../../src/dexec");
+const { makeCanonicalAuthorityRoot } = require("./testCanonicalRoot");
 
 const CLOCK = () => ({ nowIso: () => new Date(1_000_000).toISOString(), nowMs: () => 1_000_000 });
 
 /**
- * W6-R3-09 — RED-TEAM THE NEW PROVENANCE ROOT.
+ * W6-R4-01 — RED-TEAM THE COMPOSITION-ROOT PROVENANCE.
  *
  * CONSTRUCTED INSTANCE != CANONICAL OWNER:
- *   - `new AuthorityRegistry(...)` from ANY caller is NEVER canonical (near
- *     the composition root or later); it cannot capture production authority.
- *   - fake registries built before bootstrap cannot capture authority.
- *   - cloned / spread / serialized / monkey-patched copies of a canonical
- *     instance are NEVER canonical (brand is object identity inside a
- *     closure-private WeakSet populated only by the composition-root factory).
- *   - evolution live ratification and distributed-execution live authority
- *     resolve ONLY through the canonical registry.
+ *   - `new AuthorityRegistry(...)` from ANY caller is NEVER canonical.
+ *   - No production export can construct, canonify, install, or rebind the
+ *     canonical Authority owner.
+ *   - Only the deep-internal composition (reached here via the test-only
+ *     harness, which is itself not part of any public/package surface) can
+ *     construct+mark+install.
+ *   - Clones / spreads / serialized / monkey-patched copies are never canonical
+ *     (object identity in a closure-private WeakSet).
+ *   - Evolution live ratification and distributed-execution live authority
+ *     resolve ONLY through the canonical owner.
  */
 
 function mkStore() { return createMemoryAuthorityStore(); }
 
-test("R3-09: caller-created `new AuthorityRegistry` before bootstrap is NOT canonical", () => {
+test("R4-01: caller-created `new AuthorityRegistry` is never canonical (pre/post bootstrap)", () => {
     const fake = new AuthorityRegistry({ store: mkStore(), clock: CLOCK() });
     assert.equal(isCanonicalAuthorityRegistry(fake), false);
-    assert.throws(() => installCanonicalAuthorityRegistry(fake), /composition-root ownership/);
-});
-
-test("R3-09: caller-created registry after bootstrap is still NOT canonical", () => {
-    // A canonical owner already exists (installed by authorityLease/canonical
-    // suites in this process). A NEW caller registry must STILL be rejected.
     const late = new AuthorityRegistry({ store: mkStore(), clock: CLOCK() });
     assert.equal(isCanonicalAuthorityRegistry(late), false);
-    assert.throws(() => installCanonicalAuthorityRegistry(late), /composition-root ownership/);
 });
 
-test("R3-09: cloned / spread / serialized / monkey-patched canonical registry rejected", () => {
-    // Build a genuinely canonical registry (the only way to become canonical).
-    const canonical = createCanonicalAuthorityRegistry({ store: mkStore(), clock: CLOCK() });
+test("R4-01: no public factory/installer/binder on authority or dexec surfaces", () => {
+    // authority surface exposes only read-only predicate + vocab.
+    const authorityPublic = require("../../../src/authority");
+    assert.equal(authorityPublic.createCanonicalAuthorityRegistry, undefined,
+        "authority public surface must NOT export a canonical factory (R4-01)");
+    assert.equal(authorityPublic.canonical && authorityPublic.canonical.createCanonicalAuthorityRegistry, undefined,
+        "canonical vocab must NOT carry a factory");
+    // dexec public surface exposes no installer / first-bind.
+    assert.equal(dexec.installCanonicalAuthorityRegistry, undefined,
+        "dexec public must NOT export an installer (R4-01)");
+    assert.equal(dexec.bindCanonicalAuthorityRegistry, undefined,
+        "dexec public must NOT export a first-bind binder");
+    assert.equal(dexec.createCanonicalAuthorityRegistry, undefined,
+        "dexec public must NOT export a canonical factory");
+    assert.equal(dexec.getCanonicalAuthorityBridge, undefined,
+        "bridge getter must not be exported publicly");
+});
+
+test("R4-01: cloned / spread / serialized / monkey-patched canonical registry rejected", async () => {
+    // Brand-only (not distributed source) — the distributed source is
+    // first-wins and bound by routing suites; this test needs only the brand.
+    const { owner: canonical } = await makeCanonicalAuthorityRoot({
+        store: mkStore(), clock: CLOCK(), installDistributed: false
+    });
     assert.equal(isCanonicalAuthorityRegistry(canonical), true);
 
-    // Object.assign spread / structured clone / JSON round-trip / manual copy
     const spread = { ...canonical };
     const cloned = Object.assign(Object.create(null), canonical);
     const json = JSON.parse(JSON.stringify(canonical));
     const manual = { store: canonical.store, clock: canonical.clock };
-
     for (const [label, value] of [
         ["spread", spread], ["Object.assign clone", cloned],
         ["serialized/deserialized", json], ["manual reconstruction", manual]
     ]) {
         assert.equal(isCanonicalAuthorityRegistry(value), false, `${label} must NOT be canonical`);
-        assert.throws(() => installCanonicalAuthorityRegistry(value),
-            /composition-root ownership/, `${label} install must be rejected`);
     }
-
-    // Monkey-patched copy: same shape, added methods — still not canonical.
     const patched = new AuthorityRegistry({ store: mkStore(), clock: CLOCK() });
     Object.defineProperty(patched, "store", { value: canonical.store });
     Object.defineProperty(patched, "getCurrentRatification", { value: canonical.getCurrentRatification });
     assert.equal(isCanonicalAuthorityRegistry(patched), false);
-    assert.throws(() => installCanonicalAuthorityRegistry(patched), /composition-root ownership/);
+    // There is no public installer to attempt on the patched copy.
+    assert.equal(dexec.installCanonicalAuthorityRegistry, undefined);
 });
 
-test("R3-09: no exported first-bind / brand API exists on the dexec public surface", () => {
-    assert.equal(typeof dexec.bindCanonicalAuthorityRegistry, "undefined",
-        "bindCanonicalAuthorityRegistry first-bind surface must be REMOVED");
-    assert.equal(dexec.getCanonicalAuthorityBridge, undefined,
-        "bridge getter must not be exported publicly");
-    assert.equal(typeof dexec.installCanonicalAuthorityRegistry, "function",
-        "only the composition-root install seam is the (non-first-wins) factory-install entry");
+test("R4-01: composition-root owner is canonical and is THE authority (no rebind via public surface)", async () => {
+    const { owner: canonical, isCanonical } = await makeCanonicalAuthorityRoot({ store: mkStore(), clock: CLOCK(), installDistributed: false });
+    assert.equal(isCanonical, true);
+    assert.equal(isCanonicalAuthorityRegistry(canonical), true);
+    // No public rebinding handle exists.
+    assert.equal(dexec.installCanonicalAuthorityRegistry, undefined);
+    assert.equal(dexec.bindCanonicalAuthorityRegistry, undefined);
 });
 
-test("R3-09: a composition-root-produced owner is installable and is THE canonical authority", () => {
-    const canonical = createCanonicalAuthorityRegistry({ store: mkStore(), clock: CLOCK() });
-    // If a different canonical was already installed first, this returns false
-    // (first-wins) WITHOUT throwing — never displaces.
-    try { installCanonicalAuthorityRegistry(canonical); } catch (e) {
-        // already bound to a DIFFERENT owner (earlier suite) -> first-wins
-        assert.match(e.message, /cannot be displaced/);
-    }
-    const owner = isCanonicalAuthorityRegistry(canonical);
-    assert.equal(owner, true);
-});
-
-test("R3-09: evolution live ratification resolves ONLY through the canonical owner", async () => {
+test("R4-01: evolution live ratification resolves ONLY through the canonical owner", async () => {
     const evo = require("../../../src/evolution");
     const authorityModel = require("../../../src/authority/model");
     const pipeline = new evo.EvolutionPipeline({ authorityModel });
@@ -107,17 +106,14 @@ test("R3-09: evolution live ratification resolves ONLY through the canonical own
         () => pipeline.startCanary({ proposalId: "x", candidateArtifactDigest: "c".repeat(64) }),
         (e) => e.code === "EVOLUTION_NOT_APPROVED" ||
                /not the canonical owner/.test(e.message),
-        "a monkey-patched/duck-typed registry cannot mint canary authority"
+        "a duck-typed registry cannot mint canary authority"
     );
 });
 
-test("R3-09: distributed execution live authority resolves ONLY through canonical registry", async () => {
+test("R4-01: distributed execution live authority resolves ONLY through canonical registry", async () => {
     const mesh = require("../../../src/mesh");
     const ids = mesh.ids;
     const { DistributedExecutionRouter } = require("../../../src/dexec");
-    // Router built WITHOUT the canonical owner bound to it still requires the
-    // module-private canonical source; a caller-created registry never becomes
-    // the source.
     const trust = new mesh.NodeTrust();
     const registry = new mesh.NodeRegistry();
     const identity = mesh.meshIdentity.mintNodeIdentity({ logicalDamarId: ids.mint.logicalDamarId() });
@@ -125,10 +121,12 @@ test("R3-09: distributed execution live authority resolves ONLY through canonica
     const router = new DistributedExecutionRouter({ trust, registry });
     trust.pair({ nodeId: identity.nodeId, state: "TRUSTED", scopes: ["COMPUTE", "TOOL_EXECUTION"] });
     const intent = { intentId: "i1", capabilityId: "code.test", operation: "run", arguments: {}, correlationId: "c", createdAtMs: 1 };
-    // Without the canonical owner having a grant for code.test, routing
-    // DENIES (never a caller-fake). If a canonical owner from another suite is
-    // installed but has no code.test grant, this still DENIES.
     const err = await router.route({ intent, toolId: "t", preferredNodeId: identity.nodeId }).then(() => null).catch(e => e);
-    assert.ok(err, "route must fail closed (no caller-supplied authority path)");
-    assert.equal(err.failureClass === "AUTHORITY_DENIED" || err.code === "MESSAGE_MALFORMED", true);
+    assert.ok(err, "route must fail closed (no caller-supplied authority path / owner not installed)");
+    // Fail-closed either because the canonical owner isn't installed yet
+    // (plain Error with "not yet bound") OR because a bound owner denies this
+    // capability (AUTHORITY_DENIED). Either way route() MUST NOT resolve.
+    const deniedByOwner = err.failureClass === "AUTHORITY_DENIED" || err.code === "MESSAGE_MALFORMED";
+    const ownerUnbound = /not yet bound/.test(err.message || "");
+    assert.ok(deniedByOwner || ownerUnbound, "route must fail closed: got " + (err.message || "").slice(0, 120));
 });
