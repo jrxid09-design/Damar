@@ -41,7 +41,7 @@ const HOST_EXE = path.resolve(__dirname, "..", "..", "native", "sandbox-host", "
 // R4-02: frozen helper binary digest. Rebuilds re-record this value via the
 // provisioning manifest check; a binary that differs from this exact digest is
 // treated as tampered/untrusted and provisioning fails closed.
-const SANDBOX_HOST_DIGEST = "b199a4f10dd18332b1248b9e34f494d9bed7dee02530737ffadd4b320921e5e0";
+const SANDBOX_HOST_DIGEST = "d8a7d777d5fd1282c82b5b85e52c8a055e6deadf1fbb43482d1ad66a57007d6f";
 
 const PROVISION_TIMEOUT_MS = 30_000;
 

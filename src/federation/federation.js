@@ -227,6 +227,22 @@ class ExternalCapabilityFederation {
         return true;
     }
 
+    /**
+     * R5-04: the PINNED artifact digest for an enabled tool. This is the ONLY
+     * authoritative artifact identity a governed execution may bind: it was
+     * recorded at validation time (digest pinning mandatory). Returns null when
+     * the candidate/tool is not validated+enabled. Read-only — it mints nothing.
+     */
+    getPinnedToolDigest(candidateId, toolName) {
+        const c = this._candidates.get(String(candidateId ?? ""));
+        if (!c) return null;
+        const tool = String(toolName ?? "").slice(0, 128);
+        const pinned = c.validatedToolDigests.get(tool);
+        if (!pinned || !/^[0-9a-f]{64}$/.test(String(pinned))) return null;
+        if (!this.isToolEnabled(candidateId, tool)) return null;
+        return String(pinned);
+    }
+
     snapshot(candidateId) {
         const c = this._candidates.get(candidateId);
         return c ? Object.freeze({

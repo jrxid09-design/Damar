@@ -45,6 +45,23 @@ function bootSubsystems() {
 
     startup(config);
 
+    // R5-03: REAL PRODUCTION OWNER-TRUST PROVISIONING. Bind the canonical
+    // AuthorityRegistry into the module-private distributed authority source
+    // AND compose the sealed canonical Owner/Admin trust domain, so governed
+    // distributed execution + Owner-ratified evolution resolve against a real
+    // canonical owner instead of fail-closing on an unbound source. Boot stays
+    // graceful: a composition fault is logged, fail-closed, and never crashes
+    // the daemon.
+    require("./authority/productionComposition").ensureProductionAuthorityComposed()
+        .then((comp) => {
+            const status = comp.status();
+            logger.info?.(`[authority] kanonik siap: authorityBound=${status.authorityBound} ` +
+                `ownerTrust=${status.ownerTrustComposed} owner=${status.ownerEnrolled}`);
+        })
+        .catch((error) => {
+            logger.error?.(`Komposisi otoritas/owner-trust gagal (fail-closed): ${error.message}`);
+        });
+
     // Runtime otonom: capability sync, environment watch, housekeeping.
     require("./autonomy").init().catch(error => {
         logger.warn?.(`Autonomy runtime gagal disiapkan: ${error.message}`);
@@ -413,6 +430,12 @@ const shutdown = (signal) => {
         const mataDewa = require("./mataDewa");
         const mdInstance = mataDewa.getService();
         if (mdInstance) mdInstance.shutdown();
+    } catch { /* abaikan */ }
+    // R5-03: release the canonical owner-trust audit sink lock (single-writer)
+    // on graceful shutdown.
+    try {
+        const production = require("./authority/productionComposition").getProductionAuthorityComposition();
+        if (production) production.close();
     } catch { /* abaikan */ }
 
     if (server) {
