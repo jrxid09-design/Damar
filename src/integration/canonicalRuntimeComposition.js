@@ -183,9 +183,10 @@ async function buildRuntimeCoreInternal({
     recoverySystem = null,
     generationLedger = null,
     statusTracker = null,
-    recoveryConfigOverrides = {},
-    // ---- Wave 6 Repair3: narrow distributed lane-3 seam (optional) ----
-    wave6Distributed = null
+     recoveryConfigOverrides = {}
+     // R5-02: the Wave 6 lane-3 distributed adapter is NOT a public option. It
+     // is constructed inside the trusted runtime composition and passed to the
+     // Manager as a trusted-internal dependency, never via RuntimeCore options.
 } = {}, onCompositionPayload = null) {
 
     if (bus !== null) {
@@ -259,11 +260,9 @@ async function buildRuntimeCoreInternal({
         channelIngress = require("../manager/bootstrap").createDamarManagerIngressDomain({
             bus: busInstance,
             mediaSubsystem,
-            ...(continuityStoreFile === undefined ? {} : { continuityStoreFile }),
-            // R3-04: narrow Wave 6 lane-3 seam is optional; when provided by
-            // the host composition it routes AUTHORIZED intents through
-            // distributed execution. Absent = frozen behavior.
-            ...(wave6Distributed === null || wave6Distributed === undefined ? {} : { wave6Distributed })
+            ...(continuityStoreFile === undefined ? {} : { continuityStoreFile })
+            // R5-02: NO wave6Distributed threading — the public ingress never
+            // accepts a caller/option-supplied distributed execution adapter.
         });
     }
 

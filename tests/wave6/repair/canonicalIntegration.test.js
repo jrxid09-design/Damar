@@ -10,6 +10,7 @@ const { makeCanonicalAuthorityRoot } = require("./testCanonicalRoot");
 const dexec = require("../../../src/dexec");
 const dresil = require("../../../src/dresil");
 const federationMod = require("../../../src/federation");
+const { sha256File } = require("../../helpers/toolDigest");
 const mesh = require("../../../src/mesh");
 const ids = mesh.ids;
 
@@ -171,7 +172,7 @@ test("W6-07 F: governed external tool execution — canonical claim + sandbox + 
   permissions: { network: ["api.example.com"], filesystem: ["/data"] }
  });
  fed.inspect(snap.candidateId, { artifactSurface: "clean handler code" });
- fed.validate(snap.candidateId, { toolDigests: { search: "b".repeat(64) } });
+ fed.validate(snap.candidateId, { toolDigests: { search: sha256File(NOOP_TOOL) } });
  fed.enableTool(snap.candidateId, { toolName: "search" });
  const executor = createGovernedExternalToolExecutor({
   federation: fed,

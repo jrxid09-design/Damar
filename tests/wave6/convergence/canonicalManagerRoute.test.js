@@ -3,9 +3,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { createTestWave6Lane3Facade, brandTestWave6Adapter, isCanonicalWave6ExecutionAdapter } = require("../../manager/productionHarness");
+const { createTestWave6Lane3Facade, isCanonicalWave6ExecutionAdapter } = require("../../manager/productionHarness");
 const { makeActuationHarness } = require("../../actuation/harness");
 const { createDamarManagerComposition } = require("../../../src/manager/internal/managerBootstrap");
+const { createDamarManager } = require("../../../src/manager/bootstrap");
 const { VERIFICATION_STATE } = require("../../../src/action/verification/errors");
 const { CHANNEL_TYPES, OUTCOME } = require("../../../src/manager");
 
@@ -59,6 +60,11 @@ async function makeFullManager({ wave6Distributed = null, lane3LocalCalls = null
         capabilityId: "fs.cap", operations: ["read"], capabilityIncarnationId: capRes.incarnationId,
         actuatorId: "act-fs", invoke: async () => { if (lane3LocalCalls) lane3LocalCalls.push("act"); return { ok: true }; }
     });
+    // R5-02: the distributed seam is wired through the TRUSTED-INTERNAL
+    // composition parameter `wave6Adapter`. The public ingress never accepts it;
+    // tests drive the internal composition directly (test-only composition
+    // privilege). The adapter is passed UNBRANDED — R5-02 removed the production
+    // branding primitive entirely.
     const manager = createDamarManagerComposition({
         deps: {
             lane2: { admit: lane3.lane2.admit, evaluate: lane3.lane2.evaluate, authenticate: authAlice(lane3), session: lane3.lane2.session },
@@ -66,7 +72,7 @@ async function makeFullManager({ wave6Distributed = null, lane3LocalCalls = null
             lane4: { verify: async () => ({ verificationState: VERIFICATION_STATE.VERIFIED_SUCCESS, verificationId: "v1" }), compensate: async () => ({}) }
         },
         trustedChannelAdapters: [],
-        ...(wave6Distributed ? { wave6Distributed: brandTestWave6Adapter(wave6Distributed) } : {})
+        ...(wave6Distributed ? { wave6Adapter: wave6Distributed } : {})
     });
     return { manager, lane3 };
 }
@@ -132,13 +138,27 @@ test("R3-04: Wave 6 claim failure — Manager reports FAILED (no silent local do
     void r;
 });
 
-test("R3-04/R4-04: wave6Distributed seam rejects malformed + un-branded adapters", async () => {
-    // Malformed (missing tryDistributed function) -> rejected by the test
-    // harness brander (test-only composition privilege).
-    await assert.rejects(
-        () => makeFullManager({ wave6Distributed: { tryDistributed: "nope" } }),
-        /requires \{ tryDistributed \}/
-    );
+test("R4-04/R5-02: public Manager ingress does NOT accept a wave6Distributed option (seam removed)", async () => {
+    // R5-02 STEP 3: createDamarManagerIngressDomain has no wave6Distributed
+    // parameter and never installs/forwards a caller-supplied adapter. The only
+    // canonical Lane-3 seam is the trusted-internal composition param; there is
+    // no public surface that captures it.
+    const mb = require("../../../src/manager/bootstrap");
+    assert.equal(typeof mb.createDamarManagerIngressDomain, "function");
+    // A caller-supplied duck-typed adapter must NOT be canonical (brand primitive
+    // removed).
+    const duck = { tryDistributed: async () => ({ distributed: false }) };
+    assert.equal(isCanonicalWave6ExecutionAdapter(duck), false,
+        "duck-typed adapter must not be canonical (brand primitive removed)");
+    assert.equal(mb.installCanonicalWave6Seam, undefined,
+        "installCanonicalWave6Seam mutator is absent from the public manager surface (R5-02)");
+    void duck;
+});
+
+test("R5-02: public createDamarManager() rejects ANY options (no caller seam)", async () => {
+    assert.throws(() => createDamarManager({ wave6Distributed: { tryDistributed: async () => ({ distributed: false }) } }),
+        /canonical manager creation accepts NO options/,
+        "canonical Manager creation is zero-argument; no caller adapter option is accepted");
 });
 
 test("R4-04: public RuntimeHost / RuntimeCore REJECT a caller-supplied wave6Distributed option", async () => {
@@ -166,24 +186,25 @@ test("R4-04: production facade no longer exports createWave6Lane3Facade", () => 
     assert.equal(typeof managerBootstrap.createWave6Lane3Facade, "undefined");
 });
 
-test("R4-04: Manager composition rejects a duck-typed (un-branded) adapter — caller seam cannot reach it", async () => {
-    const lane3 = await makeActuationHarness({ scopeBindings: lane4Bindings() });
-    const capRes = await lane3.lane2.registerCapability({ id: "fs.cap", operations: ["read"] });
-    await lane3.lane2.grantAuthority({ capabilityId: "fs.cap", subject: "alice", actions: ["read"], identityBinding: { principals: ["alice"] } });
-    // A caller-constructed duck-typed adapter is NEVER canonical: the Manager
-    // composition itself rejects it at composition time (brand check).
+test("R5-02: a caller-controlled adapter cannot reach Manager Lane-3 (no public seam)", async () => {
+    // The Manager's Lane-3 distributed seam is a TRUSTED-INTERNAL composition
+    // parameter (wave6Adapter). It is NOT exposed on any public Manager/RuntimeHost
+    // surface, so a caller-constructed duck-typed / prototype-forged adapter can
+    // never occupy it. The internal composition accepts it ONLY when driven by a
+    // test-only harness (composition-time privilege), never from a request.
     const duck = { tryDistributed: async () => ({ distributed: false }) };
+    const protoDuck = Object.create({ tryDistributed: async () => ({ distributed: false }) });
     assert.equal(isCanonicalWave6ExecutionAdapter(duck), false,
-        "duck-typed adapter must not be canonical before branding");
-    assert.throws(() => createDamarManagerComposition({
-        deps: {
-            lane2: { admit: lane3.lane2.admit, evaluate: lane3.lane2.evaluate, authenticate: authAlice(lane3), session: lane3.lane2.session },
-            lane3: { execute: lane3.execute },
-            lane4: { verify: async () => ({ verificationState: VERIFICATION_STATE.VERIFIED_SUCCESS, verificationId: "v1" }), compensate: async () => ({}) }
-        },
-        trustedChannelAdapters: [],
-        wave6Distributed: duck
-    }), /BRANDED canonical Wave 6 execution adapter/, "composition must reject un-branded adapter (R4-04)");
+        "duck-typed adapter is not canonical (no brandable mutator exports)");
+    assert.equal(isCanonicalWave6ExecutionAdapter(protoDuck), false,
+        "prototype-forged adapter is not canonical");
+    // Public bootstrap surfaces do not carry an adapter slot:
+    assert.equal(typeof createDamarManager, "function");
+    assert.equal(createDamarManager.length, 0, "createDamarManager takes no parameters (no adapter slot)");
+    const mb = require("../../../src/manager/bootstrap");
+    assert.equal(mb.installCanonicalWave6Seam, undefined,
+        "installCanonicalWave6Seam mutator is absent from the public manager surface (R5-02)");
+    void duck; void protoDuck;
 });
 
 test("R3-04: createTestWave6Lane3Facade validates members + disabled default", async () => {

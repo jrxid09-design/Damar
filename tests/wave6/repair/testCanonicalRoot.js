@@ -1,30 +1,28 @@
 "use strict";
 
 /**
- * TEST-ONLY — canonical authority root harness for Repair3/4 suites.
+ * TEST-ONLY — canonical authority root harness for Repair5 suites.
  *
- * This module is NOT part of production exports or package surfaces. It is a
- * thin test helper that invokes the deep-internal production composition
- * (`src/authority/canonicalComposition.js`), which is itself not re-exported
- * from any public index. Tests use this harness to obtain an isolated
- * canonical AuthorityRegistry owner + install it into the module-private
- * distributed authority source.
+ * This module is NOT part of production exports or package surfaces. It uses the
+ * sanctioned TEST-ONLY seam exported by `src/authority/canonicalComposition`
+ * (`createCanonicalAuthorityRootTestOnly`). It does NOT import any production
+ * privileged mutator by name (`__markCanonical`, `composeCanonicalAuthorityRoot`,
+ * `installCanonicalAuthorityRegistry` are all absent from production exports).
  *
- * The production RuntimeHost composition uses the SAME deep-internal
- * composition module. This helper exists ONLY so test suites can legitimately
- * construct an isolated canonical composition without reaching into a public
- * factory (there is none).
+ * The production RuntimeHost composition owns the canonical authority via
+ * `createProductionRuntimeComposition`; this helper exists ONLY so repair tests
+ * can build isolated canonical owners for assertions.
  */
 
-const { composeCanonicalAuthorityRoot } = require("../../../src/authority/canonicalComposition");
+const { createCanonicalAuthorityRootTestOnly } = require("../../../src/authority/canonicalComposition");
 const dexec = require("../../../src/dexec");
 
 /**
  * Build an isolated canonical authority root.
- * @returns {Promise<{ owner, isCanonical, install }>}
+ * @returns {Promise<{ owner, isCanonical, marker }>}
  */
 async function makeCanonicalAuthorityRoot({ store, clock, evolutionPipeline = null, installDistributed = true } = {}) {
-    const root = composeCanonicalAuthorityRoot({
+    const root = await createCanonicalAuthorityRootTestOnly({
         store,
         clock,
         evolutionPipeline,
@@ -33,9 +31,7 @@ async function makeCanonicalAuthorityRoot({ store, clock, evolutionPipeline = nu
     return {
         owner: root.owner,
         isCanonical: root.isCanonical,
-        marker: root.marker,
-        // Test-only convenience: install is done by composition when requested.
-        install: () => (root.canInstallForDistributed ? true : undefined)
+        marker: root.marker
     };
 }
 

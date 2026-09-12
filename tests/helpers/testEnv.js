@@ -50,6 +50,22 @@ if (!process.env.DAMAR_CONTINUITY_STATE) {
     );
 }
 
+// R5-03: basis data otoritas kanonik produksi (authority-v1.db) juga
+// diisolasi — tes komposisi produksi tidak boleh menyentuh store
+// otoritas sungguhan pemilik. Default ke mode memori (non-durable)
+// agar tes deterministik; tes durability menyetel path eksplisit.
+if (!process.env.DAMAR_AUTHORITY_DB) {
+    process.env.DAMAR_AUTHORITY_DB = "memory";
+}
+
+// R5-03: state Owner/Admin trust kanonik juga diisolasi — komposisi
+// produksi yang dijalankan tes tidak boleh menulis ke
+// ~/.damar/ownertrust-v1.json milik pengguna sungguhan. Mode memori =
+// non-durable, deterministik.
+if (!process.env.DAMAR_OWNER_TRUST_STATE) {
+    process.env.DAMAR_OWNER_TRUST_STATE = "memory";
+}
+
 process.on("exit", () => {
 
     for (const jalur of [

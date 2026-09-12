@@ -11,6 +11,7 @@ const dexec = require("../../../src/dexec");
 const federationMod = require("../../../src/federation");
 const mesh = require("../../../src/mesh");
 const ids = mesh.ids;
+const { sha256File } = require("../../helpers/toolDigest");
 
 /**
  * W6-R2-06/R3-01 / R2-CHAOS-01 — REAL canonical ingress + end-to-end chaos.
@@ -139,7 +140,8 @@ test("R2-CHAOS-01: canonical end-to-end -> claim -> sandbox -> verify; replay/re
         permissions: {}
     });
     fed.inspect(snap.candidateId, { artifactSurface: "clean" });
-    fed.validate(snap.candidateId, { toolDigests: { search: "b".repeat(64) } });
+    // R5-04: pin the REAL artifact digest (native host verifies source+staged).
+    fed.validate(snap.candidateId, { toolDigests: { search: sha256File(NOOP_TOOL) } });
     fed.enableTool(snap.candidateId, { toolName: "search" });
     const executor = createGovernedExternalToolExecutor({
         federation: fed,

@@ -13,6 +13,7 @@ const { createMemoryAuthorityStore } = require("../../../src/authority/store");
 const federation = require("../../../src/federation");
 const { createGovernedExternalToolExecutor } = require("../../../src/integration/wave6Production");
 const { APPCONTAINER_NAME, HOST_EXE } = require("../../../src/federation/appContainerSandbox");
+const { sha256File } = require("../../helpers/toolDigest");
 
 /**
  * W6-R3-02/03 — REAL sandbox via Windows AppContainer (kernel network denial),
@@ -57,7 +58,7 @@ async function canonicalIntent({ capabilityId = "code.test", operation = "test" 
     return intent;
 }
 
-function makeExecutor({ sandboxPolicy = {}, toolDigests = {}, enabled = true } = {}) {
+function makeExecutor({ sandboxPolicy = {}, toolArtifactPath = NOOP_TOOL, toolName = "search", enabled = true } = {}) {
     const fed = new federation.ExternalCapabilityFederation();
     const snap = fed.discover({
         source: "https://mcp.example.com", sourceType: "mcp", publisher: "pub",
@@ -65,8 +66,9 @@ function makeExecutor({ sandboxPolicy = {}, toolDigests = {}, enabled = true } =
         permissions: { network: [], filesystem: [] }
     });
     fed.inspect(snap.candidateId, { artifactSurface: "clean" });
-    fed.validate(snap.candidateId, { toolDigests: { search: toolDigests.search ?? "b".repeat(64) } });
-    if (enabled) fed.enableTool(snap.candidateId, { toolName: "search" });
+    // R5-04: pin the REAL artifact digest — the native host verifies it end-to-end.
+    fed.validate(snap.candidateId, { toolDigests: { [toolName]: sha256File(toolArtifactPath) } });
+    if (enabled) fed.enableTool(snap.candidateId, { toolName });
     const registry = new mesh.NodeRegistry();
     const trust = new mesh.NodeTrust();
     const identity = mesh.meshIdentity.mintNodeIdentity({ logicalDamarId: ids.mint.logicalDamarId() });
@@ -129,7 +131,7 @@ module.exports = function(args) {
 };
 `);
     try {
-        const { snap, executor, router } = makeExecutor();
+        const { snap, executor, router } = makeExecutor({ toolArtifactPath: markerTool });
         const { claim } = await claimFor({ executor, router, snap, toolArtifactPath: markerTool });
         const result = await executor.execute({ claimId: claim.claimId, args: {} });
         const output = result.output ?? {};
@@ -175,7 +177,7 @@ module.exports = function(args) {
         process.env.DB_PASSWORD = "R4-PASS-LEAK";
         process.env.APP_API_KEY = "R4-KEY-LEAK";
         try {
-            const { snap, executor, router } = makeExecutor();
+            const { snap, executor, router } = makeExecutor({ toolArtifactPath: probeTool });
             const { claim } = await claimFor({ executor, router, snap, toolArtifactPath: probeTool });
             const result = await executor.execute({ claimId: claim.claimId, args: {} });
             const output = result.output ?? {};
@@ -241,7 +243,7 @@ module.exports = function(args) {
 };
 `);
     try {
-        const { snap, executor, router } = makeExecutor();
+        const { snap, executor, router } = makeExecutor({ toolArtifactPath: netTool });
         const { claim } = await claimFor({ executor, router, snap, toolArtifactPath: netTool });
         const result = await executor.execute({ claimId: claim.claimId, args: { port } });
         // Kernel denies loopback in AppContainer: tool must NOT connect.
@@ -264,7 +266,7 @@ module.exports = function() {
 };
 `);
     try {
-        const { snap, executor, router } = makeExecutor({ sandboxPolicy: { config: { timeoutMs: 2500 } } });
+        const { snap, executor, router } = makeExecutor({ sandboxPolicy: { config: { timeoutMs: 2500 } }, toolArtifactPath: hangTool });
         const { claim } = await claimFor({ executor, router, snap, toolArtifactPath: hangTool });
         await assert.rejects(executor.execute({ claimId: claim.claimId }), (e) => e.code === "MESSAGE_EXPIRED");
     } finally {
@@ -279,7 +281,7 @@ test("R3-SBOX-06: oversized output fails with BOUNDS_EXCEEDED", { skip: !canRun 
 module.exports = function() { return { data: "x".repeat(1024 * 1024) }; };
 `);
     try {
-        const { snap, executor, router } = makeExecutor();
+        const { snap, executor, router } = makeExecutor({ toolArtifactPath: bigTool });
         const { claim } = await claimFor({ executor, router, snap, toolArtifactPath: bigTool });
         await assert.rejects(executor.execute({ claimId: claim.claimId }), (e) => e.code === "BOUNDS_EXCEEDED");
     } finally {

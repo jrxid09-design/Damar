@@ -39,32 +39,12 @@ const { fail, REASONS } = require("../action/errors");
 // The ONE canonical application Manager, created exactly once, lazily.
 let canonicalManager = null;
 let canonicalMediaContextAuthority = null;
-// R4-04: canonical Wave 6 lane-3 adapter installed by the canonical composition
-// root (RuntimeHost) BEFORE the Manager singleton is first created. It is
-// BRANDED (wave6AdapterBrand) so a duck-typed/caller-controlled object can
-// never occupy the seam. Absent = frozen behavior.
-let canonicalWave6Seam = null;
-
-/**
- * R4-04: install the canonical Wave 6 lane-3 adapter on the canonical Manager.
- * Composition-root/internal only — MUST be called before the first
- * createDamarManager(). Only an adapter already BRANDED by wave6AdapterBrand is
- * accepted (duck-typed callbacks rejected). NOT exported from the public
- * manager surface.
- */
-function installCanonicalWave6Seam(seam) {
-    const { isCanonicalWave6ExecutionAdapter } = require("./internal/wave6AdapterBrand");
-    if (seam !== null && seam !== undefined && !isCanonicalWave6ExecutionAdapter(seam)) {
-        throw fail(REASONS.CALLER_BOOTSTRAP_REJECTED,
-            "installCanonicalWave6Seam requires a BRANDED canonical Wave 6 adapter (R4-04)");
-    }
-    if (canonicalManager !== null) {
-        throw fail(REASONS.CALLER_BOOTSTRAP_REJECTED,
-            "installCanonicalWave6Seam must be called before createDamarManager()");
-    }
-    canonicalWave6Seam = seam;
-    return true;
-}
+// R5-02: NO canonical Wave 6 seam is stored/installed on the public Manager
+// surface. The Manager ↔ Wave 6 lane-3 adapter is a TRUSTED-INTERNAL dependency
+// supplied to createDamarManagerComposition() by the trusted runtime composition
+// (or a test-only harness that drives that internal composition directly). There
+// is no importable mutator and no public option to inject a caller-controlled
+// adapter — not even a branded one.
 
 /**
  * Create the canonical application Damar Manager facade. Takes NO options.
@@ -96,8 +76,9 @@ function createDamarManager() {
             // or adapter injection is exposed by this bootstrap.
             trustedChannelAdapters: CHANNEL_ADAPTERS.slice(),
             mediaProcessor: createRealtimeMultimodalProcessor(),
-            mediaContextAuthority: canonicalMediaContextAuthority,
-            ...(canonicalWave6Seam ? { wave6Distributed: canonicalWave6Seam } : {})
+            mediaContextAuthority: canonicalMediaContextAuthority
+            // R5-02: NO wave6Distributed/threading — production does not wire a
+            // distributed lane-3 adapter through this public bootstrap path.
         });
     }
     return canonicalManager;
@@ -194,13 +175,12 @@ function createTrustedTransportPeerScopes() {
     });
 }
 
-function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionContinuity = null, continuityStoreFile = undefined, transportPeerScopes = undefined, wave6Distributed = null } = {}) {
-    // R4-04: install the (BRANDED) Wave 6 lane-3 adapter BEFORE the singleton
-    // Manager is composed. A duck-typed adapter is rejected by the brand check
-    // in installCanonicalWave6Seam.
-    if (wave6Distributed !== null && wave6Distributed !== undefined) {
-        installCanonicalWave6Seam(wave6Distributed);
-    }
+function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionContinuity = null, continuityStoreFile = undefined, transportPeerScopes = undefined } = {}) {
+    // R5-02: NO wave6Distributed parameter here. The Manager's Lane-3 distributed
+    // seam is a trusted-internal dependency of createDamarManagerComposition();
+    // it is never forwarded from a public ingress option. Production callers
+    // (the RuntimeHost composition) may wire a Wave 6 adapter only through the
+    // internal composition path, never through this public ingress.
     const manager = createDamarManager();
     let continuity = sessionContinuity !== null && sessionContinuity !== undefined
         ? sessionContinuity

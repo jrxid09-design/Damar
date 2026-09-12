@@ -138,29 +138,22 @@ const SANDBOX_DEFAULTS = Object.freeze({
     maxOutputBytes: 256 * 1024
 });
 
-// ---- private AppContainer launch primitive (R3-03: closure-private) ----
-function stageIntoPackage({ nodeExecutable, toolArtifactPath, runName }) {
-    const root = path.join(os.homedir(), "AppData", "Local", "Packages", APPCONTAINER_NAME);
-    if (!fs.existsSync(root)) {
-        throw meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
-            "AppContainer package folder missing — sandbox host unavailable (R3-02 fail-closed)");
-    }
-    const dir = path.join(root, "run-" + runName);
-    fs.mkdirSync(dir, { recursive: true });
-    const stagedNode = path.join(dir, "node.exe");
-    fs.copyFileSync(nodeExecutable, stagedNode);
-    const stagedTool = path.join(dir, path.basename(String(toolArtifactPath)) || "tool.js");
-    fs.copyFileSync(toolArtifactPath, stagedTool);
-    return { dir, stagedNode, stagedTool };
-}
-
+// ---- R5-04: NATIVE-HOST-OWNED staging + launch (no JS package-dir writes) ----
+//
+// The JS parent NEVER writes into the protected AppContainer package directory
+// and NEVER supplies a destination path. It supplies ONLY the validated SOURCE
+// node executable, the validated SOURCE artifact path, the EXPECTED artifact
+// digest (the federation-pinned digest), the execution identity, and bounded
+// args/env. The trusted native host derives the destination, stages, verifies
+// source+destination digests, checks TOCTOU, and launches the restricted child.
 function launchAppContainerTool({
-    toolArtifactPath,
+    artifactPath,
+    artifactDigest,
+    executionId = crypto.randomBytes(16).toString("hex"),
     toolArgs = {},
     envMaterial = {},
     nodeExecutable = process.execPath,
-    timeoutMs = 30_000,
-    runName = crypto.randomBytes(8).toString("hex")
+    timeoutMs = 30_000
 } = {}) {
     return new Promise((resolve, reject) => {
         if (process.platform !== "win32") {
@@ -171,28 +164,32 @@ function launchAppContainerTool({
             return reject(meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
                 "native/sandbox-host/sandbox-host.exe missing — governed external execution fails closed (R3-03)"));
         }
-        let staged;
-        try {
-            staged = stageIntoPackage({ nodeExecutable, toolArtifactPath, runName });
-        } catch (e) {
-            return reject(e instanceof Error && e.code ? e : meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
-                "failed to stage sandbox payload: " + String(e.message).slice(0, 160)));
+        // The artifact source + its expected digest are MANDATORY. A caller that
+        // cannot present both cannot stage; there is no JS copy fallback.
+        if (typeof artifactPath !== "string" || artifactPath.length === 0) {
+            return reject(meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "governed sandbox requires an artifact source path"));
         }
-        const outFile = path.join(staged.dir, "out.json");
+        if (typeof artifactDigest !== "string" || !/^[0-9a-f]{64}$/.test(artifactDigest)) {
+            return reject(meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "governed sandbox requires the 64-hex pinned artifact digest (R5-04)"));
+        }
+        const nodeSrc = String(nodeExecutable);
+        if (!fs.existsSync(nodeSrc)) {
+            return reject(meshFailure(MESH_ERRORS.SANDBOX_VIOLATION, "node executable source unavailable"));
+        }
+        const nodeDigest = crypto.createHash("sha256").update(fs.readFileSync(nodeSrc)).digest("hex");
         const argsJson = JSON.stringify(toolArgs ?? {});
         const envJson = JSON.stringify(envMaterial ?? {});
         const hostArgs = [
+            "--governed",
             "--app-container", APPCONTAINER_NAME,
-            "--node", staged.stagedNode,
-            "--entry", "__eval__",
-            "--cwd", staged.dir,
-            "--read", staged.dir,
-            "--write", staged.dir,
+            "--execution-id", String(executionId).slice(0, 128),
+            "--node-source", nodeSrc,
+            "--node-digest", nodeDigest,
+            "--artifact-source", artifactPath,
+            "--artifact-digest", artifactDigest,
             "--timeout-ms", String(Math.floor(Number(timeoutMs) || 30000)),
             "--",
             SHIM_SOURCE,
-            staged.stagedTool,
-            outFile,
             argsJson,
             envJson
         ];
@@ -200,8 +197,13 @@ function launchAppContainerTool({
             stdio: ["ignore", "pipe", "pipe"],
             windowsHide: true
         });
+        let stdoutChunk = "";
         let stderrChunk = "";
         let killed = false;
+        child.stdout.on("data", d => {
+            stdoutChunk += d.toString();
+            if (Buffer.byteLength(stdoutChunk, "utf8") > 1024 * 1024) { killed = true; child.kill("SIGKILL"); }
+        });
         child.stderr.on("data", d => {
             stderrChunk += d.toString();
             if (Buffer.byteLength(stderrChunk, "utf8") > 64 * 1024) { killed = true; child.kill("SIGKILL"); }
@@ -213,20 +215,19 @@ function launchAppContainerTool({
         child.on("close", code => {
             if (killed) return reject(meshFailure(MESH_ERRORS.BOUNDS_EXCEEDED, "sandbox output exceeded cap"));
             if (code === 124) return reject(meshFailure(MESH_ERRORS.MESSAGE_EXPIRED, `sandbox timeout (${timeoutMs}ms)`));
-            let raw;
-            try {
-                raw = fs.readFileSync(outFile, "utf8");
-            } catch {
+            // Parse the framed result relayed by the native host on stdout.
+            const framed = parseNativeResult(stdoutChunk);
+            if (framed === null) {
                 const tail = stderrChunk.slice(-200).trim();
                 return reject(meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
                     `sandbox produced no result (host code=${code}) ${tail}`));
             }
-            if (Buffer.byteLength(raw, "utf8") > 256 * 1024) {
+            if (Buffer.byteLength(framed, "utf8") > 256 * 1024) {
                 return reject(meshFailure(MESH_ERRORS.BOUNDS_EXCEEDED, "sandbox result exceeds output cap"));
             }
             let parsed;
             try {
-                parsed = JSON.parse(raw);
+                parsed = JSON.parse(framed);
             } catch {
                 return reject(meshFailure(MESH_ERRORS.MESSAGE_MALFORMED, "sandbox produced non-JSON result"));
             }
@@ -236,7 +237,8 @@ function launchAppContainerTool({
                     output: parsed.output ?? null,
                     sandboxPid: Number(parsed.pid) || 0,
                     mechanism: "AppContainer",
-                    sandboxId: APPCONTAINER_NAME
+                    sandboxId: APPCONTAINER_NAME,
+                    stagedDigest: artifactDigest
                 }));
             }
             if (parsed && String(parsed.error).indexOf("OUTPUT_EXCEEDS_CAP") >= 0) {
@@ -246,6 +248,26 @@ function launchAppContainerTool({
                 `sandbox error: ${String((parsed && parsed.error) || "unknown").slice(0, 300)}`));
         });
     });
+}
+
+/**
+ * R5-04: parse the native host's framed result relay from stdout:
+ *   SANDBOXHOST_RESULT_BEGIN <bytes>\n<body>\nSANDBOXHOST_RESULT_END
+ * Returns the body string, or null when the frame is absent/empty.
+ */
+function parseNativeResult(stdoutChunk) {
+    const beginMark = "SANDBOXHOST_RESULT_BEGIN ";
+    const endMark = "SANDBOXHOST_RESULT_END";
+    const bi = stdoutChunk.indexOf(beginMark);
+    if (bi < 0) return null;
+    const lineEnd = stdoutChunk.indexOf("\n", bi);
+    if (lineEnd < 0) return null;
+    const declared = Number(stdoutChunk.slice(bi + beginMark.length, lineEnd).trim());
+    if (!Number.isFinite(declared) || declared <= 0) return null;
+    const bodyStart = lineEnd + 1;
+    const ei = stdoutChunk.indexOf("\n" + endMark, bodyStart);
+    const body = ei < 0 ? stdoutChunk.slice(bodyStart) : stdoutChunk.slice(bodyStart, ei);
+    return body;
 }
 
 let compositionProvisionPromise = null;
@@ -427,18 +449,29 @@ function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandbox
             if (violations.length > 0) {
                 throw meshFailure(MESH_ERRORS.SANDBOX_VIOLATION, `sandbox violations: ${violations.slice(0, 3).join("; ")}`);
             }
-            // 5. REAL AppContainer sandbox launch (private primitive). Tool
-            //    code comes from the claim-bound artifact path; this process
-            //    never loads tool code itself. R4-02: provisioning is verified
-            //    FAIL-CLOSED before launch — profile exists, zero caps, and
-            //    the frozen helper binary is untampered (single-flight probe).
+            // 5. REAL AppContainer sandbox launch (native-host-owned staging).
+            //    R5-04: the executor resolves the AUTHORITATIVE artifact digest
+            //    from the federation's validation-time pin (digest pinning is
+            //    mandatory). The claim carries the artifact SOURCE path; the
+            //    digest is bound end-to-end and verified by the native host
+            //    before launch. A tool whose enabled artifact cannot present its
+            //    pinned digest fails closed — no JS-side copy fallback exists.
             const provisioned = await ensureCompositionProvisioning().catch((e) => null);
             if (provisioned !== true) {
                 throw meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
                     "sandbox runtime not provisioned (R4-02 fail-closed): " + String(provisioned?.message || ("not ready")).slice(0, 160));
             }
+            const pinnedDigest = typeof federation.getPinnedToolDigest === "function"
+                ? federation.getPinnedToolDigest(claim.candidateId, claim.toolName)
+                : null;
+            if (typeof pinnedDigest !== "string" || !/^[0-9a-f]{64}$/.test(pinnedDigest)) {
+                throw meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
+                    "no pinned artifact digest for the enabled tool (R5-04 fail-closed: digest pinning mandatory)");
+            }
             const result = await launchAppContainerTool({
-                toolArtifactPath: claim.toolArtifactPath,
+                artifactPath: claim.toolArtifactPath,
+                artifactDigest: pinnedDigest,
+                executionId: claim.executionId,
                 toolArgs: args,
                 envMaterial: resolveEnvMaterial(claim, materialTable),
                 timeoutMs: config.timeoutMs
@@ -450,7 +483,10 @@ function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandbox
                 executionId: claim.executionId,
                 decisionDigest: claim.decisionDigest,
                 consumedLease: claim.consumedLease ? claim.consumedLease.executionId : null,
-                sandbox: { pid: result.sandboxPid, mechanism: result.mechanism, sandboxId: result.sandboxId }
+                sandbox: {
+                    pid: result.sandboxPid, mechanism: result.mechanism,
+                    sandboxId: result.sandboxId, stagedDigest: result.stagedDigest
+                }
             });
         }
     });

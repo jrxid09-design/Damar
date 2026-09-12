@@ -196,8 +196,8 @@ function createDamarManagerComposition({
     deps,
     trustedChannelAdapters = [],
     mediaProcessor = null,
-    mediaContextAuthority = createMediaContextAuthority(),
-    wave6Distributed = null              // R4-04: brand-validated Wave 6 lane-3 adapter (default null = frozen behavior)
+     mediaContextAuthority = createMediaContextAuthority(),
+    wave6Adapter = null              // R5-02: trusted-internal Wave 6 lane-3 dependency (closure-owned).
 } = {}) {
     if (deps === null || typeof deps !== "object") {
         throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "manager composition requires deps");
@@ -227,17 +227,13 @@ function createDamarManagerComposition({
     if (!Array.isArray(trustedChannelAdapters)) {
         throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "trustedChannelAdapters must be an array");
     }
-    // R4-04: ONLY a BRANDED canonical Wave 6 adapter may occupy the Lane-3
-    // distributed-execution seam. A duck-typed / caller-controlled object
-    // ({ tryDistributed } or any callback facade) is REJECTED — it can never
-    // reach the Manager's execution boundary.
-    const { isCanonicalWave6ExecutionAdapter } = require("./wave6AdapterBrand");
-    if (wave6Distributed !== null && wave6Distributed !== undefined) {
-        if (!isCanonicalWave6ExecutionAdapter(wave6Distributed)) {
-            throw mfail(MREASONS.INVALID_MANAGER_REQUEST,
-                "wave6Distributed must be a BRANDED canonical Wave 6 execution adapter (R4-04: caller-supplied seam rejected)");
-        }
-    }
+    // R5-02: the Manager ↔ Wave 6 lane-3 seam is a TRUSTED-INTERNAL dependency.
+    // It is supplied by the trusted runtime composition (or a test-only harness
+    // that drives this internal composition directly). There is NO public option
+    // to inject it and NO brand/shape gate is relied upon: a caller-controlled
+    // { tryDistributed } can never reach Lane-3 because it can never reach this
+    // composition parameter through any public Manager/RuntimeHost surface.
+    const capturedWave6 = wave6Adapter ?? null;
 
     // ---- PER-COMPOSITION PROVENANCE DOMAIN (Lane 4 R5 lesson) -------------
     const mRequestBrandSet = new WeakSet();
@@ -249,7 +245,6 @@ function createDamarManagerComposition({
     const capturedLane4 = lane4;
     const capturedPlanner = planner;
     const capturedMediaProcessor = mediaProcessor;
-    const capturedWave6 = wave6Distributed ?? null;
     const recognizeMediaContext = mediaContextAuthority.recognize;
 
     // Channel adapters: frozen snapshots, keyed by channel type. Composition-

@@ -24,23 +24,26 @@
 
 const { createDamarManagerComposition } = require("../../src/manager/internal/managerBootstrap");
 const { createMediaContextAuthority } = require("../../src/manager/internal/mediaContext");
-const { __brandWave6Adapter, isCanonicalWave6ExecutionAdapter } = require("../../src/manager/internal/wave6AdapterBrand");
+const { isCanonicalWave6ExecutionAdapter } = require("../../src/manager/internal/wave6AdapterBrand");
 const { makeActuationHarness } = require("../actuation/harness");
 const { makeVerificationHarness } = require("../verification/harness");
 const { CHANNEL_ADAPTERS } = require("../../src/manager/channels");
 
 /**
- * TEST-ONLY: brand a test-supplied Wave 6 lane-3 adapter for injection through
- * the composition seam. NOT part of production surfaces. The production
- * RuntimeHost composition uses its OWN internal concrete adapter (branded the
- * same way inside the composition closure) — never caller callbacks.
+ * TEST-ONLY: pass-through for a test-supplied Wave 6 lane-3 adapter so it can be
+ * injected through the trusted-internal composition seam. R5-02 removed the
+ * production branding primitive entirely (`__brandWave6Adapter` no longer exists);
+ * this helper does NOT import or invoke any production privileged mutator. It is
+ * test-only scaffolding — never a production export, never reachable by a
+ * RuntimeHost/channel. The production RuntimeHost composition owns its own
+ * adapter via closure; tests drive the internal composition directly.
  */
 function brandTestWave6Adapter(adapter) {
     if (adapter === null || typeof adapter !== "object" ||
         typeof adapter.tryDistributed !== "function") {
         throw new TypeError("brandTestWave6Adapter requires { tryDistributed }");
     }
-    return __brandWave6Adapter(adapter);
+    return adapter;
 }
 
 /**
@@ -121,6 +124,10 @@ function createTestWave6Lane3Facade({
  * @param {Array}    [opts.trustedVerifiers] — Lane 4 composition-time verifiers
  * @param {Function} [opts.planner] — advisory cognition hook (PLAN != AUTHORITY)
  * @param {boolean}  [opts.withAdapters] — wire the 5 built-in channel adapters
+ * @param {object}   [opts.wave6Adapter] — TEST-ONLY: trusted-internal Wave 6
+ *   lane-3 adapter wired through the internal composition seam. NOT a production
+ *   option; never forwarded from RuntimeHost/channel/Manager requests. Null =
+ *   frozen behavior. Passed UNBRANDED (R5-02 removed production branding).
  */
 async function makeManagerHarness({
     scopeBindings,
@@ -131,10 +138,10 @@ async function makeManagerHarness({
     // forwarded from RuntimeHost, a channel adapter, or a Manager request.
     authenticate = undefined,
     withAdapters = true,
-    // R4-04: brand-validated Wave 6 lane-3 adapter (injected via test-only
-    // brandTestWave6Adapter). Null = frozen behavior. Duck-typed objects are
-    // rejected by the Manager composition itself.
-    wave6Distributed = null
+    // R5-02: TRUSTED-INTERNAL Wave 6 lane-3 adapter (test-only composition
+    // privilege). Null = frozen behavior. Duck-typed objects are rejected by
+    // the test-only harness pass-through. Production never receives this.
+    wave6Adapter = null
 } = {}) {
     // Lane 3 actuation harness (canonical execution results for this domain)
     const lane3h = await makeActuationHarness({ scopeBindings, ...(authenticate ? { authenticate } : {}) });
@@ -158,7 +165,9 @@ async function makeManagerHarness({
         trustedChannelAdapters: withAdapters ? CHANNEL_ADAPTERS.slice() : [],
         mediaProcessor,
         mediaContextAuthority,
-        ...(wave6Distributed ? { wave6Distributed: brandTestWave6Adapter(wave6Distributed) } : {})
+        // R5-02: trusted-internal seam, wired to the internal composition param
+        // directly (NO production brand / NO caller callback facade).
+        ...(wave6Adapter ? { wave6Adapter } : {})
     });
 
     return {

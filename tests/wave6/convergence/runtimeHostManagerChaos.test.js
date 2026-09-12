@@ -12,6 +12,7 @@ const { createMemoryAuthorityStore } = require("../../../src/authority/store");
 const { makeCanonicalAuthorityRoot } = require("../repair/testCanonicalRoot");
 const dexec = require("../../../src/dexec");
 const federationMod = require("../../../src/federation");
+const { sha256File } = require("../../helpers/toolDigest");
 const mesh = require("../../../src/mesh");
 const ids = mesh.ids;
 
@@ -68,11 +69,12 @@ function makeNodeA(registry) {
     return A;
 }
 
-function makeEnabledTool() {
+function makeEnabledTool(artifactPath) {
     const fed = new federationMod.ExternalCapabilityFederation();
     const snap = fed.discover({ source: "https://mcp.example.com", sourceType: "mcp", publisher: "p", name: "chaos-tool", version: "1.0.0", license: "MIT", artifactDigest: "a".repeat(64), permissions: {} });
     fed.inspect(snap.candidateId, { artifactSurface: "clean" });
-    fed.validate(snap.candidateId, { toolDigests: { search: "b".repeat(64) } });
+    // R5-04: pin the REAL artifact digest (native host verifies source+staged).
+    fed.validate(snap.candidateId, { toolDigests: { search: sha256File(artifactPath) } });
     fed.enableTool(snap.candidateId, { toolName: "search" });
     return { fed, snap };
 }
@@ -153,12 +155,11 @@ function authorizedIntent(tag) {
 test("R3-06-B: chaos via Manager seam — ONE claim, ONE consume, replay/revoke rejected; sandboxed", async (t) => {
     const registry = await canonicalOwner();
     const A = makeNodeA(registry);
-    const { fed, snap } = makeEnabledTool();
     const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), "r3-chaos-"));
     const toolPath = path.join(artifactDir, "search.js");
     fs.writeFileSync(toolPath, "module.exports = async (args) => ({ ran: true, arg: args.msg });", "utf8");
     t.after(() => fs.rmSync(artifactDir, { force: true, recursive: true }));
-
+    const { fed, snap } = makeEnabledTool(toolPath);
     const wave6 = await makeSeam(A, fed, snap, toolPath);
     const intent = authorizedIntent("b1");
     const out = await wave6.tryDistributed({ intent, parameters: {} });

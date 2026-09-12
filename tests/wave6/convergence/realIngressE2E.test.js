@@ -43,13 +43,14 @@ const { createDamarManagerComposition } = require("../../../src/manager/internal
 const { makeActuationHarness } = require("../../actuation/harness");
 const { CHANNEL_TYPES, OUTCOME } = require("../../../src/manager");
 const { VERIFICATION_STATE } = require("../../../src/action/verification/errors");
-const { createTestWave6Lane3Facade, brandTestWave6Adapter } = require("../../manager/productionHarness");
+const { createTestWave6Lane3Facade } = require("../../manager/productionHarness");
 const { createGovernedExternalToolExecutor } = require("../../../src/integration/wave6Production");
 const { HOST_EXE } = require("../../../src/federation/appContainerSandbox");
 
 const mesh = require("../../../src/mesh");
 const ids = mesh.ids;
 const federationMod = require("../../../src/federation");
+const { sha256File } = require("../../helpers/toolDigest");
 const { makeCanonicalAuthorityRoot } = require("../repair/testCanonicalRoot");
 const { createMemoryAuthorityStore } = require("../../../src/authority/store");
 
@@ -84,11 +85,12 @@ function makeNodeA() {
     return A;
 }
 
-function makeEnabledTool() {
+function makeEnabledTool(artifactPath) {
     const fed = new federationMod.ExternalCapabilityFederation();
     const snap = fed.discover({ source: "https://mcp.example.com", sourceType: "mcp", publisher: "p", name: "r4-tool", version: "1.0.0", license: "MIT", artifactDigest: "a".repeat(64), permissions: {} });
     fed.inspect(snap.candidateId, { artifactSurface: "clean" });
-    fed.validate(snap.candidateId, { toolDigests: { search: "b".repeat(64) } });
+    // R5-04: pin the REAL artifact digest (native host verifies source+staged).
+    fed.validate(snap.candidateId, { toolDigests: { search: sha256File(artifactPath) } });
     fed.enableTool(snap.candidateId, { toolName: "search" });
     return { fed, snap };
 }
@@ -151,11 +153,11 @@ test("R4-05-B: SAME production Manager code routes a granted request to the bran
     await lane3.lane2.grantAuthority({ capabilityId: "code.cap", subject: "damar", actions: ["run"], identityBinding: { principals: ["damar"] } });
 
     const A = makeNodeA();
-    const { fed, snap } = makeEnabledTool();
     const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), "r4-e2e-"));
     const toolPath = path.join(artifactDir, "search.js");
     fs.writeFileSync(toolPath, "module.exports = async (args) => ({ ran: true, msg: args.msg });", "utf8");
     t.after(() => fs.rmSync(artifactDir, { force: true, recursive: true }));
+    const { fed, snap } = makeEnabledTool(toolPath);
 
     const seam = createTestWave6Lane3Facade({
         route: async (intent) => {
@@ -180,7 +182,10 @@ test("R4-05-B: SAME production Manager code routes a granted request to the bran
             lane4: { verify: async () => ({ verificationState: VERIFICATION_STATE.VERIFIED_SUCCESS, verificationId: "v1" }), compensate: async () => ({}) }
         },
         trustedChannelAdapters: [],
-        wave6Distributed: brandTestWave6Adapter(seam)
+        // R5-02: trusted-internal seam, UNBRANDED (production brand removed). The
+        // test drives the internal composition directly; the public ingress
+        // never accepts this option.
+        wave6Adapter: seam
     });
 
     const r = await manager.handle({
@@ -203,7 +208,6 @@ test("R4-05-B: SAME production Manager code routes a granted request to the bran
 test("R4-06: REAL security reproduction — one probe tool, every vector kernel/shim denied", { skip: !canRun }, async (t) => {
     await canonicalOwner();
     const A = makeNodeA();
-    const { fed, snap } = makeEnabledTool();
     const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), "r4-sec-"));
     const probePath = path.join(artifactDir, "probe.js");
     // The tool DECLARES no needs, so admission passes; it then ATTEMPTS the
@@ -234,6 +238,8 @@ module.exports = async function (args) {
 };
 `);
     t.after(() => fs.rmSync(artifactDir, { force: true, recursive: true }));
+    // R5-04: pin the REAL probe artifact digest now that it exists.
+    const { fed, snap } = makeEnabledTool(probePath);
 
     const srv = net.createServer((sock) => { sock.on("error", () => {}); sock.end("OPEN"); });
     srv.on("error", () => {});
@@ -275,11 +281,11 @@ module.exports = async function (args) {
 test("R4-08: single-request distributed claim — ONE execute, replay/ghost fail closed", { skip: !canRun }, async (t) => {
     await canonicalOwner();
     const A = makeNodeA();
-    const { fed, snap } = makeEnabledTool();
     const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), "r4-chaos-"));
     const toolPath = path.join(artifactDir, "search.js");
     fs.writeFileSync(toolPath, "module.exports = async () => ({ chaos: true });", "utf8");
     t.after(() => fs.rmSync(artifactDir, { force: true, recursive: true }));
+    const { fed, snap } = makeEnabledTool(toolPath);
 
     const router = A.dexecRouter;
     const claim = await router.claimGovernedExecution({
