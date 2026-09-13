@@ -170,6 +170,17 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
         };
     }
 
+    // Bug review independen (audit putaran-9, AUD9-P1-1): pengiriman ulang
+    // observationId/declarationId yang sama (replay lintas-node) dulu
+    // dihitung sebagai REINFORCE baru -- revision naik dan record.recordId
+    // yang SAMA ditambahkan lagi ke supportedBy, memalsukan korroborasi
+    // (computeConfidence pakai Math.min(supportedBy.length,5)/5, jadi satu
+    // sumber yang di-replay 5x mencapai confidence maksimum seolah 5 sumber
+    // independen). recordId yang sudah ada di supportedBy adalah no-op.
+    if (existing.supportedBy.includes(record.recordId)) {
+        return { case: "DUPLICATE", belief: existing, contradiction: null };
+    }
+
     const sameValue = JSON.stringify(existing.value) === JSON.stringify(record.value);
     const expired = isExpired(existing, nowMs);
     const newerOrEqualTier = TIER_RANK[record.tier] >= TIER_RANK[existing.tier];

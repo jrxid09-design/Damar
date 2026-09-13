@@ -43,12 +43,12 @@ function validateTrigger(trigger) {
     if (trigger.kind === "ON_EVENT" && typeof trigger.eventKind !== "string") {
         fail(REASONS.INVALID_TRIGGER, "trigger ON_EVENT wajib eventKind");
     }
-    // Bug review independen (audit putaran-8, W7R8-P2-2): `Object.freeze({...trigger})`
-    // dangkal -- `trigger.subject` (ON_STATE) tetap referensi milik
-    // pemanggil, jadi mutasi pasca-arm() menulis ulang subject trigger yang
-    // sudah tersimpan.
+    // Bug review independen (audit putaran-8, W7R8-P2-2; diperdalam putaran-9,
+    // AUD9-P2-1): `Object.freeze({...trigger.subject})` cuma satu level --
+    // objek bersarang di dalam subject tetap referensi milik pemanggil.
+    // deepFreeze menutup ini di semua kedalaman.
     if (trigger.kind === "ON_STATE") {
-        return Object.freeze({ ...trigger, subject: Object.freeze({ ...trigger.subject }) });
+        return Object.freeze({ ...trigger, subject: deepFreeze({ ...trigger.subject }) });
     }
     return Object.freeze({ ...trigger });
 }
@@ -188,7 +188,7 @@ function makeReminder({ reminderId, ownerRef = null, trigger, payloadRef = null,
         reminderId, ownerRef,
         trigger: validateTrigger(trigger),
         payloadRef: validatePayloadRef(payloadRef),
-        wakeClass, origin: Object.freeze({ ...origin }),
+        wakeClass, origin: deepFreeze({ ...origin }),
         state: "ARMED", firedAt: null, missedAt: null, retiredReason: null,
         occurrenceIndex: 0, armedAtMs: null, createdAt: nowIso
     });
@@ -207,9 +207,14 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
         !Number.isFinite(Date.parse(window.earliestAt))) {
         fail(REASONS.NO_LATEST_AT, "window.earliestAt, jika ada, wajib tanggal ISO yang sah");
     }
+    // Bug review independen (audit putaran-9, AUD9-P2-3): expectedValue
+    // tidak pernah disaring -- BigInt di dalamnya lolos lalu meledakkan
+    // JSON.stringify di saveSnapshot() saat persist(). buildSafePayloadRef
+    // sudah menolak BigInt/function/authority-shaped keys; dipakai ulang di sini.
     return Object.freeze({
-        expectationId, subject: Object.freeze({ ...subject }), attribute, expectedValue,
-        window: Object.freeze({ ...window }),
+        expectationId, subject: deepFreeze({ ...subject }), attribute,
+        expectedValue: buildSafePayloadRef(expectedValue),
+        window: deepFreeze({ ...window }),
         onSatisfied, onViolated, state: "PENDING"
     });
 }

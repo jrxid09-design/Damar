@@ -20,7 +20,17 @@ const { makeSignal, makeTarget } = require("./records");
 const { assignPriorityClass } = require("./policy");
 const { computeEffectivePriority, initCredits, pickOne, mapToGovernorPriority } = require("./scheduling");
 
-function targetKey(subjectRef, workKind) { return `${JSON.stringify(subjectRef)}::${workKind}`; }
+// Bug review independen (audit putaran-9, AUD9-P2-2): JSON.stringify(subjectRef)
+// mengeksekusi toJSON milik pemanggil di dalam proses kognisi -- toJSON yang
+// stateful juga membuat dedup/rate-accounting non-deterministik. subjectRef
+// hanya pernah berbentuk {entityId} atau {relationId} (sama seperti
+// worldmodel/query.js's subjectKeyOf); kunci dibangun dari field itu saja.
+function targetKey(subjectRef, workKind) {
+    const subjectKey = subjectRef && subjectRef.entityId
+        ? `entity:${subjectRef.entityId}`
+        : `relation:${subjectRef && subjectRef.relationId}`;
+    return `${subjectKey}::${workKind}`;
+}
 
 async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bounds = BOUNDS, governorPort = null } = {}) {
 
