@@ -30,7 +30,7 @@
  *               untouched by this integration pass (see freeze evidence).
  */
 
-const { MODES } = require("./bounds");
+const { MODES, BOUNDS } = require("./bounds");
 const { laws } = require("./laws");
 const { createSelfModel } = require("../selfmodel");
 const { createWorldModel } = require("../worldmodel");
@@ -57,7 +57,7 @@ function assertNoAuthorityShapedFields(value, label) {
 
 async function createLongHorizonCycle({
     mode = "off", capabilityRegistry, clock = { nowMs: () => Date.now() },
-    stores = {}, auditLedger = null
+    stores = {}, auditLedger = null, bounds = BOUNDS
 } = {}) {
 
     if (!MODES.includes(mode)) mode = "off";
@@ -107,12 +107,18 @@ async function createLongHorizonCycle({
 
         previousAssessments = new Map(snap.capabilityAssessments.map(a => [a.capabilityId, a.selfBelief]));
 
-        for (const event of events) {
+        // Bug review independen (Codex putaran-8): satu siklus bisa memancarkan
+        // satu event per kapabilitas terlacak (hingga batas selfModel 2048),
+        // jauh melampaui MAX_AUDIT_EVENTS_PER_CYCLE (256) -- membanjiri audit
+        // ledger. Dibatasi eksplisit di sini, per siklus.
+        const bounded = events.slice(0, bounds.MAX_AUDIT_EVENTS_PER_CYCLE);
+
+        for (const event of bounded) {
             if (auditLedger && typeof auditLedger.append === "function") {
                 try { auditLedger.append(event); } catch { /* audit failure never blocks cognition */ }
             }
         }
-        return events;
+        return bounded;
     }
 
     function buildGovernedProjection() {
