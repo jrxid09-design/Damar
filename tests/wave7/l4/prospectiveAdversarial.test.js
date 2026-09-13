@@ -77,6 +77,24 @@ test("PM-repair-4: restart rebuild counts only ARMED reminders toward the per-go
     }), "reminder terminal yang tersisa tidak boleh menghitung ke batas per-goal pasca-restart");
 });
 
+test("PM-repair-5: a valid non-null payloadRef is accepted, not rejected by a dead reference (Codex P1 round 9)", async () => {
+    const pm = await createProspectiveMemory();
+    const r = pm.arm({
+        trigger: { kind: "AT", at: new Date(1000).toISOString() }, wakeClass: "MAINTENANCE",
+        payloadRef: { note: "safe reference data", count: 3 }
+    });
+    assert.deepEqual(r.payloadRef, { note: "safe reference data", count: 3 });
+});
+
+test("PM-repair-6: a sparse/huge array in payloadRef is rejected before JSON.stringify materializes it (Codex P1 round 9)", async () => {
+    const pm = await createProspectiveMemory();
+    const hugeSparse = new Array(2 ** 32 - 1); // no own indexed keys, would defeat a Reflect.ownKeys-only walk
+    assertThrowsReason(() => pm.arm({
+        trigger: { kind: "AT", at: new Date(1000).toISOString() }, wakeClass: "MAINTENANCE",
+        payloadRef: hugeSparse
+    }), "PAYLOAD_TOO_LARGE");
+});
+
 test("PM-repair-2: deferred wake events are bounded, drops are counted not silently lost (Codex P2 round 6)", async () => {
     const clock = manualClock(0);
     const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_WAKE_EVENTS_PER_MINUTE: 1, MAX_DEFERRED_WAKE_EVENTS: 2 } });

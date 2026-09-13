@@ -160,11 +160,16 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             const e = entities.get(observation.subject.entityId);
             entities.set(e.entityId, { ...e, lastSeenAt: now() });
         }
+        // Bug review independen (Codex putaran-9): `Date.parse(...) || now()`
+        // memakai kebenaran-tanpa-syarat -- observedAt persis epoch
+        // (1970-01-01T00:00:00.000Z -> 0) dianggap "falsy" dan diam-diam
+        // diganti now(), memalsukan observasi epoch sebagai baru saja terjadi.
+        const parsedObservedAtMs = Date.parse(observation.observedAt);
         return applyRecordToBelief({
             recordId: observation.observationId, subject: observation.subject,
             attribute: observation.attribute, value: observation.value,
             tier: observation.tier, observedAt: observation.observedAt,
-            observedAtMs: Date.parse(observation.observedAt) || now()
+            observedAtMs: Number.isFinite(parsedObservedAtMs) ? parsedObservedAtMs : now()
         });
     }
 

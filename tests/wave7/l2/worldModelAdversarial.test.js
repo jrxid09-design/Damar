@@ -31,6 +31,29 @@ test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite"
     assert.equal(wm.query({ subject: { entityId: "e1" }, attribute: "temp" }).value, 20);
 });
 
+test("WM-repair-3: an epoch-dated observation (1970-01-01T00:00:00.000Z) is not falsely treated as the newest evidence (Codex P2 round 9)", async () => {
+    const clock = manualClock(1000);
+    const wm = await createWorldModel({ clock });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
+    wm.ingestObservation({
+        subject: { entityId: "e1" }, attribute: "status", value: "on",
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1_000_000).toISOString()
+    });
+    clock.advance(31 * 60_000); // past default 30-minute TTL -> belief is expired, eligible for SUPERSEDE
+
+    // observedAt is epoch (parses to 0ms) -- genuinely OLDER evidence than
+    // the existing belief's observedAt (1_000_000ms). If `Date.parse(...) ||
+    // now()` had treated the parsed 0 as falsy, this would be silently
+    // stamped with the current (much later) clock time, appear "newer",
+    // and wrongly SUPERSEDE the existing belief.
+    const result = wm.ingestObservation({
+        subject: { entityId: "e1" }, attribute: "status", value: "off",
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(0).toISOString()
+    });
+    assert.notEqual(result.case, "SUPERSEDE", "bukti epoch yang genuinely lebih lama tidak boleh menang sebagai 'lebih baru'");
+    assert.equal(wm.query({ subject: { entityId: "e1" }, attribute: "status" }).value, "on");
+});
+
 test("WM-repair-2: evicting an entity also removes its incident relations -- no dangling relation in subgraph (Codex P2 round 6)", async () => {
     const clock = manualClock(1000);
     const store = createMemoryAccStore();

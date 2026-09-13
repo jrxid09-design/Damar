@@ -41,6 +41,19 @@ test("AT-A2: corroboration counts distinct source+evidence pairs, not repeated m
     assert.ok(withDistinct > withRepeats, "sumber+bukti berbeda menaikkan prioritas lebih dari pesan berulang");
 });
 
+test("AT-repair-1: supporting signals per target are bounded across many distinct sources (Codex P1 round 9)", async () => {
+    const ae = await createAttentionEconomy({ bounds: { ...BOUNDS, MAX_SUPPORTING_SIGNALS_PER_TARGET: 3 } });
+    let targetId;
+    for (let i = 0; i < 10; i++) {
+        ({ targetId } = ae.ingestSignal(
+            { sourceKind: "SENSOR", sourceId: `adapter-${i}`, subjectRef: { entityId: "e1" }, evidenceRef: `ev-${i}` },
+            "PERCEIVE"
+        ));
+    }
+    assert.equal(ae.supportingSignalCount(targetId), 3,
+        "dukungan per target tidak boleh tumbuh tanpa batas walau tiap sourceId berbeda");
+});
+
 test("AT-A5-repair: a pick() blocked by full capacity never consumes the winning class's scheduling credit (Codex P2 round 5)", async () => {
     const clock = manualClock(0);
     let capacity = 0;
