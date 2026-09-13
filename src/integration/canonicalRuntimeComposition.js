@@ -183,10 +183,19 @@ async function buildRuntimeCoreInternal({
     recoverySystem = null,
     generationLedger = null,
     statusTracker = null,
-     recoveryConfigOverrides = {}
+     recoveryConfigOverrides = {},
      // R5-02: the Wave 6 lane-3 distributed adapter is NOT a public option. It
      // is constructed inside the trusted runtime composition and passed to the
      // Manager as a trusted-internal dependency, never via RuntimeCore options.
+    // ---- Cognition (W7-L7, opt-in, mirrors enableManagerIngress) ----
+    // Default false => zero footprint (GATE-W7-10). Not privileged: no
+    // continuity/trust material crosses this boundary, only an ordinary
+    // mode string and optional plain dependency references, same class of
+    // option as `governor`/`presenceRuntime` above.
+    enableCognition = false,
+    cognitionMode = "off",
+    cognitionCapabilityRegistry = null,
+    cognitionAuditLedger = null
 } = {}, onCompositionPayload = null) {
 
     if (bus !== null) {
@@ -330,11 +339,28 @@ async function buildRuntimeCoreInternal({
         }));
     }
 
+    // ---- Cognition (W7-L7, opt-in): composition-only, read-only reference.
+    // Zero influence on any decision made above — nothing in this function
+    // reads `cognition` back. GATE-W7-10/11 hold structurally: with
+    // enableCognition=false (the default) this is simply `null`.
+    let cognition = null;
+    if (enableCognition) {
+        const { createLongHorizonCycle } = require("../cognition/longhorizon");
+        cognition = await createLongHorizonCycle({
+            mode: cognitionMode,
+            capabilityRegistry: cognitionCapabilityRegistry,
+            auditLedger: cognitionAuditLedger
+        });
+    }
+
     return Object.freeze({
         version: CORE_VERSION,
 
         // Wave 1 (referensi kanonik):
         wave1: core,
+
+        // Wave 7 (opt-in, composition-only; null unless enableCognition):
+        cognition,
 
         // Wave 2 (pemilik kanonik):
         governor: gov,

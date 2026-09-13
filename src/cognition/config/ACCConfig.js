@@ -12,7 +12,7 @@
  * tidak dipakai reducer inti.
  */
 
-const MODES = Object.freeze(["off", "shadow"]);
+const MODES = Object.freeze(["off", "shadow", "governed"]);
 
 const DEFAULTS = Object.freeze({
     schemaVersion: 1,
