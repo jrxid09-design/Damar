@@ -247,6 +247,39 @@ test("GL-repair-11: evicting a goal removes its own plans, not just the per-goal
     assert.equal(ge.plansSize(), 0, "plan milik goal yang dievict harus ikut dihapus, bukan menjadi yatim selamanya");
 });
 
+test("GL-repair-12: task retention fails closed when no DONE/SKIPPED victim exists (independent audit W7R6-P1-1)", async () => {
+    const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_TASKS_RETAINED: 5 } });
+    for (let i = 0; i < 5; i++) ge.createTask({ taskId: `t${i}`, planRef: "p", order: i }); // stay PENDING, never terminal
+    assertThrowsReason(() => ge.createTask({ taskId: "t-overflow", planRef: "p", order: 99 }),
+        "TASK_RETENTION_LIMIT_EXCEEDED");
+    assert.equal(ge.tasksSize(), 5, "populasi murni non-terminal tidak boleh melampaui batas diam-diam");
+});
+
+test("GL-repair-13: plans are globally retention-bounded across distinct goalRefs, not just per-goal (independent audit W7R6-P2-1)", async () => {
+    const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_PLAN_VERSIONS_RETAINED: 3, MAX_TOTAL_PLANS_RETAINED: 10 } });
+    for (let g = 0; g < 50; g++) {
+        for (let v = 0; v < 3; v++) ge.createPlan({ goalRef: `ghost-${g}`, version: v, steps: [] });
+    }
+    assert.ok(ge.plansSize() <= 10, "banyak goalRef berbeda tidak boleh menumpuk plan tanpa batas total");
+});
+
+test("GL-repair-14: a rejected createCommitment/createTask never evicts an existing terminal record (independent audit W7R6-P2-2)", async () => {
+    const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_COMMITMENTS_RETAINED: 3, MAX_OPEN_COMMITMENTS: 100 } });
+    for (let i = 0; i < 3; i++) {
+        ge.createCommitment({
+            commitmentId: `c${i}`, goalRef: "g", toWhom: { id: "o" }, promise: "p",
+            dueCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" }
+        });
+        ge.transitionCommitment(`c${i}`, "met", {});
+    }
+    assert.equal(ge.commitmentsSize(), 3);
+    assert.throws(() => ge.createCommitment({
+        commitmentId: "bad", goalRef: "g", toWhom: { id: "o" }, promise: "p",
+        dueCondition: { kind: "k" } // missing subject/attribute -> validateConditionSpec rejects
+    }));
+    assert.equal(ge.commitmentsSize(), 3, "commitment valid tidak boleh dievict akibat create LAIN yang gagal validasi");
+});
+
 test("GL-A5: immortal goal — terminal states are terminal, cannot be reactivated", async () => {
     const ge = await createGoalEngine();
     const g = ge.proposeGoal(baseGoalSpec());
