@@ -36,6 +36,16 @@ test("PM-A1-repair: forbidden fields nested inside payloadRef are rejected too (
     }), "EXECUTABLE_MATERIAL_REJECTED");
 });
 
+test("PM-A1-repair-2: forbidden fields beyond the old depth-8 cutoff are rejected, not silently skipped (Codex P1 finding round 2)", async () => {
+    const pm = await createProspectiveMemory();
+    let deep = { capabilityId: "cap.x" };
+    for (let i = 0; i < 9; i++) deep = { nested: deep }; // 9 levels below the payload root
+    assertThrowsReason(() => pm.arm({
+        trigger: { kind: "AT", at: new Date(1000).toISOString() }, wakeClass: "MAINTENANCE",
+        payloadRef: deep
+    }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
 test("PM-A2: reminder flood is bounded by arm cap, not unbounded DoS on cognition", async () => {
     const pm = await createProspectiveMemory({ bounds: { ...BOUNDS, MAX_ARMED_REMINDERS: 3 } });
     for (let i = 0; i < 3; i++) pm.arm({ trigger: { kind: "AT", at: new Date(1000 + i).toISOString() }, wakeClass: "MAINTENANCE" });
