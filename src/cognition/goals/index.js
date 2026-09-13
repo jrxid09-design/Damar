@@ -176,7 +176,16 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         }
 
         goals.set(goal.goalId, goal);
-        if (goal.parentGoalId) childCounts.set(goal.parentGoalId, (childCounts.get(goal.parentGoalId) ?? 0) + 1);
+        // Bug review independen (audit putaran-17, AUD17-P2-6): kalau
+        // parentGoalId goal baru ini KEBETULAN adalah goal yang barusan
+        // dievict retensi (evicted.goalId), childCounts.delete(evicted.goalId)
+        // di atas langsung ditimpa ulang di sini, menghidupkan kembali kunci
+        // childCounts basi milik goal yang sudah tidak ada -- pertumbuhan tak
+        // terbatas yang sama yang sudah ditutup AUD3-P2-2/AUD11-P2-5, muncul
+        // kembali lewat interaksi baru antara insersi dan pembersihan eviksi.
+        if (goal.parentGoalId && goal.parentGoalId !== evicted?.goalId) {
+            childCounts.set(goal.parentGoalId, (childCounts.get(goal.parentGoalId) ?? 0) + 1);
+        }
 
         return goal;
     }

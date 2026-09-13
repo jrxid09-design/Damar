@@ -271,6 +271,13 @@ async function createSelfModel({
         if (!validStates.has(state)) {
             fail(REASONS.INVALID_OBSERVATION, `state '${state}' tidak dikenal`);
         }
+        // Bug review independen (audit putaran-17, AUD17-P2-2): `at` tidak
+        // pernah disaring seperti ingestOutcome's `at` -- BigInt di dalamnya
+        // meledakkan JSON.stringify di snapshot()/buildGovernedProjection(),
+        // yang dipanggil setiap siklus longhorizon shadow/governed.
+        if (at !== undefined && typeof at !== "string" && typeof at !== "number") {
+            fail(REASONS.INVALID_OBSERVATION, "'at', jika ada, wajib string atau number");
+        }
 
         degradedSubsystems = degradedSubsystems.filter(d => d.subsystem !== subsystem);
         if (state !== "HEALTHY") {

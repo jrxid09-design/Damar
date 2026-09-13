@@ -36,7 +36,16 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
     // `p.kind`. `cost` juga tidak pernah dijaga sama sekali -- cost:null
     // melempar TypeError mentah karena default `= {...}` hanya berlaku
     // untuk undefined.
-    if (!cost || typeof cost !== "object") fail(REASONS.INVALID_RECORD, "cost wajib objek");
+    // Bug review independen (audit putaran-17, AUD17-P2-1): guard putaran-16
+    // hanya memeriksa WADAH-nya -- BigInt/NaN/negatif di cost.tokens/ms
+    // meledakkan aritmetika mentah atau meracuni anggaran refleksi di
+    // openReview (index.js). Disamakan persis dengan guard di sana supaya
+    // kedua tempat tidak berbeda predikat.
+    if (!cost || typeof cost !== "object" ||
+        typeof cost.tokens !== "number" || !Number.isFinite(cost.tokens) || cost.tokens < 0 ||
+        typeof cost.ms !== "number" || !Number.isFinite(cost.ms) || cost.ms < 0) {
+        fail(REASONS.INVALID_RECORD, "cost wajib { tokens, ms } berupa number >= 0 yang valid");
+    }
     for (const p of proposals) {
         if (!p || typeof p !== "object") fail(REASONS.INVALID_RECORD, "setiap proposal wajib objek");
         if (!PROPOSAL_KINDS.has(p.kind)) fail(REASONS.INVALID_RECORD, `proposal.kind '${p.kind}' tidak dikenal`);

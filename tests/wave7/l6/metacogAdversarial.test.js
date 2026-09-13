@@ -25,6 +25,15 @@ test("MC-repair-5: a null/undefined element inside findings/proposals, or a null
     assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, cost: null }), "INVALID_RECORD");
 });
 
+test("MC-repair-6: a BigInt/NaN/negative cost.tokens or cost.ms is rejected, never crashes or silently disables the reflection budget (independent audit AUD17-P2-1)", async () => {
+    const mc = await createMetacognition({ bounds: { ...BOUNDS, REFLECTION_BUDGET_TOKENS_PER_HOUR: 1000, REFLECTION_BUDGET_MS_PER_HOUR: 1000 } });
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, cost: { tokens: 10n, ms: 0 } }), "INVALID_RECORD");
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, cost: { tokens: NaN, ms: 0 } }), "INVALID_RECORD");
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, cost: { tokens: -1000, ms: 0 } }), "INVALID_RECORD");
+    const r = mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e2" }, cost: { tokens: 2000, ms: 0 } });
+    assert.equal(r.state, "EXPIRED", "a valid over-budget cost must still be enforced");
+});
+
 test("MC-A1: fake confidence (model writes 0.99) is impossible — no API accepts a raw value", async () => {
     const mc = await createMetacognition();
     const a = mc.assess({ entityId: "e1" }, "claim", { value: 0.99, sourceCount: 0 }); // "value" in input ignored

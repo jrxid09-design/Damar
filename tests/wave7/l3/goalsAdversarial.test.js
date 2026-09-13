@@ -489,6 +489,16 @@ test("GL-repair-33: a rate-exceeded proposal must not evict a valid terminal goa
     assert.notEqual(ge.getGoal("G1"), null, "a rate-rejected proposal must not evict a valid terminal goal");
 });
 
+test("GL-repair-34: proposing a new child of a goal that is itself the retention-eviction victim must not resurrect a stale childCounts key (independent audit AUD17-P2-6)", async () => {
+    const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_GOALS_RETAINED: 2, MAX_CHILDREN_PER_GOAL: 100 } });
+    const g1 = ge.proposeGoal(baseGoalSpec({ goalId: "G1" }));
+    ge.proposeGoal(baseGoalSpec({ goalId: "C1", parentGoalId: g1.goalId }));
+    ge.transition("G1", "supersede", { actorKind: "OWNER", reason: "r" });
+    ge.proposeGoal(baseGoalSpec({ goalId: "C2", parentGoalId: g1.goalId })); // G1 is now the retention victim
+    assert.equal(ge.getGoal("G1"), null, "G1 must have been evicted for this test to be meaningful");
+    assert.equal(ge.childCountsSize(), 0, "childCounts must not resurrect a key for the goal just evicted in this same call");
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

@@ -358,6 +358,46 @@ test("WM-repair-27: an overflowed unresolved contradiction is archived and retri
     assert.equal(overflowed[0].status, "UNRESOLVABLE");
 });
 
+test("WM-repair-28: a rejected ingestObservation must not bump the referenced entity's lastSeenAt (independent audit AUD17-P2-3)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_ENTITIES: 2 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    wm.declareRelation({ relationId: "r1", kind: "connects", from: "e1", to: "e2" });
+    const before = wm.entitiesByKind("device").entities.find(e => e.entityId === "e1").lastSeenAt;
+    assert.throws(() => wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "a", value: 10n, sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() }));
+    const after = wm.entitiesByKind("device").entities.find(e => e.entityId === "e1").lastSeenAt;
+    assert.equal(after, before, "a rejected observation must not advance the entity's lastSeenAt (would skew the eviction tie-break)");
+});
+
+test("WM-repair-29: declareEntity never evicts the entity it just created, even when it is the isolated lowest-degree candidate (independent audit AUD17-P2-4)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_ENTITIES: 2 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    wm.declareRelation({ relationId: "r1", kind: "connects", from: "e1", to: "e2" });
+    const result = wm.declareEntity({ entityId: "e3", entityKind: "device", source: "s" });
+    assert.notEqual(result, undefined, "declareEntity must never return undefined for a call it just accepted");
+    assert.equal(result.entityId, "e3");
+    assert.equal(wm.entitiesByKind("device").entities.some(e => e.entityId === "e3"), true);
+});
+
+test("WM-repair-30: overflow-archiving a contradiction set that was already RESOLVED preserves its real resolution, not a fabricated OVERFLOW_ARCHIVE (independent audit AUD17-P2-5)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_OPEN_CONTRADICTION_SETS: 2 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e3", entityKind: "device", source: "s" });
+    const base = { attribute: "status", tier: "T1" };
+    wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "INC-1", value: "a", sensor: { sensorId: "s1" }, observedAt: new Date(1000).toISOString() });
+    const r1 = wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "c1", value: "b", sensor: { sensorId: "s2" }, observedAt: new Date(1001).toISOString() });
+    wm.ingestObservation({ ...base, subject: { entityId: "e2" }, observationId: "INC-2", value: "a", sensor: { sensorId: "s1" }, observedAt: new Date(1000).toISOString() });
+    wm.ingestObservation({ ...base, subject: { entityId: "e2" }, observationId: "c2", value: "b", sensor: { sensorId: "s3" }, observedAt: new Date(1001).toISOString() });
+    wm.resolveContradiction(r1.contradictionSetId, "RULE-REAL");
+    wm.ingestObservation({ ...base, subject: { entityId: "e3" }, observationId: "INC-3", value: "a", sensor: { sensorId: "s1" }, observedAt: new Date(1000).toISOString() });
+    wm.ingestObservation({ ...base, subject: { entityId: "e3" }, observationId: "c3", value: "b", sensor: { sensorId: "s3" }, observedAt: new Date(1001).toISOString() });
+    const overflowed = wm.overflowedContradictions().find(c => c.challengerRecordId === "c1");
+    assert.equal(overflowed.status, "RESOLVED", "overflow archival must not overwrite an already-resolved contradiction's status");
+    assert.equal(overflowed.resolution.ruleId, "RULE-REAL", "overflow archival must not overwrite an already-resolved contradiction's real resolution");
+});
+
 test("WM-repair-17: replaying a recordId already consumed by an earlier SUPERSEDE is a no-op, not a fresh CONTEST (independent audit AUD11-P2-7)", async () => {
     const clock = manualClock(0);
     const wm = await createWorldModel({ clock });

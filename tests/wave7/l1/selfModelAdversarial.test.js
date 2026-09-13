@@ -77,6 +77,13 @@ test("SM-repair-6: a store whose getKv() throws (corrupt/unreadable KV) starts w
     assert.equal(sm.assess("cap.x").selfBelief, "UNKNOWN");
 });
 
+test("SM-repair-7: a BigInt in ingestHealth's 'at' is rejected, not accepted and left to crash snapshot()/persist() (independent audit AUD17-P2-2)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const sm = await createSelfModel({ capabilityRegistry: registry });
+    assert.throws(() => sm.ingestHealth({ subsystem: "x", state: "DEGRADED", at: 10n }));
+    assert.doesNotThrow(() => sm.snapshot());
+});
+
 test("SM-repair-3: a BigInt in ingestOutcome's 'at' is rejected, not accepted and left to crash persist() (independent audit AUD10-P2-1)", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const sm = await createSelfModel({ capabilityRegistry: registry });

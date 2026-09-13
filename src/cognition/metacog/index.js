@@ -89,7 +89,17 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         // makeReview berjalan SETELAH baris ini membaca cost.tokens/cost.ms --
         // cost:null tetap melempar TypeError mentah di sini duluan, sebelum
         // sempat sampai ke makeReview.
-        if (!cost || typeof cost !== "object") fail(REASONS.INVALID_RECORD, "cost wajib objek");
+        // Bug review independen (audit putaran-17, AUD17-P2-1): guard putaran-16
+        // hanya memeriksa WADAH-nya -- BigInt di cost.tokens/ms meledakkan
+        // `+` mentah (TypeError mentah), NaN meracuni tokensSpentThisWindow
+        // untuk SISA JENDELA (setiap perbandingan `> budget` sesudahnya
+        // otomatis false, anggaran refleksi mati total), dan nilai negatif
+        // MENGKREDIT anggaran alih-alih membelanjakannya.
+        if (!cost || typeof cost !== "object" ||
+            typeof cost.tokens !== "number" || !Number.isFinite(cost.tokens) || cost.tokens < 0 ||
+            typeof cost.ms !== "number" || !Number.isFinite(cost.ms) || cost.ms < 0) {
+            fail(REASONS.INVALID_RECORD, "cost wajib { tokens, ms } berupa number >= 0 yang valid");
+        }
         const wouldExceedBudget =
             tokensSpentThisWindow + cost.tokens > bounds.REFLECTION_BUDGET_TOKENS_PER_HOUR ||
             msSpentThisWindow + cost.ms > bounds.REFLECTION_BUDGET_MS_PER_HOUR;
