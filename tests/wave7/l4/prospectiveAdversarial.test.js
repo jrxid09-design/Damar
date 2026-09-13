@@ -221,6 +221,19 @@ test("PM-repair-20: an ON_EVENT trigger is rejected fail-closed, since no dispat
     assertThrowsReason(() => pm.arm({ reminderId: "R-evt", wakeClass: "RESUME_GOAL", trigger: { kind: "ON_EVENT", eventKind: "X" } }), "INVALID_TRIGGER");
 });
 
+test("PM-repair-21: firedOccurrenceIds is bounded by an explicit MAX_FIRED_OCCURRENCE_IDS, not left to grow with one reminder's full occurrence history (independent audit AUD19-P2-3)", async () => {
+    const clock = manualClock(0);
+    const pm = await createProspectiveMemory({
+        clock, bounds: { ...BOUNDS, MAX_RECURRENCE_OCCURRENCES: 50, MAX_FIRED_OCCURRENCE_IDS: 10 }
+    });
+    pm.arm({ reminderId: "R", wakeClass: "MAINTENANCE", trigger: { kind: "RECURRING", intervalMs: 60_000, maxOccurrences: 50 } });
+    for (let i = 0; i < 50; i++) {
+        clock.advance(60_001);
+        pm.tick();
+    }
+    assert.ok(pm.firedOccurrenceIdsSize() <= 10, "firedOccurrenceIds must stay bounded by MAX_FIRED_OCCURRENCE_IDS regardless of a single reminder's occurrence count");
+});
+
 test("PM-repair-16: an ON_STATE trigger's non-subject fields are sanitized+frozen and cannot crash persist() (independent audit AUD12-P1-1)", async () => {
     const store = jsonStore();
     const pm = await createProspectiveMemory({ store });

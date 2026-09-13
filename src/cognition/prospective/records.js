@@ -63,8 +63,9 @@ function validateTrigger(trigger) {
     }
     // Bug review independen (audit putaran-10, AUD10-P2-2): sapuan deepFreeze
     // putaran-9 hanya menyentuh cabang ON_STATE -- cabang lain (AT/AFTER/
-    // RECURRING/ON_EVENT) masih pembekuan SATU level, objek/nilai bersarang
-    // apa pun yang pemanggil sisipkan di trigger tetap referensi mutable.
+    // RECURRING) masih pembekuan SATU level, objek/nilai bersarang apa pun
+    // yang pemanggil sisipkan di trigger tetap referensi mutable.
+    // (ON_EVENT dihapus dari TRIGGER_KINDS putaran-18, AUD18-P2-2.)
     return deepFreeze(buildSafePayloadRef({ ...trigger }));
 }
 

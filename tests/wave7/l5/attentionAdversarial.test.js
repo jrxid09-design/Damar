@@ -189,6 +189,18 @@ test("AT-repair-10: ingestSignal never returns a targetId that its own overflow 
     assert.notEqual(ae.getTarget(targetId), null, "ingestSignal must never return a targetId already purged by its own MAX_TOTAL_TARGETS eviction");
 });
 
+test("AT-repair-11: MAX_TOTAL_TARGETS stays enforceable even once many targets are RUNNING with no governorPort (independent audit AUD19-P2-1)", async () => {
+    const ae = await createAttentionEconomy({ bounds: { ...BOUNDS, MAX_TOTAL_TARGETS: 2, MAX_QUEUED_TARGETS: 1, MAX_RUNNING_TARGETS: 1 } });
+    const ids = [];
+    for (let i = 0; i < 6; i++) {
+        const { targetId } = ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s" + i, subjectRef: { entityId: "e" + i } }, "PERCEIVE");
+        ids.push(targetId);
+        ae.pick();
+    }
+    const live = ids.filter(id => ae.getTarget(id) !== null).length;
+    assert.ok(live <= 3, "targets must stay bounded even when every non-RUNNING candidate keeps getting picked into RUNNING");
+});
+
 test("AT-A9: an uncorroborated agent urgency claim never jumps the queue above owner work", async () => {
     const ae = await createAttentionEconomy();
     const { targetId: agentTarget } = ae.ingestSignal({

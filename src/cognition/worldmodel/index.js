@@ -44,7 +44,11 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     // dipakai, jadi kontradiksi yang belum terselesaikan hilang diam-diam
     // begitu daftar kontradiksi terbatas overflow. Diarsipkan di sini,
     // dibatasi sendiri, supaya bisa diambil lewat overflowedContradictions().
-    const overflowedContradictions = [];
+    // Bug review independen (audit putaran-19, AUD19-P2-2): dulu SELALU
+    // dimulai dari [] di sini, tidak pernah dimuat dari snapshot -- arsip
+    // overflow hilang lagi setelah restart, membalikkan tepat fix yang
+    // dimaksudkan AUD16-P2-2.
+    const overflowedContradictions = [...(snapshot.overflowedContradictions ?? [])];
 
     const entityCountBySource = new Map();
     for (const e of entities.values()) {
@@ -159,6 +163,14 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function declareRelation(spec) {
+        // Bug review independen (audit putaran-19, AUD19-A3): sapuan dedup
+        // replay id putaran-9/10/13 mencakup observationId/declarationId/
+        // hypothesisId/goalId/dll, tapi tidak pernah mencakup relationId --
+        // replay sebuah relationId yang sudah ada diam-diam menimpa
+        // topologi/strength relasi tersimpan.
+        if (spec.relationId && relations.has(spec.relationId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `relationId '${spec.relationId}' sudah ada`);
+        }
         const relation = makeRelation(spec);
         if (!entities.has(relation.from) || !entities.has(relation.to)) {
             fail(REASONS.UNKNOWN_ENTITY, "relasi merujuk entitas yang belum dideklarasikan");
@@ -347,7 +359,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     function beliefsSize() { return beliefs.size; }
 
     async function persist() {
-        return saveSnapshot(store, { entities, relations, beliefs, hypotheses, contradictions });
+        return saveSnapshot(store, { entities, relations, beliefs, hypotheses, contradictions, overflowedContradictions });
     }
 
     return Object.freeze({

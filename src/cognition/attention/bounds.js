@@ -17,6 +17,14 @@ const CLASS_BASE = Object.freeze({
 const BOUNDS = Object.freeze({
     MAX_QUEUED_TARGETS: 4096,
     MAX_TOTAL_TARGETS: 8192,
+    // Bug review independen (audit putaran-19, AUD19-P2-1): tanpa
+    // governorPort, pick() memakai `maxRunning = Infinity` -- RUNNING tidak
+    // pernah dipurge (memang seharusnya, itu pekerjaan aktif), tapi tanpa
+    // batas di sisi MASUKNYA, jumlah target RUNNING bisa tumbuh tak
+    // terbatas, membuat MAX_TOTAL_TARGETS tidak bisa ditegakkan sama sekali
+    // (blok purge hanya boleh memilih korban non-RUNNING). Batas jatuh diri
+    // ini menutup celah itu saat tidak ada governor eksternal yang mengatur.
+    MAX_RUNNING_TARGETS: 256,
     MAX_SIGNALS_PER_SOURCE_PER_MINUTE: 120,
     MAX_DISTINCT_SOURCES_COUNTED: 8,
     MAX_WAIT_MS: 60_000,

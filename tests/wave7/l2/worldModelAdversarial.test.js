@@ -420,6 +420,43 @@ test("WM-repair-31: declareRelation never evicts the relation it just created, e
     assert.equal(inState.includes("r3"), true, "declareRelation must never evict the relation it just created in the same call");
 });
 
+test("WM-repair-33: an overflow-archived contradiction survives a JSON-round-tripping restart (independent audit AUD19-P2-2)", async () => {
+    function jsonStore() {
+        const kv = new Map();
+        return {
+            async getKv(k) { return kv.has(k) ? JSON.parse(kv.get(k)) : null; },
+            async putKv(k, v) { kv.set(k, JSON.stringify(v)); }
+        };
+    }
+    const store = jsonStore();
+    let wm = await createWorldModel({ store, bounds: { ...BOUNDS, MAX_OPEN_CONTRADICTION_SETS: 1 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    const base = { attribute: "status", tier: "T1" };
+    wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "INC-1", value: "a", sensor: { sensorId: "s1" }, observedAt: new Date(1000).toISOString() });
+    wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "c1", value: "b", sensor: { sensorId: "s2" }, observedAt: new Date(1001).toISOString() });
+    wm.ingestObservation({ ...base, subject: { entityId: "e2" }, observationId: "INC-2", value: "a", sensor: { sensorId: "s1" }, observedAt: new Date(1000).toISOString() });
+    wm.ingestObservation({ ...base, subject: { entityId: "e2" }, observationId: "c2", value: "b", sensor: { sensorId: "s3" }, observedAt: new Date(1001).toISOString() });
+    assert.equal(wm.overflowedContradictions().length, 1);
+    await wm.persist();
+    wm = await createWorldModel({ store, bounds: { ...BOUNDS, MAX_OPEN_CONTRADICTION_SETS: 1 } });
+    const overflowed = wm.overflowedContradictions();
+    assert.equal(overflowed.length, 1, "an overflow-archived contradiction must survive a restart");
+    assert.equal(overflowed[0].challengerRecordId, "c1");
+});
+
+test("WM-repair-34: replaying an already-used relationId is rejected, not silently overwritten (independent audit AUD19-A3)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e3", entityKind: "device", source: "s" });
+    wm.declareRelation({ relationId: "r1", kind: "k", from: "e1", to: "e2" });
+    assertThrowsReason(() => wm.declareRelation({ relationId: "r1", kind: "k", from: "e2", to: "e3" }), "DUPLICATE_RECORD_ID");
+    const inState = wm.subgraph(["e1", "e2", "e3"], 1).relations.find(r => r.relationId === "r1");
+    assert.equal(inState.from, "e1");
+    assert.equal(inState.to, "e2");
+});
+
 test("WM-repair-17: replaying a recordId already consumed by an earlier SUPERSEDE is a no-op, not a fresh CONTEST (independent audit AUD11-P2-7)", async () => {
     const clock = manualClock(0);
     const wm = await createWorldModel({ clock });

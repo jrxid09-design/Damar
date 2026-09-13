@@ -119,6 +119,13 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         const occId = occurrenceKey(reminder.reminderId, reminder.occurrenceIndex);
         if (firedOccurrenceIds.has(occId)) return null; // duplikat -> no-op
         firedOccurrenceIds.add(occId);
+        // Bug review independen (audit putaran-19, AUD19-P2-3): tidak ada
+        // batas eksplisit pada firedOccurrenceIds -- hanya dipangkas
+        // oportunistik saat reminder lain dikompaksi. Dipangkas FIFO
+        // (Set mempertahankan urutan insersi) begitu melebihi batas eksplisit.
+        if (firedOccurrenceIds.size > bounds.MAX_FIRED_OCCURRENCE_IDS) {
+            firedOccurrenceIds.delete(firedOccurrenceIds.values().next().value);
+        }
 
         const event = makeWakeEvent({
             reminderId: reminder.reminderId, wakeClass: reminder.wakeClass,
@@ -305,6 +312,7 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
     function droppedDeferredCount() { return droppedDeferredWakeEventCount; }
     function reminderCount() { return reminders.size; }
     function remindersPerGoalSize() { return remindersPerGoal.size; }
+    function firedOccurrenceIdsSize() { return firedOccurrenceIds.size; }
 
     async function persist() { return saveSnapshot(store, { reminders, expectations, firedOccurrenceIds }); }
 
@@ -314,6 +322,7 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         arm, tick, checkOnStateReminders,
         armExpectation, checkExpectations,
         getReminder, getExpectation, deferredCount, droppedDeferredCount, reminderCount, remindersPerGoalSize,
+        firedOccurrenceIdsSize,
         persist, laws, bounds
     });
 }

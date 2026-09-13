@@ -28,19 +28,25 @@ function deepFreeze(value, seen = new WeakSet()) {
     return Object.freeze(value);
 }
 
-function serialize({ entities, relations, beliefs, hypotheses, contradictions }) {
+function serialize({ entities, relations, beliefs, hypotheses, contradictions, overflowedContradictions }) {
     return {
         entities: Object.fromEntries(entities),
         relations: Object.fromEntries(relations),
         beliefs: Object.fromEntries(beliefs),
         hypotheses: Object.fromEntries(hypotheses),
-        contradictions
+        contradictions,
+        // Bug review independen (audit putaran-19, AUD19-P2-2): arsip
+        // overflow (AUD16-P2-2's overflowedContradictions) hanya pernah
+        // in-memory -- setelah restart, kontradiksi belum-terselesaikan yang
+        // sudah dieskalasi lewat overflowedContradictions() hilang lagi,
+        // membalikkan tepat fix yang dimaksudkan untuk menutup celah itu.
+        overflowedContradictions: overflowedContradictions ?? []
     };
 }
 
 function deserialize(raw) {
     if (!raw || typeof raw !== "object") {
-        return { entities: new Map(), relations: new Map(), beliefs: new Map(), hypotheses: new Map(), contradictions: [], coldStart: true };
+        return { entities: new Map(), relations: new Map(), beliefs: new Map(), hypotheses: new Map(), contradictions: [], overflowedContradictions: [], coldStart: true };
     }
     // Bug review independen (audit putaran-8, W7R8-P1-1): putaran-5 hanya
     // membekukan `beliefs` -- entities/relations/hypotheses/contradictions
@@ -54,19 +60,20 @@ function deserialize(raw) {
         beliefs: new Map(Object.entries(raw.beliefs ?? {}).map(([k, v]) => [k, deepFreeze(v)])),
         hypotheses: new Map(Object.entries(raw.hypotheses ?? {}).map(([k, v]) => [k, deepFreeze(v)])),
         contradictions: (raw.contradictions ?? []).map(c => deepFreeze(c)),
+        overflowedContradictions: (raw.overflowedContradictions ?? []).map(c => deepFreeze(c)),
         coldStart: false
     };
 }
 
 async function loadSnapshot(store) {
     if (!store || typeof store.getKv !== "function") {
-        return { entities: new Map(), relations: new Map(), beliefs: new Map(), hypotheses: new Map(), contradictions: [], coldStart: true };
+        return { entities: new Map(), relations: new Map(), beliefs: new Map(), hypotheses: new Map(), contradictions: [], overflowedContradictions: [], coldStart: true };
     }
     try {
         const raw = await store.getKv(KV_KEY);
         return deserialize(raw);
     } catch {
-        return { entities: new Map(), relations: new Map(), beliefs: new Map(), hypotheses: new Map(), contradictions: [], coldStart: true };
+        return { entities: new Map(), relations: new Map(), beliefs: new Map(), hypotheses: new Map(), contradictions: [], overflowedContradictions: [], coldStart: true };
     }
 }
 
