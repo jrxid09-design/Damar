@@ -341,7 +341,21 @@ test("WM-repair-26: replaying a CONTEST challenger recordId stays deduped even a
     const replay = wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "c2", value: "b", sensor: { sensorId: "s2" }, observedAt: new Date(1001).toISOString() });
     assert.equal(replay.case, "DUPLICATE", "a challenger recordId must stay deduped past the 32-entry appliedRecordIds window");
     assert.equal(wm.openContradictions().map(c => c.challengerRecordId).includes("c3"), true, "the still-legitimate c3 contradiction must not be evicted by the replay");
-    assert.equal(wm.openContradictions().map(c => c.challengerRecordId).includes("c3"), true, "the still-legitimate c3 contradiction must not be evicted by the replay");
+});
+
+test("WM-repair-27: an overflowed unresolved contradiction is archived and retrievable, not silently dropped (independent audit AUD16-P2-2)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_OPEN_CONTRADICTION_SETS: 1 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    const base = { attribute: "status", tier: "T1" };
+    wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "INC-1", value: "a", sensor: { sensorId: "s1" }, observedAt: new Date(1000).toISOString() });
+    wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "c2", value: "b", sensor: { sensorId: "s2" }, observedAt: new Date(1001).toISOString() });
+    wm.ingestObservation({ ...base, subject: { entityId: "e2" }, observationId: "INC-2", value: "a", sensor: { sensorId: "s1" }, observedAt: new Date(1000).toISOString() });
+    wm.ingestObservation({ ...base, subject: { entityId: "e2" }, observationId: "c3", value: "b", sensor: { sensorId: "s3" }, observedAt: new Date(1001).toISOString() });
+    const overflowed = wm.overflowedContradictions();
+    assert.equal(overflowed.length, 1);
+    assert.equal(overflowed[0].challengerRecordId, "c2");
+    assert.equal(overflowed[0].status, "UNRESOLVABLE");
 });
 
 test("WM-repair-17: replaying a recordId already consumed by an earlier SUPERSEDE is a no-op, not a fresh CONTEST (independent audit AUD11-P2-7)", async () => {

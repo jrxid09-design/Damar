@@ -85,6 +85,11 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
             fail(REASONS.OPEN_REVIEW_LIMIT_EXCEEDED, "jumlah review terbuka melebihi batas");
         }
 
+        // Bug review independen (audit putaran-16, AUD16-P2-1): guard cost di
+        // makeReview berjalan SETELAH baris ini membaca cost.tokens/cost.ms --
+        // cost:null tetap melempar TypeError mentah di sini duluan, sebelum
+        // sempat sampai ke makeReview.
+        if (!cost || typeof cost !== "object") fail(REASONS.INVALID_RECORD, "cost wajib objek");
         const wouldExceedBudget =
             tokensSpentThisWindow + cost.tokens > bounds.REFLECTION_BUDGET_TOKENS_PER_HOUR ||
             msSpentThisWindow + cost.ms > bounds.REFLECTION_BUDGET_MS_PER_HOUR;

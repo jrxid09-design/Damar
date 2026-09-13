@@ -17,6 +17,14 @@ test("MC-repair-4: explicit null findings/proposals is rejected as INVALID_RECOR
     assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, proposals: null }), "INVALID_RECORD");
 });
 
+test("MC-repair-5: a null/undefined element inside findings/proposals, or a null cost, is rejected as INVALID_RECORD (independent audit AUD16-P2-1)", async () => {
+    const mc = await createMetacognition();
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, proposals: [null] }), "INVALID_RECORD");
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, proposals: [undefined] }), "INVALID_RECORD");
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: [null] }), "INVALID_RECORD");
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, cost: null }), "INVALID_RECORD");
+});
+
 test("MC-A1: fake confidence (model writes 0.99) is impossible — no API accepts a raw value", async () => {
     const mc = await createMetacognition();
     const a = mc.assess({ entityId: "e1" }, "claim", { value: 0.99, sourceCount: 0 }); // "value" in input ignored

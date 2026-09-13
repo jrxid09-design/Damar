@@ -480,6 +480,15 @@ test("GL-repair-32: a valid proposal rejected only by retention pressure (no ter
     assert.equal(ge.creationTimestampsSize(), before, "a retention-rejected (never-stored) proposal must not create/charge a new origin.kind rate key");
 });
 
+test("GL-repair-33: a rate-exceeded proposal must not evict a valid terminal goal (independent audit AUD16-P1-1)", async () => {
+    const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_GOALS_RETAINED: 2, MAX_GOAL_CREATION_RATE_PER_MINUTE: 2 } });
+    ge.proposeGoal(baseGoalSpec({ goalId: "G1" }));
+    ge.transition("G1", "supersede", { actorKind: "OWNER", reason: "r" });
+    ge.proposeGoal(baseGoalSpec({ goalId: "G2" }));
+    assertThrowsReason(() => ge.proposeGoal(baseGoalSpec({ goalId: "G3" })), "CREATION_RATE_EXCEEDED");
+    assert.notEqual(ge.getGoal("G1"), null, "a rate-rejected proposal must not evict a valid terminal goal");
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

@@ -38,6 +38,13 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     const hypotheses = snapshot.hypotheses;
     let contradictions = snapshot.contradictions;
     const coldStart = snapshot.coldStart;
+    // Bug review independen (audit putaran-16, AUD16-P2-2): openContradictionSet
+    // mengembalikan `evicted` (arsip UNRESOLVABLE/OVERFLOW_ARCHIVE) supaya
+    // pemanggil bisa mengeskalasi ke metakognisi/audit -- tapi tidak pernah
+    // dipakai, jadi kontradiksi yang belum terselesaikan hilang diam-diam
+    // begitu daftar kontradiksi terbatas overflow. Diarsipkan di sini,
+    // dibatasi sendiri, supaya bisa diambil lewat overflowedContradictions().
+    const overflowedContradictions = [];
 
     const entityCountBySource = new Map();
     for (const e of entities.values()) {
@@ -199,8 +206,12 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             if (alreadyOpen) {
                 return { case: "DUPLICATE", belief: existing, contradictionSetId: alreadyOpen.contradictionSetId };
             }
-            const { list, entry } = openContradictionSet(contradictions, contradiction, nowIso(), bounds.MAX_OPEN_CONTRADICTION_SETS);
+            const { list, entry, evicted } = openContradictionSet(contradictions, contradiction, nowIso(), bounds.MAX_OPEN_CONTRADICTION_SETS);
             contradictions = list;
+            if (evicted) {
+                overflowedContradictions.push(evicted);
+                if (overflowedContradictions.length > bounds.MAX_OPEN_CONTRADICTION_SETS) overflowedContradictions.shift();
+            }
             const nextContestedRecordIds = Object.freeze(appendBounded(
                 existing.contestedRecordIds ?? [], contradiction.challengerRecordId,
                 bounds.MAX_OPEN_CONTRADICTION_SETS));
@@ -298,6 +309,8 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     function query(spec) { return queryBelief(beliefs, spec, now()); }
 
     function openContradictions() { return contradictions.filter(c => c.status === "OPEN"); }
+    /** AUD16-P2-2: kontradiksi yang belum terselesaikan (status masih OPEN saat overflow) yang terdorong keluar dari daftar terbatas. */
+    function overflowedContradictionsView() { return [...overflowedContradictions]; }
 
     function resolveContradiction(contradictionSetId, ruleId) {
         contradictions = resolveContradictionSet(contradictions, contradictionSetId, ruleId, nowIso());
@@ -322,7 +335,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         subgraph: (seeds, depth, budget) => graphOps.subgraph(stateView(), seeds, depth, budget),
         path: (from, to, maxDepth) => graphOps.path(stateView(), from, to, maxDepth),
         entitiesByKind: (kind, limit) => graphOps.entitiesByKind(stateView(), kind, limit),
-        openContradictions, resolveContradiction, entityCountBySourceSize, beliefsSize,
+        openContradictions, overflowedContradictions: overflowedContradictionsView, resolveContradiction, entityCountBySourceSize, beliefsSize,
         persist, laws, bounds
     });
 }
