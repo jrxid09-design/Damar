@@ -42,12 +42,18 @@ function deserialize(raw) {
     if (!raw || typeof raw !== "object") {
         return { entities: new Map(), relations: new Map(), beliefs: new Map(), hypotheses: new Map(), contradictions: [], coldStart: true };
     }
+    // Bug review independen (audit putaran-8, W7R8-P1-1): putaran-5 hanya
+    // membekukan `beliefs` -- entities/relations/hypotheses/contradictions
+    // tetap dimuat mentah, jadi entitasByKind/neighbors/subgraph/
+    // openContradictions() pasca-restart bisa dimutasi pemanggil (topologi
+    // dipalsukan, kuota per-sumber dilewati, kontradiksi ditutup tanpa
+    // ruleId). SEMUA koleksi sekarang dibekukan, bukan hanya beliefs.
     return {
-        entities: new Map(Object.entries(raw.entities ?? {})),
-        relations: new Map(Object.entries(raw.relations ?? {})),
+        entities: new Map(Object.entries(raw.entities ?? {}).map(([k, v]) => [k, deepFreeze(v)])),
+        relations: new Map(Object.entries(raw.relations ?? {}).map(([k, v]) => [k, deepFreeze(v)])),
         beliefs: new Map(Object.entries(raw.beliefs ?? {}).map(([k, v]) => [k, deepFreeze(v)])),
-        hypotheses: new Map(Object.entries(raw.hypotheses ?? {})),
-        contradictions: raw.contradictions ?? [],
+        hypotheses: new Map(Object.entries(raw.hypotheses ?? {}).map(([k, v]) => [k, deepFreeze(v)])),
+        contradictions: (raw.contradictions ?? []).map(c => deepFreeze(c)),
         coldStart: false
     };
 }

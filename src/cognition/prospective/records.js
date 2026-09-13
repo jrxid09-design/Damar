@@ -43,6 +43,13 @@ function validateTrigger(trigger) {
     if (trigger.kind === "ON_EVENT" && typeof trigger.eventKind !== "string") {
         fail(REASONS.INVALID_TRIGGER, "trigger ON_EVENT wajib eventKind");
     }
+    // Bug review independen (audit putaran-8, W7R8-P2-2): `Object.freeze({...trigger})`
+    // dangkal -- `trigger.subject` (ON_STATE) tetap referensi milik
+    // pemanggil, jadi mutasi pasca-arm() menulis ulang subject trigger yang
+    // sudah tersimpan.
+    if (trigger.kind === "ON_STATE") {
+        return Object.freeze({ ...trigger, subject: Object.freeze({ ...trigger.subject }) });
+    }
     return Object.freeze({ ...trigger });
 }
 

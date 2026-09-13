@@ -214,8 +214,17 @@ async function createSelfModel({
         }
 
         const window = successWindows.get(capabilityId) ?? emptySuccessWindow(now());
-        const history = [...(window.history ?? []), { at, outcome, evidenceRef }]
-            .slice(-bounds.MAX_SUCCESS_WINDOW);
+        // Bug review independen (audit putaran-8, W7R8-P1-2): `history`
+        // (array DAN elemennya) tidak pernah dibekukan -- assess()'s
+        // `Object.freeze({...window})` di assessment.js cuma dangkal, jadi
+        // `assessment.successWindow.history` adalah REFERENSI YANG SAMA
+        // dengan history kanonik ini. Pemanggil yang memutasi hasil assess()
+        // menulis ulang bukti kanonik yang lalu ikut terbawa ke
+        // ingestOutcome BERIKUTNYA (confidence bisa dipalsukan tanpa restart
+        // sama sekali). Membekukan di sumbernya menutup jalur ini di mana
+        // pun history dibaca, tidak cuma di satu titik baca.
+        const history = Object.freeze([...(window.history ?? []), Object.freeze({ at, outcome, evidenceRef })]
+            .slice(-bounds.MAX_SUCCESS_WINDOW));
         const nextWindow = Object.freeze({
             attempts: history.length,
             successes: history.filter(h => h.outcome === "SUCCESS").length,

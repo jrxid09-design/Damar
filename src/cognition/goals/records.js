@@ -125,7 +125,11 @@ function validateConditionSpec(spec, label) {
         fail(REASONS.UNVERIFIABLE_SUCCESS_CONDITION,
             `${label} tidak dapat dievaluasi (kind/subject/attribute wajib ada)`);
     }
-    return Object.freeze({ ...spec });
+    // Bug review independen (audit putaran-8, W7R8-P2-1): `Object.freeze({...spec})`
+    // dangkal -- `spec.subject` tetap referensi milik pemanggil, jadi
+    // mutasi pasca-proposeGoal/createTask menulis ulang subject kondisi
+    // yang sudah tersimpan.
+    return Object.freeze({ ...spec, subject: Object.freeze({ ...spec.subject }) });
 }
 
 /** G-1/G-2: SELF_PROPOSED tidak pernah menyetujui dirinya; AGENT_SUGGESTION tidak pernah mengatur ownerApproval. */
