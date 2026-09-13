@@ -28,6 +28,14 @@ test("PM-A1: reminder carrying executable/authority-shaped payload is rejected",
     }), "EXECUTABLE_MATERIAL_REJECTED");
 });
 
+test("PM-A1-repair: forbidden fields nested inside payloadRef are rejected too (Codex P2 finding)", async () => {
+    const pm = await createProspectiveMemory();
+    assertThrowsReason(() => pm.arm({
+        trigger: { kind: "AT", at: new Date(1000).toISOString() }, wakeClass: "MAINTENANCE",
+        payloadRef: { nested: { capabilityId: "cap.x" } }
+    }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
 test("PM-A2: reminder flood is bounded by arm cap, not unbounded DoS on cognition", async () => {
     const pm = await createProspectiveMemory({ bounds: { ...BOUNDS, MAX_ARMED_REMINDERS: 3 } });
     for (let i = 0; i < 3; i++) pm.arm({ trigger: { kind: "AT", at: new Date(1000 + i).toISOString() }, wakeClass: "MAINTENANCE" });

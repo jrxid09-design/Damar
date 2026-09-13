@@ -46,6 +46,19 @@ function validateTrigger(trigger) {
     return Object.freeze({ ...trigger });
 }
 
+const FORBIDDEN_PAYLOAD_KEYS = Object.freeze(["capabilityId", "actuatorRef", "authProof", "authorityDecision", "intentTemplate"]);
+
+/** PM-1, rekursif: field eksekusi/otoritas ditolak di kedalaman manapun. */
+function assertNoForbiddenPayloadKeys(value, depth = 0) {
+    if (!value || typeof value !== "object" || depth > 8) return;
+    for (const key of Object.keys(value)) {
+        if (FORBIDDEN_PAYLOAD_KEYS.includes(key)) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa '${key}' (di kedalaman manapun)`);
+        }
+        assertNoForbiddenPayloadKeys(value[key], depth + 1);
+    }
+}
+
 /** PM-1: payloadRef adalah REFERENSI saja — menolak materi eksekusi/fungsi. */
 function validatePayloadRef(payloadRef) {
     if (payloadRef === null || payloadRef === undefined) return null;
@@ -57,12 +70,10 @@ function validatePayloadRef(payloadRef) {
     if (Buffer.byteLength(serialized) > BOUNDS.MAX_PAYLOAD_REF_BYTES) {
         fail(REASONS.PAYLOAD_TOO_LARGE, "payloadRef melebihi batas ukuran");
     }
-    // PM-1: tidak boleh membawa field bernuansa eksekusi/otoritas.
-    for (const forbidden of ["capabilityId", "actuatorRef", "authProof", "authorityDecision", "intentTemplate"]) {
-        if (payloadRef && typeof payloadRef === "object" && forbidden in payloadRef) {
-            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa '${forbidden}'`);
-        }
-    }
+    // PM-1: tidak boleh membawa field bernuansa eksekusi/otoritas, DI
+    // KEDALAMAN MANAPUN — bug diketemukan review independen (Codex):
+    // pemeriksaan lama hanya level-atas, { nested: { capabilityId } } lolos.
+    assertNoForbiddenPayloadKeys(payloadRef);
     return JSON.parse(serialized);
 }
 

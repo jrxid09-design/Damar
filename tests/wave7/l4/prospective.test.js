@@ -67,6 +67,16 @@ test("W7-L4 boundedness: MAX_ARMED_REMINDERS and MAX_REMINDERS_PER_GOAL enforced
         (err) => err.reason === "PER_GOAL_LIMIT_EXCEEDED");
 });
 
+test("W7-L4 repair: armed capacity is released after a reminder fires or retires (Codex P2 finding)", async () => {
+    const clock = manualClock(0);
+    const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_ARMED_REMINDERS: 3 } });
+    for (let i = 0; i < 3; i++) pm.arm({ trigger: { kind: "AT", at: new Date(1000 + i).toISOString() }, wakeClass: "MAINTENANCE" });
+    clock.advance(2000);
+    pm.tick(); // fires all three one-shot AT reminders -> should release all 3 slots
+    assert.doesNotThrow(() => pm.arm({ trigger: { kind: "AT", at: new Date(9999).toISOString() }, wakeClass: "MAINTENANCE" }),
+        "kapasitas armed harus dilepas setelah reminder benar-benar berhenti ARMED");
+});
+
 test("W7-L4 expectations: SATISFIED and VIOLATED per window, never fabricated intermediate state", async () => {
     const clock = manualClock(0);
     const pm = await createProspectiveMemory({ clock });

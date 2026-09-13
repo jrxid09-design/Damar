@@ -70,14 +70,23 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function declareEntity({ entityId, entityKind, labels, externalRefs, source }) {
+        const existing = entities.get(entityId);
+        // Bug diketemukan review independen (Codex): deklarasi ulang dengan
+        // `source` BERBEDA dulu menimpa entitas tanpa menyesuaikan hitungan
+        // kuota sumber lama/baru — celah untuk melampaui MAX_ENTITIES_PER_SOURCE.
+        const isSourceChange = existing && existing.source !== source;
         const count = entityCountBySource.get(source) ?? 0;
-        if (count >= bounds.MAX_ENTITIES_PER_SOURCE) {
+        if ((!existing || isSourceChange) && count >= bounds.MAX_ENTITIES_PER_SOURCE) {
             fail(REASONS.QUOTA_EXCEEDED, `sumber '${source}' melebihi kuota entitas (WM-A6)`);
         }
         const entity = makeEntity({ entityId, entityKind, labels, externalRefs, source, nowMs: now() });
-        const existing = entities.get(entityId);
         entities.set(entityId, existing ? { ...entity, firstSeenAt: existing.firstSeenAt } : entity);
-        if (!existing) entityCountBySource.set(source, count + 1);
+        if (!existing) {
+            entityCountBySource.set(source, count + 1);
+        } else if (isSourceChange) {
+            entityCountBySource.set(existing.source, Math.max(0, (entityCountBySource.get(existing.source) ?? 1) - 1));
+            entityCountBySource.set(source, count + 1);
+        }
         evictEntityIfOverBound();
         return entities.get(entityId);
     }

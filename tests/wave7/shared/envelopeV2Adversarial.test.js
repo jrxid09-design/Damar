@@ -171,6 +171,20 @@ test("W7-ENV-24: payload bounds enforced (depth/keys/string/array/bytes)", () =>
         "ACC_ENVELOPE_TOO_LARGE");
 });
 
+test("W7-ENV-repair-1: accessor on an ARRAY index is rejected without invoking the getter (Codex P1 finding)", () => {
+    let invoked = false;
+    const hostileArray = [1, 2];
+    Object.defineProperty(hostileArray, 0, {
+        enumerable: true, configurable: true,
+        get() { invoked = true; return "should-not-run"; }
+    });
+    assertThrowsCode(
+        () => envelope.makeEnvelope(baseSpec({ payload: { arr: hostileArray } })),
+        "ACC_INVALID_METADATA"
+    );
+    assert.equal(invoked, false, "getter pada indeks array tidak boleh pernah dipanggil");
+});
+
 test("W7-ENV-25: malformed schemaVersion on a persisted row fails closed", () => {
     assertThrowsCode(
         () => envelope.normalizeEnvelopeRecord({ schemaVersion: "not-a-version" }),

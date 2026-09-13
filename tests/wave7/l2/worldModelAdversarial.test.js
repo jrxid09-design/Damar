@@ -79,6 +79,18 @@ test("WM-A6: entity explosion from one source is quota-limited, does not grow un
         "QUOTA_EXCEEDED");
 });
 
+test("WM-A6-repair: redeclaring an entity under a new source cannot bypass the old/new source quotas (Codex P2 finding)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_ENTITIES_PER_SOURCE: 1 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "window", source: "source-a" });
+    // Redeclare e1 under source-b — source-b's quota (1) should now count e1.
+    wm.declareEntity({ entityId: "e1", entityKind: "window", source: "source-b" });
+    assert.throws(() => wm.declareEntity({ entityId: "e2", entityKind: "window", source: "source-b" }),
+        (err) => err.reason === "QUOTA_EXCEEDED", "source-b harus dianggap sudah memakai 1 kuotanya dari e1");
+    // source-a's quota should be freed up again since e1 moved away.
+    assert.doesNotThrow(() => wm.declareEntity({ entityId: "e3", entityKind: "window", source: "source-a" }),
+        "source-a harus melepas kuota e1 yang sudah pindah sumber");
+});
+
 test("WM-A7: graph traversal never walks past its depth/fanout caps", async () => {
     const wm = await createWorldModel();
     // Build a long chain longer than PATH_MAX_DEPTH.

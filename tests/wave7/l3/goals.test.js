@@ -96,6 +96,18 @@ test("W7-L3 boundedness: goal depth/children/creation-rate/active-goal caps", as
         (err) => err.reason === "CREATION_RATE_EXCEEDED");
 });
 
+test("W7-L3 boundedness: MAX_PLAN_VERSIONS_RETAINED compacts oldest plan versions (Codex P2 finding)", async () => {
+    const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_PLAN_VERSIONS_RETAINED: 2, MAX_GOAL_CREATION_RATE_PER_MINUTE: 1000 } });
+    const g = ge.proposeGoal(baseGoalSpec());
+    const p1 = ge.createPlan({ goalRef: g.goalId, version: 1, steps: [] });
+    const p2 = ge.createPlan({ goalRef: g.goalId, version: 2, steps: [] });
+    const p3 = ge.createPlan({ goalRef: g.goalId, version: 3, steps: [] });
+
+    assert.equal(ge.getPlan(p1.planId), null, "versi tertua dikompaksi setelah melebihi batas retensi");
+    assert.ok(ge.getPlan(p2.planId));
+    assert.ok(ge.getPlan(p3.planId));
+});
+
 test("W7-L3 boundedness: MAX_ATTEMPTS_PER_TASK is enforced across retries", async () => {
     const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_GOAL_CREATION_RATE_PER_MINUTE: 1000 } });
     const g = ge.proposeGoal(baseGoalSpec());
