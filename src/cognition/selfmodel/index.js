@@ -170,7 +170,13 @@ async function createSelfModel({
                 `generation ${gen} tidak lebih baru dari ${existing.generation}, ditolak`);
         }
 
+        // Bug review independen (Codex putaran-5): observedAtMs masa depan
+        // membuat (nowMs - observedAtMs) negatif, melewati cek staleness
+        // dengan berpura-pura selalu "baru saja diamati".
         const observedAt = Number.isFinite(Number(observedAtMs)) ? Number(observedAtMs) : now();
+        if (observedAt > now() + bounds.MAX_FUTURE_SKEW_MS) {
+            fail(REASONS.INVALID_OBSERVATION, "observedAtMs tidak boleh di masa depan (di luar toleransi skew jam)");
+        }
         availabilityCache.set(capabilityId, {
             availability: canonical, generation: gen, observedAtMs: observedAt
         });

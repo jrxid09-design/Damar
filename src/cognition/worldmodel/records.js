@@ -67,8 +67,10 @@ function makeObservation({ observationId, subject, attribute, value, sensor, fra
     if (!sensor || typeof sensor.sensorId !== "string" || !sensor.sensorId) {
         fail(REASONS.MISSING_SENSOR_ID, "sensor.sensorId wajib ada (W-3)");
     }
-    if (typeof observedAt !== "string" || !observedAt) {
-        fail(REASONS.MISSING_SENSOR_ID, "observedAt wajib ada (W-3)");
+    if (typeof observedAt !== "string" || !observedAt || !Number.isFinite(Date.parse(observedAt))) {
+        // Bug review independen (Codex putaran-5): string tak-tanggal lolos cek
+        // "ada"-saja lalu diam-diam diperlakukan sebagai now() oleh index.js.
+        fail(REASONS.MISSING_SENSOR_ID, "observedAt wajib tanggal ISO yang sah (W-3)");
     }
 
     return Object.freeze({
