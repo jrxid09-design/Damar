@@ -114,6 +114,18 @@ test("PM-A1-repair-10: a Proxy with consistent-but-lying traps cannot smuggle a 
     assert.equal(Object.prototype.hasOwnProperty.call(r.payloadRef, "capabilityId"), false);
 });
 
+test("PM-repair-7: remindersPerGoal deletes an ownerRef key once its count reaches zero (independent audit W7R4-P2-3)", async () => {
+    const clock = manualClock(0);
+    const pm = await createProspectiveMemory({ clock });
+    for (let i = 0; i < 50; i++) {
+        pm.arm({ ownerRef: `goal-${i}`, trigger: { kind: "AT", at: new Date(1000).toISOString() }, wakeClass: "RESUME_GOAL" });
+    }
+    clock.advance(1500);
+    pm.tick(); // fires and releases capacity for all 50 distinct ownerRefs
+    assert.equal(pm.remindersPerGoalSize(), 0,
+        "kunci ownerRef harus dihapus begitu hitungannya kembali ke nol, bukan menumpuk selamanya");
+});
+
 test("PM-repair-4: restart rebuild counts only ARMED reminders toward the per-goal cap (Codex P2 round 7)", async () => {
     const store = createMemoryAccStore();
     const clock = manualClock(0);

@@ -182,6 +182,35 @@ test("GL-repair-6: evicting a goal removes its own childCounts entry, not just t
         "childCounts tidak boleh menumpuk kunci induk yang goal-nya sendiri sudah dievict");
 });
 
+test("GL-repair-7: intentTemplate array length is bounded (independent audit W7R4-P2-4)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+    const N = 3_000_000;
+    const arrLikeProxy = new Proxy([], {
+        getPrototypeOf() { return Array.prototype; },
+        ownKeys() { return ["length"]; },
+        getOwnPropertyDescriptor(t, k) {
+            if (k === "length") return { value: N, writable: true, enumerable: false, configurable: false };
+            if (/^(0|[1-9][0-9]*)$/.test(String(k))) return { value: 0, writable: true, enumerable: true, configurable: true };
+            return undefined;
+        },
+        get(t, k) { return k === "length" ? N : undefined; }
+    });
+    assertThrowsReason(() => ge.createTask({ planRef: p.planId, order: 1, intentTemplate: [arrLikeProxy] }),
+        "AUTHORITY_SHAPED_FIELD_REJECTED");
+});
+
+test("GL-repair-8: an unknown origin.kind is rejected before it ever touches the creation-rate map (independent audit W7R4-P2-3)", async () => {
+    const ge = await createGoalEngine();
+    for (let i = 0; i < 20; i++) {
+        assertThrowsReason(() => ge.proposeGoal(baseGoalSpec({ origin: { kind: `BOGUS-${i}`, ref: "x" } })),
+            "INVALID_RECORD");
+    }
+    assert.equal(ge.creationTimestampsSize(), 0,
+        "origin.kind sampah tidak boleh pernah membuat kunci baru di peta laju pembuatan");
+});
+
 test("GL-A5: immortal goal — terminal states are terminal, cannot be reactivated", async () => {
     const ge = await createGoalEngine();
     const g = ge.proposeGoal(baseGoalSpec());

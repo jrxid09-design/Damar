@@ -31,6 +31,55 @@ test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite"
     assert.equal(wm.query({ subject: { entityId: "e1" }, attribute: "temp" }).value, 20);
 });
 
+test("WM-repair-4: mutating a query() result's value never rewrites the stored belief (independent audit W7R4-P1-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.ingestObservation({
+        subject: { entityId: "e1" }, attribute: "cfg", value: { mode: "safe" },
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString()
+    });
+    const r1 = wm.query({ subject: { entityId: "e1" }, attribute: "cfg" });
+    assert.throws(() => { "use strict"; r1.value.mode = "PWNED"; });
+    const r2 = wm.query({ subject: { entityId: "e1" }, attribute: "cfg" });
+    assert.equal(r2.value.mode, "safe", "mutasi hasil query() tidak boleh menulis ulang belief tersimpan");
+    assert.equal(r2.revision, 1, "revisi tidak boleh naik hanya karena hasil query() dimutasi");
+});
+
+test("WM-repair-5: ingestDeclaration copies its input, post-ingest mutation cannot rewrite the stored belief (independent audit W7R4-P1-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const decl = { owner: "real" };
+    wm.ingestDeclaration({ subject: { entityId: "e1" }, attribute: "decl", value: decl, declarationId: "d1" });
+    decl.owner = "ATTACKER"; // mutate the caller's original object after ingest
+    const r = wm.query({ subject: { entityId: "e1" }, attribute: "decl" });
+    assert.equal(r.value.owner, "real", "ingestDeclaration harus menyalin input, bukan menyimpan referensi mentah");
+});
+
+test("WM-repair-6: a toJSON hook on an observation value is never invoked (independent audit W7R4-P2-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    let calls = 0;
+    const value = { toJSON() { calls++; return { pwned: true }; } };
+    assertThrowsReason(() => wm.ingestObservation({
+        subject: { entityId: "e1" }, attribute: "a", value,
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString()
+    }), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(calls, 0, "toJSON pada value observasi tidak boleh pernah dipanggil");
+    assertThrowsReason(() => wm.ingestObservation({
+        subject: { entityId: "e1" }, attribute: "b", value: () => {},
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString()
+    }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
+test("WM-repair-7: entityCountBySource deletes a source key once its count reaches zero (independent audit W7R4-P2-3)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s1" });
+    assert.equal(wm.entityCountBySourceSize(), 1);
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s2" }); // source change, s1 count -> 0
+    assert.equal(wm.entityCountBySourceSize(), 1,
+        "sumber lama dengan hitungan nol harus dihapus, bukan menumpuk sebagai kunci basi");
+});
+
 test("WM-repair-3: an epoch-dated observation (1970-01-01T00:00:00.000Z) is not falsely treated as the newest evidence (Codex P2 round 9)", async () => {
     const clock = manualClock(1000);
     const wm = await createWorldModel({ clock });

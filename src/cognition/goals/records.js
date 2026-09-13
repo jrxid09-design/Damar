@@ -23,6 +23,7 @@ const FORBIDDEN_INTENT_KEYS = Object.freeze([
 const DANGEROUS_INTENT_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 const INTENT_ARRAY_INDEX_PATTERN = /^(0|[1-9][0-9]*)$/;
 const MAX_INTENT_SCAN_DEPTH = 16;
+const MAX_INTENT_ARRAY_LENGTH = 1024;
 
 /**
  * Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
@@ -51,6 +52,14 @@ function buildSafeIntentTemplate(value, depth = 0) {
     }
 
     if (Array.isArray(value)) {
+        // Bug review independen (audit putaran-4, W7R4-P2-4): walker ini
+        // tidak punya batas panjang array seperti saudaranya di
+        // prospective (MAX_PAYLOAD_ARRAY_LENGTH) dan envelope
+        // (GLOBAL_MAX_ARRAY_LENGTH) -- array-like Proxy dengan `length`
+        // besar bisa memaksa loop tak terbatas.
+        if (value.length > MAX_INTENT_ARRAY_LENGTH) {
+            fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "panjang array pada intentTemplate melebihi batas");
+        }
         const arrProto = Object.getPrototypeOf(value);
         if (arrProto !== Array.prototype && arrProto !== null) {
             fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa array dengan prototype non-standar");

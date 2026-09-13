@@ -11,8 +11,73 @@
  */
 
 const { BOUNDS } = require("./bounds");
+const { REASONS, fail } = require("./errors");
 
 const TIER_RANK = Object.freeze({ T4: 1, T2: 2, T1: 3, DECLARED: 4 });
+const DANGEROUS_VALUE_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
+
+/**
+ * Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+ * putaran-4, W7R4-P1-1/W7R4-P2-1): sebelumnya `record.value` disimpan APA
+ * ADANYA -- lewat referensi mentah untuk ingestDeclaration, atau lewat
+ * `JSON.parse(JSON.stringify(value))` untuk ingestObservation (yang
+ * mengeksekusi `toJSON` pemanggil sebelum validasi apa pun, kelas bug yang
+ * sama yang sudah diperbaiki secara arsitektural putaran-3 untuk
+ * prospective/envelope/goals, tapi belum dimigrasikan ke worldmodel).
+ * `query()` juga mengembalikan `belief.value` mentah -- pemanggil yang
+ * memutasi hasil query() menulis ulang belief tersimpan TANPA revisi baru,
+ * melanggar "BELIEF REVISION != OVERWRITE" (§3). Satu lintasan aman di sini
+ * (dipanggil SEKALI di titik belief lahir/berevolusi) menutup KEDUANYA:
+ * validasi+salin+bekukan value SEBELUM pernah menjadi bagian dari belief.
+ */
+function buildSafeBeliefValue(value, depth = 0) {
+    if (value === null || value === undefined) return null;
+    const t = typeof value;
+    if (t === "function") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh membawa fungsi (termasuk toJSON)");
+    if (t === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh membawa Symbol");
+    if (t === "bigint") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh membawa BigInt");
+    if (t !== "object") return value;
+    if (depth > BOUNDS.MAX_VALUE_SCAN_DEPTH) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value terlalu dalam untuk diverifikasi dengan aman, ditolak");
+    }
+
+    if (Array.isArray(value)) {
+        if (value.length > BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array pada value melebihi batas");
+        }
+        const arrProto = Object.getPrototypeOf(value);
+        if (arrProto !== Array.prototype && arrProto !== null) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh berupa array dengan prototype non-standar");
+        }
+        const out = [];
+        for (let i = 0; i < value.length; i++) {
+            const desc = Object.getOwnPropertyDescriptor(value, i);
+            if (!desc || desc.get || desc.set) {
+                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `value tidak boleh membawa properti accessor: '${i}'`);
+            }
+            const built = buildSafeBeliefValue(desc.value, depth + 1);
+            out[i] = built === undefined ? null : built;
+        }
+        return Object.freeze(out);
+    }
+
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh berupa instance kelas (kontrak data murni)");
+    }
+    const out = {};
+    for (const key of Reflect.ownKeys(value)) {
+        if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh membawa kunci Symbol");
+        if (DANGEROUS_VALUE_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak: '${key}'`);
+        const desc = Object.getOwnPropertyDescriptor(value, key);
+        if (!desc || desc.get || desc.set) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `value tidak boleh membawa properti accessor: '${String(key)}'`);
+        }
+        const built = buildSafeBeliefValue(desc.value, depth + 1);
+        if (built !== undefined) out[key] = built;
+    }
+    return Object.freeze(out);
+}
 
 const DEFAULT_DECAY_POLICY = Object.freeze({ ttlMs: 30 * 60_000, decayKind: "STEP" });
 
@@ -40,6 +105,13 @@ function appendBounded(list, item, max) {
  * `contradiction` non-null hanya pada kasus CONTEST.
  */
 function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_POLICY }) {
+    // record.value divalidasi+disalin+dibekukan DI SINI, satu-satunya
+    // tempat belief lahir/berevolusi -- menutup W7R4-P1-1 (query() dan
+    // ingestDeclaration menyimpan/mengembalikan referensi mentah yang bisa
+    // dimutasi pemanggil) dan W7R4-P2-1 (toJSON pemanggil bisa tereksekusi
+    // sebelum validasi) sekaligus, untuk ingestObservation MAUPUN
+    // ingestDeclaration.
+    record = { ...record, value: buildSafeBeliefValue(record.value) };
 
     if (!existing) {
         // Kelahiran pertama — setara REFRESH dari ketiadaan.
@@ -129,5 +201,5 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
 }
 
 module.exports = {
-    TIER_RANK, DEFAULT_DECAY_POLICY, isExpired, epistemicClassOf, applyRevision
+    TIER_RANK, DEFAULT_DECAY_POLICY, isExpired, epistemicClassOf, applyRevision, buildSafeBeliefValue
 };

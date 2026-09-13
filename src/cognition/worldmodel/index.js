@@ -47,6 +47,15 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     function now() { return clock.nowMs(); }
     function nowIso() { return new Date(now()).toISOString(); }
 
+    // Bug review independen (audit putaran-4, W7R4-P2-3): nilai hanya
+    // diturunkan ke 0, kuncinya sendiri tidak pernah dihapus -- satu entri
+    // Map menumpuk selamanya per string `source` berbeda yang pernah dipakai.
+    function decrementSourceCount(source) {
+        const next = Math.max(0, (entityCountBySource.get(source) ?? 1) - 1);
+        if (next === 0) entityCountBySource.delete(source);
+        else entityCountBySource.set(source, next);
+    }
+
     function relationDegree(entityId) {
         let degree = 0;
         for (const r of relations.values()) {
@@ -78,7 +87,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         }
         if (victim) {
             entities.delete(victim.entityId);
-            entityCountBySource.set(victim.source, Math.max(0, (entityCountBySource.get(victim.source) ?? 1) - 1));
+            decrementSourceCount(victim.source);
             // Bug review independen (Codex putaran-6): relasi yang masih
             // menunjuk ke entitas yang baru dievict dulu dibiarkan, jadi
             // path/subgraph bisa melewati endpoint yang sudah tidak ada.
@@ -112,7 +121,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         if (!existing) {
             entityCountBySource.set(source, count + 1);
         } else if (isSourceChange) {
-            entityCountBySource.set(existing.source, Math.max(0, (entityCountBySource.get(existing.source) ?? 1) - 1));
+            decrementSourceCount(existing.source);
             entityCountBySource.set(source, count + 1);
         }
         evictEntityIfOverBound();
@@ -206,6 +215,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function stateView() { return { entities, relations }; }
+    function entityCountBySourceSize() { return entityCountBySource.size; }
 
     async function persist() {
         return saveSnapshot(store, { entities, relations, beliefs, hypotheses, contradictions });
@@ -221,7 +231,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         subgraph: (seeds, depth, budget) => graphOps.subgraph(stateView(), seeds, depth, budget),
         path: (from, to, maxDepth) => graphOps.path(stateView(), from, to, maxDepth),
         entitiesByKind: (kind, limit) => graphOps.entitiesByKind(stateView(), kind, limit),
-        openContradictions, resolveContradiction,
+        openContradictions, resolveContradiction, entityCountBySourceSize,
         persist, laws, bounds
     });
 }

@@ -9,6 +9,7 @@
 const { clamp01 } = require("../core/envelope");
 const { REASONS, fail } = require("./errors");
 const { BOUNDS } = require("./bounds");
+const { buildSafeBeliefValue } = require("./beliefAlgebra");
 
 const ADMISSIBLE_TIERS = new Set(["T1", "T2", "T4"]);
 
@@ -75,7 +76,12 @@ function makeObservation({ observationId, subject, attribute, value, sensor, fra
 
     return Object.freeze({
         observationId, subject: Object.freeze({ ...subject }),
-        attribute, value: JSON.parse(JSON.stringify(value ?? null)),
+        // Bug review independen (audit putaran-4, W7R4-P2-1): JSON.stringify
+        // langsung pada `value` pemanggil mengeksekusi `toJSON` warisan
+        // SEBELUM validasi apa pun. Diganti dengan pembangun satu-lintasan
+        // yang membaca hanya lewat descriptor, sama seperti prospective/
+        // envelope/goals (perbaikan arsitektural putaran-3).
+        attribute, value: buildSafeBeliefValue(value),
         sensor: Object.freeze({
             sensorId: sensor.sensorId,
             modality: sensor.modality ? String(sensor.modality).slice(0, 64) : null,
