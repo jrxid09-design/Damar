@@ -5,10 +5,11 @@ const assert = require("node:assert/strict");
 
 const { createTestWave6Lane3Facade, isCanonicalWave6ExecutionAdapter } = require("../../manager/productionHarness");
 const { makeActuationHarness } = require("../../actuation/harness");
-const { createDamarManagerComposition } = require("../../../src/manager/internal/managerBootstrap");
+const { createDamarManagerComposition, dispatchActuation } = require("../../../src/manager/internal/managerBootstrap");
 const { createDamarManager } = require("../../../src/manager/bootstrap");
 const { VERIFICATION_STATE } = require("../../../src/action/verification/errors");
 const { CHANNEL_TYPES, OUTCOME } = require("../../../src/manager");
+const wave6Production = require("../../../src/integration/wave6Production");
 
 /**
  * W6-R3-04/05/06 — CANONICAL MANAGER → WAVE 6 LANE-3 SEAM (real decision point).
@@ -50,7 +51,7 @@ function authAlice(lane3) {
     });
 }
 
-async function makeFullManager({ wave6Distributed = null, lane3LocalCalls = null } = {}) {
+async function makeFullManager({ lane3LocalCalls = null } = {}) {
     // SAME pattern as manager/security.test.js test 14: authorized action.
     const lane3 = await makeActuationHarness({ scopeBindings: lane4Bindings() });
     const capRes = await lane3.lane2.registerCapability({ id: "fs.cap", operations: ["read"] });
@@ -60,19 +61,19 @@ async function makeFullManager({ wave6Distributed = null, lane3LocalCalls = null
         capabilityId: "fs.cap", operations: ["read"], capabilityIncarnationId: capRes.incarnationId,
         actuatorId: "act-fs", invoke: async () => { if (lane3LocalCalls) lane3LocalCalls.push("act"); return { ok: true }; }
     });
-    // R5-02: the distributed seam is wired through the TRUSTED-INTERNAL
-    // composition parameter `wave6Adapter`. The public ingress never accepts it;
-    // tests drive the internal composition directly (test-only composition
-    // privilege). The adapter is passed UNBRANDED — R5-02 removed the production
-    // branding primitive entirely.
+    // DB-02 (Repair5): createDamarManagerComposition no longer accepts ANY
+    // wave6Adapter — not even from a test-only direct-internal-import caller.
+    // The privileged seam is lexically owned by createDamarManager() alone
+    // (src/manager/internal/managerBootstrap.js). Distributed-dispatch branch
+    // coverage below drives `dispatchActuation` directly instead (the SAME
+    // function runHandleBody calls internally) — see the tests further down.
     const manager = createDamarManagerComposition({
         deps: {
             lane2: { admit: lane3.lane2.admit, evaluate: lane3.lane2.evaluate, authenticate: authAlice(lane3), session: lane3.lane2.session },
             lane3: { execute: lane3.execute },
             lane4: { verify: async () => ({ verificationState: VERIFICATION_STATE.VERIFIED_SUCCESS, verificationId: "v1" }), compensate: async () => ({}) }
         },
-        trustedChannelAdapters: [],
-        ...(wave6Distributed ? { wave6Adapter: wave6Distributed } : {})
+        trustedChannelAdapters: []
     });
     return { manager, lane3 };
 }
@@ -92,50 +93,67 @@ test("R3-04: default (no seam) — authorized intent reaches LOCAL Lane 3 (froze
     void r;
 });
 
+// DB-02 (Repair5): the 3 tests below no longer inject a wave6Adapter into a
+// full Manager composition (that seam no longer exists on ANY export, not
+// even for a test-only direct-internal-import caller — see makeFullManager
+// above). They instead drive `dispatchActuation` directly: the SAME function
+// runHandleBody calls, unmodified, at step 7 of the real pipeline. This is
+// genuine coverage of the production decision logic, not a parallel copy.
+
 test("R3-04: Wave 6 seam present — authorized intent routes through DISTRIBUTED lane-3", async () => {
     const claims = [];
     const executes = [];
-    const lane3Local = [];
+    let localCalled = false;
     const wave6 = createTestWave6Lane3Facade({
         route: async (intent) => ({ targetNodeId: "dnode-b", toolId: "tool.fs", sandboxNeeds: {}, toolArtifactPath: null }),
         claim: async ({ intent }) => { claims.push(intent.capabilityId); return "dclaim-r3"; },
         execute: async ({ claimId }) => { executes.push(claimId); return { executionId: "dexec-r3", output: { ok: true }, decisionDigest: "d".repeat(64) }; }
     });
-    const { manager } = await makeFullManager({ wave6Distributed: wave6, lane3LocalCalls: lane3Local });
-    const r = await manager.handle(actionRequest());
+    const dispatch = await dispatchActuation({
+        wave6Adapter: wave6,
+        intent: { intentId: "i-r3-1", capabilityId: "fs.cap", operation: "read", arguments: { target: "t" } },
+        parameters: { target: "t" },
+        localExecute: async () => { localCalled = true; return { ok: true }; }
+    });
     assert.equal(claims.length, 1, "Seam claim invoked exactly once for the authorized intent");
     assert.equal(executes.length, 1, "Seam execute invoked exactly once");
-    assert.equal(lane3Local.length, 0, "local Lane 3 must NOT be used when the seam claims it");
-    assert.equal(r.outcome, OUTCOME.COMPLETED, "Manager still verifies + completes after distributed execution");
-    void r;
+    assert.equal(localCalled, false, "local Lane 3 must NOT be used when the seam claims it");
+    assert.equal(dispatch.outcome, "DISTRIBUTED", "Manager prefers the distributed result");
+    assert.equal(dispatch.executionResult.executionId, "dexec-r3");
 });
 
 test("R3-04: Wave 6 seam ineligible — Manager falls back to local Lane 3", async () => {
-    const lane3Local = [];
+    let localCalled = false;
     const wave6 = createTestWave6Lane3Facade({
         route: async () => null,
         claim: async () => "x",
         execute: async () => ({})
     });
-    const { manager } = await makeFullManager({ wave6Distributed: wave6, lane3LocalCalls: lane3Local });
-    const r = await manager.handle(actionRequest());
-    assert.equal(lane3Local.length, 1, "local Lane 3 actuator invoked when Wave 6 ineligible");
-    assert.equal(r.outcome, OUTCOME.COMPLETED);
-    void r;
+    const dispatch = await dispatchActuation({
+        wave6Adapter: wave6,
+        intent: { intentId: "i-r3-2", capabilityId: "fs.cap", operation: "read", arguments: {} },
+        parameters: {},
+        localExecute: async () => { localCalled = true; return { ok: true }; }
+    });
+    assert.equal(localCalled, true, "local Lane 3 actuator invoked when Wave 6 ineligible");
+    assert.equal(dispatch.outcome, "LOCAL");
 });
 
 test("R3-04: Wave 6 claim failure — Manager reports FAILED (no silent local double-execute)", async () => {
-    const lane3Local = [];
+    let localCalled = false;
     const wave6 = createTestWave6Lane3Facade({
         route: async () => ({ targetNodeId: "dnode-b", toolId: "tool.fs" }),
         claim: async () => null,
         execute: async () => ({})
     });
-    const { manager } = await makeFullManager({ wave6Distributed: wave6, lane3LocalCalls: lane3Local });
-    const r = await manager.handle(actionRequest());
-    assert.equal(lane3Local.length, 0, "no local execution after a distributed claim failure");
-    assert.notEqual(r.outcome, OUTCOME.COMPLETED, "must not complete via local fallback after distributed failure");
-    void r;
+    const dispatch = await dispatchActuation({
+        wave6Adapter: wave6,
+        intent: { intentId: "i-r3-3", capabilityId: "fs.cap", operation: "read", arguments: {} },
+        parameters: {},
+        localExecute: async () => { localCalled = true; return { ok: true }; }
+    });
+    assert.equal(localCalled, false, "no local execution after a distributed claim failure");
+    assert.equal(dispatch.outcome, "DISTRIBUTED_FAILED", "must not silently fall back to local after distributed failure");
 });
 
 test("R4-04/R5-02: public Manager ingress does NOT accept a wave6Distributed option (seam removed)", async () => {
@@ -214,4 +232,32 @@ test("R3-04: createTestWave6Lane3Facade validates members + disabled default", a
     assert.equal(d.disabled, true);
     const out = await d.tryDistributed({ intent: {}, parameters: {} });
     assert.equal(out.distributed, false);
+});
+
+// ---------------------------------------------------------------------------
+// DB02-C: Wave6 production adapter construction is sealed — no caller-
+// selected capabilityIds/logicalDamarId/router/federation/executor, and a
+// first-importer cannot poison what the canonical Manager later receives.
+// ---------------------------------------------------------------------------
+
+test("DB02-C: wave6Production exposes no caller-parameterized canonical adapter constructor", () => {
+    // Only a read-only getter is on the normal enumerable surface.
+    assert.deepEqual(Object.keys(wave6Production).sort(),
+        ["APPCONTAINER_NAME", "createDistributedNodeRuntime", "createGovernedExternalToolExecutor", "getCanonicalWave6ExecutionAdapter"]);
+    assert.equal(wave6Production.getCanonicalWave6ExecutionAdapter.length, 0,
+        "getter takes no arguments");
+});
+
+test("DB02-C: the canonical adapter constructor takes NO parameters (nothing to poison)", () => {
+    assert.equal(wave6Production.ensureCanonicalWave6ExecutionAdapter.length, 0,
+        "ensureCanonicalWave6ExecutionAdapter accepts zero parameters — a caller " +
+        "cannot pass capabilityIds/logicalDamarId/router/federation/executor");
+});
+
+test("DB02-C: repeated construction (any caller, any order) yields the identical singleton", () => {
+    const a = wave6Production.ensureCanonicalWave6ExecutionAdapter();
+    const b = wave6Production.ensureCanonicalWave6ExecutionAdapter();
+    assert.equal(a, b, "first-call-wins is harmless here: there is no caller-supplied state to vary");
+    assert.equal(wave6Production.getCanonicalWave6ExecutionAdapter(), a,
+        "the read-only getter observes the SAME instance a constructor caller would");
 });

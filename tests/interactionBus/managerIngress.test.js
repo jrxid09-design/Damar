@@ -148,8 +148,18 @@ test("production ingress cannot create a second media ownership domain", () => {
 
 test("production bootstrap contains only one Manager composition site", () => {
   const fs = require("node:fs");
-  const source = fs.readFileSync(require.resolve("../../src/manager/bootstrap"), "utf8");
-  assert.equal((source.match(/createDamarManagerComposition\s*\(\s*\{/g) || []).length, 1);
+  // DB-02 (Repair5): the canonical Manager composition moved from
+  // src/manager/bootstrap.js into src/manager/internal/managerBootstrap.js
+  // itself, so the privileged wave6Adapter dependency stays lexically
+  // captured inside the SAME closure that owns it and never crosses an
+  // exported function boundary. src/manager/bootstrap.js is now a thin
+  // re-export with no composition call of its own.
+  const bootstrapSource = fs.readFileSync(require.resolve("../../src/manager/bootstrap"), "utf8");
+  assert.equal((bootstrapSource.match(/composeManagerInternal\s*\(/g) || []).length, 0,
+    "src/manager/bootstrap.js must contain no composition call of its own");
+  const internalSource = fs.readFileSync(require.resolve("../../src/manager/internal/managerBootstrap"), "utf8");
+  assert.equal((internalSource.match(/canonicalManager\s*=\s*composeManagerInternal\s*\(/g) || []).length, 1,
+    "exactly one site assigns the canonical Manager singleton");
   const { createDamarManager } = require("../../src/manager/bootstrap");
   assert.equal(createDamarManager(), createDamarManager());
 });

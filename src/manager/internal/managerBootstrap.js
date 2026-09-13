@@ -176,7 +176,65 @@ function deepFreezeM(obj) {
 }
 
 /**
+ * DB-02 (Repair5): the Wave 6 / local Lane 3 actuation decision, extracted as
+ * a standalone, genuinely unprivileged helper (per the DB-02 owner decision:
+ * "Low-level unprivileged Manager helpers may remain exportable if genuinely
+ * unprivileged"). It constructs no Manager, touches no Authority/session/
+ * request state, and grants nothing on its own — it only shapes whichever
+ * `wave6Adapter` / `localExecute` the CALLER supplies into a uniform result.
+ * The real canonical Manager singleton (`createDamarManager()` below) is the
+ * only production caller that ever supplies the REAL wave6Adapter (lexically,
+ * never as an externally-suppliable option); calling this helper directly
+ * with a fake adapter (e.g. a unit test) touches no shared or ambient state.
+ *
+ * @returns {Promise<object>} one of:
+ *   { outcome: "DISTRIBUTED", executionResult }
+ *   { outcome: "DISTRIBUTED_FAILED", error }
+ *   { outcome: "LOCAL", executionResult }
+ *   { outcome: "LOCAL_FAILED", error }
+ */
+async function dispatchActuation({ wave6Adapter = null, intent, parameters = {}, localExecute }) {
+    if (wave6Adapter !== null) {
+        try {
+            const wave6Outcome = await wave6Adapter.tryDistributed({ intent, parameters });
+            if (wave6Outcome && wave6Outcome.distributed === true) {
+                if (wave6Outcome.error) {
+                    return { outcome: "DISTRIBUTED_FAILED", error: wave6Outcome.error };
+                }
+                return {
+                    outcome: "DISTRIBUTED",
+                    executionResult: {
+                        executionId: wave6Outcome.executionId,
+                        state: RESULT_STATE_L3.EXECUTED,
+                        output: wave6Outcome.output ?? null,
+                        distributed: true,
+                        targetNodeId: wave6Outcome.targetNodeId ?? null
+                    }
+                };
+            }
+            // { distributed: false } (ineligible / non-conforming) falls
+            // through to local Lane 3 below — not an error.
+        } catch (e) {
+            return { outcome: "DISTRIBUTED_FAILED", error: String(e?.reasonCode ?? e?.message ?? "error").slice(0, 256) };
+        }
+    }
+    try {
+        const executionResult = await localExecute();
+        return { outcome: "LOCAL", executionResult };
+    } catch (e) {
+        return { outcome: "LOCAL_FAILED", error: String(e?.reasonCode ?? e?.message ?? "error").slice(0, 256) };
+    }
+}
+
+/**
  * Create the canonical Damar Manager composition (trusted internal factory).
+ *
+ * DB-02 (Repair5): NOT exported directly. `wave6Adapter` is a privileged,
+ * composition-time-only dependency that must be lexically captured by the
+ * canonical production composition owner (`createDamarManager()` below) —
+ * never supplied through an exported, externally-callable factory. The
+ * exported `createDamarManagerComposition` wrapper further down always
+ * rejects a caller-supplied `wave6Adapter` key outright.
  *
  * @param {object} opts
  * @param {object} opts.deps — bootstrap-owned dependencies, captured ONCE:
@@ -192,12 +250,12 @@ function deepFreezeM(obj) {
  * @returns {object} frozen least-privilege facade:
  *   { handle, cancel, isCanonicalManagerRequest, isCanonicalManagerResult }
  */
-function createDamarManagerComposition({
+function composeManagerInternal({
     deps,
     trustedChannelAdapters = [],
     mediaProcessor = null,
      mediaContextAuthority = createMediaContextAuthority(),
-    wave6Adapter = null              // R5-02: trusted-internal Wave 6 lane-3 dependency (closure-owned).
+    wave6Adapter = null              // lexically supplied ONLY by createDamarManager() below.
 } = {}) {
     if (deps === null || typeof deps !== "object") {
         throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "manager composition requires deps");
@@ -227,12 +285,19 @@ function createDamarManagerComposition({
     if (!Array.isArray(trustedChannelAdapters)) {
         throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "trustedChannelAdapters must be an array");
     }
-    // R5-02: the Manager ↔ Wave 6 lane-3 seam is a TRUSTED-INTERNAL dependency.
-    // It is supplied by the trusted runtime composition (or a test-only harness
-    // that drives this internal composition directly). There is NO public option
-    // to inject it and NO brand/shape gate is relied upon: a caller-controlled
-    // { tryDistributed } can never reach Lane-3 because it can never reach this
-    // composition parameter through any public Manager/RuntimeHost surface.
+    // DB-02 (Repair5): the Manager <-> Wave 6 lane-3 seam is a TRUSTED-INTERNAL
+    // composition-time dependency, supplied by the trusted production runtime
+    // composition (src/manager/bootstrap.js::createDamarManager, wired to the
+    // REAL canonical adapter from src/integration/wave6Production.js) or by a
+    // test-only harness driving this internal composition directly — the SAME
+    // shape contract lane2/lane3/lane4 already get. It is shape-validated like
+    // any other composition-time dependency; per-composition provenance (see
+    // header) means a rogue composition built from a forged wave6Adapter is
+    // its own disconnected trust domain and is never the canonical production
+    // Manager singleton that real RuntimeHost traffic reaches.
+    if (wave6Adapter !== null && (typeof wave6Adapter !== "object" || typeof wave6Adapter.tryDistributed !== "function")) {
+        throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "wave6Adapter must be null or provide tryDistributed");
+    }
     const capturedWave6 = wave6Adapter ?? null;
 
     // ---- PER-COMPOSITION PROVENANCE DOMAIN (Lane 4 R5 lesson) -------------
@@ -330,6 +395,38 @@ function createDamarManagerComposition({
                 turns.push({ role, content });
             }
             continuityContext = deepFreezeM(turns);
+        }
+        // DB02-B (Repair5): OPTIONAL one-use Owner/Admin proof, forwarded
+        // VERBATIM into Lane 2's EXISTING authenticate(evidence) contract
+        // (src/authority/ownerTrustComposition.js::makeAuthVerifier, sealed
+        // into action/bootstrap.js via _setOwnerAuthVerifier). This is INERT,
+        // OPAQUE evidence: Manager/RuntimeHost never inspects, trusts, or
+        // cryptographically checks it — Lane 2's OWN sealed verifier performs
+        // the real one-use Ed25519 proof check and either mints a genuine
+        // principal or fails closed (null), exactly as if no proof were
+        // supplied. A forged/garbage authProof simply fails verification; it
+        // never becomes authority by itself, and it grants nothing (Lane 2's
+        // SEPARATE evaluate() step still independently checks capability
+        // grants against the canonical Authority — see DB02-A).
+        let authProof = null;
+        if (input.authProof !== undefined && input.authProof !== null) {
+            const ap = input.authProof;
+            if (ap === null || typeof ap !== "object" || Array.isArray(ap)) {
+                throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "authProof must be a plain object");
+            }
+            if (Object.getOwnPropertySymbols(ap).length > 0) {
+                throw mfail(MREASONS.SYMBOL_VALUE, "symbol keys are not permitted");
+            }
+            const kind = ap.kind;
+            if (kind !== "owner-proof" && kind !== "admin-proof") {
+                throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "authProof.kind must be 'owner-proof' or 'admin-proof'");
+            }
+            authProof = deepFreezeM({
+                kind,
+                credentialId: mRequireString(ap.credentialId, "authProof.credentialId", 128),
+                nonce: mRequireString(ap.nonce, "authProof.nonce", 256),
+                signature: mRequireString(ap.signature, "authProof.signature", 512)
+            });
         }
         const peer = mRequireString(input.peer ?? "", "peer", MBOUNDS.MAX_CHANNEL_ID_CHARS, { optional: true, allowEmpty: true });
         const correlationId = mRequireString(input.correlationId ?? sessionId, "correlationId", MBOUNDS.MAX_CORRELATION_CHARS, { optional: true, allowEmpty: true });
@@ -444,6 +541,10 @@ function createDamarManagerComposition({
             // DSC-R1-004: prior logical-conversation turns as INERT context
             // provenance (nullable).  Never a principal, never authority.
             continuityContext,
+            // DB02-B: OPTIONAL one-use Owner/Admin proof (nullable), INERT
+            // until Lane 2's own sealed verifier checks it at authenticate()
+            // time. Never a principal, never authority, by itself.
+            authProof,
             correlationId,
             receivedAtMs,
             payload: detachedPayload,
@@ -563,7 +664,17 @@ function createDamarManagerComposition({
                 channelId: request.channelId,
                 sessionId: request.sessionProvenance.sessionId,
                 peer: request.sessionProvenance.peer,
-                correlationId: request.correlationId
+                correlationId: request.correlationId,
+                // DB02-B: forward the OPAQUE one-use proof verbatim, if
+                // present, into Lane 2's own sealed verifier. Manager itself
+                // performs no cryptographic check and grants nothing — see
+                // formManagerRequest's authProof parsing above.
+                ...(request.authProof ? {
+                    kind: request.authProof.kind,
+                    credentialId: request.authProof.credentialId,
+                    nonce: request.authProof.nonce,
+                    signature: request.authProof.signature
+                } : {})
                 // NOTE: no caller-supplied principal field is forwarded.
             };
             session = capturedLane2.authenticate(evidence);
@@ -725,70 +836,43 @@ function createDamarManagerComposition({
             });
         }
         entry.lifecycle = MLC.DISPATCHED;
-        let executionResult = null;
         // R3-04: when the Wave 6 lane-3 seam is wired (RuntimeHost composition),
         // prefer distributed execution for an AUTHORIZED intent. A distributed
-        // success returns the actuator-shaped result (executionId present).
-        // A distributed effort that FAILS is reported FAILED (no silent local
+        // success returns the actuator-shaped result (executionId present). A
+        // distributed effort that FAILS is reported FAILED (no silent local
         // fallback that could double-authorize). A non-eligible result
-        // ({ distributed: false }) falls back to the frozen local Lane 3.
-        let wave6Attempted = false;
-        let wave6Error = null;
-        if (capturedWave6 !== null) {
-            try {
-                const wave6Outcome = await capturedWave6.tryDistributed({
-                    intent,
-                    parameters: proposal.arguments ?? {}
-                });
-                if (wave6Outcome && wave6Outcome.distributed === true) {
-                    // Wave 6 distributed execution succeeded.
-                    if (wave6Outcome.error) {
-                        wave6Attempted = true;
-                        wave6Error = wave6Outcome.error;
-                    } else {
-                        wave6Attempted = true;
-                        executionResult = {
-                            executionId: wave6Outcome.executionId,
-                            state: RESULT_STATE_L3.EXECUTED,
-                            output: wave6Outcome.output ?? null,
-                            distributed: true,
-                            targetNodeId: wave6Outcome.targetNodeId ?? null
-                        };
-                    }
-                }
-            } catch (e) {
-                wave6Attempted = true;
-                wave6Error = String(e?.reasonCode ?? e?.message ?? "error").slice(0, 256);
-            }
-        }
-        if (wave6Attempted && !executionResult) {
+        // ({ distributed: false }) falls back to the frozen local Lane 3. The
+        // decision itself lives in dispatchActuation() (DB-02: extracted,
+        // genuinely unprivileged — see its own header).
+        const dispatch = await dispatchActuation({
+            wave6Adapter: capturedWave6,
+            intent,
+            parameters: proposal.arguments ?? {},
+            localExecute: () => capturedLane3.execute({
+                intent, authSession: session, parameters: proposal.arguments ?? {}
+            })
+        });
+        if (dispatch.outcome === "DISTRIBUTED_FAILED") {
             // A Wave 6 attempt failed — report FAILED (do not re-dispatch
             // locally; that could execute the side effect twice).
             return formManagerResult({
                 request, lifecycleState: MLC.FAILED, outcome: MOUTCOME.FAILED,
                 actionIntentId: intent.intentId, authorityEvidence,
-                detail: `distributed execution failed: ${wave6Error ?? "unknown"}`,
+                detail: `distributed execution failed: ${dispatch.error ?? "unknown"}`,
                 startedAtMs, completedAtMs: now(),
                 errorReason: MREASONS.ACTUATION_REJECTED
             });
         }
-        if (!executionResult) {
-            try {
-                executionResult = await capturedLane3.execute({
-                    intent,
-                    authSession: session,
-                    parameters: proposal.arguments ?? {}
-                });
-            } catch (e) {
-                return formManagerResult({
-                    request, lifecycleState: MLC.FAILED, outcome: MOUTCOME.FAILED,
-                    actionIntentId: intent.intentId, authorityEvidence,
-                    detail: `actuation dispatch failed: ${String(e?.reasonCode ?? e?.message ?? "error").slice(0, 256)}`,
-                    startedAtMs, completedAtMs: now(),
-                    errorReason: MREASONS.ACTUATION_REJECTED
-                });
-            }
+        if (dispatch.outcome === "LOCAL_FAILED") {
+            return formManagerResult({
+                request, lifecycleState: MLC.FAILED, outcome: MOUTCOME.FAILED,
+                actionIntentId: intent.intentId, authorityEvidence,
+                detail: `actuation dispatch failed: ${dispatch.error}`,
+                startedAtMs, completedAtMs: now(),
+                errorReason: MREASONS.ACTUATION_REJECTED
+            });
         }
+        const executionResult = dispatch.executionResult;
         const executionId = executionResult?.executionId ?? null;
 
         // ---- 8. OUTCOME MAPPING (uniform; ambiguity preserved) -------------
@@ -954,4 +1038,84 @@ function createDamarManagerComposition({
     });
 }
 
-module.exports = { createDamarManagerComposition };
+/**
+ * DB-02 (Repair5): the ONE public, safe composition factory. It builds the
+ * SAME Manager pipeline as the canonical production singleton below, for
+ * legitimate lower-level tests that supply their own Lane 2/3/4 — but it
+ * NEVER accepts a wave6Adapter. A caller-supplied `wave6Adapter` key is
+ * REJECTED outright (loud, typed error) rather than silently ignored, so an
+ * ordinary repo-local caller cannot even attempt to wire a distributed
+ * execution seam through this export.
+ */
+function createDamarManagerComposition(opts = {}) {
+    if (opts !== null && typeof opts === "object" && Object.prototype.hasOwnProperty.call(opts, "wave6Adapter")) {
+        throw mfail(MREASONS.INVALID_MANAGER_REQUEST,
+            "createDamarManagerComposition does not accept wave6Adapter (DB-02): the privileged Wave6 seam is lexically owned by createDamarManager()");
+    }
+    return composeManagerInternal(opts);
+}
+
+// ---------------------------------------------------------------------------
+// DB-02 (Repair5): THE canonical production Manager singleton — moved here
+// (from src/manager/bootstrap.js) so the privileged wave6Adapter dependency
+// is lexically captured in the SAME closure that owns composeManagerInternal
+// and never crosses an exported function boundary as a caller-suppliable
+// value. src/manager/bootstrap.js re-exports this unchanged.
+// ---------------------------------------------------------------------------
+let canonicalManager = null;
+let canonicalMediaContextAuthority = null;
+
+/**
+ * Create the canonical application Damar Manager facade. Takes NO options.
+ *
+ * @returns {object} frozen least-privilege facade, EXACTLY:
+ *     { handle, cancel, isCanonicalManagerRequest, isCanonicalManagerResult }
+ */
+function createDamarManager() {
+    if (arguments[0] !== undefined) {
+        throw mfail(MREASONS.INVALID_MANAGER_REQUEST,
+            "canonical manager creation accepts NO options; the Lane 2/3/4 facades, planner, and channel adapters are bootstrap-owned");
+    }
+    if (canonicalManager === null) {
+        const { CHANNEL_ADAPTERS } = require("../channels");
+        const {
+            createCanonicalActionFacade, createCanonicalActuationFacade, createCanonicalVerificationFacade
+        } = require("../../action/bootstrap");
+        const { createRealtimeMultimodalProcessor } = require("../../runtime/realtimeMultimodal");
+        canonicalMediaContextAuthority = createMediaContextAuthority();
+        canonicalManager = composeManagerInternal({
+            deps: {
+                lane2: createCanonicalActionFacade(),
+                lane3: createCanonicalActuationFacade(),
+                lane4: createCanonicalVerificationFacade(),
+                // No production planner is wired in Lane 5 V1; cognition
+                // integration is advisory and defaults to null (non-action
+                // requests complete without it).
+                planner: null
+            },
+            // Trusted built-in normalizers only; no caller-controlled registry
+            // or adapter injection is exposed by this bootstrap.
+            trustedChannelAdapters: CHANNEL_ADAPTERS.slice(),
+            mediaProcessor: createRealtimeMultimodalProcessor(),
+            mediaContextAuthority: canonicalMediaContextAuthority,
+            // DB-02 (Repair5): the REAL canonical Wave 6 distributed adapter,
+            // captured HERE, lexically, inside the single production owner.
+            // No exported function accepts this value from a caller.
+            wave6Adapter: require("../../integration/wave6Production").ensureCanonicalWave6ExecutionAdapter()
+        });
+    }
+    return canonicalManager;
+}
+
+/** The canonical MediaContext authority bound to the production singleton
+ * above (null before createDamarManager() has run once). Used by
+ * src/manager/bootstrap.js::createDamarManagerIngressDomain to mint media
+ * context handles for the SAME canonical Manager instance. */
+function getCanonicalMediaContextAuthority() {
+    return canonicalMediaContextAuthority;
+}
+
+module.exports = {
+    createDamarManagerComposition, createDamarManager,
+    getCanonicalMediaContextAuthority, dispatchActuation
+};

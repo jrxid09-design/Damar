@@ -87,6 +87,12 @@ test("structural: action module imports no executors, authority mutators, fs/net
                 ((isActuation || isVerification || isInternal) && /^\/?(\.\.\/)*(intent|gate|clock|errors|authDomain|authSession|verification\/errors|verification\/postcondition|verification\/schema|verification\/verifierRegistry|actuation\/errors)$/.test(target.replace(".js", ""))) ||
                 ((isActuation || isInternal) && /^\/?(\.\.\/)*(intent|gate|clock|errors|authDomain|authSession)$/.test(target.replace(".js", ""))) ||
                 (isBootstrap && (target === "../capability/registry" || target === "../authority/store" || target === "./internal/verificationBootstrap")) ||
+                // DB02-A (Repair5): the trusted bootstrap resolves a
+                // READ-ONLY view (getCapability/getGeneration/countConsumption
+                // only) over the canonical production Authority store — ONE
+                // canonical authority truth, no second store, no bridge that
+                // could write. See resolveLane2AuthorityStore()'s own header.
+                (isBootstrap && target === "../authority/productionComposition") ||
                 // MD-011: the canonical bootstrap wires the built-in Mata
                 // Dewa visual-mode capabilities + actuators. These requires
                 // pull capability metadata + a lazy read-only service getter
@@ -102,6 +108,16 @@ test("structural: action module imports no executors, authority mutators, fs/net
                 (isBootstrap && target === "../mataDewa/capabilities/visualModeWiring") ||
                 (isBootstrap && target === "../mataDewa/capabilities/rfControlWiring") ||
                 (isBootstrap && target === "../mataDewa/composition") ||
+                // DB02-D (Repair5): the trusted bootstrap wires the first
+                // real production external capability
+                // (damar.runtime.diagnostic.probe) through the IDENTICAL
+                // MD-011 pattern — descriptive capability metadata + an
+                // actuator binding that routes through the governed
+                // ExternalCapabilityFederation/DistributedExecutionRouter/
+                // sandbox pipeline (src/federation/, a separately-audited
+                // trust domain whose whole job IS governed execution). No
+                // executor/mutator is embedded in src/action/ itself.
+                (isBootstrap && target === "../federation/capabilities/diagnosticProbeWiring") ||
                 (isActuatorRegistry && target === "../../capability/registry/ids");
             assert.ok(ok, `${file}: unexpected external require '${target}'`);
         }

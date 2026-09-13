@@ -31,58 +31,16 @@
  * brand state, any composition factory, or any channel authority hook.
  */
 
-const { createDamarManagerComposition } = require("./internal/managerBootstrap");
-const { CHANNEL_ADAPTERS } = require("./channels");
-const { createCanonicalActionFacade, createCanonicalActuationFacade, createCanonicalVerificationFacade } = require("../action/bootstrap");
-const { fail, REASONS } = require("../action/errors");
-
-// The ONE canonical application Manager, created exactly once, lazily.
-let canonicalManager = null;
-let canonicalMediaContextAuthority = null;
-// R5-02: NO canonical Wave 6 seam is stored/installed on the public Manager
-// surface. The Manager ↔ Wave 6 lane-3 adapter is a TRUSTED-INTERNAL dependency
-// supplied to createDamarManagerComposition() by the trusted runtime composition
-// (or a test-only harness that drives that internal composition directly). There
-// is no importable mutator and no public option to inject a caller-controlled
-// adapter — not even a branded one.
-
-/**
- * Create the canonical application Damar Manager facade. Takes NO options.
- *
- * @returns {object} frozen least-privilege facade, EXACTLY:
- *     { handle, cancel, isCanonicalManagerRequest, isCanonicalManagerResult }
- */
-function createDamarManager() {
-    if (arguments[0] !== undefined) {
-        throw fail(REASONS.CALLER_BOOTSTRAP_REJECTED,
-            "canonical manager creation accepts NO options; the Lane 2/3/4 facades, planner, and channel adapters are bootstrap-owned");
-    }
-    if (canonicalManager === null) {
-        const { createMediaContextAuthority } = require("./internal/mediaContext");
-        const { createRealtimeMultimodalProcessor } = require("../runtime/realtimeMultimodal");
-        canonicalMediaContextAuthority = createMediaContextAuthority();
-        canonicalManager = createDamarManagerComposition({
-            deps: {
-                // Canonical certified fabric singletons (bootstrap-owned).
-                lane2: createCanonicalActionFacade(),
-                lane3: createCanonicalActuationFacade(),
-                lane4: createCanonicalVerificationFacade(),
-                // No production planner is wired in Lane 5 V1; cognition
-                // integration is advisory and defaults to null (non-action
-                // requests complete without it).
-                planner: null
-            },
-            // Trusted built-in normalizers only; no caller-controlled registry
-            // or adapter injection is exposed by this bootstrap.
-            trustedChannelAdapters: CHANNEL_ADAPTERS.slice(),
-            mediaProcessor: createRealtimeMultimodalProcessor(),
-            mediaContextAuthority: canonicalMediaContextAuthority
-            // R5-02: NO wave6Distributed/threading — production does not wire a
-            // distributed lane-3 adapter through this public bootstrap path.
-        });
-    }
-    return canonicalManager;
-}
+// DB-02 (Repair5): the ONE canonical application Manager is now composed
+// LEXICALLY inside src/manager/internal/managerBootstrap.js itself (the SAME
+// module that owns composeManagerInternal / dispatchActuation), so the
+// privileged wave6Adapter dependency never crosses an exported function
+// boundary as a caller-suppliable value. This file re-exports it unchanged —
+// this remains the documented "ONE place" callers reach for the canonical
+// Manager; the composition work has simply moved one file over.
+const {
+    createDamarManager, getCanonicalMediaContextAuthority
+} = require("./internal/managerBootstrap");
 
 /** Trusted runtime composition: pair one Bus/MediaIngress ownership domain
  * with one Manager media-context brand and expose only channel ingestion.
@@ -176,11 +134,11 @@ function createTrustedTransportPeerScopes() {
 }
 
 function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionContinuity = null, continuityStoreFile = undefined, transportPeerScopes = undefined } = {}) {
-    // R5-02: NO wave6Distributed parameter here. The Manager's Lane-3 distributed
-    // seam is a trusted-internal dependency of createDamarManagerComposition();
-    // it is never forwarded from a public ingress option. Production callers
-    // (the RuntimeHost composition) may wire a Wave 6 adapter only through the
-    // internal composition path, never through this public ingress.
+    // R5-02/DB-02: NO wave6Distributed parameter here. The Manager's Lane-3
+    // distributed seam is lexically captured inside
+    // src/manager/internal/managerBootstrap.js::createDamarManager() itself;
+    // it is never forwarded from a public ingress option and never crosses
+    // any exported function as a caller-suppliable value.
     const manager = createDamarManager();
     let continuity = sessionContinuity !== null && sessionContinuity !== undefined
         ? sessionContinuity
@@ -239,7 +197,7 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
             bus,
             manager,
             mediaSubsystem,
-            mediaContextMint: canonicalMediaContextAuthority.mint,
+            mediaContextMint: getCanonicalMediaContextAuthority().mint,
             sessionContinuity: continuity,
             trustedContinuity,
             peerScopes,
@@ -249,15 +207,20 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
         // DSC-R4-002/004 — HONEST CONTINUITY ADMIN SURFACE (fail-closed).
         //
         // Cross-channel owner-confirmed LINKING is UNSUPPORTED in the current
-        // production runtime.  Repository inspection proved there is NO
-        // genuine production owner-confirmation trust root: the canonical
-        // action-runtime authentication adapter is a deliberate fail-closed
-        // stub that authenticates NOBODY, and DeviceIdentityService.ownerConfirm
-        // / AuthorityRegistry.ratify are only ever invoked from tests.  A
-        // CALLER-SUPPLIED DeviceIdentityService is therefore NOT a real owner
-        // trust root (any caller can construct one and self-confirm a fake
-        // pairing).  Per the repair mandate, we DO NOT fabricate an owner
-        // root just to pass tests.
+        // production runtime. DB-02 (Repair5) recon: a real production
+        // owner-trust root DOES exist (src/authority/ownerTrustComposition.js
+        // + src/authority/productionComposition.js, wired into RuntimeHost
+        // boot — see canonicalRuntimeComposition.js) and the canonical
+        // action-runtime authentication adapter has a real sealed
+        // installation seam (action/bootstrap.js::_setOwnerAuthVerifier) that
+        // becomes live once an Owner is genuinely enrolled+ratified through
+        // that composition. What remains missing is CROSS-CHANNEL LINKING
+        // specifically (binding a second channel identity to an already
+        // -enrolled Owner) — that linking flow is not wired to any production
+        // caller yet. A CALLER-SUPPLIED DeviceIdentityService is still NOT a
+        // real owner trust root (any caller can construct one and
+        // self-confirm a fake pairing). Per the repair mandate, we DO NOT
+        // fabricate an owner root just to pass tests.
         //
         // The private continuity link core (trustedLinkContinuity /
         // trustedTransferBinding) is PRESERVED inside the continuity domain
@@ -299,7 +262,8 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
 module.exports = Object.freeze({
     createDamarManager,
     createDamarManagerIngressDomain
-    // R4-04: installCanonicalWave6Seam is intentionally NOT exported from the
-    // public manager surface. Only the production composition closure (which
-    // brands the adapter via wave6AdapterBrand) installs it.
+    // R4-04/DB-02: no wave6 install/seam primitive is exported from the
+    // public manager surface. The privileged wave6Adapter dependency is
+    // captured lexically inside createDamarManager() (moved to
+    // src/manager/internal/managerBootstrap.js — see its own header).
 });

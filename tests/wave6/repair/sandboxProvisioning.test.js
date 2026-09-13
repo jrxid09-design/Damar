@@ -18,8 +18,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { spawnSync } = require("node:child_process");
 
 const {
     APPCONTAINER_NAME,
@@ -113,8 +115,33 @@ test("R4-02: tamper detection — modified helper binary is rejected (fail-close
     }
 });
 
-test("R4-02: busy/hung helper is bounded (timeout) — helper that never answers fails closed", { skip: true }, async () => {
-    // Skip by default: we cannot fabricate a hung helper without shipping a
-    // second binary. The timeout path is code-reviewed and exercised through
-    // the spawn error branch below.
+test("R4-02: busy/hung helper is bounded (timeout) — fixture is terminated and retry works", async () => {
+    if (!WINDOWS) return;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "damar-hung-helper-"));
+    const fixtureSource = path.join(dir, "hung-helper.cs");
+    const fixture = path.join(dir, "hung-helper.exe");
+    // Compile a throwaway executable outside production artifacts. It ignores
+    // all arguments, never writes a success result, and remains alive until
+    // the watchdog fires.
+    fs.writeFileSync(fixtureSource, "using System; public static class HungHelper { public static void Main() { System.Threading.Thread.Sleep(60000); } }", "utf8");
+    const csc = path.join(process.env.WINDIR || "C:\\Windows", "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe");
+    const build = spawnSync(csc, ["/nologo", "/target:exe", "/out:" + fixture, fixtureSource], { encoding: "utf8", timeout: 10000 });
+    assert.equal(build.status, 0, "hung-helper fixture must compile: " + (build.stderr || build.stdout || ""));
+    const started = Date.now();
+    try {
+        const waiters = Array.from({ length: 3 }, () => ensureSandboxRuntimeReady({ helperPath: fixture, timeoutMs: 250, skipDigest: true }));
+        const results = await Promise.all(waiters.map((p) => p.then(() => null, (e) => e)));
+        assert.ok(results.every((e) => e && e.code === "SANDBOX_PROVISION_TIMEOUT"),
+            "all coalesced waiters must receive the bounded timeout: " + JSON.stringify(results.map((e) => e && { code: e.code, message: e.message })));
+        assert.ok(Date.now() - started < 5000, "watchdog must fire within bounded tolerance");
+        const lingering = spawnSync("tasklist", ["/FI", "IMAGENAME eq ping.exe", "/FO", "CSV", "/NH"], { encoding: "utf8", timeout: 5000 });
+        assert.equal(String(lingering.stdout || "").toLowerCase().includes("ping.exe"), false,
+            "hung-helper fixture must not leave a ping descendant alive");
+    } finally {
+        try { fs.unlinkSync(fixtureSource); } catch { /* fixture cleanup */ }
+        try { fs.unlinkSync(fixture); } catch { /* fixture cleanup */ }
+        try { fs.rmdirSync(dir); } catch { /* fixture cleanup */ }
+    }
+    const retry = await ensureSandboxRuntimeReady();
+    assert.equal(retry.ready, true, "subsequent provisioning must retry after timeout");
 });

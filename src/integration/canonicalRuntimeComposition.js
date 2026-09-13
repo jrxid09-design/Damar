@@ -257,6 +257,21 @@ async function buildRuntimeCoreInternal({
     const busInstance = mediaDomain.bus;
     let channelIngress = null;
     if (!bus && enableManagerIngress) {
+        // DB-02 (Repair5) recon fix: the real production owner-trust root
+        // (src/authority/ownerTrustComposition.js + productionComposition.js)
+        // previously bound ONLY through src/server.js's separate legacy boot
+        // path — this RuntimeHost/RuntimeCore composition never called it, so
+        // Lane 2 authentication stayed fail-closed and the canonical
+        // AuthorityRegistry stayed unbound for the distributed router
+        // regardless of Wave 6 wiring. Reusing the SAME existing production
+        // composition here (no second Authority root) connects the missing
+        // link: once an Owner is genuinely enrolled+ratified through this
+        // composition, Lane 2 authentication and the canonical Authority used
+        // by Wave 6 routing both become live for THIS RuntimeHost too.
+        // Fail-soft: a composition fault must never block RuntimeHost boot.
+        try {
+            await require("../authority/productionComposition").ensureProductionAuthorityComposed();
+        } catch { /* logged upstream by the composition itself; fail-closed for owner-gated ops */ }
         channelIngress = require("../manager/bootstrap").createDamarManagerIngressDomain({
             bus: busInstance,
             mediaSubsystem,

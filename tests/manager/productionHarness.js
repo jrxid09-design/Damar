@@ -124,10 +124,14 @@ function createTestWave6Lane3Facade({
  * @param {Array}    [opts.trustedVerifiers] — Lane 4 composition-time verifiers
  * @param {Function} [opts.planner] — advisory cognition hook (PLAN != AUTHORITY)
  * @param {boolean}  [opts.withAdapters] — wire the 5 built-in channel adapters
- * @param {object}   [opts.wave6Adapter] — TEST-ONLY: trusted-internal Wave 6
- *   lane-3 adapter wired through the internal composition seam. NOT a production
- *   option; never forwarded from RuntimeHost/channel/Manager requests. Null =
- *   frozen behavior. Passed UNBRANDED (R5-02 removed production branding).
+ *
+ * DB-02 (Repair5): this harness no longer accepts a wave6Adapter option at
+ * all. createDamarManagerComposition (which this harness wires) now REJECTS
+ * a wave6Adapter key outright — the privileged Wave 6 seam is lexically
+ * owned by createDamarManager() alone. Tests that need distributed-dispatch
+ * branch coverage call `dispatchActuation` directly (see
+ * src/manager/internal/managerBootstrap.js), which is the SAME function the
+ * real pipeline calls.
  */
 async function makeManagerHarness({
     scopeBindings,
@@ -137,11 +141,7 @@ async function makeManagerHarness({
     // Contract tests may supply this at composition time only.  It is never
     // forwarded from RuntimeHost, a channel adapter, or a Manager request.
     authenticate = undefined,
-    withAdapters = true,
-    // R5-02: TRUSTED-INTERNAL Wave 6 lane-3 adapter (test-only composition
-    // privilege). Null = frozen behavior. Duck-typed objects are rejected by
-    // the test-only harness pass-through. Production never receives this.
-    wave6Adapter = null
+    withAdapters = true
 } = {}) {
     // Lane 3 actuation harness (canonical execution results for this domain)
     const lane3h = await makeActuationHarness({ scopeBindings, ...(authenticate ? { authenticate } : {}) });
@@ -164,10 +164,7 @@ async function makeManagerHarness({
         },
         trustedChannelAdapters: withAdapters ? CHANNEL_ADAPTERS.slice() : [],
         mediaProcessor,
-        mediaContextAuthority,
-        // R5-02: trusted-internal seam, wired to the internal composition param
-        // directly (NO production brand / NO caller callback facade).
-        ...(wave6Adapter ? { wave6Adapter } : {})
+        mediaContextAuthority
     });
 
     return {

@@ -39,10 +39,7 @@ const net = require("node:net");
 
 const { createRuntimeHost } = require("../../../src/runtime/host/runtimeHost");
 const { createDistributedNodeRuntime } = require("../../../src/integration/wave6Production");
-const { createDamarManagerComposition } = require("../../../src/manager/internal/managerBootstrap");
-const { makeActuationHarness } = require("../../actuation/harness");
-const { CHANNEL_TYPES, OUTCOME } = require("../../../src/manager");
-const { VERIFICATION_STATE } = require("../../../src/action/verification/errors");
+const { dispatchActuation } = require("../../../src/manager/internal/managerBootstrap");
 const { createTestWave6Lane3Facade } = require("../../manager/productionHarness");
 const { createGovernedExternalToolExecutor } = require("../../../src/integration/wave6Production");
 const { HOST_EXE } = require("../../../src/federation/appContainerSandbox");
@@ -51,30 +48,70 @@ const mesh = require("../../../src/mesh");
 const ids = mesh.ids;
 const federationMod = require("../../../src/federation");
 const { sha256File } = require("../../helpers/toolDigest");
-const { makeCanonicalAuthorityRoot } = require("../repair/testCanonicalRoot");
-const { createMemoryAuthorityStore } = require("../../../src/authority/store");
+const crypto = require("node:crypto");
 
 const WINDOWS = process.platform === "win32";
 const HOST_PRESENT = fs.existsSync(HOST_EXE);
 const canRun = WINDOWS && HOST_PRESENT && process.env.DAMAR_SKIP_APP_CONTAINER !== "1";
 
-// ---- shared canonical authority (grant code.cap), installed once per
-// process into the module-private distributed authority source. The grant is
-// proposed+ratified on the SAME owner that is installed, so route() sees it.
+// ---- DB-02 (Repair5): shared canonical authority (grant code.cap), through
+// the REAL production owner-trust contract — src/authority/productionComposition.js
+// (the SAME composition RuntimeHost boot now calls; see canonicalRuntimeComposition.js).
+// This REPLACES the former test-only `registry.ratify({ ownerIdentity: "owner" })`
+// shortcut (which forged an unproven identity string) with a genuine Ed25519
+// proof-of-possession first-owner enrollment + proof-verified ratification,
+// mirroring tests/wave6/repair/ownerTrustProvisioning.test.js's proven real
+// path exactly. It is also now the ONLY canonical-authority installer this
+// file uses, so it never conflicts with a RuntimeHost boot's own
+// ensureProductionAuthorityComposed() call in the same process (single-flight).
 let sharedBound = false;
 async function canonicalOwner() {
     if (sharedBound) return;
-    const { owner: registry } = await makeCanonicalAuthorityRoot({
-        store: createMemoryAuthorityStore(),
-        clock: { nowIso: () => new Date().toISOString(), nowMs: () => Date.now() }
-    });
+    const comp = await require("../../../src/authority/productionComposition").ensureProductionAuthorityComposed();
+    if (!comp.ownerTrust) {
+        throw new Error("REAL production owner-trust composition unavailable: " + String(comp.ownerTrustError));
+    }
+    const ot = comp.ownerTrust;
+    const { canonicalChallenge, BOOTSTRAP_PURPOSE, BOOTSTRAP_CONTEXT } = require("../../../src/authority/ownerTrustComposition");
+    const kp = crypto.generateKeyPairSync("ed25519");
+    let credentialId;
+    if (ot.registry.getState() !== "ACTIVE") {
+        const begin = await ot.firstOwnerBootstrap.begin({
+            principalId: "owner-r4", mode: "external",
+            publicKeyPem: kp.publicKey.export({ type: "spki", format: "pem" })
+        });
+        const payload = canonicalChallenge({
+            purpose: BOOTSTRAP_PURPOSE, credentialId: begin.challenge.credentialId,
+            nonce: begin.challenge.nonce, context: BOOTSTRAP_CONTEXT
+        });
+        const sig = crypto.sign(null, payload, kp.privateKey).toString("base64url");
+        const done = await ot.firstOwnerBootstrap.complete({ ceremonyId: begin.ceremonyId, signature: sig });
+        credentialId = done.credentialId;
+    } else {
+        throw new Error("unexpected: an Owner is already ACTIVE before this file's first enrollment");
+    }
+    const registry = comp.canonicalOwner;
     await registry.proposeEvolution({
         proposalId: "r4-grant", createdBy: "owner", kind: "authority_expansion",
         problem: "grant", proposedChange: "grant",
         requestedAuthority: { capabilityId: "code.cap", subject: "damar", actions: ["run"], scope: ["."], maxExecutions: 200 }
     }, "owner");
-    await registry.ratify({ ratificationId: "rat", proposalId: "r4-grant", ownerIdentity: "owner", decision: "APPROVED" });
-    await registry.issueRatifiedRootGrant({ proposalId: "r4-grant", ratificationId: "rat", actor: "owner" });
+    // Genuine proof-verified ratification (NOT a raw ownerIdentity string).
+    const ch = ot.proofVerifier.issueChallenge({ purpose: "owner-proof", credentialId });
+    const proofSig = crypto.sign(null, canonicalChallenge({
+        purpose: "owner-proof", credentialId, nonce: ch.nonce, context: ch.context
+    }), kp.privateKey).toString("base64url");
+    const ratified = await comp.ratifyAsOwner({
+        proof: { credentialId, nonce: ch.nonce, signature: proofSig },
+        ratification: { ratificationId: "r4-rat", proposalId: "r4-grant", decision: "APPROVED" }
+    });
+    if (!ratified.applied) {
+        throw new Error("genuine owner ratification failed: " + JSON.stringify(ratified));
+    }
+    const issued = await comp.provisionAuthority({ proposalId: "r4-grant", ratificationId: "r4-rat" });
+    if (!issued.allowed) {
+        throw new Error("provisionAuthority failed: " + JSON.stringify(issued));
+    }
     sharedBound = true;
 }
 
@@ -145,12 +182,19 @@ test("R4-05-A: public RuntimeHost forwards MESSAGE to Manager ingress (terminal 
     console.log("R4-05-A terminal from bus:", terminal.state);
 });
 
-test("R4-05-B: SAME production Manager code routes a granted request to the branded seam -> distributed -> REAL sandbox", { skip: !canRun }, async (t) => {
+test("R4-05-B: SAME production dispatch decision (dispatchActuation) routes a granted intent -> distributed -> REAL sandbox", { skip: !canRun }, async (t) => {
+    // DB-02 (Repair5): createDamarManagerComposition no longer accepts ANY
+    // wave6Adapter (not even from a test-only direct-internal-import caller
+    // — the privileged seam is lexically owned by createDamarManager() alone).
+    // This test now drives `dispatchActuation` directly — the SAME function
+    // runHandleBody calls at step 7 of the real Manager pipeline — against
+    // REAL infrastructure (A.dexecRouter, a REAL governed executor, a REAL
+    // AppContainer sandbox launch). The gap this leaves versus a genuine
+    // public-RuntimeHost request is the SAME pre-existing, documented one
+    // named in this file's HONESTY FRAME above (no owner-confirmed Lane 2
+    // grant reaches this path from a real request yet) — DB-02 does not
+    // widen or narrow that gap.
     await canonicalOwner();
-    const lane3 = await makeActuationHarness({ scopeBindings: lane4Bindings() });
-    const capRes = await lane3.lane2.registerCapability({ id: "code.cap", operations: ["run"] });
-    await lane3.lane2.registry.observeAvailability("code.cap", "AVAILABLE", { generation: 1, incarnationId: capRes.incarnationId });
-    await lane3.lane2.grantAuthority({ capabilityId: "code.cap", subject: "damar", actions: ["run"], identityBinding: { principals: ["damar"] } });
 
     const A = makeNodeA();
     const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), "r4-e2e-"));
@@ -175,32 +219,19 @@ test("R4-05-B: SAME production Manager code routes a granted request to the bran
         }
     });
 
-    const manager = createDamarManagerComposition({
-        deps: {
-            lane2: { admit: lane3.lane2.admit, evaluate: lane3.lane2.evaluate, authenticate: (e) => lane3.lane2.authDomain.authenticate({ ...(e ?? {}), claimedPrincipal: "damar" }), session: lane3.lane2.session },
-            lane3: { execute: lane3.execute },
-            lane4: { verify: async () => ({ verificationState: VERIFICATION_STATE.VERIFIED_SUCCESS, verificationId: "v1" }), compensate: async () => ({}) }
-        },
-        trustedChannelAdapters: [],
-        // R5-02: trusted-internal seam, UNBRANDED (production brand removed). The
-        // test drives the internal composition directly; the public ingress
-        // never accepts this option.
-        wave6Adapter: seam
+    const intent = intentFor("code.cap", "run", { msg: "hello-r4" }, "r4-05-b");
+    const dispatch = await dispatchActuation({
+        wave6Adapter: seam,
+        intent,
+        parameters: { msg: "hello-r4" },
+        localExecute: async () => { throw new Error("local Lane 3 must not be reached — the seam is eligible"); }
     });
 
-    const r = await manager.handle({
-        channelType: CHANNEL_TYPES.CONSOLE, channelId: "console", sessionId: "s-r4",
-        correlationId: "corr-r4", receivedAtMs: Date.now(),
-        requestedOperation: {
-            capabilityId: "code.cap", operation: "run",
-            arguments: { msg: "hello-r4" },
-            expectedPostcondition: { expect: { "world.value": { op: "eq", value: 1 } } }
-        }
-    });
-
-    assert.notEqual(r.outcome, OUTCOME.FAILED, "manager request must not fail (got " + (r.outcome ?? "?") + " detail=" + String((r && r.detail) || "").slice(0, 200) + ")");
-    const output = (r.executionResult && r.executionResult.output) || null;
-    console.log("R4-05-B outcome:", r.outcome, "detail:", String((r && r.detail) || "").slice(0, 160), "distributed output.ran:", output && output.ran);
+    assert.equal(dispatch.outcome, "DISTRIBUTED",
+        "must route through the distributed seam (got " + dispatch.outcome + " error=" + String(dispatch.error || "").slice(0, 200) + ")");
+    const output = dispatch.executionResult && dispatch.executionResult.output;
+    console.log("R4-05-B outcome:", dispatch.outcome, "distributed output.ran:", output && output.ran);
+    assert.equal(output && output.ran, true, "REAL AppContainer sandbox executed the tool");
 });
 
 // ---- (B) R4-06 -----------------------------------------------------------

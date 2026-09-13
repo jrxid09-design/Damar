@@ -8,8 +8,7 @@ const path = require("node:path");
 const { createRuntimeHost } = require("../../../src/runtime/host/runtimeHost");
 const { createDistributedNodeRuntime, createGovernedExternalToolExecutor } = require("../../../src/integration/wave6Production");
 const { createTestWave6Lane3Facade } = require("../../manager/productionHarness");
-const { createMemoryAuthorityStore } = require("../../../src/authority/store");
-const { makeCanonicalAuthorityRoot } = require("../repair/testCanonicalRoot");
+const crypto = require("node:crypto");
 const dexec = require("../../../src/dexec");
 const federationMod = require("../../../src/federation");
 const { sha256File } = require("../../helpers/toolDigest");
@@ -35,25 +34,59 @@ const ids = mesh.ids;
  * first-wins); all chaos tests share that single owner.
  */
 
-// --- R3-01: one canonical registry per process, shared across tests ---
+// --- DB-02 (Repair5): one canonical registry per process, shared across
+// tests, through the REAL production owner-trust contract
+// (src/authority/productionComposition.js — the SAME composition RuntimeHost
+// boot now calls; see canonicalRuntimeComposition.js). This replaces the
+// former test-only `registry.ratify({ ownerIdentity: "owner" })` shortcut
+// with genuine Ed25519 proof-of-possession enrollment + proof-verified
+// ratification (mirrors tests/wave6/repair/ownerTrustProvisioning.test.js's
+// proven real path), and is now the ONLY canonical-authority installer this
+// file uses, so it never conflicts with this file's own createRuntimeHost()
+// call (single-flight composition, whichever runs first wins).
 let sharedRegistry = null;
 let sharedBound = false;
 async function canonicalOwner() {
     if (sharedBound) return sharedRegistry;
-    const store = createMemoryAuthorityStore();
-    // R4-01: canonical root from deep-internal composition (test harness).
-    const { owner: registry } = await makeCanonicalAuthorityRoot({
-        store,
-        clock: { nowIso: () => new Date().toISOString(), nowMs: () => Date.now() }
+    const comp = await require("../../../src/authority/productionComposition").ensureProductionAuthorityComposed();
+    if (!comp.ownerTrust) {
+        throw new Error("REAL production owner-trust composition unavailable: " + String(comp.ownerTrustError));
+    }
+    const ot = comp.ownerTrust;
+    const { canonicalChallenge, BOOTSTRAP_PURPOSE, BOOTSTRAP_CONTEXT } = require("../../../src/authority/ownerTrustComposition");
+    const kp = crypto.generateKeyPairSync("ed25519");
+    if (ot.registry.getState() === "ACTIVE") {
+        throw new Error("unexpected: an Owner is already ACTIVE before this file's first enrollment");
+    }
+    const begin = await ot.firstOwnerBootstrap.begin({
+        principalId: "owner-chaos", mode: "external",
+        publicKeyPem: kp.publicKey.export({ type: "spki", format: "pem" })
     });
+    const payload = canonicalChallenge({
+        purpose: BOOTSTRAP_PURPOSE, credentialId: begin.challenge.credentialId,
+        nonce: begin.challenge.nonce, context: BOOTSTRAP_CONTEXT
+    });
+    const sig = crypto.sign(null, payload, kp.privateKey).toString("base64url");
+    const done = await ot.firstOwnerBootstrap.complete({ ceremonyId: begin.ceremonyId, signature: sig });
+    const credentialId = done.credentialId;
+
+    const registry = comp.canonicalOwner;
     await registry.proposeEvolution({
         proposalId: "chaos-grant", createdBy: "owner", kind: "authority_expansion",
         problem: "grant", proposedChange: "grant",
         requestedAuthority: { capabilityId: "code.cap", subject: "damar", actions: ["run"], scope: ["."], maxExecutions: 100 }
     }, "owner");
-    await registry.ratify({ ratificationId: "rat-c", proposalId: "chaos-grant", ownerIdentity: "owner", decision: "APPROVED" });
-    const issued = await registry.issueRatifiedRootGrant({ proposalId: "chaos-grant", ratificationId: "rat-c", actor: "owner" });
-    if (!issued.allowed) throw new Error("chaos grant failed: " + issued.reasonCode);
+    const ch = ot.proofVerifier.issueChallenge({ purpose: "owner-proof", credentialId });
+    const proofSig = crypto.sign(null, canonicalChallenge({
+        purpose: "owner-proof", credentialId, nonce: ch.nonce, context: ch.context
+    }), kp.privateKey).toString("base64url");
+    const ratified = await comp.ratifyAsOwner({
+        proof: { credentialId, nonce: ch.nonce, signature: proofSig },
+        ratification: { ratificationId: "chaos-rat", proposalId: "chaos-grant", decision: "APPROVED" }
+    });
+    if (!ratified.applied) throw new Error("genuine owner ratification failed: " + JSON.stringify(ratified));
+    const issued = await comp.provisionAuthority({ proposalId: "chaos-grant", ratificationId: "chaos-rat" });
+    if (!issued.allowed) throw new Error("chaos grant failed: " + JSON.stringify(issued));
     sharedRegistry = registry;
     sharedBound = true;
     return registry;

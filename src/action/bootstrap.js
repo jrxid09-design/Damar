@@ -668,6 +668,14 @@ const PRIVILEGED_KEYS = Object.freeze([
 // The ONE canonical runtime, created exactly once, lazily, on first use.
 let canonical = null;
 
+// DB02-D / AVAILABILITY-GAP (Repair5): a closure-private reference to the
+// SAME CapabilityRegistry instance captured by composeActionAuthorityRuntime
+// above, set once at canonical construction time. NOT exported as the
+// registry object itself (that stays sealed) — only read-only, detached
+// snapshots derived from it are ever handed out (see
+// getCanonicalAvailableCapabilityIds below).
+let canonicalCapabilityRegistry = null;
+
 // ---------------------------------------------------------------------------
 // MATA DEWA VISUAL MODE (MD-011) — built-in capability + actuator wiring.
 //
@@ -696,6 +704,48 @@ function resolveCanonicalMataDewaService() {
 }
 
 /**
+ * DB02-A (Repair5): ONE canonical authority truth.
+ *
+ * Before this repair, Lane 2 evaluated against its OWN private, ephemeral
+ * `createMemoryAuthorityStore()` — completely disconnected from the durable,
+ * Owner-ratified canonical AuthorityRegistry (src/authority/productionComposition.js).
+ * A genuine production Owner grant could never become effective in Lane 2
+ * evaluation, no matter how it was provisioned.
+ *
+ * This resolver returns a READ-ONLY view over the SAME store instance the
+ * canonical AuthorityRegistry writes into — not a copy, not a bridge, not a
+ * second store. `loadAndEvaluateAuthority` (used by both Lane 2's evaluateGate
+ * and AuthorityRegistry's own evaluate()) only ever reads `getCapability`,
+ * `getGeneration`, and `countConsumption`; only those three read methods are
+ * exposed here, so Lane 2 has no path to WRITE into the canonical store even
+ * though it holds a live reference to it.
+ *
+ * Falls back to an ephemeral in-memory store when no production composition
+ * has run yet in this process (e.g. ordinary unit tests that never call
+ * ensureProductionAuthorityComposed()) — IDENTICAL to prior behavior for
+ * every caller that doesn't touch the production composition path.
+ *
+ * This function accepts NO parameters and is not exported: there is no
+ * caller-supplied store, generic provisioning API, or bridge surface reachable
+ * from RuntimeHost, Manager payloads, models, plugins, MCP, skills, or an
+ * ordinary repo-local import.
+ */
+function resolveLane2AuthorityStore() {
+    try {
+        const prod = require("../authority/productionComposition").getProductionAuthorityComposition();
+        const canonicalStore = prod && prod.canonicalOwner && prod.canonicalOwner.store;
+        if (canonicalStore && typeof canonicalStore.getCapability === "function") {
+            return Object.freeze({
+                getCapability: (...a) => canonicalStore.getCapability(...a),
+                getGeneration: (...a) => canonicalStore.getGeneration(...a),
+                countConsumption: (...a) => canonicalStore.countConsumption(...a)
+            });
+        }
+    } catch { /* production composition module unavailable — ephemeral fallback */ }
+    return createMemoryAuthorityStore();
+}
+
+/**
  * Create the canonical production Action facade. Takes NO options — canonical
  * authentication policy is bootstrap-owned and the fixed fail-closed adapter
  * is bound internally.
@@ -714,7 +764,7 @@ function createCanonicalActionFacade() {
         //      can substitute a capabilityRuntime, authorityStore, authDomain,
         //      verifier, or authentication adapter. ----
         const capabilityRuntime = createCapabilityRuntime({ registrars: { core: true } });
-        const authorityStore = createMemoryAuthorityStore();
+        const authorityStore = resolveLane2AuthorityStore();
         const authDomain = composeAuthenticationDomain({
             authenticate: canonicalAuthAdapter,
             clock: { nowMs: () => Date.now() }
@@ -747,14 +797,49 @@ function createCanonicalActionFacade() {
             const rfWiring = registerRfControlCapabilities({
                 registrar: capabilityRuntime.registrars.core
             });
-            canonicalTrustedScopeBindings = { ...VISUAL_MODE_SCOPE_BINDINGS, ...RF_CONTROL_SCOPE_BINDINGS };
-            canonicalWiringRecord = Object.freeze({ visual: wiring, rfControl: rfWiring });
+            // DB02-D (Repair5): the FIRST real production external
+            // capability, wired with the SAME descriptive-only,
+            // no-authority-grant pattern as visual mode / RF control above.
+            const diagnosticProbeWiring = require("../federation/capabilities/diagnosticProbeWiring");
+            const probeWiring = diagnosticProbeWiring.wireCapability({
+                registrar: capabilityRuntime.registrars.core
+            });
+
+            canonicalTrustedScopeBindings = { ...VISUAL_MODE_SCOPE_BINDINGS, ...RF_CONTROL_SCOPE_BINDINGS, ...diagnosticProbeWiring.SCOPE_BINDINGS };
+            canonicalWiringRecord = Object.freeze({ visual: wiring, rfControl: rfWiring, diagnosticProbe: probeWiring });
+
+            // DB02-D: genuine availability observation. AVAILABLE iff the
+            // probe's ExternalCapabilityFederation candidate is genuinely
+            // ENABLED (real discover->inspect->validate->enableTool
+            // lifecycle) — never a default; UNAVAILABLE if that lifecycle
+            // has not genuinely completed.
+            capabilityRuntime.registry.observeAvailability(
+                probeWiring.id,
+                diagnosticProbeWiring.isGenuinelyAvailable() ? "AVAILABLE" : "UNAVAILABLE",
+                { generation: 1, incarnationId: probeWiring.incarnationId }
+            );
+
+            // AVAILABILITY-GAP (Repair5): visual-mode capabilities have NO
+            // external dependency (in-process UI toggle only) — "wired" IS a
+            // true, immediate observation of "available", not a default. This
+            // is the ONLY production call site for observeAvailability; RF
+            // control capabilities are deliberately NOT marked here (they
+            // depend on a real, not-yet-connected device-trust attach signal
+            // — see AVAILABILITY_GAP recon notes) and stay UNKNOWN, correctly
+            // fail-closed, until that separate signal is wired.
+            for (const entry of [wiring.activate, wiring.deactivate]) {
+                capabilityRuntime.registry.observeAvailability(entry.id, "AVAILABLE", {
+                    generation: 1,
+                    incarnationId: entry.incarnationId
+                });
+            }
         }
         catch (error) {
             throw Object.assign(
                 new Error(`MATA_DEWA_WIRING_FAILED: gagal wire capability visual mode di komposisi kanonik: ${error?.message ?? error}`),
                 { code: "MATA_DEWA_WIRING_FAILED", cause: error });
         }
+        canonicalCapabilityRegistry = capabilityRuntime.registry;
 
         // ---- INTERNAL composition only. The verifier is captured inside this
         //      closure; it is never handed to a caller. ----
@@ -1723,6 +1808,14 @@ function createCanonicalActuationFacade() {
             wiring: canonicalWiringRecord.rfControl,
             resolveService: resolveCanonicalMataDewaService
         });
+        // DB02-D (Repair5): the diagnostic probe actuator NEVER runs the
+        // artifact directly — invoke() claims a governed execution through
+        // the canonical DistributedExecutionRouter and dispatches it to the
+        // governed external tool executor (real AppContainer sandbox).
+        require("../federation/capabilities/diagnosticProbeWiring").wireActuator({
+            actuatorRegistry,
+            wiring: canonicalWiringRecord.diagnosticProbe
+        });
         const dispatcher = composeDispatcher3({
             lane2Facade,
             actuatorRegistry,
@@ -1798,12 +1891,25 @@ function createCanonicalVerificationFacade() {
             "canonical verification creation accepts NO options; the verifier registry, observation functions, postcondition evaluator, and the Lane 3 facade are bootstrap-owned");
     }
     if (canonicalVerification === null) {
+        // DB02-D (Repair5): ONE real, composition-time-owned production
+        // verifier for the diagnostic probe capability — NOT a caller/test
+        // verifier (trustedVerifiers stays otherwise empty). Retrieved from
+        // the SAME closure-private wiring record used by Lane 2/Lane 3
+        // above (mataDewaWiringByFacade), never re-derived or guessed.
+        const lane2Facade = createCanonicalActionFacade();
+        const wiringRecord = mataDewaWiringByFacade.get(lane2Facade);
+        if (!wiringRecord || !wiringRecord.diagnosticProbe) {
+            throw new Error("DIAGNOSTIC_PROBE_WIRING_FAILED: capability wiring record missing at verification composition time");
+        }
+        const diagnosticProbeWiring = require("../federation/capabilities/diagnosticProbeWiring");
         canonicalVerification = createCanonicalVerificationComposition({
             deps: {
                 createLane3Facade: createCanonicalActuationFacade,
                 createLane2Facade: createCanonicalActionFacade
             },
-            trustedVerifiers: [] // PRODUCTION: no test verifiers, ever
+            trustedVerifiers: [
+                diagnosticProbeWiring.wireVerifier({ wiring: wiringRecord.diagnosticProbe })
+            ]
         });
     }
     return canonicalVerification;
@@ -1830,12 +1936,43 @@ function isCanonicalExecutionResult4(value) {
     return createCanonicalActuationFacade().isCanonicalExecutionResult(value);
 }
 
+/**
+ * DB02-D (Repair5): read-only view over the canonical capability registry's
+ * AVAILABLE capability ids. Mirrors resolveLane2AuthorityStore's read-only
+ * pattern above — exposes ids only (derived from registry.list()'s already
+ * detached/frozen snapshots), never the registry object, never a mutation
+ * path. Ensures canonical composition has run first (deterministic; no
+ * caller-suppliable input). The ONLY intended caller is the canonical Wave6
+ * node composition (src/integration/wave6Production.js), so a real node
+ * advertises the SAME capabilities Lane2 can actually authorize — never a
+ * caller-chosen list.
+ */
+function getCanonicalAvailableCapabilityIds() {
+    createCanonicalActionFacade();
+    if (!canonicalCapabilityRegistry) return Object.freeze([]);
+    return Object.freeze(
+        canonicalCapabilityRegistry.list()
+            .filter((d) => d.availability === "AVAILABLE")
+            .map((d) => d.id)
+    );
+}
+
 module.exports = {
     createCanonicalActionFacade,
     createCanonicalActuationFacade,
     createCanonicalVerificationFacade,
     PRIVILEGED_KEYS
 };
+
+// Non-enumerable internal seam (DB02-D), same pattern as
+// _setOwnerAuthVerifier below: NOT on the public production facade, NOT
+// reachable by public DI, read-only (returns a detached frozen id list).
+Object.defineProperty(module.exports, "_getCanonicalAvailableCapabilityIds", {
+    value: getCanonicalAvailableCapabilityIds,
+    enumerable: false,
+    writable: false,
+    configurable: false
+});
 
 // Non-enumerable internal seam for the sealed Owner trust composition root
 // (src/authority/ownerTrustComposition).  NOT on the public production facade

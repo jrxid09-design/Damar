@@ -35,15 +35,11 @@
  */
 
 const { AuthorityRegistry } = require("./registry");
-const { registerCanonicalPredicate } = require("./canonicalBrand");
 const { loadAndEvaluateAuthority, isCanonicalAuthorityEvaluation } = require("../authority/evaluate");
 const { mintAuthorityArtifact } = require("../dexec/authorityAdapter");
 
-// R5-01: the canonical brand (closure-private WeakSet + marking function) lives
-// LEXICALLY in this single production owner module. It is NOT exported. The
-// read-only predicate is published to canonicalBrand via registerCanonicalPredicate
-// at load time, so downstream modules keep a stable `isCanonicalAuthorityRegistry`
-// import without creating a reverse dependency / load cycle.
+// DB-01: the canonical brand and predicate live together in this single
+// production owner. No second module receives a setter or registration hook.
 const CANONICAL_REGISTRIES = new WeakSet();
 
 function markCanonicalAuthorityRegistry(registry) {
@@ -57,8 +53,6 @@ function markCanonicalAuthorityRegistry(registry) {
 function isCanonicalAuthorityRegistry(value) {
     return value !== null && typeof value === "object" && CANONICAL_REGISTRIES.has(value);
 }
-
-registerCanonicalPredicate(isCanonicalAuthorityRegistry);
 
 // Module-private canonical authority source state (formerly in dexec/authoritySource).
 let _canonicalRegistry = null; // the ONE canonical AuthorityRegistry instance

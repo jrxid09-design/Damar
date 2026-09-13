@@ -492,13 +492,108 @@ function createGovernedExternalToolExecutor({ federation, sandboxPolicy, sandbox
     });
 }
 
-module.exports = Object.freeze({
+/**
+ * DB-02/DB02-C (Repair5): the ONE canonical production Wave 6 lane-3 adapter,
+ * lazily constructed at most once. This is what
+ * the internal Manager bootstrap module's createDamarManager() wires into
+ * the canonical Manager singleton's `wave6Adapter` composition parameter —
+ * REAL infrastructure (a DistributedNodeRuntime + GovernedExternalToolExecutor),
+ * never a test double, and never a caller-supplied route/claim/execute
+ * callback.
+ *
+ * SEALED CONSTRUCTION (DB02-C): takes NO parameters. Daybreak's finding was
+ * that a caller-selected `capabilityIds`/`logicalDamarId` on a first-call-wins
+ * singleton let an earlier importer's choice silently become what the REAL
+ * canonical Manager later received — "FIRST-CALLER-WINS TRUST IS NOT TRUST."
+ * With zero parameters, every call (whoever makes it, whenever) produces the
+ * IDENTICAL deterministic construction, so there is no caller-influenceable
+ * state left to poison. The constructor itself (`ensureCanonicalWave6ExecutionAdapter`)
+ * is additionally kept off the normal enumerable export surface (see
+ * module.exports below) — ordinary importers get only the read-only getter.
+ *
+ * HONEST LIMITATION (DB02-D, partially repaired): the node now advertises
+ * the REAL canonical AVAILABLE capability ids (via
+ * action/bootstrap.js::_getCanonicalAvailableCapabilityIds — a read-only
+ * view, not a caller-selected list), so `route()` can genuinely find an
+ * advertising node for a real capability. There is STILL no production
+ * capability -> federation-enabled-tool-candidate resolver: no capability in
+ * this codebase today is backed by a discovered/validated/enabled external
+ * tool artifact (src/federation/federation.js's ExternalCapabilityFederation
+ * lifecycle has no production caller). That remaining link is a distinct,
+ * deeper gap requiring an actual production external-tool capability +
+ * artifact to exist — a product/architecture decision, not thin wiring — and
+ * is intentionally NOT fabricated here. Until it exists, `tryDistributed`
+ * correctly reports `{ distributed: false }` and the Manager falls back to
+ * the frozen local Lane 3 — honest inert wiring, not a faked distributed path.
+ */
+let canonicalWave6Adapter = null;
+
+/**
+ * DB02-C: construct the ONE canonical adapter if it doesn't exist yet, else
+ * return it. Zero-argument. NOT on the normal enumerable module.exports
+ * shape (see below) — reachable only by a caller that already knows to look
+ * for the non-enumerable property, and harmless even then since there is no
+ * parameter to poison.
+ */
+function ensureCanonicalWave6ExecutionAdapter() {
+    if (canonicalWave6Adapter) return canonicalWave6Adapter;
+    // DB02-D (Repair5): advertise the REAL canonical capability ids (a
+    // read-only, deterministic view — see action/bootstrap.js
+    // _getCanonicalAvailableCapabilityIds) instead of an empty list. This is
+    // a require(), not a caller-suppliable argument: this zero-parameter
+    // constructor still produces the identical deterministic construction on
+    // every call (DB02-C invariant preserved).
+    const { _getCanonicalAvailableCapabilityIds } = require("../action/bootstrap");
+    const capabilityIds = _getCanonicalAvailableCapabilityIds();
+    const node = createDistributedNodeRuntime({ capabilityIds });
+    canonicalWave6Adapter = Object.freeze({
+        async tryDistributed({ intent, parameters = {} }) {
+            let routed;
+            try {
+                routed = await node.dexecRouter.route({ intent, toolId: `tool.${intent.capabilityId}` });
+            } catch {
+                // No production node currently advertises this capability
+                // (or no eligible trusted node) — honest ineligible result.
+                return Object.freeze({ distributed: false });
+            }
+            // A route exists, but governed execution additionally requires a
+            // federation-enabled tool candidate (candidateId/toolName); no
+            // production caller resolves one yet, so the attempt is reported
+            // ineligible rather than fabricating a claim.
+            return Object.freeze({ distributed: false, targetNodeId: routed.targetNodeId ?? null });
+        }
+    });
+    return canonicalWave6Adapter;
+}
+
+/**
+ * DB02-C: read-only accessor. Returns the already-constructed canonical
+ * adapter, or null before the trusted production composition has run. Cannot
+ * create or mutate anything.
+ */
+function getCanonicalWave6ExecutionAdapter() {
+    return canonicalWave6Adapter;
+}
+
+const wave6ProductionExports = {
     createDistributedNodeRuntime,
     createGovernedExternalToolExecutor,
+    getCanonicalWave6ExecutionAdapter,
     APPCONTAINER_NAME: require("../federation/appContainerSandbox").APPCONTAINER_NAME
     // R4-04: `createWave6Lane3Facade` (caller-controlled callback facade) is
     // REMOVED from production surfaces. The Manager's Lane-3 distributed seam
-    // accepts only a BRANDED adapter (wave6AdapterBrand), and the production
-    // RuntimeHost composition NEVER accepts caller callbacks. Tests construct a
-    // seam via tests/manager/productionHarness.js (test-only, branded).
+    // is shape-validated composition-time DI (see managerBootstrap.js DB-02
+    // note); the production RuntimeHost composition never accepts caller
+    // callbacks. Tests construct their own seam via
+    // tests/manager/productionHarness.js (test-only).
+};
+// DB02-C: the zero-argument constructor is deliberately NOT an enumerable
+// export — ordinary importers (Object.keys, destructuring `{ x }` still
+// works if named explicitly, but nothing iterates to discover it) only see
+// the read-only getter above. The only caller is
+// the internal Manager bootstrap module's createDamarManager().
+Object.defineProperty(wave6ProductionExports, "ensureCanonicalWave6ExecutionAdapter", {
+    value: ensureCanonicalWave6ExecutionAdapter,
+    enumerable: false, writable: false, configurable: false
 });
+module.exports = Object.freeze(wave6ProductionExports);
