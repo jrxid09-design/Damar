@@ -260,6 +260,21 @@ test("WM-repair-19: declareHypothesis's expiresAt is validated as an ISO string,
     }));
 });
 
+test("WM-repair-20: declareHypothesis validates attribute as a non-empty string, not left to crash persist() (independent audit AUD13-P2-1)", async () => {
+    const wm = await createWorldModel();
+    assert.throws(() => wm.declareHypothesis({
+        hypothesisId: "h1", subject: { entityId: "e1" }, attribute: 10n,
+        candidateValues: [{ value: "a", weight: 0.5 }], expiresAt: new Date(Date.now() + 1000).toISOString()
+    }));
+});
+
+test("WM-repair-21: replaying an already-used hypothesisId is rejected, not silently overwritten (independent audit AUD13-P2-4)", async () => {
+    const wm = await createWorldModel();
+    const iso = new Date(Date.now() + 100000).toISOString();
+    wm.declareHypothesis({ hypothesisId: "h1", subject: { entityId: "e1" }, attribute: "cfg", candidateValues: [{ value: "v1", weight: 0.5 }], expiresAt: iso });
+    assertThrowsReason(() => wm.declareHypothesis({ hypothesisId: "h1", subject: { entityId: "e1" }, attribute: "cfg", candidateValues: [{ value: "v2", weight: 0.9 }], expiresAt: iso }), "DUPLICATE_RECORD_ID");
+});
+
 test("WM-repair-17: replaying a recordId already consumed by an earlier SUPERSEDE is a no-op, not a fresh CONTEST (independent audit AUD11-P2-7)", async () => {
     const clock = manualClock(0);
     const wm = await createWorldModel({ clock });

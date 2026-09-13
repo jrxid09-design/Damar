@@ -246,6 +246,15 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function declareHypothesis(spec) {
+        // Bug review independen (audit putaran-13, AUD13-P2-4): hypothesisId
+        // tidak pernah dicek tabrakan -- replay sebuah hypothesisId yang
+        // sudah ada diam-diam menimpa candidateValues/expiresAt tersimpan,
+        // pola yang sama yang sudah ditutup untuk observationId/
+        // declarationId (putaran 9) dan id goals/prospective (putaran 10)
+        // tapi tidak pernah dimigrasikan ke worldmodel's hypothesisId.
+        if (spec.hypothesisId && hypotheses.has(spec.hypothesisId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `hypothesisId '${spec.hypothesisId}' sudah ada`);
+        }
         if (hypotheses.size >= bounds.MAX_HYPOTHESES) {
             // §11: kadaluwarsa dulu, lalu bobot terendah.
             const sorted = [...hypotheses.values()].sort((a, b) =>

@@ -109,6 +109,12 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
     if (typeof expiresAt !== "string" || !Number.isFinite(Date.parse(expiresAt))) {
         fail(REASONS.INVALID_RECORD, "expiresAt wajib tanggal ISO string yang sah");
     }
+    // Bug review independen (audit putaran-13, AUD13-P2-1): perbaikan
+    // proaktif sebelumnya menyaring `expiresAt` di fungsi yang SAMA tapi
+    // melewatkan `attribute` -- BigInt di dalamnya meledakkan
+    // JSON.stringify saat persist(), objek non-string mengumpulkan hipotesis
+    // berbeda ke satu kunci yang sama.
+    if (typeof attribute !== "string" || !attribute) fail(REASONS.INVALID_RECORD, "attribute wajib string");
     // Bug review independen (audit putaran-5, W7R5-P1-1): candidateValues[].value,
     // discriminatingProbe, dan subject dulu disimpan APA ADANYA -- lewat
     // referensi mentah, toJSON pemanggil bisa tereksekusi saat serialisasi

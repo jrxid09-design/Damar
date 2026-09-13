@@ -417,6 +417,36 @@ test("GL-repair-26: a BigInt in plan.createdBy or task.{planRef,order,capability
     assert.throws(() => ge.createTask({ planRef: p.planId, order: 0, capabilityId: 10n, intentTemplate: {} }));
 });
 
+test("GL-repair-27: goal.deadline/budgetRef/missionRef are frozen (not just BigInt-sanitized), a toJSON on them cannot execute during persist() (independent audit AUD13-P1-1)", async () => {
+    const ge = await createGoalEngine({});
+    const g = ge.proposeGoal(baseGoalSpec({ deadline: { at: "2026-01-01" }, budgetRef: { id: "b1" }, missionRef: { id: "m1" } }));
+    assert.equal(Object.isFrozen(g.deadline), true);
+    assert.equal(Object.isFrozen(g.budgetRef), true);
+    assert.equal(Object.isFrozen(g.missionRef), true);
+    assert.throws(() => { "use strict"; g.deadline.at = "MUTATED"; });
+    assert.throws(() => { "use strict"; g.budgetRef.id = "MUTATED"; });
+});
+
+test("GL-repair-28: a BigInt in makePlan's goalRef/version or a step/assumption element is rejected, not left to crash persist() (independent audit AUD13-P2-2)", async () => {
+    const ge = await createGoalEngine({});
+    const g = ge.proposeGoal(baseGoalSpec({}));
+    assert.throws(() => ge.createPlan({ goalRef: 10n, steps: [] }));
+    assert.throws(() => ge.createPlan({ goalRef: g.goalId, steps: [], version: 10n }));
+    assert.throws(() => ge.createPlan({ goalRef: g.goalId, steps: [{ n: 10n }] }));
+    assert.throws(() => ge.createPlan({ goalRef: g.goalId, steps: [], assumptions: [{ n: 10n }] }));
+});
+
+test("GL-repair-29: a BigInt in transition reason/evidenceRef, grantApproval's approvalRef/scope, or invalidatePlanIfAssumptionBroken's brokenBeliefRef is rejected (independent audit AUD13-P2-3)", async () => {
+    const ge = await createGoalEngine({});
+    const g = ge.proposeGoal(baseGoalSpec({}));
+    assert.throws(() => ge.transition(g.goalId, "supersede", { actorKind: "OWNER", reason: 10n }));
+    assert.throws(() => ge.grantApproval(g.goalId, { approvalRef: 10n }));
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+    assert.throws(() => ge.invalidatePlanIfAssumptionBroken(p.planId, 10n));
+    ge.createCommitment({ commitmentId: "C1", goalRef: g.goalId, toWhom: { id: "o" }, promise: "p", dueCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" } });
+    assert.throws(() => ge.transitionCommitment("C1", "met", { evidenceRef: 10n }));
+});
+
 function jsonStore() {
     const kv = new Map();
     return {
