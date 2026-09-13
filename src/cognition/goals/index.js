@@ -194,7 +194,12 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     /** GL-A2: `ownerApproval` hanya bisa dinaikkan lewat panggilan eksplisit ini, tidak lewat propose. */
-    function grantApproval(goalId, { approvalRef, scope = null }) {
+    function grantApproval(goalId, meta) {
+        // Bug review independen (audit putaran-23, AUD23-P2-1): meta null/
+        // undefined meledakkan destructuring jadi TypeError mentah -- sibling
+        // proposeGoal/createCommitment/createPlan/createTask di file yang
+        // sama dijaga putaran-22 (F-4), fungsi ini terlewat.
+        const { approvalRef, scope = null } = meta || {};
         const goal = goals.get(goalId);
         if (!goal) fail(REASONS.UNKNOWN_GOAL, `goal '${goalId}' tidak ditemukan`);
         // Bug review independen (audit putaran-13, AUD13-P2-3): approvalRef/
@@ -272,7 +277,11 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     function transitionCommitmentAction(commitmentId, action, meta) {
         const c = commitments.get(commitmentId);
         if (!c) fail(REASONS.UNKNOWN_GOAL, `commitment '${commitmentId}' tidak ditemukan`);
-        const next = transitionCommitment(c, action, meta);
+        // Bug review independen (audit putaran-23, AUD23-P2-2): meta null
+        // diteruskan mentah ke lifecycle's `{ evidenceRef = null } = {}`
+        // (default cuma berlaku untuk undefined) jadi TypeError mentah --
+        // sibling `transition()` sudah aman lewat `{ ...meta, nowIso }`.
+        const next = transitionCommitment(c, action, { ...(meta || {}) });
         commitments.set(commitmentId, next);
         return next;
     }
