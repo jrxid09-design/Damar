@@ -326,6 +326,63 @@ test("GL-repair-19: a non-finite/invalid maxAttempts (NaN, string, 0) fails clos
     }
 });
 
+test("GL-repair-20: successCondition.expectedValue is frozen, not just sanitized (independent audit AUD10-P1-1)", async () => {
+    const ge = await createGoalEngine({});
+    const goal = ge.proposeGoal(baseGoalSpec({
+        successCondition: { kind: "WORLD_BELIEF", subject: { entityId: "e1" }, attribute: "status", expectedValue: { nested: { deep: "orig" } } }
+    }));
+    const stored = ge.getGoal(goal.goalId);
+    assert.equal(Object.isFrozen(stored.successCondition.expectedValue), true);
+    assert.throws(() => { "use strict"; stored.successCondition.expectedValue.nested.deep = "MUTATED"; });
+});
+
+test("GL-repair-21: replaying an already-used goalId/commitmentId/taskId/planId is rejected, not resurrected to a fresh state (independent audit AUD10-P1-2)", async () => {
+    const ge = await createGoalEngine({});
+    const g = ge.proposeGoal(baseGoalSpec({ goalId: "G-FIXED" }));
+    ge.transition(g.goalId, "supersede", { actorKind: "OWNER", reason: "test" });
+    assertThrowsReason(() => ge.proposeGoal(baseGoalSpec({ goalId: "G-FIXED" })), "DUPLICATE_RECORD_ID");
+    assert.equal(ge.getGoal("G-FIXED").state, "SUPERSEDED", "replay attempt must not resurrect the terminal goal");
+
+    const p = ge.createPlan({ planId: "P-FIXED", goalRef: g.goalId, steps: [] });
+    assertThrowsReason(() => ge.createPlan({ planId: "P-FIXED", goalRef: g.goalId, steps: [] }), "DUPLICATE_RECORD_ID");
+
+    ge.createTask({ taskId: "T-FIXED", planRef: p.planId, order: 1, intentTemplate: {}, maxAttempts: 1 });
+    ge.transitionTask("T-FIXED", "ready");
+    ge.transitionTask("T-FIXED", "formIntent");
+    ge.transitionTask("T-FIXED", "awaitAuthority");
+    ge.transitionTask("T-FIXED", "execute");
+    ge.transitionTask("T-FIXED", "fail");
+    ge.transitionTask("T-FIXED", "retry");
+    assertThrowsReason(() => ge.transitionTask("T-FIXED", "execute"), "ATTEMPTS_EXCEEDED");
+    assertThrowsReason(() => ge.createTask({ taskId: "T-FIXED", planRef: p.planId, order: 1, intentTemplate: {}, maxAttempts: 1 }), "DUPLICATE_RECORD_ID");
+    assert.equal(ge.getTask("T-FIXED").attempts, 1, "replay must not reset the attempt counter");
+
+    ge.createCommitment({ commitmentId: "C-FIXED", goalRef: g.goalId, toWhom: { id: "o" }, promise: "p", dueCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" } });
+    const metCommitment = ge.transitionCommitment("C-FIXED", "met", {});
+    assert.equal(metCommitment.state, "MET");
+    assertThrowsReason(() => ge.createCommitment({ commitmentId: "C-FIXED", goalRef: g.goalId, toWhom: { id: "o" }, promise: "p", dueCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" } }), "DUPLICATE_RECORD_ID");
+});
+
+test("GL-repair-22: a BigInt anywhere in deadline/origin/toWhom/budgetRef/missionRef is rejected, not accepted and left to crash persist() (independent audit AUD10-P2-1)", async () => {
+    const ge = await createGoalEngine({});
+    assert.throws(() => ge.proposeGoal(baseGoalSpec({ deadline: 10n })));
+    assert.throws(() => ge.proposeGoal(baseGoalSpec({ origin: { kind: "OWNER", ref: "owner-1", nested: 10n } })));
+    const g = ge.proposeGoal(baseGoalSpec({}));
+    assert.throws(() => ge.createCommitment({
+        commitmentId: "C-BIG", goalRef: g.goalId, toWhom: { id: "o", nested: 10n }, promise: "p",
+        dueCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" }
+    }));
+});
+
+test("GL-repair-23: nested objects inside plan steps/assumptions stay immutable (independent audit AUD10-P2-2)", async () => {
+    const ge = await createGoalEngine({});
+    const g = ge.proposeGoal(baseGoalSpec({}));
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [{ id: "s1", nested: { deep: "orig" } }], assumptions: [{ k: "a", nested: { deep: "orig" } }] });
+    assert.equal(Object.isFrozen(p.steps[0]), true);
+    assert.throws(() => { "use strict"; p.steps[0].nested.deep = "MUTATED"; });
+    assert.throws(() => { "use strict"; p.assumptions[0].nested.deep = "MUTATED"; });
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

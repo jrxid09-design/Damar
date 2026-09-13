@@ -176,6 +176,37 @@ test("PM-repair-11: a BigInt in an expectation's expectedValue is rejected, not 
     }));
 });
 
+test("PM-repair-12: an expectation's expectedValue is frozen, not just sanitized (independent audit AUD10-P1-1)", async () => {
+    const pm = await createProspectiveMemory({});
+    const e = pm.armExpectation({
+        subject: { entityId: "e1" }, attribute: "status", expectedValue: { nested: { deep: "orig" } },
+        window: { latestAt: new Date(1000).toISOString() }
+    });
+    assert.equal(Object.isFrozen(e.expectedValue), true);
+    assert.throws(() => { "use strict"; pm.getExpectation(e.expectationId).expectedValue.nested.deep = "MUTATED"; });
+});
+
+test("PM-repair-13: replaying an already-used reminderId/expectationId is rejected, not resurrected to a fresh armed/pending state (independent audit AUD10-P1-2/AUD10-P2-4)", async () => {
+    const pm = await createProspectiveMemory({ bounds: { ...BOUNDS, MAX_ARMED_REMINDERS: 2 } });
+    const spec = { reminderId: "R-FIXED", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(5000).toISOString() } };
+    pm.arm(spec);
+    assertThrowsReason(() => pm.arm(spec), "DUPLICATE_RECORD_ID");
+    assert.equal(pm.reminderCount(), 1, "a rejected replay must not consume a second armed-capacity slot");
+    pm.arm({ ...spec, reminderId: "R-OTHER" });
+    assertThrowsReason(() => pm.arm({ ...spec, reminderId: "R-THIRD" }), "PROSPECTIVE_FULL");
+
+    const es = { expectationId: "E-FIXED", subject: { entityId: "e1" }, attribute: "status", expectedValue: "done", window: { latestAt: new Date(1000).toISOString() } };
+    pm.armExpectation(es);
+    assertThrowsReason(() => pm.armExpectation(es), "DUPLICATE_RECORD_ID");
+});
+
+test("PM-repair-14: a nested value inside a non-ON_STATE trigger (AT/AFTER/RECURRING/ON_EVENT) stays immutable (independent audit AUD10-P2-2)", async () => {
+    const pm = await createProspectiveMemory({});
+    const r = pm.arm({ reminderId: "R-nested", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(1).toISOString(), extra: { nested: { deep: "orig" } } } });
+    assert.equal(Object.isFrozen(r.trigger.extra), true);
+    assert.throws(() => { "use strict"; pm.getReminder(r.reminderId).trigger.extra.nested.deep = "MUTATED"; });
+});
+
 test("PM-repair-8: an until-only recurring reminder still bounds occurrences and firedOccurrenceIds (independent audit W7R7-P2-2)", async () => {
     const clock = manualClock(0);
     const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_RECURRENCE_OCCURRENCES: 5 } });

@@ -70,6 +70,12 @@ test("SM-repair-2: assess()'s successWindow.history is frozen, mutating it canno
     assert.equal(a2.successWindow.attempts, 2);
 });
 
+test("SM-repair-3: a BigInt in ingestOutcome's 'at' is rejected, not accepted and left to crash persist() (independent audit AUD10-P2-1)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const sm = await createSelfModel({ capabilityRegistry: registry });
+    assert.throws(() => sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "FAILED", at: 10n, evidenceRef: "e1" }));
+});
+
 test("SM-A2: stale availability is marked STALE after TTL, never silently USABLE", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const clock = manualClock(0);

@@ -18,6 +18,14 @@ test("MC-A1: fake confidence (model writes 0.99) is impossible — no API accept
     assert.equal(a.basis, "NO_EVIDENCE");
 });
 
+test("MC-repair-2: a malformed subjectRef (neither entityId nor relationId) is rejected, not silently collapsed into another review's debounce key (independent audit AUD10-P2-3)", async () => {
+    const mc = await createMetacognition();
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { kind: "alpha", id: "A" } }), "INVALID_RECORD");
+    const r1 = mc.openReview({ trigger: "SCHEDULED", subjectRef: { relationId: "rA" } });
+    const r2 = mc.openReview({ trigger: "SCHEDULED", subjectRef: { relationId: "rB" } });
+    assert.notEqual(r1.reviewId, r2.reviewId, "two distinct relationId subjects must not collapse to the same debounced review");
+});
+
 test("MC-repair-1: a hostile toJSON on subjectRef is never invoked while keying/debouncing reviews (independent audit AUD9-P2-2)", async () => {
     const mc = await createMetacognition();
     let toJSONCalls = 0;

@@ -25,6 +25,14 @@ test("AT-A1: salience flooding from one sensor is rate-capped and the source mar
     assert.equal(ae.isNoisySource("sensor-1"), true);
 });
 
+test("AT-repair-6: a malformed subjectRef (neither entityId nor relationId) is rejected, not silently collapsed into another target's key (independent audit AUD10-P2-3)", async () => {
+    const ae = await createAttentionEconomy();
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef: { kind: "alpha", id: "A" } }, "PERCEIVE"), "INVALID_RECORD");
+    const a = ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef: { relationId: "rA" } }, "PERCEIVE");
+    const b = ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef: { relationId: "rB" } }, "PERCEIVE");
+    assert.notEqual(a.targetId, b.targetId, "two distinct relationId subjects must not collapse to the same target");
+});
+
 test("AT-repair-5: a hostile toJSON on subjectRef is never invoked while keying/deduping targets (independent audit AUD9-P2-2)", async () => {
     const ae = await createAttentionEconomy();
     let toJSONCalls = 0;

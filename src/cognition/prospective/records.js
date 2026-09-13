@@ -50,7 +50,11 @@ function validateTrigger(trigger) {
     if (trigger.kind === "ON_STATE") {
         return Object.freeze({ ...trigger, subject: deepFreeze({ ...trigger.subject }) });
     }
-    return Object.freeze({ ...trigger });
+    // Bug review independen (audit putaran-10, AUD10-P2-2): sapuan deepFreeze
+    // putaran-9 hanya menyentuh cabang ON_STATE -- cabang lain (AT/AFTER/
+    // RECURRING/ON_EVENT) masih pembekuan SATU level, objek/nilai bersarang
+    // apa pun yang pemanggil sisipkan di trigger tetap referensi mutable.
+    return deepFreeze({ ...trigger });
 }
 
 const FORBIDDEN_PAYLOAD_KEYS = Object.freeze(["capabilityId", "actuatorRef", "authProof", "authorityDecision", "intentTemplate"]);
@@ -211,9 +215,12 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
     // tidak pernah disaring -- BigInt di dalamnya lolos lalu meledakkan
     // JSON.stringify di saveSnapshot() saat persist(). buildSafePayloadRef
     // sudah menolak BigInt/function/authority-shaped keys; dipakai ulang di sini.
+    // Bug review independen (audit putaran-10, AUD10-P1-1): salinan yang
+    // dikembalikan buildSafePayloadRef tidak pernah dibekukan di sini --
+    // tetap bisa dimutasi pemanggil pasca-panggilan.
     return Object.freeze({
         expectationId, subject: deepFreeze({ ...subject }), attribute,
-        expectedValue: buildSafePayloadRef(expectedValue),
+        expectedValue: deepFreeze(buildSafePayloadRef(expectedValue)),
         window: deepFreeze({ ...window }),
         onSatisfied, onViolated, state: "PENDING"
     });

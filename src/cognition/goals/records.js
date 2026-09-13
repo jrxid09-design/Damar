@@ -144,10 +144,16 @@ function validateConditionSpec(spec, label) {
     // tidak pernah disaring -- BigInt di dalamnya lolos lalu meledakkan
     // JSON.stringify di saveSnapshot() saat persist(). buildSafeIntentTemplate
     // menyaring BigInt/function/Symbol dan membekukan salinannya sekaligus.
+    // Bug review independen (audit putaran-10, AUD10-P1-1): round-9 menyaring
+    // expectedValue lewat buildSafeIntentTemplate tapi LUPA membekukan hasilnya
+    // (beda dengan makeTask's intentTemplate yang sudah benar --
+    // `deepFreeze(safeIntentTemplate)`) -- salinan plain object yang
+    // dikembalikan buildSafeIntentTemplate tetap bisa dimutasi pemanggil
+    // pasca-panggilan, menulis ulang semantik evaluasi kondisi tersimpan.
     return Object.freeze({
         ...spec,
         subject: deepFreeze({ ...spec.subject }),
-        expectedValue: buildSafeIntentTemplate(spec.expectedValue)
+        expectedValue: deepFreeze(buildSafeIntentTemplate(spec.expectedValue))
     });
 }
 
@@ -172,16 +178,21 @@ function makeGoal({
         ownerApproval = Object.freeze({ state: "NOT_REQUIRED", approvalRef: null, grantedAt: null, scope: null });
     }
 
+    // Bug review independen (audit putaran-10, AUD10-P2-1): `deadline`/
+    // `budgetRef`/`missionRef`/`origin` dulu disimpan mentah tanpa disaring --
+    // BigInt di dalamnya lolos lalu meledakkan JSON.stringify di
+    // saveSnapshot() saat persist(). buildSafeIntentTemplate menyaring
+    // BigInt/function/Symbol (dan menolak kunci authority-shaped di origin).
     return Object.freeze({
         goalId, title: String(title).slice(0, 500), kind,
-        origin: deepFreeze({ ...origin }),
+        origin: deepFreeze(buildSafeIntentTemplate({ ...origin })),
         ownerApproval,
         state: "PROPOSED",
         priorityClass,
         successCondition: condition,
         abandonCondition: abandonCondition ? validateConditionSpec(abandonCondition, "abandonCondition") : null,
-        deadline, parentGoalId, depth,
-        budgetRef, missionRef,
+        deadline: buildSafeIntentTemplate(deadline), parentGoalId, depth,
+        budgetRef: buildSafeIntentTemplate(budgetRef), missionRef: buildSafeIntentTemplate(missionRef),
         createdAt: nowIso, lastTransitionAt: nowIso,
         transitions: Object.freeze([])
     });
@@ -192,7 +203,7 @@ function makeCommitment({ commitmentId, goalRef, toWhom, promise, dueCondition, 
     if (typeof goalRef !== "string" || !goalRef) fail(REASONS.INVALID_RECORD, "goalRef wajib string");
     return Object.freeze({
         commitmentId, goalRef,
-        toWhom: deepFreeze({ ...toWhom }),
+        toWhom: deepFreeze(buildSafeIntentTemplate({ ...toWhom })),
         promise: String(promise).slice(0, 500),
         dueCondition: validateConditionSpec(dueCondition, "dueCondition"),
         state: "OPEN", evidenceRef: null,
@@ -203,9 +214,13 @@ function makeCommitment({ commitmentId, goalRef, toWhom, promise, dueCondition, 
 function makePlan({ planId, goalRef, version = 1, steps, assumptions = [], createdBy = "SELF" }) {
     if (typeof planId !== "string" || !planId) fail(REASONS.INVALID_RECORD, "planId wajib string");
     if (!Array.isArray(steps)) fail(REASONS.INVALID_RECORD, "steps wajib array taskId");
+    // Bug review independen (audit putaran-10, AUD10-P2-2): sapuan deepFreeze
+    // putaran-9 hanya menyentuh field yang ditandai auditor -- steps/
+    // assumptions di sini masih pembekuan SATU level, objek bersarang di
+    // dalamnya tetap referensi milik pemanggil.
     return Object.freeze({
-        planId, goalRef, version, steps: Object.freeze([...steps]),
-        createdBy, assumptions: Object.freeze(assumptions.map(a => Object.freeze({ ...a }))),
+        planId, goalRef, version, steps: deepFreeze([...steps]),
+        createdBy, assumptions: deepFreeze(assumptions.map(a => ({ ...a }))),
         invalidatedBy: Object.freeze([]), state: "DRAFT"
     });
 }

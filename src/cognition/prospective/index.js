@@ -71,6 +71,16 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
     let armedReminderCount = [...reminders.values()].filter(r => r.state === "ARMED").length;
 
     function arm(spec) {
+        // Bug review independen (audit putaran-10, AUD10-P1-2/AUD10-P2-4):
+        // reminderId pemanggil dulu langsung menimpa entri lama tanpa cek
+        // tabrakan -- replay sebuah reminderId yang sudah ARMED menaikkan
+        // armedReminderCount/remindersPerGoal LAGI untuk record yang sama
+        // (kapasitas armed terkuras permanen sampai restart), dan replay
+        // reminderId yang sudah RETIRED/FIRED menghidupkannya kembali ke
+        // ARMED, melewati finalitas state terminal.
+        if (spec.reminderId && reminders.has(spec.reminderId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `reminderId '${spec.reminderId}' sudah ada`);
+        }
         if (armedReminderCount >= bounds.MAX_ARMED_REMINDERS) {
             fail(REASONS.PROSPECTIVE_FULL, "jumlah reminder armed melebihi batas");
         }
@@ -246,6 +256,13 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
     }
 
     function armExpectation(spec) {
+        // Bug review independen (audit putaran-10, AUD10-P1-2): replay dari
+        // expectationId yang sudah ada (mis. sudah VIOLATED) menimpanya
+        // kembali ke PENDING, memicu ulang jalur kebijakan (onSatisfied/
+        // onViolated) untuk expectation yang sudah final.
+        if (spec.expectationId && expectations.has(spec.expectationId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `expectationId '${spec.expectationId}' sudah ada`);
+        }
         if (expectations.size >= bounds.MAX_PENDING_EXPECTATIONS) {
             const oldest = [...expectations.values()].sort((a, b) => Date.parse(a.window.latestAt) - Date.parse(b.window.latestAt))[0];
             if (oldest) expectations.delete(oldest.expectationId);

@@ -168,6 +168,17 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         });
 
         if (caseName === "CONTEST") {
+            // Bug review independen (audit putaran-10, AUD10-P1-3): replay
+            // dari challengerRecordId yang sama (pengiriman ulang observasi/
+            // deklarasi yang belum pernah masuk supportedBy karena nilainya
+            // ditolak sebagai CONTEST) dulu membuka kontradiksi BARU setiap
+            // kali -- mengevict/meng-overflow-archive kontradiksi sah lain
+            // yang masih terbuka. recordId yang sama tidak boleh membuka
+            // kontradiksi kedua.
+            const alreadyOpen = contradictions.find(c => c.challengerRecordId === contradiction.challengerRecordId);
+            if (alreadyOpen) {
+                return { case: "DUPLICATE", belief: existing, contradictionSetId: alreadyOpen.contradictionSetId };
+            }
             const { list, entry } = openContradictionSet(contradictions, contradiction, nowIso(), bounds.MAX_OPEN_CONTRADICTION_SETS);
             contradictions = list;
             const contested = Object.freeze({ ...existing, contradictionSetId: entry.contradictionSetId });

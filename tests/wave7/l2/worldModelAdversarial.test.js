@@ -219,6 +219,22 @@ test("WM-repair-14: entities stay frozen after ingestObservation touches lastSee
     assert.throws(() => { "use strict"; redeclared.source = "FORGED_SOURCE"; });
 });
 
+test("WM-repair-15: replaying the same CONTEST challenger recordId does not evict legitimate open contradiction sets (independent audit AUD10-P1-3)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_OPEN_CONTRADICTION_SETS: 2 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    const base = { attribute: "status", sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1000).toISOString() };
+    wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "INCUMBENT-1", value: "a" });
+    wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "LEGIT-CHALLENGER", sensor: { sensorId: "s2" }, value: "b" });
+    wm.ingestObservation({ ...base, subject: { entityId: "e2" }, observationId: "INCUMBENT-2", value: "a" });
+    for (let i = 0; i < 5; i++) {
+        wm.ingestObservation({ ...base, subject: { entityId: "e2" }, observationId: "REPLAY-CHALLENGER", sensor: { sensorId: "s3" }, value: "c" });
+    }
+    const ids = wm.openContradictions().map(c => c.challengerRecordId);
+    assert.equal(ids.filter(id => id === "REPLAY-CHALLENGER").length, 1, "a replayed challenger must not open more than one contradiction set");
+    assert.ok(ids.includes("LEGIT-CHALLENGER"), "a replayed challenger elsewhere must not evict a legitimate open contradiction");
+});
+
 test("WM-repair-3: an epoch-dated observation (1970-01-01T00:00:00.000Z) is not falsely treated as the newest evidence (Codex P2 round 9)", async () => {
     const clock = manualClock(1000);
     const wm = await createWorldModel({ clock });

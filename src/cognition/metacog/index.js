@@ -62,9 +62,14 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         // mengeksekusi toJSON milik pemanggil di dalam proses kognisi. subjectRef
         // hanya pernah berbentuk {entityId} atau {relationId}; kunci dibangun
         // dari field itu saja (sama seperti attention/index.js's targetKey).
-        const subjectKey = subjectRef && subjectRef.entityId
-            ? `entity:${subjectRef.entityId}`
-            : `relation:${subjectRef && subjectRef.relationId}`;
+        // Bug review independen (audit putaran-10, AUD10-P2-3): versi putaran-9
+        // tidak memvalidasi bentuk subjectRef -- dua subjectRef yang BEDA tapi
+        // sama-sama tidak punya entityId/relationId string jatuh ke
+        // `relation:undefined`, menggabungkan review yang tidak terkait.
+        let subjectKey;
+        if (typeof subjectRef?.entityId === "string") subjectKey = `entity:${subjectRef.entityId}`;
+        else if (typeof subjectRef?.relationId === "string") subjectKey = `relation:${subjectRef.relationId}`;
+        else fail(REASONS.INVALID_RECORD, "subjectRef wajib { entityId } atau { relationId } string");
         const debounceKey = `${subjectKey}::${trigger}`;
         const existingId = lastReviewBySubjectTrigger.get(debounceKey);
         if (existingId) {
