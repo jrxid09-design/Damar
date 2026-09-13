@@ -13,11 +13,26 @@
 
 const KV_KEY = "selfmodel.successWindows";
 
+/**
+ * Proaktif (pola yang sama seperti W7R7-P1-1/P1-2, worldmodel/store.js
+ * putaran-5): successWindow yang dimuat ulang dari store JSON round-trip
+ * TIDAK PERNAH dibekukan -- pemanggil bisa memutasi attempts/successes
+ * pasca-restart untuk memalsukan selfBelief/confidence. Dibekukan sebelum
+ * lane lain menemukan lubang yang sama.
+ */
+function deepFreeze(value, seen = new WeakSet()) {
+    if (!value || typeof value !== "object") return value;
+    if (seen.has(value)) return value;
+    seen.add(value);
+    for (const key of Reflect.ownKeys(value)) deepFreeze(value[key], seen);
+    return Object.freeze(value);
+}
+
 async function loadSuccessWindows(store) {
     if (!store || typeof store.getKv !== "function") return new Map();
     const raw = await store.getKv(KV_KEY);
     if (!raw || typeof raw !== "object") return new Map();
-    return new Map(Object.entries(raw));
+    return new Map(Object.entries(raw).map(([k, v]) => [k, deepFreeze(v)]));
 }
 
 async function saveSuccessWindows(store, successWindows) {
