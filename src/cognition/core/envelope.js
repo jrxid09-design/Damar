@@ -124,7 +124,9 @@ function makeEnvelope({
     }
 
     if (!isEpistemicClass(epistemicClass)) {
-        const error = new Error(`ACC: epistemicClass tidak sah: '${epistemicClass}'`);
+        // Bug review independen (audit putaran-27, AUD27-P2-4): interpolasi
+        // `${epistemicClass}` mentah meledakkan TypeError untuk Symbol.
+        const error = new Error(`ACC: epistemicClass tidak sah: '${typeof epistemicClass === "string" ? epistemicClass : typeof epistemicClass}'`);
         error.code = "ACC_INVALID_EPISTEMIC_CLASS";
         throw error;
     }
@@ -168,9 +170,19 @@ function makeEnvelope({
  * pemotongan skalar generik dan sengaja tidak diubah di sini).
  */
 function validateConfidence(value) {
+    // Bug review independen (audit putaran-27, AUD27-P2-4): `Number(value)`
+    // meledakkan TypeError mentah untuk Symbol SEBELUM pemeriksaan
+    // Number.isFinite sempat menolaknya dengan domain error, dan
+    // `Number({valueOf(){...}})` mengeksekusi valueOf milik pemanggil.
+    // Ditolak tertutup untuk tipe non-number/non-string SEBELUM coercion.
+    if (typeof value === "symbol" || (typeof value !== "number" && typeof value !== "string" && typeof value !== "boolean")) {
+        const error = new Error(`ACC: confidence tidak sah (tipe): '${typeof value}'`);
+        error.code = "ACC_INVALID_CONFIDENCE";
+        throw error;
+    }
     const x = Number(value);
     if (!Number.isFinite(x)) {
-        const error = new Error(`ACC: confidence tidak sah (non-finite): '${value}'`);
+        const error = new Error(`ACC: confidence tidak sah (non-finite): '${typeof value === "string" ? value : typeof value}'`);
         error.code = "ACC_INVALID_CONFIDENCE";
         throw error;
     }
