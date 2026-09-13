@@ -289,6 +289,16 @@ test("GL-repair-14: a rejected createCommitment/createTask never evicts an exist
     assert.equal(ge.commitmentsSize(), 3, "commitment valid tidak boleh dievict akibat create LAIN yang gagal validasi");
 });
 
+test("GL-repair-16: mutating the caller's successCondition.subject after proposeGoal cannot rewrite the stored condition (independent audit W7R8-P2-1)", async () => {
+    const ge = await createGoalEngine({});
+    const subject = { entityId: "e1" };
+    const goal = ge.proposeGoal(baseGoalSpec({ successCondition: { kind: "WORLD_BELIEF", subject, attribute: "status", expectedValue: "done" } }));
+    subject.entityId = "HACKED";
+    const stored = ge.getGoal(goal.goalId);
+    assert.equal(stored.successCondition.subject.entityId, "e1");
+    assert.throws(() => { "use strict"; stored.successCondition.subject.entityId = "HACKED2"; });
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

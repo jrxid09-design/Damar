@@ -148,6 +148,16 @@ test("PM-restart-freeze: a reloaded reminder's payloadRef cannot be forged after
     assert.deepEqual(p2.getReminder("R1").payloadRef, { safe: true });
 });
 
+test("PM-repair-9: mutating the caller's ON_STATE trigger.subject after arm() cannot rewrite the stored trigger (independent audit W7R8-P2-2)", async () => {
+    const pm = await createProspectiveMemory({});
+    const subject = { entityId: "e1" };
+    const r = pm.arm({ reminderId: "R-state", wakeClass: "NOTIFY_OWNER", trigger: { kind: "ON_STATE", subject, attribute: "status" } });
+    subject.entityId = "HACKED";
+    const stored = pm.getReminder(r.reminderId);
+    assert.equal(stored.trigger.subject.entityId, "e1");
+    assert.throws(() => { "use strict"; stored.trigger.subject.entityId = "HACKED2"; });
+});
+
 test("PM-repair-8: an until-only recurring reminder still bounds occurrences and firedOccurrenceIds (independent audit W7R7-P2-2)", async () => {
     const clock = manualClock(0);
     const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_RECURRENCE_OCCURRENCES: 5 } });

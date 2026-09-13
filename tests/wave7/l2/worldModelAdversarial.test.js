@@ -147,6 +147,44 @@ test("WM-repair-12: beliefs are retention-bounded across many distinct attribute
     assert.ok(wm.beliefsSize() <= 10, "attribute string bebas tidak boleh menumpuk beliefs tanpa batas total");
 });
 
+test("WM-restart-freeze-collections: entities/relations/hypotheses/contradictions stay immutable after a JSON-round-tripping restart (independent audit W7R8-P1-1)", async () => {
+    function jsonStore() {
+        const kv = new Map();
+        return {
+            async getKv(k) { return kv.has(k) ? JSON.parse(kv.get(k)) : null; },
+            async putKv(k, v) { kv.set(k, JSON.stringify(v)); }
+        };
+    }
+    const store = jsonStore();
+    const wm1 = await createWorldModel({ store });
+    wm1.declareEntity({ entityId: "e1", entityKind: "device", source: "trusted-sensor" });
+    wm1.declareRelation({ relationId: "r1", kind: "connects", from: "e1", to: "e1" });
+    wm1.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    wm1.ingestObservation({
+        subject: { entityId: "e1" }, attribute: "state", value: "on",
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString()
+    });
+    wm1.ingestObservation({
+        subject: { entityId: "e1" }, attribute: "state", value: "off",
+        sensor: { sensorId: "s2" }, tier: "T1", observedAt: new Date(2).toISOString()
+    });
+    await wm1.persist();
+
+    const wm2 = await createWorldModel({ store });
+    const entity = wm2.entitiesByKind("device").entities[0];
+    assert.equal(Object.isFrozen(entity), true);
+    assert.throws(() => { "use strict"; entity.entityKind = "HACKED_KIND"; });
+
+    const relation = wm2.subgraph(["e1"], 2).relations[0];
+    assert.equal(Object.isFrozen(relation), true);
+    assert.throws(() => { "use strict"; relation.from = "e2"; });
+
+    const contradiction = wm2.openContradictions()[0];
+    assert.equal(Object.isFrozen(contradiction), true);
+    assert.throws(() => { "use strict"; contradiction.status = "RESOLVED"; });
+    assert.equal(wm2.openContradictions().length, 1, "kontradiksi tidak boleh tertutup lewat mutasi hasil baca");
+});
+
 test("WM-repair-3: an epoch-dated observation (1970-01-01T00:00:00.000Z) is not falsely treated as the newest evidence (Codex P2 round 9)", async () => {
     const clock = manualClock(1000);
     const wm = await createWorldModel({ clock });

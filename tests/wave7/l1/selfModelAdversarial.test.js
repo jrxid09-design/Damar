@@ -52,6 +52,24 @@ test("SM-repair-1: a future-dated availability observation is rejected, not trea
     });
 });
 
+test("SM-repair-2: assess()'s successWindow.history is frozen, mutating it cannot forge canonical confidence (independent audit W7R8-P1-2)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const clock = manualClock(1000);
+    const sm = await createSelfModel({ capabilityRegistry: registry, clock });
+    sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "FAILED", at: "t1", evidenceRef: "e1" });
+
+    const a = sm.assess("cap.x");
+    assert.equal(Object.isFrozen(a.successWindow.history), true);
+    assert.equal(Object.isFrozen(a.successWindow.history[0]), true);
+    assert.throws(() => { "use strict"; a.successWindow.history.push({ at: "t2", outcome: "SUCCESS", evidenceRef: "e2" }); });
+    assert.throws(() => { "use strict"; a.successWindow.history[0].outcome = "SUCCESS"; });
+
+    sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "FAILED", at: "t2", evidenceRef: "e2" });
+    const a2 = sm.assess("cap.x");
+    assert.equal(a2.successWindow.successes, 0, "forged SUCCESS entry from a mutated read must not leak into canonical state");
+    assert.equal(a2.successWindow.attempts, 2);
+});
+
 test("SM-A2: stale availability is marked STALE after TTL, never silently USABLE", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const clock = manualClock(0);
