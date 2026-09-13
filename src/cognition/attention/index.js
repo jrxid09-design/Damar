@@ -82,30 +82,35 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
     // pemanggil di dalam proses kognisi, tereksekusi setiap pick()/recompute)
     // DAN meruntuhkan semua evidenceRef berbentuk objek ke string sama
     // ("[object Object]"), menggabungkan pasangan sumber+bukti yang
-    // sebenarnya berbeda (undercount korroborasi). Kunci identitas dibangun
-    // hanya dari nilai primitif dibaca lewat descriptor (tidak pernah
-    // memanggil toString/toJSON/getter pemanggil), sama seperti pola
-    // getOwnPropertyDescriptor yang sudah dipakai di lane lain.
-    // Bug review independen (audit putaran-25, AUD25-P2-2): versi
-    // putaran-24 hanya membedakan SATU level -- nilai bersarang (objek di
-    // dalam objek) diruntuhkan ke tag tipe "object" yang sama, jadi
-    // evidenceRef berbeda dengan nilai bersarang berbeda tetap tergabung
-    // (undercount korroborasi tetap ada, hanya di kedalaman >1). Sekarang
-    // rekursif dengan batas kedalaman kecil (5, sudah lebih dari cukup
-    // untuk evidenceRef nyata) supaya tidak jadi vektor DoS baru.
-    function evidenceRefIdentity(evidenceRef, depth = 0) {
+    // sebenarnya berbeda (undercount korroborasi).
+    // Bug review independen (audit putaran-25, AUD25-P2-2): perbaikan
+    // putaran-24 (baca field primitif via descriptor) hanya membedakan
+    // SATU level -- nilai bersarang tetap runtuh ke tag "object" yang sama.
+    // Bug review independen (audit putaran-26, AUD26-P1-1, BLOCKING;
+    // AUD26-P2-2): putaran-25 mengganti dengan rekursi konten
+    // depth-capped -- tapi bahkan dengan memo per node, MENGGABUNGKAN
+    // konten hasil rekursi anak yang dibagikan (`${k}=${childResult}`) ke
+    // string induk tetap membuat PANJANG STRING meledak O(fanout^level)
+    // untuk DAG referensi-bersama (bukan siklus): diukur RangeError
+    // "Invalid string length" pada fanout=60/level=5, dan 42ms sampai
+    // beberapa detik pada fanout lebih kecil -- memoisasi kerja TIDAK
+    // menutup ledakan panjang string yang dibangunnya. Identitas evidenceRef
+    // objek sekarang HANYA identitas REFERENSI (WeakMap, id berurutan) --
+    // tidak pernah membaca/merekursi isinya sama sekali, jadi tidak pernah
+    // memanggil toString/valueOf/getter pemanggil DAN biayanya O(1) murni
+    // per objek terlepas dari struktur/kedalamannya (tidak ada test di
+    // lane ini yang mensyaratkan penggabungan dua objek BERBEDA REFERENSI
+    // meski isinya sama -- hanya mensyaratkan objek BERBEDA tetap
+    // dibedakan, yang tetap terpenuhi).
+    const objectEvidenceRefIds = new WeakMap();
+    let nextObjectEvidenceRefId = 1;
+    function evidenceRefIdentity(evidenceRef) {
         if (evidenceRef === null || evidenceRef === undefined) return "";
         const t = typeof evidenceRef;
         if (t === "string" || t === "number" || t === "boolean") return `${t}:${evidenceRef}`;
         if (t !== "object") return t;
-        if (depth >= 5) return "depth-limit";
-        const keys = Reflect.ownKeys(evidenceRef).filter(k => typeof k !== "symbol").sort();
-        if (keys.length === 0) return "object:{}";
-        return keys.map(k => {
-            const desc = Object.getOwnPropertyDescriptor(evidenceRef, k);
-            const v = (desc && !desc.get && !desc.set) ? desc.value : undefined;
-            return `${String(k)}=${evidenceRefIdentity(v, depth + 1)}`;
-        }).join("&");
+        if (!objectEvidenceRefIds.has(evidenceRef)) objectEvidenceRefIds.set(evidenceRef, nextObjectEvidenceRefId++);
+        return `object:${objectEvidenceRefIds.get(evidenceRef)}`;
     }
 
     function recomputeAll() {

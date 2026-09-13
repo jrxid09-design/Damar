@@ -47,7 +47,10 @@ function makeSignal({ signalId, sourceKind, sourceId, subjectRef, proposedUrgenc
 
 function makeTarget({ targetId, subjectRef, workKind, priorityClass, admittedAtMs }) {
     if (typeof targetId !== "string" || !targetId) fail(REASONS.INVALID_RECORD, "targetId wajib string");
-    if (!WORK_KINDS.has(workKind)) fail(REASONS.INVALID_RECORD, `workKind '${workKind}' tidak dikenal`);
+    // Bug review independen (audit putaran-26, AUD26-P2-1): sibling
+    // ingestSignal's workKind message ditutup putaran-25, ini (makeTarget's
+    // SENDIRI) terlewat.
+    if (!WORK_KINDS.has(workKind)) fail(REASONS.INVALID_RECORD, `workKind '${typeof workKind === "string" ? workKind : typeof workKind}' tidak dikenal`);
 
     return Object.freeze({
         targetId, subjectRef: deepFreeze({ ...subjectRef }), workKind, priorityClass,
