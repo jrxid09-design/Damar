@@ -16,6 +16,11 @@ function assertThrowsReason(fn, reason) {
     });
 }
 
+test("PM-repair-22: arm(null) is rejected as INVALID_RECORD, not a raw TypeError (independent audit AUD21-ADV-1)", async () => {
+    const pm = await createProspectiveMemory();
+    assertThrowsReason(() => pm.arm(null), "INVALID_RECORD");
+});
+
 test("PM-A1: reminder carrying executable/authority-shaped payload is rejected", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.arm({

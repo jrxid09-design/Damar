@@ -481,6 +481,23 @@ test("WM-repair-37: subgraph() with an explicit null budget falls back to the de
     assert.ok(sub.entities.some(e => e.entityId === "e1"));
 });
 
+test("WM-repair-39: declareEntity rejects a non-array externalRefs container (number/string/object) as INVALID_RECORD, not a raw TypeError (independent audit AUD21-P2-1)", async () => {
+    const wm = await createWorldModel();
+    assertThrowsReason(() => wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s", externalRefs: 42 }), "INVALID_RECORD");
+    assertThrowsReason(() => wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s", externalRefs: "abc" }), "INVALID_RECORD");
+    assertThrowsReason(() => wm.declareEntity({ entityId: "e3", entityKind: "device", source: "s", externalRefs: { system: "x" } }), "INVALID_RECORD");
+    // null/undefined must still default to [] rather than being rejected
+    const ok = wm.declareEntity({ entityId: "e4", entityKind: "device", source: "s", externalRefs: null });
+    assert.deepEqual(ok.externalRefs, []);
+});
+
+test("WM-repair-40: query() with a null/malformed subject fails safe to unknown NEVER_OBSERVED, not a raw TypeError (independent audit AUD21-ADV-1)", async () => {
+    const wm = await createWorldModel();
+    const r = wm.query({ subject: null, attribute: "a" });
+    assert.equal(r.unknown, true);
+    assert.equal(r.reason, "NEVER_OBSERVED");
+});
+
 test("WM-repair-38: entity eviction stays fast at scale -- relationDegree() must not rescan all relations per candidate (independent audit AUD20-P2-3)", async () => {
     const ENTITY_COUNT = 3000;
     const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_ENTITIES: ENTITY_COUNT, MAX_ENTITIES_PER_SOURCE: ENTITY_COUNT + 500, MAX_RELATIONS: ENTITY_COUNT * 4 } });

@@ -71,6 +71,9 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
     let armedReminderCount = [...reminders.values()].filter(r => r.state === "ARMED").length;
 
     function arm(spec) {
+        // Bug review independen (audit putaran-21, AUD21-ADV-1): spec null/
+        // non-objek meledakkan `spec.reminderId` jadi TypeError mentah.
+        if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
         // Bug review independen (audit putaran-10, AUD10-P1-2/AUD10-P2-4):
         // reminderId pemanggil dulu langsung menimpa entri lama tanpa cek
         // tabrakan -- replay sebuah reminderId yang sudah ARMED menaikkan

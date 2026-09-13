@@ -15,6 +15,11 @@ function assertThrowsReason(fn, reason) {
     });
 }
 
+test("AT-repair-12: ingestSignal(null, workKind) is rejected as INVALID_RECORD, not a raw TypeError (independent audit AUD21-ADV-1)", async () => {
+    const ae = await createAttentionEconomy();
+    assertThrowsReason(() => ae.ingestSignal(null, "PERCEIVE"), "INVALID_RECORD");
+});
+
 test("AT-A1: salience flooding from one sensor is rate-capped and the source marked noisy", async () => {
     const ae = await createAttentionEconomy({ bounds: { ...BOUNDS, MAX_SIGNALS_PER_SOURCE_PER_MINUTE: 3 } });
     for (let i = 0; i < 3; i++) {

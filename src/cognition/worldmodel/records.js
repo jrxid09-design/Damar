@@ -31,6 +31,12 @@ function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, n
     if (typeof entityId !== "string" || !entityId) fail(REASONS.INVALID_RECORD, "entityId wajib string");
     if (typeof entityKind !== "string" || !entityKind) fail(REASONS.INVALID_RECORD, "entityKind wajib string");
     if (typeof source !== "string" || !source) fail(REASONS.INVALID_RECORD, "source wajib string (untuk kuota WM-A6)");
+    // Bug review independen (audit putaran-21, AUD21-P2-1): round-20 menjaga
+    // ELEMEN externalRefs tapi bukan KONTAINERNYA -- `externalRefs: 42` atau
+    // string masih meledakkan `.slice(...).map(...)` jadi TypeError mentah.
+    if (externalRefs !== undefined && externalRefs !== null && !Array.isArray(externalRefs)) {
+        fail(REASONS.INVALID_RECORD, "externalRefs wajib array");
+    }
 
     return Object.freeze({
         entityId, entityKind: entityKind.slice(0, 64),

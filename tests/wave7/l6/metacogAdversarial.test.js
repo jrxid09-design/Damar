@@ -34,6 +34,14 @@ test("MC-repair-6: a BigInt/NaN/negative cost.tokens or cost.ms is rejected, nev
     assert.equal(r.state, "EXPIRED", "a valid over-budget cost must still be enforced");
 });
 
+test("MC-repair-8: assess() with a missing/null evidenceQuality fails safe to NO_EVIDENCE instead of an uncontrolled TypeError (independent audit AUD21-ADV-1)", async () => {
+    const mc = await createMetacognition();
+    const a1 = mc.assess({ entityId: "e1" }, "claim"); // evidenceQuality omitted entirely
+    assert.equal(a1.basis, "NO_EVIDENCE");
+    const a2 = mc.assess({ entityId: "e1" }, "claim", null);
+    assert.equal(a2.basis, "NO_EVIDENCE");
+});
+
 test("MC-A1: fake confidence (model writes 0.99) is impossible — no API accepts a raw value", async () => {
     const mc = await createMetacognition();
     const a = mc.assess({ entityId: "e1" }, "claim", { value: 0.99, sourceCount: 0 }); // "value" in input ignored

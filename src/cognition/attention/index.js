@@ -139,6 +139,9 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
 
     /** AT-1/AT-2/AT-3: kelas ditentukan HANYA di sini lewat policy.js. */
     function ingestSignal(spec, workKind) {
+        // Bug review independen (audit putaran-21, AUD21-ADV-1): spec null/
+        // non-objek meledakkan `spec.signalId` jadi TypeError mentah.
+        if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
         // Bug review independen (audit putaran-11, AUD11-P2-9): enforceSourceRate
         // dulu berjalan SEBELUM makeSignal memvalidasi spec -- signal yang
         // ditolak (sourceId/sourceKind cacat) tetap membuat/menaikkan kunci
