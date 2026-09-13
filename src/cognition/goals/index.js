@@ -220,22 +220,31 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // Bug diketemukan review independen (Codex): MAX_PLAN_VERSIONS_RETAINED
         // dideklarasikan tapi tidak pernah ditegakkan — plans per goal bisa
         // tumbuh tak terbatas lewat re-planning berulang. §8: kompaksi tertua.
-        const sameGoal = [...plans.values()]
-            .filter(x => x.goalRef === p.goalRef)
+        // Bug review independen (audit putaran-7, W7R7-P2-1): versi lama
+        // memasukkan plan yang BARU DIBUAT (p) sendiri ke kumpulan kandidat
+        // korban -- jika versinya kebetulan paling kecil (mis. dibuat di luar
+        // urutan: v3,v2,v1, lalu v0), createPlan() mengembalikan record yang
+        // barusan dihapusnya sendiri. p sekarang SELALU dikecualikan dari
+        // kandidat korban di kedua kompaksi (per-goal dan global).
+        const otherSameGoal = [...plans.values()]
+            .filter(x => x.goalRef === p.goalRef && x.planId !== p.planId)
             .sort((a, b) => a.version - b.version);
-        if (sameGoal.length > bounds.MAX_PLAN_VERSIONS_RETAINED) {
-            const overflow = sameGoal.length - bounds.MAX_PLAN_VERSIONS_RETAINED;
-            for (let i = 0; i < overflow; i++) plans.delete(sameGoal[i].planId);
+        const totalForGoal = otherSameGoal.length + 1; // +1 untuk p sendiri
+        if (totalForGoal > bounds.MAX_PLAN_VERSIONS_RETAINED) {
+            const overflow = totalForGoal - bounds.MAX_PLAN_VERSIONS_RETAINED;
+            for (let i = 0; i < overflow; i++) plans.delete(otherSameGoal[i].planId);
         }
         // Bug review independen (audit putaran-6, W7R6-P2-1): MAX_PLAN_VERSIONS_RETAINED
         // hanya membatasi PER goalRef -- createPlan tidak pernah memvalidasi
         // goalRef benar-benar ada, jadi banyak goalRef berbeda (termasuk yang
         // palsu/tidak ada) bisa menumpuk plan tanpa batas TOTAL. Kompaksi
         // global tertua (lintas semua goalRef) saat retensi total penuh --
-        // selalu ada korban karena tidak ada kelas plan yang "dilindungi".
+        // selalu ada korban karena tidak ada kelas plan yang "dilindungi"
+        // (selain p sendiri, yang dikecualikan di sini juga).
         if (plans.size > bounds.MAX_TOTAL_PLANS_RETAINED) {
-            const oldest = plans.keys().next().value;
-            if (oldest !== undefined) plans.delete(oldest);
+            for (const k of plans.keys()) {
+                if (k !== p.planId) { plans.delete(k); break; }
+            }
         }
         return p;
     }

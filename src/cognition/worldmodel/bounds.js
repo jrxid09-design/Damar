@@ -8,7 +8,13 @@ const BOUNDS = Object.freeze({
     MAX_ENTITIES: 100000,
     MAX_ENTITIES_PER_SOURCE: 10000,          // WM-A6: kuota per-sumber, bukan rate limiter penuh
     MAX_RELATIONS: 400000,
-    MAX_BELIEFS_PER_SUBJECT_ATTRIBUTE: 16,
+    // Bug review independen (audit putaran-7, W7R7-P1-3, eskalasi dari
+    // AUD-P2-1/W7R5-P2-4): MAX_BELIEFS_PER_SUBJECT_ATTRIBUTE tidak pernah
+    // dipakai (dan tidak cocok dengan bentuk data -- `beliefs` menyimpan
+    // SATU belief per kunci subject+attribute, jadi "per subject-attribute"
+    // selalu 1 secara struktural). Diganti batas total yang sungguh
+    // ditegakkan di applyRecordToBelief.
+    MAX_TOTAL_BELIEFS: 100000,
     MAX_OBSERVATIONS_RETAINED_PER_BELIEF: 32,
     MAX_OPEN_CONTRADICTION_SETS: 4096,
     MAX_HYPOTHESES: 4096,
