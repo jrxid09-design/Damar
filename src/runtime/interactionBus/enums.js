@@ -29,7 +29,8 @@ const INTERACTION_KINDS = Object.freeze([
   "STATUS_REQUEST",
   "CONTEXT_REFERENCE",
   "AUTH_EVIDENCE",
-  "EVENT"
+  "EVENT",
+  "ACTION_REQUEST"
 ]);
 
 const INTERACTION_STATES = Object.freeze([
@@ -60,7 +61,8 @@ const ROUTES = Object.freeze([
   "COMMAND",
   "APPROVAL",
   "STATUS",
-  "CONTROL"
+  "CONTROL",
+  "ACTION"
 ]);
 
 const STREAM_EVENT_TYPES = Object.freeze([
