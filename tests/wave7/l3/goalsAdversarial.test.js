@@ -73,6 +73,16 @@ test("GL-A4: recursive goal explosion is stopped by depth/child/rate caps", asyn
         "GOAL_DEPTH_EXCEEDED");
 });
 
+test("GL-repair-1: the total-goal retention cap is enforced even when no goal is terminal (Codex P2 round 6)", async () => {
+    const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_GOALS_RETAINED: 2, MAX_GOAL_CREATION_RATE_PER_MINUTE: 1000 } });
+    ge.proposeGoal(baseGoalSpec());
+    ge.proposeGoal(baseGoalSpec());
+    // Both goals are still PROPOSED (non-terminal) -- there is nothing to
+    // evict, so the third proposal must be rejected, not silently admitted
+    // past MAX_TOTAL_GOALS_RETAINED.
+    assertThrowsReason(() => ge.proposeGoal(baseGoalSpec()), "GOAL_RETENTION_LIMIT_EXCEEDED");
+});
+
 test("GL-A5: immortal goal — terminal states are terminal, cannot be reactivated", async () => {
     const ge = await createGoalEngine();
     const g = ge.proposeGoal(baseGoalSpec());

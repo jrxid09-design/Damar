@@ -79,6 +79,12 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         if (victim) {
             entities.delete(victim.entityId);
             entityCountBySource.set(victim.source, Math.max(0, (entityCountBySource.get(victim.source) ?? 1) - 1));
+            // Bug review independen (Codex putaran-6): relasi yang masih
+            // menunjuk ke entitas yang baru dievict dulu dibiarkan, jadi
+            // path/subgraph bisa melewati endpoint yang sudah tidak ada.
+            for (const r of [...relations.values()]) {
+                if (r.from === victim.entityId || r.to === victim.entityId) relations.delete(r.relationId);
+            }
         }
     }
 

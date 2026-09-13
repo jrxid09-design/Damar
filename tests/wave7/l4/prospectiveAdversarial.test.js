@@ -60,6 +60,29 @@ test("PM-A1-repair-3: a toJSON hook on payloadRef never executes -- rejected bef
     assert.equal(executed, false, "toJSON tidak boleh pernah dipanggil -- fungsi ditolak sebelum JSON.stringify");
 });
 
+test("PM-repair-2: deferred wake events are bounded, drops are counted not silently lost (Codex P2 round 6)", async () => {
+    const clock = manualClock(0);
+    const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_WAKE_EVENTS_PER_MINUTE: 1, MAX_DEFERRED_WAKE_EVENTS: 2 } });
+    for (let i = 0; i < 5; i++) {
+        pm.arm({ trigger: { kind: "AT", at: new Date(1000).toISOString() }, wakeClass: "MAINTENANCE" });
+    }
+    clock.advance(1500);
+    pm.tick();
+    assert.ok(pm.deferredCount() <= 2, "antrean deferred tidak boleh tumbuh tanpa batas");
+    assert.equal(pm.droppedDeferredCount(), 2, "kelebihan deferred dibuang TAPI tetap terhitung, tidak hilang diam-diam");
+});
+
+test("PM-repair-3: terminal (fired/retired) reminders are compacted once retention cap is exceeded (Codex P2 round 6)", async () => {
+    const clock = manualClock(0);
+    const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_TOTAL_REMINDERS_RETAINED: 2, MAX_ARMED_REMINDERS: 100 } });
+    for (let i = 0; i < 5; i++) {
+        pm.arm({ trigger: { kind: "AT", at: new Date(1000 + i).toISOString() }, wakeClass: "MAINTENANCE" });
+    }
+    clock.advance(2000);
+    pm.tick();
+    assert.ok(pm.reminderCount() <= 2, "retensi reminder terminal harus dipangkas, bukan tumbuh tanpa batas");
+});
+
 test("PM-A5-repair: an unparsable expectation deadline is rejected, not silently accepted (Codex P2 round 4)", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.armExpectation({

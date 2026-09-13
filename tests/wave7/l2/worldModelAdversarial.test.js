@@ -2,6 +2,8 @@ const test = require("node:test");
 const assert = require("node:assert");
 
 const { createWorldModel, BOUNDS } = require("../../../src/cognition/worldmodel");
+const { KV_KEY } = require("../../../src/cognition/worldmodel/store");
+const { createMemoryAccStore } = require("../../../src/cognition/persistence/AccStore");
 
 /** W7-L2 adversarial suite — the twelve attacks from
  * `W7_WORLD_MODEL_FORMAL_SPEC.md` §13 (WM-A1..A12). */
@@ -27,6 +29,29 @@ test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite"
         sensor: { sensorId: "compromised" }, tier: "T1", observedAt: new Date(2).toISOString() });
     assert.equal(r.case, "CONTEST");
     assert.equal(wm.query({ subject: { entityId: "e1" }, attribute: "temp" }).value, 20);
+});
+
+test("WM-repair-2: evicting an entity also removes its incident relations -- no dangling relation in subgraph (Codex P2 round 6)", async () => {
+    const clock = manualClock(1000);
+    const store = createMemoryAccStore();
+    await store.putKv(KV_KEY, {
+        entities: {
+            e0: { entityId: "e0", entityKind: "device", labels: [], firstSeenAt: 0, lastSeenAt: 0, externalRefs: [], source: "t" },
+            e1: { entityId: "e1", entityKind: "device", labels: [], firstSeenAt: 0, lastSeenAt: 0, externalRefs: [], source: "t" }
+        },
+        relations: { r1: { relationId: "r1", kind: "near", from: "e0", to: "e1", directed: true, strength: 0.5 } },
+        beliefs: {}, hypotheses: {}, contradictions: []
+    });
+    // Bounds tighter than the loaded snapshot -- realistic after a restart
+    // with a lowered MAX_ENTITIES. Both loaded entities are connected
+    // (degree 1 each), so redeclaring one of them (no new degree-0 entity
+    // enters the pool) forces the eviction of a genuinely CONNECTED entity.
+    const wm = await createWorldModel({ clock, store, bounds: { ...BOUNDS, MAX_ENTITIES: 1, MAX_ENTITIES_PER_SOURCE: 100 } });
+    wm.declareEntity({ entityId: "e0", entityKind: "device", source: "t" });
+
+    const sub = wm.subgraph(["e0"], 2);
+    assert.ok(!sub.relations.some(r => r.relationId === "r1"),
+        "relasi ke entitas yang sudah dievict tidak boleh tersisa di subgraph");
 });
 
 test("WM-repair-1: a non-date observedAt string is rejected, not silently treated as now() (Codex P2 round 5)", async () => {
