@@ -18,7 +18,7 @@ const crypto = require("node:crypto");
 const { REASONS, fail } = require("./errors");
 const { BOUNDS, SCHEMA_VERSION } = require("./bounds");
 const { laws } = require("./laws");
-const { makeGoal, makeCommitment, makePlan, makeTask } = require("./records");
+const { makeGoal, makeCommitment, makePlan, makeTask, ORIGIN_KINDS } = require("./records");
 const { transitionGoal, transitionCommitment, transitionTask } = require("./lifecycle");
 const { loadSnapshot, saveSnapshot } = require("./store");
 
@@ -63,7 +63,15 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function proposeGoal(spec) {
-        enforceCreationRate(spec.origin?.kind);
+        // Bug review independen (audit putaran-4, W7R4-P2-3): enforceCreationRate
+        // dulu berjalan SEBELUM makeGoal memvalidasi origin.kind -- setiap
+        // origin.kind sampah (string acak pemanggil) tetap membuat kunci baru
+        // di creationTimestampsByOrigin sebelum proposal ditolak, dan kunci
+        // itu tidak pernah dihapus. Divalidasi dulu di sini.
+        if (!spec.origin || !ORIGIN_KINDS.has(spec.origin.kind)) {
+            fail(REASONS.INVALID_RECORD, "origin.kind tidak dikenal");
+        }
+        enforceCreationRate(spec.origin.kind);
 
         // Bug diketemukan review independen (Codex, putaran ke-4): depth
         // lama dipercaya langsung dari pemanggil (`spec.depth`), jadi
@@ -229,6 +237,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     function getTask(taskId) { return tasks.get(taskId) ?? null; }
     function getPlan(planId) { return plans.get(planId) ?? null; }
     function childCountsSize() { return childCounts.size; }
+    function creationTimestampsSize() { return creationTimestampsByOrigin.size; }
 
     async function persist() { return saveSnapshot(store, { goals, commitments, plans, tasks }); }
 
@@ -238,7 +247,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         createCommitment, transitionCommitment: transitionCommitmentAction,
         createPlan, invalidatePlanIfAssumptionBroken, getPlan,
         createTask, transitionTask: transitionTaskAction, getTask,
-        childCountsSize,
+        childCountsSize, creationTimestampsSize,
         persist, laws, bounds
     });
 }

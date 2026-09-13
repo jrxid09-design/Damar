@@ -138,7 +138,13 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
     function releaseArmedCapacity(reminder) {
         armedReminderCount = Math.max(0, armedReminderCount - 1);
         if (reminder.ownerRef) {
-            remindersPerGoal.set(reminder.ownerRef, Math.max(0, (remindersPerGoal.get(reminder.ownerRef) ?? 1) - 1));
+            const next = Math.max(0, (remindersPerGoal.get(reminder.ownerRef) ?? 1) - 1);
+            // Bug review independen (audit putaran-4, W7R4-P2-3): nilai
+            // hanya diturunkan ke 0, kuncinya sendiri tidak pernah dihapus
+            // -- satu entri Map menumpuk selamanya per ownerRef berbeda
+            // yang pernah dipakai, walau reminder-nya sudah tidak ada.
+            if (next === 0) remindersPerGoal.delete(reminder.ownerRef);
+            else remindersPerGoal.set(reminder.ownerRef, next);
         }
     }
 
@@ -265,6 +271,7 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
     function deferredCount() { return deferredWakeEvents.length; }
     function droppedDeferredCount() { return droppedDeferredWakeEventCount; }
     function reminderCount() { return reminders.size; }
+    function remindersPerGoalSize() { return remindersPerGoal.size; }
 
     async function persist() { return saveSnapshot(store, { reminders, expectations, firedOccurrenceIds }); }
 
@@ -273,7 +280,7 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         catchUpEvents,
         arm, tick, checkOnStateReminders,
         armExpectation, checkExpectations,
-        getReminder, getExpectation, deferredCount, droppedDeferredCount, reminderCount,
+        getReminder, getExpectation, deferredCount, droppedDeferredCount, reminderCount, remindersPerGoalSize,
         persist, laws, bounds
     });
 }
