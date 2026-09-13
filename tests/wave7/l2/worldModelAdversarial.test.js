@@ -22,11 +22,20 @@ test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite"
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
     wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "temp", value: 20,
-        sensor: { sensorId: "good" }, tier: "T1", observedAt: "t1" });
+        sensor: { sensorId: "good" }, tier: "T1", observedAt: new Date(1).toISOString() });
     const r = wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "temp", value: 99,
-        sensor: { sensorId: "compromised" }, tier: "T1", observedAt: "t2" });
+        sensor: { sensorId: "compromised" }, tier: "T1", observedAt: new Date(2).toISOString() });
     assert.equal(r.case, "CONTEST");
     assert.equal(wm.query({ subject: { entityId: "e1" }, attribute: "temp" }).value, 20);
+});
+
+test("WM-repair-1: a non-date observedAt string is rejected, not silently treated as now() (Codex P2 round 5)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
+    assertThrowsReason(() => wm.ingestObservation({
+        subject: { entityId: "e1" }, attribute: "status", value: "on",
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: "not-a-date"
+    }), "MISSING_SENSOR_ID");
 });
 
 test("WM-A2: unresolvable/malformed evidence is rejected at ingest, not silently accepted", async () => {
@@ -34,7 +43,7 @@ test("WM-A2: unresolvable/malformed evidence is rejected at ingest, not silently
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
     assertThrowsReason(() => wm.ingestObservation({
         subject: { entityId: "e1" }, attribute: "temp", value: 1,
-        sensor: {}, tier: "T1", observedAt: "t1" // sensorId absent -> forged/unresolvable
+        sensor: {}, tier: "T1", observedAt: new Date(1).toISOString() // sensorId absent -> forged/unresolvable
     }), "MISSING_SENSOR_ID");
 });
 
@@ -43,7 +52,7 @@ test("WM-A3: writer cannot extend a belief's TTL to keep stale truth alive", asy
     const wm = await createWorldModel({ clock });
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
     wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "on",
-        sensor: { sensorId: "s1" }, tier: "T1", observedAt: "t1" });
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() });
     // REINFORCE (same value) does not reset the TTL clock backwards past decay boundary check.
     clock.advance(31 * 60_000);
     const r = wm.query({ subject: { entityId: "e1" }, attribute: "status" });
@@ -55,7 +64,7 @@ test("WM-A4: replica-flood-style repeated reinforcement never raises confidence 
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
     for (let i = 0; i < 50; i++) {
         wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "on",
-            sensor: { sensorId: `s${i}` }, tier: "T1", observedAt: `t${i}` });
+            sensor: { sensorId: `s${i}` }, tier: "T1", observedAt: new Date(i + 1).toISOString() });
     }
     const r = wm.query({ subject: { entityId: "e1" }, attribute: "status" });
     assert.ok(r.confidence <= 1, "confidence tetap dalam [0,1] walau membanjiri korroborasi");
@@ -68,7 +77,7 @@ test("WM-A5: memory/recall-shaped input cannot ingest as an observation", async 
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
     assertThrowsReason(() => wm.ingestObservation({
         subject: { entityId: "e1" }, attribute: "status", value: "on",
-        sensor: { sensorId: "memory-recall" }, tier: "T6", observedAt: "t1" // T6 = belief tier, not admissible for ingest
+        sensor: { sensorId: "memory-recall" }, tier: "T6", observedAt: new Date(1).toISOString() // T6 = belief tier, not admissible for ingest
     }), "INADMISSIBLE_TIER");
 });
 
@@ -125,9 +134,9 @@ test("WM-A8-repair: contradiction list stays bounded on overflow, does not grow 
     for (let i = 0; i < 6; i++) {
         wm.declareEntity({ entityId: `e${i}`, entityKind: "device", source: "t" });
         wm.ingestObservation({ subject: { entityId: `e${i}` }, attribute: "status", value: "on",
-            sensor: { sensorId: "s1" }, tier: "T1", observedAt: `t${i}a` });
+            sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(i * 10 + 1).toISOString() });
         wm.ingestObservation({ subject: { entityId: `e${i}` }, attribute: "status", value: "off",
-            sensor: { sensorId: "s2" }, tier: "T1", observedAt: `t${i}b` });
+            sensor: { sensorId: "s2" }, tier: "T1", observedAt: new Date(i * 10 + 2).toISOString() });
     }
     // 6 contradictions opened against a cap of 3 — the tracked list must
     // never exceed the bound, even though every overflow "archives" one.
@@ -138,9 +147,9 @@ test("WM-A8: resolving a contradiction without a ruleId is rejected, no silent c
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
     wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "on",
-        sensor: { sensorId: "s1" }, tier: "T1", observedAt: "t1" });
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() });
     const contest = wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "off",
-        sensor: { sensorId: "s2" }, tier: "T1", observedAt: "t2" });
+        sensor: { sensorId: "s2" }, tier: "T1", observedAt: new Date(2).toISOString() });
 
     assertThrowsReason(() => wm.resolveContradiction(contest.contradictionSetId, ""), "SILENT_RESOLUTION_REJECTED");
     assertThrowsReason(() => wm.resolveContradiction(contest.contradictionSetId, undefined), "SILENT_RESOLUTION_REJECTED");
@@ -154,7 +163,7 @@ test("WM-A9: confidence cannot be injected — no ingest path accepts a confiden
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
     wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "on",
-        sensor: { sensorId: "s1" }, tier: "T1", observedAt: "t1", confidence: 1.0 });
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString(), confidence: 1.0 });
     const r = wm.query({ subject: { entityId: "e1" }, attribute: "status" });
     assert.ok(r.confidence < 1, "confidence=1.0 yang disuntikkan pemanggil diabaikan, dihitung ulang dari bukti");
 });
@@ -164,7 +173,7 @@ test("WM-A10: simulation-tagged records are rejected at ingest with a named reas
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
     assertThrowsReason(() => wm.ingestObservation({
         subject: { entityId: "e1" }, attribute: "status", value: "on",
-        sensor: { sensorId: "sim" }, tier: "SIMULATION", observedAt: "t1"
+        sensor: { sensorId: "sim" }, tier: "SIMULATION", observedAt: new Date(1).toISOString()
     }), "SIMULATION_NOT_ADMISSIBLE");
 });
 
@@ -174,7 +183,7 @@ test("WM-A11: decay TTL is not writable at runtime by the ingest caller", async 
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
     // Caller tries to smuggle a custom ttlMs/decayPolicy through the observation spec.
     wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "on",
-        sensor: { sensorId: "s1" }, tier: "T1", observedAt: "t1", decayPolicy: { ttlMs: 999_999_999, decayKind: "NONE" } });
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString(), decayPolicy: { ttlMs: 999_999_999, decayKind: "NONE" } });
     clock.advance(31 * 60_000);
     const r = wm.query({ subject: { entityId: "e1" }, attribute: "status" });
     assert.equal(r.epistemicClass, "STALE", "decayPolicy dari pemanggil diabaikan, TTL tetap kebijakan pemilik");
@@ -185,6 +194,6 @@ test("WM-A12: an inference-tier record can never be cited as supportedBy for an 
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
     assertThrowsReason(() => wm.ingestObservation({
         subject: { entityId: "e1" }, attribute: "status", value: "on",
-        sensor: { sensorId: "inference-engine" }, tier: "T7", observedAt: "t1"
+        sensor: { sensorId: "inference-engine" }, tier: "T7", observedAt: new Date(1).toISOString()
     }), "INADMISSIBLE_TIER");
 });

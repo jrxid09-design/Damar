@@ -51,32 +51,41 @@ const FORBIDDEN_PAYLOAD_KEYS = Object.freeze(["capabilityId", "actuatorRef", "au
 const MAX_PAYLOAD_SCAN_DEPTH = 16;
 
 /**
- * PM-1, rekursif: field eksekusi/otoritas ditolak di kedalaman manapun.
- * Bug diketemukan review independen (Codex, putaran ke-2): pemotongan
- * kedalaman sebelumnya BERHENTI diam-diam alih-alih GAGAL KERAS, sehingga
- * payload bersarang lebih dalam dari batas lolos tanpa diperiksa —
- * kebalikan dari fail-closed. Sekarang melebihi batas kedalaman itu
- * SENDIRI adalah penolakan, bukan alasan untuk berhenti memeriksa.
+ * PM-1, rekursif: field eksekusi/otoritas ditolak di kedalaman manapun,
+ * DAN materi eksekusi (fungsi/toJSON/accessor) ditolak SEBELUM
+ * JSON.stringify pernah dipanggil. Bug diketemukan review independen
+ * (Codex, putaran ke-5): validatePayloadRef sebelumnya memanggil
+ * JSON.stringify LEBIH DAHULU untuk cek ukuran — jika payloadRef punya
+ * `toJSON` (fungsi apa pun), itu dieksekusi sebelum pagar ini sempat
+ * menolaknya. Sekarang pagar ini SELALU berjalan dulu, dan fungsi apa pun
+ * (termasuk toJSON) ditolak sama seperti kunci terlarang lainnya.
  */
-function assertNoForbiddenPayloadKeys(value, depth = 0) {
-    if (!value || typeof value !== "object") return;
+function assertSafePayloadRef(value, depth = 0) {
+    if (value === null || value === undefined) return;
+    const t = typeof value;
+    if (t === "function") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa fungsi (termasuk toJSON)");
+    if (t === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa Symbol");
+    if (t !== "object") return;
     if (depth > MAX_PAYLOAD_SCAN_DEPTH) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef terlalu dalam untuk diverifikasi dengan aman, ditolak");
     }
-    for (const key of Object.keys(value)) {
+    for (const key of Reflect.ownKeys(value)) {
+        if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa kunci Symbol");
         if (FORBIDDEN_PAYLOAD_KEYS.includes(key)) {
             fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa '${key}' (di kedalaman manapun)`);
         }
-        assertNoForbiddenPayloadKeys(value[key], depth + 1);
+        const desc = Object.getOwnPropertyDescriptor(value, key);
+        if (desc && (desc.get || desc.set)) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa properti accessor: '${String(key)}'`);
+        }
+        assertSafePayloadRef(value[key], depth + 1);
     }
 }
 
 /** PM-1: payloadRef adalah REFERENSI saja — menolak materi eksekusi/fungsi. */
 function validatePayloadRef(payloadRef) {
     if (payloadRef === null || payloadRef === undefined) return null;
-    if (typeof payloadRef === "function") {
-        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh berupa fungsi");
-    }
+    assertSafePayloadRef(payloadRef);
     const serialized = JSON.stringify(payloadRef);
     if (serialized === undefined) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak dapat diserialisasi");
     if (Buffer.byteLength(serialized) > BOUNDS.MAX_PAYLOAD_REF_BYTES) {

@@ -32,9 +32,9 @@ test("W7-L2 functional: REINFORCE then read returns OBSERVED with rising corrobo
     const wm = await createWorldModel({ clock });
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "test" });
     wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "on",
-        sensor: { sensorId: "s1" }, tier: "T1", observedAt: "t1" });
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() });
     wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "on",
-        sensor: { sensorId: "s1" }, tier: "T1", observedAt: "t2" });
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(2).toISOString() });
     const r = wm.query({ subject: { entityId: "e1" }, attribute: "status" });
     assert.equal(r.value, "on");
     assert.equal(r.epistemicClass, "OBSERVED");
@@ -46,9 +46,9 @@ test("W7-L2 functional: CONTEST opens a contradiction set without changing the v
     const wm = await createWorldModel({ clock });
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "test" });
     wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "on",
-        sensor: { sensorId: "s1" }, tier: "T1", observedAt: "t1" });
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() });
     const result = wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "off",
-        sensor: { sensorId: "s2" }, tier: "T1", observedAt: "t2" });
+        sensor: { sensorId: "s2" }, tier: "T1", observedAt: new Date(2).toISOString() });
     assert.equal(result.case, "CONTEST");
 
     const r = wm.query({ subject: { entityId: "e1" }, attribute: "status" });
@@ -62,11 +62,11 @@ test("W7-L2 functional: SUPERSEDE only after the incumbent belief has expired", 
     const wm = await createWorldModel({ clock });
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "test" });
     wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "on",
-        sensor: { sensorId: "s1" }, tier: "T1", observedAt: "t1" });
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() });
 
     clock.advance(31 * 60_000); // past default 30-minute TTL
     const result = wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "off",
-        sensor: { sensorId: "s1" }, tier: "T1", observedAt: "t2" });
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(2).toISOString() });
     assert.equal(result.case, "SUPERSEDE");
     assert.equal(wm.query({ subject: { entityId: "e1" }, attribute: "status" }).value, "off");
 });
@@ -76,7 +76,7 @@ test("W7-L2 functional: query decays to STALE at read time after TTL, without an
     const wm = await createWorldModel({ clock });
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "test" });
     wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "on",
-        sensor: { sensorId: "s1" }, tier: "T1", observedAt: "t1" });
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() });
     clock.advance(31 * 60_000);
     const r = wm.query({ subject: { entityId: "e1" }, attribute: "status" });
     assert.equal(r.epistemicClass, "STALE");
@@ -88,7 +88,7 @@ test("W7-L2 functional: requireFresh returns unknown instead of a stale value (Q
     const wm = await createWorldModel({ clock });
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "test" });
     wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "on",
-        sensor: { sensorId: "s1" }, tier: "T1", observedAt: "t1" });
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() });
     clock.advance(31 * 60_000);
     const r = wm.query({ subject: { entityId: "e1" }, attribute: "status", requireFresh: true });
     assert.equal(r.unknown, true);
@@ -131,7 +131,7 @@ test("W7-L2 restart/persistence: beliefs and entities survive a fresh createWorl
     const wm1 = await createWorldModel({ store });
     wm1.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
     wm1.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "on",
-        sensor: { sensorId: "s1" }, tier: "T1", observedAt: "t1" });
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() });
     await wm1.persist();
 
     const wm2 = await createWorldModel({ store });

@@ -41,6 +41,25 @@ test("AT-A2: corroboration counts distinct source+evidence pairs, not repeated m
     assert.ok(withDistinct > withRepeats, "sumber+bukti berbeda menaikkan prioritas lebih dari pesan berulang");
 });
 
+test("AT-A5-repair: a pick() blocked by full capacity never consumes the winning class's scheduling credit (Codex P2 round 5)", async () => {
+    const clock = manualClock(0);
+    let capacity = 0;
+    const governorPort = { capacity: () => capacity };
+    const ae = await createAttentionEconomy({ clock, governorPort });
+    ae.ingestSignal({ sourceKind: "OWNER", sourceId: "owner-1", subjectRef: { entityId: "owner-task" } }, "REASON");
+    ae.ingestSignal({ sourceKind: "AGENT", sourceId: "agent-1", subjectRef: { entityId: "agent-task" } }, "REASON");
+
+    // Kapasitas penuh: pick() harus null DAN tidak boleh diam-diam menguras
+    // giliran kelas pemenang (P1_OWNER, kuota 35 > P4_BACKGROUND, kuota 10).
+    assert.equal(ae.pick(), null);
+
+    capacity = 1;
+    const started = ae.pick();
+    assert.ok(started, "harus ada target yang jalan begitu kapasitas terbuka");
+    assert.equal(started.priorityClass, "P1_OWNER",
+        "P1_OWNER tetap menang giliran pertama -- percobaan pick() yang diblokir kapasitas tidak boleh mengonsumsi kredit");
+});
+
 test("AT-A3: no signal field can set P0_SAFETY directly — only allowlisted origin can", async () => {
     const ae = await createAttentionEconomy();
     const { targetId } = ae.ingestSignal({

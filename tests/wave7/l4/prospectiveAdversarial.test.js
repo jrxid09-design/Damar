@@ -46,6 +46,20 @@ test("PM-A1-repair-2: forbidden fields beyond the old depth-8 cutoff are rejecte
     }), "EXECUTABLE_MATERIAL_REJECTED");
 });
 
+test("PM-A1-repair-3: a toJSON hook on payloadRef never executes -- rejected before serialization (Codex P1 round 5)", async () => {
+    const pm = await createProspectiveMemory();
+    let executed = false;
+    const hostile = {
+        note: "looks harmless",
+        toJSON() { executed = true; return { capabilityId: "cap.x" }; }
+    };
+    assertThrowsReason(() => pm.arm({
+        trigger: { kind: "AT", at: new Date(1000).toISOString() }, wakeClass: "MAINTENANCE",
+        payloadRef: hostile
+    }), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(executed, false, "toJSON tidak boleh pernah dipanggil -- fungsi ditolak sebelum JSON.stringify");
+});
+
 test("PM-A5-repair: an unparsable expectation deadline is rejected, not silently accepted (Codex P2 round 4)", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.armExpectation({

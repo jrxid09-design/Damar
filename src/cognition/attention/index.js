@@ -116,12 +116,20 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
     function pick() {
         recomputeAll();
         const result = pickOne(queuesByClass(), credits, now());
-        credits = result.credits;
-        if (!result.target) return null;
+        if (!result.target) {
+            credits = result.credits;
+            return null;
+        }
 
         const maxRunning = governorPort?.capacity?.() ?? Infinity;
         const runningCount = [...targets.values()].filter(t => t.state === "RUNNING").length;
-        if (runningCount >= maxRunning) return null; // admisi diblokir, tidak pernah overscribe
+        if (runningCount >= maxRunning) return null;
+        // Bug review independen (Codex putaran-5): kredit deficit round-robin
+        // sebelumnya dikonsumsi SEBELUM cek kapasitas ini, jadi giliran kelas
+        // pemenang tetap terpakai walau admisi diblokir dan target TIDAK
+        // pernah benar-benar jalan -- kelaparan diam-diam. Sekarang kredit
+        // hanya dikomit saat admisi benar-benar terjadi.
+        credits = result.credits;
 
         const started = Object.freeze({ ...result.target, state: "RUNNING", startedAt: now() });
         targets.set(started.targetId, started);

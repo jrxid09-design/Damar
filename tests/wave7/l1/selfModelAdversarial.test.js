@@ -39,6 +39,19 @@ test("SM-A1: model claiming a capability in free text cannot set selfBelief", as
     assert.equal(a.selfBelief, "UNKNOWN", "no observation ever ingested -> UNKNOWN, never USABLE from assertion");
 });
 
+test("SM-repair-1: a future-dated availability observation is rejected, not treated as fresh (Codex P2 round 5)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const clock = manualClock(1_000_000);
+    const sm = await createSelfModel({ capabilityRegistry: registry, clock });
+    assert.throws(() => sm.ingestAvailability({
+        capabilityId: "cap.x", availability: "AVAILABLE", generation: 1,
+        observedAtMs: 1_000_000 + 60_000 // 60s in the future, well past MAX_FUTURE_SKEW_MS
+    }), (err) => {
+        assert.equal(err.reason, "INVALID_OBSERVATION");
+        return true;
+    });
+});
+
 test("SM-A2: stale availability is marked STALE after TTL, never silently USABLE", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const clock = manualClock(0);
