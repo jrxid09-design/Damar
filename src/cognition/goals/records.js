@@ -8,6 +8,34 @@ const GOAL_KINDS = new Set(["OWNER_ASSIGNED", "SELF_PROPOSED", "MISSION_DERIVED"
 const ORIGIN_KINDS = new Set(["OWNER", "SELF", "MISSION", "AGENT_SUGGESTION"]);
 const PRIORITY_CLASSES = new Set(["CRITICAL", "HIGH", "NORMAL", "LOW", "BACKGROUND"]);
 
+/**
+ * Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+ * independen putaran-1, AUD-P2-4): makeTask menyebar intentTemplate tanpa
+ * pagar kunci terlarang -- authProof/grant/balance bisa masuk lalu
+ * persisten lewat restart, melemahkan klaim struktural GOAL != AUTHORITY
+ * (pola yang sama sudah dipagari di prospective/longhorizon).
+ */
+const FORBIDDEN_INTENT_KEYS = Object.freeze([
+    "authProof", "authorityDecision", "grant", "capabilityGrant",
+    "executionLease", "balance", "allow", "owner", "executor",
+    "route", "trustedNode", "rootAuthority"
+]);
+const MAX_INTENT_SCAN_DEPTH = 16;
+
+function assertNoAuthorityShapedIntentFields(value, depth = 0) {
+    if (value === null || value === undefined || typeof value !== "object") return;
+    if (depth > MAX_INTENT_SCAN_DEPTH) {
+        fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate terlalu dalam untuk diverifikasi dengan aman, ditolak");
+    }
+    for (const key of Reflect.ownKeys(value)) {
+        if (typeof key === "symbol") continue;
+        if (FORBIDDEN_INTENT_KEYS.includes(key)) {
+            fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa '${key}' (di kedalaman manapun)`);
+        }
+        assertNoAuthorityShapedIntentFields(value[key], depth + 1);
+    }
+}
+
 function validateConditionSpec(spec, label) {
     if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, `${label} wajib objek`);
     if (typeof spec.kind !== "string" || typeof spec.subject !== "object" ||
@@ -79,6 +107,7 @@ function makePlan({ planId, goalRef, version = 1, steps, assumptions = [], creat
 
 function makeTask({ taskId, planRef, order, capabilityId = null, preconditions = [], postconditions = [], intentTemplate, maxAttempts = 5 }) {
     if (typeof taskId !== "string" || !taskId) fail(REASONS.INVALID_RECORD, "taskId wajib string");
+    assertNoAuthorityShapedIntentFields(intentTemplate);
     return Object.freeze({
         taskId, planRef, order, capabilityId,
         preconditions: Object.freeze(preconditions.map(c => validateConditionSpec(c, "precondition"))),

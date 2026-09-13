@@ -64,15 +64,39 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
 
     function evictLowestIfOverflow() {
         const queued = [...targets.values()].filter(t => t.state === "QUEUED");
-        if (queued.length <= bounds.MAX_QUEUED_TARGETS) return;
-        recomputeAll();
-        const victim = [...targets.values()].filter(t => t.state === "QUEUED")
-            .sort((a, b) => a.effectivePriority - b.effectivePriority)[0];
-        if (!victim) return;
-        targets.set(victim.targetId, Object.freeze({ ...victim, state: "DEFERRED" }));
-        overflowTotalCount += 1;
-        overflowJournal.push(Object.freeze({ targetId: victim.targetId, subjectRef: victim.subjectRef, deferredAt: now(), reason: "QUEUE_FULL" }));
-        if (overflowJournal.length > bounds.MAX_OVERFLOW_JOURNAL) overflowJournal.shift();
+        if (queued.length > bounds.MAX_QUEUED_TARGETS) {
+            recomputeAll();
+            const victim = [...targets.values()].filter(t => t.state === "QUEUED")
+                .sort((a, b) => a.effectivePriority - b.effectivePriority)[0];
+            if (victim) {
+                targets.set(victim.targetId, Object.freeze({ ...victim, state: "DEFERRED" }));
+                overflowTotalCount += 1;
+                overflowJournal.push(Object.freeze({ targetId: victim.targetId, subjectRef: victim.subjectRef, deferredAt: now(), reason: "QUEUE_FULL" }));
+                if (overflowJournal.length > bounds.MAX_OVERFLOW_JOURNAL) overflowJournal.shift();
+            }
+        }
+
+        // Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+        // independen putaran-1, AUD-P1-3): demosi ke DEFERRED tidak pernah
+        // MENGHAPUS entri dari targets/targetIdByKey/supportingSignals --
+        // pemanggil dengan banyak subjectRef berbeda bisa menumbuhkan
+        // ketiganya tanpa batas walau MAX_QUEUED_TARGETS terjaga (DEFERRED
+        // dan DONE tidak pernah dihitung terhadapnya). RUNNING tidak pernah
+        // dipurge -- itu pekerjaan aktif.
+        if (targets.size > bounds.MAX_TOTAL_TARGETS) {
+            const purgeRank = { DONE: 0, DEFERRED: 1, QUEUED: 2 };
+            const candidate = [...targets.values()].filter(t => t.state !== "RUNNING")
+                .sort((a, b) => {
+                    const rankDiff = purgeRank[a.state] - purgeRank[b.state];
+                    if (rankDiff !== 0) return rankDiff;
+                    return (a.lastComputedAtMs ?? a.admittedAt) - (b.lastComputedAtMs ?? b.admittedAt);
+                })[0];
+            if (candidate) {
+                targets.delete(candidate.targetId);
+                targetIdByKey.delete(targetKey(candidate.subjectRef, candidate.workKind));
+                supportingSignals.delete(candidate.targetId);
+            }
+        }
     }
 
     /** AT-1/AT-2/AT-3: kelas ditentukan HANYA di sini lewat policy.js. */

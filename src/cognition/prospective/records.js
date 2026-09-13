@@ -77,6 +77,21 @@ function assertSafePayloadRef(value, depth = 0) {
     if (Array.isArray(value) && value.length > BOUNDS.MAX_PAYLOAD_ARRAY_LENGTH) {
         fail(REASONS.PAYLOAD_TOO_LARGE, "panjang array pada payloadRef melebihi batas");
     }
+    // Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+    // independen putaran-1, AUD-P1-2): walker ini hanya memeriksa kunci OWN
+    // (Reflect.ownKeys), jadi `Object.create(proto)` dengan `proto.toJSON`
+    // warisan lolos tanpa terdeteksi (nol kunci own) -- lalu JSON.stringify
+    // memanggil toJSON warisan itu dan memalsukan capabilityId/authProof.
+    // Kontrak data murni: instance kelas/prototype ganjil ditolak, sama
+    // seperti core/envelope.js -- TAPI TIDAK untuk array (Array.prototype
+    // bukan Object.prototype, itu sah).
+    if (!Array.isArray(value)) {
+        const proto = Object.getPrototypeOf(value);
+        if (proto !== Object.prototype && proto !== null) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED,
+                "payloadRef tidak boleh berupa instance kelas (kontrak data murni, termasuk toJSON warisan)");
+        }
+    }
     for (const key of Reflect.ownKeys(value)) {
         if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa kunci Symbol");
         if (FORBIDDEN_PAYLOAD_KEYS.includes(key)) {
@@ -88,6 +103,22 @@ function assertSafePayloadRef(value, depth = 0) {
         }
         assertSafePayloadRef(value[key], depth + 1);
     }
+}
+
+/**
+ * Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+ * independen putaran-1, AUD-P1-1): validatePayloadRef sebelumnya
+ * mengembalikan salinan JSON.parse yang TIDAK di-freeze sama sekali --
+ * makeReminder/makeWakeEvent hanya freeze SATU LEVEL (Object.freeze pada
+ * record itu sendiri), jadi `reminder.payloadRef.capabilityId = "X"`
+ * (mutasi SETELAH validasi) berhasil menyuntikkan kunci terlarang ke
+ * WakeEvent yang benar-benar ditembakkan. Freeze rekursif di sini menutup
+ * jalur itu -- sama seperti deepFreeze di core/envelope.js.
+ */
+function deepFreeze(value) {
+    if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+    for (const key of Object.keys(value)) deepFreeze(value[key]);
+    return Object.freeze(value);
 }
 
 /** PM-1: payloadRef adalah REFERENSI saja — menolak materi eksekusi/fungsi. */
@@ -105,7 +136,7 @@ function validatePayloadRef(payloadRef) {
     // payloadRef non-null yang sah gagal dengan ReferenceError. Dihapus;
     // pemeriksaan kunci terlarang DI KEDALAMAN MANAPUN sudah dilakukan
     // assertSafePayloadRef sebelum baris ini.
-    return JSON.parse(serialized);
+    return deepFreeze(JSON.parse(serialized));
 }
 
 function makeReminder({ reminderId, ownerRef = null, trigger, payloadRef = null, wakeClass, origin = { kind: "SELF" }, nowIso }) {
