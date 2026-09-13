@@ -208,6 +208,12 @@ async function createSelfModel({
         if (typeof evidenceRef !== "string" || evidenceRef.length === 0) {
             fail(REASONS.INVALID_OUTCOME, "evidenceRef wajib ada (SM-A4)");
         }
+        // Bug review independen (audit putaran-10, AUD10-P2-1): `at` tidak
+        // pernah disaring -- BigInt di dalamnya lolos lalu meledakkan
+        // JSON.stringify di saveSuccessWindows() saat persist().
+        if (typeof at === "bigint") {
+            fail(REASONS.INVALID_OUTCOME, "'at' tidak boleh BigInt (tidak dapat diserialisasi)");
+        }
         if (!safeCall(() => capabilityRegistry.has(capabilityId))) {
             fail(REASONS.UNKNOWN_CAPABILITY,
                 `capability '${capabilityId}' tidak terdaftar, outcome ditolak`);

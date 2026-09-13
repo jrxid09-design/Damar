@@ -25,11 +25,14 @@ const { computeEffectivePriority, initCredits, pickOne, mapToGovernorPriority } 
 // stateful juga membuat dedup/rate-accounting non-deterministik. subjectRef
 // hanya pernah berbentuk {entityId} atau {relationId} (sama seperti
 // worldmodel/query.js's subjectKeyOf); kunci dibangun dari field itu saja.
+// Bug review independen (audit putaran-10, AUD10-P2-3): versi putaran-9 tidak
+// memvalidasi bentuk subjectRef -- dua subjectRef yang BEDA tapi sama-sama
+// tidak punya entityId/relationId string keduanya jatuh ke `relation:undefined`,
+// menggabungkan target/review yang sebenarnya tidak terkait. Ditolak tertutup.
 function targetKey(subjectRef, workKind) {
-    const subjectKey = subjectRef && subjectRef.entityId
-        ? `entity:${subjectRef.entityId}`
-        : `relation:${subjectRef && subjectRef.relationId}`;
-    return `${subjectKey}::${workKind}`;
+    if (typeof subjectRef?.entityId === "string") return `entity:${subjectRef.entityId}::${workKind}`;
+    if (typeof subjectRef?.relationId === "string") return `relation:${subjectRef.relationId}::${workKind}`;
+    fail(REASONS.INVALID_RECORD, "subjectRef wajib { entityId } atau { relationId } string");
 }
 
 async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bounds = BOUNDS, governorPort = null } = {}) {

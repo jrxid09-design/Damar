@@ -71,6 +71,14 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         if (!spec.origin || !ORIGIN_KINDS.has(spec.origin.kind)) {
             fail(REASONS.INVALID_RECORD, "origin.kind tidak dikenal");
         }
+        // Bug review independen (audit putaran-10, AUD10-P1-2): goalId
+        // pemanggil (spec.goalId) dulu langsung di-set tanpa cek tabrakan --
+        // pengiriman ulang goalId yang sudah ada (replay lintas-node)
+        // menimpa goal terminal (ABANDONED/SATISFIED/SUPERSEDED) kembali ke
+        // PROPOSED, melewati G-8 (finalitas state terminal).
+        if (spec.goalId && goals.has(spec.goalId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `goalId '${spec.goalId}' sudah ada`);
+        }
         enforceCreationRate(spec.origin.kind);
 
         // Bug diketemukan review independen (Codex, putaran ke-4): depth
@@ -176,6 +184,12 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function createCommitment(spec) {
+        // Bug review independen (audit putaran-10, AUD10-P1-2): replay dari
+        // commitmentId yang sudah ada (mis. sudah MET) menimpanya kembali ke
+        // OPEN, melewati finalitas state terminal.
+        if (spec.commitmentId && commitments.has(spec.commitmentId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `commitmentId '${spec.commitmentId}' sudah ada`);
+        }
         let openCount = 0;
         for (const c of commitments.values()) if (c.state === "OPEN") openCount++;
         if (openCount >= bounds.MAX_OPEN_COMMITMENTS) {
@@ -211,6 +225,12 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function createPlan(spec) {
+        // Bug review independen (audit putaran-10, AUD10-P1-2): replay dari
+        // planId yang sudah ada menimpanya kembali ke state DRAFT, membuang
+        // invalidatedBy yang sudah tercatat.
+        if (spec.planId && plans.has(spec.planId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `planId '${spec.planId}' sudah ada`);
+        }
         if ((spec.steps ?? []).length > bounds.MAX_STEPS_PER_PLAN) {
             fail(REASONS.PLAN_STEP_LIMIT_EXCEEDED, "jumlah langkah rencana melebihi batas");
         }
@@ -262,6 +282,13 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function createTask(spec) {
+        // Bug review independen (audit putaran-10, AUD10-P1-2): replay dari
+        // taskId yang sudah ada mengganti task (termasuk yang sudah
+        // ATTEMPTS_EXCEEDED/DONE) dengan attempts:0/state:PENDING baru,
+        // melewati batas percobaan dan finalitas state terminal.
+        if (spec.taskId && tasks.has(spec.taskId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `taskId '${spec.taskId}' sudah ada`);
+        }
         // Bug review independen (audit putaran-6, W7R6-P2-2): validasi/bangun
         // record DULU (sama seperti createCommitment), baru kompaksi+simpan.
         // Bug review independen (audit putaran-9, AUD9-P2-4): `Math.min(spec.
