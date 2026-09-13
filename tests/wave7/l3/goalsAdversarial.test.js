@@ -83,6 +83,27 @@ test("GL-repair-1: the total-goal retention cap is enforced even when no goal is
     assertThrowsReason(() => ge.proposeGoal(baseGoalSpec()), "GOAL_RETENTION_LIMIT_EXCEEDED");
 });
 
+test("GL-repair-2: evicting a terminal child goal decrements its parent's child count (Codex P2 round 8)", async () => {
+    let t = 0;
+    const clock = { nowMs: () => t++ };
+    const ge = await createGoalEngine({
+        clock, bounds: { ...BOUNDS, MAX_TOTAL_GOALS_RETAINED: 3, MAX_CHILDREN_PER_GOAL: 1, MAX_GOAL_CREATION_RATE_PER_MINUTE: 1000 }
+    });
+    const parent = ge.proposeGoal(baseGoalSpec());
+    const child = ge.proposeGoal(baseGoalSpec({ parentGoalId: parent.goalId }));
+    ge.transition(child.goalId, "supersede", { actorKind: "OWNER", reason: "no longer needed" }); // oldest terminal
+    ge.proposeGoal(baseGoalSpec()); // fillerA (unrelated), size -> 3
+
+    // Retention cap (3) is hit here -> evicts the oldest terminal (child).
+    // If childCounts for the parent isn't decremented too, MAX_CHILDREN_PER_GOAL
+    // (1) wrongly still looks full even though the child is gone.
+    const fillerB = ge.proposeGoal(baseGoalSpec()); // evicts `child`, size stays 3
+    ge.transition(fillerB.goalId, "supersede", { actorKind: "OWNER", reason: "no longer needed" }); // new oldest terminal, feeds the next retention check
+
+    assert.doesNotThrow(() => ge.proposeGoal(baseGoalSpec({ parentGoalId: parent.goalId })),
+        "childCounts induk harus diturunkan saat anak terminalnya dievict");
+});
+
 test("GL-A5: immortal goal — terminal states are terminal, cannot be reactivated", async () => {
     const ge = await createGoalEngine();
     const g = ge.proposeGoal(baseGoalSpec());

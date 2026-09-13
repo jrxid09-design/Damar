@@ -982,3 +982,21 @@ test("C0.1-repair: a direct append() with no envelopeFields defaults to the curr
     assert.equal(row.schemaVersion, 2, "append() langsung tidak boleh menulis skema lama (1) secara diam-diam");
     assert.equal(row.epistemicClass, "UNKNOWN", "default epistemicClass wajib UNKNOWN, bukan null");
 });
+
+test("C0.1-repair2: journal integrity check detects tampering of the v2 epistemicClass field (Codex P1 round 8)", async () => {
+    const store = createMemoryAccStore();
+    const core = makeCore(store, acc.manualClock(1_000_000));
+    await core.append("TOOL_SUCCEEDED", "test", "SYSTEM_EVENT", { ok: true },
+        { schemaVersion: 2, epistemicClass: "OBSERVED" });
+
+    // Simulate a corrupted read: the persisted hash never changed, but the
+    // stored epistemicClass value did.
+    const realAllEvents = store.allEvents.bind(store);
+    const tamperedStore = {
+        ...store,
+        allEvents: async () => (await realAllEvents()).map(r => ({ ...r, epistemicClass: "PREDICTED" }))
+    };
+    const tamperedCore = makeCore(tamperedStore, acc.manualClock(1_000_000));
+    const verdict = await tamperedCore.verifyJournalIntegrity();
+    assert.equal(verdict.ok, false, "mengubah epistemicClass baris v2 harus terdeteksi oleh rantai hash");
+});

@@ -99,6 +99,32 @@ test("W7-L7 convergence 21: L1-R1 closure — downgrade and eviction audit event
         "penurunan selfBelief harus terekam ke Audit Ledger");
 });
 
+test("W7-L7 repair: audit events emitted in one cycle are capped at MAX_AUDIT_EVENTS_PER_CYCLE (Codex P2 round 8)", async () => {
+    const { BOUNDS } = require("../../../src/cognition/longhorizon/bounds");
+    const N = 6;
+    const descriptors = {};
+    for (let i = 0; i < N; i++) descriptors[`cap.${i}`] = { kind: "tool" };
+    const registry = fakeRegistry(descriptors);
+    const auditEvents = [];
+    const fakeLedger = { append: (e) => auditEvents.push(e) };
+    let t = 1000;
+    const clock = { nowMs: () => t };
+    const lh = await createLongHorizonCycle({
+        mode: "shadow", capabilityRegistry: registry, clock, auditLedger: fakeLedger,
+        bounds: { ...BOUNDS, MAX_AUDIT_EVENTS_PER_CYCLE: 2 }
+    });
+
+    for (const id of Object.keys(descriptors)) {
+        lh.lanes.selfModel.ingestAvailability({ capabilityId: id, availability: "AVAILABLE", generation: 1, observedAtMs: t });
+    }
+    await lh.cycle(); // all N become USABLE (baseline)
+
+    t += 60_000; // past AVAILABILITY_TTL_MS -> all N go STALE -> UNKNOWN (a downgrade each)
+    await lh.cycle();
+
+    assert.ok(auditEvents.length <= 2, "audit ledger tidak boleh menerima lebih dari MAX_AUDIT_EVENTS_PER_CYCLE event per siklus");
+});
+
 test("W7-L7 convergence 22: no persisted cognition state can restore execution permission — no authority-shaped field anywhere in the projection", async () => {
     const { AUTHORITY_SHAPED_KEYS } = require("../../../src/cognition/longhorizon");
     const lh = await createLongHorizonCycle({ mode: "governed", capabilityRegistry: fakeRegistry() });

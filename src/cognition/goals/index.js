@@ -96,7 +96,16 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
                 .filter(g => ["SATISFIED", "ABANDONED", "SUPERSEDED"].includes(g.state))
                 .sort((a, b) => Date.parse(a.lastTransitionAt) - Date.parse(b.lastTransitionAt));
             if (terminal[0]) {
-                goals.delete(terminal[0].goalId);
+                const evicted = terminal[0];
+                goals.delete(evicted.goalId);
+                // Bug review independen (Codex putaran-8): saat retensi
+                // mengevict anak terminal, entri induknya di childCounts
+                // dibiarkan -- dengan MAX_CHILDREN_PER_GOAL kecil, proposal
+                // anak baru di bawah induk itu ditolak "penuh" padahal anak
+                // yang tersisa sudah tidak ada lagi.
+                if (evicted.parentGoalId) {
+                    childCounts.set(evicted.parentGoalId, Math.max(0, (childCounts.get(evicted.parentGoalId) ?? 1) - 1));
+                }
             } else {
                 fail(REASONS.GOAL_RETENTION_LIMIT_EXCEEDED,
                     `retensi goal melebihi batas (${bounds.MAX_TOTAL_GOALS_RETAINED}) dan tidak ada goal terminal untuk dievict`);

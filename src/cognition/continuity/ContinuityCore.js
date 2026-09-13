@@ -739,7 +739,7 @@ function setToolReliabilitySource(fn) {
 }
 
 function sha256Row(row) {
-    const material = canonicalJson({
+    const fields = {
         eventId: row.eventId, type: row.type,
         occurredAt: row.occurredAt, monotonic: row.monotonic,
         source: row.source, provenance: row.provenance,
@@ -749,7 +749,18 @@ function sha256Row(row) {
         confidence: row.confidence ?? 1,
         payload: row.payload ?? {},
         prevHash: row.prevHash ?? null
-    });
+    };
+    // Bug review independen (Codex putaran-8): field v2 (schemaVersion/
+    // epistemicClass) sebelumnya TIDAK PERNAH masuk materi hash sama sekali,
+    // jadi korupsi klasifikasi epistemik tidak terdeteksi verifyJournalIntegrity().
+    // Baris v1 lama tetap di-hash PERSIS seperti semula (kompatibilitas
+    // historis, lihat komentar di atas); hanya baris v2 baru menyertakan
+    // kedua field ini.
+    if (row.schemaVersion === 2) {
+        fields.schemaVersion = row.schemaVersion;
+        fields.epistemicClass = row.epistemicClass ?? null;
+    }
+    const material = canonicalJson(fields);
     return require("../core/envelope").sha256(material);
 }
 
