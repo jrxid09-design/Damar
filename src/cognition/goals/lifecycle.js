@@ -36,7 +36,18 @@ function appendTransitionLog(log, entry) {
  * lain (`actorKind`, `reason`, `evidenceRef`) wajib untuk SEMUA transisi (G-7).
  */
 function transitionGoal(goal, action, { actorKind, reason, evidenceRef = null, evidenceTier = null, nowIso }) {
-    if (!ACTOR_KINDS.has(actorKind)) fail(REASONS.INVALID_TRANSITION, `actorKind '${actorKind}' tidak dikenal`);
+    // Bug review independen (audit putaran-25, AUD25-P2-1): `action`
+    // mentah dipakai sebagai kunci properti (`GOAL_TRANSITIONS[action]`)
+    // DAN diinterpolasi ke pesan error -- objek hostile dengan
+    // toString/Symbol.toPrimitive tereksekusi di KEDUA jalur (ToPropertyKey
+    // saat indexing, lalu lagi di template literal), dan Symbol murni
+    // meledakkan TypeError mentah di interpolasi sebelum fail() sempat
+    // menolaknya dengan domain error. Dinormalisasi ke kunci aman sekali,
+    // dipakai untuk indexing MAUPUN pesan.
+    const actionKey = typeof action === "string" ? action : "";
+    if (!ACTOR_KINDS.has(actorKind)) {
+        fail(REASONS.INVALID_TRANSITION, `actorKind '${typeof actorKind === "string" ? actorKind : typeof actorKind}' tidak dikenal`);
+    }
     // Bug review independen (audit putaran-13, AUD13-P2-3): reason/
     // evidenceRef diteruskan mentah ke entry log transisi -- BigInt di
     // salah satunya meledakkan JSON.stringify saat persist(), dan ikut
@@ -48,17 +59,17 @@ function transitionGoal(goal, action, { actorKind, reason, evidenceRef = null, e
     if (TERMINAL_GOAL_STATES.has(goal.state)) {
         fail(REASONS.INVALID_TRANSITION, `status terminal '${goal.state}' bersifat final (G-8)`);
     }
-    const rule = GOAL_TRANSITIONS[action];
-    if (!rule) fail(REASONS.INVALID_TRANSITION, `aksi '${action}' tidak dikenal`);
+    const rule = GOAL_TRANSITIONS[actionKey];
+    if (!rule) fail(REASONS.INVALID_TRANSITION, `aksi '${actionKey}' tidak dikenal`);
     if (!rule.from.includes(goal.state)) {
-        fail(REASONS.INVALID_TRANSITION, `tidak bisa '${action}' dari status '${goal.state}'`);
+        fail(REASONS.INVALID_TRANSITION, `tidak bisa '${actionKey}' dari status '${goal.state}'`);
     }
 
-    if (action === "succeed" && evidenceTier !== "T1") {
+    if (actionKey === "succeed" && evidenceTier !== "T1") {
         // G-6: T2 (hasil eksekusi) tidak cukup untuk SATISFIED.
         fail(REASONS.SATISFACTION_REQUIRES_T1, "SATISFIED wajib bukti T1, T2 tidak cukup");
     }
-    if (action === "activate" && goal.ownerApproval.state === "REQUIRED") {
+    if (actionKey === "activate" && goal.ownerApproval.state === "REQUIRED") {
         fail(REASONS.APPROVAL_REQUIRED, "goal belum disetujui pemilik");
     }
 
@@ -79,10 +90,14 @@ const COMMITMENT_TRANSITIONS = Object.freeze({
 });
 
 function transitionCommitment(commitment, action, { evidenceRef = null } = {}) {
-    const rule = COMMITMENT_TRANSITIONS[action];
-    if (!rule) fail(REASONS.INVALID_TRANSITION, `aksi commitment '${action}' tidak dikenal`);
+    // Bug review independen (audit putaran-25, AUD25-P2-1): sama seperti
+    // transitionGoal -- `action` mentah dipakai sebagai kunci properti
+    // DAN diinterpolasi.
+    const actionKey = typeof action === "string" ? action : "";
+    const rule = COMMITMENT_TRANSITIONS[actionKey];
+    if (!rule) fail(REASONS.INVALID_TRANSITION, `aksi commitment '${actionKey}' tidak dikenal`);
     if (!rule.from.includes(commitment.state)) {
-        fail(REASONS.INVALID_TRANSITION, `tidak bisa '${action}' dari status '${commitment.state}'`);
+        fail(REASONS.INVALID_TRANSITION, `tidak bisa '${actionKey}' dari status '${commitment.state}'`);
     }
     // Bug review independen (audit putaran-13, AUD13-P2-3): evidenceRef
     // diteruskan mentah -- BigInt meledakkan JSON.stringify saat persist().
@@ -109,13 +124,16 @@ const TASK_TRANSITIONS = Object.freeze({
 });
 
 function transitionTask(task, action) {
-    const rule = TASK_TRANSITIONS[action];
-    if (!rule) fail(REASONS.INVALID_TRANSITION, `aksi task '${action}' tidak dikenal`);
+    // Bug review independen (audit putaran-25, AUD25-P2-1): sama seperti
+    // transitionGoal/transitionCommitment.
+    const actionKey = typeof action === "string" ? action : "";
+    const rule = TASK_TRANSITIONS[actionKey];
+    if (!rule) fail(REASONS.INVALID_TRANSITION, `aksi task '${actionKey}' tidak dikenal`);
     if (!rule.from.includes(task.state)) {
-        fail(REASONS.INVALID_TRANSITION, `tidak bisa '${action}' dari status '${task.state}'`);
+        fail(REASONS.INVALID_TRANSITION, `tidak bisa '${actionKey}' dari status '${task.state}'`);
     }
     let attempts = task.attempts;
-    if (action === "execute") {
+    if (actionKey === "execute") {
         attempts += 1;
         if (attempts > task.maxAttempts) {
             fail(REASONS.ATTEMPTS_EXCEEDED, `melebihi maxAttempts (${task.maxAttempts})`);

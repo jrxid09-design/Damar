@@ -170,6 +170,26 @@ test("SM-repair-10: a legacy successWindow still dedups a replay even after enou
     assert.equal(a.successWindow.successes, 0, "replaying a legacy evidenceRef must stay a no-op even after it has scrolled out of both history and appliedEvidenceRefs' unseeded state");
 });
 
+test("SM-repair-11: hostile toString on tier/outcome/health-state never executes, and Symbol variants are rejected as domain errors, not raw TypeErrors (independent audit AUD25-P2-1)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const sm = await createSelfModel({ capabilityRegistry: registry });
+    let calledTier = 0;
+    const evilTier = { toString() { calledTier++; return "T1"; } };
+    assertThrowsReason(() => sm.ingestOutcome({ capabilityId: "cap.x", tier: evilTier, outcome: "SUCCESS", at: "t0", evidenceRef: "E0" }), "INVALID_OUTCOME");
+    assert.equal(calledTier, 0, "tier's toString must never be invoked before the enum check");
+    assertThrowsReason(() => sm.ingestOutcome({ capabilityId: "cap.x", tier: Symbol("t"), outcome: "SUCCESS", at: "t0", evidenceRef: "E0" }), "INVALID_OUTCOME");
+
+    let calledOutcome = 0;
+    const evilOutcome = { toString() { calledOutcome++; return "SUCCESS"; } };
+    assertThrowsReason(() => sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: evilOutcome, at: "t0", evidenceRef: "E0" }), "INVALID_OUTCOME");
+    assert.equal(calledOutcome, 0, "outcome's toString must never be invoked before the enum check");
+
+    let calledState = 0;
+    const evilState = { toString() { calledState++; return "HEALTHY"; } };
+    assertThrowsReason(() => sm.ingestHealth({ subsystem: "s1", state: evilState }), "INVALID_OBSERVATION");
+    assert.equal(calledState, 0, "health state's toString must never be invoked before the enum check");
+});
+
 test("SM-A2: stale availability is marked STALE after TTL, never silently USABLE", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const clock = manualClock(0);

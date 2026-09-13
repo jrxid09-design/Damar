@@ -23,7 +23,12 @@ function makeAssessment({ assessmentId, subjectRef, claim, evidenceQuality, nowM
 }
 
 function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = { tokens: 0, ms: 0 }, bounds }) {
-    if (!TRIGGERS.has(trigger)) fail(REASONS.INVALID_RECORD, `trigger '${trigger}' tidak dikenal`);
+    // Bug review independen (audit putaran-25, AUD25-ADV-1): interpolasi
+    // `${trigger}` mentah di pesan error meledakkan TypeError untuk Symbol
+    // -- latent sampai sekarang karena index.js's openReview() sudah
+    // menjaga TRIGGERS sebelum sampai sini (putaran-24), tapi builder ini
+    // sendiri wajib aman untuk pemanggil lain/masa depan.
+    if (!TRIGGERS.has(trigger)) fail(REASONS.INVALID_RECORD, `trigger '${typeof trigger === "string" ? trigger : typeof trigger}' tidak dikenal`);
     // Bug review independen (audit putaran-15, AUD15-P2-3): default `= []`
     // hanya berlaku untuk undefined, bukan null eksplisit -- findings:null/
     // proposals:null lolos lalu melempar TypeError mentah (bukan
@@ -48,7 +53,9 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
     }
     for (const p of proposals) {
         if (!p || typeof p !== "object") fail(REASONS.INVALID_RECORD, "setiap proposal wajib objek");
-        if (!PROPOSAL_KINDS.has(p.kind)) fail(REASONS.INVALID_RECORD, `proposal.kind '${p.kind}' tidak dikenal`);
+        // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
+        // `${p.kind}` mentah meledakkan TypeError kalau p.kind Symbol.
+        if (!PROPOSAL_KINDS.has(p.kind)) fail(REASONS.INVALID_RECORD, `proposal.kind '${typeof p.kind === "string" ? p.kind : typeof p.kind}' tidak dikenal`);
     }
     for (const f of findings) {
         if (!f || typeof f !== "object") fail(REASONS.INVALID_RECORD, "setiap finding wajib objek");

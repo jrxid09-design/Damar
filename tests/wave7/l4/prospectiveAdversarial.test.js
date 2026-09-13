@@ -34,6 +34,15 @@ test("PM-repair-30: an ON_STATE trigger with subject:null is rejected instead of
     }), "INVALID_TRIGGER");
 });
 
+test("PM-repair-31: a hostile toString on trigger.kind never executes, and a Symbol trigger.kind is rejected as a domain error, not a raw TypeError (independent audit AUD25-P2-1)", async () => {
+    const pm = await createProspectiveMemory();
+    let called = 0;
+    const evil = { toString() { called++; return "AT"; } };
+    assertThrowsReason(() => pm.arm({ reminderId: "R", wakeClass: "NOTIFY_OWNER", trigger: { kind: evil, at: new Date(1).toISOString() } }), "INVALID_TRIGGER");
+    assert.equal(called, 0, "trigger.kind's toString must never be invoked before the enum check");
+    assertThrowsReason(() => pm.arm({ reminderId: "R2", wakeClass: "NOTIFY_OWNER", trigger: { kind: Symbol("k") } }), "INVALID_TRIGGER");
+});
+
 test("PM-A1: reminder carrying executable/authority-shaped payload is rejected", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.arm({

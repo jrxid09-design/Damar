@@ -57,6 +57,28 @@ test("MC-repair-9: openReview(null)/recordCalibration(null) are rejected as INVA
     assertThrowsReason(() => mc.recordCalibration(null), "INVALID_RECORD");
 });
 
+test("MC-repair-11: hostile toString on proposal.kind/outcomeTier/reviewId never executes, and Symbol variants are rejected as domain errors, not raw TypeErrors (independent audit AUD25-P2-1)", async () => {
+    const mc = await createMetacognition();
+    let calledKind = 0;
+    const evilKind = { toString() { calledKind++; return "APPLY_CHANGE"; } };
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, proposals: [{ kind: evilKind }] }), "INVALID_RECORD");
+    assert.equal(calledKind, 0, "proposal.kind's toString must never be invoked before the enum check");
+
+    let calledTier = 0;
+    const evilTier = { toString() { calledTier++; return "T1"; } };
+    assertThrowsReason(() => mc.recordCalibration({ outcomeTier: evilTier, outcomeRef: "r1" }), "INVALID_OUTCOME");
+    assert.equal(calledTier, 0, "outcomeTier's toString must never be invoked before the enum check");
+    assert.throws(() => mc.recordCalibration({ outcomeTier: Symbol("t"), outcomeRef: "r1" }), (err) => {
+        assert.equal(err.reason, "INVALID_OUTCOME");
+        return true;
+    });
+
+    let calledReviewId = 0;
+    const evilReviewId = { toString() { calledReviewId++; return "nonexistent"; } };
+    assertThrowsReason(() => mc.applyProposal(evilReviewId, 0), "UNKNOWN_REVIEW");
+    assert.equal(calledReviewId, 0, "an unknown reviewId's toString must never be invoked while building the error message");
+});
+
 test("MC-A1: fake confidence (model writes 0.99) is impossible — no API accepts a raw value", async () => {
     const mc = await createMetacognition();
     const a = mc.assess({ entityId: "e1" }, "claim", { value: 0.99, sourceCount: 0 }); // "value" in input ignored

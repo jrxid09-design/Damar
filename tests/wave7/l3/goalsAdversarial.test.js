@@ -546,6 +546,31 @@ test("GL-repair-40: proposeGoal rejects a successCondition with subject:null ins
     })));
 });
 
+test("GL-repair-41: a hostile toString on kind/action never executes, and a Symbol kind/action is rejected as a domain error, not a raw TypeError (independent audit AUD25-P2-1)", async () => {
+    const ge = await createGoalEngine();
+    let called = 0;
+    const evilKind = { toString() { called++; return "OWNER_ASSIGNED"; } };
+    assertThrowsReason(() => ge.proposeGoal(baseGoalSpec({ kind: evilKind })), "INVALID_RECORD");
+    assert.equal(called, 0, "kind's toString must never be invoked before the enum check");
+    assert.throws(() => ge.proposeGoal(baseGoalSpec({ kind: Symbol("k") })), (err) => {
+        assert.equal(err.reason, "INVALID_RECORD", `expected a domain error, got ${err.constructor.name}: ${err.message}`);
+        return true;
+    });
+
+    const g = ge.proposeGoal(baseGoalSpec());
+    let calledAction = 0;
+    const evilAction = { toString() { calledAction++; return "approve"; } };
+    assert.throws(() => ge.transition(g.goalId, evilAction, { actorKind: "OWNER", reason: "r" }), (err) => {
+        assert.equal(err.reason, "INVALID_TRANSITION", `expected a domain error, got ${err.constructor.name}: ${err.message}`);
+        return true;
+    });
+    assert.equal(calledAction, 0, "action's toString must never be invoked before the transition-table lookup");
+    assert.throws(() => ge.transition(g.goalId, Symbol("a"), { actorKind: "OWNER", reason: "r" }), (err) => {
+        assert.equal(err.reason, "INVALID_TRANSITION", `expected a domain error, got ${err.constructor.name}: ${err.message}`);
+        return true;
+    });
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

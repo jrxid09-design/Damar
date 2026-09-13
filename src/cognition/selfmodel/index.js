@@ -199,11 +199,13 @@ async function createSelfModel({
         if (typeof capabilityId !== "string" || capabilityId.length === 0) {
             fail(REASONS.INVALID_OUTCOME, "capabilityId wajib string tidak kosong");
         }
+        // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
+        // `${tier}`/`${outcome}` mentah meledakkan TypeError untuk Symbol.
         if (!ALLOWED_TIERS.has(tier)) {
-            fail(REASONS.INVALID_OUTCOME, `tier '${tier}' tidak diterima, hanya T1/T2`);
+            fail(REASONS.INVALID_OUTCOME, `tier '${typeof tier === "string" ? tier : typeof tier}' tidak diterima, hanya T1/T2`);
         }
         if (!ALLOWED_OUTCOMES.has(outcome)) {
-            fail(REASONS.INVALID_OUTCOME, `outcome '${outcome}' tidak dikenal`);
+            fail(REASONS.INVALID_OUTCOME, `outcome '${typeof outcome === "string" ? outcome : typeof outcome}' tidak dikenal`);
         }
         if (typeof evidenceRef !== "string" || evidenceRef.length === 0) {
             fail(REASONS.INVALID_OUTCOME, "evidenceRef wajib ada (SM-A4)");
@@ -286,8 +288,10 @@ async function createSelfModel({
             fail(REASONS.INVALID_OBSERVATION, "subsystem wajib string tidak kosong");
         }
         const validStates = new Set(["HEALTHY", "DEGRADED", "DOWN", "UNKNOWN"]);
+        // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
+        // `${state}` mentah meledakkan TypeError untuk Symbol.
         if (!validStates.has(state)) {
-            fail(REASONS.INVALID_OBSERVATION, `state '${state}' tidak dikenal`);
+            fail(REASONS.INVALID_OBSERVATION, `state '${typeof state === "string" ? state : typeof state}' tidak dikenal`);
         }
         // Bug review independen (audit putaran-17, AUD17-P2-2): `at` tidak
         // pernah disaring seperti ingestOutcome's `at` -- BigInt di dalamnya

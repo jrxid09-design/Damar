@@ -595,6 +595,48 @@ test("WM-repair-47: a belief's contradictionSetId is reconciled when the set it 
     }
 });
 
+test("WM-repair-49: hostile toString on tier/subjectRef.entityId never executes, and a Symbol tier/attribute is rejected as a domain error, not a raw TypeError (independent audit AUD25-P2-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    let called = 0;
+    const evilTier = { toString() { called++; return "T1"; } };
+    assertThrowsReason(() => wm.ingestObservation({
+        subject: { entityId: "e1" }, attribute: "status", value: "v", sensor: { sensorId: "s1" },
+        tier: evilTier, observedAt: new Date(1).toISOString()
+    }), "INADMISSIBLE_TIER");
+    assert.equal(called, 0, "tier's toString must never be invoked before the enum check");
+    assert.throws(() => wm.ingestObservation({
+        subject: { entityId: "e1" }, attribute: "status", value: "v", sensor: { sensorId: "s1" },
+        tier: Symbol("t"), observedAt: new Date(1).toISOString()
+    }), (err) => { assert.equal(err.reason, "INADMISSIBLE_TIER"); return true; });
+
+    let calledEntityId = 0;
+    const evilEntityId = { toString() { calledEntityId++; return "e1"; } };
+    const q = wm.query({ subject: { entityId: evilEntityId }, attribute: "status" });
+    assert.equal(calledEntityId, 0, "a hostile entityId's toString must never be invoked while building the query key");
+    assert.equal(q.unknown, true, "a malformed (non-string) entityId must never resolve to a real belief");
+});
+
+test("WM-repair-50: an explicit negative depth/limit does not silently disable or bypass neighbors/subgraph/path/entitiesByKind (independent audit AUD25-P2-3)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    wm.declareRelation({ relationId: "r1", kind: "k", from: "e1", to: "e2" });
+    assert.equal(wm.neighbors("e1", null, -1).entities.length, 1, "neighbors with negative depth must still traverse with the default depth");
+    assert.ok(wm.subgraph(["e1"], -1).entities.some(e => e.entityId === "e2"), "subgraph with negative depth must still traverse with the default depth");
+    assert.notEqual(wm.path("e1", "e2", -1).path, null, "path with negative maxDepth must still search with the default maxDepth");
+
+    // graph.js's traversal bounds (ENTITIES_BY_KIND_LIMIT included) are not
+    // wired to createWorldModel's `bounds` override -- a pre-existing,
+    // separate limitation, not part of this fix -- so the real default
+    // (1024) must be exceeded to exercise the cap.
+    const wmMany = await createWorldModel({ bounds: { ...BOUNDS, MAX_ENTITIES_PER_SOURCE: 2000, MAX_ENTITIES: 2000 } });
+    const overLimit = BOUNDS.ENTITIES_BY_KIND_LIMIT + 50;
+    for (let i = 0; i < overLimit; i++) wmMany.declareEntity({ entityId: `d${i}`, entityKind: "device", source: "s" });
+    const r = wmMany.entitiesByKind("device", -1);
+    assert.ok(r.entities.length <= BOUNDS.ENTITIES_BY_KIND_LIMIT, `entitiesByKind with a negative limit must never return more than ENTITIES_BY_KIND_LIMIT (got ${r.entities.length})`);
+});
+
 test("WM-repair-38: entity eviction stays fast at scale -- relationDegree() must not rescan all relations per candidate (independent audit AUD20-P2-3)", async () => {
     const ENTITY_COUNT = 3000;
     const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_ENTITIES: ENTITY_COUNT, MAX_ENTITIES_PER_SOURCE: ENTITY_COUNT + 500, MAX_RELATIONS: ENTITY_COUNT * 4 } });

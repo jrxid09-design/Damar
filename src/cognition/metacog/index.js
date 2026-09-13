@@ -162,7 +162,11 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
 
     function applyProposal(reviewId, proposalIndex, cognitiveApplyPort = null) {
         const review = reviews.get(reviewId);
-        if (!review) fail(REASONS.UNKNOWN_REVIEW, `review '${reviewId}' tidak ditemukan`);
+        // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
+        // `${reviewId}` mentah meledakkan TypeError untuk Symbol/mengeksekusi
+        // toString pemanggil untuk objek, walau `reviews.get()` sendiri
+        // (pencarian Map) tidak pernah mengeksekusi apa pun.
+        if (!review) fail(REASONS.UNKNOWN_REVIEW, `review '${typeof reviewId === "string" ? reviewId : typeof reviewId}' tidak ditemukan`);
         const proposal = review.proposals[proposalIndex];
         if (!proposal) fail(REASONS.INVALID_RECORD, "proposal index tidak ditemukan");
 
@@ -191,7 +195,7 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         // meledakkan `spec.outcomeTier` jadi TypeError mentah.
         if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
         if (!ADMISSIBLE_OUTCOME_TIERS.has(spec.outcomeTier)) {
-            fail(REASONS.INVALID_OUTCOME, `outcomeTier '${spec.outcomeTier}' tidak admissible untuk kalibrasi`);
+            fail(REASONS.INVALID_OUTCOME, `outcomeTier '${typeof spec.outcomeTier === "string" ? spec.outcomeTier : typeof spec.outcomeTier}' tidak admissible untuk kalibrasi`);
         }
         if (typeof spec.outcomeRef !== "string" || !spec.outcomeRef) {
             fail(REASONS.INVALID_OUTCOME, "outcomeRef wajib ada dan bisa diselesaikan");

@@ -37,6 +37,43 @@ test("AT-repair-18: a hostile evidenceRef toString is never invoked, and two dis
         "two distinct object evidenceRefs must count as two distinct corroboration pairs, same as two distinct string evidenceRefs");
 });
 
+test("AT-repair-19: hostile toString on workKind/sourceKind/targetId never executes, Symbol variants are rejected as domain errors, and mapToGovernorPriority never coerces a hostile priorityClass (independent audit AUD25-P2-1/AUD25-ADV-2)", async () => {
+    const ae = await createAttentionEconomy();
+    let calledWorkKind = 0;
+    const evilWorkKind = { toString() { calledWorkKind++; return "PERCEIVE"; } };
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef: { entityId: "e1" } }, evilWorkKind), "INVALID_RECORD");
+    assert.equal(calledWorkKind, 0, "workKind's toString must never be invoked before the enum check");
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef: { entityId: "e1" } }, Symbol("w")), "INVALID_RECORD");
+
+    let calledSourceKind = 0;
+    const evilSourceKind = { toString() { calledSourceKind++; return "SENSOR"; } };
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: evilSourceKind, sourceId: "s1", subjectRef: { entityId: "e1" } }, "PERCEIVE"), "INVALID_RECORD");
+    assert.equal(calledSourceKind, 0, "sourceKind's toString must never be invoked before the enum check");
+
+    let calledTargetId = 0;
+    const evilTargetId = { toString() { calledTargetId++; return "nonexistent"; } };
+    assertThrowsReason(() => ae.preempt(evilTargetId), "UNKNOWN_TARGET");
+    assert.equal(calledTargetId, 0, "an unknown targetId's toString must never be invoked while building the error message");
+
+    let calledPriority = 0;
+    const evilPriority = { toString() { calledPriority++; return "CRITICAL"; } };
+    assert.equal(ae.toGovernorPriority(evilPriority), "LOW", "a non-string priorityClass must fall back to LOW without coercion");
+    assert.equal(calledPriority, 0, "priorityClass's toString must never be invoked while mapping to a governor priority");
+    assert.equal(ae.governorMappingAudit().some(e => e.priorityClass === evilPriority), false, "the raw hostile object must never be logged to the audit trail");
+});
+
+test("AT-repair-20: two distinct NESTED-object evidenceRefs still count as two distinct corroboration pairs, not just flat ones (independent audit AUD25-P2-2)", async () => {
+    const control = await createAttentionEconomy();
+    const { targetId: tControl } = control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "A" }, "PERCEIVE");
+    control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "B" }, "PERCEIVE");
+
+    const nested = await createAttentionEconomy();
+    const { targetId: tNested } = nested.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: { nested: { x: 1 } } }, "PERCEIVE");
+    nested.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: { nested: { x: 2 } } }, "PERCEIVE");
+    assert.equal(nested.getTarget(tNested).effectivePriority, control.getTarget(tControl).effectivePriority,
+        "two distinct nested-object evidenceRefs must count as two distinct corroboration pairs, same as two distinct string evidenceRefs");
+});
+
 test("AT-A1: salience flooding from one sensor is rate-capped and the source marked noisy", async () => {
     const ae = await createAttentionEconomy({ bounds: { ...BOUNDS, MAX_SIGNALS_PER_SOURCE_PER_MINUTE: 3 } });
     for (let i = 0; i < 3; i++) {

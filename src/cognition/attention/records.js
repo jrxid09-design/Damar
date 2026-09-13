@@ -24,7 +24,9 @@ function deepFreeze(value, seen = new WeakSet()) {
 
 function makeSignal({ signalId, sourceKind, sourceId, subjectRef, proposedUrgency = 0, evidenceRef = null, createdAtMs, expiresAtMs = null }) {
     if (typeof signalId !== "string" || !signalId) fail(REASONS.INVALID_RECORD, "signalId wajib string");
-    if (!SOURCE_KINDS.has(sourceKind)) fail(REASONS.INVALID_RECORD, `sourceKind '${sourceKind}' tidak dikenal`);
+    // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
+    // `${sourceKind}` mentah meledakkan TypeError untuk Symbol.
+    if (!SOURCE_KINDS.has(sourceKind)) fail(REASONS.INVALID_RECORD, `sourceKind '${typeof sourceKind === "string" ? sourceKind : typeof sourceKind}' tidak dikenal`);
     if (typeof sourceId !== "string" || !sourceId) fail(REASONS.INVALID_RECORD, "sourceId wajib string");
 
     return Object.freeze({

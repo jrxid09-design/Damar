@@ -51,7 +51,11 @@ function resolveContradictionSet(list, contradictionSetId, ruleId, nowIso) {
         fail(REASONS.SILENT_RESOLUTION_REJECTED, "resolusi kontradiksi wajib menyertakan ruleId");
     }
     const idx = list.findIndex(c => c.contradictionSetId === contradictionSetId);
-    if (idx === -1) fail(REASONS.UNKNOWN_ENTITY, `contradictionSetId '${contradictionSetId}' tidak ditemukan`);
+    // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
+    // `${contradictionSetId}` mentah meledakkan TypeError untuk Symbol.
+    if (idx === -1) {
+        fail(REASONS.UNKNOWN_ENTITY, `contradictionSetId '${typeof contradictionSetId === "string" ? contradictionSetId : typeof contradictionSetId}' tidak ditemukan`);
+    }
 
     const resolved = Object.freeze({
         ...list[idx], status: "RESOLVED", resolution: Object.freeze({ ruleId, at: nowIso })

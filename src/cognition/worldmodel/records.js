@@ -75,7 +75,9 @@ function makeObservation({ observationId, subject, attribute, value, sensor, fra
         fail(REASONS.SIMULATION_NOT_ADMISSIBLE, "rekaman simulasi ditolak di ingest (W-2)");
     }
     if (!ADMISSIBLE_TIERS.has(tier)) {
-        fail(REASONS.INADMISSIBLE_TIER, `tier '${tier}' tidak admissible untuk ingest (hanya T1/T2/T4)`);
+        // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
+        // `${tier}` mentah meledakkan TypeError untuk Symbol.
+        fail(REASONS.INADMISSIBLE_TIER, `tier '${typeof tier === "string" ? tier : typeof tier}' tidak admissible untuk ingest (hanya T1/T2/T4)`);
     }
     if (!sensor || typeof sensor.sensorId !== "string" || !sensor.sensorId) {
         fail(REASONS.MISSING_SENSOR_ID, "sensor.sensorId wajib ada (W-3)");
