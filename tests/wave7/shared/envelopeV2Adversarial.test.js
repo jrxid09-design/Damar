@@ -102,17 +102,25 @@ test("W7-ENV-14: accessor properties rejected without invoking the getter", () =
     assert.equal(invoked, false, "getter tidak boleh pernah dipanggil");
 });
 
-test("W7-ENV-15: hostile Proxy rejected safely (no crash, no bypass)", () => {
+test("W7-ENV-15: hostile Proxy is neutralized safely (no crash, no bypass)", () => {
+    // Bug review independen (audit putaran-3, AUD3-P1-1): pagar sekarang
+    // membaca nilai HANYA dari `getOwnPropertyDescriptor(...).value`, tidak
+    // pernah lewat `value[key]` -- jadi trap `get` proxy ini (yang dulu
+    // ikut terpanggil lewat walk lama dan melempar) TIDAK PERNAH terpanggil
+    // sama sekali. Ini properti keamanan yang lebih kuat daripada sekadar
+    // "melempar": envelope terbentuk aman, hanya dari data yang benar-benar
+    // dideklarasikan lewat descriptor, trap get tidak pernah dieksekusi.
     const target = { a: 1 };
+    let getTrapCalled = false;
     const hostile = new Proxy(target, {
-        get() { throw new Error("hostile trap fired"); },
+        get() { getTrapCalled = true; throw new Error("hostile trap fired"); },
         ownKeys() { return ["a"]; },
         getOwnPropertyDescriptor() { return { enumerable: true, configurable: true, value: 1 }; }
     });
 
-    assert.throws(() => envelope.makeEnvelope(baseSpec({ payload: hostile })));
-    // Sengaja tidak mensyaratkan kode ACC_* spesifik di sini: syaratnya
-    // hanya bahwa proses tidak crash dan tidak ada amplop yang terbentuk.
+    const env = envelope.makeEnvelope(baseSpec({ payload: hostile }));
+    assert.equal(getTrapCalled, false, "trap get proxy tidak boleh pernah terpanggil");
+    assert.deepEqual(env.payload, { a: 1 });
 });
 
 test("W7-ENV-16: authority-shaped payload keys stay inert opaque data", () => {

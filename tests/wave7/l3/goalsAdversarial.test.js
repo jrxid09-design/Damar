@@ -132,10 +132,54 @@ test("GL-repair-4: intentTemplate accessors and post-creation mutation cannot by
     assertThrowsReason(() => ge.createTask({ planRef: p.planId, order: 1, intentTemplate: it }),
         "AUTHORITY_SHAPED_FIELD_REJECTED");
 
+    // Bug review independen (audit putaran-3, AUD3-P1-2): makeTask sekarang
+    // membangun SALINAN baru dari nilai yang tervalidasi (bukan membekukan
+    // objek asli pemanggil), jadi memutasi objek asli pemanggil setelahnya
+    // tidak berpengaruh sama sekali pada task tersimpan -- keduanya sudah
+    // menjadi struktur yang sepenuhnya independen begitu createTask kembali.
     const shared = { nested: {} };
     const t = ge.createTask({ planRef: p.planId, order: 1, intentTemplate: shared });
-    assert.throws(() => { "use strict"; shared.nested.authProof = "PROOF-INJECTED"; });
+    shared.nested.authProof = "PROOF-INJECTED"; // memutasi objek ASLI pemanggil, bukan salinan tersimpan
     assert.equal(JSON.stringify(t.intentTemplate).includes("authProof"), false);
+});
+
+test("GL-repair-5: a Proxy with consistent-but-lying traps cannot smuggle authProof via a hidden get trap (independent audit AUD3-P1-1)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+
+    const target = { safe: 1 };
+    const proxy = new Proxy(target, {
+        getPrototypeOf() { return Object.prototype; },
+        ownKeys() { return ["safe"]; },
+        getOwnPropertyDescriptor() { return { enumerable: true, configurable: true, value: 1, writable: true }; },
+        get(t2, key) { if (key === "authProof") return "PROXY-INJECTED"; return t2[key]; }
+    });
+    const t = ge.createTask({ planRef: p.planId, order: 1, intentTemplate: proxy });
+    assert.deepEqual(t.intentTemplate, { safe: 1 });
+    assert.equal(t.intentTemplate.authProof, undefined,
+        "task.intentTemplate adalah salinan polos kita sendiri -- trap get proxy tidak pernah lagi dibaca setelah createTask");
+});
+
+test("GL-repair-6: evicting a goal removes its own childCounts entry, not just the parent's counter (independent audit AUD3-P2-2)", async () => {
+    let t = 0;
+    const clock = { nowMs: () => t++ };
+    const ge = await createGoalEngine({
+        clock, bounds: { ...BOUNDS, MAX_TOTAL_GOALS_RETAINED: 2, MAX_GOAL_CREATION_RATE_PER_MINUTE: 1000 }
+    });
+    // Every parent gets its own childCounts entry the moment a child is
+    // proposed under it. Each cycle here ends with BOTH parent and child
+    // terminal, so retention always has something to evict on the next
+    // cycle's proposals -- if the evicted parent's OWN childCounts entry is
+    // never deleted, childCountsSize() grows without bound across cycles.
+    for (let i = 0; i < 20; i++) {
+        const parent = ge.proposeGoal(baseGoalSpec());
+        const child = ge.proposeGoal(baseGoalSpec({ parentGoalId: parent.goalId }));
+        ge.transition(child.goalId, "supersede", { actorKind: "OWNER", reason: "cycle" });
+        ge.transition(parent.goalId, "supersede", { actorKind: "OWNER", reason: "cycle" });
+    }
+    assert.ok(ge.childCountsSize() <= 4,
+        "childCounts tidak boleh menumpuk kunci induk yang goal-nya sendiri sudah dievict");
 });
 
 test("GL-A5: immortal goal — terminal states are terminal, cannot be reactivated", async () => {

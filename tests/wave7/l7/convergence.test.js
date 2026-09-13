@@ -38,6 +38,25 @@ test("W7-L7 convergence 3: GOVERNED mode complete path — advisory projection o
     assert.equal(result.projection.decisionInfluence, "ADVISORY_ONLY");
 });
 
+test("W7-L7 repair: GOVERNED mode's projection never mutates attention scheduling state (independent audit AUD3-P2-1)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const lh = await createLongHorizonCycle({ mode: "governed", capabilityRegistry: registry });
+
+    const { targetId } = lh.lanes.attention.ingestSignal(
+        { sourceKind: "OWNER", sourceId: "owner-1", subjectRef: { entityId: "e1" } }, "REASON"
+    );
+
+    await lh.cycle();
+    await lh.cycle(); // generating the advisory projection twice must not change anything
+
+    assert.equal(lh.lanes.attention.getTarget(targetId).state, "QUEUED",
+        "proyeksi GOVERNED tidak boleh memindahkan target ke RUNNING sekadar dengan membacanya");
+
+    const started = lh.lanes.attention.pick();
+    assert.equal(started.targetId, targetId,
+        "pick() nyata sesudahnya harus tetap memilih target yang sama -- kredit tidak boleh terkuras oleh proyeksi read-only");
+});
+
 test("W7-L7 convergence 4/5/6: no import of action/authority/actuation anywhere in this module tree", async () => {
     const dir = path.join(__dirname, "../../../src/cognition/longhorizon");
     for (const file of fs.readdirSync(dir)) {

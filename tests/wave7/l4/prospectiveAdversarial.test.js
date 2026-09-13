@@ -92,6 +92,28 @@ test("PM-A1-repair-9: array with a redefined prototype carrying inherited toJSON
     }), "EXECUTABLE_MATERIAL_REJECTED");
 });
 
+test("PM-A1-repair-10: a Proxy with consistent-but-lying traps cannot smuggle a hidden toJSON into a fired WakeEvent (independent audit AUD3-P1-1)", async () => {
+    const pm = await createProspectiveMemory({ clock: { nowMs: () => 1000 } });
+    let toJsonExecuted = false;
+    const target = { note: "safe" };
+    const proxy = new Proxy(target, {
+        getPrototypeOf() { return Object.prototype; },
+        ownKeys() { return ["note"]; },
+        getOwnPropertyDescriptor() { return { enumerable: true, configurable: true, value: "safe", writable: true }; },
+        get(t, p) {
+            if (p === "toJSON") return () => { toJsonExecuted = true; return { capabilityId: "cap.proxy", authProof: "P" }; };
+            return t[p];
+        }
+    });
+    const r = pm.arm({
+        reminderId: "r1", trigger: { kind: "AT", at: new Date(1).toISOString() },
+        wakeClass: "MAINTENANCE", payloadRef: proxy
+    });
+    assert.equal(toJsonExecuted, false, "trap get proxy (dan toJSON tersembunyinya) tidak boleh pernah terpanggil");
+    assert.deepEqual(r.payloadRef, { note: "safe" });
+    assert.equal(Object.prototype.hasOwnProperty.call(r.payloadRef, "capabilityId"), false);
+});
+
 test("PM-repair-4: restart rebuild counts only ARMED reminders toward the per-goal cap (Codex P2 round 7)", async () => {
     const store = createMemoryAccStore();
     const clock = manualClock(0);

@@ -183,29 +183,39 @@ function validateConfidence(value) {
 }
 
 /**
- * Pagar payload v2 — menolak bentuk berbahaya SEBELUM menyentuh
- * JSON.stringify (yang diam-diam membuang function/Symbol dan memanggil
- * getter). Deteksi siklik berbasis ancestor-stack (bukan "pernah terlihat"),
- * sehingga referensi bersama yang sah (DAG, bukan siklus) tidak ditolak
- * keliru. Mengembalikan salinan struktural aman (setara `structuredCopy`
- * lama) setelah lolos pagar.
+ * Pagar payload v2 — satu lintasan yang memvalidasi DAN membangun salinan
+ * aman sekaligus, tidak pernah membaca lewat `value[key]` (itu memanggil
+ * trap `get` pada Proxy) dan tidak pernah memanggil JSON.stringify pada
+ * objek pemanggil yang tidak tepercaya. Bug diketemukan review independen
+ * (OpenCode/9router deepseek-v4.1-flash, audit putaran-3, AUD3-P1-1): versi
+ * lama memvalidasi lewat `walkSafe` (memeriksa descriptor via
+ * `getOwnPropertyDescriptor`) lalu memanggil `structuredCopy` (JSON.stringify)
+ * TERPISAH -- sebuah Proxy bisa membuat trap `getPrototypeOf`/`ownKeys`/
+ * `getOwnPropertyDescriptor` konsisten-tapi-bohong (melaporkan bentuk aman)
+ * sementara trap `get`-nya mengembalikan `toJSON` tersembunyi yang lalu
+ * dipanggil JSON.stringify di langkah copy. Sekarang nilai dibaca HANYA dari
+ * `desc.value` (hasil `getOwnPropertyDescriptor` yang sudah final) dan
+ * disalin langsung ke objek/array polos baru. Deteksi siklik berbasis
+ * ancestor-stack (bukan "pernah terlihat"), sehingga referensi bersama yang
+ * sah (DAG, bukan siklus) tidak ditolak keliru (dan disalin independen di
+ * setiap kemunculan, sama seperti `JSON.stringify` lama).
  */
 function assertSafeMetadata(value, label) {
-    walkSafe(value, label, 0, new WeakSet(), { count: 0 });
-    return structuredCopy(value);
+    return walkSafe(value, label, 0, new WeakSet(), { count: 0 });
 }
 
 function walkSafe(value, label, depth, stack, budget) {
-    if (value === null || value === undefined) return;
+    if (value === null || value === undefined) return value;
 
     const t = typeof value;
 
     if (t === "function") rejectMetadata(label, "fungsi tidak diperbolehkan");
     if (t === "symbol") rejectMetadata(label, "Symbol tidak diperbolehkan");
+    if (t === "bigint") rejectMetadata(label, "BigInt tidak diperbolehkan");
     if (t === "string" && value.length > ENVELOPE_BOUNDS.MAX_PAYLOAD_STRING_CHARS) {
         rejectMetadata(label, "panjang string melebihi batas");
     }
-    if (t !== "object") return;
+    if (t !== "object") return value;
 
     if (depth > ENVELOPE_BOUNDS.MAX_PAYLOAD_DEPTH) {
         rejectMetadata(label, "kedalaman melebihi batas");
@@ -223,34 +233,33 @@ function walkSafe(value, label, depth, stack, budget) {
         if (value.length > ENVELOPE_BOUNDS.GLOBAL_MAX_ARRAY_LENGTH) {
             rejectMetadata(label, "panjang array melebihi batas");
         }
-        // Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
-        // putaran-2, AUD2-P2-3): cabang array ini `return` sebelum sempat
-        // mencapai cek prototype di bawah (khusus objek non-array), jadi
-        // `Object.setPrototypeOf(arr, {toJSON})` lolos -- JSON.stringify di
-        // structuredCopy memanggil toJSON warisan itu tanpa validasi.
+        // Bug review independen (audit putaran-2, AUD2-P2-3): cabang array
+        // ini `return` sebelum sempat mencapai cek prototype di bawah
+        // (khusus objek non-array), jadi `Object.setPrototypeOf(arr,{toJSON})`
+        // lolos.
         const arrProto = Object.getPrototypeOf(value);
         if (arrProto !== Array.prototype && arrProto !== null) {
             rejectMetadata(label, "prototipe array tidak standar (kontrak data murni, termasuk toJSON warisan)");
         }
         stack.add(value);
+        const out = [];
         try {
             // Indeks array bisa membawa accessor (Object.defineProperty pada
             // elemen) — periksa descriptor SEBELUM membaca nilainya, sama
             // seperti kunci objek di bawah. `for...of`/indexing langsung
-            // akan memanggil getter sebelum sempat ditolak.
+            // akan memanggil getter (atau trap `get` Proxy) sebelum sempat
+            // ditolak; nilai dibaca dari `desc.value`, tidak pernah `value[i]`.
             for (let i = 0; i < value.length; i++) {
                 const desc = Object.getOwnPropertyDescriptor(value, i);
-                if (desc && (desc.get || desc.set)) {
+                if (!desc || desc.get || desc.set) {
                     rejectMetadata(label, `properti accessor pada indeks array ditolak tanpa dipanggil: '${i}'`);
                 }
-                walkSafe(value[i], label, depth + 1, stack, budget);
+                const built = walkSafe(desc.value, label, depth + 1, stack, budget);
+                out[i] = built === undefined ? null : built;
             }
-            // Bug diketemukan review independen (Codex, putaran ke-3): array
-            // bisa punya properti OWN NON-INDEKS (mis. `arr.toJSON = fn`)
-            // yang loop indeks di atas tidak pernah memeriksa — dan
-            // JSON.stringify (di structuredCopy) memanggil toJSON tanpa
-            // validasi. Periksa properti non-indeks/non-length sama seperti
-            // kunci objek biasa.
+            // Properti OWN NON-INDEKS pada array (mis. `arr.toJSON = fn`)
+            // divalidasi tapi TIDAK disalin -- sama seperti JSON.stringify
+            // lama yang diam-diam mengabaikan properti non-indeks pada array.
             for (const key of Reflect.ownKeys(value)) {
                 if (key === "length" || ARRAY_INDEX_PATTERN.test(String(key))) continue;
                 if (typeof key === "symbol") {
@@ -260,15 +269,18 @@ function walkSafe(value, label, depth, stack, budget) {
                     rejectMetadata(label, `kunci berbahaya ditolak pada array: '${key}'`);
                 }
                 const desc = Object.getOwnPropertyDescriptor(value, key);
-                if (desc && (desc.get || desc.set)) {
+                if (!desc || desc.get || desc.set) {
                     rejectMetadata(label, `properti accessor pada array ditolak tanpa dipanggil: '${String(key)}'`);
                 }
-                walkSafe(value[key], label, depth + 1, stack, budget);
+                // Nilainya tidak disalin (lihat komentar di atas), TAPI tetap
+                // divalidasi -- kalau tidak, `arr.toJSON = fn` lolos tanpa
+                // terdeteksi karena tidak pernah masuk `out`.
+                walkSafe(desc.value, label, depth + 1, stack, budget);
             }
         } finally {
             stack.delete(value);
         }
-        return;
+        return out;
     }
 
     // Kontrak data murni: instance kelas (selain object literal) ditolak.
@@ -283,6 +295,7 @@ function walkSafe(value, label, depth, stack, budget) {
     }
 
     stack.add(value);
+    const out = {};
     try {
         for (const key of keys) {
             if (typeof key === "symbol") {
@@ -296,15 +309,17 @@ function walkSafe(value, label, depth, stack, budget) {
             }
 
             const desc = Object.getOwnPropertyDescriptor(value, key);
-            if (desc && (desc.get || desc.set)) {
+            if (!desc || desc.get || desc.set) {
                 rejectMetadata(label, `properti accessor ditolak tanpa dipanggil: '${key}'`);
             }
 
-            walkSafe(value[key], label, depth + 1, stack, budget);
+            const built = walkSafe(desc.value, label, depth + 1, stack, budget);
+            if (built !== undefined) out[key] = built; // sama seperti JSON: kunci undefined dibuang
         }
     } finally {
         stack.delete(value);
     }
+    return out;
 }
 
 function rejectMetadata(label, reason) {
@@ -363,13 +378,20 @@ function digest(state) {
     return sha256(canonicalJson(state));
 }
 
-function deepFreeze(value) {
-    if (!value || typeof value !== "object" || Object.isFrozen(value)) {
-        return value;
-    }
+/**
+ * Bug review independen (audit putaran-3, AUD3-P1-2): versi lama berhenti
+ * rekursi begitu `Object.isFrozen` true (node perantara yang sudah beku
+ * milik pemanggil melindungi anak yang masih bisa diubah) dan memakai
+ * `Object.keys` (melewati properti non-enumerable). Sekarang selalu
+ * rekursi lewat `Reflect.ownKeys`, pakai WeakSet untuk siklus.
+ */
+function deepFreeze(value, seen = new WeakSet()) {
+    if (!value || typeof value !== "object") return value;
+    if (seen.has(value)) return value;
+    seen.add(value);
 
-    for (const key of Object.keys(value)) {
-        deepFreeze(value[key]);
+    for (const key of Reflect.ownKeys(value)) {
+        deepFreeze(value[key], seen);
     }
 
     return Object.freeze(value);
