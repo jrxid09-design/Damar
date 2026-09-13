@@ -248,6 +248,18 @@ test("WM-repair-18: ingestDeclaration validates attribute/declarationId as non-e
     assert.throws(() => wm.ingestDeclaration({ subject: { entityId: "e1" }, attribute: "a", value: "v", declarationId: 10n }));
 });
 
+test("WM-repair-19: declareHypothesis's expiresAt is validated as an ISO string, not left to crash persist() or the expiry-eviction sort (proactive, same class as AUD11/AUD12-P2 bigint sweep)", async () => {
+    const wm = await createWorldModel();
+    assert.throws(() => wm.declareHypothesis({
+        hypothesisId: "h1", subject: { entityId: "e1" }, attribute: "cfg",
+        candidateValues: [{ value: "a", weight: 0.5 }], expiresAt: 10n
+    }));
+    assert.throws(() => wm.declareHypothesis({
+        hypothesisId: "h2", subject: { entityId: "e1" }, attribute: "cfg",
+        candidateValues: [{ value: "a", weight: 0.5 }], expiresAt: "not-a-date"
+    }));
+});
+
 test("WM-repair-17: replaying a recordId already consumed by an earlier SUPERSEDE is a no-op, not a fresh CONTEST (independent audit AUD11-P2-7)", async () => {
     const clock = manualClock(0);
     const wm = await createWorldModel({ clock });

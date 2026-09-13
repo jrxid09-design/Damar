@@ -101,6 +101,14 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
     if (!Array.isArray(candidateValues) || candidateValues.length === 0) {
         fail(REASONS.INVALID_RECORD, "candidateValues wajib array tidak kosong");
     }
+    // Proaktif (sapuan lengkap kelas AUD11/AUD12-P2, sebelum ditemukan
+    // auditor independen sebagai finding terpisah): expiresAt diteruskan
+    // mentah tanpa disaring -- BigInt di dalamnya meledakkan JSON.stringify
+    // saat persist(), dan declareHypothesis's compaction (index.js) memakai
+    // Date.parse(expiresAt) untuk mengurutkan korban kadaluwarsa.
+    if (typeof expiresAt !== "string" || !Number.isFinite(Date.parse(expiresAt))) {
+        fail(REASONS.INVALID_RECORD, "expiresAt wajib tanggal ISO string yang sah");
+    }
     // Bug review independen (audit putaran-5, W7R5-P1-1): candidateValues[].value,
     // discriminatingProbe, dan subject dulu disimpan APA ADANYA -- lewat
     // referensi mentah, toJSON pemanggil bisa tereksekusi saat serialisasi
