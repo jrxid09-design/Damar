@@ -225,13 +225,16 @@ async function createSelfModel({
         }
 
         const window = successWindows.get(capabilityId) ?? emptySuccessWindow(now());
-        // Bug review independen (audit putaran-11, AUD11-P2-6): replay dari
-        // evidenceRef yang sama (pengiriman ulang lintas-node) dulu dihitung
-        // sebagai outcome BARU -- attempts/successes bertambah lagi untuk
-        // bukti yang sama, memalsukan confidence (satu SUCCESS yang di-replay
-        // 5x menaikkan confidence seolah 5 percobaan independen berhasil).
-        // Sama seperti worldmodel's applyRevision, replay adalah no-op.
-        if ((window.history ?? []).some(h => h.evidenceRef === evidenceRef)) {
+        // Bug review independen (audit putaran-11, AUD11-P2-6; horizon
+        // diperbaiki putaran-20, AUD20-P2-1): dedup semula cuma cek
+        // `history` yang dipangkas FIFO ke MAX_SUCCESS_WINDOW (32) --
+        // evidenceRef yang sudah terlempar dari 32 entri terakhir dianggap
+        // BARU lagi saat di-replay, memalsukan confidence/selfBelief
+        // (DEGRADED -> USABLE lewat replay evidenceRef lama). `appliedEvidenceRefs`
+        // punya horizon independen jauh lebih besar (MAX_APPLIED_EVIDENCE_REFS),
+        // sama seperti worldmodel's appliedRecordIds/contestedRecordIds.
+        const appliedEvidenceRefs = window.appliedEvidenceRefs ?? [];
+        if (appliedEvidenceRefs.includes(evidenceRef)) {
             return assess(capabilityId);
         }
         // Bug review independen (audit putaran-8, W7R8-P1-2): `history`
@@ -245,11 +248,15 @@ async function createSelfModel({
         // pun history dibaca, tidak cuma di satu titik baca.
         const history = Object.freeze([...(window.history ?? []), Object.freeze({ at, outcome, evidenceRef })]
             .slice(-bounds.MAX_SUCCESS_WINDOW));
+        const nextAppliedEvidenceRefs = Object.freeze(
+            [...appliedEvidenceRefs, evidenceRef].slice(-bounds.MAX_APPLIED_EVIDENCE_REFS)
+        );
         const nextWindow = Object.freeze({
             attempts: history.length,
             successes: history.filter(h => h.outcome === "SUCCESS").length,
             windowStartedAt: window.windowStartedAt,
-            history
+            history,
+            appliedEvidenceRefs: nextAppliedEvidenceRefs
         });
         successWindows.set(capabilityId, nextWindow);
         lastOutcomes.set(capabilityId, Object.freeze({ outcomeRef: evidenceRef, state: outcome, at }));

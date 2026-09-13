@@ -55,6 +55,28 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         entityCountBySource.set(e.source, (entityCountBySource.get(e.source) ?? 0) + 1);
     }
 
+    // Bug review independen (audit putaran-20, AUD20-P2-3): evictEntityIfOverBound
+    // memanggil relationDegree(id) -- pemindaian PENUH `relations` -- untuk
+    // SETIAP entitas kandidat korban, jadi O(entitas x relasi) per panggilan.
+    // Pada batas produksi (100000 entitas x 400000 relasi) ini butuh menit
+    // CPU per declareEntity() begitu kapasitas tercapai (DoS CPU/latensi).
+    // Indeks derajat inkremental dijaga di sini (pola sama seperti
+    // entityCountBySource di atas) supaya relationDegree() jadi O(1); satu-
+    // satunya biaya O(R) tersisa adalah inisialisasi ini sekali saat startup.
+    const degreeByEntity = new Map();
+    function incDegree(entityId) {
+        degreeByEntity.set(entityId, (degreeByEntity.get(entityId) ?? 0) + 1);
+    }
+    function decDegree(entityId) {
+        const next = Math.max(0, (degreeByEntity.get(entityId) ?? 1) - 1);
+        if (next === 0) degreeByEntity.delete(entityId);
+        else degreeByEntity.set(entityId, next);
+    }
+    for (const r of relations.values()) {
+        incDegree(r.from);
+        incDegree(r.to);
+    }
+
     function now() { return clock.nowMs(); }
     function nowIso() { return new Date(now()).toISOString(); }
 
@@ -68,11 +90,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function relationDegree(entityId) {
-        let degree = 0;
-        for (const r of relations.values()) {
-            if (r.from === entityId || r.to === entityId) degree += 1;
-        }
-        return degree;
+        return degreeByEntity.get(entityId) ?? 0;
     }
 
     /**
@@ -113,7 +131,11 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             // menunjuk ke entitas yang baru dievict dulu dibiarkan, jadi
             // path/subgraph bisa melewati endpoint yang sudah tidak ada.
             for (const r of [...relations.values()]) {
-                if (r.from === victim.entityId || r.to === victim.entityId) relations.delete(r.relationId);
+                if (r.from === victim.entityId || r.to === victim.entityId) {
+                    relations.delete(r.relationId);
+                    decDegree(r.from);
+                    decDegree(r.to);
+                }
             }
         }
     }
@@ -131,7 +153,11 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             if (r.relationId === protectedRelationId) continue;
             if (!victim || r.strength < victim.strength) victim = r;
         }
-        if (victim) relations.delete(victim.relationId);
+        if (victim) {
+            relations.delete(victim.relationId);
+            decDegree(victim.from);
+            decDegree(victim.to);
+        }
     }
 
     function declareEntity({ entityId, entityKind, labels, externalRefs, source }) {
@@ -176,6 +202,8 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             fail(REASONS.UNKNOWN_ENTITY, "relasi merujuk entitas yang belum dideklarasikan");
         }
         relations.set(relation.relationId, relation);
+        incDegree(relation.from);
+        incDegree(relation.to);
         evictRelationIfOverBound(relation.relationId);
         return relation;
     }

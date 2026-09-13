@@ -257,6 +257,11 @@ function makePlan({ planId, goalRef, version = 1, steps, assumptions = [], creat
     // `a.version - b.version` pada kompaksi.
     if (typeof goalRef !== "string" || !goalRef) fail(REASONS.INVALID_RECORD, "goalRef wajib string");
     if (!Number.isFinite(version)) fail(REASONS.INVALID_RECORD, "version wajib number");
+    // Bug review independen (audit putaran-20, AUD20-P2-2): `assumptions`
+    // (beda dengan `steps`) tidak pernah dijaga Array.isArray -- `null`
+    // eksplisit lolos default parameter (hanya `undefined` yang memicunya)
+    // lalu meledakkan `.map()` jadi TypeError mentah, bukan INVALID_RECORD.
+    if (!Array.isArray(assumptions)) fail(REASONS.INVALID_RECORD, "assumptions wajib array");
     // Bug review independen (audit putaran-10, AUD10-P2-2; diperdalam
     // putaran-13, AUD13-P2-2): sapuan deepFreeze putaran-9 hanya membekukan
     // steps/assumptions, tidak pernah menyaringnya -- BigInt di dalam salah
@@ -281,6 +286,11 @@ function makeTask({ taskId, planRef, order, capabilityId = null, preconditions =
     if (capabilityId !== null && (typeof capabilityId !== "string" || !capabilityId)) {
         fail(REASONS.INVALID_RECORD, "capabilityId, jika ada, wajib string");
     }
+    // Bug review independen (audit putaran-20, AUD20-P2-2): preconditions/
+    // postconditions tidak pernah dijaga Array.isArray -- `null` eksplisit
+    // lolos default parameter lalu meledakkan `.map()` jadi TypeError mentah.
+    if (!Array.isArray(preconditions)) fail(REASONS.INVALID_RECORD, "preconditions wajib array");
+    if (!Array.isArray(postconditions)) fail(REASONS.INVALID_RECORD, "postconditions wajib array");
     const safeIntentTemplate = buildSafeIntentTemplate(intentTemplate ?? {});
     return Object.freeze({
         taskId, planRef, order, capabilityId,
