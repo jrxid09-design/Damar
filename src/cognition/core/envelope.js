@@ -224,7 +224,17 @@ function walkSafe(value, label, depth, stack, budget) {
         }
         stack.add(value);
         try {
-            for (const item of value) walkSafe(item, label, depth + 1, stack, budget);
+            // Indeks array bisa membawa accessor (Object.defineProperty pada
+            // elemen) — periksa descriptor SEBELUM membaca nilainya, sama
+            // seperti kunci objek di bawah. `for...of`/indexing langsung
+            // akan memanggil getter sebelum sempat ditolak.
+            for (let i = 0; i < value.length; i++) {
+                const desc = Object.getOwnPropertyDescriptor(value, i);
+                if (desc && (desc.get || desc.set)) {
+                    rejectMetadata(label, `properti accessor pada indeks array ditolak tanpa dipanggil: '${i}'`);
+                }
+                walkSafe(value[i], label, depth + 1, stack, budget);
+            }
         } finally {
             stack.delete(value);
         }

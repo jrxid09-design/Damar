@@ -148,6 +148,17 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         }
         const p = makePlan({ ...spec, planId: spec.planId ?? crypto.randomUUID() });
         plans.set(p.planId, p);
+
+        // Bug diketemukan review independen (Codex): MAX_PLAN_VERSIONS_RETAINED
+        // dideklarasikan tapi tidak pernah ditegakkan — plans per goal bisa
+        // tumbuh tak terbatas lewat re-planning berulang. §8: kompaksi tertua.
+        const sameGoal = [...plans.values()]
+            .filter(x => x.goalRef === p.goalRef)
+            .sort((a, b) => a.version - b.version);
+        if (sameGoal.length > bounds.MAX_PLAN_VERSIONS_RETAINED) {
+            const overflow = sameGoal.length - bounds.MAX_PLAN_VERSIONS_RETAINED;
+            for (let i = 0; i < overflow; i++) plans.delete(sameGoal[i].planId);
+        }
         return p;
     }
 
@@ -179,6 +190,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
 
     function getGoal(goalId) { return goals.get(goalId) ?? null; }
     function getTask(taskId) { return tasks.get(taskId) ?? null; }
+    function getPlan(planId) { return plans.get(planId) ?? null; }
 
     async function persist() { return saveSnapshot(store, { goals, commitments, plans, tasks }); }
 
@@ -186,7 +198,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         schemaVersion: SCHEMA_VERSION,
         proposeGoal, grantApproval, transition, getGoal,
         createCommitment, transitionCommitment: transitionCommitmentAction,
-        createPlan, invalidatePlanIfAssumptionBroken,
+        createPlan, invalidatePlanIfAssumptionBroken, getPlan,
         createTask, transitionTask: transitionTaskAction, getTask,
         persist, laws, bounds
     });

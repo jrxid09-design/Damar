@@ -100,11 +100,25 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
             firedAt: nowIso(), missedAt: missed ? nowIso() : reminder.missedAt
         }));
 
+        // Bug diketemukan review independen (Codex): kapasitas armed tidak
+        // pernah dilepas setelah reminder berhenti ARMED secara permanen,
+        // sehingga proses berumur panjang akhirnya menolak arm() baru
+        // walau tidak ada lagi reminder yang benar-benar ARMED.
+        if (!stillRecurs) releaseArmedCapacity(reminder);
+
         return admitWakeEvent(event);
     }
 
     function retire(reminder, reason) {
         reminders.set(reminder.reminderId, Object.freeze({ ...reminder, state: "RETIRED", retiredReason: reason }));
+        releaseArmedCapacity(reminder);
+    }
+
+    function releaseArmedCapacity(reminder) {
+        armedReminderCount = Math.max(0, armedReminderCount - 1);
+        if (reminder.ownerRef) {
+            remindersPerGoal.set(reminder.ownerRef, Math.max(0, (remindersPerGoal.get(reminder.ownerRef) ?? 1) - 1));
+        }
     }
 
     /**
