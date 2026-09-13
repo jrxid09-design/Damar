@@ -60,6 +60,23 @@ test("PM-A1-repair-3: a toJSON hook on payloadRef never executes -- rejected bef
     assert.equal(executed, false, "toJSON tidak boleh pernah dipanggil -- fungsi ditolak sebelum JSON.stringify");
 });
 
+test("PM-repair-4: restart rebuild counts only ARMED reminders toward the per-goal cap (Codex P2 round 7)", async () => {
+    const store = createMemoryAccStore();
+    const clock = manualClock(0);
+    let pm = await createProspectiveMemory({ clock, store, bounds: { ...BOUNDS, MAX_REMINDERS_PER_GOAL: 1 } });
+    pm.arm({ ownerRef: "goal-1", trigger: { kind: "AT", at: new Date(1000).toISOString() }, wakeClass: "RESUME_GOAL" });
+    clock.advance(1500);
+    pm.tick(); // reminder fires -> becomes FIRED (terminal), per-goal slot released live
+    await pm.persist();
+
+    // "Restart": a fresh instance loads the same persisted snapshot, which
+    // still contains the terminal (FIRED) reminder for goal-1.
+    pm = await createProspectiveMemory({ clock, store, bounds: { ...BOUNDS, MAX_REMINDERS_PER_GOAL: 1 } });
+    assert.doesNotThrow(() => pm.arm({
+        ownerRef: "goal-1", trigger: { kind: "AT", at: new Date(9999).toISOString() }, wakeClass: "RESUME_GOAL"
+    }), "reminder terminal yang tersisa tidak boleh menghitung ke batas per-goal pasca-restart");
+});
+
 test("PM-repair-2: deferred wake events are bounded, drops are counted not silently lost (Codex P2 round 6)", async () => {
     const clock = manualClock(0);
     const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_WAKE_EVENTS_PER_MINUTE: 1, MAX_DEFERRED_WAKE_EVENTS: 2 } });
