@@ -162,6 +162,12 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     function grantApproval(goalId, { approvalRef, scope = null }) {
         const goal = goals.get(goalId);
         if (!goal) fail(REASONS.UNKNOWN_GOAL, `goal '${goalId}' tidak ditemukan`);
+        // Bug review independen (audit putaran-13, AUD13-P2-3): approvalRef/
+        // scope diteruskan mentah -- BigInt meledakkan JSON.stringify saat
+        // persist(). approvalRef tetap opaque (bukan grant), hanya wajib
+        // berupa referensi string yang bisa diserialisasi.
+        if (typeof approvalRef !== "string" || !approvalRef) fail(REASONS.INVALID_RECORD, "approvalRef wajib string");
+        if (scope !== null && (typeof scope !== "string" || !scope)) fail(REASONS.INVALID_RECORD, "scope, jika ada, wajib string");
         const next = Object.freeze({
             ...goal,
             ownerApproval: Object.freeze({ state: "GRANTED", approvalRef, grantedAt: nowIso(), scope })
@@ -282,6 +288,12 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     function invalidatePlanIfAssumptionBroken(planId, brokenBeliefRef) {
         const plan = plans.get(planId);
         if (!plan) fail(REASONS.UNKNOWN_GOAL, `plan '${planId}' tidak ditemukan`);
+        // Bug review independen (audit putaran-13, AUD13-P2-3): brokenBeliefRef
+        // diteruskan mentah ke invalidatedBy -- BigInt meledakkan
+        // JSON.stringify saat persist().
+        if (typeof brokenBeliefRef !== "string" || !brokenBeliefRef) {
+            fail(REASONS.INVALID_RECORD, "brokenBeliefRef wajib string");
+        }
         const next = Object.freeze({
             ...plan, state: "INVALIDATED",
             invalidatedBy: Object.freeze([...plan.invalidatedBy, brokenBeliefRef])

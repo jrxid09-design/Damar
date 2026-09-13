@@ -37,6 +37,14 @@ function appendTransitionLog(log, entry) {
  */
 function transitionGoal(goal, action, { actorKind, reason, evidenceRef = null, evidenceTier = null, nowIso }) {
     if (!ACTOR_KINDS.has(actorKind)) fail(REASONS.INVALID_TRANSITION, `actorKind '${actorKind}' tidak dikenal`);
+    // Bug review independen (audit putaran-13, AUD13-P2-3): reason/
+    // evidenceRef diteruskan mentah ke entry log transisi -- BigInt di
+    // salah satunya meledakkan JSON.stringify saat persist(), dan ikut
+    // merusak catatan log transisi G-7 yang seharusnya bisa diaudit.
+    if (typeof reason !== "string" || !reason) fail(REASONS.INVALID_TRANSITION, "reason wajib string (G-7)");
+    if (evidenceRef !== null && (typeof evidenceRef !== "string" || !evidenceRef)) {
+        fail(REASONS.INVALID_TRANSITION, "evidenceRef, jika ada, wajib string");
+    }
     if (TERMINAL_GOAL_STATES.has(goal.state)) {
         fail(REASONS.INVALID_TRANSITION, `status terminal '${goal.state}' bersifat final (G-8)`);
     }
@@ -75,6 +83,11 @@ function transitionCommitment(commitment, action, { evidenceRef = null } = {}) {
     if (!rule) fail(REASONS.INVALID_TRANSITION, `aksi commitment '${action}' tidak dikenal`);
     if (!rule.from.includes(commitment.state)) {
         fail(REASONS.INVALID_TRANSITION, `tidak bisa '${action}' dari status '${commitment.state}'`);
+    }
+    // Bug review independen (audit putaran-13, AUD13-P2-3): evidenceRef
+    // diteruskan mentah -- BigInt meledakkan JSON.stringify saat persist().
+    if (evidenceRef !== null && (typeof evidenceRef !== "string" || !evidenceRef)) {
+        fail(REASONS.INVALID_TRANSITION, "evidenceRef, jika ada, wajib string");
     }
     return Object.freeze({ ...commitment, state: rule.to, evidenceRef: evidenceRef ?? commitment.evidenceRef });
 }

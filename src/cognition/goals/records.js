@@ -194,8 +194,18 @@ function makeGoal({
         priorityClass,
         successCondition: condition,
         abandonCondition: abandonCondition ? validateConditionSpec(abandonCondition, "abandonCondition") : null,
-        deadline: buildSafeIntentTemplate(deadline), parentGoalId, depth,
-        budgetRef: buildSafeIntentTemplate(budgetRef), missionRef: buildSafeIntentTemplate(missionRef),
+        // Bug review independen (audit putaran-13, AUD13-P1-1): round-10
+        // menyaring BigInt lewat buildSafeIntentTemplate tapi LUPA
+        // membekukan hasilnya (beda dengan `origin` dua baris di atas yang
+        // sudah benar -- `deepFreeze(buildSafeIntentTemplate(...))`) --
+        // salinan plain object tetap bisa dimutasi pemanggil pasca-panggilan
+        // (menulis ulang deadline/budgetRef/missionRef kanonik), dan sebuah
+        // toJSON yang disisipkan pemanggil pada objek yang dikembalikan
+        // tereksekusi saat persist() lalu memalsukan kunci authority-shaped
+        // (mis. authProof) ke dalam snapshot durabel -- melanggar GOAL !=
+        // AUTHORITY.
+        deadline: deepFreeze(buildSafeIntentTemplate(deadline)), parentGoalId, depth,
+        budgetRef: deepFreeze(buildSafeIntentTemplate(budgetRef)), missionRef: deepFreeze(buildSafeIntentTemplate(missionRef)),
         createdAt: nowIso, lastTransitionAt: nowIso,
         transitions: Object.freeze([])
     });
@@ -222,13 +232,23 @@ function makePlan({ planId, goalRef, version = 1, steps, assumptions = [], creat
     // tetap diteruskan mentah; BigInt di dalamnya meledakkan JSON.stringify
     // saat persist().
     if (typeof createdBy !== "string" || !createdBy) fail(REASONS.INVALID_RECORD, "createdBy wajib string");
-    // Bug review independen (audit putaran-10, AUD10-P2-2): sapuan deepFreeze
-    // putaran-9 hanya menyentuh field yang ditandai auditor -- steps/
-    // assumptions di sini masih pembekuan SATU level, objek bersarang di
-    // dalamnya tetap referensi milik pemanggil.
+    // Bug review independen (audit putaran-13, AUD13-P2-2): sapuan putaran-12
+    // hanya menyaring createdBy -- goalRef/version/steps[] masih diteruskan
+    // mentah; BigInt di salah satunya meledakkan JSON.stringify saat
+    // persist(), dan version non-number merusak perbandingan
+    // `a.version - b.version` pada kompaksi.
+    if (typeof goalRef !== "string" || !goalRef) fail(REASONS.INVALID_RECORD, "goalRef wajib string");
+    if (!Number.isFinite(version)) fail(REASONS.INVALID_RECORD, "version wajib number");
+    // Bug review independen (audit putaran-10, AUD10-P2-2; diperdalam
+    // putaran-13, AUD13-P2-2): sapuan deepFreeze putaran-9 hanya membekukan
+    // steps/assumptions, tidak pernah menyaringnya -- BigInt di dalam salah
+    // satu elemen meledakkan JSON.stringify saat persist(). buildSafeIntentTemplate
+    // menyaring BigInt/function/Symbol di elemen apa pun (string taskId
+    // ATAU objek langkah terstruktur, keduanya dipakai penelepon nyata di
+    // basis kode ini), lalu deepFreeze membekukan hasilnya.
     return Object.freeze({
-        planId, goalRef, version, steps: deepFreeze([...steps]),
-        createdBy, assumptions: deepFreeze(assumptions.map(a => ({ ...a }))),
+        planId, goalRef, version, steps: deepFreeze(steps.map(s => buildSafeIntentTemplate(s))),
+        createdBy, assumptions: deepFreeze(assumptions.map(a => buildSafeIntentTemplate(a))),
         invalidatedBy: Object.freeze([]), state: "DRAFT"
     });
 }
