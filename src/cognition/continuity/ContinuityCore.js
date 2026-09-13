@@ -1,6 +1,6 @@
 const crypto = require("node:crypto");
 
-const { makeEnvelope, digest, canonicalJson } = require("../core/envelope");
+const { makeEnvelope, digest, canonicalJson, normalizeEnvelopeRecord } = require("../core/envelope");
 const { HANDLERS, ignored } = require("./reducers");
 const epistemics = require("../self/epistemics");
 const affectEngine = require("../affect/engine");
@@ -161,7 +161,9 @@ class ContinuityCore {
                 subject: envelope.subject,
                 sessionId: envelope.sessionId,
                 correlationId: envelope.correlationId,
-                confidence: envelope.confidence
+                confidence: envelope.confidence,
+                schemaVersion: envelope.schemaVersion,
+                epistemicClass: envelope.epistemicClass
             });
 
         if (appended.duplicate) {
@@ -665,6 +667,10 @@ class ContinuityCore {
             sessionId: envelopeFields.sessionId ?? null,
             correlationId: envelopeFields.correlationId ?? null,
             confidence: envelopeFields.confidence ?? 1,
+            // schemaVersion/epistemicClass SENGAJA di luar cakupan hash §51
+            // (lihat core/envelope.js) — tidak ikut sha256Row di bawah.
+            schemaVersion: envelopeFields.schemaVersion ?? 1,
+            epistemicClass: envelopeFields.epistemicClass ?? null,
             payload,
             prevHash,
             hash: null
@@ -751,16 +757,24 @@ function makeEnvelopeSafe(spec) {
 /** Kunci watermark projeksi di acc_kv (sama di backend memory & sqlite). */
 const PROJECTION_SEQ_KEY = "acc.projection.appliedSeq";
 
-/** Baris jurnal → envelope replay (bentuk tunggal untuk semua jalur). */
+/**
+ * Baris jurnal → envelope replay (bentuk tunggal untuk semua jalur).
+ * Baris v1 (schemaVersion hilang/1) dinormalisasi konservatif ke pandangan
+ * v2 lewat `normalizeEnvelopeRecord` — epistemicClass selalu UNKNOWN untuk
+ * baris lama, tidak pernah ditebak dari `provenance`.
+ */
 function envelopeFromRow(row) {
+    const normalized = normalizeEnvelopeRecord(row);
     return {
-        eventId: row.eventId, type: row.type,
-        timestamp: row.occurredAt, monotonic: row.monotonic,
-        source: row.source, provenance: row.provenance,
-        subject: row.subject ?? null, sessionId: row.sessionId ?? null,
-        correlationId: row.correlationId ?? null,
-        confidence: row.confidence ?? 1,
-        payload: row.payload ?? {}
+        eventId: normalized.eventId, type: normalized.type,
+        timestamp: normalized.occurredAt, monotonic: normalized.monotonic,
+        source: normalized.source, provenance: normalized.provenance,
+        subject: normalized.subject ?? null, sessionId: normalized.sessionId ?? null,
+        correlationId: normalized.correlationId ?? null,
+        confidence: normalized.confidence ?? 1,
+        schemaVersion: normalized.schemaVersion,
+        epistemicClass: normalized.epistemicClass,
+        payload: normalized.payload ?? {}
     };
 }
 
