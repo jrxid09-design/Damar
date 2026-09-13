@@ -30,8 +30,19 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
     // INVALID_RECORD) di `.length`/`for...of`.
     if (findings !== undefined && !Array.isArray(findings)) fail(REASONS.INVALID_RECORD, "findings wajib array");
     if (proposals !== undefined && !Array.isArray(proposals)) fail(REASONS.INVALID_RECORD, "proposals wajib array");
+    // Bug review independen (audit putaran-16, AUD16-P2-1): perbaikan
+    // putaran-15 hanya menjaga WADAH array-nya -- elemen null/undefined di
+    // dalamnya (mis. proposals: [null]) tetap melempar TypeError mentah di
+    // `p.kind`. `cost` juga tidak pernah dijaga sama sekali -- cost:null
+    // melempar TypeError mentah karena default `= {...}` hanya berlaku
+    // untuk undefined.
+    if (!cost || typeof cost !== "object") fail(REASONS.INVALID_RECORD, "cost wajib objek");
     for (const p of proposals) {
+        if (!p || typeof p !== "object") fail(REASONS.INVALID_RECORD, "setiap proposal wajib objek");
         if (!PROPOSAL_KINDS.has(p.kind)) fail(REASONS.INVALID_RECORD, `proposal.kind '${p.kind}' tidak dikenal`);
+    }
+    for (const f of findings) {
+        if (!f || typeof f !== "object") fail(REASONS.INVALID_RECORD, "setiap finding wajib objek");
     }
     const boundedFindings = findings.length > bounds.MAX_FINDINGS_PER_REVIEW
         ? [...findings].sort((a, b) => (b.severity ?? 0) - (a.severity ?? 0)).slice(0, bounds.MAX_FINDINGS_PER_REVIEW)

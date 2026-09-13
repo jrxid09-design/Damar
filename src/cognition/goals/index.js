@@ -117,58 +117,64 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // proposal baru tetap diterima tanpa batas, melampaui
         // MAX_TOTAL_GOALS_RETAINED selamanya. Sekarang cek berjalan SEBELUM
         // insersi dan gagal tertutup kalau tidak ada goal terminal untuk dievict.
+        // Bug review independen (audit putaran-16, AUD16-P1-1): perbaikan
+        // putaran-15 memindahkan enforceCreationRate ke SETELAH blok retensi
+        // ini, tapi blok ini sendiri MENGHAPUS goal terminal yang valid
+        // SEBELUM enforceCreationRate sempat menolak panggilan karena
+        // CREATION_RATE_EXCEEDED -- proposal yang ditolak rate limit tetap
+        // mengevict goal valid secara permanen. Korban sekarang hanya
+        // DIPILIH (tanpa dihapus) di sini; penghapusan+pembersihan
+        // sesungguhnya dipindah ke SETELAH enforceCreationRate lolos.
+        let evicted = null;
         if (goals.size >= bounds.MAX_TOTAL_GOALS_RETAINED) {
             const terminal = [...goals.values()]
                 .filter(g => ["SATISFIED", "ABANDONED", "SUPERSEDED"].includes(g.state))
                 .sort((a, b) => Date.parse(a.lastTransitionAt) - Date.parse(b.lastTransitionAt));
             if (terminal[0]) {
-                const evicted = terminal[0];
-                goals.delete(evicted.goalId);
-                // Bug review independen (Codex putaran-8): saat retensi
-                // mengevict anak terminal, entri induknya di childCounts
-                // dibiarkan -- dengan MAX_CHILDREN_PER_GOAL kecil, proposal
-                // anak baru di bawah induk itu ditolak "penuh" padahal anak
-                // yang tersisa sudah tidak ada lagi.
-                // Bug review independen (audit putaran-11, AUD11-P2-5): nilai
-                // hanya diturunkan ke 0, kuncinya sendiri tidak pernah
-                // dihapus -- pola yang sama yang sudah diperbaiki di
-                // worldmodel's decrementSourceCount (W7R4-P2-3) dan
-                // prospective's releaseArmedCapacity, tapi tidak pernah
-                // dimigrasikan ke goals' childCounts. Growth tak terbatas
-                // sebanding dengan churn goal jangka panjang.
-                if (evicted.parentGoalId) {
-                    const nextCount = Math.max(0, (childCounts.get(evicted.parentGoalId) ?? 1) - 1);
-                    if (nextCount === 0) childCounts.delete(evicted.parentGoalId);
-                    else childCounts.set(evicted.parentGoalId, nextCount);
-                }
-                // Bug review independen (audit putaran-3, AUD3-P2-2): entri
-                // MILIK goal yang dievict sendiri di childCounts (dipakai
-                // sebagai induk untuk anak-anaknya) tidak pernah dihapus --
-                // hanya nilainya yang berubah lewat proposeGoal berikutnya
-                // (childCounts.get(evicted.goalId) ?? 0) + 1, jadi kunci UUID
-                // basi menumpuk selamanya walau goal-nya sudah tidak ada.
-                childCounts.delete(evicted.goalId);
-                // Bug review independen (audit putaran-5, W7R5-P2-3): plan
-                // milik goal yang dievict ditinggalkan -- MAX_PLAN_VERSIONS_RETAINED
-                // hanya membatasi PER goal, jadi churn goal jangka panjang
-                // menumpuk plan tak terbatas secara total.
-                for (const p of [...plans.values()]) {
-                    if (p.goalRef === evicted.goalId) plans.delete(p.planId);
-                }
+                evicted = terminal[0];
             } else {
                 fail(REASONS.GOAL_RETENTION_LIMIT_EXCEEDED,
                     `retensi goal melebihi batas (${bounds.MAX_TOTAL_GOALS_RETAINED}) dan tidak ada goal terminal untuk dievict`);
             }
         }
 
-        // Bug review independen (audit putaran-15, AUD15-P2-1): perbaikan
-        // putaran-14 memindahkan enforceCreationRate ke SETELAH makeGoal,
-        // tapi masih SEBELUM cek retensi -- proposal yang valid tapi ditolak
-        // retensi (GOAL_RETENTION_LIMIT_EXCEEDED, tidak ada goal terminal
-        // untuk dievict) tetap menagih kuota origin.kind walau tidak pernah
-        // tersimpan. Dipindah lagi ke tepat sebelum insersi, setelah SEMUA
-        // jalur penolakan (validasi maupun retensi) sudah lolos.
         enforceCreationRate(spec.origin.kind);
+
+        if (evicted) {
+            goals.delete(evicted.goalId);
+            // Bug review independen (Codex putaran-8): saat retensi
+            // mengevict anak terminal, entri induknya di childCounts
+            // dibiarkan -- dengan MAX_CHILDREN_PER_GOAL kecil, proposal
+            // anak baru di bawah induk itu ditolak "penuh" padahal anak
+            // yang tersisa sudah tidak ada lagi.
+            // Bug review independen (audit putaran-11, AUD11-P2-5): nilai
+            // hanya diturunkan ke 0, kuncinya sendiri tidak pernah
+            // dihapus -- pola yang sama yang sudah diperbaiki di
+            // worldmodel's decrementSourceCount (W7R4-P2-3) dan
+            // prospective's releaseArmedCapacity, tapi tidak pernah
+            // dimigrasikan ke goals' childCounts. Growth tak terbatas
+            // sebanding dengan churn goal jangka panjang.
+            if (evicted.parentGoalId) {
+                const nextCount = Math.max(0, (childCounts.get(evicted.parentGoalId) ?? 1) - 1);
+                if (nextCount === 0) childCounts.delete(evicted.parentGoalId);
+                else childCounts.set(evicted.parentGoalId, nextCount);
+            }
+            // Bug review independen (audit putaran-3, AUD3-P2-2): entri
+            // MILIK goal yang dievict sendiri di childCounts (dipakai
+            // sebagai induk untuk anak-anaknya) tidak pernah dihapus --
+            // hanya nilainya yang berubah lewat proposeGoal berikutnya
+            // (childCounts.get(evicted.goalId) ?? 0) + 1, jadi kunci UUID
+            // basi menumpuk selamanya walau goal-nya sudah tidak ada.
+            childCounts.delete(evicted.goalId);
+            // Bug review independen (audit putaran-5, W7R5-P2-3): plan
+            // milik goal yang dievict ditinggalkan -- MAX_PLAN_VERSIONS_RETAINED
+            // hanya membatasi PER goal, jadi churn goal jangka panjang
+            // menumpuk plan tak terbatas secara total.
+            for (const p of [...plans.values()]) {
+                if (p.goalRef === evicted.goalId) plans.delete(p.planId);
+            }
+        }
+
         goals.set(goal.goalId, goal);
         if (goal.parentGoalId) childCounts.set(goal.parentGoalId, (childCounts.get(goal.parentGoalId) ?? 0) + 1);
 
