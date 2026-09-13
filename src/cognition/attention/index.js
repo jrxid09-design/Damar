@@ -100,7 +100,15 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
             }
         }
 
-        supportingSignals.get(targetId).push({ sourceId: signal.sourceId, evidenceRef: signal.evidenceRef, createdAtMs: signal.createdAtMs });
+        // Bug review independen (Codex putaran-9): pembatas laju hanya
+        // membatasi per-sumber -- pemanggil dengan banyak sourceId berbeda
+        // bisa menumpuk dukungan tak terbatas untuk SATU target, dan setiap
+        // recompute memindai seluruh daftar itu. Dibatasi eksplisit di sini,
+        // membuang yang tertua saat kelebihan (masih terhitung di aging via
+        // corroborationBonus yang sudah dibatasi MAX_DISTINCT_SOURCES_COUNTED).
+        const support = supportingSignals.get(targetId);
+        support.push({ sourceId: signal.sourceId, evidenceRef: signal.evidenceRef, createdAtMs: signal.createdAtMs });
+        if (support.length > bounds.MAX_SUPPORTING_SIGNALS_PER_TARGET) support.shift();
         evictLowestIfOverflow();
         recomputeAll();
         return { signal, targetId };
@@ -170,12 +178,13 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
     function overflowCount() { return overflowTotalCount; }
     function overflowEntries() { return [...overflowJournal]; }
     function isNoisySource(sourceId) { return noisySources.has(sourceId); }
+    function supportingSignalCount(targetId) { return (supportingSignals.get(targetId) ?? []).length; }
 
     return Object.freeze({
         schemaVersion: SCHEMA_VERSION,
         ingestSignal, pick, preempt, complete, getTarget,
         overloadState, toGovernorPriority, governorMappingAudit: () => [...governorMappingAudit],
-        overflowCount, overflowEntries, isNoisySource,
+        overflowCount, overflowEntries, isNoisySource, supportingSignalCount,
         laws, bounds
     });
 }

@@ -69,6 +69,14 @@ function assertSafePayloadRef(value, depth = 0) {
     if (depth > MAX_PAYLOAD_SCAN_DEPTH) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef terlalu dalam untuk diverifikasi dengan aman, ditolak");
     }
+    // Bug review independen (Codex putaran-9): array jarang (mis. `new
+    // Array(2**32-1)`) tidak punya kunci indeks OWN sama sekali, jadi lolos
+    // pagar ini tanpa terdeteksi, lalu JSON.stringify mencoba memproses
+    // tiap lubangnya SEBELUM cek ukuran 1KB sempat berjalan -- DoS memori/CPU.
+    // Panjang array diperiksa eksplisit di sini, sebelum walk maupun stringify.
+    if (Array.isArray(value) && value.length > BOUNDS.MAX_PAYLOAD_ARRAY_LENGTH) {
+        fail(REASONS.PAYLOAD_TOO_LARGE, "panjang array pada payloadRef melebihi batas");
+    }
     for (const key of Reflect.ownKeys(value)) {
         if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa kunci Symbol");
         if (FORBIDDEN_PAYLOAD_KEYS.includes(key)) {
@@ -91,10 +99,12 @@ function validatePayloadRef(payloadRef) {
     if (Buffer.byteLength(serialized) > BOUNDS.MAX_PAYLOAD_REF_BYTES) {
         fail(REASONS.PAYLOAD_TOO_LARGE, "payloadRef melebihi batas ukuran");
     }
-    // PM-1: tidak boleh membawa field bernuansa eksekusi/otoritas, DI
-    // KEDALAMAN MANAPUN — bug diketemukan review independen (Codex):
-    // pemeriksaan lama hanya level-atas, { nested: { capabilityId } } lolos.
-    assertNoForbiddenPayloadKeys(payloadRef);
+    // Bug review independen (Codex putaran-9): panggilan ini menunjuk
+    // fungsi yang tidak pernah ada lagi setelah PM-1 dipindah ke
+    // assertSafePayloadRef (rekursif, sudah berjalan di atas) -- SETIAP
+    // payloadRef non-null yang sah gagal dengan ReferenceError. Dihapus;
+    // pemeriksaan kunci terlarang DI KEDALAMAN MANAPUN sudah dilakukan
+    // assertSafePayloadRef sebelum baris ini.
     return JSON.parse(serialized);
 }
 
