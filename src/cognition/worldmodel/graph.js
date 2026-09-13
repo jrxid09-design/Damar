@@ -7,6 +7,7 @@
  */
 
 const { BOUNDS } = require("./bounds");
+const { REASONS, fail } = require("./errors");
 
 function adjacency(relations, entityId) {
     const out = [];
@@ -18,6 +19,13 @@ function adjacency(relations, entityId) {
 }
 
 function neighbors(state, entityId, kinds = null, depth = 1) {
+    // Bug review independen (audit putaran-22, F-2): `budget` di subgraph()
+    // dijaga (putaran-20) tapi `kinds` di FUNGSI SAMA-KELAS ini tidak --
+    // `kinds` bukan array/null meledakkan `.includes()` jadi TypeError
+    // mentah.
+    if (kinds !== null && kinds !== undefined && !Array.isArray(kinds)) {
+        fail(REASONS.INVALID_RECORD, "kinds wajib array atau null");
+    }
     const boundedDepth = Math.min(depth, BOUNDS.NEIGHBORS_MAX_DEPTH);
     const visited = new Set([entityId]);
     let frontier = [entityId];
@@ -49,6 +57,13 @@ function neighbors(state, entityId, kinds = null, depth = 1) {
 }
 
 function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 262144 }) {
+    // Bug review independen (audit putaran-22, F-2): sibling `budget`
+    // dijaga (putaran-20) tapi `seeds` tidak -- `seeds: null` eksplisit
+    // meledakkan `new Set(seeds)`/`[...seeds]` jadi TypeError mentah
+    // ("seeds is not iterable"), asimetri elemen-vs-kontainer yang sama
+    // dengan AUD21-P2-1.
+    if (seeds === undefined || seeds === null) seeds = [];
+    else if (!Array.isArray(seeds)) fail(REASONS.INVALID_RECORD, "seeds wajib array");
     // Bug review independen (audit putaran-20, AUD20-P2-2): default parameter
     // hanya berlaku untuk `undefined` -- `budget: null` eksplisit lolos lalu
     // meledakkan `budget.nodes`/`budget.bytes` jadi TypeError mentah.
