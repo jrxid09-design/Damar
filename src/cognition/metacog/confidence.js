@@ -18,7 +18,11 @@ const BASIS = Object.freeze([
 const STALE_AFTER_MS = 30 * 60_000;
 
 function determineBasis(evidenceQuality, nowMs) {
-    const { sourceCount = 0, contradictionCount = 0, verifiedCount = 0, freshestAtMs = null, inferenceOnly = false } = evidenceQuality;
+    // Bug review independen (audit putaran-21, AUD21-ADV-1): evidenceQuality
+    // null/undefined meledakkan destructuring jadi TypeError mentah --
+    // diperlakukan sebagai "tidak ada bukti" (NO_EVIDENCE), gagal aman,
+    // bukan crash.
+    const { sourceCount = 0, contradictionCount = 0, verifiedCount = 0, freshestAtMs = null, inferenceOnly = false } = evidenceQuality || {};
 
     if (contradictionCount > 0) return "CONTESTED";
     if (verifiedCount > 0) return "VERIFIED_EVIDENCE";

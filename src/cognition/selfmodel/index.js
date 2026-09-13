@@ -234,7 +234,16 @@ async function createSelfModel({
         // punya horizon independen jauh lebih besar (MAX_APPLIED_EVIDENCE_REFS),
         // sama seperti worldmodel's appliedRecordIds/contestedRecordIds.
         const appliedEvidenceRefs = window.appliedEvidenceRefs ?? [];
-        if (appliedEvidenceRefs.includes(evidenceRef)) {
+        // Bug review independen (audit putaran-21, AUD21-P2-2): putaran-20
+        // MENGGANTI dedup `history` dengan `appliedEvidenceRefs`, bukan
+        // meng-OR-kannya, dan tidak pernah menabur (seed) appliedEvidenceRefs
+        // dari `history` window yang sudah ada -- window durabel yang
+        // ditulis kandidat SEBELUM putaran-20 (punya history, tanpa
+        // appliedEvidenceRefs) kehilangan dedup sama sekali untuk setiap
+        // evidenceRef di history-nya sampai window itu diperbarui lagi.
+        // Kedua pemeriksaan dipertahankan sekaligus.
+        if (appliedEvidenceRefs.includes(evidenceRef) ||
+            (window.history ?? []).some(h => h.evidenceRef === evidenceRef)) {
             return assess(capabilityId);
         }
         // Bug review independen (audit putaran-8, W7R8-P1-2): `history`

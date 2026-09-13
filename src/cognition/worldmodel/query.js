@@ -25,6 +25,12 @@ function computeConfidence(belief, nowMs) {
 }
 
 function subjectKeyOf(subject) {
+    // Bug review independen (audit putaran-21, AUD21-ADV-1): subject
+    // malformed (null/non-objek) meledakkan `.entityId` jadi TypeError
+    // mentah -- dijaga jadi kunci yang tidak pernah cocok dengan belief
+    // manapun (gagal aman ke NEVER_OBSERVED lewat beliefKey/query di
+    // bawah, tidak pernah memfabrikasi atau menggabungkan subject lain).
+    if (!subject || typeof subject !== "object") return "invalid:malformed-subject";
     return subject.entityId ? `entity:${subject.entityId}` : `relation:${subject.relationId}`;
 }
 
