@@ -1,0 +1,34 @@
+"use strict";
+
+const REASONS = Object.freeze({
+    INVALID_RECORD: "INVALID_RECORD",
+    UNVERIFIABLE_SUCCESS_CONDITION: "UNVERIFIABLE_SUCCESS_CONDITION",
+    GOAL_DEPTH_EXCEEDED: "GOAL_DEPTH_EXCEEDED",
+    CHILDREN_LIMIT_EXCEEDED: "CHILDREN_LIMIT_EXCEEDED",
+    CREATION_RATE_EXCEEDED: "CREATION_RATE_EXCEEDED",
+    ACTIVE_GOAL_LIMIT_EXCEEDED: "ACTIVE_GOAL_LIMIT_EXCEEDED",
+    INVALID_TRANSITION: "INVALID_TRANSITION",
+    APPROVAL_REQUIRED: "APPROVAL_REQUIRED",
+    APPROVAL_EXPIRED: "APPROVAL_EXPIRED",
+    SATISFACTION_REQUIRES_T1: "SATISFACTION_REQUIRES_T1",
+    UNKNOWN_GOAL: "UNKNOWN_GOAL",
+    UNKNOWN_TASK: "UNKNOWN_TASK",
+    PLAN_STEP_LIMIT_EXCEEDED: "PLAN_STEP_LIMIT_EXCEEDED",
+    OPEN_COMMITMENT_LIMIT_EXCEEDED: "OPEN_COMMITMENT_LIMIT_EXCEEDED",
+    ATTEMPTS_EXCEEDED: "ATTEMPTS_EXCEEDED"
+});
+
+class GoalError extends Error {
+    constructor(reason, message, details = null) {
+        super(message);
+        this.name = "GoalError";
+        this.reason = reason;
+        this.details = details;
+    }
+}
+
+function fail(reason, message, details) {
+    throw new GoalError(reason, message, details);
+}
+
+module.exports = { REASONS, GoalError, fail };

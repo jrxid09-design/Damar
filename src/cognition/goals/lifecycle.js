@@ -1,0 +1,117 @@
+"use strict";
+
+/**
+ * W7-L3 GOALS — mesin status (spec §4 persis) + transisi Commitment/Task.
+ * G-7: setiap transisi Goal tercatat { at, from, to, reason, actorKind,
+ * evidenceRef } — tidak ada transisi anonim. G-8: status terminal itu final.
+ */
+
+const { REASONS, fail } = require("./errors");
+const { BOUNDS } = require("./bounds");
+
+const ACTOR_KINDS = new Set(["OWNER", "SELF", "SYSTEM", "MISSION"]);
+const TERMINAL_GOAL_STATES = new Set(["SATISFIED", "ABANDONED", "SUPERSEDED"]);
+
+const GOAL_TRANSITIONS = Object.freeze({
+    approve: { from: ["PROPOSED"], to: "ACCEPTED" },
+    activate: { from: ["ACCEPTED"], to: "ACTIVE" },
+    pause: { from: ["ACTIVE"], to: "PAUSED" },
+    resume: { from: ["PAUSED"], to: "ACTIVE" },
+    block: { from: ["ACTIVE"], to: "BLOCKED" },
+    unblock: { from: ["BLOCKED"], to: "ACTIVE" },
+    succeed: { from: ["ACTIVE"], to: "SATISFIED" },
+    abandon: { from: ["ACTIVE", "BLOCKED", "PAUSED"], to: "ABANDONED" },
+    supersede: { from: ["PROPOSED", "ACCEPTED", "ACTIVE", "PAUSED", "BLOCKED"], to: "SUPERSEDED" }
+});
+
+function appendTransitionLog(log, entry) {
+    const next = [...log, entry];
+    if (next.length <= BOUNDS.MAX_TRANSITION_LOG_PER_GOAL) return { log: next, truncated: false };
+    // §4: "keep first and last, flag truncated".
+    return { log: [next[0], ...next.slice(-(BOUNDS.MAX_TRANSITION_LOG_PER_GOAL - 1))], truncated: true };
+}
+
+/**
+ * `evidence` diperlukan hanya untuk `succeed` (G-6: WAJIB T1) — parameter
+ * lain (`actorKind`, `reason`, `evidenceRef`) wajib untuk SEMUA transisi (G-7).
+ */
+function transitionGoal(goal, action, { actorKind, reason, evidenceRef = null, evidenceTier = null, nowIso }) {
+    if (!ACTOR_KINDS.has(actorKind)) fail(REASONS.INVALID_TRANSITION, `actorKind '${actorKind}' tidak dikenal`);
+    if (TERMINAL_GOAL_STATES.has(goal.state)) {
+        fail(REASONS.INVALID_TRANSITION, `status terminal '${goal.state}' bersifat final (G-8)`);
+    }
+    const rule = GOAL_TRANSITIONS[action];
+    if (!rule) fail(REASONS.INVALID_TRANSITION, `aksi '${action}' tidak dikenal`);
+    if (!rule.from.includes(goal.state)) {
+        fail(REASONS.INVALID_TRANSITION, `tidak bisa '${action}' dari status '${goal.state}'`);
+    }
+
+    if (action === "succeed" && evidenceTier !== "T1") {
+        // G-6: T2 (hasil eksekusi) tidak cukup untuk SATISFIED.
+        fail(REASONS.SATISFACTION_REQUIRES_T1, "SATISFIED wajib bukti T1, T2 tidak cukup");
+    }
+    if (action === "activate" && goal.ownerApproval.state === "REQUIRED") {
+        fail(REASONS.APPROVAL_REQUIRED, "goal belum disetujui pemilik");
+    }
+
+    const entry = Object.freeze({ at: nowIso, from: goal.state, to: rule.to, reason, actorKind, evidenceRef });
+    const { log, truncated } = appendTransitionLog(goal.transitions, entry);
+
+    return Object.freeze({
+        ...goal, state: rule.to, lastTransitionAt: nowIso,
+        transitions: Object.freeze(log), transitionsTruncated: truncated
+    });
+}
+
+const COMMITMENT_TRANSITIONS = Object.freeze({
+    met: { from: ["OPEN"], to: "MET" },
+    miss: { from: ["OPEN"], to: "MISSED" },
+    release: { from: ["OPEN"], to: "RELEASED" },
+    renegotiate: { from: ["OPEN", "MISSED"], to: "RENEGOTIATED" }
+});
+
+function transitionCommitment(commitment, action, { evidenceRef = null } = {}) {
+    const rule = COMMITMENT_TRANSITIONS[action];
+    if (!rule) fail(REASONS.INVALID_TRANSITION, `aksi commitment '${action}' tidak dikenal`);
+    if (!rule.from.includes(commitment.state)) {
+        fail(REASONS.INVALID_TRANSITION, `tidak bisa '${action}' dari status '${commitment.state}'`);
+    }
+    return Object.freeze({ ...commitment, state: rule.to, evidenceRef: evidenceRef ?? commitment.evidenceRef });
+}
+
+const TASK_TRANSITIONS = Object.freeze({
+    ready: { from: ["PENDING"], to: "READY" },
+    formIntent: { from: ["READY"], to: "INTENT_FORMED" },
+    awaitAuthority: { from: ["INTENT_FORMED"], to: "AWAITING_AUTHORITY" },
+    execute: { from: ["AWAITING_AUTHORITY"], to: "EXECUTING" },
+    verify: { from: ["EXECUTING"], to: "VERIFYING" },
+    done: { from: ["VERIFYING"], to: "DONE" },
+    fail: { from: ["EXECUTING", "VERIFYING", "AWAITING_AUTHORITY", "READY", "INTENT_FORMED"], to: "FAILED" },
+    skip: { from: ["PENDING", "READY"], to: "SKIPPED" },
+    // P-3: percobaan ulang membentuk intent BARU dan dievaluasi ulang oleh
+    // Authority — bukan melanjutkan eksekusi lama.
+    retry: { from: ["FAILED"], to: "AWAITING_AUTHORITY" },
+    // Restart: EXECUTING tidak pernah dilanjutkan — kembali ke PENDING (freeze criterion #3).
+    resetAfterRestart: { from: ["EXECUTING", "AWAITING_AUTHORITY", "INTENT_FORMED"], to: "PENDING" }
+});
+
+function transitionTask(task, action) {
+    const rule = TASK_TRANSITIONS[action];
+    if (!rule) fail(REASONS.INVALID_TRANSITION, `aksi task '${action}' tidak dikenal`);
+    if (!rule.from.includes(task.state)) {
+        fail(REASONS.INVALID_TRANSITION, `tidak bisa '${action}' dari status '${task.state}'`);
+    }
+    let attempts = task.attempts;
+    if (action === "execute") {
+        attempts += 1;
+        if (attempts > task.maxAttempts) {
+            fail(REASONS.ATTEMPTS_EXCEEDED, `melebihi maxAttempts (${task.maxAttempts})`);
+        }
+    }
+    return Object.freeze({ ...task, state: rule.to, attempts });
+}
+
+module.exports = {
+    ACTOR_KINDS, TERMINAL_GOAL_STATES, GOAL_TRANSITIONS, COMMITMENT_TRANSITIONS, TASK_TRANSITIONS,
+    transitionGoal, transitionCommitment, transitionTask
+};
