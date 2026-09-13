@@ -190,6 +190,14 @@ test("SM-repair-11: hostile toString on tier/outcome/health-state never executes
     assert.equal(calledState, 0, "health state's toString must never be invoked before the enum check");
 });
 
+test("SM-repair-12: a Symbol generation is rejected as INVALID_OBSERVATION, not a raw TypeError (independent audit AUD27-P2-5)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const sm = await createSelfModel({ capabilityRegistry: registry });
+    assertThrowsReason(() => sm.ingestAvailability({
+        capabilityId: "cap.x", availability: "AVAILABLE", generation: Symbol("g"), observedAtMs: 0
+    }), "INVALID_OBSERVATION");
+});
+
 test("SM-A2: stale availability is marked STALE after TTL, never silently USABLE", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const clock = manualClock(0);

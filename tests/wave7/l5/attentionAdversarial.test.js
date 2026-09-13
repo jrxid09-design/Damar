@@ -123,6 +123,27 @@ test("AT-repair-23: mapToGovernorPriority never returns an inherited Object.prot
     assert.equal(ae.governorMappingAudit().every(e => typeof e.mapped === "string"), true, "every audit entry's mapped value must be a string");
 });
 
+test("AT-repair-24: replaying the SAME object evidenceRef from the same source is one corroboration pair, not N (independent audit AUD27-P2-3)", async () => {
+    const ae = await createAttentionEconomy();
+    const obj = { ev: "X" };
+    const { targetId } = ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s", subjectRef: { entityId: "z" }, evidenceRef: obj }, "PERCEIVE");
+    for (let i = 0; i < 6; i++) {
+        ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s", subjectRef: { entityId: "z" }, evidenceRef: obj }, "PERCEIVE");
+    }
+    const one = await createAttentionEconomy();
+    const single = one.ingestSignal({ sourceKind: "SENSOR", sourceId: "s", subjectRef: { entityId: "z" }, evidenceRef: { ev: "X" } }, "PERCEIVE");
+    assert.equal(ae.getTarget(targetId).effectivePriority, one.getTarget(single.targetId).effectivePriority,
+        "replaying the same evidenceRef object reference must not inflate corroboration past a single pair");
+});
+
+test("AT-repair-25: a replayed signalId is not counted twice (independent audit AUD27-P2-7)", async () => {
+    const ae = await createAttentionEconomy();
+    const ev = { e: 1 };
+    ae.ingestSignal({ signalId: "S", sourceKind: "SENSOR", sourceId: "s", subjectRef: { entityId: "e" }, evidenceRef: ev }, "PERCEIVE");
+    const r = ae.ingestSignal({ signalId: "S", sourceKind: "SENSOR", sourceId: "s", subjectRef: { entityId: "e" }, evidenceRef: ev }, "PERCEIVE");
+    assert.equal(ae.supportingSignalCount(r.targetId), 1, "a replayed signalId must not add a second support entry");
+});
+
 test("AT-A1: salience flooding from one sensor is rate-capped and the source marked noisy", async () => {
     const ae = await createAttentionEconomy({ bounds: { ...BOUNDS, MAX_SIGNALS_PER_SOURCE_PER_MINUTE: 3 } });
     for (let i = 0; i < 3; i++) {

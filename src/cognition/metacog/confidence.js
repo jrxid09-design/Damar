@@ -22,7 +22,19 @@ function determineBasis(evidenceQuality, nowMs) {
     // null/undefined meledakkan destructuring jadi TypeError mentah --
     // diperlakukan sebagai "tidak ada bukti" (NO_EVIDENCE), gagal aman,
     // bukan crash.
-    const { sourceCount = 0, contradictionCount = 0, verifiedCount = 0, freshestAtMs = null, inferenceOnly = false } = evidenceQuality || {};
+    const raw = evidenceQuality || {};
+    // Bug review independen (audit putaran-27, AUD27-P2-6): field numerik
+    // dari evidenceQuality dulu dipakai APA ADANYA di perbandingan relasi
+    // (`> 0`, `>= 2`, `=== 1`) -- Symbol meledakkan TypeError mentah di
+    // perbandingan itu (relational comparison memaksa ToNumber), dan
+    // `{valueOf(){...}}` mengeksekusi valueOf pemanggil. Dinormalisasi ke
+    // angka aman (0 kalau bukan angka valid) sebelum dipakai.
+    const safeNumber = (v) => (typeof v === "number" && Number.isFinite(v)) ? v : 0;
+    const sourceCount = safeNumber(raw.sourceCount);
+    const contradictionCount = safeNumber(raw.contradictionCount);
+    const verifiedCount = safeNumber(raw.verifiedCount);
+    const freshestAtMs = (typeof raw.freshestAtMs === "number" && Number.isFinite(raw.freshestAtMs)) ? raw.freshestAtMs : null;
+    const inferenceOnly = raw.inferenceOnly === true;
 
     if (contradictionCount > 0) return "CONTESTED";
     if (verifiedCount > 0) return "VERIFIED_EVIDENCE";

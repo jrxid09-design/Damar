@@ -79,6 +79,13 @@ test("MC-repair-11: hostile toString on proposal.kind/outcomeTier/reviewId never
     assert.equal(calledReviewId, 0, "an unknown reviewId's toString must never be invoked while building the error message");
 });
 
+test("MC-repair-12: a Symbol evidenceQuality field fails safe to NO_EVIDENCE-shaped behavior, not a raw TypeError (independent audit AUD27-P2-6)", async () => {
+    const mc = await createMetacognition();
+    assert.doesNotThrow(() => mc.assess({ entityId: "e" }, "c", { sourceCount: Symbol("n") }));
+    const a = mc.assess({ entityId: "e" }, "c", { sourceCount: Symbol("n") });
+    assert.equal(a.basis, "NO_EVIDENCE");
+});
+
 test("MC-A1: fake confidence (model writes 0.99) is impossible — no API accepts a raw value", async () => {
     const mc = await createMetacognition();
     const a = mc.assess({ entityId: "e1" }, "claim", { value: 0.99, sourceCount: 0 }); // "value" in input ignored

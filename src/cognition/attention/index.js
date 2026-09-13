@@ -46,6 +46,10 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
     let overflowTotalCount = 0;
     const governorMappingAudit = [];
     const noisySources = new Set();
+    // AUD27-P2-7: signalId -> targetId, bounded FIFO -- lihat komentar di
+    // ingestSignal (replay dedup, sama seperti observationId/relationId/dll
+    // di lane lain).
+    const signalIdToTargetId = new Map();
 
     function now() { return clock.nowMs(); }
 
@@ -117,7 +121,7 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         for (const [id, t] of targets) {
             if (t.state !== "QUEUED") continue;
             const support = supportingSignals.get(id) ?? [];
-            const distinctPairs = new Set(support.map(s => `${s.sourceId}::${evidenceRefIdentity(s.evidenceRef)}`)).size;
+            const distinctPairs = new Set(support.map(s => `${s.sourceId}::${s.evidenceIdentity}`)).size;
             const newestSignalAge = support.length
                 ? now() - Math.max(...support.map(s => s.createdAtMs)) : 0;
             const effectivePriority = computeEffectivePriority(t, {
@@ -178,6 +182,16 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         // Bug review independen (audit putaran-21, AUD21-ADV-1): spec null/
         // non-objek meledakkan `spec.signalId` jadi TypeError mentah.
         if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
+        // Bug review independen (audit putaran-27, AUD27-P2-3): identitas
+        // evidenceRef WAJIB dihitung dari referensi ASLI pemanggil (spec.evidenceRef)
+        // di sini -- makeSignal (di bawah) menyimpan SALINAN beku
+        // (`deepFreeze({...evidenceRef})`), objek BARU setiap panggilan, jadi
+        // menghitung identitas dari signal.evidenceRef (versi tersimpan)
+        // membuat replay evidenceRef objek yang SAMA dari sumber yang SAMA
+        // selalu dianggap berbeda (tiap salinan dapat id WeakMap sendiri),
+        // meniadakan dedup korroborasi AT-5 -- pembalikan diam-diam dari
+        // perbaikan putaran-24/25 yang justru menutup kelas bug ini.
+        const evidenceIdentity = evidenceRefIdentity(spec.evidenceRef);
         // Bug review independen (audit putaran-11, AUD11-P2-9): enforceSourceRate
         // dulu berjalan SEBELUM makeSignal memvalidasi spec -- signal yang
         // ditolak (sourceId/sourceKind cacat) tetap membuat/menaikkan kunci
@@ -185,6 +199,17 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         // sudah diperbaiki di goals' proposeGoal tapi tidak dimigrasikan ke
         // sini. Validasi/bangun record dulu, baru tegakkan rate.
         const signal = makeSignal({ ...spec, signalId: spec.signalId ?? crypto.randomUUID(), createdAtMs: now() });
+        // Bug review independen (audit putaran-27, AUD27-P2-7): signalId
+        // yang di-replay (pengiriman ulang lintas-node) dulu dihitung
+        // sebagai signal BARU setiap kali -- support bertambah lagi untuk
+        // bukti yang sama (memalsukan korroborasi) DAN sourceId-nya menagih
+        // kuota rate lagi (self-DoS lewat replay), satu-satunya id
+        // eksternal di lane ini yang tidak pernah dijaga dedup, tidak
+        // seperti observationId/relationId/dll di lane lain.
+        const alreadySeenTargetId = signalIdToTargetId.get(signal.signalId);
+        if (alreadySeenTargetId !== undefined) {
+            return { signal, targetId: alreadySeenTargetId };
+        }
         // Bug review independen (audit putaran-14, AUD14-P2-2): workKind
         // hanya divalidasi DI DALAM makeTarget, yang berjalan SETELAH
         // enforceSourceRate/targetKey -- signal dengan workKind cacat tetap
@@ -228,8 +253,12 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         // membuang yang tertua saat kelebihan (masih terhitung di aging via
         // corroborationBonus yang sudah dibatasi MAX_DISTINCT_SOURCES_COUNTED).
         const support = supportingSignals.get(targetId);
-        support.push({ sourceId: signal.sourceId, evidenceRef: signal.evidenceRef, createdAtMs: signal.createdAtMs });
+        support.push({ sourceId: signal.sourceId, evidenceIdentity, createdAtMs: signal.createdAtMs });
         if (support.length > bounds.MAX_SUPPORTING_SIGNALS_PER_TARGET) support.shift();
+        signalIdToTargetId.set(signal.signalId, targetId);
+        if (signalIdToTargetId.size > bounds.MAX_SEEN_SIGNAL_IDS) {
+            signalIdToTargetId.delete(signalIdToTargetId.keys().next().value);
+        }
         evictLowestIfOverflow(targetId);
         recomputeAll();
         return { signal, targetId };

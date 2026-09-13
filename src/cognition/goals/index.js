@@ -91,7 +91,13 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         let depth = 0;
         if (spec.parentGoalId) {
             const parent = goals.get(spec.parentGoalId);
-            if (!parent) fail(REASONS.INVALID_RECORD, `parentGoalId '${spec.parentGoalId}' tidak ditemukan`);
+            // Bug review independen (audit putaran-27, AUD27-P2-2): interpolasi
+            // `${spec.parentGoalId}` mentah meledakkan TypeError untuk Symbol;
+            // putaran-26 menutup 5 sibling id-message di file yang sama tapi
+            // melewatkan yang ini.
+            if (!parent) {
+                fail(REASONS.INVALID_RECORD, `parentGoalId '${typeof spec.parentGoalId === "string" ? spec.parentGoalId : typeof spec.parentGoalId}' tidak ditemukan`);
+            }
             depth = parent.depth + 1;
 
             const siblingCount = childCounts.get(spec.parentGoalId) ?? 0;

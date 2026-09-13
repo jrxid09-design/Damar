@@ -59,7 +59,15 @@ function transitionGoal(goal, action, { actorKind, reason, evidenceRef = null, e
     if (TERMINAL_GOAL_STATES.has(goal.state)) {
         fail(REASONS.INVALID_TRANSITION, `status terminal '${goal.state}' bersifat final (G-8)`);
     }
-    const rule = GOAL_TRANSITIONS[actionKey];
+    // Bug review independen (audit putaran-27, AUD27-P2-1): actionKey
+    // dinormalisasi ke string (putaran-25) tapi indexing objek biasa masih
+    // menembus Object.prototype -- action:"constructor"/"toString"/
+    // "hasOwnProperty"/"__proto__" mengembalikan anggota Object.prototype
+    // yang terwarisi (bukan undefined), meledakkan `.from.includes` jadi
+    // TypeError mentah, atau (dengan polusi Object.prototype.from/.to di
+    // tempat lain) mengizinkan transisi status DIAM-DIAM -- pola yang sama
+    // yang sudah ditutup untuk mapToGovernorPriority (AUD26-P2-3).
+    const rule = Object.prototype.hasOwnProperty.call(GOAL_TRANSITIONS, actionKey) ? GOAL_TRANSITIONS[actionKey] : null;
     if (!rule) fail(REASONS.INVALID_TRANSITION, `aksi '${actionKey}' tidak dikenal`);
     if (!rule.from.includes(goal.state)) {
         fail(REASONS.INVALID_TRANSITION, `tidak bisa '${actionKey}' dari status '${goal.state}'`);
@@ -94,7 +102,8 @@ function transitionCommitment(commitment, action, { evidenceRef = null } = {}) {
     // transitionGoal -- `action` mentah dipakai sebagai kunci properti
     // DAN diinterpolasi.
     const actionKey = typeof action === "string" ? action : "";
-    const rule = COMMITMENT_TRANSITIONS[actionKey];
+    // Bug review independen (audit putaran-27, AUD27-P2-1): sama seperti transitionGoal.
+    const rule = Object.prototype.hasOwnProperty.call(COMMITMENT_TRANSITIONS, actionKey) ? COMMITMENT_TRANSITIONS[actionKey] : null;
     if (!rule) fail(REASONS.INVALID_TRANSITION, `aksi commitment '${actionKey}' tidak dikenal`);
     if (!rule.from.includes(commitment.state)) {
         fail(REASONS.INVALID_TRANSITION, `tidak bisa '${actionKey}' dari status '${commitment.state}'`);
@@ -127,7 +136,8 @@ function transitionTask(task, action) {
     // Bug review independen (audit putaran-25, AUD25-P2-1): sama seperti
     // transitionGoal/transitionCommitment.
     const actionKey = typeof action === "string" ? action : "";
-    const rule = TASK_TRANSITIONS[actionKey];
+    // Bug review independen (audit putaran-27, AUD27-P2-1): sama seperti transitionGoal.
+    const rule = Object.prototype.hasOwnProperty.call(TASK_TRANSITIONS, actionKey) ? TASK_TRANSITIONS[actionKey] : null;
     if (!rule) fail(REASONS.INVALID_TRANSITION, `aksi task '${actionKey}' tidak dikenal`);
     if (!rule.from.includes(task.state)) {
         fail(REASONS.INVALID_TRANSITION, `tidak bisa '${actionKey}' dari status '${task.state}'`);

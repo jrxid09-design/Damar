@@ -37,6 +37,11 @@ test("W7-ENV-06/07: confidence out of [0,1] rejected", () => {
         "ACC_INVALID_CONFIDENCE");
 });
 
+test("W7-ENV-repair-4: a Symbol confidence/epistemicClass fails closed with an ACC_INVALID_* code, not a raw TypeError (independent audit AUD27-P2-4)", () => {
+    assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ confidence: Symbol("c") })), "ACC_INVALID_CONFIDENCE");
+    assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ epistemicClass: Symbol("e") })), "ACC_INVALID_EPISTEMIC_CLASS");
+});
+
 test("W7-ENV-08: NaN/Infinity/-Infinity confidence rejected", () => {
     for (const bad of [NaN, Infinity, -Infinity]) {
         assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ confidence: bad })),

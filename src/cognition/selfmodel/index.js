@@ -159,6 +159,13 @@ async function createSelfModel({
             fail(REASONS.INVALID_OBSERVATION, `availability tidak sah: ${error.message}`);
         }
 
+        // Bug review independen (audit putaran-27, AUD27-P2-5): `Number(generation)`
+        // meledakkan TypeError mentah untuk Symbol SEBELUM Number.isFinite
+        // sempat menolaknya, dan `Number({valueOf(){...}})` mengeksekusi
+        // valueOf milik pemanggil di dalam proses kognisi.
+        if (typeof generation === "symbol" || (typeof generation !== "number" && typeof generation !== "string" && typeof generation !== "boolean")) {
+            fail(REASONS.INVALID_OBSERVATION, "generation wajib angka >= 0");
+        }
         const gen = Number(generation);
         if (!Number.isFinite(gen) || gen < 0) {
             fail(REASONS.INVALID_OBSERVATION, "generation wajib angka >= 0");

@@ -586,6 +586,39 @@ test("GL-repair-42: a Symbol id passed to grantApproval/transition/transitionCom
     void g;
 });
 
+test("GL-repair-43: prototype-shaped action names (constructor/toString/hasOwnProperty/__proto__) are rejected as INVALID_TRANSITION, never a raw TypeError or a silent transition even under Object.prototype pollution (independent audit AUD27-P2-1)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    for (const a of ["constructor", "toString", "hasOwnProperty", "__proto__", "valueOf"]) {
+        assert.throws(() => ge.transition(g.goalId, a, { actorKind: "OWNER", reason: "r" }), (err) => {
+            assert.notEqual(err.constructor.name, "TypeError", `action '${a}': expected domain error, got raw ${err.constructor.name}: ${err.message}`);
+            assert.equal(err.reason, "INVALID_TRANSITION");
+            return true;
+        });
+    }
+    // escalation check: even with a hostile Object.prototype.from/.to primitive
+    // present elsewhere in the process, a prototype-shaped action must never
+    // silently transition state.
+    Object.prototype.from = ["ACCEPTED"];
+    Object.prototype.to = "SUPERSEDED";
+    try {
+        assert.throws(() => ge.transition(g.goalId, "constructor", { actorKind: "OWNER", reason: "r" }));
+        assert.equal(ge.getGoal(g.goalId).state, "PROPOSED", "goal state must not silently change via a prototype-shaped action");
+    } finally {
+        delete Object.prototype.from;
+        delete Object.prototype.to;
+    }
+});
+
+test("GL-repair-44: a Symbol parentGoalId is rejected as INVALID_RECORD, not a raw TypeError (independent audit AUD27-P2-2)", async () => {
+    const ge = await createGoalEngine();
+    assert.throws(() => ge.proposeGoal(baseGoalSpec({ parentGoalId: Symbol("p") })), (err) => {
+        assert.notEqual(err.constructor.name, "TypeError", `expected a domain error, got raw ${err.constructor.name}: ${err.message}`);
+        assert.equal(err.reason, "INVALID_RECORD");
+        return true;
+    });
+});
+
 function jsonStore() {
     const kv = new Map();
     return {
