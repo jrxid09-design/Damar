@@ -138,6 +138,15 @@ test("WM-repair-11: ingestDeclaration's subject is copied, post-ingest mutation 
     assert.deepEqual(wm.openContradictions()[0].subject, { entityId: "e1" });
 });
 
+test("WM-repair-12: beliefs are retention-bounded across many distinct attribute names on one entity (independent audit W7R7-P1-3)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_TOTAL_BELIEFS: 10 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    for (let i = 0; i < 100; i++) {
+        wm.ingestDeclaration({ subject: { entityId: "e1" }, attribute: `attr${i}`, value: i, declarationId: `d${i}` });
+    }
+    assert.ok(wm.beliefsSize() <= 10, "attribute string bebas tidak boleh menumpuk beliefs tanpa batas total");
+});
+
 test("WM-repair-3: an epoch-dated observation (1970-01-01T00:00:00.000Z) is not falsely treated as the newest evidence (Codex P2 round 9)", async () => {
     const clock = manualClock(1000);
     const wm = await createWorldModel({ clock });

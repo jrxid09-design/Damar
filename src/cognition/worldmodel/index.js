@@ -143,6 +143,20 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         const key = beliefKey(record.subject, record.attribute);
         const existing = beliefs.get(key);
 
+        // Bug review independen (audit putaran-7, W7R7-P1-3): beliefs tidak
+        // punya batas total sama sekali -- attribute string bebas milik
+        // pemanggil (ingestObservation/ingestDeclaration) berarti satu
+        // entitas bisa memicu beliefs tak terbatas. Cek HANYA saat key ini
+        // BARU (existing null) supaya tidak pernah mengevict belief yang
+        // baru saja dibuat/direvisi di panggilan ini sendiri.
+        if (!existing && beliefs.size >= bounds.MAX_TOTAL_BELIEFS) {
+            let victimKey = null, victimUpdatedAtMs = Infinity;
+            for (const [k, b] of beliefs) {
+                if (b.updatedAtMs < victimUpdatedAtMs) { victimUpdatedAtMs = b.updatedAtMs; victimKey = k; }
+            }
+            if (victimKey !== null) beliefs.delete(victimKey);
+        }
+
         const { case: caseName, belief, contradiction } = applyRevision({
             existing, record: { ...record, subjectKey }, nowMs: now(), decayPolicy: DEFAULT_DECAY_POLICY
         });
@@ -216,6 +230,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
 
     function stateView() { return { entities, relations }; }
     function entityCountBySourceSize() { return entityCountBySource.size; }
+    function beliefsSize() { return beliefs.size; }
 
     async function persist() {
         return saveSnapshot(store, { entities, relations, beliefs, hypotheses, contradictions });
@@ -231,7 +246,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         subgraph: (seeds, depth, budget) => graphOps.subgraph(stateView(), seeds, depth, budget),
         path: (from, to, maxDepth) => graphOps.path(stateView(), from, to, maxDepth),
         entitiesByKind: (kind, limit) => graphOps.entitiesByKind(stateView(), kind, limit),
-        openContradictions, resolveContradiction, entityCountBySourceSize,
+        openContradictions, resolveContradiction, entityCountBySourceSize, beliefsSize,
         persist, laws, bounds
     });
 }

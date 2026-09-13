@@ -126,6 +126,44 @@ test("PM-repair-7: remindersPerGoal deletes an ownerRef key once its count reach
         "kunci ownerRef harus dihapus begitu hitungannya kembali ke nol, bukan menumpuk selamanya");
 });
 
+function jsonStore() {
+    const kv = new Map();
+    return {
+        async getKv(k) { return kv.has(k) ? JSON.parse(kv.get(k)) : null; },
+        async putKv(k, v) { kv.set(k, JSON.stringify(v)); }
+    };
+}
+
+test("PM-restart-freeze: a reloaded reminder's payloadRef cannot be forged after a JSON-round-tripping restart (independent audit W7R7-P1-2)", async () => {
+    const store = jsonStore();
+    const p1 = await createProspectiveMemory({ store });
+    p1.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: "2030-01-01T00:00:00.000Z" }, payloadRef: { safe: true } });
+    await p1.persist();
+
+    const p2 = await createProspectiveMemory({ store });
+    const r = p2.getReminder("R1");
+    assert.equal(Object.isFrozen(r), true);
+    assert.equal(Object.isFrozen(r.payloadRef), true);
+    assert.throws(() => { "use strict"; r.payloadRef = { capabilityId: "forge.exec" }; });
+    assert.deepEqual(p2.getReminder("R1").payloadRef, { safe: true });
+});
+
+test("PM-repair-8: an until-only recurring reminder still bounds occurrences and firedOccurrenceIds (independent audit W7R7-P2-2)", async () => {
+    const clock = manualClock(0);
+    const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_RECURRENCE_OCCURRENCES: 5 } });
+    pm.arm({
+        reminderId: "R1", wakeClass: "MAINTENANCE",
+        trigger: { kind: "RECURRING", intervalMs: 60_000, until: new Date(1e12).toISOString() }
+    });
+    for (let i = 0; i < 20; i++) {
+        clock.advance(60_001);
+        pm.tick();
+    }
+    assert.ok(pm.reminderCount() >= 1, "reminder harus tetap ada (jadi terminal setelah occurrence habis)");
+    const r = pm.getReminder("R1");
+    assert.equal(r.state, "FIRED", "recurring until-saja harus berhenti setelah MAX_RECURRENCE_OCCURRENCES, bukan tak terbatas");
+});
+
 test("PM-repair-4: restart rebuild counts only ARMED reminders toward the per-goal cap (Codex P2 round 7)", async () => {
     const store = createMemoryAccStore();
     const clock = manualClock(0);

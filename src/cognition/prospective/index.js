@@ -19,14 +19,24 @@ const { loadSnapshot, saveSnapshot } = require("./store");
 
 function occurrenceKey(reminderId, occurrenceIndex) { return `${reminderId}:${occurrenceIndex}`; }
 
-function dueAtMs(reminder) {
+function dueAtMs(reminder, bounds = BOUNDS) {
     const t = reminder.trigger;
     if (t.kind === "AT") return Date.parse(t.at);
     if (t.kind === "AFTER") return (reminder.armedAtMs ?? 0) + t.delayMs;
     if (t.kind === "RECURRING") {
         const next = (reminder.armedAtMs ?? 0) + t.intervalMs * (reminder.occurrenceIndex + 1);
         if (t.until && next > Date.parse(t.until)) return null;
-        if (t.maxOccurrences && reminder.occurrenceIndex + 1 > t.maxOccurrences) return null;
+        // Bug review independen (audit putaran-7, W7R7-P2-2): ceiling
+        // maxOccurrences dulu hanya dicek kalau pemanggil MEMBERINYA --
+        // trigger `until`-saja yang jatuh tempo jauh di masa depan bisa
+        // tick tanpa batas, menumpuk firedOccurrenceIds tanpa henti karena
+        // reminder-nya sendiri tetap ARMED (bukan terminal) selamanya.
+        // bounds.MAX_RECURRENCE_OCCURRENCES sekarang jadi langit-langit
+        // implisit terlepas dari apakah maxOccurrences eksplisit diberikan.
+        const effectiveMaxOccurrences = t.maxOccurrences
+            ? Math.min(t.maxOccurrences, bounds.MAX_RECURRENCE_OCCURRENCES)
+            : bounds.MAX_RECURRENCE_OCCURRENCES;
+        if (reminder.occurrenceIndex + 1 > effectiveMaxOccurrences) return null;
         return next;
     }
     return null; // ON_STATE / ON_EVENT: bukan berbasis waktu
@@ -108,7 +118,7 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
 
         const isRecurring = reminder.trigger.kind === "RECURRING";
         const nextIndex = reminder.occurrenceIndex + 1;
-        const stillRecurs = isRecurring && dueAtMs({ ...reminder, occurrenceIndex: nextIndex }) !== null;
+        const stillRecurs = isRecurring && dueAtMs({ ...reminder, occurrenceIndex: nextIndex }, bounds) !== null;
 
         reminders.set(reminder.reminderId, Object.freeze({
             ...reminder,
@@ -184,7 +194,7 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
             if (reminder.state !== "ARMED") continue;
             if (!["AT", "AFTER", "RECURRING"].includes(reminder.trigger.kind)) continue;
 
-            const due = dueAtMs(reminder);
+            const due = dueAtMs(reminder, bounds);
             if (due === null || due > nowMs) continue; // belum jatuh tempo, bukan catch-up
 
             if (catchUpBudget <= 0) {
@@ -214,7 +224,7 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
                 continue;
             }
 
-            const due = dueAtMs(reminder);
+            const due = dueAtMs(reminder, bounds);
             if (due === null || due > nowMs) continue;
             const fired = fireReminder(reminders.get(reminder.reminderId), { missed: false, lateness: 0 });
             if (fired) events.push(fired);

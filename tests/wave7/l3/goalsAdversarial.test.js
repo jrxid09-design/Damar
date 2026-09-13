@@ -263,6 +263,15 @@ test("GL-repair-13: plans are globally retention-bounded across distinct goalRef
     assert.ok(ge.plansSize() <= 10, "banyak goalRef berbeda tidak boleh menumpuk plan tanpa batas total");
 });
 
+test("GL-repair-15: createPlan never returns/evicts the plan it just created, even out-of-order versions (independent audit W7R7-P2-1)", async () => {
+    const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_PLAN_VERSIONS_RETAINED: 3 } });
+    ge.createPlan({ planId: "p3", goalRef: "g", version: 3, steps: [] });
+    ge.createPlan({ planId: "p2", goalRef: "g", version: 2, steps: [] });
+    ge.createPlan({ planId: "p1", goalRef: "g", version: 1, steps: [] });
+    ge.createPlan({ planId: "p0", goalRef: "g", version: 0, steps: [] }); // lowest version, created last
+    assert.ok(ge.getPlan("p0") !== null, "plan yang baru saja dibuat tidak boleh dievict oleh kompaksinya sendiri");
+});
+
 test("GL-repair-14: a rejected createCommitment/createTask never evicts an existing terminal record (independent audit W7R6-P2-2)", async () => {
     const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_COMMITMENTS_RETAINED: 3, MAX_OPEN_COMMITMENTS: 100 } });
     for (let i = 0; i < 3; i++) {
@@ -278,6 +287,32 @@ test("GL-repair-14: a rejected createCommitment/createTask never evicts an exist
         dueCondition: { kind: "k" } // missing subject/attribute -> validateConditionSpec rejects
     }));
     assert.equal(ge.commitmentsSize(), 3, "commitment valid tidak boleh dievict akibat create LAIN yang gagal validasi");
+});
+
+function jsonStore() {
+    const kv = new Map();
+    return {
+        async getKv(k) { return kv.has(k) ? JSON.parse(kv.get(k)) : null; },
+        async putKv(k, v) { kv.set(k, JSON.stringify(v)); }
+    };
+}
+
+test("GL-restart-freeze: a reloaded goal's ownerApproval cannot be forged after a JSON-round-tripping restart (independent audit W7R7-P1-1)", async () => {
+    const store = jsonStore();
+    const g1 = await createGoalEngine({ store });
+    g1.proposeGoal({
+        goalId: "SELF1", title: "t", kind: "SELF_PROPOSED", origin: { kind: "SELF", ref: "x" },
+        successCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" }
+    });
+    g1.transition("SELF1", "approve", { actorKind: "OWNER", reason: "r" });
+    await g1.persist();
+
+    const g2 = await createGoalEngine({ store });
+    const g = g2.getGoal("SELF1");
+    assert.equal(Object.isFrozen(g), true);
+    assert.equal(Object.isFrozen(g.ownerApproval), true);
+    assert.throws(() => { "use strict"; g.ownerApproval = { state: "GRANTED" }; });
+    assertThrowsReason(() => g2.transition("SELF1", "activate", { actorKind: "OWNER", reason: "r" }), "APPROVAL_REQUIRED");
 });
 
 test("GL-A5: immortal goal — terminal states are terminal, cannot be reactivated", async () => {
