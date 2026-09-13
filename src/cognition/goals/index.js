@@ -85,16 +85,27 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
             fail(REASONS.GOAL_DEPTH_EXCEEDED, `depth melebihi batas (${bounds.MAX_GOAL_DEPTH})`);
         }
 
-        const goal = makeGoal({ ...spec, depth, goalId: spec.goalId ?? crypto.randomUUID(), nowIso: nowIso() });
-        goals.set(goal.goalId, goal);
-        if (goal.parentGoalId) childCounts.set(goal.parentGoalId, (childCounts.get(goal.parentGoalId) ?? 0) + 1);
-
-        if (goals.size > bounds.MAX_TOTAL_GOALS_RETAINED) {
+        // Bug review independen (Codex putaran-6): cek retensi lama berjalan
+        // SETELAH goal baru sudah dimasukkan, dan hanya mengevict kalau ada
+        // goal terminal -- kalau semua goal yang tersimpan masih non-terminal,
+        // proposal baru tetap diterima tanpa batas, melampaui
+        // MAX_TOTAL_GOALS_RETAINED selamanya. Sekarang cek berjalan SEBELUM
+        // insersi dan gagal tertutup kalau tidak ada goal terminal untuk dievict.
+        if (goals.size >= bounds.MAX_TOTAL_GOALS_RETAINED) {
             const terminal = [...goals.values()]
                 .filter(g => ["SATISFIED", "ABANDONED", "SUPERSEDED"].includes(g.state))
                 .sort((a, b) => Date.parse(a.lastTransitionAt) - Date.parse(b.lastTransitionAt));
-            if (terminal[0]) goals.delete(terminal[0].goalId);
+            if (terminal[0]) {
+                goals.delete(terminal[0].goalId);
+            } else {
+                fail(REASONS.GOAL_RETENTION_LIMIT_EXCEEDED,
+                    `retensi goal melebihi batas (${bounds.MAX_TOTAL_GOALS_RETAINED}) dan tidak ada goal terminal untuk dievict`);
+            }
         }
+
+        const goal = makeGoal({ ...spec, depth, goalId: spec.goalId ?? crypto.randomUUID(), nowIso: nowIso() });
+        goals.set(goal.goalId, goal);
+        if (goal.parentGoalId) childCounts.set(goal.parentGoalId, (childCounts.get(goal.parentGoalId) ?? 0) + 1);
 
         return goal;
     }

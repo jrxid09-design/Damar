@@ -45,6 +45,7 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
 
     let wakeEventsThisMinute = [];
     const deferredWakeEvents = [];
+    let droppedDeferredWakeEventCount = 0;
 
     function now() { return clock.nowMs(); }
     function nowIso() { return new Date(now()).toISOString(); }
@@ -71,6 +72,14 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         wakeEventsThisMinute = wakeEventsThisMinute.filter(t => now() - t < windowMs);
         if (wakeEventsThisMinute.length >= bounds.MAX_WAKE_EVENTS_PER_MINUTE) {
             deferredWakeEvents.push(event); // §9: tidak pernah dibuang diam-diam, hanya ditunda+terhitung
+            // Bug review independen (Codex putaran-6): antrean ini tidak
+            // pernah dibatasi -- beban recurring-reminder yang bertahan lama
+            // membuatnya tumbuh tanpa batas. Sekarang dibatasi, kelebihan
+            // tertua dibuang TAPI TETAP TERHITUNG (bukan hilang diam-diam).
+            if (deferredWakeEvents.length > bounds.MAX_DEFERRED_WAKE_EVENTS) {
+                deferredWakeEvents.shift();
+                droppedDeferredWakeEventCount += 1;
+            }
             return null;
         }
         wakeEventsThisMinute.push(now());
@@ -104,7 +113,10 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         // pernah dilepas setelah reminder berhenti ARMED secara permanen,
         // sehingga proses berumur panjang akhirnya menolak arm() baru
         // walau tidak ada lagi reminder yang benar-benar ARMED.
-        if (!stillRecurs) releaseArmedCapacity(reminder);
+        if (!stillRecurs) {
+            releaseArmedCapacity(reminder);
+            compactTerminalRemindersIfOverBound();
+        }
 
         return admitWakeEvent(event);
     }
@@ -112,12 +124,35 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
     function retire(reminder, reason) {
         reminders.set(reminder.reminderId, Object.freeze({ ...reminder, state: "RETIRED", retiredReason: reason }));
         releaseArmedCapacity(reminder);
+        compactTerminalRemindersIfOverBound();
     }
 
     function releaseArmedCapacity(reminder) {
         armedReminderCount = Math.max(0, armedReminderCount - 1);
         if (reminder.ownerRef) {
             remindersPerGoal.set(reminder.ownerRef, Math.max(0, (remindersPerGoal.get(reminder.ownerRef) ?? 1) - 1));
+        }
+    }
+
+    /**
+     * Bug review independen (Codex putaran-6): hanya reminder ARMED yang
+     * dihitung ke batas kapasitas -- reminder FIRED/RETIRED (dan
+     * firedOccurrenceIds miliknya) tertahan selamanya di memori dan snapshot.
+     * Dipanggil setiap kali reminder menjadi terminal; hanya mengompaksi
+     * reminder terminal PALING LAMA (createdAt), tidak pernah reminder yang
+     * masih ARMED.
+     */
+    function compactTerminalRemindersIfOverBound() {
+        if (reminders.size <= bounds.MAX_TOTAL_REMINDERS_RETAINED) return;
+        const terminal = [...reminders.values()]
+            .filter(r => r.state === "FIRED" || r.state === "RETIRED")
+            .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+        const victim = terminal[0];
+        if (!victim) return;
+        reminders.delete(victim.reminderId);
+        const prefix = `${victim.reminderId}:`;
+        for (const key of firedOccurrenceIds) {
+            if (key.startsWith(prefix)) firedOccurrenceIds.delete(key);
         }
     }
 
@@ -220,6 +255,8 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
     function getReminder(reminderId) { return reminders.get(reminderId) ?? null; }
     function getExpectation(expectationId) { return expectations.get(expectationId) ?? null; }
     function deferredCount() { return deferredWakeEvents.length; }
+    function droppedDeferredCount() { return droppedDeferredWakeEventCount; }
+    function reminderCount() { return reminders.size; }
 
     async function persist() { return saveSnapshot(store, { reminders, expectations, firedOccurrenceIds }); }
 
@@ -228,7 +265,7 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         catchUpEvents,
         arm, tick, checkOnStateReminders,
         armExpectation, checkExpectations,
-        getReminder, getExpectation, deferredCount,
+        getReminder, getExpectation, deferredCount, droppedDeferredCount, reminderCount,
         persist, laws, bounds
     });
 }
