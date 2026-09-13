@@ -196,6 +196,15 @@ test("W7-ENV-repair-2: array with a non-index toJSON hook cannot execute during 
     assert.equal(invoked, false, "toJSON pada array tidak boleh pernah dipanggil");
 });
 
+test("W7-ENV-repair-3: array with a redefined (non-standard) prototype carrying inherited toJSON is rejected (independent audit AUD2-P2-3)", () => {
+    const arr = [1, 2, 3];
+    Object.setPrototypeOf(arr, { toJSON() { return { capabilityId: "cap.x" }; } });
+    assertThrowsCode(
+        () => envelope.makeEnvelope(baseSpec({ payload: { arr } })),
+        "ACC_INVALID_METADATA"
+    );
+});
+
 test("W7-ENV-25: malformed schemaVersion on a persisted row fails closed", () => {
     assertThrowsCode(
         () => envelope.normalizeEnvelopeRecord({ schemaVersion: "not-a-version" }),

@@ -118,6 +118,26 @@ test("GL-repair-3: intentTemplate cannot carry authority-shaped fields, at any d
     }), "AUTHORITY_SHAPED_FIELD_REJECTED");
 });
 
+test("GL-repair-4: intentTemplate accessors and post-creation mutation cannot bypass the authority guard (independent audit AUD2-P2-1)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+
+    let reads = 0;
+    const it = {};
+    Object.defineProperty(it, "x", {
+        enumerable: true, configurable: true,
+        get() { reads++; return reads === 1 ? { ok: true } : { authProof: "TOCTOU-P" }; }
+    });
+    assertThrowsReason(() => ge.createTask({ planRef: p.planId, order: 1, intentTemplate: it }),
+        "AUTHORITY_SHAPED_FIELD_REJECTED");
+
+    const shared = { nested: {} };
+    const t = ge.createTask({ planRef: p.planId, order: 1, intentTemplate: shared });
+    assert.throws(() => { "use strict"; shared.nested.authProof = "PROOF-INJECTED"; });
+    assert.equal(JSON.stringify(t.intentTemplate).includes("authProof"), false);
+});
+
 test("GL-A5: immortal goal — terminal states are terminal, cannot be reactivated", async () => {
     const ge = await createGoalEngine();
     const g = ge.proposeGoal(baseGoalSpec());

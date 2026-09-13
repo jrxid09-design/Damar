@@ -45,6 +45,23 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         }
         list.push(now());
         signalsBySource.set(sourceId, list);
+
+        // Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+        // putaran-2, AUD2-P2-2): sourceId berbeda-beda tanpa batas membuat
+        // signalsBySource/noisySources tumbuh selamanya -- MAX_DISTINCT_SOURCES_COUNTED
+        // hanya membatasi BONUS korobrasi, bukan peta ini. Evict sumber
+        // paling lama tidak aktif saat melebihi batas.
+        if (signalsBySource.size > bounds.MAX_TRACKED_SOURCES) {
+            let victimId = null, victimLast = Infinity;
+            for (const [id, times] of signalsBySource) {
+                const last = times.length ? times[times.length - 1] : -Infinity;
+                if (last < victimLast) { victimLast = last; victimId = id; }
+            }
+            if (victimId !== null) {
+                signalsBySource.delete(victimId);
+                noisySources.delete(victimId);
+            }
+        }
     }
 
     function recomputeAll() {
@@ -196,19 +213,26 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         return "NORMAL";
     }
 
-    function toGovernorPriority(priorityClass) { return mapToGovernorPriority(priorityClass, governorMappingAudit); }
+    function toGovernorPriority(priorityClass) {
+        const mapped = mapToGovernorPriority(priorityClass, governorMappingAudit);
+        // Bug review independen (audit putaran-2, AUD2-P2-2): jurnal ini
+        // tumbuh selamanya, satu entri per panggilan, tanpa batas.
+        if (governorMappingAudit.length > bounds.MAX_GOVERNOR_MAPPING_AUDIT) governorMappingAudit.shift();
+        return mapped;
+    }
 
     function getTarget(targetId) { return targets.get(targetId) ?? null; }
     function overflowCount() { return overflowTotalCount; }
     function overflowEntries() { return [...overflowJournal]; }
     function isNoisySource(sourceId) { return noisySources.has(sourceId); }
     function supportingSignalCount(targetId) { return (supportingSignals.get(targetId) ?? []).length; }
+    function trackedSourceCount() { return signalsBySource.size; }
 
     return Object.freeze({
         schemaVersion: SCHEMA_VERSION,
         ingestSignal, pick, preempt, complete, getTarget,
         overloadState, toGovernorPriority, governorMappingAudit: () => [...governorMappingAudit],
-        overflowCount, overflowEntries, isNoisySource, supportingSignalCount,
+        overflowCount, overflowEntries, isNoisySource, supportingSignalCount, trackedSourceCount,
         laws, bounds
     });
 }

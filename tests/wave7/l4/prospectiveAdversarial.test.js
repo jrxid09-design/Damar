@@ -82,6 +82,16 @@ test("PM-A1-repair-7: payloadRef is deeply frozen -- post-validation mutation ca
     assert.equal(Object.prototype.hasOwnProperty.call(r.payloadRef, "capabilityId"), false);
 });
 
+test("PM-A1-repair-9: array with a redefined prototype carrying inherited toJSON cannot fabricate forbidden keys (independent audit AUD2-P1-1)", async () => {
+    const pm = await createProspectiveMemory();
+    const arr = [1];
+    Object.setPrototypeOf(arr, { toJSON() { return { capabilityId: "cap.x" }; } });
+    assertThrowsReason(() => pm.arm({
+        trigger: { kind: "AT", at: new Date(1).toISOString() }, wakeClass: "MAINTENANCE",
+        payloadRef: arr
+    }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
 test("PM-repair-4: restart rebuild counts only ARMED reminders toward the per-goal cap (Codex P2 round 7)", async () => {
     const store = createMemoryAccStore();
     const clock = manualClock(0);
