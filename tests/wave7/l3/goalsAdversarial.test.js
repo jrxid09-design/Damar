@@ -383,6 +383,30 @@ test("GL-repair-23: nested objects inside plan steps/assumptions stay immutable 
     assert.throws(() => { "use strict"; p.assumptions[0].nested.deep = "MUTATED"; });
 });
 
+test("GL-repair-24: a BigInt anywhere else in a condition spec (not just subject/expectedValue) is rejected, and any extra field is frozen too (independent audit AUD11-P2-2)", async () => {
+    const ge = await createGoalEngine({});
+    assert.throws(() => ge.proposeGoal(baseGoalSpec({
+        successCondition: { kind: "WORLD_BELIEF", subject: { entityId: "e1" }, attribute: "status", metadata: { n: 10n } }
+    })));
+    const g = ge.proposeGoal(baseGoalSpec({
+        successCondition: { kind: "WORLD_BELIEF", subject: { entityId: "e1" }, attribute: "status", metadata: { deep: "orig" } }
+    }));
+    const stored = ge.getGoal(g.goalId).successCondition;
+    assert.equal(Object.isFrozen(stored.metadata), true);
+    assert.throws(() => { "use strict"; stored.metadata.deep = "MUTATED"; });
+});
+
+test("GL-repair-25: evicting a terminal child under retention pressure deletes its parent's childCounts key at zero, not just decrements it (independent audit AUD11-P2-5)", async () => {
+    const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_GOALS_RETAINED: 2, MAX_CHILDREN_PER_GOAL: 100 } });
+    const parent = ge.proposeGoal(baseGoalSpec({ goalId: "PARENT" })); // stays non-terminal
+    ge.proposeGoal(baseGoalSpec({ goalId: "CHILD", parentGoalId: parent.goalId }));
+    ge.transition("CHILD", "supersede", { actorKind: "OWNER", reason: "x" });
+    assert.equal(ge.childCountsSize(), 1);
+    ge.proposeGoal(baseGoalSpec({ goalId: "FILLER-1" })); // retention pressure evicts the terminal CHILD
+    assert.equal(ge.getGoal("CHILD"), null, "CHILD must have been evicted for this test to be meaningful");
+    assert.equal(ge.childCountsSize(), 0, "childCounts must not leak a stale zero-valued key once its last child is evicted");
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

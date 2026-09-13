@@ -235,6 +235,26 @@ test("WM-repair-15: replaying the same CONTEST challenger recordId does not evic
     assert.ok(ids.includes("LEGIT-CHALLENGER"), "a replayed challenger elsewhere must not evict a legitimate open contradiction");
 });
 
+test("WM-repair-16: a BigInt in ingestDeclaration's 'at' is rejected, not accepted and left to crash persist() (independent audit AUD11-P2-3)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    assert.throws(() => wm.ingestDeclaration({ subject: { entityId: "e1" }, attribute: "a", value: "v", declarationId: "D1", at: 10n }));
+});
+
+test("WM-repair-17: replaying a recordId already consumed by an earlier SUPERSEDE is a no-op, not a fresh CONTEST (independent audit AUD11-P2-7)", async () => {
+    const clock = manualClock(0);
+    const wm = await createWorldModel({ clock });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const spec = { subject: { entityId: "e1" }, attribute: "status", sensor: { sensorId: "s1" }, tier: "T1" };
+    wm.ingestObservation({ ...spec, observationId: "R1", value: "a", observedAt: new Date(0).toISOString() });
+    clock.advance(31 * 60_000); // past the 30min TTL -> next differing value SUPERSEDEs, resetting supportedBy
+    const superseded = wm.ingestObservation({ ...spec, observationId: "R2", value: "b", observedAt: new Date(31 * 60_000).toISOString() });
+    assert.equal(superseded.case, "SUPERSEDE");
+    const replay = wm.ingestObservation({ ...spec, observationId: "R1", value: "a", observedAt: new Date(0).toISOString() });
+    assert.equal(replay.case, "DUPLICATE", "a recordId already consumed before the SUPERSEDE must stay deduped, not open a fresh CONTEST");
+    assert.equal(wm.query({ subject: { entityId: "e1" }, attribute: "status" }).contested, false);
+});
+
 test("WM-repair-3: an epoch-dated observation (1970-01-01T00:00:00.000Z) is not falsely treated as the newest evidence (Codex P2 round 9)", async () => {
     const clock = manualClock(1000);
     const wm = await createWorldModel({ clock });

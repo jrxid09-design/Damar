@@ -47,14 +47,18 @@ function validateTrigger(trigger) {
     // AUD9-P2-1): `Object.freeze({...trigger.subject})` cuma satu level --
     // objek bersarang di dalam subject tetap referensi milik pemanggil.
     // deepFreeze menutup ini di semua kedalaman.
+    // Bug review independen (audit putaran-11, AUD11-P2-1): deepFreeze
+    // hanya membekukan, tidak menyaring -- BigInt di dalam subject/trigger
+    // lolos lalu meledakkan JSON.stringify di saveSnapshot() saat persist().
+    // buildSafePayloadRef menyaring BigInt/function/Symbol sekaligus.
     if (trigger.kind === "ON_STATE") {
-        return Object.freeze({ ...trigger, subject: deepFreeze({ ...trigger.subject }) });
+        return Object.freeze({ ...trigger, subject: deepFreeze(buildSafePayloadRef({ ...trigger.subject })) });
     }
     // Bug review independen (audit putaran-10, AUD10-P2-2): sapuan deepFreeze
     // putaran-9 hanya menyentuh cabang ON_STATE -- cabang lain (AT/AFTER/
     // RECURRING/ON_EVENT) masih pembekuan SATU level, objek/nilai bersarang
     // apa pun yang pemanggil sisipkan di trigger tetap referensi mutable.
-    return deepFreeze({ ...trigger });
+    return deepFreeze(buildSafePayloadRef({ ...trigger }));
 }
 
 const FORBIDDEN_PAYLOAD_KEYS = Object.freeze(["capabilityId", "actuatorRef", "authProof", "authorityDecision", "intentTemplate"]);
@@ -192,7 +196,11 @@ function makeReminder({ reminderId, ownerRef = null, trigger, payloadRef = null,
         reminderId, ownerRef,
         trigger: validateTrigger(trigger),
         payloadRef: validatePayloadRef(payloadRef),
-        wakeClass, origin: deepFreeze({ ...origin }),
+        // Bug review independen (audit putaran-11, AUD11-P2-1): deepFreeze
+        // hanya membekukan, tidak menyaring -- BigInt di dalam origin lolos
+        // lalu meledakkan JSON.stringify di saveSnapshot() saat persist().
+        // buildSafePayloadRef menyaring BigInt/function/Symbol sekaligus.
+        wakeClass, origin: deepFreeze(buildSafePayloadRef({ ...origin })),
         state: "ARMED", firedAt: null, missedAt: null, retiredReason: null,
         occurrenceIndex: 0, armedAtMs: null, createdAt: nowIso
     });
@@ -218,10 +226,13 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
     // Bug review independen (audit putaran-10, AUD10-P1-1): salinan yang
     // dikembalikan buildSafePayloadRef tidak pernah dibekukan di sini --
     // tetap bisa dimutasi pemanggil pasca-panggilan.
+    // Bug review independen (audit putaran-11, AUD11-P2-1): subject/window di
+    // sini juga cuma deepFreeze (membekukan, tidak menyaring) -- BigInt di
+    // dalamnya lolos lalu meledakkan JSON.stringify di saveSnapshot().
     return Object.freeze({
-        expectationId, subject: deepFreeze({ ...subject }), attribute,
+        expectationId, subject: deepFreeze(buildSafePayloadRef({ ...subject })), attribute,
         expectedValue: deepFreeze(buildSafePayloadRef(expectedValue)),
-        window: deepFreeze({ ...window }),
+        window: deepFreeze(buildSafePayloadRef({ ...window })),
         onSatisfied, onViolated, state: "PENDING"
     });
 }

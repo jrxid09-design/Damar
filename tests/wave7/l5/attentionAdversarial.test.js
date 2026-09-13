@@ -25,6 +25,12 @@ test("AT-A1: salience flooding from one sensor is rate-capped and the source mar
     assert.equal(ae.isNoisySource("sensor-1"), true);
 });
 
+test("AT-repair-7: a rejected (invalid) signal must not consume per-source rate budget before validation (independent audit AUD11-P2-9)", async () => {
+    const ae = await createAttentionEconomy();
+    assert.throws(() => ae.ingestSignal({ sourceKind: "SENSOR" /* no sourceId, no subjectRef */ }, "PERCEIVE"));
+    assert.equal(ae.trackedSourceCount(), 0, "an invalid signal must not create/charge a rate-limit slot");
+});
+
 test("AT-repair-6: a malformed subjectRef (neither entityId nor relationId) is rejected, not silently collapsed into another target's key (independent audit AUD10-P2-3)", async () => {
     const ae = await createAttentionEconomy();
     assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef: { kind: "alpha", id: "A" } }, "PERCEIVE"), "INVALID_RECORD");

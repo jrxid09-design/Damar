@@ -207,6 +207,15 @@ test("PM-repair-14: a nested value inside a non-ON_STATE trigger (AT/AFTER/RECUR
     assert.throws(() => { "use strict"; pm.getReminder(r.reminderId).trigger.extra.nested.deep = "MUTATED"; });
 });
 
+test("PM-repair-15: a BigInt anywhere in a reminder's origin/trigger-extra or an expectation's subject/window is rejected, not accepted and left to crash persist() (independent audit AUD11-P2-1)", async () => {
+    const pm = await createProspectiveMemory({});
+    assert.throws(() => pm.arm({ reminderId: "R-big-1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(1).toISOString() }, origin: { kind: "SELF", n: 10n } }));
+    assert.throws(() => pm.arm({ reminderId: "R-big-2", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(1).toISOString(), extra: { n: 10n } } }));
+    assert.throws(() => pm.arm({ reminderId: "R-big-3", wakeClass: "NOTIFY_OWNER", trigger: { kind: "ON_STATE", subject: { entityId: "e1", n: 10n }, attribute: "status" } }));
+    assert.throws(() => pm.armExpectation({ subject: { entityId: "e1", n: 10n }, attribute: "status", expectedValue: "done", window: { latestAt: new Date(1000).toISOString() } }));
+    assert.throws(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: "done", window: { latestAt: new Date(1000).toISOString(), n: 10n } }));
+});
+
 test("PM-repair-8: an until-only recurring reminder still bounds occurrences and firedOccurrenceIds (independent audit W7R7-P2-2)", async () => {
     const clock = manualClock(0);
     const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_RECURRENCE_OCCURRENCES: 5 } });

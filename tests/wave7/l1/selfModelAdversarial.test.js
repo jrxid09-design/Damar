@@ -76,6 +76,25 @@ test("SM-repair-3: a BigInt in ingestOutcome's 'at' is rejected, not accepted an
     assert.throws(() => sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "FAILED", at: 10n, evidenceRef: "e1" }));
 });
 
+test("SM-repair-4: a nested BigInt (or any object) in ingestOutcome's 'at' is rejected, not accepted and left to crash persist() or corrupt canonical history via reference (independent audit AUD11-P2-4)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const sm = await createSelfModel({ capabilityRegistry: registry });
+    assert.throws(() => sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "FAILED", at: { n: 10n }, evidenceRef: "e1" }));
+    assert.throws(() => sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "FAILED", at: { nested: { deep: "orig" } }, evidenceRef: "e2" }));
+});
+
+test("SM-repair-5: a replayed evidenceRef is a no-op, not a fabricated extra attempt/success (independent audit AUD11-P2-6)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const sm = await createSelfModel({ capabilityRegistry: registry });
+    sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "FAILED", at: "t1", evidenceRef: "F1" });
+    for (let i = 0; i < 5; i++) {
+        sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "SUCCESS", at: "t2", evidenceRef: "S1" });
+    }
+    const a = sm.assess("cap.x");
+    assert.equal(a.successWindow.attempts, 2, "a replayed evidenceRef must not be counted as a new attempt");
+    assert.equal(a.successWindow.successes, 1, "a replayed evidenceRef must not inflate successes");
+});
+
 test("SM-A2: stale availability is marked STALE after TTL, never silently USABLE", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const clock = manualClock(0);

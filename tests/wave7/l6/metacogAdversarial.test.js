@@ -26,6 +26,16 @@ test("MC-repair-2: a malformed subjectRef (neither entityId nor relationId) is r
     assert.notEqual(r1.reviewId, r2.reviewId, "two distinct relationId subjects must not collapse to the same debounced review");
 });
 
+test("MC-repair-3: replaying an already-used calibration recordId is rejected, not double-counted (independent audit AUD11-P2-8)", async () => {
+    const mc = await createMetacognition();
+    const spec = {
+        recordId: "CAL-FIXED", predictionRef: "p", predictedValue: 1, predictedConfidence: 0.9,
+        outcomeRef: "o", outcomeValue: 1, outcomeCorrect: true, outcomeTier: "T1", windowFrom: null, windowTo: null
+    };
+    mc.recordCalibration(spec);
+    assertThrowsReason(() => mc.recordCalibration(spec), "DUPLICATE_RECORD_ID");
+});
+
 test("MC-repair-1: a hostile toJSON on subjectRef is never invoked while keying/debouncing reviews (independent audit AUD9-P2-2)", async () => {
     const mc = await createMetacognition();
     let toJSONCalls = 0;

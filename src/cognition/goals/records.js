@@ -150,11 +150,14 @@ function validateConditionSpec(spec, label) {
     // `deepFreeze(safeIntentTemplate)`) -- salinan plain object yang
     // dikembalikan buildSafeIntentTemplate tetap bisa dimutasi pemanggil
     // pasca-panggilan, menulis ulang semantik evaluasi kondisi tersimpan.
-    return Object.freeze({
-        ...spec,
-        subject: deepFreeze({ ...spec.subject }),
-        expectedValue: deepFreeze(buildSafeIntentTemplate(spec.expectedValue))
-    });
+    // Bug review independen (audit putaran-11, AUD11-P2-2): perbaikan putaran-10
+    // hanya menyaring/membekukan `subject`/`expectedValue` -- field lain yang
+    // ikut ter-spread (`...spec`, mis. field ekstra bebas pemanggil) tidak
+    // pernah disaring ATAU dibekukan sama sekali. Seluruh spec sekarang
+    // disaring+dibekukan sekaligus lewat buildSafeIntentTemplate (yang sudah
+    // menolak BigInt/function/Symbol di kedalaman berapa pun); subject tetap
+    // ditangani terpisah karena wajib objek (bukan dilewatkan begitu saja).
+    return deepFreeze(buildSafeIntentTemplate({ ...spec, subject: { ...spec.subject } }));
 }
 
 /** G-1/G-2: SELF_PROPOSED tidak pernah menyetujui dirinya; AGENT_SUGGESTION tidak pernah mengatur ownerApproval. */

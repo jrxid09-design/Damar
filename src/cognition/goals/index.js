@@ -119,8 +119,17 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
                 // dibiarkan -- dengan MAX_CHILDREN_PER_GOAL kecil, proposal
                 // anak baru di bawah induk itu ditolak "penuh" padahal anak
                 // yang tersisa sudah tidak ada lagi.
+                // Bug review independen (audit putaran-11, AUD11-P2-5): nilai
+                // hanya diturunkan ke 0, kuncinya sendiri tidak pernah
+                // dihapus -- pola yang sama yang sudah diperbaiki di
+                // worldmodel's decrementSourceCount (W7R4-P2-3) dan
+                // prospective's releaseArmedCapacity, tapi tidak pernah
+                // dimigrasikan ke goals' childCounts. Growth tak terbatas
+                // sebanding dengan churn goal jangka panjang.
                 if (evicted.parentGoalId) {
-                    childCounts.set(evicted.parentGoalId, Math.max(0, (childCounts.get(evicted.parentGoalId) ?? 1) - 1));
+                    const nextCount = Math.max(0, (childCounts.get(evicted.parentGoalId) ?? 1) - 1);
+                    if (nextCount === 0) childCounts.delete(evicted.parentGoalId);
+                    else childCounts.set(evicted.parentGoalId, nextCount);
                 }
                 // Bug review independen (audit putaran-3, AUD3-P2-2): entri
                 // MILIK goal yang dievict sendiri di childCounts (dipakai
