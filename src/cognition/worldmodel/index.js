@@ -80,11 +80,21 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
      * adalah kunci utama (evict yang paling sedikit terhubung dulu),
      * lastSeenAt sebagai pemecah seri di antara kandidat berderajat sama.
      */
-    function evictEntityIfOverBound() {
+    // Bug review independen (audit putaran-17, AUD17-P2-4): entitas yang
+    // BARU SAJA dideklarasikan (protectedEntityId) tidak pernah dikecualikan
+    // dari kandidat korban -- derajat relasinya 0 dan lastSeenAt-nya paling
+    // baru, jadi kalau semua entitas lain sudah terhubung, entitas yang
+    // baru dibuat sendiri yang dievict. declareEntity() lalu
+    // `entities.get(entityId)` mengembalikan undefined -- deklarasi yang
+    // "diterima" hilang diam-diam. Pola yang sama dengan createPlan's
+    // W7R7-P2-1 (jangan pernah mengevict record yang baru saja dibuat SENDIRI
+    // dalam panggilan ini).
+    function evictEntityIfOverBound(protectedEntityId = null) {
         if (entities.size <= bounds.MAX_ENTITIES) return;
         let victim = null;
         let victimDegree = Infinity;
         for (const e of entities.values()) {
+            if (e.entityId === protectedEntityId) continue;
             const degree = relationDegree(e.entityId);
             if (!victim || degree < victimDegree ||
                 (degree === victimDegree && e.lastSeenAt < victim.lastSeenAt)) {
@@ -137,7 +147,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             decrementSourceCount(existing.source);
             entityCountBySource.set(source, count + 1);
         }
-        evictEntityIfOverBound();
+        evictEntityIfOverBound(entityId);
         return entities.get(entityId);
     }
 
@@ -230,21 +240,29 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         if (entityId && !entities.has(entityId)) {
             fail(REASONS.UNKNOWN_ENTITY, "observasi merujuk entitas yang belum dideklarasikan");
         }
-        if (observation.subject.entityId) {
-            const e = entities.get(observation.subject.entityId);
-            entities.set(e.entityId, Object.freeze({ ...e, lastSeenAt: now() }));
-        }
         // Bug review independen (Codex putaran-9): `Date.parse(...) || now()`
         // memakai kebenaran-tanpa-syarat -- observedAt persis epoch
         // (1970-01-01T00:00:00.000Z -> 0) dianggap "falsy" dan diam-diam
         // diganti now(), memalsukan observasi epoch sebagai baru saja terjadi.
         const parsedObservedAtMs = Date.parse(observation.observedAt);
-        return applyRecordToBelief({
+        // Bug review independen (audit putaran-17, AUD17-P2-3): entity's
+        // lastSeenAt dulu disentuh SEBELUM applyRecordToBelief -- satu-satunya
+        // tempat `value` benar-benar divalidasi (buildSafeBeliefValue). Sebuah
+        // observasi yang DITOLAK (mis. BigInt pada value) tetap memperbarui
+        // lastSeenAt, membuat entitas terlihat baru dipakai dan melindunginya
+        // dari eviksi (evictEntityIfOverBound memakai lastSeenAt sebagai
+        // pemecah seri). Disentuh HANYA setelah observasi terbukti valid.
+        const result = applyRecordToBelief({
             recordId: observation.observationId, subject: observation.subject,
             attribute: observation.attribute, value: observation.value,
             tier: observation.tier, observedAt: observation.observedAt,
             observedAtMs: Number.isFinite(parsedObservedAtMs) ? parsedObservedAtMs : now()
         });
+        if (entityId) {
+            const e = entities.get(entityId);
+            entities.set(e.entityId, Object.freeze({ ...e, lastSeenAt: now() }));
+        }
+        return result;
     }
 
     /** W-1: pernyataan DECLARED pemilik — jalur admissible terpisah dari observasi sensor. */

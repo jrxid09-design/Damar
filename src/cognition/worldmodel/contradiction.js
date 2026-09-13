@@ -27,8 +27,18 @@ function openContradictionSet(list, contradiction, nowIso, maxOpenContradictionS
         // ukurannya: slot tertua dilepas dari list yang dilacak, bentuk
         // arsipnya tetap dikembalikan lewat `evicted` supaya pemanggil bisa
         // mengeskalasi ke metakognisi tanpa modul ini menahannya selamanya.
+        // Bug review independen (audit putaran-17, AUD17-P2-5): arsip overflow
+        // dulu SELALU menimpa status/resolution slot tertua ke UNRESOLVABLE/
+        // OVERFLOW_ARCHIVE tanpa syarat -- kalau slot tertua itu ternyata
+        // SUDAH diselesaikan (RESOLVED) sebelum overflow terjadi, jejak audit
+        // resolusi aslinya (ruleId sungguhan) tertimpa dan hilang, membuat
+        // pengamat overflowedContradictions() percaya kontradiksi itu belum
+        // pernah diselesaikan. Status/resolution asli dipertahankan kalau
+        // sudah bukan OPEN.
         const [oldest, ...rest] = list;
-        const archived = Object.freeze({ ...oldest, status: "UNRESOLVABLE", resolution: { ruleId: "OVERFLOW_ARCHIVE", at: nowIso } });
+        const archived = oldest.status === "OPEN"
+            ? Object.freeze({ ...oldest, status: "UNRESOLVABLE", resolution: { ruleId: "OVERFLOW_ARCHIVE", at: nowIso } })
+            : oldest;
         return { list: [...rest, entry], entry, evicted: archived };
     }
 
