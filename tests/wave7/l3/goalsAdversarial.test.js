@@ -407,6 +407,16 @@ test("GL-repair-25: evicting a terminal child under retention pressure deletes i
     assert.equal(ge.childCountsSize(), 0, "childCounts must not leak a stale zero-valued key once its last child is evicted");
 });
 
+test("GL-repair-26: a BigInt in plan.createdBy or task.{planRef,order,capabilityId} is rejected, not left to crash persist() (independent audit AUD12-P2-2)", async () => {
+    const ge = await createGoalEngine({});
+    const g = ge.proposeGoal(baseGoalSpec({}));
+    assert.throws(() => ge.createPlan({ goalRef: g.goalId, steps: [], createdBy: 10n }));
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+    assert.throws(() => ge.createTask({ planRef: 10n, order: 0, intentTemplate: {} }));
+    assert.throws(() => ge.createTask({ planRef: p.planId, order: 10n, intentTemplate: {} }));
+    assert.throws(() => ge.createTask({ planRef: p.planId, order: 0, capabilityId: 10n, intentTemplate: {} }));
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

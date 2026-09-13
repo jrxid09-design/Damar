@@ -216,6 +216,31 @@ test("PM-repair-15: a BigInt anywhere in a reminder's origin/trigger-extra or an
     assert.throws(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: "done", window: { latestAt: new Date(1000).toISOString(), n: 10n } }));
 });
 
+test("PM-repair-16: an ON_STATE trigger's non-subject fields are sanitized+frozen and cannot crash persist() (independent audit AUD12-P1-1)", async () => {
+    const store = jsonStore();
+    const pm = await createProspectiveMemory({ store });
+    assert.throws(() => pm.arm({
+        reminderId: "R1", wakeClass: "NOTIFY_OWNER",
+        trigger: { kind: "ON_STATE", subject: { entityId: "e1" }, attribute: "a", predicate: { n: 10n } }
+    }));
+    const extra = { deep: { v: "orig" } };
+    const r = pm.arm({
+        reminderId: "R2", wakeClass: "NOTIFY_OWNER",
+        trigger: { kind: "ON_STATE", subject: { entityId: "e1" }, attribute: "a", extra }
+    });
+    extra.deep.v = "MUTATED";
+    assert.equal(pm.getReminder(r.reminderId).trigger.extra.deep.v, "orig");
+    assert.throws(() => { "use strict"; pm.getReminder(r.reminderId).trigger.extra.deep.v = "MUTATED2"; });
+    await pm.persist();
+});
+
+test("PM-repair-17: a BigInt in reminder.ownerRef or expectation.{attribute,onSatisfied,onViolated} is rejected (independent audit AUD12-P2-3)", async () => {
+    const pm = await createProspectiveMemory({});
+    assert.throws(() => pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", ownerRef: 10n, trigger: { kind: "AT", at: new Date(1).toISOString() } }));
+    assert.throws(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: 10n, expectedValue: "x", window: { latestAt: new Date(1).toISOString() } }));
+    assert.throws(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "a", expectedValue: "x", onViolated: 10n, window: { latestAt: new Date(1).toISOString() } }));
+});
+
 test("PM-repair-8: an until-only recurring reminder still bounds occurrences and firedOccurrenceIds (independent audit W7R7-P2-2)", async () => {
     const clock = manualClock(0);
     const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_RECURRENCE_OCCURRENCES: 5 } });

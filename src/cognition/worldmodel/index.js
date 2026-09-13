@@ -227,6 +227,18 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         if (at !== undefined && (typeof at !== "string" || !Number.isFinite(Date.parse(at)))) {
             fail(REASONS.INVALID_RECORD, "'at', jika ada, wajib tanggal ISO string yang sah");
         }
+        // Bug review independen (audit putaran-12, AUD12-P2-1): perbaikan
+        // putaran-11 hanya menyaring `at` -- `attribute`/`declarationId`
+        // tetap diteruskan mentah ke applyRecordToBelief; BigInt di salah
+        // satunya meledakkan JSON.stringify saat persist(), dan `attribute`
+        // berupa objek referensi mengumpulkan setiap deklarasi berbeda ke
+        // satu kunci belief yang sama ("[object Object]").
+        if (typeof attribute !== "string" || !attribute) {
+            fail(REASONS.INVALID_RECORD, "attribute wajib string tidak kosong");
+        }
+        if (declarationId !== undefined && (typeof declarationId !== "string" || !declarationId)) {
+            fail(REASONS.INVALID_RECORD, "declarationId, jika ada, wajib string tidak kosong");
+        }
         return applyRecordToBelief({
             recordId: declarationId ?? crypto.randomUUID(), subject, attribute, value,
             tier: "DECLARED", observedAt: at ?? nowIso(), observedAtMs: now()

@@ -241,6 +241,13 @@ test("WM-repair-16: a BigInt in ingestDeclaration's 'at' is rejected, not accept
     assert.throws(() => wm.ingestDeclaration({ subject: { entityId: "e1" }, attribute: "a", value: "v", declarationId: "D1", at: 10n }));
 });
 
+test("WM-repair-18: ingestDeclaration validates attribute/declarationId as non-empty strings, like ingestObservation (independent audit AUD12-P2-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    assert.throws(() => wm.ingestDeclaration({ subject: { entityId: "e1" }, attribute: 10n, value: "v", declarationId: "D1" }));
+    assert.throws(() => wm.ingestDeclaration({ subject: { entityId: "e1" }, attribute: "a", value: "v", declarationId: 10n }));
+});
+
 test("WM-repair-17: replaying a recordId already consumed by an earlier SUPERSEDE is a no-op, not a fresh CONTEST (independent audit AUD11-P2-7)", async () => {
     const clock = manualClock(0);
     const wm = await createWorldModel({ clock });
