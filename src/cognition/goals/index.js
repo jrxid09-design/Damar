@@ -181,16 +181,23 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         if (openCount >= bounds.MAX_OPEN_COMMITMENTS) {
             fail(REASONS.OPEN_COMMITMENT_LIMIT_EXCEEDED, "jumlah komitmen terbuka melebihi batas");
         }
+        // Bug review independen (audit putaran-6, W7R6-P2-2): kompaksi dulu
+        // berjalan SEBELUM makeCommitment memvalidasi spec -- spec yang
+        // ditolak (mis. dueCondition cacat) tetap menghapus satu komitmen
+        // terminal yang VALID sebelum error dilempar. Validasi/bangun record
+        // dulu, baru kompaksi+simpan.
+        const c = makeCommitment({ ...spec, commitmentId: spec.commitmentId ?? crypto.randomUUID() });
         // Bug review independen (audit putaran-5, W7R5-P2-3, dieskalasi dari
         // advisory putaran-4): MAX_OPEN_COMMITMENTS hanya membatasi yang OPEN
         // -- komitmen terminal (MET/MISSED/RELEASED/RENEGOTIATED) menumpuk
         // selamanya, tak terbatas. Kompaksi tertua saat retensi total penuh,
         // pola yang sama dengan goals sendiri (MAX_TOTAL_GOALS_RETAINED).
+        // Selalu menemukan korban di sini karena OPEN dibatasi independen
+        // jauh di bawah MAX_TOTAL_COMMITMENTS_RETAINED (lihat cek di atas).
         if (commitments.size >= bounds.MAX_TOTAL_COMMITMENTS_RETAINED) {
-            const terminal = [...commitments.values()].filter(c => c.state !== "OPEN")[0];
+            const terminal = [...commitments.values()].filter(x => x.state !== "OPEN")[0];
             if (terminal) commitments.delete(terminal.commitmentId);
         }
-        const c = makeCommitment({ ...spec, commitmentId: spec.commitmentId ?? crypto.randomUUID() });
         commitments.set(c.commitmentId, c);
         return c;
     }
@@ -220,6 +227,16 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
             const overflow = sameGoal.length - bounds.MAX_PLAN_VERSIONS_RETAINED;
             for (let i = 0; i < overflow; i++) plans.delete(sameGoal[i].planId);
         }
+        // Bug review independen (audit putaran-6, W7R6-P2-1): MAX_PLAN_VERSIONS_RETAINED
+        // hanya membatasi PER goalRef -- createPlan tidak pernah memvalidasi
+        // goalRef benar-benar ada, jadi banyak goalRef berbeda (termasuk yang
+        // palsu/tidak ada) bisa menumpuk plan tanpa batas TOTAL. Kompaksi
+        // global tertua (lintas semua goalRef) saat retensi total penuh --
+        // selalu ada korban karena tidak ada kelas plan yang "dilindungi".
+        if (plans.size > bounds.MAX_TOTAL_PLANS_RETAINED) {
+            const oldest = plans.keys().next().value;
+            if (oldest !== undefined) plans.delete(oldest);
+        }
         return p;
     }
 
@@ -236,15 +253,27 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function createTask(spec) {
+        // Bug review independen (audit putaran-6, W7R6-P2-2): validasi/bangun
+        // record DULU (sama seperti createCommitment), baru kompaksi+simpan.
+        const t = makeTask({ ...spec, taskId: spec.taskId ?? crypto.randomUUID(), maxAttempts: Math.min(spec.maxAttempts ?? 5, bounds.MAX_ATTEMPTS_PER_TASK) });
         // Bug review independen (audit putaran-5, W7R5-P2-3): tasks tidak
         // punya batas total sama sekali. Kompaksi task terminal (DONE/SKIPPED)
         // tertua saat retensi penuh; task FAILED/lainnya dipertahankan karena
-        // masih bisa "retry".
+        // masih bisa "retry". Bug review independen (audit putaran-6,
+        // W7R6-P1-1): TIDAK SEPERTI commitments, tasks tidak punya batas
+        // independen pada kelas yang tidak bisa dievict (PENDING/READY/
+        // EXECUTING/VERIFYING/FAILED) -- populasi murni non-terminal bisa
+        // tumbuh tak terbatas karena tidak pernah ada korban DONE/SKIPPED.
+        // Gagal tertutup di sini, sama seperti proposeGoal's retention check.
         if (tasks.size >= bounds.MAX_TOTAL_TASKS_RETAINED) {
-            const terminal = [...tasks.values()].filter(t => t.state === "DONE" || t.state === "SKIPPED")[0];
-            if (terminal) tasks.delete(terminal.taskId);
+            const terminal = [...tasks.values()].filter(x => x.state === "DONE" || x.state === "SKIPPED")[0];
+            if (terminal) {
+                tasks.delete(terminal.taskId);
+            } else {
+                fail(REASONS.TASK_RETENTION_LIMIT_EXCEEDED,
+                    `retensi task melebihi batas (${bounds.MAX_TOTAL_TASKS_RETAINED}) dan tidak ada task DONE/SKIPPED untuk dievict`);
+            }
         }
-        const t = makeTask({ ...spec, taskId: spec.taskId ?? crypto.randomUUID(), maxAttempts: Math.min(spec.maxAttempts ?? 5, bounds.MAX_ATTEMPTS_PER_TASK) });
         tasks.set(t.taskId, t);
         return t;
     }
