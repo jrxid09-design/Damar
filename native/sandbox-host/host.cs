@@ -331,6 +331,9 @@ namespace DamarSandboxHost
         private const uint WAIT_TIMEOUT = 0x00000102;
         private const uint STILL_ACTIVE = 259;
         private const int EXIT_TIMEOUT = 124;
+        private const int MAX_STAGE_DIRS = 64;
+        private const long MAX_STAGE_BYTES = 256L * 1024L * 1024L;
+        private const int STALE_STAGE_AGE_MINUTES = 60;
 
         private sealed class Options
         {
@@ -512,9 +515,19 @@ namespace DamarSandboxHost
 
                 string destArt, outFile;
                 long artSize;
-                if (!StageArtifact(o, nodeSrc, artSrc, out destArt, out outFile, out artSize))
+                string stageDir = null;
+                FileStream stageLock = null;
+                using (var gate = new System.Threading.Mutex(false, "Local\\DamarGovExternalSandbox-StagingGate"))
                 {
-                    return 24; // reason already printed
+                    gate.WaitOne();
+                    try
+                    {
+                        if (!StageArtifact(o, nodeSrc, artSrc, out destArt, out outFile, out artSize, out stageDir, out stageLock))
+                        {
+                            return 24; // reason already printed
+                        }
+                    }
+                    finally { gate.ReleaseMutex(); }
                 }
 
                 // Build the restricted launch from NATIVE-derived paths only.
@@ -543,11 +556,20 @@ namespace DamarSandboxHost
                 Console.Error.WriteLine("SANDBOXHOST governed staged dir=" + launch.Cwd +
                     " artifact-digest=" + o.ArtifactDigest +
                     " artifact-size=" + artSize);
-                int code = Spawn(launch, sid);
-                // R5-04: relay the bounded child result to the caller on stdout
-                // (framed) so the JS parent never needs to know the native-derived
-                // staging path and never reads inside the protected package dir.
-                RelayResult(outFile);
+                int code;
+                try
+                {
+                    code = Spawn(launch, sid);
+                    // R5-04: relay the bounded child result to the caller on stdout
+                    // (framed) so the JS parent never needs to know the native-derived
+                    // staging path and never reads inside the protected package dir.
+                    RelayResult(outFile);
+                }
+                finally
+                {
+                    if (stageLock != null) stageLock.Dispose();
+                    CleanupStageDirectory(stageDir);
+                }
                 Console.Error.WriteLine("SANDBOXHOST exit=" + code + " morphed=1");
                 return code;
             }
@@ -602,14 +624,16 @@ namespace DamarSandboxHost
         // create it, copy node + artifact, verify the DESTINATION digests, and
         // re-check the SOURCE (TOCTOU). All paths are newly computed here.
         private static bool StageArtifact(Options o, string nodeSrc, string artSrc,
-            out string destArt, out string outFile, out long artSize)
+            out string destArt, out string outFile, out long artSize, out string stageDir, out FileStream stageLock)
         {
-            destArt = null; outFile = null; artSize = 0;
+            destArt = null; outFile = null; artSize = 0; stageDir = null; stageLock = null;
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string pkgRoot = Path.GetFullPath(Path.Combine(localAppData, "Packages", o.AppContainer));
             string stageRoot = Path.GetFullPath(Path.Combine(pkgRoot, "staging"));
             string runKey = DeriveRunKey(o.ExecutionId, o.ArtifactDigest);
-            string stageDir = Path.GetFullPath(Path.Combine(stageRoot, runKey));
+            stageDir = Path.GetFullPath(Path.Combine(stageRoot, runKey));
+
+            if (!ReconcileStaging(stageRoot)) return false;
 
             // containment: the derived dir must remain under stageRoot.
             string prefix = stageRoot.TrimEnd('\\') + "\\";
@@ -632,6 +656,9 @@ namespace DamarSandboxHost
                 return false;
             }
 
+            try { stageLock = new FileStream(Path.Combine(stageDir, "run.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            catch (Exception ex) { Console.Error.WriteLine("SANDBOXHOST governed staging-lock-failed " + ex.GetType().Name + ":" + Sanitize(ex.Message)); CleanupStageDirectory(stageDir); return false; }
+
             string stagedNode = Path.Combine(stageDir, "node.exe");
             destArt = Path.Combine(stageDir, "tool.js");
             outFile = Path.Combine(stageDir, "out.json");
@@ -643,6 +670,7 @@ namespace DamarSandboxHost
                 !EqHex(Sha256File(destArt), o.ArtifactDigest))
             {
                 Console.Error.WriteLine("SANDBOXHOST governed dest-digest-mismatch");
+                stageLock.Dispose(); stageLock = null; CleanupStageDirectory(stageDir);
                 return false;
             }
             // TOCTOU: if the source changed during staging, refuse to launch.
@@ -650,10 +678,86 @@ namespace DamarSandboxHost
                 !EqHex(Sha256File(artSrc), o.ArtifactDigest))
             {
                 Console.Error.WriteLine("SANDBOXHOST governed source-mutated");
+                stageLock.Dispose(); stageLock = null; CleanupStageDirectory(stageDir);
                 return false;
             }
             artSize = new FileInfo(destArt).Length;
             return true;
+        }
+
+        // Reconcile only native-derived staging children. Old abandoned runs
+        // are removed before quota accounting; recent directories are treated
+        // as active and are never evicted. A named mutex serializes this check
+        // across concurrent helper processes.
+        private static bool ReconcileStaging(string stageRoot)
+        {
+            try
+            {
+                Directory.CreateDirectory(stageRoot);
+                string[] dirs = Directory.GetDirectories(stageRoot);
+                foreach (string d in dirs)
+                {
+                    if (HasReparseAncestor(d, stageRoot)) continue;
+                    if (!IsStageActive(d)) CleanupStageDirectory(d);
+                }
+                dirs = Directory.GetDirectories(stageRoot);
+                long bytes = 0; int count = 0;
+                foreach (string d in dirs)
+                {
+                    if (HasReparseAncestor(d, stageRoot)) return false;
+                    count++;
+                    bytes += DirectoryBytes(new DirectoryInfo(d));
+                }
+                if (count >= MAX_STAGE_DIRS || bytes >= MAX_STAGE_BYTES)
+                {
+                    Console.Error.WriteLine("SANDBOXHOST governed staging-quota-exceeded count=" + count + " bytes=" + bytes);
+                    return false;
+                }
+                return true;
+            }
+            catch
+            {
+                Console.Error.WriteLine("SANDBOXHOST governed staging-reconcile-failed");
+                return false;
+            }
+        }
+
+        private static long DirectoryBytes(DirectoryInfo dir)
+        {
+            long total = 0;
+            foreach (FileInfo f in dir.GetFiles()) total += f.Length;
+            foreach (DirectoryInfo d in dir.GetDirectories())
+            {
+                if (!HasReparseAncestor(d.FullName, dir.Root.FullName)) total += DirectoryBytes(d);
+            }
+            return total;
+        }
+
+        private static bool IsStageActive(string dir)
+        {
+            string marker = Path.Combine(dir, "run.lock");
+            if (!File.Exists(marker)) return false;
+            try
+            {
+                using (var probe = new FileStream(marker, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+                return false;
+            }
+            catch { return true; }
+        }
+
+        private static void CleanupStageDirectory(string dir)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+                DirectoryInfo di = new DirectoryInfo(dir);
+                if (di.Attributes.HasFlag(FileAttributes.ReparsePoint)) return;
+                Directory.Delete(dir, true);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("SANDBOXHOST governed staging-cleanup-failed " + ex.GetType().Name);
+            }
         }
 
         private static readonly char[] RUNKEY_ALLOWED =
