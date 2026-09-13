@@ -211,6 +211,42 @@ test("GL-repair-8: an unknown origin.kind is rejected before it ever touches the
         "origin.kind sampah tidak boleh pernah membuat kunci baru di peta laju pembuatan");
 });
 
+test("GL-repair-9: terminal commitments are retention-bounded, not just OPEN ones (independent audit W7R5-P2-3)", async () => {
+    const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_COMMITMENTS_RETAINED: 5 } });
+    for (let i = 0; i < 50; i++) {
+        ge.createCommitment({
+            commitmentId: `c${i}`, goalRef: "g", toWhom: { id: "o" }, promise: "p",
+            dueCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" }
+        });
+        ge.transitionCommitment(`c${i}`, "met", {});
+    }
+    assert.ok(ge.commitmentsSize() <= 5,
+        "komitmen terminal (MET/MISSED/RELEASED/RENEGOTIATED) harus dikompaksi, bukan menumpuk tak terbatas");
+});
+
+test("GL-repair-10: DONE/SKIPPED tasks are retention-bounded (independent audit W7R5-P2-3)", async () => {
+    const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_TASKS_RETAINED: 5 } });
+    for (let i = 0; i < 50; i++) {
+        const t = ge.createTask({ taskId: `t${i}`, planRef: "p", order: i, intentTemplate: { x: 1 } });
+        ge.transitionTask(t.taskId, "skip");
+    }
+    assert.ok(ge.tasksSize() <= 5, "task SKIPPED/DONE harus dikompaksi, bukan menumpuk tak terbatas");
+});
+
+test("GL-repair-11: evicting a goal removes its own plans, not just the per-goal version cap (independent audit W7R5-P2-3)", async () => {
+    let t = 0;
+    const clock = { nowMs: () => t++ };
+    const ge = await createGoalEngine({
+        clock, bounds: { ...BOUNDS, MAX_TOTAL_GOALS_RETAINED: 2, MAX_GOAL_CREATION_RATE_PER_MINUTE: 1000 }
+    });
+    const g = ge.proposeGoal(baseGoalSpec());
+    ge.createPlan({ goalRef: g.goalId, steps: [] });
+    ge.transition(g.goalId, "supersede", { actorKind: "OWNER", reason: "cycle" }); // terminal, evictable
+    ge.proposeGoal(baseGoalSpec()); // fillerA, size -> 2
+    ge.proposeGoal(baseGoalSpec()); // evicts `g` -- its plan should go with it
+    assert.equal(ge.plansSize(), 0, "plan milik goal yang dievict harus ikut dihapus, bukan menjadi yatim selamanya");
+});
+
 test("GL-A5: immortal goal — terminal states are terminal, cannot be reactivated", async () => {
     const ge = await createGoalEngine();
     const g = ge.proposeGoal(baseGoalSpec());
