@@ -208,11 +208,16 @@ async function createSelfModel({
         if (typeof evidenceRef !== "string" || evidenceRef.length === 0) {
             fail(REASONS.INVALID_OUTCOME, "evidenceRef wajib ada (SM-A4)");
         }
-        // Bug review independen (audit putaran-10, AUD10-P2-1): `at` tidak
-        // pernah disaring -- BigInt di dalamnya lolos lalu meledakkan
-        // JSON.stringify di saveSuccessWindows() saat persist().
-        if (typeof at === "bigint") {
-            fail(REASONS.INVALID_OUTCOME, "'at' tidak boleh BigInt (tidak dapat diserialisasi)");
+        // Bug review independen (audit putaran-10, AUD10-P2-1; diperdalam
+        // putaran-11, AUD11-P2-4): cek BigInt top-level saja tidak cukup --
+        // BigInt BERSARANG di dalam objek `at` tetap lolos lalu meledakkan
+        // JSON.stringify di saveSuccessWindows() saat persist(), dan objek
+        // `at` disimpan lewat REFERENSI (tidak disalin/dibekukan), jadi
+        // pemanggil yang memutasinya pasca-panggilan menulis ulang bukti
+        // history kanonik. `at` di seluruh basis kode ini hanya pernah berupa
+        // string ISO atau angka epoch -- ditolak tertutup untuk bentuk lain.
+        if (typeof at !== "string" && typeof at !== "number") {
+            fail(REASONS.INVALID_OUTCOME, "'at' wajib string atau number (tidak boleh objek/BigInt)");
         }
         if (!safeCall(() => capabilityRegistry.has(capabilityId))) {
             fail(REASONS.UNKNOWN_CAPABILITY,
@@ -220,6 +225,15 @@ async function createSelfModel({
         }
 
         const window = successWindows.get(capabilityId) ?? emptySuccessWindow(now());
+        // Bug review independen (audit putaran-11, AUD11-P2-6): replay dari
+        // evidenceRef yang sama (pengiriman ulang lintas-node) dulu dihitung
+        // sebagai outcome BARU -- attempts/successes bertambah lagi untuk
+        // bukti yang sama, memalsukan confidence (satu SUCCESS yang di-replay
+        // 5x menaikkan confidence seolah 5 percobaan independen berhasil).
+        // Sama seperti worldmodel's applyRevision, replay adalah no-op.
+        if ((window.history ?? []).some(h => h.evidenceRef === evidenceRef)) {
+            return assess(capabilityId);
+        }
         // Bug review independen (audit putaran-8, W7R8-P1-2): `history`
         // (array DAN elemennya) tidak pernah dibekukan -- assess()'s
         // `Object.freeze({...window})` di assessment.js cuma dangkal, jadi

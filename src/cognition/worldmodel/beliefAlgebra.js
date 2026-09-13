@@ -159,6 +159,7 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
                 subject: record.subject, attribute: record.attribute,
                 value: record.value, revision: 1,
                 supportedBy: Object.freeze([record.recordId]),
+                appliedRecordIds: Object.freeze([record.recordId]),
                 contradictedBy: Object.freeze([]),
                 contradictionSetId: null,
                 tier: record.tier,
@@ -177,7 +178,14 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
     // (computeConfidence pakai Math.min(supportedBy.length,5)/5, jadi satu
     // sumber yang di-replay 5x mencapai confidence maksimum seolah 5 sumber
     // independen). recordId yang sudah ada di supportedBy adalah no-op.
-    if (existing.supportedBy.includes(record.recordId)) {
+    // Bug review independen (audit putaran-11, AUD11-P2-7): cek di atas
+    // hanya melihat `supportedBy`, yang DIRESET oleh SUPERSEDE (§ dibawah)
+    // -- record yang sudah dikonsumsi lalu di-supersede lalu di-replay lolos
+    // dedup dan dianggap CONTEST baru terhadap nilai yang sekarang berlaku,
+    // memalsukan status kontradiksi belief yang sudah tidak kontroversial.
+    // `appliedRecordIds` adalah riwayat SEMUA recordId yang pernah diterapkan
+    // ke belief ini, tidak pernah direset oleh SUPERSEDE.
+    if ((existing.appliedRecordIds ?? existing.supportedBy).includes(record.recordId)) {
         return { case: "DUPLICATE", belief: existing, contradiction: null };
     }
 
@@ -185,6 +193,10 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
     const expired = isExpired(existing, nowMs);
     const newerOrEqualTier = TIER_RANK[record.tier] >= TIER_RANK[existing.tier];
     const newerInTime = record.observedAtMs === undefined || record.observedAtMs >= (existing.observedAtMs ?? 0);
+
+    const nextAppliedRecordIds = Object.freeze(appendBounded(
+        existing.appliedRecordIds ?? existing.supportedBy, record.recordId,
+        BOUNDS.MAX_OBSERVATIONS_RETAINED_PER_BELIEF));
 
     if (sameValue && !expired) {
         // REINFORCE
@@ -195,6 +207,7 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
                 revision: existing.revision + 1,
                 supportedBy: Object.freeze(appendBounded(existing.supportedBy, record.recordId,
                     BOUNDS.MAX_OBSERVATIONS_RETAINED_PER_BELIEF)),
+                appliedRecordIds: nextAppliedRecordIds,
                 updatedAtMs: nowMs
             }),
             contradiction: null
@@ -210,6 +223,7 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
                 revision: existing.revision + 1,
                 supportedBy: Object.freeze(appendBounded(existing.supportedBy, record.recordId,
                     BOUNDS.MAX_OBSERVATIONS_RETAINED_PER_BELIEF)),
+                appliedRecordIds: nextAppliedRecordIds,
                 updatedAtMs: nowMs, observedAt: record.observedAt,
                 observedAtMs: record.observedAtMs ?? nowMs
             }),
@@ -225,6 +239,7 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
                 beliefId: existing.beliefId, subject: existing.subject, attribute: existing.attribute,
                 value: record.value, revision: existing.revision + 1,
                 supportedBy: Object.freeze([record.recordId]),
+                appliedRecordIds: nextAppliedRecordIds,
                 contradictedBy: Object.freeze([]),
                 contradictionSetId: null,
                 tier: record.tier, decayPolicy: existing.decayPolicy,

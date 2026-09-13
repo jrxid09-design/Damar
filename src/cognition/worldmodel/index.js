@@ -218,6 +218,15 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         if (!subject || (typeof subject.entityId !== "string" && typeof subject.relationId !== "string")) {
             fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
         }
+        // Bug review independen (audit putaran-11, AUD11-P2-3): `at ?? nowIso()`
+        // hanya menangkap null/undefined -- BigInt (atau string tak-tanggal)
+        // lolos apa adanya, lalu BigInt meledakkan JSON.stringify di
+        // saveSnapshot() saat persist(). ingestObservation sudah mewajibkan
+        // observedAt yang valid lewat makeObservation; ingestDeclaration
+        // adalah jalur konstruksi terpisah yang tidak pernah ikut disamakan.
+        if (at !== undefined && (typeof at !== "string" || !Number.isFinite(Date.parse(at)))) {
+            fail(REASONS.INVALID_RECORD, "'at', jika ada, wajib tanggal ISO string yang sah");
+        }
         return applyRecordToBelief({
             recordId: declarationId ?? crypto.randomUUID(), subject, attribute, value,
             tier: "DECLARED", observedAt: at ?? nowIso(), observedAtMs: now()

@@ -131,8 +131,14 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
 
     /** AT-1/AT-2/AT-3: kelas ditentukan HANYA di sini lewat policy.js. */
     function ingestSignal(spec, workKind) {
-        enforceSourceRate(spec.sourceId);
+        // Bug review independen (audit putaran-11, AUD11-P2-9): enforceSourceRate
+        // dulu berjalan SEBELUM makeSignal memvalidasi spec -- signal yang
+        // ditolak (sourceId/sourceKind cacat) tetap membuat/menaikkan kunci
+        // rate-limit untuk sourceId sampah, sama seperti bug W7R4-P2-3 yang
+        // sudah diperbaiki di goals' proposeGoal tapi tidak dimigrasikan ke
+        // sini. Validasi/bangun record dulu, baru tegakkan rate.
         const signal = makeSignal({ ...spec, signalId: spec.signalId ?? crypto.randomUUID(), createdAtMs: now() });
+        enforceSourceRate(signal.sourceId);
         const priorityClass = assignPriorityClass(signal);
 
         const key = targetKey(signal.subjectRef, workKind);
