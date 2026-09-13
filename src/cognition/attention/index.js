@@ -138,10 +138,16 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         // sudah diperbaiki di goals' proposeGoal tapi tidak dimigrasikan ke
         // sini. Validasi/bangun record dulu, baru tegakkan rate.
         const signal = makeSignal({ ...spec, signalId: spec.signalId ?? crypto.randomUUID(), createdAtMs: now() });
+        // Bug review independen (audit putaran-12, AUD12-P2-4): perbaikan
+        // putaran-11 memindahkan enforceSourceRate ke SETELAH makeSignal,
+        // tapi targetKey (validator KEDUA di jalur ini, menolak subjectRef
+        // yang bentuknya salah) masih berjalan SETELAHNYA -- signal dengan
+        // subjectRef cacat tetap menagih/membuat kuota rate sebelum ditolak.
+        // targetKey (murni, tanpa efek samping) sekarang dihitung dulu.
+        const key = targetKey(signal.subjectRef, workKind);
         enforceSourceRate(signal.sourceId);
         const priorityClass = assignPriorityClass(signal);
 
-        const key = targetKey(signal.subjectRef, workKind);
         let targetId = targetIdByKey.get(key);
 
         if (!targetId) {

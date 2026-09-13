@@ -47,12 +47,15 @@ function validateTrigger(trigger) {
     // AUD9-P2-1): `Object.freeze({...trigger.subject})` cuma satu level --
     // objek bersarang di dalam subject tetap referensi milik pemanggil.
     // deepFreeze menutup ini di semua kedalaman.
-    // Bug review independen (audit putaran-11, AUD11-P2-1): deepFreeze
-    // hanya membekukan, tidak menyaring -- BigInt di dalam subject/trigger
-    // lolos lalu meledakkan JSON.stringify di saveSnapshot() saat persist().
-    // buildSafePayloadRef menyaring BigInt/function/Symbol sekaligus.
+    // Bug review independen (audit putaran-11, AUD11-P2-1; diperdalam
+    // putaran-12, AUD12-P1-1): perbaikan putaran-11 hanya membungkus
+    // `trigger.subject` -- field LAIN pada trigger ON_STATE (mis. `extra`,
+    // `predicate`) tetap referensi mentah milik pemanggil, tidak disaring
+    // ATAU dibekukan sama sekali (beda dengan cabang non-ON_STATE di bawah
+    // yang sudah membungkus SELURUH trigger). Sekarang seluruh trigger
+    // dibungkus juga, sama seperti cabang lain.
     if (trigger.kind === "ON_STATE") {
-        return Object.freeze({ ...trigger, subject: deepFreeze(buildSafePayloadRef({ ...trigger.subject })) });
+        return deepFreeze(buildSafePayloadRef({ ...trigger, subject: { ...trigger.subject } }));
     }
     // Bug review independen (audit putaran-10, AUD10-P2-2): sapuan deepFreeze
     // putaran-9 hanya menyentuh cabang ON_STATE -- cabang lain (AT/AFTER/
@@ -191,6 +194,12 @@ function validatePayloadRef(payloadRef) {
 function makeReminder({ reminderId, ownerRef = null, trigger, payloadRef = null, wakeClass, origin = { kind: "SELF" }, nowIso }) {
     if (typeof reminderId !== "string" || !reminderId) fail(REASONS.INVALID_RECORD, "reminderId wajib string");
     if (!WAKE_CLASSES.has(wakeClass)) fail(REASONS.INVALID_RECORD, `wakeClass '${wakeClass}' tidak dikenal`);
+    // Bug review independen (audit putaran-12, AUD12-P2-3): ownerRef
+    // diteruskan mentah tanpa disaring -- BigInt di dalamnya meledakkan
+    // JSON.stringify saat persist().
+    if (ownerRef !== null && (typeof ownerRef !== "string" || !ownerRef)) {
+        fail(REASONS.INVALID_RECORD, "ownerRef, jika ada, wajib string");
+    }
 
     return Object.freeze({
         reminderId, ownerRef,
@@ -219,6 +228,12 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
         !Number.isFinite(Date.parse(window.earliestAt))) {
         fail(REASONS.NO_LATEST_AT, "window.earliestAt, jika ada, wajib tanggal ISO yang sah");
     }
+    // Bug review independen (audit putaran-12, AUD12-P2-3): attribute/
+    // onSatisfied/onViolated diteruskan mentah tanpa disaring -- BigInt di
+    // salah satunya meledakkan JSON.stringify saat persist().
+    if (typeof attribute !== "string" || !attribute) fail(REASONS.INVALID_RECORD, "attribute wajib string");
+    if (typeof onSatisfied !== "string") fail(REASONS.INVALID_RECORD, "onSatisfied wajib string");
+    if (typeof onViolated !== "string") fail(REASONS.INVALID_RECORD, "onViolated wajib string");
     // Bug review independen (audit putaran-9, AUD9-P2-3): expectedValue
     // tidak pernah disaring -- BigInt di dalamnya lolos lalu meledakkan
     // JSON.stringify di saveSnapshot() saat persist(). buildSafePayloadRef

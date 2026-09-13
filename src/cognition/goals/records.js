@@ -217,6 +217,11 @@ function makeCommitment({ commitmentId, goalRef, toWhom, promise, dueCondition, 
 function makePlan({ planId, goalRef, version = 1, steps, assumptions = [], createdBy = "SELF" }) {
     if (typeof planId !== "string" || !planId) fail(REASONS.INVALID_RECORD, "planId wajib string");
     if (!Array.isArray(steps)) fail(REASONS.INVALID_RECORD, "steps wajib array taskId");
+    // Bug review independen (audit putaran-12, AUD12-P2-2): sapuan BigInt
+    // putaran-10/11 hanya menyentuh field yang ditandai auditor -- createdBy
+    // tetap diteruskan mentah; BigInt di dalamnya meledakkan JSON.stringify
+    // saat persist().
+    if (typeof createdBy !== "string" || !createdBy) fail(REASONS.INVALID_RECORD, "createdBy wajib string");
     // Bug review independen (audit putaran-10, AUD10-P2-2): sapuan deepFreeze
     // putaran-9 hanya menyentuh field yang ditandai auditor -- steps/
     // assumptions di sini masih pembekuan SATU level, objek bersarang di
@@ -230,6 +235,14 @@ function makePlan({ planId, goalRef, version = 1, steps, assumptions = [], creat
 
 function makeTask({ taskId, planRef, order, capabilityId = null, preconditions = [], postconditions = [], intentTemplate, maxAttempts = 5 }) {
     if (typeof taskId !== "string" || !taskId) fail(REASONS.INVALID_RECORD, "taskId wajib string");
+    // Bug review independen (audit putaran-12, AUD12-P2-2): planRef/order/
+    // capabilityId diteruskan mentah tanpa disaring -- BigInt di salah
+    // satunya meledakkan JSON.stringify saat persist().
+    if (typeof planRef !== "string" || !planRef) fail(REASONS.INVALID_RECORD, "planRef wajib string");
+    if (!Number.isFinite(order)) fail(REASONS.INVALID_RECORD, "order wajib number");
+    if (capabilityId !== null && (typeof capabilityId !== "string" || !capabilityId)) {
+        fail(REASONS.INVALID_RECORD, "capabilityId, jika ada, wajib string");
+    }
     const safeIntentTemplate = buildSafeIntentTemplate(intentTemplate ?? {});
     return Object.freeze({
         taskId, planRef, order, capabilityId,
