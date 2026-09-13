@@ -209,7 +209,13 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
             return null;
         }
 
-        const maxRunning = governorPort?.capacity?.() ?? Infinity;
+        // Bug review independen (audit putaran-19, AUD19-P2-1): tanpa
+        // governorPort, `maxRunning` dulu Infinity -- jumlah target RUNNING
+        // (yang tidak pernah dipurge oleh evictLowestIfOverflow) bisa tumbuh
+        // tak terbatas, membuat MAX_TOTAL_TARGETS tidak bisa ditegakkan sama
+        // sekali begitu semua target lain jadi RUNNING. bounds.MAX_RUNNING_TARGETS
+        // adalah lantai jatuh-diri saat tidak ada governor eksternal.
+        const maxRunning = governorPort?.capacity?.() ?? bounds.MAX_RUNNING_TARGETS;
         const runningCount = [...targets.values()].filter(t => t.state === "RUNNING").length;
         if (runningCount >= maxRunning) return null;
         // Bug review independen (Codex putaran-5): kredit deficit round-robin
