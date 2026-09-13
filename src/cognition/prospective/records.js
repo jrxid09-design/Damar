@@ -44,7 +44,14 @@ function validateTrigger(trigger) {
             fail(REASONS.RECURRENCE_UNBOUNDED, `maxOccurrences melebihi batas (${BOUNDS.MAX_RECURRENCE_OCCURRENCES})`);
         }
     }
-    if (trigger.kind === "ON_STATE" && (typeof trigger.subject !== "object" || typeof trigger.attribute !== "string")) {
+    // Bug review independen (audit putaran-24, AUD24-P2-4): `typeof
+    // trigger.subject !== "object"` TIDAK menolak `null` (typeof null ===
+    // "object"), jadi subject:null lolos lalu spread ke `{}` -- ON_STATE
+    // reminder tanpa entityId/relationId nyata tersimpan, kolaps lewat
+    // subjectKeyOf ke kunci sentinel bersama.
+    if (trigger.kind === "ON_STATE" && (
+        !trigger.subject || (typeof trigger.subject.entityId !== "string" && typeof trigger.subject.relationId !== "string") ||
+        typeof trigger.attribute !== "string")) {
         fail(REASONS.INVALID_TRIGGER, "trigger ON_STATE wajib subject/attribute");
     }
     // Bug review independen (audit putaran-8, W7R8-P2-2; diperdalam putaran-9,

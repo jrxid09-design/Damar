@@ -144,7 +144,14 @@ function deepFreeze(value, seen = new WeakSet()) {
 
 function validateConditionSpec(spec, label) {
     if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, `${label} wajib objek`);
-    if (typeof spec.kind !== "string" || typeof spec.subject !== "object" ||
+    // Bug review independen (audit putaran-24, AUD24-P2-4): `typeof
+    // spec.subject !== "object"` TIDAK menolak `null` (typeof null ===
+    // "object"), jadi subject:null lolos lalu spread ke `{}` -- tersimpan
+    // tanpa entityId/relationId nyata, kolaps lewat subjectKeyOf ke kunci
+    // sentinel bersama yang menggabungkan kondisi tak-terkait. Sibling
+    // makeObservation/makeHypothesis sudah pakai guard bentuk positif ini.
+    if (typeof spec.kind !== "string" ||
+        !spec.subject || (typeof spec.subject.entityId !== "string" && typeof spec.subject.relationId !== "string") ||
         typeof spec.attribute !== "string") {
         fail(REASONS.UNVERIFIABLE_SUCCESS_CONDITION,
             `${label} tidak dapat dievaluasi (kind/subject/attribute wajib ada)`);

@@ -539,6 +539,13 @@ test("GL-repair-39: transitionCommitment(id, action, null) does not throw a raw 
     assert.equal(next.state, "MET", "explicit null meta must behave the same as omitting the argument");
 });
 
+test("GL-repair-40: proposeGoal rejects a successCondition with subject:null instead of silently accepting it as {} (independent audit AUD24-P2-4)", async () => {
+    const ge = await createGoalEngine();
+    assert.throws(() => ge.proposeGoal(baseGoalSpec({
+        successCondition: { kind: "WORLD_BELIEF", subject: null, attribute: "status", expectedValue: "done" }
+    })));
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

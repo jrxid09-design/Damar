@@ -274,8 +274,22 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             const { list, entry, evicted } = openContradictionSet(contradictions, contradiction, nowIso(), bounds.MAX_OPEN_CONTRADICTION_SETS);
             contradictions = list;
             if (evicted) {
+                // Bug review independen (audit putaran-24, AUD24-P2-1): entri
+                // yang dilempar dari `contradictions` (dan yang lalu ikut
+                // dilempar lagi dari `overflowedContradictions` saat arsip
+                // itu SENDIRI overflow) tidak pernah mencocokkan kembali
+                // belief yang contradictionSetId-nya menunjuk ke entri itu --
+                // query() bisa terus melapor contested:true dengan id yang
+                // sudah tidak ada di collection manapun, dan resolveContradiction()
+                // atas id itu melempar UNKNOWN_ENTITY. Dicocokkan ulang di
+                // KEDUA titik pelemparan (round-23's "other OPEN sets" logic
+                // yang sama, dipakai ulang di sini).
+                reconcileBeliefContradictionPointer(evicted);
                 overflowedContradictions.push(evicted);
-                if (overflowedContradictions.length > bounds.MAX_OPEN_CONTRADICTION_SETS) overflowedContradictions.shift();
+                if (overflowedContradictions.length > bounds.MAX_OPEN_CONTRADICTION_SETS) {
+                    const droppedFromArchive = overflowedContradictions.shift();
+                    reconcileBeliefContradictionPointer(droppedFromArchive);
+                }
             }
             const nextContestedRecordIds = Object.freeze(appendBounded(
                 existing.contestedRecordIds ?? [], contradiction.challengerRecordId,
@@ -404,39 +418,35 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     /** AUD16-P2-2: kontradiksi yang belum terselesaikan (status masih OPEN saat overflow) yang terdorong keluar dari daftar terbatas. */
     function overflowedContradictionsView() { return [...overflowedContradictions]; }
 
+    // Bug review independen (audit putaran-22, A-1; diperbaiki putaran-23,
+    // AUD23-P1-1; diperluas putaran-24, AUD24-P2-1): belief.contradictionSetId
+    // hanya pernah menyimpan SATU set (yang terbaru), tapi bisa ada >1 set
+    // OPEN untuk beliefKey yang sama. Setiap kali satu set BERHENTI eksis
+    // di `contradictions` (di-resolve, ATAU dilempar keluar oleh overflow
+    // `contradictions` sendiri, ATAU dilempar keluar oleh overflow arsip
+    // `overflowedContradictions`), belief yang menunjuk ke set itu wajib
+    // dicocokkan ulang ke satu-satunya sumber kebenaran (`contradictions`
+    // yang OPEN) -- bukan dibiarkan menunjuk ke id yang sudah tidak ada di
+    // collection manapun (query() lalu melaporkan contested:true dengan id
+    // yang resolveContradiction() sendiri tolak sebagai UNKNOWN_ENTITY).
+    function reconcileBeliefContradictionPointer(goneEntry) {
+        if (!goneEntry) return;
+        const key = beliefKey(goneEntry.subject, goneEntry.attribute);
+        const belief = beliefs.get(key);
+        if (!belief || belief.contradictionSetId !== goneEntry.contradictionSetId) return;
+        const stillOpen = contradictions.filter(c =>
+            c.status === "OPEN" && c.contradictionSetId !== goneEntry.contradictionSetId &&
+            beliefKey(c.subject, c.attribute) === key);
+        const nextContradictionSetId = stillOpen.length > 0
+            ? stillOpen[stillOpen.length - 1].contradictionSetId
+            : null;
+        beliefs.set(key, Object.freeze({ ...belief, contradictionSetId: nextContradictionSetId }));
+    }
+
     function resolveContradiction(contradictionSetId, ruleId) {
         contradictions = resolveContradictionSet(contradictions, contradictionSetId, ruleId, nowIso());
         const entry = contradictions.find(c => c.contradictionSetId === contradictionSetId);
-        // Bug review independen (audit putaran-22, A-1): resolveContradictionSet
-        // menutup ENTRY-nya sendiri tapi belief.contradictionSetId yang
-        // ditulis applyRecordToBelief saat CONTEST tidak pernah dibersihkan
-        // -- query() terus melaporkan `contested: true` untuk belief yang
-        // kontradiksinya sudah RESOLVED, menyesatkan konsumen metakognisi/
-        // governed di masa depan (WORLD MODEL != GROUND TRUTH: query harus
-        // jujur, bukan basi).
-        if (entry) {
-            const key = beliefKey(entry.subject, entry.attribute);
-            const belief = beliefs.get(key);
-            // Bug review independen (audit putaran-23, AUD23-P1-1): fix
-            // putaran-22 (A-1) membersihkan contradictionSetId TANPA SYARAT
-            // begitu id yang di-resolve cocok -- tapi applyRecordToBelief
-            // membuka satu set BARU per challenger berbeda (bukan menimpa
-            // yang lama), jadi satu belief bisa punya >1 set OPEN sekaligus
-            // dan hanya menyimpan id set TERBARU. Resolve set terbaru lalu
-            // membuat query() melapor contested:false padahal set LAIN
-            // untuk subject+attribute yang sama masih genuinely OPEN --
-            // kebohongan terbalik dari bug yang coba ditutup A-1. Dibersihkan
-            // hanya kalau TIDAK ADA set OPEN lain untuk beliefKey ini.
-            const otherOpen = contradictions.filter(c =>
-                c.status === "OPEN" && c.contradictionSetId !== contradictionSetId &&
-                beliefKey(c.subject, c.attribute) === key);
-            if (belief && belief.contradictionSetId === contradictionSetId) {
-                const nextContradictionSetId = otherOpen.length > 0
-                    ? otherOpen[otherOpen.length - 1].contradictionSetId
-                    : null;
-                beliefs.set(key, Object.freeze({ ...belief, contradictionSetId: nextContradictionSetId }));
-            }
-        }
+        if (entry) reconcileBeliefContradictionPointer(entry);
         return entry;
     }
 

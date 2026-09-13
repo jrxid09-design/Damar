@@ -16,7 +16,7 @@ const crypto = require("node:crypto");
 const { REASONS, fail } = require("./errors");
 const { BOUNDS, SCHEMA_VERSION } = require("./bounds");
 const { laws } = require("./laws");
-const { makeAssessment, makeReview, makeCalibrationRecord, COGNITIVE_ONLY_PROPOSALS } = require("./records");
+const { makeAssessment, makeReview, makeCalibrationRecord, COGNITIVE_ONLY_PROPOSALS, TRIGGERS } = require("./records");
 
 const ADMISSIBLE_OUTCOME_TIERS = new Set(["T1", "T2"]);
 
@@ -73,6 +73,20 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         if (typeof subjectRef?.entityId === "string") subjectKey = `entity:${subjectRef.entityId}`;
         else if (typeof subjectRef?.relationId === "string") subjectKey = `relation:${subjectRef.relationId}`;
         else fail(REASONS.INVALID_RECORD, "subjectRef wajib { entityId } atau { relationId } string");
+        // Bug review independen (audit putaran-24, AUD24-P2-2): `trigger`
+        // dulu langsung diinterpolasi ke debounceKey (mengeksekusi
+        // toString milik pemanggil) SEBELUM makeReview sempat memvalidasi
+        // TRIGGERS.has(trigger) -- kalau string hasil coercion kebetulan
+        // cocok kunci debounce yang OPEN dan dalam cooldown, trigger
+        // non-string diterima diam-diam lewat jalur early-return debounce,
+        // sama seperti AUD9-P2-2 yang sudah menutup jalur ini untuk
+        // subjectRef tapi tidak pernah dimigrasikan ke trigger.
+        if (!TRIGGERS.has(trigger)) {
+            // Pesan error TIDAK menginterpolasi `trigger` mentah -- template
+            // literal `${trigger}` sendiri memanggil toString milik
+            // pemanggil, persis jalur yang baru saja ditutup guard di atas.
+            fail(REASONS.INVALID_RECORD, `trigger '${typeof trigger}' tidak dikenal`);
+        }
         const debounceKey = `${subjectKey}::${trigger}`;
         const existingId = lastReviewBySubjectTrigger.get(debounceKey);
         if (existingId) {

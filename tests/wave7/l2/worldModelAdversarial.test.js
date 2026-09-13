@@ -554,12 +554,45 @@ test("WM-repair-45: resolving one of TWO open contradiction sets for the same su
     assert.equal(wm.query(base).contested, true, "a belief with another still-OPEN contradiction set must not be reported as uncontested");
 });
 
+test("WM-repair-48: an explicit null depth/limit does not silently disable neighbors/subgraph/path/entitiesByKind -- it behaves like the omitted default (independent audit AUD24-P2-5)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "d", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "d", source: "s" });
+    wm.declareRelation({ relationId: "r1", kind: "k", from: "e1", to: "e2" });
+    assert.equal(wm.neighbors("e1", null, null).entities.length, 1, "neighbors(id, null, null) must still traverse with the default depth");
+    assert.ok(wm.subgraph(["e1"], null).entities.some(e => e.entityId === "e2"), "subgraph(seeds, null) must still traverse with the default depth");
+    assert.notEqual(wm.path("e1", "e2", null).path, null, "path(from, to, null) must still search with the default maxDepth");
+    assert.equal(wm.entitiesByKind("d", null).entities.length, 2, "entitiesByKind(kind, null) must still return with the default limit");
+});
+
 test("WM-repair-46: declareHypothesis rejects a malformed subject as INVALID_RECORD, matching makeObservation's sibling guard (independent audit AUD23-ADV-1)", async () => {
     const wm = await createWorldModel();
     assertThrowsReason(() => wm.declareHypothesis({
         hypothesisId: "h1", subject: null, attribute: "a",
         candidateValues: [{ value: "v1", weight: 0.5 }], expiresAt: new Date(Date.now() + 60_000).toISOString()
     }), "INVALID_RECORD");
+});
+
+test("WM-repair-47: a belief's contradictionSetId is reconciled when the set it points at is rotated out by overflow eviction (not just by resolveContradiction), so query() never reports an id no collection contains (independent audit AUD24-P2-1)", async () => {
+    const bounds = { ...BOUNDS, MAX_OPEN_CONTRADICTION_SETS: 2 };
+    const wm = await createWorldModel({ bounds });
+    wm.declareEntity({ entityId: "A", entityKind: "d", source: "s" });
+    wm.declareEntity({ entityId: "B", entityKind: "d", source: "s" });
+    let t = 1;
+    const mk = (eid, v) => wm.ingestObservation({
+        subject: { entityId: eid }, attribute: "status", value: v,
+        sensor: { sensorId: `sensor-${eid}-${v}` }, tier: "T1", observedAt: new Date(t++).toISOString()
+    });
+    mk("A", "a0"); mk("A", "a1"); mk("A", "a2"); const c3 = mk("A", "a3"); // A's belief points at c3
+    mk("B", "b0");
+    for (let i = 1; i <= 12; i++) mk("B", "b" + i); // churn B until c3 is rotated out of BOTH contradictions and the bounded overflow archive
+    const qA = () => wm.query({ subject: { entityId: "A" }, attribute: "status" });
+    const stillReferenced = wm.openContradictions().some(c => c.contradictionSetId === qA().contradictionSetId) ||
+        wm.overflowedContradictions().some(c => c.contradictionSetId === qA().contradictionSetId);
+    assert.ok(!qA().contested || stillReferenced, "a contested=true belief must reference a contradiction set that actually exists somewhere");
+    if (qA().contested) {
+        assert.doesNotThrow(() => wm.resolveContradiction(qA().contradictionSetId, "R"), "resolveContradiction must never throw UNKNOWN_ENTITY for an id query() itself just returned");
+    }
 });
 
 test("WM-repair-38: entity eviction stays fast at scale -- relationDegree() must not rescan all relations per candidate (independent audit AUD20-P2-3)", async () => {

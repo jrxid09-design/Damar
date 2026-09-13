@@ -42,6 +42,15 @@ test("MC-repair-8: assess() with a missing/null evidenceQuality fails safe to NO
     assert.equal(a2.basis, "NO_EVIDENCE");
 });
 
+test("MC-repair-10: a non-string trigger cannot bypass the TRIGGERS enum via toString-coercion inside the debounce key (independent audit AUD24-P2-2)", async () => {
+    const mc = await createMetacognition();
+    mc.openReview({ trigger: "CONTRADICTION", subjectRef: { entityId: "e1" } });
+    let called = 0;
+    const evil = { toString() { called++; return "CONTRADICTION"; } };
+    assertThrowsReason(() => mc.openReview({ trigger: evil, subjectRef: { entityId: "e1" } }), "INVALID_RECORD");
+    assert.equal(called, 0, "a non-string trigger's toString must never be invoked before the enum check");
+});
+
 test("MC-repair-9: openReview(null)/recordCalibration(null) are rejected as INVALID_RECORD, not a raw TypeError (independent audit AUD22-F-4)", async () => {
     const mc = await createMetacognition();
     assertThrowsReason(() => mc.openReview(null), "INVALID_RECORD");

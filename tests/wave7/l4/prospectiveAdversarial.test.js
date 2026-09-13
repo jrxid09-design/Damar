@@ -26,6 +26,14 @@ test("PM-repair-23: armExpectation(null) is rejected as INVALID_RECORD, not a ra
     assertThrowsReason(() => pm.armExpectation(null), "INVALID_RECORD");
 });
 
+test("PM-repair-30: an ON_STATE trigger with subject:null is rejected instead of silently accepted as {} (independent audit AUD24-P2-4)", async () => {
+    const pm = await createProspectiveMemory();
+    assertThrowsReason(() => pm.arm({
+        reminderId: "R-null-subject", wakeClass: "NOTIFY_OWNER",
+        trigger: { kind: "ON_STATE", subject: null, attribute: "status" }
+    }), "INVALID_TRIGGER");
+});
+
 test("PM-A1: reminder carrying executable/authority-shaped payload is rejected", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.arm({

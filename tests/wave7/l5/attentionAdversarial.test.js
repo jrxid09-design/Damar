@@ -20,6 +20,23 @@ test("AT-repair-12: ingestSignal(null, workKind) is rejected as INVALID_RECORD, 
     assertThrowsReason(() => ae.ingestSignal(null, "PERCEIVE"), "INVALID_RECORD");
 });
 
+test("AT-repair-18: a hostile evidenceRef toString is never invoked, and two distinct object evidenceRefs count as two distinct corroboration pairs (independent audit AUD24-P2-3)", async () => {
+    const ae = await createAttentionEconomy();
+    let called = 0;
+    const evil = { originKind: "SYSTEM", toString() { called++; return "x"; } };
+    ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s1", subjectRef: { entityId: "e1" }, evidenceRef: evil }, "PERCEIVE");
+    assert.equal(called, 0, "evidenceRef's toString must never be invoked during ingest/recompute");
+
+    const control = await createAttentionEconomy();
+    const { targetId: tControl } = control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "A" }, "PERCEIVE");
+    control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "B" }, "PERCEIVE");
+    const objectRefs = await createAttentionEconomy();
+    const { targetId: tObj } = objectRefs.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: { ev: "A" } }, "PERCEIVE");
+    objectRefs.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: { ev: "B" } }, "PERCEIVE");
+    assert.equal(objectRefs.getTarget(tObj).effectivePriority, control.getTarget(tControl).effectivePriority,
+        "two distinct object evidenceRefs must count as two distinct corroboration pairs, same as two distinct string evidenceRefs");
+});
+
 test("AT-A1: salience flooding from one sensor is rate-capped and the source marked noisy", async () => {
     const ae = await createAttentionEconomy({ bounds: { ...BOUNDS, MAX_SIGNALS_PER_SOURCE_PER_MINUTE: 3 } });
     for (let i = 0; i < 3; i++) {
