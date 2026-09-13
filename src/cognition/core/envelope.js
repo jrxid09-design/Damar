@@ -223,6 +223,15 @@ function walkSafe(value, label, depth, stack, budget) {
         if (value.length > ENVELOPE_BOUNDS.GLOBAL_MAX_ARRAY_LENGTH) {
             rejectMetadata(label, "panjang array melebihi batas");
         }
+        // Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+        // putaran-2, AUD2-P2-3): cabang array ini `return` sebelum sempat
+        // mencapai cek prototype di bawah (khusus objek non-array), jadi
+        // `Object.setPrototypeOf(arr, {toJSON})` lolos -- JSON.stringify di
+        // structuredCopy memanggil toJSON warisan itu tanpa validasi.
+        const arrProto = Object.getPrototypeOf(value);
+        if (arrProto !== Array.prototype && arrProto !== null) {
+            rejectMetadata(label, "prototipe array tidak standar (kontrak data murni, termasuk toJSON warisan)");
+        }
         stack.add(value);
         try {
             // Indeks array bisa membawa accessor (Object.defineProperty pada

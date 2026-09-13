@@ -22,18 +22,52 @@ const FORBIDDEN_INTENT_KEYS = Object.freeze([
 ]);
 const MAX_INTENT_SCAN_DEPTH = 16;
 
+/**
+ * Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+ * putaran-2, AUD2-P2-1): versi lama membaca `value[key]` langsung tanpa
+ * memeriksa descriptor lebih dulu -- getter TOCTOU (mengembalikan nilai
+ * aman saat divalidasi, nilai jahat saat dibaca ulang nanti) lolos. Juga
+ * tidak menolak instance kelas/array non-standar (pola toJSON warisan yang
+ * sama seperti prospective/core-envelope). Sekarang mengikuti pola yang
+ * sama persis: fungsi/Symbol/accessor ditolak SEBELUM pernah dibaca.
+ */
 function assertNoAuthorityShapedIntentFields(value, depth = 0) {
-    if (value === null || value === undefined || typeof value !== "object") return;
+    if (value === null || value === undefined) return;
+    const t = typeof value;
+    if (t === "function") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa fungsi (termasuk toJSON)");
+    if (t === "symbol") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa Symbol");
+    if (t !== "object") return;
     if (depth > MAX_INTENT_SCAN_DEPTH) {
         fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate terlalu dalam untuk diverifikasi dengan aman, ditolak");
     }
+    if (Array.isArray(value)) {
+        const arrProto = Object.getPrototypeOf(value);
+        if (arrProto !== Array.prototype && arrProto !== null) {
+            fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa array dengan prototype non-standar");
+        }
+    } else {
+        const proto = Object.getPrototypeOf(value);
+        if (proto !== Object.prototype && proto !== null) {
+            fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh berupa instance kelas (kontrak data murni)");
+        }
+    }
     for (const key of Reflect.ownKeys(value)) {
-        if (typeof key === "symbol") continue;
+        if (typeof key === "symbol") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa kunci Symbol");
         if (FORBIDDEN_INTENT_KEYS.includes(key)) {
             fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa '${key}' (di kedalaman manapun)`);
         }
+        const desc = Object.getOwnPropertyDescriptor(value, key);
+        if (desc && (desc.get || desc.set)) {
+            fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa properti accessor: '${String(key)}'`);
+        }
         assertNoAuthorityShapedIntentFields(value[key], depth + 1);
     }
+}
+
+function deepFreeze(value) {
+    if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+    for (const key of Object.keys(value)) deepFreeze(value[key]);
+    return Object.freeze(value);
 }
 
 function validateConditionSpec(spec, label) {
@@ -112,7 +146,12 @@ function makeTask({ taskId, planRef, order, capabilityId = null, preconditions =
         taskId, planRef, order, capabilityId,
         preconditions: Object.freeze(preconditions.map(c => validateConditionSpec(c, "precondition"))),
         postconditions: Object.freeze(postconditions.map(c => validateConditionSpec(c, "postcondition"))),
-        intentTemplate: Object.freeze({ ...intentTemplate }),
+        // Bug review independen (audit putaran-2, AUD2-P2-1): freeze SATU
+        // LEVEL (`Object.freeze({...intentTemplate})`) meninggalkan objek
+        // nested (mis. `intentTemplate.nested`) tetap dapat diubah setelah
+        // validasi. Freeze rekursif di sini menutup jalur mutasi itu, sama
+        // seperti pola deepFreeze di prospective/records.js.
+        intentTemplate: deepFreeze(intentTemplate ?? {}),
         state: "PENDING", attempts: 0, maxAttempts, lastOutcomeRef: null
     });
 }

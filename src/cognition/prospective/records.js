@@ -83,9 +83,20 @@ function assertSafePayloadRef(value, depth = 0) {
     // warisan lolos tanpa terdeteksi (nol kunci own) -- lalu JSON.stringify
     // memanggil toJSON warisan itu dan memalsukan capabilityId/authProof.
     // Kontrak data murni: instance kelas/prototype ganjil ditolak, sama
-    // seperti core/envelope.js -- TAPI TIDAK untuk array (Array.prototype
-    // bukan Object.prototype, itu sah).
-    if (!Array.isArray(value)) {
+    // seperti core/envelope.js -- TERMASUK array. Bug review independen
+    // (OpenCode/9router deepseek-v4.1-flash, audit putaran-2, AUD2-P1-1):
+    // fix putaran-1 mengecualikan SEMUA array dari cek prototype, jadi
+    // `Object.setPrototypeOf(arr, {toJSON})` masih lolos (Array.isArray
+    // tetap true, kunci own tetap tak berbahaya) dan JSON.stringify
+    // memanggil toJSON warisan itu. Array standar (literal `[]`) punya
+    // prototype === Array.prototype; itu satu-satunya yang sah.
+    if (Array.isArray(value)) {
+        const arrProto = Object.getPrototypeOf(value);
+        if (arrProto !== Array.prototype && arrProto !== null) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED,
+                "payloadRef tidak boleh berupa array dengan prototype non-standar (kontrak data murni, termasuk toJSON warisan)");
+        }
+    } else {
         const proto = Object.getPrototypeOf(value);
         if (proto !== Object.prototype && proto !== null) {
             fail(REASONS.EXECUTABLE_MATERIAL_REJECTED,
