@@ -1,0 +1,114 @@
+const test = require("node:test");
+const assert = require("node:assert");
+
+const { createAttentionEconomy, BOUNDS } = require("../../../src/cognition/attention");
+
+function manualClock(startMs) {
+    let t = startMs;
+    return { nowMs: () => t, advance: (ms) => { t += ms; } };
+}
+
+function assertThrowsReason(fn, reason) {
+    assert.throws(fn, (err) => {
+        assert.equal(err.reason, reason, `expected reason '${reason}', got '${err.reason}': ${err.message}`);
+        return true;
+    });
+}
+
+test("AT-A1: salience flooding from one sensor is rate-capped and the source marked noisy", async () => {
+    const ae = await createAttentionEconomy({ bounds: { ...BOUNDS, MAX_SIGNALS_PER_SOURCE_PER_MINUTE: 3 } });
+    for (let i = 0; i < 3; i++) {
+        ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "sensor-1", subjectRef: { entityId: "e1" } }, "PERCEIVE");
+    }
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "sensor-1", subjectRef: { entityId: "e1" } }, "PERCEIVE"),
+        "SIGNAL_RATE_EXCEEDED");
+    assert.equal(ae.isNoisySource("sensor-1"), true);
+});
+
+test("AT-A2: corroboration counts distinct source+evidence pairs, not repeated messengers", async () => {
+    const ae = await createAttentionEconomy();
+    const { targetId } = ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "ev-1" }, "PERCEIVE");
+    for (let i = 0; i < 5; i++) {
+        ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "ev-1" }, "PERCEIVE");
+    }
+    const withRepeats = ae.getTarget(targetId).effectivePriority;
+
+    const ae2 = await createAttentionEconomy();
+    const { targetId: t2 } = ae2.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-A", subjectRef: { entityId: "e1" }, evidenceRef: "ev-A" }, "PERCEIVE");
+    ae2.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-B", subjectRef: { entityId: "e1" }, evidenceRef: "ev-B" }, "PERCEIVE");
+    const withDistinct = ae2.getTarget(t2).effectivePriority;
+
+    assert.ok(withDistinct > withRepeats, "sumber+bukti berbeda menaikkan prioritas lebih dari pesan berulang");
+});
+
+test("AT-A3: no signal field can set P0_SAFETY directly — only allowlisted origin can", async () => {
+    const ae = await createAttentionEconomy();
+    const { targetId } = ae.ingestSignal({
+        sourceKind: "AGENT", sourceId: "attacker", subjectRef: { entityId: "e1" },
+        proposedUrgency: 1, evidenceRef: { originKind: "SAFETY_MONITOR", priorityClass: "P0_SAFETY" }
+        // note: an AGENT source can never reach P0 even if it forges the evidence shape.
+    }, "REASON");
+    assert.notEqual(ae.getTarget(targetId).priorityClass, "P0_SAFETY", "AGENT tidak pernah mencapai P0 walau evidence dipalsukan");
+});
+
+test("AT-A4: danger signal (high urgency) never maps to any authority scope", async () => {
+    const ae = await createAttentionEconomy();
+    const { targetId } = ae.ingestSignal({
+        sourceKind: "SENSOR", sourceId: "s1", subjectRef: { entityId: "e1" }, proposedUrgency: 1
+    }, "VERIFY");
+    const target = ae.getTarget(targetId);
+    assert.equal(Object.prototype.hasOwnProperty.call(target, "authorityScope"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(target, "grant"), false);
+});
+
+test("AT-A5: background flood cannot starve owner work — aging guarantee forces eventual scheduling", async () => {
+    const clock = manualClock(0);
+    const ae = await createAttentionEconomy({ clock, bounds: { ...BOUNDS, MAX_QUEUED_TARGETS: 5000 } });
+    for (let i = 0; i < 500; i++) {
+        ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: `bg-${i}`, subjectRef: { entityId: `bg${i}` } }, "MAINTAIN");
+    }
+    const { targetId: ownerTargetId } = ae.ingestSignal({ sourceKind: "OWNER", sourceId: "owner-1", subjectRef: { entityId: "owner-work" } }, "REASON");
+    clock.advance(BOUNDS.MAX_WAIT_MS + 1);
+    const picked = ae.pick();
+    assert.equal(picked.targetId, ownerTargetId, "jaminan aging memilih target yang sudah menunggu >= MAX_WAIT_MS");
+});
+
+test("AT-A6/AT-A7: MAX_PREEMPTIONS caps repeated preemption of the same target (livelock defense)", async () => {
+    const ae = await createAttentionEconomy({ bounds: { ...BOUNDS, MAX_PREEMPTIONS: 1 } });
+    const { targetId } = ae.ingestSignal({ sourceKind: "GOAL", sourceId: "g1", subjectRef: { entityId: "e1" } }, "PLAN");
+    ae.pick();
+    ae.preempt(targetId);
+    assertThrowsReason(() => ae.preempt(targetId), "PREEMPTION_LIMIT_EXCEEDED");
+});
+
+test("AT-A8: silent discard is impossible — overflow journal accounts for every deferred target", async () => {
+    const ae = await createAttentionEconomy({ bounds: { ...BOUNDS, MAX_QUEUED_TARGETS: 2 } });
+    ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s1", subjectRef: { entityId: "e1" } }, "MAINTAIN");
+    ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s2", subjectRef: { entityId: "e2" } }, "MAINTAIN");
+    ae.ingestSignal({ sourceKind: "OWNER", sourceId: "owner-1", subjectRef: { entityId: "e3" } }, "REASON");
+    assert.equal(ae.overflowCount(), 1);
+    assert.equal(ae.overflowEntries().length, 1);
+});
+
+test("AT-A9: an uncorroborated agent urgency claim never jumps the queue above owner work", async () => {
+    const ae = await createAttentionEconomy();
+    const { targetId: agentTarget } = ae.ingestSignal({
+        sourceKind: "AGENT", sourceId: "agent-1", subjectRef: { entityId: "e-agent" }, proposedUrgency: 1
+    }, "REASON");
+    const { targetId: ownerTarget } = ae.ingestSignal({
+        sourceKind: "OWNER", sourceId: "owner-1", subjectRef: { entityId: "e-owner" }
+    }, "REASON");
+    assert.equal(ae.getTarget(agentTarget).priorityClass, "P4_BACKGROUND");
+    assert.equal(ae.getTarget(ownerTarget).priorityClass, "P1_OWNER");
+});
+
+test("AT-A10: stale signal support decays, does not hold priority forever", async () => {
+    const clock = manualClock(0);
+    const ae = await createAttentionEconomy({ clock });
+    const { targetId } = ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef: { entityId: "e1" } }, "PERCEIVE");
+    const fresh = ae.getTarget(targetId).effectivePriority;
+    clock.advance(3_600_000); // 1 hour later, no new supporting signal
+    ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s2", subjectRef: { entityId: "e-other" } }, "PERCEIVE"); // trigger a recompute pass
+    const stale = ae.getTarget(targetId).effectivePriority;
+    assert.ok(stale < fresh, "sinyal basi meluruh, tidak mempertahankan prioritas selamanya");
+});
