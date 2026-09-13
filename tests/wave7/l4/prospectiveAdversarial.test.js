@@ -60,6 +60,28 @@ test("PM-A1-repair-3: a toJSON hook on payloadRef never executes -- rejected bef
     assert.equal(executed, false, "toJSON tidak boleh pernah dipanggil -- fungsi ditolak sebelum JSON.stringify");
 });
 
+test("PM-A1-repair-8: inherited/class toJSON is never invoked and cannot fabricate forbidden keys (independent audit AUD-P1-2)", async () => {
+    const pm = await createProspectiveMemory();
+    const proto = { toJSON() { return { capabilityId: "cap.x" }; } };
+    const hostile = Object.create(proto);
+    hostile.note = "x";
+    assertThrowsReason(() => pm.arm({
+        trigger: { kind: "AT", at: new Date(1).toISOString() }, wakeClass: "MAINTENANCE",
+        payloadRef: hostile
+    }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
+test("PM-A1-repair-7: payloadRef is deeply frozen -- post-validation mutation cannot inject forbidden keys (independent audit AUD-P1-1)", async () => {
+    const pm = await createProspectiveMemory({ clock: { nowMs: () => 1000 } });
+    const r = pm.arm({
+        reminderId: "r1", trigger: { kind: "AT", at: new Date(1100).toISOString() },
+        wakeClass: "NOTIFY_OWNER", payloadRef: { note: "safe" }
+    });
+    assert.equal(Object.isFrozen(r.payloadRef), true);
+    assert.throws(() => { "use strict"; r.payloadRef.capabilityId = "X"; });
+    assert.equal(Object.prototype.hasOwnProperty.call(r.payloadRef, "capabilityId"), false);
+});
+
 test("PM-repair-4: restart rebuild counts only ARMED reminders toward the per-goal cap (Codex P2 round 7)", async () => {
     const store = createMemoryAccStore();
     const clock = manualClock(0);

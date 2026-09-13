@@ -104,6 +104,20 @@ test("GL-repair-2: evicting a terminal child goal decrements its parent's child 
         "childCounts induk harus diturunkan saat anak terminalnya dievict");
 });
 
+test("GL-repair-3: intentTemplate cannot carry authority-shaped fields, at any depth (independent audit AUD-P2-4)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+    assertThrowsReason(() => ge.createTask({
+        planRef: p.planId, order: 1,
+        intentTemplate: { op: "x", authProof: "PROOF-1", grant: "GRANT-1", balance: 999 }
+    }), "AUTHORITY_SHAPED_FIELD_REJECTED");
+    assertThrowsReason(() => ge.createTask({
+        planRef: p.planId, order: 1,
+        intentTemplate: { op: "x", nested: { authProof: "PROOF-1" } }
+    }), "AUTHORITY_SHAPED_FIELD_REJECTED");
+});
+
 test("GL-A5: immortal goal — terminal states are terminal, cannot be reactivated", async () => {
     const ge = await createGoalEngine();
     const g = ge.proposeGoal(baseGoalSpec());

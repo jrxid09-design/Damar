@@ -1000,3 +1000,9 @@ test("C0.1-repair2: journal integrity check detects tampering of the v2 epistemi
     const verdict = await tamperedCore.verifyJournalIntegrity();
     assert.equal(verdict.ok, false, "mengubah epistemicClass baris v2 harus terdeteksi oleh rantai hash");
 });
+
+test("C0.1-repair3: DAMAR_ACC=governed coerces to off -- the legacy ACC core has no semantics for it (independent audit AUD-P2-2)", async () => {
+    const config = acc.createACCConfig({ DAMAR_ACC: "governed" });
+    assert.equal(config.mode, "off",
+        "'governed' bukan mode ACC core lama (itu mode siklus W7-L7 yang terpisah) -- harus jatuh ke default off, bukan lolos coercion");
+});

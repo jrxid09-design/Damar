@@ -54,6 +54,16 @@ test("AT-repair-1: supporting signals per target are bounded across many distinc
         "dukungan per target tidak boleh tumbuh tanpa batas walau tiap sourceId berbeda");
 });
 
+test("AT-repair-2: total targets are bounded, not just queued ones (independent audit AUD-P1-3)", async () => {
+    const ae = await createAttentionEconomy({ bounds: { ...BOUNDS, MAX_QUEUED_TARGETS: 2, MAX_TOTAL_TARGETS: 10 } });
+    const ids = [];
+    for (let i = 0; i < 50; i++) {
+        ids.push(ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s", subjectRef: { entityId: "e" + i } }, "MAINTAIN").targetId);
+    }
+    const resident = ids.filter(id => ae.getTarget(id) !== null).length;
+    assert.ok(resident <= 10, "target yang didemosi/selesai harus benar-benar dihapus setelah melewati MAX_TOTAL_TARGETS, bukan hanya diberi label DEFERRED selamanya");
+});
+
 test("AT-A5-repair: a pick() blocked by full capacity never consumes the winning class's scheduling credit (Codex P2 round 5)", async () => {
     const clock = manualClock(0);
     let capacity = 0;
