@@ -7,9 +7,9 @@
 
 const crypto = require("node:crypto");
 const { REASONS, fail } = require("./errors");
-const { BOUNDS } = require("./bounds");
+const { BOUNDS: DEFAULT_BOUNDS } = require("./bounds");
 
-function openContradictionSet(list, contradiction, nowIso) {
+function openContradictionSet(list, contradiction, nowIso, maxOpenContradictionSets = DEFAULT_BOUNDS.MAX_OPEN_CONTRADICTION_SETS) {
     const entry = Object.freeze({
         contradictionSetId: crypto.randomUUID(),
         subject: contradiction.subject, attribute: contradiction.attribute,
@@ -19,11 +19,17 @@ function openContradictionSet(list, contradiction, nowIso) {
         openedAt: nowIso, status: "OPEN", resolution: null
     });
 
-    if (list.length >= BOUNDS.MAX_OPEN_CONTRADICTION_SETS) {
-        // Set tertua diarsipkan sebagai UNRESOLVABLE, bukan dibuang diam-diam.
+    if (list.length >= maxOpenContradictionSets) {
+        // Bug diketemukan review independen (Codex, putaran ke-4): versi
+        // lama menambahkan BAIK arsip lama MAUPUN entry baru ke list yang
+        // sudah penuh, sehingga list tumbuh +1 setiap overflow — batas
+        // tidak pernah benar-benar berlaku. List sekarang tetap tetap
+        // ukurannya: slot tertua dilepas dari list yang dilacak, bentuk
+        // arsipnya tetap dikembalikan lewat `evicted` supaya pemanggil bisa
+        // mengeskalasi ke metakognisi tanpa modul ini menahannya selamanya.
         const [oldest, ...rest] = list;
         const archived = Object.freeze({ ...oldest, status: "UNRESOLVABLE", resolution: { ruleId: "OVERFLOW_ARCHIVE", at: nowIso } });
-        return { list: [...rest, archived, entry], entry, evicted: archived };
+        return { list: [...rest, entry], entry, evicted: archived };
     }
 
     return { list: [...list, entry], entry, evicted: null };

@@ -105,9 +105,16 @@ function makeReminder({ reminderId, ownerRef = null, trigger, payloadRef = null,
 
 function makeExpectation({ expectationId, subject, attribute, expectedValue, window, onSatisfied = "CLOSE", onViolated = "NOTIFY" }) {
     if (typeof expectationId !== "string" || !expectationId) fail(REASONS.INVALID_RECORD, "expectationId wajib string");
-    if (!window || typeof window.latestAt !== "string") {
-        // PM-5: ekspektasi tanpa latestAt ditolak.
-        fail(REASONS.NO_LATEST_AT, "window.latestAt wajib ada (PM-5)");
+    if (!window || typeof window.latestAt !== "string" || !Number.isFinite(Date.parse(window.latestAt))) {
+        // PM-5: ekspektasi tanpa latestAt YANG SAH ditolak. Bug diketemukan
+        // review independen (Codex, putaran ke-4): string tak-tanggal lolos
+        // dulu, lalu Date.parse -> NaN membuat checkExpectations() tidak
+        // pernah bisa melewati window (tidak pernah VIOLATED).
+        fail(REASONS.NO_LATEST_AT, "window.latestAt wajib tanggal ISO yang sah (PM-5)");
+    }
+    if (window.earliestAt !== undefined && window.earliestAt !== null &&
+        !Number.isFinite(Date.parse(window.earliestAt))) {
+        fail(REASONS.NO_LATEST_AT, "window.earliestAt, jika ada, wajib tanggal ISO yang sah");
     }
     return Object.freeze({
         expectationId, subject: Object.freeze({ ...subject }), attribute, expectedValue,

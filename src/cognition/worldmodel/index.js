@@ -133,7 +133,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         });
 
         if (caseName === "CONTEST") {
-            const { list, entry } = openContradictionSet(contradictions, contradiction, nowIso());
+            const { list, entry } = openContradictionSet(contradictions, contradiction, nowIso(), bounds.MAX_OPEN_CONTRADICTION_SETS);
             contradictions = list;
             const contested = Object.freeze({ ...existing, contradictionSetId: entry.contradictionSetId });
             beliefs.set(key, contested);
