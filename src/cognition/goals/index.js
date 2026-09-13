@@ -110,7 +110,6 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // benar-benar divalidasi) sekarang dipanggil DULU; efek samping
         // hanya terjadi setelah record yang akan disimpan terbukti valid.
         const goal = makeGoal({ ...spec, depth, goalId: spec.goalId ?? crypto.randomUUID(), nowIso: nowIso() });
-        enforceCreationRate(spec.origin.kind);
 
         // Bug review independen (Codex putaran-6): cek retensi lama berjalan
         // SETELAH goal baru sudah dimasukkan, dan hanya mengevict kalau ada
@@ -162,6 +161,14 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
             }
         }
 
+        // Bug review independen (audit putaran-15, AUD15-P2-1): perbaikan
+        // putaran-14 memindahkan enforceCreationRate ke SETELAH makeGoal,
+        // tapi masih SEBELUM cek retensi -- proposal yang valid tapi ditolak
+        // retensi (GOAL_RETENTION_LIMIT_EXCEEDED, tidak ada goal terminal
+        // untuk dievict) tetap menagih kuota origin.kind walau tidak pernah
+        // tersimpan. Dipindah lagi ke tepat sebelum insersi, setelah SEMUA
+        // jalur penolakan (validasi maupun retensi) sudah lolos.
+        enforceCreationRate(spec.origin.kind);
         goals.set(goal.goalId, goal);
         if (goal.parentGoalId) childCounts.set(goal.parentGoalId, (childCounts.get(goal.parentGoalId) ?? 0) + 1);
 

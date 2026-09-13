@@ -183,26 +183,28 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             // kali -- mengevict/meng-overflow-archive kontradiksi sah lain
             // yang masih terbuka. recordId yang sama tidak boleh membuka
             // kontradiksi kedua.
-            // Bug review independen (audit putaran-14, AUD14-P2-1): dedup di
-            // atas hanya mencari `contradictions` yang MASIH tertahan -- begitu
-            // daftar terbatas itu overflow (MAX_OPEN_CONTRADICTION_SETS),
-            // entri challenger yang sudah di-replay hilang, dan replay
-            // berikutnya membuka set BARU lagi, mengevict kontradiksi sah lain.
-            // challengerRecordId sekarang JUGA dicatat di appliedRecordIds
-            // (riwayat permanen, tidak pernah direset oleh overflow) sehingga
-            // cek dedup utama di applyRevision (dijalankan di panggilan
-            // BERIKUTNYA) menangkapnya sebagai DUPLICATE lebih awal, sebelum
-            // pernah sampai ke cabang CONTEST ini lagi.
+            // Bug review independen (audit putaran-14, AUD14-P2-1; diperdalam
+            // putaran-15, AUD15-P1-1): dedup di atas hanya mencari
+            // `contradictions` yang MASIH tertahan -- begitu daftar terbatas
+            // itu overflow (MAX_OPEN_CONTRADICTION_SETS), entri challenger
+            // yang sudah di-replay hilang. Perbaikan putaran-14 mencatat
+            // challengerRecordId ke `appliedRecordIds`, TAPI itu dibatasi
+            // hanya 32 entri (MAX_OBSERVATIONS_RETAINED_PER_BELIEF) -- horizon
+            // yang jauh lebih sempit dari horizon retensi contradiction set
+            // (4096), jadi klaim "permanen" salah untuk belief yang menerima
+            // >32 record lain setelahnya. `contestedRecordIds` sekarang
+            // horizon terpisah, disamakan dengan MAX_OPEN_CONTRADICTION_SETS,
+            // supaya tidak pernah lebih sempit dari tempat ia diperiksa.
             const alreadyOpen = contradictions.find(c => c.challengerRecordId === contradiction.challengerRecordId);
             if (alreadyOpen) {
                 return { case: "DUPLICATE", belief: existing, contradictionSetId: alreadyOpen.contradictionSetId };
             }
             const { list, entry } = openContradictionSet(contradictions, contradiction, nowIso(), bounds.MAX_OPEN_CONTRADICTION_SETS);
             contradictions = list;
-            const nextAppliedRecordIds = Object.freeze(appendBounded(
-                existing.appliedRecordIds ?? existing.supportedBy, contradiction.challengerRecordId,
-                bounds.MAX_OBSERVATIONS_RETAINED_PER_BELIEF));
-            const contested = Object.freeze({ ...existing, contradictionSetId: entry.contradictionSetId, appliedRecordIds: nextAppliedRecordIds });
+            const nextContestedRecordIds = Object.freeze(appendBounded(
+                existing.contestedRecordIds ?? [], contradiction.challengerRecordId,
+                bounds.MAX_OPEN_CONTRADICTION_SETS));
+            const contested = Object.freeze({ ...existing, contradictionSetId: entry.contradictionSetId, contestedRecordIds: nextContestedRecordIds });
             beliefs.set(key, contested);
             return { case: caseName, belief: contested, contradictionSetId: entry.contradictionSetId };
         }

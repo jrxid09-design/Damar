@@ -30,9 +30,20 @@ function deepFreeze(value, seen = new WeakSet()) {
 
 async function loadSuccessWindows(store) {
     if (!store || typeof store.getKv !== "function") return new Map();
-    const raw = await store.getKv(KV_KEY);
-    if (!raw || typeof raw !== "object") return new Map();
-    return new Map(Object.entries(raw).map(([k, v]) => [k, deepFreeze(v)]));
+    // Bug review independen (audit putaran-15, AUD15-P2-2): tidak seperti
+    // worldmodel/goals/prospective's store.js (semua membungkus getKv dalam
+    // try/catch, "Store unreadable -> start empty"), pembacaan di sini
+    // TIDAK dijaga -- satu baris KV yang rusak (mis. JSON korup) menolak
+    // seluruh createSelfModel(), yang lalu menggagalkan komposisi L7 penuh
+    // (longhorizon membuat selfmodel duluan) alih-alih hanya mendegradasi
+    // L1 ke successWindow kosong.
+    try {
+        const raw = await store.getKv(KV_KEY);
+        if (!raw || typeof raw !== "object") return new Map();
+        return new Map(Object.entries(raw).map(([k, v]) => [k, deepFreeze(v)]));
+    } catch {
+        return new Map();
+    }
 }
 
 async function saveSuccessWindows(store, successWindows) {
