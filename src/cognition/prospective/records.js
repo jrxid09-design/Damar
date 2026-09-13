@@ -48,9 +48,21 @@ function validateTrigger(trigger) {
 
 const FORBIDDEN_PAYLOAD_KEYS = Object.freeze(["capabilityId", "actuatorRef", "authProof", "authorityDecision", "intentTemplate"]);
 
-/** PM-1, rekursif: field eksekusi/otoritas ditolak di kedalaman manapun. */
+const MAX_PAYLOAD_SCAN_DEPTH = 16;
+
+/**
+ * PM-1, rekursif: field eksekusi/otoritas ditolak di kedalaman manapun.
+ * Bug diketemukan review independen (Codex, putaran ke-2): pemotongan
+ * kedalaman sebelumnya BERHENTI diam-diam alih-alih GAGAL KERAS, sehingga
+ * payload bersarang lebih dalam dari batas lolos tanpa diperiksa —
+ * kebalikan dari fail-closed. Sekarang melebihi batas kedalaman itu
+ * SENDIRI adalah penolakan, bukan alasan untuk berhenti memeriksa.
+ */
 function assertNoForbiddenPayloadKeys(value, depth = 0) {
-    if (!value || typeof value !== "object" || depth > 8) return;
+    if (!value || typeof value !== "object") return;
+    if (depth > MAX_PAYLOAD_SCAN_DEPTH) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef terlalu dalam untuk diverifikasi dengan aman, ditolak");
+    }
     for (const key of Object.keys(value)) {
         if (FORBIDDEN_PAYLOAD_KEYS.includes(key)) {
             fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa '${key}' (di kedalaman manapun)`);
