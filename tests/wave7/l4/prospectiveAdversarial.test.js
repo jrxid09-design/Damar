@@ -46,6 +46,14 @@ test("PM-A1-repair-2: forbidden fields beyond the old depth-8 cutoff are rejecte
     }), "EXECUTABLE_MATERIAL_REJECTED");
 });
 
+test("PM-A5-repair: an unparsable expectation deadline is rejected, not silently accepted (Codex P2 round 4)", async () => {
+    const pm = await createProspectiveMemory();
+    assertThrowsReason(() => pm.armExpectation({
+        subject: { entityId: "e1" }, attribute: "status", expectedValue: "done",
+        window: { earliestAt: new Date(0).toISOString(), latestAt: "tomorrowish" }
+    }), "NO_LATEST_AT");
+});
+
 test("PM-A2: reminder flood is bounded by arm cap, not unbounded DoS on cognition", async () => {
     const pm = await createProspectiveMemory({ bounds: { ...BOUNDS, MAX_ARMED_REMINDERS: 3 } });
     for (let i = 0; i < 3; i++) pm.arm({ trigger: { kind: "AT", at: new Date(1000 + i).toISOString() }, wakeClass: "MAINTENANCE" });

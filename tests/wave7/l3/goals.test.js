@@ -80,7 +80,11 @@ test("W7-L3 restart: no task resumes in EXECUTING", async () => {
 
 test("W7-L3 boundedness: goal depth/children/creation-rate/active-goal caps", async () => {
     const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_GOAL_DEPTH: 1, MAX_GOAL_CREATION_RATE_PER_MINUTE: 1000 } });
-    assert.throws(() => ge.proposeGoal(baseGoalSpec({ depth: 2 })),
+    // depth is derived from the real parent chain, not trusted from the caller.
+    const root = ge.proposeGoal(baseGoalSpec());
+    const child = ge.proposeGoal(baseGoalSpec({ parentGoalId: root.goalId }));
+    assert.equal(child.depth, 1);
+    assert.throws(() => ge.proposeGoal(baseGoalSpec({ parentGoalId: child.goalId })),
         (err) => err.reason === "GOAL_DEPTH_EXCEEDED");
 
     const ge2 = await createGoalEngine({ bounds: { ...BOUNDS, MAX_CHILDREN_PER_GOAL: 1, MAX_GOAL_CREATION_RATE_PER_MINUTE: 1000 } });

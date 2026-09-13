@@ -65,17 +65,27 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     function proposeGoal(spec) {
         enforceCreationRate(spec.origin?.kind);
 
-        if ((spec.depth ?? 0) > bounds.MAX_GOAL_DEPTH) {
-            fail(REASONS.GOAL_DEPTH_EXCEEDED, `depth melebihi batas (${bounds.MAX_GOAL_DEPTH})`);
-        }
+        // Bug diketemukan review independen (Codex, putaran ke-4): depth
+        // lama dipercaya langsung dari pemanggil (`spec.depth`), jadi
+        // pemanggil bisa memberi depth:0 pada setiap anak dan melewati
+        // MAX_GOAL_DEPTH sepenuhnya. depth sekarang SELALU diturunkan dari
+        // induk yang benar-benar tersimpan; nilai `spec.depth` diabaikan.
+        let depth = 0;
         if (spec.parentGoalId) {
+            const parent = goals.get(spec.parentGoalId);
+            if (!parent) fail(REASONS.INVALID_RECORD, `parentGoalId '${spec.parentGoalId}' tidak ditemukan`);
+            depth = parent.depth + 1;
+
             const siblingCount = childCounts.get(spec.parentGoalId) ?? 0;
             if (siblingCount >= bounds.MAX_CHILDREN_PER_GOAL) {
                 fail(REASONS.CHILDREN_LIMIT_EXCEEDED, `induk '${spec.parentGoalId}' melebihi batas anak`);
             }
         }
+        if (depth > bounds.MAX_GOAL_DEPTH) {
+            fail(REASONS.GOAL_DEPTH_EXCEEDED, `depth melebihi batas (${bounds.MAX_GOAL_DEPTH})`);
+        }
 
-        const goal = makeGoal({ ...spec, goalId: spec.goalId ?? crypto.randomUUID(), nowIso: nowIso() });
+        const goal = makeGoal({ ...spec, depth, goalId: spec.goalId ?? crypto.randomUUID(), nowIso: nowIso() });
         goals.set(goal.goalId, goal);
         if (goal.parentGoalId) childCounts.set(goal.parentGoalId, (childCounts.get(goal.parentGoalId) ?? 0) + 1);
 

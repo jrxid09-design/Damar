@@ -52,11 +52,24 @@ test("GL-A3: plans hold no grants — createPlan/createTask accept no authority-
     assert.equal(Object.prototype.hasOwnProperty.call(t, "grant"), false);
 });
 
+test("GL-A4-repair: depth is derived from the real parent, caller-supplied depth is ignored (Codex P2 round 4)", async () => {
+    const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_GOAL_DEPTH: 2, MAX_GOAL_CREATION_RATE_PER_MINUTE: 1000 } });
+    const parent = ge.proposeGoal(baseGoalSpec({ depth: 0 }));
+    const child = ge.proposeGoal(baseGoalSpec({ depth: 0, parentGoalId: parent.goalId })); // lies about depth
+    assert.equal(child.depth, 1, "depth diturunkan dari induk, bukan dipercaya dari pemanggil");
+    const grandchild = ge.proposeGoal(baseGoalSpec({ depth: 0, parentGoalId: child.goalId }));
+    assert.equal(grandchild.depth, 2);
+    assertThrowsReason(() => ge.proposeGoal(baseGoalSpec({ depth: 0, parentGoalId: grandchild.goalId })),
+        "GOAL_DEPTH_EXCEEDED");
+});
+
 test("GL-A4: recursive goal explosion is stopped by depth/child/rate caps", async () => {
     const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_GOAL_DEPTH: 2, MAX_GOAL_CREATION_RATE_PER_MINUTE: 1000 } });
-    let parent = ge.proposeGoal(baseGoalSpec({ depth: 0 }));
-    parent = ge.proposeGoal(baseGoalSpec({ depth: 1, parentGoalId: parent.goalId }));
-    assertThrowsReason(() => ge.proposeGoal(baseGoalSpec({ depth: 3, parentGoalId: parent.goalId })),
+    const root = ge.proposeGoal(baseGoalSpec());
+    const child = ge.proposeGoal(baseGoalSpec({ parentGoalId: root.goalId }));
+    const grandchild = ge.proposeGoal(baseGoalSpec({ parentGoalId: child.goalId }));
+    assert.equal(grandchild.depth, 2);
+    assertThrowsReason(() => ge.proposeGoal(baseGoalSpec({ parentGoalId: grandchild.goalId })),
         "GOAL_DEPTH_EXCEEDED");
 });
 

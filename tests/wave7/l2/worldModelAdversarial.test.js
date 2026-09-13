@@ -120,6 +120,20 @@ test("WM-A7: graph traversal never walks past its depth/fanout caps", async () =
     assert.equal(p.truncated, true);
 });
 
+test("WM-A8-repair: contradiction list stays bounded on overflow, does not grow (Codex P2 round 4)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_OPEN_CONTRADICTION_SETS: 3 } });
+    for (let i = 0; i < 6; i++) {
+        wm.declareEntity({ entityId: `e${i}`, entityKind: "device", source: "t" });
+        wm.ingestObservation({ subject: { entityId: `e${i}` }, attribute: "status", value: "on",
+            sensor: { sensorId: "s1" }, tier: "T1", observedAt: `t${i}a` });
+        wm.ingestObservation({ subject: { entityId: `e${i}` }, attribute: "status", value: "off",
+            sensor: { sensorId: "s2" }, tier: "T1", observedAt: `t${i}b` });
+    }
+    // 6 contradictions opened against a cap of 3 — the tracked list must
+    // never exceed the bound, even though every overflow "archives" one.
+    assert.ok(wm.openContradictions().length <= 3, "daftar kontradiksi tidak boleh tumbuh melebihi batas");
+});
+
 test("WM-A8: resolving a contradiction without a ruleId is rejected, no silent close", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
