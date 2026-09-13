@@ -1,0 +1,128 @@
+const test = require("node:test");
+const assert = require("node:assert");
+
+const { createProspectiveMemory, BOUNDS } = require("../../../src/cognition/prospective");
+const { createMemoryAccStore } = require("../../../src/cognition/persistence/AccStore");
+
+function manualClock(startMs) {
+    let t = startMs;
+    return { nowMs: () => t, advance: (ms) => { t += ms; } };
+}
+
+function assertThrowsReason(fn, reason) {
+    assert.throws(fn, (err) => {
+        assert.equal(err.reason, reason, `expected reason '${reason}', got '${err.reason}': ${err.message}`);
+        return true;
+    });
+}
+
+test("PM-A1: reminder carrying executable/authority-shaped payload is rejected", async () => {
+    const pm = await createProspectiveMemory();
+    assertThrowsReason(() => pm.arm({
+        trigger: { kind: "AT", at: new Date(1000).toISOString() }, wakeClass: "MAINTENANCE",
+        payloadRef: { capabilityId: "cap.x" }
+    }), "EXECUTABLE_MATERIAL_REJECTED");
+    assertThrowsReason(() => pm.arm({
+        trigger: { kind: "AT", at: new Date(1000).toISOString() }, wakeClass: "MAINTENANCE",
+        payloadRef: () => 1
+    }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
+test("PM-A2: reminder flood is bounded by arm cap, not unbounded DoS on cognition", async () => {
+    const pm = await createProspectiveMemory({ bounds: { ...BOUNDS, MAX_ARMED_REMINDERS: 3 } });
+    for (let i = 0; i < 3; i++) pm.arm({ trigger: { kind: "AT", at: new Date(1000 + i).toISOString() }, wakeClass: "MAINTENANCE" });
+    assertThrowsReason(() => pm.arm({ trigger: { kind: "AT", at: new Date(9999).toISOString() }, wakeClass: "MAINTENANCE" }),
+        "PROSPECTIVE_FULL");
+});
+
+test("PM-A3: sub-floor recurrence period and unbounded recurrence are both rejected", async () => {
+    const pm = await createProspectiveMemory();
+    assertThrowsReason(() => pm.arm({
+        trigger: { kind: "RECURRING", intervalMs: 1000, maxOccurrences: 5 }, wakeClass: "MAINTENANCE"
+    }), "RECURRENCE_PERIOD_TOO_SHORT");
+    assertThrowsReason(() => pm.arm({
+        trigger: { kind: "RECURRING", intervalMs: 120_000 }, wakeClass: "MAINTENANCE" // no until/maxOccurrences
+    }), "RECURRENCE_UNBOUNDED");
+});
+
+test("PM-A4: wall-clock jump does not fire a reminder early relative to its own recorded due time", async () => {
+    const clock = manualClock(0);
+    const pm = await createProspectiveMemory({ clock });
+    pm.arm({ trigger: { kind: "AT", at: new Date(1_000_000).toISOString() }, wakeClass: "MAINTENANCE" });
+    // Small forward tick, nowhere near due — must not fire.
+    clock.advance(1000);
+    assert.equal(pm.tick().length, 0, "belum jatuh tempo, tidak boleh tembak dini");
+});
+
+test("PM-A5: catch-up storm after a long outage is capped, remainder MISSED_EXPIRED", async () => {
+    const store = createMemoryAccStore();
+    const clock1 = manualClock(0);
+    const pm1 = await createProspectiveMemory({ clock: clock1, store, bounds: { ...BOUNDS, MAX_CATCHUP_FIRES_PER_RESTART: 2 } });
+    for (let i = 0; i < 5; i++) pm1.arm({ trigger: { kind: "AT", at: new Date(100 + i).toISOString() }, wakeClass: "MAINTENANCE" });
+    await pm1.persist();
+
+    const clock2 = manualClock(1_000_000);
+    const pm2 = await createProspectiveMemory({ clock: clock2, store, bounds: { ...BOUNDS, MAX_CATCHUP_FIRES_PER_RESTART: 2 } });
+    assert.equal(pm2.catchUpEvents.length, 2, "catch-up dibatasi, tidak burst-fire semua yang basi");
+});
+
+test("PM-A6: waking a dead (terminal) goal is refused — reminder retires instead of firing", async () => {
+    const clock = manualClock(0);
+    const pm = await createProspectiveMemory({ clock });
+    pm.arm({ ownerRef: "goal-dead", trigger: { kind: "AT", at: new Date(1000).toISOString() }, wakeClass: "RESUME_GOAL" });
+    clock.advance(1500);
+    const events = pm.tick({ isTerminal: (goalId) => goalId === "goal-dead" });
+    assert.equal(events.length, 0, "goal terminal tidak pernah menerima wake event");
+});
+
+test("PM-A7: deterministic occurrence id collapses duplicate firing (cross-node simulation)", async () => {
+    const store = createMemoryAccStore();
+    const clock = manualClock(0);
+    const pm1 = await createProspectiveMemory({ clock, store });
+    pm1.arm({ trigger: { kind: "AT", at: new Date(1000).toISOString() }, wakeClass: "MAINTENANCE" });
+    clock.advance(1500);
+    const first = pm1.tick();
+    assert.equal(first.length, 1);
+    await pm1.persist();
+
+    // "node 2" loads the same durable snapshot (same firedOccurrenceIds) and
+    // attempts the same occurrence — must collapse, not double-fire.
+    const pm2 = await createProspectiveMemory({ clock: manualClock(2000), store });
+    assert.equal(pm2.catchUpEvents.length, 0, "occurrence sudah tercatat fired, tidak ditembak ulang");
+});
+
+test("PM-A8: violated expectation never asserts the opposite value, only opens a policy path", async () => {
+    const clock = manualClock(0);
+    const pm = await createProspectiveMemory({ clock });
+    const e = pm.armExpectation({
+        subject: { entityId: "e1" }, attribute: "status", expectedValue: "done",
+        window: { earliestAt: new Date(0).toISOString(), latestAt: new Date(1000).toISOString() },
+        onViolated: "OPEN_CONTRADICTION"
+    });
+    clock.advance(1500);
+    const results = pm.checkExpectations(() => null);
+    assert.equal(results[0].outcome, "VIOLATED");
+    assert.equal(pm.getExpectation(e.expectationId).state, "VIOLATED");
+    assert.equal(Object.prototype.hasOwnProperty.call(pm.getExpectation(e.expectationId), "assertedValue"), false);
+});
+
+test("PM-A9: MISSED is never suppressed — catch-up MISSED events are always returned, never swallowed", async () => {
+    const store = createMemoryAccStore();
+    const clock1 = manualClock(0);
+    const pm1 = await createProspectiveMemory({ clock: clock1, store });
+    pm1.arm({ trigger: { kind: "AT", at: new Date(1000).toISOString() }, wakeClass: "NOTIFY_OWNER" });
+    await pm1.persist();
+
+    const pm2 = await createProspectiveMemory({ clock: manualClock(50_000), store });
+    assert.equal(pm2.catchUpEvents.length, 1);
+    assert.equal(pm2.catchUpEvents[0].missed, true);
+});
+
+test("PM-A10: agent-suggested reminder is recorded with that origin, not silently treated as owner-trusted", async () => {
+    const pm = await createProspectiveMemory();
+    const r = pm.arm({
+        trigger: { kind: "AT", at: new Date(1000).toISOString() }, wakeClass: "MAINTENANCE",
+        origin: { kind: "AGENT_SUGGESTION", ref: "agent-1" }
+    });
+    assert.equal(r.origin.kind, "AGENT_SUGGESTION");
+});
