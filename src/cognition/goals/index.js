@@ -121,6 +121,13 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
                 // (childCounts.get(evicted.goalId) ?? 0) + 1, jadi kunci UUID
                 // basi menumpuk selamanya walau goal-nya sudah tidak ada.
                 childCounts.delete(evicted.goalId);
+                // Bug review independen (audit putaran-5, W7R5-P2-3): plan
+                // milik goal yang dievict ditinggalkan -- MAX_PLAN_VERSIONS_RETAINED
+                // hanya membatasi PER goal, jadi churn goal jangka panjang
+                // menumpuk plan tak terbatas secara total.
+                for (const p of [...plans.values()]) {
+                    if (p.goalRef === evicted.goalId) plans.delete(p.planId);
+                }
             } else {
                 fail(REASONS.GOAL_RETENTION_LIMIT_EXCEEDED,
                     `retensi goal melebihi batas (${bounds.MAX_TOTAL_GOALS_RETAINED}) dan tidak ada goal terminal untuk dievict`);
@@ -174,6 +181,15 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         if (openCount >= bounds.MAX_OPEN_COMMITMENTS) {
             fail(REASONS.OPEN_COMMITMENT_LIMIT_EXCEEDED, "jumlah komitmen terbuka melebihi batas");
         }
+        // Bug review independen (audit putaran-5, W7R5-P2-3, dieskalasi dari
+        // advisory putaran-4): MAX_OPEN_COMMITMENTS hanya membatasi yang OPEN
+        // -- komitmen terminal (MET/MISSED/RELEASED/RENEGOTIATED) menumpuk
+        // selamanya, tak terbatas. Kompaksi tertua saat retensi total penuh,
+        // pola yang sama dengan goals sendiri (MAX_TOTAL_GOALS_RETAINED).
+        if (commitments.size >= bounds.MAX_TOTAL_COMMITMENTS_RETAINED) {
+            const terminal = [...commitments.values()].filter(c => c.state !== "OPEN")[0];
+            if (terminal) commitments.delete(terminal.commitmentId);
+        }
         const c = makeCommitment({ ...spec, commitmentId: spec.commitmentId ?? crypto.randomUUID() });
         commitments.set(c.commitmentId, c);
         return c;
@@ -220,6 +236,14 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function createTask(spec) {
+        // Bug review independen (audit putaran-5, W7R5-P2-3): tasks tidak
+        // punya batas total sama sekali. Kompaksi task terminal (DONE/SKIPPED)
+        // tertua saat retensi penuh; task FAILED/lainnya dipertahankan karena
+        // masih bisa "retry".
+        if (tasks.size >= bounds.MAX_TOTAL_TASKS_RETAINED) {
+            const terminal = [...tasks.values()].filter(t => t.state === "DONE" || t.state === "SKIPPED")[0];
+            if (terminal) tasks.delete(terminal.taskId);
+        }
         const t = makeTask({ ...spec, taskId: spec.taskId ?? crypto.randomUUID(), maxAttempts: Math.min(spec.maxAttempts ?? 5, bounds.MAX_ATTEMPTS_PER_TASK) });
         tasks.set(t.taskId, t);
         return t;
@@ -238,6 +262,9 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     function getPlan(planId) { return plans.get(planId) ?? null; }
     function childCountsSize() { return childCounts.size; }
     function creationTimestampsSize() { return creationTimestampsByOrigin.size; }
+    function commitmentsSize() { return commitments.size; }
+    function tasksSize() { return tasks.size; }
+    function plansSize() { return plans.size; }
 
     async function persist() { return saveSnapshot(store, { goals, commitments, plans, tasks }); }
 
@@ -247,7 +274,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         createCommitment, transitionCommitment: transitionCommitmentAction,
         createPlan, invalidatePlanIfAssumptionBroken, getPlan,
         createTask, transitionTask: transitionTaskAction, getTask,
-        childCountsSize, creationTimestampsSize,
+        childCountsSize, creationTimestampsSize, commitmentsSize, tasksSize, plansSize,
         persist, laws, bounds
     });
 }
