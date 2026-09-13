@@ -79,7 +79,6 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         if (spec.goalId && goals.has(spec.goalId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `goalId '${spec.goalId}' sudah ada`);
         }
-        enforceCreationRate(spec.origin.kind);
 
         // Bug diketemukan review independen (Codex, putaran ke-4): depth
         // lama dipercaya langsung dari pemanggil (`spec.depth`), jadi
@@ -100,6 +99,18 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         if (depth > bounds.MAX_GOAL_DEPTH) {
             fail(REASONS.GOAL_DEPTH_EXCEEDED, `depth melebihi batas (${bounds.MAX_GOAL_DEPTH})`);
         }
+
+        // Bug review independen (audit putaran-14, AUD14-P1-2/AUD14-P2-3):
+        // enforceCreationRate (efek samping, menaikkan kuota) dan kompaksi
+        // retensi (efek samping, MENGHAPUS goal valid lain) dulu berjalan
+        // SEBELUM makeGoal memvalidasi spec -- proposal yang ditolak (mis.
+        // successCondition cacat) tetap menagih kuota origin.kind DAN
+        // mengevict satu goal terminal yang VALID sebelum error dilempar,
+        // kehilangan data permanen. makeGoal (satu-satunya tempat spec
+        // benar-benar divalidasi) sekarang dipanggil DULU; efek samping
+        // hanya terjadi setelah record yang akan disimpan terbukti valid.
+        const goal = makeGoal({ ...spec, depth, goalId: spec.goalId ?? crypto.randomUUID(), nowIso: nowIso() });
+        enforceCreationRate(spec.origin.kind);
 
         // Bug review independen (Codex putaran-6): cek retensi lama berjalan
         // SETELAH goal baru sudah dimasukkan, dan hanya mengevict kalau ada
@@ -151,7 +162,6 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
             }
         }
 
-        const goal = makeGoal({ ...spec, depth, goalId: spec.goalId ?? crypto.randomUUID(), nowIso: nowIso() });
         goals.set(goal.goalId, goal);
         if (goal.parentGoalId) childCounts.set(goal.parentGoalId, (childCounts.get(goal.parentGoalId) ?? 0) + 1);
 

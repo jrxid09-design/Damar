@@ -24,6 +24,8 @@ const DANGEROUS_INTENT_KEYS = Object.freeze(["__proto__", "constructor", "protot
 const INTENT_ARRAY_INDEX_PATTERN = /^(0|[1-9][0-9]*)$/;
 const MAX_INTENT_SCAN_DEPTH = 16;
 const MAX_INTENT_ARRAY_LENGTH = 1024;
+const MAX_INTENT_KEYS = 256;
+const MAX_INTENT_NODES = 512;
 
 /**
  * Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
@@ -41,7 +43,15 @@ const MAX_INTENT_ARRAY_LENGTH = 1024;
  * baru yang kita bangun sendiri, lalu dibekukan; objek asli pemanggil
  * tidak pernah disimpan atau dibaca lagi setelah validasi.
  */
-function buildSafeIntentTemplate(value, depth = 0) {
+function buildSafeIntentTemplate(value, depth = 0, budget) {
+    // Bug review independen (audit putaran-14, AUD14-P1-1): walker ini tidak
+    // punya anggaran jumlah node seperti worldmodel's buildSafeBeliefValue
+    // (W7R5-P1-2) -- sebuah DAG referensi-bersama (BUKAN siklus, jadi lolos
+    // MAX_INTENT_SCAN_DEPTH) dengan fanout kecil meledak eksponensial
+    // (fan^depth salinan), CPU/memory DoS trivial lewat proposeGoal/
+    // createTask/createPlan. `budget` diwariskan rekursif sepanjang SATU
+    // panggilan (dibuat baru hanya di titik masuk).
+    if (!budget) budget = { count: 0 };
     if (value === null || value === undefined) return value;
     const t = typeof value;
     if (t === "function") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa fungsi (termasuk toJSON)");
@@ -55,6 +65,10 @@ function buildSafeIntentTemplate(value, depth = 0) {
     if (t !== "object") return value;
     if (depth > MAX_INTENT_SCAN_DEPTH) {
         fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate terlalu dalam untuk diverifikasi dengan aman, ditolak");
+    }
+    budget.count += 1;
+    if (budget.count > MAX_INTENT_NODES) {
+        fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "jumlah node pada intentTemplate melebihi batas");
     }
 
     if (Array.isArray(value)) {
@@ -76,7 +90,7 @@ function buildSafeIntentTemplate(value, depth = 0) {
             if (!desc || desc.get || desc.set) {
                 fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa properti accessor: '${i}'`);
             }
-            const built = buildSafeIntentTemplate(desc.value, depth + 1);
+            const built = buildSafeIntentTemplate(desc.value, depth + 1, budget);
             out[i] = built === undefined ? null : built;
         }
         for (const key of Reflect.ownKeys(value)) {
@@ -90,7 +104,7 @@ function buildSafeIntentTemplate(value, depth = 0) {
             if (!desc || desc.get || desc.set) {
                 fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa properti accessor: '${String(key)}'`);
             }
-            buildSafeIntentTemplate(desc.value, depth + 1); // divalidasi, tidak disalin (properti non-indeks array)
+            buildSafeIntentTemplate(desc.value, depth + 1, budget); // divalidasi, tidak disalin (properti non-indeks array)
         }
         return out;
     }
@@ -99,8 +113,12 @@ function buildSafeIntentTemplate(value, depth = 0) {
     if (proto !== Object.prototype && proto !== null) {
         fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh berupa instance kelas (kontrak data murni)");
     }
+    const objKeys = Reflect.ownKeys(value);
+    if (objKeys.length > MAX_INTENT_KEYS) {
+        fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "jumlah kunci pada intentTemplate melebihi batas");
+    }
     const out = {};
-    for (const key of Reflect.ownKeys(value)) {
+    for (const key of objKeys) {
         if (typeof key === "symbol") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa kunci Symbol");
         if (DANGEROUS_INTENT_KEYS.includes(key)) fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `kunci berbahaya ditolak: '${key}'`);
         if (FORBIDDEN_INTENT_KEYS.includes(key)) {
@@ -110,7 +128,7 @@ function buildSafeIntentTemplate(value, depth = 0) {
         if (!desc || desc.get || desc.set) {
             fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa properti accessor: '${String(key)}'`);
         }
-        const built = buildSafeIntentTemplate(desc.value, depth + 1);
+        const built = buildSafeIntentTemplate(desc.value, depth + 1, budget);
         if (built !== undefined) out[key] = built;
     }
     return out;

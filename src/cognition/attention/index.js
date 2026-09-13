@@ -16,7 +16,7 @@ const crypto = require("node:crypto");
 const { REASONS, fail } = require("./errors");
 const { BOUNDS, SCHEMA_VERSION, PRIORITY_CLASSES } = require("./bounds");
 const { laws } = require("./laws");
-const { makeSignal, makeTarget } = require("./records");
+const { makeSignal, makeTarget, WORK_KINDS } = require("./records");
 const { assignPriorityClass } = require("./policy");
 const { computeEffectivePriority, initCredits, pickOne, mapToGovernorPriority } = require("./scheduling");
 
@@ -138,6 +138,12 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         // sudah diperbaiki di goals' proposeGoal tapi tidak dimigrasikan ke
         // sini. Validasi/bangun record dulu, baru tegakkan rate.
         const signal = makeSignal({ ...spec, signalId: spec.signalId ?? crypto.randomUUID(), createdAtMs: now() });
+        // Bug review independen (audit putaran-14, AUD14-P2-2): workKind
+        // hanya divalidasi DI DALAM makeTarget, yang berjalan SETELAH
+        // enforceSourceRate/targetKey -- signal dengan workKind cacat tetap
+        // menagih kuota rate sumbernya sebelum ditolak. Divalidasi di sini
+        // dulu, sebelum efek samping apa pun.
+        if (!WORK_KINDS.has(workKind)) fail(REASONS.INVALID_RECORD, `workKind '${workKind}' tidak dikenal`);
         // Bug review independen (audit putaran-12, AUD12-P2-4): perbaikan
         // putaran-11 memindahkan enforceSourceRate ke SETELAH makeSignal,
         // tapi targetKey (validator KEDUA di jalur ini, menolak subjectRef

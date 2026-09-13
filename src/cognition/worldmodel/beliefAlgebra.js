@@ -264,5 +264,6 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
 }
 
 module.exports = {
-    TIER_RANK, DEFAULT_DECAY_POLICY, isExpired, epistemicClassOf, applyRevision, buildSafeBeliefValue
+    TIER_RANK, DEFAULT_DECAY_POLICY, isExpired, epistemicClassOf, applyRevision, buildSafeBeliefValue,
+    appendBounded
 };

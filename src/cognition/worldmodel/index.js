@@ -23,7 +23,7 @@ const { REASONS, fail } = require("./errors");
 const { BOUNDS, SCHEMA_VERSION } = require("./bounds");
 const { laws } = require("./laws");
 const { makeEntity, makeRelation, makeObservation, makeHypothesis } = require("./records");
-const { DEFAULT_DECAY_POLICY, applyRevision } = require("./beliefAlgebra");
+const { DEFAULT_DECAY_POLICY, applyRevision, appendBounded } = require("./beliefAlgebra");
 const { openContradictionSet, resolveContradictionSet } = require("./contradiction");
 const graphOps = require("./graph");
 const { beliefKey, subjectKeyOf, query: queryBelief } = require("./query");
@@ -149,6 +149,18 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         const key = beliefKey(record.subject, record.attribute);
         const existing = beliefs.get(key);
 
+        // Bug review independen (audit putaran-14, AUD14-P1-2): kompaksi
+        // (menghapus belief valid lain) dulu berjalan SEBELUM applyRevision
+        // -- satu-satunya tempat record.value/subject benar-benar disaring
+        // (buildSafeBeliefValue) -- sehingga sebuah observasi/deklarasi yang
+        // DITOLAK (mis. BigInt pada value) tetap mengevict satu belief VALID
+        // sebelum error dilempar, kehilangan data permanen. applyRevision
+        // sekarang dipanggil DULU; kompaksi hanya terjadi setelah belief
+        // yang akan disimpan terbukti valid.
+        const { case: caseName, belief, contradiction } = applyRevision({
+            existing, record: { ...record, subjectKey }, nowMs: now(), decayPolicy: DEFAULT_DECAY_POLICY
+        });
+
         // Bug review independen (audit putaran-7, W7R7-P1-3): beliefs tidak
         // punya batas total sama sekali -- attribute string bebas milik
         // pemanggil (ingestObservation/ingestDeclaration) berarti satu
@@ -163,10 +175,6 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             if (victimKey !== null) beliefs.delete(victimKey);
         }
 
-        const { case: caseName, belief, contradiction } = applyRevision({
-            existing, record: { ...record, subjectKey }, nowMs: now(), decayPolicy: DEFAULT_DECAY_POLICY
-        });
-
         if (caseName === "CONTEST") {
             // Bug review independen (audit putaran-10, AUD10-P1-3): replay
             // dari challengerRecordId yang sama (pengiriman ulang observasi/
@@ -175,13 +183,26 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             // kali -- mengevict/meng-overflow-archive kontradiksi sah lain
             // yang masih terbuka. recordId yang sama tidak boleh membuka
             // kontradiksi kedua.
+            // Bug review independen (audit putaran-14, AUD14-P2-1): dedup di
+            // atas hanya mencari `contradictions` yang MASIH tertahan -- begitu
+            // daftar terbatas itu overflow (MAX_OPEN_CONTRADICTION_SETS),
+            // entri challenger yang sudah di-replay hilang, dan replay
+            // berikutnya membuka set BARU lagi, mengevict kontradiksi sah lain.
+            // challengerRecordId sekarang JUGA dicatat di appliedRecordIds
+            // (riwayat permanen, tidak pernah direset oleh overflow) sehingga
+            // cek dedup utama di applyRevision (dijalankan di panggilan
+            // BERIKUTNYA) menangkapnya sebagai DUPLICATE lebih awal, sebelum
+            // pernah sampai ke cabang CONTEST ini lagi.
             const alreadyOpen = contradictions.find(c => c.challengerRecordId === contradiction.challengerRecordId);
             if (alreadyOpen) {
                 return { case: "DUPLICATE", belief: existing, contradictionSetId: alreadyOpen.contradictionSetId };
             }
             const { list, entry } = openContradictionSet(contradictions, contradiction, nowIso(), bounds.MAX_OPEN_CONTRADICTION_SETS);
             contradictions = list;
-            const contested = Object.freeze({ ...existing, contradictionSetId: entry.contradictionSetId });
+            const nextAppliedRecordIds = Object.freeze(appendBounded(
+                existing.appliedRecordIds ?? existing.supportedBy, contradiction.challengerRecordId,
+                bounds.MAX_OBSERVATIONS_RETAINED_PER_BELIEF));
+            const contested = Object.freeze({ ...existing, contradictionSetId: entry.contradictionSetId, appliedRecordIds: nextAppliedRecordIds });
             beliefs.set(key, contested);
             return { case: caseName, belief: contested, contradictionSetId: entry.contradictionSetId };
         }
@@ -255,13 +276,19 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         if (spec.hypothesisId && hypotheses.has(spec.hypothesisId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `hypothesisId '${spec.hypothesisId}' sudah ada`);
         }
+        // Bug review independen (audit putaran-14, AUD14-P1-2): kompaksi
+        // (menghapus hipotesis valid lain) dulu berjalan SEBELUM
+        // makeHypothesis memvalidasi spec -- spec yang ditolak (mis.
+        // expiresAt cacat) tetap mengevict satu hipotesis VALID sebelum
+        // error dilempar, kehilangan data permanen. Validasi/bangun record
+        // DULU, baru kompaksi+simpan.
+        const h = makeHypothesis(spec);
         if (hypotheses.size >= bounds.MAX_HYPOTHESES) {
             // §11: kadaluwarsa dulu, lalu bobot terendah.
             const sorted = [...hypotheses.values()].sort((a, b) =>
                 (Date.parse(a.expiresAt) - Date.parse(b.expiresAt)));
             if (sorted[0]) hypotheses.delete(sorted[0].hypothesisId);
         }
-        const h = makeHypothesis(spec);
         hypotheses.set(h.hypothesisId, h);
         return h;
     }
