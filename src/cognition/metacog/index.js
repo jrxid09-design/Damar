@@ -90,7 +90,22 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
 
         reviews.set(finalReview.reviewId, finalReview);
         lastReviewBySubjectTrigger.set(debounceKey, finalReview.reviewId);
+        evictOldestClosedReviewIfOverBound();
         return finalReview;
+    }
+
+    /** Batas total retensi (open dibatasi terpisah oleh MAX_OPEN_REVIEWS di atas). */
+    function evictOldestClosedReviewIfOverBound() {
+        if (reviews.size <= bounds.MAX_TOTAL_REVIEWS_RETAINED) return;
+        for (const [id, r] of reviews) {
+            if (r.state !== "OPEN") {
+                reviews.delete(id);
+                for (const [key, mappedId] of lastReviewBySubjectTrigger) {
+                    if (mappedId === id) lastReviewBySubjectTrigger.delete(key);
+                }
+                return;
+            }
+        }
     }
 
     /**
@@ -143,11 +158,12 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
 
     function getReview(reviewId) { return reviews.get(reviewId) ?? null; }
     function calibrationCount() { return calibrationRecords.length; }
+    function reviewCount() { return reviews.size; }
 
     return Object.freeze({
         schemaVersion: SCHEMA_VERSION,
         assess, openReview, classifyProposal, applyProposal,
-        recordCalibration, getReview, calibrationCount,
+        recordCalibration, getReview, calibrationCount, reviewCount,
         laws, bounds
     });
 }

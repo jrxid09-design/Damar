@@ -45,6 +45,16 @@ test("MC-A4: reflection DoS via endless self-review is stopped by budget + open-
     assert.equal(r2.state, "EXPIRED", "anggaran refleksi habis -> review baru langsung EXPIRED, bukan reflect lebih lanjut");
 });
 
+test("MC-A4-repair: total retention of closed/expired reviews is bounded (Codex P1 round 3)", async () => {
+    const mc = await createMetacognition({ bounds: { ...BOUNDS, MAX_TOTAL_REVIEWS_RETAINED: 5, REFLECTION_BUDGET_MS_PER_HOUR: 0, REVIEW_COOLDOWN_MS: 0 } });
+    for (let i = 0; i < 20; i++) {
+        mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: `e${i}` }, cost: { tokens: 0, ms: 1 } });
+    }
+    // Every one of these is immediately EXPIRED (budget is 0) — retention must still be bounded,
+    // even though openReviewCount() only counts OPEN reviews.
+    assert.ok(mc.reviewCount() <= 5, `reviewCount ${mc.reviewCount()} melebihi MAX_TOTAL_REVIEWS_RETAINED`);
+});
+
 test("MC-A5: no authority call exists in this owner — module never imports src/authority", async () => {
     const fs = require("node:fs");
     const path = require("node:path");

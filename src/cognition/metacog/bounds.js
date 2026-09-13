@@ -4,6 +4,11 @@ const SCHEMA_VERSION = "metacog.v1";
 
 const BOUNDS = Object.freeze({
     MAX_OPEN_REVIEWS: 128,
+    // Bug diketemukan review independen (Codex, putaran ke-3): review yang
+    // sudah EXPIRED/APPLIED/REJECTED tidak pernah dibatasi total retensinya
+    // — hanya OPEN yang dihitung terhadap MAX_OPEN_REVIEWS. Ini bisa
+    // menghabiskan memori lewat pemicu berulang pasca-anggaran habis.
+    MAX_TOTAL_REVIEWS_RETAINED: 512,
     MAX_FINDINGS_PER_REVIEW: 64,
     MAX_PROPOSALS_PER_REVIEW: 32,
     REFLECTION_BUDGET_TOKENS_PER_HOUR: 200_000,

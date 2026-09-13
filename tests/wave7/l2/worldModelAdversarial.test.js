@@ -91,6 +91,24 @@ test("WM-A6-repair: redeclaring an entity under a new source cannot bypass the o
         "source-a harus melepas kuota e1 yang sudah pindah sumber");
 });
 
+test("WM-A6-repair-2: eviction prefers the lowest-degree entity, not merely the oldest (Codex P2 round 3)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_ENTITIES: 3 } });
+    // e1 (oldest) and e3 become connected; e2 (also old, but isolated) has degree 0.
+    wm.declareEntity({ entityId: "e1", entityKind: "hub", source: "t" });
+    wm.declareEntity({ entityId: "e2", entityKind: "isolated", source: "t" });
+    wm.declareEntity({ entityId: "e3", entityKind: "leaf", source: "t" });
+    wm.declareRelation({ relationId: "r1", kind: "near", from: "e1", to: "e3" });
+
+    // A 4th entity pushes past MAX_ENTITIES=3; the isolated e2 (degree 0)
+    // must be evicted even though e1 is equally old but has degree 1.
+    wm.declareEntity({ entityId: "e4", entityKind: "leaf", source: "t" });
+
+    const byKind = wm.entitiesByKind("isolated", 10);
+    assert.equal(byKind.entities.length, 0,
+        "entitas terisolasi (e2) harus dievict duluan, bukan e1 yang sama tuanya tapi terhubung");
+    assert.ok(wm.entitiesByKind("hub", 10).entities.length > 0, "e1 yang terhubung harus bertahan");
+});
+
 test("WM-A7: graph traversal never walks past its depth/fanout caps", async () => {
     const wm = await createWorldModel();
     // Build a long chain longer than PATH_MAX_DEPTH.

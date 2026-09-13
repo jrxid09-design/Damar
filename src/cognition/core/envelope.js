@@ -57,6 +57,7 @@ const ENVELOPE_BOUNDS = Object.freeze({
 });
 
 const DANGEROUS_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
+const ARRAY_INDEX_PATTERN = /^(0|[1-9][0-9]*)$/;
 
 /** Kelas event yang BOLEH bermutasi state ACC + producer sah-nya. */
 const EVENT_TYPES = Object.freeze({
@@ -234,6 +235,26 @@ function walkSafe(value, label, depth, stack, budget) {
                     rejectMetadata(label, `properti accessor pada indeks array ditolak tanpa dipanggil: '${i}'`);
                 }
                 walkSafe(value[i], label, depth + 1, stack, budget);
+            }
+            // Bug diketemukan review independen (Codex, putaran ke-3): array
+            // bisa punya properti OWN NON-INDEKS (mis. `arr.toJSON = fn`)
+            // yang loop indeks di atas tidak pernah memeriksa — dan
+            // JSON.stringify (di structuredCopy) memanggil toJSON tanpa
+            // validasi. Periksa properti non-indeks/non-length sama seperti
+            // kunci objek biasa.
+            for (const key of Reflect.ownKeys(value)) {
+                if (key === "length" || ARRAY_INDEX_PATTERN.test(String(key))) continue;
+                if (typeof key === "symbol") {
+                    rejectMetadata(label, "kunci Symbol tidak diperbolehkan pada array");
+                }
+                if (DANGEROUS_KEYS.includes(key)) {
+                    rejectMetadata(label, `kunci berbahaya ditolak pada array: '${key}'`);
+                }
+                const desc = Object.getOwnPropertyDescriptor(value, key);
+                if (desc && (desc.get || desc.set)) {
+                    rejectMetadata(label, `properti accessor pada array ditolak tanpa dipanggil: '${String(key)}'`);
+                }
+                walkSafe(value[key], label, depth + 1, stack, budget);
             }
         } finally {
             stack.delete(value);

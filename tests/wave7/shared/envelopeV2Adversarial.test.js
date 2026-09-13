@@ -185,6 +185,17 @@ test("W7-ENV-repair-1: accessor on an ARRAY index is rejected without invoking t
     assert.equal(invoked, false, "getter pada indeks array tidak boleh pernah dipanggil");
 });
 
+test("W7-ENV-repair-2: array with a non-index toJSON hook cannot execute during serialization (Codex P1 round 3)", () => {
+    const hostileArray = [1, 2];
+    let invoked = false;
+    hostileArray.toJSON = () => { invoked = true; return []; };
+    assertThrowsCode(
+        () => envelope.makeEnvelope(baseSpec({ payload: { arr: hostileArray } })),
+        "ACC_INVALID_METADATA"
+    );
+    assert.equal(invoked, false, "toJSON pada array tidak boleh pernah dipanggil");
+});
+
 test("W7-ENV-25: malformed schemaVersion on a persisted row fails closed", () => {
     assertThrowsCode(
         () => envelope.normalizeEnvelopeRecord({ schemaVersion: "not-a-version" }),

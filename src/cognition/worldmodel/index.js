@@ -47,12 +47,34 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     function now() { return clock.nowMs(); }
     function nowIso() { return new Date(now()).toISOString(); }
 
-    /** §11 overflow: evict by lastSeenAt ascending among lowest relation degree. */
+    function relationDegree(entityId) {
+        let degree = 0;
+        for (const r of relations.values()) {
+            if (r.from === entityId || r.to === entityId) degree += 1;
+        }
+        return degree;
+    }
+
+    /**
+     * §11 overflow: evict by lastSeenAt AND low relation degree. Bug
+     * diketemukan review independen (Codex, putaran ke-3): implementasi
+     * lama hanya memakai lastSeenAt, sehingga entitas lama yang sangat
+     * terhubung bisa dievict sementara entitas baru yang terisolasi
+     * bertahan — merusak konektivitas graf. Sekarang derajat relasi
+     * adalah kunci utama (evict yang paling sedikit terhubung dulu),
+     * lastSeenAt sebagai pemecah seri di antara kandidat berderajat sama.
+     */
     function evictEntityIfOverBound() {
         if (entities.size <= bounds.MAX_ENTITIES) return;
         let victim = null;
+        let victimDegree = Infinity;
         for (const e of entities.values()) {
-            if (!victim || e.lastSeenAt < victim.lastSeenAt) victim = e;
+            const degree = relationDegree(e.entityId);
+            if (!victim || degree < victimDegree ||
+                (degree === victimDegree && e.lastSeenAt < victim.lastSeenAt)) {
+                victim = e;
+                victimDegree = degree;
+            }
         }
         if (victim) {
             entities.delete(victim.entityId);
