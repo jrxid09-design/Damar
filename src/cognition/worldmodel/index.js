@@ -160,7 +160,12 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         }
     }
 
-    function declareEntity({ entityId, entityKind, labels, externalRefs, source }) {
+    function declareEntity(spec) {
+        // Bug review independen (audit putaran-22, F-4): spec null/non-objek
+        // meledakkan destructuring jadi TypeError mentah alih-alih
+        // INVALID_RECORD (pola yang sama dengan 11 titik masuk lain di
+        // ke-4 lane pada putaran ini).
+        const { entityId, entityKind, labels, externalRefs, source } = spec || {};
         const existing = entities.get(entityId);
         // Bug diketemukan review independen (Codex): deklarasi ulang dengan
         // `source` BERBEDA dulu menimpa entitas tanpa menyesuaikan hitungan
@@ -189,6 +194,9 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function declareRelation(spec) {
+        // Bug review independen (audit putaran-22, F-4): spec null/non-objek
+        // meledakkan `spec.relationId` jadi TypeError mentah.
+        if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
         // Bug review independen (audit putaran-19, AUD19-A3): sapuan dedup
         // replay id putaran-9/10/13 mencakup observationId/declarationId/
         // hypothesisId/goalId/dll, tapi tidak pernah mencakup relationId --
@@ -282,6 +290,9 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function ingestObservation(spec) {
+        // Bug review independen (audit putaran-22, F-4): spec null/non-objek
+        // meledakkan `spec.observationId` jadi TypeError mentah.
+        if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
         const observation = makeObservation({ ...spec, observationId: spec.observationId ?? crypto.randomUUID() });
         const entityId = observation.subject.entityId;
         if (entityId && !entities.has(entityId)) {
@@ -313,7 +324,10 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     /** W-1: pernyataan DECLARED pemilik — jalur admissible terpisah dari observasi sensor. */
-    function ingestDeclaration({ subject, attribute, value, declarationId, at }) {
+    function ingestDeclaration(spec) {
+        // Bug review independen (audit putaran-22, F-4): spec null/non-objek
+        // meledakkan destructuring jadi TypeError mentah.
+        const { subject, attribute, value, declarationId, at } = spec || {};
         if (!subject || (typeof subject.entityId !== "string" && typeof subject.relationId !== "string")) {
             fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
         }
@@ -345,6 +359,9 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function declareHypothesis(spec) {
+        // Bug review independen (audit putaran-22, F-4): spec null/non-objek
+        // meledakkan `spec.hypothesisId` jadi TypeError mentah.
+        if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
         // Bug review independen (audit putaran-13, AUD13-P2-4): hypothesisId
         // tidak pernah dicek tabrakan -- replay sebuah hypothesisId yang
         // sudah ada diam-diam menimpa candidateValues/expiresAt tersimpan,
@@ -371,7 +388,17 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         return h;
     }
 
-    function query(spec) { return queryBelief(beliefs, spec, now()); }
+    function query(spec) {
+        // Bug review independen (audit putaran-22, F-3): AUD21-ADV-1 menjaga
+        // `subject` malformed lewat subjectKeyOf, tapi `spec` itu sendiri
+        // null/undefined tetap meledakkan destructuring `{subject,...}` di
+        // queryBelief SEBELUM subjectKeyOf sempat dipanggil -- perbaikan
+        // tidak lengkap untuk kasus paling jelas.
+        if (!spec || typeof spec !== "object") {
+            return { unknown: true, reason: "NEVER_OBSERVED", lastKnown: null };
+        }
+        return queryBelief(beliefs, spec, now());
+    }
 
     function openContradictions() { return contradictions.filter(c => c.status === "OPEN"); }
     /** AUD16-P2-2: kontradiksi yang belum terselesaikan (status masih OPEN saat overflow) yang terdorong keluar dari daftar terbatas. */
@@ -379,7 +406,22 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
 
     function resolveContradiction(contradictionSetId, ruleId) {
         contradictions = resolveContradictionSet(contradictions, contradictionSetId, ruleId, nowIso());
-        return contradictions.find(c => c.contradictionSetId === contradictionSetId);
+        const entry = contradictions.find(c => c.contradictionSetId === contradictionSetId);
+        // Bug review independen (audit putaran-22, A-1): resolveContradictionSet
+        // menutup ENTRY-nya sendiri tapi belief.contradictionSetId yang
+        // ditulis applyRecordToBelief saat CONTEST tidak pernah dibersihkan
+        // -- query() terus melaporkan `contested: true` untuk belief yang
+        // kontradiksinya sudah RESOLVED, menyesatkan konsumen metakognisi/
+        // governed di masa depan (WORLD MODEL != GROUND TRUTH: query harus
+        // jujur, bukan basi).
+        if (entry) {
+            const key = beliefKey(entry.subject, entry.attribute);
+            const belief = beliefs.get(key);
+            if (belief && belief.contradictionSetId === contradictionSetId) {
+                beliefs.set(key, Object.freeze({ ...belief, contradictionSetId: null }));
+            }
+        }
+        return entry;
     }
 
     function stateView() { return { entities, relations }; }

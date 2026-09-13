@@ -148,6 +148,28 @@ test("SM-repair-9: a legacy successWindow (history populated, no appliedEvidence
     assert.equal(a.successWindow.attempts, 1);
 });
 
+test("SM-repair-10: a legacy successWindow still dedups a replay even after enough churn to scroll the ref out of `history` (independent audit AUD22-F-1)", async () => {
+    function jsonStore() {
+        const kv = new Map();
+        return {
+            async getKv(k) { return kv.has(k) ? JSON.parse(kv.get(k)) : null; },
+            async putKv(k, v) { kv.set(k, JSON.stringify(v)); }
+        };
+    }
+    const store = jsonStore();
+    await store.putKv("selfmodel.successWindows", {
+        "cap.x": { attempts: 1, successes: 1, windowStartedAt: 0, history: [{ at: "t0", outcome: "SUCCESS", evidenceRef: "E0" }] }
+    });
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const sm = await createSelfModel({ capabilityRegistry: registry, store });
+    for (let i = 0; i < BOUNDS.MAX_SUCCESS_WINDOW + 2; i++) {
+        sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "FAILED", at: `t${i + 1}`, evidenceRef: `N${i}` });
+    }
+    sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "SUCCESS", at: "t0", evidenceRef: "E0" }); // replay, long after E0 scrolled out of `history`
+    const a = sm.assess("cap.x");
+    assert.equal(a.successWindow.successes, 0, "replaying a legacy evidenceRef must stay a no-op even after it has scrolled out of both history and appliedEvidenceRefs' unseeded state");
+});
+
 test("SM-A2: stale availability is marked STALE after TTL, never silently USABLE", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const clock = manualClock(0);

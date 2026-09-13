@@ -233,15 +233,17 @@ async function createSelfModel({
         // (DEGRADED -> USABLE lewat replay evidenceRef lama). `appliedEvidenceRefs`
         // punya horizon independen jauh lebih besar (MAX_APPLIED_EVIDENCE_REFS),
         // sama seperti worldmodel's appliedRecordIds/contestedRecordIds.
-        const appliedEvidenceRefs = window.appliedEvidenceRefs ?? [];
-        // Bug review independen (audit putaran-21, AUD21-P2-2): putaran-20
-        // MENGGANTI dedup `history` dengan `appliedEvidenceRefs`, bukan
-        // meng-OR-kannya, dan tidak pernah menabur (seed) appliedEvidenceRefs
-        // dari `history` window yang sudah ada -- window durabel yang
-        // ditulis kandidat SEBELUM putaran-20 (punya history, tanpa
-        // appliedEvidenceRefs) kehilangan dedup sama sekali untuk setiap
-        // evidenceRef di history-nya sampai window itu diperbarui lagi.
-        // Kedua pemeriksaan dipertahankan sekaligus.
+        // Bug review independen (audit putaran-21, AUD21-P2-2; diperdalam
+        // putaran-22, F-1): putaran-21 menambahkan fallback OR ke `history`
+        // tapi TIDAK PERNAH menabur (seed) appliedEvidenceRefs dari history
+        // window durabel yang sudah ada -- begitu window legacy itu
+        // menerima >32 outcome baru, ref lama terlempar dari `history` (FIFO
+        // 32) sementara appliedEvidenceRefs (masih [] karena tidak ditabur)
+        // tidak pernah menerimanya juga, jadi fallback OR gagal menutup
+        // celah tepat pada window yang seharusnya ia lindungi. Ditabur
+        // sekali di sini dari history yang ada; OR tetap dipertahankan
+        // sebagai jaring pengaman kedua.
+        const appliedEvidenceRefs = window.appliedEvidenceRefs ?? (window.history ?? []).map(h => h.evidenceRef);
         if (appliedEvidenceRefs.includes(evidenceRef) ||
             (window.history ?? []).some(h => h.evidenceRef === evidenceRef)) {
             return assess(capabilityId);

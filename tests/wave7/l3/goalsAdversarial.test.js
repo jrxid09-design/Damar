@@ -513,6 +513,14 @@ test("GL-repair-36: createTask rejects explicit null preconditions/postcondition
     assertThrowsReason(() => ge.createTask({ planRef: p.planId, order: 2, intentTemplate: { op: "noop" }, postconditions: null }), "INVALID_RECORD");
 });
 
+test("GL-repair-37: proposeGoal/createCommitment/createPlan/createTask(null) are rejected as INVALID_RECORD, not a raw TypeError (independent audit AUD22-F-4)", async () => {
+    const ge = await createGoalEngine();
+    assertThrowsReason(() => ge.proposeGoal(null), "INVALID_RECORD");
+    assertThrowsReason(() => ge.createCommitment(null), "INVALID_RECORD");
+    assertThrowsReason(() => ge.createPlan(null), "INVALID_RECORD");
+    assertThrowsReason(() => ge.createTask(null), "INVALID_RECORD");
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

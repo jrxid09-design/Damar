@@ -55,7 +55,10 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
      * MC-5: tidak ada parameter "parentReviewId" — struktural mustahil
      * membuat review dari review (depth dibatasi 1 lewat ABSENnya jalur itu).
      */
-    function openReview({ trigger, subjectRef, findings = [], proposals = [], cost = { tokens: 0, ms: 0 } }) {
+    function openReview(spec) {
+        // Bug review independen (audit putaran-22, F-4): spec null/non-objek
+        // meledakkan destructuring jadi TypeError mentah.
+        const { trigger, subjectRef, findings = [], proposals = [], cost = { tokens: 0, ms: 0 } } = spec || {};
         rollBudgetWindow();
 
         // Bug review independen (audit putaran-9, AUD9-P2-2): JSON.stringify(subjectRef)
@@ -170,6 +173,9 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
 
     /** MC-A6: hasil hanya diterima dari T1/T2 dengan bukti yang bisa diselesaikan. */
     function recordCalibration(spec) {
+        // Bug review independen (audit putaran-22, F-4): spec null/non-objek
+        // meledakkan `spec.outcomeTier` jadi TypeError mentah.
+        if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
         if (!ADMISSIBLE_OUTCOME_TIERS.has(spec.outcomeTier)) {
             fail(REASONS.INVALID_OUTCOME, `outcomeTier '${spec.outcomeTier}' tidak admissible untuk kalibrasi`);
         }

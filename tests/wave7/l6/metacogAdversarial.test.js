@@ -42,6 +42,12 @@ test("MC-repair-8: assess() with a missing/null evidenceQuality fails safe to NO
     assert.equal(a2.basis, "NO_EVIDENCE");
 });
 
+test("MC-repair-9: openReview(null)/recordCalibration(null) are rejected as INVALID_RECORD, not a raw TypeError (independent audit AUD22-F-4)", async () => {
+    const mc = await createMetacognition();
+    assertThrowsReason(() => mc.openReview(null), "INVALID_RECORD");
+    assertThrowsReason(() => mc.recordCalibration(null), "INVALID_RECORD");
+});
+
 test("MC-A1: fake confidence (model writes 0.99) is impossible — no API accepts a raw value", async () => {
     const mc = await createMetacognition();
     const a = mc.assess({ entityId: "e1" }, "claim", { value: 0.99, sourceCount: 0 }); // "value" in input ignored

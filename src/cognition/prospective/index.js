@@ -266,6 +266,11 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
     }
 
     function armExpectation(spec) {
+        // Bug review independen (audit putaran-22, F-4): spec null/non-objek
+        // meledakkan `spec.expectationId` jadi TypeError mentah -- sibling
+        // `arm()` di file yang sama dijaga putaran-21 (PM-repair-22), fungsi
+        // ini terlewat.
+        if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
         // Bug review independen (audit putaran-10, AUD10-P1-2): replay dari
         // expectationId yang sudah ada (mis. sudah VIOLATED) menimpanya
         // kembali ke PENDING, memicu ulang jalur kebijakan (onSatisfied/

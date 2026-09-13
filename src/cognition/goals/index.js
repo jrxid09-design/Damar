@@ -63,6 +63,9 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function proposeGoal(spec) {
+        // Bug review independen (audit putaran-22, F-4): spec null/non-objek
+        // meledakkan `spec.origin` jadi TypeError mentah.
+        if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
         // Bug review independen (audit putaran-4, W7R4-P2-3): enforceCreationRate
         // dulu berjalan SEBELUM makeGoal memvalidasi origin.kind -- setiap
         // origin.kind sampah (string acak pemanggil) tetap membuat kunci baru
@@ -231,6 +234,9 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function createCommitment(spec) {
+        // Bug review independen (audit putaran-22, F-4): spec null/non-objek
+        // meledakkan `spec.commitmentId` jadi TypeError mentah.
+        if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
         // Bug review independen (audit putaran-10, AUD10-P1-2): replay dari
         // commitmentId yang sudah ada (mis. sudah MET) menimpanya kembali ke
         // OPEN, melewati finalitas state terminal.
@@ -272,6 +278,9 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function createPlan(spec) {
+        // Bug review independen (audit putaran-22, F-4): spec null/non-objek
+        // meledakkan `spec.planId` jadi TypeError mentah.
+        if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
         // Bug review independen (audit putaran-10, AUD10-P1-2): replay dari
         // planId yang sudah ada menimpanya kembali ke state DRAFT, membuang
         // invalidatedBy yang sudah tercatat.
@@ -335,6 +344,9 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function createTask(spec) {
+        // Bug review independen (audit putaran-22, F-4): spec null/non-objek
+        // meledakkan `spec.taskId` jadi TypeError mentah.
+        if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
         // Bug review independen (audit putaran-10, AUD10-P1-2): replay dari
         // taskId yang sudah ada mengganti task (termasuk yang sudah
         // ATTEMPTS_EXCEEDED/DONE) dengan attempts:0/state:PENDING baru,

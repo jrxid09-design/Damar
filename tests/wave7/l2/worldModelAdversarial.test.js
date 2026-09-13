@@ -498,6 +498,41 @@ test("WM-repair-40: query() with a null/malformed subject fails safe to unknown 
     assert.equal(r.reason, "NEVER_OBSERVED");
 });
 
+test("WM-repair-41: subgraph()/neighbors() reject malformed seeds/kinds as INVALID_RECORD, not a raw TypeError (independent audit AUD22-F-2)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    assertThrowsReason(() => wm.subgraph(42), "INVALID_RECORD");
+    const sub = wm.subgraph(null);
+    assert.deepEqual(sub.entities, []); // null defaults to empty seeds, not a throw
+    assertThrowsReason(() => wm.neighbors("e1", 42), "INVALID_RECORD");
+});
+
+test("WM-repair-42: query(null)/query(undefined) fail safe to unknown NEVER_OBSERVED, not a raw TypeError (independent audit AUD22-F-3)", async () => {
+    const wm = await createWorldModel();
+    assert.deepEqual(wm.query(null), { unknown: true, reason: "NEVER_OBSERVED", lastKnown: null });
+    assert.deepEqual(wm.query(undefined), { unknown: true, reason: "NEVER_OBSERVED", lastKnown: null });
+});
+
+test("WM-repair-43: declareEntity/ingestObservation/ingestDeclaration/declareRelation/declareHypothesis(null) are rejected as INVALID_RECORD, not a raw TypeError (independent audit AUD22-F-4)", async () => {
+    const wm = await createWorldModel();
+    assertThrowsReason(() => wm.declareEntity(null), "INVALID_RECORD");
+    assertThrowsReason(() => wm.ingestObservation(null), "INVALID_RECORD");
+    assertThrowsReason(() => wm.ingestDeclaration(null), "INVALID_RECORD");
+    assertThrowsReason(() => wm.declareRelation(null), "INVALID_RECORD");
+    assertThrowsReason(() => wm.declareHypothesis(null), "INVALID_RECORD");
+});
+
+test("WM-repair-44: resolving a contradiction clears the belief's contested flag, query() never reports a stale contested=true (independent audit AUD22-A-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const base = { subject: { entityId: "e1" }, attribute: "status", tier: "T1" };
+    wm.ingestObservation({ ...base, value: "a", sensor: { sensorId: "s1" }, observedAt: new Date(1).toISOString() });
+    const contest = wm.ingestObservation({ ...base, value: "b", sensor: { sensorId: "s2" }, observedAt: new Date(2).toISOString() });
+    assert.equal(wm.query(base).contested, true);
+    wm.resolveContradiction(contest.contradictionSetId, "RULE-1");
+    assert.equal(wm.query(base).contested, false, "a resolved contradiction must not leave the belief permanently marked contested");
+});
+
 test("WM-repair-38: entity eviction stays fast at scale -- relationDegree() must not rescan all relations per candidate (independent audit AUD20-P2-3)", async () => {
     const ENTITY_COUNT = 3000;
     const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_ENTITIES: ENTITY_COUNT, MAX_ENTITIES_PER_SOURCE: ENTITY_COUNT + 500, MAX_RELATIONS: ENTITY_COUNT * 4 } });
