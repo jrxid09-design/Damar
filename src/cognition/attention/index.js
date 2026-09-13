@@ -77,11 +77,34 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         }
     }
 
+    // Bug review independen (audit putaran-24, AUD24-P2-3): template literal
+    // `${s.evidenceRef}` memaksa coercion (memanggil toString/valueOf milik
+    // pemanggil di dalam proses kognisi, tereksekusi setiap pick()/recompute)
+    // DAN meruntuhkan semua evidenceRef berbentuk objek ke string sama
+    // ("[object Object]"), menggabungkan pasangan sumber+bukti yang
+    // sebenarnya berbeda (undercount korroborasi). Kunci identitas dibangun
+    // hanya dari nilai primitif dibaca lewat descriptor (tidak pernah
+    // memanggil toString/toJSON/getter pemanggil), sama seperti pola
+    // getOwnPropertyDescriptor yang sudah dipakai di lane lain.
+    function evidenceRefIdentity(evidenceRef) {
+        if (evidenceRef === null || evidenceRef === undefined) return "";
+        const t = typeof evidenceRef;
+        if (t === "string" || t === "number" || t === "boolean") return `${t}:${evidenceRef}`;
+        if (t !== "object") return t;
+        return Reflect.ownKeys(evidenceRef).filter(k => typeof k !== "symbol").sort().map(k => {
+            const desc = Object.getOwnPropertyDescriptor(evidenceRef, k);
+            const v = (desc && !desc.get && !desc.set) ? desc.value : undefined;
+            const vt = typeof v;
+            const vs = (vt === "string" || vt === "number" || vt === "boolean") ? String(v) : vt;
+            return `${String(k)}=${vs}`;
+        }).join("&");
+    }
+
     function recomputeAll() {
         for (const [id, t] of targets) {
             if (t.state !== "QUEUED") continue;
             const support = supportingSignals.get(id) ?? [];
-            const distinctPairs = new Set(support.map(s => `${s.sourceId}::${s.evidenceRef ?? ""}`)).size;
+            const distinctPairs = new Set(support.map(s => `${s.sourceId}::${evidenceRefIdentity(s.evidenceRef)}`)).size;
             const newestSignalAge = support.length
                 ? now() - Math.max(...support.map(s => s.createdAtMs)) : 0;
             const effectivePriority = computeEffectivePriority(t, {

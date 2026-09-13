@@ -31,7 +31,15 @@ function makeSignal({ signalId, sourceKind, sourceId, subjectRef, proposedUrgenc
         signalId, sourceKind, sourceId,
         subjectRef: deepFreeze({ ...subjectRef }),
         proposedUrgency: clamp01(Number(proposedUrgency)), // AT-1: saran saja, bukan class final
-        evidenceRef, createdAtMs, expiresAtMs
+        // Bug review independen (audit putaran-24, AUD24-P2-3): evidenceRef
+        // OBJEK dulu disimpan APA ADANYA, tidak seperti subjectRef --
+        // pemanggil bisa memutasinya pasca-panggilan (menulis ulang bukti
+        // korroborasi tersimpan). Primitif (string/number) sudah immutable
+        // dengan sendirinya, tidak perlu (dan tidak boleh, `{...'x'}`
+        // merusak bentuknya) disalin ke objek.
+        evidenceRef: (evidenceRef !== null && typeof evidenceRef === "object")
+            ? deepFreeze({ ...evidenceRef }) : evidenceRef,
+        createdAtMs, expiresAtMs
     });
 }
 
