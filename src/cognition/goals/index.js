@@ -106,6 +106,13 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
                 if (evicted.parentGoalId) {
                     childCounts.set(evicted.parentGoalId, Math.max(0, (childCounts.get(evicted.parentGoalId) ?? 1) - 1));
                 }
+                // Bug review independen (audit putaran-3, AUD3-P2-2): entri
+                // MILIK goal yang dievict sendiri di childCounts (dipakai
+                // sebagai induk untuk anak-anaknya) tidak pernah dihapus --
+                // hanya nilainya yang berubah lewat proposeGoal berikutnya
+                // (childCounts.get(evicted.goalId) ?? 0) + 1, jadi kunci UUID
+                // basi menumpuk selamanya walau goal-nya sudah tidak ada.
+                childCounts.delete(evicted.goalId);
             } else {
                 fail(REASONS.GOAL_RETENTION_LIMIT_EXCEEDED,
                     `retensi goal melebihi batas (${bounds.MAX_TOTAL_GOALS_RETAINED}) dan tidak ada goal terminal untuk dievict`);
@@ -221,6 +228,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     function getGoal(goalId) { return goals.get(goalId) ?? null; }
     function getTask(taskId) { return tasks.get(taskId) ?? null; }
     function getPlan(planId) { return plans.get(planId) ?? null; }
+    function childCountsSize() { return childCounts.size; }
 
     async function persist() { return saveSnapshot(store, { goals, commitments, plans, tasks }); }
 
@@ -230,6 +238,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         createCommitment, transitionCommitment: transitionCommitmentAction,
         createPlan, invalidatePlanIfAssumptionBroken, getPlan,
         createTask, transitionTask: transitionTaskAction, getTask,
+        childCountsSize,
         persist, laws, bounds
     });
 }

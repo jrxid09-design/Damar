@@ -20,53 +20,92 @@ const FORBIDDEN_INTENT_KEYS = Object.freeze([
     "executionLease", "balance", "allow", "owner", "executor",
     "route", "trustedNode", "rootAuthority"
 ]);
+const DANGEROUS_INTENT_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
+const INTENT_ARRAY_INDEX_PATTERN = /^(0|[1-9][0-9]*)$/;
 const MAX_INTENT_SCAN_DEPTH = 16;
 
 /**
  * Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
- * putaran-2, AUD2-P2-1): versi lama membaca `value[key]` langsung tanpa
- * memeriksa descriptor lebih dulu -- getter TOCTOU (mengembalikan nilai
- * aman saat divalidasi, nilai jahat saat dibaca ulang nanti) lolos. Juga
- * tidak menolak instance kelas/array non-standar (pola toJSON warisan yang
- * sama seperti prospective/core-envelope). Sekarang mengikuti pola yang
- * sama persis: fungsi/Symbol/accessor ditolak SEBELUM pernah dibaca.
+ * putaran-3, AUD3-P1-1/AUD3-P1-2): satu lintasan yang MEMVALIDASI dan
+ * MEMBANGUN salinan aman sekaligus -- sama seperti perbaikan di
+ * prospective/records.js dan core/envelope.js. Versi lama (putaran-2)
+ * memvalidasi lewat pemeriksaan descriptor lalu membekukan OBJEK ASLI
+ * pemanggil (`deepFreeze(intentTemplate)`); sebuah Proxy dengan trap
+ * `get`/`getPrototypeOf`/`ownKeys` konsisten-tapi-bohong tetap bisa
+ * memalsukan nilai saat dibaca ulang, dan node perantara yang sudah beku
+ * atau properti non-enumerable bisa melindungi anak yang masih bisa
+ * diubah dari `deepFreeze`. Sekarang nilai HANYA pernah dibaca dari
+ * `desc.value` (hasil `getOwnPropertyDescriptor`, sudah final -- trap
+ * `get` proxy tidak pernah dipanggil) dan disalin ke objek/array polos
+ * baru yang kita bangun sendiri, lalu dibekukan; objek asli pemanggil
+ * tidak pernah disimpan atau dibaca lagi setelah validasi.
  */
-function assertNoAuthorityShapedIntentFields(value, depth = 0) {
-    if (value === null || value === undefined) return;
+function buildSafeIntentTemplate(value, depth = 0) {
+    if (value === null || value === undefined) return value;
     const t = typeof value;
     if (t === "function") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa fungsi (termasuk toJSON)");
     if (t === "symbol") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa Symbol");
-    if (t !== "object") return;
+    if (t !== "object") return value;
     if (depth > MAX_INTENT_SCAN_DEPTH) {
         fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate terlalu dalam untuk diverifikasi dengan aman, ditolak");
     }
+
     if (Array.isArray(value)) {
         const arrProto = Object.getPrototypeOf(value);
         if (arrProto !== Array.prototype && arrProto !== null) {
             fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa array dengan prototype non-standar");
         }
-    } else {
-        const proto = Object.getPrototypeOf(value);
-        if (proto !== Object.prototype && proto !== null) {
-            fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh berupa instance kelas (kontrak data murni)");
+        const out = [];
+        for (let i = 0; i < value.length; i++) {
+            const desc = Object.getOwnPropertyDescriptor(value, i);
+            if (!desc || desc.get || desc.set) {
+                fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa properti accessor: '${i}'`);
+            }
+            const built = buildSafeIntentTemplate(desc.value, depth + 1);
+            out[i] = built === undefined ? null : built;
         }
+        for (const key of Reflect.ownKeys(value)) {
+            if (key === "length" || INTENT_ARRAY_INDEX_PATTERN.test(String(key))) continue;
+            if (typeof key === "symbol") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa kunci Symbol");
+            if (DANGEROUS_INTENT_KEYS.includes(key)) fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `kunci berbahaya ditolak: '${key}'`);
+            if (FORBIDDEN_INTENT_KEYS.includes(key)) {
+                fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa '${key}' (di kedalaman manapun)`);
+            }
+            const desc = Object.getOwnPropertyDescriptor(value, key);
+            if (!desc || desc.get || desc.set) {
+                fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa properti accessor: '${String(key)}'`);
+            }
+            buildSafeIntentTemplate(desc.value, depth + 1); // divalidasi, tidak disalin (properti non-indeks array)
+        }
+        return out;
     }
+
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+        fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh berupa instance kelas (kontrak data murni)");
+    }
+    const out = {};
     for (const key of Reflect.ownKeys(value)) {
         if (typeof key === "symbol") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa kunci Symbol");
+        if (DANGEROUS_INTENT_KEYS.includes(key)) fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `kunci berbahaya ditolak: '${key}'`);
         if (FORBIDDEN_INTENT_KEYS.includes(key)) {
             fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa '${key}' (di kedalaman manapun)`);
         }
         const desc = Object.getOwnPropertyDescriptor(value, key);
-        if (desc && (desc.get || desc.set)) {
+        if (!desc || desc.get || desc.set) {
             fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa properti accessor: '${String(key)}'`);
         }
-        assertNoAuthorityShapedIntentFields(value[key], depth + 1);
+        const built = buildSafeIntentTemplate(desc.value, depth + 1);
+        if (built !== undefined) out[key] = built;
     }
+    return out;
 }
 
-function deepFreeze(value) {
-    if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
-    for (const key of Object.keys(value)) deepFreeze(value[key]);
+function deepFreeze(value, seen = new WeakSet()) {
+    if (!value || typeof value !== "object") return value;
+    if (seen.has(value)) return value;
+    seen.add(value);
+    for (const key of Reflect.ownKeys(value)) deepFreeze(value[key], seen);
     return Object.freeze(value);
 }
 
@@ -141,17 +180,12 @@ function makePlan({ planId, goalRef, version = 1, steps, assumptions = [], creat
 
 function makeTask({ taskId, planRef, order, capabilityId = null, preconditions = [], postconditions = [], intentTemplate, maxAttempts = 5 }) {
     if (typeof taskId !== "string" || !taskId) fail(REASONS.INVALID_RECORD, "taskId wajib string");
-    assertNoAuthorityShapedIntentFields(intentTemplate);
+    const safeIntentTemplate = buildSafeIntentTemplate(intentTemplate ?? {});
     return Object.freeze({
         taskId, planRef, order, capabilityId,
         preconditions: Object.freeze(preconditions.map(c => validateConditionSpec(c, "precondition"))),
         postconditions: Object.freeze(postconditions.map(c => validateConditionSpec(c, "postcondition"))),
-        // Bug review independen (audit putaran-2, AUD2-P2-1): freeze SATU
-        // LEVEL (`Object.freeze({...intentTemplate})`) meninggalkan objek
-        // nested (mis. `intentTemplate.nested`) tetap dapat diubah setelah
-        // validasi. Freeze rekursif di sini menutup jalur mutasi itu, sama
-        // seperti pola deepFreeze di prospective/records.js.
-        intentTemplate: deepFreeze(intentTemplate ?? {}),
+        intentTemplate: deepFreeze(safeIntentTemplate),
         state: "PENDING", attempts: 0, maxAttempts, lastOutcomeRef: null
     });
 }

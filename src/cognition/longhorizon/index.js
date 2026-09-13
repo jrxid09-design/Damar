@@ -124,7 +124,11 @@ async function createLongHorizonCycle({
     function buildGovernedProjection() {
         const selfSnap = selfModel.snapshot();
         const openContradictions = worldModel.openContradictions();
-        const pick = attention.pick();
+        // Bug review independen (audit putaran-3, AUD3-P2-1): `attention.pick()`
+        // MENGOMIT kredit round-robin dan memindahkan target ke RUNNING --
+        // proyeksi "advisory-only"/read-only ini tidak boleh punya efek
+        // samping pada penjadwalan nyata. `peekTopTarget()` murni baca.
+        const pick = attention.peekTopTarget();
 
         const projection = Object.freeze({
             schemaVersion: "governedCognitiveProjection.v1",

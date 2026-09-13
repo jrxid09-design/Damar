@@ -47,107 +47,130 @@ function validateTrigger(trigger) {
 }
 
 const FORBIDDEN_PAYLOAD_KEYS = Object.freeze(["capabilityId", "actuatorRef", "authProof", "authorityDecision", "intentTemplate"]);
+const DANGEROUS_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
+const ARRAY_INDEX_PATTERN = /^(0|[1-9][0-9]*)$/;
 
 const MAX_PAYLOAD_SCAN_DEPTH = 16;
 
 /**
- * PM-1, rekursif: field eksekusi/otoritas ditolak di kedalaman manapun,
- * DAN materi eksekusi (fungsi/toJSON/accessor) ditolak SEBELUM
- * JSON.stringify pernah dipanggil. Bug diketemukan review independen
- * (Codex, putaran ke-5): validatePayloadRef sebelumnya memanggil
- * JSON.stringify LEBIH DAHULU untuk cek ukuran — jika payloadRef punya
- * `toJSON` (fungsi apa pun), itu dieksekusi sebelum pagar ini sempat
- * menolaknya. Sekarang pagar ini SELALU berjalan dulu, dan fungsi apa pun
- * (termasuk toJSON) ditolak sama seperti kunci terlarang lainnya.
+ * PM-1: satu lintasan yang MEMVALIDASI dan MEMBANGUN salinan aman sekaligus
+ * -- bukan lagi validasi lalu JSON.stringify terpisah. Bug diketemukan
+ * review independen (OpenCode/9router deepseek-v4.1-flash, audit
+ * putaran-3, AUD3-P1-1): bahkan setelah prototype/accessor/fungsi diperiksa
+ * lewat Reflect.ownKeys/getOwnPropertyDescriptor, sebuah `Proxy` bisa
+ * membuat trap `getPrototypeOf`/`ownKeys`/`getOwnPropertyDescriptor`
+ * konsisten-tapi-bohong (melaporkan bentuk aman), sementara trap `get`-nya
+ * mengembalikan `toJSON` tersembunyi yang lalu dipanggil JSON.stringify di
+ * langkah copy terpisah -- toJSON itu memalsukan capabilityId/authProof.
+ * Perbaikan: TIDAK PERNAH membaca nilai lewat `value[key]` (itu memanggil
+ * trap `get`); selalu baca dari `desc.value` (hasil `getOwnPropertyDescriptor`
+ * yang SUDAH final) dan bangun objek/array polos baru langsung dari situ.
+ * `JSON.stringify` tidak pernah lagi dipanggil pada objek pemanggil yang
+ * tidak tepercaya -- hanya pada salinan aman yang sudah kita bangun sendiri.
  */
-function assertSafePayloadRef(value, depth = 0) {
-    if (value === null || value === undefined) return;
+function buildSafePayloadRef(value, depth = 0) {
+    if (value === null || value === undefined) return value;
     const t = typeof value;
     if (t === "function") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa fungsi (termasuk toJSON)");
     if (t === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa Symbol");
-    if (t !== "object") return;
+    if (t === "bigint") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa BigInt");
+    if (t !== "object") return value;
     if (depth > MAX_PAYLOAD_SCAN_DEPTH) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef terlalu dalam untuk diverifikasi dengan aman, ditolak");
     }
-    // Bug review independen (Codex putaran-9): array jarang (mis. `new
-    // Array(2**32-1)`) tidak punya kunci indeks OWN sama sekali, jadi lolos
-    // pagar ini tanpa terdeteksi, lalu JSON.stringify mencoba memproses
-    // tiap lubangnya SEBELUM cek ukuran 1KB sempat berjalan -- DoS memori/CPU.
-    // Panjang array diperiksa eksplisit di sini, sebelum walk maupun stringify.
-    if (Array.isArray(value) && value.length > BOUNDS.MAX_PAYLOAD_ARRAY_LENGTH) {
-        fail(REASONS.PAYLOAD_TOO_LARGE, "panjang array pada payloadRef melebihi batas");
-    }
-    // Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
-    // independen putaran-1, AUD-P1-2): walker ini hanya memeriksa kunci OWN
-    // (Reflect.ownKeys), jadi `Object.create(proto)` dengan `proto.toJSON`
-    // warisan lolos tanpa terdeteksi (nol kunci own) -- lalu JSON.stringify
-    // memanggil toJSON warisan itu dan memalsukan capabilityId/authProof.
-    // Kontrak data murni: instance kelas/prototype ganjil ditolak, sama
-    // seperti core/envelope.js -- TERMASUK array. Bug review independen
-    // (OpenCode/9router deepseek-v4.1-flash, audit putaran-2, AUD2-P1-1):
-    // fix putaran-1 mengecualikan SEMUA array dari cek prototype, jadi
-    // `Object.setPrototypeOf(arr, {toJSON})` masih lolos (Array.isArray
-    // tetap true, kunci own tetap tak berbahaya) dan JSON.stringify
-    // memanggil toJSON warisan itu. Array standar (literal `[]`) punya
-    // prototype === Array.prototype; itu satu-satunya yang sah.
+
     if (Array.isArray(value)) {
+        if (value.length > BOUNDS.MAX_PAYLOAD_ARRAY_LENGTH) {
+            fail(REASONS.PAYLOAD_TOO_LARGE, "panjang array pada payloadRef melebihi batas");
+        }
         const arrProto = Object.getPrototypeOf(value);
         if (arrProto !== Array.prototype && arrProto !== null) {
             fail(REASONS.EXECUTABLE_MATERIAL_REJECTED,
                 "payloadRef tidak boleh berupa array dengan prototype non-standar (kontrak data murni, termasuk toJSON warisan)");
         }
-    } else {
-        const proto = Object.getPrototypeOf(value);
-        if (proto !== Object.prototype && proto !== null) {
-            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED,
-                "payloadRef tidak boleh berupa instance kelas (kontrak data murni, termasuk toJSON warisan)");
+        const out = [];
+        for (let i = 0; i < value.length; i++) {
+            const desc = Object.getOwnPropertyDescriptor(value, i);
+            if (!desc || desc.get || desc.set) {
+                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa properti accessor: '${i}'`);
+            }
+            const built = buildSafePayloadRef(desc.value, depth + 1);
+            out[i] = built === undefined ? null : built; // sama seperti JSON: lubang array -> null
         }
+        // Properti OWN non-indeks pada array (mis. `.toJSON`) divalidasi
+        // tapi TIDAK disalin -- sama seperti JSON.stringify lama yang diam-diam
+        // mengabaikan properti non-indeks pada array.
+        for (const key of Reflect.ownKeys(value)) {
+            if (key === "length" || ARRAY_INDEX_PATTERN.test(String(key))) continue;
+            if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa kunci Symbol");
+            if (DANGEROUS_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak pada array: '${key}'`);
+            if (FORBIDDEN_PAYLOAD_KEYS.includes(key)) {
+                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa '${key}' (di kedalaman manapun)`);
+            }
+            const desc = Object.getOwnPropertyDescriptor(value, key);
+            if (!desc || desc.get || desc.set) {
+                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa properti accessor: '${String(key)}'`);
+            }
+            // Nilainya tidak disalin (lihat komentar di atas), TAPI tetap
+            // divalidasi -- kalau tidak, `arr.toJSON = fn` lolos tanpa
+            // terdeteksi karena tidak pernah masuk `out`.
+            buildSafePayloadRef(desc.value, depth + 1);
+        }
+        return out;
     }
+
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED,
+            "payloadRef tidak boleh berupa instance kelas (kontrak data murni, termasuk toJSON warisan)");
+    }
+    const out = {};
     for (const key of Reflect.ownKeys(value)) {
         if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa kunci Symbol");
+        if (DANGEROUS_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak: '${key}'`);
         if (FORBIDDEN_PAYLOAD_KEYS.includes(key)) {
             fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa '${key}' (di kedalaman manapun)`);
         }
         const desc = Object.getOwnPropertyDescriptor(value, key);
-        if (desc && (desc.get || desc.set)) {
+        if (!desc || desc.get || desc.set) {
             fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa properti accessor: '${String(key)}'`);
         }
-        assertSafePayloadRef(value[key], depth + 1);
+        const built = buildSafePayloadRef(desc.value, depth + 1);
+        if (built !== undefined) out[key] = built; // sama seperti JSON: kunci bernilai undefined dibuang
     }
+    return out;
 }
 
 /**
  * Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
- * independen putaran-1, AUD-P1-1): validatePayloadRef sebelumnya
- * mengembalikan salinan JSON.parse yang TIDAK di-freeze sama sekali --
- * makeReminder/makeWakeEvent hanya freeze SATU LEVEL (Object.freeze pada
- * record itu sendiri), jadi `reminder.payloadRef.capabilityId = "X"`
- * (mutasi SETELAH validasi) berhasil menyuntikkan kunci terlarang ke
- * WakeEvent yang benar-benar ditembakkan. Freeze rekursif di sini menutup
- * jalur itu -- sama seperti deepFreeze di core/envelope.js.
+ * putaran-3, AUD3-P1-2): versi lama berhenti rekursi begitu `Object.isFrozen`
+ * true, jadi node perantara yang SUDAH beku milik pemanggil melindungi anak
+ * yang masih bisa diubah; dan `Object.keys` melewati properti non-enumerable
+ * walau assertSafePayloadRef sudah memvalidasinya lewat Reflect.ownKeys.
+ * Sekarang selalu rekursi lewat Reflect.ownKeys, pakai WeakSet untuk
+ * menghindari siklus (bukan status frozen).
  */
-function deepFreeze(value) {
-    if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
-    for (const key of Object.keys(value)) deepFreeze(value[key]);
+function deepFreeze(value, seen = new WeakSet()) {
+    if (!value || typeof value !== "object") return value;
+    if (seen.has(value)) return value;
+    seen.add(value);
+    for (const key of Reflect.ownKeys(value)) deepFreeze(value[key], seen);
     return Object.freeze(value);
 }
 
 /** PM-1: payloadRef adalah REFERENSI saja — menolak materi eksekusi/fungsi. */
 function validatePayloadRef(payloadRef) {
     if (payloadRef === null || payloadRef === undefined) return null;
-    assertSafePayloadRef(payloadRef);
-    const serialized = JSON.stringify(payloadRef);
+    const safeCopy = buildSafePayloadRef(payloadRef);
+    // Aman dipanggil di sini: safeCopy adalah struktur polos yang KITA
+    // bangun sendiri di atas -- tidak ada lagi proxy/accessor/toJSON warisan
+    // yang bisa dieksekusi JSON.stringify.
+    const serialized = JSON.stringify(safeCopy);
     if (serialized === undefined) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak dapat diserialisasi");
     if (Buffer.byteLength(serialized) > BOUNDS.MAX_PAYLOAD_REF_BYTES) {
         fail(REASONS.PAYLOAD_TOO_LARGE, "payloadRef melebihi batas ukuran");
     }
-    // Bug review independen (Codex putaran-9): panggilan ini menunjuk
-    // fungsi yang tidak pernah ada lagi setelah PM-1 dipindah ke
-    // assertSafePayloadRef (rekursif, sudah berjalan di atas) -- SETIAP
-    // payloadRef non-null yang sah gagal dengan ReferenceError. Dihapus;
-    // pemeriksaan kunci terlarang DI KEDALAMAN MANAPUN sudah dilakukan
-    // assertSafePayloadRef sebelum baris ini.
-    return deepFreeze(JSON.parse(serialized));
+    return deepFreeze(safeCopy);
 }
 
 function makeReminder({ reminderId, ownerRef = null, trigger, payloadRef = null, wakeClass, origin = { kind: "SELF" }, nowIso }) {

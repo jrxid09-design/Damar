@@ -185,6 +185,23 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         return started;
     }
 
+    /**
+     * Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+     * putaran-3, AUD3-P2-1): GOVERNED mode diklaim "advisory-only"/read-only
+     * (tidak pernah memengaruhi keputusan), tapi `buildGovernedProjection()`
+     * memakai `pick()` untuk menurunkan `attentionFocus` -- itu MENGONSUMSI
+     * kredit round-robin dan memindahkan target ke RUNNING sebagai efek
+     * samping sekadar membaca proyeksi. `peekTopTarget()` melakukan
+     * perhitungan yang sama TANPA mengomit kredit atau mengubah state target
+     * mana pun -- murni baca.
+     */
+    function peekTopTarget() {
+        recomputeAll();
+        const result = pickOne(queuesByClass(), credits, now());
+        if (!result.target) return null;
+        return { targetId: result.target.targetId, workKind: result.target.workKind, priorityClass: result.target.priorityClass };
+    }
+
     function preempt(targetId) {
         const t = targets.get(targetId);
         if (!t) fail(REASONS.UNKNOWN_TARGET, `target '${targetId}' tidak ditemukan`);
@@ -230,7 +247,7 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
 
     return Object.freeze({
         schemaVersion: SCHEMA_VERSION,
-        ingestSignal, pick, preempt, complete, getTarget,
+        ingestSignal, pick, peekTopTarget, preempt, complete, getTarget,
         overloadState, toGovernorPriority, governorMappingAudit: () => [...governorMappingAudit],
         overflowCount, overflowEntries, isNoisySource, supportingSignalCount, trackedSourceCount,
         laws, bounds
