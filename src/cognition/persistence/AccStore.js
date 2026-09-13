@@ -118,11 +118,13 @@ function createSqliteAccStore(database) {
                     `INSERT INTO acc_event_journal
                        (event_id, type, occurred_at, monotonic, source,
                         provenance, subject, session_id, correlation_id,
-                        confidence, payload, prev_hash, hash)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                        confidence, schema_version, epistemic_class,
+                        payload, prev_hash, hash)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                     [row.eventId, row.type, row.occurredAt, row.monotonic,
                      row.source, row.provenance, row.subject, row.sessionId,
                      row.correlationId, row.confidence,
+                     row.schemaVersion ?? null, row.epistemicClass ?? null,
                      JSON.stringify(row.payload ?? {}), row.prevHash, row.hash]
                 );
                 const got = await database.get(
@@ -147,7 +149,9 @@ function createSqliteAccStore(database) {
                 `SELECT seq, event_id AS eventId, type, occurred_at AS occurredAt,
                         monotonic, source, provenance, subject,
                         session_id AS sessionId, correlation_id AS correlationId,
-                        confidence, payload, prev_hash AS prevHash, hash
+                        confidence, schema_version AS schemaVersion,
+                        epistemic_class AS epistemicClass,
+                        payload, prev_hash AS prevHash, hash
                    FROM acc_event_journal ORDER BY seq DESC LIMIT 1`);
         },
 
@@ -156,7 +160,9 @@ function createSqliteAccStore(database) {
                 `SELECT seq, event_id AS eventId, type, occurred_at AS occurredAt,
                         monotonic, source, provenance, subject,
                         session_id AS sessionId, correlation_id AS correlationId,
-                        confidence, payload, prev_hash AS prevHash, hash
+                        confidence, schema_version AS schemaVersion,
+                        epistemic_class AS epistemicClass,
+                        payload, prev_hash AS prevHash, hash
                    FROM acc_event_journal WHERE seq > ? ORDER BY seq ASC`,
                 [afterSeq]);
             return rows.map(parsePayload);
