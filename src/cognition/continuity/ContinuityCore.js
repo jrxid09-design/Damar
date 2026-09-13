@@ -1,6 +1,6 @@
 const crypto = require("node:crypto");
 
-const { makeEnvelope, digest, canonicalJson, normalizeEnvelopeRecord } = require("../core/envelope");
+const { makeEnvelope, digest, canonicalJson, normalizeEnvelopeRecord, SCHEMA_VERSION, EPISTEMIC_CLASS } = require("../core/envelope");
 const { HANDLERS, ignored } = require("./reducers");
 const epistemics = require("../self/epistemics");
 const affectEngine = require("../affect/engine");
@@ -669,8 +669,12 @@ class ContinuityCore {
             confidence: envelopeFields.confidence ?? 1,
             // schemaVersion/epistemicClass SENGAJA di luar cakupan hash §51
             // (lihat core/envelope.js) — tidak ikut sha256Row di bawah.
-            schemaVersion: envelopeFields.schemaVersion ?? 1,
-            epistemicClass: envelopeFields.epistemicClass ?? null,
+            // Bug review independen (Codex putaran-7): default lama (1/null)
+            // membuat append() langsung (tanpa envelopeFields) menulis baris
+            // format lama walau v2 sudah jadi skema tulis saat ini, dan baris
+            // itu di-replay sebagai legacy lalu dinormalisasi ke UNKNOWN.
+            schemaVersion: envelopeFields.schemaVersion ?? SCHEMA_VERSION,
+            epistemicClass: envelopeFields.epistemicClass ?? EPISTEMIC_CLASS.UNKNOWN,
             payload,
             prevHash,
             hash: null

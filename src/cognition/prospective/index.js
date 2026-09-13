@@ -40,7 +40,15 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
     const firedOccurrenceIds = snapshot.firedOccurrenceIds;
     const remindersPerGoal = new Map();
     for (const r of reminders.values()) {
-        if (r.ownerRef) remindersPerGoal.set(r.ownerRef, (remindersPerGoal.get(r.ownerRef) ?? 0) + 1);
+        // Bug review independen (Codex putaran-7): rebuild restart lama
+        // menghitung SEMUA reminder tersimpan (termasuk FIRED/RETIRED),
+        // padahal releaseArmedCapacity() hanya melepas slot untuk yang
+        // ARMED di proses hidup -- pasca-restart, goal dengan reminder
+        // terminal salah diblokir MAX_REMINDERS_PER_GOAL sampai kompaksi
+        // retensi terjadi. Sekarang hanya reminder ARMED yang dihitung.
+        if (r.ownerRef && r.state === "ARMED") {
+            remindersPerGoal.set(r.ownerRef, (remindersPerGoal.get(r.ownerRef) ?? 0) + 1);
+        }
     }
 
     let wakeEventsThisMinute = [];
