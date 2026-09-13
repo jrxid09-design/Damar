@@ -417,8 +417,24 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         if (entry) {
             const key = beliefKey(entry.subject, entry.attribute);
             const belief = beliefs.get(key);
+            // Bug review independen (audit putaran-23, AUD23-P1-1): fix
+            // putaran-22 (A-1) membersihkan contradictionSetId TANPA SYARAT
+            // begitu id yang di-resolve cocok -- tapi applyRecordToBelief
+            // membuka satu set BARU per challenger berbeda (bukan menimpa
+            // yang lama), jadi satu belief bisa punya >1 set OPEN sekaligus
+            // dan hanya menyimpan id set TERBARU. Resolve set terbaru lalu
+            // membuat query() melapor contested:false padahal set LAIN
+            // untuk subject+attribute yang sama masih genuinely OPEN --
+            // kebohongan terbalik dari bug yang coba ditutup A-1. Dibersihkan
+            // hanya kalau TIDAK ADA set OPEN lain untuk beliefKey ini.
+            const otherOpen = contradictions.filter(c =>
+                c.status === "OPEN" && c.contradictionSetId !== contradictionSetId &&
+                beliefKey(c.subject, c.attribute) === key);
             if (belief && belief.contradictionSetId === contradictionSetId) {
-                beliefs.set(key, Object.freeze({ ...belief, contradictionSetId: null }));
+                const nextContradictionSetId = otherOpen.length > 0
+                    ? otherOpen[otherOpen.length - 1].contradictionSetId
+                    : null;
+                beliefs.set(key, Object.freeze({ ...belief, contradictionSetId: nextContradictionSetId }));
             }
         }
         return entry;

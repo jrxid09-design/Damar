@@ -110,6 +110,13 @@ function makeObservation({ observationId, subject, attribute, value, sensor, fra
 
 function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, discriminatingProbe = null, expiresAt }) {
     if (typeof hypothesisId !== "string" || !hypothesisId) fail(REASONS.INVALID_RECORD, "hypothesisId wajib string");
+    // Bug review independen (audit putaran-23, AUD23-ADV-1): sibling
+    // makeObservation memvalidasi subject wajib { entityId } atau
+    // { relationId }; makeHypothesis tidak pernah, jadi subject:null lolos
+    // tersimpan dan bisa bertabrakan kunci dengan hipotesis lain.
+    if (!subject || (typeof subject.entityId !== "string" && typeof subject.relationId !== "string")) {
+        fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
+    }
     if (!Array.isArray(candidateValues) || candidateValues.length === 0) {
         fail(REASONS.INVALID_RECORD, "candidateValues wajib array tidak kosong");
     }

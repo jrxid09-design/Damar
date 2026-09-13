@@ -186,7 +186,15 @@ test("WM-restart-freeze-collections: entities/relations/hypotheses/contradiction
 });
 
 test("WM-repair-13: a replayed observationId is a no-op, not a fabricated REINFORCE (independent audit AUD9-P1-1)", async () => {
-    const wm = await createWorldModel();
+    // Bug review independen (audit putaran-23, AUD23-P2-3): tanpa clock
+    // manual, confidence's real-time recency term (query.js's
+    // `ageMs = nowMs - belief.updatedAtMs`) berubah antara dua panggilan
+    // query() sungguhan, jadi `q2.confidence === q1.confidence` flaky
+    // (gagal kalau scheduler menyisipkan >=1ms nyata di antaranya) --
+    // bukan bug pada jalur DUPLICATE itu sendiri. Clock dibekukan supaya
+    // pengujian menutup semantik replay, bukan artefak wall-clock.
+    const clock = manualClock(1000);
+    const wm = await createWorldModel({ clock });
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
     const spec = {
         observationId: "OBS-1", subject: { entityId: "e1" }, attribute: "state",
@@ -531,6 +539,27 @@ test("WM-repair-44: resolving a contradiction clears the belief's contested flag
     assert.equal(wm.query(base).contested, true);
     wm.resolveContradiction(contest.contradictionSetId, "RULE-1");
     assert.equal(wm.query(base).contested, false, "a resolved contradiction must not leave the belief permanently marked contested");
+});
+
+test("WM-repair-45: resolving one of TWO open contradiction sets for the same subject/attribute must not under-report contested=false while the other stays OPEN (independent audit AUD23-P1-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const base = { subject: { entityId: "e1" }, attribute: "status", tier: "T1" };
+    wm.ingestObservation({ ...base, value: "a", sensor: { sensorId: "s1" }, observedAt: new Date(1).toISOString() });
+    const c1 = wm.ingestObservation({ ...base, value: "b", sensor: { sensorId: "s2" }, observedAt: new Date(2).toISOString() });
+    const c2 = wm.ingestObservation({ ...base, value: "c", sensor: { sensorId: "s3" }, observedAt: new Date(3).toISOString() });
+    assert.equal(wm.openContradictions().length, 2);
+    wm.resolveContradiction(c2.contradictionSetId, "RULE-1"); // resolve only the LATEST set
+    assert.equal(wm.openContradictions().length, 1, "c1 must still be OPEN");
+    assert.equal(wm.query(base).contested, true, "a belief with another still-OPEN contradiction set must not be reported as uncontested");
+});
+
+test("WM-repair-46: declareHypothesis rejects a malformed subject as INVALID_RECORD, matching makeObservation's sibling guard (independent audit AUD23-ADV-1)", async () => {
+    const wm = await createWorldModel();
+    assertThrowsReason(() => wm.declareHypothesis({
+        hypothesisId: "h1", subject: null, attribute: "a",
+        candidateValues: [{ value: "v1", weight: 0.5 }], expiresAt: new Date(Date.now() + 60_000).toISOString()
+    }), "INVALID_RECORD");
 });
 
 test("WM-repair-38: entity eviction stays fast at scale -- relationDegree() must not rescan all relations per candidate (independent audit AUD20-P2-3)", async () => {

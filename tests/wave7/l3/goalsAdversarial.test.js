@@ -521,6 +521,24 @@ test("GL-repair-37: proposeGoal/createCommitment/createPlan/createTask(null) are
     assertThrowsReason(() => ge.createTask(null), "INVALID_RECORD");
 });
 
+test("GL-repair-38: grantApproval(goalId, null)/(goalId) is rejected as INVALID_RECORD, not a raw TypeError -- sibling of proposeGoal/createCommitment/createPlan/createTask, missed in round 22 (independent audit AUD23-P2-1)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    assertThrowsReason(() => ge.grantApproval(g.goalId, null), "INVALID_RECORD");
+    assertThrowsReason(() => ge.grantApproval(g.goalId), "INVALID_RECORD");
+});
+
+test("GL-repair-39: transitionCommitment(id, action, null) does not throw a raw TypeError -- explicit null meta must behave like omitting it (independent audit AUD23-P2-2)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    const c = ge.createCommitment({
+        goalRef: g.goalId, toWhom: { ref: "owner-1" }, promise: "test promise",
+        dueCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" }
+    });
+    const next = ge.transitionCommitment(c.commitmentId, "met", null);
+    assert.equal(next.state, "MET", "explicit null meta must behave the same as omitting the argument");
+});
+
 function jsonStore() {
     const kv = new Map();
     return {
