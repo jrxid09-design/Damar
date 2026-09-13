@@ -76,12 +76,16 @@ function makeObservation({ observationId, subject, attribute, value, sensor, fra
 
     return Object.freeze({
         observationId, subject: Object.freeze({ ...subject }),
-        // Bug review independen (audit putaran-4, W7R4-P2-1): JSON.stringify
-        // langsung pada `value` pemanggil mengeksekusi `toJSON` warisan
-        // SEBELUM validasi apa pun. Diganti dengan pembangun satu-lintasan
-        // yang membaca hanya lewat descriptor, sama seperti prospective/
-        // envelope/goals (perbaikan arsitektural putaran-3).
-        attribute, value: buildSafeBeliefValue(value),
+        // Bug review independen (audit putaran-4, W7R4-P2-1; disempurnakan
+        // putaran-5, W7R5-P1-2): validasi/salin `value` TIDAK dilakukan di
+        // sini lagi -- applyRevision (beliefAlgebra.js, satu-satunya tempat
+        // belief lahir/berevolusi) sudah memanggil buildSafeBeliefValue
+        // sekali untuk SEMUA jalur (observasi maupun deklarasi). Memanggilnya
+        // di sini JUGA berarti dua kali kerja penuh per observasi -- tidak
+        // salah lagi sejak anggaran node ditambahkan, tapi tetap boros.
+        // `value` di record observasi ini murni transit, belum aman dipakai
+        // sendiri sampai applyRevision memprosesnya.
+        attribute, value,
         sensor: Object.freeze({
             sensorId: sensor.sensorId,
             modality: sensor.modality ? String(sensor.modality).slice(0, 64) : null,
@@ -97,11 +101,16 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
     if (!Array.isArray(candidateValues) || candidateValues.length === 0) {
         fail(REASONS.INVALID_RECORD, "candidateValues wajib array tidak kosong");
     }
+    // Bug review independen (audit putaran-5, W7R5-P1-1): candidateValues[].value,
+    // discriminatingProbe, dan subject dulu disimpan APA ADANYA -- lewat
+    // referensi mentah, toJSON pemanggil bisa tereksekusi saat serialisasi
+    // (mis. persist()) dan mutasi pasca-deklarasi menulis ulang hipotesis
+    // tersimpan. Sekarang lewat buildSafeBeliefValue yang sama.
     return Object.freeze({
-        hypothesisId, subject, attribute,
+        hypothesisId, subject: buildSafeBeliefValue(subject), attribute,
         candidateValues: Object.freeze(candidateValues.slice(0, 16).map(c =>
-            Object.freeze({ value: c.value, weight: clamp01(Number(c.weight)) }))),
-        discriminatingProbe, expiresAt
+            Object.freeze({ value: buildSafeBeliefValue(c.value), weight: clamp01(Number(c.weight)) }))),
+        discriminatingProbe: buildSafeBeliefValue(discriminatingProbe), expiresAt
     });
 }
 
