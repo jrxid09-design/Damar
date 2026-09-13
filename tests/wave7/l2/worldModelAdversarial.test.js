@@ -275,6 +275,56 @@ test("WM-repair-21: replaying an already-used hypothesisId is rejected, not sile
     assertThrowsReason(() => wm.declareHypothesis({ hypothesisId: "h1", subject: { entityId: "e1" }, attribute: "cfg", candidateValues: [{ value: "v2", weight: 0.9 }], expiresAt: iso }), "DUPLICATE_RECORD_ID");
 });
 
+test("WM-repair-22: a shared-reference DAG in a hypothesis candidateValue is rejected via a node budget (independent audit AUD14-P1-1, mirrors W7R5-P1-2)", async () => {
+    function dag(d, f) {
+        let n = { leaf: 1 };
+        for (let i = 0; i < d; i++) { const o = {}; for (let k = 0; k < f; k++) o["k" + k] = n; n = o; }
+        return n;
+    }
+    const wm = await createWorldModel();
+    const t = Date.now();
+    assertThrowsReason(() => wm.declareHypothesis({
+        hypothesisId: "h1", subject: { entityId: "e1" }, attribute: "cfg",
+        candidateValues: [{ value: dag(16, 4), weight: 0.5 }], expiresAt: new Date(Date.now() + 1000).toISOString()
+    }), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.ok(Date.now() - t < 500);
+});
+
+test("WM-repair-23: a rejected declareHypothesis call must not evict an existing valid hypothesis (independent audit AUD14-P1-2)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_HYPOTHESES: 1 } });
+    const iso = new Date(Date.now() + 100000).toISOString();
+    wm.declareHypothesis({ hypothesisId: "H-KEEP", subject: { entityId: "e1" }, attribute: "cfg", candidateValues: [{ value: "v1", weight: 0.5 }], expiresAt: iso });
+    assert.throws(() => wm.declareHypothesis({ hypothesisId: "H-BAD", subject: { entityId: "e2" }, attribute: "cfg", candidateValues: [{ value: "v2", weight: 0.5 }], expiresAt: "not-a-date" }));
+    // H-KEEP must still exist: re-declaring the same id must still throw DUPLICATE_RECORD_ID, not silently succeed as if evicted.
+    assertThrowsReason(() => wm.declareHypothesis({ hypothesisId: "H-KEEP", subject: { entityId: "e1" }, attribute: "cfg", candidateValues: [{ value: "v3", weight: 0.5 }], expiresAt: iso }), "DUPLICATE_RECORD_ID");
+});
+
+test("WM-repair-24: a rejected ingestObservation call must not evict an existing valid belief (independent audit AUD14-P1-2)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_TOTAL_BELIEFS: 1 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "a1", value: "v1", sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() });
+    assert.equal(wm.query({ subject: { entityId: "e1" }, attribute: "a1" }).epistemicClass, "OBSERVED");
+    assert.throws(() => wm.ingestObservation({ subject: { entityId: "e2" }, attribute: "a2", value: 10n, sensor: { sensorId: "s2" }, tier: "T1", observedAt: new Date(2).toISOString() }));
+    assert.equal(wm.query({ subject: { entityId: "e1" }, attribute: "a1" }).epistemicClass, "OBSERVED", "a rejected observation must not evict an existing valid belief");
+});
+
+test("WM-repair-25: replaying a CONTEST challenger recordId is still deduped after its contradiction set overflows out of the bounded list (independent audit AUD14-P2-1)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_OPEN_CONTRADICTION_SETS: 1 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    const base = { attribute: "status", tier: "T1", observedAt: new Date(1000).toISOString() };
+    wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "INCUMBENT-1", value: "a", sensor: { sensorId: "s1" } });
+    wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "c2", value: "b", sensor: { sensorId: "s2" } });
+    wm.ingestObservation({ ...base, subject: { entityId: "e2" }, observationId: "INCUMBENT-2", value: "a", sensor: { sensorId: "s1" } });
+    wm.ingestObservation({ ...base, subject: { entityId: "e2" }, observationId: "c3", value: "b", sensor: { sensorId: "s3" } });
+    // c3 overflowed c2's set out of the bounded list; c2 is now gone from `openContradictions()`.
+    assert.equal(wm.openContradictions().map(c => c.challengerRecordId).includes("c2"), false);
+    const replay = wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "c2", value: "b", sensor: { sensorId: "s2" } });
+    assert.equal(replay.case, "DUPLICATE", "a challenger recordId already consumed must stay deduped even after its contradiction set overflows");
+    assert.equal(wm.openContradictions().map(c => c.challengerRecordId).includes("c3"), true, "the still-legitimate c3 contradiction must not be evicted by the replay");
+});
+
 test("WM-repair-17: replaying a recordId already consumed by an earlier SUPERSEDE is a no-op, not a fresh CONTEST (independent audit AUD11-P2-7)", async () => {
     const clock = manualClock(0);
     const wm = await createWorldModel({ clock });

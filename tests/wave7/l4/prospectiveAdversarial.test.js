@@ -241,6 +241,25 @@ test("PM-repair-17: a BigInt in reminder.ownerRef or expectation.{attribute,onSa
     assert.throws(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "a", expectedValue: "x", onViolated: 10n, window: { latestAt: new Date(1).toISOString() } }));
 });
 
+test("PM-repair-18: a shared-reference DAG (not a cycle) in an expectation's expectedValue is rejected via a node budget, not expanded exponentially (independent audit AUD14-P1-1)", async () => {
+    function dag(d, f) {
+        let n = { leaf: 1 };
+        for (let i = 0; i < d; i++) { const o = {}; for (let k = 0; k < f; k++) o["k" + k] = n; n = o; }
+        return n;
+    }
+    const pm = await createProspectiveMemory({});
+    const t = Date.now();
+    assert.throws(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "a", expectedValue: dag(16, 4), window: { latestAt: new Date(1000).toISOString() } }));
+    assert.ok(Date.now() - t < 500, "shared-reference DAG must be rejected via a node budget, not expanded in full");
+});
+
+test("PM-repair-19: a rejected armExpectation call must not evict an existing pending expectation (independent audit AUD14-P1-2)", async () => {
+    const pm = await createProspectiveMemory({ bounds: { ...BOUNDS, MAX_PENDING_EXPECTATIONS: 1 } });
+    pm.armExpectation({ expectationId: "E-KEEP", subject: { entityId: "e1" }, attribute: "a", expectedValue: "x", window: { latestAt: new Date(1000).toISOString() } });
+    assert.throws(() => pm.armExpectation({ subject: { entityId: "e2" }, attribute: "a", expectedValue: "x", window: { latestAt: "not-a-date" } }));
+    assert.ok(pm.getExpectation("E-KEEP"), "a rejected armExpectation call must not evict an existing pending expectation");
+});
+
 test("PM-repair-8: an until-only recurring reminder still bounds occurrences and firedOccurrenceIds (independent audit W7R7-P2-2)", async () => {
     const clock = manualClock(0);
     const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_RECURRENCE_OCCURRENCES: 5 } });

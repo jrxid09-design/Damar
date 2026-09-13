@@ -69,6 +69,8 @@ const DANGEROUS_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 const ARRAY_INDEX_PATTERN = /^(0|[1-9][0-9]*)$/;
 
 const MAX_PAYLOAD_SCAN_DEPTH = 16;
+const MAX_PAYLOAD_KEYS = 256;
+const MAX_PAYLOAD_NODES = 512;
 
 /**
  * PM-1: satu lintasan yang MEMVALIDASI dan MEMBANGUN salinan aman sekaligus
@@ -86,7 +88,14 @@ const MAX_PAYLOAD_SCAN_DEPTH = 16;
  * `JSON.stringify` tidak pernah lagi dipanggil pada objek pemanggil yang
  * tidak tepercaya -- hanya pada salinan aman yang sudah kita bangun sendiri.
  */
-function buildSafePayloadRef(value, depth = 0) {
+function buildSafePayloadRef(value, depth = 0, budget) {
+    // Bug review independen (audit putaran-14, AUD14-P1-1): walker ini tidak
+    // punya anggaran jumlah node seperti worldmodel's buildSafeBeliefValue
+    // (W7R5-P1-2) -- sebuah DAG referensi-bersama (BUKAN siklus, jadi lolos
+    // MAX_PAYLOAD_SCAN_DEPTH) dengan fanout kecil meledak eksponensial
+    // (fan^depth salinan), CPU/memory DoS trivial lewat arm/armExpectation.
+    // `budget` diwariskan rekursif sepanjang SATU panggilan.
+    if (!budget) budget = { count: 0 };
     if (value === null || value === undefined) return value;
     const t = typeof value;
     if (t === "function") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa fungsi (termasuk toJSON)");
@@ -95,6 +104,10 @@ function buildSafePayloadRef(value, depth = 0) {
     if (t !== "object") return value;
     if (depth > MAX_PAYLOAD_SCAN_DEPTH) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef terlalu dalam untuk diverifikasi dengan aman, ditolak");
+    }
+    budget.count += 1;
+    if (budget.count > MAX_PAYLOAD_NODES) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah node pada payloadRef melebihi batas");
     }
 
     if (Array.isArray(value)) {
@@ -112,7 +125,7 @@ function buildSafePayloadRef(value, depth = 0) {
             if (!desc || desc.get || desc.set) {
                 fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa properti accessor: '${i}'`);
             }
-            const built = buildSafePayloadRef(desc.value, depth + 1);
+            const built = buildSafePayloadRef(desc.value, depth + 1, budget);
             out[i] = built === undefined ? null : built; // sama seperti JSON: lubang array -> null
         }
         // Properti OWN non-indeks pada array (mis. `.toJSON`) divalidasi
@@ -132,7 +145,7 @@ function buildSafePayloadRef(value, depth = 0) {
             // Nilainya tidak disalin (lihat komentar di atas), TAPI tetap
             // divalidasi -- kalau tidak, `arr.toJSON = fn` lolos tanpa
             // terdeteksi karena tidak pernah masuk `out`.
-            buildSafePayloadRef(desc.value, depth + 1);
+            buildSafePayloadRef(desc.value, depth + 1, budget);
         }
         return out;
     }
@@ -142,8 +155,12 @@ function buildSafePayloadRef(value, depth = 0) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED,
             "payloadRef tidak boleh berupa instance kelas (kontrak data murni, termasuk toJSON warisan)");
     }
+    const objKeys = Reflect.ownKeys(value);
+    if (objKeys.length > MAX_PAYLOAD_KEYS) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah kunci pada payloadRef melebihi batas");
+    }
     const out = {};
-    for (const key of Reflect.ownKeys(value)) {
+    for (const key of objKeys) {
         if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa kunci Symbol");
         if (DANGEROUS_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak: '${key}'`);
         if (FORBIDDEN_PAYLOAD_KEYS.includes(key)) {
@@ -153,7 +170,7 @@ function buildSafePayloadRef(value, depth = 0) {
         if (!desc || desc.get || desc.set) {
             fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa properti accessor: '${String(key)}'`);
         }
-        const built = buildSafePayloadRef(desc.value, depth + 1);
+        const built = buildSafePayloadRef(desc.value, depth + 1, budget);
         if (built !== undefined) out[key] = built; // sama seperti JSON: kunci bernilai undefined dibuang
     }
     return out;

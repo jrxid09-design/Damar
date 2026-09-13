@@ -263,11 +263,17 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         if (spec.expectationId && expectations.has(spec.expectationId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `expectationId '${spec.expectationId}' sudah ada`);
         }
+        // Bug review independen (audit putaran-14, AUD14-P1-2): kompaksi
+        // (menghapus expectation valid lain) dulu berjalan SEBELUM
+        // makeExpectation memvalidasi spec -- spec yang ditolak (mis.
+        // window.latestAt cacat) tetap mengevict satu expectation pending
+        // yang VALID sebelum error dilempar, kehilangan data permanen.
+        // Validasi/bangun record DULU, baru kompaksi+simpan.
+        const e = makeExpectation({ ...spec, expectationId: spec.expectationId ?? crypto.randomUUID() });
         if (expectations.size >= bounds.MAX_PENDING_EXPECTATIONS) {
             const oldest = [...expectations.values()].sort((a, b) => Date.parse(a.window.latestAt) - Date.parse(b.window.latestAt))[0];
             if (oldest) expectations.delete(oldest.expectationId);
         }
-        const e = makeExpectation({ ...spec, expectationId: spec.expectationId ?? crypto.randomUUID() });
         expectations.set(e.expectationId, e);
         return e;
     }

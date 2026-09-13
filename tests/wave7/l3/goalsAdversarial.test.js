@@ -447,6 +447,28 @@ test("GL-repair-29: a BigInt in transition reason/evidenceRef, grantApproval's a
     assert.throws(() => ge.transitionCommitment("C1", "met", { evidenceRef: 10n }));
 });
 
+test("GL-repair-30: a shared-reference DAG (not a cycle) in a condition spec/expectedValue is rejected via a node budget, not expanded exponentially (independent audit AUD14-P1-1)", () => {
+    function dag(d, f) {
+        let n = { leaf: 1 };
+        for (let i = 0; i < d; i++) { const o = {}; for (let k = 0; k < f; k++) o["k" + k] = n; n = o; }
+        return n;
+    }
+    const { validateConditionSpec } = require("../../../src/cognition/goals/records");
+    const t = Date.now();
+    assert.throws(() => validateConditionSpec({ kind: "k", subject: { entityId: "e" }, attribute: "a", expectedValue: dag(16, 4) }, "successCondition"));
+    assert.ok(Date.now() - t < 500, "shared-reference DAG must be rejected via a node budget, not expanded in full");
+});
+
+test("GL-repair-31: a rejected proposeGoal call must not evict an existing terminal goal or charge the creation-rate budget (independent audit AUD14-P1-2/AUD14-P2-3)", async () => {
+    const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_GOALS_RETAINED: 1 } });
+    const g = ge.proposeGoal(baseGoalSpec({ goalId: "G-KEEP" }));
+    ge.transition("G-KEEP", "supersede", { actorKind: "OWNER", reason: "x" });
+    const rateBefore = ge.creationTimestampsSize();
+    assert.throws(() => ge.proposeGoal({ title: "t", kind: "OWNER_ASSIGNED", origin: { kind: "OWNER", ref: "o" }, successCondition: null }));
+    assert.equal(ge.getGoal("G-KEEP").state, "SUPERSEDED", "a rejected proposal must not evict an existing terminal goal");
+    assert.equal(ge.creationTimestampsSize(), rateBefore, "a rejected proposal must not charge the creation-rate budget");
+});
+
 function jsonStore() {
     const kv = new Map();
     return {
