@@ -6,7 +6,14 @@ const { REASONS, fail } = require("./errors");
 const { BOUNDS } = require("./bounds");
 
 const WAKE_CLASSES = new Set(["NOTIFY_OWNER", "RESUME_GOAL", "CHECK_EXPECTATION", "MAINTENANCE"]);
-const TRIGGER_KINDS = new Set(["AT", "AFTER", "RECURRING", "ON_STATE", "ON_EVENT"]);
+// Bug review independen (audit putaran-18, AUD18-P2-2): "ON_EVENT" diterima
+// TRIGGER_KINDS dan divalidasi, tapi tidak ada jalur dispatch untuknya di
+// mana pun (index.js's tick()/checkOnStateReminders() hanya menangani
+// AT/AFTER/RECURRING/ON_STATE) -- sebuah reminder ON_EVENT yang diterima
+// PERMANEN macet di state ARMED, menghabiskan MAX_ARMED_REMINDERS
+// selamanya (dan bertahan lewat restart karena reminder itu durabel).
+// Ditolak tertutup sampai jalur dispatch-nya benar-benar diimplementasikan.
+const TRIGGER_KINDS = new Set(["AT", "AFTER", "RECURRING", "ON_STATE"]);
 
 /** PM-A3: recurrence tanpa batas ditolak — wajib until ATAU maxOccurrences, dan ada lantai periode. */
 function validateTrigger(trigger) {
@@ -39,9 +46,6 @@ function validateTrigger(trigger) {
     }
     if (trigger.kind === "ON_STATE" && (typeof trigger.subject !== "object" || typeof trigger.attribute !== "string")) {
         fail(REASONS.INVALID_TRIGGER, "trigger ON_STATE wajib subject/attribute");
-    }
-    if (trigger.kind === "ON_EVENT" && typeof trigger.eventKind !== "string") {
-        fail(REASONS.INVALID_TRIGGER, "trigger ON_EVENT wajib eventKind");
     }
     // Bug review independen (audit putaran-8, W7R8-P2-2; diperdalam putaran-9,
     // AUD9-P2-1): `Object.freeze({...trigger.subject})` cuma satu level --

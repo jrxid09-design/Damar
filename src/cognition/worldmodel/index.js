@@ -114,10 +114,17 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         }
     }
 
-    function evictRelationIfOverBound() {
+    // Bug review independen (audit putaran-18, AUD18-P2-1): pola yang sama
+    // yang sudah diperbaiki untuk entitas (AUD17-P2-4, protectedEntityId)
+    // tidak pernah dimigrasikan ke relasi -- relasi yang BARU SAJA
+    // dideklarasikan (strength rendah, kandidat korban wajar) bisa dievict
+    // di panggilan yang SAMA, declareRelation tetap mengembalikannya seolah
+    // diterima padahal sudah tidak ada di state kanonik.
+    function evictRelationIfOverBound(protectedRelationId = null) {
         if (relations.size <= bounds.MAX_RELATIONS) return;
         let victim = null;
         for (const r of relations.values()) {
+            if (r.relationId === protectedRelationId) continue;
             if (!victim || r.strength < victim.strength) victim = r;
         }
         if (victim) relations.delete(victim.relationId);
@@ -157,7 +164,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             fail(REASONS.UNKNOWN_ENTITY, "relasi merujuk entitas yang belum dideklarasikan");
         }
         relations.set(relation.relationId, relation);
-        evictRelationIfOverBound();
+        evictRelationIfOverBound(relation.relationId);
         return relation;
     }
 
@@ -349,7 +356,11 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         declareEntity, declareRelation, declareHypothesis,
         ingestObservation, ingestDeclaration,
         query,
-        neighbors: (id, kinds, depth) => graphOps.neighbors(stateView(), id, kinds, depth),
+        // Bug review independen (audit putaran-18, AUD18-A3): tanpa default,
+        // depth yang dihilangkan pemanggil menjadi undefined -> Math.min(undefined,...)
+        // = NaN di graphOps.neighbors, membuat loop traversal berjalan NOL kali
+        // dan diam-diam mengembalikan hasil kosong.
+        neighbors: (id, kinds, depth = 1) => graphOps.neighbors(stateView(), id, kinds, depth),
         subgraph: (seeds, depth, budget) => graphOps.subgraph(stateView(), seeds, depth, budget),
         path: (from, to, maxDepth) => graphOps.path(stateView(), from, to, maxDepth),
         entitiesByKind: (kind, limit) => graphOps.entitiesByKind(stateView(), kind, limit),
