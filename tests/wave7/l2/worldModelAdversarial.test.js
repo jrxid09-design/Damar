@@ -80,6 +80,64 @@ test("WM-repair-7: entityCountBySource deletes a source key once its count reach
         "sumber lama dengan hitungan nol harus dihapus, bukan menumpuk sebagai kunci basi");
 });
 
+test("WM-repair-8: hypothesis candidateValues/discriminatingProbe reject executable material and never invoke toJSON (independent audit W7R5-P1-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    let calls = 0;
+    const hostile = { toJSON() { calls++; return { pwned: true }; } };
+    assertThrowsReason(() => wm.declareHypothesis({
+        hypothesisId: "h1", subject: { entityId: "e1" }, attribute: "cfg",
+        candidateValues: [{ value: hostile, weight: 0.5 }], discriminatingProbe: hostile,
+        expiresAt: new Date(9e12).toISOString()
+    }), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(calls, 0, "toJSON pada candidateValues/discriminatingProbe tidak boleh pernah dipanggil");
+});
+
+test("WM-repair-9: buildSafeBeliefValue is bounded on a shared-reference DAG, not just cycles (independent audit W7R5-P1-2)", () => {
+    const { buildSafeBeliefValue } = require("../../../src/cognition/worldmodel/beliefAlgebra");
+    function dag(d, f) {
+        let n = { leaf: 1 };
+        for (let i = 0; i < d; i++) { const o = {}; for (let k = 0; k < f; k++) o["k" + k] = n; n = o; }
+        return n;
+    }
+    const t = Date.now();
+    assertThrowsReason(() => buildSafeBeliefValue(dag(16, 4)), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.ok(Date.now() - t < 500, "DAG referensi-bersama harus ditolak lewat anggaran node, bukan diperluas penuh");
+});
+
+test("WM-repair-10: query() result stays immutable after a restart through a JSON-round-tripping store (independent audit W7R5-P1-3)", async () => {
+    function jsonStore() {
+        const kv = new Map();
+        return {
+            async putKv(k, v) { kv.set(k, JSON.parse(JSON.stringify(v))); },
+            async getKv(k) { return kv.has(k) ? JSON.parse(JSON.stringify(kv.get(k))) : null; }
+        };
+    }
+    const s = jsonStore();
+    const wm1 = await createWorldModel({ store: s });
+    wm1.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm1.ingestDeclaration({ subject: { entityId: "e1" }, attribute: "cfg", value: { mode: "safe" }, declarationId: "d1" });
+    await wm1.persist();
+
+    const wm2 = await createWorldModel({ store: s });
+    const r = wm2.query({ subject: { entityId: "e1" }, attribute: "cfg" });
+    assert.equal(Object.isFrozen(r.value), true);
+    assert.equal(Object.isFrozen(r.supportedBy), true);
+    assert.throws(() => { "use strict"; r.value.mode = "PWNED"; });
+    assert.throws(() => { "use strict"; r.supportedBy.push("FORGED"); });
+    assert.equal(wm2.query({ subject: { entityId: "e1" }, attribute: "cfg" }).value.mode, "safe");
+});
+
+test("WM-repair-11: ingestDeclaration's subject is copied, post-ingest mutation cannot rewrite a stored contradiction (independent audit W7R5-P2-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const subject = { entityId: "e1" };
+    wm.ingestDeclaration({ subject, attribute: "a", value: 1, declarationId: "d1" });
+    subject.entityId = "HACKED";
+    wm.ingestDeclaration({ subject: { entityId: "e1" }, attribute: "a", value: 2, declarationId: "d2" });
+    assert.deepEqual(wm.openContradictions()[0].subject, { entityId: "e1" });
+});
+
 test("WM-repair-3: an epoch-dated observation (1970-01-01T00:00:00.000Z) is not falsely treated as the newest evidence (Codex P2 round 9)", async () => {
     const clock = manualClock(1000);
     const wm = await createWorldModel({ clock });

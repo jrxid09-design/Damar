@@ -30,7 +30,18 @@ const DANGEROUS_VALUE_KEYS = Object.freeze(["__proto__", "constructor", "prototy
  * (dipanggil SEKALI di titik belief lahir/berevolusi) menutup KEDUANYA:
  * validasi+salin+bekukan value SEBELUM pernah menjadi bagian dari belief.
  */
-function buildSafeBeliefValue(value, depth = 0) {
+function buildSafeBeliefValue(value, depth = 0, stack, budget) {
+    // Bug review independen (audit putaran-5, W7R5-P1-2): versi putaran-4
+    // tidak punya anggaran jumlah node (seperti ENVELOPE_BOUNDS.MAX_PAYLOAD_NODES
+    // di core/envelope.js) maupun deteksi siklik berbasis stack -- sebuah DAG
+    // referensi-bersama (BUKAN siklus, jadi bukan dilarang secara struktural)
+    // disalin ulang independen di setiap kemunculan; dengan fanout kecil dan
+    // kedalaman dalam batas MAX_VALUE_SCAN_DEPTH, ini meledak eksponensial
+    // (miliaran salinan) -- DoS trivial. `stack`/`budget` sekarang diwariskan
+    // rekursif sepanjang SATU panggilan (dibuat baru hanya di titik masuk).
+    if (!stack) stack = new WeakSet();
+    if (!budget) budget = { count: 0 };
+
     if (value === null || value === undefined) return null;
     const t = typeof value;
     if (t === "function") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh membawa fungsi (termasuk toJSON)");
@@ -39,6 +50,13 @@ function buildSafeBeliefValue(value, depth = 0) {
     if (t !== "object") return value;
     if (depth > BOUNDS.MAX_VALUE_SCAN_DEPTH) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value terlalu dalam untuk diverifikasi dengan aman, ditolak");
+    }
+    if (stack.has(value)) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "struktur siklik terdeteksi pada value");
+    }
+    budget.count += 1;
+    if (budget.count > BOUNDS.MAX_VALUE_NODES) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah node pada value melebihi batas");
     }
 
     if (Array.isArray(value)) {
@@ -49,14 +67,19 @@ function buildSafeBeliefValue(value, depth = 0) {
         if (arrProto !== Array.prototype && arrProto !== null) {
             fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh berupa array dengan prototype non-standar");
         }
+        stack.add(value);
         const out = [];
-        for (let i = 0; i < value.length; i++) {
-            const desc = Object.getOwnPropertyDescriptor(value, i);
-            if (!desc || desc.get || desc.set) {
-                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `value tidak boleh membawa properti accessor: '${i}'`);
+        try {
+            for (let i = 0; i < value.length; i++) {
+                const desc = Object.getOwnPropertyDescriptor(value, i);
+                if (!desc || desc.get || desc.set) {
+                    fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `value tidak boleh membawa properti accessor: '${i}'`);
+                }
+                const built = buildSafeBeliefValue(desc.value, depth + 1, stack, budget);
+                out[i] = built === undefined ? null : built;
             }
-            const built = buildSafeBeliefValue(desc.value, depth + 1);
-            out[i] = built === undefined ? null : built;
+        } finally {
+            stack.delete(value);
         }
         return Object.freeze(out);
     }
@@ -65,16 +88,25 @@ function buildSafeBeliefValue(value, depth = 0) {
     if (proto !== Object.prototype && proto !== null) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh berupa instance kelas (kontrak data murni)");
     }
+    const keys = Reflect.ownKeys(value);
+    if (keys.length > BOUNDS.MAX_VALUE_KEYS) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah kunci pada value melebihi batas");
+    }
+    stack.add(value);
     const out = {};
-    for (const key of Reflect.ownKeys(value)) {
+    try {
+    for (const key of keys) {
         if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh membawa kunci Symbol");
         if (DANGEROUS_VALUE_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak: '${key}'`);
         const desc = Object.getOwnPropertyDescriptor(value, key);
         if (!desc || desc.get || desc.set) {
             fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `value tidak boleh membawa properti accessor: '${String(key)}'`);
         }
-        const built = buildSafeBeliefValue(desc.value, depth + 1);
+        const built = buildSafeBeliefValue(desc.value, depth + 1, stack, budget);
         if (built !== undefined) out[key] = built;
+    }
+    } finally {
+        stack.delete(value);
     }
     return Object.freeze(out);
 }
@@ -111,7 +143,12 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
     // dimutasi pemanggil) dan W7R4-P2-1 (toJSON pemanggil bisa tereksekusi
     // sebelum validasi) sekaligus, untuk ingestObservation MAUPUN
     // ingestDeclaration.
-    record = { ...record, value: buildSafeBeliefValue(record.value) };
+    // Bug review independen (audit putaran-5, W7R5-P2-1): `subject` juga
+    // disimpan mentah lewat ingestDeclaration -- pemanggil yang memutasi
+    // objek subject aslinya SETELAH ingest menulis ulang subject pada
+    // belief/kontradiksi tersimpan (makeObservation sudah freeze subject-nya
+    // sendiri, ingestDeclaration tidak).
+    record = { ...record, value: buildSafeBeliefValue(record.value), subject: buildSafeBeliefValue(record.subject) };
 
     if (!existing) {
         // Kelahiran pertama — setara REFRESH dari ketiadaan.

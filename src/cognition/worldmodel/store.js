@@ -9,6 +9,25 @@
 
 const KV_KEY = "worldmodel.snapshot";
 
+/**
+ * Bug review independen (audit putaran-5, W7R5-P1-3): pembekuan value/
+ * subject di applyRevision hanya melindungi belief yang lahir DALAM sesi
+ * proses ini. Belief yang dimuat ulang dari store yang benar-benar
+ * melakukan round-trip JSON (mis. backend sqlite) TIDAK PERNAH dibekukan
+ * ulang -- query() lalu mengembalikan `value`/`supportedBy` yang bisa
+ * dimutasi pemanggil, menulis ulang state kanonik pasca-restart. Store
+ * memori (referensi langsung) sudah aman (objek belief yang sama sudah
+ * beku dari sesi sebelumnya); freeze ulang di sini idempoten/tidak
+ * berbahaya untuk kasus itu.
+ */
+function deepFreeze(value, seen = new WeakSet()) {
+    if (!value || typeof value !== "object") return value;
+    if (seen.has(value)) return value;
+    seen.add(value);
+    for (const key of Reflect.ownKeys(value)) deepFreeze(value[key], seen);
+    return Object.freeze(value);
+}
+
 function serialize({ entities, relations, beliefs, hypotheses, contradictions }) {
     return {
         entities: Object.fromEntries(entities),
@@ -26,7 +45,7 @@ function deserialize(raw) {
     return {
         entities: new Map(Object.entries(raw.entities ?? {})),
         relations: new Map(Object.entries(raw.relations ?? {})),
-        beliefs: new Map(Object.entries(raw.beliefs ?? {})),
+        beliefs: new Map(Object.entries(raw.beliefs ?? {}).map(([k, v]) => [k, deepFreeze(v)])),
         hypotheses: new Map(Object.entries(raw.hypotheses ?? {})),
         contradictions: raw.contradictions ?? [],
         coldStart: false
