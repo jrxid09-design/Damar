@@ -25,6 +25,14 @@ test("AT-A1: salience flooding from one sensor is rate-capped and the source mar
     assert.equal(ae.isNoisySource("sensor-1"), true);
 });
 
+test("AT-repair-5: a hostile toJSON on subjectRef is never invoked while keying/deduping targets (independent audit AUD9-P2-2)", async () => {
+    const ae = await createAttentionEconomy();
+    let toJSONCalls = 0;
+    const subjectRef = { entityId: "e1", toJSON() { toJSONCalls++; throw new Error("executed"); } };
+    assert.doesNotThrow(() => ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef }, "PERCEIVE"));
+    assert.equal(toJSONCalls, 0, "toJSON on caller-supplied subjectRef must never execute inside the cognition process");
+});
+
 test("AT-A2: corroboration counts distinct source+evidence pairs, not repeated messengers", async () => {
     const ae = await createAttentionEconomy();
     const { targetId } = ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "ev-1" }, "PERCEIVE");

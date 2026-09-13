@@ -299,6 +299,33 @@ test("GL-repair-16: mutating the caller's successCondition.subject after propose
     assert.throws(() => { "use strict"; stored.successCondition.subject.entityId = "HACKED2"; });
 });
 
+test("GL-repair-17: a nested object inside successCondition.subject stays immutable, not just the top level (independent audit AUD9-P2-1)", async () => {
+    const ge = await createGoalEngine({});
+    const subject = { entityId: "e1", nested: { deep: "orig" } };
+    const goal = ge.proposeGoal(baseGoalSpec({ successCondition: { kind: "WORLD_BELIEF", subject, attribute: "status", expectedValue: "done" } }));
+    subject.nested.deep = "MUTATED";
+    const stored = ge.getGoal(goal.goalId);
+    assert.equal(stored.successCondition.subject.nested.deep, "orig");
+    assert.throws(() => { "use strict"; stored.successCondition.subject.nested.deep = "MUTATED2"; });
+});
+
+test("GL-repair-18: a BigInt in successCondition.expectedValue is rejected, not accepted and left to crash persist() (independent audit AUD9-P2-3)", async () => {
+    const ge = await createGoalEngine({});
+    assert.throws(() => ge.proposeGoal(baseGoalSpec({
+        successCondition: { kind: "WORLD_BELIEF", subject: { entityId: "e1" }, attribute: "status", expectedValue: { big: 7n } }
+    })));
+});
+
+test("GL-repair-19: a non-finite/invalid maxAttempts (NaN, string, 0) fails closed to the default, never disabling the retry cap (independent audit AUD9-P2-4)", async () => {
+    const ge = await createGoalEngine({});
+    const g = ge.proposeGoal(baseGoalSpec({}));
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+    for (const bad of [NaN, "abc", 0, -1]) {
+        const t = ge.createTask({ planRef: p.planId, order: 1, intentTemplate: {}, maxAttempts: bad });
+        assert.equal(t.maxAttempts, 5, `maxAttempts=${bad} must fall back to the default, not disable the cap`);
+    }
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

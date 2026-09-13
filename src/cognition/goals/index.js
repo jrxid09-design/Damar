@@ -264,7 +264,15 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     function createTask(spec) {
         // Bug review independen (audit putaran-6, W7R6-P2-2): validasi/bangun
         // record DULU (sama seperti createCommitment), baru kompaksi+simpan.
-        const t = makeTask({ ...spec, taskId: spec.taskId ?? crypto.randomUUID(), maxAttempts: Math.min(spec.maxAttempts ?? 5, bounds.MAX_ATTEMPTS_PER_TASK) });
+        // Bug review independen (audit putaran-9, AUD9-P2-4): `Math.min(spec.
+        // maxAttempts ?? 5, MAX)` tidak menyaring NaN/string -- `??` hanya
+        // menangkap null/undefined, jadi maxAttempts: NaN atau "abc" lolos ke
+        // Math.min dan menghasilkan NaN. `attempts > NaN` selalu false, jadi
+        // ATTEMPTS_EXCEEDED tidak pernah tercapai (retry tanpa batas).
+        const safeMaxAttempts = Number.isInteger(spec.maxAttempts) && spec.maxAttempts > 0
+            ? Math.min(spec.maxAttempts, bounds.MAX_ATTEMPTS_PER_TASK)
+            : 5;
+        const t = makeTask({ ...spec, taskId: spec.taskId ?? crypto.randomUUID(), maxAttempts: safeMaxAttempts });
         // Bug review independen (audit putaran-5, W7R5-P2-3): tasks tidak
         // punya batas total sama sekali. Kompaksi task terminal (DONE/SKIPPED)
         // tertua saat retensi penuh; task FAILED/lainnya dipertahankan karena

@@ -117,7 +117,13 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             fail(REASONS.QUOTA_EXCEEDED, `sumber '${source}' melebihi kuota entitas (WM-A6)`);
         }
         const entity = makeEntity({ entityId, entityKind, labels, externalRefs, source, nowMs: now() });
-        entities.set(entityId, existing ? { ...entity, firstSeenAt: existing.firstSeenAt } : entity);
+        // Bug review independen (audit putaran-9, AUD9-P1-2): spread pasca-
+        // makeEntity() menghasilkan objek POLOS TAK DIBEKUKAN -- pemanggil
+        // yang menyimpan hasil declareEntity/entitiesByKind bisa memutasi
+        // entityKind/source kanonik dalam sesi yang sama tanpa restart,
+        // bahkan merusak akuntansi entityCountBySource pada deklarasi ulang
+        // berikutnya (decrement pakai existing.source yang sudah dipalsukan).
+        entities.set(entityId, existing ? Object.freeze({ ...entity, firstSeenAt: existing.firstSeenAt }) : entity);
         if (!existing) {
             entityCountBySource.set(source, count + 1);
         } else if (isSourceChange) {
@@ -181,7 +187,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         }
         if (observation.subject.entityId) {
             const e = entities.get(observation.subject.entityId);
-            entities.set(e.entityId, { ...e, lastSeenAt: now() });
+            entities.set(e.entityId, Object.freeze({ ...e, lastSeenAt: now() }));
         }
         // Bug review independen (Codex putaran-9): `Date.parse(...) || now()`
         // memakai kebenaran-tanpa-syarat -- observedAt persis epoch

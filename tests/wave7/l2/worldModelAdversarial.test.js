@@ -185,6 +185,40 @@ test("WM-restart-freeze-collections: entities/relations/hypotheses/contradiction
     assert.equal(wm2.openContradictions().length, 1, "kontradiksi tidak boleh tertutup lewat mutasi hasil baca");
 });
 
+test("WM-repair-13: a replayed observationId is a no-op, not a fabricated REINFORCE (independent audit AUD9-P1-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const spec = {
+        observationId: "OBS-1", subject: { entityId: "e1" }, attribute: "state",
+        value: "on", sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1000).toISOString()
+    };
+    const r1 = wm.ingestObservation(spec);
+    const q1 = wm.query({ subject: { entityId: "e1" }, attribute: "state" });
+    const r2 = wm.ingestObservation(spec);
+    const q2 = wm.query({ subject: { entityId: "e1" }, attribute: "state" });
+    assert.equal(r1.case, "REFRESH");
+    assert.equal(r2.case, "DUPLICATE", "replaying the same observationId must not be counted as new corroboration");
+    assert.equal(q2.revision, q1.revision, "revision must not advance for a duplicate delivery");
+    assert.equal(q2.confidence, q1.confidence, "confidence must not increase for a duplicate delivery");
+});
+
+test("WM-repair-14: entities stay frozen after ingestObservation touches lastSeenAt, and a re-declareEntity result stays frozen (independent audit AUD9-P1-2)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.ingestObservation({
+        subject: { entityId: "e1" }, attribute: "state", value: "on",
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString()
+    });
+    const afterObservation = wm.entitiesByKind("device").entities[0];
+    assert.equal(Object.isFrozen(afterObservation), true);
+    assert.throws(() => { "use strict"; afterObservation.entityKind = "FORGED"; });
+    assert.equal(wm.entitiesByKind("FORGED").entities.length, 0);
+
+    const redeclared = wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    assert.equal(Object.isFrozen(redeclared), true);
+    assert.throws(() => { "use strict"; redeclared.source = "FORGED_SOURCE"; });
+});
+
 test("WM-repair-3: an epoch-dated observation (1970-01-01T00:00:00.000Z) is not falsely treated as the newest evidence (Codex P2 round 9)", async () => {
     const clock = manualClock(1000);
     const wm = await createWorldModel({ clock });

@@ -18,6 +18,14 @@ test("MC-A1: fake confidence (model writes 0.99) is impossible — no API accept
     assert.equal(a.basis, "NO_EVIDENCE");
 });
 
+test("MC-repair-1: a hostile toJSON on subjectRef is never invoked while keying/debouncing reviews (independent audit AUD9-P2-2)", async () => {
+    const mc = await createMetacognition();
+    let toJSONCalls = 0;
+    const subjectRef = { entityId: "e1", toJSON() { toJSONCalls++; throw new Error("executed"); } };
+    assert.doesNotThrow(() => mc.openReview({ trigger: "SCHEDULED", subjectRef }));
+    assert.equal(toJSONCalls, 0, "toJSON on caller-supplied subjectRef must never execute inside the cognition process");
+});
+
 test("MC-A2: applied-versus-proposed is verifiable — a rejected proposal is distinguishable from an applied one", async () => {
     const mc = await createMetacognition();
     const review = mc.openReview({

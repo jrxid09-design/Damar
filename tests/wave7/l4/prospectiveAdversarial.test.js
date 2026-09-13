@@ -158,6 +158,24 @@ test("PM-repair-9: mutating the caller's ON_STATE trigger.subject after arm() ca
     assert.throws(() => { "use strict"; stored.trigger.subject.entityId = "HACKED2"; });
 });
 
+test("PM-repair-10: a nested object inside an ON_STATE trigger.subject stays immutable (independent audit AUD9-P2-1)", async () => {
+    const pm = await createProspectiveMemory({});
+    const subject = { entityId: "e1", nested: { deep: "orig" } };
+    const r = pm.arm({ reminderId: "R-state-2", wakeClass: "NOTIFY_OWNER", trigger: { kind: "ON_STATE", subject, attribute: "status" } });
+    subject.nested.deep = "MUTATED";
+    const stored = pm.getReminder(r.reminderId);
+    assert.equal(stored.trigger.subject.nested.deep, "orig");
+    assert.throws(() => { "use strict"; stored.trigger.subject.nested.deep = "MUTATED2"; });
+});
+
+test("PM-repair-11: a BigInt in an expectation's expectedValue is rejected, not accepted and left to crash persist() (independent audit AUD9-P2-3)", async () => {
+    const pm = await createProspectiveMemory({});
+    assert.throws(() => pm.armExpectation({
+        subject: { entityId: "e1" }, attribute: "status", expectedValue: { big: 7n },
+        window: { latestAt: new Date(1000).toISOString() }
+    }));
+});
+
 test("PM-repair-8: an until-only recurring reminder still bounds occurrences and firedOccurrenceIds (independent audit W7R7-P2-2)", async () => {
     const clock = manualClock(0);
     const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_RECURRENCE_OCCURRENCES: 5 } });

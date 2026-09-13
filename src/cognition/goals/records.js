@@ -46,6 +46,12 @@ function buildSafeIntentTemplate(value, depth = 0) {
     const t = typeof value;
     if (t === "function") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa fungsi (termasuk toJSON)");
     if (t === "symbol") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa Symbol");
+    // Bug review independen (audit putaran-9, AUD9-P2-3): BigInt lolos lewat
+    // `t !== "object"` -> return value apa adanya (sama seperti asimetri di
+    // buildSafeBeliefValue), lalu meledakkan `JSON.stringify` di
+    // saveSnapshot() saat persist() -- satu record bisa mematikan seluruh
+    // durabilitas lane goals/prospective.
+    if (t === "bigint") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa BigInt (tidak dapat diserialisasi)");
     if (t !== "object") return value;
     if (depth > MAX_INTENT_SCAN_DEPTH) {
         fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate terlalu dalam untuk diverifikasi dengan aman, ditolak");
@@ -129,7 +135,20 @@ function validateConditionSpec(spec, label) {
     // dangkal -- `spec.subject` tetap referensi milik pemanggil, jadi
     // mutasi pasca-proposeGoal/createTask menulis ulang subject kondisi
     // yang sudah tersimpan.
-    return Object.freeze({ ...spec, subject: Object.freeze({ ...spec.subject }) });
+    // Bug review independen (audit putaran-9, AUD9-P2-1): round-8's fix
+    // hanya membekukan SATU level `spec.subject` -- objek bersarang di
+    // dalamnya (mis. spec.subject.nested) tetap referensi milik pemanggil,
+    // mutasi pasca-panggilan menulis ulang kondisi tersimpan lewat jalur
+    // yang lebih dalam. deepFreeze menutup ini di semua kedalaman.
+    // Bug review independen (audit putaran-9, AUD9-P2-3): `expectedValue`
+    // tidak pernah disaring -- BigInt di dalamnya lolos lalu meledakkan
+    // JSON.stringify di saveSnapshot() saat persist(). buildSafeIntentTemplate
+    // menyaring BigInt/function/Symbol dan membekukan salinannya sekaligus.
+    return Object.freeze({
+        ...spec,
+        subject: deepFreeze({ ...spec.subject }),
+        expectedValue: buildSafeIntentTemplate(spec.expectedValue)
+    });
 }
 
 /** G-1/G-2: SELF_PROPOSED tidak pernah menyetujui dirinya; AGENT_SUGGESTION tidak pernah mengatur ownerApproval. */
@@ -155,7 +174,7 @@ function makeGoal({
 
     return Object.freeze({
         goalId, title: String(title).slice(0, 500), kind,
-        origin: Object.freeze({ ...origin }),
+        origin: deepFreeze({ ...origin }),
         ownerApproval,
         state: "PROPOSED",
         priorityClass,
@@ -173,7 +192,7 @@ function makeCommitment({ commitmentId, goalRef, toWhom, promise, dueCondition, 
     if (typeof goalRef !== "string" || !goalRef) fail(REASONS.INVALID_RECORD, "goalRef wajib string");
     return Object.freeze({
         commitmentId, goalRef,
-        toWhom: Object.freeze({ ...toWhom }),
+        toWhom: deepFreeze({ ...toWhom }),
         promise: String(promise).slice(0, 500),
         dueCondition: validateConditionSpec(dueCondition, "dueCondition"),
         state: "OPEN", evidenceRef: null,

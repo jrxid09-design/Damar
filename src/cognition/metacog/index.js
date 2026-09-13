@@ -58,7 +58,13 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
     function openReview({ trigger, subjectRef, findings = [], proposals = [], cost = { tokens: 0, ms: 0 } }) {
         rollBudgetWindow();
 
-        const subjectKey = JSON.stringify(subjectRef);
+        // Bug review independen (audit putaran-9, AUD9-P2-2): JSON.stringify(subjectRef)
+        // mengeksekusi toJSON milik pemanggil di dalam proses kognisi. subjectRef
+        // hanya pernah berbentuk {entityId} atau {relationId}; kunci dibangun
+        // dari field itu saja (sama seperti attention/index.js's targetKey).
+        const subjectKey = subjectRef && subjectRef.entityId
+            ? `entity:${subjectRef.entityId}`
+            : `relation:${subjectRef && subjectRef.relationId}`;
         const debounceKey = `${subjectKey}::${trigger}`;
         const existingId = lastReviewBySubjectTrigger.get(debounceKey);
         if (existingId) {
