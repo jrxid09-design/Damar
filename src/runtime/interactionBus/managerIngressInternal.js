@@ -97,6 +97,47 @@ function safeRawEvent(raw, channel) {
   };
 }
 
+/**
+ * DB02-E — CLOSED-SCHEMA action-request normalizer. Recognized ONLY when the
+ * raw external event carries an OWN-DATA `requestedOperation` field (an
+ * ordinary MESSAGE `{text: "..."}` event never has this field, so plain
+ * conversational text can never become privileged by accident). Shapes the
+ * bus payload into exactly the bounded fields `validateActionRequestPayload`
+ * (src/runtime/interactionBus/payloads.js) accepts; `authProof` is carried
+ * through as an OPAQUE blob — this adapter never inspects or verifies it.
+ */
+function safeActionRequestEvent(raw, channel) {
+  const requestedOperation = dataField(raw, "requestedOperation");
+  if (requestedOperation === null || typeof requestedOperation !== "object" || Array.isArray(requestedOperation)) {
+    return { ok: false, code: "ACTION_REQUEST_INVALID" };
+  }
+  const capabilityId = dataField(requestedOperation, "capabilityId");
+  const operation = dataField(requestedOperation, "operation");
+  const args = dataField(requestedOperation, "arguments");
+  const expectedPostcondition = dataField(requestedOperation, "expectedPostcondition");
+  const authProof = dataField(raw, "authProof");
+  const userId = dataField(raw, "userId");
+  const rawSessionId = dataField(raw, "sessionId");
+  const channelScope = typeof channel === "string" && CHANNELS[channel] ? channel : "channel";
+  return {
+    ok: true,
+    kind: "ACTION_REQUEST",
+    sessionId: (typeof rawSessionId === "string" && rawSessionId.startsWith("ses_"))
+      ? rawSessionId
+      : slugSessionId(rawSessionId)
+        || slugSessionId(`${channelScope}-${userId ?? ""}`)
+        || fallbackSessionId(channelScope),
+    claimedIdentity: typeof userId === "string" ? userId.slice(0, 128) : null,
+    payload: {
+      capabilityId,
+      operation,
+      ...(args === undefined ? {} : { arguments: args }),
+      ...(expectedPostcondition === undefined ? {} : { expectedPostcondition }),
+      ...(authProof === undefined ? {} : { authProof })
+    }
+  };
+}
+
 function channelAdapter(channel) {
   if (!Object.prototype.hasOwnProperty.call(CHANNELS, channel)) {
     throw new TypeError("CHANNEL_NOT_SUPPORTED");
@@ -185,8 +226,15 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
       bus,
       transportId: descriptor.transportId,
       origin: descriptor.origin,
-      capabilities: { acceptsText: true, supportsBinaryAttachments: true },
-      normalize: (rawEvent) => safeRawEvent(rawEvent, channel)
+      capabilities: { acceptsText: true, supportsBinaryAttachments: true, acceptsActionRequests: true },
+      // DB02-E: an action-request is recognized ONLY by the presence of an
+      // own-data `requestedOperation` field on the raw event — ordinary
+      // MESSAGE events (`{text: "..."}`) never carry it, so plain text can
+      // never become privileged by accident.
+      normalize: (rawEvent) => (
+        rawEvent !== null && typeof rawEvent === "object" &&
+        Object.prototype.hasOwnProperty.call(rawEvent, "requestedOperation")
+      ) ? safeActionRequestEvent(rawEvent, channel) : safeRawEvent(rawEvent, channel)
     }));
     if (!adapterDefinition) throw new TypeError("CHANNEL_ADAPTER_MISSING");
   }
@@ -344,6 +392,59 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
         continuityByInteraction.delete(envelope.interactionId);
         if (typeof context.releaseMediaAccess === "function") for (const handle of access) releaseHandleSafe(context, handle);
         if (typeof context.releaseMediaBinding === "function") context.releaseMediaBinding();
+      }
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // DB02-E — CLOSED-SCHEMA action-request route. This is the ONLY bus path
+  // that forwards `requestedOperation`/`authProof` to Manager; the ordinary
+  // CONVERSATION/MESSAGE handler above never reads these fields, so
+  // privileged-looking keys inside ordinary chat text stay inert. Manager
+  // forwards `authProof` VERBATIM, opaque, to Lane 2's own sealed verifier —
+  // this handler never inspects or verifies it (CHANNEL != AUTHORITY,
+  // AUTHENTICATION != AUTHORIZATION). No continuity/media context is bound
+  // here: an action request is not a conversational turn.
+  // ------------------------------------------------------------------
+  bus.registerHandler({
+    route: "ACTION",
+    supportedKinds: ["ACTION_REQUEST"],
+    handler: async (envelope, context) => {
+      if (!bus.isCanonicalEnvelope(envelope)) {
+        context.stream.emit("ERROR", { reason: "NON_CANONICAL_ENVELOPE" });
+        return;
+      }
+      const channelType = ORIGIN_TO_CHANNEL[envelope.origin];
+      await Promise.resolve();
+      const managerInput = {
+        interactionId: envelope.interactionId,
+        channelType,
+        channelId: envelope.provenance.transportId,
+        sessionId: envelope.sessionId,
+        correlationId: envelope.correlationId || `cor_${envelope.interactionId.slice(3)}`,
+        receivedAtMs: Date.now(),
+        ...(envelope.payload.authProof === undefined ? {} : { authProof: envelope.payload.authProof }),
+        requestedOperation: {
+          capabilityId: envelope.payload.capabilityId,
+          operation: envelope.payload.operation,
+          ...(envelope.payload.arguments === undefined ? {} : { arguments: envelope.payload.arguments }),
+          ...(envelope.payload.expectedPostcondition === undefined ? {} : { expectedPostcondition: envelope.payload.expectedPostcondition })
+        }
+      };
+      const adapter = channelAdapter(channelType);
+      context.stream.emit("START", { interactionId: envelope.interactionId });
+      const waiter = pending.get(envelope.interactionId);
+      try {
+        const result = await manager.handle(managerInput, Object.freeze({ signal: waiter?.controller.signal }));
+        const rendered = Object.freeze(adapter.renderOutbound(result));
+        context.stream.emit("FINAL", rendered);
+        context.stream.emit("COMPLETE", { interactionId: envelope.interactionId });
+        waiter?.resolve(rendered);
+      } catch (error) {
+        waiter?.reject(error);
+        throw error;
+      } finally {
+        pending.delete(envelope.interactionId);
       }
     }
   });

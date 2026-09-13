@@ -30,7 +30,8 @@ test("enums: interaction kinds are the closed canonical set", () => {
     "STATUS_REQUEST",
     "CONTEXT_REFERENCE",
     "AUTH_EVIDENCE",
-    "EVENT"
+    "EVENT",
+    "ACTION_REQUEST"
   ]);
 });
 

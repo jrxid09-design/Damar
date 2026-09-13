@@ -14,7 +14,8 @@ const CAPABILITY_NAMES = Object.freeze([
   "supportsBinaryAttachments",
   "supportsVoiceHints",
   "acceptsAuthEvidence",
-  "acceptsEvents"
+  "acceptsEvents",
+  "acceptsActionRequests"
 ]);
 
 const DEFAULT_CAPABILITIES = Object.freeze({
@@ -26,7 +27,8 @@ const DEFAULT_CAPABILITIES = Object.freeze({
   supportsBinaryAttachments: false,
   supportsVoiceHints: false,
   acceptsAuthEvidence: false,
-  acceptsEvents: false
+  acceptsEvents: false,
+  acceptsActionRequests: false
 });
 
 const KIND_CAPABILITY_REQUIREMENTS = Object.freeze({
@@ -37,7 +39,8 @@ const KIND_CAPABILITY_REQUIREMENTS = Object.freeze({
   APPROVAL_RESPONSE: ["supportsApprovalResponses"],
   AUTH_EVIDENCE: ["acceptsAuthEvidence"],
   STATUS_REQUEST: [],
-  EVENT: ["acceptsEvents"]
+  EVENT: ["acceptsEvents"],
+  ACTION_REQUEST: ["acceptsActionRequests"]
 });
 
 function createTransportRegistry() {

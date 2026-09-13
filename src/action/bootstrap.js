@@ -704,26 +704,35 @@ function resolveCanonicalMataDewaService() {
 }
 
 /**
- * DB02-A (Repair5): ONE canonical authority truth.
+ * DB02-A (Repair5 continued): ONE canonical authority truth — construction
+ * order must not split it.
  *
- * Before this repair, Lane 2 evaluated against its OWN private, ephemeral
- * `createMemoryAuthorityStore()` — completely disconnected from the durable,
- * Owner-ratified canonical AuthorityRegistry (src/authority/productionComposition.js).
- * A genuine production Owner grant could never become effective in Lane 2
- * evaluation, no matter how it was provisioned.
+ * The prior fix resolved the canonical production store correctly, but
+ * resolved it ONCE, eagerly, at facade-construction time, and
+ * `createCanonicalActionFacade()` memoizes `canonical` forever (`if (canonical
+ * === null)`). If anything triggers canonical Lane 2 construction before
+ * `ensureProductionAuthorityComposed()` finishes (boot ordering, a stray
+ * early call, a race), that one eager resolution captured the ephemeral
+ * fallback — and the memoized facade could never see the real canonical
+ * store for the lifetime of the process, even after production composition
+ * later completed. BOOT ORDER must never decide AUTHORITY TRUTH.
  *
- * This resolver returns a READ-ONLY view over the SAME store instance the
- * canonical AuthorityRegistry writes into — not a copy, not a bridge, not a
- * second store. `loadAndEvaluateAuthority` (used by both Lane 2's evaluateGate
- * and AuthorityRegistry's own evaluate()) only ever reads `getCapability`,
- * `getGeneration`, and `countConsumption`; only those three read methods are
- * exposed here, so Lane 2 has no path to WRITE into the canonical store even
- * though it holds a live reference to it.
+ * The fix: this resolver returns a store-shaped DELEGATE, not a captured
+ * store reference. Its three read methods (the only three
+ * `loadAndEvaluateAuthority` ever calls) re-resolve the current canonical
+ * production store on EVERY call, not once at construction. Whichever order
+ * `createCanonicalActionFacade()` / `createDamarManager()` /
+ * `ensureProductionAuthorityComposed()` run in, the very next Lane 2 read
+ * after production composition completes sees the SAME store the canonical
+ * AuthorityRegistry writes into — live, not a copy, not a second
+ * synchronized store: exactly one underlying store is ever read, chosen
+ * fresh on each call.
  *
- * Falls back to an ephemeral in-memory store when no production composition
- * has run yet in this process (e.g. ordinary unit tests that never call
- * ensureProductionAuthorityComposed()) — IDENTICAL to prior behavior for
- * every caller that doesn't touch the production composition path.
+ * Falls back to a single lazily-created ephemeral in-memory store when no
+ * production composition has run yet in this process (e.g. ordinary unit
+ * tests that never call `ensureProductionAuthorityComposed()`) — IDENTICAL
+ * to prior behavior for every caller that doesn't touch the production
+ * composition path.
  *
  * This function accepts NO parameters and is not exported: there is no
  * caller-supplied store, generic provisioning API, or bridge surface reachable
@@ -731,18 +740,23 @@ function resolveCanonicalMataDewaService() {
  * ordinary repo-local import.
  */
 function resolveLane2AuthorityStore() {
-    try {
-        const prod = require("../authority/productionComposition").getProductionAuthorityComposition();
-        const canonicalStore = prod && prod.canonicalOwner && prod.canonicalOwner.store;
-        if (canonicalStore && typeof canonicalStore.getCapability === "function") {
-            return Object.freeze({
-                getCapability: (...a) => canonicalStore.getCapability(...a),
-                getGeneration: (...a) => canonicalStore.getGeneration(...a),
-                countConsumption: (...a) => canonicalStore.countConsumption(...a)
-            });
-        }
-    } catch { /* production composition module unavailable — ephemeral fallback */ }
-    return createMemoryAuthorityStore();
+    let ephemeralFallback = null;
+    function currentStore() {
+        try {
+            const prod = require("../authority/productionComposition").getProductionAuthorityComposition();
+            const canonicalStore = prod && prod.canonicalOwner && prod.canonicalOwner.store;
+            if (canonicalStore && typeof canonicalStore.getCapability === "function") {
+                return canonicalStore;
+            }
+        } catch { /* production composition module unavailable — ephemeral fallback */ }
+        if (ephemeralFallback === null) ephemeralFallback = createMemoryAuthorityStore();
+        return ephemeralFallback;
+    }
+    return Object.freeze({
+        getCapability: (...a) => currentStore().getCapability(...a),
+        getGeneration: (...a) => currentStore().getGeneration(...a),
+        countConsumption: (...a) => currentStore().countConsumption(...a)
+    });
 }
 
 /**

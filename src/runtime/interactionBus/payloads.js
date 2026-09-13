@@ -395,6 +395,89 @@ function validateContextReferencePayload(raw) {
   return Object.freeze({ reference: validateContextRef(raw.reference) });
 }
 
+const CAPABILITY_ID_RE_ACTION = /^[a-z][a-z0-9._-]{0,255}$/;
+const OPERATION_RE_ACTION = /^[a-z][a-z0-9._-]{0,255}$/;
+const POSTCONDITION_OP_RE = /^[a-z][a-z0-9_]{0,31}$/;
+const AUTH_PROOF_KINDS = new Set(["owner-proof", "admin-proof"]);
+
+/**
+ * DB02-E — CLOSED-SCHEMA action-request payload. Carries ONLY bounded
+ * declarative operation material (capabilityId/operation/arguments/
+ * expectedPostcondition) plus authentication evidence as an OPAQUE proof
+ * blob (kind/credentialId/nonce/signature — no cryptographic check here;
+ * Lane 2's sealed verifier is the sole proof verifier). No principal/Owner/
+ * authority/routing field is accepted at any level: `rejectForbiddenFields`
+ * makes an unrecognized key (wave6Distributed, candidate, executor, router,
+ * principal, authorityDecision, ...) a hard bus-layer rejection before the
+ * request ever reaches Manager.
+ */
+function validateActionAuthProof(raw) {
+  if (!isPlainObject(raw)) fail("PAYLOAD_FIELD_INVALID", { scope: "authProof" });
+  rejectForbiddenFields(raw, ["kind", "credentialId", "nonce", "signature"], "authProof");
+  if (!AUTH_PROOF_KINDS.has(raw.kind)) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "authProof", field: "kind" });
+  }
+  if (typeof raw.credentialId !== "string" || raw.credentialId.length === 0 || raw.credentialId.length > 128) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "authProof", field: "credentialId" });
+  }
+  if (typeof raw.nonce !== "string" || raw.nonce.length === 0 || raw.nonce.length > 256) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "authProof", field: "nonce" });
+  }
+  if (typeof raw.signature !== "string" || raw.signature.length === 0 || raw.signature.length > 512) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "authProof", field: "signature" });
+  }
+  return Object.freeze({ kind: raw.kind, credentialId: raw.credentialId, nonce: raw.nonce, signature: raw.signature });
+}
+
+function validateExpectedPostcondition(raw, bounds) {
+  if (raw === undefined) return undefined;
+  if (!isPlainObject(raw)) fail("PAYLOAD_FIELD_INVALID", { scope: "expectedPostcondition" });
+  rejectForbiddenFields(raw, ["expect"], "expectedPostcondition");
+  if (!isPlainObject(raw.expect)) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "expectedPostcondition", field: "expect" });
+  }
+  const entries = Object.entries(raw.expect);
+  if (entries.length === 0 || entries.length > bounds.maxClaimedFields) {
+    fail("BOUNDS_EXCEEDED", { scope: "expectedPostcondition", field: "expect" });
+  }
+  const expect = {};
+  for (const [key, clause] of entries) {
+    if (!META_KEY_RE.test(key)) fail("PAYLOAD_FIELD_INVALID", { scope: "expectedPostcondition", field: key });
+    if (!isPlainObject(clause)) fail("PAYLOAD_FIELD_INVALID", { scope: "expectedPostcondition", field: key });
+    rejectForbiddenFields(clause, ["op", "value"], "expectedPostcondition.clause");
+    if (typeof clause.op !== "string" || !POSTCONDITION_OP_RE.test(clause.op)) {
+      fail("PAYLOAD_FIELD_INVALID", { scope: "expectedPostcondition", field: `${key}.op` });
+    }
+    const v = clause.value;
+    if (!(typeof v === "string" || typeof v === "number" || typeof v === "boolean" || v === null) ||
+        (typeof v === "number" && !Number.isFinite(v))) {
+      fail("PAYLOAD_FIELD_INVALID", { scope: "expectedPostcondition", field: `${key}.value` });
+    }
+    expect[key] = Object.freeze({ op: clause.op, value: v });
+  }
+  return Object.freeze({ expect: Object.freeze(expect) });
+}
+
+function validateActionRequestPayload(raw, bounds) {
+  rejectForbiddenFields(raw, ["capabilityId", "operation", "arguments", "expectedPostcondition", "authProof"], "ACTION_REQUEST");
+  if (typeof raw.capabilityId !== "string" || !CAPABILITY_ID_RE_ACTION.test(raw.capabilityId)) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "ACTION_REQUEST", field: "capabilityId" });
+  }
+  if (typeof raw.operation !== "string" || !OPERATION_RE_ACTION.test(raw.operation)) {
+    fail("PAYLOAD_FIELD_INVALID", { scope: "ACTION_REQUEST", field: "operation" });
+  }
+  const args = validateBoundedRecord(raw, "arguments", bounds, "ACTION_REQUEST");
+  const expectedPostcondition = validateExpectedPostcondition(raw.expectedPostcondition, bounds);
+  const authProof = raw.authProof === undefined ? undefined : validateActionAuthProof(raw.authProof);
+  return Object.freeze({
+    capabilityId: raw.capabilityId,
+    operation: raw.operation,
+    arguments: args,
+    expectedPostcondition,
+    authProof
+  });
+}
+
 const PAYLOAD_VALIDATORS = {
   MESSAGE: validateMessagePayload,
   COMMAND: validateCommandPayload,
@@ -403,7 +486,8 @@ const PAYLOAD_VALIDATORS = {
   STATUS_REQUEST: validateStatusRequestPayload,
   AUTH_EVIDENCE: validateAuthEvidencePayload,
   EVENT: validateEventPayload,
-  CONTEXT_REFERENCE: validateContextReferencePayload
+  CONTEXT_REFERENCE: validateContextReferencePayload,
+  ACTION_REQUEST: validateActionRequestPayload
 };
 
 function validatePayload(kind, raw, bounds, mediaVerifier) {
