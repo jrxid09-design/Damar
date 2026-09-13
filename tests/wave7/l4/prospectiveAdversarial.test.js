@@ -200,7 +200,7 @@ test("PM-repair-13: replaying an already-used reminderId/expectationId is reject
     assertThrowsReason(() => pm.armExpectation(es), "DUPLICATE_RECORD_ID");
 });
 
-test("PM-repair-14: a nested value inside a non-ON_STATE trigger (AT/AFTER/RECURRING/ON_EVENT) stays immutable (independent audit AUD10-P2-2)", async () => {
+test("PM-repair-14: a nested value inside a non-ON_STATE trigger (AT/AFTER/RECURRING) stays immutable (independent audit AUD10-P2-2)", async () => {
     const pm = await createProspectiveMemory({});
     const r = pm.arm({ reminderId: "R-nested", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(1).toISOString(), extra: { nested: { deep: "orig" } } } });
     assert.equal(Object.isFrozen(r.trigger.extra), true);
@@ -214,6 +214,11 @@ test("PM-repair-15: a BigInt anywhere in a reminder's origin/trigger-extra or an
     assert.throws(() => pm.arm({ reminderId: "R-big-3", wakeClass: "NOTIFY_OWNER", trigger: { kind: "ON_STATE", subject: { entityId: "e1", n: 10n }, attribute: "status" } }));
     assert.throws(() => pm.armExpectation({ subject: { entityId: "e1", n: 10n }, attribute: "status", expectedValue: "done", window: { latestAt: new Date(1000).toISOString() } }));
     assert.throws(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: "done", window: { latestAt: new Date(1000).toISOString(), n: 10n } }));
+});
+
+test("PM-repair-20: an ON_EVENT trigger is rejected fail-closed, since no dispatch path exists to ever fire it (independent audit AUD18-P2-2)", async () => {
+    const pm = await createProspectiveMemory({});
+    assertThrowsReason(() => pm.arm({ reminderId: "R-evt", wakeClass: "RESUME_GOAL", trigger: { kind: "ON_EVENT", eventKind: "X" } }), "INVALID_TRIGGER");
 });
 
 test("PM-repair-16: an ON_STATE trigger's non-subject fields are sanitized+frozen and cannot crash persist() (independent audit AUD12-P1-1)", async () => {

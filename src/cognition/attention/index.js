@@ -92,7 +92,15 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         }
     }
 
-    function evictLowestIfOverflow() {
+    // Bug review independen (audit putaran-18, AUD18-P2-3): pola yang sama
+    // yang sudah diperbaiki untuk entitas worldmodel (AUD17-P2-4) dan relasi
+    // worldmodel (AUD18-P2-1) -- tapi hanya untuk blok PENGHAPUSAN TOTAL di
+    // bawah (MAX_TOTAL_TARGETS). Demosi QUEUED->DEFERRED di blok INI tidak
+    // menghapus target dari `targets` (getTarget() masih menemukannya),
+    // jadi target baru boleh tetap jadi kandidat demosi wajar berdasarkan
+    // prioritas -- mengecualikannya di sini salah menutupi overflow yang sah
+    // (AT-A8) tanpa menutup celah aslinya.
+    function evictLowestIfOverflow(protectedTargetId = null) {
         const queued = [...targets.values()].filter(t => t.state === "QUEUED");
         if (queued.length > bounds.MAX_QUEUED_TARGETS) {
             recomputeAll();
@@ -115,7 +123,7 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         // dipurge -- itu pekerjaan aktif.
         if (targets.size > bounds.MAX_TOTAL_TARGETS) {
             const purgeRank = { DONE: 0, DEFERRED: 1, QUEUED: 2 };
-            const candidate = [...targets.values()].filter(t => t.state !== "RUNNING")
+            const candidate = [...targets.values()].filter(t => t.state !== "RUNNING" && t.targetId !== protectedTargetId)
                 .sort((a, b) => {
                     const rankDiff = purgeRank[a.state] - purgeRank[b.state];
                     if (rankDiff !== 0) return rankDiff;
@@ -181,7 +189,7 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         const support = supportingSignals.get(targetId);
         support.push({ sourceId: signal.sourceId, evidenceRef: signal.evidenceRef, createdAtMs: signal.createdAtMs });
         if (support.length > bounds.MAX_SUPPORTING_SIGNALS_PER_TARGET) support.shift();
-        evictLowestIfOverflow();
+        evictLowestIfOverflow(targetId);
         recomputeAll();
         return { signal, targetId };
     }

@@ -59,6 +59,13 @@ test("MC-repair-3: replaying an already-used calibration recordId is rejected, n
     assertThrowsReason(() => mc.recordCalibration(spec), "DUPLICATE_RECORD_ID");
 });
 
+test("MC-repair-7: a BigInt or NaN predictedConfidence is rejected, not left to crash Brier scoring or poison the calibration score (independent audit AUD18-A1)", async () => {
+    const mc = await createMetacognition();
+    const base = { predictionRef: "p", predictedValue: 1, outcomeRef: "o", outcomeValue: 1, outcomeCorrect: true, outcomeTier: "T1", windowFrom: null, windowTo: null };
+    assertThrowsReason(() => mc.recordCalibration({ ...base, predictedConfidence: 10n }), "INVALID_RECORD");
+    assertThrowsReason(() => mc.recordCalibration({ ...base, predictedConfidence: NaN }), "INVALID_RECORD");
+});
+
 test("MC-repair-1: a hostile toJSON on subjectRef is never invoked while keying/debouncing reviews (independent audit AUD9-P2-2)", async () => {
     const mc = await createMetacognition();
     let toJSONCalls = 0;

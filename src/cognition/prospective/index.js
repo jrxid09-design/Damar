@@ -39,7 +39,7 @@ function dueAtMs(reminder, bounds = BOUNDS) {
         if (reminder.occurrenceIndex + 1 > effectiveMaxOccurrences) return null;
         return next;
     }
-    return null; // ON_STATE / ON_EVENT: bukan berbasis waktu
+    return null; // ON_STATE: bukan berbasis waktu (ON_EVENT ditolak sejak putaran-18, AUD18-P2-2 -- tidak ada jalur dispatch)
 }
 
 async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS } = {}) {

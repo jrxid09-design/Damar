@@ -181,6 +181,14 @@ test("AT-A8: silent discard is impossible — overflow journal accounts for ever
     assert.equal(ae.overflowEntries().length, 1);
 });
 
+test("AT-repair-10: ingestSignal never returns a targetId that its own overflow purge just deleted (independent audit AUD18-P2-3)", async () => {
+    const ae = await createAttentionEconomy({ bounds: { ...BOUNDS, MAX_TOTAL_TARGETS: 1, MAX_QUEUED_TARGETS: 1 } });
+    ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef: { entityId: "e1" } }, "PERCEIVE");
+    ae.pick(); // e1 target now RUNNING
+    const { targetId } = ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s2", subjectRef: { entityId: "e2" } }, "PERCEIVE");
+    assert.notEqual(ae.getTarget(targetId), null, "ingestSignal must never return a targetId already purged by its own MAX_TOTAL_TARGETS eviction");
+});
+
 test("AT-A9: an uncorroborated agent urgency claim never jumps the queue above owner work", async () => {
     const ae = await createAttentionEconomy();
     const { targetId: agentTarget } = ae.ingestSignal({

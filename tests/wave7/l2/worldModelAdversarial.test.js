@@ -398,6 +398,28 @@ test("WM-repair-30: overflow-archiving a contradiction set that was already RESO
     assert.equal(overflowed.resolution.ruleId, "RULE-REAL", "overflow archival must not overwrite an already-resolved contradiction's real resolution");
 });
 
+test("WM-repair-32: neighbors() defaults depth to 1 when omitted, instead of silently returning an empty result (independent audit AUD18-A3)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "a", entityKind: "device", source: "t" });
+    wm.declareEntity({ entityId: "b", entityKind: "device", source: "t" });
+    wm.declareRelation({ relationId: "r1", kind: "near", from: "a", to: "b" });
+    const n = wm.neighbors("a");
+    assert.deepEqual(n.entities.map(e => e.entityId), ["b"]);
+});
+
+test("WM-repair-31: declareRelation never evicts the relation it just created, even when it is the lowest-strength candidate (independent audit AUD18-P2-1)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_RELATIONS: 2 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e3", entityKind: "device", source: "s" });
+    wm.declareRelation({ relationId: "r1", kind: "k", from: "e1", to: "e2", strength: 0.9 });
+    wm.declareRelation({ relationId: "r2", kind: "k", from: "e2", to: "e3", strength: 0.8 });
+    const r3 = wm.declareRelation({ relationId: "r3", kind: "k", from: "e1", to: "e3", strength: 0.1 });
+    assert.equal(r3.relationId, "r3");
+    const inState = wm.subgraph(["e1", "e2", "e3"], 1).relations.map(r => r.relationId);
+    assert.equal(inState.includes("r3"), true, "declareRelation must never evict the relation it just created in the same call");
+});
+
 test("WM-repair-17: replaying a recordId already consumed by an earlier SUPERSEDE is a no-op, not a fresh CONTEST (independent audit AUD11-P2-7)", async () => {
     const clock = manualClock(0);
     const wm = await createWorldModel({ clock });

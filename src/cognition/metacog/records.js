@@ -76,6 +76,13 @@ function brierScore(predictedConfidence, outcomeCorrect) {
 
 function makeCalibrationRecord({ recordId, predictionRef, predictedValue, predictedConfidence, outcomeRef, outcomeValue, outcomeCorrect, scoreKind = "BRIER", windowFrom, windowTo }) {
     if (typeof recordId !== "string" || !recordId) fail(REASONS.INVALID_RECORD, "recordId wajib string");
+    // Bug review independen (audit putaran-18, AUD18-A1): predictedConfidence
+    // tidak pernah divalidasi -- BigInt meledakkan aritmetika mentah
+    // (TypeError), NaN diam-diam menghasilkan skor kalibrasi error:NaN yang
+    // meracuni statistik kalibrasi.
+    if (typeof predictedConfidence !== "number" || !Number.isFinite(predictedConfidence)) {
+        fail(REASONS.INVALID_RECORD, "predictedConfidence wajib number yang valid");
+    }
     const error = scoreKind === "BRIER" ? brierScore(predictedConfidence, outcomeCorrect) : Math.abs(predictedConfidence - (outcomeCorrect ? 1 : 0));
     return Object.freeze({
         recordId, predictionRef, predictedValue, predictedConfidence,
