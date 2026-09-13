@@ -225,7 +225,9 @@ function validatePayloadRef(payloadRef) {
 
 function makeReminder({ reminderId, ownerRef = null, trigger, payloadRef = null, wakeClass, origin = { kind: "SELF" }, nowIso }) {
     if (typeof reminderId !== "string" || !reminderId) fail(REASONS.INVALID_RECORD, "reminderId wajib string");
-    if (!WAKE_CLASSES.has(wakeClass)) fail(REASONS.INVALID_RECORD, `wakeClass '${wakeClass}' tidak dikenal`);
+    // Bug review independen (audit putaran-26, AUD26-P2-1): interpolasi
+    // `${wakeClass}` mentah meledakkan TypeError untuk Symbol.
+    if (!WAKE_CLASSES.has(wakeClass)) fail(REASONS.INVALID_RECORD, `wakeClass '${typeof wakeClass === "string" ? wakeClass : typeof wakeClass}' tidak dikenal`);
     // Bug review independen (audit putaran-12, AUD12-P2-3): ownerRef
     // diteruskan mentah tanpa disaring -- BigInt di dalamnya meledakkan
     // JSON.stringify saat persist().

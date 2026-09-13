@@ -74,6 +74,55 @@ test("AT-repair-20: two distinct NESTED-object evidenceRefs still count as two d
         "two distinct nested-object evidenceRefs must count as two distinct corroboration pairs, same as two distinct string evidenceRefs");
 });
 
+test("AT-repair-21: a shared-reference DAG evidenceRef must not cause exponential CPU cost in evidenceRefIdentity (independent audit AUD26-P1-1, BLOCKING)", async () => {
+    // Build a DAG where every one of 5 levels has FANOUT keys all pointing
+    // at the SAME child object -- a shared reference (not a cycle), the
+    // exact shape that made putaran-25's unbudgeted recursion O(fanout^5).
+    function sharedDag(fanout, levels) {
+        let node = {};
+        for (let d = 0; d < levels; d++) {
+            const child = node;
+            node = {};
+            for (let i = 0; i < fanout; i++) node["k" + i] = child;
+        }
+        return node;
+    }
+    const ae = await createAttentionEconomy();
+    const dag = sharedDag(30, 5);
+    const start = process.hrtime.bigint();
+    ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef: { entityId: "e1" }, evidenceRef: dag }, "PERCEIVE");
+    // ingest twice more from the same source to confirm no compounding cost
+    ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef: { entityId: "e1" }, evidenceRef: dag }, "PERCEIVE");
+    ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef: { entityId: "e1" }, evidenceRef: dag }, "PERCEIVE");
+    const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
+    assert.ok(elapsedMs < 500, `3 ingests of a fanout=30/depth=5 shared-reference DAG took ${elapsedMs}ms, expected well under 500ms with a memoized/budgeted walk`);
+});
+
+test("AT-repair-22: two distinct evidenceRefs nested past the recursion depth cap still count as two distinct corroboration pairs (independent audit AUD26-P2-2)", async () => {
+    function deepObject(depth, leafValue) {
+        let v = { leaf: leafValue };
+        for (let i = 0; i < depth; i++) v = { child: v };
+        return v;
+    }
+    const control = await createAttentionEconomy();
+    const { targetId: tControl } = control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "A" }, "PERCEIVE");
+    control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "B" }, "PERCEIVE");
+
+    const deep = await createAttentionEconomy();
+    const { targetId: tDeep } = deep.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: deepObject(6, "A") }, "PERCEIVE");
+    deep.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: deepObject(6, "B") }, "PERCEIVE");
+    assert.equal(deep.getTarget(tDeep).effectivePriority, control.getTarget(tControl).effectivePriority,
+        "two distinct evidenceRefs nested past the recursion depth cap must still count as two distinct corroboration pairs");
+});
+
+test("AT-repair-23: mapToGovernorPriority never returns an inherited Object.prototype member for a prototype-shaped priorityClass string, and makeTarget rejects a Symbol workKind (independent audit AUD26-P2-3/AUD26-P2-1)", async () => {
+    const ae = await createAttentionEconomy();
+    for (const hostileClass of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+        assert.equal(ae.toGovernorPriority(hostileClass), "LOW", `toGovernorPriority('${hostileClass}') must fall back to LOW, not an inherited Object.prototype member`);
+    }
+    assert.equal(ae.governorMappingAudit().every(e => typeof e.mapped === "string"), true, "every audit entry's mapped value must be a string");
+});
+
 test("AT-A1: salience flooding from one sensor is rate-capped and the source marked noisy", async () => {
     const ae = await createAttentionEconomy({ bounds: { ...BOUNDS, MAX_SIGNALS_PER_SOURCE_PER_MINUTE: 3 } });
     for (let i = 0; i < 3; i++) {

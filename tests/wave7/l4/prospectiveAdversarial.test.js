@@ -43,6 +43,13 @@ test("PM-repair-31: a hostile toString on trigger.kind never executes, and a Sym
     assertThrowsReason(() => pm.arm({ reminderId: "R2", wakeClass: "NOTIFY_OWNER", trigger: { kind: Symbol("k") } }), "INVALID_TRIGGER");
 });
 
+test("PM-repair-32: a Symbol wakeClass is rejected as INVALID_RECORD, not a raw TypeError (independent audit AUD26-P2-1)", async () => {
+    const pm = await createProspectiveMemory();
+    assertThrowsReason(() => pm.arm({
+        reminderId: "R", trigger: { kind: "AT", at: new Date(Date.now() + 60_000).toISOString() }, wakeClass: Symbol("w")
+    }), "INVALID_RECORD");
+});
+
 test("PM-A1: reminder carrying executable/authority-shaped payload is rejected", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.arm({

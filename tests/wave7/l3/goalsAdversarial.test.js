@@ -571,6 +571,21 @@ test("GL-repair-41: a hostile toString on kind/action never executes, and a Symb
     });
 });
 
+test("GL-repair-42: a Symbol id passed to grantApproval/transition/transitionCommitment/transitionTask/invalidatePlanIfAssumptionBroken is rejected as a domain error, not a raw TypeError (independent audit AUD26-P2-1)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    const assertDomainError = (fn) => assert.throws(fn, (err) => {
+        assert.notEqual(err.constructor.name, "TypeError", `expected a domain error, got raw ${err.constructor.name}: ${err.message}`);
+        return true;
+    });
+    assertDomainError(() => ge.grantApproval(Symbol("g"), { approvalRef: "a" }));
+    assertDomainError(() => ge.transition(Symbol("g"), "approve", { actorKind: "OWNER", reason: "r" }));
+    assertDomainError(() => ge.transitionCommitment(Symbol("c"), "met", {}));
+    assertDomainError(() => ge.transitionTask(Symbol("t"), "ready"));
+    assertDomainError(() => ge.invalidatePlanIfAssumptionBroken(Symbol("p"), "belief-ref"));
+    void g;
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

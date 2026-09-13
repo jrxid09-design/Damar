@@ -201,7 +201,11 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // sama dijaga putaran-22 (F-4), fungsi ini terlewat.
         const { approvalRef, scope = null } = meta || {};
         const goal = goals.get(goalId);
-        if (!goal) fail(REASONS.UNKNOWN_GOAL, `goal '${goalId}' tidak ditemukan`);
+        // Bug review independen (audit putaran-26, AUD26-P2-1): interpolasi
+        // `${goalId}` mentah meledakkan TypeError untuk Symbol; sama seperti
+        // 18 titik yang sudah ditutup putaran-25, ini terlewat dalam file
+        // yang sama.
+        if (!goal) fail(REASONS.UNKNOWN_GOAL, `goal '${typeof goalId === "string" ? goalId : typeof goalId}' tidak ditemukan`);
         // Bug review independen (audit putaran-13, AUD13-P2-3): approvalRef/
         // scope diteruskan mentah -- BigInt meledakkan JSON.stringify saat
         // persist(). approvalRef tetap opaque (bukan grant), hanya wajib
@@ -218,7 +222,8 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
 
     function transition(goalId, action, meta) {
         const goal = goals.get(goalId);
-        if (!goal) fail(REASONS.UNKNOWN_GOAL, `goal '${goalId}' tidak ditemukan`);
+        // Bug review independen (audit putaran-26, AUD26-P2-1): sama seperti grantApproval.
+        if (!goal) fail(REASONS.UNKNOWN_GOAL, `goal '${typeof goalId === "string" ? goalId : typeof goalId}' tidak ditemukan`);
 
         if (action === "activate" && activeGoalCount() >= bounds.MAX_ACTIVE_GOALS) {
             fail(REASONS.ACTIVE_GOAL_LIMIT_EXCEEDED, "jumlah goal aktif melebihi batas");
@@ -276,7 +281,8 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
 
     function transitionCommitmentAction(commitmentId, action, meta) {
         const c = commitments.get(commitmentId);
-        if (!c) fail(REASONS.UNKNOWN_GOAL, `commitment '${commitmentId}' tidak ditemukan`);
+        // Bug review independen (audit putaran-26, AUD26-P2-1): sama seperti grantApproval/transition.
+        if (!c) fail(REASONS.UNKNOWN_GOAL, `commitment '${typeof commitmentId === "string" ? commitmentId : typeof commitmentId}' tidak ditemukan`);
         // Bug review independen (audit putaran-23, AUD23-P2-2): meta null
         // diteruskan mentah ke lifecycle's `{ evidenceRef = null } = {}`
         // (default cuma berlaku untuk undefined) jadi TypeError mentah --
@@ -337,7 +343,8 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     /** P-1: assumption yang superseded/contested membatalkan rencana — dipanggil eksplisit oleh caller (pull, bukan subscription). */
     function invalidatePlanIfAssumptionBroken(planId, brokenBeliefRef) {
         const plan = plans.get(planId);
-        if (!plan) fail(REASONS.UNKNOWN_GOAL, `plan '${planId}' tidak ditemukan`);
+        // Bug review independen (audit putaran-26, AUD26-P2-1): sama seperti grantApproval/transition.
+        if (!plan) fail(REASONS.UNKNOWN_GOAL, `plan '${typeof planId === "string" ? planId : typeof planId}' tidak ditemukan`);
         // Bug review independen (audit putaran-13, AUD13-P2-3): brokenBeliefRef
         // diteruskan mentah ke invalidatedBy -- BigInt meledakkan
         // JSON.stringify saat persist().
@@ -398,7 +405,8 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
 
     function transitionTaskAction(taskId, action) {
         const t = tasks.get(taskId);
-        if (!t) fail(REASONS.UNKNOWN_TASK, `task '${taskId}' tidak ditemukan`);
+        // Bug review independen (audit putaran-26, AUD26-P2-1): sama seperti grantApproval/transition.
+        if (!t) fail(REASONS.UNKNOWN_TASK, `task '${typeof taskId === "string" ? taskId : typeof taskId}' tidak ditemukan`);
         const next = transitionTask(t, action);
         tasks.set(taskId, next);
         return next;

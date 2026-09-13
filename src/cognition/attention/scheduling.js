@@ -87,7 +87,14 @@ function mapToGovernorPriority(priorityClass, auditLog) {
     // string buatan pemanggil). priorityClass dinormalisasi ke primitif
     // dulu SEBELUM dipakai untuk indexing ATAU dicatat.
     const safePriorityClass = typeof priorityClass === "string" ? priorityClass : null;
-    const mapped = (safePriorityClass && GOVERNOR_PRIORITY_MAP[safePriorityClass]) || "LOW";
+    // Bug review independen (audit putaran-26, AUD26-P2-3): guard putaran-25
+    // menormalisasi tipe tapi tidak memeriksa apakah kuncinya benar-benar
+    // OWN PROPERTY -- "constructor"/"toString"/"__proto__"/"hasOwnProperty"
+    // adalah string biasa yang lolos guard, lalu indexing mengembalikan
+    // anggota Object.prototype yang terwarisi (fungsi/objek), bukan string
+    // prioritas, dan nilai type-confused itu ikut tercatat ke audit trail.
+    const mapped = (safePriorityClass && Object.prototype.hasOwnProperty.call(GOVERNOR_PRIORITY_MAP, safePriorityClass))
+        ? GOVERNOR_PRIORITY_MAP[safePriorityClass] : "LOW";
     auditLog.push(Object.freeze({ priorityClass: safePriorityClass, mapped }));
     return mapped;
 }
