@@ -79,8 +79,16 @@ const GOVERNOR_PRIORITY_MAP = Object.freeze({
 });
 
 function mapToGovernorPriority(priorityClass, auditLog) {
-    const mapped = GOVERNOR_PRIORITY_MAP[priorityClass] ?? "LOW";
-    auditLog.push(Object.freeze({ priorityClass, mapped }));
+    // Bug review independen (audit putaran-25, AUD25-ADV-2): indexing
+    // objek langsung (`GOVERNOR_PRIORITY_MAP[priorityClass]`) memanggil
+    // ToPropertyKey pada priorityClass -- objek hostile dengan
+    // toString/Symbol.toPrimitive tereksekusi, dan nilai hasil coercion-nya
+    // ikut tercatat ke governorMappingAudit (mencemari jejak audit dengan
+    // string buatan pemanggil). priorityClass dinormalisasi ke primitif
+    // dulu SEBELUM dipakai untuk indexing ATAU dicatat.
+    const safePriorityClass = typeof priorityClass === "string" ? priorityClass : null;
+    const mapped = (safePriorityClass && GOVERNOR_PRIORITY_MAP[safePriorityClass]) || "LOW";
+    auditLog.push(Object.freeze({ priorityClass: safePriorityClass, mapped }));
     return mapped;
 }
 

@@ -31,11 +31,21 @@ function subjectKeyOf(subject) {
     // manapun (gagal aman ke NEVER_OBSERVED lewat beliefKey/query di
     // bawah, tidak pernah memfabrikasi atau menggabungkan subject lain).
     if (!subject || typeof subject !== "object") return "invalid:malformed-subject";
-    return subject.entityId ? `entity:${subject.entityId}` : `relation:${subject.relationId}`;
+    // Bug review independen (audit putaran-25, AUD25-P2-1): `subject.entityId`
+    // hanya dicek truthy, bukan tipenya -- entityId berupa objek hostile
+    // dengan toString tereksekusi (mengeksekusi kode pemanggil di dalam
+    // proses kognisi) tanpa pernah ditolak, mirip kelas AUD10-P2-3 yang
+    // sudah ditutup untuk attention/metacog tapi tidak untuk lane ini.
+    if (typeof subject.entityId === "string") return `entity:${subject.entityId}`;
+    if (typeof subject.relationId === "string") return `relation:${subject.relationId}`;
+    return "invalid:malformed-subject";
 }
 
 function beliefKey(subject, attribute) {
-    return `${subjectKeyOf(subject)}::${attribute}`;
+    // Bug review independen (audit putaran-25, AUD25-P2-1): `${attribute}`
+    // mentah meledakkan TypeError untuk Symbol.
+    const safeAttribute = typeof attribute === "string" ? attribute : typeof attribute;
+    return `${subjectKeyOf(subject)}::${safeAttribute}`;
 }
 
 function query(beliefs, { subject, attribute, at = null, requireFresh = false, maxStalenessMs = null }, nowMs) {

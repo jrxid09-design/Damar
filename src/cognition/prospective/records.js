@@ -18,7 +18,10 @@ const TRIGGER_KINDS = new Set(["AT", "AFTER", "RECURRING", "ON_STATE"]);
 /** PM-A3: recurrence tanpa batas ditolak — wajib until ATAU maxOccurrences, dan ada lantai periode. */
 function validateTrigger(trigger) {
     if (!trigger || !TRIGGER_KINDS.has(trigger.kind)) {
-        fail(REASONS.INVALID_TRIGGER, `trigger.kind '${trigger?.kind}' tidak dikenal`);
+        // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
+        // `${trigger?.kind}` mentah meledakkan TypeError untuk Symbol.
+        const kindType = typeof trigger?.kind;
+        fail(REASONS.INVALID_TRIGGER, `trigger.kind '${kindType === "string" ? trigger.kind : kindType}' tidak dikenal`);
     }
     if (trigger.kind === "AT") {
         if (typeof trigger.at !== "string" || !Number.isFinite(Date.parse(trigger.at))) {

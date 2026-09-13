@@ -31,7 +31,11 @@ function neighbors(state, entityId, kinds = null, depth = 1) {
     // null` eksplisit lolos lalu `Math.min(null, MAX)` menjadi 0, membuat
     // traversal diam-diam TIDAK BERJALAN SAMA SEKALI (jawaban kosong yang
     // salah, bukan error ATAU default WM-A7 yang didokumentasikan).
-    if (depth === undefined || depth === null || !Number.isFinite(depth)) depth = 1;
+    // Bug review independen (audit putaran-25, AUD25-P2-3): putaran-24
+    // hanya menjaga null/non-finite -- `depth: -1` lolos lalu
+    // `Math.min(-1, MAX)` = -1, membuat loop `d < boundedDepth` tidak
+    // pernah berjalan (traversal diam-diam kosong), sama seperti kasus null.
+    if (depth === undefined || depth === null || !Number.isFinite(depth) || depth < 0) depth = 1;
     const boundedDepth = Math.min(depth, BOUNDS.NEIGHBORS_MAX_DEPTH);
     const visited = new Set([entityId]);
     let frontier = [entityId];
@@ -73,7 +77,9 @@ function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 26
     // Bug review independen (audit putaran-24, AUD24-P2-5): `depth: null`
     // eksplisit lolos default parameter lalu `Math.min(null, MAX)` = 0,
     // membuat traversal diam-diam tidak berjalan (jawaban kosong salah).
-    if (depth === undefined || depth === null || !Number.isFinite(depth)) depth = 2;
+    // Bug review independen (audit putaran-25, AUD25-P2-3): negatif lolos
+    // guard null/non-finite putaran-24, sama-sama membuat traversal diam-diam kosong.
+    if (depth === undefined || depth === null || !Number.isFinite(depth) || depth < 0) depth = 2;
     // Bug review independen (audit putaran-20, AUD20-P2-2): default parameter
     // hanya berlaku untuk `undefined` -- `budget: null` eksplisit lolos lalu
     // meledakkan `budget.nodes`/`budget.bytes` jadi TypeError mentah.
@@ -117,7 +123,10 @@ function path(state, from, to, maxDepth = 5) {
     // null` eksplisit lolos default parameter lalu `Math.min(null, MAX)`
     // = 0, membuat path() diam-diam melapor "tidak ditemukan" (truncated:
     // true) alih-alih benar-benar mencari sampai PATH_MAX_DEPTH.
-    if (maxDepth === undefined || maxDepth === null || !Number.isFinite(maxDepth)) maxDepth = 5;
+    // Bug review independen (audit putaran-25, AUD25-P2-3): negatif lolos
+    // guard null/non-finite putaran-24, membuat path() diam-diam melapor
+    // "tidak ditemukan" walau path sebenarnya ada.
+    if (maxDepth === undefined || maxDepth === null || !Number.isFinite(maxDepth) || maxDepth < 0) maxDepth = 5;
     const boundedDepth = Math.min(maxDepth, BOUNDS.PATH_MAX_DEPTH);
     if (from === to) return { path: [from], truncated: false };
 
@@ -148,8 +157,15 @@ function entitiesByKind(state, kind, limit = 256) {
     // eksplisit lolos default parameter lalu `Math.min(null, MAX)` = 0,
     // membuat hasil diam-diam kosong DAN truncated:true walau entitas
     // yang cocok memang ada.
-    if (limit === undefined || limit === null || !Number.isFinite(limit)) limit = 256;
-    const boundedLimit = Math.min(limit, BOUNDS.ENTITIES_BY_KIND_LIMIT);
+    // Bug review independen (audit putaran-25, AUD25-P2-3): putaran-24
+    // hanya menjaga null/non-finite -- `limit: -1` lolos lalu
+    // `Math.min(-1, MAX)` = -1, dan `.slice(0, -1)` MEMBUANG elemen
+    // terakhir alih-alih membatasi, jadi `entitiesByKind("d", -1)` bisa
+    // mengembalikan LEBIH BANYAK dari ENTITIES_BY_KIND_LIMIT (melanggar
+    // batas yang justru mau ditegakkan). Dinormalisasi ke default untuk
+    // negatif, DAN batas bawah 0 dipaksakan sebagai jaring pengaman kedua.
+    if (limit === undefined || limit === null || !Number.isFinite(limit) || limit < 0) limit = 256;
+    const boundedLimit = Math.max(0, Math.min(limit, BOUNDS.ENTITIES_BY_KIND_LIMIT));
     const all = [...state.entities.values()].filter(e => e.entityKind === kind);
     return { entities: all.slice(0, boundedLimit), truncated: all.length > boundedLimit };
 }

@@ -192,7 +192,12 @@ function makeGoal({
     parentGoalId = null, depth = 0, budgetRef = null, missionRef = null, nowIso
 }) {
     if (typeof goalId !== "string" || !goalId) fail(REASONS.INVALID_RECORD, "goalId wajib string");
-    if (!GOAL_KINDS.has(kind)) fail(REASONS.INVALID_RECORD, `kind '${kind}' tidak dikenal`);
+    // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
+    // `${kind}` mentah di pesan error meledakkan TypeError SEBELUM fail()
+    // sempat dilempar kalau kind berupa Symbol (atau mengeksekusi toString
+    // pemanggil kalau berupa objek) -- diganti representasi aman (typeof
+    // untuk non-string, nilai asli untuk string).
+    if (!GOAL_KINDS.has(kind)) fail(REASONS.INVALID_RECORD, `kind '${typeof kind === "string" ? kind : typeof kind}' tidak dikenal`);
     if (!origin || !ORIGIN_KINDS.has(origin.kind)) fail(REASONS.INVALID_RECORD, "origin.kind tidak dikenal");
     if (!PRIORITY_CLASSES.has(priorityClass)) fail(REASONS.INVALID_RECORD, "priorityClass tidak dikenal");
 

@@ -86,17 +86,25 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
     // hanya dari nilai primitif dibaca lewat descriptor (tidak pernah
     // memanggil toString/toJSON/getter pemanggil), sama seperti pola
     // getOwnPropertyDescriptor yang sudah dipakai di lane lain.
-    function evidenceRefIdentity(evidenceRef) {
+    // Bug review independen (audit putaran-25, AUD25-P2-2): versi
+    // putaran-24 hanya membedakan SATU level -- nilai bersarang (objek di
+    // dalam objek) diruntuhkan ke tag tipe "object" yang sama, jadi
+    // evidenceRef berbeda dengan nilai bersarang berbeda tetap tergabung
+    // (undercount korroborasi tetap ada, hanya di kedalaman >1). Sekarang
+    // rekursif dengan batas kedalaman kecil (5, sudah lebih dari cukup
+    // untuk evidenceRef nyata) supaya tidak jadi vektor DoS baru.
+    function evidenceRefIdentity(evidenceRef, depth = 0) {
         if (evidenceRef === null || evidenceRef === undefined) return "";
         const t = typeof evidenceRef;
         if (t === "string" || t === "number" || t === "boolean") return `${t}:${evidenceRef}`;
         if (t !== "object") return t;
-        return Reflect.ownKeys(evidenceRef).filter(k => typeof k !== "symbol").sort().map(k => {
+        if (depth >= 5) return "depth-limit";
+        const keys = Reflect.ownKeys(evidenceRef).filter(k => typeof k !== "symbol").sort();
+        if (keys.length === 0) return "object:{}";
+        return keys.map(k => {
             const desc = Object.getOwnPropertyDescriptor(evidenceRef, k);
             const v = (desc && !desc.get && !desc.set) ? desc.value : undefined;
-            const vt = typeof v;
-            const vs = (vt === "string" || vt === "number" || vt === "boolean") ? String(v) : vt;
-            return `${String(k)}=${vs}`;
+            return `${String(k)}=${evidenceRefIdentity(v, depth + 1)}`;
         }).join("&");
     }
 
@@ -177,7 +185,9 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         // enforceSourceRate/targetKey -- signal dengan workKind cacat tetap
         // menagih kuota rate sumbernya sebelum ditolak. Divalidasi di sini
         // dulu, sebelum efek samping apa pun.
-        if (!WORK_KINDS.has(workKind)) fail(REASONS.INVALID_RECORD, `workKind '${workKind}' tidak dikenal`);
+        // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
+        // `${workKind}` mentah meledakkan TypeError untuk Symbol.
+        if (!WORK_KINDS.has(workKind)) fail(REASONS.INVALID_RECORD, `workKind '${typeof workKind === "string" ? workKind : typeof workKind}' tidak dikenal`);
         // Bug review independen (audit putaran-12, AUD12-P2-4): perbaikan
         // putaran-11 memindahkan enforceSourceRate ke SETELAH makeSignal,
         // tapi targetKey (validator KEDUA di jalur ini, menolak subjectRef
@@ -275,7 +285,10 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
 
     function preempt(targetId) {
         const t = targets.get(targetId);
-        if (!t) fail(REASONS.UNKNOWN_TARGET, `target '${targetId}' tidak ditemukan`);
+        // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
+        // `${targetId}` mentah meledakkan TypeError untuk Symbol; `targets.get()`
+        // sendiri (pencarian Map) tidak pernah mengeksekusi apa pun.
+        if (!t) fail(REASONS.UNKNOWN_TARGET, `target '${typeof targetId === "string" ? targetId : typeof targetId}' tidak ditemukan`);
         if (t.preemptions >= bounds.MAX_PREEMPTIONS) {
             fail(REASONS.PREEMPTION_LIMIT_EXCEEDED, `target sudah mencapai batas preemption (${bounds.MAX_PREEMPTIONS})`);
         }
@@ -286,7 +299,10 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
 
     function complete(targetId) {
         const t = targets.get(targetId);
-        if (!t) fail(REASONS.UNKNOWN_TARGET, `target '${targetId}' tidak ditemukan`);
+        // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
+        // `${targetId}` mentah meledakkan TypeError untuk Symbol; `targets.get()`
+        // sendiri (pencarian Map) tidak pernah mengeksekusi apa pun.
+        if (!t) fail(REASONS.UNKNOWN_TARGET, `target '${typeof targetId === "string" ? targetId : typeof targetId}' tidak ditemukan`);
         const next = Object.freeze({ ...t, state: "DONE", completedAt: now() });
         targets.set(targetId, next);
         return next;
