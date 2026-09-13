@@ -49,6 +49,13 @@ function neighbors(state, entityId, kinds = null, depth = 1) {
 }
 
 function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 262144 }) {
+    // Bug review independen (audit putaran-20, AUD20-P2-2): default parameter
+    // hanya berlaku untuk `undefined` -- `budget: null` eksplisit lolos lalu
+    // meledakkan `budget.nodes`/`budget.bytes` jadi TypeError mentah.
+    if (!budget || typeof budget !== "object" ||
+        !Number.isFinite(budget.nodes) || !Number.isFinite(budget.bytes)) {
+        budget = { nodes: 512, bytes: 262144 };
+    }
     const boundedDepth = Math.min(depth, BOUNDS.NEIGHBORS_MAX_DEPTH);
     const nodeIds = new Set(seeds);
     let frontier = [...seeds];

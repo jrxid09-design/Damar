@@ -36,8 +36,14 @@ function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, n
         entityId, entityKind: entityKind.slice(0, 64),
         labels: validateLabels(labels),
         firstSeenAt: nowMs, lastSeenAt: nowMs,
+        // Bug review independen (audit putaran-20, AUD20-P2-2): elemen
+        // externalRefs tidak dijaga -- elemen `null` meledakkan `r.system`
+        // jadi TypeError mentah alih-alih INVALID_RECORD.
         externalRefs: Object.freeze((externalRefs ?? []).slice(0, 32)
-            .map(r => Object.freeze({ system: String(r.system).slice(0, 64), id: String(r.id).slice(0, 200) }))),
+            .map(r => {
+                if (!r || typeof r !== "object") fail(REASONS.INVALID_RECORD, "externalRefs elemen wajib objek");
+                return Object.freeze({ system: String(r.system).slice(0, 64), id: String(r.id).slice(0, 200) });
+            })),
         source
     });
 }
@@ -122,8 +128,13 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
     // tersimpan. Sekarang lewat buildSafeBeliefValue yang sama.
     return Object.freeze({
         hypothesisId, subject: buildSafeBeliefValue(subject), attribute,
-        candidateValues: Object.freeze(candidateValues.slice(0, 16).map(c =>
-            Object.freeze({ value: buildSafeBeliefValue(c.value), weight: clamp01(Number(c.weight)) }))),
+        // Bug review independen (audit putaran-20, AUD20-P2-2): elemen
+        // candidateValues tidak dijaga -- elemen `null` meledakkan `c.value`
+        // jadi TypeError mentah alih-alih INVALID_RECORD.
+        candidateValues: Object.freeze(candidateValues.slice(0, 16).map(c => {
+            if (!c || typeof c !== "object") fail(REASONS.INVALID_RECORD, "candidateValues elemen wajib objek");
+            return Object.freeze({ value: buildSafeBeliefValue(c.value), weight: clamp01(Number(c.weight)) });
+        })),
         discriminatingProbe: buildSafeBeliefValue(discriminatingProbe), expiresAt
     });
 }

@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 
 const { createSelfModel } = require("../../../src/cognition/selfmodel");
+const { BOUNDS } = require("../../../src/cognition/selfmodel/bounds");
 
 /**
  * W7-L1 adversarial suite — the twelve attacks from
@@ -107,6 +108,22 @@ test("SM-repair-5: a replayed evidenceRef is a no-op, not a fabricated extra att
     const a = sm.assess("cap.x");
     assert.equal(a.successWindow.attempts, 2, "a replayed evidenceRef must not be counted as a new attempt");
     assert.equal(a.successWindow.successes, 1, "a replayed evidenceRef must not inflate successes");
+});
+
+test("SM-repair-8: replaying an evidenceRef already evicted from the 32-entry history window is still a no-op, not a fabricated success (independent audit AUD20-P2-1)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const sm = await createSelfModel({ capabilityRegistry: registry });
+    sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "SUCCESS", at: "t0", evidenceRef: "E0" });
+    for (let i = 0; i < BOUNDS.MAX_SUCCESS_WINDOW; i++) {
+        sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "FAILED", at: `t${i + 1}`, evidenceRef: `F${i}` });
+    }
+    const before = sm.assess("cap.x");
+    assert.equal(before.successWindow.successes, 0, "E0 must have scrolled out of the 32-entry history by now");
+    // replay E0 — a naive dedup scoped only to `history` would see it as new
+    sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "SUCCESS", at: "t0", evidenceRef: "E0" });
+    const after = sm.assess("cap.x");
+    assert.equal(after.successWindow.successes, 0, "replaying an evicted evidenceRef must not fabricate a success (DEGRADED must not become USABLE)");
+    assert.equal(after.successWindow.attempts, BOUNDS.MAX_SUCCESS_WINDOW, "replay must not grow the window past its cap either");
 });
 
 test("SM-A2: stale availability is marked STALE after TTL, never silently USABLE", async () => {

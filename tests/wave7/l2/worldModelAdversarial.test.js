@@ -457,6 +457,53 @@ test("WM-repair-34: replaying an already-used relationId is rejected, not silent
     assert.equal(inState.to, "e2");
 });
 
+test("WM-repair-35: declareHypothesis rejects a null candidateValues element as INVALID_RECORD, not a raw TypeError (independent audit AUD20-P2-2)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const iso = new Date(Date.now() + 60_000).toISOString();
+    assertThrowsReason(() => wm.declareHypothesis({
+        hypothesisId: "h1", subject: { entityId: "e1" }, attribute: "cfg",
+        candidateValues: [{ value: "v1", weight: 0.5 }, null], expiresAt: iso
+    }), "INVALID_RECORD");
+});
+
+test("WM-repair-36: declareEntity rejects a null externalRefs element as INVALID_RECORD, not a raw TypeError (independent audit AUD20-P2-2)", async () => {
+    const wm = await createWorldModel();
+    assertThrowsReason(() => wm.declareEntity({
+        entityId: "e1", entityKind: "device", source: "s", externalRefs: [null]
+    }), "INVALID_RECORD");
+});
+
+test("WM-repair-37: subgraph() with an explicit null budget falls back to the default instead of throwing a raw TypeError (independent audit AUD20-P2-2)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const sub = wm.subgraph(["e1"], 2, null);
+    assert.ok(sub.entities.some(e => e.entityId === "e1"));
+});
+
+test("WM-repair-38: entity eviction stays fast at scale -- relationDegree() must not rescan all relations per candidate (independent audit AUD20-P2-3)", async () => {
+    const ENTITY_COUNT = 3000;
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_ENTITIES: ENTITY_COUNT, MAX_ENTITIES_PER_SOURCE: ENTITY_COUNT + 500, MAX_RELATIONS: ENTITY_COUNT * 4 } });
+    for (let i = 0; i < ENTITY_COUNT; i++) {
+        wm.declareEntity({ entityId: `e${i}`, entityKind: "device", source: "s" });
+    }
+    // ring topology: every entity has degree 2, forcing relationDegree() to
+    // do real work for every candidate instead of trivially returning 0.
+    for (let i = 0; i < ENTITY_COUNT; i++) {
+        wm.declareRelation({ relationId: `r${i}`, kind: "near", from: `e${i}`, to: `e${(i + 1) % ENTITY_COUNT}` });
+    }
+    const start = process.hrtime.bigint();
+    // each call is already at MAX_ENTITIES, so every declareEntity below
+    // forces exactly one full eviction scan over ENTITY_COUNT candidates.
+    for (let i = 0; i < 300; i++) {
+        wm.declareEntity({ entityId: `new${i}`, entityKind: "device", source: "s" });
+    }
+    const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
+    // O(E x R) (the pre-fix behavior) at this scale is minutes, not
+    // milliseconds -- a generous budget still catches a real regression.
+    assert.ok(elapsedMs < 5000, `300 evictions at E=R=${ENTITY_COUNT} took ${elapsedMs}ms, expected well under 5000ms with O(1) relationDegree()`);
+});
+
 test("WM-repair-17: replaying a recordId already consumed by an earlier SUPERSEDE is a no-op, not a fresh CONTEST (independent audit AUD11-P2-7)", async () => {
     const clock = manualClock(0);
     const wm = await createWorldModel({ clock });

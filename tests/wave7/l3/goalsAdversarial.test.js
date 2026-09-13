@@ -499,6 +499,20 @@ test("GL-repair-34: proposing a new child of a goal that is itself the retention
     assert.equal(ge.childCountsSize(), 0, "childCounts must not resurrect a key for the goal just evicted in this same call");
 });
 
+test("GL-repair-35: createPlan rejects an explicit null assumptions container as INVALID_RECORD, not a raw TypeError (independent audit AUD20-P2-2)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    assertThrowsReason(() => ge.createPlan({ goalRef: g.goalId, steps: [], assumptions: null }), "INVALID_RECORD");
+});
+
+test("GL-repair-36: createTask rejects explicit null preconditions/postconditions containers as INVALID_RECORD, not a raw TypeError (independent audit AUD20-P2-2)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+    assertThrowsReason(() => ge.createTask({ planRef: p.planId, order: 1, intentTemplate: { op: "noop" }, preconditions: null }), "INVALID_RECORD");
+    assertThrowsReason(() => ge.createTask({ planRef: p.planId, order: 2, intentTemplate: { op: "noop" }, postconditions: null }), "INVALID_RECORD");
+});
+
 function jsonStore() {
     const kv = new Map();
     return {
