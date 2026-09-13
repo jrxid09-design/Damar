@@ -322,6 +322,25 @@ test("WM-repair-25: replaying a CONTEST challenger recordId is still deduped aft
     assert.equal(wm.openContradictions().map(c => c.challengerRecordId).includes("c2"), false);
     const replay = wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "c2", value: "b", sensor: { sensorId: "s2" } });
     assert.equal(replay.case, "DUPLICATE", "a challenger recordId already consumed must stay deduped even after its contradiction set overflows");
+});
+
+test("WM-repair-26: replaying a CONTEST challenger recordId stays deduped even after 32+ other records applied AND the contradiction set overflows (independent audit AUD15-P1-1)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_OPEN_CONTRADICTION_SETS: 1 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    const base = { attribute: "status", tier: "T1" };
+    wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "INCUMBENT-1", value: "a", sensor: { sensorId: "s1" }, observedAt: new Date(1000).toISOString() });
+    wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "c2", value: "b", sensor: { sensorId: "s2" }, observedAt: new Date(1001).toISOString() });
+    // Push appliedRecordIds well past its 32-entry window with legitimate REINFORCE traffic (same incumbent value "a", unrelated recordIds).
+    for (let i = 0; i < 40; i++) {
+        wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: `r${i}`, value: "a", sensor: { sensorId: "s1" }, observedAt: new Date(2000 + i).toISOString() });
+    }
+    wm.ingestObservation({ ...base, subject: { entityId: "e2" }, observationId: "INCUMBENT-2", value: "a", sensor: { sensorId: "s1" }, observedAt: new Date(1000).toISOString() });
+    wm.ingestObservation({ ...base, subject: { entityId: "e2" }, observationId: "c3", value: "b", sensor: { sensorId: "s3" }, observedAt: new Date(1001).toISOString() });
+    assert.equal(wm.openContradictions().map(c => c.challengerRecordId).includes("c2"), false, "c2's set must have overflowed out of the bounded list");
+    const replay = wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "c2", value: "b", sensor: { sensorId: "s2" }, observedAt: new Date(1001).toISOString() });
+    assert.equal(replay.case, "DUPLICATE", "a challenger recordId must stay deduped past the 32-entry appliedRecordIds window");
+    assert.equal(wm.openContradictions().map(c => c.challengerRecordId).includes("c3"), true, "the still-legitimate c3 contradiction must not be evicted by the replay");
     assert.equal(wm.openContradictions().map(c => c.challengerRecordId).includes("c3"), true, "the still-legitimate c3 contradiction must not be evicted by the replay");
 });
 

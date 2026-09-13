@@ -185,7 +185,20 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
     // memalsukan status kontradiksi belief yang sudah tidak kontroversial.
     // `appliedRecordIds` adalah riwayat SEMUA recordId yang pernah diterapkan
     // ke belief ini, tidak pernah direset oleh SUPERSEDE.
-    if ((existing.appliedRecordIds ?? existing.supportedBy).includes(record.recordId)) {
+    // Bug review independen (audit putaran-15, AUD15-P1-1): `appliedRecordIds`
+    // dibatasi ke MAX_OBSERVATIONS_RETAINED_PER_BELIEF (32) -- klaim komentar
+    // putaran-14 "riwayat permanen, tidak pernah direset overflow" SALAH untuk
+    // recordId CONTEST: setelah 32 record lain diterapkan, recordId challenger
+    // jatuh dari jendela ini, DAN jika contradiction set-nya sendiri sudah
+    // ter-overflow dari daftar `contradictions` (cek sekunder di
+    // applyRecordToBelief), replay recordId yang sama lolos KEDUA mekanisme
+    // dedup dan membuka CONTEST baru, mengevict kontradiksi sah lain.
+    // `contestedRecordIds` adalah riwayat KHUSUS challenger CONTEST dengan
+    // horizon terpisah (jauh lebih besar, disamakan dengan
+    // MAX_OPEN_CONTRADICTION_SETS) sehingga tidak pernah lebih sempit dari
+    // horizon retensi contradiction set yang menjadi tempatnya diperiksa.
+    if ((existing.appliedRecordIds ?? existing.supportedBy).includes(record.recordId) ||
+        (existing.contestedRecordIds ?? []).includes(record.recordId)) {
         return { case: "DUPLICATE", belief: existing, contradiction: null };
     }
 
@@ -240,6 +253,12 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
                 value: record.value, revision: existing.revision + 1,
                 supportedBy: Object.freeze([record.recordId]),
                 appliedRecordIds: nextAppliedRecordIds,
+                // Bug review independen (audit putaran-15, AUD15-P1-1):
+                // cabang ini tidak men-spread `...existing` -- tanpa baris
+                // ini, contestedRecordIds akan hilang diam-diam pada setiap
+                // SUPERSEDE, membuka kembali celah replay-CONTEST yang sama
+                // yang barusan ditutup.
+                contestedRecordIds: existing.contestedRecordIds ?? Object.freeze([]),
                 contradictedBy: Object.freeze([]),
                 contradictionSetId: null,
                 tier: record.tier, decayPolicy: existing.decayPolicy,

@@ -469,6 +469,17 @@ test("GL-repair-31: a rejected proposeGoal call must not evict an existing termi
     assert.equal(ge.creationTimestampsSize(), rateBefore, "a rejected proposal must not charge the creation-rate budget");
 });
 
+test("GL-repair-32: a valid proposal rejected only by retention pressure (no terminal goal to evict) must not charge the creation-rate budget for its origin.kind (independent audit AUD15-P2-1)", async () => {
+    const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_GOALS_RETAINED: 1 } });
+    ge.proposeGoal(baseGoalSpec({ goalId: "G1", origin: { kind: "OWNER", ref: "owner-1" } })); // fills retention, stays non-terminal
+    const before = ge.creationTimestampsSize();
+    assert.throws(() => ge.proposeGoal({
+        title: "t2", kind: "SELF_PROPOSED", origin: { kind: "SELF" },
+        successCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" }
+    }), /retensi/);
+    assert.equal(ge.creationTimestampsSize(), before, "a retention-rejected (never-stored) proposal must not create/charge a new origin.kind rate key");
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

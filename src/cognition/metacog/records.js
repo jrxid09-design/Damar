@@ -24,6 +24,12 @@ function makeAssessment({ assessmentId, subjectRef, claim, evidenceQuality, nowM
 
 function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = { tokens: 0, ms: 0 }, bounds }) {
     if (!TRIGGERS.has(trigger)) fail(REASONS.INVALID_RECORD, `trigger '${trigger}' tidak dikenal`);
+    // Bug review independen (audit putaran-15, AUD15-P2-3): default `= []`
+    // hanya berlaku untuk undefined, bukan null eksplisit -- findings:null/
+    // proposals:null lolos lalu melempar TypeError mentah (bukan
+    // INVALID_RECORD) di `.length`/`for...of`.
+    if (findings !== undefined && !Array.isArray(findings)) fail(REASONS.INVALID_RECORD, "findings wajib array");
+    if (proposals !== undefined && !Array.isArray(proposals)) fail(REASONS.INVALID_RECORD, "proposals wajib array");
     for (const p of proposals) {
         if (!PROPOSAL_KINDS.has(p.kind)) fail(REASONS.INVALID_RECORD, `proposal.kind '${p.kind}' tidak dikenal`);
     }

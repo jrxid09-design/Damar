@@ -70,6 +70,13 @@ test("SM-repair-2: assess()'s successWindow.history is frozen, mutating it canno
     assert.equal(a2.successWindow.attempts, 2);
 });
 
+test("SM-repair-6: a store whose getKv() throws (corrupt/unreadable KV) starts with an empty successWindow instead of aborting createSelfModel entirely (independent audit AUD15-P2-2)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const brokenStore = { getKv: async () => { throw new Error("STORE_DOWN"); }, putKv: async () => {} };
+    const sm = await createSelfModel({ capabilityRegistry: registry, store: brokenStore });
+    assert.equal(sm.assess("cap.x").selfBelief, "UNKNOWN");
+});
+
 test("SM-repair-3: a BigInt in ingestOutcome's 'at' is rejected, not accepted and left to crash persist() (independent audit AUD10-P2-1)", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const sm = await createSelfModel({ capabilityRegistry: registry });
