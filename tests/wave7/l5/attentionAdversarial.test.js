@@ -197,6 +197,17 @@ test("AT-repair-31: targetKey reads subjectRef.entityId exactly once (independen
     assert.equal(key, "entity:e1::PERCEIVE");
 });
 
+test("AT-repair-37: a revoked-Proxy OBJECT evidenceRef (and subjectRef) fails closed with a controlled domain reason instead of a raw TypeError (independent audit AUD41-P2-3)", async () => {
+    const ae = await createAttentionEconomy();
+    const r1 = Proxy.revocable({ originKind: "SAFETY_MONITOR" }, {});
+    r1.revoke();
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s1", subjectRef: { entityId: "e" }, evidenceRef: r1.proxy }, "PERCEIVE"), "EXECUTABLE_MATERIAL_REJECTED");
+
+    const r2 = Proxy.revocable({ entityId: "e" }, {});
+    r2.revoke();
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s2", subjectRef: r2.proxy }, "PERCEIVE"), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
 test("AT-repair-36: assignPriorityClass never reads originKind/ownerTrustVerified off a function evidenceRef -- a Proxy-wrapped function's trap never fires, and a revoked Proxy never raw-throws (independent audit AUD40-P2-1)", async () => {
     const ae = await createAttentionEconomy();
     const seen = [];

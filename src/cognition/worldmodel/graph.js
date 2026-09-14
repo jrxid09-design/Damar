@@ -98,8 +98,20 @@ function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 26
         maxBytes = 262144;
     }
     const boundedDepth = Math.min(depth, BOUNDS.NEIGHBORS_MAX_DEPTH);
-    const nodeIds = new Set(seeds);
-    let frontier = [...seeds];
+    // Bug review independen (audit putaran-41, AUD41-P2-1): `Array.isArray(seeds)`
+    // di atas hanya menjaga KONTAINERnya -- `new Set(seeds)`/`[...seeds]`
+    // di bawah tetap mengonsumsi `seeds` lewat protokol iterator
+    // (`Symbol.iterator`), yang lolos dari guard Array.isArray untuk
+    // sebuah array/Proxy dengan `Symbol.iterator` yang ADA tapi bukan
+    // function, meledakkan TypeError mentah dari API publik ini. Dibaca
+    // lewat loop indeks eksplisit (sama seperti buildSafeArray) yang
+    // tidak pernah menyentuh Symbol.iterator sama sekali; `nodeIds`/
+    // `frontier` lalu dibangun dari salinan array POLOS ini.
+    const seedList = [];
+    const seedsLen = seeds.length;
+    for (let i = 0; i < seedsLen; i++) seedList.push(seeds[i]);
+    const nodeIds = new Set(seedList);
+    let frontier = seedList.slice();
     let truncated = false;
 
     for (let d = 0; d < boundedDepth && nodeIds.size < maxNodes; d++) {

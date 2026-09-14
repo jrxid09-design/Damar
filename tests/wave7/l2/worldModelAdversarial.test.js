@@ -433,6 +433,21 @@ test("WM-repair-70: declareEntity/declareHypothesis reject sparse (hole-bearing)
     assertThrowsReason(() => wm.declareHypothesis({ hypothesisId: "h1", subject: { entityId: "e2" }, attribute: "a", candidateValues: new Array(1), expiresAt: new Date(9e12).toISOString() }), "INVALID_RECORD");
 });
 
+test("WM-repair-72: subgraph rejects a seeds array with a non-callable Symbol.iterator instead of raw-throwing (independent audit AUD41-P2-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const seeds = ["e1"];
+    seeds[Symbol.iterator] = 42;
+    assert.doesNotThrow(() => wm.subgraph(seeds), "subgraph must consume seeds by index, never via the iterator protocol");
+});
+
+test("WM-repair-73: declareEntity with a revoked-Proxy labels object fails closed with a domain reason instead of raw-throwing (independent audit AUD41-P2-3)", async () => {
+    const wm = await createWorldModel();
+    const { proxy, revoke } = Proxy.revocable({ a: "x" }, {});
+    revoke();
+    assertThrowsReason(() => wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s", labels: proxy }), "INVALID_RECORD");
+});
+
 test("WM-repair-71: declareEntity's labels values are read via property descriptor, so an accessor label value is never invoked (independent audit AUD40-ADV-2)", async () => {
     const wm = await createWorldModel();
     let called = 0;

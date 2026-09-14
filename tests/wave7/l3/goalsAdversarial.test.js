@@ -719,6 +719,21 @@ test("GL-repair-54: a non-string, falsy parentGoalId (e.g. 0n) is rejected, not 
     await assert.doesNotReject(() => ge.persist());
 });
 
+test("GL-repair-59: createPlan does not re-read a caller array's length each iteration, so a growing-length Proxy cannot hang the loop (independent audit AUD41-P2-2)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    let reads = 0;
+    const proxy = new Proxy([{ a: 1 }], {
+        get(t, k, r) {
+            if (k === "length") { reads++; return reads; }
+            if (typeof k === "string" && /^[0-9]+$/.test(k)) return { a: 1 };
+            return Reflect.get(t, k, r);
+        }
+    });
+    ge.createPlan({ goalRef: g.goalId, steps: proxy });
+    assert.ok(reads <= 2, "length must be read once (cached), got " + reads + " reads");
+});
+
 test("GL-repair-58: createPlan/createTask reject sparse (hole-bearing) steps/preconditions arrays, not just explicit null/undefined elements (independent audit AUD40-P2-3)", async () => {
     const ge = await createGoalEngine();
     const g = ge.proposeGoal(baseGoalSpec());
