@@ -23,7 +23,11 @@ const ADMISSIBLE_OUTCOME_TIERS = new Set(["T1", "T2"]);
 async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds = BOUNDS } = {}) {
 
     const reviews = new Map();
-    const calibrationRecords = [];
+    // Bug review independen (audit putaran-37, AUD37-ADV-1): Map (bukan
+    // array) supaya cek tabrakan recordId dan penghapusan tertua di
+    // recordCalibration keduanya O(1), bukan O(n) per panggilan. Map
+    // mempertahankan urutan penyisipan sama seperti array untuk FIFO.
+    const calibrationRecords = new Map(); // recordId -> record
     const lastReviewBySubjectTrigger = new Map(); // `${subjectKey}::${trigger}` -> reviewId
     let budgetWindowStartMs = clock.nowMs();
     let tokensSpentThisWindow = 0;
@@ -76,12 +80,23 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         // meledakkan TypeError, meniadakan jaminan single-read yang sudah
         // ditegakkan untuk `trigger` di fungsi yang sama (putaran-24).
         // Dibaca SEKALI ke variabel lokal, dipakai untuk KEDUA pemeriksaan.
+        // Bug review independen (audit putaran-37, AUD37-P2-1): perbaikan
+        // putaran-28 di atas membaca `relationId` TANPA SYARAT bahkan
+        // ketika `entityId` sudah valid -- short-circuit ASLI (baca
+        // relationId HANYA kalau entityId gagal) hilang, getter
+        // relationId pemanggil yang sebelumnya tidak pernah tersentuh jadi
+        // tereksekusi (kelas yang sama dengan AUD36-P2-2 di worldmodel/
+        // attention). Dikembalikan: relationId hanya dibaca kalau entityId
+        // terbukti bukan string.
         let subjectKey;
         const eid = subjectRef?.entityId;
-        const rid = subjectRef?.relationId;
-        if (typeof eid === "string") subjectKey = `entity:${eid}`;
-        else if (typeof rid === "string") subjectKey = `relation:${rid}`;
-        else fail(REASONS.INVALID_RECORD, "subjectRef wajib { entityId } atau { relationId } string");
+        if (typeof eid === "string") {
+            subjectKey = `entity:${eid}`;
+        } else {
+            const rid = subjectRef?.relationId;
+            if (typeof rid === "string") subjectKey = `relation:${rid}`;
+            else fail(REASONS.INVALID_RECORD, "subjectRef wajib { entityId } atau { relationId } string");
+        }
         // Bug review independen (audit putaran-24, AUD24-P2-2): `trigger`
         // dulu langsung diinterpolasi ke debounceKey (mengeksekusi
         // toString milik pemanggil) SEBELUM makeReview sempat memvalidasi
@@ -236,17 +251,25 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         if (typeof outcomeRef !== "string" || !outcomeRef) {
             fail(REASONS.INVALID_OUTCOME, "outcomeRef wajib ada dan bisa diselesaikan");
         }
-        if (recordId && calibrationRecords.some(r => r.recordId === recordId)) {
+        // Bug review independen (audit putaran-37, AUD37-ADV-1): cek
+        // tabrakan `.some()` dan pemangkasan `.shift()` sama-sama O(n) per
+        // panggilan -- pada MAX_CALIBRATION_RECORDS (100000), mengisi+
+        // membuang penuh berarti ~10^10 perbandingan. `calibrationRecords`
+        // (Map, urutan penyisipan sama seperti array untuk FIFO) memberi
+        // cek tabrakan dan penghapusan tertua O(1).
+        if (recordId && calibrationRecords.has(recordId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `recordId kalibrasi '${typeof recordId === "string" ? recordId : typeof recordId}' sudah ada`);
         }
         const record = makeCalibrationRecord({ ...specRest, outcomeRef, recordId: recordId ?? crypto.randomUUID() });
-        calibrationRecords.push(record);
-        if (calibrationRecords.length > bounds.MAX_CALIBRATION_RECORDS) calibrationRecords.shift();
+        calibrationRecords.set(record.recordId, record);
+        if (calibrationRecords.size > bounds.MAX_CALIBRATION_RECORDS) {
+            calibrationRecords.delete(calibrationRecords.keys().next().value);
+        }
         return record;
     }
 
     function getReview(reviewId) { return reviews.get(reviewId) ?? null; }
-    function calibrationCount() { return calibrationRecords.length; }
+    function calibrationCount() { return calibrationRecords.size; }
     function reviewCount() { return reviews.size; }
 
     return Object.freeze({
