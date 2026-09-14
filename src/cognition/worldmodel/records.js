@@ -206,7 +206,12 @@ function makeRelation({ relationId, kind, from, to, directed = true, strength = 
 }
 
 /** W-2/W-3: tier admissible, sensor.sensorId + observedAt wajib ada. */
-function makeObservation({ observationId, subject, attribute, value, sensor, frame = null, tier, observedAt }) {
+// Bug review independen (audit putaran-67, sapuan preventif berdasarkan
+// pola eskalasi putaran-65/66): sibling PERSIS dari W7R66-P2-2's
+// makeHypothesis -- buildSafeBeliefValue(subject) di bawah tidak pernah
+// menerima `bounds`. Diperbaiki lebih dulu di sini, bukan menunggu
+// dilaporkan ulang seperti pola dua putaran sebelumnya.
+function makeObservation({ observationId, subject, attribute, value, sensor, frame = null, tier, observedAt, bounds = BOUNDS }) {
     if (typeof observationId !== "string" || !observationId) fail(REASONS.INVALID_RECORD, "observationId wajib string");
     // Bug review independen (audit putaran-32, AUD32-P2-3): `subject.entityId`/
     // `subject.relationId` sebelumnya divalidasi lewat `subject.entityId`/
@@ -226,7 +231,7 @@ function makeObservation({ observationId, subject, attribute, value, sensor, fra
     // relationId diturunkan dari salinan aman itu dengan short-circuit
     // (relationId hanya dibaca kalau entityId terbukti bukan string).
     if (!subject) fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
-    const safeSubject = buildSafeBeliefValue(subject);
+    const safeSubject = buildSafeBeliefValue(subject, 0, undefined, undefined, bounds);
     const validEntity = typeof safeSubject?.entityId === "string";
     if (!validEntity && typeof safeSubject?.relationId !== "string") {
         fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");

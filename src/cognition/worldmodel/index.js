@@ -452,7 +452,9 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         } catch {
             fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
         }
-        const observation = makeObservation({ ...specRest, observationId: observationId ?? crypto.randomUUID() });
+        // Bug review independen (audit putaran-67, sapuan preventif):
+        // `bounds` diteruskan eksplisit, sesudah spread.
+        const observation = makeObservation({ ...specRest, observationId: observationId ?? crypto.randomUUID(), bounds });
         const entityId = observation.subject.entityId;
         if (entityId && !entities.has(entityId)) {
             fail(REASONS.UNKNOWN_ENTITY, "observasi merujuk entitas yang belum dideklarasikan");

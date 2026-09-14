@@ -153,6 +153,15 @@ test("WM-repair-102: declareHypothesis honors a caller-sanctioned override of MA
     }), "BOUND_EXCEEDED");
 });
 
+test("WM-repair-103: ingestObservation's makeObservation-level subject pre-check honors a caller-sanctioned override of MAX_VALUE_NODES -- buildSafeBeliefValue(subject) inside makeObservation never received bounds, the exact sibling of W7R66-P2-2's makeHypothesis fix in the same file, fixed preemptively rather than waiting for a third escalation round (self-discovered sweep, round 67)", async () => {
+    const wm = await createWorldModel({ bounds: { MAX_VALUE_NODES: 0 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "thing", source: "s" });
+    assertThrowsReason(() => wm.ingestObservation({
+        observationId: "o1", subject: { entityId: "e1" }, attribute: "cfg", value: "plain",
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString()
+    }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
 test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
