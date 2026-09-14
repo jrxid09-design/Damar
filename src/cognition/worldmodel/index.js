@@ -23,7 +23,7 @@ const { REASONS, fail } = require("./errors");
 const { BOUNDS, SCHEMA_VERSION } = require("./bounds");
 const { laws } = require("./laws");
 const { makeEntity, makeRelation, makeObservation, makeHypothesis } = require("./records");
-const { DEFAULT_DECAY_POLICY, applyRevision, appendBounded } = require("./beliefAlgebra");
+const { DEFAULT_DECAY_POLICY, applyRevision, appendBounded, buildSafeBeliefValue } = require("./beliefAlgebra");
 const { openContradictionSet, resolveContradictionSet } = require("./contradiction");
 const graphOps = require("./graph");
 const { beliefKey, subjectKeyOf, query: queryBelief } = require("./query");
@@ -197,12 +197,14 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // Bug review independen (audit putaran-22, F-4): spec null/non-objek
         // meledakkan `spec.relationId` jadi TypeError mentah.
         if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
-        // Bug review independen (audit putaran-30, AUD30-P2-1): `spec.relationId`
-        // dibaca sekali di sini untuk cek tabrakan lalu dibaca LAGI di
-        // dalam makeRelation (destructuring) -- accessor stateful bisa
-        // mengembalikan id berbeda di kedua baca, melewati dedup. Dibaca
-        // SEKALI ke lokal, dipaksakan eksplisit ke makeRelation.
-        const relationId = spec.relationId;
+        // Bug review independen (audit putaran-30, AUD30-P2-1; putaran-35,
+        // AUD35-ADV-2): `spec.relationId` dulu dibaca sekali ke lokal untuk
+        // cek tabrakan, tapi `{...spec}` di bawah masih men-spread `spec`
+        // ITU SENDIRI (bukan sisa tanpa relationId) -- spread itu sendiri
+        // membaca getter lagi (override eksplisit `relationId` sesudahnya
+        // cuma membuang hasil baca kedua itu). Dikeluarkan lewat
+        // destructuring supaya spread tidak menyentuhnya lagi.
+        const { relationId, ...specRest } = spec;
         // Bug review independen (audit putaran-19, AUD19-A3): sapuan dedup
         // replay id putaran-9/10/13 mencakup observationId/declarationId/
         // hypothesisId/goalId/dll, tapi tidak pernah mencakup relationId --
@@ -211,7 +213,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         if (relationId && relations.has(relationId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `relationId '${typeof relationId === "string" ? relationId : typeof relationId}' sudah ada`);
         }
-        const relation = makeRelation({ ...spec, relationId });
+        const relation = makeRelation({ ...specRest, relationId });
         if (!entities.has(relation.from) || !entities.has(relation.to)) {
             fail(REASONS.UNKNOWN_ENTITY, "relasi merujuk entitas yang belum dideklarasikan");
         }
@@ -223,8 +225,22 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function applyRecordToBelief(record) {
-        const subjectKey = subjectKeyOf(record.subject);
-        const key = beliefKey(record.subject, record.attribute);
+        // Bug review independen (audit putaran-35, AUD35-P2-5): subjectKeyOf/
+        // beliefKey dulu membaca `record.subject` lewat akses properti biasa
+        // (trap `get` untuk Proxy), sementara applyRevision (di bawah)
+        // mengambil subjek TERSIMPAN lewat buildSafeBeliefValue (trap
+        // `getOwnPropertyDescriptor`) -- Proxy yang membuat kedua trap itu
+        // tidak konsisten (get -> "e1", descriptor -> "e2") membuat kunci
+        // belief dan subjek tersimpan menunjuk ke ENTITAS BERBEDA;
+        // reconcileBeliefContradictionPointer lalu gagal menemukan belief-nya
+        // sendiri pasca-RESOLVE, membuat query() melapor contested:true
+        // selamanya. Disaring SEKALI di sini SEBELUM kunci dihitung; subjek
+        // sanitasi yang sama (bukan Proxy asli lagi) dipakai untuk kunci
+        // MAUPUN diteruskan ke applyRevision (yang boleh menyaringnya lagi
+        // dengan aman -- objek polos, tidak ada lagi trap untuk berbeda).
+        const safeSubject = buildSafeBeliefValue(record.subject);
+        const subjectKey = subjectKeyOf(safeSubject);
+        const key = beliefKey(safeSubject, record.attribute);
         const existing = beliefs.get(key);
 
         // Bug review independen (audit putaran-14, AUD14-P1-2): kompaksi
@@ -236,7 +252,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // sekarang dipanggil DULU; kompaksi hanya terjadi setelah belief
         // yang akan disimpan terbukti valid.
         const { case: caseName, belief, contradiction } = applyRevision({
-            existing, record: { ...record, subjectKey }, nowMs: now(), decayPolicy: DEFAULT_DECAY_POLICY
+            existing, record: { ...record, subject: safeSubject, subjectKey }, nowMs: now(), decayPolicy: DEFAULT_DECAY_POLICY
         });
 
         // Bug review independen (audit putaran-7, W7R7-P1-3): beliefs tidak
@@ -313,7 +329,13 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // Bug review independen (audit putaran-22, F-4): spec null/non-objek
         // meledakkan `spec.observationId` jadi TypeError mentah.
         if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
-        const observation = makeObservation({ ...spec, observationId: spec.observationId ?? crypto.randomUUID() });
+        // Bug review independen (audit putaran-35, AUD35-ADV-2): `spec.observationId`
+        // dulu dibaca lewat `spec.observationId ?? crypto.randomUUID()` DI
+        // DALAM object literal yang juga men-spread `...spec` -- sisa kunci
+        // itu (yang masih punya observationId) DAN akses langsung sama-sama
+        // membaca getter yang sama, dua kali. Dikeluarkan lewat destructuring.
+        const { observationId, ...specRest } = spec;
+        const observation = makeObservation({ ...specRest, observationId: observationId ?? crypto.randomUUID() });
         const entityId = observation.subject.entityId;
         if (entityId && !entities.has(entityId)) {
             fail(REASONS.UNKNOWN_ENTITY, "observasi merujuk entitas yang belum dideklarasikan");
@@ -388,11 +410,12 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // pola yang sama yang sudah ditutup untuk observationId/
         // declarationId (putaran 9) dan id goals/prospective (putaran 10)
         // tapi tidak pernah dimigrasikan ke worldmodel's hypothesisId.
-        // Bug review independen (audit putaran-30, AUD30-P2-1): `spec.hypothesisId`
-        // dibaca sekali untuk cek tabrakan, sekali lagi di dalam
-        // makeHypothesis (destructuring) -- accessor stateful bisa
-        // mengembalikan id berbeda di kedua baca, melewati dedup.
-        const hypothesisId = spec.hypothesisId;
+        // Bug review independen (audit putaran-30, AUD30-P2-1; putaran-35,
+        // AUD35-ADV-2): `spec.hypothesisId` dulu dibaca sekali ke lokal
+        // untuk cek tabrakan, tapi `{...spec}` di bawah masih men-spread
+        // `spec` ITU SENDIRI -- spread itu sendiri membaca getter lagi.
+        // Dikeluarkan lewat destructuring.
+        const { hypothesisId, ...specRest } = spec;
         if (hypothesisId && hypotheses.has(hypothesisId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `hypothesisId '${typeof hypothesisId === "string" ? hypothesisId : typeof hypothesisId}' sudah ada`);
         }
@@ -402,7 +425,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // expiresAt cacat) tetap mengevict satu hipotesis VALID sebelum
         // error dilempar, kehilangan data permanen. Validasi/bangun record
         // DULU, baru kompaksi+simpan.
-        const h = makeHypothesis({ ...spec, hypothesisId });
+        const h = makeHypothesis({ ...specRest, hypothesisId });
         if (hypotheses.size >= bounds.MAX_HYPOTHESES) {
             // §11: kadaluwarsa dulu, lalu bobot terendah.
             const sorted = [...hypotheses.values()].sort((a, b) =>

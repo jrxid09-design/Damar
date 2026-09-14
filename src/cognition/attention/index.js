@@ -30,8 +30,16 @@ const { computeEffectivePriority, initCredits, pickOne, mapToGovernorPriority } 
 // tidak punya entityId/relationId string keduanya jatuh ke `relation:undefined`,
 // menggabungkan target/review yang sebenarnya tidak terkait. Ditolak tertutup.
 function targetKey(subjectRef, workKind) {
-    if (typeof subjectRef?.entityId === "string") return `entity:${subjectRef.entityId}::${workKind}`;
-    if (typeof subjectRef?.relationId === "string") return `relation:${subjectRef.relationId}::${workKind}`;
+    // Bug review independen (audit putaran-35, AUD35-ADV-4): `subjectRef.
+    // entityId`/`.relationId` dibaca DUA KALI (sekali di `typeof`, lagi di
+    // template literal) -- latent hari ini (setiap pemanggil produksi
+    // memakai subjectRef beku milik makeSignal/makeTarget, tanpa accessor),
+    // tapi kelas yang sama dengan AUD28-P2-6 yang sudah ditutup di lane
+    // lain; dibaca sekali untuk paritas dan keamanan-masa-depan.
+    const entityId = subjectRef?.entityId;
+    const relationId = subjectRef?.relationId;
+    if (typeof entityId === "string") return `entity:${entityId}::${workKind}`;
+    if (typeof relationId === "string") return `relation:${relationId}::${workKind}`;
     fail(REASONS.INVALID_RECORD, "subjectRef wajib { entityId } atau { relationId } string");
 }
 
@@ -397,4 +405,4 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
     });
 }
 
-module.exports = { createAttentionEconomy, laws, BOUNDS };
+module.exports = { createAttentionEconomy, laws, BOUNDS, targetKey };

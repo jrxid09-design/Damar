@@ -36,8 +36,16 @@ function subjectKeyOf(subject) {
     // dengan toString tereksekusi (mengeksekusi kode pemanggil di dalam
     // proses kognisi) tanpa pernah ditolak, mirip kelas AUD10-P2-3 yang
     // sudah ditutup untuk attention/metacog tapi tidak untuk lane ini.
-    if (typeof subject.entityId === "string") return `entity:${subject.entityId}`;
-    if (typeof subject.relationId === "string") return `relation:${subject.relationId}`;
+    // Bug review independen (audit putaran-35, AUD35-P2-1): `subject.entityId`/
+    // `.relationId` dibaca DUA KALI (sekali di `typeof`, lagi di template
+    // literal) -- getter stateful bisa mengembalikan string sah pada baca
+    // pertama lalu Symbol/BigInt pada baca kedua, meledakkan TypeError
+    // mentah dari `query()` publik, DAN membuat kunci belief dibangun dari
+    // nilai yang berbeda dari yang divalidasi. Dibaca SEKALI ke lokal.
+    const entityId = subject.entityId;
+    const relationId = subject.relationId;
+    if (typeof entityId === "string") return `entity:${entityId}`;
+    if (typeof relationId === "string") return `relation:${relationId}`;
     return "invalid:malformed-subject";
 }
 

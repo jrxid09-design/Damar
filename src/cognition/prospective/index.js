@@ -314,11 +314,15 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         // expectationId yang sudah ada (mis. sudah VIOLATED) menimpanya
         // kembali ke PENDING, memicu ulang jalur kebijakan (onSatisfied/
         // onViolated) untuk expectation yang sudah final.
-        // Bug review independen (audit putaran-30, AUD30-P2-1): `spec.expectationId`
-        // dibaca sekali untuk cek tabrakan, sekali lagi saat konstruksi --
-        // accessor stateful bisa mengembalikan id berbeda di kedua baca,
-        // melewati dedup.
-        const expectationId = spec.expectationId;
+        // Bug review independen (audit putaran-30, AUD30-P2-1; putaran-35,
+        // AUD35-ADV-1): `spec.expectationId` dulu dibaca sekali ke lokal
+        // untuk cek tabrakan, tapi masih dilewatkan lewat `{...spec}` (bukan
+        // `...specRest`) ke makeExpectation -- spread itu sendiri membaca
+        // getter lagi (override-nya cuma membuang hasil baca kedua itu).
+        // `arm()` di file yang sama sudah dimigrasikan ke `...specRest`
+        // putaran-34 (AUD34-ADV-1); `armExpectation` terlewat. Dikeluarkan
+        // lewat destructuring supaya spread di bawah tidak menyentuhnya lagi.
+        const { expectationId, ...specRest } = spec;
         if (expectationId && expectations.has(expectationId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `expectationId '${typeof expectationId === "string" ? expectationId : typeof expectationId}' sudah ada`);
         }
@@ -328,7 +332,7 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         // window.latestAt cacat) tetap mengevict satu expectation pending
         // yang VALID sebelum error dilempar, kehilangan data permanen.
         // Validasi/bangun record DULU, baru kompaksi+simpan.
-        const e = makeExpectation({ ...spec, expectationId: expectationId ?? crypto.randomUUID() });
+        const e = makeExpectation({ ...specRest, expectationId: expectationId ?? crypto.randomUUID() });
         if (expectations.size >= bounds.MAX_PENDING_EXPECTATIONS) {
             const oldest = [...expectations.values()].sort((a, b) => Date.parse(a.window.latestAt) - Date.parse(b.window.latestAt))[0];
             if (oldest) expectations.delete(oldest.expectationId);

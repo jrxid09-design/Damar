@@ -156,16 +156,36 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
     // meledakkan aritmetika mentah atau meracuni anggaran refleksi di
     // openReview (index.js). Disamakan persis dengan guard di sana supaya
     // kedua tempat tidak berbeda predikat.
-    if (!cost || typeof cost !== "object" ||
-        typeof cost.tokens !== "number" || !Number.isFinite(cost.tokens) || cost.tokens < 0 ||
-        typeof cost.ms !== "number" || !Number.isFinite(cost.ms) || cost.ms < 0) {
+    // Bug review independen (audit putaran-35, AUD35-ADV-3): guard ini
+    // membaca `cost.tokens`/`cost.ms` langsung, lalu penyimpanan di bawah
+    // (`Object.freeze({...cost})`) membacanya LAGI secara independen --
+    // kalau makeReview PERNAH dipanggil langsung dengan cost stateful
+    // (openReview di index.js sudah lolos-aman lewat safeCost sejak
+    // putaran-34, tapi builder ini sendiri wajib aman untuk pemanggil
+    // lain/masa depan), nilai tersimpan bisa berbeda dari yang divalidasi.
+    // Dibaca SEKALI ke lokal; disimpan dari lokal yang SAMA.
+    if (!cost || typeof cost !== "object") {
         fail(REASONS.INVALID_RECORD, "cost wajib { tokens, ms } berupa number >= 0 yang valid");
     }
+    const costTokens = cost.tokens;
+    const costMs = cost.ms;
+    if (typeof costTokens !== "number" || !Number.isFinite(costTokens) || costTokens < 0 ||
+        typeof costMs !== "number" || !Number.isFinite(costMs) || costMs < 0) {
+        fail(REASONS.INVALID_RECORD, "cost wajib { tokens, ms } berupa number >= 0 yang valid");
+    }
+    const safeCost = Object.freeze({ tokens: costTokens, ms: costMs });
     for (const p of proposals) {
         if (!p || typeof p !== "object") fail(REASONS.INVALID_RECORD, "setiap proposal wajib objek");
-        // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
-        // `${p.kind}` mentah meledakkan TypeError kalau p.kind Symbol.
-        if (!PROPOSAL_KINDS.has(p.kind)) fail(REASONS.INVALID_RECORD, `proposal.kind '${typeof p.kind === "string" ? p.kind : typeof p.kind}' tidak dikenal`);
+        // Bug review independen (audit putaran-25, AUD25-P2-1; putaran-35,
+        // AUD35-P2-2): interpolasi `${p.kind}` mentah meledakkan TypeError
+        // kalau p.kind Symbol -- perbaikan putaran-25 menghindari
+        // interpolasi LANGSUNG tapi tetap membaca `p.kind` TIGA KALI
+        // (enum check, typeof, lalu nilai di pesan) -- getter stateful
+        // bisa lolos enum check dengan string tidak dikenal lalu membalas
+        // Symbol pada baca berikutnya, tetap meledakkan TypeError mentah.
+        // Dibaca SEKALI ke lokal.
+        const kind = p.kind;
+        if (!PROPOSAL_KINDS.has(kind)) fail(REASONS.INVALID_RECORD, `proposal.kind '${typeof kind === "string" ? kind : typeof kind}' tidak dikenal`);
     }
     for (const f of findings) {
         if (!f || typeof f !== "object") fail(REASONS.INVALID_RECORD, "setiap finding wajib objek");
@@ -189,7 +209,7 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
         findings: Object.freeze(boundedFindings.map(f => buildSafeCognitiveCopy(f))),
         findingsTruncated: findings.length > bounds.MAX_FINDINGS_PER_REVIEW,
         proposals: Object.freeze(boundedProposals.map(p => buildSafeCognitiveCopy(p))),
-        cost: Object.freeze({ ...cost }),
+        cost: safeCost,
         state: "OPEN"
     });
 }
