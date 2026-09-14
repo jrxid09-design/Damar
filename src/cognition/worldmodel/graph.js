@@ -49,8 +49,17 @@ function neighbors(state, entityId, kinds = null, depth = 1) {
         } catch {
             fail(REASONS.INVALID_RECORD, "kinds tidak dapat diverifikasi dengan aman, ditolak");
         }
-        if (!Number.isInteger(kindsLen) || kindsLen < 0) {
-            fail(REASONS.INVALID_RECORD, "kinds.length tidak sah");
+        // Bug review independen (audit putaran-49, W7R49-P2-1): guard ini
+        // memvalidasi integer/non-negatif TAPI TIDAK PERNAH membatasi
+        // ATASNYA -- Proxy array-like yang memalsukan `length` besar
+        // (sampai 2^32-1) tanpa pernah benar-benar menyimpan elemennya
+        // memaksa loop indeks di bawah berjalan jutaan kali, DoS CPU/memori
+        // trivial satu panggilan. Setiap sanitizer saudara (buildSafeArray,
+        // buildSafeBeliefValue, dst.) sudah punya langit-langit
+        // MAX_*_ARRAY_LENGTH -- ditambahkan di sini juga, dipakai ulang
+        // BOUNDS.MAX_VALUE_ARRAY_LENGTH milik lane yang sama.
+        if (!Number.isInteger(kindsLen) || kindsLen < 0 || kindsLen > BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
+            fail(REASONS.INVALID_RECORD, "kinds.length tidak sah atau melebihi batas");
         }
         safeKinds = [];
         for (let i = 0; i < kindsLen; i++) {
@@ -184,8 +193,12 @@ function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 26
     } catch {
         fail(REASONS.INVALID_RECORD, "seeds tidak dapat diverifikasi dengan aman, ditolak");
     }
-    if (!Number.isInteger(seedsLen) || seedsLen < 0) {
-        fail(REASONS.INVALID_RECORD, "seeds.length tidak sah");
+    // Bug review independen (audit putaran-49, W7R49-P2-1): sibling
+    // langsung dari `neighbors`'s `kindsLen` (kelas yang sama) -- guard
+    // ini memvalidasi integer/non-negatif tapi tidak pernah membatasi
+    // atasnya, membuka DoS trivial lewat length Proxy yang dipalsukan.
+    if (!Number.isInteger(seedsLen) || seedsLen < 0 || seedsLen > BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
+        fail(REASONS.INVALID_RECORD, "seeds.length tidak sah atau melebihi batas");
     }
     // Bug review independen (audit putaran-44, W7R44-P2-3): `Array.isArray`
     // hanya membuktikan IDENTITAS-nya array -- tidak menetralkan trap
