@@ -88,6 +88,22 @@ async function createLongHorizonCycle({
             return null;
         }
     };
+
+    // Bug review independen (audit putaran-54, Codex, AUD54-P2-1): `clock`
+    // sendiri milik lapisan komposisi L7 ini (dipakai di buildGovernedProjection,
+    // TERPISAH dari clock yang diteruskan ke 6 lane anak) tidak pernah
+    // dinormalisasi -- Proxy `clock` yang di-revoke raw-throw pas
+    // `clock.nowMs()`, menggagalkan seluruh siklus governed. Pola fallback
+    // sama seperti now() 6 lane anak (putaran-53) diterapkan di sini.
+    function safeNowMs() {
+        let candidate;
+        try {
+            candidate = typeof clock?.nowMs === "function" ? clock.nowMs() : undefined;
+        } catch {
+            candidate = undefined;
+        }
+        return Number.isFinite(candidate) ? candidate : Date.now();
+    }
     const selfModel = await createSelfModel({ capabilityRegistry, clock, store: storeFor("selfmodel") });
     const worldModel = await createWorldModel({ clock, store: storeFor("worldmodel") });
     const goals = await createGoalEngine({ clock, store: storeFor("goals") });
@@ -176,7 +192,7 @@ async function createLongHorizonCycle({
 
         const projection = Object.freeze({
             schemaVersion: "governedCognitiveProjection.v1",
-            generatedAtMs: clock.nowMs(),
+            generatedAtMs: safeNowMs(),
             selfModel: Object.freeze({
                 capabilityCount: selfSnap.capabilityAssessments.length,
                 unknownCount: selfSnap.unknowns.length,
