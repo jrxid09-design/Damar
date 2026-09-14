@@ -343,10 +343,20 @@ async function createSelfModel({
         // ingestOutcome BERIKUTNYA (confidence bisa dipalsukan tanpa restart
         // sama sekali). Membekukan di sumbernya menutup jalur ini di mana
         // pun history dibaca, tidak cuma di satu titik baca.
-        const history = Object.freeze([...(window.history ?? []), Object.freeze({ at, outcome, evidenceRef })]
-            .slice(-bounds.MAX_SUCCESS_WINDOW));
+        // Bug review independen (audit putaran-58, OpenCode, W7R58-P2-1):
+        // `.slice(-bound)` dengan bound 0 (atau fractional antara 0 dan 1,
+        // keduanya override sah lewat sanitizeBounds) trunc ke -0 --
+        // `.slice(-0)` === `.slice(0)`, mengembalikan SELURUH array, bukan
+        // kosong. Sibling dari bug goals' invalidatedBy (putaran-58,
+        // Codex) yang belum disapu ke sini. Bound dibulatkan integer >= 0,
+        // cabang 0 mengembalikan array kosong secara langsung.
+        const maxHistory = Math.max(0, Math.trunc(bounds.MAX_SUCCESS_WINDOW));
+        const combinedHistory = [...(window.history ?? []), Object.freeze({ at, outcome, evidenceRef })];
+        const history = Object.freeze(maxHistory === 0 ? [] : combinedHistory.slice(-maxHistory));
+        const maxAppliedRefs = Math.max(0, Math.trunc(bounds.MAX_APPLIED_EVIDENCE_REFS));
+        const combinedAppliedRefs = [...appliedEvidenceRefs, evidenceRef];
         const nextAppliedEvidenceRefs = Object.freeze(
-            [...appliedEvidenceRefs, evidenceRef].slice(-bounds.MAX_APPLIED_EVIDENCE_REFS)
+            maxAppliedRefs === 0 ? [] : combinedAppliedRefs.slice(-maxAppliedRefs)
         );
         const nextWindow = Object.freeze({
             attempts: history.length,

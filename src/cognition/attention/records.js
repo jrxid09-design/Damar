@@ -7,6 +7,15 @@ const { clamp01 } = require("../core/envelope");
 
 const SOURCE_KINDS = new Set(["OWNER", "SENSOR", "GOAL", "REMINDER", "MISSION", "AGENT", "SELF", "SYSTEM"]);
 const WORK_KINDS = new Set(["PERCEIVE", "REASON", "PLAN", "VERIFY", "EXPLAIN", "MAINTAIN"]);
+// Bug review independen (audit putaran-58, OpenCode, W7R58-P2-2): deepFreeze
+// di sini adalah SATU-SATUNYA dari ke-6 sanitizer lane yang tidak pernah
+// menolak kunci berbahaya -- envelope/goals/metacog/prospective/worldmodel
+// semua menolak `__proto__`/`constructor`/`prototype`. `out[key] = ...`
+// dengan key literal "__proto__" memanggil setter Object.prototype.__proto__
+// pada copy, membuat hasil sanitisasi punya NOL own key tapi prototype
+// yang dikendalikan pemanggil -- targetKey() membaca lewat prototype itu
+// dan mengalias target arbitrer.
+const DANGEROUS_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 
 /**
  * Bug review independen (audit putaran-9, AUD9-P2-1): `Object.freeze({...
@@ -51,6 +60,9 @@ function deepFreeze(value, seen = new WeakSet()) {
     try {
         const out = Array.isArray(value) ? [] : {};
         for (const key of Reflect.ownKeys(value)) {
+            if (typeof key === "string" && DANGEROUS_KEYS.includes(key)) {
+                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak: '${key}'`);
+            }
             const desc = Object.getOwnPropertyDescriptor(value, key);
             if (!desc || desc.get || desc.set) {
                 fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `tidak boleh membawa properti accessor: '${String(key)}'`);

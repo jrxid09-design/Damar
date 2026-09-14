@@ -537,10 +537,18 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         if (plan.state === "INVALIDATED") {
             fail(REASONS.INVALID_TRANSITION, "plan sudah INVALIDATED");
         }
+        // Bug review independen (audit putaran-58, Codex, W7R58-P2-1):
+        // `.slice(-bound)` dengan bound 0 jadi `.slice(-0)` -- -0 === 0,
+        // `.slice(0)` mengembalikan SELURUH array, bukan array kosong.
+        // Bound fractional antara 0 dan 1 trunc ke -0, bug yang sama.
+        // Ditangani eksplisit: bound dibulatkan ke integer >= 0, cabang
+        // 0 mengembalikan array kosong secara langsung.
+        const maxInvalidatedBy = Math.max(0, Math.trunc(bounds.MAX_INVALIDATED_BY_PER_PLAN));
+        const combinedInvalidatedBy = [...plan.invalidatedBy, brokenBeliefRef];
         const next = Object.freeze({
             ...plan, state: "INVALIDATED",
             invalidatedBy: Object.freeze(
-                [...plan.invalidatedBy, brokenBeliefRef].slice(-bounds.MAX_INVALIDATED_BY_PER_PLAN)
+                maxInvalidatedBy === 0 ? [] : combinedInvalidatedBy.slice(-maxInvalidatedBy)
             )
         });
         plans.set(planId, next);
