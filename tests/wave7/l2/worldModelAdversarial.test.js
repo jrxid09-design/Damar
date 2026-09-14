@@ -481,6 +481,29 @@ test("WM-repair-71: declareEntity's labels values are read via property descript
     assert.equal(e.labels.a, "x", "a plain label value must still round-trip");
 });
 
+test("WM-repair-88: subgraph/neighbors bound a fabricated finite seeds/kinds length -- integer/non-negative was validated, but no ceiling existed, so a length-lying Proxy that never really stores its elements forced an unbounded O(N) descriptor loop (independent audit W7R49-P2-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const N = BOUNDS.MAX_VALUE_ARRAY_LENGTH + 1_000_000;
+    function fakeArr(n) {
+        const t = [];
+        return new Proxy(t, {
+            get(o, p) { return p === "length" ? n : o[p]; },
+            getOwnPropertyDescriptor(o, p) {
+                return (typeof p === "string" && /^\d+$/.test(p))
+                    ? { value: "x", writable: true, enumerable: true, configurable: true }
+                    : Object.getOwnPropertyDescriptor(o, p);
+            },
+            has() { return true; }
+        });
+    }
+    assertThrowsReason(() => wm.subgraph(fakeArr(N)), "INVALID_RECORD");
+    assertThrowsReason(() => wm.neighbors("e1", fakeArr(N), 1), "INVALID_RECORD");
+    // sanity: legitimate small inputs still work
+    assert.doesNotThrow(() => wm.subgraph(["e1"], 1));
+    assert.doesNotThrow(() => wm.neighbors("e1", ["kind"], 1));
+});
+
 test("WM-repair-74: subgraph rejects a seeds array whose .length is negative/NaN/Infinity/fractional instead of skipping or infinite-looping (independent audit W7R42-P2-1)", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
