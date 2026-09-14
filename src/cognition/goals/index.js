@@ -221,22 +221,33 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // mengevict goal valid secara permanen. Korban sekarang hanya
         // DIPILIH (tanpa dihapus) di sini; penghapusan+pembersihan
         // sesungguhnya dipindah ke SETELAH enforceCreationRate lolos.
-        let evicted = null;
-        if (goals.size >= bounds.MAX_TOTAL_GOALS_RETAINED) {
-            const terminal = [...goals.values()]
-                .filter(g => ["SATISFIED", "ABANDONED", "SUPERSEDED"].includes(g.state))
-                .sort((a, b) => Date.parse(a.lastTransitionAt) - Date.parse(b.lastTransitionAt));
-            if (terminal[0]) {
-                evicted = terminal[0];
-            } else {
-                fail(REASONS.GOAL_RETENTION_LIMIT_EXCEEDED,
-                    `retensi goal melebihi batas (${bounds.MAX_TOTAL_GOALS_RETAINED}) dan tidak ada goal terminal untuk dievict`);
+        // Bug review independen (audit putaran-61, Codex, AUD61-P2-1,
+        // BLOCKING, kelas umum): satu korban DIPILIH per panggilan tidak
+        // cukup kalau store dimuat ulang dengan bound yang lebih rendah
+        // dari saat data itu dipersist -- populasi pra-ada bisa jauh
+        // melebihi bound baru. SEMUA korban yang diperlukan dipilih di
+        // sini lewat SALINAN virtual (goals asli belum disentuh, sesuai
+        // urutan "pilih dulu, hapus sesudah enforceCreationRate lolos"
+        // yang sudah ada), lalu benar-benar dihapus SEMUA sesudah lolos.
+        const evictedList = [];
+        {
+            const stillAlive = new Map(goals);
+            while (stillAlive.size >= bounds.MAX_TOTAL_GOALS_RETAINED) {
+                const terminal = [...stillAlive.values()]
+                    .filter(g => ["SATISFIED", "ABANDONED", "SUPERSEDED"].includes(g.state))
+                    .sort((a, b) => Date.parse(a.lastTransitionAt) - Date.parse(b.lastTransitionAt));
+                if (!terminal[0]) {
+                    fail(REASONS.GOAL_RETENTION_LIMIT_EXCEEDED,
+                        `retensi goal melebihi batas (${bounds.MAX_TOTAL_GOALS_RETAINED}) dan tidak ada goal terminal untuk dievict`);
+                }
+                evictedList.push(terminal[0]);
+                stillAlive.delete(terminal[0].goalId);
             }
         }
 
         enforceCreationRate(originKind);
 
-        if (evicted) {
+        for (const evicted of evictedList) {
             goals.delete(evicted.goalId);
             // Bug review independen (Codex putaran-8): saat retensi
             // mengevict anak terminal, entri induknya di childCounts
@@ -279,7 +290,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // childCounts basi milik goal yang sudah tidak ada -- pertumbuhan tak
         // terbatas yang sama yang sudah ditutup AUD3-P2-2/AUD11-P2-5, muncul
         // kembali lewat interaksi baru antara insersi dan pembersihan eviksi.
-        if (goal.parentGoalId && goal.parentGoalId !== evicted?.goalId) {
+        if (goal.parentGoalId && !evictedList.some(ev => ev.goalId === goal.parentGoalId)) {
             childCounts.set(goal.parentGoalId, (childCounts.get(goal.parentGoalId) ?? 0) + 1);
         }
 
@@ -425,14 +436,17 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // beda dari goals/tasks sendiri yang SUDAH punya cabang fail-closed
         // (baris di atas komentar aslinya salah asumsi "selalu ada
         // korban"). Sekarang gagal tertutup, sama seperti goals/tasks.
-        if (commitments.size >= bounds.MAX_TOTAL_COMMITMENTS_RETAINED) {
+        // Bug review independen (audit putaran-61, Codex, AUD61-P2-1,
+        // BLOCKING, kelas umum): dilooping sampai benar-benar patuh --
+        // satu korban per panggilan tidak cukup kalau store dimuat ulang
+        // dengan bound yang lebih rendah dari saat data itu dipersist.
+        while (commitments.size >= bounds.MAX_TOTAL_COMMITMENTS_RETAINED) {
             const terminal = [...commitments.values()].filter(x => x.state !== "OPEN")[0];
-            if (terminal) {
-                commitments.delete(terminal.commitmentId);
-            } else {
+            if (!terminal) {
                 fail(REASONS.COMMITMENT_RETENTION_LIMIT_EXCEEDED,
                     `retensi commitment melebihi batas (${bounds.MAX_TOTAL_COMMITMENTS_RETAINED}) dan tidak ada commitment non-OPEN untuk dievict`);
             }
+            commitments.delete(terminal.commitmentId);
         }
         commitments.set(c.commitmentId, c);
         return c;
@@ -540,15 +554,27 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // total 0. Sibling PERSIS dari kelas round-59, belum disapu ke
         // kompaksi GLOBAL ini (per-goal di atas sudah diperbaiki round
         // 59). Pada kapasitas 0, `p` sendiri yang dihapus.
+        // Bug review independen (audit putaran-61, Codex, AUD61-P2-1,
+        // BLOCKING): perbaikan putaran-60 hanya menghapus SATU record per
+        // panggilan createPlan -- kalau store dimuat ulang dengan bound
+        // yang LEBIH RENDAH dari saat plan-plan itu awalnya dipersist,
+        // populasi yang sudah ada bisa jauh melebihi bound baru, dan
+        // menghapus satu record per panggilan tidak pernah benar-benar
+        // mengompaksi turun ke bound saat ini. Sekarang loop sampai
+        // plans.size <= maxTotalPlans; pada kapasitas 0, SEMUA plan
+        // (termasuk p) dihapus, bukan cuma p.
         const maxTotalPlans = Math.max(0, Math.trunc(bounds.MAX_TOTAL_PLANS_RETAINED));
-        if (plans.size > maxTotalPlans) {
+        while (plans.size > maxTotalPlans) {
+            let victimKey = null;
             if (maxTotalPlans === 0) {
-                plans.delete(p.planId);
+                victimKey = plans.keys().next().value;
             } else {
                 for (const k of plans.keys()) {
-                    if (k !== p.planId) { plans.delete(k); break; }
+                    if (k !== p.planId) { victimKey = k; break; }
                 }
             }
+            if (victimKey === undefined || victimKey === null) break;
+            plans.delete(victimKey);
         }
         return p;
     }
@@ -638,14 +664,15 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // EXECUTING/VERIFYING/FAILED) -- populasi murni non-terminal bisa
         // tumbuh tak terbatas karena tidak pernah ada korban DONE/SKIPPED.
         // Gagal tertutup di sini, sama seperti proposeGoal's retention check.
-        if (tasks.size >= bounds.MAX_TOTAL_TASKS_RETAINED) {
+        // Bug review independen (audit putaran-61, Codex, AUD61-P2-1,
+        // BLOCKING, kelas umum): dilooping sampai benar-benar patuh.
+        while (tasks.size >= bounds.MAX_TOTAL_TASKS_RETAINED) {
             const terminal = [...tasks.values()].filter(x => x.state === "DONE" || x.state === "SKIPPED")[0];
-            if (terminal) {
-                tasks.delete(terminal.taskId);
-            } else {
+            if (!terminal) {
                 fail(REASONS.TASK_RETENTION_LIMIT_EXCEEDED,
                     `retensi task melebihi batas (${bounds.MAX_TOTAL_TASKS_RETAINED}) dan tidak ada task DONE/SKIPPED untuk dievict`);
             }
+            tasks.delete(terminal.taskId);
         }
         tasks.set(t.taskId, t);
         return t;
