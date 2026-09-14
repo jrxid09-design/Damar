@@ -41,10 +41,19 @@ function subjectKeyOf(subject) {
     // literal) -- getter stateful bisa mengembalikan string sah pada baca
     // pertama lalu Symbol/BigInt pada baca kedua, meledakkan TypeError
     // mentah dari `query()` publik, DAN membuat kunci belief dibangun dari
-    // nilai yang berbeda dari yang divalidasi. Dibaca SEKALI ke lokal.
+    // nilai yang berbeda dari yang divalidasi. Dibaca SEKALI ke lokal SAJA
+    // jika benar-benar diperlukan.
+    // Bug review independen (audit putaran-36, AUD36-P2-2, regresi
+    // diperkenalkan kandidat): perbaikan putaran-35 di atas membaca
+    // `relationId` TANPA SYARAT bahkan ketika `entityId` sudah valid --
+    // versi putaran-34 short-circuit (tidak pernah membaca relationId
+    // kalau entityId sudah cukup), versi ini mengeksekusi accessor
+    // `relationId` pemanggil yang SEBELUMNYA tidak pernah dipanggil.
+    // short-circuit dikembalikan: `relationId` hanya dibaca kalau
+    // `entityId` TERBUKTI bukan string.
     const entityId = subject.entityId;
-    const relationId = subject.relationId;
     if (typeof entityId === "string") return `entity:${entityId}`;
+    const relationId = subject.relationId;
     if (typeof relationId === "string") return `relation:${relationId}`;
     return "invalid:malformed-subject";
 }

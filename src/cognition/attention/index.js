@@ -30,15 +30,18 @@ const { computeEffectivePriority, initCredits, pickOne, mapToGovernorPriority } 
 // tidak punya entityId/relationId string keduanya jatuh ke `relation:undefined`,
 // menggabungkan target/review yang sebenarnya tidak terkait. Ditolak tertutup.
 function targetKey(subjectRef, workKind) {
-    // Bug review independen (audit putaran-35, AUD35-ADV-4): `subjectRef.
-    // entityId`/`.relationId` dibaca DUA KALI (sekali di `typeof`, lagi di
-    // template literal) -- latent hari ini (setiap pemanggil produksi
-    // memakai subjectRef beku milik makeSignal/makeTarget, tanpa accessor),
-    // tapi kelas yang sama dengan AUD28-P2-6 yang sudah ditutup di lane
-    // lain; dibaca sekali untuk paritas dan keamanan-masa-depan.
+    // Bug review independen (audit putaran-35, AUD35-ADV-4; putaran-36,
+    // AUD36-ADV-2, regresi diperkenalkan kandidat): `subjectRef.entityId`/
+    // `.relationId` dulu dibaca DUA KALI (sekali di `typeof`, lagi di
+    // template literal) -- putaran-35 menyatukannya jadi satu baca TANPA
+    // SYARAT untuk keduanya, tapi itu menghilangkan short-circuit asli:
+    // `relationId` sekarang dieksekusi bahkan ketika `entityId` sudah
+    // valid, mengeksekusi accessor pemanggil yang sebelumnya tidak pernah
+    // dipanggil. `relationId` hanya dibaca kalau `entityId` terbukti
+    // bukan string.
     const entityId = subjectRef?.entityId;
-    const relationId = subjectRef?.relationId;
     if (typeof entityId === "string") return `entity:${entityId}::${workKind}`;
+    const relationId = subjectRef?.relationId;
     if (typeof relationId === "string") return `relation:${relationId}::${workKind}`;
     fail(REASONS.INVALID_RECORD, "subjectRef wajib { entityId } atau { relationId } string");
 }

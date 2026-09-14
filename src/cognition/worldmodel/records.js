@@ -168,14 +168,22 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
     // makeObservation memvalidasi subject wajib { entityId } atau
     // { relationId }; makeHypothesis tidak pernah, jadi subject:null lolos
     // tersimpan dan bisa bertabrakan kunci dengan hipotesis lain.
-    // Bug review independen (audit putaran-35, AUD35-ADV-6): `subject.entityId`/
-    // `.relationId` dibaca langsung di sini SEBELUM buildSafeBeliefValue
-    // (yang menolak accessor lewat descriptor) sempat memproses subject --
-    // getter pemanggil tetap terpanggil satu kali sebelum ditolak tertutup.
-    // Dibaca lewat destructuring SEKALI, dipakai untuk guard SAJA; subject
-    // asli tetap diteruskan ke buildSafeBeliefValue seperti sebelumnya.
-    const { entityId, relationId } = subject ?? {};
-    if (!subject || (typeof entityId !== "string" && typeof relationId !== "string")) {
+    // Bug review independen (audit putaran-35, AUD35-ADV-6; putaran-36,
+    // AUD36-ADV-1): guard dulu membaca `subject.entityId`/`.relationId`
+    // lewat [[Get]] biasa (trap `get` untuk Proxy) SEBELUM
+    // buildSafeBeliefValue (trap `getOwnPropertyDescriptor`) sempat
+    // memprosesnya -- Proxy yang membuat kedua trap tidak konsisten bisa
+    // lolos guard dengan entityId yang TERLIHAT sah padahal bentuk yang
+    // BENAR-BENAR tersimpan tidak sah (kelas yang sama dengan AUD36-P2-1
+    // di ingestDeclaration). Disaring SEKALI di sini; guard DAN
+    // penyimpanan di bawah memakai bentuk tersanitasi yang SAMA (bukan
+    // `subject` mentah lagi). `relationId` hanya dibaca kalau `entityId`
+    // terbukti bukan string (short-circuit, kelas AUD36-P2-2).
+    const safeSubject = buildSafeBeliefValue(subject);
+    const entityId = safeSubject?.entityId;
+    const validEntity = typeof entityId === "string";
+    const relationId = validEntity ? undefined : safeSubject?.relationId;
+    if (!safeSubject || (!validEntity && typeof relationId !== "string")) {
         fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
     }
     if (!Array.isArray(candidateValues) || candidateValues.length === 0) {
@@ -201,7 +209,7 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
     // (mis. persist()) dan mutasi pasca-deklarasi menulis ulang hipotesis
     // tersimpan. Sekarang lewat buildSafeBeliefValue yang sama.
     return Object.freeze({
-        hypothesisId, subject: buildSafeBeliefValue(subject), attribute,
+        hypothesisId, subject: safeSubject, attribute,
         // Bug review independen (audit putaran-20, AUD20-P2-2): elemen
         // candidateValues tidak dijaga -- elemen `null` meledakkan `c.value`
         // jadi TypeError mentah alih-alih INVALID_RECORD.
