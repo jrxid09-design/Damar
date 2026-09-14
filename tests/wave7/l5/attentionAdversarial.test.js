@@ -197,6 +197,14 @@ test("AT-repair-31: targetKey reads subjectRef.entityId exactly once (independen
     assert.equal(key, "entity:e1::PERCEIVE");
 });
 
+test("AT-repair-42: createAttentionEconomy never raw-throws on a revoked/throwing clock or bounds -- normalized once at construction (independent audit AUD53-P2-2)", async () => {
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    await assert.doesNotReject(() => createAttentionEconomy({ clock: rev() }));
+    await assert.doesNotReject(() => createAttentionEconomy({ bounds: rev() }));
+    const ae = await createAttentionEconomy({ clock: { nowMs() { throw new Error("x"); } } });
+    assert.doesNotThrow(() => ae.ingestSignal({ sourceKind: "OWNER", sourceId: "o1", subjectRef: { entityId: "e1" } }, "REASON"));
+});
+
 test("AT-repair-41: pick() falls back to bounds.MAX_RUNNING_TARGETS (not raw-throw) when governorPort.capacity() throws or is a revoked Proxy (independent audit W7R51-ADV-2)", async () => {
     const ae = await createAttentionEconomy({ clock: manualClock(0), governorPort: { capacity: () => { throw new Error("capacity refuses"); } } });
     ae.ingestSignal({ sourceKind: "OWNER", sourceId: "o1", subjectRef: { entityId: "e1" } }, "REASON");

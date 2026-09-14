@@ -56,7 +56,18 @@ const MAX_SAFE_ARRAY_LENGTH = 65536;
 // memakai `len` yang SAMA PERSIS dipakai loop di bawah -- satu-satunya
 // pembacaan `.length`, tidak ada celah divergensi yang mungkin.
 function buildSafeArray(arr, mapFn, maxLen = MAX_SAFE_ARRAY_LENGTH, overLimitReason = REASONS.INVALID_RECORD, overLimitMessage = "panjang array melebihi batas") {
-    const len = arr.length;
+    // Bug review independen (audit putaran-53, AUD53-P2-1): `arr.length`
+    // dan `arr[i]` adalah [[Get]] mentah -- Proxy dengan trap `length`/indeks
+    // yang melempar (bukan hanya Array.isArray yang sudah dijaga pemanggil)
+    // tetap raw-throw dari sini, keluar dari createPlan/createTask publik.
+    // Dibungkus try/catch TERPISAH dari pemanggilan `mapFn` -- error domain
+    // yang dilempar `mapFn` (validasi elemen) TIDAK PERNAH ditangkap di sini.
+    let len;
+    try {
+        len = arr.length;
+    } catch {
+        fail(REASONS.INVALID_RECORD, "panjang array tidak dapat diverifikasi dengan aman, ditolak");
+    }
     if (!Number.isInteger(len) || len < 0) {
         fail(REASONS.INVALID_RECORD, "panjang array tidak sah");
     }
@@ -64,7 +75,15 @@ function buildSafeArray(arr, mapFn, maxLen = MAX_SAFE_ARRAY_LENGTH, overLimitRea
         fail(overLimitReason, overLimitMessage);
     }
     const out = [];
-    for (let i = 0; i < len; i++) out.push(mapFn(arr[i], i));
+    for (let i = 0; i < len; i++) {
+        let element;
+        try {
+            element = arr[i];
+        } catch {
+            fail(REASONS.INVALID_RECORD, `elemen array pada indeks '${i}' tidak dapat diverifikasi dengan aman, ditolak`);
+        }
+        out.push(mapFn(element, i));
+    }
     return out;
 }
 

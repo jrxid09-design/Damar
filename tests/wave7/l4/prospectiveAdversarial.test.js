@@ -117,6 +117,14 @@ test("PM-repair-58: tick() never raw-throws on a throwing/revoked goalStatusPort
     assert.doesNotThrow(() => pm.tick(proxy));
 });
 
+test("PM-repair-59: createProspectiveMemory never raw-throws on a revoked/throwing clock or bounds -- normalized once at construction (independent audit AUD53-P2-2)", async () => {
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    await assert.doesNotReject(() => createProspectiveMemory({ clock: rev() }));
+    await assert.doesNotReject(() => createProspectiveMemory({ bounds: rev() }));
+    const pm = await createProspectiveMemory({ clock: { nowMs() { throw new Error("x"); } } });
+    assert.doesNotThrow(() => pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(Date.now() + 60000).toISOString() } }));
+});
+
 test("PM-repair-56: checkExpectations never raw-throws when the evaluate port returns a revoked Proxy, throws itself, or returns an object with a throwing value/atMs getter -- treated as 'not observed', the sweep continues for other expectations (independent audit W7R50-P2-1)", async () => {
     const pm = await createProspectiveMemory({ clock: manualClock(100) });
     pm.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: "done", window: { latestAt: new Date(1000).toISOString() } });

@@ -311,6 +311,21 @@ test("MC-repair-38: applyProposal rejects a non-integer proposalIndex (including
     assertThrowsReason(() => mc.applyProposal(review.reviewId, r.proxy, null), "INVALID_RECORD");
 });
 
+test("MC-repair-39: buildSafeArray never raw-throws on a Proxy findings/proposals array with a throwing length/index getter -- Array.isArray only proves identity, not trap-safety (independent audit AUD53-P2-1)", async () => {
+    const mc = await createMetacognition();
+    const arr = (trap) => new Proxy([1, 2, 3], { get(o, p, r) { if (p === trap) throw new Error("hostile"); return Reflect.get(o, p, r); } });
+    assertThrowsReason(() => mc.openReview({ trigger: "LOW_CONFIDENCE_ACTION", subjectRef: { entityId: "e1" }, findings: arr("length") }), "INVALID_RECORD");
+    assertThrowsReason(() => mc.openReview({ trigger: "CONTRADICTION", subjectRef: { entityId: "e2" }, proposals: arr("0") }), "INVALID_RECORD");
+});
+
+test("MC-repair-40: createMetacognition never raw-throws on a revoked/throwing clock or bounds -- normalized once at construction (independent audit AUD53-P2-2)", async () => {
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    await assert.doesNotReject(() => createMetacognition({ clock: rev() }));
+    await assert.doesNotReject(() => createMetacognition({ bounds: rev() }));
+    const mc = await createMetacognition({ clock: { nowMs() { throw new Error("x"); } } });
+    assert.doesNotThrow(() => mc.openReview({ trigger: "LOW_CONFIDENCE_ACTION", subjectRef: { entityId: "e1" } }));
+});
+
 test("MC-repair-36: buildSafeCognitiveCopy's object branch rejects a flat object whose key count exceeds MAX_VALUE_KEYS, matching every sibling sanitizer's key-count bound (independent audit W7R44-P2-4)", async () => {
     const mc = await createMetacognition();
     const big = {};

@@ -41,6 +41,18 @@ async function createSelfModel({
     requireCapabilityRegistryPort(capabilityRegistry);
     void healthPort; // reserved: ingestHealth() is push-based today, port unused directly
 
+    // Bug review independen (audit putaran-53, AUD53-P2-2): `bounds` yang
+    // dioverride pemanggil dibaca mentah (`bounds.MAX_*`) di puluhan titik
+    // di seluruh lane ini -- Proxy yang di-revoke raw-throw pada baca
+    // PERTAMA, di mana pun itu. Dinormalisasi SEKALI di sini (spread
+    // memicu trap `ownKeys` kalau ada, jadi ini juga menguji keamanannya);
+    // field yang hilang jatuh ke `BOUNDS` asli, bukan `undefined`.
+    try {
+        bounds = (bounds && typeof bounds === "object") ? { ...BOUNDS, ...bounds } : BOUNDS;
+    } catch {
+        bounds = BOUNDS;
+    }
+
     // --- state (semua di sini murni in-process; hanya successWindows durabel) ---
     const availabilityCache = new Map();   // capabilityId -> {availability, generation, observedAtMs}
     const successWindows = await loadSuccessWindows(store); // capabilityId -> {attempts, successes, windowStartedAt, history:[]}
@@ -50,7 +62,20 @@ async function createSelfModel({
     let limitationsList = [];
     let degradedSubsystems = [];           // [{subsystem, state, at}]
 
-    function now() { return clock.nowMs(); }
+    // Bug review independen (audit putaran-53, AUD53-P2-2): `clock.nowMs()`
+    // mentah -- Proxy yang di-revoke (atau `nowMs` yang melempar/bukan
+    // fungsi/mengembalikan non-finite) raw-throw dari SETIAP pemanggil
+    // now()/nowIso() di seluruh lane. Envelope.js (putaran-48) sudah
+    // punya kontrak yang sama untuk clock-nya; disamakan di sini.
+    function now() {
+        let candidate;
+        try {
+            candidate = typeof clock?.nowMs === "function" ? clock.nowMs() : undefined;
+        } catch {
+            candidate = undefined;
+        }
+        return Number.isFinite(candidate) ? candidate : Date.now();
+    }
     function nowIso() { return new Date(now()).toISOString(); }
 
     function touch(capabilityId) {

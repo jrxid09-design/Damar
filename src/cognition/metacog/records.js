@@ -37,12 +37,30 @@ const DANGEROUS_VALUE_KEYS = Object.freeze(["__proto__", "constructor", "prototy
 // keamanan yang jauh lebih tinggi dari itu, bukan batas tampilan.
 const MAX_SAFE_ARRAY_LENGTH = VALUE_BOUNDS.MAX_VALUE_ARRAY_LENGTH;
 function buildSafeArray(arr, mapFn) {
-    const len = arr.length;
+    // Bug review independen (audit putaran-53, AUD53-P2-1): sibling
+    // langsung dari goals/records.js's buildSafeArray -- `arr.length`/
+    // `arr[i]` adalah [[Get]] mentah, raw-throw untuk Proxy dengan trap
+    // yang melempar. Dibungkus try/catch TERPISAH dari `mapFn` -- error
+    // domain dari validasi elemen tidak pernah ditangkap di sini.
+    let len;
+    try {
+        len = arr.length;
+    } catch {
+        fail(REASONS.INVALID_RECORD, "panjang array tidak dapat diverifikasi dengan aman, ditolak");
+    }
     if (!Number.isInteger(len) || len < 0 || len > MAX_SAFE_ARRAY_LENGTH) {
         fail(REASONS.INVALID_RECORD, "panjang array tidak sah atau melebihi batas");
     }
     const out = [];
-    for (let i = 0; i < len; i++) out.push(mapFn(arr[i], i));
+    for (let i = 0; i < len; i++) {
+        let element;
+        try {
+            element = arr[i];
+        } catch {
+            fail(REASONS.INVALID_RECORD, `elemen array pada indeks '${i}' tidak dapat diverifikasi dengan aman, ditolak`);
+        }
+        out.push(mapFn(element, i));
+    }
     return out;
 }
 

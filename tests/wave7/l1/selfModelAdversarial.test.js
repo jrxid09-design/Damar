@@ -220,6 +220,15 @@ test("SM-repair-15: snapshot()'s runtimeLocation/resourcePressure/activeProvider
     assert.throws(() => { "use strict"; snap.activeProviders[0].nested.ok = false; });
 });
 
+test("SM-repair-20: createSelfModel never raw-throws on a revoked/throwing clock or bounds -- normalized once at construction (independent audit AUD53-P2-2)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    await assert.doesNotReject(() => createSelfModel({ capabilityRegistry: registry, clock: rev() }));
+    await assert.doesNotReject(() => createSelfModel({ capabilityRegistry: registry, bounds: rev() }));
+    const sm = await createSelfModel({ capabilityRegistry: registry, clock: { nowMs() { throw new Error("x"); } } });
+    assert.doesNotThrow(() => sm.assess("cap.x"));
+});
+
 test("SM-repair-19: snapshot() never raw-throws on revoked/throwing soft ports (mesh/provider/governor/presence) or a BigInt inside a port result -- safeCall only wraps the port CALL, not the consumption of what it returns (independent audit W7R51-ADV-1)", async () => {
     const reg = { get: () => ({ id: "x" }), has: () => true, getAvailability: () => null };
     const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };

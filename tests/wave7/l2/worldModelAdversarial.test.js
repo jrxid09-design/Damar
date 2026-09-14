@@ -592,6 +592,14 @@ test("WM-repair-82: subgraph/neighbors consume seeds/kinds via property descript
     assertThrowsReason(() => wm.neighbors("e1", throwingDescArr(["device"]), 1), "INVALID_RECORD");
 });
 
+test("WM-repair-89: createWorldModel never raw-throws on a revoked/throwing clock or bounds -- normalized once at construction (independent audit AUD53-P2-2)", async () => {
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    await assert.doesNotReject(() => createWorldModel({ clock: rev() }));
+    await assert.doesNotReject(() => createWorldModel({ bounds: rev() }));
+    const wm = await createWorldModel({ clock: { nowMs() { throw new Error("x"); } } });
+    assert.doesNotThrow(() => wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" }));
+});
+
 test("WM-repair-87: the exported subjectKeyOf() never raw-throws on a revoked-Proxy subject -- falls back to the same malformed-subject sentinel as any other unreadable subject, matching its own never-throws contract (independent audit W7R47-P2-2)", async () => {
     const { subjectKeyOf } = require("../../../src/cognition/worldmodel/query");
     const r = Proxy.revocable({}, {});

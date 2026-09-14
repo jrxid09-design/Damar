@@ -838,6 +838,24 @@ test("GL-repair-66: buildSafeIntentTemplate's fail-closed catch itself does not 
     }), "AUTHORITY_SHAPED_FIELD_REJECTED");
 });
 
+test("GL-repair-71: buildSafeArray never raw-throws on a Proxy array with a throwing length/index getter -- Array.isArray only proves identity, not trap-safety, the exact class round 44 fixed for subgraph/neighbors but never swept to this shared helper (independent audit AUD53-P2-1)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    const arr = (trap) => new Proxy([1, 2, 3], { get(o, p, r) { if (p === trap) throw new Error("hostile"); return Reflect.get(o, p, r); } });
+    assertThrowsReason(() => ge.createPlan({ goalRef: g.goalId, steps: arr("length") }), "INVALID_RECORD");
+    assertThrowsReason(() => ge.createPlan({ goalRef: g.goalId, steps: [], assumptions: arr("length") }), "INVALID_RECORD");
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+    assertThrowsReason(() => ge.createTask({ taskId: "t1", planRef: p.planId, order: 0, preconditions: arr("0"), postconditions: [], intentTemplate: {} }), "INVALID_RECORD");
+});
+
+test("GL-repair-72: createGoalEngine never raw-throws on a revoked/throwing clock or bounds -- normalized once at construction, falling back to Date.now()/the module BOUNDS (independent audit AUD53-P2-2)", async () => {
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    await assert.doesNotReject(() => createGoalEngine({ clock: rev() }));
+    await assert.doesNotReject(() => createGoalEngine({ bounds: rev() }));
+    const ge = await createGoalEngine({ clock: { nowMs() { throw new Error("x"); } } });
+    assert.doesNotThrow(() => ge.proposeGoal(baseGoalSpec()));
+});
+
 test("GL-repair-70: transition() fails closed to APPROVAL_EXPIRED (not raw-throw) when authorityPort.checkApproval() returns a revoked-Proxy result -- treated the same as an invalid/falsy check (independent audit W7R50-ADV-1)", async () => {
     const r = Proxy.revocable({}, {});
     r.revoke();
