@@ -166,6 +166,16 @@ test("PM-repair-45: ownerRef is read exactly once end-to-end (guard AND construc
     assert.equal(r.ownerRef, "owner-1");
 });
 
+test("PM-repair-46: expectationId is read exactly once end-to-end in armExpectation (guard AND construction) (independent audit AUD35-ADV-1)", async () => {
+    const pm = await createProspectiveMemory();
+    let n = 0;
+    const spec = { subject: { entityId: "e1" }, attribute: "status", expectedValue: 1, window: { latestAt: new Date(9e12).toISOString() } };
+    Object.defineProperty(spec, "expectationId", { enumerable: true, configurable: true, get() { n++; return "E1"; } });
+    const e = pm.armExpectation(spec);
+    assert.equal(n, 1, "expectationId must be read exactly once, including during construction");
+    assert.equal(e.expectationId, "E1");
+});
+
 test("PM-repair-38: window.latestAt/earliestAt are read exactly once, so a stateful getter cannot pass validation with a valid date and store an invalid one (independent audit AUD32-P2-2)", async () => {
     const pm = await createProspectiveMemory({ clock: manualClock(100) });
     let n = 0;

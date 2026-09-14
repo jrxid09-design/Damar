@@ -197,6 +197,26 @@ test("MC-repair-23: cost.tokens/cost.ms are each read exactly once in openReview
     assert.equal(r2.state, "OPEN", "the reflection budget window must not have been poisoned by a second, unread cost.tokens value");
 });
 
+test("MC-repair-25: openReview reads each proposal.kind exactly once, so a stateful getter cannot pass the enum check and then crash the error message (independent audit AUD35-P2-2)", async () => {
+    const mc = await createMetacognition();
+    let n = 0;
+    const p = {};
+    Object.defineProperty(p, "kind", { enumerable: true, configurable: true, get() { n++; return n === 1 ? "NOT_A_KIND" : Symbol("boom"); } });
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: [], proposals: [p], cost: { tokens: 0, ms: 0 } }), "INVALID_RECORD");
+    assert.equal(n, 1, "proposal.kind must be read exactly once");
+});
+
+test("MC-repair-26: makeReview's cost guard and stored cost come from the same captured local, not independent reads (independent audit AUD35-ADV-3)", async () => {
+    const { makeReview } = require("../../../src/cognition/metacog/records");
+    let n = 0;
+    const cost = {};
+    Object.defineProperty(cost, "tokens", { enumerable: true, configurable: true, get() { n++; return n === 1 ? 5 : 999; } });
+    cost.ms = 0;
+    const review = makeReview({ reviewId: "R1", trigger: "SCHEDULED", findings: [], proposals: [], cost, bounds: BOUNDS });
+    assert.equal(n, 1, "cost.tokens must be read exactly once");
+    assert.equal(review.cost.tokens, 5, "the stored cost must be the same value that was validated");
+});
+
 test("MC-repair-24: recordCalibration's window (windowFrom/windowTo) is sanitized like predictionRef/outcomeValue, and outcomeRef is read exactly once (independent audit AUD34-ADV-3)", async () => {
     const mc = await createMetacognition();
     assertThrowsReason(() => mc.recordCalibration({

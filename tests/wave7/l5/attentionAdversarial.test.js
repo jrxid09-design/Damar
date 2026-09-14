@@ -187,6 +187,16 @@ test("AT-repair-29: a BigInt or non-finite number nested in subjectRef/evidenceR
     assert.equal(called, 0);
 });
 
+test("AT-repair-31: targetKey reads subjectRef.entityId exactly once (independent audit AUD35-ADV-4)", async () => {
+    const { targetKey } = require("../../../src/cognition/attention");
+    let n = 0;
+    const subjectRef = {};
+    Object.defineProperty(subjectRef, "entityId", { enumerable: true, configurable: true, get() { n++; return "e1"; } });
+    const key = targetKey(subjectRef, "PERCEIVE");
+    assert.equal(n, 1, "subjectRef.entityId must be read exactly once");
+    assert.equal(key, "entity:e1::PERCEIVE");
+});
+
 test("AT-repair-30: a governorPort.capacity() that returns NaN/Infinity falls back to bounds.MAX_RUNNING_TARGETS instead of disabling the floor (independent audit AUD34-ADV-5c)", async () => {
     const clock = manualClock(0);
     const governorPort = { capacity: () => NaN };

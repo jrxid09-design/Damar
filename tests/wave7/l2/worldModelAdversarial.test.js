@@ -366,6 +366,111 @@ test("WM-repair-27: an overflowed unresolved contradiction is archived and retri
     assert.equal(overflowed[0].status, "UNRESOLVABLE");
 });
 
+test("WM-repair-60: subjectKeyOf reads subject.entityId exactly once, so a stateful getter cannot pass the type-guard and then crash key construction (independent audit AUD35-P2-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "d", source: "s" });
+    let n = 0;
+    const subject = {};
+    Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { n++; return n === 1 ? "e1" : Symbol("boom"); } });
+    assert.doesNotThrow(() => wm.query({ subject, attribute: "x" }));
+    assert.equal(n, 1, "entityId must be read exactly once");
+});
+
+test("WM-repair-61: makeEntity's externalRefs[].system/id are each read exactly once, so a stateful getter cannot pass the guard and then crash .slice() (independent audit AUD35-P2-3)", async () => {
+    const wm = await createWorldModel();
+    let n = 0;
+    const ref = { id: "i1" };
+    Object.defineProperty(ref, "system", { enumerable: true, configurable: true, get() { n++; return n === 1 ? "sys" : Symbol("boom"); } });
+    const e = wm.declareEntity({ entityId: "e1", entityKind: "d", source: "s", externalRefs: [ref] });
+    assert.equal(n, 1, "externalRefs[].system must be read exactly once");
+    assert.equal(e.externalRefs[0].system, "sys");
+});
+
+test("WM-repair-62: makeHypothesis's candidateValues[].weight is read exactly once, so a stateful getter cannot pass the guard and then crash Number() (independent audit AUD35-P2-4)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "d", source: "s" });
+    let n = 0;
+    const cand = { value: "v" };
+    Object.defineProperty(cand, "weight", { enumerable: true, configurable: true, get() { n++; return n === 1 ? 1 : Symbol("boom"); } });
+    const h = wm.declareHypothesis({ hypothesisId: "H1", subject: { entityId: "e1" }, attribute: "a", candidateValues: [cand], expiresAt: new Date(9e12).toISOString() });
+    assert.equal(n, 1, "candidateValues[].weight must be read exactly once");
+    assert.equal(h.candidateValues[0].weight, 1);
+});
+
+test("WM-repair-63: a subject whose get/getOwnPropertyDescriptor traps disagree is keyed and stored from the SAME (sanitized) reading, never a mix of both (independent audit AUD35-P2-5)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "d", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "d", source: "s" });
+    // get() lies "e1" (what a naive plain-property read would see); the
+    // descriptor (what buildSafeBeliefValue actually reads) says "e2".
+    // Before the fix, the belief was KEYED under "e1" (subjectKeyOf/beliefKey
+    // used the get trap) but STORED under "e2" (applyRevision's
+    // buildSafeBeliefValue used the descriptor trap) -- two different
+    // subjects for the same belief. After the fix, both must agree: the
+    // belief is consistently "e2" everywhere (buildSafeBeliefValue's
+    // descriptor-based reading is canonical), never split across two subjects.
+    const proxy = new Proxy({ entityId: "e1" }, {
+        get(t, p, r) { return p === "entityId" ? "e1" : Reflect.get(t, p, r); },
+        getOwnPropertyDescriptor(t, p) {
+            return p === "entityId"
+                ? { value: "e2", enumerable: true, configurable: true, writable: true }
+                : Reflect.getOwnPropertyDescriptor(t, p);
+        },
+        ownKeys() { return ["entityId"]; },
+        has(t, p) { return p === "entityId"; }
+    });
+    wm.ingestDeclaration({ subject: proxy, attribute: "status", value: "ok" });
+    assert.equal(wm.query({ subject: { entityId: "e2" }, attribute: "status" }).value, "ok",
+        "the belief must be queryable under the SAME subject it was stored under (the descriptor-based reading)");
+    assert.equal(wm.query({ subject: { entityId: "e1" }, attribute: "status" }).unknown, true,
+        "the belief must never also appear keyed under the get-trap's subject -- key and storage must agree");
+});
+
+test("WM-repair-64: relationId/hypothesisId/observationId are read exactly once end-to-end (guard AND construction), not just guard-vs-store consistent (independent audit AUD35-ADV-2)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "d", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "d", source: "s" });
+
+    let nr = 0;
+    const rspec = { kind: "k", from: "e1", to: "e2" };
+    Object.defineProperty(rspec, "relationId", { enumerable: true, configurable: true, get() { nr++; return "R1"; } });
+    const r = wm.declareRelation(rspec);
+    assert.equal(nr, 1, "relationId must be read exactly once, including during construction");
+    assert.equal(r.relationId, "R1");
+
+    let nh = 0;
+    const hspec = { subject: { entityId: "e1" }, attribute: "a", candidateValues: [{ value: 1, weight: 1 }], expiresAt: new Date(9e12).toISOString() };
+    Object.defineProperty(hspec, "hypothesisId", { enumerable: true, configurable: true, get() { nh++; return "H1"; } });
+    const h = wm.declareHypothesis(hspec);
+    assert.equal(nh, 1, "hypothesisId must be read exactly once, including during construction");
+    assert.equal(h.hypothesisId, "H1");
+
+    let no = 0;
+    const ospec = { subject: { entityId: "e1" }, attribute: "temp", value: 1, sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() };
+    Object.defineProperty(ospec, "observationId", { enumerable: true, configurable: true, get() { no++; return "O1"; } });
+    wm.ingestObservation(ospec);
+    assert.equal(no, 1, "observationId must be read exactly once, including during construction");
+});
+
+test("WM-repair-65: makeObservation's sensor/frame fields are each read exactly once (independent audit AUD35-ADV-5)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "d", source: "s" });
+    let n = 0;
+    const sensor = { sensorId: "s1" };
+    Object.defineProperty(sensor, "modality", { enumerable: true, configurable: true, get() { n++; return n === 1 ? "vision" : Symbol("boom"); } });
+    assert.doesNotThrow(() => wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "x", value: 1, sensor, tier: "T1", observedAt: new Date(1).toISOString() }));
+    assert.equal(n, 1, "sensor.modality must be read exactly once");
+});
+
+test("WM-repair-66: makeHypothesis's subject.entityId guard reads exactly once, from the same source buildSafeBeliefValue rejects accessors from (independent audit AUD35-ADV-6)", async () => {
+    const wm = await createWorldModel();
+    let called = 0;
+    const subject = {};
+    Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { called++; return "e1"; } });
+    assertThrowsReason(() => wm.declareHypothesis({ hypothesisId: "H1", subject, attribute: "a", candidateValues: [{ value: 1, weight: 1 }], expiresAt: new Date(9e12).toISOString() }), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(called, 1, "the accessor guard read must happen exactly once before the sanitizer rejects it closed");
+});
+
 test("WM-repair-59: subgraph's budget.nodes/budget.bytes are each read exactly once, so a stateful accessor cannot change the effective budget mid-traversal (independent audit AUD34-ADV-5b)", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e0", entityKind: "d", source: "s" });

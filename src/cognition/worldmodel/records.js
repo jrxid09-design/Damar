@@ -56,13 +56,19 @@ function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, n
         externalRefs: Object.freeze((externalRefs ?? []).slice(0, 32)
             .map(r => {
                 if (!r || typeof r !== "object") fail(REASONS.INVALID_RECORD, "externalRefs elemen wajib objek");
-                // Bug review independen (audit putaran-28, AUD28-P2-7):
-                // `String(r.system)`/`String(r.id)` mentah mengeksekusi
-                // toString hostile milik pemanggil, dan meledakkan TypeError
-                // mentah untuk Symbol.
-                if (typeof r.system !== "string" || !r.system) fail(REASONS.INVALID_RECORD, "externalRefs[].system wajib string");
-                if (typeof r.id !== "string" || !r.id) fail(REASONS.INVALID_RECORD, "externalRefs[].id wajib string");
-                return Object.freeze({ system: r.system.slice(0, 64), id: r.id.slice(0, 200) });
+                // Bug review independen (audit putaran-28, AUD28-P2-7;
+                // putaran-35, AUD35-P2-3): `String(r.system)`/`String(r.id)`
+                // mentah mengeksekusi toString hostile milik pemanggil, dan
+                // meledakkan TypeError mentah untuk Symbol -- perbaikan
+                // putaran-28 menutup itu tapi `r.system`/`r.id` masih dibaca
+                // TIGA KALI (typeof, truthy, `.slice()`) -- getter stateful
+                // bisa lolos guard dengan string sah lalu membalas Symbol/
+                // BigInt pada baca berikutnya, tetap meledakkan mentah.
+                // Dikeluarkan sekali lewat destructuring.
+                const { system, id } = r;
+                if (typeof system !== "string" || !system) fail(REASONS.INVALID_RECORD, "externalRefs[].system wajib string");
+                if (typeof id !== "string" || !id) fail(REASONS.INVALID_RECORD, "externalRefs[].id wajib string");
+                return Object.freeze({ system: system.slice(0, 64), id: id.slice(0, 200) });
             })),
         source
     });
@@ -110,7 +116,14 @@ function makeObservation({ observationId, subject, attribute, value, sensor, fra
         // `${tier}` mentah meledakkan TypeError untuk Symbol.
         fail(REASONS.INADMISSIBLE_TIER, `tier '${typeof tier === "string" ? tier : typeof tier}' tidak admissible untuk ingest (hanya T1/T2/T4)`);
     }
-    if (!sensor || typeof sensor.sensorId !== "string" || !sensor.sensorId) {
+    // Bug review independen (audit putaran-35, AUD35-ADV-5): `sensor`/
+    // `frame`'s field masing-masing dibaca berkali-kali (guard tipe, lalu
+    // `String()` di konstruksi) -- latent hari ini (record observasi ini
+    // transit, tidak durabel sendiri), tapi paritas dengan sanitizer lane
+    // lain. Dikeluarkan sekali lewat destructuring.
+    const { sensorId, modality, calibrationRef } = sensor ?? {};
+    const { kind: frameKind, ref: frameRef } = frame ?? {};
+    if (!sensor || typeof sensorId !== "string" || !sensorId) {
         fail(REASONS.MISSING_SENSOR_ID, "sensor.sensorId wajib ada (W-3)");
     }
     if (typeof observedAt !== "string" || !observedAt || !Number.isFinite(Date.parse(observedAt))) {
@@ -137,13 +150,13 @@ function makeObservation({ observationId, subject, attribute, value, sensor, fra
         // Symbol. Field bukan primitif aman diperlakukan sebagai absen
         // (null), konsisten dengan perilaku falsy->null yang sudah ada.
         sensor: Object.freeze({
-            sensorId: sensor.sensorId,
-            modality: (typeof sensor.modality === "string" || typeof sensor.modality === "number") ? String(sensor.modality).slice(0, 64) : null,
-            calibrationRef: (typeof sensor.calibrationRef === "string" || typeof sensor.calibrationRef === "number") ? String(sensor.calibrationRef).slice(0, 200) : null
+            sensorId,
+            modality: (typeof modality === "string" || typeof modality === "number") ? String(modality).slice(0, 64) : null,
+            calibrationRef: (typeof calibrationRef === "string" || typeof calibrationRef === "number") ? String(calibrationRef).slice(0, 200) : null
         }),
         frame: frame ? Object.freeze({
-            kind: (typeof frame.kind === "string" || typeof frame.kind === "number") ? String(frame.kind).slice(0, 32) : "",
-            ref: (typeof frame.ref === "string" || typeof frame.ref === "number") ? String(frame.ref).slice(0, 200) : ""
+            kind: (typeof frameKind === "string" || typeof frameKind === "number") ? String(frameKind).slice(0, 32) : "",
+            ref: (typeof frameRef === "string" || typeof frameRef === "number") ? String(frameRef).slice(0, 200) : ""
         }) : null,
         tier, observedAt
     });
@@ -155,7 +168,14 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
     // makeObservation memvalidasi subject wajib { entityId } atau
     // { relationId }; makeHypothesis tidak pernah, jadi subject:null lolos
     // tersimpan dan bisa bertabrakan kunci dengan hipotesis lain.
-    if (!subject || (typeof subject.entityId !== "string" && typeof subject.relationId !== "string")) {
+    // Bug review independen (audit putaran-35, AUD35-ADV-6): `subject.entityId`/
+    // `.relationId` dibaca langsung di sini SEBELUM buildSafeBeliefValue
+    // (yang menolak accessor lewat descriptor) sempat memproses subject --
+    // getter pemanggil tetap terpanggil satu kali sebelum ditolak tertutup.
+    // Dibaca lewat destructuring SEKALI, dipakai untuk guard SAJA; subject
+    // asli tetap diteruskan ke buildSafeBeliefValue seperti sebelumnya.
+    const { entityId, relationId } = subject ?? {};
+    if (!subject || (typeof entityId !== "string" && typeof relationId !== "string")) {
         fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
     }
     if (!Array.isArray(candidateValues) || candidateValues.length === 0) {
@@ -187,13 +207,19 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
         // jadi TypeError mentah alih-alih INVALID_RECORD.
         candidateValues: Object.freeze(candidateValues.slice(0, 16).map(c => {
             if (!c || typeof c !== "object") fail(REASONS.INVALID_RECORD, "candidateValues elemen wajib objek");
-            // Bug review independen (audit putaran-28, AUD28-P2-3):
-            // `Number(c.weight)` mentah meledakkan TypeError untuk Symbol
-            // dan mengeksekusi valueOf hostile untuk objek.
-            if (typeof c.weight !== "number" && typeof c.weight !== "string" && typeof c.weight !== "boolean" && c.weight !== undefined) {
+            // Bug review independen (audit putaran-28, AUD28-P2-3; putaran-35,
+            // AUD35-P2-4): `Number(c.weight)` mentah meledakkan TypeError
+            // untuk Symbol dan mengeksekusi valueOf hostile untuk objek --
+            // perbaikan putaran-28 menutup itu tapi `c.weight` masih dibaca
+            // DUA KALI (guard tipe, lalu `Number()` di konstruksi) -- getter
+            // stateful bisa lolos guard dengan angka sah lalu membalas
+            // Symbol pada baca berikutnya, tetap meledakkan mentah. Dibaca
+            // SEKALI ke lokal.
+            const { weight, value } = c;
+            if (typeof weight !== "number" && typeof weight !== "string" && typeof weight !== "boolean" && weight !== undefined) {
                 fail(REASONS.INVALID_RECORD, "candidateValues[].weight wajib angka");
             }
-            return Object.freeze({ value: buildSafeBeliefValue(c.value), weight: clamp01(Number(c.weight)) });
+            return Object.freeze({ value: buildSafeBeliefValue(value), weight: clamp01(Number(weight)) });
         })),
         discriminatingProbe: buildSafeBeliefValue(discriminatingProbe), expiresAt
     });
