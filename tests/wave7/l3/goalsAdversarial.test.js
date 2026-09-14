@@ -684,14 +684,16 @@ test("GL-repair-48: commitmentId/planId/taskId are each read exactly once, so a 
     assert.equal(ge.getTask(t1.taskId).state, "PENDING");
 });
 
-test("GL-repair-52: successCondition.subject.entityId is read exactly once, so a stateful getter cannot pass the guard with a valid entityId and store an empty subject (independent audit AUD34-P2-1)", async () => {
+test("GL-repair-52: validateConditionSpec's subject is sanitized via buildSafeIntentTemplate before the guard, so an accessor entityId is rejected closed without ever being invoked (independent audit AUD34-P2-1, tightened by AUD38-P2-1)", async () => {
     const ge = await createGoalEngine();
     let n = 0;
     const subject = {};
-    Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { n++; return n === 1 ? "e1" : undefined; } });
-    const goal = ge.proposeGoal(baseGoalSpec({ successCondition: { kind: "WORLD_BELIEF", subject, attribute: "status", expectedValue: "done" } }));
-    assert.equal(n, 1, "subject.entityId must be read exactly once");
-    assert.equal(goal.successCondition.subject.entityId, "e1", "the stored subject must come from the same read that was validated");
+    Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { n++; return "e1"; } });
+    assert.throws(() => ge.proposeGoal(baseGoalSpec({ successCondition: { kind: "WORLD_BELIEF", subject, attribute: "status", expectedValue: "done" } })));
+    assert.equal(n, 0, "buildSafeIntentTemplate must reject the accessor via its property descriptor without ever invoking it");
+
+    const goal = ge.proposeGoal(baseGoalSpec({ successCondition: { kind: "WORLD_BELIEF", subject: { entityId: "e1" }, attribute: "status", expectedValue: "done" } }));
+    assert.equal(goal.successCondition.subject.entityId, "e1", "a plain (non-accessor) subject must still be accepted");
 });
 
 test("GL-repair-53: origin.kind is read exactly once across proposeGoal/makeGoal, so a stateful getter cannot get validated as OWNER (skipping ownerApproval) and stored as AGENT_SUGGESTION (independent audit AUD34-P2-5)", async () => {

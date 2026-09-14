@@ -92,14 +92,21 @@ function validateTrigger(trigger) {
     // Bug review independen (audit putaran-37, AUD37-P2-2): `subject`
     // dikeluarkan DI SINI (bukan di atas fungsi) supaya AT/AFTER/RECURRING
     // tidak pernah menyentuhnya sama sekali.
+    // Bug review independen (audit putaran-38, AUD38-P2-1): destructuring
+    // `entityId`/`relationId` di atas membaca KEDUANYA lewat [[Get]] biasa
+    // milik pemanggil SEBELUM buildSafePayloadRef (descriptor-based)
+    // sempat memprosesnya -- getter relationId tereksekusi bahkan ketika
+    // entityId sudah valid. Disaring SEKALI lewat buildSafePayloadRef
+    // lebih dulu; entityId/relationId diturunkan dari salinan aman itu.
     if (kind === "ON_STATE") {
-        const { entityId, relationId, ...subjectRest } = subject ?? {};
-        if (!subject || (typeof entityId !== "string" && typeof relationId !== "string") ||
+        const safeSubject = buildSafePayloadRef(subject);
+        const validEntity = typeof safeSubject?.entityId === "string";
+        if (!subject || (!validEntity && typeof safeSubject?.relationId !== "string") ||
             typeof attribute !== "string") {
             fail(REASONS.INVALID_TRIGGER, "trigger ON_STATE wajib subject/attribute");
         }
         return deepFreeze(buildSafePayloadRef({
-            ...triggerRest, kind, attribute, subject: { ...subjectRest, entityId, relationId }
+            ...triggerRest, kind, attribute, subject: safeSubject
         }));
     }
     // Bug review independen (audit putaran-10, AUD10-P2-2): sapuan deepFreeze
@@ -330,8 +337,14 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
     // stateful bisa lolos validasi dengan entityId sah lalu menyimpan
     // subject kosong (kelas yang sama dengan AUD34-P2-1/AUD34-P2-2).
     // Dikeluarkan sekali lewat destructuring.
-    const { entityId, relationId, ...subjectRest } = subject ?? {};
-    if (!subject || (typeof entityId !== "string" && typeof relationId !== "string")) {
+    // Bug review independen (audit putaran-38, AUD38-P2-1): destructuring
+    // di atas membaca `entityId`/`relationId` KEDUANYA lewat [[Get]] biasa
+    // milik pemanggil SEBELUM buildSafePayloadRef sempat memprosesnya --
+    // getter relationId tereksekusi bahkan ketika entityId sudah valid.
+    // Disaring SEKALI lewat buildSafePayloadRef lebih dulu.
+    const safeSubject = buildSafePayloadRef(subject);
+    const validEntity = typeof safeSubject?.entityId === "string";
+    if (!subject || (!validEntity && typeof safeSubject?.relationId !== "string")) {
         fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
     }
     // Bug review independen (audit putaran-9, AUD9-P2-3): expectedValue
@@ -345,7 +358,7 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
     // sini juga cuma deepFreeze (membekukan, tidak menyaring) -- BigInt di
     // dalamnya lolos lalu meledakkan JSON.stringify di saveSnapshot().
     return Object.freeze({
-        expectationId, subject: deepFreeze(buildSafePayloadRef({ ...subjectRest, entityId, relationId })), attribute,
+        expectationId, subject: deepFreeze(safeSubject), attribute,
         expectedValue: deepFreeze(buildSafePayloadRef(expectedValue)),
         window: deepFreeze(buildSafePayloadRef({ ...windowRest, latestAt, earliestAt })),
         onSatisfied, onViolated, state: "PENDING"

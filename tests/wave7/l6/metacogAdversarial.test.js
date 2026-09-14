@@ -59,9 +59,16 @@ test("MC-repair-9: openReview(null)/recordCalibration(null) are rejected as INVA
 
 test("MC-repair-11: hostile toString on proposal.kind/outcomeTier/reviewId never executes, and Symbol variants are rejected as domain errors, not raw TypeErrors (independent audit AUD25-P2-1)", async () => {
     const mc = await createMetacognition();
+    // Bug review independen (audit putaran-38, AUD38-P2-2): sejak proposal
+    // disaring SEKALI lewat buildSafeCognitiveCopy SEBELUM `kind` divalidasi
+    // (menutup celah getter kind), method `toString` bersarang di dalam
+    // evilKind sendiri kini ditolak lebih dulu sebagai materi executable
+    // (EXECUTABLE_MATERIAL_REJECTED, bukan lagi INVALID_RECORD) -- toString
+    // tetap TIDAK PERNAH dipanggil (dibaca lewat descriptor), invarian asli
+    // tes ini tetap berlaku, hanya alasan penolakannya lebih ketat sekarang.
     let calledKind = 0;
     const evilKind = { toString() { calledKind++; return "APPLY_CHANGE"; } };
-    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, proposals: [{ kind: evilKind }] }), "INVALID_RECORD");
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, proposals: [{ kind: evilKind }] }), "EXECUTABLE_MATERIAL_REJECTED");
     assert.equal(calledKind, 0, "proposal.kind's toString must never be invoked before the enum check");
 
     let calledTier = 0;
@@ -197,13 +204,13 @@ test("MC-repair-23: cost.tokens/cost.ms are each read exactly once in openReview
     assert.equal(r2.state, "OPEN", "the reflection budget window must not have been poisoned by a second, unread cost.tokens value");
 });
 
-test("MC-repair-25: openReview reads each proposal.kind exactly once, so a stateful getter cannot pass the enum check and then crash the error message (independent audit AUD35-P2-2)", async () => {
+test("MC-repair-25: openReview sanitizes each proposal via buildSafeCognitiveCopy before checking .kind, so an accessor kind is rejected closed without ever being invoked (independent audit AUD35-P2-2, tightened by AUD38-P2-2)", async () => {
     const mc = await createMetacognition();
     let n = 0;
     const p = {};
-    Object.defineProperty(p, "kind", { enumerable: true, configurable: true, get() { n++; return n === 1 ? "NOT_A_KIND" : Symbol("boom"); } });
-    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: [], proposals: [p], cost: { tokens: 0, ms: 0 } }), "INVALID_RECORD");
-    assert.equal(n, 1, "proposal.kind must be read exactly once");
+    Object.defineProperty(p, "kind", { enumerable: true, configurable: true, get() { n++; return "REPLAN"; } });
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: [], proposals: [p], cost: { tokens: 0, ms: 0 } }), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(n, 0, "buildSafeCognitiveCopy must reject the accessor via its property descriptor without ever invoking it");
 });
 
 test("MC-repair-27: openReview preserves the entityId-first short-circuit; a valid entityId subject's relationId accessor is never invoked (independent audit AUD37-P2-1)", async () => {

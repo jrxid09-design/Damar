@@ -68,6 +68,16 @@ function makeSignal({ signalId, sourceKind, sourceId, subjectRef, proposedUrgenc
     if (expiresAtMs !== null && (typeof expiresAtMs !== "number" || !Number.isFinite(expiresAtMs))) {
         fail(REASONS.INVALID_RECORD, "expiresAtMs, jika ada, wajib angka finite");
     }
+    // Bug review independen (audit putaran-38, AUD38-ADV-2): evidenceRef
+    // primitif hanya dijaga untuk objek (deepFreeze) -- BigInt lolos
+    // mentah, dan evidenceRefIdentity meruntuhkan SEMUA BigInt/Symbol/
+    // function ke satu identitas ("bigint"/"symbol"/"function"), membuat
+    // dua evidenceRef primitif yang benar-benar berbeda dihitung sebagai
+    // korroborasi yang SAMA (undercounting). Ditolak tertutup, konsisten
+    // dengan sweep angka non-finite di lane lain.
+    if (typeof evidenceRef === "bigint") {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "evidenceRef tidak boleh berupa BigInt");
+    }
 
     return Object.freeze({
         signalId, sourceKind, sourceId,

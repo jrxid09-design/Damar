@@ -126,24 +126,28 @@ test("PM-repair-41: armExpectation(subject:null) is rejected instead of silently
     assertThrowsReason(() => pm.armExpectation({ subject: null, attribute: "status", expectedValue: 1, window: { latestAt: new Date(9e12).toISOString() } }), "INVALID_RECORD");
 });
 
-test("PM-repair-42: an ON_STATE trigger's subject.entityId is read exactly once, so a stateful getter cannot pass the guard with a valid entityId and store an empty subject (independent audit AUD34-P2-2)", async () => {
+test("PM-repair-42: an ON_STATE trigger's subject is sanitized via buildSafePayloadRef before the guard, so an accessor entityId is rejected closed without ever being invoked (independent audit AUD34-P2-2, tightened by AUD38-P2-1)", async () => {
     const pm = await createProspectiveMemory();
     let n = 0;
     const subject = {};
-    Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { n++; return n === 1 ? "e1" : undefined; } });
-    const r = pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "ON_STATE", subject, attribute: "status" } });
-    assert.equal(n, 1, "trigger.subject.entityId must be read exactly once");
-    assert.equal(r.trigger.subject.entityId, "e1", "the stored subject must come from the same read that was validated");
+    Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { n++; return "e1"; } });
+    assert.throws(() => pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "ON_STATE", subject, attribute: "status" } }));
+    assert.equal(n, 0, "buildSafePayloadRef must reject the accessor via its property descriptor without ever invoking it");
+
+    const r = pm.arm({ reminderId: "R2", wakeClass: "NOTIFY_OWNER", trigger: { kind: "ON_STATE", subject: { entityId: "e1" }, attribute: "status" } });
+    assert.equal(r.trigger.subject.entityId, "e1", "a plain (non-accessor) subject must still be accepted");
 });
 
-test("PM-repair-43: an expectation's subject.entityId is read exactly once, so a stateful getter cannot pass the guard with a valid entityId and store an empty subject (independent audit AUD34-P2-3)", async () => {
+test("PM-repair-43: an expectation's subject is sanitized via buildSafePayloadRef before the guard, so an accessor entityId is rejected closed without ever being invoked (independent audit AUD34-P2-3, tightened by AUD38-P2-1)", async () => {
     const pm = await createProspectiveMemory();
     let n = 0;
     const subject = {};
-    Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { n++; return n === 1 ? "e1" : undefined; } });
-    const e = pm.armExpectation({ subject, attribute: "status", expectedValue: "done", window: { latestAt: new Date(9e12).toISOString() } });
-    assert.equal(n, 1, "subject.entityId must be read exactly once");
-    assert.equal(e.subject.entityId, "e1", "the stored subject must come from the same read that was validated");
+    Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { n++; return "e1"; } });
+    assert.throws(() => pm.armExpectation({ subject, attribute: "status", expectedValue: "done", window: { latestAt: new Date(9e12).toISOString() } }));
+    assert.equal(n, 0, "buildSafePayloadRef must reject the accessor via its property descriptor without ever invoking it");
+
+    const e = pm.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: "done", window: { latestAt: new Date(9e12).toISOString() } });
+    assert.equal(e.subject.entityId, "e1", "a plain (non-accessor) subject must still be accepted");
 });
 
 test("PM-repair-44: trigger.kind is read exactly once, so a stateful getter cannot pass the AT guard and store an unvalidated ON_STATE trigger (independent audit AUD34-P2-4)", async () => {
@@ -174,6 +178,18 @@ test("PM-repair-47: a non-ON_STATE trigger never dereferences subject's inner fi
     const r = pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(9e12).toISOString(), subject } });
     assert.equal(r.trigger.kind, "AT");
     assert.equal(called, 0, "an AT trigger must never touch subject's inner fields -- subject is ON_STATE-only");
+});
+
+test("PM-repair-49: compaction only removes a victim's OWN firedOccurrenceIds entries, not a differently-terminated reminder whose id happens to be a string-prefix of the victim's (independent audit AUD38-ADV-1)", async () => {
+    const clock = manualClock(0);
+    const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_TOTAL_REMINDERS_RETAINED: 1, MAX_ARMED_REMINDERS: 100 } });
+    pm.arm({ reminderId: "R", wakeClass: "MAINTENANCE", trigger: { kind: "AT", at: new Date(500).toISOString() } });
+    clock.advance(1000);
+    pm.tick(); // fires "R" -> firedOccurrenceIds = { "R:0" }; reminders.size===1, not yet over bound
+    pm.arm({ reminderId: "R:x", wakeClass: "MAINTENANCE", trigger: { kind: "AT", at: new Date(1500).toISOString() } });
+    clock.advance(1000);
+    pm.tick(); // fires "R:x" -> reminders.size===2 > MAX_TOTAL_REMINDERS_RETAINED(1) -> compacts the OLDER terminal reminder, "R"
+    assert.equal(pm.firedOccurrenceIdsSize(), 1, "compacting 'R' must remove only 'R:0', not 'R:x:0' (a false string-prefix match)");
 });
 
 test("PM-repair-48: origin is passed to the sanitizer without a pre-spread, so a hostile origin.kind accessor is rejected without being invoked (independent audit AUD37-P2-3)", async () => {

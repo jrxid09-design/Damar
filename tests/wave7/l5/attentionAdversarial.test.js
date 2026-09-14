@@ -197,6 +197,20 @@ test("AT-repair-31: targetKey reads subjectRef.entityId exactly once (independen
     assert.equal(key, "entity:e1::PERCEIVE");
 });
 
+test("AT-repair-34: a BigInt evidenceRef is rejected, and two distinct non-object evidenceRefs (e.g. Symbols) still count as two distinct corroboration pairs (independent audit AUD38-ADV-2)", async () => {
+    const ae = await createAttentionEconomy();
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef: { entityId: "e1" }, evidenceRef: 1n }, "PERCEIVE"), "EXECUTABLE_MATERIAL_REJECTED");
+
+    const control = await createAttentionEconomy({ clock: manualClock(1000) });
+    const { targetId: tControl } = control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "A" }, "PERCEIVE");
+    control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "B" }, "PERCEIVE");
+    const symbolRefs = await createAttentionEconomy({ clock: manualClock(1000) });
+    const { targetId: tSym } = symbolRefs.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: Symbol("A") }, "PERCEIVE");
+    symbolRefs.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: Symbol("B") }, "PERCEIVE");
+    assert.equal(symbolRefs.getTarget(tSym).effectivePriority, control.getTarget(tControl).effectivePriority,
+        "two distinct Symbol evidenceRefs must count as two distinct corroboration pairs, same as two distinct string evidenceRefs");
+});
+
 test("AT-repair-33: an accessor on ingestSignal's subjectRef/evidenceRef is rejected without being invoked -- deepFreeze receives the raw value, not a pre-spread copy (independent audit AUD37-P2-3)", async () => {
     const ae = await createAttentionEconomy();
     let called = 0;

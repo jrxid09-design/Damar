@@ -123,7 +123,16 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         if (evidenceRef === null || evidenceRef === undefined) return "";
         const t = typeof evidenceRef;
         if (t === "string" || t === "number" || t === "boolean") return `${t}:${evidenceRef}`;
-        if (t !== "object") return t;
+        // Bug review independen (audit putaran-38, AUD38-ADV-2): sebelumnya
+        // `return t;` meruntuhkan SEMUA evidenceRef bigint/symbol/function ke
+        // satu identitas per tipe ("bigint"/"symbol"/"function"), membuat dua
+        // evidenceRef primitif yang benar-benar berbeda (mis. 1n vs 2n)
+        // dihitung sebagai bukti korroborasi yang SAMA. BigInt sudah ditolak
+        // tertutup di makeSignal (AUD38-ADV-2); paritas di sini untuk
+        // symbol/function (yang tetap diterima sebagai data tidak aktif,
+        // lihat catatan deepFreeze) supaya dua nilai berbeda tetap
+        // menghasilkan identitas berbeda.
+        if (t !== "object") return `${t}:${String(evidenceRef)}`;
         if (!objectEvidenceRefIds.has(evidenceRef)) objectEvidenceRefIds.set(evidenceRef, nextObjectEvidenceRefId++);
         return `object:${objectEvidenceRefIds.get(evidenceRef)}`;
     }
