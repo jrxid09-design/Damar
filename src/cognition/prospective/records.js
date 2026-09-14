@@ -2,7 +2,7 @@
 
 /** W7-L4 PROSPECTIVE MEMORY — pembangun record murni (spec §3). */
 
-const { REASONS, fail } = require("./errors");
+const { REASONS, fail, ProspectiveError } = require("./errors");
 const { BOUNDS } = require("./bounds");
 
 const WAKE_CLASSES = new Set(["NOTIFY_OWNER", "RESUME_GOAL", "CHECK_EXPECTATION", "MAINTENANCE"]);
@@ -39,10 +39,19 @@ function validateTrigger(trigger) {
     // tersentuh sama sekali untuk kind selain ON_STATE. `subject` sekarang
     // hanya dikeluarkan di DALAM cabang ON_STATE, tempat ia benar-benar
     // dipakai.
-    const {
-        kind, at, delayMs, intervalMs, until, maxOccurrences, subject, attribute,
-        ...triggerRest
-    } = trigger ?? {};
+    // Bug review independen (audit putaran-43, W7R43-P2-1): destructuring
+    // di bawah membaca SETIAP properti `trigger` lewat [[Get]] biasa --
+    // sebuah Proxy yang di-revoke melempar TypeError MENTAH pada operasi
+    // ini, keluar dari `arm()` publik, bukan INVALID_TRIGGER terkendali.
+    let kind, at, delayMs, intervalMs, until, maxOccurrences, subject, attribute, triggerRest;
+    try {
+        ({
+            kind, at, delayMs, intervalMs, until, maxOccurrences, subject, attribute,
+            ...triggerRest
+        } = trigger ?? {});
+    } catch {
+        fail(REASONS.INVALID_TRIGGER, "trigger tidak dapat diverifikasi dengan aman, ditolak");
+    }
     if (!trigger || !TRIGGER_KINDS.has(kind)) {
         // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
         // `${trigger?.kind}` mentah meledakkan TypeError untuk Symbol.
@@ -170,38 +179,75 @@ function buildSafePayloadRef(value, depth = 0, budget) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah node pada payloadRef melebihi batas");
     }
 
-    if (Array.isArray(value)) {
-        // Bug review independen (audit putaran-42, W7R42-P2-1): `value.length`
-        // dulu dibaca SEKALI untuk cek batas ini, lalu dibaca ULANG di
-        // KONDISI loop di bawah setiap iterasi -- Proxy dengan getter
-        // `length` yang terus bertambah membuat loop TIDAK PERNAH berhenti
-        // (DoS). `length` di-cache SEKALI ke lokal dan divalidasi sebagai
-        // integer terhingga non-negatif SEBELUM dipakai di mana pun.
-        const len = value.length;
-        if (!Number.isInteger(len) || len < 0 || len > BOUNDS.MAX_PAYLOAD_ARRAY_LENGTH) {
-            fail(REASONS.PAYLOAD_TOO_LARGE, "panjang array pada payloadRef melebihi batas atau tidak sah");
-        }
-        const arrProto = Object.getPrototypeOf(value);
-        if (arrProto !== Array.prototype && arrProto !== null) {
-            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED,
-                "payloadRef tidak boleh berupa array dengan prototype non-standar (kontrak data murni, termasuk toJSON warisan)");
-        }
-        const out = [];
-        for (let i = 0; i < len; i++) {
-            const desc = Object.getOwnPropertyDescriptor(value, i);
-            if (!desc || desc.get || desc.set) {
-                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa properti accessor: '${i}'`);
+    // Bug review independen (audit putaran-43, W7R43-P2-1/W7R43-P2-7):
+    // `Array.isArray`/`Object.getPrototypeOf`/`Reflect.ownKeys` di bawah
+    // adalah operasi dasar terhadap `value` yang belum tepercaya -- di
+    // KEDALAMAN MANAPUN lewat rekursi -- sebuah Proxy yang di-revoke
+    // melempar TypeError MENTAH pada operasi ini, keluar dari `arm()`/
+    // `armExpectation()` publik. Seluruh cabang array/objek dibungkus
+    // try/catch; ProspectiveError (termasuk hasil rekursi anak) diteruskan
+    // apa adanya, kegagalan APA PUN lainnya gagal tertutup.
+    try {
+        if (Array.isArray(value)) {
+            // Bug review independen (audit putaran-42, W7R42-P2-1): `value.length`
+            // dulu dibaca SEKALI untuk cek batas ini, lalu dibaca ULANG di
+            // KONDISI loop di bawah setiap iterasi -- Proxy dengan getter
+            // `length` yang terus bertambah membuat loop TIDAK PERNAH berhenti
+            // (DoS). `length` di-cache SEKALI ke lokal dan divalidasi sebagai
+            // integer terhingga non-negatif SEBELUM dipakai di mana pun.
+            const len = value.length;
+            if (!Number.isInteger(len) || len < 0 || len > BOUNDS.MAX_PAYLOAD_ARRAY_LENGTH) {
+                fail(REASONS.PAYLOAD_TOO_LARGE, "panjang array pada payloadRef melebihi batas atau tidak sah");
             }
-            const built = buildSafePayloadRef(desc.value, depth + 1, budget);
-            out[i] = built === undefined ? null : built; // sama seperti JSON: lubang array -> null
+            const arrProto = Object.getPrototypeOf(value);
+            if (arrProto !== Array.prototype && arrProto !== null) {
+                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED,
+                    "payloadRef tidak boleh berupa array dengan prototype non-standar (kontrak data murni, termasuk toJSON warisan)");
+            }
+            const out = [];
+            for (let i = 0; i < len; i++) {
+                const desc = Object.getOwnPropertyDescriptor(value, i);
+                if (!desc || desc.get || desc.set) {
+                    fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa properti accessor: '${i}'`);
+                }
+                const built = buildSafePayloadRef(desc.value, depth + 1, budget);
+                out[i] = built === undefined ? null : built; // sama seperti JSON: lubang array -> null
+            }
+            // Properti OWN non-indeks pada array (mis. `.toJSON`) divalidasi
+            // tapi TIDAK disalin -- sama seperti JSON.stringify lama yang diam-diam
+            // mengabaikan properti non-indeks pada array.
+            for (const key of Reflect.ownKeys(value)) {
+                if (key === "length" || ARRAY_INDEX_PATTERN.test(String(key))) continue;
+                if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa kunci Symbol");
+                if (DANGEROUS_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak pada array: '${key}'`);
+                if (FORBIDDEN_PAYLOAD_KEYS.includes(key)) {
+                    fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa '${key}' (di kedalaman manapun)`);
+                }
+                const desc = Object.getOwnPropertyDescriptor(value, key);
+                if (!desc || desc.get || desc.set) {
+                    fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa properti accessor: '${String(key)}'`);
+                }
+                // Nilainya tidak disalin (lihat komentar di atas), TAPI tetap
+                // divalidasi -- kalau tidak, `arr.toJSON = fn` lolos tanpa
+                // terdeteksi karena tidak pernah masuk `out`.
+                buildSafePayloadRef(desc.value, depth + 1, budget);
+            }
+            return out;
         }
-        // Properti OWN non-indeks pada array (mis. `.toJSON`) divalidasi
-        // tapi TIDAK disalin -- sama seperti JSON.stringify lama yang diam-diam
-        // mengabaikan properti non-indeks pada array.
-        for (const key of Reflect.ownKeys(value)) {
-            if (key === "length" || ARRAY_INDEX_PATTERN.test(String(key))) continue;
+
+        const proto = Object.getPrototypeOf(value);
+        if (proto !== Object.prototype && proto !== null) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED,
+                "payloadRef tidak boleh berupa instance kelas (kontrak data murni, termasuk toJSON warisan)");
+        }
+        const objKeys = Reflect.ownKeys(value);
+        if (objKeys.length > MAX_PAYLOAD_KEYS) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah kunci pada payloadRef melebihi batas");
+        }
+        const out = {};
+        for (const key of objKeys) {
             if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa kunci Symbol");
-            if (DANGEROUS_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak pada array: '${key}'`);
+            if (DANGEROUS_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak: '${key}'`);
             if (FORBIDDEN_PAYLOAD_KEYS.includes(key)) {
                 fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa '${key}' (di kedalaman manapun)`);
             }
@@ -209,38 +255,14 @@ function buildSafePayloadRef(value, depth = 0, budget) {
             if (!desc || desc.get || desc.set) {
                 fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa properti accessor: '${String(key)}'`);
             }
-            // Nilainya tidak disalin (lihat komentar di atas), TAPI tetap
-            // divalidasi -- kalau tidak, `arr.toJSON = fn` lolos tanpa
-            // terdeteksi karena tidak pernah masuk `out`.
-            buildSafePayloadRef(desc.value, depth + 1, budget);
+            const built = buildSafePayloadRef(desc.value, depth + 1, budget);
+            if (built !== undefined) out[key] = built; // sama seperti JSON: kunci bernilai undefined dibuang
         }
         return out;
+    } catch (err) {
+        if (err instanceof ProspectiveError) throw err;
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak dapat diverifikasi dengan aman, ditolak");
     }
-
-    const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null) {
-        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED,
-            "payloadRef tidak boleh berupa instance kelas (kontrak data murni, termasuk toJSON warisan)");
-    }
-    const objKeys = Reflect.ownKeys(value);
-    if (objKeys.length > MAX_PAYLOAD_KEYS) {
-        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah kunci pada payloadRef melebihi batas");
-    }
-    const out = {};
-    for (const key of objKeys) {
-        if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa kunci Symbol");
-        if (DANGEROUS_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak: '${key}'`);
-        if (FORBIDDEN_PAYLOAD_KEYS.includes(key)) {
-            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa '${key}' (di kedalaman manapun)`);
-        }
-        const desc = Object.getOwnPropertyDescriptor(value, key);
-        if (!desc || desc.get || desc.set) {
-            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa properti accessor: '${String(key)}'`);
-        }
-        const built = buildSafePayloadRef(desc.value, depth + 1, budget);
-        if (built !== undefined) out[key] = built; // sama seperti JSON: kunci bernilai undefined dibuang
-    }
-    return out;
 }
 
 /**

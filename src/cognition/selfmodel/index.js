@@ -142,7 +142,17 @@ async function createSelfModel({
         if (!observation || typeof observation !== "object") {
             fail(REASONS.INVALID_OBSERVATION, "observation wajib objek");
         }
-        const { capabilityId, availability, generation, observedAtMs } = observation;
+        // Bug review independen (audit putaran-43, W7R43-P2-2): destructuring
+        // di bawah membaca SETIAP properti `observation` lewat [[Get]] biasa
+        // -- sebuah Proxy yang di-revoke melempar TypeError MENTAH pada
+        // operasi ini, keluar dari `ingestAvailability()` publik, tidak
+        // seperti sibling ingestOutcome/ingestHealth yang sudah aman.
+        let capabilityId, availability, generation, observedAtMs;
+        try {
+            ({ capabilityId, availability, generation, observedAtMs } = observation);
+        } catch {
+            fail(REASONS.INVALID_OBSERVATION, "observation tidak dapat diverifikasi dengan aman, ditolak");
+        }
         if (typeof capabilityId !== "string" || capabilityId.length === 0) {
             fail(REASONS.INVALID_OBSERVATION, "capabilityId wajib string tidak kosong");
         }

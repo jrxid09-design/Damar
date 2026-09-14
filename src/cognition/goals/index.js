@@ -369,24 +369,18 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         if (planId && plans.has(planId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `planId '${typeof planId === "string" ? planId : typeof planId}' sudah ada`);
         }
-        // Bug review independen (audit putaran-42, W7R42-P2-3): `steps.length`
-        // dibaca mentah DI SINI, SEBELUM makePlan sempat menjaganya sama
-        // sekali -- Proxy yang di-revoke (atau getter `length` hostile)
-        // melempar TypeError mentah keluar dari API publik ini, bukan
-        // domain error terkendali. Dibungkus try/catch, gagal tertutup.
-        let stepsLenForQuota;
-        try {
-            stepsLenForQuota = (steps ?? []).length;
-        } catch {
-            fail(REASONS.INVALID_RECORD, "steps tidak dapat diverifikasi dengan aman, ditolak");
-        }
-        if (!Number.isInteger(stepsLenForQuota) || stepsLenForQuota < 0) {
-            fail(REASONS.INVALID_RECORD, "steps.length tidak sah");
-        }
-        if (stepsLenForQuota > bounds.MAX_STEPS_PER_PLAN) {
-            fail(REASONS.PLAN_STEP_LIMIT_EXCEEDED, "jumlah langkah rencana melebihi batas");
-        }
-        const p = makePlan({ ...specRest, planId: planId ?? crypto.randomUUID(), steps });
+        // Bug review independen (audit putaran-42, W7R42-P2-3; putaran-43,
+        // W7R43-P2-8): versi sebelumnya membaca `steps.length` MENTAH DI SINI
+        // untuk cek kuota, LALU makePlan/buildSafeArray membaca
+        // `steps.length` LAGI secara terpisah untuk membangun salinan --
+        // sebuah Proxy dengan getter `length` yang berbohong pada baca kedua
+        // (mis. `1` lalu `1000`) lolos cek kuota tapi menyimpan 1000 elemen,
+        // MEMALSUKAN penegakan MAX_STEPS_PER_PLAN sepenuhnya (bukan cuma
+        // raw-throw). Kuota sekarang ditegakkan SATU-SATUNYA di dalam
+        // buildSafeArray (dipanggil dari makePlan) memakai `len` yang
+        // di-cache SEKALI di sana -- tidak ada pembacaan `.length` kedua di
+        // sini sama sekali, jadi tidak ada celah divergensi yang mungkin.
+        const p = makePlan({ ...specRest, planId: planId ?? crypto.randomUUID(), steps, maxSteps: bounds.MAX_STEPS_PER_PLAN });
         plans.set(p.planId, p);
 
         // Bug diketemukan review independen (Codex): MAX_PLAN_VERSIONS_RETAINED

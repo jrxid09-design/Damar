@@ -23,8 +23,17 @@ function neighbors(state, entityId, kinds = null, depth = 1) {
     // dijaga (putaran-20) tapi `kinds` di FUNGSI SAMA-KELAS ini tidak --
     // `kinds` bukan array/null meledakkan `.includes()` jadi TypeError
     // mentah.
-    if (kinds !== null && kinds !== undefined && !Array.isArray(kinds)) {
-        fail(REASONS.INVALID_RECORD, "kinds wajib array atau null");
+    // Bug review independen (audit putaran-43, W7R43-P2-5): sibling
+    // langsung dari `subgraph`'s `seeds` (round-42 hanya menutup itu) --
+    // Proxy yang di-revoke melempar TypeError mentah pada `Array.isArray(kinds)`.
+    if (kinds !== null && kinds !== undefined) {
+        let isKindsArray;
+        try {
+            isKindsArray = Array.isArray(kinds);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "kinds tidak dapat diverifikasi dengan aman, ditolak");
+        }
+        if (!isKindsArray) fail(REASONS.INVALID_RECORD, "kinds wajib array atau null");
     }
     // Bug review independen (audit putaran-24, AUD24-P2-5): default
     // parameter `depth = 1` hanya berlaku untuk `undefined` -- `depth:

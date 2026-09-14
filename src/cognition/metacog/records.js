@@ -2,7 +2,7 @@
 
 /** W7-L6 METACOGNITION — pembangun record (spec §3). */
 
-const { REASONS, fail } = require("./errors");
+const { REASONS, fail, MetacogError } = require("./errors");
 const { BOUNDS: VALUE_BOUNDS } = require("./bounds");
 const { sanitizeEvidenceQuality, confidenceFromSafe } = require("./confidence");
 
@@ -26,7 +26,16 @@ const DANGEROUS_VALUE_KEYS = Object.freeze(["__proto__", "constructor", "prototy
 // yang mengembalikan `Infinity` membuat loop TIDAK PERNAH berhenti (DoS).
 // `length` sekarang divalidasi sebagai integer terhingga non-negatif dan
 // dibatasi eksplisit sebelum loop dimulai.
-const MAX_SAFE_ARRAY_LENGTH = 65536;
+// Bug review independen (audit putaran-43, W7R43-ADV-1): `65536` adalah
+// konstanta arbitrer independen dari batas lane manapun -- dipakai kembali
+// `VALUE_BOUNDS.MAX_VALUE_ARRAY_LENGTH` (batas yang sudah dipakai
+// buildSafeCognitiveCopy untuk array bersarang di lane yang SAMA) supaya
+// konsisten, bukan generik. Findings/proposals TETAP boleh melebihi
+// MAX_FINDINGS_PER_REVIEW/MAX_PROPOSALS_PER_REVIEW di sini secara sengaja
+// (lihat boundedFindings/boundedProposals di bawah -- disortir-lalu-dipotong
+// ke prioritas tertinggi, bukan ditolak) -- 1024 adalah langit-langit
+// keamanan yang jauh lebih tinggi dari itu, bukan batas tampilan.
+const MAX_SAFE_ARRAY_LENGTH = VALUE_BOUNDS.MAX_VALUE_ARRAY_LENGTH;
 function buildSafeArray(arr, mapFn) {
     const len = arr.length;
     if (!Number.isInteger(len) || len < 0 || len > MAX_SAFE_ARRAY_LENGTH) {
@@ -77,58 +86,71 @@ function buildSafeCognitiveCopy(value, depth = 0, stack, budget) {
     if (budget.count > VALUE_BOUNDS.MAX_VALUE_NODES) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah node melebihi batas");
     }
-    if (Array.isArray(value)) {
-        // Bug review independen (audit putaran-42, W7R42-P2-1): `value.length`
-        // dulu dibaca SEKALI untuk cek batas ini, lalu dibaca ULANG di
-        // KONDISI loop di bawah setiap iterasi -- Proxy dengan getter
-        // `length` yang terus bertambah membuat loop TIDAK PERNAH berhenti
-        // (DoS). `length` di-cache SEKALI ke lokal dan divalidasi sebagai
-        // integer terhingga non-negatif SEBELUM dipakai di mana pun.
-        const len = value.length;
-        if (!Number.isInteger(len) || len < 0 || len > VALUE_BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
-            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array melebihi batas atau tidak sah");
+    // Bug review independen (audit putaran-43, W7R43-P2-3/W7R43-P2-7):
+    // `Array.isArray`/`Object.getPrototypeOf`/`Reflect.ownKeys` di bawah
+    // adalah operasi dasar terhadap `value` yang belum tepercaya -- di
+    // KEDALAMAN MANAPUN lewat rekursi -- sebuah Proxy yang di-revoke
+    // melempar TypeError MENTAH pada operasi ini, keluar dari
+    // `openReview()`/`assess()` publik. Seluruh cabang array/objek
+    // dibungkus try/catch; MetacogError (termasuk hasil rekursi anak)
+    // diteruskan apa adanya, kegagalan APA PUN lainnya gagal tertutup.
+    try {
+        if (Array.isArray(value)) {
+            // Bug review independen (audit putaran-42, W7R42-P2-1): `value.length`
+            // dulu dibaca SEKALI untuk cek batas ini, lalu dibaca ULANG di
+            // KONDISI loop di bawah setiap iterasi -- Proxy dengan getter
+            // `length` yang terus bertambah membuat loop TIDAK PERNAH berhenti
+            // (DoS). `length` di-cache SEKALI ke lokal dan divalidasi sebagai
+            // integer terhingga non-negatif SEBELUM dipakai di mana pun.
+            const len = value.length;
+            if (!Number.isInteger(len) || len < 0 || len > VALUE_BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
+                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array melebihi batas atau tidak sah");
+            }
+            const arrProto = Object.getPrototypeOf(value);
+            if (arrProto !== Array.prototype && arrProto !== null) {
+                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "array dengan prototype non-standar ditolak");
+            }
+            stack.add(value);
+            const out = [];
+            try {
+                for (let i = 0; i < len; i++) {
+                    const desc = Object.getOwnPropertyDescriptor(value, i);
+                    if (!desc || desc.get || desc.set) {
+                        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `tidak boleh membawa properti accessor: '${i}'`);
+                    }
+                    out[i] = buildSafeCognitiveCopy(desc.value, depth + 1, stack, budget);
+                }
+            } finally {
+                stack.delete(value);
+            }
+            return Object.freeze(out);
         }
-        const arrProto = Object.getPrototypeOf(value);
-        if (arrProto !== Array.prototype && arrProto !== null) {
-            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "array dengan prototype non-standar ditolak");
+        const proto = Object.getPrototypeOf(value);
+        if (proto !== Object.prototype && proto !== null) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh berupa instance kelas (kontrak data murni)");
         }
         stack.add(value);
-        const out = [];
+        const out = {};
         try {
-            for (let i = 0; i < len; i++) {
-                const desc = Object.getOwnPropertyDescriptor(value, i);
+            for (const key of Reflect.ownKeys(value)) {
+                if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh membawa kunci Symbol");
+                if (DANGEROUS_VALUE_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak: '${key}'`);
+                const desc = Object.getOwnPropertyDescriptor(value, key);
                 if (!desc || desc.get || desc.set) {
-                    fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `tidak boleh membawa properti accessor: '${i}'`);
+                    fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `tidak boleh membawa properti accessor: '${String(key)}'`);
                 }
-                out[i] = buildSafeCognitiveCopy(desc.value, depth + 1, stack, budget);
+                if (!desc.enumerable) continue;
+                const built = buildSafeCognitiveCopy(desc.value, depth + 1, stack, budget);
+                if (built !== undefined) out[key] = built;
             }
         } finally {
             stack.delete(value);
         }
         return Object.freeze(out);
+    } catch (err) {
+        if (err instanceof MetacogError) throw err;
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak dapat diverifikasi dengan aman, ditolak");
     }
-    const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null) {
-        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh berupa instance kelas (kontrak data murni)");
-    }
-    stack.add(value);
-    const out = {};
-    try {
-        for (const key of Reflect.ownKeys(value)) {
-            if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh membawa kunci Symbol");
-            if (DANGEROUS_VALUE_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak: '${key}'`);
-            const desc = Object.getOwnPropertyDescriptor(value, key);
-            if (!desc || desc.get || desc.set) {
-                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `tidak boleh membawa properti accessor: '${String(key)}'`);
-            }
-            if (!desc.enumerable) continue;
-            const built = buildSafeCognitiveCopy(desc.value, depth + 1, stack, budget);
-            if (built !== undefined) out[key] = built;
-        }
-    } finally {
-        stack.delete(value);
-    }
-    return Object.freeze(out);
 }
 
 const TRIGGERS = new Set(["CONTRADICTION", "EXPECTATION_VIOLATED", "REPEATED_FAILURE", "LOW_CONFIDENCE_ACTION", "OWNER_CHALLENGE", "SCHEDULED"]);
@@ -179,8 +201,21 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
     // hanya berlaku untuk undefined, bukan null eksplisit -- findings:null/
     // proposals:null lolos lalu melempar TypeError mentah (bukan
     // INVALID_RECORD) di `.length`/`for...of`.
-    if (findings !== undefined && !Array.isArray(findings)) fail(REASONS.INVALID_RECORD, "findings wajib array");
-    if (proposals !== undefined && !Array.isArray(proposals)) fail(REASONS.INVALID_RECORD, "proposals wajib array");
+    // Bug review independen (audit putaran-43, W7R43-P2-3): Proxy yang
+    // di-revoke melempar TypeError mentah pada `Array.isArray` di sini juga.
+    let isFindingsArray, isProposalsArray;
+    try {
+        isFindingsArray = findings === undefined || Array.isArray(findings);
+    } catch {
+        fail(REASONS.INVALID_RECORD, "findings tidak dapat diverifikasi dengan aman, ditolak");
+    }
+    if (!isFindingsArray) fail(REASONS.INVALID_RECORD, "findings wajib array");
+    try {
+        isProposalsArray = proposals === undefined || Array.isArray(proposals);
+    } catch {
+        fail(REASONS.INVALID_RECORD, "proposals tidak dapat diverifikasi dengan aman, ditolak");
+    }
+    if (!isProposalsArray) fail(REASONS.INVALID_RECORD, "proposals wajib array");
     // Bug review independen (audit putaran-16, AUD16-P2-1): perbaikan
     // putaran-15 hanya menjaga WADAH array-nya -- elemen null/undefined di
     // dalamnya (mis. proposals: [null]) tetap melempar TypeError mentah di
@@ -262,7 +297,14 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
     return Object.freeze({
         reviewId, trigger,
         findings: Object.freeze(boundedFindings),
-        findingsTruncated: findings.length > bounds.MAX_FINDINGS_PER_REVIEW,
+        // Bug review independen (audit putaran-43, W7R43-P2-8): `findings.length`
+        // dibaca ULANG di sini, TERPISAH dari `len` yang sudah di-cache SEKALI
+        // di dalam buildSafeArray di atas -- getter `length` yang berbohong
+        // antara dua baca membuat flag ini divergen dari `boundedFindings`
+        // yang SUNGGUHAN tersimpan. `safeFindings.length` (array polos hasil
+        // buildSafeArray, bukan Proxy pemanggil) dipakai, satu-satunya sumber
+        // kebenaran yang sama dipakai `boundedFindings` di atas.
+        findingsTruncated: safeFindings.length > bounds.MAX_FINDINGS_PER_REVIEW,
         proposals: Object.freeze(boundedProposals),
         cost: safeCost,
         state: "OPEN"
