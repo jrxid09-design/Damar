@@ -12,6 +12,19 @@ function assertThrowsCode(fn, code) {
     });
 }
 
+function fakeLengthArray(items, badLen) {
+    return new Proxy(items.slice(), {
+        get(t, p, r) { return p === "length" ? badLen : Reflect.get(t, p, r); }
+    });
+}
+
+test("W7-ENV-repair-7: walkSafe rejects a payload array whose .length is negative/NaN/Infinity/fractional instead of skipping or infinite-looping (independent audit W7R42-P2-1)", () => {
+    for (const badLen of [-1, NaN, Infinity, 1.5]) {
+        const arr = fakeLengthArray([1], badLen);
+        assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ payload: { list: arr } })), "ACC_INVALID_METADATA");
+    }
+});
+
 function baseSpec(overrides = {}) {
     return {
         type: "TOOL_SUCCEEDED",

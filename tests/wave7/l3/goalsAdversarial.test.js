@@ -19,6 +19,16 @@ function assertThrowsReason(fn, reason) {
     });
 }
 
+/** A real array (Array.isArray stays true) whose `.length` read is
+ * intercepted via a Proxy `get` trap -- a plain array's own `.length`
+ * setter enforces the valid-array-length invariant, so a hostile length
+ * (negative/NaN/Infinity/fractional) must come from a Proxy instead. */
+function fakeLengthArray(items, badLen) {
+    return new Proxy(items.slice(), {
+        get(t, p, r) { return p === "length" ? badLen : Reflect.get(t, p, r); }
+    });
+}
+
 test("GL-A1: goal injection through conversation text requires owner approval like any self-proposal", async () => {
     const ge = await createGoalEngine();
     const g = ge.proposeGoal(baseGoalSpec({
@@ -732,6 +742,32 @@ test("GL-repair-59: createPlan does not re-read a caller array's length each ite
     });
     ge.createPlan({ goalRef: g.goalId, steps: proxy });
     assert.ok(reads <= 2, "length must be read once (cached), got " + reads + " reads");
+});
+
+test("GL-repair-60: buildSafeIntentTemplate rejects a nested array whose .length is negative/NaN/Infinity/fractional instead of skipping or infinite-looping (independent audit W7R42-P2-1)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    for (const badLen of [-1, NaN, Infinity, 1.5]) {
+        const nestedArr = fakeLengthArray([1], badLen);
+        assertThrowsReason(() => ge.createPlan({ goalRef: g.goalId, steps: [], assumptions: [nestedArr] }), "AUTHORITY_SHAPED_FIELD_REJECTED");
+    }
+});
+
+test("GL-repair-61: buildSafeArray inside createPlan rejects a steps/assumptions array whose .length is negative/NaN/Infinity/fractional (independent audit W7R42-P2-2)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    for (const badLen of [-1, NaN, Infinity, 1.5]) {
+        const steps = fakeLengthArray([{ a: 1 }], badLen);
+        assertThrowsReason(() => ge.createPlan({ goalRef: g.goalId, steps }), "INVALID_RECORD");
+    }
+});
+
+test("GL-repair-62: createPlan fails closed (not raw-throw) on a revoked-Proxy steps argument (independent audit W7R42-P2-3)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    const stepsProxy = Proxy.revocable([{ a: 1 }], {});
+    stepsProxy.revoke();
+    assertThrowsReason(() => ge.createPlan({ goalRef: g.goalId, steps: stepsProxy.proxy }), "INVALID_RECORD");
 });
 
 test("GL-repair-58: createPlan/createTask reject sparse (hole-bearing) steps/preconditions arrays, not just explicit null/undefined elements (independent audit AUD40-P2-3)", async () => {

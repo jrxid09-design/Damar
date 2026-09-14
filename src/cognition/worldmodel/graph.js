@@ -72,8 +72,21 @@ function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 26
     // meledakkan `new Set(seeds)`/`[...seeds]` jadi TypeError mentah
     // ("seeds is not iterable"), asimetri elemen-vs-kontainer yang sama
     // dengan AUD21-P2-1.
+    // Bug review independen (audit putaran-42, W7R42-P2-3): sebuah Proxy
+    // yang sudah di-revoke melempar TypeError MENTAH pada `Array.isArray`
+    // (trap `[[IsArray]]`, yang butuh `getPrototypeOf`) -- dibungkus
+    // try/catch supaya kegagalan APA PUN di sini gagal tertutup, bukan
+    // crash keluar dari API publik ini.
     if (seeds === undefined || seeds === null) seeds = [];
-    else if (!Array.isArray(seeds)) fail(REASONS.INVALID_RECORD, "seeds wajib array");
+    else {
+        let isSeedsArray;
+        try {
+            isSeedsArray = Array.isArray(seeds);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "seeds tidak dapat diverifikasi dengan aman, ditolak");
+        }
+        if (!isSeedsArray) fail(REASONS.INVALID_RECORD, "seeds wajib array");
+    }
     // Bug review independen (audit putaran-24, AUD24-P2-5): `depth: null`
     // eksplisit lolos default parameter lalu `Math.min(null, MAX)` = 0,
     // membuat traversal diam-diam tidak berjalan (jawaban kosong salah).
@@ -107,8 +120,22 @@ function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 26
     // lewat loop indeks eksplisit (sama seperti buildSafeArray) yang
     // tidak pernah menyentuh Symbol.iterator sama sekali; `nodeIds`/
     // `frontier` lalu dibangun dari salinan array POLOS ini.
+    // Bug review independen (audit putaran-42, W7R42-P2-1/W7R42-P2-3):
+    // `seeds.length` bisa melempar mentah (getter `length` yang
+    // melempar, atau Proxy yang di-revoke ANTARA cek Array.isArray di
+    // atas dan baris ini) dan bisa berupa NaN/Infinity/pecahan/negatif
+    // (Proxy panjang palsu) -- dibungkus try/catch dan divalidasi
+    // sebagai integer terhingga non-negatif sebelum dipakai di loop.
+    let seedsLen;
+    try {
+        seedsLen = seeds.length;
+    } catch {
+        fail(REASONS.INVALID_RECORD, "seeds tidak dapat diverifikasi dengan aman, ditolak");
+    }
+    if (!Number.isInteger(seedsLen) || seedsLen < 0) {
+        fail(REASONS.INVALID_RECORD, "seeds.length tidak sah");
+    }
     const seedList = [];
-    const seedsLen = seeds.length;
     for (let i = 0; i < seedsLen; i++) seedList.push(seeds[i]);
     const nodeIds = new Set(seedList);
     let frontier = seedList.slice();

@@ -32,9 +32,18 @@ const ADMISSIBLE_TIERS = new Set(["T1", "T2", "T4"]);
 // `.slice()` dulu, memaksa salinan array polos), tapi diperbaiki di sini
 // juga demi paritas dan menutup kelas ini permanen di helper bersama.
 // `length` sekarang di-cache SEKALI ke lokal.
+// Bug review independen (audit putaran-42, W7R42-P2-2/W7R42-ADV-1): `len`
+// di-cache tapi tidak pernah divalidasi -- Proxy dengan getter `length`
+// yang mengembalikan `Infinity` membuat loop TIDAK PERNAH berhenti (DoS).
+// `length` sekarang divalidasi sebagai integer terhingga non-negatif dan
+// dibatasi eksplisit sebelum loop dimulai.
+const MAX_SAFE_ARRAY_LENGTH = 65536;
 function buildSafeArray(arr, mapFn) {
-    const out = [];
     const len = arr.length;
+    if (!Number.isInteger(len) || len < 0 || len > MAX_SAFE_ARRAY_LENGTH) {
+        fail(REASONS.INVALID_RECORD, "panjang array tidak sah atau melebihi batas");
+    }
+    const out = [];
     for (let i = 0; i < len; i++) out.push(mapFn(arr[i], i));
     return out;
 }
@@ -85,8 +94,26 @@ function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, n
     // Bug review independen (audit putaran-21, AUD21-P2-1): round-20 menjaga
     // ELEMEN externalRefs tapi bukan KONTAINERNYA -- `externalRefs: 42` atau
     // string masih meledakkan `.slice(...).map(...)` jadi TypeError mentah.
-    if (externalRefs !== undefined && externalRefs !== null && !Array.isArray(externalRefs)) {
-        fail(REASONS.INVALID_RECORD, "externalRefs wajib array");
+    // Bug review independen (audit putaran-42, W7R42-P2-3): sebuah Proxy
+    // yang sudah di-revoke melempar TypeError MENTAH pada `Array.isArray`
+    // maupun `.slice()` -- keduanya dibungkus try/catch supaya kegagalan
+    // APA PUN di sini gagal tertutup, bukan crash keluar dari API publik ini.
+    let safeExternalRefs;
+    if (externalRefs === undefined || externalRefs === null) {
+        safeExternalRefs = [];
+    } else {
+        let isRefsArray;
+        try {
+            isRefsArray = Array.isArray(externalRefs);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "externalRefs tidak dapat diverifikasi dengan aman, ditolak");
+        }
+        if (!isRefsArray) fail(REASONS.INVALID_RECORD, "externalRefs wajib array");
+        try {
+            safeExternalRefs = externalRefs.slice(0, 32);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "externalRefs tidak dapat diiris dengan aman, ditolak");
+        }
     }
 
     return Object.freeze({
@@ -96,7 +123,7 @@ function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, n
         // Bug review independen (audit putaran-20, AUD20-P2-2): elemen
         // externalRefs tidak dijaga -- elemen `null` meledakkan `r.system`
         // jadi TypeError mentah alih-alih INVALID_RECORD.
-        externalRefs: Object.freeze(buildSafeArray((externalRefs ?? []).slice(0, 32), r => {
+        externalRefs: Object.freeze(buildSafeArray(safeExternalRefs, r => {
             if (!r || typeof r !== "object") fail(REASONS.INVALID_RECORD, "externalRefs elemen wajib objek");
             // Bug review independen (audit putaran-28, AUD28-P2-7;
             // putaran-35, AUD35-P2-3): `String(r.system)`/`String(r.id)`
@@ -239,8 +266,32 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
     if (!safeSubject || (!validEntity && typeof relationId !== "string")) {
         fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
     }
-    if (!Array.isArray(candidateValues) || candidateValues.length === 0) {
+    // Bug review independen (audit putaran-42, W7R42-P2-3): sebuah Proxy
+    // yang sudah di-revoke melempar TypeError MENTAH pada `Array.isArray`,
+    // `.length`, maupun `.slice()` -- ketiganya dibungkus try/catch supaya
+    // kegagalan APA PUN di sini gagal tertutup, bukan crash keluar dari
+    // API publik ini.
+    let isCandArray;
+    try {
+        isCandArray = Array.isArray(candidateValues);
+    } catch {
+        fail(REASONS.INVALID_RECORD, "candidateValues tidak dapat diverifikasi dengan aman, ditolak");
+    }
+    if (!isCandArray) fail(REASONS.INVALID_RECORD, "candidateValues wajib array tidak kosong");
+    let candidateValuesLen;
+    try {
+        candidateValuesLen = candidateValues.length;
+    } catch {
+        fail(REASONS.INVALID_RECORD, "candidateValues tidak dapat diverifikasi dengan aman, ditolak");
+    }
+    if (!Number.isInteger(candidateValuesLen) || candidateValuesLen === 0) {
         fail(REASONS.INVALID_RECORD, "candidateValues wajib array tidak kosong");
+    }
+    let safeCandidateValues;
+    try {
+        safeCandidateValues = candidateValues.slice(0, 16);
+    } catch {
+        fail(REASONS.INVALID_RECORD, "candidateValues tidak dapat diiris dengan aman, ditolak");
     }
     // Proaktif (sapuan lengkap kelas AUD11/AUD12-P2, sebelum ditemukan
     // auditor independen sebagai finding terpisah): expiresAt diteruskan
@@ -266,7 +317,7 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
         // Bug review independen (audit putaran-20, AUD20-P2-2): elemen
         // candidateValues tidak dijaga -- elemen `null` meledakkan `c.value`
         // jadi TypeError mentah alih-alih INVALID_RECORD.
-        candidateValues: Object.freeze(buildSafeArray(candidateValues.slice(0, 16), c => {
+        candidateValues: Object.freeze(buildSafeArray(safeCandidateValues, c => {
             if (!c || typeof c !== "object") fail(REASONS.INVALID_RECORD, "candidateValues elemen wajib objek");
             // Bug review independen (audit putaran-28, AUD28-P2-3; putaran-35,
             // AUD35-P2-4): `Number(c.weight)` mentah meledakkan TypeError

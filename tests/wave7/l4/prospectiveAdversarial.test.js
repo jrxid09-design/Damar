@@ -16,6 +16,12 @@ function assertThrowsReason(fn, reason) {
     });
 }
 
+function fakeLengthArray(items, badLen) {
+    return new Proxy(items.slice(), {
+        get(t, p, r) { return p === "length" ? badLen : Reflect.get(t, p, r); }
+    });
+}
+
 test("PM-repair-22: arm(null) is rejected as INVALID_RECORD, not a raw TypeError (independent audit AUD21-ADV-1)", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.arm(null), "INVALID_RECORD");
@@ -182,6 +188,14 @@ test("PM-repair-47: a non-ON_STATE trigger never dereferences subject's inner fi
     const r = pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(9e12).toISOString(), subject } });
     assert.equal(r.trigger.kind, "AT");
     assert.equal(called, 0, "an AT trigger must never touch subject's inner fields -- subject is ON_STATE-only");
+});
+
+test("PM-repair-50: buildSafePayloadRef rejects a nested trigger array whose .length is negative/NaN/Infinity/fractional instead of skipping or infinite-looping (independent audit W7R42-P2-1)", async () => {
+    const pm = await createProspectiveMemory();
+    for (const badLen of [-1, NaN, Infinity, 1.5]) {
+        const arr = fakeLengthArray([1], badLen);
+        assertThrowsReason(() => pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(9e12).toISOString(), extra: arr } }), "PAYLOAD_TOO_LARGE");
+    }
 });
 
 test("PM-repair-49: compaction only removes a victim's OWN firedOccurrenceIds entries, not a differently-terminated reminder whose id happens to be a string-prefix of the victim's (independent audit AUD38-ADV-1)", async () => {

@@ -11,6 +11,12 @@ function assertThrowsReason(fn, reason) {
     });
 }
 
+function fakeLengthArray(items, badLen) {
+    return new Proxy(items.slice(), {
+        get(t, p, r) { return p === "length" ? badLen : Reflect.get(t, p, r); }
+    });
+}
+
 test("MC-repair-4: explicit null findings/proposals is rejected as INVALID_RECORD, not an uncontrolled TypeError (independent audit AUD15-P2-3)", async () => {
     const mc = await createMetacognition();
     assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: null }), "INVALID_RECORD");
@@ -232,6 +238,22 @@ test("MC-repair-28: recordCalibration's duplicate-recordId check is O(1) (Map-ba
     mc.recordCalibration({ recordId: "C3", predictionRef: "p", predictedValue: 1, predictedConfidence: 0.9, outcomeTier: "T1", outcomeRef: "o3", outcomeValue: 1, outcomeCorrect: true });
     assert.equal(mc.calibrationCount(), 3, "retention must stay bounded at MAX_CALIBRATION_RECORDS");
     assert.doesNotThrow(() => mc.recordCalibration({ recordId: "C0", predictionRef: "p", predictedValue: 1, predictedConfidence: 0.9, outcomeTier: "T1", outcomeRef: "o0c", outcomeValue: 1, outcomeCorrect: true }), "C0 must have been evicted (FIFO) once retention overflowed, so its id is reusable");
+});
+
+test("MC-repair-31: buildSafeCognitiveCopy rejects a nested array whose .length is negative/NaN/Infinity/fractional instead of skipping or infinite-looping (independent audit W7R42-P2-1)", async () => {
+    const mc = await createMetacognition();
+    for (const badLen of [-1, NaN, Infinity, 1.5]) {
+        const nestedArr = fakeLengthArray([1], badLen);
+        assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: [{ severity: 1, extra: nestedArr }], proposals: [], cost: { tokens: 0, ms: 0 } }), "EXECUTABLE_MATERIAL_REJECTED");
+    }
+});
+
+test("MC-repair-32: buildSafeArray inside openReview rejects a findings/proposals array whose .length is negative/NaN/Infinity/fractional (independent audit W7R42-P2-2)", async () => {
+    const mc = await createMetacognition();
+    for (const badLen of [-1, NaN, Infinity, 1.5]) {
+        const findings = fakeLengthArray([{ severity: 1 }], badLen);
+        assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings, proposals: [], cost: { tokens: 0, ms: 0 } }), "INVALID_RECORD");
+    }
 });
 
 test("MC-repair-30: openReview's element validation never consults Symbol.iterator at all, so a findings array with a non-callable Symbol.iterator is still processed by plain index instead of raw-throwing (independent audit AUD40-ADV-1)", async () => {

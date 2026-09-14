@@ -20,6 +20,16 @@ function assertThrowsReason(fn, reason) {
     });
 }
 
+/** A real array (so Array.isArray stays true) whose `.length` read is
+ * intercepted to return an arbitrary (possibly invalid) value -- a plain
+ * array's own `.length` setter enforces the valid-array-length invariant,
+ * so a hostile length must come from a Proxy `get` trap instead. */
+function fakeLengthArray(items, badLen) {
+    return new Proxy(items.slice(), {
+        get(t, p, r) { return p === "length" ? badLen : Reflect.get(t, p, r); }
+    });
+}
+
 test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
@@ -456,6 +466,62 @@ test("WM-repair-71: declareEntity's labels values are read via property descript
     const e = wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s", labels });
     assert.equal(called, 0, "an accessor label value must never be invoked");
     assert.equal(e.labels.a, "x", "a plain label value must still round-trip");
+});
+
+test("WM-repair-74: subgraph rejects a seeds array whose .length is negative/NaN/Infinity/fractional instead of skipping or infinite-looping (independent audit W7R42-P2-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    for (const badLen of [-1, NaN, Infinity, 1.5]) {
+        assertThrowsReason(() => wm.subgraph(fakeLengthArray(["e1"], badLen)), "INVALID_RECORD");
+    }
+});
+
+test("WM-repair-75: declareEntity's pre-slice(0,32) on externalRefs bounds a hostile .length (negative/NaN/Infinity/fractional) to a terminating, ToLength-clamped read -- never hangs, never raw-throws (independent audit W7R42-P2-2)", async () => {
+    // externalRefs/candidateValues go through `.slice(0, N)` BEFORE
+    // buildSafeArray ever sees them, so a hostile `.length` is clamped by
+    // the engine's own ToLength + slice(end) semantics, never reaching
+    // buildSafeArray's cached-length guard at all. The safety property to
+    // prove here is therefore "bounded, deterministic, no raw throw" --
+    // not a specific rejection reason (buildSafeArray's own guard is
+    // exercised directly by the OTHER lanes' un-sliced callers instead,
+    // e.g. GL-repair-61/MC-repair-32).
+    for (const badLen of [-1, NaN, Infinity, 1.5]) {
+        const wm = await createWorldModel();
+        const externalRefs = fakeLengthArray([{ system: "s", id: "1" }], badLen);
+        assert.doesNotThrow(() => {
+            try {
+                wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s", externalRefs });
+            } catch (err) {
+                assert.equal(err.reason, "INVALID_RECORD", `unexpected reason for badLen=${badLen}: ${err.message}`);
+            }
+        }, `badLen=${badLen} must terminate without a raw (non-domain) throw`);
+    }
+});
+
+test("WM-repair-77: buildSafeBeliefValue rejects a value array whose .length is negative/NaN/Infinity/fractional instead of skipping or infinite-looping (independent audit W7R42-P2-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    for (const badLen of [-1, NaN, Infinity, 1.5]) {
+        const value = fakeLengthArray([1], badLen);
+        assertThrowsReason(() => wm.ingestDeclaration({ subject: { entityId: "e1" }, attribute: "a", value }), "EXECUTABLE_MATERIAL_REJECTED");
+    }
+});
+
+test("WM-repair-76: subgraph/declareEntity/declareHypothesis fail closed (not raw-throw) on a revoked-Proxy container argument (independent audit W7R42-P2-3)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+
+    const seedsProxy = Proxy.revocable(["e1"], {});
+    seedsProxy.revoke();
+    assertThrowsReason(() => wm.subgraph(seedsProxy.proxy), "INVALID_RECORD");
+
+    const refsProxy = Proxy.revocable([{ system: "s", id: "1" }], {});
+    refsProxy.revoke();
+    assertThrowsReason(() => wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s", externalRefs: refsProxy.proxy }), "INVALID_RECORD");
+
+    const candProxy = Proxy.revocable([{ value: "x", weight: 1 }], {});
+    candProxy.revoke();
+    assertThrowsReason(() => wm.declareHypothesis({ hypothesisId: "h2", subject: { entityId: "e1" }, attribute: "a", candidateValues: candProxy.proxy, expiresAt: new Date(9e12).toISOString() }), "INVALID_RECORD");
 });
 
 test("WM-repair-67: ingestDeclaration's subject-shape guard validates the SAME sanitized value that gets keyed/stored, so a Proxy whose get/descriptor traps disagree cannot bypass the shape guard (independent audit AUD36-P2-1)", async () => {

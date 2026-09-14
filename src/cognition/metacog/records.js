@@ -21,9 +21,18 @@ const DANGEROUS_VALUE_KEYS = Object.freeze(["__proto__", "constructor", "prototy
 // `arr.length` di KONDISI loop -- dievaluasi ULANG setiap iterasi. Proxy
 // dengan getter `length` yang TERUS BERTAMBAH membuat loop TIDAK PERNAH
 // berhenti (DoS). `length` sekarang di-cache SEKALI ke lokal.
+// Bug review independen (audit putaran-42, W7R42-P2-2/W7R42-ADV-1): `len`
+// di-cache tapi tidak pernah divalidasi -- Proxy dengan getter `length`
+// yang mengembalikan `Infinity` membuat loop TIDAK PERNAH berhenti (DoS).
+// `length` sekarang divalidasi sebagai integer terhingga non-negatif dan
+// dibatasi eksplisit sebelum loop dimulai.
+const MAX_SAFE_ARRAY_LENGTH = 65536;
 function buildSafeArray(arr, mapFn) {
-    const out = [];
     const len = arr.length;
+    if (!Number.isInteger(len) || len < 0 || len > MAX_SAFE_ARRAY_LENGTH) {
+        fail(REASONS.INVALID_RECORD, "panjang array tidak sah atau melebihi batas");
+    }
+    const out = [];
     for (let i = 0; i < len; i++) out.push(mapFn(arr[i], i));
     return out;
 }
@@ -69,8 +78,15 @@ function buildSafeCognitiveCopy(value, depth = 0, stack, budget) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah node melebihi batas");
     }
     if (Array.isArray(value)) {
-        if (value.length > VALUE_BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
-            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array melebihi batas");
+        // Bug review independen (audit putaran-42, W7R42-P2-1): `value.length`
+        // dulu dibaca SEKALI untuk cek batas ini, lalu dibaca ULANG di
+        // KONDISI loop di bawah setiap iterasi -- Proxy dengan getter
+        // `length` yang terus bertambah membuat loop TIDAK PERNAH berhenti
+        // (DoS). `length` di-cache SEKALI ke lokal dan divalidasi sebagai
+        // integer terhingga non-negatif SEBELUM dipakai di mana pun.
+        const len = value.length;
+        if (!Number.isInteger(len) || len < 0 || len > VALUE_BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array melebihi batas atau tidak sah");
         }
         const arrProto = Object.getPrototypeOf(value);
         if (arrProto !== Array.prototype && arrProto !== null) {
@@ -79,7 +95,7 @@ function buildSafeCognitiveCopy(value, depth = 0, stack, budget) {
         stack.add(value);
         const out = [];
         try {
-            for (let i = 0; i < value.length; i++) {
+            for (let i = 0; i < len; i++) {
                 const desc = Object.getOwnPropertyDescriptor(value, i);
                 if (!desc || desc.get || desc.set) {
                     fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `tidak boleh membawa properti accessor: '${i}'`);
