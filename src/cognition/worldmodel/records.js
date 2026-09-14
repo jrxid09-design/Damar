@@ -21,7 +21,15 @@ function validateLabels(labels) {
     }
     const out = {};
     for (const key of keys) {
-        const value = String(labels[key] ?? "").slice(0, BOUNDS.MAX_ENTITY_LABEL_CHARS);
+        const raw = labels[key];
+        // Bug review independen (audit putaran-28, AUD28-P2-7): `String(x)`
+        // mentah mengeksekusi toString hostile milik pemanggil untuk objek,
+        // dan meledakkan TypeError mentah untuk Symbol. Nilai label bukan
+        // primitif aman diperlakukan sebagai string kosong (perilaku sama
+        // lenient seperti null/undefined yang sudah ada), bukan crash.
+        const safeRaw = (raw === undefined || raw === null || typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean")
+            ? (raw ?? "") : "";
+        const value = String(safeRaw).slice(0, BOUNDS.MAX_ENTITY_LABEL_CHARS);
         out[key.slice(0, 128)] = value;
     }
     return Object.freeze(out);
@@ -48,7 +56,13 @@ function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, n
         externalRefs: Object.freeze((externalRefs ?? []).slice(0, 32)
             .map(r => {
                 if (!r || typeof r !== "object") fail(REASONS.INVALID_RECORD, "externalRefs elemen wajib objek");
-                return Object.freeze({ system: String(r.system).slice(0, 64), id: String(r.id).slice(0, 200) });
+                // Bug review independen (audit putaran-28, AUD28-P2-7):
+                // `String(r.system)`/`String(r.id)` mentah mengeksekusi
+                // toString hostile milik pemanggil, dan meledakkan TypeError
+                // mentah untuk Symbol.
+                if (typeof r.system !== "string" || !r.system) fail(REASONS.INVALID_RECORD, "externalRefs[].system wajib string");
+                if (typeof r.id !== "string" || !r.id) fail(REASONS.INVALID_RECORD, "externalRefs[].id wajib string");
+                return Object.freeze({ system: r.system.slice(0, 64), id: r.id.slice(0, 200) });
             })),
         source
     });
@@ -57,8 +71,16 @@ function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, n
 function makeRelation({ relationId, kind, from, to, directed = true, strength = 0.5 }) {
     if (typeof relationId !== "string" || !relationId) fail(REASONS.INVALID_RECORD, "relationId wajib string");
     if (typeof from !== "string" || typeof to !== "string") fail(REASONS.INVALID_RECORD, "from/to wajib entityId string");
+    // Bug review independen (audit putaran-28, AUD28-P2-3/AUD28-P2-7):
+    // `String(kind)`/`Number(strength)` mentah -- objek hostile dengan
+    // toString/valueOf tereksekusi, Symbol meledakkan TypeError mentah
+    // SEBELUM sempat ditolak sebagai domain error.
+    if (typeof kind !== "string" || !kind) fail(REASONS.INVALID_RECORD, "kind wajib string");
+    if (typeof strength !== "number" && typeof strength !== "string" && typeof strength !== "boolean") {
+        fail(REASONS.INVALID_RECORD, "strength wajib angka");
+    }
     return Object.freeze({
-        relationId, kind: String(kind).slice(0, 64), from, to,
+        relationId, kind: kind.slice(0, 64), from, to,
         directed: Boolean(directed), strength: clamp01(Number(strength))
     });
 }
@@ -100,12 +122,20 @@ function makeObservation({ observationId, subject, attribute, value, sensor, fra
         // `value` di record observasi ini murni transit, belum aman dipakai
         // sendiri sampai applyRevision memprosesnya.
         attribute, value,
+        // Bug review independen (audit putaran-28, AUD28-P2-7): `String(x)`
+        // mentah pada field opsional ini mengeksekusi toString hostile milik
+        // pemanggil untuk objek, dan meledakkan TypeError mentah untuk
+        // Symbol. Field bukan primitif aman diperlakukan sebagai absen
+        // (null), konsisten dengan perilaku falsy->null yang sudah ada.
         sensor: Object.freeze({
             sensorId: sensor.sensorId,
-            modality: sensor.modality ? String(sensor.modality).slice(0, 64) : null,
-            calibrationRef: sensor.calibrationRef ? String(sensor.calibrationRef).slice(0, 200) : null
+            modality: (typeof sensor.modality === "string" || typeof sensor.modality === "number") ? String(sensor.modality).slice(0, 64) : null,
+            calibrationRef: (typeof sensor.calibrationRef === "string" || typeof sensor.calibrationRef === "number") ? String(sensor.calibrationRef).slice(0, 200) : null
         }),
-        frame: frame ? Object.freeze({ kind: String(frame.kind).slice(0, 32), ref: String(frame.ref).slice(0, 200) }) : null,
+        frame: frame ? Object.freeze({
+            kind: (typeof frame.kind === "string" || typeof frame.kind === "number") ? String(frame.kind).slice(0, 32) : "",
+            ref: (typeof frame.ref === "string" || typeof frame.ref === "number") ? String(frame.ref).slice(0, 200) : ""
+        }) : null,
         tier, observedAt
     });
 }
@@ -148,6 +178,12 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
         // jadi TypeError mentah alih-alih INVALID_RECORD.
         candidateValues: Object.freeze(candidateValues.slice(0, 16).map(c => {
             if (!c || typeof c !== "object") fail(REASONS.INVALID_RECORD, "candidateValues elemen wajib objek");
+            // Bug review independen (audit putaran-28, AUD28-P2-3):
+            // `Number(c.weight)` mentah meledakkan TypeError untuk Symbol
+            // dan mengeksekusi valueOf hostile untuk objek.
+            if (typeof c.weight !== "number" && typeof c.weight !== "string" && typeof c.weight !== "boolean" && c.weight !== undefined) {
+                fail(REASONS.INVALID_RECORD, "candidateValues[].weight wajib angka");
+            }
             return Object.freeze({ value: buildSafeBeliefValue(c.value), weight: clamp01(Number(c.weight)) });
         })),
         discriminatingProbe: buildSafeBeliefValue(discriminatingProbe), expiresAt

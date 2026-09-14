@@ -69,9 +69,18 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         // tidak memvalidasi bentuk subjectRef -- dua subjectRef yang BEDA tapi
         // sama-sama tidak punya entityId/relationId string jatuh ke
         // `relation:undefined`, menggabungkan review yang tidak terkait.
+        // Bug review independen (audit putaran-28, AUD28-P2-6): entityId/
+        // relationId dibaca DUA KALI (sekali di `typeof` test, sekali lagi
+        // di template literal) -- getter/Proxy stateful yang mengembalikan
+        // string sah pada baca pertama lalu Symbol pada baca kedua tetap
+        // meledakkan TypeError, meniadakan jaminan single-read yang sudah
+        // ditegakkan untuk `trigger` di fungsi yang sama (putaran-24).
+        // Dibaca SEKALI ke variabel lokal, dipakai untuk KEDUA pemeriksaan.
         let subjectKey;
-        if (typeof subjectRef?.entityId === "string") subjectKey = `entity:${subjectRef.entityId}`;
-        else if (typeof subjectRef?.relationId === "string") subjectKey = `relation:${subjectRef.relationId}`;
+        const eid = subjectRef?.entityId;
+        const rid = subjectRef?.relationId;
+        if (typeof eid === "string") subjectKey = `entity:${eid}`;
+        else if (typeof rid === "string") subjectKey = `relation:${rid}`;
         else fail(REASONS.INVALID_RECORD, "subjectRef wajib { entityId } atau { relationId } string");
         // Bug review independen (audit putaran-24, AUD24-P2-2): `trigger`
         // dulu langsung diinterpolasi ke debounceKey (mengeksekusi

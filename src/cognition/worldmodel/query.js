@@ -69,7 +69,13 @@ function query(beliefs, { subject, attribute, at = null, requireFresh = false, m
     if (requireFresh && stale) {
         return { unknown: true, reason: "STALE_SOURCE", lastKnown: { value: belief.value, at: belief.observedAt } };
     }
-    if (maxStalenessMs !== null && (nowMs - belief.updatedAtMs) > maxStalenessMs) {
+    // Bug review independen (audit putaran-28, AUD28-P2-4): perbandingan
+    // relasi `>` memaksa ToNumber pada maxStalenessMs -- Symbol meledakkan
+    // TypeError mentah, objek dengan valueOf hostile tereksekusi. Nilai
+    // bukan angka valid diperlakukan sebagai "tidak ada batas staleness"
+    // (perilaku default, bukan crash).
+    const safeMaxStalenessMs = (typeof maxStalenessMs === "number" && Number.isFinite(maxStalenessMs)) ? maxStalenessMs : null;
+    if (safeMaxStalenessMs !== null && (nowMs - belief.updatedAtMs) > safeMaxStalenessMs) {
         return { unknown: true, reason: "STALE_SOURCE", lastKnown: { value: belief.value, at: belief.observedAt } };
     }
 
