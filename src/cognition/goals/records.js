@@ -266,7 +266,17 @@ function validateConditionSpec(spec, label) {
     // valid. `kind`/`attribute` sekarang ikut dikeluarkan lewat
     // destructuring yang SAMA, divalidasi sebagai lokal, dan lokal itulah
     // yang dipakai membangun salinan aman di bawah.
-    const { subject, kind, attribute, ...specRest } = spec;
+    // Bug review independen (audit putaran-45, W7R45-P2-2): `spec` di sini
+    // adalah nilai BERSARANG milik pemanggil (successCondition/
+    // abandonCondition/dueCondition/precondition/postcondition) -- round-44
+    // hanya membungkus destructuring tingkat atas SETIAP entry point, bukan
+    // nilai bersarang yang diteruskan ke fungsi bersama ini.
+    let subject, kind, attribute, specRest;
+    try {
+        ({ subject, kind, attribute, ...specRest } = spec);
+    } catch {
+        fail(REASONS.UNVERIFIABLE_SUCCESS_CONDITION, `${label} tidak dapat diverifikasi dengan aman, ditolak`);
+    }
     // Bug review independen (audit putaran-34, AUD34-P2-1; putaran-38,
     // AUD38-P2-1): destructuring putaran-31 mengeluarkan `subject` ITU
     // SENDIRI dari `spec` untuk satu baca, tapi properti DALAM subject

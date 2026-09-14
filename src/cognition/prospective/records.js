@@ -348,7 +348,15 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
     // lolos validasi dengan tanggal sah lalu menyimpan nilai LAIN yang tidak
     // sah, membuat expectation PENDING selamanya (tidak pernah SATISFIED/
     // VIOLATED). Destructure SEKALI; validasi dan simpan pakai lokal yang sama.
-    const { latestAt, earliestAt, ...windowRest } = window ?? {};
+    // Bug review independen (audit putaran-45, W7R45-P2-6): `window` adalah
+    // nilai bersarang milik pemanggil -- `?? {}` hanya melindungi
+    // null/undefined, bukan Proxy yang di-revoke (tetap truthy).
+    let latestAt, earliestAt, windowRest;
+    try {
+        ({ latestAt, earliestAt, ...windowRest } = window ?? {});
+    } catch {
+        fail(REASONS.NO_LATEST_AT, "window tidak dapat diverifikasi dengan aman, ditolak");
+    }
     if (typeof latestAt !== "string" || !Number.isFinite(Date.parse(latestAt))) {
         // PM-5: ekspektasi tanpa latestAt YANG SAH ditolak. Bug diketemukan
         // review independen (Codex, putaran ke-4): string tak-tanggal lolos

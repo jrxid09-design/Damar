@@ -41,13 +41,25 @@ function sanitizeEvidenceQuality(evidenceQuality) {
     // `{valueOf(){...}}` mengeksekusi valueOf pemanggil. Dinormalisasi ke
     // angka aman (0 kalau bukan angka valid) sebelum dipakai.
     const safeNumber = (v) => (typeof v === "number" && Number.isFinite(v)) ? v : 0;
-    return {
-        sourceCount: safeNumber(raw.sourceCount),
-        contradictionCount: safeNumber(raw.contradictionCount),
-        verifiedCount: safeNumber(raw.verifiedCount),
-        freshestAtMs: (typeof raw.freshestAtMs === "number" && Number.isFinite(raw.freshestAtMs)) ? raw.freshestAtMs : null,
-        inferenceOnly: raw.inferenceOnly === true
-    };
+    // Bug review independen (audit putaran-45, W7R45-P2-7): `evidenceQuality
+    // || {}` cuma melindungi dari nilai falsy -- sebuah Proxy yang di-revoke
+    // tetap truthy, jadi `raw.x` di bawah tetap [[Get]] mentah terhadapnya.
+    // Diperlakukan SAMA seperti null/undefined (komentar di atas): gagal
+    // aman ke NO_EVIDENCE, bukan crash -- fungsi ini tidak punya (dan
+    // sengaja tidak diberi) kontrak melempar sama sekali.
+    let safeQuality;
+    try {
+        safeQuality = {
+            sourceCount: safeNumber(raw.sourceCount),
+            contradictionCount: safeNumber(raw.contradictionCount),
+            verifiedCount: safeNumber(raw.verifiedCount),
+            freshestAtMs: (typeof raw.freshestAtMs === "number" && Number.isFinite(raw.freshestAtMs)) ? raw.freshestAtMs : null,
+            inferenceOnly: raw.inferenceOnly === true
+        };
+    } catch {
+        safeQuality = { sourceCount: 0, contradictionCount: 0, verifiedCount: 0, freshestAtMs: null, inferenceOnly: false };
+    }
+    return safeQuality;
 }
 
 function basisFromSafe(safe, nowMs) {

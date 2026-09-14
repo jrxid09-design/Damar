@@ -144,8 +144,20 @@ function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 26
     // batas efektif tidak konsisten. `nodes`/`ms` dibaca SEKALI SAJA
     // masing-masing (SEBELUM divalidasi) ke lokal; validasi dan seluruh
     // traversal di bawah memakai lokal itu saja.
-    let maxNodes = budget?.nodes;
-    let maxBytes = budget?.bytes;
+    // Bug review independen (audit putaran-45, W7R45-P2-5): `?.` cuma
+    // melindungi dari null/undefined, BUKAN dari Proxy yang di-revoke
+    // (tetap truthy/typeof "object") -- `budget?.nodes`/`budget?.bytes`
+    // tetap [[Get]] mentah terhadapnya. Diperlakukan SAMA seperti budget
+    // malformed lain di guard bawah (jatuh ke default), bukan penolakan
+    // baru -- konsisten dengan kontrak fungsi ini yang sudah ada.
+    let maxNodes, maxBytes;
+    try {
+        maxNodes = budget?.nodes;
+        maxBytes = budget?.bytes;
+    } catch {
+        maxNodes = undefined;
+        maxBytes = undefined;
+    }
     if (!budget || typeof budget !== "object" || !Number.isFinite(maxNodes) || !Number.isFinite(maxBytes)) {
         maxNodes = 512;
         maxBytes = 262144;
