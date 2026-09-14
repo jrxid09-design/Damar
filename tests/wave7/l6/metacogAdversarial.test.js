@@ -256,6 +256,25 @@ test("MC-repair-32: buildSafeArray inside openReview rejects a findings/proposal
     }
 });
 
+test("MC-repair-33: openReview/assess fail closed (not raw-throw) on a revoked-Proxy subjectRef/findings/finding-element (independent audit W7R43-P2-3/W7R43-P2-7)", async () => {
+    const mc = await createMetacognition();
+    const s = Proxy.revocable({ entityId: "e1" }, {});
+    s.revoke();
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: s.proxy, findings: [], proposals: [], cost: { tokens: 0, ms: 0 } }), "INVALID_RECORD");
+
+    const f = Proxy.revocable([{ severity: 1 }], {});
+    f.revoke();
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: f.proxy, proposals: [], cost: { tokens: 0, ms: 0 } }), "INVALID_RECORD");
+
+    const nested = Proxy.revocable({ a: 1 }, {});
+    nested.revoke();
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: [{ severity: 1, extra: nested.proxy }], proposals: [], cost: { tokens: 0, ms: 0 } }), "EXECUTABLE_MATERIAL_REJECTED");
+
+    const s2 = Proxy.revocable({ entityId: "e1" }, {});
+    s2.revoke();
+    assertThrowsReason(() => mc.assess(s2.proxy, "claim", { verifiedCount: 1, unverifiedCount: 0, contradictionCount: 0, freshnessMs: 0, sourceTier: "T1" }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
 test("MC-repair-30: openReview's element validation never consults Symbol.iterator at all, so a findings array with a non-callable Symbol.iterator is still processed by plain index instead of raw-throwing (independent audit AUD40-ADV-1)", async () => {
     const mc = await createMetacognition();
     const a = [{ severity: 1 }];

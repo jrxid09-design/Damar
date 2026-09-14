@@ -88,12 +88,29 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         // tereksekusi (kelas yang sama dengan AUD36-P2-2 di worldmodel/
         // attention). Dikembalikan: relationId hanya dibaca kalau entityId
         // terbukti bukan string.
+        // Bug review independen (audit putaran-43, W7R43-P2-3): `subjectRef?.entityId`
+        // MASIH melakukan [[Get]] biasa kalau `subjectRef` bukan null/undefined
+        // -- `?.` cuma melindungi dari null/undefined, BUKAN dari Proxy yang
+        // di-revoke, yang melempar TypeError MENTAH pada [[Get]] apa pun.
+        // Short-circuit AUD37-P2-1 (relationId hanya dibaca kalau entityId
+        // gagal) DIPERTAHANKAN -- setiap baca dibungkus try/catch sendiri,
+        // TIDAK digabung jadi satu blok tak bersyarat.
         let subjectKey;
-        const eid = subjectRef?.entityId;
+        let eid;
+        try {
+            eid = subjectRef?.entityId;
+        } catch {
+            fail(REASONS.INVALID_RECORD, "subjectRef tidak dapat diverifikasi dengan aman, ditolak");
+        }
         if (typeof eid === "string") {
             subjectKey = `entity:${eid}`;
         } else {
-            const rid = subjectRef?.relationId;
+            let rid;
+            try {
+                rid = subjectRef?.relationId;
+            } catch {
+                fail(REASONS.INVALID_RECORD, "subjectRef tidak dapat diverifikasi dengan aman, ditolak");
+            }
             if (typeof rid === "string") subjectKey = `relation:${rid}`;
             else fail(REASONS.INVALID_RECORD, "subjectRef wajib { entityId } atau { relationId } string");
         }

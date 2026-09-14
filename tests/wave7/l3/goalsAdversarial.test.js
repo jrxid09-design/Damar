@@ -770,6 +770,56 @@ test("GL-repair-62: createPlan fails closed (not raw-throw) on a revoked-Proxy s
     assertThrowsReason(() => ge.createPlan({ goalRef: g.goalId, steps: stepsProxy.proxy }), "INVALID_RECORD");
 });
 
+test("GL-repair-63: createPlan's assumptions and createTask's pre/postconditions fail closed on a revoked-Proxy container, the exact sibling round-42 left unswept (independent audit W7R43-P2-4)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+    const a = Proxy.revocable([1], {});
+    a.revoke();
+    assertThrowsReason(() => ge.createPlan({ goalRef: g.goalId, steps: [], assumptions: a.proxy }), "INVALID_RECORD");
+    const pre = Proxy.revocable([{ kind: "X" }], {});
+    pre.revoke();
+    assertThrowsReason(() => ge.createTask({ taskId: "t1", planRef: p.planId, order: 0, preconditions: pre.proxy, postconditions: [], intentTemplate: {} }), "INVALID_RECORD");
+    const post = Proxy.revocable([{ kind: "X" }], {});
+    post.revoke();
+    assertThrowsReason(() => ge.createTask({ taskId: "t2", planRef: p.planId, order: 0, preconditions: [], postconditions: post.proxy, intentTemplate: {} }), "INVALID_RECORD");
+});
+
+test("GL-repair-64: createPlan enforces MAX_STEPS_PER_PLAN against a genuinely oversized steps array (independent audit W7R43-P2-8)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    const big = Array.from({ length: BOUNDS.MAX_STEPS_PER_PLAN + 1 }, (_, i) => ({ i }));
+    assertThrowsReason(() => ge.createPlan({ goalRef: g.goalId, steps: big }), "PLAN_STEP_LIMIT_EXCEEDED");
+});
+
+test("GL-repair-64b: createPlan's steps.length is read exactly ONCE end-to-end (quota check and stored-array construction share one read), so a stateful getter cannot pass the quota with one value and store a different one (independent audit W7R43-P2-8)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    let n = 0;
+    const big = Array.from({ length: 1000 }, (_, i) => ({ i }));
+    const small = [{ i: 0 }];
+    const steps = new Proxy(big, {
+        get(t, p, r) {
+            if (p === "length") { n++; return n === 1 ? small.length : big.length; }
+            return Reflect.get(t, p, r);
+        }
+    });
+    const p = ge.createPlan({ goalRef: g.goalId, steps });
+    assert.equal(n, 1, "steps.length must be read exactly once end-to-end, not once for a quota pre-check and again for construction");
+    assert.equal(p.steps.length, 1, "the stored steps must come from the SAME single read that passed the quota check (the small-length branch), never a later, larger read");
+});
+
+test("GL-repair-65: buildSafeIntentTemplate fails closed (not raw-throw) on a revoked-Proxy nested anywhere inside successCondition.expectedValue (independent audit W7R43-P2-7)", async () => {
+    const ge = await createGoalEngine();
+    const r = Proxy.revocable({ a: 1 }, {});
+    r.revoke();
+    assertThrowsReason(() => ge.proposeGoal({
+        title: "g", kind: "OWNER_ASSIGNED",
+        origin: { kind: "OWNER", ref: "o", evidenceRef: null },
+        successCondition: { kind: "WORLD_BELIEF", subject: { entityId: "e1" }, attribute: "s", expectedValue: r.proxy }
+    }), "AUTHORITY_SHAPED_FIELD_REJECTED");
+});
+
 test("GL-repair-58: createPlan/createTask reject sparse (hole-bearing) steps/preconditions arrays, not just explicit null/undefined elements (independent audit AUD40-P2-3)", async () => {
     const ge = await createGoalEngine();
     const g = ge.proposeGoal(baseGoalSpec());

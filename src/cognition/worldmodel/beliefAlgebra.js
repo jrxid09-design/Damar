@@ -11,7 +11,7 @@
  */
 
 const { BOUNDS } = require("./bounds");
-const { REASONS, fail } = require("./errors");
+const { REASONS, fail, WorldModelError } = require("./errors");
 const { canonicalJson } = require("../core/envelope");
 
 const TIER_RANK = Object.freeze({ T4: 1, T2: 2, T1: 3, DECLARED: 4 });
@@ -72,63 +72,77 @@ function buildSafeBeliefValue(value, depth = 0, stack, budget) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah node pada value melebihi batas");
     }
 
-    if (Array.isArray(value)) {
-        // Bug review independen (audit putaran-42, W7R42-P2-1): `value.length`
-        // dulu dibaca SEKALI untuk cek batas ini, lalu dibaca ULANG di
-        // KONDISI loop di bawah setiap iterasi -- Proxy dengan getter
-        // `length` yang terus bertambah membuat loop TIDAK PERNAH berhenti
-        // (DoS). `length` di-cache SEKALI ke lokal dan divalidasi sebagai
-        // integer terhingga non-negatif SEBELUM dipakai di mana pun.
-        const len = value.length;
-        if (!Number.isInteger(len) || len < 0 || len > BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
-            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array pada value melebihi batas atau tidak sah");
+    // Bug review independen (audit putaran-43, W7R43-P2-7): `Array.isArray`/
+    // `Object.getPrototypeOf`/`Reflect.ownKeys` di bawah adalah operasi
+    // dasar terhadap `value` yang belum tepercaya -- di KEDALAMAN MANAPUN
+    // lewat rekursi -- sebuah Proxy yang di-revoke melempar TypeError
+    // MENTAH pada operasi ini, keluar dari `ingestObservation()`/
+    // `ingestDeclaration()`/`declareHypothesis()` publik. Seluruh cabang
+    // array/objek dibungkus try/catch; WorldModelError (termasuk hasil
+    // rekursi anak) diteruskan apa adanya, kegagalan APA PUN lainnya gagal
+    // tertutup.
+    try {
+        if (Array.isArray(value)) {
+            // Bug review independen (audit putaran-42, W7R42-P2-1): `value.length`
+            // dulu dibaca SEKALI untuk cek batas ini, lalu dibaca ULANG di
+            // KONDISI loop di bawah setiap iterasi -- Proxy dengan getter
+            // `length` yang terus bertambah membuat loop TIDAK PERNAH berhenti
+            // (DoS). `length` di-cache SEKALI ke lokal dan divalidasi sebagai
+            // integer terhingga non-negatif SEBELUM dipakai di mana pun.
+            const len = value.length;
+            if (!Number.isInteger(len) || len < 0 || len > BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
+                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array pada value melebihi batas atau tidak sah");
+            }
+            const arrProto = Object.getPrototypeOf(value);
+            if (arrProto !== Array.prototype && arrProto !== null) {
+                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh berupa array dengan prototype non-standar");
+            }
+            stack.add(value);
+            const out = [];
+            try {
+                for (let i = 0; i < len; i++) {
+                    const desc = Object.getOwnPropertyDescriptor(value, i);
+                    if (!desc || desc.get || desc.set) {
+                        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `value tidak boleh membawa properti accessor: '${i}'`);
+                    }
+                    const built = buildSafeBeliefValue(desc.value, depth + 1, stack, budget);
+                    out[i] = built === undefined ? null : built;
+                }
+            } finally {
+                stack.delete(value);
+            }
+            return Object.freeze(out);
         }
-        const arrProto = Object.getPrototypeOf(value);
-        if (arrProto !== Array.prototype && arrProto !== null) {
-            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh berupa array dengan prototype non-standar");
+
+        const proto = Object.getPrototypeOf(value);
+        if (proto !== Object.prototype && proto !== null) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh berupa instance kelas (kontrak data murni)");
+        }
+        const keys = Reflect.ownKeys(value);
+        if (keys.length > BOUNDS.MAX_VALUE_KEYS) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah kunci pada value melebihi batas");
         }
         stack.add(value);
-        const out = [];
+        const out = {};
         try {
-            for (let i = 0; i < len; i++) {
-                const desc = Object.getOwnPropertyDescriptor(value, i);
+            for (const key of keys) {
+                if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh membawa kunci Symbol");
+                if (DANGEROUS_VALUE_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak: '${key}'`);
+                const desc = Object.getOwnPropertyDescriptor(value, key);
                 if (!desc || desc.get || desc.set) {
-                    fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `value tidak boleh membawa properti accessor: '${i}'`);
+                    fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `value tidak boleh membawa properti accessor: '${String(key)}'`);
                 }
                 const built = buildSafeBeliefValue(desc.value, depth + 1, stack, budget);
-                out[i] = built === undefined ? null : built;
+                if (built !== undefined) out[key] = built;
             }
         } finally {
             stack.delete(value);
         }
         return Object.freeze(out);
+    } catch (err) {
+        if (err instanceof WorldModelError) throw err;
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak dapat diverifikasi dengan aman, ditolak");
     }
-
-    const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null) {
-        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh berupa instance kelas (kontrak data murni)");
-    }
-    const keys = Reflect.ownKeys(value);
-    if (keys.length > BOUNDS.MAX_VALUE_KEYS) {
-        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah kunci pada value melebihi batas");
-    }
-    stack.add(value);
-    const out = {};
-    try {
-    for (const key of keys) {
-        if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh membawa kunci Symbol");
-        if (DANGEROUS_VALUE_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak: '${key}'`);
-        const desc = Object.getOwnPropertyDescriptor(value, key);
-        if (!desc || desc.get || desc.set) {
-            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `value tidak boleh membawa properti accessor: '${String(key)}'`);
-        }
-        const built = buildSafeBeliefValue(desc.value, depth + 1, stack, budget);
-        if (built !== undefined) out[key] = built;
-    }
-    } finally {
-        stack.delete(value);
-    }
-    return Object.freeze(out);
 }
 
 const DEFAULT_DECAY_POLICY = Object.freeze({ ttlMs: 30 * 60_000, decayKind: "STEP" });

@@ -198,6 +198,25 @@ test("PM-repair-50: buildSafePayloadRef rejects a nested trigger array whose .le
     }
 });
 
+test("PM-repair-51: arm/armExpectation fail closed (not raw-throw) on a revoked-Proxy trigger/payloadRef/subject/expectedValue (independent audit W7R43-P2-1/W7R43-P2-7)", async () => {
+    const pm = await createProspectiveMemory();
+    const trig = Proxy.revocable({ kind: "AT", at: new Date(1).toISOString() }, {});
+    trig.revoke();
+    assertThrowsReason(() => pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: trig.proxy }), "INVALID_TRIGGER");
+
+    const payload = Proxy.revocable([1], {});
+    payload.revoke();
+    assertThrowsReason(() => pm.arm({ reminderId: "R2", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(1).toISOString(), extra: payload.proxy } }), "EXECUTABLE_MATERIAL_REJECTED");
+
+    const subj = Proxy.revocable({ entityId: "e1" }, {});
+    subj.revoke();
+    assertThrowsReason(() => pm.armExpectation({ subject: subj.proxy, attribute: "a", expectedValue: 1, window: { latestAt: new Date(9e12).toISOString() } }), "EXECUTABLE_MATERIAL_REJECTED");
+
+    const ev = Proxy.revocable({ a: 1 }, {});
+    ev.revoke();
+    assertThrowsReason(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "a", expectedValue: ev.proxy, window: { latestAt: new Date(9e12).toISOString() } }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
 test("PM-repair-49: compaction only removes a victim's OWN firedOccurrenceIds entries, not a differently-terminated reminder whose id happens to be a string-prefix of the victim's (independent audit AUD38-ADV-1)", async () => {
     const clock = manualClock(0);
     const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_TOTAL_REMINDERS_RETAINED: 1, MAX_ARMED_REMINDERS: 100 } });

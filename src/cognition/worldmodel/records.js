@@ -37,7 +37,11 @@ const ADMISSIBLE_TIERS = new Set(["T1", "T2", "T4"]);
 // yang mengembalikan `Infinity` membuat loop TIDAK PERNAH berhenti (DoS).
 // `length` sekarang divalidasi sebagai integer terhingga non-negatif dan
 // dibatasi eksplisit sebelum loop dimulai.
-const MAX_SAFE_ARRAY_LENGTH = 65536;
+// Bug review independen (audit putaran-43, W7R43-ADV-1): `65536` adalah
+// konstanta arbitrer independen dari batas lane manapun -- dipakai kembali
+// `BOUNDS.MAX_VALUE_ARRAY_LENGTH` (batas yang sudah dipakai buildSafeBeliefValue
+// untuk array `value` di lane yang SAMA) supaya konsisten, bukan generik.
+const MAX_SAFE_ARRAY_LENGTH = BOUNDS.MAX_VALUE_ARRAY_LENGTH;
 function buildSafeArray(arr, mapFn) {
     const len = arr.length;
     if (!Number.isInteger(len) || len < 0 || len > MAX_SAFE_ARRAY_LENGTH) {

@@ -261,104 +261,119 @@ function walkSafe(value, label, depth, stack, budget) {
         rejectMetadata(label, "jumlah node melebihi batas");
     }
 
-    if (Array.isArray(value)) {
-        // Bug review independen (audit putaran-42, W7R42-P2-1): `value.length`
-        // dulu dibaca SEKALI untuk cek batas ini, lalu dibaca ULANG di
-        // KONDISI loop di bawah setiap iterasi -- Proxy dengan getter
-        // `length` yang terus bertambah membuat loop TIDAK PERNAH berhenti
-        // (DoS). `length` di-cache SEKALI ke lokal dan divalidasi sebagai
-        // integer terhingga non-negatif SEBELUM dipakai di mana pun.
-        const len = value.length;
-        if (!Number.isInteger(len) || len < 0 || len > ENVELOPE_BOUNDS.GLOBAL_MAX_ARRAY_LENGTH) {
-            rejectMetadata(label, "panjang array melebihi batas atau tidak sah");
-        }
-        // Bug review independen (audit putaran-2, AUD2-P2-3): cabang array
-        // ini `return` sebelum sempat mencapai cek prototype di bawah
-        // (khusus objek non-array), jadi `Object.setPrototypeOf(arr,{toJSON})`
-        // lolos.
-        const arrProto = Object.getPrototypeOf(value);
-        if (arrProto !== Array.prototype && arrProto !== null) {
-            rejectMetadata(label, "prototipe array tidak standar (kontrak data murni, termasuk toJSON warisan)");
-        }
-        stack.add(value);
-        const out = [];
-        try {
-            // Indeks array bisa membawa accessor (Object.defineProperty pada
-            // elemen) — periksa descriptor SEBELUM membaca nilainya, sama
-            // seperti kunci objek di bawah. `for...of`/indexing langsung
-            // akan memanggil getter (atau trap `get` Proxy) sebelum sempat
-            // ditolak; nilai dibaca dari `desc.value`, tidak pernah `value[i]`.
-            for (let i = 0; i < len; i++) {
-                const desc = Object.getOwnPropertyDescriptor(value, i);
-                if (!desc || desc.get || desc.set) {
-                    rejectMetadata(label, `properti accessor pada indeks array ditolak tanpa dipanggil: '${i}'`);
-                }
-                const built = walkSafe(desc.value, label, depth + 1, stack, budget);
-                out[i] = built === undefined ? null : built;
+    // Bug review independen (audit putaran-43, W7R43-P2-6/W7R43-P2-7):
+    // `Array.isArray`/`Object.getPrototypeOf`/`Reflect.ownKeys` di bawah
+    // adalah operasi dasar terhadap `value` yang belum tepercaya -- di
+    // KEDALAMAN MANAPUN lewat rekursi -- sebuah Proxy yang di-revoke
+    // melempar TypeError MENTAH pada operasi ini, keluar dari
+    // `makeEnvelope()` publik (dipakai CognitiveCore/ContinuityCore/
+    // FoundationEventAdapter/InteroceptiveBus). Seluruh cabang array/objek
+    // dibungkus try/catch; error `ACC_INVALID_METADATA` (termasuk hasil
+    // rekursi anak) diteruskan apa adanya, kegagalan APA PUN lainnya gagal
+    // tertutup lewat `rejectMetadata`.
+    try {
+        if (Array.isArray(value)) {
+            // Bug review independen (audit putaran-42, W7R42-P2-1): `value.length`
+            // dulu dibaca SEKALI untuk cek batas ini, lalu dibaca ULANG di
+            // KONDISI loop di bawah setiap iterasi -- Proxy dengan getter
+            // `length` yang terus bertambah membuat loop TIDAK PERNAH berhenti
+            // (DoS). `length` di-cache SEKALI ke lokal dan divalidasi sebagai
+            // integer terhingga non-negatif SEBELUM dipakai di mana pun.
+            const len = value.length;
+            if (!Number.isInteger(len) || len < 0 || len > ENVELOPE_BOUNDS.GLOBAL_MAX_ARRAY_LENGTH) {
+                rejectMetadata(label, "panjang array melebihi batas atau tidak sah");
             }
-            // Properti OWN NON-INDEKS pada array (mis. `arr.toJSON = fn`)
-            // divalidasi tapi TIDAK disalin -- sama seperti JSON.stringify
-            // lama yang diam-diam mengabaikan properti non-indeks pada array.
-            for (const key of Reflect.ownKeys(value)) {
-                if (key === "length" || ARRAY_INDEX_PATTERN.test(String(key))) continue;
+            // Bug review independen (audit putaran-2, AUD2-P2-3): cabang array
+            // ini `return` sebelum sempat mencapai cek prototype di bawah
+            // (khusus objek non-array), jadi `Object.setPrototypeOf(arr,{toJSON})`
+            // lolos.
+            const arrProto = Object.getPrototypeOf(value);
+            if (arrProto !== Array.prototype && arrProto !== null) {
+                rejectMetadata(label, "prototipe array tidak standar (kontrak data murni, termasuk toJSON warisan)");
+            }
+            stack.add(value);
+            const out = [];
+            try {
+                // Indeks array bisa membawa accessor (Object.defineProperty pada
+                // elemen) — periksa descriptor SEBELUM membaca nilainya, sama
+                // seperti kunci objek di bawah. `for...of`/indexing langsung
+                // akan memanggil getter (atau trap `get` Proxy) sebelum sempat
+                // ditolak; nilai dibaca dari `desc.value`, tidak pernah `value[i]`.
+                for (let i = 0; i < len; i++) {
+                    const desc = Object.getOwnPropertyDescriptor(value, i);
+                    if (!desc || desc.get || desc.set) {
+                        rejectMetadata(label, `properti accessor pada indeks array ditolak tanpa dipanggil: '${i}'`);
+                    }
+                    const built = walkSafe(desc.value, label, depth + 1, stack, budget);
+                    out[i] = built === undefined ? null : built;
+                }
+                // Properti OWN NON-INDEKS pada array (mis. `arr.toJSON = fn`)
+                // divalidasi tapi TIDAK disalin -- sama seperti JSON.stringify
+                // lama yang diam-diam mengabaikan properti non-indeks pada array.
+                for (const key of Reflect.ownKeys(value)) {
+                    if (key === "length" || ARRAY_INDEX_PATTERN.test(String(key))) continue;
+                    if (typeof key === "symbol") {
+                        rejectMetadata(label, "kunci Symbol tidak diperbolehkan pada array");
+                    }
+                    if (DANGEROUS_KEYS.includes(key)) {
+                        rejectMetadata(label, `kunci berbahaya ditolak pada array: '${key}'`);
+                    }
+                    const desc = Object.getOwnPropertyDescriptor(value, key);
+                    if (!desc || desc.get || desc.set) {
+                        rejectMetadata(label, `properti accessor pada array ditolak tanpa dipanggil: '${String(key)}'`);
+                    }
+                    // Nilainya tidak disalin (lihat komentar di atas), TAPI tetap
+                    // divalidasi -- kalau tidak, `arr.toJSON = fn` lolos tanpa
+                    // terdeteksi karena tidak pernah masuk `out`.
+                    walkSafe(desc.value, label, depth + 1, stack, budget);
+                }
+            } finally {
+                stack.delete(value);
+            }
+            return out;
+        }
+
+        // Kontrak data murni: instance kelas (selain object literal) ditolak.
+        const proto = Object.getPrototypeOf(value);
+        if (proto !== Object.prototype && proto !== null) {
+            rejectMetadata(label, "instance kelas tidak diperbolehkan (kontrak data murni)");
+        }
+
+        const keys = Reflect.ownKeys(value);
+        if (keys.length > ENVELOPE_BOUNDS.MAX_PAYLOAD_KEYS) {
+            rejectMetadata(label, "jumlah kunci melebihi batas");
+        }
+
+        stack.add(value);
+        const out = {};
+        try {
+            for (const key of keys) {
                 if (typeof key === "symbol") {
-                    rejectMetadata(label, "kunci Symbol tidak diperbolehkan pada array");
+                    rejectMetadata(label, "kunci Symbol tidak diperbolehkan");
                 }
                 if (DANGEROUS_KEYS.includes(key)) {
-                    rejectMetadata(label, `kunci berbahaya ditolak pada array: '${key}'`);
+                    rejectMetadata(label, `kunci berbahaya ditolak: '${key}'`);
                 }
+                if (key.length > ENVELOPE_BOUNDS.MAX_PAYLOAD_KEY_CHARS) {
+                    rejectMetadata(label, "panjang kunci melebihi batas");
+                }
+
                 const desc = Object.getOwnPropertyDescriptor(value, key);
                 if (!desc || desc.get || desc.set) {
-                    rejectMetadata(label, `properti accessor pada array ditolak tanpa dipanggil: '${String(key)}'`);
+                    rejectMetadata(label, `properti accessor ditolak tanpa dipanggil: '${key}'`);
                 }
-                // Nilainya tidak disalin (lihat komentar di atas), TAPI tetap
-                // divalidasi -- kalau tidak, `arr.toJSON = fn` lolos tanpa
-                // terdeteksi karena tidak pernah masuk `out`.
-                walkSafe(desc.value, label, depth + 1, stack, budget);
+
+                const built = walkSafe(desc.value, label, depth + 1, stack, budget);
+                if (built !== undefined) out[key] = built; // sama seperti JSON: kunci undefined dibuang
             }
         } finally {
             stack.delete(value);
         }
         return out;
+    } catch (err) {
+        if (err && err.code === "ACC_INVALID_METADATA") throw err;
+        rejectMetadata(label, "tidak dapat diverifikasi dengan aman, ditolak");
     }
-
-    // Kontrak data murni: instance kelas (selain object literal) ditolak.
-    const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null) {
-        rejectMetadata(label, "instance kelas tidak diperbolehkan (kontrak data murni)");
-    }
-
-    const keys = Reflect.ownKeys(value);
-    if (keys.length > ENVELOPE_BOUNDS.MAX_PAYLOAD_KEYS) {
-        rejectMetadata(label, "jumlah kunci melebihi batas");
-    }
-
-    stack.add(value);
-    const out = {};
-    try {
-        for (const key of keys) {
-            if (typeof key === "symbol") {
-                rejectMetadata(label, "kunci Symbol tidak diperbolehkan");
-            }
-            if (DANGEROUS_KEYS.includes(key)) {
-                rejectMetadata(label, `kunci berbahaya ditolak: '${key}'`);
-            }
-            if (key.length > ENVELOPE_BOUNDS.MAX_PAYLOAD_KEY_CHARS) {
-                rejectMetadata(label, "panjang kunci melebihi batas");
-            }
-
-            const desc = Object.getOwnPropertyDescriptor(value, key);
-            if (!desc || desc.get || desc.set) {
-                rejectMetadata(label, `properti accessor ditolak tanpa dipanggil: '${key}'`);
-            }
-
-            const built = walkSafe(desc.value, label, depth + 1, stack, budget);
-            if (built !== undefined) out[key] = built; // sama seperti JSON: kunci undefined dibuang
-        }
-    } finally {
-        stack.delete(value);
-    }
-    return out;
 }
 
 function rejectMetadata(label, reason) {

@@ -2,7 +2,7 @@
 
 /** W7-L3 GOALS — pembangun record murni (spec §3, §5, §6). */
 
-const { REASONS, fail } = require("./errors");
+const { REASONS, fail, GoalError } = require("./errors");
 
 const GOAL_KINDS = new Set(["OWNER_ASSIGNED", "SELF_PROPOSED", "MISSION_DERIVED", "MAINTENANCE"]);
 const ORIGIN_KINDS = new Set(["OWNER", "SELF", "MISSION", "AGENT_SUGGESTION"]);
@@ -46,10 +46,22 @@ const DANGEROUS_INTENT_KEYS = Object.freeze(["__proto__", "constructor", "protot
 // `ToLength`. `length` sekarang divalidasi sebagai integer terhingga
 // non-negatif dan dibatasi eksplisit sebelum loop dimulai.
 const MAX_SAFE_ARRAY_LENGTH = 65536;
-function buildSafeArray(arr, mapFn) {
+// Bug review independen (audit putaran-43, W7R43-P2-8/W7R43-ADV-1): `steps`
+// dulu dibatasi MAX_STEPS_PER_PLAN lewat pembacaan `.length` KEDUA yang
+// terpisah di goals/index.js (SEBELUM panggilan ini) -- Proxy dengan getter
+// `length` yang berbohong pada baca kedua lolos cek kuota lalu menyimpan
+// jauh lebih banyak elemen dari yang diizinkan (MEMALSUKAN penegakan
+// MAX_STEPS_PER_PLAN, bukan cuma raw-throw). `maxLen`/`overLimitReason`
+// sekarang opsional supaya PEMANGGIL bisa menegakkan batas KHUSUS FIELD-nya
+// memakai `len` yang SAMA PERSIS dipakai loop di bawah -- satu-satunya
+// pembacaan `.length`, tidak ada celah divergensi yang mungkin.
+function buildSafeArray(arr, mapFn, maxLen = MAX_SAFE_ARRAY_LENGTH, overLimitReason = REASONS.INVALID_RECORD, overLimitMessage = "panjang array melebihi batas") {
     const len = arr.length;
-    if (!Number.isInteger(len) || len < 0 || len > MAX_SAFE_ARRAY_LENGTH) {
-        fail(REASONS.INVALID_RECORD, "panjang array tidak sah atau melebihi batas");
+    if (!Number.isInteger(len) || len < 0) {
+        fail(REASONS.INVALID_RECORD, "panjang array tidak sah");
+    }
+    if (len > maxLen) {
+        fail(overLimitReason, overLimitMessage);
     }
     const out = [];
     for (let i = 0; i < len; i++) out.push(mapFn(arr[i], i));
@@ -113,39 +125,73 @@ function buildSafeIntentTemplate(value, depth = 0, budget) {
         fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "jumlah node pada intentTemplate melebihi batas");
     }
 
-    if (Array.isArray(value)) {
-        // Bug review independen (audit putaran-4, W7R4-P2-4): walker ini
-        // tidak punya batas panjang array seperti saudaranya di
-        // prospective (MAX_PAYLOAD_ARRAY_LENGTH) dan envelope
-        // (GLOBAL_MAX_ARRAY_LENGTH) -- array-like Proxy dengan `length`
-        // besar bisa memaksa loop tak terbatas.
-        // Bug review independen (audit putaran-42, W7R42-P2-1): `value.length`
-        // dulu dibaca SEKALI untuk cek batas ini, lalu dibaca ULANG di
-        // KONDISI loop di bawah setiap iterasi -- Proxy dengan getter
-        // `length` yang terus bertambah (dipasangkan getter indeks yang
-        // memalsukan nilai) membuat `i` dan `length` naik bersamaan, loop
-        // TIDAK PERNAH berhenti (DoS). `length` di-cache SEKALI ke lokal
-        // dan divalidasi sebagai integer terhingga non-negatif SEBELUM
-        // dipakai di mana pun.
-        const len = value.length;
-        if (!Number.isInteger(len) || len < 0 || len > MAX_INTENT_ARRAY_LENGTH) {
-            fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "panjang array pada intentTemplate melebihi batas atau tidak sah");
-        }
-        const arrProto = Object.getPrototypeOf(value);
-        if (arrProto !== Array.prototype && arrProto !== null) {
-            fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa array dengan prototype non-standar");
-        }
-        const out = [];
-        for (let i = 0; i < len; i++) {
-            const desc = Object.getOwnPropertyDescriptor(value, i);
-            if (!desc || desc.get || desc.set) {
-                fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa properti accessor: '${i}'`);
+    // Bug review independen (audit putaran-43, W7R43-P2-7): `Array.isArray`/
+    // `Object.getPrototypeOf`/`Reflect.ownKeys` di bawah adalah operasi
+    // dasar terhadap `value` yang belum tepercaya -- sebuah Proxy yang
+    // di-revoke (di KEDALAMAN MANAPUN dalam intentTemplate, bukan cuma
+    // level teratas) melempar TypeError MENTAH pada operasi ini, keluar
+    // dari API publik (proposeGoal/createPlan/createTask/dst). Seluruh
+    // logika pembentukan cabang array/objek dibungkus try/catch; error
+    // GoalError (termasuk yang dilempar ulang dari rekursi anak) diteruskan
+    // apa adanya, kegagalan APA PUN lainnya gagal tertutup.
+    try {
+        if (Array.isArray(value)) {
+            // Bug review independen (audit putaran-4, W7R4-P2-4): walker ini
+            // tidak punya batas panjang array seperti saudaranya di
+            // prospective (MAX_PAYLOAD_ARRAY_LENGTH) dan envelope
+            // (GLOBAL_MAX_ARRAY_LENGTH) -- array-like Proxy dengan `length`
+            // besar bisa memaksa loop tak terbatas.
+            // Bug review independen (audit putaran-42, W7R42-P2-1): `value.length`
+            // dulu dibaca SEKALI untuk cek batas ini, lalu dibaca ULANG di
+            // KONDISI loop di bawah setiap iterasi -- Proxy dengan getter
+            // `length` yang terus bertambah (dipasangkan getter indeks yang
+            // memalsukan nilai) membuat `i` dan `length` naik bersamaan, loop
+            // TIDAK PERNAH berhenti (DoS). `length` di-cache SEKALI ke lokal
+            // dan divalidasi sebagai integer terhingga non-negatif SEBELUM
+            // dipakai di mana pun.
+            const len = value.length;
+            if (!Number.isInteger(len) || len < 0 || len > MAX_INTENT_ARRAY_LENGTH) {
+                fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "panjang array pada intentTemplate melebihi batas atau tidak sah");
             }
-            const built = buildSafeIntentTemplate(desc.value, depth + 1, budget);
-            out[i] = built === undefined ? null : built;
+            const arrProto = Object.getPrototypeOf(value);
+            if (arrProto !== Array.prototype && arrProto !== null) {
+                fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa array dengan prototype non-standar");
+            }
+            const out = [];
+            for (let i = 0; i < len; i++) {
+                const desc = Object.getOwnPropertyDescriptor(value, i);
+                if (!desc || desc.get || desc.set) {
+                    fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa properti accessor: '${i}'`);
+                }
+                const built = buildSafeIntentTemplate(desc.value, depth + 1, budget);
+                out[i] = built === undefined ? null : built;
+            }
+            for (const key of Reflect.ownKeys(value)) {
+                if (key === "length" || INTENT_ARRAY_INDEX_PATTERN.test(String(key))) continue;
+                if (typeof key === "symbol") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa kunci Symbol");
+                if (DANGEROUS_INTENT_KEYS.includes(key)) fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `kunci berbahaya ditolak: '${key}'`);
+                if (FORBIDDEN_INTENT_KEYS.includes(key)) {
+                    fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa '${key}' (di kedalaman manapun)`);
+                }
+                const desc = Object.getOwnPropertyDescriptor(value, key);
+                if (!desc || desc.get || desc.set) {
+                    fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa properti accessor: '${String(key)}'`);
+                }
+                buildSafeIntentTemplate(desc.value, depth + 1, budget); // divalidasi, tidak disalin (properti non-indeks array)
+            }
+            return out;
         }
-        for (const key of Reflect.ownKeys(value)) {
-            if (key === "length" || INTENT_ARRAY_INDEX_PATTERN.test(String(key))) continue;
+
+        const proto = Object.getPrototypeOf(value);
+        if (proto !== Object.prototype && proto !== null) {
+            fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh berupa instance kelas (kontrak data murni)");
+        }
+        const objKeys = Reflect.ownKeys(value);
+        if (objKeys.length > MAX_INTENT_KEYS) {
+            fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "jumlah kunci pada intentTemplate melebihi batas");
+        }
+        const out = {};
+        for (const key of objKeys) {
             if (typeof key === "symbol") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa kunci Symbol");
             if (DANGEROUS_INTENT_KEYS.includes(key)) fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `kunci berbahaya ditolak: '${key}'`);
             if (FORBIDDEN_INTENT_KEYS.includes(key)) {
@@ -155,34 +201,14 @@ function buildSafeIntentTemplate(value, depth = 0, budget) {
             if (!desc || desc.get || desc.set) {
                 fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa properti accessor: '${String(key)}'`);
             }
-            buildSafeIntentTemplate(desc.value, depth + 1, budget); // divalidasi, tidak disalin (properti non-indeks array)
+            const built = buildSafeIntentTemplate(desc.value, depth + 1, budget);
+            if (built !== undefined) out[key] = built;
         }
         return out;
+    } catch (err) {
+        if (err instanceof GoalError) throw err;
+        fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak dapat diverifikasi dengan aman, ditolak");
     }
-
-    const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null) {
-        fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh berupa instance kelas (kontrak data murni)");
-    }
-    const objKeys = Reflect.ownKeys(value);
-    if (objKeys.length > MAX_INTENT_KEYS) {
-        fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "jumlah kunci pada intentTemplate melebihi batas");
-    }
-    const out = {};
-    for (const key of objKeys) {
-        if (typeof key === "symbol") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa kunci Symbol");
-        if (DANGEROUS_INTENT_KEYS.includes(key)) fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `kunci berbahaya ditolak: '${key}'`);
-        if (FORBIDDEN_INTENT_KEYS.includes(key)) {
-            fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa '${key}' (di kedalaman manapun)`);
-        }
-        const desc = Object.getOwnPropertyDescriptor(value, key);
-        if (!desc || desc.get || desc.set) {
-            fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa properti accessor: '${String(key)}'`);
-        }
-        const built = buildSafeIntentTemplate(desc.value, depth + 1, budget);
-        if (built !== undefined) out[key] = built;
-    }
-    return out;
 }
 
 function deepFreeze(value, seen = new WeakSet()) {
@@ -368,7 +394,7 @@ function makeCommitment({ commitmentId, goalRef, toWhom, promise, dueCondition, 
     });
 }
 
-function makePlan({ planId, goalRef, version = 1, steps, assumptions = [], createdBy = "SELF" }) {
+function makePlan({ planId, goalRef, version = 1, steps, assumptions = [], createdBy = "SELF", maxSteps = MAX_SAFE_ARRAY_LENGTH }) {
     if (typeof planId !== "string" || !planId) fail(REASONS.INVALID_RECORD, "planId wajib string");
     // Bug review independen (audit putaran-42, W7R42-P2-3): sebuah Proxy
     // yang sudah di-revoke melempar TypeError MENTAH pada `Array.isArray`
@@ -396,7 +422,17 @@ function makePlan({ planId, goalRef, version = 1, steps, assumptions = [], creat
     // (beda dengan `steps`) tidak pernah dijaga Array.isArray -- `null`
     // eksplisit lolos default parameter (hanya `undefined` yang memicunya)
     // lalu meledakkan `.map()` jadi TypeError mentah, bukan INVALID_RECORD.
-    if (!Array.isArray(assumptions)) fail(REASONS.INVALID_RECORD, "assumptions wajib array");
+    // Bug review independen (audit putaran-43, W7R43-P2-4): sibling
+    // langsung dari `steps` dua baris di atas (round-42 hanya menutup
+    // `steps`) -- Proxy yang di-revoke melempar TypeError mentah pada
+    // `Array.isArray(assumptions)` juga.
+    let isAssumptionsArray;
+    try {
+        isAssumptionsArray = Array.isArray(assumptions);
+    } catch {
+        fail(REASONS.INVALID_RECORD, "assumptions tidak dapat diverifikasi dengan aman, ditolak");
+    }
+    if (!isAssumptionsArray) fail(REASONS.INVALID_RECORD, "assumptions wajib array");
     // Bug review independen (audit putaran-10, AUD10-P2-2; diperdalam
     // putaran-13, AUD13-P2-2): sapuan deepFreeze putaran-9 hanya membekukan
     // steps/assumptions, tidak pernah menyaringnya -- BigInt di dalam salah
@@ -405,7 +441,8 @@ function makePlan({ planId, goalRef, version = 1, steps, assumptions = [], creat
     // ATAU objek langkah terstruktur, keduanya dipakai penelepon nyata di
     // basis kode ini), lalu deepFreeze membekukan hasilnya.
     return Object.freeze({
-        planId, goalRef, version, steps: deepFreeze(buildSafeArray(steps, s => buildSafeIntentTemplate(s))),
+        planId, goalRef, version,
+        steps: deepFreeze(buildSafeArray(steps, s => buildSafeIntentTemplate(s), maxSteps, REASONS.PLAN_STEP_LIMIT_EXCEEDED, "jumlah langkah rencana melebihi batas")),
         createdBy, assumptions: deepFreeze(buildSafeArray(assumptions, a => buildSafeIntentTemplate(a))),
         invalidatedBy: Object.freeze([]), state: "DRAFT"
     });
@@ -424,8 +461,21 @@ function makeTask({ taskId, planRef, order, capabilityId = null, preconditions =
     // Bug review independen (audit putaran-20, AUD20-P2-2): preconditions/
     // postconditions tidak pernah dijaga Array.isArray -- `null` eksplisit
     // lolos default parameter lalu meledakkan `.map()` jadi TypeError mentah.
-    if (!Array.isArray(preconditions)) fail(REASONS.INVALID_RECORD, "preconditions wajib array");
-    if (!Array.isArray(postconditions)) fail(REASONS.INVALID_RECORD, "postconditions wajib array");
+    // Bug review independen (audit putaran-43, W7R43-P2-4): Proxy yang
+    // di-revoke melempar TypeError mentah pada `Array.isArray` di sini juga.
+    let isPreArray, isPostArray;
+    try {
+        isPreArray = Array.isArray(preconditions);
+    } catch {
+        fail(REASONS.INVALID_RECORD, "preconditions tidak dapat diverifikasi dengan aman, ditolak");
+    }
+    if (!isPreArray) fail(REASONS.INVALID_RECORD, "preconditions wajib array");
+    try {
+        isPostArray = Array.isArray(postconditions);
+    } catch {
+        fail(REASONS.INVALID_RECORD, "postconditions tidak dapat diverifikasi dengan aman, ditolak");
+    }
+    if (!isPostArray) fail(REASONS.INVALID_RECORD, "postconditions wajib array");
     const safeIntentTemplate = buildSafeIntentTemplate(intentTemplate ?? {});
     return Object.freeze({
         taskId, planRef, order, capabilityId,

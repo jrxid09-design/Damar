@@ -498,6 +498,22 @@ test("WM-repair-75: declareEntity's pre-slice(0,32) on externalRefs bounds a hos
     }
 });
 
+test("WM-repair-78: neighbors fails closed (not raw-throw) on a revoked-Proxy kinds argument (independent audit W7R43-P2-5)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const r = Proxy.revocable(["device"], {});
+    r.revoke();
+    assertThrowsReason(() => wm.neighbors("e1", r.proxy, 1), "INVALID_RECORD");
+});
+
+test("WM-repair-79: ingestDeclaration fails closed (not raw-throw) on a revoked-Proxy value nested inside a plain object (independent audit W7R43-P2-7)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const nested = Proxy.revocable({ x: 1 }, {});
+    nested.revoke();
+    assertThrowsReason(() => wm.ingestDeclaration({ subject: { entityId: "e1" }, attribute: "a", value: { extra: nested.proxy } }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
 test("WM-repair-77: buildSafeBeliefValue rejects a value array whose .length is negative/NaN/Infinity/fractional instead of skipping or infinite-looping (independent audit W7R42-P2-1)", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });

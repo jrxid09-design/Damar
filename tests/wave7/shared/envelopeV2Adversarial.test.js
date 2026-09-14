@@ -18,6 +18,16 @@ function fakeLengthArray(items, badLen) {
     });
 }
 
+test("W7-ENV-repair-8: walkSafe fails closed (not raw-throw) on a revoked-Proxy payload, including nested inside a plain object (independent audit W7R43-P2-6/W7R43-P2-7)", () => {
+    const r = Proxy.revocable([1], {});
+    r.revoke();
+    assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ payload: r.proxy })), "ACC_INVALID_METADATA");
+
+    const nested = Proxy.revocable({ x: 1 }, {});
+    nested.revoke();
+    assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ payload: { extra: nested.proxy } })), "ACC_INVALID_METADATA");
+});
+
 test("W7-ENV-repair-7: walkSafe rejects a payload array whose .length is negative/NaN/Infinity/fractional instead of skipping or infinite-looping (independent audit W7R42-P2-1)", () => {
     for (const badLen of [-1, NaN, Infinity, 1.5]) {
         const arr = fakeLengthArray([1], badLen);
