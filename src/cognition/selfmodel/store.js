@@ -28,8 +28,17 @@ function deepFreeze(value, seen = new WeakSet()) {
     return Object.freeze(value);
 }
 
+// Bug review independen (audit putaran-52, W7R52-P2-2): sibling langsung
+// dari worldmodel/store.js -- `typeof store.getKv/.putKv` raw-throw untuk
+// Proxy yang di-revoke, sebelum sempat jatuh ke default aman.
 async function loadSuccessWindows(store) {
-    if (!store || typeof store.getKv !== "function") return new Map();
+    let hasGetKv;
+    try {
+        hasGetKv = !!store && typeof store.getKv === "function";
+    } catch {
+        hasGetKv = false;
+    }
+    if (!hasGetKv) return new Map();
     // Bug review independen (audit putaran-15, AUD15-P2-2): tidak seperti
     // worldmodel/goals/prospective's store.js (semua membungkus getKv dalam
     // try/catch, "Store unreadable -> start empty"), pembacaan di sini
@@ -47,7 +56,13 @@ async function loadSuccessWindows(store) {
 }
 
 async function saveSuccessWindows(store, successWindows) {
-    if (!store || typeof store.putKv !== "function") return false;
+    let hasPutKv;
+    try {
+        hasPutKv = !!store && typeof store.putKv === "function";
+    } catch {
+        hasPutKv = false;
+    }
+    if (!hasPutKv) return false;
     await store.putKv(KV_KEY, Object.fromEntries(successWindows));
     return true;
 }

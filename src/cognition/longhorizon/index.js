@@ -71,10 +71,27 @@ async function createLongHorizonCycle({
         });
     }
 
-    const selfModel = await createSelfModel({ capabilityRegistry, clock, store: stores.selfmodel ?? null });
-    const worldModel = await createWorldModel({ clock, store: stores.worldmodel ?? null });
-    const goals = await createGoalEngine({ clock, store: stores.goals ?? null });
-    const prospective = await createProspectiveMemory({ clock, store: stores.prospective ?? null });
+    // Bug review independen (audit putaran-52, W7R52-P2-2): `stores.X`
+    // adalah [[Get]] mentah -- Proxy yang di-revoke pada `stores`
+    // melempar TypeError mentah, sebelum tiap lane sempat menerima
+    // `store: null` (jalur "tanpa persistence" yang sudah aman).
+    let safeStores;
+    try {
+        safeStores = stores || {};
+    } catch {
+        safeStores = {};
+    }
+    const storeFor = (key) => {
+        try {
+            return safeStores[key] ?? null;
+        } catch {
+            return null;
+        }
+    };
+    const selfModel = await createSelfModel({ capabilityRegistry, clock, store: storeFor("selfmodel") });
+    const worldModel = await createWorldModel({ clock, store: storeFor("worldmodel") });
+    const goals = await createGoalEngine({ clock, store: storeFor("goals") });
+    const prospective = await createProspectiveMemory({ clock, store: storeFor("prospective") });
     const attention = await createAttentionEconomy({ clock });
     const metacog = await createMetacognition({ clock });
 
@@ -116,12 +133,34 @@ async function createLongHorizonCycle({
         // satu event per kapabilitas terlacak (hingga batas selfModel 2048),
         // jauh melampaui MAX_AUDIT_EVENTS_PER_CYCLE (256) -- membanjiri audit
         // ledger. Dibatasi eksplisit di sini, per siklus.
-        const bounded = events.slice(0, bounds.MAX_AUDIT_EVENTS_PER_CYCLE);
+        // Bug review independen (audit putaran-52, W7R52-P2-2): `bounds.
+        // MAX_AUDIT_EVENTS_PER_CYCLE` adalah [[Get]] mentah terhadap
+        // `bounds` yang bisa dioverride pemanggil -- Proxy yang di-revoke
+        // raw-throw di sini. Jatuh ke default BOUNDS asli kalau tidak sah.
+        let maxAuditEvents;
+        try {
+            maxAuditEvents = bounds.MAX_AUDIT_EVENTS_PER_CYCLE;
+        } catch {
+            maxAuditEvents = BOUNDS.MAX_AUDIT_EVENTS_PER_CYCLE;
+        }
+        if (!Number.isInteger(maxAuditEvents) || maxAuditEvents < 0) {
+            maxAuditEvents = BOUNDS.MAX_AUDIT_EVENTS_PER_CYCLE;
+        }
+        const bounded = events.slice(0, maxAuditEvents);
 
+        // Bug review independen (audit putaran-52, W7R52-P2-1): cek tipe
+        // `typeof auditLedger.append === "function"` sendiri berada DI
+        // LUAR try -- Proxy yang di-revoke (atau getter `append` yang
+        // melempar) melempar mentah persis pada [[Get]] cek ini, SEBELUM
+        // try di baris berikutnya sempat menangkapnya. Kontrak "audit
+        // failure never blocks cognition" dilanggar oleh guard-nya
+        // sendiri. Cek tipe DAN panggilan sekarang dalam SATU try.
         for (const event of bounded) {
-            if (auditLedger && typeof auditLedger.append === "function") {
-                try { auditLedger.append(event); } catch { /* audit failure never blocks cognition */ }
-            }
+            try {
+                if (auditLedger && typeof auditLedger.append === "function") {
+                    auditLedger.append(event);
+                }
+            } catch { /* audit failure never blocks cognition */ }
         }
         return bounded;
     }

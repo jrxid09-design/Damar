@@ -118,6 +118,44 @@ test("W7-L7 convergence 21: L1-R1 closure — downgrade and eviction audit event
         "penurunan selfBelief harus terekam ke Audit Ledger");
 });
 
+test("W7-L7 convergence 24: cycle() never raw-throws when auditLedger is a revoked Proxy or has a throwing append -- 'audit failure never blocks cognition' held even for the type-check guard itself (independent audit W7R52-P2-1)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    let t = 1000;
+    const clock = { nowMs: () => t };
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+    const lh = await createLongHorizonCycle({ mode: "shadow", capabilityRegistry: registry, clock, auditLedger: revoked.proxy });
+
+    lh.lanes.selfModel.ingestAvailability({ capabilityId: "cap.x", availability: "AVAILABLE", generation: 1, observedAtMs: t });
+    await assert.doesNotReject(() => lh.cycle());
+
+    t += 1000;
+    lh.lanes.selfModel.ingestAvailability({ capabilityId: "cap.x", availability: "UNAVAILABLE", generation: 2, observedAtMs: t });
+    await assert.doesNotReject(() => lh.cycle(), "a revoked-Proxy auditLedger must never abort the cycle, even while emitting a downgrade event");
+
+    const throwingLedger = { get append() { throw new Error("x"); } };
+    const lh2 = await createLongHorizonCycle({ mode: "shadow", capabilityRegistry: registry, clock, auditLedger: throwingLedger });
+    lh2.lanes.selfModel.ingestAvailability({ capabilityId: "cap.x", availability: "AVAILABLE", generation: 1, observedAtMs: t });
+    await assert.doesNotReject(() => lh2.cycle());
+});
+
+test("W7-L7 convergence 25: constructing the composed cycle never raw-throws when capabilityRegistry, a per-lane store, or the injected stores/bounds objects are revoked Proxies -- each guard fails closed to its own established default (independent audit W7R52-P2-2)", async () => {
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    const { createSelfModel } = require("../../../src/cognition/selfmodel");
+    const { createWorldModel } = require("../../../src/cognition/worldmodel");
+    const { createGoalEngine } = require("../../../src/cognition/goals");
+    const { createProspectiveMemory } = require("../../../src/cognition/prospective");
+
+    await assert.rejects(() => createSelfModel({ capabilityRegistry: rev() }), (err) => err.reason === "INVALID_PORT");
+    await assert.doesNotReject(() => createWorldModel({ store: rev() }));
+    await assert.doesNotReject(() => createGoalEngine({ store: rev() }));
+    await assert.doesNotReject(() => createProspectiveMemory({ store: rev() }));
+
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    await assert.doesNotReject(() => createLongHorizonCycle({ mode: "shadow", capabilityRegistry: registry, stores: rev() }));
+    await assert.doesNotReject(() => createLongHorizonCycle({ mode: "shadow", capabilityRegistry: registry, bounds: rev() }));
+});
+
 test("W7-L7 repair: audit events emitted in one cycle are capped at MAX_AUDIT_EVENTS_PER_CYCLE (Codex P2 round 8)", async () => {
     const { BOUNDS } = require("../../../src/cognition/longhorizon/bounds");
     const N = 6;
