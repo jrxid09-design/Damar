@@ -65,8 +65,19 @@ function deserialize(raw) {
     };
 }
 
+// Bug review independen (audit putaran-52, W7R52-P2-2): `typeof
+// store.getKv/.putKv` adalah [[Get]] mentah -- Proxy yang di-revoke
+// melempar TypeError mentah persis pada guard yang wujudnya MEMANG
+// untuk menolak dependency tidak sah/absen (coldStart aman), bukan
+// crash saat boot.
 async function loadSnapshot(store) {
-    if (!store || typeof store.getKv !== "function") {
+    let hasGetKv;
+    try {
+        hasGetKv = !!store && typeof store.getKv === "function";
+    } catch {
+        hasGetKv = false;
+    }
+    if (!hasGetKv) {
         return { entities: new Map(), relations: new Map(), beliefs: new Map(), hypotheses: new Map(), contradictions: [], overflowedContradictions: [], coldStart: true };
     }
     try {
@@ -78,7 +89,13 @@ async function loadSnapshot(store) {
 }
 
 async function saveSnapshot(store, state) {
-    if (!store || typeof store.putKv !== "function") return false;
+    let hasPutKv;
+    try {
+        hasPutKv = !!store && typeof store.putKv === "function";
+    } catch {
+        hasPutKv = false;
+    }
+    if (!hasPutKv) return false;
     await store.putKv(KV_KEY, serialize(state));
     return true;
 }

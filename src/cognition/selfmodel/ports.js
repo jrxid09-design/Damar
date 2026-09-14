@@ -8,10 +8,22 @@ const { REASONS, fail } = require("./errors");
  * absen berarti UNKNOWN/STALE, bukan galat.
  */
 function requireCapabilityRegistryPort(port) {
-    if (!port || typeof port !== "object" ||
-        typeof port.get !== "function" ||
-        typeof port.has !== "function" ||
-        typeof port.getAvailability !== "function") {
+    // Bug review independen (audit putaran-52, W7R52-P2-2): `port.get`/
+    // `.has`/`.getAvailability` adalah [[Get]] mentah -- Proxy yang
+    // di-revoke melempar TypeError mentah persis pada guard yang wujudnya
+    // MEMANG untuk menolak dependency tidak sah, bukan crash keluar
+    // dari API publik. Dibungkus try/catch; kegagalan APA PUN
+    // diperlakukan sama seperti port tidak punya method yang dibutuhkan.
+    let isValid;
+    try {
+        isValid = !!port && typeof port === "object" &&
+            typeof port.get === "function" &&
+            typeof port.has === "function" &&
+            typeof port.getAvailability === "function";
+    } catch {
+        isValid = false;
+    }
+    if (!isValid) {
         fail(REASONS.INVALID_PORT,
             "capabilityRegistry port wajib punya get()/has()/getAvailability()");
     }

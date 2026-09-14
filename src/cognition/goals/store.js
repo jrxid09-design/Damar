@@ -44,8 +44,17 @@ function deserialize(raw) {
     };
 }
 
+// Bug review independen (audit putaran-52, W7R52-P2-2): sibling langsung
+// dari worldmodel/store.js -- `typeof store.getKv/.putKv` raw-throw untuk
+// Proxy yang di-revoke, sebelum sempat jatuh ke default coldStart aman.
 async function loadSnapshot(store) {
-    if (!store || typeof store.getKv !== "function") {
+    let hasGetKv;
+    try {
+        hasGetKv = !!store && typeof store.getKv === "function";
+    } catch {
+        hasGetKv = false;
+    }
+    if (!hasGetKv) {
         return { goals: new Map(), commitments: new Map(), plans: new Map(), tasks: new Map() };
     }
     try {
@@ -56,7 +65,13 @@ async function loadSnapshot(store) {
 }
 
 async function saveSnapshot(store, state) {
-    if (!store || typeof store.putKv !== "function") return false;
+    let hasPutKv;
+    try {
+        hasPutKv = !!store && typeof store.putKv === "function";
+    } catch {
+        hasPutKv = false;
+    }
+    if (!hasPutKv) return false;
     await store.putKv(KV_KEY, serialize(state));
     return true;
 }
