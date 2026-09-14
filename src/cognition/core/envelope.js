@@ -40,8 +40,14 @@ const EPISTEMIC_CLASS = Object.freeze([
     "OBSERVED", "INFERRED", "PREDICTED", "UNKNOWN"
 ].reduce((m, c) => (m[c] = c, m), {}));
 
+// Bug review independen (audit putaran-47, W7R47-P2-1): `hasOwnProperty.call`
+// memaksa ToPropertyKey(value) -- sebuah Proxy yang di-revoke melempar
+// TypeError mentah di sana, keluar dari makeEnvelope publik. Sibling
+// `isKnownProvenance` di bawah SUDAH punya short-circuit `typeof value ===
+// "string"`; guard ini (dan `isKnownEventType` di bawah, kelas identik)
+// disamakan.
 function isEpistemicClass(value) {
-    return Object.prototype.hasOwnProperty.call(EPISTEMIC_CLASS, value);
+    return typeof value === "string" && Object.prototype.hasOwnProperty.call(EPISTEMIC_CLASS, value);
 }
 
 /** Batas eksplisit payload amplop — mengikuti konvensi rumah yang sudah
@@ -94,8 +100,11 @@ const EVENT_TYPES = Object.freeze({
     PREDICTION_RESOLVED_INCORRECT: { producers: ["acc.prediction"] }
 });
 
+// Bug review independen (audit putaran-47, W7R47-ADV-1, kelas identik
+// dengan isEpistemicClass di atas): `hasOwnProperty.call` memaksa
+// ToPropertyKey(type), raw-throw untuk Proxy yang di-revoke.
 function isKnownEventType(type) {
-    return Object.prototype.hasOwnProperty.call(EVENT_TYPES, type);
+    return typeof type === "string" && Object.prototype.hasOwnProperty.call(EVENT_TYPES, type);
 }
 
 // Bug review independen (audit putaran-29, AUD29-P2-1): `PROVENANCE[provenance]`
@@ -115,12 +124,26 @@ let seqCounter = 0;
  * Amplop event. `monotonic` dijamin naik dalam satu proses; saat replay,
  * reducer menghormati urutan jurnal (seq DB) sebagai kebenaran urutan.
  */
-function makeEnvelope({
-    type, source, provenance, payload = {},
-    subject = null, sessionId = null, missionId = null,
-    correlationId = null, confidence = 1,
-    epistemicClass = EPISTEMIC_CLASS.UNKNOWN, clock = null
-} = {}) {
+function makeEnvelope(spec) {
+    // Bug review independen (audit putaran-47, W7R47-ADV-1): parameter
+    // destructuring ini adalah [[Get]] mentah terhadap `spec` -- sebuah
+    // Proxy yang di-revoke melempar TypeError mentah, satu-satunya titik
+    // masuk publik lane yang belum disapu (round 44-46 menutup 6 lane
+    // kognisi, envelope.js terlewat). Dibungkus try/catch.
+    let type, source, provenance, payload, subject, sessionId, missionId,
+        correlationId, confidence, epistemicClass, clock;
+    try {
+        ({
+            type, source, provenance, payload = {},
+            subject = null, sessionId = null, missionId = null,
+            correlationId = null, confidence = 1,
+            epistemicClass = EPISTEMIC_CLASS.UNKNOWN, clock = null
+        } = spec ?? {});
+    } catch {
+        const error = new Error("ACC: spec tidak dapat diverifikasi dengan aman, ditolak");
+        error.code = "ACC_INVALID_METADATA";
+        throw error;
+    }
 
     if (!isKnownEventType(type)) {
         // Bug review independen (audit putaran-29, AUD29-P2-1): interpolasi
@@ -149,19 +172,28 @@ function makeEnvelope({
 
     const nowMs = clock ? clock.nowMs() : Date.now();
 
+    // Bug review independen (audit putaran-47, W7R47-ADV-1): `String(x)`
+    // pada nilai truthy non-primitif melakukan ToPrimitive (memanggil
+    // toString/Symbol.toPrimitive milik pemanggil) -- raw-throw untuk
+    // Proxy yang di-revoke, DAN mengeksekusi kode pemanggil untuk objek
+    // hostile lainnya (kelas yang sama dengan toJSON/toString yang sudah
+    // ditolak di tempat lain). Hanya string/number/boolean yang aman
+    // di-String()-kan; nilai truthy non-primitif lain diperlakukan sebagai
+    // tidak ada, tidak pernah memanggil accessor pemanggil.
+    const isSafePrimitive = (x) => typeof x === "string" || typeof x === "number" || typeof x === "boolean";
     const envelope = Object.freeze({
         eventId: crypto.randomUUID(),
         schemaVersion: SCHEMA_VERSION,
         type,
         timestamp: new Date(nowMs).toISOString(),
         monotonic: ++seqCounter,
-        source: String(source ?? "unknown").slice(0, 120),
+        source: (source === null || source === undefined) ? "unknown" : (isSafePrimitive(source) ? String(source).slice(0, 120) : "unknown"),
         provenance,
         epistemicClass,
-        subject: subject ? String(subject).slice(0, 200) : null,
-        sessionId: sessionId ? String(sessionId).slice(0, 120) : null,
-        missionId: missionId ? String(missionId).slice(0, 120) : null,
-        correlationId: correlationId ? String(correlationId).slice(0, 120) : null,
+        subject: (subject && isSafePrimitive(subject)) ? String(subject).slice(0, 200) : null,
+        sessionId: (sessionId && isSafePrimitive(sessionId)) ? String(sessionId).slice(0, 120) : null,
+        missionId: (missionId && isSafePrimitive(missionId)) ? String(missionId).slice(0, 120) : null,
+        correlationId: (correlationId && isSafePrimitive(correlationId)) ? String(correlationId).slice(0, 120) : null,
         confidence: safeConfidence,
         payload: deepFreeze(safePayload)
     });
