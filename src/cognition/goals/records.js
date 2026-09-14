@@ -206,7 +206,21 @@ function buildSafeIntentTemplate(value, depth = 0, budget) {
         }
         return out;
     } catch (err) {
-        if (err instanceof GoalError) throw err;
+        // Bug review independen (audit putaran-44, W7R44-P2-1): `err
+        // instanceof GoalError` sendiri memanggil [[GetPrototypeOf]] pada
+        // `err` -- kalau pemanggil sengaja MELEMPAR sebuah Proxy (bukan
+        // Error biasa) dengan trap `getPrototypeOf` yang melempar, guard
+        // fail-closed ITU SENDIRI jadi permukaan raw-throw baru. Dibungkus
+        // try/catch; kegagalan APA PUN pada pemeriksaan ini dianggap BUKAN
+        // GoalError (fail closed lewat fail() di bawah), tidak pernah
+        // meneruskan `err` mentah.
+        let isDomainError = false;
+        try {
+            isDomainError = err instanceof GoalError;
+        } catch {
+            isDomainError = false;
+        }
+        if (isDomainError) throw err;
         fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak dapat diverifikasi dengan aman, ditolak");
     }
 }

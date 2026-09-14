@@ -119,7 +119,16 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         // membaca kedua getter lagi (override-nya cuma membuang hasil baca
         // itu, tidak mencegahnya). Dikeluarkan bersama lewat destructuring
         // supaya spread di bawah benar-benar tidak menyentuh keduanya lagi.
-        const { reminderId, ownerRef, ...specRest } = spec;
+        // Bug review independen (audit putaran-44, W7R44-P2-2): `spec`
+        // sudah dijaga BUKAN null/non-objek di atas, tapi Proxy yang
+        // di-revoke tetap typeof "object" -- destructuring ini tetap
+        // [[Get]] mentah terhadapnya.
+        let reminderId, ownerRef, specRest;
+        try {
+            ({ reminderId, ownerRef, ...specRest } = spec);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
         if (reminderId && reminders.has(reminderId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `reminderId '${typeof reminderId === "string" ? reminderId : typeof reminderId}' sudah ada`);
         }
@@ -331,7 +340,14 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         // `arm()` di file yang sama sudah dimigrasikan ke `...specRest`
         // putaran-34 (AUD34-ADV-1); `armExpectation` terlewat. Dikeluarkan
         // lewat destructuring supaya spread di bawah tidak menyentuhnya lagi.
-        const { expectationId, ...specRest } = spec;
+        // Bug review independen (audit putaran-44, W7R44-P2-2): sibling
+        // `arm()` di file yang sama.
+        let expectationId, specRest;
+        try {
+            ({ expectationId, ...specRest } = spec);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
         if (expectationId && expectations.has(expectationId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `expectationId '${typeof expectationId === "string" ? expectationId : typeof expectationId}' sudah ada`);
         }

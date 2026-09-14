@@ -59,7 +59,19 @@ function deepFreeze(value, seen = new WeakSet()) {
         }
         return Object.freeze(out);
     } catch (err) {
-        if (err instanceof AttentionError) throw err;
+        // Bug review independen (audit putaran-44, W7R44-P2-1): `err
+        // instanceof AttentionError` memanggil [[GetPrototypeOf]] pada
+        // `err` -- sebuah Proxy yang sengaja dilempar dengan trap
+        // `getPrototypeOf` yang melempar membuat guard fail-closed ini
+        // SENDIRI jadi permukaan raw-throw. Dibungkus try/catch; kegagalan
+        // pemeriksaan ini dianggap BUKAN AttentionError.
+        let isDomainError = false;
+        try {
+            isDomainError = err instanceof AttentionError;
+        } catch {
+            isDomainError = false;
+        }
+        if (isDomainError) throw err;
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak dapat diverifikasi dengan aman, ditolak");
     }
 }

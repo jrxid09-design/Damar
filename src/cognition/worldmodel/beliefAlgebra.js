@@ -140,7 +140,20 @@ function buildSafeBeliefValue(value, depth = 0, stack, budget) {
         }
         return Object.freeze(out);
     } catch (err) {
-        if (err instanceof WorldModelError) throw err;
+        // Bug review independen (audit putaran-44, W7R44-P2-1): `err
+        // instanceof WorldModelError` memanggil [[GetPrototypeOf]] pada
+        // `err` -- sebuah Proxy yang sengaja dilempar (bukan Error biasa)
+        // dengan trap `getPrototypeOf` yang melempar membuat guard
+        // fail-closed ini SENDIRI jadi permukaan raw-throw. Dibungkus
+        // try/catch; kegagalan pemeriksaan ini dianggap BUKAN
+        // WorldModelError (fail closed lewat fail() di bawah).
+        let isDomainError = false;
+        try {
+            isDomainError = err instanceof WorldModelError;
+        } catch {
+            isDomainError = false;
+        }
+        if (isDomainError) throw err;
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak dapat diverifikasi dengan aman, ditolak");
     }
 }

@@ -371,7 +371,19 @@ function walkSafe(value, label, depth, stack, budget) {
         }
         return out;
     } catch (err) {
-        if (err && err.code === "ACC_INVALID_METADATA") throw err;
+        // Bug review independen (audit putaran-44, W7R44-P2-1): `err.code`
+        // sendiri adalah [[Get]] pada `err` -- sebuah objek/Proxy yang
+        // sengaja dilempar dengan getter `code` yang melempar membuat
+        // guard fail-closed ini SENDIRI jadi permukaan raw-throw baru.
+        // Dibungkus try/catch; kegagalan pemeriksaan ini dianggap BUKAN
+        // ACC_INVALID_METADATA.
+        let isDomainError = false;
+        try {
+            isDomainError = err && err.code === "ACC_INVALID_METADATA";
+        } catch {
+            isDomainError = false;
+        }
+        if (isDomainError) throw err;
         rejectMetadata(label, "tidak dapat diverifikasi dengan aman, ditolak");
     }
 }

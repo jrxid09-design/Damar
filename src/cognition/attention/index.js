@@ -248,7 +248,16 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         // -- sisa kunci itu (yang masih punya `signalId`) DAN akses langsung
         // `spec.signalId` sama-sama membaca getter yang sama, dua kali.
         // Dikeluarkan sekalian lewat destructuring yang sama dengan evidenceRef.
-        const { evidenceRef: rawEvidenceRef, signalId: rawSignalId, ...specRestForSignal } = spec;
+        // Bug review independen (audit putaran-44, W7R44-P2-2): `spec`
+        // sudah dijaga BUKAN null/non-objek di atas, tapi Proxy yang
+        // di-revoke tetap typeof "object" -- destructuring ini tetap
+        // [[Get]] mentah terhadapnya.
+        let rawEvidenceRef, rawSignalId, specRestForSignal;
+        try {
+            ({ evidenceRef: rawEvidenceRef, signalId: rawSignalId, ...specRestForSignal } = spec);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
         const evidenceIdentity = evidenceRefIdentity(rawEvidenceRef);
         // Bug review independen (audit putaran-11, AUD11-P2-9): enforceSourceRate
         // dulu berjalan SEBELUM makeSignal memvalidasi spec -- signal yang

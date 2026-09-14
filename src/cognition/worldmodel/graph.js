@@ -26,6 +26,15 @@ function neighbors(state, entityId, kinds = null, depth = 1) {
     // Bug review independen (audit putaran-43, W7R43-P2-5): sibling
     // langsung dari `subgraph`'s `seeds` (round-42 hanya menutup itu) --
     // Proxy yang di-revoke melempar TypeError mentah pada `Array.isArray(kinds)`.
+    // Bug review independen (audit putaran-44, W7R44-P2-3): `Array.isArray`
+    // hanya membuktikan IDENTITAS-nya array -- `kinds.includes(...)` di
+    // bawah tetap [[Get]] BIASA (baca length + indeks), jadi sebuah Proxy
+    // array-like dengan trap `get` yang melempar tetap raw-throw walau
+    // sudah lolos guard ini. `kinds` disalin SEKALI ke array polos lewat
+    // descriptor (menolak properti accessor) SEBELUM traversal, dan
+    // `.includes()` di bawah dipakai pada SALINAN itu, tidak pernah pada
+    // `kinds` milik pemanggil.
+    let safeKinds = null;
     if (kinds !== null && kinds !== undefined) {
         let isKindsArray;
         try {
@@ -34,6 +43,28 @@ function neighbors(state, entityId, kinds = null, depth = 1) {
             fail(REASONS.INVALID_RECORD, "kinds tidak dapat diverifikasi dengan aman, ditolak");
         }
         if (!isKindsArray) fail(REASONS.INVALID_RECORD, "kinds wajib array atau null");
+        let kindsLen;
+        try {
+            kindsLen = kinds.length;
+        } catch {
+            fail(REASONS.INVALID_RECORD, "kinds tidak dapat diverifikasi dengan aman, ditolak");
+        }
+        if (!Number.isInteger(kindsLen) || kindsLen < 0) {
+            fail(REASONS.INVALID_RECORD, "kinds.length tidak sah");
+        }
+        safeKinds = [];
+        for (let i = 0; i < kindsLen; i++) {
+            let desc;
+            try {
+                desc = Object.getOwnPropertyDescriptor(kinds, i);
+            } catch {
+                fail(REASONS.INVALID_RECORD, "kinds tidak dapat diverifikasi dengan aman, ditolak");
+            }
+            if (!desc || desc.get || desc.set) {
+                fail(REASONS.INVALID_RECORD, `kinds tidak boleh membawa properti accessor: '${i}'`);
+            }
+            safeKinds.push(desc.value);
+        }
     }
     // Bug review independen (audit putaran-24, AUD24-P2-5): default
     // parameter `depth = 1` hanya berlaku untuk `undefined` -- `depth:
@@ -58,7 +89,7 @@ function neighbors(state, entityId, kinds = null, depth = 1) {
             const limited = edges.slice(0, BOUNDS.NEIGHBORS_MAX_FANOUT);
             if (edges.length > BOUNDS.NEIGHBORS_MAX_FANOUT) truncated = true;
             for (const { neighborId, relation } of limited) {
-                if (kinds && !kinds.includes(relation.kind)) continue;
+                if (safeKinds && !safeKinds.includes(relation.kind)) continue;
                 if (!visited.has(neighborId)) {
                     visited.add(neighborId);
                     result.add(neighborId);
@@ -144,8 +175,26 @@ function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 26
     if (!Number.isInteger(seedsLen) || seedsLen < 0) {
         fail(REASONS.INVALID_RECORD, "seeds.length tidak sah");
     }
+    // Bug review independen (audit putaran-44, W7R44-P2-3): `Array.isArray`
+    // hanya membuktikan IDENTITAS-nya array -- tidak menetralkan trap
+    // `get` milik Proxy. `seeds[i]` di sini masih [[Get]] BIASA, jadi
+    // sebuah Proxy array-like dengan trap `get` yang melempar tetap
+    // raw-throw di sini walau sudah lolos guard Array.isArray/length di
+    // atas. Dibaca lewat descriptor (sama seperti sanitizer lain di basis
+    // kode ini), menolak properti accessor, tidak pernah `value[i]` mentah.
     const seedList = [];
-    for (let i = 0; i < seedsLen; i++) seedList.push(seeds[i]);
+    for (let i = 0; i < seedsLen; i++) {
+        let desc;
+        try {
+            desc = Object.getOwnPropertyDescriptor(seeds, i);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "seeds tidak dapat diverifikasi dengan aman, ditolak");
+        }
+        if (!desc || desc.get || desc.set) {
+            fail(REASONS.INVALID_RECORD, `seeds tidak boleh membawa properti accessor: '${i}'`);
+        }
+        seedList.push(desc.value);
+    }
     const nodeIds = new Set(seedList);
     let frontier = seedList.slice();
     let truncated = false;

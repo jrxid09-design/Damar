@@ -28,7 +28,15 @@ const BOUNDS = Object.freeze({
     // DAG referensi-bersama tidak meledak eksponensial.
     MAX_VALUE_SCAN_DEPTH: 16,
     MAX_VALUE_NODES: 512,
-    MAX_VALUE_ARRAY_LENGTH: 1024
+    MAX_VALUE_ARRAY_LENGTH: 1024,
+    // Bug review independen (audit putaran-44, W7R44-P2-4): buildSafeCognitiveCopy's
+    // cabang objek tidak pernah punya batas JUMLAH KUNCI seperti keempat
+    // sanitizer saudaranya (envelope's MAX_PAYLOAD_KEYS, worldmodel's
+    // MAX_VALUE_KEYS, prospective's MAX_PAYLOAD_KEYS, goals's MAX_INTENT_KEYS)
+    // -- objek datar (flat) dengan puluhan ribu kunci primitif diproses
+    // tanpa batas (budget.count hanya bertambah untuk node komposit, bukan
+    // per kunci), celah paritas sanitizer.
+    MAX_VALUE_KEYS: 256
 });
 
 module.exports = { SCHEMA_VERSION, BOUNDS };
