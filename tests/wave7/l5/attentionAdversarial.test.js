@@ -197,6 +197,14 @@ test("AT-repair-31: targetKey reads subjectRef.entityId exactly once (independen
     assert.equal(key, "entity:e1::PERCEIVE");
 });
 
+test("AT-repair-40: the exported targetKey() fails closed (not raw-throw) on a revoked-Proxy subjectRef or a Symbol workKind -- its nested entityId/relationId reads were hardened, but the top-level parameter itself and workKind's template-literal interpolation never were (independent audit W7R47-P2-2)", async () => {
+    const { targetKey } = require("../../../src/cognition/attention");
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    assertThrowsReason(() => targetKey(r.proxy, "PERCEIVE"), "INVALID_RECORD");
+    assertThrowsReason(() => targetKey({ entityId: "e1" }, Symbol("w")), "INVALID_RECORD");
+});
+
 test("AT-repair-38: deepFreeze's fail-closed catch itself does not raw-throw when the caught value is a hostile object whose own inspection throws (independent audit W7R44-P2-1)", async () => {
     const ae = await createAttentionEconomy();
     const h = new Proxy({}, { getPrototypeOf() { throw new Error("RAW"); } });

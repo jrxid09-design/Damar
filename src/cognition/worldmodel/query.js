@@ -51,9 +51,26 @@ function subjectKeyOf(subject) {
     // `relationId` pemanggil yang SEBELUMNYA tidak pernah dipanggil.
     // short-circuit dikembalikan: `relationId` hanya dibaca kalau
     // `entityId` TERBUKTI bukan string.
-    const entityId = subject.entityId;
+    // Bug review independen (audit putaran-47, W7R47-P2-2): `typeof subject
+    // !== "object"` di atas TIDAK menangkap Proxy yang di-revoke (tetap
+    // typeof "object") -- `subject.entityId`/`.relationId` tetap [[Get]]
+    // mentah. Fungsi ini TIDAK PERNAH melempar by design (lihat komentar
+    // putaran-21 di atas) -- kegagalan baca diperlakukan SAMA seperti
+    // subject malformed lain, jatuh ke sentinel yang sama, short-circuit
+    // entityId-dulu tetap terjaga.
+    let entityId;
+    try {
+        entityId = subject.entityId;
+    } catch {
+        return "invalid:malformed-subject";
+    }
     if (typeof entityId === "string") return `entity:${entityId}`;
-    const relationId = subject.relationId;
+    let relationId;
+    try {
+        relationId = subject.relationId;
+    } catch {
+        return "invalid:malformed-subject";
+    }
     if (typeof relationId === "string") return `relation:${relationId}`;
     return "invalid:malformed-subject";
 }

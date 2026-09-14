@@ -39,9 +39,26 @@ function targetKey(subjectRef, workKind) {
     // valid, mengeksekusi accessor pemanggil yang sebelumnya tidak pernah
     // dipanggil. `relationId` hanya dibaca kalau `entityId` terbukti
     // bukan string.
-    const entityId = subjectRef?.entityId;
+    // Bug review independen (audit putaran-47, W7R47-P2-2): `?.` cuma
+    // melindungi null/undefined, bukan Proxy yang di-revoke -- setiap baca
+    // dibungkus try/catch TERPISAH supaya short-circuit (relationId hanya
+    // dibaca kalau entityId gagal) tetap terjaga, sama seperti pelajaran
+    // AUD36-ADV-2. `workKind` juga divalidasi bertipe string sebelum
+    // diinterpolasi -- sebuah Symbol meledakkan template literal mentah.
+    let entityId;
+    try {
+        entityId = subjectRef?.entityId;
+    } catch {
+        fail(REASONS.INVALID_RECORD, "subjectRef tidak dapat diverifikasi dengan aman, ditolak");
+    }
+    if (typeof workKind !== "string") fail(REASONS.INVALID_RECORD, "workKind wajib string");
     if (typeof entityId === "string") return `entity:${entityId}::${workKind}`;
-    const relationId = subjectRef?.relationId;
+    let relationId;
+    try {
+        relationId = subjectRef?.relationId;
+    } catch {
+        fail(REASONS.INVALID_RECORD, "subjectRef tidak dapat diverifikasi dengan aman, ditolak");
+    }
     if (typeof relationId === "string") return `relation:${relationId}::${workKind}`;
     fail(REASONS.INVALID_RECORD, "subjectRef wajib { entityId } atau { relationId } string");
 }

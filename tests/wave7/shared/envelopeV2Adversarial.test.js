@@ -38,6 +38,28 @@ test("W7-ENV-repair-9: walkSafe's fail-closed catch itself does not raw-throw wh
     assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ payload: hostile })), "ACC_INVALID_METADATA");
 });
 
+test("W7-ENV-repair-10: makeEnvelope rejects a revoked-Proxy epistemicClass with the controlled ACC_INVALID_EPISTEMIC_CLASS code, not a raw TypeError -- isEpistemicClass lacked the typeof short-circuit its sibling isKnownProvenance already had (independent audit W7R47-P2-1)", () => {
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ epistemicClass: r.proxy })), "ACC_INVALID_EPISTEMIC_CLASS");
+});
+
+test("W7-ENV-repair-11: makeEnvelope fails closed on a revoked-Proxy TOP-LEVEL spec, and never raw-throws coercing a hostile truthy subject/source/sessionId/missionId/correlationId via String() (independent audit W7R47-ADV-1)", () => {
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    assertThrowsCode(() => envelope.makeEnvelope(r.proxy), "ACC_INVALID_METADATA");
+
+    const revokedFields = Proxy.revocable({}, {});
+    revokedFields.revoke();
+    const hostile = revokedFields.proxy;
+    const env = envelope.makeEnvelope(baseSpec({ subject: hostile, sessionId: hostile, missionId: hostile, correlationId: hostile, source: hostile }));
+    assert.equal(env.subject, null, "a truthy non-primitive subject must degrade to null, never invoke String()'s ToPrimitive coercion");
+    assert.equal(env.sessionId, null);
+    assert.equal(env.missionId, null);
+    assert.equal(env.correlationId, null);
+    assert.equal(env.source, "unknown", "a truthy non-primitive source must degrade to the same default as a missing source");
+});
+
 test("W7-ENV-repair-7: walkSafe rejects a payload array whose .length is negative/NaN/Infinity/fractional instead of skipping or infinite-looping (independent audit W7R42-P2-1)", () => {
     for (const badLen of [-1, NaN, Infinity, 1.5]) {
         const arr = fakeLengthArray([1], badLen);
