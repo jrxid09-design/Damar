@@ -30,6 +30,19 @@ function fakeLengthArray(items, badLen) {
     });
 }
 
+/** A plain object whose `getOwnPropertyDescriptor` trap throws a HOSTILE
+ * value (a Proxy whose own `getPrototypeOf` trap raw-throws) instead of a
+ * normal Error -- exercises whether a walker's `catch(err){ if (err
+ * instanceof XError) ... }` guard itself raw-throws on the caught value. */
+function hostileThrowObj() {
+    const h = new Proxy({}, { getPrototypeOf() { throw new Error("RAW"); } });
+    return new Proxy({}, {
+        getOwnPropertyDescriptor() { throw h; },
+        ownKeys() { return ["a"]; },
+        getPrototypeOf() { return Object.prototype; }
+    });
+}
+
 test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
@@ -521,6 +534,39 @@ test("WM-repair-77: buildSafeBeliefValue rejects a value array whose .length is 
         const value = fakeLengthArray([1], badLen);
         assertThrowsReason(() => wm.ingestDeclaration({ subject: { entityId: "e1" }, attribute: "a", value }), "EXECUTABLE_MATERIAL_REJECTED");
     }
+});
+
+test("WM-repair-80: buildSafeBeliefValue's fail-closed catch itself does not raw-throw when the caught value is a hostile object whose own inspection throws (independent audit W7R44-P2-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    assertThrowsReason(() => wm.ingestDeclaration({ subject: { entityId: "e1" }, attribute: "a", value: hostileThrowObj() }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
+test("WM-repair-81: declareEntity/declareRelation/ingestObservation/ingestDeclaration/declareHypothesis/query fail closed (not raw-throw) on a revoked-Proxy TOP-LEVEL spec argument (independent audit W7R44-P2-2)", async () => {
+    const wm = await createWorldModel();
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    assertThrowsReason(() => wm.declareEntity(rev()), "INVALID_RECORD");
+    assertThrowsReason(() => wm.declareRelation(rev()), "INVALID_RECORD");
+    assertThrowsReason(() => wm.ingestObservation(rev()), "INVALID_RECORD");
+    assertThrowsReason(() => wm.ingestDeclaration(rev()), "INVALID_RECORD");
+    assertThrowsReason(() => wm.declareHypothesis(rev()), "INVALID_RECORD");
+    assert.doesNotThrow(() => {
+        const r = wm.query(rev());
+        assert.equal(r.unknown, true, "query() must never throw -- a revoked top-level spec must resolve to its established unknown-input contract");
+    });
+});
+
+test("WM-repair-82: subgraph/neighbors consume seeds/kinds via property descriptor, not the caller's raw [[Get]], so a Proxy whose descriptor trap throws still fails closed (independent audit W7R44-P2-3)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const throwingDescArr = (items) => new Proxy(items.slice(), {
+        getOwnPropertyDescriptor(t, p) {
+            if (typeof p === "string" && /^[0-9]+$/.test(p)) throw new Error("RAW-desc");
+            return Reflect.getOwnPropertyDescriptor(t, p);
+        }
+    });
+    assertThrowsReason(() => wm.subgraph(throwingDescArr(["e1"])), "INVALID_RECORD");
+    assertThrowsReason(() => wm.neighbors("e1", throwingDescArr(["device"]), 1), "INVALID_RECORD");
 });
 
 test("WM-repair-76: subgraph/declareEntity/declareHypothesis fail closed (not raw-throw) on a revoked-Proxy container argument (independent audit W7R42-P2-3)", async () => {

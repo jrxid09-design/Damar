@@ -29,6 +29,15 @@ function fakeLengthArray(items, badLen) {
     });
 }
 
+function hostileThrowObj() {
+    const h = new Proxy({}, { getPrototypeOf() { throw new Error("RAW"); } });
+    return new Proxy({}, {
+        getOwnPropertyDescriptor() { throw h; },
+        ownKeys() { return ["a"]; },
+        getPrototypeOf() { return Object.prototype; }
+    });
+}
+
 test("GL-A1: goal injection through conversation text requires owner approval like any self-proposal", async () => {
     const ge = await createGoalEngine();
     const g = ge.proposeGoal(baseGoalSpec({
@@ -818,6 +827,24 @@ test("GL-repair-65: buildSafeIntentTemplate fails closed (not raw-throw) on a re
         origin: { kind: "OWNER", ref: "o", evidenceRef: null },
         successCondition: { kind: "WORLD_BELIEF", subject: { entityId: "e1" }, attribute: "s", expectedValue: r.proxy }
     }), "AUTHORITY_SHAPED_FIELD_REJECTED");
+});
+
+test("GL-repair-66: buildSafeIntentTemplate's fail-closed catch itself does not raw-throw when the caught value is a hostile object whose own inspection throws (independent audit W7R44-P2-1)", async () => {
+    const ge = await createGoalEngine();
+    assertThrowsReason(() => ge.proposeGoal({
+        title: "g", kind: "OWNER_ASSIGNED",
+        origin: { kind: "OWNER", ref: "o", evidenceRef: null },
+        successCondition: { kind: "WORLD_BELIEF", subject: { entityId: "e1" }, attribute: "s", expectedValue: hostileThrowObj() }
+    }), "AUTHORITY_SHAPED_FIELD_REJECTED");
+});
+
+test("GL-repair-67: proposeGoal/createCommitment/createPlan/createTask fail closed (not raw-throw) on a revoked-Proxy TOP-LEVEL spec argument (independent audit W7R44-P2-2)", async () => {
+    const ge = await createGoalEngine();
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    assertThrowsReason(() => ge.proposeGoal(rev()), "INVALID_RECORD");
+    assertThrowsReason(() => ge.createCommitment(rev()), "INVALID_RECORD");
+    assertThrowsReason(() => ge.createPlan(rev()), "INVALID_RECORD");
+    assertThrowsReason(() => ge.createTask(rev()), "INVALID_RECORD");
 });
 
 test("GL-repair-58: createPlan/createTask reject sparse (hole-bearing) steps/preconditions arrays, not just explicit null/undefined elements (independent audit AUD40-P2-3)", async () => {

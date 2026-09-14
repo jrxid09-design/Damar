@@ -22,6 +22,15 @@ function fakeLengthArray(items, badLen) {
     });
 }
 
+function hostileThrowObj() {
+    const h = new Proxy({}, { getPrototypeOf() { throw new Error("RAW"); } });
+    return new Proxy({}, {
+        getOwnPropertyDescriptor() { throw h; },
+        ownKeys() { return ["a"]; },
+        getPrototypeOf() { return Object.prototype; }
+    });
+}
+
 test("PM-repair-22: arm(null) is rejected as INVALID_RECORD, not a raw TypeError (independent audit AUD21-ADV-1)", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.arm(null), "INVALID_RECORD");
@@ -215,6 +224,18 @@ test("PM-repair-51: arm/armExpectation fail closed (not raw-throw) on a revoked-
     const ev = Proxy.revocable({ a: 1 }, {});
     ev.revoke();
     assertThrowsReason(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "a", expectedValue: ev.proxy, window: { latestAt: new Date(9e12).toISOString() } }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
+test("PM-repair-52: buildSafePayloadRef's fail-closed catch itself does not raw-throw when the caught value is a hostile object whose own inspection throws (independent audit W7R44-P2-1)", async () => {
+    const pm = await createProspectiveMemory();
+    assertThrowsReason(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "a", expectedValue: hostileThrowObj(), window: { latestAt: new Date(9e12).toISOString() } }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
+test("PM-repair-53: arm/armExpectation fail closed (not raw-throw) on a revoked-Proxy TOP-LEVEL spec argument (independent audit W7R44-P2-2)", async () => {
+    const pm = await createProspectiveMemory();
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    assertThrowsReason(() => pm.arm(rev()), "INVALID_RECORD");
+    assertThrowsReason(() => pm.armExpectation(rev()), "INVALID_RECORD");
 });
 
 test("PM-repair-49: compaction only removes a victim's OWN firedOccurrenceIds entries, not a differently-terminated reminder whose id happens to be a string-prefix of the victim's (independent audit AUD38-ADV-1)", async () => {

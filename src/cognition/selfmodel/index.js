@@ -218,7 +218,16 @@ async function createSelfModel({
         if (!outcomeRecord || typeof outcomeRecord !== "object") {
             fail(REASONS.INVALID_OUTCOME, "outcomeRecord wajib objek");
         }
-        const { capabilityId, tier, outcome, at, evidenceRef } = outcomeRecord;
+        // Bug review independen (audit putaran-44, W7R44-P2-2): `typeof
+        // outcomeRecord !== "object"` TIDAK menangkap Proxy yang di-revoke
+        // (tetap typeof "object") -- destructuring ini tetap [[Get]] mentah
+        // terhadapnya, sibling langsung dari ingestAvailability (round-43).
+        let capabilityId, tier, outcome, at, evidenceRef;
+        try {
+            ({ capabilityId, tier, outcome, at, evidenceRef } = outcomeRecord);
+        } catch {
+            fail(REASONS.INVALID_OUTCOME, "outcomeRecord tidak dapat diverifikasi dengan aman, ditolak");
+        }
 
         if (typeof capabilityId !== "string" || capabilityId.length === 0) {
             fail(REASONS.INVALID_OUTCOME, "capabilityId wajib string tidak kosong");
@@ -315,7 +324,14 @@ async function createSelfModel({
         if (!healthEvent || typeof healthEvent !== "object") {
             fail(REASONS.INVALID_OBSERVATION, "healthEvent wajib objek");
         }
-        const { subsystem, state, at } = healthEvent;
+        // Bug review independen (audit putaran-44, W7R44-P2-2): sibling
+        // ingestOutcome di file yang sama.
+        let subsystem, state, at;
+        try {
+            ({ subsystem, state, at } = healthEvent);
+        } catch {
+            fail(REASONS.INVALID_OBSERVATION, "healthEvent tidak dapat diverifikasi dengan aman, ditolak");
+        }
         if (typeof subsystem !== "string" || subsystem.length === 0) {
             fail(REASONS.INVALID_OBSERVATION, "subsystem wajib string tidak kosong");
         }

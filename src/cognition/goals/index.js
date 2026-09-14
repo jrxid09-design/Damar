@@ -77,7 +77,16 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // (pelajaran dari AUD32-P2-1: rest-destructure TERPISAH tetap
         // membaca ulang field yang sudah dibaca lewat penyalinan sisa
         // kunci) supaya `specRest` tidak pernah menyentuh ketiganya lagi.
-        const { goalId, parentGoalId, origin: rawOrigin, ...specRest } = spec;
+        // Bug review independen (audit putaran-44, W7R44-P2-2): `spec`
+        // sudah dijaga BUKAN null/non-objek di atas, tapi Proxy yang
+        // di-revoke tetap typeof "object" -- destructuring ini tetap
+        // [[Get]] mentah terhadapnya.
+        let goalId, parentGoalId, rawOrigin, specRest;
+        try {
+            ({ goalId, parentGoalId, origin: rawOrigin, ...specRest } = spec);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
         // Bug review independen (audit putaran-34, AUD34-P2-5): `origin`
         // ITU SENDIRI dikeluarkan sekali (di atas) dari `spec`, tapi
         // `origin.kind` (properti DALAM origin) masih dibaca berkali-kali
@@ -305,7 +314,16 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // commitmentId lagi (override-nya cuma membuang hasil baca itu,
         // tidak mencegah baca itu terjadi). Dikeluarkan lewat destructuring
         // supaya spread di bawah benar-benar tidak menyentuhnya lagi.
-        const { commitmentId, ...specRest } = spec;
+        // Bug review independen (audit putaran-44, W7R44-P2-2): `spec`
+        // sudah dijaga BUKAN null/non-objek di atas, tapi Proxy yang
+        // di-revoke tetap typeof "object" -- destructuring ini tetap
+        // [[Get]] mentah terhadapnya.
+        let commitmentId, specRest;
+        try {
+            ({ commitmentId, ...specRest } = spec);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
         if (commitmentId && commitments.has(commitmentId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `commitmentId '${typeof commitmentId === "string" ? commitmentId : typeof commitmentId}' sudah ada`);
         }
@@ -365,7 +383,14 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // sekarang dikeluarkan bersama dalam SATU pernyataan destructuring
         // supaya `specRest` benar-benar tidak lagi menyentuh planId maupun
         // steps sama sekali.
-        const { planId, steps, ...specRest } = spec;
+        // Bug review independen (audit putaran-44, W7R44-P2-2): sibling
+        // dari createCommitment/createTask di file yang sama.
+        let planId, steps, specRest;
+        try {
+            ({ planId, steps, ...specRest } = spec);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
         if (planId && plans.has(planId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `planId '${typeof planId === "string" ? planId : typeof planId}' sudah ada`);
         }
@@ -448,7 +473,14 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // `{...spec}` di bawah) -- spread objek membaca ULANG setiap
         // properti yang tersisa termasuk keduanya, jadi override sesudahnya
         // cuma membuang hasil baca kedua itu, tidak mencegahnya terjadi.
-        const { taskId, maxAttempts, ...specRest } = spec;
+        // Bug review independen (audit putaran-44, W7R44-P2-2): sibling
+        // dari createCommitment/createPlan di file yang sama.
+        let taskId, maxAttempts, specRest;
+        try {
+            ({ taskId, maxAttempts, ...specRest } = spec);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
         if (taskId && tasks.has(taskId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `taskId '${typeof taskId === "string" ? taskId : typeof taskId}' sudah ada`);
         }

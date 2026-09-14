@@ -275,6 +275,35 @@ test("MC-repair-33: openReview/assess fail closed (not raw-throw) on a revoked-P
     assertThrowsReason(() => mc.assess(s2.proxy, "claim", { verifiedCount: 1, unverifiedCount: 0, contradictionCount: 0, freshnessMs: 0, sourceTier: "T1" }), "EXECUTABLE_MATERIAL_REJECTED");
 });
 
+test("MC-repair-34: buildSafeCognitiveCopy's fail-closed catch itself does not raw-throw when the caught value is a hostile object whose own inspection throws (independent audit W7R44-P2-1)", async () => {
+    const mc = await createMetacognition();
+    const h = new Proxy({}, { getPrototypeOf() { throw new Error("RAW"); } });
+    const hostile = new Proxy({}, {
+        getOwnPropertyDescriptor() { throw h; },
+        ownKeys() { return ["a"]; },
+        getPrototypeOf() { return Object.prototype; }
+    });
+    assertThrowsReason(() => mc.assess(hostile, "claim", { verifiedCount: 1, unverifiedCount: 0, contradictionCount: 0, freshnessMs: 0, sourceTier: "T1" }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
+test("MC-repair-35: openReview/recordCalibration fail closed (not raw-throw) on a revoked-Proxy TOP-LEVEL spec argument or a revoked-Proxy cost (independent audit W7R44-P2-2)", async () => {
+    const mc = await createMetacognition();
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    assertThrowsReason(() => mc.openReview(rev()), "INVALID_RECORD");
+    assertThrowsReason(() => mc.recordCalibration(rev()), "INVALID_RECORD");
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: [], proposals: [], cost: rev() }), "INVALID_RECORD");
+});
+
+test("MC-repair-36: buildSafeCognitiveCopy's object branch rejects a flat object whose key count exceeds MAX_VALUE_KEYS, matching every sibling sanitizer's key-count bound (independent audit W7R44-P2-4)", async () => {
+    const mc = await createMetacognition();
+    const big = {};
+    for (let i = 0; i < BOUNDS.MAX_VALUE_KEYS + 1; i++) big["k" + i] = i;
+    assertThrowsReason(() => mc.assess(big, "claim", { verifiedCount: 1, unverifiedCount: 0, contradictionCount: 0, freshnessMs: 0, sourceTier: "T1" }), "EXECUTABLE_MATERIAL_REJECTED");
+    const ok = {};
+    for (let i = 0; i < BOUNDS.MAX_VALUE_KEYS; i++) ok["k" + i] = i;
+    assert.doesNotThrow(() => mc.assess(ok, "claim", { verifiedCount: 1, unverifiedCount: 0, contradictionCount: 0, freshnessMs: 0, sourceTier: "T1" }));
+});
+
 test("MC-repair-30: openReview's element validation never consults Symbol.iterator at all, so a findings array with a non-callable Symbol.iterator is still processed by plain index instead of raw-throwing (independent audit AUD40-ADV-1)", async () => {
     const mc = await createMetacognition();
     const a = [{ severity: 1 }];

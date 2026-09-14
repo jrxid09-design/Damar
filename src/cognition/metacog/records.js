@@ -129,10 +129,20 @@ function buildSafeCognitiveCopy(value, depth = 0, stack, budget) {
         if (proto !== Object.prototype && proto !== null) {
             fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh berupa instance kelas (kontrak data murni)");
         }
+        // Bug review independen (audit putaran-44, W7R44-P2-4): cabang ini
+        // tidak pernah punya batas jumlah kunci seperti keempat sanitizer
+        // saudaranya -- objek datar dengan puluhan ribu kunci primitif
+        // diproses tanpa batas (budget.count cuma bertambah untuk node
+        // KOMPOSIT, bukan per kunci). `keys` di-cache SEKALI dan divalidasi
+        // sebelum loop, sama seperti cabang array di atas.
+        const keys = Reflect.ownKeys(value);
+        if (keys.length > VALUE_BOUNDS.MAX_VALUE_KEYS) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah kunci melebihi batas");
+        }
         stack.add(value);
         const out = {};
         try {
-            for (const key of Reflect.ownKeys(value)) {
+            for (const key of keys) {
                 if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh membawa kunci Symbol");
                 if (DANGEROUS_VALUE_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak: '${key}'`);
                 const desc = Object.getOwnPropertyDescriptor(value, key);
@@ -148,7 +158,19 @@ function buildSafeCognitiveCopy(value, depth = 0, stack, budget) {
         }
         return Object.freeze(out);
     } catch (err) {
-        if (err instanceof MetacogError) throw err;
+        // Bug review independen (audit putaran-44, W7R44-P2-1): `err
+        // instanceof MetacogError` memanggil [[GetPrototypeOf]] pada
+        // `err` -- sebuah Proxy yang sengaja dilempar dengan trap
+        // `getPrototypeOf` yang melempar membuat guard fail-closed ini
+        // SENDIRI jadi permukaan raw-throw. Dibungkus try/catch; kegagalan
+        // pemeriksaan ini dianggap BUKAN MetacogError.
+        let isDomainError = false;
+        try {
+            isDomainError = err instanceof MetacogError;
+        } catch {
+            isDomainError = false;
+        }
+        if (isDomainError) throw err;
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak dapat diverifikasi dengan aman, ditolak");
     }
 }

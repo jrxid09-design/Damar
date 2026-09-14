@@ -62,7 +62,15 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
     function openReview(spec) {
         // Bug review independen (audit putaran-22, F-4): spec null/non-objek
         // meledakkan destructuring jadi TypeError mentah.
-        const { trigger, subjectRef, findings = [], proposals = [], cost = { tokens: 0, ms: 0 } } = spec || {};
+        // Bug review independen (audit putaran-44, W7R44-P2-2): `spec || {}`
+        // tidak melindungi dari Proxy yang di-revoke (tetap truthy/typeof
+        // "object") -- destructuring ini tetap [[Get]] mentah terhadapnya.
+        let trigger, subjectRef, findings, proposals, cost;
+        try {
+            ({ trigger, subjectRef, findings = [], proposals = [], cost = { tokens: 0, ms: 0 } } = spec || {});
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
         rollBudgetWindow();
 
         // Bug review independen (audit putaran-9, AUD9-P2-2): JSON.stringify(subjectRef)
@@ -168,8 +176,16 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         if (!cost || typeof cost !== "object") {
             fail(REASONS.INVALID_RECORD, "cost wajib { tokens, ms } berupa number >= 0 yang valid");
         }
-        const costTokens = cost.tokens;
-        const costMs = cost.ms;
+        // Bug review independen (audit putaran-44, W7R44-P2-2): `typeof cost
+        // !== "object"` TIDAK menangkap Proxy yang di-revoke -- `cost.tokens`/
+        // `cost.ms` tetap [[Get]] mentah terhadapnya.
+        let costTokens, costMs;
+        try {
+            costTokens = cost.tokens;
+            costMs = cost.ms;
+        } catch {
+            fail(REASONS.INVALID_RECORD, "cost tidak dapat diverifikasi dengan aman, ditolak");
+        }
         if (typeof costTokens !== "number" || !Number.isFinite(costTokens) || costTokens < 0 ||
             typeof costMs !== "number" || !Number.isFinite(costMs) || costMs < 0) {
             fail(REASONS.INVALID_RECORD, "cost wajib { tokens, ms } berupa number >= 0 yang valid");
@@ -261,7 +277,16 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         // `{...spec}` -- spread itu sendiri membaca ulang KEDUANYA (getter
         // stateful bisa memvalidasi outcomeRef string sah lalu menyimpan
         // objek pada baca kedua). Dikeluarkan bersama lewat destructuring.
-        const { outcomeTier, outcomeRef, recordId, ...specRest } = spec;
+        // Bug review independen (audit putaran-44, W7R44-P2-2): `spec`
+        // sudah dijaga BUKAN null/non-objek di atas, tapi Proxy yang
+        // di-revoke tetap typeof "object" -- destructuring ini tetap
+        // [[Get]] mentah terhadapnya.
+        let outcomeTier, outcomeRef, recordId, specRest;
+        try {
+            ({ outcomeTier, outcomeRef, recordId, ...specRest } = spec);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
         if (!ADMISSIBLE_OUTCOME_TIERS.has(outcomeTier)) {
             fail(REASONS.INVALID_OUTCOME, `outcomeTier '${typeof outcomeTier === "string" ? outcomeTier : typeof outcomeTier}' tidak admissible untuk kalibrasi`);
         }

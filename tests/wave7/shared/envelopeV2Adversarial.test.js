@@ -28,6 +28,16 @@ test("W7-ENV-repair-8: walkSafe fails closed (not raw-throw) on a revoked-Proxy 
     assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ payload: { extra: nested.proxy } })), "ACC_INVALID_METADATA");
 });
 
+test("W7-ENV-repair-9: walkSafe's fail-closed catch itself does not raw-throw when the caught value is a hostile object whose own inspection throws (independent audit W7R44-P2-1)", () => {
+    const h = new Proxy({}, { getPrototypeOf() { throw new Error("RAW"); } });
+    const hostile = new Proxy({}, {
+        getOwnPropertyDescriptor() { throw h; },
+        ownKeys() { return ["a"]; },
+        getPrototypeOf() { return Object.prototype; }
+    });
+    assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ payload: hostile })), "ACC_INVALID_METADATA");
+});
+
 test("W7-ENV-repair-7: walkSafe rejects a payload array whose .length is negative/NaN/Infinity/fractional instead of skipping or infinite-looping (independent audit W7R42-P2-1)", () => {
     for (const badLen of [-1, NaN, Infinity, 1.5]) {
         const arr = fakeLengthArray([1], badLen);

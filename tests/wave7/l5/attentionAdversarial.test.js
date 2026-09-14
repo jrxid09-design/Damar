@@ -197,6 +197,24 @@ test("AT-repair-31: targetKey reads subjectRef.entityId exactly once (independen
     assert.equal(key, "entity:e1::PERCEIVE");
 });
 
+test("AT-repair-38: deepFreeze's fail-closed catch itself does not raw-throw when the caught value is a hostile object whose own inspection throws (independent audit W7R44-P2-1)", async () => {
+    const ae = await createAttentionEconomy();
+    const h = new Proxy({}, { getPrototypeOf() { throw new Error("RAW"); } });
+    const hostile = new Proxy({}, {
+        getOwnPropertyDescriptor() { throw h; },
+        ownKeys() { return ["a"]; },
+        getPrototypeOf() { return Object.prototype; }
+    });
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s1", subjectRef: hostile }, "PERCEIVE"), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
+test("AT-repair-39: ingestSignal fails closed (not raw-throw) on a revoked-Proxy TOP-LEVEL spec argument (independent audit W7R44-P2-2)", async () => {
+    const ae = await createAttentionEconomy();
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    assertThrowsReason(() => ae.ingestSignal(r.proxy, "PERCEIVE"), "INVALID_RECORD");
+});
+
 test("AT-repair-37: a revoked-Proxy OBJECT evidenceRef (and subjectRef) fails closed with a controlled domain reason instead of a raw TypeError (independent audit AUD41-P2-3)", async () => {
     const ae = await createAttentionEconomy();
     const r1 = Proxy.revocable({ originKind: "SAFETY_MONITOR" }, {});

@@ -165,7 +165,17 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // meledakkan destructuring jadi TypeError mentah alih-alih
         // INVALID_RECORD (pola yang sama dengan 11 titik masuk lain di
         // ke-4 lane pada putaran ini).
-        const { entityId, entityKind, labels, externalRefs, source } = spec || {};
+        // Bug review independen (audit putaran-44, W7R44-P2-2): `spec || {}`
+        // aman untuk null/undefined, TAPI sebuah Proxy yang di-revoke tetap
+        // truthy/typeof "object" -- destructuring di bawah tetap [[Get]]
+        // MENTAH terhadapnya, keluar dari API publik ini sebagai TypeError
+        // tak terkendali, bukan INVALID_RECORD.
+        let entityId, entityKind, labels, externalRefs, source;
+        try {
+            ({ entityId, entityKind, labels, externalRefs, source } = spec || {});
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
         const existing = entities.get(entityId);
         // Bug diketemukan review independen (Codex): deklarasi ulang dengan
         // `source` BERBEDA dulu menimpa entitas tanpa menyesuaikan hitungan
@@ -204,7 +214,16 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // membaca getter lagi (override eksplisit `relationId` sesudahnya
         // cuma membuang hasil baca kedua itu). Dikeluarkan lewat
         // destructuring supaya spread tidak menyentuhnya lagi.
-        const { relationId, ...specRest } = spec;
+        // Bug review independen (audit putaran-44, W7R44-P2-2): `spec` sudah
+        // dijaga BUKAN null/non-objek DI ATAS, tapi sebuah Proxy yang
+        // di-revoke tetap typeof "object" -- destructuring ini tetap
+        // [[Get]] MENTAH terhadapnya.
+        let relationId, specRest;
+        try {
+            ({ relationId, ...specRest } = spec);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
         // Bug review independen (audit putaran-19, AUD19-A3): sapuan dedup
         // replay id putaran-9/10/13 mencakup observationId/declarationId/
         // hypothesisId/goalId/dll, tapi tidak pernah mencakup relationId --
@@ -334,7 +353,16 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // DALAM object literal yang juga men-spread `...spec` -- sisa kunci
         // itu (yang masih punya observationId) DAN akses langsung sama-sama
         // membaca getter yang sama, dua kali. Dikeluarkan lewat destructuring.
-        const { observationId, ...specRest } = spec;
+        // Bug review independen (audit putaran-44, W7R44-P2-2): sibling
+        // langsung dari declareRelation/declareHypothesis di file yang
+        // SAMA -- Proxy yang di-revoke tetap typeof "object", lolos guard
+        // di atas, lalu raw-throw di destructuring ini.
+        let observationId, specRest;
+        try {
+            ({ observationId, ...specRest } = spec);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
         const observation = makeObservation({ ...specRest, observationId: observationId ?? crypto.randomUUID() });
         const entityId = observation.subject.entityId;
         if (entityId && !entities.has(entityId)) {
@@ -369,7 +397,15 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     function ingestDeclaration(spec) {
         // Bug review independen (audit putaran-22, F-4): spec null/non-objek
         // meledakkan destructuring jadi TypeError mentah.
-        const { subject, attribute, value, declarationId, at } = spec || {};
+        // Bug review independen (audit putaran-44, W7R44-P2-2): `spec || {}`
+        // tidak melindungi dari Proxy yang di-revoke (tetap truthy/typeof
+        // "object") -- destructuring ini tetap [[Get]] mentah.
+        let subject, attribute, value, declarationId, at;
+        try {
+            ({ subject, attribute, value, declarationId, at } = spec || {});
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
         // Bug review independen (audit putaran-36, AUD36-P2-1): round-35
         // (AUD35-P2-5) menyatukan kunci belief dan subjek TERSIMPAN supaya
         // keduanya berasal dari SATU pembacaan (buildSafeBeliefValue, trap
@@ -430,7 +466,14 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // untuk cek tabrakan, tapi `{...spec}` di bawah masih men-spread
         // `spec` ITU SENDIRI -- spread itu sendiri membaca getter lagi.
         // Dikeluarkan lewat destructuring.
-        const { hypothesisId, ...specRest } = spec;
+        // Bug review independen (audit putaran-44, W7R44-P2-2): sibling
+        // dari declareRelation/ingestObservation di file yang sama.
+        let hypothesisId, specRest;
+        try {
+            ({ hypothesisId, ...specRest } = spec);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
         if (hypothesisId && hypotheses.has(hypothesisId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `hypothesisId '${typeof hypothesisId === "string" ? hypothesisId : typeof hypothesisId}' sudah ada`);
         }
@@ -460,7 +503,17 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         if (!spec || typeof spec !== "object") {
             return { unknown: true, reason: "NEVER_OBSERVED", lastKnown: null };
         }
-        return queryBelief(beliefs, spec, now());
+        // Bug review independen (audit putaran-44, W7R44-P2-2): `typeof
+        // spec !== "object"` TIDAK menangkap Proxy yang di-revoke (tetap
+        // typeof "object") -- destructuring parameter queryBelief
+        // (`{subject, attribute, ...}`) raw-throw terhadapnya. query()
+        // TIDAK PERNAH melempar untuk input malformed (kontraknya selalu
+        // mengembalikan `{unknown:true,...}`) -- disamakan di sini juga.
+        try {
+            return queryBelief(beliefs, spec, now());
+        } catch {
+            return { unknown: true, reason: "NEVER_OBSERVED", lastKnown: null };
+        }
     }
 
     function openContradictions() { return contradictions.filter(c => c.status === "OPEN"); }

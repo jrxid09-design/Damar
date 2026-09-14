@@ -220,6 +220,23 @@ test("SM-repair-15: snapshot()'s runtimeLocation/resourcePressure/activeProvider
     assert.throws(() => { "use strict"; snap.activeProviders[0].nested.ok = false; });
 });
 
+test("SM-repair-17: ingestOutcome/ingestHealth fail closed (not raw-throw) on a revoked-Proxy TOP-LEVEL argument, the exact sibling ingestAvailability's own comment (round 43) incorrectly claimed was already safe (independent audit W7R44-P2-2)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const sm = await createSelfModel({ capabilityRegistry: registry });
+    const r1 = Proxy.revocable({}, {});
+    r1.revoke();
+    assert.throws(() => sm.ingestOutcome(r1.proxy), (err) => {
+        assert.equal(err.reason, "INVALID_OUTCOME", `expected INVALID_OUTCOME, got '${err.reason}': ${err.message}`);
+        return true;
+    });
+    const r2 = Proxy.revocable({}, {});
+    r2.revoke();
+    assert.throws(() => sm.ingestHealth(r2.proxy), (err) => {
+        assert.equal(err.reason, "INVALID_OBSERVATION", `expected INVALID_OBSERVATION, got '${err.reason}': ${err.message}`);
+        return true;
+    });
+});
+
 test("SM-repair-16: ingestAvailability fails closed on a revoked-Proxy observation instead of raw-throwing (independent audit W7R43-P2-2)", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const sm = await createSelfModel({ capabilityRegistry: registry });
