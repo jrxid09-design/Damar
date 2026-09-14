@@ -270,8 +270,12 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // Bug review independen (audit putaran-10, AUD10-P1-2): replay dari
         // commitmentId yang sudah ada (mis. sudah MET) menimpanya kembali ke
         // OPEN, melewati finalitas state terminal.
-        if (spec.commitmentId && commitments.has(spec.commitmentId)) {
-            fail(REASONS.DUPLICATE_RECORD_ID, `commitmentId '${spec.commitmentId}' sudah ada`);
+        // Bug review independen (audit putaran-31, AUD31-P2-1): sama seperti
+        // goalId (putaran-30) -- `spec.commitmentId` dibaca ulang saat
+        // konstruksi di bawah, sibling yang terlewat dalam file yang sama.
+        const commitmentId = spec.commitmentId;
+        if (commitmentId && commitments.has(commitmentId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `commitmentId '${typeof commitmentId === "string" ? commitmentId : typeof commitmentId}' sudah ada`);
         }
         let openCount = 0;
         for (const c of commitments.values()) if (c.state === "OPEN") openCount++;
@@ -283,7 +287,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // ditolak (mis. dueCondition cacat) tetap menghapus satu komitmen
         // terminal yang VALID sebelum error dilempar. Validasi/bangun record
         // dulu, baru kompaksi+simpan.
-        const c = makeCommitment({ ...spec, commitmentId: spec.commitmentId ?? crypto.randomUUID() });
+        const c = makeCommitment({ ...spec, commitmentId: commitmentId ?? crypto.randomUUID() });
         // Bug review independen (audit putaran-5, W7R5-P2-3, dieskalasi dari
         // advisory putaran-4): MAX_OPEN_COMMITMENTS hanya membatasi yang OPEN
         // -- komitmen terminal (MET/MISSED/RELEASED/RENEGOTIATED) menumpuk
@@ -319,13 +323,16 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // Bug review independen (audit putaran-10, AUD10-P1-2): replay dari
         // planId yang sudah ada menimpanya kembali ke state DRAFT, membuang
         // invalidatedBy yang sudah tercatat.
-        if (spec.planId && plans.has(spec.planId)) {
-            fail(REASONS.DUPLICATE_RECORD_ID, `planId '${spec.planId}' sudah ada`);
+        // Bug review independen (audit putaran-31, AUD31-P2-1): sibling dari
+        // goalId (putaran-30) yang terlewat dalam file yang sama.
+        const planId = spec.planId;
+        if (planId && plans.has(planId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `planId '${typeof planId === "string" ? planId : typeof planId}' sudah ada`);
         }
         if ((spec.steps ?? []).length > bounds.MAX_STEPS_PER_PLAN) {
             fail(REASONS.PLAN_STEP_LIMIT_EXCEEDED, "jumlah langkah rencana melebihi batas");
         }
-        const p = makePlan({ ...spec, planId: spec.planId ?? crypto.randomUUID() });
+        const p = makePlan({ ...spec, planId: planId ?? crypto.randomUUID() });
         plans.set(p.planId, p);
 
         // Bug diketemukan review independen (Codex): MAX_PLAN_VERSIONS_RETAINED
@@ -387,8 +394,11 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // taskId yang sudah ada mengganti task (termasuk yang sudah
         // ATTEMPTS_EXCEEDED/DONE) dengan attempts:0/state:PENDING baru,
         // melewati batas percobaan dan finalitas state terminal.
-        if (spec.taskId && tasks.has(spec.taskId)) {
-            fail(REASONS.DUPLICATE_RECORD_ID, `taskId '${spec.taskId}' sudah ada`);
+        // Bug review independen (audit putaran-31, AUD31-P2-1): sibling dari
+        // goalId (putaran-30) yang terlewat dalam file yang sama.
+        const taskId = spec.taskId;
+        if (taskId && tasks.has(taskId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `taskId '${typeof taskId === "string" ? taskId : typeof taskId}' sudah ada`);
         }
         // Bug review independen (audit putaran-6, W7R6-P2-2): validasi/bangun
         // record DULU (sama seperti createCommitment), baru kompaksi+simpan.
@@ -400,7 +410,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         const safeMaxAttempts = Number.isInteger(spec.maxAttempts) && spec.maxAttempts > 0
             ? Math.min(spec.maxAttempts, bounds.MAX_ATTEMPTS_PER_TASK)
             : 5;
-        const t = makeTask({ ...spec, taskId: spec.taskId ?? crypto.randomUUID(), maxAttempts: safeMaxAttempts });
+        const t = makeTask({ ...spec, taskId: taskId ?? crypto.randomUUID(), maxAttempts: safeMaxAttempts });
         // Bug review independen (audit putaran-5, W7R5-P2-3): tasks tidak
         // punya batas total sama sekali. Kompaksi task terminal (DONE/SKIPPED)
         // tertua saat retensi penuh; task FAILED/lainnya dipertahankan karena

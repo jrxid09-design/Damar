@@ -240,6 +240,13 @@ function walkSafe(value, label, depth, stack, budget) {
     if (t === "string" && value.length > ENVELOPE_BOUNDS.MAX_PAYLOAD_STRING_CHARS) {
         rejectMetadata(label, "panjang string melebihi batas");
     }
+    // Bug review independen (audit putaran-31, AUD31-ADV-1): sibling dari
+    // worldmodel's buildSafeBeliefValue (AUD30-ADV-1) -- angka non-finite
+    // (Infinity/-Infinity/NaN) lolos apa adanya lalu diam-diam berubah
+    // jadi `null` saat JSON.stringify (persist()/store durabel).
+    if (t === "number" && !Number.isFinite(value)) {
+        rejectMetadata(label, "angka non-finite (NaN/Infinity) tidak diperbolehkan");
+    }
     if (t !== "object") return value;
 
     if (depth > ENVELOPE_BOUNDS.MAX_PAYLOAD_DEPTH) {

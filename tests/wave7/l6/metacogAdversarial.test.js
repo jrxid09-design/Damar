@@ -137,6 +137,23 @@ test("MC-repair-17: recordId is read exactly once in recordCalibration, so a sta
     assert.equal(n, 1, "recordId must be read exactly once");
 });
 
+test("MC-repair-18: nested objects inside a stored finding/proposal are frozen too, not just the top level -- mutating the caller's original nested object after openReview() cannot rewrite the canonical review (independent audit AUD31-P2-5)", async () => {
+    const mc = await createMetacognition();
+    const detail = { x: 1 };
+    const payload = { y: 1 };
+    const review = mc.openReview({
+        trigger: "SCHEDULED", subjectRef: { entityId: "e1" },
+        findings: [{ severity: 1, detail }],
+        proposals: [{ kind: "PROBE", payload }]
+    });
+    detail.x = 999;
+    payload.y = 999;
+    const stored = mc.getReview(review.reviewId);
+    assert.equal(stored.findings[0].detail.x, 1, "mutating the caller's original nested object must not rewrite the stored finding");
+    assert.equal(stored.proposals[0].payload.y, 1, "mutating the caller's original nested object must not rewrite the stored proposal");
+    assert.throws(() => { "use strict"; stored.findings[0].detail.x = 2; });
+});
+
 test("MC-A1: fake confidence (model writes 0.99) is impossible — no API accepts a raw value", async () => {
     const mc = await createMetacognition();
     const a = mc.assess({ entityId: "e1" }, "claim", { value: 0.99, sourceCount: 0 }); // "value" in input ignored

@@ -654,6 +654,47 @@ test("GL-repair-47: successCondition.subject is read exactly once, so a stateful
     assert.equal(goal.successCondition.subject.entityId, "e1", "the stored subject must come from the same read that was validated");
 });
 
+test("GL-repair-48: commitmentId/planId/taskId are each read exactly once, so a stateful getter cannot resurrect a terminal commitment/plan/task via inconsistent reads (independent audit AUD31-P2-1)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+
+    const c1 = ge.createCommitment({ goalRef: g.goalId, toWhom: { ref: "o" }, promise: "p1", dueCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" } });
+    ge.transitionCommitment(c1.commitmentId, "met", {});
+    let nc = 0;
+    const cspec = { goalRef: g.goalId, toWhom: { ref: "o" }, promise: "p2", dueCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" } };
+    Object.defineProperty(cspec, "commitmentId", { enumerable: true, configurable: true, get() { nc++; return c1.commitmentId; } });
+    assertThrowsReason(() => ge.createCommitment(cspec), "DUPLICATE_RECORD_ID");
+    assert.equal(nc, 1, "commitmentId must be read exactly once");
+    assert.equal(ge.commitmentsSize(), 1, "no second commitment record must have been created/overwritten");
+
+    const p1 = ge.createPlan({ goalRef: g.goalId, steps: [] });
+    let np = 0;
+    const pspec = { goalRef: g.goalId, steps: ["x"] };
+    Object.defineProperty(pspec, "planId", { enumerable: true, configurable: true, get() { np++; return p1.planId; } });
+    assertThrowsReason(() => ge.createPlan(pspec), "DUPLICATE_RECORD_ID");
+    assert.equal(np, 1, "planId must be read exactly once");
+    assert.equal(ge.getPlan(p1.planId).state, "DRAFT");
+
+    const t1 = ge.createTask({ planRef: p1.planId, order: 1, intentTemplate: { op: "noop" } });
+    let nt = 0;
+    const tspec = { planRef: p1.planId, order: 2, intentTemplate: { op: "noop" } };
+    Object.defineProperty(tspec, "taskId", { enumerable: true, configurable: true, get() { nt++; return t1.taskId; } });
+    assertThrowsReason(() => ge.createTask(tspec), "DUPLICATE_RECORD_ID");
+    assert.equal(nt, 1, "taskId must be read exactly once");
+    assert.equal(ge.getTask(t1.taskId).state, "PENDING");
+});
+
+test("GL-repair-49: successCondition.kind/attribute are read exactly once alongside subject, so a stateful getter cannot slip an unverifiable condition past the guard (independent audit AUD31-P2-3)", async () => {
+    const ge = await createGoalEngine();
+    let n = 0;
+    const condition = { subject: { entityId: "e1" } };
+    Object.defineProperty(condition, "kind", { enumerable: true, configurable: true, get() { n++; return n === 1 ? "EQUALITY" : 12345; } });
+    condition.attribute = "a";
+    const goal = ge.proposeGoal(baseGoalSpec({ successCondition: condition }));
+    assert.equal(n, 1, "kind must be read exactly once");
+    assert.equal(goal.successCondition.kind, "EQUALITY", "the stored kind must come from the same read that was validated");
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

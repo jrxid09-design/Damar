@@ -72,6 +72,27 @@ test("PM-repair-33: an expectation with no earliestAt is satisfied by ANY observ
     assert.equal(results[0].outcome, "SATISFIED", "an omitted earliestAt must mean no lower bound (epoch), not 'after year 2000'");
 });
 
+test("PM-repair-35: an object-valued expectation is SATISFIED by a structurally-equal observation, not just a reference-identical one (independent audit AUD31-P2-2)", async () => {
+    const pm = await createProspectiveMemory({ clock: manualClock(100) });
+    pm.armExpectation({
+        subject: { entityId: "e1" }, attribute: "status", expectedValue: { nested: { deep: "orig" } },
+        window: { latestAt: new Date(1000).toISOString() }
+    });
+    const results = pm.checkExpectations(() => ({ value: { nested: { deep: "orig" } }, atMs: 500 }));
+    assert.equal(results[0].outcome, "SATISFIED", "a structurally-equal object value must satisfy the expectation, not require reference identity");
+});
+
+test("PM-repair-36: ownerRef is read exactly once, so a stateful getter cannot exceed MAX_REMINDERS_PER_GOAL via inconsistent reads (independent audit AUD31-P2-4)", async () => {
+    const pm = await createProspectiveMemory({ bounds: { ...BOUNDS, MAX_REMINDERS_PER_GOAL: 1 } });
+    pm.arm({ reminderId: "R-B1", ownerRef: "B", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(9e12).toISOString() } });
+
+    let n = 0;
+    const spec = { reminderId: "R-B2", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(9e12).toISOString() } };
+    Object.defineProperty(spec, "ownerRef", { enumerable: true, configurable: true, get() { n++; return "B"; } });
+    assertThrowsReason(() => pm.arm(spec), "PER_GOAL_LIMIT_EXCEEDED");
+    assert.equal(n, 1, "ownerRef must be read exactly once");
+});
+
 test("PM-A1: reminder carrying executable/authority-shaped payload is rejected", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.arm({
