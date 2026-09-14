@@ -15,7 +15,13 @@ const BOUNDS = Object.freeze({
     MAX_TRANSITION_LOG_PER_GOAL: 256,
     MAX_TOTAL_COMMITMENTS_RETAINED: 20000,
     MAX_TOTAL_TASKS_RETAINED: 20000,
-    MAX_TOTAL_PLANS_RETAINED: 20000
+    MAX_TOTAL_PLANS_RETAINED: 20000,
+    // Bug review independen (audit putaran-57, OpenCode, W7R57-P2-1):
+    // invalidatePlanIfAssumptionBroken menambah invalidatedBy tanpa
+    // batas -- MAX_PLAN_VERSIONS_RETAINED/MAX_TOTAL_PLANS_RETAINED
+    // membatasi JUMLAH plan, tapi tidak field turunan di dalam SATU
+    // plan. Ditambahkan di sini, dipakai lewat slice(-bound).
+    MAX_INVALIDATED_BY_PER_PLAN: 256
 });
 
 module.exports = { SCHEMA_VERSION, BOUNDS };

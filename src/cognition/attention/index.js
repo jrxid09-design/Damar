@@ -15,6 +15,7 @@
 const crypto = require("node:crypto");
 const { REASONS, fail } = require("./errors");
 const { BOUNDS, SCHEMA_VERSION, PRIORITY_CLASSES } = require("./bounds");
+const { sanitizeBounds } = require("../core/bounds");
 const { laws } = require("./laws");
 const { makeSignal, makeTarget, WORK_KINDS } = require("./records");
 const { assignPriorityClass } = require("./policy");
@@ -70,8 +71,12 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
     // ini -- Proxy yang di-revoke raw-throw pada baca PERTAMA. Dinormalisasi
     // SEKALI di sini (spread memicu trap `ownKeys` kalau ada); field yang
     // hilang jatuh ke `BOUNDS` asli, bukan `undefined`.
+    // Bug review independen (audit putaran-57, Codex, W7R57-P2-1):
+    // normalisasi lama hanya memvalidasi `bounds` ITU SENDIRI sebagai
+    // objek, bukan tiap NILAI override -- Infinity/NaN/negatif pada satu
+    // MAX_* melumpuhkan batas itu. sanitizeBounds memvalidasi per key.
     try {
-        bounds = Object.freeze((bounds && typeof bounds === "object") ? { ...BOUNDS, ...bounds } : BOUNDS);
+        bounds = sanitizeBounds(BOUNDS, bounds);
     } catch {
         bounds = BOUNDS;
     }
