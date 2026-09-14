@@ -34,6 +34,13 @@ function appendTransitionLog(log, entry, maxLog = BOUNDS.MAX_TRANSITION_LOG_PER_
     const next = [...log, entry];
     if (next.length <= max) return { log: next, truncated: false };
     if (max === 0) return { log: [], truncated: true };
+    // Bug review independen (audit putaran-63, Codex, AUD63-P2-1): pada
+    // max===1, `next.slice(-(max-1))` jadi `next.slice(-0)` -- -0 === 0,
+    // `.slice(0)` mengembalikan SELURUH array, bukan satu elemen. Sibling
+    // PERSIS dari kelas round-58 (invalidatedBy), diperkenalkan LAGI di
+    // fungsi ini sendiri saat memperbaiki bug lain di putaran-60. Cabang
+    // eksplisit untuk max===1: simpan hanya entri PALING BARU.
+    if (max === 1) return { log: [next[next.length - 1]], truncated: true };
     // §4: "keep first and last, flag truncated".
     return { log: [next[0], ...next.slice(-(max - 1))], truncated: true };
 }

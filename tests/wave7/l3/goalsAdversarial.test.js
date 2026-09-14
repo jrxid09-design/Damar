@@ -277,6 +277,14 @@ test("GL-repair-80: createPlan's PER-GOAL compaction retains ZERO plans when MAX
     assert.equal(ge.getPlan("p0"), null);
 });
 
+test("GL-repair-81: transition() log stays at exactly 1 entry when MAX_TRANSITION_LOG_PER_GOAL is 1, across multiple transitions -- appendTransitionLog's max===1 case computed next.slice(-(max-1)) = next.slice(-0), and -0 === 0 makes .slice(0) return the WHOLE array, duplicating next[0] instead of keeping just one entry; the exact -0 class round 58 fixed for invalidatedBy, reintroduced in THIS SAME function by round 60's own fix for a different bug (independent audit round 63, Codex, AUD63-P2-1)", async () => {
+    const ge = await createGoalEngine({ bounds: { MAX_TRANSITION_LOG_PER_GOAL: 1 } });
+    const g = ge.proposeGoal(baseGoalSpec());
+    ge.transition(g.goalId, "approve", { actorKind: "OWNER", reason: "r1" });
+    const activated = ge.transition(g.goalId, "activate", { actorKind: "OWNER", reason: "r2" });
+    assert.equal(activated.transitions.length, 1);
+});
+
 test("GL-repair-9: terminal commitments are retention-bounded, not just OPEN ones (independent audit W7R5-P2-3)", async () => {
     const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_COMMITMENTS_RETAINED: 5 } });
     for (let i = 0; i < 50; i++) {
