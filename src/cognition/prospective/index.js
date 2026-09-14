@@ -77,7 +77,7 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
     // SEKALI di sini (spread memicu trap `ownKeys` kalau ada); field yang
     // hilang jatuh ke `BOUNDS` asli, bukan `undefined`.
     try {
-        bounds = (bounds && typeof bounds === "object") ? { ...BOUNDS, ...bounds } : BOUNDS;
+        bounds = Object.freeze((bounds && typeof bounds === "object") ? { ...BOUNDS, ...bounds } : BOUNDS);
     } catch {
         bounds = BOUNDS;
     }
