@@ -276,6 +276,26 @@ test("SM-repair-22: snapshot()'s activeProviders copy is capped at MAX_ACTIVE_PR
     assert.ok(reads <= BOUNDS.MAX_ACTIVE_PROVIDERS, "jumlah baca index tidak boleh melebihi MAX_ACTIVE_PROVIDERS");
 });
 
+test("SM-repair-23: a caller-supplied bounds override with a non-finite/negative MAX_ACTIVE_PROVIDERS (e.g. Infinity) is rejected per-key and falls back to the lane default, instead of disabling the cap entirely -- normalizing that `bounds` is an object was not enough, each VALUE inside it must be validated too (independent audit round 57, Codex, W7R57-P2-1)", async () => {
+    const { BOUNDS } = require("../../../src/cognition/selfmodel/bounds");
+    const reg = { get: () => ({ id: "x" }), has: () => true, getAvailability: () => null };
+    let reads = 0;
+    const arrProxy = new Proxy([], {
+        get(t, p, rec) {
+            if (p === "length") return 1000;
+            if (typeof p === "string" && /^\d+$/.test(p)) { reads++; return undefined; }
+            return Reflect.get(t, p, rec);
+        }
+    });
+    const sm = await createSelfModel({
+        capabilityRegistry: reg, bounds: { MAX_ACTIVE_PROVIDERS: Infinity },
+        providerPort: { activeProviders: () => arrProxy }
+    });
+    assert.equal(sm.bounds.MAX_ACTIVE_PROVIDERS, BOUNDS.MAX_ACTIVE_PROVIDERS, "override tidak finite harus jatuh ke default lane");
+    sm.snapshot();
+    assert.ok(reads <= BOUNDS.MAX_ACTIVE_PROVIDERS, "cap harus tetap berlaku walau override Infinity");
+});
+
 test("SM-repair-18: assess() never raw-throws when the capability registry returns a revoked-Proxy descriptor -- descriptorRef falls back to capabilityId, same as a missing descriptor.id (independent audit W7R50-ADV-1)", async () => {
     const { proxy, revoke } = Proxy.revocable({}, {});
     revoke();

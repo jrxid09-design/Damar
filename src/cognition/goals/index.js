@@ -17,6 +17,7 @@
 const crypto = require("node:crypto");
 const { REASONS, fail } = require("./errors");
 const { BOUNDS, SCHEMA_VERSION } = require("./bounds");
+const { sanitizeBounds } = require("../core/bounds");
 const { laws } = require("./laws");
 const { makeGoal, makeCommitment, makePlan, makeTask, ORIGIN_KINDS } = require("./records");
 const { transitionGoal, transitionCommitment, transitionTask } = require("./lifecycle");
@@ -29,8 +30,12 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     // ini -- Proxy yang di-revoke raw-throw pada baca PERTAMA. Dinormalisasi
     // SEKALI di sini (spread memicu trap `ownKeys` kalau ada); field yang
     // hilang jatuh ke `BOUNDS` asli, bukan `undefined`.
+    // Bug review independen (audit putaran-57, Codex, W7R57-P2-1):
+    // normalisasi lama hanya memvalidasi `bounds` ITU SENDIRI sebagai
+    // objek, bukan tiap NILAI override -- Infinity/NaN/negatif pada satu
+    // MAX_* melumpuhkan batas itu. sanitizeBounds memvalidasi per key.
     try {
-        bounds = Object.freeze((bounds && typeof bounds === "object") ? { ...BOUNDS, ...bounds } : BOUNDS);
+        bounds = sanitizeBounds(BOUNDS, bounds);
     } catch {
         bounds = BOUNDS;
     }
@@ -521,9 +526,22 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         if (typeof brokenBeliefRef !== "string" || !brokenBeliefRef) {
             fail(REASONS.INVALID_RECORD, "brokenBeliefRef wajib string");
         }
+        // Bug review independen (audit putaran-57, OpenCode, W7R57-P2-1):
+        // (a) tidak ada guard status terminal -- plan yang sudah
+        // INVALIDATED tetap menerima entry baru lewat panggilan publik
+        // berulang; (b) invalidatedBy tidak dibatasi, tumbuh tak
+        // terbatas (diukur: 200000 panggilan -> 200000 entri, O(n^2)
+        // karena tiap panggilan menyalin ulang array). Dibatasi
+        // MAX_INVALIDATED_BY_PER_PLAN lewat slice(-bound); panggilan
+        // berulang pada plan yang sudah INVALIDATED ditolak.
+        if (plan.state === "INVALIDATED") {
+            fail(REASONS.INVALID_TRANSITION, "plan sudah INVALIDATED");
+        }
         const next = Object.freeze({
             ...plan, state: "INVALIDATED",
-            invalidatedBy: Object.freeze([...plan.invalidatedBy, brokenBeliefRef])
+            invalidatedBy: Object.freeze(
+                [...plan.invalidatedBy, brokenBeliefRef].slice(-bounds.MAX_INVALIDATED_BY_PER_PLAN)
+            )
         });
         plans.set(planId, next);
         return next;

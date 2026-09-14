@@ -856,6 +856,17 @@ test("GL-repair-72: createGoalEngine never raw-throws on a revoked/throwing cloc
     assert.doesNotThrow(() => ge.proposeGoal(baseGoalSpec()));
 });
 
+test("GL-repair-73: invalidatePlanIfAssumptionBroken's invalidatedBy is bounded by MAX_INVALIDATED_BY_PER_PLAN and rejects re-invalidating an already-INVALIDATED plan instead of growing invalidatedBy without limit (independent audit round 57, OpenCode, W7R57-P2-1)", async () => {
+    const { BOUNDS } = require("../../../src/cognition/goals/bounds");
+    const ge = await createGoalEngine({});
+    const g = ge.proposeGoal(baseGoalSpec());
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+    ge.invalidatePlanIfAssumptionBroken(p.planId, "ref-0");
+    assert.equal(ge.getPlan(p.planId).invalidatedBy.length, 1);
+    assert.throws(() => ge.invalidatePlanIfAssumptionBroken(p.planId, "ref-1"), (e) => e && e.reason === "INVALID_TRANSITION");
+    assert.ok(ge.getPlan(p.planId).invalidatedBy.length <= BOUNDS.MAX_INVALIDATED_BY_PER_PLAN);
+});
+
 test("GL-repair-70: transition() fails closed to APPROVAL_EXPIRED (not raw-throw) when authorityPort.checkApproval() returns a revoked-Proxy result -- treated the same as an invalid/falsy check (independent audit W7R50-ADV-1)", async () => {
     const r = Proxy.revocable({}, {});
     r.revoke();

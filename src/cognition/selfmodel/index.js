@@ -18,6 +18,7 @@
 
 const { REASONS, fail } = require("./errors");
 const { BOUNDS } = require("./bounds");
+const { sanitizeBounds } = require("../core/bounds");
 const { laws } = require("./laws");
 const { requireCapabilityRegistryPort, safeCall } = require("./ports");
 const {
@@ -47,8 +48,12 @@ async function createSelfModel({
     // PERTAMA, di mana pun itu. Dinormalisasi SEKALI di sini (spread
     // memicu trap `ownKeys` kalau ada, jadi ini juga menguji keamanannya);
     // field yang hilang jatuh ke `BOUNDS` asli, bukan `undefined`.
+    // Bug review independen (audit putaran-57, Codex, W7R57-P2-1):
+    // normalisasi lama hanya memvalidasi `bounds` ITU SENDIRI sebagai
+    // objek, bukan tiap NILAI override -- Infinity/NaN/negatif pada satu
+    // MAX_* melumpuhkan batas itu. sanitizeBounds memvalidasi per key.
     try {
-        bounds = Object.freeze((bounds && typeof bounds === "object") ? { ...BOUNDS, ...bounds } : BOUNDS);
+        bounds = sanitizeBounds(BOUNDS, bounds);
     } catch {
         bounds = BOUNDS;
     }
