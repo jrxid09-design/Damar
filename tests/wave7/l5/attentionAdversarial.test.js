@@ -197,6 +197,16 @@ test("AT-repair-31: targetKey reads subjectRef.entityId exactly once (independen
     assert.equal(key, "entity:e1::PERCEIVE");
 });
 
+test("AT-repair-32: targetKey preserves the entityId-first short-circuit -- a valid entityId subject's relationId accessor is never invoked (independent audit AUD36-ADV-2)", async () => {
+    const { targetKey } = require("../../../src/cognition/attention");
+    let called = 0;
+    const subjectRef = { entityId: "e1" };
+    Object.defineProperty(subjectRef, "relationId", { enumerable: true, configurable: true, get() { called++; throw new Error("hostile relationId getter executed"); } });
+    const key = targetKey(subjectRef, "PERCEIVE");
+    assert.equal(key, "entity:e1::PERCEIVE");
+    assert.equal(called, 0, "relationId must never be read when entityId already resolved the key");
+});
+
 test("AT-repair-30: a governorPort.capacity() that returns NaN/Infinity falls back to bounds.MAX_RUNNING_TARGETS instead of disabling the floor (independent audit AUD34-ADV-5c)", async () => {
     const clock = manualClock(0);
     const governorPort = { capacity: () => NaN };

@@ -370,7 +370,22 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // Bug review independen (audit putaran-22, F-4): spec null/non-objek
         // meledakkan destructuring jadi TypeError mentah.
         const { subject, attribute, value, declarationId, at } = spec || {};
-        if (!subject || (typeof subject.entityId !== "string" && typeof subject.relationId !== "string")) {
+        // Bug review independen (audit putaran-36, AUD36-P2-1): round-35
+        // (AUD35-P2-5) menyatukan kunci belief dan subjek TERSIMPAN supaya
+        // keduanya berasal dari SATU pembacaan (buildSafeBeliefValue, trap
+        // `getOwnPropertyDescriptor`) -- tapi guard bentuk subjek DI SINI
+        // masih membaca `subject.entityId`/`.relationId` lewat [[Get]] biasa
+        // (trap `get`). Proxy yang membuat kedua trap tidak konsisten
+        // (get -> "e1" valid, descriptor -> 42 tidak valid) melewati guard
+        // ini dengan subjek yang TERLIHAT sah, padahal bentuk yang BENAR-
+        // BENAR akan tersimpan (descriptor) tidak sah -- deklarasi diterima
+        // lalu jatuh ke kunci sentinel "invalid:malformed-subject", bisa
+        // bertabrakan/CONTEST palsu dengan subjek lain yang juga malformed.
+        // Disaring SEKALI di sini; guard DAN applyRecordToBelief (yang
+        // menyaring ulang -- aman, objek polos tidak lagi punya trap)
+        // memakai bentuk tersanitasi yang SAMA.
+        const safeSubject = buildSafeBeliefValue(subject);
+        if (!safeSubject || (typeof safeSubject.entityId !== "string" && typeof safeSubject.relationId !== "string")) {
             fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
         }
         // Bug review independen (audit putaran-11, AUD11-P2-3): `at ?? nowIso()`
@@ -395,7 +410,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             fail(REASONS.INVALID_RECORD, "declarationId, jika ada, wajib string tidak kosong");
         }
         return applyRecordToBelief({
-            recordId: declarationId ?? crypto.randomUUID(), subject, attribute, value,
+            recordId: declarationId ?? crypto.randomUUID(), subject: safeSubject, attribute, value,
             tier: "DECLARED", observedAt: at ?? nowIso(), observedAtMs: now()
         });
     }

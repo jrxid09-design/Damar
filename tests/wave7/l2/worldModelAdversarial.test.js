@@ -426,6 +426,53 @@ test("WM-repair-63: a subject whose get/getOwnPropertyDescriptor traps disagree 
         "the belief must never also appear keyed under the get-trap's subject -- key and storage must agree");
 });
 
+test("WM-repair-67: ingestDeclaration's subject-shape guard validates the SAME sanitized value that gets keyed/stored, so a Proxy whose get/descriptor traps disagree cannot bypass the shape guard (independent audit AUD36-P2-1)", async () => {
+    const wm = await createWorldModel();
+    const proxy = new Proxy({ entityId: "e1" }, {
+        get(t, p, r) { return p === "entityId" ? "e1" : Reflect.get(t, p, r); },
+        getOwnPropertyDescriptor(t, p) {
+            return p === "entityId"
+                ? { value: 42, enumerable: true, configurable: true, writable: true }
+                : Reflect.getOwnPropertyDescriptor(t, p);
+        },
+        ownKeys() { return ["entityId"]; },
+        has(t, p) { return p === "entityId"; }
+    });
+    const before = wm.beliefsSize();
+    assertThrowsReason(() => wm.ingestDeclaration({ subject: proxy, attribute: "status", value: "V-A" }), "INVALID_RECORD");
+    assert.equal(wm.beliefsSize(), before, "a subject whose canonical (sanitized) form is malformed must never create a belief, sentinel-keyed or otherwise");
+});
+
+test("WM-repair-68: two distinct malformed proxy subjects never collapse onto the same sentinel key and report a false CONTEST (independent audit AUD36-P2-1)", async () => {
+    const wm = await createWorldModel();
+    const makeLyingProxy = (getVal, descVal) => new Proxy({ entityId: getVal }, {
+        get(t, p, r) { return p === "entityId" ? getVal : Reflect.get(t, p, r); },
+        getOwnPropertyDescriptor(t, p) {
+            return p === "entityId"
+                ? { value: descVal, enumerable: true, configurable: true, writable: true }
+                : Reflect.getOwnPropertyDescriptor(t, p);
+        },
+        ownKeys() { return ["entityId"]; },
+        has(t, p) { return p === "entityId"; }
+    });
+    assertThrowsReason(() => wm.ingestDeclaration({ subject: makeLyingProxy("e1", 42), attribute: "status", value: "A" }), "INVALID_RECORD");
+    assertThrowsReason(() => wm.ingestDeclaration({ subject: makeLyingProxy("e9", null), attribute: "status", value: "B" }), "INVALID_RECORD");
+    assert.equal(wm.openContradictions().length, 0, "two independently-rejected malformed subjects must never be treated as the same subject in contest");
+});
+
+test("WM-repair-69: subjectKeyOf/targetKey preserve the entityId-first short-circuit -- a valid entityId subject's relationId accessor is never invoked (independent audit AUD36-P2-2)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "d", source: "s" });
+    wm.ingestDeclaration({ subject: { entityId: "e1" }, attribute: "x", value: "v" });
+    let called = 0;
+    const subject = { entityId: "e1" };
+    Object.defineProperty(subject, "relationId", { enumerable: true, configurable: true, get() { called++; throw new Error("hostile relationId getter executed"); } });
+    let result;
+    assert.doesNotThrow(() => { result = wm.query({ subject, attribute: "x" }); });
+    assert.equal(result.value, "v");
+    assert.equal(called, 0, "relationId must never be read when entityId already resolved the query");
+});
+
 test("WM-repair-64: relationId/hypothesisId/observationId are read exactly once end-to-end (guard AND construction), not just guard-vs-store consistent (independent audit AUD35-ADV-2)", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "d", source: "s" });
@@ -462,13 +509,13 @@ test("WM-repair-65: makeObservation's sensor/frame fields are each read exactly 
     assert.equal(n, 1, "sensor.modality must be read exactly once");
 });
 
-test("WM-repair-66: makeHypothesis's subject.entityId guard reads exactly once, from the same source buildSafeBeliefValue rejects accessors from (independent audit AUD35-ADV-6)", async () => {
+test("WM-repair-66: makeHypothesis's subject guard now validates the SAME sanitized value it stores, so the caller's accessor getter is never invoked at all (independent audit AUD35-ADV-6, tightened by AUD36-ADV-1)", async () => {
     const wm = await createWorldModel();
     let called = 0;
     const subject = {};
     Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { called++; return "e1"; } });
     assertThrowsReason(() => wm.declareHypothesis({ hypothesisId: "H1", subject, attribute: "a", candidateValues: [{ value: 1, weight: 1 }], expiresAt: new Date(9e12).toISOString() }), "EXECUTABLE_MATERIAL_REJECTED");
-    assert.equal(called, 1, "the accessor guard read must happen exactly once before the sanitizer rejects it closed");
+    assert.equal(called, 0, "buildSafeBeliefValue must reject the accessor via its property descriptor before ever invoking the getter");
 });
 
 test("WM-repair-59: subgraph's budget.nodes/budget.bytes are each read exactly once, so a stateful accessor cannot change the effective budget mid-traversal (independent audit AUD34-ADV-5b)", async () => {
