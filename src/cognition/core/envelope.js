@@ -170,7 +170,34 @@ function makeEnvelope(spec) {
     const safeConfidence = validateConfidence(confidence);
     const safePayload = assertSafeMetadata(payload, "payload");
 
-    const nowMs = clock ? clock.nowMs() : Date.now();
+    // Bug review independen (audit putaran-48, W7R48-P2-2): round-47
+    // membungkus destructuring parameter dan lima koersi String() di
+    // fungsi yang SAMA, tapi `clock.nowMs()` (field bersarang lain milik
+    // pemanggil, dipakai nyata oleh CognitiveCore.js/InteroceptiveBus.js)
+    // tetap panggilan mentah -- Proxy yang di-revoke, objek tanpa
+    // `nowMs`, atau `nowMs()` yang melempar semuanya raw-throw keluar
+    // dari `makeEnvelope` publik. Dibungkus try/catch; hasil non-finite
+    // (termasuk clock cacat yang tidak melempar tapi mengembalikan
+    // sampah) juga ditolak tertutup, bukan diam-diam dipakai.
+    let nowMs;
+    if (clock) {
+        let candidate;
+        try {
+            candidate = clock.nowMs();
+        } catch {
+            const error = new Error("ACC: clock tidak dapat diverifikasi dengan aman, ditolak");
+            error.code = "ACC_INVALID_METADATA";
+            throw error;
+        }
+        if (!Number.isFinite(candidate)) {
+            const error = new Error("ACC: clock.nowMs() wajib mengembalikan angka terhingga");
+            error.code = "ACC_INVALID_METADATA";
+            throw error;
+        }
+        nowMs = candidate;
+    } else {
+        nowMs = Date.now();
+    }
 
     // Bug review independen (audit putaran-47, W7R47-ADV-1): `String(x)`
     // pada nilai truthy non-primitif melakukan ToPrimitive (memanggil
@@ -440,21 +467,41 @@ function normalizeEnvelopeRecord(row) {
         throw error;
     }
 
-    const rawVersion = row.schemaVersion ?? null;
+    // Bug review independen (audit putaran-48, W7R48-P2-1): fungsi ini
+    // mendahului disiplin baca-sekali/descriptor yang sudah diterapkan ke
+    // `makeEnvelope` (putaran-47) -- `row.schemaVersion`/`{...row}` adalah
+    // [[Get]] mentah (raw-throw untuk Proxy yang di-revoke; interpolasi
+    // `${rawVersion}` raw-throw untuk Symbol), DAN `row.epistemicClass`
+    // dibaca DUA KALI terpisah (guard `isEpistemicClass`, lalu nilai
+    // tersimpan) -- getter stateful bisa lolos validasi pada baca pertama
+    // lalu menyimpan objek forged (dengan `toJSON` eksekusi-aktif) pada
+    // baca kedua, melanggar "tidak ada materi eksekusi". Seluruh baca
+    // tingkat-atas dibungkus SATU try/catch; `epistemicClass` dibaca
+    // SEKALI ke lokal dan divalidasi/disimpan dari lokal itu saja.
+    let rawVersion, rawEpistemicClass, copy;
+    try {
+        rawVersion = row.schemaVersion ?? null;
+        rawEpistemicClass = row.epistemicClass;
+        copy = { ...row };
+    } catch {
+        const error = new Error("ACC: baris envelope tidak dapat diverifikasi dengan aman untuk normalisasi");
+        error.code = "ACC_INVALID_ENVELOPE_RECORD";
+        throw error;
+    }
 
     if (rawVersion !== null && !KNOWN_SCHEMA_VERSIONS.includes(rawVersion)) {
-        const error = new Error(`ACC: schemaVersion tidak dikenal: ${rawVersion}`);
+        const error = new Error(`ACC: schemaVersion tidak dikenal: '${typeof rawVersion === "string" || typeof rawVersion === "number" ? rawVersion : typeof rawVersion}'`);
         error.code = "ACC_UNKNOWN_SCHEMA_VERSION";
         throw error;
     }
 
     if (rawVersion === 2) {
-        const epistemicClass = isEpistemicClass(row.epistemicClass)
-            ? row.epistemicClass : EPISTEMIC_CLASS.UNKNOWN;
-        return { ...row, schemaVersion: 2, epistemicClass };
+        const epistemicClass = isEpistemicClass(rawEpistemicClass)
+            ? rawEpistemicClass : EPISTEMIC_CLASS.UNKNOWN;
+        return { ...copy, schemaVersion: 2, epistemicClass };
     }
 
-    return { ...row, schemaVersion: 2, epistemicClass: EPISTEMIC_CLASS.UNKNOWN };
+    return { ...copy, schemaVersion: 2, epistemicClass: EPISTEMIC_CLASS.UNKNOWN };
 }
 
 /** JSON kanonik: key terurut deterministik (§50/§101 anti-kebetulan urutan). */

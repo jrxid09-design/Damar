@@ -60,6 +60,37 @@ test("W7-ENV-repair-11: makeEnvelope fails closed on a revoked-Proxy TOP-LEVEL s
     assert.equal(env.source, "unknown", "a truthy non-primitive source must degrade to the same default as a missing source");
 });
 
+test("W7-ENV-repair-12: normalizeEnvelopeRecord fails closed on a revoked-Proxy row and a Symbol schemaVersion, and never stores a non-enum epistemicClass forged by a stateful getter (independent audit W7R48-P2-1)", () => {
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    assertThrowsCode(() => envelope.normalizeEnvelopeRecord(r.proxy), "ACC_INVALID_ENVELOPE_RECORD");
+    assertThrowsCode(() => envelope.normalizeEnvelopeRecord({ schemaVersion: Symbol("v") }), "ACC_UNKNOWN_SCHEMA_VERSION");
+
+    let n = 0;
+    const row = { eventId: "e1", type: "SELF_STATE_UPDATED", payload: {}, schemaVersion: 2 };
+    Object.defineProperty(row, "epistemicClass", {
+        enumerable: true,
+        get() { return ++n === 1 ? "OBSERVED" : { forged: true, toJSON() { return "PWNED"; } }; }
+    });
+    const out = envelope.normalizeEnvelopeRecord(row);
+    assert.equal(typeof out.epistemicClass, "string", "a stateful getter must never let a forged non-string object become the stored epistemicClass");
+    assert.equal(out.epistemicClass, "OBSERVED", "the SAME single read used for validation must be the one stored");
+});
+
+test("W7-ENV-repair-13: makeEnvelope fails closed (not raw-throw) on a malformed/revoked/throwing clock -- round 47 hardened this function's destructure and String() coercions but left the sibling clock.nowMs() call unguarded (independent audit W7R48-P2-2)", () => {
+    const base = { type: "SELF_STATE_UPDATED", source: "s", provenance: "SELF_STATE", payload: {} };
+    assertThrowsCode(() => envelope.makeEnvelope({ ...base, clock: {} }), "ACC_INVALID_METADATA");
+    assertThrowsCode(() => envelope.makeEnvelope({ ...base, clock: { nowMs: 1 } }), "ACC_INVALID_METADATA");
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    assertThrowsCode(() => envelope.makeEnvelope({ ...base, clock: r.proxy }), "ACC_INVALID_METADATA");
+    assertThrowsCode(() => envelope.makeEnvelope({ ...base, clock: { nowMs() { throw new Error("hostile"); } } }), "ACC_INVALID_METADATA");
+    assertThrowsCode(() => envelope.makeEnvelope({ ...base, clock: { nowMs: () => NaN } }), "ACC_INVALID_METADATA");
+    // a legitimate clock still works and is honored:
+    const env = envelope.makeEnvelope({ ...base, clock: { nowMs: () => 1_000_000 } });
+    assert.equal(env.timestamp, new Date(1_000_000).toISOString());
+});
+
 test("W7-ENV-repair-7: walkSafe rejects a payload array whose .length is negative/NaN/Infinity/fractional instead of skipping or infinite-looping (independent audit W7R42-P2-1)", () => {
     for (const badLen of [-1, NaN, Infinity, 1.5]) {
         const arr = fakeLengthArray([1], badLen);
