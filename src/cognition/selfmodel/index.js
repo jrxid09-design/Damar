@@ -235,6 +235,14 @@ async function createSelfModel({
         if (typeof at !== "string" && typeof at !== "number") {
             fail(REASONS.INVALID_OUTCOME, "'at' wajib string atau number (tidak boleh objek/BigInt)");
         }
+        // Bug review independen (audit putaran-32, AUD32-P2-4): sibling dari
+        // sweep angka non-finite (envelope/goals/prospective/worldmodel di
+        // putaran-30/31) yang belum menjangkau selfmodel -- `at` numerik
+        // non-finite lolos, lalu diam-diam berubah jadi `null` saat
+        // persist() lewat backend JSON, merusak bukti outcome kanonik.
+        if (typeof at === "number" && !Number.isFinite(at)) {
+            fail(REASONS.INVALID_OUTCOME, "'at' tidak boleh berupa angka non-finite (NaN/Infinity)");
+        }
         if (!safeCall(() => capabilityRegistry.has(capabilityId))) {
             fail(REASONS.UNKNOWN_CAPABILITY,
                 `capability '${capabilityId}' tidak terdaftar, outcome ditolak`);
@@ -313,6 +321,11 @@ async function createSelfModel({
         // yang dipanggil setiap siklus longhorizon shadow/governed.
         if (at !== undefined && typeof at !== "string" && typeof at !== "number") {
             fail(REASONS.INVALID_OBSERVATION, "'at', jika ada, wajib string atau number");
+        }
+        // Bug review independen (audit putaran-32, AUD32-P2-4): sibling dari
+        // ingestOutcome's non-finite 'at' guard di fungsi yang sama.
+        if (typeof at === "number" && !Number.isFinite(at)) {
+            fail(REASONS.INVALID_OBSERVATION, "'at', jika ada, tidak boleh berupa angka non-finite (NaN/Infinity)");
         }
 
         degradedSubsystems = degradedSubsystems.filter(d => d.subsystem !== subsystem);

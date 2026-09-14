@@ -323,16 +323,24 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // Bug review independen (audit putaran-10, AUD10-P1-2): replay dari
         // planId yang sudah ada menimpanya kembali ke state DRAFT, membuang
         // invalidatedBy yang sudah tercatat.
-        // Bug review independen (audit putaran-31, AUD31-P2-1): sibling dari
-        // goalId (putaran-30) yang terlewat dalam file yang sama.
-        const planId = spec.planId;
+        // Bug review independen (audit putaran-31, AUD31-P2-1; putaran-32,
+        // AUD32-P2-1): planId DAN steps wajib dibaca SEKALI SAJA masing-
+        // masing. Membaca `planId` lewat `spec.planId` lalu memisahkan
+        // `steps` lewat destructuring TERPISAH ternyata tetap salah --
+        // rest-destructuring (`...specRest`) menyalin SEMUA kunci enumerable
+        // yang tersisa (termasuk `planId`), jadi getter `planId` tetap
+        // terpanggil KEDUA kalinya lewat penyalinan rest itu. Keduanya
+        // sekarang dikeluarkan bersama dalam SATU pernyataan destructuring
+        // supaya `specRest` benar-benar tidak lagi menyentuh planId maupun
+        // steps sama sekali.
+        const { planId, steps, ...specRest } = spec;
         if (planId && plans.has(planId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `planId '${typeof planId === "string" ? planId : typeof planId}' sudah ada`);
         }
-        if ((spec.steps ?? []).length > bounds.MAX_STEPS_PER_PLAN) {
+        if ((steps ?? []).length > bounds.MAX_STEPS_PER_PLAN) {
             fail(REASONS.PLAN_STEP_LIMIT_EXCEEDED, "jumlah langkah rencana melebihi batas");
         }
-        const p = makePlan({ ...spec, planId: planId ?? crypto.randomUUID() });
+        const p = makePlan({ ...specRest, planId: planId ?? crypto.randomUUID(), steps });
         plans.set(p.planId, p);
 
         // Bug diketemukan review independen (Codex): MAX_PLAN_VERSIONS_RETAINED

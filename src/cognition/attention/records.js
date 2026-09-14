@@ -34,6 +34,13 @@ function makeSignal({ signalId, sourceKind, sourceId, subjectRef, proposedUrgenc
     if (typeof proposedUrgency !== "number" && typeof proposedUrgency !== "string" && typeof proposedUrgency !== "boolean") {
         fail(REASONS.INVALID_RECORD, "proposedUrgency wajib angka");
     }
+    // Bug review independen (audit putaran-32, AUD32-ADV-2): sibling dari
+    // sweep angka non-finite di lane lain (envelope/goals/prospective/
+    // worldmodel/selfmodel) yang belum menjangkau attention -- expiresAtMs
+    // non-finite lolos mentah, tersimpan begitu saja di signal/target.
+    if (expiresAtMs !== null && (typeof expiresAtMs !== "number" || !Number.isFinite(expiresAtMs))) {
+        fail(REASONS.INVALID_RECORD, "expiresAtMs, jika ada, wajib angka finite");
+    }
 
     return Object.freeze({
         signalId, sourceKind, sourceId,

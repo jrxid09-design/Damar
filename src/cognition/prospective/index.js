@@ -14,9 +14,35 @@ const crypto = require("node:crypto");
 const { REASONS, fail } = require("./errors");
 const { BOUNDS, SCHEMA_VERSION } = require("./bounds");
 const { laws } = require("./laws");
-const { makeReminder, makeExpectation, makeWakeEvent } = require("./records");
+const { makeReminder, makeExpectation, makeWakeEvent, buildSafePayloadRef } = require("./records");
 const { loadSnapshot, saveSnapshot } = require("./store");
 const { canonicalJson } = require("../core/envelope");
+
+// Bug review independen (audit putaran-32, AUD32-P1-1, BLOCKING): perbaikan
+// putaran-31 memanggil canonicalJson langsung pada `observed.value` --
+// nilai MENTAH dari port evaluatePort() milik pemanggil, TIDAK PERNAH
+// disaring. canonicalJson tidak menangani BigInt/Symbol/function (throw
+// mentah dari JSON.stringify, membatalkan seluruh sweep checkExpectations)
+// dan JSON.stringify(NaN)===JSON.stringify(Infinity)===JSON.stringify(null)
+// ("null") -- expectedValue:null bisa dianggap SATISFIED oleh observed
+// NaN/Infinity. `buildSafePayloadRef` (dipakai untuk payloadRef) sudah
+// menolak semua kelas itu dan berhenti aman (bukan meledak) pada
+// kedalaman/anggaran tertentu; jalankan observed.value lewatnya dulu --
+// gagal validasi berarti "tidak cocok", bukan exception yang lolos ke
+// pemanggil checkExpectations.
+function safeObservedEquals(observedValue, expectedValue) {
+    let safeObserved;
+    try {
+        safeObserved = buildSafePayloadRef(observedValue);
+    } catch {
+        return false;
+    }
+    try {
+        return canonicalJson(safeObserved) === canonicalJson(expectedValue);
+    } catch {
+        return false;
+    }
+}
 
 function occurrenceKey(reminderId, occurrenceIndex) { return `${reminderId}:${occurrenceIndex}`; }
 
@@ -336,7 +362,11 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
             // kelas plain-input yang sama persis dengan AUD30-P1-1 (worldmodel).
             // canonicalJson (sudah ada tepat untuk perbandingan ini) dipakai
             // di sini juga.
-            const sameValue = canonicalJson(observed?.value) === canonicalJson(e.expectedValue);
+            // Bug review independen (audit putaran-32, AUD32-P1-1, BLOCKING):
+            // observed.value adalah nilai MENTAH dari port pemanggil --
+            // canonicalJson mentah tidak aman untuk itu (lihat safeObservedEquals
+            // di atas berkas ini).
+            const sameValue = observed ? safeObservedEquals(observed.value, e.expectedValue) : false;
             if (observed && sameValue &&
                 observed.atMs >= earliestMs && observed.atMs <= Date.parse(e.window.latestAt)) {
                 const next = Object.freeze({ ...e, state: "SATISFIED" });
