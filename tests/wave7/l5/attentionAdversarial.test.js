@@ -164,6 +164,18 @@ test("AT-repair-26: a Symbol/hostile-object proposedUrgency is rejected as INVAL
     assert.equal(called, 0, "proposedUrgency's valueOf must never be invoked before the type check");
 });
 
+test("AT-repair-28: evidenceRef is read exactly once in ingestSignal, so the corroboration identity always describes the same object that is actually stored (independent audit AUD33-ADV-1)", async () => {
+    const ae = await createAttentionEconomy();
+    let n = 0;
+    const objA = { ev: "A" };
+    const objB = { ev: "B" };
+    const spec = { sourceKind: "SENSOR", sourceId: "s1", subjectRef: { entityId: "e1" } };
+    Object.defineProperty(spec, "evidenceRef", { enumerable: true, configurable: true, get() { n++; return n === 1 ? objA : objB; } });
+    const { signal } = ae.ingestSignal(spec, "PERCEIVE");
+    assert.equal(n, 1, "evidenceRef must be read exactly once");
+    assert.deepEqual(signal.evidenceRef, objA, "the stored evidenceRef must come from the same read that the corroboration identity was computed from");
+});
+
 test("AT-repair-27: a non-finite expiresAtMs (Infinity/NaN) is rejected, not stored raw (independent audit AUD32-ADV-2)", async () => {
     const ae = await createAttentionEconomy();
     assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s1", subjectRef: { entityId: "e1" }, expiresAtMs: Infinity }, "PERCEIVE"), "INVALID_RECORD");

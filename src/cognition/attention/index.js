@@ -191,14 +191,22 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         // selalu dianggap berbeda (tiap salinan dapat id WeakMap sendiri),
         // meniadakan dedup korroborasi AT-5 -- pembalikan diam-diam dari
         // perbaikan putaran-24/25 yang justru menutup kelas bug ini.
-        const evidenceIdentity = evidenceRefIdentity(spec.evidenceRef);
+        // Bug review independen (audit putaran-33, AUD33-ADV-1): `spec.evidenceRef`
+        // dulu dibaca DUA KALI -- sekali di sini untuk identitas, sekali lagi
+        // lewat `{...spec}` di makeSignal di bawah -- getter stateful bisa
+        // memasangkan identitas dari referensi PERTAMA dengan evidenceRef
+        // TERSIMPAN yang berasal dari referensi KEDUA, melepaskan dedup
+        // korroborasi dari objek yang benar-benar tersimpan. Dibaca SEKALI
+        // ke lokal dan diteruskan eksplisit ke makeSignal.
+        const { evidenceRef: rawEvidenceRef, ...specRestForSignal } = spec;
+        const evidenceIdentity = evidenceRefIdentity(rawEvidenceRef);
         // Bug review independen (audit putaran-11, AUD11-P2-9): enforceSourceRate
         // dulu berjalan SEBELUM makeSignal memvalidasi spec -- signal yang
         // ditolak (sourceId/sourceKind cacat) tetap membuat/menaikkan kunci
         // rate-limit untuk sourceId sampah, sama seperti bug W7R4-P2-3 yang
         // sudah diperbaiki di goals' proposeGoal tapi tidak dimigrasikan ke
         // sini. Validasi/bangun record dulu, baru tegakkan rate.
-        const signal = makeSignal({ ...spec, signalId: spec.signalId ?? crypto.randomUUID(), createdAtMs: now() });
+        const signal = makeSignal({ ...specRestForSignal, evidenceRef: rawEvidenceRef, signalId: spec.signalId ?? crypto.randomUUID(), createdAtMs: now() });
         // Bug review independen (audit putaran-27, AUD27-P2-7): signalId
         // yang di-replay (pengiriman ulang lintas-node) dulu dihitung
         // sebagai signal BARU setiap kali -- support bertambah lagi untuk

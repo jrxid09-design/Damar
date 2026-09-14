@@ -103,6 +103,29 @@ test("PM-repair-37: checkExpectations never crashes or falsely SATISFIES on a Bi
     assert.doesNotThrow(() => pm4.checkExpectations(() => ({ value: cyc, atMs: 500 })), "a cyclic observed value must not raw-throw and abort the whole sweep");
 });
 
+test("PM-repair-39: checkExpectations never crashes on a Symbol/hostile observed.atMs, the sibling raw field to observed.value on the same port result (independent audit AUD33-P2-3)", async () => {
+    const pm = await createProspectiveMemory({ clock: manualClock(100) });
+    pm.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: "done", window: { latestAt: new Date(1000).toISOString() } });
+    let results;
+    assert.doesNotThrow(() => { results = pm.checkExpectations(() => ({ value: "done", atMs: Symbol("boom") })); }, "a Symbol atMs must not raw-throw and abort the whole sweep");
+    assert.deepEqual(results, [], "an invalid atMs must never be treated as satisfying the window");
+});
+
+test("PM-repair-40: an ON_STATE trigger's subject is read exactly once, so a stateful getter cannot pass the AUD24-P2-4 guard with a valid subject and store a different one (independent audit AUD33-P2-4)", async () => {
+    const pm = await createProspectiveMemory();
+    let n = 0;
+    const trigger = { kind: "ON_STATE", attribute: "status" };
+    Object.defineProperty(trigger, "subject", { enumerable: true, configurable: true, get() { n++; return n <= 3 ? { entityId: "e1" } : {}; } });
+    const r = pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger });
+    assert.equal(n, 1, "trigger.subject must be read exactly once");
+    assert.equal(r.trigger.subject.entityId, "e1", "the stored subject must come from the same read that was validated");
+});
+
+test("PM-repair-41: armExpectation(subject:null) is rejected instead of silently stored as {} (independent audit AUD33-ADV-2)", async () => {
+    const pm = await createProspectiveMemory();
+    assertThrowsReason(() => pm.armExpectation({ subject: null, attribute: "status", expectedValue: 1, window: { latestAt: new Date(9e12).toISOString() } }), "INVALID_RECORD");
+});
+
 test("PM-repair-38: window.latestAt/earliestAt are read exactly once, so a stateful getter cannot pass validation with a valid date and store an invalid one (independent audit AUD32-P2-2)", async () => {
     const pm = await createProspectiveMemory({ clock: manualClock(100) });
     let n = 0;

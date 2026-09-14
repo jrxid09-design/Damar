@@ -35,9 +35,15 @@ function openContradictionSet(list, contradiction, nowIso, maxOpenContradictionS
         // pengamat overflowedContradictions() percaya kontradiksi itu belum
         // pernah diselesaikan. Status/resolution asli dipertahankan kalau
         // sudah bukan OPEN.
+        // Bug review independen (audit putaran-33, AUD33-P2-1): objek literal
+        // `resolution` di sini dibekukan HANYA lewat Object.freeze pada entry
+        // LUARnya (`{...oldest, ...}`) -- `resolution` sendiri tidak pernah
+        // dibekukan (beda dengan resolveContradictionSet di bawah yang sudah
+        // benar), jadi pemanggil overflowedContradictions() bisa menulis
+        // ulang `resolution.ruleId` kanonik pasca-arsip tanpa restart.
         const [oldest, ...rest] = list;
         const archived = oldest.status === "OPEN"
-            ? Object.freeze({ ...oldest, status: "UNRESOLVABLE", resolution: { ruleId: "OVERFLOW_ARCHIVE", at: nowIso } })
+            ? Object.freeze({ ...oldest, status: "UNRESOLVABLE", resolution: Object.freeze({ ruleId: "OVERFLOW_ARCHIVE", at: nowIso }) })
             : oldest;
         return { list: [...rest, entry], entry, evicted: archived };
     }

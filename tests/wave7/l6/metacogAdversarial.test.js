@@ -169,6 +169,21 @@ test("MC-repair-20: assess()'s subjectRef and recordCalibration()'s stored refs/
     assert.throws(() => { "use strict"; rec.outcomeValue.x = 2; });
 });
 
+test("MC-repair-21: buildSafeCognitiveCopy rejects BigInt and non-finite numbers, matching its sibling sanitizers, and openReview never raw-throws sorting hostile-severity findings past MAX_FINDINGS_PER_REVIEW (independent audit AUD33-P2-5)", async () => {
+    const mc = await createMetacognition();
+    assertThrowsReason(() => mc.assess({ entityId: "e1", n: 10n }, "claim", { sourceCount: 0 }), "EXECUTABLE_MATERIAL_REJECTED");
+    assertThrowsReason(() => mc.assess({ entityId: "e1", n: Infinity }, "claim", { sourceCount: 0 }), "EXECUTABLE_MATERIAL_REJECTED");
+
+    const findings = [];
+    for (let i = 0; i < BOUNDS.MAX_FINDINGS_PER_REVIEW + 1; i++) findings.push({ severity: 10n, detail: "x" });
+    assertThrowsReason(() => mc.openReview({ trigger: "CONTRADICTION", subjectRef: { entityId: "e1" }, findings, proposals: [], cost: { tokens: 0, ms: 0 } }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
+test("MC-repair-22: assess()'s claim is sanitized/bounded like subjectRef, not stored raw (independent audit AUD33-ADV-2)", async () => {
+    const mc = await createMetacognition();
+    assertThrowsReason(() => mc.assess({ entityId: "e1" }, 10n, { sourceCount: 0 }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
 test("MC-repair-18: nested objects inside a stored finding/proposal are frozen too, not just the top level -- mutating the caller's original nested object after openReview() cannot rewrite the canonical review (independent audit AUD31-P2-5)", async () => {
     const mc = await createMetacognition();
     const detail = { x: 1 };

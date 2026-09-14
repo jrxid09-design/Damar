@@ -366,6 +366,21 @@ test("WM-repair-27: an overflowed unresolved contradiction is archived and retri
     assert.equal(overflowed[0].status, "UNRESOLVABLE");
 });
 
+test("WM-repair-58: an archived overflow contradiction's resolution is deep-frozen, not just the outer entry -- a caller cannot rewrite the canonical OVERFLOW_ARCHIVE reason (independent audit AUD33-P2-1)", async () => {
+    const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_OPEN_CONTRADICTION_SETS: 1 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    const base = { attribute: "status", tier: "T1" };
+    wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "INC-1", value: "a", sensor: { sensorId: "s1" }, observedAt: new Date(1000).toISOString() });
+    wm.ingestObservation({ ...base, subject: { entityId: "e1" }, observationId: "c2", value: "b", sensor: { sensorId: "s2" }, observedAt: new Date(1001).toISOString() });
+    wm.ingestObservation({ ...base, subject: { entityId: "e2" }, observationId: "INC-2", value: "a", sensor: { sensorId: "s1" }, observedAt: new Date(1000).toISOString() });
+    wm.ingestObservation({ ...base, subject: { entityId: "e2" }, observationId: "c3", value: "b", sensor: { sensorId: "s3" }, observedAt: new Date(1001).toISOString() });
+    const overflowed = wm.overflowedContradictions()[0];
+    assert.equal(Object.isFrozen(overflowed.resolution), true, "the archived entry's resolution must be frozen, not just the outer entry");
+    assert.throws(() => { "use strict"; overflowed.resolution.ruleId = "HACKED"; });
+    assert.equal(wm.overflowedContradictions()[0].resolution.ruleId, "OVERFLOW_ARCHIVE", "a fresh view must still report the canonical OVERFLOW_ARCHIVE reason");
+});
+
 test("WM-repair-28: a rejected ingestObservation must not bump the referenced entity's lastSeenAt (independent audit AUD17-P2-3)", async () => {
     const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_ENTITIES: 2 } });
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });

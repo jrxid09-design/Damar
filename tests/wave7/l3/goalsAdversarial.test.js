@@ -684,6 +684,23 @@ test("GL-repair-48: commitmentId/planId/taskId are each read exactly once, so a 
     assert.equal(ge.getTask(t1.taskId).state, "PENDING");
 });
 
+test("GL-repair-51: parentGoalId is read exactly once in proposeGoal, so a stateful getter cannot get depth/MAX_CHILDREN_PER_GOAL validated against one parent and store a different one, and a non-string parentGoalId can never reach persist() (independent audit AUD33-P2-2)", async () => {
+    const store = jsonStore();
+    const ge = await createGoalEngine({ store });
+    ge.proposeGoal(baseGoalSpec({ goalId: "A" }));
+    ge.proposeGoal(baseGoalSpec({ goalId: "B", parentGoalId: "A" }));
+    ge.proposeGoal(baseGoalSpec({ goalId: "C", parentGoalId: "B" }));
+
+    let n = 0;
+    const spec = baseGoalSpec({ goalId: "EVIL" });
+    Object.defineProperty(spec, "parentGoalId", { enumerable: true, configurable: true, get() { n++; return n <= 3 ? "A" : 10n; } });
+    const g = ge.proposeGoal(spec);
+    assert.equal(n, 1, "parentGoalId must be read exactly once");
+    assert.equal(g.parentGoalId, "A", "the stored parentGoalId must be the same one that was validated and used to derive depth");
+    assert.equal(g.depth, 1, "depth must be derived from the same parent that was actually stored");
+    await assert.doesNotReject(() => ge.persist(), "a single-read parentGoalId must never let a non-serializable value reach persist()");
+});
+
 test("GL-repair-50: createPlan's steps is read exactly once, so a stateful getter cannot bypass MAX_STEPS_PER_PLAN via inconsistent reads (independent audit AUD32-P2-1)", async () => {
     const ge = await createGoalEngine();
     const g = ge.proposeGoal(baseGoalSpec());
