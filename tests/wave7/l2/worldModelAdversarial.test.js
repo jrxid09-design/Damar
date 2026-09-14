@@ -426,6 +426,23 @@ test("WM-repair-63: a subject whose get/getOwnPropertyDescriptor traps disagree 
         "the belief must never also appear keyed under the get-trap's subject -- key and storage must agree");
 });
 
+test("WM-repair-70: declareEntity/declareHypothesis reject sparse (hole-bearing) externalRefs/candidateValues arrays, not just explicit null/undefined elements (independent audit AUD40-P2-2)", async () => {
+    const wm = await createWorldModel();
+    assertThrowsReason(() => wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s", externalRefs: new Array(2) }), "INVALID_RECORD");
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    assertThrowsReason(() => wm.declareHypothesis({ hypothesisId: "h1", subject: { entityId: "e2" }, attribute: "a", candidateValues: new Array(1), expiresAt: new Date(9e12).toISOString() }), "INVALID_RECORD");
+});
+
+test("WM-repair-71: declareEntity's labels values are read via property descriptor, so an accessor label value is never invoked (independent audit AUD40-ADV-2)", async () => {
+    const wm = await createWorldModel();
+    let called = 0;
+    const labels = { a: "x" };
+    Object.defineProperty(labels, "b", { enumerable: true, configurable: true, get() { called++; return "y"; } });
+    const e = wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s", labels });
+    assert.equal(called, 0, "an accessor label value must never be invoked");
+    assert.equal(e.labels.a, "x", "a plain label value must still round-trip");
+});
+
 test("WM-repair-67: ingestDeclaration's subject-shape guard validates the SAME sanitized value that gets keyed/stored, so a Proxy whose get/descriptor traps disagree cannot bypass the shape guard (independent audit AUD36-P2-1)", async () => {
     const wm = await createWorldModel();
     const proxy = new Proxy({ entityId: "e1" }, {

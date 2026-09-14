@@ -21,6 +21,21 @@ const FORBIDDEN_INTENT_KEYS = Object.freeze([
     "route", "trustedNode", "rootAuthority"
 ]);
 const DANGEROUS_INTENT_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
+
+// Bug review independen (audit putaran-40, AUD40-P2-3; sibling dari
+// AUD39-P2-2 di metacog/AUD40-P2-2 di worldmodel): `arr.map(cb)` MELEWATI
+// lubang (hole) pada array jarang (sparse) -- `cb` tidak pernah dipanggil
+// untuk indeks kosong, jadi guard elemen di dalam callback tidak pernah
+// tereksekusi untuk lubang itu. Loop indeks eksplisit mengunjungi SETIAP
+// indeks (termasuk lubang, sebagai `undefined`) tanpa mengonsultasikan
+// `Symbol.iterator` -- beda dengan `Array.from`, yang melempar TypeError
+// mentah kalau `Symbol.iterator` ADA tapi bukan function (AUD40-ADV-1).
+function buildSafeArray(arr, mapFn) {
+    const out = [];
+    for (let i = 0; i < arr.length; i++) out.push(mapFn(arr[i], i));
+    return out;
+}
+
 const INTENT_ARRAY_INDEX_PATTERN = /^(0|[1-9][0-9]*)$/;
 const MAX_INTENT_SCAN_DEPTH = 16;
 const MAX_INTENT_ARRAY_LENGTH = 1024;
@@ -352,8 +367,8 @@ function makePlan({ planId, goalRef, version = 1, steps, assumptions = [], creat
     // ATAU objek langkah terstruktur, keduanya dipakai penelepon nyata di
     // basis kode ini), lalu deepFreeze membekukan hasilnya.
     return Object.freeze({
-        planId, goalRef, version, steps: deepFreeze(steps.map(s => buildSafeIntentTemplate(s))),
-        createdBy, assumptions: deepFreeze(assumptions.map(a => buildSafeIntentTemplate(a))),
+        planId, goalRef, version, steps: deepFreeze(buildSafeArray(steps, s => buildSafeIntentTemplate(s))),
+        createdBy, assumptions: deepFreeze(buildSafeArray(assumptions, a => buildSafeIntentTemplate(a))),
         invalidatedBy: Object.freeze([]), state: "DRAFT"
     });
 }
@@ -376,8 +391,8 @@ function makeTask({ taskId, planRef, order, capabilityId = null, preconditions =
     const safeIntentTemplate = buildSafeIntentTemplate(intentTemplate ?? {});
     return Object.freeze({
         taskId, planRef, order, capabilityId,
-        preconditions: Object.freeze(preconditions.map(c => validateConditionSpec(c, "precondition"))),
-        postconditions: Object.freeze(postconditions.map(c => validateConditionSpec(c, "postcondition"))),
+        preconditions: Object.freeze(buildSafeArray(preconditions, c => validateConditionSpec(c, "precondition"))),
+        postconditions: Object.freeze(buildSafeArray(postconditions, c => validateConditionSpec(c, "postcondition"))),
         intentTemplate: deepFreeze(safeIntentTemplate),
         state: "PENDING", attempts: 0, maxAttempts, lastOutcomeRef: null
     });

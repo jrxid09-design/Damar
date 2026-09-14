@@ -8,6 +8,20 @@ const { sanitizeEvidenceQuality, confidenceFromSafe } = require("./confidence");
 
 const DANGEROUS_VALUE_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 
+// Bug review independen (audit putaran-40, AUD40-ADV-1): perbaikan
+// putaran-39 (AUD39-P2-2) mengganti `.map` (melewati lubang array sparse)
+// dengan `Array.from`, yang MENGONSULTASIKAN `Symbol.iterator` -- sebuah
+// array dengan `Symbol.iterator` yang ADA tapi bukan function (atau
+// sebuah Proxy yang trap iterator-nya melempar) meledakkan TypeError
+// mentah dari `Array.from` itu sendiri. Loop indeks eksplisit mengunjungi
+// SETIAP indeks (termasuk lubang, sebagai `undefined`) tanpa pernah
+// menyentuh `Symbol.iterator` sama sekali.
+function buildSafeArray(arr, mapFn) {
+    const out = [];
+    for (let i = 0; i < arr.length; i++) out.push(mapFn(arr[i], i));
+    return out;
+}
+
 // Bug review independen (audit putaran-31, AUD31-P2-5; putaran-32,
 // AUD32-P2-5): perbaikan putaran-31 (`deepFreeze({...f})`) memang
 // membekukan lapis dalam, tapi lewat `value[key]` -- itu MEMANGGIL
@@ -194,7 +208,7 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
     // `for...of` sebelumnya, yang mengunjungi lubang sebagai `undefined`
     // lewat iterator array). `Array.from(arr, cb)` mengunjungi lubang
     // SEBAGAI `undefined` sama seperti `for...of`, menutup celah ini.
-    const safeProposals = Array.from(proposals, p => {
+    const safeProposals = buildSafeArray(proposals, p => {
         if (!p || typeof p !== "object") fail(REASONS.INVALID_RECORD, "setiap proposal wajib objek");
         const sp = buildSafeCognitiveCopy(p);
         const kind = sp?.kind;
@@ -213,7 +227,7 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
     // melewati lubang array sparse -- `Array.from` dipakai supaya lubang
     // dikunjungi sebagai `undefined` dan ditolak oleh guard, sama seperti
     // perbaikan di atas untuk proposals.
-    const safeFindings = Array.from(findings, f => {
+    const safeFindings = buildSafeArray(findings, f => {
         if (!f || typeof f !== "object") fail(REASONS.INVALID_RECORD, "setiap finding wajib objek");
         return buildSafeCognitiveCopy(f);
     });

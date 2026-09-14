@@ -234,6 +234,16 @@ test("MC-repair-28: recordCalibration's duplicate-recordId check is O(1) (Map-ba
     assert.doesNotThrow(() => mc.recordCalibration({ recordId: "C0", predictionRef: "p", predictedValue: 1, predictedConfidence: 0.9, outcomeTier: "T1", outcomeRef: "o0c", outcomeValue: 1, outcomeCorrect: true }), "C0 must have been evicted (FIFO) once retention overflowed, so its id is reusable");
 });
 
+test("MC-repair-30: openReview's element validation never consults Symbol.iterator at all, so a findings array with a non-callable Symbol.iterator is still processed by plain index instead of raw-throwing (independent audit AUD40-ADV-1)", async () => {
+    const mc = await createMetacognition();
+    const a = [{ severity: 1 }];
+    a[Symbol.iterator] = 42;
+    let review;
+    assert.doesNotThrow(() => { review = mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: a, proposals: [], cost: { tokens: 0, ms: 0 } }); },
+        "index-based iteration must never touch Symbol.iterator, so a non-callable one must not raw-throw");
+    assert.equal(review.findings.length, 1, "the legitimate finding must still be validated and stored");
+});
+
 test("MC-repair-29: openReview rejects sparse (hole-bearing) findings/proposals arrays, not just explicit null/undefined elements (independent audit AUD39-P2-2)", async () => {
     const mc = await createMetacognition();
     assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: new Array(2), proposals: [], cost: { tokens: 0, ms: 0 } }), "INVALID_RECORD");

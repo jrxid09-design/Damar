@@ -719,6 +719,13 @@ test("GL-repair-54: a non-string, falsy parentGoalId (e.g. 0n) is rejected, not 
     await assert.doesNotReject(() => ge.persist());
 });
 
+test("GL-repair-58: createPlan/createTask reject sparse (hole-bearing) steps/preconditions arrays, not just explicit null/undefined elements (independent audit AUD40-P2-3)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+    assertThrowsReason(() => ge.createTask({ planRef: p.planId, order: 1, intentTemplate: { op: "noop" }, preconditions: new Array(2) }), "INVALID_RECORD");
+});
+
 test("GL-repair-57: makeGoal sanitizes origin via buildSafeIntentTemplate before reading origin.kind (ORIGIN_KINDS guard and ownerApproval decision), so a hostile origin.kind accessor is rejected without ever being invoked (independent audit AUD39-ADV-1)", async () => {
     const { makeGoal } = require("../../../src/cognition/goals/records");
     let n = 0;

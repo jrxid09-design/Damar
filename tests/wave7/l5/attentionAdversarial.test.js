@@ -197,6 +197,20 @@ test("AT-repair-31: targetKey reads subjectRef.entityId exactly once (independen
     assert.equal(key, "entity:e1::PERCEIVE");
 });
 
+test("AT-repair-36: assignPriorityClass never reads originKind/ownerTrustVerified off a function evidenceRef -- a Proxy-wrapped function's trap never fires, and a revoked Proxy never raw-throws (independent audit AUD40-P2-1)", async () => {
+    const ae = await createAttentionEconomy();
+    const seen = [];
+    const p = new Proxy(function () {}, { get(t, k, r) { seen.push(String(k)); return Reflect.get(t, k, r); } });
+    const { targetId } = ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s1", subjectRef: { entityId: "e1" }, evidenceRef: p }, "PERCEIVE");
+    assert.equal(seen.length, 0, "a function evidenceRef's Proxy trap must never fire during priority assignment");
+    assert.notEqual(ae.getTarget(targetId).priorityClass, "P0_SAFETY", "a function evidenceRef must never be able to claim P0_SAFETY");
+
+    const { proxy, revoke } = Proxy.revocable(function () {}, {});
+    revoke();
+    assert.doesNotThrow(() => ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s2", subjectRef: { entityId: "e1" }, evidenceRef: proxy }, "PERCEIVE"),
+        "a revoked-Proxy function evidenceRef must not raw-throw out of ingestSignal");
+});
+
 test("AT-repair-35: a function evidenceRef's toString is never invoked, and two SAME-description Symbols / two SAME-source functions still count as two distinct corroboration pairs (independent audit AUD39-P2-1)", async () => {
     const ae = await createAttentionEconomy();
     let called = 0;
