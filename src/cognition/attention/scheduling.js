@@ -10,25 +10,31 @@
 
 const { CLASS_BASE, CLASS_QUOTA, PRIORITY_CLASSES, BOUNDS } = require("./bounds");
 
-function agingBonus(waitingMs) {
-    return Math.min(BOUNDS.AGING_BONUS_MAX, (waitingMs / BOUNDS.MAX_WAIT_MS) * BOUNDS.AGING_BONUS_MAX);
+// Bug review independen (audit putaran-64, Codex, AUD64-P2-1): fungsi di
+// file ini membaca `BOUNDS` modul (default TETAP) langsung, bukan `bounds`
+// yang sudah disanitasi per-instance -- override pemanggil (mis.
+// MAX_WAIT_MS, DECAY_PER_MS) diam-diam diabaikan. Parameter `bounds`
+// ditambahkan (default ke BOUNDS modul untuk kompatibilitas mundur),
+// diteruskan dari index.js's `bounds` instance yang sudah sah.
+function agingBonus(waitingMs, bounds = BOUNDS) {
+    return Math.min(bounds.AGING_BONUS_MAX, (waitingMs / bounds.MAX_WAIT_MS) * bounds.AGING_BONUS_MAX);
 }
 
-function decay(signalAgeMs) {
-    return Math.min(BOUNDS.AGING_BONUS_MAX + BOUNDS.CORROBORATION_BONUS_MAX, signalAgeMs * BOUNDS.DECAY_PER_MS);
+function decay(signalAgeMs, bounds = BOUNDS) {
+    return Math.min(bounds.AGING_BONUS_MAX + bounds.CORROBORATION_BONUS_MAX, signalAgeMs * bounds.DECAY_PER_MS);
 }
 
 /** AT-5: hanya SUMBER berbeda dengan BUKTI berbeda yang dihitung — bukan pesan berulang. */
-function corroborationBonus(distinctSourceEvidencePairs) {
-    const n = Math.min(distinctSourceEvidencePairs, BOUNDS.MAX_DISTINCT_SOURCES_COUNTED);
-    return (n / BOUNDS.MAX_DISTINCT_SOURCES_COUNTED) * BOUNDS.CORROBORATION_BONUS_MAX;
+function corroborationBonus(distinctSourceEvidencePairs, bounds = BOUNDS) {
+    const n = Math.min(distinctSourceEvidencePairs, bounds.MAX_DISTINCT_SOURCES_COUNTED);
+    return (n / bounds.MAX_DISTINCT_SOURCES_COUNTED) * bounds.CORROBORATION_BONUS_MAX;
 }
 
-function computeEffectivePriority(target, { waitingMs, signalAgeMs, distinctSourceEvidencePairs }) {
+function computeEffectivePriority(target, { waitingMs, signalAgeMs, distinctSourceEvidencePairs }, bounds = BOUNDS) {
     return CLASS_BASE[target.priorityClass]
-        + agingBonus(waitingMs)
-        - decay(signalAgeMs)
-        + corroborationBonus(distinctSourceEvidencePairs);
+        + agingBonus(waitingMs, bounds)
+        - decay(signalAgeMs, bounds)
+        + corroborationBonus(distinctSourceEvidencePairs, bounds);
 }
 
 /**
@@ -40,14 +46,14 @@ function initCredits() {
     return Object.fromEntries(PRIORITY_CLASSES.map(c => [c, 0]));
 }
 
-function pickOne(queuesByClass, credits, nowMs) {
+function pickOne(queuesByClass, credits, nowMs, bounds = BOUNDS) {
     // Jaminan anti-starvation struktural: target manapun yang sudah
     // menunggu >= MAX_WAIT_MS menang tanpa syarat kuota (AT-4/AT-5).
     let oldestAged = null;
     for (const cls of PRIORITY_CLASSES) {
         for (const t of queuesByClass[cls] ?? []) {
             const waited = nowMs - t.admittedAt;
-            if (waited >= BOUNDS.MAX_WAIT_MS && (!oldestAged || t.admittedAt < oldestAged.admittedAt)) {
+            if (waited >= bounds.MAX_WAIT_MS && (!oldestAged || t.admittedAt < oldestAged.admittedAt)) {
                 oldestAged = t;
             }
         }
