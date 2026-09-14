@@ -847,6 +847,19 @@ test("GL-repair-67: proposeGoal/createCommitment/createPlan/createTask fail clos
     assertThrowsReason(() => ge.createTask(rev()), "INVALID_RECORD");
 });
 
+test("GL-repair-68: proposeGoal/createCommitment/createTask fail closed (not raw-throw) on a revoked-Proxy NESTED origin/condition/element, one level below where round 44 stopped (independent audit W7R45-P2-1/W7R45-P2-2)", async () => {
+    const ge = await createGoalEngine();
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    assertThrowsReason(() => ge.proposeGoal({ title: "g", kind: "OWNER_ASSIGNED", origin: rev(), successCondition: { kind: "WORLD_BELIEF", subject: { entityId: "e1" }, attribute: "a", expectedValue: 1 } }), "INVALID_RECORD");
+    assertThrowsReason(() => ge.proposeGoal(baseGoalSpec({ successCondition: rev() })), "UNVERIFIABLE_SUCCESS_CONDITION");
+    assertThrowsReason(() => ge.proposeGoal(baseGoalSpec({ abandonCondition: rev() })), "UNVERIFIABLE_SUCCESS_CONDITION");
+    const g = ge.proposeGoal(baseGoalSpec());
+    assertThrowsReason(() => ge.createCommitment({ goalRef: g.goalId, toWhom: "owner", promise: "p", dueCondition: rev() }), "UNVERIFIABLE_SUCCESS_CONDITION");
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+    assertThrowsReason(() => ge.createTask({ taskId: "t1", planRef: p.planId, order: 0, preconditions: [rev()], postconditions: [], intentTemplate: {} }), "UNVERIFIABLE_SUCCESS_CONDITION");
+    assertThrowsReason(() => ge.createTask({ taskId: "t2", planRef: p.planId, order: 0, preconditions: [], postconditions: [rev()], intentTemplate: {} }), "UNVERIFIABLE_SUCCESS_CONDITION");
+});
+
 test("GL-repair-58: createPlan/createTask reject sparse (hole-bearing) steps/preconditions arrays, not just explicit null/undefined elements (independent audit AUD40-P2-3)", async () => {
     const ge = await createGoalEngine();
     const g = ge.proposeGoal(baseGoalSpec());

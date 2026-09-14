@@ -101,7 +101,16 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // ULANG sebagai objek polos baru -- makeGoal menerima objek polos
         // itu, jadi baca-berkalinya di dalam sana tidak lagi menyentuh
         // accessor pemanggil sama sekali.
-        const { kind: originKind, ...originRest } = rawOrigin ?? {};
+        // Bug review independen (audit putaran-45, W7R45-P2-1): round-44
+        // hanya membungkus destructuring `spec` TINGKAT ATAS -- `rawOrigin`
+        // (nilai bersarang DI DALAM spec) tetap didestrukturisasi mentah di
+        // sini, satu level lebih dalam dari yang round-44 tutup.
+        let originKind, originRest;
+        try {
+            ({ kind: originKind, ...originRest } = rawOrigin ?? {});
+        } catch {
+            fail(REASONS.INVALID_RECORD, "origin tidak dapat diverifikasi dengan aman, ditolak");
+        }
         // Bug review independen (audit putaran-4, W7R4-P2-3): enforceCreationRate
         // dulu berjalan SEBELUM makeGoal memvalidasi origin.kind -- setiap
         // origin.kind sampah (string acak pemanggil) tetap membuat kunci baru

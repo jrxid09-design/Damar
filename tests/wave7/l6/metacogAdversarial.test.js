@@ -294,6 +294,15 @@ test("MC-repair-35: openReview/recordCalibration fail closed (not raw-throw) on 
     assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: [], proposals: [], cost: rev() }), "INVALID_RECORD");
 });
 
+test("MC-repair-37: assess() never raw-throws on a revoked-Proxy evidenceQuality -- sanitizeEvidenceQuality falls back to NO_EVIDENCE-shaped safe defaults, matching its own established null/undefined contract (independent audit W7R45-P2-7)", async () => {
+    const mc = await createMetacognition();
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    let a;
+    assert.doesNotThrow(() => { a = mc.assess({ entityId: "e1" }, "claim", r.proxy); }, "a revoked-Proxy evidenceQuality must not raw-throw out of assess()");
+    assert.equal(a.basis, "NO_EVIDENCE", "a revoked evidenceQuality must fail safe to NO_EVIDENCE, same as null/undefined");
+});
+
 test("MC-repair-36: buildSafeCognitiveCopy's object branch rejects a flat object whose key count exceeds MAX_VALUE_KEYS, matching every sibling sanitizer's key-count bound (independent audit W7R44-P2-4)", async () => {
     const mc = await createMetacognition();
     const big = {};

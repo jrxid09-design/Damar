@@ -138,7 +138,16 @@ function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, n
             // bisa lolos guard dengan string sah lalu membalas Symbol/
             // BigInt pada baca berikutnya, tetap meledakkan mentah.
             // Dikeluarkan sekali lewat destructuring.
-            const { system, id } = r;
+            // Bug review independen (audit putaran-45, W7R45-P2-3): `r`
+            // adalah ELEMEN array milik pemanggil -- round-21/42 menjaga
+            // KONTAINER externalRefs, tapi setiap ELEMEN di dalamnya masih
+            // didestrukturisasi mentah di sini.
+            let system, id;
+            try {
+                ({ system, id } = r);
+            } catch {
+                fail(REASONS.INVALID_RECORD, "externalRefs elemen tidak dapat diverifikasi dengan aman, ditolak");
+            }
             if (typeof system !== "string" || !system) fail(REASONS.INVALID_RECORD, "externalRefs[].system wajib string");
             if (typeof id !== "string" || !id) fail(REASONS.INVALID_RECORD, "externalRefs[].id wajib string");
             return Object.freeze({ system: system.slice(0, 64), id: id.slice(0, 200) });
@@ -205,8 +214,20 @@ function makeObservation({ observationId, subject, attribute, value, sensor, fra
     // `String()` di konstruksi) -- latent hari ini (record observasi ini
     // transit, tidak durabel sendiri), tapi paritas dengan sanitizer lane
     // lain. Dikeluarkan sekali lewat destructuring.
-    const { sensorId, modality, calibrationRef } = sensor ?? {};
-    const { kind: frameKind, ref: frameRef } = frame ?? {};
+    // Bug review independen (audit putaran-45, W7R45-P2-4): `sensor`/
+    // `frame` adalah nilai bersarang milik pemanggil -- `?? {}` hanya
+    // melindungi null/undefined, bukan Proxy yang di-revoke (tetap truthy).
+    let sensorId, modality, calibrationRef, frameKind, frameRef;
+    try {
+        ({ sensorId, modality, calibrationRef } = sensor ?? {});
+    } catch {
+        fail(REASONS.MISSING_SENSOR_ID, "sensor tidak dapat diverifikasi dengan aman, ditolak");
+    }
+    try {
+        ({ kind: frameKind, ref: frameRef } = frame ?? {});
+    } catch {
+        fail(REASONS.INVALID_RECORD, "frame tidak dapat diverifikasi dengan aman, ditolak");
+    }
     if (!sensor || typeof sensorId !== "string" || !sensorId) {
         fail(REASONS.MISSING_SENSOR_ID, "sensor.sensorId wajib ada (W-3)");
     }

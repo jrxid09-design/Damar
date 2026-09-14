@@ -569,6 +569,35 @@ test("WM-repair-82: subgraph/neighbors consume seeds/kinds via property descript
     assertThrowsReason(() => wm.neighbors("e1", throwingDescArr(["device"]), 1), "INVALID_RECORD");
 });
 
+test("WM-repair-83: declareEntity fails closed (not raw-throw) on a revoked-Proxy ELEMENT inside externalRefs, one level below where round 44's container guard stopped (independent audit W7R45-P2-3)", async () => {
+    const wm = await createWorldModel();
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    assertThrowsReason(() => wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s", externalRefs: [r.proxy] }), "INVALID_RECORD");
+});
+
+test("WM-repair-84: ingestObservation fails closed (not raw-throw) on a revoked-Proxy nested sensor/frame argument (independent audit W7R45-P2-4)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const iso = new Date(1).toISOString();
+    const r1 = Proxy.revocable({ sensorId: "s1" }, {});
+    r1.revoke();
+    assertThrowsReason(() => wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "a", value: 1, sensor: r1.proxy, tier: "T1", observedAt: iso }), "MISSING_SENSOR_ID");
+    const r2 = Proxy.revocable({ kind: "camera" }, {});
+    r2.revoke();
+    assertThrowsReason(() => wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "a", value: 1, sensor: { sensorId: "s1" }, tier: "T1", observedAt: iso, frame: r2.proxy }), "INVALID_RECORD");
+});
+
+test("WM-repair-85: subgraph's budget?.nodes/budget?.bytes reads never raw-throw on a revoked-Proxy budget -- falls back to the default budget exactly like a malformed/null budget already does (independent audit W7R45-P2-5)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const r = Proxy.revocable({ nodes: 10, bytes: 100 }, {});
+    r.revoke();
+    let result;
+    assert.doesNotThrow(() => { result = wm.subgraph(["e1"], 2, r.proxy); }, "a revoked-Proxy budget must not raw-throw out of subgraph");
+    assert.ok(result.entities.length >= 1, "subgraph must still traverse using the default budget fallback");
+});
+
 test("WM-repair-76: subgraph/declareEntity/declareHypothesis fail closed (not raw-throw) on a revoked-Proxy container argument (independent audit W7R42-P2-3)", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });

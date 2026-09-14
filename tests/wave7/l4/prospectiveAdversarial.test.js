@@ -238,6 +238,13 @@ test("PM-repair-53: arm/armExpectation fail closed (not raw-throw) on a revoked-
     assertThrowsReason(() => pm.armExpectation(rev()), "INVALID_RECORD");
 });
 
+test("PM-repair-54: armExpectation fails closed (not raw-throw) on a revoked-Proxy NESTED window argument, one level below where round 44's subject/expectedValue guard stopped (independent audit W7R45-P2-6)", async () => {
+    const pm = await createProspectiveMemory();
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    assertThrowsReason(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "a", expectedValue: "x", window: r.proxy }), "NO_LATEST_AT");
+});
+
 test("PM-repair-49: compaction only removes a victim's OWN firedOccurrenceIds entries, not a differently-terminated reminder whose id happens to be a string-prefix of the victim's (independent audit AUD38-ADV-1)", async () => {
     const clock = manualClock(0);
     const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_TOTAL_REMINDERS_RETAINED: 1, MAX_ARMED_REMINDERS: 100 } });
