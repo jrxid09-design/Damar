@@ -12,6 +12,7 @@
 
 const { BOUNDS } = require("./bounds");
 const { REASONS, fail } = require("./errors");
+const { canonicalJson } = require("../core/envelope");
 
 const TIER_RANK = Object.freeze({ T4: 1, T2: 2, T1: 3, DECLARED: 4 });
 const DANGEROUS_VALUE_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
@@ -47,6 +48,18 @@ function buildSafeBeliefValue(value, depth = 0, stack, budget) {
     if (t === "function") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh membawa fungsi (termasuk toJSON)");
     if (t === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh membawa Symbol");
     if (t === "bigint") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh membawa BigInt");
+    // Bug review independen (audit putaran-30, AUD30-ADV-1): angka non-finite
+    // (Infinity/-Infinity/NaN) dulu lolos apa adanya -- backend JSON
+    // (mis. sqlite) menulis ulang Infinity jadi `null` saat persist()
+    // (JSON.stringify(Infinity) === "null"), dan NaN tidak sama dengan
+    // apa pun (termasuk dirinya sendiri) tapi `canonicalJson`/JSON.stringify
+    // MEMPERLAKUKANNYA sama dengan null ("null" juga), membuat NaN vs null
+    // lolos sebagai "sameValue" -- kontradiksi asli yang seharusnya terbuka
+    // jadi terlewat. Ditolak tertutup, konsisten dengan nilai lain yang
+    // wajib bisa diserialisasi JSON tanpa berubah bentuk.
+    if (t === "number" && !Number.isFinite(value)) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh berupa angka non-finite (NaN/Infinity)");
+    }
     if (t !== "object") return value;
     if (depth > BOUNDS.MAX_VALUE_SCAN_DEPTH) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value terlalu dalam untuk diverifikasi dengan aman, ditolak");
@@ -202,7 +215,17 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
         return { case: "DUPLICATE", belief: existing, contradiction: null };
     }
 
-    const sameValue = JSON.stringify(existing.value) === JSON.stringify(record.value);
+    // Bug review independen (audit putaran-30, AUD30-P1-1, BLOCKING):
+    // `JSON.stringify` peka urutan kunci -- dua nilai yang SECARA SEMANTIK
+    // sama (mis. {unit:"C",v:5} vs {v:5,unit:"C"}) dianggap BERBEDA,
+    // membuka CONTEST palsu untuk observasi yang benar-benar tidak
+    // bertentangan (bukan input hostile, cukup dua produser yang menyusun
+    // objek dengan urutan kunci beda). CONTEST palsu berulang bisa
+    // mengevict kontradiksi ASLI dari daftar terbatas. `canonicalJson`
+    // (core/envelope.js) sudah ada tepat untuk ini -- mengurutkan kunci
+    // secara deterministik sebelum dibandingkan/dihash, dipakai di sini
+    // alih-alih JSON.stringify mentah.
+    const sameValue = canonicalJson(existing.value) === canonicalJson(record.value);
     const expired = isExpired(existing, nowMs);
     const newerOrEqualTier = TIER_RANK[record.tier] >= TIER_RANK[existing.tier];
     const newerInTime = record.observedAtMs === undefined || record.observedAtMs >= (existing.observedAtMs ?? 0);

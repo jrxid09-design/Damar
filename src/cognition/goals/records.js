@@ -150,8 +150,24 @@ function validateConditionSpec(spec, label) {
     // tanpa entityId/relationId nyata, kolaps lewat subjectKeyOf ke kunci
     // sentinel bersama yang menggabungkan kondisi tak-terkait. Sibling
     // makeObservation/makeHypothesis sudah pakai guard bentuk positif ini.
+    // Bug review independen (audit putaran-30, AUD30-P2-2): `spec.subject`
+    // dulu dibaca BERKALI-KALI (tiga kali di guard ini, sekali lagi saat
+    // membangun salinan aman di bawah) -- accessor stateful bisa
+    // mengembalikan subject sah pada baca-baca guard lalu subject cacat
+    // (mis. {}) pada baca terakhir, meloloskan kondisi yang tidak bisa
+    // dievaluasi. Dibaca SEKALI ke lokal, dipakai untuk validasi MAUPUN
+    // salinan aman.
+    // `subject` DIKELUARKAN dari `spec` lewat destructuring (bukan
+    // `spec.subject` terpisah lalu `{...spec}` di bawah) -- spread objek
+    // membaca ULANG setiap properti enumerable milik sumbernya termasuk
+    // `subject`, jadi `{...spec, subject: {...subject}}` tanpa destructuring
+    // tetap memanggil getter subject DUA KALI (sekali oleh `{...spec}`,
+    // override-nya diabaikan). Dengan destructuring, `specRest` TIDAK
+    // PERNAH punya kunci `subject` sama sekali, jadi spread-nya tidak
+    // menyentuhnya lagi -- total tepat SATU baca.
+    const { subject, ...specRest } = spec;
     if (typeof spec.kind !== "string" ||
-        !spec.subject || (typeof spec.subject.entityId !== "string" && typeof spec.subject.relationId !== "string") ||
+        !subject || (typeof subject.entityId !== "string" && typeof subject.relationId !== "string") ||
         typeof spec.attribute !== "string") {
         fail(REASONS.UNVERIFIABLE_SUCCESS_CONDITION,
             `${label} tidak dapat dievaluasi (kind/subject/attribute wajib ada)`);
@@ -182,7 +198,7 @@ function validateConditionSpec(spec, label) {
     // disaring+dibekukan sekaligus lewat buildSafeIntentTemplate (yang sudah
     // menolak BigInt/function/Symbol di kedalaman berapa pun); subject tetap
     // ditangani terpisah karena wajib objek (bukan dilewatkan begitu saja).
-    return deepFreeze(buildSafeIntentTemplate({ ...spec, subject: { ...spec.subject } }));
+    return deepFreeze(buildSafeIntentTemplate({ ...specRest, subject: { ...subject } }));
 }
 
 /** G-1/G-2: SELF_PROPOSED tidak pernah menyetujui dirinya; AGENT_SUGGESTION tidak pernah mengatur ownerApproval. */

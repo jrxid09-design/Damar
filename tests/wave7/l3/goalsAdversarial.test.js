@@ -630,6 +630,30 @@ test("GL-repair-45: a hostile toString on title/promise is never invoked, and re
     assert.equal(called, 0, "promise's toString must never be invoked");
 });
 
+test("GL-repair-46: goalId is read exactly once, so a stateful getter cannot slip a different id past the DUPLICATE_RECORD_ID check than the one actually stored (independent audit AUD30-P2-1)", async () => {
+    const ge = await createGoalEngine();
+    const g1 = ge.proposeGoal(baseGoalSpec({ goalId: "g1" }));
+    ge.transition(g1.goalId, "supersede", { actorKind: "OWNER", reason: "r" });
+    assert.equal(ge.getGoal("g1").state, "SUPERSEDED");
+
+    let n = 0;
+    const spec = { ...baseGoalSpec(), title: "resurrected" };
+    Object.defineProperty(spec, "goalId", { enumerable: true, configurable: true, get() { n++; return "g1"; } });
+    assertThrowsReason(() => ge.proposeGoal(spec), "DUPLICATE_RECORD_ID");
+    assert.equal(n, 1, "goalId must be read exactly once (checked and used for construction from the same read), not re-read separately");
+    assert.equal(ge.getGoal("g1").state, "SUPERSEDED", "the terminal goal must not be resurrected");
+});
+
+test("GL-repair-47: successCondition.subject is read exactly once, so a stateful getter (valid subject during validation, empty afterward) cannot slip an unverifiable condition past the guard (independent audit AUD30-P2-2)", async () => {
+    const ge = await createGoalEngine();
+    let n = 0;
+    const condition = { kind: "EQUALITY", attribute: "a" };
+    Object.defineProperty(condition, "subject", { enumerable: true, configurable: true, get() { n++; return n === 1 ? { entityId: "e1" } : {}; } });
+    const goal = ge.proposeGoal(baseGoalSpec({ successCondition: condition }));
+    assert.equal(n, 1, "subject must be read exactly once");
+    assert.equal(goal.successCondition.subject.entityId, "e1", "the stored subject must come from the same read that was validated");
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

@@ -672,6 +672,49 @@ test("WM-repair-53: hostile toString on entity labels/externalRefs/relation kind
     assert.equal(called, 0, "a hostile externalRefs.system's toString must never be invoked");
 });
 
+test("WM-repair-56: relationId/hypothesisId are each read exactly once, so a stateful getter cannot overwrite an existing relation/hypothesis via inconsistent reads (independent audit AUD30-P2-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    wm.declareRelation({ relationId: "r1", kind: "ORIGINAL", from: "e1", to: "e2", strength: 0.9 });
+
+    let n = 0;
+    const spec = { kind: "REPLAYED", from: "e1", to: "e2", strength: 0.1 };
+    Object.defineProperty(spec, "relationId", { enumerable: true, configurable: true, get() { n++; return "r1"; } });
+    assertThrowsReason(() => wm.declareRelation(spec), "DUPLICATE_RECORD_ID");
+    assert.equal(n, 1, "relationId must be read exactly once");
+    assert.equal(wm.subgraph(["e1", "e2"], 1).relations.find(r => r.relationId === "r1").kind, "ORIGINAL");
+});
+
+test("WM-repair-55: a non-finite numeric belief value (Infinity/NaN) is rejected, not silently corrupted to null by a JSON-round-tripping store (independent audit AUD30-ADV-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    for (const bad of [Infinity, -Infinity, NaN]) {
+        assertThrowsReason(() => wm.ingestObservation({
+            subject: { entityId: "e1" }, attribute: "reading", value: bad,
+            sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString()
+        }), "EXECUTABLE_MATERIAL_REJECTED");
+    }
+});
+
+test("WM-repair-54: two observations with the SAME logical object value but different key order are treated as REINFORCE, not a spurious CONTEST (independent audit AUD30-P1-1, BLOCKING)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const r1 = wm.ingestObservation({
+        observationId: "o1", subject: { entityId: "e1" }, attribute: "reading", value: { unit: "C", v: 5 },
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1000).toISOString()
+    });
+    const r2 = wm.ingestObservation({
+        observationId: "o2", subject: { entityId: "e1" }, attribute: "reading", value: { v: 5, unit: "C" },
+        sensor: { sensorId: "s2" }, tier: "T1", observedAt: new Date(1001).toISOString()
+    });
+    assert.notEqual(r2.case, "CONTEST", "a value that is structurally identical (only key order differs) must not open a contradiction");
+    assert.equal(wm.openContradictions().length, 0);
+    const q = wm.query({ subject: { entityId: "e1" }, attribute: "reading" });
+    assert.equal(q.contested, false);
+    assert.deepEqual([...q.supportedBy].sort(), ["o1", "o2"], "the second observation must REINFORCE (corroborate), not overwrite/contest");
+});
+
 test("WM-repair-38: entity eviction stays fast at scale -- relationDegree() must not rescan all relations per candidate (independent audit AUD20-P2-3)", async () => {
     const ENTITY_COUNT = 3000;
     const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_ENTITIES: ENTITY_COUNT, MAX_ENTITIES_PER_SOURCE: ENTITY_COUNT + 500, MAX_RELATIONS: ENTITY_COUNT * 4 } });

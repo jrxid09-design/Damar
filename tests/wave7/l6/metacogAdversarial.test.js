@@ -113,6 +113,30 @@ test("MC-repair-15: computeConfidence reads each evidenceQuality field exactly o
     assert.ok(result.value > 0.8, `basis=VERIFIED_EVIDENCE must produce a matching high value, got ${result.value}`);
 });
 
+test("MC-repair-16: a stateful evidenceQuality.verifiedCount getter (5 then 0) never produces an assessment whose stored evidenceQuality contradicts its own basis/value (independent audit AUD30-P2-3)", async () => {
+    const mc = await createMetacognition();
+    let n = 0;
+    const eq = { sourceCount: 0, contradictionCount: 0, freshestAtMs: null, inferenceOnly: false };
+    Object.defineProperty(eq, "verifiedCount", { enumerable: true, get() { n++; return n === 1 ? 5 : 0; } });
+    const a = mc.assess({ entityId: "e1" }, "claim", eq);
+    if (a.basis === "VERIFIED_EVIDENCE") {
+        assert.equal(a.evidenceQuality.verifiedCount, 5, "stored evidenceQuality must match the same snapshot that produced VERIFIED_EVIDENCE");
+    } else {
+        assert.equal(a.evidenceQuality.verifiedCount, 0);
+    }
+});
+
+test("MC-repair-17: recordId is read exactly once in recordCalibration, so a stateful getter cannot double-count a calibration record via inconsistent reads (independent audit AUD30-P2-1)", async () => {
+    const mc = await createMetacognition();
+    mc.recordCalibration({ recordId: "C1", predictionRef: "p", predictedValue: 1, predictedConfidence: 0.9, outcomeTier: "T1", outcomeRef: "o1", outcomeValue: 1, outcomeCorrect: true });
+
+    let n = 0;
+    const spec = { predictionRef: "p2", predictedValue: 1, predictedConfidence: 0.5, outcomeTier: "T1", outcomeRef: "o2", outcomeValue: 1, outcomeCorrect: true };
+    Object.defineProperty(spec, "recordId", { enumerable: true, configurable: true, get() { n++; return "C1"; } });
+    assertThrowsReason(() => mc.recordCalibration(spec), "DUPLICATE_RECORD_ID");
+    assert.equal(n, 1, "recordId must be read exactly once");
+});
+
 test("MC-A1: fake confidence (model writes 0.99) is impossible — no API accepts a raw value", async () => {
     const mc = await createMetacognition();
     const a = mc.assess({ entityId: "e1" }, "claim", { value: 0.99, sourceCount: 0 }); // "value" in input ignored

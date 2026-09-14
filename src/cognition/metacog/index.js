@@ -212,10 +212,14 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         // Bug review independen (audit putaran-11, AUD11-P2-8): recordId
         // pemanggil tidak pernah dicek tabrakan -- replay sebuah recordId
         // yang sudah tercatat menghitung ganda satu bukti kalibrasi yang sama.
-        if (spec.recordId && calibrationRecords.some(r => r.recordId === spec.recordId)) {
-            fail(REASONS.DUPLICATE_RECORD_ID, `recordId kalibrasi '${spec.recordId}' sudah ada`);
+        // Bug review independen (audit putaran-30, AUD30-P2-1): `spec.recordId`
+        // dibaca berkali-kali (cek tabrakan, lalu konstruksi) -- accessor
+        // stateful bisa mengembalikan id berbeda tiap baca, melewati dedup.
+        const recordId = spec.recordId;
+        if (recordId && calibrationRecords.some(r => r.recordId === recordId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `recordId kalibrasi '${typeof recordId === "string" ? recordId : typeof recordId}' sudah ada`);
         }
-        const record = makeCalibrationRecord({ ...spec, recordId: spec.recordId ?? crypto.randomUUID() });
+        const record = makeCalibrationRecord({ ...spec, recordId: recordId ?? crypto.randomUUID() });
         calibrationRecords.push(record);
         if (calibrationRecords.length > bounds.MAX_CALIBRATION_RECORDS) calibrationRecords.shift();
         return record;

@@ -50,6 +50,28 @@ test("PM-repair-32: a Symbol wakeClass is rejected as INVALID_RECORD, not a raw 
     }), "INVALID_RECORD");
 });
 
+test("PM-repair-34: reminderId is read exactly once, so a stateful getter cannot leak armed capacity via inconsistent reads (independent audit AUD30-P2-1)", async () => {
+    const pm = await createProspectiveMemory({ bounds: { ...BOUNDS, MAX_ARMED_REMINDERS: 1 } });
+    pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(5000).toISOString() } });
+
+    let n = 0;
+    const spec = { wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(6000).toISOString() } };
+    Object.defineProperty(spec, "reminderId", { enumerable: true, configurable: true, get() { n++; return "R1"; } });
+    assertThrowsReason(() => pm.arm(spec), "DUPLICATE_RECORD_ID");
+    assert.equal(n, 1, "reminderId must be read exactly once");
+    assert.equal(pm.reminderCount(), 1, "the existing reminder must not be double-counted or overwritten");
+});
+
+test("PM-repair-33: an expectation with no earliestAt is satisfied by ANY observation at or before latestAt, not just ones after year 2000 (independent audit AUD30-P2-4)", async () => {
+    const pm = await createProspectiveMemory({ clock: manualClock(100) });
+    pm.armExpectation({
+        subject: { entityId: "e1" }, attribute: "status", expectedValue: "done",
+        window: { latestAt: new Date(1000).toISOString() } // earliestAt omitted
+    });
+    const results = pm.checkExpectations(() => ({ value: "done", atMs: 500 }));
+    assert.equal(results[0].outcome, "SATISFIED", "an omitted earliestAt must mean no lower bound (epoch), not 'after year 2000'");
+});
+
 test("PM-A1: reminder carrying executable/authority-shaped payload is rejected", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.arm({
