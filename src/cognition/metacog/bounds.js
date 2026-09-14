@@ -14,8 +14,12 @@ const BOUNDS = Object.freeze({
     REFLECTION_BUDGET_TOKENS_PER_HOUR: 200_000,
     REFLECTION_BUDGET_MS_PER_HOUR: 120_000,
     REVIEW_COOLDOWN_MS: 5 * 60_000,
+    // Bug review independen (audit putaran-38, AUD38-ADV-3): CALIBRATION_WINDOW_DAYS
+    // dideklarasikan tapi tidak pernah disambungkan ke kode apa pun --
+    // retensi kalibrasi murni berbasis jumlah lewat MAX_CALIBRATION_RECORDS.
+    // Dihapus (bukan MAX_REVIEW_DEPTH's sibling di bawah, yang memang
+    // ditegakkan secara struktural lewat absennya parameter parentReviewId).
     MAX_CALIBRATION_RECORDS: 100000,
-    CALIBRATION_WINDOW_DAYS: 90,
     MAX_REVIEW_DEPTH: 1,
     NO_EVIDENCE_CEILING: 0.2,
     // Bug review independen (audit putaran-32, AUD32-P2-5): sanitizer baru

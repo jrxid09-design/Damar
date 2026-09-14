@@ -174,41 +174,47 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
         fail(REASONS.INVALID_RECORD, "cost wajib { tokens, ms } berupa number >= 0 yang valid");
     }
     const safeCost = Object.freeze({ tokens: costTokens, ms: costMs });
-    for (const p of proposals) {
+    // Bug review independen (audit putaran-25, AUD25-P2-1; putaran-35,
+    // AUD35-P2-2; putaran-38, AUD38-P2-2): interpolasi `${p.kind}` mentah
+    // meledakkan TypeError kalau p.kind Symbol -- perbaikan putaran-25
+    // menghindari interpolasi LANGSUNG dan putaran-35 membacanya sekali
+    // ke lokal, tapi keduanya masih membaca `p.kind` lewat [[Get]] biasa
+    // milik pemanggil SEBELUM buildSafeCognitiveCopy (descriptor-based)
+    // sempat menolaknya -- getter kind tereksekusi meski proposal itu
+    // akhirnya ditolak juga oleh sanitizer. Disaring SEKALI lewat
+    // buildSafeCognitiveCopy lebih dulu; `kind` diturunkan dari salinan
+    // aman itu, dan salinan yang SAMA dipakai untuk penyimpanan di bawah
+    // (tidak disaring dua kali).
+    const safeProposals = proposals.map(p => {
         if (!p || typeof p !== "object") fail(REASONS.INVALID_RECORD, "setiap proposal wajib objek");
-        // Bug review independen (audit putaran-25, AUD25-P2-1; putaran-35,
-        // AUD35-P2-2): interpolasi `${p.kind}` mentah meledakkan TypeError
-        // kalau p.kind Symbol -- perbaikan putaran-25 menghindari
-        // interpolasi LANGSUNG tapi tetap membaca `p.kind` TIGA KALI
-        // (enum check, typeof, lalu nilai di pesan) -- getter stateful
-        // bisa lolos enum check dengan string tidak dikenal lalu membalas
-        // Symbol pada baca berikutnya, tetap meledakkan TypeError mentah.
-        // Dibaca SEKALI ke lokal.
-        const kind = p.kind;
+        const sp = buildSafeCognitiveCopy(p);
+        const kind = sp?.kind;
         if (!PROPOSAL_KINDS.has(kind)) fail(REASONS.INVALID_RECORD, `proposal.kind '${typeof kind === "string" ? kind : typeof kind}' tidak dikenal`);
-    }
-    for (const f of findings) {
+        return sp;
+    });
+    // Bug review independen (audit putaran-33, AUD33-P2-5; putaran-38,
+    // AUD38-P2-2 sibling): komparator sort dulu membaca `severity` MENTAH
+    // (sebelum buildSafeCognitiveCopy sempat menyaringnya) -- BigInt/
+    // hostile valueOf meledakkan aritmetika `-` mentah, DAN getter
+    // severity milik pemanggil tereksekusi meski finding-nya akhirnya
+    // ditolak juga oleh sanitizer. Disaring SEKALI lewat
+    // buildSafeCognitiveCopy lebih dulu (fail closed untuk objek non-form
+    // di sini); severity untuk pengurutan diturunkan dari salinan aman.
+    const safeFindings = findings.map(f => {
         if (!f || typeof f !== "object") fail(REASONS.INVALID_RECORD, "setiap finding wajib objek");
-    }
-    // Bug review independen (audit putaran-33, AUD33-P2-5): komparator ini
-    // membaca `severity` MENTAH (sebelum buildSafeCognitiveCopy sempat
-    // menyaringnya di bawah) -- BigInt/hostile valueOf meledakkan aritmetika
-    // `-` mentah, membatalkan seluruh openReview(). safeSeverity tidak
-    // pernah melempar; finding yang severity-nya benar-benar BigInt/
-    // non-finite tetap DITOLAK TERTUTUP oleh buildSafeCognitiveCopy di
-    // bawah begitu urutannya selesai -- ini hanya menjaga PENGURUTAN itu
-    // sendiri tidak meledak sebelum penolakan sempat terjadi.
+        return buildSafeCognitiveCopy(f);
+    });
     const safeSeverity = (v) => (typeof v === "number" && Number.isFinite(v)) ? v : 0;
-    const boundedFindings = findings.length > bounds.MAX_FINDINGS_PER_REVIEW
-        ? [...findings].sort((a, b) => safeSeverity(b?.severity) - safeSeverity(a?.severity)).slice(0, bounds.MAX_FINDINGS_PER_REVIEW)
-        : findings;
-    const boundedProposals = proposals.slice(0, bounds.MAX_PROPOSALS_PER_REVIEW);
+    const boundedFindings = safeFindings.length > bounds.MAX_FINDINGS_PER_REVIEW
+        ? [...safeFindings].sort((a, b) => safeSeverity(b?.severity) - safeSeverity(a?.severity)).slice(0, bounds.MAX_FINDINGS_PER_REVIEW)
+        : safeFindings;
+    const boundedProposals = safeProposals.slice(0, bounds.MAX_PROPOSALS_PER_REVIEW);
 
     return Object.freeze({
         reviewId, trigger,
-        findings: Object.freeze(boundedFindings.map(f => buildSafeCognitiveCopy(f))),
+        findings: Object.freeze(boundedFindings),
         findingsTruncated: findings.length > bounds.MAX_FINDINGS_PER_REVIEW,
-        proposals: Object.freeze(boundedProposals.map(p => buildSafeCognitiveCopy(p))),
+        proposals: Object.freeze(boundedProposals),
         cost: safeCost,
         state: "OPEN"
     });

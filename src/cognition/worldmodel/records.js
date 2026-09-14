@@ -101,9 +101,20 @@ function makeObservation({ observationId, subject, attribute, value, sensor, fra
     // lalu menyimpan subjek lain (mis. undefined), melewati guard
     // UNKNOWN_ENTITY (W-3) dan membuat observasi jatuh ke kunci belief
     // sentinel "invalid:malformed-subject". Destructure SEKALI di sini.
+    // Bug review independen (audit putaran-38, AUD38-P2-1): destructuring
+    // `entityId`/`relationId` di atas membaca KEDUANYA tanpa syarat --
+    // getter relationId pemanggil tereksekusi bahkan ketika entityId
+    // sudah valid, dan tidak seperti makeHypothesis/ingestDeclaration
+    // (yang sudah disaring lewat buildSafeBeliefValue sebelum divalidasi),
+    // subject di sini masih dibaca lewat [[Get]] biasa milik pemanggil.
+    // Disaring SEKALI lewat buildSafeBeliefValue lebih dulu (menolak
+    // accessor lewat descriptor TANPA memanggilnya), lalu entityId/
+    // relationId diturunkan dari salinan aman itu dengan short-circuit
+    // (relationId hanya dibaca kalau entityId terbukti bukan string).
     if (!subject) fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
-    const { entityId, relationId, ...subjectRest } = subject;
-    if (typeof entityId !== "string" && typeof relationId !== "string") {
+    const safeSubject = buildSafeBeliefValue(subject);
+    const validEntity = typeof safeSubject?.entityId === "string";
+    if (!validEntity && typeof safeSubject?.relationId !== "string") {
         fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
     }
     if (typeof attribute !== "string" || !attribute) fail(REASONS.INVALID_RECORD, "attribute wajib string");
@@ -133,7 +144,7 @@ function makeObservation({ observationId, subject, attribute, value, sensor, fra
     }
 
     return Object.freeze({
-        observationId, subject: Object.freeze({ ...subjectRest, entityId, relationId }),
+        observationId, subject: safeSubject,
         // Bug review independen (audit putaran-4, W7R4-P2-1; disempurnakan
         // putaran-5, W7R5-P1-2): validasi/salin `value` TIDAK dilakukan di
         // sini lagi -- applyRevision (beliefAlgebra.js, satu-satunya tempat

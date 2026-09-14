@@ -233,9 +233,18 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         const victim = terminal[0];
         if (!victim) return;
         reminders.delete(victim.reminderId);
+        // Bug review independen (audit putaran-38, AUD38-ADV-1): `key.
+        // startsWith(prefix)` cocok pada BATAS STRING, bukan batas
+        // reminderId -- reminderId "R" adalah prefix string dari
+        // occurrenceKey milik reminder LAIN yang namanya "R:x" (occurrenceKey
+        // untuk itu adalah "R:x:0", dan "R:x:0".startsWith("R:") == true),
+        // jadi kompaksi "R" salah menghapus entri dedup milik "R:x" yang
+        // masih hidup. Dicocokkan tepat pada batas `${reminderId}:<integer>`.
         const prefix = `${victim.reminderId}:`;
         for (const key of firedOccurrenceIds) {
-            if (key.startsWith(prefix)) firedOccurrenceIds.delete(key);
+            if (key.startsWith(prefix) && /^\d+$/.test(key.slice(prefix.length))) {
+                firedOccurrenceIds.delete(key);
+            }
         }
     }
 
