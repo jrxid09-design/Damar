@@ -203,6 +203,29 @@ test("W7-L7 convergence 22: no persisted cognition state can restore execution p
     }
 });
 
+test("W7-L7 convergence 27: each lane's public .bounds is frozen -- a caller holding the reference (e.g. via longhorizon.lanes.*) cannot raise or zero the lane's enforced MAX_* values in-session (independent audit round 55, W7R55-P2-2)", async () => {
+    const { createSelfModel } = require("../../../src/cognition/selfmodel");
+    const { createWorldModel } = require("../../../src/cognition/worldmodel");
+    const { createGoalEngine } = require("../../../src/cognition/goals");
+    const { createProspectiveMemory } = require("../../../src/cognition/prospective");
+    const { createAttentionEconomy } = require("../../../src/cognition/attention");
+    const { createMetacognition } = require("../../../src/cognition/metacog");
+
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const lanes = [
+        await createSelfModel({ capabilityRegistry: registry }),
+        await createWorldModel({}),
+        await createGoalEngine({}),
+        await createProspectiveMemory({}),
+        await createAttentionEconomy({}),
+        await createMetacognition({})
+    ];
+    for (const lane of lanes) {
+        assert.ok(Object.isFrozen(lane.bounds), "lane.bounds harus frozen");
+        assert.throws(() => { "use strict"; lane.bounds.__forged__ = 1; });
+    }
+});
+
 test("W7-L7 convergence 23: composed lanes keep their own bounds under the shared cycle", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const lh = await createLongHorizonCycle({ mode: "shadow", capabilityRegistry: registry });

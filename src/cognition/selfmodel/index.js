@@ -48,7 +48,7 @@ async function createSelfModel({
     // memicu trap `ownKeys` kalau ada, jadi ini juga menguji keamanannya);
     // field yang hilang jatuh ke `BOUNDS` asli, bukan `undefined`.
     try {
-        bounds = (bounds && typeof bounds === "object") ? { ...BOUNDS, ...bounds } : BOUNDS;
+        bounds = Object.freeze((bounds && typeof bounds === "object") ? { ...BOUNDS, ...bounds } : BOUNDS);
     } catch {
         bounds = BOUNDS;
     }
@@ -441,15 +441,24 @@ async function createSelfModel({
         } catch { reachableNodes = []; }
 
         // Bug review independen (audit putaran-51, W7R51-ADV-1, sapuan
-        // lanjutan): `buildSnapshot`'s `assemble()` men-spread `[...activeProviders]`
-        // SEBELUM `deepFreeze` (yang sudah diperbaiki di snapshot.js) sempat
-        // memprosesnya -- spread sendiri mengonsumsi Symbol.iterator, raw-throw
-        // untuk Proxy yang di-revoke. Divalidasi sebagai array polos di sini,
-        // jatuh ke array kosong kalau tidak.
+        // lanjutan; DIPERKUAT putaran-55, W7R55-P2-1): `buildSnapshot`'s
+        // `assemble()` men-spread `[...activeProviders]` SEBELUM `deepFreeze`
+        // sempat memprosesnya -- `Array.isArray` hanya membuktikan identitas,
+        // BUKAN keamanan trap (pelajaran putaran-44/53 yang sama). Sebuah
+        // array Proxy yang lolos Array.isArray tapi getter Symbol.iterator-nya
+        // melempar tetap raw-throw lewat spread. Disalin di sini per-index
+        // (tanpa iterator/spread), elemen yang hostile dilewati.
         let activeProviders = [];
         try {
             const raw = safeCall(() => providerPort?.activeProviders?.()) ?? [];
-            activeProviders = Array.isArray(raw) ? raw : [];
+            if (Array.isArray(raw)) {
+                let len;
+                try { len = raw.length; } catch { len = 0; }
+                if (!Number.isInteger(len) || len < 0) len = 0;
+                for (let i = 0; i < len; i++) {
+                    try { activeProviders.push(raw[i]); } catch { /* skip hostile index */ }
+                }
+            }
         } catch { activeProviders = []; }
         const resourcePressure = safeCall(() => governorPort?.pressure?.()) ?? null;
         const presence = safeCall(() => presencePort?.state?.()) ?? null;

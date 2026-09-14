@@ -246,6 +246,18 @@ test("SM-repair-19: snapshot() never raw-throws on revoked/throwing soft ports (
     }
 });
 
+test("SM-repair-21: snapshot() never raw-throws when providerPort.activeProviders() returns an array Proxy whose Symbol.iterator getter throws -- Array.isArray proves identity, not trap-safety (independent audit round 55, W7R55-P2-1)", async () => {
+    const reg = { get: () => ({ id: "x" }), has: () => true, getAvailability: () => null };
+    const arrProxy = new Proxy([1, 2, 3], {
+        get(t, p, rec) {
+            if (p === Symbol.iterator) throw new Error("hostile iterator");
+            return Reflect.get(t, p, rec);
+        }
+    });
+    const sm = await createSelfModel({ capabilityRegistry: reg, providerPort: { activeProviders: () => arrProxy } });
+    assert.doesNotThrow(() => sm.snapshot());
+});
+
 test("SM-repair-18: assess() never raw-throws when the capability registry returns a revoked-Proxy descriptor -- descriptorRef falls back to capabilityId, same as a missing descriptor.id (independent audit W7R50-ADV-1)", async () => {
     const { proxy, revoke } = Proxy.revocable({}, {});
     revoke();
