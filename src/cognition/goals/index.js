@@ -357,7 +357,12 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // melempar TypeError mentah pada `ownKeys` yang dipakai spread.
         let safeMeta;
         try {
-            safeMeta = { ...meta, nowIso: nowIso() };
+            // Bug review independen (audit putaran-60, Codex, W7R60-P2-1):
+            // transitionGoal/appendTransitionLog dulu memakai BOUNDS modul
+            // tetap, bukan `bounds` yang sudah disanitasi -- diteruskan
+            // eksplisit di sini, SESUDAH spread meta (caller tidak bisa
+            // menimpanya).
+            safeMeta = { ...meta, nowIso: nowIso(), maxTransitionLog: bounds.MAX_TRANSITION_LOG_PER_GOAL };
         } catch {
             fail(REASONS.INVALID_RECORD, "meta tidak dapat diverifikasi dengan aman, ditolak");
         }
@@ -528,9 +533,21 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // global tertua (lintas semua goalRef) saat retensi total penuh --
         // selalu ada korban karena tidak ada kelas plan yang "dilindungi"
         // (selain p sendiri, yang dikecualikan di sini juga).
-        if (plans.size > bounds.MAX_TOTAL_PLANS_RETAINED) {
-            for (const k of plans.keys()) {
-                if (k !== p.planId) { plans.delete(k); break; }
+        // Bug review independen (audit putaran-60, OpenCode, W7R60-P2-3):
+        // kapasitas 0 (sanksi sah lewat sanitizeBounds) dengan `p` sebagai
+        // SATU-SATUNYA plan -- loop selalu mengecualikan `p`, tidak ada
+        // korban ditemukan, plan baru tetap tersimpan, melampaui cap
+        // total 0. Sibling PERSIS dari kelas round-59, belum disapu ke
+        // kompaksi GLOBAL ini (per-goal di atas sudah diperbaiki round
+        // 59). Pada kapasitas 0, `p` sendiri yang dihapus.
+        const maxTotalPlans = Math.max(0, Math.trunc(bounds.MAX_TOTAL_PLANS_RETAINED));
+        if (plans.size > maxTotalPlans) {
+            if (maxTotalPlans === 0) {
+                plans.delete(p.planId);
+            } else {
+                for (const k of plans.keys()) {
+                    if (k !== p.planId) { plans.delete(k); break; }
+                }
             }
         }
         return p;

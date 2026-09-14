@@ -24,18 +24,25 @@ const GOAL_TRANSITIONS = Object.freeze({
     supersede: { from: ["PROPOSED", "ACCEPTED", "ACTIVE", "PAUSED", "BLOCKED"], to: "SUPERSEDED" }
 });
 
-function appendTransitionLog(log, entry) {
+// Bug review independen (audit putaran-60, Codex, W7R60-P2-1):
+// appendTransitionLog membaca `BOUNDS.MAX_TRANSITION_LOG_PER_GOAL` dari
+// modul (default TETAP), bukan `bounds` yang sudah disanitasi per-instance
+// lewat sanitizeBounds -- override pemanggil (termasuk 0) diam-diam
+// diabaikan sepenuhnya, tidak seperti setiap bound lain di lane ini.
+function appendTransitionLog(log, entry, maxLog = BOUNDS.MAX_TRANSITION_LOG_PER_GOAL) {
+    const max = Math.max(0, Math.trunc(maxLog));
     const next = [...log, entry];
-    if (next.length <= BOUNDS.MAX_TRANSITION_LOG_PER_GOAL) return { log: next, truncated: false };
+    if (next.length <= max) return { log: next, truncated: false };
+    if (max === 0) return { log: [], truncated: true };
     // §4: "keep first and last, flag truncated".
-    return { log: [next[0], ...next.slice(-(BOUNDS.MAX_TRANSITION_LOG_PER_GOAL - 1))], truncated: true };
+    return { log: [next[0], ...next.slice(-(max - 1))], truncated: true };
 }
 
 /**
  * `evidence` diperlukan hanya untuk `succeed` (G-6: WAJIB T1) — parameter
  * lain (`actorKind`, `reason`, `evidenceRef`) wajib untuk SEMUA transisi (G-7).
  */
-function transitionGoal(goal, action, { actorKind, reason, evidenceRef = null, evidenceTier = null, nowIso }) {
+function transitionGoal(goal, action, { actorKind, reason, evidenceRef = null, evidenceTier = null, nowIso, maxTransitionLog = BOUNDS.MAX_TRANSITION_LOG_PER_GOAL }) {
     // Bug review independen (audit putaran-25, AUD25-P2-1): `action`
     // mentah dipakai sebagai kunci properti (`GOAL_TRANSITIONS[action]`)
     // DAN diinterpolasi ke pesan error -- objek hostile dengan
@@ -82,7 +89,7 @@ function transitionGoal(goal, action, { actorKind, reason, evidenceRef = null, e
     }
 
     const entry = Object.freeze({ at: nowIso, from: goal.state, to: rule.to, reason, actorKind, evidenceRef });
-    const { log, truncated } = appendTransitionLog(goal.transitions, entry);
+    const { log, truncated } = appendTransitionLog(goal.transitions, entry, maxTransitionLog);
 
     return Object.freeze({
         ...goal, state: rule.to, lastTransitionAt: nowIso,

@@ -139,11 +139,20 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     // W7R7-P2-1 (jangan pernah mengevict record yang baru saja dibuat SENDIRI
     // dalam panggilan ini).
     function evictEntityIfOverBound(protectedEntityId = null) {
-        if (entities.size <= bounds.MAX_ENTITIES) return;
+        // Bug review independen (audit putaran-60, OpenCode, W7R60-P2-1):
+        // kapasitas 0 (sanksi sah lewat sanitizeBounds) dengan
+        // `protectedEntityId` sebagai SATU-SATUNYA entitas -- filter
+        // kandidat mengecualikannya, tidak ada korban ditemukan, entitas
+        // baru tetap tersimpan, melampaui cap total 0. Sibling PERSIS
+        // dari kelas round-59 (attention evictLowestIfOverflow), belum
+        // disapu ke sini. Pada kapasitas 0, proteksi dilepas.
+        const maxEntities = Math.max(0, Math.trunc(bounds.MAX_ENTITIES));
+        if (entities.size <= maxEntities) return;
+        const effectiveProtected = maxEntities === 0 ? null : protectedEntityId;
         let victim = null;
         let victimDegree = Infinity;
         for (const e of entities.values()) {
-            if (e.entityId === protectedEntityId) continue;
+            if (e.entityId === effectiveProtected) continue;
             const degree = relationDegree(e.entityId);
             if (!victim || degree < victimDegree ||
                 (degree === victimDegree && e.lastSeenAt < victim.lastSeenAt)) {
@@ -174,10 +183,16 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     // di panggilan yang SAMA, declareRelation tetap mengembalikannya seolah
     // diterima padahal sudah tidak ada di state kanonik.
     function evictRelationIfOverBound(protectedRelationId = null) {
-        if (relations.size <= bounds.MAX_RELATIONS) return;
+        // Bug review independen (audit putaran-60, OpenCode, W7R60-P2-2):
+        // sibling PERSIS dari W7R60-P2-1 -- kapasitas 0 dengan
+        // `protectedRelationId` sebagai satu-satunya relasi tidak pernah
+        // dievict. Proteksi dilepas pada kapasitas 0.
+        const maxRelations = Math.max(0, Math.trunc(bounds.MAX_RELATIONS));
+        if (relations.size <= maxRelations) return;
+        const effectiveProtected = maxRelations === 0 ? null : protectedRelationId;
         let victim = null;
         for (const r of relations.values()) {
-            if (r.relationId === protectedRelationId) continue;
+            if (r.relationId === effectiveProtected) continue;
             if (!victim || r.strength < victim.strength) victim = r;
         }
         if (victim) {
@@ -375,9 +390,25 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             const nextContestedRecordIds = Object.freeze(appendBounded(
                 existing.contestedRecordIds ?? [], contradiction.challengerRecordId,
                 bounds.MAX_OPEN_CONTRADICTION_SETS));
-            const contested = Object.freeze({ ...existing, contradictionSetId: entry.contradictionSetId, contestedRecordIds: nextContestedRecordIds });
+            // Bug review independen (audit putaran-60, Codex, W7R60-P2-2):
+            // round-59's kapasitas-0 fix untuk openContradictionSet
+            // mengembalikan `entry` yang SUDAH diarsipkan (status bukan
+            // "OPEN", entry === evicted) alih-alih pernah benar-benar
+            // terbuka -- sebelumnya tetap dipasang sebagai
+            // contradictionSetId/contested:true belief, membocorkan
+            // pointer ke contradiction set yang tidak ada di manapun
+            // (openContradictions() kosong tapi query() melapor contested).
+            // Entry yang langsung diarsipkan tidak boleh menandai belief
+            // sebagai kontes AKTIF; contradictionSetId lama (kalau ada)
+            // dipertahankan apa adanya.
+            const isActiveContradiction = entry.status === "OPEN";
+            const contested = Object.freeze({
+                ...existing,
+                contradictionSetId: isActiveContradiction ? entry.contradictionSetId : (existing.contradictionSetId ?? null),
+                contestedRecordIds: nextContestedRecordIds
+            });
             beliefs.set(key, contested);
-            return { case: caseName, belief: contested, contradictionSetId: entry.contradictionSetId };
+            return { case: caseName, belief: contested, contradictionSetId: isActiveContradiction ? entry.contradictionSetId : null };
         }
 
         if (!skipNewBeliefStorage) beliefs.set(key, belief);
