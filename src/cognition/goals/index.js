@@ -74,13 +74,22 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         if (!spec.origin || !ORIGIN_KINDS.has(spec.origin.kind)) {
             fail(REASONS.INVALID_RECORD, "origin.kind tidak dikenal");
         }
+        // Bug review independen (audit putaran-30, AUD30-P2-1): `spec.goalId`
+        // dulu dibaca ULANG (sekali untuk cek tabrakan, sekali lagi saat
+        // konstruksi goal di bawah) -- accessor/getter stateful milik
+        // pemanggil bisa mengembalikan id BARU pada baca pertama (lolos cek
+        // tabrakan) lalu id goal TERMINAL yang sudah ada pada baca kedua,
+        // menimpa goal terminal itu -- pola umum yang sama dengan
+        // AUD29-P2-2 (baca-ganda objek stateful pemanggil), diterapkan ke
+        // penjaga replay-dedup id eksternal. Dibaca SEKALI ke lokal.
+        const goalId = spec.goalId;
         // Bug review independen (audit putaran-10, AUD10-P1-2): goalId
-        // pemanggil (spec.goalId) dulu langsung di-set tanpa cek tabrakan --
-        // pengiriman ulang goalId yang sudah ada (replay lintas-node)
-        // menimpa goal terminal (ABANDONED/SATISFIED/SUPERSEDED) kembali ke
-        // PROPOSED, melewati G-8 (finalitas state terminal).
-        if (spec.goalId && goals.has(spec.goalId)) {
-            fail(REASONS.DUPLICATE_RECORD_ID, `goalId '${spec.goalId}' sudah ada`);
+        // pemanggil dulu langsung di-set tanpa cek tabrakan -- pengiriman
+        // ulang goalId yang sudah ada (replay lintas-node) menimpa goal
+        // terminal (ABANDONED/SATISFIED/SUPERSEDED) kembali ke PROPOSED,
+        // melewati G-8 (finalitas state terminal).
+        if (goalId && goals.has(goalId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `goalId '${typeof goalId === "string" ? goalId : typeof goalId}' sudah ada`);
         }
 
         // Bug diketemukan review independen (Codex, putaran ke-4): depth
@@ -123,7 +132,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // kehilangan data permanen. makeGoal (satu-satunya tempat spec
         // benar-benar divalidasi) sekarang dipanggil DULU; efek samping
         // hanya terjadi setelah record yang akan disimpan terbukti valid.
-        const goal = makeGoal({ ...spec, depth, goalId: spec.goalId ?? crypto.randomUUID(), nowIso: nowIso() });
+        const goal = makeGoal({ ...spec, depth, goalId: goalId ?? crypto.randomUUID(), nowIso: nowIso() });
 
         // Bug review independen (Codex putaran-6): cek retensi lama berjalan
         // SETELAH goal baru sudah dimasukkan, dan hanya mengevict kalau ada

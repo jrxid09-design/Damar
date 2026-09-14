@@ -197,15 +197,21 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // Bug review independen (audit putaran-22, F-4): spec null/non-objek
         // meledakkan `spec.relationId` jadi TypeError mentah.
         if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
+        // Bug review independen (audit putaran-30, AUD30-P2-1): `spec.relationId`
+        // dibaca sekali di sini untuk cek tabrakan lalu dibaca LAGI di
+        // dalam makeRelation (destructuring) -- accessor stateful bisa
+        // mengembalikan id berbeda di kedua baca, melewati dedup. Dibaca
+        // SEKALI ke lokal, dipaksakan eksplisit ke makeRelation.
+        const relationId = spec.relationId;
         // Bug review independen (audit putaran-19, AUD19-A3): sapuan dedup
         // replay id putaran-9/10/13 mencakup observationId/declarationId/
         // hypothesisId/goalId/dll, tapi tidak pernah mencakup relationId --
         // replay sebuah relationId yang sudah ada diam-diam menimpa
         // topologi/strength relasi tersimpan.
-        if (spec.relationId && relations.has(spec.relationId)) {
-            fail(REASONS.DUPLICATE_RECORD_ID, `relationId '${spec.relationId}' sudah ada`);
+        if (relationId && relations.has(relationId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `relationId '${typeof relationId === "string" ? relationId : typeof relationId}' sudah ada`);
         }
-        const relation = makeRelation(spec);
+        const relation = makeRelation({ ...spec, relationId });
         if (!entities.has(relation.from) || !entities.has(relation.to)) {
             fail(REASONS.UNKNOWN_ENTITY, "relasi merujuk entitas yang belum dideklarasikan");
         }
@@ -382,8 +388,13 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // pola yang sama yang sudah ditutup untuk observationId/
         // declarationId (putaran 9) dan id goals/prospective (putaran 10)
         // tapi tidak pernah dimigrasikan ke worldmodel's hypothesisId.
-        if (spec.hypothesisId && hypotheses.has(spec.hypothesisId)) {
-            fail(REASONS.DUPLICATE_RECORD_ID, `hypothesisId '${spec.hypothesisId}' sudah ada`);
+        // Bug review independen (audit putaran-30, AUD30-P2-1): `spec.hypothesisId`
+        // dibaca sekali untuk cek tabrakan, sekali lagi di dalam
+        // makeHypothesis (destructuring) -- accessor stateful bisa
+        // mengembalikan id berbeda di kedua baca, melewati dedup.
+        const hypothesisId = spec.hypothesisId;
+        if (hypothesisId && hypotheses.has(hypothesisId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `hypothesisId '${typeof hypothesisId === "string" ? hypothesisId : typeof hypothesisId}' sudah ada`);
         }
         // Bug review independen (audit putaran-14, AUD14-P1-2): kompaksi
         // (menghapus hipotesis valid lain) dulu berjalan SEBELUM
@@ -391,7 +402,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // expiresAt cacat) tetap mengevict satu hipotesis VALID sebelum
         // error dilempar, kehilangan data permanen. Validasi/bangun record
         // DULU, baru kompaksi+simpan.
-        const h = makeHypothesis(spec);
+        const h = makeHypothesis({ ...spec, hypothesisId });
         if (hypotheses.size >= bounds.MAX_HYPOTHESES) {
             // §11: kadaluwarsa dulu, lalu bobot terendah.
             const sorted = [...hypotheses.values()].sort((a, b) =>

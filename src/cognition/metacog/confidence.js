@@ -66,12 +66,7 @@ function determineBasis(evidenceQuality, nowMs) {
     return basisFromSafe(sanitizeEvidenceQuality(evidenceQuality), nowMs);
 }
 
-/** MC-1/MC-2: fungsi murni, deterministik, dan satu-satunya penulis value. */
-function computeConfidence(evidenceQuality, nowMs) {
-    // SATU pembacaan evidenceQuality untuk seluruh panggilan ini -- basis
-    // DAN value berasal dari snapshot yang SAMA, tidak pernah dari dua
-    // pembacaan terpisah (lihat komentar AUD29-P2-2 di atas).
-    const safe = sanitizeEvidenceQuality(evidenceQuality);
+function confidenceFromSafe(safe, nowMs) {
     const basis = basisFromSafe(safe, nowMs);
 
     let raw;
@@ -92,4 +87,21 @@ function computeConfidence(evidenceQuality, nowMs) {
     return Object.freeze({ value, basis });
 }
 
-module.exports = { BASIS, STALE_AFTER_MS, determineBasis, computeConfidence };
+/** MC-1/MC-2: fungsi murni, deterministik, dan satu-satunya penulis value. */
+function computeConfidence(evidenceQuality, nowMs) {
+    // SATU pembacaan evidenceQuality untuk seluruh panggilan ini -- basis
+    // DAN value berasal dari snapshot yang SAMA, tidak pernah dari dua
+    // pembacaan terpisah (lihat komentar AUD29-P2-2 di atas).
+    return confidenceFromSafe(sanitizeEvidenceQuality(evidenceQuality), nowMs);
+}
+
+module.exports = {
+    BASIS, STALE_AFTER_MS, determineBasis, computeConfidence,
+    // Bug review independen (audit putaran-30, AUD30-P2-3): diekspor
+    // supaya pemanggil (mis. metacog/records.js's makeAssessment) bisa
+    // menyaring evidenceQuality SEKALI dan menurunkan value/basis DAN
+    // salinan tersimpan dari snapshot yang SAMA persis -- alih-alih
+    // makeAssessment membaca evidenceQuality mentah lagi secara terpisah
+    // setelah computeConfidence sudah menyaringnya sendiri di dalam.
+    sanitizeEvidenceQuality, confidenceFromSafe
+};

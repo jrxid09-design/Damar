@@ -81,8 +81,13 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         // (kapasitas armed terkuras permanen sampai restart), dan replay
         // reminderId yang sudah RETIRED/FIRED menghidupkannya kembali ke
         // ARMED, melewati finalitas state terminal.
-        if (spec.reminderId && reminders.has(spec.reminderId)) {
-            fail(REASONS.DUPLICATE_RECORD_ID, `reminderId '${spec.reminderId}' sudah ada`);
+        // Bug review independen (audit putaran-30, AUD30-P2-1): `spec.reminderId`
+        // dibaca sekali untuk cek tabrakan, sekali lagi saat konstruksi --
+        // accessor stateful bisa mengembalikan id berbeda di kedua baca,
+        // melewati dedup dan bocor kapasitas armed.
+        const reminderId = spec.reminderId;
+        if (reminderId && reminders.has(reminderId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `reminderId '${typeof reminderId === "string" ? reminderId : typeof reminderId}' sudah ada`);
         }
         if (armedReminderCount >= bounds.MAX_ARMED_REMINDERS) {
             fail(REASONS.PROSPECTIVE_FULL, "jumlah reminder armed melebihi batas");
@@ -90,7 +95,7 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         if (spec.ownerRef && (remindersPerGoal.get(spec.ownerRef) ?? 0) >= bounds.MAX_REMINDERS_PER_GOAL) {
             fail(REASONS.PER_GOAL_LIMIT_EXCEEDED, "jumlah reminder per goal melebihi batas");
         }
-        const reminder = makeReminder({ ...spec, reminderId: spec.reminderId ?? crypto.randomUUID(), nowIso: nowIso() });
+        const reminder = makeReminder({ ...spec, reminderId: reminderId ?? crypto.randomUUID(), nowIso: nowIso() });
         const armed = Object.freeze({ ...reminder, armedAtMs: now() });
         reminders.set(armed.reminderId, armed);
         armedReminderCount += 1;
@@ -275,8 +280,13 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         // expectationId yang sudah ada (mis. sudah VIOLATED) menimpanya
         // kembali ke PENDING, memicu ulang jalur kebijakan (onSatisfied/
         // onViolated) untuk expectation yang sudah final.
-        if (spec.expectationId && expectations.has(spec.expectationId)) {
-            fail(REASONS.DUPLICATE_RECORD_ID, `expectationId '${spec.expectationId}' sudah ada`);
+        // Bug review independen (audit putaran-30, AUD30-P2-1): `spec.expectationId`
+        // dibaca sekali untuk cek tabrakan, sekali lagi saat konstruksi --
+        // accessor stateful bisa mengembalikan id berbeda di kedua baca,
+        // melewati dedup.
+        const expectationId = spec.expectationId;
+        if (expectationId && expectations.has(expectationId)) {
+            fail(REASONS.DUPLICATE_RECORD_ID, `expectationId '${typeof expectationId === "string" ? expectationId : typeof expectationId}' sudah ada`);
         }
         // Bug review independen (audit putaran-14, AUD14-P1-2): kompaksi
         // (menghapus expectation valid lain) dulu berjalan SEBELUM
@@ -284,7 +294,7 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         // window.latestAt cacat) tetap mengevict satu expectation pending
         // yang VALID sebelum error dilempar, kehilangan data permanen.
         // Validasi/bangun record DULU, baru kompaksi+simpan.
-        const e = makeExpectation({ ...spec, expectationId: spec.expectationId ?? crypto.randomUUID() });
+        const e = makeExpectation({ ...spec, expectationId: expectationId ?? crypto.randomUUID() });
         if (expectations.size >= bounds.MAX_PENDING_EXPECTATIONS) {
             const oldest = [...expectations.values()].sort((a, b) => Date.parse(a.window.latestAt) - Date.parse(b.window.latestAt))[0];
             if (oldest) expectations.delete(oldest.expectationId);
@@ -300,8 +310,17 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         for (const e of [...expectations.values()]) {
             if (e.state !== "PENDING") continue;
             const observed = evaluatePort?.(e.subject, e.attribute);
+            // Bug review independen (audit putaran-30, AUD30-P2-4): `e.window.earliestAt
+            // ?? 0` dimaksudkan "tanpa batas bawah" saat earliestAt tidak
+            // ada, tapi `Date.parse(0)` MEM-PARSE angka 0 sebagai string
+            // "0" -> tanggal 2000-01-01, BUKAN epoch -- observasi genuinely
+            // valid sebelum tahun 2000 tidak pernah memenuhi window,
+            // expectation yang seharusnya SATISFIED tetap PENDING lalu
+            // jatuh ke VIOLATED. Tanpa earliestAt berarti benar-benar tanpa
+            // batas bawah (epoch), bukan "0" yang di-parse sebagai tanggal.
+            const earliestMs = e.window.earliestAt != null ? Date.parse(e.window.earliestAt) : 0;
             if (observed && observed.value === e.expectedValue &&
-                observed.atMs >= Date.parse(e.window.earliestAt ?? 0) && observed.atMs <= Date.parse(e.window.latestAt)) {
+                observed.atMs >= earliestMs && observed.atMs <= Date.parse(e.window.latestAt)) {
                 const next = Object.freeze({ ...e, state: "SATISFIED" });
                 expectations.set(e.expectationId, next);
                 results.push({ expectationId: e.expectationId, outcome: "SATISFIED" });

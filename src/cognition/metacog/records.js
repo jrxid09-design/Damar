@@ -3,7 +3,7 @@
 /** W7-L6 METACOGNITION — pembangun record (spec §3). */
 
 const { REASONS, fail } = require("./errors");
-const { computeConfidence } = require("./confidence");
+const { sanitizeEvidenceQuality, confidenceFromSafe } = require("./confidence");
 
 const TRIGGERS = new Set(["CONTRADICTION", "EXPECTATION_VIOLATED", "REPEATED_FAILURE", "LOW_CONFIDENCE_ACTION", "OWNER_CHALLENGE", "SCHEDULED"]);
 const PROPOSAL_KINDS = new Set(["REPLAN", "PROBE", "ASK_OWNER", "LOWER_CONFIDENCE", "ABANDON_GOAL", "OPEN_CONTRADICTION", "RECALIBRATE"]);
@@ -13,11 +13,22 @@ const COGNITIVE_ONLY_PROPOSALS = new Set(["LOWER_CONFIDENCE", "OPEN_CONTRADICTIO
 
 function makeAssessment({ assessmentId, subjectRef, claim, evidenceQuality, nowMs, calibrationRef = null }) {
     if (typeof assessmentId !== "string" || !assessmentId) fail(REASONS.INVALID_RECORD, "assessmentId wajib string");
-    const { value, basis } = computeConfidence(evidenceQuality, nowMs);
+    // Bug review independen (audit putaran-30, AUD30-P2-3): evidenceQuality
+    // dulu dibaca DUA KALI secara independen -- sekali di dalam
+    // computeConfidence (untuk basis/value) dan sekali lagi di sini
+    // (`{...evidenceQuality}` untuk arsip tersimpan). evidenceQuality
+    // stateful bisa memberi nilai valid pada baca pertama (basis:
+    // VERIFIED_EVIDENCE) lalu nilai lain pada baca kedua (evidenceQuality
+    // tersimpan bilang verifiedCount:0) -- assessment yang disimpan
+    // BERTENTANGAN dengan confidence yang disertifikasinya (pelanggaran
+    // MC-1/MC-2). Disaring SEKALI di sini; value/basis dan salinan
+    // tersimpan berasal dari snapshot yang SAMA persis.
+    const safeEvidenceQuality = sanitizeEvidenceQuality(evidenceQuality);
+    const { value, basis } = confidenceFromSafe(safeEvidenceQuality, nowMs);
     return Object.freeze({
         assessmentId, subjectRef: Object.freeze({ ...subjectRef }), claim,
         value, basis,
-        evidenceQuality: Object.freeze({ ...evidenceQuality }),
+        evidenceQuality: Object.freeze(safeEvidenceQuality),
         calibrationRef
     });
 }
