@@ -31,7 +31,12 @@ const DANGEROUS_VALUE_KEYS = Object.freeze(["__proto__", "constructor", "prototy
  * (dipanggil SEKALI di titik belief lahir/berevolusi) menutup KEDUANYA:
  * validasi+salin+bekukan value SEBELUM pernah menjadi bagian dari belief.
  */
-function buildSafeBeliefValue(value, depth = 0, stack, budget) {
+// Bug review independen (audit putaran-65, Codex, AUD65-P2-1, eskalasi
+// dari item yang diungkap-tapi-tidak-diperbaiki putaran-64): fungsi ini
+// membaca `BOUNDS` modul (default TETAP) langsung, bukan `bounds` yang
+// sudah disanitasi per-instance. Parameter `bounds` ditambahkan (default
+// ke BOUNDS modul untuk kompatibilitas mundur).
+function buildSafeBeliefValue(value, depth = 0, stack, budget, bounds = BOUNDS) {
     // Bug review independen (audit putaran-5, W7R5-P1-2): versi putaran-4
     // tidak punya anggaran jumlah node (seperti ENVELOPE_BOUNDS.MAX_PAYLOAD_NODES
     // di core/envelope.js) maupun deteksi siklik berbasis stack -- sebuah DAG
@@ -61,14 +66,14 @@ function buildSafeBeliefValue(value, depth = 0, stack, budget) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh berupa angka non-finite (NaN/Infinity)");
     }
     if (t !== "object") return value;
-    if (depth > BOUNDS.MAX_VALUE_SCAN_DEPTH) {
+    if (depth > bounds.MAX_VALUE_SCAN_DEPTH) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value terlalu dalam untuk diverifikasi dengan aman, ditolak");
     }
     if (stack.has(value)) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "struktur siklik terdeteksi pada value");
     }
     budget.count += 1;
-    if (budget.count > BOUNDS.MAX_VALUE_NODES) {
+    if (budget.count > bounds.MAX_VALUE_NODES) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah node pada value melebihi batas");
     }
 
@@ -90,7 +95,7 @@ function buildSafeBeliefValue(value, depth = 0, stack, budget) {
             // (DoS). `length` di-cache SEKALI ke lokal dan divalidasi sebagai
             // integer terhingga non-negatif SEBELUM dipakai di mana pun.
             const len = value.length;
-            if (!Number.isInteger(len) || len < 0 || len > BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
+            if (!Number.isInteger(len) || len < 0 || len > bounds.MAX_VALUE_ARRAY_LENGTH) {
                 fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array pada value melebihi batas atau tidak sah");
             }
             const arrProto = Object.getPrototypeOf(value);
@@ -105,7 +110,7 @@ function buildSafeBeliefValue(value, depth = 0, stack, budget) {
                     if (!desc || desc.get || desc.set) {
                         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `value tidak boleh membawa properti accessor: '${i}'`);
                     }
-                    const built = buildSafeBeliefValue(desc.value, depth + 1, stack, budget);
+                    const built = buildSafeBeliefValue(desc.value, depth + 1, stack, budget, bounds);
                     out[i] = built === undefined ? null : built;
                 }
             } finally {
@@ -119,7 +124,7 @@ function buildSafeBeliefValue(value, depth = 0, stack, budget) {
             fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "value tidak boleh berupa instance kelas (kontrak data murni)");
         }
         const keys = Reflect.ownKeys(value);
-        if (keys.length > BOUNDS.MAX_VALUE_KEYS) {
+        if (keys.length > bounds.MAX_VALUE_KEYS) {
             fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah kunci pada value melebihi batas");
         }
         stack.add(value);
@@ -132,7 +137,7 @@ function buildSafeBeliefValue(value, depth = 0, stack, budget) {
                 if (!desc || desc.get || desc.set) {
                     fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `value tidak boleh membawa properti accessor: '${String(key)}'`);
                 }
-                const built = buildSafeBeliefValue(desc.value, depth + 1, stack, budget);
+                const built = buildSafeBeliefValue(desc.value, depth + 1, stack, budget, bounds);
                 if (built !== undefined) out[key] = built;
             }
         } finally {
@@ -200,7 +205,7 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
     // objek subject aslinya SETELAH ingest menulis ulang subject pada
     // belief/kontradiksi tersimpan (makeObservation sudah freeze subject-nya
     // sendiri, ingestDeclaration tidak).
-    record = { ...record, value: buildSafeBeliefValue(record.value), subject: buildSafeBeliefValue(record.subject) };
+    record = { ...record, value: buildSafeBeliefValue(record.value, 0, undefined, undefined, bounds), subject: buildSafeBeliefValue(record.subject, 0, undefined, undefined, bounds) };
 
     if (!existing) {
         // Kelahiran pertama — setara REFRESH dari ketiadaan.

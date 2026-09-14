@@ -178,7 +178,10 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         // Tidak ada perbaikan diterapkan di sini -- laporan ini bukan bug
         // nyata di bawah kontrak yang ada, dicatat di ledger sebagai
         // findings yang ditinjau-dan-ditolak.
-        const reminder = makeReminder({ ...specRest, reminderId: reminderId ?? crypto.randomUUID(), ownerRef, nowIso: nowIso() });
+        // Bug review independen (audit putaran-65, Codex, AUD65-P2-1):
+        // `bounds` (sudah disanitasi) diteruskan eksplisit, SESUDAH spread
+        // specRest (caller tidak bisa menimpanya).
+        const reminder = makeReminder({ ...specRest, reminderId: reminderId ?? crypto.randomUUID(), ownerRef, nowIso: nowIso(), bounds });
         const armed = Object.freeze({ ...reminder, armedAtMs: now() });
         reminders.set(armed.reminderId, armed);
         armedReminderCount += 1;

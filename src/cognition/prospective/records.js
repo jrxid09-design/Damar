@@ -150,7 +150,15 @@ const MAX_PAYLOAD_NODES = 512;
  * `JSON.stringify` tidak pernah lagi dipanggil pada objek pemanggil yang
  * tidak tepercaya -- hanya pada salinan aman yang sudah kita bangun sendiri.
  */
-function buildSafePayloadRef(value, depth = 0, budget) {
+// Bug review independen (audit putaran-65, Codex, AUD65-P2-1, eskalasi
+// dari item yang diungkap-tapi-tidak-diperbaiki putaran-64): fungsi ini
+// membaca `BOUNDS.MAX_PAYLOAD_ARRAY_LENGTH` modul (default TETAP)
+// langsung, bukan `bounds` yang sudah disanitasi per-instance -- override
+// pemanggil diam-diam diabaikan. Parameter `bounds` ditambahkan (default
+// ke BOUNDS modul untuk kompatibilitas mundur). MAX_PAYLOAD_SCAN_DEPTH/
+// MAX_PAYLOAD_NODES/MAX_PAYLOAD_KEYS TIDAK termasuk (konstanta lokal
+// tetap, bukan bagian dari objek BOUNDS lane ini sejak awal).
+function buildSafePayloadRef(value, depth = 0, budget, bounds = BOUNDS) {
     // Bug review independen (audit putaran-14, AUD14-P1-1): walker ini tidak
     // punya anggaran jumlah node seperti worldmodel's buildSafeBeliefValue
     // (W7R5-P1-2) -- sebuah DAG referensi-bersama (BUKAN siklus, jadi lolos
@@ -196,7 +204,7 @@ function buildSafePayloadRef(value, depth = 0, budget) {
             // (DoS). `length` di-cache SEKALI ke lokal dan divalidasi sebagai
             // integer terhingga non-negatif SEBELUM dipakai di mana pun.
             const len = value.length;
-            if (!Number.isInteger(len) || len < 0 || len > BOUNDS.MAX_PAYLOAD_ARRAY_LENGTH) {
+            if (!Number.isInteger(len) || len < 0 || len > bounds.MAX_PAYLOAD_ARRAY_LENGTH) {
                 fail(REASONS.PAYLOAD_TOO_LARGE, "panjang array pada payloadRef melebihi batas atau tidak sah");
             }
             const arrProto = Object.getPrototypeOf(value);
@@ -210,7 +218,7 @@ function buildSafePayloadRef(value, depth = 0, budget) {
                 if (!desc || desc.get || desc.set) {
                     fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa properti accessor: '${i}'`);
                 }
-                const built = buildSafePayloadRef(desc.value, depth + 1, budget);
+                const built = buildSafePayloadRef(desc.value, depth + 1, budget, bounds);
                 out[i] = built === undefined ? null : built; // sama seperti JSON: lubang array -> null
             }
             // Properti OWN non-indeks pada array (mis. `.toJSON`) divalidasi
@@ -230,7 +238,7 @@ function buildSafePayloadRef(value, depth = 0, budget) {
                 // Nilainya tidak disalin (lihat komentar di atas), TAPI tetap
                 // divalidasi -- kalau tidak, `arr.toJSON = fn` lolos tanpa
                 // terdeteksi karena tidak pernah masuk `out`.
-                buildSafePayloadRef(desc.value, depth + 1, budget);
+                buildSafePayloadRef(desc.value, depth + 1, budget, bounds);
             }
             return out;
         }
@@ -255,7 +263,7 @@ function buildSafePayloadRef(value, depth = 0, budget) {
             if (!desc || desc.get || desc.set) {
                 fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `payloadRef tidak boleh membawa properti accessor: '${String(key)}'`);
             }
-            const built = buildSafePayloadRef(desc.value, depth + 1, budget);
+            const built = buildSafePayloadRef(desc.value, depth + 1, budget, bounds);
             if (built !== undefined) out[key] = built; // sama seperti JSON: kunci bernilai undefined dibuang
         }
         return out;
@@ -295,21 +303,27 @@ function deepFreeze(value, seen = new WeakSet()) {
 }
 
 /** PM-1: payloadRef adalah REFERENSI saja — menolak materi eksekusi/fungsi. */
-function validatePayloadRef(payloadRef) {
+// Bug review independen (audit putaran-65, Codex, AUD65-P2-1, eskalasi
+// dari item yang diungkap-tapi-tidak-diperbaiki putaran-64): fungsi ini
+// membaca `BOUNDS.MAX_PAYLOAD_REF_BYTES` modul (default TETAP) langsung.
+// Parameter `bounds` ditambahkan (default ke BOUNDS modul), diteruskan
+// juga ke buildSafePayloadRef supaya MAX_PAYLOAD_ARRAY_LENGTH ikut
+// dihormati sepanjang rekursi.
+function validatePayloadRef(payloadRef, bounds = BOUNDS) {
     if (payloadRef === null || payloadRef === undefined) return null;
-    const safeCopy = buildSafePayloadRef(payloadRef);
+    const safeCopy = buildSafePayloadRef(payloadRef, 0, undefined, bounds);
     // Aman dipanggil di sini: safeCopy adalah struktur polos yang KITA
     // bangun sendiri di atas -- tidak ada lagi proxy/accessor/toJSON warisan
     // yang bisa dieksekusi JSON.stringify.
     const serialized = JSON.stringify(safeCopy);
     if (serialized === undefined) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak dapat diserialisasi");
-    if (Buffer.byteLength(serialized) > BOUNDS.MAX_PAYLOAD_REF_BYTES) {
+    if (Buffer.byteLength(serialized) > bounds.MAX_PAYLOAD_REF_BYTES) {
         fail(REASONS.PAYLOAD_TOO_LARGE, "payloadRef melebihi batas ukuran");
     }
     return deepFreeze(safeCopy);
 }
 
-function makeReminder({ reminderId, ownerRef = null, trigger, payloadRef = null, wakeClass, origin = { kind: "SELF" }, nowIso }) {
+function makeReminder({ reminderId, ownerRef = null, trigger, payloadRef = null, wakeClass, origin = { kind: "SELF" }, nowIso, bounds = BOUNDS }) {
     if (typeof reminderId !== "string" || !reminderId) fail(REASONS.INVALID_RECORD, "reminderId wajib string");
     // Bug review independen (audit putaran-26, AUD26-P2-1): interpolasi
     // `${wakeClass}` mentah meledakkan TypeError untuk Symbol.
@@ -324,7 +338,7 @@ function makeReminder({ reminderId, ownerRef = null, trigger, payloadRef = null,
     return Object.freeze({
         reminderId, ownerRef,
         trigger: validateTrigger(trigger),
-        payloadRef: validatePayloadRef(payloadRef),
+        payloadRef: validatePayloadRef(payloadRef, bounds),
         // Bug review independen (audit putaran-11, AUD11-P2-1): deepFreeze
         // hanya membekukan, tidak menyaring -- BigInt di dalam origin lolos
         // lalu meledakkan JSON.stringify di saveSnapshot() saat persist().
