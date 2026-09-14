@@ -238,6 +238,21 @@ test("GL-repair-76: createCommitment rejects with COMMITMENT_RETENTION_LIMIT_EXC
     }), "COMMITMENT_RETENTION_LIMIT_EXCEEDED");
 });
 
+test("GL-repair-77: createPlan retains ZERO plans when MAX_TOTAL_PLANS_RETAINED is 0 -- the global (cross-goalRef) compaction loop always excludes the just-created plan p from eviction candidates, so at cap 0 it was the only plan and nothing was ever deleted; round 59 only audited the PER-GOAL MAX_PLAN_VERSIONS_RETAINED sibling, never this global compaction site (independent audit round 60, OpenCode, W7R60-P2-3)", async () => {
+    const ge = await createGoalEngine({ bounds: { MAX_TOTAL_PLANS_RETAINED: 0 } });
+    const g = ge.proposeGoal(baseGoalSpec());
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+    assert.equal(ge.plansSize(), 0);
+    assert.equal(ge.getPlan(p.planId), null);
+});
+
+test("GL-repair-78: transition() honors a sanctioned MAX_TRANSITION_LOG_PER_GOAL of 0 -- appendTransitionLog read the module's fixed default BOUNDS constant instead of the engine's sanitized per-instance bounds, so the override was silently ignored entirely (not just at the zero boundary) (independent audit round 60, Codex, W7R60-P2-1)", async () => {
+    const ge = await createGoalEngine({ bounds: { MAX_TRANSITION_LOG_PER_GOAL: 0 } });
+    const g = ge.proposeGoal(baseGoalSpec());
+    const transitioned = ge.transition(g.goalId, "approve", { actorKind: "OWNER", reason: "test" });
+    assert.equal(transitioned.transitions.length, 0);
+});
+
 test("GL-repair-9: terminal commitments are retention-bounded, not just OPEN ones (independent audit W7R5-P2-3)", async () => {
     const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_COMMITMENTS_RETAINED: 5 } });
     for (let i = 0; i < 50; i++) {

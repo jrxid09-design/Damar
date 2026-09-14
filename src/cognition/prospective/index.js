@@ -165,6 +165,19 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         if (ownerRef && (remindersPerGoal.get(ownerRef) ?? 0) >= bounds.MAX_REMINDERS_PER_GOAL) {
             fail(REASONS.PER_GOAL_LIMIT_EXCEEDED, "jumlah reminder per goal melebihi batas");
         }
+        // Bug review DITINJAU ULANG (audit putaran-60, OpenCode, W7R60-P2-4):
+        // laporan menyarankan arm() menegakkan MAX_TOTAL_REMINDERS_RETAINED
+        // sebagai gerbang admission -- TAPI itu bertentangan dengan
+        // kontrak yang SUDAH ada dan diuji (PM-repair-3, Codex putaran-6):
+        // reminder ARMED SENGAJA tidak pernah dievict oleh kompaksi total
+        // (hanya FIRED/RETIRED yang jadi korban); gerbang admission untuk
+        // populasi ARMED adalah MAX_ARMED_REMINDERS, terpisah. Menolak di
+        // sini akan merusak kontrak PM-repair-3 (5 reminder ARMED berhasil
+        // dibuat di bawah MAX_ARMED_REMINDERS=100 walau MAX_TOTAL_
+        // REMINDERS_RETAINED=2, baru dipangkas SETELAH menjadi terminal).
+        // Tidak ada perbaikan diterapkan di sini -- laporan ini bukan bug
+        // nyata di bawah kontrak yang ada, dicatat di ledger sebagai
+        // findings yang ditinjau-dan-ditolak.
         const reminder = makeReminder({ ...specRest, reminderId: reminderId ?? crypto.randomUUID(), ownerRef, nowIso: nowIso() });
         const armed = Object.freeze({ ...reminder, armedAtMs: now() });
         reminders.set(armed.reminderId, armed);

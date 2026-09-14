@@ -65,6 +65,36 @@ test("WM-repair-94: declareHypothesis retains ZERO new hypotheses when MAX_HYPOT
     assert.doesNotThrow(() => wm.declareHypothesis(spec));
 });
 
+test("WM-repair-95: declareEntity retains ZERO entities when MAX_ENTITIES is 0 -- evictEntityIfOverBound's protectedEntityId excluded the just-created (and only) entity from the eviction candidates, leaving no victim and silently exceeding a sanctioned zero cap (independent audit round 60, OpenCode, W7R60-P2-1)", async () => {
+    const wm = await createWorldModel({ bounds: { MAX_ENTITIES: 0 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    assert.equal(wm.entitiesByKind("device").entities.length, 0);
+});
+
+test("WM-repair-96: declareRelation retains ZERO relations when MAX_RELATIONS is 0 -- the exact sibling of WM-repair-95 in the same file, evictRelationIfOverBound's protectedRelationId excluded the only relation from eviction (independent audit round 60, OpenCode, W7R60-P2-2)", async () => {
+    const wm = await createWorldModel({ bounds: { MAX_RELATIONS: 0 } });
+    wm.declareEntity({ entityId: "a", entityKind: "k", source: "s" });
+    wm.declareEntity({ entityId: "b", entityKind: "k", source: "s" });
+    wm.declareRelation({ relationId: "r1", kind: "x", from: "a", to: "b", strength: 1 });
+    assert.equal(wm.neighbors("a").entities.length, 0);
+});
+
+test("WM-repair-97: a challenger auto-archived at MAX_OPEN_CONTRADICTION_SETS=0 does not mark the belief as actively contested -- round 59's zero-cap fix for openContradictionSet returns an already-archived entry, but applyRecordToBelief still unconditionally wired it as the belief's ACTIVE contradictionSetId, leaking a pointer to a contradiction set that exists nowhere (independent audit round 60, Codex, W7R60-P2-2)", async () => {
+    const { createMemoryAccStore } = require("../../../src/cognition/persistence/AccStore");
+    const store = createMemoryAccStore();
+    const wm1 = await createWorldModel({ store, bounds: { MAX_OPEN_CONTRADICTION_SETS: 1 } });
+    await wm1.declareEntity({ entityId: "e1", entityKind: "thing", source: "s" });
+    wm1.ingestObservation({ observationId: "o1", subject: { entityId: "e1" }, attribute: "color", value: "red", sensor: { sensorId: "s1" }, tier: "T1", observedAt: "2024-01-01T00:00:00.000Z" });
+    await wm1.persist();
+    const wm2 = await createWorldModel({ store, bounds: { MAX_OPEN_CONTRADICTION_SETS: 0 } });
+    const result = wm2.ingestObservation({ observationId: "o2", subject: { entityId: "e1" }, attribute: "color", value: "blue", sensor: { sensorId: "s2" }, tier: "T1", observedAt: "2024-01-01T00:00:01.000Z" });
+    assert.equal(result.case, "CONTEST");
+    assert.equal(wm2.openContradictions().length, 0);
+    const q = wm2.query({ subject: { entityId: "e1" }, attribute: "color" });
+    assert.equal(q.contested, false);
+    assert.equal(q.contradictionSetId, null);
+});
+
 test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
