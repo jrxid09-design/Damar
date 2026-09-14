@@ -77,6 +77,16 @@ test("PM-repair-34: reminderId is read exactly once, so a stateful getter cannot
     assert.equal(pm.reminderCount(), 1, "the existing reminder must not be double-counted or overwritten");
 });
 
+test("PM-repair-60: armExpectation retains ZERO pending expectations when MAX_PENDING_EXPECTATIONS is 0 -- the empty-eviction-search guard (if (oldest)) already prevented a raw-throw, but the newly built expectation was still stored unconditionally afterward, silently exceeding a sanctioned zero cap (independent audit round 59, Codex, W7R59-P2-3)", async () => {
+    const pm = await createProspectiveMemory({ clock: manualClock(100), bounds: { MAX_PENDING_EXPECTATIONS: 0 } });
+    pm.armExpectation({
+        subject: { entityId: "e1" }, attribute: "status", expectedValue: "done",
+        window: { latestAt: new Date(1000).toISOString() }
+    });
+    const results = pm.checkExpectations(() => ({ value: "done", atMs: 500 }));
+    assert.equal(results.length, 0, "tidak ada expectation yang boleh dipertahankan pada kapasitas 0");
+});
+
 test("PM-repair-33: an expectation with no earliestAt is satisfied by ANY observation at or before latestAt, not just ones after year 2000 (independent audit AUD30-P2-4)", async () => {
     const pm = await createProspectiveMemory({ clock: manualClock(100) });
     pm.armExpectation({

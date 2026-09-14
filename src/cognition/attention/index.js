@@ -189,10 +189,18 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         if (t === "string" || t === "number" || t === "boolean") return `${t}:${evidenceRef}`;
         if (t === "symbol") {
             if (!symbolEvidenceRefIds.has(evidenceRef)) {
-                if (symbolEvidenceRefIds.size >= bounds.MAX_SEEN_SYMBOL_EVIDENCE_REFS) {
+                // Bug ditemukan lewat sapuan mandiri (setelah audit
+                // putaran-59): kapasitas 0 dengan map kosong -- delete(undefined)
+                // adalah no-op senyap, tapi set() sesudahnya tetap tanpa
+                // syarat, melampaui cap 0. Kapasitas 0 berarti TIDAK ADA
+                // identitas Symbol yang dilacak.
+                const maxSeenSymbols = Math.max(0, Math.trunc(bounds.MAX_SEEN_SYMBOL_EVIDENCE_REFS));
+                if (symbolEvidenceRefIds.size >= maxSeenSymbols) {
                     symbolEvidenceRefIds.delete(symbolEvidenceRefIds.keys().next().value);
                 }
-                symbolEvidenceRefIds.set(evidenceRef, nextSymbolEvidenceRefId++);
+                if (maxSeenSymbols > 0) {
+                    symbolEvidenceRefIds.set(evidenceRef, nextSymbolEvidenceRefId++);
+                }
             }
             return `symbol:${symbolEvidenceRefIds.get(evidenceRef)}`;
         }
@@ -249,9 +257,18 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         // ketiganya tanpa batas walau MAX_QUEUED_TARGETS terjaga (DEFERRED
         // dan DONE tidak pernah dihitung terhadapnya). RUNNING tidak pernah
         // dipurge -- itu pekerjaan aktif.
-        if (targets.size > bounds.MAX_TOTAL_TARGETS) {
+        // Bug review independen (audit putaran-59, Codex, W7R59-P2-5):
+        // bound 0 (sanksi sah lewat sanitizeBounds) dengan `protectedTargetId`
+        // adalah SATU-SATUNYA target -- filter kandidat mengecualikannya,
+        // tidak ada korban ditemukan, target baru tetap tersimpan,
+        // melampaui cap total 0 secara diam-diam. Pada kapasitas 0,
+        // "melindungi" target baru tidak masuk akal -- proteksi
+        // dilepas khusus untuk kasus ini.
+        const maxTotalTargets = Math.max(0, Math.trunc(bounds.MAX_TOTAL_TARGETS));
+        if (targets.size > maxTotalTargets) {
             const purgeRank = { DONE: 0, DEFERRED: 1, QUEUED: 2 };
-            const candidate = [...targets.values()].filter(t => t.state !== "RUNNING" && t.targetId !== protectedTargetId)
+            const effectiveProtected = maxTotalTargets === 0 ? null : protectedTargetId;
+            const candidate = [...targets.values()].filter(t => t.state !== "RUNNING" && t.targetId !== effectiveProtected)
                 .sort((a, b) => {
                     const rankDiff = purgeRank[a.state] - purgeRank[b.state];
                     if (rankDiff !== 0) return rankDiff;

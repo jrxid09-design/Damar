@@ -19,7 +19,22 @@ function openContradictionSet(list, contradiction, nowIso, maxOpenContradictionS
         openedAt: nowIso, status: "OPEN", resolution: null
     });
 
-    if (list.length >= maxOpenContradictionSets) {
+    // Bug review independen (audit putaran-59, OpenCode, W7R59-P2-2): bound
+    // 0 (sanksi sah lewat sanitizeBounds) dengan `list` kosong membuat
+    // `list.length >= 0` true tapi TIDAK ADA `oldest` untuk dievict --
+    // `oldest.status` raw-throw pada undefined. Bound dibulatkan integer
+    // >= 0; kalau list kosong (tidak ada korban untuk dievict), entry BARU
+    // itu sendiri yang langsung diarsipkan (tidak pernah benar-benar
+    // dibuka), bukan melempar.
+    const maxOpen = Math.max(0, Math.trunc(maxOpenContradictionSets));
+    if (list.length >= maxOpen && list.length === 0) {
+        const archivedEntry = Object.freeze({
+            ...entry, status: "UNRESOLVABLE",
+            resolution: Object.freeze({ ruleId: "OVERFLOW_ARCHIVE", at: nowIso })
+        });
+        return { list, entry: archivedEntry, evicted: archivedEntry };
+    }
+    if (list.length >= maxOpen) {
         // Bug diketemukan review independen (Codex, putaran ke-4): versi
         // lama menambahkan BAIK arsip lama MAUPUN entry baru ke list yang
         // sudah penuh, sehingga list tumbuh +1 setiap overflow — batas

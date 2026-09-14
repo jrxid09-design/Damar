@@ -230,6 +230,14 @@ test("GL-repair-8: an unknown origin.kind is rejected before it ever touches the
         "origin.kind sampah tidak boleh pernah membuat kunci baru di peta laju pembuatan");
 });
 
+test("GL-repair-76: createCommitment rejects with COMMITMENT_RETENTION_LIMIT_EXCEEDED (not silently retained past the cap) when MAX_TOTAL_COMMITMENTS_RETAINED is 0 -- a freshly-created commitment is always OPEN, so no non-OPEN victim exists to evict, and the unconditional commitments.set() afterward retained it regardless (self-discovered sweep, sibling of round 59's W7R59-P2-1..5 zero-boundary class)", async () => {
+    const ge = await createGoalEngine({ bounds: { MAX_TOTAL_COMMITMENTS_RETAINED: 0 } });
+    assertThrowsReason(() => ge.createCommitment({
+        commitmentId: "c1", goalRef: "g", toWhom: { id: "o" }, promise: "p",
+        dueCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" }
+    }), "COMMITMENT_RETENTION_LIMIT_EXCEEDED");
+});
+
 test("GL-repair-9: terminal commitments are retention-bounded, not just OPEN ones (independent audit W7R5-P2-3)", async () => {
     const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_COMMITMENTS_RETAINED: 5 } });
     for (let i = 0; i < 50; i++) {
@@ -879,6 +887,16 @@ test("GL-repair-74: invalidatePlanIfAssumptionBroken stores an EMPTY invalidated
     const pFrac = geFrac.createPlan({ goalRef: gFrac.goalId, steps: [] });
     geFrac.invalidatePlanIfAssumptionBroken(pFrac.planId, "belief-r58b");
     assert.deepEqual(geFrac.getPlan(pFrac.planId).invalidatedBy, []);
+});
+
+test("GL-repair-75: createPlan does not raw-throw when MAX_PLAN_VERSIONS_RETAINED is 0 or fractional, and still returns the plan it created -- the per-goal version-compaction eviction loop indexed past otherSameGoal.length when overflow exceeded it, the same zero-boundary class round 58 fixed for invalidatedBy but never swept here (independent audit round 59, OpenCode, W7R59-P2-1)", async () => {
+    for (const v of [0, 0.5]) {
+        const ge = await createGoalEngine({ bounds: { MAX_PLAN_VERSIONS_RETAINED: v } });
+        const g = ge.proposeGoal(baseGoalSpec());
+        let p;
+        assert.doesNotThrow(() => { p = ge.createPlan({ goalRef: g.goalId, steps: [] }); });
+        assert.equal(ge.getPlan(p.planId).planId, p.planId);
+    }
 });
 
 test("GL-repair-70: transition() fails closed to APPROVAL_EXPIRED (not raw-throw) when authorityPort.checkApproval() returns a revoked-Proxy result -- treated the same as an invalid/falsy check (independent audit W7R50-ADV-1)", async () => {

@@ -17,6 +17,11 @@ function fakeLengthArray(items, badLen) {
     });
 }
 
+test("MC-repair-41: openReview is rejected with OPEN_REVIEW_LIMIT_EXCEEDED (not silently retained past the cap) when MAX_TOTAL_REVIEWS_RETAINED is 0 -- a freshly-created review is always OPEN, and evictOldestClosedReviewIfOverBound only evicts CLOSED reviews, so it was retained regardless of the zero total cap (independent audit round 59, Codex, W7R59-P2-4)", async () => {
+    const mc = await createMetacognition({ bounds: { MAX_TOTAL_REVIEWS_RETAINED: 0 } });
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" } }), "OPEN_REVIEW_LIMIT_EXCEEDED");
+});
+
 test("MC-repair-4: explicit null findings/proposals is rejected as INVALID_RECORD, not an uncontrolled TypeError (independent audit AUD15-P2-3)", async () => {
     const mc = await createMetacognition();
     assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: null }), "INVALID_RECORD");

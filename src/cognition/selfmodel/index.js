@@ -409,11 +409,20 @@ async function createSelfModel({
 
         degradedSubsystems = degradedSubsystems.filter(d => d.subsystem !== subsystem);
         if (state !== "HEALTHY") {
-            const entry = Object.freeze({ subsystem, state, at: at ?? nowIso() });
-            if (degradedSubsystems.length >= bounds.MAX_DEGRADED_SUBSYSTEMS) {
-                degradedSubsystems = degradedSubsystems.slice(1); // FIFO, batas keras
+            // Bug ditemukan lewat sapuan mandiri (setelah audit putaran-59):
+            // sibling PERSIS dari kelas W7R59-P2-1..5 -- kapasitas 0
+            // (sanksi sah lewat sanitizeBounds) dengan array kosong tidak
+            // pernah dicegah dari SELALU di-append sesudah slice(1), jadi
+            // cap 0 tetap kebobolan satu entri. Dibulatkan integer >= 0;
+            // kapasitas 0 berarti TIDAK ADA entri degraded yang disimpan.
+            const maxDegraded = Math.max(0, Math.trunc(bounds.MAX_DEGRADED_SUBSYSTEMS));
+            if (maxDegraded > 0) {
+                const entry = Object.freeze({ subsystem, state, at: at ?? nowIso() });
+                if (degradedSubsystems.length >= maxDegraded) {
+                    degradedSubsystems = degradedSubsystems.slice(1); // FIFO, batas keras
+                }
+                degradedSubsystems = [...degradedSubsystems, entry];
             }
-            degradedSubsystems = [...degradedSubsystems, entry];
         }
         return healthState();
     }

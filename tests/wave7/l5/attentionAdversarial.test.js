@@ -15,6 +15,21 @@ function assertThrowsReason(fn, reason) {
     });
 }
 
+test("AT-repair-45: ingestSignal with a Symbol evidenceRef never raw-throws and stays bounded when MAX_SEEN_SYMBOL_EVIDENCE_REFS is 0 -- delete(undefined) on an empty Map is a silent no-op, but the Map was still unconditionally grown afterward, exceeding a sanctioned zero cap by one every distinct Symbol seen (self-discovered sweep, sibling of round 59's W7R59-P2-1..5 zero-boundary class)", async () => {
+    const ae = await createAttentionEconomy({ clock: manualClock(1000), bounds: { MAX_SEEN_SYMBOL_EVIDENCE_REFS: 0 } });
+    assert.doesNotThrow(() => {
+        for (let i = 0; i < 50; i++) {
+            ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: Symbol(`x${i}`) }, "PERCEIVE");
+        }
+    });
+});
+
+test("AT-repair-44: ingestSignal retains ZERO targets when MAX_TOTAL_TARGETS is 0 -- protectedTargetId excluded the just-created (and only) target from the eviction candidate filter, leaving no victim and silently exceeding a sanctioned zero total cap (independent audit round 59, Codex, W7R59-P2-5)", async () => {
+    const ae = await createAttentionEconomy({ clock: manualClock(1000), bounds: { MAX_TOTAL_TARGETS: 0 } });
+    const r = ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s1", subjectRef: { entityId: "e1" } }, "MAINTAIN");
+    assert.equal(ae.getTarget(r.targetId), null, "tidak ada target yang boleh dipertahankan pada kapasitas total 0");
+});
+
 test("AT-repair-43: ingestSignal rejects a subjectRef carrying an own __proto__/constructor/prototype key -- deepFreeze was the only one of the 6 lane sanitizers that never rejected dangerous keys, letting an attacker-controlled prototype alias an arbitrary entity via subjectRef.entityId with zero own keys (independent audit round 58, OpenCode, W7R58-P2-2)", async () => {
     const ae = await createAttentionEconomy({ clock: manualClock(1000) });
     const polluted = JSON.parse('{"__proto__":{"entityId":"VICTIM"}}');

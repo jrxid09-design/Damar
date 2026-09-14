@@ -307,12 +307,25 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // entitas bisa memicu beliefs tak terbatas. Cek HANYA saat key ini
         // BARU (existing null) supaya tidak pernah mengevict belief yang
         // baru saja dibuat/direvisi di panggilan ini sendiri.
-        if (!existing && beliefs.size >= bounds.MAX_TOTAL_BELIEFS) {
+        // Bug ditemukan lewat sapuan mandiri (setelah audit putaran-59):
+        // sibling PERSIS dari kelas W7R59-P2-1..5 -- kapasitas 0 (sanksi
+        // sah lewat sanitizeBounds) dengan `beliefs` kosong membuat
+        // `victimKey` tetap null (tidak ada korban), tapi belief baru
+        // tetap disimpan tanpa syarat di `beliefs.set(key, belief)` di
+        // bawah, melampaui cap total secara diam-diam. Kapasitas 0
+        // berarti TIDAK ADA belief baru yang dipertahankan.
+        const maxTotalBeliefs = Math.max(0, Math.trunc(bounds.MAX_TOTAL_BELIEFS));
+        let skipNewBeliefStorage = false;
+        if (!existing && beliefs.size >= maxTotalBeliefs) {
             let victimKey = null, victimUpdatedAtMs = Infinity;
             for (const [k, b] of beliefs) {
                 if (b.updatedAtMs < victimUpdatedAtMs) { victimUpdatedAtMs = b.updatedAtMs; victimKey = k; }
             }
-            if (victimKey !== null) beliefs.delete(victimKey);
+            if (victimKey !== null) {
+                beliefs.delete(victimKey);
+            } else if (maxTotalBeliefs === 0) {
+                skipNewBeliefStorage = true;
+            }
         }
 
         if (caseName === "CONTEST") {
@@ -367,7 +380,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             return { case: caseName, belief: contested, contradictionSetId: entry.contradictionSetId };
         }
 
-        beliefs.set(key, belief);
+        if (!skipNewBeliefStorage) beliefs.set(key, belief);
         return { case: caseName, belief, contradictionSetId: null };
     }
 
@@ -511,13 +524,26 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // error dilempar, kehilangan data permanen. Validasi/bangun record
         // DULU, baru kompaksi+simpan.
         const h = makeHypothesis({ ...specRest, hypothesisId });
-        if (hypotheses.size >= bounds.MAX_HYPOTHESES) {
+        // Bug ditemukan lewat sapuan mandiri (setelah audit putaran-59):
+        // sibling PERSIS dari kelas W7R59-P2-1..5 -- kapasitas 0 (sanksi
+        // sah lewat sanitizeBounds) dengan `hypotheses` kosong membuat
+        // `sorted[0]` undefined (tidak ada korban), tapi `hypotheses.set`
+        // di bawah tetap tanpa syarat, melampaui cap total secara diam-
+        // diam. Kapasitas 0 berarti TIDAK ADA hipotesis baru yang
+        // dipertahankan.
+        const maxHypotheses = Math.max(0, Math.trunc(bounds.MAX_HYPOTHESES));
+        let skipNewHypothesisStorage = false;
+        if (hypotheses.size >= maxHypotheses) {
             // §11: kadaluwarsa dulu, lalu bobot terendah.
             const sorted = [...hypotheses.values()].sort((a, b) =>
                 (Date.parse(a.expiresAt) - Date.parse(b.expiresAt)));
-            if (sorted[0]) hypotheses.delete(sorted[0].hypothesisId);
+            if (sorted[0]) {
+                hypotheses.delete(sorted[0].hypothesisId);
+            } else if (maxHypotheses === 0) {
+                skipNewHypothesisStorage = true;
+            }
         }
-        hypotheses.set(h.hypothesisId, h);
+        if (!skipNewHypothesisStorage) hypotheses.set(h.hypothesisId, h);
         return h;
     }
 

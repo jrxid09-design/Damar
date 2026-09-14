@@ -315,6 +315,15 @@ test("SM-repair-24: ingestOutcome's history/appliedEvidenceRefs are truly EMPTY 
     assert.equal(aFrac.successWindow.appliedEvidenceRefs.length, 0);
 });
 
+test("SM-repair-25: ingestHealth retains ZERO degradedSubsystems entries when MAX_DEGRADED_SUBSYSTEMS is 0 -- slice(1) on an empty array is a silent no-op, but the array was still unconditionally appended to afterward, exceeding a sanctioned zero cap by one every call (self-discovered sweep, sibling of round 59's W7R59-P2-1..5 zero-boundary class)", async () => {
+    const reg = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const sm = await createSelfModel({ capabilityRegistry: reg, bounds: { MAX_DEGRADED_SUBSYSTEMS: 0 } });
+    sm.ingestHealth({ subsystem: "net", state: "DOWN" });
+    const snap = sm.snapshot();
+    assert.equal(snap.degradedSubsystems.length, 0);
+    assert.equal(snap.healthState, "UNKNOWN", "tanpa entri degraded yang dipertahankan (SM-A9: tanpa sinyal, tidak pernah HEALTHY), healthState tidak boleh melaporkan DOWN");
+});
+
 test("SM-repair-18: assess() never raw-throws when the capability registry returns a revoked-Proxy descriptor -- descriptorRef falls back to capabilityId, same as a missing descriptor.id (independent audit W7R50-ADV-1)", async () => {
     const { proxy, revoke } = Proxy.revocable({}, {});
     revoke();

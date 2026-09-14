@@ -667,8 +667,12 @@ class ContinuityCore {
             sessionId: envelopeFields.sessionId ?? null,
             correlationId: envelopeFields.correlationId ?? null,
             confidence: envelopeFields.confidence ?? 1,
-            // schemaVersion/epistemicClass SENGAJA di luar cakupan hash §51
-            // (lihat core/envelope.js) — tidak ikut sha256Row di bawah.
+            // schemaVersion/epistemicClass: cakupan hash §51 (lihat
+            // core/envelope.js) beda per versi -- baris v1 di-hash TANPA
+            // keduanya (kolom belum ada), baris v2 MENYERTAKAN keduanya
+            // (putaran-8; komentar ini diperbarui putaran-59, W7R59-ADV-1,
+            // setelah audit independen menemukan komentar lama salah untuk
+            // v2 -- lihat sha256Row() di bawah, bukan default di sini).
             // Bug review independen (Codex putaran-7): default lama (1/null)
             // membuat append() langsung (tanpa envelopeFields) menulis baris
             // format lama walau v2 sudah jadi skema tulis saat ini, dan baris

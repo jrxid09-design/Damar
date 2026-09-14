@@ -43,6 +43,28 @@ function hostileThrowObj() {
     });
 }
 
+test("WM-repair-93: ingestObservation retains ZERO new beliefs when MAX_TOTAL_BELIEFS is 0 -- the empty-eviction-search guard (if (victimKey !== null)) already prevented growth beyond the eviction step, but beliefs.set() ran unconditionally afterward, silently exceeding a sanctioned zero cap (self-discovered sweep, sibling of round 59's W7R59-P2-1..5 zero-boundary class)", async () => {
+    const wm = await createWorldModel({ bounds: { MAX_TOTAL_BELIEFS: 0 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "temp", value: 20, sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() });
+    const r = wm.query({ subject: { entityId: "e1" }, attribute: "temp" });
+    assert.equal(r.unknown, true);
+    assert.equal(r.reason, "NEVER_OBSERVED");
+});
+
+test("WM-repair-94: declareHypothesis retains ZERO new hypotheses when MAX_HYPOTHESES is 0 -- the same unconditional-set-after-eviction-attempt class as WM-repair-93, never swept here (self-discovered sweep, sibling of round 59's W7R59-P2-1..5 zero-boundary class)", async () => {
+    const wm = await createWorldModel({ bounds: { MAX_HYPOTHESES: 0 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "k", source: "s" });
+    const spec = {
+        hypothesisId: "h1", subject: { entityId: "e1" }, attribute: "a",
+        candidateValues: [{ value: "x", weight: 1 }], expiresAt: "2030-01-01T00:00:00.000Z"
+    };
+    assert.doesNotThrow(() => wm.declareHypothesis(spec));
+    // if h1 were actually retained, re-declaring the same hypothesisId would
+    // throw DUPLICATE_RECORD_ID -- it must NOT throw, proving nothing was stored.
+    assert.doesNotThrow(() => wm.declareHypothesis(spec));
+});
+
 test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
@@ -623,6 +645,13 @@ test("WM-repair-91: declareHypothesis rejects a fabricated negative candidateVal
         hypothesisId: "h1", subject: { entityId: "e1" }, attribute: "a",
         candidateValues: cand, expiresAt: "2030-01-01T00:00:00.000Z"
     }), (e) => e && e.reason === "INVALID_RECORD");
+});
+
+test("WM-repair-92: ingestObservation never raw-throws when MAX_OPEN_CONTRADICTION_SETS is 0 -- openContradictionSet indexed [oldest] on an empty list (list.length >= 0 is true, but there is no oldest to evict), the same zero-boundary class round 58/59 fixed elsewhere but never swept here (independent audit round 59, OpenCode, W7R59-P2-2)", async () => {
+    const wm = await createWorldModel({ bounds: { MAX_OPEN_CONTRADICTION_SETS: 0 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "k", source: "s" });
+    wm.ingestObservation({ observationId: "o1", subject: { entityId: "e1" }, attribute: "a", value: 1, sensor: { sensorId: "s" }, tier: "T1", observedAt: "2026-01-01T00:00:00.000Z" });
+    assert.doesNotThrow(() => wm.ingestObservation({ observationId: "o2", subject: { entityId: "e1" }, attribute: "a", value: 2, sensor: { sensorId: "s" }, tier: "T1", observedAt: "2026-01-02T00:00:00.000Z" }));
 });
 
 test("WM-repair-87: the exported subjectKeyOf() never raw-throws on a revoked-Proxy subject -- falls back to the same malformed-subject sentinel as any other unreadable subject, matching its own never-throws contract (independent audit W7R47-P2-2)", async () => {
