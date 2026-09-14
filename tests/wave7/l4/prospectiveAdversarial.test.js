@@ -245,6 +245,13 @@ test("PM-repair-54: armExpectation fails closed (not raw-throw) on a revoked-Pro
     assertThrowsReason(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "a", expectedValue: "x", window: r.proxy }), "NO_LATEST_AT");
 });
 
+test("PM-repair-55: armExpectation rejects a non-string window.earliestAt (including a revoked Proxy) instead of raw-throwing inside Date.parse's implicit ToString, closing the gap round 45's own window fix left in its sibling field (independent audit W7R46-P2-2)", async () => {
+    const pm = await createProspectiveMemory();
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    assertThrowsReason(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "a", expectedValue: 1, window: { latestAt: new Date(1).toISOString(), earliestAt: r.proxy } }), "NO_LATEST_AT");
+});
+
 test("PM-repair-49: compaction only removes a victim's OWN firedOccurrenceIds entries, not a differently-terminated reminder whose id happens to be a string-prefix of the victim's (independent audit AUD38-ADV-1)", async () => {
     const clock = manualClock(0);
     const pm = await createProspectiveMemory({ clock, bounds: { ...BOUNDS, MAX_TOTAL_REMINDERS_RETAINED: 1, MAX_ARMED_REMINDERS: 100 } });

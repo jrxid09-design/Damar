@@ -598,6 +598,14 @@ test("WM-repair-85: subgraph's budget?.nodes/budget?.bytes reads never raw-throw
     assert.ok(result.entities.length >= 1, "subgraph must still traverse using the default budget fallback");
 });
 
+test("WM-repair-86: declareHypothesis fails closed (not raw-throw) on a revoked-Proxy ELEMENT inside candidateValues, the exact sibling of externalRefs' element guard (round 45) left unswept (independent audit W7R46-P2-1)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    assertThrowsReason(() => wm.declareHypothesis({ hypothesisId: "h1", subject: { entityId: "e1" }, attribute: "a", candidateValues: [r.proxy], expiresAt: new Date(1).toISOString() }), "INVALID_RECORD");
+});
+
 test("WM-repair-76: subgraph/declareEntity/declareHypothesis fail closed (not raw-throw) on a revoked-Proxy container argument (independent audit W7R42-P2-3)", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });

@@ -847,6 +847,19 @@ test("GL-repair-67: proposeGoal/createCommitment/createPlan/createTask fail clos
     assertThrowsReason(() => ge.createTask(rev()), "INVALID_RECORD");
 });
 
+test("GL-repair-69: grantApproval/transition/transitionCommitment fail closed (not raw-throw) on a revoked-Proxy meta argument -- round 44 swept the entry points' spec parameter but never the meta slot on these 3 mutation methods (independent audit W7R46-P2-3)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    const c = ge.createCommitment({
+        goalRef: g.goalId, toWhom: "owner", promise: "p",
+        dueCondition: { kind: "WORLD_BELIEF", subject: { entityId: "e1" }, attribute: "a", expectedValue: 1 }
+    });
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    assertThrowsReason(() => ge.grantApproval(g.goalId, rev()), "INVALID_RECORD");
+    assertThrowsReason(() => ge.transition(g.goalId, "activate", rev()), "INVALID_RECORD");
+    assertThrowsReason(() => ge.transitionCommitment(c.commitmentId, "release", rev()), "INVALID_RECORD");
+});
+
 test("GL-repair-68: proposeGoal/createCommitment/createTask fail closed (not raw-throw) on a revoked-Proxy NESTED origin/condition/element, one level below where round 44 stopped (independent audit W7R45-P2-1/W7R45-P2-2)", async () => {
     const ge = await createGoalEngine();
     const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };

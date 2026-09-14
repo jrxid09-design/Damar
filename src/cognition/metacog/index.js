@@ -241,6 +241,13 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         // toString pemanggil untuk objek, walau `reviews.get()` sendiri
         // (pencarian Map) tidak pernah mengeksekusi apa pun.
         if (!review) fail(REASONS.UNKNOWN_REVIEW, `review '${typeof reviewId === "string" ? reviewId : typeof reviewId}' tidak ditemukan`);
+        // Bug review independen (audit putaran-46, W7R46-P2-4): `proposalIndex`
+        // dipakai mentah sebagai kunci array -- sebuah Proxy yang di-revoke
+        // (dipaksa ToPropertyKey saat dipakai sebagai indeks) melempar
+        // TypeError mentah di sini, sebelum sempat sampai ke cek `!proposal`.
+        if (!Number.isInteger(proposalIndex)) {
+            fail(REASONS.INVALID_RECORD, "proposal index wajib integer");
+        }
         const proposal = review.proposals[proposalIndex];
         if (!proposal) fail(REASONS.INVALID_RECORD, "proposal index tidak ditemukan");
 

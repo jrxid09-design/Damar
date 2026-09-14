@@ -303,6 +303,14 @@ test("MC-repair-37: assess() never raw-throws on a revoked-Proxy evidenceQuality
     assert.equal(a.basis, "NO_EVIDENCE", "a revoked evidenceQuality must fail safe to NO_EVIDENCE, same as null/undefined");
 });
 
+test("MC-repair-38: applyProposal rejects a non-integer proposalIndex (including a revoked Proxy, forced through ToPropertyKey as an array index) instead of raw-throwing (independent audit W7R46-P2-4)", async () => {
+    const mc = await createMetacognition();
+    const review = mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, proposals: [{ kind: "PROBE" }] });
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    assertThrowsReason(() => mc.applyProposal(review.reviewId, r.proxy, null), "INVALID_RECORD");
+});
+
 test("MC-repair-36: buildSafeCognitiveCopy's object branch rejects a flat object whose key count exceeds MAX_VALUE_KEYS, matching every sibling sanitizer's key-count bound (independent audit W7R44-P2-4)", async () => {
     const mc = await createMetacognition();
     const big = {};
