@@ -296,7 +296,19 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
             if (!["AT", "AFTER", "RECURRING"].includes(reminder.trigger.kind)) continue;
 
             // PM-3: goal terminal -> pensiun, tidak pernah ditembak.
-            if (reminder.ownerRef && goalStatusPort?.isTerminal?.(reminder.ownerRef)) {
+            // Bug review independen (audit putaran-51, W7R51-P2-2): sibling
+            // langsung dari checkExpectations's evaluatePort (round-50) --
+            // `goalStatusPort` yang melempar atau berupa Proxy yang
+            // di-revoke tetap raw-throw di [[Call]]/[[Get]] ini, membatalkan
+            // SISA sweep tick untuk reminder lain. Diperlakukan sama
+            // seperti "tidak terminal" (gagal aman), sweep lanjut.
+            let isTerminal;
+            try {
+                isTerminal = !!goalStatusPort?.isTerminal?.(reminder.ownerRef);
+            } catch {
+                isTerminal = false;
+            }
+            if (reminder.ownerRef && isTerminal) {
                 retire(reminders.get(reminder.reminderId), "GOAL_TERMINAL");
                 continue;
             }
@@ -313,7 +325,18 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         const events = [];
         for (const reminder of [...reminders.values()]) {
             if (reminder.state !== "ARMED" || reminder.trigger.kind !== "ON_STATE") continue;
-            const satisfied = evaluatePort?.(reminder.trigger.subject, reminder.trigger.attribute, reminder.trigger.predicate);
+            // Bug review independen (audit putaran-51, W7R51-P2-1): sibling
+            // langsung dari checkExpectations's evaluatePort (round-50, di
+            // FILE yang sama) -- port yang melempar atau Proxy fungsi yang
+            // di-revoke tetap raw-throw di [[Call]], membatalkan SISA sweep
+            // ON_STATE untuk reminder lain. Diperlakukan sama seperti
+            // "tidak terpenuhi" (gagal aman), sweep lanjut.
+            let satisfied;
+            try {
+                satisfied = evaluatePort?.(reminder.trigger.subject, reminder.trigger.attribute, reminder.trigger.predicate);
+            } catch {
+                satisfied = false;
+            }
             if (satisfied) {
                 const fired = fireReminder(reminder, { missed: false, lateness: 0 });
                 if (fired) events.push(fired);

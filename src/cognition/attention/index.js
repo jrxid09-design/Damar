@@ -375,7 +375,18 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         // `runningCount >= maxRunning` selalu false, menggagalkan lantai
         // MAX_RUNNING_TARGETS sepenuhnya (port tepercaya tapi tidak wajib
         // benar; advisory, bukan P2, karena tidak ada persist/authority di sini).
-        const rawCapacity = governorPort?.capacity?.();
+        // Bug review independen (audit putaran-51, W7R51-ADV-2): baca/panggilan
+        // ini sendiri tidak pernah dibungkus -- `governorPort` yang melempar
+        // atau berupa Proxy yang di-revoke tetap raw-throw di [[Call]]/[[Get]],
+        // membatalkan pick() sepenuhnya. Dibungkus try/catch; kegagalan
+        // APA PUN jatuh ke default MAX_RUNNING_TARGETS yang sudah ada,
+        // sama seperti nilai non-finite yang sudah ditangani di atas.
+        let rawCapacity;
+        try {
+            rawCapacity = governorPort?.capacity?.();
+        } catch {
+            rawCapacity = undefined;
+        }
         const maxRunning = (typeof rawCapacity === "number" && Number.isFinite(rawCapacity))
             ? rawCapacity : bounds.MAX_RUNNING_TARGETS;
         const runningCount = [...targets.values()].filter(t => t.state === "RUNNING").length;
