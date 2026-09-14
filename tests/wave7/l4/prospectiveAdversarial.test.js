@@ -36,6 +36,14 @@ test("PM-repair-22: arm(null) is rejected as INVALID_RECORD, not a raw TypeError
     assertThrowsReason(() => pm.arm(null), "INVALID_RECORD");
 });
 
+test("PM-repair-61: arm()'s payloadRef honors a caller-sanctioned override of MAX_PAYLOAD_ARRAY_LENGTH -- buildSafePayloadRef/validatePayloadRef read the module's fixed BOUNDS constant directly instead of the sanitized per-instance bounds (independent audit round 65, Codex, AUD65-P2-1, escalation of a round-64 disclosed-but-unfixed item)", async () => {
+    const pm = await createProspectiveMemory({ bounds: { MAX_PAYLOAD_ARRAY_LENGTH: 1 } });
+    assertThrowsReason(() => pm.arm({
+        reminderId: "m1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: "2030-01-01T00:00:00.000Z" },
+        payloadRef: { list: [1, 2, 3] }
+    }), "PAYLOAD_TOO_LARGE");
+});
+
 test("PM-repair-23: armExpectation(null) is rejected as INVALID_RECORD, not a raw TypeError -- arm()'s sibling in the same file was missed in round 21 (independent audit AUD22-F-4)", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.armExpectation(null), "INVALID_RECORD");

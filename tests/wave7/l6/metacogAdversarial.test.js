@@ -22,6 +22,14 @@ test("MC-repair-41: openReview is rejected with OPEN_REVIEW_LIMIT_EXCEEDED (not 
     assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" } }), "OPEN_REVIEW_LIMIT_EXCEEDED");
 });
 
+test("MC-repair-42: openReview honors a caller-sanctioned override of MAX_VALUE_NODES (including 0) -- buildSafeCognitiveCopy read the module's fixed VALUE_BOUNDS constant directly instead of the sanitized per-instance bounds, so a zero ceiling was silently ignored and one finding was still accepted (independent audit round 65, Codex, AUD65-P2-1, escalation of a round-64 disclosed-but-unfixed item)", async () => {
+    const mc = await createMetacognition({ bounds: { MAX_VALUE_NODES: 0 } });
+    assert.throws(() => mc.openReview({
+        trigger: "CONTRADICTION", subjectRef: { entityId: "e1" },
+        findings: [{ severity: 1 }], proposals: [], cost: { tokens: 0, ms: 0 }
+    }));
+});
+
 test("MC-repair-4: explicit null findings/proposals is rejected as INVALID_RECORD, not an uncontrolled TypeError (independent audit AUD15-P2-3)", async () => {
     const mc = await createMetacognition();
     assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: null }), "INVALID_RECORD");

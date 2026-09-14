@@ -73,8 +73,10 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
     }
 
     function assess(subjectRef, claim, evidenceQuality) {
+        // Bug review independen (audit putaran-65, Codex, AUD65-P2-1):
+        // `bounds` (sudah disanitasi) diteruskan eksplisit.
         return makeAssessment({
-            assessmentId: crypto.randomUUID(), subjectRef, claim, evidenceQuality, nowMs: now()
+            assessmentId: crypto.randomUUID(), subjectRef, claim, evidenceQuality, nowMs: now(), bounds
         });
     }
 
@@ -349,7 +351,10 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         if (recordId && calibrationRecords.has(recordId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `recordId kalibrasi '${typeof recordId === "string" ? recordId : typeof recordId}' sudah ada`);
         }
-        const record = makeCalibrationRecord({ ...specRest, outcomeRef, recordId: recordId ?? crypto.randomUUID() });
+        // Bug review independen (audit putaran-65, Codex, AUD65-P2-1):
+        // `bounds` (sudah disanitasi) diteruskan eksplisit, SESUDAH spread
+        // specRest (caller tidak bisa menimpanya).
+        const record = makeCalibrationRecord({ ...specRest, outcomeRef, recordId: recordId ?? crypto.randomUUID(), bounds });
         calibrationRecords.set(record.recordId, record);
         if (calibrationRecords.size > bounds.MAX_CALIBRATION_RECORDS) {
             calibrationRecords.delete(calibrationRecords.keys().next().value);

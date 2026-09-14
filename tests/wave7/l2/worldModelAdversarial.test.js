@@ -129,6 +129,15 @@ test("WM-repair-100: applyRevision honors a caller-sanctioned override of MAX_OB
     assert.ok(q.supportedBy.length <= 1, "supportedBy harus dibatasi ke override MAX_OBSERVATIONS_RETAINED_PER_BELIEF, bukan default modul 32");
 });
 
+test("WM-repair-101: ingestObservation honors a caller-sanctioned override of MAX_VALUE_NODES (including 0) for composite belief values -- buildSafeBeliefValue read the module's fixed BOUNDS constant directly instead of the sanitized per-instance bounds (independent audit round 65, Codex, AUD65-P2-1, escalation of a round-64 disclosed-but-unfixed item)", async () => {
+    const wm = await createWorldModel({ bounds: { MAX_VALUE_NODES: 0 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "thing", source: "s" });
+    assert.throws(() => wm.ingestObservation({
+        observationId: "o1", subject: { entityId: "e1" }, attribute: "cfg", value: { mode: "safe" },
+        sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString()
+    }));
+});
+
 test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });

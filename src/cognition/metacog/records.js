@@ -77,7 +77,15 @@ function buildSafeArray(arr, mapFn) {
 // kedalaman/anggaran node (pola sama seperti buildSafeBeliefValue di
 // worldmodel/buildSafePayloadRef di prospective) -- accessor pemanggil
 // tidak pernah tersentuh sama sekali, apalagi dipanggil.
-function buildSafeCognitiveCopy(value, depth = 0, stack, budget) {
+// Bug review independen (audit putaran-65, Codex, AUD65-P2-1, eskalasi
+// dari item yang diungkap-tapi-tidak-diperbaiki putaran-64): fungsi ini
+// membaca `VALUE_BOUNDS` modul (default TETAP) langsung, bukan `bounds`
+// yang sudah disanitasi per-instance -- override pemanggil (mis.
+// MAX_VALUE_NODES:0) diam-diam diabaikan sepenuhnya, dibuktikan lewat
+// reproduksi nyata (createMetacognition({bounds:{MAX_VALUE_NODES:0}})
+// tetap menerima satu finding). Parameter `bounds` ditambahkan (default
+// ke VALUE_BOUNDS modul untuk kompatibilitas mundur).
+function buildSafeCognitiveCopy(value, depth = 0, stack, budget, bounds = VALUE_BOUNDS) {
     if (!stack) stack = new WeakSet();
     if (!budget) budget = { count: 0 };
     if (value === null || value === undefined) return value;
@@ -96,12 +104,12 @@ function buildSafeCognitiveCopy(value, depth = 0, stack, budget) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh berupa angka non-finite (NaN/Infinity)");
     }
     if (t !== "object") return value;
-    if (depth > VALUE_BOUNDS.MAX_VALUE_SCAN_DEPTH) {
+    if (depth > bounds.MAX_VALUE_SCAN_DEPTH) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "struktur terlalu dalam untuk diverifikasi dengan aman, ditolak");
     }
     if (stack.has(value)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "struktur siklik terdeteksi");
     budget.count += 1;
-    if (budget.count > VALUE_BOUNDS.MAX_VALUE_NODES) {
+    if (budget.count > bounds.MAX_VALUE_NODES) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah node melebihi batas");
     }
     // Bug review independen (audit putaran-43, W7R43-P2-3/W7R43-P2-7):
@@ -121,7 +129,7 @@ function buildSafeCognitiveCopy(value, depth = 0, stack, budget) {
             // (DoS). `length` di-cache SEKALI ke lokal dan divalidasi sebagai
             // integer terhingga non-negatif SEBELUM dipakai di mana pun.
             const len = value.length;
-            if (!Number.isInteger(len) || len < 0 || len > VALUE_BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
+            if (!Number.isInteger(len) || len < 0 || len > bounds.MAX_VALUE_ARRAY_LENGTH) {
                 fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array melebihi batas atau tidak sah");
             }
             const arrProto = Object.getPrototypeOf(value);
@@ -136,7 +144,7 @@ function buildSafeCognitiveCopy(value, depth = 0, stack, budget) {
                     if (!desc || desc.get || desc.set) {
                         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `tidak boleh membawa properti accessor: '${i}'`);
                     }
-                    out[i] = buildSafeCognitiveCopy(desc.value, depth + 1, stack, budget);
+                    out[i] = buildSafeCognitiveCopy(desc.value, depth + 1, stack, budget, bounds);
                 }
             } finally {
                 stack.delete(value);
@@ -154,7 +162,7 @@ function buildSafeCognitiveCopy(value, depth = 0, stack, budget) {
         // KOMPOSIT, bukan per kunci). `keys` di-cache SEKALI dan divalidasi
         // sebelum loop, sama seperti cabang array di atas.
         const keys = Reflect.ownKeys(value);
-        if (keys.length > VALUE_BOUNDS.MAX_VALUE_KEYS) {
+        if (keys.length > bounds.MAX_VALUE_KEYS) {
             fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah kunci melebihi batas");
         }
         stack.add(value);
@@ -168,7 +176,7 @@ function buildSafeCognitiveCopy(value, depth = 0, stack, budget) {
                     fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `tidak boleh membawa properti accessor: '${String(key)}'`);
                 }
                 if (!desc.enumerable) continue;
-                const built = buildSafeCognitiveCopy(desc.value, depth + 1, stack, budget);
+                const built = buildSafeCognitiveCopy(desc.value, depth + 1, stack, budget, bounds);
                 if (built !== undefined) out[key] = built;
             }
         } finally {
@@ -199,7 +207,7 @@ const PROPOSAL_KINDS = new Set(["REPLAN", "PROBE", "ASK_OWNER", "LOWER_CONFIDENC
 /** §5: proposal kognitif-murni boleh diterapkan tanpa Authority; sisanya normal governed. */
 const COGNITIVE_ONLY_PROPOSALS = new Set(["LOWER_CONFIDENCE", "OPEN_CONTRADICTION", "PROBE"]);
 
-function makeAssessment({ assessmentId, subjectRef, claim, evidenceQuality, nowMs, calibrationRef = null }) {
+function makeAssessment({ assessmentId, subjectRef, claim, evidenceQuality, nowMs, calibrationRef = null, bounds = VALUE_BOUNDS }) {
     if (typeof assessmentId !== "string" || !assessmentId) fail(REASONS.INVALID_RECORD, "assessmentId wajib string");
     // Bug review independen (audit putaran-30, AUD30-P2-3): evidenceQuality
     // dulu dibaca DUA KALI secara independen -- sekali di dalam
@@ -223,7 +231,7 @@ function makeAssessment({ assessmentId, subjectRef, claim, evidenceQuality, nowM
     // BigInt/non-finite/objek tak terbatas bisa tersimpan tanpa batas per
     // assessment; disaring lewat sanitizer yang sama.
     return Object.freeze({
-        assessmentId, subjectRef: buildSafeCognitiveCopy(subjectRef), claim: buildSafeCognitiveCopy(claim),
+        assessmentId, subjectRef: buildSafeCognitiveCopy(subjectRef, 0, undefined, undefined, bounds), claim: buildSafeCognitiveCopy(claim, 0, undefined, undefined, bounds),
         value, basis,
         evidenceQuality: Object.freeze(safeEvidenceQuality),
         calibrationRef
@@ -307,7 +315,7 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
     // SEBAGAI `undefined` sama seperti `for...of`, menutup celah ini.
     const safeProposals = buildSafeArray(proposals, p => {
         if (!p || typeof p !== "object") fail(REASONS.INVALID_RECORD, "setiap proposal wajib objek");
-        const sp = buildSafeCognitiveCopy(p);
+        const sp = buildSafeCognitiveCopy(p, 0, undefined, undefined, bounds);
         const kind = sp?.kind;
         if (!PROPOSAL_KINDS.has(kind)) fail(REASONS.INVALID_RECORD, `proposal.kind '${typeof kind === "string" ? kind : typeof kind}' tidak dikenal`);
         return sp;
@@ -326,7 +334,7 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
     // perbaikan di atas untuk proposals.
     const safeFindings = buildSafeArray(findings, f => {
         if (!f || typeof f !== "object") fail(REASONS.INVALID_RECORD, "setiap finding wajib objek");
-        return buildSafeCognitiveCopy(f);
+        return buildSafeCognitiveCopy(f, 0, undefined, undefined, bounds);
     });
     const safeSeverity = (v) => (typeof v === "number" && Number.isFinite(v)) ? v : 0;
     const boundedFindings = safeFindings.length > bounds.MAX_FINDINGS_PER_REVIEW
@@ -357,7 +365,7 @@ function brierScore(predictedConfidence, outcomeCorrect) {
     return (predictedConfidence - o) ** 2;
 }
 
-function makeCalibrationRecord({ recordId, predictionRef, predictedValue, predictedConfidence, outcomeRef, outcomeValue, outcomeCorrect, scoreKind = "BRIER", windowFrom, windowTo }) {
+function makeCalibrationRecord({ recordId, predictionRef, predictedValue, predictedConfidence, outcomeRef, outcomeValue, outcomeCorrect, scoreKind = "BRIER", windowFrom, windowTo, bounds = VALUE_BOUNDS }) {
     if (typeof recordId !== "string" || !recordId) fail(REASONS.INVALID_RECORD, "recordId wajib string");
     // Bug review independen (audit putaran-18, AUD18-A1): predictedConfidence
     // tidak pernah divalidasi -- BigInt meledakkan aritmetika mentah
@@ -373,18 +381,18 @@ function makeCalibrationRecord({ recordId, predictionRef, predictedValue, predic
     // disaring/dibekukan; buildSafeCognitiveCopy menutup keduanya sekaligus.
     return Object.freeze({
         recordId,
-        predictionRef: buildSafeCognitiveCopy(predictionRef),
-        predictedValue: buildSafeCognitiveCopy(predictedValue),
+        predictionRef: buildSafeCognitiveCopy(predictionRef, 0, undefined, undefined, bounds),
+        predictedValue: buildSafeCognitiveCopy(predictedValue, 0, undefined, undefined, bounds),
         predictedConfidence,
-        outcomeRef: buildSafeCognitiveCopy(outcomeRef),
-        outcomeValue: buildSafeCognitiveCopy(outcomeValue),
+        outcomeRef: buildSafeCognitiveCopy(outcomeRef, 0, undefined, undefined, bounds),
+        outcomeValue: buildSafeCognitiveCopy(outcomeValue, 0, undefined, undefined, bounds),
         error, scoreKind,
         // Bug review independen (audit putaran-34, AUD34-ADV-3): `window`
         // disimpan mentah, tidak seperti predictionRef/outcomeValue di atas
         // -- BigInt/non-finite/accessor di windowFrom/windowTo lolos tanpa
         // disaring (sibling dari sanitisasi `window` yang sudah ada di
         // prospective's makeExpectation).
-        window: buildSafeCognitiveCopy({ from: windowFrom, to: windowTo })
+        window: buildSafeCognitiveCopy({ from: windowFrom, to: windowTo }, 0, undefined, undefined, bounds)
     });
 }
 
