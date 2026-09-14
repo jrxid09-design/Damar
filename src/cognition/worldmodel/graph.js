@@ -83,21 +83,31 @@ function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 26
     // Bug review independen (audit putaran-20, AUD20-P2-2): default parameter
     // hanya berlaku untuk `undefined` -- `budget: null` eksplisit lolos lalu
     // meledakkan `budget.nodes`/`budget.bytes` jadi TypeError mentah.
-    if (!budget || typeof budget !== "object" ||
-        !Number.isFinite(budget.nodes) || !Number.isFinite(budget.bytes)) {
-        budget = { nodes: 512, bytes: 262144 };
+    // Bug review independen (audit putaran-34, AUD34-ADV-5): `budget.nodes`/
+    // `budget.bytes` dulu dibaca berkali-kali -- sekali di guard tipe ini,
+    // lagi untuk `maxNodes`/`maxBytes` di bawah, lagi setiap iterasi
+    // traversal, lagi di cek byte -- sebuah accessor budget bisa lolos
+    // guard dengan nilai sah lalu berubah DI TENGAH traversal, membuat
+    // batas efektif tidak konsisten. `nodes`/`ms` dibaca SEKALI SAJA
+    // masing-masing (SEBELUM divalidasi) ke lokal; validasi dan seluruh
+    // traversal di bawah memakai lokal itu saja.
+    let maxNodes = budget?.nodes;
+    let maxBytes = budget?.bytes;
+    if (!budget || typeof budget !== "object" || !Number.isFinite(maxNodes) || !Number.isFinite(maxBytes)) {
+        maxNodes = 512;
+        maxBytes = 262144;
     }
     const boundedDepth = Math.min(depth, BOUNDS.NEIGHBORS_MAX_DEPTH);
     const nodeIds = new Set(seeds);
     let frontier = [...seeds];
     let truncated = false;
 
-    for (let d = 0; d < boundedDepth && nodeIds.size < budget.nodes; d++) {
+    for (let d = 0; d < boundedDepth && nodeIds.size < maxNodes; d++) {
         const next = [];
         for (const id of frontier) {
             const edges = adjacency(state.relations, id).slice(0, BOUNDS.NEIGHBORS_MAX_FANOUT);
             for (const { neighborId } of edges) {
-                if (nodeIds.size >= budget.nodes) { truncated = true; break; }
+                if (nodeIds.size >= maxNodes) { truncated = true; break; }
                 if (!nodeIds.has(neighborId)) { nodeIds.add(neighborId); next.push(neighborId); }
             }
         }
@@ -109,7 +119,7 @@ function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 26
         .filter(r => nodeIds.has(r.from) && nodeIds.has(r.to));
 
     let payload = { entities, relations };
-    if (Buffer.byteLength(JSON.stringify(payload)) > budget.bytes) {
+    if (Buffer.byteLength(JSON.stringify(payload)) > maxBytes) {
         truncated = true;
         const half = Math.max(1, Math.floor(entities.length / 2));
         payload = { entities: entities.slice(0, half), relations: relations.slice(0, half) };

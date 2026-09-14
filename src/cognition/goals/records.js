@@ -183,8 +183,18 @@ function validateConditionSpec(spec, label) {
     // destructuring yang SAMA, divalidasi sebagai lokal, dan lokal itulah
     // yang dipakai membangun salinan aman di bawah.
     const { subject, kind, attribute, ...specRest } = spec;
+    // Bug review independen (audit putaran-34, AUD34-P2-1): destructuring
+    // putaran-31 mengeluarkan `subject` ITU SENDIRI dari `spec` untuk satu
+    // baca, tapi properti DALAM subject (`entityId`/`relationId`) masih
+    // divalidasi lewat `subject.entityId`/`.relationId` lalu dibaca LAGI
+    // lewat `{...subject}` saat konstruksi di bawah -- getter stateful pada
+    // entityId/relationId bisa lolos validasi dengan nilai sah lalu
+    // menyimpan subject kosong, kondisi jatuh ke kunci sentinel
+    // "invalid:malformed-subject" (persis kegagalan yang wajib dicegah
+    // guard ini). Sekarang dikeluarkan juga lewat destructuring yang sama.
+    const { entityId, relationId, ...subjectRest } = subject ?? {};
     if (typeof kind !== "string" ||
-        !subject || (typeof subject.entityId !== "string" && typeof subject.relationId !== "string") ||
+        !subject || (typeof entityId !== "string" && typeof relationId !== "string") ||
         typeof attribute !== "string") {
         fail(REASONS.UNVERIFIABLE_SUCCESS_CONDITION,
             `${label} tidak dapat dievaluasi (kind/subject/attribute wajib ada)`);
@@ -215,7 +225,7 @@ function validateConditionSpec(spec, label) {
     // disaring+dibekukan sekaligus lewat buildSafeIntentTemplate (yang sudah
     // menolak BigInt/function/Symbol di kedalaman berapa pun); subject tetap
     // ditangani terpisah karena wajib objek (bukan dilewatkan begitu saja).
-    return deepFreeze(buildSafeIntentTemplate({ ...specRest, kind, attribute, subject: { ...subject } }));
+    return deepFreeze(buildSafeIntentTemplate({ ...specRest, kind, attribute, subject: { ...subjectRest, entityId, relationId } }));
 }
 
 /** G-1/G-2: SELF_PROPOSED tidak pernah menyetujui dirinya; AGENT_SUGGESTION tidak pernah mengatur ownerApproval. */
