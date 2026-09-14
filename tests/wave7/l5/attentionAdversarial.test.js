@@ -27,10 +27,15 @@ test("AT-repair-18: a hostile evidenceRef toString is never invoked, and two dis
     ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s1", subjectRef: { entityId: "e1" }, evidenceRef: evil }, "PERCEIVE");
     assert.equal(called, 0, "evidenceRef's toString must never be invoked during ingest/recompute");
 
-    const control = await createAttentionEconomy();
+    // Bug review independen (audit putaran-29): tanpa clock manual,
+    // effectivePriority's komponen aging (wall-clock nyata) berbeda tipis
+    // antara dua instance yang dibuat di saat nyata berbeda, membuat
+    // perbandingan persis flaky (kelas yang sama dengan WM-repair-13,
+    // putaran-23) -- bukan bug pada logika dedup itu sendiri.
+    const control = await createAttentionEconomy({ clock: manualClock(1000) });
     const { targetId: tControl } = control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "A" }, "PERCEIVE");
     control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "B" }, "PERCEIVE");
-    const objectRefs = await createAttentionEconomy();
+    const objectRefs = await createAttentionEconomy({ clock: manualClock(1000) });
     const { targetId: tObj } = objectRefs.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: { ev: "A" } }, "PERCEIVE");
     objectRefs.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: { ev: "B" } }, "PERCEIVE");
     assert.equal(objectRefs.getTarget(tObj).effectivePriority, control.getTarget(tControl).effectivePriority,
@@ -63,11 +68,13 @@ test("AT-repair-19: hostile toString on workKind/sourceKind/targetId never execu
 });
 
 test("AT-repair-20: two distinct NESTED-object evidenceRefs still count as two distinct corroboration pairs, not just flat ones (independent audit AUD25-P2-2)", async () => {
-    const control = await createAttentionEconomy();
+    // Bug review independen (audit putaran-29): sama seperti AT-repair-18,
+    // dibekukan supaya perbandingan tidak flaky karena wall-clock nyata.
+    const control = await createAttentionEconomy({ clock: manualClock(1000) });
     const { targetId: tControl } = control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "A" }, "PERCEIVE");
     control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "B" }, "PERCEIVE");
 
-    const nested = await createAttentionEconomy();
+    const nested = await createAttentionEconomy({ clock: manualClock(1000) });
     const { targetId: tNested } = nested.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: { nested: { x: 1 } } }, "PERCEIVE");
     nested.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: { nested: { x: 2 } } }, "PERCEIVE");
     assert.equal(nested.getTarget(tNested).effectivePriority, control.getTarget(tControl).effectivePriority,
@@ -104,11 +111,13 @@ test("AT-repair-22: two distinct evidenceRefs nested past the recursion depth ca
         for (let i = 0; i < depth; i++) v = { child: v };
         return v;
     }
-    const control = await createAttentionEconomy();
+    // Bug review independen (audit putaran-29): dibekukan supaya
+    // perbandingan tidak flaky karena wall-clock nyata.
+    const control = await createAttentionEconomy({ clock: manualClock(1000) });
     const { targetId: tControl } = control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "A" }, "PERCEIVE");
     control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "B" }, "PERCEIVE");
 
-    const deep = await createAttentionEconomy();
+    const deep = await createAttentionEconomy({ clock: manualClock(1000) });
     const { targetId: tDeep } = deep.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: deepObject(6, "A") }, "PERCEIVE");
     deep.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: deepObject(6, "B") }, "PERCEIVE");
     assert.equal(deep.getTarget(tDeep).effectivePriority, control.getTarget(tControl).effectivePriority,
@@ -124,13 +133,15 @@ test("AT-repair-23: mapToGovernorPriority never returns an inherited Object.prot
 });
 
 test("AT-repair-24: replaying the SAME object evidenceRef from the same source is one corroboration pair, not N (independent audit AUD27-P2-3)", async () => {
-    const ae = await createAttentionEconomy();
+    // Bug review independen (audit putaran-29): dibekukan supaya
+    // perbandingan tidak flaky karena wall-clock nyata.
+    const ae = await createAttentionEconomy({ clock: manualClock(1000) });
     const obj = { ev: "X" };
     const { targetId } = ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s", subjectRef: { entityId: "z" }, evidenceRef: obj }, "PERCEIVE");
     for (let i = 0; i < 6; i++) {
         ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s", subjectRef: { entityId: "z" }, evidenceRef: obj }, "PERCEIVE");
     }
-    const one = await createAttentionEconomy();
+    const one = await createAttentionEconomy({ clock: manualClock(1000) });
     const single = one.ingestSignal({ sourceKind: "SENSOR", sourceId: "s", subjectRef: { entityId: "z" }, evidenceRef: { ev: "X" } }, "PERCEIVE");
     assert.equal(ae.getTarget(targetId).effectivePriority, one.getTarget(single.targetId).effectivePriority,
         "replaying the same evidenceRef object reference must not inflate corroboration past a single pair");

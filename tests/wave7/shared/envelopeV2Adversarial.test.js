@@ -37,6 +37,14 @@ test("W7-ENV-06/07: confidence out of [0,1] rejected", () => {
         "ACC_INVALID_CONFIDENCE");
 });
 
+test("W7-ENV-repair-6: prototype-shaped provenance strings (__proto__/constructor/toString) are rejected as ACC_UNKNOWN_PROVENANCE, not accepted via an inherited Object.prototype member; a Symbol provenance/type also fails closed (independent audit AUD29-P2-1)", () => {
+    for (const p of ["__proto__", "constructor", "toString", "valueOf", "hasOwnProperty", "isPrototypeOf"]) {
+        assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ provenance: p })), "ACC_UNKNOWN_PROVENANCE");
+    }
+    assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ provenance: Symbol("p") })), "ACC_UNKNOWN_PROVENANCE");
+    assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ type: Symbol("t") })), "ACC_UNKNOWN_EVENT_TYPE");
+});
+
 test("W7-ENV-repair-4: a Symbol confidence/epistemicClass fails closed with an ACC_INVALID_* code, not a raw TypeError (independent audit AUD27-P2-4)", () => {
     assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ confidence: Symbol("c") })), "ACC_INVALID_CONFIDENCE");
     assertThrowsCode(() => envelope.makeEnvelope(baseSpec({ epistemicClass: Symbol("e") })), "ACC_INVALID_EPISTEMIC_CLASS");

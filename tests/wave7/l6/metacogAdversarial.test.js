@@ -102,6 +102,17 @@ test("MC-repair-14: a stateful getter subjectRef.entityId (valid on first read, 
     assert.doesNotThrow(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: sr }));
 });
 
+test("MC-repair-15: computeConfidence reads each evidenceQuality field exactly once, so basis and value are always consistent even with a stateful getter (independent audit AUD29-P2-2)", async () => {
+    const { computeConfidence } = require("../../../src/cognition/metacog/confidence");
+    let n = 0;
+    const eq = {};
+    Object.defineProperty(eq, "verifiedCount", { enumerable: true, get() { n++; return n === 1 ? 5 : 0; } });
+    Object.defineProperty(eq, "sourceCount", { enumerable: true, get() { return 0; } });
+    const result = computeConfidence(eq, 0);
+    assert.equal(result.basis, "VERIFIED_EVIDENCE");
+    assert.ok(result.value > 0.8, `basis=VERIFIED_EVIDENCE must produce a matching high value, got ${result.value}`);
+});
+
 test("MC-A1: fake confidence (model writes 0.99) is impossible — no API accepts a raw value", async () => {
     const mc = await createMetacognition();
     const a = mc.assess({ entityId: "e1" }, "claim", { value: 0.99, sourceCount: 0 }); // "value" in input ignored

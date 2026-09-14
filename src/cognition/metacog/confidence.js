@@ -17,7 +17,18 @@ const BASIS = Object.freeze([
 
 const STALE_AFTER_MS = 30 * 60_000;
 
-function determineBasis(evidenceQuality, nowMs) {
+// Bug review independen (audit putaran-29, AUD29-P2-2): putaran-28
+// menutup crash-nya (Symbol pada baca KEDUA tidak lagi meledak), tapi
+// determineBasis dan computeConfidence tetap membaca evidenceQuality
+// SECARA TERPISAH -- getter/Proxy stateful yang mengembalikan nilai sah
+// pada baca pertama (dipakai determineBasis memilih basis) lalu nilai
+// LAIN pada baca kedua (dipakai computeConfidence menghitung value)
+// menghasilkan basis dan value yang TIDAK KONSISTEN untuk satu evidenceQuality
+// yang sama -- pelanggaran MC-1/MC-2 (satu-satunya penulis, deterministik).
+// Field dibaca SEKALI di sini ke snapshot, dipakai bersama oleh determineBasis
+// (via basisFromSafe) MAUPUN computeConfidence -- tidak pernah membaca
+// evidenceQuality mentah lebih dari sekali per panggilan publik.
+function sanitizeEvidenceQuality(evidenceQuality) {
     // Bug review independen (audit putaran-21, AUD21-ADV-1): evidenceQuality
     // null/undefined meledakkan destructuring jadi TypeError mentah --
     // diperlakukan sebagai "tidak ada bukti" (NO_EVIDENCE), gagal aman,
@@ -30,44 +41,43 @@ function determineBasis(evidenceQuality, nowMs) {
     // `{valueOf(){...}}` mengeksekusi valueOf pemanggil. Dinormalisasi ke
     // angka aman (0 kalau bukan angka valid) sebelum dipakai.
     const safeNumber = (v) => (typeof v === "number" && Number.isFinite(v)) ? v : 0;
-    const sourceCount = safeNumber(raw.sourceCount);
-    const contradictionCount = safeNumber(raw.contradictionCount);
-    const verifiedCount = safeNumber(raw.verifiedCount);
-    const freshestAtMs = (typeof raw.freshestAtMs === "number" && Number.isFinite(raw.freshestAtMs)) ? raw.freshestAtMs : null;
-    const inferenceOnly = raw.inferenceOnly === true;
+    return {
+        sourceCount: safeNumber(raw.sourceCount),
+        contradictionCount: safeNumber(raw.contradictionCount),
+        verifiedCount: safeNumber(raw.verifiedCount),
+        freshestAtMs: (typeof raw.freshestAtMs === "number" && Number.isFinite(raw.freshestAtMs)) ? raw.freshestAtMs : null,
+        inferenceOnly: raw.inferenceOnly === true
+    };
+}
 
-    if (contradictionCount > 0) return "CONTESTED";
-    if (verifiedCount > 0) return "VERIFIED_EVIDENCE";
-    if (sourceCount >= 2) return "MULTI_SOURCE";
-    if (sourceCount === 1) {
-        const age = freshestAtMs !== null ? nowMs - freshestAtMs : Infinity;
+function basisFromSafe(safe, nowMs) {
+    if (safe.contradictionCount > 0) return "CONTESTED";
+    if (safe.verifiedCount > 0) return "VERIFIED_EVIDENCE";
+    if (safe.sourceCount >= 2) return "MULTI_SOURCE";
+    if (safe.sourceCount === 1) {
+        const age = safe.freshestAtMs !== null ? nowMs - safe.freshestAtMs : Infinity;
         return age > STALE_AFTER_MS ? "STALE_SOURCE" : "SINGLE_SOURCE";
     }
-    if (inferenceOnly) return "INFERENCE_ONLY";
+    if (safe.inferenceOnly) return "INFERENCE_ONLY";
     return "NO_EVIDENCE";
+}
+
+function determineBasis(evidenceQuality, nowMs) {
+    return basisFromSafe(sanitizeEvidenceQuality(evidenceQuality), nowMs);
 }
 
 /** MC-1/MC-2: fungsi murni, deterministik, dan satu-satunya penulis value. */
 function computeConfidence(evidenceQuality, nowMs) {
-    const basis = determineBasis(evidenceQuality, nowMs);
-    // Bug review independen (audit putaran-28, AUD28-P2-5): putaran-27
-    // menyaring sourceCount/verifiedCount di DALAM determineBasis, tapi
-    // computeConfidence MEMBACA ULANG evidenceQuality.verifiedCount/
-    // sourceCount mentah di sini -- sebuah getter/Proxy stateful yang
-    // mengembalikan nilai valid pada baca pertama (dipakai determineBasis
-    // untuk memilih basis) lalu Symbol pada baca KEDUA (di sini) tetap
-    // meledakkan TypeError, meniadakan jaminan "single read" yang justru
-    // ingin ditutup. Disaring ulang dengan predikat aman yang SAMA di sini,
-    // bukan membaca ulang raw evidenceQuality.
-    const raw2 = evidenceQuality || {};
-    const safeNumber = (v) => (typeof v === "number" && Number.isFinite(v)) ? v : 0;
-    const safeVerifiedCount = safeNumber(raw2.verifiedCount);
-    const safeSourceCount = safeNumber(raw2.sourceCount);
+    // SATU pembacaan evidenceQuality untuk seluruh panggilan ini -- basis
+    // DAN value berasal dari snapshot yang SAMA, tidak pernah dari dua
+    // pembacaan terpisah (lihat komentar AUD29-P2-2 di atas).
+    const safe = sanitizeEvidenceQuality(evidenceQuality);
+    const basis = basisFromSafe(safe, nowMs);
 
     let raw;
     switch (basis) {
-        case "VERIFIED_EVIDENCE": raw = 0.85 + 0.03 * Math.min(safeVerifiedCount, 5); break;
-        case "MULTI_SOURCE": raw = 0.55 + 0.05 * Math.min(safeSourceCount, 6); break;
+        case "VERIFIED_EVIDENCE": raw = 0.85 + 0.03 * Math.min(safe.verifiedCount, 5); break;
+        case "MULTI_SOURCE": raw = 0.55 + 0.05 * Math.min(safe.sourceCount, 6); break;
         case "SINGLE_SOURCE": raw = 0.45; break;
         case "STALE_SOURCE": raw = 0.25; break;
         case "INFERENCE_ONLY": raw = 0.30; break; // MC-A7: repetisi tidak menambah sumber, ceiling tetap rendah

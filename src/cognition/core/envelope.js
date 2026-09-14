@@ -98,6 +98,17 @@ function isKnownEventType(type) {
     return Object.prototype.hasOwnProperty.call(EVENT_TYPES, type);
 }
 
+// Bug review independen (audit putaran-29, AUD29-P2-1): `PROVENANCE[provenance]`
+// adalah indexing objek biasa yang menembus Object.prototype --
+// provenance:"__proto__"/"constructor"/"toString"/"valueOf"/
+// "hasOwnProperty"/"isPrototypeOf" semuanya mengembalikan anggota
+// Object.prototype yang terwarisi (truthy), jadi LOLOS validasi dan
+// tersimpan sebagai provenance kanonik -- asimetri dengan isKnownEventType
+// di atas (yang SUDAH pakai hasOwnProperty) di fungsi yang SAMA.
+function isKnownProvenance(value) {
+    return typeof value === "string" && Object.prototype.hasOwnProperty.call(PROVENANCE, value);
+}
+
 let seqCounter = 0;
 
 /**
@@ -112,13 +123,15 @@ function makeEnvelope({
 } = {}) {
 
     if (!isKnownEventType(type)) {
-        const error = new Error(`ACC: tipe event tidak terdaftar: '${type}'`);
+        // Bug review independen (audit putaran-29, AUD29-P2-1): interpolasi
+        // `${type}` mentah meledakkan TypeError untuk Symbol.
+        const error = new Error(`ACC: tipe event tidak terdaftar: '${typeof type === "string" ? type : typeof type}'`);
         error.code = "ACC_UNKNOWN_EVENT_TYPE";
         throw error;
     }
 
-    if (!PROVENANCE[provenance]) {
-        const error = new Error(`ACC: provenance tidak sah: '${provenance}'`);
+    if (!isKnownProvenance(provenance)) {
+        const error = new Error(`ACC: provenance tidak sah: '${typeof provenance === "string" ? provenance : typeof provenance}'`);
         error.code = "ACC_UNKNOWN_PROVENANCE";
         throw error;
     }
