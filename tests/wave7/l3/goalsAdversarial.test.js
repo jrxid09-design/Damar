@@ -269,6 +269,14 @@ test("GL-repair-79: createPlan's GLOBAL compaction fully compacts down to a newl
     assert.equal(ge2.getPlan(p3.planId), null);
 });
 
+test("GL-repair-80: createPlan's PER-GOAL compaction retains ZERO plans when MAX_PLAN_VERSIONS_RETAINED is 0, even when MAX_TOTAL_PLANS_RETAINED is not also exceeded -- `p` is always excluded from its own eviction pool (otherSameGoal), so round 59's per-goal fix deleted every sibling but never p itself, leaving the sole plan for that goal retained past a sanctioned zero per-goal cap whenever the global cap didn't independently trigger (independent audit round 62, Codex, AUD62-P2-1)", async () => {
+    const ge = await createGoalEngine({ bounds: { MAX_PLAN_VERSIONS_RETAINED: 0, MAX_TOTAL_PLANS_RETAINED: 1 } });
+    const g = ge.proposeGoal(baseGoalSpec());
+    const p = ge.createPlan({ goalRef: g.goalId, planId: "p0", steps: [] });
+    assert.ok(p);
+    assert.equal(ge.getPlan("p0"), null);
+});
+
 test("GL-repair-9: terminal commitments are retention-bounded, not just OPEN ones (independent audit W7R5-P2-3)", async () => {
     const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_COMMITMENTS_RETAINED: 5 } });
     for (let i = 0; i < 50; i++) {
@@ -920,14 +928,19 @@ test("GL-repair-74: invalidatePlanIfAssumptionBroken stores an EMPTY invalidated
     assert.deepEqual(geFrac.getPlan(pFrac.planId).invalidatedBy, []);
 });
 
-test("GL-repair-75: createPlan does not raw-throw when MAX_PLAN_VERSIONS_RETAINED is 0 or fractional, and still returns the plan it created -- the per-goal version-compaction eviction loop indexed past otherSameGoal.length when overflow exceeded it, the same zero-boundary class round 58 fixed for invalidatedBy but never swept here (independent audit round 59, OpenCode, W7R59-P2-1)", async () => {
-    for (const v of [0, 0.5]) {
-        const ge = await createGoalEngine({ bounds: { MAX_PLAN_VERSIONS_RETAINED: v } });
-        const g = ge.proposeGoal(baseGoalSpec());
-        let p;
-        assert.doesNotThrow(() => { p = ge.createPlan({ goalRef: g.goalId, steps: [] }); });
-        assert.equal(ge.getPlan(p.planId).planId, p.planId);
-    }
+test("GL-repair-75: createPlan does not raw-throw when MAX_PLAN_VERSIONS_RETAINED is 0 or fractional -- the per-goal version-compaction eviction loop indexed past otherSameGoal.length when overflow exceeded it, the same zero-boundary class round 58 fixed for invalidatedBy but never swept here (independent audit round 59, OpenCode, W7R59-P2-1); at a truncated bound of >=1 (e.g. 1.5) the plan is retained, at a truncated bound of 0 it is not (see GL-repair-80/AUD62-P2-1)", async () => {
+    const geFrac = await createGoalEngine({ bounds: { MAX_PLAN_VERSIONS_RETAINED: 1.5 } });
+    const gFrac = geFrac.proposeGoal(baseGoalSpec());
+    let pFrac;
+    assert.doesNotThrow(() => { pFrac = geFrac.createPlan({ goalRef: gFrac.goalId, steps: [] }); });
+    assert.equal(geFrac.getPlan(pFrac.planId).planId, pFrac.planId);
+
+    const ge0 = await createGoalEngine({ bounds: { MAX_PLAN_VERSIONS_RETAINED: 0 } });
+    const g0 = ge0.proposeGoal(baseGoalSpec());
+    let p0;
+    assert.doesNotThrow(() => { p0 = ge0.createPlan({ goalRef: g0.goalId, steps: [] }); });
+    assert.ok(p0);
+    assert.equal(ge0.getPlan(p0.planId), null);
 });
 
 test("GL-repair-70: transition() fails closed to APPROVAL_EXPIRED (not raw-throw) when authorityPort.checkApproval() returns a revoked-Proxy result -- treated the same as an invalid/falsy check (independent audit W7R50-ADV-1)", async () => {

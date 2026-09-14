@@ -539,6 +539,13 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         if (totalForGoal > keepMax) {
             const overflow = Math.min(totalForGoal - keepMax, otherSameGoal.length);
             for (let i = 0; i < overflow; i++) plans.delete(otherSameGoal[i].planId);
+            // Bug review independen (audit putaran-62, Codex, AUD62-P2-1):
+            // `p` SELALU dikecualikan dari otherSameGoal (komentar di atas),
+            // jadi pada keepMax 0 sekalipun overflow di atas menghapus
+            // SEMUA sibling tapi tidak pernah `p` sendiri -- satu-satunya
+            // plan goal ini tetap tersimpan melampaui cap per-goal 0, kalau
+            // kompaksi global (MAX_TOTAL_PLANS_RETAINED) tidak ikut terpicu.
+            if (keepMax === 0) plans.delete(p.planId);
         }
         // Bug review independen (audit putaran-6, W7R6-P2-1): MAX_PLAN_VERSIONS_RETAINED
         // hanya membatasi PER goalRef -- createPlan tidak pernah memvalidasi
