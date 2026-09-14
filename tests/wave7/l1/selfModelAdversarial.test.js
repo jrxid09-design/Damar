@@ -258,6 +258,24 @@ test("SM-repair-21: snapshot() never raw-throws when providerPort.activeProvider
     assert.doesNotThrow(() => sm.snapshot());
 });
 
+test("SM-repair-22: snapshot()'s activeProviders copy is capped at MAX_ACTIVE_PROVIDERS even when a hostile Proxy fabricates a huge .length -- round 55's per-index copy removed the raw-throw but had no upper bound (independent audit round 56, Codex, W7R56-P2-1)", async () => {
+    const { BOUNDS } = require("../../../src/cognition/selfmodel/bounds");
+    const reg = { get: () => ({ id: "x" }), has: () => true, getAvailability: () => null };
+    let reads = 0;
+    const arrProxy = new Proxy([], {
+        get(t, p, rec) {
+            if (p === Symbol.iterator) throw new Error("hostile iterator");
+            if (p === "length") return 100000;
+            if (typeof p === "string" && /^\d+$/.test(p)) { reads++; return undefined; }
+            return Reflect.get(t, p, rec);
+        }
+    });
+    const sm = await createSelfModel({ capabilityRegistry: reg, providerPort: { activeProviders: () => arrProxy } });
+    const snap = sm.snapshot();
+    assert.ok(snap.activeProviders.length <= BOUNDS.MAX_ACTIVE_PROVIDERS, "activeProviders harus dibatasi MAX_ACTIVE_PROVIDERS");
+    assert.ok(reads <= BOUNDS.MAX_ACTIVE_PROVIDERS, "jumlah baca index tidak boleh melebihi MAX_ACTIVE_PROVIDERS");
+});
+
 test("SM-repair-18: assess() never raw-throws when the capability registry returns a revoked-Proxy descriptor -- descriptorRef falls back to capabilityId, same as a missing descriptor.id (independent audit W7R50-ADV-1)", async () => {
     const { proxy, revoke } = Proxy.revocable({}, {});
     revoke();

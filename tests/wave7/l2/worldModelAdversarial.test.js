@@ -600,6 +600,31 @@ test("WM-repair-89: createWorldModel never raw-throws on a revoked/throwing cloc
     assert.doesNotThrow(() => wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" }));
 });
 
+test("WM-repair-90: validateLabels never raw-throws when labels' getOwnPropertyDescriptor trap succeeds once (during Object.keys) then throws on the same key inside the copy loop (independent audit round 56, W7R56-P2-2)", async () => {
+    const wm = await createWorldModel({});
+    let calls = 0;
+    const labels = new Proxy({ a: "1" }, {
+        getOwnPropertyDescriptor(t, p) {
+            if (++calls > 1) throw new Error("hostile descriptor trap");
+            return Reflect.getOwnPropertyDescriptor(t, p);
+        },
+        ownKeys(t) { return Reflect.ownKeys(t); },
+        get(t, p, r) { return Reflect.get(t, p, r); }
+    });
+    assert.throws(() => wm.declareEntity({ entityId: "e1", entityKind: "k", labels, source: "s" }),
+        (e) => e && e.reason === "INVALID_RECORD");
+});
+
+test("WM-repair-91: declareHypothesis rejects a fabricated negative candidateValues length instead of silently storing an empty array (independent audit round 56, W7R56-P2-3)", async () => {
+    const wm = await createWorldModel({});
+    wm.declareEntity({ entityId: "e1", entityKind: "k", source: "s" });
+    const cand = new Proxy([{ value: "x", weight: 1 }], { get(t, p, r) { if (p === "length") return -1; return Reflect.get(t, p, r); } });
+    assert.throws(() => wm.declareHypothesis({
+        hypothesisId: "h1", subject: { entityId: "e1" }, attribute: "a",
+        candidateValues: cand, expiresAt: "2030-01-01T00:00:00.000Z"
+    }), (e) => e && e.reason === "INVALID_RECORD");
+});
+
 test("WM-repair-87: the exported subjectKeyOf() never raw-throws on a revoked-Proxy subject -- falls back to the same malformed-subject sentinel as any other unreadable subject, matching its own never-throws contract (independent audit W7R47-P2-2)", async () => {
     const { subjectKeyOf } = require("../../../src/cognition/worldmodel/query");
     const r = Proxy.revocable({}, {});

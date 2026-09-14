@@ -94,7 +94,17 @@ function validateLabels(labels) {
         // getOwnPropertyDescriptor (tidak pernah memanggil getter);
         // properti accessor diperlakukan sebagai absen (string kosong),
         // konsisten dengan perlakuan lenient nilai non-primitif di bawah.
-        const desc = Object.getOwnPropertyDescriptor(labels, key);
+        // Bug review independen (audit putaran-56, W7R56-P2-2): descriptor
+        // read di atas komentar bisa BERHASIL sekali (saat Object.keys
+        // memicu trap ownKeys) lalu MELEMPAR di iterasi loop ini -- Proxy
+        // yang trap getOwnPropertyDescriptor-nya sukses sekali lalu gagal
+        // tidak tertangkap try/catch Object.keys di atas. Dibungkus di sini.
+        let desc;
+        try {
+            desc = Object.getOwnPropertyDescriptor(labels, key);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "labels tidak dapat diverifikasi dengan aman, ditolak");
+        }
         const raw = (desc && !desc.get && !desc.set) ? desc.value : undefined;
         // Bug review independen (audit putaran-28, AUD28-P2-7): `String(x)`
         // mentah mengeksekusi toString hostile milik pemanggil untuk objek,
@@ -327,7 +337,12 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
     } catch {
         fail(REASONS.INVALID_RECORD, "candidateValues tidak dapat diverifikasi dengan aman, ditolak");
     }
-    if (!Number.isInteger(candidateValuesLen) || candidateValuesLen === 0) {
+    // Bug review independen (audit putaran-56, W7R56-P2-3): `=== 0` tidak
+    // menolak length negatif yang dipalsukan (mis. -1) -- satu-satunya
+    // guard panjang di src/cognition yang tidak pakai `< 0`/`<= 0`.
+    // `.slice(0,16)` men-ToLength(-1) jadi 0, diam-diam menyimpan array
+    // kosong padahal kontrak "wajib tidak kosong" seharusnya menolak.
+    if (!Number.isInteger(candidateValuesLen) || candidateValuesLen <= 0) {
         fail(REASONS.INVALID_RECORD, "candidateValues wajib array tidak kosong");
     }
     let safeCandidateValues;
