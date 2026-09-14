@@ -117,22 +117,46 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
     // lane ini yang mensyaratkan penggabungan dua objek BERBEDA REFERENSI
     // meski isinya sama -- hanya mensyaratkan objek BERBEDA tetap
     // dibedakan, yang tetap terpenuhi).
+    // WeakMap menerima objek MAUPUN fungsi sebagai kunci -- keduanya
+    // dipakai untuk identitas berbasis referensi murni (O(1), tidak pernah
+    // membaca isinya).
     const objectEvidenceRefIds = new WeakMap();
     let nextObjectEvidenceRefId = 1;
+    // Bug review independen (audit putaran-39, AUD39-P2-1, regresi
+    // diperkenalkan kandidat putaran-38): perbaikan AUD38-ADV-2 mengganti
+    // `return t;` dengan `return `${t}:${String(evidenceRef)}`;` -- niatnya
+    // memberi identitas berbeda untuk nilai primitif berbeda, TAPI
+    // `String(fn)` pada sebuah FUNCTION memanggil toString milik pemanggil
+    // (mengeksekusi kode pemanggil di dalam ingestSignal, melanggar
+    // kontrak "toString tidak pernah dipanggil" yang sudah diuji AT-repair-
+    // 18/29), dan `String(symbol)`/`String(fn)` TIDAK injektif -- dua
+    // Symbol/function BERBEDA dengan deskripsi/sumber yang SAMA runtuh ke
+    // satu identitas, tetap undercounting korroborasi. Function (objek
+    // secara JS, `typeof === "function"`) sekarang memakai jalur WeakMap
+    // referensi murni yang SAMA seperti objek biasa (tidak pernah dibaca/
+    // di-toString). Symbol adalah primitif (tidak bisa jadi kunci WeakMap)
+    // -- Map biasa terpisah dipakai, dibatasi eksplisit dengan eviksi FIFO
+    // (Symbol tidak pernah di-garbage-collect otomatis dari Map biasa).
+    const symbolEvidenceRefIds = new Map();
+    let nextSymbolEvidenceRefId = 1;
     function evidenceRefIdentity(evidenceRef) {
         if (evidenceRef === null || evidenceRef === undefined) return "";
         const t = typeof evidenceRef;
         if (t === "string" || t === "number" || t === "boolean") return `${t}:${evidenceRef}`;
-        // Bug review independen (audit putaran-38, AUD38-ADV-2): sebelumnya
-        // `return t;` meruntuhkan SEMUA evidenceRef bigint/symbol/function ke
-        // satu identitas per tipe ("bigint"/"symbol"/"function"), membuat dua
-        // evidenceRef primitif yang benar-benar berbeda (mis. 1n vs 2n)
-        // dihitung sebagai bukti korroborasi yang SAMA. BigInt sudah ditolak
-        // tertutup di makeSignal (AUD38-ADV-2); paritas di sini untuk
-        // symbol/function (yang tetap diterima sebagai data tidak aktif,
-        // lihat catatan deepFreeze) supaya dua nilai berbeda tetap
-        // menghasilkan identitas berbeda.
-        if (t !== "object") return `${t}:${String(evidenceRef)}`;
+        if (t === "symbol") {
+            if (!symbolEvidenceRefIds.has(evidenceRef)) {
+                if (symbolEvidenceRefIds.size >= bounds.MAX_SEEN_SYMBOL_EVIDENCE_REFS) {
+                    symbolEvidenceRefIds.delete(symbolEvidenceRefIds.keys().next().value);
+                }
+                symbolEvidenceRefIds.set(evidenceRef, nextSymbolEvidenceRefId++);
+            }
+            return `symbol:${symbolEvidenceRefIds.get(evidenceRef)}`;
+        }
+        // BigInt sudah ditolak tertutup di makeSignal sebelum sempat
+        // tersimpan, tapi identitas ini dihitung SEBELUM validasi itu --
+        // `String(bigint)` aman (BigInt.prototype.toString bukan sesuatu
+        // yang bisa ditimpa per-instance oleh pemanggil).
+        if (t !== "object" && t !== "function") return `${t}:${String(evidenceRef)}`;
         if (!objectEvidenceRefIds.has(evidenceRef)) objectEvidenceRefIds.set(evidenceRef, nextObjectEvidenceRefId++);
         return `object:${objectEvidenceRefIds.get(evidenceRef)}`;
     }

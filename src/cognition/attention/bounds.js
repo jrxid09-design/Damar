@@ -36,7 +36,13 @@ const BOUNDS = Object.freeze({
     MAX_SUPPORTING_SIGNALS_PER_TARGET: 64,
     MAX_TRACKED_SOURCES: 4096,
     MAX_GOVERNOR_MAPPING_AUDIT: 4096,
-    MAX_SEEN_SIGNAL_IDS: 50000
+    MAX_SEEN_SIGNAL_IDS: 50000,
+    // Bug review independen (audit putaran-39, AUD39-P2-1): Symbol
+    // evidenceRef adalah primitif (bukan objek), jadi tidak bisa jadi
+    // kunci WeakMap -- Map biasa dipakai, yang TIDAK di-garbage-collect
+    // sendiri seperti WeakMap. Dibatasi eksplisit dengan eviksi FIFO,
+    // sama seperti MAX_SEEN_SIGNAL_IDS.
+    MAX_SEEN_SYMBOL_EVIDENCE_REFS: 50000
 });
 
 module.exports = { SCHEMA_VERSION, PRIORITY_CLASSES, CLASS_QUOTA, CLASS_BASE, BOUNDS };

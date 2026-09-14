@@ -185,7 +185,16 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
     // buildSafeCognitiveCopy lebih dulu; `kind` diturunkan dari salinan
     // aman itu, dan salinan yang SAMA dipakai untuk penyimpanan di bawah
     // (tidak disaring dua kali).
-    const safeProposals = proposals.map(p => {
+    // Bug review independen (audit putaran-39, AUD39-P2-2, regresi
+    // diperkenalkan kandidat putaran-38): `Array.prototype.map` MELEWATI
+    // lubang (hole) pada array jarang (sparse) -- `new Array(2).map(cb)`
+    // tidak pernah memanggil `cb` sama sekali untuk indeks yang kosong,
+    // jadi guard "setiap proposal wajib objek" tidak pernah tereksekusi
+    // untuk elemen itu dan lubangnya lolos tersimpan (beda dengan
+    // `for...of` sebelumnya, yang mengunjungi lubang sebagai `undefined`
+    // lewat iterator array). `Array.from(arr, cb)` mengunjungi lubang
+    // SEBAGAI `undefined` sama seperti `for...of`, menutup celah ini.
+    const safeProposals = Array.from(proposals, p => {
         if (!p || typeof p !== "object") fail(REASONS.INVALID_RECORD, "setiap proposal wajib objek");
         const sp = buildSafeCognitiveCopy(p);
         const kind = sp?.kind;
@@ -200,7 +209,11 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
     // ditolak juga oleh sanitizer. Disaring SEKALI lewat
     // buildSafeCognitiveCopy lebih dulu (fail closed untuk objek non-form
     // di sini); severity untuk pengurutan diturunkan dari salinan aman.
-    const safeFindings = findings.map(f => {
+    // Bug review independen (audit putaran-39, AUD39-P2-2 sibling): `.map`
+    // melewati lubang array sparse -- `Array.from` dipakai supaya lubang
+    // dikunjungi sebagai `undefined` dan ditolak oleh guard, sama seperti
+    // perbaikan di atas untuk proposals.
+    const safeFindings = Array.from(findings, f => {
         if (!f || typeof f !== "object") fail(REASONS.INVALID_RECORD, "setiap finding wajib objek");
         return buildSafeCognitiveCopy(f);
     });
