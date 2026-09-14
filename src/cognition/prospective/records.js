@@ -116,6 +116,13 @@ function buildSafePayloadRef(value, depth = 0, budget) {
     if (t === "function") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa fungsi (termasuk toJSON)");
     if (t === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa Symbol");
     if (t === "bigint") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh membawa BigInt");
+    // Bug review independen (audit putaran-31, AUD31-ADV-1): sibling dari
+    // worldmodel's buildSafeBeliefValue (AUD30-ADV-1) -- angka non-finite
+    // (Infinity/-Infinity/NaN) lolos apa adanya lalu diam-diam berubah
+    // jadi `null` saat persist() lewat backend JSON (mis. sqlite).
+    if (t === "number" && !Number.isFinite(value)) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef tidak boleh berupa angka non-finite (NaN/Infinity)");
+    }
     if (t !== "object") return value;
     if (depth > MAX_PAYLOAD_SCAN_DEPTH) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "payloadRef terlalu dalam untuk diverifikasi dengan aman, ditolak");

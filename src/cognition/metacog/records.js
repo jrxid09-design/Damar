@@ -5,6 +5,20 @@
 const { REASONS, fail } = require("./errors");
 const { sanitizeEvidenceQuality, confidenceFromSafe } = require("./confidence");
 
+// Bug review independen (audit putaran-31, AUD31-P2-5): `Object.freeze({...f})`/
+// `Object.freeze({...p})` di makeReview cuma SATU level -- objek bersarang
+// di dalam finding.detail/proposal.payload dll tetap referensi milik
+// pemanggil, mutasi pasca-openReview() menulis ulang review kanonik
+// tersimpan tanpa restart sama sekali (kelas yang sama dengan W7R8/W7R9/
+// W7R7-P1-* yang sudah ditutup di lane lain, belum dimigrasikan ke sini).
+function deepFreeze(value, seen = new WeakSet()) {
+    if (!value || typeof value !== "object") return value;
+    if (seen.has(value)) return value;
+    seen.add(value);
+    for (const key of Reflect.ownKeys(value)) deepFreeze(value[key], seen);
+    return Object.freeze(value);
+}
+
 const TRIGGERS = new Set(["CONTRADICTION", "EXPECTATION_VIOLATED", "REPEATED_FAILURE", "LOW_CONFIDENCE_ACTION", "OWNER_CHALLENGE", "SCHEDULED"]);
 const PROPOSAL_KINDS = new Set(["REPLAN", "PROBE", "ASK_OWNER", "LOWER_CONFIDENCE", "ABANDON_GOAL", "OPEN_CONTRADICTION", "RECALIBRATE"]);
 
@@ -78,9 +92,9 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
 
     return Object.freeze({
         reviewId, trigger,
-        findings: Object.freeze(boundedFindings.map(f => Object.freeze({ ...f }))),
+        findings: Object.freeze(boundedFindings.map(f => deepFreeze({ ...f }))),
         findingsTruncated: findings.length > bounds.MAX_FINDINGS_PER_REVIEW,
-        proposals: Object.freeze(boundedProposals.map(p => Object.freeze({ ...p }))),
+        proposals: Object.freeze(boundedProposals.map(p => deepFreeze({ ...p }))),
         cost: Object.freeze({ ...cost }),
         state: "OPEN"
     });

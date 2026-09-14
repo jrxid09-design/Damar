@@ -62,6 +62,13 @@ function buildSafeIntentTemplate(value, depth = 0, budget) {
     // saveSnapshot() saat persist() -- satu record bisa mematikan seluruh
     // durabilitas lane goals/prospective.
     if (t === "bigint") fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa BigInt (tidak dapat diserialisasi)");
+    // Bug review independen (audit putaran-31, AUD31-ADV-1): sibling dari
+    // worldmodel's buildSafeBeliefValue (AUD30-ADV-1) -- angka non-finite
+    // (Infinity/-Infinity/NaN) lolos apa adanya lalu diam-diam berubah
+    // jadi `null` saat persist() lewat backend JSON.
+    if (t === "number" && !Number.isFinite(value)) {
+        fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh berupa angka non-finite (NaN/Infinity)");
+    }
     if (t !== "object") return value;
     if (depth > MAX_INTENT_SCAN_DEPTH) {
         fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate terlalu dalam untuk diverifikasi dengan aman, ditolak");
@@ -165,10 +172,20 @@ function validateConditionSpec(spec, label) {
     // override-nya diabaikan). Dengan destructuring, `specRest` TIDAK
     // PERNAH punya kunci `subject` sama sekali, jadi spread-nya tidak
     // menyentuhnya lagi -- total tepat SATU baca.
-    const { subject, ...specRest } = spec;
-    if (typeof spec.kind !== "string" ||
+    // Bug review independen (audit putaran-31, AUD31-P2-3): perbaikan
+    // putaran-30 hanya mengeluarkan `subject` lewat destructuring --
+    // `kind`/`attribute` masih divalidasi lewat `spec.kind`/`spec.attribute`
+    // (baca KEDUA), sementara nilai TERSIMPAN datang dari `specRest` (yang
+    // sudah membaca kind/attribute SEKALI lewat pengumpulan rest destructuring
+    // di atas) -- getter stateful bisa membuat guard memvalidasi baca
+    // KEDUA yang valid sementara nilai tersimpan (baca PERTAMA) tidak
+    // valid. `kind`/`attribute` sekarang ikut dikeluarkan lewat
+    // destructuring yang SAMA, divalidasi sebagai lokal, dan lokal itulah
+    // yang dipakai membangun salinan aman di bawah.
+    const { subject, kind, attribute, ...specRest } = spec;
+    if (typeof kind !== "string" ||
         !subject || (typeof subject.entityId !== "string" && typeof subject.relationId !== "string") ||
-        typeof spec.attribute !== "string") {
+        typeof attribute !== "string") {
         fail(REASONS.UNVERIFIABLE_SUCCESS_CONDITION,
             `${label} tidak dapat dievaluasi (kind/subject/attribute wajib ada)`);
     }
@@ -198,7 +215,7 @@ function validateConditionSpec(spec, label) {
     // disaring+dibekukan sekaligus lewat buildSafeIntentTemplate (yang sudah
     // menolak BigInt/function/Symbol di kedalaman berapa pun); subject tetap
     // ditangani terpisah karena wajib objek (bukan dilewatkan begitu saja).
-    return deepFreeze(buildSafeIntentTemplate({ ...specRest, subject: { ...subject } }));
+    return deepFreeze(buildSafeIntentTemplate({ ...specRest, kind, attribute, subject: { ...subject } }));
 }
 
 /** G-1/G-2: SELF_PROPOSED tidak pernah menyetujui dirinya; AGENT_SUGGESTION tidak pernah mengatur ownerApproval. */

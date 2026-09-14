@@ -16,6 +16,7 @@ const { BOUNDS, SCHEMA_VERSION } = require("./bounds");
 const { laws } = require("./laws");
 const { makeReminder, makeExpectation, makeWakeEvent } = require("./records");
 const { loadSnapshot, saveSnapshot } = require("./store");
+const { canonicalJson } = require("../core/envelope");
 
 function occurrenceKey(reminderId, occurrenceIndex) { return `${reminderId}:${occurrenceIndex}`; }
 
@@ -92,10 +93,16 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         if (armedReminderCount >= bounds.MAX_ARMED_REMINDERS) {
             fail(REASONS.PROSPECTIVE_FULL, "jumlah reminder armed melebihi batas");
         }
-        if (spec.ownerRef && (remindersPerGoal.get(spec.ownerRef) ?? 0) >= bounds.MAX_REMINDERS_PER_GOAL) {
+        // Bug review independen (audit putaran-31, AUD31-P2-4): `spec.ownerRef`
+        // dibaca berkali-kali (dua kali di guard ini, lagi lewat `{...spec}`
+        // saat konstruksi) -- accessor stateful bisa membuat guard memvalidasi
+        // owner yang BELUM penuh sementara reminder yang benar-benar tersimpan
+        // memakai owner LAIN yang sudah di batas, melampaui MAX_REMINDERS_PER_GOAL.
+        const ownerRef = spec.ownerRef;
+        if (ownerRef && (remindersPerGoal.get(ownerRef) ?? 0) >= bounds.MAX_REMINDERS_PER_GOAL) {
             fail(REASONS.PER_GOAL_LIMIT_EXCEEDED, "jumlah reminder per goal melebihi batas");
         }
-        const reminder = makeReminder({ ...spec, reminderId: reminderId ?? crypto.randomUUID(), nowIso: nowIso() });
+        const reminder = makeReminder({ ...spec, reminderId: reminderId ?? crypto.randomUUID(), ownerRef, nowIso: nowIso() });
         const armed = Object.freeze({ ...reminder, armedAtMs: now() });
         reminders.set(armed.reminderId, armed);
         armedReminderCount += 1;
@@ -319,7 +326,18 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
             // jatuh ke VIOLATED. Tanpa earliestAt berarti benar-benar tanpa
             // batas bawah (epoch), bukan "0" yang di-parse sebagai tanggal.
             const earliestMs = e.window.earliestAt != null ? Date.parse(e.window.earliestAt) : 0;
-            if (observed && observed.value === e.expectedValue &&
+            // Bug review independen (audit putaran-31, AUD31-P2-2): `observed.value
+            // === e.expectedValue` adalah kesetaraan REFERENSI -- expectedValue
+            // yang bertipe objek SELALU disalin+dibekukan sendiri oleh
+            // makeExpectation (buildSafePayloadRef), jadi referensi pemanggil
+            // TIDAK PERNAH bisa alias objek tersimpan; sebuah observasi objek
+            // yang SECARA STRUKTURAL sama (dua produser berbeda) tidak pernah
+            // bisa SATISFIED, lalu jatuh ke VIOLATED begitu latestAt lewat --
+            // kelas plain-input yang sama persis dengan AUD30-P1-1 (worldmodel).
+            // canonicalJson (sudah ada tepat untuk perbandingan ini) dipakai
+            // di sini juga.
+            const sameValue = canonicalJson(observed?.value) === canonicalJson(e.expectedValue);
+            if (observed && sameValue &&
                 observed.atMs >= earliestMs && observed.atMs <= Date.parse(e.window.latestAt)) {
                 const next = Object.freeze({ ...e, state: "SATISFIED" });
                 expectations.set(e.expectationId, next);
