@@ -22,6 +22,32 @@ const ADMISSIBLE_OUTCOME_TIERS = new Set(["T1", "T2"]);
 
 async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds = BOUNDS } = {}) {
 
+    // Bug review independen (audit putaran-53, AUD53-P2-2): `bounds` yang
+    // dioverride pemanggil dibaca mentah di banyak titik di seluruh lane
+    // ini -- Proxy yang di-revoke raw-throw pada baca PERTAMA. Dinormalisasi
+    // SEKALI di sini (spread memicu trap `ownKeys` kalau ada); field yang
+    // hilang jatuh ke `BOUNDS` asli, bukan `undefined`.
+    try {
+        bounds = (bounds && typeof bounds === "object") ? { ...BOUNDS, ...bounds } : BOUNDS;
+    } catch {
+        bounds = BOUNDS;
+    }
+
+    // Bug review independen (audit putaran-53, AUD53-P2-2): `clock.nowMs()`
+    // mentah -- Proxy yang di-revoke (atau `nowMs` yang melempar/bukan
+    // fungsi/non-finite) raw-throw dari setiap pemanggil now(). Didefinisikan
+    // SEBELUM `budgetWindowStartMs` (yang memanggilnya) supaya jaminan ini
+    // berlaku sejak baca PERTAMA, bukan hanya di pemanggil belakangan.
+    function now() {
+        let candidate;
+        try {
+            candidate = typeof clock?.nowMs === "function" ? clock.nowMs() : undefined;
+        } catch {
+            candidate = undefined;
+        }
+        return Number.isFinite(candidate) ? candidate : Date.now();
+    }
+
     const reviews = new Map();
     // Bug review independen (audit putaran-37, AUD37-ADV-1): Map (bukan
     // array) supaya cek tabrakan recordId dan penghapusan tertua di
@@ -29,11 +55,9 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
     // mempertahankan urutan penyisipan sama seperti array untuk FIFO.
     const calibrationRecords = new Map(); // recordId -> record
     const lastReviewBySubjectTrigger = new Map(); // `${subjectKey}::${trigger}` -> reviewId
-    let budgetWindowStartMs = clock.nowMs();
+    let budgetWindowStartMs = now();
     let tokensSpentThisWindow = 0;
     let msSpentThisWindow = 0;
-
-    function now() { return clock.nowMs(); }
 
     function rollBudgetWindow() {
         if (now() - budgetWindowStartMs >= 3_600_000) {

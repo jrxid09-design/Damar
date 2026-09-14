@@ -65,6 +65,17 @@ function targetKey(subjectRef, workKind) {
 
 async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bounds = BOUNDS, governorPort = null } = {}) {
 
+    // Bug review independen (audit putaran-53, AUD53-P2-2): `bounds` yang
+    // dioverride pemanggil dibaca mentah di puluhan titik di seluruh lane
+    // ini -- Proxy yang di-revoke raw-throw pada baca PERTAMA. Dinormalisasi
+    // SEKALI di sini (spread memicu trap `ownKeys` kalau ada); field yang
+    // hilang jatuh ke `BOUNDS` asli, bukan `undefined`.
+    try {
+        bounds = (bounds && typeof bounds === "object") ? { ...BOUNDS, ...bounds } : BOUNDS;
+    } catch {
+        bounds = BOUNDS;
+    }
+
     const signalsBySource = new Map();     // sourceId -> timestamps[] (untuk laju)
     const targets = new Map();             // targetId -> AttentionTarget
     const targetIdByKey = new Map();       // subjectRef+workKind -> targetId
@@ -79,7 +90,18 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
     // di lane lain).
     const signalIdToTargetId = new Map();
 
-    function now() { return clock.nowMs(); }
+    // Bug review independen (audit putaran-53, AUD53-P2-2): `clock.nowMs()`
+    // mentah -- Proxy yang di-revoke (atau `nowMs` yang melempar/bukan
+    // fungsi/non-finite) raw-throw dari setiap pemanggil now().
+    function now() {
+        let candidate;
+        try {
+            candidate = typeof clock?.nowMs === "function" ? clock.nowMs() : undefined;
+        } catch {
+            candidate = undefined;
+        }
+        return Number.isFinite(candidate) ? candidate : Date.now();
+    }
 
     function enforceSourceRate(sourceId) {
         const windowMs = 60_000;

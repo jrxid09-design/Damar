@@ -43,12 +43,30 @@ const ADMISSIBLE_TIERS = new Set(["T1", "T2", "T4"]);
 // untuk array `value` di lane yang SAMA) supaya konsisten, bukan generik.
 const MAX_SAFE_ARRAY_LENGTH = BOUNDS.MAX_VALUE_ARRAY_LENGTH;
 function buildSafeArray(arr, mapFn) {
-    const len = arr.length;
+    // Bug review independen (audit putaran-53, AUD53-P2-1, sapuan
+    // paritas): sibling dari goals/metacog's buildSafeArray -- kedua
+    // pemanggil di file ini sudah `.slice()` lebih dulu, tapi helper
+    // ITU SENDIRI tetap harus trap-safe supaya kelas ini tidak
+    // terbuka lagi kalau ada pemanggil baru tanpa slice di masa depan.
+    let len;
+    try {
+        len = arr.length;
+    } catch {
+        fail(REASONS.INVALID_RECORD, "panjang array tidak dapat diverifikasi dengan aman, ditolak");
+    }
     if (!Number.isInteger(len) || len < 0 || len > MAX_SAFE_ARRAY_LENGTH) {
         fail(REASONS.INVALID_RECORD, "panjang array tidak sah atau melebihi batas");
     }
     const out = [];
-    for (let i = 0; i < len; i++) out.push(mapFn(arr[i], i));
+    for (let i = 0; i < len; i++) {
+        let element;
+        try {
+            element = arr[i];
+        } catch {
+            fail(REASONS.INVALID_RECORD, `elemen array pada indeks '${i}' tidak dapat diverifikasi dengan aman, ditolak`);
+        }
+        out.push(mapFn(element, i));
+    }
     return out;
 }
 
