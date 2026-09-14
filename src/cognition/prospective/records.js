@@ -30,11 +30,19 @@ function validateTrigger(trigger) {
     // SEKALI lewat destructuring TERLEBIH DAHULU, baru divalidasi dari
     // lokal itu -- `trigger`/`subject` mentah tidak pernah disentuh lagi
     // setelah baris ini.
+    // Bug review independen (audit putaran-37, AUD37-P2-2): destructuring
+    // `subject` di atas dulu diangkat TANPA SYARAT ke bagian paling atas
+    // fungsi ini supaya ON_STATE dapat satu baca -- tapi itu berarti
+    // trigger AT/AFTER/RECURRING (yang TIDAK PERNAH memakai subject) juga
+    // ikut membaca entityId/relationId-nya, mengeksekusi accessor
+    // pemanggil yang sebelumnya (sebelum putaran-34) tidak pernah
+    // tersentuh sama sekali untuk kind selain ON_STATE. `subject` sekarang
+    // hanya dikeluarkan di DALAM cabang ON_STATE, tempat ia benar-benar
+    // dipakai.
     const {
         kind, at, delayMs, intervalMs, until, maxOccurrences, subject, attribute,
         ...triggerRest
     } = trigger ?? {};
-    const { entityId, relationId, ...subjectRest } = subject ?? {};
     if (!trigger || !TRIGGER_KINDS.has(kind)) {
         // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
         // `${trigger?.kind}` mentah meledakkan TypeError untuk Symbol.
@@ -70,11 +78,6 @@ function validateTrigger(trigger) {
     // "object"), jadi subject:null lolos lalu spread ke `{}` -- ON_STATE
     // reminder tanpa entityId/relationId nyata tersimpan, kolaps lewat
     // subjectKeyOf ke kunci sentinel bersama.
-    if (kind === "ON_STATE" && (
-        !subject || (typeof entityId !== "string" && typeof relationId !== "string") ||
-        typeof attribute !== "string")) {
-        fail(REASONS.INVALID_TRIGGER, "trigger ON_STATE wajib subject/attribute");
-    }
     // Bug review independen (audit putaran-8, W7R8-P2-2; diperdalam putaran-9,
     // AUD9-P2-1): `Object.freeze({...trigger.subject})` cuma satu level --
     // objek bersarang di dalam subject tetap referensi milik pemanggil.
@@ -86,7 +89,15 @@ function validateTrigger(trigger) {
     // ATAU dibekukan sama sekali (beda dengan cabang non-ON_STATE di bawah
     // yang sudah membungkus SELURUH trigger). Sekarang seluruh trigger
     // dibungkus juga, sama seperti cabang lain.
+    // Bug review independen (audit putaran-37, AUD37-P2-2): `subject`
+    // dikeluarkan DI SINI (bukan di atas fungsi) supaya AT/AFTER/RECURRING
+    // tidak pernah menyentuhnya sama sekali.
     if (kind === "ON_STATE") {
+        const { entityId, relationId, ...subjectRest } = subject ?? {};
+        if (!subject || (typeof entityId !== "string" && typeof relationId !== "string") ||
+            typeof attribute !== "string") {
+            fail(REASONS.INVALID_TRIGGER, "trigger ON_STATE wajib subject/attribute");
+        }
         return deepFreeze(buildSafePayloadRef({
             ...triggerRest, kind, attribute, subject: { ...subjectRest, entityId, relationId }
         }));
@@ -270,7 +281,12 @@ function makeReminder({ reminderId, ownerRef = null, trigger, payloadRef = null,
         // hanya membekukan, tidak menyaring -- BigInt di dalam origin lolos
         // lalu meledakkan JSON.stringify di saveSnapshot() saat persist().
         // buildSafePayloadRef menyaring BigInt/function/Symbol sekaligus.
-        wakeClass, origin: deepFreeze(buildSafePayloadRef({ ...origin })),
+        // Bug review independen (audit putaran-37, AUD37-P2-3): `{...origin}`
+        // men-spread SEBELUM diserahkan ke buildSafePayloadRef -- spread itu
+        // sendiri membaca setiap properti enumerable (memanggil getter apa
+        // pun) sebelum sanitizer berbasis descriptor sempat menolaknya.
+        // `origin` mentah diserahkan langsung.
+        wakeClass, origin: deepFreeze(buildSafePayloadRef(origin)),
         state: "ARMED", firedAt: null, missedAt: null, retiredReason: null,
         occurrenceIndex: 0, armedAtMs: null, createdAt: nowIso
     });

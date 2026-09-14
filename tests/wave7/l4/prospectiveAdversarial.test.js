@@ -166,6 +166,25 @@ test("PM-repair-45: ownerRef is read exactly once end-to-end (guard AND construc
     assert.equal(r.ownerRef, "owner-1");
 });
 
+test("PM-repair-47: a non-ON_STATE trigger never dereferences subject's inner fields at all (independent audit AUD37-P2-2)", async () => {
+    const pm = await createProspectiveMemory();
+    let called = 0;
+    const subject = {};
+    Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { called++; throw new Error("must not run"); } });
+    const r = pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(9e12).toISOString(), subject } });
+    assert.equal(r.trigger.kind, "AT");
+    assert.equal(called, 0, "an AT trigger must never touch subject's inner fields -- subject is ON_STATE-only");
+});
+
+test("PM-repair-48: origin is passed to the sanitizer without a pre-spread, so a hostile origin.kind accessor is rejected without being invoked (independent audit AUD37-P2-3)", async () => {
+    const pm = await createProspectiveMemory();
+    let called = 0;
+    const origin = {};
+    Object.defineProperty(origin, "kind", { enumerable: true, configurable: true, get() { called++; throw new Error("must not run"); } });
+    assert.throws(() => pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(9e12).toISOString() }, origin }));
+    assert.equal(called, 0, "the sanitizer must reject the accessor via its property descriptor without ever invoking it");
+});
+
 test("PM-repair-46: expectationId is read exactly once end-to-end in armExpectation (guard AND construction) (independent audit AUD35-ADV-1)", async () => {
     const pm = await createProspectiveMemory();
     let n = 0;

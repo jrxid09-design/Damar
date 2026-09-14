@@ -265,7 +265,11 @@ function makeGoal({
     // BigInt/function/Symbol (dan menolak kunci authority-shaped di origin).
     return Object.freeze({
         goalId, title: title.slice(0, 500), kind,
-        origin: deepFreeze(buildSafeIntentTemplate({ ...origin })),
+        // Bug review independen (audit putaran-37, AUD37-P2-3): sibling dari
+        // makeCommitment's toWhom di berkas yang sama -- `{...origin}`
+        // men-spread SEBELUM diserahkan ke sanitizer berbasis descriptor.
+        // `origin` mentah diserahkan langsung.
+        origin: deepFreeze(buildSafeIntentTemplate(origin)),
         ownerApproval,
         state: "PROPOSED",
         priorityClass,
@@ -296,7 +300,13 @@ function makeCommitment({ commitmentId, goalRef, toWhom, promise, dueCondition, 
     if (typeof promise !== "string" || !promise) fail(REASONS.INVALID_RECORD, "promise wajib string");
     return Object.freeze({
         commitmentId, goalRef,
-        toWhom: deepFreeze(buildSafeIntentTemplate({ ...toWhom })),
+        // Bug review independen (audit putaran-37, AUD37-P2-3): `{...toWhom}`
+        // men-spread SEBELUM diserahkan ke buildSafeIntentTemplate -- spread
+        // itu sendiri membaca setiap properti enumerable (memanggil getter
+        // apa pun) sebelum sanitizer berbasis descriptor sempat melihatnya.
+        // `toWhom` mentah diserahkan langsung; sanitizer sendiri yang
+        // membangun salinan aman.
+        toWhom: deepFreeze(buildSafeIntentTemplate(toWhom)),
         promise: promise.slice(0, 500),
         dueCondition: validateConditionSpec(dueCondition, "dueCondition"),
         state: "OPEN", evidenceRef: null,

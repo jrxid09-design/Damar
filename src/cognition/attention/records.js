@@ -71,7 +71,16 @@ function makeSignal({ signalId, sourceKind, sourceId, subjectRef, proposedUrgenc
 
     return Object.freeze({
         signalId, sourceKind, sourceId,
-        subjectRef: deepFreeze({ ...subjectRef }),
+        // Bug review independen (audit putaran-37, AUD37-P2-3): `deepFreeze({
+        // ...subjectRef })` men-spread subjectRef SEBELUM menyerahkannya ke
+        // deepFreeze -- spread itu SENDIRI membaca setiap properti enumerable
+        // (memanggil getter apa pun), lalu menyerahkan objek POLOS (tanpa
+        // accessor lagi) ke deepFreeze yang berbasis descriptor. Sanitizer
+        // berbasis descriptor jadi tidak pernah sungguh melihat accessor
+        // aslinya -- kontrak "accessor tidak pernah tersentuh" gagal tepat
+        // di titik pemanggilannya sendiri. deepFreeze diberi subjectRef
+        // MENTAH langsung; ia sendiri yang membangun salinan aman.
+        subjectRef: deepFreeze(subjectRef),
         proposedUrgency: clamp01(Number(proposedUrgency)), // AT-1: saran saja, bukan class final
         // Bug review independen (audit putaran-24, AUD24-P2-3): evidenceRef
         // OBJEK dulu disimpan APA ADANYA, tidak seperti subjectRef --
@@ -80,7 +89,7 @@ function makeSignal({ signalId, sourceKind, sourceId, subjectRef, proposedUrgenc
         // dengan sendirinya, tidak perlu (dan tidak boleh, `{...'x'}`
         // merusak bentuknya) disalin ke objek.
         evidenceRef: (evidenceRef !== null && typeof evidenceRef === "object")
-            ? deepFreeze({ ...evidenceRef }) : evidenceRef,
+            ? deepFreeze(evidenceRef) : evidenceRef,
         createdAtMs, expiresAtMs
     });
 }
@@ -93,7 +102,7 @@ function makeTarget({ targetId, subjectRef, workKind, priorityClass, admittedAtM
     if (!WORK_KINDS.has(workKind)) fail(REASONS.INVALID_RECORD, `workKind '${typeof workKind === "string" ? workKind : typeof workKind}' tidak dikenal`);
 
     return Object.freeze({
-        targetId, subjectRef: deepFreeze({ ...subjectRef }), workKind, priorityClass,
+        targetId, subjectRef: deepFreeze(subjectRef), workKind, priorityClass,
         effectivePriority: 0, admittedAt: admittedAtMs, startedAt: null, completedAt: null,
         state: "QUEUED", preemptions: 0,
         supportingSignalIds: Object.freeze([]), lastComputedAtMs: admittedAtMs

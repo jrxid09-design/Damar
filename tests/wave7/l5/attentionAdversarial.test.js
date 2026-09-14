@@ -197,6 +197,15 @@ test("AT-repair-31: targetKey reads subjectRef.entityId exactly once (independen
     assert.equal(key, "entity:e1::PERCEIVE");
 });
 
+test("AT-repair-33: an accessor on ingestSignal's subjectRef/evidenceRef is rejected without being invoked -- deepFreeze receives the raw value, not a pre-spread copy (independent audit AUD37-P2-3)", async () => {
+    const ae = await createAttentionEconomy();
+    let called = 0;
+    const subjectRef = {};
+    Object.defineProperty(subjectRef, "entityId", { enumerable: true, configurable: true, get() { called++; throw new Error("must not run"); } });
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef }, "PERCEIVE"), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(called, 0, "deepFreeze must reject the accessor via its property descriptor without ever invoking it");
+});
+
 test("AT-repair-32: targetKey preserves the entityId-first short-circuit -- a valid entityId subject's relationId accessor is never invoked (independent audit AUD36-ADV-2)", async () => {
     const { targetKey } = require("../../../src/cognition/attention");
     let called = 0;

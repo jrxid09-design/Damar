@@ -712,6 +712,22 @@ test("GL-repair-54: a non-string, falsy parentGoalId (e.g. 0n) is rejected, not 
     await assert.doesNotReject(() => ge.persist());
 });
 
+test("GL-repair-56: createCommitment's toWhom (and proposeGoal's origin) are passed to the sanitizer without a pre-spread, so a hostile accessor is rejected without being invoked (independent audit AUD37-P2-3)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    let called = 0;
+    const toWhom = {};
+    Object.defineProperty(toWhom, "party", { enumerable: true, configurable: true, get() { called++; throw new Error("must not run"); } });
+    assert.throws(() => ge.createCommitment({ goalRef: g.goalId, toWhom, promise: "p", dueCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" } }));
+    assert.equal(called, 0, "the sanitizer must reject the accessor via its property descriptor without ever invoking it");
+
+    let calledOrigin = 0;
+    const origin = { ref: "x" };
+    Object.defineProperty(origin, "kind", { enumerable: true, configurable: true, get() { calledOrigin++; return "OWNER"; } });
+    ge.proposeGoal(baseGoalSpec({ origin }));
+    assert.equal(calledOrigin, 1, "origin.kind must still be read exactly once for a benign accessor");
+});
+
 test("GL-repair-55: commitmentId/taskId are read exactly once end-to-end (guard AND construction), not just guard-vs-store consistent (independent audit AUD34-ADV-1)", async () => {
     const ge = await createGoalEngine();
     const g = ge.proposeGoal(baseGoalSpec());

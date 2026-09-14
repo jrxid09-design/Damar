@@ -206,6 +206,27 @@ test("MC-repair-25: openReview reads each proposal.kind exactly once, so a state
     assert.equal(n, 1, "proposal.kind must be read exactly once");
 });
 
+test("MC-repair-27: openReview preserves the entityId-first short-circuit; a valid entityId subject's relationId accessor is never invoked (independent audit AUD37-P2-1)", async () => {
+    const mc = await createMetacognition();
+    let called = 0;
+    const subjectRef = { entityId: "e1" };
+    Object.defineProperty(subjectRef, "relationId", { enumerable: true, configurable: true, get() { called++; throw new Error("must not run"); } });
+    const r = mc.openReview({ trigger: "SCHEDULED", subjectRef });
+    assert.ok(r.reviewId);
+    assert.equal(called, 0, "relationId must never be read when entityId already resolved the subjectKey");
+});
+
+test("MC-repair-28: recordCalibration's duplicate-recordId check is O(1) (Map-backed), not a linear array scan, and still correctly dedups/evicts (independent audit AUD37-ADV-1)", async () => {
+    const mc = await createMetacognition({ bounds: { ...BOUNDS, MAX_CALIBRATION_RECORDS: 3 } });
+    for (let i = 0; i < 3; i++) {
+        mc.recordCalibration({ recordId: `C${i}`, predictionRef: "p", predictedValue: 1, predictedConfidence: 0.9, outcomeTier: "T1", outcomeRef: `o${i}`, outcomeValue: 1, outcomeCorrect: true });
+    }
+    assertThrowsReason(() => mc.recordCalibration({ recordId: "C0", predictionRef: "p", predictedValue: 1, predictedConfidence: 0.9, outcomeTier: "T1", outcomeRef: "o0b", outcomeValue: 1, outcomeCorrect: true }), "DUPLICATE_RECORD_ID");
+    mc.recordCalibration({ recordId: "C3", predictionRef: "p", predictedValue: 1, predictedConfidence: 0.9, outcomeTier: "T1", outcomeRef: "o3", outcomeValue: 1, outcomeCorrect: true });
+    assert.equal(mc.calibrationCount(), 3, "retention must stay bounded at MAX_CALIBRATION_RECORDS");
+    assert.doesNotThrow(() => mc.recordCalibration({ recordId: "C0", predictionRef: "p", predictedValue: 1, predictedConfidence: 0.9, outcomeTier: "T1", outcomeRef: "o0c", outcomeValue: 1, outcomeCorrect: true }), "C0 must have been evicted (FIFO) once retention overflowed, so its id is reusable");
+});
+
 test("MC-repair-26: makeReview's cost guard and stored cost come from the same captured local, not independent reads (independent audit AUD35-ADV-3)", async () => {
     const { makeReview } = require("../../../src/cognition/metacog/records");
     let n = 0;
