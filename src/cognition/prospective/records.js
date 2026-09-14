@@ -16,7 +16,13 @@ const WAKE_CLASSES = new Set(["NOTIFY_OWNER", "RESUME_GOAL", "CHECK_EXPECTATION"
 const TRIGGER_KINDS = new Set(["AT", "AFTER", "RECURRING", "ON_STATE"]);
 
 /** PM-A3: recurrence tanpa batas ditolak — wajib until ATAU maxOccurrences, dan ada lantai periode. */
-function validateTrigger(trigger) {
+// Bug review independen (audit putaran-66, Codex, W7R66-P2-1, eskalasi
+// dari item yang diungkap-tapi-tidak-diperbaiki putaran-65): fungsi ini
+// membaca `BOUNDS` modul (MIN_RECURRENCE_INTERVAL_MS/MAX_RECURRENCE_OCCURRENCES)
+// dan meneruskan `buildSafePayloadRef` TANPA `bounds` sama sekali --
+// putaran-65 hanya menyambungkan makeReminder's payloadRef, bukan
+// validateTrigger/makeExpectation ini. Parameter `bounds` ditambahkan.
+function validateTrigger(trigger, bounds = BOUNDS) {
     // Bug review independen (audit putaran-33, AUD33-P2-4; putaran-34,
     // AUD34-P2-2/AUD34-P2-4): fungsi ini punya riwayat baca-berkali-kali
     // yang paling gigih di seluruh basis kode. Putaran-33 mengeluarkan
@@ -69,17 +75,17 @@ function validateTrigger(trigger) {
         }
     }
     if (kind === "RECURRING") {
-        if (!Number.isFinite(intervalMs) || intervalMs < BOUNDS.MIN_RECURRENCE_INTERVAL_MS) {
+        if (!Number.isFinite(intervalMs) || intervalMs < bounds.MIN_RECURRENCE_INTERVAL_MS) {
             fail(REASONS.RECURRENCE_PERIOD_TOO_SHORT,
-                `interval recurring di bawah lantai ${BOUNDS.MIN_RECURRENCE_INTERVAL_MS}ms`);
+                `interval recurring di bawah lantai ${bounds.MIN_RECURRENCE_INTERVAL_MS}ms`);
         }
         const hasUntil = typeof until === "string" && Number.isFinite(Date.parse(until));
         const hasMax = Number.isFinite(maxOccurrences) && maxOccurrences > 0;
         if (!hasUntil && !hasMax) {
             fail(REASONS.RECURRENCE_UNBOUNDED, "recurring wajib 'until' atau 'maxOccurrences'");
         }
-        if (hasMax && maxOccurrences > BOUNDS.MAX_RECURRENCE_OCCURRENCES) {
-            fail(REASONS.RECURRENCE_UNBOUNDED, `maxOccurrences melebihi batas (${BOUNDS.MAX_RECURRENCE_OCCURRENCES})`);
+        if (hasMax && maxOccurrences > bounds.MAX_RECURRENCE_OCCURRENCES) {
+            fail(REASONS.RECURRENCE_UNBOUNDED, `maxOccurrences melebihi batas (${bounds.MAX_RECURRENCE_OCCURRENCES})`);
         }
     }
     // Bug review independen (audit putaran-24, AUD24-P2-4): `typeof
@@ -108,7 +114,7 @@ function validateTrigger(trigger) {
     // entityId sudah valid. Disaring SEKALI lewat buildSafePayloadRef
     // lebih dulu; entityId/relationId diturunkan dari salinan aman itu.
     if (kind === "ON_STATE") {
-        const safeSubject = buildSafePayloadRef(subject);
+        const safeSubject = buildSafePayloadRef(subject, 0, undefined, bounds);
         const validEntity = typeof safeSubject?.entityId === "string";
         if (!subject || (!validEntity && typeof safeSubject?.relationId !== "string") ||
             typeof attribute !== "string") {
@@ -116,14 +122,14 @@ function validateTrigger(trigger) {
         }
         return deepFreeze(buildSafePayloadRef({
             ...triggerRest, kind, attribute, subject: safeSubject
-        }));
+        }, 0, undefined, bounds));
     }
     // Bug review independen (audit putaran-10, AUD10-P2-2): sapuan deepFreeze
     // putaran-9 hanya menyentuh cabang ON_STATE -- cabang lain (AT/AFTER/
     // RECURRING) masih pembekuan SATU level, objek/nilai bersarang apa pun
     // yang pemanggil sisipkan di trigger tetap referensi mutable.
     // (ON_EVENT dihapus dari TRIGGER_KINDS putaran-18, AUD18-P2-2.)
-    return deepFreeze(buildSafePayloadRef({ ...triggerRest, kind, at, delayMs, intervalMs, until, maxOccurrences }));
+    return deepFreeze(buildSafePayloadRef({ ...triggerRest, kind, at, delayMs, intervalMs, until, maxOccurrences }, 0, undefined, bounds));
 }
 
 const FORBIDDEN_PAYLOAD_KEYS = Object.freeze(["capabilityId", "actuatorRef", "authProof", "authorityDecision", "intentTemplate"]);
@@ -337,7 +343,7 @@ function makeReminder({ reminderId, ownerRef = null, trigger, payloadRef = null,
 
     return Object.freeze({
         reminderId, ownerRef,
-        trigger: validateTrigger(trigger),
+        trigger: validateTrigger(trigger, bounds),
         payloadRef: validatePayloadRef(payloadRef, bounds),
         // Bug review independen (audit putaran-11, AUD11-P2-1): deepFreeze
         // hanya membekukan, tidak menyaring -- BigInt di dalam origin lolos
@@ -348,13 +354,13 @@ function makeReminder({ reminderId, ownerRef = null, trigger, payloadRef = null,
         // sendiri membaca setiap properti enumerable (memanggil getter apa
         // pun) sebelum sanitizer berbasis descriptor sempat menolaknya.
         // `origin` mentah diserahkan langsung.
-        wakeClass, origin: deepFreeze(buildSafePayloadRef(origin)),
+        wakeClass, origin: deepFreeze(buildSafePayloadRef(origin, 0, undefined, bounds)),
         state: "ARMED", firedAt: null, missedAt: null, retiredReason: null,
         occurrenceIndex: 0, armedAtMs: null, createdAt: nowIso
     });
 }
 
-function makeExpectation({ expectationId, subject, attribute, expectedValue, window, onSatisfied = "CLOSE", onViolated = "NOTIFY" }) {
+function makeExpectation({ expectationId, subject, attribute, expectedValue, window, onSatisfied = "CLOSE", onViolated = "NOTIFY", bounds = BOUNDS }) {
     if (typeof expectationId !== "string" || !expectationId) fail(REASONS.INVALID_RECORD, "expectationId wajib string");
     // Bug review independen (audit putaran-32, AUD32-P2-2): `window.latestAt`/
     // `window.earliestAt` sebelumnya dibaca berkali-kali (typeof, Date.parse,
@@ -413,7 +419,7 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
     // milik pemanggil SEBELUM buildSafePayloadRef sempat memprosesnya --
     // getter relationId tereksekusi bahkan ketika entityId sudah valid.
     // Disaring SEKALI lewat buildSafePayloadRef lebih dulu.
-    const safeSubject = buildSafePayloadRef(subject);
+    const safeSubject = buildSafePayloadRef(subject, 0, undefined, bounds);
     const validEntity = typeof safeSubject?.entityId === "string";
     if (!subject || (!validEntity && typeof safeSubject?.relationId !== "string")) {
         fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
@@ -430,8 +436,8 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
     // dalamnya lolos lalu meledakkan JSON.stringify di saveSnapshot().
     return Object.freeze({
         expectationId, subject: deepFreeze(safeSubject), attribute,
-        expectedValue: deepFreeze(buildSafePayloadRef(expectedValue)),
-        window: deepFreeze(buildSafePayloadRef({ ...windowRest, latestAt, earliestAt })),
+        expectedValue: deepFreeze(buildSafePayloadRef(expectedValue, 0, undefined, bounds)),
+        window: deepFreeze(buildSafePayloadRef({ ...windowRest, latestAt, earliestAt }, 0, undefined, bounds)),
         onSatisfied, onViolated, state: "PENDING"
     });
 }

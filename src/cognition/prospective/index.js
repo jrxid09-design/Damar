@@ -428,7 +428,9 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         // window.latestAt cacat) tetap mengevict satu expectation pending
         // yang VALID sebelum error dilempar, kehilangan data permanen.
         // Validasi/bangun record DULU, baru kompaksi+simpan.
-        const e = makeExpectation({ ...specRest, expectationId: expectationId ?? crypto.randomUUID() });
+        // Bug review independen (audit putaran-66, Codex, W7R66-P2-1):
+        // `bounds` (sudah disanitasi) diteruskan eksplisit, SESUDAH spread.
+        const e = makeExpectation({ ...specRest, expectationId: expectationId ?? crypto.randomUUID(), bounds });
         // Bug review independen (audit putaran-59, Codex, W7R59-P2-3):
         // bound 0 (sanksi sah lewat sanitizeBounds) dengan `expectations`
         // kosong -- `size >= 0` true tapi tidak ada `oldest` untuk dievict
