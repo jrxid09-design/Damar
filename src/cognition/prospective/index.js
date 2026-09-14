@@ -408,11 +408,21 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         // yang VALID sebelum error dilempar, kehilangan data permanen.
         // Validasi/bangun record DULU, baru kompaksi+simpan.
         const e = makeExpectation({ ...specRest, expectationId: expectationId ?? crypto.randomUUID() });
-        if (expectations.size >= bounds.MAX_PENDING_EXPECTATIONS) {
+        // Bug review independen (audit putaran-59, Codex, W7R59-P2-3):
+        // bound 0 (sanksi sah lewat sanitizeBounds) dengan `expectations`
+        // kosong -- `size >= 0` true tapi tidak ada `oldest` untuk dievict
+        // (`if (oldest)` sudah menjaga dari raw-throw), TAPI expectation
+        // baru tetap disimpan tanpa syarat sesudahnya, melampaui cap 0
+        // secara diam-diam. Bound dibulatkan integer >= 0; kapasitas 0
+        // berarti TIDAK ADA expectation yang dipertahankan.
+        const maxPending = Math.max(0, Math.trunc(bounds.MAX_PENDING_EXPECTATIONS));
+        if (expectations.size >= maxPending) {
             const oldest = [...expectations.values()].sort((a, b) => Date.parse(a.window.latestAt) - Date.parse(b.window.latestAt))[0];
             if (oldest) expectations.delete(oldest.expectationId);
         }
-        expectations.set(e.expectationId, e);
+        if (maxPending > 0) {
+            expectations.set(e.expectationId, e);
+        }
         return e;
     }
 

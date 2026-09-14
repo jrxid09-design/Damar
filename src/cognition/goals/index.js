@@ -411,9 +411,23 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // pola yang sama dengan goals sendiri (MAX_TOTAL_GOALS_RETAINED).
         // Selalu menemukan korban di sini karena OPEN dibatasi independen
         // jauh di bawah MAX_TOTAL_COMMITMENTS_RETAINED (lihat cek di atas).
+        // Bug ditemukan lewat sapuan mandiri (setelah audit putaran-59):
+        // sibling PERSIS dari kelas W7R59-P2-1..5 -- kalau kapasitas total
+        // 0 (sanksi sah lewat sanitizeBounds) atau tidak ada commitment
+        // terminal untuk dievict, `terminal` undefined, `if (terminal)`
+        // menjaga dari raw-throw, TAPI `commitments.set(...)` sesudahnya
+        // tetap tanpa syarat -- melampaui cap total secara diam-diam,
+        // beda dari goals/tasks sendiri yang SUDAH punya cabang fail-closed
+        // (baris di atas komentar aslinya salah asumsi "selalu ada
+        // korban"). Sekarang gagal tertutup, sama seperti goals/tasks.
         if (commitments.size >= bounds.MAX_TOTAL_COMMITMENTS_RETAINED) {
             const terminal = [...commitments.values()].filter(x => x.state !== "OPEN")[0];
-            if (terminal) commitments.delete(terminal.commitmentId);
+            if (terminal) {
+                commitments.delete(terminal.commitmentId);
+            } else {
+                fail(REASONS.COMMITMENT_RETENTION_LIMIT_EXCEEDED,
+                    `retensi commitment melebihi batas (${bounds.MAX_TOTAL_COMMITMENTS_RETAINED}) dan tidak ada commitment non-OPEN untuk dievict`);
+            }
         }
         commitments.set(c.commitmentId, c);
         return c;
@@ -496,8 +510,15 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
             .filter(x => x.goalRef === p.goalRef && x.planId !== p.planId)
             .sort((a, b) => a.version - b.version);
         const totalForGoal = otherSameGoal.length + 1; // +1 untuk p sendiri
-        if (totalForGoal > bounds.MAX_PLAN_VERSIONS_RETAINED) {
-            const overflow = totalForGoal - bounds.MAX_PLAN_VERSIONS_RETAINED;
+        // Bug review independen (audit putaran-59, OpenCode, W7R59-P2-1):
+        // bound 0/fractional < 1 (sanksi sah lewat sanitizeBounds) membuat
+        // `overflow` melebihi `otherSameGoal.length` (p sendiri, +1 di
+        // atas, tidak pernah masuk populasi yang diindeks) -- indeks
+        // terakhir membaca `undefined.planId`, raw-throw. Dibulatkan
+        // integer >= 0, loop dibatasi ke populasi yang benar-benar ada.
+        const keepMax = Math.max(0, Math.trunc(bounds.MAX_PLAN_VERSIONS_RETAINED));
+        if (totalForGoal > keepMax) {
+            const overflow = Math.min(totalForGoal - keepMax, otherSameGoal.length);
             for (let i = 0; i < overflow; i++) plans.delete(otherSameGoal[i].planId);
         }
         // Bug review independen (audit putaran-6, W7R6-P2-1): MAX_PLAN_VERSIONS_RETAINED

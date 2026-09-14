@@ -13,10 +13,14 @@ const crypto = require("node:crypto");
  * OBSERVED != INFERRED, INFERRED != FACT, PREDICTED != FACT,
  * UNKNOWN != FALSE, CONFIDENCE != TRUTH, PROVENANCE != AUTHORITY.
  * `confidence` tidak pernah menaikkan `epistemicClass`; keduanya field
- * independen. Rantai hash §51 (`sha256Row`, di ContinuityCore) SENGAJA
- * tidak menyertakan `schemaVersion`/`epistemicClass` — menambahkannya akan
- * mengubah hash yang dihitung ulang untuk setiap baris jurnal historis dan
- * merusak `verifyJournalIntegrity()` untuk data lama.
+ * independen. Rantai hash §51 (`sha256Row`, di ContinuityCore): baris v1
+ * di-hash TANPA `schemaVersion`/`epistemicClass` (kolom belum ada saat
+ * itu) supaya `verifyJournalIntegrity()` untuk data lama tidak rusak;
+ * baris v2 MENYERTAKAN keduanya (diperbaiki putaran-8, komentar ini
+ * diperbarui putaran-59 setelah audit independen -- W7R59-ADV-1 --
+ * menemukan komentar lama masih bilang "SENGAJA tidak menyertakan" untuk
+ * kedua versi, padahal kode sha256Row sudah menyertakan untuk v2 sejak
+ * putaran-8).
  */
 
 const SCHEMA_VERSION = 2;

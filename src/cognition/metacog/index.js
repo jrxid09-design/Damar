@@ -179,6 +179,17 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         if (openReviewCount() >= bounds.MAX_OPEN_REVIEWS) {
             fail(REASONS.OPEN_REVIEW_LIMIT_EXCEEDED, "jumlah review terbuka melebihi batas");
         }
+        // Bug review independen (audit putaran-59, Codex, W7R59-P2-4):
+        // bound 0 (sanksi sah lewat sanitizeBounds) untuk
+        // MAX_TOTAL_REVIEWS_RETAINED tidak pernah ditolak di sini --
+        // review baru selalu OPEN saat dibuat, dan evictOldestClosedReviewIfOverBound()
+        // hanya mengevict yang SUDAH closed (open dibatasi terpisah oleh
+        // MAX_OPEN_REVIEWS), jadi review yang baru dibuat tetap tersimpan,
+        // melampaui cap total 0 secara diam-diam. Ditolak eksplisit di sini
+        // kalau kapasitas total memang nol.
+        if (Math.max(0, Math.trunc(bounds.MAX_TOTAL_REVIEWS_RETAINED)) === 0) {
+            fail(REASONS.OPEN_REVIEW_LIMIT_EXCEEDED, "kapasitas retensi review total adalah nol");
+        }
 
         // Bug review independen (audit putaran-16, AUD16-P2-1): guard cost di
         // makeReview berjalan SETELAH baris ini membaca cost.tokens/cost.ms --
