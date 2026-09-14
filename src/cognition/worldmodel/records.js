@@ -24,15 +24,34 @@ const ADMISSIBLE_TIERS = new Set(["T1", "T2", "T4"]);
 // melempar TypeError mentah kalau `Symbol.iterator` ADA tapi bukan
 // function (AUD40-ADV-1). Dipakai di semua situs elemen-array lintas lane
 // (worldmodel, goals) untuk paritas dan menghindari kelas AUD40-ADV-1.
+// Bug review independen (audit putaran-41, AUD41-P2-2, regresi
+// diperkenalkan kandidat putaran-40): loop di atas dulu membaca
+// `arr.length` di KONDISI loop -- dievaluasi ULANG setiap iterasi. Proxy
+// dengan getter `length` yang TERUS BERTAMBAH membuat loop TIDAK PERNAH
+// berhenti (DoS). Situs pemanggil di berkas ini sudah aman (dilewati
+// `.slice()` dulu, memaksa salinan array polos), tapi diperbaiki di sini
+// juga demi paritas dan menutup kelas ini permanen di helper bersama.
+// `length` sekarang di-cache SEKALI ke lokal.
 function buildSafeArray(arr, mapFn) {
     const out = [];
-    for (let i = 0; i < arr.length; i++) out.push(mapFn(arr[i], i));
+    const len = arr.length;
+    for (let i = 0; i < len; i++) out.push(mapFn(arr[i], i));
     return out;
 }
 
 function validateLabels(labels) {
     if (labels == null) return {};
-    const keys = Object.keys(labels);
+    // Bug review independen (audit putaran-41, AUD41-P2-3): sebuah Proxy
+    // yang sudah di-revoke melempar TypeError MENTAH pada `Object.keys`
+    // (trap `ownKeys`), keluar dari `declareEntity` publik tanpa pernah
+    // menjadi kesalahan domain. Dibungkus try/catch; kegagalan APA PUN di
+    // sini diperlakukan sebagai penolakan tertutup.
+    let keys;
+    try {
+        keys = Object.keys(labels);
+    } catch {
+        fail(REASONS.INVALID_RECORD, "labels tidak dapat diverifikasi dengan aman, ditolak");
+    }
     if (keys.length > BOUNDS.MAX_ENTITY_LABEL_KEYS) {
         fail(REASONS.BOUND_EXCEEDED, "jumlah label melebihi batas");
     }

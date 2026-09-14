@@ -30,9 +30,17 @@ const DANGEROUS_INTENT_KEYS = Object.freeze(["__proto__", "constructor", "protot
 // indeks (termasuk lubang, sebagai `undefined`) tanpa mengonsultasikan
 // `Symbol.iterator` -- beda dengan `Array.from`, yang melempar TypeError
 // mentah kalau `Symbol.iterator` ADA tapi bukan function (AUD40-ADV-1).
+// Bug review independen (audit putaran-41, AUD41-P2-2, regresi
+// diperkenalkan kandidat putaran-40): loop di atas dulu membaca
+// `arr.length` di KONDISI loop -- dievaluasi ULANG setiap iterasi. Proxy
+// dengan getter `length` yang TERUS BERTAMBAH (dan getter indeks yang
+// memalsukan nilai) membuat loop TIDAK PERNAH berhenti (diukur >5 juta
+// iterasi) -- `.map()` yang digantikan HANYA membaca `length` SEKALI di
+// awal. `length` sekarang di-cache SEKALI ke lokal sebelum loop dimulai.
 function buildSafeArray(arr, mapFn) {
     const out = [];
-    for (let i = 0; i < arr.length; i++) out.push(mapFn(arr[i], i));
+    const len = arr.length;
+    for (let i = 0; i < len; i++) out.push(mapFn(arr[i], i));
     return out;
 }
 

@@ -2,7 +2,7 @@
 
 /** W7-L5 ATTENTION — pembangun record murni (spec §3). */
 
-const { REASONS, fail } = require("./errors");
+const { REASONS, fail, AttentionError } = require("./errors");
 const { clamp01 } = require("../core/envelope");
 
 const SOURCE_KINDS = new Set(["OWNER", "SENSOR", "GOAL", "REMINDER", "MISSION", "AGENT", "SELF", "SYSTEM"]);
@@ -38,15 +38,30 @@ function deepFreeze(value, seen = new WeakSet()) {
     if (seen.has(value)) return value;
     seen.add(value);
     if (t === "function") return value; // fungsi diterima sebagai data tidak aktif, lihat catatan di atas
-    const out = Array.isArray(value) ? [] : {};
-    for (const key of Reflect.ownKeys(value)) {
-        const desc = Object.getOwnPropertyDescriptor(value, key);
-        if (!desc || desc.get || desc.set) {
-            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `tidak boleh membawa properti accessor: '${String(key)}'`);
+    // Bug review independen (audit putaran-41, AUD41-P2-3): sebuah Proxy
+    // yang sudah di-revoke melempar TypeError MENTAH pada operasi dasar
+    // apa pun terhadapnya (`Array.isArray`, `Reflect.ownKeys`,
+    // `getOwnPropertyDescriptor`) -- round-40's AT-repair-36 hanya
+    // menjamin kontrak "tidak raw-throw" untuk evidenceRef berbentuk
+    // FUNCTION (Proxy.revocable(function(){})); Proxy.revocable({}) yang
+    // di-revoke (typeof "object") tetap meledakkan TypeError mentah di
+    // sini, keluar dari ingestSignal publik. Operasi dasar dibungkus
+    // try/catch; kegagalan APA PUN pada level ini diperlakukan sebagai
+    // penolakan tertutup (bukan crash), sama seperti setiap penolakan lain.
+    try {
+        const out = Array.isArray(value) ? [] : {};
+        for (const key of Reflect.ownKeys(value)) {
+            const desc = Object.getOwnPropertyDescriptor(value, key);
+            if (!desc || desc.get || desc.set) {
+                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `tidak boleh membawa properti accessor: '${String(key)}'`);
+            }
+            out[key] = deepFreeze(desc.value, seen);
         }
-        out[key] = deepFreeze(desc.value, seen);
+        return Object.freeze(out);
+    } catch (err) {
+        if (err instanceof AttentionError) throw err;
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak dapat diverifikasi dengan aman, ditolak");
     }
-    return Object.freeze(out);
 }
 
 function makeSignal({ signalId, sourceKind, sourceId, subjectRef, proposedUrgency = 0, evidenceRef = null, createdAtMs, expiresAtMs = null }) {
