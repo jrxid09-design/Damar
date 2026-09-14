@@ -18,10 +18,20 @@ const P0_ORIGIN_TRUSTED_SOURCE_KINDS = Object.freeze({
 });
 
 function assignPriorityClass(signal) {
-    const origin = signal.evidenceRef?.originKind;
+    // Bug review independen (audit putaran-40, AUD40-P2-1): evidenceRef
+    // berbentuk FUNCTION sengaja diterima sebagai data TIDAK AKTIF (lihat
+    // deepFreeze/makeSignal, AT-repair-18/29/35) -- tapi di sini
+    // `signal.evidenceRef?.originKind`/`.ownerTrustVerified` membacanya
+    // lewat [[Get]] biasa TANPA memandang tipe, jadi getter/trap Proxy
+    // milik function evidenceRef tetap tereksekusi (dan Proxy yang sudah
+    // di-revoke melempar TypeError mentah). Function bukan objek
+    // PEMBAWA-DATA yang sah untuk originKind -- hanya objek non-function
+    // yang boleh dibaca.
+    const ev = (signal.evidenceRef && typeof signal.evidenceRef === "object") ? signal.evidenceRef : null;
+    const origin = ev?.originKind;
 
     if (origin && P0_ORIGINS.has(origin) && P0_ORIGIN_TRUSTED_SOURCE_KINDS[origin].has(signal.sourceKind)) {
-        if (origin === "OWNER_STOP" && !signal.evidenceRef?.ownerTrustVerified) {
+        if (origin === "OWNER_STOP" && !ev?.ownerTrustVerified) {
             // Klaim owner-stop tanpa verifikasi saluran trust ditolak turun ke P1.
             return "P1_OWNER";
         }

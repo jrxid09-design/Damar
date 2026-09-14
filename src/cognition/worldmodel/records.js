@@ -13,6 +13,23 @@ const { buildSafeBeliefValue } = require("./beliefAlgebra");
 
 const ADMISSIBLE_TIERS = new Set(["T1", "T2", "T4"]);
 
+// Bug review independen (audit putaran-40, AUD40-P2-2; sibling dari
+// AUD39-P2-2 di metacog): `arr.map(cb)` MELEWATI lubang (hole) pada array
+// jarang (sparse) -- `cb` tidak pernah dipanggil untuk indeks kosong, jadi
+// guard "elemen wajib objek" di dalam callback tidak pernah tereksekusi
+// untuk lubang itu, dan lubangnya lolos tersimpan (serialize ke null).
+// Loop indeks eksplisit mengunjungi SETIAP indeks (termasuk lubang, sebagai
+// `undefined`) tanpa mengonsultasikan `Symbol.iterator` sama sekali --
+// beda dengan `Array.from` (yang round-39 pakai di metacog), yang
+// melempar TypeError mentah kalau `Symbol.iterator` ADA tapi bukan
+// function (AUD40-ADV-1). Dipakai di semua situs elemen-array lintas lane
+// (worldmodel, goals) untuk paritas dan menghindari kelas AUD40-ADV-1.
+function buildSafeArray(arr, mapFn) {
+    const out = [];
+    for (let i = 0; i < arr.length; i++) out.push(mapFn(arr[i], i));
+    return out;
+}
+
 function validateLabels(labels) {
     if (labels == null) return {};
     const keys = Object.keys(labels);
@@ -21,7 +38,14 @@ function validateLabels(labels) {
     }
     const out = {};
     for (const key of keys) {
-        const raw = labels[key];
+        // Bug review independen (audit putaran-40, AUD40-ADV-2): `labels[key]`
+        // adalah [[Get]] biasa -- accessor (getter) milik pemanggil
+        // tereksekusi satu kali per kunci. Dibaca lewat
+        // getOwnPropertyDescriptor (tidak pernah memanggil getter);
+        // properti accessor diperlakukan sebagai absen (string kosong),
+        // konsisten dengan perlakuan lenient nilai non-primitif di bawah.
+        const desc = Object.getOwnPropertyDescriptor(labels, key);
+        const raw = (desc && !desc.get && !desc.set) ? desc.value : undefined;
         // Bug review independen (audit putaran-28, AUD28-P2-7): `String(x)`
         // mentah mengeksekusi toString hostile milik pemanggil untuk objek,
         // dan meledakkan TypeError mentah untuk Symbol. Nilai label bukan
@@ -53,23 +77,22 @@ function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, n
         // Bug review independen (audit putaran-20, AUD20-P2-2): elemen
         // externalRefs tidak dijaga -- elemen `null` meledakkan `r.system`
         // jadi TypeError mentah alih-alih INVALID_RECORD.
-        externalRefs: Object.freeze((externalRefs ?? []).slice(0, 32)
-            .map(r => {
-                if (!r || typeof r !== "object") fail(REASONS.INVALID_RECORD, "externalRefs elemen wajib objek");
-                // Bug review independen (audit putaran-28, AUD28-P2-7;
-                // putaran-35, AUD35-P2-3): `String(r.system)`/`String(r.id)`
-                // mentah mengeksekusi toString hostile milik pemanggil, dan
-                // meledakkan TypeError mentah untuk Symbol -- perbaikan
-                // putaran-28 menutup itu tapi `r.system`/`r.id` masih dibaca
-                // TIGA KALI (typeof, truthy, `.slice()`) -- getter stateful
-                // bisa lolos guard dengan string sah lalu membalas Symbol/
-                // BigInt pada baca berikutnya, tetap meledakkan mentah.
-                // Dikeluarkan sekali lewat destructuring.
-                const { system, id } = r;
-                if (typeof system !== "string" || !system) fail(REASONS.INVALID_RECORD, "externalRefs[].system wajib string");
-                if (typeof id !== "string" || !id) fail(REASONS.INVALID_RECORD, "externalRefs[].id wajib string");
-                return Object.freeze({ system: system.slice(0, 64), id: id.slice(0, 200) });
-            })),
+        externalRefs: Object.freeze(buildSafeArray((externalRefs ?? []).slice(0, 32), r => {
+            if (!r || typeof r !== "object") fail(REASONS.INVALID_RECORD, "externalRefs elemen wajib objek");
+            // Bug review independen (audit putaran-28, AUD28-P2-7;
+            // putaran-35, AUD35-P2-3): `String(r.system)`/`String(r.id)`
+            // mentah mengeksekusi toString hostile milik pemanggil, dan
+            // meledakkan TypeError mentah untuk Symbol -- perbaikan
+            // putaran-28 menutup itu tapi `r.system`/`r.id` masih dibaca
+            // TIGA KALI (typeof, truthy, `.slice()`) -- getter stateful
+            // bisa lolos guard dengan string sah lalu membalas Symbol/
+            // BigInt pada baca berikutnya, tetap meledakkan mentah.
+            // Dikeluarkan sekali lewat destructuring.
+            const { system, id } = r;
+            if (typeof system !== "string" || !system) fail(REASONS.INVALID_RECORD, "externalRefs[].system wajib string");
+            if (typeof id !== "string" || !id) fail(REASONS.INVALID_RECORD, "externalRefs[].id wajib string");
+            return Object.freeze({ system: system.slice(0, 64), id: id.slice(0, 200) });
+        })),
         source
     });
 }
@@ -224,7 +247,7 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
         // Bug review independen (audit putaran-20, AUD20-P2-2): elemen
         // candidateValues tidak dijaga -- elemen `null` meledakkan `c.value`
         // jadi TypeError mentah alih-alih INVALID_RECORD.
-        candidateValues: Object.freeze(candidateValues.slice(0, 16).map(c => {
+        candidateValues: Object.freeze(buildSafeArray(candidateValues.slice(0, 16), c => {
             if (!c || typeof c !== "object") fail(REASONS.INVALID_RECORD, "candidateValues elemen wajib objek");
             // Bug review independen (audit putaran-28, AUD28-P2-3; putaran-35,
             // AUD35-P2-4): `Number(c.weight)` mentah meledakkan TypeError
