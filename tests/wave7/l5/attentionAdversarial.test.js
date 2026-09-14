@@ -15,6 +15,15 @@ function assertThrowsReason(fn, reason) {
     });
 }
 
+test("AT-repair-43: ingestSignal rejects a subjectRef carrying an own __proto__/constructor/prototype key -- deepFreeze was the only one of the 6 lane sanitizers that never rejected dangerous keys, letting an attacker-controlled prototype alias an arbitrary entity via subjectRef.entityId with zero own keys (independent audit round 58, OpenCode, W7R58-P2-2)", async () => {
+    const ae = await createAttentionEconomy({ clock: manualClock(1000) });
+    const polluted = JSON.parse('{"__proto__":{"entityId":"VICTIM"}}');
+    assertThrowsReason(
+        () => ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s1", subjectRef: polluted }, "MAINTAIN"),
+        "EXECUTABLE_MATERIAL_REJECTED"
+    );
+});
+
 test("AT-repair-12: ingestSignal(null, workKind) is rejected as INVALID_RECORD, not a raw TypeError (independent audit AUD21-ADV-1)", async () => {
     const ae = await createAttentionEconomy();
     assertThrowsReason(() => ae.ingestSignal(null, "PERCEIVE"), "INVALID_RECORD");

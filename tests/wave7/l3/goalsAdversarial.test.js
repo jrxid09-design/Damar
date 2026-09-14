@@ -867,6 +867,20 @@ test("GL-repair-73: invalidatePlanIfAssumptionBroken's invalidatedBy is bounded 
     assert.ok(ge.getPlan(p.planId).invalidatedBy.length <= BOUNDS.MAX_INVALIDATED_BY_PER_PLAN);
 });
 
+test("GL-repair-74: invalidatePlanIfAssumptionBroken stores an EMPTY invalidatedBy when MAX_INVALIDATED_BY_PER_PLAN is 0 (or fractional between 0 and 1) -- .slice(-0) === .slice(0) returns the WHOLE array, not an empty one, the exact zero-boundary gap round 57's fix missed (independent audit round 58, Codex, W7R58-P2-1)", async () => {
+    const ge0 = await createGoalEngine({ bounds: { MAX_INVALIDATED_BY_PER_PLAN: 0 } });
+    const g0 = ge0.proposeGoal(baseGoalSpec());
+    const p0 = ge0.createPlan({ goalRef: g0.goalId, steps: [] });
+    ge0.invalidatePlanIfAssumptionBroken(p0.planId, "belief-r58");
+    assert.deepEqual(ge0.getPlan(p0.planId).invalidatedBy, []);
+
+    const geFrac = await createGoalEngine({ bounds: { MAX_INVALIDATED_BY_PER_PLAN: 0.5 } });
+    const gFrac = geFrac.proposeGoal(baseGoalSpec());
+    const pFrac = geFrac.createPlan({ goalRef: gFrac.goalId, steps: [] });
+    geFrac.invalidatePlanIfAssumptionBroken(pFrac.planId, "belief-r58b");
+    assert.deepEqual(geFrac.getPlan(pFrac.planId).invalidatedBy, []);
+});
+
 test("GL-repair-70: transition() fails closed to APPROVAL_EXPIRED (not raw-throw) when authorityPort.checkApproval() returns a revoked-Proxy result -- treated the same as an invalid/falsy check (independent audit W7R50-ADV-1)", async () => {
     const r = Proxy.revocable({}, {});
     r.revoke();

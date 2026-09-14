@@ -296,6 +296,25 @@ test("SM-repair-23: a caller-supplied bounds override with a non-finite/negative
     assert.ok(reads <= BOUNDS.MAX_ACTIVE_PROVIDERS, "cap harus tetap berlaku walau override Infinity");
 });
 
+test("SM-repair-24: ingestOutcome's history/appliedEvidenceRefs are truly EMPTY (not the whole array) when MAX_SUCCESS_WINDOW/MAX_APPLIED_EVIDENCE_REFS is 0 (or fractional between 0 and 1) -- .slice(-0) === .slice(0) returns everything, the exact sibling of goals' invalidatedBy bug round 58 (Codex) fixed but never swept here (independent audit round 58, OpenCode, W7R58-P2-1)", async () => {
+    const reg = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const sm0 = await createSelfModel({ capabilityRegistry: reg, bounds: { MAX_SUCCESS_WINDOW: 0, MAX_APPLIED_EVIDENCE_REFS: 0 } });
+    for (let i = 0; i < 100; i++) {
+        sm0.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "SUCCESS", at: "t" + i, evidenceRef: "e" + i });
+    }
+    const a0 = sm0.assess("cap.x");
+    assert.equal(a0.successWindow.history.length, 0);
+    assert.equal(a0.successWindow.appliedEvidenceRefs.length, 0);
+
+    const smFrac = await createSelfModel({ capabilityRegistry: reg, bounds: { MAX_SUCCESS_WINDOW: 0.5, MAX_APPLIED_EVIDENCE_REFS: 0.5 } });
+    for (let i = 0; i < 100; i++) {
+        smFrac.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "SUCCESS", at: "t" + i, evidenceRef: "f" + i });
+    }
+    const aFrac = smFrac.assess("cap.x");
+    assert.equal(aFrac.successWindow.history.length, 0);
+    assert.equal(aFrac.successWindow.appliedEvidenceRefs.length, 0);
+});
+
 test("SM-repair-18: assess() never raw-throws when the capability registry returns a revoked-Proxy descriptor -- descriptorRef falls back to capabilityId, same as a missing descriptor.id (independent audit W7R50-ADV-1)", async () => {
     const { proxy, revoke } = Proxy.revocable({}, {});
     revoke();
