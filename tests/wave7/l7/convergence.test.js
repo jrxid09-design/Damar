@@ -156,6 +156,17 @@ test("W7-L7 convergence 25: constructing the composed cycle never raw-throws whe
     await assert.doesNotReject(() => createLongHorizonCycle({ mode: "shadow", capabilityRegistry: registry, bounds: rev() }));
 });
 
+test("W7-L7 convergence 26: governed cycle() never raw-throws when the L7 composition layer's OWN clock (distinct from the clocks passed to the 6 child lanes) is a revoked Proxy -- falls back to Date.now() (independent audit round 54, Codex, AUD54-P2-1)", async () => {
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+
+    const lh = await createLongHorizonCycle({ mode: "governed", capabilityRegistry: registry, clock: rev() });
+    await assert.doesNotReject(() => lh.cycle());
+
+    const result = await lh.cycle();
+    assert.ok(Number.isFinite(result.projection.generatedAtMs), "generatedAtMs harus fallback ke Date.now() saat clock rusak");
+});
+
 test("W7-L7 repair: audit events emitted in one cycle are capped at MAX_AUDIT_EVENTS_PER_CYCLE (Codex P2 round 8)", async () => {
     const { BOUNDS } = require("../../../src/cognition/longhorizon/bounds");
     const N = 6;
