@@ -66,23 +66,26 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // Bug review independen (audit putaran-22, F-4): spec null/non-objek
         // meledakkan `spec.origin` jadi TypeError mentah.
         if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
+        // Bug review independen (audit putaran-30, AUD30-P2-1; putaran-33,
+        // AUD33-P2-2): `goalId`/`parentGoalId`/`origin` dulu masing-masing
+        // dibaca lebih dari sekali (langsung lewat `spec.x` untuk validasi,
+        // lalu LAGI lewat `{...spec}` saat konstruksi goal) -- getter
+        // stateful bisa lolos validasi dengan nilai sah lalu menyimpan nilai
+        // lain (parentGoalId yang berbeda dari yang dipakai menghitung
+        // depth/childCounts, atau BigInt yang meledakkan persist()). Ketiga
+        // field dikeluarkan bersama dalam SATU pernyataan destructuring
+        // (pelajaran dari AUD32-P2-1: rest-destructure TERPISAH tetap
+        // membaca ulang field yang sudah dibaca lewat penyalinan sisa
+        // kunci) supaya `specRest` tidak pernah menyentuh ketiganya lagi.
+        const { goalId, parentGoalId, origin, ...specRest } = spec;
         // Bug review independen (audit putaran-4, W7R4-P2-3): enforceCreationRate
         // dulu berjalan SEBELUM makeGoal memvalidasi origin.kind -- setiap
         // origin.kind sampah (string acak pemanggil) tetap membuat kunci baru
         // di creationTimestampsByOrigin sebelum proposal ditolak, dan kunci
         // itu tidak pernah dihapus. Divalidasi dulu di sini.
-        if (!spec.origin || !ORIGIN_KINDS.has(spec.origin.kind)) {
+        if (!origin || !ORIGIN_KINDS.has(origin.kind)) {
             fail(REASONS.INVALID_RECORD, "origin.kind tidak dikenal");
         }
-        // Bug review independen (audit putaran-30, AUD30-P2-1): `spec.goalId`
-        // dulu dibaca ULANG (sekali untuk cek tabrakan, sekali lagi saat
-        // konstruksi goal di bawah) -- accessor/getter stateful milik
-        // pemanggil bisa mengembalikan id BARU pada baca pertama (lolos cek
-        // tabrakan) lalu id goal TERMINAL yang sudah ada pada baca kedua,
-        // menimpa goal terminal itu -- pola umum yang sama dengan
-        // AUD29-P2-2 (baca-ganda objek stateful pemanggil), diterapkan ke
-        // penjaga replay-dedup id eksternal. Dibaca SEKALI ke lokal.
-        const goalId = spec.goalId;
         // Bug review independen (audit putaran-10, AUD10-P1-2): goalId
         // pemanggil dulu langsung di-set tanpa cek tabrakan -- pengiriman
         // ulang goalId yang sudah ada (replay lintas-node) menimpa goal
@@ -98,25 +101,25 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // MAX_GOAL_DEPTH sepenuhnya. depth sekarang SELALU diturunkan dari
         // induk yang benar-benar tersimpan; nilai `spec.depth` diabaikan.
         let depth = 0;
-        if (spec.parentGoalId) {
-            const parent = goals.get(spec.parentGoalId);
+        if (parentGoalId) {
+            const parent = goals.get(parentGoalId);
             // Bug review independen (audit putaran-27, AUD27-P2-2): interpolasi
             // `${spec.parentGoalId}` mentah meledakkan TypeError untuk Symbol;
             // putaran-26 menutup 5 sibling id-message di file yang sama tapi
             // melewatkan yang ini.
             if (!parent) {
-                fail(REASONS.INVALID_RECORD, `parentGoalId '${typeof spec.parentGoalId === "string" ? spec.parentGoalId : typeof spec.parentGoalId}' tidak ditemukan`);
+                fail(REASONS.INVALID_RECORD, `parentGoalId '${typeof parentGoalId === "string" ? parentGoalId : typeof parentGoalId}' tidak ditemukan`);
             }
             depth = parent.depth + 1;
 
-            const siblingCount = childCounts.get(spec.parentGoalId) ?? 0;
+            const siblingCount = childCounts.get(parentGoalId) ?? 0;
             if (siblingCount >= bounds.MAX_CHILDREN_PER_GOAL) {
                 // Bug review independen (audit putaran-28, AUD28-ADV-3):
                 // interpolasi `${spec.parentGoalId}` mentah -- latent (baris
                 // 94/98 di atas sudah mewajibkan parentGoalId cocok kunci
                 // goals.get() bertipe string), tapi tetap disamakan dengan
                 // sibling di baris yang sama untuk konsistensi.
-                fail(REASONS.CHILDREN_LIMIT_EXCEEDED, `induk '${typeof spec.parentGoalId === "string" ? spec.parentGoalId : typeof spec.parentGoalId}' melebihi batas anak`);
+                fail(REASONS.CHILDREN_LIMIT_EXCEEDED, `induk '${typeof parentGoalId === "string" ? parentGoalId : typeof parentGoalId}' melebihi batas anak`);
             }
         }
         if (depth > bounds.MAX_GOAL_DEPTH) {
@@ -132,7 +135,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // kehilangan data permanen. makeGoal (satu-satunya tempat spec
         // benar-benar divalidasi) sekarang dipanggil DULU; efek samping
         // hanya terjadi setelah record yang akan disimpan terbukti valid.
-        const goal = makeGoal({ ...spec, depth, goalId: goalId ?? crypto.randomUUID(), nowIso: nowIso() });
+        const goal = makeGoal({ ...specRest, origin, parentGoalId, depth, goalId: goalId ?? crypto.randomUUID(), nowIso: nowIso() });
 
         // Bug review independen (Codex putaran-6): cek retensi lama berjalan
         // SETELAH goal baru sudah dimasukkan, dan hanya mengevict kalau ada
@@ -161,7 +164,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
             }
         }
 
-        enforceCreationRate(spec.origin.kind);
+        enforceCreationRate(origin.kind);
 
         if (evicted) {
             goals.delete(evicted.goalId);

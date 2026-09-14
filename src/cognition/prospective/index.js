@@ -367,8 +367,19 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
             // canonicalJson mentah tidak aman untuk itu (lihat safeObservedEquals
             // di atas berkas ini).
             const sameValue = observed ? safeObservedEquals(observed.value, e.expectedValue) : false;
-            if (observed && sameValue &&
-                observed.atMs >= earliestMs && observed.atMs <= Date.parse(e.window.latestAt)) {
+            // Bug review independen (audit putaran-33, AUD33-P2-3): sibling
+            // dari AUD32-P1-1 di baris yang sama -- `observed.value` sudah
+            // disaring lewat safeObservedEquals, tapi `observed.atMs` (field
+            // MENTAH lain dari port pemanggil yang sama, dibaca DUA KALI di
+            // bawah) tidak. Sebuah Symbol/objek dengan valueOf hostile
+            // meledakkan TypeError mentah pada `>=`/`<=`, membatalkan SISA
+            // sweep checkExpectations. Dibaca SEKALI ke lokal dan divalidasi
+            // sebagai angka finite sebelum dipakai; kalau tidak, dianggap
+            // "tidak cocok" (bukan exception yang lolos).
+            const atMs = observed?.atMs;
+            const hasValidAtMs = typeof atMs === "number" && Number.isFinite(atMs);
+            if (observed && sameValue && hasValidAtMs &&
+                atMs >= earliestMs && atMs <= Date.parse(e.window.latestAt)) {
                 const next = Object.freeze({ ...e, state: "SATISFIED" });
                 expectations.set(e.expectationId, next);
                 results.push({ expectationId: e.expectationId, outcome: "SATISFIED" });

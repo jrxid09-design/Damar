@@ -28,6 +28,17 @@ function buildSafeCognitiveCopy(value, depth = 0, stack, budget) {
     const t = typeof value;
     if (t === "function") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh membawa fungsi (termasuk toJSON)");
     if (t === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh membawa Symbol");
+    // Bug review independen (audit putaran-33, AUD33-P2-5): sanitizer ini
+    // ditulis meniru buildSafeBeliefValue/buildSafePayloadRef tapi lupa dua
+    // cabang penolakannya -- BigInt (meledakkan JSON.stringify/aritmetika
+    // mentah di pemanggil, mis. sort comparator makeReview di bawah) dan
+    // angka non-finite (NaN/Infinity, kelas yang sama dengan sweep
+    // AUD30-ADV-1/AUD31-ADV-1/AUD32-P2-4 yang belum menjangkau sanitizer
+    // baru ini).
+    if (t === "bigint") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh membawa BigInt");
+    if (t === "number" && !Number.isFinite(value)) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh berupa angka non-finite (NaN/Infinity)");
+    }
     if (t !== "object") return value;
     if (depth > VALUE_BOUNDS.MAX_VALUE_SCAN_DEPTH) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "struktur terlalu dalam untuk diverifikasi dengan aman, ditolak");
@@ -109,8 +120,12 @@ function makeAssessment({ assessmentId, subjectRef, claim, evidenceQuality, nowM
     // hanya satu lapis DAN membaca lewat spread (memanggil accessor
     // pemanggil); diganti buildSafeCognitiveCopy yang sudah membekukan
     // dalam dan tidak pernah memanggil accessor.
+    // Bug review independen (audit putaran-33, AUD33-ADV-2): `claim`
+    // disimpan mentah, tidak seperti subjectRef di baris yang sama --
+    // BigInt/non-finite/objek tak terbatas bisa tersimpan tanpa batas per
+    // assessment; disaring lewat sanitizer yang sama.
     return Object.freeze({
-        assessmentId, subjectRef: buildSafeCognitiveCopy(subjectRef), claim,
+        assessmentId, subjectRef: buildSafeCognitiveCopy(subjectRef), claim: buildSafeCognitiveCopy(claim),
         value, basis,
         evidenceQuality: Object.freeze(safeEvidenceQuality),
         calibrationRef
@@ -155,8 +170,17 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
     for (const f of findings) {
         if (!f || typeof f !== "object") fail(REASONS.INVALID_RECORD, "setiap finding wajib objek");
     }
+    // Bug review independen (audit putaran-33, AUD33-P2-5): komparator ini
+    // membaca `severity` MENTAH (sebelum buildSafeCognitiveCopy sempat
+    // menyaringnya di bawah) -- BigInt/hostile valueOf meledakkan aritmetika
+    // `-` mentah, membatalkan seluruh openReview(). safeSeverity tidak
+    // pernah melempar; finding yang severity-nya benar-benar BigInt/
+    // non-finite tetap DITOLAK TERTUTUP oleh buildSafeCognitiveCopy di
+    // bawah begitu urutannya selesai -- ini hanya menjaga PENGURUTAN itu
+    // sendiri tidak meledak sebelum penolakan sempat terjadi.
+    const safeSeverity = (v) => (typeof v === "number" && Number.isFinite(v)) ? v : 0;
     const boundedFindings = findings.length > bounds.MAX_FINDINGS_PER_REVIEW
-        ? [...findings].sort((a, b) => (b.severity ?? 0) - (a.severity ?? 0)).slice(0, bounds.MAX_FINDINGS_PER_REVIEW)
+        ? [...findings].sort((a, b) => safeSeverity(b?.severity) - safeSeverity(a?.severity)).slice(0, bounds.MAX_FINDINGS_PER_REVIEW)
         : findings;
     const boundedProposals = proposals.slice(0, bounds.MAX_PROPOSALS_PER_REVIEW);
 

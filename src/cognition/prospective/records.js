@@ -23,6 +23,14 @@ function validateTrigger(trigger) {
         const kindType = typeof trigger?.kind;
         fail(REASONS.INVALID_TRIGGER, `trigger.kind '${kindType === "string" ? trigger.kind : kindType}' tidak dikenal`);
     }
+    // Bug review independen (audit putaran-33, AUD33-P2-4): `trigger.subject`
+    // (dipakai hanya oleh cabang ON_STATE di bawah) dulu dibaca berkali-kali
+    // -- untuk guard kehadiran, untuk entityId/relationId, lalu LAGI lewat
+    // `{...trigger}` DAN `{...trigger.subject}` saat konstruksi (pola yang
+    // sama tepat dengan makeObservation's subject, AUD32-P2-3). Dikeluarkan
+    // SEKALI di sini lewat destructuring supaya `triggerRest` tidak pernah
+    // menyentuhnya lagi.
+    const { subject, ...triggerRest } = trigger;
     if (trigger.kind === "AT") {
         if (typeof trigger.at !== "string" || !Number.isFinite(Date.parse(trigger.at))) {
             fail(REASONS.INVALID_TRIGGER, "trigger AT wajib 'at' ISO string sah");
@@ -53,7 +61,7 @@ function validateTrigger(trigger) {
     // reminder tanpa entityId/relationId nyata tersimpan, kolaps lewat
     // subjectKeyOf ke kunci sentinel bersama.
     if (trigger.kind === "ON_STATE" && (
-        !trigger.subject || (typeof trigger.subject.entityId !== "string" && typeof trigger.subject.relationId !== "string") ||
+        !subject || (typeof subject.entityId !== "string" && typeof subject.relationId !== "string") ||
         typeof trigger.attribute !== "string")) {
         fail(REASONS.INVALID_TRIGGER, "trigger ON_STATE wajib subject/attribute");
     }
@@ -69,7 +77,7 @@ function validateTrigger(trigger) {
     // yang sudah membungkus SELURUH trigger). Sekarang seluruh trigger
     // dibungkus juga, sama seperti cabang lain.
     if (trigger.kind === "ON_STATE") {
-        return deepFreeze(buildSafePayloadRef({ ...trigger, subject: { ...trigger.subject } }));
+        return deepFreeze(buildSafePayloadRef({ ...triggerRest, subject: { ...subject } }));
     }
     // Bug review independen (audit putaran-10, AUD10-P2-2): sapuan deepFreeze
     // putaran-9 hanya menyentuh cabang ON_STATE -- cabang lain (AT/AFTER/
@@ -282,6 +290,15 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
     if (typeof attribute !== "string" || !attribute) fail(REASONS.INVALID_RECORD, "attribute wajib string");
     if (typeof onSatisfied !== "string") fail(REASONS.INVALID_RECORD, "onSatisfied wajib string");
     if (typeof onViolated !== "string") fail(REASONS.INVALID_RECORD, "onViolated wajib string");
+    // Bug review independen (audit putaran-33, AUD33-ADV-2): sibling
+    // makeObservation (worldmodel)/makeHypothesis/validateConditionSpec
+    // (goals) sudah mewajibkan subject berbentuk { entityId }|{ relationId }
+    // -- makeExpectation tidak pernah dijaga sama, jadi subject:null lolos
+    // lalu disalin sebagai `{}` (buildSafePayloadRef tidak menolak objek
+    // kosong), mengirim subject yang tidak pernah valid ke evaluatePort().
+    if (!subject || (typeof subject.entityId !== "string" && typeof subject.relationId !== "string")) {
+        fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
+    }
     // Bug review independen (audit putaran-9, AUD9-P2-3): expectedValue
     // tidak pernah disaring -- BigInt di dalamnya lolos lalu meledakkan
     // JSON.stringify di saveSnapshot() saat persist(). buildSafePayloadRef
