@@ -236,7 +236,9 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         if ((!existing || isSourceChange) && count >= bounds.MAX_ENTITIES_PER_SOURCE) {
             fail(REASONS.QUOTA_EXCEEDED, `sumber '${source}' melebihi kuota entitas (WM-A6)`);
         }
-        const entity = makeEntity({ entityId, entityKind, labels, externalRefs, source, nowMs: now() });
+        // Bug review independen (audit putaran-66, Codex, W7R66-P2-2):
+        // `bounds` (sudah disanitasi) diteruskan eksplisit.
+        const entity = makeEntity({ entityId, entityKind, labels, externalRefs, source, nowMs: now(), bounds });
         // Bug review independen (audit putaran-9, AUD9-P1-2): spread pasca-
         // makeEntity() menghasilkan objek POLOS TAK DIBEKUKAN -- pemanggil
         // yang menyimpan hasil declareEntity/entitiesByKind bisa memutasi
@@ -570,7 +572,9 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // expiresAt cacat) tetap mengevict satu hipotesis VALID sebelum
         // error dilempar, kehilangan data permanen. Validasi/bangun record
         // DULU, baru kompaksi+simpan.
-        const h = makeHypothesis({ ...specRest, hypothesisId });
+        // Bug review independen (audit putaran-66, Codex, W7R66-P2-2):
+        // `bounds` (sudah disanitasi) diteruskan eksplisit, SESUDAH spread.
+        const h = makeHypothesis({ ...specRest, hypothesisId, bounds });
         // Bug ditemukan lewat sapuan mandiri (setelah audit putaran-59):
         // sibling PERSIS dari kelas W7R59-P2-1..5 -- kapasitas 0 (sanksi
         // sah lewat sanitizeBounds) dengan `hypotheses` kosong membuat

@@ -138,6 +138,21 @@ test("WM-repair-101: ingestObservation honors a caller-sanctioned override of MA
     }));
 });
 
+test("WM-repair-102: declareHypothesis honors a caller-sanctioned override of MAX_VALUE_NODES (including 0) for composite candidate values, and declareEntity honors a caller-sanctioned override of MAX_ENTITY_LABEL_KEYS -- makeHypothesis/buildSafeBeliefValue and validateLabels read the module's fixed BOUNDS constant directly instead of the sanitized per-instance bounds (independent audit round 66, Codex, W7R66-P2-2, escalation of a round-65 disclosed-but-unfixed item)", async () => {
+    const wmHyp = await createWorldModel({ bounds: { MAX_VALUE_NODES: 0 } });
+    wmHyp.declareEntity({ entityId: "e1", entityKind: "thing", source: "s" });
+    assert.throws(() => wmHyp.declareHypothesis({
+        hypothesisId: "h1", subject: { entityId: "e1" }, attribute: "a",
+        candidateValues: [{ value: { nested: "composite" }, weight: 1 }],
+        expiresAt: "2030-01-01T00:00:00.000Z"
+    }));
+
+    const wmLabel = await createWorldModel({ bounds: { MAX_ENTITY_LABEL_KEYS: 0 } });
+    assertThrowsReason(() => wmLabel.declareEntity({
+        entityId: "e2", entityKind: "thing", source: "s", labels: { a: "1" }
+    }), "BOUND_EXCEEDED");
+});
+
 test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });

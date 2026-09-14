@@ -44,6 +44,26 @@ test("PM-repair-61: arm()'s payloadRef honors a caller-sanctioned override of MA
     }), "PAYLOAD_TOO_LARGE");
 });
 
+test("PM-repair-62: arm()'s trigger.extra and MAX_RECURRENCE_OCCURRENCES, and armExpectation()'s window.extra, all honor a caller-sanctioned bounds override -- round 65 only threaded bounds through makeReminder's payloadRef, missing validateTrigger/makeExpectation's OWN buildSafePayloadRef calls and the recurrence-validation reads (independent audit round 66, Codex, W7R66-P2-1, escalation of a round-65 disclosed-but-unfixed item)", async () => {
+    const pmArr = await createProspectiveMemory({ bounds: { MAX_PAYLOAD_ARRAY_LENGTH: 1 } });
+    assertThrowsReason(() => pmArr.arm({
+        reminderId: "m2", wakeClass: "NOTIFY_OWNER",
+        trigger: { kind: "AT", at: "2030-01-01T00:00:00.000Z", extra: [1, 2, 3] }
+    }), "PAYLOAD_TOO_LARGE");
+
+    const pmRecur = await createProspectiveMemory({ bounds: { MAX_RECURRENCE_OCCURRENCES: 1 } });
+    assertThrowsReason(() => pmRecur.arm({
+        reminderId: "m3", wakeClass: "NOTIFY_OWNER",
+        trigger: { kind: "RECURRING", intervalMs: 120_000, maxOccurrences: 2 }
+    }), "RECURRENCE_UNBOUNDED");
+
+    const pmWin = await createProspectiveMemory({ bounds: { MAX_PAYLOAD_ARRAY_LENGTH: 1 } });
+    assertThrowsReason(() => pmWin.armExpectation({
+        subject: { entityId: "e1" }, attribute: "status", expectedValue: "done",
+        window: { latestAt: new Date(1000).toISOString(), extra: [1, 2, 3] }
+    }), "PAYLOAD_TOO_LARGE");
+});
+
 test("PM-repair-23: armExpectation(null) is rejected as INVALID_RECORD, not a raw TypeError -- arm()'s sibling in the same file was missed in round 21 (independent audit AUD22-F-4)", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.armExpectation(null), "INVALID_RECORD");

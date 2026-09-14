@@ -70,7 +70,11 @@ function buildSafeArray(arr, mapFn) {
     return out;
 }
 
-function validateLabels(labels) {
+// Bug review independen (audit putaran-66, Codex, W7R66-P2-2, eskalasi
+// dari item yang diungkap-tapi-tidak-diperbaiki putaran-65): fungsi ini
+// membaca `BOUNDS.MAX_ENTITY_LABEL_KEYS`/`MAX_ENTITY_LABEL_CHARS` modul
+// (default TETAP) langsung. Parameter `bounds` ditambahkan.
+function validateLabels(labels, bounds = BOUNDS) {
     if (labels == null) return {};
     // Bug review independen (audit putaran-41, AUD41-P2-3): sebuah Proxy
     // yang sudah di-revoke melempar TypeError MENTAH pada `Object.keys`
@@ -83,7 +87,7 @@ function validateLabels(labels) {
     } catch {
         fail(REASONS.INVALID_RECORD, "labels tidak dapat diverifikasi dengan aman, ditolak");
     }
-    if (keys.length > BOUNDS.MAX_ENTITY_LABEL_KEYS) {
+    if (keys.length > bounds.MAX_ENTITY_LABEL_KEYS) {
         fail(REASONS.BOUND_EXCEEDED, "jumlah label melebihi batas");
     }
     const out = {};
@@ -113,13 +117,13 @@ function validateLabels(labels) {
         // lenient seperti null/undefined yang sudah ada), bukan crash.
         const safeRaw = (raw === undefined || raw === null || typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean")
             ? (raw ?? "") : "";
-        const value = String(safeRaw).slice(0, BOUNDS.MAX_ENTITY_LABEL_CHARS);
+        const value = String(safeRaw).slice(0, bounds.MAX_ENTITY_LABEL_CHARS);
         out[key.slice(0, 128)] = value;
     }
     return Object.freeze(out);
 }
 
-function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, nowMs }) {
+function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, nowMs, bounds = BOUNDS }) {
     if (typeof entityId !== "string" || !entityId) fail(REASONS.INVALID_RECORD, "entityId wajib string");
     if (typeof entityKind !== "string" || !entityKind) fail(REASONS.INVALID_RECORD, "entityKind wajib string");
     if (typeof source !== "string" || !source) fail(REASONS.INVALID_RECORD, "source wajib string (untuk kuota WM-A6)");
@@ -150,7 +154,7 @@ function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, n
 
     return Object.freeze({
         entityId, entityKind: entityKind.slice(0, 64),
-        labels: validateLabels(labels),
+        labels: validateLabels(labels, bounds),
         firstSeenAt: nowMs, lastSeenAt: nowMs,
         // Bug review independen (audit putaran-20, AUD20-P2-2): elemen
         // externalRefs tidak dijaga -- elemen `null` meledakkan `r.system`
@@ -295,7 +299,7 @@ function makeObservation({ observationId, subject, attribute, value, sensor, fra
     });
 }
 
-function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, discriminatingProbe = null, expiresAt }) {
+function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, discriminatingProbe = null, expiresAt, bounds = BOUNDS }) {
     if (typeof hypothesisId !== "string" || !hypothesisId) fail(REASONS.INVALID_RECORD, "hypothesisId wajib string");
     // Bug review independen (audit putaran-23, AUD23-ADV-1): sibling
     // makeObservation memvalidasi subject wajib { entityId } atau
@@ -312,7 +316,7 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
     // penyimpanan di bawah memakai bentuk tersanitasi yang SAMA (bukan
     // `subject` mentah lagi). `relationId` hanya dibaca kalau `entityId`
     // terbukti bukan string (short-circuit, kelas AUD36-P2-2).
-    const safeSubject = buildSafeBeliefValue(subject);
+    const safeSubject = buildSafeBeliefValue(subject, 0, undefined, undefined, bounds);
     const entityId = safeSubject?.entityId;
     const validEntity = typeof entityId === "string";
     const relationId = validEntity ? undefined : safeSubject?.relationId;
@@ -397,9 +401,9 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
             if (typeof weight !== "number" && typeof weight !== "string" && typeof weight !== "boolean" && weight !== undefined) {
                 fail(REASONS.INVALID_RECORD, "candidateValues[].weight wajib angka");
             }
-            return Object.freeze({ value: buildSafeBeliefValue(value), weight: clamp01(Number(weight)) });
+            return Object.freeze({ value: buildSafeBeliefValue(value, 0, undefined, undefined, bounds), weight: clamp01(Number(weight)) });
         })),
-        discriminatingProbe: buildSafeBeliefValue(discriminatingProbe), expiresAt
+        discriminatingProbe: buildSafeBeliefValue(discriminatingProbe, 0, undefined, undefined, bounds), expiresAt
     });
 }
 
