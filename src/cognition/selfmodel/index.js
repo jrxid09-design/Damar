@@ -415,13 +415,20 @@ async function createSelfModel({
             // pernah dicegah dari SELALU di-append sesudah slice(1), jadi
             // cap 0 tetap kebobolan satu entri. Dibulatkan integer >= 0;
             // kapasitas 0 berarti TIDAK ADA entri degraded yang disimpan.
+            // Bug review independen (audit putaran-61, Codex, AUD61-P2-1,
+            // BLOCKING, kelas umum): `.slice(1)` (satu langkah) tidak
+            // benar-benar mengompaksi kalau store dimuat ulang dengan
+            // bound lebih rendah dari saat data itu dipersist -- populasi
+            // pra-ada bisa jauh melebihi bound baru. `.slice(-(maxDegraded-1))`
+            // memangkas penuh ke maxDegraded-1 SEBELUM menambah entri baru,
+            // bukan cuma satu langkah per panggilan.
             const maxDegraded = Math.max(0, Math.trunc(bounds.MAX_DEGRADED_SUBSYSTEMS));
             if (maxDegraded > 0) {
                 const entry = Object.freeze({ subsystem, state, at: at ?? nowIso() });
-                if (degradedSubsystems.length >= maxDegraded) {
-                    degradedSubsystems = degradedSubsystems.slice(1); // FIFO, batas keras
-                }
-                degradedSubsystems = [...degradedSubsystems, entry];
+                const trimmed = maxDegraded > 1 ? degradedSubsystems.slice(-(maxDegraded - 1)) : [];
+                degradedSubsystems = [...trimmed, entry];
+            } else {
+                degradedSubsystems = [];
             }
         }
         return healthState();

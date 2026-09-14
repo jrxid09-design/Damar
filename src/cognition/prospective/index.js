@@ -275,24 +275,29 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
      * masih ARMED.
      */
     function compactTerminalRemindersIfOverBound() {
-        if (reminders.size <= bounds.MAX_TOTAL_REMINDERS_RETAINED) return;
-        const terminal = [...reminders.values()]
-            .filter(r => r.state === "FIRED" || r.state === "RETIRED")
-            .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-        const victim = terminal[0];
-        if (!victim) return;
-        reminders.delete(victim.reminderId);
-        // Bug review independen (audit putaran-38, AUD38-ADV-1): `key.
-        // startsWith(prefix)` cocok pada BATAS STRING, bukan batas
-        // reminderId -- reminderId "R" adalah prefix string dari
-        // occurrenceKey milik reminder LAIN yang namanya "R:x" (occurrenceKey
-        // untuk itu adalah "R:x:0", dan "R:x:0".startsWith("R:") == true),
-        // jadi kompaksi "R" salah menghapus entri dedup milik "R:x" yang
-        // masih hidup. Dicocokkan tepat pada batas `${reminderId}:<integer>`.
-        const prefix = `${victim.reminderId}:`;
-        for (const key of firedOccurrenceIds) {
-            if (key.startsWith(prefix) && /^\d+$/.test(key.slice(prefix.length))) {
-                firedOccurrenceIds.delete(key);
+        // Bug review independen (audit putaran-61, Codex, AUD61-P2-1,
+        // BLOCKING, kelas umum): dilooping sampai benar-benar patuh --
+        // satu korban per panggilan tidak cukup kalau store dimuat ulang
+        // dengan bound yang lebih rendah dari saat data itu dipersist.
+        while (reminders.size > bounds.MAX_TOTAL_REMINDERS_RETAINED) {
+            const terminal = [...reminders.values()]
+                .filter(r => r.state === "FIRED" || r.state === "RETIRED")
+                .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+            const victim = terminal[0];
+            if (!victim) return;
+            reminders.delete(victim.reminderId);
+            // Bug review independen (audit putaran-38, AUD38-ADV-1): `key.
+            // startsWith(prefix)` cocok pada BATAS STRING, bukan batas
+            // reminderId -- reminderId "R" adalah prefix string dari
+            // occurrenceKey milik reminder LAIN yang namanya "R:x" (occurrenceKey
+            // untuk itu adalah "R:x:0", dan "R:x:0".startsWith("R:") == true),
+            // jadi kompaksi "R" salah menghapus entri dedup milik "R:x" yang
+            // masih hidup. Dicocokkan tepat pada batas `${reminderId}:<integer>`.
+            const prefix = `${victim.reminderId}:`;
+            for (const key of firedOccurrenceIds) {
+                if (key.startsWith(prefix) && /^\d+$/.test(key.slice(prefix.length))) {
+                    firedOccurrenceIds.delete(key);
+                }
             }
         }
     }
@@ -428,10 +433,15 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         // baru tetap disimpan tanpa syarat sesudahnya, melampaui cap 0
         // secara diam-diam. Bound dibulatkan integer >= 0; kapasitas 0
         // berarti TIDAK ADA expectation yang dipertahankan.
+        // Bug review independen (audit putaran-61, Codex, AUD61-P2-1,
+        // BLOCKING, kelas umum): dilooping sampai benar-benar patuh --
+        // satu korban per panggilan tidak cukup kalau store dimuat ulang
+        // dengan bound yang lebih rendah dari saat data itu dipersist.
         const maxPending = Math.max(0, Math.trunc(bounds.MAX_PENDING_EXPECTATIONS));
-        if (expectations.size >= maxPending) {
+        while (expectations.size >= maxPending) {
             const oldest = [...expectations.values()].sort((a, b) => Date.parse(a.window.latestAt) - Date.parse(b.window.latestAt))[0];
-            if (oldest) expectations.delete(oldest.expectationId);
+            if (!oldest) break;
+            expectations.delete(oldest.expectationId);
         }
         if (maxPending > 0) {
             expectations.set(e.expectationId, e);

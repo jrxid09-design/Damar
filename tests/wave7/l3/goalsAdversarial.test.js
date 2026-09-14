@@ -253,6 +253,22 @@ test("GL-repair-78: transition() honors a sanctioned MAX_TRANSITION_LOG_PER_GOAL
     assert.equal(transitioned.transitions.length, 0);
 });
 
+test("GL-repair-79: createPlan's GLOBAL compaction fully compacts down to a newly-lowered MAX_TOTAL_PLANS_RETAINED after a store reload, not just one plan per call -- round 60's fix deleted only ONE record per createPlan invocation, so pre-existing persisted plans (written under a higher bound) never got compacted down when reopened with a lower one (independent audit round 61, Codex, AUD61-P2-1, BLOCKING)", async () => {
+    const { createMemoryAccStore } = require("../../../src/cognition/persistence/AccStore");
+    const store = createMemoryAccStore();
+    const ge1 = await createGoalEngine({ store, bounds: { MAX_TOTAL_PLANS_RETAINED: 5 } });
+    const g1 = ge1.proposeGoal(baseGoalSpec());
+    ge1.createPlan({ goalRef: g1.goalId, steps: [] });
+    ge1.createPlan({ goalRef: g1.goalId, steps: [] });
+    await ge1.persist();
+
+    const ge2 = await createGoalEngine({ store, bounds: { MAX_TOTAL_PLANS_RETAINED: 0 } });
+    const g2 = ge2.proposeGoal(baseGoalSpec());
+    const p3 = ge2.createPlan({ goalRef: g2.goalId, steps: [] });
+    assert.equal(ge2.plansSize(), 0);
+    assert.equal(ge2.getPlan(p3.planId), null);
+});
+
 test("GL-repair-9: terminal commitments are retention-bounded, not just OPEN ones (independent audit W7R5-P2-3)", async () => {
     const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_COMMITMENTS_RETAINED: 5 } });
     for (let i = 0; i < 50; i++) {

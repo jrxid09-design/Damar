@@ -95,6 +95,19 @@ test("WM-repair-97: a challenger auto-archived at MAX_OPEN_CONTRADICTION_SETS=0 
     assert.equal(q.contradictionSetId, null);
 });
 
+test("WM-repair-98: declareEntity's evictEntityIfOverBound fully compacts down to a newly-lowered MAX_ENTITIES after a store reload, not just one entity per call -- round 60's fix only removed a single victim per invocation, so pre-existing persisted entities (written under a higher bound) never got compacted when reopened with a lower one (independent audit round 61, Codex, AUD61-P2-1, BLOCKING, same class swept to the entity graph)", async () => {
+    const { createMemoryAccStore } = require("../../../src/cognition/persistence/AccStore");
+    const store = createMemoryAccStore();
+    const wm1 = await createWorldModel({ store, bounds: { MAX_ENTITIES: 5 } });
+    await wm1.declareEntity({ entityId: "e1", entityKind: "thing", source: "s" });
+    await wm1.declareEntity({ entityId: "e2", entityKind: "thing", source: "s" });
+    await wm1.persist();
+
+    const wm2 = await createWorldModel({ store, bounds: { MAX_ENTITIES: 0 } });
+    wm2.declareEntity({ entityId: "e3", entityKind: "thing", source: "s" });
+    assert.equal(wm2.entitiesByKind("thing").entities.length, 0);
+});
+
 test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });

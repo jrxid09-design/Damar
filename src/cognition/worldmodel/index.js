@@ -146,21 +146,27 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // baru tetap tersimpan, melampaui cap total 0. Sibling PERSIS
         // dari kelas round-59 (attention evictLowestIfOverflow), belum
         // disapu ke sini. Pada kapasitas 0, proteksi dilepas.
+        // Bug review independen (audit putaran-61, Codex, AUD61-P2-1,
+        // BLOCKING, kelas umum): menghapus SATU korban per panggilan tidak
+        // pernah benar-benar mengompaksi turun kalau store dimuat ulang
+        // dengan bound yang lebih rendah dari saat data itu dipersist --
+        // populasi pra-ada bisa jauh melebihi bound baru. Loop sampai
+        // benar-benar patuh, bukan cuma satu langkah per panggilan.
         const maxEntities = Math.max(0, Math.trunc(bounds.MAX_ENTITIES));
-        if (entities.size <= maxEntities) return;
         const effectiveProtected = maxEntities === 0 ? null : protectedEntityId;
-        let victim = null;
-        let victimDegree = Infinity;
-        for (const e of entities.values()) {
-            if (e.entityId === effectiveProtected) continue;
-            const degree = relationDegree(e.entityId);
-            if (!victim || degree < victimDegree ||
-                (degree === victimDegree && e.lastSeenAt < victim.lastSeenAt)) {
-                victim = e;
-                victimDegree = degree;
+        while (entities.size > maxEntities) {
+            let victim = null;
+            let victimDegree = Infinity;
+            for (const e of entities.values()) {
+                if (e.entityId === effectiveProtected) continue;
+                const degree = relationDegree(e.entityId);
+                if (!victim || degree < victimDegree ||
+                    (degree === victimDegree && e.lastSeenAt < victim.lastSeenAt)) {
+                    victim = e;
+                    victimDegree = degree;
+                }
             }
-        }
-        if (victim) {
+            if (!victim) break;
             entities.delete(victim.entityId);
             decrementSourceCount(victim.source);
             // Bug review independen (Codex putaran-6): relasi yang masih
@@ -188,14 +194,17 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // `protectedRelationId` sebagai satu-satunya relasi tidak pernah
         // dievict. Proteksi dilepas pada kapasitas 0.
         const maxRelations = Math.max(0, Math.trunc(bounds.MAX_RELATIONS));
-        if (relations.size <= maxRelations) return;
+        // Bug review independen (audit putaran-61, Codex, AUD61-P2-1,
+        // BLOCKING, kelas umum): sibling PERSIS -- dilooping sampai
+        // benar-benar patuh, bukan cuma satu korban per panggilan.
         const effectiveProtected = maxRelations === 0 ? null : protectedRelationId;
-        let victim = null;
-        for (const r of relations.values()) {
-            if (r.relationId === effectiveProtected) continue;
-            if (!victim || r.strength < victim.strength) victim = r;
-        }
-        if (victim) {
+        while (relations.size > maxRelations) {
+            let victim = null;
+            for (const r of relations.values()) {
+                if (r.relationId === effectiveProtected) continue;
+                if (!victim || r.strength < victim.strength) victim = r;
+            }
+            if (!victim) break;
             relations.delete(victim.relationId);
             decDegree(victim.from);
             decDegree(victim.to);
@@ -329,17 +338,22 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // tetap disimpan tanpa syarat di `beliefs.set(key, belief)` di
         // bawah, melampaui cap total secara diam-diam. Kapasitas 0
         // berarti TIDAK ADA belief baru yang dipertahankan.
+        // Bug review independen (audit putaran-61, Codex, AUD61-P2-1,
+        // BLOCKING, kelas umum): dilooping sampai populasi (SETELAH
+        // menghitung belief baru yang akan ditambahkan) benar-benar patuh
+        // ke bound saat ini -- bukan cuma satu korban per panggilan, yang
+        // gagal mengompaksi kalau store dimuat ulang dengan bound lebih
+        // rendah dari saat data itu dipersist.
         const maxTotalBeliefs = Math.max(0, Math.trunc(bounds.MAX_TOTAL_BELIEFS));
         let skipNewBeliefStorage = false;
-        if (!existing && beliefs.size >= maxTotalBeliefs) {
-            let victimKey = null, victimUpdatedAtMs = Infinity;
-            for (const [k, b] of beliefs) {
-                if (b.updatedAtMs < victimUpdatedAtMs) { victimUpdatedAtMs = b.updatedAtMs; victimKey = k; }
-            }
-            if (victimKey !== null) {
+        if (!existing) {
+            while (beliefs.size >= maxTotalBeliefs) {
+                let victimKey = null, victimUpdatedAtMs = Infinity;
+                for (const [k, b] of beliefs) {
+                    if (b.updatedAtMs < victimUpdatedAtMs) { victimUpdatedAtMs = b.updatedAtMs; victimKey = k; }
+                }
+                if (victimKey === null) { skipNewBeliefStorage = (maxTotalBeliefs === 0); break; }
                 beliefs.delete(victimKey);
-            } else if (maxTotalBeliefs === 0) {
-                skipNewBeliefStorage = true;
             }
         }
 
@@ -562,17 +576,16 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // di bawah tetap tanpa syarat, melampaui cap total secara diam-
         // diam. Kapasitas 0 berarti TIDAK ADA hipotesis baru yang
         // dipertahankan.
+        // Bug review independen (audit putaran-61, Codex, AUD61-P2-1,
+        // BLOCKING, kelas umum): dilooping sampai benar-benar patuh.
         const maxHypotheses = Math.max(0, Math.trunc(bounds.MAX_HYPOTHESES));
         let skipNewHypothesisStorage = false;
-        if (hypotheses.size >= maxHypotheses) {
+        while (hypotheses.size >= maxHypotheses) {
             // §11: kadaluwarsa dulu, lalu bobot terendah.
             const sorted = [...hypotheses.values()].sort((a, b) =>
                 (Date.parse(a.expiresAt) - Date.parse(b.expiresAt)));
-            if (sorted[0]) {
-                hypotheses.delete(sorted[0].hypothesisId);
-            } else if (maxHypotheses === 0) {
-                skipNewHypothesisStorage = true;
-            }
+            if (!sorted[0]) { skipNewHypothesisStorage = (maxHypotheses === 0); break; }
+            hypotheses.delete(sorted[0].hypothesisId);
         }
         if (!skipNewHypothesisStorage) hypotheses.set(h.hypothesisId, h);
         return h;
