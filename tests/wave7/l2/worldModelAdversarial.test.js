@@ -366,6 +366,21 @@ test("WM-repair-27: an overflowed unresolved contradiction is archived and retri
     assert.equal(overflowed[0].status, "UNRESOLVABLE");
 });
 
+test("WM-repair-59: subgraph's budget.nodes/budget.bytes are each read exactly once, so a stateful accessor cannot change the effective budget mid-traversal (independent audit AUD34-ADV-5b)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e0", entityKind: "d", source: "s" });
+    for (let i = 1; i <= 5; i++) {
+        wm.declareEntity({ entityId: `e${i}`, entityKind: "d", source: "s" });
+        wm.declareRelation({ relationId: `r${i}`, kind: "k", from: `e${i - 1}`, to: `e${i}` });
+    }
+    let n = 0;
+    const budget = { bytes: 262144 };
+    Object.defineProperty(budget, "nodes", { enumerable: true, configurable: true, get() { n++; return n === 1 ? 512 : 1; } });
+    const sub = wm.subgraph(["e0"], 5, budget);
+    assert.equal(n, 1, "budget.nodes must be read exactly once");
+    assert.ok(sub.entities.length > 1, "the value seen on the single read must be honored for the whole traversal, not silently shrunk mid-traversal");
+});
+
 test("WM-repair-58: an archived overflow contradiction's resolution is deep-frozen, not just the outer entry -- a caller cannot rewrite the canonical OVERFLOW_ARCHIVE reason (independent audit AUD33-P2-1)", async () => {
     const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_OPEN_CONTRADICTION_SETS: 1 } });
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });

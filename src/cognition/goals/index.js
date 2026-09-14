@@ -77,15 +77,31 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // (pelajaran dari AUD32-P2-1: rest-destructure TERPISAH tetap
         // membaca ulang field yang sudah dibaca lewat penyalinan sisa
         // kunci) supaya `specRest` tidak pernah menyentuh ketiganya lagi.
-        const { goalId, parentGoalId, origin, ...specRest } = spec;
+        const { goalId, parentGoalId, origin: rawOrigin, ...specRest } = spec;
+        // Bug review independen (audit putaran-34, AUD34-P2-5): `origin`
+        // ITU SENDIRI dikeluarkan sekali (di atas) dari `spec`, tapi
+        // `origin.kind` (properti DALAM origin) masih dibaca berkali-kali
+        // lintas fungsi -- guard ini, enforceCreationRate di bawah, DAN tiga
+        // titik lagi di dalam makeGoal (guard/keputusan ownerApproval/spread
+        // konstruksi) -- lima baca total dari getter yang sama. Getter
+        // stateful bisa memvalidasi OWNER lalu mengizinkan AGENT_SUGGESTION
+        // menyetel ownerApproval-nya SENDIRI (melanggar G-2), dan
+        // creationTimestampsByOrigin bisa tumbuh satu kunci tak terbatas per
+        // proposal (getter yang berubah tiap panggilan). `kind` (dan setiap
+        // properti origin lain) dibaca SEKALI di sini lalu origin DIBANGUN
+        // ULANG sebagai objek polos baru -- makeGoal menerima objek polos
+        // itu, jadi baca-berkalinya di dalam sana tidak lagi menyentuh
+        // accessor pemanggil sama sekali.
+        const { kind: originKind, ...originRest } = rawOrigin ?? {};
         // Bug review independen (audit putaran-4, W7R4-P2-3): enforceCreationRate
         // dulu berjalan SEBELUM makeGoal memvalidasi origin.kind -- setiap
         // origin.kind sampah (string acak pemanggil) tetap membuat kunci baru
         // di creationTimestampsByOrigin sebelum proposal ditolak, dan kunci
         // itu tidak pernah dihapus. Divalidasi dulu di sini.
-        if (!origin || !ORIGIN_KINDS.has(origin.kind)) {
+        if (!rawOrigin || !ORIGIN_KINDS.has(originKind)) {
             fail(REASONS.INVALID_RECORD, "origin.kind tidak dikenal");
         }
+        const origin = Object.freeze({ ...originRest, kind: originKind });
         // Bug review independen (audit putaran-10, AUD10-P1-2): goalId
         // pemanggil dulu langsung di-set tanpa cek tabrakan -- pengiriman
         // ulang goalId yang sudah ada (replay lintas-node) menimpa goal
@@ -100,6 +116,15 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // pemanggil bisa memberi depth:0 pada setiap anak dan melewati
         // MAX_GOAL_DEPTH sepenuhnya. depth sekarang SELALU diturunkan dari
         // induk yang benar-benar tersimpan; nilai `spec.depth` diabaikan.
+        // Bug review independen (audit putaran-34, AUD34-P2-6): `if
+        // (parentGoalId)` adalah cek KEBENARAN, bukan cek TIPE -- `0n`
+        // (BigInt nol) bertipe salah tapi FALSY, jadi melewati blok ini
+        // sepenuhnya (tidak pernah dicek lewat goals.get()) dan tersimpan
+        // mentah di makeGoal, meledakkan JSON.stringify saat persist()
+        // (durability DoS dari satu proposal biasa, bukan getter hostile).
+        if (parentGoalId != null && typeof parentGoalId !== "string") {
+            fail(REASONS.INVALID_RECORD, "parentGoalId, jika ada, wajib string");
+        }
         let depth = 0;
         if (parentGoalId) {
             const parent = goals.get(parentGoalId);
@@ -164,7 +189,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
             }
         }
 
-        enforceCreationRate(origin.kind);
+        enforceCreationRate(originKind);
 
         if (evicted) {
             goals.delete(evicted.goalId);
@@ -273,10 +298,14 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // Bug review independen (audit putaran-10, AUD10-P1-2): replay dari
         // commitmentId yang sudah ada (mis. sudah MET) menimpanya kembali ke
         // OPEN, melewati finalitas state terminal.
-        // Bug review independen (audit putaran-31, AUD31-P2-1): sama seperti
-        // goalId (putaran-30) -- `spec.commitmentId` dibaca ulang saat
-        // konstruksi di bawah, sibling yang terlewat dalam file yang sama.
-        const commitmentId = spec.commitmentId;
+        // Bug review independen (audit putaran-31, AUD31-P2-1; putaran-34,
+        // AUD34-ADV-1): perbaikan putaran-31 membaca `commitmentId` sekali
+        // ke lokal tapi masih melewatkan `...spec` (bukan `...specRest`) ke
+        // makeCommitment di bawah -- spread itu SENDIRI membaca getter
+        // commitmentId lagi (override-nya cuma membuang hasil baca itu,
+        // tidak mencegah baca itu terjadi). Dikeluarkan lewat destructuring
+        // supaya spread di bawah benar-benar tidak menyentuhnya lagi.
+        const { commitmentId, ...specRest } = spec;
         if (commitmentId && commitments.has(commitmentId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `commitmentId '${typeof commitmentId === "string" ? commitmentId : typeof commitmentId}' sudah ada`);
         }
@@ -290,7 +319,7 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // ditolak (mis. dueCondition cacat) tetap menghapus satu komitmen
         // terminal yang VALID sebelum error dilempar. Validasi/bangun record
         // dulu, baru kompaksi+simpan.
-        const c = makeCommitment({ ...spec, commitmentId: commitmentId ?? crypto.randomUUID() });
+        const c = makeCommitment({ ...specRest, commitmentId: commitmentId ?? crypto.randomUUID() });
         // Bug review independen (audit putaran-5, W7R5-P2-3, dieskalasi dari
         // advisory putaran-4): MAX_OPEN_COMMITMENTS hanya membatasi yang OPEN
         // -- komitmen terminal (MET/MISSED/RELEASED/RENEGOTIATED) menumpuk
@@ -405,9 +434,13 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // taskId yang sudah ada mengganti task (termasuk yang sudah
         // ATTEMPTS_EXCEEDED/DONE) dengan attempts:0/state:PENDING baru,
         // melewati batas percobaan dan finalitas state terminal.
-        // Bug review independen (audit putaran-31, AUD31-P2-1): sibling dari
-        // goalId (putaran-30) yang terlewat dalam file yang sama.
-        const taskId = spec.taskId;
+        // Bug review independen (audit putaran-31, AUD31-P2-1; putaran-34,
+        // AUD34-ADV-1): `spec.taskId`/`spec.maxAttempts` dikeluarkan
+        // bersama lewat destructuring (bukan `spec.x` terpisah lalu
+        // `{...spec}` di bawah) -- spread objek membaca ULANG setiap
+        // properti yang tersisa termasuk keduanya, jadi override sesudahnya
+        // cuma membuang hasil baca kedua itu, tidak mencegahnya terjadi.
+        const { taskId, maxAttempts, ...specRest } = spec;
         if (taskId && tasks.has(taskId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `taskId '${typeof taskId === "string" ? taskId : typeof taskId}' sudah ada`);
         }
@@ -418,10 +451,10 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // menangkap null/undefined, jadi maxAttempts: NaN atau "abc" lolos ke
         // Math.min dan menghasilkan NaN. `attempts > NaN` selalu false, jadi
         // ATTEMPTS_EXCEEDED tidak pernah tercapai (retry tanpa batas).
-        const safeMaxAttempts = Number.isInteger(spec.maxAttempts) && spec.maxAttempts > 0
-            ? Math.min(spec.maxAttempts, bounds.MAX_ATTEMPTS_PER_TASK)
+        const safeMaxAttempts = Number.isInteger(maxAttempts) && maxAttempts > 0
+            ? Math.min(maxAttempts, bounds.MAX_ATTEMPTS_PER_TASK)
             : 5;
-        const t = makeTask({ ...spec, taskId: taskId ?? crypto.randomUUID(), maxAttempts: safeMaxAttempts });
+        const t = makeTask({ ...specRest, taskId: taskId ?? crypto.randomUUID(), maxAttempts: safeMaxAttempts });
         // Bug review independen (audit putaran-5, W7R5-P2-3): tasks tidak
         // punya batas total sama sekali. Kompaksi task terminal (DONE/SKIPPED)
         // tertua saat retensi penuh; task FAILED/lainnya dipertahankan karena

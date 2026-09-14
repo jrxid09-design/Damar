@@ -176,6 +176,29 @@ test("AT-repair-28: evidenceRef is read exactly once in ingestSignal, so the cor
     assert.deepEqual(signal.evidenceRef, objA, "the stored evidenceRef must come from the same read that the corroboration identity was computed from");
 });
 
+test("AT-repair-29: a BigInt or non-finite number nested in subjectRef/evidenceRef is rejected, matching the sanitizer parity every other lane already has (independent audit AUD34-ADV-4)", async () => {
+    const ae = await createAttentionEconomy();
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s1", subjectRef: { entityId: "e1", n: 10n } }, "PERCEIVE"), "EXECUTABLE_MATERIAL_REJECTED");
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s2", subjectRef: { entityId: "e1" }, evidenceRef: { n: Infinity } }, "PERCEIVE"), "EXECUTABLE_MATERIAL_REJECTED");
+    // A hostile toString/toJSON must still be tolerated as inert data (deliberate contract, AT-repair-5/18).
+    let called = 0;
+    const evil = { entityId: "e1", toString() { called++; return "x"; } };
+    assert.doesNotThrow(() => ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s3", subjectRef: evil }, "PERCEIVE"));
+    assert.equal(called, 0);
+});
+
+test("AT-repair-30: a governorPort.capacity() that returns NaN/Infinity falls back to bounds.MAX_RUNNING_TARGETS instead of disabling the floor (independent audit AUD34-ADV-5c)", async () => {
+    const clock = manualClock(0);
+    const governorPort = { capacity: () => NaN };
+    const ae = await createAttentionEconomy({ clock, governorPort, bounds: { ...BOUNDS, MAX_RUNNING_TARGETS: 1 } });
+    ae.ingestSignal({ sourceKind: "OWNER", sourceId: "o1", subjectRef: { entityId: "t1" } }, "REASON");
+    ae.ingestSignal({ sourceKind: "OWNER", sourceId: "o2", subjectRef: { entityId: "t2" } }, "REASON");
+    const first = ae.pick();
+    assert.ok(first, "the first pick must succeed");
+    const second = ae.pick();
+    assert.equal(second, null, "a NaN governor capacity must not disable the MAX_RUNNING_TARGETS floor");
+});
+
 test("AT-repair-27: a non-finite expiresAtMs (Infinity/NaN) is rejected, not stored raw (independent audit AUD32-ADV-2)", async () => {
     const ae = await createAttentionEconomy();
     assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s1", subjectRef: { entityId: "e1" }, expiresAtMs: Infinity }, "PERCEIVE"), "INVALID_RECORD");

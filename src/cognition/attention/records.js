@@ -13,13 +13,40 @@ const WORK_KINDS = new Set(["PERCEIVE", "REASON", "PLAN", "VERIFY", "EXPLAIN", "
  * subjectRef})` cuma satu level -- objek bersarang di dalam subjectRef
  * tetap referensi milik pemanggil, mutasi pasca-panggilan menulis ulang
  * signal/target tersimpan lewat jalur yang lebih dalam.
+ * Bug review independen (audit putaran-34, AUD34-ADV-4): deepFreeze
+ * membekukan tapi tidak pernah menolak BigInt/angka non-finite, tidak
+ * seperti sanitizer lane lain (buildSafeBeliefValue/buildSafePayloadRef/
+ * buildSafeCognitiveCopy). Attention tidak punya persist(), jadi tidak
+ * ada crash JSON hari ini -- tapi ini kesenjangan paritas sanitizer yang
+ * sama persis dengan yang ditutup putaran-33 untuk prospective/metacog.
+ * CATATAN: fungsi/Symbol SENGAJA TIDAK ditolak di sini (beda dengan lane
+ * berpersist) -- AT-repair-5/18 menguji kontrak yang disengaja: hostile
+ * toString/toJSON pada subjectRef/evidenceRef tetap diterima sebagai data
+ * TIDAK AKTIF (tidak pernah dipanggil), bukan ditolak; membaca lewat
+ * getOwnPropertyDescriptor (bukan `value[key]`) menutup jalur eksekusi
+ * accessor pemanggil (kelas AUD10-P2-3/AUD24-P2-3) tanpa mengubah
+ * kontrak fungsi-sebagai-data itu.
  */
 function deepFreeze(value, seen = new WeakSet()) {
-    if (!value || typeof value !== "object") return value;
+    if (value === null || value === undefined) return value;
+    const t = typeof value;
+    if (t === "bigint") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh membawa BigInt");
+    if (t === "number" && !Number.isFinite(value)) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh berupa angka non-finite (NaN/Infinity)");
+    }
+    if (t !== "object" && t !== "function") return value;
     if (seen.has(value)) return value;
     seen.add(value);
-    for (const key of Reflect.ownKeys(value)) deepFreeze(value[key], seen);
-    return Object.freeze(value);
+    if (t === "function") return value; // fungsi diterima sebagai data tidak aktif, lihat catatan di atas
+    const out = Array.isArray(value) ? [] : {};
+    for (const key of Reflect.ownKeys(value)) {
+        const desc = Object.getOwnPropertyDescriptor(value, key);
+        if (!desc || desc.get || desc.set) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `tidak boleh membawa properti accessor: '${String(key)}'`);
+        }
+        out[key] = deepFreeze(desc.value, seen);
+    }
+    return Object.freeze(out);
 }
 
 function makeSignal({ signalId, sourceKind, sourceId, subjectRef, proposedUrgency = 0, evidenceRef = null, createdAtMs, expiresAtMs = null }) {

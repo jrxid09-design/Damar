@@ -121,23 +121,40 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         // untuk SISA JENDELA (setiap perbandingan `> budget` sesudahnya
         // otomatis false, anggaran refleksi mati total), dan nilai negatif
         // MENGKREDIT anggaran alih-alih membelanjakannya.
-        if (!cost || typeof cost !== "object" ||
-            typeof cost.tokens !== "number" || !Number.isFinite(cost.tokens) || cost.tokens < 0 ||
-            typeof cost.ms !== "number" || !Number.isFinite(cost.ms) || cost.ms < 0) {
+        // Bug review independen (audit putaran-34, AUD34-ADV-2): `cost.tokens`/
+        // `cost.ms` dulu dibaca berkali-kali secara independen (guard tipe,
+        // `wouldExceedBudget`, akumulasi `+=` di bawah, LALU lagi di dalam
+        // makeReview) -- getter stateful bisa lolos guard dengan nilai sah
+        // lalu membalas nilai besar/negatif pada baca berikutnya, meracuni
+        // anggaran jendela (kelas yang sama dengan AUD17-P2-1, yang menutup
+        // MASALAH TIPE tapi bukan masalah baca-berkali-kali ini). `tokens`/
+        // `ms` dibaca SEKALI SAJA masing-masing (SEBELUM divalidasi, bukan
+        // divalidasi-lewat-`cost.x`-lalu-dibaca-lagi) ke lokal, lalu
+        // dibangun ulang jadi objek polos yang diteruskan ke makeReview --
+        // baca internal makeReview di sana pun tidak lagi menyentuh
+        // accessor pemanggil.
+        if (!cost || typeof cost !== "object") {
             fail(REASONS.INVALID_RECORD, "cost wajib { tokens, ms } berupa number >= 0 yang valid");
         }
+        const costTokens = cost.tokens;
+        const costMs = cost.ms;
+        if (typeof costTokens !== "number" || !Number.isFinite(costTokens) || costTokens < 0 ||
+            typeof costMs !== "number" || !Number.isFinite(costMs) || costMs < 0) {
+            fail(REASONS.INVALID_RECORD, "cost wajib { tokens, ms } berupa number >= 0 yang valid");
+        }
+        const safeCost = Object.freeze({ tokens: costTokens, ms: costMs });
         const wouldExceedBudget =
-            tokensSpentThisWindow + cost.tokens > bounds.REFLECTION_BUDGET_TOKENS_PER_HOUR ||
-            msSpentThisWindow + cost.ms > bounds.REFLECTION_BUDGET_MS_PER_HOUR;
+            tokensSpentThisWindow + costTokens > bounds.REFLECTION_BUDGET_TOKENS_PER_HOUR ||
+            msSpentThisWindow + costMs > bounds.REFLECTION_BUDGET_MS_PER_HOUR;
 
-        const review = makeReview({ reviewId: crypto.randomUUID(), trigger, findings, proposals, cost, bounds });
+        const review = makeReview({ reviewId: crypto.randomUUID(), trigger, findings, proposals, cost: safeCost, bounds });
         const finalReview = wouldExceedBudget
             ? Object.freeze({ ...review, state: "EXPIRED", debounceCount: 1, lastTriggeredAtMs: now() })
             : Object.freeze({ ...review, debounceCount: 1, lastTriggeredAtMs: now() });
 
         if (!wouldExceedBudget) {
-            tokensSpentThisWindow += cost.tokens;
-            msSpentThisWindow += cost.ms;
+            tokensSpentThisWindow += costTokens;
+            msSpentThisWindow += costMs;
         }
 
         reviews.set(finalReview.reviewId, finalReview);
@@ -203,23 +220,26 @@ async function createMetacognition({ clock = { nowMs: () => Date.now() }, bounds
         // Bug review independen (audit putaran-22, F-4): spec null/non-objek
         // meledakkan `spec.outcomeTier` jadi TypeError mentah.
         if (!spec || typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec wajib objek");
-        if (!ADMISSIBLE_OUTCOME_TIERS.has(spec.outcomeTier)) {
-            fail(REASONS.INVALID_OUTCOME, `outcomeTier '${typeof spec.outcomeTier === "string" ? spec.outcomeTier : typeof spec.outcomeTier}' tidak admissible untuk kalibrasi`);
-        }
-        if (typeof spec.outcomeRef !== "string" || !spec.outcomeRef) {
-            fail(REASONS.INVALID_OUTCOME, "outcomeRef wajib ada dan bisa diselesaikan");
-        }
         // Bug review independen (audit putaran-11, AUD11-P2-8): recordId
         // pemanggil tidak pernah dicek tabrakan -- replay sebuah recordId
         // yang sudah tercatat menghitung ganda satu bukti kalibrasi yang sama.
-        // Bug review independen (audit putaran-30, AUD30-P2-1): `spec.recordId`
-        // dibaca berkali-kali (cek tabrakan, lalu konstruksi) -- accessor
-        // stateful bisa mengembalikan id berbeda tiap baca, melewati dedup.
-        const recordId = spec.recordId;
+        // Bug review independen (audit putaran-30, AUD30-P2-1; putaran-34,
+        // AUD34-ADV-3): `recordId`/`outcomeRef` dulu divalidasi lewat
+        // `spec.x` langsung lalu (untuk recordId) dilewatkan lewat
+        // `{...spec}` -- spread itu sendiri membaca ulang KEDUANYA (getter
+        // stateful bisa memvalidasi outcomeRef string sah lalu menyimpan
+        // objek pada baca kedua). Dikeluarkan bersama lewat destructuring.
+        const { outcomeTier, outcomeRef, recordId, ...specRest } = spec;
+        if (!ADMISSIBLE_OUTCOME_TIERS.has(outcomeTier)) {
+            fail(REASONS.INVALID_OUTCOME, `outcomeTier '${typeof outcomeTier === "string" ? outcomeTier : typeof outcomeTier}' tidak admissible untuk kalibrasi`);
+        }
+        if (typeof outcomeRef !== "string" || !outcomeRef) {
+            fail(REASONS.INVALID_OUTCOME, "outcomeRef wajib ada dan bisa diselesaikan");
+        }
         if (recordId && calibrationRecords.some(r => r.recordId === recordId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `recordId kalibrasi '${typeof recordId === "string" ? recordId : typeof recordId}' sudah ada`);
         }
-        const record = makeCalibrationRecord({ ...spec, recordId: recordId ?? crypto.randomUUID() });
+        const record = makeCalibrationRecord({ ...specRest, outcomeRef, recordId: recordId ?? crypto.randomUUID() });
         calibrationRecords.push(record);
         if (calibrationRecords.length > bounds.MAX_CALIBRATION_RECORDS) calibrationRecords.shift();
         return record;

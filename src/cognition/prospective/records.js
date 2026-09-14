@@ -17,41 +17,51 @@ const TRIGGER_KINDS = new Set(["AT", "AFTER", "RECURRING", "ON_STATE"]);
 
 /** PM-A3: recurrence tanpa batas ditolak — wajib until ATAU maxOccurrences, dan ada lantai periode. */
 function validateTrigger(trigger) {
-    if (!trigger || !TRIGGER_KINDS.has(trigger.kind)) {
+    // Bug review independen (audit putaran-33, AUD33-P2-4; putaran-34,
+    // AUD34-P2-2/AUD34-P2-4): fungsi ini punya riwayat baca-berkali-kali
+    // yang paling gigih di seluruh basis kode. Putaran-33 mengeluarkan
+    // `subject` ITU SENDIRI lewat destructuring, tapi guard `kind` masih
+    // membaca `trigger.kind` LANGSUNG (baca pertama) SEBELUM destructuring
+    // (baca kedua) sempat menangkapnya ke lokal -- persis jebakan yang
+    // sama yang tertangkap round INI JUGA lewat tes sendiri sebelum commit
+    // (bukan cuma spread-lalu-override, tapi juga guard-lalu-destructure).
+    // `kind` (dan `entityId`/`relationId` di dalam subject, kelas yang
+    // sama dengan AUD34-P2-1 di goals/records.js) sekarang dikeluarkan
+    // SEKALI lewat destructuring TERLEBIH DAHULU, baru divalidasi dari
+    // lokal itu -- `trigger`/`subject` mentah tidak pernah disentuh lagi
+    // setelah baris ini.
+    const {
+        kind, at, delayMs, intervalMs, until, maxOccurrences, subject, attribute,
+        ...triggerRest
+    } = trigger ?? {};
+    const { entityId, relationId, ...subjectRest } = subject ?? {};
+    if (!trigger || !TRIGGER_KINDS.has(kind)) {
         // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
         // `${trigger?.kind}` mentah meledakkan TypeError untuk Symbol.
-        const kindType = typeof trigger?.kind;
-        fail(REASONS.INVALID_TRIGGER, `trigger.kind '${kindType === "string" ? trigger.kind : kindType}' tidak dikenal`);
+        const kindType = typeof kind;
+        fail(REASONS.INVALID_TRIGGER, `trigger.kind '${kindType === "string" ? kind : kindType}' tidak dikenal`);
     }
-    // Bug review independen (audit putaran-33, AUD33-P2-4): `trigger.subject`
-    // (dipakai hanya oleh cabang ON_STATE di bawah) dulu dibaca berkali-kali
-    // -- untuk guard kehadiran, untuk entityId/relationId, lalu LAGI lewat
-    // `{...trigger}` DAN `{...trigger.subject}` saat konstruksi (pola yang
-    // sama tepat dengan makeObservation's subject, AUD32-P2-3). Dikeluarkan
-    // SEKALI di sini lewat destructuring supaya `triggerRest` tidak pernah
-    // menyentuhnya lagi.
-    const { subject, ...triggerRest } = trigger;
-    if (trigger.kind === "AT") {
-        if (typeof trigger.at !== "string" || !Number.isFinite(Date.parse(trigger.at))) {
+    if (kind === "AT") {
+        if (typeof at !== "string" || !Number.isFinite(Date.parse(at))) {
             fail(REASONS.INVALID_TRIGGER, "trigger AT wajib 'at' ISO string sah");
         }
     }
-    if (trigger.kind === "AFTER") {
-        if (!Number.isFinite(trigger.delayMs) || trigger.delayMs <= 0) {
+    if (kind === "AFTER") {
+        if (!Number.isFinite(delayMs) || delayMs <= 0) {
             fail(REASONS.INVALID_TRIGGER, "trigger AFTER wajib delayMs > 0");
         }
     }
-    if (trigger.kind === "RECURRING") {
-        if (!Number.isFinite(trigger.intervalMs) || trigger.intervalMs < BOUNDS.MIN_RECURRENCE_INTERVAL_MS) {
+    if (kind === "RECURRING") {
+        if (!Number.isFinite(intervalMs) || intervalMs < BOUNDS.MIN_RECURRENCE_INTERVAL_MS) {
             fail(REASONS.RECURRENCE_PERIOD_TOO_SHORT,
                 `interval recurring di bawah lantai ${BOUNDS.MIN_RECURRENCE_INTERVAL_MS}ms`);
         }
-        const hasUntil = typeof trigger.until === "string" && Number.isFinite(Date.parse(trigger.until));
-        const hasMax = Number.isFinite(trigger.maxOccurrences) && trigger.maxOccurrences > 0;
+        const hasUntil = typeof until === "string" && Number.isFinite(Date.parse(until));
+        const hasMax = Number.isFinite(maxOccurrences) && maxOccurrences > 0;
         if (!hasUntil && !hasMax) {
             fail(REASONS.RECURRENCE_UNBOUNDED, "recurring wajib 'until' atau 'maxOccurrences'");
         }
-        if (hasMax && trigger.maxOccurrences > BOUNDS.MAX_RECURRENCE_OCCURRENCES) {
+        if (hasMax && maxOccurrences > BOUNDS.MAX_RECURRENCE_OCCURRENCES) {
             fail(REASONS.RECURRENCE_UNBOUNDED, `maxOccurrences melebihi batas (${BOUNDS.MAX_RECURRENCE_OCCURRENCES})`);
         }
     }
@@ -60,9 +70,9 @@ function validateTrigger(trigger) {
     // "object"), jadi subject:null lolos lalu spread ke `{}` -- ON_STATE
     // reminder tanpa entityId/relationId nyata tersimpan, kolaps lewat
     // subjectKeyOf ke kunci sentinel bersama.
-    if (trigger.kind === "ON_STATE" && (
-        !subject || (typeof subject.entityId !== "string" && typeof subject.relationId !== "string") ||
-        typeof trigger.attribute !== "string")) {
+    if (kind === "ON_STATE" && (
+        !subject || (typeof entityId !== "string" && typeof relationId !== "string") ||
+        typeof attribute !== "string")) {
         fail(REASONS.INVALID_TRIGGER, "trigger ON_STATE wajib subject/attribute");
     }
     // Bug review independen (audit putaran-8, W7R8-P2-2; diperdalam putaran-9,
@@ -76,15 +86,17 @@ function validateTrigger(trigger) {
     // ATAU dibekukan sama sekali (beda dengan cabang non-ON_STATE di bawah
     // yang sudah membungkus SELURUH trigger). Sekarang seluruh trigger
     // dibungkus juga, sama seperti cabang lain.
-    if (trigger.kind === "ON_STATE") {
-        return deepFreeze(buildSafePayloadRef({ ...triggerRest, subject: { ...subject } }));
+    if (kind === "ON_STATE") {
+        return deepFreeze(buildSafePayloadRef({
+            ...triggerRest, kind, attribute, subject: { ...subjectRest, entityId, relationId }
+        }));
     }
     // Bug review independen (audit putaran-10, AUD10-P2-2): sapuan deepFreeze
     // putaran-9 hanya menyentuh cabang ON_STATE -- cabang lain (AT/AFTER/
     // RECURRING) masih pembekuan SATU level, objek/nilai bersarang apa pun
     // yang pemanggil sisipkan di trigger tetap referensi mutable.
     // (ON_EVENT dihapus dari TRIGGER_KINDS putaran-18, AUD18-P2-2.)
-    return deepFreeze(buildSafePayloadRef({ ...trigger }));
+    return deepFreeze(buildSafePayloadRef({ ...triggerRest, kind, at, delayMs, intervalMs, until, maxOccurrences }));
 }
 
 const FORBIDDEN_PAYLOAD_KEYS = Object.freeze(["capabilityId", "actuatorRef", "authProof", "authorityDecision", "intentTemplate"]);
@@ -296,7 +308,14 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
     // -- makeExpectation tidak pernah dijaga sama, jadi subject:null lolos
     // lalu disalin sebagai `{}` (buildSafePayloadRef tidak menolak objek
     // kosong), mengirim subject yang tidak pernah valid ke evaluatePort().
-    if (!subject || (typeof subject.entityId !== "string" && typeof subject.relationId !== "string")) {
+    // Bug review independen (audit putaran-34, AUD34-P2-3): guard putaran-33
+    // di atas membaca `subject.entityId`/`.relationId` langsung, lalu
+    // konstruksi di bawah membacanya LAGI lewat `{...subject}` -- getter
+    // stateful bisa lolos validasi dengan entityId sah lalu menyimpan
+    // subject kosong (kelas yang sama dengan AUD34-P2-1/AUD34-P2-2).
+    // Dikeluarkan sekali lewat destructuring.
+    const { entityId, relationId, ...subjectRest } = subject ?? {};
+    if (!subject || (typeof entityId !== "string" && typeof relationId !== "string")) {
         fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
     }
     // Bug review independen (audit putaran-9, AUD9-P2-3): expectedValue
@@ -310,7 +329,7 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
     // sini juga cuma deepFreeze (membekukan, tidak menyaring) -- BigInt di
     // dalamnya lolos lalu meledakkan JSON.stringify di saveSnapshot().
     return Object.freeze({
-        expectationId, subject: deepFreeze(buildSafePayloadRef({ ...subject })), attribute,
+        expectationId, subject: deepFreeze(buildSafePayloadRef({ ...subjectRest, entityId, relationId })), attribute,
         expectedValue: deepFreeze(buildSafePayloadRef(expectedValue)),
         window: deepFreeze(buildSafePayloadRef({ ...windowRest, latestAt, earliestAt })),
         onSatisfied, onViolated, state: "PENDING"

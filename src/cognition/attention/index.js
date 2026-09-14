@@ -198,7 +198,13 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         // TERSIMPAN yang berasal dari referensi KEDUA, melepaskan dedup
         // korroborasi dari objek yang benar-benar tersimpan. Dibaca SEKALI
         // ke lokal dan diteruskan eksplisit ke makeSignal.
-        const { evidenceRef: rawEvidenceRef, ...specRestForSignal } = spec;
+        // Bug review independen (audit putaran-34, AUD34-ADV-1): `signalId`
+        // masih dilewatkan lewat `spec.signalId ?? crypto.randomUUID()`
+        // DI DALAM object literal yang juga men-spread `...specRestForSignal`
+        // -- sisa kunci itu (yang masih punya `signalId`) DAN akses langsung
+        // `spec.signalId` sama-sama membaca getter yang sama, dua kali.
+        // Dikeluarkan sekalian lewat destructuring yang sama dengan evidenceRef.
+        const { evidenceRef: rawEvidenceRef, signalId: rawSignalId, ...specRestForSignal } = spec;
         const evidenceIdentity = evidenceRefIdentity(rawEvidenceRef);
         // Bug review independen (audit putaran-11, AUD11-P2-9): enforceSourceRate
         // dulu berjalan SEBELUM makeSignal memvalidasi spec -- signal yang
@@ -206,7 +212,7 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         // rate-limit untuk sourceId sampah, sama seperti bug W7R4-P2-3 yang
         // sudah diperbaiki di goals' proposeGoal tapi tidak dimigrasikan ke
         // sini. Validasi/bangun record dulu, baru tegakkan rate.
-        const signal = makeSignal({ ...specRestForSignal, evidenceRef: rawEvidenceRef, signalId: spec.signalId ?? crypto.randomUUID(), createdAtMs: now() });
+        const signal = makeSignal({ ...specRestForSignal, evidenceRef: rawEvidenceRef, signalId: rawSignalId ?? crypto.randomUUID(), createdAtMs: now() });
         // Bug review independen (audit putaran-27, AUD27-P2-7): signalId
         // yang di-replay (pengiriman ulang lintas-node) dulu dihitung
         // sebagai signal BARU setiap kali -- support bertambah lagi untuk
@@ -293,7 +299,15 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         // tak terbatas, membuat MAX_TOTAL_TARGETS tidak bisa ditegakkan sama
         // sekali begitu semua target lain jadi RUNNING. bounds.MAX_RUNNING_TARGETS
         // adalah lantai jatuh-diri saat tidak ada governor eksternal.
-        const maxRunning = governorPort?.capacity?.() ?? bounds.MAX_RUNNING_TARGETS;
+        // Bug review independen (audit putaran-34, AUD34-ADV-5): hasil
+        // governorPort.capacity() dulu dipakai mentah -- port yang
+        // mengembalikan NaN/Infinity/non-angka membuat
+        // `runningCount >= maxRunning` selalu false, menggagalkan lantai
+        // MAX_RUNNING_TARGETS sepenuhnya (port tepercaya tapi tidak wajib
+        // benar; advisory, bukan P2, karena tidak ada persist/authority di sini).
+        const rawCapacity = governorPort?.capacity?.();
+        const maxRunning = (typeof rawCapacity === "number" && Number.isFinite(rawCapacity))
+            ? rawCapacity : bounds.MAX_RUNNING_TARGETS;
         const runningCount = [...targets.values()].filter(t => t.state === "RUNNING").length;
         if (runningCount >= maxRunning) return null;
         // Bug review independen (Codex putaran-5): kredit deficit round-robin

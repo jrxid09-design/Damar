@@ -684,6 +684,54 @@ test("GL-repair-48: commitmentId/planId/taskId are each read exactly once, so a 
     assert.equal(ge.getTask(t1.taskId).state, "PENDING");
 });
 
+test("GL-repair-52: successCondition.subject.entityId is read exactly once, so a stateful getter cannot pass the guard with a valid entityId and store an empty subject (independent audit AUD34-P2-1)", async () => {
+    const ge = await createGoalEngine();
+    let n = 0;
+    const subject = {};
+    Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { n++; return n === 1 ? "e1" : undefined; } });
+    const goal = ge.proposeGoal(baseGoalSpec({ successCondition: { kind: "WORLD_BELIEF", subject, attribute: "status", expectedValue: "done" } }));
+    assert.equal(n, 1, "subject.entityId must be read exactly once");
+    assert.equal(goal.successCondition.subject.entityId, "e1", "the stored subject must come from the same read that was validated");
+});
+
+test("GL-repair-53: origin.kind is read exactly once across proposeGoal/makeGoal, so a stateful getter cannot get validated as OWNER (skipping ownerApproval) and stored as AGENT_SUGGESTION (independent audit AUD34-P2-5)", async () => {
+    const ge = await createGoalEngine();
+    let n = 0;
+    const origin = { ref: "x" };
+    Object.defineProperty(origin, "kind", { enumerable: true, configurable: true, get() { n++; return n <= 1 ? "OWNER" : "AGENT_SUGGESTION"; } });
+    const goal = ge.proposeGoal(baseGoalSpec({ origin }));
+    assert.equal(n, 1, "origin.kind must be read exactly once");
+    assert.equal(goal.origin.kind, "OWNER", "the stored origin.kind must come from the same read that was validated");
+    assert.equal(goal.ownerApproval.state, "NOT_REQUIRED", "ownerApproval must be decided from the same origin.kind that was actually stored");
+});
+
+test("GL-repair-54: a non-string, falsy parentGoalId (e.g. 0n) is rejected, not silently accepted and later breaking persist() (independent audit AUD34-P2-6)", async () => {
+    const store = jsonStore();
+    const ge = await createGoalEngine({ store });
+    assertThrowsReason(() => ge.proposeGoal(baseGoalSpec({ goalId: "G", parentGoalId: 0n })), "INVALID_RECORD");
+    await assert.doesNotReject(() => ge.persist());
+});
+
+test("GL-repair-55: commitmentId/taskId are read exactly once end-to-end (guard AND construction), not just guard-vs-store consistent (independent audit AUD34-ADV-1)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+
+    let nc = 0;
+    const cspec = { goalRef: g.goalId, toWhom: { ref: "o" }, promise: "p1", dueCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" } };
+    Object.defineProperty(cspec, "commitmentId", { enumerable: true, configurable: true, get() { nc++; return "C1"; } });
+    const c = ge.createCommitment(cspec);
+    assert.equal(nc, 1, "commitmentId must be read exactly once, including during construction");
+    assert.equal(c.commitmentId, "C1");
+
+    let nt = 0;
+    const p = ge.createPlan({ goalRef: g.goalId, steps: [] });
+    const tspec = { planRef: p.planId, order: 1, intentTemplate: { op: "noop" } };
+    Object.defineProperty(tspec, "taskId", { enumerable: true, configurable: true, get() { nt++; return "T1"; } });
+    const t = ge.createTask(tspec);
+    assert.equal(nt, 1, "taskId must be read exactly once, including during construction");
+    assert.equal(t.taskId, "T1");
+});
+
 test("GL-repair-51: parentGoalId is read exactly once in proposeGoal, so a stateful getter cannot get depth/MAX_CHILDREN_PER_GOAL validated against one parent and store a different one, and a non-string parentGoalId can never reach persist() (independent audit AUD33-P2-2)", async () => {
     const store = jsonStore();
     const ge = await createGoalEngine({ store });

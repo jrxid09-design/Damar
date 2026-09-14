@@ -222,7 +222,12 @@ function makeCalibrationRecord({ recordId, predictionRef, predictedValue, predic
         outcomeRef: buildSafeCognitiveCopy(outcomeRef),
         outcomeValue: buildSafeCognitiveCopy(outcomeValue),
         error, scoreKind,
-        window: Object.freeze({ from: windowFrom, to: windowTo })
+        // Bug review independen (audit putaran-34, AUD34-ADV-3): `window`
+        // disimpan mentah, tidak seperti predictionRef/outcomeValue di atas
+        // -- BigInt/non-finite/accessor di windowFrom/windowTo lolos tanpa
+        // disaring (sibling dari sanitisasi `window` yang sudah ada di
+        // prospective's makeExpectation).
+        window: buildSafeCognitiveCopy({ from: windowFrom, to: windowTo })
     });
 }
 

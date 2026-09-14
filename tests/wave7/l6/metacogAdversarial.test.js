@@ -184,6 +184,38 @@ test("MC-repair-22: assess()'s claim is sanitized/bounded like subjectRef, not s
     assertThrowsReason(() => mc.assess({ entityId: "e1" }, 10n, { sourceCount: 0 }), "EXECUTABLE_MATERIAL_REJECTED");
 });
 
+test("MC-repair-23: cost.tokens/cost.ms are each read exactly once in openReview, so a stateful getter cannot pass the guard as 0 and then poison the reflection budget window on a later read (independent audit AUD34-ADV-2)", async () => {
+    const mc = await createMetacognition({ bounds: { ...BOUNDS, REFLECTION_BUDGET_TOKENS_PER_HOUR: 100 } });
+    let n = 0;
+    const cost = {};
+    Object.defineProperty(cost, "tokens", { enumerable: true, configurable: true, get() { n++; return n <= 4 ? 0 : 1_000_000; } });
+    cost.ms = 0;
+    mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: [], proposals: [], cost });
+    assert.ok(n <= 1, "cost.tokens must be read exactly once");
+    // A second, ordinary review must still fit under the (unpoisoned) budget.
+    const r2 = mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e2" }, findings: [], proposals: [], cost: { tokens: 10, ms: 0 } });
+    assert.equal(r2.state, "OPEN", "the reflection budget window must not have been poisoned by a second, unread cost.tokens value");
+});
+
+test("MC-repair-24: recordCalibration's window (windowFrom/windowTo) is sanitized like predictionRef/outcomeValue, and outcomeRef is read exactly once (independent audit AUD34-ADV-3)", async () => {
+    const mc = await createMetacognition();
+    assertThrowsReason(() => mc.recordCalibration({
+        recordId: "C1", predictionRef: "p", predictedValue: 1, predictedConfidence: 0.9,
+        outcomeTier: "T1", outcomeRef: "o1", outcomeValue: 1, outcomeCorrect: true,
+        windowFrom: 10n, windowTo: "2020-01-01"
+    }), "EXECUTABLE_MATERIAL_REJECTED");
+
+    let n = 0;
+    const spec = {
+        recordId: "C2", predictionRef: "p", predictedValue: 1, predictedConfidence: 0.9,
+        outcomeTier: "T1", outcomeValue: 1, outcomeCorrect: true
+    };
+    Object.defineProperty(spec, "outcomeRef", { enumerable: true, configurable: true, get() { n++; return "o2"; } });
+    const rec = mc.recordCalibration(spec);
+    assert.equal(n, 1, "outcomeRef must be read exactly once");
+    assert.equal(rec.outcomeRef, "o2");
+});
+
 test("MC-repair-18: nested objects inside a stored finding/proposal are frozen too, not just the top level -- mutating the caller's original nested object after openReview() cannot rewrite the canonical review (independent audit AUD31-P2-5)", async () => {
     const mc = await createMetacognition();
     const detail = { x: 1 };

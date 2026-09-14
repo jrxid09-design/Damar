@@ -126,6 +126,46 @@ test("PM-repair-41: armExpectation(subject:null) is rejected instead of silently
     assertThrowsReason(() => pm.armExpectation({ subject: null, attribute: "status", expectedValue: 1, window: { latestAt: new Date(9e12).toISOString() } }), "INVALID_RECORD");
 });
 
+test("PM-repair-42: an ON_STATE trigger's subject.entityId is read exactly once, so a stateful getter cannot pass the guard with a valid entityId and store an empty subject (independent audit AUD34-P2-2)", async () => {
+    const pm = await createProspectiveMemory();
+    let n = 0;
+    const subject = {};
+    Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { n++; return n === 1 ? "e1" : undefined; } });
+    const r = pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "ON_STATE", subject, attribute: "status" } });
+    assert.equal(n, 1, "trigger.subject.entityId must be read exactly once");
+    assert.equal(r.trigger.subject.entityId, "e1", "the stored subject must come from the same read that was validated");
+});
+
+test("PM-repair-43: an expectation's subject.entityId is read exactly once, so a stateful getter cannot pass the guard with a valid entityId and store an empty subject (independent audit AUD34-P2-3)", async () => {
+    const pm = await createProspectiveMemory();
+    let n = 0;
+    const subject = {};
+    Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { n++; return n === 1 ? "e1" : undefined; } });
+    const e = pm.armExpectation({ subject, attribute: "status", expectedValue: "done", window: { latestAt: new Date(9e12).toISOString() } });
+    assert.equal(n, 1, "subject.entityId must be read exactly once");
+    assert.equal(e.subject.entityId, "e1", "the stored subject must come from the same read that was validated");
+});
+
+test("PM-repair-44: trigger.kind is read exactly once, so a stateful getter cannot pass the AT guard and store an unvalidated ON_STATE trigger (independent audit AUD34-P2-4)", async () => {
+    const pm = await createProspectiveMemory();
+    let n = 0;
+    const trigger = { at: new Date(9e12).toISOString() };
+    Object.defineProperty(trigger, "kind", { enumerable: true, configurable: true, get() { n++; return n <= 7 ? "AT" : "ON_STATE"; } });
+    const r = pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger });
+    assert.ok(n <= 1, "trigger.kind must be read exactly once");
+    assert.equal(r.trigger.kind, "AT", "the stored kind must be the same one that was validated for the AT branch");
+});
+
+test("PM-repair-45: ownerRef is read exactly once end-to-end (guard AND construction), not just guard-vs-store consistent (independent audit AUD34-ADV-1)", async () => {
+    const pm = await createProspectiveMemory();
+    let n = 0;
+    const spec = { reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(9e12).toISOString() } };
+    Object.defineProperty(spec, "ownerRef", { enumerable: true, configurable: true, get() { n++; return "owner-1"; } });
+    const r = pm.arm(spec);
+    assert.equal(n, 1, "ownerRef must be read exactly once, including during construction");
+    assert.equal(r.ownerRef, "owner-1");
+});
+
 test("PM-repair-38: window.latestAt/earliestAt are read exactly once, so a stateful getter cannot pass validation with a valid date and store an invalid one (independent audit AUD32-P2-2)", async () => {
     const pm = await createProspectiveMemory({ clock: manualClock(100) });
     let n = 0;

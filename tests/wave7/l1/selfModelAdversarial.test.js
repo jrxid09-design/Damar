@@ -208,6 +208,18 @@ test("SM-repair-13: a Symbol/hostile-object observedAtMs never throws and never 
     assert.equal(called, 0, "observedAtMs's valueOf must never be invoked");
 });
 
+test("SM-repair-15: snapshot()'s runtimeLocation/resourcePressure/activeProviders are deep-frozen, not just shallow (independent audit AUD34-ADV-5a)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const presencePort = { state: () => ({ nested: { mode: "ONLINE" } }) };
+    const governorPort = { pressure: () => ({ cpu: { pct: 10 } }) };
+    const providerPort = { activeProviders: () => [{ id: "p1", nested: { ok: true } }] };
+    const sm = await createSelfModel({ capabilityRegistry: registry, presencePort, governorPort, providerPort });
+    const snap = sm.snapshot();
+    assert.throws(() => { "use strict"; snap.runtimeLocation.presence.nested.mode = "PWNED"; });
+    assert.throws(() => { "use strict"; snap.resourcePressure.cpu.pct = 999; });
+    assert.throws(() => { "use strict"; snap.activeProviders[0].nested.ok = false; });
+});
+
 test("SM-repair-14: a non-finite numeric 'at' in ingestOutcome/ingestHealth is rejected, not silently corrupted to null by a JSON-round-tripping store (independent audit AUD32-P2-4)", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const sm = await createSelfModel({ capabilityRegistry: registry });

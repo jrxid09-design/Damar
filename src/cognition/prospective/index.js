@@ -112,23 +112,24 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         // dibaca sekali untuk cek tabrakan, sekali lagi saat konstruksi --
         // accessor stateful bisa mengembalikan id berbeda di kedua baca,
         // melewati dedup dan bocor kapasitas armed.
-        const reminderId = spec.reminderId;
+        // Bug review independen (audit putaran-30, AUD30-P2-1; putaran-31,
+        // AUD31-P2-4; putaran-34, AUD34-ADV-1): reminderId/ownerRef dulu
+        // dibaca ke lokal terpisah tapi masih dilewatkan lewat `{...spec}`
+        // (bukan `...specRest`) ke makeReminder -- spread itu SENDIRI
+        // membaca kedua getter lagi (override-nya cuma membuang hasil baca
+        // itu, tidak mencegahnya). Dikeluarkan bersama lewat destructuring
+        // supaya spread di bawah benar-benar tidak menyentuh keduanya lagi.
+        const { reminderId, ownerRef, ...specRest } = spec;
         if (reminderId && reminders.has(reminderId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `reminderId '${typeof reminderId === "string" ? reminderId : typeof reminderId}' sudah ada`);
         }
         if (armedReminderCount >= bounds.MAX_ARMED_REMINDERS) {
             fail(REASONS.PROSPECTIVE_FULL, "jumlah reminder armed melebihi batas");
         }
-        // Bug review independen (audit putaran-31, AUD31-P2-4): `spec.ownerRef`
-        // dibaca berkali-kali (dua kali di guard ini, lagi lewat `{...spec}`
-        // saat konstruksi) -- accessor stateful bisa membuat guard memvalidasi
-        // owner yang BELUM penuh sementara reminder yang benar-benar tersimpan
-        // memakai owner LAIN yang sudah di batas, melampaui MAX_REMINDERS_PER_GOAL.
-        const ownerRef = spec.ownerRef;
         if (ownerRef && (remindersPerGoal.get(ownerRef) ?? 0) >= bounds.MAX_REMINDERS_PER_GOAL) {
             fail(REASONS.PER_GOAL_LIMIT_EXCEEDED, "jumlah reminder per goal melebihi batas");
         }
-        const reminder = makeReminder({ ...spec, reminderId: reminderId ?? crypto.randomUUID(), ownerRef, nowIso: nowIso() });
+        const reminder = makeReminder({ ...specRest, reminderId: reminderId ?? crypto.randomUUID(), ownerRef, nowIso: nowIso() });
         const armed = Object.freeze({ ...reminder, armedAtMs: now() });
         reminders.set(armed.reminderId, armed);
         armedReminderCount += 1;

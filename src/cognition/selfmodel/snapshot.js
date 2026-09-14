@@ -13,6 +13,20 @@ function byteSize(value) {
     return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
+// Bug review independen (audit putaran-34, AUD34-ADV-5): `runtimeLocation`/
+// `resourcePressure`/`activeProviders` hanya dibekukan SATU level (atau,
+// untuk resourcePressure, tidak dibekukan sama sekali) -- objek bersarang
+// yang dikembalikan port (capabilityRegistry/health) tetap mutable lewat
+// snapshot yang dikembalikan. Port tepercaya (bukan pemanggil luar), jadi
+// advisory (bukan P2); deepFreeze menutup lapis-dalam tanpa menyaring tipe.
+function deepFreeze(value, seen = new WeakSet()) {
+    if (!value || typeof value !== "object") return value;
+    if (seen.has(value)) return value;
+    seen.add(value);
+    for (const key of Reflect.ownKeys(value)) deepFreeze(value[key], seen);
+    return Object.freeze(value);
+}
+
 function buildSnapshot({
     identity, runtimeLocation, capabilityAssessments, unknowns,
     activeLimitations, healthState, degradedSubsystems, resourcePressure,
@@ -37,14 +51,14 @@ function buildSnapshot({
             schemaVersion: SCHEMA_VERSION,
             generatedAtMs,
             identity: Object.freeze({ ...identity }),
-            runtimeLocation: Object.freeze({ ...runtimeLocation }),
+            runtimeLocation: deepFreeze({ ...runtimeLocation }),
             capabilityAssessments: Object.freeze([...live.capabilityAssessments]),
             unknowns: Object.freeze([...live.unknowns]),
             activeLimitations: Object.freeze([...live.activeLimitations]),
             healthState,
             degradedSubsystems: Object.freeze([...live.degradedSubsystems]),
-            resourcePressure,
-            activeProviders: Object.freeze([...activeProviders]),
+            resourcePressure: deepFreeze(resourcePressure),
+            activeProviders: deepFreeze([...activeProviders]),
             knownNodes: Object.freeze([...live.knownNodes]),
             reachableNodes: Object.freeze([...live.reachableNodes]),
             activeGoalRefs: Object.freeze([...live.activeGoalRefs]),
