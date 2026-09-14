@@ -17,6 +17,13 @@ const BOUNDS = Object.freeze({
     MAX_DEGRADED_SUBSYSTEMS: 64,
     MAX_KNOWN_NODES: 256,
     MAX_SNAPSHOT_BYTES: 262144,
+    // Bug review independen (audit putaran-56, Codex, W7R56-P2-1): round-55
+    // menghapus raw-throw pada activeProviders (Array.isArray hanya
+    // identitas, bukan keamanan trap) tapi TIDAK memberi batas atas --
+    // Proxy dengan `length` yang dipalsukan besar (mis. 100000) tetap
+    // menyebabkan 100000 baca index, snapshot tak terbatas. MAX eksplisit
+    // ditambahkan di sini, dipakai saat menyalin per-index.
+    MAX_ACTIVE_PROVIDERS: 256,
     // Bug review independen (audit putaran-49, W7R49-ADV-1, kelas sama
     // dengan AUD38-ADV-3): `SNAPSHOT_TTL_MS` dideklarasikan tapi tidak
     // pernah dikonsumsi kode apa pun -- snapshot() membangun ulang setiap

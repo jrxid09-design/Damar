@@ -455,6 +455,11 @@ async function createSelfModel({
                 let len;
                 try { len = raw.length; } catch { len = 0; }
                 if (!Number.isInteger(len) || len < 0) len = 0;
+                // Bug review independen (audit putaran-56, Codex, W7R56-P2-1):
+                // panjang yang dipalsukan besar (mis. 100000) tanpa batas atas
+                // menyebabkan pembacaan per-index tak terbatas -- dibatasi
+                // MAX_ACTIVE_PROVIDERS sebelum loop, sama seperti lane lain.
+                if (len > bounds.MAX_ACTIVE_PROVIDERS) len = bounds.MAX_ACTIVE_PROVIDERS;
                 for (let i = 0; i < len; i++) {
                     try { activeProviders.push(raw[i]); } catch { /* skip hostile index */ }
                 }
