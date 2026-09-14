@@ -265,7 +265,15 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // undefined meledakkan destructuring jadi TypeError mentah -- sibling
         // proposeGoal/createCommitment/createPlan/createTask di file yang
         // sama dijaga putaran-22 (F-4), fungsi ini terlewat.
-        const { approvalRef, scope = null } = meta || {};
+        // Bug review independen (audit putaran-46, W7R46-P2-3): `meta ||
+        // {}` cuma melindungi dari nilai falsy -- Proxy yang di-revoke
+        // tetap truthy, jadi destructuring ini tetap [[Get]] mentah.
+        let approvalRef, scope;
+        try {
+            ({ approvalRef, scope = null } = meta || {});
+        } catch {
+            fail(REASONS.INVALID_RECORD, "meta tidak dapat diverifikasi dengan aman, ditolak");
+        }
         const goal = goals.get(goalId);
         // Bug review independen (audit putaran-26, AUD26-P2-1): interpolasi
         // `${goalId}` mentah meledakkan TypeError untuk Symbol; sama seperti
@@ -304,7 +312,16 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
             }
         }
 
-        const next = transitionGoal(goal, action, { ...meta, nowIso: nowIso() });
+        // Bug review independen (audit putaran-46, W7R46-P2-3): `{...meta,
+        // nowIso}` men-spread `meta` mentah -- Proxy yang di-revoke
+        // melempar TypeError mentah pada `ownKeys` yang dipakai spread.
+        let safeMeta;
+        try {
+            safeMeta = { ...meta, nowIso: nowIso() };
+        } catch {
+            fail(REASONS.INVALID_RECORD, "meta tidak dapat diverifikasi dengan aman, ditolak");
+        }
+        const next = transitionGoal(goal, action, safeMeta);
         goals.set(goalId, next);
         return next;
     }
@@ -370,7 +387,16 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // diteruskan mentah ke lifecycle's `{ evidenceRef = null } = {}`
         // (default cuma berlaku untuk undefined) jadi TypeError mentah --
         // sibling `transition()` sudah aman lewat `{ ...meta, nowIso }`.
-        const next = transitionCommitment(c, action, { ...(meta || {}) });
+        // Bug review independen (audit putaran-46, W7R46-P2-3): `{...(meta
+        // || {})}` men-spread `meta` mentah -- Proxy yang di-revoke
+        // melempar TypeError mentah pada `ownKeys` yang dipakai spread.
+        let safeMeta;
+        try {
+            safeMeta = { ...(meta || {}) };
+        } catch {
+            fail(REASONS.INVALID_RECORD, "meta tidak dapat diverifikasi dengan aman, ditolak");
+        }
+        const next = transitionCommitment(c, action, safeMeta);
         commitments.set(commitmentId, next);
         return next;
     }

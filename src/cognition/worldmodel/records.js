@@ -352,7 +352,15 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
             // stateful bisa lolos guard dengan angka sah lalu membalas
             // Symbol pada baca berikutnya, tetap meledakkan mentah. Dibaca
             // SEKALI ke lokal.
-            const { weight, value } = c;
+            // Bug review independen (audit putaran-46, W7R46-P2-1): sibling
+            // langsung dari externalRefs elemen (putaran-45, W7R45-P2-3, di
+            // FILE yang sama) -- candidateValues elemen tidak pernah disapu.
+            let weight, value;
+            try {
+                ({ weight, value } = c);
+            } catch {
+                fail(REASONS.INVALID_RECORD, "candidateValues elemen tidak dapat diverifikasi dengan aman, ditolak");
+            }
             if (typeof weight !== "number" && typeof weight !== "string" && typeof weight !== "boolean" && weight !== undefined) {
                 fail(REASONS.INVALID_RECORD, "candidateValues[].weight wajib angka");
             }

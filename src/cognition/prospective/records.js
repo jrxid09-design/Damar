@@ -364,8 +364,16 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
         // pernah bisa melewati window (tidak pernah VIOLATED).
         fail(REASONS.NO_LATEST_AT, "window.latestAt wajib tanggal ISO yang sah (PM-5)");
     }
+    // Bug review independen (audit putaran-46, W7R46-P2-2): guard ini
+    // menerima `earliestAt` bertipe APA PUN (bukan hanya string), lalu
+    // `Date.parse(earliestAt)` melakukan ToString MENTAH terhadapnya --
+    // sebuah Proxy yang di-revoke melempar TypeError mentah di sana.
+    // Sibling `latestAt` aman karena guard `typeof !== "string"`-nya
+    // short-circuit LEBIH DULU; `earliestAt` cuma dicek null di sini,
+    // jadi coercion tetap tercapai. `typeof` diperiksa dulu, sama seperti
+    // latestAt.
     if (earliestAt !== undefined && earliestAt !== null &&
-        !Number.isFinite(Date.parse(earliestAt))) {
+        (typeof earliestAt !== "string" || !Number.isFinite(Date.parse(earliestAt)))) {
         fail(REASONS.NO_LATEST_AT, "window.earliestAt, jika ada, wajib tanggal ISO yang sah");
     }
     // Bug review independen (audit putaran-12, AUD12-P2-3): attribute/
