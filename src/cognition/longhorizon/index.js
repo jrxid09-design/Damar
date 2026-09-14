@@ -83,6 +83,11 @@ async function createLongHorizonCycle({
     // to L1's public contract. Emits real Audit Ledger events when a real
     // ledger is supplied; always returns the events either way so tests can
     // verify the detection logic independent of ledger wiring.
+    // Bug review independen (audit putaran-29, AUD29-ADV-1): tidak punya
+    // MAX_* sendiri, tapi setiap panggilan MENGGANTI seluruh Map dari
+    // `snap.capabilityAssessments` (baris di bawah), yang sudah dibatasi
+    // selfModel's MAX_CAPABILITY_ASSESSMENTS -- terikat transitif, bukan
+    // kebocoran independen.
     let previousAssessments = new Map(); // capabilityId -> selfBelief
 
     function auditSelfModelTransitions() {
