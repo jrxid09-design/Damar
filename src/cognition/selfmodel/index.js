@@ -122,9 +122,22 @@ async function createSelfModel({
             recordUnknown(capabilityId, "NEVER_OBSERVED");
         }
 
+        // Bug review independen (audit putaran-50, W7R50-ADV-1): `safeCall`
+        // di atas hanya membungkus PANGGILAN `capabilityRegistry.get()` --
+        // kalau REGISTRY (dependency internal tepercaya) mengembalikan
+        // descriptor berbentuk Proxy yang di-revoke, `descriptor.id` di
+        // sini tetap [[Get]] mentah. Dibungkus try/catch, jatuh ke
+        // `capabilityId` (fallback yang sama seperti `descriptor.id`
+        // hilang/undefined).
+        let descriptorRef;
+        try {
+            descriptorRef = descriptor.id ?? capabilityId;
+        } catch {
+            descriptorRef = capabilityId;
+        }
         const assessment = buildAssessment({
             capabilityId,
-            descriptorRef: descriptor.id ?? capabilityId,
+            descriptorRef,
             cacheEntry, successWindow: window, lastOutcome,
             nowMs: now(), availabilityTtlMs: bounds.AVAILABILITY_TTL_MS
         });

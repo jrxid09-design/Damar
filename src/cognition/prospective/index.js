@@ -372,7 +372,22 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
         const nowMs = now();
         for (const e of [...expectations.values()]) {
             if (e.state !== "PENDING") continue;
-            const observed = evaluatePort?.(e.subject, e.attribute);
+            // Bug review independen (audit putaran-50, W7R50-P2-1): rounds
+            // 32/33 menyaring NILAI `observed.value`/`observed.atMs` (BigInt/
+            // cyclic/NaN/Symbol) tapi tidak pernah membungkus PEMBACAAN
+            // properti itu SENDIRI -- port pemanggil yang mengembalikan
+            // Proxy yang di-revoke, atau objek dengan getter `value`/`atMs`
+            // yang melempar, tetap raw-throw dan membatalkan SISA sweep
+            // untuk expectation lain. `evaluatePort?.(...)` sendiri juga
+            // bisa melempar. Diperlakukan sama seperti observasi tidak sah
+            // lainnya di fungsi ini: gagal aman ke "tidak teramati", sweep
+            // lanjut ke expectation berikutnya.
+            let observed;
+            try {
+                observed = evaluatePort?.(e.subject, e.attribute);
+            } catch {
+                observed = null;
+            }
             // Bug review independen (audit putaran-30, AUD30-P2-4): `e.window.earliestAt
             // ?? 0` dimaksudkan "tanpa batas bawah" saat earliestAt tidak
             // ada, tapi `Date.parse(0)` MEM-PARSE angka 0 sebagai string
@@ -396,7 +411,13 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
             // observed.value adalah nilai MENTAH dari port pemanggil --
             // canonicalJson mentah tidak aman untuk itu (lihat safeObservedEquals
             // di atas berkas ini).
-            const sameValue = observed ? safeObservedEquals(observed.value, e.expectedValue) : false;
+            let sameValue;
+            try {
+                sameValue = observed ? safeObservedEquals(observed.value, e.expectedValue) : false;
+            } catch {
+                sameValue = false;
+                observed = null;
+            }
             // Bug review independen (audit putaran-33, AUD33-P2-3): sibling
             // dari AUD32-P1-1 di baris yang sama -- `observed.value` sudah
             // disaring lewat safeObservedEquals, tapi `observed.atMs` (field
@@ -406,7 +427,13 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
             // sweep checkExpectations. Dibaca SEKALI ke lokal dan divalidasi
             // sebagai angka finite sebelum dipakai; kalau tidak, dianggap
             // "tidak cocok" (bukan exception yang lolos).
-            const atMs = observed?.atMs;
+            let atMs;
+            try {
+                atMs = observed?.atMs;
+            } catch {
+                atMs = undefined;
+                observed = null;
+            }
             const hasValidAtMs = typeof atMs === "number" && Number.isFinite(atMs);
             if (observed && sameValue && hasValidAtMs &&
                 atMs >= earliestMs && atMs <= Date.parse(e.window.latestAt)) {

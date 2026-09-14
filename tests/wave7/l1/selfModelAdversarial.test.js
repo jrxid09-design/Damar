@@ -220,6 +220,20 @@ test("SM-repair-15: snapshot()'s runtimeLocation/resourcePressure/activeProvider
     assert.throws(() => { "use strict"; snap.activeProviders[0].nested.ok = false; });
 });
 
+test("SM-repair-18: assess() never raw-throws when the capability registry returns a revoked-Proxy descriptor -- descriptorRef falls back to capabilityId, same as a missing descriptor.id (independent audit W7R50-ADV-1)", async () => {
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    const registry = {
+        get: (id) => (id === "cap.x" ? proxy : null),
+        has: (id) => id === "cap.x",
+        getAvailability: () => { throw new Error("unused"); }
+    };
+    const sm = await createSelfModel({ capabilityRegistry: registry });
+    let a;
+    assert.doesNotThrow(() => { a = sm.assess("cap.x"); }, "a revoked-Proxy descriptor must not raw-throw out of assess()");
+    assert.equal(a.capabilityId, "cap.x");
+});
+
 test("SM-repair-17: ingestOutcome/ingestHealth fail closed (not raw-throw) on a revoked-Proxy TOP-LEVEL argument, the exact sibling ingestAvailability's own comment (round 43) incorrectly claimed was already safe (independent audit W7R44-P2-2)", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const sm = await createSelfModel({ capabilityRegistry: registry });

@@ -306,8 +306,21 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         // Standing-approval expiry gate (spec §7): authorityPort dipanggil
         // HANYA untuk memeriksa validitas referensi — tidak pernah mengonstruksi grant.
         if (action === "activate" && goal.ownerApproval.state === "GRANTED" && authorityPort) {
-            const check = authorityPort.checkApproval(goal.ownerApproval.approvalRef);
-            if (!check || !check.valid) {
+            // Bug review independen (audit putaran-50, W7R50-ADV-1):
+            // `authorityPort` adalah dependency internal tepercaya, tapi
+            // panggilan/hasilnya tetap bisa berupa Proxy yang di-revoke
+            // atau melempar -- `check.valid` di bawah tetap [[Get]]
+            // mentah. Dibungkus try/catch; kegagalan APA PUN diperlakukan
+            // SAMA seperti `check` falsy (fail closed ke APPROVAL_EXPIRED,
+            // bukan raw-throw).
+            let checkValid;
+            try {
+                const check = authorityPort.checkApproval(goal.ownerApproval.approvalRef);
+                checkValid = !!check && !!check.valid;
+            } catch {
+                checkValid = false;
+            }
+            if (!checkValid) {
                 fail(REASONS.APPROVAL_EXPIRED, "standing approval sudah kedaluwarsa, aktivasi ditolak");
             }
         }

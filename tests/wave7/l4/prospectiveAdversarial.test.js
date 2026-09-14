@@ -97,6 +97,29 @@ test("PM-repair-35: an object-valued expectation is SATISFIED by a structurally-
     assert.equal(results[0].outcome, "SATISFIED", "a structurally-equal object value must satisfy the expectation, not require reference identity");
 });
 
+test("PM-repair-56: checkExpectations never raw-throws when the evaluate port returns a revoked Proxy, throws itself, or returns an object with a throwing value/atMs getter -- treated as 'not observed', the sweep continues for other expectations (independent audit W7R50-P2-1)", async () => {
+    const pm = await createProspectiveMemory({ clock: manualClock(100) });
+    pm.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: "done", window: { latestAt: new Date(1000).toISOString() } });
+
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    assert.doesNotThrow(() => pm.checkExpectations(() => proxy));
+
+    assert.doesNotThrow(() => pm.checkExpectations(() => { throw new Error("port refuses"); }));
+
+    const hostileValue = {};
+    Object.defineProperty(hostileValue, "value", { enumerable: true, get() { throw new Error("RAW-value"); } });
+    assert.doesNotThrow(() => pm.checkExpectations(() => hostileValue));
+
+    const hostileAt = { value: "done" };
+    Object.defineProperty(hostileAt, "atMs", { enumerable: true, get() { throw new Error("RAW-atMs"); } });
+    assert.doesNotThrow(() => pm.checkExpectations(() => hostileAt));
+
+    // sanity: a legitimate observation still satisfies afterward
+    const results = pm.checkExpectations(() => ({ value: "done", atMs: 500 }));
+    assert.equal(results[0].outcome, "SATISFIED");
+});
+
 test("PM-repair-37: checkExpectations never crashes or falsely SATISFIES on a BigInt/cyclic/NaN/Infinity observed value from the evaluate port (independent audit AUD32-P1-1, BLOCKING)", async () => {
     const pm1 = await createProspectiveMemory({ clock: manualClock(100) });
     pm1.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: null, window: { latestAt: new Date(1000).toISOString() } });

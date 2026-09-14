@@ -838,6 +838,16 @@ test("GL-repair-66: buildSafeIntentTemplate's fail-closed catch itself does not 
     }), "AUTHORITY_SHAPED_FIELD_REJECTED");
 });
 
+test("GL-repair-70: transition() fails closed to APPROVAL_EXPIRED (not raw-throw) when authorityPort.checkApproval() returns a revoked-Proxy result -- treated the same as an invalid/falsy check (independent audit W7R50-ADV-1)", async () => {
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    const ge = await createGoalEngine({ authorityPort: { checkApproval: () => r.proxy } });
+    const g = ge.proposeGoal(baseGoalSpec());
+    ge.transition(g.goalId, "approve", { actorKind: "OWNER", reason: "r" });
+    ge.grantApproval(g.goalId, { approvalRef: "standing-approval-1" });
+    assertThrowsReason(() => ge.transition(g.goalId, "activate", { actorKind: "OWNER", reason: "r" }), "APPROVAL_EXPIRED");
+});
+
 test("GL-repair-67: proposeGoal/createCommitment/createPlan/createTask fail closed (not raw-throw) on a revoked-Proxy TOP-LEVEL spec argument (independent audit W7R44-P2-2)", async () => {
     const ge = await createGoalEngine();
     const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
