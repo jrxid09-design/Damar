@@ -3,20 +3,85 @@
 /** W7-L6 METACOGNITION — pembangun record (spec §3). */
 
 const { REASONS, fail } = require("./errors");
+const { BOUNDS: VALUE_BOUNDS } = require("./bounds");
 const { sanitizeEvidenceQuality, confidenceFromSafe } = require("./confidence");
 
-// Bug review independen (audit putaran-31, AUD31-P2-5): `Object.freeze({...f})`/
-// `Object.freeze({...p})` di makeReview cuma SATU level -- objek bersarang
-// di dalam finding.detail/proposal.payload dll tetap referensi milik
-// pemanggil, mutasi pasca-openReview() menulis ulang review kanonik
-// tersimpan tanpa restart sama sekali (kelas yang sama dengan W7R8/W7R9/
-// W7R7-P1-* yang sudah ditutup di lane lain, belum dimigrasikan ke sini).
-function deepFreeze(value, seen = new WeakSet()) {
-    if (!value || typeof value !== "object") return value;
-    if (seen.has(value)) return value;
-    seen.add(value);
-    for (const key of Reflect.ownKeys(value)) deepFreeze(value[key], seen);
-    return Object.freeze(value);
+const DANGEROUS_VALUE_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
+
+// Bug review independen (audit putaran-31, AUD31-P2-5; putaran-32,
+// AUD32-P2-5): perbaikan putaran-31 (`deepFreeze({...f})`) memang
+// membekukan lapis dalam, tapi lewat `value[key]` -- itu MEMANGGIL
+// accessor getter milik pemanggil, dan Object.freeze tidak menghapus
+// accessor itu, jadi review tersimpan tetap punya getter HIDUP yang
+// mengeksekusi kode pemanggil setiap kali dibaca (kelas yang sama dengan
+// AUD10-P2-3/AUD24-P2-3 -- eksekusi getter pemanggil). Diganti sanitizer
+// yang membangun SALINAN POLOS baru: baca selalu lewat
+// getOwnPropertyDescriptor (bukan `value[key]`), tolak descriptor
+// accessor (get/set) dan function/Symbol/kunci berbahaya, dibatasi
+// kedalaman/anggaran node (pola sama seperti buildSafeBeliefValue di
+// worldmodel/buildSafePayloadRef di prospective) -- accessor pemanggil
+// tidak pernah tersentuh sama sekali, apalagi dipanggil.
+function buildSafeCognitiveCopy(value, depth = 0, stack, budget) {
+    if (!stack) stack = new WeakSet();
+    if (!budget) budget = { count: 0 };
+    if (value === null || value === undefined) return value;
+    const t = typeof value;
+    if (t === "function") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh membawa fungsi (termasuk toJSON)");
+    if (t === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh membawa Symbol");
+    if (t !== "object") return value;
+    if (depth > VALUE_BOUNDS.MAX_VALUE_SCAN_DEPTH) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "struktur terlalu dalam untuk diverifikasi dengan aman, ditolak");
+    }
+    if (stack.has(value)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "struktur siklik terdeteksi");
+    budget.count += 1;
+    if (budget.count > VALUE_BOUNDS.MAX_VALUE_NODES) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah node melebihi batas");
+    }
+    if (Array.isArray(value)) {
+        if (value.length > VALUE_BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array melebihi batas");
+        }
+        const arrProto = Object.getPrototypeOf(value);
+        if (arrProto !== Array.prototype && arrProto !== null) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "array dengan prototype non-standar ditolak");
+        }
+        stack.add(value);
+        const out = [];
+        try {
+            for (let i = 0; i < value.length; i++) {
+                const desc = Object.getOwnPropertyDescriptor(value, i);
+                if (!desc || desc.get || desc.set) {
+                    fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `tidak boleh membawa properti accessor: '${i}'`);
+                }
+                out[i] = buildSafeCognitiveCopy(desc.value, depth + 1, stack, budget);
+            }
+        } finally {
+            stack.delete(value);
+        }
+        return Object.freeze(out);
+    }
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh berupa instance kelas (kontrak data murni)");
+    }
+    stack.add(value);
+    const out = {};
+    try {
+        for (const key of Reflect.ownKeys(value)) {
+            if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "tidak boleh membawa kunci Symbol");
+            if (DANGEROUS_VALUE_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak: '${key}'`);
+            const desc = Object.getOwnPropertyDescriptor(value, key);
+            if (!desc || desc.get || desc.set) {
+                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `tidak boleh membawa properti accessor: '${String(key)}'`);
+            }
+            if (!desc.enumerable) continue;
+            const built = buildSafeCognitiveCopy(desc.value, depth + 1, stack, budget);
+            if (built !== undefined) out[key] = built;
+        }
+    } finally {
+        stack.delete(value);
+    }
+    return Object.freeze(out);
 }
 
 const TRIGGERS = new Set(["CONTRADICTION", "EXPECTATION_VIOLATED", "REPEATED_FAILURE", "LOW_CONFIDENCE_ACTION", "OWNER_CHALLENGE", "SCHEDULED"]);
@@ -39,8 +104,13 @@ function makeAssessment({ assessmentId, subjectRef, claim, evidenceQuality, nowM
     // tersimpan berasal dari snapshot yang SAMA persis.
     const safeEvidenceQuality = sanitizeEvidenceQuality(evidenceQuality);
     const { value, basis } = confidenceFromSafe(safeEvidenceQuality, nowMs);
+    // Bug review independen (audit putaran-32, AUD32-ADV-1): sibling dari
+    // AUD31-P2-5 dalam berkas yang sama -- `Object.freeze({...subjectRef})`
+    // hanya satu lapis DAN membaca lewat spread (memanggil accessor
+    // pemanggil); diganti buildSafeCognitiveCopy yang sudah membekukan
+    // dalam dan tidak pernah memanggil accessor.
     return Object.freeze({
-        assessmentId, subjectRef: Object.freeze({ ...subjectRef }), claim,
+        assessmentId, subjectRef: buildSafeCognitiveCopy(subjectRef), claim,
         value, basis,
         evidenceQuality: Object.freeze(safeEvidenceQuality),
         calibrationRef
@@ -92,9 +162,9 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
 
     return Object.freeze({
         reviewId, trigger,
-        findings: Object.freeze(boundedFindings.map(f => deepFreeze({ ...f }))),
+        findings: Object.freeze(boundedFindings.map(f => buildSafeCognitiveCopy(f))),
         findingsTruncated: findings.length > bounds.MAX_FINDINGS_PER_REVIEW,
-        proposals: Object.freeze(boundedProposals.map(p => deepFreeze({ ...p }))),
+        proposals: Object.freeze(boundedProposals.map(p => buildSafeCognitiveCopy(p))),
         cost: Object.freeze({ ...cost }),
         state: "OPEN"
     });
@@ -116,9 +186,18 @@ function makeCalibrationRecord({ recordId, predictionRef, predictedValue, predic
         fail(REASONS.INVALID_RECORD, "predictedConfidence wajib number yang valid");
     }
     const error = scoreKind === "BRIER" ? brierScore(predictedConfidence, outcomeCorrect) : Math.abs(predictedConfidence - (outcomeCorrect ? 1 : 0));
+    // Bug review independen (audit putaran-32, AUD32-ADV-1): sibling dari
+    // AUD31-P2-5 -- predictionRef/predictedValue/outcomeRef/outcomeValue
+    // disimpan sebagai referensi mentah milik pemanggil, tidak pernah
+    // disaring/dibekukan; buildSafeCognitiveCopy menutup keduanya sekaligus.
     return Object.freeze({
-        recordId, predictionRef, predictedValue, predictedConfidence,
-        outcomeRef, outcomeValue, error, scoreKind,
+        recordId,
+        predictionRef: buildSafeCognitiveCopy(predictionRef),
+        predictedValue: buildSafeCognitiveCopy(predictedValue),
+        predictedConfidence,
+        outcomeRef: buildSafeCognitiveCopy(outcomeRef),
+        outcomeValue: buildSafeCognitiveCopy(outcomeValue),
+        error, scoreKind,
         window: Object.freeze({ from: windowFrom, to: windowTo })
     });
 }

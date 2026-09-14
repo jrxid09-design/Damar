@@ -137,6 +137,38 @@ test("MC-repair-17: recordId is read exactly once in recordCalibration, so a sta
     assert.equal(n, 1, "recordId must be read exactly once");
 });
 
+test("MC-repair-19: a hostile getter nested inside a finding/proposal is never invoked by openReview() -- round-31's deep-freeze fix still read via `value[key]` (independent audit AUD32-P2-5)", async () => {
+    const mc = await createMetacognition();
+    let called = 0;
+    const detail = {};
+    Object.defineProperty(detail, "secret", { enumerable: true, configurable: true, get() { called++; return "boom"; } });
+    // Sama seperti setiap sanitizer lane lain (buildSafeBeliefValue/
+    // buildSafePayloadRef/walkSafe, lihat W7-ENV-14), properti accessor
+    // ditolak TERTUTUP (throw), bukan dilewatkan diam-diam -- yang penting
+    // untuk diverifikasi di sini adalah getter-nya TIDAK PERNAH terpanggil
+    // sebelum ditolak.
+    assertThrowsReason(() => mc.openReview({
+        trigger: "SCHEDULED", subjectRef: { entityId: "e1" },
+        findings: [{ severity: 1, detail }]
+    }), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(called, 0, "a nested caller getter must never be invoked while rejecting it");
+});
+
+test("MC-repair-20: assess()'s subjectRef and recordCalibration()'s stored refs/values are deep-frozen, not raw caller references (independent audit AUD32-ADV-1)", async () => {
+    const mc = await createMetacognition();
+    const nested = { deep: 1 };
+    const a = mc.assess({ entityId: "e1", extra: nested }, "claim", { sourceCount: 0 });
+    nested.deep = 999;
+    assert.equal(a.subjectRef.extra.deep, 1, "mutating the caller's original nested object must not rewrite the stored assessment");
+    assert.throws(() => { "use strict"; a.subjectRef.extra.deep = 2; });
+
+    const ov = { x: 1 };
+    const rec = mc.recordCalibration({ recordId: "C1", predictionRef: "p", predictedValue: 1, predictedConfidence: 0.9, outcomeTier: "T1", outcomeRef: "o1", outcomeValue: ov, outcomeCorrect: true });
+    ov.x = 999;
+    assert.equal(rec.outcomeValue.x, 1, "mutating the caller's original outcomeValue must not rewrite the stored calibration record");
+    assert.throws(() => { "use strict"; rec.outcomeValue.x = 2; });
+});
+
 test("MC-repair-18: nested objects inside a stored finding/proposal are frozen too, not just the top level -- mutating the caller's original nested object after openReview() cannot rewrite the canonical review (independent audit AUD31-P2-5)", async () => {
     const mc = await createMetacognition();
     const detail = { x: 1 };

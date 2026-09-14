@@ -88,7 +88,16 @@ function makeRelation({ relationId, kind, from, to, directed = true, strength = 
 /** W-2/W-3: tier admissible, sensor.sensorId + observedAt wajib ada. */
 function makeObservation({ observationId, subject, attribute, value, sensor, frame = null, tier, observedAt }) {
     if (typeof observationId !== "string" || !observationId) fail(REASONS.INVALID_RECORD, "observationId wajib string");
-    if (!subject || (typeof subject.entityId !== "string" && typeof subject.relationId !== "string")) {
+    // Bug review independen (audit putaran-32, AUD32-P2-3): `subject.entityId`/
+    // `subject.relationId` sebelumnya divalidasi lewat `subject.entityId`/
+    // `.relationId` lalu subjek TERSIMPAN datang dari `{...subject}` (baca
+    // KEDUA) -- getter stateful bisa lolos validasi dengan entityId yang sah
+    // lalu menyimpan subjek lain (mis. undefined), melewati guard
+    // UNKNOWN_ENTITY (W-3) dan membuat observasi jatuh ke kunci belief
+    // sentinel "invalid:malformed-subject". Destructure SEKALI di sini.
+    if (!subject) fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
+    const { entityId, relationId, ...subjectRest } = subject;
+    if (typeof entityId !== "string" && typeof relationId !== "string") {
         fail(REASONS.INVALID_RECORD, "subject wajib { entityId } atau { relationId }");
     }
     if (typeof attribute !== "string" || !attribute) fail(REASONS.INVALID_RECORD, "attribute wajib string");
@@ -111,7 +120,7 @@ function makeObservation({ observationId, subject, attribute, value, sensor, fra
     }
 
     return Object.freeze({
-        observationId, subject: Object.freeze({ ...subject }),
+        observationId, subject: Object.freeze({ ...subjectRest, entityId, relationId }),
         // Bug review independen (audit putaran-4, W7R4-P2-1; disempurnakan
         // putaran-5, W7R5-P1-2): validasi/salin `value` TIDAK dilakukan di
         // sini lagi -- applyRevision (beliefAlgebra.js, satu-satunya tempat

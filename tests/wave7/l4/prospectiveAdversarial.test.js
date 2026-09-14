@@ -82,6 +82,37 @@ test("PM-repair-35: an object-valued expectation is SATISFIED by a structurally-
     assert.equal(results[0].outcome, "SATISFIED", "a structurally-equal object value must satisfy the expectation, not require reference identity");
 });
 
+test("PM-repair-37: checkExpectations never crashes or falsely SATISFIES on a BigInt/cyclic/NaN/Infinity observed value from the evaluate port (independent audit AUD32-P1-1, BLOCKING)", async () => {
+    const pm1 = await createProspectiveMemory({ clock: manualClock(100) });
+    pm1.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: null, window: { latestAt: new Date(1000).toISOString() } });
+    const r1 = pm1.checkExpectations(() => ({ value: NaN, atMs: 500 }));
+    assert.deepEqual(r1, [], "NaN observed must never satisfy an expectedValue of null");
+
+    const pm2 = await createProspectiveMemory({ clock: manualClock(100) });
+    pm2.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: null, window: { latestAt: new Date(1000).toISOString() } });
+    const r2 = pm2.checkExpectations(() => ({ value: Infinity, atMs: 500 }));
+    assert.deepEqual(r2, [], "Infinity observed must never satisfy an expectedValue of null");
+
+    const pm3 = await createProspectiveMemory({ clock: manualClock(100) });
+    pm3.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: 5, window: { latestAt: new Date(1000).toISOString() } });
+    assert.doesNotThrow(() => pm3.checkExpectations(() => ({ value: 10n, atMs: 500 })), "a BigInt observed value must not raw-throw and abort the whole sweep");
+
+    const pm4 = await createProspectiveMemory({ clock: manualClock(100) });
+    pm4.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: 5, window: { latestAt: new Date(1000).toISOString() } });
+    const cyc = {}; cyc.self = cyc;
+    assert.doesNotThrow(() => pm4.checkExpectations(() => ({ value: cyc, atMs: 500 })), "a cyclic observed value must not raw-throw and abort the whole sweep");
+});
+
+test("PM-repair-38: window.latestAt/earliestAt are read exactly once, so a stateful getter cannot pass validation with a valid date and store an invalid one (independent audit AUD32-P2-2)", async () => {
+    const pm = await createProspectiveMemory({ clock: manualClock(100) });
+    let n = 0;
+    const window = {};
+    Object.defineProperty(window, "latestAt", { enumerable: true, configurable: true, get() { n++; return new Date(1000).toISOString(); } });
+    const e = pm.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: "done", window });
+    assert.equal(n, 1, "window.latestAt must be read exactly once");
+    assert.ok(Number.isFinite(Date.parse(e.window.latestAt)), "the stored latestAt must be the same valid date that was validated");
+});
+
 test("PM-repair-36: ownerRef is read exactly once, so a stateful getter cannot exceed MAX_REMINDERS_PER_GOAL via inconsistent reads (independent audit AUD31-P2-4)", async () => {
     const pm = await createProspectiveMemory({ bounds: { ...BOUNDS, MAX_REMINDERS_PER_GOAL: 1 } });
     pm.arm({ reminderId: "R-B1", ownerRef: "B", wakeClass: "NOTIFY_OWNER", trigger: { kind: "AT", at: new Date(9e12).toISOString() } });

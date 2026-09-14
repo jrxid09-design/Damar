@@ -208,6 +208,14 @@ test("SM-repair-13: a Symbol/hostile-object observedAtMs never throws and never 
     assert.equal(called, 0, "observedAtMs's valueOf must never be invoked");
 });
 
+test("SM-repair-14: a non-finite numeric 'at' in ingestOutcome/ingestHealth is rejected, not silently corrupted to null by a JSON-round-tripping store (independent audit AUD32-P2-4)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const sm = await createSelfModel({ capabilityRegistry: registry });
+    assertThrowsReason(() => sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "SUCCESS", at: Infinity, evidenceRef: "ev-1" }), "INVALID_OUTCOME");
+    assertThrowsReason(() => sm.ingestOutcome({ capabilityId: "cap.x", tier: "T1", outcome: "SUCCESS", at: NaN, evidenceRef: "ev-2" }), "INVALID_OUTCOME");
+    assertThrowsReason(() => sm.ingestHealth({ subsystem: "sub1", state: "DOWN", at: Infinity }), "INVALID_OBSERVATION");
+});
+
 test("SM-A2: stale availability is marked STALE after TTL, never silently USABLE", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const clock = manualClock(0);

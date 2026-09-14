@@ -672,6 +672,18 @@ test("WM-repair-53: hostile toString on entity labels/externalRefs/relation kind
     assert.equal(called, 0, "a hostile externalRefs.system's toString must never be invoked");
 });
 
+test("WM-repair-57: subject.entityId is read exactly once in ingestObservation, so a stateful getter cannot pass the UNKNOWN_ENTITY guard with a valid entityId and store a different one (independent audit AUD32-P2-3)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    let n = 0;
+    const subject = {};
+    Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { n++; return n === 1 ? "e1" : undefined; } });
+    wm.ingestObservation({ subject, attribute: "reading", value: 5, sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() });
+    assert.equal(n, 1, "subject.entityId must be read exactly once");
+    const r = wm.query({ subject: { entityId: "e1" }, attribute: "reading" });
+    assert.equal(r.value, 5, "the observation must be stored under the entityId that was actually validated");
+});
+
 test("WM-repair-56: relationId/hypothesisId are each read exactly once, so a stateful getter cannot overwrite an existing relation/hypothesis via inconsistent reads (independent audit AUD30-P2-1)", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });

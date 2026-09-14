@@ -684,6 +684,18 @@ test("GL-repair-48: commitmentId/planId/taskId are each read exactly once, so a 
     assert.equal(ge.getTask(t1.taskId).state, "PENDING");
 });
 
+test("GL-repair-50: createPlan's steps is read exactly once, so a stateful getter cannot bypass MAX_STEPS_PER_PLAN via inconsistent reads (independent audit AUD32-P2-1)", async () => {
+    const ge = await createGoalEngine();
+    const g = ge.proposeGoal(baseGoalSpec());
+    let n = 0;
+    const big = new Array(BOUNDS.MAX_STEPS_PER_PLAN + 1).fill({ op: "noop" });
+    const spec = { goalRef: g.goalId };
+    Object.defineProperty(spec, "steps", { enumerable: true, configurable: true, get() { n++; return n === 1 ? [] : big; } });
+    const p = ge.createPlan(spec);
+    assert.equal(n, 1, "steps must be read exactly once");
+    assert.equal(p.steps.length, 0, "the stored steps must come from the same (empty) read that passed the MAX_STEPS_PER_PLAN guard, not a later oversized read");
+});
+
 test("GL-repair-49: successCondition.kind/attribute are read exactly once alongside subject, so a stateful getter cannot slip an unverifiable condition past the guard (independent audit AUD31-P2-3)", async () => {
     const ge = await createGoalEngine();
     let n = 0;

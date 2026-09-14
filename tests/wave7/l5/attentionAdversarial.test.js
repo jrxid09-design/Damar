@@ -164,6 +164,12 @@ test("AT-repair-26: a Symbol/hostile-object proposedUrgency is rejected as INVAL
     assert.equal(called, 0, "proposedUrgency's valueOf must never be invoked before the type check");
 });
 
+test("AT-repair-27: a non-finite expiresAtMs (Infinity/NaN) is rejected, not stored raw (independent audit AUD32-ADV-2)", async () => {
+    const ae = await createAttentionEconomy();
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s1", subjectRef: { entityId: "e1" }, expiresAtMs: Infinity }, "PERCEIVE"), "INVALID_RECORD");
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "s2", subjectRef: { entityId: "e1" }, expiresAtMs: NaN }, "PERCEIVE"), "INVALID_RECORD");
+});
+
 test("AT-A1: salience flooding from one sensor is rate-capped and the source marked noisy", async () => {
     const ae = await createAttentionEconomy({ bounds: { ...BOUNDS, MAX_SIGNALS_PER_SOURCE_PER_MINUTE: 3 } });
     for (let i = 0; i < 3; i++) {

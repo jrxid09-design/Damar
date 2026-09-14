@@ -258,15 +258,22 @@ function makeReminder({ reminderId, ownerRef = null, trigger, payloadRef = null,
 
 function makeExpectation({ expectationId, subject, attribute, expectedValue, window, onSatisfied = "CLOSE", onViolated = "NOTIFY" }) {
     if (typeof expectationId !== "string" || !expectationId) fail(REASONS.INVALID_RECORD, "expectationId wajib string");
-    if (!window || typeof window.latestAt !== "string" || !Number.isFinite(Date.parse(window.latestAt))) {
+    // Bug review independen (audit putaran-32, AUD32-P2-2): `window.latestAt`/
+    // `window.earliestAt` sebelumnya dibaca berkali-kali (typeof, Date.parse,
+    // lalu lagi lewat `{...window}` saat konstruksi) -- getter stateful bisa
+    // lolos validasi dengan tanggal sah lalu menyimpan nilai LAIN yang tidak
+    // sah, membuat expectation PENDING selamanya (tidak pernah SATISFIED/
+    // VIOLATED). Destructure SEKALI; validasi dan simpan pakai lokal yang sama.
+    const { latestAt, earliestAt, ...windowRest } = window ?? {};
+    if (typeof latestAt !== "string" || !Number.isFinite(Date.parse(latestAt))) {
         // PM-5: ekspektasi tanpa latestAt YANG SAH ditolak. Bug diketemukan
         // review independen (Codex, putaran ke-4): string tak-tanggal lolos
         // dulu, lalu Date.parse -> NaN membuat checkExpectations() tidak
         // pernah bisa melewati window (tidak pernah VIOLATED).
         fail(REASONS.NO_LATEST_AT, "window.latestAt wajib tanggal ISO yang sah (PM-5)");
     }
-    if (window.earliestAt !== undefined && window.earliestAt !== null &&
-        !Number.isFinite(Date.parse(window.earliestAt))) {
+    if (earliestAt !== undefined && earliestAt !== null &&
+        !Number.isFinite(Date.parse(earliestAt))) {
         fail(REASONS.NO_LATEST_AT, "window.earliestAt, jika ada, wajib tanggal ISO yang sah");
     }
     // Bug review independen (audit putaran-12, AUD12-P2-3): attribute/
@@ -288,7 +295,7 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
     return Object.freeze({
         expectationId, subject: deepFreeze(buildSafePayloadRef({ ...subject })), attribute,
         expectedValue: deepFreeze(buildSafePayloadRef(expectedValue)),
-        window: deepFreeze(buildSafePayloadRef({ ...window })),
+        window: deepFreeze(buildSafePayloadRef({ ...windowRest, latestAt, earliestAt })),
         onSatisfied, onViolated, state: "PENDING"
     });
 }
@@ -302,5 +309,5 @@ function makeWakeEvent({ reminderId, wakeClass, payloadRef, firedAt, occurrenceI
 
 module.exports = {
     WAKE_CLASSES, TRIGGER_KINDS, validateTrigger, validatePayloadRef,
-    makeReminder, makeExpectation, makeWakeEvent
+    makeReminder, makeExpectation, makeWakeEvent, buildSafePayloadRef
 };

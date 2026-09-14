@@ -17,7 +17,14 @@ const BOUNDS = Object.freeze({
     MAX_CALIBRATION_RECORDS: 100000,
     CALIBRATION_WINDOW_DAYS: 90,
     MAX_REVIEW_DEPTH: 1,
-    NO_EVIDENCE_CEILING: 0.2
+    NO_EVIDENCE_CEILING: 0.2,
+    // Bug review independen (audit putaran-32, AUD32-P2-5): sanitizer baru
+    // buildSafeCognitiveCopy (records.js) butuh anggaran kedalaman/node
+    // seperti buildSafeBeliefValue/buildSafePayloadRef di lane lain, supaya
+    // DAG referensi-bersama tidak meledak eksponensial.
+    MAX_VALUE_SCAN_DEPTH: 16,
+    MAX_VALUE_NODES: 512,
+    MAX_VALUE_ARRAY_LENGTH: 1024
 });
 
 module.exports = { SCHEMA_VERSION, BOUNDS };
