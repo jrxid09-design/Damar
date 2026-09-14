@@ -220,6 +220,23 @@ test("SM-repair-15: snapshot()'s runtimeLocation/resourcePressure/activeProvider
     assert.throws(() => { "use strict"; snap.activeProviders[0].nested.ok = false; });
 });
 
+test("SM-repair-19: snapshot() never raw-throws on revoked/throwing soft ports (mesh/provider/governor/presence) or a BigInt inside a port result -- safeCall only wraps the port CALL, not the consumption of what it returns (independent audit W7R51-ADV-1)", async () => {
+    const reg = { get: () => ({ id: "x" }), has: () => true, getAvailability: () => null };
+    const rev = () => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy; };
+    const cases = [
+        { meshPort: { identity: () => rev(), knownNodes: () => [], reachableNodes: () => [] } },
+        { meshPort: { identity: () => null, knownNodes: () => rev(), reachableNodes: () => [] } },
+        { providerPort: { activeProviders: () => rev() } },
+        { governorPort: { pressure: () => rev() } },
+        { presencePort: { state: () => rev() } },
+        { providerPort: { activeProviders: () => [{ id: "p", big: 1n }] } }
+    ];
+    for (const c of cases) {
+        const sm = await createSelfModel({ capabilityRegistry: reg, ...c });
+        assert.doesNotThrow(() => sm.snapshot());
+    }
+});
+
 test("SM-repair-18: assess() never raw-throws when the capability registry returns a revoked-Proxy descriptor -- descriptorRef falls back to capabilityId, same as a missing descriptor.id (independent audit W7R50-ADV-1)", async () => {
     const { proxy, revoke } = Proxy.revocable({}, {});
     revoke();

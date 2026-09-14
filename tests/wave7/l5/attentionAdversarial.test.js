@@ -197,6 +197,12 @@ test("AT-repair-31: targetKey reads subjectRef.entityId exactly once (independen
     assert.equal(key, "entity:e1::PERCEIVE");
 });
 
+test("AT-repair-41: pick() falls back to bounds.MAX_RUNNING_TARGETS (not raw-throw) when governorPort.capacity() throws or is a revoked Proxy (independent audit W7R51-ADV-2)", async () => {
+    const ae = await createAttentionEconomy({ clock: manualClock(0), governorPort: { capacity: () => { throw new Error("capacity refuses"); } } });
+    ae.ingestSignal({ sourceKind: "OWNER", sourceId: "o1", subjectRef: { entityId: "e1" } }, "REASON");
+    assert.doesNotThrow(() => ae.pick());
+});
+
 test("AT-repair-40: the exported targetKey() fails closed (not raw-throw) on a revoked-Proxy subjectRef or a Symbol workKind -- its nested entityId/relationId reads were hardened, but the top-level parameter itself and workKind's template-literal interpolation never were (independent audit W7R47-P2-2)", async () => {
     const { targetKey } = require("../../../src/cognition/attention");
     const r = Proxy.revocable({}, {});

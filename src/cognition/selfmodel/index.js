@@ -388,20 +388,49 @@ async function createSelfModel({
     function limitations() { return Object.freeze([...limitationsList]); }
 
     function snapshot() {
+        // Bug review independen (audit putaran-51, W7R51-ADV-1): `safeCall`
+        // hanya membungkus PANGGILAN port (mesh/provider/governor/presence)
+        // -- HASIL yang dikembalikan (mis. `meshIdentity`) tetap dibaca
+        // MENTAH sesudahnya (`?.nodeId`, `.slice()`). Sebuah soft port yang
+        // mengembalikan Proxy yang di-revoke (bukan melempar saat
+        // dipanggil) tetap raw-throw di sini. Setiap pembacaan hasil
+        // dibungkus try/catch sendiri, gagal aman ke default yang sudah
+        // ada (UNKNOWN/array kosong), tidak pernah crash snapshot().
         const meshIdentity = safeCall(() => meshPort?.identity?.()) ?? null;
-        const knownNodes = (safeCall(() => meshPort?.knownNodes?.()) ?? [])
-            .slice(0, bounds.MAX_KNOWN_NODES);
-        const reachableNodes = (safeCall(() => meshPort?.reachableNodes?.()) ?? [])
-            .slice(0, bounds.MAX_KNOWN_NODES);
-        const activeProviders = safeCall(() => providerPort?.activeProviders?.()) ?? [];
+        let nodeId = "UNKNOWN", nodeRole = "UNKNOWN";
+        try {
+            nodeId = meshIdentity?.nodeId ?? "UNKNOWN";
+            nodeRole = meshIdentity?.nodeRole ?? "UNKNOWN";
+        } catch { /* jatuh ke default UNKNOWN */ }
+
+        let knownNodes = [];
+        try {
+            const raw = safeCall(() => meshPort?.knownNodes?.()) ?? [];
+            knownNodes = Array.isArray(raw) ? raw.slice(0, bounds.MAX_KNOWN_NODES) : [];
+        } catch { knownNodes = []; }
+
+        let reachableNodes = [];
+        try {
+            const raw = safeCall(() => meshPort?.reachableNodes?.()) ?? [];
+            reachableNodes = Array.isArray(raw) ? raw.slice(0, bounds.MAX_KNOWN_NODES) : [];
+        } catch { reachableNodes = []; }
+
+        // Bug review independen (audit putaran-51, W7R51-ADV-1, sapuan
+        // lanjutan): `buildSnapshot`'s `assemble()` men-spread `[...activeProviders]`
+        // SEBELUM `deepFreeze` (yang sudah diperbaiki di snapshot.js) sempat
+        // memprosesnya -- spread sendiri mengonsumsi Symbol.iterator, raw-throw
+        // untuk Proxy yang di-revoke. Divalidasi sebagai array polos di sini,
+        // jatuh ke array kosong kalau tidak.
+        let activeProviders = [];
+        try {
+            const raw = safeCall(() => providerPort?.activeProviders?.()) ?? [];
+            activeProviders = Array.isArray(raw) ? raw : [];
+        } catch { activeProviders = []; }
         const resourcePressure = safeCall(() => governorPort?.pressure?.()) ?? null;
         const presence = safeCall(() => presencePort?.state?.()) ?? null;
 
         return buildSnapshot({
-            identity: {
-                nodeId: meshIdentity?.nodeId ?? "UNKNOWN",
-                nodeRole: meshIdentity?.nodeRole ?? "UNKNOWN"
-            },
+            identity: { nodeId, nodeRole },
             runtimeLocation: { presence },
             capabilityAssessments: [...availabilityCache.keys()].map(assess),
             unknowns: unknownsList,

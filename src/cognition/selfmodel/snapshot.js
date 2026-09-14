@@ -10,7 +10,19 @@
 const { SCHEMA_VERSION } = require("./bounds");
 
 function byteSize(value) {
-    return Buffer.byteLength(JSON.stringify(value), "utf8");
+    // Bug review independen (audit putaran-51, W7R51-ADV-1): `JSON.stringify`
+    // melempar mentah untuk BigInt (dan struktur siklik) -- sebuah soft
+    // port (mis. providerPort.activeProviders()) yang menyisipkan BigInt
+    // di dalam hasilnya meledakkan seluruh snapshot(), dipanggil setiap
+    // siklus L7 shadow/governed. `Infinity` dikembalikan untuk apa pun
+    // yang tidak bisa diserialisasi -- memaksa loop pemotongan di bawah
+    // berjalan (gagal aman ke snapshot terpotong bertanda
+    // `snapshotTruncated:true`, bukan crash).
+    try {
+        return Buffer.byteLength(JSON.stringify(value), "utf8");
+    } catch {
+        return Infinity;
+    }
 }
 
 // Bug review independen (audit putaran-34, AUD34-ADV-5): `runtimeLocation`/
@@ -19,12 +31,33 @@ function byteSize(value) {
 // yang dikembalikan port (capabilityRegistry/health) tetap mutable lewat
 // snapshot yang dikembalikan. Port tepercaya (bukan pemanggil luar), jadi
 // advisory (bukan P2); deepFreeze menutup lapis-dalam tanpa menyaring tipe.
+// Bug review independen (audit putaran-51, W7R51-ADV-1): `Reflect.ownKeys`/
+// `value[key]`/`Object.freeze` di sini semuanya [[Get]]/[[OwnKeys]] mentah
+// terhadap hasil PORT (mesh/provider/governor/presence) -- soft port yang
+// mengembalikan Proxy yang di-revoke meledakkan snapshot() secara mentah.
+// Fungsi ini TIDAK PERNAH punya kontrak melempar (dipanggil di sini
+// khusus untuk EFEK SAMPING pembekuan, bukan disalin/dikembalikan) --
+// kegagalan APA PUN pada satu properti/subtree diperlakukan sebagai
+// "tidak bisa dibekukan dengan aman", dilewati (bukan crash), sisanya
+// tetap dibekukan sebisa mungkin.
 function deepFreeze(value, seen = new WeakSet()) {
     if (!value || typeof value !== "object") return value;
-    if (seen.has(value)) return value;
-    seen.add(value);
-    for (const key of Reflect.ownKeys(value)) deepFreeze(value[key], seen);
-    return Object.freeze(value);
+    try {
+        if (seen.has(value)) return value;
+        seen.add(value);
+        for (const key of Reflect.ownKeys(value)) {
+            let nested;
+            try {
+                nested = value[key];
+            } catch {
+                continue;
+            }
+            deepFreeze(nested, seen);
+        }
+        return Object.freeze(value);
+    } catch {
+        return value;
+    }
 }
 
 function buildSnapshot({

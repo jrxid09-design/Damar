@@ -97,6 +97,26 @@ test("PM-repair-35: an object-valued expectation is SATISFIED by a structurally-
     assert.equal(results[0].outcome, "SATISFIED", "a structurally-equal object value must satisfy the expectation, not require reference identity");
 });
 
+test("PM-repair-57: checkOnStateReminders never raw-throws on a throwing/revoked evaluate port and keeps sweeping the remaining ON_STATE reminders -- the exact sibling of checkExpectations's own evaluatePort fix, one function away in the same file (independent audit W7R51-P2-1)", async () => {
+    const pm = await createProspectiveMemory({ clock: manualClock(0) });
+    pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "ON_STATE", subject: { entityId: "e1" }, attribute: "status" } });
+    assert.doesNotThrow(() => pm.checkOnStateReminders(() => { throw new Error("port refuses"); }));
+    const { proxy, revoke } = Proxy.revocable(function () {}, {});
+    revoke();
+    assert.doesNotThrow(() => pm.checkOnStateReminders(proxy));
+});
+
+test("PM-repair-58: tick() never raw-throws on a throwing/revoked goalStatusPort and keeps firing due reminders (independent audit W7R51-P2-2)", async () => {
+    const c = manualClock(0);
+    const pm = await createProspectiveMemory({ clock: c });
+    pm.arm({ reminderId: "R1", ownerRef: "g1", wakeClass: "RESUME_GOAL", trigger: { kind: "AT", at: new Date(1000).toISOString() } });
+    c.advance(1500);
+    assert.doesNotThrow(() => pm.tick({ isTerminal: () => { throw new Error("refuses"); } }));
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    assert.doesNotThrow(() => pm.tick(proxy));
+});
+
 test("PM-repair-56: checkExpectations never raw-throws when the evaluate port returns a revoked Proxy, throws itself, or returns an object with a throwing value/atMs getter -- treated as 'not observed', the sweep continues for other expectations (independent audit W7R50-P2-1)", async () => {
     const pm = await createProspectiveMemory({ clock: manualClock(100) });
     pm.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: "done", window: { latestAt: new Date(1000).toISOString() } });
