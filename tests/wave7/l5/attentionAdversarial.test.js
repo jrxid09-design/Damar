@@ -15,6 +15,16 @@ function assertThrowsReason(fn, reason) {
     });
 }
 
+test("AT-repair-46: pick()'s aging guarantee honors a caller-sanctioned override of MAX_WAIT_MS -- scheduling.js's pickOne/agingBonus/decay/corroborationBonus all read the module's fixed BOUNDS constant directly instead of the sanitized per-instance bounds, so a much smaller override was silently ignored and the real default (60000ms) governed aging instead (independent audit round 64, Codex, AUD64-P2-1)", async () => {
+    const clock = manualClock(0);
+    const ae = await createAttentionEconomy({ clock, bounds: { MAX_WAIT_MS: 10 } });
+    const { targetId: bgTargetId } = ae.ingestSignal({ sourceKind: "SYSTEM", sourceId: "bg-1", subjectRef: { entityId: "bg1" } }, "MAINTAIN");
+    clock.advance(11);
+    ae.ingestSignal({ sourceKind: "OWNER", sourceId: "owner-1", subjectRef: { entityId: "owner-work" } }, "REASON");
+    const picked = ae.pick();
+    assert.equal(picked.targetId, bgTargetId, "override MAX_WAIT_MS kecil harus membuat target lama menang lewat aging, bukan default modul 60000ms");
+});
+
 test("AT-repair-45: ingestSignal with a Symbol evidenceRef never raw-throws and stays bounded when MAX_SEEN_SYMBOL_EVIDENCE_REFS is 0 -- delete(undefined) on an empty Map is a silent no-op, but the Map was still unconditionally grown afterward, exceeding a sanctioned zero cap by one every distinct Symbol seen (self-discovered sweep, sibling of round 59's W7R59-P2-1..5 zero-boundary class)", async () => {
     const ae = await createAttentionEconomy({ clock: manualClock(1000), bounds: { MAX_SEEN_SYMBOL_EVIDENCE_REFS: 0 } });
     assert.doesNotThrow(() => {

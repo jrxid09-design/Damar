@@ -183,7 +183,12 @@ function appendBounded(list, item, max) {
  * belum ada). Mengembalikan `{ case, belief, contradiction }` —
  * `contradiction` non-null hanya pada kasus CONTEST.
  */
-function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_POLICY }) {
+// Bug review independen (audit putaran-64, Codex, AUD64-P2-1, sibling
+// sweep): fungsi ini membaca `BOUNDS.MAX_OBSERVATIONS_RETAINED_PER_BELIEF`
+// modul (default TETAP) langsung, tidak pernah menerima `bounds` yang
+// sudah disanitasi per-instance dari pemanggil -- override diam-diam
+// diabaikan, sama seperti graph.js/scheduling.js di lane lain.
+function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_POLICY, bounds = BOUNDS }) {
     // record.value divalidasi+disalin+dibekukan DI SINI, satu-satunya
     // tempat belief lahir/berevolusi -- menutup W7R4-P1-1 (query() dan
     // ingestDeclaration menyimpan/mengembalikan referensi mentah yang bisa
@@ -266,7 +271,7 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
 
     const nextAppliedRecordIds = Object.freeze(appendBounded(
         existing.appliedRecordIds ?? existing.supportedBy, record.recordId,
-        BOUNDS.MAX_OBSERVATIONS_RETAINED_PER_BELIEF));
+        bounds.MAX_OBSERVATIONS_RETAINED_PER_BELIEF));
 
     if (sameValue && !expired) {
         // REINFORCE
@@ -276,7 +281,7 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
                 ...existing,
                 revision: existing.revision + 1,
                 supportedBy: Object.freeze(appendBounded(existing.supportedBy, record.recordId,
-                    BOUNDS.MAX_OBSERVATIONS_RETAINED_PER_BELIEF)),
+                    bounds.MAX_OBSERVATIONS_RETAINED_PER_BELIEF)),
                 appliedRecordIds: nextAppliedRecordIds,
                 updatedAtMs: nowMs
             }),
@@ -292,7 +297,7 @@ function applyRevision({ existing, record, nowMs, decayPolicy = DEFAULT_DECAY_PO
                 ...existing,
                 revision: existing.revision + 1,
                 supportedBy: Object.freeze(appendBounded(existing.supportedBy, record.recordId,
-                    BOUNDS.MAX_OBSERVATIONS_RETAINED_PER_BELIEF)),
+                    bounds.MAX_OBSERVATIONS_RETAINED_PER_BELIEF)),
                 appliedRecordIds: nextAppliedRecordIds,
                 updatedAtMs: nowMs, observedAt: record.observedAt,
                 observedAtMs: record.observedAtMs ?? nowMs

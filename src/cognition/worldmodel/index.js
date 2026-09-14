@@ -321,8 +321,10 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // sebelum error dilempar, kehilangan data permanen. applyRevision
         // sekarang dipanggil DULU; kompaksi hanya terjadi setelah belief
         // yang akan disimpan terbukti valid.
+        // Bug review independen (audit putaran-64, Codex, AUD64-P2-1,
+        // sibling sweep): `bounds` (sudah disanitasi) diteruskan eksplisit.
         const { case: caseName, belief, contradiction } = applyRevision({
-            existing, record: { ...record, subject: safeSubject, subjectKey }, nowMs: now(), decayPolicy: DEFAULT_DECAY_POLICY
+            existing, record: { ...record, subject: safeSubject, subjectKey }, nowMs: now(), decayPolicy: DEFAULT_DECAY_POLICY, bounds
         });
 
         // Bug review independen (audit putaran-7, W7R7-P1-3): beliefs tidak
@@ -667,10 +669,14 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         // depth yang dihilangkan pemanggil menjadi undefined -> Math.min(undefined,...)
         // = NaN di graphOps.neighbors, membuat loop traversal berjalan NOL kali
         // dan diam-diam mengembalikan hasil kosong.
-        neighbors: (id, kinds, depth = 1) => graphOps.neighbors(stateView(), id, kinds, depth),
-        subgraph: (seeds, depth, budget) => graphOps.subgraph(stateView(), seeds, depth, budget),
-        path: (from, to, maxDepth) => graphOps.path(stateView(), from, to, maxDepth),
-        entitiesByKind: (kind, limit) => graphOps.entitiesByKind(stateView(), kind, limit),
+        // Bug review independen (audit putaran-64, Codex, AUD64-P2-1):
+        // `bounds` (sudah disanitasi lewat sanitizeBounds) diteruskan
+        // eksplisit di sini -- sebelumnya graphOps membaca BOUNDS modul
+        // TETAP sendiri, mengabaikan override per-instance sepenuhnya.
+        neighbors: (id, kinds, depth = 1) => graphOps.neighbors(stateView(), id, kinds, depth, bounds),
+        subgraph: (seeds, depth, budget) => graphOps.subgraph(stateView(), seeds, depth, budget, bounds),
+        path: (from, to, maxDepth) => graphOps.path(stateView(), from, to, maxDepth, bounds),
+        entitiesByKind: (kind, limit) => graphOps.entitiesByKind(stateView(), kind, limit, bounds),
         openContradictions, overflowedContradictions: overflowedContradictionsView, resolveContradiction, entityCountBySourceSize, beliefsSize,
         persist, laws, bounds
     });

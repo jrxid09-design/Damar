@@ -108,6 +108,27 @@ test("WM-repair-98: declareEntity's evictEntityIfOverBound fully compacts down t
     assert.equal(wm2.entitiesByKind("thing").entities.length, 0);
 });
 
+test("WM-repair-99: neighbors/path/entitiesByKind honor a caller-sanctioned override of NEIGHBORS_MAX_FANOUT/PATH_MAX_DEPTH/ENTITIES_BY_KIND_LIMIT -- graph.js's traversal functions read the module's fixed BOUNDS constant directly, never receiving the sanitized per-instance bounds, so overrides (including 0) were silently ignored entirely (independent audit round 64, Codex, AUD64-P2-1)", async () => {
+    const wm = await createWorldModel({ bounds: { NEIGHBORS_MAX_FANOUT: 0, PATH_MAX_DEPTH: 0, ENTITIES_BY_KIND_LIMIT: 0 } });
+    wm.declareEntity({ entityId: "a", entityKind: "thing", source: "s" });
+    wm.declareEntity({ entityId: "b", entityKind: "thing", source: "s" });
+    wm.declareRelation({ relationId: "r1", kind: "x", from: "a", to: "b", strength: 1 });
+
+    assert.equal(wm.neighbors("a", null, 1).entities.length, 0);
+    assert.equal(wm.path("a", "b", 5).path, null);
+    assert.equal(wm.entitiesByKind("thing").entities.length, 0);
+});
+
+test("WM-repair-100: applyRevision honors a caller-sanctioned override of MAX_OBSERVATIONS_RETAINED_PER_BELIEF -- beliefAlgebra.js read the module's fixed BOUNDS constant directly instead of the sanitized per-instance bounds (independent audit round 64, Codex, AUD64-P2-1, sibling sweep)", async () => {
+    const wm = await createWorldModel({ bounds: { MAX_OBSERVATIONS_RETAINED_PER_BELIEF: 1 } });
+    wm.declareEntity({ entityId: "e1", entityKind: "thing", source: "s" });
+    for (let i = 0; i < 5; i++) {
+        wm.ingestObservation({ observationId: `o${i}`, subject: { entityId: "e1" }, attribute: "temp", value: 20, sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(i + 1).toISOString() });
+    }
+    const q = wm.query({ subject: { entityId: "e1" }, attribute: "temp" });
+    assert.ok(q.supportedBy.length <= 1, "supportedBy harus dibatasi ke override MAX_OBSERVATIONS_RETAINED_PER_BELIEF, bukan default modul 32");
+});
+
 test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });

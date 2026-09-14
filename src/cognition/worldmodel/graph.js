@@ -18,7 +18,14 @@ function adjacency(relations, entityId) {
     return out;
 }
 
-function neighbors(state, entityId, kinds = null, depth = 1) {
+// Bug review independen (audit putaran-64, Codex, AUD64-P2-1): keempat
+// fungsi traversal di file ini membaca `BOUNDS` modul (default TETAP)
+// langsung, bukan `bounds` yang sudah disanitasi per-instance lewat
+// sanitizeBounds -- override pemanggil (mis. NEIGHBORS_MAX_FANOUT:0,
+// PATH_MAX_DEPTH:0) diam-diam diabaikan sepenuhnya. Parameter `bounds`
+// ditambahkan di setiap fungsi (default ke BOUNDS modul untuk kompatibilitas
+// mundur), diteruskan dari index.js's `bounds` instance yang sudah sah.
+function neighbors(state, entityId, kinds = null, depth = 1, bounds = BOUNDS) {
     // Bug review independen (audit putaran-22, F-2): `budget` di subgraph()
     // dijaga (putaran-20) tapi `kinds` di FUNGSI SAMA-KELAS ini tidak --
     // `kinds` bukan array/null meledakkan `.includes()` jadi TypeError
@@ -58,7 +65,7 @@ function neighbors(state, entityId, kinds = null, depth = 1) {
         // buildSafeBeliefValue, dst.) sudah punya langit-langit
         // MAX_*_ARRAY_LENGTH -- ditambahkan di sini juga, dipakai ulang
         // BOUNDS.MAX_VALUE_ARRAY_LENGTH milik lane yang sama.
-        if (!Number.isInteger(kindsLen) || kindsLen < 0 || kindsLen > BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
+        if (!Number.isInteger(kindsLen) || kindsLen < 0 || kindsLen > bounds.MAX_VALUE_ARRAY_LENGTH) {
             fail(REASONS.INVALID_RECORD, "kinds.length tidak sah atau melebihi batas");
         }
         safeKinds = [];
@@ -85,18 +92,18 @@ function neighbors(state, entityId, kinds = null, depth = 1) {
     // `Math.min(-1, MAX)` = -1, membuat loop `d < boundedDepth` tidak
     // pernah berjalan (traversal diam-diam kosong), sama seperti kasus null.
     if (depth === undefined || depth === null || !Number.isFinite(depth) || depth < 0) depth = 1;
-    const boundedDepth = Math.min(depth, BOUNDS.NEIGHBORS_MAX_DEPTH);
+    const boundedDepth = Math.min(depth, bounds.NEIGHBORS_MAX_DEPTH);
     const visited = new Set([entityId]);
     let frontier = [entityId];
-    let truncated = depth > BOUNDS.NEIGHBORS_MAX_DEPTH;
+    let truncated = depth > bounds.NEIGHBORS_MAX_DEPTH;
     const result = new Set();
 
     for (let d = 0; d < boundedDepth; d++) {
         const next = [];
         for (const id of frontier) {
             const edges = adjacency(state.relations, id);
-            const limited = edges.slice(0, BOUNDS.NEIGHBORS_MAX_FANOUT);
-            if (edges.length > BOUNDS.NEIGHBORS_MAX_FANOUT) truncated = true;
+            const limited = edges.slice(0, bounds.NEIGHBORS_MAX_FANOUT);
+            if (edges.length > bounds.NEIGHBORS_MAX_FANOUT) truncated = true;
             for (const { neighborId, relation } of limited) {
                 if (safeKinds && !safeKinds.includes(relation.kind)) continue;
                 if (!visited.has(neighborId)) {
@@ -115,7 +122,7 @@ function neighbors(state, entityId, kinds = null, depth = 1) {
     };
 }
 
-function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 262144 }) {
+function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 262144 }, bounds = BOUNDS) {
     // Bug review independen (audit putaran-22, F-2): sibling `budget`
     // dijaga (putaran-20) tapi `seeds` tidak -- `seeds: null` eksplisit
     // meledakkan `new Set(seeds)`/`[...seeds]` jadi TypeError mentah
@@ -171,7 +178,7 @@ function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 26
         maxNodes = 512;
         maxBytes = 262144;
     }
-    const boundedDepth = Math.min(depth, BOUNDS.NEIGHBORS_MAX_DEPTH);
+    const boundedDepth = Math.min(depth, bounds.NEIGHBORS_MAX_DEPTH);
     // Bug review independen (audit putaran-41, AUD41-P2-1): `Array.isArray(seeds)`
     // di atas hanya menjaga KONTAINERnya -- `new Set(seeds)`/`[...seeds]`
     // di bawah tetap mengonsumsi `seeds` lewat protokol iterator
@@ -197,7 +204,7 @@ function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 26
     // langsung dari `neighbors`'s `kindsLen` (kelas yang sama) -- guard
     // ini memvalidasi integer/non-negatif tapi tidak pernah membatasi
     // atasnya, membuka DoS trivial lewat length Proxy yang dipalsukan.
-    if (!Number.isInteger(seedsLen) || seedsLen < 0 || seedsLen > BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
+    if (!Number.isInteger(seedsLen) || seedsLen < 0 || seedsLen > bounds.MAX_VALUE_ARRAY_LENGTH) {
         fail(REASONS.INVALID_RECORD, "seeds.length tidak sah atau melebihi batas");
     }
     // Bug review independen (audit putaran-44, W7R44-P2-3): `Array.isArray`
@@ -227,7 +234,7 @@ function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 26
     for (let d = 0; d < boundedDepth && nodeIds.size < maxNodes; d++) {
         const next = [];
         for (const id of frontier) {
-            const edges = adjacency(state.relations, id).slice(0, BOUNDS.NEIGHBORS_MAX_FANOUT);
+            const edges = adjacency(state.relations, id).slice(0, bounds.NEIGHBORS_MAX_FANOUT);
             for (const { neighborId } of edges) {
                 if (nodeIds.size >= maxNodes) { truncated = true; break; }
                 if (!nodeIds.has(neighborId)) { nodeIds.add(neighborId); next.push(neighborId); }
@@ -250,7 +257,7 @@ function subgraph(state, seeds = [], depth = 2, budget = { nodes: 512, bytes: 26
     return { ...payload, truncated };
 }
 
-function path(state, from, to, maxDepth = 5) {
+function path(state, from, to, maxDepth = 5, bounds = BOUNDS) {
     // Bug review independen (audit putaran-24, AUD24-P2-5): `maxDepth:
     // null` eksplisit lolos default parameter lalu `Math.min(null, MAX)`
     // = 0, membuat path() diam-diam melapor "tidak ditemukan" (truncated:
@@ -259,7 +266,7 @@ function path(state, from, to, maxDepth = 5) {
     // guard null/non-finite putaran-24, membuat path() diam-diam melapor
     // "tidak ditemukan" walau path sebenarnya ada.
     if (maxDepth === undefined || maxDepth === null || !Number.isFinite(maxDepth) || maxDepth < 0) maxDepth = 5;
-    const boundedDepth = Math.min(maxDepth, BOUNDS.PATH_MAX_DEPTH);
+    const boundedDepth = Math.min(maxDepth, bounds.PATH_MAX_DEPTH);
     if (from === to) return { path: [from], truncated: false };
 
     const visited = new Set([from]);
@@ -269,7 +276,7 @@ function path(state, from, to, maxDepth = 5) {
         const next = [];
         for (const chain of frontier) {
             const tail = chain[chain.length - 1];
-            for (const { neighborId } of adjacency(state.relations, tail).slice(0, BOUNDS.NEIGHBORS_MAX_FANOUT)) {
+            for (const { neighborId } of adjacency(state.relations, tail).slice(0, bounds.NEIGHBORS_MAX_FANOUT)) {
                 if (neighborId === to) return { path: [...chain, neighborId], truncated: false };
                 if (!visited.has(neighborId)) {
                     visited.add(neighborId);
@@ -284,7 +291,7 @@ function path(state, from, to, maxDepth = 5) {
     return { path: null, truncated: true };
 }
 
-function entitiesByKind(state, kind, limit = 256) {
+function entitiesByKind(state, kind, limit = 256, bounds = BOUNDS) {
     // Bug review independen (audit putaran-24, AUD24-P2-5): `limit: null`
     // eksplisit lolos default parameter lalu `Math.min(null, MAX)` = 0,
     // membuat hasil diam-diam kosong DAN truncated:true walau entitas
@@ -297,7 +304,7 @@ function entitiesByKind(state, kind, limit = 256) {
     // batas yang justru mau ditegakkan). Dinormalisasi ke default untuk
     // negatif, DAN batas bawah 0 dipaksakan sebagai jaring pengaman kedua.
     if (limit === undefined || limit === null || !Number.isFinite(limit) || limit < 0) limit = 256;
-    const boundedLimit = Math.max(0, Math.min(limit, BOUNDS.ENTITIES_BY_KIND_LIMIT));
+    const boundedLimit = Math.max(0, Math.min(limit, bounds.ENTITIES_BY_KIND_LIMIT));
     const all = [...state.entities.values()].filter(e => e.entityKind === kind);
     return { entities: all.slice(0, boundedLimit), truncated: all.length > boundedLimit };
 }

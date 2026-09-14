@@ -220,10 +220,13 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
             const distinctPairs = new Set(support.map(s => `${s.sourceId}::${s.evidenceIdentity}`)).size;
             const newestSignalAge = support.length
                 ? now() - Math.max(...support.map(s => s.createdAtMs)) : 0;
+            // Bug review independen (audit putaran-64, Codex, AUD64-P2-1):
+            // `bounds` (sudah disanitasi) diteruskan eksplisit -- sebelumnya
+            // scheduling.js membaca BOUNDS modul TETAP sendiri.
             const effectivePriority = computeEffectivePriority(t, {
                 waitingMs: now() - t.admittedAt, signalAgeMs: newestSignalAge,
                 distinctSourceEvidencePairs: distinctPairs
-            });
+            }, bounds);
             targets.set(id, Object.freeze({ ...t, effectivePriority, lastComputedAtMs: now() }));
         }
     }
@@ -401,7 +404,7 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
     /** Satu keputusan penjadwalan — deterministik untuk (state, nowMs) yang sama (freeze criterion #1). */
     function pick() {
         recomputeAll();
-        const result = pickOne(queuesByClass(), credits, now());
+        const result = pickOne(queuesByClass(), credits, now(), bounds);
         if (!result.target) {
             credits = result.credits;
             return null;
@@ -459,7 +462,7 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
      */
     function peekTopTarget() {
         recomputeAll();
-        const result = pickOne(queuesByClass(), credits, now());
+        const result = pickOne(queuesByClass(), credits, now(), bounds);
         if (!result.target) return null;
         return { targetId: result.target.targetId, workKind: result.target.workKind, priorityClass: result.target.priorityClass };
     }
