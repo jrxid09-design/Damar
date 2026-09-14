@@ -262,8 +262,15 @@ function walkSafe(value, label, depth, stack, budget) {
     }
 
     if (Array.isArray(value)) {
-        if (value.length > ENVELOPE_BOUNDS.GLOBAL_MAX_ARRAY_LENGTH) {
-            rejectMetadata(label, "panjang array melebihi batas");
+        // Bug review independen (audit putaran-42, W7R42-P2-1): `value.length`
+        // dulu dibaca SEKALI untuk cek batas ini, lalu dibaca ULANG di
+        // KONDISI loop di bawah setiap iterasi -- Proxy dengan getter
+        // `length` yang terus bertambah membuat loop TIDAK PERNAH berhenti
+        // (DoS). `length` di-cache SEKALI ke lokal dan divalidasi sebagai
+        // integer terhingga non-negatif SEBELUM dipakai di mana pun.
+        const len = value.length;
+        if (!Number.isInteger(len) || len < 0 || len > ENVELOPE_BOUNDS.GLOBAL_MAX_ARRAY_LENGTH) {
+            rejectMetadata(label, "panjang array melebihi batas atau tidak sah");
         }
         // Bug review independen (audit putaran-2, AUD2-P2-3): cabang array
         // ini `return` sebelum sempat mencapai cek prototype di bawah
@@ -281,7 +288,7 @@ function walkSafe(value, label, depth, stack, budget) {
             // seperti kunci objek di bawah. `for...of`/indexing langsung
             // akan memanggil getter (atau trap `get` Proxy) sebelum sempat
             // ditolak; nilai dibaca dari `desc.value`, tidak pernah `value[i]`.
-            for (let i = 0; i < value.length; i++) {
+            for (let i = 0; i < len; i++) {
                 const desc = Object.getOwnPropertyDescriptor(value, i);
                 if (!desc || desc.get || desc.set) {
                     rejectMetadata(label, `properti accessor pada indeks array ditolak tanpa dipanggil: '${i}'`);

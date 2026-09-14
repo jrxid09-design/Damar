@@ -37,9 +37,21 @@ const DANGEROUS_INTENT_KEYS = Object.freeze(["__proto__", "constructor", "protot
 // memalsukan nilai) membuat loop TIDAK PERNAH berhenti (diukur >5 juta
 // iterasi) -- `.map()` yang digantikan HANYA membaca `length` SEKALI di
 // awal. `length` sekarang di-cache SEKALI ke lokal sebelum loop dimulai.
+// Bug review independen (audit putaran-42, W7R42-P2-2/W7R42-ADV-1): `len`
+// di-cache tapi tidak pernah divalidasi -- Proxy dengan getter `length`
+// yang mengembalikan `Infinity` membuat loop TIDAK PERNAH berhenti (DoS)
+// sekalipun sudah tidak dibaca ulang; `NaN`/negatif diam-diam menghasilkan
+// array kosong (bukan penolakan); pecahan (non-integer) menghasilkan
+// jumlah elemen yang tidak konsisten dengan `Array.prototype.map`'s
+// `ToLength`. `length` sekarang divalidasi sebagai integer terhingga
+// non-negatif dan dibatasi eksplisit sebelum loop dimulai.
+const MAX_SAFE_ARRAY_LENGTH = 65536;
 function buildSafeArray(arr, mapFn) {
-    const out = [];
     const len = arr.length;
+    if (!Number.isInteger(len) || len < 0 || len > MAX_SAFE_ARRAY_LENGTH) {
+        fail(REASONS.INVALID_RECORD, "panjang array tidak sah atau melebihi batas");
+    }
+    const out = [];
     for (let i = 0; i < len; i++) out.push(mapFn(arr[i], i));
     return out;
 }
@@ -107,15 +119,24 @@ function buildSafeIntentTemplate(value, depth = 0, budget) {
         // prospective (MAX_PAYLOAD_ARRAY_LENGTH) dan envelope
         // (GLOBAL_MAX_ARRAY_LENGTH) -- array-like Proxy dengan `length`
         // besar bisa memaksa loop tak terbatas.
-        if (value.length > MAX_INTENT_ARRAY_LENGTH) {
-            fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "panjang array pada intentTemplate melebihi batas");
+        // Bug review independen (audit putaran-42, W7R42-P2-1): `value.length`
+        // dulu dibaca SEKALI untuk cek batas ini, lalu dibaca ULANG di
+        // KONDISI loop di bawah setiap iterasi -- Proxy dengan getter
+        // `length` yang terus bertambah (dipasangkan getter indeks yang
+        // memalsukan nilai) membuat `i` dan `length` naik bersamaan, loop
+        // TIDAK PERNAH berhenti (DoS). `length` di-cache SEKALI ke lokal
+        // dan divalidasi sebagai integer terhingga non-negatif SEBELUM
+        // dipakai di mana pun.
+        const len = value.length;
+        if (!Number.isInteger(len) || len < 0 || len > MAX_INTENT_ARRAY_LENGTH) {
+            fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "panjang array pada intentTemplate melebihi batas atau tidak sah");
         }
         const arrProto = Object.getPrototypeOf(value);
         if (arrProto !== Array.prototype && arrProto !== null) {
             fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, "intentTemplate tidak boleh membawa array dengan prototype non-standar");
         }
         const out = [];
-        for (let i = 0; i < value.length; i++) {
+        for (let i = 0; i < len; i++) {
             const desc = Object.getOwnPropertyDescriptor(value, i);
             if (!desc || desc.get || desc.set) {
                 fail(REASONS.AUTHORITY_SHAPED_FIELD_REJECTED, `intentTemplate tidak boleh membawa properti accessor: '${i}'`);
@@ -349,7 +370,16 @@ function makeCommitment({ commitmentId, goalRef, toWhom, promise, dueCondition, 
 
 function makePlan({ planId, goalRef, version = 1, steps, assumptions = [], createdBy = "SELF" }) {
     if (typeof planId !== "string" || !planId) fail(REASONS.INVALID_RECORD, "planId wajib string");
-    if (!Array.isArray(steps)) fail(REASONS.INVALID_RECORD, "steps wajib array taskId");
+    // Bug review independen (audit putaran-42, W7R42-P2-3): sebuah Proxy
+    // yang sudah di-revoke melempar TypeError MENTAH pada `Array.isArray`
+    // -- dibungkus try/catch supaya kegagalan APA PUN gagal tertutup.
+    let isStepsArray;
+    try {
+        isStepsArray = Array.isArray(steps);
+    } catch {
+        fail(REASONS.INVALID_RECORD, "steps tidak dapat diverifikasi dengan aman, ditolak");
+    }
+    if (!isStepsArray) fail(REASONS.INVALID_RECORD, "steps wajib array taskId");
     // Bug review independen (audit putaran-12, AUD12-P2-2): sapuan BigInt
     // putaran-10/11 hanya menyentuh field yang ditandai auditor -- createdBy
     // tetap diteruskan mentah; BigInt di dalamnya meledakkan JSON.stringify

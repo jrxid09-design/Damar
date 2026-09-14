@@ -369,7 +369,21 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
         if (planId && plans.has(planId)) {
             fail(REASONS.DUPLICATE_RECORD_ID, `planId '${typeof planId === "string" ? planId : typeof planId}' sudah ada`);
         }
-        if ((steps ?? []).length > bounds.MAX_STEPS_PER_PLAN) {
+        // Bug review independen (audit putaran-42, W7R42-P2-3): `steps.length`
+        // dibaca mentah DI SINI, SEBELUM makePlan sempat menjaganya sama
+        // sekali -- Proxy yang di-revoke (atau getter `length` hostile)
+        // melempar TypeError mentah keluar dari API publik ini, bukan
+        // domain error terkendali. Dibungkus try/catch, gagal tertutup.
+        let stepsLenForQuota;
+        try {
+            stepsLenForQuota = (steps ?? []).length;
+        } catch {
+            fail(REASONS.INVALID_RECORD, "steps tidak dapat diverifikasi dengan aman, ditolak");
+        }
+        if (!Number.isInteger(stepsLenForQuota) || stepsLenForQuota < 0) {
+            fail(REASONS.INVALID_RECORD, "steps.length tidak sah");
+        }
+        if (stepsLenForQuota > bounds.MAX_STEPS_PER_PLAN) {
             fail(REASONS.PLAN_STEP_LIMIT_EXCEEDED, "jumlah langkah rencana melebihi batas");
         }
         const p = makePlan({ ...specRest, planId: planId ?? crypto.randomUUID(), steps });

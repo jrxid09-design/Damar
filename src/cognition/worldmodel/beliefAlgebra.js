@@ -73,8 +73,15 @@ function buildSafeBeliefValue(value, depth = 0, stack, budget) {
     }
 
     if (Array.isArray(value)) {
-        if (value.length > BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
-            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array pada value melebihi batas");
+        // Bug review independen (audit putaran-42, W7R42-P2-1): `value.length`
+        // dulu dibaca SEKALI untuk cek batas ini, lalu dibaca ULANG di
+        // KONDISI loop di bawah setiap iterasi -- Proxy dengan getter
+        // `length` yang terus bertambah membuat loop TIDAK PERNAH berhenti
+        // (DoS). `length` di-cache SEKALI ke lokal dan divalidasi sebagai
+        // integer terhingga non-negatif SEBELUM dipakai di mana pun.
+        const len = value.length;
+        if (!Number.isInteger(len) || len < 0 || len > BOUNDS.MAX_VALUE_ARRAY_LENGTH) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array pada value melebihi batas atau tidak sah");
         }
         const arrProto = Object.getPrototypeOf(value);
         if (arrProto !== Array.prototype && arrProto !== null) {
@@ -83,7 +90,7 @@ function buildSafeBeliefValue(value, depth = 0, stack, budget) {
         stack.add(value);
         const out = [];
         try {
-            for (let i = 0; i < value.length; i++) {
+            for (let i = 0; i < len; i++) {
                 const desc = Object.getOwnPropertyDescriptor(value, i);
                 if (!desc || desc.get || desc.set) {
                     fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `value tidak boleh membawa properti accessor: '${i}'`);
