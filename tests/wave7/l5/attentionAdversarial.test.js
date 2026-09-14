@@ -197,6 +197,31 @@ test("AT-repair-31: targetKey reads subjectRef.entityId exactly once (independen
     assert.equal(key, "entity:e1::PERCEIVE");
 });
 
+test("AT-repair-35: a function evidenceRef's toString is never invoked, and two SAME-description Symbols / two SAME-source functions still count as two distinct corroboration pairs (independent audit AUD39-P2-1)", async () => {
+    const ae = await createAttentionEconomy();
+    let called = 0;
+    function fn() {}
+    fn.toString = function () { called++; return "X"; };
+    ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef: { entityId: "e1" }, evidenceRef: fn }, "PERCEIVE");
+    assert.equal(called, 0, "a function evidenceRef's toString must never be invoked (deliberate contract, AT-repair-18/29)");
+
+    const control = await createAttentionEconomy({ clock: manualClock(1000) });
+    const { targetId: tControl } = control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "A" }, "PERCEIVE");
+    control.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: "B" }, "PERCEIVE");
+
+    const sameDescSymbols = await createAttentionEconomy({ clock: manualClock(1000) });
+    const { targetId: tSym } = sameDescSymbols.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: Symbol("x") }, "PERCEIVE");
+    sameDescSymbols.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: Symbol("x") }, "PERCEIVE");
+    assert.equal(sameDescSymbols.getTarget(tSym).effectivePriority, control.getTarget(tControl).effectivePriority,
+        "two distinct Symbol('x') references (same description) must still count as two distinct corroboration pairs");
+
+    const sameSourceFns = await createAttentionEconomy({ clock: manualClock(1000) });
+    const { targetId: tFn } = sameSourceFns.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: () => {} }, "PERCEIVE");
+    sameSourceFns.ingestSignal({ sourceKind: "SENSOR", sourceId: "adapter-1", subjectRef: { entityId: "e1" }, evidenceRef: () => {} }, "PERCEIVE");
+    assert.equal(sameSourceFns.getTarget(tFn).effectivePriority, control.getTarget(tControl).effectivePriority,
+        "two distinct function references with identical source text must still count as two distinct corroboration pairs");
+});
+
 test("AT-repair-34: a BigInt evidenceRef is rejected, and two distinct non-object evidenceRefs (e.g. Symbols) still count as two distinct corroboration pairs (independent audit AUD38-ADV-2)", async () => {
     const ae = await createAttentionEconomy();
     assertThrowsReason(() => ae.ingestSignal({ sourceKind: "SENSOR", sourceId: "s1", subjectRef: { entityId: "e1" }, evidenceRef: 1n }, "PERCEIVE"), "EXECUTABLE_MATERIAL_REJECTED");

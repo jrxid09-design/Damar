@@ -247,13 +247,22 @@ function makeGoal({
     // mentah mengeksekusi toString hostile milik pemanggil (dan meledakkan
     // TypeError mentah untuk Symbol) sebelum sempat disimpan.
     if (typeof title !== "string" || !title) fail(REASONS.INVALID_RECORD, "title wajib string");
-    if (!origin || !ORIGIN_KINDS.has(origin.kind)) fail(REASONS.INVALID_RECORD, "origin.kind tidak dikenal");
+    // Bug review independen (audit putaran-39, AUD39-ADV-1): guard ini dan
+    // keputusan ownerApproval di bawah membaca `origin.kind` lewat [[Get]]
+    // biasa milik pemanggil SEBELUM buildSafeIntentTemplate (descriptor-
+    // based) sempat menyaringnya -- kelas yang sama tepat dengan
+    // AUD34-P2-1..AUD38-P2-1 (subject) yang belum menjangkau `origin` di
+    // builder ini. Disaring SEKALI lebih dulu; `originKind` diturunkan
+    // dari salinan aman itu.
+    const safeOrigin = buildSafeIntentTemplate(origin);
+    const originKind = safeOrigin?.kind;
+    if (!origin || !ORIGIN_KINDS.has(originKind)) fail(REASONS.INVALID_RECORD, "origin.kind tidak dikenal");
     if (!PRIORITY_CLASSES.has(priorityClass)) fail(REASONS.INVALID_RECORD, "priorityClass tidak dikenal");
 
     const condition = validateConditionSpec(successCondition, "successCondition");
 
     let ownerApproval;
-    if (kind === "SELF_PROPOSED" || origin.kind === "AGENT_SUGGESTION") {
+    if (kind === "SELF_PROPOSED" || originKind === "AGENT_SUGGESTION") {
         // G-1/G-2: self-proposal atau saran agen TIDAK PERNAH menyetel approval sendiri.
         ownerApproval = Object.freeze({ state: "REQUIRED", approvalRef: null, grantedAt: null, scope: null });
     } else {
@@ -267,11 +276,10 @@ function makeGoal({
     // BigInt/function/Symbol (dan menolak kunci authority-shaped di origin).
     return Object.freeze({
         goalId, title: title.slice(0, 500), kind,
-        // Bug review independen (audit putaran-37, AUD37-P2-3): sibling dari
-        // makeCommitment's toWhom di berkas yang sama -- `{...origin}`
-        // men-spread SEBELUM diserahkan ke sanitizer berbasis descriptor.
-        // `origin` mentah diserahkan langsung.
-        origin: deepFreeze(buildSafeIntentTemplate(origin)),
+        // Bug review independen (audit putaran-37, AUD37-P2-3; putaran-39,
+        // AUD39-ADV-1): `origin` disaring SEKALI di atas (safeOrigin);
+        // salinan yang SAMA dipakai di sini, tidak disaring dua kali.
+        origin: deepFreeze(safeOrigin),
         ownerApproval,
         state: "PROPOSED",
         priorityClass,

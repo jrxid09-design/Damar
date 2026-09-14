@@ -131,7 +131,9 @@ test("PM-repair-42: an ON_STATE trigger's subject is sanitized via buildSafePayl
     let n = 0;
     const subject = {};
     Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { n++; return "e1"; } });
-    assert.throws(() => pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "ON_STATE", subject, attribute: "status" } }));
+    // Bug review independen (audit putaran-39, AUD39-ADV-2): `assert.throws`
+    // polos tidak memverifikasi ALASAN penolakan -- dipertegas.
+    assertThrowsReason(() => pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger: { kind: "ON_STATE", subject, attribute: "status" } }), "EXECUTABLE_MATERIAL_REJECTED");
     assert.equal(n, 0, "buildSafePayloadRef must reject the accessor via its property descriptor without ever invoking it");
 
     const r = pm.arm({ reminderId: "R2", wakeClass: "NOTIFY_OWNER", trigger: { kind: "ON_STATE", subject: { entityId: "e1" }, attribute: "status" } });
@@ -143,7 +145,9 @@ test("PM-repair-43: an expectation's subject is sanitized via buildSafePayloadRe
     let n = 0;
     const subject = {};
     Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { n++; return "e1"; } });
-    assert.throws(() => pm.armExpectation({ subject, attribute: "status", expectedValue: "done", window: { latestAt: new Date(9e12).toISOString() } }));
+    // Bug review independen (audit putaran-39, AUD39-ADV-2): `assert.throws`
+    // polos tidak memverifikasi ALASAN penolakan -- dipertegas.
+    assertThrowsReason(() => pm.armExpectation({ subject, attribute: "status", expectedValue: "done", window: { latestAt: new Date(9e12).toISOString() } }), "EXECUTABLE_MATERIAL_REJECTED");
     assert.equal(n, 0, "buildSafePayloadRef must reject the accessor via its property descriptor without ever invoking it");
 
     const e = pm.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: "done", window: { latestAt: new Date(9e12).toISOString() } });

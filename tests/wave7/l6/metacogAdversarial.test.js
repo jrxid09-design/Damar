@@ -234,6 +234,12 @@ test("MC-repair-28: recordCalibration's duplicate-recordId check is O(1) (Map-ba
     assert.doesNotThrow(() => mc.recordCalibration({ recordId: "C0", predictionRef: "p", predictedValue: 1, predictedConfidence: 0.9, outcomeTier: "T1", outcomeRef: "o0c", outcomeValue: 1, outcomeCorrect: true }), "C0 must have been evicted (FIFO) once retention overflowed, so its id is reusable");
 });
 
+test("MC-repair-29: openReview rejects sparse (hole-bearing) findings/proposals arrays, not just explicit null/undefined elements (independent audit AUD39-P2-2)", async () => {
+    const mc = await createMetacognition();
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, findings: new Array(2), proposals: [], cost: { tokens: 0, ms: 0 } }), "INVALID_RECORD");
+    assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e2" }, findings: [], proposals: new Array(2), cost: { tokens: 0, ms: 0 } }), "INVALID_RECORD");
+});
+
 test("MC-repair-26: makeReview's cost guard and stored cost come from the same captured local, not independent reads (independent audit AUD35-ADV-3)", async () => {
     const { makeReview } = require("../../../src/cognition/metacog/records");
     let n = 0;

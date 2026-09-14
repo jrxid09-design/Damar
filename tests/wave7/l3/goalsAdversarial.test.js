@@ -689,7 +689,12 @@ test("GL-repair-52: validateConditionSpec's subject is sanitized via buildSafeIn
     let n = 0;
     const subject = {};
     Object.defineProperty(subject, "entityId", { enumerable: true, configurable: true, get() { n++; return "e1"; } });
-    assert.throws(() => ge.proposeGoal(baseGoalSpec({ successCondition: { kind: "WORLD_BELIEF", subject, attribute: "status", expectedValue: "done" } })));
+    // Bug review independen (audit putaran-39, AUD39-ADV-2): perbaikan
+    // putaran-38 memakai `assert.throws` polos di sini (bukan
+    // assertThrowsReason), jadi tidak pernah memverifikasi ALASAN
+    // penolakan -- hanya `n===0` yang benar-benar menegakkan invarian.
+    // Dipertegas untuk memverifikasi keduanya.
+    assertThrowsReason(() => ge.proposeGoal(baseGoalSpec({ successCondition: { kind: "WORLD_BELIEF", subject, attribute: "status", expectedValue: "done" } })), "AUTHORITY_SHAPED_FIELD_REJECTED");
     assert.equal(n, 0, "buildSafeIntentTemplate must reject the accessor via its property descriptor without ever invoking it");
 
     const goal = ge.proposeGoal(baseGoalSpec({ successCondition: { kind: "WORLD_BELIEF", subject: { entityId: "e1" }, attribute: "status", expectedValue: "done" } }));
@@ -712,6 +717,19 @@ test("GL-repair-54: a non-string, falsy parentGoalId (e.g. 0n) is rejected, not 
     const ge = await createGoalEngine({ store });
     assertThrowsReason(() => ge.proposeGoal(baseGoalSpec({ goalId: "G", parentGoalId: 0n })), "INVALID_RECORD");
     await assert.doesNotReject(() => ge.persist());
+});
+
+test("GL-repair-57: makeGoal sanitizes origin via buildSafeIntentTemplate before reading origin.kind (ORIGIN_KINDS guard and ownerApproval decision), so a hostile origin.kind accessor is rejected without ever being invoked (independent audit AUD39-ADV-1)", async () => {
+    const { makeGoal } = require("../../../src/cognition/goals/records");
+    let n = 0;
+    const origin = {};
+    Object.defineProperty(origin, "kind", { enumerable: true, configurable: true, get() { n++; return "OWNER"; } });
+    assertThrowsReason(() => makeGoal({
+        goalId: "g1", title: "t", kind: "OWNER_ASSIGNED", origin,
+        successCondition: { kind: "WORLD_BELIEF", subject: { entityId: "e1" }, attribute: "a", expectedValue: 1 },
+        nowIso: new Date(0).toISOString()
+    }), "AUTHORITY_SHAPED_FIELD_REJECTED");
+    assert.equal(n, 0, "buildSafeIntentTemplate must reject the accessor via its property descriptor without ever invoking it");
 });
 
 test("GL-repair-56: createCommitment's toWhom (and proposeGoal's origin) are passed to the sanitizer without a pre-spread, so a hostile accessor is rejected without being invoked (independent audit AUD37-P2-3)", async () => {
