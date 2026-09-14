@@ -198,6 +198,16 @@ test("SM-repair-12: a Symbol generation is rejected as INVALID_OBSERVATION, not 
     }), "INVALID_OBSERVATION");
 });
 
+test("SM-repair-13: a Symbol/hostile-object observedAtMs never throws and never invokes caller valueOf, falling back safely like other invalid values (independent audit AUD28-P2-1)", async () => {
+    const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
+    const sm = await createSelfModel({ capabilityRegistry: registry });
+    assert.doesNotThrow(() => sm.ingestAvailability({ capabilityId: "cap.x", availability: "AVAILABLE", generation: 1, observedAtMs: Symbol("t") }));
+    let called = 0;
+    const evil = { valueOf() { called++; return 1; } };
+    sm.ingestAvailability({ capabilityId: "cap.x", availability: "AVAILABLE", generation: 2, observedAtMs: evil });
+    assert.equal(called, 0, "observedAtMs's valueOf must never be invoked");
+});
+
 test("SM-A2: stale availability is marked STALE after TTL, never silently USABLE", async () => {
     const registry = fakeRegistry({ "cap.x": { kind: "tool" } });
     const clock = manualClock(0);

@@ -144,6 +144,15 @@ test("AT-repair-25: a replayed signalId is not counted twice (independent audit 
     assert.equal(ae.supportingSignalCount(r.targetId), 1, "a replayed signalId must not add a second support entry");
 });
 
+test("AT-repair-26: a Symbol/hostile-object proposedUrgency is rejected as INVALID_RECORD, not a raw TypeError, and never invokes caller valueOf (independent audit AUD28-P2-2)", async () => {
+    const ae = await createAttentionEconomy();
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "AGENT", sourceId: "s", subjectRef: { entityId: "e" }, proposedUrgency: Symbol("u") }, "REASON"), "INVALID_RECORD");
+    let called = 0;
+    const evil = { valueOf() { called++; return 0.5; } };
+    assertThrowsReason(() => ae.ingestSignal({ sourceKind: "AGENT", sourceId: "s", subjectRef: { entityId: "e" }, proposedUrgency: evil }, "REASON"), "INVALID_RECORD");
+    assert.equal(called, 0, "proposedUrgency's valueOf must never be invoked before the type check");
+});
+
 test("AT-A1: salience flooding from one sensor is rate-capped and the source marked noisy", async () => {
     const ae = await createAttentionEconomy({ bounds: { ...BOUNDS, MAX_SIGNALS_PER_SOURCE_PER_MINUTE: 3 } });
     for (let i = 0; i < 3; i++) {

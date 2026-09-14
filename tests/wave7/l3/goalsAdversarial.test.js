@@ -619,6 +619,17 @@ test("GL-repair-44: a Symbol parentGoalId is rejected as INVALID_RECORD, not a r
     });
 });
 
+test("GL-repair-45: a hostile toString on title/promise is never invoked, and rejected as INVALID_RECORD (independent audit AUD28-P2-7)", async () => {
+    const ge = await createGoalEngine();
+    let called = 0;
+    const evil = { toString() { called++; return "t"; } };
+    assertThrowsReason(() => ge.proposeGoal(baseGoalSpec({ title: evil })), "INVALID_RECORD");
+    assert.equal(called, 0, "title's toString must never be invoked");
+    const g = ge.proposeGoal(baseGoalSpec());
+    assertThrowsReason(() => ge.createCommitment({ goalRef: g.goalId, toWhom: { ref: "o" }, promise: evil, dueCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" } }), "INVALID_RECORD");
+    assert.equal(called, 0, "promise's toString must never be invoked");
+});
+
 function jsonStore() {
     const kv = new Map();
     return {

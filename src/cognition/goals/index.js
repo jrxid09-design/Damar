@@ -102,7 +102,12 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
 
             const siblingCount = childCounts.get(spec.parentGoalId) ?? 0;
             if (siblingCount >= bounds.MAX_CHILDREN_PER_GOAL) {
-                fail(REASONS.CHILDREN_LIMIT_EXCEEDED, `induk '${spec.parentGoalId}' melebihi batas anak`);
+                // Bug review independen (audit putaran-28, AUD28-ADV-3):
+                // interpolasi `${spec.parentGoalId}` mentah -- latent (baris
+                // 94/98 di atas sudah mewajibkan parentGoalId cocok kunci
+                // goals.get() bertipe string), tapi tetap disamakan dengan
+                // sibling di baris yang sama untuk konsistensi.
+                fail(REASONS.CHILDREN_LIMIT_EXCEEDED, `induk '${typeof spec.parentGoalId === "string" ? spec.parentGoalId : typeof spec.parentGoalId}' melebihi batas anak`);
             }
         }
         if (depth > bounds.MAX_GOAL_DEPTH) {

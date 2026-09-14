@@ -180,7 +180,14 @@ async function createSelfModel({
         // Bug review independen (Codex putaran-5): observedAtMs masa depan
         // membuat (nowMs - observedAtMs) negatif, melewati cek staleness
         // dengan berpura-pura selalu "baru saja diamati".
-        const observedAt = Number.isFinite(Number(observedAtMs)) ? Number(observedAtMs) : now();
+        // Bug review independen (audit putaran-28, AUD28-P2-1): sibling
+        // `generation` di fungsi yang sama dijaga putaran-27 -- `observedAtMs`
+        // dua baris di bawahnya masih memanggil `Number(observedAtMs)`
+        // mentah, meledakkan TypeError untuk Symbol dan mengeksekusi
+        // valueOf hostile untuk objek, SEBELUM sempat jatuh ke fallback now().
+        const observedAtNumeric = (typeof observedAtMs === "number" || typeof observedAtMs === "string" || typeof observedAtMs === "boolean")
+            ? Number(observedAtMs) : NaN;
+        const observedAt = Number.isFinite(observedAtNumeric) ? observedAtNumeric : now();
         if (observedAt > now() + bounds.MAX_FUTURE_SKEW_MS) {
             fail(REASONS.INVALID_OBSERVATION, "observedAtMs tidak boleh di masa depan (di luar toleransi skew jam)");
         }

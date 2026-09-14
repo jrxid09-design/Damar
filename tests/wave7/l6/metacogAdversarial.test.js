@@ -86,6 +86,22 @@ test("MC-repair-12: a Symbol evidenceQuality field fails safe to NO_EVIDENCE-sha
     assert.equal(a.basis, "NO_EVIDENCE");
 });
 
+test("MC-repair-13: a stateful getter evidenceQuality field (valid on first read, Symbol on later reads) never throws inside assess() (independent audit AUD28-P2-5)", async () => {
+    const mc = await createMetacognition();
+    let n = 0;
+    const eq = {};
+    Object.defineProperty(eq, "sourceCount", { enumerable: true, get() { n++; return n === 1 ? 3 : Symbol("boom"); } });
+    assert.doesNotThrow(() => mc.assess({ entityId: "e" }, "c", eq));
+});
+
+test("MC-repair-14: a stateful getter subjectRef.entityId (valid on first read, Symbol on later reads) never throws inside openReview() (independent audit AUD28-P2-6)", async () => {
+    const mc = await createMetacognition();
+    let n = 0;
+    const sr = {};
+    Object.defineProperty(sr, "entityId", { enumerable: true, get() { n++; return n === 1 ? "e" : Symbol("boom"); } });
+    assert.doesNotThrow(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: sr }));
+});
+
 test("MC-A1: fake confidence (model writes 0.99) is impossible — no API accepts a raw value", async () => {
     const mc = await createMetacognition();
     const a = mc.assess({ entityId: "e1" }, "claim", { value: 0.99, sourceCount: 0 }); // "value" in input ignored

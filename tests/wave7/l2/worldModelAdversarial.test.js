@@ -637,6 +637,41 @@ test("WM-repair-50: an explicit negative depth/limit does not silently disable o
     assert.ok(r.entities.length <= BOUNDS.ENTITIES_BY_KIND_LIMIT, `entitiesByKind with a negative limit must never return more than ENTITIES_BY_KIND_LIMIT (got ${r.entities.length})`);
 });
 
+test("WM-repair-51: a Symbol strength/weight is rejected as INVALID_RECORD, not a raw TypeError (independent audit AUD28-P2-3)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    assertThrowsReason(() => wm.declareRelation({ relationId: "r1", kind: "k", from: "e1", to: "e2", strength: Symbol("s") }), "INVALID_RECORD");
+    assertThrowsReason(() => wm.declareHypothesis({
+        hypothesisId: "h1", subject: { entityId: "e1" }, attribute: "cfg",
+        candidateValues: [{ value: "v1", weight: Symbol("w") }], expiresAt: new Date(Date.now() + 60_000).toISOString()
+    }), "INVALID_RECORD");
+});
+
+test("WM-repair-52: a Symbol/hostile-object maxStalenessMs in query() never throws and never invokes caller valueOf (independent audit AUD28-P2-4)", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm.ingestObservation({ subject: { entityId: "e1" }, attribute: "status", value: "on", sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() });
+    assert.doesNotThrow(() => wm.query({ subject: { entityId: "e1" }, attribute: "status", maxStalenessMs: Symbol("m") }));
+    let called = 0;
+    const evil = { valueOf() { called++; return 1000; } };
+    wm.query({ subject: { entityId: "e1" }, attribute: "status", maxStalenessMs: evil });
+    assert.equal(called, 0, "maxStalenessMs's valueOf must never be invoked");
+});
+
+test("WM-repair-53: hostile toString on entity labels/externalRefs/relation kind/observation sensor/frame fields never executes (independent audit AUD28-P2-7)", async () => {
+    const wm = await createWorldModel();
+    let called = 0;
+    const evil = { toString() { called++; return "x"; } };
+    wm.declareEntity({ entityId: "e1", entityKind: "device", source: "s", labels: { l: evil } });
+    assert.equal(called, 0, "a hostile label value's toString must never be invoked");
+    wm.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    assertThrowsReason(() => wm.declareRelation({ relationId: "r1", kind: evil, from: "e1", to: "e2" }), "INVALID_RECORD");
+    assert.equal(called, 0, "a hostile relation kind's toString must never be invoked");
+    assertThrowsReason(() => wm.declareEntity({ entityId: "e3", entityKind: "device", source: "s", externalRefs: [{ system: evil, id: "i" }] }), "INVALID_RECORD");
+    assert.equal(called, 0, "a hostile externalRefs.system's toString must never be invoked");
+});
+
 test("WM-repair-38: entity eviction stays fast at scale -- relationDegree() must not rescan all relations per candidate (independent audit AUD20-P2-3)", async () => {
     const ENTITY_COUNT = 3000;
     const wm = await createWorldModel({ bounds: { ...BOUNDS, MAX_ENTITIES: ENTITY_COUNT, MAX_ENTITIES_PER_SOURCE: ENTITY_COUNT + 500, MAX_RELATIONS: ENTITY_COUNT * 4 } });

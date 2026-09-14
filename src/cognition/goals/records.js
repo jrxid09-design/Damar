@@ -198,6 +198,10 @@ function makeGoal({
     // pemanggil kalau berupa objek) -- diganti representasi aman (typeof
     // untuk non-string, nilai asli untuk string).
     if (!GOAL_KINDS.has(kind)) fail(REASONS.INVALID_RECORD, `kind '${typeof kind === "string" ? kind : typeof kind}' tidak dikenal`);
+    // Bug review independen (audit putaran-28, AUD28-P2-7): `String(title)`
+    // mentah mengeksekusi toString hostile milik pemanggil (dan meledakkan
+    // TypeError mentah untuk Symbol) sebelum sempat disimpan.
+    if (typeof title !== "string" || !title) fail(REASONS.INVALID_RECORD, "title wajib string");
     if (!origin || !ORIGIN_KINDS.has(origin.kind)) fail(REASONS.INVALID_RECORD, "origin.kind tidak dikenal");
     if (!PRIORITY_CLASSES.has(priorityClass)) fail(REASONS.INVALID_RECORD, "priorityClass tidak dikenal");
 
@@ -217,7 +221,7 @@ function makeGoal({
     // saveSnapshot() saat persist(). buildSafeIntentTemplate menyaring
     // BigInt/function/Symbol (dan menolak kunci authority-shaped di origin).
     return Object.freeze({
-        goalId, title: String(title).slice(0, 500), kind,
+        goalId, title: title.slice(0, 500), kind,
         origin: deepFreeze(buildSafeIntentTemplate({ ...origin })),
         ownerApproval,
         state: "PROPOSED",
@@ -244,10 +248,13 @@ function makeGoal({
 function makeCommitment({ commitmentId, goalRef, toWhom, promise, dueCondition, missedPolicy = "NOTIFY" }) {
     if (typeof commitmentId !== "string" || !commitmentId) fail(REASONS.INVALID_RECORD, "commitmentId wajib string");
     if (typeof goalRef !== "string" || !goalRef) fail(REASONS.INVALID_RECORD, "goalRef wajib string");
+    // Bug review independen (audit putaran-28, AUD28-P2-7): `String(promise)`
+    // mentah mengeksekusi toString hostile milik pemanggil.
+    if (typeof promise !== "string" || !promise) fail(REASONS.INVALID_RECORD, "promise wajib string");
     return Object.freeze({
         commitmentId, goalRef,
         toWhom: deepFreeze(buildSafeIntentTemplate({ ...toWhom })),
-        promise: String(promise).slice(0, 500),
+        promise: promise.slice(0, 500),
         dueCondition: validateConditionSpec(dueCondition, "dueCondition"),
         state: "OPEN", evidenceRef: null,
         missedPolicy: ["NOTIFY", "ESCALATE", "SILENT_RECORD"].includes(missedPolicy) ? missedPolicy : "NOTIFY"

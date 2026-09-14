@@ -28,6 +28,12 @@ function makeSignal({ signalId, sourceKind, sourceId, subjectRef, proposedUrgenc
     // `${sourceKind}` mentah meledakkan TypeError untuk Symbol.
     if (!SOURCE_KINDS.has(sourceKind)) fail(REASONS.INVALID_RECORD, `sourceKind '${typeof sourceKind === "string" ? sourceKind : typeof sourceKind}' tidak dikenal`);
     if (typeof sourceId !== "string" || !sourceId) fail(REASONS.INVALID_RECORD, "sourceId wajib string");
+    // Bug review independen (audit putaran-28, AUD28-P2-2): `Number(proposedUrgency)`
+    // meledakkan TypeError mentah untuk Symbol dan mengeksekusi valueOf
+    // hostile untuk objek, SEBELUM clamp01 sempat menormalkannya.
+    if (typeof proposedUrgency !== "number" && typeof proposedUrgency !== "string" && typeof proposedUrgency !== "boolean") {
+        fail(REASONS.INVALID_RECORD, "proposedUrgency wajib angka");
+    }
 
     return Object.freeze({
         signalId, sourceKind, sourceId,

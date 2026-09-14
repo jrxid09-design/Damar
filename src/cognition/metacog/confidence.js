@@ -50,11 +50,24 @@ function determineBasis(evidenceQuality, nowMs) {
 /** MC-1/MC-2: fungsi murni, deterministik, dan satu-satunya penulis value. */
 function computeConfidence(evidenceQuality, nowMs) {
     const basis = determineBasis(evidenceQuality, nowMs);
+    // Bug review independen (audit putaran-28, AUD28-P2-5): putaran-27
+    // menyaring sourceCount/verifiedCount di DALAM determineBasis, tapi
+    // computeConfidence MEMBACA ULANG evidenceQuality.verifiedCount/
+    // sourceCount mentah di sini -- sebuah getter/Proxy stateful yang
+    // mengembalikan nilai valid pada baca pertama (dipakai determineBasis
+    // untuk memilih basis) lalu Symbol pada baca KEDUA (di sini) tetap
+    // meledakkan TypeError, meniadakan jaminan "single read" yang justru
+    // ingin ditutup. Disaring ulang dengan predikat aman yang SAMA di sini,
+    // bukan membaca ulang raw evidenceQuality.
+    const raw2 = evidenceQuality || {};
+    const safeNumber = (v) => (typeof v === "number" && Number.isFinite(v)) ? v : 0;
+    const safeVerifiedCount = safeNumber(raw2.verifiedCount);
+    const safeSourceCount = safeNumber(raw2.sourceCount);
 
     let raw;
     switch (basis) {
-        case "VERIFIED_EVIDENCE": raw = 0.85 + 0.03 * Math.min(evidenceQuality.verifiedCount, 5); break;
-        case "MULTI_SOURCE": raw = 0.55 + 0.05 * Math.min(evidenceQuality.sourceCount, 6); break;
+        case "VERIFIED_EVIDENCE": raw = 0.85 + 0.03 * Math.min(safeVerifiedCount, 5); break;
+        case "MULTI_SOURCE": raw = 0.55 + 0.05 * Math.min(safeSourceCount, 6); break;
         case "SINGLE_SOURCE": raw = 0.45; break;
         case "STALE_SOURCE": raw = 0.25; break;
         case "INFERENCE_ONLY": raw = 0.30; break; // MC-A7: repetisi tidak menambah sumber, ceiling tetap rendah
