@@ -64,5 +64,6 @@ module.exports = {
     ExperienceEncoder: require("./autobiography/ExperienceEncoder"),
     SubstrateRouter: require("./substrate/SubstrateRouter"),
     InteroceptiveBus: require("./interoception/InteroceptiveBus"),
-    FoundationAdapter: require("./integration/FoundationEventAdapter")
+    FoundationAdapter: require("./integration/FoundationEventAdapter"),
+    governed: require("./governed")
 };

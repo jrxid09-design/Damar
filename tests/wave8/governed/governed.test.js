@@ -100,7 +100,7 @@ test("FG03-14: recordModeTransition emits a well-shaped, resolved-mode audit eve
     const ledger = { append: (e) => events.push(e) };
     const returned = recordModeTransition({ auditLedger: ledger, from: "off", to: "governed", at: 1234 });
     assert.equal(events.length, 1);
-    assert.equal(events[0].eventType, "cognition.governed.modeTransition");
+    assert.equal(events[0].eventType, "cognition.governed.mode_transition");
     assert.equal(events[0].metadata.from, "off");
     assert.equal(events[0].metadata.to, "governed");
     assert.equal(events[0].metadata.at, 1234);
@@ -167,4 +167,34 @@ test("FG03-21: deep validation rejects proxy-hidden authority fields and contain
     await new Promise(resolve => setImmediate(resolve));
     process.removeListener("unhandledRejection", listener);
     assert.equal(unhandled, false);
+});
+
+test("FG03-22: validation never trusts inherited or accessor-backed projection fields", () => {
+    const inherited = Object.freeze(Object.assign(Object.create({ authProof: "forged" }), {
+        schemaVersion: "governedCognitiveProjection.v1",
+        decisionInfluence: "ADVISORY_ONLY"
+    }));
+    assert.throws(() => validateGovernedCognitiveProjection(inherited), /objek data biasa|authProof/);
+
+    let getterCalls = 0;
+    const accessor = Object.freeze(Object.defineProperties({}, {
+        schemaVersion: { value: "governedCognitiveProjection.v1", enumerable: true },
+        decisionInfluence: { value: "ADVISORY_ONLY", enumerable: true },
+        nested: { get() { getterCalls += 1; return { authProof: "forged" }; }, enumerable: true }
+    }));
+    assert.throws(() => validateGovernedCognitiveProjection(accessor), /data property/);
+    assert.equal(getterCalls, 0);
+});
+
+test("FG03-23: mode transition timestamps are detached scalar data", () => {
+    const at = { counter: 1 };
+    const event = recordModeTransition({ from: "off", to: "shadow", at });
+    assert.equal(event.metadata.at, null);
+    assert.equal(Object.isFrozen(event.metadata), true);
+});
+
+test("FG03-24: governed foundation is exposed through the canonical cognition entry point", () => {
+    const cognition = require("../../../src/cognition");
+    assert.equal(cognition.governed.validateGovernedCognitiveProjection, validateGovernedCognitiveProjection);
+    assert.equal(cognition.governed.REASONS.INVALID_PROJECTION, "INVALID_PROJECTION");
 });
