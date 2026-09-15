@@ -53,9 +53,12 @@ const AUTHORITY_SHAPED_KEYS = Object.freeze([
 const MAX_PROJECTION_DEPTH = 16;
 const MAX_PROJECTION_NODES = 4096;
 
-function walkForAuthorityShapedFields(value, label, seen, budget, depth) {
+function walkForAuthorityShapedFields(value, label, seen, budget, depth, requireFrozen = false) {
     if (!value || typeof value !== "object") return;
     if (seen.has(value)) return;
+    if (requireFrozen && !Object.isFrozen(value)) {
+        throw new Error(`ACC governed: ${label} wajib dibekukan secara mendalam`);
+    }
     seen.add(value);
     if (depth > MAX_PROJECTION_DEPTH) {
         throw new Error(`ACC governed: ${label} terlalu dalam untuk diverifikasi dengan aman`);
@@ -70,7 +73,7 @@ function walkForAuthorityShapedFields(value, label, seen, budget, depth) {
         }
     }
     for (const key of Reflect.ownKeys(value)) {
-        walkForAuthorityShapedFields(value[key], `${label}.${String(key)}`, seen, budget, depth + 1);
+        walkForAuthorityShapedFields(value[key], `${label}.${String(key)}`, seen, budget, depth + 1, requireFrozen);
     }
 }
 
@@ -82,7 +85,7 @@ function walkForAuthorityShapedFields(value, label, seen, budget, depth) {
  * past whatever depth the ORIGINAL producer happened to nest fields at.
  */
 function assertNoAuthorityShapedFields(value, label) {
-    walkForAuthorityShapedFields(value, label, new WeakSet(), { count: 0 }, 0);
+    walkForAuthorityShapedFields(value, label, new WeakSet(), { count: 0 }, 0, false);
 }
 
 /**
@@ -130,7 +133,7 @@ function validateGovernedCognitiveProjection(projection) {
     if (!Object.isFrozen(projection)) {
         throw new Error("ACC governed: proyeksi wajib dibekukan");
     }
-    assertNoAuthorityShapedFields(projection, "GovernedCognitiveProjection");
+    walkForAuthorityShapedFields(projection, "GovernedCognitiveProjection", new WeakSet(), { count: 0 }, 0, true);
     return true;
 }
 
@@ -151,7 +154,11 @@ function recordModeTransition({ auditLedger, from, to, at }) {
     });
     try {
         if (auditLedger && typeof auditLedger.append === "function") {
-            auditLedger.append(event);
+            const result = auditLedger.append(event);
+            if (result && (typeof result === "object" || typeof result === "function")
+                && typeof result.then === "function") {
+                Promise.resolve(result).catch(() => {});
+            }
         }
     } catch { /* audit failure never blocks cognition */ }
     return event;
