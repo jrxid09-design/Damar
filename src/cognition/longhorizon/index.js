@@ -30,7 +30,7 @@
  *               untouched by this integration pass (see freeze evidence).
  */
 
-const { MODES, BOUNDS } = require("./bounds");
+const { BOUNDS } = require("./bounds");
 const { laws } = require("./laws");
 const { createSelfModel } = require("../selfmodel");
 const { createWorldModel } = require("../worldmodel");
@@ -38,29 +38,23 @@ const { createGoalEngine } = require("../goals");
 const { createProspectiveMemory } = require("../prospective");
 const { createAttentionEconomy } = require("../attention");
 const { createMetacognition } = require("../metacog");
-
-const AUTHORITY_SHAPED_KEYS = Object.freeze([
-    "authorityDecision", "allow", "grant", "owner", "authProof",
-    "capabilityGrant", "executionLease", "executor", "route", "trustedNode", "rootAuthority"
-]);
+// FG-03: MODES/AUTHORITY_SHAPED_KEYS/assertNoAuthorityShapedFields/
+// resolveMode/isInfluenceAllowed now live in src/cognition/governed/**
+// (the canonical, reusable governed-mode foundation) -- longhorizon was
+// their first producer and is now just their first consumer, so no
+// behavior changes here, only the ownership of these guarantees.
+const {
+    AUTHORITY_SHAPED_KEYS, assertNoAuthorityShapedFields, resolveMode, isInfluenceAllowed
+} = require("../governed");
 
 const BELIEF_RANK = Object.freeze({ USABLE: 3, DEGRADED: 2, UNUSABLE: 1, UNKNOWN: 0 });
-
-function assertNoAuthorityShapedFields(value, label) {
-    if (!value || typeof value !== "object") return;
-    for (const key of AUTHORITY_SHAPED_KEYS) {
-        if (Object.prototype.hasOwnProperty.call(value, key)) {
-            throw new Error(`ACC longhorizon: ${label} tidak boleh membawa field '${key}'`);
-        }
-    }
-}
 
 async function createLongHorizonCycle({
     mode = "off", capabilityRegistry, clock = { nowMs: () => Date.now() },
     stores = {}, auditLedger = null, bounds = BOUNDS
 } = {}) {
 
-    if (!MODES.includes(mode)) mode = "off";
+    mode = resolveMode(mode);
 
     if (mode === "off") {
         // GATE-W7-10: OFF => nothing is even constructed. Zero footprint.
@@ -214,7 +208,7 @@ async function createLongHorizonCycle({
         const contradictions = worldModel.openContradictions();
 
         const result = {
-            mode, decisionInfluence: mode === "shadow" ? false : "ADVISORY_ONLY",
+            mode, decisionInfluence: isInfluenceAllowed(mode) ? "ADVISORY_ONLY" : false,
             auditEvents, remindersFired: reminders.length, openContradictions: contradictions.length
         };
 
