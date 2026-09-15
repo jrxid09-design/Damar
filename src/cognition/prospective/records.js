@@ -59,7 +59,7 @@ function validateTrigger(trigger, bounds = BOUNDS) {
     // destructuring bernama berjalan di atas salinan aman itu.
     let safeTrigger;
     if (trigger === null || trigger === undefined) {
-        safeTrigger = {};
+        safeTrigger = Object.create(null);
     } else if (typeof trigger !== "object") {
         fail(REASONS.INVALID_TRIGGER, "trigger tidak dapat diverifikasi dengan aman, ditolak");
     } else {
@@ -69,7 +69,7 @@ function validateTrigger(trigger, bounds = BOUNDS) {
         } catch {
             fail(REASONS.INVALID_TRIGGER, "trigger tidak dapat diverifikasi dengan aman, ditolak");
         }
-        safeTrigger = {};
+        safeTrigger = Object.create(null);
         for (const key of keys) {
             let desc;
             try {
@@ -401,12 +401,21 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
     // Bug review independen (audit putaran-45, W7R45-P2-6): `window` adalah
     // nilai bersarang milik pemanggil -- `?? {}` hanya melindungi
     // null/undefined, bukan Proxy yang di-revoke (tetap truthy).
-    let latestAt, earliestAt, windowRest;
+    // Bug review independen (audit putaran-68, AUD68-P2-2): destructuring
+    // `window` mentah lewat rest-spread (`...windowRest`) membaca SETIAP
+    // properti window lewat [[Get]] biasa SEBELUM buildSafePayloadRef
+    // (descriptor-based) sempat memprosesnya -- getter `extra` tereksekusi
+    // walau nilainya nanti ditolak sanitizer. window disaring SEKALI lebih
+    // dulu lewat buildSafePayloadRef; latestAt/earliestAt/sisanya semua
+    // diturunkan dari salinan aman itu, bukan dari `window` mentah.
+    let safeWindow;
     try {
-        ({ latestAt, earliestAt, ...windowRest } = window ?? {});
-    } catch {
+        safeWindow = buildSafePayloadRef(window, 0, undefined, bounds) ?? {};
+    } catch (err) {
+        if (err instanceof ProspectiveError) throw err;
         fail(REASONS.NO_LATEST_AT, "window tidak dapat diverifikasi dengan aman, ditolak");
     }
+    const { latestAt, earliestAt } = safeWindow;
     if (typeof latestAt !== "string" || !Number.isFinite(Date.parse(latestAt))) {
         // PM-5: ekspektasi tanpa latestAt YANG SAH ditolak. Bug diketemukan
         // review independen (Codex, putaran ke-4): string tak-tanggal lolos
@@ -467,7 +476,7 @@ function makeExpectation({ expectationId, subject, attribute, expectedValue, win
     return Object.freeze({
         expectationId, subject: deepFreeze(safeSubject), attribute,
         expectedValue: deepFreeze(buildSafePayloadRef(expectedValue, 0, undefined, bounds)),
-        window: deepFreeze(buildSafePayloadRef({ ...windowRest, latestAt, earliestAt }, 0, undefined, bounds)),
+        window: deepFreeze(safeWindow),
         onSatisfied, onViolated, state: "PENDING"
     });
 }
