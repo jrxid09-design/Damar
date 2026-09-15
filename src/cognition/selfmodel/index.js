@@ -80,6 +80,34 @@ async function createSelfModel({
             successWindows.delete(oldestKey);
         }
     }
+    // Bug review independen (audit putaran-73, Codex, AUD73-P2-2): round
+    // 72's kompaksi hanya menangani jumlah RECORD (top-level Map), bukan
+    // field bertingkat berbatas DI DALAM satu record -- successWindow.
+    // history/appliedEvidenceRefs dipangkas hanya saat ingestOutcome
+    // BERIKUTNYA (sama seperti kelas AUD72-P2-1: normalisasi per-insert,
+    // tidak pernah berjalan sekali pun antara restart dan panggilan
+    // berikutnya). Dinormalisasi ulang di sini ke bound AKTIF, memakai
+    // kebijakan FIFO (.slice(-bound)) yang sama seperti ingestOutcome;
+    // attempts/successes dihitung ulang dari history yang sudah dipangkas
+    // supaya tetap konsisten (sama seperti ingestOutcome sendiri).
+    {
+        const maxHistory = Math.max(0, Math.trunc(bounds.MAX_SUCCESS_WINDOW));
+        const maxAppliedRefs = Math.max(0, Math.trunc(bounds.MAX_APPLIED_EVIDENCE_REFS));
+        for (const [capabilityId, window] of successWindows) {
+            const rawHistory = window.history ?? [];
+            const rawAppliedRefs = window.appliedEvidenceRefs ?? [];
+            const history = maxHistory === 0 ? [] : rawHistory.slice(-maxHistory);
+            const appliedEvidenceRefs = maxAppliedRefs === 0 ? [] : rawAppliedRefs.slice(-maxAppliedRefs);
+            if (history.length === rawHistory.length && appliedEvidenceRefs.length === rawAppliedRefs.length) continue;
+            successWindows.set(capabilityId, Object.freeze({
+                attempts: history.length,
+                successes: history.filter(h => h.outcome === "SUCCESS").length,
+                windowStartedAt: window.windowStartedAt,
+                history: Object.freeze(history),
+                appliedEvidenceRefs: Object.freeze(appliedEvidenceRefs)
+            }));
+        }
+    }
     let unknownsList = [];
     let limitationsList = [];
     let degradedSubsystems = [];           // [{subsystem, state, at}]
