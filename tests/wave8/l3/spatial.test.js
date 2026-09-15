@@ -4,6 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 
 const { createSpatialModel, BOUNDS } = require("../../../src/cognition/spatial");
+const { buildSafeSpatialValue, makeSceneNode } = require("../../../src/cognition/spatial/records");
 
 function assertThrowsReason(fn, reason) {
     assert.throws(fn, (err) => {
@@ -24,6 +25,18 @@ function manualClock(startMs) {
     let t = startMs;
     return { nowMs: () => t, advance: (ms) => { t += ms; } };
 }
+
+test("L3-24: spatial sanitizers reject proxy length and accessor-backed observation references without invoking them", () => {
+    let lengthReads = 0;
+    const proxy = new Proxy([], { get(target, key, receiver) { if (key === "length") lengthReads++; return Reflect.get(target, key, receiver); } });
+    assert.deepEqual(buildSafeSpatialValue(proxy), []);
+    assert.equal(lengthReads, 0);
+    let reads = 0;
+    const refs = [];
+    Object.defineProperty(refs, 0, { enumerable: true, get() { reads++; return "o1"; } });
+    assert.throws(() => makeSceneNode({ nodeId: "f::{}", frameId: "f", region: {}, state: "KNOWN", observationRefs: refs, updatedAtMs: 0 }));
+    assert.equal(reads, 0);
+});
 
 test("L3-1: registerFrame accepts valid frame, rejects unknown kind", async () => {
     const sm = await createSpatialModel();
