@@ -145,6 +145,228 @@ function sanitizeCoreOptions(options) {
 }
 
 /* ===========================================================================
+ * W8-L1 SENSORIUM -> W7-L2 WORLD MODEL BRIDGE
+ * Frozen contract: C:\Workspace\Damar-audit-evidence\wave7-10\wave8-l1-recon\
+ * W8_L1_CONTRACT.md (see also wave8-recon\WAVE8_CONTRACTS_FROZEN.md, L1
+ * section, the full-wave-reconciled version).
+ *
+ * The ONLY write capability this function has is `worldModel.ingestObservation`
+ * (OBSERVATION != EXECUTION AUTHORITY) — it never touches actuation/dispatch.
+ * It lives here, not in a new file, because this composition function is the
+ * one place that already holds live references to both `core.body`
+ * (Wave1-certified embodiedCore's BodySchema) and `cognition.lanes.worldModel`
+ * (Wave7-certified world model) — see the contract's "Canonical owner"
+ * section for why an earlier draft's separate `sensoriumBridge.js` was
+ * rejected in adversarial review.
+ * ========================================================================= */
+
+const {
+    toSensorModality
+} = require("../embodiment/domain/modalityMap");
+
+const SENSOR_OBSERVATION_HEALTH_PRIORITY = Object.freeze({
+    OK: 3, DEGRADED: 2, SUSPECT: 1, FAILED: 0
+});
+
+// Contract "Resource/boundedness limits": modality-specific per-sensor
+// observation rate caps; unlisted modalities default to the screen tier.
+const SENSOR_OBSERVATION_RATE_CAP_PER_SEC = Object.freeze({
+    SCREEN: 5, RF: 50, IMU: 200
+});
+const SENSOR_OBSERVATION_DEFAULT_RATE_CAP_PER_SEC = 5;
+
+// Contract "Resource/boundedness limits": 512 registered sensors x 64
+// channels/device = 32768 worst case. This bounds the ONE combined
+// per-(subject, channel.id) tracking map below (dedup `monotonic` +
+// rate-limit sampling + fairness priority for shed accounting) — the
+// contract lists "dedup tracking" (32768) and "pending observations
+// (bridge queue)" (50000) as two separate bounds, but this bridge's call
+// chain is fully synchronous (no I/O, no microtask gap between "plan
+// computed" and "ingestObservation applied"), so there is no actual
+// in-flight backlog for a literal second queue to hold — the smaller,
+// binding-in-practice per-source tracking map below IS the bridge's only
+// persistent per-observation-adjacent state, and doing that job twice in
+// two structures keyed the same way would be pure duplication. If a real
+// async device-adapter loop is added later (contract checklist item 4),
+// a literal async queue becomes meaningful then and is a natural
+// extension point, not a defect in this synchronous implementation.
+const MAX_TRACKED_SENSOR_CHANNELS = 512 * 64;
+
+function bridgeSensoriumPairKey(subject, channelId) {
+    return `${subject}\u0000${channelId}`;
+}
+
+/**
+ * bridgeSensoriumToWorldModel({ body, worldModel, clock, auditLedger })
+ * -> { applyObservationPlan(event, result) }
+ *
+ * `body.subscribe(...)` (BodySchema's existing, already-hardened hook —
+ * subscriber errors are isolated per-callback by BodySchema itself, never
+ * reach `ingest()`'s caller) drives `applyObservationPlan` for every
+ * committed SENSOR_OBSERVATION. Exposed directly too, for a future
+ * device-adapter loop that wants to call it without a live `body.ingest`
+ * round-trip (contract checklist item 4).
+ */
+function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedger = null }) {
+
+    function nowMs() {
+        try {
+            const t = typeof clock?.nowMs === "function" ? clock.nowMs() : undefined;
+            return Number.isFinite(t) ? t : Date.now();
+        } catch {
+            return Date.now();
+        }
+    }
+
+    function audit(event) {
+        try {
+            if (auditLedger && typeof auditLedger.append === "function") {
+                auditLedger.append(event);
+            }
+        } catch { /* audit failure never blocks the bridge */ }
+    }
+
+    // subject|channelId -> { monotonic, lastAppliedMs, healthPriority }
+    const tracked = new Map();
+
+    function evictWorstTrackedEntryIfOver(limit) {
+        if (tracked.size <= limit) return;
+        let victimKey = null;
+        let victimPriority = Infinity;
+        let victimAppliedMs = Infinity;
+        for (const [key, t] of tracked) {
+            if (t.healthPriority < victimPriority
+                || (t.healthPriority === victimPriority && t.lastAppliedMs < victimAppliedMs)) {
+                victimKey = key;
+                victimPriority = t.healthPriority;
+                victimAppliedMs = t.lastAppliedMs;
+            }
+        }
+        if (victimKey !== null) {
+            tracked.delete(victimKey);
+            audit({ type: "W8_L1_TRACKED_CHANNEL_EVICTED", key: victimKey, atMs: nowMs() });
+        }
+    }
+
+    /**
+     * Effective healthState (contract "Malformed-input behavior": never
+     * trust a producer's claimed OK verbatim) — the WORSE of the producer's
+     * claim (or OK if absent) and a calibration-derived floor: SUSPECT
+     * whenever calibration is null/expired.
+     */
+    function computeEffectiveHealthState(claimed, calibration) {
+        const claimedPriority = SENSOR_OBSERVATION_HEALTH_PRIORITY[claimed] ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK;
+        let floor = "OK";
+        if (!calibration) {
+            floor = "SUSPECT";
+        } else {
+            const validUntilMs = Date.parse(calibration.validUntil);
+            if (!Number.isFinite(validUntilMs) || validUntilMs <= nowMs()) floor = "SUSPECT";
+        }
+        const floorPriority = SENSOR_OBSERVATION_HEALTH_PRIORITY[floor];
+        return claimedPriority <= floorPriority ? (claimed ?? "OK") : floor;
+    }
+
+    function applyObservationPlan(event, result) {
+        if (!event || event.type !== "SENSOR_OBSERVATION" || !result) return { applied: false, reason: "not-an-observation" };
+
+        const subject = event.subject;
+        const payload = event.payload ?? {};
+        const channelId = payload.channel?.id;
+        if (typeof subject !== "string" || typeof channelId !== "string") {
+            return { applied: false, reason: "missing-identity" };
+        }
+        const key = bridgeSensoriumPairKey(subject, channelId);
+
+        // Dedup: a non-increasing `monotonic` for the same (subject, channel)
+        // is a duplicate/replay — idempotent no-op, never a duplicate belief.
+        const prior = tracked.get(key);
+        if (prior && Number.isFinite(event.monotonic) && event.monotonic <= prior.monotonic) {
+            audit({ type: "W8_L1_OBSERVATION_DUPLICATE_DROPPED", subject, channelId, monotonic: event.monotonic, atMs: nowMs() });
+            return { applied: false, reason: "duplicate" };
+        }
+
+        // Per-sensor rate cap: sample down (drop the intermediate sample,
+        // never buffer unboundedly) rather than reject/queue.
+        const rateCap = SENSOR_OBSERVATION_RATE_CAP_PER_SEC[toSensorModality(payload.modalityHint)] ?? SENSOR_OBSERVATION_DEFAULT_RATE_CAP_PER_SEC;
+        const minIntervalMs = 1000 / rateCap;
+        const receivedAtMs = nowMs();
+        if (prior && (receivedAtMs - prior.lastAppliedMs) < minIntervalMs) {
+            return { applied: false, reason: "rate-limited" };
+        }
+
+        const effectiveHealthState = computeEffectiveHealthState(payload.healthState, payload.calibration);
+
+        // Timestamp/causal-order: sampledAtMs (sensor clock) when supplied,
+        // else receive time — the substitution is recorded, never silent.
+        const sampledAtMs = payload.sample && typeof payload.sample === "object" && !Array.isArray(payload.sample)
+            ? payload.sample.sampledAtMs : undefined;
+        let observedAtMs = receivedAtMs;
+        let sampledAtMissing = true;
+        if (Number.isFinite(sampledAtMs)) {
+            observedAtMs = sampledAtMs;
+            sampledAtMissing = false;
+        }
+        const skewMs = sampledAtMissing ? null : (event.timestampMs - sampledAtMs);
+        const skewedHealthState = (skewMs !== null && (skewMs < 0 || skewMs > 5 * 60 * 1000)
+            && SENSOR_OBSERVATION_HEALTH_PRIORITY[effectiveHealthState] > SENSOR_OBSERVATION_HEALTH_PRIORITY.SUSPECT)
+            ? "SUSPECT" : effectiveHealthState;
+
+        const value = Object.freeze({
+            sample: payload.sample ?? null,
+            calibration: payload.calibration ?? null,
+            healthState: skewedHealthState,
+            frame: payload.frame ?? null,
+            quality: Object.freeze({
+                ...(payload.quality && typeof payload.quality === "object" ? payload.quality : {}),
+                sampledAtMissing,
+                ...(skewMs !== null ? { skewMs } : {})
+            }),
+            raw: payload.raw ?? null
+        });
+
+        let applyResult;
+        try {
+            applyResult = worldModel.ingestObservation({
+                subject: { entityId: subject },
+                attribute: `sensor:${channelId}`,
+                value,
+                sensor: { sensorId: channelId },
+                tier: "T4",
+                observedAt: new Date(observedAtMs).toISOString()
+            });
+        } catch (err) {
+            // Reject-closed: the world model itself refused this observation
+            // (e.g. UNKNOWN_ENTITY — the device has no corresponding
+            // world-model entity yet). The bridge's ONE write capability is
+            // ingestObservation itself (contract "Authority boundaries") —
+            // it never declares entities on the caller's behalf.
+            audit({ type: "W8_L1_OBSERVATION_REJECTED", subject, channelId, reason: err?.reason ?? err?.code ?? "ingest-failed", atMs: nowMs() });
+            return { applied: false, reason: "ingest-rejected" };
+        }
+
+        tracked.set(key, {
+            monotonic: Number.isFinite(event.monotonic) ? event.monotonic : (prior?.monotonic ?? 0),
+            lastAppliedMs: receivedAtMs,
+            healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState] ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK
+        });
+        evictWorstTrackedEntryIfOver(MAX_TRACKED_SENSOR_CHANNELS);
+
+        if (skewedHealthState === "FAILED") {
+            audit({ type: "W8_L1_SENSOR_FAILED", subject, channelId, atMs: nowMs() });
+        }
+
+        return { applied: true, healthState: skewedHealthState, result: applyResult };
+    }
+
+    if (body && typeof body.subscribe === "function") {
+        body.subscribe(applyObservationPlan);
+    }
+
+    return Object.freeze({ applyObservationPlan });
+}
+
+/* ===========================================================================
  * RUNTIME CORE COMPOSITION (moved from src/integration/runtimeCore.js)
  * ========================================================================= */
 
@@ -344,6 +566,11 @@ async function buildRuntimeCoreInternal({
     // reads `cognition` back. GATE-W7-10/11 hold structurally: with
     // enableCognition=false (the default) this is simply `null`.
     let cognition = null;
+    // W8-L1 (frozen contract): the bridge from Sensorium observations into
+    // W7-L2 world-model ingest. Constructed ONLY when both sides of the
+    // join actually exist (mirrors `enableCognition`'s own opt-in shape;
+    // zero footprint when disabled, same as `cognition` itself).
+    let sensoriumBridge = null;
     if (enableCognition) {
         const { createLongHorizonCycle } = require("../cognition/longhorizon");
         cognition = await createLongHorizonCycle({
@@ -351,6 +578,18 @@ async function buildRuntimeCoreInternal({
             capabilityRegistry: cognitionCapabilityRegistry,
             auditLedger: cognitionAuditLedger
         });
+        if (core?.body && cognition?.lanes?.worldModel) {
+            sensoriumBridge = bridgeSensoriumToWorldModel({
+                body: core.body,
+                worldModel: cognition.lanes.worldModel,
+                // No dedicated cognition clock is threaded through
+                // `createLongHorizonCycle` at this call site (it defaults
+                // internally to a real Date.now()-based clock) -- the
+                // bridge defaults the same way, rather than coupling to
+                // `presenceClock`, an unrelated subsystem's clock.
+                auditLedger: cognitionAuditLedger
+            });
+        }
     }
 
     return Object.freeze({
@@ -361,6 +600,13 @@ async function buildRuntimeCoreInternal({
 
         // Wave 7 (opt-in, composition-only; null unless enableCognition):
         cognition,
+
+        // W8-L1 (opt-in, composition-only; null unless enableCognition AND
+        // both core.body/cognition.lanes.worldModel exist): the sole join
+        // point between the embodiment and cognition pipelines. Exposes
+        // `applyObservationPlan` for a future device-adapter loop; the
+        // bridge is already live-subscribed to `core.body` regardless.
+        sensoriumBridge,
 
         // Wave 2 (pemilik kanonik):
         governor: gov,
@@ -1769,6 +2015,11 @@ async function createRuntimeHost(options = {}) {
 module.exports = Object.freeze({
     createRuntimeCore,
     createRuntimeHost,
+    // W8-L1: exported directly for focused unit testing of the bridge's own
+    // dedup/rate-limit/health-floor/shed logic without spinning up the full
+    // RuntimeCore composition for every case; production wiring still goes
+    // through `createRuntimeCore({ enableCognition: true, ... })` above.
+    bridgeSensoriumToWorldModel,
     CORE_VERSION,
     HOST_VERSION,
     LOCAL_TRANSPORT_ID,
