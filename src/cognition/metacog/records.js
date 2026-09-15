@@ -360,7 +360,17 @@ function makeReview({ reviewId, trigger, findings = [], proposals = [], cost = {
 }
 
 /** §7: skor Brier — never LogLoss di sini demi kesederhanaan (dipilih via scoreKind). */
+// Bug review independen (audit putaran-71, Codex, AUD71-P2-1): fungsi ini
+// di-export LANGSUNG (module.exports di bawah) -- pemanggil LUAR bisa
+// memanggilnya tanpa pernah melewati guard `typeof outcomeCorrect ===
+// "boolean"` yang putaran-70 tambahkan di makeCalibrationRecord (guard di
+// PEMANGGIL, bukan di FUNGSI ITU SENDIRI). Divalidasi di sini juga, supaya
+// helper yang di-export ini aman dipanggil sendiri, tidak bergantung pada
+// disiplin pemanggilnya.
 function brierScore(predictedConfidence, outcomeCorrect) {
+    if (typeof outcomeCorrect !== "boolean") {
+        fail(REASONS.INVALID_RECORD, "outcomeCorrect wajib boolean");
+    }
     const o = outcomeCorrect ? 1 : 0;
     return (predictedConfidence - o) ** 2;
 }

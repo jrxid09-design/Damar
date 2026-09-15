@@ -91,6 +91,17 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
     const reminders = snapshot.reminders;
     const expectations = snapshot.expectations;
     const firedOccurrenceIds = snapshot.firedOccurrenceIds;
+    // Bug review independen (audit putaran-71, Codex, AUD71-P2-2): snapshot
+    // yang dipersist di bawah bounds LAMA (lebih besar) lalu dimuat ulang
+    // dengan MAX_FIRED_OCCURRENCE_IDS yang lebih rendah tidak pernah
+    // dipangkas -- runtime hanya memangkas SATU entri per fireReminder()
+    // (cukup karena hanya bertambah satu per panggilan), tapi TIDAK PERNAH
+    // dijalankan sekali pun di antara restart dan fireReminder() berikutnya.
+    // Dipangkas FIFO (sama seperti eviction runtime di fireReminder())
+    // begitu dimuat, sebelum record apa pun sempat dibaca.
+    while (firedOccurrenceIds.size > bounds.MAX_FIRED_OCCURRENCE_IDS) {
+        firedOccurrenceIds.delete(firedOccurrenceIds.values().next().value);
+    }
     const remindersPerGoal = new Map();
     for (const r of reminders.values()) {
         // Bug review independen (Codex putaran-7): rebuild restart lama
