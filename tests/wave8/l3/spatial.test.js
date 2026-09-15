@@ -20,6 +20,11 @@ function jsonStore() {
     };
 }
 
+function manualClock(startMs) {
+    let t = startMs;
+    return { nowMs: () => t, advance: (ms) => { t += ms; } };
+}
+
 test("L3-1: registerFrame accepts valid frame, rejects unknown kind", async () => {
     const sm = await createSpatialModel();
     const f = sm.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "kitchen" }, source: "s" });
@@ -152,4 +157,52 @@ test("L3-15: a revoked-Proxy spec fails closed as INVALID_RECORD, not a raw Type
     const { proxy, revoke } = Proxy.revocable({}, {});
     revoke();
     assertThrowsReason(() => sm.registerFrame(proxy), "INVALID_RECORD");
+});
+
+test("L3-16: a KNOWN region whose freshness has decayed to 'stale' blocks too -- stale never means clear either (independent audit round 1, Codex, AUDL3-P1-1)", async () => {
+    const clock = manualClock(0);
+    const sm = await createSpatialModel({ clock });
+    sm.registerFrame({ frameId: "a", kind: "ROOM", ref: {}, source: "s" });
+    sm.reportOccupancy({ frameId: "a", region: { c: 1 }, state: "KNOWN", observationRef: "o1" });
+    clock.advance(31 * 60 * 1000);
+    const r = sm.queryOccupancy({ frameId: "a", region: { c: 1 } });
+    assert.equal(r.band, "stale");
+    assert.equal(r.blocked, true, "a stale KNOWN region must block, not silently report clear");
+});
+
+test("L3-17: reload compaction fully compacts BOTH frames and transforms when frames are only evictable after their referencing transform is gone (independent audit round 1, Codex, AUDL3-P1-2)", async () => {
+    const store = jsonStore();
+    const sm1 = await createSpatialModel({ store, bounds: { ...BOUNDS, MAX_FRAMES: 10, MAX_TRANSFORMS: 10 } });
+    sm1.registerFrame({ frameId: "a", kind: "ROOM", ref: {}, source: "s" });
+    sm1.registerFrame({ frameId: "b", kind: "ROOM", ref: {}, source: "s" });
+    sm1.registerTransform({ transformId: "t1", fromFrameId: "a", toFrameId: "b", data: {} });
+    await sm1.persist();
+
+    const sm2 = await createSpatialModel({ store, bounds: { ...BOUNDS, MAX_FRAMES: 1, MAX_TRANSFORMS: 0 } });
+    assert.equal(sm2.transformsSize(), 0, "transforms must compact to 0 first");
+    assert.ok(sm2.framesSize() <= 1, "frames must then compact to the active bound, now that no transform references them");
+});
+
+test("L3-18: two logically-identical regions with different key order are the SAME region for contest detection, not silently split into two nodes (independent audit round 1, Codex, AUDL3-P1-3)", async () => {
+    const sm = await createSpatialModel();
+    sm.registerFrame({ frameId: "a", kind: "ROOM", ref: {}, source: "s" });
+    sm.reportOccupancy({ frameId: "a", region: { x: 1, y: 2 }, state: "KNOWN", observationRef: "o1" });
+    sm.reportOccupancy({ frameId: "a", region: { y: 2, x: 1 }, state: "UNKNOWN", observationRef: "o2" });
+    const r = sm.queryOccupancy({ frameId: "a", region: { x: 1, y: 2 } });
+    assert.equal(r.state, "CONTESTED", "reordered-key regions must resolve to the SAME scene node so disagreement is detected");
+    assert.equal(r.blocked, true);
+});
+
+test("L3-19: a hostile accessor on ANY registerFrame spec field is rejected with zero getter invocations, not executed during destructuring (independent audit round 1, Codex, AUDL3-P1-4)", async () => {
+    const sm = await createSpatialModel();
+    let n = 0;
+    const spec = { kind: "ROOM", ref: {}, source: "s" };
+    Object.defineProperty(spec, "frameId", { enumerable: true, configurable: true, get() { n++; return "f1"; } });
+    assertThrowsReason(() => sm.registerFrame(spec), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(n, 0, "spec.frameId's getter must never be invoked");
+});
+
+test("L3-20: a Symbol frameId to queryOccupancy fails closed as INVALID_RECORD, not a raw TypeError from template-literal interpolation (independent audit round 1, Codex, AUDL3-P1-4)", async () => {
+    const sm = await createSpatialModel();
+    assertThrowsReason(() => sm.queryOccupancy({ frameId: Symbol("x"), region: null }), "INVALID_RECORD");
 });

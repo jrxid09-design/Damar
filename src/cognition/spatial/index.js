@@ -19,20 +19,17 @@ const { REASONS, fail } = require("./errors");
 const { BOUNDS, SCHEMA_VERSION } = require("./bounds");
 const { sanitizeBounds } = require("../core/bounds");
 const { laws } = require("./laws");
-const { makeFrame, makeTransform, makeSceneNode, OCCUPANCY_STATES } = require("./records");
+const { makeFrame, makeTransform, makeSceneNode, readSpecFields, requireStringId, canonicalRegionKey } = require("./records");
 const { loadSnapshot, saveSnapshot } = require("./store");
 const { freshnessBand } = require("../../mataDewa/spatial/epistemic");
 
-function regionKey(region) {
-    try {
-        return JSON.stringify(region ?? null);
-    } catch {
-        fail(REASONS.INVALID_RECORD, "region tidak dapat diverifikasi dengan aman, ditolak");
-    }
-}
+// Bands other than "fresh"/"aging" are treated as stale for blocking
+// purposes -- "unknown never means clear" extends to "stale never means
+// clear either" (audit round 1, AUDL3-P1-1).
+const NON_BLOCKING_BANDS = new Set(["fresh", "aging"]);
 
 function sceneNodeKey(frameId, region) {
-    return `${frameId}::${regionKey(region)}`;
+    return `${frameId}::${canonicalRegionKey(region)}`;
 }
 
 async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS } = {}) {
@@ -52,7 +49,23 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
     // 71-73): a reloaded snapshot persisted under a larger bound must be
     // compacted to the ACTIVE bound at construction, before any record is
     // exposed -- not just at insert time.
+    //
+    // Bug review independen (audit round 1, Codex, AUDL3-P1-2): transforms
+    // MUST be compacted BEFORE frames -- a frame still referenced by a live
+    // transform can never be evicted, so compacting frames first (while
+    // over-bound transforms still hold references) stalls frame compaction
+    // early and leaves the frame collection over its active bound. Reversed
+    // order.
     {
+        const maxTransforms = Math.max(0, Math.trunc(bounds.MAX_TRANSFORMS));
+        while (transforms.size > maxTransforms) {
+            let victimId = null, victimAt = Infinity;
+            for (const t of transforms.values()) {
+                if (t.registeredAt < victimAt) { victimAt = t.registeredAt; victimId = t.transformId; }
+            }
+            if (!victimId) break;
+            transforms.delete(victimId);
+        }
         const maxFrames = Math.max(0, Math.trunc(bounds.MAX_FRAMES));
         while (frames.size > maxFrames) {
             let victimId = null, victimAt = Infinity;
@@ -63,15 +76,6 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
             }
             if (!victimId) break;
             frames.delete(victimId);
-        }
-        const maxTransforms = Math.max(0, Math.trunc(bounds.MAX_TRANSFORMS));
-        while (transforms.size > maxTransforms) {
-            let victimId = null, victimAt = Infinity;
-            for (const t of transforms.values()) {
-                if (t.registeredAt < victimAt) { victimAt = t.registeredAt; victimId = t.transformId; }
-            }
-            if (!victimId) break;
-            transforms.delete(victimId);
         }
         const maxNodes = Math.max(0, Math.trunc(bounds.MAX_SCENE_NODES));
         while (sceneNodes.size > maxNodes) {
@@ -99,12 +103,7 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
     }
 
     function registerFrame(spec) {
-        let frameId, kind, ref, source;
-        try {
-            ({ frameId, kind, ref, source } = spec || {});
-        } catch {
-            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
-        }
+        const { frameId, kind, ref, source } = readSpecFields(spec, ["frameId", "kind", "ref", "source"]);
         const existing = frames.get(frameId);
         const frame = makeFrame({ frameId, kind, ref, source, nowMs: now() }, bounds);
         if (!existing) {
@@ -148,12 +147,7 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
     }
 
     function registerTransform(spec) {
-        let transformId, fromFrameId, toFrameId, data;
-        try {
-            ({ transformId, fromFrameId, toFrameId, data } = spec || {});
-        } catch {
-            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
-        }
+        const { transformId, fromFrameId, toFrameId, data } = readSpecFields(spec, ["transformId", "fromFrameId", "toFrameId", "data"]);
         if (!frames.has(fromFrameId)) fail(REASONS.UNKNOWN_FRAME, `fromFrameId '${typeof fromFrameId === "string" ? fromFrameId : typeof fromFrameId}' belum terdaftar`);
         if (!frames.has(toFrameId)) fail(REASONS.UNKNOWN_FRAME, `toFrameId '${typeof toFrameId === "string" ? toFrameId : typeof toFrameId}' belum terdaftar`);
         const existing = transforms.get(transformId);
@@ -182,13 +176,9 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
 
     /** Reports occupancy for a region as observed by one observationRef. Disagreement -> CONTESTED (blocks), never silently picked. */
     function reportOccupancy(spec) {
-        let frameId, region, state, observationRef;
-        try {
-            ({ frameId, region, state, observationRef } = spec || {});
-        } catch {
-            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
-        }
-        if (!frames.has(frameId)) fail(REASONS.UNKNOWN_FRAME, `frameId '${typeof frameId === "string" ? frameId : typeof frameId}' belum terdaftar`);
+        const { frameId, region, state, observationRef } = readSpecFields(spec, ["frameId", "region", "state", "observationRef"]);
+        requireStringId(frameId, "frameId");
+        if (!frames.has(frameId)) fail(REASONS.UNKNOWN_FRAME, `frameId '${frameId}' belum terdaftar`);
         if (typeof observationRef !== "string" || !observationRef) fail(REASONS.INVALID_RECORD, "observationRef wajib string");
         const key = sceneNodeKey(frameId, region);
         const existing = sceneNodes.get(key);
@@ -225,23 +215,38 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         return node;
     }
 
-    /** UNKNOWN NEVER MEANS CLEAR: no node for a region -> blocked:true, state:"UNKNOWN". */
-    function queryOccupancy({ frameId, region } = {}) {
+    /**
+     * UNKNOWN NEVER MEANS CLEAR: no node for a region -> blocked:true.
+     * Bug review independen (audit round 1, Codex, AUDL3-P1-1): a KNOWN
+     * node whose freshness band has decayed to "stale"/"expired" reported
+     * blocked:false purely because `state === "KNOWN"` -- staleness never
+     * fed into the blocking decision at all. Stale/expired KNOWN claims now
+     * block too, same as UNKNOWN/CONTESTED -- "stale never means clear
+     * either."
+     */
+    function queryOccupancy(spec) {
+        const { frameId, region } = readSpecFields(spec, ["frameId", "region"]);
+        requireStringId(frameId, "frameId");
         const key = sceneNodeKey(frameId, region);
         const node = sceneNodes.get(key);
-        if (!node) return Object.freeze({ state: "UNKNOWN", blocked: true, freshnessMs: null, provenance: Object.freeze([]) });
-        const freshnessMs = now() - node.updatedAtMs;
+        if (!node) return Object.freeze({ state: "UNKNOWN", blocked: true, freshnessMs: null, band: "unknown", provenance: Object.freeze([]) });
+        const nowMs = now();
+        const freshnessMs = nowMs - node.updatedAtMs;
+        const band = freshnessBand(node.updatedAtMs, {}, nowMs);
+        const blocked = node.state !== "KNOWN" || !NON_BLOCKING_BANDS.has(band);
         return Object.freeze({
             state: node.state,
-            blocked: node.state !== "KNOWN",
+            blocked,
             freshnessMs,
-            band: freshnessBand(node.updatedAtMs, {}, now()),
+            band,
             provenance: node.observationRefs
         });
     }
 
-    /** Sequence of hops; blocked if ANY hop is unknown/contested. Bounded path length -- never a runaway traversal. */
-    function queryReachability({ frameId, path } = {}) {
+    /** Sequence of hops; blocked if ANY hop is unknown/contested/stale. Bounded path length -- never a runaway traversal. */
+    function queryReachability(spec) {
+        const { frameId, path } = readSpecFields(spec, ["frameId", "path"]);
+        requireStringId(frameId, "frameId");
         let hops;
         try {
             hops = Array.isArray(path) ? [...path] : [];
@@ -261,10 +266,12 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
 
     /** Returns the frame plus the ordered chain of transformIds connecting fromFrameId to toFrameId, or null if unreachable. Bounded BFS. */
     function resolveFrame(fromFrameId, toFrameId) {
+        requireStringId(fromFrameId, "frameId");
         const frame = frames.get(fromFrameId);
-        if (!frame) fail(REASONS.UNKNOWN_FRAME, `frameId '${typeof fromFrameId === "string" ? fromFrameId : typeof fromFrameId}' belum terdaftar`);
+        if (!frame) fail(REASONS.UNKNOWN_FRAME, `frameId '${fromFrameId}' belum terdaftar`);
         if (toFrameId === undefined || toFrameId === null) return Object.freeze({ frame, path: Object.freeze([]) });
-        if (!frames.has(toFrameId)) fail(REASONS.UNKNOWN_FRAME, `toFrameId '${typeof toFrameId === "string" ? toFrameId : typeof toFrameId}' belum terdaftar`);
+        requireStringId(toFrameId, "toFrameId");
+        if (!frames.has(toFrameId)) fail(REASONS.UNKNOWN_FRAME, `toFrameId '${toFrameId}' belum terdaftar`);
         const maxSteps = Math.max(0, Math.trunc(bounds.MAX_TRANSFORMS)) + 1;
         const queue = [[fromFrameId, []]];
         const seen = new Set([fromFrameId]);
@@ -309,4 +316,4 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
     });
 }
 
-module.exports = { createSpatialModel, BOUNDS, SCHEMA_VERSION, OCCUPANCY_STATES };
+module.exports = { createSpatialModel, BOUNDS, SCHEMA_VERSION };

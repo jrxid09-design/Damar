@@ -13,6 +13,60 @@ const { BOUNDS } = require("./bounds");
 
 const FRAME_KINDS = new Set(["SCREEN", "ROOM", "GEO", "BODY", "LOGICAL"]);
 const OCCUPANCY_STATES = new Set(["KNOWN", "UNKNOWN", "CONTESTED"]);
+
+/**
+ * Bug review independen (audit round 1, Codex, AUDL3-P1-4): every public
+ * entry point destructured its `spec` object RAW (`{ frameId, kind, ... } =
+ * spec || {}`), an ordinary [[Get]] that executes any accessor getter on
+ * ANY requested field before this lane could ever sanitize it -- the exact
+ * class that dominated the Wave7 audit history (this session's own
+ * MILESTONE_LEDGER.md, rounds 41-73). Reads the requested `fields` from
+ * `spec` via property descriptor, rejecting accessors outright, and never
+ * invokes any getter. `spec` itself may be null/undefined (returns an
+ * all-undefined copy, matching every other Wave7 lane's "explicit null is
+ * not a crash" convention) or a revoked Proxy (fails closed as
+ * INVALID_RECORD, not a raw TypeError).
+ */
+function readSpecFields(spec, fields) {
+    if (spec === null || spec === undefined) {
+        const empty = {};
+        for (const f of fields) empty[f] = undefined;
+        return empty;
+    }
+    if (typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+    let keys;
+    try {
+        keys = new Set(Object.keys(spec));
+    } catch {
+        fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+    }
+    const out = {};
+    for (const f of fields) {
+        if (!keys.has(f)) { out[f] = undefined; continue; }
+        let desc;
+        try {
+            desc = Object.getOwnPropertyDescriptor(spec, f);
+        } catch {
+            fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+        }
+        if (!desc || desc.get || desc.set) {
+            fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `spec tidak boleh membawa properti accessor: '${f}'`);
+        }
+        out[f] = desc.value;
+    }
+    return out;
+}
+
+/** frameId/toFrameId/etc. must be validated as strings BEFORE reaching any
+ * template-literal key derivation (sceneNodeKey/regionKey/error messages) --
+ * a Symbol interpolated into a template literal raw-throws TypeError before
+ * any domain-error guard runs (AUDL3-P1-4's second half). */
+function requireStringId(value, fieldName) {
+    if (typeof value !== "string" || !value) {
+        fail(REASONS.INVALID_RECORD, `${fieldName} wajib string tidak kosong`);
+    }
+    return value;
+}
 const DANGEROUS_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 const MAX_SCAN_DEPTH = 8;
 const MAX_SCAN_NODES = 512;
@@ -129,7 +183,33 @@ function makeSceneNode({ nodeId, frameId, region, state, observationRefs, update
     });
 }
 
+/**
+ * Bug review independen (audit round 1, Codex, AUDL3-P1-3): raw
+ * JSON.stringify for region identity depends on caller-controlled object
+ * key insertion order (two logically-identical regions with different key
+ * order produce different keys, splitting one region into two and hiding a
+ * genuine disagreement from CONTESTED_GEOMETRY_BLOCKS_MOTION) and on
+ * caller-controlled toJSON (which JSON.stringify invokes as caller code).
+ * Called only on the ALREADY-SANITIZED output of buildSafeSpatialValue
+ * (never the raw caller region), so there is no toJSON/accessor/prototype
+ * to invoke by the time this runs; keys are additionally sorted here so
+ * insertion order can never affect the derived key.
+ */
+function canonicalStringify(value) {
+    if (value === null || typeof value !== "object") return JSON.stringify(value);
+    if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(",")}]`;
+    const keys = Object.keys(value).sort();
+    return `{${keys.map(k => `${JSON.stringify(k)}:${canonicalStringify(value[k])}`).join(",")}}`;
+}
+
+/** Sanitize THEN canonicalize -- the only safe order (sanitize before truncate/key-derive, this session's own audit lesson from round 67). */
+function canonicalRegionKey(region) {
+    const safe = buildSafeSpatialValue(region);
+    return canonicalStringify(safe ?? null);
+}
+
 module.exports = {
     FRAME_KINDS, OCCUPANCY_STATES, buildSafeSpatialValue, deepFreeze,
-    makeFrame, makeTransform, makeSceneNode
+    makeFrame, makeTransform, makeSceneNode,
+    readSpecFields, requireStringId, canonicalRegionKey
 };
