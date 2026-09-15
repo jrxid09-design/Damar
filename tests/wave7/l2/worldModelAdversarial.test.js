@@ -228,6 +228,21 @@ test("WM-repair-107: reloaded entities/relations/beliefs/hypotheses are compacte
     assert.ok(Object.keys(raw.hypotheses).length <= 1, "hypotheses must be compacted to the active bound at construction");
 });
 
+test("WM-repair-108: a reloaded belief's own supportedBy/appliedRecordIds are trimmed to the ACTIVE MAX_OBSERVATIONS_RETAINED_PER_BELIEF bound at construction -- round 72's compaction only handled the count of belief RECORDS, not the nested bounded array inside each one, which only trims on the next applyRevision() for that belief (independent audit round 73, Codex, AUD73-P2-2)", async () => {
+    const store = createMemoryAccStore();
+    const wm1 = await createWorldModel({ store, bounds: { MAX_OBSERVATIONS_RETAINED_PER_BELIEF: 100 } });
+    wm1.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    for (let i = 0; i < 5; i++) {
+        wm1.ingestObservation({ observationId: `o${i}`, subject: { entityId: "e1" }, attribute: "a", value: 20, sensor: { sensorId: `s${i}` }, tier: "T1", observedAt: new Date(i + 1).toISOString() });
+    }
+    assert.ok(wm1.query({ subject: { entityId: "e1" }, attribute: "a" }).supportedBy.length >= 5);
+    await wm1.persist();
+
+    const wm2 = await createWorldModel({ store, bounds: { MAX_OBSERVATIONS_RETAINED_PER_BELIEF: 1 } });
+    const q = wm2.query({ subject: { entityId: "e1" }, attribute: "a" });
+    assert.ok(q.supportedBy.length <= 1, "supportedBy must be trimmed to the active bound at construction");
+});
+
 test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });

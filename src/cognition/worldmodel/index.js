@@ -107,6 +107,42 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     compactBeliefsIfOverBound();
     compactHypothesesIfOverBound();
     compactContradictionsIfOverBound();
+    // Bug review independen (audit putaran-73, Codex, AUD73-P2-2): round
+    // 72's kompaksi hanya menangani jumlah RECORD (Map/array top-level),
+    // bukan field bertingkat berbatas DI DALAM satu belief -- supportedBy/
+    // appliedRecordIds/contestedRecordIds dipangkas hanya saat
+    // applyRevision BERIKUTNYA untuk belief itu (sama seperti kelas
+    // AUD72-P2-1: normalisasi per-insert, tidak pernah berjalan antara
+    // restart dan revisi berikutnya). Dinormalisasi ulang ke bound aktif
+    // di sini, pakai kebijakan pangkas yang SAMA seperti appendBounded
+    // (indeks awal positif, aman dari kelas bug -0's `slice(-bound)`).
+    // contestedRecordIds disapukan preemptif bersama supportedBy/
+    // appliedRecordIds (sibling PERSIS, sama-sama array riwayat recordId
+    // berbatas pada belief yang sama) -- pola "diungkap tapi tidak
+    // diperbaiki" sudah lima kali menjadi eskalasi putaran berikutnya
+    // dalam audit ini (65->66, 68->69, 70->71, 71->72, 72->73 sendiri).
+    {
+        const maxSupportedBy = Math.max(0, Math.trunc(bounds.MAX_OBSERVATIONS_RETAINED_PER_BELIEF));
+        const maxContested = Math.max(0, Math.trunc(bounds.MAX_OPEN_CONTRADICTION_SETS));
+        const trim = (arr, max) => (arr.length > max ? arr.slice(arr.length - max) : arr);
+        for (const [key, belief] of beliefs) {
+            const supportedBy = belief.supportedBy ?? [];
+            const appliedRecordIds = belief.appliedRecordIds ?? belief.supportedBy ?? [];
+            const contestedRecordIds = belief.contestedRecordIds ?? [];
+            const trimmedSupportedBy = trim(supportedBy, maxSupportedBy);
+            const trimmedApplied = trim(appliedRecordIds, maxSupportedBy);
+            const trimmedContested = trim(contestedRecordIds, maxContested);
+            if (trimmedSupportedBy.length === supportedBy.length &&
+                trimmedApplied.length === appliedRecordIds.length &&
+                trimmedContested.length === contestedRecordIds.length) continue;
+            beliefs.set(key, Object.freeze({
+                ...belief,
+                supportedBy: Object.freeze(trimmedSupportedBy),
+                appliedRecordIds: Object.freeze(trimmedApplied),
+                contestedRecordIds: Object.freeze(trimmedContested)
+            }));
+        }
+    }
 
     // Bug review independen (audit putaran-53, AUD53-P2-2): `clock.nowMs()`
     // mentah -- Proxy yang di-revoke (atau `nowMs` yang melempar/bukan

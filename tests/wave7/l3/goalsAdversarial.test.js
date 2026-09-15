@@ -314,6 +314,39 @@ test("GL-repair-82: reloaded goals/commitments/plans/tasks are compacted to thei
     assert.ok(Object.keys(raw.goals).length <= 2, "the one SATISFIED (terminal) goal must be compacted away, leaving only the two still-active ones that have no terminal victim to evict in their place");
 });
 
+test("GL-repair-83: construction-time goal compaction also deletes plans OWNED by the evicted goal, not just the goal itself -- round 72's first version only did `goals.delete(terminal.goalId)`, missing the insert-time cleanup (W7R5-P2-3) that also removes owned plans, leaving them addressable via getPlan() after their parent goal is gone (independent audit round 73, Codex, AUD73-P2-1)", async () => {
+    const { createMemoryAccStore } = require("../../../src/cognition/persistence/AccStore");
+    const store = createMemoryAccStore();
+    const ge1 = await createGoalEngine({ store, bounds: { ...BOUNDS, MAX_TOTAL_GOALS_RETAINED: 100 } });
+    const g1 = ge1.proposeGoal(baseGoalSpec());
+    ge1.transition(g1.goalId, "approve", { actorKind: "OWNER", reason: "r" });
+    ge1.transition(g1.goalId, "activate", { actorKind: "OWNER", reason: "r" });
+    ge1.transition(g1.goalId, "succeed", { actorKind: "SYSTEM", reason: "r", evidenceTier: "T1", evidenceRef: "e0" });
+    const p1 = ge1.createPlan({ planId: "p1", goalRef: g1.goalId, steps: [] });
+    const g2 = ge1.proposeGoal(baseGoalSpec());
+    await ge1.persist();
+
+    const ge2 = await createGoalEngine({ store, bounds: { ...BOUNDS, MAX_TOTAL_GOALS_RETAINED: 1 } });
+    assert.equal(ge2.getGoal(g1.goalId), null, "the terminal goal must be evicted");
+    assert.equal(ge2.getPlan(p1.planId), null, "a plan owned by the evicted goal must be deleted along with it, not left dangling");
+    assert.notEqual(ge2.getGoal(g2.goalId), null, "the still-active goal must survive");
+});
+
+test("GL-repair-84: a reloaded goal's transitions log is trimmed to the ACTIVE MAX_TRANSITION_LOG_PER_GOAL bound at construction -- appendTransitionLog's 'keep first and last' policy only runs on the NEXT transition() call for that goal, so it never ran between a restart and the next transition (independent audit round 73, Codex, AUD73-P2-2)", async () => {
+    const { createMemoryAccStore } = require("../../../src/cognition/persistence/AccStore");
+    const store = createMemoryAccStore();
+    const ge1 = await createGoalEngine({ store, bounds: { ...BOUNDS, MAX_TRANSITION_LOG_PER_GOAL: 100 } });
+    const g = ge1.proposeGoal(baseGoalSpec());
+    ge1.transition(g.goalId, "approve", { actorKind: "OWNER", reason: "r1" });
+    ge1.transition(g.goalId, "activate", { actorKind: "OWNER", reason: "r2" });
+    const activated = ge1.transition(g.goalId, "pause", { actorKind: "OWNER", reason: "r3" });
+    assert.ok(activated.transitions.length >= 3);
+    await ge1.persist();
+
+    const ge2 = await createGoalEngine({ store, bounds: { ...BOUNDS, MAX_TRANSITION_LOG_PER_GOAL: 1 } });
+    assert.ok(ge2.getGoal(g.goalId).transitions.length <= 1, "transitions log must be trimmed to the active bound at construction");
+});
+
 test("GL-repair-9: terminal commitments are retention-bounded, not just OPEN ones (independent audit W7R5-P2-3)", async () => {
     const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_COMMITMENTS_RETAINED: 5 } });
     for (let i = 0; i < 50; i++) {

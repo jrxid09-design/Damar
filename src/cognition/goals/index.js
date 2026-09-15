@@ -68,6 +68,18 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
                 .sort((a, b) => Date.parse(a.lastTransitionAt) - Date.parse(b.lastTransitionAt))[0];
             if (!terminal) break;
             goals.delete(terminal.goalId);
+            // Bug review independen (audit putaran-73, Codex, AUD73-P2-1):
+            // versi pertama kompaksi konstruksi ini hanya menghapus goal
+            // itu sendiri -- insert-time's cleanup (proposeGoal) JUGA
+            // menghapus plan MILIK goal yang dievict (W7R5-P2-3), tapi itu
+            // ditinggalkan di sini, membuat plan yatim tetap bisa diakses
+            // lewat getPlan() walau goal induknya sudah tidak ada.
+            // childCounts TIDAK perlu dibersihkan manual di sini -- Map itu
+            // baru dibangun SETELAH blok ini, jadi otomatis hanya menghitung
+            // populasi goal yang SELAMAT (lihat loop childCounts di bawah).
+            for (const p of [...plans.values()]) {
+                if (p.goalRef === terminal.goalId) plans.delete(p.planId);
+            }
         }
 
         const maxCommitments = Math.max(0, Math.trunc(bounds.MAX_TOTAL_COMMITMENTS_RETAINED));
@@ -89,6 +101,24 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
             const terminal = [...tasks.values()].find(x => x.state === "DONE" || x.state === "SKIPPED");
             if (!terminal) break;
             tasks.delete(terminal.taskId);
+        }
+
+        // Bug review independen (audit putaran-73, Codex, AUD73-P2-2):
+        // round 72's kompaksi hanya menangani jumlah goal (Map top-level),
+        // bukan field bertingkat berbatas DI DALAM satu goal --
+        // goal.transitions dipangkas hanya saat transition() BERIKUTNYA
+        // untuk goal itu (sama seperti kelas AUD72-P2-1). Dinormalisasi
+        // ulang ke bound aktif di sini, pakai kebijakan pangkas yang SAMA
+        // seperti appendTransitionLog ("keep first and last", termasuk
+        // cabang max===1 round-63's -0 fix) tapi TANPA menambah entri baru.
+        const maxTransitionLog = Math.max(0, Math.trunc(bounds.MAX_TRANSITION_LOG_PER_GOAL));
+        for (const [goalId, g] of goals) {
+            const log = g.transitions ?? [];
+            if (log.length <= maxTransitionLog) continue;
+            const trimmed = maxTransitionLog === 0 ? []
+                : maxTransitionLog === 1 ? [log[log.length - 1]]
+                : [log[0], ...log.slice(-(maxTransitionLog - 1))];
+            goals.set(goalId, Object.freeze({ ...g, transitions: Object.freeze(trimmed), transitionsTruncated: true }));
         }
     }
 

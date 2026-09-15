@@ -346,6 +346,28 @@ test("SM-repair-26: a reloaded successWindows Map is compacted to the ACTIVE MAX
     assert.ok(Object.keys(raw).length <= 1, "a reloaded successWindows must be compacted to the ACTIVE (possibly lower) bound at construction time");
 });
 
+test("SM-repair-27: a reloaded successWindow's own history/appliedEvidenceRefs are trimmed to the ACTIVE MAX_SUCCESS_WINDOW/MAX_APPLIED_EVIDENCE_REFS bounds at construction -- round 72's compaction only handled the count of successWindows RECORDS, not the nested bounded arrays inside each one, which only trim on the next ingestOutcome() for that capability (independent audit round 73, Codex, AUD73-P2-2)", async () => {
+    const registry = fakeRegistry({ "cap.a": {} });
+    function jsonStore() {
+        const kv = new Map();
+        return {
+            async getKv(k) { return kv.has(k) ? JSON.parse(kv.get(k)) : null; },
+            async putKv(k, v) { kv.set(k, JSON.stringify(v)); }
+        };
+    }
+    const store = jsonStore();
+    const sm1 = await createSelfModel({ capabilityRegistry: registry, store, bounds: { ...BOUNDS, MAX_SUCCESS_WINDOW: 100, MAX_APPLIED_EVIDENCE_REFS: 100 } });
+    for (let i = 0; i < 5; i++) {
+        sm1.ingestOutcome({ capabilityId: "cap.a", tier: "T1", outcome: "SUCCESS", at: `t${i}`, evidenceRef: `e${i}` });
+    }
+    await sm1.persist();
+
+    const sm2 = await createSelfModel({ capabilityRegistry: registry, store, bounds: { ...BOUNDS, MAX_SUCCESS_WINDOW: 1, MAX_APPLIED_EVIDENCE_REFS: 1 } });
+    const a = sm2.assess("cap.a");
+    assert.ok(a.successWindow.history.length <= 1, "history must be trimmed to the active bound at construction");
+    assert.equal(a.successWindow.attempts, a.successWindow.history.length, "attempts must stay consistent with the trimmed history");
+});
+
 test("SM-repair-18: assess() never raw-throws when the capability registry returns a revoked-Proxy descriptor -- descriptorRef falls back to capabilityId, same as a missing descriptor.id (independent audit W7R50-ADV-1)", async () => {
     const { proxy, revoke } = Proxy.revocable({}, {});
     revoke();
