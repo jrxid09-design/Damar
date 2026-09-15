@@ -52,6 +52,36 @@ const STRUCTURAL_RELATIONSHIP_TYPES = Object.freeze([
 
 const CHANNEL_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,119}$/;
 
+const OBSERVATION_HEALTH_STATES = Object.freeze(
+    new Set(["OK", "DEGRADED", "SUSPECT", "FAILED"]));
+const OBSERVATION_FRAME_KINDS = Object.freeze(
+    new Set(["SCREEN", "ROOM", "GEO", "BODY", "LOGICAL"]));
+const OBSERVATION_CALIBRATION_FIELDS = Object.freeze(
+    ["calibrationRef", "appliedAt", "offsets", "scale", "validUntil"]);
+
+/**
+ * W8-L1 (frozen contract, "Malformed-input behavior"): `ingest()` accepts
+ * events from foreign/journal/queue callers that never went through
+ * `makeEvent()`'s `structuredCopy`+`deepFreeze` sanitization — a nested
+ * field here can be a live accessor. Read via descriptor, never a raw
+ * `[[Get]]`, so a hostile getter is rejected without ever being invoked.
+ */
+function safeOwnField(obj, key) {
+    let desc;
+    try {
+        desc = Object.getOwnPropertyDescriptor(obj, key);
+    } catch {
+        throw fail("EMB_INVALID_OBSERVATION_PAYLOAD",
+            `payload observasi tidak dapat diverifikasi dengan aman: '${key}'`);
+    }
+    if (!desc) return undefined;
+    if (desc.get || desc.set) {
+        throw fail("EMB_INVALID_OBSERVATION_PAYLOAD",
+            `payload observasi tidak boleh membawa properti accessor: '${key}'`);
+    }
+    return desc.value;
+}
+
 /** Urutan total KONTEN antar-pengamatan deskriptor. */
 function newerWins(a, b) {
     // 1) confidence lebih tinggi menang
@@ -394,10 +424,71 @@ class BodySchema {
         if (sample.length > 2048) {
             throw fail("EMB_OBSERVATION_TOO_LARGE", "sampel observasi > 2KB");
         }
+
+        // W8-L1 frozen contract: payload bertingkat baru (aditif, guard di
+        // atas tidak tersentuh). Field manapun yang cacat menolak SELURUH
+        // observasi -- tidak pernah aplikasi sebagian.
+        const healthState = safeOwnField(event.payload, "healthState");
+        if (healthState !== undefined && !OBSERVATION_HEALTH_STATES.has(healthState)) {
+            throw fail("EMB_INVALID_OBSERVATION_HEALTH_STATE",
+                `healthState observasi tidak dikenal: '${String(healthState)}'`);
+        }
+
+        const frame = safeOwnField(event.payload, "frame");
+        if (frame !== null && frame !== undefined) {
+            if (typeof frame !== "object" || Array.isArray(frame)) {
+                throw fail("EMB_INVALID_OBSERVATION_FRAME", "frame observasi wajib objek atau null");
+            }
+            const frameKind = safeOwnField(frame, "kind");
+            if (!OBSERVATION_FRAME_KINDS.has(frameKind)) {
+                throw fail("EMB_INVALID_OBSERVATION_FRAME",
+                    `frame.kind observasi tidak dikenal: '${String(frameKind)}'`);
+            }
+        }
+
+        const calibration = safeOwnField(event.payload, "calibration");
+        if (calibration !== null && calibration !== undefined) {
+            if (typeof calibration !== "object" || Array.isArray(calibration)) {
+                throw fail("EMB_INVALID_OBSERVATION_CALIBRATION", "calibration observasi wajib objek atau null");
+            }
+            let calibrationKeys;
+            try {
+                calibrationKeys = Object.keys(calibration);
+            } catch {
+                throw fail("EMB_INVALID_OBSERVATION_CALIBRATION",
+                    "calibration observasi tidak dapat diverifikasi dengan aman");
+            }
+            const extraOrMissing = calibrationKeys.length !== OBSERVATION_CALIBRATION_FIELDS.length
+                || calibrationKeys.some(k => !OBSERVATION_CALIBRATION_FIELDS.includes(k));
+            if (extraOrMissing) {
+                throw fail("EMB_INVALID_OBSERVATION_CALIBRATION",
+                    "calibration observasi wajib TEPAT lima field: calibrationRef, appliedAt, offsets, scale, validUntil");
+            }
+            for (const k of OBSERVATION_CALIBRATION_FIELDS) safeOwnField(calibration, k);
+        }
+
+        const quality = safeOwnField(event.payload, "quality");
+        if (quality !== null && quality !== undefined
+            && (typeof quality !== "object" || Array.isArray(quality))) {
+            throw fail("EMB_INVALID_OBSERVATION_QUALITY", "quality observasi wajib objek atau null");
+        }
+
+        const raw = safeOwnField(event.payload, "raw");
+        if (raw !== null && raw !== undefined) {
+            if (typeof raw !== "object" || Array.isArray(raw) || typeof safeOwnField(raw, "storageRef") !== "string") {
+                throw fail("EMB_INVALID_OBSERVATION_RAW", "raw observasi wajib { storageRef: string } atau null");
+            }
+        }
+
         return {
             kind: "observation", deviceId: event.subject,
             channelId: channel.id, modality: classification.modality,
-            sample: event.payload.sample ?? null
+            sample: event.payload.sample ?? null,
+            healthState: healthState ?? null,
+            frame: frame ?? null,
+            calibration: calibration ?? null,
+            quality: quality ?? null,
+            raw: raw ?? null
         };
     }
 
