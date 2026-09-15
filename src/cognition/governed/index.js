@@ -55,6 +55,9 @@ const MAX_PROJECTION_DEPTH = 16;
 const MAX_PROJECTION_NODES = 4096;
 
 function walkForAuthorityShapedFields(value, label, seen, budget, depth, requireFrozen = false) {
+    if (typeof value === "function") {
+        throw new Error(`ACC governed: ${label} tidak boleh berupa fungsi`);
+    }
     if (!value || typeof value !== "object") return;
     if (seen.has(value)) return;
     if (requireFrozen && !Object.isFrozen(value)) {
@@ -184,10 +187,21 @@ function validateGovernedCognitiveProjection(projection) {
  * revoked ledger never raises, it just means the transition goes
  * unaudited rather than crashing the caller.
  */
-function recordModeTransition({ auditLedger, from, to, at }) {
+function recordModeTransition(options) {
+    let auditLedger, from, to, at;
+    try {
+        const source = options && typeof options === "object" ? options : {};
+        const read = (key) => {
+            const descriptor = Object.getOwnPropertyDescriptor(source, key);
+            return descriptor && !descriptor.get && !descriptor.set ? descriptor.value : undefined;
+        };
+        auditLedger = read("auditLedger"); from = read("from"); to = read("to"); at = read("at");
+    } catch {
+        auditLedger = null; from = undefined; to = undefined; at = undefined;
+    }
     const safeAt = typeof at === "number" && Number.isFinite(at) ? at : null;
     const event = Object.freeze({
-        eventType: "cognition.governed.mode_transition",
+        eventType: "cognition.governed.mode.transition",
         source: "acc.governed",
         outcome: "ok",
         metadata: Object.freeze({ from: resolveMode(from), to: resolveMode(to), at: safeAt })

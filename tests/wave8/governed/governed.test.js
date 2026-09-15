@@ -100,7 +100,7 @@ test("FG03-14: recordModeTransition emits a well-shaped, resolved-mode audit eve
     const ledger = { append: (e) => events.push(e) };
     const returned = recordModeTransition({ auditLedger: ledger, from: "off", to: "governed", at: 1234 });
     assert.equal(events.length, 1);
-    assert.equal(events[0].eventType, "cognition.governed.mode_transition");
+    assert.equal(events[0].eventType, "cognition.governed.mode.transition");
     assert.equal(events[0].metadata.from, "off");
     assert.equal(events[0].metadata.to, "governed");
     assert.equal(events[0].metadata.at, 1234);
