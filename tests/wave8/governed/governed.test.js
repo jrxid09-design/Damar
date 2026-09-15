@@ -155,3 +155,16 @@ test("FG03-20: every export is frozen or a pure function -- governed holds no mu
     assert.ok(Object.isFrozen(MODES));
     assert.ok(Object.isFrozen(AUTHORITY_SHAPED_KEYS));
 });
+
+test("FG03-21: deep validation rejects proxy-hidden authority fields and contains async audit rejection", async () => {
+    const hidden = new Proxy(Object.freeze({ authProof: "forged" }), { ownKeys: () => [] });
+    const projection = Object.freeze({ schemaVersion: "governedCognitiveProjection.v1", decisionInfluence: "ADVISORY_ONLY", nested: hidden });
+    assert.throws(() => validateGovernedCognitiveProjection(projection), /dibekukan|authProof/);
+    let unhandled = false;
+    const listener = () => { unhandled = true; };
+    process.once("unhandledRejection", listener);
+    recordModeTransition({ auditLedger: { append: () => Promise.reject(new Error("down")) }, from: "off", to: "governed" });
+    await new Promise(resolve => setImmediate(resolve));
+    process.removeListener("unhandledRejection", listener);
+    assert.equal(unhandled, false);
+});
