@@ -42,13 +42,19 @@ function buildSafeSimValue(value, depth = 0, budget) {
 
     try {
         if (Array.isArray(value)) {
-            const len = value.length;
+            const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+            const len = lengthDescriptor && !lengthDescriptor.get && !lengthDescriptor.set ? lengthDescriptor.value : -1;
             if (!Number.isInteger(len) || len < 0) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array tidak sah");
             const out = [];
             for (let i = 0; i < len; i++) {
                 const desc = Object.getOwnPropertyDescriptor(value, i);
                 if (!desc || desc.get || desc.set) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `elemen array pada indeks '${i}' tidak boleh membawa properti accessor`);
                 out.push(buildSafeSimValue(desc.value, depth + 1, budget));
+            }
+            for (const key of Reflect.ownKeys(value)) {
+                if (key !== "length" && !(typeof key === "string" && /^(0|[1-9][0-9]*)$/.test(key) && Number(key) < len)) {
+                    fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "array tidak boleh membawa properti tambahan");
+                }
             }
             return out;
         }
@@ -116,7 +122,7 @@ function makeSimulationResult({ runId, distribution, risks, assumptions, confide
     });
     let size;
     try {
-        size = JSON.stringify(result).length;
+        size = Buffer.byteLength(JSON.stringify(result), "utf8");
     } catch {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "hasil simulasi tidak dapat diserialisasi dengan aman");
     }

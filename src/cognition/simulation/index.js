@@ -28,6 +28,15 @@ const { loadSnapshot, saveSnapshot } = require("./store");
 
 const HOURLY_WINDOW_MS = 3600000;
 
+function safeOutcomeValue(outcome, key, fallback) {
+    try {
+        const descriptor = outcome && Object.getOwnPropertyDescriptor(outcome, key);
+        return descriptor && !descriptor.get && !descriptor.set ? descriptor.value : fallback;
+    } catch {
+        return fallback;
+    }
+}
+
 async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS } = {}) {
     try {
         bounds = sanitizeBounds(BOUNDS, bounds);
@@ -47,6 +56,12 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
     // to the active bound before any record is exposed.
     {
         const maxRetained = Math.max(0, Math.trunc(bounds.MAX_RETAINED_RUNS));
+        for (const [runId, run] of runs) {
+            if (run.state === "RUNNING") {
+                runs.delete(runId);
+                results.delete(runId);
+            }
+        }
         while (runs.size > maxRetained) {
             let victimId = null, victimAt = Infinity;
             for (const r of runs.values()) {
@@ -103,7 +118,15 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
     async function startRun(spec) {
         let runId, question, scenario, initialStateRef, steps, horizonDays, budgetTokens, fidelity, provider;
         try {
-            ({ runId, question, scenario, initialStateRef, steps, horizonDays, budgetTokens, fidelity, provider } = spec || {});
+            const source = spec || {};
+            const read = (key) => {
+                const descriptor = Object.getOwnPropertyDescriptor(source, key);
+                if (!descriptor || descriptor.get || descriptor.set) throw new Error("accessor");
+                return descriptor.value;
+            };
+            runId = read("runId"); question = read("question"); scenario = read("scenario");
+            initialStateRef = read("initialStateRef"); steps = read("steps"); horizonDays = read("horizonDays");
+            budgetTokens = read("budgetTokens"); fidelity = read("fidelity"); provider = read("provider");
         } catch {
             fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
         }
@@ -122,6 +145,8 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
 
         const run = makeSimulationRun({ runId, question, scenario, initialStateRef, steps, horizonDays, budgetTokens, fidelity, nowMs }, bounds);
         runs.set(run.runId, run);
+        const reservation = { atMs: nowMs, tokens: budgetTokens };
+        tokenLedger.push(reservation);
 
         let outcome;
         try {
@@ -130,28 +155,50 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
             outcome = null; // provider failure -> FAILED, planning is told, never silently proceeds as if it succeeded
         }
 
-        const tokensUsed = (outcome && Number.isFinite(outcome.tokensUsed)) ? Math.max(0, outcome.tokensUsed) : 0;
-        tokenLedger.push({ atMs: nowMs, tokens: tokensUsed });
+        let tokensUsed = 0;
+        let reportedTokensUsed = 0;
+        try {
+            const descriptor = outcome && Object.getOwnPropertyDescriptor(outcome, "tokensUsed");
+            if (descriptor && !descriptor.get && !descriptor.set && Number.isFinite(descriptor.value)) {
+                reportedTokensUsed = Math.max(0, descriptor.value);
+                tokensUsed = Math.min(run.budgetTokens, reportedTokensUsed);
+            }
+            else if (outcome) outcome = null;
+        } catch { outcome = null; }
+        reservation.tokens = tokensUsed;
 
         let state;
         if (!outcome) {
             state = "FAILED";
-        } else if (tokensUsed > run.budgetTokens) {
+        } else if (reportedTokensUsed > run.budgetTokens) {
             state = "TRUNCATED"; // budget exhausted mid-run -- explicitly marked incomplete, never presented as complete
         } else {
             state = "COMPLETE";
         }
 
-        const result = makeSimulationResult({
-            runId: run.runId,
-            distribution: outcome ? outcome.distribution : null,
-            risks: outcome ? outcome.risks : [],
-            assumptions: outcome ? outcome.assumptions : [],
-            confidence: outcome ? outcome.confidence : 0,
-            state, tokensUsed,
-            validUntilMs: nowMs + Math.max(0, Math.trunc(bounds.TTL_MS)),
-            nowMs
-        }, bounds);
+        let result;
+        try {
+            result = makeSimulationResult({
+                runId: run.runId,
+                distribution: outcome ? safeOutcomeValue(outcome, "distribution", null) : null,
+                risks: outcome ? safeOutcomeValue(outcome, "risks", []) : [],
+                assumptions: outcome ? safeOutcomeValue(outcome, "assumptions", []) : [],
+                confidence: outcome ? safeOutcomeValue(outcome, "confidence", 0) : 0,
+                state, tokensUsed,
+                validUntilMs: nowMs + Math.max(0, Math.trunc(bounds.TTL_MS)),
+                nowMs
+            }, bounds);
+        } catch {
+            state = "FAILED";
+            try {
+                result = makeSimulationResult({ runId: run.runId, distribution: null, risks: [], assumptions: [], confidence: 0,
+                    state, tokensUsed: 0, validUntilMs: nowMs + Math.max(0, Math.trunc(bounds.TTL_MS)), nowMs }, bounds);
+            } catch (fatal) {
+                runs.delete(run.runId);
+                results.delete(run.runId);
+                throw fatal;
+            }
+        }
 
         runs.set(run.runId, Object.freeze({ ...run, state }));
         results.set(run.runId, result);
