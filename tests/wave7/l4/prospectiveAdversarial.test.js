@@ -73,6 +73,22 @@ test("PM-repair-63: an AT trigger with a stateful getter for a non-named ('extra
     assert.equal(n, 0, "trigger.extra's getter must never be invoked");
 });
 
+test("PM-repair-64: an AT trigger carrying an enumerable data property '__proto__' is rejected, not silently accepted with the value dropped -- validateTrigger's descriptor-copy accumulator was a plain {} literal, so `safeTrigger['__proto__'] = desc.value` set the accumulator's PROTOTYPE instead of an own property, hiding the dangerous key from downstream validation entirely (independent audit round 68, Codex, AUD68-P2-1)", async () => {
+    const pm = await createProspectiveMemory();
+    const trigger = { kind: "AT", at: new Date(9e12).toISOString() };
+    Object.defineProperty(trigger, "__proto__", { enumerable: true, configurable: true, value: { capabilityId: "forged" } });
+    assertThrowsReason(() => pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger }), "EXECUTABLE_MATERIAL_REJECTED");
+});
+
+test("PM-repair-65: armExpectation's window with a stateful getter for a non-named ('extra', rest-captured) field is rejected without the getter ever being invoked -- makeExpectation's old rest-destructure (...windowRest) performed an ordinary [[Get]]/rest-spread over every property of window, executing any accessor before buildSafePayloadRef could sanitize it; window is now sanitized via buildSafePayloadRef FIRST, and latestAt/earliestAt are derived from that safe copy (independent audit round 68, Codex, AUD68-P2-2)", async () => {
+    const pm = await createProspectiveMemory();
+    let n = 0;
+    const window = { latestAt: new Date(9e12).toISOString() };
+    Object.defineProperty(window, "extra", { enumerable: true, configurable: true, get() { n++; return { authProof: "forged" }; } });
+    assertThrowsReason(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "a", expectedValue: 1, window }), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(n, 0, "window.extra's getter must never be invoked");
+});
+
 test("PM-repair-23: armExpectation(null) is rejected as INVALID_RECORD, not a raw TypeError -- arm()'s sibling in the same file was missed in round 21 (independent audit AUD22-F-4)", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.armExpectation(null), "INVALID_RECORD");
@@ -334,18 +350,18 @@ test("PM-repair-53: arm/armExpectation fail closed (not raw-throw) on a revoked-
     assertThrowsReason(() => pm.armExpectation(rev()), "INVALID_RECORD");
 });
 
-test("PM-repair-54: armExpectation fails closed (not raw-throw) on a revoked-Proxy NESTED window argument, one level below where round 44's subject/expectedValue guard stopped (independent audit W7R45-P2-6)", async () => {
+test("PM-repair-54: armExpectation fails closed (not raw-throw) on a revoked-Proxy NESTED window argument, one level below where round 44's subject/expectedValue guard stopped (independent audit W7R45-P2-6; reason superseded in round 68, AUD68-P2-2 -- window is now sanitized via buildSafePayloadRef BEFORE the latestAt-specific check ever runs, so a revoked proxy fails closed as EXECUTABLE_MATERIAL_REJECTED, not NO_LATEST_AT)", async () => {
     const pm = await createProspectiveMemory();
     const r = Proxy.revocable({}, {});
     r.revoke();
-    assertThrowsReason(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "a", expectedValue: "x", window: r.proxy }), "NO_LATEST_AT");
+    assertThrowsReason(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "a", expectedValue: "x", window: r.proxy }), "EXECUTABLE_MATERIAL_REJECTED");
 });
 
-test("PM-repair-55: armExpectation rejects a non-string window.earliestAt (including a revoked Proxy) instead of raw-throwing inside Date.parse's implicit ToString, closing the gap round 45's own window fix left in its sibling field (independent audit W7R46-P2-2)", async () => {
+test("PM-repair-55: armExpectation rejects a non-string window.earliestAt (including a revoked Proxy) instead of raw-throwing inside Date.parse's implicit ToString, closing the gap round 45's own window fix left in its sibling field (independent audit W7R46-P2-2; reason superseded in round 68, AUD68-P2-2 -- window is now sanitized whole via buildSafePayloadRef BEFORE latestAt/earliestAt are read, so a revoked proxy nested at earliestAt fails closed as EXECUTABLE_MATERIAL_REJECTED, not NO_LATEST_AT)", async () => {
     const pm = await createProspectiveMemory();
     const r = Proxy.revocable({}, {});
     r.revoke();
-    assertThrowsReason(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "a", expectedValue: 1, window: { latestAt: new Date(1).toISOString(), earliestAt: r.proxy } }), "NO_LATEST_AT");
+    assertThrowsReason(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "a", expectedValue: 1, window: { latestAt: new Date(1).toISOString(), earliestAt: r.proxy } }), "EXECUTABLE_MATERIAL_REJECTED");
 });
 
 test("PM-repair-49: compaction only removes a victim's OWN firedOccurrenceIds entries, not a differently-terminated reminder whose id happens to be a string-prefix of the victim's (independent audit AUD38-ADV-1)", async () => {
@@ -379,14 +395,13 @@ test("PM-repair-46: expectationId is read exactly once end-to-end in armExpectat
     assert.equal(e.expectationId, "E1");
 });
 
-test("PM-repair-38: window.latestAt/earliestAt are read exactly once, so a stateful getter cannot pass validation with a valid date and store an invalid one (independent audit AUD32-P2-2)", async () => {
+test("PM-repair-38: window.latestAt is rejected outright when it is a stateful getter, never invoked -- superseded, stronger contract than the original 'read exactly once' guarantee (independent audit AUD32-P2-2; strengthened round 68, AUD68-P2-2, once window is sanitized whole via buildSafePayloadRef before latestAt is read at all)", async () => {
     const pm = await createProspectiveMemory({ clock: manualClock(100) });
     let n = 0;
     const window = {};
     Object.defineProperty(window, "latestAt", { enumerable: true, configurable: true, get() { n++; return new Date(1000).toISOString(); } });
-    const e = pm.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: "done", window });
-    assert.equal(n, 1, "window.latestAt must be read exactly once");
-    assert.ok(Number.isFinite(Date.parse(e.window.latestAt)), "the stored latestAt must be the same valid date that was validated");
+    assertThrowsReason(() => pm.armExpectation({ subject: { entityId: "e1" }, attribute: "status", expectedValue: "done", window }), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(n, 0, "window.latestAt's getter must never be invoked");
 });
 
 test("PM-repair-36: ownerRef is read exactly once, so a stateful getter cannot exceed MAX_REMINDERS_PER_GOAL via inconsistent reads (independent audit AUD31-P2-4)", async () => {
