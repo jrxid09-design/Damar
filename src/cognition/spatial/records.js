@@ -111,6 +111,24 @@ function buildSafeSpatialValue(value, depth = 0, budget) {
                 if (!desc || desc.get || desc.set) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `elemen array pada indeks '${i}' tidak boleh membawa properti accessor`);
                 out.push(buildSafeSpatialValue(desc.value, depth + 1, budget));
             }
+            // Bug review independen (audit round 2, Codex, AUDL3-P2-2): cabang
+            // array di atas hanya memvalidasi indeks numerik -- properti OWN
+            // NON-indeks (mis. `toJSON` fungsi, atau kunci berbahaya) tidak
+            // pernah divalidasi sama sekali, membiarkan materi eksekusi lolos
+            // dan (via canonicalRegionKey) dua region yang SECARA SEMANTIK
+            // berbeda collapse jadi kunci yang sama. Sibling PERSIS dari
+            // worldmodel's buildSafeArray fix (putaran-67 audit Wave7) --
+            // properti non-indeks divalidasi (ditolak kalau berbahaya) walau
+            // tidak pernah disalin ke `out`.
+            const ARRAY_INDEX_PATTERN = /^(0|[1-9][0-9]*)$/;
+            for (const key of Reflect.ownKeys(value)) {
+                if (key === "length" || (typeof key === "string" && ARRAY_INDEX_PATTERN.test(key) && Number(key) < len)) continue;
+                if (typeof key === "symbol") fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "nilai spasial tidak boleh membawa kunci Symbol pada array");
+                if (DANGEROUS_KEYS.includes(key)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `kunci berbahaya ditolak pada array: '${key}'`);
+                const extraDesc = Object.getOwnPropertyDescriptor(value, key);
+                if (!extraDesc || extraDesc.get || extraDesc.set) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `properti array '${key}' tidak boleh membawa properti accessor`);
+                buildSafeSpatialValue(extraDesc.value, depth + 1, budget); // divalidasi, tidak disalin -- sama seperti worldmodel's buildSafeArray
+            }
             return out;
         }
         const proto = Object.getPrototypeOf(value);
