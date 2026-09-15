@@ -235,6 +235,15 @@ function bridgeSensoriumPairKey(subject, channelId) {
     return `${subject}\u0000${channelId}`;
 }
 
+function resolveSensorRateModality(raw) {
+    if (typeof raw !== "string") return "OTHER";
+    const upper = raw.toUpperCase();
+    if (Object.prototype.hasOwnProperty.call(SENSOR_OBSERVATION_RATE_CAP_PER_SEC, upper)) return upper;
+    const prefix = upper.split(/[.:/_-]/, 1)[0];
+    if (Object.prototype.hasOwnProperty.call(SENSOR_OBSERVATION_RATE_CAP_PER_SEC, prefix)) return prefix;
+    return toSensorModality(raw.toLowerCase());
+}
+
 /**
  * bridgeSensoriumToWorldModel({ body, worldModel, clock, auditLedger })
  * -> { applyObservationPlan(event, result) }
@@ -323,18 +332,23 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         const channel = payload && readDataProperty(payload, "channel");
         const channelIdRead = channel.ok ? readDataProperty(channel.value, "id") : { ok: false };
         const channelId = channelIdRead.value;
-        const modality = resultModality.ok && Object.prototype.hasOwnProperty.call(SENSOR_OBSERVATION_RATE_CAP_PER_SEC, resultModality.value)
-            ? resultModality.value
-            : (resultChannel.ok ? toSensorModality(resultChannel.value) : toSensorModality(channelId));
+        const modality = resultModality.ok ? resultModality.value
+            : (resultChannel.ok ? resultChannel.value : channelId);
         const monotonic = monotonicRead.ok ? monotonicRead.value : undefined;
         const timestampMs = timestampRead.ok ? timestampRead.value : undefined;
         if (!payload || !channelIdRead.ok) return { applied: false, reason: "malformed-observation" };
+        if (payload.raw && typeof payload.raw === "object" &&
+            payload.raw.storageRef !== undefined &&
+            (typeof payload.raw.storageRef !== "string" || !/^media:[A-Za-z0-9._:-]{1,128}$/.test(payload.raw.storageRef))) {
+            return { applied: false, reason: "non-canonical-media-reference" };
+        }
         if (typeof subject !== "string" || typeof channelId !== "string") {
             return { applied: false, reason: "missing-identity" };
         }
         const key = bridgeSensoriumPairKey(subject, channelId);
         const prior = tracked.get(key);
-        if (prior?.failed && !result.reconnected) return { applied: false, reason: "sensor-failed" };
+        const reconnectedRead = readDataProperty(result, "reconnected");
+        if (prior?.failed && !(reconnectedRead.ok && reconnectedRead.value === true)) return { applied: false, reason: "sensor-failed" };
 
         // Dedup: a non-increasing `monotonic` for the same (subject, channel)
         // is a duplicate/replay — idempotent no-op, never a duplicate belief.
@@ -345,7 +359,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
 
         // Per-sensor rate cap: sample down (drop the intermediate sample,
         // never buffer unboundedly) rather than reject/queue.
-        const rateCap = SENSOR_OBSERVATION_RATE_CAP_PER_SEC[toSensorModality(modality)] ?? SENSOR_OBSERVATION_DEFAULT_RATE_CAP_PER_SEC;
+        const rateCap = SENSOR_OBSERVATION_RATE_CAP_PER_SEC[resolveSensorRateModality(modality)] ?? SENSOR_OBSERVATION_DEFAULT_RATE_CAP_PER_SEC;
         const minIntervalMs = 1000 / rateCap;
         const receivedAtMs = nowMs();
         if (prior && (receivedAtMs - prior.lastAppliedMs) < minIntervalMs) {
