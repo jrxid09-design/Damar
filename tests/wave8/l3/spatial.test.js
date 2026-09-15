@@ -206,3 +206,30 @@ test("L3-20: a Symbol frameId to queryOccupancy fails closed as INVALID_RECORD, 
     const sm = await createSpatialModel();
     assertThrowsReason(() => sm.queryOccupancy({ frameId: Symbol("x"), region: null }), "INVALID_RECORD");
 });
+
+test("L3-21: evicting a frame at cap also evicts every scene node it owns -- orphaned geometry must never remain queryable as KNOWN (independent audit round 2, Codex, AUDL3-P1-1)", async () => {
+    const sm = await createSpatialModel({ bounds: { ...BOUNDS, MAX_FRAMES: 1 } });
+    sm.registerFrame({ frameId: "a", kind: "ROOM", ref: {}, source: "s" });
+    sm.reportOccupancy({ frameId: "a", region: { c: 1 }, state: "KNOWN", observationRef: "o1" });
+    sm.registerFrame({ frameId: "b", kind: "ROOM", ref: {}, source: "s" }); // evicts "a" at cap 1
+    const scene = sm.getScene();
+    assert.ok(!scene.sceneNodes.some(n => n.frameId === "a"), "no scene node may reference the evicted frame");
+});
+
+test("L3-22: a hostile accessor on a queryReachability path element is rejected without ever being invoked (independent audit round 2, Codex, AUDL3-P2-1)", async () => {
+    const sm = await createSpatialModel();
+    sm.registerFrame({ frameId: "a", kind: "ROOM", ref: {}, source: "s" });
+    let n = 0;
+    const path = [{}];
+    Object.defineProperty(path, 0, { enumerable: true, configurable: true, get() { n++; return { c: 1 }; } });
+    assertThrowsReason(() => sm.queryReachability({ frameId: "a", path }), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(n, 0, "path[0]'s getter must never be invoked");
+});
+
+test("L3-23: an array region with an enumerable non-index 'toJSON' function is rejected outright, not silently ignored and collapsed with a semantically-different region (independent audit round 2, Codex, AUDL3-P2-2)", async () => {
+    const sm = await createSpatialModel();
+    sm.registerFrame({ frameId: "a", kind: "ROOM", ref: {}, source: "s" });
+    const region = [];
+    Object.defineProperty(region, "toJSON", { enumerable: true, configurable: true, value: () => [] });
+    assertThrowsReason(() => sm.reportOccupancy({ frameId: "a", region, state: "KNOWN", observationRef: "o1" }), "EXECUTABLE_MATERIAL_REJECTED");
+});

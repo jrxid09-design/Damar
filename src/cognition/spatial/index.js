@@ -19,7 +19,7 @@ const { REASONS, fail } = require("./errors");
 const { BOUNDS, SCHEMA_VERSION } = require("./bounds");
 const { sanitizeBounds } = require("../core/bounds");
 const { laws } = require("./laws");
-const { makeFrame, makeTransform, makeSceneNode, readSpecFields, requireStringId, canonicalRegionKey } = require("./records");
+const { makeFrame, makeTransform, makeSceneNode, readSpecFields, requireStringId, canonicalRegionKey, buildSafeSpatialValue } = require("./records");
 const { loadSnapshot, saveSnapshot } = require("./store");
 const { freshnessBand } = require("../../mataDewa/spatial/epistemic");
 
@@ -76,6 +76,15 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
             }
             if (!victimId) break;
             frames.delete(victimId);
+            // Bug review independen (audit round 2, Codex, AUDL3-P1-1):
+            // mengevict frame TANPA mengevict scene node yang menunjuk ke
+            // frame itu membuat geometri yatim tetap queryable sebagai KNOWN
+            // -- getScene()/queryOccupancy() melaporkan occupancy untuk frame
+            // yang sudah tidak ada, melanggar konsistensi snapshot dan bisa
+            // meloloskan precondition fisik pakai geometri basi.
+            for (const [k, n] of [...sceneNodes]) {
+                if (n.frameId === victimId) sceneNodes.delete(k);
+            }
         }
         const maxNodes = Math.max(0, Math.trunc(bounds.MAX_SCENE_NODES));
         while (sceneNodes.size > maxNodes) {
@@ -121,6 +130,12 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
                     fail(REASONS.BOUND_EXCEEDED, `retensi frame melebihi batas (${maxFrames}) dan tidak ada frame tak-terpakai untuk dievict`);
                 }
                 frames.delete(victimId);
+                // AUDL3-P1-1 sibling: evicting a frame at insert-time must
+                // also evict any scene node it owns, same as the
+                // construction-time compaction fix above.
+                for (const [k, n] of [...sceneNodes]) {
+                    if (n.frameId === victimId) sceneNodes.delete(k);
+                }
             }
         }
         frames.set(frame.frameId, frame);
@@ -247,11 +262,24 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
     function queryReachability(spec) {
         const { frameId, path } = readSpecFields(spec, ["frameId", "path"]);
         requireStringId(frameId, "frameId");
+        // Bug review independen (audit round 2, Codex, AUDL3-P2-1): `[...path]`
+        // adalah spread biasa -- iterator/index [[Get]] yang mengeksekusi
+        // accessor pada elemen manapun SEBELUM sanitasi apa pun berjalan.
+        // Disaring sekali lewat buildSafeSpatialValue (descriptor-based,
+        // sekarang juga memvalidasi properti non-indeks per AUDL3-P2-2),
+        // bukan spread mentah.
         let hops;
-        try {
-            hops = Array.isArray(path) ? [...path] : [];
-        } catch {
-            fail(REASONS.INVALID_RECORD, "path tidak dapat diverifikasi dengan aman, ditolak");
+        if (path === null || path === undefined) {
+            hops = [];
+        } else {
+            let isArray;
+            try {
+                isArray = Array.isArray(path);
+            } catch {
+                fail(REASONS.INVALID_RECORD, "path tidak dapat diverifikasi dengan aman, ditolak");
+            }
+            if (!isArray) fail(REASONS.INVALID_RECORD, "path wajib array");
+            hops = buildSafeSpatialValue(path);
         }
         const maxPath = Math.max(0, Math.trunc(bounds.MAX_REACHABILITY_PATH_LENGTH));
         if (hops.length > maxPath) fail(REASONS.BOUND_EXCEEDED, `panjang path reachability melebihi batas (${maxPath})`);
