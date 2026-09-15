@@ -180,6 +180,27 @@ test("WM-repair-104: declareEntity/declareHypothesis honor a caller-sanctioned o
     assert.equal(n, 0, "externalRefs[0]'s getter must never be invoked -- elements are read via descriptor, not raw [[Get]]");
 });
 
+test("WM-repair-105: declareEntity rejects an enumerable data '__proto__' label key instead of silently dropping it -- validateLabels's `{}` accumulator let `out['__proto__'] = value` reassign the accumulator's PROTOTYPE instead of an own property, making the dangerous key invisible in the returned labels object (independent audit round 69, Codex, AUD69-P2-1)", async () => {
+    const wm = await createWorldModel();
+    const labels = {};
+    Object.defineProperty(labels, "__proto__", { enumerable: true, configurable: true, value: { forgedLabel: "attacker-controlled" } });
+    assertThrowsReason(() => wm.declareEntity({
+        entityId: "e105", entityKind: "device", source: "s", labels
+    }), "INVALID_RECORD");
+});
+
+test("WM-repair-106: declareEntity rejects an externalRefs element whose system/id are stateful getters, without ever invoking them -- makeEntity's externalRefs map callback destructured `({ system, id } = r)` raw, an ordinary [[Get]] that executes any accessor before sanitization (independent audit round 69, Codex, AUD69-P2-2)", async () => {
+    const wm = await createWorldModel();
+    let n = 0;
+    const externalRef = {};
+    Object.defineProperty(externalRef, "system", { enumerable: true, configurable: true, get() { n++; return "sensor"; } });
+    Object.defineProperty(externalRef, "id", { enumerable: true, configurable: true, get() { n++; return "r106"; } });
+    assertThrowsReason(() => wm.declareEntity({
+        entityId: "e106", entityKind: "device", source: "s", externalRefs: [externalRef]
+    }), "INVALID_RECORD");
+    assert.equal(n, 0, "externalRef.system/.id getters must never be invoked");
+});
+
 test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });
@@ -536,14 +557,13 @@ test("WM-repair-60: subjectKeyOf reads subject.entityId exactly once, so a state
     assert.equal(n, 1, "entityId must be read exactly once");
 });
 
-test("WM-repair-61: makeEntity's externalRefs[].system/id are each read exactly once, so a stateful getter cannot pass the guard and then crash .slice() (independent audit AUD35-P2-3)", async () => {
+test("WM-repair-61: makeEntity's externalRefs[].system is rejected outright when it is a stateful getter, never invoked -- superseded, stronger contract than the original 'read exactly once' guarantee (independent audit AUD35-P2-3; strengthened round 69, AUD69-P2-2, once system/id are read via descriptor before any value is extracted)", async () => {
     const wm = await createWorldModel();
     let n = 0;
     const ref = { id: "i1" };
     Object.defineProperty(ref, "system", { enumerable: true, configurable: true, get() { n++; return n === 1 ? "sys" : Symbol("boom"); } });
-    const e = wm.declareEntity({ entityId: "e1", entityKind: "d", source: "s", externalRefs: [ref] });
-    assert.equal(n, 1, "externalRefs[].system must be read exactly once");
-    assert.equal(e.externalRefs[0].system, "sys");
+    assertThrowsReason(() => wm.declareEntity({ entityId: "e1", entityKind: "d", source: "s", externalRefs: [ref] }), "INVALID_RECORD");
+    assert.equal(n, 0, "externalRefs[].system's getter must never be invoked");
 });
 
 test("WM-repair-62: makeHypothesis's candidateValues[].weight is read exactly once, so a stateful getter cannot pass the guard and then crash Number() (independent audit AUD35-P2-4)", async () => {

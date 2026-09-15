@@ -12,6 +12,7 @@ const { BOUNDS } = require("./bounds");
 const { buildSafeBeliefValue } = require("./beliefAlgebra");
 
 const ADMISSIBLE_TIERS = new Set(["T1", "T2", "T4"]);
+const DANGEROUS_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 
 // Bug review independen (audit putaran-40, AUD40-P2-2; sibling dari
 // AUD39-P2-2 di metacog): `arr.map(cb)` MELEWATI lubang (hole) pada array
@@ -101,6 +102,15 @@ function validateLabels(labels, bounds = BOUNDS) {
     }
     const out = {};
     for (const key of keys) {
+        // Bug review independen (audit putaran-69, Codex, AUD69-P2-1): sebuah
+        // key "__proto__" (data property biasa yang enumerable) tidak pernah
+        // ditolak di sini -- `out[key] = value` pada `{}` biasa untuk key
+        // "__proto__" diam-diam mengubah PROTOTYPE akumulator, bukan
+        // menyimpan properti sendiri, jadi key berbahaya lolos lalu HILANG
+        // dari labels yang dikembalikan (bukan ditolak fail-closed).
+        if (DANGEROUS_KEYS.includes(key)) {
+            fail(REASONS.INVALID_RECORD, `kunci label berbahaya ditolak: '${key}'`);
+        }
         // Bug review independen (audit putaran-40, AUD40-ADV-2): `labels[key]`
         // adalah [[Get]] biasa -- accessor (getter) milik pemanggil
         // tereksekusi satu kali per kunci. Dibaca lewat
@@ -188,12 +198,28 @@ function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, n
             // adalah ELEMEN array milik pemanggil -- round-21/42 menjaga
             // KONTAINER externalRefs, tapi setiap ELEMEN di dalamnya masih
             // didestrukturisasi mentah di sini.
-            let system, id;
+            // Bug review independen (audit putaran-69, Codex, AUD69-P2-2):
+            // destructuring `({ system, id } = r)` di atas adalah [[Get]]
+            // BIASA -- accessor (getter) milik pemanggil pada `system`/`id`
+            // tereksekusi di sini, SEBELUM sanitasi apa pun. Dibaca lewat
+            // getOwnPropertyDescriptor (tidak pernah memanggil getter);
+            // properti accessor ditolak fail-closed, bukan diam-diam
+            // dijalankan.
+            let sysDesc, idDesc;
             try {
-                ({ system, id } = r);
+                sysDesc = Object.getOwnPropertyDescriptor(r, "system");
+                idDesc = Object.getOwnPropertyDescriptor(r, "id");
             } catch {
                 fail(REASONS.INVALID_RECORD, "externalRefs elemen tidak dapat diverifikasi dengan aman, ditolak");
             }
+            if (sysDesc && (sysDesc.get || sysDesc.set)) {
+                fail(REASONS.INVALID_RECORD, "externalRefs[].system tidak boleh membawa properti accessor");
+            }
+            if (idDesc && (idDesc.get || idDesc.set)) {
+                fail(REASONS.INVALID_RECORD, "externalRefs[].id tidak boleh membawa properti accessor");
+            }
+            const system = sysDesc ? sysDesc.value : undefined;
+            const id = idDesc ? idDesc.value : undefined;
             if (typeof system !== "string" || !system) fail(REASONS.INVALID_RECORD, "externalRefs[].system wajib string");
             if (typeof id !== "string" || !id) fail(REASONS.INVALID_RECORD, "externalRefs[].id wajib string");
             return Object.freeze({ system: system.slice(0, 64), id: id.slice(0, 200) });
