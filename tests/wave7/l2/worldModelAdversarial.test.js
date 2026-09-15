@@ -162,6 +162,24 @@ test("WM-repair-103: ingestObservation's makeObservation-level subject pre-check
     }), "EXECUTABLE_MATERIAL_REJECTED");
 });
 
+test("WM-repair-104: declareEntity/declareHypothesis honor a caller-sanctioned override of MAX_VALUE_ARRAY_LENGTH for externalRefs/candidateValues, and reject an array element carrying an accessor without ever invoking it -- buildSafeArray in this file read the module's fixed BOUNDS constant directly AND used a raw arr[i] read (executing any getter), unlike every other trap-safe sanitizer in the codebase (independent audit round 67, Codex, AUD67-P2-1/AUD67-P2-2)", async () => {
+    const wmLen = await createWorldModel({ bounds: { MAX_VALUE_ARRAY_LENGTH: 0 } });
+    assertThrowsReason(() => wmLen.declareEntity({
+        entityId: "e1", entityKind: "thing", source: "s",
+        externalRefs: [{ system: "x", id: "y" }]
+    }), "INVALID_RECORD");
+
+    const wmAcc = await createWorldModel();
+    let n = 0;
+    const externalRefs = [];
+    Object.defineProperty(externalRefs, 0, { enumerable: true, configurable: true, get() { n++; return { system: "x", id: "y" }; } });
+    Object.defineProperty(externalRefs, "length", { value: 1 });
+    assertThrowsReason(() => wmAcc.declareEntity({
+        entityId: "e2", entityKind: "thing", source: "s", externalRefs
+    }), "INVALID_RECORD");
+    assert.equal(n, 0, "externalRefs[0]'s getter must never be invoked -- elements are read via descriptor, not raw [[Get]]");
+});
+
 test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });

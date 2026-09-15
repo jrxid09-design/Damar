@@ -39,33 +39,42 @@ const ADMISSIBLE_TIERS = new Set(["T1", "T2", "T4"]);
 // dibatasi eksplisit sebelum loop dimulai.
 // Bug review independen (audit putaran-43, W7R43-ADV-1): `65536` adalah
 // konstanta arbitrer independen dari batas lane manapun -- dipakai kembali
-// `BOUNDS.MAX_VALUE_ARRAY_LENGTH` (batas yang sudah dipakai buildSafeBeliefValue
+// `MAX_VALUE_ARRAY_LENGTH` (batas yang sudah dipakai buildSafeBeliefValue
 // untuk array `value` di lane yang SAMA) supaya konsisten, bukan generik.
-const MAX_SAFE_ARRAY_LENGTH = BOUNDS.MAX_VALUE_ARRAY_LENGTH;
-function buildSafeArray(arr, mapFn) {
-    // Bug review independen (audit putaran-53, AUD53-P2-1, sapuan
-    // paritas): sibling dari goals/metacog's buildSafeArray -- kedua
-    // pemanggil di file ini sudah `.slice()` lebih dulu, tapi helper
-    // ITU SENDIRI tetap harus trap-safe supaya kelas ini tidak
-    // terbuka lagi kalau ada pemanggil baru tanpa slice di masa depan.
+// (Putaran-67: dibaca dari `bounds` yang sudah disanitasi per-instance,
+// bukan lagi konstanta modul tetap -- lihat komentar di bawah.)
+// Bug review independen (audit putaran-67, Codex, AUD67-P2-1/P2-2):
+// (a) fungsi ini membaca `MAX_SAFE_ARRAY_LENGTH` (alias BOUNDS modul
+// TETAP) langsung, bukan `bounds` yang sudah disanitasi per-instance --
+// override pemanggil (mis. MAX_VALUE_ARRAY_LENGTH:0) diam-diam
+// diabaikan. (b) `element = arr[i]` adalah [[Get]] BIASA -- accessor
+// (getter) milik pemanggil pada indeks manapun TEREKSEKUSI, kelas yang
+// sama yang sudah ditutup di banyak sanitizer lain (round 44) tapi
+// tidak pernah menjangkau buildSafeArray INI. Dibaca lewat
+// getOwnPropertyDescriptor (tidak pernah memanggil getter); properti
+// accessor ditolak tertutup.
+function buildSafeArray(arr, mapFn, bounds = BOUNDS) {
     let len;
     try {
         len = arr.length;
     } catch {
         fail(REASONS.INVALID_RECORD, "panjang array tidak dapat diverifikasi dengan aman, ditolak");
     }
-    if (!Number.isInteger(len) || len < 0 || len > MAX_SAFE_ARRAY_LENGTH) {
+    if (!Number.isInteger(len) || len < 0 || len > bounds.MAX_VALUE_ARRAY_LENGTH) {
         fail(REASONS.INVALID_RECORD, "panjang array tidak sah atau melebihi batas");
     }
     const out = [];
     for (let i = 0; i < len; i++) {
-        let element;
+        let desc;
         try {
-            element = arr[i];
+            desc = Object.getOwnPropertyDescriptor(arr, i);
         } catch {
             fail(REASONS.INVALID_RECORD, `elemen array pada indeks '${i}' tidak dapat diverifikasi dengan aman, ditolak`);
         }
-        out.push(mapFn(element, i));
+        if (!desc || desc.get || desc.set) {
+            fail(REASONS.INVALID_RECORD, `elemen array pada indeks '${i}' tidak boleh membawa properti accessor`);
+        }
+        out.push(mapFn(desc.value, i));
     }
     return out;
 }
@@ -134,6 +143,15 @@ function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, n
     // yang sudah di-revoke melempar TypeError MENTAH pada `Array.isArray`
     // maupun `.slice()` -- keduanya dibungkus try/catch supaya kegagalan
     // APA PUN di sini gagal tertutup, bukan crash keluar dari API publik ini.
+    // Bug review independen (audit putaran-67, Codex, AUD67-P2-2): `.slice(0,32)`
+    // di sini dulu membaca SETIAP elemen lewat [[Get]] BIASA SEBELUM
+    // buildSafeArray sempat memprosesnya secara trap-safe -- accessor
+    // (getter) milik pemanggil pada indeks manapun TEREKSEKUSI di sini,
+    // membuat perbaikan buildSafeArray sendiri (descriptor-based) tidak
+    // pernah tercapai untuk elemen manapun. `safeExternalRefs` sekarang
+    // array MENTAH (hanya identitas-nya divalidasi); pemotongan ke 32
+    // dipindah SESUDAH buildSafeArray (lihat di bawah), pada salinan
+    // POLOS yang sudah kita bangun sendiri -- slice di situ 100% aman.
     let safeExternalRefs;
     if (externalRefs === undefined || externalRefs === null) {
         safeExternalRefs = [];
@@ -145,11 +163,7 @@ function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, n
             fail(REASONS.INVALID_RECORD, "externalRefs tidak dapat diverifikasi dengan aman, ditolak");
         }
         if (!isRefsArray) fail(REASONS.INVALID_RECORD, "externalRefs wajib array");
-        try {
-            safeExternalRefs = externalRefs.slice(0, 32);
-        } catch {
-            fail(REASONS.INVALID_RECORD, "externalRefs tidak dapat diiris dengan aman, ditolak");
-        }
+        safeExternalRefs = externalRefs;
     }
 
     return Object.freeze({
@@ -183,7 +197,7 @@ function makeEntity({ entityId, entityKind, labels, externalRefs = [], source, n
             if (typeof system !== "string" || !system) fail(REASONS.INVALID_RECORD, "externalRefs[].system wajib string");
             if (typeof id !== "string" || !id) fail(REASONS.INVALID_RECORD, "externalRefs[].id wajib string");
             return Object.freeze({ system: system.slice(0, 64), id: id.slice(0, 200) });
-        })),
+        }, bounds).slice(0, 32)),
         source
     });
 }
@@ -354,12 +368,13 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
     if (!Number.isInteger(candidateValuesLen) || candidateValuesLen <= 0) {
         fail(REASONS.INVALID_RECORD, "candidateValues wajib array tidak kosong");
     }
-    let safeCandidateValues;
-    try {
-        safeCandidateValues = candidateValues.slice(0, 16);
-    } catch {
-        fail(REASONS.INVALID_RECORD, "candidateValues tidak dapat diiris dengan aman, ditolak");
-    }
+    // Bug review independen (audit putaran-67, Codex, AUD67-P2-2): sibling
+    // PERSIS dari makeEntity's externalRefs -- `.slice(0,16)` di sini
+    // dulu membaca SETIAP elemen lewat [[Get]] BIASA SEBELUM buildSafeArray
+    // sempat memprosesnya. `safeCandidateValues` sekarang array MENTAH;
+    // pemotongan ke 16 dipindah SESUDAH buildSafeArray, pada salinan POLOS
+    // yang sudah kita bangun sendiri.
+    const safeCandidateValues = candidateValues;
     // Proaktif (sapuan lengkap kelas AUD11/AUD12-P2, sebelum ditemukan
     // auditor independen sebagai finding terpisah): expiresAt diteruskan
     // mentah tanpa disaring -- BigInt di dalamnya meledakkan JSON.stringify
@@ -407,7 +422,7 @@ function makeHypothesis({ hypothesisId, subject, attribute, candidateValues, dis
                 fail(REASONS.INVALID_RECORD, "candidateValues[].weight wajib angka");
             }
             return Object.freeze({ value: buildSafeBeliefValue(value, 0, undefined, undefined, bounds), weight: clamp01(Number(weight)) });
-        })),
+        }, bounds).slice(0, 16)),
         discriminatingProbe: buildSafeBeliefValue(discriminatingProbe, 0, undefined, undefined, bounds), expiresAt
     });
 }

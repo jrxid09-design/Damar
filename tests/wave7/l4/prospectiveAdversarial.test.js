@@ -64,6 +64,15 @@ test("PM-repair-62: arm()'s trigger.extra and MAX_RECURRENCE_OCCURRENCES, and ar
     }), "PAYLOAD_TOO_LARGE");
 });
 
+test("PM-repair-63: an AT trigger with a stateful getter for a non-named ('extra', rest-captured) field is rejected without the getter ever being invoked -- validateTrigger's old rest-destructure (...triggerRest) performed an ordinary [[Get]]/rest-spread over every property of trigger, executing any accessor before any sanitization; the whole trigger is now copied via property descriptor FIRST, rejecting accessors closed (independent audit round 67, Codex, AUD67-P2-3)", async () => {
+    const pm = await createProspectiveMemory();
+    let n = 0;
+    const trigger = { kind: "AT", at: new Date(9e12).toISOString() };
+    Object.defineProperty(trigger, "extra", { enumerable: true, configurable: true, get() { n++; return "x"; } });
+    assertThrowsReason(() => pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger }), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(n, 0, "trigger.extra's getter must never be invoked");
+});
+
 test("PM-repair-23: armExpectation(null) is rejected as INVALID_RECORD, not a raw TypeError -- arm()'s sibling in the same file was missed in round 21 (independent audit AUD22-F-4)", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.armExpectation(null), "INVALID_RECORD");
@@ -215,14 +224,13 @@ test("PM-repair-39: checkExpectations never crashes on a Symbol/hostile observed
     assert.deepEqual(results, [], "an invalid atMs must never be treated as satisfying the window");
 });
 
-test("PM-repair-40: an ON_STATE trigger's subject is read exactly once, so a stateful getter cannot pass the AUD24-P2-4 guard with a valid subject and store a different one (independent audit AUD33-P2-4)", async () => {
+test("PM-repair-40: an ON_STATE trigger's subject is now sanitized via a descriptor-based whole-trigger copy BEFORE any destructuring, so a stateful getter (which could once be read multiple times across guard vs. store) is rejected outright and never invoked at all -- superseded, stronger contract than the original 'read exactly once' guarantee (independent audit AUD33-P2-4, tightened by round 67, Codex, AUD67-P2-3)", async () => {
     const pm = await createProspectiveMemory();
     let n = 0;
     const trigger = { kind: "ON_STATE", attribute: "status" };
     Object.defineProperty(trigger, "subject", { enumerable: true, configurable: true, get() { n++; return n <= 3 ? { entityId: "e1" } : {}; } });
-    const r = pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger });
-    assert.equal(n, 1, "trigger.subject must be read exactly once");
-    assert.equal(r.trigger.subject.entityId, "e1", "the stored subject must come from the same read that was validated");
+    assertThrowsReason(() => pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger }), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(n, 0, "trigger.subject's getter must never be invoked -- the whole trigger is descriptor-sanitized before any named field is ever read");
 });
 
 test("PM-repair-41: armExpectation(subject:null) is rejected instead of silently stored as {} (independent audit AUD33-ADV-2)", async () => {
@@ -258,14 +266,13 @@ test("PM-repair-43: an expectation's subject is sanitized via buildSafePayloadRe
     assert.equal(e.subject.entityId, "e1", "a plain (non-accessor) subject must still be accepted");
 });
 
-test("PM-repair-44: trigger.kind is read exactly once, so a stateful getter cannot pass the AT guard and store an unvalidated ON_STATE trigger (independent audit AUD34-P2-4)", async () => {
+test("PM-repair-44: trigger.kind is now sanitized via a descriptor-based whole-trigger copy BEFORE any destructuring, so a stateful getter (which could once be read multiple times across guard vs. store) is rejected outright and never invoked at all -- superseded, stronger contract than the original 'read exactly once' guarantee (independent audit AUD34-P2-4, tightened by round 67, Codex, AUD67-P2-3)", async () => {
     const pm = await createProspectiveMemory();
     let n = 0;
     const trigger = { at: new Date(9e12).toISOString() };
     Object.defineProperty(trigger, "kind", { enumerable: true, configurable: true, get() { n++; return n <= 7 ? "AT" : "ON_STATE"; } });
-    const r = pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger });
-    assert.ok(n <= 1, "trigger.kind must be read exactly once");
-    assert.equal(r.trigger.kind, "AT", "the stored kind must be the same one that was validated for the AT branch");
+    assertThrowsReason(() => pm.arm({ reminderId: "R1", wakeClass: "NOTIFY_OWNER", trigger }), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(n, 0, "trigger.kind's getter must never be invoked -- the whole trigger is descriptor-sanitized before any named field is ever read");
 });
 
 test("PM-repair-45: ownerRef is read exactly once end-to-end (guard AND construction), not just guard-vs-store consistent (independent audit AUD34-ADV-1)", async () => {
