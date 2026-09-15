@@ -93,6 +93,21 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         incDegree(r.to);
     }
 
+    // Bug review independen (audit putaran-72, Codex, AUD72-P2-1, kelas
+    // umum dari AUD61-P2-1): eviction per-insert (evictEntityIfOverBound/
+    // evictRelationIfOverBound/kompaksi beliefs/hypotheses/contradictions
+    // inline di declareX) tidak pernah berjalan sekali pun kalau snapshot
+    // dimuat ulang dengan bound LEBIH RENDAH dari saat data itu dipersist
+    // -- populasi restart bisa berlipat melebihi bound baru dan tetap
+    // begitu sampai insert berikutnya (atau selamanya kalau tidak pernah
+    // ada insert lagi ke koleksi itu). Setiap koleksi berbatas dikompaksi
+    // SEKALI di sini, sebelum record apa pun diekspos ke pemanggil publik.
+    evictEntityIfOverBound();
+    evictRelationIfOverBound();
+    compactBeliefsIfOverBound();
+    compactHypothesesIfOverBound();
+    compactContradictionsIfOverBound();
+
     // Bug review independen (audit putaran-53, AUD53-P2-2): `clock.nowMs()`
     // mentah -- Proxy yang di-revoke (atau `nowMs` yang melempar/bukan
     // fungsi/non-finite) raw-throw dari setiap pemanggil now()/nowIso().
@@ -208,6 +223,62 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
             relations.delete(victim.relationId);
             decDegree(victim.from);
             decDegree(victim.to);
+        }
+    }
+
+    // Bug review independen (audit putaran-72, Codex, AUD72-P2-1): sibling
+    // konstruksi dari kompaksi inline di applyRecordToBelief -- dipakai
+    // hanya sekali, saat memuat ulang snapshot, sebelum belief apa pun
+    // dibaca pemanggil publik. `>` (bukan `>=`) karena di sini tidak ada
+    // record baru yang akan disisipkan, murni memangkas populasi yang
+    // sudah ada ke bound aktif.
+    function compactBeliefsIfOverBound() {
+        const maxTotalBeliefs = Math.max(0, Math.trunc(bounds.MAX_TOTAL_BELIEFS));
+        while (beliefs.size > maxTotalBeliefs) {
+            let victimKey = null, victimUpdatedAtMs = Infinity;
+            for (const [k, b] of beliefs) {
+                if (b.updatedAtMs < victimUpdatedAtMs) { victimUpdatedAtMs = b.updatedAtMs; victimKey = k; }
+            }
+            if (victimKey === null) break;
+            beliefs.delete(victimKey);
+        }
+    }
+
+    // Bug review independen (audit putaran-72, Codex, AUD72-P2-1): sibling
+    // konstruksi dari kompaksi inline di declareHypothesis (kadaluwarsa
+    // dulu, lalu bobot terendah).
+    function compactHypothesesIfOverBound() {
+        const maxHypotheses = Math.max(0, Math.trunc(bounds.MAX_HYPOTHESES));
+        while (hypotheses.size > maxHypotheses) {
+            const sorted = [...hypotheses.values()].sort((a, b) =>
+                (Date.parse(a.expiresAt) - Date.parse(b.expiresAt)));
+            if (!sorted[0]) break;
+            hypotheses.delete(sorted[0].hypothesisId);
+        }
+    }
+
+    // Bug review independen (audit putaran-72, Codex, AUD72-P2-1): sibling
+    // konstruksi dari kompaksi inline di applyRecordToBelief's CONTEST path
+    // (openContradictionSet's overflow-archive semantics) -- FIFO, entri
+    // tertua diarsipkan UNRESOLVABLE/OVERFLOW_ARCHIVE (kalau masih OPEN;
+    // status/resolution asli dipertahankan kalau sudah bukan OPEN, sama
+    // seperti putaran-17's AUD17-P2-5), lalu pointer belief yang menunjuk
+    // ke entri itu direkonsiliasi -- persis logika yang sama dipakai di
+    // openContradictionSet dan reconcileBeliefContradictionPointer.
+    function compactContradictionsIfOverBound() {
+        const maxOpen = Math.max(0, Math.trunc(bounds.MAX_OPEN_CONTRADICTION_SETS));
+        while (contradictions.length > maxOpen) {
+            const [oldest, ...rest] = contradictions;
+            contradictions = rest;
+            const archived = oldest.status === "OPEN"
+                ? Object.freeze({ ...oldest, status: "UNRESOLVABLE", resolution: Object.freeze({ ruleId: "OVERFLOW_ARCHIVE", at: nowIso() }) })
+                : oldest;
+            reconcileBeliefContradictionPointer(archived);
+            overflowedContradictions.push(archived);
+        }
+        while (overflowedContradictions.length > maxOpen) {
+            const dropped = overflowedContradictions.shift();
+            reconcileBeliefContradictionPointer(dropped);
         }
     }
 

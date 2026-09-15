@@ -285,6 +285,35 @@ test("GL-repair-81: transition() log stays at exactly 1 entry when MAX_TRANSITIO
     assert.equal(activated.transitions.length, 1);
 });
 
+test("GL-repair-82: reloaded goals/commitments/plans/tasks are compacted to their ACTIVE bounds at construction, not left oversized from a prior process that ran under larger bounds -- retention compaction is only invoked per-insert (proposeGoal/createCommitment/createPlan/createTask), so it never ran between a restart and the next relevant call (independent audit round 72, Codex, AUD72-P2-1)", async () => {
+    const { createMemoryAccStore } = require("../../../src/cognition/persistence/AccStore");
+    const store = createMemoryAccStore();
+    const ge1 = await createGoalEngine({ store, bounds: { ...BOUNDS, MAX_TOTAL_GOALS_RETAINED: 100, MAX_TOTAL_COMMITMENTS_RETAINED: 100, MAX_TOTAL_PLANS_RETAINED: 100, MAX_TOTAL_TASKS_RETAINED: 100 } });
+    const g1 = ge1.proposeGoal(baseGoalSpec());
+    ge1.transition(g1.goalId, "approve", { actorKind: "OWNER", reason: "r" });
+    ge1.transition(g1.goalId, "activate", { actorKind: "OWNER", reason: "r" });
+    ge1.transition(g1.goalId, "succeed", { actorKind: "SYSTEM", reason: "r", evidenceTier: "T1", evidenceRef: "e0" });
+    ge1.proposeGoal(baseGoalSpec());
+    ge1.proposeGoal(baseGoalSpec());
+    for (let i = 0; i < 3; i++) {
+        ge1.createCommitment({ commitmentId: `c${i}`, goalRef: "g", toWhom: { id: "o" }, promise: "p", dueCondition: { kind: "k", subject: { entityId: "e" }, attribute: "a" } });
+        ge1.transitionCommitment(`c${i}`, "met", {});
+        ge1.createTask({ taskId: `t${i}`, planRef: "p", order: i, intentTemplate: { x: 1 } });
+        ge1.transitionTask(`t${i}`, "skip");
+        ge1.createPlan({ planId: `p${i}`, goalRef: `g${i}`, steps: [] });
+    }
+    assert.ok(ge1.commitmentsSize() >= 3 && ge1.tasksSize() >= 3 && ge1.plansSize() >= 3);
+    await ge1.persist();
+
+    const ge2 = await createGoalEngine({ store, bounds: { ...BOUNDS, MAX_TOTAL_GOALS_RETAINED: 1, MAX_TOTAL_COMMITMENTS_RETAINED: 1, MAX_TOTAL_PLANS_RETAINED: 1, MAX_TOTAL_TASKS_RETAINED: 1 } });
+    assert.ok(ge2.commitmentsSize() <= 1, "commitments must be compacted to the active bound at construction");
+    assert.ok(ge2.plansSize() <= 1, "plans must be compacted to the active bound at construction");
+    assert.ok(ge2.tasksSize() <= 1, "tasks must be compacted to the active bound at construction");
+    await ge2.persist();
+    const raw = await store.getKv("goals.snapshot");
+    assert.ok(Object.keys(raw.goals).length <= 2, "the one SATISFIED (terminal) goal must be compacted away, leaving only the two still-active ones that have no terminal victim to evict in their place");
+});
+
 test("GL-repair-9: terminal commitments are retention-bounded, not just OPEN ones (independent audit W7R5-P2-3)", async () => {
     const ge = await createGoalEngine({ bounds: { ...BOUNDS, MAX_TOTAL_COMMITMENTS_RETAINED: 5 } });
     for (let i = 0; i < 50; i++) {

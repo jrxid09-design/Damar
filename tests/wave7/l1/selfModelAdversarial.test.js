@@ -324,6 +324,28 @@ test("SM-repair-25: ingestHealth retains ZERO degradedSubsystems entries when MA
     assert.equal(snap.healthState, "UNKNOWN", "tanpa entri degraded yang dipertahankan (SM-A9: tanpa sinyal, tidak pernah HEALTHY), healthState tidak boleh melaporkan DOWN");
 });
 
+test("SM-repair-26: a reloaded successWindows Map is compacted to the ACTIVE MAX_CAPABILITY_ASSESSMENTS bound at construction, not left oversized from a prior process that ran under a larger bound -- evictIfOverBound() (§9) evicts by `lastUsedAt`, but lastUsedAt always starts EMPTY post-restart, so it never ran between restart and the next touch() (independent audit round 72, Codex, AUD72-P2-1)", async () => {
+    const registry = fakeRegistry({ "cap.a": {}, "cap.b": {}, "cap.c": {} });
+    function jsonStore() {
+        const kv = new Map();
+        return {
+            async getKv(k) { return kv.has(k) ? JSON.parse(kv.get(k)) : null; },
+            async putKv(k, v) { kv.set(k, JSON.stringify(v)); }
+        };
+    }
+    const store = jsonStore();
+    const sm1 = await createSelfModel({ capabilityRegistry: registry, store, bounds: { ...BOUNDS, MAX_CAPABILITY_ASSESSMENTS: 100 } });
+    sm1.ingestOutcome({ capabilityId: "cap.a", tier: "T1", outcome: "SUCCESS", at: "t0", evidenceRef: "e0" });
+    sm1.ingestOutcome({ capabilityId: "cap.b", tier: "T1", outcome: "SUCCESS", at: "t1", evidenceRef: "e1" });
+    sm1.ingestOutcome({ capabilityId: "cap.c", tier: "T1", outcome: "SUCCESS", at: "t2", evidenceRef: "e2" });
+    await sm1.persist();
+
+    const sm2 = await createSelfModel({ capabilityRegistry: registry, store, bounds: { ...BOUNDS, MAX_CAPABILITY_ASSESSMENTS: 1 } });
+    await sm2.persist();
+    const raw = await store.getKv("selfmodel.successWindows");
+    assert.ok(Object.keys(raw).length <= 1, "a reloaded successWindows must be compacted to the ACTIVE (possibly lower) bound at construction time");
+});
+
 test("SM-repair-18: assess() never raw-throws when the capability registry returns a revoked-Proxy descriptor -- descriptorRef falls back to capabilityId, same as a missing descriptor.id (independent audit W7R50-ADV-1)", async () => {
     const { proxy, revoke } = Proxy.revocable({}, {});
     revoke();

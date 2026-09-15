@@ -45,6 +45,53 @@ async function createGoalEngine({ clock = { nowMs: () => Date.now() }, store = n
     const commitments = snapshot.commitments;
     const plans = snapshot.plans;
     const tasks = snapshot.tasks;
+
+    // Bug review independen (audit putaran-72, Codex, AUD72-P2-1, kelas
+    // umum dari AUD61-P2-1): eviction per-insert (retensi goal/commitment/
+    // plan/task, semuanya sudah dilooping ke bound saat INSERSI) tidak
+    // pernah berjalan sekali pun kalau snapshot dimuat ulang dengan bound
+    // LEBIH RENDAH dari saat data itu dipersist -- populasi restart bisa
+    // berlipat melebihi bound baru dan tetap begitu sampai insert
+    // berikutnya (atau selamanya). Dikompaksi SEKALI di sini, SEBELUM
+    // childCounts/index apa pun dibangun dari populasi yang dimuat, memakai
+    // kebijakan eviction yang SAMA seperti versi insert-time masing-masing
+    // (goal/commitment/task: hanya korban TERMINAL yang dievict -- populasi
+    // aktif murni dipertahankan apa adanya kalau tidak ada korban terminal,
+    // sama seperti insert-time yang gagal tertutup alih-alih mengevict yang
+    // masih hidup; plan: tanpa batasan terminal, korban tertua by insertion
+    // order).
+    {
+        const maxGoals = Math.max(0, Math.trunc(bounds.MAX_TOTAL_GOALS_RETAINED));
+        while (goals.size > maxGoals) {
+            const terminal = [...goals.values()]
+                .filter(g => ["SATISFIED", "ABANDONED", "SUPERSEDED"].includes(g.state))
+                .sort((a, b) => Date.parse(a.lastTransitionAt) - Date.parse(b.lastTransitionAt))[0];
+            if (!terminal) break;
+            goals.delete(terminal.goalId);
+        }
+
+        const maxCommitments = Math.max(0, Math.trunc(bounds.MAX_TOTAL_COMMITMENTS_RETAINED));
+        while (commitments.size > maxCommitments) {
+            const terminal = [...commitments.values()].find(x => x.state !== "OPEN");
+            if (!terminal) break;
+            commitments.delete(terminal.commitmentId);
+        }
+
+        const maxPlans = Math.max(0, Math.trunc(bounds.MAX_TOTAL_PLANS_RETAINED));
+        while (plans.size > maxPlans) {
+            const victimKey = plans.keys().next().value;
+            if (victimKey === undefined) break;
+            plans.delete(victimKey);
+        }
+
+        const maxTasks = Math.max(0, Math.trunc(bounds.MAX_TOTAL_TASKS_RETAINED));
+        while (tasks.size > maxTasks) {
+            const terminal = [...tasks.values()].find(x => x.state === "DONE" || x.state === "SKIPPED");
+            if (!terminal) break;
+            tasks.delete(terminal.taskId);
+        }
+    }
+
     const childCounts = new Map();
     const creationTimestampsByOrigin = new Map();
 

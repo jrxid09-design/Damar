@@ -105,6 +105,25 @@ test("PM-repair-66: a reloaded snapshot's firedOccurrenceIds is compacted to the
     assert.ok(pm2.firedOccurrenceIdsSize() <= 10, "a reloaded firedOccurrenceIds must be compacted to the ACTIVE (possibly lower) bound at construction time");
 });
 
+test("PM-repair-67: reloaded reminders/expectations are compacted to their ACTIVE bounds at construction, not left oversized from a prior process that ran under larger bounds -- compactTerminalRemindersIfOverBound/the expectations eviction loop are only invoked per-insert (arm()/fireReminder()/retire()/armExpectation()), so they never ran between a restart and the next relevant call (independent audit round 72, Codex, AUD72-P2-1)", async () => {
+    const store = createMemoryAccStore();
+    const pm1 = await createProspectiveMemory({ store, bounds: { ...BOUNDS, MAX_TOTAL_REMINDERS_RETAINED: 100, MAX_ARMED_REMINDERS: 100, MAX_PENDING_EXPECTATIONS: 100 } });
+    for (let i = 0; i < 3; i++) {
+        pm1.arm({ reminderId: `R${i}`, wakeClass: "MAINTENANCE", trigger: { kind: "AT", at: new Date(1).toISOString() } });
+        pm1.tick({}); // AT trigger already due at construction time (clock defaults to Date.now()) -- fires immediately, becomes terminal
+    }
+    pm1.armExpectation({ expectationId: "e0", subject: { entityId: "e1" }, attribute: "a", expectedValue: 1, window: { latestAt: new Date(9e12).toISOString() } });
+    pm1.armExpectation({ expectationId: "e1", subject: { entityId: "e1" }, attribute: "a", expectedValue: 1, window: { latestAt: new Date(9e12).toISOString() } });
+    pm1.armExpectation({ expectationId: "e2", subject: { entityId: "e1" }, attribute: "a", expectedValue: 1, window: { latestAt: new Date(9e12).toISOString() } });
+    await pm1.persist();
+
+    const pm2 = await createProspectiveMemory({ store, bounds: { ...BOUNDS, MAX_TOTAL_REMINDERS_RETAINED: 1, MAX_ARMED_REMINDERS: 1, MAX_PENDING_EXPECTATIONS: 1 } });
+    assert.ok(pm2.reminderCount() <= 1, "reminders must be compacted to the active bound at construction");
+    await pm2.persist();
+    const raw = await store.getKv("prospective.snapshot");
+    assert.ok(Object.keys(raw.expectations).length <= 1, "expectations must be compacted to the active bound at construction");
+});
+
 test("PM-repair-23: armExpectation(null) is rejected as INVALID_RECORD, not a raw TypeError -- arm()'s sibling in the same file was missed in round 21 (independent audit AUD22-F-4)", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.armExpectation(null), "INVALID_RECORD");

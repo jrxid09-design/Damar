@@ -201,6 +201,33 @@ test("WM-repair-106: declareEntity rejects an externalRefs element whose system/
     assert.equal(n, 0, "externalRef.system/.id getters must never be invoked");
 });
 
+test("WM-repair-107: reloaded entities/relations/beliefs/hypotheses are compacted to their ACTIVE bounds at construction, not left oversized from a prior process that ran under larger bounds -- evictEntityIfOverBound/evictRelationIfOverBound/belief+hypothesis eviction are only invoked per-insert (declareX), so they never ran between a restart and the next relevant declareX call (independent audit round 72, Codex, AUD72-P2-1)", async () => {
+    const store = createMemoryAccStore();
+    const wm1 = await createWorldModel({ store, bounds: { MAX_ENTITIES: 100, MAX_RELATIONS: 100, MAX_TOTAL_BELIEFS: 100, MAX_HYPOTHESES: 100 } });
+    wm1.declareEntity({ entityId: "e1", entityKind: "device", source: "s" });
+    wm1.declareEntity({ entityId: "e2", entityKind: "device", source: "s" });
+    wm1.declareEntity({ entityId: "e3", entityKind: "device", source: "s" });
+    wm1.declareRelation({ relationId: "r1", kind: "x", from: "e1", to: "e2", strength: 1 });
+    wm1.declareRelation({ relationId: "r2", kind: "x", from: "e2", to: "e3", strength: 1 });
+    wm1.declareRelation({ relationId: "r3", kind: "x", from: "e3", to: "e1", strength: 1 });
+    wm1.ingestObservation({ observationId: "o1", subject: { entityId: "e1" }, attribute: "a1", value: 1, sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(1).toISOString() });
+    wm1.ingestObservation({ observationId: "o2", subject: { entityId: "e1" }, attribute: "a2", value: 1, sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(2).toISOString() });
+    wm1.ingestObservation({ observationId: "o3", subject: { entityId: "e1" }, attribute: "a3", value: 1, sensor: { sensorId: "s1" }, tier: "T1", observedAt: new Date(3).toISOString() });
+    wm1.declareHypothesis({ hypothesisId: "h1", subject: { entityId: "e1" }, attribute: "b1", candidateValues: [{ value: 1, weight: 1 }], expiresAt: "2030-01-01T00:00:00.000Z" });
+    wm1.declareHypothesis({ hypothesisId: "h2", subject: { entityId: "e1" }, attribute: "b2", candidateValues: [{ value: 1, weight: 1 }], expiresAt: "2030-01-01T00:00:00.000Z" });
+    wm1.declareHypothesis({ hypothesisId: "h3", subject: { entityId: "e1" }, attribute: "b3", candidateValues: [{ value: 1, weight: 1 }], expiresAt: "2030-01-01T00:00:00.000Z" });
+    assert.equal(wm1.beliefsSize(), 3);
+    await wm1.persist();
+
+    const wm2 = await createWorldModel({ store, bounds: { MAX_ENTITIES: 1, MAX_RELATIONS: 1, MAX_TOTAL_BELIEFS: 1, MAX_HYPOTHESES: 1 } });
+    assert.ok(wm2.beliefsSize() <= 1, "beliefs must be compacted to the active bound at construction");
+    await wm2.persist();
+    const raw = await store.getKv("worldmodel.snapshot");
+    assert.ok(Object.keys(raw.entities).length <= 1, "entities must be compacted to the active bound at construction");
+    assert.ok(Object.keys(raw.relations).length <= 1, "relations must be compacted to the active bound at construction");
+    assert.ok(Object.keys(raw.hypotheses).length <= 1, "hypotheses must be compacted to the active bound at construction");
+});
+
 test("WM-A1: conflicting sensor opens a contradiction, never a silent overwrite", async () => {
     const wm = await createWorldModel();
     wm.declareEntity({ entityId: "e1", entityKind: "device", source: "t" });

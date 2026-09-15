@@ -63,6 +63,23 @@ async function createSelfModel({
     const successWindows = await loadSuccessWindows(store); // capabilityId -> {attempts, successes, windowStartedAt, history:[]}
     const lastOutcomes = new Map();        // capabilityId -> {outcomeRef, state, at}
     const lastUsedAt = new Map();          // capabilityId -> ms (kunci eviksi §9)
+    // Bug review independen (audit putaran-72, Codex, AUD72-P2-1, kelas
+    // umum dari AUD61-P2-1): evictIfOverBound() (§9) mengevict berdasarkan
+    // `lastUsedAt`, TAPI `lastUsedAt` SELALU mulai kosong pasca-restart
+    // (tidak dipersist) -- successWindows yang dimuat dari snapshot lebih
+    // besar dari bound aktif tidak pernah dipangkas sampai capability itu
+    // di-touch() lagi (atau selamanya kalau tidak pernah). Tidak ada sinyal
+    // recency yang bertahan pasca-restart untuk successWindows yang dimuat
+    // ulang, jadi dipangkas FIFO memakai urutan insersi Map yang dimuat
+    // (sama seperti konvensi reload-FIFO yang sudah dipakai di
+    // firedOccurrenceIds/prospective, putaran-71).
+    {
+        const maxAssessments = Math.max(0, Math.trunc(bounds.MAX_CAPABILITY_ASSESSMENTS));
+        while (successWindows.size > maxAssessments) {
+            const oldestKey = successWindows.keys().next().value;
+            successWindows.delete(oldestKey);
+        }
+    }
     let unknownsList = [];
     let limitationsList = [];
     let degradedSubsystems = [];           // [{subsystem, state, at}]
