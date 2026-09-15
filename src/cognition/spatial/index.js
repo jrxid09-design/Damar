@@ -91,7 +91,7 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
             // evict-stale-first: prefer UNKNOWN/CONTESTED, oldest updatedAtMs, never live/fresh KNOWN nodes if a stale one exists
             let victimKey = null, victimAt = Infinity, foundStale = false;
             for (const [k, n] of sceneNodes) {
-                const isStale = n.state !== "KNOWN";
+                const isStale = !NON_BLOCKING_BANDS.has(freshnessBand(n.updatedAtMs, {}, Date.now()));
                 if (foundStale && !isStale) continue;
                 if (isStale && !foundStale) { foundStale = true; victimAt = Infinity; }
                 if (n.updatedAtMs < victimAt) { victimAt = n.updatedAtMs; victimKey = k; }
@@ -142,7 +142,7 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         return frame;
     }
 
-    function wouldCreateCycle(fromFrameId, toFrameId) {
+    function wouldCreateCycle(fromFrameId, toFrameId, ignoreTransformId = null) {
         // Would adding fromFrameId -> toFrameId let toFrameId reach fromFrameId already? DFS from toFrameId.
         const stack = [toFrameId];
         const seen = new Set();
@@ -155,6 +155,7 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
             if (seen.has(cur)) continue;
             seen.add(cur);
             for (const t of transforms.values()) {
+                if (t.transformId === ignoreTransformId) continue;
                 if (t.fromFrameId === cur) stack.push(t.toFrameId);
             }
         }
@@ -166,7 +167,7 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         if (!frames.has(fromFrameId)) fail(REASONS.UNKNOWN_FRAME, `fromFrameId '${typeof fromFrameId === "string" ? fromFrameId : typeof fromFrameId}' belum terdaftar`);
         if (!frames.has(toFrameId)) fail(REASONS.UNKNOWN_FRAME, `toFrameId '${typeof toFrameId === "string" ? toFrameId : typeof toFrameId}' belum terdaftar`);
         const existing = transforms.get(transformId);
-        if (!existing && wouldCreateCycle(fromFrameId, toFrameId)) {
+        if (wouldCreateCycle(fromFrameId, toFrameId, existing?.transformId ?? null)) {
             fail(REASONS.TRANSFORM_CYCLE_REJECTED, "transform ditolak: akan membentuk siklus pada graf frame");
         }
         const transform = makeTransform({ transformId, fromFrameId, toFrameId, data, nowMs: now() }, bounds);
@@ -214,7 +215,7 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
                 let victimKey = null, victimAt = Infinity, foundStale = false;
                 for (const [k, n] of sceneNodes) {
                     if (k === node.nodeId) continue;
-                    const isStale = n.state !== "KNOWN";
+                    const isStale = !NON_BLOCKING_BANDS.has(freshnessBand(n.updatedAtMs, {}, now()));
                     if (foundStale && !isStale) continue;
                     if (isStale && !foundStale) { foundStale = true; victimAt = Infinity; }
                     if (n.updatedAtMs < victimAt) { victimAt = n.updatedAtMs; victimKey = k; }
@@ -283,13 +284,19 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         }
         const maxPath = Math.max(0, Math.trunc(bounds.MAX_REACHABILITY_PATH_LENGTH));
         if (hops.length > maxPath) fail(REASONS.BOUND_EXCEEDED, `panjang path reachability melebihi batas (${maxPath})`);
+        const provenance = [];
+        const freshness = [];
         for (let i = 0; i < hops.length; i++) {
             const result = queryOccupancy({ frameId, region: hops[i] });
+            provenance.push(...result.provenance);
+            freshness.push({ freshnessMs: result.freshnessMs, band: result.band });
             if (result.blocked) {
-                return Object.freeze({ reachable: false, blockedAtIndex: i, blockedState: result.state });
+                return Object.freeze({ reachable: false, blockedAtIndex: i, blockedState: result.state,
+                    provenance: Object.freeze(provenance), freshness: Object.freeze(freshness) });
             }
         }
-        return Object.freeze({ reachable: true, blockedAtIndex: -1, blockedState: null });
+        return Object.freeze({ reachable: true, blockedAtIndex: -1, blockedState: null,
+            provenance: Object.freeze(provenance), freshness: Object.freeze(freshness) });
     }
 
     /** Returns the frame plus the ordered chain of transformIds connecting fromFrameId to toFrameId, or null if unreachable. Bounded BFS. */
