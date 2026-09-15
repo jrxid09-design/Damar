@@ -38,6 +38,7 @@
  */
 
 const { MODES } = require("./bounds");
+const { REASONS, GovernedError, fail } = require("./errors");
 
 const AUTHORITY_SHAPED_KEYS = Object.freeze([
     "authorityDecision", "allow", "grant", "owner", "authProof",
@@ -59,6 +60,18 @@ function walkForAuthorityShapedFields(value, label, seen, budget, depth, require
     if (requireFrozen && !Object.isFrozen(value)) {
         throw new Error(`ACC governed: ${label} wajib dibekukan secara mendalam`);
     }
+    if (requireFrozen) {
+        let prototype;
+        try {
+            prototype = Object.getPrototypeOf(value);
+        } catch {
+            throw new Error(`ACC governed: ${label} tidak dapat diverifikasi dengan aman`);
+        }
+        const allowedPrototype = Array.isArray(value) ? Array.prototype : Object.prototype;
+        if (prototype !== null && prototype !== allowedPrototype) {
+            throw new Error(`ACC governed: ${label} wajib berupa objek data biasa`);
+        }
+    }
     seen.add(value);
     if (depth > MAX_PROJECTION_DEPTH) {
         throw new Error(`ACC governed: ${label} terlalu dalam untuk diverifikasi dengan aman`);
@@ -67,13 +80,28 @@ function walkForAuthorityShapedFields(value, label, seen, budget, depth, require
     if (budget.count > MAX_PROJECTION_NODES) {
         throw new Error(`ACC governed: ${label} melebihi batas jumlah simpul`);
     }
-    for (const key of Reflect.ownKeys(value)) {
+    let keys;
+    try {
+        keys = Reflect.ownKeys(value);
+    } catch {
+        throw new Error(`ACC governed: ${label} tidak dapat diverifikasi dengan aman`);
+    }
+    for (const key of keys) {
         if (typeof key === "string" && AUTHORITY_SHAPED_KEYS.includes(key)) {
             throw new Error(`ACC governed: ${label} tidak boleh membawa field '${key}'`);
         }
     }
-    for (const key of Reflect.ownKeys(value)) {
-        walkForAuthorityShapedFields(value[key], `${label}.${String(key)}`, seen, budget, depth + 1, requireFrozen);
+    for (const key of keys) {
+        let descriptor;
+        try {
+            descriptor = Object.getOwnPropertyDescriptor(value, key);
+        } catch {
+            throw new Error(`ACC governed: ${label} tidak dapat dibaca dengan aman`);
+        }
+        if (!descriptor || !("value" in descriptor)) {
+            throw new Error(`ACC governed: ${label}.${String(key)} wajib berupa data property`);
+        }
+        walkForAuthorityShapedFields(descriptor.value, `${label}.${String(key)}`, seen, budget, depth + 1, requireFrozen);
     }
 }
 
@@ -121,20 +149,31 @@ function isInfluenceAllowed(mode) {
  * domain-coded failure should catch and re-fail with their own REASONS.
  */
 function validateGovernedCognitiveProjection(projection) {
-    if (!projection || typeof projection !== "object") {
-        throw new Error("ACC governed: proyeksi wajib objek");
+    try {
+        if (!projection || typeof projection !== "object") {
+            throw new Error("ACC governed: proyeksi wajib objek");
+        }
+        const schemaDescriptor = Object.getOwnPropertyDescriptor(projection, "schemaVersion");
+        const influenceDescriptor = Object.getOwnPropertyDescriptor(projection, "decisionInfluence");
+        if (!schemaDescriptor || !("value" in schemaDescriptor) ||
+            !influenceDescriptor || !("value" in influenceDescriptor)) {
+            throw new Error("ACC governed: proyeksi wajib berupa data properties");
+        }
+        if (schemaDescriptor.value !== "governedCognitiveProjection.v1") {
+            throw new Error("ACC governed: schemaVersion proyeksi tidak dikenal");
+        }
+        if (influenceDescriptor.value !== "ADVISORY_ONLY") {
+            throw new Error("ACC governed: decisionInfluence proyeksi wajib 'ADVISORY_ONLY'");
+        }
+        if (!Object.isFrozen(projection)) {
+            throw new Error("ACC governed: proyeksi wajib dibekukan");
+        }
+        walkForAuthorityShapedFields(projection, "GovernedCognitiveProjection", new WeakSet(), { count: 0 }, 0, true);
+        return true;
+    } catch (error) {
+        if (error instanceof Error && error.message.startsWith("ACC governed:")) throw error;
+        throw new Error("ACC governed: proyeksi tidak dapat diverifikasi dengan aman (authProof/accessor boundary)");
     }
-    if (projection.schemaVersion !== "governedCognitiveProjection.v1") {
-        throw new Error("ACC governed: schemaVersion proyeksi tidak dikenal");
-    }
-    if (projection.decisionInfluence !== "ADVISORY_ONLY") {
-        throw new Error("ACC governed: decisionInfluence proyeksi wajib 'ADVISORY_ONLY'");
-    }
-    if (!Object.isFrozen(projection)) {
-        throw new Error("ACC governed: proyeksi wajib dibekukan");
-    }
-    walkForAuthorityShapedFields(projection, "GovernedCognitiveProjection", new WeakSet(), { count: 0 }, 0, true);
-    return true;
 }
 
 /**
@@ -146,11 +185,12 @@ function validateGovernedCognitiveProjection(projection) {
  * unaudited rather than crashing the caller.
  */
 function recordModeTransition({ auditLedger, from, to, at }) {
+    const safeAt = typeof at === "number" && Number.isFinite(at) ? at : null;
     const event = Object.freeze({
-        eventType: "cognition.governed.modeTransition",
+        eventType: "cognition.governed.mode_transition",
         source: "acc.governed",
         outcome: "ok",
-        metadata: Object.freeze({ from: resolveMode(from), to: resolveMode(to), at: at ?? null })
+        metadata: Object.freeze({ from: resolveMode(from), to: resolveMode(to), at: safeAt })
     });
     try {
         if (auditLedger && typeof auditLedger.append === "function") {
@@ -166,6 +206,9 @@ function recordModeTransition({ auditLedger, from, to, at }) {
 
 module.exports = {
     MODES,
+    REASONS,
+    GovernedError,
+    fail,
     AUTHORITY_SHAPED_KEYS,
     assertNoAuthorityShapedFields,
     resolveMode,

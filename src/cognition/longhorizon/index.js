@@ -44,7 +44,8 @@ const { createMetacognition } = require("../metacog");
 // their first producer and is now just their first consumer, so no
 // behavior changes here, only the ownership of these guarantees.
 const {
-    AUTHORITY_SHAPED_KEYS, assertNoAuthorityShapedFields, resolveMode, isInfluenceAllowed
+    AUTHORITY_SHAPED_KEYS, assertNoAuthorityShapedFields, resolveMode, isInfluenceAllowed,
+    recordModeTransition
 } = require("../governed");
 
 const BELIEF_RANK = Object.freeze({ USABLE: 3, DEGRADED: 2, UNUSABLE: 1, UNKNOWN: 0 });
@@ -104,6 +105,10 @@ async function createLongHorizonCycle({
     const prospective = await createProspectiveMemory({ clock, store: storeFor("prospective") });
     const attention = await createAttentionEconomy({ clock });
     const metacog = await createMetacognition({ clock });
+
+    if (mode === "governed") {
+        recordModeTransition({ auditLedger, from: "off", to: mode, at: safeNowMs() });
+    }
 
     // --- L1-R1 closure: diff-based downgrade/eviction observer -----------
     // Reads ONLY selfModel.snapshot()'s existing frozen output — no change
