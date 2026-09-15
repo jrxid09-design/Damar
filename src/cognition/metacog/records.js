@@ -374,6 +374,13 @@ function makeCalibrationRecord({ recordId, predictionRef, predictedValue, predic
     if (typeof predictedConfidence !== "number" || !Number.isFinite(predictedConfidence)) {
         fail(REASONS.INVALID_RECORD, "predictedConfidence wajib number yang valid");
     }
+    // Bug review independen (audit putaran-70, Codex, AUD70-P2-1): `outcomeCorrect
+    // ? 1 : 0` (di brierScore dan cabang non-BRIER) menerima NILAI APA PUN --
+    // string "false" bersifat truthy, jadi diperlakukan sebagai outcome BENAR,
+    // meracuni statistik kalibrasi dengan data yang tidak pernah divalidasi.
+    if (typeof outcomeCorrect !== "boolean") {
+        fail(REASONS.INVALID_RECORD, "outcomeCorrect wajib boolean");
+    }
     const error = scoreKind === "BRIER" ? brierScore(predictedConfidence, outcomeCorrect) : Math.abs(predictedConfidence - (outcomeCorrect ? 1 : 0));
     // Bug review independen (audit putaran-32, AUD32-ADV-1): sibling dari
     // AUD31-P2-5 -- predictionRef/predictedValue/outcomeRef/outcomeValue

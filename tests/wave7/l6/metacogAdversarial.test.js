@@ -44,6 +44,21 @@ test("MC-repair-5: a null/undefined element inside findings/proposals, or a null
     assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, cost: null }), "INVALID_RECORD");
 });
 
+test("MC-repair-43: recordCalibration rejects a non-boolean outcomeCorrect instead of truthy-coercing it -- brierScore's `outcomeCorrect ? 1 : 0` treated the string \"false\" as a correct outcome, poisoning the calibration score with unvalidated data (independent audit round 70, Codex, AUD70-P2-1)", async () => {
+    const mc = await createMetacognition();
+    const base = {
+        recordId: "cal-invalid-bool", predictionRef: "p", predictedValue: 1,
+        predictedConfidence: 0.9, outcomeRef: "o", outcomeValue: 1,
+        outcomeTier: "T1", windowFrom: null, windowTo: null
+    };
+    assertThrowsReason(() => mc.recordCalibration({ ...base, outcomeCorrect: "false" }), "INVALID_RECORD");
+    assertThrowsReason(() => mc.recordCalibration({ ...base, outcomeCorrect: 1 }), "INVALID_RECORD");
+    assertThrowsReason(() => mc.recordCalibration({ ...base, outcomeCorrect: undefined }), "INVALID_RECORD");
+    const wrong = mc.recordCalibration({ ...base, recordId: "cal-wrong", outcomeCorrect: false });
+    const right = mc.recordCalibration({ ...base, recordId: "cal-right", outcomeCorrect: true });
+    assert.notEqual(wrong.error, right.error, "a genuine false vs. true outcomeCorrect must score differently");
+});
+
 test("MC-repair-6: a BigInt/NaN/negative cost.tokens or cost.ms is rejected, never crashes or silently disables the reflection budget (independent audit AUD17-P2-1)", async () => {
     const mc = await createMetacognition({ bounds: { ...BOUNDS, REFLECTION_BUDGET_TOKENS_PER_HOUR: 1000, REFLECTION_BUDGET_MS_PER_HOUR: 1000 } });
     assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, cost: { tokens: 10n, ms: 0 } }), "INVALID_RECORD");
