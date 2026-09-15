@@ -419,3 +419,18 @@ test("W8L1-repair-21: toSensorModality maps every known classifyCapability domai
     assert.equal(toSensorModality(undefined), SENSOR_MODALITIES.OTHER);
     assert.equal(toSensorModality("something-nobody-expected"), SENSOR_MODALITIES.OTHER);
 });
+
+test("W8L1-repair-22: direct bridge rejects hostile payload accessors, stops failed channels, and sheds over the bounded pending cap", () => {
+    let now = T0;
+    let ingested = 0;
+    let shed = 0;
+    const bridge = bridgeSensoriumToWorldModel({ body: { subscribe() {} }, auditLedger: { append(e) { if (e.type === "W8_L1_OBSERVATION_SHED") shed++; } }, worldModel: { ingestObservation() { ingested++; return { ok: true }; } }, clock: { nowMs: () => now } });
+    let calls = 0;
+    const payload = { get channel() { calls++; throw new Error("hostile"); } };
+    assert.doesNotThrow(() => bridge.applyObservationPlan({ type: "SENSOR_OBSERVATION", subject: HOST, monotonic: 1, timestampMs: now, payload }, { modality: "SCREEN" }));
+    assert.equal(calls, 0);
+    const event = (n, healthState) => ({ type: "SENSOR_OBSERVATION", subject: HOST, monotonic: n, timestampMs: now, payload: { channel: { id: `screen.${n}` }, sample: {}, healthState } });
+    for (let i = 0; i < 50001; i++) bridge.applyObservationPlan(event(i + 2, "FAILED"), { modality: "SCREEN" });
+    assert.equal(ingested, 50000);
+    assert.equal(shed, 1);
+});

@@ -191,6 +191,45 @@ const SENSOR_OBSERVATION_DEFAULT_RATE_CAP_PER_SEC = 5;
 // a literal async queue becomes meaningful then and is a natural
 // extension point, not a defect in this synchronous implementation.
 const MAX_TRACKED_SENSOR_CHANNELS = 512 * 64;
+const MAX_PENDING_OBSERVATIONS = 50_000;
+
+function readDataProperty(value, key) {
+    if (!value || typeof value !== "object") return { ok: false };
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor && !descriptor.get && !descriptor.set && ("value" in descriptor)
+        ? { ok: true, value: descriptor.value } : { ok: false };
+}
+
+function copySensorValue(value, depth = 0, budget = { count: 0 }) {
+    if (value === null || value === undefined) return value;
+    const type = typeof value;
+    if (type !== "object") return ["string", "number", "boolean"].includes(type) && (type !== "number" || Number.isFinite(value)) ? value : undefined;
+    if (depth > 8 || ++budget.count > 512) return undefined;
+    if (Array.isArray(value)) {
+        const length = readDataProperty(value, "length");
+        if (!length.ok || !Number.isSafeInteger(length.value) || length.value < 0 || length.value > 4096) return undefined;
+        const out = [];
+        for (let i = 0; i < length.value; i++) {
+            const item = readDataProperty(value, i);
+            if (!item.ok) return undefined;
+            const copied = copySensorValue(item.value, depth + 1, budget);
+            if (copied === undefined && item.value !== undefined) return undefined;
+            out.push(copied);
+        }
+        return out;
+    }
+    if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) return undefined;
+    const out = {};
+    for (const key of Reflect.ownKeys(value)) {
+        if (typeof key !== "string" || key === "__proto__" || key === "constructor" || key === "prototype") return undefined;
+        const item = readDataProperty(value, key);
+        if (!item.ok) return undefined;
+        const copied = copySensorValue(item.value, depth + 1, budget);
+        if (copied === undefined && item.value !== undefined) return undefined;
+        out[key] = copied;
+    }
+    return out;
+}
 
 function bridgeSensoriumPairKey(subject, channelId) {
     return `${subject}\u0000${channelId}`;
@@ -228,6 +267,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
 
     // subject|channelId -> { monotonic, lastAppliedMs, healthPriority }
     const tracked = new Map();
+    let pendingObservations = 0;
 
     function evictWorstTrackedEntryIfOver(limit) {
         if (tracked.size <= limit) return;
@@ -268,27 +308,44 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
     }
 
     function applyObservationPlan(event, result) {
-        if (!event || event.type !== "SENSOR_OBSERVATION" || !result) return { applied: false, reason: "not-an-observation" };
+        try {
+        const type = readDataProperty(event, "type");
+        const subjectRead = readDataProperty(event, "subject");
+        const monotonicRead = readDataProperty(event, "monotonic");
+        const timestampRead = readDataProperty(event, "timestampMs");
+        const payloadRead = readDataProperty(event, "payload");
+        if (!type.ok || type.value !== "SENSOR_OBSERVATION" || !subjectRead.ok || !payloadRead.ok || !result) return { applied: false, reason: "not-an-observation" };
 
-        const subject = event.subject;
-        const payload = event.payload ?? {};
-        const channelId = payload.channel?.id;
+        const subject = subjectRead.value;
+        const payload = copySensorValue(payloadRead.value);
+        const resultModality = readDataProperty(result, "modality");
+        const resultChannel = readDataProperty(result, "channelId");
+        const channel = payload && readDataProperty(payload, "channel");
+        const channelIdRead = channel.ok ? readDataProperty(channel.value, "id") : { ok: false };
+        const channelId = channelIdRead.value;
+        const modality = resultModality.ok && Object.prototype.hasOwnProperty.call(SENSOR_OBSERVATION_RATE_CAP_PER_SEC, resultModality.value)
+            ? resultModality.value
+            : (resultChannel.ok ? toSensorModality(resultChannel.value) : toSensorModality(channelId));
+        const monotonic = monotonicRead.ok ? monotonicRead.value : undefined;
+        const timestampMs = timestampRead.ok ? timestampRead.value : undefined;
+        if (!payload || !channelIdRead.ok) return { applied: false, reason: "malformed-observation" };
         if (typeof subject !== "string" || typeof channelId !== "string") {
             return { applied: false, reason: "missing-identity" };
         }
         const key = bridgeSensoriumPairKey(subject, channelId);
+        const prior = tracked.get(key);
+        if (prior?.failed && !result.reconnected) return { applied: false, reason: "sensor-failed" };
 
         // Dedup: a non-increasing `monotonic` for the same (subject, channel)
         // is a duplicate/replay — idempotent no-op, never a duplicate belief.
-        const prior = tracked.get(key);
-        if (prior && Number.isFinite(event.monotonic) && event.monotonic <= prior.monotonic) {
-            audit({ type: "W8_L1_OBSERVATION_DUPLICATE_DROPPED", subject, channelId, monotonic: event.monotonic, atMs: nowMs() });
+        if (prior && Number.isFinite(monotonic) && monotonic <= prior.monotonic) {
+            audit({ type: "W8_L1_OBSERVATION_DUPLICATE_DROPPED", subject, channelId, monotonic, atMs: nowMs() });
             return { applied: false, reason: "duplicate" };
         }
 
         // Per-sensor rate cap: sample down (drop the intermediate sample,
         // never buffer unboundedly) rather than reject/queue.
-        const rateCap = SENSOR_OBSERVATION_RATE_CAP_PER_SEC[toSensorModality(payload.modalityHint)] ?? SENSOR_OBSERVATION_DEFAULT_RATE_CAP_PER_SEC;
+        const rateCap = SENSOR_OBSERVATION_RATE_CAP_PER_SEC[toSensorModality(modality)] ?? SENSOR_OBSERVATION_DEFAULT_RATE_CAP_PER_SEC;
         const minIntervalMs = 1000 / rateCap;
         const receivedAtMs = nowMs();
         if (prior && (receivedAtMs - prior.lastAppliedMs) < minIntervalMs) {
@@ -307,7 +364,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             observedAtMs = sampledAtMs;
             sampledAtMissing = false;
         }
-        const skewMs = sampledAtMissing ? null : (event.timestampMs - sampledAtMs);
+        const skewMs = sampledAtMissing ? null : (timestampMs - sampledAtMs);
         const skewedHealthState = (skewMs !== null && (skewMs < 0 || skewMs > 5 * 60 * 1000)
             && SENSOR_OBSERVATION_HEALTH_PRIORITY[effectiveHealthState] > SENSOR_OBSERVATION_HEALTH_PRIORITY.SUSPECT)
             ? "SUSPECT" : effectiveHealthState;
@@ -325,6 +382,11 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             raw: payload.raw ?? null
         });
 
+        if (pendingObservations >= MAX_PENDING_OBSERVATIONS) {
+            audit({ type: "W8_L1_OBSERVATION_SHED", subject, channelId, reason: "pending-capacity", atMs: nowMs() });
+            return { applied: false, reason: "pending-capacity" };
+        }
+        pendingObservations++;
         let applyResult;
         try {
             applyResult = worldModel.ingestObservation({
@@ -336,6 +398,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
                 observedAt: new Date(observedAtMs).toISOString()
             });
         } catch (err) {
+            pendingObservations = Math.max(0, pendingObservations - 1);
             // Reject-closed: the world model itself refused this observation
             // (e.g. UNKNOWN_ENTITY — the device has no corresponding
             // world-model entity yet). The bridge's ONE write capability is
@@ -346,10 +409,16 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         }
 
         tracked.set(key, {
-            monotonic: Number.isFinite(event.monotonic) ? event.monotonic : (prior?.monotonic ?? 0),
+            monotonic: Number.isFinite(monotonic) ? monotonic : (prior?.monotonic ?? 0),
             lastAppliedMs: receivedAtMs,
-            healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState] ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK
+            healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState] ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK,
+            failed: skewedHealthState === "FAILED"
         });
+        if (applyResult && typeof applyResult.then === "function") {
+            Promise.resolve(applyResult).finally(() => { pendingObservations = Math.max(0, pendingObservations - 1); }).catch(() => {});
+        } else {
+            queueMicrotask(() => { pendingObservations = Math.max(0, pendingObservations - 1); });
+        }
         evictWorstTrackedEntryIfOver(MAX_TRACKED_SENSOR_CHANNELS);
 
         if (skewedHealthState === "FAILED") {
@@ -357,6 +426,9 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         }
 
         return { applied: true, healthState: skewedHealthState, result: applyResult };
+        } catch {
+            return { applied: false, reason: "malformed-observation" };
+        }
     }
 
     if (body && typeof body.subscribe === "function") {
