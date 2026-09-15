@@ -434,3 +434,26 @@ test("W8L1-repair-22: direct bridge rejects hostile payload accessors, stops fai
     assert.equal(ingested, 50000);
     assert.equal(shed, 1);
 });
+
+test("W8L1-repair-23: RF/IMU caps use explicit modality and reconnect accessors are not trusted", () => {
+    let now = T0;
+    let sequence = 0;
+    const bridge = bridgeSensoriumToWorldModel({ body: { subscribe() {} }, worldModel: { ingestObservation() { return { ok: true }; } }, clock: { nowMs: () => now } });
+    const event = (channelId, healthState = "OK") => ({ type: "SENSOR_OBSERVATION", subject: HOST, monotonic: ++sequence, timestampMs: now,
+        payload: { channel: { id: channelId }, sample: {}, healthState } });
+    assert.equal(bridge.applyObservationPlan(event("rf.read"), { modality: "RF" }).applied, true);
+    assert.equal(bridge.applyObservationPlan(event("rf.read"), { modality: "RF" }).reason, "rate-limited");
+    assert.equal(bridge.applyObservationPlan(event("imu.read"), { modality: "IMU" }).applied, true);
+    bridge.applyObservationPlan(event("failed.read", "FAILED"), { modality: "SCREEN" });
+    let calls = 0;
+    const hostile = Object.defineProperty({}, "reconnected", { get() { calls++; return true; } });
+    assert.equal(bridge.applyObservationPlan(event("failed.read"), hostile).reason, "sensor-failed");
+    assert.equal(calls, 0);
+});
+
+test("W8L1-repair-24: non-canonical raw storage references are rejected at the bridge boundary", () => {
+    const bridge = bridgeSensoriumToWorldModel({ body: { subscribe() {} }, worldModel: { ingestObservation() { throw new Error("must not ingest"); } } });
+    const result = bridge.applyObservationPlan({ type: "SENSOR_OBSERVATION", subject: HOST, monotonic: 1,
+        payload: { channel: { id: "vision.capture" }, raw: { storageRef: "file:///etc/passwd" } } }, { channelId: "vision.capture" });
+    assert.equal(result.reason, "non-canonical-media-reference");
+});
