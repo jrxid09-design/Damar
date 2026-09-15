@@ -49,15 +49,45 @@ function validateTrigger(trigger, bounds = BOUNDS) {
     // di bawah membaca SETIAP properti `trigger` lewat [[Get]] biasa --
     // sebuah Proxy yang di-revoke melempar TypeError MENTAH pada operasi
     // ini, keluar dari `arm()` publik, bukan INVALID_TRIGGER terkendali.
-    let kind, at, delayMs, intervalMs, until, maxOccurrences, subject, attribute, triggerRest;
-    try {
-        ({
-            kind, at, delayMs, intervalMs, until, maxOccurrences, subject, attribute,
-            ...triggerRest
-        } = trigger ?? {});
-    } catch {
+    // Bug review independen (audit putaran-67, Codex, AUD67-P2-3):
+    // destructuring lama (`...triggerRest`) membaca SETIAP properti milik
+    // `trigger` lewat [[Get]]/rest-spread BIASA -- accessor (getter)
+    // pemanggil pada properti MANAPUN (termasuk yang jatuh ke triggerRest,
+    // bukan cuma field bernama) TEREKSEKUSI di sini, sebelum sanitasi
+    // apa pun. `trigger` disalin dulu ke objek polos lewat descriptor
+    // (menolak accessor tertutup, TIDAK PERNAH memanggilnya), baru
+    // destructuring bernama berjalan di atas salinan aman itu.
+    let safeTrigger;
+    if (trigger === null || trigger === undefined) {
+        safeTrigger = {};
+    } else if (typeof trigger !== "object") {
         fail(REASONS.INVALID_TRIGGER, "trigger tidak dapat diverifikasi dengan aman, ditolak");
+    } else {
+        let keys;
+        try {
+            keys = Object.keys(trigger);
+        } catch {
+            fail(REASONS.INVALID_TRIGGER, "trigger tidak dapat diverifikasi dengan aman, ditolak");
+        }
+        safeTrigger = {};
+        for (const key of keys) {
+            let desc;
+            try {
+                desc = Object.getOwnPropertyDescriptor(trigger, key);
+            } catch {
+                fail(REASONS.INVALID_TRIGGER, "trigger tidak dapat diverifikasi dengan aman, ditolak");
+            }
+            if (!desc || desc.get || desc.set) {
+                fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, `trigger tidak boleh membawa properti accessor: '${key}'`);
+            }
+            safeTrigger[key] = desc.value;
+        }
     }
+    let kind, at, delayMs, intervalMs, until, maxOccurrences, subject, attribute, triggerRest;
+    ({
+        kind, at, delayMs, intervalMs, until, maxOccurrences, subject, attribute,
+        ...triggerRest
+    } = safeTrigger);
     if (!trigger || !TRIGGER_KINDS.has(kind)) {
         // Bug review independen (audit putaran-25, AUD25-P2-1): interpolasi
         // `${trigger?.kind}` mentah meledakkan TypeError untuk Symbol.
