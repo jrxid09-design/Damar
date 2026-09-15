@@ -59,6 +59,16 @@ test("MC-repair-43: recordCalibration rejects a non-boolean outcomeCorrect inste
     assert.notEqual(wrong.error, right.error, "a genuine false vs. true outcomeCorrect must score differently");
 });
 
+test("MC-repair-44: brierScore itself rejects a non-boolean outcomeCorrect when called directly (not just through makeCalibrationRecord) -- it is exported independently, so round 70's guard in makeCalibrationRecord (the CALLER) did not protect a caller that imports and calls the exported helper on its own (independent audit round 71, Codex, AUD71-P2-1)", () => {
+    const { brierScore } = require("../../../src/cognition/metacog/records");
+    assertThrowsReason(() => brierScore(0.7, "false"), "INVALID_RECORD");
+    assertThrowsReason(() => brierScore(0.7, 0), "INVALID_RECORD");
+    assertThrowsReason(() => brierScore(0.7, undefined), "INVALID_RECORD");
+    assertThrowsReason(() => brierScore(0.7, 0n), "INVALID_RECORD");
+    assert.doesNotThrow(() => brierScore(0.7, true));
+    assert.doesNotThrow(() => brierScore(0.7, false));
+});
+
 test("MC-repair-6: a BigInt/NaN/negative cost.tokens or cost.ms is rejected, never crashes or silently disables the reflection budget (independent audit AUD17-P2-1)", async () => {
     const mc = await createMetacognition({ bounds: { ...BOUNDS, REFLECTION_BUDGET_TOKENS_PER_HOUR: 1000, REFLECTION_BUDGET_MS_PER_HOUR: 1000 } });
     assertThrowsReason(() => mc.openReview({ trigger: "SCHEDULED", subjectRef: { entityId: "e1" }, cost: { tokens: 10n, ms: 0 } }), "INVALID_RECORD");

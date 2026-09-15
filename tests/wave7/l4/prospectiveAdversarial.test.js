@@ -89,6 +89,22 @@ test("PM-repair-65: armExpectation's window with a stateful getter for a non-nam
     assert.equal(n, 0, "window.extra's getter must never be invoked");
 });
 
+test("PM-repair-66: a reloaded snapshot's firedOccurrenceIds is compacted to the ACTIVE MAX_FIRED_OCCURRENCE_IDS bound at construction, not left oversized from a prior process that ran under a larger bound -- the runtime eviction in fireReminder() only trims ONE entry per call (sufficient for a size that grows by at most one at a time), but never runs at all between a restart and the next fireReminder() call (independent audit round 71, Codex, AUD71-P2-2)", async () => {
+    const store = createMemoryAccStore();
+    const clock1 = manualClock(0);
+    const pm1 = await createProspectiveMemory({ clock: clock1, store, bounds: { ...BOUNDS, MAX_RECURRENCE_OCCURRENCES: 50, MAX_FIRED_OCCURRENCE_IDS: 100 } });
+    pm1.arm({ reminderId: "R", wakeClass: "MAINTENANCE", trigger: { kind: "RECURRING", intervalMs: 60_000, maxOccurrences: 50 } });
+    for (let i = 0; i < 50; i++) {
+        clock1.advance(60_001);
+        pm1.tick();
+    }
+    assert.equal(pm1.firedOccurrenceIdsSize(), 50);
+    await pm1.persist();
+
+    const pm2 = await createProspectiveMemory({ store, bounds: { ...BOUNDS, MAX_FIRED_OCCURRENCE_IDS: 10 } });
+    assert.ok(pm2.firedOccurrenceIdsSize() <= 10, "a reloaded firedOccurrenceIds must be compacted to the ACTIVE (possibly lower) bound at construction time");
+});
+
 test("PM-repair-23: armExpectation(null) is rejected as INVALID_RECORD, not a raw TypeError -- arm()'s sibling in the same file was missed in round 21 (independent audit AUD22-F-4)", async () => {
     const pm = await createProspectiveMemory();
     assertThrowsReason(() => pm.armExpectation(null), "INVALID_RECORD");
