@@ -103,7 +103,9 @@ function buildSafeSpatialValue(value, depth = 0, budget) {
 
     try {
         if (Array.isArray(value)) {
-            const len = value.length;
+            const lengthDesc = Object.getOwnPropertyDescriptor(value, "length");
+            if (!lengthDesc || !("value" in lengthDesc)) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array tidak dapat diverifikasi dengan aman");
+            const len = lengthDesc.value;
             if (!Number.isInteger(len) || len < 0) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "panjang array tidak sah");
             const out = [];
             for (let i = 0; i < len; i++) {
@@ -187,7 +189,7 @@ function makeSceneNode({ nodeId, frameId, region, state, observationRefs, update
     const safeRegion = buildSafeSpatialValue(region);
     let refs;
     try {
-        refs = Array.isArray(observationRefs) ? observationRefs.map(r => {
+        refs = Array.isArray(observationRefs) ? buildSafeSpatialValue(observationRefs).map(r => {
             if (typeof r !== "string" || !r) fail(REASONS.INVALID_RECORD, "observationRefs elemen wajib string");
             return r;
         }) : [];
