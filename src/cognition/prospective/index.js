@@ -102,6 +102,15 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
     while (firedOccurrenceIds.size > bounds.MAX_FIRED_OCCURRENCE_IDS) {
         firedOccurrenceIds.delete(firedOccurrenceIds.values().next().value);
     }
+    // Bug review independen (audit putaran-72, Codex, AUD72-P2-1, kelas
+    // umum, sibling langsung dari AUD71-P2-2 di atas): reminders/expectations
+    // punya kompaksi PER-INSERT (compactTerminalRemindersIfOverBound,
+    // dipanggil dari arm()/fireReminder()/retire(); loop inline di
+    // armExpectation), tapi TIDAK SATU PUN berjalan sekali pun di antara
+    // restart dan panggilan berikutnya yang relevan. Dikompaksi SEKALI di
+    // sini juga, sebelum remindersPerGoal dibangun dari populasi yang dimuat.
+    compactTerminalRemindersIfOverBound();
+    compactExpectationsIfOverBound();
     const remindersPerGoal = new Map();
     for (const r of reminders.values()) {
         // Bug review independen (Codex putaran-7): rebuild restart lama
@@ -313,6 +322,18 @@ async function createProspectiveMemory({ clock = { nowMs: () => Date.now() }, st
                     firedOccurrenceIds.delete(key);
                 }
             }
+        }
+    }
+
+    // Bug review independen (audit putaran-72, Codex, AUD72-P2-1): sibling
+    // KONSTRUKSI dari kompaksi inline di armExpectation (`>` bukan `>=`
+    // karena di sini tidak ada expectation baru yang akan disisipkan).
+    function compactExpectationsIfOverBound() {
+        const maxPending = Math.max(0, Math.trunc(bounds.MAX_PENDING_EXPECTATIONS));
+        while (expectations.size > maxPending) {
+            const oldest = [...expectations.values()].sort((a, b) => Date.parse(a.window.latestAt) - Date.parse(b.window.latestAt))[0];
+            if (!oldest) break;
+            expectations.delete(oldest.expectationId);
         }
     }
 
