@@ -320,6 +320,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         try {
         const type = readDataProperty(event, "type");
         const subjectRead = readDataProperty(event, "subject");
+        const eventIdRead = readDataProperty(event, "eventId");
         const monotonicRead = readDataProperty(event, "monotonic");
         const timestampRead = readDataProperty(event, "timestampMs");
         const payloadRead = readDataProperty(event, "payload");
@@ -404,6 +405,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         let applyResult;
         try {
             applyResult = worldModel.ingestObservation({
+                observationId: eventIdRead.ok ? eventIdRead.value : undefined,
                 subject: { entityId: subject },
                 attribute: `sensor:${channelId}`,
                 value,
