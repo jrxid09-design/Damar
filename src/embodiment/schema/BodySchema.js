@@ -143,6 +143,7 @@ const NOTIFYING_EVENTS = new WeakSet();
  */
 const COMMIT_SEQUENCE = new WeakMap();
 let commitSeqCounter = 0;
+let currentDeliverySeq = null;
 
 function wasCommittedByBodySchema(event) {
     return event !== null
@@ -154,6 +155,19 @@ function wasCommittedByBodySchema(event) {
 function commitSequenceOf(event) {
     if (event === null || (typeof event !== "object" && typeof event !== "function")) return undefined;
     return COMMIT_SEQUENCE.get(event);
+}
+
+/**
+ * Urutan komit peristiwa yang SEDANG diserahkan sekarang, atau undefined.
+ *
+ * Subscriber bisa, DI DALAM loop notifikasi, menyerahkan observasi yang lebih
+ * baru. Observasi itu karena itu LEBIH BARU daripada peristiwa yang sedang
+ * dikirim, walau keduanya diproses jembatan dalam urutan terbalik. Sinyal ini
+ * memberi jembatan cara yang dapat diputuskan untuk mengetahui hal itu tanpa
+ * bergantung pada urutan pemanggilan.
+ */
+function currentDeliveryCommitSequence() {
+    return currentDeliverySeq;
 }
 
 /** Bukti terkuat: event ini sedang diserahkan oleh komit yang sedang berjalan. */
@@ -1095,6 +1109,8 @@ class BodySchema {
         // jendela ini, sehingga replay event lama tidak pernah lolos.
         const markDelivering = event !== null && typeof event === "object";
         if (markDelivering) NOTIFYING_EVENTS.add(event);
+        const previousDeliverySeq = currentDeliverySeq;
+        if (markDelivering) currentDeliverySeq = COMMIT_SEQUENCE.get(event) ?? null;
         try {
             for (const fn of [...this._subscribers]) {
                 try {
@@ -1112,6 +1128,7 @@ class BodySchema {
             }
         } finally {
             if (markDelivering) NOTIFYING_EVENTS.delete(event);
+            currentDeliverySeq = previousDeliverySeq;
         }
     }
 
@@ -1508,5 +1525,6 @@ function freezeView(view) {
 
 module.exports = {
     BodySchema, newerWins, presenceWins,
-    wasCommittedByBodySchema, isEventBeingDelivered, commitSequenceOf
+    wasCommittedByBodySchema, isEventBeingDelivered, commitSequenceOf,
+    currentDeliveryCommitSequence
 };

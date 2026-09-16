@@ -35,7 +35,10 @@
 const os = require("node:os");
 const path = require("node:path");
 const { types: utilTypes } = require("node:util");
-const { wasCommittedByBodySchema, isEventBeingDelivered, commitSequenceOf } = require("../embodiment/schema/BodySchema");
+const {
+    wasCommittedByBodySchema, isEventBeingDelivered, commitSequenceOf,
+    currentDeliveryCommitSequence
+} = require("../embodiment/schema/BodySchema");
 
 /**
  * Bukti lifecycle terkuat: event ini SEDANG diserahkan oleh komit BodySchema
@@ -340,6 +343,63 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
     let pendingSeq = 0;
     let shedCount = 0;
     let inFlight = 0;
+    // Urutan tunggal milik jembatan ini, dipakai bersama oleh ADMISSION
+    // observasi dan PEMROSESAN peristiwa lifecycle. Keduanya harus dibandingkan
+    // dalam satu garis waktu: `commitSequenceOf()` BodySchema hanya mengurutkan
+    // komit, sedangkan admission terjadi belakangan, jadi membandingkan
+    // keduanya tidak bermakna (audit of dd15f44).
+    let bridgeSeq = 0;
+
+    // Per-channel admission stack. Admission writes `tracked` BEFORE the world
+    // model agrees (that is what makes dedup/rate/FAILED sequential), so the
+    // writes must be individually undoable:
+    //   frames    -- admissions not yet settled, newest last
+    //   committed -- the last SETTLED state, or null when the channel had none
+    // Rolling back one frame and re-deriving the effective state from the stack
+    // is compositional: reversing A while B is newer leaves B in force, and
+    // reversing B afterwards falls back to the pre-A committed state. The
+    // previous snapshot-based rollback could not express that and resurrected a
+    // rejected monotonic (audit of dd15f44).
+    const admissionState = new Map(); // key -> { frames: [{seq, state}], committed }
+
+    function effectiveStateFor(rec) {
+        if (rec.frames.length > 0) return rec.frames[rec.frames.length - 1].state;
+        return rec.committed;
+    }
+
+    /** Kembalikan korban eviction milik sebuah frame, tanpa menimpa state yang lebih baru. */
+    function restoreEvictedVictim(frame) {
+        const evicted = frame && frame.evicted;
+        if (!evicted) return;
+        if (!tracked.has(evicted.key)) tracked.set(evicted.key, evicted.state);
+    }
+
+    function settleAdmissionFrame(key, seq, committedState) {
+        const rec = admissionState.get(key);
+        if (!rec) return;
+        const frame = rec.frames.find(f => f.seq === seq);
+        rec.frames = rec.frames.filter(f => f.seq !== seq);
+        // COMMIT: the eviction this admission caused becomes permanent.
+        if (frame) frame.evicted = null;
+        rec.committed = committedState;
+        const effective = effectiveStateFor(rec);
+        if (effective === null) tracked.delete(key); else tracked.set(key, effective);
+        if (rec.frames.length === 0 && rec.committed === null) admissionState.delete(key);
+    }
+
+    function rollbackAdmissionFrame(key, seq) {
+        const rec = admissionState.get(key);
+        if (!rec) return;
+        const frame = rec.frames.find(f => f.seq === seq);
+        rec.frames = rec.frames.filter(f => f.seq !== seq);
+        // UNDO the eviction as well, so a rejected admission cannot have
+        // permanently erased an unrelated live FAILED tombstone (audit of
+        // dd15f44).
+        restoreEvictedVictim(frame);
+        const effective = effectiveStateFor(rec);
+        if (effective === null) tracked.delete(key); else tracked.set(key, effective);
+        if (rec.frames.length === 0 && rec.committed === null) admissionState.delete(key);
+    }
 
     // Read-only OBSERVABILITY view (contract "OBSERVABILITY": "Shed counts are
     // exposed ... and audited"). Getters only, so a caller cannot rewrite the
@@ -457,8 +517,18 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
     }
 
 
-    function evictWorstTrackedEntryIfOver(limit) {
-        if (tracked.size <= limit) return;
+    /**
+     * Evict the worst tracked channel when over `limit`, RETURNING the victim so
+     * the caller can undo it.
+     *
+     * Admission must still evict, or `tracked` grows past its bound during a
+     * large backlog -- but an admission that is later rejected must not
+     * permanently erase an unrelated live FAILED tombstone it happened to push
+     * out (audit of dd15f44). Returning the victim lets the admission frame
+     * carry it and restore it on rollback.
+     */
+    function evictTrackedIfOver(limit) {
+        if (tracked.size <= limit) return null;
         let victimKey = null;
         let victimPriority = Infinity;
         let victimAppliedMs = Infinity;
@@ -470,10 +540,11 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
                 victimAppliedMs = t.lastAppliedMs;
             }
         }
-        if (victimKey !== null) {
-            tracked.delete(victimKey);
-            audit({ type: "W8_L1_TRACKED_CHANNEL_EVICTED", key: victimKey, atMs: nowMs() });
-        }
+        if (victimKey === null) return null;
+        const victimState = tracked.get(victimKey);
+        tracked.delete(victimKey);
+        audit({ type: "W8_L1_TRACKED_CHANNEL_EVICTED", key: victimKey, atMs: nowMs() });
+        return { key: victimKey, state: victimState };
     }
 
     /**
@@ -519,19 +590,40 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
                 return { applied: false, reason: "untrusted-lifecycle-event" };
             }
             const onlineSubject = subjectRead.ok ? subjectRead.value : undefined;
-            const onlineSeq = commitSequenceOf(event);
+            // Dua sinyal urutan, sengaja berlapis:
+            //  - `onlineCommitSeq` (urutan komit BodySchema) TETAP pada saat
+            //    komit, jadi perbandingannya tidak bergantung pada urutan
+            //    subscriber -- inilah yang menutup celah re-entrancy.
+            //  - `onlineBridgeSeq` diambil di pintu masuk, sebagai cadangan
+            //    untuk observasi sintetis yang tidak pernah dikomit.
+            const onlineCommitSeq = commitSequenceOf(event);
+            const onlineDeliverySeq = currentDeliveryCommitSequence();
+            const onlineBridgeSeq = ++bridgeSeq;
             let cleared = 0;
             if (typeof onlineSubject === "string") {
                 for (const [key, entry] of tracked) {
-                    // ORDERING, not merely authenticity (audit of 8d4f80c): a
-                    // subscriber handling this very ONLINE event can
-                    // synchronously submit a NEWER FAILED observation, so an
-                    // older ONLINE must never clear state a later commit set.
-                    // Only a lifecycle event committed AFTER the observation
-                    // that failed the channel may reopen it.
-                    if (entry.failed && Number.isFinite(entry.failedAtSeq)
-                        && Number.isFinite(onlineSeq) && onlineSeq <= entry.failedAtSeq) {
-                        continue;
+                    // ORDERING, not merely authenticity (audits of 8d4f80c /
+                    // dd15f44): a subscriber handling this very ONLINE event can
+                    // synchronously submit a NEWER failed observation, so an
+                    // older lifecycle event must never clear state a later one
+                    // set. Three layered signals, because a synthetic
+                    // observation carries no commit sequence at all:
+                    if (entry.failed) {
+                        let blockedByOrder = false;
+                        if (Number.isFinite(onlineCommitSeq) && Number.isFinite(entry.failedAtSeq)) {
+                            // Both real commits: compare commit order.
+                            blockedByOrder = onlineCommitSeq <= entry.failedAtSeq;
+                        } else if (entry.failedAtDeliverySeq !== null && entry.failedAtDeliverySeq !== undefined) {
+                            // The failure was admitted INSIDE the delivery window
+                            // of some commit. A lifecycle event delivered in that
+                            // SAME window is not newer than it; one delivered by a
+                            // LATER commit genuinely is, and may reconnect.
+                            blockedByOrder = !Number.isFinite(onlineDeliverySeq)
+                                || onlineDeliverySeq <= entry.failedAtDeliverySeq;
+                        } else if (Number.isFinite(entry.failedAtBridgeSeq)) {
+                            blockedByOrder = onlineBridgeSeq <= entry.failedAtBridgeSeq;
+                        }
+                        if (blockedByOrder) continue;
                     }
                     if (entry.failed && key.startsWith(`${onlineSubject}\u0000`)) {
                         tracked.set(key, { ...entry, failed: false });
@@ -697,46 +789,70 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         // decision here makes those laws sequential regardless of how the world
         // model resolves its promises.
         //
-        // Because admission now writes state BEFORE the world model has agreed,
-        // the pre-admission state is kept so a delivery that is rejected or
-        // times out can be ROLLED BACK -- otherwise a failed delivery would
-        // still consume monotonic/rate/FAILED state forever (audit of 8d4f80c).
-        const priorTracked = prior === undefined ? null : { ...prior };
+        // The write is a FRAME on the channel's admission stack, so it can be
+        // undone individually and compositionally (audit of dd15f44).
         const seq = ++pendingSeq;
-        tracked.set(key, {
+        const admissionBridgeSeq = ++bridgeSeq;
+        const admittedState = {
             monotonic: Number.isFinite(monotonic) ? monotonic : (prior?.monotonic ?? 0),
             lastAppliedMs: receivedAtMs,
             healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState]
                 ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK,
             failed: skewedHealthState === "FAILED",
-            failedAtMs: skewedHealthState === "FAILED" ? receivedAtMs : undefined,
-            calibrationRef: calibrationRef ?? null,
-            writerSeq: seq
-        });
-        evictWorstTrackedEntryIfOver(MAX_TRACKED_SENSOR_CHANNELS);
+            // Urutan saat kanal ini dinyatakan FAILED. `failedAtSeq` memakai
+            // urutan KOMIT amplop (tetap, jadi perbandingannya bebas urutan
+            // subscriber); `failedAtBridgeSeq` adalah cadangan untuk observasi
+            // sintetis yang tidak pernah dikomit. Keduanya harus BENAR-BENAR
+            // ditulis -- revisi sebelumnya mendeklarasikan `failedAtSeq` tapi
+            // tidak pernah mengisinya, sehingga penjaga urutannya tidak pernah
+            // menyala (audit of dd15f44).
+            failedAtSeq: skewedHealthState === "FAILED" ? commitSequenceOf(event) : undefined,
+            failedAtBridgeSeq: skewedHealthState === "FAILED" ? admissionBridgeSeq : undefined,
+            // Komit yang SEDANG dikirim saat observasi ini diadmit. Sebuah
+            // peristiwa lifecycle yang dikirim dalam jendela yang SAMA bukanlah
+            // hal yang lebih baru darinya, walau jembatan memprosesnya
+            // belakangan -- inilah sinyal yang menutup celah re-entrancy tanpa
+            // bergantung pada urutan subscriber.
+            failedAtDeliverySeq: skewedHealthState === "FAILED" ? currentDeliveryCommitSequence() : undefined,
+            // Referensi kalibrasi ikut tersimpan: perbandingan perubahan
+            // kalibrasi membaca field ini dari state sebelumnya, jadi
+            // menghilangkannya akan mematikan audit perubahan kalibrasi.
+            calibrationRef: calibrationRef ?? null
+        };
+        const frame = { seq, state: admittedState, evicted: null };
+        const existingAdmission = admissionState.get(key);
+        if (existingAdmission) {
+            existingAdmission.frames.push(frame);
+        } else {
+            const base = prior === undefined ? null : { ...prior };
+            admissionState.set(key, { frames: [frame], committed: base });
+        }
+        tracked.set(key, admittedState);
+        // Eviction happens at admission (so `tracked` stays bounded even during
+        // a large backlog) but its VICTIM is recorded on the frame: if this
+        // admission is later rejected or shed, rollback puts the victim back,
+        // so a failed admission can never permanently erase an unrelated live
+        // FAILED tombstone it happened to push out (audit of dd15f44).
+        frame.evicted = evictTrackedIfOver(MAX_TRACKED_SENSOR_CHANNELS);
         if (skewedHealthState === "FAILED") {
             audit({ type: "W8_L1_SENSOR_FAILED", subject, channelId, atMs: nowMs() });
-        }
-
-        // Roll back to the pre-admission state, but ONLY while this entry is
-        // still the latest writer for the channel: a newer observation that has
-        // since been admitted must never be regressed by an older failure.
-        function rollbackTrackedState() {
-            const current = tracked.get(key);
-            if (!current || current.writerSeq !== seq) return;
-            if (priorTracked === null) tracked.delete(key);
-            else tracked.set(key, priorTracked);
         }
 
         const entry = {
             subject, channelId, seq, input, result: undefined,
             state: "queued",
-            // Dipakai jalur timeout dan shed untuk mengembalikan state yang
-            // sempat ditulis saat admission (audit of 8d4f80c).
-            rollback: rollbackTrackedState,
+            // Dipakai jalur timeout dan shed untuk membatalkan frame admission
+            // tanpa menyentuh frame lain yang lebih baru (audit of dd15f44).
+            rollback: () => rollbackAdmissionFrame(key, seq),
             healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState]
                 ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK,
-            onSettled: (value) => { entry.state = "applied"; entry.result = value; },
+            onSettled: (value) => {
+                entry.state = "applied";
+                entry.result = value;
+                // COMMIT the frame: the admitted state becomes this channel's
+                // settled state, and any older frames are now moot.
+                settleAdmissionFrame(key, seq, admittedState);
+            },
             onRejected: (err) => {
                 // Reject-closed: the world model itself refused this
                 // observation (e.g. UNKNOWN_ENTITY — the device has no
@@ -748,7 +864,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
                 // Reject-closed AND rolled back: a delivery the world model
                 // refused must not keep consuming this channel's
                 // monotonic/rate/FAILED state (audit of 8d4f80c).
-                rollbackTrackedState();
+                rollbackAdmissionFrame(key, seq);
                 audit({ type: "W8_L1_OBSERVATION_REJECTED", subject, channelId,
                         reason: err?.reason ?? err?.code ?? "ingest-failed", atMs: nowMs() });
             }
