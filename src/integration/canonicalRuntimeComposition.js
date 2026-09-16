@@ -35,6 +35,7 @@
 const os = require("node:os");
 const path = require("node:path");
 const { types: utilTypes } = require("node:util");
+const { wasCommittedByBodySchema } = require("../embodiment/schema/BodySchema");
 
 // RuntimeCore composition dependencies (moved from runtimeCore.js).
 const { createEmbodiedCore } = require("./embodiedCore");
@@ -193,6 +194,14 @@ const SENSOR_OBSERVATION_DEFAULT_RATE_CAP_PER_SEC = 5;
 // extension point, not a defect in this synchronous implementation.
 const MAX_TRACKED_SENSOR_CHANNELS = 512 * 64;
 const MAX_PENDING_OBSERVATIONS = 50_000;
+// Bounded delivery window: at most this many deliveries may be ISSUED and
+// awaiting settlement at once. Without this, every admitted observation is
+// immediately in flight, the queue never forms, and capacity is consumed by
+// work that can no longer be cancelled -- which makes the contract's fair
+// shedding unreachable (independent audit of 636ee8d). With a bounded window
+// the queue is the real backlog, so overflow cancels work that has NOT been
+// issued yet.
+const MAX_IN_FLIGHT_DELIVERIES = 64;
 
 /**
  * Proxy probe via internal slot — zero traps, and correct for a revoked
@@ -220,7 +229,12 @@ function copySensorValue(value, depth = 0, budget = { count: 0 }) {
     const type = typeof value;
     if (type !== "object") return ["string", "number", "boolean"].includes(type) && (type !== "number" || Number.isFinite(value)) ? value : undefined;
     if (isProxyValue(value)) return undefined;
-    if (depth > 8 || ++budget.count > 512) return undefined;
+    // Budget ini hanya plafon anti-DoS, bukan batas semantik: BodySchema
+    // sudah memvalidasi observasi ini, jadi copier di sini tidak boleh
+    // menolak sesuatu yang BodySchema terima (audit 636ee8d: sampel sah
+    // 17-tingkat ditolak di sini dan tidak pernah sampai ke world model).
+    // Batas yang mengikat tetap batas sampel 2.048 byte yang dibekukan.
+    if (depth > 1024 || ++budget.count > 65536) return undefined;
     if (Array.isArray(value)) {
         const length = readDataProperty(value, "length");
         if (!length.ok || !Number.isSafeInteger(length.value) || length.value < 0 || length.value > 4096) return undefined;
@@ -293,38 +307,48 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
     // subject|channelId -> { monotonic, lastAppliedMs, healthPriority, failed }
     const tracked = new Map();
 
-    // In-flight queue between "plan computed" and "ingestObservation applied"
-    // (W8-L1 contract, "MAX_PENDING_OBSERVATIONS"): bounded at
-    // MAX_PENDING_OBSERVATIONS. Overflow sheds the OLDEST LOWEST-`healthState`-
-    // priority observation FIRST -- and among equal priority, from the source
-    // holding the most in-flight entries -- so a noisy failing sensor is never
-    // kept at the expense of a healthy low-traffic one. An unconditional
-    // reject-the-arrival drop would shed exactly the healthy sensor the
-    // contract forbids shedding.
-    const pending = [];
+    // Admitted-but-unsettled deliveries (W8-L1 contract,
+    // "MAX_PENDING_OBSERVATIONS"): `queue` holds entries ADMITTED but NOT YET
+    // ISSUED to the world model, `inFlight` counts entries already issued and
+    // still awaiting settlement. Overflow sheds the OLDEST LOWEST-`healthState`-
+    // priority queued entry FIRST -- and among equal priority, from the source
+    // holding the most queued entries -- so a noisy failing sensor never
+    // occupies capacity at the expense of a healthy low-traffic one.
+    //
+    // The shed has to remove work that has NOT been issued yet. Removing only
+    // the bookkeeping of an entry that was already handed to
+    // `worldModel.ingestObservation` would report a shed that never happened
+    // (independent audit of 636ee8d), so the queue is drained separately from
+    // admission and the victim is cancelled before it is ever issued.
+    const queue = [];
     let pendingSeq = 0;
     let shedCount = 0;
-    // Read-only OBSERVABILITY view (contract "OBSERVABILITY" + "Shed counts
-    // are exposed ... and audited"): getters only, so a caller can never
-    // rewrite the bridge's own counters through the exported reference.
+    let inFlight = 0;
+
+    // Read-only OBSERVABILITY view (contract "OBSERVABILITY": "Shed counts are
+    // exposed ... and audited"). Getters only, so a caller cannot rewrite the
+    // bridge's own counters through the exported reference.
     const observability = {};
     Object.defineProperties(observability, {
-        pendingObservations: { get: () => pending.length, enumerable: true },
+        pendingObservations: { get: () => queue.length + inFlight, enumerable: true },
+        queuedObservations: { get: () => queue.length, enumerable: true },
+        inFlightObservations: { get: () => inFlight, enumerable: true },
         shedCount: { get: () => shedCount, enumerable: true },
         maxPending: { get: () => MAX_PENDING_OBSERVATIONS, enumerable: true }
     });
     Object.freeze(observability);
 
+    /** Pilih korban di antara entri yang BELUM PERNAH di-issue. */
     function shedOneForCapacity() {
-        if (pending.length === 0) return false;
+        if (queue.length === 0) return false;
         const perSource = new Map();
-        for (const entry of pending) {
+        for (const entry of queue) {
             perSource.set(entry.subject, (perSource.get(entry.subject) ?? 0) + 1);
         }
         let victimIndex = 0;
-        for (let i = 1; i < pending.length; i++) {
-            const candidate = pending[i];
-            const victim = pending[victimIndex];
+        for (let i = 1; i < queue.length; i++) {
+            const candidate = queue[i];
+            const victim = queue[victimIndex];
             if (candidate.healthPriority < victim.healthPriority) { victimIndex = i; continue; }
             if (candidate.healthPriority > victim.healthPriority) continue;
             const candidateSourceCount = perSource.get(candidate.subject) ?? 0;
@@ -333,16 +357,45 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             if (candidateSourceCount < victimSourceCount) continue;
             if (candidate.seq < victim.seq) victimIndex = i;   // oldest last
         }
-        const [evicted] = pending.splice(victimIndex, 1);
+        const [evicted] = queue.splice(victimIndex, 1);
         shedCount += 1;
         audit({ type: "W8_L1_OBSERVATION_SHED", subject: evicted.subject,
                 channelId: evicted.channelId, reason: "pending-capacity", atMs: nowMs() });
         return true;
     }
 
-    function releasePending(entry) {
-        const index = pending.indexOf(entry);
-        if (index >= 0) pending.splice(index, 1);
+    function issueEntry(entry) {
+        inFlight += 1;
+        let issued;
+        try {
+            issued = worldModel.ingestObservation(entry.input);
+        } catch (err) {
+            inFlight -= 1;
+            entry.result = undefined;
+            entry.onRejected(err);
+            drainQueue();
+            return;
+        }
+        entry.result = issued;
+        if (issued && typeof issued.then === "function") {
+            Promise.resolve(issued).then(
+                (value) => { inFlight -= 1; entry.onSettled(value); drainQueue(); },
+                (err) => { inFlight -= 1; entry.result = undefined; entry.onRejected(err); drainQueue(); });
+        } else {
+            // Selesai sinkron: settle SEKARANG, bukan lewat microtask, supaya
+            // `observability` melaporkan keadaan sebenarnya (tanpa ini sebuah
+            // world model sinkron tampak "pending" padahal sudah selesai).
+            inFlight -= 1;
+            entry.onSettled(issued);
+            drainQueue();
+        }
+        return;
+    }
+
+    function drainQueue() {
+        while (queue.length > 0 && inFlight < MAX_IN_FLIGHT_DELIVERIES) {
+            issueEntry(queue.shift());
+        }
     }
 
 
@@ -394,12 +447,17 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         const payloadRead = readDataProperty(event, "payload");
         if (!type.ok || !payloadRead.ok) return { applied: false, reason: "not-an-observation" };
 
-        // Trusted reconnect: BodySchema itself observed the device return.
-        // This is the ONLY path that lifts a channel's FAILED stop-forwarding
-        // state -- a sample claiming healthState OK (or a caller-supplied
-        // `reconnected` flag) never does, so a disconnected sensor cannot
-        // un-wedge itself by asserting it is healthy.
+        // Trusted reconnect: ONLY a lifecycle event BodySchema itself
+        // committed may reopen a channel. A forged `DEVICE_ONLINE` handed
+        // straight to this exported method is not in BodySchema's committed
+        // set, and a sample claiming healthState OK (or a caller-supplied
+        // `reconnected` flag) never reopens anything either -- so a
+        // disconnected sensor cannot un-wedge itself.
         if (type.value === "DEVICE_ONLINE") {
+            if (!wasCommittedByBodySchema(event)) {
+                audit({ type: "W8_L1_UNTRUSTED_LIFECYCLE_REJECTED", subject: subjectRead.ok ? subjectRead.value : null, atMs: nowMs() });
+                return { applied: false, reason: "untrusted-lifecycle-event" };
+            }
             const onlineSubject = subjectRead.ok ? subjectRead.value : undefined;
             let cleared = 0;
             if (typeof onlineSubject === "string") {
@@ -413,6 +471,22 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             if (cleared > 0) {
                 audit({ type: "W8_L1_SENSOR_RECONNECTED", subject: onlineSubject, cleared, atMs: nowMs() });
             }
+            return { applied: false, reason: "not-an-observation" };
+        }
+
+        // Audit coverage for the lifecycle/health transitions the frozen
+        // contract requires to be observable ("Sensor registration, health
+        // transitions, calibration changes, and shed counts ... are audited").
+        if (type.value === "DEVICE_DISCOVERED" || type.value === "DEVICE_CHANGED") {
+            audit({ type: "W8_L1_SENSOR_REGISTERED", subject: subjectRead.ok ? subjectRead.value : null,
+                    change: type.value, atMs: nowMs() });
+            return { applied: false, reason: "not-an-observation" };
+        }
+        if (type.value === "DEVICE_HEALTH_CHANGED") {
+            const health = payloadRead.ok ? readDataProperty(payloadRead.value, "health") : { ok: false };
+            const status = health.ok ? readDataProperty(health.value, "status") : { ok: false };
+            audit({ type: "W8_L1_SENSOR_HEALTH_CHANGED", subject: subjectRead.ok ? subjectRead.value : null,
+                    status: status.ok ? status.value : null, atMs: nowMs() });
             return { applied: false, reason: "not-an-observation" };
         }
         if (type.value !== "SENSOR_OBSERVATION" || !result) return { applied: false, reason: "not-an-observation" };
@@ -440,8 +514,12 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         }
         const key = bridgeSensoriumPairKey(subject, channelId);
         const prior = tracked.get(key);
-        const reconnectedRead = readDataProperty(result, "reconnected");
-        if (prior?.failed && !(reconnectedRead.ok && reconnectedRead.value === true)) return { applied: false, reason: "sensor-failed" };
+        // A FAILED channel stays stopped until BodySchema itself reports the
+        // device back online. `result.reconnected` is deliberately NOT
+        // honoured: it was a caller-supplied flag that bypassed the whole
+        // reconnect story (independent audit of 636ee8d).
+        if (prior?.failed) return { applied: false, reason: "sensor-failed" };
+
 
         // Dedup: a non-increasing `monotonic` for the same (subject, channel)
         // is a duplicate/replay — idempotent no-op, never a duplicate belief.
@@ -494,54 +572,86 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             raw: payload.raw ?? null
         });
 
-        if (pending.length >= MAX_PENDING_OBSERVATIONS) shedOneForCapacity();
-        const pendingEntry = {
-            subject, channelId, seq: ++pendingSeq,
-            healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState]
-                ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK
+        const input = {
+            observationId: eventIdRead.ok ? eventIdRead.value : undefined,
+            subject: { entityId: subject },
+            attribute: `sensor:${channelId}`,
+            value,
+            sensor: { sensorId: channelId },
+            tier: "T4",
+            observedAt: new Date(observedAtMs).toISOString()
         };
-        pending.push(pendingEntry);
-        let applyResult;
-        try {
-            applyResult = worldModel.ingestObservation({
-                observationId: eventIdRead.ok ? eventIdRead.value : undefined,
-                subject: { entityId: subject },
-                attribute: `sensor:${channelId}`,
-                value,
-                sensor: { sensorId: channelId },
-                tier: "T4",
-                observedAt: new Date(observedAtMs).toISOString()
+
+        const recordApplied = () => {
+            // Calibration change is an audited transition (contract: "...
+            // and calibration change is audited"). Compared against the last
+            // committed reference for this channel, so a producer cannot swap
+            // calibration silently.
+            const calibrationRef = payload.calibration && typeof payload.calibration === "object"
+                ? payload.calibration.calibrationRef : null;
+            if (prior && prior.calibrationRef !== undefined && prior.calibrationRef !== calibrationRef) {
+                audit({ type: "W8_L1_CALIBRATION_CHANGED", subject, channelId,
+                        from: prior.calibrationRef ?? null, to: calibrationRef ?? null, atMs: nowMs() });
+            }
+            tracked.set(key, {
+                monotonic: Number.isFinite(monotonic) ? monotonic : (prior?.monotonic ?? 0),
+                lastAppliedMs: receivedAtMs,
+                healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState]
+                    ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK,
+                failed: skewedHealthState === "FAILED",
+                calibrationRef: calibrationRef ?? null
             });
-        } catch (err) {
-            releasePending(pendingEntry);
-            // Reject-closed: the world model itself refused this observation
-            // (e.g. UNKNOWN_ENTITY — the device has no corresponding
-            // world-model entity yet). The bridge's ONE write capability is
-            // ingestObservation itself (contract "Authority boundaries") —
-            // it never declares entities on the caller's behalf.
-            audit({ type: "W8_L1_OBSERVATION_REJECTED", subject, channelId, reason: err?.reason ?? err?.code ?? "ingest-failed", atMs: nowMs() });
-            return { applied: false, reason: "ingest-rejected" };
+            evictWorstTrackedEntryIfOver(MAX_TRACKED_SENSOR_CHANNELS);
+            if (skewedHealthState === "FAILED") {
+                audit({ type: "W8_L1_SENSOR_FAILED", subject, channelId, atMs: nowMs() });
+            }
+        };
+
+        // Capacity spans ADMITTED-but-unsettled work (queued + issued). The
+        // victim is always a QUEUED entry, so the shed is real: it is
+        // cancelled before it is ever handed to the world model. If nothing is
+        // queued to shed (all capacity is already issued and awaiting
+        // settlement) the arrival is honestly REJECTED instead of reporting a
+        // shed that did not happen.
+        if ((queue.length + inFlight) >= MAX_PENDING_OBSERVATIONS) {
+            const shed = shedOneForCapacity();
+            if (!shed && (queue.length + inFlight) >= MAX_PENDING_OBSERVATIONS) {
+                audit({ type: "W8_L1_OBSERVATION_REJECTED", subject, channelId,
+                        reason: "pending-capacity", atMs: nowMs() });
+                return { applied: false, reason: "pending-capacity" };
+            }
         }
 
-        tracked.set(key, {
-            monotonic: Number.isFinite(monotonic) ? monotonic : (prior?.monotonic ?? 0),
-            lastAppliedMs: receivedAtMs,
-            healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState] ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK,
-            failed: skewedHealthState === "FAILED"
-        });
-        if (applyResult && typeof applyResult.then === "function") {
-            Promise.resolve(applyResult).finally(() => { releasePending(pendingEntry); }).catch(() => {});
+        const entry = {
+            subject, channelId, seq: ++pendingSeq, input, result: undefined,
+            healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState]
+                ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK,
+            onSettled: recordApplied,
+            onRejected: (err) => {
+                // Reject-closed: the world model itself refused this
+                // observation (e.g. UNKNOWN_ENTITY — the device has no
+                // corresponding world-model entity yet). The bridge's ONE write
+                // capability is ingestObservation itself (contract "Authority
+                // boundaries") — it never declares entities on the caller's
+                // behalf. The channel is NOT marked applied.
+                audit({ type: "W8_L1_OBSERVATION_REJECTED", subject, channelId,
+                        reason: err?.reason ?? err?.code ?? "ingest-failed", atMs: nowMs() });
+            }
+        };
+
+        // Deliver immediately when there is a free delivery slot, so a
+        // synchronous world model is committed before this call returns and
+        // every existing caller keeps its `applied`/`result` semantics. Only
+        // genuine backlog (the delivery window already full) queues.
+        if (inFlight < MAX_IN_FLIGHT_DELIVERIES) {
+            issueEntry(entry);
+            drainQueue();
         } else {
-            queueMicrotask(() => { releasePending(pendingEntry); });
+            queue.push(entry);
         }
-        evictWorstTrackedEntryIfOver(MAX_TRACKED_SENSOR_CHANNELS);
-
-
-        if (skewedHealthState === "FAILED") {
-            audit({ type: "W8_L1_SENSOR_FAILED", subject, channelId, atMs: nowMs() });
-        }
-
-        return { applied: true, healthState: skewedHealthState, result: applyResult };
+        // `result` is only meaningful for work actually issued; a queued
+        // observation has not reached the world model yet.
+        return { applied: true, healthState: skewedHealthState, result: entry.result };
         } catch {
             return { applied: false, reason: "malformed-observation" };
         }
