@@ -197,7 +197,11 @@ test("L5-repair-14: persisted non-T10 and orphan results are quarantined, and as
     const raw = { runs: { ok: { runId: "ok", state: "COMPLETE", createdAtMs: 0 } }, results: {
         ok: { runId: "ok", tier: "T1", state: "COMPLETE", assumptions: ["scene:v1"], validUntilMs: 999999999, generatedAtMs: 0 },
         orphan: { runId: "orphan", tier: "T10", state: "COMPLETE", assumptions: [], validUntilMs: 999999999, generatedAtMs: 0 }
-    } };
+    },
+    // A well-formed snapshot always carries the budget history: since audit
+    // fdda055 a snapshot that EXISTS without it is treated as an unverifiable
+    // history (which refuses new runs), so fixtures must be realistic.
+    budget: { tokenLedger: [], invalidatedAssumptions: [] } };
     const store = { getKv: async () => raw, putKv: async () => {} };
     const sim = await createSimulationSandbox({ store, clock: { nowMs: () => 1 } });
     assertThrowsReason(() => sim.getResult("ok"), "UNKNOWN_RUN");
@@ -526,6 +530,66 @@ test("L5-audit-11: sparse, malformed, oversized, or Proxy budget histories all f
         });
         await assertRejectsReason(sim.startRun(spec), "BUDGET_EXCEEDED");
     }
+});
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of fdda055 -- repaired classes                        */
+/* ---------------------------------------------------------------------- */
+
+test("L5-audit-12: EVERY real-state writer verb is enforced, not just the first one scanned", async () => {
+    // The per-level `seen` set was shared across the outer verb loop, so after
+    // the first verb walked the chain every later verb saw each level as
+    // already-seen and bailed immediately: seven of the eight verbs were
+    // unenforced (audit of fdda055).
+    for (const verb of [
+        "appendEvent", "saveSnapshot", "upsertPrediction", "upsertExperience",
+        "upsertCommitment", "upsertSubstrateEpoch", "upsertBelief", "appendJournal"
+    ]) {
+        const store = { async getKv() { return null; }, async putKv() {} };
+        store[verb] = () => {};
+        await assertRejectsReason(
+            createSimulationSandbox({ store }),
+            "CROSS_STORE_WRITE_REJECTED"
+        );
+    }
+    // A plain double is still accepted.
+    const ok = await createSimulationSandbox({
+        store: { async getKv() { return null; }, async putKv() {} }
+    });
+    assert.equal(ok.simulationColdStart, true);
+});
+
+test("L5-audit-13: a snapshot that EXISTS without its budget history is unverifiable, and 100k legitimate entries still restore", async () => {
+    // Omitting `budget` (or a field inside it) previously read as an empty
+    // history, resetting the hourly cap by simply stripping the field.
+    assert.equal(deserialize({ runs: {}, results: {} }).degraded, true,
+        "a snapshot without a budget history cannot be trusted");
+    assert.equal(deserialize({
+        runs: {}, results: {}, budget: { invalidatedAssumptions: [] }
+    }).degraded, true, "a budget without tokenLedger cannot be trusted");
+    assert.equal(deserialize({
+        runs: {}, results: {}, budget: { tokenLedger: [] }
+    }).degraded, true, "a budget without invalidatedAssumptions cannot be trusted");
+
+    const stripped = await createSimulationSandbox({
+        store: { async getKv() { return { runs: {}, results: {} }; }, async putKv() {} },
+        bounds: { ...BOUNDS, MAX_TOKENS_PER_HOUR: 100 }
+    });
+    await assertRejectsReason(stripped.startRun({
+        runId: "r", question: "q", scenario: "s", initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 60,
+        provider: () => ({ tokensUsed: 60, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+    }), "BUDGET_EXCEEDED");
+
+    // A LARGE but legitimate one-token history must NOT be treated as
+    // unverifiable -- the earlier 100k cap bricked restarts on valid data.
+    const ledger = [];
+    for (let i = 0; i < 100_001; i += 1) ledger.push({ atMs: 1_000_000, tokens: 1 });
+    const restored = deserialize({
+        runs: {}, results: {}, budget: { tokenLedger: ledger, invalidatedAssumptions: [] }
+    });
+    assert.equal(restored.degraded, false, "a large legitimate history is still trustworthy");
+    assert.equal(restored.tokenLedger.length, 100_001);
 });
 
 

@@ -412,3 +412,85 @@ test("L3-audit-7: restart-time stale-first compaction uses the INJECTED clock an
         `restart-time eviction must be audited, saw: ${events.join(",")}`);
 });
 
+/* ---------------------------------------------------------------------- */
+/* Independent audit of fdda055 -- repaired classes                        */
+/* ---------------------------------------------------------------------- */
+
+test("L3-audit-8: an accessor-backed or Proxy KV on the spatial store executes no caller code", async () => {
+    // `typeof store.getKv === "function"` was a raw [[Get]].
+    let getterCalls = 0;
+    const hostile = {};
+    Object.defineProperty(hostile, "getKv", {
+        enumerable: true, configurable: true,
+        get() { getterCalls += 1; return async () => null; }
+    });
+    const fromAccessor = await createSpatialModel({ store: hostile, clock: { nowMs: () => 1000 } });
+    assert.equal(getterCalls, 0, "the store accessor must never run");
+    assert.equal(fromAccessor.spatialColdStart, true);
+
+    let traps = 0;
+    const proxyStore = new Proxy({}, {
+        getOwnPropertyDescriptor() { traps += 1; return undefined; },
+        getPrototypeOf(t) { traps += 1; return Object.getPrototypeOf(t); },
+        ownKeys(t) { traps += 1; return Reflect.ownKeys(t); }
+    });
+    const fromProxy = await createSpatialModel({ store: proxyStore, clock: { nowMs: () => 1000 } });
+    assert.equal(traps, 0, "no Proxy trap may run while probing the store");
+    assert.equal(fromProxy.spatialColdStart, true);
+});
+
+test("L3-audit-9: a lying Proxy persisted as a collection is rejected, not silently read as empty", () => {
+    // `Object.keys` ran before any Proxy rejection, and a Proxy that reports no
+    // keys looked like a legitimately empty collection -- state silently lost
+    // with no degradation (audit of fdda055).
+    let traps = 0;
+    const lying = new Proxy({}, {
+        ownKeys(t) { traps += 1; return []; },
+        getOwnPropertyDescriptor(t, k) { traps += 1; return undefined; },
+        getPrototypeOf(t) { traps += 1; return Reflect.getPrototypeOf(t); }
+    });
+    assert.throws(() => deserialize({ frames: lying, transforms: {}, sceneNodes: {} }));
+    assert.equal(traps, 0, "no proxy trap may run during deserialization");
+});
+
+test("L3-audit-10: a persisted transform CYCLE is rejected at restart, and malformed entries cannot displace valid state", async () => {
+    const nowMs = 1_000_000;
+    const frames = {
+        A: { frameId: "A", kind: "SCREEN", ref: {}, source: "s", registeredAt: nowMs - 10 },
+        B: { frameId: "B", kind: "SCREEN", ref: {}, source: "s", registeredAt: nowMs - 10 }
+    };
+    const transforms = {
+        t1: { transformId: "t1", fromFrameId: "A", toFrameId: "B", data: { x: 1 }, registeredAt: nowMs - 10 },
+        t2: { transformId: "t2", fromFrameId: "B", toFrameId: "A", data: { x: -1 }, registeredAt: nowMs - 10 }
+    };
+    const cycled = await createSpatialModel({
+        store: { async getKv() { return { frames, transforms, sceneNodes: {} }; }, async putKv() {} },
+        clock: { nowMs: () => nowMs }
+    });
+    assert.ok(cycled.transformsSize() < 2,
+        "a persisted cycle must not survive restart as queryable geometry");
+
+    // Validation now runs BEFORE compaction, so a malformed entry is dropped
+    // without occupying capacity and evicting a valid one.
+    const validNodes = {};
+    const validFrames = {};
+    for (let i = 0; i < 3; i += 1) {
+        const frameId = `f${i}`;
+        validFrames[frameId] = { frameId, kind: "SCREEN", ref: {}, source: "s", registeredAt: nowMs - 10 };
+        validNodes[sceneNodeKey(frameId, { r: i })] = {
+            nodeId: sceneNodeKey(frameId, { r: i }), frameId, region: { r: i }, state: "KNOWN",
+            observationRefs: ["o"], updatedAtMs: nowMs - 10
+        };
+    }
+    // One malformed frame whose id does not match its own key.
+    validFrames.bad = { frameId: "MISMATCH", kind: "SCREEN", ref: {}, source: "s", registeredAt: nowMs - 10 };
+
+    const sm = await createSpatialModel({
+        store: { async getKv() { return { frames: validFrames, transforms: {}, sceneNodes: validNodes }; }, async putKv() {} },
+        clock: { nowMs: () => nowMs },
+        bounds: { ...BOUNDS, MAX_FRAMES: 3, MAX_SCENE_NODES: 3 }
+    });
+    assert.equal(sm.framesSize(), 3, "the malformed frame must be dropped, leaving the valid three");
+    assert.equal(sm.sceneNodesSize(), 3, "no valid scene node may be displaced by a malformed entry");
+});
+
