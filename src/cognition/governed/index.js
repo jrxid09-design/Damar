@@ -66,18 +66,24 @@ function isProxyValue(value) {
  */
 const AUTHORITY_SHAPED_KEYS = Object.freeze([
     // historical names this repo already used
-    "authorityDecision", "allow", "grant", "owner", "authProof",
-    "capabilityGrant", "executionLease", "executor", "route", "trustedNode", "rootAuthority",
+    "authorityDecision", "allow", "grant", "owner", "authProof", "route",
+    "capabilityGrant", "executionLease", "executor", "trustedNode", "rootAuthority",
     // authority/permission family
     "authority", "authorities", "authorized", "authorization", "authorizations",
+    "authorizationCode", "unauthorized",
     "permission", "permissions", "privilege", "privileges", "permit", "permitted", "permitAll",
+    "allowed", "denied", "deny", "forbidden",
     "approved", "approval", "approvedBy", "entitlement", "entitlements",
+    "consent", "scope", "scopes", "authentication", "authenticated",
     // decision/grant family
     "decision", "decisions", "decisionMaker", "granted", "grants", "grantedBy",
     "delegation", "delegated", "delegate", "mandate", "mandated",
-    // bearer-token / lease family
+    // bearer-token / lease family. NOTE: bare `token`/`tokens` are deliberately
+    // NOT listed -- they are ordinary advisory vocabulary (e.g. a planning
+    // token budget), and listing them risks rejecting legitimate projections.
+    // The specific credential forms below carry the actual authority risk.
     "lease", "leases", "leasedUntil", "bearer", "bearerToken", "leaseToken", "authToken",
-    "accessToken", "refreshToken", "token", "tokens", "sessionToken",
+    "accessToken", "refreshToken", "idToken", "sessionToken",
     // credential family
     "credential", "credentials", "creds", "secret", "secrets", "apiKey", "privateKey",
     "password", "passphrase"
@@ -328,10 +334,19 @@ function recordModeTransitionChecked(options) {
                     // No positive confirmation. A no-op append must not be
                     // reported as a recorded transition (audit of 8f78a21).
                     audited = false;
-                } else {
-                    // Canonical append() returns the stored record on success
-                    // and throws on failure.
+                } else if (typeof result === "object" && !Array.isArray(result)
+                    && typeof result.eventId === "string" && result.eventId.length > 0) {
+                    // The canonical createAuditLedger().append contract: the
+                    // FROZEN STORED RECORD is returned on success, and it throws
+                    // on failure. Requiring that record shape is what makes
+                    // "confirmed" mean something -- treating any other truthy
+                    // return as success let `1`, `"ok"`, a Symbol, a function,
+                    // an array, or an unrelated object all report audited:true
+                    // and left governed construction fail-open (audit of
+                    // 9e7b8df).
                     audited = true;
+                } else {
+                    audited = false;
                 }
             }
         }

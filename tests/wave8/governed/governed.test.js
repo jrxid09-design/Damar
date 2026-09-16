@@ -388,3 +388,76 @@ test("FG03-33: the canonical audit-ledger binding actually resolves, so shadow a
     const off = await createLongHorizonCycle({ mode: "off", capabilityRegistry: fakeRegistry() });
     assert.equal(off.lanes, undefined);
 });
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of 9e7b8df — repaired classes                        */
+/* ---------------------------------------------------------------------- */
+
+test("FG03-34: only a positive confirmation SHAPE counts as audited -- arbitrary truthy returns stay fail-open", () => {
+    const outcome = (append) => recordModeTransitionChecked(
+        { auditLedger: { append }, from: "off", to: "governed" });
+
+    // Every one of these is truthy but is NOT the canonical stored record, so
+    // none may be reported as a recorded transition (audit of 9e7b8df found
+    // that any truthy return was previously accepted as success).
+    assert.equal(outcome(() => 1).failedOpen, true, "number 1");
+    assert.equal(outcome(() => "ok").failedOpen, true, "string");
+    assert.equal(outcome(() => Symbol("x")).failedOpen, true, "symbol");
+    assert.equal(outcome(() => () => {}).failedOpen, true, "function");
+    assert.equal(outcome(() => []).failedOpen, true, "array");
+    assert.equal(outcome(() => ({ nope: 1 })).failedOpen, true, "unrelated object");
+    assert.equal(outcome(() => ({ eventId: "" })).failedOpen, true, "empty eventId is not a record");
+
+    // The two genuine confirmations still pass.
+    assert.equal(outcome(() => ({ ok: true })).failedOpen, false, "appendSafe contract");
+    assert.equal(outcome(() => ({ eventId: "canonical-record-1" })).failedOpen, false, "canonical stored record");
+});
+
+test("FG03-35: the additional authority vocabulary is contained while legitimate advisory vocabulary is not over-rejected", () => {
+    for (const key of [
+        "allowed", "denied", "deny", "forbidden", "unauthorized",
+        "authentication", "authenticated", "authorizationCode",
+        "idToken", "sessionToken", "consent", "scope", "scopes"
+    ]) {
+        assert.throws(
+            () => assertNoAuthorityShapedFields({ nested: { [key]: "x" } }, "Probe"),
+            /tidak boleh membawa field/,
+            `'${key}' must be contained`);
+    }
+    // Bare `token`/`tokens` are ordinary advisory vocabulary (e.g. a planning
+    // token budget) and must NOT be collateral damage of the denylist.
+    assert.doesNotThrow(() => assertNoAuthorityShapedFields({
+        plan: { token: 12, tokens: 34 }, decisionInfluence: "ADVISORY_ONLY"
+    }, "Probe"));
+});
+
+test("FG03-36: a non-recording ledger degrades GOVERNED to off but never degrades SHADOW", async () => {
+    const { createLongHorizonCycle } = require("../../../src/cognition/longhorizon");
+    // Shadow is decisionInfluence:false ALWAYS by contract, so an unrecorded
+    // shadow initialization cannot influence a decision; degrading it would
+    // destroy capability for no safety gain (and would break the frozen W7-L7
+    // per-cycle audit cap). Governed, which permits ADVISORY_ONLY influence,
+    // must still refuse to start unaudited.
+    const nonRecording = { append: () => 1 };
+
+    const shadow = await createLongHorizonCycle({
+        mode: "shadow", capabilityRegistry: fakeRegistry(), auditLedger: nonRecording
+    });
+    assert.equal(shadow.mode, "shadow", "shadow must not be degraded by a non-recording ledger");
+    assert.ok(shadow.lanes, "shadow still constructs its lanes");
+
+    const governed = await createLongHorizonCycle({
+        mode: "governed", capabilityRegistry: fakeRegistry(), auditLedger: nonRecording
+    });
+    assert.equal(governed.mode, "off", "an unconfirmed transition must not yield governed mode");
+    assert.equal(governed.auditUnavailable, true);
+    assert.equal(governed.lanes, undefined);
+
+    // A recording ledger keeps governed working.
+    const recording = await createLongHorizonCycle({
+        mode: "governed", capabilityRegistry: fakeRegistry(),
+        auditLedger: { append: () => ({ eventId: "canonical-record-2" }) }
+    });
+    assert.equal(recording.mode, "governed");
+    assert.ok(recording.lanes);
+});

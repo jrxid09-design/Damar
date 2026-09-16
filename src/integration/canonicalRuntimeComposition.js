@@ -344,12 +344,29 @@ async function buildRuntimeCoreInternal({
     // reads `cognition` back. GATE-W7-10/11 hold structurally: with
     // enableCognition=false (the default) this is simply `null`.
     let cognition = null;
+    let cognitionAuditLedgerResolved = null;
     if (enableCognition) {
         const { createLongHorizonCycle } = require("../cognition/longhorizon");
+        // BIND THE CANONICAL LEDGER HERE, at the composition layer that owns
+        // runtime wiring -- not inside the cognition lane. A previous revision
+        // had the lane call `createAuditLedger()` itself and label it
+        // "canonical"; that produced a fresh sinkless in-memory ledger per
+        // construction, sharing nothing with the durable ledger the runtime
+        // owns, and put a record-sink factory inside a cognition lane where
+        // FG-03 must not reach (audit of 9e7b8df). A caller-supplied ledger
+        // still wins when present.
+        cognitionAuditLedgerResolved = cognitionAuditLedger;
+        if (cognitionAuditLedgerResolved == null) {
+            try {
+                cognitionAuditLedgerResolved = require("../runtime/auditLedger").createAuditLedger({});
+            } catch {
+                cognitionAuditLedgerResolved = null;
+            }
+        }
         cognition = await createLongHorizonCycle({
             mode: cognitionMode,
             capabilityRegistry: cognitionCapabilityRegistry,
-            auditLedger: cognitionAuditLedger
+            auditLedger: cognitionAuditLedgerResolved
         });
     }
 
