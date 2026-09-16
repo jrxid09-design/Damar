@@ -25,6 +25,7 @@ const KV_KEY = "sim_simulation.snapshot";
 // membuat salinan kedua di sini.
 const { buildSafeSimValue } = require("./records");
 const { REASONS, fail } = require("./errors");
+const utilTypes = require("node:util").types;
 
 function deepFreeze(value, seen = new WeakSet()) {
     if (!value || typeof value !== "object") return value;
@@ -57,13 +58,61 @@ function serialize({ runs, results, tokenLedger, invalidatedAssumptions }) {
  * memalsukan konsumsi token maupun menyuntikkan asumsi yang tidak pernah
  * diinvalidasi. Bentuk yang tidak dikenal menghasilkan riwayat kosong.
  */
+/**
+ * Baca elemen array tersimpan TANPA `for...of` / `Symbol.iterator`.
+ *
+ * `for (const x of arr)` memanggil `arr[Symbol.iterator]`, yaitu `[[Get]]`
+ * mentah pada kunci Symbol: snapshot hostil bisa memasang accessor di sana dan
+ * kodenya berjalan sebelum validasi apa pun (audit Wave8 L3/L5). Iterasi di
+ * sini memakai indeks numerik lewat deskriptor, persis seperti sanitizer lane.
+ */
+function readPersistedArray(value) {
+    if (!Array.isArray(value)) return null;
+    const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+    const len = lengthDescriptor && !lengthDescriptor.get && !lengthDescriptor.set
+        ? lengthDescriptor.value : -1;
+    if (!Number.isInteger(len) || len < 0) return null;
+    const out = [];
+    for (let i = 0; i < len; i++) {
+        const desc = Object.getOwnPropertyDescriptor(value, i);
+        if (!desc || desc.get || desc.set || !("value" in desc)) continue;
+        out.push(desc.value);
+    }
+    return out;
+}
+
+/**
+ * Riwayat anggaran tersimpan. Bentuk yang TIDAK DIKENAL berarti state anggaran
+ * tidak dapat dipulihkan -- itu WAJIB terlihat sebagai `degraded`, bukan diam-diam
+ * menjadi riwayat kosong: memperlakukan riwayat yang tidak terbaca sebagai kosong
+ * akan mereset batas 500k token/jam (dan bisa menghidupkan lagi hasil yang sudah
+ * STALE_ASSUMPTIONS) hanya dengan merusak snapshot (audit Wave8 L3/L5).
+ */
 function readPersistedBudget(raw) {
     const budget = readSnapshotField(raw, "budget");
-    const out = { tokenLedger: [], invalidatedAssumptions: [] };
-    if (budget === null || budget === undefined || typeof budget !== "object" || Array.isArray(budget)) return out;
-    const ledger = readSnapshotField(budget, "tokenLedger");
-    if (Array.isArray(ledger)) {
-        for (const entry of ledger) {
+    const out = { tokenLedger: [], invalidatedAssumptions: [], degraded: false };
+    if (budget === null || budget === undefined) {
+        // Tidak ada state anggaran tersimpan sama sekali: cold start yang jujur,
+        // bukan degradasi (tidak ada apa pun yang gagal dibaca).
+        return out;
+    }
+    if (typeof budget !== "object" || Array.isArray(budget)) {
+        out.degraded = true;
+        return out;
+    }
+    const ledgerRaw = readSnapshotField(budget, "tokenLedger");
+    const invalidatedRaw = readSnapshotField(budget, "invalidatedAssumptions");
+    if (ledgerRaw !== undefined && !Array.isArray(ledgerRaw)) {
+        out.degraded = true;
+        return out;
+    }
+    if (invalidatedRaw !== undefined && !Array.isArray(invalidatedRaw)) {
+        out.degraded = true;
+        return out;
+    }
+    const entries = readPersistedArray(ledgerRaw);
+    if (entries) {
+        for (const entry of entries) {
             if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
             const atMs = readSnapshotField(entry, "atMs");
             const tokens = readSnapshotField(entry, "tokens");
@@ -71,9 +120,9 @@ function readPersistedBudget(raw) {
             out.tokenLedger.push({ atMs, tokens });
         }
     }
-    const invalidated = readSnapshotField(budget, "invalidatedAssumptions");
-    if (Array.isArray(invalidated)) {
-        for (const ref of invalidated) {
+    const refs = readPersistedArray(invalidatedRaw);
+    if (refs) {
+        for (const ref of refs) {
             if (typeof ref === "string" && ref) out.invalidatedAssumptions.push(ref);
         }
     }
@@ -93,6 +142,8 @@ function deserialize(raw) {
         results: readPersistedCollection(raw, "results"),
         tokenLedger: budget.tokenLedger,
         invalidatedAssumptions: budget.invalidatedAssumptions,
+        // Riwayat anggaran yang tidak terbaca = degradasi yang WAJIB terlihat.
+        degraded: budget.degraded,
         coldStart: false
     };
 }
@@ -175,13 +226,50 @@ const REAL_STORE_WRITE_VERBS = Object.freeze([
  */
 function checkStoreIsolation(store) {
     if (!store || typeof store !== "object") return;
+    // Proxy ditolak lebih dulu: setiap introspeksi pada Proxy menjalankan trap
+    // milik pemanggil, jadi tidak ada pemeriksaan yang benar-benar aman di sini.
+    try {
+        if (utilTypes.isProxy(store)) {
+            throw fail(REASONS.CROSS_STORE_WRITE_REJECTED,
+                "store simulasi tidak boleh berupa Proxy");
+        }
+    } catch (err) {
+        if (err && err.reason) throw err;
+    }
     for (const verb of REAL_STORE_WRITE_VERBS) {
-        let has = false;
+        // Dibaca lewat DESKRIPTOR, bukan `store[verb]`: pembacaan mentah
+        // menjalankan getter/proxy milik pemanggil SEBELUM penolakan, sehingga
+        // penjaga ini sendiri menjadi jalur eksekusi kode (audit Wave8 L3/L5).
+        let desc;
         try {
-            has = typeof store[verb] === "function";
+            desc = Object.getOwnPropertyDescriptor(store, verb);
         } catch {
-            // Accessor/proxy hostil pada store: perlakukan sebagai mencurigakan.
-            has = true;
+            // Store yang tidak dapat diintrospeksi diperlakukan mencurigakan.
+            desc = null;
+        }
+        let has = false;
+        if (desc) {
+            has = desc.get || desc.set ? true : typeof desc.value === "function";
+        } else {
+            // Warisan (mis. metode pada prototype AccStore) tetap harus terdeteksi.
+            let proto;
+            try {
+                proto = Object.getPrototypeOf(store);
+            } catch {
+                proto = null;
+            }
+            if (proto && proto !== Object.prototype) {
+                let inherited;
+                try {
+                    inherited = Object.getOwnPropertyDescriptor(proto, verb);
+                } catch {
+                    inherited = null;
+                }
+                if (inherited) {
+                    has = inherited.get || inherited.set
+                        ? true : typeof inherited.value === "function";
+                }
+            }
         }
         if (has) {
             throw fail(REASONS.CROSS_STORE_WRITE_REJECTED,

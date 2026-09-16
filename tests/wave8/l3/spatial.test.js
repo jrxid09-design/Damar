@@ -330,3 +330,24 @@ test("L3-audit-4: one source revising its OWN reading is a revision, not a contr
         "no contradiction may be recorded for a single-source revision");
 });
 
+test("L3-audit-5: an async-rejecting audit sink is contained and never blocks the lane", async () => {
+    let unhandled = 0;
+    const listener = () => { unhandled += 1; };
+    process.on("unhandledRejection", listener);
+    try {
+        const sm = await createSpatialModel({
+            clock: { nowMs: () => 1000 },
+            auditLedger: { append: () => Promise.reject(new Error("audit down")) }
+        });
+        sm.registerFrame({ frameId: "f1", kind: "SCREEN", ref: "r", source: "s" });
+        sm.registerFrame({ frameId: "f2", kind: "SCREEN", ref: "r", source: "s" });
+        sm.registerTransform({ transformId: "t1", fromFrameId: "f1", toFrameId: "f2", data: {} });
+        assert.equal(sm.framesSize(), 2, "audit failure must never block the lane");
+        await new Promise(r => setImmediate(r));
+        await new Promise(r => setTimeout(r, 30));
+    } finally {
+        process.removeListener("unhandledRejection", listener);
+    }
+    assert.equal(unhandled, 0, "an async-rejecting audit hook must not produce unhandled rejections");
+});
+

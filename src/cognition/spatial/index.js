@@ -47,10 +47,16 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
     function audit(eventType, fields) {
         try {
             if (auditLedger && typeof auditLedger.append === "function") {
-                auditLedger.append(Object.freeze({
+                const result = auditLedger.append(Object.freeze({
                     eventType, source: "acc.spatial", outcome: "ok",
                     metadata: Object.freeze({ lane: "W8-L3", ...fields })
                 }));
+                // Hook audit bisa ASYNC dan menolak; penolakan yang tidak
+                // ditangani dapat menghentikan proses Node, sehingga kegagalan
+                // audit berubah menjadi kegagalan lane (audit Wave8 L3/L5).
+                if (result && typeof result.then === "function") {
+                    Promise.resolve(result).catch(() => {});
+                }
             }
         } catch { /* audit failure never blocks the lane */ }
     }

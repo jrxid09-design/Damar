@@ -296,3 +296,102 @@ test("L5-audit-4: the hourly token budget and invalidated assumptions SURVIVE a 
         "an invalidated assumption must survive a restart");
 });
 
+/* ---------------------------------------------------------------------- */
+/* Independent audit of 80d5afd — repaired classes                        */
+/* ---------------------------------------------------------------------- */
+
+test("L5-audit-5: persisted budget iterators/accessors never execute, and an unverifiable budget refuses new runs", async () => {
+    // A hostile Symbol.iterator on the persisted budget array must never run.
+    let iterCalls = 0;
+    const hostileLedger = [{ atMs: 1, tokens: 5 }];
+    Object.defineProperty(hostileLedger, Symbol.iterator, {
+        enumerable: false, configurable: true,
+        get() { iterCalls += 1; return Array.prototype[Symbol.iterator]; }
+    });
+    deserialize({ runs: {}, results: {}, budget: { tokenLedger: hostileLedger, invalidatedAssumptions: [] } });
+    assert.equal(iterCalls, 0, "a persisted iterator getter must never run");
+
+    // A malformed budget is a DEGRADATION, not a silent empty history.
+    const malformed = deserialize({ runs: {}, results: {}, budget: { tokenLedger: "not-an-array" } });
+    assert.equal(malformed.degraded, true, "an unreadable budget history must be reported as degraded");
+    const wellFormed = deserialize({
+        runs: {}, results: {}, budget: { tokenLedger: [{ atMs: 1, tokens: 5 }], invalidatedAssumptions: [] }
+    });
+    assert.equal(wellFormed.degraded, false);
+    assert.equal(wellFormed.tokenLedger.length, 1);
+
+    // FAIL-CLOSED: with an unverifiable history the hourly cap cannot be
+    // enforced, so a run must be refused rather than silently resetting it.
+    const store = {
+        async getKv() { return { runs: {}, results: {}, budget: { tokenLedger: "not-an-array" } }; },
+        async putKv() {}
+    };
+    const sim = await createSimulationSandbox({ store, bounds: { ...BOUNDS, MAX_TOKENS_PER_HOUR: 100 } });
+    await assertRejectsReason(sim.startRun({
+        runId: "r1", question: "q", scenario: "s", initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 60,
+        provider: () => ({ tokensUsed: 60, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+    }), "BUDGET_EXCEEDED");
+
+    // A genuine cold start (nothing stored) is NOT a degradation: runs proceed.
+    const cold = await createSimulationSandbox({
+        store: { async getKv() { return null; }, async putKv() {} },
+        bounds: { ...BOUNDS, MAX_TOKENS_PER_HOUR: 100 }
+    });
+    const ok = await cold.startRun({
+        runId: "cold", question: "q", scenario: "s", initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 60,
+        provider: () => ({ tokensUsed: 60, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+    });
+    assert.equal(ok.state, "COMPLETE");
+});
+
+test("L5-audit-6: a store exposing real-state writer verbs is rejected WITHOUT running its getters", async () => {
+    let getterCalls = 0;
+    const hostile = {};
+    Object.defineProperty(hostile, "appendEvent", {
+        enumerable: true, configurable: true,
+        get() { getterCalls += 1; return () => {}; }
+    });
+    await assertRejectsReason(
+        createSimulationSandbox({ store: hostile }),
+        "CROSS_STORE_WRITE_REJECTED"
+    );
+    assert.equal(getterCalls, 0, "the isolation guard must not execute caller code");
+
+    // The real ACC store is still rejected, and ordinary doubles still work.
+    const { createMemoryAccStore } = require("../../../src/cognition/persistence/AccStore");
+    await assertRejectsReason(
+        createSimulationSandbox({ store: createMemoryAccStore() }),
+        "CROSS_STORE_WRITE_REJECTED"
+    );
+    const kv = new Map();
+    const ok = await createSimulationSandbox({
+        store: { async getKv(k) { return kv.get(k); }, async putKv(k, v) { kv.set(k, v); } }
+    });
+    assert.equal(ok.simulationColdStart, true);
+});
+
+test("L5-audit-7: an async-rejecting audit sink is contained and never blocks the run", async () => {
+    let unhandled = 0;
+    const listener = () => { unhandled += 1; };
+    process.on("unhandledRejection", listener);
+    try {
+        const sim = await createSimulationSandbox({
+            auditLedger: { append: () => Promise.reject(new Error("audit down")) }
+        });
+        const result = await sim.startRun({
+            runId: "r1", question: "q", scenario: "s", initialStateRef: { frozen: true },
+            steps: 1, horizonDays: 1, budgetTokens: 10,
+            provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+        });
+        assert.equal(result.state, "COMPLETE", "audit failure must never block the run");
+        await new Promise(r => setImmediate(r));
+        await new Promise(r => setTimeout(r, 30));
+    } finally {
+        process.removeListener("unhandledRejection", listener);
+    }
+    assert.equal(unhandled, 0, "an async-rejecting audit hook must not produce unhandled rejections");
+});
+
+
