@@ -347,15 +347,31 @@ async function buildRuntimeCoreInternal({
     let cognitionAuditLedgerResolved = null;
     if (enableCognition) {
         const { createLongHorizonCycle } = require("../cognition/longhorizon");
-        // BIND THE CANONICAL LEDGER HERE, at the composition layer that owns
-        // runtime wiring -- not inside the cognition lane. A previous revision
-        // had the lane call `createAuditLedger()` itself and label it
-        // "canonical"; that produced a fresh sinkless in-memory ledger per
-        // construction, sharing nothing with the durable ledger the runtime
-        // owns, and put a record-sink factory inside a cognition lane where
-        // FG-03 must not reach (audit of 9e7b8df). A caller-supplied ledger
-        // still wins when present.
+        // BIND THE CANONICAL LEDGER OWNER -- do not manufacture a second one.
+        //
+        // A previous revision called `createAuditLedger({})` here and labelled
+        // the result canonical; that is a DIFFERENT instance from the durable
+        // ledger `src/authority/ownerTrustComposition.js` already owns, and it
+        // has no persistence sink, so a "confirmed durable append" claim
+        // against it was false (audit of d409f56). Priority order:
+        //   1. an explicitly caller-supplied ledger (deployment override);
+        //   2. the canonical owner-trust ledger, via the same production
+        //      composition this file already boots for Manager ingress;
+        //   3. a local in-memory ledger ONLY as a documented fallback for the
+        //      boot path where owner-trust was never composed, so the governed
+        //      transition is still recorded rather than silently skipped.
         cognitionAuditLedgerResolved = cognitionAuditLedger;
+        if (cognitionAuditLedgerResolved == null) {
+            try {
+                const productionComposition = require("../authority/productionComposition");
+                await productionComposition.ensureProductionAuthorityComposed();
+                const composed = productionComposition.getProductionAuthorityComposition();
+                const ownerLedger = composed && composed.ownerTrust && composed.ownerTrust.ledger;
+                if (ownerLedger && typeof ownerLedger.append === "function") {
+                    cognitionAuditLedgerResolved = ownerLedger;
+                }
+            } catch { /* owner-gated ops stay fail-closed; audit binding is best-effort */ }
+        }
         if (cognitionAuditLedgerResolved == null) {
             try {
                 cognitionAuditLedgerResolved = require("../runtime/auditLedger").createAuditLedger({});
