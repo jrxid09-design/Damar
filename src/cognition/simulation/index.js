@@ -51,10 +51,16 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
     function audit(eventType, fields) {
         try {
             if (auditLedger && typeof auditLedger.append === "function") {
-                auditLedger.append(Object.freeze({
+                const result = auditLedger.append(Object.freeze({
                     eventType, source: "acc.simulation", outcome: "ok",
                     metadata: Object.freeze({ lane: "W8-L5", ...fields })
                 }));
+                // Hook audit bisa ASYNC dan menolak; penolakan yang tidak
+                // ditangani dapat menghentikan proses Node, sehingga kegagalan
+                // audit berubah menjadi kegagalan lane (audit Wave8 L3/L5).
+                if (result && typeof result.then === "function") {
+                    Promise.resolve(result).catch(() => {});
+                }
             }
         } catch { /* audit failure never blocks the sandbox */ }
     }
@@ -86,6 +92,13 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
     if (snapshot.degraded) {
         audit("cognition.simulation.store_unreadable", { reason: "store-unreadable-or-hostile" });
     }
+    // Riwayat anggaran yang ADA tapi tidak dapat diverifikasi berarti jumlah
+    // token yang sudah dipakai tidak diketahui. Menganggapnya nol adalah
+    // gagal-buka yang mereset batas laju 500k token/jam (dan menghidupkan lagi
+    // hasil yang sudah STALE_ASSUMPTIONS) hanya dengan merusak snapshot, jadi
+    // jalannya run ditolak tegas sampai state anggaran dapat diverifikasi
+    // (audit Wave8 L3/L5).
+    const budgetUnverifiable = snapshot.degraded === true;
     for (const [runId, run] of runs) {
         if (run.state === "RUNNING") {
             // A lost in-flight run is an HONEST loss (contract: "a lost
@@ -193,6 +206,13 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
         }
 
         const nowMs = now();
+        if (budgetUnverifiable) {
+            // Jumlah token terpakai tidak dapat diverifikasi, jadi batas laju
+            // tidak dapat ditegakkan. Menjalankan run akan melewati batas
+            // secara diam-diam; menolaknya adalah arah yang aman.
+            audit("cognition.simulation.budget_unverifiable", { runId: typeof runId === "string" ? runId : null });
+            fail(REASONS.BUDGET_EXCEEDED, "riwayat anggaran tidak dapat diverifikasi; run ditolak sampai state anggaran pulih");
+        }
         if (hourlyTokensUsed(nowMs) + (Number.isInteger(budgetTokens) ? budgetTokens : 0) > bounds.MAX_TOKENS_PER_HOUR) {
             fail(REASONS.BUDGET_EXCEEDED, `anggaran token per jam melebihi batas (${bounds.MAX_TOKENS_PER_HOUR})`);
         }
