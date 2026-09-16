@@ -45,7 +45,7 @@ const { createMetacognition } = require("../metacog");
 // behavior changes here, only the ownership of these guarantees.
 const {
     AUTHORITY_SHAPED_KEYS, assertNoAuthorityShapedFields, resolveMode, isInfluenceAllowed,
-    recordModeTransition
+    recordModeTransition, recordModeTransitionChecked
 } = require("../governed");
 
 const BELIEF_RANK = Object.freeze({ USABLE: 3, DEGRADED: 2, UNUSABLE: 1, UNKNOWN: 0 });
@@ -99,16 +99,66 @@ async function createLongHorizonCycle({
         }
         return Number.isFinite(candidate) ? candidate : Date.now();
     }
+    // ADR-17: entering shadow OR governed is a DECLARED, AUDITED configuration
+    // transition -- both are recorded, not just governed (audit of 0b8abb7:
+    // "shadow initialization is not recorded at all").
+    //
+    // This runs BEFORE any lane is constructed so that a fail-closed degrade
+    // has the same zero footprint as mode "off".
+    //
+    // The ledger is BOUND from the canonical owner rather than relying on
+    // caller injection (the same owner src/authority/ownerTrustComposition
+    // uses). A caller may still pass one, but no caller is required to pass
+    // one for the transition to be auditable.
+    let canonicalLedger = null;
+    try {
+        canonicalLedger = require("../runtime/auditLedger").createAuditLedger({ clock });
+    } catch {
+        canonicalLedger = null;
+    }
+
+    // Which sink receives the transition record:
+    //  - governed: a caller-supplied ledger wins if present (that is how a
+    //    deployment points this at a durable file sink), else the canonical
+    //    owner. This preserves the existing injected-ledger behaviour.
+    //  - shadow: the canonical owner ONLY. A shadow initialization is a
+    //    canonical lifecycle fact; writing it into whatever object a caller
+    //    injected is precisely the "merely reach a test sink" pattern the
+    //    audit flagged, and the caller must not own the record of its own
+    //    mode transition.
+    const transitionLedger = (mode === "governed" && auditLedger != null)
+        ? auditLedger
+        : canonicalLedger;
+
+    const transition = recordModeTransitionChecked({
+        auditLedger: transitionLedger, from: "off", to: mode, at: safeNowMs()
+    });
+
+    // Per-cycle audit events keep their existing destination, and gain the
+    // canonical owner when no caller supplied one -- so audit coverage no
+    // longer depends on a caller injecting a ledger.
+    if (auditLedger == null) auditLedger = canonicalLedger;
+
+    // FAIL-CLOSED (audit of 0b8abb7, P1): a ledger that was SUPPLIED and did
+    // not confirm a durable append means the required audited transition did
+    // not happen. Proceeding into an unaudited governed mode would be exactly
+    // the fail-open transition ADR-17 forbids, so the mode degrades to "off"
+    // here instead -- with no lane constructed, mirroring the "off" path.
+    if (transition.failedOpen) {
+        return Object.freeze({
+            schemaVersion: require("./bounds").SCHEMA_VERSION,
+            mode: "off", laws,
+            auditUnavailable: true,
+            async cycle() { return null; }
+        });
+    }
+
     const selfModel = await createSelfModel({ capabilityRegistry, clock, store: storeFor("selfmodel") });
     const worldModel = await createWorldModel({ clock, store: storeFor("worldmodel") });
     const goals = await createGoalEngine({ clock, store: storeFor("goals") });
     const prospective = await createProspectiveMemory({ clock, store: storeFor("prospective") });
     const attention = await createAttentionEconomy({ clock });
     const metacog = await createMetacognition({ clock });
-
-    if (mode === "governed") {
-        recordModeTransition({ auditLedger, from: "off", to: mode, at: safeNowMs() });
-    }
 
     // --- L1-R1 closure: diff-based downgrade/eviction observer -----------
     // Reads ONLY selfModel.snapshot()'s existing frozen output — no change

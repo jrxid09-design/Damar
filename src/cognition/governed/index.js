@@ -37,12 +37,47 @@
  * every time.
  */
 
+const { types: utilTypes } = require("node:util");
 const { MODES } = require("./bounds");
 const { REASONS, GovernedError, fail } = require("./errors");
 
+/**
+ * Proxy probe via internal slot: zero traps, and correct for a revoked Proxy
+ * too. Reflection on a Proxy EXECUTES caller code, and an `ownKeys` trap can
+ * HIDE a field from the walk -- so this guard must run BEFORE the first
+ * reflection, not be discovered by it.
+ */
+function isProxyValue(value) {
+    try {
+        return utilTypes.isProxy(value);
+    } catch {
+        return true;
+    }
+}
+
+/**
+ * Authority-shaped vocabulary. Independent audit of 0b8abb7 found the
+ * original list covered only this repo's historical field NAMES
+ * (authProof/capabilityGrant/executionLease/...) and therefore let equally
+ * authoritative synonyms through: a projection carrying `authority`,
+ * `permission`, `approved`, `decision`, or a bearer/lease token validated
+ * clean. The list below is the containment boundary, so it is deliberately
+ * vocabulary-family based rather than a record of names seen so far.
+ */
 const AUTHORITY_SHAPED_KEYS = Object.freeze([
+    // historical names this repo already used
     "authorityDecision", "allow", "grant", "owner", "authProof",
-    "capabilityGrant", "executionLease", "executor", "route", "trustedNode", "rootAuthority"
+    "capabilityGrant", "executionLease", "executor", "route", "trustedNode", "rootAuthority",
+    // authority/permission family
+    "authority", "authorities", "authorized", "authorization", "authorizations",
+    "permission", "permissions", "privilege", "privileges",
+    "approved", "approval", "approvedBy",
+    // decision/grant family
+    "decision", "decisions", "decisionMaker", "granted", "grants", "grantedBy",
+    // bearer-token / lease family
+    "lease", "leases", "leasedUntil", "bearer", "bearerToken", "leaseToken", "authToken",
+    // credential family
+    "credential", "credentials", "creds", "secret", "secrets", "apiKey", "privateKey"
 ]);
 
 // Bug review independen (extraksi FG-03, sibling langsung dari class
@@ -59,6 +94,13 @@ function walkForAuthorityShapedFields(value, label, seen, budget, depth, require
         throw new Error(`ACC governed: ${label} tidak boleh berupa fungsi`);
     }
     if (!value || typeof value !== "object") return;
+    // A Proxy is refused outright. Without this, the walk's guarantee is
+    // unsound twice over: `ownKeys`/`getOwnPropertyDescriptor` EXECUTE caller
+    // code, and an `ownKeys` trap returning [] hides `authProof` from the
+    // scan entirely. Independent audit of 0b8abb7 proved exactly that bypass.
+    if (isProxyValue(value)) {
+        throw new Error(`ACC governed: ${label} tidak dapat dibekukan/diverifikasi -- tidak boleh berupa Proxy`);
+    }
     if (seen.has(value)) return;
     if (requireFrozen && !Object.isFrozen(value)) {
         throw new Error(`ACC governed: ${label} wajib dibekukan secara mendalam`);
@@ -188,10 +230,40 @@ function validateGovernedCognitiveProjection(projection) {
  * unaudited rather than crashing the caller.
  */
 function recordModeTransition(options) {
+    return recordModeTransitionChecked(options).event;
+}
+
+/**
+ * Auditable mode transition with an explicit durability outcome.
+ *
+ * ADR-17 requires the mode gate to be a DECLARED, AUDITED configuration
+ * transition. The previous implementation could not distinguish "audited"
+ * from "silently went unaudited": a supplied ledger that was missing,
+ * rejected, or threw produced exactly the same return value as a successful
+ * append, so a caller could proceed in governed mode believing the
+ * transition was recorded. Independent audit of 0b8abb7 flagged that as
+ * fail-open.
+ *
+ * `recordModeTransitionChecked` never throws (the established "audit failure
+ * must not take down the operation" law) but REPORTS the outcome so the
+ * caller can fail closed on it:
+ *   auditSupplied  -- a caller-supplied positive audit path existed
+ *   audited        -- that path CONFIRMED a durable append
+ *   failedOpen     -- a supplied path did NOT confirm; the caller must not
+ *                     treat the transition as audited
+ *
+ * A missing ledger is a declared configuration (no positive audit claim is
+ * made, `auditSupplied:false`), which is what keeps the Wave7 L7 convergence
+ * contract's `mode: "governed"` construction -- with no ledger -- intact.
+ * The fail-open case is specifically "you gave me a ledger and it did not
+ * record", which is detectably different and must not be silently ignored.
+ */
+function recordModeTransitionChecked(options) {
     let auditLedger, from, to, at;
     try {
         const source = options && typeof options === "object" ? options : {};
         const read = (key) => {
+            if (isProxyValue(source)) return undefined;
             const descriptor = Object.getOwnPropertyDescriptor(source, key);
             return descriptor && !descriptor.get && !descriptor.set ? descriptor.value : undefined;
         };
@@ -206,19 +278,30 @@ function recordModeTransition(options) {
         outcome: "ok",
         metadata: Object.freeze({ from: resolveMode(from), to: resolveMode(to), at: safeAt })
     });
+
+    let auditSupplied = false;
+    let audited = false;
     try {
-        if (auditLedger && typeof auditLedger.append === "function") {
-            const result = auditLedger.append(event);
-            if (result && (typeof result === "object" || typeof result === "function")
-                && typeof result.then === "function") {
+        const append = auditLedger && !isProxyValue(auditLedger) ? auditLedger.append : undefined;
+        if (typeof append === "function") {
+            auditSupplied = true;
+            const result = append.call(auditLedger, event);
+            if (result && typeof result.then === "function") {
+                // Async ledgers cannot confirm durability here; treat as
+                // unconfirmed rather than assuming success.
                 Promise.resolve(result).catch(() => {});
+            } else if (result && typeof result === "object" && "ok" in result) {
+                audited = result.ok === true;      // appendSafe contract
+            } else {
+                audited = true;                    // canonical append() threw on failure
             }
         }
-    } catch { /* audit failure never blocks cognition */ }
-    return event;
+    } catch { /* audit failure never blocks cognition -- reported, not thrown */ }
+
+    return { event, auditSupplied, audited, failedOpen: auditSupplied && !audited };
 }
 
-module.exports = {
+module.exports = Object.freeze({
     MODES,
     REASONS,
     GovernedError,
@@ -228,5 +311,6 @@ module.exports = {
     resolveMode,
     isInfluenceAllowed,
     validateGovernedCognitiveProjection,
-    recordModeTransition
-};
+    recordModeTransition,
+    recordModeTransitionChecked
+});

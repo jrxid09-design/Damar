@@ -6,7 +6,7 @@ const path = require("node:path");
 const {
     MODES, AUTHORITY_SHAPED_KEYS, assertNoAuthorityShapedFields,
     resolveMode, isInfluenceAllowed, validateGovernedCognitiveProjection,
-    recordModeTransition
+    recordModeTransition, recordModeTransitionChecked
 } = require("../../../src/cognition/governed");
 
 test("FG03-1: resolveMode passes through exactly the three sanctioned modes", () => {
@@ -197,4 +197,110 @@ test("FG03-24: governed foundation is exposed through the canonical cognition en
     const cognition = require("../../../src/cognition");
     assert.equal(cognition.governed.validateGovernedCognitiveProjection, validateGovernedCognitiveProjection);
     assert.equal(cognition.governed.REASONS.INVALID_PROJECTION, "INVALID_PROJECTION");
+});
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of 0b8abb7 — repaired classes                        */
+/* ---------------------------------------------------------------------- */
+
+test("FG03-25: an ACTIVE Proxy is refused before any trap runs, so an ownKeys trap can no longer hide an authority-shaped field", () => {
+    // The pre-repair walk used Reflect.ownKeys directly: the trap below ran
+    // AND returned [], hiding authProof from the scan, so validation passed.
+    let traps = 0;
+    const hidden = new Proxy(Object.freeze({ authProof: "forged" }), {
+        ownKeys() { traps += 1; return []; },
+        getOwnPropertyDescriptor() { traps += 1; return { value: 1, enumerable: true, configurable: true }; }
+    });
+    const projection = Object.freeze({
+        schemaVersion: "governedCognitiveProjection.v1",
+        decisionInfluence: "ADVISORY_ONLY",
+        nested: hidden
+    });
+    assert.throws(() => validateGovernedCognitiveProjection(projection), /Proxy|dibekukan|authProof/);
+    assert.equal(traps, 0, "no Proxy trap may execute during validation");
+});
+
+test("FG03-26: authority-shaped containment covers the whole vocabulary family, not just historical field names", () => {
+    for (const key of [
+        "authority", "authorized", "authorization", "permission", "permissions",
+        "privilege", "approved", "approval", "decision", "decisionMaker",
+        "lease", "bearerToken", "leaseToken", "authToken", "credential", "apiKey"
+    ]) {
+        assert.throws(
+            () => assertNoAuthorityShapedFields({ nested: { [key]: "x" } }, "Probe"),
+            /tidak boleh membawa field/,
+            `'${key}' must be contained`);
+    }
+    // A legitimate advisory projection still passes.
+    assert.doesNotThrow(() => assertNoAuthorityShapedFields({
+        selfModel: { capabilityCount: 1, healthState: "OK" },
+        attentionFocus: { targetId: "t1", workKind: "REASON" },
+        decisionInfluence: "ADVISORY_ONLY"
+    }, "Probe"));
+});
+
+test("FG03-27: recordModeTransitionChecked REPORTS an unconfirmed append instead of silently going unaudited", () => {
+    // no ledger: a declared configuration, not a positive audit claim
+    const none = recordModeTransitionChecked({ from: "off", to: "shadow" });
+    assert.equal(none.auditSupplied, false);
+    assert.equal(none.audited, false);
+    assert.equal(none.failedOpen, false);
+
+    // confirmed durable append
+    const confirmed = recordModeTransitionChecked({
+        auditLedger: { append: () => ({ ok: true }) }, from: "off", to: "governed"
+    });
+    assert.equal(confirmed.auditSupplied, true);
+    assert.equal(confirmed.audited, true);
+    assert.equal(confirmed.failedOpen, false);
+
+    // supplied but REJECTED -- the fail-open case that must be visible
+    const rejected = recordModeTransitionChecked({
+        auditLedger: { append: () => ({ ok: false, error: { code: "E_INVALID_EVENT" } }) },
+        from: "off", to: "governed"
+    });
+    assert.equal(rejected.failedOpen, true, "a rejected append must be reported as fail-open");
+
+    // supplied but THROWING
+    const throwing = recordModeTransitionChecked({
+        auditLedger: { append: () => { throw new Error("ledger down"); } },
+        from: "off", to: "governed"
+    });
+    assert.equal(throwing.failedOpen, true, "a throwing append must be reported as fail-open");
+
+    // the unchecked wrapper keeps its exact prior contract (FG03-14 relies on it)
+    assert.deepEqual(
+        recordModeTransition({ auditLedger: { append: () => {} }, from: "off", to: "governed" }),
+        recordModeTransitionChecked({ auditLedger: { append: () => {} }, from: "off", to: "governed" }).event);
+});
+
+test("FG03-28: the governed facade is frozen -- a caller cannot swap a guard for a permissive one", () => {
+    const governed = require("../../../src/cognition/governed");
+    assert.equal(Object.isFrozen(governed), true);
+    assert.equal(Object.isFrozen(require("../../../src/cognition").governed), true);
+    // This file is not strict-mode, so a plain assignment to a frozen property
+    // silently no-ops rather than throwing -- assert the OUTCOME (the guard is
+    // unchanged), which is what actually matters, via the strict Reflect path.
+    assert.equal(Reflect.set(governed, "resolveMode", () => "governed"), false);
+    assert.equal(governed.resolveMode("hostile"), "off");
+    assert.equal(Reflect.set(governed, "AUTHORITY_SHAPED_KEYS", []), false);
+    assert.equal(governed.AUTHORITY_SHAPED_KEYS.includes("authProof"), true);
+});
+
+test("FG03-29: governed mode cannot start when a SUPPLIED ledger fails to record the transition (fail-closed construction)", async () => {
+    const { createLongHorizonCycle } = require("../../../src/cognition/longhorizon");
+    const registry = Object.freeze({
+        get: () => ({ kind: "tool" }),
+        has: () => true,
+        list: () => []
+    });
+
+    const lh = await createLongHorizonCycle({
+        mode: "governed", capabilityRegistry: registry,
+        auditLedger: { append: () => { throw new Error("ledger down"); } }
+    });
+    assert.equal(lh.mode, "off", "an unrecordable transition must not silently yield governed mode");
+    assert.equal(lh.auditUnavailable, true);
+    assert.equal(lh.lanes, undefined, "the degraded path constructs no lanes, matching mode off's zero footprint");
+    assert.equal(await lh.cycle(), null);
 });
