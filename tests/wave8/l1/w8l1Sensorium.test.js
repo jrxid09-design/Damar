@@ -1392,3 +1392,142 @@ test("W8L1-repair-54: replaying an old monotonic after reverse-order settlement 
     assert.equal(send(302, "screen.302", "replay").reason, "duplicate",
         "a mid-range monotonic must stay a duplicate after reverse-order settlement");
 });
+
+/* ---------------------------------------------------------------------- */
+/* Audit of 31a8770 -- repaired ordering/trust classes                     */
+/* ---------------------------------------------------------------------- */
+
+test("W8L1-repair-55: while a NEWER delivery has settled, an OLDER still-pending one must not become the effective state", async () => {
+    let t = T0;
+    const gates = new Map();
+    const bridge = bridgeSensoriumToWorldModel({
+        body: { subscribe: () => {} }, auditLedger: { append() {} },
+        clock: { nowMs: () => t },
+        worldModel: {
+            ingestObservation(o) {
+                const tag = o.value.sample.tag;
+                return new Promise((resolve) => gates.set(tag, resolve));
+            }
+        }
+    });
+    const send = (mono, tag) => {
+        const r = bridge.applyObservationPlan({
+            type: "SENSOR_OBSERVATION", subject: HOST, monotonic: mono, timestampMs: t,
+            payload: { channel: { id: "vision.capture" }, sample: { tag }, healthState: "OK" }
+        }, { modality: "VISION" });
+        t += 5000;
+        return r;
+    };
+
+    send(1, "A");
+    send(2, "B");
+    // The NEWER one settles while the older is still pending.
+    gates.get("B")({ ok: true });
+    await new Promise(r => setImmediate(r));
+
+    // Selecting "the last remaining frame" (A) would have regressed `tracked`
+    // and let this stale monotonic through.
+    assert.equal(send(1.5, "between").reason, "duplicate",
+        "a settled newer delivery must win over a still-pending older one");
+
+    gates.get("A")({ ok: true });
+    await new Promise(r => setImmediate(r));
+});
+
+test("W8L1-repair-56: lifecycle trust cannot be forged by overriding or deleting BodySchema's public methods", () => {
+    // (a) OVERRIDING: both methods made to always answer "yes".
+    const bodyOverride = makeBody();
+    const bridgeOverride = bridgeSensoriumToWorldModel({
+        body: bodyOverride, auditLedger: { append() {} },
+        worldModel: { ingestObservation() { return { ok: true }; } }
+    });
+    bridgeOverride.applyObservationPlan({
+        type: "SENSOR_OBSERVATION", subject: HOST, monotonic: 1, timestampMs: T0,
+        payload: { channel: { id: "vision.capture" }, sample: {}, healthState: "FAILED" }
+    }, { modality: "VISION" });
+    bodyOverride.isBeingDelivered = () => true;
+    bodyOverride.wasCommittedBy = () => true;
+    bodyOverride.commitSequenceOf = () => 999999;
+    bodyOverride.currentDeliveryCommitSequence = () => 999999;
+
+    // A stale ONLINE that is NOT being delivered right now must stay refused.
+    let staleOnline = null;
+    bodyOverride.subscribe((e) => { if (e.type === "DEVICE_ONLINE") staleOnline = e; });
+    bodyOverride.ingest(emb.makeEvent({
+        type: "DEVICE_ONLINE", source: "test-adapter", provenance: "OBSERVATION", subject: HOST,
+        clock: emb.manualClock(T0 + 8000), payload: {}
+    }));
+    assert.equal(bridgeOverride.applyObservationPlan(staleOnline).reason, "untrusted-lifecycle-event",
+        "overriding the public methods must not forge a lifecycle delivery");
+
+    // (b) DELETING: falling through to module-global markers would let another
+    // BodySchema instance's in-flight event be trusted.
+    const bodyOwner = makeBody();
+    const bodyVictim = makeBody();
+    const bridgeVictim = bridgeSensoriumToWorldModel({
+        body: bodyVictim, auditLedger: { append() {} },
+        worldModel: { ingestObservation() { return { ok: true }; } }
+    });
+    bridgeVictim.applyObservationPlan({
+        type: "SENSOR_OBSERVATION", subject: HOST, monotonic: 1, timestampMs: T0,
+        payload: { channel: { id: "vision.capture" }, sample: {}, healthState: "FAILED" }
+    }, { modality: "VISION" });
+    delete bodyVictim.isBeingDelivered;
+    delete bodyVictim.wasCommittedBy;
+    delete bodyVictim.commitSequenceOf;
+    delete bodyVictim.currentDeliveryCommitSequence;
+
+    let injected = false;
+    bodyOwner.subscribe((event) => {
+        if (event.type === "DEVICE_ONLINE" && !injected) {
+            injected = true;
+            bridgeVictim.applyObservationPlan(event);
+        }
+    });
+    bodyOwner.ingest(emb.makeEvent({
+        type: "DEVICE_ONLINE", source: "test-adapter", provenance: "OBSERVATION", subject: HOST,
+        clock: emb.manualClock(T0 + 8000), payload: {}
+    }));
+    assert.equal(injected, true, "the cross-instance subscriber ran");
+    assert.equal(bridgeVictim.applyObservationPlan({
+        type: "SENSOR_OBSERVATION", subject: HOST, monotonic: 2, timestampMs: T0 + 30000,
+        payload: { channel: { id: "vision.capture" }, sample: {}, healthState: "OK" }
+    }, { modality: "VISION" }).reason, "sensor-failed",
+    "deleting the instance methods must not fall back to module-global markers");
+});
+
+test("W8L1-repair-57: at the tracked-channel bound a self-evicting newcomer is not restored past the limit", () => {
+    const BOUND = 512 * 64; // MAX_TRACKED_SENSOR_CHANNELS
+    let t = T0;
+    const events = [];
+    const bridge = bridgeSensoriumToWorldModel({
+        body: { subscribe: () => {} },
+        auditLedger: { append: (e) => { events.push(e.type); } },
+        clock: { nowMs: () => t },
+        worldModel: { ingestObservation() { return { ok: true }; } }
+    });
+    const send = (dev, ch, health) => bridge.applyObservationPlan({
+        type: "SENSOR_OBSERVATION", subject: dev, monotonic: 1, timestampMs: t,
+        payload: { channel: { id: ch }, sample: {}, healthState: health }
+    }, { modality: "SCREEN" });
+
+    // Fill exactly to the bound with HEALTHY channels.
+    for (let i = 0; i < BOUND; i += 1) send(`dev:${i}`, `ch.${i}`, "OK");
+    assert.equal(events.filter(e => e === "W8_L1_TRACKED_CHANNEL_EVICTED").length, 0,
+        "filling exactly to the bound must not evict anything");
+
+    // A FAILED newcomer is the lowest priority, so admission itself evicts it.
+    send("dev:newcomer", "ch.newcomer", "FAILED");
+    // If it had been restored past the bound it would still be tracked, and
+    // re-sending the SAME channel+monotonic would report `duplicate`.
+    const resend = send("dev:newcomer", "ch.newcomer", "FAILED");
+    assert.notEqual(resend.reason, "duplicate",
+        "a newcomer evicted at admission must not be restored past the bound");
+
+    // One eviction per admission past the bound -- no runaway churn.
+    const before = events.filter(e => e === "W8_L1_TRACKED_CHANNEL_EVICTED").length;
+    for (let i = 0; i < 20; i += 1) send(`dev:extra:${i}`, `ch.extra.${i}`, "FAILED");
+    const after = events.filter(e => e === "W8_L1_TRACKED_CHANNEL_EVICTED").length;
+    assert.equal(after - before, 20,
+        "each admission past the bound evicts exactly one entry");
+});

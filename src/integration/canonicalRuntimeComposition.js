@@ -37,44 +37,40 @@ const path = require("node:path");
 const { types: utilTypes } = require("node:util");
 const {
     wasCommittedByBodySchema, isEventBeingDelivered, commitSequenceOf,
-    currentDeliveryCommitSequence
+    currentDeliveryCommitSequence, isBodySchemaInstance, lifecycleTrustOf
 } = require("../embodiment/schema/BodySchema");
 
 /**
- * Bukti lifecycle, DIBATASI PADA SATU INSTANCE BodySchema.
+ * Bukti lifecycle, dibaca dari STATE PRIVAT BodySchema.
  *
- * Dua lapis, keduanya wajib:
- *  - `body` adalah instance yang `subscribe`-nya menyerahkan event ini, dan
- *    hanya instance ITU yang boleh mengotorisasi lifecycle-nya. Tanpa batas
- *    instance, event yang sedang dikirim BodySchema A diterima jembatan milik
- *    BodySchema B dan membuka kembali kanal FAILED milik B (audit 406553b).
- *  - `wasCommittedBy`/`isBeingDelivered` milik instance itu, bukan penanda
- *    modul-global -- jadi jembatan ini tidak pernah mempercayai event yang
- *    kebetulan sedang dikirim instance LAIN.
- * Fallback ke penanda modul hanya dipakai bila `body` tidak menyediakan API
- * instance (mis. objek body tiruan di test lama), supaya perilaku lamanya tidak
- * rusak.
+ * Rantai dispatch penting di sini, dan urutannya sengaja:
+ *  1. Instance BodySchema ASLI (di-brand modul) -> bukti dibaca lewat
+ *     `lifecycleTrustOf`, jadi MENIMPA atau MENGHAPUS metode publik seperti
+ *     `isBeingDelivered`/`wasCommittedBy` tidak berpengaruh sama sekali. Ini
+ *     yang menutup celah "metode publik bisa ditimpa" dan celah "hapus metode
+ *     lalu jatuh ke penanda modul-global" (audit 31a8770).
+ *  2. Bukan instance (double test / objek tiruan dengan `subscribe`): tidak ada
+ *     mesin komit nyata, jadi hanya penanda modul yang tersedia. Produksi selalu
+ *     menyerahkan instance asli (`core.body`), sehingga jalur ini tidak pernah
+ *     dipakai di produksi.
  */
 function isTrustedLifecycleEvent(body, event) {
-    if (body && typeof body.isBeingDelivered === "function") {
-        return body.isBeingDelivered(event) === true
-            && typeof body.wasCommittedBy === "function"
-            && body.wasCommittedBy(event) === true;
-    }
+    const trust = lifecycleTrustOf(body, event);
+    if (trust !== null) return trust.isBeingDelivered && trust.wasCommitted;
     return isEventBeingDelivered(event) && wasCommittedByBodySchema(event);
 }
 
-/** Urutan komit event, dari instance BodySchema yang bersangkutan bila ada. */
+/** Urutan komit event, dari state privat instance bila body adalah instance asli. */
 function commitSequenceFor(body, event) {
-    if (body && typeof body.commitSequenceOf === "function") return body.commitSequenceOf(event);
+    const trust = lifecycleTrustOf(body, event);
+    if (trust !== null) return trust.commitSequence;
     return commitSequenceOf(event);
 }
 
 /** Urutan komit peristiwa yang SEDANG dikirim, dari instance bila ada. */
 function currentDeliverySequenceFor(body) {
-    if (body && typeof body.currentDeliveryCommitSequence === "function") {
-        return body.currentDeliveryCommitSequence();
-    }
+    const trust = lifecycleTrustOf(body, null);
+    if (trust !== null) return trust.deliverySequence;
     return currentDeliveryCommitSequence();
 }
 
@@ -387,9 +383,21 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
     // rejected monotonic (audit of dd15f44).
     const admissionState = new Map(); // key -> { frames: [{seq, state, evicted}], committed }
 
+    /**
+     * State yang berlaku = state dari frame dengan urutan TERBESAR.
+     *
+     * Memilih "frame terakhir yang tersisa" saja salah saat penyelesaian
+     * datang TIDAK BERURUTAN: bila B (lebih baru) sudah selesai sementara A
+     * (lebih lama) masih pending, sisa frame A membuat `tracked` mundur ke
+     * monotonic A -- sehingga monotonik 1,5 lolos padahal 2 sudah diterapkan
+     * (audit 31a8770). Karena itu `committed` (dari `settledSeq`) ikut
+     * dibandingkan, bukan hanya frame yang tersisa.
+     */
     function effectiveStateFor(rec) {
-        if (rec.frames.length > 0) return rec.frames[rec.frames.length - 1].state;
-        return rec.committed;
+        const lastFrame = rec.frames.length > 0 ? rec.frames[rec.frames.length - 1] : null;
+        if (!lastFrame) return rec.committed;
+        if (rec.committed === null || rec.settledSeq === undefined) return lastFrame.state;
+        return lastFrame.seq > rec.settledSeq ? lastFrame.state : rec.committed;
     }
 
     /**
@@ -445,22 +453,27 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         }
     }
 
-    /** Kembalikan korban eviction milik sebuah frame, tanpa menimpa state yang lebih baru. */
-    function restoreEvictedVictim(frame) {
-        const evicted = frame && frame.evicted;
-        if (!evicted) return;
-        if (tracked.has(evicted.key)) return;
-        tracked.set(evicted.key, evicted.state);
-        // Pemulihan menambah satu entri, jadi bound harus ditegakkan lagi --
-        // tanpa ini `tracked` bisa melampaui batas yang dinyatakan (audit
-        // 406553b). Korban yang baru dipulihkan DIKECUALIKAN: entri itu justru
-        // yang sedang diselamatkan.
+    /**
+     * Tegakkan bound `tracked` setelah SETIAP mutasi.
+     *
+     * Sebelumnya bound hanya ditegakkan di jalur admission dan di jalur
+     * pemulihan korban, sehingga penyelesaian yang berhasil bisa mengembalikan
+     * channel ke `tracked` TANPA pemeriksaan bound: pada 32.768 entri, admission
+     * mengevict channel baru itu sendiri, lalu penyelesaian sinkronnya
+     * memasangnya kembali dan `tracked` menetap di 32.769 (audit 31a8770).
+     *
+     * `protectedKey` hanya dilindungi bila masih ada kandidat lain; kalau
+     * seluruh isi adalah entri yang dilindungi, eviction berhenti dan bound
+     * dilaporkan tidak dapat ditegakkan (lebih baik jujur daripada mengorbankan
+     * satu-satunya entri yang sedang diselamatkan).
+     */
+    function enforceTrackedBound(protectedKey = null) {
         while (tracked.size > MAX_TRACKED_SENSOR_CHANNELS) {
             let victimKey = null;
             let victimPriority = Infinity;
             let victimAppliedMs = Infinity;
             for (const [k, t] of tracked) {
-                if (k === evicted.key) continue;
+                if (protectedKey !== null && k === protectedKey) continue;
                 if (t.healthPriority < victimPriority
                     || (t.healthPriority === victimPriority && t.lastAppliedMs < victimAppliedMs)) {
                     victimKey = k;
@@ -471,6 +484,18 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             if (victimKey === null) break;
             tracked.delete(victimKey);
         }
+    }
+
+    /** Kembalikan korban eviction milik sebuah frame, tanpa menimpa state yang lebih baru. */
+    function restoreEvictedVictim(frame) {
+        const evicted = frame && frame.evicted;
+        if (!evicted) return;
+        if (tracked.has(evicted.key)) return;
+        tracked.set(evicted.key, evicted.state);
+        // Pemulihan menambah satu entri, jadi bound harus ditegakkan lagi.
+        // Korban yang baru dipulihkan DILINDUNGI: entri itu justru yang sedang
+        // diselamatkan.
+        enforceTrackedBound(evicted.key);
     }
 
     function settleAdmissionFrame(key, seq, committedState) {
@@ -485,6 +510,10 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             rec.settledSeq = seq;
         }
         applyEffective(key, rec);
+        // Bound ditegakkan SETELAH state berlaku dipasang, bukan hanya di jalur
+        // admission: penyelesaian yang berhasil tidak boleh membawa `tracked`
+        // melewati batas (audit 31a8770).
+        enforceTrackedBound();
         compactAdmissionRecord(key, rec);
     }
 
