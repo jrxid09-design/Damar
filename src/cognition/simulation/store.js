@@ -219,6 +219,9 @@ const REAL_STORE_WRITE_VERBS = Object.freeze([
     "upsertCommitment", "upsertSubstrateEpoch", "upsertBelief", "appendJournal"
 ]);
 
+/** Batas penelusuran rantai prototipe store. */
+const MAX_PROTOTYPE_DEPTH = 32;
+
 /**
  * Tolak store milik lane NYATA. Melempar SimulationError
  * CROSS_STORE_WRITE_REJECTED (gagal-tutup, ditolak mentah) sehingga pemanggil
@@ -237,43 +240,37 @@ function checkStoreIsolation(store) {
         if (err && err.reason) throw err;
     }
     for (const verb of REAL_STORE_WRITE_VERBS) {
-        // Dibaca lewat DESKRIPTOR, bukan `store[verb]`: pembacaan mentah
-        // menjalankan getter/proxy milik pemanggil SEBELUM penolakan, sehingga
-        // penjaga ini sendiri menjadi jalur eksekusi kode (audit Wave8 L3/L5).
-        let desc;
-        try {
-            desc = Object.getOwnPropertyDescriptor(store, verb);
-        } catch {
-            // Store yang tidak dapat diintrospeksi diperlakukan mencurigakan.
-            desc = null;
-        }
-        let has = false;
-        if (desc) {
-            has = desc.get || desc.set ? true : typeof desc.value === "function";
-        } else {
-            // Warisan (mis. metode pada prototype AccStore) tetap harus terdeteksi.
-            let proto;
+        // Seluruh RANTAI PROTOTIPE ditelusuri, bukan hanya satu tingkat: sebuah
+        // store yang menyembunyikan kata kerja tulis dua tingkat di atas
+        // (Object.create(Object.create({appendEvent}))) sebelumnya lolos
+        // (audit Wave8 L3/L5). Setiap tingkat dibaca lewat DESKRIPTOR, bukan
+        // `store[verb]`, karena pembacaan mentah menjalankan getter/proxy
+        // pemanggil SEBELUM penolakan.
+        let level = store;
+        for (let depth = 0; depth < MAX_PROTOTYPE_DEPTH && level; depth += 1) {
+            if (level === Object.prototype || level === Function.prototype) break;
+            let desc;
             try {
-                proto = Object.getPrototypeOf(store);
+                desc = Object.getOwnPropertyDescriptor(level, verb);
             } catch {
-                proto = null;
+                // Tingkat yang tidak dapat diintrospeksi diperlakukan mencurigakan.
+                desc = null;
             }
-            if (proto && proto !== Object.prototype) {
-                let inherited;
-                try {
-                    inherited = Object.getOwnPropertyDescriptor(proto, verb);
-                } catch {
-                    inherited = null;
+            if (desc) {
+                const present = desc.get || desc.set ? true : typeof desc.value === "function";
+                if (present) {
+                    throw fail(REASONS.CROSS_STORE_WRITE_REJECTED,
+                        `store simulasi tidak boleh berupa store state nyata (mengekspos '${verb}')`);
                 }
-                if (inherited) {
-                    has = inherited.get || inherited.set
-                        ? true : typeof inherited.value === "function";
-                }
+                // Ditemukan sebagai data non-fungsi pada tingkat ini: tidak perlu
+                // menelusuri lebih dalam untuk kata kerja ini.
+                break;
             }
-        }
-        if (has) {
-            throw fail(REASONS.CROSS_STORE_WRITE_REJECTED,
-                `store simulasi tidak boleh berupa store state nyata (mengekspos '${verb}')`);
+            try {
+                level = Object.getPrototypeOf(level);
+            } catch {
+                break;
+            }
         }
     }
 }
