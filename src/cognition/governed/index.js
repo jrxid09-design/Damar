@@ -537,7 +537,17 @@ function recordModeTransitionChecked(options) {
             if (typeof append !== "function") {
                 audited = false;                  // supplied, but unusable
             } else {
-                const result = append.call(auditLedger, event);
+                // DURABLE append, bukan append biasa.
+                //
+                // Merek kanonik membuktikan ASAL-PABRIK, bukan durabilitas:
+                // `append(event)` tanpa opsi TIDAK pernah menyentuh sink, jadi
+                // ledger kanonik tanpa sink -- dan ledger dengan sink yang tidak
+                // pernah dipakai -- sama-sama melaporkan terkonfirmasi (audit
+                // bd45f18). Dengan `{durable:true}` ledger menulis ke sink-nya,
+                // dan ledger TANPA sink melempar NO_SINK sehingga terkonfirmasi
+                // menjadi false dan governed gagal-tutup. Konfirmasi akhirnya
+                // membuktikan yang diklaimnya: rekaman durabel.
+                const result = append.call(auditLedger, event, { durable: true });
                 // Probe `then` with a get (NOT an own-descriptor read: a real
                 // Promise carries `then` on Promise.prototype, so an
                 // own-descriptor probe would miss it and leave the rejection
