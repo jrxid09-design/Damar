@@ -52,6 +52,25 @@ const { canonicalJson } = require("./canonicalJson");
 
 const SINK_KIND = "audit-file-jsonl-v1";
 
+/**
+ * Merek leksikal untuk sink DURABEL yang benar-benar dimiliki lane ini.
+ *
+ * Port `AuditPersistencePort` mendokumentasikan "return true on success; throw
+ * to reject", tapi bentuk itu dipenuhi oleh sink APA PUN -- termasuk
+ * `{ append() {} }` yang tidak menulis apa-apa. Karena sebuah klaim "tercatat
+ * durabel" (FG-03) hanya boleh dibuat bila ada sink yang benar-benar menulis ke
+ * disk dan fsync, sink yang dibuat di sini didaftarkan pada WeakSet modul dan
+ * pemeriksaannya tidak dapat dipalsukan dari luar (audit 7677a0f).
+ */
+const DURABLE_AUDIT_SINKS = new WeakSet();
+
+/** Apakah `candidate` adalah sink durabel yang dibuat oleh factory di modul ini. */
+function isDurableAuditSink(candidate) {
+    return candidate !== null
+        && (typeof candidate === "object" || typeof candidate === "function")
+        && DURABLE_AUDIT_SINKS.has(candidate);
+}
+
 function failPersist(message, detail) {
     return new LedgerError(CODES.PERSIST_FAILED, message, detail);
 }
@@ -419,10 +438,13 @@ function createFileAuditSink(filePath, options = {}) {
         }
     };
 
-    return Object.freeze(sink);
+    const frozenSink = Object.freeze(sink);
+    DURABLE_AUDIT_SINKS.add(frozenSink);
+    return frozenSink;
 }
 
 module.exports = Object.freeze({
     createFileAuditSink,
+    isDurableAuditSink,
     SINK_KIND
 });

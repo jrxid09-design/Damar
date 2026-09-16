@@ -8,6 +8,7 @@ const { CORRELATION_KEYS } = require("./ids");
 const { buildEventRecord, digestCore, RESERVED_EVENT_TYPES } = require("./events");
 const { canonicalJson } = require("./canonicalJson");
 const { sha256Hex } = require("./integrity");
+const { isDurableAuditSink } = require("./fileSink");
 
 /**
  * Audit Ledger V1 — the append-oriented observational ledger.
@@ -195,6 +196,15 @@ function createAuditLedger(options = {}) {
                 if (outcome && typeof outcome.then === "function") {
                     throw new LedgerError(CODES.PERSIST_FAILED,
                         "async sinks are not supported by atomic durable append in V1");
+                }
+                // PORT CONTRACT: "Persist one frozen audit record. Return true
+                // on success; throw to reject". A sink that returns nothing (or
+                // false) has NOT acknowledged a durable write, and treating
+                // that as success let `{ append() {} }` claim durability it
+                // never performed (audit 7677a0f).
+                if (outcome !== true) {
+                    throw new LedgerError(CODES.PERSIST_FAILED,
+                        "persistence sink did not acknowledge a durable write (append must return true)");
                 }
             }
             catch (error) {
@@ -482,7 +492,13 @@ function createAuditLedger(options = {}) {
         stats,
         verifyIntegrity,
         exportWindow,
-        bounds
+        bounds,
+        // Apakah ledger ini benar-benar memiliki sink DURABEL (dibuat oleh
+        // factory sink lane ini dan menulis+fsync ke disk). Sebuah klaim
+        // "rekaman durabel" (FG-03) hanya sah bila ini true; sink buatan
+        // pemanggil apa pun -- termasuk `{ append() {} }` -- tidak dihitung
+        // (audit 7677a0f).
+        hasDurableSink: isDurableAuditSink(sink)
     });
     CANONICAL_LEDGERS.add(ledgerInstance);
     return ledgerInstance;
