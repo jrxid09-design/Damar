@@ -112,7 +112,12 @@ async function createLongHorizonCycle({
     // one for the transition to be auditable.
     let canonicalLedger = null;
     try {
-        canonicalLedger = require("../runtime/auditLedger").createAuditLedger({ clock });
+        // Path relatif dari src/cognition/longhorizon/ ke pemilik kanonik
+        // src/runtime/auditLedger. Path sebelumnya salah satu tingkat
+        // (`../runtime/...` -> src/cognition/runtime/...), sehingga require-nya
+        // gagal dan catch di bawah diam-diam menyulapnya jadi null: binding
+        // "kanonik" itu TIDAK PERNAH benar-benar terjadi (audit 8f78a21).
+        canonicalLedger = require("../../runtime/auditLedger").createAuditLedger({ clock });
     } catch {
         canonicalLedger = null;
     }

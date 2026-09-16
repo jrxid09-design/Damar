@@ -70,15 +70,39 @@ const AUTHORITY_SHAPED_KEYS = Object.freeze([
     "capabilityGrant", "executionLease", "executor", "route", "trustedNode", "rootAuthority",
     // authority/permission family
     "authority", "authorities", "authorized", "authorization", "authorizations",
-    "permission", "permissions", "privilege", "privileges",
-    "approved", "approval", "approvedBy",
+    "permission", "permissions", "privilege", "privileges", "permit", "permitted", "permitAll",
+    "approved", "approval", "approvedBy", "entitlement", "entitlements",
     // decision/grant family
     "decision", "decisions", "decisionMaker", "granted", "grants", "grantedBy",
+    "delegation", "delegated", "delegate", "mandate", "mandated",
     // bearer-token / lease family
     "lease", "leases", "leasedUntil", "bearer", "bearerToken", "leaseToken", "authToken",
+    "accessToken", "refreshToken", "token", "tokens", "sessionToken",
     // credential family
-    "credential", "credentials", "creds", "secret", "secrets", "apiKey", "privateKey"
+    "credential", "credentials", "creds", "secret", "secrets", "apiKey", "privateKey",
+    "password", "passphrase"
 ]);
+
+/**
+ * Normalisasi nama field untuk pencocokan keluarga: huruf kecil, tanpa
+ * pemisah. Ini menutup dua celah yang ditemukan audit 8f78a21 pada daftar
+ * sebelumnya: pencocokan yang PERSIS dan PEKA-HURUF membuat `AUTHORIZATION`,
+ * `auth_token`, `accessToken`, dan `permitted` lolos begitu saja, padahal
+ * maknanya identik dengan entri yang sudah ditolak.
+ *
+ * Pencocokan tetap EXACT setelah normalisasi (bukan substring): `decision`
+ * ditolak, sementara `decisionInfluence` -- field proyeksi yang sah -- tidak
+ * boleh ikut tertolak.
+ */
+function normalizeAuthorityKey(key) {
+    return String(key).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+const AUTHORITY_SHAPED_KEY_SET = new Set(AUTHORITY_SHAPED_KEYS.map(normalizeAuthorityKey));
+
+function isAuthorityShapedKey(key) {
+    return typeof key === "string" && AUTHORITY_SHAPED_KEY_SET.has(normalizeAuthorityKey(key));
+}
 
 // Bug review independen (extraksi FG-03, sibling langsung dari class
 // round-14's AUD14-P1-1/round-30's AUD30-ADV-1): recursion tanpa budget
@@ -132,7 +156,7 @@ function walkForAuthorityShapedFields(value, label, seen, budget, depth, require
         throw new Error(`ACC governed: ${label} tidak dapat diverifikasi dengan aman`);
     }
     for (const key of keys) {
-        if (typeof key === "string" && AUTHORITY_SHAPED_KEYS.includes(key)) {
+        if (isAuthorityShapedKey(key)) {
             throw new Error(`ACC governed: ${label} tidak boleh membawa field '${key}'`);
         }
     }
@@ -279,24 +303,41 @@ function recordModeTransitionChecked(options) {
         metadata: Object.freeze({ from: resolveMode(from), to: resolveMode(to), at: safeAt })
     });
 
-    let auditSupplied = false;
+    // "Supplied" means the caller actually passed a ledger, which is
+    // detectable independently of whether a usable `append` exists on it.
+    // Treating "a callable append was found" as the definition (the previous
+    // behaviour) let `{}`, a revoked Proxy, a throwing getter, or a
+    // non-callable `append` all report failedOpen:false and proceed in
+    // governed mode unaudited (independent audit of 8f78a21).
+    const auditSupplied = auditLedger !== null && auditLedger !== undefined;
     let audited = false;
     try {
-        const append = auditLedger && !isProxyValue(auditLedger) ? auditLedger.append : undefined;
-        if (typeof append === "function") {
-            auditSupplied = true;
-            const result = append.call(auditLedger, event);
-            if (result && typeof result.then === "function") {
-                // Async ledgers cannot confirm durability here; treat as
-                // unconfirmed rather than assuming success.
-                Promise.resolve(result).catch(() => {});
-            } else if (result && typeof result === "object" && "ok" in result) {
-                audited = result.ok === true;      // appendSafe contract
+        const append = auditSupplied && !isProxyValue(auditLedger) ? auditLedger.append : undefined;
+        if (auditSupplied) {
+            if (typeof append !== "function") {
+                audited = false;                  // supplied, but unusable
             } else {
-                audited = true;                    // canonical append() threw on failure
+                const result = append.call(auditLedger, event);
+                if (result && typeof result.then === "function") {
+                    // Async ledgers cannot confirm durability here; unconfirmed
+                    // rather than assumed successful.
+                    Promise.resolve(result).catch(() => {});
+                } else if (result && typeof result === "object" && "ok" in result) {
+                    audited = result.ok === true; // appendSafe contract
+                } else if (result === false || result === undefined || result === null) {
+                    // No positive confirmation. A no-op append must not be
+                    // reported as a recorded transition (audit of 8f78a21).
+                    audited = false;
+                } else {
+                    // Canonical append() returns the stored record on success
+                    // and throws on failure.
+                    audited = true;
+                }
             }
         }
-    } catch { /* audit failure never blocks cognition -- reported, not thrown */ }
+    } catch { /* audit failure never blocks cognition -- reported, not thrown */
+        audited = false;
+    }
 
     return { event, auditSupplied, audited, failedOpen: auditSupplied && !audited };
 }
@@ -307,6 +348,7 @@ module.exports = Object.freeze({
     GovernedError,
     fail,
     AUTHORITY_SHAPED_KEYS,
+    isAuthorityShapedKey,
     assertNoAuthorityShapedFields,
     resolveMode,
     isInfluenceAllowed,
