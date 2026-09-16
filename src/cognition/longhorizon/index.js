@@ -52,7 +52,7 @@ const BELIEF_RANK = Object.freeze({ USABLE: 3, DEGRADED: 2, UNUSABLE: 1, UNKNOWN
 
 async function createLongHorizonCycle({
     mode = "off", capabilityRegistry, clock = { nowMs: () => Date.now() },
-    stores = {}, auditLedger = null, bounds = BOUNDS
+    stores = {}, auditLedger = null, bounds = BOUNDS, requireAudit = false
 } = {}) {
 
     mode = resolveMode(mode);
@@ -137,10 +137,15 @@ async function createLongHorizonCycle({
         // would be exactly the fail-open transition ADR-17 forbids, so the mode
         // degrades to "off" -- with no lane constructed, mirroring "off".
         //
-        // No supplied ledger is a DECLARED configuration (auditSupplied:false),
-        // which is what keeps the Wave7 L7 convergence contract's
-        // `mode: "governed"` construction with no ledger intact.
-        if (transition.failedOpen) {
+        // `requireAudit: false` (the default) keeps the Wave7 L7 convergence
+        // contract's `mode: "governed"` construction with no ledger intact --
+        // that is a DECLARED configuration (auditSupplied:false), not a
+        // silent failure. The PRODUCTION runtime passes `requireAudit: true`,
+        // which additionally refuses to start governed with NO ledger at all:
+        // resolving a null ledger was otherwise indistinguishable from success,
+        // so governed could start with no canonical durable record even after
+        // the sinkless fallback was removed (audit of 406553b).
+        if (transition.failedOpen || (requireAudit === true && auditLedger == null)) {
             return Object.freeze({
                 schemaVersion: require("./bounds").SCHEMA_VERSION,
                 mode: "off", laws,

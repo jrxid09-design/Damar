@@ -383,7 +383,14 @@ async function buildRuntimeCoreInternal({
         cognition = await createLongHorizonCycle({
             mode: cognitionMode,
             capabilityRegistry: cognitionCapabilityRegistry,
-            auditLedger: cognitionAuditLedgerResolved
+            auditLedger: cognitionAuditLedgerResolved,
+            // Production path: refuse to start governed with no ledger at all.
+            // `getProductionAuthorityComposition()` deliberately resolves
+            // `ownerTrust: null` on a trust-domain failure, so leaving the
+            // ledger null was previously indistinguishable from success and
+            // governed could start with no canonical durable record (audit of
+            // 406553b).
+            requireAudit: cognitionMode === "governed"
         });
     }
 
