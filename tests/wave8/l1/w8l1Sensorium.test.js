@@ -1272,3 +1272,123 @@ test("W8L1-repair-51: a rejected admission cannot erase an unrelated live FAILED
     }, { modality: "VISION" }).reason, "sensor-failed",
     "rollback must restore any tombstone the rejected admission displaced");
 });
+
+/* ---------------------------------------------------------------------- */
+/* Audit of 406553b -- repaired ordering/instance classes                  */
+/* ---------------------------------------------------------------------- */
+
+test("W8L1-repair-52: out-of-order SUCCESSFUL settlements do not let an older observation win", async () => {
+    let t = T0;
+    const gates = new Map();
+    const bridge = bridgeSensoriumToWorldModel({
+        body: { subscribe: () => {} }, auditLedger: { append() {} },
+        clock: { nowMs: () => t },
+        worldModel: {
+            ingestObservation(o) {
+                const tag = o.value.sample.tag;
+                return new Promise((resolve) => gates.set(tag, resolve));
+            }
+        }
+    });
+    const send = (mono, tag) => {
+        const r = bridge.applyObservationPlan({
+            type: "SENSOR_OBSERVATION", subject: HOST, monotonic: mono, timestampMs: t,
+            payload: { channel: { id: "vision.capture" }, sample: { tag }, healthState: "OK" }
+        }, { modality: "VISION" });
+        t += 5000;
+        return r;
+    };
+
+    send(1, "A");
+    send(2, "B");
+    // NEWER (B) settles first, then the OLDER (A).
+    gates.get("B")({ ok: true });
+    await new Promise(r => setImmediate(r));
+    gates.get("A")({ ok: true });
+    await new Promise(r => setImmediate(r));
+
+    // The NEWEST admission must remain effective, so a monotonic between them
+    // is still a duplicate -- the older settlement may not become the winner.
+    assert.equal(send(1.5, "between").reason, "duplicate",
+        "an older settlement must not overwrite newer committed state");
+});
+
+test("W8L1-repair-53: a DEVICE_ONLINE from ANOTHER BodySchema instance cannot reopen this bridge's FAILED channel", () => {
+    const bodyA = makeBody();
+    const bodyB = makeBody();
+    const bridgeB = bridgeSensoriumToWorldModel({
+        body: bodyB, auditLedger: { append() {} },
+        worldModel: { ingestObservation() { return { ok: true }; } }
+    });
+
+    // bodyB's channel is FAILED.
+    bridgeB.applyObservationPlan({
+        type: "SENSOR_OBSERVATION", subject: HOST, monotonic: 1, timestampMs: T0,
+        payload: { channel: { id: "vision.capture" }, sample: {}, healthState: "FAILED" }
+    }, { modality: "VISION" });
+
+    // bodyA delivers its OWN DEVICE_ONLINE. A subscriber re-enters bridgeB with
+    // A's event object WHILE A is still delivering it, so the module-global
+    // markers were previously satisfied by A's commit.
+    let injected = false;
+    bodyA.subscribe((event) => {
+        if (event.type === "DEVICE_ONLINE" && !injected) {
+            injected = true;
+            bridgeB.applyObservationPlan(event);
+        }
+    });
+    bodyA.ingest(emb.makeEvent({
+        type: "DEVICE_ONLINE", source: "test-adapter", provenance: "OBSERVATION", subject: HOST,
+        clock: emb.manualClock(T0 + 8000), payload: {}
+    }));
+    assert.equal(injected, true, "the cross-instance subscriber ran");
+
+    // If B had accepted it, this healthy sample would be forwarded instead.
+    assert.equal(bridgeB.applyObservationPlan({
+        type: "SENSOR_OBSERVATION", subject: HOST, monotonic: 2, timestampMs: T0 + 20000,
+        payload: { channel: { id: "vision.capture" }, sample: {}, healthState: "OK" }
+    }, { modality: "VISION" }).reason, "sensor-failed",
+    "lifecycle trust must be scoped to the instance that committed the event");
+});
+
+test("W8L1-repair-54: replaying an old monotonic after reverse-order settlement is still a duplicate", async () => {
+    let t = T0;
+    const gates = new Map();
+    const bridge = bridgeSensoriumToWorldModel({
+        body: { subscribe: () => {} }, auditLedger: { append() {} },
+        clock: { nowMs: () => t },
+        worldModel: {
+            ingestObservation(o) {
+                const tag = o.value.sample.tag;
+                return new Promise((resolve) => gates.set(tag, resolve));
+            }
+        }
+    });
+    const send = (mono, channelId, tag) => {
+        const r = bridge.applyObservationPlan({
+            type: "SENSOR_OBSERVATION", subject: HOST, monotonic: mono, timestampMs: t,
+            payload: { channel: { id: channelId }, sample: { tag }, healthState: "OK" }
+        }, { modality: "SCREEN" });
+        t += 5000;
+        return r;
+    };
+
+    // Several channels resolved NEWEST-first, in waves that respect the
+    // delivery window.
+    for (let wave = 0; wave < 4; wave++) {
+        const tags = [];
+        for (let i = 0; i < 60; i++) {
+            const mono = wave * 100 + i + 1;
+            const tag = `w${mono}`;
+            tags.push(tag);
+            send(mono, `screen.${mono}`, tag);
+        }
+        for (let i = tags.length - 1; i >= 0; i--) gates.get(tags[i])({ ok: true });
+        await new Promise(r => setTimeout(r, 10));
+    }
+
+    assert.equal(send(1, "screen.1", "replay").reason, "duplicate",
+        "an old monotonic must stay a duplicate after reverse-order settlement");
+    assert.equal(send(302, "screen.302", "replay").reason, "duplicate",
+        "a mid-range monotonic must stay a duplicate after reverse-order settlement");
+});

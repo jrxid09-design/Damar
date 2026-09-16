@@ -41,16 +41,41 @@ const {
 } = require("../embodiment/schema/BodySchema");
 
 /**
- * Bukti lifecycle terkuat: event ini SEDANG diserahkan oleh komit BodySchema
- * yang berjalan sekarang.
+ * Bukti lifecycle, DIBATASI PADA SATU INSTANCE BodySchema.
  *
- * `wasCommittedByBodySchema` saja hanya membuktikan "pernah dikomit", sehingga
- * objek DEVICE_ONLINE lama bisa diserahkan ULANG setelah observasi FAILED yang
- * lebih baru dan membuka kembali kanal yang seharusnya tetap tertutup (audit
- * b332cf8). Jendela pengiriman menutup celah replay itu tanpa perlu kriptografi.
+ * Dua lapis, keduanya wajib:
+ *  - `body` adalah instance yang `subscribe`-nya menyerahkan event ini, dan
+ *    hanya instance ITU yang boleh mengotorisasi lifecycle-nya. Tanpa batas
+ *    instance, event yang sedang dikirim BodySchema A diterima jembatan milik
+ *    BodySchema B dan membuka kembali kanal FAILED milik B (audit 406553b).
+ *  - `wasCommittedBy`/`isBeingDelivered` milik instance itu, bukan penanda
+ *    modul-global -- jadi jembatan ini tidak pernah mempercayai event yang
+ *    kebetulan sedang dikirim instance LAIN.
+ * Fallback ke penanda modul hanya dipakai bila `body` tidak menyediakan API
+ * instance (mis. objek body tiruan di test lama), supaya perilaku lamanya tidak
+ * rusak.
  */
-function isTrustedLifecycleEvent(event) {
+function isTrustedLifecycleEvent(body, event) {
+    if (body && typeof body.isBeingDelivered === "function") {
+        return body.isBeingDelivered(event) === true
+            && typeof body.wasCommittedBy === "function"
+            && body.wasCommittedBy(event) === true;
+    }
     return isEventBeingDelivered(event) && wasCommittedByBodySchema(event);
+}
+
+/** Urutan komit event, dari instance BodySchema yang bersangkutan bila ada. */
+function commitSequenceFor(body, event) {
+    if (body && typeof body.commitSequenceOf === "function") return body.commitSequenceOf(event);
+    return commitSequenceOf(event);
+}
+
+/** Urutan komit peristiwa yang SEDANG dikirim, dari instance bila ada. */
+function currentDeliverySequenceFor(body) {
+    if (body && typeof body.currentDeliveryCommitSequence === "function") {
+        return body.currentDeliveryCommitSequence();
+    }
+    return currentDeliveryCommitSequence();
 }
 
 // RuntimeCore composition dependencies (moved from runtimeCore.js).
@@ -360,18 +385,92 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
     // reversing B afterwards falls back to the pre-A committed state. The
     // previous snapshot-based rollback could not express that and resurrected a
     // rejected monotonic (audit of dd15f44).
-    const admissionState = new Map(); // key -> { frames: [{seq, state}], committed }
+    const admissionState = new Map(); // key -> { frames: [{seq, state, evicted}], committed }
 
     function effectiveStateFor(rec) {
         if (rec.frames.length > 0) return rec.frames[rec.frames.length - 1].state;
         return rec.committed;
     }
 
+    /**
+     * Bereskan catatan channel ke bentuk paling ringkas, dan BUANG catatan yang
+     * tidak lagi diperlukan.
+     *
+     * `admissionState` tidak boleh tumbuh tanpa batas: sebuah channel yang
+     * sudah selesai (tanpa frame) dan state akhirnya SUDAH menjadi
+     * `tracked[key]` tidak menyimpan informasi apa pun yang tidak dimiliki
+     * `tracked`, jadi catatannya dapat dibuang. Tanpa ini, setiap channel yang
+     * pernah berubah hanya karena eviction akan meninggalkan `committed`
+     * selamanya -- dan pemulihan korban eviction kelak akan menghidupkan lagi
+     * state basi yang seharusnya sudah hilang (audit 406553b).
+     */
+    function compactAdmissionRecord(key, rec) {
+        if (rec.frames.length === 0) {
+            if (!tracked.has(key)) {
+                admissionState.delete(key);
+                return;
+            }
+            // State akhir sudah identik dengan tracked[key] -> catatan murni
+            // redundan.
+            const current = tracked.get(key);
+            if (rec.committed !== null && rec.committed === current) {
+                admissionState.delete(key);
+                return;
+            }
+        }
+        if (rec.frames.length === 0 && rec.committed === null) admissionState.delete(key);
+    }
+
+    /**
+     * Apakah `state` adalah penulis TERBARU untuk channel ini?
+     *
+     * Pada penyelesaian yang datang TIDAK BERURUTAN (B selesai sebelum A),
+     * penerapan `committed` tanpa syarat akan membuat state A menang padahal B
+     * lebih baru -- mis. observasi monotonic 1,5 lolos setelah monotonic 2
+     * sudah diterapkan (audit 406553b). Karena itu `committed` hanya boleh
+     * ditulis oleh frame dengan seq TERBESAR.
+     */
+    function isNewestSettledWriter(rec, seq) {
+        return rec.settledSeq === undefined || seq > rec.settledSeq;
+    }
+
+    function applyEffective(key, rec) {
+        const effective = effectiveStateFor(rec);
+        if (effective === null) {
+            // Hanya hapus bila TIDAK ada penulis yang lebih baru yang sudah
+            // menyelesaikan diri; kalau ada, state penulis itu yang berlaku.
+            if (rec.settledSeq === undefined) tracked.delete(key);
+        } else {
+            tracked.set(key, effective);
+        }
+    }
+
     /** Kembalikan korban eviction milik sebuah frame, tanpa menimpa state yang lebih baru. */
     function restoreEvictedVictim(frame) {
         const evicted = frame && frame.evicted;
         if (!evicted) return;
-        if (!tracked.has(evicted.key)) tracked.set(evicted.key, evicted.state);
+        if (tracked.has(evicted.key)) return;
+        tracked.set(evicted.key, evicted.state);
+        // Pemulihan menambah satu entri, jadi bound harus ditegakkan lagi --
+        // tanpa ini `tracked` bisa melampaui batas yang dinyatakan (audit
+        // 406553b). Korban yang baru dipulihkan DIKECUALIKAN: entri itu justru
+        // yang sedang diselamatkan.
+        while (tracked.size > MAX_TRACKED_SENSOR_CHANNELS) {
+            let victimKey = null;
+            let victimPriority = Infinity;
+            let victimAppliedMs = Infinity;
+            for (const [k, t] of tracked) {
+                if (k === evicted.key) continue;
+                if (t.healthPriority < victimPriority
+                    || (t.healthPriority === victimPriority && t.lastAppliedMs < victimAppliedMs)) {
+                    victimKey = k;
+                    victimPriority = t.healthPriority;
+                    victimAppliedMs = t.lastAppliedMs;
+                }
+            }
+            if (victimKey === null) break;
+            tracked.delete(victimKey);
+        }
     }
 
     function settleAdmissionFrame(key, seq, committedState) {
@@ -381,10 +480,12 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         rec.frames = rec.frames.filter(f => f.seq !== seq);
         // COMMIT: the eviction this admission caused becomes permanent.
         if (frame) frame.evicted = null;
-        rec.committed = committedState;
-        const effective = effectiveStateFor(rec);
-        if (effective === null) tracked.delete(key); else tracked.set(key, effective);
-        if (rec.frames.length === 0 && rec.committed === null) admissionState.delete(key);
+        if (isNewestSettledWriter(rec, seq)) {
+            rec.committed = committedState;
+            rec.settledSeq = seq;
+        }
+        applyEffective(key, rec);
+        compactAdmissionRecord(key, rec);
     }
 
     function rollbackAdmissionFrame(key, seq) {
@@ -396,9 +497,8 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         // permanently erased an unrelated live FAILED tombstone (audit of
         // dd15f44).
         restoreEvictedVictim(frame);
-        const effective = effectiveStateFor(rec);
-        if (effective === null) tracked.delete(key); else tracked.set(key, effective);
-        if (rec.frames.length === 0 && rec.committed === null) admissionState.delete(key);
+        applyEffective(key, rec);
+        compactAdmissionRecord(key, rec);
     }
 
     // Read-only OBSERVABILITY view (contract "OBSERVABILITY": "Shed counts are
@@ -585,7 +685,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         // healthState OK, and a caller-supplied `reconnected` flag all fail
         // to reopen anything.
         if (type.value === "DEVICE_ONLINE") {
-            if (!isTrustedLifecycleEvent(event)) {
+            if (!isTrustedLifecycleEvent(body, event)) {
                 audit({ type: "W8_L1_UNTRUSTED_LIFECYCLE_REJECTED", subject: subjectRead.ok ? subjectRead.value : null, atMs: nowMs() });
                 return { applied: false, reason: "untrusted-lifecycle-event" };
             }
@@ -596,8 +696,8 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             //    subscriber -- inilah yang menutup celah re-entrancy.
             //  - `onlineBridgeSeq` diambil di pintu masuk, sebagai cadangan
             //    untuk observasi sintetis yang tidak pernah dikomit.
-            const onlineCommitSeq = commitSequenceOf(event);
-            const onlineDeliverySeq = currentDeliveryCommitSequence();
+            const onlineCommitSeq = commitSequenceFor(body, event);
+            const onlineDeliverySeq = currentDeliverySequenceFor(body);
             const onlineBridgeSeq = ++bridgeSeq;
             let cleared = 0;
             if (typeof onlineSubject === "string") {
@@ -645,7 +745,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         // event manufactures a trusted-looking audit record (audit b332cf8).
         if (type.value === "DEVICE_DISCOVERED" || type.value === "DEVICE_CHANGED"
             || type.value === "DEVICE_HEALTH_CHANGED") {
-            if (!isTrustedLifecycleEvent(event)) {
+            if (!isTrustedLifecycleEvent(body, event)) {
                 audit({ type: "W8_L1_UNTRUSTED_LIFECYCLE_REJECTED", subject: subjectRead.ok ? subjectRead.value : null, atMs: nowMs() });
                 return { applied: false, reason: "untrusted-lifecycle-event" };
             }
@@ -806,14 +906,14 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             // ditulis -- revisi sebelumnya mendeklarasikan `failedAtSeq` tapi
             // tidak pernah mengisinya, sehingga penjaga urutannya tidak pernah
             // menyala (audit of dd15f44).
-            failedAtSeq: skewedHealthState === "FAILED" ? commitSequenceOf(event) : undefined,
+            failedAtSeq: skewedHealthState === "FAILED" ? commitSequenceFor(body, event) : undefined,
             failedAtBridgeSeq: skewedHealthState === "FAILED" ? admissionBridgeSeq : undefined,
             // Komit yang SEDANG dikirim saat observasi ini diadmit. Sebuah
             // peristiwa lifecycle yang dikirim dalam jendela yang SAMA bukanlah
             // hal yang lebih baru darinya, walau jembatan memprosesnya
             // belakangan -- inilah sinyal yang menutup celah re-entrancy tanpa
             // bergantung pada urutan subscriber.
-            failedAtDeliverySeq: skewedHealthState === "FAILED" ? currentDeliveryCommitSequence() : undefined,
+            failedAtDeliverySeq: skewedHealthState === "FAILED" ? currentDeliverySequenceFor(body) : undefined,
             // Referensi kalibrasi ikut tersimpan: perbandingan perubahan
             // kalibrasi membaca field ini dari state sebelumnya, jadi
             // menghilangkannya akan mematikan audit perubahan kalibrasi.
@@ -825,7 +925,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             existingAdmission.frames.push(frame);
         } else {
             const base = prior === undefined ? null : { ...prior };
-            admissionState.set(key, { frames: [frame], committed: base });
+            admissionState.set(key, { frames: [frame], committed: base, settledSeq: undefined });
         }
         tracked.set(key, admittedState);
         // Eviction happens at admission (so `tracked` stays bounded even during

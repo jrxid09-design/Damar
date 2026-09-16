@@ -276,6 +276,46 @@ class BodySchema {
         this._subscriberErrors = [];
         this._subscribers = new Set();
         this._deriving = false;
+
+        // Lifecycle authenticity + ordering state, PER-INSTANCE.
+        //
+        // Sebelumnya semua penanda ini modul-global: event yang sedang
+        // diserahkan oleh BodySchema A diterima oleh jembatan milik BodySchema
+        // B dan membuka kembali kanal FAILED milik B (audit 406553b). Karena
+        // kepercayaan lifecycle hanya bermakna di dalam instance yang
+        // meng-commit event itu, state-nya harus melekat pada instance.
+        this._committedEvents = new WeakSet();
+        this._commitSequences = new WeakMap();
+        this._deliveringEvents = new WeakSet();
+        this._deliverySeq = null;
+        this._commitSeqCounter = 0;
+    }
+
+    /* ------------- bukti lifecycle (per-instance, lihat catatan di atas) --- */
+
+    /** Apakah event ini benar-benar melewati KOMIT instance ini. */
+    wasCommittedBy(event) {
+        return event !== null
+            && (typeof event === "object" || typeof event === "function")
+            && this._committedEvents.has(event);
+    }
+
+    /** Apakah event ini SEDANG diserahkan oleh komit instance ini. */
+    isBeingDelivered(event) {
+        return event !== null
+            && (typeof event === "object" || typeof event === "function")
+            && this._deliveringEvents.has(event);
+    }
+
+    /** Urutan komit event ini di instance ini, atau undefined. */
+    commitSequenceOf(event) {
+        if (event === null || (typeof event !== "object" && typeof event !== "function")) return undefined;
+        return this._commitSequences.get(event);
+    }
+
+    /** Urutan komit peristiwa yang sedang dikirim instance ini, atau null. */
+    currentDeliveryCommitSequence() {
+        return this._deliverySeq;
     }
 
     /* -------------------- batas kepercayaan produsen ------------------- */
@@ -345,6 +385,10 @@ class BodySchema {
         // ingest() yang boleh dipercaya hilir sebagai peristiwa nyata.
         COMMITTED_EVENTS.add(event);
         COMMIT_SEQUENCE.set(event, ++commitSeqCounter);
+        // Catatan PER-INSTANCE (lihat constructor): hanya instance yang
+        // benar-benar meng-commit event ini yang boleh mempercayainya hilir.
+        this._committedEvents.add(event);
+        this._commitSequences.set(event, ++this._commitSeqCounter);
 
         if (!event.payload?.derived) {
             this._deriveDefaultChanges();
@@ -1108,9 +1152,16 @@ class BodySchema {
         // memperlakukan peristiwa lifecycle sebagai nyata HANYA di dalam
         // jendela ini, sehingga replay event lama tidak pernah lolos.
         const markDelivering = event !== null && typeof event === "object";
-        if (markDelivering) NOTIFYING_EVENTS.add(event);
+        if (markDelivering) {
+            NOTIFYING_EVENTS.add(event);
+            this._deliveringEvents.add(event);
+        }
         const previousDeliverySeq = currentDeliverySeq;
-        if (markDelivering) currentDeliverySeq = COMMIT_SEQUENCE.get(event) ?? null;
+        const previousInstanceDeliverySeq = this._deliverySeq;
+        if (markDelivering) {
+            currentDeliverySeq = COMMIT_SEQUENCE.get(event) ?? null;
+            this._deliverySeq = this._commitSequences.get(event) ?? null;
+        }
         try {
             for (const fn of [...this._subscribers]) {
                 try {
@@ -1127,8 +1178,12 @@ class BodySchema {
                 }
             }
         } finally {
-            if (markDelivering) NOTIFYING_EVENTS.delete(event);
+            if (markDelivering) {
+                NOTIFYING_EVENTS.delete(event);
+                this._deliveringEvents.delete(event);
+            }
             currentDeliverySeq = previousDeliverySeq;
+            this._deliverySeq = previousInstanceDeliverySeq;
         }
     }
 
