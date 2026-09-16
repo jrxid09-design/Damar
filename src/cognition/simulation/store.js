@@ -113,9 +113,13 @@ function readPersistedArray(value, state) {
 function readPersistedBudget(raw) {
     const budget = readSnapshotField(raw, "budget");
     const out = { tokenLedger: [], invalidatedAssumptions: [], degraded: false };
+    // Snapshot YANG ADA tetapi tanpa riwayat anggaran berarti pemakaian token
+    // tidak dapat diketahui. Memperlakukannya sebagai riwayat kosong adalah
+    // gagal-buka: batas 500k token/jam ter-reset hanya dengan menghapus field
+    // itu dari snapshot (audit fdda055). Snapshot kosong yang jujur adalah
+    // `null` dari store, yang ditangani di `deserialize` sebagai cold start.
     if (budget === null || budget === undefined) {
-        // Tidak ada state anggaran tersimpan sama sekali: cold start yang jujur,
-        // bukan degradasi (tidak ada apa pun yang gagal dibaca).
+        out.degraded = true;
         return out;
     }
     if (typeof budget !== "object" || Array.isArray(budget)) {
@@ -124,11 +128,7 @@ function readPersistedBudget(raw) {
     }
     const ledgerRaw = readSnapshotField(budget, "tokenLedger");
     const invalidatedRaw = readSnapshotField(budget, "invalidatedAssumptions");
-    if (ledgerRaw !== undefined && !Array.isArray(ledgerRaw)) {
-        out.degraded = true;
-        return out;
-    }
-    if (invalidatedRaw !== undefined && !Array.isArray(invalidatedRaw)) {
+    if (!Array.isArray(ledgerRaw) || !Array.isArray(invalidatedRaw)) {
         out.degraded = true;
         return out;
     }
@@ -228,6 +228,13 @@ function readPersistedCollection(raw, key) {
     const container = readSnapshotField(raw, key);
     if (container === null || container === undefined) return new Map();
     if (typeof container !== "object" || Array.isArray(container)) return new Map();
+    // Sebelum `Object.keys`: pada Proxy, ownKeys dan setiap deskriptor
+    // menjalankan trap pemanggil -- dan Proxy yang "berbohong" bisa tampak
+    // seperti koleksi kosong yang sah, sehingga state-nya diam-diam hilang
+    // tanpa degradasi (audit fdda055).
+    if (utilTypes.isProxy(container)) {
+        throw new Error("snapshot tidak boleh berupa Proxy");
+    }
     let names;
     try {
         names = Object.keys(container);
@@ -236,6 +243,9 @@ function readPersistedCollection(raw, key) {
     }
     const out = new Map();
     for (const name of names) {
+        if (name === "__proto__" || name === "constructor" || name === "prototype") {
+            throw new Error(`snapshot tidak boleh membawa kunci berbahaya: '${name}'`);
+        }
         let desc;
         try {
             desc = Object.getOwnPropertyDescriptor(container, name);
@@ -270,12 +280,13 @@ const REAL_STORE_WRITE_VERBS = Object.freeze([
 /**
  * Batas jumlah entri riwayat anggaran yang akan dipulihkan.
  *
- * Riwayat sepanjang ini (jauh di atas apa pun yang bisa dihasilkan dalam satu
- * jam pada batas token) tidak masuk akal, dan membaca array raksasa secara
- * sinkron bisa memblokir event loop (audit Wave8 L3/L5). Melewati batas =
- * riwayat tidak dapat diyakini lengkap, jadi fail closed, bukan dipotong diam-diam.
+ * Batas ini harus DI ATAS apa pun yang dapat dihasilkan secara sah dalam satu
+ * jam (riwayat dipangkas per jam), supaya snapshot yang sah tidak pernah
+ * dianggap degradasi: batas 100.000 sebelumnya bisa tercapai oleh entri
+ * satu-token yang sah dan "membrick" restart (audit fdda055). Melewati batas
+ * tetap berarti riwayat tidak dapat diyakini lengkap -> fail closed.
  */
-const MAX_BUDGET_ENTRIES = 100_000;
+const MAX_BUDGET_ENTRIES = 5_000_000;
 
 /**
  * Tolak store milik lane NYATA. Melempar SimulationError
@@ -300,13 +311,18 @@ function checkStoreIsolation(store) {
     // prototipe yang sah selalu berakhir. Setiap tingkat dibaca lewat
     // DESKRIPTOR, bukan `store[verb]`; Proxy pada tingkat mana pun ditolak
     // karena trap-nya akan berjalan saat diintrospeksi (audit Wave8 L3/L5).
-    const seenLevels = new Set();
     for (const verb of REAL_STORE_WRITE_VERBS) {
+        // `seen` HARUS per-kata-kerja. Sebelumnya himpunan ini dibagi antar
+        // iterasi, sehingga setelah kata kerja pertama menelusuri rantai,
+        // semua kata kerja berikutnya menganggap tiap tingkat "sudah dilihat"
+        // dan langsung berhenti -- hanya `appendEvent` yang benar-benar
+        // ditegakkan, tujuh sisanya lolos (audit fdda055).
+        const seen = new Set();
         let level = store;
         while (level && typeof level === "object") {
             if (level === Object.prototype || level === Function.prototype) break;
-            if (seenLevels.has(level)) break;
-            seenLevels.add(level);
+            if (seen.has(level)) break;
+            seen.add(level);
             if (utilTypes.isProxy(level)) {
                 throw fail(REASONS.CROSS_STORE_WRITE_REJECTED,
                     "store simulasi tidak boleh menyembunyikan Proxy pada rantai prototipenya");
