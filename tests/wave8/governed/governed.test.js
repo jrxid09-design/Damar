@@ -461,3 +461,80 @@ test("FG03-36: a non-recording ledger degrades GOVERNED to off but never degrade
     assert.equal(recording.mode, "governed");
     assert.ok(recording.lanes);
 });
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of d409f56 — repaired classes                        */
+/* ---------------------------------------------------------------------- */
+
+test("FG03-37: a confirmation cannot be forged via inheritance, an array, an accessor, or a Proxy", () => {
+    const outcome = (append) => recordModeTransitionChecked(
+        { auditLedger: { append }, from: "off", to: "governed" });
+
+    // `"ok" in result` walked the prototype chain and `result.ok` was a raw
+    // [[Get]], so all four of these previously reported audited:true.
+    const inheritedOk = Object.create({ ok: true });
+    assert.equal(outcome(() => inheritedOk).failedOpen, true, "inherited ok:true");
+
+    const arrayWithOk = [1, 2];
+    arrayWithOk.ok = true;
+    assert.equal(outcome(() => arrayWithOk).failedOpen, true, "array carrying a smuggled ok");
+
+    const accessorOk = {};
+    Object.defineProperty(accessorOk, "ok", { get() { return true; }, enumerable: true });
+    assert.equal(outcome(() => accessorOk).failedOpen, true, "accessor-backed ok");
+
+    const proxyOk = new Proxy({}, {
+        get: (t, k) => (k === "ok" ? true : undefined),
+        has: (t, k) => (k === "ok"),
+        getOwnPropertyDescriptor: (t, k) => (k === "ok"
+            ? { value: true, enumerable: true, configurable: true } : undefined)
+    });
+    assert.equal(outcome(() => proxyOk).failedOpen, true, "Proxy synthesizing ok:true");
+
+    // Genuine confirmations are still accepted.
+    assert.equal(outcome(() => ({ ok: true })).failedOpen, false);
+    assert.equal(outcome(() => ({ eventId: "canonical-record-3" })).failedOpen, false);
+});
+
+test("FG03-38: a string credential under `token` is contained, while a numeric token budget is still legitimate", () => {
+    // A bare `token` string is credential material and must not pass the
+    // containment boundary, even though it is not a listed key name.
+    assert.throws(
+        () => assertNoAuthorityShapedFields({ plan: { token: "Bearer root-secret" } }, "Probe"),
+        /kredensial|tidak boleh/,
+        "a string token is credential material");
+
+    // The same key as a NUMBER is ordinary advisory vocabulary.
+    assert.doesNotThrow(() => assertNoAuthorityShapedFields({
+        plan: { token: 12, tokens: 34 }, decisionInfluence: "ADVISORY_ONLY"
+    }, "Probe"));
+
+    // The additional credential/auth families are contained by name.
+    for (const key of ["auth", "oauthToken", "jwt", "accessKey", "sessionCredential"]) {
+        assert.throws(
+            () => assertNoAuthorityShapedFields({ nested: { [key]: "v" } }, "Probe"),
+            /tidak boleh membawa field|kredensial/,
+            `'${key}' must be contained`);
+    }
+});
+
+test("FG03-39: the canonical owner-trust ledger really confirms a governed transition (not a second, sinkless ledger)", async () => {
+    const { composeOwnerTrustForTest } = require("../../../src/authority/ownerTrustComposition");
+    const comp = await composeOwnerTrustForTest({ stateFile: null });
+    try {
+        // The canonical owner exposes the single ledger this repo owns.
+        assert.ok(comp.ledger, "owner-trust composition must expose its ledger");
+        assert.equal(typeof comp.ledger.append, "function");
+
+        // A governed transition recorded against THAT ledger must be confirmed
+        // by the canonical append contract (it returns the stored record).
+        const checked = recordModeTransitionChecked({
+            auditLedger: comp.ledger, from: "off", to: "governed", at: 1
+        });
+        assert.equal(checked.auditSupplied, true);
+        assert.equal(checked.audited, true, "the canonical ledger must confirm the transition");
+        assert.equal(checked.failedOpen, false);
+    } finally {
+        try { comp.close(); } catch { /* ignore */ }
+    }
+});

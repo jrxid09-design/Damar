@@ -85,8 +85,9 @@ const AUTHORITY_SHAPED_KEYS = Object.freeze([
     "lease", "leases", "leasedUntil", "bearer", "bearerToken", "leaseToken", "authToken",
     "accessToken", "refreshToken", "idToken", "sessionToken",
     // credential family
-    "credential", "credentials", "creds", "secret", "secrets", "apiKey", "privateKey",
-    "password", "passphrase"
+    "credential", "credentials", "creds", "secret", "secrets", "apiKey", "accessKey",
+    "privateKey", "password", "passphrase", "auth", "oauthToken", "jwt",
+    "sessionCredential"
 ]);
 
 /**
@@ -106,8 +107,24 @@ function normalizeAuthorityKey(key) {
 
 const AUTHORITY_SHAPED_KEY_SET = new Set(AUTHORITY_SHAPED_KEYS.map(normalizeAuthorityKey));
 
+/**
+ * Kunci yang berbahaya HANYA bila nilainya berupa string.
+ *
+ * `token`/`tokens` adalah kosakata advisory yang sah ketika berupa ANGKA (mis.
+ * anggaran token perencanaan), tetapi sebuah string seperti
+ * `"Bearer root-secret"` adalah materi kredensial. Audit d409f56 menunjukkan
+ * bahwa mengecualikan `token` sepenuhnya membuka bypass kredensial, sementara
+ * memblokirnya tanpa syarat akan menolak proyeksi advisory yang sah. Karena
+ * itu aturannya bergantung pada BENTUK NILAI, bukan pada nama kunci saja.
+ */
+const CONDITIONAL_AUTHORITY_KEYS = Object.freeze(new Set(["token", "tokens"]));
+
 function isAuthorityShapedKey(key) {
     return typeof key === "string" && AUTHORITY_SHAPED_KEY_SET.has(normalizeAuthorityKey(key));
+}
+
+function isConditionallyAuthorityShapedKey(key) {
+    return typeof key === "string" && CONDITIONAL_AUTHORITY_KEYS.has(normalizeAuthorityKey(key));
 }
 
 // Bug review independen (extraksi FG-03, sibling langsung dari class
@@ -175,6 +192,12 @@ function walkForAuthorityShapedFields(value, label, seen, budget, depth, require
         }
         if (!descriptor || !("value" in descriptor)) {
             throw new Error(`ACC governed: ${label}.${String(key)} wajib berupa data property`);
+        }
+        // Kunci berkondisi (token/tokens): angka adalah kosakata advisory yang
+        // sah, STRING adalah materi kredensial -- `token: "Bearer root-secret"`
+        // tidak boleh lolos batas containment (audit d409f56).
+        if (isConditionallyAuthorityShapedKey(key) && typeof descriptor.value === "string") {
+            throw new Error(`ACC governed: ${label}.${String(key)} tidak boleh berupa string kredensial`);
         }
         walkForAuthorityShapedFields(descriptor.value, `${label}.${String(key)}`, seen, budget, depth + 1, requireFrozen);
     }
@@ -288,8 +311,29 @@ function recordModeTransition(options) {
  * The fail-open case is specifically "you gave me a ledger and it did not
  * record", which is detectably different and must not be silently ignored.
  */
-function recordModeTransitionChecked(options) {
-    let auditLedger, from, to, at;
+/**
+ * Baca satu field dari hasil `append` sebagai DATA milik objek itu sendiri.
+ *
+ * `"ok" in result` menelusuri RANTAI PROTOTIPE dan `result.ok` adalah `[[Get]]`
+ * mentah yang menjalankan accessor/trap Proxy -- sehingga `ok:true` warisan,
+ * array yang ditempel `ok=true`, dan Proxy yang menyintesis `ok:true` semuanya
+ * lolos sebagai "terkonfirmasi" (audit d409f56). Pembacaan di sini hanya lewat
+ * deskriptor MILIK SENDIRI, jadi tidak ada jalur warisan, accessor, maupun Proxy
+ * yang bisa memalsukannya.
+ */
+function readOwnDataField(value, key) {
+    if (value === null || typeof value !== "object" || isProxyValue(value)) return undefined;
+    let desc;
+    try {
+        desc = Object.getOwnPropertyDescriptor(value, key);
+    } catch {
+        return undefined;
+    }
+    if (!desc || desc.get || desc.set || !("value" in desc)) return undefined;
+    return desc.value;
+}
+
+function recordModeTransitionChecked(options) {    let auditLedger, from, to, at;
     try {
         const source = options && typeof options === "object" ? options : {};
         const read = (key) => {
@@ -328,25 +372,27 @@ function recordModeTransitionChecked(options) {
                     // Async ledgers cannot confirm durability here; unconfirmed
                     // rather than assumed successful.
                     Promise.resolve(result).catch(() => {});
-                } else if (result && typeof result === "object" && "ok" in result) {
-                    audited = result.ok === true; // appendSafe contract
                 } else if (result === false || result === undefined || result === null) {
                     // No positive confirmation. A no-op append must not be
                     // reported as a recorded transition (audit of 8f78a21).
                     audited = false;
-                } else if (typeof result === "object" && !Array.isArray(result)
-                    && typeof result.eventId === "string" && result.eventId.length > 0) {
-                    // The canonical createAuditLedger().append contract: the
-                    // FROZEN STORED RECORD is returned on success, and it throws
-                    // on failure. Requiring that record shape is what makes
-                    // "confirmed" mean something -- treating any other truthy
-                    // return as success let `1`, `"ok"`, a Symbol, a function,
-                    // an array, or an unrelated object all report audited:true
-                    // and left governed construction fail-open (audit of
-                    // 9e7b8df).
-                    audited = true;
                 } else {
-                    audited = false;
+                    // Positive confirmation must be OWN DATA on a plain object.
+                    // `readOwnDataField` refuses inherited fields, accessors,
+                    // arrays carrying a smuggled `ok`, and Proxies (audit of
+                    // d409f56); an array or unrelated object therefore cannot
+                    // masquerade as a confirmation.
+                    const ownOk = readOwnDataField(result, "ok");
+                    const ownEventId = readOwnDataField(result, "eventId");
+                    const isPlain = result !== null && typeof result === "object"
+                        && !Array.isArray(result) && !isProxyValue(result);
+                    if (isPlain && ownOk === true) {
+                        audited = true;               // appendSafe contract
+                    } else if (isPlain && typeof ownEventId === "string" && ownEventId.length > 0) {
+                        audited = true;               // canonical stored record
+                    } else {
+                        audited = false;
+                    }
                 }
             }
         }
