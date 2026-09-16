@@ -35,7 +35,20 @@
 const os = require("node:os");
 const path = require("node:path");
 const { types: utilTypes } = require("node:util");
-const { wasCommittedByBodySchema } = require("../embodiment/schema/BodySchema");
+const { wasCommittedByBodySchema, isEventBeingDelivered } = require("../embodiment/schema/BodySchema");
+
+/**
+ * Bukti lifecycle terkuat: event ini SEDANG diserahkan oleh komit BodySchema
+ * yang berjalan sekarang.
+ *
+ * `wasCommittedByBodySchema` saja hanya membuktikan "pernah dikomit", sehingga
+ * objek DEVICE_ONLINE lama bisa diserahkan ULANG setelah observasi FAILED yang
+ * lebih baru dan membuka kembali kanal yang seharusnya tetap tertutup (audit
+ * b332cf8). Jendela pengiriman menutup celah replay itu tanpa perlu kriptografi.
+ */
+function isTrustedLifecycleEvent(event) {
+    return isEventBeingDelivered(event) && wasCommittedByBodySchema(event);
+}
 
 // RuntimeCore composition dependencies (moved from runtimeCore.js).
 const { createEmbodiedCore } = require("./embodiedCore");
@@ -202,6 +215,9 @@ const MAX_PENDING_OBSERVATIONS = 50_000;
 // the queue is the real backlog, so overflow cancels work that has NOT been
 // issued yet.
 const MAX_IN_FLIGHT_DELIVERIES = 64;
+// Batas waktu penyelesaian satu pengiriman: slot TIDAK PERNAH dipegang
+// selamanya oleh promise yang tidak pernah selesai.
+const DELIVERY_SETTLE_TIMEOUT_MS = 30_000;
 
 /**
  * Proxy probe via internal slot — zero traps, and correct for a revoked
@@ -365,6 +381,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
     }
 
     function issueEntry(entry) {
+        entry.state = "pending";
         inFlight += 1;
         let issued;
         try {
@@ -378,9 +395,25 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         }
         entry.result = issued;
         if (issued && typeof issued.then === "function") {
+            // A delivery that never settles must not hold its slot forever:
+            // without a deadline, unresolved promises retain every slot and
+            // queued work can never advance (independent audit of b332cf8).
+            let settled = false;
+            const finish = (fn, arg) => {
+                if (settled) return;
+                settled = true;
+                if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
+                inFlight -= 1;
+                fn(arg);
+                drainQueue();
+            };
+            entry.timer = setTimeout(() => {
+                finish((/** @type {any} */ e) => { e.state = "timeout"; }, entry);
+            }, DELIVERY_SETTLE_TIMEOUT_MS);
+            if (entry.timer && typeof entry.timer.unref === "function") entry.timer.unref();
             Promise.resolve(issued).then(
-                (value) => { inFlight -= 1; entry.onSettled(value); drainQueue(); },
-                (err) => { inFlight -= 1; entry.result = undefined; entry.onRejected(err); drainQueue(); });
+                (value) => finish(entry.onSettled, value),
+                (err) => finish(entry.onRejected, err));
         } else {
             // Selesai sinkron: settle SEKARANG, bukan lewat microtask, supaya
             // `observability` melaporkan keadaan sebenarnya (tanpa ini sebuah
@@ -447,14 +480,16 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         const payloadRead = readDataProperty(event, "payload");
         if (!type.ok || !payloadRead.ok) return { applied: false, reason: "not-an-observation" };
 
-        // Trusted reconnect: ONLY a lifecycle event BodySchema itself
-        // committed may reopen a channel. A forged `DEVICE_ONLINE` handed
-        // straight to this exported method is not in BodySchema's committed
-        // set, and a sample claiming healthState OK (or a caller-supplied
-        // `reconnected` flag) never reopens anything either -- so a
-        // disconnected sensor cannot un-wedge itself.
+        // Trusted reconnect: ONLY a lifecycle event BodySchema is delivering
+        // from the commit running right now may reopen a channel. Merely
+        // "ever committed" is not enough -- a previously committed
+        // DEVICE_ONLINE object could be replayed after a later FAILED
+        // observation and re-open a channel that must stay closed (audit
+        // b332cf8). A forged event, a replayed one, a sample claiming
+        // healthState OK, and a caller-supplied `reconnected` flag all fail
+        // to reopen anything.
         if (type.value === "DEVICE_ONLINE") {
-            if (!wasCommittedByBodySchema(event)) {
+            if (!isTrustedLifecycleEvent(event)) {
                 audit({ type: "W8_L1_UNTRUSTED_LIFECYCLE_REJECTED", subject: subjectRead.ok ? subjectRead.value : null, atMs: nowMs() });
                 return { applied: false, reason: "untrusted-lifecycle-event" };
             }
@@ -474,19 +509,28 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             return { applied: false, reason: "not-an-observation" };
         }
 
-        // Audit coverage for the lifecycle/health transitions the frozen
-        // contract requires to be observable ("Sensor registration, health
-        // transitions, calibration changes, and shed counts ... are audited").
-        if (type.value === "DEVICE_DISCOVERED" || type.value === "DEVICE_CHANGED") {
-            audit({ type: "W8_L1_SENSOR_REGISTERED", subject: subjectRead.ok ? subjectRead.value : null,
-                    change: type.value, atMs: nowMs() });
-            return { applied: false, reason: "not-an-observation" };
-        }
-        if (type.value === "DEVICE_HEALTH_CHANGED") {
-            const health = payloadRead.ok ? readDataProperty(payloadRead.value, "health") : { ok: false };
-            const status = health.ok ? readDataProperty(health.value, "status") : { ok: false };
-            audit({ type: "W8_L1_SENSOR_HEALTH_CHANGED", subject: subjectRead.ok ? subjectRead.value : null,
-                    status: status.ok ? status.value : null, atMs: nowMs() });
+        // Audit coverage for the lifecycle transitions the frozen contract
+        // requires to be observable ("Sensor registration, health transitions,
+        // calibration changes, and shed counts ... are audited"). Like
+        // DEVICE_ONLINE, these are authorized ONLY as they are delivered by a
+        // real BodySchema commit -- otherwise a forged discovery/change/health
+        // event manufactures a trusted-looking audit record (audit b332cf8).
+        if (type.value === "DEVICE_DISCOVERED" || type.value === "DEVICE_CHANGED"
+            || type.value === "DEVICE_HEALTH_CHANGED") {
+            if (!isTrustedLifecycleEvent(event)) {
+                audit({ type: "W8_L1_UNTRUSTED_LIFECYCLE_REJECTED", subject: subjectRead.ok ? subjectRead.value : null, atMs: nowMs() });
+                return { applied: false, reason: "untrusted-lifecycle-event" };
+            }
+            const lifecycleSubject = subjectRead.ok ? subjectRead.value : null;
+            if (type.value === "DEVICE_HEALTH_CHANGED") {
+                const health = payloadRead.ok ? readDataProperty(payloadRead.value, "health") : { ok: false };
+                const status = health.ok ? readDataProperty(health.value, "status") : { ok: false };
+                audit({ type: "W8_L1_SENSOR_HEALTH_CHANGED", subject: lifecycleSubject,
+                        status: status.ok ? status.value : null, atMs: nowMs() });
+            } else {
+                audit({ type: "W8_L1_SENSOR_REGISTERED", subject: lifecycleSubject,
+                        change: type.value, atMs: nowMs() });
+            }
             return { applied: false, reason: "not-an-observation" };
         }
         if (type.value !== "SENSOR_OBSERVATION" || !result) return { applied: false, reason: "not-an-observation" };
@@ -582,30 +626,16 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             observedAt: new Date(observedAtMs).toISOString()
         };
 
-        const recordApplied = () => {
-            // Calibration change is an audited transition (contract: "...
-            // and calibration change is audited"). Compared against the last
-            // committed reference for this channel, so a producer cannot swap
-            // calibration silently.
-            const calibrationRef = payload.calibration && typeof payload.calibration === "object"
-                ? payload.calibration.calibrationRef : null;
-            if (prior && prior.calibrationRef !== undefined && prior.calibrationRef !== calibrationRef) {
-                audit({ type: "W8_L1_CALIBRATION_CHANGED", subject, channelId,
-                        from: prior.calibrationRef ?? null, to: calibrationRef ?? null, atMs: nowMs() });
-            }
-            tracked.set(key, {
-                monotonic: Number.isFinite(monotonic) ? monotonic : (prior?.monotonic ?? 0),
-                lastAppliedMs: receivedAtMs,
-                healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState]
-                    ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK,
-                failed: skewedHealthState === "FAILED",
-                calibrationRef: calibrationRef ?? null
-            });
-            evictWorstTrackedEntryIfOver(MAX_TRACKED_SENSOR_CHANNELS);
-            if (skewedHealthState === "FAILED") {
-                audit({ type: "W8_L1_SENSOR_FAILED", subject, channelId, atMs: nowMs() });
-            }
-        };
+        // Calibration change is an audited transition (contract: "... and
+        // calibration change is audited"), compared against the last committed
+        // reference for this channel so a producer cannot swap calibration
+        // silently.
+        const calibrationRef = payload.calibration && typeof payload.calibration === "object"
+            ? payload.calibration.calibrationRef : null;
+        if (prior && prior.calibrationRef !== undefined && prior.calibrationRef !== calibrationRef) {
+            audit({ type: "W8_L1_CALIBRATION_CHANGED", subject, channelId,
+                    from: prior.calibrationRef ?? null, to: calibrationRef ?? null, atMs: nowMs() });
+        }
 
         // Capacity spans ADMITTED-but-unsettled work (queued + issued). The
         // victim is always a QUEUED entry, so the shed is real: it is
@@ -622,18 +652,41 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             }
         }
 
-        const entry = {
-            subject, channelId, seq: ++pendingSeq, input, result: undefined,
+        // ORDERING IS DECIDED AT ADMISSION, NOT AT SETTLEMENT. Dedup, the rate
+        // cap, and the FAILED stop-forwarding check all read `tracked`, so if
+        // `tracked` were only updated once a delivery settled, two concurrently
+        // in-flight observations sharing a monotonic would BOTH pass the dedup
+        // check, and out-of-order settlement could regress monotonic, health,
+        // and calibration state (independent audit of b332cf8). Recording the
+        // decision here makes those laws sequential regardless of how the world
+        // model resolves its promises.
+        tracked.set(key, {
+            monotonic: Number.isFinite(monotonic) ? monotonic : (prior?.monotonic ?? 0),
+            lastAppliedMs: receivedAtMs,
             healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState]
                 ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK,
-            onSettled: recordApplied,
+            failed: skewedHealthState === "FAILED",
+            calibrationRef: calibrationRef ?? null
+        });
+        evictWorstTrackedEntryIfOver(MAX_TRACKED_SENSOR_CHANNELS);
+        if (skewedHealthState === "FAILED") {
+            audit({ type: "W8_L1_SENSOR_FAILED", subject, channelId, atMs: nowMs() });
+        }
+
+        const entry = {
+            subject, channelId, seq: ++pendingSeq, input, result: undefined,
+            state: "queued",
+            healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState]
+                ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK,
+            onSettled: (value) => { entry.state = "applied"; entry.result = value; },
             onRejected: (err) => {
                 // Reject-closed: the world model itself refused this
                 // observation (e.g. UNKNOWN_ENTITY — the device has no
                 // corresponding world-model entity yet). The bridge's ONE write
                 // capability is ingestObservation itself (contract "Authority
                 // boundaries") — it never declares entities on the caller's
-                // behalf. The channel is NOT marked applied.
+                // behalf.
+                entry.state = "rejected";
                 audit({ type: "W8_L1_OBSERVATION_REJECTED", subject, channelId,
                         reason: err?.reason ?? err?.code ?? "ingest-failed", atMs: nowMs() });
             }
@@ -649,9 +702,18 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         } else {
             queue.push(entry);
         }
-        // `result` is only meaningful for work actually issued; a queued
-        // observation has not reached the world model yet.
-        return { applied: true, healthState: skewedHealthState, result: entry.result };
+
+        // HONEST `applied` (audit of b332cf8): true means the world model
+        // actually accepted this observation. Admitted-but-not-yet-delivered and
+        // issued-but-unsettled work reports false with a named reason, because
+        // downstream reads `applied` as "the world model has this".
+        if (entry.state === "applied") {
+            return { applied: true, healthState: skewedHealthState, result: entry.result };
+        }
+        if (entry.state === "rejected") {
+            return { applied: false, reason: "ingest-rejected" };
+        }
+        return { applied: false, reason: entry.state === "queued" ? "queued" : "pending" };
         } catch {
             return { applied: false, reason: "malformed-observation" };
         }
