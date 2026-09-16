@@ -457,3 +457,97 @@ test("W8L1-repair-24: non-canonical raw storage references are rejected at the b
         payload: { channel: { id: "vision.capture" }, raw: { storageRef: "file:///etc/passwd" } } }, { channelId: "vision.capture" });
     assert.equal(result.reason, "non-canonical-media-reference");
 });
+
+/* ---------------------------------------------------------------------- */
+/* Ingest trust boundary: descriptor-only sanitization                     */
+/* ---------------------------------------------------------------------- */
+
+/*
+ * The four tests below sweep the WHOLE ingest entry point rather than the
+ * individual fields an audit happened to name. `repair-7..9` already cover
+ * healthState/calibration/frame.kind; this closes the remaining legacy
+ * reads (`channel`, `channel.id`, `sample`, `quality.*`, `raw.*`), the
+ * envelope itself, and inheritance/array-extra-property smuggling -- all
+ * of which previously executed caller code or trusted caller structure.
+ */
+
+test("W8L1-repair-25: every legacy payload field carrying a hostile getter is rejected without ever being invoked", () => {
+    let calls = 0;
+    const cases = [
+        ["payload.channel.id", () => {
+            const channel = {};
+            Object.defineProperty(channel, "id", { enumerable: true, configurable: true, get() { calls++; return "vision.capture"; } });
+            return { channel, sample: { w: 1 } };
+        }],
+        ["payload.sample", () => ({ channel: { id: "vision.capture" }, get sample() { calls++; return { w: 1 }; } })],
+        ["payload.quality.snr", () => {
+            const quality = {};
+            Object.defineProperty(quality, "snr", { enumerable: true, configurable: true, get() { calls++; return 10; } });
+            return { channel: { id: "vision.capture" }, sample: { w: 1 }, quality };
+        }],
+        ["payload.raw.storageRef", () => {
+            const raw = {};
+            Object.defineProperty(raw, "storageRef", { enumerable: true, configurable: true, get() { calls++; return "media:x"; } });
+            return { channel: { id: "vision.capture" }, sample: { w: 1 }, raw };
+        }]
+    ];
+    for (const [name, makePayload] of cases) {
+        const body = makeBody();
+        const r = body.ingest(rawForeignObservationEnvelope(makePayload()));
+        assert.equal(r.accepted, false, `${name} must be rejected`);
+        assert.equal(r.reason, "EMB_INVALID_OBSERVATION_PAYLOAD", `${name} reason code`);
+    }
+    assert.equal(calls, 0, "no payload accessor may ever be invoked");
+});
+
+test("W8L1-repair-26: a hostile accessor on the envelope itself is rejected without invocation, and a revoked Proxy never throws raw", () => {
+    const body = makeBody();
+    let calls = 0;
+    const envelope = rawForeignObservationEnvelope({ channel: { id: "vision.capture" }, sample: { w: 1 } });
+    Object.defineProperty(envelope, "type", { enumerable: true, configurable: true, get() { calls++; return "SENSOR_OBSERVATION"; } });
+    const r = body.ingest(envelope);
+    assert.equal(r.accepted, false);
+    assert.equal(r.reason, "EMB_INVALID_EVENT_ACCESSOR");
+    assert.equal(calls, 0, "envelope getter must never be invoked");
+
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    let raw = null;
+    let revoked;
+    try { revoked = body.ingest(proxy); } catch (err) { raw = err; }
+    assert.equal(raw, null, "a revoked Proxy must not escape ingest as a raw throw");
+    assert.equal(revoked.accepted, false);
+    assert.equal(revoked.reason, "EMB_INVALID_EVENT_VALUE");
+});
+
+test("W8L1-repair-27: inherited and array-extra-property material is never trusted as own event data", () => {
+    // An inherited `channel` is not own data, so it cannot satisfy the
+    // channel guard -- sanitization drops it instead of honoring the
+    // prototype chain.
+    const inheritedBody = makeBody();
+    const inherited = Object.create({ channel: { id: "vision.capture" } });
+    inherited.sample = { w: 1 };
+    const inheritedResult = inheritedBody.ingest(rawForeignObservationEnvelope(inherited));
+    assert.equal(inheritedResult.accepted, false);
+    assert.equal(inheritedResult.reason, "EMB_INVALID_CHANNEL");
+
+    // An enumerable non-index own property on an array argument is
+    // executable/hidden material, so the array is rejected outright.
+    const arrayBody = makeBody();
+    const smuggled = Object.assign([1, 2], { toJSON() { return [9, 9]; } });
+    const arrayResult = arrayBody.ingest(rawForeignObservationEnvelope({
+        channel: { id: "vision.capture" }, sample: smuggled
+    }));
+    assert.equal(arrayResult.accepted, false);
+    assert.equal(arrayResult.reason, "EMB_INVALID_EVENT_VALUE");
+});
+
+test("W8L1-repair-28: the legitimate makeEvent path still ingests and commits unchanged", () => {
+    const body = makeBody();
+    const r = body.ingest(emb.makeEvent({
+        type: "SENSOR_OBSERVATION", source: "test-adapter", provenance: "OBSERVATION", subject: HOST,
+        payload: { channel: { id: "vision.capture" }, sample: { w: 640, h: 480 }, healthState: "OK" }
+    }));
+    assert.equal(r.accepted, true);
+    assert.equal(r.channelId, "vision.capture");
+});
