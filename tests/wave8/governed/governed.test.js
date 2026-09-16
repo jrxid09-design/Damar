@@ -10,17 +10,28 @@ const {
 } = require("../../../src/cognition/governed");
 
 /**
- * Ledger KANONIK yang sebenarnya, dipakai untuk kasus "terkonfirmasi".
+ * Ledger KANONIK bermerek DENGAN SINK, dipakai untuk kasus "terkonfirmasi".
  *
- * Sejak audit cd3dedf, konfirmasi menuntut DUA hal: objeknya adalah ledger
- * kanonik (merek leksikal -- satu-satunya hal yang tidak bisa dipalsukan oleh
- * ledger tiruan yang menggemakan apa yang diterimanya), DAN rekamannya dapat
- * dibaca kembali serta cocok dengan event yang kita append. Test double biasa
- * karena itu TIDAK BISA lagi dianggap "terkonfirmasi" -- itulah intinya.
+ * Konfirmasi menuntut TIGA hal, dan ketiganya pernah menjadi celah:
+ *  1. objeknya ledger kanonik (merek leksikal -- tidak bisa dipalsukan oleh
+ *     tiruan yang menggemakan apa yang diterimanya, audit cd3dedf / bd45f18);
+ *  2. konfirmasi memakai append DURABEL, sehingga ledger tanpa sink melempar
+ *     NO_SINK dan gagal-tutup (audit bd45f18: merek membuktikan asal-pabrik,
+ *     bukan durabilitas);
+ *  3. rekamannya dapat dibaca kembali dan cocok dengan event yang di-append.
+ * Sink di sini di memori; jalur file nyata diuji terpisah lewat owner-trust.
  */
 function recordingLedger() {
     const { createAuditLedger } = require("../../../src/runtime/auditLedger");
-    return createAuditLedger({});
+    const writes = [];
+    const sink = { append(record) { writes.push(record); } };
+    const ledger = createAuditLedger({ sink });
+    return Object.freeze({ ledger, writes });
+}
+
+/** Ledger kanonik bermerek yang SIAP dipakai sebagai `auditLedger`. */
+function recordingLedgerFor() {
+    return recordingLedger().ledger;
 }
 
 test("FG03-1: resolveMode passes through exactly the three sanctioned modes", () => {
@@ -262,7 +273,7 @@ test("FG03-27: recordModeTransitionChecked REPORTS an unconfirmed append instead
 
     // confirmed durable append -- requires PROOF OF PERSISTENCE (read-back)
     const confirmed = recordModeTransitionChecked({
-        auditLedger: recordingLedger(), from: "off", to: "governed"
+        auditLedger: recordingLedgerFor(), from: "off", to: "governed"
     });
     assert.equal(confirmed.auditSupplied, true);
     assert.equal(confirmed.audited, true);
@@ -367,7 +378,7 @@ test("FG03-30: 'supplied' means the caller passed a ledger, so an unusable one c
         "a forged eventId is not proof of persistence");
 
     // Genuine confirmations still pass, against a ledger that really records.
-    assert.equal(governedOutcome(recordingLedger()).failedOpen, false);
+    assert.equal(governedOutcome(recordingLedgerFor()).failedOpen, false);
 });
 
 test("FG03-31: authority vocabulary containment is case- and separator-insensitive, without rejecting legitimate advisory fields", () => {
@@ -485,7 +496,7 @@ test("FG03-36: a non-recording ledger degrades GOVERNED to off but never degrade
 
     // A recording ledger keeps governed working.
     const recording = await createLongHorizonCycle({
-        mode: "governed", capabilityRegistry: fakeRegistry(), auditLedger: recordingLedger()
+        mode: "governed", capabilityRegistry: fakeRegistry(), auditLedger: recordingLedgerFor()
     });
     assert.equal(recording.mode, "governed");
     assert.ok(recording.lanes);
@@ -575,22 +586,43 @@ test("FG03-38: every NON-NUMBER `token` form is contained, while a numeric token
 
 test("FG03-39: the canonical owner-trust ledger really confirms a governed transition (not a second, sinkless ledger)", async () => {
     const { composeOwnerTrustForTest } = require("../../../src/authority/ownerTrustComposition");
-    const comp = await composeOwnerTrustForTest({ stateFile: null });
+    const os = require("node:os");
+    const path = require("node:path");
+    const fs = require("node:fs");
+
+    // DURABLE composition: the owner-trust ledger then owns a real file sink,
+    // so its append can actually prove persistence.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-ot-"));
+    const stateFile = path.join(dir, "ownertrust.json");
+    const comp = await composeOwnerTrustForTest({ stateFile });
     try {
         // The canonical owner exposes the single ledger this repo owns.
         assert.ok(comp.ledger, "owner-trust composition must expose its ledger");
         assert.equal(typeof comp.ledger.append, "function");
 
-        // A governed transition recorded against THAT ledger must be confirmed
-        // by the canonical append contract (it returns the stored record).
         const checked = recordModeTransitionChecked({
             auditLedger: comp.ledger, from: "off", to: "governed", at: 1
         });
         assert.equal(checked.auditSupplied, true);
-        assert.equal(checked.audited, true, "the canonical ledger must confirm the transition");
+        assert.equal(checked.audited, true, "the durable canonical ledger must confirm the transition");
         assert.equal(checked.failedOpen, false);
     } finally {
         try { comp.close(); } catch { /* ignore */ }
+    }
+
+    // A NON-durable (sinkless) owner-trust ledger is branded but CANNOT prove
+    // durability, so it must fail closed rather than claim a durable record
+    // that was never written (audit of bd45f18).
+    const memoryComp = await composeOwnerTrustForTest({ stateFile: null });
+    try {
+        const memChecked = recordModeTransitionChecked({
+            auditLedger: memoryComp.ledger, from: "off", to: "governed", at: 1
+        });
+        assert.equal(memChecked.audited, false,
+            "a sinkless canonical ledger cannot prove a DURABLE append");
+        assert.equal(memChecked.failedOpen, true);
+    } finally {
+        try { memoryComp.close(); } catch { /* ignore */ }
     }
 });
 
@@ -612,11 +644,12 @@ test("FG03-40: a ledger that SYNTHESIZES a read-back record cannot prove persist
     assert.equal(r.failedOpen, true);
 
     // A ledger that really stores the event still confirms.
-    const real = recordingLedger();
-    const ok = recordModeTransitionChecked({ auditLedger: real, from: "off", to: "governed" });
+    const rec = recordingLedger();
+    const ok = recordModeTransitionChecked({ auditLedger: rec.ledger, from: "off", to: "governed" });
     assert.equal(ok.audited, true);
     assert.equal(ok.failedOpen, false);
-    assert.equal(real.size(), 1, "the transition really was recorded");
+    assert.equal(rec.ledger.size(), 1, "the transition really was recorded");
+    assert.equal(rec.writes.length, 1, "a confirmed transition really reached the persistence sink");
 });
 
 test("FG03-41: the repository's own authority vocabulary is contained", () => {
@@ -660,9 +693,10 @@ test("FG03-43: a caller-supplied look-alike ledger is refused by the canonical b
     assert.equal(cloned.audited, false, "a spread clone of a real ledger must not confirm");
     assert.equal(cloned.failedOpen, true);
 
-    // The genuine brand still confirms.
+    // The genuine brand still confirms -- WITH a persistence sink, because a
+    // confirmation asserts DURABILITY (audit of bd45f18).
     const genuine = recordModeTransitionChecked({
-        auditLedger: createAuditLedger({}), from: "off", to: "governed"
+        auditLedger: recordingLedgerFor(), from: "off", to: "governed"
     });
     assert.equal(genuine.audited, true);
     assert.equal(genuine.failedOpen, false);
@@ -704,8 +738,72 @@ test("FG03-42: production refuses governed with NO ledger, while the frozen W7-L
 
     // With a real ledger the production path works.
     const ok = await createLongHorizonCycle({
-        mode: "governed", capabilityRegistry: registry, auditLedger: recordingLedger(), requireAudit: true
+        mode: "governed", capabilityRegistry: registry, auditLedger: recordingLedgerFor(), requireAudit: true
     });
     assert.equal(ok.mode, "governed");
     assert.ok(ok.lanes);
+});
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of bd45f18 — durable-append requirement               */
+/* ---------------------------------------------------------------------- */
+
+test("FG03-45: confirmation asserts DURABILITY -- a branded ledger with no sink cannot confirm", () => {
+    const { createAuditLedger } = require("../../../src/runtime/auditLedger");
+    const registry = { get: () => ({ kind: "tool" }), has: () => true, getAvailability: () => { throw new Error("unused"); } };
+
+    // The brand proves FACTORY ORIGIN, not persistence. A branded SINKLESS
+    // ledger previously reported audited:true, and requireAudit then started
+    // governed mode against a ledger that had written nothing (audit of
+    // bd45f18). A durable append must be requested, so a sinkless ledger
+    // raises NO_SINK and the confirmation fails closed.
+    const sinkless = createAuditLedger({});
+    const absent = recordModeTransitionChecked({
+        auditLedger: sinkless, from: "off", to: "governed"
+    });
+    assert.equal(absent.audited, false, "a sinkless ledger cannot prove a durable append");
+    assert.equal(absent.failedOpen, true);
+
+    // A branded ledger with a sink confirms AND really reaches that sink.
+    const rec = recordingLedger();
+    const confirmed = recordModeTransitionChecked({
+        auditLedger: rec.ledger, from: "off", to: "governed"
+    });
+    assert.equal(confirmed.audited, true);
+    assert.equal(confirmed.failedOpen, false);
+    assert.equal(rec.writes.length, 1,
+        "a confirmed transition must have produced an actual sink write");
+    assert.ok(rec.writes[0] && typeof rec.writes[0].eventId === "string",
+        "the sink received the stored record");
+
+    // A sink whose append THROWS is a persistence failure, not a confirmation.
+    const failing = createAuditLedger({ sink: { append() { throw new Error("disk full"); } } });
+    const failed = recordModeTransitionChecked({
+        auditLedger: failing, from: "off", to: "governed"
+    });
+    assert.equal(failed.audited, false, "a rejecting sink must not confirm");
+    assert.equal(failed.failedOpen, true);
+});
+
+test("FG03-46: requireAudit refuses to start governed against a sinkless ledger, and starts against a durable one", async () => {
+    const { createAuditLedger } = require("../../../src/runtime/auditLedger");
+    const { createLongHorizonCycle } = require("../../../src/cognition/longhorizon");
+    const registry = { get: () => ({ kind: "tool" }), has: () => true, getAvailability: () => { throw new Error("unused"); } };
+
+    // Branded but sinkless -> no durability -> governed must degrade to off.
+    const sinklessRun = await createLongHorizonCycle({
+        mode: "governed", capabilityRegistry: registry,
+        auditLedger: createAuditLedger({}), requireAudit: true
+    });
+    assert.equal(sinklessRun.mode, "off", "a sinkless ledger must not satisfy requireAudit");
+    assert.equal(sinklessRun.auditUnavailable, true);
+    assert.equal(sinklessRun.lanes, undefined);
+
+    // Branded WITH a sink -> real durability -> governed starts.
+    const durableRun = await createLongHorizonCycle({
+        mode: "governed", capabilityRegistry: registry,
+        auditLedger: recordingLedgerFor(), requireAudit: true
+    });
+    assert.equal(durableRun.mode, "governed");
+    assert.ok(durableRun.lanes);
 });
