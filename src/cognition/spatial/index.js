@@ -32,11 +32,27 @@ function sceneNodeKey(frameId, region) {
     return `${frameId}::${canonicalRegionKey(region)}`;
 }
 
-async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS } = {}) {
+async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS, auditLedger = null } = {}) {
     try {
         bounds = sanitizeBounds(BOUNDS, bounds);
     } catch {
         bounds = BOUNDS;
+    }
+
+    // Audit hook (contract L3: "frame registration, transform changes,
+    // occupancy CONTRADICTIONS are audited"; and "overflow evicts STALE
+    // regions first (never live/fresh ones), audited"). Kegagalan audit TIDAK
+    // PERNAH menggagalkan operasi yang diaudit -- pola yang sama dengan lane
+    // Wave7 lainnya.
+    function audit(eventType, fields) {
+        try {
+            if (auditLedger && typeof auditLedger.append === "function") {
+                auditLedger.append(Object.freeze({
+                    eventType, source: "acc.spatial", outcome: "ok",
+                    metadata: Object.freeze({ lane: "W8-L3", ...fields })
+                }));
+            }
+        } catch { /* audit failure never blocks the lane */ }
     }
 
     const snapshot = await loadSnapshot(store);
@@ -44,6 +60,9 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
     const transforms = snapshot.transforms;
     const sceneNodes = snapshot.sceneNodes;
     const coldStart = snapshot.coldStart;
+    if (snapshot.degraded) {
+        audit("cognition.spatial.store_unreadable", { reason: "store-unreadable-or-hostile" });
+    }
 
     // Bug-class awareness (this session's own Wave7 audit history, rounds
     // 71-73): a reloaded snapshot persisted under a larger bound must be
@@ -159,6 +178,9 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
             }
         }
         frames.set(frame.frameId, frame);
+        // Frame registration is audited (contract L3 verification hooks).
+        audit(existing ? "cognition.spatial.frame_updated" : "cognition.spatial.frame_registered",
+            { frameId: frame.frameId, kind: frame.kind });
         return frame;
     }
 
@@ -204,9 +226,13 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
                     fail(REASONS.BOUND_EXCEEDED, `retensi transform melebihi batas (${maxTransforms})`);
                 }
                 transforms.delete(victimId);
+                audit("cognition.spatial.transform_evicted", { transformId: victimId, reason: "overflow" });
             }
         }
         transforms.set(transform.transformId, transform);
+        // Transform changes are audited (contract L3 verification hooks).
+        audit(existing ? "cognition.spatial.transform_changed" : "cognition.spatial.transform_registered",
+            { transformId: transform.transformId, fromFrameId: transform.fromFrameId, toFrameId: transform.toFrameId });
         return transform;
     }
 
@@ -221,9 +247,16 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         let nextState = state;
         let refs = [observationRef];
         if (existing) {
-            refs = existing.observationRefs.includes(observationRef) ? [...existing.observationRefs] : [...existing.observationRefs, observationRef];
+            const alreadyKnown = existing.observationRefs.includes(observationRef);
+            refs = alreadyKnown ? [...existing.observationRefs] : [...existing.observationRefs, observationRef];
             if (existing.state !== "CONTESTED" && existing.state !== state) {
-                nextState = "CONTESTED"; // two sources disagreeing -> BLOCKS, never arbitrarily picks one
+                // Kontes = PERSELISIHAN ANTAR-SUMBER (kontrak L3). Sumber yang
+                // merevisi klaimnya sendiri adalah revisi, bukan kontes --
+                // menandainya CONTESTED akan mengunci region secara permanen
+                // hanya karena satu sensor memperbarui bacaannya (audit L3
+                // putaran 5, P2). Hanya sumber BERBEDA yang mengunci.
+                const differentSourceDisagrees = existing.observationRefs.some(r => r !== observationRef);
+                nextState = differentSourceDisagrees ? "CONTESTED" : state;
             } else if (existing.state === "CONTESTED") {
                 nextState = "CONTESTED"; // once contested, stays contested until an explicit resolve (out of this lane's scope)
             }
@@ -245,9 +278,18 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
                     fail(REASONS.BOUND_EXCEEDED, `retensi scene node melebihi batas (${maxNodes})`);
                 }
                 sceneNodes.delete(victimKey);
+                audit("cognition.spatial.scene_node_evicted", { nodeId: victimKey, reason: "overflow" });
             }
         }
         sceneNodes.set(node.nodeId, node);
+        // Occupancy CONTRADICTIONS are audited (contract L3 verification
+        // hooks) -- dua sumber yang berselisih mengunci region jadi CONTESTED
+        // dan itu harus terlihat.
+        if (nextState === "CONTESTED" && existing && existing.state !== "CONTESTED") {
+            audit("cognition.spatial.occupancy_contradiction", {
+                nodeId: node.nodeId, frameId, from: existing.state, to: nextState
+            });
+        }
         return node;
     }
 
