@@ -13,7 +13,7 @@
  */
 
 const crypto = require("node:crypto");
-const { deepFreeze, structuredCopy, clamp01, fail } = require("../core/util");
+const { deepFreeze, structuredCopy, clamp01, fail, isProxyValue } = require("../core/util");
 const { validateDeviceId } = require("../core/identity");
 
 const SCHEMA_VERSION = 1;
@@ -138,10 +138,30 @@ const ENVELOPE_FIELDS = Object.freeze([
     "monotonic", "source", "provenance", "subject", "confidence", "payload"
 ]);
 
-/** Batas biaya sanitasi input hostil (kedalaman/lebar/jumlah node). */
-const MAX_SANITIZE_DEPTH = 16;
-const MAX_SANITIZE_KEYS = 512;
+/**
+ * Batas biaya sanitasi input hostil (kedalaman/lebar/jumlah simpul).
+ *
+ * Nilai-nilai ini adalah PLAFON anti-DoS murni, sengaja jauh di atas
+ * apa pun yang bisa lolos batas sampel 2.048 byte yang sudah dibekukan
+ * di BodySchema — jadi tidak mungkin menolak muatan yang sah menurut
+ * kontrak. Batas kedalaman sampel yang sebenarnya ditegakkan oleh batas
+ * byte itu sendiri, bukan oleh angka di sini.
+ */
+const MAX_SANITIZE_DEPTH = 64;
+const MAX_SANITIZE_KEYS = 4096;
 const MAX_SANITIZE_NODES = 65536;
+
+/** `__proto__` tidak pernah data sah dan selalu berbahaya via assignment. */
+const FORBIDDEN_KEYS = Object.freeze(new Set(["__proto__"]));
+
+/**
+ * Pemeriksaan Proxy lewat internal slot — TIDAK memicu trap apa pun dan
+ * tetap benar untuk Proxy yang sudah dicabut. Kegagalan probe diperlakukan
+ * sebagai "proxy" (gagal-tutup).
+ */
+function isProxy(value) {
+    return isProxyValue(value);
+}
 
 /**
  * Salinan-dalam SADAR-DESKRIPTOR untuk batas kepercayaan ingest.
@@ -151,6 +171,12 @@ const MAX_SANITIZE_NODES = 65536;
  * `toJSON` yang dapat dieksekusi. Fungsi ini MEMBACA VIA DESKRIPTOR saja:
  * `[[Get]]` tidak pernah dipanggil, jadi getter tidak pernah berjalan dan
  * `toJSON` tidak pernah dipakai (kontras dengan `structuredCopy`).
+ *
+ * PROXY DITOLAK SEBELUM TRAP PERTAMA: `util.types.isProxy()` adalah
+ * pemeriksaan internal-slot yang tidak memicu trap apa pun — termasuk pada
+ * Proxy yang sudah dicabut. Tanpa ini, `ownKeys`/`getOwnPropertyDescriptor`
+ * justru MENJALANKAN kode pemanggil, yang persis berlawanan dengan tujuan
+ * fungsi ini. Pola yang sama dipakai modul ingress/otorisasi lain di repo.
  *
  * Properti yang diwarisi dari prototipe TIDAK disalin — field otoritas
  * selundupan lewat rantai prototipe hilang dengan sendirinya.
@@ -170,6 +196,10 @@ function sanitizeDeep(value, depth, budget, inPayload = false) {
         throw fail("EMB_INVALID_EVENT_VALUE",
             "nilai amplop event tidak dapat disanitasi");
     }
+    if (isProxy(value)) {
+        throw fail("EMB_INVALID_EVENT_VALUE",
+            "amplop event tidak boleh berupa Proxy");
+    }
     if (depth >= MAX_SANITIZE_DEPTH) {
         throw fail("EMB_EVENT_TOO_DEEP", "kedalaman amplop event melebihi batas");
     }
@@ -179,7 +209,6 @@ function sanitizeDeep(value, depth, budget, inPayload = false) {
         symbols = Object.getOwnPropertySymbols(value);
         names = Object.getOwnPropertyNames(value);
     } catch {
-        // Proxy yang sudah dicabut melempar di sini — gagal-tutup.
         throw fail("EMB_INVALID_EVENT_VALUE",
             "amplop event tidak dapat diperiksa dengan aman");
     }
@@ -212,6 +241,10 @@ function sanitizeDeep(value, depth, budget, inPayload = false) {
 
     for (const key of names) {
         if (key === "length") continue;
+        if (FORBIDDEN_KEYS.has(key)) {
+            throw fail("EMB_INVALID_EVENT_VALUE",
+                `field '${key}' tidak sah pada amplop event`);
+        }
         let desc;
         try {
             desc = Object.getOwnPropertyDescriptor(value, key);
@@ -235,13 +268,20 @@ function sanitizeDeep(value, depth, budget, inPayload = false) {
                 `field '${String(key)}' wajib enumerable`);
         }
         const childInPayload = inPayload || (depth === 0 && key === "payload");
-        out[key] = sanitizeDeep(desc.value, depth + 1, budget, childInPayload);
+        // defineProperty, bukan assignment: assignment ke nama warisan
+        // seperti `__proto__` menulis ke rantai prototipe, bukan ke objek.
+        Object.defineProperty(out, key, {
+            value: sanitizeDeep(desc.value, depth + 1, budget, childInPayload),
+            writable: true, enumerable: true, configurable: true
+        });
     }
 
     for (const sym of symbols) {
         const desc = Object.getOwnPropertyDescriptor(value, sym);
         if (desc && !desc.get && !desc.set && desc.value === CORE_TOKEN) {
-            out[CORE_TOKEN] = CORE_TOKEN;
+            Object.defineProperty(out, sym, {
+                value: CORE_TOKEN, writable: true, enumerable: true, configurable: true
+            });
         }
     }
 
@@ -268,6 +308,11 @@ function sanitizeEnvelope(event) {
     const missing = ENVELOPE_FIELDS.find(
         (field) => !Object.prototype.hasOwnProperty.call(clean, field));
     if (missing) return { ok: false, reason: `field-hilang:${missing}` };
+
+    // Amplop bersifat TERTUTUP: field tingkat-atas di luar daftar kanonik
+    // adalah material asing, bukan data event yang sah.
+    const extra = Object.keys(clean).find((key) => !ENVELOPE_FIELDS.includes(key));
+    if (extra) return { ok: false, reason: `field-asing:${extra}` };
 
     if (!isKnownEventType(clean.type)) {
         return { ok: false, reason: `tipe-tak-dikenal:${String(clean.type)}` };

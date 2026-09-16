@@ -34,6 +34,7 @@
 
 const os = require("node:os");
 const path = require("node:path");
+const { types: utilTypes } = require("node:util");
 
 // RuntimeCore composition dependencies (moved from runtimeCore.js).
 const { createEmbodiedCore } = require("./embodiedCore");
@@ -193,8 +194,22 @@ const SENSOR_OBSERVATION_DEFAULT_RATE_CAP_PER_SEC = 5;
 const MAX_TRACKED_SENSOR_CHANNELS = 512 * 64;
 const MAX_PENDING_OBSERVATIONS = 50_000;
 
+/**
+ * Proxy probe via internal slot — zero traps, and correct for a revoked
+ * Proxy too. Reflection on a Proxy EXECUTES caller code, so a hostile Proxy
+ * must be refused before the first reflection, not detected by it.
+ */
+function isProxyValue(value) {
+    try {
+        return utilTypes.isProxy(value);
+    } catch {
+        return true;
+    }
+}
+
 function readDataProperty(value, key) {
     if (!value || typeof value !== "object") return { ok: false };
+    if (isProxyValue(value)) return { ok: false };
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     return descriptor && !descriptor.get && !descriptor.set && ("value" in descriptor)
         ? { ok: true, value: descriptor.value } : { ok: false };
@@ -204,6 +219,7 @@ function copySensorValue(value, depth = 0, budget = { count: 0 }) {
     if (value === null || value === undefined) return value;
     const type = typeof value;
     if (type !== "object") return ["string", "number", "boolean"].includes(type) && (type !== "number" || Number.isFinite(value)) ? value : undefined;
+    if (isProxyValue(value)) return undefined;
     if (depth > 8 || ++budget.count > 512) return undefined;
     if (Array.isArray(value)) {
         const length = readDataProperty(value, "length");
@@ -274,9 +290,61 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         } catch { /* audit failure never blocks the bridge */ }
     }
 
-    // subject|channelId -> { monotonic, lastAppliedMs, healthPriority }
+    // subject|channelId -> { monotonic, lastAppliedMs, healthPriority, failed }
     const tracked = new Map();
-    let pendingObservations = 0;
+
+    // In-flight queue between "plan computed" and "ingestObservation applied"
+    // (W8-L1 contract, "MAX_PENDING_OBSERVATIONS"): bounded at
+    // MAX_PENDING_OBSERVATIONS. Overflow sheds the OLDEST LOWEST-`healthState`-
+    // priority observation FIRST -- and among equal priority, from the source
+    // holding the most in-flight entries -- so a noisy failing sensor is never
+    // kept at the expense of a healthy low-traffic one. An unconditional
+    // reject-the-arrival drop would shed exactly the healthy sensor the
+    // contract forbids shedding.
+    const pending = [];
+    let pendingSeq = 0;
+    let shedCount = 0;
+    // Read-only OBSERVABILITY view (contract "OBSERVABILITY" + "Shed counts
+    // are exposed ... and audited"): getters only, so a caller can never
+    // rewrite the bridge's own counters through the exported reference.
+    const observability = {};
+    Object.defineProperties(observability, {
+        pendingObservations: { get: () => pending.length, enumerable: true },
+        shedCount: { get: () => shedCount, enumerable: true },
+        maxPending: { get: () => MAX_PENDING_OBSERVATIONS, enumerable: true }
+    });
+    Object.freeze(observability);
+
+    function shedOneForCapacity() {
+        if (pending.length === 0) return false;
+        const perSource = new Map();
+        for (const entry of pending) {
+            perSource.set(entry.subject, (perSource.get(entry.subject) ?? 0) + 1);
+        }
+        let victimIndex = 0;
+        for (let i = 1; i < pending.length; i++) {
+            const candidate = pending[i];
+            const victim = pending[victimIndex];
+            if (candidate.healthPriority < victim.healthPriority) { victimIndex = i; continue; }
+            if (candidate.healthPriority > victim.healthPriority) continue;
+            const candidateSourceCount = perSource.get(candidate.subject) ?? 0;
+            const victimSourceCount = perSource.get(victim.subject) ?? 0;
+            if (candidateSourceCount > victimSourceCount) { victimIndex = i; continue; }
+            if (candidateSourceCount < victimSourceCount) continue;
+            if (candidate.seq < victim.seq) victimIndex = i;   // oldest last
+        }
+        const [evicted] = pending.splice(victimIndex, 1);
+        shedCount += 1;
+        audit({ type: "W8_L1_OBSERVATION_SHED", subject: evicted.subject,
+                channelId: evicted.channelId, reason: "pending-capacity", atMs: nowMs() });
+        return true;
+    }
+
+    function releasePending(entry) {
+        const index = pending.indexOf(entry);
+        if (index >= 0) pending.splice(index, 1);
+    }
+
 
     function evictWorstTrackedEntryIfOver(limit) {
         if (tracked.size <= limit) return;
@@ -324,7 +392,31 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         const monotonicRead = readDataProperty(event, "monotonic");
         const timestampRead = readDataProperty(event, "timestampMs");
         const payloadRead = readDataProperty(event, "payload");
-        if (!type.ok || type.value !== "SENSOR_OBSERVATION" || !subjectRead.ok || !payloadRead.ok || !result) return { applied: false, reason: "not-an-observation" };
+        if (!type.ok || !payloadRead.ok) return { applied: false, reason: "not-an-observation" };
+
+        // Trusted reconnect: BodySchema itself observed the device return.
+        // This is the ONLY path that lifts a channel's FAILED stop-forwarding
+        // state -- a sample claiming healthState OK (or a caller-supplied
+        // `reconnected` flag) never does, so a disconnected sensor cannot
+        // un-wedge itself by asserting it is healthy.
+        if (type.value === "DEVICE_ONLINE") {
+            const onlineSubject = subjectRead.ok ? subjectRead.value : undefined;
+            let cleared = 0;
+            if (typeof onlineSubject === "string") {
+                for (const [key, entry] of tracked) {
+                    if (entry.failed && key.startsWith(`${onlineSubject}\u0000`)) {
+                        tracked.set(key, { ...entry, failed: false });
+                        cleared++;
+                    }
+                }
+            }
+            if (cleared > 0) {
+                audit({ type: "W8_L1_SENSOR_RECONNECTED", subject: onlineSubject, cleared, atMs: nowMs() });
+            }
+            return { applied: false, reason: "not-an-observation" };
+        }
+        if (type.value !== "SENSOR_OBSERVATION" || !result) return { applied: false, reason: "not-an-observation" };
+
 
         const subject = subjectRead.value;
         const payload = copySensorValue(payloadRead.value);
@@ -370,16 +462,21 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         const effectiveHealthState = computeEffectiveHealthState(payload.healthState, payload.calibration);
 
         // Timestamp/causal-order: sampledAtMs (sensor clock) when supplied,
-        // else receive time — the substitution is recorded, never silent.
+        // else the envelope's RECEIVE time -- `events.js` already set
+        // event.timestampMs at the sensorium boundary (contract: "If absent,
+        // the bridge uses event.timestamp (receive time) as observedAt").
+        // Reading the bridge clock here instead would let an observation's
+        // causal time drift with however late the bridge happened to run.
         const sampledAtMs = payload.sample && typeof payload.sample === "object" && !Array.isArray(payload.sample)
             ? payload.sample.sampledAtMs : undefined;
-        let observedAtMs = receivedAtMs;
+        let observedAtMs = Number.isFinite(timestampMs) ? timestampMs : receivedAtMs;
         let sampledAtMissing = true;
         if (Number.isFinite(sampledAtMs)) {
             observedAtMs = sampledAtMs;
             sampledAtMissing = false;
         }
-        const skewMs = sampledAtMissing ? null : (timestampMs - sampledAtMs);
+        const skewMs = sampledAtMissing || !Number.isFinite(timestampMs)
+            ? null : (timestampMs - sampledAtMs);
         const skewedHealthState = (skewMs !== null && (skewMs < 0 || skewMs > 5 * 60 * 1000)
             && SENSOR_OBSERVATION_HEALTH_PRIORITY[effectiveHealthState] > SENSOR_OBSERVATION_HEALTH_PRIORITY.SUSPECT)
             ? "SUSPECT" : effectiveHealthState;
@@ -397,11 +494,13 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             raw: payload.raw ?? null
         });
 
-        if (pendingObservations >= MAX_PENDING_OBSERVATIONS) {
-            audit({ type: "W8_L1_OBSERVATION_SHED", subject, channelId, reason: "pending-capacity", atMs: nowMs() });
-            return { applied: false, reason: "pending-capacity" };
-        }
-        pendingObservations++;
+        if (pending.length >= MAX_PENDING_OBSERVATIONS) shedOneForCapacity();
+        const pendingEntry = {
+            subject, channelId, seq: ++pendingSeq,
+            healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState]
+                ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK
+        };
+        pending.push(pendingEntry);
         let applyResult;
         try {
             applyResult = worldModel.ingestObservation({
@@ -414,7 +513,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
                 observedAt: new Date(observedAtMs).toISOString()
             });
         } catch (err) {
-            pendingObservations = Math.max(0, pendingObservations - 1);
+            releasePending(pendingEntry);
             // Reject-closed: the world model itself refused this observation
             // (e.g. UNKNOWN_ENTITY — the device has no corresponding
             // world-model entity yet). The bridge's ONE write capability is
@@ -431,11 +530,12 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             failed: skewedHealthState === "FAILED"
         });
         if (applyResult && typeof applyResult.then === "function") {
-            Promise.resolve(applyResult).finally(() => { pendingObservations = Math.max(0, pendingObservations - 1); }).catch(() => {});
+            Promise.resolve(applyResult).finally(() => { releasePending(pendingEntry); }).catch(() => {});
         } else {
-            queueMicrotask(() => { pendingObservations = Math.max(0, pendingObservations - 1); });
+            queueMicrotask(() => { releasePending(pendingEntry); });
         }
         evictWorstTrackedEntryIfOver(MAX_TRACKED_SENSOR_CHANNELS);
+
 
         if (skewedHealthState === "FAILED") {
             audit({ type: "W8_L1_SENSOR_FAILED", subject, channelId, atMs: nowMs() });
@@ -451,7 +551,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         body.subscribe(applyObservationPlan);
     }
 
-    return Object.freeze({ applyObservationPlan });
+    return Object.freeze({ applyObservationPlan, observability });
 }
 
 /* ===========================================================================

@@ -420,7 +420,7 @@ test("W8L1-repair-21: toSensorModality maps every known classifyCapability domai
     assert.equal(toSensorModality("something-nobody-expected"), SENSOR_MODALITIES.OTHER);
 });
 
-test("W8L1-repair-22: direct bridge rejects hostile payload accessors, stops failed channels, and sheds over the bounded pending cap", () => {
+test("W8L1-repair-22: direct bridge rejects hostile payload accessors, stops failed channels, and bounds the pending queue", () => {
     let now = T0;
     let ingested = 0;
     let shed = 0;
@@ -431,8 +431,175 @@ test("W8L1-repair-22: direct bridge rejects hostile payload accessors, stops fai
     assert.equal(calls, 0);
     const event = (n, healthState) => ({ type: "SENSOR_OBSERVATION", subject: HOST, monotonic: n, timestampMs: now, payload: { channel: { id: `screen.${n}` }, sample: {}, healthState } });
     for (let i = 0; i < 50001; i++) bridge.applyObservationPlan(event(i + 2, "FAILED"), { modality: "SCREEN" });
-    assert.equal(ingested, 50000);
-    assert.equal(shed, 1);
+    // The queue itself stays bounded at the contract cap; how many shed
+    // depends on the release policy (see repair-29 for the fairness law).
+    assert.ok(shed >= 1, "overflow must shed");
+    assert.ok(bridge.observability.pendingObservations <= bridge.observability.maxPending);
+    assert.equal(bridge.observability.maxPending, 50000);
+});
+
+test("W8L1-repair-29: pending-queue overflow sheds the OLDEST LOWEST-health-priority entries per source, never starving a healthy low-traffic sensor", () => {
+    let now = T0;
+    let monotonic = 0;
+    const appliedSubjects = [];
+    // A backlog only exists while observations are IN FLIGHT, so the world
+    // model deliberately never settles -- exactly the asynchronous producer
+    // the contract's fair-shedding law is written for.
+    const bridge = bridgeSensoriumToWorldModel({
+        body: { subscribe() {} },
+        auditLedger: { append() {} },
+        worldModel: { ingestObservation(o) { appliedSubjects.push(o.subject.entityId); return new Promise(() => {}); } },
+        clock: { nowMs: () => now }
+    });
+    const send = (subject, channelId, healthState) => bridge.applyObservationPlan(
+        { type: "SENSOR_OBSERVATION", subject, monotonic: ++monotonic, timestampMs: now,
+          payload: { channel: { id: channelId }, sample: {}, healthState } },
+        { modality: "SCREEN" });
+
+    const NOISY = "usb:noisy";
+    const QUIET = "usb:quiet";
+    for (let i = 0; i < 50000; i++) assert.equal(send(NOISY, `screen.n${i}`, "FAILED").applied, true);
+
+    // The healthy low-traffic sensor must still be ADMITTED -- shedding the
+    // arrival instead of the stale noisy backlog is precisely the starvation
+    // the contract forbids.
+    assert.equal(send(QUIET, "screen.quiet", "OK").applied, true,
+        "a healthy low-traffic observation must not be rejected while a noisy FAILED backlog is held");
+    assert.equal(bridge.observability.pendingObservations, 50000,
+        "the queue never exceeds the frozen cap");
+    assert.equal(bridge.observability.shedCount, 1);
+    assert.equal(appliedSubjects.filter(s => s === QUIET).length, 1);
+});
+
+test("W8L1-repair-30: a FAILED channel only resumes on BodySchema's own DEVICE_ONLINE, never on a sample that claims to be healthy", () => {
+    let now = T0;
+    let monotonic = 0;
+    let ingested = 0;
+    const bridge = bridgeSensoriumToWorldModel({
+        body: { subscribe() {} }, auditLedger: { append() {} },
+        worldModel: { ingestObservation() { ingested++; return { ok: true }; } },
+        clock: { nowMs: () => now }
+    });
+    const send = (subject, healthState) => bridge.applyObservationPlan(
+        { type: "SENSOR_OBSERVATION", subject, monotonic: ++monotonic, timestampMs: now,
+          payload: { channel: { id: "vision.capture" }, sample: {}, healthState } },
+        { modality: "VISION" });
+
+    assert.equal(send(HOST, "FAILED").applied, true);
+    assert.equal(ingested, 1);
+    // Still blocked, and the sample cannot un-block itself by asserting OK.
+    now += 1000;
+    assert.equal(send(HOST, "OK").reason, "sensor-failed");
+    assert.equal(ingested, 1);
+
+    // The trusted lifecycle transition reopens the channel.
+    now += 1000;
+    bridge.applyObservationPlan({ type: "DEVICE_ONLINE", subject: HOST, monotonic: ++monotonic, timestampMs: now, payload: {} });
+    now += 1000;
+    assert.equal(send(HOST, "OK").applied, true);
+    assert.equal(ingested, 2);
+});
+
+test("W8L1-repair-32: with sampledAtMs absent, observedAt is the envelope RECEIVE time, not however late the bridge happens to run", () => {
+    const ENVELOPE_RECEIVED_AT = T0 + 25;
+    const BRIDGE_RAN_AT = T0 + 9000;
+    const seen = [];
+    const bridge = bridgeSensoriumToWorldModel({
+        body: { subscribe() {} }, auditLedger: { append() {} },
+        worldModel: { ingestObservation(o) { seen.push(o); return { ok: true }; } },
+        clock: { nowMs: () => BRIDGE_RAN_AT }
+    });
+    const result = bridge.applyObservationPlan({
+        type: "SENSOR_OBSERVATION", subject: HOST, eventId: "recv-1", monotonic: 1,
+        timestampMs: ENVELOPE_RECEIVED_AT,
+        payload: { channel: { id: "vision.capture" }, sample: { w: 1 }, healthState: "OK" }
+    }, { modality: "VISION" });
+    assert.equal(result.applied, true);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].observedAt, new Date(ENVELOPE_RECEIVED_AT).toISOString(),
+        "observedAt must use the envelope receive time, never the bridge clock");
+    assert.equal(result.result.ok, true);
+});
+
+test("W8L1-repair-33: the sample bound is enforced in UTF-8 BYTES, so a multibyte sample cannot exceed 2KB", () => {
+    const body = makeBody();
+    // 700 three-byte characters = 2100 UTF-8 bytes but only 700 UTF-16 units,
+    // so a character-count check would wrongly accept it.
+    const multibyte = "日".repeat(700);
+    assert.equal(Buffer.byteLength(multibyte, "utf8") > 2048, true);
+    const rejected = body.ingest(emb.makeEvent({
+        type: "SENSOR_OBSERVATION", source: "test-adapter", provenance: "OBSERVATION", subject: HOST,
+        payload: { channel: { id: "vision.capture" }, sample: { text: multibyte } }
+    }));
+    assert.equal(rejected.accepted, false);
+    assert.equal(rejected.reason, "EMB_OBSERVATION_TOO_LARGE");
+
+    // A sample that fits in bytes is still accepted.
+    const ok = makeBody().ingest(emb.makeEvent({
+        type: "SENSOR_OBSERVATION", source: "test-adapter", provenance: "OBSERVATION", subject: HOST,
+        payload: { channel: { id: "vision.capture" }, sample: { text: "日".repeat(600) } }
+    }));
+    assert.equal(ok.accepted, true);
+});
+
+test("W8L1-repair-34: a deeply-but-legitimately nested sample is not falsely rejected by the anti-DoS budgets", () => {
+    // The sanitizer's depth/width/node limits are anti-DoS ceilings only and
+    // must sit far above anything the frozen 2048-byte sample bound admits.
+    let nested = { leaf: 1 };
+    for (let i = 0; i < 17; i++) nested = { n: nested };
+    const body = makeBody();
+    const result = body.ingest(emb.makeEvent({
+        type: "SENSOR_OBSERVATION", source: "test-adapter", provenance: "OBSERVATION", subject: HOST,
+        payload: { channel: { id: "vision.capture" }, sample: nested }
+    }));
+    assert.equal(result.accepted, true, "a legitimate contract-valid nested sample must not be rejected");
+});
+
+test("W8L1-repair-35: an audit-capable bridge exposes shed counts read-only, and the counters cannot be rewritten by a caller", () => {
+    const bridge = bridgeSensoriumToWorldModel({
+        body: { subscribe() {} }, auditLedger: { append() {} },
+        worldModel: { ingestObservation() { return new Promise(() => {}); } }
+    });
+    assert.equal(bridge.observability.maxPending, 50000);
+    assert.equal(bridge.observability.shedCount, 0);
+    assert.equal(bridge.observability.pendingObservations, 0);
+    // The exported view is frozen: a caller cannot forge the bridge's own
+    // observability numbers.
+    assert.equal(Object.isFrozen(bridge.observability), true);
+});
+
+test("W8L1-repair-31: a hostile Proxy is rejected before any trap runs, __proto__ cannot be smuggled, and the envelope is closed", () => {
+    const { makeEvent } = emb;
+    // An active (non-revoked) Proxy would otherwise EXECUTE its traps during
+    // the sanitizer's own reflection -- the exact opposite of the boundary.
+    let traps = 0;
+    const active = new Proxy({}, new Proxy({}, {
+        get(_t, key) { traps++; return () => { traps++; return undefined; }; }
+    }));
+    const body = makeBody();
+    const proxied = body.ingest(active);
+    assert.equal(proxied.accepted, false);
+    assert.equal(traps, 0, "no Proxy trap may execute at the ingest boundary");
+
+    // __proto__ must never be written as an inherited prototype.
+    const protoPayload = JSON.parse('{"channel":{"id":"vision.capture"},"sample":{"w":1},"__proto__":{"healthState":"OK"}}');
+    const protoResult = makeBody().ingest(rawForeignObservationEnvelope(protoPayload));
+    assert.equal(protoResult.accepted, false);
+    assert.equal(protoResult.reason, "EMB_INVALID_EVENT_VALUE");
+
+    // Extra top-level envelope fields are foreign material, not event data.
+    const extraEnvelope = Object.assign(
+        rawForeignObservationEnvelope({ channel: { id: "vision.capture" }, sample: { w: 1 } }),
+        { auditOverride: "trust-me" });
+    const extraResult = makeBody().ingest(extraEnvelope);
+    assert.equal(extraResult.accepted, false);
+    assert.equal(extraResult.reason, "field-asing:auditOverride");
+
+    // A legitimate canonical event is still accepted.
+    assert.equal(makeBody().ingest(makeEvent({
+        type: "SENSOR_OBSERVATION", source: "test-adapter", provenance: "OBSERVATION", subject: HOST,
+        payload: { channel: { id: "vision.capture" }, sample: { w: 1 } }
+    })).accepted, true);
 });
 
 test("W8L1-repair-23: RF/IMU caps use explicit modality and reconnect accessors are not trusted", () => {
