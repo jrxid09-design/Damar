@@ -145,7 +145,14 @@ async function createLongHorizonCycle({
         // resolving a null ledger was otherwise indistinguishable from success,
         // so governed could start with no canonical durable record even after
         // the sinkless fallback was removed (audit of 406553b).
-        if (transition.failedOpen || (requireAudit === true && auditLedger == null)) {
+        //
+        // Normalisasi GAGAL-TUTUP: `requireAudit === true` membuat nilai
+        // truthy yang salah bentuk (mis. `1` atau "true") justru MEMATIKAN
+        // persyaratannya -- kebalikan dari yang dimaksudkan pemanggil (audit
+        // 7677a0f). Sekarang setiap nilai truthy menuntut audit, sehingga
+        // konfigurasi yang salah bentuk tidak pernah melemahkan penjaga ini.
+        const auditRequired = Boolean(requireAudit);
+        if (transition.failedOpen || (auditRequired && auditLedger == null)) {
             return Object.freeze({
                 schemaVersion: require("./bounds").SCHEMA_VERSION,
                 mode: "off", laws,

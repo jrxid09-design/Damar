@@ -22,11 +22,25 @@ const {
  * Sink di sini di memori; jalur file nyata diuji terpisah lewat owner-trust.
  */
 function recordingLedger() {
-    const { createAuditLedger } = require("../../../src/runtime/auditLedger");
-    const writes = [];
-    const sink = { append(record) { writes.push(record); } };
-    const ledger = createAuditLedger({ sink });
-    return Object.freeze({ ledger, writes });
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const { createAuditLedger, createFileAuditSink } = require("../../../src/runtime/auditLedger");
+    // Sink DURABEL nyata (file + fsync), bukan sink in-memory: sejak audit
+    // 7677a0f sebuah konfirmasi menuntut bukti bahwa ledger benar-benar MAMPU
+    // menulis durabel, dan hanya sink milik lane ini yang dihitung.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-rec-"));
+    const file = path.join(dir, "audit-ledger.jsonl");
+    const sink = createFileAuditSink(file);
+    const ledger = createAuditLedger({ sink, resume: sink.describeDurable() });
+    return Object.freeze({
+        ledger,
+        file,
+        writes: () => (fs.existsSync(file)
+            ? fs.readFileSync(file, "utf8").split("\n").filter(l => l.trim().length > 0)
+            : []),
+        close: () => { try { sink.close(); } catch { /* ignore */ } }
+    });
 }
 
 /** Ledger kanonik bermerek yang SIAP dipakai sebagai `auditLedger`. */
@@ -649,7 +663,8 @@ test("FG03-40: a ledger that SYNTHESIZES a read-back record cannot prove persist
     assert.equal(ok.audited, true);
     assert.equal(ok.failedOpen, false);
     assert.equal(rec.ledger.size(), 1, "the transition really was recorded");
-    assert.equal(rec.writes.length, 1, "a confirmed transition really reached the persistence sink");
+    assert.equal(rec.writes().length, 1, "a confirmed transition really reached the durable sink");
+    rec.close();
 });
 
 test("FG03-41: the repository's own authority vocabulary is contained", () => {
@@ -771,10 +786,10 @@ test("FG03-45: confirmation asserts DURABILITY -- a branded ledger with no sink 
     });
     assert.equal(confirmed.audited, true);
     assert.equal(confirmed.failedOpen, false);
-    assert.equal(rec.writes.length, 1,
-        "a confirmed transition must have produced an actual sink write");
-    assert.ok(rec.writes[0] && typeof rec.writes[0].eventId === "string",
-        "the sink received the stored record");
+    assert.equal(rec.writes().length, 1,
+        "a confirmed transition must have produced an actual durable sink write");
+    assert.ok(rec.writes()[0].length > 0, "the sink received the stored record");
+    rec.close();
 
     // A sink whose append THROWS is a persistence failure, not a confirmation.
     const failing = createAuditLedger({ sink: { append() { throw new Error("disk full"); } } });
@@ -806,4 +821,74 @@ test("FG03-46: requireAudit refuses to start governed against a sinkless ledger,
     });
     assert.equal(durableRun.mode, "governed");
     assert.ok(durableRun.lanes);
+});
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of 7677a0f — durability acknowledgement + config      */
+/* ---------------------------------------------------------------------- */
+
+test("FG03-47: a branded ledger whose sink does not acknowledge a durable write cannot confirm", () => {
+    const { createAuditLedger, createFileAuditSink } = require("../../../src/runtime/auditLedger");
+
+    // THE AUDITOR'S EXACT REPRO: a branded ledger backed by a no-op sink. The
+    // port contract says append must RETURN TRUE to acknowledge success, and
+    // the ledger previously ignored the return value, so `{append(){}}` claimed
+    // durability it never performed (audit of 7677a0f).
+    const noop = createAuditLedger({ sink: { append() {} } });
+    const absent = recordModeTransitionChecked({
+        auditLedger: noop, from: "off", to: "governed"
+    });
+    assert.equal(absent.audited, false, "a no-op sink must not confirm durability");
+    assert.equal(absent.failedOpen, true);
+
+    // Explicitly returning `false` is likewise not an acknowledgement.
+    const falsy = createAuditLedger({ sink: { append() { return false; } } });
+    assert.equal(recordModeTransitionChecked({
+        auditLedger: falsy, from: "off", to: "governed"
+    }).audited, false, "a false-returning sink must not confirm");
+
+    // A REAL durable sink (file + fsync) confirms and really writes.
+    const rec = recordingLedger();
+    const confirmed = recordModeTransitionChecked({
+        auditLedger: rec.ledger, from: "off", to: "governed"
+    });
+    assert.equal(confirmed.audited, true);
+    assert.equal(confirmed.failedOpen, false);
+    assert.equal(rec.writes().length, 1, "the durable file sink received the record");
+    rec.close();
+});
+
+test("FG03-48: requireAudit fails closed for any truthy value, and a no-op sink cannot satisfy it", async () => {
+    const { createAuditLedger } = require("../../../src/runtime/auditLedger");
+    const { createLongHorizonCycle } = require("../../../src/cognition/longhorizon");
+    const registry = { get: () => ({ kind: "tool" }), has: () => true, getAvailability: () => { throw new Error("unused"); } };
+
+    // A malformed but truthy `requireAudit` used to DISABLE the guard, which is
+    // the opposite of what the caller intended (audit of 7677a0f).
+    for (const value of [1, "true", {}, []]) {
+        const run = await createLongHorizonCycle({
+            mode: "governed", capabilityRegistry: registry, auditLedger: null, requireAudit: value
+        });
+        assert.equal(run.mode, "off",
+            `requireAudit=${JSON.stringify(value)} must still demand an audit ledger`);
+        assert.equal(run.auditUnavailable, true);
+    }
+
+    // A branded ledger with a NO-OP sink cannot satisfy requireAudit either.
+    const noopRun = await createLongHorizonCycle({
+        mode: "governed", capabilityRegistry: registry,
+        auditLedger: createAuditLedger({ sink: { append() {} } }), requireAudit: true
+    });
+    assert.equal(noopRun.mode, "off", "a no-op sink must not satisfy requireAudit");
+    assert.equal(noopRun.lanes, undefined);
+
+    // A genuinely durable ledger satisfies it.
+    const rec = recordingLedger();
+    const okRun = await createLongHorizonCycle({
+        mode: "governed", capabilityRegistry: registry,
+        auditLedger: rec.ledger, requireAudit: true
+    });
+    assert.equal(okRun.mode, "governed");
+    assert.ok(okRun.lanes);
+    rec.close();
 });

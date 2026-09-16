@@ -417,10 +417,18 @@ function isCanonicalLedger(candidate) {
     }
     if (typeof ledgerBrandCheck !== "function") return false;
     try {
-        return ledgerBrandCheck(candidate) === true;
+        if (ledgerBrandCheck(candidate) !== true) return false;
     } catch {
         return false;
     }
+    // MEREK SAJA BELUM CUKUP. Merek membuktikan ledger dibuat oleh factory
+    // kanonik, bukan bahwa ledger itu MAMPU menulis durabel: factory yang sama
+    // bisa dibuat dengan sink apa pun. Konfirmasi karena itu juga menuntut
+    // ledger benar-benar memiliki sink durabel milik lane ini
+    // (`hasDurableSink`), sehingga `{append(){}}` yang dikemas sebagai ledger
+    // kanonik tidak pernah bisa mengklaim rekaman yang tidak pernah ditulis
+    // (audit 7677a0f).
+    return readOwnDataField(candidate, "hasDurableSink") === true;
 }
 
 /** Salinan struktur-dalam milik ledger kanonik, bila tersedia. */
