@@ -191,3 +191,19 @@ test("L5-13: a Symbol/non-finite confidence is clamped/rejected safely, never a 
     });
     assert.equal(result.confidence, 0);
 });
+
+test("L5-repair-14: persisted non-T10 and orphan results are quarantined, and assumptions can invalidate before TTL", async () => {
+    const raw = { runs: { ok: { runId: "ok", state: "COMPLETE", createdAtMs: 0 } }, results: {
+        ok: { runId: "ok", tier: "T1", state: "COMPLETE", assumptions: ["scene:v1"], validUntilMs: 999999999, generatedAtMs: 0 },
+        orphan: { runId: "orphan", tier: "T10", state: "COMPLETE", assumptions: [], validUntilMs: 999999999, generatedAtMs: 0 }
+    } };
+    const store = { getKv: async () => raw, putKv: async () => {} };
+    const sim = await createSimulationSandbox({ store, clock: { nowMs: () => 1 } });
+    assertThrowsReason(() => sim.getResult("ok"), "UNKNOWN_RUN");
+    assertThrowsReason(() => sim.getResult("orphan"), "UNKNOWN_RUN");
+    const fresh = await sim.startRun({ runId: "new", question: "q", scenario: {}, initialStateRef: {}, steps: 1, horizonDays: 1, budgetTokens: 1,
+        provider: async () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: ["scene:v1"], confidence: 0 }) });
+    assert.equal(fresh.state, "COMPLETE");
+    sim.invalidateAssumptions("scene:v1");
+    assert.equal(sim.getResult("new").state, "STALE_ASSUMPTIONS");
+});

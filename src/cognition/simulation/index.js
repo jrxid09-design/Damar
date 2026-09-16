@@ -49,6 +49,7 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
     const results = snapshot.results;
     const coldStart = snapshot.coldStart;
     const tokenLedger = []; // [{atMs, tokens}] -- rolling hourly budget, in-process only (not persisted; a restart resets the hourly window, an honest and safe direction to err in)
+    const invalidatedAssumptions = new Set();
 
     // Construction-time compaction of a reloaded snapshot (same class as
     // Wave7 rounds 71-73 and W8-L3's own construction-time compaction
@@ -82,6 +83,14 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
             candidate = undefined;
         }
         return Number.isFinite(candidate) ? candidate : Date.now();
+    }
+
+    for (const [runId, run] of [...runs]) {
+        if (!run || run.runId !== runId || !["COMPLETE", "TRUNCATED", "FAILED"].includes(run.state)) runs.delete(runId);
+    }
+    for (const [runId, result] of [...results]) {
+        if (!result || result.runId !== runId || result.tier !== "T10" || !runs.has(runId) ||
+            !["COMPLETE", "TRUNCATED", "FAILED"].includes(result.state)) results.delete(runId);
     }
 
     function pruneLedger(nowMs) {
@@ -121,7 +130,8 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
             const source = spec || {};
             const read = (key) => {
                 const descriptor = Object.getOwnPropertyDescriptor(source, key);
-                if (!descriptor || descriptor.get || descriptor.set) throw new Error("accessor");
+                if (!descriptor) return undefined;
+                if (descriptor.get || descriptor.set) throw new Error("accessor");
                 return descriptor.value;
             };
             runId = read("runId"); question = read("question"); scenario = read("scenario");
@@ -210,10 +220,18 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
     function getResult(runId) {
         const result = results.get(runId);
         if (!result) fail(REASONS.UNKNOWN_RUN, `runId '${typeof runId === "string" ? runId : typeof runId}' tidak ditemukan`);
-        if (result.state === "COMPLETE" && now() > result.validUntilMs) {
+        const assumptions = Array.isArray(result.assumptions) ? result.assumptions : [];
+        const invalidated = assumptions.some((item) => typeof item === "string" && invalidatedAssumptions.has(item));
+        if (result.state === "COMPLETE" && (invalidated || now() > result.validUntilMs)) {
             return Object.freeze({ ...result, state: "STALE_ASSUMPTIONS" });
         }
         return result;
+    }
+
+    function invalidateAssumptions(ref) {
+        if (typeof ref !== "string" || !ref) fail(REASONS.INVALID_RECORD, "assumption ref wajib string");
+        invalidatedAssumptions.add(ref);
+        return Object.freeze({ invalidated: true, ref });
     }
 
     function listRuns() {
@@ -229,7 +247,7 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
     return Object.freeze({
         schemaVersion: SCHEMA_VERSION,
         simulationColdStart: coldStart,
-        startRun, getResult, listRuns, runsSize,
+        startRun, getResult, invalidateAssumptions, listRuns, runsSize,
         persist, laws, bounds
     });
 }

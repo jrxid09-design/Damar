@@ -111,6 +111,26 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         return Number.isFinite(candidate) ? candidate : Date.now();
     }
 
+    // Persisted maps are untrusted input. Reconcile them before any public
+    // query can observe geometry: orphan frames/nodes, incoherent map keys,
+    // invalid timestamps, and malformed transforms are fail-closed.
+    for (const [id, frame] of [...frames]) {
+        if (!frame || frame.frameId !== id || typeof frame.frameId !== "string" ||
+            !Number.isFinite(frame.registeredAt) || frame.registeredAt > now()) frames.delete(id);
+    }
+    for (const [id, transform] of [...transforms]) {
+        if (!transform || transform.transformId !== id || typeof transform.fromFrameId !== "string" ||
+            typeof transform.toFrameId !== "string" || !frames.has(transform.fromFrameId) ||
+            !frames.has(transform.toFrameId) || !Number.isFinite(transform.registeredAt)) transforms.delete(id);
+    }
+    for (const [key, node] of [...sceneNodes]) {
+        let coherent = false;
+        try { coherent = node && node.frameId && frames.has(node.frameId) &&
+            key === sceneNodeKey(node.frameId, node.region) && Number.isFinite(node.updatedAtMs) &&
+            node.updatedAtMs <= now() && Array.isArray(node.observationRefs); } catch { coherent = false; }
+        if (!coherent) sceneNodes.delete(key);
+    }
+
     function registerFrame(spec) {
         const { frameId, kind, ref, source } = readSpecFields(spec, ["frameId", "kind", "ref", "source"]);
         const existing = frames.get(frameId);

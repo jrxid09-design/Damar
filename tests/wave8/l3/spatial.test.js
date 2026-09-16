@@ -246,3 +246,14 @@ test("L3-23: an array region with an enumerable non-index 'toJSON' function is r
     Object.defineProperty(region, "toJSON", { enumerable: true, configurable: true, value: () => [] });
     assertThrowsReason(() => sm.reportOccupancy({ frameId: "a", region, state: "KNOWN", observationRef: "o1" }), "EXECUTABLE_MATERIAL_REJECTED");
 });
+
+test("L3-repair-24: persisted orphan/future geometry is quarantined before query", async () => {
+    const key = 'ghost::{"c":1}';
+    const store = { getKv: async () => ({ frames: {}, transforms: {}, sceneNodes: {
+        [key]: { nodeId: key, frameId: "ghost", region: { c: 1 }, state: "KNOWN", observationRefs: ["forged"], updatedAtMs: 9999999999999 }
+    } }), putKv: async () => {} };
+    const sm = await createSpatialModel({ store, clock: { nowMs: () => 1000 } });
+    const result = sm.queryOccupancy({ frameId: "ghost", region: { c: 1 } });
+    assert.equal(result.state, "UNKNOWN");
+    assert.equal(result.blocked, true);
+});
