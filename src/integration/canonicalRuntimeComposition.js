@@ -372,13 +372,14 @@ async function buildRuntimeCoreInternal({
                 }
             } catch { /* owner-gated ops stay fail-closed; audit binding is best-effort */ }
         }
-        if (cognitionAuditLedgerResolved == null) {
-            try {
-                cognitionAuditLedgerResolved = require("../runtime/auditLedger").createAuditLedger({});
-            } catch {
-                cognitionAuditLedgerResolved = null;
-            }
-        }
+        // NO SINKLESS FALLBACK. A previous revision fell back to
+        // `createAuditLedger({})` when owner-trust was not composed -- which is
+        // exactly the state productionComposition deliberately produces on a
+        // trust-domain failure (`ownerTrust: null`). That fallback therefore
+        // recreated the duplicate-ledger defect and let governed mode start
+        // with no canonical durable record (audit of 321c7b3). Leaving the
+        // ledger null is the correct behaviour: the cognition lane then fails
+        // closed, refusing governed mode rather than proceeding unaudited.
         cognition = await createLongHorizonCycle({
             mode: cognitionMode,
             capabilityRegistry: cognitionCapabilityRegistry,
