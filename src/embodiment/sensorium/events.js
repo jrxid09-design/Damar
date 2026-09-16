@@ -88,7 +88,22 @@ function buildEnvelope({
     core = false
 }) {
 
-    commonValidation({ type, source, provenance, subject, payload });
+    // SATU PEMBACAAN, SATU KEBENARAN: payload disalin secara sadar-deskriptor
+    // LEBIH DULU, lalu validasi dan amplop sama-sama memakai salinan itu.
+    //
+    // `structuredCopy` tidak dapat dipakai di sini: ia memanggil
+    // `JSON.stringify(payload)`, yang MENJALANKAN `payload.toJSON()` milik
+    // pemanggil — eksekusi kode mereka sebelum validasi apa pun. Sanitizer ini
+    // tidak pernah melakukan `[[Get]]` dan menolak accessor/Proxy.
+    let cleanPayload;
+    try {
+        cleanPayload = sanitizeDeep(payload, 0, { n: MAX_SANITIZE_NODES });
+    } catch (err) {
+        throw fail((err && err.code) || "EMB_INVALID_PAYLOAD",
+            "payload event tidak dapat disanitasi dengan aman");
+    }
+
+    commonValidation({ type, source, provenance, subject, payload: cleanPayload });
 
     if (!core && EVENT_TYPES[type].producerClass === "core") {
         // Pintu publik tidak pernah bisa menciptakan event inti.
@@ -109,16 +124,62 @@ function buildEnvelope({
         provenance,
         subject,
         confidence: clamp01(confidence),
-        payload: deepFreeze(structuredCopy(payload))
+        payload: deepFreeze(cleanPayload)
     };
 
     return Object.freeze(
         core ? { ...envelope, [CORE_TOKEN]: CORE_TOKEN } : envelope);
 }
 
+/**
+ * Baca satu field opsi konstruksi lewat DESKRIPTOR. `makeEvent()` menerima
+ * objek dari adapter/pemanggil asing, jadi destructuring biasa (`[[Get]]`)
+ * akan MENJALANKAN getter atau trap Proxy mereka.
+ */
+function readOptionField(options, key) {
+    if (options === null || (typeof options !== "object" && typeof options !== "function")) {
+        return undefined;
+    }
+    if (isProxy(options)) {
+        throw fail("EMB_INVALID_SOURCE", "opsi event tidak boleh berupa Proxy");
+    }
+    let desc;
+    try {
+        desc = Object.getOwnPropertyDescriptor(options, key);
+    } catch {
+        throw fail("EMB_INVALID_SOURCE",
+            `opsi event tidak dapat dibaca dengan aman: '${key}'`);
+    }
+    if (!desc) return undefined;
+    if (desc.get || desc.set) {
+        throw fail("EMB_INVALID_SOURCE",
+            `opsi event tidak boleh membawa accessor: '${key}'`);
+    }
+    return desc.value;
+}
+
 /** Amplop event adapter/publik. Melempar (gagal-tutup) pada input kotor. */
 function makeEvent(options) {
-    return buildEnvelope(options);
+    // BATAS KEPERCAYAAN KONSTRUKSI: `options` datang dari pemanggil asing.
+    // Setiap field dibaca via deskriptor (tidak ada `[[Get]]`), dan payload
+    // disalin lewat sanitizer sadar-deskriptor — `structuredCopy` dihindari
+    // karena `JSON.stringify` memanggil `toJSON` milik pemanggil, yang akan
+    // mengeksekusi kode mereka sebelum validasi apa pun berjalan.
+    const type = readOptionField(options, "type");
+    const source = readOptionField(options, "source");
+    const provenance = readOptionField(options, "provenance");
+    const subject = readOptionField(options, "subject");
+    const confidence = readOptionField(options, "confidence");
+    const clock = readOptionField(options, "clock");
+    const rawPayload = readOptionField(options, "payload");
+
+    return buildEnvelope({
+        type: type === undefined ? {} : type,
+        source, provenance, subject,
+        payload: rawPayload,
+        confidence: confidence === undefined ? 1 : confidence,
+        clock, core: false
+    });
 }
 
 /**
@@ -146,8 +207,13 @@ const ENVELOPE_FIELDS = Object.freeze([
  * di BodySchema — jadi tidak mungkin menolak muatan yang sah menurut
  * kontrak. Batas kedalaman sampel yang sebenarnya ditegakkan oleh batas
  * byte itu sendiri, bukan oleh angka di sini.
+ *
+ * Audit 636ee8d menemukan sampel SAH 64-tingkat/394-byte ikut tertolak oleh
+ * batas kedalaman sebelumnya (64). Karena batas byte-lah yang mengikat,
+ * plafon ini dinaikkan jauh melampaui kedalaman yang mungkin dibentuk oleh
+ * 2.048 byte JSON, sehingga tidak ada muatan kontrak-sah yang bisa tertolak.
  */
-const MAX_SANITIZE_DEPTH = 64;
+const MAX_SANITIZE_DEPTH = 1024;
 const MAX_SANITIZE_KEYS = 4096;
 const MAX_SANITIZE_NODES = 65536;
 

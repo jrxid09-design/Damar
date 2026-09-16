@@ -106,6 +106,25 @@ function safeRejectField(event, key) {
     }
 }
 
+/**
+ * Jejak event yang BENAR-BENAR dikomit BodySchema.
+ *
+ * Konsumen hilir (mis. jembatan sensorium) harus bisa membedakan peristiwa
+ * lifecycle NYATA dari objek yang dipalsukan pemanggil lalu diserahkan
+ * langsung ke API-nya. Keanggotaan WeakSet ini hanya bisa diperoleh dengan
+ * melewati `ingest()`: objek buatan luar tidak pernah ada di sini, jadi
+ * "perangkat kembali online" tidak dapat dikarang oleh pemanggil
+ * (audit 636ee8d menemukan `DEVICE_ONLINE` palsu membuka kembali kanal
+ * FAILED).
+ */
+const COMMITTED_EVENTS = new WeakSet();
+
+function wasCommittedByBodySchema(event) {
+    return event !== null
+        && (typeof event === "object" || typeof event === "function")
+        && COMMITTED_EVENTS.has(event);
+}
+
 /** Urutan total KONTEN antar-pengamatan deskriptor. */
 function newerWins(a, b) {
     // 1) confidence lebih tinggi menang
@@ -269,6 +288,10 @@ class BodySchema {
         }
 
         this._pushJournal(event);
+
+        // Tandai SETELAH komit sah: hanya event yang benar-benar melewati
+        // ingest() yang boleh dipercaya hilir sebagai peristiwa nyata.
+        COMMITTED_EVENTS.add(event);
 
         if (!event.payload?.derived) {
             this._deriveDefaultChanges();
@@ -1435,4 +1458,4 @@ function freezeView(view) {
     return deepFreeze(structuredCopy(view));
 }
 
-module.exports = { BodySchema, newerWins, presenceWins };
+module.exports = { BodySchema, newerWins, presenceWins, wasCommittedByBodySchema };
