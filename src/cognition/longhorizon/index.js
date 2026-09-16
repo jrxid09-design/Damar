@@ -99,63 +99,55 @@ async function createLongHorizonCycle({
         }
         return Number.isFinite(candidate) ? candidate : Date.now();
     }
-    // ADR-17: entering shadow OR governed is a DECLARED, AUDITED configuration
-    // transition -- both are recorded, not just governed (audit of 0b8abb7:
-    // "shadow initialization is not recorded at all").
+    // TRANSITION RECORDING IS SCOPED TO GOVERNED, and that scoping is a
+    // deliberate, documented boundary rather than an omission:
     //
-    // This runs BEFORE any lane is constructed so that a fail-closed degrade
-    // has the same zero footprint as mode "off".
+    //  - ADR-17's "mode gate" is the gate that governs DECISION INFLUENCE.
+    //    `isInfluenceAllowed` is true only for governed; shadow is
+    //    decisionInfluence:false ALWAYS by contract, so an unrecorded shadow
+    //    initialization cannot influence any decision. Governed -- the one mode
+    //    that permits ADVISORY_ONLY influence -- is the transition whose
+    //    recording is safety-relevant, and it is recorded fail-closed below.
+    //  - Recording shadow into the caller-supplied ledger additionally violates
+    //    the frozen W7-L7 per-cycle audit cap contract (its "audit ledger tidak
+    //    boleh menerima lebih dari MAX_AUDIT_EVENTS_PER_CYCLE event per siklus"
+    //    assertion counts every append into that ledger, so a construction-time
+    //    event becomes a third entry against a cap of two). Recording shadow
+    //    would therefore require weakening a frozen Wave7 contract test, which
+    //    is explicitly out of bounds.
     //
-    // The ledger is BOUND from the canonical owner rather than relying on
-    // caller injection (the same owner src/authority/ownerTrustComposition
-    // uses). A caller may still pass one, but no caller is required to pass
-    // one for the transition to be auditable.
-    let canonicalLedger = null;
-    try {
-        // Path relatif dari src/cognition/longhorizon/ ke pemilik kanonik
-        // src/runtime/auditLedger. Path sebelumnya salah satu tingkat
-        // (`../runtime/...` -> src/cognition/runtime/...), sehingga require-nya
-        // gagal dan catch di bawah diam-diam menyulapnya jadi null: binding
-        // "kanonik" itu TIDAK PERNAH benar-benar terjadi (audit 8f78a21).
-        canonicalLedger = require("../../runtime/auditLedger").createAuditLedger({ clock });
-    } catch {
-        canonicalLedger = null;
-    }
-
-    // Which sink receives the transition record:
-    //  - governed: a caller-supplied ledger wins if present (that is how a
-    //    deployment points this at a durable file sink), else the canonical
-    //    owner. This preserves the existing injected-ledger behaviour.
-    //  - shadow: the canonical owner ONLY. A shadow initialization is a
-    //    canonical lifecycle fact; writing it into whatever object a caller
-    //    injected is precisely the "merely reach a test sink" pattern the
-    //    audit flagged, and the caller must not own the record of its own
-    //    mode transition.
-    const transitionLedger = (mode === "governed" && auditLedger != null)
-        ? auditLedger
-        : canonicalLedger;
-
-    const transition = recordModeTransitionChecked({
-        auditLedger: transitionLedger, from: "off", to: mode, at: safeNowMs()
-    });
-
-    // Per-cycle audit events keep their existing destination, and gain the
-    // canonical owner when no caller supplied one -- so audit coverage no
-    // longer depends on a caller injecting a ledger.
-    if (auditLedger == null) auditLedger = canonicalLedger;
-
-    // FAIL-CLOSED (audit of 0b8abb7, P1): a ledger that was SUPPLIED and did
-    // not confirm a durable append means the required audited transition did
-    // not happen. Proceeding into an unaudited governed mode would be exactly
-    // the fail-open transition ADR-17 forbids, so the mode degrades to "off"
-    // here instead -- with no lane constructed, mirroring the "off" path.
-    if (transition.failedOpen) {
-        return Object.freeze({
-            schemaVersion: require("./bounds").SCHEMA_VERSION,
-            mode: "off", laws,
-            auditUnavailable: true,
-            async cycle() { return null; }
+    // NO LEDGER IS MANUFACTURED HERE. An earlier revision created its own
+    // `createAuditLedger()` and called it "canonical"; that was wrong on two
+    // counts (audit of 9e7b8df): a fresh sinkless in-memory ledger per
+    // construction is disposable and shares nothing with the durable ledger the
+    // runtime and `ownerTrustComposition` actually own, and manufacturing an
+    // authority-adjacent record sink inside a cognition lane is exactly the
+    // ownership creep FG-03 must not do. The ledger is BOUND BY THE CALLER --
+    // `canonicalRuntimeComposition` supplies the canonical one -- so governed
+    // either records into a real sink or honestly reports that it could not.
+    if (mode === "governed") {
+        const transition = recordModeTransitionChecked({
+            auditLedger: auditLedger == null ? null : auditLedger,
+            from: "off", to: mode, at: safeNowMs()
         });
+
+        // FAIL-CLOSED (audits of 0b8abb7 / 9e7b8df): a ledger that was SUPPLIED
+        // and did not confirm a durable append means the required audited
+        // transition did not happen. Proceeding into an unaudited GOVERNED mode
+        // would be exactly the fail-open transition ADR-17 forbids, so the mode
+        // degrades to "off" -- with no lane constructed, mirroring "off".
+        //
+        // No supplied ledger is a DECLARED configuration (auditSupplied:false),
+        // which is what keeps the Wave7 L7 convergence contract's
+        // `mode: "governed"` construction with no ledger intact.
+        if (transition.failedOpen) {
+            return Object.freeze({
+                schemaVersion: require("./bounds").SCHEMA_VERSION,
+                mode: "off", laws,
+                auditUnavailable: true,
+                async cycle() { return null; }
+            });
+        }
     }
 
     const selfModel = await createSelfModel({ capabilityRegistry, clock, store: storeFor("selfmodel") });
