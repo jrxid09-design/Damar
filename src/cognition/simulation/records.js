@@ -12,6 +12,7 @@
 
 const { REASONS, fail, SimulationError } = require("./errors");
 const { BOUNDS } = require("./bounds");
+const utilTypes = require("node:util").types;
 
 const DANGEROUS_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 const MAX_SCAN_DEPTH = 12;
@@ -36,6 +37,15 @@ function buildSafeSimValue(value, depth = 0, budget) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "nilai simulasi tidak boleh berupa angka non-finite");
     }
     if (t !== "object") return value;
+    // PROXY DITOLAK SEBELUM OPERASI REFLEKTIF APA PUN.
+    //
+    // Seluruh pembacaan di bawah memakai operasi reflektif (getOwnPropertyDescriptor,
+    // Reflect.ownKeys, getPrototypeOf). Pada Proxy, semuanya menjalankan trap
+    // milik pemanggil, jadi "pembacaan lewat deskriptor" TIDAK cukup -- nilainya
+    // sudah menjalankan kode sebelum validasi (audit Wave8 L3/L5).
+    if (utilTypes.isProxy(value)) {
+        fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "nilai simulasi tidak boleh berupa Proxy");
+    }
     if (depth > MAX_SCAN_DEPTH) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "nilai simulasi terlalu dalam untuk diverifikasi dengan aman");
     budget.count += 1;
     if (budget.count > MAX_SCAN_NODES) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "jumlah node pada nilai simulasi melebihi batas");

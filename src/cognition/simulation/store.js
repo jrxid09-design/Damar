@@ -66,16 +66,38 @@ function serialize({ runs, results, tokenLedger, invalidatedAssumptions }) {
  * kodenya berjalan sebelum validasi apa pun (audit Wave8 L3/L5). Iterasi di
  * sini memakai indeks numerik lewat deskriptor, persis seperti sanitizer lane.
  */
-function readPersistedArray(value) {
+function readPersistedArray(value, state) {
     if (!Array.isArray(value)) return null;
+    if (utilTypes.isProxy(value)) {
+        // Array.isArray(jahatProxy) === true, lalu setiap operasi reflektif di
+        // bawah menjalankan trap pemanggil. Tidak ada pembacaan yang aman.
+        state.degraded = true;
+        return null;
+    }
     const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
     const len = lengthDescriptor && !lengthDescriptor.get && !lengthDescriptor.set
         ? lengthDescriptor.value : -1;
-    if (!Number.isInteger(len) || len < 0) return null;
+    if (!Number.isInteger(len) || len < 0) {
+        state.degraded = true;
+        return null;
+    }
+    // Riwayat yang sangat panjang tidak boleh memblokir event loop; melewati
+    // batas berarti riwayat tidak dapat diyakini lengkap -> fail closed.
+    if (len > MAX_BUDGET_ENTRIES) {
+        state.degraded = true;
+        return null;
+    }
     const out = [];
-    for (let i = 0; i < len; i++) {
+    for (let i = 0; i < len; i += 1) {
         const desc = Object.getOwnPropertyDescriptor(value, i);
-        if (!desc || desc.get || desc.set || !("value" in desc)) continue;
+        if (!desc || desc.get || desc.set || !("value" in desc)) {
+            // LUBANG atau elemen malformed: riwayat tidak lengkap, jadi
+            // pemakaian token tidak dapat dihitung dengan benar. Sebelumnya
+            // entri ini dilewati diam-diam, sehingga riwayat berlubang tampak
+            // seperti riwayat kosong dan batas laju ter-reset (audit L3/L5).
+            state.degraded = true;
+            return null;
+        }
         out.push(desc.value);
     }
     return out;
@@ -110,20 +132,34 @@ function readPersistedBudget(raw) {
         out.degraded = true;
         return out;
     }
-    const entries = readPersistedArray(ledgerRaw);
+    const entries = readPersistedArray(ledgerRaw, out);
     if (entries) {
         for (const entry of entries) {
-            if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+            // Entri yang TIDAK berbentuk {atMs, tokens} yang sah berarti
+            // riwayat tidak dapat dipercaya: pemakaian token bisa tampak lebih
+            // kecil dari kenyataan. Dilewati diam-diam = gagal-buka, jadi ini
+            // menandai degraded (audit L3/L5).
+            if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+                out.degraded = true;
+                return out;
+            }
             const atMs = readSnapshotField(entry, "atMs");
             const tokens = readSnapshotField(entry, "tokens");
-            if (!Number.isFinite(atMs) || !Number.isFinite(tokens) || tokens < 0) continue;
+            if (!Number.isFinite(atMs) || !Number.isFinite(tokens) || tokens < 0) {
+                out.degraded = true;
+                return out;
+            }
             out.tokenLedger.push({ atMs, tokens });
         }
     }
-    const refs = readPersistedArray(invalidatedRaw);
+    const refs = readPersistedArray(invalidatedRaw, out);
     if (refs) {
         for (const ref of refs) {
-            if (typeof ref === "string" && ref) out.invalidatedAssumptions.push(ref);
+            if (typeof ref !== "string" || !ref) {
+                out.degraded = true;
+                return out;
+            }
+            out.invalidatedAssumptions.push(ref);
         }
     }
     return out;
@@ -154,6 +190,18 @@ function deserialize(raw) {
  * pembacaannya MENJALANKAN kode pihak lain (audit Wave8 L3/L5).
  */
 function readSnapshotField(raw, key) {
+    // Proxy pada snapshot: setiap operasi reflektif (termasuk
+    // getOwnPropertyDescriptor di bawah) menjalankan trap milik pemanggil, jadi
+    // tidak ada pembacaan yang aman (audit L3/L5).
+    try {
+        if (raw !== null && typeof raw === "object" && utilTypes.isProxy(raw)) {
+            throw new Error("snapshot tidak boleh berupa Proxy");
+        }
+    } catch (err) {
+        throw err instanceof Error && /Proxy/.test(err.message)
+            ? err
+            : new Error("snapshot tidak dapat dibaca dengan aman");
+    }
     let desc;
     try {
         desc = Object.getOwnPropertyDescriptor(raw, key);
@@ -219,8 +267,15 @@ const REAL_STORE_WRITE_VERBS = Object.freeze([
     "upsertCommitment", "upsertSubstrateEpoch", "upsertBelief", "appendJournal"
 ]);
 
-/** Batas penelusuran rantai prototipe store. */
-const MAX_PROTOTYPE_DEPTH = 32;
+/**
+ * Batas jumlah entri riwayat anggaran yang akan dipulihkan.
+ *
+ * Riwayat sepanjang ini (jauh di atas apa pun yang bisa dihasilkan dalam satu
+ * jam pada batas token) tidak masuk akal, dan membaca array raksasa secara
+ * sinkron bisa memblokir event loop (audit Wave8 L3/L5). Melewati batas =
+ * riwayat tidak dapat diyakini lengkap, jadi fail closed, bukan dipotong diam-diam.
+ */
+const MAX_BUDGET_ENTRIES = 100_000;
 
 /**
  * Tolak store milik lane NYATA. Melempar SimulationError
@@ -239,22 +294,30 @@ function checkStoreIsolation(store) {
     } catch (err) {
         if (err && err.reason) throw err;
     }
+    // Seluruh RANTAI PROTOTIPE ditelusuri TANPA batas kedalaman, sampai
+    // `null`: batas kedalaman apa pun adalah bypass yang bisa dipakai
+    // (kedalaman 33 lolos dari batas 32 sebelumnya), sedangkan rantai
+    // prototipe yang sah selalu berakhir. Setiap tingkat dibaca lewat
+    // DESKRIPTOR, bukan `store[verb]`; Proxy pada tingkat mana pun ditolak
+    // karena trap-nya akan berjalan saat diintrospeksi (audit Wave8 L3/L5).
+    const seenLevels = new Set();
     for (const verb of REAL_STORE_WRITE_VERBS) {
-        // Seluruh RANTAI PROTOTIPE ditelusuri, bukan hanya satu tingkat: sebuah
-        // store yang menyembunyikan kata kerja tulis dua tingkat di atas
-        // (Object.create(Object.create({appendEvent}))) sebelumnya lolos
-        // (audit Wave8 L3/L5). Setiap tingkat dibaca lewat DESKRIPTOR, bukan
-        // `store[verb]`, karena pembacaan mentah menjalankan getter/proxy
-        // pemanggil SEBELUM penolakan.
         let level = store;
-        for (let depth = 0; depth < MAX_PROTOTYPE_DEPTH && level; depth += 1) {
+        while (level && typeof level === "object") {
             if (level === Object.prototype || level === Function.prototype) break;
+            if (seenLevels.has(level)) break;
+            seenLevels.add(level);
+            if (utilTypes.isProxy(level)) {
+                throw fail(REASONS.CROSS_STORE_WRITE_REJECTED,
+                    "store simulasi tidak boleh menyembunyikan Proxy pada rantai prototipenya");
+            }
             let desc;
             try {
                 desc = Object.getOwnPropertyDescriptor(level, verb);
             } catch {
                 // Tingkat yang tidak dapat diintrospeksi diperlakukan mencurigakan.
-                desc = null;
+                throw fail(REASONS.CROSS_STORE_WRITE_REJECTED,
+                    "store simulasi tidak dapat diintrospeksi dengan aman");
             }
             if (desc) {
                 const present = desc.get || desc.set ? true : typeof desc.value === "function";
@@ -275,21 +338,52 @@ function checkStoreIsolation(store) {
     }
 }
 
+/**
+ * Resolve `getKv`/`putKv` lewat DESKRIPTOR di sepanjang rantai prototipe.
+ *
+ * `typeof store.getKv === "function"` adalah `[[Get]]` mentah: store yang
+ * memasang getter di sana menjalankan kode pemanggil sebelum validasi apa pun,
+ * jadi batas "tanpa eksekusi kode" tidak benar-benar berlaku (audit L3/L5).
+ * Mengembalikan undefined bila propertinya accessor, bukan fungsi, atau tidak
+ * ada -- dalam semua kasus itu store tidak dapat dipakai secara aman.
+ */
+function resolveStoreMethod(store, name) {
+    let level = store;
+    const seen = new Set();
+    while (level && typeof level === "object") {
+        if (level === Object.prototype || level === Function.prototype) break;
+        if (seen.has(level)) break;
+        seen.add(level);
+        if (utilTypes.isProxy(level)) return undefined;
+        let desc;
+        try {
+            desc = Object.getOwnPropertyDescriptor(level, name);
+        } catch {
+            return undefined;
+        }
+        if (desc) {
+            if (desc.get || desc.set) return undefined;   // accessor: mengeksekusi kode
+            return typeof desc.value === "function" ? desc.value : undefined;
+        }
+        try {
+            level = Object.getPrototypeOf(level);
+        } catch {
+            return undefined;
+        }
+    }
+    return undefined;
+}
+
 async function loadSnapshot(store) {
     // Baca dari store NYATA juga merupakan pelanggaran batas: snapshot nyata
     // tidak boleh masuk ke sandbox simulasi (SIMULATION != REALITY).
     checkStoreIsolation(store);
-    let hasGetKv;
-    try {
-        hasGetKv = !!store && typeof store.getKv === "function";
-    } catch {
-        hasGetKv = false;
-    }
-    if (!hasGetKv) {
+    const getKv = resolveStoreMethod(store, "getKv");
+    if (!getKv) {
         return { runs: new Map(), results: new Map(), coldStart: true, tokenLedger: [], invalidatedAssumptions: [] };
     }
     try {
-        return deserialize(await store.getKv(KV_KEY));
+        return deserialize(await getKv.call(store, KV_KEY));
     } catch {
         // Snapshot tidak terbaca / membawa materi berbahaya: mulai kosong.
         // Konsumen membedakan ini lewat `coldStart` dan mencatatnya ke audit.
@@ -299,14 +393,9 @@ async function loadSnapshot(store) {
 
 async function saveSnapshot(store, state) {
     checkStoreIsolation(store);
-    let hasPutKv;
-    try {
-        hasPutKv = !!store && typeof store.putKv === "function";
-    } catch {
-        hasPutKv = false;
-    }
-    if (!hasPutKv) return false;
-    await store.putKv(KV_KEY, serialize(state));
+    const putKv = resolveStoreMethod(store, "putKv");
+    if (!putKv) return false;
+    await putKv.call(store, KV_KEY, serialize(state));
     return true;
 }
 

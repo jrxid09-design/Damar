@@ -113,16 +113,24 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         }
         const maxNodes = Math.max(0, Math.trunc(bounds.MAX_SCENE_NODES));
         while (sceneNodes.size > maxNodes) {
-            // evict-stale-first: prefer UNKNOWN/CONTESTED, oldest updatedAtMs, never live/fresh KNOWN nodes if a stale one exists
+            // evict-stale-first: prefer UNKNOWN/CONTESTED, oldest updatedAtMs, never live/fresh KNOWN nodes if a stale one exists.
+            // Memakai CLOCK YANG DISUNTIKKAN, bukan Date.now(): jam dinding
+            // membuat klasifikasi stale bergantung pada waktu nyata alih-alih
+            // waktu lane, sehingga hasilnya tidak deterministik di test
+            // (audit Wave8 L3/L5).
+            const compactionNowMs = now();
             let victimKey = null, victimAt = Infinity, foundStale = false;
             for (const [k, n] of sceneNodes) {
-                const isStale = !NON_BLOCKING_BANDS.has(freshnessBand(n.updatedAtMs, {}, Date.now()));
+                const isStale = !NON_BLOCKING_BANDS.has(freshnessBand(n.updatedAtMs, {}, compactionNowMs));
                 if (foundStale && !isStale) continue;
                 if (isStale && !foundStale) { foundStale = true; victimAt = Infinity; }
                 if (n.updatedAtMs < victimAt) { victimAt = n.updatedAtMs; victimKey = k; }
             }
             if (!victimKey) break;
             sceneNodes.delete(victimKey);
+            // Eviction saat restart juga diaudit, sama seperti eviction saat
+            // insert (audit Wave8 L3/L5).
+            audit("cognition.spatial.scene_node_evicted", { nodeId: victimKey, reason: "restart-compaction" });
         }
     }
 
