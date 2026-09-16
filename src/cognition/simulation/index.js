@@ -37,19 +37,63 @@ function safeOutcomeValue(outcome, key, fallback) {
     }
 }
 
-async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS } = {}) {
+async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS, auditLedger = null } = {}) {
     try {
         bounds = sanitizeBounds(BOUNDS, bounds);
     } catch {
         bounds = BOUNDS;
     }
 
-    const snapshot = await loadSnapshot(store);
+    // Audit hook (contract L5: "run start/end, truncation, and export are
+    // audited ... every store-boundary rejection is audited as a would-be
+    // contamination attempt"). Kegagalan audit TIDAK PERNAH menggagalkan
+    // operasi yang diaudit -- pola yang sama dengan lane Wave7 lainnya.
+    function audit(eventType, fields) {
+        try {
+            if (auditLedger && typeof auditLedger.append === "function") {
+                auditLedger.append(Object.freeze({
+                    eventType, source: "acc.simulation", outcome: "ok",
+                    metadata: Object.freeze({ lane: "W8-L5", ...fields })
+                }));
+            }
+        } catch { /* audit failure never blocks the sandbox */ }
+    }
+
+    // Batas store: percobaan membaca store NYATA ditolak dan HARUS tercatat
+    // sebagai percobaan kontaminasi (contract: "every store-boundary rejection
+    // is audited as a would-be contamination attempt"). Penolakannya sendiri
+    // terjadi di dalam loadSnapshot, jadi catch ini yang mengauditnya sebelum
+    // melempar ulang -- tanpa ini penolakan konstruksi tidak pernah tercatat.
+    let snapshot;
+    try {
+        snapshot = await loadSnapshot(store);
+    } catch (err) {
+        audit("cognition.simulation.cross_store_write_rejected", {
+            reason: err && err.reason ? err.reason : "CROSS_STORE_WRITE_REJECTED"
+        });
+        throw err;
+    }
     const runs = snapshot.runs;
     const results = snapshot.results;
     const coldStart = snapshot.coldStart;
-    const tokenLedger = []; // [{atMs, tokens}] -- rolling hourly budget, in-process only (not persisted; a restart resets the hourly window, an honest and safe direction to err in)
-    const invalidatedAssumptions = new Set();
+    // Riwayat anggaran + asumsi yang diinvalidasi IKUT BERTAHAN melintasi
+    // restart. Tidak mempersistensinya membuat bound 500k token/jam bisa
+    // dilampaui hanya dengan me-restart, dan membuat hasil yang sudah
+    // STALE_ASSUMPTIONS kembali COMPLETE (audit Wave8 L3/L5).
+    const tokenLedger = Array.isArray(snapshot.tokenLedger) ? [...snapshot.tokenLedger] : []; // [{atMs, tokens}]
+    const invalidatedAssumptions = new Set(
+        Array.isArray(snapshot.invalidatedAssumptions) ? snapshot.invalidatedAssumptions : []);
+    if (snapshot.degraded) {
+        audit("cognition.simulation.store_unreadable", { reason: "store-unreadable-or-hostile" });
+    }
+    for (const [runId, run] of runs) {
+        if (run.state === "RUNNING") {
+            // A lost in-flight run is an HONEST loss (contract: "a lost
+            // in-flight sandbox run is an HONEST loss (never silently
+            // reconstructed as if it had completed)").
+            audit("cognition.simulation.run_lost", { runId });
+        }
+    }
 
     // Construction-time compaction of a reloaded snapshot (same class as
     // Wave7 rounds 71-73 and W8-L3's own construction-time compaction
@@ -155,6 +199,7 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
 
         const run = makeSimulationRun({ runId, question, scenario, initialStateRef, steps, horizonDays, budgetTokens, fidelity, nowMs }, bounds);
         runs.set(run.runId, run);
+        audit("cognition.simulation.run_started", { runId: run.runId, fidelity: run.fidelity, budgetTokens: run.budgetTokens });
         const reservation = { atMs: nowMs, tokens: budgetTokens };
         tokenLedger.push(reservation);
 
@@ -212,6 +257,9 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
 
         runs.set(run.runId, Object.freeze({ ...run, state }));
         results.set(run.runId, result);
+        // run end + truncation are audited (contract L5 verification hooks).
+        audit(state === "TRUNCATED" ? "cognition.simulation.run_truncated" : "cognition.simulation.run_ended",
+            { runId: run.runId, state, tokensUsed });
         evictRetainedIfOverBound();
         return getResult(run.runId);
     }
@@ -231,6 +279,7 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
     function invalidateAssumptions(ref) {
         if (typeof ref !== "string" || !ref) fail(REASONS.INVALID_RECORD, "assumption ref wajib string");
         invalidatedAssumptions.add(ref);
+        audit("cognition.simulation.assumptions_invalidated", { ref });
         return Object.freeze({ invalidated: true, ref });
     }
 
@@ -241,7 +290,21 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
     function runsSize() { return runs.size; }
 
     async function persist() {
-        return saveSnapshot(store, { runs, results });
+        try {
+            // "export" dalam kontrak L5: persist adalah satu-satunya jalur yang
+            // mengeluarkan state sandbox dari memori, jadi ia diaudit
+            // ("run start/end, truncation, and export are audited").
+            audit("cognition.simulation.exported", { runs: runs.size, results: results.size });
+            return await saveSnapshot(store, { runs, results, tokenLedger, invalidatedAssumptions });
+        } catch (err) {
+            // Batas store: penulisan ke store NYATA ditolak. Dicatat sebagai
+            // percobaan kontaminasi (contract: "every store-boundary rejection
+            // is audited as a would-be contamination attempt").
+            audit("cognition.simulation.cross_store_write_rejected", {
+                reason: err && err.reason ? err.reason : "CROSS_STORE_WRITE_REJECTED"
+            });
+            throw err;
+        }
     }
 
     return Object.freeze({

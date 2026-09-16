@@ -4,6 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 
 const { createSimulationSandbox, BOUNDS } = require("../../../src/cognition/simulation");
+const { deserialize } = require("../../../src/cognition/simulation/store");
 
 function assertThrowsReason(fn, reason) {
     assert.throws(fn, (err) => {
@@ -207,3 +208,91 @@ test("L5-repair-14: persisted non-T10 and orphan results are quarantined, and as
     sim.invalidateAssumptions("scene:v1");
     assert.equal(sim.getResult("new").state, "STALE_ASSUMPTIONS");
 });
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of 3fdc20e — repaired classes                        */
+/* ---------------------------------------------------------------------- */
+
+test("L5-audit-1: a persisted accessor is rejected at deserialize and NEVER executed", () => {
+    let calls = 0;
+    const hostileRun = {};
+    Object.defineProperty(hostileRun, "runId", {
+        enumerable: true, configurable: true,
+        get() { calls += 1; return "forged"; }
+    });
+    assert.throws(() => deserialize({ runs: { r1: hostileRun }, results: {} }));
+    assert.equal(calls, 0, "a persisted getter must never run during deserialization");
+});
+
+test("L5-audit-2: a REAL state store is rejected as a sandbox store, and the rejection is audited", async () => {
+    const { createMemoryAccStore } = require("../../../src/cognition/persistence/AccStore");
+    const events = [];
+    await assertRejectsReason(
+        createSimulationSandbox({
+            store: createMemoryAccStore(),
+            auditLedger: { append: (e) => events.push(e.eventType) }
+        }),
+        "CROSS_STORE_WRITE_REJECTED"
+    );
+    assert.ok(events.includes("cognition.simulation.cross_store_write_rejected"),
+        `a store-boundary rejection must be audited, saw: ${events.join(",")}`);
+});
+
+test("L5-audit-3: run start, run end, truncation, and assumption invalidation are audited", async () => {
+    const events = [];
+    const clock = manualClock(1000);
+    const sim = await createSimulationSandbox({
+        clock,
+        auditLedger: { append: (e) => events.push(e.eventType) }
+    });
+
+    await sim.startRun({
+        runId: "audited-1", question: "q", scenario: "s", initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 10,
+        provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: ["a1"], confidence: 0.5 })
+    });
+    assert.ok(events.includes("cognition.simulation.run_started"));
+    assert.ok(events.includes("cognition.simulation.run_ended"));
+
+    // Budget exhausted -> TRUNCATED, explicitly audited as truncation.
+    await sim.startRun({
+        runId: "audited-2", question: "q", scenario: "s", initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 5,
+        provider: () => ({ tokensUsed: 99, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+    });
+    assert.ok(events.includes("cognition.simulation.run_truncated"),
+        `truncation must be audited, saw: ${events.join(",")}`);
+
+    sim.invalidateAssumptions("a1");
+    assert.ok(events.includes("cognition.simulation.assumptions_invalidated"),
+        `assumption invalidation must be audited, saw: ${events.join(",")}`);
+});
+
+test("L5-audit-4: the hourly token budget and invalidated assumptions SURVIVE a restart", async () => {
+    const store = jsonStore();
+    const budgeted = { ...BOUNDS, MAX_TOKENS_PER_HOUR: 100 };
+
+    const sim1 = await createSimulationSandbox({ store, bounds: budgeted });
+    await sim1.startRun({
+        runId: "b1", question: "q", scenario: "s", initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 60,
+        provider: () => ({ tokensUsed: 60, distribution: null, risks: [], assumptions: ["keep"], confidence: 0.5 })
+    });
+    // A real-world assumption this run depended on changes -> STALE_ASSUMPTIONS.
+    sim1.invalidateAssumptions("keep");
+    assert.equal(sim1.getResult("b1").state, "STALE_ASSUMPTIONS");
+    await sim1.persist();
+
+    // Restarting must NOT hand the caller a fresh hourly window: 60 + 60 > 100.
+    const sim2 = await createSimulationSandbox({ store, bounds: budgeted });
+    await assertRejectsReason(sim2.startRun({
+        runId: "b2", question: "q", scenario: "s", initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 60,
+        provider: () => ({ tokensUsed: 60, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+    }), "BUDGET_EXCEEDED");
+
+    // ...and the invalidated assumption is not resurrected as fresh.
+    assert.equal(sim2.getResult("b1").state, "STALE_ASSUMPTIONS",
+        "an invalidated assumption must survive a restart");
+});
+

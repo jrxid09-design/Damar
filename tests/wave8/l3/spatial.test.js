@@ -5,6 +5,7 @@ const assert = require("node:assert");
 
 const { createSpatialModel, BOUNDS } = require("../../../src/cognition/spatial");
 const { buildSafeSpatialValue, makeSceneNode } = require("../../../src/cognition/spatial/records");
+const { deserialize } = require("../../../src/cognition/spatial/store");
 
 function assertThrowsReason(fn, reason) {
     assert.throws(fn, (err) => {
@@ -257,3 +258,75 @@ test("L3-repair-24: persisted orphan/future geometry is quarantined before query
     assert.equal(result.state, "UNKNOWN");
     assert.equal(result.blocked, true);
 });
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of 3fdc20e — repaired classes                        */
+/* ---------------------------------------------------------------------- */
+
+test("L3-audit-1: a persisted accessor is rejected at deserialize and NEVER executed", () => {
+    let calls = 0;
+    const hostileFrame = {};
+    Object.defineProperty(hostileFrame, "frameId", {
+        enumerable: true, configurable: true,
+        get() { calls += 1; return "forged"; }
+    });
+    assert.throws(() => deserialize({ frames: { f1: hostileFrame }, transforms: {}, sceneNodes: {} }));
+    assert.equal(calls, 0, "a persisted getter must never run during deserialization");
+});
+
+test("L3-audit-2: a hostile store read degrades to an audited cold start, never a silent empty scene", async () => {
+    const events = [];
+    const hostileFrame = {};
+    Object.defineProperty(hostileFrame, "occupancy", {
+        enumerable: true, configurable: true, get() { return "KNOWN"; }
+    });
+    const store = {
+        async getKv() { return { frames: { f1: hostileFrame }, transforms: {}, sceneNodes: {} }; },
+        async putKv() {}
+    };
+    const sm = await createSpatialModel({ store, auditLedger: { append: (e) => events.push(e.eventType) } });
+    assert.equal(sm.spatialColdStart, true);
+    assert.equal(sm.framesSize(), 0);
+    assert.ok(events.includes("cognition.spatial.store_unreadable"),
+        `an unreadable/hostile snapshot must be audited, saw: ${events.join(",")}`);
+});
+
+test("L3-audit-3: frame registration, transform changes, and occupancy contradictions are audited", async () => {
+    const events = [];
+    const sm = await createSpatialModel({
+        clock: { nowMs: () => 1000 },
+        auditLedger: { append: (e) => events.push(e.eventType) }
+    });
+    sm.registerFrame({ frameId: "f1", kind: "SCREEN", ref: "r", source: "s" });
+    sm.registerFrame({ frameId: "f2", kind: "SCREEN", ref: "r", source: "s" });
+    sm.registerTransform({ transformId: "t1", fromFrameId: "f1", toFrameId: "f2", data: {} });
+    sm.registerTransform({ transformId: "t1", fromFrameId: "f1", toFrameId: "f2", data: { x: 1 } });
+    // Two DIFFERENT sources disagreeing.
+    sm.reportOccupancy({ frameId: "f1", region: { x: 1, y: 1 }, state: "KNOWN", observationRef: "obs-1" });
+    sm.reportOccupancy({ frameId: "f1", region: { x: 1, y: 1 }, state: "UNKNOWN", observationRef: "obs-2" });
+
+    for (const expected of [
+        "cognition.spatial.frame_registered",
+        "cognition.spatial.transform_registered",
+        "cognition.spatial.transform_changed",
+        "cognition.spatial.occupancy_contradiction"
+    ]) {
+        assert.ok(events.includes(expected), `${expected} must be audited, saw: ${events.join(",")}`);
+    }
+});
+
+test("L3-audit-4: one source revising its OWN reading is a revision, not a contradiction (it must not lock the region)", async () => {
+    const events = [];
+    const sm = await createSpatialModel({
+        clock: { nowMs: () => 1000 },
+        auditLedger: { append: (e) => events.push(e.eventType) }
+    });
+    sm.registerFrame({ frameId: "f1", kind: "SCREEN", ref: "r", source: "s" });
+    sm.reportOccupancy({ frameId: "f1", region: { x: 2, y: 2 }, state: "KNOWN", observationRef: "obs-1" });
+    const revised = sm.reportOccupancy({ frameId: "f1", region: { x: 2, y: 2 }, state: "UNKNOWN", observationRef: "obs-1" });
+    assert.notEqual(revised.state, "CONTESTED",
+        "a single source correcting itself must not permanently contest the region");
+    assert.equal(events.filter(e => e === "cognition.spatial.occupancy_contradiction").length, 0,
+        "no contradiction may be recorded for a single-source revision");
+});
+
