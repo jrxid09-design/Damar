@@ -18,4 +18,4 @@ function fail(reason, message, details) {
     throw new GovernedError(reason, message, details);
 }
 
-module.exports = { REASONS, GovernedError, fail };
+module.exports = Object.freeze({ REASONS, GovernedError, fail });
