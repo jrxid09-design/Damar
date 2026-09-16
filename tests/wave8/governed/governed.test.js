@@ -10,23 +10,17 @@ const {
 } = require("../../../src/cognition/governed");
 
 /**
- * Ledger minimal yang benar-benar MEREKAM, dengan API baca (`getByEventId`)
- * seperti ledger kanonik. Dipakai untuk kasus "terkonfirmasi": sejak audit
- * 321c7b3, konfirmasi menuntut bukti tulis-balik, jadi ledger yang hanya
- * mengembalikan bentuk tidak lagi sah.
+ * Ledger KANONIK yang sebenarnya, dipakai untuk kasus "terkonfirmasi".
+ *
+ * Sejak audit cd3dedf, konfirmasi menuntut DUA hal: objeknya adalah ledger
+ * kanonik (merek leksikal -- satu-satunya hal yang tidak bisa dipalsukan oleh
+ * ledger tiruan yang menggemakan apa yang diterimanya), DAN rekamannya dapat
+ * dibaca kembali serta cocok dengan event yang kita append. Test double biasa
+ * karena itu TIDAK BISA lagi dianggap "terkonfirmasi" -- itulah intinya.
  */
 function recordingLedger() {
-    const stored = new Map();
-    let seq = 0;
-    return {
-        append(event) {
-            const record = Object.freeze({ ...event, eventId: `rec-${++seq}` });
-            stored.set(record.eventId, record);
-            return record;
-        },
-        getByEventId(eventId) { return stored.get(eventId) ?? null; },
-        size() { return stored.size; }
-    };
+    const { createAuditLedger } = require("../../../src/runtime/auditLedger");
+    return createAuditLedger({});
 }
 
 test("FG03-1: resolveMode passes through exactly the three sanctioned modes", () => {
@@ -626,12 +620,61 @@ test("FG03-40: a ledger that SYNTHESIZES a read-back record cannot prove persist
 });
 
 test("FG03-41: the repository's own authority vocabulary is contained", () => {
-    // Terms this repo classifies as authority/bearer terms in
-    // src/action/intent.js and src/action/actuation/dispatcher.js.
+    // FULL PARITY, not a hand-picked subset: every token in the repo's canonical
+    // authority vocabulary must also be contained here (audit of cd3dedf found
+    // `authorisation`, `ownerapproved`, and `superuser` were missing).
+    const { INTENT_AUTHORITY_TOKENS } = require("../../../src/action/intent");
+    const missing = [];
+    for (const token of INTENT_AUTHORITY_TOKENS) {
+        try {
+            assertNoAuthorityShapedFields({ nested: { [token]: "v" } }, "Probe");
+            missing.push(token);
+        } catch { /* contained */ }
+    }
+    assert.deepEqual(missing, [],
+        `every canonical authority token must be contained, missing: ${missing.join(",")}`);
+    assert.ok(INTENT_AUTHORITY_TOKENS.size > 0, "the canonical vocabulary must be non-empty");
+});
+
+test("FG03-43: a caller-supplied look-alike ledger is refused by the canonical brand, however convincing", () => {
+    // A ledger that stores nothing but ECHOES what it was handed: it satisfies
+    // every content check yet proves no persistence (audit of cd3dedf).
+    let echoed = null;
+    const transientEcho = {
+        append(evt) { echoed = { ...evt, eventId: "echo-1" }; return echoed; },
+        getByEventId(id) { return echoed && echoed.eventId === id ? echoed : null; }
+    };
+    const forged = recordModeTransitionChecked({
+        auditLedger: transientEcho, from: "off", to: "governed"
+    });
+    assert.equal(forged.audited, false, "an unbranded look-alike cannot prove persistence");
+    assert.equal(forged.failedOpen, true);
+
+    // Even a SPREAD CLONE of a genuine ledger loses the brand, so a caller
+    // cannot launder authority through a copy of the real object.
+    const { createAuditLedger } = require("../../../src/runtime/auditLedger");
+    const clone = { ...createAuditLedger({}) };
+    const cloned = recordModeTransitionChecked({
+        auditLedger: clone, from: "off", to: "governed"
+    });
+    assert.equal(cloned.audited, false, "a spread clone of a real ledger must not confirm");
+    assert.equal(cloned.failedOpen, true);
+
+    // The genuine brand still confirms.
+    const genuine = recordModeTransitionChecked({
+        auditLedger: createAuditLedger({}), from: "off", to: "governed"
+    });
+    assert.equal(genuine.audited, true);
+    assert.equal(genuine.failedOpen, false);
+});
+
+test("FG03-44: the repository's own authority vocabulary is contained (property name form)", () => {
+    // Kept as a plain-name check alongside the parity assertion above, so a
+    // regression in normalization is distinguishable from a missing token.
     for (const key of [
         "authorize", "approve", "trusted", "trust", "privileged",
         "admin", "root", "role", "roles", "canExecute", "allowDecision",
-        "trustLevel", "trustedBy"
+        "trustLevel", "trustedBy", "authorisation", "ownerapproved", "superuser"
     ]) {
         assert.throws(
             () => assertNoAuthorityShapedFields({ nested: { [key]: "v" } }, "Probe"),

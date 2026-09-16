@@ -66,6 +66,27 @@ function detach(value) {
     return out;
 }
 
+/**
+ * MD-018-style lexical brand: only a ledger created by `createAuditLedger()`
+ * below can be in this set.
+ *
+ * FG-03 needs to distinguish a GENUINE ledger from an object that merely
+ * satisfies the ledger's shape. Content read-back cannot do it: a caller's
+ * look-alike can append into a transient variable and echo it from
+ * `getByEventId`, which proves correspondence but not persistence (audit of
+ * cd3dedf). WeakSet membership cannot be forged -- `spread`, `Object.assign`,
+ * and `structuredClone` all lose it -- so requiring the brand at the trust
+ * boundary is what actually excludes caller-supplied look-alike ledgers.
+ * Entries are weak, so a discarded ledger is still collectable.
+ */
+const CANONICAL_LEDGERS = new WeakSet();
+
+function isAuditLedger(candidate) {
+    return candidate !== null
+        && (typeof candidate === "object" || typeof candidate === "function")
+        && CANONICAL_LEDGERS.has(candidate);
+}
+
 function createAuditLedger(options = {}) {
     const bounds = resolveBounds(options.bounds);
     const clock = typeof options.clock === "function" ? options.clock : defaultClock;
@@ -450,7 +471,7 @@ function createAuditLedger(options = {}) {
         return orderedWindow({ order: "asc", limit }).map(detach);
     }
 
-    return Object.freeze({
+    const ledgerInstance = Object.freeze({
         append,
         appendSafe,
         correct,
@@ -463,6 +484,8 @@ function createAuditLedger(options = {}) {
         exportWindow,
         bounds
     });
+    CANONICAL_LEDGERS.add(ledgerInstance);
+    return ledgerInstance;
 }
 
-module.exports = Object.freeze({ createAuditLedger, detach, deepFreeze });
+module.exports = Object.freeze({ createAuditLedger, isAuditLedger, detach, deepFreeze });
