@@ -87,7 +87,12 @@ const AUTHORITY_SHAPED_KEYS = Object.freeze([
     // credential family
     "credential", "credentials", "creds", "secret", "secrets", "apiKey", "accessKey",
     "privateKey", "password", "passphrase", "auth", "oauthToken", "jwt",
-    "sessionCredential"
+    "sessionCredential",
+    // credential-bearing names actually used elsewhere in this repo (audit of
+    // 321c7b3 named `bindingSecret` as a real persistent device credential in
+    // src/authority/ownerTrust/bindings.js) plus their obvious siblings.
+    "bindingSecret", "clientSecret", "secretKey", "apiToken", "privateToken",
+    "accessCredential", "authorizationBearer"
 ]);
 
 /**
@@ -193,11 +198,17 @@ function walkForAuthorityShapedFields(value, label, seen, budget, depth, require
         if (!descriptor || !("value" in descriptor)) {
             throw new Error(`ACC governed: ${label}.${String(key)} wajib berupa data property`);
         }
-        // Kunci berkondisi (token/tokens): angka adalah kosakata advisory yang
-        // sah, STRING adalah materi kredensial -- `token: "Bearer root-secret"`
-        // tidak boleh lolos batas containment (audit d409f56).
-        if (isConditionallyAuthorityShapedKey(key) && typeof descriptor.value === "string") {
-            throw new Error(`ACC governed: ${label}.${String(key)} tidak boleh berupa string kredensial`);
+        // Kunci berkondisi (token/tokens): HANYA angka (anggaran token
+        // perencanaan) yang sah. Setiap representasi lain -- string, array
+        // bersisi string, objek `{value:...}`, boolean, bahkan objek kotak
+        // `new String(...)` -- gagal-tutup, karena semuanya bisa menyelundupkan
+        // materi kredensial (audit 321c7b3 memperlihatkan `["Bearer ..."]`,
+        // `{value:"Bearer ..."}`, dan `true` semuanya lolos).
+        if (isConditionallyAuthorityShapedKey(key)) {
+            const tokenValue = descriptor.value;
+            if (typeof tokenValue !== "number" || !Number.isFinite(tokenValue)) {
+                throw new Error(`ACC governed: ${label}.${String(key)} hanya boleh berupa angka (anggaran token)`);
+            }
         }
         walkForAuthorityShapedFields(descriptor.value, `${label}.${String(key)}`, seen, budget, depth + 1, requireFrozen);
     }
@@ -333,6 +344,61 @@ function readOwnDataField(value, key) {
     return desc.value;
 }
 
+/**
+ * Objek data biasa: prototipe `Object.prototype` atau `null`, bukan array,
+ * bukan Proxy. Objek kotak (`new String(...)`), `Date`, `Map`, dan instance
+ * kelas lain PUNYA properti sendiri yang bisa menyamar, jadi semuanya ditolak
+ * (audit 321c7b3).
+ */
+function isPlainDataObject(value) {
+    if (value === null || typeof value !== "object" || isProxyValue(value) || Array.isArray(value)) return false;
+    let proto;
+    try {
+        proto = Object.getPrototypeOf(value);
+    } catch {
+        return false;
+    }
+    return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Ekstrak eventId dari hasil append, bila bentuknya memang salah satu kontrak
+ * yang sah: `{ok:true, event:{eventId}}` (appendSafe) atau rekaman tersimpan
+ * yang membawa `eventId` (append kanonik).
+ */
+function extractConfirmedEventId(result) {
+    const direct = readOwnDataField(result, "eventId");
+    if (typeof direct === "string" && direct) return direct;
+    const event = readOwnDataField(result, "event");
+    const nested = event === undefined ? undefined : readOwnDataField(event, "eventId");
+    return typeof nested === "string" && nested ? nested : null;
+}
+
+/**
+ * Bukti TULIS-BALIK: rekaman benar-benar ADA di ledger, dibaca lewat API baca
+ * ledger itu sendiri.
+ *
+ * Bentuk kembalian tidak bisa membuktikan durabilitas -- ledger yang
+ * dipasok pemanggil bisa saja mengembalikan `{ok:true}` tanpa menulis apa pun
+ * (audit 321c7b3). Karena itu "terkonfirmasi" hanya sah bila ledger
+ * mengekspos pembacaan (`getByEventId`/`list`) DAN rekaman itu benar-benar
+ * dapat dibaca kembali dari sana. Ledger tanpa API baca tidak dapat
+ * mengonfirmasi apa pun, jadi jalur itu gagal-tutup.
+ */
+function verifyRecordPersisted(ledger, eventId) {
+    if (typeof eventId !== "string" || !eventId) return false;
+    const readBack = readOwnDataField(ledger, "getByEventId");
+    if (typeof readBack !== "function") return false;
+    try {
+        const record = readBack.call(ledger, eventId);
+        if (!record || typeof record !== "object") return false;
+        const storedId = readOwnDataField(record, "eventId");
+        return storedId === eventId;
+    } catch {
+        return false;
+    }
+}
+
 function recordModeTransitionChecked(options) {    let auditLedger, from, to, at;
     try {
         const source = options && typeof options === "object" ? options : {};
@@ -368,31 +434,35 @@ function recordModeTransitionChecked(options) {    let auditLedger, from, to, at
                 audited = false;                  // supplied, but unusable
             } else {
                 const result = append.call(auditLedger, event);
-                if (result && typeof result.then === "function") {
+                // Probe `then` with a get (NOT an own-descriptor read: a real
+                // Promise carries `then` on Promise.prototype, so an
+                // own-descriptor probe would miss it and leave the rejection
+                // unhandled). The probe is inside try/catch so a hostile
+                // `then` accessor still cannot run uncontrolled.
+                let isThenable = false;
+                try {
+                    isThenable = !!result && typeof result.then === "function";
+                } catch {
+                    isThenable = false;
+                }
+                if (isThenable) {
                     // Async ledgers cannot confirm durability here; unconfirmed
                     // rather than assumed successful.
                     Promise.resolve(result).catch(() => {});
-                } else if (result === false || result === undefined || result === null) {
-                    // No positive confirmation. A no-op append must not be
-                    // reported as a recorded transition (audit of 8f78a21).
+                } else if (!isPlainDataObject(result)) {
+                    // Rejects `false`, `undefined`, `null`, primitives, arrays,
+                    // boxed strings, Dates, Maps, and class instances in one
+                    // check -- none of them can be a durable confirmation.
                     audited = false;
                 } else {
-                    // Positive confirmation must be OWN DATA on a plain object.
-                    // `readOwnDataField` refuses inherited fields, accessors,
-                    // arrays carrying a smuggled `ok`, and Proxies (audit of
-                    // d409f56); an array or unrelated object therefore cannot
-                    // masquerade as a confirmation.
-                    const ownOk = readOwnDataField(result, "ok");
-                    const ownEventId = readOwnDataField(result, "eventId");
-                    const isPlain = result !== null && typeof result === "object"
-                        && !Array.isArray(result) && !isProxyValue(result);
-                    if (isPlain && ownOk === true) {
-                        audited = true;               // appendSafe contract
-                    } else if (isPlain && typeof ownEventId === "string" && ownEventId.length > 0) {
-                        audited = true;               // canonical stored record
-                    } else {
-                        audited = false;
-                    }
+                    // Positive confirmation requires PROOF OF PERSISTENCE: the
+                    // returned record must be readable back from the ledger's
+                    // OWN read API. A shape-only check let a caller-supplied
+                    // ledger return {ok:true} or a forged {eventId} without
+                    // recording anything (audit of 321c7b3), and a ledger with
+                    // no read API can prove nothing at all -- so both fail
+                    // closed rather than counting as durable.
+                    audited = verifyRecordPersisted(auditLedger, extractConfirmedEventId(result));
                 }
             }
         }

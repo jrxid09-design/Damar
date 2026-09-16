@@ -9,6 +9,26 @@ const {
     recordModeTransition, recordModeTransitionChecked
 } = require("../../../src/cognition/governed");
 
+/**
+ * Ledger minimal yang benar-benar MEREKAM, dengan API baca (`getByEventId`)
+ * seperti ledger kanonik. Dipakai untuk kasus "terkonfirmasi": sejak audit
+ * 321c7b3, konfirmasi menuntut bukti tulis-balik, jadi ledger yang hanya
+ * mengembalikan bentuk tidak lagi sah.
+ */
+function recordingLedger() {
+    const stored = new Map();
+    let seq = 0;
+    return {
+        append(event) {
+            const record = Object.freeze({ ...event, eventId: `rec-${++seq}` });
+            stored.set(record.eventId, record);
+            return record;
+        },
+        getByEventId(eventId) { return stored.get(eventId) ?? null; },
+        size() { return stored.size; }
+    };
+}
+
 test("FG03-1: resolveMode passes through exactly the three sanctioned modes", () => {
     assert.equal(resolveMode("off"), "off");
     assert.equal(resolveMode("shadow"), "shadow");
@@ -246,13 +266,19 @@ test("FG03-27: recordModeTransitionChecked REPORTS an unconfirmed append instead
     assert.equal(none.audited, false);
     assert.equal(none.failedOpen, false);
 
-    // confirmed durable append
+    // confirmed durable append -- requires PROOF OF PERSISTENCE (read-back)
     const confirmed = recordModeTransitionChecked({
-        auditLedger: { append: () => ({ ok: true }) }, from: "off", to: "governed"
+        auditLedger: recordingLedger(), from: "off", to: "governed"
     });
     assert.equal(confirmed.auditSupplied, true);
     assert.equal(confirmed.audited, true);
     assert.equal(confirmed.failedOpen, false);
+
+    // A shape-only return proves nothing and must NOT count as confirmed.
+    const shapeOnly = recordModeTransitionChecked({
+        auditLedger: { append: () => ({ ok: true }) }, from: "off", to: "governed"
+    });
+    assert.equal(shapeOnly.failedOpen, true, "a shape-only return is not proof of a durable record");
 
     // supplied but REJECTED -- the fail-open case that must be visible
     const rejected = recordModeTransitionChecked({
@@ -339,9 +365,15 @@ test("FG03-30: 'supplied' means the caller passed a ledger, so an unusable one c
     revoke();
     assert.equal(governedOutcome(proxy).failedOpen, true, "revoked Proxy ledger");
 
-    // Genuine confirmations still pass.
-    assert.equal(governedOutcome({ append: () => ({ ok: true }) }).failedOpen, false);
-    assert.equal(governedOutcome({ append: () => ({ eventId: "e1" }) }).failedOpen, false);
+    // A shape-only return is forgeable and proves nothing, so it must NOT be
+    // accepted -- confirmation now requires the record to be readable back.
+    assert.equal(governedOutcome({ append: () => ({ ok: true }) }).failedOpen, true,
+        "shape-only ok:true is not proof of persistence");
+    assert.equal(governedOutcome({ append: () => ({ eventId: "e1" }) }).failedOpen, true,
+        "a forged eventId is not proof of persistence");
+
+    // Genuine confirmations still pass, against a ledger that really records.
+    assert.equal(governedOutcome(recordingLedger()).failedOpen, false);
 });
 
 test("FG03-31: authority vocabulary containment is case- and separator-insensitive, without rejecting legitimate advisory fields", () => {
@@ -407,10 +439,14 @@ test("FG03-34: only a positive confirmation SHAPE counts as audited -- arbitrary
     assert.equal(outcome(() => []).failedOpen, true, "array");
     assert.equal(outcome(() => ({ nope: 1 })).failedOpen, true, "unrelated object");
     assert.equal(outcome(() => ({ eventId: "" })).failedOpen, true, "empty eventId is not a record");
-
-    // The two genuine confirmations still pass.
-    assert.equal(outcome(() => ({ ok: true })).failedOpen, false, "appendSafe contract");
-    assert.equal(outcome(() => ({ eventId: "canonical-record-1" })).failedOpen, false, "canonical stored record");
+    // A shape-only return is forgeable: it must be UNCONFIRMED unless the
+    // ledger can prove the record exists by reading it back.
+    assert.equal(outcome(() => ({ ok: true })).failedOpen, true,
+        "shape-only ok:true cannot prove a durable append");
+    assert.equal(outcome(() => ({ eventId: "canonical-record-1" })).failedOpen, true,
+        "a forged eventId cannot prove a durable append");
+    assert.equal(outcome(() => ({ ok: true, event: { eventId: "e1" } })).failedOpen, true,
+        "nested shape without read-back cannot prove a durable append");
 });
 
 test("FG03-35: the additional authority vocabulary is contained while legitimate advisory vocabulary is not over-rejected", () => {
@@ -455,8 +491,7 @@ test("FG03-36: a non-recording ledger degrades GOVERNED to off but never degrade
 
     // A recording ledger keeps governed working.
     const recording = await createLongHorizonCycle({
-        mode: "governed", capabilityRegistry: fakeRegistry(),
-        auditLedger: { append: () => ({ eventId: "canonical-record-2" }) }
+        mode: "governed", capabilityRegistry: fakeRegistry(), auditLedger: recordingLedger()
     });
     assert.equal(recording.mode, "governed");
     assert.ok(recording.lanes);
@@ -491,26 +526,52 @@ test("FG03-37: a confirmation cannot be forged via inheritance, an array, an acc
     });
     assert.equal(outcome(() => proxyOk).failedOpen, true, "Proxy synthesizing ok:true");
 
-    // Genuine confirmations are still accepted.
-    assert.equal(outcome(() => ({ ok: true })).failedOpen, false);
-    assert.equal(outcome(() => ({ eventId: "canonical-record-3" })).failedOpen, false);
+    // Boxed strings, Dates, and class instances are NOT plain data objects, so
+    // they cannot masquerade as a confirmation either (audit of 321c7b3).
+    assert.equal(outcome(() => new String("ok")).failedOpen, true, "boxed string");
+    assert.equal(outcome(() => new Date()).failedOpen, true, "Date");
+    assert.equal(outcome(() => new Map()).failedOpen, true, "Map");
+
+    // A shape-only return is forgeable and never counts as confirmed.
+    assert.equal(outcome(() => ({ ok: true })).failedOpen, true,
+        "shape-only ok:true cannot prove persistence");
 });
 
-test("FG03-38: a string credential under `token` is contained, while a numeric token budget is still legitimate", () => {
-    // A bare `token` string is credential material and must not pass the
-    // containment boundary, even though it is not a listed key name.
-    assert.throws(
-        () => assertNoAuthorityShapedFields({ plan: { token: "Bearer root-secret" } }, "Probe"),
-        /kredensial|tidak boleh/,
-        "a string token is credential material");
+test("FG03-38: every NON-NUMBER `token` form is contained, while a numeric token budget stays legitimate", () => {
+    // Only a plain finite number is ordinary advisory vocabulary. Every other
+    // representation can carry credential material, so all of these fail closed
+    // (audit of 321c7b3 showed an array, an object, and `true` all passed).
+    const rejected = [
+        "Bearer root-secret",
+        ["Bearer root-secret"],
+        { value: "Bearer root-secret" },
+        true,
+        new String("Bearer root-secret"),
+        null
+    ];
+    for (const value of rejected) {
+        assert.throws(
+            () => assertNoAuthorityShapedFields({ plan: { token: value } }, "Probe"),
+            /hanya boleh berupa angka|tidak boleh/,
+            `token=${String(value)} must be contained`);
+    }
 
     // The same key as a NUMBER is ordinary advisory vocabulary.
     assert.doesNotThrow(() => assertNoAuthorityShapedFields({
         plan: { token: 12, tokens: 34 }, decisionInfluence: "ADVISORY_ONLY"
     }, "Probe"));
 
+    // A non-finite number is not a legitimate budget either.
+    assert.throws(
+        () => assertNoAuthorityShapedFields({ plan: { token: Infinity } }, "Probe"),
+        /hanya boleh berupa angka/);
+
     // The additional credential/auth families are contained by name.
-    for (const key of ["auth", "oauthToken", "jwt", "accessKey", "sessionCredential"]) {
+    for (const key of [
+        "auth", "oauthToken", "jwt", "accessKey", "sessionCredential",
+        "bindingSecret", "clientSecret", "secretKey", "apiToken",
+        "privateToken", "accessCredential", "authorizationBearer"
+    ]) {
         assert.throws(
             () => assertNoAuthorityShapedFields({ nested: { [key]: "v" } }, "Probe"),
             /tidak boleh membawa field|kredensial/,
