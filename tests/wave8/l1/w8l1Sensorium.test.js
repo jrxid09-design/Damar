@@ -1122,3 +1122,153 @@ test("W8L1-repair-48: a hostile `then` accessor cannot leak a delivery slot", ()
         "nothing is left stranded in the queue");
     assert.equal(issued, 200, "every observation still reached the world model");
 });
+
+/* ---------------------------------------------------------------------- */
+/* Audit of dd15f44 -- repaired ordering/rollback/eviction classes         */
+/* ---------------------------------------------------------------------- */
+
+test("W8L1-repair-49: a re-entrant newer FAILED survives an older DEVICE_ONLINE even when the subscriber runs BEFORE the bridge", () => {
+    let monotonic = 0;
+    const body = makeBody();
+    // The re-entrant subscriber is registered FIRST, so under BodySchema's
+    // subscriber loop the ONLINE reaches the BRIDGE AFTER the FAILED it
+    // triggered -- the reversed order the audit used to defeat the guard.
+    let injected = false;
+    body.subscribe((event) => {
+        if (event.type === "DEVICE_ONLINE" && !injected) {
+            injected = true;
+            bridge.applyObservationPlan({
+                type: "SENSOR_OBSERVATION", subject: HOST, monotonic: ++monotonic, timestampMs: T0 + 9000,
+                payload: { channel: { id: "vision.capture" }, sample: {}, healthState: "FAILED" }
+            }, { modality: "VISION" });
+        }
+    });
+    const bridge = bridgeSensoriumToWorldModel({
+        body, auditLedger: { append() {} },
+        worldModel: { ingestObservation() { return { ok: true }; } }
+    });
+
+    body.ingest(emb.makeEvent({
+        type: "DEVICE_ONLINE", source: "test-adapter", provenance: "OBSERVATION", subject: HOST,
+        clock: emb.manualClock(T0 + 8000), payload: {}
+    }));
+    assert.equal(injected, true, "the re-entrant subscriber ran");
+
+    const healthy = bridge.applyObservationPlan({
+        type: "SENSOR_OBSERVATION", subject: HOST, monotonic: ++monotonic, timestampMs: T0 + 20000,
+        payload: { channel: { id: "vision.capture" }, sample: {}, healthState: "OK" }
+    }, { modality: "VISION" });
+    assert.equal(healthy.reason, "sensor-failed",
+        "a newer FAILED must survive an older DEVICE_ONLINE regardless of subscriber order");
+});
+
+test("W8L1-repair-50: rollback is compositional -- a rejected older admission still releases its state", async () => {
+    let t = T0;
+    const clock = { nowMs: () => t };
+    const gates = new Map();
+    const bridge = bridgeSensoriumToWorldModel({
+        body: { subscribe: () => {} }, auditLedger: { append() {} }, clock,
+        worldModel: {
+            ingestObservation(o) {
+                const tag = o.value.sample.tag;
+                return new Promise((resolve, reject) => gates.set(tag, { resolve, reject }));
+            }
+        }
+    });
+    const send = (mono, tag) => {
+        const r = bridge.applyObservationPlan({
+            type: "SENSOR_OBSERVATION", subject: HOST, monotonic: mono, timestampMs: t,
+            payload: { channel: { id: "vision.capture" }, sample: { tag }, healthState: "OK" }
+        }, { modality: "VISION" });
+        t += 5000;
+        return r;
+    };
+
+    // A and B are BOTH in flight. A rejects FIRST, while B is newer.
+    send(1, "A");
+    send(2, "B");
+    gates.get("A").reject(new Error("reject A"));
+    await new Promise(r => setImmediate(r));
+    // Then B rejects too, so nothing settled.
+    gates.get("B").reject(new Error("reject B"));
+    await new Promise(r => setImmediate(r));
+
+    gates.clear();
+    const retry = send(1, "A-retry");
+    assert.notEqual(retry.reason, "duplicate",
+        "with both deliveries reversed, monotonic 1 is not a duplicate -- the rejected admissions must release their state");
+    assert.equal(gates.has("A-retry"), true, "the retry reaches the world model");
+
+    // Mirror case: A rejects but B COMMITS -> monotonic 1 is genuinely stale.
+    let t2 = T0;
+    const gates2 = new Map();
+    const b2 = bridgeSensoriumToWorldModel({
+        body: { subscribe: () => {} }, auditLedger: { append() {} },
+        clock: { nowMs: () => t2 },
+        worldModel: {
+            ingestObservation(o) {
+                const tag = o.value.sample.tag;
+                return new Promise((resolve, reject) => gates2.set(tag, { resolve, reject }));
+            }
+        }
+    });
+    const send2 = (mono, tag) => {
+        const r = b2.applyObservationPlan({
+            type: "SENSOR_OBSERVATION", subject: HOST, monotonic: mono, timestampMs: t2,
+            payload: { channel: { id: "vision.capture" }, sample: { tag }, healthState: "OK" }
+        }, { modality: "VISION" });
+        t2 += 5000;
+        return r;
+    };
+    send2(1, "A");
+    send2(2, "B");
+    gates2.get("A").reject(new Error("reject A"));
+    await new Promise(r => setImmediate(r));
+    gates2.get("B").resolve({ ok: true });
+    await new Promise(r => setImmediate(r));
+    assert.equal(send2(1, "A-retry").reason, "duplicate",
+        "a committed newer observation must still make an older monotonic a duplicate");
+});
+
+test("W8L1-repair-51: a rejected admission cannot erase an unrelated live FAILED tombstone", async () => {
+    let t = T0;
+    const clock = { nowMs: () => t };
+    let rejectNext = false;
+    const bridge = bridgeSensoriumToWorldModel({
+        body: { subscribe: () => {} }, auditLedger: { append() {} }, clock,
+        worldModel: {
+            ingestObservation() {
+                if (rejectNext) { rejectNext = false; throw new Error("reject newcomer"); }
+                return { ok: true };
+            }
+        }
+    });
+
+    // A live FAILED tombstone on another channel.
+    bridge.applyObservationPlan({
+        type: "SENSOR_OBSERVATION", subject: "usb:victim", monotonic: 1, timestampMs: t,
+        payload: { channel: { id: "vision.capture" }, sample: {}, healthState: "FAILED" }
+    }, { modality: "VISION" });
+    t += 5000;
+    assert.equal(bridge.applyObservationPlan({
+        type: "SENSOR_OBSERVATION", subject: "usb:victim", monotonic: 2, timestampMs: t,
+        payload: { channel: { id: "vision.capture" }, sample: {}, healthState: "OK" }
+    }, { modality: "VISION" }).reason, "sensor-failed");
+
+    // A newcomer that is REJECTED, whose admission triggered eviction.
+    rejectNext = true;
+    t += 5000;
+    assert.equal(bridge.applyObservationPlan({
+        type: "SENSOR_OBSERVATION", subject: "usb:newcomer", monotonic: 1, timestampMs: t,
+        payload: { channel: { id: "screen.new" }, sample: {}, healthState: "OK" }
+    }, { modality: "SCREEN" }).reason, "ingest-rejected");
+    await new Promise(r => setImmediate(r));
+    t += 5000;
+
+    // The tombstone must survive: the failure is still in force.
+    assert.equal(bridge.applyObservationPlan({
+        type: "SENSOR_OBSERVATION", subject: "usb:victim", monotonic: 3, timestampMs: t,
+        payload: { channel: { id: "vision.capture" }, sample: {}, healthState: "OK" }
+    }, { modality: "VISION" }).reason, "sensor-failed",
+    "rollback must restore any tombstone the rejected admission displaced");
+});
