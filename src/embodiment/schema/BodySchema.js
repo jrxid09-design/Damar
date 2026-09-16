@@ -119,10 +119,29 @@ function safeRejectField(event, key) {
  */
 const COMMITTED_EVENTS = new WeakSet();
 
+/**
+ * Event yang SEDANG diserahkan oleh komit SEKARANG.
+ *
+ * Keanggotaan COMMITTED_EVENTS hanya membuktikan "pernah dikomit", sehingga
+ * event DEVICE_ONLINE lama masih bisa diserahkan ULANG langsung ke API hilir
+ * setelah observasi FAILED yang lebih baru, dan membuka kembali kanal yang
+ * seharusnya tetap tertutup (audit b332cf8). Himpunan ini diisi HANYA selama
+ * `_notify` berjalan, jadi ia membuktikan "sedang dikirim oleh komit ini" --
+ * replay objek event lama tidak pernah memenuhi syarat itu.
+ */
+const NOTIFYING_EVENTS = new WeakSet();
+
 function wasCommittedByBodySchema(event) {
     return event !== null
         && (typeof event === "object" || typeof event === "function")
         && COMMITTED_EVENTS.has(event);
+}
+
+/** Bukti terkuat: event ini sedang diserahkan oleh komit yang sedang berjalan. */
+function isEventBeingDelivered(event) {
+    return event !== null
+        && (typeof event === "object" || typeof event === "function")
+        && NOTIFYING_EVENTS.has(event);
 }
 
 /** Urutan total KONTEN antar-pengamatan deskriptor. */
@@ -1051,19 +1070,28 @@ class BodySchema {
     }
 
     _notify(event, result) {
-        for (const fn of [...this._subscribers]) {
-            try {
-                fn(event, result);
-            } catch (err) {
-                if (this._subscriberErrors.length >= this.config.subscriberErrorCapacity) {
-                    this._subscriberErrors.shift();
+        // Tandai SEDANG diserahkan selama loop ini saja -- konsumen hilir boleh
+        // memperlakukan peristiwa lifecycle sebagai nyata HANYA di dalam
+        // jendela ini, sehingga replay event lama tidak pernah lolos.
+        const markDelivering = event !== null && typeof event === "object";
+        if (markDelivering) NOTIFYING_EVENTS.add(event);
+        try {
+            for (const fn of [...this._subscribers]) {
+                try {
+                    fn(event, result);
+                } catch (err) {
+                    if (this._subscriberErrors.length >= this.config.subscriberErrorCapacity) {
+                        this._subscriberErrors.shift();
+                    }
+                    this._subscriberErrors.push(Object.freeze({
+                        atMs: this.clock.nowMs(),
+                        eventId: event.eventId,
+                        message: String(err?.message ?? err).slice(0, 200)
+                    }));
                 }
-                this._subscriberErrors.push(Object.freeze({
-                    atMs: this.clock.nowMs(),
-                    eventId: event.eventId,
-                    message: String(err?.message ?? err).slice(0, 200)
-                }));
             }
+        } finally {
+            if (markDelivering) NOTIFYING_EVENTS.delete(event);
         }
     }
 
@@ -1458,4 +1486,7 @@ function freezeView(view) {
     return deepFreeze(structuredCopy(view));
 }
 
-module.exports = { BodySchema, newerWins, presenceWins, wasCommittedByBodySchema };
+module.exports = {
+    BodySchema, newerWins, presenceWins,
+    wasCommittedByBodySchema, isEventBeingDelivered
+};
