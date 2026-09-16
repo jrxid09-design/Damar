@@ -131,10 +131,29 @@ const COMMITTED_EVENTS = new WeakSet();
  */
 const NOTIFYING_EVENTS = new WeakSet();
 
+/**
+ * Urutan komit per event.
+ *
+ * Jendela pengiriman saja belum cukup: satu subscriber bisa, DI DALAM loop
+ * notifikasi yang sedang berjalan, mengirim observasi FAILED yang LEBIH BARU,
+ * lalu event DEVICE_ONLINE lama (yang di-commit lebih dulu) sampai ke jembatan
+ * dan menghapus status FAILED itu (audit 8d4f80c). Urutan komit memberi
+ * pembanding yang bebas re-entrancy: lifecycle hanya boleh membuka kanal bila
+ * di-commit SETELAH observasi yang membuat kanal itu FAILED.
+ */
+const COMMIT_SEQUENCE = new WeakMap();
+let commitSeqCounter = 0;
+
 function wasCommittedByBodySchema(event) {
     return event !== null
         && (typeof event === "object" || typeof event === "function")
         && COMMITTED_EVENTS.has(event);
+}
+
+/** Urutan komit event, atau undefined bila event tidak pernah dikomit di sini. */
+function commitSequenceOf(event) {
+    if (event === null || (typeof event !== "object" && typeof event !== "function")) return undefined;
+    return COMMIT_SEQUENCE.get(event);
 }
 
 /** Bukti terkuat: event ini sedang diserahkan oleh komit yang sedang berjalan. */
@@ -311,6 +330,7 @@ class BodySchema {
         // Tandai SETELAH komit sah: hanya event yang benar-benar melewati
         // ingest() yang boleh dipercaya hilir sebagai peristiwa nyata.
         COMMITTED_EVENTS.add(event);
+        COMMIT_SEQUENCE.set(event, ++commitSeqCounter);
 
         if (!event.payload?.derived) {
             this._deriveDefaultChanges();
@@ -1488,5 +1508,5 @@ function freezeView(view) {
 
 module.exports = {
     BodySchema, newerWins, presenceWins,
-    wasCommittedByBodySchema, isEventBeingDelivered
+    wasCommittedByBodySchema, isEventBeingDelivered, commitSequenceOf
 };
