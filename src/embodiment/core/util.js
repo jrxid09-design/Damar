@@ -13,6 +13,22 @@
  */
 
 const crypto = require("node:crypto");
+const { types: utilTypes } = require("node:util");
+
+/**
+ * Pemeriksaan Proxy lewat internal slot: TIDAK memicu trap apa pun dan tetap
+ * benar untuk Proxy yang sudah dicabut. Ini penting karena refleksi
+ * (`Reflect.ownKeys`, `getOwnPropertyDescriptor`) pada Proxy justru
+ * MENJALANKAN kode pemanggil — deteksi-dengan-refleksi berlawanan dengan
+ * tujuannya. Kegagalan probe diperlakukan sebagai "proxy" (gagal-tutup).
+ */
+function isProxyValue(value) {
+    try {
+        return utilTypes.isProxy(value);
+    } catch {
+        return true;
+    }
+}
 
 /** Pembekuan mendalam — tetap menelusuri anak walau kulit sudah beku. */
 function deepFreeze(value) {
@@ -81,5 +97,5 @@ function fail(code, message) {
 
 module.exports = {
     deepFreeze, structuredCopy, canonicalJson, sha256Hex, digestOf,
-    clamp01, realClock, manualClock, fail
+    clamp01, realClock, manualClock, fail, isProxyValue
 };

@@ -24,7 +24,7 @@
 
 const {
     deepFreeze, structuredCopy, digestOf, canonicalJson, fail,
-    realClock
+    realClock, isProxyValue
 } = require("../core/util");
 const { validateDeviceId } = require("../core/identity");
 const {
@@ -69,8 +69,13 @@ const OBSERVATION_CALIBRATION_FIELDS = Object.freeze(
 function safeOwnField(obj, key) {
     let desc;
     try {
+        if (isProxyValue(obj)) {
+            throw fail("EMB_INVALID_OBSERVATION_PAYLOAD",
+                `payload observasi tidak boleh berupa Proxy: '${key}'`);
+        }
         desc = Object.getOwnPropertyDescriptor(obj, key);
-    } catch {
+    } catch (err) {
+        if (err && err.code === "EMB_INVALID_OBSERVATION_PAYLOAD") throw err;
         throw fail("EMB_INVALID_OBSERVATION_PAYLOAD",
             `payload observasi tidak dapat diverifikasi dengan aman: '${key}'`);
     }
@@ -89,6 +94,10 @@ function safeOwnField(obj, key) {
  */
 function safeRejectField(event, key) {
     try {
+        // Jalur ini hanya berjalan pada input yang sudah dicurigai hostil —
+        // refleksi pada Proxy justru MENJALANKAN trap pemanggil, jadi
+        // Proxy ditolak sebelum refleksi pertama.
+        if (isProxyValue(event)) return null;
         const desc = Object.getOwnPropertyDescriptor(event, key);
         if (!desc || desc.get || desc.set) return null;
         return typeof desc.value === "string" ? desc.value.slice(0, 120) : null;
@@ -440,8 +449,10 @@ class BodySchema {
             throw fail("EMB_INVALID_CHANNEL",
                 `kanal observasi bukan sensor: '${channel.id}'`);
         }
+        // Batas 2.048 BYTE (UTF-8), bukan 2.048 unit kode UTF-16: satu
+        // karakter multibyte tidak boleh lolos dua kali lebih besar.
         const sample = JSON.stringify(event.payload.sample ?? null);
-        if (sample.length > 2048) {
+        if (Buffer.byteLength(sample, "utf8") > 2048) {
             throw fail("EMB_OBSERVATION_TOO_LARGE", "sampel observasi > 2KB");
         }
 
