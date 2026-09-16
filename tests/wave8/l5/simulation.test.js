@@ -394,4 +394,51 @@ test("L5-audit-7: an async-rejecting audit sink is contained and never blocks th
     assert.equal(unhandled, 0, "an async-rejecting audit hook must not produce unhandled rejections");
 });
 
+test("L5-audit-8: a real-state writer verb hidden up the prototype CHAIN is still rejected", async () => {
+    // The guard previously inspected only ONE prototype level, so a verb two or
+    // three levels up was accepted -- a genuine cross-store bypass.
+    for (const depth of [1, 2, 3]) {
+        const base = { appendEvent() {} };
+        let store = Object.create(base);
+        for (let i = 1; i < depth; i++) store = Object.create(store);
+        store.getKv = async () => null;
+        store.putKv = async () => {};
+        await assertRejectsReason(
+            createSimulationSandbox({ store }),
+            "CROSS_STORE_WRITE_REJECTED"
+        );
+    }
+
+    // A plain {getKv, putKv} double must still be accepted.
+    const kv = new Map();
+    const ok = await createSimulationSandbox({
+        store: { async getKv(k) { return kv.get(k); }, async putKv(k, v) { kv.set(k, v); } }
+    });
+    assert.equal(ok.simulationColdStart, true);
+});
+
+test("L5-audit-9: a transient store read failure fails closed but is RECOVERABLE, not permanent", async () => {
+    let reads = 0;
+    const flaky = {
+        async getKv() { reads += 1; if (reads === 1) throw new Error("transient IO"); return null; },
+        async putKv() {}
+    };
+    const spec = {
+        runId: "t", question: "q", scenario: "s", initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 10,
+        provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+    };
+
+    // While the history cannot be read, the cap cannot be enforced -> refuse.
+    const first = await createSimulationSandbox({ store: flaky });
+    await assertRejectsReason(first.startRun(spec), "BUDGET_EXCEEDED");
+
+    // Once the store is healthy, a fresh construction recovers -- the sandbox
+    // is not permanently bricked by one transient read failure.
+    const second = await createSimulationSandbox({ store: flaky });
+    const recovered = await second.startRun({ ...spec, runId: "t2" });
+    assert.equal(recovered.state, "COMPLETE",
+        "a healthy store must recover on reconstruction");
+});
+
 
