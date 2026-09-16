@@ -599,3 +599,70 @@ test("FG03-39: the canonical owner-trust ledger really confirms a governed trans
         try { comp.close(); } catch { /* ignore */ }
     }
 });
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of c37be79 — repaired classes                        */
+/* ---------------------------------------------------------------------- */
+
+test("FG03-40: a ledger that SYNTHESIZES a read-back record cannot prove persistence", () => {
+    // Returns an eventId AND fabricates a record carrying that id on read.
+    const synthesizer = {
+        append: () => ({ eventId: "forged" }),
+        getByEventId: (id) => ({ eventId: id, eventType: "whatever", source: "elsewhere", metadata: {} })
+    };
+    const r = recordModeTransitionChecked({
+        auditLedger: synthesizer, from: "off", to: "governed"
+    });
+    assert.equal(r.auditSupplied, true);
+    assert.equal(r.audited, false, "an id-only read-back is forgeable and must not confirm");
+    assert.equal(r.failedOpen, true);
+
+    // A ledger that really stores the event still confirms.
+    const real = recordingLedger();
+    const ok = recordModeTransitionChecked({ auditLedger: real, from: "off", to: "governed" });
+    assert.equal(ok.audited, true);
+    assert.equal(ok.failedOpen, false);
+    assert.equal(real.size(), 1, "the transition really was recorded");
+});
+
+test("FG03-41: the repository's own authority vocabulary is contained", () => {
+    // Terms this repo classifies as authority/bearer terms in
+    // src/action/intent.js and src/action/actuation/dispatcher.js.
+    for (const key of [
+        "authorize", "approve", "trusted", "trust", "privileged",
+        "admin", "root", "role", "roles", "canExecute", "allowDecision",
+        "trustLevel", "trustedBy"
+    ]) {
+        assert.throws(
+            () => assertNoAuthorityShapedFields({ nested: { [key]: "v" } }, "Probe"),
+            /tidak boleh membawa field/,
+            `'${key}' must be contained`);
+    }
+});
+
+test("FG03-42: production refuses governed with NO ledger, while the frozen W7-L7 no-ledger construction still works", async () => {
+    const { createLongHorizonCycle } = require("../../../src/cognition/longhorizon");
+    const registry = { get: () => ({ kind: "tool" }), has: () => true, getAvailability: () => { throw new Error("unused"); } };
+
+    // PRODUCTION: resolving a null ledger must not be indistinguishable from success.
+    const strict = await createLongHorizonCycle({
+        mode: "governed", capabilityRegistry: registry, auditLedger: null, requireAudit: true
+    });
+    assert.equal(strict.mode, "off", "governed must not start with no ledger when audit is required");
+    assert.equal(strict.auditUnavailable, true);
+    assert.equal(strict.lanes, undefined, "no lanes are constructed on the degraded path");
+    assert.equal(await strict.cycle(), null);
+
+    // The frozen Wave7 L7 convergence contract still constructs governed with
+    // no ledger under the default (declared configuration), unchanged.
+    const permissive = await createLongHorizonCycle({ mode: "governed", capabilityRegistry: registry });
+    assert.equal(permissive.mode, "governed");
+    assert.ok(permissive.lanes);
+
+    // With a real ledger the production path works.
+    const ok = await createLongHorizonCycle({
+        mode: "governed", capabilityRegistry: registry, auditLedger: recordingLedger(), requireAudit: true
+    });
+    assert.equal(ok.mode, "governed");
+    assert.ok(ok.lanes);
+});

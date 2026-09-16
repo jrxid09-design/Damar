@@ -92,7 +92,14 @@ const AUTHORITY_SHAPED_KEYS = Object.freeze([
     // 321c7b3 named `bindingSecret` as a real persistent device credential in
     // src/authority/ownerTrust/bindings.js) plus their obvious siblings.
     "bindingSecret", "clientSecret", "secretKey", "apiToken", "privateToken",
-    "accessCredential", "authorizationBearer"
+    "accessCredential", "authorizationBearer",
+    // Authority-family terms this repo classifies as authority/bearer terms in
+    // src/action/intent.js and src/action/actuation/dispatcher.js (audit of
+    // c37be79): the vocabulary must cover the repo's OWN authority vocabulary,
+    // not a hand-picked subset of it.
+    "authorize", "authorized", "approve", "approved", "trust", "trusted",
+    "privileged", "admin", "administrator", "root", "role", "roles",
+    "canExecute", "allowDecision", "trustLevel", "trustedBy"
 ]);
 
 /**
@@ -385,21 +392,64 @@ function extractConfirmedEventId(result) {
  * dapat dibaca kembali dari sana. Ledger tanpa API baca tidak dapat
  * mengonfirmasi apa pun, jadi jalur itu gagal-tutup.
  */
-function verifyRecordPersisted(ledger, eventId) {
+function verifyRecordPersisted(ledger, eventId, event) {
     if (typeof eventId !== "string" || !eventId) return false;
     const readBack = readOwnDataField(ledger, "getByEventId");
     if (typeof readBack !== "function") return false;
+    let record;
     try {
-        const record = readBack.call(ledger, eventId);
-        if (!record || typeof record !== "object") return false;
-        const storedId = readOwnDataField(record, "eventId");
-        return storedId === eventId;
+        record = readBack.call(ledger, eventId);
     } catch {
         return false;
     }
+    if (!record || typeof record !== "object") return false;
+    if (readOwnDataField(record, "eventId") !== eventId) return false;
+
+    // READING BACK THE ID IS NOT ENOUGH. A ledger can return an arbitrary
+    // `{eventId}` AND have `getByEventId()` synthesize any record carrying that
+    // id, which passed the id-only check (audit of c37be79). The stored record
+    // must also CORRESPOND to the event we actually appended, so a synthesizing
+    // ledger has to reproduce our content -- i.e. it has to actually store it.
+    if (!event || typeof event !== "object") return false;
+    if (readOwnDataField(record, "eventType") !== readOwnDataField(event, "eventType")) return false;
+    if (readOwnDataField(record, "source") !== readOwnDataField(event, "source")) return false;
+    return sameMetadata(readOwnDataField(record, "metadata"), readOwnDataField(event, "metadata"));
 }
 
-function recordModeTransitionChecked(options) {    let auditLedger, from, to, at;
+/**
+ * Perbandingan metadata secara struktural dan tanpa mengeksekusi kode: hanya
+ * field MILIK SENDIRI yang dibaca, hanya nilai primitif, kedalaman dibatasi.
+ * Dipakai untuk membuktikan rekaman hasil baca-balik benar-benar memuat event
+ * yang kita append -- bukan rekaman lain yang kebetulan ber-id sama.
+ */
+function sameMetadata(a, b, depth = 0) {
+    if (a === b) return true;
+    if (depth > 8) return false;
+    if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+    let keysA;
+    let keysB;
+    try {
+        keysA = Object.keys(a);
+        keysB = Object.keys(b);
+    } catch {
+        return false;
+    }
+    if (keysA.length !== keysB.length) return false;
+    for (const key of keysA) {
+        if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+        const valueA = readOwnDataField(a, key);
+        const valueB = readOwnDataField(b, key);
+        if (valueA !== null && typeof valueA === "object") {
+            if (!sameMetadata(valueA, valueB, depth + 1)) return false;
+        } else if (valueA !== valueB) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function recordModeTransitionChecked(options) {
+    let auditLedger, from, to, at;
     try {
         const source = options && typeof options === "object" ? options : {};
         const read = (key) => {
@@ -462,7 +512,7 @@ function recordModeTransitionChecked(options) {    let auditLedger, from, to, at
                     // recording anything (audit of 321c7b3), and a ledger with
                     // no read API can prove nothing at all -- so both fail
                     // closed rather than counting as durable.
-                    audited = verifyRecordPersisted(auditLedger, extractConfirmedEventId(result));
+                    audited = verifyRecordPersisted(auditLedger, extractConfirmedEventId(result), event);
                 }
             }
         }
