@@ -441,4 +441,91 @@ test("L5-audit-9: a transient store read failure fails closed but is RECOVERABLE
         "a healthy store must recover on reconstruction");
 });
 
+test("L5-audit-10: the isolation guard walks the WHOLE prototype chain, with no depth cap to hide behind", async () => {
+    // A previous fix capped the walk at 32 levels, which is itself a bypass:
+    // placing the writer verb at depth 33 was accepted.
+    let deep = Object.create({ appendEvent() {} });
+    for (let i = 0; i < 32; i++) deep = Object.create(deep);
+    deep.getKv = async () => null;
+    deep.putKv = async () => {};
+    await assertRejectsReason(
+        createSimulationSandbox({ store: deep }),
+        "CROSS_STORE_WRITE_REJECTED"
+    );
+
+    // A Proxy hidden IN the chain is refused too: every reflective read of a
+    // Proxy runs its traps, so it cannot be trusted even when its traps lie.
+    let traps = 0;
+    const lying = new Proxy({}, {
+        getOwnPropertyDescriptor() { traps += 1; return undefined; },
+        getPrototypeOf(t) { traps += 1; return Object.getPrototypeOf(t); },
+        ownKeys(t) { traps += 1; return Reflect.ownKeys(t); }
+    });
+    const sneaky = Object.create(lying);
+    sneaky.getKv = async () => null;
+    sneaky.putKv = async () => {};
+    await assertRejectsReason(
+        createSimulationSandbox({ store: sneaky }),
+        "CROSS_STORE_WRITE_REJECTED"
+    );
+    assert.equal(traps, 0, "no proxy trap may run while checking isolation");
+});
+
+test("L5-audit-11: sparse, malformed, oversized, or Proxy budget histories all fail CLOSED", async () => {
+    // A hole in the ledger previously read as an SHORTER history, restoring
+    // less usage than was really consumed and resetting the hourly cap.
+    const sparse = [];
+    sparse.length = 2;
+    sparse[0] = { atMs: 1, tokens: 50 };
+    assert.equal(deserialize({
+        runs: {}, results: {}, budget: { tokenLedger: sparse, invalidatedAssumptions: [] }
+    }).degraded, true, "a sparse ledger cannot be trusted");
+
+    // A malformed individual entry is not silently skipped either.
+    assert.equal(deserialize({
+        runs: {}, results: {},
+        budget: { tokenLedger: [{ atMs: 1, tokens: 5 }, { atMs: "x", tokens: 5 }], invalidatedAssumptions: [] }
+    }).degraded, true, "a malformed entry cannot be trusted");
+
+    // A non-string invalidation ref is likewise untrustworthy.
+    assert.equal(deserialize({
+        runs: {}, results: {}, budget: { tokenLedger: [], invalidatedAssumptions: [1] }
+    }).degraded, true, "a malformed invalidation ref cannot be trusted");
+
+    // An absurdly long ledger is refused rather than scanned synchronously.
+    const started = Date.now();
+    const huge = deserialize({
+        runs: {}, results: {}, budget: { tokenLedger: new Array(2_000_000), invalidatedAssumptions: [] }
+    });
+    assert.equal(huge.degraded, true, "an oversized ledger cannot be trusted");
+    assert.ok(Date.now() - started < 1000, "an oversized ledger must not be scanned synchronously");
+
+    // A Proxy anywhere in the persisted value is refused without running traps.
+    let traps = 0;
+    const inner = new Proxy({ x: 1 }, {
+        ownKeys(t) { traps += 1; return Reflect.ownKeys(t); },
+        getOwnPropertyDescriptor(t, k) { traps += 1; return Reflect.getOwnPropertyDescriptor(t, k); },
+        getPrototypeOf(t) { traps += 1; return Reflect.getPrototypeOf(t); }
+    });
+    assert.throws(() => deserialize({ runs: { r1: { runId: "r1", scenario: inner } }, results: {} }));
+    assert.equal(traps, 0, "no proxy trap may run during deserialization");
+
+    // The fail-closed consequences: each of these refuses a run.
+    const base = { ...BOUNDS, MAX_TOKENS_PER_HOUR: 100 };
+    const spec = {
+        runId: "r", question: "q", scenario: "s", initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 60,
+        provider: () => ({ tokensUsed: 60, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+    };
+    for (const raw of [
+        { runs: {}, results: {}, budget: { tokenLedger: sparse, invalidatedAssumptions: [] } },
+        { runs: {}, results: {}, budget: { tokenLedger: new Array(2_000_000), invalidatedAssumptions: [] } }
+    ]) {
+        const sim = await createSimulationSandbox({
+            store: { async getKv() { return raw; }, async putKv() {} }, bounds: base
+        });
+        await assertRejectsReason(sim.startRun(spec), "BUDGET_EXCEEDED");
+    }
+});
+
 

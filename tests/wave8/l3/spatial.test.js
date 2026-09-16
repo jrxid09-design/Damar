@@ -6,6 +6,12 @@ const assert = require("node:assert");
 const { createSpatialModel, BOUNDS } = require("../../../src/cognition/spatial");
 const { buildSafeSpatialValue, makeSceneNode } = require("../../../src/cognition/spatial/records");
 const { deserialize } = require("../../../src/cognition/spatial/store");
+const { canonicalRegionKey } = require("../../../src/cognition/spatial/records");
+
+/** Kunci scene node yang sama dengan yang dipakai lane (`frameId::region`). */
+function sceneNodeKey(frameId, region) {
+    return `${frameId}::${canonicalRegionKey(region)}`;
+}
 
 function assertThrowsReason(fn, reason) {
     assert.throws(fn, (err) => {
@@ -30,8 +36,12 @@ function manualClock(startMs) {
 test("L3-24: spatial sanitizers reject proxy length and accessor-backed observation references without invoking them", () => {
     let lengthReads = 0;
     const proxy = new Proxy([], { get(target, key, receiver) { if (key === "length") lengthReads++; return Reflect.get(target, key, receiver); } });
-    assert.deepEqual(buildSafeSpatialValue(proxy), []);
-    assert.equal(lengthReads, 0);
+    // A Proxy is now refused OUTRIGHT, before any reflective read: descriptor
+    // reads and Reflect.ownKeys themselves run the proxy's traps, so simply
+    // reading `length` safely (the earlier contract) still executed caller code
+    // for nested proxies and other keys (audit Wave8 L3/L5).
+    assertThrowsReason(() => buildSafeSpatialValue(proxy), "EXECUTABLE_MATERIAL_REJECTED");
+    assert.equal(lengthReads, 0, "no proxy trap may run during sanitization");
     let reads = 0;
     const refs = [];
     Object.defineProperty(refs, 0, { enumerable: true, get() { reads++; return "o1"; } });
@@ -349,5 +359,56 @@ test("L3-audit-5: an async-rejecting audit sink is contained and never blocks th
         process.removeListener("unhandledRejection", listener);
     }
     assert.equal(unhandled, 0, "an async-rejecting audit hook must not produce unhandled rejections");
+});
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of 49859df — repaired classes                        */
+/* ---------------------------------------------------------------------- */
+
+test("L3-audit-6: a persisted Proxy value is rejected without running any trap", () => {
+    let traps = 0;
+    const inner = new Proxy({ x: 1 }, {
+        ownKeys(t) { traps += 1; return Reflect.ownKeys(t); },
+        getOwnPropertyDescriptor(t, k) { traps += 1; return Reflect.getOwnPropertyDescriptor(t, k); },
+        getPrototypeOf(t) { traps += 1; return Reflect.getPrototypeOf(t); }
+    });
+    assert.throws(() => deserialize({ frames: { f1: { frameId: "f1", ref: inner } }, transforms: {}, sceneNodes: {} }));
+    assert.equal(traps, 0, "no proxy trap may run during sanitization");
+});
+
+test("L3-audit-7: restart-time stale-first compaction uses the INJECTED clock and is audited", async () => {
+    const events = [];
+    const nowMs = 1_000_000;
+    // A durable snapshot holding more scene nodes than the active bound, all
+    // last updated long before "now" so every one of them is stale.
+    const sceneNodes = {};
+    for (let i = 0; i < 8; i++) {
+        const frameId = `f${i}`;
+        const region = { r: i };
+        sceneNodes[sceneNodeKey(frameId, region)] = {
+            nodeId: sceneNodeKey(frameId, region),
+            frameId,
+            region,
+            state: "KNOWN",
+            observationRefs: ["obs-1"],
+            updatedAtMs: nowMs - 10_000_000
+        };
+    }
+    const frames = {};
+    for (let i = 0; i < 8; i++) frames[`f${i}`] = { frameId: `f${i}`, kind: "SCREEN", ref: {}, source: "s", registeredAt: nowMs - 10_000_000 };
+
+    const store = {
+        async getKv() { return { frames, transforms: {}, sceneNodes }; },
+        async putKv() {}
+    };
+    const sm = await createSpatialModel({
+        store,
+        clock: { nowMs: () => nowMs },
+        bounds: { ...BOUNDS, MAX_SCENE_NODES: 3 },
+        auditLedger: { append: (e) => events.push(e.eventType) }
+    });
+    assert.ok(sm.sceneNodesSize() <= 3, "restart compaction must enforce the active bound");
+    assert.ok(events.includes("cognition.spatial.scene_node_evicted"),
+        `restart-time eviction must be audited, saw: ${events.join(",")}`);
 });
 
