@@ -34,7 +34,7 @@ const {
 const { assertCapability, normalizeDescriptor, normalizeCapabilityClaim }
     = require("../domain/descriptor");
 const {
-    EVENT_TYPES, CORE_SOURCE, CORE_TOKEN, makeCoreEvent, validateEventShape
+    EVENT_TYPES, CORE_SOURCE, CORE_TOKEN, makeCoreEvent, sanitizeEnvelope
 } = require("../sensorium/events");
 
 const DEFAULTS = Object.freeze({
@@ -80,6 +80,21 @@ function safeOwnField(obj, key) {
             `payload observasi tidak boleh membawa properti accessor: '${key}'`);
     }
     return desc.value;
+}
+
+/**
+ * Identitas event untuk dead-letter. Berjalan tepat saat input sudah
+ * dicurigai hostil, jadi: baca via deskriptor, jangan pernah melempar,
+ * dan jangan pernah mengembalikan apa pun selain string pendek/null.
+ */
+function safeRejectField(event, key) {
+    try {
+        const desc = Object.getOwnPropertyDescriptor(event, key);
+        if (!desc || desc.get || desc.set) return null;
+        return typeof desc.value === "string" ? desc.value.slice(0, 120) : null;
+    } catch {
+        return null;
+    }
 }
 
 /** Urutan total KONTEN antar-pengamatan deskriptor. */
@@ -202,10 +217,15 @@ class BodySchema {
      * Satu-satunya pintu mutasi state. Atomik per event: penolakan
      * tidak pernah meninggalkan state setengah jadi.
      */
-    ingest(event) {
+    ingest(rawEvent) {
 
-        const shape = validateEventShape(event);
-        if (!shape.ok) return this._reject(shape.reason, event);
+        // BATAS KEPERCAYAAN — satu-satunya tempat objek pemanggil disentuh.
+        // Seluruh jalur setelah baris ini hanya melihat salinan beku yang
+        // dibaca via deskriptor, jadi accessor/getter/proxy hostil tidak
+        // pernah dieksekusi dan field warisan tidak pernah ikut terbawa.
+        const shape = sanitizeEnvelope(rawEvent);
+        if (!shape.ok) return this._reject(shape.reason, rawEvent);
+        const event = shape.event;
 
         const producerClass = EVENT_TYPES[event.type].producerClass;
 
@@ -1380,11 +1400,20 @@ class BodySchema {
         if (this._deadLetters.length >= this.config.deadLetterCapacity) {
             this._deadLetters.shift();
         }
+        // Jalur ini berjalan PERSIS saat input sudah dicurigai hostil, jadi
+        // identitas event dibaca via deskriptor: accessor tidak pernah
+        // dijalankan dan exception tidak boleh lolos dari penolakan.
+        let eventId = null;
+        let type = null;
+        if (event && typeof event === "object") {
+            eventId = safeRejectField(event, "eventId");
+            type = safeRejectField(event, "type");
+        }
         this._deadLetters.push(Object.freeze({
             atMs: this.clock.nowMs(),
             reason,
-            eventId: event && typeof event === "object" ? event.eventId ?? null : null,
-            type: event && typeof event === "object" ? event.type ?? null : null
+            eventId,
+            type
         }));
         return { accepted: false, reason };
     }
