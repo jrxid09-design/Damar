@@ -35,7 +35,7 @@
 const os = require("node:os");
 const path = require("node:path");
 const { types: utilTypes } = require("node:util");
-const { wasCommittedByBodySchema, isEventBeingDelivered } = require("../embodiment/schema/BodySchema");
+const { wasCommittedByBodySchema, isEventBeingDelivered, commitSequenceOf } = require("../embodiment/schema/BodySchema");
 
 /**
  * Bukti lifecycle terkuat: event ini SEDANG diserahkan oleh komit BodySchema
@@ -375,6 +375,11 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         }
         const [evicted] = queue.splice(victimIndex, 1);
         shedCount += 1;
+        // Shed work was never issued, so its admission-time state must be rolled
+        // back too -- otherwise a shed silently consumes this channel's
+        // monotonic/rate/calibration state (audit of 8d4f80c).
+        evicted.state = "shed";
+        if (typeof evicted.rollback === "function") evicted.rollback();
         audit({ type: "W8_L1_OBSERVATION_SHED", subject: evicted.subject,
                 channelId: evicted.channelId, reason: "pending-capacity", atMs: nowMs() });
         return true;
@@ -388,13 +393,24 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
             issued = worldModel.ingestObservation(entry.input);
         } catch (err) {
             inFlight -= 1;
+            entry.state = "rejected";
             entry.result = undefined;
+            if (typeof entry.rollback === "function") entry.rollback();
             entry.onRejected(err);
             drainQueue();
             return;
         }
         entry.result = issued;
-        if (issued && typeof issued.then === "function") {
+        // Probes `then` INSIDE the try so a throwing `then` accessor cannot
+        // escape after `inFlight` was already incremented -- which previously
+        // leaked a delivery slot permanently (audit of 8d4f80c).
+        let isThenable = false;
+        try {
+            isThenable = !!issued && typeof issued.then === "function";
+        } catch {
+            isThenable = false;
+        }
+        if (isThenable) {
             // A delivery that never settles must not hold its slot forever:
             // without a deadline, unresolved promises retain every slot and
             // queued work can never advance (independent audit of b332cf8).
@@ -408,7 +424,16 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
                 drainQueue();
             };
             entry.timer = setTimeout(() => {
-                finish((/** @type {any} */ e) => { e.state = "timeout"; }, entry);
+                finish((e) => {
+                    // Sebuah delivery yang tidak pernah selesai adalah
+                    // KEHILANGAN yang jujur, bukan penerapan: state yang
+                    // sempat ditulis saat admission harus dikembalikan supaya
+                    // monotonic/rate/FAILED tidak terus dikonsumsi (audit of
+                    // 8d4f80c).
+                    e.state = "timeout";
+                    e.result = undefined;
+                    if (typeof e.rollback === "function") e.rollback();
+                }, entry);
             }, DELIVERY_SETTLE_TIMEOUT_MS);
             if (entry.timer && typeof entry.timer.unref === "function") entry.timer.unref();
             Promise.resolve(issued).then(
@@ -494,9 +519,20 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
                 return { applied: false, reason: "untrusted-lifecycle-event" };
             }
             const onlineSubject = subjectRead.ok ? subjectRead.value : undefined;
+            const onlineSeq = commitSequenceOf(event);
             let cleared = 0;
             if (typeof onlineSubject === "string") {
                 for (const [key, entry] of tracked) {
+                    // ORDERING, not merely authenticity (audit of 8d4f80c): a
+                    // subscriber handling this very ONLINE event can
+                    // synchronously submit a NEWER FAILED observation, so an
+                    // older ONLINE must never clear state a later commit set.
+                    // Only a lifecycle event committed AFTER the observation
+                    // that failed the channel may reopen it.
+                    if (entry.failed && Number.isFinite(entry.failedAtSeq)
+                        && Number.isFinite(onlineSeq) && onlineSeq <= entry.failedAtSeq) {
+                        continue;
+                    }
                     if (entry.failed && key.startsWith(`${onlineSubject}\u0000`)) {
                         tracked.set(key, { ...entry, failed: false });
                         cleared++;
@@ -660,22 +696,44 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
         // and calibration state (independent audit of b332cf8). Recording the
         // decision here makes those laws sequential regardless of how the world
         // model resolves its promises.
+        //
+        // Because admission now writes state BEFORE the world model has agreed,
+        // the pre-admission state is kept so a delivery that is rejected or
+        // times out can be ROLLED BACK -- otherwise a failed delivery would
+        // still consume monotonic/rate/FAILED state forever (audit of 8d4f80c).
+        const priorTracked = prior === undefined ? null : { ...prior };
+        const seq = ++pendingSeq;
         tracked.set(key, {
             monotonic: Number.isFinite(monotonic) ? monotonic : (prior?.monotonic ?? 0),
             lastAppliedMs: receivedAtMs,
             healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState]
                 ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK,
             failed: skewedHealthState === "FAILED",
-            calibrationRef: calibrationRef ?? null
+            failedAtMs: skewedHealthState === "FAILED" ? receivedAtMs : undefined,
+            calibrationRef: calibrationRef ?? null,
+            writerSeq: seq
         });
         evictWorstTrackedEntryIfOver(MAX_TRACKED_SENSOR_CHANNELS);
         if (skewedHealthState === "FAILED") {
             audit({ type: "W8_L1_SENSOR_FAILED", subject, channelId, atMs: nowMs() });
         }
 
+        // Roll back to the pre-admission state, but ONLY while this entry is
+        // still the latest writer for the channel: a newer observation that has
+        // since been admitted must never be regressed by an older failure.
+        function rollbackTrackedState() {
+            const current = tracked.get(key);
+            if (!current || current.writerSeq !== seq) return;
+            if (priorTracked === null) tracked.delete(key);
+            else tracked.set(key, priorTracked);
+        }
+
         const entry = {
-            subject, channelId, seq: ++pendingSeq, input, result: undefined,
+            subject, channelId, seq, input, result: undefined,
             state: "queued",
+            // Dipakai jalur timeout dan shed untuk mengembalikan state yang
+            // sempat ditulis saat admission (audit of 8d4f80c).
+            rollback: rollbackTrackedState,
             healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState]
                 ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK,
             onSettled: (value) => { entry.state = "applied"; entry.result = value; },
@@ -687,6 +745,10 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
                 // boundaries") — it never declares entities on the caller's
                 // behalf.
                 entry.state = "rejected";
+                // Reject-closed AND rolled back: a delivery the world model
+                // refused must not keep consuming this channel's
+                // monotonic/rate/FAILED state (audit of 8d4f80c).
+                rollbackTrackedState();
                 audit({ type: "W8_L1_OBSERVATION_REJECTED", subject, channelId,
                         reason: err?.reason ?? err?.code ?? "ingest-failed", atMs: nowMs() });
             }

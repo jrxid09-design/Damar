@@ -1011,3 +1011,114 @@ test("W8L1-repair-44: a never-settling delivery is reclaimed by the settle deadl
     assert.equal(obs.queuedObservations, 200 - obs.inFlightObservations,
         "everything beyond the delivery window is queued, not dropped");
 });
+
+/* ---------------------------------------------------------------------- */
+/* Audit of 8d4f80c -- repaired rollback/ordering/leak classes             */
+/* ---------------------------------------------------------------------- */
+
+test("W8L1-repair-45: a delivery the world model REJECTS does not keep consuming the channel's state", () => {
+    let now = T0;
+    let monotonic = 0;
+    const bridge = bridgeSensoriumToWorldModel({
+        body: { subscribe() {} }, auditLedger: { append() {} },
+        // The world model refuses everything (e.g. UNKNOWN_ENTITY).
+        worldModel: { ingestObservation() { throw new Error("UNKNOWN_ENTITY"); } },
+        clock: { nowMs: () => now }
+    });
+    const send = (healthState) => bridge.applyObservationPlan(
+        { type: "SENSOR_OBSERVATION", subject: HOST, monotonic: ++monotonic, timestampMs: now,
+          payload: { channel: { id: "vision.capture" }, sample: {}, healthState } },
+        { modality: "VISION" });
+
+    // A REJECTED FAILED observation must not wedge the channel: its
+    // admission-time FAILED state is rolled back.
+    assert.equal(send("FAILED").reason, "ingest-rejected");
+    now += 5000;
+    const retry = send("OK");
+    assert.notEqual(retry.reason, "sensor-failed",
+        "a rejected FAILED observation must not leave the channel stop-forwarded forever");
+    assert.equal(retry.reason, "ingest-rejected", "the retry reaches the world model again");
+});
+
+test("W8L1-repair-46: shedding cancels an observation without consuming its channel state", () => {
+    let monotonic = 0;
+    const bridge = bridgeSensoriumToWorldModel({
+        body: { subscribe() {} }, auditLedger: { append() {} },
+        worldModel: { ingestObservation() { return new Promise(() => {}); } }
+    });
+    const send = (channelId) => bridge.applyObservationPlan({
+        type: "SENSOR_OBSERVATION", subject: HOST, monotonic: ++monotonic, timestampMs: T0,
+        payload: { channel: { id: channelId }, sample: {} }
+    }, { modality: "SCREEN" });
+
+    // Fill the delivery window, then queue (and shed) further work.
+    for (let i = 0; i < 64; i++) assert.equal(send(`screen.w${i}`).reason, "pending");
+    for (let i = 0; i < 80000; i++) send(`screen.q${i}`);
+    assert.ok(bridge.observability.shedCount > 0, "overflow sheds queued work");
+    // Shed work was never issued, so the channel it named is not consumed: a
+    // later observation for that same channel is not treated as a duplicate.
+    const revived = send("screen.q0");
+    assert.notEqual(revived.reason, "duplicate",
+        "a shed observation must not leave behind a consumed monotonic");
+});
+
+test("W8L1-repair-47: a re-entrant NEWER FAILED observation is not cleared by an older DEVICE_ONLINE commit", () => {
+    let monotonic = 0;
+    let ingested = 0;
+    const body = makeBody();
+    const bridge = bridgeSensoriumToWorldModel({
+        body, auditLedger: { append() {} },
+        worldModel: { ingestObservation() { ingested++; return { ok: true }; } }
+    });
+
+    // A subscriber that, while the ONLINE commit is being delivered, submits a
+    // NEWER FAILED observation for the same channel.
+    let injected = false;
+    body.subscribe((event) => {
+        if (event.type === "DEVICE_ONLINE" && !injected) {
+            injected = true;
+            bridge.applyObservationPlan({
+                type: "SENSOR_OBSERVATION", subject: HOST, monotonic: ++monotonic, timestampMs: T0 + 9000,
+                payload: { channel: { id: "vision.capture" }, sample: {}, healthState: "FAILED" }
+            }, { modality: "VISION" });
+        }
+    });
+
+    body.ingest(emb.makeEvent({
+        type: "DEVICE_ONLINE", source: "test-adapter", provenance: "OBSERVATION", subject: HOST,
+        clock: emb.manualClock(T0 + 8000), payload: {}
+    }));
+    assert.equal(injected, true, "the re-entrant subscriber ran");
+
+    // The older ONLINE commit must NOT have reopened the channel the newer
+    // FAILED observation closed.
+    const healthy = bridge.applyObservationPlan({
+        type: "SENSOR_OBSERVATION", subject: HOST, monotonic: ++monotonic, timestampMs: T0 + 10000,
+        payload: { channel: { id: "vision.capture" }, sample: {}, healthState: "OK" }
+    }, { modality: "VISION" });
+    assert.equal(healthy.reason, "sensor-failed",
+        "a newer FAILED must survive an older DEVICE_ONLINE delivery");
+});
+
+test("W8L1-repair-48: a hostile `then` accessor cannot leak a delivery slot", () => {
+    const thenThrower = {};
+    Object.defineProperty(thenThrower, "then", { get() { throw new Error("hostile then"); } });
+    let issued = 0;
+    const bridge = bridgeSensoriumToWorldModel({
+        body: { subscribe() {} }, auditLedger: { append() {} },
+        worldModel: { ingestObservation() { issued++; return thenThrower; } }
+    });
+    for (let i = 0; i < 200; i++) {
+        bridge.applyObservationPlan({
+            type: "SENSOR_OBSERVATION", subject: HOST, monotonic: i + 1, timestampMs: T0,
+            payload: { channel: { id: `screen.x${i}` }, sample: {} }
+        }, { modality: "SCREEN" });
+    }
+    // Probing `then` outside the protected region previously leaked every slot,
+    // stalling the window permanently. No slot may leak now.
+    assert.equal(bridge.observability.inFlightObservations, 0,
+        "a throwing `then` must not leak delivery slots");
+    assert.equal(bridge.observability.queuedObservations, 0,
+        "nothing is left stranded in the queue");
+    assert.equal(issued, 200, "every observation still reached the world model");
+});
