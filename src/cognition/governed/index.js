@@ -99,7 +99,11 @@ const AUTHORITY_SHAPED_KEYS = Object.freeze([
     // not a hand-picked subset of it.
     "authorize", "authorized", "approve", "approved", "trust", "trusted",
     "privileged", "admin", "administrator", "root", "role", "roles",
-    "canExecute", "allowDecision", "trustLevel", "trustedBy"
+    "canExecute", "allowDecision", "trustLevel", "trustedBy",
+    // Tiga token yang masih hilang dari daftar ini padahal ada di kosakata
+    // kanonik repo (INTENT_AUTHORITY_TOKENS, src/action/intent.js) -- parity
+    // diperiksa test, bukan diklaim (audit of fg03 r10).
+    "authorisation", "ownerapproved", "superuser"
 ]);
 
 /**
@@ -392,7 +396,59 @@ function extractConfirmedEventId(result) {
  * dapat dibaca kembali dari sana. Ledger tanpa API baca tidak dapat
  * mengonfirmasi apa pun, jadi jalur itu gagal-tutup.
  */
-function verifyRecordPersisted(ledger, eventId, event) {
+/**
+ * Pemeriksa merek ledger kanonik, di-resolve MALAS.
+ *
+ * `governed/` tidak boleh mengimpor runtime record-sink saat modul dimuat
+ * (pola yang sama dengan pemeriksa `SpatialError` di lane Wave7 lain), jadi
+ * pemeriksa ini dicari saat pertama dipakai dan di-cache. Bila modul ledger
+ * tidak tersedia, TIDAK ADA ledger yang dapat dibuktikan kanonik -- gagal-tutup.
+ */
+let ledgerBrandCheck;
+
+function isCanonicalLedger(candidate) {
+    if (ledgerBrandCheck === undefined) {
+        try {
+            const mod = require("../../runtime/auditLedger");
+            ledgerBrandCheck = typeof mod.isAuditLedger === "function" ? mod.isAuditLedger : null;
+        } catch {
+            ledgerBrandCheck = null;
+        }
+    }
+    if (typeof ledgerBrandCheck !== "function") return false;
+    try {
+        return ledgerBrandCheck(candidate) === true;
+    } catch {
+        return false;
+    }
+}
+
+/** Salinan struktur-dalam milik ledger kanonik, bila tersedia. */
+let ledgerDetach;
+
+function detachRecord(value) {
+    if (ledgerDetach === undefined) {
+        try {
+            const mod = require("../../runtime/auditLedger/ledger");
+            ledgerDetach = typeof mod.detach === "function" ? mod.detach : null;
+        } catch {
+            ledgerDetach = null;
+        }
+    }
+    return typeof ledgerDetach === "function" ? ledgerDetach(value) : null;
+}
+
+/**
+ * Apakah rekaman hasil baca-balik benar-benar memuat event yang kita append?
+ *
+ * Perbandingan dilakukan pada SALINAN STRUKTUR-DALAM milik ledger kanonik
+ * (`detach`), bukan pada objek hidup: salinan itu bebas accessor/Proxy dan
+ * hanya memuat data property, sehingga tidak ada kode pemanggil yang berjalan
+ * dan tidak ada rantai prototipe yang bisa menipu. Bila `detach` tidak
+ * tersedia, hasil baca-balik tidak dapat dibandingkan dengan aman dan
+ * jawabannya gagal-tutup.
+ */
+function readBackCorresponds(ledger, eventId, event) {
     if (typeof eventId !== "string" || !eventId) return false;
     const readBack = readOwnDataField(ledger, "getByEventId");
     if (typeof readBack !== "function") return false;
@@ -405,43 +461,41 @@ function verifyRecordPersisted(ledger, eventId, event) {
     if (!record || typeof record !== "object") return false;
     if (readOwnDataField(record, "eventId") !== eventId) return false;
 
-    // READING BACK THE ID IS NOT ENOUGH. A ledger can return an arbitrary
-    // `{eventId}` AND have `getByEventId()` synthesize any record carrying that
-    // id, which passed the id-only check (audit of c37be79). The stored record
-    // must also CORRESPOND to the event we actually appended, so a synthesizing
-    // ledger has to reproduce our content -- i.e. it has to actually store it.
+    // READ-BACK ALONE IS NOT PROOF. A look-alike ledger can append into a
+    // transient variable and echo it back, which proves correspondence but NOT
+    // persistence (audit of cd3dedf). Only the lexical brand of a genuine
+    // canonical ledger is unforgeable, so that check is the hard gate and this
+    // content check is layered on top of it.
     if (!event || typeof event !== "object") return false;
-    if (readOwnDataField(record, "eventType") !== readOwnDataField(event, "eventType")) return false;
-    if (readOwnDataField(record, "source") !== readOwnDataField(event, "source")) return false;
-    return sameMetadata(readOwnDataField(record, "metadata"), readOwnDataField(event, "metadata"));
+    const storedCore = detachRecord(record);
+    const eventCore = detachRecord(event);
+    if (storedCore === null || eventCore === null) return false;
+    return containsEventCore(storedCore, eventCore);
 }
 
 /**
- * Perbandingan metadata secara struktural dan tanpa mengeksekusi kode: hanya
- * field MILIK SENDIRI yang dibaca, hanya nilai primitif, kedalaman dibatasi.
- * Dipakai untuk membuktikan rekaman hasil baca-balik benar-benar memuat event
- * yang kita append -- bukan rekaman lain yang kebetulan ber-id sama.
+ * Apakah rekaman tersimpan MEMUAT event yang kita append?
+ *
+ * Sengaja SUBSET, bukan kesamaan penuh: ledger kanonik menambah field miliknya
+ * sendiri (sequence, digest, atMs, ...), jadi menuntut jumlah kunci yang sama
+ * akan menolak setiap rekaman yang sah (ditemukan saat menjalankan suite).
+ * Yang harus dibuktikan adalah setiap field yang kita kirim ada di rekaman itu
+ * dengan nilai yang sama -- cukup untuk menolak rekaman lain yang kebetulan
+ * ber-id sama, tanpa melarang pengayaan yang wajar.
  */
-function sameMetadata(a, b, depth = 0) {
-    if (a === b) return true;
+function containsEventCore(stored, appended, depth = 0) {
     if (depth > 8) return false;
-    if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
-    let keysA;
-    let keysB;
-    try {
-        keysA = Object.keys(a);
-        keysB = Object.keys(b);
-    } catch {
-        return false;
+    if (stored === null || appended === null
+        || typeof stored !== "object" || typeof appended !== "object") {
+        return stored === appended;
     }
-    if (keysA.length !== keysB.length) return false;
-    for (const key of keysA) {
-        if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
-        const valueA = readOwnDataField(a, key);
-        const valueB = readOwnDataField(b, key);
-        if (valueA !== null && typeof valueA === "object") {
-            if (!sameMetadata(valueA, valueB, depth + 1)) return false;
-        } else if (valueA !== valueB) {
+    for (const key of Object.keys(appended)) {
+        if (!Object.prototype.hasOwnProperty.call(stored, key)) return false;
+        const valueStored = readOwnDataField(stored, key);
+        const valueAppended = readOwnDataField(appended, key);
+        if (valueAppended !== null && typeof valueAppended === "object") {
+            if (!containsEventCore(valueStored, valueAppended, depth + 1)) return false;
+        } else if (valueStored !== valueAppended) {
             return false;
         }
     }
@@ -512,7 +566,18 @@ function recordModeTransitionChecked(options) {
                     // recording anything (audit of 321c7b3), and a ledger with
                     // no read API can prove nothing at all -- so both fail
                     // closed rather than counting as durable.
-                    audited = verifyRecordPersisted(auditLedger, extractConfirmedEventId(result), event);
+                    // Positive confirmation requires BOTH:
+                    //  1. the LEDGER is a genuine canonical ledger (lexical
+                    //     brand -- unforgeable, and the only check that actually
+                    //     excludes a caller-supplied look-alike that echoes what
+                    //     it was handed without storing anything), and
+                    //  2. the appended record is readable back and MATCHES the
+                    //     event we appended.
+                    // A shape-only check let a ledger return {ok:true} or a
+                    // forged {eventId} without recording anything (audits of
+                    // 321c7b3 / cd3dedf).
+                    audited = isCanonicalLedger(auditLedger)
+                        && readBackCorresponds(auditLedger, extractConfirmedEventId(result), event);
                 }
             }
         }
