@@ -304,3 +304,87 @@ test("FG03-29: governed mode cannot start when a SUPPLIED ledger fails to record
     assert.equal(lh.lanes, undefined, "the degraded path constructs no lanes, matching mode off's zero footprint");
     assert.equal(await lh.cycle(), null);
 });
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of 8f78a21 — repaired classes                        */
+/* ---------------------------------------------------------------------- */
+
+function fakeRegistry() {
+    const map = new Map([["cap.x", { kind: "tool" }]]);
+    return {
+        get: (id) => (map.has(id) ? { id, ...map.get(id) } : null),
+        has: (id) => map.has(id),
+        getAvailability: () => { throw new Error("unused"); }
+    };
+}
+
+test("FG03-30: 'supplied' means the caller passed a ledger, so an unusable one can never report a confirmed transition", () => {
+    const governedOutcome = (auditLedger) =>
+        recordModeTransitionChecked({ auditLedger, from: "off", to: "governed" });
+
+    // absent ledger: a declared configuration, not a positive audit claim
+    assert.equal(governedOutcome(undefined).auditSupplied, false);
+    assert.equal(governedOutcome(undefined).failedOpen, false);
+    assert.equal(governedOutcome(null).auditSupplied, false);
+
+    // SUPPLIED but unusable: every one of these must be reported as fail-open.
+    assert.equal(governedOutcome({}).failedOpen, true, "no append at all");
+    assert.equal(governedOutcome({ append: 42 }).failedOpen, true, "non-callable append");
+    assert.equal(governedOutcome({ append: () => {} }).failedOpen, true, "a no-op append confirms nothing");
+    assert.equal(governedOutcome({ append: () => false }).failedOpen, true, "explicit refusal");
+    assert.equal(governedOutcome({ append: () => ({ ok: false }) }).failedOpen, true, "appendSafe rejection");
+    assert.equal(governedOutcome({ append: () => { throw new Error("down"); } }).failedOpen, true, "throwing append");
+
+    const { proxy, revoke } = Proxy.revocable({ append: () => ({ ok: true }) }, {});
+    revoke();
+    assert.equal(governedOutcome(proxy).failedOpen, true, "revoked Proxy ledger");
+
+    // Genuine confirmations still pass.
+    assert.equal(governedOutcome({ append: () => ({ ok: true }) }).failedOpen, false);
+    assert.equal(governedOutcome({ append: () => ({ eventId: "e1" }) }).failedOpen, false);
+});
+
+test("FG03-31: authority vocabulary containment is case- and separator-insensitive, without rejecting legitimate advisory fields", () => {
+    for (const key of [
+        "permitted", "permit", "entitlement", "accessToken", "refreshToken",
+        "delegation", "delegated", "mandate", "AUTHORIZATION", "auth_token",
+        "Auth-Token", "Permissions", "LEASE"
+    ]) {
+        assert.throws(
+            () => assertNoAuthorityShapedFields({ nested: { [key]: "x" } }, "Probe"),
+            /tidak boleh membawa field/,
+            `'${key}' must be contained`);
+    }
+    // Legitimate advisory-shaped projection fields must NOT be collateral damage.
+    assert.doesNotThrow(() => assertNoAuthorityShapedFields({
+        decisionInfluence: "ADVISORY_ONLY",
+        selfModel: { capabilityCount: 0, healthState: "OK" },
+        attentionFocus: null
+    }, "Probe"));
+});
+
+test("FG03-32: the canonical cognition barrel is frozen, so the governed facade cannot be swapped one level up", () => {
+    const cognition = require("../../../src/cognition");
+    assert.equal(Object.isFrozen(cognition), true);
+    assert.equal(Reflect.set(cognition, "governed", { validateGovernedCognitiveProjection: () => true }), false);
+    assert.equal(cognition.governed, require("../../../src/cognition/governed"));
+    assert.equal(cognition.governed.resolveMode("hostile"), "off");
+});
+
+test("FG03-33: the canonical audit-ledger binding actually resolves, so shadow and governed construct with a real ledger", async () => {
+    const { createLongHorizonCycle } = require("../../../src/cognition/longhorizon");
+    // The previous revision required a non-existent path, so the binding
+    // silently became null and nothing was ever recorded canonically.
+    const auditLedger = require("../../../src/runtime/auditLedger");
+    assert.equal(typeof auditLedger.createAuditLedger, "function");
+
+    for (const mode of ["shadow", "governed"]) {
+        const lh = await createLongHorizonCycle({ mode, capabilityRegistry: fakeRegistry() });
+        assert.equal(lh.mode, mode, `${mode} must construct normally against the canonical ledger`);
+        assert.equal(lh.auditUnavailable, undefined);
+        assert.ok(lh.lanes, `${mode} must have constructed its lanes`);
+    }
+    // off stays zero-footprint.
+    const off = await createLongHorizonCycle({ mode: "off", capabilityRegistry: fakeRegistry() });
+    assert.equal(off.lanes, undefined);
+});
