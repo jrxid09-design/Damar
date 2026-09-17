@@ -11,6 +11,29 @@ const { sha256Hex } = require("./integrity");
 const { isDurableAuditSink } = require("./fileSink");
 
 /**
+ * `WeakSet.prototype.has`/`add` lewat INTRINSIK yang dibekukan saat modul ini
+ * dimuat, bukan pencarian properti `CANONICAL_LEDGERS.has(...)`.
+ *
+ * Merek leksikal ini adalah satu-satunya yang membedakan ledger kanonik dari
+ * tiruan ber-bentuk sama. Memanggilnya sebagai metode membuatnya bergantung pada
+ * `WeakSet.prototype.has` yang masih dapat dijangkau dan ditimpa SETELAH modul
+ * dimuat; dengan penimpaan selektif, ledger tiruan tanpa sink disk dilaporkan
+ * `audited:true` (audit 0132c36). Pola pemanggilan yang sama dipakai untuk
+ * primitive berkas di `fileSink.js`.
+ */
+const REFLECT_APPLY = Reflect.apply;
+const WEAKSET_HAS = WeakSet.prototype.has;
+const WEAKSET_ADD = WeakSet.prototype.add;
+
+function brandHas(set, value) {
+    return REFLECT_APPLY(WEAKSET_HAS, set, [value]);
+}
+
+function brandAdd(set, value) {
+    REFLECT_APPLY(WEAKSET_ADD, set, [value]);
+}
+
+/**
  * Audit Ledger V1 — the append-oriented observational ledger.
  *
  * LAWS (binding):
@@ -85,7 +108,7 @@ const CANONICAL_LEDGERS = new WeakSet();
 function isAuditLedger(candidate) {
     return candidate !== null
         && (typeof candidate === "object" || typeof candidate === "function")
-        && CANONICAL_LEDGERS.has(candidate);
+        && brandHas(CANONICAL_LEDGERS, candidate);
 }
 
 function createAuditLedger(options = {}) {
@@ -500,7 +523,7 @@ function createAuditLedger(options = {}) {
         // (audit 7677a0f).
         hasDurableSink: isDurableAuditSink(sink)
     });
-    CANONICAL_LEDGERS.add(ledgerInstance);
+    brandAdd(CANONICAL_LEDGERS, ledgerInstance);
     return ledgerInstance;
 }
 

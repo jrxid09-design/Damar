@@ -1143,3 +1143,83 @@ test("FG03-54: a Proxy options object runs no traps, and swapping the ledger mod
         require.cache[ledgerPath] = original;
     }
 });
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of 0132c36 -- intrinsics must not be mutable lookups  */
+/* ---------------------------------------------------------------------- */
+
+test("FG03-55: overriding WeakSet.prototype.has cannot forge a durable brand", () => {
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const { createAuditLedger, createFileAuditSink, isAuditLedger } = require("../../../src/runtime/auditLedger");
+    const { isDurableAuditSink } = require("../../../src/runtime/auditLedger/fileSink");
+
+    // The brand checks called `WEAKSET.has(x)` / `CANONICAL_LEDGERS.has(x)` --
+    // property lookups on `WeakSet.prototype`, which is reachable and mutable
+    // AFTER module load. A selective override made a completely fake ledger with
+    // no disk sink report `audited: true` (audit of 0132c36). The intrinsics are
+    // now captured at load and invoked through a frozen `Reflect.apply`.
+    const realHas = WeakSet.prototype.has;
+    let overriddenHasCalls = 0;
+    try {
+        WeakSet.prototype.has = function () { overriddenHasCalls += 1; return true; };
+
+        const fakeLedger = Object.freeze({
+            append() { return { eventId: "forged" }; },
+            getByEventId(id) { return { eventId: id, eventType: "trust", source: "elsewhere", metadata: {} }; },
+            hasDurableSink: true
+        });
+        const checked = recordModeTransitionChecked({
+            auditLedger: fakeLedger, from: "off", to: "governed"
+        });
+        assert.equal(checked.audited, false, "an unbranded look-alike must not confirm");
+        assert.equal(checked.failedOpen, true);
+        assert.equal(isAuditLedger(fakeLedger), false, "and it is not a canonical ledger");
+        assert.equal(overriddenHasCalls, 0, "the overridden has() must never be reached");
+    } finally {
+        WeakSet.prototype.has = realHas;
+    }
+
+    // A genuine branded ledger is still recognised through the captured intrinsic.
+    const rec = recordingLedger();
+    assert.equal(isAuditLedger(rec.ledger), true,
+        "a genuine canonical ledger is still recognised");
+    rec.close();
+
+    // And a genuine fsync file sink is still branded durable.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-intr-brand-"));
+    const durableSink = createFileAuditSink(path.join(dir, "audit.jsonl"));
+    assert.equal(isDurableAuditSink(durableSink), true);
+    try { durableSink.close(); } catch { /* ignore */ }
+});
+
+test("FG03-56: overriding util.types.isProxy cannot make an options Proxy execute traps", () => {
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const utilTypes = require("node:util").types;
+    const { createFileAuditSink } = require("../../../src/runtime/auditLedger");
+    const { isDurableAuditSink } = require("../../../src/runtime/auditLedger/fileSink");
+
+    // `isProxyValue` called `utilTypes.isProxy(...)` -- another mutable property
+    // lookup, so replacing it made the supposedly rejected options Proxy run two
+    // traps (audit of 0132c36).
+    const realIsProxy = utilTypes.isProxy;
+    let traps = 0;
+    try {
+        utilTypes.isProxy = () => false;   // lie: nothing is a Proxy
+        const proxyOpts = new Proxy({}, {
+            getOwnPropertyDescriptor() { traps += 1; return undefined; },
+            getPrototypeOf(t) { traps += 1; return Object.getPrototypeOf(t); },
+            get() { traps += 1; return true; }
+        });
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-intr-"));
+        const sink = createFileAuditSink(path.join(dir, "audit.jsonl"), proxyOpts);
+        assert.equal(traps, 0, "no Proxy trap may run while resolving the option");
+        assert.equal(isDurableAuditSink(sink), true, "the safe default (fsync on) stays in force");
+        try { sink.close(); } catch { /* ignore */ }
+    } finally {
+        utilTypes.isProxy = realIsProxy;
+    }
+});

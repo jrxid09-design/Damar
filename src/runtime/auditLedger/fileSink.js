@@ -5,11 +5,11 @@ const path = require("node:path");
 const utilTypes = require("node:util").types;
 
 /**
- * Primitive berkas DIBEKUKAN SAAT MODUL DIMUAT, lalu dipanggil lewat
- * `Reflect.apply` yang juga dibekukan.
+ * Primitive DIBEKUKAN SAAT MODUL DIMUAT, lalu dipanggil lewat `Reflect.apply`
+ * yang juga dibekukan.
  *
- * Merek durabel (di bawah) menegaskan "sink ini menulis DAN fsync", jadi
- * jalur tulis tidak boleh dapat dibelokkan oleh kode penelepon.
+ * Merek durabel (di bawah) menegaskan "sink ini menulis DAN fsync", jadi jalur
+ * tulis TIDAK boleh dapat dibelokkan oleh kode penelepon.
  *
  * Kenapa `Reflect.apply` dan BUKAN `FN.call(...)`: `FILE_FSYNC_SYNC` menunjuk
  * ke objek fungsi yang SAMA dengan `fs.fsyncSync`, dan objek itu masih dapat
@@ -19,8 +19,16 @@ const utilTypes = require("node:util").types;
  * (audit 2712bf3). Memanggil fungsi yang sudah dibekukan SECARA LANGSUNG tidak
  * melakukan pencarian properti apa pun.
  *
- * BATAS YANG DISEBUT JUJUR: bila kode penelepon sudah berjalan di proses ini
- * SEBELUM modul dimuat, ia dapat mengganti `fs.fsyncSync` sehingga yang
+ * POLA YANG SAMA BERLAKU UNTUK SEMUA INTRINSIK yang dipakai jalur kepercayaan:
+ * `WeakSet.prototype.add/has` dan `util.types.isProxy` juga diambil SEKALI di
+ * sini dan dipanggil lewat `Reflect.apply`. Sebelumnya ketiganya dipanggil
+ * sebagai `WEAKSET.has(x)` / `utilTypes.isProxy(x)` -- pencarian properti pada
+ * objek yang masih dapat dijangkau, sehingga penimpaan pasca-pemuatan cukup
+ * untuk memalsukan merek durabel atau menjalankan trap Proxy yang seharusnya
+ * ditolak (audit 0132c36).
+ *
+ * BATAS YANG DISEBUT JUJUR: kode yang sudah berjalan di proses ini SEBELUM modul
+ * dimuat dapat mengganti apa pun, termasuk intrinsik di bawah, sehingga yang
  * TERBEKUKAN adalah implementasi palsu. Itu threat model yang sama dengan
  * seluruh merek leksikal lane ini (dan CommonJS cache), dan tidak diklaim
  * tertutup di sini.
@@ -30,6 +38,26 @@ const FILE_OPEN_SYNC = fs.openSync;
 const FILE_WRITE_SYNC = fs.writeSync;
 const FILE_FSYNC_SYNC = fs.fsyncSync;
 const FILE_CLOSE_SYNC = fs.closeSync;
+const IS_PROXY_INTRINSIC = utilTypes.isProxy;
+const WEAKSET_HAS = WeakSet.prototype.has;
+const WEAKSET_ADD = WeakSet.prototype.add;
+const GET_OWN_DESCRIPTOR = Object.getOwnPropertyDescriptor;
+const GET_PROTOTYPE_OF = Object.getPrototypeOf;
+
+/** `util.types.isProxy` lewat intrinsic yang dibekukan (tanpa pencarian properti). */
+function isProxyIntrinsic(value) {
+    return REFLECT_APPLY(IS_PROXY_INTRINSIC, utilTypes, [value]);
+}
+
+/** `WeakSet.prototype.has` lewat intrinsic yang dibekukan. */
+function weakSetHas(set, value) {
+    return REFLECT_APPLY(WEAKSET_HAS, set, [value]);
+}
+
+/** `WeakSet.prototype.add` lewat intrinsic yang dibekukan. */
+function weakSetAdd(set, value) {
+    REFLECT_APPLY(WEAKSET_ADD, set, [value]);
+}
 
 /**
  * Apakah nilai ini Proxy.
@@ -42,7 +70,7 @@ const FILE_CLOSE_SYNC = fs.closeSync;
 function isProxyValue(value) {
     if (value === null || typeof value !== "object") return false;
     try {
-        return utilTypes.isProxy(value);
+        return isProxyIntrinsic(value);
     } catch {
         return true;   // tidak dapat dipastikan -> perlakukan sebagai tidak aman
     }
@@ -62,7 +90,7 @@ function resolveFsyncOption(options) {
     if (isProxyValue(options)) return true;      // trap apa pun tidak boleh jalan
     let desc;
     try {
-        desc = Object.getOwnPropertyDescriptor(options, "fsync");
+        desc = REFLECT_APPLY(GET_OWN_DESCRIPTOR, Object, [options, "fsync"]);
     } catch {
         return true;
     }
@@ -70,7 +98,7 @@ function resolveFsyncOption(options) {
         // Mungkin diwarisi; telusuri prototipe lewat deskriptor juga.
         let proto;
         try {
-            proto = Object.getPrototypeOf(options);
+            proto = REFLECT_APPLY(GET_PROTOTYPE_OF, Object, [options]);
         } catch {
             return true;
         }
@@ -147,7 +175,7 @@ const DURABLE_AUDIT_SINKS = new WeakSet();
 function isDurableAuditSink(candidate) {
     return candidate !== null
         && (typeof candidate === "object" || typeof candidate === "function")
-        && DURABLE_AUDIT_SINKS.has(candidate);
+        && weakSetHas(DURABLE_AUDIT_SINKS, candidate);
 }
 
 function failPersist(message, detail) {
@@ -532,7 +560,7 @@ function createFileAuditSink(filePath, options = {}) {
     // konfirmasi governed tanpa durabilitas yang disyaratkan (audit 8fbfcdd).
     // Tanpa fsync, sink ini tetap dapat dipakai -- ia hanya tidak dihitung
     // sebagai bukti durabel.
-    if (fsync) DURABLE_AUDIT_SINKS.add(frozenSink);
+    if (fsync) weakSetAdd(DURABLE_AUDIT_SINKS, frozenSink);
     return frozenSink;
 }
 
