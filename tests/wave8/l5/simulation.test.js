@@ -1048,4 +1048,112 @@ test("L5-audit-24: a result exceeding its run's token budget or the configured T
         "a TTL beyond the configured bound must be rejected");
 });
 
+test("L5-audit-25: widened construction bounds do not legitimise over-limit persisted data", async () => {
+    // Judging stored evidence against the caller-widened `bounds` meant raising
+    // the construction limits let a result with 10^12 tokens and a 10^15 ms TTL
+    // pass validation, where the default configuration correctly rejected it
+    // (audit of 03956b6). Evidence about PERSISTED data is now judged against the
+    // frozen contract ceilings, while a stricter configuration still applies.
+    const nowMs = 1_000_000;
+    const goodRun = {
+        runId: "good", question: "q", scenario: {}, initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 5, fidelity: "DEFAULT",
+        state: "COMPLETE", createdAtMs: nowMs - 5000
+    };
+    const widened = { ...BOUNDS, MAX_TOKENS_PER_RUN: 1e15, MAX_TOKENS_PER_HOUR: 1e15, TTL_MS: 1e15 };
+
+    const loadWith = async (result, bounds) => createSimulationSandbox({
+        store: {
+            async getKv() {
+                return {
+                    runs: { good: goodRun }, results: { good: result },
+                    budget: { tokenLedger: [], invalidatedAssumptions: [] }
+                };
+            },
+            async putKv() {}
+        },
+        clock: { nowMs: () => nowMs },
+        bounds
+    });
+
+    const overLimit = {
+        runId: "good", distribution: null, risks: [], assumptions: [], confidence: 0.5,
+        tier: "T10", state: "COMPLETE", tokensUsed: 1e12,
+        validUntilMs: 1e15, generatedAtMs: nowMs - 5000
+    };
+    const overLimitSim = await loadWith(overLimit, widened);
+    assertThrowsReason(() => overLimitSim.getResult("good"), "UNKNOWN_RUN");
+
+    // A legitimate record still loads under the widened bounds.
+    const legitimate = {
+        runId: "good", distribution: null, risks: [], assumptions: [], confidence: 0.5,
+        tier: "T10", state: "COMPLETE", tokensUsed: 5,
+        validUntilMs: nowMs - 5000 + BOUNDS.TTL_MS, generatedAtMs: nowMs - 5000
+    };
+    assert.equal((await loadWith(legitimate, widened)).getResult("good").tokensUsed, 5);
+});
+
+test("L5-audit-26: a hostile `call` getter on the append function cannot detach a rejection or hide the audit", async () => {
+    // `append.call(...)` is a property lookup for `call` on a caller-controlled
+    // function object: a throwing getter there detached a rejection and made the
+    // audit silently fail (audit of 03956b6). The call is now made through a
+    // frozen `Reflect.apply`, which performs no property lookup.
+    let unhandled = 0;
+    const onUnhandled = () => { unhandled += 1; };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+        let appendInvoked = 0;
+        const appendFn = function () { appendInvoked += 1; return undefined; };
+        Object.defineProperty(appendFn, "call", {
+            get() { Promise.reject(new Error("detached")); return Function.prototype.call; }
+        });
+
+        const sim = await createSimulationSandbox({
+            clock: { nowMs: () => 1_000_000 },
+            auditLedger: { append: appendFn },
+            bounds: { ...BOUNDS, MAX_TOKENS_PER_HOUR: 100 }
+        });
+        await sim.startRun({
+            runId: "r", question: "q", scenario: "s", initialStateRef: { frozen: true },
+            steps: 1, horizonDays: 1, budgetTokens: 10,
+            provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+        });
+        await new Promise(r => setTimeout(r, 60));
+        assert.equal(unhandled, 0, "a hostile `call` getter must not leak a rejection");
+        assert.equal(appendInvoked, 2, "the audit hook still reached the sink for both events");
+    } finally {
+        process.removeListener("unhandledRejection", onUnhandled);
+    }
+});
+
+test("L5-audit-27: a hostile constructor getter on a returned real promise cannot leak its rejection", async () => {
+    // `Promise.prototype.then` reads the promise's `constructor`/`Symbol.species`
+    // to pick the result constructor. A throwing getter there made handler
+    // attachment fail, so the ORIGINAL rejection leaked (audit of 03956b6).
+    let unhandled = 0;
+    const onUnhandled = () => { unhandled += 1; };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+        const hostilePromise = Promise.reject(new Error("original-rejection"));
+        Object.defineProperty(hostilePromise, "constructor", {
+            configurable: true,
+            get() { throw new Error("hostile ctor getter"); }
+        });
+        const sim = await createSimulationSandbox({
+            clock: { nowMs: () => 1_000_000 },
+            auditLedger: { append: () => hostilePromise },
+            bounds: { ...BOUNDS, MAX_TOKENS_PER_HOUR: 100 }
+        });
+        await sim.startRun({
+            runId: "r", question: "q", scenario: "s", initialStateRef: { frozen: true },
+            steps: 1, horizonDays: 1, budgetTokens: 10,
+            provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+        });
+        await new Promise(r => setTimeout(r, 60));
+        assert.equal(unhandled, 0, "the original rejection must be absorbed");
+    } finally {
+        process.removeListener("unhandledRejection", onUnhandled);
+    }
+});
+
 

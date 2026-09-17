@@ -760,3 +760,56 @@ test("L3-audit-17: an explicitly `undefined` sources field is rejected while a g
     assert.equal((await build({ ...base, sources: ["sensor-a"] })).sceneNodesSize(), 1);
 });
 
+test("L3-audit-18: a hostile `call` getter on the append function cannot detach a rejection or hide the audit", async () => {
+    // `append.call(...)` is a property lookup for `call` on a caller-controlled
+    // function object: a throwing getter there detached a rejection and made the
+    // audit silently fail (audit of 03956b6). The call is now made through a
+    // frozen `Reflect.apply`, which performs no property lookup.
+    let unhandled = 0;
+    const onUnhandled = () => { unhandled += 1; };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+        let appendInvoked = 0;
+        const appendFn = function () { appendInvoked += 1; return undefined; };
+        Object.defineProperty(appendFn, "call", {
+            get() { Promise.reject(new Error("detached")); return Function.prototype.call; }
+        });
+        const sm = await createSpatialModel({
+            clock: { nowMs: () => 1_000_000 },
+            auditLedger: { append: appendFn }
+        });
+        sm.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s" });
+        await new Promise(r => setTimeout(r, 60));
+        assert.equal(unhandled, 0, "a hostile `call` getter must not leak a rejection");
+        assert.equal(appendInvoked, 1, "the audit hook still reached the sink");
+        assert.equal(sm.framesSize(), 1, "and the lane itself is unaffected");
+    } finally {
+        process.removeListener("unhandledRejection", onUnhandled);
+    }
+});
+
+test("L3-audit-19: a hostile constructor getter on a returned real promise cannot leak its rejection", async () => {
+    // `Promise.prototype.then` reads the promise's `constructor`/`Symbol.species`
+    // to pick the result constructor. A throwing getter there made handler
+    // attachment fail, so the ORIGINAL rejection leaked (audit of 03956b6).
+    let unhandled = 0;
+    const onUnhandled = () => { unhandled += 1; };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+        const hostilePromise = Promise.reject(new Error("original-rejection"));
+        Object.defineProperty(hostilePromise, "constructor", {
+            configurable: true,
+            get() { throw new Error("hostile ctor getter"); }
+        });
+        const sm = await createSpatialModel({
+            clock: { nowMs: () => 1_000_000 },
+            auditLedger: { append: () => hostilePromise }
+        });
+        sm.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s" });
+        await new Promise(r => setTimeout(r, 60));
+        assert.equal(unhandled, 0, "the original rejection must be absorbed");
+    } finally {
+        process.removeListener("unhandledRejection", onUnhandled);
+    }
+});
+

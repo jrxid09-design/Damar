@@ -97,6 +97,8 @@ function resolveAuditAppend(auditLedger) {
 const REFLECT_APPLY = Reflect.apply;
 const PROMISE_THEN = Promise.prototype.then;
 const IS_PROMISE_INTRINSIC = utilTypes.isPromise;
+const DEFINE_PROPERTY = Object.defineProperty;
+const FREEZE = Object.freeze;
 
 function absorbAuditResult(result) {
     if (!result || (typeof result !== "object" && typeof result !== "function")) return;
@@ -107,9 +109,19 @@ function absorbAuditResult(result) {
         return;
     }
     if (!isRealPromise) return;   // thenable pemanggil tidak pernah dipanggil
+    // `Promise.prototype.then` membaca `constructor`/`Symbol.species` milik
+    // promise itu untuk menentukan konstruktor hasil. Accessor yang melempar di
+    // sana membuat pemasangan handler GAGAL dan rejection aslinya lepas sebagai
+    // unhandledRejection (audit 03956b6). Karena itu `constructor` dinetralkan
+    // dulu menjadi data-property yang menunjuk ke `Promise` bawaan.
+    try {
+        REFLECT_APPLY(DEFINE_PROPERTY, Object, [result, "constructor", {
+            value: Promise, writable: true, enumerable: false, configurable: true
+        }]);
+    } catch { /* non-extensible + non-configurable: tidak dapat dinetralkan */ }
     try {
         REFLECT_APPLY(PROMISE_THEN, result, [undefined, () => {}]);
-    } catch { /* promise asli yang aneh -> tidak ada rejection yang tertinggal */ }
+    } catch { /* handler sudah terpasang bila memungkinkan */ }
 }
 
 async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS, auditLedger = null } = {}) {
@@ -128,10 +140,16 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         try {
             const append = resolveAuditAppend(auditLedger);
             if (append) {
-                const result = append.call(auditLedger, Object.freeze({
+                // `append.call(...)` adalah pencarian properti `call` pada objek
+                // fungsi milik pemanggil: getter `call` yang melempar dapat
+                // men-detach rejection dan membuat hook audit gagal tanpa jejak
+                // (audit 03956b6). `Reflect.apply` yang dibekukan tidak melakukan
+                // pencarian properti apa pun. `FREEZE` juga dibekukan agar
+                // penimpaannya tidak dapat membuat payload audit dapat diubah.
+                const result = REFLECT_APPLY(append, auditLedger, [FREEZE({
                     eventType, source: "acc.spatial", outcome: "ok",
-                    metadata: Object.freeze({ lane: "W8-L3", ...fields })
-                }));
+                    metadata: FREEZE({ lane: "W8-L3", ...fields })
+                })]);
                 // Hook audit bisa ASYNC dan menolak. Seluruh pemeriksaan hasil
                 // (termasuk nilai kembalian `then`) ditangani absorbAuditResult
                 // tanpa satu pun pencarian properti pada objek pemanggil.
