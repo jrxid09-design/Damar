@@ -100,6 +100,8 @@ function safeOutcomeValue(outcome, key, fallback) {
 const REFLECT_APPLY = Reflect.apply;
 const PROMISE_THEN = Promise.prototype.then;
 const IS_PROMISE_INTRINSIC = utilTypes.isPromise;
+const DEFINE_PROPERTY = Object.defineProperty;
+const FREEZE = Object.freeze;
 
 function absorbAuditResult(result) {
     if (!result || (typeof result !== "object" && typeof result !== "function")) return;
@@ -110,9 +112,21 @@ function absorbAuditResult(result) {
         return;
     }
     if (!isRealPromise) return;   // thenable pemanggil tidak pernah dipanggil
+    // `Promise.prototype.then` membaca `constructor`/`Symbol.species` milik
+    // promise itu untuk menentukan konstruktor hasil. Accessor yang melempar di
+    // sana membuat pemasangan handler GAGAL dan rejection aslinya lepas sebagai
+    // unhandledRejection (audit 03956b6). Karena itu `constructor` dinetralkan
+    // dulu menjadi data-property yang menunjuk ke `Promise` bawaan. Ini berhasil
+    // untuk promise yang dapat diperluas (semua sink wajar); sisa kasus
+    // non-extensible dibahas di bawah.
+    try {
+        REFLECT_APPLY(DEFINE_PROPERTY, Object, [result, "constructor", {
+            value: Promise, writable: true, enumerable: false, configurable: true
+        }]);
+    } catch { /* non-extensible + non-configurable: lihat catatan */ }
     try {
         REFLECT_APPLY(PROMISE_THEN, result, [undefined, () => {}]);
-    } catch { /* promise asli yang aneh -> tidak ada rejection yang tertinggal */ }
+    } catch { /* handler sudah terpasang bila memungkinkan */ }
 }
 
 async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS, auditLedger = null } = {}) {
@@ -130,10 +144,16 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
         try {
             const append = resolveAuditAppend(auditLedger);
             if (append) {
-                const result = append.call(auditLedger, Object.freeze({
+                // `append.call(...)` adalah pencarian properti `call` pada objek
+                // fungsi milik pemanggil: getter `call` yang melempar dapat
+                // men-detach rejection dan membuat hook audit gagal tanpa jejak
+                // (audit 03956b6). `Reflect.apply` yang dibekukan tidak melakukan
+                // pencarian properti apa pun. `FREEZE` juga dibekukan agar
+                // penimpaannya tidak dapat membuat payload audit dapat diubah.
+                const result = REFLECT_APPLY(append, auditLedger, [FREEZE({
                     eventType, source: "acc.simulation", outcome: "ok",
-                    metadata: Object.freeze({ lane: "W8-L5", ...fields })
-                }));
+                    metadata: FREEZE({ lane: "W8-L5", ...fields })
+                })]);
                 // Hook audit bisa ASYNC dan menolak. Seluruh pemeriksaan hasil
                 // (termasuk nilai kembalian `then`) ditangani absorbAuditResult
                 // tanpa satu pun pencarian properti pada objek pemanggil.
@@ -307,10 +327,21 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
         // anggaran run -- atau TTL yang membentang ribuan tahun -- tetap lolos
         // dan terbaca sebagai COMPLETE, ikut menggantikan hasil yang sah dan
         // membuat kuota token serta kesegaran tidak bermakna (audit a9cc5db).
+        //
+        // Batasnya diambil dari NILAI FROZEN kontrak, bukan dari `bounds` yang
+        // boleh dinaikkan. `bounds` adalah parameter KONSTRUKSI yang sah
+        // dinaikkan untuk kapasitas operasional (AMB-W8-03), tetapi bukti
+        // tentang data TERSIMPAN harus dinilai terhadap batas kontrak: kalau
+        // tidak, menaikkan konfigurasi membuat hasil dengan token 10^12 dan TTL
+        // 10^15 lolos validasi, tepat seperti konfigurasi default menolaknya
+        // (audit 03956b6). Konfigurasi yang LEBIH KETAT tetap berlaku.
+        const frozenTokenCeiling = Math.min(bounds.MAX_TOKENS_PER_RUN, BOUNDS.MAX_TOKENS_PER_RUN);
+        const frozenTtlCeiling = Math.min(bounds.TTL_MS, BOUNDS.TTL_MS);
         const pairedRun = runs.get(id);
         if (!pairedRun || !Number.isFinite(pairedRun.budgetTokens)) return false;
-        if (result.tokensUsed > pairedRun.budgetTokens) return false;
-        if (result.validUntilMs > result.generatedAtMs + Math.max(0, Math.trunc(bounds.TTL_MS))) return false;
+        if (pairedRun.budgetTokens > frozenTokenCeiling) return false;
+        if (result.tokensUsed > Math.min(pairedRun.budgetTokens, frozenTokenCeiling)) return false;
+        if (result.validUntilMs > result.generatedAtMs + Math.max(0, Math.trunc(frozenTtlCeiling))) return false;
         // BENTUK yang tidak dinormalkan builder: `risks`/`assumptions` yang bukan
         // array diteruskan apa adanya oleh builder, jadi perbandingan kanonik
         // tidak menangkapnya dan record malformed tetap lolos (audit 472b6e0).
