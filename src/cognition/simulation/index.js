@@ -77,70 +77,42 @@ function safeOutcomeValue(outcome, key, fallback) {
 }
 
 /**
- * Absorpsi hasil audit yang mungkin thenable, TANPA pencarian properti pada
- * objek milik pemanggil.
+ * Absorpsi hasil audit, TANPA pernah memanggil `then` milik pemanggil.
  *
- * Tiga jalur eksekusi kode pemanggil ditutup sekaligus di sini:
+ * Versi-versi sebelumnya memanggil `then` (lewat `then.call` lalu lewat
+ * `Reflect.apply`) dan hanya bisa menyerap promise yang DIKEMBALIKAN. Itu tidak
+ * cukup: sebuah `then` milik pemanggil dapat mengeksekusi `Promise.reject(...)`
+ * lalu mengembalikan `undefined`, sehingga penolakan itu lepas sama sekali dan
+ * hanya bisa diamati sebagai `unhandledRejection` -- di bawah kebijakan Node
+ * yang ketat, proses berhenti (audit a9cc5db). Memanggil kode pemanggil juga
+ * bertentangan dengan batas "hook audit tidak menjalankan kode pemanggil".
  *
- *  1. `value.then` adalah `[[Get]]` mentah -> dibaca lewat DESKRIPTOR; accessor
- *     dan Proxy tidak dipakai.
- *  2. `then.call(...)` adalah pencarian properti `call` pada objek fungsi
- *     `then` -- cukup dengan menempelkan `call` no-op di sana untuk membelokkan
- *     pemanggilan -> dipakai `Reflect.apply` yang dibekukan saat modul dimuat.
- *  3. Nilai KEMBALIAN `then` diabaikan, padahal `then` asinkron yang menolak
- *     mengembalikan promise yang DITOLAK -> diabsorpsi lewat
- *     `Promise.prototype.then` INTRINSIK (bukan `.catch`, karena `catch` juga
- *     pencarian properti pada objek pemanggil; audit 472b6e0).
+ * Karena itu `then` milik pemanggil TIDAK PERNAH dijalankan. Hanya promise ASLI
+ * (dikenali lewat brand intrinsik `util.types.isPromise`, yang juga benar untuk
+ * promise lintas-realm) yang diberi handler, dan handler itu dipasang lewat
+ * `Promise.prototype.then` INTRINSIK sehingga tidak ada pencarian properti pada
+ * objek pemanggil.
  *
- * Bila objeknya bukan promise asli, pemanggilan intrinsik itu melempar dan
- * ditangkap -- dan tidak ada rejection nyata yang tertinggal.
+ * Konsekuensi yang DISEBUT: thenable buatan sendiri (bukan Promise asli) tidak
+ * lagi diikuti. Untuk hook audit itu justru yang diinginkan -- hook yang ingin
+ * hasilnya diobservasi harus mengembalikan Promise asli.
  */
 const REFLECT_APPLY = Reflect.apply;
 const PROMISE_THEN = Promise.prototype.then;
-
-function readMethodOnce(value, name) {
-    if (!value || (typeof value !== "object" && typeof value !== "function")) return null;
-    if (utilTypes.isProxy(value)) return null;
-    let level = value;
-    const seen = new Set();
-    while (level && (typeof level === "object" || typeof level === "function")) {
-        if (level === Object.prototype || level === Function.prototype) break;
-        if (seen.has(level)) break;
-        seen.add(level);
-        let desc;
-        try {
-            desc = Object.getOwnPropertyDescriptor(level, name);
-        } catch {
-            return null;
-        }
-        if (desc) {
-            if (desc.get || desc.set) return null;
-            return typeof desc.value === "function" ? desc.value : null;
-        }
-        try {
-            level = Object.getPrototypeOf(level);
-        } catch {
-            return null;
-        }
-    }
-    return null;
-}
+const IS_PROMISE_INTRINSIC = utilTypes.isPromise;
 
 function absorbAuditResult(result) {
-    const then = readMethodOnce(result, "then");
-    if (!then) return;
-    let chained;
+    if (!result || (typeof result !== "object" && typeof result !== "function")) return;
+    let isRealPromise;
     try {
-        chained = REFLECT_APPLY(then, result, [undefined, () => {}]);
+        isRealPromise = REFLECT_APPLY(IS_PROMISE_INTRINSIC, utilTypes, [result]);
     } catch {
-        return;   // kegagalan audit tidak pernah memblokir lane
+        return;
     }
-    if (!chained || (typeof chained !== "object" && typeof chained !== "function")) return;
-    // `then` yang mengabaikan handler dan mengembalikan promise tertolak:
-    // pasang handler lewat intrinsic, sehingga tidak ada pencarian properti.
+    if (!isRealPromise) return;   // thenable pemanggil tidak pernah dipanggil
     try {
-        REFLECT_APPLY(PROMISE_THEN, chained, [undefined, () => {}]);
-    } catch { /* bukan promise asli -> tidak ada rejection yang tertinggal */ }
+        REFLECT_APPLY(PROMISE_THEN, result, [undefined, () => {}]);
+    } catch { /* promise asli yang aneh -> tidak ada rejection yang tertinggal */ }
 }
 
 async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS, auditLedger = null } = {}) {
@@ -329,6 +301,16 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
         if (!Number.isFinite(result.tokensUsed) || result.tokensUsed < 0) return false;
         if (!Number.isFinite(result.generatedAtMs) || result.generatedAtMs > now()) return false;
         if (!Number.isFinite(result.validUntilMs) || result.validUntilMs < result.generatedAtMs) return false;
+        // BATAS ANGGARAN DAN TTL dari RUN pasangannya. Perbandingan kanonik tidak
+        // dapat menangkap keduanya: builder hanya menyalin `validUntilMs` dan
+        // `tokensUsed` apa adanya, sehingga hasil dengan token jauh melampaui
+        // anggaran run -- atau TTL yang membentang ribuan tahun -- tetap lolos
+        // dan terbaca sebagai COMPLETE, ikut menggantikan hasil yang sah dan
+        // membuat kuota token serta kesegaran tidak bermakna (audit a9cc5db).
+        const pairedRun = runs.get(id);
+        if (!pairedRun || !Number.isFinite(pairedRun.budgetTokens)) return false;
+        if (result.tokensUsed > pairedRun.budgetTokens) return false;
+        if (result.validUntilMs > result.generatedAtMs + Math.max(0, Math.trunc(bounds.TTL_MS))) return false;
         // BENTUK yang tidak dinormalkan builder: `risks`/`assumptions` yang bukan
         // array diteruskan apa adanya oleh builder, jadi perbandingan kanonik
         // tidak menangkapnya dan record malformed tetap lolos (audit 472b6e0).
