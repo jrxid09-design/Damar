@@ -24,6 +24,15 @@ const { isDurableAuditSink } = require("./fileSink");
 const REFLECT_APPLY = Reflect.apply;
 const WEAKSET_HAS = WeakSet.prototype.has;
 const WEAKSET_ADD = WeakSet.prototype.add;
+const FREEZE = Object.freeze;
+const IS_FROZEN = Object.isFrozen;
+/**
+ * Enumerasi juga dibekukan: `detach` dipakai pada jalur kepercayaan (salinan
+ * struktur-dalam untuk perbandingan baca-balik governed), jadi `Object.keys`
+ * yang dapat ditimpa pasca-pemuatan tidak boleh ikut menentukan hasilnya.
+ */
+const OBJECT_KEYS = Object.keys;
+const OBJECT_ENTRIES = Object.entries;
 
 function brandHas(set, value) {
     return REFLECT_APPLY(WEAKSET_HAS, set, [value]);
@@ -73,10 +82,10 @@ function defaultIdFactory() {
 /** Deep-freeze a plain structure (records contain only plain data). */
 function deepFreeze(value) {
     if (value !== null && typeof value === "object") {
-        for (const key of Object.keys(value)) {
+        for (const key of OBJECT_KEYS(value)) {
             deepFreeze(value[key]);
         }
-        Object.freeze(value);
+        FREEZE(value);
     }
     return value;
 }
@@ -86,7 +95,7 @@ function detach(value) {
     if (value === null || typeof value !== "object") return value;
     if (Array.isArray(value)) return value.map(detach);
     const out = {};
-    for (const key of Object.keys(value)) out[key] = detach(value[key]);
+    for (const key of OBJECT_KEYS(value)) out[key] = detach(value[key]);
     return out;
 }
 
@@ -197,7 +206,7 @@ function createAuditLedger(options = {}) {
 
         // Hash chain over canonical serialization (corruption detection
         // ONLY — see integrity.js for binding semantics disclaimer).
-        shell.integrity = Object.freeze({
+        shell.integrity = FREEZE({
             algorithm: "sha256",
             prevDigest: lastDigest,
             digest: sha256Hex(Buffer.from(digestCore(shell), "utf8"))
@@ -376,7 +385,7 @@ function createAuditLedger(options = {}) {
             if (typeof corr !== "object" || Array.isArray(corr)) {
                 throw new LedgerError(CODES.INVALID_QUERY, "correlation filter must be an object");
             }
-            for (const key of Object.keys(corr)) {
+            for (const key of OBJECT_KEYS(corr)) {
                 if (!CORRELATION_KEYS.includes(key)) {
                     throw new LedgerError(CODES.INVALID_QUERY, `unknown correlation filter key: ${key}`);
                 }
@@ -393,7 +402,7 @@ function createAuditLedger(options = {}) {
     }
 
     function matches(record, filter) {
-        for (const [key, value] of Object.entries(filter)) {
+        for (const [key, value] of OBJECT_ENTRIES(filter)) {
             if (value === undefined || value === null) continue;
             switch (key) {
                 case "types":
@@ -433,7 +442,7 @@ function createAuditLedger(options = {}) {
                     if (!record.correlation) return false;
                     const corr = filter.correlation;
                     if (!corr || typeof corr !== "object") return false;
-                    for (const [ckey, cval] of Object.entries(corr)) {
+                    for (const [ckey, cval] of OBJECT_ENTRIES(corr)) {
                         if (cval === undefined || cval === null) continue;
                         if (record.correlation[ckey] !== cval) return false;
                     }
@@ -456,7 +465,7 @@ function createAuditLedger(options = {}) {
 
     /** Operational stats (bounded view). */
     function stats() {
-        return Object.freeze({
+        return FREEZE({
             retainedEvents: records.length,
             logicalSequence: sequenceCounter,
             acceptedCount,
@@ -504,7 +513,7 @@ function createAuditLedger(options = {}) {
         return orderedWindow({ order: "asc", limit }).map(detach);
     }
 
-    const ledgerInstance = Object.freeze({
+    const ledgerInstance = FREEZE({
         append,
         appendSafe,
         correct,
@@ -523,8 +532,14 @@ function createAuditLedger(options = {}) {
         // (audit 7677a0f).
         hasDurableSink: isDurableAuditSink(sink)
     });
-    brandAdd(CANONICAL_LEDGERS, ledgerInstance);
+    // Imutabilitas DIVERIFIKASI sebelum branding. Bila `FREEZE` tidak
+    // benar-benar membekukan (intrinsiknya sudah tertimpa), instance ini masih
+    // dapat ditambal SESUDAH memperoleh merek kanonik, dan merek itu adalah
+    // dasar seluruh konfirmasi governed (audit bcc2d45).
+    if (REFLECT_APPLY(IS_FROZEN, Object, [ledgerInstance]) === true) {
+        brandAdd(CANONICAL_LEDGERS, ledgerInstance);
+    }
     return ledgerInstance;
 }
 
-module.exports = Object.freeze({ createAuditLedger, isAuditLedger, detach, deepFreeze });
+module.exports = FREEZE({ createAuditLedger, isAuditLedger, detach, deepFreeze });

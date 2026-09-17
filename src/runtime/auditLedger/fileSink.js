@@ -34,15 +34,57 @@ const utilTypes = require("node:util").types;
  * tertutup di sini.
  */
 const REFLECT_APPLY = Reflect.apply;
-const FILE_OPEN_SYNC = fs.openSync;
-const FILE_WRITE_SYNC = fs.writeSync;
-const FILE_FSYNC_SYNC = fs.fsyncSync;
-const FILE_CLOSE_SYNC = fs.closeSync;
 const IS_PROXY_INTRINSIC = utilTypes.isProxy;
 const WEAKSET_HAS = WeakSet.prototype.has;
 const WEAKSET_ADD = WeakSet.prototype.add;
 const GET_OWN_DESCRIPTOR = Object.getOwnPropertyDescriptor;
 const GET_PROTOTYPE_OF = Object.getPrototypeOf;
+const FREEZE = Object.freeze;
+const IS_FROZEN = Object.isFrozen;
+
+/**
+ * TABEL PRIMITIF BERKAS YANG DIBEKUKAN SAAT MODUL DIMUAT.
+ *
+ * Menambal satu per satu (fsyncSync, lalu `call`, lalu `WeakSet.has`, lalu
+ * `Object.freeze`, lalu primitive lock) selalu menyisakan primitive berikutnya
+ * yang masih dapat dijangkau penelepon dan ditimpa SETELAH modul dimuat. Setiap
+ * penimpaan seperti itu cukup untuk membatalkan salah satu dari dua invarian
+ * lane ini: (a) merek durabel hanya boleh ada pada sink yang benar-benar
+ * menulis+fsync dan TIDAK DAPAT DIUBAH, dan (b) dua sink aktif tidak boleh
+ * sama-sama memiliki satu jurnal.
+ *
+ * Karena itu SELURUH primitive yang ikut dalam kepemilikan lock, verifikasi
+ * restart, baca-balik, dan penutupan diambil sekali di sini ke dalam SATU objek
+ * yang DIBEKUKAN. Pembacaan `F.openSync(...)` adalah pembacaan data-property
+ * milik objek yang sudah beku -- tidak ada accessor yang berjalan dan nilainya
+ * tidak dapat diganti setelah freeze (di mode strict, penugasan padanya
+ * melempar). Ini menutup kelasnya, bukan satu per satu kasusnya.
+ */
+const F = FREEZE({
+    mkdirSync: fs.mkdirSync,
+    openSync: fs.openSync,
+    closeSync: fs.closeSync,
+    writeSync: fs.writeSync,
+    fsyncSync: fs.fsyncSync,
+    readFileSync: fs.readFileSync,
+    writeFileSync: fs.writeFileSync,
+    renameSync: fs.renameSync,
+    unlinkSync: fs.unlinkSync,
+    existsSync: fs.existsSync
+});
+
+/** `process.kill`/`pid` juga ikut: uji hidup lock bergantung padanya. */
+const PROC = FREEZE({ kill: process.kill, pid: process.pid });
+
+/** `path.dirname` dipakai untuk membuat direktori jurnal. */
+const PATH_DIRNAME = path.dirname;
+
+// Alias lama tetap tersedia (nilainya sekarang berasal dari tabel beku yang
+// sama, jadi tidak ada jalur kedua yang bisa ditimpa).
+const FILE_OPEN_SYNC = F.openSync;
+const FILE_WRITE_SYNC = F.writeSync;
+const FILE_FSYNC_SYNC = F.fsyncSync;
+const FILE_CLOSE_SYNC = F.closeSync;
 
 /** `util.types.isProxy` lewat intrinsic yang dibekukan (tanpa pencarian properti). */
 function isProxyIntrinsic(value) {
@@ -261,7 +303,7 @@ function createFileAuditSink(filePath, options = {}) {
     }
     const fsync = resolveFsyncOption(options);
 
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    F.mkdirSync(PATH_DIRNAME(filePath), { recursive: true });
 
     // TF-003 SINGLE-WRITER OWNERSHIP: an exclusive lock file guards the
     // canonical sink file so two active sink owners (in this process or
@@ -281,7 +323,7 @@ function createFileAuditSink(filePath, options = {}) {
 
     function readLockFile() {
         try {
-            const data = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+            const data = JSON.parse(F.readFileSync(lockPath, "utf8"));
             if (data === null || typeof data !== "object" ||
                 data.v !== 1 || !Number.isSafeInteger(data.pid) || data.pid <= 0) {
                 return { present: true, valid: false };
@@ -295,7 +337,7 @@ function createFileAuditSink(filePath, options = {}) {
 
     function pidAlive(pid) {
         try {
-            process.kill(pid, 0);
+            PROC.kill(pid, 0);
             return true;
         } catch (error) {
             // EPERM: the process exists but is owned by someone else —
@@ -305,8 +347,8 @@ function createFileAuditSink(filePath, options = {}) {
     }
 
     function writeLockContent(fd) {
-        fs.writeFileSync(fd, JSON.stringify({
-            v: 1, pid: process.pid, acquiredAtMs: Date.now()
+        F.writeFileSync(fd, JSON.stringify({
+            v: 1, pid: PROC.pid, acquiredAtMs: Date.now()
         }), { encoding: "utf8" });
     }
 
@@ -317,8 +359,8 @@ function createFileAuditSink(filePath, options = {}) {
 
     try {
         // "wx" = O_CREAT|O_EXCL|O_WRONLY: fails if the lock already exists.
-        const fd = fs.openSync(lockPath, "wx");
-        try { writeLockContent(fd); } finally { fs.closeSync(fd); }
+        const fd = F.openSync(lockPath, "wx");
+        try { writeLockContent(fd); } finally { F.closeSync(fd); }
         lockHeld = true;
     } catch (error) {
         if (error && (error.code === "EEXIST" || error.code === "EPERM" || error.code === "EACCES")) {
@@ -327,8 +369,8 @@ function createFileAuditSink(filePath, options = {}) {
                 // Vanished between the failed open and the read: one clean
                 // retry through the same create-exclusive path.
                 try {
-                    const fd = fs.openSync(lockPath, "wx");
-                    try { writeLockContent(fd); } finally { fs.closeSync(fd); }
+                    const fd = F.openSync(lockPath, "wx");
+                    try { writeLockContent(fd); } finally { F.closeSync(fd); }
                     lockHeld = true;
                 } catch (retryError) {
                     if (retryError && (retryError.code === "EEXIST" || retryError.code === "EPERM" || retryError.code === "EACCES")) {
@@ -347,18 +389,18 @@ function createFileAuditSink(filePath, options = {}) {
                 // temp + atomic rename, then RE-VERIFY the lock now records
                 // OUR pid (a competing reclaimer wins and we fail closed).
                 const claim = JSON.stringify({
-                    v: 1, pid: process.pid, acquiredAtMs: Date.now()
+                    v: 1, pid: PROC.pid, acquiredAtMs: Date.now()
                 });
-                const tmp = `${lockPath}.claim-${process.pid}-${Math.random().toString(16).slice(2, 10)}`;
-                fs.writeFileSync(tmp, claim, { encoding: "utf8", mode: 0o600 });
+                const tmp = `${lockPath}.claim-${PROC.pid}-${Math.random().toString(16).slice(2, 10)}`;
+                F.writeFileSync(tmp, claim, { encoding: "utf8", mode: 0o600 });
                 try {
-                    fs.renameSync(tmp, lockPath);
+                    F.renameSync(tmp, lockPath);
                 } catch (renameError) {
-                    try { fs.unlinkSync(tmp); } catch { /* best effort */ }
+                    try { F.unlinkSync(tmp); } catch { /* best effort */ }
                     throw failPersist(`audit sink lock reclaim failed: ${renameError.message}`);
                 }
                 const after = readLockFile();
-                if (!after.valid || after.pid !== process.pid) {
+                if (!after.valid || after.pid !== PROC.pid) {
                     throw failOwned();
                 }
                 lockHeld = true;
@@ -373,8 +415,8 @@ function createFileAuditSink(filePath, options = {}) {
         lockHeld = false;
         // Ownership-checked unlink: never delete a foreign lock.
         const current = readLockFile();
-        if (current.present && current.valid && current.pid === process.pid) {
-            try { fs.unlinkSync(lockPath); } catch { /* best-effort */ }
+        if (current.present && current.valid && current.pid === PROC.pid) {
+            try { F.unlinkSync(lockPath); } catch { /* best-effort */ }
         }
     }
 
@@ -384,8 +426,8 @@ function createFileAuditSink(filePath, options = {}) {
     let corruptReason = null;
     const seenEventIds = new Set();
 
-    if (fs.existsSync(filePath)) {
-        const raw = fs.readFileSync(filePath, "utf8");
+    if (F.existsSync(filePath)) {
+        const raw = F.readFileSync(filePath, "utf8");
         const lines = raw.split("\n").filter((l) => l.trim().length > 0);
         const records = [];
         try {
@@ -510,7 +552,7 @@ function createFileAuditSink(filePath, options = {}) {
 
         /** Observed durable tail state for restart continuation. */
         describeDurable() {
-            return Object.freeze({
+            return FREEZE({
                 kind: SINK_KIND,
                 corrupt,
                 corruptReason,
@@ -531,7 +573,7 @@ function createFileAuditSink(filePath, options = {}) {
                 throw failPersist(
                     `cannot resume from a corrupt audit sink: ${corruptReason}`);
             }
-            return Object.freeze({
+            return FREEZE({
                 lastSequence: tail.lastSequence,
                 lastDigest: tail.lastDigest
             });
@@ -539,10 +581,10 @@ function createFileAuditSink(filePath, options = {}) {
 
         /** Read back the verified stored records (bounded, for continuation/tests). */
         readAll() {
-            if (!fs.existsSync(filePath)) return Object.freeze([]);
-            const raw = fs.readFileSync(filePath, "utf8");
+            if (!F.existsSync(filePath)) return FREEZE([]);
+            const raw = F.readFileSync(filePath, "utf8");
             const lines = raw.split("\n").filter((l) => l.trim().length > 0);
-            return Object.freeze(lines.map((l) => parseRecordLine(l)));
+            return FREEZE(lines.map((l) => parseRecordLine(l)));
         },
 
         /** Release the single-writer lock (TF-003).  Idempotent. */
@@ -551,7 +593,7 @@ function createFileAuditSink(filePath, options = {}) {
         }
     };
 
-    const frozenSink = Object.freeze(sink);
+    const frozenSink = FREEZE(sink);
     // HANYA sink yang benar-benar fsync yang di-brand DURABEL.
     //
     // Merek ini adalah dasar klaim "rekaman durabel" (FG-03), dan janji itu
@@ -560,11 +602,19 @@ function createFileAuditSink(filePath, options = {}) {
     // konfirmasi governed tanpa durabilitas yang disyaratkan (audit 8fbfcdd).
     // Tanpa fsync, sink ini tetap dapat dipakai -- ia hanya tidak dihitung
     // sebagai bukti durabel.
-    if (fsync) weakSetAdd(DURABLE_AUDIT_SINKS, frozenSink);
+    //
+    // Imutabilitas DIVERIFIKASI, bukan diasumsikan: merek durabel menjanjikan
+    // sink yang tidak dapat diubah, jadi bila `FREEZE` tidak benar-benar
+    // membekukan sink (mis. intrinsiknya sudah tertimpa), `append` masih bisa
+    // diganti dengan `() => true` SESUDAH branding dan governed masuk tanpa satu
+    // baris pun di disk (audit bcc2d45). Kalau tidak beku, JANGAN di-brand.
+    if (fsync && REFLECT_APPLY(IS_FROZEN, Object, [frozenSink]) === true) {
+        weakSetAdd(DURABLE_AUDIT_SINKS, frozenSink);
+    }
     return frozenSink;
 }
 
-module.exports = Object.freeze({
+module.exports = FREEZE({
     createFileAuditSink,
     isDurableAuditSink,
     SINK_KIND
