@@ -117,7 +117,14 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
                 const then = readThenOnce(result);
                 if (then) {
                     try {
-                        then.call(result, undefined, () => {});
+                        // Nilai kembalian `then` juga harus diserap: sebuah
+                        // `then` async yang melempar mengembalikan promise yang
+                        // DITOLAK, dan membiarkannya berarti unhandled rejection
+                        // yang bisa menghentikan proses Node (audit de9553c).
+                        const chained = then.call(result, undefined, () => {});
+                        if (chained && typeof chained.catch === "function") {
+                            chained.catch(() => {});
+                        }
                     } catch { /* penolakan sudah diserap; kegagalan audit tidak memblokir lane */ }
                 }
             }
@@ -150,7 +157,11 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
     function isWellFormedPersistedTransform(id, transform) {
         if (!transform || typeof transform !== "object") return false;
         if (transform.transformId !== id) return false;
-        if (!Number.isFinite(transform.registeredAt)) return false;
+        // `registeredAt` masa depan TIDAK sah: builder hanya menyalin `nowMs`,
+        // jadi memakai builder saja tidak menangkapnya, padahal transform
+        // seperti itu menempati kapasitas dan mengevict transform sah pada
+        // batas retensi (audit de9553c).
+        if (!Number.isFinite(transform.registeredAt) || transform.registeredAt > now()) return false;
         if (!frames.has(transform.fromFrameId) || !frames.has(transform.toFrameId)) return false;
         try {
             makeTransform({
@@ -166,10 +177,14 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         if (!frames.has(node.frameId)) return false;
         if (key !== sceneNodeKey(node.frameId, node.region)) return false;
         if (!Number.isFinite(node.updatedAtMs) || node.updatedAtMs > now()) return false;
+        // `sources` dinormalkan builder -> harus array string bila ada.
+        if (node.sources !== undefined &&
+            (!Array.isArray(node.sources) || node.sources.some(s => typeof s !== "string" || !s))) return false;
         try {
             makeSceneNode({
                 nodeId: node.nodeId, frameId: node.frameId, region: node.region,
-                state: node.state, observationRefs: node.observationRefs, updatedAtMs: node.updatedAtMs
+                state: node.state, observationRefs: node.observationRefs,
+                sources: node.sources, updatedAtMs: node.updatedAtMs
             }, bounds);
         } catch { return false; }
         return true;
@@ -376,30 +391,42 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
 
     /** Reports occupancy for a region as observed by one observationRef. Disagreement -> CONTESTED (blocks), never silently picked. */
     function reportOccupancy(spec) {
-        const { frameId, region, state, observationRef } = readSpecFields(spec, ["frameId", "region", "state", "observationRef"]);
+        const { frameId, region, state, observationRef, source } = readSpecFields(spec, ["frameId", "region", "state", "observationRef", "source"]);
         requireStringId(frameId, "frameId");
         if (!frames.has(frameId)) fail(REASONS.UNKNOWN_FRAME, `frameId '${frameId}' belum terdaftar`);
         if (typeof observationRef !== "string" || !observationRef) fail(REASONS.INVALID_RECORD, "observationRef wajib string");
+        // `source` opsional: identitas SUMBER yang mengamati. Bila tidak diberi,
+        // observationRef dipakai sebagai pengganti (perilaku lama) -- tetapi
+        // pemanggil yang melaporkan banyak observasi dari sensor yang sama HARUS
+        // mengirim `source`, karena kalau tidak revisi satu sensor akan terus
+        // tampak sebagai perselisihan antar-sumber (audit de9553c).
+        const sourceId = (typeof source === "string" && source) ? source : observationRef;
         const key = sceneNodeKey(frameId, region);
         const existing = sceneNodes.get(key);
         let nextState = state;
         let refs = [observationRef];
+        let sources = [sourceId];
         if (existing) {
             const alreadyKnown = existing.observationRefs.includes(observationRef);
             refs = alreadyKnown ? [...existing.observationRefs] : [...existing.observationRefs, observationRef];
+            const priorSources = Array.isArray(existing.sources) && existing.sources.length > 0
+                ? existing.sources
+                : existing.observationRefs;   // node lama tanpa `sources`
+            sources = priorSources.includes(sourceId) ? [...priorSources] : [...priorSources, sourceId];
             if (existing.state !== "CONTESTED" && existing.state !== state) {
                 // Kontes = PERSELISIHAN ANTAR-SUMBER (kontrak L3). Sumber yang
-                // merevisi klaimnya sendiri adalah revisi, bukan kontes --
-                // menandainya CONTESTED akan mengunci region secara permanen
-                // hanya karena satu sensor memperbarui bacaannya (audit L3
-                // putaran 5, P2). Hanya sumber BERBEDA yang mengunci.
-                const differentSourceDisagrees = existing.observationRefs.some(r => r !== observationRef);
+                // merevisi klaimnya sendiri adalah revisi, bukan kontes.
+                // Dibandingkan lewat IDENTITAS SUMBER, bukan observationRef:
+                // observasi berikutnya dari sensor yang sama selalu membawa ref
+                // baru, jadi memakai ref akan mengunci region selamanya (audit
+                // de9553c).
+                const differentSourceDisagrees = priorSources.some(s => s !== sourceId);
                 nextState = differentSourceDisagrees ? "CONTESTED" : state;
             } else if (existing.state === "CONTESTED") {
                 nextState = "CONTESTED"; // once contested, stays contested until an explicit resolve (out of this lane's scope)
             }
         }
-        const node = makeSceneNode({ nodeId: key, frameId, region, state: nextState, observationRefs: refs, updatedAtMs: now() }, bounds);
+        const node = makeSceneNode({ nodeId: key, frameId, region, state: nextState, observationRefs: refs, sources, updatedAtMs: now() }, bounds);
         if (!existing) {
             const maxNodes = Math.max(0, Math.trunc(bounds.MAX_SCENE_NODES));
             while (sceneNodes.size >= maxNodes) {
