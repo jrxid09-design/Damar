@@ -1,79 +1,52 @@
 "use strict";
 
 /**
- * W8-L1 lifecycle-trust state — PRIVATE state module for `BodySchema`.
+ * W8-L1 lifecycle-trust — the read-only seam the bridge uses to ask
+ * "did BodySchema really commit/deliver this event".
  *
- * Kepercayaan lifecycle TIDAK BOLEH dibaca lewat metode publik yang bisa
- * ditimpa: jembatan yang memanggil `body.isBeingDelivered(...)` dapat ditipu
- * hanya dengan mengganti metode itu, dan menghapusnya membuat pemanggil jatuh
- * ke penanda modul-global sehingga event milik instance LAIN diterima (audit
- * 31a8770).
+ * Modul ini SENGAJA tidak menyediakan cara apa pun untuk MEMBUAT, MENDAFTARKAN,
+ * atau MEMUTASI state kepercayaan. Ia hanya menyimpan SATU oracle yang diikat
+ * oleh `BodySchema.js` saat modul itu dimuat, dan meneruskan pertanyaan ke sana.
  *
- * Modul ini adalah rumah TUNGGAL bagi state tersebut. Ia sengaja dipisah dari
- * `BodySchema.js` supaya permukaan ekspor kelas itu tetap seperti semula
- * (`BodySchema, newerWins, presenceWins`) dan oracle kepercayaan tidak ikut
- * menjadi bagian dari API kelas (audit 5520019). State-nya sendiri tetap tidak
- * dapat dipalsukan: hanya `markCommitted`/`beginDelivery` di bawah yang
- * menulis, dan keduanya hanya dipanggil dari dalam `BodySchema`.
+ * Alasannya konkret: versi sebelumnya mengekspor `registerBodyInstance` yang
+ * mengembalikan handle state hidup, sehingga siapa pun dapat men-brand objek
+ * sembarangan, menyuntikkan event palsu ke state itu, lalu membuka kembali kanal
+ * FAILED milik jembatan (audit 41a7006). Memindahkan fungsi itu "ke modul
+ * internal" tidak mengamankannya -- selama ia diekspor, ia adalah API.
+ *
+ * Dengan desain ini:
+ *  - state kepercayaan hidup di closure `BodySchema.js` dan tidak pernah
+ *    meninggalkannya;
+ *  - tidak ada API pendaftaran, jadi tidak ada objek yang bisa di-brand;
+ *  - `bindTrustOracle` hanya menerima pengikatan PERTAMA, dan `BodySchema.js`
+ *    MELEMPAR bila pengikatan itu gagal (berarti ada yang mengikat lebih dulu),
+ *    sehingga hijack membuat runtime gagal dengan keras -- bukan gagal terbuka.
  */
 
-/** Instance milik kelas BodySchema. */
-const BODY_INSTANCES = new WeakSet();
-/** State kepercayaan per-instance. */
-const TRUST_STATE = new WeakMap();
+/** Oracle yang diikat sekali. Tidak pernah dapat dibaca dari luar. */
+let TRUST_ORACLE = null;
 
-/** Daftarkan sebuah instance dan state kepercayaannya (dipanggil constructor). */
-function registerBodyInstance(instance, state) {
-    TRUST_STATE.set(instance, state);
-    BODY_INSTANCES.add(instance);
-    return state;
-}
-
-/** Buat wadah state kepercayaan yang kosong. */
-function createTrustState() {
-    return {
-        committedEvents: new WeakSet(),
-        deliveringEvents: new WeakSet(),
-        commitSequences: new WeakMap(),
-        deliverySeq: null,
-        commitSeqCounter: 0
-    };
-}
-
-/** Apakah `candidate` dibuat oleh kelas BodySchema. */
-function isBodySchemaInstance(candidate) {
-    return candidate !== null
-        && (typeof candidate === "object" || typeof candidate === "function")
-        && BODY_INSTANCES.has(candidate);
+/**
+ * Ikat oracle pembaca kepercayaan. Panggilan pertama menang.
+ * @returns {boolean} true bila pengikatan ini yang diterima.
+ */
+function bindTrustOracle(oracle) {
+    if (TRUST_ORACLE !== null) return false;
+    if (typeof oracle !== "function") return false;
+    TRUST_ORACLE = oracle;
+    return true;
 }
 
 /**
- * Bukti lifecycle milik instance, dibaca dari state privat modul.
- * Mengembalikan null untuk objek yang bukan instance BodySchema, sehingga
- * pemanggil dapat membedakan "double tanpa API" dari "instance asli".
+ * Bukti lifecycle untuk `instance`, atau null bila `instance` bukan BodySchema
+ * asli (pemanggil dapat membedakan "double tanpa API" dari "instance asli").
  */
-function lifecycleTrustOf(candidate, event) {
-    if (!BODY_INSTANCES.has(candidate)) return null;
-    const state = TRUST_STATE.get(candidate);
-    if (!state) return null;
-    const usable = event !== null && (typeof event === "object" || typeof event === "function");
-    return Object.freeze({
-        wasCommitted: usable && state.committedEvents.has(event),
-        isBeingDelivered: usable && state.deliveringEvents.has(event),
-        commitSequence: usable ? state.commitSequences.get(event) : undefined,
-        deliverySequence: state.deliverySeq
-    });
-}
-
-/** State kepercayaan sebuah instance, untuk dipakai BodySchema sendiri. */
-function trustStateOf(instance) {
-    return TRUST_STATE.get(instance) ?? null;
+function lifecycleTrustOf(instance, event) {
+    if (TRUST_ORACLE === null) return null;
+    return TRUST_ORACLE(instance, event);
 }
 
 module.exports = Object.freeze({
-    createTrustState,
-    registerBodyInstance,
-    trustStateOf,
-    isBodySchemaInstance,
+    bindTrustOracle,
     lifecycleTrustOf
 });
