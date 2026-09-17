@@ -25,8 +25,46 @@ const { sanitizeBounds } = require("../core/bounds");
 const { laws } = require("./laws");
 const { makeSimulationRun, makeSimulationResult } = require("./records");
 const { loadSnapshot, saveSnapshot } = require("./store");
+const utilTypes = require("node:util").types;
 
 const HOURLY_WINDOW_MS = 3600000;
+
+/**
+ * Resolve `append` milik audit ledger lewat DESKRIPTOR, di sepanjang rantai
+ * prototipe.
+ *
+ * `typeof auditLedger.append === "function"` adalah `[[Get]]` mentah: ledger
+ * yang memasang getter di sana menjalankan kode pemanggil SEBELUM hook audit
+ * sempat menangkap kegagalannya, jadi batas "tanpa eksekusi kode" tidak benar
+ * (audit Wave8 L3/L5). Accessor diperlakukan sebagai tidak dapat dipakai.
+ */
+function resolveAuditAppend(auditLedger) {
+    if (!auditLedger || (typeof auditLedger !== "object" && typeof auditLedger !== "function")) return null;
+    let level = auditLedger;
+    const seen = new Set();
+    while (level && (typeof level === "object" || typeof level === "function")) {
+        if (level === Object.prototype || level === Function.prototype) break;
+        if (seen.has(level)) break;
+        seen.add(level);
+        if (utilTypes.isProxy(level)) return null;
+        let desc;
+        try {
+            desc = Object.getOwnPropertyDescriptor(level, "append");
+        } catch {
+            return null;
+        }
+        if (desc) {
+            if (desc.get || desc.set) return null;
+            return typeof desc.value === "function" ? desc.value : null;
+        }
+        try {
+            level = Object.getPrototypeOf(level);
+        } catch {
+            return null;
+        }
+    }
+    return null;
+}
 
 function safeOutcomeValue(outcome, key, fallback) {
     try {
@@ -50,17 +88,24 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
     // operasi yang diaudit -- pola yang sama dengan lane Wave7 lainnya.
     function audit(eventType, fields) {
         try {
-            if (auditLedger && typeof auditLedger.append === "function") {
-                const result = auditLedger.append(Object.freeze({
+            const append = resolveAuditAppend(auditLedger);
+            if (append) {
+                const result = append.call(auditLedger, Object.freeze({
                     eventType, source: "acc.simulation", outcome: "ok",
                     metadata: Object.freeze({ lane: "W8-L5", ...fields })
                 }));
                 // Hook audit bisa ASYNC dan menolak; penolakan yang tidak
                 // ditangani dapat menghentikan proses Node, sehingga kegagalan
                 // audit berubah menjadi kegagalan lane (audit Wave8 L3/L5).
-                if (result && typeof result.then === "function") {
-                    Promise.resolve(result).catch(() => {});
+                // `then` dibaca dengan aman: getter yang melempar ditangkap dan
+                // diperlakukan sebagai hasil non-thenable.
+                let isThenable = false;
+                try {
+                    isThenable = !!result && typeof result.then === "function";
+                } catch {
+                    isThenable = false;
                 }
+                if (isThenable) Promise.resolve(result).catch(() => {});
             }
         } catch { /* audit failure never blocks the sandbox */ }
     }
@@ -108,6 +153,21 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
         }
     }
 
+    // Validasi DIJALANKAN SEBELUM kompaksi.
+    //
+    // Sebelumnya kompaksi berjalan lebih dulu, sehingga entri malformed bisa
+    // menempati kapasitas dan mengevict entri SAH: dengan retensi 1, sebuah run
+    // malformed yang lebih baru mengevict run sah yang lebih lama, lalu validasi
+    // membuang run malformed itu -- dan tersisa NOL run. State sah hilang oleh
+    // state yang memang tidak layak dipercaya (audit 97a1990).
+    for (const [runId, run] of [...runs]) {
+        if (!run || run.runId !== runId || !["COMPLETE", "TRUNCATED", "FAILED"].includes(run.state)) runs.delete(runId);
+    }
+    for (const [runId, result] of [...results]) {
+        if (!result || result.runId !== runId || result.tier !== "T10" || !runs.has(runId) ||
+            !["COMPLETE", "TRUNCATED", "FAILED"].includes(result.state)) results.delete(runId);
+    }
+
     // Construction-time compaction of a reloaded snapshot (same class as
     // Wave7 rounds 71-73 and W8-L3's own construction-time compaction
     // above): a snapshot persisted under a larger bound must be compacted
@@ -140,14 +200,6 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
             candidate = undefined;
         }
         return Number.isFinite(candidate) ? candidate : Date.now();
-    }
-
-    for (const [runId, run] of [...runs]) {
-        if (!run || run.runId !== runId || !["COMPLETE", "TRUNCATED", "FAILED"].includes(run.state)) runs.delete(runId);
-    }
-    for (const [runId, result] of [...results]) {
-        if (!result || result.runId !== runId || result.tier !== "T10" || !runs.has(runId) ||
-            !["COMPLETE", "TRUNCATED", "FAILED"].includes(result.state)) results.delete(runId);
     }
 
     function pruneLedger(nowMs) {

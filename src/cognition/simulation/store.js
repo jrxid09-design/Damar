@@ -341,9 +341,13 @@ function checkStoreIsolation(store) {
                     throw fail(REASONS.CROSS_STORE_WRITE_REJECTED,
                         `store simulasi tidak boleh berupa store state nyata (mengekspos '${verb}')`);
                 }
-                // Ditemukan sebagai data non-fungsi pada tingkat ini: tidak perlu
-                // menelusuri lebih dalam untuk kata kerja ini.
-                break;
+                // Data non-fungsi di tingkat ini TIDAK menghentikan penelusuran.
+                // Berhenti di sini adalah bypass: menutupi setiap kata kerja
+                // dengan `null` (data non-fungsi) menyembunyikan penulis NYATA
+                // yang tetap dapat dijangkau lewat prototipe, dan store itu
+                // memang masih backend store nyata (audit 97a1990). Yang dicari
+                // pemeriksa ini adalah KEMAMPUAN pada rantai, bukan hasil
+                // resolusi properti.
             }
             try {
                 level = Object.getPrototypeOf(level);
