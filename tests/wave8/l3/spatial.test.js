@@ -494,3 +494,29 @@ test("L3-audit-10: a persisted transform CYCLE is rejected at restart, and malfo
     assert.equal(sm.sceneNodesSize(), 3, "no valid scene node may be displaced by a malformed entry");
 });
 
+test("L3-audit-11: an accessor-backed audit ledger executes no caller code, and a normal one still receives events", async () => {
+    // `typeof auditLedger.append === "function"` was a raw [[Get]] that ran a
+    // getter BEFORE the audit hook could contain the failure (audit of
+    // 97a1990).
+    let getterCalls = 0;
+    const hostile = {};
+    Object.defineProperty(hostile, "append", {
+        enumerable: true, configurable: true,
+        get() { getterCalls += 1; return () => ({ ok: true }); }
+    });
+    const sm = await createSpatialModel({
+        clock: { nowMs: () => 1_000_000 }, auditLedger: hostile
+    });
+    sm.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "kitchen" }, source: "s" });
+    assert.equal(getterCalls, 0, "the audit ledger accessor must never run");
+
+    // A well-formed ledger still receives the lane's contract events.
+    const seen = [];
+    const good = { append(e) { seen.push(e.eventType); return true; } };
+    const sm2 = await createSpatialModel({
+        clock: { nowMs: () => 1_000_000 }, auditLedger: good
+    });
+    sm2.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "kitchen" }, source: "s" });
+    assert.ok(seen.includes("cognition.spatial.frame_registered"), `saw: ${seen.join(",")}`);
+});
+

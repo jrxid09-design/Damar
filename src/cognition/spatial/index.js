@@ -19,6 +19,7 @@ const { REASONS, fail } = require("./errors");
 const { BOUNDS, SCHEMA_VERSION } = require("./bounds");
 const { sanitizeBounds } = require("../core/bounds");
 const { laws } = require("./laws");
+const utilTypes = require("node:util").types;
 const { makeFrame, makeTransform, makeSceneNode, readSpecFields, requireStringId, canonicalRegionKey, buildSafeSpatialValue } = require("./records");
 const { loadSnapshot, saveSnapshot } = require("./store");
 const { freshnessBand } = require("../../mataDewa/spatial/epistemic");
@@ -30,6 +31,43 @@ const NON_BLOCKING_BANDS = new Set(["fresh", "aging"]);
 
 function sceneNodeKey(frameId, region) {
     return `${frameId}::${canonicalRegionKey(region)}`;
+}
+
+/**
+ * Resolve `append` milik audit ledger lewat DESKRIPTOR, di sepanjang rantai
+ * prototipe.
+ *
+ * `typeof auditLedger.append === "function"` adalah `[[Get]]` mentah: ledger
+ * yang memasang getter di sana menjalankan kode pemanggil SEBELUM hook audit
+ * sempat menangkap kegagalannya, jadi batas "tanpa eksekusi kode" tidak benar
+ * (audit Wave8 L3/L5). Accessor diperlakukan sebagai tidak dapat dipakai.
+ */
+function resolveAuditAppend(auditLedger) {
+    if (!auditLedger || (typeof auditLedger !== "object" && typeof auditLedger !== "function")) return null;
+    let level = auditLedger;
+    const seen = new Set();
+    while (level && (typeof level === "object" || typeof level === "function")) {
+        if (level === Object.prototype || level === Function.prototype) break;
+        if (seen.has(level)) break;
+        seen.add(level);
+        if (utilTypes.isProxy(level)) return null;
+        let desc;
+        try {
+            desc = Object.getOwnPropertyDescriptor(level, "append");
+        } catch {
+            return null;
+        }
+        if (desc) {
+            if (desc.get || desc.set) return null;
+            return typeof desc.value === "function" ? desc.value : null;
+        }
+        try {
+            level = Object.getPrototypeOf(level);
+        } catch {
+            return null;
+        }
+    }
+    return null;
 }
 
 async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS, auditLedger = null } = {}) {
@@ -46,17 +84,24 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
     // Wave7 lainnya.
     function audit(eventType, fields) {
         try {
-            if (auditLedger && typeof auditLedger.append === "function") {
-                const result = auditLedger.append(Object.freeze({
+            const append = resolveAuditAppend(auditLedger);
+            if (append) {
+                const result = append.call(auditLedger, Object.freeze({
                     eventType, source: "acc.spatial", outcome: "ok",
                     metadata: Object.freeze({ lane: "W8-L3", ...fields })
                 }));
                 // Hook audit bisa ASYNC dan menolak; penolakan yang tidak
                 // ditangani dapat menghentikan proses Node, sehingga kegagalan
                 // audit berubah menjadi kegagalan lane (audit Wave8 L3/L5).
-                if (result && typeof result.then === "function") {
-                    Promise.resolve(result).catch(() => {});
+                // `then` dibaca dengan aman: getter yang melempar ditangkap dan
+                // diperlakukan sebagai hasil non-thenable.
+                let isThenable = false;
+                try {
+                    isThenable = !!result && typeof result.then === "function";
+                } catch {
+                    isThenable = false;
                 }
+                if (isThenable) Promise.resolve(result).catch(() => {});
             }
         } catch { /* audit failure never blocks the lane */ }
     }

@@ -592,4 +592,104 @@ test("L5-audit-13: a snapshot that EXISTS without its budget history is unverifi
     assert.equal(restored.tokenLedger.length, 100_001);
 });
 
+/* ---------------------------------------------------------------------- */
+/* Independent audit of 97a1990 -- repaired classes                        */
+/* ---------------------------------------------------------------------- */
+
+test("L5-audit-14: shadowing every writer verb with null does not hide the inherited real writers", async () => {
+    // Stopping the chain walk at an own NON-FUNCTION descriptor was a bypass:
+    // covering all eight verbs with `null` left the inherited real writers
+    // reachable, and the store was still a real-store-shaped backend whose
+    // getKv/putKv could be exercised (audit of 97a1990).
+    const proto = {
+        appendEvent() {}, saveSnapshot() {}, upsertPrediction() {},
+        upsertExperience() {}, upsertCommitment() {}, upsertSubstrateEpoch() {},
+        upsertBelief() {}, appendJournal() {}
+    };
+    const store = Object.create(proto);
+    for (const verb of [
+        "appendEvent", "saveSnapshot", "upsertPrediction", "upsertExperience",
+        "upsertCommitment", "upsertSubstrateEpoch", "upsertBelief", "appendJournal"
+    ]) {
+        store[verb] = null;   // own non-function shadowing an inherited real writer
+    }
+    let reads = 0;
+    let writes = 0;
+    Object.defineProperty(store, "getKv", { value: async () => { reads += 1; return null; } });
+    Object.defineProperty(store, "putKv", { value: async () => { writes += 1; } });
+
+    await assertRejectsReason(
+        createSimulationSandbox({ store }),
+        "CROSS_STORE_WRITE_REJECTED"
+    );
+    assert.equal(reads, 0, "the real backend must never be read");
+    assert.equal(writes, 0, "the real backend must never be written");
+});
+
+test("L5-audit-15: a VALID retained run is not evicted by a malformed newer one before validation", async () => {
+    // Compaction ran BEFORE validation, so with retention 1 a malformed newer
+    // run displaced a valid older one and then validation discarded the
+    // malformed run -- leaving nothing (audit of 97a1990).
+    const nowMs = 1_000_000;
+    const raw = {
+        runs: {
+            good: { runId: "good", state: "COMPLETE", createdAtMs: nowMs - 5000 },
+            bad: { runId: "MISMATCH", state: "COMPLETE", createdAtMs: nowMs - 1000 }
+        },
+        results: {
+            good: {
+                runId: "good", tier: "T10", state: "COMPLETE",
+                assumptions: [], validUntilMs: nowMs + 1_000_000, generatedAtMs: nowMs - 5000
+            }
+        },
+        budget: { tokenLedger: [], invalidatedAssumptions: [] }
+    };
+    const sim = await createSimulationSandbox({
+        store: { async getKv() { return raw; }, async putKv() {} },
+        clock: { nowMs: () => nowMs },
+        bounds: { ...BOUNDS, MAX_RETAINED_RUNS: 1 }
+    });
+    assert.equal(sim.getResult("good").state, "COMPLETE",
+        "the valid retained run must survive a malformed newer entry");
+    assertThrowsReason(() => sim.getResult("bad"), "UNKNOWN_RUN");
+});
+
+test("L5-audit-16: an accessor-backed audit ledger executes no caller code, and a normal one still receives events", async () => {
+    // `typeof auditLedger.append === "function"` was a raw [[Get]] that ran a
+    // getter BEFORE the audit hook could contain the failure (audit of
+    // 97a1990).
+    let getterCalls = 0;
+    const hostile = {};
+    Object.defineProperty(hostile, "append", {
+        enumerable: true, configurable: true,
+        get() { getterCalls += 1; return () => ({ ok: true }); }
+    });
+
+    const sim = await createSimulationSandbox({
+        clock: { nowMs: () => 1_000_000 },
+        auditLedger: hostile,
+        bounds: { ...BOUNDS, MAX_TOKENS_PER_HOUR: 100 }
+    });
+    await sim.startRun({
+        runId: "r", question: "q", scenario: "s", initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 10,
+        provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+    });
+    assert.equal(getterCalls, 0, "the audit ledger accessor must never run");
+
+    // A well-formed ledger still receives the lane's contract events.
+    const seen = [];
+    const good = { append(e) { seen.push(e.eventType); return true; } };
+    const sim2 = await createSimulationSandbox({
+        clock: { nowMs: () => 1_000_000 }, auditLedger: good,
+        bounds: { ...BOUNDS, MAX_TOKENS_PER_HOUR: 100 }
+    });
+    await sim2.startRun({
+        runId: "r", question: "q", scenario: "s", initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 10,
+        provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+    });
+    assert.ok(seen.includes("cognition.simulation.run_started"), `saw: ${seen.join(",")}`);
+});
+
 
