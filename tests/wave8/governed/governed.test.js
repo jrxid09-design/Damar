@@ -1223,3 +1223,111 @@ test("FG03-56: overriding util.types.isProxy cannot make an options Proxy execut
         utilTypes.isProxy = realIsProxy;
     }
 });
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of bcc2d45 -- freeze verification + lock primitives   */
+/* ---------------------------------------------------------------------- */
+
+test("FG03-57: overriding Object.freeze cannot produce a mutable sink that still carries the durable brand", () => {
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const { createAuditLedger, createFileAuditSink, isAuditLedger } = require("../../../src/runtime/auditLedger");
+    const { isDurableAuditSink } = require("../../../src/runtime/auditLedger/fileSink");
+
+    // The brand was applied right after `Object.freeze(sink)`, with `Object.freeze`
+    // itself resolved dynamically. Replacing it with the identity function during
+    // construction left the sink MUTABLE, so `sink.append = () => true` afterwards
+    // made governed mode confirm with an empty audit file (audit of bcc2d45).
+    // Immutability is now verified with a captured `Object.isFrozen` before either
+    // brand is granted, and `Object.freeze` itself is captured.
+    const realFreeze = Object.freeze;
+    let sink;
+    let ledger;
+    let checked;
+    let file;
+    let appendStillOriginal = false;
+    try {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-freeze-"));
+        file = path.join(dir, "audit.jsonl");
+        Object.freeze = (x) => x;                 // identity: freeze becomes a no-op
+        sink = createFileAuditSink(file);
+        Object.freeze = realFreeze;               // restore, then try to tamper
+        // This file is NOT strict mode, so a failed assignment to a frozen object
+        // no-ops silently instead of throwing -- detect by IDENTITY, not by throw.
+        const originalAppend = sink.append;
+        sink.append = () => true;
+        appendStillOriginal = sink.append === originalAppend;
+        ledger = createAuditLedger({ sink, resume: sink.describeDurable() });
+        checked = recordModeTransitionChecked({
+            auditLedger: ledger, from: "off", to: "governed"
+        });
+    } finally {
+        Object.freeze = realFreeze;
+    }
+
+    try {
+        assert.equal(appendStillOriginal, true, "the sink's append must be unchanged");
+        assert.equal(Object.isFrozen(sink), true, "and genuinely frozen");
+        assert.equal(isDurableAuditSink(sink), true, "a real fsyncing sink is still branded");
+        assert.equal(isAuditLedger(ledger), true, "and its ledger is still canonical");
+        assert.equal(checked.audited, true, "the durable append still confirms");
+        assert.ok(fs.statSync(file).size > 0, "and a real record reached disk");
+    } finally {
+        try { sink.close(); } catch { /* ignore */ }
+    }
+});
+
+test("FG03-58: overriding the lock filesystem primitives cannot create a second writer over one journal", () => {
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const { createFileAuditSink } = require("../../../src/runtime/auditLedger");
+
+    // Only the data-append primitives were captured, so lock acquisition, reclaim
+    // and release still went through mutable `fs.*` lookups. Selectively
+    // overriding them let two sinks both own one journal and both confirm,
+    // producing a corrupt sequence (audit of bcc2d45). Every filesystem primitive
+    // used by the lock path is now taken from the same frozen table.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-lock-"));
+    const file = path.join(dir, "audit.jsonl");
+    const first = createFileAuditSink(file);
+
+    const real = {
+        openSync: fs.openSync,
+        writeFileSync: fs.writeFileSync,
+        closeSync: fs.closeSync,
+        unlinkSync: fs.unlinkSync,
+        renameSync: fs.renameSync
+    };
+    let overrideCalls = 0;
+    let second = null;
+    let refusal = null;
+    try {
+        fs.openSync = (...a) => { overrideCalls += 1; return real.openSync(...a); };
+        fs.writeFileSync = (...a) => { overrideCalls += 1; return real.writeFileSync(...a); };
+        fs.closeSync = (...a) => { overrideCalls += 1; return real.closeSync(...a); };
+        fs.unlinkSync = (...a) => { overrideCalls += 1; return real.unlinkSync(...a); };
+        fs.renameSync = (...a) => { overrideCalls += 1; return real.renameSync(...a); };
+        try {
+            second = createFileAuditSink(file);
+        } catch (error) {
+            refusal = error;
+        }
+    } finally {
+        fs.openSync = real.openSync;
+        fs.writeFileSync = real.writeFileSync;
+        fs.closeSync = real.closeSync;
+        fs.unlinkSync = real.unlinkSync;
+        fs.renameSync = real.renameSync;
+    }
+
+    try {
+        assert.equal(overrideCalls, 0, "no overridden lock primitive may be reached");
+        assert.equal(second, null, "a second sink must not acquire the same journal");
+        assert.ok(refusal, "and must refuse loudly instead");
+    } finally {
+        try { first.close(); } catch { /* ignore */ }
+        try { if (second) second.close(); } catch { /* ignore */ }
+    }
+});
