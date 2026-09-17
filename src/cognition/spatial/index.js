@@ -20,6 +20,7 @@ const { BOUNDS, SCHEMA_VERSION } = require("./bounds");
 const { sanitizeBounds } = require("../core/bounds");
 const { laws } = require("./laws");
 const utilTypes = require("node:util").types;
+const { isDeepStrictEqual } = require("node:util");
 const { makeFrame, makeTransform, makeSceneNode, readSpecFields, requireStringId, canonicalRegionKey, buildSafeSpatialValue } = require("./records");
 const { loadSnapshot, saveSnapshot } = require("./store");
 const { freshnessBand } = require("../../mataDewa/spatial/epistemic");
@@ -71,21 +72,70 @@ function resolveAuditAppend(auditLedger) {
 }
 
 /**
- * Baca `then` SEKALI saja dan kembalikan fungsinya, atau null.
+ * Absorpsi hasil audit yang mungkin thenable, TANPA pencarian properti pada
+ * objek milik pemanggil.
  *
- * Sebelumnya hook memeriksa `typeof result.then === "function"` lalu menyerahkan
- * `result` ke `Promise.resolve`, sehingga accessor `then` dijalankan DUA kali
- * per event (audit ba68903). Di sini `then` dibaca sekali; kalau bukan fungsi,
- * tidak ada promise yang dibuat sama sekali.
+ * Tiga jalur eksekusi kode pemanggil ditutup sekaligus di sini:
+ *
+ *  1. `value.then` adalah `[[Get]]` mentah -> dibaca lewat DESKRIPTOR; accessor
+ *     dan Proxy tidak dipakai.
+ *  2. `then.call(...)` adalah pencarian properti `call` pada objek fungsi
+ *     `then` -- cukup dengan menempelkan `call` no-op di sana untuk membelokkan
+ *     pemanggilan -> dipakai `Reflect.apply` yang dibekukan saat modul dimuat.
+ *  3. Nilai KEMBALIAN `then` diabaikan, padahal `then` asinkron yang menolak
+ *     mengembalikan promise yang DITOLAK -> diabsorpsi lewat
+ *     `Promise.prototype.then` INTRINSIK (bukan `.catch`, karena `catch` juga
+ *     pencarian properti pada objek pemanggil; audit 472b6e0).
+ *
+ * Bila objeknya bukan promise asli, pemanggilan intrinsik itu melempar dan
+ * ditangkap -- dan tidak ada rejection nyata yang tertinggal.
  */
-function readThenOnce(value) {
+const REFLECT_APPLY = Reflect.apply;
+const PROMISE_THEN = Promise.prototype.then;
+
+function readMethodOnce(value, name) {
     if (!value || (typeof value !== "object" && typeof value !== "function")) return null;
-    try {
-        const then = value.then;
-        return typeof then === "function" ? then : null;
-    } catch {
-        return null;
+    if (utilTypes.isProxy(value)) return null;
+    let level = value;
+    const seen = new Set();
+    while (level && (typeof level === "object" || typeof level === "function")) {
+        if (level === Object.prototype || level === Function.prototype) break;
+        if (seen.has(level)) break;
+        seen.add(level);
+        let desc;
+        try {
+            desc = Object.getOwnPropertyDescriptor(level, name);
+        } catch {
+            return null;
+        }
+        if (desc) {
+            if (desc.get || desc.set) return null;
+            return typeof desc.value === "function" ? desc.value : null;
+        }
+        try {
+            level = Object.getPrototypeOf(level);
+        } catch {
+            return null;
+        }
     }
+    return null;
+}
+
+function absorbAuditResult(result) {
+    const then = readMethodOnce(result, "then");
+    if (!then) return;
+    let chained;
+    try {
+        chained = REFLECT_APPLY(then, result, [undefined, () => {}]);
+    } catch {
+        return;   // kegagalan audit tidak pernah memblokir lane
+    }
+    if (!chained || (typeof chained !== "object" && typeof chained !== "function")) return;
+    // `then` yang mengabaikan handler dan mengembalikan promise tertolak:
+    // pasang handler lewat intrinsic, sehingga tidak ada pencarian properti.
+    try {
+        REFLECT_APPLY(PROMISE_THEN, chained, [undefined, () => {}]);
+    } catch { /* bukan promise asli -> tidak ada rejection yang tertinggal */ }
 }
 
 async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS, auditLedger = null } = {}) {
@@ -108,25 +158,10 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
                     eventType, source: "acc.spatial", outcome: "ok",
                     metadata: Object.freeze({ lane: "W8-L3", ...fields })
                 }));
-                // Hook audit bisa ASYNC dan menolak; penolakan yang tidak
-                // ditangani dapat menghentikan proses Node, sehingga kegagalan
-                // audit berubah menjadi kegagalan lane (audit Wave8 L3/L5).
-                // `then` dibaca SEKALI lewat readThenOnce, lalu dipanggil
-                // langsung -- `Promise.resolve(result)` akan membaca `then`
-                // untuk kedua kalinya.
-                const then = readThenOnce(result);
-                if (then) {
-                    try {
-                        // Nilai kembalian `then` juga harus diserap: sebuah
-                        // `then` async yang melempar mengembalikan promise yang
-                        // DITOLAK, dan membiarkannya berarti unhandled rejection
-                        // yang bisa menghentikan proses Node (audit de9553c).
-                        const chained = then.call(result, undefined, () => {});
-                        if (chained && typeof chained.catch === "function") {
-                            chained.catch(() => {});
-                        }
-                    } catch { /* penolakan sudah diserap; kegagalan audit tidak memblokir lane */ }
-                }
+                // Hook audit bisa ASYNC dan menolak. Seluruh pemeriksaan hasil
+                // (termasuk nilai kembalian `then`) ditangani absorbAuditResult
+                // tanpa satu pun pencarian properti pada objek pemanggil.
+                absorbAuditResult(result);
             }
         } catch { /* audit failure never blocks the lane */ }
     }
@@ -140,18 +175,57 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         audit("cognition.spatial.store_unreadable", { reason: "store-unreadable-or-hostile" });
     }
 
+    /**
+     * Record tersimpan harus lulus builder lane ini DAN tidak dinormalkan olehnya.
+     *
+     * Builder MENORMALKAN beberapa medan (mis. `observationRefs` non-array
+     * menjadi `[]`). "Lulus builder" saja karena itu bukan bukti bentuk yang
+     * benar: record ASLINYA tetap tersimpan apa adanya, sehingga
+     * `observationRefs` berisi objek tetap ter-expose lewat getScene() /
+     * queryOccupancy() dan membuat update sah gagal dengan TypeError (audit
+     * 472b6e0).
+     *
+     * Karena itu SALINAN AMAN record tersimpan dibandingkan dengan hasil
+     * builder: setiap medan yang dinormalkan membuat keduanya tidak sama, jadi
+     * record itu ditolak. Salinan diambil lewat buildSafeSpatialValue
+     * (deskriptor, tanpa accessor) dan hasil builder sudah disanitasi builder,
+     * sehingga perbandingan ini tidak menjalankan kode pemanggil.
+     */
+    function isCanonicallyEqual(stored, canonical, defaults = null) {
+        let safeStored;
+        try {
+            safeStored = buildSafeSpatialValue(stored);
+        } catch {
+            return false;
+        }
+        if (!safeStored || typeof safeStored !== "object") return false;
+        if (defaults !== null) {
+            // Medan yang boleh ABSEN di snapshot lama dibandingkan sebagai
+            // nilai default-nya. Disalin dari hasil sanitasi (objek milik kita),
+            // bukan dari input mentah.
+            const withDefaults = {};
+            for (const key of Object.keys(safeStored)) withDefaults[key] = safeStored[key];
+            for (const key of Object.keys(defaults)) {
+                if (withDefaults[key] === undefined) withDefaults[key] = defaults[key];
+            }
+            return isDeepStrictEqual(withDefaults, canonical);
+        }
+        return isDeepStrictEqual(safeStored, canonical);
+    }
+
     /** Record tersimpan harus lulus BUILDER lane ini, bukan sekadar berbentuk objek. */
     function isWellFormedPersistedFrame(id, frame) {
         if (!frame || typeof frame !== "object") return false;
         if (frame.frameId !== id) return false;
         if (!Number.isFinite(frame.registeredAt) || frame.registeredAt > now()) return false;
+        let canonical;
         try {
-            makeFrame({
+            canonical = makeFrame({
                 frameId: frame.frameId, kind: frame.kind, ref: frame.ref,
                 source: frame.source, nowMs: frame.registeredAt
             }, bounds);
         } catch { return false; }
-        return true;
+        return isCanonicallyEqual(frame, canonical);
     }
 
     function isWellFormedPersistedTransform(id, transform) {
@@ -163,13 +237,14 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         // batas retensi (audit de9553c).
         if (!Number.isFinite(transform.registeredAt) || transform.registeredAt > now()) return false;
         if (!frames.has(transform.fromFrameId) || !frames.has(transform.toFrameId)) return false;
+        let canonical;
         try {
-            makeTransform({
+            canonical = makeTransform({
                 transformId: transform.transformId, fromFrameId: transform.fromFrameId,
                 toFrameId: transform.toFrameId, data: transform.data, nowMs: transform.registeredAt
             }, bounds);
         } catch { return false; }
-        return true;
+        return isCanonicallyEqual(transform, canonical);
     }
 
     function isWellFormedPersistedSceneNode(key, node) {
@@ -177,17 +252,19 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         if (!frames.has(node.frameId)) return false;
         if (key !== sceneNodeKey(node.frameId, node.region)) return false;
         if (!Number.isFinite(node.updatedAtMs) || node.updatedAtMs > now()) return false;
-        // `sources` dinormalkan builder -> harus array string bila ada.
-        if (node.sources !== undefined &&
-            (!Array.isArray(node.sources) || node.sources.some(s => typeof s !== "string" || !s))) return false;
+        // `sources` ditambahkan pada revisi ini; snapshot lama (sebelum medan itu
+        // ada) tetap sah dan dibandingkan sebagai daftar kosong. Nilai `sources`
+        // yang ada tetapi salah bentuk tetap ditolak lewat perbandingan kanonik.
+        let canonical;
         try {
-            makeSceneNode({
+            canonical = makeSceneNode({
                 nodeId: node.nodeId, frameId: node.frameId, region: node.region,
                 state: node.state, observationRefs: node.observationRefs,
-                sources: node.sources, updatedAtMs: node.updatedAtMs
+                sources: node.sources === undefined ? [] : node.sources,
+                updatedAtMs: node.updatedAtMs
             }, bounds);
         } catch { return false; }
-        return true;
+        return isCanonicallyEqual(node, canonical, { sources: [] });
     }
 
     // Persisted maps are untrusted input. Reconcile them BEFORE compaction:
@@ -395,11 +472,6 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         requireStringId(frameId, "frameId");
         if (!frames.has(frameId)) fail(REASONS.UNKNOWN_FRAME, `frameId '${frameId}' belum terdaftar`);
         if (typeof observationRef !== "string" || !observationRef) fail(REASONS.INVALID_RECORD, "observationRef wajib string");
-        // `source` opsional: identitas SUMBER yang mengamati. Bila tidak diberi,
-        // observationRef dipakai sebagai pengganti (perilaku lama) -- tetapi
-        // pemanggil yang melaporkan banyak observasi dari sensor yang sama HARUS
-        // mengirim `source`, karena kalau tidak revisi satu sensor akan terus
-        // tampak sebagai perselisihan antar-sumber (audit de9553c).
         const sourceId = (typeof source === "string" && source) ? source : observationRef;
         const key = sceneNodeKey(frameId, region);
         const existing = sceneNodes.get(key);
@@ -411,16 +483,32 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
             refs = alreadyKnown ? [...existing.observationRefs] : [...existing.observationRefs, observationRef];
             const priorSources = Array.isArray(existing.sources) && existing.sources.length > 0
                 ? existing.sources
-                : existing.observationRefs;   // node lama tanpa `sources`
+                : existing.observationRefs;
             sources = priorSources.includes(sourceId) ? [...priorSources] : [...priorSources, sourceId];
             if (existing.state !== "CONTESTED" && existing.state !== state) {
-                // Kontes = PERSELISIHAN ANTAR-SUMBER (kontrak L3). Sumber yang
-                // merevisi klaimnya sendiri adalah revisi, bukan kontes.
-                // Dibandingkan lewat IDENTITAS SUMBER, bukan observationRef:
-                // observasi berikutnya dari sensor yang sama selalu membawa ref
-                // baru, jadi memakai ref akan mengunci region selamanya (audit
-                // de9553c).
-                const differentSourceDisagrees = priorSources.some(s => s !== sourceId);
+                // Kontes = PERSELISIHAN ANTAR-SUMBER (kontrak L3), dan kontes
+                // MEMBLOKIR precondition gerak. Karena itu penilaian ini harus
+                // TIDAK DAPAT DIPERLEMAH oleh pemanggil.
+                //
+                // Lane ini tidak memiliki cara mengautentikasi identitas
+                // sumber: `source` hanyalah label yang diberikan pemanggil,
+                // persis seperti `observationRef`. Bila label itu dipakai untuk
+                // MENURUNKAN kekuatan pemeriksaan, dua pelapor independen cukup
+                // memakai string yang sama untuk mengubah perselisihan menjadi
+                // "revisi" -- dan sebuah region yang seharusnya terkunci bisa
+                // membuka kembali dan meloloskan precondition gerak (audit
+                // 472b6e0).
+                //
+                // Aturannya karena itu konservatif mengikuti identitas
+                // OBSERVASI: observasi dari slot yang SAMA (`observationRef`
+                // yang sama) adalah revisi; `observationRef` BARU diperlakukan
+                // sebagai potensi sumber berbeda sampai terbukti sebaliknya.
+                // `source` tetap disimpan sebagai provenance (kontrak:
+                // "occupancy answers carry the provenance of their contributing
+                // observations") tetapi TIDAK pernah dipakai untuk membatalkan
+                // kontes. Lebih baik menandai CONTESTED secara berlebihan --
+                // arah gagal-tutup yang sama dengan "unknown never means clear".
+                const differentSourceDisagrees = !alreadyKnown;
                 nextState = differentSourceDisagrees ? "CONTESTED" : state;
             } else if (existing.state === "CONTESTED") {
                 nextState = "CONTESTED"; // once contested, stays contested until an explicit resolve (out of this lane's scope)

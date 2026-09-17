@@ -758,9 +758,12 @@ test("L5-audit-17: a malformed run is rejected by FULL record validation, not ju
     }
 });
 
-test("L5-audit-18: an accessor-backed `then` on an audit result runs at most ONCE per event", async () => {
-    // The hook probed `then` and then handed the value to `Promise.resolve`,
-    // which read `then` AGAIN -- two getter calls per event (audit of ba68903).
+test("L5-audit-18: an accessor-backed `then` on an audit result NEVER runs", async () => {
+    // Two earlier defects are closed here. `Promise.resolve` read `then`
+    // repeatedly (~2 getter calls per event, audit of ba68903), and the fix for
+    // that still invoked the result through `then.call` / `.catch` -- property
+    // lookups on a caller-controlled object (audit of 472b6e0). Handling is now
+    // entirely descriptor-based, so an accessor `then` is never executed at all.
     let thenCalls = 0;
     const payload = {};
     Object.defineProperty(payload, "then", {
@@ -777,8 +780,7 @@ test("L5-audit-18: an accessor-backed `then` on an audit result runs at most ONC
         steps: 1, horizonDays: 1, budgetTokens: 10,
         provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
     });
-    // run_started + run_ended = 2 events, one `then` read each.
-    assert.equal(thenCalls, 2, "`then` must be read exactly once per audited event");
+    assert.equal(thenCalls, 0, "an accessor `then` must never be executed");
 });
 
 /* ---------------------------------------------------------------------- */
@@ -851,6 +853,104 @@ test("L5-audit-20: a hostile async thenable on an audit result leaks no unhandle
         });
         await new Promise(r => setTimeout(r, 50));
         assert.equal(unhandled, 0, "a hostile thenable must not produce an unhandled rejection");
+    } finally {
+        process.removeListener("unhandledRejection", onUnhandled);
+    }
+});
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of 472b6e0 -- canonical equality + property lookups   */
+/* ---------------------------------------------------------------------- */
+
+test("L5-audit-21: a persisted result the builder would NORMALIZE is rejected, not exposed", async () => {
+    // The builder clamps `confidence` to 0..1 and turns a non-finite
+    // `tokensUsed` into 0, so "passes the builder" let the MALFORMED ORIGINAL
+    // stay stored and publicly readable through `getResult()` -- e.g.
+    // `confidence: 999`, `tokensUsed: -7`, and a far-future timestamp
+    // (audit of 472b6e0). Validation now requires the stored record to EQUAL the
+    // builder's canonical output, plus the semantics equality cannot express.
+    const nowMs = 1_000_000;
+    const goodRun = {
+        runId: "good", question: "q", scenario: {}, initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 10, fidelity: "DEFAULT",
+        state: "COMPLETE", createdAtMs: nowMs - 5000
+    };
+    const goodResult = () => ({
+        runId: "good", distribution: null, risks: [], assumptions: [], confidence: 0.5,
+        tier: "T10", state: "COMPLETE", tokensUsed: 1,
+        validUntilMs: nowMs + 3_600_000, generatedAtMs: nowMs - 5000
+    });
+
+    const malformedResults = [
+        { ...goodResult(), confidence: 999 },
+        { ...goodResult(), confidence: -3 },
+        { ...goodResult(), tokensUsed: -7 },
+        { ...goodResult(), generatedAtMs: 1e15, validUntilMs: 1e15 },
+        { ...goodResult(), validUntilMs: nowMs - 3_600_000 },
+        { ...goodResult(), risks: "not-an-array" },
+        { ...goodResult(), confidence: "0.5" }
+    ];
+
+    for (const result of malformedResults) {
+        const sim = await createSimulationSandbox({
+            store: {
+                async getKv() {
+                    return {
+                        runs: { good: goodRun }, results: { good: result },
+                        budget: { tokenLedger: [], invalidatedAssumptions: [] }
+                    };
+                },
+                async putKv() {}
+            },
+            clock: { nowMs: () => nowMs }
+        });
+        assertThrowsReason(() => sim.getResult("good"), "UNKNOWN_RUN");
+    }
+
+    // A genuinely well-formed result still loads.
+    const sim = await createSimulationSandbox({
+        store: {
+            async getKv() {
+                return {
+                    runs: { good: goodRun }, results: { good: goodResult() },
+                    budget: { tokenLedger: [], invalidatedAssumptions: [] }
+                };
+            },
+            async putKv() {}
+        },
+        clock: { nowMs: () => nowMs }
+    });
+    assert.equal(sim.getResult("good").confidence, 0.5);
+});
+
+test("L5-audit-22: a throwing `catch` accessor on a thenable's return value leaks no unhandled rejection", async () => {
+    // The previous fix absorbed the value returned by `then` through `.catch`,
+    // which is itself a property lookup on a caller-controlled object -- a
+    // throwing `catch` accessor prevented handler attachment and produced
+    // unhandled rejections (audit of 472b6e0). Absorption now uses the intrinsic
+    // `Promise.prototype.then` via a frozen `Reflect.apply`.
+    let unhandled = 0;
+    const onUnhandled = () => { unhandled += 1; };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+        const evilReturn = {};
+        Object.defineProperty(evilReturn, "catch", {
+            get() { throw new Error("hostile catch accessor"); }
+        });
+        const hostile = Object.freeze({ then() { return evilReturn; } });
+
+        const sim = await createSimulationSandbox({
+            clock: { nowMs: () => 1_000_000 },
+            auditLedger: { append() { return hostile; } },
+            bounds: { ...BOUNDS, MAX_TOKENS_PER_HOUR: 100 }
+        });
+        await sim.startRun({
+            runId: "r", question: "q", scenario: "s", initialStateRef: { frozen: true },
+            steps: 1, horizonDays: 1, budgetTokens: 10,
+            provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+        });
+        await new Promise(r => setTimeout(r, 60));
+        assert.equal(unhandled, 0, "a throwing `catch` accessor must not leak a rejection");
     } finally {
         process.removeListener("unhandledRejection", onUnhandled);
     }

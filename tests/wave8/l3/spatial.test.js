@@ -565,9 +565,12 @@ test("L3-audit-12: a frame with invalid kind/source is rejected by FULL validati
     }
 });
 
-test("L3-audit-13: an accessor-backed `then` on an audit result runs at most ONCE per event", async () => {
-    // The hook probed `then` and then handed the value to `Promise.resolve`,
-    // which read `then` AGAIN -- two getter calls per event (audit of ba68903).
+test("L3-audit-13: an accessor-backed `then` on an audit result NEVER runs", async () => {
+    // Two earlier defects are closed here. `Promise.resolve` read `then`
+    // repeatedly (~2 getter calls per event, audit of ba68903), and the fix for
+    // that still invoked the result through `then.call` / `.catch` -- property
+    // lookups on a caller-controlled object (audit of 472b6e0). Handling is now
+    // entirely descriptor-based, so an accessor `then` is never executed at all.
     let thenCalls = 0;
     const payload = {};
     Object.defineProperty(payload, "then", {
@@ -579,7 +582,7 @@ test("L3-audit-13: an accessor-backed `then` on an audit result runs at most ONC
         auditLedger: { append() { return payload; } }
     });
     sm.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "kitchen" }, source: "s" });
-    assert.equal(thenCalls, 1, "`then` must be read exactly once per audited event");
+    assert.equal(thenCalls, 0, "an accessor `then` must never be executed");
 });
 
 /* ---------------------------------------------------------------------- */
@@ -630,32 +633,91 @@ test("L3-audit-14: a future-dated persisted transform cannot displace a valid on
     }
 });
 
-test("L3-audit-15: contest is decided by SOURCE identity, not observationRef identity", async () => {
+test("L3-audit-15: a caller-asserted `source` cannot weaken contest detection", async () => {
     const nowMs = 1_000_000;
     const sm = await createSpatialModel({ clock: { nowMs: () => nowMs } });
     sm.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s" });
     const region = { r: 1 };
 
-    // The SAME sensor reporting a NEW observationRef is a REVISION, not a
-    // contest. Comparing observationRef identity made every subsequent reading
-    // from one sensor look like a second source and locked the region
-    // CONTESTED forever (audit of de9553c).
+    // A source-aware rule was tried and then WITHDRAWN. This lane cannot
+    // authenticate a source identity: `source` is only a caller-supplied label,
+    // exactly like `observationRef`. Had a matching label downgraded a contest to
+    // a "revision", two independent reporters could have shared one string to
+    // unlock a region that should stay locked -- and a contested region blocks
+    // motion preconditions (audit of 472b6e0). The conservative rule is therefore
+    // kept: only the SAME observation slot is a revision.
     sm.reportOccupancy({ frameId: "f1", region, state: "KNOWN", observationRef: "obs-1", source: "sensor-a" });
     sm.reportOccupancy({ frameId: "f1", region, state: "UNKNOWN", observationRef: "obs-2", source: "sensor-a" });
-    assert.equal(sm.queryOccupancy({ frameId: "f1", region }).state, "UNKNOWN",
-        "one sensor revising its own reading is not a contest");
-
-    // A genuinely DIFFERENT source disagreeing is a contest.
-    sm.reportOccupancy({ frameId: "f1", region, state: "KNOWN", observationRef: "obs-3", source: "sensor-b" });
     assert.equal(sm.queryOccupancy({ frameId: "f1", region }).state, "CONTESTED",
-        "a second source disagreeing must contest the region");
+        "a NEW observation ref is a potential second source, even under one asserted label");
 
-    // Legacy callers that omit `source` keep the previous behaviour.
+    // Two reporters sharing a label cannot suppress the contest: the second
+    // one arrives with its own observation ref.
     const sm2 = await createSpatialModel({ clock: { nowMs: () => nowMs } });
     sm2.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s" });
-    sm2.reportOccupancy({ frameId: "f1", region, state: "KNOWN", observationRef: "r1" });
-    sm2.reportOccupancy({ frameId: "f1", region, state: "UNKNOWN", observationRef: "r2" });
-    assert.equal(sm2.queryOccupancy({ frameId: "f1", region }).state, "CONTESTED",
-        "omitting `source` falls back to observationRef as the source identity");
+    sm2.reportOccupancy({ frameId: "f1", region, state: "UNKNOWN", observationRef: "shared-1", source: "shared-label" });
+    sm2.reportOccupancy({ frameId: "f1", region, state: "KNOWN", observationRef: "shared-2", source: "shared-label" });
+    const after = sm2.queryOccupancy({ frameId: "f1", region });
+    assert.equal(after.state, "CONTESTED",
+        "a shared label must not let a conflicting report unblock the region");
+    assert.equal(after.blocked, true, "and the region stays blocked");
+
+    // Re-reporting the SAME observation slot is a revision, not a contest.
+    const sm3 = await createSpatialModel({ clock: { nowMs: () => nowMs } });
+    sm3.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s" });
+    sm3.reportOccupancy({ frameId: "f1", region, state: "KNOWN", observationRef: "obs-1" });
+    sm3.reportOccupancy({ frameId: "f1", region, state: "UNKNOWN", observationRef: "obs-1" });
+    assert.equal(sm3.queryOccupancy({ frameId: "f1", region }).state, "UNKNOWN",
+        "the same observation ref updating itself is a revision");
+
+    // `source` is still RETAINED as provenance, as the contract requires.
+    const node = sm3.getScene().sceneNodes.find(n => n.region && n.region.r === 1);
+    assert.ok(node && Array.isArray(node.sources), "the source is retained as provenance");
+});
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of 472b6e0 -- canonical equality + property lookups   */
+/* ---------------------------------------------------------------------- */
+
+test("L3-audit-16: a persisted record the builder would NORMALIZE is rejected, not silently stored", async () => {
+    // The builder normalizes a non-array `observationRefs` to `[]`, so "passes
+    // the builder" let the MALFORMED ORIGINAL stay stored: `getScene()` exposed
+    // the object, `queryOccupancy()` returned it as provenance, and a legitimate
+    // later update threw a raw TypeError (audit of 472b6e0). Validation now
+    // requires the stored record to EQUAL the builder's canonical output.
+    const nowMs = 1_000_000;
+    const frame = { frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s", registeredAt: nowMs - 5000 };
+
+    const malformedNodes = [
+        { nodeId: "f1::{\"r\":1}", frameId: "f1", region: { r: 1 }, state: "KNOWN", observationRefs: [{ evil: true }], updatedAtMs: nowMs - 1000 },
+        { nodeId: "f1::{\"r\":1}", frameId: "f1", region: { r: 1 }, state: "KNOWN", observationRefs: "not-an-array", updatedAtMs: nowMs - 1000 },
+        { nodeId: "f1::{\"r\":1}", frameId: "f1", region: { r: 1 }, state: "KNOWN", observationRefs: ["ok", 5], updatedAtMs: nowMs - 1000 },
+        { nodeId: "f1::{\"r\":1}", frameId: "f1", region: { r: 1 }, state: "KNOWN", observationRefs: ["ok"], sources: [{ bad: true }], updatedAtMs: nowMs - 1000 }
+    ];
+
+    for (const node of malformedNodes) {
+        const sm = await createSpatialModel({
+            store: {
+                async getKv() {
+                    return { frames: { f1: frame }, transforms: {}, sceneNodes: { [node.nodeId]: node } };
+                },
+                async putKv() {}
+            },
+            clock: { nowMs: () => nowMs }
+        });
+        assert.equal(sm.sceneNodesSize(), 0, "a normalized record must not be retained");
+        assert.equal(sm.getScene().sceneNodes.length, 0, "and must not be exposed");
+    }
+
+    // A genuine update after loading a clean snapshot must not throw.
+    const sm = await createSpatialModel({
+        store: {
+            async getKv() { return { frames: { f1: frame }, transforms: {}, sceneNodes: {} }; },
+            async putKv() {}
+        },
+        clock: { nowMs: () => nowMs }
+    });
+    const node = sm.reportOccupancy({ frameId: "f1", region: { r: 1 }, state: "KNOWN", observationRef: "o1" });
+    assert.equal(node.state, "KNOWN");
 });
 
