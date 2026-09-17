@@ -892,3 +892,78 @@ test("FG03-48: requireAudit fails closed for any truthy value, and a no-op sink 
     assert.ok(okRun.lanes);
     rec.close();
 });
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of 8fbfcdd -- durable brand must mean fsync           */
+/* ---------------------------------------------------------------------- */
+
+test("FG03-49: a file sink created with fsync disabled is NOT branded durable and cannot confirm", () => {
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const { createAuditLedger, createFileAuditSink } = require("../../../src/runtime/auditLedger");
+    const { isDurableAuditSink } = require("../../../src/runtime/auditLedger/fileSink");
+
+    // The durable brand is the basis of the "durably recorded" claim, and that
+    // claim names fsync explicitly. A sink built with {fsync:false} writes
+    // without flushing, so branding it durable let a deployment obtain governed
+    // confirmation without the required durability (audit of 8fbfcdd).
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-nofsync-"));
+    const noFsyncSink = createFileAuditSink(path.join(dir, "audit.jsonl"), { fsync: false });
+    assert.equal(noFsyncSink.describeDurable().fsync, false, "the sink really is non-fsyncing");
+    assert.equal(isDurableAuditSink(noFsyncSink), false,
+        "a non-fsyncing sink must not carry the durable brand");
+
+    const noFsyncLedger = createAuditLedger({
+        sink: noFsyncSink, resume: noFsyncSink.describeDurable()
+    });
+    assert.equal(noFsyncLedger.hasDurableSink, false, "and its ledger cannot claim a durable sink");
+    const checked = recordModeTransitionChecked({
+        auditLedger: noFsyncLedger, from: "off", to: "governed"
+    });
+    assert.equal(checked.audited, false, "a non-fsyncing sink must not confirm a durable append");
+    assert.equal(checked.failedOpen, true);
+    try { noFsyncSink.close(); } catch { /* ignore */ }
+
+    // The DEFAULT sink (fsync on) is durable and still confirms end to end.
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-fsync-"));
+    const file = path.join(dir2, "audit.jsonl");
+    const durableSink = createFileAuditSink(file);
+    assert.equal(durableSink.describeDurable().fsync, true);
+    assert.equal(isDurableAuditSink(durableSink), true, "the default sink is durable");
+    const durableLedger = createAuditLedger({ sink: durableSink, resume: durableSink.describeDurable() });
+    assert.equal(durableLedger.hasDurableSink, true);
+    assert.equal(recordModeTransitionChecked({
+        auditLedger: durableLedger, from: "off", to: "governed"
+    }).audited, true);
+    try { durableSink.close(); } catch { /* ignore */ }
+});
+
+test("FG03-50: requireAudit refuses a non-fsyncing ledger and accepts a durable one", async () => {
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const { createAuditLedger, createFileAuditSink } = require("../../../src/runtime/auditLedger");
+    const { createLongHorizonCycle } = require("../../../src/cognition/longhorizon");
+    const registry = { get: () => ({ kind: "tool" }), has: () => true, getAvailability: () => { throw new Error("unused"); } };
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-nofsync2-"));
+    const noFsyncSink = createFileAuditSink(path.join(dir, "audit.jsonl"), { fsync: false });
+    const noFsyncLedger = createAuditLedger({ sink: noFsyncSink, resume: noFsyncSink.describeDurable() });
+    const refused = await createLongHorizonCycle({
+        mode: "governed", capabilityRegistry: registry,
+        auditLedger: noFsyncLedger, requireAudit: true
+    });
+    assert.equal(refused.mode, "off", "a non-fsyncing ledger must not satisfy requireAudit");
+    assert.equal(refused.lanes, undefined);
+    try { noFsyncSink.close(); } catch { /* ignore */ }
+
+    const rec = recordingLedger();
+    const accepted = await createLongHorizonCycle({
+        mode: "governed", capabilityRegistry: registry,
+        auditLedger: rec.ledger, requireAudit: true
+    });
+    assert.equal(accepted.mode, "governed");
+    assert.ok(accepted.lanes);
+    rec.close();
+});

@@ -439,7 +439,15 @@ function createFileAuditSink(filePath, options = {}) {
     };
 
     const frozenSink = Object.freeze(sink);
-    DURABLE_AUDIT_SINKS.add(frozenSink);
+    // HANYA sink yang benar-benar fsync yang di-brand DURABEL.
+    //
+    // Merek ini adalah dasar klaim "rekaman durabel" (FG-03), dan janji itu
+    // menyebut fsync secara eksplisit: `createFileAuditSink(path, {fsync:false})`
+    // menulis tanpa flush, sehingga sebuah deployment bisa memperoleh
+    // konfirmasi governed tanpa durabilitas yang disyaratkan (audit 8fbfcdd).
+    // Tanpa fsync, sink ini tetap dapat dipakai -- ia hanya tidak dihitung
+    // sebagai bukti durabel.
+    if (fsync) DURABLE_AUDIT_SINKS.add(frozenSink);
     return frozenSink;
 }
 
