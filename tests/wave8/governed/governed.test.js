@@ -967,3 +967,88 @@ test("FG03-50: requireAudit refuses a non-fsyncing ledger and accepts a durable 
     assert.ok(accepted.lanes);
     rec.close();
 });
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of c894e05 -- caller code must not suppress the flush */
+/* ---------------------------------------------------------------------- */
+
+test("FG03-51: an options getter/Proxy cannot suppress the real fsync while the sink stays durably branded", () => {
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const { createAuditLedger, createFileAuditSink } = require("../../../src/runtime/auditLedger");
+    const { isDurableAuditSink } = require("../../../src/runtime/auditLedger/fileSink");
+
+    // The attack: read options.fsync through an accessor, and inside that getter
+    // replace `fs.fsyncSync` so the sink is branded durable while never actually
+    // flushing -- which let `requireAudit: true` enter governed mode without the
+    // durability it asserts (audit of c894e05).
+    const realFsync = fs.fsyncSync;
+    let getterReads = 0;
+    const hostileOpts = {};
+    Object.defineProperty(hostileOpts, "fsync", {
+        enumerable: true, configurable: true,
+        get() { getterReads += 1; fs.fsyncSync = () => {}; return true; }
+    });
+    try {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-atk-"));
+        const sink = createFileAuditSink(path.join(dir, "audit.jsonl"), hostileOpts);
+        assert.equal(getterReads, 0, "the options accessor must never run");
+        assert.equal(fs.fsyncSync, realFsync, "the getter therefore never got a chance to replace the primitive");
+        assert.equal(isDurableAuditSink(sink), true, "a genuinely fsyncing sink is still branded");
+        try { sink.close(); } catch { /* ignore */ }
+    } finally {
+        fs.fsyncSync = realFsync;
+    }
+
+    // A Proxy options object must not run either.
+    let proxyReads = 0;
+    const proxyOpts = new Proxy({}, {
+        get(t, k) { if (k === "fsync") { proxyReads += 1; } return Reflect.get(t, k); }
+    });
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-atk2-"));
+    const sink2 = createFileAuditSink(path.join(dir2, "audit.jsonl"), proxyOpts);
+    assert.equal(proxyReads, 0, "a Proxy options object must not be read through");
+    assert.equal(isDurableAuditSink(sink2), true, "omitting fsync keeps the safe default (fsync on)");
+    try { sink2.close(); } catch { /* ignore */ }
+
+    // The brand must always agree with the sink's own reported fsync state.
+    for (const [label, opts] of [["default", undefined], ["{fsync:true}", { fsync: true }],
+        ["{fsync:false}", { fsync: false }], ["{fsync:0}", { fsync: 0 }], ["{fsync:null}", { fsync: null }]]) {
+        const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-inv-"));
+        const file = path.join(dir3, "audit.jsonl");
+        const s = opts === undefined ? createFileAuditSink(file) : createFileAuditSink(file, opts);
+        const branded = isDurableAuditSink(s);
+        assert.equal(branded, s.describeDurable().fsync,
+            `the durable brand must match the real fsync state for ${label}`);
+        try { s.close(); } catch { /* ignore */ }
+    }
+});
+
+test("FG03-52: the sink flushes through primitives captured at load, so later mutation cannot defeat a confirmed append", () => {
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const { createAuditLedger, createFileAuditSink } = require("../../../src/runtime/auditLedger");
+
+    // The module captures its file primitives when it loads, so replacing
+    // `fs.fsyncSync` AFTER that point cannot suppress the flush of an append
+    // that was already confirmed durable.
+    const realFsync = fs.fsyncSync;
+    let wrapperCalls = 0;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-cap-"));
+    const file = path.join(dir, "audit.jsonl");
+    const sink = createFileAuditSink(file);
+    const ledger = createAuditLedger({ sink, resume: sink.describeDurable() });
+    try {
+        fs.fsyncSync = function (...args) { wrapperCalls += 1; return realFsync.apply(this, args); };
+        const record = ledger.append({ eventType: "a.b", source: "s" }, { durable: true });
+        assert.ok(record && record.eventId, "the durable append was confirmed");
+        assert.equal(wrapperCalls, 0, "the sink used its captured primitive, not the replacement");
+        assert.equal(fs.readFileSync(file, "utf8").split("\n").filter(Boolean).length, 1,
+            "the record really reached disk");
+    } finally {
+        fs.fsyncSync = realFsync;
+        try { sink.close(); } catch { /* ignore */ }
+    }
+});
