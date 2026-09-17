@@ -397,24 +397,42 @@ function extractConfirmedEventId(result) {
  * mengonfirmasi apa pun, jadi jalur itu gagal-tutup.
  */
 /**
- * Pemeriksa merek ledger kanonik, di-resolve MALAS.
+ * Pemeriksa merek ledger kanonik, di-resolve SAAT MODUL DIMUAT.
  *
- * `governed/` tidak boleh mengimpor runtime record-sink saat modul dimuat
- * (pola yang sama dengan pemeriksa `SpatialError` di lane Wave7 lain), jadi
- * pemeriksa ini dicari saat pertama dipakai dan di-cache. Bila modul ledger
- * tidak tersedia, TIDAK ADA ledger yang dapat dibuktikan kanonik -- gagal-tutup.
+ * Sebelumnya ini di-resolve MALAS (pada pemakaian pertama) lalu di-cache. Itu
+ * berarti siapa pun yang mengganti entri `require.cache` untuk modul audit
+ * ledger SEBELUM pemakaian pertama dapat memasok `isAuditLedger` palsu, dan
+ * sebuah ledger tiruan dengan `hasDurableSink:true` dilaporkan `audited:true`
+ * (audit 2712bf3). Menyelesaikannya saat modul dimuat mengambil referensi
+ * SEBELUM ada kesempatan mengganti cache pada jalur normal.
+ *
+ * BATAS YANG DISEBUT JUJUR: kode yang sudah berjalan di proses ini sebelum
+ * modul dimuat (termasuk yang menambal `require.cache` lebih dulu) berada di
+ * luar batas merek leksikal mana pun; itu residual yang sama seperti seluruh
+ * lane ini, bukan klaim yang dibuat di sini. Bila modul tidak dapat dimuat,
+ * pemeriksa bernilai null dan TIDAK ADA ledger yang dapat dibuktikan kanonik --
+ * gagal-tutup permanen.
  */
-let ledgerBrandCheck;
+const ledgerBrandCheck = (() => {
+    try {
+        const mod = require("../../runtime/auditLedger");
+        return typeof mod.isAuditLedger === "function" ? mod.isAuditLedger : null;
+    } catch {
+        return null;
+    }
+})();
+
+/** Salinan struktur-dalam milik ledger kanonik, di-resolve SAAT MODUL DIMUAT. */
+const ledgerDetach = (() => {
+    try {
+        const mod = require("../../runtime/auditLedger/ledger");
+        return typeof mod.detach === "function" ? mod.detach : null;
+    } catch {
+        return null;
+    }
+})();
 
 function isCanonicalLedger(candidate) {
-    if (ledgerBrandCheck === undefined) {
-        try {
-            const mod = require("../../runtime/auditLedger");
-            ledgerBrandCheck = typeof mod.isAuditLedger === "function" ? mod.isAuditLedger : null;
-        } catch {
-            ledgerBrandCheck = null;
-        }
-    }
     if (typeof ledgerBrandCheck !== "function") return false;
     try {
         if (ledgerBrandCheck(candidate) !== true) return false;
@@ -431,18 +449,7 @@ function isCanonicalLedger(candidate) {
     return readOwnDataField(candidate, "hasDurableSink") === true;
 }
 
-/** Salinan struktur-dalam milik ledger kanonik, bila tersedia. */
-let ledgerDetach;
-
 function detachRecord(value) {
-    if (ledgerDetach === undefined) {
-        try {
-            const mod = require("../../runtime/auditLedger/ledger");
-            ledgerDetach = typeof mod.detach === "function" ? mod.detach : null;
-        } catch {
-            ledgerDetach = null;
-        }
-    }
     return typeof ledgerDetach === "function" ? ledgerDetach(value) : null;
 }
 

@@ -1052,3 +1052,94 @@ test("FG03-52: the sink flushes through primitives captured at load, so later mu
         try { sink.close(); } catch { /* ignore */ }
     }
 });
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of 2712bf3 -- `call` lookup and module-cache swap     */
+/* ---------------------------------------------------------------------- */
+
+test("FG03-53: attaching a no-op `call` to the shared primitive cannot suppress a confirmed flush", () => {
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const { createAuditLedger, createFileAuditSink } = require("../../../src/runtime/auditLedger");
+    const { isDurableAuditSink } = require("../../../src/runtime/auditLedger/fileSink");
+
+    // The previous fix called the captured primitive as `FN.call(...)`. `call` is
+    // a PROPERTY of that function object, and the object is still reachable
+    // through `fs.fsyncSync` -- so an own no-op `call` suppressed the real flush
+    // while the sink stayed branded durable and `requireAudit: true` entered
+    // governed mode with zero flushes (audit of 2712bf3). The write path now
+    // uses a frozen `Reflect.apply`, which performs no property lookup.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-call-"));
+    const file = path.join(dir, "audit.jsonl");
+    const sink = createFileAuditSink(file);
+    const ledger = createAuditLedger({ sink, resume: sink.describeDurable() });
+
+    let noopRan = 0;
+    fs.fsyncSync.call = () => { noopRan += 1; };
+    let checked;
+    try {
+        checked = recordModeTransitionChecked({
+            auditLedger: ledger, from: "off", to: "governed"
+        });
+    } finally {
+        delete fs.fsyncSync.call;
+    }
+    try {
+        assert.equal(noopRan, 0, "the replacement `call` must never run");
+        assert.equal(checked.audited, true, "the durable append really was confirmed");
+        assert.equal(isDurableAuditSink(sink), true);
+        assert.equal(fs.readFileSync(file, "utf8").split("\n").filter(Boolean).length, 1,
+            "the record really reached disk");
+    } finally {
+        try { sink.close(); } catch { /* ignore */ }
+    }
+});
+
+test("FG03-54: a Proxy options object runs no traps, and swapping the ledger module cache cannot forge a confirmation", () => {
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const { createAuditLedger, createFileAuditSink } = require("../../../src/runtime/auditLedger");
+    const { isDurableAuditSink } = require("../../../src/runtime/auditLedger/fileSink");
+
+    // Proxy traps run on EVERY reflective operation, including the descriptor
+    // read and the prototype walk used to resolve the option, so a Proxy is now
+    // rejected before any read.
+    let traps = 0;
+    const proxyOpts = new Proxy({}, {
+        getOwnPropertyDescriptor() { traps += 1; return undefined; },
+        getPrototypeOf(t) { traps += 1; return Object.getPrototypeOf(t); },
+        get() { traps += 1; return true; }
+    });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fg03-prx-"));
+    const sink = createFileAuditSink(path.join(dir, "audit.jsonl"), proxyOpts);
+    assert.equal(traps, 0, "no Proxy trap may run while resolving the option");
+    assert.equal(isDurableAuditSink(sink), true, "the safe default (fsync on) stays in force");
+    try { sink.close(); } catch { /* ignore */ }
+
+    // The canonical brand check and the detach helper are resolved when the
+    // governed module LOADS, so replacing the audit-ledger entry in the
+    // CommonJS cache afterwards cannot substitute a fake brand.
+    const ledgerPath = require.resolve("../../../src/runtime/auditLedger");
+    const original = require.cache[ledgerPath];
+    const fakeLedger = Object.freeze({
+        append() { return { eventId: "forged" }; },
+        getByEventId(id) { return { eventId: id, eventType: "trust", source: "elsewhere", metadata: {} }; },
+        hasDurableSink: true
+    });
+    try {
+        require.cache[ledgerPath] = {
+            id: ledgerPath, filename: ledgerPath, loaded: true,
+            exports: { isAuditLedger: () => true }
+        };
+        const forged = recordModeTransitionChecked({
+            auditLedger: fakeLedger, from: "off", to: "governed"
+        });
+        assert.equal(forged.audited, false,
+            "a swapped-out brand check must not confirm a fake ledger");
+        assert.equal(forged.failedOpen, true);
+    } finally {
+        require.cache[ledgerPath] = original;
+    }
+});

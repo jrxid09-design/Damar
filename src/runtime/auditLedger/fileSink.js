@@ -2,38 +2,64 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const utilTypes = require("node:util").types;
 
 /**
- * Primitive berkas DIBEKUKAN SAAT MODUL DIMUAT.
+ * Primitive berkas DIBEKUKAN SAAT MODUL DIMUAT, lalu dipanggil lewat
+ * `Reflect.apply` yang juga dibekukan.
  *
- * Merek durabel (di bawah) menegaskan "sink ini menulis DAN fsync". Bila kode
- * penelepon dapat mengganti `fs.fsyncSync` (langsung, atau lewat getter/Proxy di
- * objek opsi yang dijalankan sebelum penulisan), sink tetap memperoleh merek itu
- * padahal tidak pernah benar-benar mem-flush -- dan `requireAudit:true` bisa
- * masuk mode governed tanpa durabilitas (audit c894e05). Menangkap fungsinya di
- * sini membuat implementasi yang dipakai tidak lagi dapat diganti setelah modul
- * dimuat.
+ * Merek durabel (di bawah) menegaskan "sink ini menulis DAN fsync", jadi
+ * jalur tulis tidak boleh dapat dibelokkan oleh kode penelepon.
  *
- * Ini BUKAN klaim keamanan terhadap kode yang sudah berjalan di proses ini
- * (sama seperti merek leksikal lane ini); batasnya adalah kode penelepon tidak
- * dapat menyetel ulang implementasi TEPAT PADA SAAT merek durabel diberikan.
+ * Kenapa `Reflect.apply` dan BUKAN `FN.call(...)`: `FILE_FSYNC_SYNC` menunjuk
+ * ke objek fungsi yang SAMA dengan `fs.fsyncSync`, dan objek itu masih dapat
+ * dijangkau penelepon. `FN.call(...)` adalah pencarian properti `call` pada
+ * objek itu -- cukup dengan menempelkan `call` no-op sebagai properti sendiri di
+ * `fs.fsyncSync`, flush asli hilang sementara merek durabel tetap terpasang
+ * (audit 2712bf3). Memanggil fungsi yang sudah dibekukan SECARA LANGSUNG tidak
+ * melakukan pencarian properti apa pun.
+ *
+ * BATAS YANG DISEBUT JUJUR: bila kode penelepon sudah berjalan di proses ini
+ * SEBELUM modul dimuat, ia dapat mengganti `fs.fsyncSync` sehingga yang
+ * TERBEKUKAN adalah implementasi palsu. Itu threat model yang sama dengan
+ * seluruh merek leksikal lane ini (dan CommonJS cache), dan tidak diklaim
+ * tertutup di sini.
  */
+const REFLECT_APPLY = Reflect.apply;
 const FILE_OPEN_SYNC = fs.openSync;
 const FILE_WRITE_SYNC = fs.writeSync;
 const FILE_FSYNC_SYNC = fs.fsyncSync;
 const FILE_CLOSE_SYNC = fs.closeSync;
 
 /**
+ * Apakah nilai ini Proxy.
+ *
+ * Diperiksa LEBIH DULU di `resolveFsyncOption`: setiap operasi reflektif pada
+ * Proxy menjalankan trap milik pemanggil, jadi tidak ada pembacaan opsi yang
+ * aman -- `Object.getOwnPropertyDescriptor` dan `Object.getPrototypeOf` pun
+ * mengeksekusi trap (audit 2712bf3).
+ */
+function isProxyValue(value) {
+    if (value === null || typeof value !== "object") return false;
+    try {
+        return utilTypes.isProxy(value);
+    } catch {
+        return true;   // tidak dapat dipastikan -> perlakukan sebagai tidak aman
+    }
+}
+
+/**
  * Baca `options.fsync` lewat DESKRIPTOR.
  *
- * `options.fsync !== false` adalah `[[Get]]` mentah: getter atau Proxy di objek
- * opsi menjalankan kode penelepon, yang dapat mengganti `fs.fsyncSync` sebelum
- * sink menulis apa pun (audit c894e05). Pembacaan lewat deskriptor tidak
- * menjalankan accessor; nilai accessor diperlakukan sebagai "tidak menyatakan
- * apa pun", sehingga default aman (fsync aktif) tetap berlaku.
+ * `options.fsync !== false` adalah `[[Get]]` mentah: getter di objek opsi
+ * menjalankan kode penelepon, yang dapat mengganti `fs.fsyncSync` sebelum sink
+ * menulis apa pun (audit c894e05). Pembacaan lewat deskriptor tidak menjalankan
+ * accessor; nilai accessor diperlakukan sebagai "tidak menyatakan apa pun",
+ * sehingga default aman (fsync aktif) tetap berlaku.
  */
 function resolveFsyncOption(options) {
     if (options === null || typeof options !== "object") return true;
+    if (isProxyValue(options)) return true;      // trap apa pun tidak boleh jalan
     let desc;
     try {
         desc = Object.getOwnPropertyDescriptor(options, "fsync");
@@ -48,6 +74,7 @@ function resolveFsyncOption(options) {
         } catch {
             return true;
         }
+        if (proto === null) return true;
         return resolveFsyncOption(proto);
     }
     if (desc.get || desc.set) return true;
@@ -353,18 +380,20 @@ function createFileAuditSink(filePath, options = {}) {
     const queue = [];
 
     function appendLine(line) {
-        // Atomic append of one fsync'd line.  O_EX so two sinks cannot both
+        // Atomic append of one fsync'd line. O_EX so two sinks cannot both
         // create the file; the queue guarantees single-writer ordering here.
-        // Primitive berkas diambil dari binding yang dibekukan saat modul
-        // dimuat (lihat FILE_*_SYNC di atas), sehingga penggantian
-        // `fs.fsyncSync` oleh kode penelepon tidak dapat membatalkan flush
-        // selagi sink tetap memegang merek durabel (audit c894e05).
-        const fd = FILE_OPEN_SYNC.call(fs, filePath, "a");
+        //
+        // Dipanggil lewat REFLECT_APPLY yang dibekukan saat modul dimuat, bukan
+        // `FN.call(...)`: `call` adalah properti pada objek fungsi yang masih
+        // dapat dijangkau penelepon, sehingga `fs.fsyncSync.call = () => {}`
+        // cukup untuk menghapus flush asli sementara merek durabel tetap
+        // terpasang (audit 2712bf3).
+        const fd = REFLECT_APPLY(FILE_OPEN_SYNC, fs, [filePath, "a"]);
         try {
-            FILE_WRITE_SYNC.call(fs, fd, line + "\n");
-            if (fsync) FILE_FSYNC_SYNC.call(fs, fd);
+            REFLECT_APPLY(FILE_WRITE_SYNC, fs, [fd, line + "\n"]);
+            if (fsync) REFLECT_APPLY(FILE_FSYNC_SYNC, fs, [fd]);
         } finally {
-            FILE_CLOSE_SYNC.call(fs, fd);
+            REFLECT_APPLY(FILE_CLOSE_SYNC, fs, [fd]);
         }
     }
 
