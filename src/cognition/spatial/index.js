@@ -21,6 +21,8 @@ const { sanitizeBounds } = require("../core/bounds");
 const { laws } = require("./laws");
 const utilTypes = require("node:util").types;
 const { isDeepStrictEqual } = require("node:util");
+/** `Object.getOwnPropertyDescriptor` lewat intrinsic tetap (tanpa pencarian properti). */
+const GET_OWN_DESCRIPTOR = Object.getOwnPropertyDescriptor;
 const { makeFrame, makeTransform, makeSceneNode, readSpecFields, requireStringId, canonicalRegionKey, buildSafeSpatialValue } = require("./records");
 const { loadSnapshot, saveSnapshot } = require("./store");
 const { freshnessBand } = require("../../mataDewa/spatial/epistemic");
@@ -72,70 +74,42 @@ function resolveAuditAppend(auditLedger) {
 }
 
 /**
- * Absorpsi hasil audit yang mungkin thenable, TANPA pencarian properti pada
- * objek milik pemanggil.
+ * Absorpsi hasil audit, TANPA pernah memanggil `then` milik pemanggil.
  *
- * Tiga jalur eksekusi kode pemanggil ditutup sekaligus di sini:
+ * Versi-versi sebelumnya memanggil `then` (lewat `then.call` lalu lewat
+ * `Reflect.apply`) dan hanya bisa menyerap promise yang DIKEMBALIKAN. Itu tidak
+ * cukup: sebuah `then` milik pemanggil dapat mengeksekusi `Promise.reject(...)`
+ * lalu mengembalikan `undefined`, sehingga penolakan itu lepas sama sekali dan
+ * hanya bisa diamati sebagai `unhandledRejection` -- di bawah kebijakan Node
+ * yang ketat, proses berhenti (audit a9cc5db). Memanggil kode pemanggil juga
+ * bertentangan dengan batas "hook audit tidak menjalankan kode pemanggil".
  *
- *  1. `value.then` adalah `[[Get]]` mentah -> dibaca lewat DESKRIPTOR; accessor
- *     dan Proxy tidak dipakai.
- *  2. `then.call(...)` adalah pencarian properti `call` pada objek fungsi
- *     `then` -- cukup dengan menempelkan `call` no-op di sana untuk membelokkan
- *     pemanggilan -> dipakai `Reflect.apply` yang dibekukan saat modul dimuat.
- *  3. Nilai KEMBALIAN `then` diabaikan, padahal `then` asinkron yang menolak
- *     mengembalikan promise yang DITOLAK -> diabsorpsi lewat
- *     `Promise.prototype.then` INTRINSIK (bukan `.catch`, karena `catch` juga
- *     pencarian properti pada objek pemanggil; audit 472b6e0).
+ * Karena itu `then` milik pemanggil TIDAK PERNAH dijalankan. Hanya promise ASLI
+ * (dikenali lewat brand intrinsik `util.types.isPromise`, yang juga benar untuk
+ * promise lintas-realm) yang diberi handler, dan handler itu dipasang lewat
+ * `Promise.prototype.then` INTRINSIK sehingga tidak ada pencarian properti pada
+ * objek pemanggil.
  *
- * Bila objeknya bukan promise asli, pemanggilan intrinsik itu melempar dan
- * ditangkap -- dan tidak ada rejection nyata yang tertinggal.
+ * Konsekuensi yang DISEBUT: thenable buatan sendiri (bukan Promise asli) tidak
+ * lagi diikuti. Untuk hook audit itu justru yang diinginkan -- hook yang ingin
+ * hasilnya diobservasi harus mengembalikan Promise asli.
  */
 const REFLECT_APPLY = Reflect.apply;
 const PROMISE_THEN = Promise.prototype.then;
-
-function readMethodOnce(value, name) {
-    if (!value || (typeof value !== "object" && typeof value !== "function")) return null;
-    if (utilTypes.isProxy(value)) return null;
-    let level = value;
-    const seen = new Set();
-    while (level && (typeof level === "object" || typeof level === "function")) {
-        if (level === Object.prototype || level === Function.prototype) break;
-        if (seen.has(level)) break;
-        seen.add(level);
-        let desc;
-        try {
-            desc = Object.getOwnPropertyDescriptor(level, name);
-        } catch {
-            return null;
-        }
-        if (desc) {
-            if (desc.get || desc.set) return null;
-            return typeof desc.value === "function" ? desc.value : null;
-        }
-        try {
-            level = Object.getPrototypeOf(level);
-        } catch {
-            return null;
-        }
-    }
-    return null;
-}
+const IS_PROMISE_INTRINSIC = utilTypes.isPromise;
 
 function absorbAuditResult(result) {
-    const then = readMethodOnce(result, "then");
-    if (!then) return;
-    let chained;
+    if (!result || (typeof result !== "object" && typeof result !== "function")) return;
+    let isRealPromise;
     try {
-        chained = REFLECT_APPLY(then, result, [undefined, () => {}]);
+        isRealPromise = REFLECT_APPLY(IS_PROMISE_INTRINSIC, utilTypes, [result]);
     } catch {
-        return;   // kegagalan audit tidak pernah memblokir lane
+        return;
     }
-    if (!chained || (typeof chained !== "object" && typeof chained !== "function")) return;
-    // `then` yang mengabaikan handler dan mengembalikan promise tertolak:
-    // pasang handler lewat intrinsic, sehingga tidak ada pencarian properti.
+    if (!isRealPromise) return;   // thenable pemanggil tidak pernah dipanggil
     try {
-        REFLECT_APPLY(PROMISE_THEN, chained, [undefined, () => {}]);
-    } catch { /* bukan promise asli -> tidak ada rejection yang tertinggal */ }
+        REFLECT_APPLY(PROMISE_THEN, result, [undefined, () => {}]);
+    } catch { /* promise asli yang aneh -> tidak ada rejection yang tertinggal */ }
 }
 
 async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS, auditLedger = null } = {}) {
@@ -252,19 +226,32 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         if (!frames.has(node.frameId)) return false;
         if (key !== sceneNodeKey(node.frameId, node.region)) return false;
         if (!Number.isFinite(node.updatedAtMs) || node.updatedAtMs > now()) return false;
-        // `sources` ditambahkan pada revisi ini; snapshot lama (sebelum medan itu
-        // ada) tetap sah dan dibandingkan sebagai daftar kosong. Nilai `sources`
-        // yang ada tetapi salah bentuk tetap ditolak lewat perbandingan kanonik.
+        // `sources` ditambahkan pada revisi ini. Snapshot lama yang BELUM punya
+        // medan itu tetap sah dan diperlakukan sebagai daftar kosong -- tetapi
+        // HANYA bila medannya benar-benar tidak ada. Sebelumnya `undefined`
+        // eksplisit diperlakukan sama dengan "tidak ada" untuk perbandingan,
+        // sementara nilai `undefined` itu tetap tersimpan dan ter-expose, jadi
+        // persamaan kanonik bisa dilewati (audit a9cc5db). Keberadaan medan
+        // diperiksa lewat DESKRIPTOR, bukan `in`/`hasOwnProperty` yang dapat
+        // ditimpa pada objek pemanggil.
+        let hasOwnSources = false;
+        try {
+            hasOwnSources = REFLECT_APPLY(GET_OWN_DESCRIPTOR, Object, [node, "sources"]) !== undefined;
+        } catch {
+            return false;
+        }
+        if (hasOwnSources && !Array.isArray(node.sources)) return false;
+        const sourcesForCompare = hasOwnSources ? node.sources : [];
         let canonical;
         try {
             canonical = makeSceneNode({
                 nodeId: node.nodeId, frameId: node.frameId, region: node.region,
                 state: node.state, observationRefs: node.observationRefs,
-                sources: node.sources === undefined ? [] : node.sources,
+                sources: sourcesForCompare,
                 updatedAtMs: node.updatedAtMs
             }, bounds);
         } catch { return false; }
-        return isCanonicallyEqual(node, canonical, { sources: [] });
+        return isCanonicallyEqual(node, canonical, hasOwnSources ? null : { sources: [] });
     }
 
     // Persisted maps are untrusted input. Reconcile them BEFORE compaction:
@@ -487,29 +474,33 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
             sources = priorSources.includes(sourceId) ? [...priorSources] : [...priorSources, sourceId];
             if (existing.state !== "CONTESTED" && existing.state !== state) {
                 // Kontes = PERSELISIHAN ANTAR-SUMBER (kontrak L3), dan kontes
-                // MEMBLOKIR precondition gerak. Karena itu penilaian ini harus
-                // TIDAK DAPAT DIPERLEMAH oleh pemanggil.
+                // MEMBLOKIR precondition gerak.
                 //
-                // Lane ini tidak memiliki cara mengautentikasi identitas
-                // sumber: `source` hanyalah label yang diberikan pemanggil,
-                // persis seperti `observationRef`. Bila label itu dipakai untuk
-                // MENURUNKAN kekuatan pemeriksaan, dua pelapor independen cukup
-                // memakai string yang sama untuk mengubah perselisihan menjadi
-                // "revisi" -- dan sebuah region yang seharusnya terkunci bisa
-                // membuka kembali dan meloloskan precondition gerak (audit
-                // 472b6e0).
+                // BATAS YANG DISEBUT JUJUR: lane ini TIDAK memiliki identitas
+                // pelapor yang terautentikasi. `observationRef` dan `source`
+                // sama-sama label yang diberikan pemanggil, jadi aturan ini
+                // hanya membedakan "pelapor yang sama merevisi bacaannya" dari
+                // "pelapor berbeda berselisih" SEJAUH label itu jujur -- ia
+                // bukan pertahanan terhadap pemanggil yang berniat buruk.
+                // (Pemanggil `reportOccupancy` berada di domain kepercayaan yang
+                // sama dan memang dapat menyatakan state apa pun; kontrak tidak
+                // menyediakan medan identitas terautentikasi untuk lane ini,
+                // berbeda dari lane lain yang memakai provenance bertanda
+                // tangan.)
                 //
-                // Aturannya karena itu konservatif mengikuti identitas
-                // OBSERVASI: observasi dari slot yang SAMA (`observationRef`
-                // yang sama) adalah revisi; `observationRef` BARU diperlakukan
-                // sebagai potensi sumber berbeda sampai terbukti sebaliknya.
-                // `source` tetap disimpan sebagai provenance (kontrak:
-                // "occupancy answers carry the provenance of their contributing
-                // observations") tetapi TIDAK pernah dipakai untuk membatalkan
-                // kontes. Lebih baik menandai CONTESTED secara berlebihan --
-                // arah gagal-tutup yang sama dengan "unknown never means clear".
-                const differentSourceDisagrees = !alreadyKnown;
-                nextState = differentSourceDisagrees ? "CONTESTED" : state;
+                // Dua aturan alternatif sudah dicoba dan ditolak:
+                //   - memakai `source` (audit de9553c) -> dua pelapor cukup
+                //     memakai label yang sama untuk menyembunyikan perselisihan;
+                //   - menandai SETIAP perubahan sebagai CONTESTED (audit
+                //     a9cc5db) -> region terkunci permanen hanya karena satu
+                //     sensor memperbarui bacaannya, yang justru melanggar
+                //     temuan yang sudah diterima (L3-audit-4) dan membuat
+                //     kesegaran tidak bermakna.
+                //
+                // Karena itu perilaku kontrak dipertahankan: observasi dari slot
+                // yang SAMA adalah revisi, `observationRef` BARU adalah kontes.
+                // `source` tetap disimpan sebagai provenance.
+                nextState = alreadyKnown ? state : "CONTESTED";
             } else if (existing.state === "CONTESTED") {
                 nextState = "CONTESTED"; // once contested, stays contested until an explicit resolve (out of this lane's scope)
             }

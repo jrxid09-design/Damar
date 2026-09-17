@@ -875,10 +875,13 @@ test("L5-audit-21: a persisted result the builder would NORMALIZE is rejected, n
         steps: 1, horizonDays: 1, budgetTokens: 10, fidelity: "DEFAULT",
         state: "COMPLETE", createdAtMs: nowMs - 5000
     };
+    const TTL = BOUNDS.TTL_MS;
+    // A genuinely well-formed result: within the run's token budget, and its TTL
+    // spans no more than the configured TTL from its own generation time.
     const goodResult = () => ({
         runId: "good", distribution: null, risks: [], assumptions: [], confidence: 0.5,
         tier: "T10", state: "COMPLETE", tokensUsed: 1,
-        validUntilMs: nowMs + 3_600_000, generatedAtMs: nowMs - 5000
+        validUntilMs: nowMs - 5000 + TTL, generatedAtMs: nowMs - 5000
     });
 
     const malformedResults = [
@@ -888,7 +891,13 @@ test("L5-audit-21: a persisted result the builder would NORMALIZE is rejected, n
         { ...goodResult(), generatedAtMs: 1e15, validUntilMs: 1e15 },
         { ...goodResult(), validUntilMs: nowMs - 3_600_000 },
         { ...goodResult(), risks: "not-an-array" },
-        { ...goodResult(), confidence: "0.5" }
+        { ...goodResult(), confidence: "0.5" },
+        // Exceeds the paired RUN's token budget: the builder copies tokensUsed
+        // through unchanged, so only the budget comparison catches this.
+        { ...goodResult(), tokensUsed: 999 },
+        // TTL stretched far beyond the configured bound: `validUntilMs` is also
+        // copied through, so only the TTL comparison catches this.
+        { ...goodResult(), validUntilMs: 1e15 }
     ];
 
     for (const result of malformedResults) {
@@ -954,6 +963,89 @@ test("L5-audit-22: a throwing `catch` accessor on a thenable's return value leak
     } finally {
         process.removeListener("unhandledRejection", onUnhandled);
     }
+});
+
+test("L5-audit-23: a caller `then` is never invoked, so a detached rejection cannot leak", async () => {
+    // The previous fix invoked the caller-supplied `then` and could only absorb
+    // the promise it RETURNED. A `then` that rejects on its own and returns
+    // `undefined` detached that rejection entirely -- observable only as an
+    // `unhandledRejection`, which terminates the process under Node's strict
+    // policy (audit of a9cc5db). Caller `then` is now never executed: only real
+    // promises (via the intrinsic `util.types.isPromise`) are absorbed.
+    let unhandled = 0;
+    const onUnhandled = () => { unhandled += 1; };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+        let thenInvoked = 0;
+        const hostile = {
+            then() {
+                thenInvoked += 1;
+                Promise.reject(new Error("detached"));
+                return undefined;          // nothing for the hook to absorb
+            }
+        };
+        const sim = await createSimulationSandbox({
+            clock: { nowMs: () => 1_000_000 },
+            auditLedger: { append() { return hostile; } },
+            bounds: { ...BOUNDS, MAX_TOKENS_PER_HOUR: 100 }
+        });
+        await sim.startRun({
+            runId: "r", question: "q", scenario: "s", initialStateRef: { frozen: true },
+            steps: 1, horizonDays: 1, budgetTokens: 10,
+            provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+        });
+        await new Promise(r => setTimeout(r, 60));
+        assert.equal(thenInvoked, 0, "a caller-supplied `then` must never be invoked");
+        assert.equal(unhandled, 0, "and no detached rejection may surface");
+    } finally {
+        process.removeListener("unhandledRejection", onUnhandled);
+    }
+});
+
+test("L5-audit-24: a result exceeding its run's token budget or the configured TTL is rejected", async () => {
+    // The builder copies `tokensUsed` and `validUntilMs` through unchanged, so
+    // canonical equality cannot catch either: a result with tokens far beyond
+    // the run's budget, or a TTL spanning millennia, stayed COMPLETE and made
+    // both the token quota and freshness meaningless (audit of a9cc5db).
+    const nowMs = 1_000_000;
+    const goodRun = {
+        runId: "good", question: "q", scenario: {}, initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 1, fidelity: "DEFAULT",
+        state: "COMPLETE", createdAtMs: nowMs - 5000
+    };
+    const base = {
+        runId: "good", distribution: null, risks: [], assumptions: [], confidence: 0.5,
+        tier: "T10", state: "COMPLETE", generatedAtMs: nowMs - 5000,
+        tokensUsed: 1, validUntilMs: nowMs - 5000 + BOUNDS.TTL_MS
+    };
+
+    const loadWith = async (result) => createSimulationSandbox({
+        store: {
+            async getKv() {
+                return {
+                    runs: { good: goodRun }, results: { good: result },
+                    budget: { tokenLedger: [], invalidatedAssumptions: [] }
+                };
+            },
+            async putKv() {}
+        },
+        clock: { nowMs: () => nowMs }
+    });
+
+    const readBack = (sim) => {
+        try {
+            return { state: sim.getResult("good").state };
+        } catch (error) {
+            return { reason: error.reason };
+        }
+    };
+
+    assert.equal(readBack(await loadWith(base)).state, "COMPLETE",
+        "a result within budget and TTL still loads");
+    assert.equal(readBack(await loadWith({ ...base, tokensUsed: 999 })).reason, "UNKNOWN_RUN",
+        "tokens beyond the run's budget must be rejected");
+    assert.equal(readBack(await loadWith({ ...base, validUntilMs: 1e15 })).reason, "UNKNOWN_RUN",
+        "a TTL beyond the configured bound must be rejected");
 });
 
 

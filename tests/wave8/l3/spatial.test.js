@@ -633,45 +633,45 @@ test("L3-audit-14: a future-dated persisted transform cannot displace a valid on
     }
 });
 
-test("L3-audit-15: a caller-asserted `source` cannot weaken contest detection", async () => {
+test("L3-audit-15: contest is decided by observation slot, and the unauthenticated-identity bound is pinned", async () => {
     const nowMs = 1_000_000;
     const sm = await createSpatialModel({ clock: { nowMs: () => nowMs } });
     sm.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s" });
     const region = { r: 1 };
 
-    // A source-aware rule was tried and then WITHDRAWN. This lane cannot
-    // authenticate a source identity: `source` is only a caller-supplied label,
-    // exactly like `observationRef`. Had a matching label downgraded a contest to
-    // a "revision", two independent reporters could have shared one string to
-    // unlock a region that should stay locked -- and a contested region blocks
-    // motion preconditions (audit of 472b6e0). The conservative rule is therefore
-    // kept: only the SAME observation slot is a revision.
-    sm.reportOccupancy({ frameId: "f1", region, state: "KNOWN", observationRef: "obs-1", source: "sensor-a" });
-    sm.reportOccupancy({ frameId: "f1", region, state: "UNKNOWN", observationRef: "obs-2", source: "sensor-a" });
+    // CONTRACT behaviour: the SAME observation slot revising itself is a
+    // revision; a NEW observation ref is a contest. A previous round tried
+    // deciding this by `source` (which let two reporters hide a disagreement
+    // behind one shared label, audit of de9553c) and then by treating EVERY
+    // change as a contest (which locked a region forever whenever one sensor
+    // refreshed its own reading -- breaking L3-audit-4 and making freshness
+    // meaningless, audit of a9cc5db). Both were rejected; this pins the
+    // contract rule that survived.
+    sm.reportOccupancy({ frameId: "f1", region, state: "KNOWN", observationRef: "obs-1" });
+    sm.reportOccupancy({ frameId: "f1", region, state: "UNKNOWN", observationRef: "obs-1" });
+    assert.equal(sm.queryOccupancy({ frameId: "f1", region }).state, "UNKNOWN",
+        "the same observation slot updating itself is a revision");
+
+    sm.reportOccupancy({ frameId: "f1", region, state: "KNOWN", observationRef: "obs-2" });
     assert.equal(sm.queryOccupancy({ frameId: "f1", region }).state, "CONTESTED",
-        "a NEW observation ref is a potential second source, even under one asserted label");
+        "a new observation ref is a second reporter and contests the region");
+    assert.equal(sm.queryOccupancy({ frameId: "f1", region }).blocked, true);
 
-    // Two reporters sharing a label cannot suppress the contest: the second
-    // one arrives with its own observation ref.
-    const sm2 = await createSpatialModel({ clock: { nowMs: () => nowMs } });
-    sm2.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s" });
-    sm2.reportOccupancy({ frameId: "f1", region, state: "UNKNOWN", observationRef: "shared-1", source: "shared-label" });
-    sm2.reportOccupancy({ frameId: "f1", region, state: "KNOWN", observationRef: "shared-2", source: "shared-label" });
-    const after = sm2.queryOccupancy({ frameId: "f1", region });
-    assert.equal(after.state, "CONTESTED",
-        "a shared label must not let a conflicting report unblock the region");
-    assert.equal(after.blocked, true, "and the region stays blocked");
-
-    // Re-reporting the SAME observation slot is a revision, not a contest.
-    const sm3 = await createSpatialModel({ clock: { nowMs: () => nowMs } });
-    sm3.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s" });
-    sm3.reportOccupancy({ frameId: "f1", region, state: "KNOWN", observationRef: "obs-1" });
-    sm3.reportOccupancy({ frameId: "f1", region, state: "UNKNOWN", observationRef: "obs-1" });
-    assert.equal(sm3.queryOccupancy({ frameId: "f1", region }).state, "UNKNOWN",
-        "the same observation ref updating itself is a revision");
+    // DISCLOSED BOUND, pinned so it cannot silently change: `observationRef` is
+    // a caller-supplied label, so this rule separates reporters only as far as
+    // that label is honest. It is NOT a defence against a hostile caller --
+    // any caller able to invoke `reportOccupancy` can assert a state directly,
+    // and the contract provides no authenticated reporter identity for this
+    // lane. Recording the behaviour here keeps the gap visible and intentional.
+    const replay = await createSpatialModel({ clock: { nowMs: () => nowMs } });
+    replay.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s" });
+    replay.reportOccupancy({ frameId: "f1", region, state: "UNKNOWN", observationRef: "shared" });
+    replay.reportOccupancy({ frameId: "f1", region, state: "KNOWN", observationRef: "shared" });
+    assert.equal(replay.queryOccupancy({ frameId: "f1", region }).state, "KNOWN",
+        "a replayed observation ref is treated as a revision -- documented, not defended");
 
     // `source` is still RETAINED as provenance, as the contract requires.
-    const node = sm3.getScene().sceneNodes.find(n => n.region && n.region.r === 1);
+    const node = sm.getScene().sceneNodes.find(n => n.region && n.region.r === 1);
     assert.ok(node && Array.isArray(node.sources), "the source is retained as provenance");
 });
 
@@ -719,5 +719,44 @@ test("L3-audit-16: a persisted record the builder would NORMALIZE is rejected, n
     });
     const node = sm.reportOccupancy({ frameId: "f1", region: { r: 1 }, state: "KNOWN", observationRef: "o1" });
     assert.equal(node.state, "KNOWN");
+});
+
+test("L3-audit-17: an explicitly `undefined` sources field is rejected while a genuinely absent one is accepted", async () => {
+    // The legacy default treated BOTH an absent `sources` and an explicit
+    // `undefined` as `[]` for comparison, while the stored record kept and
+    // exposed the `undefined` field -- so canonical equality was evadable
+    // (audit of a9cc5db). Only a truly ABSENT field may use the legacy default.
+    const nowMs = 1_000_000;
+    const frame = { frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s", registeredAt: nowMs - 5000 };
+    const key = "f1::{\"r\":1}";
+    const base = {
+        nodeId: key, frameId: "f1", region: { r: 1 }, state: "KNOWN",
+        observationRefs: ["o1"], updatedAtMs: nowMs - 1000
+    };
+
+    const build = async (node) => createSpatialModel({
+        store: {
+            async getKv() { return { frames: { f1: frame }, transforms: {}, sceneNodes: { [key]: node } }; },
+            async putKv() {}
+        },
+        clock: { nowMs: () => nowMs }
+    });
+
+    // A pre-upgrade snapshot that never had the field is still trusted.
+    assert.equal((await build({ ...base })).sceneNodesSize(), 1,
+        "a snapshot predating the `sources` field must still load");
+
+    // An explicit undefined is not the same thing.
+    assert.equal((await build({ ...base, sources: undefined })).sceneNodesSize(), 0,
+        "an explicit `undefined` sources must be rejected, not defaulted");
+
+    // Other wrong shapes are rejected too.
+    for (const bad of ["not-an-array", 5, [{ bad: true }], [""], [7]]) {
+        assert.equal((await build({ ...base, sources: bad })).sceneNodesSize(), 0,
+            `sources ${JSON.stringify(bad)} must be rejected`);
+    }
+
+    // A well-formed list is accepted.
+    assert.equal((await build({ ...base, sources: ["sensor-a"] })).sceneNodesSize(), 1);
 });
 
