@@ -1546,46 +1546,108 @@ test("W8L1-repair-58: the bridge factory is NOT on the production export surface
     // contradicted that and let bridges be constructed outside canonical
     // composition entirely (audit of 5520019).
     assert.ok(/isTestHarness\(\)/.test(source),
-        "the factory export must be gated on the test harness flag");
-    assert.ok(/DAMAR_TEST_MODE/.test(source),
-        "the gate must read the harness flag, not a production-reachable value");
+        "the factory export must be gated on the test harness seam");
+    assert.ok(/Symbol\.for\(/.test(source),
+        "the gate must use a symbol key that no env var or .env file can set");
+    assert.equal(/process\.env\.DAMAR_TEST_MODE/.test(source), false,
+        "an ambient env var is settable by .env/dotenv config drift -- not a boundary");
 
-    // The harness (loaded via --require for every test file) turns it on, so
-    // this suite can still unit-test the bridge with a controllable world model.
-    assert.equal(process.env.DAMAR_TEST_MODE, "1", "the test harness flag is set");
+    // The gate must not be satisfiable by the environment: dotenv loads `.env`
+    // into process.env (src/config/env.js), so an env-based flag could be turned
+    // on by configuration rather than by the test harness (audit of 41a7006).
+    const seamKey = Symbol.for("damar.w8l1.testSeam");
+    const savedSeam = globalThis[seamKey];
+    try {
+        process.env.DAMAR_TEST_MODE = "1";
+        globalThis["damar.w8l1.testSeam"] = true;      // wrong (string) key
+        delete globalThis[seamKey];
+        delete require.cache[require.resolve("../../../src/integration/canonicalRuntimeComposition")];
+        const viaEnv = require("../../../src/integration/canonicalRuntimeComposition");
+        assert.equal("bridgeSensoriumToWorldModel" in viaEnv, false,
+            "an env var must NOT enable the test seam");
+    } finally {
+        delete process.env.DAMAR_TEST_MODE;
+        delete globalThis["damar.w8l1.testSeam"];
+        if (savedSeam !== undefined) globalThis[seamKey] = savedSeam;
+        delete require.cache[require.resolve("../../../src/integration/canonicalRuntimeComposition")];
+    }
+
+    // The harness (loaded via --require for every test file) installs the symbol
+    // seam, so this suite can still unit-test the bridge with a controllable
+    // world model and clock.
+    assert.equal(globalThis[Symbol.for("damar.w8l1.testSeam")], true,
+        "the test harness installs the symbol seam");
     const mod = require("../../../src/integration/canonicalRuntimeComposition");
     assert.equal(typeof mod.bridgeSensoriumToWorldModel, "function",
         "the factory is reachable under the harness");
 
-    // And the production wiring still exposes the BOUND plan, which is the seam
-    // the contract sanctions.
+    // The unconditional public export list must not contain the factory.
     assert.ok(!/^\s*bridgeSensoriumToWorldModel,/m.test(source.split("const PUBLIC_EXPORTS")[0]),
         "the factory must not be listed in the unconditional public exports");
 });
 
-test("W8L1-repair-59: the lifecycle-trust oracle is NOT part of BodySchema's export surface", () => {
+test("W8L1-repair-59: the lifecycle-trust module exposes NO way to create, brand or mutate trust", () => {
     const bs = require("../../../src/embodiment/schema/BodySchema");
-    // Exposing lifecycleTrustOf/isBodySchemaInstance publicly made a live trust
-    // reading (commit sequence, delivery sequence, committed/delivering) part of
-    // a public API (audit of 5520019). They now live in an internal module that
-    // the bridge -- and only the bridge -- reaches directly.
+    const lt = require("../../../src/embodiment/schema/lifecycleTrust");
+
+    // Exposing a live trust reading (committed/delivering state, commit
+    // sequence, delivery sequence) through BodySchema was the first defect
+    // (audit of 5520019).
     assert.equal("lifecycleTrustOf" in bs, false, "the trust oracle must not be exported");
-    assert.equal("isBodySchemaInstance" in bs, false, "the brand predicate must not be exported");
     assert.deepEqual(Object.keys(bs).sort(), [
         "BodySchema", "commitSequenceOf", "currentDeliveryCommitSequence",
         "isEventBeingDelivered", "newerWins", "presenceWins", "wasCommittedByBodySchema"
     ], "BodySchema's export surface is unchanged from before the trust work");
 
-    // The internal module is where the bridge reads it, and it still works.
-    const { lifecycleTrustOf, isBodySchemaInstance } = require("../../../src/embodiment/schema/lifecycleTrust");
+    // Moving the oracle to an internal module was NOT enough on its own: the
+    // earlier version also exported `registerBodyInstance`, which returned a
+    // LIVE handle, so an arbitrary object could be branded and then filled with
+    // a fabricated event to reopen a FAILED bridge channel (audit of 41a7006).
+    // The module now exposes the reader and nothing else.
+    assert.deepEqual(Object.keys(lt).sort(), ["bindTrustOracle", "lifecycleTrustOf"],
+        "the trust module must expose only the reader and its one-time binding");
+
+    // The reader still works, and only for genuine instances.
     const body = emb.createBodySchema({ clock: emb.manualClock(T0) });
-    assert.equal(isBodySchemaInstance(body), true);
-    assert.equal(isBodySchemaInstance({ subscribe() {} }), false,
-        "a plain double is not a branded instance");
-    assert.equal(lifecycleTrustOf({ subscribe() {} }, {}), null,
+    assert.equal(lt.lifecycleTrustOf({ subscribe() {} }, {}), null,
         "a non-instance yields no trust reading at all");
-    const trust = lifecycleTrustOf(body, { notAnEvent: true });
+    const trust = lt.lifecycleTrustOf(body, { notAnEvent: true });
     assert.equal(trust.wasCommitted, false);
     assert.equal(trust.isBeingDelivered, false);
     assert.equal(trust.deliverySequence, null);
+});
+
+test("W8L1-repair-60: the trust module cannot be used to forge a lifecycle event, and the oracle cannot be stolen", () => {
+    const lt = require("../../../src/embodiment/schema/lifecycleTrust");
+
+    // The auditor's exact repro was: brand an arbitrary object via the exported
+    // registrar, write a fabricated DEVICE_ONLINE into the returned LIVE state
+    // handle, then feed it to a bridge whose channel had already been stopped by
+    // a FAILED observation. Every step of that chain must now be impossible.
+    for (const name of ["registerBodyInstance", "createTrustState", "trustStateOf",
+        "isBodySchemaInstance", "isRegisteredBodyInstance", "bindBodySchemaClass"]) {
+        assert.equal(name in lt, false, `the trust module must not expose '${name}'`);
+    }
+
+    // No exported value gives access to a live trust handle. `bindTrustOracle`
+    // is the only writer, and it accepts ONE binding: the one BodySchema already
+    // made at module load. A later attempt must be refused rather than replacing
+    // the oracle.
+    let seenInstance = null;
+    const stolen = lt.bindTrustOracle((instance) => {
+        seenInstance = instance;
+        return { wasCommitted: true, isBeingDelivered: true, commitSequence: 1e9, deliverySequence: 1e9 };
+    });
+    assert.equal(stolen, false, "a second oracle binding must be refused");
+
+    // Prove the substitution did not take effect: a plain double must still get
+    // NO trust at all, and a genuine instance must still read false for an event
+    // that was never truly delivered.
+    const body = emb.createBodySchema({ clock: emb.manualClock(T0) });
+    const doubleTrust = lt.lifecycleTrustOf({ subscribe() {} }, {});
+    assert.equal(doubleTrust, null, "the oracle was not replaced by the hijack attempt");
+    const genuine = lt.lifecycleTrustOf(body, { fabricated: true });
+    assert.equal(genuine.wasCommitted, false, "a fabricated event is not committed");
+    assert.equal(genuine.isBeingDelivered, false, "a fabricated event is not being delivered");
+    assert.equal(seenInstance, null, "the hijack oracle was never installed, so it never ran");
 });

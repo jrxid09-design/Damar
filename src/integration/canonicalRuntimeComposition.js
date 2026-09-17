@@ -2688,14 +2688,25 @@ async function createRuntimeHost(options = {}) {
 }
 
 /**
- * Apakah proses ini berjalan di bawah harness tes.
+ * Seam TES: kunci `globalThis` yang HANYA dipasang oleh harness tes.
  *
- * `tests/helpers/testEnv.js` dimuat lewat `--require` sebelum setiap berkas tes
- * (lihat `npm test`), jadi flag itu HANYA disetel di sana. Dipakai untuk seam
- * tes yang tidak boleh ada di permukaan produksi.
+ * Sebelumnya gerbang ini membaca sebuah VARIABEL LINGKUNGAN. Itu terlalu
+ * lemah: `src/config/env.js` memuat berkas `.env` lewat dotenv ke `process.env`,
+ * jadi seorang operator (atau `.env` yang bocor/diwarisi) dapat mengaktifkan
+ * ekspor tes itu TANPA menyentuh kode sama sekali -- persis keberatan audit
+ * 41a7006. Kunci `globalThis` tidak dapat dipasang oleh berkas `.env`, variabel
+ * shell, atau launcher mana pun: ia hanya muncul bila ADA KODE di proses ini
+ * yang memasangnya, dan satu-satunya kode yang melakukannya adalah
+ * `tests/helpers/testEnv.js` (dimuat lewat `--require` sebelum berkas tes).
+ *
+ * Ini tetap seam tes, bukan batas keamanan: memanggil factory itu sendiri tidak
+ * memberi wewenang apa pun (pemanggil memasok `body` dan `worldModel`-nya
+ * sendiri, dan satu-satunya kemampuan tulisnya adalah `ingestObservation`).
+ * Yang dijaga di sini adalah permukaan ekspor produksi tetap bersih sesuai
+ * kontrak beku ("Not exported outside the composition function").
  */
 function isTestHarness() {
-    return process.env.DAMAR_TEST_MODE === "1";
+    return globalThis[Symbol.for("damar.w8l1.testSeam")] === true;
 }
 
 const PUBLIC_EXPORTS = {

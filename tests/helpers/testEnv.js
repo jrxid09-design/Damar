@@ -25,9 +25,14 @@ if (!process.env.DAMAR_AUDIT_DIR) {
 // outside the composition function"). Unit test logika jembatan sendiri
 // (dedup/rate-limit/health-floor/shed/reverse-settlement) tetap butuh
 // menyuntikkan world model dan clock yang dapat dikendalikan, jadi factory itu
-// diaktifkan HANYA lewat flag yang disetel di sini -- dan berkas ini dimuat
-// sebelum setiap berkas tes lewat `--require`, bukan oleh runtime produksi.
-process.env.DAMAR_TEST_MODE = "1";
+// diaktifkan HANYA lewat kunci `globalThis` di bawah.
+//
+// Sengaja BUKAN variabel lingkungan: `src/config/env.js` memuat `.env` lewat
+// dotenv, sehingga env var bisa aktif karena konfigurasi, bukan karena tes.
+// Kunci ini hanya dapat dipasang oleh kode di proses ini, dan berkas inilah
+// satu-satunya yang memasangnya -- ia dimuat lewat `--require` sebelum setiap
+// berkas tes, tidak pernah oleh runtime produksi.
+globalThis[Symbol.for("damar.w8l1.testSeam")] = true;
 
 // Basis memori juga. Tes buildMemory sempat menitipkan 9 catatan
 // palsu ke memori sungguhan, dan karena memori disuntikkan ke
