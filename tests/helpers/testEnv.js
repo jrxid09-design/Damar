@@ -20,6 +20,15 @@ if (!process.env.DAMAR_AUDIT_DIR) {
         fs.mkdtempSync(path.join(os.tmpdir(), "damar-audit-test-"));
 }
 
+// Seam tes W8-L1: `canonicalRuntimeComposition.js` TIDAK mengekspor factory
+// jembatan sensorium di permukaan produksi (kontrak beku: "not exported
+// outside the composition function"). Unit test logika jembatan sendiri
+// (dedup/rate-limit/health-floor/shed/reverse-settlement) tetap butuh
+// menyuntikkan world model dan clock yang dapat dikendalikan, jadi factory itu
+// diaktifkan HANYA lewat flag yang disetel di sini -- dan berkas ini dimuat
+// sebelum setiap berkas tes lewat `--require`, bukan oleh runtime produksi.
+process.env.DAMAR_TEST_MODE = "1";
+
 // Basis memori juga. Tes buildMemory sempat menitipkan 9 catatan
 // palsu ke memori sungguhan, dan karena memori disuntikkan ke
 // system prompt, catatan "Area: uji" itu benar-benar muncul sebagai

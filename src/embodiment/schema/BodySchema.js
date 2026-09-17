@@ -132,44 +132,19 @@ const COMMITTED_EVENTS = new WeakSet();
 const NOTIFYING_EVENTS = new WeakSet();
 
 /**
- * MD-018-style lexical brand + state PRIVAT MODUL untuk instance BodySchema.
+ * Kepercayaan lifecycle hidup di `./lifecycleTrust.js`, BUKAN di sini.
  *
- * Kepercayaan lifecycle TIDAK BOLEH dibaca lewat metode publik yang bisa
- * ditimpa: jembatan yang memanggil `body.isBeingDelivered(...)` dapat ditipu
- * hanya dengan mengganti metode itu, dan menghapusnya membuat pemanggil jatuh
- * ke penanda modul-global sehingga event milik instance LAIN diterima (audit
- * 31a8770). Karena itu state-nya disimpan di sini, keyed by instance, dan hanya
- * dapat dibaca lewat `lifecycleTrustOf()` di bawah -- penimpaan metode publik
- * tidak berpengaruh sama sekali.
+ * State itu tidak boleh dibaca lewat metode publik yang bisa ditimpa (audit
+ * 31a8770), dan oracle-nya juga tidak boleh menjadi bagian dari permukaan ekspor
+ * kelas ini (audit 5520019). Memisahkannya ke modul internal membuat ekspor
+ * `BodySchema.js` tetap seperti semula.
  */
-const BODY_INSTANCES = new WeakSet();
-const TRUST_STATE = new WeakMap();
-
-/** Apakah `candidate` dibuat oleh kelas BodySchema ini. */
-function isBodySchemaInstance(candidate) {
-    return candidate !== null
-        && (typeof candidate === "object" || typeof candidate === "function")
-        && BODY_INSTANCES.has(candidate);
-}
-
-/**
- * Bukti lifecycle milik instance, dibaca dari state privat modul.
- * Mengembalikan null untuk objek yang bukan instance BodySchema, sehingga
- * pemanggil dapat membedakan "double tanpa API" dari "instance asli".
- */
-function lifecycleTrustOf(candidate, event) {
-    if (!isBodySchemaInstance(candidate)) return null;
-    const state = TRUST_STATE.get(candidate);
-    if (!state) return null;
-    const usable = event !== null && (typeof event === "object" || typeof event === "function");
-    return Object.freeze({
-        wasCommitted: usable && state.committedEvents.has(event),
-        isBeingDelivered: usable && state.deliveringEvents.has(event),
-        commitSequence: usable ? state.commitSequences.get(event) : undefined,
-        deliverySequence: state.deliverySeq
-    });
-}
-
+const {
+    createTrustState,
+    registerBodyInstance,
+    trustStateOf,
+    lifecycleTrustOf
+} = require("./lifecycleTrust");
 /**
  * Urutan komit per event.
  *
@@ -317,22 +292,14 @@ class BodySchema {
         this._deriving = false;
 
         // Lifecycle authenticity + ordering state, PER-INSTANCE dan PRIVAT
-        // MODUL (lihat BODY_INSTANCES/TRUST_STATE di atas).
+        // MODUL (lihat ./lifecycleTrust.js).
         //
         // Sebelumnya penanda ini modul-global: event yang sedang diserahkan oleh
         // BodySchema A diterima jembatan milik BodySchema B dan membuka kembali
         // kanal FAILED milik B (audit 406553b). Menaruhnya di properti publik
         // (`this._committedEvents`) masih bisa ditimpa pemanggil; menaruhnya di
-        // WeakMap modul membuatnya tidak dapat dijangkau dari luar.
-        const trustState = {
-            committedEvents: new WeakSet(),
-            deliveringEvents: new WeakSet(),
-            commitSequences: new WeakMap(),
-            deliverySeq: null,
-            commitSeqCounter: 0
-        };
-        TRUST_STATE.set(this, trustState);
-        BODY_INSTANCES.add(this);
+        // WeakMap milik modul membuatnya tidak dapat dijangkau dari luar.
+        registerBodyInstance(this, createTrustState());
     }
 
     /* ------------- bukti lifecycle (per-instance, lihat catatan di atas) --- */
@@ -427,7 +394,7 @@ class BodySchema {
         // Catatan PER-INSTANCE, disimpan di state privat modul: hanya instance
         // yang benar-benar meng-commit event ini yang boleh mempercayainya
         // hilir, dan penimpaan metode publik tidak dapat memalsukannya.
-        const trustState = TRUST_STATE.get(this);
+        const trustState = trustStateOf(this);
         if (trustState) {
             trustState.committedEvents.add(event);
             trustState.commitSequences.set(event, ++trustState.commitSeqCounter);
@@ -1195,7 +1162,7 @@ class BodySchema {
         // memperlakukan peristiwa lifecycle sebagai nyata HANYA di dalam
         // jendela ini, sehingga replay event lama tidak pernah lolos.
         const markDelivering = event !== null && typeof event === "object";
-        const trustState = TRUST_STATE.get(this);
+        const trustState = trustStateOf(this);
         if (markDelivering) {
             NOTIFYING_EVENTS.add(event);
             if (trustState) trustState.deliveringEvents.add(event);
@@ -1625,8 +1592,5 @@ function freezeView(view) {
 module.exports = {
     BodySchema, newerWins, presenceWins,
     wasCommittedByBodySchema, isEventBeingDelivered, commitSequenceOf,
-    currentDeliveryCommitSequence,
-    // Jalur kepercayaan lifecycle yang TIDAK dapat dipalsukan: bacaannya datang
-    // dari state privat modul, bukan dari metode publik yang bisa ditimpa.
-    isBodySchemaInstance, lifecycleTrustOf
+    currentDeliveryCommitSequence
 };

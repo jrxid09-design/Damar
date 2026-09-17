@@ -1531,3 +1531,61 @@ test("W8L1-repair-57: at the tracked-channel bound a self-evicting newcomer is n
     assert.equal(after - before, 20,
         "each admission past the bound evicts exactly one entry");
 });
+
+/* ---------------------------------------------------------------------- */
+/* Audit of 5520019 -- private surface + single victim rule                */
+/* ---------------------------------------------------------------------- */
+
+test("W8L1-repair-58: the bridge factory is NOT on the production export surface", () => {
+    const source = fs.readFileSync(
+        path.join(__dirname, "../../../src/integration/canonicalRuntimeComposition.js"), "utf8");
+
+    // The frozen contract: the factory is "Not exported outside the composition
+    // function; the composition's returned object may optionally expose the
+    // bound applyObservationPlan". Exposing the FACTORY unconditionally
+    // contradicted that and let bridges be constructed outside canonical
+    // composition entirely (audit of 5520019).
+    assert.ok(/isTestHarness\(\)/.test(source),
+        "the factory export must be gated on the test harness flag");
+    assert.ok(/DAMAR_TEST_MODE/.test(source),
+        "the gate must read the harness flag, not a production-reachable value");
+
+    // The harness (loaded via --require for every test file) turns it on, so
+    // this suite can still unit-test the bridge with a controllable world model.
+    assert.equal(process.env.DAMAR_TEST_MODE, "1", "the test harness flag is set");
+    const mod = require("../../../src/integration/canonicalRuntimeComposition");
+    assert.equal(typeof mod.bridgeSensoriumToWorldModel, "function",
+        "the factory is reachable under the harness");
+
+    // And the production wiring still exposes the BOUND plan, which is the seam
+    // the contract sanctions.
+    assert.ok(!/^\s*bridgeSensoriumToWorldModel,/m.test(source.split("const PUBLIC_EXPORTS")[0]),
+        "the factory must not be listed in the unconditional public exports");
+});
+
+test("W8L1-repair-59: the lifecycle-trust oracle is NOT part of BodySchema's export surface", () => {
+    const bs = require("../../../src/embodiment/schema/BodySchema");
+    // Exposing lifecycleTrustOf/isBodySchemaInstance publicly made a live trust
+    // reading (commit sequence, delivery sequence, committed/delivering) part of
+    // a public API (audit of 5520019). They now live in an internal module that
+    // the bridge -- and only the bridge -- reaches directly.
+    assert.equal("lifecycleTrustOf" in bs, false, "the trust oracle must not be exported");
+    assert.equal("isBodySchemaInstance" in bs, false, "the brand predicate must not be exported");
+    assert.deepEqual(Object.keys(bs).sort(), [
+        "BodySchema", "commitSequenceOf", "currentDeliveryCommitSequence",
+        "isEventBeingDelivered", "newerWins", "presenceWins", "wasCommittedByBodySchema"
+    ], "BodySchema's export surface is unchanged from before the trust work");
+
+    // The internal module is where the bridge reads it, and it still works.
+    const { lifecycleTrustOf, isBodySchemaInstance } = require("../../../src/embodiment/schema/lifecycleTrust");
+    const body = emb.createBodySchema({ clock: emb.manualClock(T0) });
+    assert.equal(isBodySchemaInstance(body), true);
+    assert.equal(isBodySchemaInstance({ subscribe() {} }), false,
+        "a plain double is not a branded instance");
+    assert.equal(lifecycleTrustOf({ subscribe() {} }, {}), null,
+        "a non-instance yields no trust reading at all");
+    const trust = lifecycleTrustOf(body, { notAnEvent: true });
+    assert.equal(trust.wasCommitted, false);
+    assert.equal(trust.isBeingDelivered, false);
+    assert.equal(trust.deliverySequence, null);
+});

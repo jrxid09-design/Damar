@@ -37,8 +37,12 @@ const path = require("node:path");
 const { types: utilTypes } = require("node:util");
 const {
     wasCommittedByBodySchema, isEventBeingDelivered, commitSequenceOf,
-    currentDeliveryCommitSequence, isBodySchemaInstance, lifecycleTrustOf
+    currentDeliveryCommitSequence
 } = require("../embodiment/schema/BodySchema");
+// Oracle kepercayaan lifecycle diambil dari modul INTERNAL-nya, bukan dari
+// permukaan ekspor `BodySchema.js`: state itu memang harus dapat dibaca
+// jembatan, tapi bukan bagian dari API kelas BodySchema (audit 5520019).
+const { lifecycleTrustOf } = require("../embodiment/schema/lifecycleTrust");
 
 /**
  * Bukti lifecycle, dibaca dari STATE PRIVAT BodySchema.
@@ -469,18 +473,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
      */
     function enforceTrackedBound(protectedKey = null) {
         while (tracked.size > MAX_TRACKED_SENSOR_CHANNELS) {
-            let victimKey = null;
-            let victimPriority = Infinity;
-            let victimAppliedMs = Infinity;
-            for (const [k, t] of tracked) {
-                if (protectedKey !== null && k === protectedKey) continue;
-                if (t.healthPriority < victimPriority
-                    || (t.healthPriority === victimPriority && t.lastAppliedMs < victimAppliedMs)) {
-                    victimKey = k;
-                    victimPriority = t.healthPriority;
-                    victimAppliedMs = t.lastAppliedMs;
-                }
-            }
+            const victimKey = pickTrackedVictim(protectedKey);
             if (victimKey === null) break;
             tracked.delete(victimKey);
         }
@@ -647,6 +640,31 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
 
 
     /**
+     * Pilih channel terburuk untuk dievict: healthPriority terendah, lalu
+     * `lastAppliedMs` tertua. `protectedKey` (mis. korban yang sedang
+     * diselamatkan) dilewati selama masih ada kandidat lain.
+     *
+     * SATU-SATUNYA tempat aturan pemilihan korban hidup. Sebelumnya aturan yang
+     * sama ditulis dua kali (jalur admission dan jalur penegakan bound), jadi
+     * keduanya bisa menyimpang tanpa terlihat (audit 5520019).
+     */
+    function pickTrackedVictim(protectedKey = null) {
+        let victimKey = null;
+        let victimPriority = Infinity;
+        let victimAppliedMs = Infinity;
+        for (const [key, t] of tracked) {
+            if (protectedKey !== null && key === protectedKey) continue;
+            if (t.healthPriority < victimPriority
+                || (t.healthPriority === victimPriority && t.lastAppliedMs < victimAppliedMs)) {
+                victimKey = key;
+                victimPriority = t.healthPriority;
+                victimAppliedMs = t.lastAppliedMs;
+            }
+        }
+        return victimKey;
+    }
+
+    /**
      * Evict the worst tracked channel when over `limit`, RETURNING the victim so
      * the caller can undo it.
      *
@@ -658,17 +676,7 @@ function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedg
      */
     function evictTrackedIfOver(limit) {
         if (tracked.size <= limit) return null;
-        let victimKey = null;
-        let victimPriority = Infinity;
-        let victimAppliedMs = Infinity;
-        for (const [key, t] of tracked) {
-            if (t.healthPriority < victimPriority
-                || (t.healthPriority === victimPriority && t.lastAppliedMs < victimAppliedMs)) {
-                victimKey = key;
-                victimPriority = t.healthPriority;
-                victimAppliedMs = t.lastAppliedMs;
-            }
-        }
+        const victimKey = pickTrackedVictim();
         if (victimKey === null) return null;
         const victimState = tracked.get(victimKey);
         tracked.delete(victimKey);
@@ -2679,14 +2687,20 @@ async function createRuntimeHost(options = {}) {
     return buildRuntimeHostInternal(options, null);
 }
 
-module.exports = Object.freeze({
+/**
+ * Apakah proses ini berjalan di bawah harness tes.
+ *
+ * `tests/helpers/testEnv.js` dimuat lewat `--require` sebelum setiap berkas tes
+ * (lihat `npm test`), jadi flag itu HANYA disetel di sana. Dipakai untuk seam
+ * tes yang tidak boleh ada di permukaan produksi.
+ */
+function isTestHarness() {
+    return process.env.DAMAR_TEST_MODE === "1";
+}
+
+const PUBLIC_EXPORTS = {
     createRuntimeCore,
     createRuntimeHost,
-    // W8-L1: exported directly for focused unit testing of the bridge's own
-    // dedup/rate-limit/health-floor/shed logic without spinning up the full
-    // RuntimeCore composition for every case; production wiring still goes
-    // through `createRuntimeCore({ enableCognition: true, ... })` above.
-    bridgeSensoriumToWorldModel,
     CORE_VERSION,
     HOST_VERSION,
     LOCAL_TRANSPORT_ID,
@@ -2700,4 +2714,17 @@ module.exports = Object.freeze({
     // a STABLE VALUE — no dynamic getter, no public class-builder in the
     // handoff path.  voice/voiceRuntime.js re-exports it for import compat.
     VoiceRuntime
-});
+};
+
+// W8-L1: the bridge factory is PRIVATE TO THIS MODULE'S `enableCognition`
+// BLOCK. The frozen contract is explicit -- "Not exported outside the
+// composition function; the composition's returned object may optionally
+// expose the bound applyObservationPlan" -- so production exposes ONLY the
+// bound plan (`core.sensoriumBridge.applyObservationPlan`), never the factory
+// (audit of 5520019). Unit tests of the bridge's own
+// dedup/rate-limit/health-floor/shed/reverse-settlement logic still need to
+// inject a controllable world model and clock, which only the factory allows,
+// so it is reachable ONLY under the test harness's own flag.
+module.exports = Object.freeze(isTestHarness()
+    ? { ...PUBLIC_EXPORTS, bridgeSensoriumToWorldModel }
+    : PUBLIC_EXPORTS);
