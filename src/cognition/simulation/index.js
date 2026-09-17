@@ -75,6 +75,24 @@ function safeOutcomeValue(outcome, key, fallback) {
     }
 }
 
+/**
+ * Baca `then` SEKALI saja dan kembalikan fungsinya, atau null.
+ *
+ * Sebelumnya hook memeriksa `typeof result.then === "function"` lalu menyerahkan
+ * `result` ke `Promise.resolve`, sehingga accessor `then` dijalankan DUA kali
+ * per event (audit ba68903). Di sini `then` dibaca sekali; kalau bukan fungsi,
+ * tidak ada promise yang dibuat sama sekali.
+ */
+function readThenOnce(value) {
+    if (!value || (typeof value !== "object" && typeof value !== "function")) return null;
+    try {
+        const then = value.then;
+        return typeof then === "function" ? then : null;
+    } catch {
+        return null;
+    }
+}
+
 async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS, auditLedger = null } = {}) {
     try {
         bounds = sanitizeBounds(BOUNDS, bounds);
@@ -97,15 +115,15 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
                 // Hook audit bisa ASYNC dan menolak; penolakan yang tidak
                 // ditangani dapat menghentikan proses Node, sehingga kegagalan
                 // audit berubah menjadi kegagalan lane (audit Wave8 L3/L5).
-                // `then` dibaca dengan aman: getter yang melempar ditangkap dan
-                // diperlakukan sebagai hasil non-thenable.
-                let isThenable = false;
-                try {
-                    isThenable = !!result && typeof result.then === "function";
-                } catch {
-                    isThenable = false;
+                // `then` dibaca SEKALI lewat readThenOnce, lalu dipanggil
+                // langsung -- `Promise.resolve(result)` akan membaca `then`
+                // untuk kedua kalinya.
+                const then = readThenOnce(result);
+                if (then) {
+                    try {
+                        then.call(result, undefined, () => {});
+                    } catch { /* penolakan sudah diserap; kegagalan audit tidak memblokir sandbox */ }
                 }
-                if (isThenable) Promise.resolve(result).catch(() => {});
             }
         } catch { /* audit failure never blocks the sandbox */ }
     }
@@ -160,12 +178,17 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
     // malformed yang lebih baru mengevict run sah yang lebih lama, lalu validasi
     // membuang run malformed itu -- dan tersisa NOL run. State sah hilang oleh
     // state yang memang tidak layak dipercaya (audit 97a1990).
+    //
+    // Validasi memakai BUILDER lane ini, bukan pemeriksaan sebagian: memeriksa
+    // {runId, state} saja membuat run dengan `createdAtMs` tidak sah lolos,
+    // menempati kapasitas, dan mengevict run sah pada retensi 1 (audit
+    // ba68903). Builder adalah kontrak bentuk record, jadi memakainya ulang
+    // menutup SELURUH medan sekaligus.
     for (const [runId, run] of [...runs]) {
-        if (!run || run.runId !== runId || !["COMPLETE", "TRUNCATED", "FAILED"].includes(run.state)) runs.delete(runId);
+        if (!isWellFormedPersistedRun(runId, run)) runs.delete(runId);
     }
     for (const [runId, result] of [...results]) {
-        if (!result || result.runId !== runId || result.tier !== "T10" || !runs.has(runId) ||
-            !["COMPLETE", "TRUNCATED", "FAILED"].includes(result.state)) results.delete(runId);
+        if (!isWellFormedPersistedResult(runId, result)) results.delete(runId);
     }
 
     // Construction-time compaction of a reloaded snapshot (same class as
@@ -200,6 +223,43 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
             candidate = undefined;
         }
         return Number.isFinite(candidate) ? candidate : Date.now();
+    }
+
+    /** Record tersimpan harus lulus BUILDER lane ini, bukan sekadar berbentuk objek. */
+    function isWellFormedPersistedRun(id, run) {
+        if (!run || typeof run !== "object") return false;
+        if (run.runId !== id) return false;
+        if (!["COMPLETE", "TRUNCATED", "FAILED"].includes(run.state)) return false;
+        if (!Number.isFinite(run.createdAtMs) || run.createdAtMs > now()) return false;
+        try {
+            makeSimulationRun({
+                runId: run.runId, question: run.question, scenario: run.scenario,
+                initialStateRef: run.initialStateRef, steps: run.steps,
+                horizonDays: run.horizonDays, budgetTokens: run.budgetTokens,
+                fidelity: run.fidelity, nowMs: run.createdAtMs
+            }, bounds);
+        } catch { return false; }
+        return true;
+    }
+
+    function isWellFormedPersistedResult(id, result) {
+        if (!result || typeof result !== "object") return false;
+        if (result.runId !== id) return false;
+        if (!runs.has(id)) return false;
+        if (!["COMPLETE", "TRUNCATED", "FAILED"].includes(result.state)) return false;
+        // FORCED T10: tier lain tidak pernah sah dan tidak boleh menggantikan
+        // hasil sah mana pun.
+        if (result.tier !== "T10") return false;
+        if (!Number.isFinite(result.validUntilMs) || !Number.isFinite(result.generatedAtMs)) return false;
+        try {
+            makeSimulationResult({
+                runId: result.runId, distribution: result.distribution, risks: result.risks,
+                assumptions: result.assumptions, confidence: result.confidence,
+                state: result.state, tokensUsed: result.tokensUsed,
+                validUntilMs: result.validUntilMs, nowMs: result.generatedAtMs
+            }, bounds);
+        } catch { return false; }
+        return true;
     }
 
     function pruneLedger(nowMs) {

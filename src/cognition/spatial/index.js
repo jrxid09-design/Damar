@@ -70,6 +70,24 @@ function resolveAuditAppend(auditLedger) {
     return null;
 }
 
+/**
+ * Baca `then` SEKALI saja dan kembalikan fungsinya, atau null.
+ *
+ * Sebelumnya hook memeriksa `typeof result.then === "function"` lalu menyerahkan
+ * `result` ke `Promise.resolve`, sehingga accessor `then` dijalankan DUA kali
+ * per event (audit ba68903). Di sini `then` dibaca sekali; kalau bukan fungsi,
+ * tidak ada promise yang dibuat sama sekali.
+ */
+function readThenOnce(value) {
+    if (!value || (typeof value !== "object" && typeof value !== "function")) return null;
+    try {
+        const then = value.then;
+        return typeof then === "function" ? then : null;
+    } catch {
+        return null;
+    }
+}
+
 async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS, auditLedger = null } = {}) {
     try {
         bounds = sanitizeBounds(BOUNDS, bounds);
@@ -93,15 +111,15 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
                 // Hook audit bisa ASYNC dan menolak; penolakan yang tidak
                 // ditangani dapat menghentikan proses Node, sehingga kegagalan
                 // audit berubah menjadi kegagalan lane (audit Wave8 L3/L5).
-                // `then` dibaca dengan aman: getter yang melempar ditangkap dan
-                // diperlakukan sebagai hasil non-thenable.
-                let isThenable = false;
-                try {
-                    isThenable = !!result && typeof result.then === "function";
-                } catch {
-                    isThenable = false;
+                // `then` dibaca SEKALI lewat readThenOnce, lalu dipanggil
+                // langsung -- `Promise.resolve(result)` akan membaca `then`
+                // untuk kedua kalinya.
+                const then = readThenOnce(result);
+                if (then) {
+                    try {
+                        then.call(result, undefined, () => {});
+                    } catch { /* penolakan sudah diserap; kegagalan audit tidak memblokir lane */ }
                 }
-                if (isThenable) Promise.resolve(result).catch(() => {});
             }
         } catch { /* audit failure never blocks the lane */ }
     }
@@ -115,18 +133,64 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         audit("cognition.spatial.store_unreadable", { reason: "store-unreadable-or-hostile" });
     }
 
+    /** Record tersimpan harus lulus BUILDER lane ini, bukan sekadar berbentuk objek. */
+    function isWellFormedPersistedFrame(id, frame) {
+        if (!frame || typeof frame !== "object") return false;
+        if (frame.frameId !== id) return false;
+        if (!Number.isFinite(frame.registeredAt) || frame.registeredAt > now()) return false;
+        try {
+            makeFrame({
+                frameId: frame.frameId, kind: frame.kind, ref: frame.ref,
+                source: frame.source, nowMs: frame.registeredAt
+            }, bounds);
+        } catch { return false; }
+        return true;
+    }
+
+    function isWellFormedPersistedTransform(id, transform) {
+        if (!transform || typeof transform !== "object") return false;
+        if (transform.transformId !== id) return false;
+        if (!Number.isFinite(transform.registeredAt)) return false;
+        if (!frames.has(transform.fromFrameId) || !frames.has(transform.toFrameId)) return false;
+        try {
+            makeTransform({
+                transformId: transform.transformId, fromFrameId: transform.fromFrameId,
+                toFrameId: transform.toFrameId, data: transform.data, nowMs: transform.registeredAt
+            }, bounds);
+        } catch { return false; }
+        return true;
+    }
+
+    function isWellFormedPersistedSceneNode(key, node) {
+        if (!node || typeof node !== "object") return false;
+        if (!frames.has(node.frameId)) return false;
+        if (key !== sceneNodeKey(node.frameId, node.region)) return false;
+        if (!Number.isFinite(node.updatedAtMs) || node.updatedAtMs > now()) return false;
+        try {
+            makeSceneNode({
+                nodeId: node.nodeId, frameId: node.frameId, region: node.region,
+                state: node.state, observationRefs: node.observationRefs, updatedAtMs: node.updatedAtMs
+            }, bounds);
+        } catch { return false; }
+        return true;
+    }
+
     // Persisted maps are untrusted input. Reconcile them BEFORE compaction:
     // compacting first lets a MALFORMED entry occupy capacity and evict a
     // VALID record, so good state is lost while the bad state is merely dropped
     // afterwards (audit fdda055).
+    //
+    // Validasi memakai BUILDER lane ini, bukan pemeriksaan sebagian. Versi
+    // sebelumnya hanya memeriksa id/waktu, sehingga sebuah frame dengan `kind`
+    // tidak dikenal dan `source` kosong lolos rekonsiliasi lalu -- karena
+    // validasi berjalan sebelum kompaksi -- menempati kapasitas dan mengevict
+    // frame SAH yang lebih lama (audit ba68903). Builder adalah kontrak bentuk
+    // record, jadi memakainya ulang menutup SELURUH medan sekaligus.
     for (const [id, frame] of [...frames]) {
-        if (!frame || frame.frameId !== id || typeof frame.frameId !== "string" ||
-            !Number.isFinite(frame.registeredAt) || frame.registeredAt > now()) frames.delete(id);
+        if (!isWellFormedPersistedFrame(id, frame)) frames.delete(id);
     }
     for (const [id, transform] of [...transforms]) {
-        if (!transform || transform.transformId !== id || typeof transform.fromFrameId !== "string" ||
-            typeof transform.toFrameId !== "string" || !frames.has(transform.fromFrameId) ||
-            !frames.has(transform.toFrameId) || !Number.isFinite(transform.registeredAt)) transforms.delete(id);
+        if (!isWellFormedPersistedTransform(id, transform)) transforms.delete(id);
     }
     // SIKLUS TERSIMPAN. Transform yang membentuk siklus (A→B→A) HARUS ditolak
     // saat penulisan, dan snapshot lama bisa membawanya; membiarkannya berarti
@@ -145,11 +209,7 @@ async function createSpatialModel({ clock = { nowMs: () => Date.now() }, store =
         if (!droppedOne) break;
     }
     for (const [key, node] of [...sceneNodes]) {
-        let coherent = false;
-        try { coherent = node && node.frameId && frames.has(node.frameId) &&
-            key === sceneNodeKey(node.frameId, node.region) && Number.isFinite(node.updatedAtMs) &&
-            node.updatedAtMs <= now() && Array.isArray(node.observationRefs); } catch { coherent = false; }
-        if (!coherent) sceneNodes.delete(key);
+        if (!isWellFormedPersistedSceneNode(key, node)) sceneNodes.delete(key);
     }
 
     // Bug-class awareness (this session's own Wave7 audit history, rounds

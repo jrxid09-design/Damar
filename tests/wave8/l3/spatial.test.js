@@ -520,3 +520,65 @@ test("L3-audit-11: an accessor-backed audit ledger executes no caller code, and 
     assert.ok(seen.includes("cognition.spatial.frame_registered"), `saw: ${seen.join(",")}`);
 });
 
+/* ---------------------------------------------------------------------- */
+/* Independent audit of ba68903 -- full-record validation + `then` once    */
+/* ---------------------------------------------------------------------- */
+
+test("L3-audit-12: a frame with invalid kind/source is rejected by FULL validation, not just id/time", async () => {
+    // Checking only id/registeredAt let a frame with an unknown `kind` and an
+    // empty `source` survive reconciliation, take capacity, and displace a valid
+    // older frame (audit of ba68903). Validation now runs every field through
+    // the lane's own `makeFrame` -- the record's actual shape contract.
+    const nowMs = 1_000_000;
+    const malformedFrames = [
+        { frameId: "bad", kind: "NOT_A_KIND", ref: {}, source: "", registeredAt: nowMs - 1000 },
+        { frameId: "bad", kind: "ROOM", ref: {}, source: "", registeredAt: nowMs - 1000 },
+        { frameId: "bad", kind: "NOT_A_KIND", ref: {}, source: "s", registeredAt: nowMs - 1000 },
+        { frameId: "bad", kind: "ROOM", ref: {}, source: "s", registeredAt: nowMs + 999999 }
+    ];
+
+    for (const malformed of malformedFrames) {
+        const sm = await createSpatialModel({
+            store: {
+                async getKv() {
+                    return {
+                        frames: {
+                            good: {
+                                frameId: "good", kind: "ROOM", ref: { name: "k" },
+                                source: "s", registeredAt: nowMs - 5000
+                            },
+                            bad: malformed
+                        },
+                        transforms: {},
+                        sceneNodes: {}
+                    };
+                },
+                async putKv() {}
+            },
+            clock: { nowMs: () => nowMs },
+            bounds: { ...BOUNDS, MAX_FRAMES: 1 }
+        });
+        assert.equal(sm.framesSize(), 1, "only the valid frame may survive");
+        const retained = (sm.getScene().frames || []).map(f => f.frameId);
+        assert.deepEqual(retained, ["good"],
+            `the valid frame must survive a ${malformed.kind}/${JSON.stringify(malformed.source)} sibling`);
+    }
+});
+
+test("L3-audit-13: an accessor-backed `then` on an audit result runs at most ONCE per event", async () => {
+    // The hook probed `then` and then handed the value to `Promise.resolve`,
+    // which read `then` AGAIN -- two getter calls per event (audit of ba68903).
+    let thenCalls = 0;
+    const payload = {};
+    Object.defineProperty(payload, "then", {
+        enumerable: true, configurable: true,
+        get() { thenCalls += 1; return undefined; }   // non-function `then`
+    });
+    const sm = await createSpatialModel({
+        clock: { nowMs: () => 1_000_000 },
+        auditLedger: { append() { return payload; } }
+    });
+    sm.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "kitchen" }, source: "s" });
+    assert.equal(thenCalls, 1, "`then` must be read exactly once per audited event");
+});
+

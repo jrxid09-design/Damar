@@ -633,13 +633,20 @@ test("L5-audit-15: a VALID retained run is not evicted by a malformed newer one 
     const nowMs = 1_000_000;
     const raw = {
         runs: {
-            good: { runId: "good", state: "COMPLETE", createdAtMs: nowMs - 5000 },
+            // A genuinely well-formed persisted run (every field the lane's own
+            // builder requires), so only the MALFORMED sibling is at issue.
+            good: {
+                runId: "good", question: "q", scenario: {}, initialStateRef: { frozen: true },
+                steps: 1, horizonDays: 1, budgetTokens: 10, fidelity: "DEFAULT",
+                state: "COMPLETE", createdAtMs: nowMs - 5000
+            },
             bad: { runId: "MISMATCH", state: "COMPLETE", createdAtMs: nowMs - 1000 }
         },
         results: {
             good: {
-                runId: "good", tier: "T10", state: "COMPLETE",
-                assumptions: [], validUntilMs: nowMs + 1_000_000, generatedAtMs: nowMs - 5000
+                runId: "good", distribution: null, risks: [], assumptions: [], confidence: 0.5,
+                tier: "T10", state: "COMPLETE", tokensUsed: 1,
+                validUntilMs: nowMs + 1_000_000, generatedAtMs: nowMs - 5000
             }
         },
         budget: { tokenLedger: [], invalidatedAssumptions: [] }
@@ -690,6 +697,88 @@ test("L5-audit-16: an accessor-backed audit ledger executes no caller code, and 
         provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
     });
     assert.ok(seen.includes("cognition.simulation.run_started"), `saw: ${seen.join(",")}`);
+});
+
+/* ---------------------------------------------------------------------- */
+/* Independent audit of ba68903 -- full-record validation + `then` once    */
+/* ---------------------------------------------------------------------- */
+
+test("L5-audit-17: a malformed run is rejected by FULL record validation, not just runId/state", async () => {
+    // Checking only {runId, state} let a run with an invalid createdAtMs survive
+    // reconciliation, take capacity, and evict a valid run at retention 1
+    // (audit of ba68903). Validation now runs every field through the lane's own
+    // builder -- the record's actual shape contract.
+    const nowMs = 1_000_000;
+    const malformedRuns = [
+        // invalid createdAtMs
+        { runId: "bad", question: "q", scenario: {}, initialStateRef: {}, steps: 1,
+            horizonDays: 1, budgetTokens: 10, state: "COMPLETE", createdAtMs: "newer-but-invalid" },
+        // invalid question
+        { runId: "bad", question: "", scenario: {}, initialStateRef: {}, steps: 1,
+            horizonDays: 1, budgetTokens: 10, state: "COMPLETE", createdAtMs: nowMs - 1000 },
+        // invalid budgetTokens
+        { runId: "bad", question: "q", scenario: {}, initialStateRef: {}, steps: 1,
+            horizonDays: 1, budgetTokens: -5, state: "COMPLETE", createdAtMs: nowMs - 1000 },
+        // createdAtMs in the future
+        { runId: "bad", question: "q", scenario: {}, initialStateRef: {}, steps: 1,
+            horizonDays: 1, budgetTokens: 10, state: "COMPLETE", createdAtMs: nowMs + 999999 }
+    ];
+
+    for (const malformed of malformedRuns) {
+        const sim = await createSimulationSandbox({
+            store: {
+                async getKv() {
+                    return {
+                        runs: {
+                            good: {
+                                runId: "good", question: "q", scenario: {}, initialStateRef: { frozen: true },
+                                steps: 1, horizonDays: 1, budgetTokens: 10, fidelity: "DEFAULT",
+                                state: "COMPLETE", createdAtMs: nowMs - 5000
+                            },
+                            bad: malformed
+                        },
+                        results: {
+                            good: {
+                                runId: "good", distribution: null, risks: [], assumptions: [], confidence: 0.5,
+                                tier: "T10", state: "COMPLETE", tokensUsed: 1,
+                                validUntilMs: nowMs + 1_000_000, generatedAtMs: nowMs - 5000
+                            }
+                        },
+                        budget: { tokenLedger: [], invalidatedAssumptions: [] }
+                    };
+                },
+                async putKv() {}
+            },
+            clock: { nowMs: () => nowMs },
+            bounds: { ...BOUNDS, MAX_RETAINED_RUNS: 1 }
+        });
+        assert.equal(sim.getResult("good").state, "COMPLETE",
+            `the valid run must survive ${JSON.stringify(malformed.createdAtMs)}-shaped malformed sibling`);
+        assertThrowsReason(() => sim.getResult("bad"), "UNKNOWN_RUN");
+    }
+});
+
+test("L5-audit-18: an accessor-backed `then` on an audit result runs at most ONCE per event", async () => {
+    // The hook probed `then` and then handed the value to `Promise.resolve`,
+    // which read `then` AGAIN -- two getter calls per event (audit of ba68903).
+    let thenCalls = 0;
+    const payload = {};
+    Object.defineProperty(payload, "then", {
+        enumerable: true, configurable: true,
+        get() { thenCalls += 1; return undefined; }   // non-function `then`
+    });
+    const sim = await createSimulationSandbox({
+        clock: { nowMs: () => 1_000_000 },
+        auditLedger: { append() { return payload; } },
+        bounds: { ...BOUNDS, MAX_TOKENS_PER_HOUR: 100 }
+    });
+    await sim.startRun({
+        runId: "r", question: "q", scenario: "s", initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 10,
+        provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+    });
+    // run_started + run_ended = 2 events, one `then` read each.
+    assert.equal(thenCalls, 2, "`then` must be read exactly once per audited event");
 });
 
 
