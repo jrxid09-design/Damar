@@ -781,4 +781,79 @@ test("L5-audit-18: an accessor-backed `then` on an audit result runs at most ONC
     assert.equal(thenCalls, 2, "`then` must be read exactly once per audited event");
 });
 
+/* ---------------------------------------------------------------------- */
+/* Independent audit of de9553c -- normalized fields, hostile thenables    */
+/* ---------------------------------------------------------------------- */
+
+test("L5-audit-19: a field the builder NORMALIZES cannot smuggle a malformed run past validation", async () => {
+    // "Passes the builder" is not "is well formed": the builders normalize some
+    // fields (an object-valued `fidelity` became "DEFAULT"), so a malformed
+    // record still passed, took capacity, and evicted a valid run at retention 1
+    // (audit of de9553c). Fields that are normalized must be checked explicitly.
+    const nowMs = 1_000_000;
+    const goodRun = () => ({
+        runId: "good", question: "q", scenario: {}, initialStateRef: { frozen: true },
+        steps: 1, horizonDays: 1, budgetTokens: 10, fidelity: "DEFAULT",
+        state: "COMPLETE", createdAtMs: nowMs - 5000
+    });
+    const goodResult = () => ({
+        runId: "good", distribution: null, risks: [], assumptions: [], confidence: 0.5,
+        tier: "T10", state: "COMPLETE", tokensUsed: 1,
+        validUntilMs: nowMs + 1_000_000, generatedAtMs: nowMs - 5000
+    });
+
+    const malformedRuns = [
+        { ...goodRun(), runId: "bad", fidelity: { evil: true }, createdAtMs: nowMs - 1000 },
+        { ...goodRun(), runId: "bad", fidelity: 7, createdAtMs: nowMs - 1000 },
+        { ...goodRun(), runId: "bad", question: 123, createdAtMs: nowMs - 1000 },
+        { ...goodRun(), runId: "bad", budgetTokens: 1.5, createdAtMs: nowMs - 1000 }
+    ];
+
+    for (const malformed of malformedRuns) {
+        const sim = await createSimulationSandbox({
+            store: {
+                async getKv() {
+                    return {
+                        runs: { good: goodRun(), bad: malformed },
+                        results: { good: goodResult() },
+                        budget: { tokenLedger: [], invalidatedAssumptions: [] }
+                    };
+                },
+                async putKv() {}
+            },
+            clock: { nowMs: () => nowMs },
+            bounds: { ...BOUNDS, MAX_RETAINED_RUNS: 1 }
+        });
+        assert.equal(sim.getResult("good").state, "COMPLETE",
+            "the valid run must survive a normalized-field malformed sibling");
+        assertThrowsReason(() => sim.getResult("bad"), "UNKNOWN_RUN");
+    }
+});
+
+test("L5-audit-20: a hostile async thenable on an audit result leaks no unhandled rejection", async () => {
+    // `then.call(...)` returns a value too: a custom async `then` that rejects
+    // returns a rejected promise, and ignoring it made the rejection unhandled
+    // (audit of de9553c).
+    let unhandled = 0;
+    const onUnhandled = () => { unhandled += 1; };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+        const hostile = Object.freeze({ then() { return Promise.reject(new Error("hostile thenable")); } });
+        const sim = await createSimulationSandbox({
+            clock: { nowMs: () => 1_000_000 },
+            auditLedger: { append() { return hostile; } },
+            bounds: { ...BOUNDS, MAX_TOKENS_PER_HOUR: 100 }
+        });
+        await sim.startRun({
+            runId: "r", question: "q", scenario: "s", initialStateRef: { frozen: true },
+            steps: 1, horizonDays: 1, budgetTokens: 10,
+            provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+        });
+        await new Promise(r => setTimeout(r, 50));
+        assert.equal(unhandled, 0, "a hostile thenable must not produce an unhandled rejection");
+    } finally {
+        process.removeListener("unhandledRejection", onUnhandled);
+    }
+});
+
 

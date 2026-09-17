@@ -582,3 +582,80 @@ test("L3-audit-13: an accessor-backed `then` on an audit result runs at most ONC
     assert.equal(thenCalls, 1, "`then` must be read exactly once per audited event");
 });
 
+/* ---------------------------------------------------------------------- */
+/* Independent audit of de9553c -- future dates, hostile thenables, source */
+/* ---------------------------------------------------------------------- */
+
+test("L3-audit-14: a future-dated persisted transform cannot displace a valid one, and hostile thenables leak nothing", async () => {
+    const nowMs = 1_000_000;
+    const goodFrame = (id) => ({ frameId: id, kind: "ROOM", ref: { name: "k" }, source: "s", registeredAt: nowMs - 5000 });
+    // `registeredAt` was checked for FINITENESS only, so a future-dated
+    // transform survived and evicted the valid older transform at retention 1
+    // (audit of de9553c).
+    const sm = await createSpatialModel({
+        store: {
+            async getKv() {
+                return {
+                    frames: { A: goodFrame("A"), B: goodFrame("B"), C: goodFrame("C") },
+                    transforms: {
+                        good: { transformId: "good", fromFrameId: "A", toFrameId: "B", data: { x: 1 }, registeredAt: nowMs - 5000 },
+                        bad: { transformId: "bad", fromFrameId: "B", toFrameId: "C", data: { x: 2 }, registeredAt: nowMs + 999999 }
+                    },
+                    sceneNodes: {}
+                };
+            },
+            async putKv() {}
+        },
+        clock: { nowMs: () => nowMs },
+        bounds: { ...BOUNDS, MAX_TRANSFORMS: 1 }
+    });
+    assert.equal(sm.transformsSize(), 1, "only the valid transform may survive");
+
+    // A custom async `then` that rejects: the value RETURNED by `then` must be
+    // absorbed too, or the rejection becomes unhandled and can kill the process.
+    let unhandled = 0;
+    const onUnhandled = () => { unhandled += 1; };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+        const hostile = Object.freeze({ then() { return Promise.reject(new Error("hostile thenable")); } });
+        const smT = await createSpatialModel({
+            clock: { nowMs: () => nowMs },
+            auditLedger: { append() { return hostile; } }
+        });
+        smT.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s" });
+        await new Promise(r => setTimeout(r, 50));
+        assert.equal(unhandled, 0, "a hostile thenable must not produce an unhandled rejection");
+    } finally {
+        process.removeListener("unhandledRejection", onUnhandled);
+    }
+});
+
+test("L3-audit-15: contest is decided by SOURCE identity, not observationRef identity", async () => {
+    const nowMs = 1_000_000;
+    const sm = await createSpatialModel({ clock: { nowMs: () => nowMs } });
+    sm.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s" });
+    const region = { r: 1 };
+
+    // The SAME sensor reporting a NEW observationRef is a REVISION, not a
+    // contest. Comparing observationRef identity made every subsequent reading
+    // from one sensor look like a second source and locked the region
+    // CONTESTED forever (audit of de9553c).
+    sm.reportOccupancy({ frameId: "f1", region, state: "KNOWN", observationRef: "obs-1", source: "sensor-a" });
+    sm.reportOccupancy({ frameId: "f1", region, state: "UNKNOWN", observationRef: "obs-2", source: "sensor-a" });
+    assert.equal(sm.queryOccupancy({ frameId: "f1", region }).state, "UNKNOWN",
+        "one sensor revising its own reading is not a contest");
+
+    // A genuinely DIFFERENT source disagreeing is a contest.
+    sm.reportOccupancy({ frameId: "f1", region, state: "KNOWN", observationRef: "obs-3", source: "sensor-b" });
+    assert.equal(sm.queryOccupancy({ frameId: "f1", region }).state, "CONTESTED",
+        "a second source disagreeing must contest the region");
+
+    // Legacy callers that omit `source` keep the previous behaviour.
+    const sm2 = await createSpatialModel({ clock: { nowMs: () => nowMs } });
+    sm2.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s" });
+    sm2.reportOccupancy({ frameId: "f1", region, state: "KNOWN", observationRef: "r1" });
+    sm2.reportOccupancy({ frameId: "f1", region, state: "UNKNOWN", observationRef: "r2" });
+    assert.equal(sm2.queryOccupancy({ frameId: "f1", region }).state, "CONTESTED",
+        "omitting `source` falls back to observationRef as the source identity");
+});
+

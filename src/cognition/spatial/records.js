@@ -193,7 +193,7 @@ function makeTransform({ transformId, fromFrameId, toFrameId, data, nowMs }, bou
     });
 }
 
-function makeSceneNode({ nodeId, frameId, region, state, observationRefs, updatedAtMs }, bounds = BOUNDS) {
+function makeSceneNode({ nodeId, frameId, region, state, observationRefs, sources, updatedAtMs }, bounds = BOUNDS) {
     if (typeof nodeId !== "string" || !nodeId) fail(REASONS.INVALID_RECORD, "nodeId wajib string");
     if (typeof frameId !== "string" || !frameId) fail(REASONS.INVALID_RECORD, "frameId wajib string");
     if (!OCCUPANCY_STATES.has(state)) fail(REASONS.INVALID_RECORD, `scene node state '${typeof state === "string" ? state : typeof state}' tidak dikenal`);
@@ -208,9 +208,28 @@ function makeSceneNode({ nodeId, frameId, region, state, observationRefs, update
         if (err && err.name === "SpatialError") throw err;
         fail(REASONS.INVALID_RECORD, "observationRefs tidak dapat diverifikasi dengan aman");
     }
+    // IDENTITAS SUMBER yang berbeda dari identitas observationRef.
+    //
+    // Kontrak L3 menuntut kontes = "dua SUMBER yang berselisih". Menyamakan
+    // identitas sumber dengan identitas observationRef salah: observasi
+    // berikutnya dari sensor yang SAMA selalu membawa ref baru, sehingga revisi
+    // satu sensor tampak seperti perselisihan antar-sumber dan mengunci region
+    // jadi CONTESTED secara permanen (audit de9553c). Karena itu daftar sumber
+    // yang pernah melapor ikut dipersistensi.
+    let safeSources;
+    try {
+        safeSources = Array.isArray(sources) ? buildSafeSpatialValue(sources).map(s => {
+            if (typeof s !== "string" || !s) fail(REASONS.INVALID_RECORD, "sources elemen wajib string");
+            return s;
+        }) : [];
+    } catch (err) {
+        if (err && err.name === "SpatialError") throw err;
+        fail(REASONS.INVALID_RECORD, "sources tidak dapat diverifikasi dengan aman");
+    }
     return Object.freeze({
         nodeId, frameId, region: deepFreeze(safeRegion), state,
-        observationRefs: Object.freeze(refs), updatedAtMs
+        observationRefs: Object.freeze(refs), sources: Object.freeze(safeSources),
+        updatedAtMs
     });
 }
 

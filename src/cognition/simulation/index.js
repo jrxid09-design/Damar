@@ -121,7 +121,14 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
                 const then = readThenOnce(result);
                 if (then) {
                     try {
-                        then.call(result, undefined, () => {});
+                        // Nilai kembalian `then` juga harus diserap: sebuah
+                        // `then` async yang melempar mengembalikan promise yang
+                        // DITOLAK, dan membiarkannya berarti unhandled rejection
+                        // yang bisa menghentikan proses Node (audit de9553c).
+                        const chained = then.call(result, undefined, () => {});
+                        if (chained && typeof chained.catch === "function") {
+                            chained.catch(() => {});
+                        }
                     } catch { /* penolakan sudah diserap; kegagalan audit tidak memblokir sandbox */ }
                 }
             }
@@ -225,10 +232,24 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
         return Number.isFinite(candidate) ? candidate : Date.now();
     }
 
-    /** Record tersimpan harus lulus BUILDER lane ini, bukan sekadar berbentuk objek. */
+    /**
+     * Record tersimpan harus lulus BUILDER lane ini, bukan sekadar berbentuk objek.
+     *
+     * CATATAN PENTING: builder MENORMALKAN sebagian medan (mis. `fidelity` yang
+     * bukan string menjadi "DEFAULT"), sehingga "lulus builder" saja tidak cukup
+     * -- medan yang dinormalkan harus diperiksa EKSPLISIT, atau record malformed
+     * tetap lolos lalu menempati kapasitas dan mengevict record sah (audit
+     * de9553c).
+     */
     function isWellFormedPersistedRun(id, run) {
         if (!run || typeof run !== "object") return false;
         if (run.runId !== id) return false;
+        if (typeof run.question !== "string" || !run.question) return false;
+        if (!Number.isInteger(run.steps) || run.steps <= 0 || run.steps > bounds.MAX_STEPS_PER_RUN) return false;
+        if (!Number.isFinite(run.horizonDays) || run.horizonDays <= 0 || run.horizonDays > bounds.MAX_HORIZON_DAYS) return false;
+        if (!Number.isInteger(run.budgetTokens) || run.budgetTokens <= 0 || run.budgetTokens > bounds.MAX_TOKENS_PER_RUN) return false;
+        // Dinormalkan builder -> harus string, bukan objek/angka.
+        if (typeof run.fidelity !== "string") return false;
         if (!["COMPLETE", "TRUNCATED", "FAILED"].includes(run.state)) return false;
         if (!Number.isFinite(run.createdAtMs) || run.createdAtMs > now()) return false;
         try {
@@ -250,6 +271,11 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
         // FORCED T10: tier lain tidak pernah sah dan tidak boleh menggantikan
         // hasil sah mana pun.
         if (result.tier !== "T10") return false;
+        // Dinormalkan builder -> harus angka finite / array, bukan bentuk lain.
+        if (!Number.isFinite(result.confidence)) return false;
+        if (!Number.isFinite(result.tokensUsed)) return false;
+        if (!Array.isArray(result.risks) || !Array.isArray(result.assumptions)) return false;
+        if (result.distribution !== null && (typeof result.distribution !== "object" || Array.isArray(result.distribution))) return false;
         if (!Number.isFinite(result.validUntilMs) || !Number.isFinite(result.generatedAtMs)) return false;
         try {
             makeSimulationResult({
