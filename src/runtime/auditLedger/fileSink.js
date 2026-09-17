@@ -3,6 +3,58 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+/**
+ * Primitive berkas DIBEKUKAN SAAT MODUL DIMUAT.
+ *
+ * Merek durabel (di bawah) menegaskan "sink ini menulis DAN fsync". Bila kode
+ * penelepon dapat mengganti `fs.fsyncSync` (langsung, atau lewat getter/Proxy di
+ * objek opsi yang dijalankan sebelum penulisan), sink tetap memperoleh merek itu
+ * padahal tidak pernah benar-benar mem-flush -- dan `requireAudit:true` bisa
+ * masuk mode governed tanpa durabilitas (audit c894e05). Menangkap fungsinya di
+ * sini membuat implementasi yang dipakai tidak lagi dapat diganti setelah modul
+ * dimuat.
+ *
+ * Ini BUKAN klaim keamanan terhadap kode yang sudah berjalan di proses ini
+ * (sama seperti merek leksikal lane ini); batasnya adalah kode penelepon tidak
+ * dapat menyetel ulang implementasi TEPAT PADA SAAT merek durabel diberikan.
+ */
+const FILE_OPEN_SYNC = fs.openSync;
+const FILE_WRITE_SYNC = fs.writeSync;
+const FILE_FSYNC_SYNC = fs.fsyncSync;
+const FILE_CLOSE_SYNC = fs.closeSync;
+
+/**
+ * Baca `options.fsync` lewat DESKRIPTOR.
+ *
+ * `options.fsync !== false` adalah `[[Get]]` mentah: getter atau Proxy di objek
+ * opsi menjalankan kode penelepon, yang dapat mengganti `fs.fsyncSync` sebelum
+ * sink menulis apa pun (audit c894e05). Pembacaan lewat deskriptor tidak
+ * menjalankan accessor; nilai accessor diperlakukan sebagai "tidak menyatakan
+ * apa pun", sehingga default aman (fsync aktif) tetap berlaku.
+ */
+function resolveFsyncOption(options) {
+    if (options === null || typeof options !== "object") return true;
+    let desc;
+    try {
+        desc = Object.getOwnPropertyDescriptor(options, "fsync");
+    } catch {
+        return true;
+    }
+    if (!desc) {
+        // Mungkin diwarisi; telusuri prototipe lewat deskriptor juga.
+        let proto;
+        try {
+            proto = Object.getPrototypeOf(options);
+        } catch {
+            return true;
+        }
+        return resolveFsyncOption(proto);
+    }
+    if (desc.get || desc.set) return true;
+    return desc.value !== false;
+}
+
+
 const { LedgerError, CODES } = require("./errors");
 const { digestCore } = require("./events");
 const { sha256Hex, isValidDigestFormat } = require("./integrity");
@@ -152,7 +204,7 @@ function createFileAuditSink(filePath, options = {}) {
     if (typeof filePath !== "string" || filePath.length === 0) {
         throw failSink("audit file sink requires a file path");
     }
-    const fsync = options.fsync !== false;
+    const fsync = resolveFsyncOption(options);
 
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
 
@@ -303,12 +355,16 @@ function createFileAuditSink(filePath, options = {}) {
     function appendLine(line) {
         // Atomic append of one fsync'd line.  O_EX so two sinks cannot both
         // create the file; the queue guarantees single-writer ordering here.
-        const fd = fs.openSync(filePath, "a");
+        // Primitive berkas diambil dari binding yang dibekukan saat modul
+        // dimuat (lihat FILE_*_SYNC di atas), sehingga penggantian
+        // `fs.fsyncSync` oleh kode penelepon tidak dapat membatalkan flush
+        // selagi sink tetap memegang merek durabel (audit c894e05).
+        const fd = FILE_OPEN_SYNC.call(fs, filePath, "a");
         try {
-            fs.writeSync(fd, line + "\n");
-            if (fsync) fs.fsyncSync(fd);
+            FILE_WRITE_SYNC.call(fs, fd, line + "\n");
+            if (fsync) FILE_FSYNC_SYNC.call(fs, fd);
         } finally {
-            fs.closeSync(fd);
+            FILE_CLOSE_SYNC.call(fs, fd);
         }
     }
 
