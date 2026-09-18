@@ -638,7 +638,7 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
                 principal: request.principal,
                 scope: request.scope,
                 parameters: request.parameters
-            });
+            }, request);
         })();
 
         let timeoutHandle = null;
@@ -704,6 +704,46 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
             return result;
         }
 
+        let sanitizedOutput;
+        try {
+            sanitizedOutput = sanitizeActuatorOutput(actuatorOutput);
+        } catch {
+            lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());
+            const result = buildExecutionResult({
+                executionRequest: request,
+                state: RESULT_STATE.FAILED,
+                actuatorId: binding.actuatorId,
+                actuatorIncarnationId: binding.actuatorIncarnationId,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: dispatchStartMs,
+                completedAtMs: canonicalClockNow(),
+                failureReason: REASONS.ACTUATOR_REJECTED_INVOCATION,
+                failureDetail: "actuator returned an unsupported result"
+            });
+            noteCompleted(contentKey, { result, request, intentId: request.intentId });
+            return result;
+        }
+        const outputOutcome = sanitizedOutput && typeof sanitizedOutput === "object"
+            ? Object.getOwnPropertyDescriptor(sanitizedOutput, "outcome")?.value
+            : undefined;
+        if (["REFUSED", "STOPPED", "UNKNOWN_OUTCOME"].includes(outputOutcome)) {
+            lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());
+            const result = buildExecutionResult({
+                executionRequest: request,
+                state: RESULT_STATE.FAILED,
+                actuatorId: binding.actuatorId,
+                actuatorIncarnationId: binding.actuatorIncarnationId,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: dispatchStartMs,
+                completedAtMs: canonicalClockNow(),
+                actuatorReport: sanitizedOutput,
+                failureReason: REASONS.ACTUATOR_REJECTED_INVOCATION,
+                failureDetail: outputOutcome === "UNKNOWN_OUTCOME" ? "actuator completed with ambiguous physical outcome" : `actuator reported ${outputOutcome.toLowerCase()}`
+            });
+            noteCompleted(contentKey, { result, request, intentId: request.intentId });
+            return result;
+        }
+
         lifecycle.advance(LIFECYCLE.EXECUTED, canonicalClockNow());
         const result = buildExecutionResult({
             executionRequest: request,
@@ -713,7 +753,7 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
             lifecycleTrace: lifecycle.trace,
             startedAtMs: dispatchStartMs,
             completedAtMs: canonicalClockNow(),
-            actuatorReport: actuatorOutput
+            actuatorReport: sanitizedOutput
         });
         noteCompleted(contentKey, { result, request, intentId: request.intentId });
         return result;

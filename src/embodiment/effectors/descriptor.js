@@ -1,7 +1,7 @@
 "use strict";
 
 const { types } = require("node:util");
-const { MAX_ADAPTER_RATE_HZ, REVERSIBILITY, HAZARD_CLASS } = require("./laws");
+const { MAX_ADAPTER_RATE_HZ, EFFECTOR_KIND, REVERSIBILITY, HAZARD_CLASS, isPhysicalEffector } = require("./laws");
 const isProxy = types.isProxy.bind(types);
 
 const FIELDS = new Set([
@@ -57,7 +57,17 @@ function validateEffectorDescriptor(input) {
     for (const key of Object.keys(source)) if (!FIELDS.has(key)) throw new TypeError(`unknown descriptor field ${key}`);
 
     const kind = text(source.kind, "kind", 32);
-    const physical = kind === "PHYSICAL";
+    if (!Object.values(EFFECTOR_KIND).includes(kind)) throw new TypeError("invalid effector kind");
+    // EM-7: a missing classification defaults to the STRICTEST value, so the
+    // physical/non-physical decision must be made on the NORMALIZED hazard
+    // class -- never on the raw input, where an omitted hazardClass would
+    // otherwise let a descriptor validate as non-physical and then run
+    // classified SAFETY_CRITICAL.
+    const reversibility = source.reversibility === undefined ? REVERSIBILITY.IRREVERSIBLE : text(source.reversibility, "reversibility", 32);
+    const hazardClass = source.hazardClass === undefined ? HAZARD_CLASS.SAFETY_CRITICAL : text(source.hazardClass, "hazardClass", 32);
+    if (!Object.values(REVERSIBILITY).includes(reversibility)) throw new TypeError("invalid effector reversibility");
+    if (!Object.values(HAZARD_CLASS).includes(hazardClass)) throw new TypeError("invalid effector hazardClass");
+    const physical = isPhysicalEffector({ kind, hazardClass });
     const limits = source.physicalLimits === undefined || source.physicalLimits === null
         ? null
         : cloneBounded(source.physicalLimits);
@@ -93,8 +103,6 @@ function validateEffectorDescriptor(input) {
         }
         return Object.freeze(result);
     };
-    const reversibility = source.reversibility === undefined ? REVERSIBILITY.IRREVERSIBLE : text(source.reversibility, "reversibility", 32);
-    const hazardClass = source.hazardClass === undefined ? HAZARD_CLASS.SAFETY_CRITICAL : text(source.hazardClass, "hazardClass", 32);
     const maxRateHz = source.maxRateHz === undefined ? MAX_ADAPTER_RATE_HZ : source.maxRateHz;
     if (typeof maxRateHz !== "number" || !Number.isFinite(maxRateHz) || maxRateHz <= 0 || maxRateHz > MAX_ADAPTER_RATE_HZ) {
         throw new TypeError("invalid maxRateHz");

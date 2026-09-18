@@ -3,6 +3,19 @@
 const { types } = require("node:util");
 const isProxy = types.isProxy.bind(types);
 
+function isCalibrationAcknowledgment(value) {
+    if (!value || typeof value !== "object" || isProxy(value)) return false;
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return false;
+    const eventType = Object.getOwnPropertyDescriptor(value, "eventType");
+    const source = Object.getOwnPropertyDescriptor(value, "source");
+    const sequence = Object.getOwnPropertyDescriptor(value, "sequence");
+    return Boolean(eventType && source && sequence &&
+        Object.prototype.hasOwnProperty.call(eventType, "value") && eventType.value === "embodiment.effector.calibration.change" &&
+        Object.prototype.hasOwnProperty.call(source, "value") && source.value === "embodiment.effector" &&
+        Object.prototype.hasOwnProperty.call(sequence, "value") && Number.isSafeInteger(sequence.value));
+}
+
 function validateCalibration(record, { nowMs = Date.now() } = {}) {
     if (!record || typeof record !== "object" || isProxy(record)) throw new TypeError("invalid calibration record");
     const proto = Object.getPrototypeOf(record);
@@ -72,13 +85,18 @@ function auditCalibrationChange(appendAuditSync, effectorId, calibrationRef, atM
         throw new TypeError("invalid calibration audit context");
     }
     try {
-        appendAuditSync(Object.freeze({
-            kind: "embodiment.effector",
-            eventType: "calibration-change",
-            effectorId,
-            calibrationRef,
-            atMs
+        const acknowledgment = appendAuditSync(Object.freeze({
+            eventType: "embodiment.effector.calibration.change",
+            source: "embodiment.effector",
+            timestampMs: Math.floor(atMs),
+            operation: "effector.calibration.change",
+            outcome: "ok",
+            subject: Object.freeze({ kind: "device", id: effectorId }),
+            metadata: Object.freeze({ calibrationRef })
         }));
+        if (acknowledgment !== true && !isCalibrationAcknowledgment(acknowledgment)) {
+            throw new Error("calibration audit was not synchronously acknowledged");
+        }
     } catch {
         throw new Error("calibration audit failed; change refused");
     }
