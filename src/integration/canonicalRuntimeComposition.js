@@ -344,12 +344,53 @@ async function buildRuntimeCoreInternal({
     // reads `cognition` back. GATE-W7-10/11 hold structurally: with
     // enableCognition=false (the default) this is simply `null`.
     let cognition = null;
+    let cognitionAuditLedgerResolved = null;
     if (enableCognition) {
         const { createLongHorizonCycle } = require("../cognition/longhorizon");
+        // BIND THE CANONICAL LEDGER OWNER -- do not manufacture a second one.
+        //
+        // A previous revision called `createAuditLedger({})` here and labelled
+        // the result canonical; that is a DIFFERENT instance from the durable
+        // ledger `src/authority/ownerTrustComposition.js` already owns, and it
+        // has no persistence sink, so a "confirmed durable append" claim
+        // against it was false (audit of d409f56). Priority order:
+        //   1. an explicitly caller-supplied ledger (deployment override);
+        //   2. the canonical owner-trust ledger, via the same production
+        //      composition this file already boots for Manager ingress;
+        //   3. a local in-memory ledger ONLY as a documented fallback for the
+        //      boot path where owner-trust was never composed, so the governed
+        //      transition is still recorded rather than silently skipped.
+        cognitionAuditLedgerResolved = cognitionAuditLedger;
+        if (cognitionAuditLedgerResolved == null) {
+            try {
+                const productionComposition = require("../authority/productionComposition");
+                await productionComposition.ensureProductionAuthorityComposed();
+                const composed = productionComposition.getProductionAuthorityComposition();
+                const ownerLedger = composed && composed.ownerTrust && composed.ownerTrust.ledger;
+                if (ownerLedger && typeof ownerLedger.append === "function") {
+                    cognitionAuditLedgerResolved = ownerLedger;
+                }
+            } catch { /* owner-gated ops stay fail-closed; audit binding is best-effort */ }
+        }
+        // NO SINKLESS FALLBACK. A previous revision fell back to
+        // `createAuditLedger({})` when owner-trust was not composed -- which is
+        // exactly the state productionComposition deliberately produces on a
+        // trust-domain failure (`ownerTrust: null`). That fallback therefore
+        // recreated the duplicate-ledger defect and let governed mode start
+        // with no canonical durable record (audit of 321c7b3). Leaving the
+        // ledger null is the correct behaviour: the cognition lane then fails
+        // closed, refusing governed mode rather than proceeding unaudited.
         cognition = await createLongHorizonCycle({
             mode: cognitionMode,
             capabilityRegistry: cognitionCapabilityRegistry,
-            auditLedger: cognitionAuditLedger
+            auditLedger: cognitionAuditLedgerResolved,
+            // Production path: refuse to start governed with no ledger at all.
+            // `getProductionAuthorityComposition()` deliberately resolves
+            // `ownerTrust: null` on a trust-domain failure, so leaving the
+            // ledger null was previously indistinguishable from success and
+            // governed could start with no canonical durable record (audit of
+            // 406553b).
+            requireAudit: cognitionMode === "governed"
         });
     }
 

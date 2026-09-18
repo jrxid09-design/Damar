@@ -8,6 +8,39 @@ const { CORRELATION_KEYS } = require("./ids");
 const { buildEventRecord, digestCore, RESERVED_EVENT_TYPES } = require("./events");
 const { canonicalJson } = require("./canonicalJson");
 const { sha256Hex } = require("./integrity");
+const { isDurableAuditSink } = require("./fileSink");
+
+/**
+ * `WeakSet.prototype.has`/`add` lewat INTRINSIK yang dibekukan saat modul ini
+ * dimuat, bukan pencarian properti `CANONICAL_LEDGERS.has(...)`.
+ *
+ * Merek leksikal ini adalah satu-satunya yang membedakan ledger kanonik dari
+ * tiruan ber-bentuk sama. Memanggilnya sebagai metode membuatnya bergantung pada
+ * `WeakSet.prototype.has` yang masih dapat dijangkau dan ditimpa SETELAH modul
+ * dimuat; dengan penimpaan selektif, ledger tiruan tanpa sink disk dilaporkan
+ * `audited:true` (audit 0132c36). Pola pemanggilan yang sama dipakai untuk
+ * primitive berkas di `fileSink.js`.
+ */
+const REFLECT_APPLY = Reflect.apply;
+const WEAKSET_HAS = WeakSet.prototype.has;
+const WEAKSET_ADD = WeakSet.prototype.add;
+const FREEZE = Object.freeze;
+const IS_FROZEN = Object.isFrozen;
+/**
+ * Enumerasi juga dibekukan: `detach` dipakai pada jalur kepercayaan (salinan
+ * struktur-dalam untuk perbandingan baca-balik governed), jadi `Object.keys`
+ * yang dapat ditimpa pasca-pemuatan tidak boleh ikut menentukan hasilnya.
+ */
+const OBJECT_KEYS = Object.keys;
+const OBJECT_ENTRIES = Object.entries;
+
+function brandHas(set, value) {
+    return REFLECT_APPLY(WEAKSET_HAS, set, [value]);
+}
+
+function brandAdd(set, value) {
+    REFLECT_APPLY(WEAKSET_ADD, set, [value]);
+}
 
 /**
  * Audit Ledger V1 — the append-oriented observational ledger.
@@ -49,10 +82,10 @@ function defaultIdFactory() {
 /** Deep-freeze a plain structure (records contain only plain data). */
 function deepFreeze(value) {
     if (value !== null && typeof value === "object") {
-        for (const key of Object.keys(value)) {
+        for (const key of OBJECT_KEYS(value)) {
             deepFreeze(value[key]);
         }
-        Object.freeze(value);
+        FREEZE(value);
     }
     return value;
 }
@@ -62,8 +95,29 @@ function detach(value) {
     if (value === null || typeof value !== "object") return value;
     if (Array.isArray(value)) return value.map(detach);
     const out = {};
-    for (const key of Object.keys(value)) out[key] = detach(value[key]);
+    for (const key of OBJECT_KEYS(value)) out[key] = detach(value[key]);
     return out;
+}
+
+/**
+ * MD-018-style lexical brand: only a ledger created by `createAuditLedger()`
+ * below can be in this set.
+ *
+ * FG-03 needs to distinguish a GENUINE ledger from an object that merely
+ * satisfies the ledger's shape. Content read-back cannot do it: a caller's
+ * look-alike can append into a transient variable and echo it from
+ * `getByEventId`, which proves correspondence but not persistence (audit of
+ * cd3dedf). WeakSet membership cannot be forged -- `spread`, `Object.assign`,
+ * and `structuredClone` all lose it -- so requiring the brand at the trust
+ * boundary is what actually excludes caller-supplied look-alike ledgers.
+ * Entries are weak, so a discarded ledger is still collectable.
+ */
+const CANONICAL_LEDGERS = new WeakSet();
+
+function isAuditLedger(candidate) {
+    return candidate !== null
+        && (typeof candidate === "object" || typeof candidate === "function")
+        && brandHas(CANONICAL_LEDGERS, candidate);
 }
 
 function createAuditLedger(options = {}) {
@@ -152,7 +206,7 @@ function createAuditLedger(options = {}) {
 
         // Hash chain over canonical serialization (corruption detection
         // ONLY — see integrity.js for binding semantics disclaimer).
-        shell.integrity = Object.freeze({
+        shell.integrity = FREEZE({
             algorithm: "sha256",
             prevDigest: lastDigest,
             digest: sha256Hex(Buffer.from(digestCore(shell), "utf8"))
@@ -174,6 +228,15 @@ function createAuditLedger(options = {}) {
                 if (outcome && typeof outcome.then === "function") {
                     throw new LedgerError(CODES.PERSIST_FAILED,
                         "async sinks are not supported by atomic durable append in V1");
+                }
+                // PORT CONTRACT: "Persist one frozen audit record. Return true
+                // on success; throw to reject". A sink that returns nothing (or
+                // false) has NOT acknowledged a durable write, and treating
+                // that as success let `{ append() {} }` claim durability it
+                // never performed (audit 7677a0f).
+                if (outcome !== true) {
+                    throw new LedgerError(CODES.PERSIST_FAILED,
+                        "persistence sink did not acknowledge a durable write (append must return true)");
                 }
             }
             catch (error) {
@@ -322,7 +385,7 @@ function createAuditLedger(options = {}) {
             if (typeof corr !== "object" || Array.isArray(corr)) {
                 throw new LedgerError(CODES.INVALID_QUERY, "correlation filter must be an object");
             }
-            for (const key of Object.keys(corr)) {
+            for (const key of OBJECT_KEYS(corr)) {
                 if (!CORRELATION_KEYS.includes(key)) {
                     throw new LedgerError(CODES.INVALID_QUERY, `unknown correlation filter key: ${key}`);
                 }
@@ -339,7 +402,7 @@ function createAuditLedger(options = {}) {
     }
 
     function matches(record, filter) {
-        for (const [key, value] of Object.entries(filter)) {
+        for (const [key, value] of OBJECT_ENTRIES(filter)) {
             if (value === undefined || value === null) continue;
             switch (key) {
                 case "types":
@@ -379,7 +442,7 @@ function createAuditLedger(options = {}) {
                     if (!record.correlation) return false;
                     const corr = filter.correlation;
                     if (!corr || typeof corr !== "object") return false;
-                    for (const [ckey, cval] of Object.entries(corr)) {
+                    for (const [ckey, cval] of OBJECT_ENTRIES(corr)) {
                         if (cval === undefined || cval === null) continue;
                         if (record.correlation[ckey] !== cval) return false;
                     }
@@ -402,7 +465,7 @@ function createAuditLedger(options = {}) {
 
     /** Operational stats (bounded view). */
     function stats() {
-        return Object.freeze({
+        return FREEZE({
             retainedEvents: records.length,
             logicalSequence: sequenceCounter,
             acceptedCount,
@@ -450,7 +513,7 @@ function createAuditLedger(options = {}) {
         return orderedWindow({ order: "asc", limit }).map(detach);
     }
 
-    return Object.freeze({
+    const ledgerInstance = FREEZE({
         append,
         appendSafe,
         correct,
@@ -461,8 +524,22 @@ function createAuditLedger(options = {}) {
         stats,
         verifyIntegrity,
         exportWindow,
-        bounds
+        bounds,
+        // Apakah ledger ini benar-benar memiliki sink DURABEL (dibuat oleh
+        // factory sink lane ini dan menulis+fsync ke disk). Sebuah klaim
+        // "rekaman durabel" (FG-03) hanya sah bila ini true; sink buatan
+        // pemanggil apa pun -- termasuk `{ append() {} }` -- tidak dihitung
+        // (audit 7677a0f).
+        hasDurableSink: isDurableAuditSink(sink)
     });
+    // Imutabilitas DIVERIFIKASI sebelum branding. Bila `FREEZE` tidak
+    // benar-benar membekukan (intrinsiknya sudah tertimpa), instance ini masih
+    // dapat ditambal SESUDAH memperoleh merek kanonik, dan merek itu adalah
+    // dasar seluruh konfirmasi governed (audit bcc2d45).
+    if (REFLECT_APPLY(IS_FROZEN, Object, [ledgerInstance]) === true) {
+        brandAdd(CANONICAL_LEDGERS, ledgerInstance);
+    }
+    return ledgerInstance;
 }
 
-module.exports = Object.freeze({ createAuditLedger, detach, deepFreeze });
+module.exports = FREEZE({ createAuditLedger, isAuditLedger, detach, deepFreeze });
