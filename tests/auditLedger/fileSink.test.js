@@ -143,6 +143,13 @@ test("canonical JSON is stable after mutable array and collection methods are re
     const proxy = new Proxy({}, { ownKeys() { proxyTraps += 1; return []; } });
     assert.throws(() => canonicalJson(proxy), /Proxy/);
     assert.equal(proxyTraps, 0);
+    let optionGetterCalls = 0;
+    const options = Object.defineProperty({}, "maxDepth", {
+        get() { optionGetterCalls += 1; return Infinity; }
+    });
+    assert.throws(() => canonicalJson({}, options), /data property/);
+    assert.equal(optionGetterCalls, 0);
+    assert.throws(() => canonicalJson({}, { maxDepth: Infinity }), /safe integer/);
 });
 
 test("sequence is strictly increasing and continues across restart", () => {
