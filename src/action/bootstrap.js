@@ -921,6 +921,10 @@ function createCanonicalActionFacade() {
 // ---------------------------------------------------------------------------
 
 const crypto3 = require("node:crypto");
+// Captured once: the outcome reader below must not consult a mutated
+// `util.types` on the dispatch path.
+const utilTypes3 = require("node:util").types;
+const isProxy3 = utilTypes3.isProxy.bind(utilTypes3);
 const {
     parseActionIntent: parseIntent3, canonicalScope: canonicalScope3,
     validateTimestamp: validateTimestamp3, isValidIncarnationId: isValidIncarnation3
@@ -1188,6 +1192,25 @@ function sanitizeActuatorOutput3(value) {
         return out;
     }
     return walk(value, 0);
+}
+
+// An actuator's own outcome description, read from the RAW report BEFORE it is
+// sanitized: only an own DATA property of a non-Proxy object is trusted. An
+// accessor, an inherited description, or any Proxy (whose descriptors may lie)
+// yields UNSUPPORTED_OUTCOME3 and fails closed; `undefined` means no outcome
+// was described at all. The sanitized copy cannot be used for this -- it
+// silently drops accessor and non-plain descriptions, which would turn an
+// ambiguous physical outcome ("UNKNOWN_OUTCOME") into EXECUTED.
+const UNSUPPORTED_OUTCOME3 = Symbol("unsupported-actuator-outcome");
+function readActuatorOutcome3(value) {
+    if (value === null || typeof value !== "object") return undefined;
+    if (isProxy3(value)) return UNSUPPORTED_OUTCOME3;
+    if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
+        if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return UNSUPPORTED_OUTCOME3;
+        return descriptor.value;
+    }
+    return Reflect.has(value, "outcome") ? UNSUPPORTED_OUTCOME3 : undefined;
 }
 
 // ---- PRIVILEGED: result/evidence builders (closure-private) ----------------
@@ -1746,18 +1769,13 @@ function composeDispatcher3({
         let sanitizedOutput;
         let outputOutcome;
         try {
-            // The outcome token is read from the RAW output through an own data
-            // descriptor. The sanitized copy silently drops accessor and
-            // non-plain properties, so reading the outcome back from it could
-            // turn an ambiguous ("UNKNOWN_OUTCOME") description into EXECUTED.
-            if (actuatorOutput !== null && typeof actuatorOutput === "object") {
-                const outcomeDescriptor = Object.getOwnPropertyDescriptor(actuatorOutput, "outcome");
-                if (outcomeDescriptor) {
-                    if (!Object.prototype.hasOwnProperty.call(outcomeDescriptor, "value")) {
-                        throw fail3(REASONS3.ACTUATOR_MALFORMED_RESULT, "actuator outcome must be a data property");
-                    }
-                    outputOutcome = outcomeDescriptor.value;
-                }
+            // Read the outcome from the RAW output before sanitizing: the
+            // sanitized copy silently drops accessor, inherited and non-plain
+            // descriptions, so reading the outcome back from it could turn an
+            // ambiguous ("UNKNOWN_OUTCOME") description into EXECUTED.
+            outputOutcome = readActuatorOutcome3(actuatorOutput);
+            if (outputOutcome === UNSUPPORTED_OUTCOME3) {
+                throw fail3(REASONS3.ACTUATOR_MALFORMED_RESULT, "actuator outcome description is unsupported");
             }
             sanitizedOutput = sanitizeActuatorOutput3(actuatorOutput);
         } catch (e) {

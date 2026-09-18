@@ -353,8 +353,36 @@ test("L4 postcondition verifier receives no command-channel report", async () =>
     assert.equal((await adapter.execute(gatedRequest({ move: 1 }, "independent-1"))).outcome, OUTCOME.UNVERIFIED);
     now = 51;
     observation = true;
-    assert.equal((await adapter.execute(gatedRequest({ move: 1 }, "independent-2"))).verified, true);
+    assert.equal((await adapter.execute(gatedRequest({ move: 1 }, "independent-2"))).postconditionVerified, true);
     assert.equal(calls, 2);
+});
+
+test("L4 an unreadable driver outcome fails closed instead of executing", async () => {
+    const descriptor = validateEffectorDescriptor(physicalDescriptor({ hazardClass: "NONE" }));
+    let now = 0;
+    let report;
+    const adapter = createTestEffectorAdapter({ descriptor, audit: auditSink(), now: () => now, invoke: async () => report });
+    const run = async (next) => {
+        now += 51;
+        report = next;
+        return adapter.execute(gatedRequest({ move: 1 }, `unreadable-${now}`));
+    };
+    // Own accessor, inherited description, and Proxy reports cannot be read as
+    // command-channel data, so they are UNKNOWN_OUTCOME rather than EXECUTED.
+    class Inherited { get outcome() { return OUTCOME.UNKNOWN_OUTCOME; } }
+    for (const unreadable of [
+        { get outcome() { return OUTCOME.UNKNOWN_OUTCOME; } },
+        new Inherited(),
+        new Proxy({ outcome: OUTCOME.UNKNOWN_OUTCOME }, {})
+    ]) {
+        const result = await run(unreadable);
+        assert.equal(result.outcome, OUTCOME.UNKNOWN_OUTCOME);
+        assert.equal(result.reason, "TRANSPORT_UNREADABLE");
+    }
+    // A readable own data property is still honoured: a clean driver is
+    // unaffected by the unreadable-report rule.
+    assert.equal((await run({ outcome: "OK" })).outcome, OUTCOME.EXECUTED);
+    assert.equal((await run("sent")).outcome, OUTCOME.EXECUTED);
 });
 
 test("L4 deadman heartbeat loss latches stop and invokes safe-stop once", () => {
@@ -434,6 +462,19 @@ test("L4 canonical actuator result maps explicit refusal to canonical FAILED", a
     assert.equal(result.actuatorReport.outcome, OUTCOME.REFUSED);
 });
 
+async function dispatchRawActuatorReport(invoke) {
+    const h = await makeActuationHarness({ scopeBindings: { "motion.arm": { move: () => ["arm.left"] } } });
+    const cap = await h.lane2.registerCapability({ id: "motion.arm", operations: ["move"] });
+    await h.lane2.registry.observeAvailability("motion.arm", "AVAILABLE", { generation: 1, incarnationId: cap.incarnationId });
+    await h.lane2.grantAuthority({ capabilityId: "motion.arm", subject: "alice", actions: ["move"], identityBinding: { principals: ["alice"] } });
+    h.registerActuator({
+        capabilityId: "motion.arm", operations: ["move"], capabilityIncarnationId: cap.incarnationId,
+        actuatorId: "arm.left", invoke
+    });
+    const intent = h.lane2.admit(JSON.stringify({ schemaVersion: 1, capabilityId: "motion.arm", operation: "move", arguments: {} }));
+    return h.execute({ intent, authSession: h.lane2.session("alice"), parameters: { move: 2 } });
+}
+
 async function dispatchWithActuatorReport(report) {
     const h = await makeActuationHarness({ scopeBindings: { "motion.arm": { move: () => ["arm.left"] } } });
     const cap = await h.lane2.registerCapability({ id: "motion.arm", operations: ["move"] });
@@ -468,19 +509,20 @@ test("L4 ambiguous physical outcome never becomes EXECUTED at the canonical disp
     assert.equal(result.actuatorReport.outcome, OUTCOME.UNKNOWN_OUTCOME);
 });
 
-test("L4 an accessor-described outcome is unsupported and cannot become EXECUTED", async () => {
-    const h = await makeActuationHarness({ scopeBindings: { "motion.arm": { move: () => ["arm.left"] } } });
-    const cap = await h.lane2.registerCapability({ id: "motion.arm", operations: ["move"] });
-    await h.lane2.registry.observeAvailability("motion.arm", "AVAILABLE", { generation: 1, incarnationId: cap.incarnationId });
-    await h.lane2.grantAuthority({ capabilityId: "motion.arm", subject: "alice", actions: ["move"], identityBinding: { principals: ["alice"] } });
-    h.registerActuator({
-        capabilityId: "motion.arm", operations: ["move"], capabilityIncarnationId: cap.incarnationId,
-        actuatorId: "arm.left", invoke: () => ({ get outcome() { return OUTCOME.UNKNOWN_OUTCOME; } })
-    });
-    const intent = h.lane2.admit(JSON.stringify({ schemaVersion: 1, capabilityId: "motion.arm", operation: "move", arguments: {} }));
-    const result = await h.execute({ intent, authSession: h.lane2.session("alice"), parameters: { move: 2 } });
-    assert.equal(result.state, "FAILED");
-    assert.equal(result.failureReason, "ACTUATOR_REJECTED_INVOCATION");
+test("L4 an unreadable actuator outcome is unsupported and cannot become EXECUTED", async () => {
+    class Inherited { get outcome() { return OUTCOME.UNKNOWN_OUTCOME; } }
+    for (const unreadable of [
+        () => ({ get outcome() { return OUTCOME.UNKNOWN_OUTCOME; } }),
+        () => new Inherited(),
+        () => new Proxy({ outcome: OUTCOME.UNKNOWN_OUTCOME }, {})
+    ]) {
+        const result = await dispatchRawActuatorReport(unreadable);
+        assert.equal(result.state, "FAILED");
+        assert.equal(result.failureReason, "ACTUATOR_REJECTED_INVOCATION");
+    }
+    // A readable own data property is still honoured at the dispatcher.
+    assert.equal((await dispatchRawActuatorReport(() => ({ outcome: OUTCOME.UNKNOWN_OUTCOME }))).state, "FAILED");
+    assert.equal((await dispatchRawActuatorReport(() => ({ ok: true }))).state, "EXECUTED");
 });
 
 test("L4 audit clock failure is contained and blocks transport", async () => {

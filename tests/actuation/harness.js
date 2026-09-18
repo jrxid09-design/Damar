@@ -60,6 +60,24 @@ function isPlainObject(v) {
     return proto === Object.prototype || proto === null;
 }
 
+const isProxyValue = require("node:util").types.isProxy.bind(require("node:util").types);
+
+// Mirrors the bootstrap dispatcher: the actuator's own outcome description is
+// read from the RAW report, and only an own DATA property of a non-Proxy object
+// is trusted -- an accessor, an inherited description or a Proxy fails closed
+// instead of falling through to EXECUTED.
+const UNSUPPORTED_OUTCOME = Symbol("unsupported-actuator-outcome");
+function readActuatorOutcome(value) {
+    if (value === null || typeof value !== "object") return undefined;
+    if (isProxyValue(value)) return UNSUPPORTED_OUTCOME;
+    if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
+        if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return UNSUPPORTED_OUTCOME;
+        return descriptor.value;
+    }
+    return Reflect.has(value, "outcome") ? UNSUPPORTED_OUTCOME : undefined;
+}
+
 function deepFreeze(obj) {
     if (obj !== null && typeof obj === "object") {
         for (const key of Object.getOwnPropertyNames(obj)) deepFreeze(obj[key]);
@@ -707,15 +725,8 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
         let sanitizedOutput;
         let outputOutcome;
         try {
-            if (actuatorOutput !== null && typeof actuatorOutput === "object") {
-                const outcomeDescriptor = Object.getOwnPropertyDescriptor(actuatorOutput, "outcome");
-                if (outcomeDescriptor) {
-                    if (!Object.prototype.hasOwnProperty.call(outcomeDescriptor, "value")) {
-                        throw new Error("actuator outcome must be a data property");
-                    }
-                    outputOutcome = outcomeDescriptor.value;
-                }
-            }
+            outputOutcome = readActuatorOutcome(actuatorOutput);
+            if (outputOutcome === UNSUPPORTED_OUTCOME) throw new Error("actuator outcome description is unsupported");
             sanitizedOutput = sanitizeActuatorOutput(actuatorOutput);
         } catch {
             lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());

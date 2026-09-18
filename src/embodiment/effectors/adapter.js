@@ -21,6 +21,22 @@ function isLedgerAcknowledgment(value, expectedEventType) {
         source.value === "embodiment.effector" && Number.isSafeInteger(sequence.value));
 }
 
+// The driver's own outcome description, read from the RAW report. Only an own
+// DATA property of a non-Proxy object is readable; an accessor, an inherited
+// description or a Proxy is `unreadable`, and the caller must fail closed as
+// UNKNOWN_OUTCOME rather than let an ambiguous physical outcome fall through
+// to EXECUTED.
+function readReportOutcome(value) {
+    if (value === null || typeof value !== "object") return { value: undefined };
+    if (isProxy(value)) return { unreadable: true };
+    if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
+        if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return { unreadable: true };
+        return { value: descriptor.value };
+    }
+    return Reflect.has(value, "outcome") ? { unreadable: true } : { value: undefined };
+}
+
 // This is a leaf adapter primitive, not a dispatcher or registration surface.
 // The execution function is intended only as a binding in the private
 // actuator registry in bootstrap.js; W8-IW1 owns concrete registrations.
@@ -163,13 +179,12 @@ function createEffectorAdapter({ descriptor, invoke, audit, isCanonicalRequest, 
                 note("command-result", safeRequest, OUTCOME.UNKNOWN_OUTCOME);
                 return Object.freeze({ outcome: OUTCOME.UNKNOWN_OUTCOME, reason: "TRANSPORT_FAILURE" });
             }
-            let transportOutcome;
-            if (report && typeof report === "object" && !isProxy(report)) {
-                const outcomeDescriptor = Object.getOwnPropertyDescriptor(report, "outcome");
-                if (outcomeDescriptor && Object.prototype.hasOwnProperty.call(outcomeDescriptor, "value")) {
-                    transportOutcome = outcomeDescriptor.value;
-                }
+            const transport = readReportOutcome(report);
+            if (transport.unreadable) {
+                note("command-result", safeRequest, OUTCOME.UNKNOWN_OUTCOME);
+                return Object.freeze({ outcome: OUTCOME.UNKNOWN_OUTCOME, reason: "TRANSPORT_UNREADABLE" });
             }
+            const transportOutcome = transport.value;
             if (transportOutcome === OUTCOME.REFUSED || transportOutcome === OUTCOME.STOPPED || transportOutcome === OUTCOME.UNKNOWN_OUTCOME) {
                 note("command-result", safeRequest, transportOutcome);
                 return Object.freeze({
@@ -194,7 +209,11 @@ function createEffectorAdapter({ descriptor, invoke, audit, isCanonicalRequest, 
             }
             consecutiveUnverified = 0;
             if (!note("command-result", safeRequest, OUTCOME.EXECUTED)) return Object.freeze({ outcome: OUTCOME.UNKNOWN_OUTCOME, reason: "AUDIT_UNAVAILABLE" });
-            return Object.freeze({ outcome: OUTCOME.EXECUTED, report, verified: true });
+            // Deliberately NOT named `verified`: the canonical ExecutionResult's
+            // `verified`/`verificationClaim` belong to the separate Lane 3/4
+            // verification owner and must never be readable from an effector's
+            // own command-channel report (EM-12 / EM-A9).
+            return Object.freeze({ outcome: OUTCOME.EXECUTED, report, postconditionVerified: true });
         } finally {
             state.inFlight = false;
         }
