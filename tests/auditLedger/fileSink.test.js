@@ -22,6 +22,7 @@ const {
     LedgerError,
     LEDGER_ERROR_CODES
 } = require("../../src/runtime/auditLedger");
+const { canonicalJson } = require("../../src/runtime/auditLedger/canonicalJson");
 
 function tmpDir() {
     return fs.mkdtempSync(path.join(os.tmpdir(), "audit-filesink-"));
@@ -51,6 +52,104 @@ test("durable event survives restart and is read back identically", () => {
     assert.equal(records[1].eventType, "trust.proof.failed");
     sink2.close();
     fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("same-process second writer is rejected and failed construction releases both locks", () => {
+    const dir = tmpDir();
+    const file = path.join(dir, "audit.jsonl");
+    const first = createFileAuditSink(file);
+    assert.throws(() => createFileAuditSink(file), /already owned/);
+    first.close();
+
+    // A directory at the journal path forces readFileSync to fail after the
+    // lock has been acquired. Construction must release the filesystem lock
+    // and the in-process ownership entry on this path.
+    const badFile = path.join(dir, "is-a-directory");
+    fs.mkdirSync(badFile);
+    assert.throws(() => createFileAuditSink(badFile));
+    assert.equal(fs.existsSync(`${badFile}.lock`), false);
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("post-load JSON tampering cannot alter journal bytes or restart parsing", () => {
+    const dir = tmpDir();
+    const file = path.join(dir, "audit.jsonl");
+    const realStringify = JSON.stringify;
+    const realParse = JSON.parse;
+    try {
+        JSON.stringify = () => "not-json";
+        JSON.parse = () => { throw new Error("tampered parse"); };
+        const sink = createFileAuditSink(file);
+        const ledger = makeLedger(sink);
+        ledger.append({ eventType: "a.b", source: "test" }, { durable: true });
+        sink.close();
+    } finally {
+        JSON.stringify = realStringify;
+        JSON.parse = realParse;
+    }
+    const reopened = createFileAuditSink(file);
+    assert.equal(reopened.describeDurable().corrupt, false);
+    assert.equal(reopened.readAll().length, 1);
+    reopened.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("dead-owner lock is reclaimed and released cleanly", () => {
+    const dir = tmpDir();
+    const file = path.join(dir, "audit.jsonl");
+    fs.writeFileSync(`${file}.lock`, JSON.stringify({ v: 1, pid: 2147483647, acquiredAtMs: 1 }));
+    const sink = createFileAuditSink(file);
+    assert.equal(sink.describeDurable().corrupt, false);
+    sink.close();
+    assert.equal(fs.existsSync(`${file}.lock`), false);
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("canonical JSON is stable after mutable array and collection methods are replaced", () => {
+    const originals = {
+        map: Array.prototype.map, join: Array.prototype.join, sort: Array.prototype.sort,
+        setHas: Set.prototype.has, weakHas: WeakSet.prototype.has,
+        weakAdd: WeakSet.prototype.add, weakDelete: WeakSet.prototype.delete,
+        iterator: Array.prototype[Symbol.iterator]
+    };
+    let serialized;
+    try {
+        Array.prototype.map = () => [];
+        Array.prototype.join = () => "forged";
+        Array.prototype.sort = () => [];
+        Set.prototype.has = () => false;
+        WeakSet.prototype.has = () => false;
+        WeakSet.prototype.add = () => { throw new Error("tampered add"); };
+        WeakSet.prototype.delete = () => false;
+        Array.prototype[Symbol.iterator] = function* () {};
+        serialized = canonicalJson({ z: [1], a: "ok" });
+    } finally {
+        Array.prototype.map = originals.map;
+        Array.prototype.join = originals.join;
+        Array.prototype.sort = originals.sort;
+        Set.prototype.has = originals.setHas;
+        WeakSet.prototype.has = originals.weakHas;
+        WeakSet.prototype.add = originals.weakAdd;
+        WeakSet.prototype.delete = originals.weakDelete;
+        Array.prototype[Symbol.iterator] = originals.iterator;
+    }
+    assert.equal(serialized, '{"a":"ok","z":[1]}');
+    assert.throws(() => canonicalJson({ constructor: "blocked" }), /forbidden object key/);
+    assert.throws(() => canonicalJson([,]), /sparse arrays/);
+    let getterCalls = 0;
+    assert.throws(() => canonicalJson({ get value() { getterCalls += 1; return 1; } }), /accessor object key/);
+    assert.equal(getterCalls, 0);
+    let proxyTraps = 0;
+    const proxy = new Proxy({}, { ownKeys() { proxyTraps += 1; return []; } });
+    assert.throws(() => canonicalJson(proxy), /Proxy/);
+    assert.equal(proxyTraps, 0);
+    let optionGetterCalls = 0;
+    const options = Object.defineProperty({}, "maxDepth", {
+        get() { optionGetterCalls += 1; return Infinity; }
+    });
+    assert.throws(() => canonicalJson({}, options), /data property/);
+    assert.equal(optionGetterCalls, 0);
+    assert.throws(() => canonicalJson({}, { maxDepth: Infinity }), /safe integer/);
 });
 
 test("sequence is strictly increasing and continues across restart", () => {

@@ -30,7 +30,7 @@
  *               untouched by this integration pass (see freeze evidence).
  */
 
-const { MODES, BOUNDS } = require("./bounds");
+const { BOUNDS } = require("./bounds");
 const { laws } = require("./laws");
 const { createSelfModel } = require("../selfmodel");
 const { createWorldModel } = require("../worldmodel");
@@ -38,29 +38,24 @@ const { createGoalEngine } = require("../goals");
 const { createProspectiveMemory } = require("../prospective");
 const { createAttentionEconomy } = require("../attention");
 const { createMetacognition } = require("../metacog");
-
-const AUTHORITY_SHAPED_KEYS = Object.freeze([
-    "authorityDecision", "allow", "grant", "owner", "authProof",
-    "capabilityGrant", "executionLease", "executor", "route", "trustedNode", "rootAuthority"
-]);
+// FG-03: MODES/AUTHORITY_SHAPED_KEYS/assertNoAuthorityShapedFields/
+// resolveMode/isInfluenceAllowed now live in src/cognition/governed/**
+// (the canonical, reusable governed-mode foundation) -- longhorizon was
+// their first producer and is now just their first consumer, so no
+// behavior changes here, only the ownership of these guarantees.
+const {
+    AUTHORITY_SHAPED_KEYS, assertNoAuthorityShapedFields, resolveMode, isInfluenceAllowed,
+    recordModeTransition, recordModeTransitionChecked
+} = require("../governed");
 
 const BELIEF_RANK = Object.freeze({ USABLE: 3, DEGRADED: 2, UNUSABLE: 1, UNKNOWN: 0 });
 
-function assertNoAuthorityShapedFields(value, label) {
-    if (!value || typeof value !== "object") return;
-    for (const key of AUTHORITY_SHAPED_KEYS) {
-        if (Object.prototype.hasOwnProperty.call(value, key)) {
-            throw new Error(`ACC longhorizon: ${label} tidak boleh membawa field '${key}'`);
-        }
-    }
-}
-
 async function createLongHorizonCycle({
     mode = "off", capabilityRegistry, clock = { nowMs: () => Date.now() },
-    stores = {}, auditLedger = null, bounds = BOUNDS
+    stores = {}, auditLedger = null, bounds = BOUNDS, requireAudit = false
 } = {}) {
 
-    if (!MODES.includes(mode)) mode = "off";
+    mode = resolveMode(mode);
 
     if (mode === "off") {
         // GATE-W7-10: OFF => nothing is even constructed. Zero footprint.
@@ -104,6 +99,69 @@ async function createLongHorizonCycle({
         }
         return Number.isFinite(candidate) ? candidate : Date.now();
     }
+    // TRANSITION RECORDING IS SCOPED TO GOVERNED, and that scoping is a
+    // deliberate, documented boundary rather than an omission:
+    //
+    //  - ADR-17's "mode gate" is the gate that governs DECISION INFLUENCE.
+    //    `isInfluenceAllowed` is true only for governed; shadow is
+    //    decisionInfluence:false ALWAYS by contract, so an unrecorded shadow
+    //    initialization cannot influence any decision. Governed -- the one mode
+    //    that permits ADVISORY_ONLY influence -- is the transition whose
+    //    recording is safety-relevant, and it is recorded fail-closed below.
+    //  - Recording shadow into the caller-supplied ledger additionally violates
+    //    the frozen W7-L7 per-cycle audit cap contract (its "audit ledger tidak
+    //    boleh menerima lebih dari MAX_AUDIT_EVENTS_PER_CYCLE event per siklus"
+    //    assertion counts every append into that ledger, so a construction-time
+    //    event becomes a third entry against a cap of two). Recording shadow
+    //    would therefore require weakening a frozen Wave7 contract test, which
+    //    is explicitly out of bounds.
+    //
+    // NO LEDGER IS MANUFACTURED HERE. An earlier revision created its own
+    // `createAuditLedger()` and called it "canonical"; that was wrong on two
+    // counts (audit of 9e7b8df): a fresh sinkless in-memory ledger per
+    // construction is disposable and shares nothing with the durable ledger the
+    // runtime and `ownerTrustComposition` actually own, and manufacturing an
+    // authority-adjacent record sink inside a cognition lane is exactly the
+    // ownership creep FG-03 must not do. The ledger is BOUND BY THE CALLER --
+    // `canonicalRuntimeComposition` supplies the canonical one -- so governed
+    // either records into a real sink or honestly reports that it could not.
+    if (mode === "governed") {
+        const transition = recordModeTransitionChecked({
+            auditLedger: auditLedger == null ? null : auditLedger,
+            from: "off", to: mode, at: safeNowMs()
+        });
+
+        // FAIL-CLOSED (audits of 0b8abb7 / 9e7b8df): a ledger that was SUPPLIED
+        // and did not confirm a durable append means the required audited
+        // transition did not happen. Proceeding into an unaudited GOVERNED mode
+        // would be exactly the fail-open transition ADR-17 forbids, so the mode
+        // degrades to "off" -- with no lane constructed, mirroring "off".
+        //
+        // `requireAudit: false` (the default) keeps the Wave7 L7 convergence
+        // contract's `mode: "governed"` construction with no ledger intact --
+        // that is a DECLARED configuration (auditSupplied:false), not a
+        // silent failure. The PRODUCTION runtime passes `requireAudit: true`,
+        // which additionally refuses to start governed with NO ledger at all:
+        // resolving a null ledger was otherwise indistinguishable from success,
+        // so governed could start with no canonical durable record even after
+        // the sinkless fallback was removed (audit of 406553b).
+        //
+        // Normalisasi GAGAL-TUTUP: `requireAudit === true` membuat nilai
+        // truthy yang salah bentuk (mis. `1` atau "true") justru MEMATIKAN
+        // persyaratannya -- kebalikan dari yang dimaksudkan pemanggil (audit
+        // 7677a0f). Sekarang setiap nilai truthy menuntut audit, sehingga
+        // konfigurasi yang salah bentuk tidak pernah melemahkan penjaga ini.
+        const auditRequired = Boolean(requireAudit);
+        if (transition.failedOpen || (auditRequired && auditLedger == null)) {
+            return Object.freeze({
+                schemaVersion: require("./bounds").SCHEMA_VERSION,
+                mode: "off", laws,
+                auditUnavailable: true,
+                async cycle() { return null; }
+            });
+        }
+    }
+
     const selfModel = await createSelfModel({ capabilityRegistry, clock, store: storeFor("selfmodel") });
     const worldModel = await createWorldModel({ clock, store: storeFor("worldmodel") });
     const goals = await createGoalEngine({ clock, store: storeFor("goals") });
@@ -214,7 +272,7 @@ async function createLongHorizonCycle({
         const contradictions = worldModel.openContradictions();
 
         const result = {
-            mode, decisionInfluence: mode === "shadow" ? false : "ADVISORY_ONLY",
+            mode, decisionInfluence: isInfluenceAllowed(mode) ? "ADVISORY_ONLY" : false,
             auditEvents, remindersFired: reminders.length, openContradictions: contradictions.length
         };
 
