@@ -353,6 +353,7 @@ function createFileAuditSink(filePath, options = {}) {
     // closed for manual inspection.  Age alone is never a reason to steal.
     const lockPath = `${filePath}.lock`;
     let lockHeld = false;
+    let lockCleanupPending = false;
     // Kunci registry dalam-proses: eksklusivitas deterministik untuk jalur
     // single-process yang dijanjikan kontrak (lihat OWNED_PATHS).
     const ownershipKey = PATH_RESOLVE(filePath);
@@ -407,6 +408,7 @@ function createFileAuditSink(filePath, options = {}) {
         // "wx" = O_CREAT|O_EXCL|O_WRONLY: fails if the lock already exists.
         const fd = F.openSync(lockPath, "wx");
         lockHeld = true;
+        lockCleanupPending = true;
         try { writeLockContent(fd); } finally { F.closeSync(fd); }
     } catch (error) {
         if (error && (error.code === "EEXIST" || error.code === "EPERM" || error.code === "EACCES")) {
@@ -417,6 +419,7 @@ function createFileAuditSink(filePath, options = {}) {
                 try {
                     const fd = F.openSync(lockPath, "wx");
                     lockHeld = true;
+                    lockCleanupPending = true;
                     try { writeLockContent(fd); } finally { F.closeSync(fd); }
                 } catch (retryError) {
                     if (retryError && (retryError.code === "EEXIST" || retryError.code === "EPERM" || retryError.code === "EACCES")) {
@@ -450,6 +453,7 @@ function createFileAuditSink(filePath, options = {}) {
                     abortAcquisition(failOwned());
                 }
                 lockHeld = true;
+                lockCleanupPending = true;
             }
         } else {
             abortAcquisition(failPersist(`audit sink lock acquisition failed: ${error.message}`));
@@ -466,9 +470,10 @@ function createFileAuditSink(filePath, options = {}) {
         OWNED_PATHS.delete(ownershipKey);
         // Ownership-checked unlink: never delete a foreign lock.
         const current = readLockFile();
-        if (current.present && current.valid && current.pid === PROC.pid) {
+        if (current.present && ((current.valid && current.pid === PROC.pid) || lockCleanupPending)) {
             try { F.unlinkSync(lockPath); } catch { /* best-effort */ }
         }
+        lockCleanupPending = false;
     }
 
     // ---- load + verify existing tail (restart continuation) ----------
@@ -495,6 +500,7 @@ function createFileAuditSink(filePath, options = {}) {
         releaseLock();
         throw error;
     }
+    lockCleanupPending = false;
 
     // In-process write queue: appends never interleave mid-line.
     let writing = false;

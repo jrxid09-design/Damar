@@ -22,6 +22,7 @@ const {
     LedgerError,
     LEDGER_ERROR_CODES
 } = require("../../src/runtime/auditLedger");
+const { canonicalJson } = require("../../src/runtime/auditLedger/canonicalJson");
 
 function tmpDir() {
     return fs.mkdtempSync(path.join(os.tmpdir(), "audit-filesink-"));
@@ -102,6 +103,35 @@ test("dead-owner lock is reclaimed and released cleanly", () => {
     sink.close();
     assert.equal(fs.existsSync(`${file}.lock`), false);
     fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("canonical JSON is stable after mutable array and collection methods are replaced", () => {
+    const originals = {
+        map: Array.prototype.map, join: Array.prototype.join, sort: Array.prototype.sort,
+        setHas: Set.prototype.has, weakHas: WeakSet.prototype.has,
+        weakAdd: WeakSet.prototype.add, weakDelete: WeakSet.prototype.delete
+    };
+    let serialized;
+    try {
+        Array.prototype.map = () => [];
+        Array.prototype.join = () => "forged";
+        Array.prototype.sort = () => [];
+        Set.prototype.has = () => false;
+        WeakSet.prototype.has = () => false;
+        WeakSet.prototype.add = () => { throw new Error("tampered add"); };
+        WeakSet.prototype.delete = () => false;
+        serialized = canonicalJson({ z: [1], a: "ok" });
+    } finally {
+        Array.prototype.map = originals.map;
+        Array.prototype.join = originals.join;
+        Array.prototype.sort = originals.sort;
+        Set.prototype.has = originals.setHas;
+        WeakSet.prototype.has = originals.weakHas;
+        WeakSet.prototype.add = originals.weakAdd;
+        WeakSet.prototype.delete = originals.weakDelete;
+    }
+    assert.equal(serialized, '{"a":"ok","z":[1]}');
+    assert.throws(() => canonicalJson({ constructor: "blocked" }), /forbidden object key/);
 });
 
 test("sequence is strictly increasing and continues across restart", () => {

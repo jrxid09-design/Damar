@@ -34,6 +34,17 @@ const OBJECT_IS = Object.is;
 const ARRAY_IS_ARRAY = Array.isArray;
 const WEAKSET = WeakSet;
 const STRINGIFY_REFLECT_APPLY = Reflect.apply;
+const ARRAY_MAP = Array.prototype.map;
+const ARRAY_JOIN = Array.prototype.join;
+const ARRAY_SORT = Array.prototype.sort;
+const SET_HAS = Set.prototype.has;
+const WEAKSET_HAS = WeakSet.prototype.has;
+const WEAKSET_ADD = WeakSet.prototype.add;
+const WEAKSET_DELETE = WeakSet.prototype.delete;
+
+function applyIntrinsic(fn, receiver, args) {
+    return STRINGIFY_REFLECT_APPLY(fn, receiver, args);
+}
 
 function stringify(value) {
     return STRINGIFY_REFLECT_APPLY(JSON_STRINGIFY, JSON, [value]);
@@ -82,28 +93,28 @@ function canonicalizeValue(value, ancestors, depth, maxDepth) {
     if (value === null) return "null";
 
     if (ARRAY_IS_ARRAY(value)) {
-        if (ancestors.has(value)) {
+        if (applyIntrinsic(WEAKSET_HAS, ancestors, [value])) {
             throw new CanonicalizationError("circular reference detected");
         }
-        ancestors.add(value);
-        const parts = value.map((item) => canonicalizeValue(item, ancestors, depth + 1, maxDepth));
-        ancestors.delete(value);
-        return `[${parts.join(",")}]`;
+        applyIntrinsic(WEAKSET_ADD, ancestors, [value]);
+        const parts = applyIntrinsic(ARRAY_MAP, value, [(item) => canonicalizeValue(item, ancestors, depth + 1, maxDepth)]);
+        applyIntrinsic(WEAKSET_DELETE, ancestors, [value]);
+        return `[${applyIntrinsic(ARRAY_JOIN, parts, [","])}]`;
     }
 
     if (!isPlainObject(value)) {
         throw new CanonicalizationError("non-plain object");
     }
 
-    if (ancestors.has(value)) {
+    if (applyIntrinsic(WEAKSET_HAS, ancestors, [value])) {
         throw new CanonicalizationError("circular reference detected");
     }
-    ancestors.add(value);
+    applyIntrinsic(WEAKSET_ADD, ancestors, [value]);
 
-    const names = OBJECT_GET_OWN_PROPERTY_NAMES(value).sort();
+    const names = applyIntrinsic(ARRAY_SORT, OBJECT_GET_OWN_PROPERTY_NAMES(value), []);
     const parts = [];
     for (const name of names) {
-        if (FORBIDDEN_KEYS.has(name)) {
+        if (applyIntrinsic(SET_HAS, FORBIDDEN_KEYS, [name])) {
             throw new CanonicalizationError(`forbidden object key: "${name}"`);
         }
         const raw = value[name];
@@ -113,8 +124,8 @@ function canonicalizeValue(value, ancestors, depth, maxDepth) {
         parts.push(`${stringify(name)}:${canonicalizeValue(raw, ancestors, depth + 1, maxDepth)}`);
     }
 
-    ancestors.delete(value);
-    return `{${parts.join(",")}}`;
+    applyIntrinsic(WEAKSET_DELETE, ancestors, [value]);
+    return `{${applyIntrinsic(ARRAY_JOIN, parts, [","])}}`;
 }
 
 /** Serialize to canonical JSON string. */
