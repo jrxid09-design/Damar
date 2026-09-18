@@ -1167,11 +1167,14 @@ function sanitizeActuatorOutput3(value) {
         if (t === "boolean") return v;
         if (t === "number") return Number.isFinite(v) ? v : null;
         if (t === "bigint" || t === "symbol" || t === "undefined" || t === "function") return null;
+        // A Proxy is never trustworthy actuator output: reflecting on one can
+        // run hostile traps (getPrototypeOf/getOwnPropertyNames), and such a
+        // throw must not escape the canonical failure path.
+        if (isProxy3(v)) return null;
         if (v instanceof Error) {
             return { name: String(v.name ?? "Error").slice(0, 64), message: String(v.message ?? "").slice(0, RESULT_STRING_CHARS3) };
         }
-        if (!actuationIsPlainObject3(v) && !Array.isArray(v)) return null;
-        if (state.path.has(v)) return null;
+        if (!actuationIsPlainObject3(v) && !Array.isArray(v)) return null;        if (state.path.has(v)) return null;
         state.path.add(v);
         if (Array.isArray(v)) {
             const out = v.slice(0, 256).map((x) => walk(x, depth + 1));
@@ -1203,14 +1206,20 @@ function sanitizeActuatorOutput3(value) {
 // ambiguous physical outcome ("UNKNOWN_OUTCOME") into EXECUTED.
 const UNSUPPORTED_OUTCOME3 = Symbol("unsupported-actuator-outcome");
 function readActuatorOutcome3(value) {
-    if (value === null || (typeof value !== "object" && typeof value !== "function")) return undefined;
-    if (isProxy3(value)) return UNSUPPORTED_OUTCOME3;
-    if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
-        const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
-        if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return UNSUPPORTED_OUTCOME3;
-        return descriptor.value;
+    try {
+        if (value === null || (typeof value !== "object" && typeof value !== "function")) return undefined;
+        if (isProxy3(value)) return UNSUPPORTED_OUTCOME3;
+        if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
+            const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
+            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return UNSUPPORTED_OUTCOME3;
+            return descriptor.value;
+        }
+        return Reflect.has(value, "outcome") ? UNSUPPORTED_OUTCOME3 : undefined;
+    } catch {
+        // A description that throws while being read (hostile prototype trap)
+        // is unsupported, never "no outcome was described".
+        return UNSUPPORTED_OUTCOME3;
     }
-    return Reflect.has(value, "outcome") ? UNSUPPORTED_OUTCOME3 : undefined;
 }
 
 // ---- PRIVILEGED: result/evidence builders (closure-private) ----------------
@@ -1685,17 +1694,27 @@ function composeDispatcher3({
         let cancelledDuringDispatch = false;
         let invocationCount = 0;
 
+        // The actuator receives a FROZEN, brand-recognized GATED request on its
+        // first argument: it is a derived artifact of the authorized request,
+        // produced only here, and downstream can verify it the same way it
+        // verifies a canonical ExecutionRequest. The full ExecutionRequest --
+        // including capabilityIncarnationId, authorityGeneration and metadata --
+        // stays on the second argument, so an effector can bind the gated view
+        // back to the artifact the dispatcher actually authorized.
+        const gatedRequest = deepFreeze3({
+            executionId: request.executionId,
+            intentId: request.intentId,
+            capabilityId: request.capabilityId,
+            operation: request.operation,
+            principal: request.principal,
+            scope: request.scope,
+            parameters: request.parameters
+        });
+        requestBrandSet3.add(gatedRequest);
+
         const execPromise = (async () => {
             invocationCount++;
-            return await binding.invoke({
-                executionId: request.executionId,
-                intentId: request.intentId,
-                capabilityId: request.capabilityId,
-                operation: request.operation,
-                principal: request.principal,
-                scope: request.scope,
-                parameters: request.parameters
-            }, request);
+            return await binding.invoke(gatedRequest, request);
         })();
 
         let timeoutHandle = null;
@@ -1749,7 +1768,11 @@ function composeDispatcher3({
 
         if (dispatchFailed) {
             lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
-            const sanitized = sanitizeActuatorOutput3(dispatchFailed);
+            // A thrown value is attacker-shaped input: it must never be able to
+            // throw again out of the canonical failure path (a rejected
+            // dispatcher would leave the caller with no canonical result).
+            let sanitized = null;
+            try { sanitized = sanitizeActuatorOutput3(dispatchFailed); } catch { sanitized = null; }
             const result = buildExecutionResult3({
                 executionRequest: request,
                 state: RESULT_STATE3.FAILED,

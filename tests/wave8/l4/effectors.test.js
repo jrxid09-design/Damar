@@ -552,6 +552,48 @@ test("L4 an unreadable actuator outcome is unsupported and cannot become EXECUTE
     assert.equal((await dispatchRawActuatorReport(() => ({ outcome: OUTCOME.UNKNOWN_OUTCOME }))).state, "FAILED");
     assert.equal((await dispatchRawActuatorReport(() => ({ ok: true }))).state, "EXECUTED");});
 
+test("L4 actuator invocation receives a frozen brand-recognized gated request", async () => {
+    const h = await makeActuationHarness({ scopeBindings: { "motion.arm": { move: () => ["arm.left"] } } });
+    const cap = await h.lane2.registerCapability({ id: "motion.arm", operations: ["move"] });
+    await h.lane2.registry.observeAvailability("motion.arm", "AVAILABLE", { generation: 1, incarnationId: cap.incarnationId });
+    await h.lane2.grantAuthority({ capabilityId: "motion.arm", subject: "alice", actions: ["move"], identityBinding: { principals: ["alice"] } });
+    let seen = null;
+    h.registerActuator({
+        capabilityId: "motion.arm", operations: ["move"], capabilityIncarnationId: cap.incarnationId,
+        actuatorId: "arm.left",
+        invoke: (gatedRequest, canonicalRequest) => { seen = { gatedRequest, canonicalRequest }; return { ok: true }; }
+    });
+    const intent = h.lane2.admit(JSON.stringify({ schemaVersion: 1, capabilityId: "motion.arm", operation: "move", arguments: {} }));
+    const result = await h.execute({ intent, authSession: h.lane2.session("alice"), parameters: { move: 2 } });
+    assert.equal(result.state, "EXECUTED");
+    // The first argument is a canonical, frozen, brand-recognized request
+    // context -- not an arbitrary projection an actuator must take on trust.
+    assert.equal(h.isCanonicalExecutionRequest(seen.gatedRequest), true);
+    assert.equal(Object.isFrozen(seen.gatedRequest), true);
+    assert.equal(Reflect.ownKeys(seen.gatedRequest).length, 7);
+    // It is bound to the artifact the dispatcher actually authorized.
+    assert.equal(h.isCanonicalExecutionRequest(seen.canonicalRequest), true);
+    for (const key of ["executionId", "intentId", "capabilityId", "operation", "principal", "scope", "parameters"]) {
+        assert.equal(seen.gatedRequest[key], seen.canonicalRequest[key]);
+    }
+});
+
+test("L4 a hostile thrown actuator value still produces a canonical FAILED result", async () => {
+    const hostileProxy = new Proxy({}, {
+        getPrototypeOf() { throw new Error("prototype trap"); },
+        ownKeys() { throw new Error("ownKeys trap"); },
+        getOwnPropertyNames() { throw new Error("ownPropertyNames trap"); },
+        getOwnPropertyDescriptor() { throw new Error("descriptor trap"); }
+    });
+    const hostilePrototype = Object.create(new Proxy({}, { getPrototypeOf() { throw new Error("proto trap"); } }));
+    for (const thrown of [hostileProxy, hostilePrototype]) {
+        const result = await dispatchRawActuatorReport(() => { throw thrown; });
+        assert.equal(result.state, "FAILED");
+        assert.equal(result.failureReason, "ACTUATOR_REJECTED_INVOCATION");
+        assert.equal(result.actuatorReport, null);
+    }
+});
+
 test("L4 audit clock failure is contained and blocks transport", async () => {
     const descriptor = validateEffectorDescriptor(physicalDescriptor());
     let calls = 0;

@@ -68,14 +68,18 @@ const isProxyValue = require("node:util").types.isProxy.bind(require("node:util"
 // instead of falling through to EXECUTED.
 const UNSUPPORTED_OUTCOME = Symbol("unsupported-actuator-outcome");
 function readActuatorOutcome(value) {
-    if (value === null || (typeof value !== "object" && typeof value !== "function")) return undefined;
-    if (isProxyValue(value)) return UNSUPPORTED_OUTCOME;
-    if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
-        const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
-        if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return UNSUPPORTED_OUTCOME;
-        return descriptor.value;
+    try {
+        if (value === null || (typeof value !== "object" && typeof value !== "function")) return undefined;
+        if (isProxyValue(value)) return UNSUPPORTED_OUTCOME;
+        if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
+            const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
+            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return UNSUPPORTED_OUTCOME;
+            return descriptor.value;
+        }
+        return Reflect.has(value, "outcome") ? UNSUPPORTED_OUTCOME : undefined;
+    } catch {
+        return UNSUPPORTED_OUTCOME;
     }
-    return Reflect.has(value, "outcome") ? UNSUPPORTED_OUTCOME : undefined;
 }
 
 function deepFreeze(obj) {
@@ -237,6 +241,7 @@ function sanitizeActuatorOutput(value) {
         if (t === "boolean") return v;
         if (t === "number") return Number.isFinite(v) ? v : null;
         if (t === "bigint" || t === "symbol" || t === "undefined" || t === "function") return null;
+        if (isProxyValue(v)) return null;
         if (v instanceof Error) return { name: String(v.name ?? "Error").slice(0, 64), message: String(v.message ?? "").slice(0, 1024) };
         if (!isPlainObject(v) && !Array.isArray(v)) return null;
         if (state.path.has(v)) return null;
@@ -646,17 +651,20 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
 
         let cancelledDuringDispatch = false;
         let invocationCount = 0;
+        const gatedRequest = deepFreeze({
+            executionId: request.executionId,
+            intentId: request.intentId,
+            capabilityId: request.capabilityId,
+            operation: request.operation,
+            principal: request.principal,
+            scope: request.scope,
+            parameters: request.parameters
+        });
+        testRequestBrandSet.add(gatedRequest);
+
         const execPromise = (async () => {
             invocationCount++;
-            return await binding.invoke({
-                executionId: request.executionId,
-                intentId: request.intentId,
-                capabilityId: request.capabilityId,
-                operation: request.operation,
-                principal: request.principal,
-                scope: request.scope,
-                parameters: request.parameters
-            }, request);
+            return await binding.invoke(gatedRequest, request);
         })();
 
         let timeoutHandle = null;
@@ -705,7 +713,8 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
 
         if (dispatchFailed) {
             lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());
-            const sanitized = sanitizeActuatorOutput(dispatchFailed);
+            let sanitized = null;
+            try { sanitized = sanitizeActuatorOutput(dispatchFailed); } catch { sanitized = null; }
             const result = buildExecutionResult({
                 executionRequest: request,
                 state: RESULT_STATE.FAILED,
@@ -878,8 +887,10 @@ async function makeActuationHarness({ clock, scopeBindings, authenticate } = {})
         execute: brandedExecute,
         isCanonicalExecutionRequest(value) {
             if (value === null || typeof value !== "object") return false;
-            if (value.schemaVersion !== 1) return false;
-            if (typeof value.executionId !== "string" || value.executionId.length === 0) return false;
+            // Brand membership ONLY, exactly like the production facade: the
+            // dispatcher brands both the canonical ExecutionRequest and the
+            // frozen gated view it hands to an actuator, so a schemaVersion
+            // pre-filter here would reject a genuine canonical artifact.
             return localRequestBrandSet.has(value) || testRequestBrandSet.has(value);
         },
         isCanonicalExecutionResult(value) {
