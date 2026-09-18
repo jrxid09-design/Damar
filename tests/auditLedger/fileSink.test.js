@@ -133,6 +133,13 @@ test("canonical JSON is stable after mutable array and collection methods are re
     assert.equal(serialized, '{"a":"ok","z":[1]}');
     assert.throws(() => canonicalJson({ constructor: "blocked" }), /forbidden object key/);
     assert.throws(() => canonicalJson([,]), /sparse arrays/);
+    let getterCalls = 0;
+    assert.throws(() => canonicalJson({ get value() { getterCalls += 1; return 1; } }), /accessor object key/);
+    assert.equal(getterCalls, 0);
+    let proxyTraps = 0;
+    const proxy = new Proxy({}, { ownKeys() { proxyTraps += 1; return []; } });
+    assert.throws(() => canonicalJson(proxy), /Proxy/);
+    assert.equal(proxyTraps, 0);
 });
 
 test("sequence is strictly increasing and continues across restart", () => {

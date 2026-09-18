@@ -15,6 +15,7 @@
  */
 
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const IS_PROXY = require("node:util").types.isProxy;
 
 /**
  * `JSON.stringify` DIBEKUKAN SAAT MODUL DIMUAT.
@@ -91,6 +92,9 @@ function canonicalizeValue(value, ancestors, depth, maxDepth) {
     }
 
     if (value === null) return "null";
+    if (IS_PROXY(value)) {
+        throw new CanonicalizationError("Proxy values are unsupported");
+    }
 
     if (ARRAY_IS_ARRAY(value)) {
         if (applyIntrinsic(WEAKSET_HAS, ancestors, [value])) {
@@ -125,7 +129,11 @@ function canonicalizeValue(value, ancestors, depth, maxDepth) {
         if (applyIntrinsic(SET_HAS, FORBIDDEN_KEYS, [name])) {
             throw new CanonicalizationError(`forbidden object key: "${name}"`);
         }
-        const raw = value[name];
+        const descriptor = OBJECT_GET_OWN_PROPERTY_DESCRIPTOR(value, name);
+        if (!descriptor || descriptor.get || descriptor.set) {
+            throw new CanonicalizationError(`accessor object key is unsupported: "${name}"`);
+        }
+        const raw = descriptor.value;
         if (raw === undefined) {
             throw new CanonicalizationError(`undefined value for key "${name}"`);
         }
