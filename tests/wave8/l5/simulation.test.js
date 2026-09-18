@@ -376,26 +376,54 @@ test("L5-audit-6: a store exposing real-state writer verbs is rejected WITHOUT r
     assert.equal(ok.simulationColdStart, true);
 });
 
-test("L5-audit-7: an async-rejecting audit sink is contained and never blocks the run", async () => {
+test("L5-audit-7: async audit returns are ignored without touching caller promises", async () => {
     let unhandled = 0;
     const listener = () => { unhandled += 1; };
     process.on("unhandledRejection", listener);
     try {
-        const sim = await createSimulationSandbox({
-            auditLedger: { append: () => Promise.reject(new Error("audit down")) }
+        const rejected = Promise.reject(new Error("caller-owned rejection"));
+        rejected.catch(() => {}); // the sink owns its own rejection lifecycle
+        let thenCalls = 0;
+        const thenable = Object.defineProperty({}, "then", {
+            get() { thenCalls += 1; throw new Error("must not inspect then"); }
         });
-        const result = await sim.startRun({
-            runId: "r1", question: "q", scenario: "s", initialStateRef: { frozen: true },
+        let proxyTraps = 0;
+        const proxy = new Proxy({}, {
+            get() { proxyTraps += 1; throw new Error("must not inspect proxy"); },
+            ownKeys() { proxyTraps += 1; throw new Error("must not inspect proxy"); }
+        });
+        const returns = [true, false, thenable, rejected, proxy];
+        let callCount = 0;
+        const sim = await createSimulationSandbox({
+            auditLedger: { append() { return returns[callCount++ % returns.length]; } }
+        });
+        for (let i = 0; i < returns.length; i += 1) {
+            await sim.startRun({
+                runId: `r${i}`, question: "q", scenario: "s", initialStateRef: { frozen: true },
+                steps: 1, horizonDays: 1, budgetTokens: 10,
+                provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
+            });
+        }
+        assert.equal(sim.runsSize(), returns.length, "return values cannot alter canonical simulation state");
+        await new Promise(r => setImmediate(r));
+        await new Promise(r => setTimeout(r, 30));
+        assert.equal(thenCalls, 0, "thenable result is not inspected or assimilated");
+        assert.equal(proxyTraps, 0, "Proxy result is not inspected");
+        assert.equal(Object.prototype.hasOwnProperty.call(rejected, "constructor"), false,
+            "caller-owned Promise remains unchanged");
+        const throwing = await createSimulationSandbox({
+            auditLedger: { append() { throw new Error("sync audit failure"); } }
+        });
+        const throwingResult = await throwing.startRun({
+            runId: "sync-throw", question: "q", scenario: "s", initialStateRef: { frozen: true },
             steps: 1, horizonDays: 1, budgetTokens: 10,
             provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
         });
-        assert.equal(result.state, "COMPLETE", "audit failure must never block the run");
-        await new Promise(r => setImmediate(r));
-        await new Promise(r => setTimeout(r, 30));
+        assert.equal(throwingResult.state, "COMPLETE", "synchronous audit failure keeps existing best-effort semantics");
     } finally {
         process.removeListener("unhandledRejection", listener);
     }
-    assert.equal(unhandled, 0, "an async-rejecting audit hook must not produce unhandled rejections");
+    assert.equal(unhandled, 0, "Damar must not create an unhandled rejection while ignoring an async result");
 });
 
 test("L5-audit-8: a real-state writer verb hidden up the prototype CHAIN is still rejected", async () => {
@@ -832,10 +860,9 @@ test("L5-audit-19: a field the builder NORMALIZES cannot smuggle a malformed run
     }
 });
 
-test("L5-audit-20: a hostile async thenable on an audit result leaks no unhandled rejection", async () => {
-    // `then.call(...)` returns a value too: a custom async `then` that rejects
-    // returns a rejected promise, and ignoring it made the rejection unhandled
-    // (audit of de9553c).
+test("L5-audit-20: a hostile thenable return is ignored without invoking then", async () => {
+    // Its `then` would create a rejected Promise if called. The lane discards
+    // this unsupported return object and never creates that Promise.
     let unhandled = 0;
     const onUnhandled = () => { unhandled += 1; };
     process.on("unhandledRejection", onUnhandled);
@@ -932,12 +959,9 @@ test("L5-audit-21: a persisted result the builder would NORMALIZE is rejected, n
     assert.equal(sim.getResult("good").confidence, 0.5);
 });
 
-test("L5-audit-22: a throwing `catch` accessor on a thenable's return value leaks no unhandled rejection", async () => {
-    // The previous fix absorbed the value returned by `then` through `.catch`,
-    // which is itself a property lookup on a caller-controlled object -- a
-    // throwing `catch` accessor prevented handler attachment and produced
-    // unhandled rejections (audit of 472b6e0). Absorption now uses the intrinsic
-    // `Promise.prototype.then` via a frozen `Reflect.apply`.
+test("L5-audit-22: a throwing `catch` accessor on a thenable is never inspected", async () => {
+    // Return objects are discarded. Neither their `then` nor `catch` property
+    // is read by the lane.
     let unhandled = 0;
     const onUnhandled = () => { unhandled += 1; };
     process.on("unhandledRejection", onUnhandled);
@@ -965,13 +989,8 @@ test("L5-audit-22: a throwing `catch` accessor on a thenable's return value leak
     }
 });
 
-test("L5-audit-23: a caller `then` is never invoked, so a detached rejection cannot leak", async () => {
-    // The previous fix invoked the caller-supplied `then` and could only absorb
-    // the promise it RETURNED. A `then` that rejects on its own and returns
-    // `undefined` detached that rejection entirely -- observable only as an
-    // `unhandledRejection`, which terminates the process under Node's strict
-    // policy (audit of a9cc5db). Caller `then` is now never executed: only real
-    // promises (via the intrinsic `util.types.isPromise`) are absorbed.
+test("L5-audit-23: a caller `then` is never invoked and cannot alter canonical state", async () => {
+    // Unsupported thenable return values are discarded without property reads.
     let unhandled = 0;
     const onUnhandled = () => { unhandled += 1; };
     process.on("unhandledRejection", onUnhandled);
@@ -1146,34 +1165,45 @@ test("L5-audit-26: a hostile `call` getter on the append function cannot detach 
     }
 });
 
-test("L5-audit-27: a hostile constructor getter on a returned real promise cannot leak its rejection", async () => {
-    // `Promise.prototype.then` reads the promise's `constructor`/`Symbol.species`
-    // to pick the result constructor. A throwing getter there made handler
-    // attachment fail, so the ORIGINAL rejection leaked (audit of 03956b6).
+test("L5 audit boundary does not read or mutate a hostile Promise constructor or species", async () => {
     let unhandled = 0;
     const onUnhandled = () => { unhandled += 1; };
     process.on("unhandledRejection", onUnhandled);
+    const originalSpecies = Object.getOwnPropertyDescriptor(Promise, Symbol.species);
+    let constructorReads = 0;
     try {
         const hostilePromise = Promise.reject(new Error("original-rejection"));
+        hostilePromise.catch(() => {});
         Object.defineProperty(hostilePromise, "constructor", {
-            configurable: true,
-            get() { throw new Error("hostile ctor getter"); }
+            configurable: false,
+            get() { constructorReads += 1; throw new Error("hostile ctor getter"); }
         });
         const sim = await createSimulationSandbox({
             clock: { nowMs: () => 1_000_000 },
             auditLedger: { append: () => hostilePromise },
             bounds: { ...BOUNDS, MAX_TOKENS_PER_HOUR: 100 }
         });
+        let speciesReads = 0;
+        Object.defineProperty(Promise, Symbol.species, {
+            configurable: true,
+            get() { speciesReads += 1; throw new Error("hostile species getter"); }
+        });
         await sim.startRun({
             runId: "r", question: "q", scenario: "s", initialStateRef: { frozen: true },
             steps: 1, horizonDays: 1, budgetTokens: 10,
             provider: () => ({ tokensUsed: 1, distribution: null, risks: [], assumptions: [], confidence: 0.5 })
         });
+        Object.defineProperty(Promise, Symbol.species, originalSpecies);
+        assert.equal(constructorReads, 0, "hostile Promise constructor is never read");
+        assert.equal(speciesReads, 0, "modified Promise species is never read by the audit boundary");
+        assert.equal(Object.getOwnPropertyDescriptor(hostilePromise, "constructor").configurable, false,
+            "hostile Promise constructor descriptor is preserved");
         await new Promise(r => setTimeout(r, 60));
-        assert.equal(unhandled, 0, "the original rejection must be absorbed");
     } finally {
+        Object.defineProperty(Promise, Symbol.species, originalSpecies);
         process.removeListener("unhandledRejection", onUnhandled);
     }
+    assert.equal(unhandled, 0, "the sink handled its own rejected Promise; Damar added no rejection chain");
 });
 
 test("L5 rejects a top-level Proxy spec before any descriptor trap runs", async () => {

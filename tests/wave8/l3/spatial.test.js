@@ -340,25 +340,48 @@ test("L3-audit-4: one source revising its OWN reading is a revision, not a contr
         "no contradiction may be recorded for a single-source revision");
 });
 
-test("L3-audit-5: an async-rejecting audit sink is contained and never blocks the lane", async () => {
+test("L3-audit-5: async audit returns are ignored without touching caller promises", async () => {
     let unhandled = 0;
     const listener = () => { unhandled += 1; };
     process.on("unhandledRejection", listener);
     try {
+        const rejected = Promise.reject(new Error("caller-owned rejection"));
+        rejected.catch(() => {}); // the sink owns its own rejection lifecycle
+        let thenCalls = 0;
+        const thenable = Object.defineProperty({}, "then", {
+            get() { thenCalls += 1; throw new Error("must not inspect then"); }
+        });
+        let proxyTraps = 0;
+        const proxy = new Proxy({}, {
+            get() { proxyTraps += 1; throw new Error("must not inspect proxy"); },
+            ownKeys() { proxyTraps += 1; throw new Error("must not inspect proxy"); }
+        });
+        const returns = [true, false, thenable, rejected, proxy];
+        let callCount = 0;
         const sm = await createSpatialModel({
             clock: { nowMs: () => 1000 },
-            auditLedger: { append: () => Promise.reject(new Error("audit down")) }
+            auditLedger: { append() { return returns[callCount++ % returns.length]; } }
         });
-        sm.registerFrame({ frameId: "f1", kind: "SCREEN", ref: "r", source: "s" });
-        sm.registerFrame({ frameId: "f2", kind: "SCREEN", ref: "r", source: "s" });
-        sm.registerTransform({ transformId: "t1", fromFrameId: "f1", toFrameId: "f2", data: {} });
-        assert.equal(sm.framesSize(), 2, "audit failure must never block the lane");
+        for (let i = 0; i < returns.length; i += 1) {
+            sm.registerFrame({ frameId: `f${i}`, kind: "SCREEN", ref: "r", source: "s" });
+        }
+        assert.equal(sm.framesSize(), returns.length, "return values cannot alter canonical spatial state");
         await new Promise(r => setImmediate(r));
         await new Promise(r => setTimeout(r, 30));
+        assert.equal(thenCalls, 0, "thenable result is not inspected or assimilated");
+        assert.equal(proxyTraps, 0, "Proxy result is not inspected");
+        assert.equal(Object.prototype.hasOwnProperty.call(rejected, "constructor"), false,
+            "caller-owned Promise remains unchanged");
+        const throwing = await createSpatialModel({
+            clock: { nowMs: () => 1000 },
+            auditLedger: { append() { throw new Error("sync audit failure"); } }
+        });
+        throwing.registerFrame({ frameId: "throw-sink", kind: "SCREEN", ref: "r", source: "s" });
+        assert.equal(throwing.framesSize(), 1, "synchronous audit failure keeps existing best-effort semantics");
     } finally {
         process.removeListener("unhandledRejection", listener);
     }
-    assert.equal(unhandled, 0, "an async-rejecting audit hook must not produce unhandled rejections");
+    assert.equal(unhandled, 0, "Damar must not create an unhandled rejection while ignoring an async result");
 });
 
 /* ---------------------------------------------------------------------- */
@@ -566,11 +589,8 @@ test("L3-audit-12: a frame with invalid kind/source is rejected by FULL validati
 });
 
 test("L3-audit-13: an accessor-backed `then` on an audit result NEVER runs", async () => {
-    // Two earlier defects are closed here. `Promise.resolve` read `then`
-    // repeatedly (~2 getter calls per event, audit of ba68903), and the fix for
-    // that still invoked the result through `then.call` / `.catch` -- property
-    // lookups on a caller-controlled object (audit of 472b6e0). Handling is now
-    // entirely descriptor-based, so an accessor `then` is never executed at all.
+    // Audit callback results are unsupported acknowledgement objects. The lane
+    // discards them without reading `then` or invoking caller code.
     let thenCalls = 0;
     const payload = {};
     Object.defineProperty(payload, "then", {
@@ -589,7 +609,7 @@ test("L3-audit-13: an accessor-backed `then` on an audit result NEVER runs", asy
 /* Independent audit of de9553c -- future dates, hostile thenables, source */
 /* ---------------------------------------------------------------------- */
 
-test("L3-audit-14: a future-dated persisted transform cannot displace a valid one, and hostile thenables leak nothing", async () => {
+test("L3-audit-14: a future-dated transform cannot displace valid state; hostile thenables are ignored", async () => {
     const nowMs = 1_000_000;
     const goodFrame = (id) => ({ frameId: id, kind: "ROOM", ref: { name: "k" }, source: "s", registeredAt: nowMs - 5000 });
     // `registeredAt` was checked for FINITENESS only, so a future-dated
@@ -614,8 +634,7 @@ test("L3-audit-14: a future-dated persisted transform cannot displace a valid on
     });
     assert.equal(sm.transformsSize(), 1, "only the valid transform may survive");
 
-    // A custom async `then` that rejects: the value RETURNED by `then` must be
-    // absorbed too, or the rejection becomes unhandled and can kill the process.
+    // Arbitrary thenables are ignored; their `then` methods are never invoked.
     let unhandled = 0;
     const onUnhandled = () => { unhandled += 1; };
     process.on("unhandledRejection", onUnhandled);
@@ -788,29 +807,40 @@ test("L3-audit-18: a hostile `call` getter on the append function cannot detach 
     }
 });
 
-test("L3-audit-19: a hostile constructor getter on a returned real promise cannot leak its rejection", async () => {
-    // `Promise.prototype.then` reads the promise's `constructor`/`Symbol.species`
-    // to pick the result constructor. A throwing getter there made handler
-    // attachment fail, so the ORIGINAL rejection leaked (audit of 03956b6).
+test("L3 audit boundary does not read or mutate a hostile Promise constructor or species", async () => {
     let unhandled = 0;
     const onUnhandled = () => { unhandled += 1; };
     process.on("unhandledRejection", onUnhandled);
+    const originalSpecies = Object.getOwnPropertyDescriptor(Promise, Symbol.species);
+    let constructorReads = 0;
     try {
         const hostilePromise = Promise.reject(new Error("original-rejection"));
+        hostilePromise.catch(() => {});
         Object.defineProperty(hostilePromise, "constructor", {
-            configurable: true,
-            get() { throw new Error("hostile ctor getter"); }
+            configurable: false,
+            get() { constructorReads += 1; throw new Error("hostile ctor getter"); }
         });
         const sm = await createSpatialModel({
             clock: { nowMs: () => 1_000_000 },
             auditLedger: { append: () => hostilePromise }
         });
+        let speciesReads = 0;
+        Object.defineProperty(Promise, Symbol.species, {
+            configurable: true,
+            get() { speciesReads += 1; throw new Error("hostile species getter"); }
+        });
         sm.registerFrame({ frameId: "f1", kind: "ROOM", ref: { name: "k" }, source: "s" });
+        Object.defineProperty(Promise, Symbol.species, originalSpecies);
+        assert.equal(constructorReads, 0, "hostile Promise constructor is never read");
+        assert.equal(speciesReads, 0, "modified Promise species is never read by the audit boundary");
+        assert.equal(Object.getOwnPropertyDescriptor(hostilePromise, "constructor").configurable, false,
+            "hostile Promise constructor descriptor is preserved");
         await new Promise(r => setTimeout(r, 60));
-        assert.equal(unhandled, 0, "the original rejection must be absorbed");
     } finally {
+        Object.defineProperty(Promise, Symbol.species, originalSpecies);
         process.removeListener("unhandledRejection", onUnhandled);
     }
+    assert.equal(unhandled, 0, "the sink handled its own rejected Promise; Damar added no rejection chain");
 });
 
 test("L3 rejects a top-level Proxy spec before Object.keys can run its traps", () => {
