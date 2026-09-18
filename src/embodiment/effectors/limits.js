@@ -136,6 +136,12 @@ function checkCommandLimits(descriptor, parameters, state, nowMs) {
                 return Object.freeze({ allowed: false, reason: "LIMIT_REFUSAL", parameter: key });
             }
             if (Number.isFinite(rule.windowMs) && Number.isFinite(rule.maxPerWindow)) {
+                // EM-A10: a sliding window, so a burst straddling a tumbling
+                // boundary cannot split its cumulative total. Retention is
+                // bounded by the declared window: at most one entry per
+                // admitted command, and admission is rate-capped at
+                // MAX_ADAPTER_RATE_HZ (20), i.e. <= 20 * windowMs / 1000
+                // entries per parameter, pruned on every check.
                 const retained = (state.windows.get(key) || []).filter((item) => item.atMs > nowMs - rule.windowMs);
                 state.windows.set(key, retained);
                 const total = retained.reduce((sum, item) => sum + item.amount, 0);
