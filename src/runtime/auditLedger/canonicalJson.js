@@ -125,7 +125,8 @@ function canonicalizeValue(value, ancestors, depth, maxDepth) {
 
     const names = applyIntrinsic(ARRAY_SORT, OBJECT_GET_OWN_PROPERTY_NAMES(value), []);
     const parts = [];
-    for (const name of names) {
+    for (let nameIndex = 0; nameIndex < names.length; nameIndex += 1) {
+        const name = names[nameIndex];
         if (applyIntrinsic(SET_HAS, FORBIDDEN_KEYS, [name])) {
             throw new CanonicalizationError(`forbidden object key: "${name}"`);
         }

@@ -109,7 +109,8 @@ test("canonical JSON is stable after mutable array and collection methods are re
     const originals = {
         map: Array.prototype.map, join: Array.prototype.join, sort: Array.prototype.sort,
         setHas: Set.prototype.has, weakHas: WeakSet.prototype.has,
-        weakAdd: WeakSet.prototype.add, weakDelete: WeakSet.prototype.delete
+        weakAdd: WeakSet.prototype.add, weakDelete: WeakSet.prototype.delete,
+        iterator: Array.prototype[Symbol.iterator]
     };
     let serialized;
     try {
@@ -120,6 +121,7 @@ test("canonical JSON is stable after mutable array and collection methods are re
         WeakSet.prototype.has = () => false;
         WeakSet.prototype.add = () => { throw new Error("tampered add"); };
         WeakSet.prototype.delete = () => false;
+        Array.prototype[Symbol.iterator] = function* () {};
         serialized = canonicalJson({ z: [1], a: "ok" });
     } finally {
         Array.prototype.map = originals.map;
@@ -129,6 +131,7 @@ test("canonical JSON is stable after mutable array and collection methods are re
         WeakSet.prototype.has = originals.weakHas;
         WeakSet.prototype.add = originals.weakAdd;
         WeakSet.prototype.delete = originals.weakDelete;
+        Array.prototype[Symbol.iterator] = originals.iterator;
     }
     assert.equal(serialized, '{"a":"ok","z":[1]}');
     assert.throws(() => canonicalJson({ constructor: "blocked" }), /forbidden object key/);
