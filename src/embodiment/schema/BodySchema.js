@@ -24,7 +24,7 @@
 
 const {
     deepFreeze, structuredCopy, digestOf, canonicalJson, fail,
-    realClock
+    realClock, isProxyValue
 } = require("../core/util");
 const { validateDeviceId } = require("../core/identity");
 const {
@@ -34,7 +34,7 @@ const {
 const { assertCapability, normalizeDescriptor, normalizeCapabilityClaim }
     = require("../domain/descriptor");
 const {
-    EVENT_TYPES, CORE_SOURCE, CORE_TOKEN, makeCoreEvent, validateEventShape
+    EVENT_TYPES, CORE_SOURCE, CORE_TOKEN, makeCoreEvent, sanitizeEnvelope
 } = require("../sensorium/events");
 
 const DEFAULTS = Object.freeze({
@@ -51,6 +51,183 @@ const STRUCTURAL_RELATIONSHIP_TYPES = Object.freeze([
 ]);
 
 const CHANNEL_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,119}$/;
+
+const OBSERVATION_HEALTH_STATES = Object.freeze(
+    new Set(["OK", "DEGRADED", "SUSPECT", "FAILED"]));
+const OBSERVATION_FRAME_KINDS = Object.freeze(
+    new Set(["SCREEN", "ROOM", "GEO", "BODY", "LOGICAL"]));
+const OBSERVATION_CALIBRATION_FIELDS = Object.freeze(
+    ["calibrationRef", "appliedAt", "offsets", "scale", "validUntil"]);
+
+/**
+ * W8-L1 (frozen contract, "Malformed-input behavior"): `ingest()` accepts
+ * events from foreign/journal/queue callers that never went through
+ * `makeEvent()`'s `structuredCopy`+`deepFreeze` sanitization — a nested
+ * field here can be a live accessor. Read via descriptor, never a raw
+ * `[[Get]]`, so a hostile getter is rejected without ever being invoked.
+ */
+function safeOwnField(obj, key) {
+    let desc;
+    try {
+        if (isProxyValue(obj)) {
+            throw fail("EMB_INVALID_OBSERVATION_PAYLOAD",
+                `payload observasi tidak boleh berupa Proxy: '${key}'`);
+        }
+        desc = Object.getOwnPropertyDescriptor(obj, key);
+    } catch (err) {
+        if (err && err.code === "EMB_INVALID_OBSERVATION_PAYLOAD") throw err;
+        throw fail("EMB_INVALID_OBSERVATION_PAYLOAD",
+            `payload observasi tidak dapat diverifikasi dengan aman: '${key}'`);
+    }
+    if (!desc) return undefined;
+    if (desc.get || desc.set) {
+        throw fail("EMB_INVALID_OBSERVATION_PAYLOAD",
+            `payload observasi tidak boleh membawa properti accessor: '${key}'`);
+    }
+    return desc.value;
+}
+
+/**
+ * Identitas event untuk dead-letter. Berjalan tepat saat input sudah
+ * dicurigai hostil, jadi: baca via deskriptor, jangan pernah melempar,
+ * dan jangan pernah mengembalikan apa pun selain string pendek/null.
+ */
+function safeRejectField(event, key) {
+    try {
+        // Jalur ini hanya berjalan pada input yang sudah dicurigai hostil —
+        // refleksi pada Proxy justru MENJALANKAN trap pemanggil, jadi
+        // Proxy ditolak sebelum refleksi pertama.
+        if (isProxyValue(event)) return null;
+        const desc = Object.getOwnPropertyDescriptor(event, key);
+        if (!desc || desc.get || desc.set) return null;
+        return typeof desc.value === "string" ? desc.value.slice(0, 120) : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Jejak event yang BENAR-BENAR dikomit BodySchema.
+ *
+ * Konsumen hilir (mis. jembatan sensorium) harus bisa membedakan peristiwa
+ * lifecycle NYATA dari objek yang dipalsukan pemanggil lalu diserahkan
+ * langsung ke API-nya. Keanggotaan WeakSet ini hanya bisa diperoleh dengan
+ * melewati `ingest()`: objek buatan luar tidak pernah ada di sini, jadi
+ * "perangkat kembali online" tidak dapat dikarang oleh pemanggil
+ * (audit 636ee8d menemukan `DEVICE_ONLINE` palsu membuka kembali kanal
+ * FAILED).
+ */
+const COMMITTED_EVENTS = new WeakSet();
+
+/**
+ * Event yang SEDANG diserahkan oleh komit SEKARANG.
+ *
+ * Keanggotaan COMMITTED_EVENTS hanya membuktikan "pernah dikomit", sehingga
+ * event DEVICE_ONLINE lama masih bisa diserahkan ULANG langsung ke API hilir
+ * setelah observasi FAILED yang lebih baru, dan membuka kembali kanal yang
+ * seharusnya tetap tertutup (audit b332cf8). Himpunan ini diisi HANYA selama
+ * `_notify` berjalan, jadi ia membuktikan "sedang dikirim oleh komit ini" --
+ * replay objek event lama tidak pernah memenuhi syarat itu.
+ */
+const NOTIFYING_EVENTS = new WeakSet();
+
+/**
+ * Kepercayaan lifecycle: state-nya PRIVAT di closure modul ini, sedangkan
+ * jembatan membacanya lewat `./lifecycleTrust.js`.
+ *
+ * Pemisahan itu penting dua arah. State tidak boleh dibaca lewat metode publik
+ * yang bisa ditimpa (audit 31a8770), dan oracle-nya tidak boleh menjadi bagian
+ * dari permukaan ekspor kelas ini (audit 5520019). Sebaliknya, state itu juga
+ * tidak boleh dapat DIBUAT atau DIMUTASI dari luar modul ini: versi yang
+ * mengekspor fungsi pendaftaran beserta handle-nya dapat dipakai men-brand objek
+ * sembarangan, menyuntikkan event palsu, lalu membuka kembali kanal FAILED milik
+ * jembatan (audit 41a7006).
+ *
+ * Karena itu modul ini hanya MEMINJAMKAN pembacanya ke `lifecycleTrust.js`
+ * (satu kali, saat modul dimuat) dan tidak mengekspor apa pun yang dapat
+ * membuat atau mengubah state.
+ */
+const { bindTrustOracle } = require("./lifecycleTrust");
+
+/** State kepercayaan per-instance. Tidak pernah meninggalkan modul ini. */
+const TRUST_STATE = new WeakMap();
+
+/** Buat state kepercayaan untuk sebuah instance baru. */
+function registerBodyInstance(instance) {
+    const state = {
+        committedEvents: new WeakSet(),
+        deliveringEvents: new WeakSet(),
+        commitSequences: new WeakMap(),
+        deliverySeq: null,
+        commitSeqCounter: 0
+    };
+    TRUST_STATE.set(instance, state);
+    return state;
+}
+
+/**
+ * Bukti lifecycle milik instance, dibaca dari state privat di atas.
+ * Mengembalikan null untuk objek yang bukan BodySchema, sehingga pemanggil
+ * dapat membedakan "double tanpa API" dari "instance asli".
+ */
+function lifecycleTrustOf(instance, event) {
+    const usableInstance = instance !== null
+        && (typeof instance === "object" || typeof instance === "function");
+    const state = usableInstance ? TRUST_STATE.get(instance) : undefined;
+    if (!state) return null;
+    const usable = event !== null && (typeof event === "object" || typeof event === "function");
+    return Object.freeze({
+        wasCommitted: usable && state.committedEvents.has(event),
+        isBeingDelivered: usable && state.deliveringEvents.has(event),
+        commitSequence: usable ? state.commitSequences.get(event) : undefined,
+        deliverySequence: state.deliverySeq
+    });
+}
+/**
+ * Urutan komit per event.
+ *
+ * Jendela pengiriman saja belum cukup: satu subscriber bisa, DI DALAM loop
+ * notifikasi yang sedang berjalan, mengirim observasi FAILED yang LEBIH BARU,
+ * lalu event DEVICE_ONLINE lama (yang di-commit lebih dulu) sampai ke jembatan
+ * dan menghapus status FAILED itu (audit 8d4f80c). Urutan komit memberi
+ * pembanding yang bebas re-entrancy: lifecycle hanya boleh membuka kanal bila
+ * di-commit SETELAH observasi yang membuat kanal itu FAILED.
+ */
+const COMMIT_SEQUENCE = new WeakMap();
+let commitSeqCounter = 0;
+let currentDeliverySeq = null;
+
+function wasCommittedByBodySchema(event) {
+    return event !== null
+        && (typeof event === "object" || typeof event === "function")
+        && COMMITTED_EVENTS.has(event);
+}
+
+/** Urutan komit event, atau undefined bila event tidak pernah dikomit di sini. */
+function commitSequenceOf(event) {
+    if (event === null || (typeof event !== "object" && typeof event !== "function")) return undefined;
+    return COMMIT_SEQUENCE.get(event);
+}
+
+/**
+ * Urutan komit peristiwa yang SEDANG diserahkan sekarang, atau undefined.
+ *
+ * Subscriber bisa, DI DALAM loop notifikasi, menyerahkan observasi yang lebih
+ * baru. Observasi itu karena itu LEBIH BARU daripada peristiwa yang sedang
+ * dikirim, walau keduanya diproses jembatan dalam urutan terbalik. Sinyal ini
+ * memberi jembatan cara yang dapat diputuskan untuk mengetahui hal itu tanpa
+ * bergantung pada urutan pemanggilan.
+ */
+function currentDeliveryCommitSequence() {
+    return currentDeliverySeq;
+}
+
+/** Bukti terkuat: event ini sedang diserahkan oleh komit yang sedang berjalan. */
+function isEventBeingDelivered(event) {
+    return event !== null
+        && (typeof event === "object" || typeof event === "function")
+        && NOTIFYING_EVENTS.has(event);
+}
 
 /** Urutan total KONTEN antar-pengamatan deskriptor. */
 function newerWins(a, b) {
@@ -151,6 +328,38 @@ class BodySchema {
         this._subscriberErrors = [];
         this._subscribers = new Set();
         this._deriving = false;
+
+        // Lifecycle authenticity + ordering state, PER-INSTANCE dan PRIVAT
+        // MODUL (lihat ./lifecycleTrust.js).
+        //
+        // Sebelumnya penanda ini modul-global: event yang sedang diserahkan oleh
+        // BodySchema A diterima jembatan milik BodySchema B dan membuka kembali
+        // kanal FAILED milik B (audit 406553b). Menaruhnya di properti publik
+        // (`this._committedEvents`) masih bisa ditimpa pemanggil; menaruhnya di
+        // WeakMap milik modul membuatnya tidak dapat dijangkau dari luar.
+        TRUST_STATE.set(this, registerBodyInstance(this));
+    }
+
+    /* ------------- bukti lifecycle (per-instance, lihat catatan di atas) --- */
+
+    /** Apakah event ini benar-benar melewati KOMIT instance ini. */
+    wasCommittedBy(event) {
+        return lifecycleTrustOf(this, event)?.wasCommitted === true;
+    }
+
+    /** Apakah event ini SEDANG diserahkan oleh komit instance ini. */
+    isBeingDelivered(event) {
+        return lifecycleTrustOf(this, event)?.isBeingDelivered === true;
+    }
+
+    /** Urutan komit event ini di instance ini, atau undefined. */
+    commitSequenceOf(event) {
+        return lifecycleTrustOf(this, event)?.commitSequence;
+    }
+
+    /** Urutan komit peristiwa yang sedang dikirim instance ini, atau null. */
+    currentDeliveryCommitSequence() {
+        return lifecycleTrustOf(this, null)?.deliverySequence ?? null;
     }
 
     /* -------------------- batas kepercayaan produsen ------------------- */
@@ -172,10 +381,15 @@ class BodySchema {
      * Satu-satunya pintu mutasi state. Atomik per event: penolakan
      * tidak pernah meninggalkan state setengah jadi.
      */
-    ingest(event) {
+    ingest(rawEvent) {
 
-        const shape = validateEventShape(event);
-        if (!shape.ok) return this._reject(shape.reason, event);
+        // BATAS KEPERCAYAAN — satu-satunya tempat objek pemanggil disentuh.
+        // Seluruh jalur setelah baris ini hanya melihat salinan beku yang
+        // dibaca via deskriptor, jadi accessor/getter/proxy hostil tidak
+        // pernah dieksekusi dan field warisan tidak pernah ikut terbawa.
+        const shape = sanitizeEnvelope(rawEvent);
+        if (!shape.ok) return this._reject(shape.reason, rawEvent);
+        const event = shape.event;
 
         const producerClass = EVENT_TYPES[event.type].producerClass;
 
@@ -210,6 +424,19 @@ class BodySchema {
         }
 
         this._pushJournal(event);
+
+        // Tandai SETELAH komit sah: hanya event yang benar-benar melewati
+        // ingest() yang boleh dipercaya hilir sebagai peristiwa nyata.
+        COMMITTED_EVENTS.add(event);
+        COMMIT_SEQUENCE.set(event, ++commitSeqCounter);
+        // Catatan PER-INSTANCE, disimpan di state privat modul: hanya instance
+        // yang benar-benar meng-commit event ini yang boleh mempercayainya
+        // hilir, dan penimpaan metode publik tidak dapat memalsukannya.
+        const trustState = TRUST_STATE.get(this);
+        if (trustState) {
+            trustState.committedEvents.add(event);
+            trustState.commitSequences.set(event, ++trustState.commitSeqCounter);
+        }
 
         if (!event.payload?.derived) {
             this._deriveDefaultChanges();
@@ -390,14 +617,77 @@ class BodySchema {
             throw fail("EMB_INVALID_CHANNEL",
                 `kanal observasi bukan sensor: '${channel.id}'`);
         }
+        // Batas 2.048 BYTE (UTF-8), bukan 2.048 unit kode UTF-16: satu
+        // karakter multibyte tidak boleh lolos dua kali lebih besar.
         const sample = JSON.stringify(event.payload.sample ?? null);
-        if (sample.length > 2048) {
+        if (Buffer.byteLength(sample, "utf8") > 2048) {
             throw fail("EMB_OBSERVATION_TOO_LARGE", "sampel observasi > 2KB");
         }
+
+        // W8-L1 frozen contract: payload bertingkat baru (aditif, guard di
+        // atas tidak tersentuh). Field manapun yang cacat menolak SELURUH
+        // observasi -- tidak pernah aplikasi sebagian.
+        const healthState = safeOwnField(event.payload, "healthState");
+        if (healthState !== undefined && !OBSERVATION_HEALTH_STATES.has(healthState)) {
+            throw fail("EMB_INVALID_OBSERVATION_HEALTH_STATE",
+                `healthState observasi tidak dikenal: '${String(healthState)}'`);
+        }
+
+        const frame = safeOwnField(event.payload, "frame");
+        if (frame !== null && frame !== undefined) {
+            if (typeof frame !== "object" || Array.isArray(frame)) {
+                throw fail("EMB_INVALID_OBSERVATION_FRAME", "frame observasi wajib objek atau null");
+            }
+            const frameKind = safeOwnField(frame, "kind");
+            if (!OBSERVATION_FRAME_KINDS.has(frameKind)) {
+                throw fail("EMB_INVALID_OBSERVATION_FRAME",
+                    `frame.kind observasi tidak dikenal: '${String(frameKind)}'`);
+            }
+        }
+
+        const calibration = safeOwnField(event.payload, "calibration");
+        if (calibration !== null && calibration !== undefined) {
+            if (typeof calibration !== "object" || Array.isArray(calibration)) {
+                throw fail("EMB_INVALID_OBSERVATION_CALIBRATION", "calibration observasi wajib objek atau null");
+            }
+            let calibrationKeys;
+            try {
+                calibrationKeys = Object.keys(calibration);
+            } catch {
+                throw fail("EMB_INVALID_OBSERVATION_CALIBRATION",
+                    "calibration observasi tidak dapat diverifikasi dengan aman");
+            }
+            const extraOrMissing = calibrationKeys.length !== OBSERVATION_CALIBRATION_FIELDS.length
+                || calibrationKeys.some(k => !OBSERVATION_CALIBRATION_FIELDS.includes(k));
+            if (extraOrMissing) {
+                throw fail("EMB_INVALID_OBSERVATION_CALIBRATION",
+                    "calibration observasi wajib TEPAT lima field: calibrationRef, appliedAt, offsets, scale, validUntil");
+            }
+            for (const k of OBSERVATION_CALIBRATION_FIELDS) safeOwnField(calibration, k);
+        }
+
+        const quality = safeOwnField(event.payload, "quality");
+        if (quality !== null && quality !== undefined
+            && (typeof quality !== "object" || Array.isArray(quality))) {
+            throw fail("EMB_INVALID_OBSERVATION_QUALITY", "quality observasi wajib objek atau null");
+        }
+
+        const raw = safeOwnField(event.payload, "raw");
+        if (raw !== null && raw !== undefined) {
+            if (typeof raw !== "object" || Array.isArray(raw) || typeof safeOwnField(raw, "storageRef") !== "string") {
+                throw fail("EMB_INVALID_OBSERVATION_RAW", "raw observasi wajib { storageRef: string } atau null");
+            }
+        }
+
         return {
             kind: "observation", deviceId: event.subject,
             channelId: channel.id, modality: classification.modality,
-            sample: event.payload.sample ?? null
+            sample: event.payload.sample ?? null,
+            healthState: healthState ?? null,
+            frame: frame ?? null,
+            calibration: calibration ?? null,
+            quality: quality ?? null,
+            raw: raw ?? null
         };
     }
 
@@ -906,19 +1196,43 @@ class BodySchema {
     }
 
     _notify(event, result) {
-        for (const fn of [...this._subscribers]) {
-            try {
-                fn(event, result);
-            } catch (err) {
-                if (this._subscriberErrors.length >= this.config.subscriberErrorCapacity) {
-                    this._subscriberErrors.shift();
+        // Tandai SEDANG diserahkan selama loop ini saja -- konsumen hilir boleh
+        // memperlakukan peristiwa lifecycle sebagai nyata HANYA di dalam
+        // jendela ini, sehingga replay event lama tidak pernah lolos.
+        const markDelivering = event !== null && typeof event === "object";
+        const trustState = TRUST_STATE.get(this);
+        if (markDelivering) {
+            NOTIFYING_EVENTS.add(event);
+            if (trustState) trustState.deliveringEvents.add(event);
+        }
+        const previousDeliverySeq = currentDeliverySeq;
+        const previousInstanceDeliverySeq = trustState ? trustState.deliverySeq : null;
+        if (markDelivering) {
+            currentDeliverySeq = COMMIT_SEQUENCE.get(event) ?? null;
+            if (trustState) trustState.deliverySeq = trustState.commitSequences.get(event) ?? null;
+        }
+        try {
+            for (const fn of [...this._subscribers]) {
+                try {
+                    fn(event, result);
+                } catch (err) {
+                    if (this._subscriberErrors.length >= this.config.subscriberErrorCapacity) {
+                        this._subscriberErrors.shift();
+                    }
+                    this._subscriberErrors.push(Object.freeze({
+                        atMs: this.clock.nowMs(),
+                        eventId: event.eventId,
+                        message: String(err?.message ?? err).slice(0, 200)
+                    }));
                 }
-                this._subscriberErrors.push(Object.freeze({
-                    atMs: this.clock.nowMs(),
-                    eventId: event.eventId,
-                    message: String(err?.message ?? err).slice(0, 200)
-                }));
             }
+        } finally {
+            if (markDelivering) {
+                NOTIFYING_EVENTS.delete(event);
+                if (trustState) trustState.deliveringEvents.delete(event);
+            }
+            currentDeliverySeq = previousDeliverySeq;
+            if (trustState) trustState.deliverySeq = previousInstanceDeliverySeq;
         }
     }
 
@@ -1289,11 +1603,20 @@ class BodySchema {
         if (this._deadLetters.length >= this.config.deadLetterCapacity) {
             this._deadLetters.shift();
         }
+        // Jalur ini berjalan PERSIS saat input sudah dicurigai hostil, jadi
+        // identitas event dibaca via deskriptor: accessor tidak pernah
+        // dijalankan dan exception tidak boleh lolos dari penolakan.
+        let eventId = null;
+        let type = null;
+        if (event && typeof event === "object") {
+            eventId = safeRejectField(event, "eventId");
+            type = safeRejectField(event, "type");
+        }
         this._deadLetters.push(Object.freeze({
             atMs: this.clock.nowMs(),
             reason,
-            eventId: event && typeof event === "object" ? event.eventId ?? null : null,
-            type: event && typeof event === "object" ? event.type ?? null : null
+            eventId,
+            type
         }));
         return { accepted: false, reason };
     }
@@ -1304,4 +1627,17 @@ function freezeView(view) {
     return deepFreeze(structuredCopy(view));
 }
 
-module.exports = { BodySchema, newerWins, presenceWins };
+// Pinjamkan pembaca kepercayaan ke `./lifecycleTrust.js` SEKALI, saat modul ini
+// dimuat. Bila pengikatan ditolak, artinya ada pihak lain yang sudah mengikat
+// lebih dulu -- dan jembatan akan membaca oracle asing itu. Gagal dengan KERAS:
+// lebih baik runtime tidak menyala daripada menjalankan kepercayaan lifecycle
+// yang sudah diambil alih (audit 41a7006).
+if (!bindTrustOracle(lifecycleTrustOf)) {
+    throw new Error("EMBODIMENT_LIFECYCLE_TRUST_ALREADY_BOUND");
+}
+
+module.exports = {
+    BodySchema, newerWins, presenceWins,
+    wasCommittedByBodySchema, isEventBeingDelivered, commitSequenceOf,
+    currentDeliveryCommitSequence
+};
