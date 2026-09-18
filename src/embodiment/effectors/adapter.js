@@ -27,14 +27,21 @@ function isLedgerAcknowledgment(value, expectedEventType) {
 // closed as UNKNOWN_OUTCOME rather than let an ambiguous physical outcome fall
 // through to EXECUTED.
 function readReportOutcome(value) {
-    if (value === null || (typeof value !== "object" && typeof value !== "function")) return { value: undefined };
-    if (isProxy(value)) return { unreadable: true };
-    if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
-        const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
-        if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return { unreadable: true };
-        return { value: descriptor.value };
+    try {
+        if (value === null || (typeof value !== "object" && typeof value !== "function")) return { value: undefined };
+        if (isProxy(value)) return { unreadable: true };
+        if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
+            const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
+            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return { unreadable: true };
+            return { value: descriptor.value };
+        }
+        if (Reflect.has(value, "outcome")) return { unreadable: true };
+        return { value: undefined };
+    } catch {
+        // A report that throws while its outcome is being read (hostile
+        // prototype trap) is unreadable, never "no outcome".
+        return { unreadable: true };
     }
-    return Reflect.has(value, "outcome") ? { unreadable: true } : { value: undefined };
 }
 
 // This is a leaf adapter primitive, not a dispatcher or registration surface.
