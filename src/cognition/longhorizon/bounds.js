@@ -12,6 +12,9 @@ const BOUNDS = Object.freeze({
     // (lihat komentar AUD29-ADV-1). Dihapus.
 });
 
-const MODES = Object.freeze(["off", "shadow", "governed"]);
+// FG-03: MODES is now owned by src/cognition/governed/bounds.js (single
+// source of truth for every mode-bearing lane); re-exported here
+// unchanged so existing callers of longhorizon/bounds.js see no change.
+const { MODES } = require("../governed/bounds");
 
 module.exports = { SCHEMA_VERSION, BOUNDS, MODES };
