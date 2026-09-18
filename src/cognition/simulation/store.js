@@ -26,6 +26,17 @@ const KV_KEY = "sim_simulation.snapshot";
 const { buildSafeSimValue } = require("./records");
 const { REASONS, fail } = require("./errors");
 const utilTypes = require("node:util").types;
+const IS_PROXY = utilTypes.isProxy;
+
+function ownData(value, key) {
+    if (!value || (typeof value !== "object" && typeof value !== "function") || IS_PROXY(value)) return undefined;
+    try {
+        const desc = Object.getOwnPropertyDescriptor(value, key);
+        return desc && !desc.get && !desc.set ? desc.value : undefined;
+    } catch {
+        return undefined;
+    }
+}
 
 function deepFreeze(value, seen = new WeakSet()) {
     if (!value || typeof value !== "object") return value;
@@ -68,7 +79,7 @@ function serialize({ runs, results, tokenLedger, invalidatedAssumptions }) {
  */
 function readPersistedArray(value, state) {
     if (!Array.isArray(value)) return null;
-    if (utilTypes.isProxy(value)) {
+    if (IS_PROXY(value)) {
         // Array.isArray(jahatProxy) === true, lalu setiap operasi reflektif di
         // bawah menjalankan trap pemanggil. Tidak ada pembacaan yang aman.
         state.degraded = true;
@@ -194,11 +205,11 @@ function readSnapshotField(raw, key) {
     // getOwnPropertyDescriptor di bawah) menjalankan trap milik pemanggil, jadi
     // tidak ada pembacaan yang aman (audit L3/L5).
     try {
-        if (raw !== null && typeof raw === "object" && utilTypes.isProxy(raw)) {
+        if (raw !== null && typeof raw === "object" && IS_PROXY(raw)) {
             throw new Error("snapshot tidak boleh berupa Proxy");
         }
     } catch (err) {
-        throw err instanceof Error && /Proxy/.test(err.message)
+        throw ownData(err, "message") === "snapshot tidak boleh berupa Proxy"
             ? err
             : new Error("snapshot tidak dapat dibaca dengan aman");
     }
@@ -232,7 +243,7 @@ function readPersistedCollection(raw, key) {
     // menjalankan trap pemanggil -- dan Proxy yang "berbohong" bisa tampak
     // seperti koleksi kosong yang sah, sehingga state-nya diam-diam hilang
     // tanpa degradasi (audit fdda055).
-    if (utilTypes.isProxy(container)) {
+    if (IS_PROXY(container)) {
         throw new Error("snapshot tidak boleh berupa Proxy");
     }
     let names;
@@ -298,12 +309,12 @@ function checkStoreIsolation(store) {
     // Proxy ditolak lebih dulu: setiap introspeksi pada Proxy menjalankan trap
     // milik pemanggil, jadi tidak ada pemeriksaan yang benar-benar aman di sini.
     try {
-        if (utilTypes.isProxy(store)) {
+        if (IS_PROXY(store)) {
             throw fail(REASONS.CROSS_STORE_WRITE_REJECTED,
                 "store simulasi tidak boleh berupa Proxy");
         }
     } catch (err) {
-        if (err && err.reason) throw err;
+        if (ownData(err, "reason")) throw err;
     }
     // Seluruh RANTAI PROTOTIPE ditelusuri TANPA batas kedalaman, sampai
     // `null`: batas kedalaman apa pun adalah bypass yang bisa dipakai
@@ -323,7 +334,7 @@ function checkStoreIsolation(store) {
             if (level === Object.prototype || level === Function.prototype) break;
             if (seen.has(level)) break;
             seen.add(level);
-            if (utilTypes.isProxy(level)) {
+            if (IS_PROXY(level)) {
                 throw fail(REASONS.CROSS_STORE_WRITE_REJECTED,
                     "store simulasi tidak boleh menyembunyikan Proxy pada rantai prototipenya");
             }
@@ -374,7 +385,7 @@ function resolveStoreMethod(store, name) {
         if (level === Object.prototype || level === Function.prototype) break;
         if (seen.has(level)) break;
         seen.add(level);
-        if (utilTypes.isProxy(level)) return undefined;
+        if (IS_PROXY(level)) return undefined;
         let desc;
         try {
             desc = Object.getOwnPropertyDescriptor(level, name);

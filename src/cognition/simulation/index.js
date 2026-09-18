@@ -27,6 +27,17 @@ const { makeSimulationRun, makeSimulationResult, buildSafeSimValue } = require("
 const { loadSnapshot, saveSnapshot } = require("./store");
 const utilTypes = require("node:util").types;
 const { isDeepStrictEqual } = require("node:util");
+const IS_PROXY = utilTypes.isProxy;
+
+function safeOwnDataValue(value, key) {
+    if (!value || (typeof value !== "object" && typeof value !== "function") || IS_PROXY(value)) return undefined;
+    try {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        return descriptor && !descriptor.get && !descriptor.set ? descriptor.value : undefined;
+    } catch {
+        return undefined;
+    }
+}
 
 const HOURLY_WINDOW_MS = 3600000;
 
@@ -47,7 +58,7 @@ function resolveAuditAppend(auditLedger) {
         if (level === Object.prototype || level === Function.prototype) break;
         if (seen.has(level)) break;
         seen.add(level);
-        if (utilTypes.isProxy(level)) return null;
+        if (IS_PROXY(level)) return null;
         let desc;
         try {
             desc = Object.getOwnPropertyDescriptor(level, "append");
@@ -172,7 +183,7 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
         snapshot = await loadSnapshot(store);
     } catch (err) {
         audit("cognition.simulation.cross_store_write_rejected", {
-            reason: err && err.reason ? err.reason : "CROSS_STORE_WRITE_REJECTED"
+            reason: safeOwnDataValue(err, "reason") || "CROSS_STORE_WRITE_REJECTED"
         });
         throw err;
     }
@@ -335,13 +346,16 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
         // tidak, menaikkan konfigurasi membuat hasil dengan token 10^12 dan TTL
         // 10^15 lolos validasi, tepat seperti konfigurasi default menolaknya
         // (audit 03956b6). Konfigurasi yang LEBIH KETAT tetap berlaku.
-        const frozenTokenCeiling = Math.min(bounds.MAX_TOKENS_PER_RUN, BOUNDS.MAX_TOKENS_PER_RUN);
-        const frozenTtlCeiling = Math.min(bounds.TTL_MS, BOUNDS.TTL_MS);
+        // Validate recovered evidence against the same active accepted bounds
+        // that admitted and persisted the run. Frozen defaults would reject a
+        // legitimate record after restart when operations widen the bounds.
+        const activeTokenCeiling = bounds.MAX_TOKENS_PER_RUN;
+        const activeTtlCeiling = bounds.TTL_MS;
         const pairedRun = runs.get(id);
         if (!pairedRun || !Number.isFinite(pairedRun.budgetTokens)) return false;
-        if (pairedRun.budgetTokens > frozenTokenCeiling) return false;
-        if (result.tokensUsed > Math.min(pairedRun.budgetTokens, frozenTokenCeiling)) return false;
-        if (result.validUntilMs > result.generatedAtMs + Math.max(0, Math.trunc(frozenTtlCeiling))) return false;
+        if (pairedRun.budgetTokens > activeTokenCeiling) return false;
+        if (result.tokensUsed > Math.min(pairedRun.budgetTokens, activeTokenCeiling)) return false;
+        if (result.validUntilMs > result.generatedAtMs + Math.max(0, Math.trunc(activeTtlCeiling))) return false;
         // BENTUK yang tidak dinormalkan builder: `risks`/`assumptions` yang bukan
         // array diteruskan apa adanya oleh builder, jadi perbandingan kanonik
         // tidak menangkapnya dan record malformed tetap lolos (audit 472b6e0).
@@ -397,6 +411,7 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
         let runId, question, scenario, initialStateRef, steps, horizonDays, budgetTokens, fidelity, provider;
         try {
             const source = spec || {};
+            if (IS_PROXY(source)) fail(REASONS.INVALID_RECORD, "spec Proxy tidak dapat diverifikasi dengan aman, ditolak");
             const read = (key) => {
                 const descriptor = Object.getOwnPropertyDescriptor(source, key);
                 if (!descriptor) return undefined;
@@ -533,7 +548,7 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
             // percobaan kontaminasi (contract: "every store-boundary rejection
             // is audited as a would-be contamination attempt").
             audit("cognition.simulation.cross_store_write_rejected", {
-                reason: err && err.reason ? err.reason : "CROSS_STORE_WRITE_REJECTED"
+                reason: safeOwnDataValue(err, "reason") || "CROSS_STORE_WRITE_REJECTED"
             });
             throw err;
         }

@@ -11,6 +11,7 @@
 const { REASONS, fail } = require("./errors");
 const { BOUNDS } = require("./bounds");
 const utilTypes = require("node:util").types;
+const IS_PROXY = utilTypes.isProxy;
 
 const FRAME_KINDS = new Set(["SCREEN", "ROOM", "GEO", "BODY", "LOGICAL"]);
 const OCCUPANCY_STATES = new Set(["KNOWN", "UNKNOWN", "CONTESTED"]);
@@ -35,6 +36,7 @@ function readSpecFields(spec, fields) {
         return empty;
     }
     if (typeof spec !== "object") fail(REASONS.INVALID_RECORD, "spec tidak dapat diverifikasi dengan aman, ditolak");
+    if (IS_PROXY(spec)) fail(REASONS.INVALID_RECORD, "spec Proxy tidak dapat diverifikasi dengan aman, ditolak");
     let keys;
     try {
         keys = new Set(Object.keys(spec));
@@ -105,7 +107,7 @@ function buildSafeSpatialValue(value, depth = 0, budget) {
     // semuanya menjalankan trap milik pemanggil, jadi "pembacaan lewat
     // deskriptor" TIDAK cukup -- nilainya sudah menjalankan kode sebelum
     // validasi (audit Wave8 L3/L5).
-    if (utilTypes.isProxy(value)) {
+    if (IS_PROXY(value)) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "nilai spasial tidak boleh berupa Proxy");
     }
     if (depth > MAX_SCAN_DEPTH) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "nilai spasial terlalu dalam untuk diverifikasi dengan aman");

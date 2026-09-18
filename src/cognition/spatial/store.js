@@ -17,13 +17,14 @@ const KV_KEY = "spatial.snapshot";
 // membuat salinan kedua di sini.
 const { buildSafeSpatialValue } = require("./records");
 const utilTypes = require("node:util").types;
+const IS_PROXY = utilTypes.isProxy;
 
 /**
  * Proxy pada nilai tersimpan: setiap operasi reflektif menjalankan trap milik
  * pemanggil, jadi tidak ada pembacaan yang aman (audit Wave8 L3/L5).
  */
 function throwIfProxy(value, label) {
-    if (value !== null && typeof value === "object" && utilTypes.isProxy(value)) {
+    if (value !== null && typeof value === "object" && IS_PROXY(value)) {
         throw new Error(`${label} tidak boleh berupa Proxy`);
     }
 }
@@ -42,7 +43,7 @@ function resolveStoreMethod(store, name) {
         if (level === Object.prototype || level === Function.prototype) break;
         if (seen.has(level)) break;
         seen.add(level);
-        if (utilTypes.isProxy(level)) return undefined;
+        if (IS_PROXY(level)) return undefined;
         let desc;
         try {
             desc = Object.getOwnPropertyDescriptor(level, name);
