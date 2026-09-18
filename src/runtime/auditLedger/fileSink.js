@@ -76,8 +76,41 @@ const F = FREEZE({
 /** `process.kill`/`pid` juga ikut: uji hidup lock bergantung padanya. */
 const PROC = FREEZE({ kill: process.kill, pid: process.pid });
 
-/** `path.dirname` dipakai untuk membuat direktori jurnal. */
+/**
+ * `JSON` juga masuk tabel: serialisasi lock dan digest ikut menentukan
+ * durabilitas. `JSON.stringify` yang ditimpa pasca-pemuatan cukup untuk menulis
+ * PID mati ke berkas lock sehingga sink kedua merebutnya, atau untuk membuat
+ * transisi governed "berhasil" sementara isi disk bukan JSON yang sah (audit
+ * 64a999b).
+ */
+const J = FREEZE({ stringify: JSON.stringify, parse: JSON.parse });
+
+/** `path.dirname`/`resolve` dipakai untuk membuat direktori jurnal dan kunci registry. */
 const PATH_DIRNAME = path.dirname;
+const PATH_RESOLVE = path.resolve;
+
+/**
+ * REGISTRY KEPEMILIKAN DALAM-PROSES.
+ *
+ * Berkas lock + cek PID TIDAK cukup untuk menjamin satu penulis, dan itu bukan
+ * sekadar teori: reclaim lock basi melakukan rename atomik lalu verifikasi
+ * sekali, sehingga dua reclaimer bisa berselang-seling `A rename -> A verify ->
+ * B rename -> B verify` dan KEDUANYA menyimpulkan mereka pemilik, lalu keduanya
+ * menerima append durabel untuk satu jurnal yang sama (audit 64a999b). Cek PID
+ * tidak menolongnya: pemiliknya memang proses yang sama.
+ *
+ * Untuk kasus yang benar-benar dijanjikan lane ini -- "narrow local ownership
+ * the existing single-process runtime expects" -- registry ini memberi
+ * eksklusivitas DETERMINISTIK: path yang sudah dimiliki tidak dapat dimiliki
+ * lagi selama pemiliknya belum melepas. Ini menutup jalur dalam satu proses
+ * tanpa bergantung pada timing filesystem.
+ *
+ * BATAS YANG DISEBUT: antar-PROSES masih mengandalkan berkas lock, dan balapan
+ * reclaim di sana tetap mungkin. Itu residual yang sudah tercatat, bukan klaim
+ * yang dibuat di sini; penutupnya adalah advisory lock OS (flock/LockFileEx)
+ * yang berada di luar wewenang lane ini.
+ */
+const OWNED_PATHS = new Set();
 
 // Alias lama tetap tersedia (nilainya sekarang berasal dari tabel beku yang
 // sama, jadi tidak ada jalur kedua yang bisa ditimpa).
@@ -238,7 +271,7 @@ function serializeRecordLine(record) {
 function parseRecordLine(line) {
     let record;
     try {
-        record = JSON.parse(line);
+        record = J.parse(line);
     } catch {
         throw failSink("stored audit line is not valid JSON");
     }
@@ -320,10 +353,13 @@ function createFileAuditSink(filePath, options = {}) {
     // closed for manual inspection.  Age alone is never a reason to steal.
     const lockPath = `${filePath}.lock`;
     let lockHeld = false;
+    // Kunci registry dalam-proses: eksklusivitas deterministik untuk jalur
+    // single-process yang dijanjikan kontrak (lihat OWNED_PATHS).
+    const ownershipKey = PATH_RESOLVE(filePath);
 
     function readLockFile() {
         try {
-            const data = JSON.parse(F.readFileSync(lockPath, "utf8"));
+            const data = J.parse(F.readFileSync(lockPath, "utf8"));
             if (data === null || typeof data !== "object" ||
                 data.v !== 1 || !Number.isSafeInteger(data.pid) || data.pid <= 0) {
                 return { present: true, valid: false };
@@ -347,7 +383,7 @@ function createFileAuditSink(filePath, options = {}) {
     }
 
     function writeLockContent(fd) {
-        F.writeFileSync(fd, JSON.stringify({
+        F.writeFileSync(fd, J.stringify({
             v: 1, pid: PROC.pid, acquiredAtMs: Date.now()
         }), { encoding: "utf8" });
     }
@@ -357,11 +393,21 @@ function createFileAuditSink(filePath, options = {}) {
             "audit sink file is already owned by another active writer");
     }
 
+    function abortAcquisition(error) {
+        // Also covers a just-created lock whose content write or close failed.
+        releaseLock();
+        throw error;
+    }
+
+    // Eksklusivitas dalam-proses, diperiksa SEBELUM menyentuh berkas lock:
+    // deterministik, tidak bergantung pada balapan rename/verify (audit 64a999b).
+    if (OWNED_PATHS.has(ownershipKey)) throw failOwned();
+
     try {
         // "wx" = O_CREAT|O_EXCL|O_WRONLY: fails if the lock already exists.
         const fd = F.openSync(lockPath, "wx");
-        try { writeLockContent(fd); } finally { F.closeSync(fd); }
         lockHeld = true;
+        try { writeLockContent(fd); } finally { F.closeSync(fd); }
     } catch (error) {
         if (error && (error.code === "EEXIST" || error.code === "EPERM" || error.code === "EACCES")) {
             const current = readLockFile();
@@ -370,25 +416,25 @@ function createFileAuditSink(filePath, options = {}) {
                 // retry through the same create-exclusive path.
                 try {
                     const fd = F.openSync(lockPath, "wx");
-                    try { writeLockContent(fd); } finally { F.closeSync(fd); }
                     lockHeld = true;
+                    try { writeLockContent(fd); } finally { F.closeSync(fd); }
                 } catch (retryError) {
                     if (retryError && (retryError.code === "EEXIST" || retryError.code === "EPERM" || retryError.code === "EACCES")) {
-                        throw failOwned();
+                        abortAcquisition(failOwned());
                     }
-                    throw failPersist(`audit sink lock acquisition failed: ${retryError.message}`);
+                    abortAcquisition(failPersist(`audit sink lock acquisition failed: ${retryError.message}`));
                 }
             } else if (!current.valid) {
                 // Unreadable/corrupt lock: fail closed; operator inspects.
-                throw new LedgerError(CODES.PERSIST_FAILED,
-                    "audit sink lock file is unreadable; manual inspection required");
+                abortAcquisition(new LedgerError(CODES.PERSIST_FAILED,
+                    "audit sink lock file is unreadable; manual inspection required"));
             } else if (pidAlive(current.pid)) {
-                throw failOwned();
+                abortAcquisition(failOwned());
             } else {
                 // STALE (dead writer): ownership-validated reclaim — unique
                 // temp + atomic rename, then RE-VERIFY the lock now records
                 // OUR pid (a competing reclaimer wins and we fail closed).
-                const claim = JSON.stringify({
+                const claim = J.stringify({
                     v: 1, pid: PROC.pid, acquiredAtMs: Date.now()
                 });
                 const tmp = `${lockPath}.claim-${PROC.pid}-${Math.random().toString(16).slice(2, 10)}`;
@@ -397,22 +443,27 @@ function createFileAuditSink(filePath, options = {}) {
                     F.renameSync(tmp, lockPath);
                 } catch (renameError) {
                     try { F.unlinkSync(tmp); } catch { /* best effort */ }
-                    throw failPersist(`audit sink lock reclaim failed: ${renameError.message}`);
+                    abortAcquisition(failPersist(`audit sink lock reclaim failed: ${renameError.message}`));
                 }
                 const after = readLockFile();
                 if (!after.valid || after.pid !== PROC.pid) {
-                    throw failOwned();
+                    abortAcquisition(failOwned());
                 }
                 lockHeld = true;
             }
         } else {
-            throw failPersist(`audit sink lock acquisition failed: ${error.message}`);
+            abortAcquisition(failPersist(`audit sink lock acquisition failed: ${error.message}`));
         }
     }
+
+    // JavaScript construction is synchronous: after this insertion no second
+    // same-process constructor can interleave before ownership is published.
+    OWNED_PATHS.add(ownershipKey);
 
     function releaseLock() {
         if (!lockHeld) return;
         lockHeld = false;
+        OWNED_PATHS.delete(ownershipKey);
         // Ownership-checked unlink: never delete a foreign lock.
         const current = readLockFile();
         if (current.present && current.valid && current.pid === PROC.pid) {
@@ -426,23 +477,23 @@ function createFileAuditSink(filePath, options = {}) {
     let corruptReason = null;
     const seenEventIds = new Set();
 
-    if (F.existsSync(filePath)) {
-        const raw = F.readFileSync(filePath, "utf8");
-        const lines = raw.split("\n").filter((l) => l.trim().length > 0);
-        const records = [];
-        try {
-            for (const line of lines) {
-                records.push(parseRecordLine(line));
+    try {
+        if (F.existsSync(filePath)) {
+            const raw = F.readFileSync(filePath, "utf8");
+            const lines = raw.split("\n").filter((l) => l.trim().length > 0);
+            const records = [];
+            try {
+                for (const line of lines) records.push(parseRecordLine(line));
+                tail = verifyChain(records);
+                for (const record of records) seenEventIds.add(record.eventId);
+            } catch (error) {
+                corrupt = true;
+                corruptReason = error instanceof LedgerError ? error.message : "stored audit history failed verification";
             }
-            tail = verifyChain(records);
-            for (const record of records) seenEventIds.add(record.eventId);
-        } catch (error) {
-            // FAIL CLOSED: corrupt/truncated/chain-broken history.  Enter an
-            // explicit recovery state; refuse all further appends; never
-            // silently append onto a broken chain and never silently reset.
-            corrupt = true;
-            corruptReason = error instanceof LedgerError ? error.message : "stored audit history failed verification";
         }
+    } catch (error) {
+        releaseLock();
+        throw error;
     }
 
     // In-process write queue: appends never interleave mid-line.

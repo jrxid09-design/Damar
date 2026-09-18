@@ -53,6 +53,57 @@ test("durable event survives restart and is read back identically", () => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("same-process second writer is rejected and failed construction releases both locks", () => {
+    const dir = tmpDir();
+    const file = path.join(dir, "audit.jsonl");
+    const first = createFileAuditSink(file);
+    assert.throws(() => createFileAuditSink(file), /already owned/);
+    first.close();
+
+    // A directory at the journal path forces readFileSync to fail after the
+    // lock has been acquired. Construction must release the filesystem lock
+    // and the in-process ownership entry on this path.
+    const badFile = path.join(dir, "is-a-directory");
+    fs.mkdirSync(badFile);
+    assert.throws(() => createFileAuditSink(badFile));
+    assert.equal(fs.existsSync(`${badFile}.lock`), false);
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("post-load JSON tampering cannot alter journal bytes or restart parsing", () => {
+    const dir = tmpDir();
+    const file = path.join(dir, "audit.jsonl");
+    const realStringify = JSON.stringify;
+    const realParse = JSON.parse;
+    try {
+        JSON.stringify = () => "not-json";
+        JSON.parse = () => { throw new Error("tampered parse"); };
+        const sink = createFileAuditSink(file);
+        const ledger = makeLedger(sink);
+        ledger.append({ eventType: "a.b", source: "test" }, { durable: true });
+        sink.close();
+    } finally {
+        JSON.stringify = realStringify;
+        JSON.parse = realParse;
+    }
+    const reopened = createFileAuditSink(file);
+    assert.equal(reopened.describeDurable().corrupt, false);
+    assert.equal(reopened.readAll().length, 1);
+    reopened.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("dead-owner lock is reclaimed and released cleanly", () => {
+    const dir = tmpDir();
+    const file = path.join(dir, "audit.jsonl");
+    fs.writeFileSync(`${file}.lock`, JSON.stringify({ v: 1, pid: 2147483647, acquiredAtMs: 1 }));
+    const sink = createFileAuditSink(file);
+    assert.equal(sink.describeDurable().corrupt, false);
+    sink.close();
+    assert.equal(fs.existsSync(`${file}.lock`), false);
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("sequence is strictly increasing and continues across restart", () => {
     const dir = tmpDir();
     const file = path.join(dir, "audit.jsonl");

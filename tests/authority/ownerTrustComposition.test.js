@@ -169,6 +169,9 @@ test("TF-007 stale lock: a dead writer's lock is reclaimed; a live writer never 
     assert.throws(() => createFileAuditSink(sinkPath),
         (e) => e.code === "E_PERSIST_FAILED", "live writer is never stolen");
     // Simulate a crashed writer: stale pid + dead process.
+    // Release the local ownership registry first: an in-process live owner is
+    // never stealable even if an external actor tampers with its lock file.
+    sink1.close();
     fs.writeFileSync(lockPath, JSON.stringify({ v: 1, pid: 999999999, acquiredAtMs: Date.now() }), "utf8");
     const sink2 = createFileAuditSink(sinkPath);
     assert.ok(sink2, "stale lock reclaimed by a live acquirer");
