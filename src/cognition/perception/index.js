@@ -5,11 +5,15 @@
  * bounded probe requests. It never performs a probe or decides Authority.
  */
 
-const crypto = require("node:crypto");
 const { types: utilTypes } = require("node:util");
 const { BOUNDS, SCHEMA_VERSION } = require("./bounds");
 const { laws } = require("./laws");
-const { REASONS, fail } = require("./errors");
+const { REASONS, fail, PerceptionError } = require("./errors");
+const { validQuestionText } = require("./question");
+const { validProbeIdentity } = require("./probe");
+const { classifyDescriptor } = require("./classify");
+const { gainForClass } = require("./gain");
+const { pairKey, belowBound } = require("./schedule");
 
 const IS_PROXY = utilTypes.isProxy;
 const GET_DESCRIPTOR = Object.getOwnPropertyDescriptor;
@@ -17,14 +21,18 @@ const REFLECT_APPLY = Reflect.apply;
 const FREEZE = Object.freeze;
 const KV_KEY = "perception.questions.v1";
 const CLASS_COST = Object.freeze({ LOCAL: 1, INTERACTIVE: 2, REMOTE: 6, WORLD_CHANGING: 8 });
+const MAX_CITATION_SCAN = 8192;
 
-function readFields(spec, fields) {
+function readFields(spec, fields, optional = []) {
     if (!spec || typeof spec !== "object" || IS_PROXY(spec)) fail(REASONS.INVALID_RECORD, "input must be a verifiable plain object");
     let proto;
     try { proto = Object.getPrototypeOf(spec); } catch { fail(REASONS.INVALID_RECORD, "input cannot be verified"); }
     if (proto !== Object.prototype && proto !== null) fail(REASONS.INVALID_RECORD, "input must be a plain data object");
+    let keys;
+    try { keys = Reflect.ownKeys(spec); } catch { fail(REASONS.INVALID_RECORD, "input cannot be verified"); }
+    if (keys.some(key => typeof key !== "string" || (!fields.includes(key) && !optional.includes(key)))) fail(REASONS.INVALID_RECORD, "input contains unsupported fields");
     const out = {};
-    for (const field of fields) {
+    for (const field of [...fields, ...optional]) {
         let desc;
         try { desc = GET_DESCRIPTOR(spec, field); } catch { fail(REASONS.INVALID_RECORD, "input cannot be verified"); }
         if (desc && (desc.get || desc.set)) fail(REASONS.INVALID_RECORD, `accessor '${field}' is not accepted`);
@@ -54,13 +62,13 @@ function safeClone(value, depth = 0, budget = { nodes: 0 }) {
         if (typeof value === "number" && !Number.isFinite(value)) fail(REASONS.INVALID_RECORD, "non-finite data rejected");
         return value;
     }
-    if (!value || typeof value !== "object" || IS_PROXY(value) || depth > 8 || ++budget.nodes > 512) fail(REASONS.INVALID_RECORD, "unverifiable data rejected");
+    if (!value || typeof value !== "object" || IS_PROXY(value) || depth > 8 || ++budget.nodes > 32768) fail(REASONS.INVALID_RECORD, "unverifiable data rejected");
     let proto;
     try { proto = Object.getPrototypeOf(value); } catch { fail(REASONS.INVALID_RECORD, "unverifiable data rejected"); }
     if (proto !== Object.prototype && proto !== null && proto !== Array.prototype) fail(REASONS.INVALID_RECORD, "non-data object rejected");
     if (Array.isArray(value)) {
         const length = GET_DESCRIPTOR(value, "length")?.value;
-        if (!Number.isSafeInteger(length) || length < 0 || length > 128) fail(REASONS.INVALID_RECORD, "descriptor array exceeds bound");
+        if (!Number.isSafeInteger(length) || length < 0 || length > 4096) fail(REASONS.INVALID_RECORD, "descriptor array exceeds bound");
         const out = [];
         for (let i = 0; i < length; i++) {
             const d = GET_DESCRIPTOR(value, String(i));
@@ -99,7 +107,7 @@ async function createPerception({ capabilityRegistry, selfModel, worldModel, att
     for (const [port, names] of [
         [capabilityRegistry, ["get", "has", "getAvailability"]],
         [selfModel, ["unknowns"]], [worldModel, ["openContradictions", "hypotheses"]],
-        [attentionPort, ["overloadState", "peekTopTarget"]]
+        [attentionPort, ["ingestSignal", "pick", "peekTopTarget", "toGovernorPriority", "complete", "overloadState"]]
     ]) {
         if (!port || names.some(n => !resolveMethod(port, n))) fail(REASONS.INVALID_RECORD, `required upstream port missing: ${names.join("/")}`);
     }
@@ -117,6 +125,7 @@ async function createPerception({ capabilityRegistry, selfModel, worldModel, att
     bounds = FREEZE(cleanBounds);
 
     const append = resolveMethod(auditLedger, "append");
+    if (!append) fail(REASONS.AUDIT_UNAVAILABLE, "a synchronous audit sink is required");
     const getKv = resolveMethod(store, "getKv");
     const putKv = resolveMethod(store, "putKv");
     const now = () => {
@@ -125,11 +134,11 @@ async function createPerception({ capabilityRegistry, selfModel, worldModel, att
         catch { return Date.now(); }
     };
     const audit = (eventType, metadata) => {
-        if (!append) return;
         try {
-            // The callback is synchronous. Its return is intentionally ignored.
-            REFLECT_APPLY(append, auditLedger, [FREEZE({ eventType, source: "acc.perception", outcome: "ok", metadata: FREEZE({ lane: "W8-L2", ...metadata }) })]);
-        } catch { /* audit failure never creates authority */ }
+            // The callback is synchronous; only an explicit false is refusal.
+            const acknowledgement = REFLECT_APPLY(append, auditLedger, [FREEZE({ eventType, source: "acc.perception", outcome: "ok", metadata: FREEZE({ lane: "W8-L2", ...metadata }) })]);
+            if (acknowledgement === false) fail(REASONS.AUDIT_UNAVAILABLE, "synchronous audit sink rejected the event");
+        } catch { fail(REASONS.AUDIT_UNAVAILABLE, "synchronous audit acknowledgement failed"); }
     };
 
     const questions = new Map();
@@ -161,30 +170,73 @@ async function createPerception({ capabilityRegistry, selfModel, worldModel, att
     }
     // Ephemeral in-flight probe state is never recovered after restart.
     const probes = new Map();
-    const seenPairs = new Map();
-    const cycleCounts = new Map();
+    // A lifetime cap is deliberately stricter than wall-clock cycle buckets,
+    // which admit twice the intended requests at a minute rollover.
+    let probeAdmissions = 0;
     const interactiveTimes = [];
+    const attentionTargets = new Map();
+    const attentionPicked = new Set();
+
+    function reapExpired() {
+        const current = now();
+        for (const [key, probe] of probes) {
+            if (probe.state === "SCHEDULED" && current >= Date.parse(probe.request.deadline)) {
+                audit("cognition.perception.probe_expired", { probeId: probe.request.probeId, questionRef: probe.request.questionRef });
+                probes.set(key, FREEZE({ ...probe, state: "EXPIRED" }));
+            }
+        }
+    }
+
+    function findArrayRecord(array, keys, ref) {
+        if (!Array.isArray(array) || IS_PROXY(array)) return null;
+        let length;
+        try { length = GET_DESCRIPTOR(array, "length")?.value; } catch { return null; }
+        if (!Number.isSafeInteger(length) || length < 0) return null;
+        // Upstream cognition collections can exceed L2's own question bound.
+        // Inspect only the fields needed for citation and impose a scan ceiling;
+        // never clone/reject the whole upstream collection due to its size.
+        for (let i = 0, end = Math.min(length, MAX_CITATION_SCAN); i < end; i++) {
+            let item;
+            try {
+                const slot = GET_DESCRIPTOR(array, String(i));
+                if (!slot || slot.get || slot.set || !slot.value || typeof slot.value !== "object" || IS_PROXY(slot.value)) continue;
+                item = slot.value;
+            } catch { continue; }
+            let proto;
+            try { proto = Object.getPrototypeOf(item); } catch { continue; }
+            if (proto !== Object.prototype && proto !== null) continue;
+            let values;
+            try {
+                values = keys.map(key => {
+                    const d = GET_DESCRIPTOR(item, key);
+                    return d && !d.get && !d.set ? d.value : undefined;
+                });
+            } catch { continue; }
+            if (values.some(value => value === ref)) return item;
+        }
+        return null;
+    }
 
     function citation(ref) {
         let unknowns;
-        try { unknowns = safeClone(safeCall(selfModel, "unknowns")); } catch { unknowns = null; }
-        if (Array.isArray(unknowns)) {
-            const found = unknowns.find(x => x && x.subject === ref);
-            if (found) return { sourceKind: "UNKNOWN", probeCost: found.probeCost };
+        try { unknowns = safeCall(selfModel, "unknowns"); } catch { unknowns = null; }
+        const unknown = findArrayRecord(unknowns, ["subject"], ref);
+        if (unknown) {
+            let cost;
+            try { const d = GET_DESCRIPTOR(unknown, "probeCost"); cost = d && !d.get && !d.set ? d.value : undefined; } catch {}
+            return { sourceKind: "UNKNOWN", probeCost: cost };
         }
         let contradictions;
-        try { contradictions = safeClone(safeCall(worldModel, "openContradictions")); } catch { contradictions = null; }
-        if (Array.isArray(contradictions)) {
-            const found = contradictions.find(x => x && (x.contradictionSetId === ref || x.challengerRecordId === ref));
-            if (found) return { sourceKind: "CONTRADICTION", probeCost: "EXPENSIVE" };
-        }
+        try { contradictions = safeCall(worldModel, "openContradictions"); } catch { contradictions = null; }
+        if (findArrayRecord(contradictions, ["contradictionSetId"], ref)) return { sourceKind: "CONTRADICTION", probeCost: "EXPENSIVE" };
         let hypotheses;
-        try { hypotheses = safeClone(safeCall(worldModel, "hypotheses")); } catch { hypotheses = null; }
-        if (Array.isArray(hypotheses) && hypotheses.some(x => x && x.hypothesisId === ref)) return { sourceKind: "HYPOTHESIS", probeCost: "EXPENSIVE" };
+        try { hypotheses = safeCall(worldModel, "hypotheses"); } catch { hypotheses = null; }
+        if (findArrayRecord(hypotheses, ["hypothesisId"], ref)) return { sourceKind: "HYPOTHESIS", probeCost: "EXPENSIVE" };
         return null;
     }
 
     async function persist() {
+        reapExpired();
         if (!putKv) return false;
         const saved = [...questions.values()].map(q => ({ ...q }));
         await REFLECT_APPLY(putKv, store, [KV_KEY, { schemaVersion: SCHEMA_VERSION, questions: saved }]);
@@ -192,56 +244,59 @@ async function createPerception({ capabilityRegistry, selfModel, worldModel, att
     }
 
     function openQuestion(spec) {
+        reapExpired();
         const { questionRef, question } = readFields(spec, ["questionRef", "question"]);
         const citationRecord = typeof questionRef === "string" && questionRef.length <= 200 ? citation(questionRef) : null;
         if (typeof questionRef !== "string" || !questionRef || !citationRecord) {
             audit("cognition.perception.question_refused", { reason: "uncited-question" });
             fail(REASONS.UNKNOWN_QUESTION, "questionRef must cite a current W7 unknown, open contradiction, or hypothesis");
         }
-        if (typeof question !== "string" || !question.trim() || question.length > bounds.MAX_QUESTION_CHARS) fail(REASONS.INVALID_RECORD, "question text is required and bounded");
+        if (!validQuestionText(question, bounds.MAX_QUESTION_CHARS)) fail(REASONS.INVALID_RECORD, "question text is required and bounded");
         const sourceKind = citationRecord.sourceKind;
         const probeCost = ["NONE", "CHEAP", "EXPENSIVE", "OWNER"].includes(citationRecord.probeCost) ? citationRecord.probeCost : "OWNER";
         const prior = questions.get(questionRef);
         if (prior) return prior;
         if (questions.size >= bounds.MAX_QUESTIONS) fail(REASONS.BOUND_EXCEEDED, "question capacity reached");
+        audit("cognition.perception.question_opened", { questionRef, sourceKind });
+        let attentionTargetId;
+        try {
+            const ingestSignal = resolveMethod(attentionPort, "ingestSignal");
+            const signalResult = REFLECT_APPLY(ingestSignal, attentionPort, [FREEZE({
+                signalId: `w8-l2:${questionRef}`, sourceKind: "SENSOR", sourceId: "w8-l2",
+                subjectRef: FREEZE({ questionRef }), proposedUrgency: 0.5,
+                evidenceRef: FREEZE({ questionRef }), createdAtMs: now()
+            }), "PERCEIVE"]);
+            attentionTargetId = signalResult?.targetId;
+            const peek = REFLECT_APPLY(resolveMethod(attentionPort, "peekTopTarget"), attentionPort, []);
+            if (peek?.priorityClass) REFLECT_APPLY(resolveMethod(attentionPort, "toGovernorPriority"), attentionPort, [peek.priorityClass]);
+            if (typeof attentionTargetId !== "string" || !attentionTargetId) throw new Error("attention did not admit target");
+        } catch {
+            audit("cognition.perception.question_refused", { reason: "attention-unavailable" });
+            fail(REASONS.BUDGET_EXHAUSTED, "attention lane refused the question");
+        }
         const record = FREEZE({ questionRef, question: question.trim(), sourceKind, probeCost, state: "OPEN", createdAtMs: now(), accruedCost: 0, attempts: 0, lastRefusal: null });
         questions.set(questionRef, record);
-        audit("cognition.perception.question_opened", { questionRef, sourceKind });
+        attentionTargets.set(questionRef, attentionTargetId);
         return record;
     }
 
-    function classify(descriptor) {
-        const d = safeClone(descriptor);
-        // World-changing/remote use requires the full downstream Authority path.
-        const kind = typeof d.kind === "string" ? d.kind.toLowerCase() : "";
-        const source = typeof d.source === "string" ? d.source.toLowerCase() : "";
-        const descriptorClass = `${kind} ${source}`;
-        const cls = /world|actuat|write|control/.test(descriptorClass) ? "WORLD_CHANGING" :
-            /remote|network/.test(descriptorClass) ? "REMOTE" :
-            /interactive|camera|microphone|sensor/.test(descriptorClass) ? "INTERACTIVE" :
-            /local|read|query/.test(descriptorClass) ? "LOCAL" : "WORLD_CHANGING";
-        const gain = cls === "LOCAL" ? 0.7 : cls === "INTERACTIVE" ? 0.5 : cls === "REMOTE" ? 0.3 : 0.25;
-        const sensitivity = [d.sensitivity, d.dataSensitivity, d.privacyClass].find(v => typeof v === "string" && ["PRIVATE", "SENSITIVE", "PERSONAL"].includes(v.toUpperCase()));
-        const privateData = d.containsPrivateData === true || sensitivity !== undefined;
-        return { cls, gain, cost: CLASS_COST[cls], privacyClass: privateData ? "PRIVATE" : "PUBLIC" };
-    }
-
     function proposeProbe(spec) {
+        reapExpired();
         const { questionRef, probeId, capabilityId, deadline } = readFields(spec, ["questionRef", "probeId", "capabilityId", "deadline"]);
         const q = questions.get(questionRef);
         if (!q) fail(REASONS.UNKNOWN_QUESTION, "question is not open in this lane");
         if (q.state !== "OPEN") fail(REASONS.QUESTION_BLOCKED, "question is not probeable");
         if (!citation(questionRef)) {
-            questions.set(questionRef, FREEZE({ ...q, lastRefusal: "CITATION_UNAVAILABLE" }));
             audit("cognition.perception.probe_refused", { probeId: typeof probeId === "string" ? probeId : null, reason: "citation-unavailable" });
+            questions.set(questionRef, FREEZE({ ...q, lastRefusal: "CITATION_UNAVAILABLE" }));
             fail(REASONS.QUESTION_BLOCKED, "upstream citation is no longer available");
         }
-        if ([probeId, capabilityId].some(x => typeof x !== "string" || !x || x.length > 200)) fail(REASONS.INVALID_RECORD, "probeId and capabilityId are required strings");
+        if (!validProbeIdentity(probeId, capabilityId)) fail(REASONS.INVALID_RECORD, "probeId and capabilityId are required strings");
         if (typeof deadline !== "number" && typeof deadline !== "string") fail(REASONS.INVALID_RECORD, "deadline must be an absolute timestamp");
         const deadlineMs = typeof deadline === "number" ? deadline : Date.parse(deadline);
         if (!Number.isFinite(deadlineMs) || deadlineMs <= now()) fail(REASONS.INVALID_RECORD, "deadline must be an absolute future timestamp");
-        const pair = `${questionRef}\u0000${probeId}`;
-        if (seenPairs.has(pair)) return seenPairs.get(pair);
+        const pair = pairKey(questionRef, probeId);
+        if (probes.has(pair)) return probes.get(pair);
         let exists = false, descriptor = null, availability = null;
         try {
             exists = REFLECT_APPLY(resolveMethod(capabilityRegistry, "has"), capabilityRegistry, [capabilityId]) === true;
@@ -252,7 +307,7 @@ async function createPerception({ capabilityRegistry, selfModel, worldModel, att
             audit("cognition.perception.probe_refused", { probeId, reason: "unknown-capability" });
             fail(REASONS.UNKNOWN_CAPABILITY, "capability descriptor unavailable");
         }
-        const { cls, gain, cost, privacyClass } = classify(descriptor);
+        const { cls, gain, cost, privacyClass } = classifyDescriptor(descriptor, safeClone, CLASS_COST, gainForClass);
         audit("cognition.perception.probe_classified", { probeId, class: cls, gain, privacyClass, capabilityId });
         let availabilityState;
         try {
@@ -261,9 +316,9 @@ async function createPerception({ capabilityRegistry, selfModel, worldModel, att
             if (availabilityDescriptor && !availabilityDescriptor.get && !availabilityDescriptor.set) availabilityState = availabilityDescriptor.value;
         } catch { availabilityState = undefined; }
         if (availabilityState !== "AVAILABLE") {
+            audit("cognition.perception.authorization_refused", { probeId, reason: "capability-unavailable" });
             const updated = FREEZE({ ...q, state: "OPEN", lastRefusal: "CAPABILITY_UNAVAILABLE" });
             questions.set(questionRef, updated);
-            audit("cognition.perception.authorization_refused", { probeId, reason: "capability-unavailable" });
             return FREEZE({ state: "PARKED", reason: "OWNER", questionRef, probeId });
         }
         if (q.probeCost === "OWNER") {
@@ -272,17 +327,14 @@ async function createPerception({ capabilityRegistry, selfModel, worldModel, att
         }
         const hourAgo = now() - 60 * 60_000;
         while (interactiveTimes.length && interactiveTimes[0] <= hourAgo) interactiveTimes.shift();
-        const cycleKey = Math.floor(now() / 60_000);
-        for (const key of cycleCounts.keys()) if (key < cycleKey) cycleCounts.delete(key);
-        const cycleCount = cycleCounts.get(cycleKey) ?? 0;
         const activeCount = [...probes.values()].filter(p => p.state === "SCHEDULED").length;
         const isInteractive = cls === "INTERACTIVE";
-        if (safeCall(attentionPort, "overloadState") === "HARD" || cycleCount >= bounds.MAX_PROBES_PER_CYCLE ||
+        if (safeCall(attentionPort, "overloadState") === "HARD" || probeAdmissions >= bounds.MAX_PROBES_PER_CYCLE ||
             (isInteractive && interactiveTimes.length >= bounds.MAX_INTERACTIVE_PROBES_PER_HOUR) ||
-            q.attempts >= bounds.MAX_ATTEMPTS_PER_QUESTION || activeCount >= bounds.MAX_CONCURRENT_PROBES) {
+            !belowBound(probeAdmissions, bounds.MAX_PROBES_PER_CYCLE) || q.attempts >= bounds.MAX_ATTEMPTS_PER_QUESTION || activeCount >= bounds.MAX_CONCURRENT_PROBES) {
+            audit("cognition.perception.probe_refused", { probeId, reason: "budget-exhausted" });
             const updated = FREEZE({ ...q, state: "OPEN", lastRefusal: "BUDGET_EXHAUSTED" });
             questions.set(questionRef, updated);
-            audit("cognition.perception.probe_refused", { probeId, reason: "budget-exhausted" });
             return FREEZE({ state: "DEFERRED", reason: "BUDGET_EXHAUSTED", questionRef, probeId });
         }
         const request = FREEZE({
@@ -291,26 +343,47 @@ async function createPerception({ capabilityRegistry, selfModel, worldModel, att
             deadline: new Date(deadlineMs).toISOString(), state: "REQUESTED",
             authorityRequired: cls !== "LOCAL", dispatch: null
         });
+        audit("cognition.perception.authorization_allowed", { probeId, questionRef, class: cls, privacyClass });
+        audit("cognition.perception.probe_schedule_requested", { probeId, questionRef, class: cls, cost, authorityRequired: request.authorityRequired });
+        if (!attentionPicked.has(questionRef)) {
+            try {
+                const top = REFLECT_APPLY(resolveMethod(attentionPort, "peekTopTarget"), attentionPort, []);
+                if (!top || top.targetId !== attentionTargets.get(questionRef)) {
+                    audit("cognition.perception.authorization_refused", { probeId, reason: "attention-deferred" });
+                    return FREEZE({ state: "DEFERRED", reason: "BUDGET_EXHAUSTED", questionRef, probeId });
+                }
+                const picked = REFLECT_APPLY(resolveMethod(attentionPort, "pick"), attentionPort, []);
+                if (!picked || picked.targetId !== attentionTargets.get(questionRef)) {
+                    audit("cognition.perception.authorization_refused", { probeId, reason: "attention-deferred" });
+                    return FREEZE({ state: "DEFERRED", reason: "BUDGET_EXHAUSTED", questionRef, probeId });
+                }
+                REFLECT_APPLY(resolveMethod(attentionPort, "toGovernorPriority"), attentionPort, [picked.priorityClass]);
+                attentionPicked.add(questionRef);
+            } catch {
+                audit("cognition.perception.authorization_refused", { probeId, reason: "attention-unavailable" });
+                return FREEZE({ state: "DEFERRED", reason: "BUDGET_EXHAUSTED", questionRef, probeId });
+            }
+        }
         const nextQ = FREEZE({ ...q, attempts: q.attempts + 1, accruedCost: q.accruedCost + cost });
         questions.set(questionRef, nextQ);
         const scheduled = FREEZE({ request, state: "SCHEDULED", createdAtMs: now() });
-        probes.set(probeId, scheduled);
-        seenPairs.set(pair, scheduled);
-        cycleCounts.set(cycleKey, cycleCount + 1);
+        probes.set(pair, scheduled);
+        probeAdmissions++;
         if (isInteractive) interactiveTimes.push(now());
-        audit("cognition.perception.probe_scheduled", { probeId, questionRef, class: cls, cost, authorityRequired: request.authorityRequired });
         return scheduled;
     }
 
     function scheduleProbe(spec) { return proposeProbe(spec); }
 
     function probeResult(spec) {
-        const { probeId, observation, outcome = "SUCCESS" } = readFields(spec, ["probeId", "observation", "outcome"]);
-        const scheduled = probes.get(probeId);
+        const { probeId, questionRef, observation, outcome = "SUCCESS" } = readFields(spec, ["probeId", "observation", "outcome"], ["questionRef"]);
+        if (questionRef !== undefined && (typeof questionRef !== "string" || !questionRef)) fail(REASONS.INVALID_RECORD, "questionRef must be a non-empty string when supplied");
+        const match = findProbe(probeId, questionRef);
+        const scheduled = match?.record;
         if (!scheduled || scheduled.state !== "SCHEDULED") fail(REASONS.PROBE_UNAVAILABLE, "probe is not in flight");
-        if (now() > Date.parse(scheduled.request.deadline)) {
-            probes.set(probeId, FREEZE({ ...scheduled, state: "EXPIRED" }));
+        if (now() >= Date.parse(scheduled.request.deadline)) {
             audit("cognition.perception.probe_expired", { probeId });
+            probes.set(match.key, FREEZE({ ...scheduled, state: "EXPIRED" }));
             return FREEZE({ state: "EXPIRED", probeId });
         }
         const verifyCompletion = resolveMethod(trustedResultAdapter, "verifyCompletion");
@@ -330,41 +403,84 @@ async function createPerception({ capabilityRegistry, selfModel, worldModel, att
         }
         if (outcome !== "SUCCESS") {
             const q = questions.get(scheduled.request.questionRef);
-            questions.set(q.questionRef, FREEZE({ ...q, state: "OPEN", lastRefusal: "PROBE_DENIED" }));
-            probes.set(probeId, FREEZE({ ...scheduled, state: "BLOCKED" }));
             audit("cognition.perception.authorization_refused", { probeId, reason: "probe-denied" });
+            questions.set(q.questionRef, FREEZE({ ...q, state: "OPEN", lastRefusal: "PROBE_DENIED" }));
+            probes.set(match.key, FREEZE({ ...scheduled, state: "BLOCKED" }));
             return FREEZE({ state: "BLOCKED", probeId, observation: null });
         }
         const safeObservation = safeClone(observation);
-        if (!safeObservation || typeof safeObservation !== "object" || safeObservation.tier !== "T4" || !safeObservation.sensor || !safeObservation.frame) fail(REASONS.INVALID_RECORD, "probe result must be an L1 T4 Observation");
-        probes.set(probeId, FREEZE({ ...scheduled, state: "COMPLETED" }));
+        if (!safeObservation || typeof safeObservation !== "object" || safeObservation.tier !== "T4" || !safeObservation.sensor || !Object.hasOwn(safeObservation, "frame") || !Object.hasOwn(safeObservation, "quality")) fail(REASONS.INVALID_RECORD, "probe result must be an L1 T4 Observation");
         audit("cognition.perception.probe_completed", { probeId });
+        probes.set(match.key, FREEZE({ ...scheduled, state: "COMPLETED" }));
         // The caller must pass this canonical Observation through the bound L1 bridge.
         return FREEZE({ state: "COMPLETED", probeId, observation: safeObservation, sensoriumBridgeRequired: true });
     }
 
     function closeQuestion(questionRef) {
+        reapExpired();
         const q = questions.get(questionRef);
         if (!q) fail(REASONS.UNKNOWN_QUESTION, "question is unknown");
         const closed = FREEZE({ ...q, state: "CLOSED", closedAtMs: now() });
+        audit("cognition.perception.question_closed", { questionRef });
+        if (attentionPicked.has(questionRef)) {
+            const attentionTargetId = attentionTargets.get(questionRef);
+            REFLECT_APPLY(resolveMethod(attentionPort, "complete"), attentionPort, [attentionTargetId]);
+            attentionPicked.delete(questionRef);
+        }
         questions.set(questionRef, closed);
-        for (const [probeId, probe] of probes) {
+        for (const [key, probe] of probes) {
             if (probe.request.questionRef === questionRef && probe.state === "SCHEDULED") {
-                probes.set(probeId, FREEZE({ ...probe, state: "CANCELLED" }));
+                probes.set(key, FREEZE({ ...probe, state: "CANCELLED" }));
             }
         }
-        audit("cognition.perception.question_closed", { questionRef });
         return closed;
     }
 
-    function getQuestion(questionRef) { return questions.get(questionRef) ?? null; }
-    function openQuestions() { return FREEZE([...questions.values()].filter(q => q.state !== "CLOSED")); }
-    function getProbe(probeId) { return probes.get(probeId) ?? null; }
-    function probeCounts() { return FREEZE({ questions: questions.size, inFlight: [...probes.values()].filter(p => p.state === "SCHEDULED").length }); }
+    function findProbe(probeId, questionRef) {
+        if (typeof probeId !== "string") return null;
+        if (typeof questionRef === "string") {
+            const key = pairKey(questionRef, probeId);
+            const record = probes.get(key);
+            return record ? { key, record } : null;
+        }
+        let found = null;
+        for (const [key, record] of probes) {
+            if (record.request.probeId !== probeId) continue;
+            if (found) return null; // ambiguous legacy lookup fails closed
+            found = { key, record };
+        }
+        return found;
+    }
+
+    function getQuestion(questionRef) { reapExpired(); return questions.get(questionRef) ?? null; }
+    function openQuestions() { reapExpired(); return FREEZE([...questions.values()].filter(q => q.state !== "CLOSED")); }
+    function getProbe(probeId, questionRef) { reapExpired(); return findProbe(probeId, questionRef)?.record ?? null; }
+    function probeCounts() { reapExpired(); return FREEZE({ questions: questions.size, inFlight: [...probes.values()].filter(p => p.state === "SCHEDULED").length }); }
+
+    function auditedOperation(operation, eventType) {
+        return (...args) => {
+            try { return operation(...args); }
+            catch (error) {
+                let auditFailure = false;
+                try {
+                    const reason = error && typeof error === "object" && !IS_PROXY(error) ? GET_DESCRIPTOR(error, "reason") : null;
+                    auditFailure = error instanceof PerceptionError && reason && !reason.get && reason.value === REASONS.AUDIT_UNAVAILABLE;
+                } catch { auditFailure = false; }
+                if (!auditFailure) {
+                    try { audit(eventType, { reason: "operation-rejected" }); } catch { /* original failure remains closed */ }
+                }
+                throw error;
+            }
+        };
+    }
 
     if (!coldStart) audit("cognition.perception.recovered", { questions: questions.size, abandonedInflight: 0 });
     return FREEZE({ schemaVersion: SCHEMA_VERSION, perceptionColdStart: coldStart,
-        openQuestion, proposeProbe, scheduleProbe, probeResult, closeQuestion,
+        openQuestion: auditedOperation(openQuestion, "cognition.perception.question_refused"),
+        proposeProbe: auditedOperation(proposeProbe, "cognition.perception.probe_refused"),
+        scheduleProbe: auditedOperation(proposeProbe, "cognition.perception.probe_refused"),
+        probeResult: auditedOperation(probeResult, "cognition.perception.probe_result_refused"),
+        closeQuestion: auditedOperation(closeQuestion, "cognition.perception.question_refused"),
         getQuestion, openQuestions, getProbe, probeCounts, persist, laws, bounds });
 }
 
