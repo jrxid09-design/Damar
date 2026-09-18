@@ -1744,7 +1744,21 @@ function composeDispatcher3({
         }
 
         let sanitizedOutput;
+        let outputOutcome;
         try {
+            // The outcome token is read from the RAW output through an own data
+            // descriptor. The sanitized copy silently drops accessor and
+            // non-plain properties, so reading the outcome back from it could
+            // turn an ambiguous ("UNKNOWN_OUTCOME") description into EXECUTED.
+            if (actuatorOutput !== null && typeof actuatorOutput === "object") {
+                const outcomeDescriptor = Object.getOwnPropertyDescriptor(actuatorOutput, "outcome");
+                if (outcomeDescriptor) {
+                    if (!Object.prototype.hasOwnProperty.call(outcomeDescriptor, "value")) {
+                        throw fail3(REASONS3.ACTUATOR_MALFORMED_RESULT, "actuator outcome must be a data property");
+                    }
+                    outputOutcome = outcomeDescriptor.value;
+                }
+            }
             sanitizedOutput = sanitizeActuatorOutput3(actuatorOutput);
         } catch (e) {
             lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
@@ -1762,9 +1776,6 @@ function composeDispatcher3({
             noteCompleted(contentKey, { result, request, intentId: request.intentId });
             return result;
         }
-        const outputOutcome = sanitizedOutput && typeof sanitizedOutput === "object"
-            ? Object.getOwnPropertyDescriptor(sanitizedOutput, "outcome")?.value
-            : undefined;
         if (outputOutcome === "REFUSED" || outputOutcome === "STOPPED" || outputOutcome === "UNKNOWN_OUTCOME") {
             lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
             const result = buildExecutionResult3({

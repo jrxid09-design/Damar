@@ -15,6 +15,11 @@ const text = (value, name, max = 128) => {
     }
     return value;
 };
+// Same reference vocabulary the canonical audit ledger applies to subject ids.
+// An effectorId the ledger cannot record would make every command of that
+// effector unauditable, which the adapter (correctly) refuses forever -- so an
+// unusable id is rejected here, at registration, instead of at first command.
+const EFFECTOR_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
 
 function ownDataRecord(value, name) {
     if (!value || typeof value !== "object" || isProxy(value)) {
@@ -108,8 +113,10 @@ function validateEffectorDescriptor(input) {
         throw new TypeError("invalid maxRateHz");
     }
     if (typeof source.deadmanRequired !== "boolean") throw new TypeError("deadmanRequired must be boolean");
+    const effectorId = text(source.effectorId, "effectorId");
+    if (!EFFECTOR_ID_PATTERN.test(effectorId)) throw new TypeError("invalid effector descriptor effectorId");
     return Object.freeze({
-        effectorId: text(source.effectorId, "effectorId"),
+        effectorId,
         deviceRef: text(source.deviceRef, "deviceRef"),
         kind,
         capabilityId: text(source.capabilityId, "capabilityId", 256),
