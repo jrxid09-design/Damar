@@ -1303,7 +1303,7 @@ async function buildRuntimeCoreInternal({
                 // internally to a real Date.now()-based clock) -- the
                 // bridge defaults the same way, rather than coupling to
                 // `presenceClock`, an unrelated subsystem's clock.
-                auditLedger: cognitionAuditLedger
+                auditLedger: cognitionAuditLedgerResolved
             });
         }
     }
