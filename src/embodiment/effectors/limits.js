@@ -1,7 +1,7 @@
 "use strict";
 
 const { types } = require("node:util");
-const { MAX_ADAPTER_RATE_HZ } = require("./laws");
+const { MAX_ADAPTER_RATE_HZ, isPhysicalEffector } = require("./laws");
 const isProxy = types.isProxy.bind(types);
 const REQUEST_FIELDS = Object.freeze([
     "executionId", "intentId", "capabilityId", "operation", "principal", "scope", "parameters"
@@ -57,7 +57,7 @@ function extractParameters(value, descriptor) {
         }
         const d = Object.getOwnPropertyDescriptor(value, key);
         if (!d || !Object.prototype.hasOwnProperty.call(d, "value") || !d.enumerable) throw new TypeError("parameters must use enumerable data properties");
-        if (descriptor.kind === "PHYSICAL") {
+        if (isPhysicalEffector(descriptor)) {
             const rule = descriptor.physicalLimits && descriptor.physicalLimits[key];
             if (!rule || typeof d.value !== "number" || !Number.isFinite(d.value)) throw new TypeError(`undeclared or nonnumeric physical parameter '${key}'`);
             result[key] = d.value;
@@ -113,20 +113,21 @@ function checkCommandLimits(descriptor, parameters, state, nowMs) {
     if (!descriptor || !state || typeof nowMs !== "number" || !Number.isFinite(nowMs)) return Object.freeze({ allowed: false, reason: "INVALID_LIMIT_CONTEXT" });
     try { parameters = extractParameters(parameters, descriptor); } catch { return Object.freeze({ allowed: false, reason: "INVALID_PARAMETERS" }); }
     if (state.inFlight) return Object.freeze({ allowed: false, reason: "COMMAND_IN_FLIGHT" });
+    if (state.lastCommandAtMs !== null && nowMs < state.lastCommandAtMs) return Object.freeze({ allowed: false, reason: "CLOCK_ROLLBACK" });
     const rate = Math.min(MAX_ADAPTER_RATE_HZ, descriptor.maxRateHz || MAX_ADAPTER_RATE_HZ);
     const interval = 1000 / rate;
     if (state.lastCommandAtMs !== null && nowMs - state.lastCommandAtMs < interval) {
         return Object.freeze({ allowed: false, reason: "RATE_LIMIT" });
     }
     const declared = descriptor.physicalLimits;
-    if (descriptor.kind === "PHYSICAL" && (!declared || typeof declared !== "object")) {
+    if (isPhysicalEffector(descriptor) && (!declared || typeof declared !== "object")) {
         return Object.freeze({ allowed: false, reason: "MISSING_PHYSICAL_LIMITS" });
     }
     if (declared && parameters && typeof parameters === "object") {
         for (const key of Object.keys(parameters)) {
             const rule = declared[key];
             const value = parameters[key];
-            if (descriptor.kind === "PHYSICAL" && typeof value === "number" && !rule) {
+            if (isPhysicalEffector(descriptor) && typeof value === "number" && !rule) {
                 return Object.freeze({ allowed: false, reason: "UNDECLARED_PHYSICAL_PARAMETER", parameter: key });
             }
             if (typeof value !== "number") continue;
@@ -135,9 +136,9 @@ function checkCommandLimits(descriptor, parameters, state, nowMs) {
                 return Object.freeze({ allowed: false, reason: "LIMIT_REFUSAL", parameter: key });
             }
             if (Number.isFinite(rule.windowMs) && Number.isFinite(rule.maxPerWindow)) {
-                const windowStart = Math.floor(nowMs / rule.windowMs) * rule.windowMs;
-                const previous = state.windows.get(key);
-                const total = previous && previous.start === windowStart ? previous.total : 0;
+                const retained = (state.windows.get(key) || []).filter((item) => item.atMs > nowMs - rule.windowMs);
+                state.windows.set(key, retained);
+                const total = retained.reduce((sum, item) => sum + item.amount, 0);
                 if (total + Math.abs(value) > rule.maxPerWindow) {
                     return Object.freeze({ allowed: false, reason: "WINDOW_LIMIT_REFUSAL", parameter: key });
                 }
@@ -155,10 +156,9 @@ function recordCommand(descriptor, parameters, state, nowMs) {
         for (const key of Object.keys(parameters)) {
             const rule = declared[key];
             if (!rule || !Number.isFinite(rule.windowMs) || rule.windowMs <= 0 || !Number.isFinite(rule.maxPerWindow)) continue;
-            const start = Math.floor(nowMs / rule.windowMs) * rule.windowMs;
-            const previous = state.windows.get(key);
-            const total = previous && previous.start === start ? previous.total : 0;
-            state.windows.set(key, { start, total: total + Math.abs(parameters[key]) });
+            const retained = (state.windows.get(key) || []).filter((item) => item.atMs > nowMs - rule.windowMs);
+            retained.push({ atMs: nowMs, amount: Math.abs(parameters[key]) });
+            state.windows.set(key, retained);
         }
     }
 }
