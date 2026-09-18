@@ -4,7 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 
 const { createSpatialModel, BOUNDS } = require("../../../src/cognition/spatial");
-const { buildSafeSpatialValue, makeSceneNode } = require("../../../src/cognition/spatial/records");
+const { buildSafeSpatialValue, makeSceneNode, readSpecFields } = require("../../../src/cognition/spatial/records");
 const { deserialize } = require("../../../src/cognition/spatial/store");
 const { canonicalRegionKey } = require("../../../src/cognition/spatial/records");
 
@@ -813,3 +813,12 @@ test("L3-audit-19: a hostile constructor getter on a returned real promise canno
     }
 });
 
+test("L3 rejects a top-level Proxy spec before Object.keys can run its traps", () => {
+    let traps = 0;
+    const spec = new Proxy({}, {
+        ownKeys() { traps += 1; throw new Error("trap ran"); },
+        getOwnPropertyDescriptor() { traps += 1; throw new Error("trap ran"); }
+    });
+    assert.throws(() => readSpecFields(spec, ["frameId"]), /Proxy/);
+    assert.equal(traps, 0);
+});

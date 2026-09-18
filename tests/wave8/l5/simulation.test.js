@@ -1091,6 +1091,26 @@ test("L5-audit-25: widened construction bounds do not legitimise over-limit pers
         validUntilMs: nowMs - 5000 + BOUNDS.TTL_MS, generatedAtMs: nowMs - 5000
     };
     assert.equal((await loadWith(legitimate, widened)).getResult("good").tokensUsed, 5);
+
+    const widenedRun = { ...goodRun, budgetTokens: 150_000 };
+    const widenedValid = {
+        ...legitimate, tokensUsed: 120_000,
+        validUntilMs: nowMs - 5000 + widened.TTL_MS
+    };
+    const widenedSim = await createSimulationSandbox({
+        store: {
+            async getKv() {
+                return {
+                    runs: { good: widenedRun }, results: { good: widenedValid },
+                    budget: { tokenLedger: [], invalidatedAssumptions: [] }
+                };
+            },
+            async putKv() {}
+        },
+        clock: { nowMs: () => nowMs }, bounds: widened
+    });
+    assert.equal(widenedSim.getResult("good").tokensUsed, 120_000,
+        "a record created under accepted wider bounds remains valid after restart");
 });
 
 test("L5-audit-26: a hostile `call` getter on the append function cannot detach a rejection or hide the audit", async () => {
@@ -1156,4 +1176,30 @@ test("L5-audit-27: a hostile constructor getter on a returned real promise canno
     }
 });
 
+test("L5 rejects a top-level Proxy spec before any descriptor trap runs", async () => {
+    let traps = 0;
+    const spec = new Proxy({}, {
+        getOwnPropertyDescriptor() { traps += 1; throw new Error("trap ran"); },
+        ownKeys() { traps += 1; throw new Error("trap ran"); }
+    });
+    const sim = await createSimulationSandbox({ clock: { nowMs: () => 1_000_000 } });
+    await assertRejectsReason(sim.startRun(spec), "INVALID_RECORD");
+    assert.equal(traps, 0);
+});
 
+test("L5 rejection auditing reads hostile error fields through own data descriptors", async () => {
+    let getterCalls = 0;
+    const injectedError = {};
+    Object.defineProperty(injectedError, "reason", {
+        get() { getterCalls += 1; throw new Error("hostile reason getter"); }
+    });
+    const events = [];
+    const sim = await createSimulationSandbox({
+        clock: { nowMs: () => 1_000_000 },
+        store: { async getKv() { return null; }, async putKv() { throw injectedError; } },
+        auditLedger: { append(event) { events.push(event); return true; } }
+    });
+    await assert.rejects(sim.persist(), (err) => err === injectedError);
+    assert.equal(getterCalls, 0);
+    assert.ok(events.some((event) => event.eventType === "cognition.simulation.cross_store_write_rejected"));
+});

@@ -20,6 +20,7 @@ const { BOUNDS, SCHEMA_VERSION } = require("./bounds");
 const { sanitizeBounds } = require("../core/bounds");
 const { laws } = require("./laws");
 const utilTypes = require("node:util").types;
+const IS_PROXY = utilTypes.isProxy;
 const { isDeepStrictEqual } = require("node:util");
 /** `Object.getOwnPropertyDescriptor` lewat intrinsic tetap (tanpa pencarian properti). */
 const GET_OWN_DESCRIPTOR = Object.getOwnPropertyDescriptor;
@@ -53,7 +54,7 @@ function resolveAuditAppend(auditLedger) {
         if (level === Object.prototype || level === Function.prototype) break;
         if (seen.has(level)) break;
         seen.add(level);
-        if (utilTypes.isProxy(level)) return null;
+        if (IS_PROXY(level)) return null;
         let desc;
         try {
             desc = Object.getOwnPropertyDescriptor(level, "append");

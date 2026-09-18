@@ -13,6 +13,7 @@
 const { REASONS, fail, SimulationError } = require("./errors");
 const { BOUNDS } = require("./bounds");
 const utilTypes = require("node:util").types;
+const IS_PROXY = utilTypes.isProxy;
 
 const DANGEROUS_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 const MAX_SCAN_DEPTH = 12;
@@ -43,7 +44,7 @@ function buildSafeSimValue(value, depth = 0, budget) {
     // Reflect.ownKeys, getPrototypeOf). Pada Proxy, semuanya menjalankan trap
     // milik pemanggil, jadi "pembacaan lewat deskriptor" TIDAK cukup -- nilainya
     // sudah menjalankan kode sebelum validasi (audit Wave8 L3/L5).
-    if (utilTypes.isProxy(value)) {
+    if (IS_PROXY(value)) {
         fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "nilai simulasi tidak boleh berupa Proxy");
     }
     if (depth > MAX_SCAN_DEPTH) fail(REASONS.EXECUTABLE_MATERIAL_REJECTED, "nilai simulasi terlalu dalam untuk diverifikasi dengan aman");
