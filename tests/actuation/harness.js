@@ -68,7 +68,7 @@ const isProxyValue = require("node:util").types.isProxy.bind(require("node:util"
 // instead of falling through to EXECUTED.
 const UNSUPPORTED_OUTCOME = Symbol("unsupported-actuator-outcome");
 function readActuatorOutcome(value) {
-    if (value === null || typeof value !== "object") return undefined;
+    if (value === null || (typeof value !== "object" && typeof value !== "function")) return undefined;
     if (isProxyValue(value)) return UNSUPPORTED_OUTCOME;
     if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
         const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
@@ -744,7 +744,7 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
             noteCompleted(contentKey, { result, request, intentId: request.intentId });
             return result;
         }
-        if (["REFUSED", "STOPPED", "UNKNOWN_OUTCOME"].includes(outputOutcome)) {
+        if (["REFUSED", "STOPPED", "UNKNOWN_OUTCOME", "UNVERIFIED"].includes(outputOutcome)) {
             lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());
             const result = buildExecutionResult({
                 executionRequest: request,

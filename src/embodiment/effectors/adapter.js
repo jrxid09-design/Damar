@@ -22,12 +22,12 @@ function isLedgerAcknowledgment(value, expectedEventType) {
 }
 
 // The driver's own outcome description, read from the RAW report. Only an own
-// DATA property of a non-Proxy object is readable; an accessor, an inherited
-// description or a Proxy is `unreadable`, and the caller must fail closed as
-// UNKNOWN_OUTCOME rather than let an ambiguous physical outcome fall through
-// to EXECUTED.
+// DATA property of a non-Proxy object or function is readable; an accessor, an
+// inherited description or a Proxy is `unreadable`, and the caller must fail
+// closed as UNKNOWN_OUTCOME rather than let an ambiguous physical outcome fall
+// through to EXECUTED.
 function readReportOutcome(value) {
-    if (value === null || typeof value !== "object") return { value: undefined };
+    if (value === null || (typeof value !== "object" && typeof value !== "function")) return { value: undefined };
     if (isProxy(value)) return { unreadable: true };
     if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
         const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
@@ -185,13 +185,13 @@ function createEffectorAdapter({ descriptor, invoke, audit, isCanonicalRequest, 
                 return Object.freeze({ outcome: OUTCOME.UNKNOWN_OUTCOME, reason: "TRANSPORT_UNREADABLE" });
             }
             const transportOutcome = transport.value;
-            if (transportOutcome === OUTCOME.REFUSED || transportOutcome === OUTCOME.STOPPED || transportOutcome === OUTCOME.UNKNOWN_OUTCOME) {
+            if (transportOutcome === OUTCOME.REFUSED || transportOutcome === OUTCOME.STOPPED ||
+                transportOutcome === OUTCOME.UNKNOWN_OUTCOME || transportOutcome === OUTCOME.UNVERIFIED) {
                 note("command-result", safeRequest, transportOutcome);
-                return Object.freeze({
-                    outcome: transportOutcome,
-                    reason: transportOutcome === OUTCOME.REFUSED ? "TRANSPORT_REFUSED"
-                        : transportOutcome === OUTCOME.STOPPED ? "TRANSPORT_STOPPED" : "TRANSPORT_UNKNOWN"
-                });
+                const reason = transportOutcome === OUTCOME.REFUSED ? "TRANSPORT_REFUSED"
+                    : transportOutcome === OUTCOME.STOPPED ? "TRANSPORT_STOPPED"
+                        : transportOutcome === OUTCOME.UNVERIFIED ? "TRANSPORT_UNVERIFIED" : "TRANSPORT_UNKNOWN";
+                return Object.freeze({ outcome: transportOutcome, reason });
             }
             if (!verify && canonicalDescriptor.hazardClass === HAZARD_CLASS.NONE) {
                 if (!note("command-result", safeRequest, OUTCOME.EXECUTED)) return Object.freeze({ outcome: OUTCOME.UNKNOWN_OUTCOME, reason: "AUDIT_UNAVAILABLE" });

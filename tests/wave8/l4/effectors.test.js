@@ -10,6 +10,7 @@ const { validateCalibration, applyCalibration, auditCalibrationChange } = requir
 const { MAX_EFFECTORS, MAX_ADAPTER_RATE_HZ, OUTCOME } = require("../../../src/embodiment/effectors/laws");
 const { makeActuationHarness } = require("../../actuation/harness");
 const { createAuditLedger } = require("../../../src/runtime/auditLedger");
+const { isRefValue } = require("../../../src/runtime/auditLedger/ids");
 const utilTypes = require("node:util").types;
 
 const auditSink = (events = []) => (event) => { events.push(event); return true; };
@@ -80,6 +81,10 @@ test("L4 enforces frozen descriptor enums and requires limits for MOTOR/RELAY", 
     assert.throws(() => validateEffectorDescriptor(physicalDescriptor({ effectorId: "arm 1" })), /effectorId/);
     assert.throws(() => validateEffectorDescriptor(physicalDescriptor({ effectorId: "-lead" })), /effectorId/);
     assert.equal(validateEffectorDescriptor(physicalDescriptor({ effectorId: "arm.left.actuator.primary" })).effectorId, "arm.left.actuator.primary");
+    // Pinned to the ledger's own reference vocabulary, so the two cannot drift.
+    assert.equal(isRefValue("arm.left.actuator.primary"), true);
+    assert.equal(isRefValue("arm 1"), false);
+    assert.equal(isRefValue("-lead"), false);
 });
 
 test("L4 direct factory requires a canonical-request verifier and rejects unbranded requests", async () => {
@@ -358,7 +363,10 @@ test("L4 postcondition verifier receives no command-channel report", async () =>
 });
 
 test("L4 an unreadable driver outcome fails closed instead of executing", async () => {
-    const descriptor = validateEffectorDescriptor(physicalDescriptor({ hazardClass: "NONE" }));
+    const descriptor = validateEffectorDescriptor(physicalDescriptor({
+        hazardClass: "NONE",
+        physicalLimits: { move: { min: -10, max: 10, windowMs: 1000, maxPerWindow: 50 } }
+    }));
     let now = 0;
     let report;
     const adapter = createTestEffectorAdapter({ descriptor, audit: auditSink(), now: () => now, invoke: async () => report });
@@ -367,22 +375,41 @@ test("L4 an unreadable driver outcome fails closed instead of executing", async 
         report = next;
         return adapter.execute(gatedRequest({ move: 1 }, `unreadable-${now}`));
     };
-    // Own accessor, inherited description, and Proxy reports cannot be read as
-    // command-channel data, so they are UNKNOWN_OUTCOME rather than EXECUTED.
     class Inherited { get outcome() { return OUTCOME.UNKNOWN_OUTCOME; } }
-    for (const unreadable of [
-        { get outcome() { return OUTCOME.UNKNOWN_OUTCOME; } },
-        new Inherited(),
-        new Proxy({ outcome: OUTCOME.UNKNOWN_OUTCOME }, {})
-    ]) {
-        const result = await run(unreadable);
-        assert.equal(result.outcome, OUTCOME.UNKNOWN_OUTCOME);
-        assert.equal(result.reason, "TRANSPORT_UNREADABLE");
+    const callable = () => {};
+    callable.outcome = OUTCOME.UNKNOWN_OUTCOME;
+    const callableAccessor = () => {};
+    Object.defineProperty(callableAccessor, "outcome", { get() { return OUTCOME.UNKNOWN_OUTCOME; } });
+    const cases = [
+        // Unreadable descriptions cannot be command-channel data: fail closed.
+        [{ get outcome() { return OUTCOME.UNKNOWN_OUTCOME; } }, OUTCOME.UNKNOWN_OUTCOME, "TRANSPORT_UNREADABLE"],
+        [new Inherited(), OUTCOME.UNKNOWN_OUTCOME, "TRANSPORT_UNREADABLE"],
+        [new Proxy({ outcome: OUTCOME.UNKNOWN_OUTCOME }, {}), OUTCOME.UNKNOWN_OUTCOME, "TRANSPORT_UNREADABLE"],
+        [callableAccessor, OUTCOME.UNKNOWN_OUTCOME, "TRANSPORT_UNREADABLE"],
+        // A readable own data property is honoured, even on a callable report.
+        [callable, OUTCOME.UNKNOWN_OUTCOME, "TRANSPORT_UNKNOWN"],
+        // No outcome described: the clean success path is unchanged.
+        ["sent", OUTCOME.EXECUTED, ""],
+        [{ ok: true }, OUTCOME.EXECUTED, ""]
+    ];
+    for (const [shape, outcome, reason] of cases) {
+        const result = await run(shape);
+        assert.equal(result.outcome, outcome);
+        if (reason) assert.equal(result.reason, reason);
     }
-    // A readable own data property is still honoured: a clean driver is
-    // unaffected by the unreadable-report rule.
-    assert.equal((await run({ outcome: "OK" })).outcome, OUTCOME.EXECUTED);
-    assert.equal((await run("sent")).outcome, OUTCOME.EXECUTED);
+});
+
+test("L4 a driver-reported UNVERIFIED token never becomes EXECUTED", async () => {
+    const descriptor = validateEffectorDescriptor(physicalDescriptor({ hazardClass: "NONE" }));
+    const adapter = createTestEffectorAdapter({
+        descriptor, audit: auditSink(), invoke: async () => ({ outcome: OUTCOME.UNVERIFIED })
+    });
+    const own = await adapter.execute(gatedRequest({ move: 1 }, "unverified-token"));
+    assert.equal(own.outcome, OUTCOME.UNVERIFIED);
+    assert.equal(own.reason, "TRANSPORT_UNVERIFIED");
+    const dispatched = await dispatchRawActuatorReport(() => ({ outcome: OUTCOME.UNVERIFIED }));
+    assert.equal(dispatched.state, "FAILED");
+    assert.equal(dispatched.failureReason, "ACTUATOR_REJECTED_INVOCATION");
 });
 
 test("L4 deadman heartbeat loss latches stop and invokes safe-stop once", () => {
@@ -514,7 +541,8 @@ test("L4 an unreadable actuator outcome is unsupported and cannot become EXECUTE
     for (const unreadable of [
         () => ({ get outcome() { return OUTCOME.UNKNOWN_OUTCOME; } }),
         () => new Inherited(),
-        () => new Proxy({ outcome: OUTCOME.UNKNOWN_OUTCOME }, {})
+        () => new Proxy({ outcome: OUTCOME.UNKNOWN_OUTCOME }, {}),
+        () => { const callable = () => {}; Object.defineProperty(callable, "outcome", { get() { return OUTCOME.UNKNOWN_OUTCOME; } }); return callable; }
     ]) {
         const result = await dispatchRawActuatorReport(unreadable);
         assert.equal(result.state, "FAILED");
@@ -522,8 +550,7 @@ test("L4 an unreadable actuator outcome is unsupported and cannot become EXECUTE
     }
     // A readable own data property is still honoured at the dispatcher.
     assert.equal((await dispatchRawActuatorReport(() => ({ outcome: OUTCOME.UNKNOWN_OUTCOME }))).state, "FAILED");
-    assert.equal((await dispatchRawActuatorReport(() => ({ ok: true }))).state, "EXECUTED");
-});
+    assert.equal((await dispatchRawActuatorReport(() => ({ ok: true }))).state, "EXECUTED");});
 
 test("L4 audit clock failure is contained and blocks transport", async () => {
     const descriptor = validateEffectorDescriptor(physicalDescriptor());

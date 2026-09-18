@@ -1203,7 +1203,7 @@ function sanitizeActuatorOutput3(value) {
 // ambiguous physical outcome ("UNKNOWN_OUTCOME") into EXECUTED.
 const UNSUPPORTED_OUTCOME3 = Symbol("unsupported-actuator-outcome");
 function readActuatorOutcome3(value) {
-    if (value === null || typeof value !== "object") return undefined;
+    if (value === null || (typeof value !== "object" && typeof value !== "function")) return undefined;
     if (isProxy3(value)) return UNSUPPORTED_OUTCOME3;
     if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
         const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
@@ -1794,7 +1794,7 @@ function composeDispatcher3({
             noteCompleted(contentKey, { result, request, intentId: request.intentId });
             return result;
         }
-        if (outputOutcome === "REFUSED" || outputOutcome === "STOPPED" || outputOutcome === "UNKNOWN_OUTCOME") {
+        if (outputOutcome === "REFUSED" || outputOutcome === "STOPPED" || outputOutcome === "UNKNOWN_OUTCOME" || outputOutcome === "UNVERIFIED") {
             lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
             const result = buildExecutionResult3({
                 executionRequest: request,
