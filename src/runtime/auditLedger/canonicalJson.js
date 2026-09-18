@@ -32,6 +32,7 @@ const OBJECT_GET_PROTOTYPE_OF = Object.getPrototypeOf;
 const OBJECT_GET_OWN_PROPERTY_NAMES = Object.getOwnPropertyNames;
 const OBJECT_GET_OWN_PROPERTY_DESCRIPTOR = Object.getOwnPropertyDescriptor;
 const NUMBER_IS_FINITE = Number.isFinite;
+const NUMBER_IS_SAFE_INTEGER = Number.isSafeInteger;
 const OBJECT_IS = Object.is;
 const ARRAY_IS_ARRAY = Array.isArray;
 const WEAKSET = WeakSet;
@@ -146,7 +147,21 @@ function canonicalizeValue(value, ancestors, depth, maxDepth) {
 }
 
 /** Serialize to canonical JSON string. */
-function canonicalJson(value, { maxDepth = 16 } = {}) {
+function canonicalJson(value, options = {}) {
+    let maxDepth = 16;
+    if (options !== null && options !== undefined) {
+        if (typeof options !== "object" || IS_PROXY(options)) {
+            throw new CanonicalizationError("canonicalization options are unsupported");
+        }
+        const descriptor = OBJECT_GET_OWN_PROPERTY_DESCRIPTOR(options, "maxDepth");
+        if (descriptor && (descriptor.get || descriptor.set)) {
+            throw new CanonicalizationError("maxDepth option must be a data property");
+        }
+        if (descriptor && descriptor.value !== undefined) maxDepth = descriptor.value;
+    }
+    if (!NUMBER_IS_SAFE_INTEGER(maxDepth) || maxDepth < 0) {
+        throw new CanonicalizationError("maxDepth must be a non-negative safe integer");
+    }
     return canonicalizeValue(value, new WEAKSET(), 0, maxDepth);
 }
 
