@@ -29,12 +29,12 @@ const JSON_STRINGIFY = JSON.stringify;
 const OBJECT_PROTOTYPE = Object.prototype;
 const OBJECT_GET_PROTOTYPE_OF = Object.getPrototypeOf;
 const OBJECT_GET_OWN_PROPERTY_NAMES = Object.getOwnPropertyNames;
+const OBJECT_GET_OWN_PROPERTY_DESCRIPTOR = Object.getOwnPropertyDescriptor;
 const NUMBER_IS_FINITE = Number.isFinite;
 const OBJECT_IS = Object.is;
 const ARRAY_IS_ARRAY = Array.isArray;
 const WEAKSET = WeakSet;
 const STRINGIFY_REFLECT_APPLY = Reflect.apply;
-const ARRAY_MAP = Array.prototype.map;
 const ARRAY_JOIN = Array.prototype.join;
 const ARRAY_SORT = Array.prototype.sort;
 const SET_HAS = Set.prototype.has;
@@ -97,7 +97,15 @@ function canonicalizeValue(value, ancestors, depth, maxDepth) {
             throw new CanonicalizationError("circular reference detected");
         }
         applyIntrinsic(WEAKSET_ADD, ancestors, [value]);
-        const parts = applyIntrinsic(ARRAY_MAP, value, [(item) => canonicalizeValue(item, ancestors, depth + 1, maxDepth)]);
+        const lengthDescriptor = OBJECT_GET_OWN_PROPERTY_DESCRIPTOR(value, "length");
+        const parts = [];
+        for (let index = 0; index < lengthDescriptor.value; index += 1) {
+            const descriptor = OBJECT_GET_OWN_PROPERTY_DESCRIPTOR(value, "" + index);
+            if (!descriptor || descriptor.get || descriptor.set) {
+                throw new CanonicalizationError("sparse arrays and accessor elements are unsupported");
+            }
+            parts[parts.length] = canonicalizeValue(descriptor.value, ancestors, depth + 1, maxDepth);
+        }
         applyIntrinsic(WEAKSET_DELETE, ancestors, [value]);
         return `[${applyIntrinsic(ARRAY_JOIN, parts, [","])}]`;
     }
@@ -121,7 +129,7 @@ function canonicalizeValue(value, ancestors, depth, maxDepth) {
         if (raw === undefined) {
             throw new CanonicalizationError(`undefined value for key "${name}"`);
         }
-        parts.push(`${stringify(name)}:${canonicalizeValue(raw, ancestors, depth + 1, maxDepth)}`);
+        parts[parts.length] = `${stringify(name)}:${canonicalizeValue(raw, ancestors, depth + 1, maxDepth)}`;
     }
 
     applyIntrinsic(WEAKSET_DELETE, ancestors, [value]);

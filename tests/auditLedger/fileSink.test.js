@@ -132,6 +132,7 @@ test("canonical JSON is stable after mutable array and collection methods are re
     }
     assert.equal(serialized, '{"a":"ok","z":[1]}');
     assert.throws(() => canonicalJson({ constructor: "blocked" }), /forbidden object key/);
+    assert.throws(() => canonicalJson([,]), /sparse arrays/);
 });
 
 test("sequence is strictly increasing and continues across restart", () => {
