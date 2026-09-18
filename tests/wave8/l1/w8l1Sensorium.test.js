@@ -62,6 +62,18 @@ test("W8L1-repair-1: canonicalRuntimeComposition.js's bridge introduces zero req
     }
 });
 
+test("W8L1-integration: composed sensorium bridge receives the resolved canonical audit ledger", () => {
+    const src = fs.readFileSync(
+        path.join(__dirname, "../../../src/integration/canonicalRuntimeComposition.js"), "utf8");
+    const compositionStart = src.indexOf("async function buildRuntimeCoreInternal");
+    const compositionEnd = src.indexOf("RUNTIME HOST COMPOSITION", compositionStart);
+    const composition = src.slice(compositionStart, compositionEnd > 0 ? compositionEnd : src.length);
+    assert.match(composition, /auditLedger:\s*cognitionAuditLedgerResolved/,
+        "the bridge must share the canonical ledger selected for governed cognition");
+    assert.doesNotMatch(composition, /auditLedger:\s*cognitionAuditLedger\s*[,}]/,
+        "the bridge must not use the unresolved optional caller ledger directly");
+});
+
 test("W8L1-repair-2: src/embodiment/schema/BodySchema.js and modalityMap.js require nothing from src/cognition or src/action (isolation law preserved)", () => {
     for (const rel of ["../../../src/embodiment/schema/BodySchema.js", "../../../src/embodiment/domain/modalityMap.js"]) {
         const src = fs.readFileSync(path.join(__dirname, rel), "utf8");
