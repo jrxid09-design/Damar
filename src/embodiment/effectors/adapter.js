@@ -91,7 +91,7 @@ function createEffectorAdapter({ descriptor, invoke, audit, isCanonicalRequest, 
             return refusal("limit-refusal", null, "INVALID_GATED_REQUEST");
         }
         const canonicalValues = Object.create(null);
-        for (const key of ["executionId", "intentId", "capabilityId", "operation", "principal", "parameters"]) {
+        for (const key of ["executionId", "intentId", "capabilityId", "operation", "principal", "scope", "parameters"]) {
             const d = Object.getOwnPropertyDescriptor(canonicalRequest, key);
             if (!d || !Object.prototype.hasOwnProperty.call(d, "value")) {
                 return refusal("limit-refusal", null, "INVALID_CANONICAL_REQUEST");
@@ -100,7 +100,8 @@ function createEffectorAdapter({ descriptor, invoke, audit, isCanonicalRequest, 
         }
         if (canonicalValues.executionId !== safeRequest.executionId || canonicalValues.intentId !== safeRequest.intentId ||
             canonicalValues.capabilityId !== safeRequest.capabilityId || canonicalValues.operation !== safeRequest.operation ||
-            canonicalValues.principal !== safeRequest.principal || canonicalValues.parameters !== gatedRequest.parameters) {
+            canonicalValues.principal !== safeRequest.principal || canonicalValues.parameters !== gatedRequest.parameters ||
+            canonicalValues.scope !== gatedRequest.scope) {
             return refusal("limit-refusal", null, "GATED_REQUEST_MISMATCH");
         }
         if (degraded) {

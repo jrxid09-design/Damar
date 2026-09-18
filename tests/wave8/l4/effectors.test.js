@@ -74,6 +74,12 @@ test("L4 enforces frozen descriptor enums and requires limits for MOTOR/RELAY", 
     // non-motor descriptor is physical and must declare limits -- validation
     // and the runtime limit check can never disagree about the classification.
     assert.throws(() => validateEffectorDescriptor(display({})), /physicalLimits/);
+    // The audit ledger's reference vocabulary, applied at registration: an id
+    // the ledger cannot record would leave every command of that effector
+    // unauditable, and the adapter refuses unauditable commands forever.
+    assert.throws(() => validateEffectorDescriptor(physicalDescriptor({ effectorId: "arm 1" })), /effectorId/);
+    assert.throws(() => validateEffectorDescriptor(physicalDescriptor({ effectorId: "-lead" })), /effectorId/);
+    assert.equal(validateEffectorDescriptor(physicalDescriptor({ effectorId: "arm.left.actuator.primary" })).effectorId, "arm.left.actuator.primary");
 });
 
 test("L4 direct factory requires a canonical-request verifier and rejects unbranded requests", async () => {
@@ -92,6 +98,10 @@ test("L4 refuses a gated request that does not match the canonical request it cl
     const canonical = gatedRequest({ move: 1 }, "mismatch");
     assert.equal((await adapter.execute(gatedRequest({ move: 1 }, "mismatch-other"), canonical)).reason, "GATED_REQUEST_MISMATCH");
     assert.equal((await adapter.execute(canonical, Object.freeze({ ...canonical, capabilityId: "motion.other" }))).reason, "GATED_REQUEST_MISMATCH");
+    // A gated request may not widen the authorized scope: the adapter would
+    // otherwise hand the actuator a scope the canonical request never carried.
+    const widened = Object.freeze({ ...canonical, scope: Object.freeze(["arm.left", "plant.nuke"]) });
+    assert.equal((await adapter.execute(widened, canonical)).reason, "GATED_REQUEST_MISMATCH");
     assert.equal(calls, 0);
 });
 
@@ -456,6 +466,21 @@ test("L4 ambiguous physical outcome never becomes EXECUTED at the canonical disp
     assert.equal(result.state, "FAILED");
     assert.equal(result.failureReason, "ACTUATOR_REJECTED_INVOCATION");
     assert.equal(result.actuatorReport.outcome, OUTCOME.UNKNOWN_OUTCOME);
+});
+
+test("L4 an accessor-described outcome is unsupported and cannot become EXECUTED", async () => {
+    const h = await makeActuationHarness({ scopeBindings: { "motion.arm": { move: () => ["arm.left"] } } });
+    const cap = await h.lane2.registerCapability({ id: "motion.arm", operations: ["move"] });
+    await h.lane2.registry.observeAvailability("motion.arm", "AVAILABLE", { generation: 1, incarnationId: cap.incarnationId });
+    await h.lane2.grantAuthority({ capabilityId: "motion.arm", subject: "alice", actions: ["move"], identityBinding: { principals: ["alice"] } });
+    h.registerActuator({
+        capabilityId: "motion.arm", operations: ["move"], capabilityIncarnationId: cap.incarnationId,
+        actuatorId: "arm.left", invoke: () => ({ get outcome() { return OUTCOME.UNKNOWN_OUTCOME; } })
+    });
+    const intent = h.lane2.admit(JSON.stringify({ schemaVersion: 1, capabilityId: "motion.arm", operation: "move", arguments: {} }));
+    const result = await h.execute({ intent, authSession: h.lane2.session("alice"), parameters: { move: 2 } });
+    assert.equal(result.state, "FAILED");
+    assert.equal(result.failureReason, "ACTUATOR_REJECTED_INVOCATION");
 });
 
 test("L4 audit clock failure is contained and blocks transport", async () => {

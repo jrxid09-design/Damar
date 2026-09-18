@@ -705,7 +705,17 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
         }
 
         let sanitizedOutput;
+        let outputOutcome;
         try {
+            if (actuatorOutput !== null && typeof actuatorOutput === "object") {
+                const outcomeDescriptor = Object.getOwnPropertyDescriptor(actuatorOutput, "outcome");
+                if (outcomeDescriptor) {
+                    if (!Object.prototype.hasOwnProperty.call(outcomeDescriptor, "value")) {
+                        throw new Error("actuator outcome must be a data property");
+                    }
+                    outputOutcome = outcomeDescriptor.value;
+                }
+            }
             sanitizedOutput = sanitizeActuatorOutput(actuatorOutput);
         } catch {
             lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());
@@ -723,9 +733,6 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
             noteCompleted(contentKey, { result, request, intentId: request.intentId });
             return result;
         }
-        const outputOutcome = sanitizedOutput && typeof sanitizedOutput === "object"
-            ? Object.getOwnPropertyDescriptor(sanitizedOutput, "outcome")?.value
-            : undefined;
         if (["REFUSED", "STOPPED", "UNKNOWN_OUTCOME"].includes(outputOutcome)) {
             lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());
             const result = buildExecutionResult({
