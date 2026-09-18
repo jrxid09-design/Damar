@@ -87,58 +87,8 @@ function safeOutcomeValue(outcome, key, fallback) {
     }
 }
 
-/**
- * Absorpsi hasil audit, TANPA pernah memanggil `then` milik pemanggil.
- *
- * Versi-versi sebelumnya memanggil `then` (lewat `then.call` lalu lewat
- * `Reflect.apply`) dan hanya bisa menyerap promise yang DIKEMBALIKAN. Itu tidak
- * cukup: sebuah `then` milik pemanggil dapat mengeksekusi `Promise.reject(...)`
- * lalu mengembalikan `undefined`, sehingga penolakan itu lepas sama sekali dan
- * hanya bisa diamati sebagai `unhandledRejection` -- di bawah kebijakan Node
- * yang ketat, proses berhenti (audit a9cc5db). Memanggil kode pemanggil juga
- * bertentangan dengan batas "hook audit tidak menjalankan kode pemanggil".
- *
- * Karena itu `then` milik pemanggil TIDAK PERNAH dijalankan. Hanya promise ASLI
- * (dikenali lewat brand intrinsik `util.types.isPromise`, yang juga benar untuk
- * promise lintas-realm) yang diberi handler, dan handler itu dipasang lewat
- * `Promise.prototype.then` INTRINSIK sehingga tidak ada pencarian properti pada
- * objek pemanggil.
- *
- * Konsekuensi yang DISEBUT: thenable buatan sendiri (bukan Promise asli) tidak
- * lagi diikuti. Untuk hook audit itu justru yang diinginkan -- hook yang ingin
- * hasilnya diobservasi harus mengembalikan Promise asli.
- */
 const REFLECT_APPLY = Reflect.apply;
-const PROMISE_THEN = Promise.prototype.then;
-const IS_PROMISE_INTRINSIC = utilTypes.isPromise;
-const DEFINE_PROPERTY = Object.defineProperty;
 const FREEZE = Object.freeze;
-
-function absorbAuditResult(result) {
-    if (!result || (typeof result !== "object" && typeof result !== "function")) return;
-    let isRealPromise;
-    try {
-        isRealPromise = REFLECT_APPLY(IS_PROMISE_INTRINSIC, utilTypes, [result]);
-    } catch {
-        return;
-    }
-    if (!isRealPromise) return;   // thenable pemanggil tidak pernah dipanggil
-    // `Promise.prototype.then` membaca `constructor`/`Symbol.species` milik
-    // promise itu untuk menentukan konstruktor hasil. Accessor yang melempar di
-    // sana membuat pemasangan handler GAGAL dan rejection aslinya lepas sebagai
-    // unhandledRejection (audit 03956b6). Karena itu `constructor` dinetralkan
-    // dulu menjadi data-property yang menunjuk ke `Promise` bawaan. Ini berhasil
-    // untuk promise yang dapat diperluas (semua sink wajar); sisa kasus
-    // non-extensible dibahas di bawah.
-    try {
-        REFLECT_APPLY(DEFINE_PROPERTY, Object, [result, "constructor", {
-            value: Promise, writable: true, enumerable: false, configurable: true
-        }]);
-    } catch { /* non-extensible + non-configurable: lihat catatan */ }
-    try {
-        REFLECT_APPLY(PROMISE_THEN, result, [undefined, () => {}]);
-    } catch { /* handler sudah terpasang bila memungkinkan */ }
-}
 
 async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, store = null, bounds = BOUNDS, auditLedger = null } = {}) {
     try {
@@ -161,14 +111,13 @@ async function createSimulationSandbox({ clock = { nowMs: () => Date.now() }, st
                 // (audit 03956b6). `Reflect.apply` yang dibekukan tidak melakukan
                 // pencarian properti apa pun. `FREEZE` juga dibekukan agar
                 // penimpaannya tidak dapat membuat payload audit dapat diubah.
-                const result = REFLECT_APPLY(append, auditLedger, [FREEZE({
+                REFLECT_APPLY(append, auditLedger, [FREEZE({
                     eventType, source: "acc.simulation", outcome: "ok",
                     metadata: FREEZE({ lane: "W8-L5", ...fields })
                 })]);
-                // Hook audit bisa ASYNC dan menolak. Seluruh pemeriksaan hasil
-                // (termasuk nilai kembalian `then`) ditangani absorbAuditResult
-                // tanpa satu pun pencarian properti pada objek pemanggil.
-                absorbAuditResult(result);
+                // Audit callback dipanggil sinkron. Nilai kembalinya tidak
+                // pernah dibaca: Promise/thenable bukan acknowledgement dan
+                // tidak boleh dimutasi, diasimilasi, atau di-hook.
             }
         } catch { /* audit failure never blocks the sandbox */ }
     }
