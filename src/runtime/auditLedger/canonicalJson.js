@@ -16,6 +16,29 @@
 
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
+/**
+ * `JSON.stringify` DIBEKUKAN SAAT MODUL DIMUAT.
+ *
+ * Serializer ini menghasilkan byte yang menentukan digest dan isi jurnal audit.
+ * `JSON.stringify` yang ditimpa pasca-pemuatan cukup untuk membuat transisi
+ * governed "berhasil" sementara isi disk bukan JSON yang sah -- restart
+ * melaporkan `corrupt:true, records:0` (audit 64a999b). Dipanggil lewat binding
+ * lokal, bukan pencarian properti pada `JSON` yang masih dapat dijangkau.
+ */
+const JSON_STRINGIFY = JSON.stringify;
+const OBJECT_PROTOTYPE = Object.prototype;
+const OBJECT_GET_PROTOTYPE_OF = Object.getPrototypeOf;
+const OBJECT_GET_OWN_PROPERTY_NAMES = Object.getOwnPropertyNames;
+const NUMBER_IS_FINITE = Number.isFinite;
+const OBJECT_IS = Object.is;
+const ARRAY_IS_ARRAY = Array.isArray;
+const WEAKSET = WeakSet;
+const STRINGIFY_REFLECT_APPLY = Reflect.apply;
+
+function stringify(value) {
+    return STRINGIFY_REFLECT_APPLY(JSON_STRINGIFY, JSON, [value]);
+}
+
 class CanonicalizationError extends Error {
     constructor(message) {
         super(message);
@@ -28,8 +51,8 @@ function isPlainObject(value) {
     if (value === null || typeof value !== "object") {
         return false;
     }
-    const proto = Object.getPrototypeOf(value);
-    return proto === Object.prototype || proto === null;
+    const proto = OBJECT_GET_PROTOTYPE_OF(value);
+    return proto === OBJECT_PROTOTYPE || proto === null;
 }
 
 function canonicalizeValue(value, ancestors, depth, maxDepth) {
@@ -38,15 +61,15 @@ function canonicalizeValue(value, ancestors, depth, maxDepth) {
     }
     switch (typeof value) {
         case "string":
-            return JSON.stringify(value);
+            return stringify(value);
         case "boolean":
             return value ? "true" : "false";
         case "number":
-            if (!Number.isFinite(value)) {
+            if (!NUMBER_IS_FINITE(value)) {
                 throw new CanonicalizationError(`non-finite number: ${value}`);
             }
-            if (Object.is(value, -0)) return "0";
-            return JSON.stringify(value);
+            if (OBJECT_IS(value, -0)) return "0";
+            return stringify(value);
         case "bigint":
         case "undefined":
         case "function":
@@ -58,7 +81,7 @@ function canonicalizeValue(value, ancestors, depth, maxDepth) {
 
     if (value === null) return "null";
 
-    if (Array.isArray(value)) {
+    if (ARRAY_IS_ARRAY(value)) {
         if (ancestors.has(value)) {
             throw new CanonicalizationError("circular reference detected");
         }
@@ -77,7 +100,7 @@ function canonicalizeValue(value, ancestors, depth, maxDepth) {
     }
     ancestors.add(value);
 
-    const names = Object.getOwnPropertyNames(value).sort();
+    const names = OBJECT_GET_OWN_PROPERTY_NAMES(value).sort();
     const parts = [];
     for (const name of names) {
         if (FORBIDDEN_KEYS.has(name)) {
@@ -87,7 +110,7 @@ function canonicalizeValue(value, ancestors, depth, maxDepth) {
         if (raw === undefined) {
             throw new CanonicalizationError(`undefined value for key "${name}"`);
         }
-        parts.push(`${JSON.stringify(name)}:${canonicalizeValue(raw, ancestors, depth + 1, maxDepth)}`);
+        parts.push(`${stringify(name)}:${canonicalizeValue(raw, ancestors, depth + 1, maxDepth)}`);
     }
 
     ancestors.delete(value);
@@ -96,7 +119,7 @@ function canonicalizeValue(value, ancestors, depth, maxDepth) {
 
 /** Serialize to canonical JSON string. */
 function canonicalJson(value, { maxDepth = 16 } = {}) {
-    return canonicalizeValue(value, new WeakSet(), 0, maxDepth);
+    return canonicalizeValue(value, new WEAKSET(), 0, maxDepth);
 }
 
 module.exports = Object.freeze({ CanonicalizationError, canonicalJson });
