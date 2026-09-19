@@ -86,6 +86,32 @@ class PluginLoader {
      * @returns {{ok:boolean, id?:string, tools?:number, error?:string}}
      */
     /**
+     * Root karantina artefak forge (draft). Artefak di sini TIDAK PERNAH
+     * dimuat, dan alasan penolakannya adalah LOKASI, bukan metadata.
+     */
+    get forgeQuarantineRoot() {
+        return path.join(USER_ROOT, ".drafts");
+    }
+
+    /**
+     * Apakah path ini berada di dalam karantina forge?
+     *
+     * Diperiksa berdasarkan PATH, bukan penanda di dalam artefak: menghapus
+     * `.forge-generated` atau menulis ulang `manifest.json` tidak mengubah
+     * lokasi berkas, jadi jalur ini tetap tertutup. Penanda provenance tetap
+     * diperiksa sebagai lapisan kedua (untuk salinan artefak di luar karantina).
+     */
+    isQuarantinedForgeArtifact(pluginPath) {
+
+        const rel = path.relative(this.forgeQuarantineRoot, path.resolve(pluginPath));
+
+        if (rel === "") return true;
+
+        return !rel.startsWith(".." + path.sep) && rel !== ".." && !path.isAbsolute(rel);
+
+    }
+
+    /**
      * Provenance: artefak hasil generate forge TIDAK PERNAH dimuat.
      *
      * W8 legacy second-path remediation: `require()` atas modul plugin
@@ -137,9 +163,11 @@ class PluginLoader {
         // sini agar pemanggil boleh memberi path relatif.
         pluginPath = path.resolve(pluginPath);
 
-        // Guard provenance PALING AWAL: sebelum manifest dibaca dan sebelum
+        // Guard PALING AWAL, dan dua lapis: LOKASI karantina lebih dulu
+        // (tidak bisa dilepas dengan menghapus penanda), lalu provenance
+        // metadata. Keduanya sebelum manifest dibaca dan sebelum
         // index.js/tool.js di-require.
-        if (this.isForgeGenerated(pluginPath)) {
+        if (this.isQuarantinedForgeArtifact(pluginPath) || this.isForgeGenerated(pluginPath)) {
             return this.refuseForgeArtifact(pluginPath);
         }
 
@@ -315,9 +343,10 @@ class PluginLoader {
 
     loadPlugin(pluginPath, manifest) {
 
-        // Defense-in-depth: even if a caller reaches here directly, a forge
-        // artifact is never required (this is the last point before require).
-        if (this.isForgeGenerated(pluginPath)) {
+        // Defense-in-depth: even if a caller reaches here directly, neither a
+        // quarantined path nor a forge artifact is ever required (this is the
+        // last point before require).
+        if (this.isQuarantinedForgeArtifact(pluginPath) || this.isForgeGenerated(pluginPath)) {
             return {};
         }
 
@@ -392,9 +421,10 @@ class PluginLoader {
 
         // W8 legacy second-path remediation: kode hasil generate forge BUKAN
         // kapabilitas kanonik, dan `require()` di bawah menjalankan body
-        // modulnya. Artefak berpenanda asal-usul forge tidak pernah dimuat;
-        // aktivasi menunggu registrasi kanonik.
-        if (this.isForgeGenerated(pluginPath)) {
+        // modulnya. Artefak di karantina TIDAK dimuat karena LOKASINYA, dan
+        // artefak berpenanda provenance tidak dimuat karena asal-usulnya —
+        // jadi menghapus penanda tidak membuka jalur ini.
+        if (this.isQuarantinedForgeArtifact(pluginPath) || this.isForgeGenerated(pluginPath)) {
 
             return [];
 

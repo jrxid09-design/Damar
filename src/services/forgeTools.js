@@ -141,9 +141,9 @@ function forgeTools() {
             name: "list_my_tools",
 
             description:
-                "Lihat tool buatan sendiri (yang aktif maupun masih draft). Pakai untuk " +
-                "mengecek apa yang sudah ada sebelum membuat yang baru, atau melihat draft " +
-                "yang menunggu persetujuan.",
+                "Lihat tool buatan sendiri: mana yang BENAR-BENAR aktif, mana yang baru " +
+                "disetujui tapi belum dimuat (menunggu registrasi kanonik), dan mana yang " +
+                "masih draft. Jangan menyebut sesuatu aktif kalau belum dimuat.",
 
             parameters: {
                 type: "object",
@@ -152,13 +152,33 @@ function forgeTools() {
 
             execute: async () => {
 
-                const { active, drafts } = forge.list();
+                const { active = [], drafts = [] } = forge.list();
+
+                // Hanya entri yang benar-benar dimuat (activated === true) yang
+                // boleh disebut aktif. Yang sekadar disetujui — baik yang sudah
+                // diinstal maupun yang masih di karantina forge — masuk bucket
+                // approvedNotLoaded supaya tidak pernah dilaporkan sebagai tool
+                // yang bisa dipanggil.
+                const isActivated = (t) => t?.activated === true && t?.status === "active";
+                const isApproved = (t) => !isActivated(t) && t?.status === "approved";
+                const live = active.filter(isActivated);
+                const approvedNotLoaded = [...active, ...drafts].filter(isApproved);
+                const pendingDrafts = drafts.filter(t => t?.status !== "approved");
 
                 return {
-                    active: active.map(t => ({ id: t.id, name: t.name, description: t.description })),
-                    drafts: drafts.map(t => ({
+                    active: live.map(t => ({ id: t.id, name: t.name, description: t.description })),
+                    approvedNotLoaded: approvedNotLoaded.map(t => ({
+                        id: t.id,
+                        name: t.name,
+                        status: t.status,
+                        canonicalRequired: t.canonicalRequired === true
+                    })),
+                    drafts: pendingDrafts.map(t => ({
                         id: t.id, name: t.name, risks: t.risks
-                    }))
+                    })),
+                    note: approvedNotLoaded.length > 0
+                        ? "approvedNotLoaded = disetujui tapi BELUM dimuat/dieksekusi; aktivasi menunggu registrasi kanonik."
+                        : null
                 };
 
             }
