@@ -440,6 +440,28 @@ module.exports = [ new ${className}() ];
 
     }
 
+    /**
+     * Apakah direktori ini artefak hasil generate forge? Artefak seperti itu
+     * TIDAK pernah dimuat (lihat pluginLoader), jadi statusnya tidak boleh
+     * dilaporkan sebagai "active".
+     */
+    isForgeGeneratedDir(dir) {
+
+        try {
+            if (fs.existsSync(path.join(dir, FORGE_GENERATED_MARKER))) return true;
+            const manifestPath = path.join(dir, "manifest.json");
+            if (fs.existsSync(manifestPath)) {
+                const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+                if (manifest?.forgeGenerated === true) return true;
+                if (manifest?.forge?.generated === true) return true;
+            }
+        }
+        catch { /* manifest rusak bukan bukti provenance */ }
+
+        return false;
+
+    }
+
     /** Baca kembali spec sebuah plugin/draft untuk diedit. */
     read(id) {
 
@@ -459,9 +481,16 @@ module.exports = [ new ${className}() ];
                 path.join(dir, "tool.js"), "utf8"
             );
 
+            // Hanya plugin NON-forge yang benar-benar dimuat bisa disebut
+            // "active"; artefak forge berhenti di status persetujuan.
+            const forgeGenerated = this.isForgeGeneratedDir(dir);
+            const active = root === this.userRoot && !forgeGenerated;
+
             return {
                 id,
-                status: root === this.userRoot ? "active" : "draft",
+                status: active ? "active" : root === this.userRoot ? "approved" : "draft",
+                activated: active,
+                canonicalRequired: forgeGenerated,
                 manifest,
                 source,
                 spec: manifest.forge?.spec ?? null,
@@ -498,11 +527,16 @@ module.exports = [ new ${className}() ];
                     const source = fs.readFileSync(
                         path.join(root, name, "tool.js"), "utf8"
                     );
+                    // Artefak forge tidak pernah dimuat: statusnya "approved"
+                    // (persetujuan tersimpan), bukan "active".
+                    const forgeGenerated = this.isForgeGeneratedDir(path.join(root, name));
                     return {
                         id: manifest.id,
                         name: manifest.name,
                         description: manifest.description,
-                        status,
+                        status: status === "active" && forgeGenerated ? "approved" : status,
+                        activated: status === "active" && !forgeGenerated,
+                        canonicalRequired: forgeGenerated,
                         origin: manifest.forge?.origin ?? "manual",
                         createdAt: manifest.forge?.createdAt ?? null,
                         risks: this.analyzeRisk(source)
