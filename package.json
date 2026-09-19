@@ -28,7 +28,9 @@
     "vision:gemini": "node scripts/gemini-webapi.js",
     "mcp:stdio": "node scripts/mcp-stdio.js",
     "census:wave8": "node scripts/wave8-census.js",
-    "census:wave8:json": "node scripts/wave8-census.js --json"
+    "census:wave8:json": "node scripts/wave8-census.js --json",
+    "census:clusters": "node scripts/wave8-cluster.js",
+    "census:clusters:json": "node scripts/wave8-cluster.js --json"
   },
   "repository": {
     "type": "git",
