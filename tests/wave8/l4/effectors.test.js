@@ -594,6 +594,38 @@ test("L4 a hostile thrown actuator value still produces a canonical FAILED resul
     }
 });
 
+test("L4 an unrecognized driver outcome token fails closed at both layers", async () => {
+    const descriptor = validateEffectorDescriptor(physicalDescriptor({
+        hazardClass: "NONE",
+        physicalLimits: { move: { min: -10, max: 10, windowMs: 1000, maxPerWindow: 50 } }
+    }));
+    let now = 0;
+    let report;
+    const adapter = createTestEffectorAdapter({ descriptor, audit: auditSink(), now: () => now, invoke: async () => report });
+    const run = async (next) => {
+        now += 51;
+        report = next;
+        return adapter.execute(gatedRequest({ move: 1 }, `token-${now}`));
+    };
+    // Every token the adapter does not recognize as the canonical success token
+    // is an ambiguous physical outcome: fail closed, never EXECUTED.
+    for (const token of ["GARBAGE", 42, null, "ok", { weird: true }, Object.create(null)]) {
+        const result = await run({ outcome: token });
+        assert.equal(result.outcome, OUTCOME.UNKNOWN_OUTCOME);
+        assert.equal(result.reason, "TRANSPORT_UNSUPPORTED_TOKEN");
+    }
+    assert.equal((await run({ outcome: OUTCOME.EXECUTED })).outcome, OUTCOME.EXECUTED);
+    assert.equal((await run({ ok: true })).outcome, OUTCOME.EXECUTED);
+    // Same closed vocabulary at the canonical dispatcher.
+    for (const token of ["GARBAGE", 42, null, Object.create(null)]) {
+        const result = await dispatchRawActuatorReport(() => ({ outcome: token }));
+        assert.equal(result.state, "FAILED");
+        assert.equal(result.failureReason, "ACTUATOR_REJECTED_INVOCATION");
+    }
+    assert.equal((await dispatchRawActuatorReport(() => ({ outcome: OUTCOME.EXECUTED }))).state, "EXECUTED");
+    assert.equal((await dispatchRawActuatorReport(() => ({ ok: true }))).state, "EXECUTED");
+});
+
 test("L4 audit clock failure is contained and blocks transport", async () => {
     const descriptor = validateEffectorDescriptor(physicalDescriptor());
     let calls = 0;

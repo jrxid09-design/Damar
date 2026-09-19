@@ -753,7 +753,9 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
             noteCompleted(contentKey, { result, request, intentId: request.intentId });
             return result;
         }
-        if (["REFUSED", "STOPPED", "UNKNOWN_OUTCOME", "UNVERIFIED"].includes(outputOutcome)) {
+        // Closed vocabulary: only the canonical EXECUTED token is a success
+        // claim (mirrors the bootstrap dispatcher).
+        if (outputOutcome !== undefined && outputOutcome !== "EXECUTED") {
             lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());
             const result = buildExecutionResult({
                 executionRequest: request,
@@ -765,7 +767,11 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
                 completedAtMs: canonicalClockNow(),
                 actuatorReport: sanitizedOutput,
                 failureReason: REASONS.ACTUATOR_REJECTED_INVOCATION,
-                failureDetail: outputOutcome === "UNKNOWN_OUTCOME" ? "actuator completed with ambiguous physical outcome" : `actuator reported ${outputOutcome.toLowerCase()}`
+                failureDetail: outputOutcome === "UNKNOWN_OUTCOME"
+                    ? "actuator completed with ambiguous physical outcome"
+                    : typeof outputOutcome === "string"
+                        ? `actuator reported ${outputOutcome.toLowerCase()}`
+                        : "actuator reported an unsupported outcome token"
             });
             noteCompleted(contentKey, { result, request, intentId: request.intentId });
             return result;

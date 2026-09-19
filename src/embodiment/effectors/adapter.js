@@ -44,6 +44,16 @@ function readReportOutcome(value) {
     }
 }
 
+// Closed vocabulary for tokens a DRIVER may report: each maps to its own
+// transport failure reason. Anything else is unrecognized and becomes
+// UNKNOWN_OUTCOME (see `outcome` handling below).
+const TRANSPORT_FAILURE_REASONS = Object.freeze({
+    REFUSED: "TRANSPORT_REFUSED",
+    STOPPED: "TRANSPORT_STOPPED",
+    UNVERIFIED: "TRANSPORT_UNVERIFIED",
+    UNKNOWN_OUTCOME: "TRANSPORT_UNKNOWN"
+});
+
 // This is a leaf adapter primitive, not a dispatcher or registration surface.
 // The execution function is intended only as a binding in the private
 // actuator registry in bootstrap.js; W8-IW1 owns concrete registrations.
@@ -192,13 +202,22 @@ function createEffectorAdapter({ descriptor, invoke, audit, isCanonicalRequest, 
                 return Object.freeze({ outcome: OUTCOME.UNKNOWN_OUTCOME, reason: "TRANSPORT_UNREADABLE" });
             }
             const transportOutcome = transport.value;
-            if (transportOutcome === OUTCOME.REFUSED || transportOutcome === OUTCOME.STOPPED ||
-                transportOutcome === OUTCOME.UNKNOWN_OUTCOME || transportOutcome === OUTCOME.UNVERIFIED) {
-                note("command-result", safeRequest, transportOutcome);
-                const reason = transportOutcome === OUTCOME.REFUSED ? "TRANSPORT_REFUSED"
-                    : transportOutcome === OUTCOME.STOPPED ? "TRANSPORT_STOPPED"
-                        : transportOutcome === OUTCOME.UNVERIFIED ? "TRANSPORT_UNVERIFIED" : "TRANSPORT_UNKNOWN";
-                return Object.freeze({ outcome: transportOutcome, reason });
+            // The command channel's outcome token is a CLOSED vocabulary: only
+            // the canonical EXECUTED token is a success claim. Any other
+            // described token -- a recognized failure OR an unrecognized/
+            // ambiguous one -- fails closed, so no unknown token can be echoed
+            // back as a successful execution.
+            if (transportOutcome !== undefined && transportOutcome !== OUTCOME.EXECUTED) {
+                // Only a string token can be looked up in the closed vocabulary:
+                // key coercion of an object token could itself throw.
+                const recognized = typeof transportOutcome === "string" &&
+                    Object.prototype.hasOwnProperty.call(TRANSPORT_FAILURE_REASONS, transportOutcome);
+                const outcome = recognized ? transportOutcome : OUTCOME.UNKNOWN_OUTCOME;
+                note("command-result", safeRequest, outcome);
+                return Object.freeze({
+                    outcome,
+                    reason: recognized ? TRANSPORT_FAILURE_REASONS[transportOutcome] : "TRANSPORT_UNSUPPORTED_TOKEN"
+                });
             }
             if (!verify && canonicalDescriptor.hazardClass === HAZARD_CLASS.NONE) {
                 if (!note("command-result", safeRequest, OUTCOME.EXECUTED)) return Object.freeze({ outcome: OUTCOME.UNKNOWN_OUTCOME, reason: "AUDIT_UNAVAILABLE" });
