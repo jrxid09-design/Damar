@@ -9,10 +9,14 @@ const forge = require("./toolForge");
  *   1. create_tool  → menyimpan DRAFT, menampilkan apa yang akan
  *      dilakukan tool + peringatan risiko.
  *   2. Pengguna menyetujui (bisa lewat percakapan atau Console).
- *   3. activate_tool → tool jadi aktif dan bisa dipanggil.
+ *   3. activate_tool → mencatat PERSETUJUAN (status).
  *
- * activate_tool hanya boleh dipanggil setelah pengguna
- * mengonfirmasi secara eksplisit — ini gerbang keamanannya.
+ * Sejak remediasi jalur-kedua W8, persetujuan BUKAN aktivasi: artefak forge
+ * tetap di karantina, tidak dipindahkan ke root plugin yang bisa dimuat, dan
+ * tidak ada kode yang dijalankan. Tool hasil generate baru bisa dipanggil
+ * setelah terdaftar lewat jalur kanonik (Manager → ActionIntent → Authority →
+ * Capability). Karena itu tidak ada tool di file ini yang boleh mengklaim
+ * sebuah tool "aktif dan siap dipanggil".
  */
 function forgeTools() {
 
@@ -89,10 +93,13 @@ function forgeTools() {
                     id: result.id,
                     status: result.status,
                     risks: result.risks,
+                    activated: false,
                     note: result.status === "draft"
-                        ? "Draft tersimpan tapi BELUM aktif. Minta pengguna menyetujui, " +
-                          "lalu panggil activate_tool dengan id ini."
-                        : "Tool langsung aktif (mode auto-approve)."
+                        ? "Draft tersimpan tapi BELUM aktif. Minta pengguna menyetujui " +
+                          "(activate_tool mencatat persetujuan; eksekusi tetap menunggu " +
+                          "registrasi kanonik)."
+                        : "Draft tersimpan dengan status persetujuan; BELUM dimuat dan " +
+                          "tidak bisa dipanggil sampai terdaftar di jalur kanonik."
                 };
 
             }
