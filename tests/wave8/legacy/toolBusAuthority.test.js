@@ -399,6 +399,32 @@ test("legacy healing: a denied agent:* request never reaches agentHub", async ()
     }
 });
 
+test("legacy forge: an approved draft is never reported as active", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-status-"));
+    const id = "w8-status-probe";
+    try {
+        toolForge.create({ id, name: id, description: "status canary", raw: "module.exports = [];" });
+        toolForge.approve(id);
+        const read = toolForge.read(id);
+        assert.ok(read, "the approved artifact is readable");
+        assert.equal(read.status, "approved", "approval is not activation");
+        assert.equal(read.activated, false);
+        assert.equal(read.canonicalRequired, true);
+        const listed = toolForge.list();
+        const entry = [...(listed.active ?? []), ...(listed.drafts ?? [])].find(t => t.id === id);
+        if (entry) {
+            assert.equal(entry.status === "active" && entry.activated === true, false,
+                "list() must not report a forge artifact as active");
+        }
+    } finally {
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
 test("legacy ToolBus: canonical compatibility success path executes exactly once through the canonical path", {
     skip: "BLOCKED ON W8-IW1: the canonical capability/actuator registrations (and a manager-owned legacy ingress) do not exist yet, so no legacy request can reach the canonical path. This test must be implemented with the IW1 production-path harness; it is deliberately NOT faked."
 }, () => { });
