@@ -489,7 +489,7 @@ test("L4 canonical actuator result maps explicit refusal to canonical FAILED", a
     assert.equal(result.actuatorReport.outcome, OUTCOME.REFUSED);
 });
 
-async function dispatchRawActuatorReport(invoke) {
+async function dispatchRawActuatorReport(invoke, signal = undefined) {
     const h = await makeActuationHarness({ scopeBindings: { "motion.arm": { move: () => ["arm.left"] } } });
     const cap = await h.lane2.registerCapability({ id: "motion.arm", operations: ["move"] });
     await h.lane2.registry.observeAvailability("motion.arm", "AVAILABLE", { generation: 1, incarnationId: cap.incarnationId });
@@ -499,7 +499,7 @@ async function dispatchRawActuatorReport(invoke) {
         actuatorId: "arm.left", invoke
     });
     const intent = h.lane2.admit(JSON.stringify({ schemaVersion: 1, capabilityId: "motion.arm", operation: "move", arguments: {} }));
-    return h.execute({ intent, authSession: h.lane2.session("alice"), parameters: { move: 2 } });
+    return h.execute({ intent, authSession: h.lane2.session("alice"), parameters: { move: 2 }, ...(signal === undefined ? {} : { signal }) });
 }
 
 async function dispatchWithActuatorReport(report) {
@@ -550,7 +550,8 @@ test("L4 an unreadable actuator outcome is unsupported and cannot become EXECUTE
     }
     // A readable own data property is still honoured at the dispatcher.
     assert.equal((await dispatchRawActuatorReport(() => ({ outcome: OUTCOME.UNKNOWN_OUTCOME }))).state, "FAILED");
-    assert.equal((await dispatchRawActuatorReport(() => ({ ok: true }))).state, "EXECUTED");});
+    assert.equal((await dispatchRawActuatorReport(() => ({ ok: true }))).state, "EXECUTED");
+});
 
 test("L4 actuator invocation receives a frozen brand-recognized gated request", async () => {
     const h = await makeActuationHarness({ scopeBindings: { "motion.arm": { move: () => ["arm.left"] } } });
@@ -619,15 +620,48 @@ test("L4 an unrecognized driver outcome token fails closed at both layers", asyn
     assert.equal((await run({ outcome: OUTCOME.EXECUTED })).outcome, OUTCOME.EXECUTED);
     assert.equal((await run({ ok: true })).outcome, OUTCOME.EXECUTED);
     assert.equal((await run({})).outcome, OUTCOME.EXECUTED);
+    // A nested/collection report cannot hide an ambiguous outcome either.
+    for (const nested of [
+        { wrapped: { outcome: OUTCOME.UNKNOWN_OUTCOME } },
+        { wrapped: { outcome: "partial" } },
+        [{ outcome: OUTCOME.UNKNOWN_OUTCOME }],
+        { list: [{ outcome: OUTCOME.REFUSED }] }
+    ]) {
+        const result = await run(nested);
+        assert.equal(result.outcome, OUTCOME.UNKNOWN_OUTCOME);
+        assert.equal(result.reason, "TRANSPORT_UNSUPPORTED_TOKEN");
+    }
+    // ...while a nested EXECUTED token or no outcome at all is still clean.
+    assert.equal((await run({ wrapped: { outcome: OUTCOME.EXECUTED } })).outcome, OUTCOME.EXECUTED);
     // Same closed vocabulary at the canonical dispatcher.
     for (const token of ["GARBAGE", 42, null, undefined, Object.create(null)]) {
         const result = await dispatchRawActuatorReport(() => ({ outcome: token }));
         assert.equal(result.state, "FAILED");
         assert.equal(result.failureReason, "ACTUATOR_REJECTED_INVOCATION");
     }
+    for (const nested of [[{ outcome: OUTCOME.UNKNOWN_OUTCOME }], { wrapped: { outcome: "partial" } }]) {
+        const result = await dispatchRawActuatorReport(() => nested);
+        assert.equal(result.state, "FAILED");
+        assert.equal(result.failureReason, "ACTUATOR_REJECTED_INVOCATION");
+    }
     assert.equal((await dispatchRawActuatorReport(() => ({ outcome: OUTCOME.EXECUTED }))).state, "EXECUTED");
     assert.equal((await dispatchRawActuatorReport(() => ({ ok: true }))).state, "EXECUTED");
     assert.equal((await dispatchRawActuatorReport(() => ({}))).state, "EXECUTED");
+});
+
+test("L4 a hostile AbortSignal cannot reject or distort the canonical dispatcher", async () => {
+    const hostileSignals = [
+        { aborted: false, get addEventListener() { throw new Error("signal getter trap"); } },
+        new Proxy({}, { get() { throw new Error("signal proxy trap"); }, has() { throw new Error("signal has trap"); } }),
+        { aborted: false, addEventListener() { throw new Error("attach trap"); }, removeEventListener() { throw new Error("detach trap"); } }
+    ];
+    for (const signal of hostileSignals) {
+        const result = await dispatchRawActuatorReport(() => ({ ok: true }), signal);
+        // A caller's broken cancellation plumbing is not authority: the
+        // authorized command still returns a canonical result instead of
+        // rejecting the dispatcher.
+        assert.equal(result.state, "EXECUTED");
+    }
 });
 
 test("L4 audit clock failure is contained and blocks transport", async () => {

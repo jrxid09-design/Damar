@@ -85,6 +85,53 @@ function readActuatorOutcome(value) {
     }
 }
 
+// Any `outcome` description ANYWHERE in a raw report must be the canonical
+// success token (mirrors the bootstrap dispatcher's scan).
+function scanOutcomeDescriptions(value, state = { nodes: 0, path: new Set() }) {
+    try {
+        if (++state.nodes > 512) return true;
+        if (value === null || (typeof value !== "object" && typeof value !== "function")) return false;
+        if (isProxyValue(value)) return true;
+        if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
+            const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
+            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return true;
+            if (descriptor.value !== "EXECUTED") return true;
+        } else if (Reflect.has(value, "outcome")) {
+            return true;
+        }
+        if (state.path.has(value)) return false;
+        state.path.add(value);
+        let ambiguous = false;
+        if (Array.isArray(value) || isPlainObject(value)) {
+            for (const key of Object.keys(value)) {
+                if (scanOutcomeDescriptions(value[key], state)) { ambiguous = true; break; }
+            }
+        }
+        state.path.delete(value);
+        return ambiguous;
+    } catch {
+        return true;
+    }
+}
+
+// A caller-supplied AbortSignal is plumbing, not authority: a hostile signal
+// degrades to "no cancellation available" instead of rejecting execute().
+function readSignal(signal) {
+    try {
+        if (!signal || typeof signal !== "object") return null;
+        const add = signal.addEventListener;
+        if (typeof add !== "function") return null;
+        const remove = signal.removeEventListener;
+        return {
+            aborted: signal.aborted === true,
+            add: add.bind(signal),
+            remove: typeof remove === "function" ? remove.bind(signal) : null
+        };
+    } catch {
+        return null;
+    }
+}
+
 function deepFreeze(obj) {
     if (obj !== null && typeof obj === "object") {
         for (const key of Object.getOwnPropertyNames(obj)) deepFreeze(obj[key]);
@@ -629,8 +676,8 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
 
         lifecycle.advance(LIFECYCLE.READY, canonicalClockNow());
 
-        const signal = p.signal;
-        if (signal && typeof signal.addEventListener === "function" && signal.aborted) {
+        const signal = readSignal(p.signal);
+        if (signal && signal.aborted) {
             lifecycle.advance(LIFECYCLE.CANCELLED, canonicalClockNow());
             const result = buildExecutionResult({
                 executionRequest: request,
@@ -678,11 +725,11 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
         });
 
         let cancelListener = null;
-        if (signal && typeof signal.addEventListener === "function") {
+        if (signal && signal.add) {
             cancelListener = () => {
                 if (lifecycle.state === LIFECYCLE.DISPATCHING && !timedOut) cancelledDuringDispatch = true;
             };
-            signal.addEventListener("abort", cancelListener);
+            try { signal.add("abort", cancelListener); } catch { cancelListener = null; }
         }
 
         let actuatorOutput = null;
@@ -711,8 +758,8 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
             dispatchFailed = e;
         } finally {
             if (timeoutHandle) clearTimeout(timeoutHandle);
-            if (signal && typeof signal.removeEventListener === "function" && cancelListener) {
-                try { signal.removeEventListener("abort", cancelListener); } catch { /* best-effort */ }
+            if (cancelListener && signal && signal.remove) {
+                try { signal.remove("abort", cancelListener); } catch { /* best-effort */ }
             }
         }
 
@@ -760,9 +807,8 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
         }
         // Closed vocabulary: only the canonical EXECUTED token is a success
         // claim (mirrors the bootstrap dispatcher).
-        if (outputOutcome !== NO_OUTCOME && outputOutcome !== "EXECUTED") {
-            lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());
-            const result = buildExecutionResult({
+        if ((outputOutcome !== NO_OUTCOME && outputOutcome !== "EXECUTED") || scanOutcomeDescriptions(actuatorOutput)) {
+            lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());            const result = buildExecutionResult({
                 executionRequest: request,
                 state: RESULT_STATE.FAILED,
                 actuatorId: binding.actuatorId,
