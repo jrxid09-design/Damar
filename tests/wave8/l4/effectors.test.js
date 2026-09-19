@@ -620,16 +620,24 @@ test("L4 an unrecognized driver outcome token fails closed at both layers", asyn
     assert.equal((await run({ outcome: OUTCOME.EXECUTED })).outcome, OUTCOME.EXECUTED);
     assert.equal((await run({ ok: true })).outcome, OUTCOME.EXECUTED);
     assert.equal((await run({})).outcome, OUTCOME.EXECUTED);
-    // A nested/collection report cannot hide an ambiguous outcome either.
+    // A nested/collection report cannot hide an ambiguous outcome either, even
+    // behind a structure whose contents sanitization would silently drop.
+    class OutcomeHolder { constructor() { this.outcome = OUTCOME.UNKNOWN_OUTCOME; } }
     for (const nested of [
         { wrapped: { outcome: OUTCOME.UNKNOWN_OUTCOME } },
         { wrapped: { outcome: "partial" } },
         [{ outcome: OUTCOME.UNKNOWN_OUTCOME }],
-        { list: [{ outcome: OUTCOME.REFUSED }] }
+        { list: [{ outcome: OUTCOME.REFUSED }] },
+        new Map([["x", { outcome: OUTCOME.UNKNOWN_OUTCOME }]]),
+        new Set([{ outcome: OUTCOME.UNKNOWN_OUTCOME }]),
+        new OutcomeHolder(),
+        Object.defineProperty({}, "outcome", { value: OUTCOME.UNKNOWN_OUTCOME, enumerable: false }),
+        { [Symbol("hidden")]: { outcome: OUTCOME.UNKNOWN_OUTCOME } },
+        Object.defineProperty({}, "child", { get() { return { outcome: OUTCOME.UNKNOWN_OUTCOME }; } })
     ]) {
         const result = await run(nested);
         assert.equal(result.outcome, OUTCOME.UNKNOWN_OUTCOME);
-        assert.equal(result.reason, "TRANSPORT_UNSUPPORTED_TOKEN");
+        assert.equal(["TRANSPORT_UNSUPPORTED_TOKEN", "TRANSPORT_UNKNOWN"].includes(result.reason), true);
     }
     // ...while a nested EXECUTED token or no outcome at all is still clean.
     assert.equal((await run({ wrapped: { outcome: OUTCOME.EXECUTED } })).outcome, OUTCOME.EXECUTED);
@@ -639,7 +647,7 @@ test("L4 an unrecognized driver outcome token fails closed at both layers", asyn
         assert.equal(result.state, "FAILED");
         assert.equal(result.failureReason, "ACTUATOR_REJECTED_INVOCATION");
     }
-    for (const nested of [[{ outcome: OUTCOME.UNKNOWN_OUTCOME }], { wrapped: { outcome: "partial" } }]) {
+    for (const nested of [[{ outcome: OUTCOME.UNKNOWN_OUTCOME }], { wrapped: { outcome: "partial" } }, new Map([["x", { outcome: OUTCOME.UNKNOWN_OUTCOME }]]), new Date(0)]) {
         const result = await dispatchRawActuatorReport(() => nested);
         assert.equal(result.state, "FAILED");
         assert.equal(result.failureReason, "ACTUATOR_REJECTED_INVOCATION");
@@ -647,6 +655,36 @@ test("L4 an unrecognized driver outcome token fails closed at both layers", asyn
     assert.equal((await dispatchRawActuatorReport(() => ({ outcome: OUTCOME.EXECUTED }))).state, "EXECUTED");
     assert.equal((await dispatchRawActuatorReport(() => ({ ok: true }))).state, "EXECUTED");
     assert.equal((await dispatchRawActuatorReport(() => ({}))).state, "EXECUTED");
+    assert.equal((await dispatchRawActuatorReport(() => [1, 2, 3])).state, "EXECUTED");
+    assert.equal((await dispatchRawActuatorReport(() => ({ nested: { outcome: OUTCOME.EXECUTED } }))).state, "EXECUTED");
+});
+
+test("L4 hostile caller fields cannot leak an arbitrary exception out of the dispatcher", async () => {
+    const h = await makeActuationHarness({ scopeBindings: { "motion.arm": { move: () => ["arm.left"] } } });
+    const cap = await h.lane2.registerCapability({ id: "motion.arm", operations: ["move"] });
+    await h.lane2.registry.observeAvailability("motion.arm", "AVAILABLE", { generation: 1, incarnationId: cap.incarnationId });
+    const intent = h.lane2.admit(JSON.stringify({ schemaVersion: 1, capabilityId: "motion.arm", operation: "move", arguments: {} }));
+    const authSession = h.lane2.session("alice");
+    const withThrowingGetter = (key) => {
+        const request = { intent, authSession };
+        Object.defineProperty(request, key, { enumerable: true, get() { throw new Error(`${key} trap`); } });
+        return request;
+    };
+    const cases = [
+        withThrowingGetter("parameters"),
+        withThrowingGetter("timeoutMs"),
+        withThrowingGetter("signal"),
+        withThrowingGetter("metadata"),
+        new Proxy({ intent, authSession }, { get() { throw new Error("proxy get trap"); }, ownKeys() { throw new Error("ownKeys trap"); } })
+    ];
+    for (const request of cases) {
+        // A hostile caller field is refused with a TYPED canonical refusal: the
+        // caller's own exception text must never leak through the dispatcher.
+        await assert.rejects(
+            () => h.execute(request),
+            (e) => typeof e.reasonCode === "string" && !/trap/.test(String(e.message))
+        );
+    }
 });
 
 test("L4 a hostile AbortSignal cannot reject or distort the canonical dispatcher", async () => {

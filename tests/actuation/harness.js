@@ -1,18 +1,18 @@
-"use strict";
+﻿"use strict";
 
 /**
- * ACTION ACTUATION FABRIC V1 — TEST-ONLY ACTUATION HARNESS (FIRST targeted
+ * ACTION ACTUATION FABRIC V1 â€” TEST-ONLY ACTUATION HARNESS (FIRST targeted
  * repair: own private copies of ALL privileged actuation implementations).
  *
  * Production src/action/actuation/*.js now export ONLY inert vocabulary + pure
- * predicates — the privileged constructors live ONLY in the trusted bootstrap's
+ * predicates â€” the privileged constructors live ONLY in the trusted bootstrap's
  * private lexical closure (src/action/bootstrap.js). Tests cannot import them
  * from production; this harness owns its OWN private copies of the same
  * implementation (the test-domain analogue of the trusted bootstrap closure)
  * and is reachable ONLY under tests/ (production src/** never imports it).
  *
  * The test-domain copies use the SAME canonical brand WeakSets exposed to the
- * pure predicates in production `src/action/actuation/index.js`. Wait — NO:
+ * pure predicates in production `src/action/actuation/index.js`. Wait â€” NO:
  * the production WeakSets are bootstrap-private and not exported. To let tests
  * exercise the brand predicates against canonical request/result shapes, the
  * test harness instead verifies via the PUBLIC structural predicates in
@@ -27,7 +27,7 @@
  *   - test lifecycle tracker (private copy)
  *
  * Downstream (in tests = channel/model code analogues) receives ONLY
- * { execute } — exactly like production. Registration happens through the
+ * { execute } â€” exactly like production. Registration happens through the
  * harness's own registrar surface, mirroring how the trusted runtime layer
  * would wire real actuators in a later lane.
  */
@@ -86,26 +86,27 @@ function readActuatorOutcome(value) {
 }
 
 // Any `outcome` description ANYWHERE in a raw report must be the canonical
-// success token (mirrors the bootstrap dispatcher's scan).
+// success token (mirrors the bootstrap dispatcher's scan): an accessor, a
+// Proxy, a callable, an exotic object, an over-budget subtree or any
+// non-EXECUTED token fails closed.
 function scanOutcomeDescriptions(value, state = { nodes: 0, path: new Set() }) {
     try {
         if (++state.nodes > 512) return true;
-        if (value === null || (typeof value !== "object" && typeof value !== "function")) return false;
+        if (value === null) return false;
+        if (typeof value === "function") return true;
+        if (typeof value !== "object") return false;
         if (isProxyValue(value)) return true;
-        if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
-            const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
-            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return true;
-            if (descriptor.value !== "EXECUTED") return true;
-        } else if (Reflect.has(value, "outcome")) {
-            return true;
-        }
+        const isArray = Array.isArray(value);
+        const proto = Object.getPrototypeOf(value);
+        if (!isArray && proto !== Object.prototype && proto !== null) return true;
         if (state.path.has(value)) return false;
         state.path.add(value);
         let ambiguous = false;
-        if (Array.isArray(value) || isPlainObject(value)) {
-            for (const key of Object.keys(value)) {
-                if (scanOutcomeDescriptions(value[key], state)) { ambiguous = true; break; }
-            }
+        for (const key of Reflect.ownKeys(value)) {
+            const descriptor = Object.getOwnPropertyDescriptor(value, key);
+            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) { ambiguous = true; break; }
+            if (key === "outcome" && descriptor.value !== "EXECUTED") { ambiguous = true; break; }
+            if (scanOutcomeDescriptions(descriptor.value, state)) { ambiguous = true; break; }
         }
         state.path.delete(value);
         return ambiguous;
@@ -473,35 +474,61 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
 
     async function execute(p) {
         if (p === null || typeof p !== "object") throw fail(REASONS.MALFORMED_REQUEST, "execute requires a request object");
-        for (const key of CALLER_EXECUTOR_KEYS) {
-            if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
-                throw fail(REASONS.CALLER_EXECUTOR_REJECTED, `caller-executor option '${key}' is forbidden; the actuator is bootstrap-owned, never caller-selectable`);
+        // Guarded intake (mirrors the bootstrap dispatcher): a getter or Proxy
+        // trap that throws becomes a typed refusal, never a leaked exception.
+        let intent;
+        let authSession;
+        let parameters;
+        let metadata;
+        let timeoutOption;
+        let signalOption;
+        try {
+            for (const key of CALLER_EXECUTOR_KEYS) {
+                if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
+                    throw fail(REASONS.CALLER_EXECUTOR_REJECTED, `caller-executor option '${key}' is forbidden; the actuator is bootstrap-owned, never caller-selectable`);
+                }
             }
-        }
-        for (const key of BEARER_DECISION_KEYS) {
-            if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
-                throw fail(REASONS.CALLER_EXECUTOR_REJECTED, `authority-decision option '${key}' is forbidden; an AuthorityDecision is historical evidence, not a bearer execution token`);
+            for (const key of BEARER_DECISION_KEYS) {
+                if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
+                    throw fail(REASONS.CALLER_EXECUTOR_REJECTED, `authority-decision option '${key}' is forbidden; an AuthorityDecision is historical evidence, not a bearer execution token`);
+                }
             }
+            intent = p.intent;
+            authSession = p.authSession;
+            parameters = p.parameters;
+            metadata = p.metadata;
+            timeoutOption = p.timeoutMs;
+            signalOption = p.signal;
+        } catch (e) {
+            if (e && typeof e.reasonCode === "string") throw e;
+            throw fail(REASONS.MALFORMED_REQUEST, "request options are unreadable");
         }
 
-        const { intent, authSession } = p;
-        if (!intent || typeof intent !== "object" ||
-            typeof intent.intentId !== "string" ||
-            typeof intent.capabilityId !== "string" ||
-            typeof intent.operation !== "string" ||
-            typeof intent.capabilityIncarnationId !== "string") {
-            throw fail(REASONS.INVALID_INTENT, "execute requires a canonical ActionIntent");
-        }
-        if (!isValidIncarnationId(intent.capabilityIncarnationId)) {
-            throw fail(REASONS.INVALID_INTENT, "intent capabilityIncarnationId is not a valid canonical incarnation");
-        }
-        if (authSession === null || typeof authSession !== "object") {
-            throw fail(REASONS.INVALID_SESSION, "execute requires an authenticated session");
+        let admittedAtMs;
+        try {
+            if (!intent || typeof intent !== "object" ||
+                typeof intent.intentId !== "string" ||
+                typeof intent.capabilityId !== "string" ||
+                typeof intent.operation !== "string" ||
+                typeof intent.capabilityIncarnationId !== "string") {
+                throw fail(REASONS.INVALID_INTENT, "execute requires a canonical ActionIntent");
+            }
+            if (!isValidIncarnationId(intent.capabilityIncarnationId)) {
+                throw fail(REASONS.INVALID_INTENT, "intent capabilityIncarnationId is not a valid canonical incarnation");
+            }
+            if (authSession === null || typeof authSession !== "object") {
+                throw fail(REASONS.INVALID_SESSION, "execute requires an authenticated session");
+            }
+            admittedAtMs = intent.createdAtMs;
+        } catch (e) {
+            if (e && typeof e.reasonCode === "string") throw e;
+            throw fail(REASONS.INVALID_INTENT, "intent fields are unreadable");
         }
 
         const requestedAtMs = canonicalClockNow();
         const lifecycle = createLifecycleTracker(LIFECYCLE.CREATED);
-        const admittedAtMs = intent.createdAtMs;
+        // Downstream reads this sanitized bag, never the caller's object.
+        const safeP = Object.freeze({ intent, authSession, parameters, metadata, timeoutMs: timeoutOption, signal: signalOption });
 
         let provisionalRequest;
         try {
@@ -515,15 +542,15 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
                 authorityGeneration: 0,
                 admittedAtMs,
                 requestedAtMs,
-                parameters: p.parameters,
-                metadata: p.metadata
+                parameters,
+                metadata
             });
         } catch (e) {
             lifecycle.advance(LIFECYCLE.FAILED, requestedAtMs);
             throw e;
         }
 
-        const contentKey = computeContentKey(intent, authSession, p.parameters, p.metadata);
+        const contentKey = computeContentKey(intent, authSession, parameters, metadata);
         if (inFlight.has(contentKey)) return inFlight.get(contentKey).promise;
         if (completed.has(contentKey)) return completed.get(contentKey).result;
 
@@ -531,7 +558,7 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
         inFlight.set(contentKey, inFlightEntry);
         const runPromise = (async () => {
             try {
-                return await runExecutionBody(contentKey, intent, authSession, p, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs);
+                return await runExecutionBody(contentKey, intent, authSession, safeP, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs);
             } finally {
                 inFlight.delete(contentKey);
             }
@@ -540,7 +567,7 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
         return runPromise;
     }
 
-    async function runExecutionBody(contentKey, intent, authSession, p, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs) {
+    async function runExecutionBody(contentKey, intent, authSession, safeP, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs) {
         lifecycle.advance(LIFECYCLE.REVALIDATING, canonicalClockNow());
 
         let freshDecision;
@@ -622,8 +649,8 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
                 authorityGeneration: freshDecision.authorityGeneration,
                 admittedAtMs,
                 requestedAtMs,
-                parameters: p.parameters,
-                metadata: p.metadata
+                parameters: safeP.parameters,
+                metadata: safeP.metadata
             });
         } catch (e) {
             lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());
@@ -676,7 +703,7 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
 
         lifecycle.advance(LIFECYCLE.READY, canonicalClockNow());
 
-        const signal = readSignal(p.signal);
+        const signal = readSignal(safeP.signal);
         if (signal && signal.aborted) {
             lifecycle.advance(LIFECYCLE.CANCELLED, canonicalClockNow());
             const result = buildExecutionResult({
@@ -696,8 +723,8 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
 
         lifecycle.advance(LIFECYCLE.DISPATCHING, canonicalClockNow());
         const dispatchStartMs = canonicalClockNow();
-        const effectiveTimeout = (typeof p.timeoutMs === "number" && Number.isSafeInteger(p.timeoutMs) && p.timeoutMs >= MIN_TIMEOUT_MS && p.timeoutMs <= MAX_TIMEOUT_MS)
-            ? p.timeoutMs : timeoutMs;
+        const effectiveTimeout = (typeof safeP.timeoutMs === "number" && Number.isSafeInteger(safeP.timeoutMs) && safeP.timeoutMs >= MIN_TIMEOUT_MS && safeP.timeoutMs <= MAX_TIMEOUT_MS)
+            ? safeP.timeoutMs : timeoutMs;
 
         let cancelledDuringDispatch = false;
         let invocationCount = 0;
@@ -909,7 +936,7 @@ async function makeActuationHarness({ clock, scopeBindings, authenticate } = {})
     });
     // Per-harness brand set: a separate trust domain per makeActuationHarness
     // call. Two harness instances have INDEPENDENT result brands, so a
-    // result from harness A is NOT canonical in harness B — exactly mirroring
+    // result from harness A is NOT canonical in harness B â€” exactly mirroring
     // the production closure-private brand model.
     const localRequestBrandSet = new WeakSet();
     const localResultBrandSet = new WeakSet();
