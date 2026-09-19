@@ -247,6 +247,47 @@ test("legacy ToolBus: source contains no handler invocation or authority evaluat
     assert.match(source, /jalur kanonik/, "ToolBus must document the canonical route");
 });
 
+test("legacy ToolBus: a refusal is classified as an authority limit, not a retryable defect", async () => {
+    const healing = require("../../../src/autonomy").healing;
+    const refusal = await toolBus.execute({ name: CANARY_ID, args: {} });
+    assert.equal(refusal.ok, false);
+    // The LIVE refusal text must classify as a permission/authority limit --
+    // otherwise recovery substitutes the tool and escalates to the forge.
+    assert.equal(healing.classify(refusal.error), "permission");
+    assert.equal(healing.classify("ditolang verifikasi: skema argumen"), "permission");
+    const recovery = await healing.recover({ tool: CANARY_ID, args: {}, error: new Error(refusal.error), goalId: null });
+    assert.equal(recovery.klass, "permission");
+    assert.equal(recovery.outcome.ok, false);
+    assert.equal(recovery.outcome.authorityLimit, true);
+    assert.equal(recovery.outcome.escalateToFactory, undefined);
+    assert.equal(
+        recovery.attempts.some(a => a.strategy === "escalate-skill-factory" || a.strategy === "substitute"),
+        false,
+        "an authority limit must not substitute a tool or escalate to the forge"
+    );
+    assert.equal(canary.runs, 0);
+});
+
+test("legacy SkillFactory: a draft tool is never required or executed in-process", async () => {
+    const os = require("node:os");
+    const skillFactory = require("../../../src/autonomy").skillFactory;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-draft-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    try {
+        // A draft whose module BODY writes a marker: if anything requires it,
+        // the marker appears -- including the old `require()`-only probe.
+        fs.writeFileSync(path.join(dir, "tool.js"),
+            `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n` +
+            `module.exports = { name: "x", execute: async () => ({}) };`);
+        const result = await skillFactory.sandbox("w8-draft", "x", {});
+        assert.equal(result.ok, false);
+        assert.equal(result.canonicalRequired, true);
+        assert.equal(fs.existsSync(marker), false, "a draft module body must never run in this process");
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
 test("legacy ToolBus: canonical compatibility success path executes exactly once through the canonical path", {
     skip: "BLOCKED ON W8-IW1: the canonical capability/actuator registrations (and a manager-owned legacy ingress) do not exist yet, so no legacy request can reach the canonical path. This test must be implemented with the IW1 production-path harness; it is deliberately NOT faked."
 }, () => { });
