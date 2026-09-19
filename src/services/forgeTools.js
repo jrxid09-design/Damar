@@ -104,9 +104,10 @@ function forgeTools() {
             name: "activate_tool",
 
             description:
-                "Aktifkan tool draft agar bisa dipakai. HANYA panggil ini setelah pengguna " +
-                "secara eksplisit menyetujui (mis. berkata 'ya, aktifkan'). Jangan " +
-                "mengaktifkan atas inisiatif sendiri.",
+                "Setujui tool draft (status persetujuan). Sejak remediasi jalur-kedua W8 " +
+                "persetujuan TIDAK mengaktifkan eksekusi: tool hasil generate baru benar-benar " +
+                "bisa dipanggil setelah terdaftar di jalur kanonik. HANYA panggil ini setelah " +
+                "pengguna secara eksplisit menyetujui (mis. berkata 'ya, setujui').",
 
             parameters: {
                 type: "object",
@@ -121,10 +122,14 @@ function forgeTools() {
                 const result = forge.approve(id);
 
                 return {
-                    activated: true,
+                    approved: true,
+                    activated: false,
+                    canonicalRequired: result.canonicalRequired === true,
                     id: result.id,
                     tools: result.tools,
-                    note: `Tool '${id}' aktif dan siap dipanggil sekarang.`
+                    note: `Draft '${id}' disetujui secara status, TAPI belum dimuat/dieksekusi: ` +
+                        `aktivasi menunggu registrasi kanonik (Manager -> ActionIntent -> Authority -> Capability). ` +
+                        `Jangan mengklaim tool ini bisa dipanggil sekarang.`
                 };
 
             }

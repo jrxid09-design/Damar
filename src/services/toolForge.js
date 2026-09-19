@@ -154,6 +154,9 @@ class ToolForge {
             entry: "index.js",
             category: spec.category ?? "user",
             description: spec.description ?? "",
+            // Provenance mesin: artefak ini dihasilkan ToolForge dan karena itu
+            // TIDAK boleh dimuat langsung oleh pluginLoader.
+            forgeGenerated: true,
             // Provenance untuk tool BARU. Manifest lama yang sudah
             // tercatat "aether-forge" DIBIARKAN apa adanya — itu
             // catatan sejarah siapa pembuatnya, bukan branding aktif.

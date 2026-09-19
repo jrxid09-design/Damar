@@ -85,12 +85,63 @@ class PluginLoader {
      *
      * @returns {{ok:boolean, id?:string, tools?:number, error?:string}}
      */
+    /**
+     * Provenance: artefak hasil generate forge TIDAK PERNAH dimuat.
+     *
+     * W8 legacy second-path remediation: `require()` atas modul plugin
+     * menjalankan BODY modulnya, jadi kode hasil generate forge (yang bukan
+     * kapabilitas kanonik) tidak boleh dimuat dari jalur legacy mana pun.
+     * Penanda diperiksa SEBELUM require/index.js dibaca.
+     */
+    isForgeGenerated(pluginPath) {
+
+        try {
+
+            if (fs.existsSync(path.join(pluginPath, ".forge-generated"))) return true;
+
+            const manifestPath = path.join(pluginPath, "manifest.json");
+
+            if (fs.existsSync(manifestPath)) {
+                const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+                if (manifest?.forgeGenerated === true) return true;
+                if (manifest?.forge?.generated === true) return true;
+            }
+
+        }
+        catch { /* manifest rusak bukan bukti provenance */ }
+
+        return false;
+
+    }
+
+    /** Alasan penolakan yang seragam untuk artefak forge. */
+    refuseForgeArtifact(pluginPath) {
+
+        const name = path.basename(pluginPath);
+
+        try {
+            require("../services/telemetryService").info(
+                `[pluginLoader] menolak memuat artefak forge '${name}' (menunggu jalur kanonik)`
+            );
+        }
+        catch { /* observability opsional */ }
+
+        return { ok: false, forgeGenerated: true, canonicalRequired: true, error: `artefak forge '${name}' tidak dimuat tanpa registrasi kanonik` };
+
+    }
+
     loadOne(pluginPath, source = "user") {
 
         // require/require.resolve butuh path absolut (relatifnya
         // dihitung dari lokasi modul ini, bukan cwd). Diresolve di
         // sini agar pemanggil boleh memberi path relatif.
         pluginPath = path.resolve(pluginPath);
+
+        // Guard provenance PALING AWAL: sebelum manifest dibaca dan sebelum
+        // index.js/tool.js di-require.
+        if (this.isForgeGenerated(pluginPath)) {
+            return this.refuseForgeArtifact(pluginPath);
+        }
 
         let manifest;
 
@@ -264,6 +315,12 @@ class PluginLoader {
 
     loadPlugin(pluginPath, manifest) {
 
+        // Defense-in-depth: even if a caller reaches here directly, a forge
+        // artifact is never required (this is the last point before require).
+        if (this.isForgeGenerated(pluginPath)) {
+            return {};
+        }
+
         const entryPath = path.join(
             pluginPath,
             manifest.entry
@@ -337,14 +394,7 @@ class PluginLoader {
         // kapabilitas kanonik, dan `require()` di bawah menjalankan body
         // modulnya. Artefak berpenanda asal-usul forge tidak pernah dimuat;
         // aktivasi menunggu registrasi kanonik.
-        if (fs.existsSync(path.join(pluginPath, ".forge-generated"))) {
-
-            try {
-                require("../services/telemetryService").info(
-                    `[pluginLoader] menolak memuat artefak forge '${path.basename(pluginPath)}' (menunggu jalur kanonik)`
-                );
-            }
-            catch { /* observability opsional */ }
+        if (this.isForgeGenerated(pluginPath)) {
 
             return [];
 

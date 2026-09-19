@@ -333,11 +333,44 @@ test("legacy pluginLoader: a forge-generated plugin directory is never loaded", 
     const marker = path.join(dir, "EXECUTED.marker");
     try {
         fs.writeFileSync(path.join(dir, ".forge-generated"), "1\n", "utf8");
+        fs.writeFileSync(path.join(dir, "index.js"),
+            `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\nmodule.exports = { tools: [] };`);
         fs.writeFileSync(path.join(dir, "tool.js"),
             `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\nmodule.exports = [];`);
-        const tools = pluginLoader.loadTools(dir);
-        assert.deepEqual(tools, []);
+        fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({
+            id: "w8forgeplug", name: "w8 forge plugin", version: "1.0.0", entry: "index.js",
+            category: "user", description: "", permissions: [], tags: ["user"], forgeGenerated: true
+        }));
+        // Every load entry point must refuse BEFORE requiring index.js/tool.js.
+        assert.deepEqual(pluginLoader.loadTools(dir), []);
+        assert.deepEqual(pluginLoader.loadPlugin(dir, { entry: "index.js" }), {});
+        const one = pluginLoader.loadOne(dir, "user");
+        assert.equal(one.ok, false);
+        assert.equal(one.forgeGenerated, true);
         assert.equal(fs.existsSync(marker), false, "load-time must not execute forge-generated code");
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy pluginLoader: a forged manifest field alone also blocks loading", () => {
+    const os = require("node:os");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-plug-mf-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    try {
+        // No .forge-generated file at all: provenance comes from the manifest,
+        // so renaming or omitting the marker file cannot bypass the refusal.
+        fs.writeFileSync(path.join(dir, "index.js"),
+            `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\nmodule.exports = { tools: [] };`);
+        fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({
+            id: "w8forgeplug2", name: "w8 forge plugin 2", version: "1.0.0", entry: "index.js",
+            category: "user", description: "", permissions: [], tags: ["user"], forgeGenerated: true
+        }));
+        const one = pluginLoader.loadOne(dir, "user");
+        assert.equal(one.ok, false);
+        assert.equal(one.forgeGenerated, true);
+        assert.equal(fs.existsSync(marker), false);
     } finally {
         fs.rmSync(dir, { recursive: true, force: true });
     }
