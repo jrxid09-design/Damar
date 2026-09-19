@@ -333,6 +333,23 @@ class PluginLoader {
 
         }
 
+        // W8 legacy second-path remediation: kode hasil generate forge BUKAN
+        // kapabilitas kanonik, dan `require()` di bawah menjalankan body
+        // modulnya. Artefak berpenanda asal-usul forge tidak pernah dimuat;
+        // aktivasi menunggu registrasi kanonik.
+        if (fs.existsSync(path.join(pluginPath, ".forge-generated"))) {
+
+            try {
+                require("../services/telemetryService").info(
+                    `[pluginLoader] menolak memuat artefak forge '${path.basename(pluginPath)}' (menunggu jalur kanonik)`
+                );
+            }
+            catch { /* observability opsional */ }
+
+            return [];
+
+        }
+
         delete require.cache[
             require.resolve(toolPath)
         ];
