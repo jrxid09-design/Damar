@@ -725,6 +725,51 @@ test("legacy pluginLoader: a manifest entry cannot escape its plugin directory",
     }
 });
 
+test("legacy forge: a hand-authored plugin using the forge's wrapper is NOT refused", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "w8-falsepos-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-falsepos-tmp-"));
+    const pluginDir = path.join(root, "handwritten");
+    const id = "w8-falsepos-probe";
+    const ledgerPath = path.join(toolForge.userRoot, ".forge-provenance.json");
+    const ledgerBackup = fs.existsSync(ledgerPath) ? fs.readFileSync(ledgerPath, "utf8") : null;
+    try {
+        // The forge writes a DETERMINISTIC index.js wrapper for every tool, so a
+        // hand-authored plugin can legitimately contain identical wrapper bytes.
+        // Only the generated payload may count as provenance.
+        const created = toolForge.create({
+            id, name: id, description: "wrapper collision canary",
+            raw: "module.exports = [{ name: 'canary', execute: async () => ({}) }];"
+        });
+
+        fs.mkdirSync(pluginDir, { recursive: true });
+        fs.writeFileSync(path.join(pluginDir, "index.js"), fs.readFileSync(path.join(created.dir, "index.js")));
+        fs.writeFileSync(path.join(pluginDir, "tool.js"), "module.exports = [{ name: 'hand', execute: async () => ({ ok: true }) }];\n");
+        fs.writeFileSync(path.join(pluginDir, "manifest.json"), JSON.stringify({
+            id: "w8hand", name: "w8 hand", version: "1.0.0", entry: "index.js",
+            category: "user", description: "", permissions: [], tags: ["user"]
+        }, null, 2));
+
+        assert.equal(pluginLoader.isQuarantinedForgeArtifact(pluginDir), false);
+        assert.equal(pluginLoader.isForgeGenerated(pluginDir), false);
+        assert.equal(pluginLoader.isForgeProvenanceContent(pluginDir, { entry: "index.js" }), false,
+            "an identical wrapper must not be treated as forge provenance");
+
+        const loaded = pluginLoader.loadOne(pluginDir, "user");
+        assert.equal(loaded.ok, true, "a legitimate hand-written plugin must still load");
+        pluginLoader.unloadPlugin("w8hand");
+    } finally {
+        if (ledgerBackup === null) fs.rmSync(ledgerPath, { force: true });
+        else fs.writeFileSync(ledgerPath, ledgerBackup, "utf8");
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
 test("legacy ToolBus: canonical compatibility success path executes exactly once through the canonical path", {
     skip: "BLOCKED ON W8-IW1: the canonical capability/actuator registrations (and a manager-owned legacy ingress) do not exist yet, so no legacy request can reach the canonical path. This test must be implemented with the IW1 production-path harness; it is deliberately NOT faked."
 }, () => { });

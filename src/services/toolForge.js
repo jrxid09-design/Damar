@@ -488,14 +488,14 @@ module.exports = [ new ${className}() ];
 
     recordProvenance(dir, id) {
         try {
-            const hashes = ["tool.js", "index.js"]
-                .map(name => this.codeHash(path.join(dir, name)))
-                .filter(Boolean);
-            if (hashes.length === 0) return;
+            // Hanya tool.js (muatan hasil generate). index.js forge adalah
+            // pembungkus deterministik yang sama untuk semua tool — mencatat
+            // hash-nya akan menolak plugin tulisan tangan yang memakai
+            // pembungkus serupa.
+            const hash = this.codeHash(path.join(dir, "tool.js"));
+            if (!hash) return;
             const ledger = this.readProvenanceLedger();
-            for (const hash of hashes) {
-                ledger.hashes[hash] = { id, at: new Date().toISOString() };
-            }
+            ledger.hashes[hash] = { id, at: new Date().toISOString() };
             // Tulis atomik supaya buku tidak pernah setengah jadi.
             const tmp = this.ledgerPath + ".tmp";
             fs.writeFileSync(tmp, JSON.stringify(ledger, null, 2), "utf8");
