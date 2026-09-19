@@ -149,9 +149,10 @@ function autonomyTools() {
         new AITool({
             name: "tool_exec",
             description:
-                "Eksekusi tool apa pun lewat TOOLBUS tahan-gagal: validasi argumen, timeout, " +
-                "retry error transien, substitusi tool alternatif bila utama gagal, dan pencatatan " +
-                "reliabilitas. Pakai bila butuh ketahanan ekstra; panggilan tool biasa tetap boleh.",
+                "Jalur eksekusi tool LEGACY lewat TOOLBUS. Sejak remediasi jalur-kedua W8, " +
+                "ToolBus BUKAN pemilik otoritas eksekusi: permintaan di sini ditolak fail-closed " +
+                "(tidak ada validasi/retry/substitusi, tidak ada handler yang dijalankan). " +
+                "Aksi yang berkonsekuensi harus lewat jalur kanonik.",
             parameters: {
                 type: "object",
                 properties: {
