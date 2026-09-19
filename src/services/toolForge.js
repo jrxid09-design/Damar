@@ -14,6 +14,13 @@ const telemetry = require("./telemetryService");
 const FORGE_GENERATED_MARKER = ".forge-generated";
 
 /**
+ * Penanda STATUS persetujuan (bukan izin eksekusi). Sejak W8, menyetujui draft
+ * tidak memindahkannya ke root plugin yang bisa dimuat: artefak forge tetap di
+ * karantina, dan aktivasi menunggu registrasi kanonik.
+ */
+const APPROVED_MARKER = ".forge-approved";
+
+/**
  * ToolForge — tempat Damar (dan pengguna) membuat tool baru.
  *
  * Sebuah "tool spec" diubah menjadi folder plugin nyata
@@ -373,8 +380,13 @@ module.exports = [ new ${className}() ];
     }
 
     /**
-     * Setujui draft: pindahkan ke userPlugins. TIDAK memuat/menjalankan kode
-     * (W8: approval bukan otorisasi eksekusi).
+     * Setujui draft: catat STATUS persetujuan. TIDAK memindahkan artefak ke
+     * root plugin dan TIDAK memuat/menjalankan kode.
+     *
+     * Sebelum W8, approve() me-rename draft ke userRoot lalu memuatnya. Itu
+     * membuat persetujuan sama dengan aktivasi, dan membuat artefak forge
+     * berada di root yang dimuat — sehingga menghapus penanda provenance saja
+     * sudah cukup untuk membuka eksekusi kode hasil generate.
      */
     approve(id) {
 
@@ -384,17 +396,13 @@ module.exports = [ new ${className}() ];
             throw new Error(`Draft '${id}' tidak ditemukan.`);
         }
 
-        const target = path.join(this.userRoot, id);
-
-        this.removeDir(target);
-
-        fs.renameSync(draftDir, target);
+        fs.writeFileSync(path.join(draftDir, APPROVED_MARKER), new Date().toISOString() + "\n", "utf8");
 
         telemetry.publish("forge:changed", { id, action: "approved" });
 
-        telemetry.info(`[forge] draft '${id}' disetujui; aktivasi menunggu jalur kanonik`);
+        telemetry.info(`[forge] draft '${id}' disetujui (status); aktivasi menunggu jalur kanonik`);
 
-        return { id, status: "approved", activated: false, canonicalRequired: true, tools: null };
+        return { id, status: "approved", activated: false, canonicalRequired: true, tools: null, dir: draftDir };
 
     }
 
@@ -462,6 +470,31 @@ module.exports = [ new ${className}() ];
 
     }
 
+    /**
+     * Status jujur sebuah artefak.
+     *
+     * "active" HANYA bila pluginLoader benar-benar memuatnya (bukan disimpulkan
+     * dari lokasi direktori). "approved" = disetujui/diinstal tetapi belum
+     * dimuat. "draft" = belum disetujui. Status tidak pernah menyamar sebagai
+     * aktivasi, dan persetujuan tidak pernah berarti bisa dipanggil.
+     */
+    statusFor(dir, id, manifest, installed) {
+
+        const loaded = pluginLoader?.loaded;
+        const isLoaded = typeof loaded?.has === "function" &&
+            (loaded.has(id) === true ||
+                (manifest?.id !== undefined && loaded.has(manifest.id) === true));
+
+        if (isLoaded) return { status: "active", activated: true };
+
+        if (installed || fs.existsSync(path.join(dir, APPROVED_MARKER))) {
+            return { status: "approved", activated: false };
+        }
+
+        return { status: "draft", activated: false };
+
+    }
+
     /** Baca kembali spec sebuah plugin/draft untuk diedit. */
     read(id) {
 
@@ -481,15 +514,13 @@ module.exports = [ new ${className}() ];
                 path.join(dir, "tool.js"), "utf8"
             );
 
-            // Hanya plugin NON-forge yang benar-benar dimuat bisa disebut
-            // "active"; artefak forge berhenti di status persetujuan.
             const forgeGenerated = this.isForgeGeneratedDir(dir);
-            const active = root === this.userRoot && !forgeGenerated;
+            const state = this.statusFor(dir, id, manifest, root === this.userRoot);
 
             return {
                 id,
-                status: active ? "active" : root === this.userRoot ? "approved" : "draft",
-                activated: active,
+                status: state.status,
+                activated: state.activated,
                 canonicalRequired: forgeGenerated,
                 manifest,
                 source,
@@ -530,12 +561,13 @@ module.exports = [ new ${className}() ];
                     // Artefak forge tidak pernah dimuat: statusnya "approved"
                     // (persetujuan tersimpan), bukan "active".
                     const forgeGenerated = this.isForgeGeneratedDir(path.join(root, name));
+                    const state = this.statusFor(path.join(root, name), name, manifest, status === "active");
                     return {
                         id: manifest.id,
                         name: manifest.name,
                         description: manifest.description,
-                        status: status === "active" && forgeGenerated ? "approved" : status,
-                        activated: status === "active" && !forgeGenerated,
+                        status: state.status,
+                        activated: state.activated,
                         canonicalRequired: forgeGenerated,
                         origin: manifest.forge?.origin ?? "manual",
                         createdAt: manifest.forge?.createdAt ?? null,

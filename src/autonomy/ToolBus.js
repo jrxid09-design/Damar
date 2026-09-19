@@ -122,14 +122,39 @@ class ToolBus {
      * @returns {Promise<{ok: boolean, result: null, error: string, tool: string,
      *   executedTool: null, via: null, attempts: Array, durationMs: number}>}
      */
-    async execute({ name, args = {}, timeoutMs = 60000, retries = 1, context = null, allowSubstitute = true } = {}) {
-
-        void args; void timeoutMs; void retries; void context; void allowSubstitute;
+    async execute(request = null) {
 
         const started = Date.now();
+
+        // Permintaan dibaca DEFENSIF, tidak lewat parameter destructuring:
+        // container hostile (Proxy/getter yang melempar, thenable, primitif,
+        // null) tidak boleh membuat exception mentah keluar dari sini — yang
+        // keluar tetap penolakan bertipe, sesuai kontrak fail-closed.
+        const name = this.readRequestName(request);
+
         const refusal = this.refuse(name, Date.now() - started);
         this.record(name, false, refusal.durationMs, refusal.error);
         return refusal;
+
+    }
+
+    /**
+     * Nama tool dari permintaan legacy, dibaca tanpa pernah melempar.
+     * Apa pun bentuk masukannya (termasuk Proxy dengan getter yang melempar),
+     * hasilnya string yang aman dipakai untuk penolakan.
+     */
+    readRequestName(request) {
+
+        try {
+            if (request === null || request === undefined || typeof request !== "object") {
+                return request === null || request === undefined ? "" : String(request);
+            }
+            const name = request.name;
+            return typeof name === "string" ? name : String(name ?? "");
+        }
+        catch {
+            return "[unreadable-request]";
+        }
 
     }
 
