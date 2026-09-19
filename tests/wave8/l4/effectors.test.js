@@ -586,11 +586,12 @@ test("L4 a hostile thrown actuator value still produces a canonical FAILED resul
         getOwnPropertyDescriptor() { throw new Error("descriptor trap"); }
     });
     const hostilePrototype = Object.create(new Proxy({}, { getPrototypeOf() { throw new Error("proto trap"); } }));
-    for (const thrown of [hostileProxy, hostilePrototype]) {
+    // Falsy thrown values must not be skipped by a truthiness test: these are
+    // all thrown values and must yield FAILED, not EXECUTED.
+    for (const thrown of [hostileProxy, hostilePrototype, null, undefined, false, 0, ""]) {
         const result = await dispatchRawActuatorReport(() => { throw thrown; });
         assert.equal(result.state, "FAILED");
         assert.equal(result.failureReason, "ACTUATOR_REJECTED_INVOCATION");
-        assert.equal(result.actuatorReport, null);
     }
 });
 
@@ -608,22 +609,25 @@ test("L4 an unrecognized driver outcome token fails closed at both layers", asyn
         return adapter.execute(gatedRequest({ move: 1 }, `token-${now}`));
     };
     // Every token the adapter does not recognize as the canonical success token
-    // is an ambiguous physical outcome: fail closed, never EXECUTED.
-    for (const token of ["GARBAGE", 42, null, "ok", { weird: true }, Object.create(null)]) {
+    // is an ambiguous physical outcome: fail closed, never EXECUTED. Note that
+    // an EXPLICITLY undefined token is a described token, not an absent one.
+    for (const token of ["GARBAGE", 42, null, undefined, "ok", { weird: true }, Object.create(null)]) {
         const result = await run({ outcome: token });
         assert.equal(result.outcome, OUTCOME.UNKNOWN_OUTCOME);
         assert.equal(result.reason, "TRANSPORT_UNSUPPORTED_TOKEN");
     }
     assert.equal((await run({ outcome: OUTCOME.EXECUTED })).outcome, OUTCOME.EXECUTED);
     assert.equal((await run({ ok: true })).outcome, OUTCOME.EXECUTED);
+    assert.equal((await run({})).outcome, OUTCOME.EXECUTED);
     // Same closed vocabulary at the canonical dispatcher.
-    for (const token of ["GARBAGE", 42, null, Object.create(null)]) {
+    for (const token of ["GARBAGE", 42, null, undefined, Object.create(null)]) {
         const result = await dispatchRawActuatorReport(() => ({ outcome: token }));
         assert.equal(result.state, "FAILED");
         assert.equal(result.failureReason, "ACTUATOR_REJECTED_INVOCATION");
     }
     assert.equal((await dispatchRawActuatorReport(() => ({ outcome: OUTCOME.EXECUTED }))).state, "EXECUTED");
     assert.equal((await dispatchRawActuatorReport(() => ({ ok: true }))).state, "EXECUTED");
+    assert.equal((await dispatchRawActuatorReport(() => ({}))).state, "EXECUTED");
 });
 
 test("L4 audit clock failure is contained and blocks transport", async () => {

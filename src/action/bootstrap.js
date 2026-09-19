@@ -1204,17 +1204,20 @@ function sanitizeActuatorOutput3(value) {
 // was described at all. The sanitized copy cannot be used for this -- it
 // silently drops accessor and non-plain descriptions, which would turn an
 // ambiguous physical outcome ("UNKNOWN_OUTCOME") into EXECUTED.
+const NO_OUTCOME3 = Symbol("no-actuator-outcome");
 const UNSUPPORTED_OUTCOME3 = Symbol("unsupported-actuator-outcome");
 function readActuatorOutcome3(value) {
     try {
-        if (value === null || (typeof value !== "object" && typeof value !== "function")) return undefined;
+        if (value === null || (typeof value !== "object" && typeof value !== "function")) return NO_OUTCOME3;
         if (isProxy3(value)) return UNSUPPORTED_OUTCOME3;
         if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
             const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
             if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return UNSUPPORTED_OUTCOME3;
+            // PRESENCE matters: an own data `outcome` whose value is undefined is
+            // a described (ambiguous) token, not an absent one.
             return descriptor.value;
         }
-        return Reflect.has(value, "outcome") ? UNSUPPORTED_OUTCOME3 : undefined;
+        return Reflect.has(value, "outcome") ? UNSUPPORTED_OUTCOME3 : NO_OUTCOME3;
     } catch {
         // A description that throws while being read (hostile prototype trap)
         // is unsupported, never "no outcome was described".
@@ -1739,6 +1742,7 @@ function composeDispatcher3({
 
         let actuatorOutput = null;
         let dispatchFailed = null;
+        let dispatchThrew = false;
         try {
             actuatorOutput = await Promise.race([execPromise, timeoutPromise]);
             if (timedOut) {
@@ -1758,6 +1762,7 @@ function composeDispatcher3({
                 return result;
             }
         } catch (e) {
+            dispatchThrew = true;
             dispatchFailed = e;
         } finally {
             if (timeoutHandle) clearTimeout(timeoutHandle);
@@ -1766,7 +1771,7 @@ function composeDispatcher3({
             }
         }
 
-        if (dispatchFailed) {
+        if (dispatchThrew) {
             lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
             // A thrown value is attacker-shaped input: it must never be able to
             // throw again out of the canonical failure path (a rejected
@@ -1821,7 +1826,7 @@ function composeDispatcher3({
         // canonical EXECUTED token is a success claim. Any other described
         // token -- a recognized failure or an unrecognized one -- fails closed,
         // so an unknown token can never be echoed back as EXECUTED.
-        if (outputOutcome !== undefined && outputOutcome !== "EXECUTED") {
+        if (outputOutcome !== NO_OUTCOME3 && outputOutcome !== "EXECUTED") {
             lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
             const result = buildExecutionResult3({
                 executionRequest: request,

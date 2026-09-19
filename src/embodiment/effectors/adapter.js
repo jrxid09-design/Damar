@@ -28,15 +28,17 @@ function isLedgerAcknowledgment(value, expectedEventType) {
 // through to EXECUTED.
 function readReportOutcome(value) {
     try {
-        if (value === null || (typeof value !== "object" && typeof value !== "function")) return { value: undefined };
+        if (value === null || (typeof value !== "object" && typeof value !== "function")) return { present: false };
         if (isProxy(value)) return { unreadable: true };
         if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
             const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
             if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return { unreadable: true };
-            return { value: descriptor.value };
+            // PRESENCE matters: an own data `outcome` whose value is undefined is
+            // a described (ambiguous) token, not an absent one.
+            return { present: true, value: descriptor.value };
         }
         if (Reflect.has(value, "outcome")) return { unreadable: true };
-        return { value: undefined };
+        return { present: false };
     } catch {
         // A report that throws while its outcome is being read (hostile
         // prototype trap) is unreadable, never "no outcome".
@@ -203,11 +205,11 @@ function createEffectorAdapter({ descriptor, invoke, audit, isCanonicalRequest, 
             }
             const transportOutcome = transport.value;
             // The command channel's outcome token is a CLOSED vocabulary: only
-            // the canonical EXECUTED token is a success claim. Any other
-            // described token -- a recognized failure OR an unrecognized/
-            // ambiguous one -- fails closed, so no unknown token can be echoed
-            // back as a successful execution.
-            if (transportOutcome !== undefined && transportOutcome !== OUTCOME.EXECUTED) {
+            // the canonical EXECUTED token is a success claim. A DESCRIBED token
+            // -- recognized failure, unknown value, or an explicit undefined --
+            // fails closed, so only a report that describes no outcome at all
+            // can reach the success path.
+            if (transport.present && transportOutcome !== OUTCOME.EXECUTED) {
                 // Only a string token can be looked up in the closed vocabulary:
                 // key coercion of an object token could itself throw.
                 const recognized = typeof transportOutcome === "string" &&

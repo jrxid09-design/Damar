@@ -66,17 +66,20 @@ const isProxyValue = require("node:util").types.isProxy.bind(require("node:util"
 // read from the RAW report, and only an own DATA property of a non-Proxy object
 // is trusted -- an accessor, an inherited description or a Proxy fails closed
 // instead of falling through to EXECUTED.
+const NO_OUTCOME = Symbol("no-actuator-outcome");
 const UNSUPPORTED_OUTCOME = Symbol("unsupported-actuator-outcome");
 function readActuatorOutcome(value) {
     try {
-        if (value === null || (typeof value !== "object" && typeof value !== "function")) return undefined;
+        if (value === null || (typeof value !== "object" && typeof value !== "function")) return NO_OUTCOME;
         if (isProxyValue(value)) return UNSUPPORTED_OUTCOME;
         if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
             const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
             if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return UNSUPPORTED_OUTCOME;
+            // PRESENCE matters: an own data `outcome` whose value is undefined is
+            // a described (ambiguous) token, not an absent one.
             return descriptor.value;
         }
-        return Reflect.has(value, "outcome") ? UNSUPPORTED_OUTCOME : undefined;
+        return Reflect.has(value, "outcome") ? UNSUPPORTED_OUTCOME : NO_OUTCOME;
     } catch {
         return UNSUPPORTED_OUTCOME;
     }
@@ -684,6 +687,7 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
 
         let actuatorOutput = null;
         let dispatchFailed = null;
+        let dispatchThrew = false;
         try {
             actuatorOutput = await Promise.race([execPromise, timeoutPromise]);
             if (timedOut) {
@@ -703,6 +707,7 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
                 return result;
             }
         } catch (e) {
+            dispatchThrew = true;
             dispatchFailed = e;
         } finally {
             if (timeoutHandle) clearTimeout(timeoutHandle);
@@ -711,7 +716,7 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
             }
         }
 
-        if (dispatchFailed) {
+        if (dispatchThrew) {
             lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());
             let sanitized = null;
             try { sanitized = sanitizeActuatorOutput(dispatchFailed); } catch { sanitized = null; }
@@ -755,7 +760,7 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
         }
         // Closed vocabulary: only the canonical EXECUTED token is a success
         // claim (mirrors the bootstrap dispatcher).
-        if (outputOutcome !== undefined && outputOutcome !== "EXECUTED") {
+        if (outputOutcome !== NO_OUTCOME && outputOutcome !== "EXECUTED") {
             lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());
             const result = buildExecutionResult({
                 executionRequest: request,
