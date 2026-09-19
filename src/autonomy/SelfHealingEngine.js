@@ -7,8 +7,11 @@ const { database, initialize } = require("../memory/db");
  * SELF-HEALING ENGINE (§12 + §33) — kegagalan = input, bukan henti.
  *
  * ERROR → KLASIFIKASI → STRATEGI:
- *   transient     → retry (backoff, sudah di ToolBus) → naikkan retries
+ *   transient     → retry (backoff) → naikkan retries
  *   permission    → laporkan batas (bukan sembunyikan) → gagal jujur
+ *                   (termasuk penolakan jalur-kanonik ToolBus: batas
+ *                   otoritas TIDAK bisa dipulihkan, tidak disubstitusi,
+ *                   tidak dieskalasi ke forge)
  *   dependency    → cek capability registry → sarankan paket/install
  *   implementation→ SUBSTITUSI tool lain (§34) → jika tetap gagal:
  *                   eskalasi SkillFactory (buat kapabilitas pengganti)
@@ -21,7 +24,7 @@ const { database, initialize } = require("../memory/db");
 
 const CLASSIFIERS = [
     { id: "transient",     test: /timeout|etimedout|econnreset|rate.?limit|503|502|busy|temporarily/i },
-    { id: "permission",    test: /ditolang|forbidden|403|401|tidak diizinkan|not allowed|sandbox/i },
+    { id: "permission",    test: /ditolang|ditolak|forbidden|403|401|tidak diizinkan|not allowed|sandbox/i },
     { id: "dependency",    test: /cannot find module|module not found|command not found|missing|dependen/i },
     { id: "environment",   test: /enospc|disk|out of memory|offline|network|fetch failed|dns/i },
     { id: "implementation",test: /typeerror|referenceerror|syntax|invalid|undefined is not|crash|exception/i }
@@ -123,12 +126,27 @@ class SelfHealingEngine {
             case "transient": {
                 // Retry agresif dengan backoff lebih panjang.
                 // M3/CLOSURE: identitas delegasi (exec/capabilitySet)
-                // IKUT ke ToolBus — pemulihan bukan hop pelucutan.
+                // IKUT pada pengajuan ulang — pemulihan bukan hop pelucutan.
                 outcome = await toolBus.execute({
                     name: tool, args, timeoutMs: 90000, retries: 3,
                     context: { goal: goalId, exec: delegator }
                 });
                 attempts.push({ strategy: "retry-aggressive", ok: outcome.ok });
+                break;
+            }
+
+            case "permission": {
+                // BATAS OTORITAS bukan kegagalan yang bisa dipulihkan: laporkan
+                // apa adanya. Tidak ada substitusi tool dan tidak ada eskalasi
+                // forge — penolakan ToolBus (jalur kanonik belum tersedia)
+                // masuk kelas ini, jadi penolakan tidak pernah berubah menjadi
+                // eksekusi lewat jalur lain.
+                attempts.push({ strategy: "report-authority-limit" });
+                outcome = {
+                    ok: false,
+                    error: String(error?.message ?? error),
+                    authorityLimit: true
+                };
                 break;
             }
 
@@ -166,7 +184,10 @@ class SelfHealingEngine {
             case "implementation":
             case "unknown":
             default: {
-                // Substitusi ekstra (ToolBus sudah mencoba satu lapis).
+                // Substitusi ekstra. Sejak remediasi jalur-kedua W8 ToolBus
+                // tidak mengeksekusi apa pun, jadi jalur ini berakhir pada
+                // penolakan fail-closed dan indikasi kebutuhan kapabilitas
+                // kanonik — bukan eksekusi lewat jalur alternatif.
                 // M3/CLOSURE: identitas delegasi ikut juga di jalur
                 // substitusi — tool pengganti tunduk pada restriction
                 // yang sama, bukan lebih luas.
@@ -178,6 +199,9 @@ class SelfHealingEngine {
 
                 // Masih gagal → indikasikan pembuatan kapabilitas pengganti.
                 if (!outcome.ok) {
+                    // Eskalasi forge tetap ditandai, TAPI tidak ada eksekusi
+                    // jalur alternatif: probe SkillFactory fail-closed sampai
+                    // kapabilitas kanonik terdaftar (lihat SkillFactory.probe).
                     outcome.escalateToFactory = true;
                     attempts.push({ strategy: "escalate-skill-factory" });
                 }

@@ -165,66 +165,30 @@ class SkillFactory {
     }
 
     /**
-     * SANDBOX — eksekusi tool baru di draft (belum ter-load ke runtime
-     * utama). Load plugin draft dalam proses terpisauk: require module
-     * tool di drafts dir dengan timeout ketat.
+     * SANDBOX — REFUSES. (W8 legacy second-path remediation.)
+     *
+     * Previously this loaded a freshly generated draft tool with `require()`
+     * and invoked `instance.execute()` in-process. That is arbitrary generated
+     * code execution outside canonical ownership: `require()` itself runs the
+     * draft module body, and the only containment was an 8s timeout race.
+     *
+     * A draft tool is NOT a canonical capability, its output is NOT a verified
+     * result, and this module has no authority to execute it. Until the draft
+     * is registered and executed through the canonical path (Manager ->
+     * ActionIntent -> Authority -> Capability Registry -> actuation ->
+     * Verification -> Audit), generation may continue but the probe fails
+     * closed and nothing is executed, activated or promoted on its word.
      */
     async sandbox(skillId, toolName, sampleArgs) {
 
-        const path = require("node:path");
-        const fs = require("node:fs");
+        void skillId; void toolName; void sampleArgs;
 
-        try {
-
-            const forge = require("../services/toolForge");
-            const draftDir = path.join(forge.draftsRoot ?? path.join(this.userRoot ?? ".", ".drafts"), skillId);
-
-            const toolFile = fs.existsSync(path.join(draftDir, "tool.js"))
-                ? path.join(draftDir, "tool.js")
-                : fs.existsSync(path.join(draftDir, "index.js"))
-                    ? path.join(draftDir, "index.js")
-                    : null;
-
-            if (!toolFile) {
-                return { ok: false, error: "berkas tool draft tidak ditemukan" };
-            }
-
-            // Hapus dari cache bila pernah dimuat (uji ulang versi baru).
-            delete require.cache[require.resolve(toolFile)];
-
-            const mod = require(toolFile);
-
-            // Modul bisa: array instance, instance tunggal, atau class.
-            let instance = null;
-
-            if (Array.isArray(mod)) {
-                instance = mod.find(t => t?.name === toolName) ?? mod[0];
-            }
-            else if (mod && typeof mod === "object" && typeof mod.execute === "function") {
-                instance = mod;
-            }
-            else if (typeof mod === "function") {
-                instance = new mod();
-            }
-            else if (mod?.default) {
-                instance = typeof mod.default === "function" ? new mod.default() : mod.default;
-            }
-
-            if (!instance || typeof instance.execute !== "function") {
-                return { ok: false, error: "modul tool tidak punya execute()" };
-            }
-
-            const result = await Promise.race([
-                Promise.resolve(instance.execute?.(sampleArgs ?? {})),
-                new Promise((_, reject) => setTimeout(() => reject(new Error("sandbox timeout 8s")), 8000))
-            ]);
-
-            return { ok: true, result };
-
-        }
-        catch (error) {
-            return { ok: false, error: error.message ?? String(error) };
-        }
+        return {
+            ok: false,
+            error: "ditolak otorisasi: draft tool tidak dieksekusi di proses ini; " +
+                "kapabilitas kanonik (Manager -> ActionIntent -> Authority -> Capability) diperlukan",
+            canonicalRequired: true
+        };
 
     }
 
