@@ -56,6 +56,40 @@ const TRANSPORT_FAILURE_REASONS = Object.freeze({
     UNKNOWN_OUTCOME: "TRANSPORT_UNKNOWN"
 });
 
+// Any `outcome` description ANYWHERE in a raw report must be the canonical
+// success token: a nested accessor, an inherited description, a Proxy, an
+// over-budget subtree or any non-EXECUTED token means the report describes an
+// ambiguous physical outcome, so one cannot be hidden inside a collection or
+// wrapper. Returns true when the report must fail closed.
+function scanOutcomeDescriptions(value, state = { nodes: 0, path: new Set() }) {
+    try {
+        if (++state.nodes > 512) return true;
+        if (value === null || (typeof value !== "object" && typeof value !== "function")) return false;
+        if (isProxy(value)) return true;
+        if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
+            const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
+            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return true;
+            if (descriptor.value !== OUTCOME.EXECUTED) return true;
+        } else if (Reflect.has(value, "outcome")) {
+            return true;
+        }
+        if (state.path.has(value)) return false;
+        state.path.add(value);
+        let ambiguous = false;
+        const proto = Object.getPrototypeOf(value);
+        if (Array.isArray(value) || proto === Object.prototype || proto === null) {
+            for (const key of Object.keys(value)) {
+                if (scanOutcomeDescriptions(value[key], state)) { ambiguous = true; break; }
+            }
+        }
+        state.path.delete(value);
+        return ambiguous;
+    } catch {
+        // Unreadable structure: never trustworthy, always fail closed.
+        return true;
+    }
+}
+
 // This is a leaf adapter primitive, not a dispatcher or registration surface.
 // The execution function is intended only as a binding in the private
 // actuator registry in bootstrap.js; W8-IW1 owns concrete registrations.
@@ -220,6 +254,12 @@ function createEffectorAdapter({ descriptor, invoke, audit, isCanonicalRequest, 
                     outcome,
                     reason: recognized ? TRANSPORT_FAILURE_REASONS[transportOutcome] : "TRANSPORT_UNSUPPORTED_TOKEN"
                 });
+            }
+            // A nested/collection report cannot smuggle an ambiguous outcome past
+            // the top-level check.
+            if (scanOutcomeDescriptions(report)) {
+                note("command-result", safeRequest, OUTCOME.UNKNOWN_OUTCOME);
+                return Object.freeze({ outcome: OUTCOME.UNKNOWN_OUTCOME, reason: "TRANSPORT_UNSUPPORTED_TOKEN" });
             }
             if (!verify && canonicalDescriptor.hazardClass === HAZARD_CLASS.NONE) {
                 if (!note("command-result", safeRequest, OUTCOME.EXECUTED)) return Object.freeze({ outcome: OUTCOME.UNKNOWN_OUTCOME, reason: "AUDIT_UNAVAILABLE" });

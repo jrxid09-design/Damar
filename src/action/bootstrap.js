@@ -1225,6 +1225,58 @@ function readActuatorOutcome3(value) {
     }
 }
 
+// Any `outcome` description ANYWHERE in a raw actuator report must be the
+// canonical success token. A nested accessor, an inherited description, a
+// Proxy, an over-budget subtree or any non-EXECUTED token means the report
+// describes an ambiguous physical outcome, so a report cannot hide one inside a
+// collection or wrapper. Returns true when the report must fail closed.
+function scanActuatorOutcomeDescriptions3(value, state = { nodes: 0, path: new Set() }) {
+    try {
+        if (++state.nodes > RESULT_NODES3) return true;
+        if (value === null || (typeof value !== "object" && typeof value !== "function")) return false;
+        if (isProxy3(value)) return true;
+        if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
+            const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
+            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return true;
+            if (descriptor.value !== "EXECUTED") return true;
+        } else if (Reflect.has(value, "outcome")) {
+            return true;
+        }
+        if (state.path.has(value)) return false;
+        state.path.add(value);
+        let ambiguous = false;
+        if (Array.isArray(value) || actuationIsPlainObject3(value)) {
+            for (const key of Object.keys(value)) {
+                if (scanActuatorOutcomeDescriptions3(value[key], state)) { ambiguous = true; break; }
+            }
+        }
+        state.path.delete(value);
+        return ambiguous;
+    } catch {
+        // Unreadable structure: never trustworthy, always fail closed.
+        return true;
+    }
+}
+
+// A caller-supplied AbortSignal is plumbing, NOT authority: probing it must
+// never be able to reject the canonical result. A hostile signal (throwing
+// traps or getters) degrades to "no cancellation available".
+function readSignal3(signal) {
+    try {
+        if (!signal || typeof signal !== "object") return null;
+        const add = signal.addEventListener;
+        if (typeof add !== "function") return null;
+        const remove = signal.removeEventListener;
+        return {
+            aborted: signal.aborted === true,
+            add: add.bind(signal),
+            remove: typeof remove === "function" ? remove.bind(signal) : null
+        };
+    } catch {
+        return null;
+    }
+}
+
 // ---- PRIVILEGED: result/evidence builders (closure-private) ----------------
 function buildExecutionResult3({
     executionRequest,
@@ -1671,8 +1723,8 @@ function composeDispatcher3({
 
         lifecycle.advance(LIFECYCLE3.READY, canonicalClockNow3());
 
-        const signal = p.signal;
-        if (signal && typeof signal.addEventListener === "function" && signal.aborted) {
+        const signal = readSignal3(p.signal);
+        if (signal && signal.aborted) {
             lifecycle.advance(LIFECYCLE3.CANCELLED, canonicalClockNow3());
             const result = buildExecutionResult3({
                 executionRequest: request,
@@ -1731,13 +1783,13 @@ function composeDispatcher3({
         });
 
         let cancelListener = null;
-        if (signal && typeof signal.addEventListener === "function") {
+        if (signal && signal.add) {
             cancelListener = () => {
                 if (lifecycle.state === LIFECYCLE3.DISPATCHING && !timedOut) {
                     cancelledDuringDispatch = true;
                 }
             };
-            signal.addEventListener("abort", cancelListener);
+            try { signal.add("abort", cancelListener); } catch { cancelListener = null; }
         }
 
         let actuatorOutput = null;
@@ -1766,8 +1818,8 @@ function composeDispatcher3({
             dispatchFailed = e;
         } finally {
             if (timeoutHandle) clearTimeout(timeoutHandle);
-            if (signal && typeof signal.removeEventListener === "function" && cancelListener) {
-                try { signal.removeEventListener("abort", cancelListener); } catch { /* best-effort */ }
+            if (cancelListener && signal && signal.remove) {
+                try { signal.remove("abort", cancelListener); } catch { /* best-effort */ }
             }
         }
 
@@ -1826,7 +1878,8 @@ function composeDispatcher3({
         // canonical EXECUTED token is a success claim. Any other described
         // token -- a recognized failure or an unrecognized one -- fails closed,
         // so an unknown token can never be echoed back as EXECUTED.
-        if (outputOutcome !== NO_OUTCOME3 && outputOutcome !== "EXECUTED") {
+        if ((outputOutcome !== NO_OUTCOME3 && outputOutcome !== "EXECUTED") ||
+            scanActuatorOutcomeDescriptions3(actuatorOutput)) {
             lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
             const result = buildExecutionResult3({
                 executionRequest: request,
