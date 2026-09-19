@@ -180,15 +180,18 @@ class PluginLoader {
                     let stat = null;
                     try { stat = fs.statSync(dir); } catch { continue; }
                     if (!stat?.isDirectory()) continue;
-                    for (const name of ["tool.js", "index.js"]) {
-                        const file = path.join(dir, name);
-                        try {
-                            if (fs.existsSync(file)) {
-                                hashes.add(crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"));
-                            }
+                    // HANYA tool.js (muatan hasil generate). index.js forge
+                    // adalah pembungkus DETERMINISTIK yang sama untuk semua
+                    // tool; ikut menghash-nya akan menolak plugin tulisan
+                    // tangan yang kebetulan memakai pembungkus serupa, yaitu
+                    // regresi pada sistem ekstensi.
+                    const file = path.join(dir, "tool.js");
+                    try {
+                        if (fs.existsSync(file)) {
+                            hashes.add(crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"));
                         }
-                        catch { /* berkas tak terbaca: lewati */ }
                     }
+                    catch { /* berkas tak terbaca: lewati */ }
                 }
             }
         }
@@ -222,19 +225,19 @@ class PluginLoader {
         if (hashes.size === 0) return false;
         if (hashes.has(LEDGER_UNREADABLE)) return true;
 
-        const names = new Set(["tool.js", "index.js", manifest?.entry ?? "index.js"].filter(Boolean));
+        // Hanya muatan hasil generate yang dibandingkan. `manifest.entry`
+        // sengaja TIDAK dibandingkan: entri normal adalah pembungkus
+        // deterministik yang sah dipakai plugin tulisan tangan juga.
+        const file = path.join(pluginPath, "tool.js");
 
-        for (const name of names) {
-            const file = path.join(pluginPath, name);
-            try {
-                if (!fs.existsSync(file)) continue;
-                const digest = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
-                if (hashes.has(digest)) return true;
-            }
-            catch { /* berkas tak terbaca: lanjut memeriksa yang lain */ }
+        try {
+            if (!fs.existsSync(file)) return false;
+            const digest = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+            return hashes.has(digest);
         }
-
-        return false;
+        catch {
+            return false;
+        }
 
     }
 
