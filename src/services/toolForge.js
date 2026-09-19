@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
+const crypto = require("node:crypto");
 
 const pluginLoader = require("../plugins/pluginLoader");
 const telemetry = require("./telemetryService");
@@ -347,6 +348,10 @@ module.exports = [ new ${className}() ];
 
             const dir = this.writePlugin(targetRoot, id, spec);
 
+            // Provenance berbasis ISI dicatat di buku milik forge (di luar
+            // artefak), supaya penanda yang dihapus tidak membuka jalur muat.
+            this.recordProvenance(dir, id);
+
             telemetry.publish("forge:created", {
                 id,
                 origin: spec.origin ?? "manual",
@@ -449,12 +454,62 @@ module.exports = [ new ${className}() ];
     }
 
     /**
+     * Buku provenance milik forge: hash isi setiap berkas yang dihasilkan.
+     *
+     * Letaknya DI LUAR direktori artefak, jadi menghapus penanda di dalam
+     * artefak tidak menghapus catatannya. Ini yang menutup jalur "salin artefak
+     * keluar karantina lalu hapus penanda": isinya tidak berubah, jadi hash-nya
+     * masih cocok dan pluginLoader tetap menolak memuatnya.
+     */
+    get ledgerPath() {
+        return path.join(this.userRoot, ".forge-provenance.json");
+    }
+
+    codeHash(file) {
+        try {
+            return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+        }
+        catch {
+            return null;
+        }
+    }
+
+    readProvenanceLedger() {
+        try {
+            const parsed = JSON.parse(fs.readFileSync(this.ledgerPath, "utf8"));
+            if (parsed && typeof parsed === "object" &&
+                parsed.hashes && typeof parsed.hashes === "object") {
+                return parsed;
+            }
+        }
+        catch { /* belum ada / rusak: dibangun ulang di bawah */ }
+        return { version: 1, hashes: {} };
+    }
+
+    recordProvenance(dir, id) {
+        try {
+            const hashes = ["tool.js", "index.js"]
+                .map(name => this.codeHash(path.join(dir, name)))
+                .filter(Boolean);
+            if (hashes.length === 0) return;
+            const ledger = this.readProvenanceLedger();
+            for (const hash of hashes) {
+                ledger.hashes[hash] = { id, at: new Date().toISOString() };
+            }
+            // Tulis atomik supaya buku tidak pernah setengah jadi.
+            const tmp = this.ledgerPath + ".tmp";
+            fs.writeFileSync(tmp, JSON.stringify(ledger, null, 2), "utf8");
+            fs.renameSync(tmp, this.ledgerPath);
+        }
+        catch { /* kegagalan buku tidak boleh membuat jalur eksekusi terbuka */ }
+    }
+
+    /**
      * Apakah direktori ini artefak hasil generate forge? Artefak seperti itu
      * TIDAK pernah dimuat (lihat pluginLoader), jadi statusnya tidak boleh
      * dilaporkan sebagai "active".
      */
     isForgeGeneratedDir(dir) {
-
         try {
             if (fs.existsSync(path.join(dir, FORGE_GENERATED_MARKER))) return true;
             const manifestPath = path.join(dir, "manifest.json");

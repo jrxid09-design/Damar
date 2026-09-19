@@ -574,6 +574,83 @@ test("legacy ToolBus: hostile request containers fail closed instead of throwing
     }
 });
 
+test("legacy forge: a copied artifact with stripped markers is still refused (content provenance)", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-copyout-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    const id = "w8-copy-probe";
+    const copy = path.join(toolForge.userRoot, `w8-copy-${Date.now()}`);
+    try {
+        const created = toolForge.create({
+            id, name: id, description: "copy canary",
+            raw: `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n` +
+                `module.exports = [{ name: "${id}", execute: async () => ({}) }];`
+        });
+
+        // Copy the artifact OUT of quarantine, then strip every self-declared
+        // provenance signal: marker file gone, manifest fields gone.
+        fs.cpSync(created.dir, copy, { recursive: true });
+        fs.rmSync(path.join(copy, ".forge-generated"), { force: true });
+        const manifestPath = path.join(copy, "manifest.json");
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+        delete manifest.forgeGenerated;
+        if (manifest.forge) delete manifest.forge.generated;
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+
+        assert.equal(pluginLoader.isQuarantinedForgeArtifact(copy), false, "copy is outside the quarantine path");
+        assert.equal(pluginLoader.isForgeGenerated(copy), false, "metadata provenance was stripped");
+        assert.equal(pluginLoader.isForgeProvenanceContent(copy, manifest), true,
+            "content provenance must still recognise the copied bytes as forge output");
+
+        assert.deepEqual(pluginLoader.loadTools(copy), []);
+        const one = pluginLoader.loadOne(copy, "user");
+        assert.equal(one.ok, false);
+        assert.equal(one.forgeGenerated, true);
+        assert.equal(fs.existsSync(marker), false, "copied generated code must never run");
+    } finally {
+        fs.rmSync(copy, { recursive: true, force: true });
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy forge: a directory alias (junction/symlink) into quarantine cannot load", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-alias-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    const id = "w8-alias-probe";
+    const alias = path.join(toolForge.userRoot, `w8-alias-${Date.now()}`);
+    try {
+        const created = toolForge.create({
+            id, name: id, description: "alias canary",
+            raw: `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n` +
+                `module.exports = [{ name: "${id}", execute: async () => ({}) }];`
+        });
+
+        // A location alias in the loadable root that points into quarantine.
+        // Lexical path comparison alone would let this through.
+        fs.symlinkSync(created.dir, alias, "junction");
+        assert.equal(pluginLoader.isQuarantinedForgeArtifact(alias), true,
+            "realpath must resolve the alias back into quarantine");
+
+        assert.deepEqual(pluginLoader.loadTools(alias), []);
+        const one = pluginLoader.loadOne(alias, "user");
+        assert.equal(one.ok, false);
+        assert.equal(one.forgeGenerated, true);
+        assert.equal(fs.existsSync(marker), false, "an aliased generated module body must never run");
+    } finally {
+        try { fs.rmSync(alias, { recursive: true, force: true }); } catch { /* not present */ }
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
 test("legacy ToolBus: canonical compatibility success path executes exactly once through the canonical path", {
     skip: "BLOCKED ON W8-IW1: the canonical capability/actuator registrations (and a manager-owned legacy ingress) do not exist yet, so no legacy request can reach the canonical path. This test must be implemented with the IW1 production-path harness; it is deliberately NOT faked."
 }, () => { });
