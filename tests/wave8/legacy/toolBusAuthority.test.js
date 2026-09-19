@@ -651,6 +651,80 @@ test("legacy forge: a directory alias (junction/symlink) into quarantine cannot 
     }
 });
 
+test("legacy forge: deleting or emptying the provenance ledger does not reopen a copy", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-ledger-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    const id = "w8-ledger-probe";
+    const copy = path.join(toolForge.userRoot, `w8-ledger-copy-${Date.now()}`);
+    const ledgerPath = path.join(toolForge.userRoot, ".forge-provenance.json");
+    const ledgerBackup = fs.existsSync(ledgerPath) ? fs.readFileSync(ledgerPath, "utf8") : null;
+    try {
+        const created = toolForge.create({
+            id, name: id, description: "ledger canary",
+            raw: `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n` +
+                `module.exports = [{ name: "${id}", execute: async () => ({}) }];`
+        });
+
+        // Copy out and strip every self-declared provenance signal.
+        fs.cpSync(created.dir, copy, { recursive: true });
+        fs.rmSync(path.join(copy, ".forge-generated"), { force: true });
+        const manifestPath = path.join(copy, "manifest.json");
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+        delete manifest.forgeGenerated;
+        if (manifest.forge) delete manifest.forge.generated;
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+
+        // (a) ledger deleted: the quarantine artifacts still supply the hashes.
+        fs.rmSync(ledgerPath, { force: true });
+        assert.equal(pluginLoader.isForgeProvenanceContent(copy, manifest), true,
+            "live quarantine hashes must still recognise the copied bytes");
+        assert.equal(pluginLoader.loadOne(copy, "user").ok, false);
+        assert.equal(fs.existsSync(marker), false);
+
+        // (b) ledger present but emptied.
+        fs.writeFileSync(ledgerPath, JSON.stringify({ version: 1, hashes: {} }), "utf8");
+        assert.equal(pluginLoader.isForgeProvenanceContent(copy, manifest), true,
+            "an emptied ledger must not disable content provenance");
+        assert.equal(pluginLoader.loadOne(copy, "user").ok, false);
+        assert.equal(fs.existsSync(marker), false);
+    } finally {
+        if (ledgerBackup === null) fs.rmSync(ledgerPath, { force: true });
+        else fs.writeFileSync(ledgerPath, ledgerBackup, "utf8");
+        fs.rmSync(copy, { recursive: true, force: true });
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy pluginLoader: a manifest entry cannot escape its plugin directory", () => {
+    const os = require("node:os");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "w8-escape-"));
+    const marker = path.join(root, "EXECUTED.marker");
+    try {
+        const pluginDir = path.join(root, "plugin");
+        fs.mkdirSync(pluginDir, { recursive: true });
+        fs.writeFileSync(path.join(root, "outside.js"),
+            `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\nmodule.exports = { tools: [] };\n`);
+
+        for (const entry of ["../outside.js", "..\\outside.js", "..\\..\\outside.js", "/absolute.js", ""]) {
+            const loaded = pluginLoader.loadPlugin(pluginDir, { id: "w8escape", entry });
+            assert.deepEqual(loaded, {}, `entry '${entry}' must be refused`);
+            assert.equal(pluginLoader.resolveEntryWithin(pluginDir, entry), null);
+        }
+
+        assert.equal(pluginLoader.resolveEntryWithin(pluginDir, "index.js"),
+            path.join(pluginDir, "index.js"), "a normal entry still resolves");
+        assert.equal(fs.existsSync(marker), false, "no out-of-directory module may execute");
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test("legacy ToolBus: canonical compatibility success path executes exactly once through the canonical path", {
     skip: "BLOCKED ON W8-IW1: the canonical capability/actuator registrations (and a manager-owned legacy ingress) do not exist yet, so no legacy request can reach the canonical path. This test must be implemented with the IW1 production-path harness; it is deliberately NOT faked."
 }, () => { });
