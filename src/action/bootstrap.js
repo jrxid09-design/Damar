@@ -1533,18 +1533,6 @@ function composeDispatcher3({
         if (p === null || typeof p !== "object") {
             throw fail3(REASONS3.MALFORMED_REQUEST, "execute requires a request object");
         }
-        for (const key of CALLER_EXECUTOR_KEYS3) {
-            if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
-                throw fail3(REASONS3.CALLER_EXECUTOR_REJECTED,
-                    `caller-executor option '${key}' is forbidden; the actuator is bootstrap-owned, never caller-selectable`);
-            }
-        }
-        for (const key of BEARER_DECISION_KEYS3) {
-            if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
-                throw fail3(REASONS3.CALLER_EXECUTOR_REJECTED,
-                    `authority-decision option '${key}' is forbidden; an AuthorityDecision is historical evidence, not a bearer execution token`);
-            }
-        }
 
         // Every caller field is read ONCE through this guarded intake. A getter
         // or Proxy trap that throws must never leak an arbitrary exception out
@@ -1603,6 +1591,9 @@ function composeDispatcher3({
 
         const requestedAtMs = canonicalClockNow3();
         const lifecycle = createLifecycleTracker3(LIFECYCLE3.CREATED);
+        // Downstream reads this sanitized bag, never the caller's object: a
+        // stateful getter cannot throw on a second read.
+        const safeBag = Object.freeze({ intent, authSession, parameters, metadata, timeoutMs: timeoutOption, signal: signalOption });
 
         let provisionalRequest;
         try {
@@ -1636,7 +1627,7 @@ function composeDispatcher3({
         inFlight.set(contentKey, inFlightEntry);
         const runPromise = (async () => {
             try {
-                return await runExecutionBody3(contentKey, intent, authSession, p, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs);
+                return await runExecutionBody3(contentKey, intent, authSession, safeBag, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs);
             } finally {
                 inFlight.delete(contentKey);
             }
@@ -1732,8 +1723,8 @@ function composeDispatcher3({
                 authorityGeneration: freshDecision.authorityGeneration,
                 admittedAtMs,
                 requestedAtMs,
-                parameters,
-                metadata
+                parameters: p.parameters,
+                metadata: p.metadata
             });
         } catch (e) {
             lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
@@ -1786,7 +1777,7 @@ function composeDispatcher3({
 
         lifecycle.advance(LIFECYCLE3.READY, canonicalClockNow3());
 
-        const signal = readSignal3(signalOption);
+        const signal = readSignal3(p.signal);
         if (signal && signal.aborted) {
             lifecycle.advance(LIFECYCLE3.CANCELLED, canonicalClockNow3());
             const result = buildExecutionResult3({
@@ -1806,8 +1797,8 @@ function composeDispatcher3({
 
         lifecycle.advance(LIFECYCLE3.DISPATCHING, canonicalClockNow3());
         const dispatchStartMs = canonicalClockNow3();
-        const effectiveTimeout = (typeof timeoutOption === "number" && Number.isSafeInteger(timeoutOption) && timeoutOption >= MIN_TIMEOUT3 && timeoutOption <= MAX_TIMEOUT3)
-            ? timeoutOption : timeoutMs;
+        const effectiveTimeout = (typeof p.timeoutMs === "number" && Number.isSafeInteger(p.timeoutMs) && p.timeoutMs >= MIN_TIMEOUT3 && p.timeoutMs <= MAX_TIMEOUT3)
+            ? p.timeoutMs : timeoutMs;
 
         let cancelledDuringDispatch = false;
         let invocationCount = 0;

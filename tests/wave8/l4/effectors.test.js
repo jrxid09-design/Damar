@@ -596,6 +596,35 @@ test("L4 a hostile thrown actuator value still produces a canonical FAILED resul
     }
 });
 
+const { createCanonicalActuationFacade } = require("../../../src/action/bootstrap");
+
+test("L4 the production dispatcher refuses hostile caller input with a typed refusal", async () => {
+    // This exercises the REAL bootstrap dispatcher, not the test-harness
+    // mirror: the mirror was correct while the production intake leaked a raw
+    // trap error (external audit round 6).
+    const facade = createCanonicalActuationFacade();
+    assert.equal(typeof facade.execute, "function");
+    const hostile = new Proxy({}, {
+        getOwnPropertyDescriptor() { throw new Error("probe"); },
+        ownKeys() { throw new Error("ownKeys trap"); },
+        get() { throw new Error("get trap"); }
+    });
+    await assert.rejects(
+        () => facade.execute(hostile),
+        (e) => typeof e.reasonCode === "string" && !/probe|trap/.test(String(e.message))
+    );
+    // A well-formed caller bag that survives intake must fail with a TYPED
+    // dispatcher refusal -- never a ReferenceError/TypeError from the body.
+    await assert.rejects(
+        () => facade.execute({
+            intent: { intentId: "i-1", capabilityId: "motion.arm", operation: "move", capabilityIncarnationId: "inc-1", createdAtMs: 0, scope: ["arm.left"] },
+            authSession: { principal: "alice", sessionId: "s-1" },
+            parameters: { move: 1 }
+        }),
+        (e) => typeof e.reasonCode === "string" && e instanceof Error && !(e instanceof ReferenceError) && !(e instanceof TypeError)
+    );
+});
+
 test("L4 an unrecognized driver outcome token fails closed at both layers", async () => {
     const descriptor = validateEffectorDescriptor(physicalDescriptor({
         hazardClass: "NONE",
