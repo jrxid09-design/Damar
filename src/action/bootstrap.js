@@ -1817,7 +1817,11 @@ function composeDispatcher3({
             noteCompleted(contentKey, { result, request, intentId: request.intentId });
             return result;
         }
-        if (outputOutcome === "REFUSED" || outputOutcome === "STOPPED" || outputOutcome === "UNKNOWN_OUTCOME" || outputOutcome === "UNVERIFIED") {
+        // The actuator's own outcome token is a CLOSED vocabulary: only the
+        // canonical EXECUTED token is a success claim. Any other described
+        // token -- a recognized failure or an unrecognized one -- fails closed,
+        // so an unknown token can never be echoed back as EXECUTED.
+        if (outputOutcome !== undefined && outputOutcome !== "EXECUTED") {
             lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
             const result = buildExecutionResult3({
                 executionRequest: request,
@@ -1831,7 +1835,9 @@ function composeDispatcher3({
                 failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION,
                 failureDetail: outputOutcome === "UNKNOWN_OUTCOME"
                     ? "actuator completed with ambiguous physical outcome"
-                    : `actuator reported ${outputOutcome.toLowerCase()}`
+                    : typeof outputOutcome === "string"
+                        ? `actuator reported ${outputOutcome.toLowerCase()}`
+                        : "actuator reported an unsupported outcome token"
             });
             noteCompleted(contentKey, { result, request, intentId: request.intentId });
             return result;
