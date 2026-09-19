@@ -770,6 +770,37 @@ test("legacy forge: a hand-authored plugin using the forge's wrapper is NOT refu
     }
 });
 
+test("legacy pluginLoader: an escaping entry rejects the whole plugin, not just loadPlugin", () => {
+    const os = require("node:os");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "w8-escape2-"));
+    const toolMarker = path.join(root, "TOOL_EXECUTED.marker");
+    const outsideMarker = path.join(root, "OUTSIDE_EXECUTED.marker");
+    try {
+        const pluginDir = path.join(root, "plugin");
+        fs.mkdirSync(pluginDir, { recursive: true });
+        fs.writeFileSync(path.join(root, "outside.js"),
+            `require("node:fs").writeFileSync(${JSON.stringify(outsideMarker)}, "ran");\nmodule.exports = { tools: [] };\n`);
+        // The manifest entry escapes, but tool.js is a normal in-directory file
+        // that collectTools()/loadTools() would still require.
+        fs.writeFileSync(path.join(pluginDir, "tool.js"),
+            `require("node:fs").writeFileSync(${JSON.stringify(toolMarker)}, "ran");\nmodule.exports = [];\n`);
+        fs.writeFileSync(path.join(pluginDir, "manifest.json"), JSON.stringify({
+            id: "w8escape2", name: "w8 escape 2", version: "1.0.0", entry: "../outside.js",
+            category: "user", description: "", permissions: [], tags: ["user"]
+        }, null, 2));
+
+        const result = pluginLoader.loadOne(pluginDir, "user");
+        assert.equal(result.ok, false, "the plugin must be refused as a whole");
+        assert.match(String(result.error), /di luar direktori plugin/);
+        assert.equal(fs.existsSync(toolMarker), false, "tool.js must not run behind an escaping entry");
+        assert.equal(fs.existsSync(outsideMarker), false, "the outside module must not run");
+        assert.equal(pluginLoader.loaded.has("w8escape2"), false, "a refused plugin is never registered");
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test("legacy ToolBus: canonical compatibility success path executes exactly once through the canonical path", {
     skip: "BLOCKED ON W8-IW1: the canonical capability/actuator registrations (and a manager-owned legacy ingress) do not exist yet, so no legacy request can reach the canonical path. This test must be implemented with the IW1 production-path harness; it is deliberately NOT faked."
 }, () => { });

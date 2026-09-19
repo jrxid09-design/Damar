@@ -321,6 +321,22 @@ class PluginLoader {
             this.unloadPlugin(manifest.id);
         }
 
+        // Entri manifest WAJIB berada di dalam direktori plugin. Kalau tidak,
+        // plugin ditolak UTUH — bukan hanya `loadPlugin`-nya — supaya `tool.js`
+        // tidak ikut di-require lewat collectTools/loadTools.
+        if (this.resolveEntryWithin(pluginPath, manifest?.entry) === null) {
+
+            try {
+                require("../services/telemetryService").info(
+                    `[pluginLoader] menolak plugin '${manifest?.id ?? path.basename(pluginPath)}': entri di luar direktori plugin`
+                );
+            }
+            catch { /* observability opsional */ }
+
+            return { ok: false, id: manifest?.id, error: "entri plugin di luar direktori plugin" };
+
+        }
+
         try {
 
             const instance = this.loadPlugin(pluginPath, manifest);
