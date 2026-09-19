@@ -2,6 +2,9 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("node:crypto");
 
+/** Penanda internal: buku provenance ada tetapi tidak bisa dibaca (fail-closed). */
+const LEDGER_UNREADABLE = "__forge-ledger-unreadable__";
+
 const pluginRegistry = require("./pluginRegistry");
 const pluginValidator = require("./pluginValidator");
 
@@ -138,33 +141,86 @@ class PluginLoader {
     }
 
     /**
+     * Himpunan hash isi yang diketahui dihasilkan forge.
+     *
+     * DUA sumber, dan yang kedua tidak bisa dihapus dari dalam artefak:
+     *   1. buku provenance yang dimiliki forge (`.forge-provenance.json`);
+     *   2. hash LANGSUNG dari artefak yang masih ada di karantina.
+     *
+     * Sumber kedua menutup "salin lalu hapus buku": salinan dihapus bukunya,
+     * tetapi artefak aslinya masih ada di karantina, jadi hash-nya tetap
+     * dihitung dan salinannya tetap ditolak.
+     */
+    forgeGeneratedHashes() {
+
+        const hashes = new Set();
+
+        const ledgerPath = this.forgeProvenanceLedgerPath;
+        if (fs.existsSync(ledgerPath)) {
+            try {
+                const parsed = JSON.parse(fs.readFileSync(ledgerPath, "utf8"));
+                const obj = parsed?.hashes;
+                if (!obj || typeof obj !== "object") {
+                    hashes.add(LEDGER_UNREADABLE);
+                }
+                else {
+                    for (const key of Object.keys(obj)) hashes.add(key);
+                }
+            }
+            catch {
+                hashes.add(LEDGER_UNREADABLE);
+            }
+        }
+
+        try {
+            const root = this.forgeQuarantineRoot;
+            if (fs.existsSync(root)) {
+                for (const entry of fs.readdirSync(root)) {
+                    const dir = path.join(root, entry);
+                    let stat = null;
+                    try { stat = fs.statSync(dir); } catch { continue; }
+                    if (!stat?.isDirectory()) continue;
+                    for (const name of ["tool.js", "index.js"]) {
+                        const file = path.join(dir, name);
+                        try {
+                            if (fs.existsSync(file)) {
+                                hashes.add(crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"));
+                            }
+                        }
+                        catch { /* berkas tak terbaca: lewati */ }
+                    }
+                }
+            }
+        }
+        catch { /* karantina tak terbaca: sumber buku tetap berlaku */ }
+
+        return hashes;
+
+    }
+
+    /**
      * Provenance BERBASIS ISI.
      *
-     * Metadata di dalam artefak bisa dihapus; ISI berkas tidak bisa dihapus
-     * tanpa mengubah artefaknya. Hash dari setiap berkas yang forge hasilkan
-     * dicatat di buku provenance yang dimiliki forge (di luar direktori
-     * artefak), jadi menyalin artefak ke luar karantina lalu menghapus penanda
-     * TETAP tertolak selama isinya belum diubah.
+     * Metadata di dalam artefak bisa dihapus; ISI berkas tidak. Hash setiap
+     * berkas yang forge hasilkan dihitung dari buku provenance DAN dari artefak
+     * yang masih ada di karantina, jadi menyalin artefak ke luar lalu menghapus
+     * penanda — bahkan menghapus bukunya — tetap tertolak selama isinya belum
+     * diubah.
      *
-     * Fail-closed: buku ada tetapi tidak terbaca = tolak (provenance forge
-     * eksis tetapi tidak bisa diverifikasi).
+     * Fail-closed: buku ada tetapi tidak terbaca = tolak.
      */
     isForgeProvenanceContent(pluginPath, manifest) {
 
-        const ledgerPath = this.forgeProvenanceLedgerPath;
-
-        if (!fs.existsSync(ledgerPath)) return false;
-
-        let ledger;
+        let hashes;
         try {
-            ledger = JSON.parse(fs.readFileSync(ledgerPath, "utf8"));
+            hashes = this.forgeGeneratedHashes();
         }
         catch {
             return true;
         }
 
-        const hashes = ledger?.hashes;
-        if (!hashes || typeof hashes !== "object") return true;
+        if (hashes.size === 0) return false;
+        if (hashes.has(LEDGER_UNREADABLE)) return true;
 
         const names = new Set(["tool.js", "index.js", manifest?.entry ?? "index.js"].filter(Boolean));
 
@@ -173,7 +229,7 @@ class PluginLoader {
             try {
                 if (!fs.existsSync(file)) continue;
                 const digest = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
-                if (Object.prototype.hasOwnProperty.call(hashes, digest)) return true;
+                if (hashes.has(digest)) return true;
             }
             catch { /* berkas tak terbaca: lanjut memeriksa yang lain */ }
         }
@@ -426,10 +482,24 @@ class PluginLoader {
             return {};
         }
 
-        const entryPath = path.join(
-            pluginPath,
-            manifest.entry
-        );
+        // Entri WAJIB berada di dalam direktori plugin. `entry` datang dari
+        // manifest yang bisa ditulis siapa saja (`../outside.js`), dan
+        // `path.join` akan dengan senang hati keluar dari direktori —
+        // menjalankan berkas di luar artefak.
+        const entryPath = this.resolveEntryWithin(pluginPath, manifest?.entry);
+
+        if (entryPath === null) {
+
+            try {
+                require("../services/telemetryService").info(
+                    `[pluginLoader] menolak entri di luar direktori plugin: ${manifest?.id ?? path.basename(pluginPath)}`
+                );
+            }
+            catch { /* observability opsional */ }
+
+            return {};
+
+        }
 
         if (!fs.existsSync(entryPath)) {
             return {};
@@ -440,6 +510,30 @@ class PluginLoader {
         ];
 
         return require(entryPath);
+
+    }
+
+    /**
+     * Resolusi `entry` yang TIDAK boleh keluar dari direktori plugin.
+     * @returns {string|null} path absolut di dalam pluginPath, atau null.
+     */
+    resolveEntryWithin(pluginPath, entry) {
+
+        if (typeof entry !== "string" || entry.trim() === "") return null;
+
+        const base = path.resolve(pluginPath);
+
+        // Realpath bila pluginPath ada, supaya symlink tidak melewati cek ini.
+        const baseReal = this.realPathOrSelf(base);
+        const candidate = path.resolve(base, entry);
+
+        for (const probe of [candidate, this.realPathOrSelf(candidate)]) {
+            const rel = path.relative(baseReal, probe);
+            if (rel === "" || path.isAbsolute(rel)) return null;
+            if (rel === ".." || rel.startsWith(".." + path.sep)) return null;
+        }
+
+        return candidate;
 
     }
 
