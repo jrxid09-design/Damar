@@ -354,7 +354,10 @@ class GoalEngine {
 
     }
 
-    /** SATU AKSI: pilih tool bila belum ada → eksekusi via ToolBus.
+    /** SATU AKSI: pilih tool bila belum ada, lalu AJUKAN lewat ToolBus.
+     * Sejak remediasi jalur-kedua W8, ToolBus BUKAN pemilik otoritas eksekusi:
+     * panggilan ini fail-closed sampai aksi dirutekan lewat jalur kanonik
+     * (Manager -> ActionIntent -> Authority -> Capability -> actuation).
      * `delegator` = identitas inisiator tujuan (N2 Round-3). */
     async act(goal, step, forcedTool = null, remainingMs = null, delegator = null) {
 
@@ -404,7 +407,9 @@ class GoalEngine {
             name: tool, args, timeoutMs: toolTimeout, retries: 1, context: { goal: goal.id }
         });
 
-        // Catat usage → trust (§39).
+        // ToolBus tidak mengeksekusi apa pun sejak remediasi jalur-kedua W8:
+        // hasilnya selalu penolakan fail-closed sampai ada rute kanonik. Usage
+        // tetap dicatat (akuntansi jujur), bukan sebagai klaim keberhasilan.
         await capabilities.recordUsage(`tool:${tool}`, { ok: res.ok, ms: res.durationMs, error: res.error });
 
         return {

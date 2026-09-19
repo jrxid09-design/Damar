@@ -174,7 +174,55 @@ test("legacy ToolBus: a duplicate request does not duplicate execution", async (
     assert.equal(canary.runs, 0);
 });
 
-test("legacy ToolBus: no alternative dispatcher or handler invocation survives in source", () => {
+test("legacy ToolBus: no handler can be invoked through any public API (behavioural proof)", async () => {
+    // PRIMARY PROOF (syntax-independent): poison the real invocation surfaces
+    // and drive every public API. Aliasing, computed member access or a dynamic
+    // require cannot hide an invocation from a behavioural counter.
+    const registry = require("../../../src/core/tools").ToolRegistry;
+    const aiRuntime = require("../../../src/services/aiRuntimeService");
+    const originalRegistryExecute = registry.execute;
+    const originalAiruntimeTools = aiRuntime.tools;
+    let registryExecutions = 0;
+    let aiExecutions = 0;
+    registry.execute = async () => {
+        registryExecutions++;
+        throw new Error("registry handler reached through a legacy path");
+    };
+    aiRuntime.tools = () => [{
+        name: "w8legacycanary.probe",
+        description: "poisoned AI-tool surface",
+        execute: async () => { aiExecutions++; return { ran: true }; }
+    }];
+    try {
+        // 1. Poison efficacy: a DIRECT call must be caught (including computed
+        //    member access, the shape a regex scan cannot prove).
+        // Computed member access (the shape a regex scan cannot prove).
+        const directProbe = registry["exec" + "ute"].bind(registry);
+        await directProbe(CANARY_ID, {}).catch(() => { });
+        assert.equal(registryExecutions, 1, "the poison is effective");
+        registryExecutions = 0;
+
+        // 2. From here on ONLY ToolBus APIs run.
+        await toolBus.execute({ name: CANARY_ID, args: {} });
+        await toolBus.execute({ name: "terminal_run", args: { command: "echo x" } });
+        await toolBus.execute({ name: "w8legacycanary.probe" });
+        const meta = toolBus.resolve(CANARY_ID);
+        await (meta?.execute?.() ?? meta?.handler?.() ?? null);
+        toolBus.discover("probe");
+        toolBus.health(CANARY_ID);
+        toolBus.snapshot();
+        toolBus.refuse(CANARY_ID);
+        toolBus.record(CANARY_ID, false, 1, "refused");
+    } finally {
+        registry.execute = originalRegistryExecute;
+        aiRuntime.tools = originalAiruntimeTools;
+    }
+    assert.equal(registryExecutions, 0, "no ToolRegistry execution may originate from ToolBus");
+    assert.equal(aiExecutions, 0, "no AI-tool executor may originate from ToolBus");
+    assert.equal(canary.runs, 0);
+});
+
+test("legacy ToolBus: source contains no handler invocation or authority evaluation", () => {
     const source = fs.readFileSync(path.join(__dirname, "..", "..", "..", "src", "autonomy", "ToolBus.js"), "utf8");
     // Scan CODE only: the module header legitimately documents the removed
     // behaviour (history is not a handler).
@@ -187,7 +235,11 @@ test("legacy ToolBus: no alternative dispatcher or handler invocation survives i
         /execSync/,
         /\.execute\(validatedArgs/,
         /ArgumentValidator/,
-        /ai\/tools\/Authorization/
+        /ai\/tools\/Authorization/,
+        /\[\s*["'`]execute["'`]\s*\]/,
+        /require\([^)]*core\/tools[^)]*\)\s*(\.|\[)\s*["'`]?execute/,
+        /require\([^)]*executors?[^)]*\)/,
+        /require\([^)]*runtime\/terminal[^)]*\)/
     ];
     for (const pattern of forbidden) {
         assert.equal(pattern.test(code), false, `ToolBus must not contain ${pattern}`);
