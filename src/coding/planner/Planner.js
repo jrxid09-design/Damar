@@ -1,6 +1,14 @@
-const graph = require("../graph/graphifyAdapter");
 const bugMemory = require("../memory/bugMemory");
-const tester = require("../tester/testRunner");
+
+/**
+ * Manager-owned capability runtime: the coding drivers are reachable only
+ * through it, and every call must pass authority first.
+ */
+function codingRuntime() {
+    return require("../manager/bootstrap").getCodingCapabilityRuntime();
+}
+
+const isDenial = (v) => Boolean(v && typeof v === "object" && v.denied === true);
 
 /**
  * Planner — fase PLANNING Coding Brain (melengkapi arsitektur modular).
@@ -49,11 +57,19 @@ class Planner {
         try { const r = await bugMemory.recall(task); experiences = r.experiences || []; used++; }
         catch { notes.push("recall pengalaman gagal (non-fatal)."); }
 
-        // 2) Graphify → file relevan (subgraf terscope).
+        // 2) Graphify → file relevan (subgraf terscope). Capability-gated: tanpa
+        //    otorisasi owner langkah graf dilewati, bukan dijalankan diam-diam.
         let nodes = [];
-        if (graph.hasGraph(project)) {
-            try { nodes = parseNodes(await graph.query(task, { project })); used++; }
-            catch (e) { notes.push(`graph query gagal: ${e.message}`); }
+        const graph = codingRuntime().adapter("graph");
+        const hasGraph = await graph.hasGraph(project);
+        if (hasGraph === true) {
+            try {
+                const q = await graph.query(task, { project });
+                if (isDenial(q)) notes.push(`graph query tidak diotorisasi (${q.reason}) — lewati langkah graf.`);
+                else { nodes = parseNodes(q); used++; }
+            } catch (e) { notes.push(`graph query gagal: ${e.message}`); }
+        } else if (isDenial(hasGraph)) {
+            notes.push(`graphify tidak diotorisasi (${hasGraph.reason}) — lewati langkah graf.`);
         } else {
             notes.push("Proyek belum punya graph (graphify-out/graph.json) — lewati langkah graf.");
         }
@@ -93,8 +109,9 @@ class Planner {
     async plan(task, opts = {}) {
         const dossier = await this.investigate(task, opts);
         const project = dossier.project;
-        const det = tester.detect(project);
-        const verifySteps = ["lint", "test"].filter(s => det[s]);
+        const tester = codingRuntime().adapter("tester");
+        const det = await tester.detect(project);
+        const verifySteps = isDenial(det) ? [] : ["lint", "test"].filter(s => det[s]);
 
         return {
             dossier,

@@ -435,6 +435,9 @@ class CanonicalCapabilityExecution {
             reason: "AUTHORIZED_AND_VERIFIED",
             effectInvoked: invoked,
             driverId: binding.driverId,
+            // The raw driver output is carried ONLY on a verified completion, so a
+            // caller can never mistake an unverified effect for a result.
+            result: raw,
             verification,
             receipt: ack.receipt
         });

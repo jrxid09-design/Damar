@@ -259,11 +259,36 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
     }
 }
 
-module.exports = Object.freeze({
-    createDamarManager,
-    createDamarManagerIngressDomain
-    // R4-04/DB-02: no wave6 install/seam primitive is exported from the
-    // public manager surface. The privileged wave6Adapter dependency is
-    // captured lexically inside createDamarManager() (moved to
-    // src/manager/internal/managerBootstrap.js — see its own header).
-});
+  /**
+   * W8-IW1 — Manager-owned accessor for the coding capability runtime.
+   *
+   * The runtime owns the low-level coding drivers (LSP/serena/graphify/
+   * powershell/git/test/refactor). `src/coding/*` obtains capability-backed
+   * adapters through this accessor, so those drivers are reachable only on a
+   * canonical path and every call must pass authority first. This accessor
+   * grants nothing: the runtime authorizes exclusively through the canonical
+   * evaluator against owner-ratified grants, and denies otherwise.
+   */
+  function getCodingCapabilityRuntime() {
+      return require("./internal/codingCapabilities").codingRuntime();
+  }
+
+  /**
+   * Composition-time installation of a coding capability runtime that carries a
+   * real authority store. Not a bypass: it must have been created by the runtime
+   * module, it can be installed once, and it still requires owner-ratified grants.
+   */
+  function installCodingCapabilityRuntime(runtime) {
+      return require("./internal/codingCapabilities").installCodingCapabilityRuntime(runtime);
+  }
+
+  module.exports = Object.freeze({
+      createDamarManager,
+      createDamarManagerIngressDomain,
+      getCodingCapabilityRuntime,
+      installCodingCapabilityRuntime
+      // R4-04/DB-02: no wave6 install/seam primitive is exported from the
+      // public manager surface. The privileged wave6Adapter dependency is
+      // captured lexically inside createDamarManager() (moved to
+      // src/manager/internal/managerBootstrap.js �?" see its own header).
+  });

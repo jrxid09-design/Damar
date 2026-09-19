@@ -32,17 +32,20 @@ test("code_diff terdaftar dan terpilih pada giliran koding", () => {
 
 });
 
-test("code_diff menolak folder yang bukan repo git", async () => {
+test("code_diff menolak tanpa otorisasi owner (ratification required)", async () => {
 
     const kosong = fs.mkdtempSync(path.join(os.tmpdir(), "damar-nonrepo-"));
 
     const hasil = await tool("code_diff").execute({ project: kosong });
 
     assert.equal(hasil.ok, false);
+    assert.equal(hasil.denied, true);
+    assert.equal(hasil.ownerRatificationRequired, true);
+    assert.equal(hasil.capabilityId, "coding.git.read");
 
 });
 
-test("code_diff melaporkan status + diff dan memangkas keluaran panjang", async () => {
+test("code_diff tidak menjalankan git sama sekali saat capability belum diotorisasi", async () => {
 
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), "damar-repo-"));
     const git = args => execFileSync("git", args, { cwd: repo, windowsHide: true });
@@ -60,10 +63,10 @@ test("code_diff melaporkan status + diff dan memangkas keluaran panjang", async 
 
     const hasil = await tool("code_diff").execute({ project: repo, maxChars: 200 });
 
-    assert.equal(hasil.ok, true);
-    assert.match(hasil.status, /a\.txt/);
-    assert.equal(hasil.truncated, true);
-    assert.equal(hasil.diff.length, 200);
+    // Capability belum diotorisasi owner: nol efek, bukan sukses palsu.
+    assert.equal(hasil.ok, false);
+    assert.equal(hasil.denied, true);
+    assert.notEqual(hasil.truncated, true);
 
 });
 
