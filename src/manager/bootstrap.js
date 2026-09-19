@@ -282,11 +282,34 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
       return require("./internal/codingCapabilities").installCodingCapabilityRuntime(runtime);
   }
 
+  /**
+   * W8-IW1 — Manager-owned accessor for the CLI capability runtime.
+   *
+   * The CLI is INGRESS, NEVER AUTHORITY. Its consequential operations (start the
+   * daemon / open an SSH tunnel) are requested as capabilities through this
+   * accessor and must pass authority first; the CLI itself holds no spawn call.
+   * This accessor grants nothing.
+   */
+  function getCliCapabilityRuntime() {
+      return require("./internal/cliCapabilities").cliRuntime();
+  }
+
+  /**
+   * Composition-time installation of a CLI capability runtime carrying a real
+   * authority store. Not a bypass: must have been created by the runtime module,
+   * installs once, and still requires owner-ratified grants.
+   */
+  function installCliCapabilityRuntime(runtime) {
+      return require("./internal/cliCapabilities").installCliCapabilityRuntime(runtime);
+  }
+
   module.exports = Object.freeze({
       createDamarManager,
       createDamarManagerIngressDomain,
       getCodingCapabilityRuntime,
-      installCodingCapabilityRuntime
+      installCodingCapabilityRuntime,
+      getCliCapabilityRuntime,
+      installCliCapabilityRuntime
       // R4-04/DB-02: no wave6 install/seam primitive is exported from the
       // public manager surface. The privileged wave6Adapter dependency is
       // captured lexically inside createDamarManager() (moved to

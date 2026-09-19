@@ -9,8 +9,11 @@ const DaemonClient = require("./client");
 const { c, symbols, banner } = require("./theme");
 const commands = require("./commands");
 
-/** Proses terowongan SSH aktif (dibunuh saat CLI keluar). */
-let sshTunnel = null;
+/**
+ * IW1: CLI tidak lagi memegang proses apa pun. Proses (daemon/console/ssh)
+ * dimiliki capability runtime di balik src/manager/bootstrap.js, dan hanya
+ * dibuka setelah lolos otoritas owner.
+ */
 
 /**
  * Damar CLI — antarmuka terminal untuk Damar.
@@ -122,31 +125,42 @@ async function main() {
     // `damar console` — daemon + Console desktop via launcher.
     // Bisa dipanggil dari folder mana pun: launcher dijalankan di
     // folder instalasi Damar (src/cli → root = ../..).
+    // IW1: CLI hanyalah ingress — proses dijalankan atas capability
+    // `cli.daemon.start` yang harus lolos otoritas owner lebih dulu.
     if (args.mode === "console") {
-        const { spawn } = require("node:child_process");
         const path = require("node:path");
         const root = path.join(__dirname, "..", "..");
-        const launcher = process.platform === "win32"
-            ? spawn(process.execPath, [path.join(root, "scripts", "launch.js"), "--console"], {
-                cwd: root, stdio: "inherit", env: { ...process.env, DAMAR_ROLE: "console" }
-            })
-            : spawn("node", [path.join(root, "scripts", "launch.js"), "--console"], {
-                cwd: root, stdio: "inherit", env: { ...process.env, DAMAR_ROLE: "console" }
-            });
-        launcher.on("exit", code => process.exit(code ?? 0));
+        const result = await require("../manager/bootstrap").getCliCapabilityRuntime().execute({
+            capabilityId: "cli.daemon.start",
+            operation: "console",
+            parameters: { root }
+        });
+        if (result?.outcome !== "EXECUTED_VERIFIED") {
+            console.log(`  ${symbols.err} ${c.danger("damar console ditolak: capability cli.daemon.start belum diotorisasi owner.")}`);
+            console.log(`  ${c.muted(`outcome=${result?.outcome ?? "-"} reason=${result?.reason ?? "-"}`)}`);
+            console.log(`  ${c.muted("Jalankan launcher langsung sebagai gantinya:")} ${c.amber("npm run damar")}`);
+            process.exitCode = 1;
+        }
         return;
     }
 
     // `damar cli` — perilaku sama dengan tanpa subcommand (REPL).
 
     // --serve: nyalakan daemon CLI (port 3001) lalu sambungkan.
+    // IW1: capability-gated (`cli.daemon.start`/serve) — nol proses saat ditolak.
     if (args.serve) {
         console.log(c.muted("  menyalakan daemon CLI di port 3001…"));
-        require("node:child_process").spawn(
-            process.execPath,
-            [require("node:path").join(__dirname, "..", "..", "src", "server.js"), "--role", "cli"],
-            { stdio: "inherit" }
-        );
+        const result = await require("../manager/bootstrap").getCliCapabilityRuntime().execute({
+            capabilityId: "cli.daemon.start",
+            operation: "serve",
+            parameters: {}
+        });
+        if (result?.outcome !== "EXECUTED_VERIFIED") {
+            console.log(`  ${symbols.err} ${c.danger("daemon CLI ditolak: capability cli.daemon.start belum diotorisasi owner.")}`);
+            console.log(`  ${c.muted(`outcome=${result?.outcome ?? "-"} reason=${result?.reason ?? "-"}`)}`);
+            process.exitCode = 1;
+            return;
+        }
         // Tunggu server siap sebelum klien menyapa.
         await new Promise(r => setTimeout(r, 1500));
         process.env.DAMAR_ROLE = "cli";
@@ -295,85 +309,45 @@ function repl(session) {
  * Terowongan SSH ke daemon Damar remote.
  *
  * Bentuk target: user@host[:remotePort]  (remotePort default 3000).
- * Port lokal dipilih acak bebas; `ssh -N -L` dijalankan sebagai
- * proses anak — ikut mati saat CLI keluar (stdio inherit agar
- * permintaan kunci/host-key terlihat).
+ *
+ * IW1: CLI hanyalah ingress. Pembukaan terowongan (spawn `ssh -N -L`) adalah
+ * capability `cli.ssh.tunnel` yang harus lolos otoritas owner lebih dulu;
+ * tanpa ratifikasi nol proses dijalankan. Runtime yang memegang siklus hidup
+ * prosesnya (closeTunnels).
  */
 async function openSshTunnel(target) {
 
-    const { spawn } = require("node:child_process");
-    const net = require("node:net");
+    const runtime = require("../manager/bootstrap").getCliCapabilityRuntime();
 
-    // parse user@host:port
-    const match = String(target).match(/^(?:([^@]+)@)?([A-Za-z0-9._-]+)(?::(\d+))?$/);
+    console.log(`${c.muted("  membuka terowongan SSH ke")} ${c.text(String(target))}…`);
 
-    if (!match) {
+    const result = await runtime.execute({
+        capabilityId: "cli.ssh.tunnel",
+        operation: "open",
+        parameters: { target }
+    });
+
+    if (result?.outcome === "REFUSED" && result.reason === "TARGET_MALFORMED") {
         console.log(`  ${symbols.err} ${c.danger(`Target SSH tidak dipahami: ${target}`)} ${c.dim("(pakai user@host[:port])")}`);
         return { localPort: null };
     }
 
-    const [, user, host, remotePort = "3000"] = match;
-
-    // cari port lokal bebas
-    const localPort = await new Promise(resolve => {
-        const srv = net.createServer();
-        srv.listen(0, "127.0.0.1", () => {
-            const port = srv.address().port;
-            srv.close(() => resolve(port));
-        });
-    });
-
-    const sshTarget = user ? `${user}@${host}` : host;
-
-    console.log(`${c.muted("  terowongan SSH ke")} ${c.text(sshTarget)} ${c.muted(`:${remotePort} → localhost:${localPort}…`)}`);
-
-    const child = spawn("ssh", [
-        "-N",
-        "-o", "ExitOnForwardFailure=yes",
-        "-o", "ServerAliveInterval=30",
-        "-L", `${localPort}:127.0.0.1:${remotePort}`,
-        sshTarget
-    ], { stdio: ["ignore", "inherit", "inherit"] });
-
-    sshTunnel = child;
-
-    // tunggu terowongan siap: cek koneksi lokal sampai hidup
-    const ready = await new Promise(resolve => {
-
-        let tries = 0;
-
-        const attempt = () => {
-
-            tries++;
-
-            const sock = net.connect(localPort, "127.0.0.1");
-
-            sock.once("connect", () => { sock.destroy(); resolve(true); });
-
-            sock.once("error", () => {
-                sock.destroy();
-                if (tries > 40) resolve(false);          // ±20 detik
-                else setTimeout(attempt, 500);
-            });
-
-        };
-
-        setTimeout(attempt, 600);
-
-    });
-
-    if (!ready) {
-        console.log(`  ${symbols.err} ${c.danger("Terowongan SSH gagal dibuka — periksa kunci/host.")}`);
-        child.kill();
+    if (result?.outcome !== "EXECUTED_VERIFIED") {
+        if (result?.denied) {
+            console.log(`  ${symbols.err} ${c.danger("Terowongan SSH ditolak: capability cli.ssh.tunnel belum diotorisasi owner.")}`);
+            console.log(`  ${c.muted(`reason=${result.reason} outcome=${result.outcome ?? "-"}`)}`);
+        } else {
+            console.log(`  ${symbols.err} ${c.danger("Terowongan SSH gagal dibuka — periksa kunci/host.")}`);
+        }
         return { localPort: null };
     }
 
-    // Terowongan ikut mati bersama CLI.
-    process.on("exit", () => { try { child.kill(); } catch { /* abaikan */ } });
+    // Terowongan ikut mati bersama CLI (siklus hidup runtime, bukan otoritas).
+    process.on("exit", () => { try { runtime.closeTunnels(); } catch { /* abaikan */ } });
 
     console.log(`  ${symbols.ok} ${c.ok("terowongan siap")}`);
 
-    return { localPort };
+    return { localPort: result.result?.localPort ?? null };
 
 }
 
