@@ -57,30 +57,29 @@ const TRANSPORT_FAILURE_REASONS = Object.freeze({
 });
 
 // Any `outcome` description ANYWHERE in a raw report must be the canonical
-// success token: a nested accessor, an inherited description, a Proxy, an
+// success token: a nested accessor, an inherited description, a Proxy, a
+// callable, an exotic object (class instance / Map / Set / Date), an
 // over-budget subtree or any non-EXECUTED token means the report describes an
 // ambiguous physical outcome, so one cannot be hidden inside a collection or
-// wrapper. Returns true when the report must fail closed.
+// behind a structure whose contents sanitization would silently drop.
 function scanOutcomeDescriptions(value, state = { nodes: 0, path: new Set() }) {
     try {
         if (++state.nodes > 512) return true;
-        if (value === null || (typeof value !== "object" && typeof value !== "function")) return false;
+        if (value === null) return false;
+        if (typeof value === "function") return true;
+        if (typeof value !== "object") return false;
         if (isProxy(value)) return true;
-        if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
-            const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
-            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return true;
-            if (descriptor.value !== OUTCOME.EXECUTED) return true;
-        } else if (Reflect.has(value, "outcome")) {
-            return true;
-        }
+        const isArray = Array.isArray(value);
+        const proto = Object.getPrototypeOf(value);
+        if (!isArray && proto !== Object.prototype && proto !== null) return true;
         if (state.path.has(value)) return false;
         state.path.add(value);
         let ambiguous = false;
-        const proto = Object.getPrototypeOf(value);
-        if (Array.isArray(value) || proto === Object.prototype || proto === null) {
-            for (const key of Object.keys(value)) {
-                if (scanOutcomeDescriptions(value[key], state)) { ambiguous = true; break; }
-            }
+        for (const key of Reflect.ownKeys(value)) {
+            const descriptor = Object.getOwnPropertyDescriptor(value, key);
+            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) { ambiguous = true; break; }
+            if (key === "outcome" && descriptor.value !== OUTCOME.EXECUTED) { ambiguous = true; break; }
+            if (scanOutcomeDescriptions(descriptor.value, state)) { ambiguous = true; break; }
         }
         state.path.delete(value);
         return ambiguous;

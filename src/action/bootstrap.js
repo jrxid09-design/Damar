@@ -1,7 +1,7 @@
-"use strict";
+﻿"use strict";
 
 /**
- * ACTION AUTHORITY GATE V1 — CANONICAL TRUSTED BOOTSTRAP (SEVENTH targeted
+ * ACTION AUTHORITY GATE V1 â€” CANONICAL TRUSTED BOOTSTRAP (SEVENTH targeted
  * repair, Wave 4 Lane 2: first-binder trust + caller authenticator + seeding
  * on the production facade REMOVED).
  *
@@ -15,16 +15,16 @@
  *   canonical authentication policy is bootstrap-owned, not
  *   runtime-constructor-owned
  *
- * ─────────────────────────────────────────────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  * HOW PRIVILEGED CONSTRUCTION IS BOOTSTRAP-PRIVATE (seventh repair)
- * ─────────────────────────────────────────────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *
- * The privileged composition functions — the action authority runtime factory
- * and the AuthenticationDomain factory — are defined INSIDE THIS MODULE'S
+ * The privileged composition functions â€” the action authority runtime factory
+ * and the AuthenticationDomain factory â€” are defined INSIDE THIS MODULE'S
  * private closure (below). They are NOT exports of this module, NOT exports
  * of runtime.js/authDomain.js, and reachable through NO binder, NO token, NO
  * host capability, NO first-call-wins registry. Acquiring them requires
- * ALREADY executing inside this module's own closure — i.e. being the trusted
+ * ALREADY executing inside this module's own closure â€” i.e. being the trusted
  * bootstrap itself.
  *
  * runtime.js and authDomain.js are now PURE NON-PRIVILEGED modules (inert
@@ -39,9 +39,9 @@
  * the production bootstrap loaded; the later bootstrap failure was loud but
  * not sufficient. First-binder-wins trust is not trust.
  *
- * ─────────────────────────────────────────────────────────────────────────
- * BLOCKER 2 — CANONICAL AUTHENTICATION IS BOOTSTRAP-OWNED
- * ─────────────────────────────────────────────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * BLOCKER 2 â€” CANONICAL AUTHENTICATION IS BOOTSTRAP-OWNED
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *
  * The production canonical runtime is created by `createCanonicalActionFacade()`
  * which takes NO options. It does NOT accept:
@@ -52,7 +52,7 @@
  *
  * The canonical AuthenticationDomain is bound internally to the FIXED
  * bootstrap-owned authentication adapter (`canonicalAuthAdapter` below): for
- * Lane 2 — where full production owner-auth infrastructure is not yet wired —
+ * Lane 2 â€” where full production owner-auth infrastructure is not yet wired â€”
  * the adapter FAILS CLOSED unconditionally: no session is ever minted from
  * caller input, no caller-asserted principal is ever trusted. This means the
  * canonical runtime evaluates but every session is INVALID_IDENTITY until a
@@ -60,9 +60,9 @@
  * (not through any constructor option). Arbitrary caller input is never
  * silently treated as authenticated.
  *
- * ─────────────────────────────────────────────────────────────────────────
- * BLOCKER 3 — PRODUCTION FACADE IS EXACTLY LEAST PRIVILEGE
- * ─────────────────────────────────────────────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * BLOCKER 3 â€” PRODUCTION FACADE IS EXACTLY LEAST PRIVILEGE
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *
  * The production facade is EXACTLY:
  *
@@ -83,14 +83,14 @@
  * registry, registrars, AuthorityStore, CapabilityRuntime, capability
  * registrar, evaluator, verifier, AuthenticationDomain, mintSession,
  * issueIdentity, bootstrap hooks. Authority/capability seeding belongs to a
- * SEPARATE privileged bootstrap/provisioning interface — for tests that is
+ * SEPARATE privileged bootstrap/provisioning interface â€” for tests that is
  * the explicitly test-only harness (tests/action/bootstrapHarness.js); for
  * production startup it will be a trusted provisioning capability in a later
  * lane. Downstream NEVER receives it.
  *
- * ─────────────────────────────────────────────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  * PROCESS / MODULE ISOLATION LIMITATION (documented honestly)
- * ─────────────────────────────────────────────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *
  * This is a same-process CommonJS trust domain, NOT OS isolation. Node/CommonJS
  * path hiding is NOT hard sandboxing against code that already has arbitrary
@@ -118,7 +118,7 @@ const { captureClock } = require("./clock");
 const { DECISION, GATE_REASONS, ALLOW_REASON, validateAuthorityEvaluation } = require("./gate");
 
 // ---------------------------------------------------------------------------
-// PRIVILEGED COMPOSITION — PRIVATE CLOSURE (seventh repair).
+// PRIVILEGED COMPOSITION â€” PRIVATE CLOSURE (seventh repair).
 // Both factories are defined HERE, inside the trusted bootstrap module's
 // closure. They are never exported, never token-gated, never binder-gated.
 // ---------------------------------------------------------------------------
@@ -173,7 +173,7 @@ function deepFreeze(obj) {
 }
 
 /**
- * PRIVILEGED (bootstrap-private) — compose one AuthenticationDomain over a
+ * PRIVILEGED (bootstrap-private) â€” compose one AuthenticationDomain over a
  * trusted authenticate() hook. The resulting domain's closure owns the
  * session brand, the ONLY mint path, and the verifier capability.
  *
@@ -214,7 +214,7 @@ function composeAuthenticationDomain({ authenticate, clock = { nowMs: () => Date
     function mintAuthenticatedSession(authResult, evidence) {
         const principal = extractAuthenticatedPrincipal(authResult);
 
-        // Descriptive telemetry ONLY — never used as Authority identity.
+        // Descriptive telemetry ONLY â€” never used as Authority identity.
         const claimed = evidence && typeof evidence === "object"
             ? cleanToken(evidence[AUTH_TELEMETRY_KEYS.claimedPrincipal], AUTH_TELEMETRY_KEYS.claimedPrincipal, MAX_TELEMETRY_CHARS)
             : "";
@@ -241,13 +241,13 @@ function composeAuthenticationDomain({ authenticate, clock = { nowMs: () => Date
     }
 
     /**
-     * authenticate(evidence) — the domain's single public identity surface.
+     * authenticate(evidence) â€” the domain's single public identity surface.
      * Resolves external evidence through the trusted authenticate()
      * infrastructure bound by bootstrap. On ANY failure (throw, null,
-     * undefined, malformed, missing principal) returns null — fail closed,
+     * undefined, malformed, missing principal) returns null â€” fail closed,
      * nothing minted, no caller identity fallback. The returned session (if
      * any) is branded to THIS domain and carries the principal that trusted
-     * authentication established — nothing else.
+     * authentication established â€” nothing else.
      */
     function authenticateEvidence(evidence) {
         let authResult;
@@ -267,7 +267,7 @@ function composeAuthenticationDomain({ authenticate, clock = { nowMs: () => Date
     }
 
     /**
-     * VERIFIER CAPABILITY — the ONLY thing the action authority runtime
+     * VERIFIER CAPABILITY â€” the ONLY thing the action authority runtime
      * receives. Brand-first (zero property access before membership check =>
      * zero Proxy traps on rejection). Returns the authenticated principal
      * string for a session branded by THIS domain, or null for anything else.
@@ -288,7 +288,7 @@ function composeAuthenticationDomain({ authenticate, clock = { nowMs: () => Date
 }
 
 /**
- * PRIVILEGED (bootstrap-private) — compose an action authority evaluation
+ * PRIVILEGED (bootstrap-private) â€” compose an action authority evaluation
  * runtime over canonical state. Destructures its inputs ONCE into
  * closure-owned state and returns the frozen least-privilege surface
  * { admit, evaluate }.
@@ -318,7 +318,7 @@ function composeActionAuthorityRuntime({
     }
     // Trust law: identity comes ONLY from a pre-bound AuthenticationDomain
     // verifier capability. A missing or invalid authVerifier means no session
-    // can ever be trusted — reject at composition so a misconfigured runtime
+    // can ever be trusted â€” reject at composition so a misconfigured runtime
     // fails loudly rather than silently evaluating as if unauthenticated.
     if (!authVerifier || typeof authVerifier !== "object") {
         throw fail(REASONS.AUTH_VERIFIER_REQUIRED, "runtime requires a pre-bound authVerifier capability");
@@ -587,7 +587,7 @@ let ownerAuthVerifier = null;
 let ownerAuthVerifierInstalled = false;
 
 /**
- * MODULE-PRIVATE, NON-ENUMERABLE — reachable ONLY by the sealed Owner trust
+ * MODULE-PRIVATE, NON-ENUMERABLE â€” reachable ONLY by the sealed Owner trust
  * composition root (src/authority/ownerTrustComposition), never by public DI
  * or a caller-controlled callback.  First-wins: a second installation attempt
  * is ignored, so the canonical composition (which runs at startup) cannot be
@@ -671,13 +671,13 @@ let canonical = null;
 // DB02-D / AVAILABILITY-GAP (Repair5): a closure-private reference to the
 // SAME CapabilityRegistry instance captured by composeActionAuthorityRuntime
 // above, set once at canonical construction time. NOT exported as the
-// registry object itself (that stays sealed) — only read-only, detached
+// registry object itself (that stays sealed) â€” only read-only, detached
 // snapshots derived from it are ever handed out (see
 // getCanonicalAvailableCapabilityIds below).
 let canonicalCapabilityRegistry = null;
 
 // ---------------------------------------------------------------------------
-// MATA DEWA VISUAL MODE (MD-011) — built-in capability + actuator wiring.
+// MATA DEWA VISUAL MODE (MD-011) â€” built-in capability + actuator wiring.
 //
 // A3/A7: the wiring record is bound to the ACTUAL canonical Lane 2 facade
 // identity via a closure-private WeakMap (fourth repair: NO mutable
@@ -690,8 +690,8 @@ let canonicalCapabilityRegistry = null;
 const mataDewaWiringByFacade = new WeakMap();
 
 /** Production lexical resolver (A4/A5): canonical MataDewaService at invoke
- *  time — pure getter, no creation, no public DI seam. Absence is a TRANSIENT
- *  runtime condition → actuator fails closed MATA_DEWA_SERVICE_UNAVAILABLE;
+ *  time â€” pure getter, no creation, no public DI seam. Absence is a TRANSIENT
+ *  runtime condition â†’ actuator fails closed MATA_DEWA_SERVICE_UNAVAILABLE;
  *  it never crashes the runtime and never fabricates a service. */
 function resolveCanonicalMataDewaService() {
     try {
@@ -704,7 +704,7 @@ function resolveCanonicalMataDewaService() {
 }
 
 /**
- * DB02-A (Repair5 continued): ONE canonical authority truth — construction
+ * DB02-A (Repair5 continued): ONE canonical authority truth â€” construction
  * order must not split it.
  *
  * The prior fix resolved the canonical production store correctly, but
@@ -713,7 +713,7 @@ function resolveCanonicalMataDewaService() {
  * === null)`). If anything triggers canonical Lane 2 construction before
  * `ensureProductionAuthorityComposed()` finishes (boot ordering, a stray
  * early call, a race), that one eager resolution captured the ephemeral
- * fallback — and the memoized facade could never see the real canonical
+ * fallback â€” and the memoized facade could never see the real canonical
  * store for the lifetime of the process, even after production composition
  * later completed. BOOT ORDER must never decide AUTHORITY TRUTH.
  *
@@ -724,13 +724,13 @@ function resolveCanonicalMataDewaService() {
  * `createCanonicalActionFacade()` / `createDamarManager()` /
  * `ensureProductionAuthorityComposed()` run in, the very next Lane 2 read
  * after production composition completes sees the SAME store the canonical
- * AuthorityRegistry writes into — live, not a copy, not a second
+ * AuthorityRegistry writes into â€” live, not a copy, not a second
  * synchronized store: exactly one underlying store is ever read, chosen
  * fresh on each call.
  *
  * Falls back to a single lazily-created ephemeral in-memory store when no
  * production composition has run yet in this process (e.g. ordinary unit
- * tests that never call `ensureProductionAuthorityComposed()`) — IDENTICAL
+ * tests that never call `ensureProductionAuthorityComposed()`) â€” IDENTICAL
  * to prior behavior for every caller that doesn't touch the production
  * composition path.
  *
@@ -748,7 +748,7 @@ function resolveLane2AuthorityStore() {
             if (canonicalStore && typeof canonicalStore.getCapability === "function") {
                 return canonicalStore;
             }
-        } catch { /* production composition module unavailable — ephemeral fallback */ }
+        } catch { /* production composition module unavailable â€” ephemeral fallback */ }
         if (ephemeralFallback === null) ephemeralFallback = createMemoryAuthorityStore();
         return ephemeralFallback;
     }
@@ -760,7 +760,7 @@ function resolveLane2AuthorityStore() {
 }
 
 /**
- * Create the canonical production Action facade. Takes NO options — canonical
+ * Create the canonical production Action facade. Takes NO options â€” canonical
  * authentication policy is bootstrap-owned and the fixed fail-closed adapter
  * is bound internally.
  *
@@ -787,7 +787,7 @@ function createCanonicalActionFacade() {
         // ---- MATA DEWA (MD-011/A7/A8): wire the built-in visual-mode
         //      capabilities + trusted scope bindings HERE, inside the
         //      canonical composition. Failure is a composition
-        //      misconfiguration → LOUD typed error (never swallowed into a
+        //      misconfiguration â†’ LOUD typed error (never swallowed into a
         //      later CAPABILITY_NOT_FOUND). No authority is granted here.
         //      Fourth repair: the wiring record is bound to THIS facade's
         //      identity in a closure-private WeakMap (no module-global). ----
@@ -801,7 +801,7 @@ function createCanonicalActionFacade() {
                 registrar: capabilityRuntime.registrars.core
             });
             // Lane 5 integrasi (post-Lane4): capability RF TERISTIMEWA
-            // didaftarkan dengan pola MD-011 yang sama — DESKRIPTIF saja
+            // didaftarkan dengan pola MD-011 yang sama â€” DESKRIPTIF saja
             // (tanpa grant). Scope bindings diperluas; record wiring RF
             // dilampirkan pada record kanonik untuk Lane 3. Kegagalan =
             // kesalahan komposisi (LOUD), bukan CAPABILITY_NOT_FOUND diam.
@@ -825,7 +825,7 @@ function createCanonicalActionFacade() {
             // DB02-D: genuine availability observation. AVAILABLE iff the
             // probe's ExternalCapabilityFederation candidate is genuinely
             // ENABLED (real discover->inspect->validate->enableTool
-            // lifecycle) — never a default; UNAVAILABLE if that lifecycle
+            // lifecycle) â€” never a default; UNAVAILABLE if that lifecycle
             // has not genuinely completed.
             capabilityRuntime.registry.observeAvailability(
                 probeWiring.id,
@@ -834,12 +834,12 @@ function createCanonicalActionFacade() {
             );
 
             // AVAILABILITY-GAP (Repair5): visual-mode capabilities have NO
-            // external dependency (in-process UI toggle only) — "wired" IS a
+            // external dependency (in-process UI toggle only) â€” "wired" IS a
             // true, immediate observation of "available", not a default. This
             // is the ONLY production call site for observeAvailability; RF
             // control capabilities are deliberately NOT marked here (they
             // depend on a real, not-yet-connected device-trust attach signal
-            // — see AVAILABILITY_GAP recon notes) and stay UNKNOWN, correctly
+            // â€” see AVAILABILITY_GAP recon notes) and stay UNKNOWN, correctly
             // fail-closed, until that separate signal is wired.
             for (const entry of [wiring.activate, wiring.deactivate]) {
                 capabilityRuntime.registry.observeAvailability(entry.id, "AVAILABLE", {
@@ -883,21 +883,21 @@ function createCanonicalActionFacade() {
             session
         });
         // MD-011 (fourth repair): bind the wiring record to THIS facade's
-        // identity — closure-private WeakMap, no mutable module-global.
+        // identity â€” closure-private WeakMap, no mutable module-global.
         mataDewaWiringByFacade.set(canonical, canonicalWiringRecord);
     }
     return canonical;
 }
 
 // ---------------------------------------------------------------------------
-// LANE 3 — CANONICAL ACTUATION COMPOSITION (FIRST targeted repair: ALL
+// LANE 3 â€” CANONICAL ACTUATION COMPOSITION (FIRST targeted repair: ALL
 // privileged actuation implementation lives in THIS private lexical closure).
 //
 // The actuation submodules (actuatorRegistry.js / dispatcher.js /
 // executionRequest.js / result.js / lifecycle.js) are now PURE NON-PRIVILEGED
-// vocabulary modules. The privileged constructors — buildActuatorRegistry,
+// vocabulary modules. The privileged constructors â€” buildActuatorRegistry,
 // composeDispatcher, formExecutionRequest, createLifecycleTracker,
-// buildExecutionResult, buildExecutionEvidence, sanitizeActuatorOutput — are
+// buildExecutionResult, buildExecutionEvidence, sanitizeActuatorOutput â€” are
 // defined HERE, inside this module's own lexical scope, exactly like Lane 2's
 // composeActionAuthorityRuntime / composeAuthenticationDomain. They are
 // reachable through NO binder, NO token, NO host capability, NO first-call-
@@ -913,7 +913,7 @@ function createCanonicalActionFacade() {
 //
 // Downstream NEVER receives the registrar: it receives only the frozen
 // { execute } capability. Fresh canonical Lane 2 revalidation happens INSIDE
-// execute() — there is no bearer-decision path and no caller-selectable
+// execute() â€” there is no bearer-decision path and no caller-selectable
 // actuator.
 //
 // LANE 2 SEMANTICS UNCHANGED: this extension adds composition only; the
@@ -1227,28 +1227,31 @@ function readActuatorOutcome3(value) {
 
 // Any `outcome` description ANYWHERE in a raw actuator report must be the
 // canonical success token. A nested accessor, an inherited description, a
-// Proxy, an over-budget subtree or any non-EXECUTED token means the report
-// describes an ambiguous physical outcome, so a report cannot hide one inside a
-// collection or wrapper. Returns true when the report must fail closed.
+// Proxy, a callable, an exotic object (class instance / Map / Set / Date), an
+// over-budget subtree or any non-EXECUTED token means the report describes an
+// ambiguous physical outcome, so one cannot be hidden inside a collection or
+// behind a structure whose contents sanitization would silently drop.
+// Returns true when the report must fail closed.
 function scanActuatorOutcomeDescriptions3(value, state = { nodes: 0, path: new Set() }) {
     try {
         if (++state.nodes > RESULT_NODES3) return true;
-        if (value === null || (typeof value !== "object" && typeof value !== "function")) return false;
+        if (value === null) return false;
+        if (typeof value === "function") return true;
+        if (typeof value !== "object") return false;
         if (isProxy3(value)) return true;
-        if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
-            const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
-            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return true;
-            if (descriptor.value !== "EXECUTED") return true;
-        } else if (Reflect.has(value, "outcome")) {
-            return true;
-        }
+        const isArray = Array.isArray(value);
+        const proto = Object.getPrototypeOf(value);
+        if (!isArray && proto !== Object.prototype && proto !== null) return true;
         if (state.path.has(value)) return false;
         state.path.add(value);
         let ambiguous = false;
-        if (Array.isArray(value) || actuationIsPlainObject3(value)) {
-            for (const key of Object.keys(value)) {
-                if (scanActuatorOutcomeDescriptions3(value[key], state)) { ambiguous = true; break; }
-            }
+        for (const key of Reflect.ownKeys(value)) {
+            const descriptor = Object.getOwnPropertyDescriptor(value, key);
+            // An accessor anywhere is unreadable and is dropped by
+            // sanitization: never silently ignored.
+            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) { ambiguous = true; break; }
+            if (key === "outcome" && descriptor.value !== "EXECUTED") { ambiguous = true; break; }
+            if (scanActuatorOutcomeDescriptions3(descriptor.value, state)) { ambiguous = true; break; }
         }
         state.path.delete(value);
         return ambiguous;
@@ -1496,12 +1499,33 @@ function composeDispatcher3({
         completed.set(key, entry);
     }
 
+    // Every field read here goes through a guarded read: a hostile getter on
+    // the intent or session must never leak an arbitrary exception out of the
+    // dispatcher -- an unreadable dedup identity simply stops deduplicating.
     function computeContentKey3(intent, authSession, parameters, metadata) {
-        const paramsJson = parameters === undefined || parameters === null ? "{}" : JSON.stringify(parameters);
-        const metaJson = metadata === undefined || metadata === null ? "{}" : JSON.stringify(metadata);
-        const sessionKey = String(typeof authSession === "object" && authSession !== null ? (authSession.principal ?? "") + ":" + authSession.sessionId : "");
-        const scopeJson = JSON.stringify(intent.scope ?? []);
-        const key = `${intent.intentId}|${intent.capabilityId}|${intent.capabilityIncarnationId}|${intent.operation}|${sessionKey}|${scopeJson}|${crypto3.createHash("sha256").update(paramsJson).digest("hex").slice(0, 16)}|${crypto3.createHash("sha256").update(metaJson).digest("hex").slice(0, 16)}`;
+        const field = (source, key) => {
+            try {
+                const value = source == null ? undefined : source[key];
+                return typeof value === "string" ? value : "";
+            } catch {
+                return "";
+            }
+        };
+        const json = (value) => {
+            if (value === undefined || value === null) return "{}";
+            try { return JSON.stringify(value) ?? "{}"; } catch { return "unreadable"; }
+        };
+        const paramsJson = json(parameters);
+        const metaJson = json(metadata);
+        let sessionKey = "";
+        try {
+            sessionKey = String(typeof authSession === "object" && authSession !== null ? (authSession.principal ?? "") + ":" + authSession.sessionId : "");
+        } catch {
+            sessionKey = "unreadable";
+        }
+        let scopeJson = "[]";
+        try { scopeJson = JSON.stringify(intent.scope ?? []) ?? "[]"; } catch { scopeJson = "unreadable"; }
+        const key = `${field(intent, "intentId")}|${field(intent, "capabilityId")}|${field(intent, "capabilityIncarnationId")}|${field(intent, "operation")}|${sessionKey}|${scopeJson}|${crypto3.createHash("sha256").update(paramsJson).digest("hex").slice(0, 16)}|${crypto3.createHash("sha256").update(metaJson).digest("hex").slice(0, 16)}`;
         return crypto3.createHash("sha256").update(key).digest("hex");
     }
 
@@ -1522,24 +1546,63 @@ function composeDispatcher3({
             }
         }
 
-        const { intent, authSession } = p;
-        if (!intent || typeof intent !== "object" ||
-            typeof intent.intentId !== "string" ||
-            typeof intent.capabilityId !== "string" ||
-            typeof intent.operation !== "string" ||
-            typeof intent.capabilityIncarnationId !== "string") {
-            throw fail3(REASONS3.INVALID_INTENT, "execute requires a canonical ActionIntent");
+        // Every caller field is read ONCE through this guarded intake. A getter
+        // or Proxy trap that throws must never leak an arbitrary exception out
+        // of execute(): it becomes a typed canonical refusal instead, and the
+        // caller's own error object is never used downstream.
+        let intent;
+        let authSession;
+        let parameters;
+        let metadata;
+        let timeoutOption;
+        let signalOption;
+        try {
+            for (const key of CALLER_EXECUTOR_KEYS3) {
+                if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
+                    throw fail3(REASONS3.CALLER_EXECUTOR_REJECTED,
+                        `caller-executor option '${key}' is forbidden; the actuator is bootstrap-owned, never caller-selectable`);
+                }
+            }
+            for (const key of BEARER_DECISION_KEYS3) {
+                if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
+                    throw fail3(REASONS3.CALLER_EXECUTOR_REJECTED,
+                        `authority-decision option '${key}' is forbidden; an AuthorityDecision is historical evidence, not a bearer execution token`);
+                }
+            }
+            intent = p.intent;
+            authSession = p.authSession;
+            parameters = p.parameters;
+            metadata = p.metadata;
+            timeoutOption = p.timeoutMs;
+            signalOption = p.signal;
+        } catch (e) {
+            if (e && typeof e.reasonCode === "string") throw e;
+            throw fail3(REASONS3.MALFORMED_REQUEST, "request options are unreadable");
         }
-        if (!isValidIncarnation3(intent.capabilityIncarnationId)) {
-            throw fail3(REASONS3.INVALID_INTENT, "intent capabilityIncarnationId is not a valid canonical incarnation");
-        }
-        if (authSession === null || typeof authSession !== "object") {
-            throw fail3(REASONS3.INVALID_SESSION, "execute requires an authenticated session");
+
+        let admittedAtMs;
+        try {
+            if (!intent || typeof intent !== "object" ||
+                typeof intent.intentId !== "string" ||
+                typeof intent.capabilityId !== "string" ||
+                typeof intent.operation !== "string" ||
+                typeof intent.capabilityIncarnationId !== "string") {
+                throw fail3(REASONS3.INVALID_INTENT, "execute requires a canonical ActionIntent");
+            }
+            if (!isValidIncarnation3(intent.capabilityIncarnationId)) {
+                throw fail3(REASONS3.INVALID_INTENT, "intent capabilityIncarnationId is not a valid canonical incarnation");
+            }
+            if (authSession === null || typeof authSession !== "object") {
+                throw fail3(REASONS3.INVALID_SESSION, "execute requires an authenticated session");
+            }
+            admittedAtMs = intent.createdAtMs;
+        } catch (e) {
+            if (e && typeof e.reasonCode === "string") throw e;
+            throw fail3(REASONS3.INVALID_INTENT, "intent fields are unreadable");
         }
 
         const requestedAtMs = canonicalClockNow3();
         const lifecycle = createLifecycleTracker3(LIFECYCLE3.CREATED);
-        const admittedAtMs = intent.createdAtMs;
 
         let provisionalRequest;
         try {
@@ -1553,15 +1616,15 @@ function composeDispatcher3({
                 authorityGeneration: 0,
                 admittedAtMs,
                 requestedAtMs,
-                parameters: p.parameters,
-                metadata: p.metadata
+                parameters,
+                metadata
             });
         } catch (e) {
             lifecycle.advance(LIFECYCLE3.FAILED, requestedAtMs);
             throw e;
         }
 
-        const contentKey = computeContentKey3(intent, authSession, p.parameters, p.metadata);
+        const contentKey = computeContentKey3(intent, authSession, parameters, metadata);
         if (inFlight.has(contentKey)) {
             return inFlight.get(contentKey).promise;
         }
@@ -1583,7 +1646,7 @@ function composeDispatcher3({
     }
 
     async function runExecutionBody3(contentKey, intent, authSession, p, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs) {
-        // ── PRE-ACTUATION REVALIDATION (the core invariant) ────────────
+        // â”€â”€ PRE-ACTUATION REVALIDATION (the core invariant) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         lifecycle.advance(LIFECYCLE3.REVALIDATING, canonicalClockNow3());
 
         let freshDecision;
@@ -1669,8 +1732,8 @@ function composeDispatcher3({
                 authorityGeneration: freshDecision.authorityGeneration,
                 admittedAtMs,
                 requestedAtMs,
-                parameters: p.parameters,
-                metadata: p.metadata
+                parameters,
+                metadata
             });
         } catch (e) {
             lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
@@ -1723,7 +1786,7 @@ function composeDispatcher3({
 
         lifecycle.advance(LIFECYCLE3.READY, canonicalClockNow3());
 
-        const signal = readSignal3(p.signal);
+        const signal = readSignal3(signalOption);
         if (signal && signal.aborted) {
             lifecycle.advance(LIFECYCLE3.CANCELLED, canonicalClockNow3());
             const result = buildExecutionResult3({
@@ -1743,8 +1806,8 @@ function composeDispatcher3({
 
         lifecycle.advance(LIFECYCLE3.DISPATCHING, canonicalClockNow3());
         const dispatchStartMs = canonicalClockNow3();
-        const effectiveTimeout = (typeof p.timeoutMs === "number" && Number.isSafeInteger(p.timeoutMs) && p.timeoutMs >= MIN_TIMEOUT3 && p.timeoutMs <= MAX_TIMEOUT3)
-            ? p.timeoutMs : timeoutMs;
+        const effectiveTimeout = (typeof timeoutOption === "number" && Number.isSafeInteger(timeoutOption) && timeoutOption >= MIN_TIMEOUT3 && timeoutOption <= MAX_TIMEOUT3)
+            ? timeoutOption : timeoutMs;
 
         let cancelledDuringDispatch = false;
         let invocationCount = 0;
@@ -1933,7 +1996,7 @@ let canonicalActuation = null;
 
 /**
  * Create the canonical Lane 3 actuation facade (trusted-bootstrap-private).
- * Takes NO options — the actuator registry, the dispatcher's clock, and the
+ * Takes NO options â€” the actuator registry, the dispatcher's clock, and the
  * Lane 2 facade it revalidates against are all owned by this closure.
  *
  * @returns {object} frozen { execute }  (least privilege: execution only)
@@ -1950,8 +2013,8 @@ function createCanonicalActuationFacade() {
         //      over the CANONICAL actuator registry, using the wiring record
         //      retrieved from the closure-private WeakMap keyed by THIS
         //      canonical Lane 2 facade's actual identity (fourth repair: no
-        //      mutable module-global; a facade without a bound record — i.e.
-        //      a foreign or recomposed one — fails LOUD here). Service
+        //      mutable module-global; a facade without a bound record â€” i.e.
+        //      a foreign or recomposed one â€” fails LOUD here). Service
         //      resolution is LAZY at invoke time (production lexical
         //      resolver); transient absence fails closed at the actuator. ----
         const canonicalWiringRecord = mataDewaWiringByFacade.get(lane2Facade);
@@ -1969,7 +2032,7 @@ function createCanonicalActuationFacade() {
             resolveService: resolveCanonicalMataDewaService
         });
         // Lane 5 integrasi (post-Lane4): actuator RF TERISTIMEWA di atas
-        // registry actuator kanonik yang SAMA — pola MD-011 identik. Tidak
+        // registry actuator kanonik yang SAMA â€” pola MD-011 identik. Tidak
         // ada otoritas yang diberikan di sini; tanpa grant ratifikasi
         // Owner, Lane 2 evaluate tetap DENY (fail closed).
         const {
@@ -1981,7 +2044,7 @@ function createCanonicalActuationFacade() {
             resolveService: resolveCanonicalMataDewaService
         });
         // DB02-D (Repair5): the diagnostic probe actuator NEVER runs the
-        // artifact directly — invoke() claims a governed execution through
+        // artifact directly â€” invoke() claims a governed execution through
         // the canonical DistributedExecutionRouter and dispatches it to the
         // governed external tool executor (real AppContainer sandbox).
         require("../federation/capabilities/diagnosticProbeWiring").wireActuator({
@@ -2003,7 +2066,7 @@ function createCanonicalActuationFacade() {
         canonicalActuation = Object.freeze({
             execute: dispatcher.execute,
 
-            // PURE brand-recognition predicates — BRAND-FIRST: closure-only
+            // PURE brand-recognition predicates â€” BRAND-FIRST: closure-only
             // WeakSet membership decides. Downstream can ASK "is this
             // canonical?"; downstream cannot CAUSE "make this canonical" (the
             // brand WeakSets are closure-private; no export exposes them or
@@ -2024,7 +2087,7 @@ function createCanonicalActuationFacade() {
 }
 
 // ---------------------------------------------------------------------------
-// LANE 4 — CANONICAL VERIFICATION + COMPENSATION COMPOSITION (TARGETED
+// LANE 4 â€” CANONICAL VERIFICATION + COMPENSATION COMPOSITION (TARGETED
 // REPAIR 4: the production implementation now lives in the TRUSTED INTERNAL
 // module src/action/internal/verificationBootstrap.js and is extracted
 // VERBATIM. This bootstrap simply wires the production composition with NO
@@ -2046,7 +2109,7 @@ let canonicalVerification = null;
 
 /**
  * Create the canonical Lane 4 verification/compensation facade
- * (trusted-bootstrap-private). Takes NO options — the verifier registry,
+ * (trusted-bootstrap-private). Takes NO options â€” the verifier registry,
  * observation functions, postcondition evaluator, and the Lane 3 facade it
  * routes compensation through are all owned by the trusted composition.
  * Caller-selected verifiers/compensators are structurally impossible to
@@ -2064,7 +2127,7 @@ function createCanonicalVerificationFacade() {
     }
     if (canonicalVerification === null) {
         // DB02-D (Repair5): ONE real, composition-time-owned production
-        // verifier for the diagnostic probe capability — NOT a caller/test
+        // verifier for the diagnostic probe capability â€” NOT a caller/test
         // verifier (trustedVerifiers stays otherwise empty). Retrieved from
         // the SAME closure-private wiring record used by Lane 2/Lane 3
         // above (mataDewaWiringByFacade), never re-derived or guessed.
@@ -2103,7 +2166,7 @@ const TIMEOUT_SENTINEL4 = Symbol("damar.action.verification.timeout");
 
 // The ONE canonical verification facade, created exactly once, lazily.
 function isCanonicalExecutionResult4(value) {
-    // Reuse the Lane 3 brand check through the canonical actuation facade —
+    // Reuse the Lane 3 brand check through the canonical actuation facade â€”
     // the ONLY trusted path to brand membership.
     return createCanonicalActuationFacade().isCanonicalExecutionResult(value);
 }
@@ -2111,12 +2174,12 @@ function isCanonicalExecutionResult4(value) {
 /**
  * DB02-D (Repair5): read-only view over the canonical capability registry's
  * AVAILABLE capability ids. Mirrors resolveLane2AuthorityStore's read-only
- * pattern above — exposes ids only (derived from registry.list()'s already
+ * pattern above â€” exposes ids only (derived from registry.list()'s already
  * detached/frozen snapshots), never the registry object, never a mutation
  * path. Ensures canonical composition has run first (deterministic; no
  * caller-suppliable input). The ONLY intended caller is the canonical Wave6
  * node composition (src/integration/wave6Production.js), so a real node
- * advertises the SAME capabilities Lane2 can actually authorize — never a
+ * advertises the SAME capabilities Lane2 can actually authorize â€” never a
  * caller-chosen list.
  */
 function getCanonicalAvailableCapabilityIds() {
