@@ -250,8 +250,12 @@ class AIRuntimeService {
             "tak dikenal, pakai goal_run (loop otonom: rencana→eksekusi→verifikasi→pulih→" +
             "belajar). Sebelum membuat skill baru, WAJIB capability_search dulu agar tidak " +
             "duplikat; bila ada gap, buat lewat skill_build (teruji sandbox otomatis). " +
-            "Kegagalan tool bukan akhir: tool_exec memberi retry+substitusi, dan kamu boleh " +
-            "memilih jalan lain (API → browser → terminal → skill baru). Sebelum aksi " +
+            "tool_exec adalah jalur LEGACY tanpa otoritas eksekusi: permintaannya " +
+            "ditolak fail-closed (tanpa retry/substitusi), jadi jangan andalkan itu; " +
+            "aksi berkonsekuensi harus lewat jalur kanonik. Kamu boleh " +
+            "memilih jalan lain yang tersedia (API → browser → terminal → skill baru), " +
+            "dan skill_build hanya menghasilkan draft sampai terdaftar kanonik. " +
+            "Sebelum aksi " +
             "signifikan/destruktif, buat checkpoint. Hal yang asing bukan hal yang mustahil — " +
             "asing artinya: cari atau ciptakan kapabilitasnya.\n" +
             // Daftar tool yang dilampirkan tiap giliran DIPILIH sesuai

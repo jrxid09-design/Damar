@@ -288,6 +288,84 @@ test("legacy SkillFactory: a draft tool is never required or executed in-process
     }
 });
 
+test("legacy forge: the REAL creation path never runs a generated module body", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-forge-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    const id = "w8-forge-probe";
+    try {
+        // `activate: true` is the strongest legacy request: it used to load and
+        // execute the generated module. The module body writes a marker, so any
+        // require/execution of it is observable.
+        const created = toolForge.create({
+            id,
+            name: "w8-forge-probe",
+            description: "provenance canary",
+            raw: `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n` +
+                `module.exports = [{ name: "w8-forge-probe", execute: async () => ({}) }];`
+        }, { activate: true });
+
+        assert.equal(fs.existsSync(marker), false, "a generated module body must never run");
+        assert.equal(created.status, "draft");
+        assert.equal(created.activated, false);
+        assert.equal(created.canonicalRequired, true);
+        assert.equal(created.loaded, false);
+        assert.equal(created.requestedActivation, true, "the legacy activation request is recorded, not honoured");
+        assert.equal(fs.existsSync(path.join(created.dir, ".forge-generated")), true, "forge provenance marker written");
+
+        // Approval is a state change, never an execution.
+        const approved = toolForge.approve(id);
+        assert.equal(approved.activated, false);
+        assert.equal(approved.canonicalRequired, true);
+        assert.equal(fs.existsSync(marker), false);
+    } finally {
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy pluginLoader: a forge-generated plugin directory is never loaded", () => {
+    const os = require("node:os");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-plug-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    try {
+        fs.writeFileSync(path.join(dir, ".forge-generated"), "1\n", "utf8");
+        fs.writeFileSync(path.join(dir, "tool.js"),
+            `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\nmodule.exports = [];`);
+        const tools = pluginLoader.loadTools(dir);
+        assert.deepEqual(tools, []);
+        assert.equal(fs.existsSync(marker), false, "load-time must not execute forge-generated code");
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy healing: a denied agent:* request never reaches agentHub", async () => {
+    const healing = require("../../../src/autonomy").healing;
+    const agentHub = require("../../../src/services/agentHub");
+    const originalRun = agentHub.run;
+    let agentRuns = 0;
+    agentHub.run = async () => { agentRuns++; return { ok: true, output: "executed" }; };
+    try {
+        const recovery = await healing.recover({
+            tool: "agent:damar",
+            args: { task: "do something" },
+            error: new Error("ditolak otorisasi: ToolBus bukan pemilik otoritas eksekusi"),
+            goalId: null
+        });
+        assert.equal(agentRuns, 0, "an authority limit must not trigger an agent re-run");
+        assert.equal(recovery.klass, "permission");
+        assert.equal(recovery.outcome.ok, false);
+        assert.equal(recovery.outcome.authorityLimit, true);
+        assert.equal(recovery.attempts.some(a => a.strategy === "agent-retry"), false);
+    } finally {
+        agentHub.run = originalRun;
+    }
+});
+
 test("legacy ToolBus: canonical compatibility success path executes exactly once through the canonical path", {
     skip: "BLOCKED ON W8-IW1: the canonical capability/actuator registrations (and a manager-owned legacy ingress) do not exist yet, so no legacy request can reach the canonical path. This test must be implemented with the IW1 production-path harness; it is deliberately NOT faked."
 }, () => { });

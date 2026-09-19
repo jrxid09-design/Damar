@@ -98,6 +98,22 @@ class SelfHealingEngine {
             `pulihkan ${tool} (klasifikasi: ${klass})`,
             String(error?.message ?? error).slice(0, 160), [], false);
 
+        // BATAS OTORITAS keluar LEBIH DULU: penolakan tidak boleh masuk jalur
+        // alternatif apa pun (agent-retry, retry agresif, substitusi, forge).
+        // Tanpa cabang awal ini, kegagalan `agent:*` yang ditolak otorisasi
+        // menjalankan ulang agent SEBELUM strategi permission ditegakkan.
+        if (klass === "permission") {
+            attempts.push({ strategy: "report-authority-limit" });
+            const limited = {
+                ok: false,
+                error: String(error?.message ?? error),
+                authorityLimit: true
+            };
+            await this.log(goalId, "recover-result",
+                `pemulihan ${tool} → gagal (batas otorisasi)`, "report-authority-limit", attempts, false);
+            return { klass, attempts, outcome: limited };
+        }
+
         // Jalur AGENT: gagal bukan karena tool — jalankan ulang agent
         // dengan instruksi lebih ketat (satu kali), bukan lewat ToolBus.
         if (String(tool ?? "").startsWith("agent:")) {
@@ -132,21 +148,6 @@ class SelfHealingEngine {
                     context: { goal: goalId, exec: delegator }
                 });
                 attempts.push({ strategy: "retry-aggressive", ok: outcome.ok });
-                break;
-            }
-
-            case "permission": {
-                // BATAS OTORITAS bukan kegagalan yang bisa dipulihkan: laporkan
-                // apa adanya. Tidak ada substitusi tool dan tidak ada eskalasi
-                // forge — penolakan ToolBus (jalur kanonik belum tersedia)
-                // masuk kelas ini, jadi penolakan tidak pernah berubah menjadi
-                // eksekusi lewat jalur lain.
-                attempts.push({ strategy: "report-authority-limit" });
-                outcome = {
-                    ok: false,
-                    error: String(error?.message ?? error),
-                    authorityLimit: true
-                };
                 break;
             }
 

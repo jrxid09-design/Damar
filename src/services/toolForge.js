@@ -6,6 +6,14 @@ const pluginLoader = require("../plugins/pluginLoader");
 const telemetry = require("./telemetryService");
 
 /**
+ * Penanda asal-usul artefak generate. pluginLoader menolak memuat direktori
+ * plugin yang memuat penanda ini (lihat pluginLoader.loadTools): kode yang
+ * dihasilkan forge bukan kapabilitas kanonik, dan `require()` atas modulnya
+ * menjalankan body modul = eksekusi kode arbitrer di luar kepemilikan kanonik.
+ */
+const FORGE_GENERATED_MARKER = ".forge-generated";
+
+/**
  * ToolForge — tempat Damar (dan pengguna) membuat tool baru.
  *
  * Sebuah "tool spec" diubah menjadi folder plugin nyata
@@ -226,6 +234,11 @@ module.exports = [ new ${className}() ];
 
         fs.mkdirSync(dir, { recursive: true });
 
+        // Jejak asal-usul: artefak hasil generate TIDAK boleh dimuat langsung
+        // oleh pluginLoader (W8 legacy second-path remediation). Penanda ini
+        // yang membuat load-time tetap fail-closed meski berkasnya ada.
+        fs.writeFileSync(path.join(dir, FORGE_GENERATED_MARKER), "1\n", "utf8");
+
         fs.writeFileSync(
             path.join(dir, "manifest.json"),
             JSON.stringify(this.manifestFor(id, spec), null, 4),
@@ -252,32 +265,35 @@ module.exports = [ new ${className}() ];
 
     }
 
-    /** Uji apakah tool.js bisa di-require tanpa error (syntax/runtime muat). */
+    /**
+     * Uji STRUKTUR tool.js TANPA menjalankannya.
+     *
+     * W8 legacy second-path remediation: versi lama `require()` berkas draf,
+     * yang berarti BODY modul hasil generate ikut berjalan di proses ini —
+     * kode arbitrer di luar kepemilikan kanonik. Kini hanya dilakukan
+     * kompilasi sintaks (`node:vm` Script = compile, bukan run), jadi kode
+     * yang tidak valid ditolak tanpa satu pun baris dieksekusi.
+     *
+     * @returns {null} jumlah tool tidak bisa diketahui tanpa menjalankan kode.
+     */
     verifyLoads(dir) {
 
         const toolPath = path.join(dir, "tool.js");
 
-        // Buang cache agar membaca berkas terbaru.
-        try {
-            delete require.cache[require.resolve(toolPath)];
-        }
-        catch { /* belum pernah di-cache */ }
-
-        const exported = require(toolPath);
-
-        const tools = Array.isArray(exported) ? exported : [];
-
-        if (tools.length === 0) {
-            throw new Error("tool.js tidak mengekspor tool apa pun.");
+        if (!fs.existsSync(toolPath)) {
+            throw new Error("tool.js tidak ditemukan.");
         }
 
-        for (const tool of tools) {
-            if (typeof tool.execute !== "function") {
-                throw new Error("Tool tidak punya method execute().");
-            }
+        const source = fs.readFileSync(toolPath, "utf8");
+
+        if (!source.trim()) {
+            throw new Error("tool.js kosong.");
         }
 
-        return tools.length;
+        // Compile-only: body modul TIDAK dijalankan.
+        new (require("node:vm").Script)(source, { filename: toolPath });
+
+        return null;
 
     }
 
@@ -294,12 +310,16 @@ module.exports = [ new ${className}() ];
 
         const { id } = this.validate(spec);
 
-        // Sumber kode berbeda antara mode formulir vs kode penuh.
+        // Bentuk kode berbeda antara mode formulir vs kode penuh.
         const risks = this.analyzeRisk(
             spec.raw ?? spec.tool?.raw ?? spec.tool?.code
         );
 
-        const goLive = activate || this.autoApprove;
+        // W8 legacy second-path remediation: `activate`/auto-approve TIDAK
+        // lagi memuat & menjalankan kode hasil generate. Artefak forge selalu
+        // tersimpan sebagai DRAFT; aktivasi menunggu registrasi kanonik
+        // (Manager -> ActionIntent -> Authority -> Capability -> actuation).
+        const requestedActivation = activate === true || this.autoApprove;
 
         // Tulis dulu ke lokasi sementara untuk verifikasi muat,
         // supaya draft/plugin rusak tidak pernah tersimpan.
@@ -310,37 +330,34 @@ module.exports = [ new ${className}() ];
             const tmpDir = this.writePlugin(tmp, id, spec);
             const toolCount = this.verifyLoads(tmpDir);
 
-            const targetRoot = goLive ? this.userRoot : this.draftsRoot;
+            const targetRoot = this.draftsRoot;
 
             // Bersihkan versi lama di target bila ada.
             this.removeDir(path.join(targetRoot, id));
 
             const dir = this.writePlugin(targetRoot, id, spec);
 
-            let loaded = null;
-
-            if (goLive) {
-                loaded = pluginLoader.loadOne(dir, "user");
-                telemetry.publish("forge:changed", { id, action: "created" });
-            }
-
             telemetry.publish("forge:created", {
                 id,
                 origin: spec.origin ?? "manual",
-                draft: !goLive,
+                draft: true,
+                requestedActivation,
                 risks
             });
 
             telemetry.info(
-                `[forge] tool '${id}' ${goLive ? "dibuat & aktif" : "disimpan sebagai draft"}`
+                `[forge] tool '${id}' disimpan sebagai draft (aktivasi menunggu jalur kanonik)`
             );
 
             return {
                 id,
-                status: goLive ? "active" : "draft",
+                status: "draft",
+                activated: false,
+                canonicalRequired: true,
+                requestedActivation,
                 tools: toolCount,
                 risks,
-                loaded: loaded?.ok ?? false,
+                loaded: false,
                 dir
             };
 
@@ -352,7 +369,10 @@ module.exports = [ new ${className}() ];
 
     }
 
-    /** Setujui draft: pindahkan ke userPlugins dan load. */
+    /**
+     * Setujui draft: pindahkan ke userPlugins. TIDAK memuat/menjalankan kode
+     * (W8: approval bukan otorisasi eksekusi).
+     */
     approve(id) {
 
         const draftDir = path.join(this.draftsRoot, id);
@@ -367,17 +387,11 @@ module.exports = [ new ${className}() ];
 
         fs.renameSync(draftDir, target);
 
-        const loaded = pluginLoader.loadOne(target, "user");
-
-        if (!loaded.ok) {
-            throw new Error(`Gagal memuat setelah disetujui: ${loaded.error}`);
-        }
-
         telemetry.publish("forge:changed", { id, action: "approved" });
 
-        telemetry.info(`[forge] draft '${id}' disetujui & aktif`);
+        telemetry.info(`[forge] draft '${id}' disetujui; aktivasi menunggu jalur kanonik`);
 
-        return { id, status: "active", tools: loaded.tools };
+        return { id, status: "approved", activated: false, canonicalRequired: true, tools: null };
 
     }
 
