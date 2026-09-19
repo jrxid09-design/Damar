@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("node:crypto");
 
 const pluginRegistry = require("./pluginRegistry");
 const pluginValidator = require("./pluginValidator");
@@ -93,21 +94,91 @@ class PluginLoader {
         return path.join(USER_ROOT, ".drafts");
     }
 
+    /** Buku provenance keluaran forge (ditulis forge, di luar direktori artefak). */
+    get forgeProvenanceLedgerPath() {
+        return path.join(USER_ROOT, ".forge-provenance.json");
+    }
+
+    /** realpath bila bisa; kalau tidak (belum ada / bukan symlink), path apa adanya. */
+    realPathOrSelf(target) {
+        try {
+            return fs.realpathSync.native
+                ? fs.realpathSync.native(target)
+                : fs.realpathSync(target);
+        }
+        catch {
+            return target;
+        }
+    }
+
     /**
      * Apakah path ini berada di dalam karantina forge?
      *
-     * Diperiksa berdasarkan PATH, bukan penanda di dalam artefak: menghapus
-     * `.forge-generated` atau menulis ulang `manifest.json` tidak mengubah
-     * lokasi berkas, jadi jalur ini tetap tertutup. Penanda provenance tetap
-     * diperiksa sebagai lapisan kedua (untuk salinan artefak di luar karantina).
+     * Dua lapis: path leksikal DAN realpath-nya. Sebuah symlink/junction di
+     * root plugin (mis. `userPlugins/alias -> .drafts/x`) lolos pemeriksaan
+     * leksikal tetapi realpath-nya tetap menunjuk ke karantina, jadi jalur
+     * alias ini ikut tertutup.
      */
     isQuarantinedForgeArtifact(pluginPath) {
 
-        const rel = path.relative(this.forgeQuarantineRoot, path.resolve(pluginPath));
+        const resolved = path.resolve(pluginPath);
+        const targets = [resolved, this.realPathOrSelf(resolved)];
+        const roots = [this.forgeQuarantineRoot, this.realPathOrSelf(this.forgeQuarantineRoot)];
 
-        if (rel === "") return true;
+        for (const target of targets) {
+            for (const root of roots) {
+                const rel = path.relative(root, target);
+                if (rel === "") return true;
+                if (!rel.startsWith(".." + path.sep) && rel !== ".." && !path.isAbsolute(rel)) return true;
+            }
+        }
 
-        return !rel.startsWith(".." + path.sep) && rel !== ".." && !path.isAbsolute(rel);
+        return false;
+
+    }
+
+    /**
+     * Provenance BERBASIS ISI.
+     *
+     * Metadata di dalam artefak bisa dihapus; ISI berkas tidak bisa dihapus
+     * tanpa mengubah artefaknya. Hash dari setiap berkas yang forge hasilkan
+     * dicatat di buku provenance yang dimiliki forge (di luar direktori
+     * artefak), jadi menyalin artefak ke luar karantina lalu menghapus penanda
+     * TETAP tertolak selama isinya belum diubah.
+     *
+     * Fail-closed: buku ada tetapi tidak terbaca = tolak (provenance forge
+     * eksis tetapi tidak bisa diverifikasi).
+     */
+    isForgeProvenanceContent(pluginPath, manifest) {
+
+        const ledgerPath = this.forgeProvenanceLedgerPath;
+
+        if (!fs.existsSync(ledgerPath)) return false;
+
+        let ledger;
+        try {
+            ledger = JSON.parse(fs.readFileSync(ledgerPath, "utf8"));
+        }
+        catch {
+            return true;
+        }
+
+        const hashes = ledger?.hashes;
+        if (!hashes || typeof hashes !== "object") return true;
+
+        const names = new Set(["tool.js", "index.js", manifest?.entry ?? "index.js"].filter(Boolean));
+
+        for (const name of names) {
+            const file = path.join(pluginPath, name);
+            try {
+                if (!fs.existsSync(file)) continue;
+                const digest = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+                if (Object.prototype.hasOwnProperty.call(hashes, digest)) return true;
+            }
+            catch { /* berkas tak terbaca: lanjut memeriksa yang lain */ }
+        }
+
+        return false;
 
     }
 
@@ -163,11 +234,14 @@ class PluginLoader {
         // sini agar pemanggil boleh memberi path relatif.
         pluginPath = path.resolve(pluginPath);
 
-        // Guard PALING AWAL, dan dua lapis: LOKASI karantina lebih dulu
-        // (tidak bisa dilepas dengan menghapus penanda), lalu provenance
-        // metadata. Keduanya sebelum manifest dibaca dan sebelum
-        // index.js/tool.js di-require.
-        if (this.isQuarantinedForgeArtifact(pluginPath) || this.isForgeGenerated(pluginPath)) {
+        // Guard PALING AWAL, tiga lapis: LOKASI karantina (leksikal + realpath,
+        // jadi symlink/junction tidak menembus), provenance metadata, lalu
+        // provenance ISI (menutup copy-out yang penandanya dihapus). Semuanya
+        // dijalankan sebelum manifest dibaca dan sebelum index.js/tool.js
+        // di-require.
+        if (this.isQuarantinedForgeArtifact(pluginPath) ||
+            this.isForgeGenerated(pluginPath) ||
+            this.isForgeProvenanceContent(pluginPath, null)) {
             return this.refuseForgeArtifact(pluginPath);
         }
 
@@ -346,7 +420,9 @@ class PluginLoader {
         // Defense-in-depth: even if a caller reaches here directly, neither a
         // quarantined path nor a forge artifact is ever required (this is the
         // last point before require).
-        if (this.isQuarantinedForgeArtifact(pluginPath) || this.isForgeGenerated(pluginPath)) {
+        if (this.isQuarantinedForgeArtifact(pluginPath) ||
+            this.isForgeGenerated(pluginPath) ||
+            this.isForgeProvenanceContent(pluginPath, manifest)) {
             return {};
         }
 
@@ -424,7 +500,9 @@ class PluginLoader {
         // modulnya. Artefak di karantina TIDAK dimuat karena LOKASINYA, dan
         // artefak berpenanda provenance tidak dimuat karena asal-usulnya —
         // jadi menghapus penanda tidak membuka jalur ini.
-        if (this.isQuarantinedForgeArtifact(pluginPath) || this.isForgeGenerated(pluginPath)) {
+        if (this.isQuarantinedForgeArtifact(pluginPath) ||
+            this.isForgeGenerated(pluginPath) ||
+            this.isForgeProvenanceContent(pluginPath, { entry: "tool.js" })) {
 
             return [];
 
