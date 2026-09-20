@@ -290,7 +290,13 @@ function createCanonicalReplayLedger({
                 if (prefixHmac === null || prefixHmac !== anchor.eventHmac) throw new Error("REPLAY_ANCHOR_MISMATCH");
                 // Read-only callers (lookup) must not write: healing happens only
                 // on the writer path, never from an unlocked read.
-                if (heal) await writeTrustedAnchor(anchorFile, rows.length, previous, key);
+                // Healing is BEST-EFFORT: a BEHIND anchor is already benign (the
+                // rows are authenticated), so a failed heal must never block
+                // unrelated reservations with a raw fs error.
+                if (heal) {
+                    try { await writeTrustedAnchor(anchorFile, rows.length, previous, key); }
+                    catch { /* best-effort; the next writer retries */ }
+                }
             } else if (anchor.eventHmac !== previous) {
                 throw new Error("REPLAY_ANCHOR_MISMATCH");
             }
@@ -306,8 +312,13 @@ function createCanonicalReplayLedger({
                     throw new Error("REPLAY_ROLLBACK_DETECTED");
                 }
                 if (externalSeq < rows.length) {
-                    try { rollbackAnchor.commit(rows.length, previous); }
-                    catch { throw new Error("REPLAY_ROLLBACK_ANCHOR_UNAVAILABLE"); }
+                    // A genuine external anchor cannot be behind, so "behind" only
+                    // means our own commit failed. Only the writer path advances it;
+                    // a read-only caller must not throw on this benign state.
+                    if (heal) {
+                        try { rollbackAnchor.commit(rows.length, previous); }
+                        catch { throw new Error("REPLAY_ROLLBACK_ANCHOR_UNAVAILABLE"); }
+                    }
                 } else if (rows.length > 0 && externalToken !== previous) {
                     throw new Error("REPLAY_ROLLBACK_DETECTED");
                 }
