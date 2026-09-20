@@ -562,6 +562,38 @@ test("P1: a persistently failing anchor heal does not block unrelated reservatio
     assert.equal(JSON.parse(fs.readFileSync(anchorFile, "utf8")).seq, 4, "the anchor must heal once the write path recovers");
 });
 
+test("P0: a local anchor write failure must not freeze the external rollback anchor", async () => {
+    const root = dir();
+    const replayRoot = path.join(root, "replay");
+    const anchorRoot = path.join(root, "anchor");
+    const l1 = createRollbackResistantLedger({ replayRoot, anchorRoot });
+    await l1.reserve(bind("A"));
+
+    // Block ONLY the local, co-located anchor's write; the external port is fine.
+    const localAnchorFile = path.join(replayRoot, "replay.sqlite.anchor");
+    const origRename = fs.renameSync;
+    fs.renameSync = function (src, dst) {
+        if (String(dst) === localAnchorFile) { const e = new Error("EACCES"); e.code = "EACCES"; throw e; }
+        return origRename.call(fs, src, dst);
+    };
+    let r = null;
+    try { r = await l1.reserve(bind("B")); } finally { fs.renameSync = origRename; }
+    assert.equal(r.reserved, true, "the reservation must not be stranded");
+
+    // A pure DB-only truncation back to seq 1 must still be caught by the EXTERNAL
+    // head (which is advanced first and independently of the local anchor).
+    const db = new sqlite3.Database(path.join(replayRoot, "replay.sqlite"));
+    await new Promise((res, rej) => db.run("DELETE FROM replay_events WHERE seq > 1", (e) => e ? rej(e) : res()));
+    db.close();
+
+    const l2 = createRollbackResistantLedger({ replayRoot, anchorRoot });
+    await assert.rejects(
+        () => l2.reserve(bind("B")),
+        /REPLAY_ROLLBACK_DETECTED|ANCHOR_MISMATCH|INTEGRITY/,
+        "a local-anchor fault must not blind the external anchor to truncation"
+    );
+});
+
 // ---------------------------------------------------------------------------
 // P1-1 — anchor durability contract
 // ---------------------------------------------------------------------------

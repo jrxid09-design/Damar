@@ -360,14 +360,23 @@ function createCanonicalReplayLedger({
      *  anchor BEHIND the authenticated chain, which snapshot() repairs forward;
      *  the committed reservation stays consumed, so no duplicate effect occurs. */
     async function persistAnchors(seq, eventHmac) {
-        try {
-            await writeTrustedAnchor(anchorFile, seq, eventHmac, key);
-            if (rollbackAnchor) rollbackAnchor.commit(seq, eventHmac);
-        } catch (error) {
-            // Typed so callers can distinguish "the event IS durably committed
-            // and the anchor will self-heal" from a genuine pre-commit failure.
-            throw new Error("REPLAY_ANCHOR_PERSIST_FAILED: " + String(error && error.message));
+        // The EXTERNAL head is the actually rollback-resistant one, so it is
+        // advanced FIRST and INDEPENDENTLY of the local, co-located anchor. A
+        // local anchor fault must never suppress it, or a DB-only truncation
+        // could go undetected and resurrect a consumed digest.
+        let externalError = null;
+        if (rollbackAnchor) {
+            try { rollbackAnchor.commit(seq, eventHmac); }
+            catch (error) { externalError = error; }
         }
+        let localError = null;
+        try { await writeTrustedAnchor(anchorFile, seq, eventHmac, key); }
+        catch (error) { localError = error; }
+
+        // Typed so callers can distinguish "the event IS durably committed and
+        // the head will self-heal" from a genuine pre-commit failure.
+        if (externalError) throw new Error("REPLAY_ROLLBACK_ANCHOR_COMMIT_FAILED: " + String(externalError && externalError.message));
+        if (localError) throw new Error("REPLAY_ANCHOR_PERSIST_FAILED: " + String(localError && localError.message));
     }
 
     function sameBinding(r, b) {
@@ -420,7 +429,7 @@ function createCanonicalReplayLedger({
                 // (that would strand the digest). The anchor heals on the next
                 // snapshot before any driver runs.
                 try { await persistAnchors(seq, eventHmac); }
-                catch (error) { if (!/REPLAY_ANCHOR_PERSIST_FAILED/.test(String(error.message))) throw error; }
+                catch (error) { if (!/REPLAY_ANCHOR_PERSIST_FAILED|REPLAY_ROLLBACK_ANCHOR_COMMIT_FAILED/.test(String(error.message))) throw error; }
                 return { reserved: true };
             } catch (error) {
                 try { await dbCall(db, "run", "ROLLBACK"); } catch { /* already rolled back */ }
@@ -437,7 +446,7 @@ function createCanonicalReplayLedger({
                 const { seq, eventHmac } = await insertEvent({ ...binding, digest }, state, s);
                 await dbCall(db, "run", "COMMIT");
                 try { await persistAnchors(seq, eventHmac); }
-                catch (error) { if (!/REPLAY_ANCHOR_PERSIST_FAILED/.test(String(error.message))) throw error; }
+                catch (error) { if (!/REPLAY_ANCHOR_PERSIST_FAILED|REPLAY_ROLLBACK_ANCHOR_COMMIT_FAILED/.test(String(error.message))) throw error; }
                 return true;
             } catch (error) {
                 try { await dbCall(db, "run", "ROLLBACK"); } catch { /* already rolled back */ }
