@@ -8,6 +8,7 @@ const path = require("node:path");
 
 const { createIdentityCapabilityRuntime, CAPABILITY_ID, STATE } = require("../../../src/manager/internal/identityCapabilities");
 const { createFileIdentityStore } = require("../../../src/embodiment/identity/store");
+const { createCanonicalReplayLedger } = require("../../../src/manager/internal/canonicalReplayLedger");
 const { grantStore } = require("../../helpers/identityCapabilityFixture");
 
 const ack = () => ({ ok: true, receipt: "identity-ack" });
@@ -82,4 +83,46 @@ test("identity/scope: the evaluated request carries the caller scope", async () 
     assert.equal(denied.denied, true);
     const allowed = await runtime.execute({ operation: "save", scope: ["device:self"], parameters: params(root) });
     assert.equal(allowed.outcome, "EXECUTED_VERIFIED");
+});
+
+test("identity/restart-replay: a fresh runtime cannot repeat a durable completed request", async () => {
+    const root = dir();
+    const replayFile = path.join(root, "replay.jsonl");
+    const first = createIdentityCapabilityRuntime({ authorityStore: grantStore(), replayStore: createCanonicalReplayLedger({ file: replayFile }), acknowledge: ack });
+    const request = { operation: "save", requestId: "restart-replay", parameters: params(root) };
+    assert.equal((await first.execute(request)).outcome, "EXECUTED_VERIFIED");
+    const second = createIdentityCapabilityRuntime({ authorityStore: grantStore(), replayStore: createCanonicalReplayLedger({ file: replayFile }), acknowledge: ack });
+    const replayed = await second.execute(request);
+    assert.equal(replayed.reason, "REPLAY");
+    assert.equal(second.invocationCount(), 0);
+    const changed = await second.execute({ ...request, requestId: "new-request", parameters: { ...params(root), payload: "{\"version\":1,\"devices\":[],\"transactions\":[\"new\"]}" } });
+    assert.equal(changed.outcome, "EXECUTED_VERIFIED");
+});
+
+test("identity/replay-ledger: corruption fails closed", async () => {
+    const root = dir();
+    const replayFile = path.join(root, "replay.jsonl");
+    fs.writeFileSync(replayFile, "not-json\n");
+    const runtime = createIdentityCapabilityRuntime({ authorityStore: grantStore(), replayStore: createCanonicalReplayLedger({ file: replayFile }), acknowledge: ack });
+    const result = await runtime.execute({ operation: "save", parameters: params(root) });
+    assert.equal(result.reason, "REPLAY_LEDGER_UNAVAILABLE");
+    assert.equal(runtime.invocationCount(), 0);
+});
+
+test("identity/audit-binding: durable acknowledgement receives exact binding fields", async () => {
+    const root = dir();
+    let observed;
+    const runtime = createIdentityCapabilityRuntime({
+        authorityStore: grantStore({ scope: ["device:self"] }),
+        acknowledge(entry) { observed = entry; return { ok: true, receipt: "bound" }; }
+    });
+    const result = await runtime.execute({ operation: "save", scope: ["device:self"], identity: { principal: "owner" }, parameters: params(root) });
+    assert.equal(result.outcome, "EXECUTED_VERIFIED");
+    assert.equal(observed.capabilityId, CAPABILITY_ID);
+    assert.equal(observed.operation, "save");
+    assert.equal(typeof observed.requestDigest, "string");
+    assert.deepEqual(observed.scope, ["device:self"]);
+    assert.equal(observed.principal, "owner");
+    assert.equal(typeof observed.authorityGeneration, "number");
+    assert.equal(observed.verificationState, "verified");
 });

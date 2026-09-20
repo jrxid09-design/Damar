@@ -20,6 +20,12 @@ const path = require("node:path");
 
 const auditTrail = require("../../core/safety/auditTrail");
 
+function syncDirectory(directory) {
+    if (process.platform === "win32") return;
+    const fd = fs.openSync(directory, "r");
+    try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+}
+
 function createCanonicalAuditAcknowledger({ dir = null, file = null, now = () => Date.now() } = {}) {
     const baseDir = dir ?? auditTrail.DIR ?? path.join(process.cwd(), "data", "audit");
     const target = file ?? path.join(baseDir, "canonical-execution.jsonl");
@@ -49,6 +55,7 @@ function createCanonicalAuditAcknowledger({ dir = null, file = null, now = () =>
             } finally {
                 fs.closeSync(fd);
             }
+            syncDirectory(path.dirname(target));
 
             // Read back: the acknowledgement is evidence the record is durable,
             // not a claim that a write was attempted.

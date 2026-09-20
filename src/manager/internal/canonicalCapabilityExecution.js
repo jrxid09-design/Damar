@@ -164,13 +164,14 @@ function canonicalJson(value) {
 
 class CanonicalCapabilityExecution {
 
-    constructor() {
+    constructor({ replayStore = null } = {}) {
         STATE.set(this, {
             drivers: new Map(),        // "<capabilityId>|<operation>" -> registration
             verifiers: new Map(),      // capabilityId -> verifier
             consumed: new Map(),       // requestDigest -> outcome token
             acknowledger: null,
-            clock: () => Date.now()
+            clock: () => Date.now(),
+            replayStore
         });
     }
 
@@ -309,6 +310,30 @@ class CanonicalCapabilityExecution {
             scope: evaluation.snapshot.scope ?? null
         });
 
+        const replayBinding = {
+            digest,
+            capabilityId,
+            operation,
+            principal: evaluation.snapshot.principal ?? null,
+            scope: evaluation.snapshot.scope ?? null,
+            authorityGeneration: evaluation.snapshot.generation ?? null,
+            driverId: binding.driverId
+        };
+        const persistReplay = (replayState) => {
+            if (!s.replayStore) return true;
+            try { s.replayStore.transition(digest, replayState, replayBinding); return true; }
+            catch { return false; }
+        };
+
+        if (s.replayStore) {
+            let reservation;
+            try { reservation = s.replayStore.reserve(replayBinding); }
+            catch { return brand({ outcome: OUTCOME.UNVERIFIED, reason: "REPLAY_LEDGER_UNAVAILABLE", effectInvoked: false }); }
+            if (!reservation.reserved) {
+                return brand({ outcome: OUTCOME.REFUSED, reason: REFUSAL.REPLAY, priorOutcome: reservation.prior.state, effectInvoked: false });
+            }
+        }
+
         // ---- EXACT-ONCE (before the effect, so a replay cannot reapply it) --
         if (s.consumed.has(digest)) {
             return brand({
@@ -322,6 +347,7 @@ class CanonicalCapabilityExecution {
         // ---- CANCELLATION BEFORE INVOCATION --------------------------------
         if (request.signal && request.signal.aborted === true) {
             s.consumed.set(digest, OUTCOME.CANCELLED_BEFORE_EFFECT);
+            if (!persistReplay("CANCELLED_BEFORE_EFFECT")) return brand({ outcome: OUTCOME.UNVERIFIED, reason: "REPLAY_LEDGER_UNAVAILABLE", effectInvoked: false });
             return brand({ outcome: OUTCOME.CANCELLED_BEFORE_EFFECT, reason: "ABORTED_BEFORE_INVOCATION", effectInvoked: false });
         }
 
@@ -336,6 +362,7 @@ class CanonicalCapabilityExecution {
         });
 
         // ---- INVOKE (the driver has been resolved only now) ----------------
+        if (!persistReplay("INVOKING")) return brand({ outcome: OUTCOME.UNVERIFIED, reason: "REPLAY_LEDGER_UNAVAILABLE", effectInvoked: false });
         let raw;
         let threw = null;
         try {
@@ -352,12 +379,15 @@ class CanonicalCapabilityExecution {
         }
 
         const invoked = true;
+        const postInvocationState = threw ? "AMBIGUOUS" : "EXECUTED_UNVERIFIED";
+        const postInvocationDurable = persistReplay(postInvocationState);
 
         if (threw !== null) {
-            const outcome = request.signal && request.signal.aborted === true
+            let outcome = request.signal && request.signal.aborted === true
                 ? OUTCOME.AMBIGUOUS_AFTER_INVOCATION
                 : OUTCOME.FAILED;
             s.consumed.set(digest, outcome);
+            if (!postInvocationDurable) outcome = OUTCOME.AMBIGUOUS_AFTER_INVOCATION;
             this._audit({ tool: capabilityId, risk: "destructive", outcome: "error", requestId, operation });
             return brand({
                 outcome,
@@ -371,6 +401,7 @@ class CanonicalCapabilityExecution {
         const shapeProblem = this._resultShapeProblem(raw);
         if (shapeProblem) {
             s.consumed.set(digest, OUTCOME.UNVERIFIED);
+            persistReplay("UNVERIFIED");
             this._audit({ tool: capabilityId, risk: "destructive", outcome: "error", requestId, operation });
             return brand({
                 outcome: OUTCOME.UNVERIFIED,
@@ -399,6 +430,7 @@ class CanonicalCapabilityExecution {
         // verifier already proved the world changed.
         if (request.signal && request.signal.aborted === true) {
             s.consumed.set(digest, OUTCOME.AMBIGUOUS_AFTER_INVOCATION);
+            persistReplay("AMBIGUOUS");
             this._audit({ tool: capabilityId, risk: "destructive", outcome: "error", requestId, operation });
             return brand({
                 outcome: OUTCOME.AMBIGUOUS_AFTER_INVOCATION,
@@ -422,6 +454,7 @@ class CanonicalCapabilityExecution {
 
         if (ack.ok !== true) {
             s.consumed.set(digest, OUTCOME.UNVERIFIED);
+            persistReplay("UNVERIFIED");
             this._audit({ tool: capabilityId, risk: "destructive", outcome: "error", requestId, operation });
             return brand({
                 outcome: OUTCOME.UNVERIFIED,
@@ -433,6 +466,7 @@ class CanonicalCapabilityExecution {
 
         this._audit({ tool: capabilityId, risk: "destructive", outcome: "ok", requestId, operation });
         s.consumed.set(digest, OUTCOME.EXECUTED_VERIFIED);
+        if (!persistReplay("COMPLETED_VERIFIED")) return brand({ outcome: OUTCOME.AMBIGUOUS_AFTER_INVOCATION, reason: "REPLAY_LEDGER_UNAVAILABLE", effectInvoked: true, verification });
 
         return brand({
             outcome: OUTCOME.EXECUTED_VERIFIED,

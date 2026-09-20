@@ -17,6 +17,7 @@ const { canonicalCapabilityId } = require("../../authority/canonical");
 const { loadAndEvaluateAuthority } = require("../../authority/evaluate");
 const { CanonicalCapabilityExecution, OUTCOME } = require("./canonicalCapabilityExecution");
 const { createCanonicalAuditAcknowledger } = require("./canonicalAuditAcknowledger");
+const { createCanonicalReplayLedger } = require("./canonicalReplayLedger");
 
 const CAPABILITY_ID = "embodiment.identity.snapshot.write";
 const OPERATION = "save";
@@ -29,8 +30,8 @@ const runtimeGate = new WeakSet();
 
 function cleanupTmp(file) { try { fs.unlinkSync(file); } catch { /* best effort */ } }
 
-function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = null } = {}) {
-    const bridge = new CanonicalCapabilityExecution();
+function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = null, replayStore = null } = {}) {
+    const bridge = new CanonicalCapabilityExecution({ replayStore });
     bridge.installAuditAcknowledger(acknowledge ?? createCanonicalAuditAcknowledger());
     let invocations = 0;
 
@@ -109,7 +110,7 @@ function installIdentityCapabilityRuntime(runtime) {
     return true;
 }
 function identityRuntime() {
-    if (installed === null) installed = createIdentityCapabilityRuntime({});
+    if (installed === null) installed = createIdentityCapabilityRuntime({ replayStore: createCanonicalReplayLedger() });
     return installed;
 }
 function isIdentityCapabilityRuntime(runtime) { return runtimeGate.has(runtime); }
