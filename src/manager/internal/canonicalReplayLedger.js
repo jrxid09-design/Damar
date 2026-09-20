@@ -92,24 +92,15 @@ function writeTrustedAnchor(anchorFile, seq, eventHmac, key) {
     const anchorHmac = hmac(key, String(seq) + ":" + eventHmac);
     const payload = JSON.stringify({ seq, eventHmac, anchorHmac });
 
-    if (process.platform === "win32") {
-        // Windows: fs.renameSync -> libuv MoveFileExW does NOT request
-        // MOVEFILE_WRITE_THROUGH and there is no directory fsync, so a rename's
-        // directory-entry update cannot be forced crash-durable via Node's API.
-        // Overwriting IN PLACE and fsyncing avoids the rename gamble: libuv
-        // fsync -> FlushFileBuffers is the real Windows durability primitive.
-        // A crash mid-write leaves a partial file rejected by readTrustedAnchor().
-        const fd = fs.openSync(anchorFile, "w", 0o600);
-        try {
-            fs.writeSync(fd, payload);
-            fs.fsyncSync(fd);
-        } finally {
-            fs.closeSync(fd);
-        }
-        return;
-    }
-
-    // POSIX: atomic replacement + directory fsync.
+    // NON-DESTRUCTIVE WRITE (every platform): stage the full payload in a temp
+    // file, fsync it, THEN atomically replace the live anchor. The live file is
+    // never truncated before the new payload is durable, so a mid-write I/O
+    // failure (disk full, AV lock, kill, power loss) leaves the PREVIOUS valid
+    // anchor intact and recoverable via snapshot()'s BEHIND reconciliation
+    // instead of corrupting it into a permanent ledger-wide denial of service.
+    // The win32 rename-durability caveat is unchanged and documented: Node sets
+    // no MOVEFILE_WRITE_THROUGH, so the rename's directory entry is not forced
+    // to disk; the rename still gives readers atomic replacement.
     const temp = anchorFile + ".tmp";
     const fd = fs.openSync(temp, "w", 0o600);
     try {
@@ -121,7 +112,6 @@ function writeTrustedAnchor(anchorFile, seq, eventHmac, key) {
     fs.renameSync(temp, anchorFile);
     syncDirectory(path.dirname(anchorFile));
 }
-
 function readTrustedAnchor(anchorFile, key) {
     if (!fs.existsSync(anchorFile)) return null;
     try {
@@ -178,71 +168,74 @@ function createCanonicalReplayLedger({
 
     async function snapshot() {
         await open();
-        const rows = await new Promise((resolve, reject) =>
-            db.all("SELECT * FROM replay_events ORDER BY seq", [], (e, r) => e ? reject(e) : resolve(r)));
+        // A reader can straddle a concurrent writer's COMMIT + anchor-persist and
+        // observe a fresh anchor over a stale row snapshot. That benign timing is
+        // retried (bounded); genuine truncation never self-heals and fails closed.
+        // Under BEGIN IMMEDIATE writers are excluded, so an AHEAD anchor there is
+        // real tamper and simply exhausts the retries.
+        for (let attempt = 0; ; attempt++) {
+            const rows = await new Promise((resolve, reject) =>
+                db.all("SELECT * FROM replay_events ORDER BY seq", [], (e, r) => e ? reject(e) : resolve(r)));
 
-        // Authenticated history is the ONLY source of current state.
-        let previous = "GENESIS";
-        const latest = new Map();
-        for (let i = 0; i < rows.length; i++) {
-            const r = rows[i];
-            if (r.seq !== i + 1 || r.prev_hmac !== previous || !Object.values(STATES).includes(r.state)) {
-                throw new Error("REPLAY_LEDGER_INTEGRITY_FAILURE");
+            // Authenticated history is the ONLY source of current state.
+            let previous = "GENESIS";
+            const latest = new Map();
+            for (let i = 0; i < rows.length; i++) {
+                const r = rows[i];
+                if (r.seq !== i + 1 || r.prev_hmac !== previous || !Object.values(STATES).includes(r.state)) {
+                    throw new Error("REPLAY_LEDGER_INTEGRITY_FAILURE");
+                }
+                let canonicalCore;
+                try { canonicalCore = canonicalJson(eventCore(r)); }
+                catch { throw new Error("REPLAY_LEDGER_INTEGRITY_FAILURE"); }
+                if (hmac(key, canonicalCore) !== r.event_hmac) throw new Error("REPLAY_LEDGER_INTEGRITY_FAILURE");
+                previous = r.event_hmac;
+                latest.set(r.digest, r);   // last occurrence wins: derived current state
             }
-            let canonicalCore;
-            try { canonicalCore = canonicalJson(eventCore(r)); }
-            catch { throw new Error("REPLAY_LEDGER_INTEGRITY_FAILURE"); }
-            if (hmac(key, canonicalCore) !== r.event_hmac) throw new Error("REPLAY_LEDGER_INTEGRITY_FAILURE");
-            previous = r.event_hmac;
-            latest.set(r.digest, r);   // last occurrence wins: derived current state
-        }
 
-        // Local keyed anchor: detects db-only tampering/truncation.
-        //
-        // DIRECTIONAL RECONCILIATION (fixes the anchor-poisoning defect found in
-        // the b7738ef audit): the anchor is a CACHE of the authenticated head.
-        // Anchor AHEAD of the chain = committed history was truncated without
-        // the anchor moving -> tamper -> FAIL CLOSED. Anchor BEHIND the chain
-        // can only come from our own post-commit anchor write failing (rows are
-        // HMAC-authenticated; only this key could have produced them), so it is
-        // REPAIRED forward instead of permanently poisoning the ledger.
-        const anchor = readTrustedAnchor(anchorFile, key);
-        if (rows.length === 0) {
-            if (anchor && anchor.seq !== 0) throw new Error("REPLAY_ANCHOR_MISMATCH");
-        } else if (!anchor) {
-            throw new Error("REPLAY_ANCHOR_MISMATCH");
-        } else if (anchor.seq > rows.length) {
-            throw new Error("REPLAY_ANCHOR_MISMATCH");
-        } else if (anchor.seq < rows.length) {
-            const prefixHmac = anchor.seq >= 1 ? rows[anchor.seq - 1].event_hmac : null;
-            if (prefixHmac === null || prefixHmac !== anchor.eventHmac) throw new Error("REPLAY_ANCHOR_MISMATCH");
-            writeTrustedAnchor(anchorFile, rows.length, previous, key);
-        } else if (anchor.eventHmac !== previous) {
-            throw new Error("REPLAY_ANCHOR_MISMATCH");
-        }
-
-        // External rollback anchor: detects whole-local-state rollback.
-        if (rollbackAnchor) {
-            let external;
-            try { external = rollbackAnchor.read(); }
-            catch { throw new Error("REPLAY_ROLLBACK_ANCHOR_UNAVAILABLE"); }
-            const externalSeq = external && Number.isSafeInteger(external.seq) ? external.seq : 0;
-            const externalToken = external && typeof external.token === "string" ? external.token : null;
-            if (externalSeq > rows.length) {
-                // External head ahead of local history: local state was rolled back.
-                throw new Error("REPLAY_ROLLBACK_DETECTED");
+            // Local keyed anchor: detects db-only tampering/truncation.
+            //
+            // DIRECTIONAL RECONCILIATION: the anchor is a CACHE of the authenticated
+            // head. Anchor AHEAD of the chain = committed history was truncated without
+            // the anchor moving -> tamper -> FAIL CLOSED. Anchor BEHIND the chain can
+            // only come from our own anchor write failing (rows are HMAC-authenticated),
+            // so it is REPAIRED forward instead of poisoning the ledger.
+            const anchor = readTrustedAnchor(anchorFile, key);
+            if (rows.length === 0) {
+                if (anchor && anchor.seq !== 0) throw new Error("REPLAY_ANCHOR_MISMATCH");
+            } else if (!anchor) {
+                throw new Error("REPLAY_ANCHOR_MISMATCH");
+            } else if (anchor.seq > rows.length) {
+                if (attempt < 3) { await new Promise((r) => setTimeout(r, 2)); continue; }
+                throw new Error("REPLAY_ANCHOR_MISMATCH");
+            } else if (anchor.seq < rows.length) {
+                const prefixHmac = anchor.seq >= 1 ? rows[anchor.seq - 1].event_hmac : null;
+                if (prefixHmac === null || prefixHmac !== anchor.eventHmac) throw new Error("REPLAY_ANCHOR_MISMATCH");
+                writeTrustedAnchor(anchorFile, rows.length, previous, key);
+            } else if (anchor.eventHmac !== previous) {
+                throw new Error("REPLAY_ANCHOR_MISMATCH");
             }
-            if (externalSeq < rows.length) {
-                // A genuine external anchor cannot be rolled back, so "behind" only
-                // means our own commit to it failed; advance it to the authenticated head.
-                try { rollbackAnchor.commit(rows.length, previous); }
+
+            // External rollback anchor: detects whole-local-state rollback.
+            if (rollbackAnchor) {
+                let external;
+                try { external = rollbackAnchor.read(); }
                 catch { throw new Error("REPLAY_ROLLBACK_ANCHOR_UNAVAILABLE"); }
-            } else if (rows.length > 0 && externalToken !== previous) {
-                throw new Error("REPLAY_ROLLBACK_DETECTED");
+                const externalSeq = external && Number.isSafeInteger(external.seq) ? external.seq : 0;
+                const externalToken = external && typeof external.token === "string" ? external.token : null;
+                if (externalSeq > rows.length) {
+                    throw new Error("REPLAY_ROLLBACK_DETECTED");
+                }
+                if (externalSeq < rows.length) {
+                    try { rollbackAnchor.commit(rows.length, previous); }
+                    catch { throw new Error("REPLAY_ROLLBACK_ANCHOR_UNAVAILABLE"); }
+                } else if (rows.length > 0 && externalToken !== previous) {
+                    throw new Error("REPLAY_ROLLBACK_DETECTED");
+                }
             }
-        }
 
-        return { rows, latest, previous };
+            return { rows, latest, previous };
+        }
     }
 
     /** INSERT one authenticated event. Returns its hmac. Anchors are NOT written

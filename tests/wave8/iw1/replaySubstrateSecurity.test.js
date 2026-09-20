@@ -286,6 +286,74 @@ test("P1: an anchor BEHIND the authenticated chain is repaired forward, not trea
 });
 
 // ---------------------------------------------------------------------------
+// P1 (audit of 52e4fe4) — a mid-write anchor failure must not corrupt the anchor
+// ---------------------------------------------------------------------------
+
+function rawRows(file) {
+    return new Promise((res, rej) => {
+        const db = new sqlite3.Database(file);
+        db.all("SELECT * FROM replay_events ORDER BY seq", [], (e, r) => { db.close(); e ? rej(e) : res(r); });
+    });
+}
+
+test("P1: a mid-write failure of the anchor write never truncates the live anchor", async () => {
+    const root = dir();
+    const file = path.join(root, "replay.sqlite");
+    const anchorFile = file + ".anchor";
+    const ledger = createCanonicalReplayLedger({ file });
+    await ledger.reserve(bind("A"));                 // anchor at seq 1
+    const before = fs.readFileSync(anchorFile, "utf8");
+
+    const origWrite = fs.writeSync;
+    let failedOnce = false;
+    fs.writeSync = function (fd, data, ...rest) {
+        if (!failedOnce && typeof data === "string" && data.includes("anchorHmac")) {
+            failedOnce = true;
+            throw new Error("simulated disk full");
+        }
+        return origWrite.call(fs, fd, data, ...rest);
+    };
+    let err = null;
+    try { await ledger.reserve(bind("B")); } catch (e) { err = e; }
+    finally { fs.writeSync = origWrite; }
+    assert.ok(err, "the simulated anchor write failure must surface");
+
+    // The live anchor must be untouched (the previous valid payload), not 0 bytes.
+    assert.equal(fs.readFileSync(anchorFile, "utf8"), before, "a failed anchor write must not truncate the live anchor");
+
+    // And the ledger must not be poisoned.
+    const fresh = createCanonicalReplayLedger({ file });
+    assert.equal((await fresh.reserve(bind("C"))).reserved, true, "ledger must self-heal, not deny forever");
+    assert.equal((await fresh.reserve(bind("A"))).reserved, false, "consumed digests stay consumed");
+});
+
+test("P2: a lookup reading a stale row snapshot alongside a fresh anchor retries instead of reporting tamper", async () => {
+    const root = dir();
+    const file = path.join(root, "replay.sqlite");
+    const ledger = createCanonicalReplayLedger({ file });
+    await ledger.reserve(bind("A"));                 // seq 1
+    const staleRows = await rawRows(file);           // snapshot with 1 row
+    await ledger.reserve(bind("B"));                 // seq 2; anchor advanced
+
+    const origAll = sqlite3.Database.prototype.all;
+    let injected = false;
+    sqlite3.Database.prototype.all = function (sql, params, cb) {
+        if (!injected && typeof sql === "string" && sql.includes("replay_events")) {
+            injected = true;
+            process.nextTick(() => cb(null, staleRows));
+            return this;
+        }
+        return origAll.apply(this, [sql, params, cb]);
+    };
+    try {
+        const r = await ledger.lookup("A");
+        assert.equal(r.state, "RESERVED", "a benign stale-read straddle must not be misreported as tamper");
+    } finally {
+        sqlite3.Database.prototype.all = origAll;
+    }
+});
+
+// ---------------------------------------------------------------------------
 // P1-1 — anchor durability contract
 // ---------------------------------------------------------------------------
 
