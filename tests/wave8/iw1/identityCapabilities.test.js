@@ -7,6 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { createIdentityCapabilityRuntime, CAPABILITY_ID, STATE } = require("../../../src/manager/internal/identityCapabilities");
+const { createFileIdentityStore } = require("../../../src/embodiment/identity/store");
 const { grantStore } = require("../../helpers/identityCapabilityFixture");
 
 const ack = () => ({ ok: true, receipt: "identity-ack" });
@@ -66,4 +67,19 @@ test("identity/proposal: proposal is unsigned and never a grant", () => {
     assert.equal(proposal.capabilityId, CAPABILITY_ID);
     assert.equal(proposal.status, "UNSIGNED_NOT_ACTIVE");
     assert.equal(Object.prototype.hasOwnProperty.call(proposal, "grant"), false);
+});
+
+test("identity/composition: unbranded runtime cannot cross the file-store boundary", () => {
+    assert.throws(() => createFileIdentityStore(path.join(dir(), "identity.json"), {
+        capabilityRuntime: { execute: async () => ({ outcome: "EXECUTED_VERIFIED" }) }
+    }), /Manager-composed capability runtime/);
+});
+
+test("identity/scope: the evaluated request carries the caller scope", async () => {
+    const root = dir();
+    const runtime = createIdentityCapabilityRuntime({ authorityStore: grantStore({ scope: ["device:self"] }), acknowledge: ack });
+    const denied = await runtime.execute({ operation: "save", parameters: params(root) });
+    assert.equal(denied.denied, true);
+    const allowed = await runtime.execute({ operation: "save", scope: ["device:self"], parameters: params(root) });
+    assert.equal(allowed.outcome, "EXECUTED_VERIFIED");
 });

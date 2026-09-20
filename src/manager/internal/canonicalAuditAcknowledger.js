@@ -38,7 +38,13 @@ function createCanonicalAuditAcknowledger({ dir = null, file = null, now = () =>
 
         try {
             fs.mkdirSync(path.dirname(target), { recursive: true });
-            fs.appendFileSync(target, `${line}\n`, "utf8");
+            const fd = fs.openSync(target, "a");
+            try {
+                fs.writeSync(fd, `${line}\n`, null, "utf8");
+                fs.fsyncSync(fd);
+            } finally {
+                fs.closeSync(fd);
+            }
 
             // Read back: the acknowledgement is evidence the record is durable,
             // not a claim that a write was attempted.

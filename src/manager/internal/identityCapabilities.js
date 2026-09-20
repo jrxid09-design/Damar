@@ -25,6 +25,7 @@ const STATE = Object.freeze({
     AVAILABLE_BUT_NOT_AUTHORIZED: "AVAILABLE_BUT_NOT_AUTHORIZED",
     AUTHORIZED: "AUTHORIZED"
 });
+const runtimeGate = new WeakSet();
 
 function cleanupTmp(file) { try { fs.unlinkSync(file); } catch { /* best effort */ } }
 
@@ -64,11 +65,11 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
         { name: "snapshot-commit-succeeded", passed: result?.ok === true }
     ] }));
 
-    async function authorize({ identity = {}, nowMs = Date.now() } = {}) {
+    async function authorize({ identity = {}, scope = [], nowMs = Date.now() } = {}) {
         if (!authorityStore) return { allowed: false, state: STATE.OWNER_RATIFICATION_REQUIRED, reason: "AUTHORITY_UNAVAILABLE" };
         try {
             const evaluation = await loadAndEvaluateAuthority(authorityStore, {
-                capabilityId: CAPABILITY_ID, action: "execute", scope: [], identity, nowMs
+                capabilityId: CAPABILITY_ID, action: "execute", scope, identity, nowMs
             });
             return evaluation?.allowed === true
                 ? { allowed: true, state: STATE.AUTHORIZED, reason: "AUTHORIZED", evaluation }
@@ -78,11 +79,11 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
         }
     }
 
-    return Object.freeze({
-        async execute({ operation, parameters = {}, requestId, identity = {}, nowMs = Date.now(), signal = null } = {}) {
+    const runtime = Object.freeze({
+        async execute({ operation, parameters = {}, requestId, identity = {}, scope = [], nowMs = Date.now(), signal = null } = {}) {
             const id = canonicalCapabilityId(CAPABILITY_ID);
             if (operation !== OPERATION) return { outcome: OUTCOME.REFUSED, reason: "OPERATION_UNBOUND", capabilityId: id, operation };
-            const auth = await authorize({ identity, nowMs });
+            const auth = await authorize({ identity, scope, nowMs });
             if (!auth.allowed) return { outcome: OUTCOME.DENIED, denied: true, state: auth.state, reason: auth.reason, capabilityId: id, operation };
             return bridge.execute({ capabilityId: id, operation, parameters, evaluation: auth.evaluation, requestId, signal });
         },
@@ -92,6 +93,24 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
             return Object.freeze({ kind: "OWNER_RATIFICATION_PROPOSAL", status: "UNSIGNED_NOT_ACTIVE", proposalDigest: crypto.createHash("sha256").update(JSON.stringify(body)).digest("hex"), ...body });
         }
     });
+    runtimeGate.add(runtime);
+    return runtime;
 }
 
-module.exports = { CAPABILITY_ID, OPERATION, STATE, createIdentityCapabilityRuntime };
+let installed = null;
+function installIdentityCapabilityRuntime(runtime) {
+    if (!runtimeGate.has(runtime)) throw new TypeError("identity capability runtime was not created by this module");
+    if (installed !== null) throw new Error("identity capability runtime already installed");
+    installed = runtime;
+    return true;
+}
+function identityRuntime() {
+    if (installed === null) installed = createIdentityCapabilityRuntime({});
+    return installed;
+}
+function isIdentityCapabilityRuntime(runtime) { return runtimeGate.has(runtime); }
+
+module.exports = {
+    CAPABILITY_ID, OPERATION, STATE, createIdentityCapabilityRuntime,
+    installIdentityCapabilityRuntime, identityRuntime, isIdentityCapabilityRuntime
+};
