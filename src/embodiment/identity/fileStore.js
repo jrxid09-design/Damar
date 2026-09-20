@@ -58,7 +58,7 @@ function createFileIdentityStore(filePath, options = {}) {
     if (typeof filePath !== "string" || filePath.length === 0) {
         throw fail("PID_NO_STORE", "file identity store memerlukan path berkas");
     }
-    const fsync = options.fsync !== false;
+    const fsync = true;
 
     const capabilityRuntime = options.capabilityRuntime;
     if (!capabilityRuntime || typeof capabilityRuntime.execute !== "function") {

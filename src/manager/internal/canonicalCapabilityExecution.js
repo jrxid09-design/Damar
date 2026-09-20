@@ -413,6 +413,10 @@ class CanonicalCapabilityExecution {
             capabilityId,
             operation,
             requestId,
+            requestDigest: digest,
+            principal: evaluation.snapshot.principal ?? null,
+            scope: evaluation.snapshot.scope ?? null,
+            authorityGeneration: evaluation.snapshot.generation ?? null,
             verificationState: verification.state
         });
 
