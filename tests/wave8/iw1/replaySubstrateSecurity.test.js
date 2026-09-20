@@ -534,6 +534,34 @@ test("P2: concurrent cold starts on a brand-new file never surface a raw SQLITE_
     assert.equal(results.filter((r) => r.ok && r.r.reserved === true).length, 6, "each distinct digest reserves exactly once");
 });
 
+test("P1: a persistently failing anchor heal does not block unrelated reservations", async () => {
+    const root = dir();
+    const file = path.join(root, "replay.sqlite");
+    const anchorFile = file + ".anchor";
+    const ledger = createCanonicalReplayLedger({ file });
+    await ledger.reserve(bind("A"));
+    const anchorSeq1 = fs.readFileSync(anchorFile, "utf8");
+    await ledger.reserve(bind("B"));
+    fs.writeFileSync(anchorFile, anchorSeq1);        // force a BEHIND state
+
+    const origRename = fs.renameSync;
+    fs.renameSync = function (src, dst) {
+        if (String(dst) === anchorFile) { const e = new Error("EACCES"); e.code = "EACCES"; throw e; }
+        return origRename.call(fs, src, dst);
+    };
+    try {
+        // A brand-new digest must still reserve; an unhealable anchor must never
+        // surface a raw error or deny new reservations.
+        assert.equal((await ledger.reserve(bind("C"))).reserved, true, "an unhealable anchor must not block new reservations");
+        // Read-only lookup must not throw either.
+        assert.equal((await ledger.lookup("A")).state, "RESERVED");
+    } finally { fs.renameSync = origRename; }
+
+    // Once the write path recovers, the next writer heals the anchor.
+    assert.equal((await ledger.reserve(bind("D"))).reserved, true);
+    assert.equal(JSON.parse(fs.readFileSync(anchorFile, "utf8")).seq, 4, "the anchor must heal once the write path recovers");
+});
+
 // ---------------------------------------------------------------------------
 // P1-1 — anchor durability contract
 // ---------------------------------------------------------------------------
