@@ -303,13 +303,19 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
       return require("./internal/cliCapabilities").installCliCapabilityRuntime(runtime);
   }
 
+  /** W8-IW1 — Manager-owned embodiment identity persistence runtime. */
+  function getIdentityCapabilityRuntime() {
+      return require("./internal/identityCapabilities").createIdentityCapabilityRuntime({});
+  }
+
   module.exports = Object.freeze({
       createDamarManager,
       createDamarManagerIngressDomain,
       getCodingCapabilityRuntime,
       installCodingCapabilityRuntime,
       getCliCapabilityRuntime,
-      installCliCapabilityRuntime
+      installCliCapabilityRuntime,
+      getIdentityCapabilityRuntime
       // R4-04/DB-02: no wave6 install/seam primitive is exported from the
       // public manager surface. The privileged wave6Adapter dependency is
       // captured lexically inside createDamarManager() (moved to

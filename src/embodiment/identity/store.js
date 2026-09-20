@@ -11,6 +11,12 @@ const { fail, structuredCopy } = require("../core/util");
 const { DeviceIdentityService } = require("./service");
 const { createFileIdentityStore } = require("./fileStore");
 
+function createManagedFileIdentityStore(filePath, options = {}) {
+    const capabilityRuntime = options.capabilityRuntime ??
+        require("../../manager/bootstrap").getIdentityCapabilityRuntime();
+    return createFileIdentityStore(filePath, { ...options, capabilityRuntime });
+}
+
 function createMemoryIdentityStore() {
     let saved = null;
     return {
@@ -32,4 +38,4 @@ async function loadIdentity({ store, clock, config, entropy, body } = {}) {
     return DeviceIdentityService.restore(data, { clock, config, entropy, body });
 }
 
-module.exports = { createMemoryIdentityStore, persistIdentity, loadIdentity, createFileIdentityStore };
+module.exports = { createMemoryIdentityStore, persistIdentity, loadIdentity, createFileIdentityStore: createManagedFileIdentityStore };
