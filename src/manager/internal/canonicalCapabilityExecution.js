@@ -55,6 +55,7 @@ const { canonicalCapabilityId } = require("../../authority/canonical");
 const { isCanonicalAuthorityEvaluation } = require("../../authority/evaluate");
 const VerificationEngine = require("../../core/verify/VerificationEngine");
 const auditTrail = require("../../core/safety/auditTrail");
+const { canonicalJson } = require("../../runtime/auditLedger/canonicalJson");
 
 /** Canonical outcomes. Only EXECUTED_VERIFIED is a completed success. */
 const OUTCOME = Object.freeze({
@@ -79,7 +80,9 @@ const REFUSAL = Object.freeze({
     AUTHORITY_FORGED: "AUTHORITY_FORGED",
     AUTHORITY_MISMATCH: "AUTHORITY_MISMATCH",
     REPLAY: "REPLAY",
-    CALLER_SELECTED_HANDLER: "CALLER_SELECTED_HANDLER"
+    CALLER_SELECTED_HANDLER: "CALLER_SELECTED_HANDLER",
+    NON_CANONICAL_REQUEST: "NON_CANONICAL_REQUEST",
+    REPLAY_ROLLBACK_UNPROTECTED: "REPLAY_ROLLBACK_UNPROTECTED"
 });
 
 /** Brand gate: only results produced by this bridge count as canonical. */
@@ -155,23 +158,20 @@ function inertnessProblem(value, depth = 0, seen = new Set()) {
     return null;
 }
 
-function canonicalJson(value) {
-    if (value === null || typeof value !== "object") return JSON.stringify(value ?? null);
-    if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
-    const keys = Object.keys(value).sort();
-    return "{" + keys.map(k => JSON.stringify(k) + ":" + canonicalJson(value[k])).join(",") + "}";
-}
-
 class CanonicalCapabilityExecution {
 
-    constructor({ replayStore = null } = {}) {
+    constructor({ replayStore = null, requireRollbackResistance = true } = {}) {
         STATE.set(this, {
             drivers: new Map(),        // "<capabilityId>|<operation>" -> registration
             verifiers: new Map(),      // capabilityId -> verifier
             consumed: new Map(),       // requestDigest -> outcome token
             acknowledger: null,
             clock: () => Date.now(),
-            replayStore
+            replayStore,
+            // P0-2: consequential execution requires a rollback-resistant replay
+            // substrate by default. Only an explicit, visible opt-out (used by
+            // unit tests that exercise unrelated bridge mechanics) disables it.
+            requireRollbackResistance: requireRollbackResistance === true
         });
     }
 
@@ -302,13 +302,34 @@ class CanonicalCapabilityExecution {
             return brand({ outcome: OUTCOME.REFUSED, reason: REFUSAL.CAPABILITY_UNBOUND, effectInvoked: false });
         }
 
-        const digest = this.requestDigest({
-            capabilityId,
-            operation,
-            parameters: request.parameters ?? null,
-            principal: evaluation.snapshot.principal ?? null,
-            scope: evaluation.snapshot.scope ?? null
-        });
+        // P0-2: a consequential capability may only execute against a replay
+        // substrate that is rollback-resistant (an EXTERNAL anchor outside the
+        // rollback domain). A local-only or absent substrate fails closed BEFORE
+        // any driver is resolved, so whole-local-state rollback cannot re-invoke.
+        if (binding.consequential && s.requireRollbackResistance) {
+            const store = s.replayStore;
+            if (!store || store.rollbackResistance !== "EXTERNAL") {
+                return brand({ outcome: OUTCOME.REFUSED, reason: REFUSAL.REPLAY_ROLLBACK_UNPROTECTED, effectInvoked: false });
+            }
+        }
+
+        // P2: the digest serializer must agree with the validated request domain.
+        // NaN/Infinity/BigInt/Date/undefined/cycles/accessors/non-plain objects are
+        // refused here, before reservation or driver resolution, so no ambiguous
+        // encoding and no uncaught digest exception can reach the effect.
+        let digest;
+        try {
+            digest = this.requestDigest({
+                capabilityId,
+                operation,
+                parameters: request.parameters ?? null,
+                principal: evaluation.snapshot.principal ?? null,
+                scope: evaluation.snapshot.scope ?? null
+            });
+        }
+        catch {
+            return brand({ outcome: OUTCOME.REFUSED, reason: REFUSAL.NON_CANONICAL_REQUEST, effectInvoked: false });
+        }
 
         const replayBinding = {
             digest,

@@ -190,10 +190,12 @@ const runtimeGate = new WeakSet();
 function createCliCapabilityRuntime({
     authorityStore = null,
     acknowledge = null,
-    driverOverrides = null
+    driverOverrides = null,
+    replayStore = null,
+    requireRollbackResistance = true
 } = {}) {
 
-    const bridge = new CanonicalCapabilityExecution();
+    const bridge = new CanonicalCapabilityExecution({ replayStore, requireRollbackResistance });
     const drivers = realDrivers();
     const invocations = new Map();
 
