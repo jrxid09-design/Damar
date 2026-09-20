@@ -99,7 +99,26 @@ function ensureKey(file) {
 
 let ANCHOR_TEMP_SEQ = 0;
 
-function writeTrustedAnchor(anchorFile, seq, eventHmac, key) {
+const TRANSIENT_RENAME_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+
+/** Bounded retry for the transient rename-collision codes Windows can raise when
+ *  two processes rename onto the same target concurrently. */
+async function renameWithRetry(temp, destination) {
+    for (let attempt = 0; ; attempt++) {
+        try {
+            return fs.renameSync(temp, destination);
+        } catch (error) {
+            const code = error && error.code;
+            if (attempt < 6 && TRANSIENT_RENAME_CODES.has(code)) {
+                await new Promise((r) => setTimeout(r, 5 * (attempt + 1)));
+                continue;
+            }
+            throw error;
+        }
+    }
+}
+
+async function writeTrustedAnchor(anchorFile, seq, eventHmac, key) {
     const anchorHmac = hmac(key, String(seq) + ":" + eventHmac);
     const payload = JSON.stringify({ seq, eventHmac, anchorHmac });
 
@@ -131,7 +150,7 @@ function writeTrustedAnchor(anchorFile, seq, eventHmac, key) {
         fs.fsyncSync(fd);
         fs.closeSync(fd);
         fd = null;
-        fs.renameSync(temp, anchorFile);
+        await renameWithRetry(temp, anchorFile);
         syncDirectory(path.dirname(anchorFile));
     } catch (error) {
         if (fd !== null) { try { fs.closeSync(fd); } catch { /* already closed */ } }
@@ -182,19 +201,36 @@ function createCanonicalReplayLedger({
     const anchorFile = file + ".anchor";
     const db = new sqlite3.Database(file);
     let ready = null;
-    const open = () => ready ?? (ready = (async () => {
-        // busy_timeout FIRST: the other pragmas then run under a real timeout,
-        // so concurrent cold starts return a clean {reserved:false} instead of a
-        // raw SQLITE_BUSY crash.
-        await dbCall(db, "run", "PRAGMA busy_timeout=10000");
-        await dbCall(db, "run", "PRAGMA journal_mode=WAL");
-        await dbCall(db, "run", "PRAGMA synchronous=FULL");
+    async function doOpen() {
+        // busy_timeout FIRST so the remaining statements run under a real
+        // timeout. The WAL-mode transition on a BRAND-NEW file can still raise
+        // SQLITE_BUSY under N-way simultaneous first opens (busy_timeout does
+        // not cover that schema change), so the whole sequence is retried.
+        for (let attempt = 0; ; attempt++) {
+            try {
+                await dbCall(db, "run", "PRAGMA busy_timeout=10000");
+                await dbCall(db, "run", "PRAGMA journal_mode=WAL");
+                await dbCall(db, "run", "PRAGMA synchronous=FULL");
         await dbCall(db, "run", "CREATE TABLE IF NOT EXISTS replay_events (seq INTEGER PRIMARY KEY AUTOINCREMENT,digest TEXT NOT NULL,state TEXT NOT NULL,capability_id TEXT,operation TEXT,principal TEXT,scope TEXT,authority_generation INTEGER,driver_id TEXT,at_ms INTEGER NOT NULL,prev_hmac TEXT NOT NULL,event_hmac TEXT NOT NULL)");
         await dbCall(db, "run", "CREATE INDEX IF NOT EXISTS idx_replay_digest ON replay_events(digest)");
         // P0-1: replay_current is no longer a trusted source. Drop any legacy
         // table so no unauthenticated cache can ever influence execution.
-        await dbCall(db, "run", "DROP TABLE IF EXISTS replay_current");
-    })());
+                await dbCall(db, "run", "DROP TABLE IF EXISTS replay_current");
+                return;
+            } catch (error) {
+                const text = String((error && error.code) || "") + " " + String((error && error.message) || "");
+                if (attempt < 8 && text.includes("SQLITE_BUSY")) {
+                    await new Promise((r) => setTimeout(r, 10 * (attempt + 1)));
+                    continue;
+                }
+                throw error;
+            }
+        }
+    }
+    const open = () => {
+        if (ready === null) ready = doOpen().catch((error) => { ready = null; throw error; });
+        return ready;
+    };
 
     async function snapshot({ heal = true } = {}) {
         await open();
@@ -254,7 +290,7 @@ function createCanonicalReplayLedger({
                 if (prefixHmac === null || prefixHmac !== anchor.eventHmac) throw new Error("REPLAY_ANCHOR_MISMATCH");
                 // Read-only callers (lookup) must not write: healing happens only
                 // on the writer path, never from an unlocked read.
-                if (heal) writeTrustedAnchor(anchorFile, rows.length, previous, key);
+                if (heal) await writeTrustedAnchor(anchorFile, rows.length, previous, key);
             } else if (anchor.eventHmac !== previous) {
                 throw new Error("REPLAY_ANCHOR_MISMATCH");
             }
@@ -313,10 +349,13 @@ function createCanonicalReplayLedger({
      *  anchor BEHIND the authenticated chain, which snapshot() repairs forward;
      *  the committed reservation stays consumed, so no duplicate effect occurs. */
     async function persistAnchors(seq, eventHmac) {
-        writeTrustedAnchor(anchorFile, seq, eventHmac, key);
-        if (rollbackAnchor) {
-            try { rollbackAnchor.commit(seq, eventHmac); }
-            catch { throw new Error("REPLAY_ROLLBACK_ANCHOR_COMMIT_FAILED"); }
+        try {
+            await writeTrustedAnchor(anchorFile, seq, eventHmac, key);
+            if (rollbackAnchor) rollbackAnchor.commit(seq, eventHmac);
+        } catch (error) {
+            // Typed so callers can distinguish "the event IS durably committed
+            // and the anchor will self-heal" from a genuine pre-commit failure.
+            throw new Error("REPLAY_ANCHOR_PERSIST_FAILED: " + String(error && error.message));
         }
     }
 
@@ -365,7 +404,12 @@ function createCanonicalReplayLedger({
                 }
                 const { seq, eventHmac } = await insertEvent(binding, STATES.RESERVED, s);
                 await dbCall(db, "run", "COMMIT");
-                await persistAnchors(seq, eventHmac);
+                // The row is durably committed: a post-commit anchor-persist
+                // failure must never reject a reservation that already landed
+                // (that would strand the digest). The anchor heals on the next
+                // snapshot before any driver runs.
+                try { await persistAnchors(seq, eventHmac); }
+                catch (error) { if (!/REPLAY_ANCHOR_PERSIST_FAILED/.test(String(error.message))) throw error; }
                 return { reserved: true };
             } catch (error) {
                 try { await dbCall(db, "run", "ROLLBACK"); } catch { /* already rolled back */ }
@@ -381,7 +425,8 @@ function createCanonicalReplayLedger({
                 if (!s.latest.has(digest)) throw new Error("REPLAY_LEDGER_MISSING_RESERVATION");
                 const { seq, eventHmac } = await insertEvent({ ...binding, digest }, state, s);
                 await dbCall(db, "run", "COMMIT");
-                await persistAnchors(seq, eventHmac);
+                try { await persistAnchors(seq, eventHmac); }
+                catch (error) { if (!/REPLAY_ANCHOR_PERSIST_FAILED/.test(String(error.message))) throw error; }
                 return true;
             } catch (error) {
                 try { await dbCall(db, "run", "ROLLBACK"); } catch { /* already rolled back */ }

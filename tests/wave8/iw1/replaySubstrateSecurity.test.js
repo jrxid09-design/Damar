@@ -314,10 +314,10 @@ test("P1: a mid-write failure of the anchor write never truncates the live ancho
         }
         return origWrite.call(fs, fd, data, ...rest);
     };
-    let err = null;
-    try { await ledger.reserve(bind("B")); } catch (e) { err = e; }
-    finally { fs.writeSync = origWrite; }
-    assert.ok(err, "the simulated anchor write failure must surface");
+    let outcome = null;
+    try { outcome = await ledger.reserve(bind("B")); } finally { fs.writeSync = origWrite; }
+    // A post-commit anchor-persist failure must NOT reject a landed reservation.
+    assert.equal(outcome.reserved, true, "a committed reservation must survive an anchor-write failure");
 
     // The live anchor must be untouched (the previous valid payload), not 0 bytes.
     assert.equal(fs.readFileSync(anchorFile, "utf8"), before, "a failed anchor write must not truncate the live anchor");
@@ -326,6 +326,7 @@ test("P1: a mid-write failure of the anchor write never truncates the live ancho
     const fresh = createCanonicalReplayLedger({ file });
     assert.equal((await fresh.reserve(bind("C"))).reserved, true, "ledger must self-heal, not deny forever");
     assert.equal((await fresh.reserve(bind("A"))).reserved, false, "consumed digests stay consumed");
+    assert.equal((await fresh.reserve(bind("B"))).reserved, false, "the committed digest stays consumed even though its anchor write failed");
 });
 
 test("P1: a non-throwing SHORT write of the anchor leaves the live anchor intact, and progressing short writes complete", async () => {
@@ -344,10 +345,9 @@ test("P1: a non-throwing SHORT write of the anchor leaves the live anchor intact
         if (!stuck && text.includes("anchorHmac")) { stuck = true; return 0; }
         return origWrite.call(fs, fd, data, ...rest);
     };
-    let err = null;
-    try { await ledger.reserve(bind("B")); } catch (e) { err = e; }
-    finally { fs.writeSync = origWrite; }
-    assert.ok(err, "a stuck short write must surface as a failure, not silent corruption");
+    let outcome = null;
+    try { outcome = await ledger.reserve(bind("B")); } finally { fs.writeSync = origWrite; }
+    assert.equal(outcome.reserved, true, "the committed reservation must survive a short-write failure");
     assert.equal(fs.readFileSync(anchorFile, "utf8"), before, "the live anchor must never be corrupted by a short write");
 
     const fresh = createCanonicalReplayLedger({ file });
@@ -437,10 +437,9 @@ test("P1: an over-reported writeSync count is rejected and never corrupts the li
         if (!inflated && text.includes("anchorHmac")) { inflated = true; return 999999; }
         return origWrite.call(fs, fd, data, ...rest);
     };
-    let err = null;
-    try { await ledger.reserve(bind("B")); } catch (e) { err = e; }
-    finally { fs.writeSync = origWrite; }
-    assert.ok(err, "an over-reported byte count must surface as a failure");
+    let outcome = null;
+    try { outcome = await ledger.reserve(bind("B")); } finally { fs.writeSync = origWrite; }
+    assert.equal(outcome.reserved, true, "the committed reservation must survive an over-reported write count");
     assert.equal(fs.readFileSync(anchorFile, "utf8"), before, "the live anchor must be intact");
 
     const fresh = createCanonicalReplayLedger({ file });
@@ -481,6 +480,58 @@ test("P1: read-only lookup never writes the anchor (no unlocked self-heal)", asy
     assert.equal(after.state, "RESERVED");
     assert.equal(fs.readFileSync(anchorFile, "utf8"), anchorSeq1, "lookup must not rewrite the anchor");
     assert.deepEqual(fs.readdirSync(root).filter((f) => f.includes(".tmp")), [], "no temp artifact from a read");
+});
+
+test("P1: a transient rename failure is retried, and a persistent one never strands the digest", async () => {
+    const root = dir();
+    const file = path.join(root, "replay.sqlite");
+    const anchorFile = file + ".anchor";
+    const ledger = createCanonicalReplayLedger({ file });
+    await ledger.reserve(bind("A"));
+
+    // (a) a transient EPERM is retried so the anchor still advances.
+    const origRename = fs.renameSync;
+    let failures = 1;
+    fs.renameSync = function (src, dst) {
+        if (failures > 0 && String(dst) === anchorFile) { failures--; const e = new Error("EPERM"); e.code = "EPERM"; throw e; }
+        return origRename.call(fs, src, dst);
+    };
+    try { assert.equal((await ledger.reserve(bind("B"))).reserved, true); }
+    finally { fs.renameSync = origRename; }
+    assert.equal(JSON.parse(fs.readFileSync(anchorFile, "utf8")).seq, 2, "the rename retry must advance the anchor");
+
+    // (b) a persistent rename failure must not strand the committed reservation.
+    const origRename2 = fs.renameSync;
+    fs.renameSync = function (src, dst) {
+        if (String(dst) === anchorFile) { const e = new Error("EPERM"); e.code = "EPERM"; throw e; }
+        return origRename2.call(fs, src, dst);
+    };
+    let r2 = null;
+    try { r2 = await ledger.reserve(bind("C")); } finally { fs.renameSync = origRename2; }
+    assert.equal(r2.reserved, true, "a persistently failing anchor write must not strand the digest");
+    assert.equal((await ledger.lookup("C")).state, "RESERVED", "the committed digest must be observable");
+});
+
+test("P2: concurrent cold starts on a brand-new file never surface a raw SQLITE_BUSY", async () => {
+    const root = dir();
+    const file = path.join(root, "cold.sqlite");
+    const modulePath = path.resolve(__dirname, "../../../src/manager/internal/canonicalReplayLedger.js");
+    const spawnOne = (i) => new Promise((resolve) => {
+        const code = `const {createCanonicalReplayLedger}=require(${JSON.stringify(modulePath)});`
+            + `createCanonicalReplayLedger({file:${JSON.stringify(file)}})`
+            + `.reserve({digest:"d"+${i},capabilityId:"c",operation:"run",principal:"owner",scope:[],authorityGeneration:0,driverId:"d"})`
+            + `.then(r=>{process.stdout.write(JSON.stringify({ok:true,r}));process.exit(0);})`
+            + `.catch(e=>{process.stdout.write(JSON.stringify({ok:false,error:String(e&&e.message)}));process.exit(0);});`;
+        const child = require("node:child_process").spawn(process.execPath, ["-e", code], { stdio: ["ignore", "pipe", "ignore"] });
+        let out = "";
+        child.stdout.on("data", (d) => { out += d; });
+        child.on("close", () => { try { resolve(JSON.parse(out)); } catch { resolve({ ok: false, error: "unparsable:" + out }); } });
+    });
+
+    const results = await Promise.all(Array.from({ length: 6 }, (_, i) => spawnOne(i)));
+    const rawBusy = results.filter((r) => !r.ok && /SQLITE_BUSY/.test(r.error));
+    assert.deepEqual(rawBusy, [], "no raw SQLITE_BUSY may surface from a cold start");
+    assert.equal(results.filter((r) => r.ok && r.r.reserved === true).length, 6, "each distinct digest reserves exactly once");
 });
 
 // ---------------------------------------------------------------------------
