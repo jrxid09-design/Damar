@@ -22,10 +22,13 @@ const auditTrail = require("../../core/safety/auditTrail");
 
 function syncDirectory(directory) {
     if (process.platform === "win32") {
-        // Windows: fsync on directory fd fails with EPERM.
-        // FILE_FLAG_WRITE_THROUGH behavior of file fsync ensures directory
-        // metadata is flushed when the file itself is flushed.
-        // We already fsync the file, so directory metadata durability is covered.
+        // Node exposes no directory-fsync primitive on Windows (fsync on a
+        // directory fd fails with EPERM), and fs.fsyncSync does NOT set
+        // FILE_FLAG_WRITE_THROUGH. Honest position: the acknowledgement's
+        // durability comes from the FILE-level fsync below (libuv fsync ->
+        // FlushFileBuffers on the appended record), which is the real Windows
+        // primitive; NTFS journals the file's metadata transaction. This no-op
+        // is not a claim that directory metadata was explicitly flushed.
         return;
     }
     const fd = fs.openSync(directory, "r");
