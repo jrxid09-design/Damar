@@ -422,6 +422,67 @@ test("P2: a lookup reading a stale row snapshot alongside a fresh anchor retries
     }
 });
 
+test("P1: an over-reported writeSync count is rejected and never corrupts the live anchor", async () => {
+    const root = dir();
+    const file = path.join(root, "replay.sqlite");
+    const anchorFile = file + ".anchor";
+    const ledger = createCanonicalReplayLedger({ file });
+    await ledger.reserve(bind("A"));
+    const before = fs.readFileSync(anchorFile, "utf8");
+
+    const origWrite = fs.writeSync;
+    let inflated = false;
+    fs.writeSync = function (fd, data, ...rest) {
+        const text = Buffer.isBuffer(data) ? data.toString("utf8") : (typeof data === "string" ? data : "");
+        if (!inflated && text.includes("anchorHmac")) { inflated = true; return 999999; }
+        return origWrite.call(fs, fd, data, ...rest);
+    };
+    let err = null;
+    try { await ledger.reserve(bind("B")); } catch (e) { err = e; }
+    finally { fs.writeSync = origWrite; }
+    assert.ok(err, "an over-reported byte count must surface as a failure");
+    assert.equal(fs.readFileSync(anchorFile, "utf8"), before, "the live anchor must be intact");
+
+    const fresh = createCanonicalReplayLedger({ file });
+    assert.equal((await fresh.reserve(bind("C"))).reserved, true, "ledger must self-heal");
+});
+
+test("P1: a failed anchor write leaves no temp artifact behind", async () => {
+    const root = dir();
+    const file = path.join(root, "replay.sqlite");
+    const ledger = createCanonicalReplayLedger({ file });
+    await ledger.reserve(bind("A"));
+
+    const origWrite = fs.writeSync;
+    let stuck = false;
+    fs.writeSync = function (fd, data, ...rest) {
+        const text = Buffer.isBuffer(data) ? data.toString("utf8") : "";
+        if (!stuck && text.includes("anchorHmac")) { stuck = true; return 0; }
+        return origWrite.call(fs, fd, data, ...rest);
+    };
+    try { await ledger.reserve(bind("B")); } catch { /* expected */ }
+    finally { fs.writeSync = origWrite; }
+
+    const leftovers = fs.readdirSync(root).filter((f) => f.includes(".tmp"));
+    assert.deepEqual(leftovers, [], "no temp anchor artifact may remain after a failed write");
+});
+
+test("P1: read-only lookup never writes the anchor (no unlocked self-heal)", async () => {
+    const root = dir();
+    const file = path.join(root, "replay.sqlite");
+    const anchorFile = file + ".anchor";
+    const ledger = createCanonicalReplayLedger({ file });
+    await ledger.reserve(bind("A"));
+    const anchorSeq1 = fs.readFileSync(anchorFile, "utf8");
+    await ledger.reserve(bind("B"));                 // anchor at seq 2
+    fs.writeFileSync(anchorFile, anchorSeq1);        // force a BEHIND state
+
+    const after = await ledger.lookup("A");
+    assert.equal(after.state, "RESERVED");
+    assert.equal(fs.readFileSync(anchorFile, "utf8"), anchorSeq1, "lookup must not rewrite the anchor");
+    assert.deepEqual(fs.readdirSync(root).filter((f) => f.includes(".tmp")), [], "no temp artifact from a read");
+});
+
 // ---------------------------------------------------------------------------
 // P1-1 — anchor durability contract
 // ---------------------------------------------------------------------------

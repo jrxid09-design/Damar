@@ -97,6 +97,8 @@ function ensureKey(file) {
     }
 }
 
+let ANCHOR_TEMP_SEQ = 0;
+
 function writeTrustedAnchor(anchorFile, seq, eventHmac, key) {
     const anchorHmac = hmac(key, String(seq) + ":" + eventHmac);
     const payload = JSON.stringify({ seq, eventHmac, anchorHmac });
@@ -104,32 +106,38 @@ function writeTrustedAnchor(anchorFile, seq, eventHmac, key) {
     // NON-DESTRUCTIVE WRITE (every platform): stage the full payload in a temp
     // file, fsync it, THEN atomically replace the live anchor. The live file is
     // never truncated before the new payload is durable, so a mid-write I/O
-    // failure (disk full, AV lock, kill, power loss) leaves the PREVIOUS valid
-    // anchor intact and recoverable via snapshot()'s BEHIND reconciliation
-    // instead of corrupting it into a permanent ledger-wide denial of service.
-    // The win32 rename-durability caveat is unchanged and documented: Node sets
-    // no MOVEFILE_WRITE_THROUGH, so the rename's directory entry is not forced
-    // to disk; the rename still gives readers atomic replacement.
-    const temp = anchorFile + ".tmp";
-    const fd = fs.openSync(temp, "w", 0o600);
+    // failure leaves the PREVIOUS valid anchor intact and recoverable via
+    // snapshot()'s BEHIND reconciliation. The win32 rename-durability caveat is
+    // unchanged (Node sets no MOVEFILE_WRITE_THROUGH); readers still get atomic
+    // replacement. The temp name is UNIQUE PER WRITER so concurrent self-heal
+    // writers cannot collide on one temp inode and throw raw ENOENT/EPERM.
+    ANCHOR_TEMP_SEQ = (ANCHOR_TEMP_SEQ + 1) >>> 0;
+    const temp = `${anchorFile}.tmp.${process.pid}.${ANCHOR_TEMP_SEQ}`;
+    let fd = null;
     try {
-        // fs.writeSync may perform a SHORT WRITE (returning fewer bytes than the
-        // buffer) WITHOUT throwing. A truncated anchor promoted by rename would
-        // corrupt the live anchor permanently, so the payload is looped and its
-        // byte count verified before fsync/rename, and a stuck write throws.
+        fd = fs.openSync(temp, "w", 0o600);
         const buf = Buffer.from(payload, "utf8");
         let written = 0;
         while (written < buf.length) {
             const n = fs.writeSync(fd, buf, written, buf.length - written);
-            if (!Number.isInteger(n) || n <= 0) throw new Error("REPLAY_ANCHOR_SHORT_WRITE");
+            // Reject non-integer, non-positive AND over-reported counts. An
+            // inflated count would skip remaining bytes and promote a truncated
+            // payload over the live anchor (silent permanent corruption).
+            if (!Number.isInteger(n) || n <= 0 || n > buf.length - written) {
+                throw new Error("REPLAY_ANCHOR_SHORT_WRITE");
+            }
             written += n;
         }
         fs.fsyncSync(fd);
-    } finally {
         fs.closeSync(fd);
+        fd = null;
+        fs.renameSync(temp, anchorFile);
+        syncDirectory(path.dirname(anchorFile));
+    } catch (error) {
+        if (fd !== null) { try { fs.closeSync(fd); } catch { /* already closed */ } }
+        try { fs.unlinkSync(temp); } catch { /* already gone */ }
+        throw error;
     }
-    fs.renameSync(temp, anchorFile);
-    syncDirectory(path.dirname(anchorFile));
 }
 function readTrustedAnchor(anchorFile, key) {
     if (!fs.existsSync(anchorFile)) return null;
@@ -175,9 +183,12 @@ function createCanonicalReplayLedger({
     const db = new sqlite3.Database(file);
     let ready = null;
     const open = () => ready ?? (ready = (async () => {
+        // busy_timeout FIRST: the other pragmas then run under a real timeout,
+        // so concurrent cold starts return a clean {reserved:false} instead of a
+        // raw SQLITE_BUSY crash.
+        await dbCall(db, "run", "PRAGMA busy_timeout=10000");
         await dbCall(db, "run", "PRAGMA journal_mode=WAL");
         await dbCall(db, "run", "PRAGMA synchronous=FULL");
-        await dbCall(db, "run", "PRAGMA busy_timeout=10000");
         await dbCall(db, "run", "CREATE TABLE IF NOT EXISTS replay_events (seq INTEGER PRIMARY KEY AUTOINCREMENT,digest TEXT NOT NULL,state TEXT NOT NULL,capability_id TEXT,operation TEXT,principal TEXT,scope TEXT,authority_generation INTEGER,driver_id TEXT,at_ms INTEGER NOT NULL,prev_hmac TEXT NOT NULL,event_hmac TEXT NOT NULL)");
         await dbCall(db, "run", "CREATE INDEX IF NOT EXISTS idx_replay_digest ON replay_events(digest)");
         // P0-1: replay_current is no longer a trusted source. Drop any legacy
@@ -185,7 +196,7 @@ function createCanonicalReplayLedger({
         await dbCall(db, "run", "DROP TABLE IF EXISTS replay_current");
     })());
 
-    async function snapshot() {
+    async function snapshot({ heal = true } = {}) {
         await open();
         // A reader can straddle a concurrent writer's COMMIT + anchor-persist and
         // observe a fresh anchor over a stale row snapshot. That benign timing is
@@ -241,7 +252,9 @@ function createCanonicalReplayLedger({
             } else if (anchor.seq < rows.length) {
                 const prefixHmac = anchor.seq >= 1 ? rows[anchor.seq - 1].event_hmac : null;
                 if (prefixHmac === null || prefixHmac !== anchor.eventHmac) throw new Error("REPLAY_ANCHOR_MISMATCH");
-                writeTrustedAnchor(anchorFile, rows.length, previous, key);
+                // Read-only callers (lookup) must not write: healing happens only
+                // on the writer path, never from an unlocked read.
+                if (heal) writeTrustedAnchor(anchorFile, rows.length, previous, key);
             } else if (anchor.eventHmac !== previous) {
                 throw new Error("REPLAY_ANCHOR_MISMATCH");
             }
@@ -377,7 +390,7 @@ function createCanonicalReplayLedger({
         },
 
         async _lookup(digest) {
-            const s = await snapshot();
+            const s = await snapshot({ heal: false });
             return s.latest.get(digest) ?? null;
         },
 
