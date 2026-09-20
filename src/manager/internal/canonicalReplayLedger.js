@@ -66,9 +66,18 @@ function ensureKey(file) {
     try {
         const fd = fs.openSync(keyFile, "wx", 0o600);
         const key = crypto.randomBytes(32);
-        fs.writeSync(fd, key);
-        fs.fsyncSync(fd);
-        fs.closeSync(fd);
+        try {
+            // Same short-write discipline: a truncated key must never be trusted.
+            let written = 0;
+            while (written < key.length) {
+                const n = fs.writeSync(fd, key, written, key.length - written);
+                if (!Number.isInteger(n) || n <= 0) throw new Error("REPLAY_INTEGRITY_KEY_SHORT_WRITE");
+                written += n;
+            }
+            fs.fsyncSync(fd);
+        } finally {
+            fs.closeSync(fd);
+        }
         syncDirectory(path.dirname(keyFile));
         return key;
     } catch (error) {
@@ -104,7 +113,17 @@ function writeTrustedAnchor(anchorFile, seq, eventHmac, key) {
     const temp = anchorFile + ".tmp";
     const fd = fs.openSync(temp, "w", 0o600);
     try {
-        fs.writeSync(fd, payload);
+        // fs.writeSync may perform a SHORT WRITE (returning fewer bytes than the
+        // buffer) WITHOUT throwing. A truncated anchor promoted by rename would
+        // corrupt the live anchor permanently, so the payload is looped and its
+        // byte count verified before fsync/rename, and a stuck write throws.
+        const buf = Buffer.from(payload, "utf8");
+        let written = 0;
+        while (written < buf.length) {
+            const n = fs.writeSync(fd, buf, written, buf.length - written);
+            if (!Number.isInteger(n) || n <= 0) throw new Error("REPLAY_ANCHOR_SHORT_WRITE");
+            written += n;
+        }
         fs.fsyncSync(fd);
     } finally {
         fs.closeSync(fd);
@@ -202,8 +221,19 @@ function createCanonicalReplayLedger({
             // so it is REPAIRED forward instead of poisoning the ledger.
             const anchor = readTrustedAnchor(anchorFile, key);
             if (rows.length === 0) {
-                if (anchor && anchor.seq !== 0) throw new Error("REPLAY_ANCHOR_MISMATCH");
+                if (anchor && anchor.seq !== 0) {
+                    // A stale-empty read straddling a writer's FIRST commit +
+                    // anchor-persist is the same benign timing as the non-empty
+                    // case, so it retries identically; real tamper exhausts retries.
+                    if (attempt < 3) { await new Promise((r) => setTimeout(r, 2)); continue; }
+                    throw new Error("REPLAY_ANCHOR_MISMATCH");
+                }
             } else if (!anchor) {
+                // A committed row exists but the anchor has not been persisted yet:
+                // the anchor is written AFTER COMMIT, so a concurrent reader can
+                // observe this benign window (e.g. the loser of a cross-process
+                // race). Retry bounded; a genuinely missing anchor still fails closed.
+                if (attempt < 3) { await new Promise((r) => setTimeout(r, 2)); continue; }
                 throw new Error("REPLAY_ANCHOR_MISMATCH");
             } else if (anchor.seq > rows.length) {
                 if (attempt < 3) { await new Promise((r) => setTimeout(r, 2)); continue; }
