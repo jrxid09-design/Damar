@@ -229,6 +229,63 @@ test("P1-2: cli runtime without a persistent substrate refuses consequential exe
 });
 
 // ---------------------------------------------------------------------------
+// P1 (audit of b7738ef) — anchor/commit ordering must never poison the ledger
+// ---------------------------------------------------------------------------
+
+test("P1: a failed COMMIT leaves no anchor ahead of committed history, and the ledger is not poisoned", async () => {
+    const root = dir();
+    const file = path.join(root, "replay.sqlite");
+    const anchorFile = file + ".anchor";
+
+    const origRun = sqlite3.Database.prototype.run;
+    let failCommitOnce = true;
+    sqlite3.Database.prototype.run = function (sql, ...rest) {
+        if (failCommitOnce && typeof sql === "string" && sql === "COMMIT") {
+            failCommitOnce = false;
+            const cb = rest[rest.length - 1];
+            if (typeof cb === "function") { process.nextTick(() => cb(new Error("simulated failure before COMMIT"))); return this; }
+        }
+        return origRun.apply(this, [sql, ...rest]);
+    };
+    let firstError = null;
+    try {
+        const l1 = createCanonicalReplayLedger({ file });
+        try { await l1.reserve(bind("A")); } catch (e) { firstError = e; }
+    } finally {
+        sqlite3.Database.prototype.run = origRun;
+    }
+    assert.ok(firstError, "the simulated COMMIT failure must surface");
+
+    // Nothing was committed and no anchor was written ahead of history.
+    assert.equal(fs.existsSync(anchorFile), false, "anchors are written only AFTER a successful COMMIT");
+
+    // The ledger must remain usable for unrelated digests (no permanent denial).
+    const l2 = createCanonicalReplayLedger({ file });
+    const after = await l2.reserve(bind("B"));
+    assert.equal(after.reserved, true, "a crashed COMMIT must not poison the whole ledger");
+});
+
+test("P1: an anchor BEHIND the authenticated chain is repaired forward, not treated as tamper", async () => {
+    const root = dir();
+    const file = path.join(root, "replay.sqlite");
+    const anchorFile = file + ".anchor";
+    const ledger = createCanonicalReplayLedger({ file });
+    await ledger.reserve(bind("A"));
+    const anchorAfterFirst = fs.readFileSync(anchorFile, "utf8");   // seq 1
+    await ledger.reserve(bind("B"));                                 // seq 2
+
+    // Simulate our own post-commit anchor write failing: anchor lags the chain.
+    fs.writeFileSync(anchorFile, anchorAfterFirst);
+
+    const fresh = createCanonicalReplayLedger({ file });
+    const c = await fresh.reserve(bind("C"));
+    assert.equal(c.reserved, true, "a lagging anchor must be repaired, not poison the ledger");
+    // The already-consumed digests stay consumed.
+    assert.equal((await fresh.reserve(bind("A"))).reserved, false);
+    assert.equal((await fresh.reserve(bind("B"))).reserved, false);
+});
+
+// ---------------------------------------------------------------------------
 // P1-1 — anchor durability contract
 // ---------------------------------------------------------------------------
 
