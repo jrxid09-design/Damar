@@ -43,7 +43,7 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
             invocations++;
             const filePath = parameters.filePath;
             const payload = parameters.payload;
-            const fsync = parameters.fsync !== false;
+            const fsync = true;
             fs.mkdirSync(path.dirname(filePath), { recursive: true });
             const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
             try {
@@ -53,6 +53,10 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
                     try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
                 }
                 fs.renameSync(tmp, filePath);
+                if (fsync && process.platform !== "win32") {
+                    const dirFd = fs.openSync(path.dirname(filePath), "r");
+                    try { fs.fsyncSync(dirFd); } finally { fs.closeSync(dirFd); }
+                }
                 return { ok: true, filePath };
             } catch (error) {
                 cleanupTmp(tmp);

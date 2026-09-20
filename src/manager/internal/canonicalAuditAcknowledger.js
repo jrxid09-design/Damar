@@ -33,6 +33,10 @@ function createCanonicalAuditAcknowledger({ dir = null, file = null, now = () =>
             capabilityId: entry?.capabilityId ?? null,
             operation: entry?.operation ?? null,
             requestId: entry?.requestId ?? null,
+            requestDigest: entry?.requestDigest ?? null,
+            principal: entry?.principal ?? null,
+            scope: entry?.scope ?? null,
+            authorityGeneration: entry?.authorityGeneration ?? null,
             verificationState: entry?.verificationState ?? null
         });
 
