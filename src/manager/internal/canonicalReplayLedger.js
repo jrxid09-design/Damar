@@ -4,11 +4,24 @@
 // durability on both Windows and POSIX. This store is evidence only.
 //
 // INTEGRITY ARCHITECTURE:
-// - HMAC chain links events: each event's HMAC includes the previous HMAC
-// - Trusted anchor file (separate from mutable SQLite) stores the expected head
-// - The anchor is fsync'd separately and contains HMAC(seq:event_hmac)
-// - Truncation/rollback of SQLite alone cannot forge a matching anchor
-// - Integrity key is separate from anchor to prevent key+anchor rollback
+// - HMAC chain links events: each event's HMAC includes the previous HMAC.
+// - A KEYED anchor file (separate from the mutable SQLite db) stores the expected
+//   head as HMAC(key, "seq:event_hmac"). Tampering with, mutating, reordering,
+//   injecting into, or truncating the SQLite db ALONE is detected and the store
+//   fails closed.
+// - Anchor durability: POSIX = temp+rename+directory fsync; Windows = in-place
+//   overwrite + fsync (FlushFileBuffers). See writeTrustedAnchor().
+//
+// HONEST BOUNDARY (this is NOT a claim of full rollback closure):
+// The integrity key and the anchor are separate FILES but co-located, and this
+// repository exposes no independently-monotonic local state to bind against
+// (src/runtime/auditLedger/ports.js ships no durable adapter). An attacker or a
+// restore operation that replaces the ENTIRE state directory -- db + anchor +
+// key -- with an older mutually-consistent snapshot cannot be detected from
+// local state alone. Full rollback resistance requires an EXTERNAL monotonic
+// anchor (remote timestamp, TPM counter, OS-protected append-only store) which
+// does not exist here. Everything short of whole-directory replacement is
+// detected and fails closed.
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -34,11 +47,11 @@ function dbCall(db, method, sql, params = []) {
 
 function syncDirectory(dir) {
     if (process.platform === "win32") {
-        // Windows: directory fsync via fd fails with EPERM.
-        // FlushFileBuffers on directory handle requires different Win32 API.
-        // Instead, rely on FILE_FLAG_WRITE_THROUGH behavior of file fsync,
-        // which flushes directory metadata when the file is flushed.
-        // SQLite PRAGMA synchronous=FULL already ensures this for its own files.
+        // Node exposes NO directory-fsync primitive on Windows: fsync on a
+        // directory fd fails with EPERM and there is no FlushFileBuffers path
+        // for directories. This is deliberately a no-op, not a faked success.
+        // Windows durability is provided at the FILE level (fsync ->
+        // FlushFileBuffers) by the writer itself; see writeTrustedAnchor().
         return;
     }
     const fd = fs.openSync(dir, "r");
@@ -81,6 +94,30 @@ function ensureKey(file) {
 function writeTrustedAnchor(anchorFile, seq, eventHmac, key) {
     const anchorHmac = hmac(key, String(seq) + ":" + eventHmac);
     const payload = JSON.stringify({ seq, eventHmac, anchorHmac });
+
+    if (process.platform === "win32") {
+        // Windows: Node's fs.renameSync -> libuv MoveFileExW does NOT request
+        // MOVEFILE_WRITE_THROUGH, and there is no directory fsync, so the
+        // rename's directory-entry update cannot be forced crash-durable via
+        // Node's API. Writing the anchor IN PLACE and fsyncing avoids the rename
+        // gamble entirely: libuv fsync -> FlushFileBuffers is the real Windows
+        // durability primitive (NTFS journals the metadata transaction). A crash
+        // mid-write leaves a partial file that readTrustedAnchor() rejects via
+        // the keyed HMAC, and the store fails closed. Durable, honest, no
+        // reliance on a flag Node never sets.
+        const fd = fs.openSync(anchorFile, "w", 0o600);
+        try {
+            fs.writeSync(fd, payload);
+            fs.fsyncSync(fd);
+        } finally {
+            fs.closeSync(fd);
+        }
+        return;
+    }
+
+    // POSIX: atomic replacement (temp + rename) plus a directory fsync, so the
+    // new directory entry itself is crash-durable and a crash never leaves a
+    // half-written anchor.
     const temp = anchorFile + ".tmp";
     const fd = fs.openSync(temp, "w", 0o600);
     try {
@@ -90,7 +127,6 @@ function writeTrustedAnchor(anchorFile, seq, eventHmac, key) {
         fs.closeSync(fd);
     }
     fs.renameSync(temp, anchorFile);
-    // After atomic rename, sync directory on POSIX (no-op on Windows per syncDirectory logic)
     syncDirectory(path.dirname(anchorFile));
 }
 

@@ -164,3 +164,58 @@ test("crash-recovery: missing anchor with existing events fails closed", async (
         "missing anchor with events must fail"
     );
 });
+
+test("anchor-durability: anchor is written, valid, and advances across transitions", async () => {
+    const root = dir();
+    const replayFile = path.join(root, "anchor-durable.sqlite");
+    const anchorFile = replayFile + ".anchor";
+    const ledger = createCanonicalReplayLedger({ file: replayFile });
+    const binding = { digest: "anchor-durable", capabilityId: "test.cap", operation: "run", principal: "owner", scope: [], authorityGeneration: 0, driverId: "driver" };
+
+    await ledger.reserve(binding);
+    const afterReserve = JSON.parse(fs.readFileSync(anchorFile, "utf8"));
+    assert.equal(afterReserve.seq, 1, "anchor seq must be the number of appended events");
+    assert.equal(typeof afterReserve.eventHmac, "string");
+    assert.equal(typeof afterReserve.anchorHmac, "string");
+
+    await ledger.transition("anchor-durable", STATES.INVOKING, binding);
+    const afterInvoking = JSON.parse(fs.readFileSync(anchorFile, "utf8"));
+    assert.equal(afterInvoking.seq, 2, "anchor must advance with each appended event");
+    assert.notEqual(afterInvoking.eventHmac, afterReserve.eventHmac);
+
+    // The freshly written anchor must validate on a fresh reader.
+    const fresh = createCanonicalReplayLedger({ file: replayFile });
+    const current = await fresh.lookup("anchor-durable");
+    assert.equal(current.state, STATES.INVOKING);
+});
+
+test("anchor-durability: truncated/partial anchor fails closed", async () => {
+    const root = dir();
+    const replayFile = path.join(root, "anchor-partial.sqlite");
+    const anchorFile = replayFile + ".anchor";
+    const ledger = createCanonicalReplayLedger({ file: replayFile });
+    await ledger.reserve({ digest: "partial", capabilityId: "test.cap", operation: "run", principal: "owner", scope: [], authorityGeneration: 0, driverId: "driver" });
+
+    // Simulate a crash mid-write: a partial (non-JSON) anchor on disk.
+    const full = fs.readFileSync(anchorFile, "utf8");
+    fs.writeFileSync(anchorFile, full.slice(0, Math.floor(full.length / 2)));
+
+    const fresh = createCanonicalReplayLedger({ file: replayFile });
+    await assert.rejects(
+        () => fresh.reserve({ digest: "partial-2", capabilityId: "test.cap", operation: "run", principal: "owner", scope: [], authorityGeneration: 0, driverId: "driver" }),
+        /ANCHOR_CORRUPT|ANCHOR_MISMATCH/,
+        "a partial anchor must fail closed, never be accepted"
+    );
+});
+
+test("anchor-durability: win32 in-place write leaves no temp anchor behind", async () => {
+    const root = dir();
+    const replayFile = path.join(root, "anchor-inplace.sqlite");
+    const anchorFile = replayFile + ".anchor";
+    const ledger = createCanonicalReplayLedger({ file: replayFile });
+    await ledger.reserve({ digest: "inplace", capabilityId: "test.cap", operation: "run", principal: "owner", scope: [], authorityGeneration: 0, driverId: "driver" });
+    await ledger.transition("inplace", STATES.INVOKING, { capabilityId: "test.cap", operation: "run", principal: "owner", scope: [], authorityGeneration: 0, driverId: "driver" });
+
+    assert.equal(fs.existsSync(anchorFile), true, "anchor must exist after write");
+    assert.equal(fs.existsSync(anchorFile + ".tmp"), false, "no temp anchor file may remain after a successful write");
+});
