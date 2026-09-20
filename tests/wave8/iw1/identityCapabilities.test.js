@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
 
 const { createIdentityCapabilityRuntime, CAPABILITY_ID, STATE } = require("../../../src/manager/internal/identityCapabilities");
 const { createFileIdentityStore } = require("../../../src/embodiment/identity/store");
@@ -125,4 +126,42 @@ test("identity/audit-binding: durable acknowledgement receives exact binding fie
     assert.equal(observed.principal, "owner");
     assert.equal(typeof observed.authorityGeneration, "number");
     assert.equal(observed.verificationState, "verified");
+});
+
+test("identity/replay-race: independent Node processes have one atomic reservation winner", async () => {
+    const root = dir();
+    const replayFile = path.join(root, "race.sqlite");
+    const readyA = path.join(root, "ready-a");
+    const readyB = path.join(root, "ready-b");
+    const go = path.join(root, "go");
+    const modulePath = path.resolve(__dirname, "../../../src/manager/internal/canonicalReplayLedger.js");
+    const code = `const fs=require("node:fs"); const {createCanonicalReplayLedger}=require(${JSON.stringify(modulePath)}); const [db,ready,go]=process.argv.slice(1); fs.writeFileSync(ready,"ready",{flag:"wx"}); while(!fs.existsSync(go)){}; createCanonicalReplayLedger({file:db}).reserve({digest:"race-digest",capabilityId:"race.cap",operation:"run",principal:"owner",scope:[],authorityGeneration:0,driverId:"race-driver"}).then(r=>{process.stdout.write(JSON.stringify(r));}).catch(e=>{process.stdout.write(JSON.stringify({error:e.message})); process.exitCode=1;});`;
+    const launch = (ready) => new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, ["-e", code, replayFile, ready, go], { stdio: ["ignore", "pipe", "pipe"] });
+        let out = "", err = ""; child.stdout.on("data", d => out += d); child.stderr.on("data", d => err += d);
+        child.on("error", reject); child.on("close", code => resolve({ code, out, err }));
+    });
+    const a = launch(readyA); const b = launch(readyB);
+    const deadline = Date.now() + 5000;
+    while (!(fs.existsSync(readyA) && fs.existsSync(readyB))) { if (Date.now() > deadline) throw new Error("race children did not rendezvous"); await new Promise(r => setTimeout(r, 5)); }
+    fs.writeFileSync(go, "go");
+    const results = await Promise.all([a, b]);
+    const reserved = results.filter(x => JSON.parse(x.out).reserved === true);
+    const replayed = results.filter(x => JSON.parse(x.out).reserved === false);
+    assert.equal(reserved.length, 1);
+    assert.equal(replayed.length, 1);
+});
+
+test("identity/replay-integrity: valid SQLite tampering is detected", async () => {
+    const root = dir();
+    const replayFile = path.join(root, "tamper.sqlite");
+    const ledger = createCanonicalReplayLedger({ file: replayFile });
+    await ledger.reserve({ digest: "tamper-a", capabilityId: "tamper.cap", operation: "run", principal: "owner", scope: [], authorityGeneration: 0, driverId: "driver" });
+    await ledger.transition("tamper-a", "INVOKING", { capabilityId: "tamper.cap", operation: "run", principal: "owner", scope: [], authorityGeneration: 0, driverId: "driver" });
+    const sqlite = require("sqlite3");
+    const db = new sqlite.Database(replayFile);
+    await new Promise((resolve, reject) => db.run("DELETE FROM replay_events WHERE seq=1", e => e ? reject(e) : resolve()));
+    db.close();
+    const fresh = createCanonicalReplayLedger({ file: replayFile });
+    await assert.rejects(() => fresh.reserve({ digest: "tamper-b", capabilityId: "tamper.cap", operation: "run", principal: "owner", scope: [], authorityGeneration: 0, driverId: "driver" }), /INTEGRITY|HEAD/);
 });

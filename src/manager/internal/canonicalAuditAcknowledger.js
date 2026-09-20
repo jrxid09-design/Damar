@@ -21,7 +21,6 @@ const path = require("node:path");
 const auditTrail = require("../../core/safety/auditTrail");
 
 function syncDirectory(directory) {
-    if (process.platform === "win32") return;
     const fd = fs.openSync(directory, "r");
     try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
 }
