@@ -208,7 +208,7 @@ test("anchor-durability: truncated/partial anchor fails closed", async () => {
     );
 });
 
-test("anchor-durability: win32 in-place write leaves no temp anchor behind", async () => {
+test("anchor-durability: anchor write leaves no temp artifact behind", async () => {
     const root = dir();
     const replayFile = path.join(root, "anchor-inplace.sqlite");
     const anchorFile = replayFile + ".anchor";

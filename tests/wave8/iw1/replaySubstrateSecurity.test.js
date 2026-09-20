@@ -307,7 +307,8 @@ test("P1: a mid-write failure of the anchor write never truncates the live ancho
     const origWrite = fs.writeSync;
     let failedOnce = false;
     fs.writeSync = function (fd, data, ...rest) {
-        if (!failedOnce && typeof data === "string" && data.includes("anchorHmac")) {
+        const text = Buffer.isBuffer(data) ? data.toString("utf8") : (typeof data === "string" ? data : "");
+        if (!failedOnce && text.includes("anchorHmac")) {
             failedOnce = true;
             throw new Error("simulated disk full");
         }
@@ -325,6 +326,74 @@ test("P1: a mid-write failure of the anchor write never truncates the live ancho
     const fresh = createCanonicalReplayLedger({ file });
     assert.equal((await fresh.reserve(bind("C"))).reserved, true, "ledger must self-heal, not deny forever");
     assert.equal((await fresh.reserve(bind("A"))).reserved, false, "consumed digests stay consumed");
+});
+
+test("P1: a non-throwing SHORT write of the anchor leaves the live anchor intact, and progressing short writes complete", async () => {
+    const root = dir();
+    const file = path.join(root, "replay.sqlite");
+    const anchorFile = file + ".anchor";
+    const ledger = createCanonicalReplayLedger({ file });
+    await ledger.reserve(bind("A"));
+    const before = fs.readFileSync(anchorFile, "utf8");
+
+    // (a) a STUCK short write returns fewer/zero bytes WITHOUT throwing.
+    const origWrite = fs.writeSync;
+    let stuck = false;
+    fs.writeSync = function (fd, data, ...rest) {
+        const text = Buffer.isBuffer(data) ? data.toString("utf8") : (typeof data === "string" ? data : "");
+        if (!stuck && text.includes("anchorHmac")) { stuck = true; return 0; }
+        return origWrite.call(fs, fd, data, ...rest);
+    };
+    let err = null;
+    try { await ledger.reserve(bind("B")); } catch (e) { err = e; }
+    finally { fs.writeSync = origWrite; }
+    assert.ok(err, "a stuck short write must surface as a failure, not silent corruption");
+    assert.equal(fs.readFileSync(anchorFile, "utf8"), before, "the live anchor must never be corrupted by a short write");
+
+    const fresh = createCanonicalReplayLedger({ file });
+    assert.equal((await fresh.reserve(bind("C"))).reserved, true, "ledger must self-heal after a short-write failure");
+
+    // (b) a PROGRESSING short write must be completed, never truncated.
+    const root2 = dir();
+    const file2 = path.join(root2, "replay.sqlite");
+    const ledger2 = createCanonicalReplayLedger({ file: file2 });
+    const origWrite2 = fs.writeSync;
+    let once = false;
+    fs.writeSync = function (fd, data, ...rest) {
+        if (!once && Buffer.isBuffer(data) && data.toString("utf8").includes("anchorHmac")) {
+            once = true;
+            const half = data.slice(0, Math.floor(data.length / 2));
+            return origWrite2.call(fs, fd, half, 0, half.length);
+        }
+        return origWrite2.call(fs, fd, data, ...rest);
+    };
+    try { await ledger2.reserve(bind("Z")); } finally { fs.writeSync = origWrite2; }
+    const anchor2 = JSON.parse(fs.readFileSync(file2 + ".anchor", "utf8"));
+    assert.equal(anchor2.seq, 1, "a progressing short write must be completed into a valid anchor");
+});
+
+test("P2: a lookup reading a stale EMPTY row snapshot alongside a fresh anchor retries", async () => {
+    const root = dir();
+    const file = path.join(root, "replay.sqlite");
+    const ledger = createCanonicalReplayLedger({ file });
+    await ledger.reserve(bind("A"));                 // seq 1; anchor written
+
+    const origAll = sqlite3.Database.prototype.all;
+    let injected = false;
+    sqlite3.Database.prototype.all = function (sql, params, cb) {
+        if (!injected && typeof sql === "string" && sql.includes("replay_events")) {
+            injected = true;
+            process.nextTick(() => cb(null, []));     // stale EMPTY view
+            return this;
+        }
+        return origAll.apply(this, [sql, params, cb]);
+    };
+    try {
+        const r = await ledger.lookup("A");
+        assert.equal(r.state, "RESERVED", "a stale-empty read must not be misreported as tamper");
+    } finally {
+        sqlite3.Database.prototype.all = origAll;
+    }
 });
 
 test("P2: a lookup reading a stale row snapshot alongside a fresh anchor retries instead of reporting tamper", async () => {
