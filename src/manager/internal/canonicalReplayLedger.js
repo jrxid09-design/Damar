@@ -198,8 +198,26 @@ function createCanonicalReplayLedger({
         }
 
         // Local keyed anchor: detects db-only tampering/truncation.
+        //
+        // DIRECTIONAL RECONCILIATION (fixes the anchor-poisoning defect found in
+        // the b7738ef audit): the anchor is a CACHE of the authenticated head.
+        // Anchor AHEAD of the chain = committed history was truncated without
+        // the anchor moving -> tamper -> FAIL CLOSED. Anchor BEHIND the chain
+        // can only come from our own post-commit anchor write failing (rows are
+        // HMAC-authenticated; only this key could have produced them), so it is
+        // REPAIRED forward instead of permanently poisoning the ledger.
         const anchor = readTrustedAnchor(anchorFile, key);
-        if ((anchor && (anchor.seq !== rows.length || anchor.eventHmac !== previous)) || (!anchor && rows.length)) {
+        if (rows.length === 0) {
+            if (anchor && anchor.seq !== 0) throw new Error("REPLAY_ANCHOR_MISMATCH");
+        } else if (!anchor) {
+            throw new Error("REPLAY_ANCHOR_MISMATCH");
+        } else if (anchor.seq > rows.length) {
+            throw new Error("REPLAY_ANCHOR_MISMATCH");
+        } else if (anchor.seq < rows.length) {
+            const prefixHmac = anchor.seq >= 1 ? rows[anchor.seq - 1].event_hmac : null;
+            if (prefixHmac === null || prefixHmac !== anchor.eventHmac) throw new Error("REPLAY_ANCHOR_MISMATCH");
+            writeTrustedAnchor(anchorFile, rows.length, previous, key);
+        } else if (anchor.eventHmac !== previous) {
             throw new Error("REPLAY_ANCHOR_MISMATCH");
         }
 
@@ -210,15 +228,27 @@ function createCanonicalReplayLedger({
             catch { throw new Error("REPLAY_ROLLBACK_ANCHOR_UNAVAILABLE"); }
             const externalSeq = external && Number.isSafeInteger(external.seq) ? external.seq : 0;
             const externalToken = external && typeof external.token === "string" ? external.token : null;
-            const localMatchesExternal = externalSeq === rows.length &&
-                (rows.length === 0 || externalToken === previous);
-            if (!localMatchesExternal) throw new Error("REPLAY_ROLLBACK_DETECTED");
+            if (externalSeq > rows.length) {
+                // External head ahead of local history: local state was rolled back.
+                throw new Error("REPLAY_ROLLBACK_DETECTED");
+            }
+            if (externalSeq < rows.length) {
+                // A genuine external anchor cannot be rolled back, so "behind" only
+                // means our own commit to it failed; advance it to the authenticated head.
+                try { rollbackAnchor.commit(rows.length, previous); }
+                catch { throw new Error("REPLAY_ROLLBACK_ANCHOR_UNAVAILABLE"); }
+            } else if (rows.length > 0 && externalToken !== previous) {
+                throw new Error("REPLAY_ROLLBACK_DETECTED");
+            }
         }
 
         return { rows, latest, previous };
     }
 
-    async function append(binding, state, prior) {
+    /** INSERT one authenticated event. Returns its hmac. Anchors are NOT written
+     *  here: they are persisted only AFTER the enclosing transaction COMMITs, so
+     *  a failed commit can never leave an anchor AHEAD of committed history. */
+    async function insertEvent(binding, state, prior) {
         const seq = prior.rows.length + 1;
         const atMs = Math.floor(now());
         const core = {
@@ -240,8 +270,14 @@ function createCanonicalReplayLedger({
             [seq, core.digest, core.state, core.capabilityId, core.operation, core.principal,
              JSON.stringify(core.scope), core.authorityGeneration, core.driverId, atMs, core.prev, eventHmac]);
 
-        writeTrustedAnchor(anchorFile, seq, eventHmac, key);
+        return { seq, eventHmac };
+    }
 
+    /** Persist the head AFTER a successful COMMIT. A failure here leaves the
+     *  anchor BEHIND the authenticated chain, which snapshot() repairs forward;
+     *  the committed reservation stays consumed, so no duplicate effect occurs. */
+    async function persistAnchors(seq, eventHmac) {
+        writeTrustedAnchor(anchorFile, seq, eventHmac, key);
         if (rollbackAnchor) {
             try { rollbackAnchor.commit(seq, eventHmac); }
             catch { throw new Error("REPLAY_ROLLBACK_ANCHOR_COMMIT_FAILED"); }
@@ -291,8 +327,9 @@ function createCanonicalReplayLedger({
                     if (!sameBinding(prior, binding)) throw new Error("REPLAY_LEDGER_BINDING_MISMATCH");
                     return { reserved: false, prior };
                 }
-                await append(binding, STATES.RESERVED, s);
+                const { seq, eventHmac } = await insertEvent(binding, STATES.RESERVED, s);
                 await dbCall(db, "run", "COMMIT");
+                await persistAnchors(seq, eventHmac);
                 return { reserved: true };
             } catch (error) {
                 try { await dbCall(db, "run", "ROLLBACK"); } catch { /* already rolled back */ }
@@ -306,8 +343,9 @@ function createCanonicalReplayLedger({
             try {
                 const s = await snapshot();
                 if (!s.latest.has(digest)) throw new Error("REPLAY_LEDGER_MISSING_RESERVATION");
-                await append({ ...binding, digest }, state, s);
+                const { seq, eventHmac } = await insertEvent({ ...binding, digest }, state, s);
                 await dbCall(db, "run", "COMMIT");
+                await persistAnchors(seq, eventHmac);
                 return true;
             } catch (error) {
                 try { await dbCall(db, "run", "ROLLBACK"); } catch { /* already rolled back */ }
