@@ -1,5 +1,12 @@
 "use strict";
 
+const { createRollbackResistantLedger } = require("../../helpers/rollbackSubstrate");
+
+/** W8-IW1: consequential execution requires a rollback-resistant replay substrate. */
+function codingWithSubstrate(opts = {}) {
+    return createCodingCapabilityRuntime({ ...opts, replayStore: opts.replayStore ?? createRollbackResistantLedger() });
+}
+
 /**
  * W8-IW1 Phase 3B — CodingBrain family migration.
  *
@@ -62,7 +69,7 @@ const tempDir = () => require("node:fs").mkdtempSync(path.join(os.tmpdir(), "dam
 // ---------------------------------------------------------------- A. UNRATIFIED
 
 test("coding/unratified: no authority store at all denies every capability with zero driver invocation", async () => {
-    const runtime = createCodingCapabilityRuntime({ acknowledge: ack });
+    const runtime = codingWithSubstrate({ acknowledge: ack });
     const before = Object.keys(CATALOGUE).map((id) => runtime.invocationCount(id));
 
     const result = await runtime.execute({ capabilityId: "coding.git.write", operation: "commit", parameters: { args: ["msg", process.cwd()] } });
@@ -81,7 +88,7 @@ test("coding/unratified: no authority store at all denies every capability with 
 });
 
 test("coding/unratified: a store without a grant denies and never reaches the driver", async () => {
-    const runtime = createCodingCapabilityRuntime({
+    const runtime = codingWithSubstrate({
         authorityStore: grantStore([]),          // no grants at all
         acknowledge: ack
     });
@@ -103,7 +110,7 @@ test("coding/unratified: a store without a grant denies and never reaches the dr
 });
 
 test("coding/unratified: model-supplied parameters cannot select a handler or smuggle code", async () => {
-    const runtime = createCodingCapabilityRuntime({ authorityStore: grantStore([]), acknowledge: ack });
+    const runtime = codingWithSubstrate({ authorityStore: grantStore([]), acknowledge: ack });
     const result = await runtime.execute({
         capabilityId: "coding.git.write",
         operation: "commit",
@@ -118,7 +125,7 @@ test("coding/unratified: model-supplied parameters cannot select a handler or sm
 // ------------------------------------------------- B. VALID OWNER-RATIFIED FIXTURE
 
 test("coding/ratified: an ACTIVE owner grant executes through authority, verification and audit", async () => {
-    const runtime = createCodingCapabilityRuntime({
+    const runtime = codingWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "coding.git.read" }]),
         acknowledge: ack
     });
@@ -142,7 +149,7 @@ test("coding/ratified: an ACTIVE owner grant executes through authority, verific
 });
 
 test("coding/ratified: adapter surface executes for an authorized capability only", async () => {
-    const runtime = createCodingCapabilityRuntime({
+    const runtime = codingWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "coding.git.read" }]),
         acknowledge: ack
     });
@@ -159,7 +166,7 @@ test("coding/ratified: adapter surface executes for an authorized capability onl
 });
 
 test("coding/ratified: audit acknowledgement failure withholds canonical completion", async () => {
-    const runtime = createCodingCapabilityRuntime({
+    const runtime = codingWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "coding.git.read" }]),
         acknowledge: () => ({ ok: false })
     });
@@ -171,7 +178,7 @@ test("coding/ratified: audit acknowledgement failure withholds canonical complet
 // ------------------------------------------------------- C. BINDING NEGATIVES
 
 test("coding/binding: wrong capability has no grant and fails closed", async () => {
-    const runtime = createCodingCapabilityRuntime({
+    const runtime = codingWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "coding.git.read" }]),
         acknowledge: ack
     });
@@ -182,7 +189,7 @@ test("coding/binding: wrong capability has no grant and fails closed", async () 
 });
 
 test("coding/binding: wrong operation on a granted capability is refused", async () => {
-    const runtime = createCodingCapabilityRuntime({
+    const runtime = codingWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "coding.git.read" }]),
         acknowledge: ack
     });
@@ -193,7 +200,7 @@ test("coding/binding: wrong operation on a granted capability is refused", async
 });
 
 test("coding/binding: wrong principal fails closed", async () => {
-    const runtime = createCodingCapabilityRuntime({
+    const runtime = codingWithSubstrate({
         authorityStore: grantStore([{
             capabilityId: "coding.git.read",
             identityBinding: { principals: ["owner"] }
@@ -209,7 +216,7 @@ test("coding/binding: wrong principal fails closed", async () => {
 });
 
 test("coding/binding: a scoped grant is not satisfied by an unscoped request", async () => {
-    const runtime = createCodingCapabilityRuntime({
+    const runtime = codingWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "coding.git.read", scope: ["project:alpha"] }]),
         acknowledge: ack
     });
@@ -220,7 +227,7 @@ test("coding/binding: a scoped grant is not satisfied by an unscoped request", a
 });
 
 test("coding/binding: expired and revoked grants fail closed", async () => {
-    const expired = createCodingCapabilityRuntime({
+    const expired = codingWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "coding.git.read", expiresAt: new Date(Date.now() - 60_000).toISOString() }]),
         acknowledge: ack
     });
@@ -228,7 +235,7 @@ test("coding/binding: expired and revoked grants fail closed", async () => {
     assert.equal(expiredResult.denied, true);
     assert.equal(expiredResult.reason, "CAP_EXPIRED");
 
-    const revoked = createCodingCapabilityRuntime({
+    const revoked = codingWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "coding.git.read", status: "REVOKED" }]),
         acknowledge: ack
     });
@@ -239,7 +246,7 @@ test("coding/binding: expired and revoked grants fail closed", async () => {
 });
 
 test("coding/binding: an identical request cannot invoke the driver twice (replay)", async () => {
-    const runtime = createCodingCapabilityRuntime({
+    const runtime = codingWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "coding.git.read" }]),
         acknowledge: ack
     });
@@ -253,7 +260,7 @@ test("coding/binding: an identical request cannot invoke the driver twice (repla
 });
 
 test("coding/binding: changed parameters are a different request, not a replayed one", async () => {
-    const runtime = createCodingCapabilityRuntime({
+    const runtime = codingWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "coding.git.read" }]),
         acknowledge: ack
     });
@@ -263,14 +270,14 @@ test("coding/binding: changed parameters are a different request, not a replayed
 });
 
 test("coding/binding: the runtime exposes no seam that accepts a caller-supplied evaluation", () => {
-    const runtime = createCodingCapabilityRuntime({ authorityStore: grantStore([]), acknowledge: ack });
+    const runtime = codingWithSubstrate({ authorityStore: grantStore([]), acknowledge: ack });
     for (const key of Object.keys(runtime)) {
         assert.ok(!/evaluation|grant|authorize/i.test(key), `runtime must not expose authority input: ${key}`);
     }
 });
 
 test("coding/proposal: the ratification bundle is a proposal, never authority", async () => {
-    const runtime = createCodingCapabilityRuntime({ authorityStore: grantStore([]), acknowledge: ack });
+    const runtime = codingWithSubstrate({ authorityStore: grantStore([]), acknowledge: ack });
     const bundle = runtime.ratificationProposal();
     assert.equal(bundle.kind, "OWNER_RATIFICATION_PROPOSAL");
     assert.equal(bundle.status, "UNSIGNED_NOT_ACTIVE");

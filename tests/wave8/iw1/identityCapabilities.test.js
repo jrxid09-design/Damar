@@ -1,5 +1,12 @@
 "use strict";
 
+const { createRollbackResistantLedger } = require("../../helpers/rollbackSubstrate");
+
+/** W8-IW1: consequential execution requires a rollback-resistant replay substrate. */
+function identityWithSubstrate(opts = {}) {
+    return createIdentityCapabilityRuntime({ ...opts, replayStore: opts.replayStore ?? createRollbackResistantLedger() });
+}
+
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -18,7 +25,7 @@ const params = (root) => ({ filePath: path.join(root, "identity.json"), payload:
 
 test("identity/unratified: registration is not authority and causes zero mutation", async () => {
     const root = dir();
-    const runtime = createIdentityCapabilityRuntime({ acknowledge: ack });
+    const runtime = identityWithSubstrate({ acknowledge: ack });
     const result = await runtime.execute({ operation: "save", parameters: params(root) });
     assert.equal(result.denied, true);
     assert.equal(result.state, STATE.OWNER_RATIFICATION_REQUIRED);
@@ -28,7 +35,7 @@ test("identity/unratified: registration is not authority and causes zero mutatio
 
 test("identity/ratified: exact capability and operation execute through verification and audit", async () => {
     const root = dir();
-    const runtime = createIdentityCapabilityRuntime({ authorityStore: grantStore(), acknowledge: ack });
+    const runtime = identityWithSubstrate({ authorityStore: grantStore(), acknowledge: ack });
     const result = await runtime.execute({ operation: "save", parameters: params(root) });
     assert.equal(result.outcome, "EXECUTED_VERIFIED");
     assert.equal(result.receipt, "identity-ack");
@@ -38,13 +45,13 @@ test("identity/ratified: exact capability and operation execute through verifica
 
 test("identity/binding: wrong operation, expiry, revocation and audit failure fail closed", async () => {
     const root = dir();
-    const expired = createIdentityCapabilityRuntime({ authorityStore: grantStore({ expiresAt: new Date(Date.now() - 1).toISOString() }), acknowledge: ack });
+    const expired = identityWithSubstrate({ authorityStore: grantStore({ expiresAt: new Date(Date.now() - 1).toISOString() }), acknowledge: ack });
     assert.equal((await expired.execute({ operation: "save", parameters: params(root) })).denied, true);
-    const revoked = createIdentityCapabilityRuntime({ authorityStore: grantStore({ status: "REVOKED" }), acknowledge: ack });
+    const revoked = identityWithSubstrate({ authorityStore: grantStore({ status: "REVOKED" }), acknowledge: ack });
     assert.equal((await revoked.execute({ operation: "save", parameters: params(root) })).denied, true);
-    const wrongOp = createIdentityCapabilityRuntime({ authorityStore: grantStore(), acknowledge: ack });
+    const wrongOp = identityWithSubstrate({ authorityStore: grantStore(), acknowledge: ack });
     assert.equal((await wrongOp.execute({ operation: "restore", parameters: params(root) })).outcome, "REFUSED");
-    const noAck = createIdentityCapabilityRuntime({ authorityStore: grantStore(), acknowledge: () => ({ ok: false }) });
+    const noAck = identityWithSubstrate({ authorityStore: grantStore(), acknowledge: () => ({ ok: false }) });
     const deniedCompletion = await noAck.execute({ operation: "save", parameters: params(root) });
     assert.equal(deniedCompletion.outcome, "UNVERIFIED");
     assert.equal(noAck.invocationCount(), 1);
@@ -52,11 +59,11 @@ test("identity/binding: wrong operation, expiry, revocation and audit failure fa
 
 test("identity/replay and cancellation: no duplicate write and honest cancellation outcomes", async () => {
     const root = dir();
-    const runtime = createIdentityCapabilityRuntime({ authorityStore: grantStore(), acknowledge: ack });
+    const runtime = identityWithSubstrate({ authorityStore: grantStore(), acknowledge: ack });
     const request = { operation: "save", parameters: params(root), requestId: "identity-replay" };
     assert.equal((await runtime.execute(request)).outcome, "EXECUTED_VERIFIED");
     assert.equal((await runtime.execute(request)).reason, "REPLAY");
-    const before = createIdentityCapabilityRuntime({ authorityStore: grantStore(), acknowledge: ack });
+    const before = identityWithSubstrate({ authorityStore: grantStore(), acknowledge: ack });
     const controller = new AbortController();
     controller.abort();
     const cancelled = await before.execute({ operation: "save", parameters: params(dir()), signal: controller.signal });
@@ -65,7 +72,7 @@ test("identity/replay and cancellation: no duplicate write and honest cancellati
 });
 
 test("identity/proposal: proposal is unsigned and never a grant", () => {
-    const proposal = createIdentityCapabilityRuntime().ratificationProposal();
+    const proposal = identityWithSubstrate().ratificationProposal();
     assert.equal(proposal.capabilityId, CAPABILITY_ID);
     assert.equal(proposal.status, "UNSIGNED_NOT_ACTIVE");
     assert.equal(Object.prototype.hasOwnProperty.call(proposal, "grant"), false);
@@ -79,7 +86,7 @@ test("identity/composition: unbranded runtime cannot cross the file-store bounda
 
 test("identity/scope: the evaluated request carries the caller scope", async () => {
     const root = dir();
-    const runtime = createIdentityCapabilityRuntime({ authorityStore: grantStore({ scope: ["device:self"] }), acknowledge: ack });
+    const runtime = identityWithSubstrate({ authorityStore: grantStore({ scope: ["device:self"] }), acknowledge: ack });
     const denied = await runtime.execute({ operation: "save", parameters: params(root) });
     assert.equal(denied.denied, true);
     const allowed = await runtime.execute({ operation: "save", scope: ["device:self"], parameters: params(root) });
@@ -88,11 +95,12 @@ test("identity/scope: the evaluated request carries the caller scope", async () 
 
 test("identity/restart-replay: a fresh runtime cannot repeat a durable completed request", async () => {
     const root = dir();
-    const replayFile = path.join(root, "replay.jsonl");
-    const first = createIdentityCapabilityRuntime({ authorityStore: grantStore(), replayStore: createCanonicalReplayLedger({ file: replayFile }), acknowledge: ack });
+    const replayRoot = path.join(root, "replay");
+    const anchorRoot = path.join(root, "anchor");
+    const first = identityWithSubstrate({ authorityStore: grantStore(), replayStore: createRollbackResistantLedger({ replayRoot, anchorRoot }), acknowledge: ack });
     const request = { operation: "save", requestId: "restart-replay", parameters: params(root) };
     assert.equal((await first.execute(request)).outcome, "EXECUTED_VERIFIED");
-    const second = createIdentityCapabilityRuntime({ authorityStore: grantStore(), replayStore: createCanonicalReplayLedger({ file: replayFile }), acknowledge: ack });
+    const second = identityWithSubstrate({ authorityStore: grantStore(), replayStore: createRollbackResistantLedger({ replayRoot, anchorRoot }), acknowledge: ack });
     const replayed = await second.execute(request);
     assert.equal(replayed.reason, "REPLAY");
     assert.equal(second.invocationCount(), 0);
@@ -102,9 +110,9 @@ test("identity/restart-replay: a fresh runtime cannot repeat a durable completed
 
 test("identity/replay-ledger: corruption fails closed", async () => {
     const root = dir();
-    const replayFile = path.join(root, "replay.jsonl");
+    const replayFile = path.join(root, "replay.sqlite");
     fs.writeFileSync(replayFile, "not-json\n");
-    const runtime = createIdentityCapabilityRuntime({ authorityStore: grantStore(), replayStore: createCanonicalReplayLedger({ file: replayFile }), acknowledge: ack });
+    const runtime = identityWithSubstrate({ authorityStore: grantStore(), replayStore: createRollbackResistantLedger({ file: replayFile }), acknowledge: ack });
     const result = await runtime.execute({ operation: "save", parameters: params(root) });
     assert.equal(result.reason, "REPLAY_LEDGER_UNAVAILABLE");
     assert.equal(runtime.invocationCount(), 0);
@@ -113,7 +121,7 @@ test("identity/replay-ledger: corruption fails closed", async () => {
 test("identity/audit-binding: durable acknowledgement receives exact binding fields", async () => {
     const root = dir();
     let observed;
-    const runtime = createIdentityCapabilityRuntime({
+    const runtime = identityWithSubstrate({
         authorityStore: grantStore({ scope: ["device:self"] }),
         acknowledge(entry) { observed = entry; return { ok: true, receipt: "bound" }; }
     });

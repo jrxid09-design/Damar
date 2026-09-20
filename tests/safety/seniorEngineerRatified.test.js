@@ -1,5 +1,12 @@
 "use strict";
 
+const { createRollbackResistantLedger } = require("../helpers/rollbackSubstrate");
+
+/** W8-IW1: consequential execution requires a rollback-resistant replay substrate. */
+function codingWithSubstrate(opts = {}) {
+    return createCodingCapabilityRuntime({ ...opts, replayStore: opts.replayStore ?? createRollbackResistantLedger() });
+}
+
 /**
  * W8-IW1 Phase 3B — the AUTHORIZED side of the CodingBrain family.
  *
@@ -57,7 +64,7 @@ function grantStore(entries) {
 
 // Composition time: ratify exactly ONE capability (git read). Everything else in
 // the family stays unratified, which is what the third test below proves.
-installCodingCapabilityRuntime(createCodingCapabilityRuntime({
+installCodingCapabilityRuntime(codingWithSubstrate({
     authorityStore: grantStore([{ capabilityId: "coding.git.read" }]),
     acknowledge: () => ({ ok: true, receipt: "ratified-fixture-ack" })
 }));

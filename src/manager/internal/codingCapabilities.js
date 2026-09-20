@@ -181,9 +181,9 @@ const runtimeGate = new WeakSet();
  *   evaluation is possible and everything reports OWNER_RATIFICATION_REQUIRED.
  * @param {Function|null} options.acknowledge  durable audit acknowledgement port
  */
-function createCodingCapabilityRuntime({ authorityStore = null, acknowledge = null } = {}) {
+function createCodingCapabilityRuntime({ authorityStore = null, acknowledge = null, replayStore = null, requireRollbackResistance = true } = {}) {
 
-    const bridge = new CanonicalCapabilityExecution();
+    const bridge = new CanonicalCapabilityExecution({ replayStore, requireRollbackResistance });
     const drivers = loadDrivers();
     const invocations = new Map();     // capabilityId -> real driver invocations
     const byDriver = new Map();        // driver name -> { capabilityId, methods }

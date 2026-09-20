@@ -1,5 +1,7 @@
 "use strict";
 
+const { createRollbackResistantLedger } = require("../../helpers/rollbackSubstrate");
+
 /**
  * W8-IW1 Phase 3A — canonical capability execution bridge.
  *
@@ -62,7 +64,7 @@ function ackedAcknowledger() {
 
 /** A bridge with one always-authorized capability whose driver can be observed. */
 async function composed({ capabilityId = "coding.lsp.query", consequential = true, verifier, driver } = {}) {
-    const bridge = new CanonicalCapabilityExecution();
+    const bridge = new CanonicalCapabilityExecution({ replayStore: createRollbackResistantLedger() });
     const calls = [];
     bridge.registerCapability({
         capabilityId,
@@ -289,7 +291,7 @@ test("bridge: audit acknowledgement failure cannot yield canonical success", asy
     ];
 
     for (const { name, install } of cases) {
-        const bridge = new CanonicalCapabilityExecution();
+        const bridge = new CanonicalCapabilityExecution({ replayStore: createRollbackResistantLedger() });
         const calls = [];
         const capabilityId = "coding.git.patch";
         bridge.registerCapability({
@@ -325,7 +327,7 @@ test("bridge: malformed requests are typed refusals and never throw", async () =
 });
 
 test("bridge: the driver table is closure-private (no exported resolver)", () => {
-    const bridge = new CanonicalCapabilityExecution();
+    const bridge = new CanonicalCapabilityExecution({ replayStore: createRollbackResistantLedger() });
     const surface = Object.keys(bridge);
     for (const name of surface) {
         assert.ok(!/driver|resolver|resolve|table/i.test(name), `${name} must not expose drivers`);

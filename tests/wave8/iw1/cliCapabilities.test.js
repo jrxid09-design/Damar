@@ -1,5 +1,12 @@
 "use strict";
 
+const { createRollbackResistantLedger } = require("../../helpers/rollbackSubstrate");
+
+/** W8-IW1: consequential execution requires a rollback-resistant replay substrate. */
+function cliWithSubstrate(opts = {}) {
+    return createCliCapabilityRuntime({ ...opts, replayStore: opts.replayStore ?? createRollbackResistantLedger() });
+}
+
 /**
  * W8-IW1 Phase 3B — CLI capability family.
  *
@@ -78,7 +85,7 @@ test("cli/structural: src/cli/index.js holds no process-spawning sink", () => {
 // ---------------------------------------------------------------- B. UNRATIFIED
 
 test("cli/unratified: no authority store denies every CLI capability with zero effect", async () => {
-    const runtime = createCliCapabilityRuntime({ acknowledge: ack });
+    const runtime = cliWithSubstrate({ acknowledge: ack });
     for (const [rawId, spec] of Object.entries(CATALOGUE)) {
         for (const operation of spec.operations) {
             const result = await runtime.execute({ capabilityId: rawId, operation, parameters: { target: "user@host" } });
@@ -96,7 +103,7 @@ test("cli/unratified: no authority store denies every CLI capability with zero e
 });
 
 test("cli/unratified: a store without a grant denies and starts no process", async () => {
-    const runtime = createCliCapabilityRuntime({ authorityStore: grantStore([]), acknowledge: ack });
+    const runtime = cliWithSubstrate({ authorityStore: grantStore([]), acknowledge: ack });
     const result = await runtime.execute({ capabilityId: "cli.daemon.start", operation: "serve", parameters: {} });
     assert.equal(result.denied, true);
     assert.equal(result.state, STATE.AVAILABLE_BUT_NOT_AUTHORIZED);
@@ -106,7 +113,7 @@ test("cli/unratified: a store without a grant denies and starts no process", asy
 
 test("cli/unratified: a denied ssh request never reaches the driver", async () => {
     const spy = recordingDriver({ ok: true, localPort: 1 });
-    const runtime = createCliCapabilityRuntime({
+    const runtime = cliWithSubstrate({
         authorityStore: grantStore([]),
         acknowledge: ack,
         driverOverrides: { "cli.ssh.tunnel": { open: spy.driver } }
@@ -120,7 +127,7 @@ test("cli/unratified: a denied ssh request never reaches the driver", async () =
 
 test("cli/ratified: an ACTIVE grant executes through authority, verification and audit", async () => {
     const spy = recordingDriver({ ok: true, localPort: 43210, sshTarget: "user@host" });
-    const runtime = createCliCapabilityRuntime({
+    const runtime = cliWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "cli.ssh.tunnel" }]),
         acknowledge: (entry) => { ack(entry); return { ok: true, receipt: "cli-ack" }; },
         driverOverrides: { "cli.ssh.tunnel": { open: spy.driver } }
@@ -147,7 +154,7 @@ test("cli/ratified: an ACTIVE grant executes through authority, verification and
 
 test("cli/ratified: driver substitution cannot widen authority (identity is capability-bound)", async () => {
     const spy = recordingDriver({ ok: true, pid: 1234 });
-    const runtime = createCliCapabilityRuntime({
+    const runtime = cliWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "cli.ssh.tunnel" }]),
         acknowledge: ack,
         driverOverrides: { "cli.daemon.start": { serve: spy.driver } }
@@ -160,7 +167,7 @@ test("cli/ratified: driver substitution cannot widen authority (identity is capa
 
 test("cli/ratified: verification failure withholds canonical completion", async () => {
     const spy = recordingDriver({ ok: false, error: "TUNNEL_NOT_READY" });
-    const runtime = createCliCapabilityRuntime({
+    const runtime = cliWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "cli.ssh.tunnel" }]),
         acknowledge: ack,
         driverOverrides: { "cli.ssh.tunnel": { open: spy.driver } }
@@ -173,7 +180,7 @@ test("cli/ratified: verification failure withholds canonical completion", async 
 
 test("cli/ratified: audit acknowledgement failure withholds canonical completion", async () => {
     const spy = recordingDriver({ ok: true, localPort: 4242 });
-    const runtime = createCliCapabilityRuntime({
+    const runtime = cliWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "cli.ssh.tunnel" }]),
         acknowledge: () => ({ ok: false }),
         driverOverrides: { "cli.ssh.tunnel": { open: spy.driver } }
@@ -187,7 +194,7 @@ test("cli/ratified: audit acknowledgement failure withholds canonical completion
 
 test("cli/binding: malformed target is refused before authority (zero effect)", async () => {
     const spy = recordingDriver({ ok: true, localPort: 1 });
-    const runtime = createCliCapabilityRuntime({
+    const runtime = cliWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "cli.ssh.tunnel" }]),
         acknowledge: ack,
         driverOverrides: { "cli.ssh.tunnel": { open: spy.driver } }
@@ -201,7 +208,7 @@ test("cli/binding: malformed target is refused before authority (zero effect)", 
 });
 
 test("cli/binding: wrong capability and wrong operation fail closed", async () => {
-    const runtime = createCliCapabilityRuntime({
+    const runtime = cliWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "cli.ssh.tunnel" }]),
         acknowledge: ack
     });
@@ -217,7 +224,7 @@ test("cli/binding: wrong capability and wrong operation fail closed", async () =
 
 test("cli/binding: wrong principal and scope mismatch fail closed", async () => {
     const spy = recordingDriver({ ok: true, localPort: 4141 });
-    const bound = createCliCapabilityRuntime({
+    const bound = cliWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "cli.ssh.tunnel", identityBinding: { principals: ["owner"] } }]),
         acknowledge: ack,
         driverOverrides: { "cli.ssh.tunnel": { open: spy.driver } }
@@ -229,7 +236,7 @@ test("cli/binding: wrong principal and scope mismatch fail closed", async () => 
     assert.equal(intruder.denied, true);
     assert.equal(intruder.reason, "CAP_IDENTITY_MISMATCH");
 
-    const scoped = createCliCapabilityRuntime({
+    const scoped = cliWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "cli.ssh.tunnel", scope: ["host:example.com"] }]),
         acknowledge: ack,
         driverOverrides: { "cli.ssh.tunnel": { open: spy.driver } }
@@ -241,7 +248,7 @@ test("cli/binding: wrong principal and scope mismatch fail closed", async () => 
 });
 
 test("cli/binding: expired and revoked grants fail closed", async () => {
-    const expired = createCliCapabilityRuntime({
+    const expired = cliWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "cli.ssh.tunnel", expiresAt: new Date(Date.now() - 1000).toISOString() }]),
         acknowledge: ack
     });
@@ -249,7 +256,7 @@ test("cli/binding: expired and revoked grants fail closed", async () => {
     assert.equal(expiredResult.denied, true);
     assert.equal(expiredResult.reason, "CAP_EXPIRED");
 
-    const revoked = createCliCapabilityRuntime({
+    const revoked = cliWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "cli.ssh.tunnel", status: "REVOKED" }]),
         acknowledge: ack
     });
@@ -261,7 +268,7 @@ test("cli/binding: expired and revoked grants fail closed", async () => {
 
 test("cli/binding: identical request cannot run twice; changed parameters are a new request", async () => {
     const spy = recordingDriver({ ok: true, localPort: 4242 });
-    const runtime = createCliCapabilityRuntime({
+    const runtime = cliWithSubstrate({
         authorityStore: grantStore([{ capabilityId: "cli.ssh.tunnel" }]),
         acknowledge: ack,
         driverOverrides: { "cli.ssh.tunnel": { open: spy.driver } }
@@ -279,14 +286,14 @@ test("cli/binding: identical request cannot run twice; changed parameters are a 
 });
 
 test("cli/binding: the runtime exposes no seam accepting a caller-supplied evaluation", () => {
-    const runtime = createCliCapabilityRuntime({ acknowledge: ack });
+    const runtime = cliWithSubstrate({ acknowledge: ack });
     for (const key of Object.keys(runtime)) {
         assert.ok(!/evaluation|grant|authorize/i.test(key), `runtime must not expose authority input: ${key}`);
     }
 });
 
 test("cli/proposal: the ratification bundle is unsigned and grants nothing", async () => {
-    const runtime = createCliCapabilityRuntime({ authorityStore: grantStore([]), acknowledge: ack });
+    const runtime = cliWithSubstrate({ authorityStore: grantStore([]), acknowledge: ack });
     const bundle = runtime.ratificationProposal();
     assert.equal(bundle.kind, "OWNER_RATIFICATION_PROPOSAL");
     assert.equal(bundle.status, "UNSIGNED_NOT_ACTIVE");
