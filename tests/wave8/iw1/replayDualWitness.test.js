@@ -293,6 +293,28 @@ test("I: a local anchor BEHIND is healed; AHEAD fails closed", async () => {
         /REPLAY_ANCHOR_MISMATCH|REPLAY_TRUNCATION_DETECTED/);
 });
 
+test("K: a local anchor that was NEVER created heals when an EXTERNAL witness carries the commit", async () => {
+    const root = dir();
+    const file = path.join(root, "replay.sqlite");
+    const storeFile = path.join(root, "ext.json");
+    const port = makePort(storeFile);
+    const ledger = createCanonicalReplayLedger({ file, rollbackAnchor: port });
+
+    // Break the local anchor write BEFORE the very first commit ever made.
+    const restore = breakLocal(file);
+    let r = null;
+    try { r = await ledger.reserve(bind("A")); } finally { restore(); }
+    assert.equal(r.reserved, true, "the external witness alone is sufficient");
+    assert.equal(externalSeq(storeFile), 1);
+    assert.equal(localSeq(file), null, "the local anchor was never created");
+
+    // The transient fault clears: the ledger must NOT be bricked.
+    const fresh = createCanonicalReplayLedger({ file, rollbackAnchor: port });
+    assert.equal((await fresh.lookup("A")).state, "RESERVED", "a missing local anchor must not brick reads");
+    assert.equal((await fresh.reserve(bind("B"))).reserved, true, "and it must heal on the writer path");
+    assert.equal(localSeq(file), 2, "the local anchor heals to the authenticated head");
+});
+
 test("J: repeated witness faults across reservations never resurrect or duplicate", async () => {
     const root = dir();
     const file = path.join(root, "replay.sqlite");
