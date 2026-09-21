@@ -314,19 +314,20 @@ test("P1: a mid-write failure of the anchor write never truncates the live ancho
         }
         return origWrite.call(fs, fd, data, ...rest);
     };
-    let outcome = null;
-    try { outcome = await ledger.reserve(bind("B")); } finally { fs.writeSync = origWrite; }
-    // A post-commit anchor-persist failure must NOT reject a landed reservation.
-    assert.equal(outcome.reserved, true, "a committed reservation must survive an anchor-write failure");
+    let err = null;
+    try { await ledger.reserve(bind("B")); } catch (e) { err = e; }
+    finally { fs.writeSync = origWrite; }
+    // No trusted witness advanced: the committed head is UNACKNOWLEDGED, so the
+    // operation must fail closed rather than report a success it cannot vouch for.
+    assert.match(String(err && err.message), /REPLAY_HEAD_UNWITNESSED/, "an unwitnessed committed head must fail closed");
 
     // The live anchor must be untouched (the previous valid payload), not 0 bytes.
     assert.equal(fs.readFileSync(anchorFile, "utf8"), before, "a failed anchor write must not truncate the live anchor");
 
-    // And the ledger must not be poisoned.
+    // The committed digest stays consumed, and the ledger recovers once a witness advances.
     const fresh = createCanonicalReplayLedger({ file });
-    assert.equal((await fresh.reserve(bind("C"))).reserved, true, "ledger must self-heal, not deny forever");
-    assert.equal((await fresh.reserve(bind("A"))).reserved, false, "consumed digests stay consumed");
-    assert.equal((await fresh.reserve(bind("B"))).reserved, false, "the committed digest stays consumed even though its anchor write failed");
+    assert.equal((await fresh.reserve(bind("B"))).reserved, false, "the committed digest stays consumed");
+    assert.equal((await fresh.reserve(bind("C"))).reserved, true, "the ledger recovers once a witness can advance");
 });
 
 test("P1: a non-throwing SHORT write of the anchor leaves the live anchor intact, and progressing short writes complete", async () => {
@@ -345,12 +346,14 @@ test("P1: a non-throwing SHORT write of the anchor leaves the live anchor intact
         if (!stuck && text.includes("anchorHmac")) { stuck = true; return 0; }
         return origWrite.call(fs, fd, data, ...rest);
     };
-    let outcome = null;
-    try { outcome = await ledger.reserve(bind("B")); } finally { fs.writeSync = origWrite; }
-    assert.equal(outcome.reserved, true, "the committed reservation must survive a short-write failure");
+    let err = null;
+    try { await ledger.reserve(bind("B")); } catch (e) { err = e; }
+    finally { fs.writeSync = origWrite; }
+    assert.match(String(err && err.message), /REPLAY_HEAD_UNWITNESSED/, "a stuck short write must fail closed");
     assert.equal(fs.readFileSync(anchorFile, "utf8"), before, "the live anchor must never be corrupted by a short write");
 
     const fresh = createCanonicalReplayLedger({ file });
+    assert.equal((await fresh.reserve(bind("B"))).reserved, false, "the committed digest stays consumed");
     assert.equal((await fresh.reserve(bind("C"))).reserved, true, "ledger must self-heal after a short-write failure");
 
     // (b) a PROGRESSING short write must be completed, never truncated.
@@ -437,12 +440,14 @@ test("P1: an over-reported writeSync count is rejected and never corrupts the li
         if (!inflated && text.includes("anchorHmac")) { inflated = true; return 999999; }
         return origWrite.call(fs, fd, data, ...rest);
     };
-    let outcome = null;
-    try { outcome = await ledger.reserve(bind("B")); } finally { fs.writeSync = origWrite; }
-    assert.equal(outcome.reserved, true, "the committed reservation must survive an over-reported write count");
+    let err = null;
+    try { await ledger.reserve(bind("B")); } catch (e) { err = e; }
+    finally { fs.writeSync = origWrite; }
+    assert.match(String(err && err.message), /REPLAY_HEAD_UNWITNESSED/, "an over-reported count must fail closed");
     assert.equal(fs.readFileSync(anchorFile, "utf8"), before, "the live anchor must be intact");
 
     const fresh = createCanonicalReplayLedger({ file });
+    assert.equal((await fresh.reserve(bind("B"))).reserved, false, "the committed digest stays consumed");
     assert.equal((await fresh.reserve(bind("C"))).reserved, true, "ledger must self-heal");
 });
 
@@ -506,9 +511,12 @@ test("P1: a transient rename failure is retried, and a persistent one never stra
         if (String(dst) === anchorFile) { const e = new Error("EPERM"); e.code = "EPERM"; throw e; }
         return origRename2.call(fs, src, dst);
     };
-    let r2 = null;
-    try { r2 = await ledger.reserve(bind("C")); } finally { fs.renameSync = origRename2; }
-    assert.equal(r2.reserved, true, "a persistently failing anchor write must not strand the digest");
+    let r2 = null, err2 = null;
+    try { r2 = await ledger.reserve(bind("C")); } catch (e) { err2 = e; }
+    finally { fs.renameSync = origRename2; }
+    assert.equal(r2, null, "a persistently failing witness must not report success");
+    assert.match(String(err2 && err2.message), /REPLAY_HEAD_UNWITNESSED/);
+    // It is not silently retryable: the committed digest stays consumed and observable.
     assert.equal((await ledger.lookup("C")).state, "RESERVED", "the committed digest must be observable");
 });
 
@@ -550,14 +558,16 @@ test("P1: a persistently failing anchor heal does not block unrelated reservatio
         return origRename.call(fs, src, dst);
     };
     try {
-        // A brand-new digest must still reserve; an unhealable anchor must never
-        // surface a raw error or deny new reservations.
-        assert.equal((await ledger.reserve(bind("C"))).reserved, true, "an unhealable anchor must not block new reservations");
-        // Read-only lookup must not throw either.
+        // An unhealable trusted witness must fail closed: no success may be
+        // reported while the committed head is unacknowledged.
+        let err = null;
+        try { await ledger.reserve(bind("C")); } catch (e) { err = e; }
+        assert.match(String(err && err.message), /REPLAY_HEAD_UNWITNESSED/, "an unhealable witness must fail closed");
+        // Reads over intact, authenticated history remain valid.
         assert.equal((await ledger.lookup("A")).state, "RESERVED");
     } finally { fs.renameSync = origRename; }
 
-    // Once the write path recovers, the next writer heals the anchor.
+    // Once the write path recovers, the next writer reconciles and the ledger proceeds.
     assert.equal((await ledger.reserve(bind("D"))).reserved, true);
     assert.equal(JSON.parse(fs.readFileSync(anchorFile, "utf8")).seq, 4, "the anchor must heal once the write path recovers");
 });

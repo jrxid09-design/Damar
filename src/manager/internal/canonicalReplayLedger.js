@@ -215,7 +215,12 @@ function createCanonicalReplayLedger({
         await dbCall(db, "run", "CREATE INDEX IF NOT EXISTS idx_replay_digest ON replay_events(digest)");
         // P0-1: replay_current is no longer a trusted source. Drop any legacy
         // table so no unauthenticated cache can ever influence execution.
-                await dbCall(db, "run", "DROP TABLE IF EXISTS replay_current");
+                // Committed-but-UNACKNOWLEDGED heads. Written in the SAME transaction as
+        // the event, so a crash after COMMIT but before any witness advances is
+        // an explicit, durable recovery state rather than a silent success. This
+        // is NOT a replay-authority cache: it can only ever force refusal.
+        await dbCall(db, "run", "CREATE TABLE IF NOT EXISTS replay_unwitnessed(seq INTEGER PRIMARY KEY,event_hmac TEXT NOT NULL,at_ms INTEGER NOT NULL)");
+        await dbCall(db, "run", "DROP TABLE IF EXISTS replay_current");
                 return;
             } catch (error) {
                 const text = String((error && error.code) || "") + " " + String((error && error.message) || "");
@@ -257,6 +262,25 @@ function createCanonicalReplayLedger({
                 if (hmac(key, canonicalCore) !== r.event_hmac) throw new Error("REPLAY_LEDGER_INTEGRITY_FAILURE");
                 previous = r.event_hmac;
                 latest.set(r.digest, r);   // last occurrence wins: derived current state
+            }
+
+            // DURABLE UNACKNOWLEDGED HEAD. A committed head is only safe once a
+            // TRUSTED witness has durably advanced past it. If a higher head was
+            // ever committed, truncating replay_events below it is DETECTED here
+            // even when every anchor still agrees with the truncated DB.
+            const pending = await new Promise((resolve, reject) =>
+                db.all("SELECT seq FROM replay_unwitnessed ORDER BY seq", [], (e, r) => (e ? reject(e) : resolve(r))));
+            if (pending.length) {
+                const highest = pending[pending.length - 1].seq;
+                if (highest > rows.length) throw new Error("REPLAY_TRUNCATION_DETECTED");
+                // History is intact but the head is unacknowledged. A read is still
+                // valid (the rows are HMAC-authenticated); only a writer reconciles,
+                // and only with independent witness advancement.
+                if (heal) {
+                    const status = await persistAnchors(rows.length, previous);
+                    if (!status.witnessOk) throw new Error("REPLAY_HEAD_UNWITNESSED: " + describePersistence(status));
+                    await markWitnessed(rows.length);
+                }
             }
 
             // Local keyed anchor: detects db-only tampering/truncation.
@@ -353,17 +377,27 @@ function createCanonicalReplayLedger({
             [seq, core.digest, core.state, core.capabilityId, core.operation, core.principal,
              JSON.stringify(core.scope), core.authorityGeneration, core.driverId, atMs, core.prev, eventHmac]);
 
+        // Same transaction as the event: either both land or neither does.
+        await dbCall(db, "run", "INSERT OR REPLACE INTO replay_unwitnessed(seq,event_hmac,at_ms) VALUES(?,?,?)",
+            [seq, eventHmac, atMs]);
+
         return { seq, eventHmac };
     }
 
-    /** Persist the head AFTER a successful COMMIT. A failure here leaves the
-     *  anchor BEHIND the authenticated chain, which snapshot() repairs forward;
-     *  the committed reservation stays consumed, so no duplicate effect occurs. */
+    /** Attempt BOTH witnesses INDEPENDENTLY and REPORT the outcome; the caller
+     *  decides, because the trust model differs. When an EXTERNAL anchor is
+     *  configured it is the only rollback-resistant witness and the local,
+     *  co-located anchor MUST NOT substitute for it. Both diagnostics are always
+     *  preserved so operators can distinguish external / local / both failures. */
+    function describePersistence(status) {
+        const parts = [
+            "external=" + (status.externalOk === null ? "not-configured" : (status.externalOk ? "ok" : "FAILED(" + String(status.externalError && status.externalError.message) + ")")),
+            "local=" + (status.localOk ? "ok" : "FAILED(" + String(status.localError && status.localError.message) + ")")
+        ];
+        return parts.join("; ");
+    }
+
     async function persistAnchors(seq, eventHmac) {
-        // The EXTERNAL head is the actually rollback-resistant one, so it is
-        // advanced FIRST and INDEPENDENTLY of the local, co-located anchor. A
-        // local anchor fault must never suppress it, or a DB-only truncation
-        // could go undetected and resurrect a consumed digest.
         let externalError = null;
         if (rollbackAnchor) {
             try { rollbackAnchor.commit(seq, eventHmac); }
@@ -373,10 +407,21 @@ function createCanonicalReplayLedger({
         try { await writeTrustedAnchor(anchorFile, seq, eventHmac, key); }
         catch (error) { localError = error; }
 
-        // Typed so callers can distinguish "the event IS durably committed and
-        // the head will self-heal" from a genuine pre-commit failure.
-        if (externalError) throw new Error("REPLAY_ROLLBACK_ANCHOR_COMMIT_FAILED: " + String(externalError && externalError.message));
-        if (localError) throw new Error("REPLAY_ANCHOR_PERSIST_FAILED: " + String(localError && localError.message));
+        const externalOk = rollbackAnchor ? externalError === null : null;
+        const localOk = localError === null;
+        return {
+            externalOk,
+            localOk,
+            witnessOk: rollbackAnchor ? externalOk === true : localOk === true,
+            externalError,
+            localError
+        };
+    }
+
+    /** Clear the durable marker only once a trusted witness has advanced. */
+    async function markWitnessed(seq) {
+        try { await dbCall(db, "run", "DELETE FROM replay_unwitnessed WHERE seq <= ?", [seq]); }
+        catch { /* best-effort; snapshot() reconciles on the next call */ }
     }
 
     function sameBinding(r, b) {
@@ -424,12 +469,16 @@ function createCanonicalReplayLedger({
                 }
                 const { seq, eventHmac } = await insertEvent(binding, STATES.RESERVED, s);
                 await dbCall(db, "run", "COMMIT");
-                // The row is durably committed: a post-commit anchor-persist
-                // failure must never reject a reservation that already landed
-                // (that would strand the digest). The anchor heals on the next
-                // snapshot before any driver runs.
-                try { await persistAnchors(seq, eventHmac); }
-                catch (error) { if (!/REPLAY_ANCHOR_PERSIST_FAILED|REPLAY_ROLLBACK_ANCHOR_COMMIT_FAILED/.test(String(error.message))) throw error; }
+                // DB COMMIT != SAFE COMPLETION. The committed head is acknowledged
+                // only once a TRUSTED witness has durably advanced to it. If none
+                // has, fail closed: the durable marker keeps this fail-closed
+                // across restart so a later truncation to the frozen anchor point
+                // is still detected and this digest is NOT re-executable.
+                const persistence = await persistAnchors(seq, eventHmac);
+                if (!persistence.witnessOk) {
+                    throw new Error("REPLAY_HEAD_UNWITNESSED: " + describePersistence(persistence));
+                }
+                await markWitnessed(seq);
                 return { reserved: true };
             } catch (error) {
                 try { await dbCall(db, "run", "ROLLBACK"); } catch { /* already rolled back */ }
@@ -445,8 +494,11 @@ function createCanonicalReplayLedger({
                 if (!s.latest.has(digest)) throw new Error("REPLAY_LEDGER_MISSING_RESERVATION");
                 const { seq, eventHmac } = await insertEvent({ ...binding, digest }, state, s);
                 await dbCall(db, "run", "COMMIT");
-                try { await persistAnchors(seq, eventHmac); }
-                catch (error) { if (!/REPLAY_ANCHOR_PERSIST_FAILED|REPLAY_ROLLBACK_ANCHOR_COMMIT_FAILED/.test(String(error.message))) throw error; }
+                const persistence = await persistAnchors(seq, eventHmac);
+                if (!persistence.witnessOk) {
+                    throw new Error("REPLAY_HEAD_UNWITNESSED: " + describePersistence(persistence));
+                }
+                await markWitnessed(seq);
                 return true;
             } catch (error) {
                 try { await dbCall(db, "run", "ROLLBACK"); } catch { /* already rolled back */ }
