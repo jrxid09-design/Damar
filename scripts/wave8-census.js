@@ -191,7 +191,7 @@ function stripComments(source) {
             }
             if (c === "/" && c2 === "/") { stack.push({ kind: "line_comment" }); code += "  "; raw += "  "; i += 2; continue; }
             if (c === "/" && c2 === "*") { stack.push({ kind: "block_comment" }); code += "  "; raw += "  "; i += 2; continue; }
-            if (c === "`") { stack.push({ kind: "template" }); code += " "; raw += c; i += 1; continue; }
+            if (c === "`") { stack.push({ kind: "template" }); code += "`"; raw += c; i += 1; continue; }
             if (c === '"' || c === "'") { stack.push({ kind: "string", quote: c }); code += " "; raw += c; i += 1; continue; }
             code += c; raw += c; i += 1; continue;
         }
@@ -212,9 +212,11 @@ function stripComments(source) {
             code += blank(c); raw += c; i += 1; continue;
         }
 
-        // kind === "template": text is DATA (blanked in `code`); `${` is CODE.
+        // kind === "template": text is DATA (blanked in `code`); `${` is CODE. The
+        // delimiter itself survives, because a tagged template INVOKES the function it
+        // is attached to (`root.load`x``) — the delimiter is syntax, not content.
         if (c === "\\") { code += "  "; raw += c + c2; i += 2; continue; }
-        if (c === "`") { stack.pop(); code += " "; raw += c; i += 1; continue; }
+        if (c === "`") { stack.pop(); code += "`"; raw += c; i += 1; continue; }
         if (c === "$" && c2 === "{") { stack.push({ kind: "interp", brace: 0 }); code += "${"; raw += "${"; i += 2; continue; }
         code += blank(c); raw += c; i += 1; continue;
     }
@@ -324,9 +326,9 @@ const CALL = "\\s*(?:\\?\\.|\\.)\\s*";
 // forms, which RUN the function. `f.bind(...)` is deliberately absent — it only
 // creates a callable; a later call of the bound function is an unmodelled
 // call-shaped use and stays UNCLASSIFIED rather than being silently blessed.
-const INVOKE = "\\s*(?:(?:\\?\\.\\s*)?\\(|\\.\\s*(?:call|apply)\\s*\\()";
+const INVOKE = "\\s*(?:(?:\\?\\.\\s*)?\\(|\\.\\s*(?:call|apply)\\s*\\(|`)";
 // Computed access to an execution surface: `xk`, `x?.k`, `x[k]?.(…)`.
-const COMPUTED = "\\s*(?:\\?\\.\\s*)?\\[\\s*[^\\]]+\\]\\s*(?:\\?\\.\\s*)?\\(";
+const COMPUTED = "\\s*(?:\\?\\.\\s*)?\\[\\s*[^\\]]+\\]\\s*(?:(?:\\?\\.\\s*)?\\(|`)";
 
 const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -354,26 +356,32 @@ function positionOf(text, index) {
 }
 
 /**
- * Walk a traversal chain of ARBITRARY depth from `index` — `.name`, `?.name`,
- * `[expr]`, `?.[expr]`, with whitespace anywhere — and report whether it ends in an
- * INVOCATION: `(`, `?.(`, or a traversal onto `call`/`apply`/`bind` followed by `(`,
- * or a parenthesised/sequence-comma call `(root.a.b)(x)`.
+ * Walk a traversal chain of ARBITRARY depth from `index` — `.name`, `?.name`, `[expr]`,
+ * `?.[expr]`, with whitespace anywhere — and decide whether the value is INVOKED. An
+ * invocation is `(`, `?.(`, a traversal onto `call`/`apply`/`bind` followed by `(`, a
+ * TAGGED TEMPLATE (`` fn`…` ``), or a call reached through parentheses
+ * (`(root).load(x)`, `((root.load))(x)`, `(root.load, 0)(x)`).
  *
- * There is deliberately no per-depth pattern here: a chain is either followed by an
- * invocation or it is a read, however long it is. Runs on the blanked `code` view,
- * where string and comment contents are already spaces.
+ * There is no per-depth or per-syntax pattern here: the chain is followed by either an
+ * invocation or a read, however long it is and however it is wrapped. The one asymmetry
+ * is deliberate: a chain that cannot be parsed is reported as `unparsed`, NOT as a read,
+ * because a parser failure is ambiguity and ambiguity must stay visible.
  *
- * @returns {{members: string[], invoked: boolean}}
+ * Runs on the blanked `code` view, where string and comment contents are already spaces.
+ *
+ * @returns {{members: string[], invoked: boolean, unparsed: boolean, end: number}}
  */
 function readMemberChain(code, index) {
     let i = index;
     const members = [];
+    let unparsed = false;
     const skipWs = () => { while (i < code.length && /\s/.test(code[i])) i += 1; };
     const readIdent = () => {
         const m = /^[A-Za-z_$][\w$]*/.exec(code.slice(i, i + 64));
         return m === null ? null : m[0];
     };
-    // `[ ... ]` including nesting; a newline or an unterminated bracket stops the chain.
+    // `[ ... ]` including nesting and line breaks (a computed access may be wrapped);
+    // running past the bound is a PARSE FAILURE, which the caller must not read as a read.
     const consumeBrackets = () => {
         if (code[i] !== "[") return false;
         let depth = 0;
@@ -384,7 +392,6 @@ function readMemberChain(code, index) {
                 depth -= 1;
                 if (depth === 0) { i = j + 1; return true; }
             }
-            else if (code[j] === "\n") return false;
         }
         return false;
     };
@@ -393,26 +400,27 @@ function readMemberChain(code, index) {
         skipWs();
         const start = i;
         let optional = false;
-        if (code[i] === "?" && code[i + 1] === ".") {
+        // `?.(` is the optional CALL, not an optional member: leave it to the tail check.
+        if (code[i] === "?" && code[i + 1] === "." && code[i + 2] !== "(") {
             i += 2;
             optional = true;
             skipWs();
         }
         if (code[i] === "[") {
-            if (!consumeBrackets()) { i = start; break; }
+            if (!consumeBrackets()) { unparsed = true; i = start; break; }
             members.push("*");
         }
         else if (code[i] === ".") {
             i += 1;
             skipWs();
             const id = readIdent();
-            if (id === null) { i = start; break; }
+            if (id === null) { unparsed = true; i = start; break; }
             i += id.length;
             members.push(id);
         }
         else if (optional) {
             const id = readIdent();
-            if (id === null) { i = start; break; }
+            if (id === null) { unparsed = true; i = start; break; }
             i += id.length;
             members.push(id);
         }
@@ -420,9 +428,122 @@ function readMemberChain(code, index) {
     }
 
     skipWs();
-    const tail = code.slice(i, i + 8);
-    const invoked = /^(?:\?\.\s*)?\(/.test(tail) || (members.length > 0 && /^\)\s*\(/.test(tail));
-    return { members, invoked };
+    let invoked = false;
+    if (invocationAt(code, i)) invoked = true;
+    else if ((code[i] === ")" || code[i] === ",") && !enclosingGroupIsCall(code, i)) {
+        // The value sits inside a parenthesis group or a sequence expression; walk out of
+        // the group and see whether the group, or a traversal on it, is what gets called.
+        const verdict = closeGroupThenInvoke(code, i);
+        if (verdict === "invoked") invoked = true;
+        else if (verdict === "unparsed") unparsed = true;
+    }
+    return { members, invoked, unparsed, end: i };
+}
+
+/**
+ * Whether the value whose chain ends at `index` sits inside the parentheses of a CALL.
+ * `fn(root).load(x)` traverses the call's RESULT and `(root).load(x)` traverses the root
+ * itself: only the second is an unmodelled call-shaped use of the root. An argument is
+ * the documented interprocedural precision limit, so the first must stay a read.
+ */
+function enclosingGroupIsCall(code, index) {
+    let depth = 0;
+    const limit = Math.max(0, index - 600);
+    for (let j = index - 1; j >= limit; j -= 1) {
+        const c = code[j];
+        if (c === ")") depth += 1;
+        else if (c === "(") {
+            if (depth === 0) {
+                const before = code.slice(Math.max(0, j - 32), j).replace(/\s+$/, "");
+                const word = /([A-Za-z_$][\w$]*)$/.exec(before);
+                return /[A-Za-z0-9_$.)\]`]/.test(before.slice(-1)) &&
+                    !(word !== null && GROUP_AFTER_WORD.has(word[1]));
+            }
+            depth -= 1;
+        }
+    }
+    return false;
+}
+
+/** The ways a value is invoked where it stands: `(`, `?.(` or a tagged template. */
+function invocationAt(code, index) {
+    return /^(?:\?\.\s*)?\(/.test(code.slice(index, index + 8)) || code[index] === "`";
+}
+
+/** Words after which a `(` opens a GROUP, not a call head (`typeof (x)`, `return (x)`). */
+const GROUP_AFTER_WORD = new Set([
+    "typeof", "void", "delete", "new", "await", "yield", "return", "throw", "case",
+    "in", "of", "instanceof", "do", "else", "if", "while", "for", "switch", "catch"
+]);
+
+/**
+ * Whether the value starting at `index` is something this expression YIELDS — `(root)`,
+ * `(0, root)`, `root ?? x`, `cond ? root : x` — or something it merely CONSUMES: an
+ * argument (`fn(root)`), an array element (`[root]`) or an object value (`{ k: root }`).
+ *
+ * Only a yielded value can make a binding root-derived. A consumed value produces a
+ * DIFFERENT result, which is the documented interprocedural precision limit: propagating
+ * identity through it would spread "root-derived" across ordinary data flow and turn
+ * every later method call on unrelated data into an unclassified finding.
+ */
+function isYieldedValue(text, index) {
+    const frames = [];
+    for (let i = 0; i < index; i += 1) {
+        const c = text[i];
+        if (c === "(") {
+            const before = text.slice(0, i).replace(/\s+$/, "");
+            const word = /([A-Za-z_$][\w$]*)$/.exec(before);
+            const callHead = /[A-Za-z0-9_$.)\]`]/.test(before.slice(-1)) &&
+                !(word !== null && GROUP_AFTER_WORD.has(word[1]));
+            frames.push(callHead ? "call" : "group");
+        }
+        else if (c === ")") frames.pop();
+        else if (c === "[" || c === "{") frames.push("literal");
+        else if (c === "]" || c === "}") frames.pop();
+    }
+    return !frames.includes("call") && !frames.includes("literal");
+}
+
+/**
+ * The value is an element of a parenthesis group — `(root).load(x)`, `((root.load))(x)`,
+ * `(0, root).load(x)`, `(root.load, 0)(x)`. Walk forward out of that group, past any
+ * sibling groups that close with it, continue any traversal on the group's result and
+ * report whether THAT is invoked.
+ *
+ * Only two answers are safe to act on: a proven invocation, or a proven plain read.
+ * Anything the bounded scan cannot finish is `unparsed` — ambiguity is never a read.
+ *
+ * @returns {"invoked"|"read"|"unparsed"}
+ */
+function closeGroupThenInvoke(code, start) {
+    let i = start;
+    const limit = Math.min(code.length, start + 600);
+    const skipWs = () => { while (i < code.length && /\s/.test(code[i])) i += 1; };
+    let depth = 0;
+    while (i < limit) {
+        const c = code[i];
+        if (c === "(") depth += 1;
+        else if (c === ")") {
+            if (depth === 0) {
+                // This closes the innermost group holding the value; sibling groups close too.
+                i += 1;
+                for (;;) {
+                    skipWs();
+                    if (code[i] !== ")") break;
+                    i += 1;
+                }
+                const chain = readMemberChain(code, i);
+                if (chain.unparsed) return "unparsed";
+                return chain.invoked ? "invoked" : "read";
+            }
+            depth -= 1;
+        }
+        // A statement or object/block boundary at the group's own level means there is no
+        // enclosing group to walk out of: the value is a plain read, not an invoked one.
+        else if ((c === ";" || c === "}") && depth === 0) return "read";
+        i += 1;
+    }
+    return "unparsed";
 }
 /** Sink kind produced by calling `surface` on a root of `kind`. */
 function surfaceKind(kind, surface) {
@@ -594,13 +715,28 @@ function unmodelledRootUses(code, raw, rootValues, inlineRoots, sinkOffsets) {
         ? "\\b" + escapeRe(key.split(".")[0]) + "\\s*(?:\\?\\.|\\.)\\s*" + escapeRe(key.split(".")[1])
         : "\\b" + escapeRe(key);
 
-    // A traversal chain (`.m`, `?.m`, `[k]`, `?.[k]`, any length) and the characters
-    // that may legally END an expression that IS that value.
-    const TRAVERSAL = "(?:\\s*(?:\\?\\.|\\.)\\s*[A-Za-z_$][\\w$]*|\\s*\\??\\.?\\s*\\[\\s*[^\\]\\n]*\\])\\s*";
-    const RHS_END = "(?=[;,)\\]}\\n])";
+    // A binding whose right-hand side CONTAINS a root-derived value without INVOKING it is
+    // root-derived itself: `const c = root`, `const c = (root)`, `c = root ?? fallback`,
+    // `cond ? root : other`, `{ load } = root ?? {}`, `o.load = root.load`. The KIND is
+    // carried over only when the right-hand side IS the value; any other derivation is
+    // UNKNOWN, so a later call on it stays UNCLASSIFIED instead of becoming silently clean.
+    // A right-hand side that INVOKES the value is a call RESULT — data, never the root —
+    // and is deliberately not propagated (`const desc = ToolRegistry.describe()`).
+    const rhsWindow = (from) => {
+        let end = from;
+        const limit = Math.min(code.length, from + 400);
+        while (end < limit && code[end] !== ";" && code[end] !== "\n") end += 1;
+        const text = code.slice(from, end);
+        if (text.trim() !== "") return text;
+        // The value starts on the next line: `const c =\n    root ?? null;`
+        let j = from;
+        const hard = Math.min(code.length, from + 200);
+        while (j < hard && code[j] !== ";") j += 1;
+        return code.slice(from, j);
+    };
 
-    // Bounded fixation (not dataflow): const/let/var, bare reassignment, member
-    // assignment and destructuring, four passes or until nothing new appears.
+    // Bounded fixation (not dataflow): declarations, bare reassignment, member assignment
+    // and destructuring, four passes or until nothing new appears.
     for (let pass = 0; pass < 4; pass += 1) {
         let grew = false;
         const add = (key, kind) => {
@@ -608,28 +744,43 @@ function unmodelledRootUses(code, raw, rootValues, inlineRoots, sinkOffsets) {
             derived.set(key, kind);
             grew = true;
         };
-        for (const [key, kind] of [...derived]) {
-            // The right-hand side must BE the value: a traversal chain of any depth
-            // followed by the end of the expression. Requiring the terminator is what
-            // keeps an INVOKED expression out (`const names = ToolRegistry.describe()`
-            // hands back data, not the registry), and it is one general pattern rather
-            // than a per-depth ladder.
-            const rhs = patternFor(key) + "(?:" + TRAVERSAL + ")*" + RHS_END;
+        if (derived.size === 0) break;
+        const mention = new RegExp("(?:" + [...derived.keys()].map(patternFor).join("|") + ")", "g");
+        const kindOfText = new Map([...derived].map(([key, kind]) => [key.replace(/\s+/g, ""), kind]));
+
+        // Classify one right-hand side: derived (with the value's kind when the RHS IS the
+        // value, UNKNOWN when it merely contains it), or not derived at all.
+        const classify = (window) => {
+            if (window.trim() === "") return null;
+            const lead = window.length - window.trimStart().length;
+            const tailEnd = window.trimEnd().length;
+            mention.lastIndex = 0;
             let m;
-            const decl = new RegExp("(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*" + rhs, "g");
-            while ((m = decl.exec(code)) !== null) add(m[1], kind);
-
-            const bare = new RegExp("[;,({\\[]\\s*([A-Za-z_$][\\w$]*)\\s*=\\s*" + rhs, "g");
-            while ((m = bare.exec(code)) !== null) if (!SKIP_BASES.has(m[1])) add(m[1], kind);
-
-            const member = new RegExp("\\b([A-Za-z_$][\\w$]*)\\s*(?:\\?\\.|\\.)\\s*([A-Za-z_$][\\w$]*)\\s*=\\s*" + rhs, "g");
-            while ((m = member.exec(code)) !== null) {
-                if (!SKIP_BASES.has(m[1])) add(m[1] + "." + m[2], kind);
+            while ((m = mention.exec(window)) !== null) {
+                const chain = readMemberChain(window, m.index + m[0].length);
+                if (chain.invoked) continue;               // a call RESULT: data, not the root
+                if (!isYieldedValue(window, m.index)) continue;   // consumed, not yielded
+                if (chain.unparsed) return { kind: null }; // ambiguity: unknown kind, never clean
+                const exact = m.index === lead && chain.end === tailEnd;
+                return { kind: exact ? kindOfText.get(m[0].replace(/\s+/g, "")) ?? null : null };
             }
+            return null;
+        };
 
-            const destructured = new RegExp("\\(?\\s*\\{([^}]+)\\}\\s*=\\s*" + rhs, "g");
-            while ((m = destructured.exec(code)) !== null) {
-                for (const name of destructuredNames(m[1])) add(name, kind);
+        const sites = [
+            { re: /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*/g, name: (m) => m[1] },
+            { re: /[;,({\[\n]\s*([A-Za-z_$][\w$]*)\s*=\s*/g, name: (m) => m[1], skipBase: true },
+            { re: /\b([A-Za-z_$][\w$]*)\s*(?:\?\.|\.)\s*([A-Za-z_$][\w$]*)\s*=\s*/g, name: (m) => m[1] + "." + m[2], skipBase: true },
+            { re: /\{([^}]+)\}\s*=\s*/g, names: (m) => destructuredNames(m[1]) }
+        ];
+        for (const site of sites) {
+            site.re.lastIndex = 0;
+            let m;
+            while ((m = site.re.exec(code)) !== null) {
+                const verdict = classify(rhsWindow(site.re.lastIndex));
+                if (verdict === null) continue;
+                if (site.names) for (const n of site.names(m)) add(n, verdict.kind);
+                else if (!site.skipBase || !SKIP_BASES.has(m[1])) add(site.name(m), verdict.kind);
             }
         }
         if (!grew) break;
@@ -662,10 +813,12 @@ function unmodelledRootUses(code, raw, rootValues, inlineRoots, sinkOffsets) {
             if (inRegexLiteral(code, index)) continue;          // regex text is data, not a value
             if (sinkOffsets.has(index)) continue;              // a declared execution surface call
             const chain = readMemberChain(code, index + m[0].length);
-            if (!chain.invoked) continue;                       // a read: a form the oracle classifies
+            // A parsed read is a form the oracle classifies; a chain it could not parse is
+            // ambiguity, and ambiguity stays visible.
+            if (!chain.invoked && !chain.unparsed) continue;
             // A single traversal onto a member PROVEN non-executing is a classified
-            // read; anything deeper cannot be proven to be the registry itself.
-            if (chain.members.length === 1 && NON_EXECUTING_MEMBERS[kind]?.has(chain.members[0])) continue;
+            // read; anything deeper — or unparsed — cannot be proven to be the registry itself.
+            if (!chain.unparsed && chain.members.length === 1 && NON_EXECUTING_MEMBERS[kind]?.has(chain.members[0])) continue;
             if (reported.has(index)) continue;
             reported.add(index);
             unknown.push(m[0].replace(/\s+/g, " ") + "…");

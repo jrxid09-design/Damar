@@ -751,3 +751,114 @@ test("census: regex literal text is data in every scanner, live code after it is
     const interp = run(tree("const s = `${pluginLoader.load(p)}`;\nmodule.exports = s;\n"));
     assert.equal(interp.counters.ACTION_CAPABLE_UNGOVERNED, 1, "a live template interpolation is code");
 });
+
+// ---------------------------------------------------------------------------
+// C0-REPAIR-3 (W8-IW1) — a call-shaped tail the scanner cannot parse is NEVER a read,
+// root identity survives guarded/parenthesised aliases but never spreads through values
+// that merely CONSUME the root, and a tagged template is an invocation like any other.
+// ---------------------------------------------------------------------------
+
+const RS_REQUIRE = 'const RS = require("./ToolRegistry.js");\n';
+const tag = String.fromCharCode(96);
+
+test("census: a call reached through parentheses or a sequence is never read", () => {
+    const shapes = {
+        "parenthesised receiver": ROOT_REQUIRE + "(root).load(x);\n",
+        "parenthesised receiver, unknown": ROOT_REQUIRE + "(root).someUnknown(x);\n",
+        "double parentheses": ROOT_REQUIRE + "((root)).load(x);\n",
+        "paren run around a member": ROOT_REQUIRE + "(((root.load)))(x);\n",
+        "sequence with the value last": ROOT_REQUIRE + "(0, root).load(x);\n",
+        "sequence with the value first": ROOT_REQUIRE + "(root.load, 0)(x);\n",
+        "computed across lines, then a member": ROOT_REQUIRE + "root" + OB + "\n  'load'\n" + CB + ".something(x);\n"
+    };
+    for (const [label, body] of Object.entries(shapes)) {
+        assertNeverClean(run(tree(body)), label);
+    }
+
+    // ...while the same receiver used as a value stays classified.
+    const computedCall = run(tree(ROOT_REQUIRE + "root" + OB + "\n  'load'\n" + CB + "(x);\n"));
+    assert.deepEqual(totals(computedCall), { sink: 1, action: 1, unclass: 0 },
+        "a multi-line computed surface call is still a sink");
+});
+
+test("census: reading a root value keeps staying clean", () => {
+    const reads = {
+        "member assigned to a name": ROOT_REQUIRE + "const u = root.userRoot;\nmodule.exports = u;\n",
+        "member passed as an argument": ROOT_REQUIRE + "consume(root.userRoot, { recursive: true });\n",
+        "multi-line argument list": ROOT_REQUIRE + "consume(\n    root.userRoot,\n    { recursive: true }\n);\n",
+        "computed read": ROOT_REQUIRE + "const v = root" + OB + "0" + CB + ";\nmodule.exports = v;\n",
+        "sequence read": ROOT_REQUIRE + "const a = 1;\nconst v = (a, root.userRoot);\nmodule.exports = v;\n"
+    };
+    for (const [label, body] of Object.entries(reads)) assertClean(run(tree(body)), label);
+});
+
+test("census: a guarded or parenthesised alias of a root is still root-derived", () => {
+    const aliases = {
+        "parenthesised": ROOT_REQUIRE + "const c = (root);\nc.load(x);\n",
+        "nested parentheses": ROOT_REQUIRE + "const c = ((root));\nc.load(x);\n",
+        "nullish guard": ROOT_REQUIRE + "const c = root ?? null;\nc.load(x);\n",
+        "OR guard": ROOT_REQUIRE + "const c = root || null;\nc.load(x);\n",
+        "ternary": ROOT_REQUIRE + "const c = 1 ? root : {};\nc.load(x);\n",
+        "reassignment": ROOT_REQUIRE + "let c;\nc = root ?? null;\nc.load(x);\n",
+        "plain alias regression": ROOT_REQUIRE + "const c = root;\nc.load(x);\n"
+    };
+    for (const [label, body] of Object.entries(aliases)) assertNeverClean(run(tree(body)), label);
+
+    const guardedDestructuring = run(tree(ROOT_REQUIRE + "const { load } = root ?? {};\nload(x);\n"));
+    assertUnclassified(guardedDestructuring, "a surface destructured out of a guarded root");
+});
+
+test("census: root identity does not spread through values that merely consume it", () => {
+    // `path.join(root.userRoot, ...)` CONSUMES the value; the result is a path, not the
+    // root, and method calls on it must stay clean (the documented interprocedural limit).
+    const consumed = run(tree(ROOT_REQUIRE + "const dir = path.join(root.userRoot, 'plugins');\n" +
+        "const names = fs.readdirSync(dir);\n" +
+        "const hit = names.filter(n => n.includes('x'));\n" +
+        "module.exports = hit.length;\n"));
+    assertClean(consumed, "a value computed FROM a root read");
+
+    const passed = run(tree(ROOT_REQUIRE + "fn(root);\nconst v = fn(root).someUnknown(x);\nmodule.exports = v;\n"));
+    assertClean(passed, "the result of passing a root into a helper");
+});
+
+test("census: a call RESULT never becomes root identity", () => {
+    const asData = {
+        "describe() result": "const desc = ToolRegistry.describe();\nconst v = desc.find(x);\nmodule.exports = v;\n",
+        "count() result": "const n = ToolRegistry.count();\nconst v = n.someMethod();\nmodule.exports = v;\n",
+        "guarded describe() result": 'const { ToolRegistry } = require("./barrel-mixed.js");\n' +
+            "const names = ToolRegistry.describe();\nconst v = names.filter(n => n);\nmodule.exports = v.length;\n"
+    };
+    for (const [label, body] of Object.entries(asData)) assertClean(run(tree(body, BARREL_MIXED)), label);
+
+    const readThenCall = run(tree(ROOT_REQUIRE + "const g = root.loaded.get(id);\nmodule.exports = g;\n"));
+    assertNeverClean(readThenCall, "a call made on the result of a root member read");
+});
+
+test("census: a tagged template invokes the surface it is attached to", () => {
+    const surfaces = {
+        "unbound literal root": "pluginLoader.load" + tag + "x" + tag + ";\n",
+        "literal registry": "ToolRegistry.execute" + tag + "x" + tag + ";\n",
+        "module-bound root": ROOT_REQUIRE + "root.load" + tag + "x" + tag + ";\n",
+        "registry alias": RS_REQUIRE + "RS.execute" + tag + "x" + tag + ";\n",
+        "optional member": ROOT_REQUIRE + "root?.load" + tag + "x" + tag + ";\n"
+    };
+    for (const [label, body] of Object.entries(surfaces)) {
+        const report = run(tree(body));
+        assert.deepEqual(totals(report), { sink: 1, action: 1, unclass: 0 }, `${label}: tagged surface call`);
+    }
+
+    const unknownTag = run(tree(ROOT_REQUIRE + "root.someUnknown" + tag + "x" + tag + ";\n"));
+    assertUnclassified(unknownTag, "an unknown tagged call on a root");
+    const deepTag = run(tree(ROOT_REQUIRE + "root.a.b" + tag + "x" + tag + ";\n"));
+    assertUnclassified(deepTag, "a deep tagged call on a root");
+
+    const controls = {
+        "plain template text": "const s = " + tag + "pluginLoader.load(x)" + tag + ";\nmodule.exports = s;\n",
+        "tag on an ordinary local": "const f = (s) => s;\nmodule.exports = f" + tag + "x" + tag + ";\n",
+        "literal control": "const s = " + tag + "no surfaces here" + tag + ";\nmodule.exports = s;\n"
+    };
+    for (const [label, body] of Object.entries(controls)) assertClean(run(tree(body)), label);
+
+    const interpolation = run(tree("const s = " + tag + "x ${pluginLoader.load(x)}" + tag + ";\nmodule.exports = s;\n"));
+    assert.equal(interpolation.counters.ACTION_CAPABLE_UNGOVERNED, 1, "an interpolated call is still live");
+});
