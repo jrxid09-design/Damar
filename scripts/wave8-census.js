@@ -644,10 +644,29 @@ function detectSinksDetailed(source, registryAliases, rootRequires = []) {
 
     // Direct handler/tool invocation shapes.
     scan(new RegExp("\\b(?:tool|handler|toolInstance|instance|registered)" + CALL + "execute" + INVOKE, "g"), "tool_handler_invocation");
-    // Bare handler( call forms only: a prefix that implies invocation, minus a
-    // definition body (`handler(a) { ... }`), so declarations and object-literal
-    // methods are not false positives.
-    scan(/(?:^|[;=(\[,]|\breturn\b|\bawait\b)\s*handler\s*\((?![^()]*\)\s*\{)/g, "tool_handler_invocation");
+    // Bare `handler(...)` is a tool/handler REFERENCE invocation. The name alone proves
+    // nothing: `const handler = HANDLERS[env.type]` is a pure local reducer table
+    // (src/cognition/continuity/reducers.js documents "no IO here"), so calling it is a
+    // name coincidence rather than an execution surface. The bare form therefore counts
+    // only when `handler` cannot be proven local: it is bound from a declared root or
+    // facade, it is a parameter (the interprocedural case the oracle keeps visible), or
+    // nothing declares it at all. Anything ambiguous is still scanned.
+    const rootRefs = [
+        ...registryAliases.map((alias) => escapeRe(alias.name)),
+        ...Object.keys(ROOT_IDENTIFIERS).map(escapeRe),
+        ...rootRequires.map((r) => "require\\s*\\(\\s*" + Q + escapeRe(r.spec) + Q + "\\s*\\)")
+    ];
+    const boundFromRoot = rootRefs.length > 0 &&
+        new RegExp("\\bhandler\\s*=\\s*(?:" + rootRefs.join("|") + ")", "g").test(code);
+    const declaredLocal = /(?:const|let|var)\s+handler\s*=/.test(code);
+    // A real parameter list: `handler` is the whole entry (`(handler)`, `f(a, handler)`),
+    // so `if (!handler) {` — a condition, not a parameter — does not qualify.
+    const asParameter = /(?:\(|,)\s*handler\s*(?:,[^)]*)?\)\s*(?:=>|\{)/.test(code);
+    if (boundFromRoot || asParameter || !declaredLocal) {
+        // `{` and `}` join the prefix class: a call at the head of a block body is a
+        // statement, and treating it as a read is the "unrecognised syntax => READ" trap.
+        scan(/(?:^|[;=(\[{,}]|\breturn\b|\bawait\b)\s*handler\s*\((?![^()]*\)\s*\{)/g, "tool_handler_invocation");
+    }
 
     // Process / shell: specifier-based (so documentation strings cannot match)
     // plus the classic driver calls.
