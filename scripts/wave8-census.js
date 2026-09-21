@@ -644,29 +644,18 @@ function detectSinksDetailed(source, registryAliases, rootRequires = []) {
 
     // Direct handler/tool invocation shapes.
     scan(new RegExp("\\b(?:tool|handler|toolInstance|instance|registered)" + CALL + "execute" + INVOKE, "g"), "tool_handler_invocation");
-    // Bare `handler(...)` is a tool/handler REFERENCE invocation. The name alone proves
-    // nothing: `const handler = HANDLERS[env.type]` is a pure local reducer table
-    // (src/cognition/continuity/reducers.js documents "no IO here"), so calling it is a
-    // name coincidence rather than an execution surface. The bare form is therefore
-    // scanned UNLESS the module can be proven root-free: no root alias, no inline root
-    // require, no root identifier anywhere, and `handler` a locally declared
-    // non-parameter. A module that does mention a root keeps the scan, because the root
-    // enumeration is bounded — a second-hop alias (`const b = R`) or an object-property
-    // hop (`o.r`) is exactly the reference it cannot resolve, and reading those as local
-    // is the "unrecognised syntax => READ" trap. Ambiguity therefore resolves to visible.
-    const declaredLocal = /(?:const|let|var)\s+handler\s*=/.test(code);
-    // A real parameter list: `handler` is the whole entry (`(handler)`, `f(a, handler)`),
-    // so `if (!handler) {` — a condition, not a parameter — does not qualify.
-    const asParameter = /(?:\(|,)\s*handler\s*(?:,[^)]*)?\)\s*(?:=>|\{)/.test(code);
-    const rootNames = Object.keys(ROOT_IDENTIFIERS).map(escapeRe);
-    const mentionsRoot = registryAliases.length > 0 || rootRequires.length > 0 ||
-        (rootNames.length > 0 &&
-            new RegExp("(?:^|[^\\w$.])(?:" + rootNames.join("|") + ")").test(code));
-    if (asParameter || !declaredLocal || mentionsRoot) {
-        // `{` and `}` join the prefix class: a call at the head of a block body is a
-        // statement, and treating it as a read is the "unrecognised syntax => READ" trap.
-        scan(/(?:^|[;=(\[{,}]|\breturn\b|\bawait\b)\s*handler\s*\((?![^()]*\)\s*\{)/g, "tool_handler_invocation");
-    }
+    // Bare `handler(...)`: a tool/handler REFERENCE invoked directly. The rule is
+    // deliberately name-based and therefore over-broad — a local variable named `handler`
+    // is flagged whatever it holds. Two attempts to narrow it by "proving" the binding
+    // local (audit 4 F1: a second hop over a root; audit 5 E1-E6: a handler obtained from
+    // another module, an ESM import, a `globalThis`/dotted mention) each produced silent
+    // false cleans, i.e. a root-derived invocation reported as 0/0/0 — the exact trap the
+    // C0 invariant forbids. The gate is therefore gone: the rule stays as certified, and a
+    // site that is genuinely not a tool-handler reference is resolved in production by
+    // naming it truthfully, not by teaching the oracle to guess.
+    // `{` and `}` are in the prefix class: a call at the head of a block body is a
+    // statement, and treating it as a read is the "unrecognised syntax => READ" trap.
+    scan(/(?:^|[;=(\[{,}]|\breturn\b|\bawait\b)\s*handler\s*\((?![^()]*\)\s*\{)/g, "tool_handler_invocation");
 
     // Process / shell: specifier-based (so documentation strings cannot match)
     // plus the classic driver calls.

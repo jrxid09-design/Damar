@@ -864,75 +864,53 @@ test("census: a tagged template invokes the surface it is attached to", () => {
 });
 
 // ---------------------------------------------------------------------------
-// W8-IW1-C0 CLUSTER C11-COGNITION-TOOLS — a bare `handler(...)` is a tool/handler
-// REFERENCE invocation only when `handler` can be something other than a proven local:
-// `const handler = HANDLERS[env.type]` is a pure reducer table ("no IO here",
-// src/cognition/continuity/reducers.js), so calling it is a name coincidence, not an
-// execution surface. Every ambiguous form — parameter, root-bound, destructured,
-// undeclared — stays visible.
+// ---------------------------------------------------------------------------
+// W8-IW1-C0 CLUSTER C11-COGNITION-TOOLS - audit 4 (F1) and audit 5 (E1-E6) both proved
+// that "proving" a bare `handler` binding local produces silent false cleans: a second
+// hop over a root, a handler obtained from another module, an ESM import or a
+// `globalThis` mention. The rule therefore stays deliberately name-based, exactly as
+// certified, and the C11 site is resolved in PRODUCTION by naming the pure reducer for
+// what it is. The tests below lock both halves of that decision.
 // ---------------------------------------------------------------------------
 
-const LOCAL_TABLE = "const HANDLERS = { A: (s) => s, B: (s) => s };\n";
+const LOCAL_REDUCER_TABLE = "const HANDLERS = { A: (s) => s, B: (s) => s };\n";
+const FACADE_RETURNING_A_ROOT = 'const T = require("./ToolRegistry.js");\n' +
+    "module.exports = { get(k) { return T.get(k); } };\n";
+const HANDLER_INVOCATION = "tool_handler_invocation";
+const bareInvocations = (report) =>
+    report.findings.filter((f) => f.kind === HANDLER_INVOCATION).length;
 
-test("census: a handler dispatched from a proven-local table is not an execution surface", () => {
-    const proven = {
-        "table lookup": LOCAL_TABLE + "const handler = HANDLERS[env.type];\nhandler(x);\n",
-        "the real ContinuityCore shape": LOCAL_TABLE +
-            "function reduceFrom(base, env) {\n    const handler = HANDLERS[env.type];\n" +
-            "    if (!handler) return base;\n    const next = handler(base, env, { config: 1 });\n    return next;\n}\nreduceFrom(1, { type: 'A' });\n",
-        "local factory result": "const make = () => (x) => x;\nconst handler = make();\nhandler(1);\n",
-        "local map lookup (meshRouter shape)": "const _handlers = new Map();\nconst handler = _handlers.get('t');\nhandler(1);\n"
+test("census: a bare handler(...) is flagged whatever it holds (the rule is name-based)", () => {
+    const shapes = {
+        "a local reducer table": LOCAL_REDUCER_TABLE + "const handler = HANDLERS[env.type];\nhandler(x);\n",
+        "a local factory result": "const make = () => (x) => x;\nconst handler = make();\nhandler(1);\n",
+        "a local map lookup": "const _handlers = new Map();\nconst handler = _handlers.get('t');\nhandler(1);\n",
+        "a parameter at the head of a block": "function f(handler) {\n    handler(x);\n}\nf(1);\n",
+        "nothing declared at all": "handler(x);\n",
+        // Audit 4 F1 and audit 5 E1-E6: every shape below was silently clean under the
+        // reclassification attempt, and every one of them must stay visible.
+        "a second hop over a root": 'const R = require("./ToolRegistry.js");\nconst b = R;\nconst handler = b.get(id);\nhandler(x);\n',
+        "an object-property hop over a root": "const o = { r: ToolRegistry };\nconst handler = o.r.get(id);\nhandler(x);\n",
+        "a handler returned by another module": 'const f = require("./f.js");\nconst handler = f.get(id);\nhandler(x);\n',
+        "a handler reached through globalThis": "const handler = globalThis.ToolRegistry.get(id);\nhandler(x);\n"
     };
-    for (const [label, body] of Object.entries(proven)) assertClean(run(tree(body)), label);
-});
-
-test("census: an ambiguous handler reference stays visible", () => {
-    const fromRoot = {
-        "registry surface result": "const handler = ToolRegistry.get(id);\nhandler(x);\n",
-        "registry alias result": RS_REQUIRE + "let handler;\nhandler = RS.get(id);\nhandler(x);\n",
-        "root aliased to a local name": "const reg = ToolRegistry;\nconst handler = reg.get(id);\nhandler(x);\n",
-        // Audit #4 (F1): the root enumeration is bounded, so a second hop over a root must
-        // keep the scan. Reading these as local was a silent false clean.
-        "second-hop alias over a root": 'const R = require("./ToolRegistry.js");\nconst b = R;\nconst handler = b.get(id);\nhandler(x);\n',
-        "object-property hop over a root": "const o = { r: ToolRegistry };\nconst handler = o.r.get(id);\nhandler(x);\n",
-        "root alias after a local handler table": LOCAL_TABLE +
-            "const handler = HANDLERS[env.type];\nconst reg = ToolRegistry;\nhandler(x);\n",
-        "call after a root mention anywhere in the module": LOCAL_TABLE.replace("const HANDLERS",
-            "const registry = ToolRegistry;\nconst HANDLERS") + "const handler = HANDLERS[env.type];\nhandler(x);\n"
-    };
-    for (const [label, body] of Object.entries(fromRoot)) {
-        assert.deepEqual(totals(run(tree(body))), { sink: 1, action: 1, unclass: 0 }, label);
-    }
-
-    // `root.loadOne(id)` is itself a plugin execution surface, so this tree carries two
-    // findings: the surface call AND the direct invocation of the handler it returned.
-    const pluginBound = run(tree(ROOT_REQUIRE + "const handler = root.loadOne(id);\nhandler(x);\n"));
-    assert.ok(pluginBound.findings.some(f => f.kind === "tool_handler_invocation"),
-        "a handler bound from a plugin surface and invoked directly stays visible");
-
-    const parameters = {
-        "parameter at the head of a block": "function f(handler) {\n    handler(x);\n}\nf(1);\n",
-        "parameter after a statement": "function f(handler) {\n    const a = 1;\n    handler(a);\n}\nf(1);\n",
-        "block-bodied arrow parameter": "const f = (handler) => { handler(x); };\nf(1);\n",
-        "parameter of a method": "const o = { on(type, handler) { handler(type); } };\no.on('t', 1);\n"
-    };
-    for (const [label, body] of Object.entries(parameters)) {
-        assert.deepEqual(totals(run(tree(body))), { sink: 1, action: 1, unclass: 0 }, label);
-    }
-
-    const other = {
-        "destructured from another module": 'const { handler } = require("./h.js");\nhandler(x);\n',
-        "never declared at all": "handler(x);\n"
-    };
-    for (const [label, body] of Object.entries(other)) {
-        assert.deepEqual(totals(run(tree(body, { "src/h.js": "module.exports = { handler: (x) => x };\n" }))),
-            { sink: 1, action: 1, unclass: 0 }, label);
+    for (const [label, body] of Object.entries(shapes)) {
+        assert.equal(bareInvocations(run(tree(body, { "src/f.js": FACADE_RETURNING_A_ROOT }))), 1, label);
     }
 });
 
-test("census: a control-flow test on a local handler does not make it a parameter", () => {
-    const guarded = run(tree(LOCAL_TABLE + "const handler = HANDLERS[env.type];\n" +
-        "if (!handler) { throw new Error('unknown event'); }\n" +
-        "handler(x);\n"));
-    assertClean(guarded, "if (!handler) { ... } is a condition, not a parameter list");
+test("census: the C11 reducer dispatch is resolved in production, not by relaxing the rule", () => {
+    const source = fs.readFileSync(path.join(__dirname, "..", "..", "..", "src", "cognition",
+        "continuity", "ContinuityCore.js"), "utf8");
+    const rows = census.detectSinksDetailed(source, [], []).rows;
+    assert.equal(rows.filter((r) => r.kind === HANDLER_INVOCATION).length, 0,
+        "the live reducer dispatch must not read as a handler invocation");
+    assert.match(source, /const reducer = HANDLERS\[env\.type\];/,
+        "the pure reducer is named for what it is - naming truthfully is the resolution");
+});
+
+test("census: a call at the head of a block body is a statement, not a read", () => {
+    const body = "function dispatch(handler) {\n    handler(x);\n}\ndispatch(fn);\n";
+    assert.equal(bareInvocations(run(tree(body))), 1,
+        "`{` is a statement boundary: the call must not be read as a non-call");
 });
