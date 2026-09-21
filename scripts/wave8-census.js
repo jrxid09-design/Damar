@@ -35,7 +35,15 @@
  * - Regex literals are not parsed; a regex containing a sink-shaped call can
  *   over-report. Documented limit, chosen over a heuristic that under-reports.
  * - Only relative ("./", "../") specifiers are resolved and walked. Bare and
- *   package specifiers are recorded as external.
+ *   package specifiers are recorded as external. A DYNAMIC specifier
+ *   (require(variable), import(expr)) is not resolvable statically and is not
+ *   walked; such a call is still reported as a sink when it is reached through a
+ *   root's execution surface (e.g. pluginLoader.loadOne()), which is the place
+ *   the oracle can see.
+ * - A root's execution surfaces are declared (EXECUTION_SURFACES) rather than
+ *   inferred, and a regression test pins them to the roots' real source: a
+ *   renamed or removed surface fails the test instead of silently weakening the
+ *   census.
  *
  * USAGE
  *   node scripts/wave8-census.js
@@ -82,9 +90,46 @@ const DEFAULT_CANONICAL_OWNERS = [
     "src/embodiment/effectors/"
 ];
 
-// Registry/plugin/executor module basenames: a binding to one of these makes
-// `<binding>.execute(...)` a registry/handler sink.
-const DEFAULT_REGISTRY_MODULES = ["ToolRegistry.js", "pluginManager.js", "pluginLoader.js"];
+// Registry/plugin ROOTS — the modules whose job is to install and dispatch
+// handlers — mapped to the sink kind a call on them produces. A binding to one of
+// these (directly, through a barrel, or through a pure re-export chain) carries
+// the root's kind.
+const REGISTRY_ROOT_KINDS = {
+    "ToolRegistry.js": "registry_execution",
+    "pluginManager.js": "plugin_handler_execution",
+    "pluginLoader.js": "plugin_handler_execution"
+};
+
+const DEFAULT_REGISTRY_MODULES = Object.keys(REGISTRY_ROOT_KINDS);
+
+/**
+ * EXECUTION SURFACES: the members of a root that can reach executable behaviour.
+ * Every other member a root exposes is data access or bookkeeping, and calling it
+ * is not an execution form.
+ *
+ *   registry_execution
+ *     execute()  — dispatches a registered handler (ToolRegistry.js:82).
+ *     invoke()   — the alternative dispatch name.
+ *     get/has/entries/describe/clear are data or bookkeeping.
+ *   plugin_handler_execution
+ *     execute()/invoke()  — dispatch a plugin handler (pluginManager.js:8).
+ *     load()/loadRoot()/loadOne() — require() plugin artifact modules
+ *                           (pluginLoader.js:48/62/289 -> loadTools():598), so the
+ *                           artifact body runs and its tools are registered.
+ *     userRoot/forgeQuarantineRoot are pure getters, isForgeGenerated/loadManifest
+ *     read metadata, unloadPlugin unregisters — none of them runs artifact code.
+ */
+const EXECUTION_SURFACES = {
+    registry_execution: ["execute", "invoke"],
+    plugin_handler_execution: ["execute", "invoke", "load", "loadRoot", "loadOne"]
+};
+
+// The identifiers literal source names a root by (derived from the root filenames,
+// so there is one source of truth): `ToolRegistry.execute(...)` reached through a
+// destructuring require, or an unbound/global root name.
+const ROOT_IDENTIFIERS = Object.fromEntries(
+    Object.entries(REGISTRY_ROOT_KINDS).map(([file, kind]) => [file.replace(/\.js$/, ""), kind])
+);
 
 const DEFAULT_ENTRYPOINTS = ["src/server.js", "src/cli/index.js"];
 
@@ -100,54 +145,68 @@ const DEFAULT_LAUNCHERS = ["scripts/launch.js"];
 /**
  * Blank out comments, preserving every newline and offset so line numbers stay
  * correct. Returns TWO views of the same text:
- *   code    — string literal CONTENT also blanked (call sinks cannot be hidden
- *             in, or faked by, a string).
- *   raw     — comments removed, string content kept (specifiers and
- *             module-name literals are matched here).
+ *   code    — comment and string-literal CONTENT blanked (call sinks cannot be
+ *             hidden in, or faked by, a string).
+ *   raw     — comments removed, string content kept (specifiers are READ from
+ *             here, but only at offsets the `code` view proves are real code).
+ * Template literal TEXT is data like any other literal, but `${...}` is live
+ * code, so the interpolation body stays in `code`.
  */
 function stripComments(source) {
     let code = "";
     let raw = "";
     let i = 0;
     const n = source.length;
-    let state = "code";
+
+    // One frame per open construct, so `code` can be re-entered from a template
+    // interpolation without losing what it restores to:
+    //   line_comment | block_comment | string{quote} | template | interp{brace}
+    const stack = [];
 
     const blank = (c) => (c === "\n" ? "\n" : " ");
 
     while (i < n) {
         const c = source[i];
         const c2 = i + 1 < n ? source[i + 1] : "";
+        const frame = stack.length > 0 ? stack[stack.length - 1] : null;
+        const kind = frame === null ? "code" : frame.kind;
 
-        if (state === "code") {
-            if (c === "/" && c2 === "/") { state = "line_comment"; code += "  "; raw += "  "; i += 2; continue; }
-            if (c === "/" && c2 === "*") { state = "block_comment"; code += "  "; raw += "  "; i += 2; continue; }
-            if (c === '"' || c === "'" || c === "`") { state = c; code += " "; raw += c; i += 1; continue; }
+        if (kind === "code" || kind === "interp") {
+            if (kind === "interp") {
+                if (c === "}") {
+                    if (frame.brace === 0) { stack.pop(); code += "}"; raw += "}"; i += 1; continue; }
+                    frame.brace -= 1; code += c; raw += c; i += 1; continue;
+                }
+                if (c === "{") { frame.brace += 1; code += c; raw += c; i += 1; continue; }
+            }
+            if (c === "/" && c2 === "/") { stack.push({ kind: "line_comment" }); code += "  "; raw += "  "; i += 2; continue; }
+            if (c === "/" && c2 === "*") { stack.push({ kind: "block_comment" }); code += "  "; raw += "  "; i += 2; continue; }
+            if (c === "`") { stack.push({ kind: "template" }); code += " "; raw += c; i += 1; continue; }
+            if (c === '"' || c === "'") { stack.push({ kind: "string", quote: c }); code += " "; raw += c; i += 1; continue; }
             code += c; raw += c; i += 1; continue;
         }
 
-        if (state === "line_comment") {
-            if (c === "\n") { state = "code"; code += "\n"; raw += "\n"; i += 1; continue; }
+        if (kind === "line_comment") {
+            if (c === "\n") { stack.pop(); code += "\n"; raw += "\n"; i += 1; continue; }
             code += " "; raw += " "; i += 1; continue;
         }
 
-        if (state === "block_comment") {
-            if (c === "*" && c2 === "/") { state = "code"; code += "  "; raw += "  "; i += 2; continue; }
+        if (kind === "block_comment") {
+            if (c === "*" && c2 === "/") { stack.pop(); code += "  "; raw += "  "; i += 2; continue; }
             code += blank(c); raw += blank(c); i += 1; continue;
         }
 
-        // Inside a quoted literal: `raw` keeps the content, `code` blanks it.
-        if (c === "\\") {
-            const nxt = i + 1 < n ? source[i + 1] : "";
-            code += "  ";
-            raw += c + nxt;
-            i += 2;
-            continue;
+        if (kind === "string") {
+            if (c === "\\") { code += "  "; raw += c + c2; i += 2; continue; }
+            if (c === frame.quote) { stack.pop(); code += " "; raw += c; i += 1; continue; }
+            code += blank(c); raw += c; i += 1; continue;
         }
-        if (c === state) { state = "code"; code += " "; raw += c; i += 1; continue; }
-        code += blank(c);
-        raw += c;
-        i += 1;
-        continue;
+
+        // kind === "template": text is DATA (blanked in `code`); `${` is CODE.
+        if (c === "\\") { code += "  "; raw += c + c2; i += 2; continue; }
+        if (c === "`") { stack.pop(); code += " "; raw += c; i += 1; continue; }
+        if (c === "$" && c2 === "{") { stack.push({ kind: "interp", brace: 0 }); code += "${"; raw += "${"; i += 2; continue; }
+        code += blank(c); raw += c; i += 1; continue;
     }
 
     return { code, raw };
@@ -161,53 +220,86 @@ function lineOf(text, index) {
     return line;
 }
 
-/** Relative require()/import() specifiers from the raw (string-keeping) view. */
-function extractSpecifiers(raw) {
+/** The string literal at or after `index` of `raw`, or null if there is none. */
+function quotedAt(raw, index) {
+    let i = index;
+    while (i < raw.length && /\s/.test(raw[i])) i += 1;
+    const q = raw[i];
+    if (q !== '"' && q !== "'") return null;
+    let out = "";
+    for (i += 1; i < raw.length; i += 1) {
+        if (raw[i] === "\\") { out += raw[i + 1] ?? ""; i += 1; continue; }
+        if (raw[i] === q) return out;
+        if (raw[i] === "\n") return null;
+        out += raw[i];
+    }
+    return null;
+}
+
+/** The literal specifier right after `index`, through an optional `(`. */
+function specAt(raw, index) {
+    let i = index;
+    while (i < raw.length && /\s/.test(raw[i])) i += 1;
+    if (raw[i] === "(") i += 1;
+    return quotedAt(raw, i);
+}
+
+/**
+ * Literal `require("x")` / `import("x")` arguments that are REAL CODE.
+ *
+ * The call head is matched on the string-blanked `code` view — so a mention
+ * inside a string or comment cannot masquerade as a dependency — and the
+ * argument is read out of `raw` at the same offset (the views share offsets).
+ * A computed/dynamic argument yields no literal and is reported as null spec.
+ */
+function moduleCalls(code, raw) {
+    const out = [];
+    const re = /\b(require|import)\b/g;
+    let m;
+    while ((m = re.exec(code)) !== null) {
+        out.push({ keyword: m[1], index: m.index, spec: specAt(raw, re.lastIndex) });
+    }
+    return out;
+}
+
+/** Relative require()/import() specifiers, in source order. */
+function extractSpecifiers(code, raw) {
     const found = [];
-    const patterns = [
-        /require\s*\(\s*"([^"\n]+)"\s*\)/g,
-        /require\s*\(\s*'([^'\n]+)'\s*\)/g,
-        /import\s*\(\s*"([^"\n]+)"\s*\)/g,
-        /import\s*\(\s*'([^'\n]+)'\s*\)/g
-    ];
-    for (const re of patterns) {
-        re.lastIndex = 0;
-        let m;
-        while ((m = re.exec(raw)) !== null) found.push({ spec: m[1], index: m.index });
+    for (const call of moduleCalls(code, raw)) {
+        if (call.spec !== null) found.push({ spec: call.spec, index: call.index });
     }
     return found.sort((a, b) => a.index - b.index);
 }
 
 /**
  * Bindings to required modules, with the FORM of the binding:
- *   namespace — `const X = require("./ToolRegistry.js")` / `const { ToolRegistry: TR } = ...`
- *               → sinks are `X.execute(...)`, `X["..."] (...)`, `X.invoke(...)`
- *   callable  — `const { execute } = require("./ToolRegistry.js")`
- *               → the bound name IS the function: sinks are `execute(...)`
+ *   module — `const X = require("./ToolRegistry.js")`: the bound name IS the
+ *            module, so its execution surfaces are called on the binding
+ *            (`X.execute(...)`, `X.load(...)`, `X"..."`).
+ *   member — anything destructured: the bound name may be the module (`{ ToolRegistry }`),
+ *            the member itself (`{ execute }`) or a renamed member (`{ load: boot }`),
+ *            so BOTH a direct call and the module's execution surfaces are scanned.
  */
-function extractBindings(raw, specifiers) {
-    const bindings = new Map();     // identifier -> { spec, form }
-    const seen = new Set();
-    for (const { spec } of specifiers) {
-        if (seen.has(spec)) continue;
-        seen.add(spec);
-        const esc = spec.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const call = "require\\s*\\(\\s*[\"']" + esc + "[\"']\\s*\\)";
+function extractBindings(code, raw) {
+    const bindings = new Map();     // identifier -> { spec, member?, form }
+    const HEAD = 200;               // enough for `const { a, b: c } = `
+    for (const call of moduleCalls(code, raw)) {
+        if (call.spec === null) continue;
+        const before = code.slice(Math.max(0, call.index - HEAD), call.index);
+        let m = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(before);
+        if (m) { bindings.set(m[1], { spec: call.spec, form: "module" }); continue; }
 
-        const rePlain = new RegExp("(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*" + call, "g");
-        let m;
-        while ((m = rePlain.exec(raw)) !== null) bindings.set(m[1], { spec, form: "namespace" });
-
-        const reDestructured = new RegExp("(?:const|let|var)\\s*\\{([^}]+)\\}\\s*=\\s*" + call, "g");
-        while ((m = reDestructured.exec(raw)) !== null) {
+        m = /(?:const|let|var)\s*\{([^}]+)\}\s*=\s*$/.exec(before);
+        if (m) {
             for (const part of m[1].split(",")) {
                 const pieces = part.split(":");
-                const renamed = pieces.length > 1;
-                const alias = (renamed ? pieces[1] : pieces[0]).trim();
+                const alias = (pieces.length > 1 ? pieces[1] : pieces[0]).trim();
                 if (alias && /^[A-Za-z_$][\w$]*$/.test(alias)) {
-                    // `{ X: Y }` binds the module object; `{ X }` binds the member
-                    // itself, which is invoked directly.
-                    bindings.set(alias, { spec, form: renamed ? "namespace" : "callable" });
+                    bindings.set(alias, {
+                        spec: call.spec,
+                        member: (pieces[0] ?? "").trim(),
+                        form: "member"
+                    });
                 }
             }
         }
@@ -219,11 +311,33 @@ function extractBindings(raw, specifiers) {
 // Sink detection (runs on the string-blanked `code` view)
 // ---------------------------------------------------------------------------
 
-function detectSinks(source, registryAliases) {
+// `x.m(` and `x.m (` and `x?.m(` are the same call site — the oracle must not be
+// bypassable by an optional chain or by whitespace around the dot.
+const CALL = "\\s*(?:\\?\\.|\\.)\\s*";
+
+const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Sink kind produced by calling `surface` on a root of `kind`. */
+function surfaceKind(kind, surface) {
+    return surface === "invoke" ? "tool_handler_invocation" : kind;
+}
+
+/**
+ * @param rootRequires {spec, kind}[] — roots THIS module requires inline
+ *        (`require("./pluginLoader").loadOne(p)`), which no binding covers.
+ */
+function detectSinks(source, registryAliases, rootRequires = []) {
     const { code, raw } = stripComments(source);
     const sinks = [];
+    const seen = new Set();
 
     const push = (kind, index, snippet) => {
+        // One call site, one row: the alias scan, the literal-identifier scan and
+        // the inline-require scan may all see the same text, and a site must never
+        // be counted twice.
+        const key = index + "|" + kind;
+        if (seen.has(key)) return;
+        seen.add(key);
         sinks.push({
             kind,
             line: lineOf(code, index),
@@ -238,52 +352,115 @@ function detectSinks(source, registryAliases) {
         while ((m = re.exec(haystack)) !== null) push(kind, m.index, m[0]);
     };
 
+    const Q = "[\\u0022\\u0027]";
+
     for (const alias of registryAliases) {
-        const a = alias.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        if (alias.form === "callable") {
-            // The bound name IS the execution function.
-            scan(new RegExp("(?:^|[;=(\[,]|\\breturn\\b|\\bawait\\b)\\s*" + a + "\\s*\\(", "g"), alias.kind);
-            continue;
+        const a = "\\b" + escapeRe(alias.name);
+        for (const surface of EXECUTION_SURFACES[alias.kind] ?? []) {
+            scan(new RegExp(a + CALL + surface + "\\s*\\(", "g"), surfaceKind(alias.kind, surface));
         }
-        scan(new RegExp("\\b" + a + "\\s*\\.\\s*execute\\s*\\(", "g"), alias.kind);
-        scan(new RegExp("\\b" + a + "\\s*\\[\\s*[^\\]]+\\]\\s*\\(", "g"), alias.kind);
-        scan(new RegExp("\\b" + a + "\\s*\\.\\s*invoke\\s*\\(", "g"), "tool_handler_invocation");
+        // A destructured name may be invoked directly (`{ execute }`, `{ load: boot }`),
+        // while a module binding never is — the module is not the function.
+        if (alias.form === "member") {
+            scan(new RegExp("(?:^|[;=(\\[,]|\\breturn\\b|\\bawait\\b)\\s*" + escapeRe(alias.name) + "\\s*\\(", "g"), alias.kind);
+        }
+        scan(new RegExp(a + "\\s*\\[\\s*[^\\]]+\\]\\s*\\(", "g"), alias.kind);
     }
 
-    // Literal registry/plugin surfaces, independent of aliasing.
-    scan(/\bToolRegistry\s*\.\s*execute\s*\(/g, "registry_execution");
-    scan(/\bpluginManager\s*\.\s*execute\s*\(/g, "plugin_handler_execution");
-    scan(/\bpluginLoader\s*\.\s*loadOne\s*\(/g, "plugin_handler_execution");
+    // Roots named literally, independent of aliasing: `ToolRegistry.execute(...)`
+    // after a destructuring require, or through generated/indirect code.
+    for (const [identifier, kind] of Object.entries(ROOT_IDENTIFIERS)) {
+        for (const surface of EXECUTION_SURFACES[kind]) {
+            scan(new RegExp("\\b" + identifier + CALL + surface + "\\s*\\(", "g"), surfaceKind(kind, surface));
+        }
+        scan(new RegExp("\\b" + identifier + "\\s*\\[\\s*[^\\]]+\\]\\s*\\(", "g"), kind);
+    }
+
+    // Inline requires of a root in this same module — `require("./pluginLoader").loadOne(p)`.
+    // Matched on `raw` (where the specifier is intact) and accepted ONLY where the
+    // blanked view proves the `require` keyword is real code, so a mention inside a
+    // string literal cannot fake an inline call.
+    for (const { spec, kind } of rootRequires) {
+        const call = "require\\s*\\(\\s*" + Q + escapeRe(spec) + Q + "\\s*\\)";
+        const accept = (re, sinkKind) => {
+            re.lastIndex = 0;
+            let m;
+            while ((m = re.exec(raw)) !== null) {
+                if (code.startsWith("require", m.index)) push(sinkKind, m.index, m[0]);
+            }
+        };
+        for (const surface of EXECUTION_SURFACES[kind] ?? []) {
+            accept(new RegExp(call + CALL + surface + "\\s*\\(", "g"), surfaceKind(kind, surface));
+        }
+        accept(new RegExp(call + "\\s*\\[\\s*[^\\]]+\\]\\s*\\(", "g"), kind);
+    }
 
     // Direct handler/tool invocation shapes.
-    scan(/\b(?:tool|handler|toolInstance|instance|registered)\s*\.\s*execute\s*\(/g, "tool_handler_invocation");
+    scan(new RegExp("\\b(?:tool|handler|toolInstance|instance|registered)" + CALL + "execute\\s*\\(", "g"), "tool_handler_invocation");
     // Bare handler( call forms only: a prefix that implies invocation, minus a
     // definition body (`handler(a) { ... }`), so declarations and object-literal
     // methods are not false positives.
     scan(/(?:^|[;=(\[,]|\breturn\b|\bawait\b)\s*handler\s*\((?![^()]*\)\s*\{)/g, "tool_handler_invocation");
 
     // Process / shell: specifier-based (so documentation strings cannot match)
-    // plus the classic driver calls. Q is the quote class, built from escapes so
-    // the pattern cannot be mangled by an editor layer.
-    const Q = "[\\u0022\\u0027]";
-    scan(new RegExp("require\\s*\\(\\s*" + Q + "(?:node:)?child_process" + Q + "\\s*\\)", "g"), "process_shell", raw);
+    // plus the classic driver calls.
+    const requires = moduleCalls(code, raw);
+    const scanSpec = (specRe, kind) => {
+        for (const call of requires) {
+            if (call.spec !== null && specRe.test(call.spec)) push(kind, call.index, `require("${call.spec}")`);
+        }
+    };
+    scanSpec(/^(?:node:)?child_process$/, "process_shell");
     scan(/\b(?:execSync|spawnSync|execFileSync|spawn|fork)\s*\(/g, "process_shell");
 
     // Terminal / pty.
-    scan(new RegExp("require\\s*\\(\\s*" + Q + "(?:node-pty|pty)" + Q + "\\s*\\)", "g"), "terminal", raw);
+    scanSpec(/^(?:node-pty|pty)$/, "terminal");
     scan(/\b(?:terminal_run|TerminalRuntime|terminalService)\b/g, "terminal");
-    scan(/\bpty\s*\.\s*spawn\s*\(/g, "terminal");
+    scan(new RegExp("\\bpty" + CALL + "spawn\\s*\\(", "g"), "terminal");
 
     // Actuator / effector invocation.
-    scan(/\bbinding\s*\.\s*invoke\s*\(/g, "actuator_invocation");
-    scan(/\bactuator\s*\.\s*(?:invoke|execute|apply)\s*\(/g, "actuator_invocation");
+    scan(new RegExp("\\bbinding" + CALL + "invoke\\s*\\(", "g"), "actuator_invocation");
+    scan(new RegExp("\\bactuator" + CALL + "(?:invoke|execute|apply)\\s*\\(", "g"), "actuator_invocation");
 
     // Advisory kinds.
-    scan(/\bfs\s*\.\s*(?:writeFileSync|writeFile|appendFileSync|rmSync|rm|unlinkSync|renameSync|mkdirSync)\s*\(/g, "filesystem_mutation");
-    scan(/\b(?:axios|http)\s*\.\s*(?:post|put|patch|delete)\s*\(/g, "network_mutation");
-    scan(/\bdevice\s*\.\s*(?:send|write|command)\s*\(/g, "device_control");
+    scan(new RegExp("\\bfs" + CALL + "(?:writeFileSync|writeFile|appendFileSync|rmSync|rm|unlinkSync|renameSync|mkdirSync)\\s*\\(", "g"), "filesystem_mutation");
+    scan(new RegExp("\\b(?:axios|http)" + CALL + "(?:post|put|patch|delete)\\s*\\(", "g"), "network_mutation");
+    scan(new RegExp("\\bdevice" + CALL + "(?:send|write|command)\\s*\\(", "g"), "device_control");
 
     return sinks.sort((a, b) => a.line - b.line || a.kind.localeCompare(b.kind));
+}
+
+/**
+ * Calls on a DIRECTLY required root whose member the oracle does not recognise.
+ * Reading a root's data property (`pluginLoader.userRoot`) or re-exporting it is a
+ * form the oracle can classify; calling a member it cannot name is an execution
+ * form it cannot classify, which is what UNCLASSIFIED_LEGACY_REACHABILITY reports.
+ *
+ * Only module bindings and inline requires are inspected: a destructured binding may
+ * be a member rather than the module, and `X.member(` on it is a call on an object
+ * the oracle has not identified, not a call on the root.
+ */
+function unknownRootCalls(source, registryAliases, directRootSpecs) {
+    const { code } = stripComments(source);
+    const unknown = [];
+    const CALLM = CALL + "([A-Za-z_$][\\w$]*)\\s*\\(";
+    const known = (kind, member) => (EXECUTION_SURFACES[kind] ?? []).includes(member);
+
+    const probe = (prefixRe, kind) => {
+        const re = new RegExp(prefixRe + CALLM, "g");
+        let m;
+        while ((m = re.exec(code)) !== null) if (!known(kind, m[1])) unknown.push(m[1]);
+    };
+
+    for (const alias of registryAliases) {
+        if (alias.form !== "module") continue;
+        probe("\\b" + escapeRe(alias.name), alias.kind);
+    }
+    const Q = "[\\u0022\\u0027]";
+    for (const { spec, kind } of directRootSpecs) {
+        probe("require\\s*\\(\\s*" + Q + escapeRe(spec) + Q + "\\s*\\)", kind);
+    }
+    return unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -320,43 +497,179 @@ function canonicalOwnerOnPath(relFile, owners) {
     return owners.some(o => relFile === o || relFile.startsWith(o));
 }
 
+/** Index of the `}` matching the `{` at `open`, or -1. */
+function matchingBrace(code, open) {
+    let depth = 0;
+    for (let i = open; i < code.length; i += 1) {
+        if (code[i] === "{") depth += 1;
+        else if (code[i] === "}") {
+            depth -= 1;
+            if (depth === 0) return i;
+        }
+    }
+    return -1;
+}
+
+/** [start, end) ranges of an object-literal body's top-level members. */
+function memberRanges(body) {
+    const ranges = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < body.length; i += 1) {
+        const c = body[i];
+        if (c === "(" || c === "[" || c === "{") depth += 1;
+        else if (c === ")" || c === "]" || c === "}") depth -= 1;
+        else if (c === "," && depth === 0) { ranges.push([start, i]); start = i + 1; }
+    }
+    ranges.push([start, body.length]);
+    return ranges;
+}
+
+// A member of a PURE barrel. Matched on the string-blanked view, where a quoted
+// key's text is blank and a quoted specifier is blank inside require( ).
+const BARREL_NAMED = /^\s*[^:()]*:\s*require\s*\([^)]*\)\s*$/;
+const BARREL_SPREAD = /^\s*\.\.\.\s*require\s*\([^)]*\)\s*$/;
+
 /**
- * Specifiers a module RE-EXPORTS wholesale:
- * `module.exports = require("./ToolRegistry.js")`. Only a pure re-export keeps
- * a caller's binding a registry/plugin binding — a façade that merely requires
- * a registry internally is its own module, not the registry.
+ * Specifiers a module RE-EXPORTS wholesale, in either module syntax:
+ *   module.exports = require("./ToolRegistry.js")
+ *   module.exports = { ToolRegistry: require("./ToolRegistry.js"), ... }   (pure barrel)
+ *   exports.ToolRegistry = require("./ToolRegistry.js")
+ *   export { ToolRegistry } from "./ToolRegistry.js"
+ * Only a PURE re-export keeps a caller's binding a registry/plugin binding — a
+ * façade that merely requires a registry internally is its own module, not the
+ * registry.
  */
-function extractReexports(raw) {
+function extractReexports(source) {
+    const { code, raw } = stripComments(source);
     const found = [];
-    const Q = "[\\u0022\\u0027]";
-    const re = new RegExp("module\\.exports\\s*=\\s*require\\s*\\(\\s*" + Q + "([^\\u0022\\u0027\\n]+)" + Q + "\\s*\\)", "g");
+
+    // Every pattern is matched on the blanked `code` view (so a mention inside a
+    // string or comment cannot fake a re-export) and its specifier is read from
+    // `raw` at the same offset. Each pattern ends at the `require` keyword / `from`.
+    const scan = (re) => {
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(code)) !== null) {
+            const spec = specAt(raw, re.lastIndex);
+            if (spec !== null) found.push(spec);
+        }
+    };
+
+    // 1. Wholesale: `module.exports = require("./X")`.
+    scan(/module\.exports\s*=\s*require/g);
+
+    // 2. Object-literal barrel: `module.exports = { K: require("./X"), ... }`.
+    //    Only a PURE barrel counts as BEING the re-exported module — every
+    //    top-level member is a named or spread re-export. A module that merely
+    //    mentions a root inside a mixed object literal is its own module, not the
+    //    root; its NAMED members are still re-exports, and a caller that
+    //    destructures one resolves through extractMemberReexports().
+    const barrel = /module\.exports\s*=\s*\{/g;
     let m;
-    while ((m = re.exec(raw)) !== null) found.push(m[1]);
+    while ((m = barrel.exec(code)) !== null) {
+        const open = code.indexOf("{", m.index);
+        const close = matchingBrace(code, open);
+        if (close === -1) continue;
+        const base = open + 1;
+        const ranges = memberRanges(code.slice(base, close));
+        let pure = true;
+        for (const [s, e] of ranges) {
+            const member = code.slice(base + s, base + e);
+            if (member.trim() === "") continue;
+            if (!BARREL_NAMED.test(member) && !BARREL_SPREAD.test(member)) { pure = false; break; }
+        }
+        if (!pure) continue;
+        for (const [s, e] of ranges) {
+            const member = code.slice(base + s, base + e);
+            const inner = /\brequire\b/g;
+            let r;
+            while ((r = inner.exec(member)) !== null) {
+                const spec = specAt(raw, base + s + inner.lastIndex);
+                if (spec !== null) found.push(spec);
+            }
+        }
+    }
+
+    // 3. Named CommonJS: `exports.X = require("./X")` / `module.exports.X = ...`.
+    scan(/(?:module\.)?exports\s*\.\s*[A-Za-z_$][\w$]*\s*=\s*require/g);
+
+    // 4. ESM re-export: `export ... from "./X"`.
+    scan(/export\s+(?:\*|\{[^}]*\})\s*from/g);
+
     return found;
+}
+
+/**
+ * NAMED re-exports of a module export, as `member -> specifier`:
+ *   module.exports = { ToolRegistry: require("./ToolRegistry.js"), version: 1 }
+ *   exports.ToolRegistry = require("./ToolRegistry.js")
+ *   export { ToolRegistry } from "./ToolRegistry.js"
+ *
+ * A caller that DESTRUCTURES one of these members binds the re-exported module
+ * itself, so the kind must resolve through the member — a barrel that carries
+ * extra data members is not the root, but its named member still is. Spread
+ * re-exports carry no member name and are deliberately absent.
+ */
+function extractMemberReexports(source) {
+    const { code, raw } = stripComments(source);
+    const out = new Map();
+    let m;
+
+    const barrel = /module\.exports\s*=\s*\{/g;
+    while ((m = barrel.exec(code)) !== null) {
+        const open = code.indexOf("{", m.index);
+        const close = matchingBrace(code, open);
+        if (close === -1) continue;
+        const base = open + 1;
+        for (const [s, e] of memberRanges(code.slice(base, close))) {
+            const member = code.slice(base + s, base + e);
+            const key = /^\s*([A-Za-z_$][\w$]*)\s*:\s*require\b/.exec(member);
+            if (!key) continue;
+            const spec = specAt(raw, base + s + member.indexOf("require") + "require".length);
+            if (spec !== null) out.set(key[1], spec);
+        }
+    }
+
+    const named = /(?:module\.)?exports\s*\.\s*([A-Za-z_$][\w$]*)\s*=\s*require/g;
+    while ((m = named.exec(code)) !== null) {
+        const spec = specAt(raw, named.lastIndex);
+        if (spec !== null) out.set(m[1], spec);
+    }
+
+    const esm = /export\s*\{([^}]*)\}\s*from/g;
+    while ((m = esm.exec(code)) !== null) {
+        const spec = specAt(raw, esm.lastIndex);
+        if (spec === null) continue;
+        for (const part of m[1].split(",")) {
+            const pieces = part.split(/\s+as\s+/);
+            const name = (pieces[1] ?? pieces[0] ?? "").trim();
+            if (/^[A-Za-z_$][\w$]*$/.test(name)) out.set(name, spec);
+        }
+    }
+
+    return out;
 }
 
 /**
  * Which kind of execution surface this module IS (directly, or through a chain
  * of PURE re-exports): "registry_execution" | "plugin_handler_execution" | null.
  */
-function moduleKind(file, cache, registryModuleNames, depth = 0) {
+function moduleKind(file, cache, depth = 0) {
     if (depth > 4) return null;
     const key = "kind:" + file;
     if (cache.has(key)) return cache.get(key);
     cache.set(key, null);
 
     const base = path.basename(file);
-    let kind = null;
-    if (base === "ToolRegistry.js") kind = "registry_execution";
-    else if (base === "pluginManager.js" || base === "pluginLoader.js") kind = "plugin_handler_execution";
-    else {
+    let kind = REGISTRY_ROOT_KINDS[base] ?? null;
+    if (!kind) {
         const source = readIfFile(file);
         if (source !== null) {
-            const { raw } = stripComments(source);
-            for (const spec of extractReexports(raw)) {
+            for (const spec of extractReexports(source)) {
                 const target = resolveRelative(file, spec);
                 if (!target) continue;
-                const found = moduleKind(target, cache, registryModuleNames, depth + 1);
+                const found = moduleKind(target, cache, depth + 1);
                 if (found) { kind = found; break; }
             }
         }
@@ -364,6 +677,16 @@ function moduleKind(file, cache, registryModuleNames, depth = 0) {
 
     cache.set(key, kind);
     return kind;
+}
+
+/** Named re-exports of `file`, cached. */
+function memberReexportsOf(file, cache) {
+    const key = "members:" + file;
+    if (cache.has(key)) return cache.get(key);
+    const source = readIfFile(file);
+    const map = source === null ? new Map() : extractMemberReexports(source);
+    cache.set(key, map);
+    return map;
 }
 
 // ---------------------------------------------------------------------------
@@ -403,20 +726,49 @@ function analyze(options = {}) {
         const source = readIfFile(node.file);
         if (source === null) continue;
 
-        const { raw } = stripComments(source);
-        const specifiers = extractSpecifiers(raw);
-        const bindings = extractBindings(raw, specifiers);
+        const { code, raw } = stripComments(source);
+        const specifiers = extractSpecifiers(code, raw);
+        const bindings = extractBindings(code, raw);
+
+        // Roots this module reaches by name, split by how they are reached.
+        const rootRequires = [];      // any root (incl. barrels) — inline call support
+        const directRootSpecs = [];   // the root module itself — the UNCLASSIFIED trigger
+        for (const { spec } of specifiers) {
+            const target = resolveRelative(node.file, spec);
+            if (!target) continue;
+            const kind = moduleKind(target, reexportCache);
+            if (kind) rootRequires.push({ spec, kind });
+            if (isRegistryModule(target, registryModuleNames)) directRootSpecs.push({ spec, kind });
+        }
+
         const registryAliases = [];
         for (const [identifier, info] of bindings) {
             const target = resolveRelative(node.file, info.spec);
             if (!target) continue;
-            const kind = moduleKind(target, reexportCache, registryModuleNames);
+            let kind = moduleKind(target, reexportCache);
+            if (!kind && info.member) {
+                // A member destructured out of a module that re-exports it by name
+                // (and is not itself a pure barrel of the root).
+                const viaMember = memberReexportsOf(target, reexportCache).get(info.member);
+                const memberTarget = viaMember ? resolveRelative(target, viaMember) : null;
+                if (memberTarget) kind = moduleKind(memberTarget, reexportCache);
+            }
             if (!kind) continue;
-            registryAliases.push({ name: identifier, kind, form: info.form });
+            registryAliases.push({
+                name: identifier,
+                kind,
+                form: info.form,
+                direct: isRegistryModule(target, registryModuleNames)
+            });
         }
 
-        const sinks = detectSinks(source, registryAliases);
-        modules.set(node.file, { sinks, specifiers });
+        const sinks = detectSinks(source, registryAliases, rootRequires);
+        const unknownRoot = unknownRootCalls(
+            source,
+            registryAliases.filter(a => a.direct),
+            directRootSpecs
+        );
+        modules.set(node.file, { sinks, specifiers, directRootSpecs, unknownRoot });
 
         for (const sink of sinks) {
             const row = {
@@ -470,23 +822,20 @@ function analyze(options = {}) {
     const actionCapableFindings = findings.filter(r => r.actionCapable);
 
     // UNCLASSIFIED_LEGACY_REACHABILITY: a reachable module that requires a
-    // registry module DIRECTLY yet shows no recognized sink at all — its
-    // execution form is not classified. Reported rather than silently excused.
-    // (A transitive re-export chain is a wrapper/facade, not an unknown form.)
+    // registry/plugin root DIRECTLY, shows no recognized sink, and CALLS a member
+    // of that root the oracle cannot name — its execution form is not classified.
+    // Reported rather than silently excused. Excluded by evidence, not by name:
+    //   - a pure re-export chain / barrel IS the root (moduleKind), not an unknown form;
+    //   - a module that only READS root data (`pluginLoader.userRoot`) or re-exports
+    //     it never invokes the execution surface, so it has no unknown form to report;
+    //   - a module that invokes a root at all without a recognized sink still is.
     const unclassified = [];
     for (const [file, info] of modules) {
         if (info.sinks.length > 0) continue;
-        // A pure re-export of a registry IS classified (moduleKind), so it is
-        // not an unknown execution form.
-        if (moduleKind(file, reexportCache, registryModuleNames)) continue;
-        for (const { spec } of info.specifiers) {
-            const target = resolveRelative(file, spec);
-            if (!target) continue;
-            if (isRegistryModule(target, registryModuleNames)) {
-                unclassified.push(rel(file));
-                break;
-            }
-        }
+        if (moduleKind(file, reexportCache)) continue;
+        if (info.directRootSpecs.length === 0) continue;
+        if (info.unknownRoot.length === 0) continue;
+        unclassified.push(rel(file));
     }
 
     let sha = null;
@@ -583,8 +932,10 @@ function main(argv) {
 }
 
 module.exports = {
-    analyze, stripComments, detectSinks, resolveRelative,
+    analyze, stripComments, detectSinks, unknownRootCalls, resolveRelative,
+    extractSpecifiers, extractBindings, extractReexports, extractMemberReexports, moduleCalls,
     SINK_KINDS, DEFAULT_CANONICAL_OWNERS, DEFAULT_ENTRYPOINTS, DEFAULT_LAUNCHERS, DEFAULT_REGISTRY_MODULES,
+    REGISTRY_ROOT_KINDS, EXECUTION_SURFACES,
     main
 };
 

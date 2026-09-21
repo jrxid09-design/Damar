@@ -22,6 +22,9 @@ const { analyze } = require("./wave8-census.js");
 const CLUSTER_BY_PREFIX = [
     ["src/runtime/terminal/", "C2-TERMINAL"],
     ["src/voice/", "C3-VOICE-IO"],
+    // src/app.js is the production bootstrap that drives the plugin loader, so it
+    // is clustered with the plugin subsystem it owns rather than left unclustered.
+    ["src/app.js", "C7-MCP-EGRESS"],
     ["src/services/", "C4-SERVICES-ACTUATION"],
     ["src/autonomy/", "C5-AUTONOMY-DAEMONS"],
     ["src/lab/", "C6-LAB-TIMEMACHINE"],
@@ -49,82 +52,101 @@ const CLUSTER_BY_PREFIX = [
 ];
 
 /**
- * Explicit resolution of the 4 UNCLASSIFIED_LEGACY_REACHABILITY entries.
- * Each entry records what the module actually does, so the count can only reach
- * 0 by migration or by an evidence-backed correction of the census rule — never
- * by suppression.
+ * Explicit resolution of the four entries the pre-C0 census reported as
+ * UNCLASSIFIED_LEGACY_REACHABILITY. Kept in the manifest as the provenance of the
+ * rule repair: the census now derives these classifications itself (see
+ * `scripts/wave8-census.js`), so this table is evidence, not an input.
  */
 const UNCLASSIFIED_RESOLUTION = {
     "src/app.js": {
-        census_category: "UNCLASSIFIED_LEGACY_REACHABILITY",
+        census_category: "LEGACY_SECOND_PATH",
         source_file: "src/app.js",
         symbol: "pluginLoader.load(  @ src/app.js:7",
         reachable_from_production: "YES",
         consequential: "YES",
+        cluster: "C7-MCP-EGRESS",
         authority_path: "NONE on this path (no canonical owner traversed)",
         execution_path: "src/server.js -> src/app.js -> plugins/pluginLoader.load(...)",
         classification: "A_REAL_PRODUCTION_CONSEQUENTIAL_PATH",
         rule_finding: "CENSUS_RULE_GAP_UNDER_REPORT",
+        census_status: "REPORTED_AS_SINK_BY_CORRECTED_CENSUS",
+        resolved_by:
+            "C0: the execution surfaces of a registry/plugin root are declared per kind " +
+            "(EXECUTION_SURFACES) instead of only matching `.execute(`/`.loadOne(` literally, so " +
+            "`pluginLoader.load(...)` — the plugin loader's artifact-loading entrypoint, which " +
+            "require()s plugin modules (pluginLoader.load -> loadRoot -> loadOne -> loadTools/loadPlugin) — " +
+            "is a plugin_handler_execution sink. This ADDS a finding; it was never a false positive.",
         evidence:
-            "src/app.js:4 `const pluginLoader = require(\"./plugins/pluginLoader\")` (namespace binding of a " +
-            "DEFAULT_REGISTRY_MODULE), then src/app.js:7 `pluginLoader.load(`. detectSinks only recognises the " +
-            "literal form `pluginLoader.loadOne(` (line 256), so a real plugin-load invocation is unclassified " +
-            "instead of being reported as plugin_handler_execution (actionCapable: true). Fixing the rule ADDS a " +
-            "finding (counter increases) — it is a real ungoverned action-capable path, not a false positive.",
-        migration_status: "PENDING_RULE_FIX_THEN_MIGRATE"
+            "src/app.js:4 `const pluginLoader = require(\"./plugins/pluginLoader\")` (module binding of a " +
+            "DEFAULT_REGISTRY_MODULE), then src/app.js:7 `pluginLoader.load(`. Reachable from the production " +
+            "entrypoint src/server.js:18.",
+        migration_status: "PENDING_MIGRATION"
     },
     "src/autonomy/CapabilityRegistry.js": {
-        census_category: "UNCLASSIFIED_LEGACY_REACHABILITY",
+        census_category: "NON_CONSEQUENTIAL_READ",
         source_file: "src/autonomy/CapabilityRegistry.js",
         symbol: "pluginLoader.userRoot  @ src/autonomy/CapabilityRegistry.js:75-76",
         reachable_from_production: "YES",
         consequential: "NO",
+        cluster: "C5-AUTONOMY-DAEMONS",
         authority_path: "N/A (no execution surface)",
         execution_path: "src/server.js -> src/autonomy/index.js -> CapabilityRegistry",
         classification: "B_NON_CONSEQUENTIAL_READ",
         rule_finding: "CENSUS_RULE_GAP_OVER_REPORT",
+        census_status: "CLASSIFIED_NON_EXECUTING",
+        resolved_by:
+            "C0: `userRoot` is a pure getter returning a module constant (pluginLoader.js:40) — no proxy, no " +
+            "side effect, no implicit execution — so the read is not a sink; and a module that only READS a " +
+            "root's data never invokes its execution surface, so it is a known form rather than an unknown one.",
         evidence:
             "The only registry-module require is line 75 `require(\"../plugins/pluginLoader\")`, used at line 76 for " +
             "the data property `pluginLoader.userRoot`. There is no invocation of the registry surface. Every other " +
             "call in the file is `database.run(...)` against `../memory/db` (persistence, not a registry execution " +
-            "form). Requiring a registry module for a data property is not an unknown execution form.",
-        migration_status: "RESOLVED_BY_CLASSIFICATION"
+            "form).",
+        migration_status: "NO_MIGRATION_REQUIRED"
     },
     "src/autonomy/SkillFactory.js": {
-        census_category: "UNCLASSIFIED_LEGACY_REACHABILITY",
+        census_category: "NON_CONSEQUENTIAL_READ",
         source_file: "src/autonomy/SkillFactory.js",
         symbol: "require(\"../plugins/pluginLoader\").userRoot  @ src/autonomy/SkillFactory.js:33",
         reachable_from_production: "YES",
         consequential: "NO",
+        cluster: "C5-AUTONOMY-DAEMONS",
         authority_path: "N/A (no execution surface)",
         execution_path: "src/server.js -> src/autonomy/index.js -> SkillFactory",
         classification: "E_COMPATIBILITY_ADAPTER",
         rule_finding: "CENSUS_RULE_GAP_OVER_REPORT",
+        census_status: "CLASSIFIED_NON_EXECUTING",
+        resolved_by:
+            "C0: the module's only root interaction is an inline `require(\"../plugins/pluginLoader\").userRoot` " +
+            "read (a getter). `ToolRegistry.describe()` is a metadata read, and the `execute(` occurrences at lines " +
+            "311/335/341 are inside STRING literals written to a generated plugin file — never executed here.",
         evidence:
-            "Same trigger as CapabilityRegistry: line 33 reads `require(\"../plugins/pluginLoader\").userRoot`. " +
-            "Line 134 `ToolRegistry.describe()` is a metadata READ. The `execute(` occurrences at lines 311/335/341 " +
-            "and `module.exports = [new Tool()];` at line 344 are inside STRING literals written to a generated " +
-            "plugin file, not executed in this module. Its only persistence goes through `../services/toolForge` " +
-            "(censused separately as filesystem_mutation).",
-        migration_status: "RESOLVED_BY_CLASSIFICATION"
+            "Same trigger as CapabilityRegistry. The generated-source occurrences are string data: the census's " +
+            "string-blanked view finds no call sink in this module (detectSinks == []) both before and after C0.",
+        migration_status: "NO_MIGRATION_REQUIRED"
     },
     "src/core/tools/index.js": {
-        census_category: "UNCLASSIFIED_LEGACY_REACHABILITY",
+        census_category: "REEXPORT_FACADE",
         source_file: "src/core/tools/index.js",
-        symbol: "module.exports = { ToolRegistry: require(\"./ToolRegistry\"), ... }",
+        symbol: "module.exports = { ToolRegistry: require(\"./ToolRegistry.js\"), ... }",
         reachable_from_production: "YES",
         consequential: "NO",
+        cluster: "C9-AI-TOOL-DISPATCH",
         authority_path: "N/A (no execution surface)",
         execution_path: "src/server.js -> ... -> src/core/tools/index.js",
-        classification: "F_DUPLICATE_CENSUS_DETECTION",
+        classification: "F_REEXPORT_BARREL",
         rule_finding: "CENSUS_RULE_GAP_OVER_REPORT",
+        census_status: "CLASSIFIED_REEXPORT_FACADE",
+        resolved_by:
+            "C0: extractReexports recognises the object-literal barrel form `{ K: require(\"./X\") }` (plus named " +
+            "CommonJS and ESM re-exports), so the 17-line barrel IS a façade of ToolRegistry.js and is classified " +
+            "by moduleKind instead of falling through to the unknown bucket. A mixed barrel is not itself the root, " +
+            "but a caller that destructures its named member still resolves through that member.",
         evidence:
-            "A 17-line barrel whose entire body is `module.exports = { X: require(\"./X\") }`. It has no sink of its " +
-            "own and IS a façade, but moduleKind's extractReexports only matches the wholesale form " +
-            "`module.exports = require(\"...\")` (line 332), so an object-literal barrel is not recognised as a " +
-            "re-export chain and falls through to the unclassified bucket. The census's own comment (line 474) says " +
-            "a façade is not an unknown execution form. Duplicate detection of ToolRegistry.js.",
-        migration_status: "RESOLVED_BY_CLASSIFICATION"
+            "The whole module body is `module.exports = { X: require(\"./X\") }`. It has no sink of its own. " +
+            "Duplicate detection of ToolRegistry.js, which callers reach through `require(\"../core/tools\")`.",
+        migration_status: "NO_MIGRATION_REQUIRED"
     }
 };
 
@@ -204,22 +226,45 @@ function build(root = process.cwd()) {
         }))
         .sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
 
+    const censusIds = new Set(rows.map(r => r.id));
+    const unclassifiedNow = rep.unclassified.map((file) => UNCLASSIFIED_RESOLUTION[file] ?? {
+        census_category: "UNCLASSIFIED_LEGACY_REACHABILITY",
+        source_file: file,
+        symbol: "RECON_REQUIRED",
+        reachable_from_production: "RECON_REQUIRED",
+        consequential: "RECON_REQUIRED",
+        authority_path: "RECON_REQUIRED",
+        execution_path: "RECON_REQUIRED",
+        classification: "H_UNKNOWN_REQUIRES_RECON",
+        census_status: "STILL_UNCLASSIFIED",
+        evidence: "RECON_REQUIRED"
+    });
+
+    // The manifest may not claim more than the census measured, nor drop a sink it
+    // measured: both directions are counted here so a divergence is visible.
+    // `unique_execution_root_count` counts the distinct production entrypoints that
+    // root the ungoverned paths (the sink-bearing module count is unique_module_count).
+    const reconciliation = {
+        raw_sink_count: rep.findings.length,
+        manifest_row_count: rows.length,
+        unique_module_count: new Set(rows.map(r => r.source_file)).size,
+        unique_execution_root_count: new Set(rows.map(r => r.entrypoint)).size,
+        action_capable_count: rows.filter(r => r.action_capable).length,
+        advisory_count: rows.filter(r => !r.action_capable).length,
+        unclassified_count: rep.unclassified.length,
+        census_findings_without_manifest_row: rep.findings
+            .filter(f => !censusIds.has(`${f.file}:${f.line}:${f.kind}`)).length,
+        manifest_rows_without_census_evidence: rows.filter(r => !censusIds.has(r.id)).length
+    };
+
     return {
         schemaVersion: 1,
         sha: rep.sha,
         generatedFrom: "scripts/wave8-census.js",
         counters: rep.counters,
-        unclassified: rep.unclassified.map((file) => UNCLASSIFIED_RESOLUTION[file] ?? {
-            census_category: "UNCLASSIFIED_LEGACY_REACHABILITY",
-            source_file: file,
-            symbol: "RECON_REQUIRED",
-            reachable_from_production: "RECON_REQUIRED",
-            consequential: "RECON_REQUIRED",
-            authority_path: "RECON_REQUIRED",
-            execution_path: "RECON_REQUIRED",
-            classification: "H_UNKNOWN_REQUIRES_RECON",
-            evidence: "RECON_REQUIRED"
-        }),
+        reconciliation,
+        unclassified: unclassifiedNow,
+        unclassified_resolutions: Object.values(UNCLASSIFIED_RESOLUTION),
         clusters: clusterList,
         findings: rows
     };
@@ -233,8 +278,13 @@ function main(argv) {
 
     if (json) { process.stdout.write(JSON.stringify(manifest, null, 2) + "\n"); return 0; }
 
+    const r = manifest.reconciliation;
     process.stdout.write(`W8-IW1 MIGRATION MANIFEST  sha=${manifest.sha}\n`);
     process.stdout.write(`  hits=${manifest.findings.length} clusters=${manifest.clusters.length} unclassified=${manifest.unclassified.length}\n\n`);
+    process.stdout.write(`  RAW_SINK_COUNT=${r.raw_sink_count} MANIFEST_ROW_COUNT=${r.manifest_row_count}\n`);
+    process.stdout.write(`  UNIQUE_MODULE_COUNT=${r.unique_module_count} UNIQUE_EXECUTION_ROOT_COUNT=${r.unique_execution_root_count}\n`);
+    process.stdout.write(`  ACTION_CAPABLE_COUNT=${r.action_capable_count} ADVISORY_COUNT=${r.advisory_count} UNCLASSIFIED_COUNT=${r.unclassified_count}\n`);
+    process.stdout.write(`  evidence gaps: census->manifest=${r.census_findings_without_manifest_row} manifest->census=${r.manifest_rows_without_census_evidence}\n\n`);
     for (const c of manifest.clusters) {
         process.stdout.write(`  ${c.id.padEnd(28)} hits=${String(c.hits).padStart(3)} action_capable=${String(c.action_capable).padStart(2)} files=${String(c.files).padStart(2)} max_risk=${c.max_risk}\n`);
     }
