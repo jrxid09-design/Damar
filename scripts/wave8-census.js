@@ -653,9 +653,20 @@ function detectSinksDetailed(source, registryAliases, rootRequires = []) {
     // C0 invariant forbids. The gate is therefore gone: the rule stays as certified, and a
     // site that is genuinely not a tool-handler reference is resolved in production by
     // naming it truthfully, not by teaching the oracle to guess.
-    // `{` and `}` are in the prefix class: a call at the head of a block body is a
-    // statement, and treating it as a read is the "unrecognised syntax => READ" trap.
-    scan(/(?:^|[;=(\[{,}]|\breturn\b|\bawait\b)\s*handler\s*\((?![^()]*\)\s*\{)/g, "tool_handler_invocation");
+    // The prefix class carries every token that can precede a statement-position call
+    // (`;`/`=`/`(`/`[`/`{`/`,`/`}`/`)`/`:`/`>`/`?`/`&`/`|`, the keywords return/await and
+    // the single-statement bodies else/do/case): a call at the head of a block or of a
+    // single-statement body is a statement, and treating it as a read is the
+    // "unrecognised syntax => READ" trap (audits 5 and 6). The invocation itself reuses
+    // INVOKE, so `handler?.(x)`, `handler.call(..)` and a tagged `handler\`..\`` count too.
+    // Disclosed ceiling (audit 6 F3/F4, no live instance): root identity does not travel
+    // through a container or a parameter (`const box = { h: handler }; box.h(x)`), nor
+    // through the result of a declared read (`ToolRegistry.get(id)(x)`). Closing either
+    // needs bounded dataflow, not another shape — they are documented limits, not claims.
+    const BARE_HANDLER = new RegExp(
+        "(?:^|[;=()\\[{,}:>?&|]|\\breturn\\b|\\bawait\\b|\\b(?:else|do|case)\\b)\\s*handler" +
+        INVOKE + "(?![^()]*\\)\\s*\\{)", "g");
+    scan(BARE_HANDLER, "tool_handler_invocation");
 
     // Process / shell: specifier-based (so documentation strings cannot match)
     // plus the classic driver calls.
