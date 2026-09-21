@@ -301,12 +301,27 @@ function createCanonicalReplayLedger({
                     throw new Error("REPLAY_ANCHOR_MISMATCH");
                 }
             } else if (!anchor) {
-                // A committed row exists but the anchor has not been persisted yet:
-                // the anchor is written AFTER COMMIT, so a concurrent reader can
-                // observe this benign window (e.g. the loser of a cross-process
-                // race). Retry bounded; a genuinely missing anchor still fails closed.
-                if (attempt < 3) { await new Promise((r) => setTimeout(r, 2)); continue; }
-                throw new Error("REPLAY_ANCHOR_MISMATCH");
+                // A committed row exists but there is no local anchor. Two cases:
+                //  - the anchor is written AFTER COMMIT, so a concurrent reader can
+                //    observe this benign window (loser of a cross-process race);
+                //  - the local anchor was NEVER created because its very first write
+                //    failed while a healthy EXTERNAL witness carried the commit.
+                // With an EXTERNAL witness the local anchor is not required for
+                // safety, so treat it as maximally BEHIND and heal it on the writer
+                // path instead of bricking the store. In local-only mode a missing
+                // anchor beside existing rows stays a genuine tamper signal.
+                if (rollbackAnchor) {
+                    // With an EXTERNAL witness the local anchor is not required for
+                    // safety: its absence is a maximally-BEHIND case. Writers heal it;
+                    // readers simply tolerate it and rely on the external check below.
+                    if (heal) {
+                        try { await writeTrustedAnchor(anchorFile, rows.length, previous, key); }
+                        catch { /* tolerated; the external witness still governs safety */ }
+                    }
+                } else {
+                    if (attempt < 3) { await new Promise((r) => setTimeout(r, 2)); continue; }
+                    throw new Error("REPLAY_ANCHOR_MISMATCH");
+                }
             } else if (anchor.seq > rows.length) {
                 if (attempt < 3) { await new Promise((r) => setTimeout(r, 2)); continue; }
                 throw new Error("REPLAY_ANCHOR_MISMATCH");
@@ -437,8 +452,8 @@ function createCanonicalReplayLedger({
     async function compensate(seq) {
         let ownTransaction = false;
         try {
-            // Called both after a COMMIT (post-commit failure) and from inside
-            // snapshot()'s caller transaction. Only open one if none is active.
+            // Called ONLY from the two POST-COMMIT sites (_reserve/_transition), where
+            // no caller transaction is open. This guard is defensive.
             try { await dbCall(db, "run", "BEGIN IMMEDIATE"); ownTransaction = true; }
             catch { ownTransaction = false; }
             const tail = await new Promise((resolve, reject) =>
