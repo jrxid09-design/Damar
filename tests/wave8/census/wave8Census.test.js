@@ -461,3 +461,135 @@ test("census CLI: exit code is non-zero on an ungoverned route and zero when cle
         fs.rmSync(good, { recursive: true, force: true });
     }
 });
+
+// ---------------------------------------------------------------------------
+// C0-REPAIR-1 (W8-IW1) — the CONSERVATIVE direction must survive every call
+// shape. The invariant is READ vs CALL, not known-member vs unknown-member:
+//   READ (any syntax)                → classified, no sink, not UNCLASSIFIED
+//   KNOWN EXECUTION SURFACE          → sink / action-capable
+//   UNMODELLED CALL SHAPE FROM ROOT  → UNCLASSIFIED
+// The oracle must never turn "I do not understand this call shape" into "clean".
+// ---------------------------------------------------------------------------
+
+const ROOT_REQUIRE = 'const root = require("./plugins/pluginLoader.js");\n';
+const loaderFixture = (body) => ({
+    "src/server.js": 'require("./m.js");\n',
+    "src/m.js": body,
+    "src/plugins/pluginLoader.js": PLUGIN_LOADER,
+    "src/ToolRegistry.js": REGISTRY
+});
+const neverClean = (report) =>
+    report.counters.LEGACY_SECOND_PATH + report.counters.UNCLASSIFIED_LEGACY_REACHABILITY >= 1;
+
+test("census: an unmodelled CALL shape derived from a root is never clean (P1)", () => {
+    const shapes = {
+        "alias chain": 'const a = require("./plugins/pluginLoader.js");\nconst b = a;\nb.load(p);\n',
+        "nested member": ROOT_REQUIRE + "root.plugins.load(p);\n",
+        "assignment destructuring": 'let b;\n({ load: b } = require("./plugins/pluginLoader.js"));\nb(p);\n',
+        "member to field": ROOT_REQUIRE + "const o = {};\no.load = root.load;\no.load(p);\n",
+        "parenthesised call": ROOT_REQUIRE + "(root.load)(p);\n",
+        "sequence-comma call": ROOT_REQUIRE + "(0, root.load)(p);\n",
+        "bound function not invoked": ROOT_REQUIRE + "const f = root.load.bind(x);\n"
+    };
+    for (const [label, body] of Object.entries(shapes)) {
+        const report = run(loaderFixture(body));
+        assert.ok(neverClean(report),
+            `${label}: a call shape the oracle does not model must be a sink or UNCLASSIFIED, never clean`);
+    }
+});
+
+test("census: a READ of a root in any syntax stays classified (P1 control)", () => {
+    const reads = {
+        "plain property": ROOT_REQUIRE + 'const u = root.userRoot ?? "";\nmodule.exports = u;\n',
+        "optional property": ROOT_REQUIRE + 'const u = root?.userRoot ?? "";\nmodule.exports = u;\n',
+        "whole object member": ROOT_REQUIRE + "const l = root.loaded;\nmodule.exports = l;\n",
+        "passed as an argument": ROOT_REQUIRE + "const u = root.userRoot;\nfs.mkdirSync(u, { recursive: true });\n",
+        "computed read": ROOT_REQUIRE + 'const v = root["load"];\nmodule.exports = v;\n',
+        "inline require read": 'const u = require("./plugins/pluginLoader.js").userRoot;\nmodule.exports = u;\n'
+    };
+    for (const [label, body] of Object.entries(reads)) {
+        const report = run(loaderFixture(body));
+        assert.equal(report.counters.UNCLASSIFIED_LEGACY_REACHABILITY, 0,
+            `${label}: a data read is a form the oracle CAN classify`);
+        assert.equal(report.counters.ACTION_CAPABLE_UNGOVERNED, 0,
+            `${label}: a data read is not an action-capable sink`);
+    }
+});
+
+test("census: a KNOWN execution surface is a sink in every call syntax (P1 control + P2)", () => {
+    const calls = {
+        "plain": "root.loadOne(p);\n",
+        "family member": "root.load(p);\n",
+        "optional on the receiver": "root?.load(p);\n",
+        "optional call": "root.load?.(p);\n",
+        "optional on both": "root?.load?.(p);\n",
+        "computed member": ["root", "[", '"loadOne"', "]", "(p);\n"].join(""),
+        "computed optional call": ["root", "[", '"loadOne"', "]", "?.(p);\n"].join(""),
+        "explicit .call": "root.loadOne.call(root, p);\n",
+        "explicit .apply": "root.loadOne.apply(root, [p]);\n"
+    };
+    for (const [label, body] of Object.entries(calls)) {
+        const report = run(loaderFixture(ROOT_REQUIRE + body));
+        assert.equal(report.counters.ACTION_CAPABLE_UNGOVERNED, 1,
+            `${label}: a declared execution surface must be reported as a sink`);
+        assert.deepEqual(kinds(report), ["plugin_handler_execution"], label);
+        assert.equal(report.counters.UNCLASSIFIED_LEGACY_REACHABILITY, 0,
+            `${label}: a recognised surface is not an unknown form`);
+    }
+});
+
+test("census: optional call syntax on a root reached by alias and inline require (P2)", () => {
+    const forms = {
+        "registry alias": 'const R = require("./ToolRegistry.js");\nR.execute?.(x);\n',
+        "literal root name": "pluginLoader.load?.(p);\n",
+        "inline require": 'const p = "x";\nrequire("./plugins/pluginLoader.js").loadOne?.(p);\n'
+    };
+    for (const [label, body] of Object.entries(forms)) {
+        const report = run(loaderFixture(body));
+        assert.equal(report.counters.ACTION_CAPABLE_UNGOVERNED, 1, `${label}: optional call must not hide the sink`);
+    }
+});
+
+test("census: regex literal text is not executable code, live code after it still is (P2 hardening)", () => {
+    const inert = run({
+        "src/server.js": 'require("./m.js");\n',
+        "src/m.js": 'const re = /require("child_process")/;\nmodule.exports = re;\n'
+    });
+    assert.equal(inert.counters.LEGACY_SECOND_PATH, 0, "a regex literal is data, not a module load");
+
+    const division = run({
+        "src/server.js": 'require("./m.js");\n',
+        "src/m.js": 'const a = 4, b = 2;\nconst q = a / b;\nconst cp = require("node:child_process");\nmodule.exports = { q, cp };\n'
+    });
+    assert.equal(division.counters.LEGACY_SECOND_PATH, 1,
+        "a division slash must not swallow the require that follows it");
+
+    const afterRegex = run(loaderFixture('const re = /x/;\n' + ROOT_REQUIRE + "root.load(p);\n"));
+    assert.equal(afterRegex.counters.ACTION_CAPABLE_UNGOVERNED, 1,
+        "a real surface call after a regex literal must still be detected");
+});
+
+test("census: per-ingress reachability is measured, not inferred from the walk order", () => {
+    const report = run({
+        "src/server.js": 'require("./legacy.js");\n',
+        "src/cli/index.js": 'require("../legacy.js");\n',
+        "src/legacy.js": 'const R = require("./ToolRegistry.js");\nR.execute("x");\n',
+        "src/ToolRegistry.js": REGISTRY
+    }, { entrypoints: ["src/cli/index.js", "src/server.js"] });
+
+    assert.deepEqual(report.ingress.analyzed, ["src/cli/index.js", "src/server.js"]);
+    assert.equal(report.counters.PRODUCTION_INGRESSES_ANALYZED, 2);
+    assert.equal(report.counters.INGRESSES_WITH_UNGOVERNED_FINDINGS, 2,
+        "both entrypoints root the same ungoverned sink and both must be counted");
+    assert.deepEqual(report.ingress.ungovernedByIngress, { "src/cli/index.js": 1, "src/server.js": 1 });
+    assert.deepEqual(report.findings[0].ingresses, ["src/cli/index.js", "src/server.js"]);
+});
+
+test("census: every finding carries the byte column that makes its identity unique", () => {
+    const report = run({
+        "src/server.js": 'require("./m.js");\n',
+        "src/m.js": "fs.writeFileSync(a); fs.writeFileSync(b); fs.writeFileSync(c);\n"
+    });
+    assert.equal(report.findings.length, 3, "three sites on one line are three findings");
+    assert.equal(new Set(report.findings.map(f => f.column)).size, 3, "each site has its own column");
+});

@@ -23,6 +23,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 const { analyze } = require("./wave8-census.js");
 
 const CLUSTER_BY_PREFIX = [
@@ -69,7 +70,8 @@ const UNCLASSIFIED_RESOLUTION = {
         source_file: "src/app.js",
         symbol: "pluginLoader.load(  @ src/app.js:7",
         reachable_from_production: "YES",
-        consequential: "YES",
+        consequential_for_stated_interaction: "YES",
+        scope: "src/app.js IS a production execution path (module-level claim)",
         cluster: "C7-MCP-EGRESS",
         authority_path: "NONE on this path (no canonical owner traversed)",
         execution_path: "src/server.js -> src/app.js -> plugins/pluginLoader.load(...)",
@@ -93,7 +95,13 @@ const UNCLASSIFIED_RESOLUTION = {
         source_file: "src/autonomy/CapabilityRegistry.js",
         symbol: "pluginLoader.userRoot  @ src/autonomy/CapabilityRegistry.js:75-76",
         reachable_from_production: "YES",
-        consequential: "NO",
+        consequential_for_stated_interaction: "NO",
+        scope: "the pluginLoader.userRoot GETTER READ only — NOT a module safety judgement",
+        unmodelled_effects:
+            "The census models execution/file/network/device sinks, not DATABASE writes. This module also runs " +
+            "`upsert` / `recordUsage` INSERT+UPDATE statements against the capability table (metadata and trust " +
+            "telemetry) on the same ungoverned path. That is outside the plugin-execution question this entry " +
+            "answers and is NOT covered by any census counter.",
         cluster: "C5-AUTONOMY-DAEMONS",
         authority_path: "N/A (no execution surface)",
         execution_path: "src/server.js -> src/autonomy/index.js -> CapabilityRegistry",
@@ -116,7 +124,12 @@ const UNCLASSIFIED_RESOLUTION = {
         source_file: "src/autonomy/SkillFactory.js",
         symbol: "require(\"../plugins/pluginLoader\").userRoot  @ src/autonomy/SkillFactory.js:33",
         reachable_from_production: "YES",
-        consequential: "NO",
+        consequential_for_stated_interaction: "NO",
+        scope: "the inline pluginLoader.userRoot GETTER READ, and the generated-source strings — NOT a module safety judgement",
+        unmodelled_effects:
+            "This module GENERATES plugin source text (and can write it through ../services/toolForge, censused " +
+            "separately as filesystem_mutation) and calls `capabilities.upsert(...)`. Neither is a registry " +
+            "execution surface; the generated code is never executed in this module.",
         cluster: "C5-AUTONOMY-DAEMONS",
         authority_path: "N/A (no execution surface)",
         execution_path: "src/server.js -> src/autonomy/index.js -> SkillFactory",
@@ -137,7 +150,8 @@ const UNCLASSIFIED_RESOLUTION = {
         source_file: "src/core/tools/index.js",
         symbol: "module.exports = { ToolRegistry: require(\"./ToolRegistry.js\"), ... }",
         reachable_from_production: "YES",
-        consequential: "NO",
+        consequential_for_stated_interaction: "NO",
+        scope: "a pure re-export barrel has no execution of its own — NOT a statement about the roots it re-exports",
         cluster: "C9-AI-TOOL-DISPATCH",
         authority_path: "N/A (no execution surface)",
         execution_path: "src/server.js -> ... -> src/core/tools/index.js",
@@ -184,15 +198,20 @@ function build(root = process.cwd()) {
     const rows = rep.findings.map((f) => {
         const actionCapable = f.actionCapable === true;
         return {
-            id: `${f.file}:${f.line}:${f.kind}`,
+            // Unique per CALL SITE: file + line + byte column + kind. A column is
+            // required because one minified line can hold several sinks of the same
+            // kind, and a manifest keyed by file:line:kind would collide on them.
+            id: `${f.file}:${f.line}:${f.column}:${f.kind}`,
             census_category: "LEGACY_SECOND_PATH",
             source_file: f.file,
             line: f.line,
+            column: f.column,
             kind: f.kind,
             snippet: f.snippet,
             action_capable: actionCapable,
             consequential: actionCapable ? "YES" : "NO",
             entrypoint: f.entrypoint,
+            ingresses: f.ingresses ?? [f.entrypoint],
             execution_path: f.path.join(" -> "),
             hops: hops(f),
             cluster: clusterFor(f.file, actionCapable),
@@ -238,7 +257,7 @@ function build(root = process.cwd()) {
         source_file: file,
         symbol: "RECON_REQUIRED",
         reachable_from_production: "RECON_REQUIRED",
-        consequential: "RECON_REQUIRED",
+        consequential_for_stated_interaction: "RECON_REQUIRED",
         authority_path: "RECON_REQUIRED",
         execution_path: "RECON_REQUIRED",
         classification: "H_UNKNOWN_REQUIRES_RECON",
@@ -248,27 +267,48 @@ function build(root = process.cwd()) {
 
     // The manifest may not claim more than the census measured, nor drop a sink it
     // measured: both directions are counted here so a divergence is visible.
-    // `unique_execution_root_count` counts the distinct production entrypoints that
-    // root the ungoverned paths (the sink-bearing module count is unique_module_count).
+    //
+    // Ingress metrics are measured per entrypoint by the census (one traversal per
+    // production ingress), NOT inferred from the `entrypoint` field, which is only
+    // the FIRST path that reached a module in the walker's own order.
     const reconciliation = {
         raw_sink_count: rep.findings.length,
         manifest_row_count: rows.length,
         unique_module_count: new Set(rows.map(r => r.source_file)).size,
-        unique_execution_root_count: new Set(rows.map(r => r.entrypoint)).size,
+        unique_row_id_count: new Set(rows.map(r => r.id)).size,
+        production_ingresses_analyzed: rep.counters.PRODUCTION_INGRESSES_ANALYZED,
+        ungoverned_findings_by_ingress: rep.ingress ? rep.ingress.ungovernedByIngress : {},
         action_capable_count: rows.filter(r => r.action_capable).length,
         advisory_count: rows.filter(r => !r.action_capable).length,
         unclassified_count: rep.unclassified.length,
         census_findings_without_manifest_row: rep.findings
-            .filter(f => !censusIds.has(`${f.file}:${f.line}:${f.kind}`)).length,
+            .filter(f => !censusIds.has(`${f.file}:${f.line}:${f.column}:${f.kind}`)).length,
         manifest_rows_without_census_evidence: rows.filter(r => !censusIds.has(r.id)).length
     };
 
+    // Distinct fields, so a JSON-only consumer never has to infer the meaning of
+    // the SHA from a generator comment:
+    //   measured_source_sha — the git HEAD the census MEASURED (the tree that was read);
+    //   artifact_commit_sha — the git HEAD the generator ran in (the commit that
+    //                        carries this file once committed is normally the next one,
+    //                        because the generator always writes its output).
+    const measured = rep.sha;
+    let artifactSha = measured;
+    try {
+        artifactSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    }
+    catch { /* not a git checkout */ }
+
     return {
         schemaVersion: 1,
-        sha: rep.sha,
+        sha: measured,
+        measured_source_sha: measured,
+        artifact_commit_sha: artifactSha,
+        sha_meaning: "measured_source_sha = the git HEAD the census read; artifact_commit_sha = the HEAD the generator ran in. `sha` is kept as an alias of measured_source_sha for older consumers.",
         generatedFrom: "scripts/wave8-census.js",
         counters: rep.counters,
         reconciliation,
+        ingress: rep.ingress ?? null,
         unclassified: unclassifiedNow,
         unclassified_resolutions: Object.values(UNCLASSIFIED_RESOLUTION),
         clusters: clusterList,
@@ -285,11 +325,13 @@ function main(argv) {
     if (json) { process.stdout.write(JSON.stringify(manifest, null, 2) + "\n"); return 0; }
 
     const r = manifest.reconciliation;
-    process.stdout.write(`W8-IW1 MIGRATION MANIFEST  sha=${manifest.sha}\n`);
+    process.stdout.write(`W8-IW1 MIGRATION MANIFEST  measured_source_sha=${manifest.measured_source_sha}\n`);
     process.stdout.write(`  hits=${manifest.findings.length} clusters=${manifest.clusters.length} unclassified=${manifest.unclassified.length}\n\n`);
     process.stdout.write(`  RAW_SINK_COUNT=${r.raw_sink_count} MANIFEST_ROW_COUNT=${r.manifest_row_count}\n`);
-    process.stdout.write(`  UNIQUE_MODULE_COUNT=${r.unique_module_count} UNIQUE_EXECUTION_ROOT_COUNT=${r.unique_execution_root_count}\n`);
+    process.stdout.write(`  UNIQUE_MODULE_COUNT=${r.unique_module_count} UNIQUE_ROW_ID_COUNT=${r.unique_row_id_count}\n`);
     process.stdout.write(`  ACTION_CAPABLE_COUNT=${r.action_capable_count} ADVISORY_COUNT=${r.advisory_count} UNCLASSIFIED_COUNT=${r.unclassified_count}\n`);
+    process.stdout.write(`  PRODUCTION_INGRESSES_ANALYZED=${r.production_ingresses_analyzed}\n`);
+    process.stdout.write(`  UNGOVERNED_FINDINGS_BY_INGRESS=${JSON.stringify(r.ungoverned_findings_by_ingress)}\n`);
     process.stdout.write(`  evidence gaps: census->manifest=${r.census_findings_without_manifest_row} manifest->census=${r.manifest_rows_without_census_evidence}\n\n`);
     for (const c of manifest.clusters) {
         process.stdout.write(`  ${c.id.padEnd(28)} hits=${String(c.hits).padStart(3)} action_capable=${String(c.action_capable).padStart(2)} files=${String(c.files).padStart(2)} max_risk=${c.max_risk}\n`);
