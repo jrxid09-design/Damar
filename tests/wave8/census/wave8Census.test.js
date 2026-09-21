@@ -862,3 +862,68 @@ test("census: a tagged template invokes the surface it is attached to", () => {
     const interpolation = run(tree("const s = " + tag + "x ${pluginLoader.load(x)}" + tag + ";\nmodule.exports = s;\n"));
     assert.equal(interpolation.counters.ACTION_CAPABLE_UNGOVERNED, 1, "an interpolated call is still live");
 });
+
+// ---------------------------------------------------------------------------
+// W8-IW1-C0 CLUSTER C11-COGNITION-TOOLS — a bare `handler(...)` is a tool/handler
+// REFERENCE invocation only when `handler` can be something other than a proven local:
+// `const handler = HANDLERS[env.type]` is a pure reducer table ("no IO here",
+// src/cognition/continuity/reducers.js), so calling it is a name coincidence, not an
+// execution surface. Every ambiguous form — parameter, root-bound, destructured,
+// undeclared — stays visible.
+// ---------------------------------------------------------------------------
+
+const LOCAL_TABLE = "const HANDLERS = { A: (s) => s, B: (s) => s };\n";
+
+test("census: a handler dispatched from a proven-local table is not an execution surface", () => {
+    const proven = {
+        "table lookup": LOCAL_TABLE + "const handler = HANDLERS[env.type];\nhandler(x);\n",
+        "the real ContinuityCore shape": LOCAL_TABLE +
+            "function reduceFrom(base, env) {\n    const handler = HANDLERS[env.type];\n" +
+            "    if (!handler) return base;\n    const next = handler(base, env, { config: 1 });\n    return next;\n}\nreduceFrom(1, { type: 'A' });\n",
+        "local factory result": "const make = () => (x) => x;\nconst handler = make();\nhandler(1);\n",
+        "local map lookup (meshRouter shape)": "const _handlers = new Map();\nconst handler = _handlers.get('t');\nhandler(1);\n"
+    };
+    for (const [label, body] of Object.entries(proven)) assertClean(run(tree(body)), label);
+});
+
+test("census: an ambiguous handler reference stays visible", () => {
+    const fromRoot = {
+        "registry surface result": "const handler = ToolRegistry.get(id);\nhandler(x);\n",
+        "registry alias result": RS_REQUIRE + "let handler;\nhandler = RS.get(id);\nhandler(x);\n"
+    };
+    for (const [label, body] of Object.entries(fromRoot)) {
+        assert.deepEqual(totals(run(tree(body))), { sink: 1, action: 1, unclass: 0 }, label);
+    }
+
+    // `root.loadOne(id)` is itself a plugin execution surface, so this tree carries two
+    // findings: the surface call AND the direct invocation of the handler it returned.
+    const pluginBound = run(tree(ROOT_REQUIRE + "const handler = root.loadOne(id);\nhandler(x);\n"));
+    assert.ok(pluginBound.findings.some(f => f.kind === "tool_handler_invocation"),
+        "a handler bound from a plugin surface and invoked directly stays visible");
+
+    const parameters = {
+        "parameter at the head of a block": "function f(handler) {\n    handler(x);\n}\nf(1);\n",
+        "parameter after a statement": "function f(handler) {\n    const a = 1;\n    handler(a);\n}\nf(1);\n",
+        "block-bodied arrow parameter": "const f = (handler) => { handler(x); };\nf(1);\n",
+        "parameter of a method": "const o = { on(type, handler) { handler(type); } };\no.on('t', 1);\n"
+    };
+    for (const [label, body] of Object.entries(parameters)) {
+        assert.deepEqual(totals(run(tree(body))), { sink: 1, action: 1, unclass: 0 }, label);
+    }
+
+    const other = {
+        "destructured from another module": 'const { handler } = require("./h.js");\nhandler(x);\n',
+        "never declared at all": "handler(x);\n"
+    };
+    for (const [label, body] of Object.entries(other)) {
+        assert.deepEqual(totals(run(tree(body, { "src/h.js": "module.exports = { handler: (x) => x };\n" }))),
+            { sink: 1, action: 1, unclass: 0 }, label);
+    }
+});
+
+test("census: a control-flow test on a local handler does not make it a parameter", () => {
+    const guarded = run(tree(LOCAL_TABLE + "const handler = HANDLERS[env.type];\n" +
+        "if (!handler) { throw new Error('unknown event'); }\n" +
+        "handler(x);\n"));
+    assertClean(guarded, "if (!handler) { ... } is a condition, not a parameter list");
+});
