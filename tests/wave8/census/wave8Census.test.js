@@ -889,7 +889,8 @@ test("census: a handler dispatched from a proven-local table is not an execution
 test("census: an ambiguous handler reference stays visible", () => {
     const fromRoot = {
         "registry surface result": "const handler = ToolRegistry.get(id);\nhandler(x);\n",
-        "registry alias result": RS_REQUIRE + "let handler;\nhandler = RS.get(id);\nhandler(x);\n"
+        "registry alias result": RS_REQUIRE + "let handler;\nhandler = RS.get(id);\nhandler(x);\n",
+        "root aliased to a local name": "const reg = ToolRegistry;\nconst handler = reg.get(id);\nhandler(x);\n"
     };
     for (const [label, body] of Object.entries(fromRoot)) {
         assert.deepEqual(totals(run(tree(body))), { sink: 1, action: 1, unclass: 0 }, label);

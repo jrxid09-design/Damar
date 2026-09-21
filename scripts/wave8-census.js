@@ -557,6 +557,25 @@ function surfaceKind(kind, surface) {
  *   offset of every RECOGNISED call site, so a caller can distinguish a modelled
  *   invocation from an unmodelled call-shaped use of the same value.
  */
+/**
+ * Names a module binds to a root OTHER than by `require`: `const reg = ToolRegistry;`.
+ * Assignment-derived aliases were invisible to the require-based alias table, so a value
+ * reached through one (and every call on it) read as unattached local data.
+ *
+ * @param code the blanked code view
+ * @param rootIdentifiers the literal root map (`ToolRegistry` -> kind)
+ * @returns {string[]} escaped alias names
+ */
+function assignAliasNames(code, rootIdentifiers) {
+    const roots = Object.keys(rootIdentifiers).map(escapeRe);
+    if (roots.length === 0) return [];
+    const re = new RegExp("\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:" + roots.join("|") + ")\\b", "g");
+    const names = [];
+    let m;
+    while ((m = re.exec(code)) !== null) names.push(escapeRe(m[1]));
+    return names;
+}
+
 function detectSinksDetailed(source, registryAliases, rootRequires = []) {
     const { code, raw } = stripComments(source);
     const rows = [];
@@ -654,7 +673,10 @@ function detectSinksDetailed(source, registryAliases, rootRequires = []) {
     const rootRefs = [
         ...registryAliases.map((alias) => escapeRe(alias.name)),
         ...Object.keys(ROOT_IDENTIFIERS).map(escapeRe),
-        ...rootRequires.map((r) => "require\\s*\\(\\s*" + Q + escapeRe(r.spec) + Q + "\\s*\\)")
+        ...rootRequires.map((r) => "require\\s*\\(\\s*" + Q + escapeRe(r.spec) + Q + "\\s*\\)"),
+        // `const reg = ToolRegistry;` is an alias of a root too: a handler reached through
+        // it is root-derived, so the bare form must not be read as a local coincidence.
+        ...assignAliasNames(code, ROOT_IDENTIFIERS)
     ];
     const boundFromRoot = rootRefs.length > 0 &&
         new RegExp("\\bhandler\\s*=\\s*(?:" + rootRefs.join("|") + ")", "g").test(code);
