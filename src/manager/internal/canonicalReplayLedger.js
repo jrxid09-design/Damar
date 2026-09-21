@@ -273,13 +273,14 @@ function createCanonicalReplayLedger({
             if (pending.length) {
                 const highest = pending[pending.length - 1].seq;
                 if (highest > rows.length) throw new Error("REPLAY_TRUNCATION_DETECTED");
-                // History is intact but the head is unacknowledged. A read is still
-                // valid (the rows are HMAC-authenticated); only a writer reconciles,
-                // and only with independent witness advancement.
+                // History is intact but the head is unacknowledged. Only a writer
+                // may reconcile, and only by durably advancing a TRUSTED witness;
+                // if it cannot, the ledger stays fail-closed. Markers are then
+                // cleared ONE SEQ AT A TIME, never as a blanket prefix.
                 if (heal) {
                     const status = await persistAnchors(rows.length, previous);
                     if (!status.witnessOk) throw new Error("REPLAY_HEAD_UNWITNESSED: " + describePersistence(status));
-                    await markWitnessed(rows.length);
+                    for (const row of pending) await markWitnessed(row.seq);
                 }
             }
 
@@ -392,7 +393,7 @@ function createCanonicalReplayLedger({
     function describePersistence(status) {
         const parts = [
             "external=" + (status.externalOk === null ? "not-configured" : (status.externalOk ? "ok" : "FAILED(" + String(status.externalError && status.externalError.message) + ")")),
-            "local=" + (status.localOk ? "ok" : "FAILED(" + String(status.localError && status.localError.message) + ")")
+            "local=" + (status.localOk === null ? "skipped" : (status.localOk ? "ok" : "FAILED(" + String(status.localError && status.localError.message) + ")"))
         ];
         return parts.join("; ");
     }
@@ -403,15 +404,23 @@ function createCanonicalReplayLedger({
             try { rollbackAnchor.commit(seq, eventHmac); }
             catch (error) { externalError = error; }
         }
+        // The local anchor must NEVER get ahead of a row that may still be
+        // compensated away: with an EXTERNAL witness configured, write it only
+        // AFTER that witness has durably advanced. Otherwise a compensate() would
+        // leave the anchor ahead of the chain and brick the whole store.
+        const localAttempted = !rollbackAnchor || externalError === null;
         let localError = null;
-        try { await writeTrustedAnchor(anchorFile, seq, eventHmac, key); }
-        catch (error) { localError = error; }
+        if (localAttempted) {
+            try { await writeTrustedAnchor(anchorFile, seq, eventHmac, key); }
+            catch (error) { localError = error; }
+        }
 
         const externalOk = rollbackAnchor ? externalError === null : null;
-        const localOk = localError === null;
+        const localOk = !localAttempted ? null : localError === null;
         return {
             externalOk,
             localOk,
+            localAttempted,
             witnessOk: rollbackAnchor ? externalOk === true : localOk === true,
             externalError,
             localError
@@ -426,21 +435,34 @@ function createCanonicalReplayLedger({
      *  Safe: it only removes the exact tail seq, and only while it is still the
      *  tail; anything else is left for fail-closed recovery. */
     async function compensate(seq) {
+        let ownTransaction = false;
         try {
-            await dbCall(db, "run", "BEGIN IMMEDIATE");
+            // Called both after a COMMIT (post-commit failure) and from inside
+            // snapshot()'s caller transaction. Only open one if none is active.
+            try { await dbCall(db, "run", "BEGIN IMMEDIATE"); ownTransaction = true; }
+            catch { ownTransaction = false; }
             const tail = await new Promise((resolve, reject) =>
                 db.get("SELECT MAX(seq) AS maxSeq FROM replay_events", [], (e, r) => (e ? reject(e) : resolve(r))));
+            let removed = false;
             if (tail && tail.maxSeq === seq) {
                 await dbCall(db, "run", "DELETE FROM replay_events WHERE seq = ?", [seq]);
                 await dbCall(db, "run", "DELETE FROM replay_unwitnessed WHERE seq = ?", [seq]);
+                removed = true;
             }
-            await dbCall(db, "run", "COMMIT");
-        } catch { /* leave the marker: recovery stays fail-closed */ }
+            if (ownTransaction) await dbCall(db, "run", "COMMIT");
+            return removed;
+        } catch {
+            if (ownTransaction) { try { await dbCall(db, "run", "ROLLBACK"); } catch { /* nothing to undo */ } }
+            return false;
+        }
     }
 
     /** Clear the durable marker only once a trusted witness has advanced. */
+    /** Clear ONLY the exact seq proven witnessed. A prefix-wide clear would let
+     *  an unrelated later commit silently exonerate a seq whose OWN witness
+     *  attempt failed. */
     async function markWitnessed(seq) {
-        try { await dbCall(db, "run", "DELETE FROM replay_unwitnessed WHERE seq <= ?", [seq]); }
+        try { await dbCall(db, "run", "DELETE FROM replay_unwitnessed WHERE seq = ?", [seq]); }
         catch { /* best-effort; snapshot() reconciles on the next call */ }
     }
 
@@ -498,6 +520,8 @@ function createCanonicalReplayLedger({
                 if (!persistence.witnessOk) {
                     // No trusted witness advanced: undo the append entirely so the
                     // store cannot later look self-consistent with a frozen head.
+                    // If it is no longer the tail it cannot be undone, and the
+                    // marker stays so every later writer stays fail-closed.
                     await compensate(seq);
                     throw new Error("REPLAY_HEAD_UNWITNESSED: " + describePersistence(persistence));
                 }

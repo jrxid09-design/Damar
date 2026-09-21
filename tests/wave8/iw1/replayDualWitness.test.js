@@ -105,7 +105,11 @@ test("B: local succeeds / external fails -> local MUST NOT establish rollback sa
     assert.match(String(err && err.message), /REPLAY_HEAD_UNWITNESSED/,
         "a co-located local anchor must not substitute for the external witness");
     assert.equal(externalSeq(storeFile), 1, "the external head did not advance");
-    assert.equal(localSeq(file), 2, "the local anchor DID advance but proves nothing on its own");
+    assert.equal(localSeq(file), 1, "the local anchor must NOT advance when the trusted witness failed");
+
+    // A transient witness failure must not brick the ledger for later operations.
+    assert.equal((await ledger.reserve(bind("C"))).reserved, true,
+        "the ledger must stay usable after a transient witness failure");
 });
 
 test("C: BOTH witnesses fail after COMMIT -> fail closed with both diagnostics preserved", async () => {
@@ -124,7 +128,8 @@ test("C: BOTH witnesses fail after COMMIT -> fail closed with both diagnostics p
 
     assert.match(String(err && err.message), /REPLAY_HEAD_UNWITNESSED/, "no silent success may be reported");
     assert.match(String(err.message), /external=FAILED/, "external failure must be reported");
-    assert.match(String(err.message), /local=FAILED/, "local failure must NOT be lost");
+    assert.match(String(err.message), /local=skipped/,
+        "the local write is deliberately SKIPPED when the trusted witness failed, so it can never get ahead");
     assert.deepEqual(await seals(file), [1],
         "an unwitnessed append must be ROLLED BACK, never left committed beside a frozen head");
 });
@@ -157,16 +162,14 @@ test("D: BOTH fail on the post-invocation transition -> the effect stays AMBIGUO
         "deleting the marker alongside the events must NOT resurrect a witnessed state");
 });
 
-test("E: REAL process crash after DB COMMIT but before witness persistence fails closed", async () => {
-    const root = dir();
+/** Seed `A`, then run a REAL child process that dies inside the COMMIT callback,
+ *  i.e. after the event is committed but before any witness is persisted. */
+async function crashAfterCommit(root) {
     const file = path.join(root, "replay.sqlite");
     const storeFile = path.join(root, "ext.json");
     const port = makePort(storeFile);
-    const seed = createCanonicalReplayLedger({ file, rollbackAnchor: port });
-    await seed.reserve(bind("A"));
+    await createCanonicalReplayLedger({ file, rollbackAnchor: port }).reserve(bind("A"));
 
-    // The child dies inside the COMMIT callback: the event is committed, but
-    // persistAnchors never runs — the exact critical window.
     const childCode = `
         const fs = require("node:fs");
         const sqlite3 = require("sqlite3");
@@ -194,20 +197,29 @@ test("E: REAL process crash after DB COMMIT but before witness persistence fails
         const child = spawn(process.execPath, ["-e", childCode], { cwd: WORKTREE, stdio: "ignore" });
         child.on("close", resolve);
     });
+    return { file, storeFile, port };
+}
 
-    assert.deepEqual(await seals(file), [1, 2], "DB COMMIT != SAFE COMPLETION: the row committed");
-    assert.equal(externalSeq(storeFile), 1, "no witness advanced before the crash");
+test("E: REAL process crash after DB COMMIT but before witness persistence fails closed", async () => {
+    // (1) Attacker truncates to the frozen head before any recovery -> detected.
+    const first = await crashAfterCommit(dir());
+    assert.deepEqual(await seals(first.file), [1, 2], "DB COMMIT != SAFE COMPLETION: the row committed");
+    assert.equal(externalSeq(first.storeFile), 1, "no witness advanced before the crash");
+    await truncateTo(first.file, 1);
+    const fresh = createCanonicalReplayLedger({ file: first.file, rollbackAnchor: first.port });
+    await assert.rejects(() => fresh.reserve(bind("B")),
+        /REPLAY_TRUNCATION_DETECTED|REPLAY_ROLLBACK_DETECTED/,
+        "a crashed-but-committed head must still be detectable after a truncation");
 
-    // UNCERTAIN PRIOR EFFECT != SAFE TO RETRY: the digest must not be re-executable.
-    const fresh = createCanonicalReplayLedger({ file, rollbackAnchor: port });
-    assert.equal((await fresh.reserve(bind("B"))).reserved, false,
-        "a crashed-but-committed digest must not be silently re-reservable");
-
-    // And a truncation to the frozen head is still detected.
-    await truncateTo(file, 1);
-    const fresh2 = createCanonicalReplayLedger({ file, rollbackAnchor: port });
-    await assert.rejects(() => fresh2.reserve(bind("B")),
-        /REPLAY_TRUNCATION_DETECTED|REPLAY_ROLLBACK_DETECTED/);
+    // (2) Without truncation the unacknowledged append is NOT silently retryable:
+    // recovery may only reconcile by durably advancing a TRUSTED witness, so the
+    // digest stays consumed (fail closed) rather than being freed for a re-run.
+    const second = await crashAfterCommit(dir());
+    assert.deepEqual(await seals(second.file), [1, 2]);
+    const fresh2 = createCanonicalReplayLedger({ file: second.file, rollbackAnchor: second.port });
+    assert.equal((await fresh2.reserve(bind("B"))).reserved, false,
+        "UNCERTAIN PRIOR EFFECT != SAFE TO RETRY: a crashed-but-committed digest must stay consumed");
+    assert.equal(externalSeq(second.storeFile), 2, "recovery acknowledged the head only by advancing the witness");
 });
 
 test("F: restart after PARTIAL persistence reconciles the local anchor", async () => {
