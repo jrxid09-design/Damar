@@ -192,19 +192,19 @@ class ContinuityCore {
     /**
      * Reducer bersama LIVE / REPLAY / REKONSILIASI.
      *
-     * Satu-satunya tempat handler dipilih dan appraisal dihitung, supaya
+     * Satu-satunya tempat reducer dipilih dan appraisal dihitung, supaya
      * jalur langsung dan jalur rebuild tidak pernah menyimpang (§50).
      */
     reduceFrom(baseState, env, label = "") {
 
         const working = this.preApply(env, baseState);
-        const handler = HANDLERS[env.type];
+        const reducer = HANDLERS[env.type];
 
-        if (!handler) {
+        if (!reducer) {
             // Tidak akan terjadi (makeEnvelope memfilter), tetapi tetap
             // aman: diagnostik saja — tidak mutasi otoritatif (§100).
             const next = ignored(working,
-                `tipe tanpa handler${label}: ${env.type}`);
+                `tipe tanpa reducer${label}: ${env.type}`);
             next.diagnostics.unknownEvents += 1;
             return { working, next, appraisal: null };
         }
@@ -214,7 +214,7 @@ class ContinuityCore {
             toolReliability: ctx_toolReliability
         });
 
-        const next = handler(working, env, {
+        const next = reducer(working, env, {
             config: this.config,
             nowMs: eventTimeMs(env, this.clock),
             appraisal
