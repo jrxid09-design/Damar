@@ -23,7 +23,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const sqlite3 = require("sqlite3");
-const { createCanonicalReplayLedger } = require("../../../src/manager/internal/canonicalReplayLedger.js");
+const { createCanonicalReplayLedger, STATES } = require("../../../src/manager/internal/canonicalReplayLedger.js");
 
 const WORKTREE = path.resolve(__dirname, "../../..");
 const MODULE_PATH = path.resolve(__dirname, "../../../src/manager/internal/canonicalReplayLedger.js");
@@ -125,29 +125,36 @@ test("C: BOTH witnesses fail after COMMIT -> fail closed with both diagnostics p
     assert.match(String(err && err.message), /REPLAY_HEAD_UNWITNESSED/, "no silent success may be reported");
     assert.match(String(err.message), /external=FAILED/, "external failure must be reported");
     assert.match(String(err.message), /local=FAILED/, "local failure must NOT be lost");
-    assert.deepEqual(await seals(file), [1, 2], "the DB COMMIT landed, but that alone is not safe completion");
+    assert.deepEqual(await seals(file), [1],
+        "an unwitnessed append must be ROLLED BACK, never left committed beside a frozen head");
 });
 
-test("D: BOTH fail, then the DB truncates to the frozen head -> restart refuses", async () => {
+test("D: BOTH fail on the post-invocation transition -> the effect stays AMBIGUOUS after a coordinated rollback", async () => {
     const root = dir();
     const file = path.join(root, "replay.sqlite");
     const storeFile = path.join(root, "ext.json");
     const port = makePort(storeFile);
     const ledger = createCanonicalReplayLedger({ file, rollbackAnchor: port });
     await ledger.reserve(bind("A"));
+    await ledger.transition("A", STATES.INVOKING, bind("A")); // the driver may now have run
 
     port.externalBroken = true;
     const restore = breakLocal(file);
-    try { await assert.rejects(() => ledger.reserve(bind("B")), /REPLAY_HEAD_UNWITNESSED/); }
+    try { await assert.rejects(() => ledger.transition("A", STATES.EXECUTED_UNVERIFIED, bind("A")), /REPLAY_HEAD_UNWITNESSED/); }
     finally { restore(); port.externalBroken = false; }
-    assert.equal(externalSeq(storeFile), 1, "the external head stayed frozen");
-    assert.equal(localSeq(file), 1, "the local anchor stayed frozen");
+    assert.equal((await ledger.lookup("A")).state, STATES.INVOKING,
+        "the unwitnessed tail must roll back to the ambiguous state, never to RESERVED");
 
+    // Coordinated attack: delete the event rows AND the co-located marker rows.
     await truncateTo(file, 1);
+    const db = new sqlite3.Database(file);
+    await new Promise((res, rej) => db.run("DELETE FROM replay_unwitnessed", [], (e) => (e ? rej(e) : res())));
+    db.close();
+
     const fresh = createCanonicalReplayLedger({ file, rollbackAnchor: port });
-    await assert.rejects(() => fresh.reserve(bind("B")),
-        /REPLAY_TRUNCATION_DETECTED|REPLAY_ROLLBACK_DETECTED/,
-        "anchors agreeing with a truncated DB must NOT be treated as current");
+    await assert.rejects(() => fresh.reserve(bind("A")),
+        /REPLAY_ANCHOR_MISMATCH|REPLAY_ROLLBACK_DETECTED|REPLAY_TRUNCATION_DETECTED/,
+        "deleting the marker alongside the events must NOT resurrect a witnessed state");
 });
 
 test("E: REAL process crash after DB COMMIT but before witness persistence fails closed", async () => {
@@ -294,12 +301,13 @@ test("J: repeated witness faults across reservations never resurrect or duplicat
         db.all("SELECT digest, COUNT(*) AS n FROM replay_events GROUP BY digest", [], (e, r) => { db.close(); e ? reject(e) : resolve(r); });
     });
     const byDigest = Object.fromEntries(counts.map((row) => [row.digest, row.n]));
-    assert.equal(byDigest.B, 1, "the first attempted digest is committed exactly once");
+    assert.equal(byDigest.A, 1);
+    assert.equal(byDigest.B ?? 0, 0, "an unwitnessed append is rolled back, not left committed");
     assert.equal(byDigest.C ?? 0, 0, "no further event may commit while the head is unacknowledged");
     assert.equal(byDigest.D ?? 0, 0, "no further event may commit while the head is unacknowledged");
 
     const fresh = createCanonicalReplayLedger({ file, rollbackAnchor: port });
-    assert.equal((await fresh.reserve(bind("B"))).reserved, false, "B must never be re-executable");
+    assert.equal((await fresh.reserve(bind("B"))).reserved, true, "B never executed, so it may proceed once recovered");
     assert.equal((await fresh.reserve(bind("C"))).reserved, true, "C never executed, so it may proceed once recovered");
     assert.equal((await fresh.reserve(bind("D"))).reserved, true, "D never executed, so it may proceed once recovered");
 });

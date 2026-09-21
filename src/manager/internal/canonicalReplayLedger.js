@@ -418,6 +418,26 @@ function createCanonicalReplayLedger({
         };
     }
 
+    /** Remove a committed-but-UNWITNESSED tail so the durable store never retains an
+     *  event that no trusted witness covers. Without this, an attacker who can
+     *  truncate replay_events can also delete the co-located marker row, leaving a
+     *  fully self-consistent frozen store (the audit of 2de4e8e). After this the
+     *  unacknowledged append simply did not happen, so nothing is resurrectable.
+     *  Safe: it only removes the exact tail seq, and only while it is still the
+     *  tail; anything else is left for fail-closed recovery. */
+    async function compensate(seq) {
+        try {
+            await dbCall(db, "run", "BEGIN IMMEDIATE");
+            const tail = await new Promise((resolve, reject) =>
+                db.get("SELECT MAX(seq) AS maxSeq FROM replay_events", [], (e, r) => (e ? reject(e) : resolve(r))));
+            if (tail && tail.maxSeq === seq) {
+                await dbCall(db, "run", "DELETE FROM replay_events WHERE seq = ?", [seq]);
+                await dbCall(db, "run", "DELETE FROM replay_unwitnessed WHERE seq = ?", [seq]);
+            }
+            await dbCall(db, "run", "COMMIT");
+        } catch { /* leave the marker: recovery stays fail-closed */ }
+    }
+
     /** Clear the durable marker only once a trusted witness has advanced. */
     async function markWitnessed(seq) {
         try { await dbCall(db, "run", "DELETE FROM replay_unwitnessed WHERE seq <= ?", [seq]); }
@@ -476,6 +496,9 @@ function createCanonicalReplayLedger({
                 // is still detected and this digest is NOT re-executable.
                 const persistence = await persistAnchors(seq, eventHmac);
                 if (!persistence.witnessOk) {
+                    // No trusted witness advanced: undo the append entirely so the
+                    // store cannot later look self-consistent with a frozen head.
+                    await compensate(seq);
                     throw new Error("REPLAY_HEAD_UNWITNESSED: " + describePersistence(persistence));
                 }
                 await markWitnessed(seq);
@@ -496,6 +519,10 @@ function createCanonicalReplayLedger({
                 await dbCall(db, "run", "COMMIT");
                 const persistence = await persistAnchors(seq, eventHmac);
                 if (!persistence.witnessOk) {
+                    // Undo the append: the digest reverts to its PREVIOUS state, so
+                    // an effect that already ran stays INVOKING (ambiguous) and can
+                    // never be silently re-driven.
+                    await compensate(seq);
                     throw new Error("REPLAY_HEAD_UNWITNESSED: " + describePersistence(persistence));
                 }
                 await markWitnessed(seq);

@@ -324,9 +324,10 @@ test("P1: a mid-write failure of the anchor write never truncates the live ancho
     // The live anchor must be untouched (the previous valid payload), not 0 bytes.
     assert.equal(fs.readFileSync(anchorFile, "utf8"), before, "a failed anchor write must not truncate the live anchor");
 
-    // The committed digest stays consumed, and the ledger recovers once a witness advances.
+    // The unwitnessed append is rolled back, so nothing is left silently committed;
+    // the digest is free because its effect never ran.
     const fresh = createCanonicalReplayLedger({ file });
-    assert.equal((await fresh.reserve(bind("B"))).reserved, false, "the committed digest stays consumed");
+    assert.equal((await fresh.reserve(bind("B"))).reserved, true, "an unwitnessed append is rolled back, not consumed");
     assert.equal((await fresh.reserve(bind("C"))).reserved, true, "the ledger recovers once a witness can advance");
 });
 
@@ -353,7 +354,7 @@ test("P1: a non-throwing SHORT write of the anchor leaves the live anchor intact
     assert.equal(fs.readFileSync(anchorFile, "utf8"), before, "the live anchor must never be corrupted by a short write");
 
     const fresh = createCanonicalReplayLedger({ file });
-    assert.equal((await fresh.reserve(bind("B"))).reserved, false, "the committed digest stays consumed");
+    assert.equal((await fresh.reserve(bind("B"))).reserved, true, "an unwitnessed append is rolled back, not consumed");
     assert.equal((await fresh.reserve(bind("C"))).reserved, true, "ledger must self-heal after a short-write failure");
 
     // (b) a PROGRESSING short write must be completed, never truncated.
@@ -447,7 +448,7 @@ test("P1: an over-reported writeSync count is rejected and never corrupts the li
     assert.equal(fs.readFileSync(anchorFile, "utf8"), before, "the live anchor must be intact");
 
     const fresh = createCanonicalReplayLedger({ file });
-    assert.equal((await fresh.reserve(bind("B"))).reserved, false, "the committed digest stays consumed");
+    assert.equal((await fresh.reserve(bind("B"))).reserved, true, "an unwitnessed append is rolled back, not consumed");
     assert.equal((await fresh.reserve(bind("C"))).reserved, true, "ledger must self-heal");
 });
 
@@ -516,8 +517,8 @@ test("P1: a transient rename failure is retried, and a persistent one never stra
     finally { fs.renameSync = origRename2; }
     assert.equal(r2, null, "a persistently failing witness must not report success");
     assert.match(String(err2 && err2.message), /REPLAY_HEAD_UNWITNESSED/);
-    // It is not silently retryable: the committed digest stays consumed and observable.
-    assert.equal((await ledger.lookup("C")).state, "RESERVED", "the committed digest must be observable");
+    // The unwitnessed append is rolled back, so nothing is silently left committed.
+    assert.equal(await ledger.lookup("C"), null, "an unwitnessed append must not remain in the store");
 });
 
 test("P2: concurrent cold starts on a brand-new file never surface a raw SQLITE_BUSY", async () => {
@@ -569,7 +570,7 @@ test("P1: a persistently failing anchor heal does not block unrelated reservatio
 
     // Once the write path recovers, the next writer reconciles and the ledger proceeds.
     assert.equal((await ledger.reserve(bind("D"))).reserved, true);
-    assert.equal(JSON.parse(fs.readFileSync(anchorFile, "utf8")).seq, 4, "the anchor must heal once the write path recovers");
+    assert.equal(JSON.parse(fs.readFileSync(anchorFile, "utf8")).seq, 3, "the anchor must heal once the write path recovers");
 });
 
 test("P0: a local anchor write failure must not freeze the external rollback anchor", async () => {
