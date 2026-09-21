@@ -289,13 +289,14 @@ function build(root = process.cwd()) {
     // Distinct fields, so a JSON-only consumer never has to infer the meaning of
     // the SHA from a generator comment:
     //   measured_source_sha — the git HEAD the census MEASURED (the tree that was read);
-    //   artifact_commit_sha — the git HEAD the generator ran in (the commit that
-    //                        carries this file once committed is normally the next one,
-    //                        because the generator always writes its output).
+    //   generator_head_sha  — the git HEAD the generator RAN IN. The generator always
+    //                         writes its output, so the commit that carries this file is
+    //                         normally the NEXT one; this field deliberately does NOT
+    //                         claim to be the carrying commit.
     const measured = rep.sha;
-    let artifactSha = measured;
+    let generatorHead = measured;
     try {
-        artifactSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+        generatorHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
     }
     catch { /* not a git checkout */ }
 
@@ -303,8 +304,8 @@ function build(root = process.cwd()) {
         schemaVersion: 1,
         sha: measured,
         measured_source_sha: measured,
-        artifact_commit_sha: artifactSha,
-        sha_meaning: "measured_source_sha = the git HEAD the census read; artifact_commit_sha = the HEAD the generator ran in. `sha` is kept as an alias of measured_source_sha for older consumers.",
+        generator_head_sha: generatorHead,
+        sha_meaning: "measured_source_sha = the git HEAD the census read (the tree these counters describe). generator_head_sha = the HEAD the generator ran in; because the generator always writes its output, the commit carrying this file is normally the NEXT commit. `sha` is kept as an alias of measured_source_sha for older consumers.",
         generatedFrom: "scripts/wave8-census.js",
         counters: rep.counters,
         reconciliation,

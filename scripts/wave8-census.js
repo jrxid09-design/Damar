@@ -124,6 +124,16 @@ const EXECUTION_SURFACES = {
     plugin_handler_execution: ["execute", "invoke", "load", "loadRoot", "loadOne"]
 };
 
+// Members PROVEN non-executing in this tree. Calling one of these on a root-derived
+// value is a metadata read the oracle CAN classify; every other member is an
+// unmodelled call shape and makes its module UNCLASSIFIED. Nothing speculative is
+// listed — the evidence is the declared surfaces above plus the live call sites
+// (`describe`/`has`/`count`/`get` on the registry; `userRoot`/`loaded` on the loader).
+const NON_EXECUTING_MEMBERS = {
+    registry_execution: new Set(["describe", "has", "count", "get"]),
+    plugin_handler_execution: new Set(["userRoot", "loaded"])
+};
+
 // The identifiers literal source names a root by (derived from the root filenames,
 // so there is one source of truth): `ToolRegistry.execute(...)` reached through a
 // destructuring require, or an unbound/global root name.
@@ -330,8 +340,6 @@ function inRegexLiteral(code, index) {
     let i = index - 1;
     while (i >= 0 && /\s/.test(code[i])) i -= 1;
     if (i < 0 || code[i] !== "/") return false;
-    // A template interpolation `${ … }` is live code, not regex position.
-    if (code[i] === "{" && code[i - 1] === "$") return false;
     return REGEX_PRECEDER.test(code.slice(0, i));
 }
 
@@ -345,6 +353,77 @@ function positionOf(text, index) {
     return { line, column: index - lineStart + 1 };
 }
 
+/**
+ * Walk a traversal chain of ARBITRARY depth from `index` — `.name`, `?.name`,
+ * `[expr]`, `?.[expr]`, with whitespace anywhere — and report whether it ends in an
+ * INVOCATION: `(`, `?.(`, or a traversal onto `call`/`apply`/`bind` followed by `(`,
+ * or a parenthesised/sequence-comma call `(root.a.b)(x)`.
+ *
+ * There is deliberately no per-depth pattern here: a chain is either followed by an
+ * invocation or it is a read, however long it is. Runs on the blanked `code` view,
+ * where string and comment contents are already spaces.
+ *
+ * @returns {{members: string[], invoked: boolean}}
+ */
+function readMemberChain(code, index) {
+    let i = index;
+    const members = [];
+    const skipWs = () => { while (i < code.length && /\s/.test(code[i])) i += 1; };
+    const readIdent = () => {
+        const m = /^[A-Za-z_$][\w$]*/.exec(code.slice(i, i + 64));
+        return m === null ? null : m[0];
+    };
+    // `[ ... ]` including nesting; a newline or an unterminated bracket stops the chain.
+    const consumeBrackets = () => {
+        if (code[i] !== "[") return false;
+        let depth = 0;
+        const limit = Math.min(code.length, i + 500);
+        for (let j = i; j < limit; j += 1) {
+            if (code[j] === "[") depth += 1;
+            else if (code[j] === "]") {
+                depth -= 1;
+                if (depth === 0) { i = j + 1; return true; }
+            }
+            else if (code[j] === "\n") return false;
+        }
+        return false;
+    };
+
+    for (;;) {
+        skipWs();
+        const start = i;
+        let optional = false;
+        if (code[i] === "?" && code[i + 1] === ".") {
+            i += 2;
+            optional = true;
+            skipWs();
+        }
+        if (code[i] === "[") {
+            if (!consumeBrackets()) { i = start; break; }
+            members.push("*");
+        }
+        else if (code[i] === ".") {
+            i += 1;
+            skipWs();
+            const id = readIdent();
+            if (id === null) { i = start; break; }
+            i += id.length;
+            members.push(id);
+        }
+        else if (optional) {
+            const id = readIdent();
+            if (id === null) { i = start; break; }
+            i += id.length;
+            members.push(id);
+        }
+        else break;
+    }
+
+    skipWs();
+    const tail = code.slice(i, i + 8);
+    const invoked = /^(?:\?\.\s*)?\(/.test(tail) || (members.length > 0 && /^\)\s*\(/.test(tail));
+    return { members, invoked };
+}
 /** Sink kind produced by calling `surface` on a root of `kind`. */
 function surfaceKind(kind, surface) {
     return surface === "invoke" ? "tool_handler_invocation" : kind;
@@ -388,6 +467,10 @@ function detectSinksDetailed(source, registryAliases, rootRequires = []) {
             // Anchor the recorded offset on the value being called, not on a
             // prefix the pattern had to consume (`;`, `return`, …).
             const at = group > 0 ? m.index + m[0].indexOf(m[group]) : m.index;
+            // Regex literal text is DATA: `/pluginLoader.load(/` must not become a
+            // phantom sink. Only the run immediately before the match is examined, so
+            // real code after a regex (or after a division) is unaffected.
+            if (inRegexLiteral(code, at)) continue;
             push(kind, at, m[0]);
         }
     };
@@ -427,7 +510,9 @@ function detectSinksDetailed(source, registryAliases, rootRequires = []) {
             re.lastIndex = 0;
             let m;
             while ((m = re.exec(raw)) !== null) {
-                if (code.startsWith("require", m.index)) push(sinkKind, m.index, m[0]);
+                if (!code.startsWith("require", m.index)) continue;
+                if (inRegexLiteral(code, m.index)) continue;
+                push(sinkKind, m.index, m[0]);
             }
         };
         for (const surface of EXECUTION_SURFACES[kind] ?? []) {
@@ -478,113 +563,109 @@ function detectSinks(source, registryAliases, rootRequires = []) {
 }
 
 /**
- * CALL-SHAPED uses of a DIRECTLY required root that the oracle does NOT model.
+ * CALL-SHAPED uses of a root-derived value that the oracle does NOT model.
  *
- * The distinction this counter needs is READ vs CALL, not known-member vs
- * unknown-member:
- *   - reading a root's data property (`pluginLoader.userRoot`), or passing a
- *     root-derived value as an argument, is a data read → the module is classified;
- *   - ANY invocation the detector did not recognise — a member call, a nested
- *     member call, a parenthesised or sequence-comma call, `.call`/`.apply`, or a
- *     call on a value assigned from the root — is an execution form the oracle must
- *     never report as clean, so the module is UNCLASSIFIED instead.
+ * The distinction is READ vs CALL, not known-member vs unknown-member, and it is
+ * DEPTH-INDEPENDENT: a root-derived value followed by ANY number of `.m` / `?.m` /
+ * `[k]` / `?.[k]` traversals and then an invocation is an execution form the oracle
+ * must never report as clean, so its module is UNCLASSIFIED instead. Reading a root's
+ * data property, or calling a member PROVEN non-executing (NON_EXECUTING_MEMBERS), is
+ * a form the oracle can classify and stays classified.
  *
- * @param directRootNames identifiers bound to a root this module requires itself.
- * @param directRootSpecs {spec, kind}[] of those same requires.
+ * @param rootValues {text, kind}[] — every name / member path in this module that
+ *        holds a root module or a value extracted from one, including a root reached
+ *        through a facade member (`const T = barrel.ToolRegistry`).
+ * @param inlineRoots {index, kind}[] — byte offsets of inline requires that resolve to
+ *        a root (the specifier is blanked in `code`, so it is located by offset).
  * @param sinkOffsets byte offsets detectSinksDetailed already recognised as declared
  *        execution surfaces — those are sinks, not unknowns.
  * @returns {string[]} one description per unmodelled call site (empty = clean).
  */
-function unmodelledRootUses(code, raw, directRootNames, directRootSpecs, sinkOffsets) {
-    const Q = "[\\u0022\\u0027]";
-    const rootSpecs = new Set(directRootSpecs.map(r => r.spec));
-
-    // Values derived from a root WITHOUT an intervening call: a plain alias, a
-    // member of the root, a destructured member, or a member assigned onto another
-    // object (`o.load = root.load`). Bounded to 3 passes — a fixation, not dataflow.
-    const derived = new Set();
+function unmodelledRootUses(code, raw, rootValues, inlineRoots, sinkOffsets) {
     const SKIP_BASES = new Set(["this", "module", "exports", "require"]);
 
-    // An INLINE root require binds through the specifier, which is blanked in
-    // `code` — so its binding head is read from the blanked view at the offset
-    // moduleCalls proves is real code.
-    const inlineRoots = [];
-    for (const call of moduleCalls(code, raw)) {
-        if (call.spec === null || !rootSpecs.has(call.spec)) continue;
-        inlineRoots.push(call.index);
-        const head = code.slice(Math.max(0, call.index - 80), call.index);
-        const bound = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(head);
-        if (bound) derived.add(bound[1]);
-        const spread = /\(\s*\{([^}]+)\}\s*=\s*$/.exec(head);
-        if (spread) for (const name of destructuredNames(spread[1])) derived.add(name);
-    }
+    // A root-derived value: a local name, or a member path (`o.load`) that holds a
+    // value derived from a root WITHOUT an intervening call. The KIND travels with
+    // the value so a recognised metadata read can be exempted and nothing else is.
+    const derived = new Map();   // name|"base.member" → kind|null
+    for (const v of rootValues) if (!derived.has(v.text)) derived.set(v.text, v.kind ?? null);
 
-    const exprSources = () => [
-        ...directRootNames.map(n => "\\b" + escapeRe(n)),
-        ...[...derived].map(d => "\\b" + escapeRe(d))
-    ];
-    // With no root value to start from there is nothing to derive: an empty
-    // alternation would match EVERY declaration and turn the whole module hostile.
-    const derivedValue = () => exprSources().length === 0
-        ? null
-        : "(?:" + exprSources().join("|") + ")(?:\\s*(?:\\?\\.|\\.)\\s*[A-Za-z_$][\\w$]*)?";
+    const patternFor = (key) => key.includes(".")
+        ? "\\b" + escapeRe(key.split(".")[0]) + "\\s*(?:\\?\\.|\\.)\\s*" + escapeRe(key.split(".")[1])
+        : "\\b" + escapeRe(key);
 
-    for (let pass = 0; pass < 3; pass += 1) {
-        const rve = derivedValue();
-        if (rve === null) break;
-        const before = derived.size;
-        let m;
-        const decl = new RegExp("(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*" + rve, "g");
-        while ((m = decl.exec(code)) !== null) derived.add(m[1]);
+    // A traversal chain (`.m`, `?.m`, `[k]`, `?.[k]`, any length) and the characters
+    // that may legally END an expression that IS that value.
+    const TRAVERSAL = "(?:\\s*(?:\\?\\.|\\.)\\s*[A-Za-z_$][\\w$]*|\\s*\\??\\.?\\s*\\[\\s*[^\\]\\n]*\\])\\s*";
+    const RHS_END = "(?=[;,)\\]}\\n])";
 
-        const bare = new RegExp("[;,({\\[]\\s*([A-Za-z_$][\\w$]*)\\s*=\\s*" + rve, "g");
-        while ((m = bare.exec(code)) !== null) if (!SKIP_BASES.has(m[1])) derived.add(m[1]);
+    // Bounded fixation (not dataflow): const/let/var, bare reassignment, member
+    // assignment and destructuring, four passes or until nothing new appears.
+    for (let pass = 0; pass < 4; pass += 1) {
+        let grew = false;
+        const add = (key, kind) => {
+            if (derived.has(key)) return;
+            derived.set(key, kind);
+            grew = true;
+        };
+        for (const [key, kind] of [...derived]) {
+            // The right-hand side must BE the value: a traversal chain of any depth
+            // followed by the end of the expression. Requiring the terminator is what
+            // keeps an INVOKED expression out (`const names = ToolRegistry.describe()`
+            // hands back data, not the registry), and it is one general pattern rather
+            // than a per-depth ladder.
+            const rhs = patternFor(key) + "(?:" + TRAVERSAL + ")*" + RHS_END;
+            let m;
+            const decl = new RegExp("(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*" + rhs, "g");
+            while ((m = decl.exec(code)) !== null) add(m[1], kind);
 
-        const member = new RegExp("\\b([A-Za-z_$][\\w$]*)\\s*(?:\\?\\.|\\.)\\s*([A-Za-z_$][\\w$]*)\\s*=\\s*" + rve, "g");
-        while ((m = member.exec(code)) !== null) {
-            if (!SKIP_BASES.has(m[1])) derived.add(m[1] + "." + m[2]);
+            const bare = new RegExp("[;,({\\[]\\s*([A-Za-z_$][\\w$]*)\\s*=\\s*" + rhs, "g");
+            while ((m = bare.exec(code)) !== null) if (!SKIP_BASES.has(m[1])) add(m[1], kind);
+
+            const member = new RegExp("\\b([A-Za-z_$][\\w$]*)\\s*(?:\\?\\.|\\.)\\s*([A-Za-z_$][\\w$]*)\\s*=\\s*" + rhs, "g");
+            while ((m = member.exec(code)) !== null) {
+                if (!SKIP_BASES.has(m[1])) add(m[1] + "." + m[2], kind);
+            }
+
+            const destructured = new RegExp("\\(?\\s*\\{([^}]+)\\}\\s*=\\s*" + rhs, "g");
+            while ((m = destructured.exec(code)) !== null) {
+                for (const name of destructuredNames(m[1])) add(name, kind);
+            }
         }
-
-        const destructured = new RegExp("\\(?\\s*\\{([^}]+)\\}\\s*=\\s*" + rve, "g");
-        while ((m = destructured.exec(code)) !== null) {
-            for (const name of destructuredNames(m[1])) derived.add(name);
-        }
-        if (derived.size === before) break;
+        if (!grew) break;
     }
 
-    // What counts as a call-shaped use of a root-derived value.
-    const CALL_SHAPED = [
-        /^\s*(?:\?\.\s*)?\(/,                                          // x(    x?.(
-        /^\s*(?:\?\.\s*)?\[[^\]]*\]\s*(?:\?\.\s*)?\(/,                 // xk    x?.k
-        /^\s*(?:\?\.\s*)?\.\s*[A-Za-z_$][\w$]*\s*(?:\?\.\s*)?\(/,      // x.m(  x.m?.(  x?.m(
-        /^\s*(?:\?\.\s*)?\.\s*[A-Za-z_$][\w$]*\s*\.\s*[A-Za-z_$][\w$]*\s*(?:\?\.\s*)?\(/,  // x.a.b(
-        /^\s*(?:\?\.\s*)?\.\s*[A-Za-z_$][\w$]*\s*\)\s*\(/             // (x.m)(   (0, x.m)(
-    ];
-
-    const targets = [];   // {re, at} — `at` is a function from match to the value offset
-    for (const name of directRootNames) {
-        targets.push({ re: new RegExp("\\b" + escapeRe(name) + "\\b", "g"), at: (m) => m.index });
+    const targets = [];
+    for (const [key, kind] of derived) {
+        targets.push({ re: new RegExp(patternFor(key) + "\\b", "g"), kind, at: (m) => m.index });
     }
-    for (const index of inlineRoots) {
-        targets.push({ re: new RegExp("require\\s*\\(\\s*" + Q + "[^" + Q + "\\n]*" + Q + "\\s*\\)", "g"), at: (m) => m.index, only: index });
-    }
-    for (const value of derived) {
-        const [base, member] = value.split(".");
-        targets.push(member
-            ? { re: new RegExp("\\b" + escapeRe(base) + "\\s*(?:\\?\\.|\\.)\\s*" + escapeRe(member) + "\\b", "g"), at: (m) => m.index }
-            : { re: new RegExp("\\b" + escapeRe(value) + "\\b", "g"), at: (m) => m.index });
+    // An INLINE require of a root. Its specifier (and its quotes) is blanked in
+    // `code`, so the call is matched in blanked form and only at the offset that
+    // moduleCalls has already proven to be real code with a root specifier.
+    for (const { index, kind } of inlineRoots) {
+        targets.push({
+            re: /require\s*\([^)\n]*\s*\)/g,
+            kind,
+            at: (m) => m.index,
+            only: index
+        });
     }
 
     const unknown = [];
     const reported = new Set();
-    for (const { re, at, only } of targets) {
+    for (const { re, kind, at, only } of targets) {
         re.lastIndex = 0;
         let m;
         while ((m = re.exec(code)) !== null) {
             const index = at(m);
             if (only !== undefined && index !== only) continue;
-            if (sinkOffsets.has(index)) continue;                        // a recognised surface call
-            if (!CALL_SHAPED.some(shape => shape.test(code.slice(index + m[0].length)))) continue;   // a read
+            if (inRegexLiteral(code, index)) continue;          // regex text is data, not a value
+            if (sinkOffsets.has(index)) continue;              // a declared execution surface call
+            const chain = readMemberChain(code, index + m[0].length);
+            if (!chain.invoked) continue;                       // a read: a form the oracle classifies
+            // A single traversal onto a member PROVEN non-executing is a classified
+            // read; anything deeper cannot be proven to be the registry itself.
+            if (chain.members.length === 1 && NON_EXECUTING_MEMBERS[kind]?.has(chain.members[0])) continue;
             if (reported.has(index)) continue;
             reported.add(index);
             unknown.push(m[0].replace(/\s+/g, " ") + "…");
@@ -692,6 +773,7 @@ function extractReexports(source) {
         re.lastIndex = 0;
         let m;
         while ((m = re.exec(code)) !== null) {
+            if (inRegexLiteral(code, m.index)) continue;
             const spec = specAt(raw, re.lastIndex);
             if (spec !== null) found.push(spec);
         }
@@ -866,17 +948,27 @@ function analyzeModule(file, ctx) {
 
         // Roots this module reaches by name, split by how they are reached.
         const rootRequires = [];      // any root (incl. barrels) — inline call support
-        const directRootSpecs = [];   // the root module itself — the UNCLASSIFIED trigger
+        const directRootSpecs = [];   // the root module itself — inline + net support
+        const specKind = new Map();   // spec → kind, for the inline-require net targets
         for (const { spec } of specifiers) {
             const target = cachedResolve(file, spec, ctx);
             if (!target) continue;
             const kind = moduleKind(target, cache.kind);
             if (kind) rootRequires.push({ spec, kind });
-            if (isRegistryModule(target, ctx.registryModuleNames)) directRootSpecs.push({ spec, kind });
+            if (isRegistryModule(target, ctx.registryModuleNames)) {
+                directRootSpecs.push({ spec, kind });
+                specKind.set(spec, kind);
+            }
+        }
+
+        const boundModules = new Map();   // local name → file, for module-form requires
+        for (const [identifier, info] of bindings) {
+            if (info.form !== "module") continue;
+            const target = cachedResolve(file, info.spec, ctx);
+            if (target) boundModules.set(identifier, target);
         }
 
         const registryAliases = [];
-        const directRootNames = [];
         for (const [identifier, info] of bindings) {
             const target = cachedResolve(file, info.spec, ctx);
             if (!target) continue;
@@ -889,18 +981,60 @@ function analyzeModule(file, ctx) {
                 if (memberTarget) kind = moduleKind(memberTarget, cache.kind);
             }
             if (!kind) continue;
-            const direct = isRegistryModule(target, ctx.registryModuleNames);
-            registryAliases.push({ name: identifier, kind, form: info.form, direct });
-            if (direct) directRootNames.push(identifier);
+            registryAliases.push({ name: identifier, kind, form: info.form });
+        }
+
+        // Members EXTRACTED from a facade that re-exports a root —
+        // `const T = barrel.ToolRegistry`, `const T = require("../core/tools").ToolRegistry`.
+        // The member map proves the identity, so the extracted value is a root alias and
+        // not an unknown object: without this, `T.execute(x)` would be invisible.
+        const extracted = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:([A-Za-z_$][\w$]*)|require\s*\([^)\n]*\))\s*(?:\?\.|\.)\s*([A-Za-z_$][\w$]*)\s*(?=[;,\n)?])/g;
+        let em;
+        while ((em = extracted.exec(code)) !== null) {
+            const [, localName, baseName, member] = em;
+            // A string literal — and the specifier of an inline require — is blanked
+            // WITH its quotes in `code`, so the target is read from `raw` instead.
+            const fromFile = baseName
+                ? boundModules.get(baseName) ?? null
+                : cachedResolve(file, specAt(raw, em.index + em[0].indexOf("require") + "require".length) ?? "\u0000", ctx);
+            if (!fromFile) continue;
+            const viaMember = memberReexportsOf(fromFile, cache.members).get(member);
+            const memberTarget = viaMember ? cachedResolve(fromFile, viaMember, ctx) : null;
+            // A pure barrel of the root has no named member map, so the member is read
+            // off the root itself.
+            const kind = memberTarget ? moduleKind(memberTarget, cache.kind) : moduleKind(fromFile, cache.kind);
+            if (!kind) continue;
+            registryAliases.push({ name: localName, kind, form: "module" });
         }
 
         const { rows: sinks, offsets } = detectSinksDetailed(source, registryAliases, rootRequires);
+
+        // Every value that holds a root or something extracted from one, with its kind.
+        const rootValues = registryAliases.map(a => ({ text: a.name, kind: a.kind }));
+        const inlineRoots = [];
+        for (const call of moduleCalls(code, raw)) {
+            const kind = call.spec === null ? undefined : specKind.get(call.spec);
+            if (kind === undefined) continue;
+            inlineRoots.push({ index: call.index, kind });
+            // An inline require can also bind the value: `const u = require(root).userRoot`.
+            const head = code.slice(Math.max(0, call.index - 80), call.index);
+            const bound = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(head);
+            if (bound) rootValues.push({ text: bound[1], kind });
+            const spread = /\(\s*\{([^}]+)\}\s*=\s*$/.exec(head);
+            if (spread) for (const name of destructuredNames(spread[1])) rootValues.push({ text: name, kind });
+        }
+        // A root's own identifier, whether or not this module required it itself: the
+        // sink detector already matches it literally, so the net must too.
+        for (const [identifier, kind] of Object.entries(ROOT_IDENTIFIERS)) {
+            if (!boundModules.has(identifier)) rootValues.push({ text: identifier, kind });
+        }
+
         out = {
             source,
             specifiers,
             sinks,
             directRootSpecs,
-            unknownRoot: unmodelledRootUses(code, raw, directRootNames, directRootSpecs, offsets)
+            unknownRoot: unmodelledRootUses(code, raw, rootValues, inlineRoots, offsets)
         };
     }
 
@@ -1036,20 +1170,20 @@ function analyze(options = {}) {
     const findings = sortRows(main.ungoverned);
     const actionCapableFindings = findings.filter(r => r.actionCapable);
 
-    // UNCLASSIFIED_LEGACY_REACHABILITY: a reachable module that requires a
-    // registry/plugin root DIRECTLY, shows no recognized sink, and uses that root in
-    // a CALL shape the oracle does not model — its execution form is not classified.
-    // Reported rather than silently excused. Excluded by evidence, not by name:
+    // UNCLASSIFIED_LEGACY_REACHABILITY: a reachable module that touches a root (its own
+    // require, an inline require, a facade-extracted member, or the root's literal
+    // identifier), shows no recognized sink, and uses that value in a CALL shape the
+    // oracle does not model — its execution form is not classified. Reported rather
+    // than silently excused. Excluded by evidence, not by name:
     //   - a pure re-export chain / barrel IS the root (moduleKind), not an unknown form;
-    //   - a module that only READS root data (`pluginLoader.userRoot`) or passes a
-    //     root-derived value as an argument never invokes the execution surface, so
-    //     it has no unmodelled call to report;
+    //   - a module that only READS root data (`pluginLoader.userRoot`) or calls a member
+    //     PROVEN non-executing never invokes the execution surface, so it has no
+    //     unmodelled call to report;
     //   - a module that invokes a root at all without a recognized sink still is.
     const unclassified = [];
     for (const [file, info] of main.modules) {
         if (info.sinks.length > 0) continue;
         if (moduleKind(file, ctx.cache.kind)) continue;
-        if (info.directRootSpecs.length === 0) continue;
         if (info.unknownRoot.length === 0) continue;
         unclassified.push(rel(file));
     }

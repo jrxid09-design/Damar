@@ -593,3 +593,161 @@ test("census: every finding carries the byte column that makes its identity uniq
     assert.equal(report.findings.length, 3, "three sites on one line are three findings");
     assert.equal(new Set(report.findings.map(f => f.column)).size, 3, "each site has its own column");
 });
+
+// ---------------------------------------------------------------------------
+// C0-REPAIR-2 (W8-IW1) — the conservative net is DEPTH-INDEPENDENT, covers a root's
+// literal identifier without a local binding, keeps a facade-extracted root member's
+// identity, and regex literal text is data in every scanner. Read-only forms must be
+// FULLY clean (no sink, no action, no UNCLASSIFIED) — not merely "not action-capable".
+// ---------------------------------------------------------------------------
+
+const RICH_REGISTRY = "module.exports = { execute(id) { return id; }, has(id) { return !!id; }, " +
+    "count() { return 0; }, get(id) { return id; }, describe() { return []; }, someUnknown(id) { return id; } };\n";
+const PLUGIN_ROOT = { "src/plugins/pluginLoader.js": PLUGIN_LOADER, "src/ToolRegistry.js": RICH_REGISTRY };
+const BARREL_PURE = { "src/barrel-pure.js": 'module.exports = require("./ToolRegistry.js");\n' };
+const BARREL_MIXED = { "src/barrel-mixed.js": 'module.exports = { version: 1, ToolRegistry: require("./ToolRegistry.js") };\n' };
+const OB = String.fromCharCode(91);
+const CB = String.fromCharCode(93);
+const tree = (body, extra = {}) => Object.assign(
+    { "src/server.js": 'require("./m.js");\n', "src/m.js": body }, PLUGIN_ROOT, extra);
+
+const totals = (report) => ({
+    sink: report.counters.LEGACY_SECOND_PATH,
+    action: report.counters.ACTION_CAPABLE_UNGOVERNED,
+    unclass: report.counters.UNCLASSIFIED_LEGACY_REACHABILITY
+});
+const assertClean = (report, label) => assert.deepEqual(totals(report), { sink: 0, action: 0, unclass: 0 },
+    `${label}: a read-only form must be fully clean`);
+const assertNeverClean = (report, label) => assert.ok(
+    report.counters.LEGACY_SECOND_PATH + report.counters.UNCLASSIFIED_LEGACY_REACHABILITY >= 1,
+    `${label}: an unmodelled call shape must never be clean`);
+const assertUnclassified = (report, label) => {
+    assert.equal(report.counters.UNCLASSIFIED_LEGACY_REACHABILITY, 1, `${label}: must be UNCLASSIFIED`);
+    assert.equal(report.counters.LEGACY_SECOND_PATH, 0, `${label}: is not a declared-surface sink`);
+};
+
+test("census: a call at ANY member depth from a root-derived value is never clean", () => {
+    const shapes = {
+        "depth 0": "root.zz(x);\n",
+        "depth 1": "root.a.zz(x);\n",
+        "depth 2": "root.a.b.zz(x);\n",
+        "depth 3": "root.a.b.c.zz(x);\n",
+        "depth 4": "root.a.b.c.d.zz(x);\n",
+        "computed at depth 2": "var q = 1;\nroot.a" + OB + "q" + CB + ".zz(x);\n",
+        "computed mid-chain": "var q = 'b';\nroot" + OB + "q" + CB + ".c.zz(x);\n",
+        "optional chain": "root?.a?.b.zz?.(x);\n",
+        "parenthesised": "(root.a.b.zz)(x);\n",
+        "sequence-comma": "(0, root.a.b.zz)(x);\n",
+        "member of member": "root.plugins.loaded.has(x);\n"
+    };
+    for (const [label, body] of Object.entries(shapes)) {
+        const report = run(tree(ROOT_REQUIRE + body));
+        assertUnclassified(report, label);
+    }
+});
+
+test("census: a deep chain onto a declared SURFACE name is UNCLASSIFIED, not a canonical sink", () => {
+    for (const body of ["root.a.load(x);\n", "root.a.b.load(x);\n", "root.a.b.c.loadOne(x);\n"]) {
+        const report = run(tree(ROOT_REQUIRE + body));
+        assert.equal(report.counters.UNCLASSIFIED_LEGACY_REACHABILITY, 1,
+            "a chain the oracle cannot prove means pluginLoader.load must be UNCLASSIFIED");
+        assert.deepEqual(kinds(report), [], "and must NOT be reported as a canonical sink");
+        assertNeverClean(report, "deep surface chain");
+    }
+});
+
+test("census: a root's literal identifier is covered even without a local binding", () => {
+    assertUnclassified(run(tree("pluginLoader.someUnknownThing(x);\n")), "unbound unknown member");
+    assertUnclassified(run(tree("pluginLoader.plugins.load(x);\n")), "unbound deep chain");
+    assertUnclassified(run(tree("ToolRegistry.someUnknownThing(x);\n")), "unbound registry member");
+
+    const surface = run(tree("pluginLoader.load(x);\n"));
+    assert.equal(surface.counters.ACTION_CAPABLE_UNGOVERNED, 1, "an unbound surface call is still a sink");
+    assert.deepEqual(kinds(surface), ["plugin_handler_execution"]);
+
+    const registry = run(tree("ToolRegistry.execute(x);\n"));
+    assert.deepEqual(totals(registry), { sink: 1, action: 1, unclass: 0 });
+});
+
+test("census: a root member extracted from a facade keeps its identity", () => {
+    const extracted = {
+        "named, pure barrel": { extra: BARREL_PURE, pre: 'const barrel = require("./barrel-pure.js");\n', t: "barrel.ToolRegistry" },
+        "named, mixed barrel": { extra: BARREL_MIXED, pre: 'const barrel = require("./barrel-mixed.js");\n', t: "barrel.ToolRegistry" }
+    };
+    for (const [label, c] of Object.entries(extracted)) {
+        const sink = run(tree(c.pre + "const T = " + c.t + ";\nT.execute(x);\n", c.extra));
+        assert.deepEqual(totals(sink), { sink: 1, action: 1, unclass: 0 }, `${label}: T.execute is a registry sink`);
+        assert.deepEqual(kinds(sink), ["registry_execution"], label);
+
+        const unknown = run(tree(c.pre + "const T = " + c.t + ";\nT.someUnknown(x);\n", c.extra));
+        assertUnclassified(unknown, `${label}: T.someUnknown`);
+    }
+
+    const inline = run(tree('const T = require("./barrel-mixed.js").ToolRegistry;\nT.execute(x);\n', BARREL_MIXED));
+    assert.deepEqual(totals(inline), { sink: 1, action: 1, unclass: 0 }, "inline-extracted member is a registry sink");
+
+    const destructured = run(tree('const { ToolRegistry: T } = require("./barrel-mixed.js");\nT.execute(x);\n', BARREL_MIXED));
+    assert.deepEqual(totals(destructured), { sink: 1, action: 1, unclass: 0 }, "renamed destructured member is a sink");
+
+    const destructuredUnknown = run(tree('const { ToolRegistry: T } = require("./barrel-mixed.js");\nT.someUnknown(x);\n', BARREL_MIXED));
+    assertUnclassified(destructuredUnknown, "renamed destructured member, unknown method");
+});
+
+test("census: known metadata methods on a facade-extracted root stay clean, unknown ones do not", () => {
+    const reads = ["T.describe()", "T.has(x)", "T.count()", "T.get(x)"];
+    for (const call of reads) {
+        const report = run(tree('const barrel = require("./barrel-mixed.js");\nconst T = barrel.ToolRegistry;\nconst v = ' + call + ';\nmodule.exports = v;\n', BARREL_MIXED));
+        assertClean(report, `T = barrel.ToolRegistry; ${call}`);
+    }
+    assertUnclassified(run(tree('const barrel = require("./barrel-mixed.js");\nconst T = barrel.ToolRegistry;\nT.someUnknown(x);\n', BARREL_MIXED)),
+        "an unknown method on a facade-extracted root");
+});
+
+test("census: the RESULT of a read call is data, not the root", () => {
+    const report = run(tree('const { ToolRegistry } = require("./barrel-mixed.js");\n' +
+        "const names = ToolRegistry.describe();\n" +
+        "const visible = names.filter(n => n);\n" +
+        "module.exports = visible.length;\n", BARREL_MIXED));
+    assertClean(report, "describe() result used as data");
+});
+
+test("census: every read-only form is FULLY clean (sink = action = unclassified = 0)", () => {
+    const reads = {
+        "root property": ROOT_REQUIRE + 'const u = root.userRoot ?? "";\nmodule.exports = u;\n',
+        "root property, optional": ROOT_REQUIRE + "const u = root?.userRoot;\nmodule.exports = u;\n",
+        "root member object": ROOT_REQUIRE + "const l = root.loaded;\nmodule.exports = l;\n",
+        "computed root read": ROOT_REQUIRE + "const v = root" + OB + '"load"' + CB + ";\nmodule.exports = v;\n",
+        "read passed as an argument": ROOT_REQUIRE + "consume(root.userRoot);\n",
+        "inline require read": 'const u = require("./plugins/pluginLoader.js").userRoot;\nmodule.exports = u;\n',
+        "unbound literal read": "const u = pluginLoader.userRoot;\nmodule.exports = u;\n",
+        "unbound registry metadata read": "const d = ToolRegistry.describe();\nmodule.exports = d;\n",
+        "facade metadata read": 'const { ToolRegistry } = require("./barrel-mixed.js");\nconst d = ToolRegistry.describe();\nmodule.exports = d;\n',
+        "destructured member read": 'const { userRoot } = require("./plugins/pluginLoader.js");\nmodule.exports = userRoot;\n'
+    };
+    for (const [label, body] of Object.entries(reads)) {
+        assertClean(run(tree(body, BARREL_MIXED)), label);
+    }
+});
+
+test("census: regex literal text is data in every scanner, live code after it is not", () => {
+    const inert = {
+        "surface text in a regex": "const re = /pluginLoader.load(/;\nmodule.exports = re;\n",
+        "registry text in a regex": "const re = /ToolRegistry.execute(/;\nmodule.exports = re;\n",
+        "process text in a regex": "const re = /execSync(/;\nmodule.exports = re;\n",
+        'require text in a regex': 'const re = /require("child_process")/;\nmodule.exports = re;\n'
+    };
+    for (const [label, body] of Object.entries(inert)) assertClean(run(tree(body)), label);
+
+    const liveCall = run(tree("const re = /x/;\n" + ROOT_REQUIRE + "root.load(p);\n"));
+    assert.deepEqual(totals(liveCall), { sink: 1, action: 1, unclass: 0 }, "a real surface call after a regex is a sink");
+
+    const liveRequire = run(tree("const re = /x/;\nconst cp = require('node:child_process');\nmodule.exports = cp;\n"));
+    assert.equal(liveRequire.counters.LEGACY_SECOND_PATH, 1, "a real require after a regex is still a sink");
+
+    const division = run(tree("const a = 4, b = 2;\nconst q = a / b;\nrequire('node:child_process').exec('x');\nmodule.exports = q;\n"));
+    assert.equal(division.counters.LEGACY_SECOND_PATH, 1,
+        "a division slash must not swallow the require that follows it");
+
+    const interp = run(tree("const s = `${pluginLoader.load(p)}`;\nmodule.exports = s;\n"));
+    assert.equal(interp.counters.ACTION_CAPABLE_UNGOVERNED, 1, "a live template interpolation is code");
+});

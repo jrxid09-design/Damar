@@ -117,9 +117,13 @@ test("manifest: the sha fields say what they mean without reading the generator"
     const manifest = build(ROOT);
     assert.equal(manifest.measured_source_sha, census.analyze({ root: ROOT }).sha);
     assert.equal(manifest.sha, manifest.measured_source_sha, "`sha` is the documented alias");
-    assert.match(manifest.artifact_commit_sha, /^[0-9a-f]{40}$/);
+    assert.match(manifest.generator_head_sha, /^[0-9a-f]{40}$/);
+    assert.equal(manifest.sha_meaning.includes("artifact_commit_sha"), false,
+        "the misleading field name must be gone");
     assert.match(manifest.sha_meaning, /measured_source_sha/);
-    assert.match(manifest.sha_meaning, /artifact_commit_sha/);
+    assert.match(manifest.sha_meaning, /generator_head_sha/);
+    assert.match(manifest.sha_meaning, /NEXT commit/,
+        "a consumer must be told that the carrying commit trails the generator HEAD");
 });
 
 test("manifest: an unclassified path is never resolved by assertion", () => {
