@@ -874,6 +874,7 @@ test("census: a tagged template invokes the surface it is attached to", () => {
 // ---------------------------------------------------------------------------
 
 const LOCAL_REDUCER_TABLE = "const HANDLERS = { A: (s) => s, B: (s) => s };\n";
+const ROOT_BOUND = 'const R = require("./ToolRegistry.js");\n' + "const handler = R.get(id);\n";
 const FACADE_RETURNING_A_ROOT = 'const T = require("./ToolRegistry.js");\n' +
     "module.exports = { get(k) { return T.get(k); } };\n";
 const HANDLER_INVOCATION = "tool_handler_invocation";
@@ -892,7 +893,14 @@ test("census: a bare handler(...) is flagged whatever it holds (the rule is name
         "a second hop over a root": 'const R = require("./ToolRegistry.js");\nconst b = R;\nconst handler = b.get(id);\nhandler(x);\n',
         "an object-property hop over a root": "const o = { r: ToolRegistry };\nconst handler = o.r.get(id);\nhandler(x);\n",
         "a handler returned by another module": 'const f = require("./f.js");\nconst handler = f.get(id);\nhandler(x);\n',
-        "a handler reached through globalThis": "const handler = globalThis.ToolRegistry.get(id);\nhandler(x);\n"
+        "a handler reached through globalThis": "const handler = globalThis.ToolRegistry.get(id);\nhandler(x);\n",
+        // Audit 6 F1/F2: statement positions and call tokens the prefix class missed.
+        "a call at the head of a single-statement body": ROOT_BOUND + "if (ok) handler(x);\n",
+        "a call at the head of a loop body": ROOT_BOUND + "while (ok) handler(x);\n",
+        "a call in an arrow body": ROOT_BOUND + "const go = () => handler(x);\n",
+        "a call on the else branch": ROOT_BOUND + "if (a) { b(); } else handler(x);\n",
+        "an optional call": ROOT_BOUND + "handler?.(x);\n",
+        "a call through call()": ROOT_BOUND + "handler.call(null, x);\n"
     };
     for (const [label, body] of Object.entries(shapes)) {
         assert.equal(bareInvocations(run(tree(body, { "src/f.js": FACADE_RETURNING_A_ROOT }))), 1, label);
@@ -913,4 +921,21 @@ test("census: a call at the head of a block body is a statement, not a read", ()
     const body = "function dispatch(handler) {\n    handler(x);\n}\ndispatch(fn);\n";
     assert.equal(bareInvocations(run(tree(body))), 1,
         "`{` is a statement boundary: the call must not be read as a non-call");
+});
+
+test("census: the documented ceilings of the name-based rule stay documented", () => {
+    // Audit 6 F3/F4 with no live instance: root identity does not travel through a
+    // container or a parameter, and a declared read's result invoked inline is not a
+    // sink. These are disclosed limits of a name-and-shape rule, not claims - closing
+    // either needs bounded dataflow, so this test fails deliberately if the behaviour
+    // changes and forces the ceiling to be revisited.
+    const read = 'const R = require("./ToolRegistry.js");\nconst handler = R.get(id);\n';
+    const ceilings = {
+        "a handler parked in a container": read + "const box = { h: handler };\nbox.h(x);\n",
+        "a handler passed straight into a parameter": 'const R = require("./ToolRegistry.js");\n((h) => h(x))(R.get(id));\n',
+        "a declared read's result invoked inline": 'const R = require("./ToolRegistry.js");\nR.get(id)(x);\n'
+    };
+    for (const [label, body] of Object.entries(ceilings)) {
+        assertClean(run(tree(body)), label + " is a disclosed ceiling, not a claim");
+    }
 });
