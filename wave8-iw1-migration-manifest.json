@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sha": "20b927fa5135ca87036fe368534e092f86cefd1b",
+  "sha": "ca303c1f38b08f881e3e333a262a35cb6193ca26",
   "generatedFrom": "scripts/wave8-census.js",
   "counters": {
     "LEGACY_SECOND_PATH": 134,
