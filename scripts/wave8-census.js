@@ -557,25 +557,6 @@ function surfaceKind(kind, surface) {
  *   offset of every RECOGNISED call site, so a caller can distinguish a modelled
  *   invocation from an unmodelled call-shaped use of the same value.
  */
-/**
- * Names a module binds to a root OTHER than by `require`: `const reg = ToolRegistry;`.
- * Assignment-derived aliases were invisible to the require-based alias table, so a value
- * reached through one (and every call on it) read as unattached local data.
- *
- * @param code the blanked code view
- * @param rootIdentifiers the literal root map (`ToolRegistry` -> kind)
- * @returns {string[]} escaped alias names
- */
-function assignAliasNames(code, rootIdentifiers) {
-    const roots = Object.keys(rootIdentifiers).map(escapeRe);
-    if (roots.length === 0) return [];
-    const re = new RegExp("\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:" + roots.join("|") + ")\\b", "g");
-    const names = [];
-    let m;
-    while ((m = re.exec(code)) !== null) names.push(escapeRe(m[1]));
-    return names;
-}
-
 function detectSinksDetailed(source, registryAliases, rootRequires = []) {
     const { code, raw } = stripComments(source);
     const rows = [];
@@ -666,25 +647,22 @@ function detectSinksDetailed(source, registryAliases, rootRequires = []) {
     // Bare `handler(...)` is a tool/handler REFERENCE invocation. The name alone proves
     // nothing: `const handler = HANDLERS[env.type]` is a pure local reducer table
     // (src/cognition/continuity/reducers.js documents "no IO here"), so calling it is a
-    // name coincidence rather than an execution surface. The bare form therefore counts
-    // only when `handler` cannot be proven local: it is bound from a declared root or
-    // facade, it is a parameter (the interprocedural case the oracle keeps visible), or
-    // nothing declares it at all. Anything ambiguous is still scanned.
-    const rootRefs = [
-        ...registryAliases.map((alias) => escapeRe(alias.name)),
-        ...Object.keys(ROOT_IDENTIFIERS).map(escapeRe),
-        ...rootRequires.map((r) => "require\\s*\\(\\s*" + Q + escapeRe(r.spec) + Q + "\\s*\\)"),
-        // `const reg = ToolRegistry;` is an alias of a root too: a handler reached through
-        // it is root-derived, so the bare form must not be read as a local coincidence.
-        ...assignAliasNames(code, ROOT_IDENTIFIERS)
-    ];
-    const boundFromRoot = rootRefs.length > 0 &&
-        new RegExp("\\bhandler\\s*=\\s*(?:" + rootRefs.join("|") + ")", "g").test(code);
+    // name coincidence rather than an execution surface. The bare form is therefore
+    // scanned UNLESS the module can be proven root-free: no root alias, no inline root
+    // require, no root identifier anywhere, and `handler` a locally declared
+    // non-parameter. A module that does mention a root keeps the scan, because the root
+    // enumeration is bounded — a second-hop alias (`const b = R`) or an object-property
+    // hop (`o.r`) is exactly the reference it cannot resolve, and reading those as local
+    // is the "unrecognised syntax => READ" trap. Ambiguity therefore resolves to visible.
     const declaredLocal = /(?:const|let|var)\s+handler\s*=/.test(code);
     // A real parameter list: `handler` is the whole entry (`(handler)`, `f(a, handler)`),
     // so `if (!handler) {` — a condition, not a parameter — does not qualify.
     const asParameter = /(?:\(|,)\s*handler\s*(?:,[^)]*)?\)\s*(?:=>|\{)/.test(code);
-    if (boundFromRoot || asParameter || !declaredLocal) {
+    const rootNames = Object.keys(ROOT_IDENTIFIERS).map(escapeRe);
+    const mentionsRoot = registryAliases.length > 0 || rootRequires.length > 0 ||
+        (rootNames.length > 0 &&
+            new RegExp("(?:^|[^\\w$.])(?:" + rootNames.join("|") + ")").test(code));
+    if (asParameter || !declaredLocal || mentionsRoot) {
         // `{` and `}` join the prefix class: a call at the head of a block body is a
         // statement, and treating it as a read is the "unrecognised syntax => READ" trap.
         scan(/(?:^|[;=(\[{,}]|\breturn\b|\bawait\b)\s*handler\s*\((?![^()]*\)\s*\{)/g, "tool_handler_invocation");

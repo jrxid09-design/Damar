@@ -890,7 +890,15 @@ test("census: an ambiguous handler reference stays visible", () => {
     const fromRoot = {
         "registry surface result": "const handler = ToolRegistry.get(id);\nhandler(x);\n",
         "registry alias result": RS_REQUIRE + "let handler;\nhandler = RS.get(id);\nhandler(x);\n",
-        "root aliased to a local name": "const reg = ToolRegistry;\nconst handler = reg.get(id);\nhandler(x);\n"
+        "root aliased to a local name": "const reg = ToolRegistry;\nconst handler = reg.get(id);\nhandler(x);\n",
+        // Audit #4 (F1): the root enumeration is bounded, so a second hop over a root must
+        // keep the scan. Reading these as local was a silent false clean.
+        "second-hop alias over a root": 'const R = require("./ToolRegistry.js");\nconst b = R;\nconst handler = b.get(id);\nhandler(x);\n',
+        "object-property hop over a root": "const o = { r: ToolRegistry };\nconst handler = o.r.get(id);\nhandler(x);\n",
+        "root alias after a local handler table": LOCAL_TABLE +
+            "const handler = HANDLERS[env.type];\nconst reg = ToolRegistry;\nhandler(x);\n",
+        "call after a root mention anywhere in the module": LOCAL_TABLE.replace("const HANDLERS",
+            "const registry = ToolRegistry;\nconst HANDLERS") + "const handler = HANDLERS[env.type];\nhandler(x);\n"
     };
     for (const [label, body] of Object.entries(fromRoot)) {
         assert.deepEqual(totals(run(tree(body))), { sink: 1, action: 1, unclass: 0 }, label);
