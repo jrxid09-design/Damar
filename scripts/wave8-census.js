@@ -212,14 +212,6 @@ function stripComments(source) {
     return { code, raw };
 }
 
-function lineOf(text, index) {
-    let line = 1;
-    for (let i = 0; i < index && i < text.length; i += 1) {
-        if (text[i] === "\n") line += 1;
-    }
-    return line;
-}
-
 /** The string literal at or after `index` of `raw`, or null if there is none. */
 function quotedAt(raw, index) {
     let i = index;
@@ -257,6 +249,8 @@ function moduleCalls(code, raw) {
     const re = /\b(require|import)\b/g;
     let m;
     while ((m = re.exec(code)) !== null) {
+        // `/require("child_process")/` is a regex literal, not a module load.
+        if (inRegexLiteral(code, m.index)) continue;
         out.push({ keyword: m[1], index: m.index, spec: specAt(raw, re.lastIndex) });
     }
     return out;
@@ -311,11 +305,45 @@ function extractBindings(code, raw) {
 // Sink detection (runs on the string-blanked `code` view)
 // ---------------------------------------------------------------------------
 
-// `x.m(` and `x.m (` and `x?.m(` are the same call site — the oracle must not be
-// bypassable by an optional chain or by whitespace around the dot.
+// `x.m(` / `x.m (` / `x?.m(` are the same call site; `x.m?.(` is that same
+// invocation again, written with an optional call. The oracle must not be
+// bypassable by an optional chain in EITHER position, or by whitespace.
 const CALL = "\\s*(?:\\?\\.|\\.)\\s*";
 
+// The invocation itself: `(` , `?.(` , and the explicit `f.call(...)` / `f.apply(...)`
+// forms, which RUN the function. `f.bind(...)` is deliberately absent — it only
+// creates a callable; a later call of the bound function is an unmodelled
+// call-shaped use and stays UNCLASSIFIED rather than being silently blessed.
+const INVOKE = "\\s*(?:(?:\\?\\.\\s*)?\\(|\\.\\s*(?:call|apply)\\s*\\()";
+// Computed access to an execution surface: `xk`, `x?.k`, `x[k]?.(…)`.
+const COMPUTED = "\\s*(?:\\?\\.\\s*)?\\[\\s*[^\\]]+\\]\\s*(?:\\?\\.\\s*)?\\(";
+
 const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// A `/` opens a regex literal only where a value may start; after an operand it is
+// division. Only the character run immediately before a match is examined, so no
+// regex body is scanned and real code can never be swallowed — the failure mode
+// stays the documented over-report, never a hidden call.
+const REGEX_PRECEDER = /(?:^|[=(,:[!&|?{};+\-*%~^<>]|\b(?:return|typeof|case|in|of|new|delete|void|do|else|instanceof|yield|await))\s*$/;
+
+function inRegexLiteral(code, index) {
+    let i = index - 1;
+    while (i >= 0 && /\s/.test(code[i])) i -= 1;
+    if (i < 0 || code[i] !== "/") return false;
+    // A template interpolation `${ … }` is live code, not regex position.
+    if (code[i] === "{" && code[i - 1] === "$") return false;
+    return REGEX_PRECEDER.test(code.slice(0, i));
+}
+
+/** 1-based line and column of `index`. */
+function positionOf(text, index) {
+    let line = 1;
+    let lineStart = 0;
+    for (let i = 0; i < index && i < text.length; i += 1) {
+        if (text[i] === "\n") { line += 1; lineStart = i + 1; }
+    }
+    return { line, column: index - lineStart + 1 };
+}
 
 /** Sink kind produced by calling `surface` on a root of `kind`. */
 function surfaceKind(kind, surface) {
@@ -325,10 +353,14 @@ function surfaceKind(kind, surface) {
 /**
  * @param rootRequires {spec, kind}[] — roots THIS module requires inline
  *        (`require("./pluginLoader").loadOne(p)`), which no binding covers.
+ * @returns {{rows: object[], offsets: Set<number>}} the sink rows, plus the byte
+ *   offset of every RECOGNISED call site, so a caller can distinguish a modelled
+ *   invocation from an unmodelled call-shaped use of the same value.
  */
-function detectSinks(source, registryAliases, rootRequires = []) {
+function detectSinksDetailed(source, registryAliases, rootRequires = []) {
     const { code, raw } = stripComments(source);
-    const sinks = [];
+    const rows = [];
+    const offsets = new Set();
     const seen = new Set();
 
     const push = (kind, index, snippet) => {
@@ -338,42 +370,51 @@ function detectSinks(source, registryAliases, rootRequires = []) {
         const key = index + "|" + kind;
         if (seen.has(key)) return;
         seen.add(key);
-        sinks.push({
+        offsets.add(index);
+        const { line, column } = positionOf(code, index);
+        rows.push({
             kind,
-            line: lineOf(code, index),
+            line,
+            column,
             snippet: String(snippet).replace(/\s+/g, " ").trim().slice(0, 120),
             actionCapable: SINK_KINDS[kind].actionCapable
         });
     };
 
-    const scan = (re, kind, haystack = code) => {
+    const scan = (re, kind, haystack = code, group = 0) => {
         re.lastIndex = 0;
         let m;
-        while ((m = re.exec(haystack)) !== null) push(kind, m.index, m[0]);
+        while ((m = re.exec(haystack)) !== null) {
+            // Anchor the recorded offset on the value being called, not on a
+            // prefix the pattern had to consume (`;`, `return`, …).
+            const at = group > 0 ? m.index + m[0].indexOf(m[group]) : m.index;
+            push(kind, at, m[0]);
+        }
     };
 
     const Q = "[\\u0022\\u0027]";
 
     for (const alias of registryAliases) {
-        const a = "\\b" + escapeRe(alias.name);
+        const name = escapeRe(alias.name);
+        const a = "\\b" + name;
         for (const surface of EXECUTION_SURFACES[alias.kind] ?? []) {
-            scan(new RegExp(a + CALL + surface + "\\s*\\(", "g"), surfaceKind(alias.kind, surface));
+            scan(new RegExp(a + CALL + surface + INVOKE, "g"), surfaceKind(alias.kind, surface));
         }
         // A destructured name may be invoked directly (`{ execute }`, `{ load: boot }`),
         // while a module binding never is — the module is not the function.
         if (alias.form === "member") {
-            scan(new RegExp("(?:^|[;=(\\[,]|\\breturn\\b|\\bawait\\b)\\s*" + escapeRe(alias.name) + "\\s*\\(", "g"), alias.kind);
+            scan(new RegExp("(?:^|[;=(\\[,]|\\breturn\\b|\\bawait\\b)\\s*(" + name + ")" + INVOKE, "g"), alias.kind, code, 1);
         }
-        scan(new RegExp(a + "\\s*\\[\\s*[^\\]]+\\]\\s*\\(", "g"), alias.kind);
+        scan(new RegExp(a + COMPUTED, "g"), alias.kind);
     }
 
     // Roots named literally, independent of aliasing: `ToolRegistry.execute(...)`
     // after a destructuring require, or through generated/indirect code.
     for (const [identifier, kind] of Object.entries(ROOT_IDENTIFIERS)) {
         for (const surface of EXECUTION_SURFACES[kind]) {
-            scan(new RegExp("\\b" + identifier + CALL + surface + "\\s*\\(", "g"), surfaceKind(kind, surface));
+            scan(new RegExp("\\b" + identifier + CALL + surface + INVOKE, "g"), surfaceKind(kind, surface));
         }
-        scan(new RegExp("\\b" + identifier + "\\s*\\[\\s*[^\\]]+\\]\\s*\\(", "g"), kind);
+        scan(new RegExp("\\b" + identifier + COMPUTED, "g"), kind);
     }
 
     // Inline requires of a root in this same module — `require("./pluginLoader").loadOne(p)`.
@@ -390,13 +431,13 @@ function detectSinks(source, registryAliases, rootRequires = []) {
             }
         };
         for (const surface of EXECUTION_SURFACES[kind] ?? []) {
-            accept(new RegExp(call + CALL + surface + "\\s*\\(", "g"), surfaceKind(kind, surface));
+            accept(new RegExp(call + CALL + surface + INVOKE, "g"), surfaceKind(kind, surface));
         }
-        accept(new RegExp(call + "\\s*\\[\\s*[^\\]]+\\]\\s*\\(", "g"), kind);
+        accept(new RegExp(call + COMPUTED, "g"), kind);
     }
 
     // Direct handler/tool invocation shapes.
-    scan(new RegExp("\\b(?:tool|handler|toolInstance|instance|registered)" + CALL + "execute\\s*\\(", "g"), "tool_handler_invocation");
+    scan(new RegExp("\\b(?:tool|handler|toolInstance|instance|registered)" + CALL + "execute" + INVOKE, "g"), "tool_handler_invocation");
     // Bare handler( call forms only: a prefix that implies invocation, minus a
     // definition body (`handler(a) { ... }`), so declarations and object-literal
     // methods are not false positives.
@@ -416,51 +457,151 @@ function detectSinks(source, registryAliases, rootRequires = []) {
     // Terminal / pty.
     scanSpec(/^(?:node-pty|pty)$/, "terminal");
     scan(/\b(?:terminal_run|TerminalRuntime|terminalService)\b/g, "terminal");
-    scan(new RegExp("\\bpty" + CALL + "spawn\\s*\\(", "g"), "terminal");
+    scan(new RegExp("\\bpty" + CALL + "spawn" + INVOKE, "g"), "terminal");
 
     // Actuator / effector invocation.
-    scan(new RegExp("\\bbinding" + CALL + "invoke\\s*\\(", "g"), "actuator_invocation");
-    scan(new RegExp("\\bactuator" + CALL + "(?:invoke|execute|apply)\\s*\\(", "g"), "actuator_invocation");
+    scan(new RegExp("\\bbinding" + CALL + "invoke" + INVOKE, "g"), "actuator_invocation");
+    scan(new RegExp("\\bactuator" + CALL + "(?:invoke|execute|apply)" + INVOKE, "g"), "actuator_invocation");
 
     // Advisory kinds.
-    scan(new RegExp("\\bfs" + CALL + "(?:writeFileSync|writeFile|appendFileSync|rmSync|rm|unlinkSync|renameSync|mkdirSync)\\s*\\(", "g"), "filesystem_mutation");
-    scan(new RegExp("\\b(?:axios|http)" + CALL + "(?:post|put|patch|delete)\\s*\\(", "g"), "network_mutation");
-    scan(new RegExp("\\bdevice" + CALL + "(?:send|write|command)\\s*\\(", "g"), "device_control");
+    scan(new RegExp("\\bfs" + CALL + "(?:writeFileSync|writeFile|appendFileSync|rmSync|rm|unlinkSync|renameSync|mkdirSync)" + INVOKE, "g"), "filesystem_mutation");
+    scan(new RegExp("\\b(?:axios|http)" + CALL + "(?:post|put|patch|delete)" + INVOKE, "g"), "network_mutation");
+    scan(new RegExp("\\bdevice" + CALL + "(?:send|write|command)" + INVOKE, "g"), "device_control");
 
-    return sinks.sort((a, b) => a.line - b.line || a.kind.localeCompare(b.kind));
+    rows.sort((a, b) => a.line - b.line || a.column - b.column || a.kind.localeCompare(b.kind));
+    return { rows, offsets };
+}
+
+/** The sink rows only (backwards-compatible face of detectSinksDetailed). */
+function detectSinks(source, registryAliases, rootRequires = []) {
+    return detectSinksDetailed(source, registryAliases, rootRequires).rows;
 }
 
 /**
- * Calls on a DIRECTLY required root whose member the oracle does not recognise.
- * Reading a root's data property (`pluginLoader.userRoot`) or re-exporting it is a
- * form the oracle can classify; calling a member it cannot name is an execution
- * form it cannot classify, which is what UNCLASSIFIED_LEGACY_REACHABILITY reports.
+ * CALL-SHAPED uses of a DIRECTLY required root that the oracle does NOT model.
  *
- * Only module bindings and inline requires are inspected: a destructured binding may
- * be a member rather than the module, and `X.member(` on it is a call on an object
- * the oracle has not identified, not a call on the root.
+ * The distinction this counter needs is READ vs CALL, not known-member vs
+ * unknown-member:
+ *   - reading a root's data property (`pluginLoader.userRoot`), or passing a
+ *     root-derived value as an argument, is a data read → the module is classified;
+ *   - ANY invocation the detector did not recognise — a member call, a nested
+ *     member call, a parenthesised or sequence-comma call, `.call`/`.apply`, or a
+ *     call on a value assigned from the root — is an execution form the oracle must
+ *     never report as clean, so the module is UNCLASSIFIED instead.
+ *
+ * @param directRootNames identifiers bound to a root this module requires itself.
+ * @param directRootSpecs {spec, kind}[] of those same requires.
+ * @param sinkOffsets byte offsets detectSinksDetailed already recognised as declared
+ *        execution surfaces — those are sinks, not unknowns.
+ * @returns {string[]} one description per unmodelled call site (empty = clean).
  */
-function unknownRootCalls(source, registryAliases, directRootSpecs) {
-    const { code } = stripComments(source);
-    const unknown = [];
-    const CALLM = CALL + "([A-Za-z_$][\\w$]*)\\s*\\(";
-    const known = (kind, member) => (EXECUTION_SURFACES[kind] ?? []).includes(member);
-
-    const probe = (prefixRe, kind) => {
-        const re = new RegExp(prefixRe + CALLM, "g");
-        let m;
-        while ((m = re.exec(code)) !== null) if (!known(kind, m[1])) unknown.push(m[1]);
-    };
-
-    for (const alias of registryAliases) {
-        if (alias.form !== "module") continue;
-        probe("\\b" + escapeRe(alias.name), alias.kind);
-    }
+function unmodelledRootUses(code, raw, directRootNames, directRootSpecs, sinkOffsets) {
     const Q = "[\\u0022\\u0027]";
-    for (const { spec, kind } of directRootSpecs) {
-        probe("require\\s*\\(\\s*" + Q + escapeRe(spec) + Q + "\\s*\\)", kind);
+    const rootSpecs = new Set(directRootSpecs.map(r => r.spec));
+
+    // Values derived from a root WITHOUT an intervening call: a plain alias, a
+    // member of the root, a destructured member, or a member assigned onto another
+    // object (`o.load = root.load`). Bounded to 3 passes — a fixation, not dataflow.
+    const derived = new Set();
+    const SKIP_BASES = new Set(["this", "module", "exports", "require"]);
+
+    // An INLINE root require binds through the specifier, which is blanked in
+    // `code` — so its binding head is read from the blanked view at the offset
+    // moduleCalls proves is real code.
+    const inlineRoots = [];
+    for (const call of moduleCalls(code, raw)) {
+        if (call.spec === null || !rootSpecs.has(call.spec)) continue;
+        inlineRoots.push(call.index);
+        const head = code.slice(Math.max(0, call.index - 80), call.index);
+        const bound = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(head);
+        if (bound) derived.add(bound[1]);
+        const spread = /\(\s*\{([^}]+)\}\s*=\s*$/.exec(head);
+        if (spread) for (const name of destructuredNames(spread[1])) derived.add(name);
+    }
+
+    const exprSources = () => [
+        ...directRootNames.map(n => "\\b" + escapeRe(n)),
+        ...[...derived].map(d => "\\b" + escapeRe(d))
+    ];
+    // With no root value to start from there is nothing to derive: an empty
+    // alternation would match EVERY declaration and turn the whole module hostile.
+    const derivedValue = () => exprSources().length === 0
+        ? null
+        : "(?:" + exprSources().join("|") + ")(?:\\s*(?:\\?\\.|\\.)\\s*[A-Za-z_$][\\w$]*)?";
+
+    for (let pass = 0; pass < 3; pass += 1) {
+        const rve = derivedValue();
+        if (rve === null) break;
+        const before = derived.size;
+        let m;
+        const decl = new RegExp("(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*" + rve, "g");
+        while ((m = decl.exec(code)) !== null) derived.add(m[1]);
+
+        const bare = new RegExp("[;,({\\[]\\s*([A-Za-z_$][\\w$]*)\\s*=\\s*" + rve, "g");
+        while ((m = bare.exec(code)) !== null) if (!SKIP_BASES.has(m[1])) derived.add(m[1]);
+
+        const member = new RegExp("\\b([A-Za-z_$][\\w$]*)\\s*(?:\\?\\.|\\.)\\s*([A-Za-z_$][\\w$]*)\\s*=\\s*" + rve, "g");
+        while ((m = member.exec(code)) !== null) {
+            if (!SKIP_BASES.has(m[1])) derived.add(m[1] + "." + m[2]);
+        }
+
+        const destructured = new RegExp("\\(?\\s*\\{([^}]+)\\}\\s*=\\s*" + rve, "g");
+        while ((m = destructured.exec(code)) !== null) {
+            for (const name of destructuredNames(m[1])) derived.add(name);
+        }
+        if (derived.size === before) break;
+    }
+
+    // What counts as a call-shaped use of a root-derived value.
+    const CALL_SHAPED = [
+        /^\s*(?:\?\.\s*)?\(/,                                          // x(    x?.(
+        /^\s*(?:\?\.\s*)?\[[^\]]*\]\s*(?:\?\.\s*)?\(/,                 // xk    x?.k
+        /^\s*(?:\?\.\s*)?\.\s*[A-Za-z_$][\w$]*\s*(?:\?\.\s*)?\(/,      // x.m(  x.m?.(  x?.m(
+        /^\s*(?:\?\.\s*)?\.\s*[A-Za-z_$][\w$]*\s*\.\s*[A-Za-z_$][\w$]*\s*(?:\?\.\s*)?\(/,  // x.a.b(
+        /^\s*(?:\?\.\s*)?\.\s*[A-Za-z_$][\w$]*\s*\)\s*\(/             // (x.m)(   (0, x.m)(
+    ];
+
+    const targets = [];   // {re, at} — `at` is a function from match to the value offset
+    for (const name of directRootNames) {
+        targets.push({ re: new RegExp("\\b" + escapeRe(name) + "\\b", "g"), at: (m) => m.index });
+    }
+    for (const index of inlineRoots) {
+        targets.push({ re: new RegExp("require\\s*\\(\\s*" + Q + "[^" + Q + "\\n]*" + Q + "\\s*\\)", "g"), at: (m) => m.index, only: index });
+    }
+    for (const value of derived) {
+        const [base, member] = value.split(".");
+        targets.push(member
+            ? { re: new RegExp("\\b" + escapeRe(base) + "\\s*(?:\\?\\.|\\.)\\s*" + escapeRe(member) + "\\b", "g"), at: (m) => m.index }
+            : { re: new RegExp("\\b" + escapeRe(value) + "\\b", "g"), at: (m) => m.index });
+    }
+
+    const unknown = [];
+    const reported = new Set();
+    for (const { re, at, only } of targets) {
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(code)) !== null) {
+            const index = at(m);
+            if (only !== undefined && index !== only) continue;
+            if (sinkOffsets.has(index)) continue;                        // a recognised surface call
+            if (!CALL_SHAPED.some(shape => shape.test(code.slice(index + m[0].length)))) continue;   // a read
+            if (reported.has(index)) continue;
+            reported.add(index);
+            unknown.push(m[0].replace(/\s+/g, " ") + "…");
+        }
     }
     return unknown;
+}
+
+/** Local names bound by a destructuring pattern (`{ a, b: c }` → a, c). */
+function destructuredNames(pattern) {
+    const names = [];
+    for (const part of pattern.split(",")) {
+        const pieces = part.split(":");
+        const name = (pieces.length > 1 ? pieces[1] : pieces[0]).trim();
+        if (/^[A-Za-z_$][\w$]*$/.test(name)) names.push(name);
+    }
+    return names;
 }
 
 // ---------------------------------------------------------------------------
@@ -693,25 +834,92 @@ function memberReexportsOf(file, cache) {
 // Analysis
 // ---------------------------------------------------------------------------
 
-function analyze(options = {}) {
-    const root = path.resolve(options.root ?? process.cwd());
-    const owners = options.canonicalOwners ?? DEFAULT_CANONICAL_OWNERS;
-    const registryModuleNames = options.registryModuleNames ?? DEFAULT_REGISTRY_MODULES;
-    const rel = (f) => path.relative(root, f).split(path.sep).join("/");
+/** Fresh per-run cache. Every pass over the graph reuses it. */
+function newCache() {
+    return { resolution: new Map(), kind: new Map(), members: new Map(), module: new Map() };
+}
 
-    const entrypoints = (options.entrypoints ?? DEFAULT_ENTRYPOINTS)
-        .map(e => path.resolve(root, e))
-        .filter(f => fs.existsSync(f));
+function cachedResolve(file, spec, ctx) {
+    const key = file + "|" + spec;
+    if (!ctx.cache.resolution.has(key)) ctx.cache.resolution.set(key, resolveRelative(file, spec));
+    return ctx.cache.resolution.get(key);
+}
 
-    const reexportCache = new Map();
-    const modules = new Map();          // file -> { sinks }
+/**
+ * The ENTRYPOINT-INDEPENDENT analysis of one module: views, specifiers, bindings,
+ * sink rows (with the offsets that prove which call sites are recognized) and the
+ * call-shaped root uses the oracle does not model. Cached, because the ingress
+ * breakdown walks the same graph again.
+ *
+ * @returns {{source, specifiers, sinks, directRootSpecs, unknownRoot}|null}
+ */
+function analyzeModule(file, ctx) {
+    const cache = ctx.cache;
+    if (cache.module.has(file)) return cache.module.get(file);
+
+    const source = readIfFile(file);
+    let out = null;
+    if (source !== null) {
+        const { code, raw } = stripComments(source);
+        const specifiers = extractSpecifiers(code, raw);
+        const bindings = extractBindings(code, raw);
+
+        // Roots this module reaches by name, split by how they are reached.
+        const rootRequires = [];      // any root (incl. barrels) — inline call support
+        const directRootSpecs = [];   // the root module itself — the UNCLASSIFIED trigger
+        for (const { spec } of specifiers) {
+            const target = cachedResolve(file, spec, ctx);
+            if (!target) continue;
+            const kind = moduleKind(target, cache.kind);
+            if (kind) rootRequires.push({ spec, kind });
+            if (isRegistryModule(target, ctx.registryModuleNames)) directRootSpecs.push({ spec, kind });
+        }
+
+        const registryAliases = [];
+        const directRootNames = [];
+        for (const [identifier, info] of bindings) {
+            const target = cachedResolve(file, info.spec, ctx);
+            if (!target) continue;
+            let kind = moduleKind(target, cache.kind);
+            if (!kind && info.member) {
+                // A member destructured out of a module that re-exports it by name
+                // (and is not itself a pure barrel of the root).
+                const viaMember = memberReexportsOf(target, cache.members).get(info.member);
+                const memberTarget = viaMember ? cachedResolve(target, viaMember, ctx) : null;
+                if (memberTarget) kind = moduleKind(memberTarget, cache.kind);
+            }
+            if (!kind) continue;
+            const direct = isRegistryModule(target, ctx.registryModuleNames);
+            registryAliases.push({ name: identifier, kind, form: info.form, direct });
+            if (direct) directRootNames.push(identifier);
+        }
+
+        const { rows: sinks, offsets } = detectSinksDetailed(source, registryAliases, rootRequires);
+        out = {
+            source,
+            specifiers,
+            sinks,
+            directRootSpecs,
+            unknownRoot: unmodelledRootUses(code, raw, directRootNames, directRootSpecs, offsets)
+        };
+    }
+
+    cache.module.set(file, out);
+    return out;
+}
+
+/**
+ * One traversal over (file, governed) states. `governed` becomes true once a
+ * canonical owner module has been traversed on that path and stays true downstream.
+ */
+function traverse(ctx, entrypoints) {
+    const { owners, rel } = ctx;
+    const modules = new Map();
     const visited = new Set();
     const seenState = new Set();
     const ungoverned = [];
     const governed = [];
 
-    // BFS over (file, governed) states. `governed` becomes true once a canonical
-    // owner module has been traversed on that path and stays true downstream.
     let queue = entrypoints.slice()
         .sort((a, b) => a.localeCompare(b))
         .map(file => ({ file, governed: canonicalOwnerOnPath(rel(file), owners), path: [rel(file)] }));
@@ -723,68 +931,25 @@ function analyze(options = {}) {
         seenState.add(stateKey);
         visited.add(node.file);
 
-        const source = readIfFile(node.file);
-        if (source === null) continue;
+        const info = analyzeModule(node.file, ctx);
+        if (info === null) continue;
+        modules.set(node.file, info);
 
-        const { code, raw } = stripComments(source);
-        const specifiers = extractSpecifiers(code, raw);
-        const bindings = extractBindings(code, raw);
-
-        // Roots this module reaches by name, split by how they are reached.
-        const rootRequires = [];      // any root (incl. barrels) — inline call support
-        const directRootSpecs = [];   // the root module itself — the UNCLASSIFIED trigger
-        for (const { spec } of specifiers) {
-            const target = resolveRelative(node.file, spec);
-            if (!target) continue;
-            const kind = moduleKind(target, reexportCache);
-            if (kind) rootRequires.push({ spec, kind });
-            if (isRegistryModule(target, registryModuleNames)) directRootSpecs.push({ spec, kind });
-        }
-
-        const registryAliases = [];
-        for (const [identifier, info] of bindings) {
-            const target = resolveRelative(node.file, info.spec);
-            if (!target) continue;
-            let kind = moduleKind(target, reexportCache);
-            if (!kind && info.member) {
-                // A member destructured out of a module that re-exports it by name
-                // (and is not itself a pure barrel of the root).
-                const viaMember = memberReexportsOf(target, reexportCache).get(info.member);
-                const memberTarget = viaMember ? resolveRelative(target, viaMember) : null;
-                if (memberTarget) kind = moduleKind(memberTarget, reexportCache);
-            }
-            if (!kind) continue;
-            registryAliases.push({
-                name: identifier,
-                kind,
-                form: info.form,
-                direct: isRegistryModule(target, registryModuleNames)
-            });
-        }
-
-        const sinks = detectSinks(source, registryAliases, rootRequires);
-        const unknownRoot = unknownRootCalls(
-            source,
-            registryAliases.filter(a => a.direct),
-            directRootSpecs
-        );
-        modules.set(node.file, { sinks, specifiers, directRootSpecs, unknownRoot });
-
-        for (const sink of sinks) {
-            const row = {
+        for (const sink of info.sinks) {
+            (node.governed ? governed : ungoverned).push({
                 file: rel(node.file),
                 kind: sink.kind,
                 actionCapable: sink.actionCapable,
                 line: sink.line,
+                column: sink.column,
                 snippet: sink.snippet,
                 entrypoint: node.path[0],
                 path: node.path.slice(0, 12)
-            };
-            (node.governed ? governed : ungoverned).push(row);
+            });
         }
 
-        for (const { spec } of specifiers) {
-            const target = resolveRelative(node.file, spec);
+        for (const { spec } of info.specifiers) {
+            const target = cachedResolve(node.file, spec, ctx);
             if (!target) continue;
             queue.push({
                 file: target,
@@ -795,8 +960,58 @@ function analyze(options = {}) {
         queue.sort((a, b) => a.file.localeCompare(b.file));
     }
 
+    return { modules, visited, ungoverned, governed };
+}
+
+/**
+ * Per-ingress reachability: one traversal PER production entrypoint, so a metric
+ * can never claim "one ingress" merely because the combined walk reached a module
+ * from one of them first. `entrypoint` on a row stays the first-reach label; the
+ * ingress sets here are the real answer.
+ */
+function ingressBreakdown(ctx, entrypoints) {
+    const { rel, root } = ctx;
+    const analyzed = entrypoints.map(rel).sort();
+    const byIngress = {};
+    const reachableByIngress = {};
+    const governedByIngress = {};
+    const siteIngresses = new Map();
+
+    for (const entry of analyzed) {
+        const run = traverse(ctx, [path.resolve(root, entry)]);
+        byIngress[entry] = run.ungoverned.length;
+        governedByIngress[entry] = run.governed.length;
+        reachableByIngress[entry] = run.visited.size;
+        for (const f of run.ungoverned) {
+            const key = f.file + "|" + f.line + "|" + f.column + "|" + f.kind;
+            if (!siteIngresses.has(key)) siteIngresses.set(key, []);
+            const list = siteIngresses.get(key);
+            if (!list.includes(entry)) list.push(entry);
+        }
+    }
+
+    return { analyzed, byIngress, governedByIngress, reachableByIngress, siteIngresses };
+}
+
+function analyze(options = {}) {
+    const root = path.resolve(options.root ?? process.cwd());
+    const rel = (f) => path.relative(root, f).split(path.sep).join("/");
+    const ctx = {
+        root,
+        owners: options.canonicalOwners ?? DEFAULT_CANONICAL_OWNERS,
+        registryModuleNames: options.registryModuleNames ?? DEFAULT_REGISTRY_MODULES,
+        rel,
+        cache: options.cache ?? newCache()
+    };
+
+    const entrypoints = (options.entrypoints ?? DEFAULT_ENTRYPOINTS)
+        .map(e => path.resolve(root, e))
+        .filter(f => fs.existsSync(f));
+
+    const main = traverse(ctx, entrypoints);
+
     const sortRows = (rows) => rows.slice().sort((a, b) =>
-        a.file.localeCompare(b.file) || a.line - b.line || a.kind.localeCompare(b.kind));
+        a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column || a.kind.localeCompare(b.kind));
 
     // Operator launchers: reported, never gated (see DEFAULT_LAUNCHERS).
     const launcherFiles = (options.launchers ?? DEFAULT_LAUNCHERS)
@@ -818,24 +1033,33 @@ function analyze(options = {}) {
         }
     }
 
-    const findings = sortRows(ungoverned);
+    const findings = sortRows(main.ungoverned);
     const actionCapableFindings = findings.filter(r => r.actionCapable);
 
     // UNCLASSIFIED_LEGACY_REACHABILITY: a reachable module that requires a
-    // registry/plugin root DIRECTLY, shows no recognized sink, and CALLS a member
-    // of that root the oracle cannot name — its execution form is not classified.
+    // registry/plugin root DIRECTLY, shows no recognized sink, and uses that root in
+    // a CALL shape the oracle does not model — its execution form is not classified.
     // Reported rather than silently excused. Excluded by evidence, not by name:
     //   - a pure re-export chain / barrel IS the root (moduleKind), not an unknown form;
-    //   - a module that only READS root data (`pluginLoader.userRoot`) or re-exports
-    //     it never invokes the execution surface, so it has no unknown form to report;
+    //   - a module that only READS root data (`pluginLoader.userRoot`) or passes a
+    //     root-derived value as an argument never invokes the execution surface, so
+    //     it has no unmodelled call to report;
     //   - a module that invokes a root at all without a recognized sink still is.
     const unclassified = [];
-    for (const [file, info] of modules) {
+    for (const [file, info] of main.modules) {
         if (info.sinks.length > 0) continue;
-        if (moduleKind(file, reexportCache)) continue;
+        if (moduleKind(file, ctx.cache.kind)) continue;
         if (info.directRootSpecs.length === 0) continue;
         if (info.unknownRoot.length === 0) continue;
         unclassified.push(rel(file));
+    }
+
+    const ingress = options.ingressBreakdown === false ? null : ingressBreakdown(ctx, entrypoints);
+    if (ingress !== null) {
+        for (const row of findings) {
+            const key = row.file + "|" + row.line + "|" + row.column + "|" + row.kind;
+            row.ingresses = ingress.siteIngresses.get(key) ?? [row.entrypoint];
+        }
     }
 
     let sha = null;
@@ -853,17 +1077,30 @@ function analyze(options = {}) {
             LEGACY_SECOND_PATH: findings.length,
             ACTION_CAPABLE_UNGOVERNED: actionCapableFindings.length,
             UNCLASSIFIED_LEGACY_REACHABILITY: unclassified.length,
-            GOVERNED_SINK_SITES: governed.length,
-            REACHABLE_MODULES: visited.size,
-            LAUNCHER_SINK_SITES: launcherSinks.length
+            GOVERNED_SINK_SITES: main.governed.length,
+            REACHABLE_MODULES: main.visited.size,
+            LAUNCHER_SINK_SITES: launcherSinks.length,
+            PRODUCTION_INGRESSES_ANALYZED: ingress === null ? entrypoints.length : ingress.analyzed.length,
+            INGRESSES_WITH_UNGOVERNED_FINDINGS: ingress === null
+                ? (findings.length > 0 ? 1 : 0)
+                : ingress.analyzed.filter(e => ingress.byIngress[e] > 0).length
         },
         launchers: launcherFiles.map(rel).sort(),
         launcherSinks: sortRows(launcherSinks),
         findings,
-        governed: sortRows(governed),
+        governed: sortRows(main.governed),
         unclassified: unclassified.sort(),
-        reachableModules: [...visited].map(rel).sort()
+        reachableModules: [...main.visited].map(rel).sort()
     };
+
+    if (ingress !== null) {
+        report.ingress = {
+            analyzed: ingress.analyzed,
+            ungovernedByIngress: ingress.byIngress,
+            governedByIngress: ingress.governedByIngress,
+            reachableModulesByIngress: ingress.reachableByIngress
+        };
+    }
 
     report.ok = options.strictAll
         ? findings.length === 0 && unclassified.length === 0
@@ -913,11 +1150,20 @@ function main(argv) {
     process.stdout.write(`governed sink sites               = ${c.GOVERNED_SINK_SITES}\n`);
     process.stdout.write(`reachable modules                 = ${c.REACHABLE_MODULES}\n`);
     process.stdout.write(`launcher sink sites (not gated)   = ${c.LAUNCHER_SINK_SITES}\n`);
+    process.stdout.write(`production ingresses analysed     = ${c.PRODUCTION_INGRESSES_ANALYZED}` +
+        ` (rooting ungoverned paths: ${c.INGRESSES_WITH_UNGOVERNED_FINDINGS})\n`);
+    if (report.ingress) {
+        for (const entry of report.ingress.analyzed) {
+            process.stdout.write(`    ${entry.padEnd(28)} ungoverned=${String(report.ingress.ungovernedByIngress[entry]).padStart(3)}` +
+                ` governed=${String(report.ingress.governedByIngress[entry]).padStart(3)}` +
+                ` reachable=${report.ingress.reachableModulesByIngress[entry]}\n`);
+        }
+    }
 
     if (report.findings.length > 0) {
         process.stdout.write("\nungoverned sink sites:\n");
         for (const f of report.findings) {
-            process.stdout.write(`  [${f.kind}] ${f.file}:${f.line}  (via ${f.entrypoint})\n`);
+            process.stdout.write(`  [${f.kind}] ${f.file}:${f.line}:${f.column}  (via ${(f.ingresses ?? [f.entrypoint]).join("+")})\n`);
             process.stdout.write(`      ${f.snippet}\n`);
             process.stdout.write(`      path: ${f.path.join(" -> ")}\n`);
         }
@@ -932,7 +1178,7 @@ function main(argv) {
 }
 
 module.exports = {
-    analyze, stripComments, detectSinks, unknownRootCalls, resolveRelative,
+    analyze, stripComments, detectSinks, detectSinksDetailed, unmodelledRootUses, resolveRelative,
     extractSpecifiers, extractBindings, extractReexports, extractMemberReexports, moduleCalls,
     SINK_KINDS, DEFAULT_CANONICAL_OWNERS, DEFAULT_ENTRYPOINTS, DEFAULT_LAUNCHERS, DEFAULT_REGISTRY_MODULES,
     REGISTRY_ROOT_KINDS, EXECUTION_SURFACES,
