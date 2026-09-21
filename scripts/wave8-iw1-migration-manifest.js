@@ -7,6 +7,12 @@
  * Deterministic: derived ONLY from scripts/wave8-census.js output (plus git HEAD),
  * so the manifest is regenerable and never drifts from the counter oracle.
  *
+ * `sha` is the git HEAD that the census MEASURED (the census reports the HEAD of
+ * the tree it read). Because the manifest is itself committed, this field names the
+ * measured baseline commit and deliberately trails the commit that carries the
+ * manifest by one: re-running the generator at a later HEAD rewrites it. Compare a
+ * manifest against a census run by the counters, not by re-reading `sha`.
+ *
  *   node scripts/wave8-iw1-migration-manifest.js
  *   node scripts/wave8-iw1-migration-manifest.js --json
  *
