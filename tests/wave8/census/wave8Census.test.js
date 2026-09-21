@@ -900,7 +900,14 @@ test("census: a bare handler(...) is flagged whatever it holds (the rule is name
         "a call in an arrow body": ROOT_BOUND + "const go = () => handler(x);\n",
         "a call on the else branch": ROOT_BOUND + "if (a) { b(); } else handler(x);\n",
         "an optional call": ROOT_BOUND + "handler?.(x);\n",
-        "a call through call()": ROOT_BOUND + "handler.call(null, x);\n"
+        "a call through call()": ROOT_BOUND + "handler.call(null, x);\n",
+        // Audit 6 F5 / audit 7: the name family and the operator positions.
+        "a sibling name of the execution-surface family": 'const R = require("./ToolRegistry.js");\n' +
+            "const instance = R.get(id);\ninstance(x);\n",
+        "an operator position": ROOT_BOUND + "const y = a + handler(x);\n",
+        "a yield position": ROOT_BOUND + "function* g() { yield handler(x); }\n",
+        "a new position": ROOT_BOUND + "const y = new handler(x);\n",
+        "an export default position": ROOT_BOUND + "export default handler(x);\n"
     };
     for (const [label, body] of Object.entries(shapes)) {
         assert.equal(bareInvocations(run(tree(body, { "src/f.js": FACADE_RETURNING_A_ROOT }))), 1, label);
@@ -924,16 +931,20 @@ test("census: a call at the head of a block body is a statement, not a read", ()
 });
 
 test("census: the documented ceilings of the name-based rule stay documented", () => {
-    // Audit 6 F3/F4 with no live instance: root identity does not travel through a
-    // container or a parameter, and a declared read's result invoked inline is not a
-    // sink. These are disclosed limits of a name-and-shape rule, not claims - closing
-    // either needs bounded dataflow, so this test fails deliberately if the behaviour
-    // changes and forces the ceiling to be revisited.
+    // Audit 6 F3/F4 and audit 7, no live instance each: root identity does not travel
+    // through a container or a parameter, a declared read's result invoked inline is not a
+    // sink, and a parenthesised reference or a spread argument is not matched (`.` cannot
+    // join the prefix class without dragging in every member call named `handler`). These
+    // are disclosed limits of a name-and-shape rule, not claims - closing the first two
+    // needs bounded dataflow - so this test fails deliberately if the behaviour changes
+    // and forces the ceiling to be revisited.
     const read = 'const R = require("./ToolRegistry.js");\nconst handler = R.get(id);\n';
     const ceilings = {
         "a handler parked in a container": read + "const box = { h: handler };\nbox.h(x);\n",
         "a handler passed straight into a parameter": 'const R = require("./ToolRegistry.js");\n((h) => h(x))(R.get(id));\n',
-        "a declared read's result invoked inline": 'const R = require("./ToolRegistry.js");\nR.get(id)(x);\n'
+        "a declared read's result invoked inline": 'const R = require("./ToolRegistry.js");\nR.get(id)(x);\n',
+        "a parenthesised reference": read + "const y = (handler)(x);\n",
+        "a spread argument": read + "f(...handler(x));\n"
     };
     for (const [label, body] of Object.entries(ceilings)) {
         assertClean(run(tree(body)), label + " is a disclosed ceiling, not a claim");

@@ -653,19 +653,28 @@ function detectSinksDetailed(source, registryAliases, rootRequires = []) {
     // C0 invariant forbids. The gate is therefore gone: the rule stays as certified, and a
     // site that is genuinely not a tool-handler reference is resolved in production by
     // naming it truthfully, not by teaching the oracle to guess.
-    // The prefix class carries every token that can precede a statement-position call
-    // (`;`/`=`/`(`/`[`/`{`/`,`/`}`/`)`/`:`/`>`/`?`/`&`/`|`, the keywords return/await and
-    // the single-statement bodies else/do/case): a call at the head of a block or of a
-    // single-statement body is a statement, and treating it as a read is the
-    // "unrecognised syntax => READ" trap (audits 5 and 6). The invocation itself reuses
-    // INVOKE, so `handler?.(x)`, `handler.call(..)` and a tagged `handler\`..\`` count too.
-    // Disclosed ceiling (audit 6 F3/F4, no live instance): root identity does not travel
-    // through a container or a parameter (`const box = { h: handler }; box.h(x)`), nor
-    // through the result of a declared read (`ToolRegistry.get(id)(x)`). Closing either
-    // needs bounded dataflow, not another shape — they are documented limits, not claims.
+    // Coverage is by enumeration, so the enumeration is the documented limit: the name
+    // family is the one this file already uses for execution surfaces
+    // (tool/handler/toolInstance/instance/registered — audit 6 F5), the prefix class
+    // carries the statement positions and operator positions a call can sit in
+    // (`;=()\\[{,}:>?&|+-*/%^!~<` plus a leading value, with the keywords
+    // return/await/yield/else/do/case/default/throw/void/typeof/delete/new/in/instanceof/of —
+    // audits 5 and 6 F1: a call at the head of a block or a single-statement body is a
+    // statement, and reading it as a non-call is the "unrecognised syntax => READ" trap),
+    // and the invocation reuses INVOKE so `handler?.(x)`, `.call(..)`/`.apply(..)` and a
+    // tagged template count (audit 6 F2).
+    // Disclosed ceilings, each verified to have no live instance in src/** (audit 6
+    // F3/F4, audit 7): a handler parked in a container or passed straight into a parameter
+    // (`const box = { h: handler }; box.h(x)`, `((h) => h(x))(R.get(id))`); the result of a
+    // declared read invoked inline (`ToolRegistry.get(id)(x)`); a parenthesised reference
+    // (`(handler)(x)`); and a spread (`f(...handler(x))`, because `.` cannot join the
+    // prefix class without dragging in every member call named `handler`). The first two
+    // need bounded dataflow, not another shape — these are limits, not claims.
     const BARE_HANDLER = new RegExp(
-        "(?:^|[;=()\\[{,}:>?&|]|\\breturn\\b|\\bawait\\b|\\b(?:else|do|case)\\b)\\s*handler" +
-        INVOKE + "(?![^()]*\\)\\s*\\{)", "g");
+        "(?:^|[;=()\\[{,}:>?&|+\\-*/%^!~<]|\\breturn\\b|\\bawait\\b|" +
+        "\\b(?:else|do|case|default|yield|throw|void|typeof|delete|new|in|instanceof|of)\\b)" +
+        "\\s*(?:tool|handler|toolInstance|instance|registered)" + INVOKE +
+        "(?![^()]*\\)\\s*\\{)", "g");
     scan(BARE_HANDLER, "tool_handler_invocation");
 
     // Process / shell: specifier-based (so documentation strings cannot match)
