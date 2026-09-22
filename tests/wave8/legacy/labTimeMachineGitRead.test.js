@@ -177,6 +177,9 @@ test("lab: object ids must match the repository SHA-1 or SHA-256 format", (t) =>
                 fs.writeFileSync(configFile, `${baseNoObjectFormat}\n[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = \"sha256#invalid\"\n`);
                 assert.throws(() => git(dir, "rev-parse", "HEAD"), "Git rejects an objectformat value containing a quoted comment marker");
                 assert.equal(readGitCommit(dir), null, "quoted comment markers are part of the value, not a comment");
+                fs.writeFileSync(configFile, `${baseNoObjectFormat}\n[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = \"sha256\n`);
+                assert.throws(() => git(dir, "rev-parse", "HEAD"), "Git rejects an unterminated config quote");
+                assert.equal(readGitCommit(dir), null, "an unterminated config quote fails closed");
                 fs.writeFileSync(configFile, config);
             }
 
