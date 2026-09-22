@@ -150,6 +150,17 @@ test("lab: object ids must match the repository SHA-1 or SHA-256 format", (t) =>
                 assert.equal(readGitCommit(dir), expected, "a commented setting cannot change the detected object format");
                 fs.writeFileSync(configFile, config);
             }
+            if (format === "sha256") {
+                const configFile = path.join(gitDir, "config");
+                const config = fs.readFileSync(configFile, "utf8");
+                fs.writeFileSync(configFile, `${config}\n[core]\n\trepositoryformatversion = 0\n`);
+                assert.throws(() => git(dir, "rev-parse", "HEAD"), "Git ignores objectformat when repositoryformatversion is 0");
+                assert.equal(readGitCommit(dir), null, "the reader honors the repository format version gate");
+                fs.writeFileSync(configFile, `${config}\n[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha1\n[extensions]\n\tobjectformat = sha256\n`);
+                assert.equal(git(dir, "rev-parse", "HEAD"), expected, "Git uses the last objectformat setting");
+                assert.equal(readGitCommit(dir), expected, "the reader uses the last objectformat setting");
+                fs.writeFileSync(configFile, config);
+            }
 
             const headFile = path.join(gitDir, "HEAD");
             const ref = git(dir, "symbolic-ref", "HEAD");
@@ -414,6 +425,18 @@ test("lab: a ref git refuses is not resolved here either", () => {
 
         fs.writeFileSync(packedFile, clean);
         assert.equal(readGitCommit(dir), heading, "control again: the intact file");
+
+        fs.writeFileSync(packedFile, `# pack-refs with: peeled fully-peeled sorted\n${heading} ${ref}\n${"0".repeat(40)} ${ref}\n`);
+        assert.equal(git(dir, "rev-parse", "HEAD"), "0".repeat(40), "the last duplicate packed ref wins in Git");
+        assert.equal(readGitCommit(dir), "0".repeat(40), "the reader follows Git's last duplicate packed ref");
+        fs.writeFileSync(packedFile, `# pack-refs with: peeled fully-peeled sorted\n${"0".repeat(40)} ${ref}\n${heading} ${ref}\n`);
+        assert.equal(git(dir, "rev-parse", "HEAD"), heading, "a later valid duplicate replaces an earlier value");
+        assert.equal(readGitCommit(dir), heading, "the reader follows the later valid duplicate");
+
+        fs.writeFileSync(headFile, "ref: ../../outside\n");
+        assert.throws(() => git(dir, "rev-parse", "HEAD"), "Git rejects a ref target that escapes refs/");
+        assert.equal(readGitCommit(dir), null, "a traversal-shaped HEAD target is never read as a path");
+        fs.writeFileSync(headFile, `ref: ${ref}\n`);
 
         // One removal per repo, so neither can cover for the other.
         for (const part of ["objects", "refs"]) {
