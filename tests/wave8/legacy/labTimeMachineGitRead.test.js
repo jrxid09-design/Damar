@@ -113,6 +113,70 @@ test("lab: a bare repository is read the way git reads it", () => {
     }
 });
 
+test("lab: object ids must match the repository SHA-1 or SHA-256 format", (t) => {
+    const probe = tmp("w8-lab-object-format-probe-");
+    try {
+        try { git(probe, "init", "-q", "--object-format=sha256"); }
+        catch (error) {
+            if (/unknown option|unsupported|unknown hash algorithm/i.test(String(error.stderr))) {
+                t.skip("installed Git does not support SHA-256 repositories");
+                return;
+            }
+            throw error;
+        }
+    }
+    finally { fs.rmSync(probe, { recursive: true, force: true }); }
+
+    for (const format of ["sha1", "sha256"]) {
+        const dir = tmp(`w8-lab-${format}-`);
+        try {
+            git(dir, "init", "-q", `--object-format=${format}`);
+            fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+            git(dir, "add", "a.txt");
+            git(dir, ...commitEnvArgs(), "commit", "-q", "-m", "first");
+
+            const expected = git(dir, "rev-parse", "HEAD");
+            const expectedLength = format === "sha1" ? 40 : 64;
+            const wrongLength = format === "sha1" ? 64 : 40;
+            assert.equal(expected.length, expectedLength, `${format} OID width`);
+            assert.equal(readGitCommit(dir), expected, `${format} valid detached OID`);
+
+            const gitDir = path.join(dir, ".git");
+            if (format === "sha1") {
+                const configFile = path.join(gitDir, "config");
+                const config = fs.readFileSync(configFile, "utf8");
+                fs.writeFileSync(configFile, `${config}\n[extensions]\n\t# objectformat = sha256\n`);
+                assert.equal(git(dir, "rev-parse", "HEAD"), expected, "Git ignores the commented objectformat setting");
+                assert.equal(readGitCommit(dir), expected, "a commented setting cannot change the detected object format");
+                fs.writeFileSync(configFile, config);
+            }
+
+            const headFile = path.join(gitDir, "HEAD");
+            const ref = git(dir, "symbolic-ref", "HEAD");
+            const looseRef = path.join(gitDir, ...ref.split("/"));
+
+            fs.writeFileSync(headFile, "0".repeat(wrongLength) + "\n");
+            assert.throws(() => git(dir, "rev-parse", "HEAD"), `${format} rejects the other format's detached OID width`);
+            assert.equal(readGitCommit(dir), null, `${format} detached mismatch fails closed`);
+
+            fs.writeFileSync(headFile, `ref: ${ref}\n`);
+            fs.writeFileSync(looseRef, "0".repeat(wrongLength) + "\n");
+            assert.throws(() => git(dir, "rev-parse", "HEAD"), `${format} rejects the other format's loose ref width`);
+            assert.equal(readGitCommit(dir), null, `${format} loose-ref mismatch fails closed`);
+
+            fs.writeFileSync(looseRef, expected + "\n");
+            git(dir, "pack-refs", "--all");
+            const packedFile = path.join(gitDir, "packed-refs");
+            assert.equal(readGitCommit(dir), expected, `${format} valid packed ref`);
+            const packed = fs.readFileSync(packedFile, "utf8");
+            fs.writeFileSync(packedFile, packed.replace(expected, "0".repeat(wrongLength)));
+            assert.throws(() => git(dir, "rev-parse", "HEAD"), `${format} rejects the other format's packed ref width`);
+            assert.equal(readGitCommit(dir), null, `${format} packed-ref mismatch fails closed`);
+        }
+        finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    }
+});
+
 test("lab: a linked worktree resolves its ref through the common git dir", () => {
     // `git worktree add` keeps HEAD in the per-worktree dir but the ref itself in
     // the common dir named by `commondir`. A hand-built pointer fixture does not
