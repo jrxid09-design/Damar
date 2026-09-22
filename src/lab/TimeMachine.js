@@ -112,10 +112,23 @@ function objectIdHexLength(commonDir) {
                 inCore = section[1].trim().toLowerCase() === "core";
                 continue;
             }
-            const setting = /^\s*([^=\s]+)\s*=\s*(.*?)\s*(?:[#;].*)?$/i.exec(line);
+            const setting = /^\s*([^=\s]+)\s*=\s*(.*)$/i.exec(line);
             if (!setting) continue;
             const key = setting[1].toLowerCase();
-            const value = setting[2].replace(/^["']|["']$/g, "").toLowerCase();
+            let rawValue = setting[2].trim();
+            let quote = null;
+            for (let i = 0; i < rawValue.length; i++) {
+                const ch = rawValue[i];
+                if (quote) {
+                    if (ch === quote && rawValue[i - 1] !== "\\") quote = null;
+                }
+                else if (ch === "\"" || ch === "'") quote = ch;
+                else if (ch === "#" || ch === ";") {
+                    rawValue = rawValue.slice(0, i).trim();
+                    break;
+                }
+            }
+            const value = rawValue.replace(/^["']|["']$/g, "").toLowerCase();
             if (inCore && key === "repositoryformatversion" && /^\d+$/.test(value)) {
                 repositoryFormatVersion = Number(value);
             }
@@ -139,6 +152,7 @@ const INVALID_REF_CHARS = /[\x00-\x20\x7f~^:?*\[\\]/;
 
 function refNameValid(name, mustBeUnderRefs) {
     if (mustBeUnderRefs && !name.startsWith("refs/")) return false;
+    if (name === "@") return false;
     if (INVALID_REF_CHARS.test(name) || name.includes("..") || name.includes("@{")) return false;
     return name.split("/").every(part => part && part[0] !== "." && !part.endsWith(".") && !part.endsWith(".lock"));
 }
