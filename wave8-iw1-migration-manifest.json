@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "sha": "8cbfbad5d394215d80d32544078187236a27f2e0",
-  "measured_source_sha": "8cbfbad5d394215d80d32544078187236a27f2e0",
-  "generator_head_sha": "8cbfbad5d394215d80d32544078187236a27f2e0",
+  "sha": "dbe58778a4fae5383d09cd500e52dd6ef5e5ea17",
+  "measured_source_sha": "dbe58778a4fae5383d09cd500e52dd6ef5e5ea17",
+  "generator_head_sha": "dbe58778a4fae5383d09cd500e52dd6ef5e5ea17",
   "sha_meaning": "measured_source_sha = the git HEAD the census read (the tree these counters describe). generator_head_sha = the HEAD the generator ran in; because the generator always writes its output, the commit carrying this file is normally the NEXT commit. `sha` is kept as an alias of measured_source_sha for older consumers.",
   "generatedFrom": "scripts/wave8-census.js",
   "counters": {
-    "LEGACY_SECOND_PATH": 134,
-    "ACTION_CAPABLE_UNGOVERNED": 49,
+    "LEGACY_SECOND_PATH": 132,
+    "ACTION_CAPABLE_UNGOVERNED": 47,
     "UNCLASSIFIED_LEGACY_REACHABILITY": 0,
     "GOVERNED_SINK_SITES": 62,
     "REACHABLE_MODULES": 756,
@@ -16,16 +16,16 @@
     "INGRESSES_WITH_UNGOVERNED_FINDINGS": 1
   },
   "reconciliation": {
-    "raw_sink_count": 134,
-    "manifest_row_count": 134,
-    "unique_module_count": 51,
-    "unique_row_id_count": 134,
+    "raw_sink_count": 132,
+    "manifest_row_count": 132,
+    "unique_module_count": 50,
+    "unique_row_id_count": 132,
     "production_ingresses_analyzed": 2,
     "ungoverned_findings_by_ingress": {
       "src/cli/index.js": 0,
-      "src/server.js": 134
+      "src/server.js": 132
     },
-    "action_capable_count": 49,
+    "action_capable_count": 47,
     "advisory_count": 85,
     "unclassified_count": 0,
     "census_findings_without_manifest_row": 0,
@@ -38,7 +38,7 @@
     ],
     "ungovernedByIngress": {
       "src/cli/index.js": 0,
-      "src/server.js": 134
+      "src/server.js": 132
     },
     "governedByIngress": {
       "src/cli/index.js": 62,
@@ -133,14 +133,6 @@
     },
     {
       "id": "C10-VERIFICATION",
-      "hits": 2,
-      "action_capable": 2,
-      "files": 1,
-      "max_risk": "P1",
-      "priority": 2
-    },
-    {
-      "id": "C6-LAB-TIMEMACHINE",
       "hits": 2,
       "action_capable": 2,
       "files": 1,
@@ -2084,68 +2076,6 @@
       "hops": 3,
       "cluster": "C8-DEVICE-BRIDGES",
       "risk": "P0",
-      "symbol": "RECON_REQUIRED",
-      "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
-      "capability_family": "RECON_REQUIRED",
-      "operation_type": "RECON_REQUIRED",
-      "authority_source": "RECON_REQUIRED",
-      "verification_mechanism": "RECON_REQUIRED",
-      "audit_mechanism": "RECON_REQUIRED",
-      "replay_durability": "RECON_REQUIRED",
-      "canonical_migration_destination": "RECON_REQUIRED",
-      "required_tests": "RECON_REQUIRED",
-      "classification": "H_UNKNOWN_REQUIRES_RECON",
-      "migration_status": "PENDING"
-    },
-    {
-      "id": "src/lab/TimeMachine.js:25:34:process_shell",
-      "census_category": "LEGACY_SECOND_PATH",
-      "source_file": "src/lab/TimeMachine.js",
-      "line": 25,
-      "column": 34,
-      "kind": "process_shell",
-      "snippet": "require(\"node:child_process\")",
-      "action_capable": true,
-      "consequential": "YES",
-      "entrypoint": "src/server.js",
-      "ingresses": [
-        "src/server.js"
-      ],
-      "execution_path": "src/server.js -> src/app.js -> src/routes/index.js -> src/routes/api/v1/index.js -> src/routes/api/v1/console.js -> src/controllers/labController.js -> src/lab/LabService.js -> src/lab/TimeMachine.js",
-      "hops": 7,
-      "cluster": "C6-LAB-TIMEMACHINE",
-      "risk": "P1",
-      "symbol": "RECON_REQUIRED",
-      "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
-      "capability_family": "RECON_REQUIRED",
-      "operation_type": "RECON_REQUIRED",
-      "authority_source": "RECON_REQUIRED",
-      "verification_mechanism": "RECON_REQUIRED",
-      "audit_mechanism": "RECON_REQUIRED",
-      "replay_durability": "RECON_REQUIRED",
-      "canonical_migration_destination": "RECON_REQUIRED",
-      "required_tests": "RECON_REQUIRED",
-      "classification": "H_UNKNOWN_REQUIRES_RECON",
-      "migration_status": "PENDING"
-    },
-    {
-      "id": "src/lab/TimeMachine.js:26:25:process_shell",
-      "census_category": "LEGACY_SECOND_PATH",
-      "source_file": "src/lab/TimeMachine.js",
-      "line": 26,
-      "column": 25,
-      "kind": "process_shell",
-      "snippet": "execSync(",
-      "action_capable": true,
-      "consequential": "YES",
-      "entrypoint": "src/server.js",
-      "ingresses": [
-        "src/server.js"
-      ],
-      "execution_path": "src/server.js -> src/app.js -> src/routes/index.js -> src/routes/api/v1/index.js -> src/routes/api/v1/console.js -> src/controllers/labController.js -> src/lab/LabService.js -> src/lab/TimeMachine.js",
-      "hops": 7,
-      "cluster": "C6-LAB-TIMEMACHINE",
-      "risk": "P1",
       "symbol": "RECON_REQUIRED",
       "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
       "capability_family": "RECON_REQUIRED",
