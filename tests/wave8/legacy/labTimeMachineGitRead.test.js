@@ -169,6 +169,117 @@ test("lab: a stray loose ref in the private worktree dir cannot win over the com
     }
 });
 
+test("lab: a worktree-private ref is read the way git reads it, and a private packed-refs is ignored", () => {
+    // Diukur dengan git 2.55: pada linked worktree, ref privat
+    // (refs/bisect|worktree|rewritten/*) hanya dibaca longgar di direktori
+    // privat worktree itu; yang hanya ada di common dir TIDAK diselesaikan git.
+    // `git pack-refs --all` juga tidak pernah memindahkan ref privat ke
+    // packed-refs, jadi berkas packed-refs di direktori privat tidak boleh
+    // dipercaya — sementara di repo biasa (git dir == common dir) git
+    // menghormati entri packed untuk ref privat.
+    const dir = tmp("w8-lab-privateref-");
+    const wt = `${dir}-linked`;
+    try {
+        git(dir, "init", "-q");
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        git(dir, "add", "a.txt");
+        git(dir, ...commitEnvArgs(), "commit", "-q", "-m", "first");
+        const first = git(dir, "rev-parse", "HEAD");
+
+        git(dir, "worktree", "add", "-q", "-b", "wtbranch", wt);
+        fs.writeFileSync(path.join(wt, "b.txt"), "b\n");
+        git(wt, "add", "b.txt");
+        git(wt, ...commitEnvArgs(), "commit", "-q", "-m", "second");
+        const second = git(wt, "rev-parse", "HEAD");
+        assert.notEqual(first, second);
+
+        const privateDir = path.join(
+            dir, ".git", "worktrees", fs.readdirSync(path.join(dir, ".git", "worktrees"))[0]
+        );
+        const privateLoose = path.join(privateDir, "refs", "bisect", "bad");
+        fs.mkdirSync(path.dirname(privateLoose), { recursive: true });
+        fs.writeFileSync(privateLoose, `${second}\n`);
+        git(wt, "symbolic-ref", "HEAD", "refs/bisect/bad");
+
+        assert.equal(git(wt, "rev-parse", "HEAD"), second, "git reads the private loose ref");
+        assert.equal(readGitCommit(wt), second, "so must the read");
+
+        fs.rmSync(privateLoose);
+        fs.writeFileSync(path.join(privateDir, "packed-refs"), `${FAKE} refs/bisect/bad\n`);
+        assert.throws(() => git(wt, "rev-parse", "HEAD"), "git ignores a private packed-refs");
+        assert.equal(readGitCommit(wt), null, "so must the read");
+
+        fs.rmSync(path.join(privateDir, "packed-refs"));
+        git(dir, "update-ref", "refs/bisect/bad", first);
+        assert.throws(() => git(wt, "rev-parse", "HEAD"), "git does not fall back to the common dir");
+        assert.equal(readGitCommit(wt), null, "so must the read");
+
+        fs.rmSync(path.join(dir, ".git", "refs", "bisect", "bad"));
+        fs.writeFileSync(path.join(dir, ".git", "packed-refs"),
+            `# pack-refs with: peeled fully-peeled sorted\n${first} refs/bisect/bad\n`);
+        git(dir, "symbolic-ref", "HEAD", "refs/bisect/bad");
+        assert.equal(git(dir, "rev-parse", "HEAD"), first, "git honours it where git dir == common dir");
+        assert.equal(readGitCommit(dir), first, "and so must the read");
+
+        git(wt, "symbolic-ref", "HEAD", "refs/heads/wtbranch");
+        git(dir, "worktree", "remove", "--force", wt);
+    }
+    finally {
+        fs.rmSync(wt, { recursive: true, force: true });
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("lab: the symbolic ref depth bound is git's own limit, not one hop past it", () => {
+    // Rantai yang git tolak harus menghasilkan null di sini juga: hash yang
+    // "lebih benar daripada git" tetap hash yang tidak pernah git laporkan.
+    const dir = tmp("w8-lab-depth-");
+    try {
+        git(dir, "init", "-q");
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        git(dir, "add", "a.txt");
+        git(dir, ...commitEnvArgs(), "commit", "-q", "-m", "first");
+        const real = git(dir, "rev-parse", "--abbrev-ref", "HEAD");
+
+        for (let hops = 1; hops <= 4; hops++) {
+            for (let i = hops; i >= 1; i--) {
+                const target = i === 1 ? `refs/heads/${real}` : `refs/heads/chain-${i - 1}`;
+                git(dir, "symbolic-ref", `refs/heads/chain-${i}`, target);
+            }
+            git(dir, "symbolic-ref", "HEAD", `refs/heads/chain-${hops}`);
+
+            if (hops <= 3) {
+                assert.equal(readGitCommit(dir), git(dir, "rev-parse", "HEAD"), `${hops} symbolic hops`);
+            }
+            else {
+                assert.throws(() => git(dir, "rev-parse", "HEAD"), "git refuses this depth");
+                assert.equal(readGitCommit(dir), null, `${hops} symbolic hops: git fails, so does the read`);
+            }
+        }
+    }
+    finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("lab: a damaged packed-refs is not repaired on git's behalf", () => {
+    // CRLF di packed-refs ditolak git seluruhnya; merapikan tiap baris di sini
+    // berarti melaporkan commit yang git sendiri tidak mau selesaikan.
+    const dir = tmp("w8-lab-packed-crlf-");
+    try {
+        git(dir, "init", "-q");
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        git(dir, "add", "a.txt");
+        git(dir, ...commitEnvArgs(), "commit", "-q", "-m", "first");
+        git(dir, "pack-refs", "--all");
+
+        const packed = path.join(dir, ".git", "packed-refs");
+        fs.writeFileSync(packed, fs.readFileSync(packed, "utf8").split("\n").join("\r\n"));
+
+        assert.throws(() => git(dir, "rev-parse", "HEAD"), "git rejects the whole file");
+        assert.equal(readGitCommit(dir), null, "so must the read");
+    }
+    finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("lab: a chained symbolic ref resolves like git", () => {
     const dir = tmp("w8-lab-symref-");
     try {
