@@ -1,31 +1,31 @@
 {
   "schemaVersion": 1,
-  "sha": "378320276e9306220f560815472a6b53ae35b016",
-  "measured_source_sha": "378320276e9306220f560815472a6b53ae35b016",
-  "generator_head_sha": "378320276e9306220f560815472a6b53ae35b016",
+  "sha": "8cbfbad5d394215d80d32544078187236a27f2e0",
+  "measured_source_sha": "8cbfbad5d394215d80d32544078187236a27f2e0",
+  "generator_head_sha": "8cbfbad5d394215d80d32544078187236a27f2e0",
   "sha_meaning": "measured_source_sha = the git HEAD the census read (the tree these counters describe). generator_head_sha = the HEAD the generator ran in; because the generator always writes its output, the commit carrying this file is normally the NEXT commit. `sha` is kept as an alias of measured_source_sha for older consumers.",
   "generatedFrom": "scripts/wave8-census.js",
   "counters": {
-    "LEGACY_SECOND_PATH": 133,
-    "ACTION_CAPABLE_UNGOVERNED": 48,
+    "LEGACY_SECOND_PATH": 134,
+    "ACTION_CAPABLE_UNGOVERNED": 49,
     "UNCLASSIFIED_LEGACY_REACHABILITY": 0,
-    "GOVERNED_SINK_SITES": 60,
+    "GOVERNED_SINK_SITES": 62,
     "REACHABLE_MODULES": 756,
     "LAUNCHER_SINK_SITES": 3,
     "PRODUCTION_INGRESSES_ANALYZED": 2,
     "INGRESSES_WITH_UNGOVERNED_FINDINGS": 1
   },
   "reconciliation": {
-    "raw_sink_count": 133,
-    "manifest_row_count": 133,
-    "unique_module_count": 50,
-    "unique_row_id_count": 133,
+    "raw_sink_count": 134,
+    "manifest_row_count": 134,
+    "unique_module_count": 51,
+    "unique_row_id_count": 134,
     "production_ingresses_analyzed": 2,
     "ungoverned_findings_by_ingress": {
       "src/cli/index.js": 0,
-      "src/server.js": 133
+      "src/server.js": 134
     },
-    "action_capable_count": 48,
+    "action_capable_count": 49,
     "advisory_count": 85,
     "unclassified_count": 0,
     "census_findings_without_manifest_row": 0,
@@ -38,11 +38,11 @@
     ],
     "ungovernedByIngress": {
       "src/cli/index.js": 0,
-      "src/server.js": 133
+      "src/server.js": 134
     },
     "governedByIngress": {
-      "src/cli/index.js": 60,
-      "src/server.js": 60
+      "src/cli/index.js": 62,
+      "src/server.js": 62
     },
     "reachableModulesByIngress": {
       "src/cli/index.js": 242,
@@ -123,6 +123,14 @@
     }
   ],
   "clusters": [
+    {
+      "id": "C0-UNCLUSTERED-ACTION",
+      "hits": 1,
+      "action_capable": 1,
+      "files": 1,
+      "max_risk": "P0",
+      "priority": 1
+    },
     {
       "id": "C10-VERIFICATION",
       "hits": 2,
@@ -2417,6 +2425,37 @@
       "hops": 3,
       "cluster": "C7-MCP-EGRESS",
       "risk": "P2",
+      "symbol": "RECON_REQUIRED",
+      "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
+      "capability_family": "RECON_REQUIRED",
+      "operation_type": "RECON_REQUIRED",
+      "authority_source": "RECON_REQUIRED",
+      "verification_mechanism": "RECON_REQUIRED",
+      "audit_mechanism": "RECON_REQUIRED",
+      "replay_durability": "RECON_REQUIRED",
+      "canonical_migration_destination": "RECON_REQUIRED",
+      "required_tests": "RECON_REQUIRED",
+      "classification": "H_UNKNOWN_REQUIRES_RECON",
+      "migration_status": "PENDING"
+    },
+    {
+      "id": "src/runtime/interactionBus/interactionBus.js:413:31:tool_handler_invocation",
+      "census_category": "LEGACY_SECOND_PATH",
+      "source_file": "src/runtime/interactionBus/interactionBus.js",
+      "line": 413,
+      "column": 31,
+      "kind": "tool_handler_invocation",
+      "snippet": ".handler(",
+      "action_capable": true,
+      "consequential": "YES",
+      "entrypoint": "src/server.js",
+      "ingresses": [
+        "src/server.js"
+      ],
+      "execution_path": "src/server.js -> src/voice/index.js -> src/voice/voiceRuntime.js -> src/integration/canonicalRuntimeComposition.js -> src/runtime/interactionBus/index.js -> src/runtime/interactionBus/interactionBus.js",
+      "hops": 5,
+      "cluster": "C0-UNCLUSTERED-ACTION",
+      "risk": "P0",
       "symbol": "RECON_REQUIRED",
       "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
       "capability_family": "RECON_REQUIRED",

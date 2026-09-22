@@ -666,16 +666,29 @@ function detectSinksDetailed(source, registryAliases, rootRequires = []) {
     // Disclosed ceilings, each verified to have no live instance in src/** (audit 6
     // F3/F4, audit 7): a handler parked in a container or passed straight into a parameter
     // (`const box = { h: handler }; box.h(x)`, `((h) => h(x))(R.get(id))`); the result of a
-    // declared read invoked inline (`ToolRegistry.get(id)(x)`); a parenthesised reference
-    // (`(handler)(x)`); and a spread (`f(...handler(x))`, because `.` cannot join the
-    // prefix class without dragging in every member call named `handler`). The first two
-    // need bounded dataflow, not another shape — these are limits, not claims.
+    // declared read invoked inline (`ToolRegistry.get(id)(x)`); and a parenthesised
+    // reference (`(handler)(x)`). The first two need bounded dataflow, not another shape —
+    // these are limits, not claims. (A spread is matched incidentally by the member rule
+    // below; `.` still cannot join the prefix class without dragging in every member call
+    // named `handler`.)
     const BARE_HANDLER = new RegExp(
         "(?:^|[;=()\\[{,}:>?&|+\\-*/%^!~<]|\\breturn\\b|\\bawait\\b|" +
         "\\b(?:else|do|case|default|yield|throw|void|typeof|delete|new|in|instanceof|of)\\b)" +
         "\\s*(?:tool|handler|toolInstance|instance|registered)" + INVOKE +
         "(?![^()]*\\)\\s*\\{)", "g");
     scan(BARE_HANDLER, "tool_handler_invocation");
+
+    // The same name family as a MEMBER call: `resolved.handler(...)`, `l.tool(...)`.
+    // Until this rule existed the census modelled member calls only on the three tracked
+    // root aliases (ToolRegistry / pluginManager / pluginLoader) and otherwise only the
+    // bare-identifier form, so a dispatch through a local object carrying a caller-supplied
+    // handler was silently absent rather than classified - the same "unrecognised syntax =>
+    // READ" trap, reached by receiver instead of by shape. Audit 8 found the two live
+    // instances that made it material: src/runtime/interactionBus/interactionBus.js (a
+    // handler resolved from its own registration map) and src/mesh/meshTransport.js (a
+    // loopback listener), both reachable from src/server.js.
+    scan(new RegExp(CALL + "(?:tool|handler|toolInstance|instance|registered)" + INVOKE, "g"),
+        "tool_handler_invocation");
 
     // Process / shell: specifier-based (so documentation strings cannot match)
     // plus the classic driver calls.
