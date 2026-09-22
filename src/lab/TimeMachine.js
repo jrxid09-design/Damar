@@ -78,7 +78,16 @@ class TimeMachine {
 
 }
 
-const HASH = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const HASH = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
+
+// git menerima heksadesimal huruf besar tetapi selalu MENCETAK huruf kecil
+// (`git rev-parse HEAD` atas ref huruf besar menghasilkan oid huruf kecil),
+// jadi hasilnya disamakan dengan cetakan git: menolak huruf besar berarti
+// kehilangan commit yang git laporkan, mengembalikannya apa adanya berarti
+// berbeda dari git hanya pada huruf.
+function commitHash(value) {
+    return HASH.test(value) ? value.toLowerCase() : null;
+}
 
 // Pseudo-ref yang memang privat per-worktree; sisanya (refs/heads/*, refs/tags/*, ...)
 // tinggal di common dir.
@@ -130,12 +139,25 @@ function readGitCommit(dir) {
     }
     catch { /* repo biasa/bare: ref memang ada di git dir itu sendiri */ }
 
+    // git hanya mengakui direktori yang berbentuk repo: `objects` dan `refs`
+    // harus ADA di common dir (salah satu hilang dan git menolak seluruh
+    // direktori itu). Diukur dengan git 2.55: tidak ada salah satunya -> gagal,
+    // tetapi berbentuk berkas biasa -> tetap diterima, jadi yang diuji
+    // keberadaannya saja. Tanpa cek ini git dir sisa/rusak — mis. isinya
+    // terhapus sebagian — melaporkan commit yang git sendiri tolak, padahal
+    // kontraknya null untuk bukan-repo.
+    for (const part of ["objects", "refs"]) {
+        if (!fs.existsSync(path.join(commonDir, part))) return null;
+    }
+
     let head;
-    try { head = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").trim(); }
+    // Hanya spasi di BELAKANG yang dibuang git; spasi di depan membuat isinya
+    // bukan lagi oid dan git menolaknya.
+    try { head = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").replace(/\s+$/, ""); }
     catch { return null; }
 
     const symbolic = /^ref:\s*(.+)$/.exec(head);
-    if (!symbolic) return HASH.test(head) ? head : null;
+    if (!symbolic) return commitHash(head);
 
     // HEAD boleh menunjuk symbolic ref yang menunjuk symbolic ref lagi.
     let ref = symbolic[1].trim();
@@ -144,7 +166,7 @@ function readGitCommit(dir) {
         if (value === null) return null;
         const deeper = /^ref:\s*(.+)$/.exec(value);
         // Ada tetapi bukan hash: git pun gagal di sini, dan dulu hasilnya null.
-        if (!deeper) return HASH.test(value) ? value : null;
+        if (!deeper) return commitHash(value);
         ref = deeper[1].trim();
     }
 
@@ -167,7 +189,9 @@ function readRef(gitDir, commonDir, ref) {
     const bases = commonDir !== gitDir && !WORKTREE_PRIVATE_REF.test(ref) ? [commonDir] : [gitDir];
 
     for (const base of bases) {
-        try { return fs.readFileSync(path.join(base, ref), "utf8").trim(); }
+        // Hanya spasi di BELAKANG yang dibuang git; spasi di depan membuat isi
+        // berkas bukan lagi oid dan `git rev-parse` menolaknya.
+        try { return fs.readFileSync(path.join(base, ref), "utf8").replace(/\s+$/, ""); }
         catch { /* belum dilonggarkan di sini — mungkin hanya ada di packed-refs */ }
     }
 
@@ -177,13 +201,19 @@ function readRef(gitDir, commonDir, ref) {
         // worktree tidak pernah dibaca git dan tidak boleh dipercaya di sini.
         if (base !== commonDir) continue;
         try {
-            for (const line of fs.readFileSync(path.join(base, "packed-refs"), "utf8").split("\n")) {
+            const packed = fs.readFileSync(path.join(base, "packed-refs"), "utf8");
+            // Baris terakhir yang terpotong (berkas tanpa LF penutup) membuat
+            // git menolak SELURUH berkas, termasuk baris yang lengkap; jadi
+            // menerimanya di sini berarti menerima ref yang git tidak selesaikan.
+            if (!packed.endsWith("\n")) continue;
+            for (const line of packed.split("\n")) {
                 if (line.startsWith("#") || line.startsWith("^")) continue;
-                // Tanpa dirapikan: baris yang rusak (CRLF, spasi ekstra) ditolak
-                // git seluruhnya, jadi memperbaikinya di sini berarti menerima
-                // ref yang git sendiri tidak mau selesaikan.
-                const [hash, name] = line.split(" ");
-                if (name === ref && HASH.test(hash)) return hash;
+                // git memisahkan hash dari nama ref pada SATU spasi/tab pertama,
+                // dan nama ref-nya adalah SISA baris itu apa adanya: "hash ref "
+                // dan "hash ref extra" bukan nama yang sama bagi git, jadi
+                // baris rusak tidak dirapikan di sini.
+                const entry = /^([0-9a-f]{40}|[0-9a-f]{64})(?: |\t)(.+)$/i.exec(line);
+                if (entry && entry[2] === ref) return entry[1].toLowerCase();
             }
         }
         catch { /* tidak ada packed-refs di sini */ }

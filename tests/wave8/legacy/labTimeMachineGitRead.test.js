@@ -52,12 +52,16 @@ test("lab: a gitdir pointer file is followed and a plain folder yields null", ()
     try {
         const store = path.join(outer, "store");
         fs.mkdirSync(path.join(store, "refs", "heads"), { recursive: true });
+        fs.mkdirSync(path.join(store, "objects"), { recursive: true });
         fs.writeFileSync(path.join(store, "HEAD"), "ref: refs/heads/main\n");
         fs.writeFileSync(path.join(store, "refs", "heads", "main"), FAKE + "\n");
 
         const worktree = path.join(outer, "wt");
         fs.mkdirSync(worktree);
         fs.writeFileSync(path.join(worktree, ".git"), `gitdir: ${path.relative(worktree, store)}\n`);
+        // Fixture ini berbentuk git dir yang sah bagi git sendiri (objects +
+        // refs + HEAD), jadi pembacanya bisa dibandingkan dengan git.
+        assert.equal(git(worktree, "rev-parse", "HEAD"), FAKE, "git resolves the fixture");
         assert.equal(readGitCommit(worktree), FAKE, "worktree/submodule pointer");
 
         const loose = path.join(store, "refs", "heads", "main");
@@ -295,6 +299,115 @@ test("lab: a chained symbolic ref resolves like git", () => {
         const expected = git(dir, "rev-parse", "HEAD");
         assert.match(expected, /^[0-9a-f]{40}$/);
         assert.equal(readGitCommit(dir), expected, "HEAD -> alias -> real branch");
+    }
+    finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("lab: a ref git refuses is not resolved here either", () => {
+    // Measured against git 2.55 on repos built by git itself: a leading space in
+    // a loose ref or in detached HEAD, anything left over after the name on a
+    // packed-refs line, a packed-refs whose last line is truncated without its
+    // LF, and a git dir that has lost `refs` or `objects` all make git FAIL.
+    // Accepting them here would report a commit git itself never resolves.
+    const dir = tmp("w8-lab-refuse-");
+    try {
+        git(dir, "init", "-q");
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        git(dir, "add", "a.txt");
+        git(dir, ...commitEnvArgs(), "commit", "-q", "-m", "first");
+
+        const ref = git(dir, "symbolic-ref", "HEAD");
+        const heading = git(dir, "rev-parse", "HEAD");
+        const loose = path.join(dir, ".git", ...ref.split("/"));
+        const headFile = path.join(dir, ".git", "HEAD");
+
+        fs.writeFileSync(loose, ` ${heading}\n`);
+        assert.throws(() => git(dir, "rev-parse", "HEAD"), "leading space in a loose ref");
+        assert.equal(readGitCommit(dir), null, "so must the read");
+
+        fs.writeFileSync(loose, `${heading}\n`);
+        fs.writeFileSync(headFile, ` ${heading}\n`);
+        assert.throws(() => git(dir, "rev-parse", "HEAD"), "leading space in detached HEAD");
+        assert.equal(readGitCommit(dir), null, "so must the read");
+
+        fs.writeFileSync(headFile, `ref: ${ref}\n`);
+        git(dir, "pack-refs", "--all");
+        const packedFile = path.join(dir, ".git", "packed-refs");
+        const clean = fs.readFileSync(packedFile, "utf8");
+        assert.equal(readGitCommit(dir), heading, "control: the packed file as git wrote it");
+
+        fs.writeFileSync(packedFile, clean.replace(` ${ref}\n`, ` ${ref} \n`));
+        assert.throws(() => git(dir, "rev-parse", "HEAD"), "trailing space after the packed name");
+        assert.equal(readGitCommit(dir), null, "so must the read");
+
+        fs.writeFileSync(packedFile, clean.replace(` ${ref}\n`, ` ${ref} extra\n`));
+        assert.throws(() => git(dir, "rev-parse", "HEAD"), "the name is the rest of the line, not a token");
+        assert.equal(readGitCommit(dir), null, "so must the read");
+
+        fs.writeFileSync(packedFile, clean.slice(0, -1));
+        assert.throws(() => git(dir, "rev-parse", "HEAD"), "last line truncated without its LF");
+        assert.equal(readGitCommit(dir), null, "so must the read");
+
+        fs.writeFileSync(packedFile, clean);
+        assert.equal(readGitCommit(dir), heading, "control again: the intact file");
+
+        // One removal per repo, so neither can cover for the other.
+        for (const part of ["objects", "refs"]) {
+            const fresh = tmp(`w8-lab-no-${part}-`);
+            try {
+                git(fresh, "init", "-q");
+                fs.writeFileSync(path.join(fresh, "a.txt"), "a\n");
+                git(fresh, "add", "a.txt");
+                git(fresh, ...commitEnvArgs(), "commit", "-q", "-m", "first");
+                assert.equal(readGitCommit(fresh), git(fresh, "rev-parse", "HEAD"), "control: intact repo");
+                fs.rmSync(path.join(fresh, ".git", part), { recursive: true, force: true });
+                assert.throws(() => git(fresh, "rev-parse", "HEAD"), `git dir without ${part}`);
+                assert.equal(readGitCommit(fresh), null, "so must the read");
+            }
+            finally { fs.rmSync(fresh, { recursive: true, force: true }); }
+        }
+
+        // ...but git only requires that they EXIST: replacing `refs` with a
+        // regular file still resolves, so the check must not demand a directory.
+        fs.rmSync(path.join(dir, ".git", "refs"), { recursive: true, force: true });
+        fs.writeFileSync(path.join(dir, ".git", "refs"), "not a dir\n");
+        assert.equal(git(dir, "rev-parse", "HEAD"), heading, "git accepts refs as a file");
+        assert.equal(readGitCommit(dir), heading, "so must the read");
+    }
+    finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("lab: an upper-case hex ref resolves to the commit git prints", () => {
+    // git accepts upper-case hexadecimal but always prints the lower-case form,
+    // so refusing it here loses a commit git does report, and echoing it back
+    // unchanged differs from git in the letter case alone.
+    const dir = tmp("w8-lab-upper-");
+    try {
+        git(dir, "init", "-q");
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        git(dir, "add", "a.txt");
+        git(dir, ...commitEnvArgs(), "commit", "-q", "-m", "first");
+
+        const ref = git(dir, "symbolic-ref", "HEAD");
+        const expected = git(dir, "rev-parse", "HEAD");
+        const upper = expected.toUpperCase();
+        assert.match(expected, /[a-f]/, "the fixture hash needs a letter or this proves nothing");
+        const loose = path.join(dir, ".git", ...ref.split("/"));
+
+        fs.writeFileSync(loose, `${upper}\n`);
+        assert.equal(git(dir, "rev-parse", "HEAD"), expected, "git normalises to lower case");
+        assert.equal(readGitCommit(dir), expected, "so must the read");
+
+        fs.writeFileSync(loose, `${expected}\n`);
+        git(dir, "pack-refs", "--all");
+        const packedFile = path.join(dir, ".git", "packed-refs");
+        fs.writeFileSync(packedFile, fs.readFileSync(packedFile, "utf8").replace(expected, upper));
+        assert.equal(git(dir, "rev-parse", "HEAD"), expected, "packed, upper case");
+        assert.equal(readGitCommit(dir), expected, "so must the read");
+
+        fs.writeFileSync(path.join(dir, ".git", "HEAD"), `${upper}\n`);
+        assert.equal(git(dir, "rev-parse", "HEAD"), expected, "detached HEAD, upper case");
+        assert.equal(readGitCommit(dir), expected, "so must the read");
     }
     finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
