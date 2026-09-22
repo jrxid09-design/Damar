@@ -60,6 +60,22 @@ test("lab: a gitdir pointer file is followed and a plain folder yields null", ()
         fs.writeFileSync(path.join(worktree, ".git"), `gitdir: ${path.relative(worktree, store)}\n`);
         assert.equal(readGitCommit(worktree), FAKE, "worktree/submodule pointer");
 
+        const loose = path.join(store, "refs", "heads", "main");
+        fs.writeFileSync(loose, "GARBAGE\n");
+        assert.equal(readGitCommit(worktree), null, "corrupt loose ref, as git failing would");
+
+        fs.writeFileSync(loose, FAKE + "a\n");
+        assert.equal(readGitCommit(worktree), null, "41 hex digits is not an object name");
+
+        fs.writeFileSync(path.join(store, "HEAD"), FAKE + "a\n");
+        assert.equal(readGitCommit(worktree), null, "41-hex detached HEAD");
+
+        fs.writeFileSync(path.join(store, "HEAD"), "ref: refs/heads/main\n");
+        fs.rmSync(loose);
+        fs.writeFileSync(path.join(store, "packed-refs"),
+            `# pack-refs with: peeled fully-peeled sorted\n${FAKE} refs/heads/main\n`);
+        assert.equal(readGitCommit(worktree), FAKE, "packed ref in the same git dir");
+
         const unborn = path.join(outer, "unborn");
         fs.mkdirSync(path.join(unborn, ".git"), { recursive: true });
         fs.writeFileSync(path.join(unborn, ".git", "HEAD"), "ref: refs/heads/main\n");
@@ -89,6 +105,34 @@ test("lab: a bare repository is read the way git reads it", () => {
         assert.equal(readGitCommit(bare), expected, "bare repo, no .git of its own");
     }
     finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("lab: a linked worktree resolves its ref through the common git dir", () => {
+    // `git worktree add` keeps HEAD in the per-worktree dir but the ref itself in
+    // the common dir named by `commondir`. A hand-built pointer fixture does not
+    // reproduce that layout, so this one uses git to build it.
+    const dir = tmp("w8-lab-wt-");
+    const wt = `${dir}-linked`;
+    try {
+        git(dir, "init", "-q");
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        git(dir, "add", "a.txt");
+        git(dir, ...commitEnvArgs(), "commit", "-q", "-m", "first");
+
+        git(dir, "worktree", "add", "-q", "-b", "wtbranch", wt);
+        const expected = git(wt, "rev-parse", "HEAD");
+        assert.match(expected, /^[0-9a-f]{40}$/);
+        assert.equal(readGitCommit(wt), expected, "linked worktree, loose ref in the common dir");
+
+        git(dir, "pack-refs", "--all");
+        assert.equal(readGitCommit(wt), expected, "linked worktree, packed ref in the common dir");
+
+        git(dir, "worktree", "remove", "--force", wt);
+    }
+    finally {
+        fs.rmSync(wt, { recursive: true, force: true });
         fs.rmSync(dir, { recursive: true, force: true });
     }
 });
