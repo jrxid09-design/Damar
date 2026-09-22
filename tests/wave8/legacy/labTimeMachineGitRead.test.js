@@ -159,6 +159,9 @@ test("lab: object ids must match the repository SHA-1 or SHA-256 format", (t) =>
                 fs.writeFileSync(configFile, `${config}\n[extensions]\n\t# objectformat = sha256\n`);
                 assert.equal(git(dir, "rev-parse", "HEAD"), expected, "Git ignores the commented objectformat setting");
                 assert.equal(readGitCommit(dir), expected, "a commented setting cannot change the detected object format");
+                fs.writeFileSync(configFile, `${config}\n[core]\n\trepositoryformatversion = 2\n`);
+                assert.throws(() => git(dir, "rev-parse", "HEAD"), "Git rejects an unsupported repository format version");
+                assert.equal(readGitCommit(dir), null, "unsupported repository format versions fail closed");
                 fs.writeFileSync(configFile, config);
             }
             if (format === "sha256") {
@@ -372,7 +375,13 @@ test("lab: a damaged packed-refs is not repaired on git's behalf", () => {
         git(dir, "pack-refs", "--all");
 
         const packed = path.join(dir, ".git", "packed-refs");
-        fs.writeFileSync(packed, fs.readFileSync(packed, "utf8").split("\n").join("\r\n"));
+        const clean = fs.readFileSync(packed, "utf8");
+        fs.writeFileSync(packed, `${clean}garbage unrelated\n`);
+
+        assert.throws(() => git(dir, "rev-parse", "HEAD"), "Git rejects malformed unrelated packed-ref lines");
+        assert.equal(readGitCommit(dir), null, "the reader rejects malformed unrelated packed-ref lines");
+
+        fs.writeFileSync(packed, clean.split("\n").join("\r\n"));
 
         assert.throws(() => git(dir, "rev-parse", "HEAD"), "git rejects the whole file");
         assert.equal(readGitCommit(dir), null, "so must the read");
