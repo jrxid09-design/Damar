@@ -199,7 +199,9 @@ function readGitCommit(dir) {
             // dengan git 2.55, `git rev-parse HEAD` gagal di semuanya).
             const raw = fs.readFileSync(dotGit, "utf8").split("\0")[0];
             if (!raw.startsWith("gitdir: ")) return null;
-            gitDir = path.resolve(dir, raw.slice("gitdir: ".length).replace(/\r?\n$|\r$/, ""));
+            const pointer = raw.slice("gitdir: ".length).replace(/\r?\n$|\r$/, "");
+            if (/^[\t ]|[\t ]$/.test(pointer)) return null;
+            gitDir = path.resolve(dir, pointer);
         }
     }
     catch {

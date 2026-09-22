@@ -68,6 +68,12 @@ test("lab: a gitdir pointer file is followed and a plain folder yields null", ()
         assert.equal(git(worktree, "rev-parse", "HEAD"), FAKE, "Git accepts a gitdir pointer ending in a lone CR");
         assert.equal(readGitCommit(worktree), FAKE, "the reader follows a gitdir pointer ending in a lone CR");
         fs.writeFileSync(path.join(worktree, ".git"), `gitdir: ${path.relative(worktree, store)}\n`);
+        for (const pointer of [`gitdir:  ${path.relative(worktree, store)}\n`, `gitdir:\t${path.relative(worktree, store)}\n`, `gitdir: ${path.relative(worktree, store)} \n`]) {
+            fs.writeFileSync(path.join(worktree, ".git"), pointer);
+            assert.throws(() => git(worktree, "rev-parse", "HEAD"), "Git rejects whitespace-corrupted gitdir pointers");
+            assert.equal(readGitCommit(worktree), null, "the reader rejects whitespace-corrupted gitdir pointers");
+        }
+        fs.writeFileSync(path.join(worktree, ".git"), `gitdir: ${path.relative(worktree, store)}\n`);
 
         const loose = path.join(store, "refs", "heads", "main");
         fs.writeFileSync(loose, "GARBAGE\n");
@@ -158,16 +164,17 @@ test("lab: object ids must match the repository SHA-1 or SHA-256 format", (t) =>
             if (format === "sha256") {
                 const configFile = path.join(gitDir, "config");
                 const config = fs.readFileSync(configFile, "utf8");
+                const baseNoObjectFormat = config.replace(/^\s*objectformat\s*=\s*sha256\s*\r?\n?/im, "");
                 fs.writeFileSync(configFile, `${config}\n[core]\n\trepositoryformatversion = 0\n`);
                 assert.throws(() => git(dir, "rev-parse", "HEAD"), "Git ignores objectformat when repositoryformatversion is 0");
                 assert.equal(readGitCommit(dir), null, "the reader honors the repository format version gate");
-                fs.writeFileSync(configFile, `${config}\n[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha1\n[extensions]\n\tobjectformat = sha256\n`);
+                fs.writeFileSync(configFile, `${baseNoObjectFormat}\n[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha1\n[extensions]\n\tobjectformat = sha256\n`);
                 assert.equal(git(dir, "rev-parse", "HEAD"), expected, "Git uses the last objectformat setting");
                 assert.equal(readGitCommit(dir), expected, "the reader uses the last objectformat setting");
-                fs.writeFileSync(configFile, `${config}\n[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha\"256\"\n`);
+                fs.writeFileSync(configFile, `${baseNoObjectFormat}\n[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha\"256\"\n`);
                 assert.equal(git(dir, "config", "--local", "--get", "extensions.objectformat"), "sha256", "Git removes partial double quoting");
                 assert.equal(readGitCommit(dir), expected, "the reader removes partial double quoting");
-                fs.writeFileSync(configFile, `${config}\n[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = \"sha256#invalid\"\n`);
+                fs.writeFileSync(configFile, `${baseNoObjectFormat}\n[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = \"sha256#invalid\"\n`);
                 assert.throws(() => git(dir, "rev-parse", "HEAD"), "Git rejects an objectformat value containing a quoted comment marker");
                 assert.equal(readGitCommit(dir), null, "quoted comment markers are part of the value, not a comment");
                 fs.writeFileSync(configFile, config);
