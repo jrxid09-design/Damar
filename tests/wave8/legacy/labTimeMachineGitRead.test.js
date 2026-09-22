@@ -159,6 +159,9 @@ test("lab: object ids must match the repository SHA-1 or SHA-256 format", (t) =>
                 fs.writeFileSync(configFile, `${config}\n[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha1\n[extensions]\n\tobjectformat = sha256\n`);
                 assert.equal(git(dir, "rev-parse", "HEAD"), expected, "Git uses the last objectformat setting");
                 assert.equal(readGitCommit(dir), expected, "the reader uses the last objectformat setting");
+                fs.writeFileSync(configFile, `${config}\n[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = \"sha256#invalid\"\n`);
+                assert.throws(() => git(dir, "rev-parse", "HEAD"), "Git rejects an objectformat value containing a quoted comment marker");
+                assert.equal(readGitCommit(dir), null, "quoted comment markers are part of the value, not a comment");
                 fs.writeFileSync(configFile, config);
             }
 
@@ -374,6 +377,11 @@ test("lab: a chained symbolic ref resolves like git", () => {
         const expected = git(dir, "rev-parse", "HEAD");
         assert.match(expected, /^[0-9a-f]{40}$/);
         assert.equal(readGitCommit(dir), expected, "HEAD -> alias -> real branch");
+
+        fs.writeFileSync(path.join(dir, ".git", "refs", "heads", "alias-branch"), "ref: @\n");
+        fs.writeFileSync(path.join(dir, ".git", "@"), `${expected}\n`);
+        assert.throws(() => git(dir, "rev-parse", "HEAD"), "Git rejects the bare @ symbolic target");
+        assert.equal(readGitCommit(dir), null, "the reader rejects the bare @ symbolic target");
     }
     finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
