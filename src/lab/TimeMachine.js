@@ -126,13 +126,14 @@ function objectIdHexLength(commonDir) {
                         if (slashes % 2 === 0) quote = null;
                     }
                 }
-                else if (ch === "\"" || ch === "'") quote = ch;
+                else if (ch === "\"") quote = ch;
                 else if (ch === "#" || ch === ";") {
                     rawValue = rawValue.slice(0, i).trim();
                     break;
                 }
             }
-            const value = rawValue.replace(/^["']|["']$/g, "").toLowerCase();
+            if (quote) continue;
+            const value = rawValue.replace(/"/g, "").toLowerCase();
             if (inCore && key === "repositoryformatversion" && /^\d+$/.test(value)) {
                 repositoryFormatVersion = Number(value);
             }

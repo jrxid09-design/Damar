@@ -164,6 +164,9 @@ test("lab: object ids must match the repository SHA-1 or SHA-256 format", (t) =>
                 fs.writeFileSync(configFile, `${config}\n[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha1\n[extensions]\n\tobjectformat = sha256\n`);
                 assert.equal(git(dir, "rev-parse", "HEAD"), expected, "Git uses the last objectformat setting");
                 assert.equal(readGitCommit(dir), expected, "the reader uses the last objectformat setting");
+                fs.writeFileSync(configFile, `${config}\n[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha\"256\"\n`);
+                assert.equal(git(dir, "config", "--local", "--get", "extensions.objectformat"), "sha256", "Git removes partial double quoting");
+                assert.equal(readGitCommit(dir), expected, "the reader removes partial double quoting");
                 fs.writeFileSync(configFile, `${config}\n[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = \"sha256#invalid\"\n`);
                 assert.throws(() => git(dir, "rev-parse", "HEAD"), "Git rejects an objectformat value containing a quoted comment marker");
                 assert.equal(readGitCommit(dir), null, "quoted comment markers are part of the value, not a comment");
