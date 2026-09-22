@@ -64,6 +64,11 @@ test("lab: a gitdir pointer file is followed and a plain folder yields null", ()
         assert.equal(git(worktree, "rev-parse", "HEAD"), FAKE, "git resolves the fixture");
         assert.equal(readGitCommit(worktree), FAKE, "worktree/submodule pointer");
 
+        fs.writeFileSync(path.join(worktree, ".git"), `gitdir: ${path.relative(worktree, store)}\r`);
+        assert.equal(git(worktree, "rev-parse", "HEAD"), FAKE, "Git accepts a gitdir pointer ending in a lone CR");
+        assert.equal(readGitCommit(worktree), FAKE, "the reader follows a gitdir pointer ending in a lone CR");
+        fs.writeFileSync(path.join(worktree, ".git"), `gitdir: ${path.relative(worktree, store)}\n`);
+
         const loose = path.join(store, "refs", "heads", "main");
         fs.writeFileSync(loose, "GARBAGE\n");
         assert.equal(readGitCommit(worktree), null, "corrupt loose ref, as git failing would");
@@ -440,10 +445,23 @@ test("lab: a ref git refuses is not resolved here either", () => {
         fs.writeFileSync(packedFile, `# pack-refs with: peeled fully-peeled sorted\n${"0".repeat(40)} ${ref}\n${heading} ${ref}\n`);
         assert.equal(git(dir, "rev-parse", "HEAD"), heading, "a later valid duplicate replaces an earlier value");
         assert.equal(readGitCommit(dir), heading, "the reader follows the later valid duplicate");
+        fs.writeFileSync(packedFile, `# pack-refs with: peeled fully-peeled sorted\n${heading} ${ref}\ngarbage ${ref}\n`);
+        assert.throws(() => git(dir, "rev-parse", "HEAD"), "a later malformed duplicate invalidates the packed ref");
+        assert.equal(readGitCommit(dir), null, "the reader does not retain a superseded packed value");
+        fs.writeFileSync(packedFile, clean);
 
         fs.writeFileSync(headFile, "ref: ../../outside\n");
         assert.throws(() => git(dir, "rev-parse", "HEAD"), "Git rejects a ref target that escapes refs/");
         assert.equal(readGitCommit(dir), null, "a traversal-shaped HEAD target is never read as a path");
+        fs.writeFileSync(headFile, `ref: ${ref}\n`);
+
+        for (const invalid of ["refs/heads/x~y", "refs/heads/x^y", "refs/heads/x:y", "refs/heads/x?y",
+            "refs/heads/x*y", "refs/heads/x[y", "refs/heads/x\\y", "refs/heads/.hidden",
+            "refs/heads/trailing.", "refs/heads/trailing.lock", "refs/heads//empty"]) {
+            fs.writeFileSync(headFile, `ref: ${invalid}\n`);
+            assert.throws(() => git(dir, "rev-parse", "HEAD"), `Git rejects invalid ref ${invalid}`);
+            assert.equal(readGitCommit(dir), null, `the reader rejects invalid ref ${invalid}`);
+        }
         fs.writeFileSync(headFile, `ref: ${ref}\n`);
 
         // One removal per repo, so neither can cover for the other.
