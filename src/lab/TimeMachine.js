@@ -78,6 +78,8 @@ class TimeMachine {
 
 }
 
+const HASH = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
 /**
  * Commit HEAD sebuah working tree, dibaca langsung dari metadata git.
  *
@@ -108,29 +110,45 @@ function readGitCommit(dir) {
         gitDir = dir;
     }
 
+    // Worktree tertaut (`git worktree add`): HEAD tinggal di direktori worktree,
+    // tetapi ref-nya tinggal di COMMON dir yang ditunjuk berkas `commondir`.
+    // Tanpa ini snapshot dari worktree kehilangan commit-nya.
+    let commonDir = gitDir;
+    try {
+        const common = fs.readFileSync(path.join(gitDir, "commondir"), "utf8").trim();
+        if (common) commonDir = path.resolve(gitDir, common);
+    }
+    catch { /* repo biasa/bare: ref memang ada di git dir itu sendiri */ }
+
     let head;
     try { head = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").trim(); }
     catch { return null; }
 
     const symbolic = /^ref:\s*(.+)$/.exec(head);
-    if (!symbolic) return /^[0-9a-f]{40,64}$/.test(head) ? head : null;
+    if (!symbolic) return HASH.test(head) ? head : null;
 
     const ref = symbolic[1].trim();
+    const refDirs = commonDir === gitDir ? [gitDir] : [commonDir, gitDir];
 
-    try {
-        const direct = fs.readFileSync(path.join(gitDir, ref), "utf8").trim();
-        if (direct) return direct;
+    for (const base of refDirs) {
+        let raw;
+        try { raw = fs.readFileSync(path.join(base, ref), "utf8"); }
+        catch { continue; }                         // ref belum dilonggarkan di sini
+        const value = raw.trim();
+        // Ada tetapi rusak/kosong: git pun gagal di sini, dan dulu hasilnya null.
+        return HASH.test(value) ? value : null;
     }
-    catch { /* ref belum dilonggarkan — mungkin ada di packed-refs */ }
 
-    try {
-        for (const line of fs.readFileSync(path.join(gitDir, "packed-refs"), "utf8").split("\n")) {
-            if (line.startsWith("#") || line.startsWith("^")) continue;
-            const [hash, name] = line.split(" ");
-            if (name && name.trim() === ref) return hash.trim();
+    for (const base of refDirs) {
+        try {
+            for (const line of fs.readFileSync(path.join(base, "packed-refs"), "utf8").split("\n")) {
+                if (line.startsWith("#") || line.startsWith("^")) continue;
+                const [hash, name] = line.split(" ");
+                if (name && name.trim() === ref && HASH.test(hash.trim())) return hash.trim();
+            }
         }
+        catch { /* tidak ada packed-refs di sini */ }
     }
-    catch { /* tidak ada packed-refs */ }
 
     return null;
 
