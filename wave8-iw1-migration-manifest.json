@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "sha": "97d709d5c67513c97527452ce1ef5a984c7d2c2c",
-  "measured_source_sha": "97d709d5c67513c97527452ce1ef5a984c7d2c2c",
-  "generator_head_sha": "97d709d5c67513c97527452ce1ef5a984c7d2c2c",
+  "sha": "98eb798e49d8d4615df7f46d456727f04bf34cae",
+  "measured_source_sha": "98eb798e49d8d4615df7f46d456727f04bf34cae",
+  "generator_head_sha": "98eb798e49d8d4615df7f46d456727f04bf34cae",
   "sha_meaning": "measured_source_sha = the git HEAD the census read (the tree these counters describe). generator_head_sha = the HEAD the generator ran in; because the generator always writes its output, the commit carrying this file is normally the NEXT commit. `sha` is kept as an alias of measured_source_sha for older consumers.",
   "generatedFrom": "scripts/wave8-census.js",
   "counters": {
