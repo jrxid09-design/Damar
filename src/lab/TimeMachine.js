@@ -123,7 +123,7 @@ function objectIdHexLength(commonDir) {
                 if (quote) {
                     if (ch === "\\") {
                         const escaped = rawValue[i + 1];
-                        if (escaped === undefined || !/[ntbr"\\]/.test(escaped)) return null;
+                        if (escaped === undefined || !/[ntb"\\]/.test(escaped)) return null;
                         i++;
                         continue;
                     }
