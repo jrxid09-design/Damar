@@ -100,19 +100,28 @@ function objectIdHexLength(commonDir) {
     try {
         const config = fs.readFileSync(path.join(commonDir, "config"), "utf8");
         let inExtensions = false;
+        let inCore = false;
+        let repositoryFormatVersion = 0;
+        let objectFormat = null;
         for (const line of config.split(/\r?\n/)) {
             const trimmed = line.trim();
             if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith(";")) continue;
             const section = /^\[([^\]]+)\]/.exec(trimmed);
             if (section) {
                 inExtensions = section[1].trim().toLowerCase() === "extensions";
+                inCore = section[1].trim().toLowerCase() === "core";
                 continue;
             }
-            if (!inExtensions) continue;
-            const setting = /^\s*objectformat\s*=\s*(.*?)\s*(?:[#;].*)?$/i.exec(line);
-            if (setting && setting[1].replace(/^["']|["']$/g, "").toLowerCase() === "sha256") return 64;
+            const setting = /^\s*([^=\s]+)\s*=\s*(.*?)\s*(?:[#;].*)?$/i.exec(line);
+            if (!setting) continue;
+            const key = setting[1].toLowerCase();
+            const value = setting[2].replace(/^["']|["']$/g, "").toLowerCase();
+            if (inCore && key === "repositoryformatversion" && /^\d+$/.test(value)) {
+                repositoryFormatVersion = Number(value);
+            }
+            if (inExtensions && key === "objectformat") objectFormat = value;
         }
-        return 40;
+        return repositoryFormatVersion >= 1 && objectFormat === "sha256" ? 64 : 40;
     }
     catch { return 40; }
 }
