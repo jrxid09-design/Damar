@@ -143,6 +143,7 @@ function objectIdHexLength(commonDir) {
             const value = rawValue.replace(/"/g, "").toLowerCase();
             if (inCore && key === "repositoryformatversion" && /^\d+$/.test(value)) {
                 repositoryFormatVersion = Number(value);
+                if (repositoryFormatVersion > 1) return null;
             }
             if (inExtensions && key === "objectformat") objectFormat = value;
         }
@@ -309,8 +310,15 @@ function readRef(gitDir, commonDir, ref, hexLength) {
             // sha1 membuat git gagal menyelesaikan ref itu (diukur dengan 2.55).
             const entryPattern = new RegExp(`^([0-9a-f]{${hexLength}})(?: |\\t)(.+)$`, "i");
             let found = null;
-            for (const line of packed.split("\n")) {
-                if (line.startsWith("#") || line.startsWith("^")) continue;
+            const lines = packed.split("\n");
+            for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+                const line = lines[lineIndex];
+                if (line === "" && lineIndex === lines.length - 1) continue;
+                if (line.startsWith("#")) continue;
+                if (line.startsWith("^")) {
+                    if (!new RegExp(`^\\^[0-9a-f]{${hexLength}}$`, "i").test(line)) return null;
+                    continue;
+                }
                 // git memisahkan hash dari nama ref pada SATU spasi/tab pertama,
                 // dan nama ref-nya adalah SISA baris itu apa adanya: "hash ref "
                 // dan "hash ref extra" bukan nama yang sama bagi git, jadi
@@ -328,8 +336,7 @@ function readRef(gitDir, commonDir, ref, hexLength) {
                 // git kehilangan nilainya — termasuk bila sebelumnya ada baris
                 // sah (diukur: "c1 ref" lalu "garbage ref" gagal, sedangkan
                 // urutan sebaliknya berhasil).
-                const broken = /^\S+(?: |\t)(.*)$/.exec(line);
-                if (broken && broken[1] === ref) found = null;
+                return null;
             }
             if (found) return found;
         }
