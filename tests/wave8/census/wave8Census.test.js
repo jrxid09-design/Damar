@@ -943,10 +943,30 @@ test("census: the documented ceilings of the name-based rule stay documented", (
         "a handler parked in a container": read + "const box = { h: handler };\nbox.h(x);\n",
         "a handler passed straight into a parameter": 'const R = require("./ToolRegistry.js");\n((h) => h(x))(R.get(id));\n',
         "a declared read's result invoked inline": 'const R = require("./ToolRegistry.js");\nR.get(id)(x);\n',
-        "a parenthesised reference": read + "const y = (handler)(x);\n",
-        "a spread argument": read + "f(...handler(x));\n"
+        "a parenthesised reference": read + "const y = (handler)(x);\n"
     };
     for (const [label, body] of Object.entries(ceilings)) {
         assertClean(run(tree(body)), label + " is a disclosed ceiling, not a claim");
     }
+});
+
+test("census: a member call on the execution-surface name family is visible (audit 8)", () => {
+    // Until this rule existed, a dispatch through a local object carrying a
+    // caller-supplied handler (`resolved.handler(...)` in the interaction bus,
+    // `l.handler(...)` in the loopback transport) produced no row at all - the
+    // "unrecognised syntax => READ" trap reached by receiver instead of by shape.
+    const visible = {
+        "a handler from a local registration map": "const resolved = { handler: (a) => a };\nresolved.handler(x);\n",
+        "a sibling name as a member": "const l = { tool: (a) => a };\nl.tool(x);\n",
+        "an optional member call": "const o = { instance: (a) => a };\no?.instance(x);\n",
+        "a member call through call()": "const p = { registered: (a) => a };\np.registered.call(null, x);\n",
+        "a spread, matched as a member shape": "const handler = (a) => a;\nf(...handler(x));\n"
+    };
+    for (const [label, body] of Object.entries(visible)) {
+        assert.equal(bareInvocations(run(tree(body))), 1, label);
+    }
+    assertClean(run(tree("const o = { handler(a) { return a; } };\n")),
+        "a method definition is not an invocation");
+    assertClean(run(tree("const o = { handler: 1 };\nconst v = o.handler;\n")),
+        "a property read is not an invocation");
 });
