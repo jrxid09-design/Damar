@@ -137,6 +137,57 @@ test("lab: a linked worktree resolves its ref through the common git dir", () =>
     }
 });
 
+test("lab: a stray loose ref in the private worktree dir cannot win over the common ref", () => {
+    // git never resolves refs/heads/* inside the per-worktree private dir, and it
+    // creates that directory on every `worktree add`. A leftover file in it must
+    // not become a confidently wrong commit label.
+    const dir = tmp("w8-lab-stray-");
+    const wt = `${dir}-linked`;
+    try {
+        git(dir, "init", "-q");
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        git(dir, "add", "a.txt");
+        git(dir, ...commitEnvArgs(), "commit", "-q", "-m", "first");
+
+        git(dir, "worktree", "add", "-q", "-b", "wtbranch", wt);
+        const expected = git(wt, "rev-parse", "HEAD");
+        const branch = git(wt, "rev-parse", "--abbrev-ref", "HEAD");
+        git(dir, "pack-refs", "--all");
+
+        const privateDir = path.join(dir, ".git", "worktrees", fs.readdirSync(path.join(dir, ".git", "worktrees"))[0]);
+        const stray = path.join(privateDir, "refs", "heads", branch);
+        fs.mkdirSync(path.dirname(stray), { recursive: true });
+        fs.writeFileSync(stray, FAKE + "\n");
+
+        assert.equal(git(wt, "rev-parse", "HEAD"), expected, "git ignores the stray file");
+        assert.equal(readGitCommit(wt), expected, "so must the read");
+        git(dir, "worktree", "remove", "--force", wt);
+    }
+    finally {
+        fs.rmSync(wt, { recursive: true, force: true });
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("lab: a chained symbolic ref resolves like git", () => {
+    const dir = tmp("w8-lab-symref-");
+    try {
+        git(dir, "init", "-q");
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        git(dir, "add", "a.txt");
+        git(dir, ...commitEnvArgs(), "commit", "-q", "-m", "first");
+
+        const real = git(dir, "rev-parse", "--abbrev-ref", "HEAD");
+        git(dir, "symbolic-ref", "refs/heads/alias-branch", `refs/heads/${real}`);
+        git(dir, "symbolic-ref", "HEAD", "refs/heads/alias-branch");
+
+        const expected = git(dir, "rev-parse", "HEAD");
+        assert.match(expected, /^[0-9a-f]{40}$/);
+        assert.equal(readGitCommit(dir), expected, "HEAD -> alias -> real branch");
+    }
+    finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("lab: reading the commit leaves no process-execution surface behind", () => {
     // The migration claim the census rests on: this module no longer spawns
     // anything, so it cannot be a legacy shell route. Asked of the census

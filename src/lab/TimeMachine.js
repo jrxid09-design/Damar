@@ -80,6 +80,14 @@ class TimeMachine {
 
 const HASH = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
+// Pseudo-ref yang memang privat per-worktree; sisanya (refs/heads/*, refs/tags/*, ...)
+// tinggal di common dir.
+const WORKTREE_PRIVATE_REF = /^refs\/(?:bisect|worktree|rewritten)\//;
+
+// git pun membatasi kedalaman rantai symbolic ref; lima langkah cukup untuk
+// bentuk yang muncul di praktik dan berhenti sebelum rantai yang dibuat-buat.
+const MAX_REF_DEPTH = 5;
+
 /**
  * Commit HEAD sebuah working tree, dibaca langsung dari metadata git.
  *
@@ -127,19 +135,36 @@ function readGitCommit(dir) {
     const symbolic = /^ref:\s*(.+)$/.exec(head);
     if (!symbolic) return HASH.test(head) ? head : null;
 
-    const ref = symbolic[1].trim();
-    const refDirs = commonDir === gitDir ? [gitDir] : [commonDir, gitDir];
-
-    for (const base of refDirs) {
-        let raw;
-        try { raw = fs.readFileSync(path.join(base, ref), "utf8"); }
-        catch { continue; }                         // ref belum dilonggarkan di sini
-        const value = raw.trim();
-        // Ada tetapi rusak/kosong: git pun gagal di sini, dan dulu hasilnya null.
-        return HASH.test(value) ? value : null;
+    // HEAD boleh menunjuk symbolic ref yang menunjuk symbolic ref lagi.
+    let ref = symbolic[1].trim();
+    for (let hop = 0; hop < MAX_REF_DEPTH; hop++) {
+        const value = readRef(gitDir, commonDir, ref);
+        if (value === null) return null;
+        const deeper = /^ref:\s*(.+)$/.exec(value);
+        // Ada tetapi bukan hash: git pun gagal di sini, dan dulu hasilnya null.
+        if (!deeper) return HASH.test(value) ? value : null;
+        ref = deeper[1].trim();
     }
 
-    for (const base of refDirs) {
+    return null;
+}
+
+/**
+ * Isi sebuah ref — berkas longgar lebih dulu, lalu `packed-refs` — atau null.
+ *
+ * Ref biasa (`refs/heads/*`, `refs/tags/*`, ...) dicari HANYA di common dir:
+ * git tidak pernah menyelesaikannya di direktori privat worktree, dan berkas
+ * sisa di sana (mis. dari restore) akan memenangkan ref yang sebenarnya.
+ */
+function readRef(gitDir, commonDir, ref) {
+    const bases = commonDir !== gitDir && !WORKTREE_PRIVATE_REF.test(ref) ? [commonDir] : [gitDir];
+
+    for (const base of bases) {
+        try { return fs.readFileSync(path.join(base, ref), "utf8").trim(); }
+        catch { /* belum dilonggarkan di sini — mungkin hanya ada di packed-refs */ }
+    }
+
+    for (const base of bases) {
         try {
             for (const line of fs.readFileSync(path.join(base, "packed-refs"), "utf8").split("\n")) {
                 if (line.startsWith("#") || line.startsWith("^")) continue;
