@@ -120,7 +120,11 @@ function objectIdHexLength(commonDir) {
             for (let i = 0; i < rawValue.length; i++) {
                 const ch = rawValue[i];
                 if (quote) {
-                    if (ch === quote && rawValue[i - 1] !== "\\") quote = null;
+                    if (ch === quote) {
+                        let slashes = 0;
+                        for (let j = i - 1; j >= 0 && rawValue[j] === "\\"; j--) slashes++;
+                        if (slashes % 2 === 0) quote = null;
+                    }
                 }
                 else if (ch === "\"" || ch === "'") quote = ch;
                 else if (ch === "#" || ch === ";") {
@@ -194,7 +198,7 @@ function readGitCommit(dir) {
             // dengan git 2.55, `git rev-parse HEAD` gagal di semuanya).
             const raw = fs.readFileSync(dotGit, "utf8").split("\0")[0];
             if (!raw.startsWith("gitdir: ")) return null;
-            gitDir = path.resolve(dir, raw.slice("gitdir: ".length).replace(/\r?\n$/, ""));
+            gitDir = path.resolve(dir, raw.slice("gitdir: ".length).replace(/\r?\n$|\r$/, ""));
         }
     }
     catch {
