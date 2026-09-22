@@ -84,9 +84,11 @@ const HASH = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 // tinggal di common dir.
 const WORKTREE_PRIVATE_REF = /^refs\/(?:bisect|worktree|rewritten)\//;
 
-// git pun membatasi kedalaman rantai symbolic ref; lima langkah cukup untuk
-// bentuk yang muncul di praktik dan berhenti sebelum rantai yang dibuat-buat.
-const MAX_REF_DEPTH = 5;
+// git sendiri berhenti pada rantai symbolic ref yang lebih dalam dari ini
+// ("too many levels of symbolic refs"), jadi batasnya disamakan: rantai yang
+// git tolak harus menghasilkan null di sini juga, bukan hash yang lebih benar
+// daripada git.
+const MAX_REF_DEPTH = 4;
 
 /**
  * Commit HEAD sebuah working tree, dibaca langsung dari metadata git.
@@ -155,6 +157,11 @@ function readGitCommit(dir) {
  * Ref biasa (`refs/heads/*`, `refs/tags/*`, ...) dicari HANYA di common dir:
  * git tidak pernah menyelesaikannya di direktori privat worktree, dan berkas
  * sisa di sana (mis. dari restore) akan memenangkan ref yang sebenarnya.
+ *
+ * Ref privat worktree (`refs/bisect|worktree|rewritten/*`) hanya dibaca
+ * longgar di direktori privat worktree itu sendiri. Diukur dengan git 2.55:
+ * pada linked worktree, ref privat yang hanya ada di common dir TIDAK
+ * diselesaikan git, jadi tidak ada fallback ke sana.
  */
 function readRef(gitDir, commonDir, ref) {
     const bases = commonDir !== gitDir && !WORKTREE_PRIVATE_REF.test(ref) ? [commonDir] : [gitDir];
@@ -165,11 +172,18 @@ function readRef(gitDir, commonDir, ref) {
     }
 
     for (const base of bases) {
+        // `packed-refs` hanya diakui git di common dir. `git pack-refs --all`
+        // membiarkan ref privat tetap longgar, jadi berkas di direktori privat
+        // worktree tidak pernah dibaca git dan tidak boleh dipercaya di sini.
+        if (base !== commonDir) continue;
         try {
             for (const line of fs.readFileSync(path.join(base, "packed-refs"), "utf8").split("\n")) {
                 if (line.startsWith("#") || line.startsWith("^")) continue;
+                // Tanpa dirapikan: baris yang rusak (CRLF, spasi ekstra) ditolak
+                // git seluruhnya, jadi memperbaikinya di sini berarti menerima
+                // ref yang git sendiri tidak mau selesaikan.
                 const [hash, name] = line.split(" ");
-                if (name && name.trim() === ref && HASH.test(hash.trim())) return hash.trim();
+                if (name === ref && HASH.test(hash)) return hash;
             }
         }
         catch { /* tidak ada packed-refs di sini */ }
