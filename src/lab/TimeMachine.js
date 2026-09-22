@@ -106,20 +106,27 @@ function objectIdHexLength(commonDir) {
         for (const line of config.split(/\r?\n/)) {
             const trimmed = line.trim();
             if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith(";")) continue;
-            const section = /^\[([^\]]+)\]/.exec(trimmed);
+            const section = /^\[([^\]]+)\]\s*$/.exec(trimmed);
+            if (trimmed.startsWith("[") && !section) return null;
             if (section) {
                 inExtensions = section[1].trim().toLowerCase() === "extensions";
                 inCore = section[1].trim().toLowerCase() === "core";
                 continue;
             }
-            const setting = /^\s*([^=\s]+)\s*=\s*(.*)$/i.exec(line);
-            if (!setting) continue;
+            const setting = /^\s*([A-Za-z][A-Za-z0-9-]*)\s*(?:=\s*(.*))?$/i.exec(line);
+            if (!setting) return null;
             const key = setting[1].toLowerCase();
-            let rawValue = setting[2].trim();
+            let rawValue = (setting[2] ?? "true").trim();
             let quote = null;
             for (let i = 0; i < rawValue.length; i++) {
                 const ch = rawValue[i];
                 if (quote) {
+                    if (ch === "\\") {
+                        const escaped = rawValue[i + 1];
+                        if (escaped === undefined || !/[ntbr"\\]/.test(escaped)) return null;
+                        i++;
+                        continue;
+                    }
                     if (ch === quote) {
                         let slashes = 0;
                         for (let j = i - 1; j >= 0 && rawValue[j] === "\\"; j--) slashes++;
@@ -132,7 +139,7 @@ function objectIdHexLength(commonDir) {
                     break;
                 }
             }
-            if (quote) continue;
+            if (quote) return null;
             const value = rawValue.replace(/"/g, "").toLowerCase();
             if (inCore && key === "repositoryformatversion" && /^\d+$/.test(value)) {
                 repositoryFormatVersion = Number(value);
@@ -240,6 +247,7 @@ function readGitCommit(dir) {
     catch { return null; }
 
     const hexLength = objectIdHexLength(commonDir);
+    if (hexLength === null) return null;
 
     const symbolic = /^ref:\s*(.+)$/.exec(head);
     if (!symbolic) return commitHash(head, hexLength);
