@@ -28,7 +28,7 @@ const KALI = "damar.kali";
 const MEDIA_OPS = Object.freeze(["resolve", "download"]);
 const DESKTOP_OPS = Object.freeze(["openApp", "fillForm", "typeText", "pressKey", "listWindows", "moveMouse", "click"]);
 const BACKUP_OPS = Object.freeze(["copy"]);
-const KALI_OPS = Object.freeze(["run"]);
+const KALI_OPS = Object.freeze(["run", "which", "tools", "status"]);
 
 const DESKTOP_APPS = Object.freeze({
     notepad: "notepad.exe",
@@ -216,7 +216,18 @@ async function backupDriver({ parameters }) {
     return { outcome: "EXECUTED", ok: true, source, dest, code, binding: { source, dest }, verificationClass: "destination-exists" };
 }
 
-async function kaliDriver({ parameters }) {
+async function kaliDriver({ operation, parameters }) {
+    if (operation === "which") {
+        const tool = stringArg(parameters, "tool", 128).replace(/[^\w.-]/g, "");
+        const result = await kaliBridge.which(tool);
+        return { outcome: "EXECUTED", ok: true, operation: "which", tool, path: result };
+    }
+    if (operation === "tools") {
+        return { outcome: "EXECUTED", ...(await kaliBridge.tools()), operation: "tools" };
+    }
+    if (operation === "status") {
+        return { outcome: "EXECUTED", ...(await kaliBridge.status()), operation: "status" };
+    }
     const request = shellCommand(parameters);
     const result = await kaliBridge.run(request.command, { cwd: request.cwd, timeout: request.timeout });
     return {
@@ -246,6 +257,16 @@ function wireEmbodimentCapabilities({ registrar } = {}) {
         requireObject(args, "action arguments");
         if (id === MEDIA) return Object.freeze([`video:${videoId(args)}`]);
         if (id === BACKUP) return Object.freeze([`source:${safePath(args.source)}`, `dest:${safePath(args.dest)}`]);
+        if (id === KALI) {
+            if (op === "status" || op === "tools") return Object.freeze([`kali:${op}`]);
+            if (op === "which") return Object.freeze([`tool:${stringArg(args, "tool", 128).replace(/[^\w.-]/g, "")}`]);
+            const request = shellCommand(args);
+            return Object.freeze([
+                `command-sha256:${crypto.createHash("sha256").update(request.command).digest("hex")}`,
+                `cwd:${request.cwd ?? "<default>"}`,
+                `timeout:${request.timeout}`
+            ]);
+        }
         return Object.freeze([`desktop:${op}`]);
     } });
     const scopeBindings = { [MEDIA]: {}, [DESKTOP]: {}, [BACKUP]: {}, [KALI]: {} };
@@ -275,7 +296,7 @@ function wireEmbodimentActuators({ actuatorRegistry, wiring } = {}) {
     bindings.push(actuatorRegistry.register({ capabilityId: MEDIA, operations: MEDIA_OPS, capabilityIncarnationId: wiring.media.incarnationId, actuatorId: "act-damar-media", invoke: async ({ executionId, operation, parameters }) => { const result = await mediaDriver({ operation, parameters }); remember(executionId, result); return result; } }));
     bindings.push(actuatorRegistry.register({ capabilityId: DESKTOP, operations: DESKTOP_OPS, capabilityIncarnationId: wiring.desktop.incarnationId, actuatorId: "act-damar-desktop", invoke: async ({ executionId, operation, parameters }) => { const result = await desktopDriver({ operation, parameters }); remember(executionId, result); return result; } }));
     bindings.push(actuatorRegistry.register({ capabilityId: BACKUP, operations: BACKUP_OPS, capabilityIncarnationId: wiring.backup.incarnationId, actuatorId: "act-damar-backup", invoke: async ({ executionId, parameters }) => { const result = await backupDriver({ parameters }); remember(executionId, result); return result; } }));
-    bindings.push(actuatorRegistry.register({ capabilityId: KALI, operations: KALI_OPS, capabilityIncarnationId: wiring.kali.incarnationId, actuatorId: "act-damar-kali", invoke: async ({ executionId, parameters }) => { const result = await kaliDriver({ parameters }); remember(executionId, result); return result; } }));
+    bindings.push(actuatorRegistry.register({ capabilityId: KALI, operations: KALI_OPS, capabilityIncarnationId: wiring.kali.incarnationId, actuatorId: "act-damar-kali", invoke: async ({ executionId, operation, parameters }) => { const result = await kaliDriver({ operation, parameters }); remember(executionId, result); return result; } }));
     return Object.freeze(bindings);
 }
 
@@ -315,6 +336,8 @@ function wireEmbodimentVerifiers({ wiring } = {}) {
         }),
         definition(KALI, KALI_OPS, wiring.kali, (ctx) => {
             const result = observations.get(ctx.executionId) ?? {};
+            if (ctx.operation === "status" || ctx.operation === "tools") return { operation: ctx.operation, completed: result.outcome === "EXECUTED" };
+            if (ctx.operation === "which") return { operation: "which", toolMatches: result.tool === ctx.parameters?.tool?.replace(/[^\w.-]/g, ""), completed: result.outcome === "EXECUTED" };
             const requested = shellCommand(ctx.parameters ?? {});
             const digest = crypto.createHash("sha256").update(requested.command).digest("hex");
             return {

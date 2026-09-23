@@ -34,7 +34,10 @@ async function downloadMedia(videoId, context = null) {
         expectedPostcondition: { expect: { exists: { op: "eq", value: true }, bytes: { op: "gt", value: 0 }, bindingMatches: { op: "eq", value: true } } }
     });
     if (result.outcome !== "COMPLETED") return null;
-    return path.join(CACHE_DIR, `${id}.mp4`);
+    const bytes = Number(result.evidenceSummary?.observedEvidence?.bytes ?? 0);
+    return Number.isSafeInteger(bytes) && bytes > 0
+        ? path.join(CACHE_DIR, `${id}.mp4`)
+        : null;
 }
 
 module.exports = Object.freeze({ resolveStream, downloadMedia, CACHE_DIR });
