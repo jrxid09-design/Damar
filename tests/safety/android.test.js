@@ -16,10 +16,12 @@ const { androidTools } = require("../../src/android/tools");
  */
 
 test("android_devices tak error saat tak ada HP (adb terpasang)", async () => {
+    // IW1: the adapter is deny-until-ratified, so with no owner grant it
+    // refuses before any ADB process and reports a denial, never a throw.
     const r = await adb.devices();
-    // adb ada → { ok, devices, count }. Tak ada adb → { ok:false, error }.
-    if (r.ok) { assert.ok(Array.isArray(r.devices)); assert.equal(typeof r.count, "number"); }
-    else { assert.match(r.error, /.+/); }
+    assert.equal(r.ok, false);
+    assert.equal(typeof r.reason, "string");
+    assert.ok(r.reason.length > 0);
 });
 
 test("aksi HP tergolong destruktif — lewat gerbang konfirmasi", () => {
@@ -46,8 +48,13 @@ test("tool Android terdaftar dan profil selektor ada", () => {
 });
 
 test("android_key menambah prefix KEYCODE_ dan menyaring input", async () => {
-    // Tanpa HP → resolveSerial melempar; ditangkap jadi { ok:false }.
-    const r = await androidTools().find(t => t.name === "android_key").execute({ keycode: "home" });
-    assert.equal(typeof r.ok, "boolean");
-    if (!r.ok) assert.match(r.error || "", /perangkat|device|Tak ada/i);
+    // The tool still normalises KEYCODE_ before the capability request, and
+    // without an owner grant the request is denied before any device is touched.
+    const tool = androidTools().find(t => t.name === "android_key");
+    const r = await tool.execute({ keycode: "home" });
+    assert.equal(r.ok, false);
+    assert.equal(r.denied, true);
+    const { shellCommand } = require("../../src/manager/internal/adbCapabilities");
+    assert.equal(shellCommand("key", { keycode: "KEYCODE_HOME" }), "input keyevent KEYCODE_HOME");
+    assert.equal(shellCommand("key", { keycode: "home;id" }), "input keyevent homeid");
 });

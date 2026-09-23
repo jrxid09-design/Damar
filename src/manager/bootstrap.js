@@ -316,6 +316,21 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
       return require("./internal/identityCapabilities").isIdentityCapabilityRuntime(runtime);
   }
 
+  /** W8-IW1 — Manager-owned accessor for the ADB capability runtime.
+   *  Android tools are INGRESS, NEVER AUTHORITY. This accessor grants nothing:
+   *  the runtime authorizes exclusively through the canonical evaluator. */
+  function getAdbCapabilityRuntime() {
+      return require("./internal/adbCapabilities").adbRuntime();
+  }
+
+  function installAdbCapabilityRuntime(runtime) {
+      return require("./internal/adbCapabilities").installAdbCapabilityRuntime(runtime);
+  }
+
+  function isAdbCapabilityRuntime(runtime) {
+      return require("./internal/adbCapabilities").isAdbCapabilityRuntime(runtime);
+  }
+
   module.exports = Object.freeze({
       createDamarManager,
       createDamarManagerIngressDomain,
@@ -325,7 +340,10 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
       installCliCapabilityRuntime,
       getIdentityCapabilityRuntime,
       installIdentityCapabilityRuntime,
-      isIdentityCapabilityRuntime
+      isIdentityCapabilityRuntime,
+      getAdbCapabilityRuntime,
+      installAdbCapabilityRuntime,
+      isAdbCapabilityRuntime
       // R4-04/DB-02: no wave6 install/seam primitive is exported from the
       // public manager surface. The privileged wave6Adapter dependency is
       // captured lexically inside createDamarManager() (moved to

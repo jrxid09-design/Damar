@@ -1,31 +1,31 @@
 {
   "schemaVersion": 1,
-  "sha": "0b3904dc346e0d002ec4c4f9d55a1a29116e9a8a",
-  "measured_source_sha": "0b3904dc346e0d002ec4c4f9d55a1a29116e9a8a",
-  "generator_head_sha": "0b3904dc346e0d002ec4c4f9d55a1a29116e9a8a",
+  "sha": "3fe8648f75f5654321d0973aab83a3ed408576e0",
+  "measured_source_sha": "3fe8648f75f5654321d0973aab83a3ed408576e0",
+  "generator_head_sha": "3fe8648f75f5654321d0973aab83a3ed408576e0",
   "sha_meaning": "measured_source_sha = the git HEAD the census read (the tree these counters describe). generator_head_sha = the HEAD the generator ran in; because the generator always writes its output, the commit carrying this file is normally the NEXT commit. `sha` is kept as an alias of measured_source_sha for older consumers.",
   "generatedFrom": "scripts/wave8-census.js",
   "counters": {
-    "LEGACY_SECOND_PATH": 132,
-    "ACTION_CAPABLE_UNGOVERNED": 46,
+    "LEGACY_SECOND_PATH": 131,
+    "ACTION_CAPABLE_UNGOVERNED": 45,
     "UNCLASSIFIED_LEGACY_REACHABILITY": 0,
-    "GOVERNED_SINK_SITES": 62,
-    "REACHABLE_MODULES": 756,
+    "GOVERNED_SINK_SITES": 63,
+    "REACHABLE_MODULES": 757,
     "LAUNCHER_SINK_SITES": 3,
     "PRODUCTION_INGRESSES_ANALYZED": 2,
     "INGRESSES_WITH_UNGOVERNED_FINDINGS": 1
   },
   "reconciliation": {
-    "raw_sink_count": 132,
-    "manifest_row_count": 132,
-    "unique_module_count": 50,
-    "unique_row_id_count": 132,
+    "raw_sink_count": 131,
+    "manifest_row_count": 131,
+    "unique_module_count": 49,
+    "unique_row_id_count": 131,
     "production_ingresses_analyzed": 2,
     "ungoverned_findings_by_ingress": {
       "src/cli/index.js": 0,
-      "src/server.js": 132
+      "src/server.js": 131
     },
-    "action_capable_count": 46,
+    "action_capable_count": 45,
     "advisory_count": 86,
     "unclassified_count": 0,
     "census_findings_without_manifest_row": 0,
@@ -38,15 +38,15 @@
     ],
     "ungovernedByIngress": {
       "src/cli/index.js": 0,
-      "src/server.js": 132
+      "src/server.js": 131
     },
     "governedByIngress": {
-      "src/cli/index.js": 62,
-      "src/server.js": 62
+      "src/cli/index.js": 63,
+      "src/server.js": 63
     },
     "reachableModulesByIngress": {
-      "src/cli/index.js": 242,
-      "src/server.js": 753
+      "src/cli/index.js": 243,
+      "src/server.js": 754
     }
   },
   "unclassified": [],
@@ -133,11 +133,11 @@
     },
     {
       "id": "C8-DEVICE-BRIDGES",
-      "hits": 4,
-      "action_capable": 4,
-      "files": 4,
+      "hits": 3,
+      "action_capable": 3,
+      "files": 3,
       "max_risk": "P0",
-      "priority": 4
+      "priority": 3
     },
     {
       "id": "C9-AI-TOOL-DISPATCH",
@@ -455,37 +455,6 @@
       "execution_path": "src/server.js -> src/services/aiRuntimeService.js -> src/ai/index.js -> src/ai/builder/AIBuilder.js -> src/ai/runtime/AIRuntime.js -> src/ai/executors/index.js -> src/ai/executors/RuntimeExecutor.js -> src/ai/tools/ToolExecutor.js",
       "hops": 7,
       "cluster": "C9-AI-TOOL-DISPATCH",
-      "risk": "P0",
-      "symbol": "RECON_REQUIRED",
-      "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
-      "capability_family": "RECON_REQUIRED",
-      "operation_type": "RECON_REQUIRED",
-      "authority_source": "RECON_REQUIRED",
-      "verification_mechanism": "RECON_REQUIRED",
-      "audit_mechanism": "RECON_REQUIRED",
-      "replay_durability": "RECON_REQUIRED",
-      "canonical_migration_destination": "RECON_REQUIRED",
-      "required_tests": "RECON_REQUIRED",
-      "classification": "H_UNKNOWN_REQUIRES_RECON",
-      "migration_status": "PENDING"
-    },
-    {
-      "id": "src/android/adb.js:1:22:process_shell",
-      "census_category": "LEGACY_SECOND_PATH",
-      "source_file": "src/android/adb.js",
-      "line": 1,
-      "column": 22,
-      "kind": "process_shell",
-      "snippet": "require(\"node:child_process\")",
-      "action_capable": true,
-      "consequential": "YES",
-      "entrypoint": "src/server.js",
-      "ingresses": [
-        "src/server.js"
-      ],
-      "execution_path": "src/server.js -> src/services/aiRuntimeService.js -> src/android/tools.js -> src/android/adb.js",
-      "hops": 3,
-      "cluster": "C8-DEVICE-BRIDGES",
       "risk": "P0",
       "symbol": "RECON_REQUIRED",
       "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
