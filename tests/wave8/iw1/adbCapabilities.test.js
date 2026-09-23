@@ -210,6 +210,19 @@ test("adb/binding: a grant for both devices still rejects a request that declare
     assert.equal(fx.calls[0].args[1], "DEV2");
 });
 
+test("adb/binding: an omitted serial plus a declared device is a contradiction, not a discovery", async () => {
+    const fx = execDouble("List of devices attached\nDEV2 device\n");
+    const runtime = withSubstrate({ authorityStore: grantStore(GRANT), acknowledge: ack, execFileImpl: fx.exec });
+    // The only plugged-in device is DEV2. Declaring DEV1 and naming no serial must
+    // not fall through to discovery and drive DEV2, even under an unscoped grant.
+    const result = await runtime.execute({
+        operation: "shell", parameters: { command: "id" }, scope: ["device:DEV1"]
+    });
+    assert.equal(result.outcome, "REFUSED");
+    assert.equal(result.reason, "DEVICE_CONTRADICTED");
+    assert.equal(fx.calls.length, 0);
+});
+
 test("adb/binding: an unscoped grant still cannot drive a device the caller did not declare", async () => {
     const fx = execDouble("ok\n");
     const runtime = withSubstrate({ authorityStore: grantStore(GRANT), acknowledge: ack, execFileImpl: fx.exec });
