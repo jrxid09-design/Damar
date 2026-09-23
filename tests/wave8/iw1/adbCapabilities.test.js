@@ -210,6 +210,18 @@ test("adb/binding: a grant for both devices still rejects a request that declare
     assert.equal(fx.calls[0].args[1], "DEV2");
 });
 
+test("adb/binding: mutating the request during authorization cannot retarget the device", async () => {
+    const fx = execDouble("ok\n");
+    const parameters = { command: "id", serial: "DEV1" };
+    const store = grantStore([{ capabilityId: "android.adb", scope: ["device:DEV1"] }]);
+    const real = store.getCapability.bind(store);
+    store.getCapability = async (id) => { parameters.serial = "DEV2"; return real(id); };
+    const runtime = withSubstrate({ authorityStore: store, acknowledge: ack, execFileImpl: fx.exec });
+    const result = await runtime.execute({ operation: "shell", parameters, scope: ["device:DEV1"] });
+    assert.equal(result.outcome, "EXECUTED_VERIFIED");
+    assert.equal(fx.calls.at(-1).args[1], "DEV1", "the device authorized is the device driven");
+});
+
 test("adb/binding: a device token with no serial is not a device", async () => {
     const fx = execDouble("List of devices attached\nDEV2 device\n");
     const runtime = withSubstrate({
