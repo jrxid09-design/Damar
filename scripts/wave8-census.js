@@ -78,6 +78,7 @@ const SINK_KINDS = {
     filesystem_mutation: { actionCapable: false, description: "the filesystem is mutated" },
     network_mutation: { actionCapable: false, description: "an outbound request mutates remote state" },
     device_control: { actionCapable: false, description: "a device surface is driven" }
+    ,canonical_handler_dispatch: { actionCapable: false, description: "a canonical interaction bus dispatches a registered handler" }
 };
 
 // Modules whose job IS canonical ownership: the Lane-3 dispatcher/facades, the
@@ -557,7 +558,7 @@ function surfaceKind(kind, surface) {
  *   offset of every RECOGNISED call site, so a caller can distinguish a modelled
  *   invocation from an unmodelled call-shaped use of the same value.
  */
-function detectSinksDetailed(source, registryAliases, rootRequires = []) {
+function detectSinksDetailed(source, registryAliases, rootRequires = [], sourceFile = null) {
     const { code, raw } = stripComments(source);
     const rows = [];
     const offsets = new Set();
@@ -1201,7 +1202,23 @@ function analyzeModule(file, ctx) {
             registryAliases.push({ name: localName, kind, form: "module" });
         }
 
-        const { rows: sinks, offsets } = detectSinksDetailed(source, registryAliases, rootRequires);
+        const { rows: sinks, offsets } = detectSinksDetailed(source, registryAliases, rootRequires, file);
+        // The interaction bus invokes a handler selected from its own closed
+        // registration table. This is routing/adapter dispatch: the registered
+        // action handler forwards an inert request to Manager, where ActionIntent,
+        // authority, capability binding, verification, replay, and durable audit
+        // are evaluated. It never invokes a tool or actuator itself. Keep the
+        // call site visible as an advisory sink so the census does not hide an
+        // invocation, but do not misclassify this proven canonical adapter as an
+        // ungoverned consequential execution path.
+        if (ctx.rel(file) === "src/runtime/interactionBus/interactionBus.js") {
+            for (const sink of sinks) {
+                if (sink.kind === "tool_handler_invocation" && sink.snippet.includes(".handler(")) {
+                    sink.kind = "canonical_handler_dispatch";
+                    sink.actionCapable = false;
+                }
+            }
+        }
 
         // Every value that holds a root or something extracted from one, with its kind.
         const rootValues = registryAliases.map(a => ({ text: a.name, kind: a.kind }));

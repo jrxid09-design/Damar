@@ -970,3 +970,17 @@ test("census: a member call on the execution-surface name family is visible (aud
     assertClean(run(tree("const o = { handler: 1 };\nconst v = o.handler;\n")),
         "a property read is not an invocation");
 });
+
+test("census: interaction bus handler dispatch is visible but not an ungoverned actuator", () => {
+    const report = run({
+        "src/server.js": 'require("./runtime/interactionBus/interactionBus.js");\n',
+        "src/runtime/interactionBus/interactionBus.js":
+            "function dispatch(resolved, record, handlerContext) {\n" +
+            "  const outcome = resolved.handler(record.envelope, handlerContext);\n" +
+            "  return outcome;\n" +
+            "}\nmodule.exports = { dispatch };\n"
+    });
+    assert.equal(report.counters.LEGACY_SECOND_PATH, 1, "the dispatch remains represented");
+    assert.equal(report.counters.ACTION_CAPABLE_UNGOVERNED, 0, "canonical bus routing is not an actuator authority");
+    assert.equal(report.findings[0].kind, "canonical_handler_dispatch");
+});
