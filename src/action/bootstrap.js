@@ -767,12 +767,51 @@ function canonicalAuditPort() {
     const composition = require("../authority/productionComposition").getProductionAuthorityComposition();
     const ownerTrust = composition?.ownerTrust;
     if (!ownerTrust || ownerTrust.durable !== true || typeof ownerTrust.auditGate?.audit !== "function") return null;
-    return ownerTrust.auditGate.audit;
+    return { audit: ownerTrust.auditGate.audit, ledger: ownerTrust.ledger };
+}
+
+let canonicalReplayStore = undefined;
+function resolveCanonicalReplayStore() {
+    if (canonicalReplayStore !== undefined) return canonicalReplayStore;
+    try {
+        const port = canonicalAuditPort();
+        if (!port || typeof port.audit !== "function" || !port.ledger || typeof port.ledger.list !== "function") return null;
+        const { createCanonicalReplayLedger } = require("../manager/internal/canonicalReplayLedger");
+        const anchor = {
+            read() {
+                const rows = port.ledger.list({ eventType: "action.replay.anchor" }, { order: "desc", limit: 1 });
+                const metadata = rows[0]?.metadata;
+                return {
+                    seq: Number.isSafeInteger(metadata?.replaySeq) ? metadata.replaySeq : 0,
+                    token: typeof metadata?.replayEventHmac === "string" ? metadata.replayEventHmac : null
+                };
+            },
+            commit(seq, eventHmac) {
+                port.audit({
+                    eventType: "action.replay.anchor",
+                    source: "canonicalAction",
+                    metadata: { replaySeq: seq, replayEventHmac: eventHmac }
+                });
+            }
+        };
+        const path = require("node:path");
+        const os = require("node:os");
+        canonicalReplayStore = createCanonicalReplayLedger({
+            file: process.env.DAMAR_ACTION_REPLAY_DB || path.join(os.homedir(), ".damar", "canonical-action-replay.sqlite"),
+            rollbackAnchor: anchor
+        });
+    } catch {
+        // Missing substrate/dependency remains a hard fail-closed condition;
+        // do not replace it with an in-memory replay map.
+        return null;
+    }
+    return canonicalReplayStore;
 }
 
 function prepareCanonicalExecution(entry = {}) {
     try {
-        const audit = canonicalAuditPort();
+        const port = canonicalAuditPort();
+        const audit = port?.audit;
         if (typeof audit !== "function") return { ok: false, reason: "DURABLE_AUDIT_UNAVAILABLE" };
         audit({
             eventType: "action.execution.reserve",
@@ -792,7 +831,8 @@ function prepareCanonicalExecution(entry = {}) {
 
 function acknowledgeCanonicalExecution(entry = {}) {
     try {
-        const audit = canonicalAuditPort();
+        const port = canonicalAuditPort();
+        const audit = port?.audit;
         if (typeof audit !== "function") return { ok: false, reason: "AUDIT_GATE_UNAVAILABLE" };
         audit({
             eventType: "action.execution.ack",
@@ -1536,7 +1576,8 @@ function composeDispatcher3({
     actuatorRegistry,
     clock = { nowMs: () => Date.now() },
     timeoutMs = DEFAULT_TIMEOUT3,
-    auditAcknowledger = null
+    auditAcknowledger = null,
+    replayStoreResolver = null
 } = {}) {
     if (!lane2Facade || typeof lane2Facade.admit !== "function" || typeof lane2Facade.evaluate !== "function") {
         throw fail3(REASONS3.MALFORMED_REQUEST, "dispatcher requires the Lane 2 facade (admit + evaluate)");
@@ -1549,6 +1590,9 @@ function composeDispatcher3({
     }
     if (auditAcknowledger !== null && typeof auditAcknowledger !== "function") {
         throw fail3(REASONS3.MALFORMED_REQUEST, "auditAcknowledger must be a function");
+    }
+    if (replayStoreResolver !== null && typeof replayStoreResolver !== "function") {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "replayStoreResolver must be a function");
     }
     if (typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < MIN_TIMEOUT3 || timeoutMs > MAX_TIMEOUT3) {
         throw fail3(REASONS3.INVALID_TIMEOUT_CONFIG, `timeoutMs must be in [${MIN_TIMEOUT3}, ${MAX_TIMEOUT3}]`);
@@ -1877,6 +1921,8 @@ function composeDispatcher3({
 
         let cancelledDuringDispatch = false;
         let invocationCount = 0;
+        let activeReplayStore = null;
+        let activeReplayBinding = null;
 
         // The actuator receives a FROZEN, brand-recognized GATED request on its
         // first argument: it is a derived artifact of the authorized request,
@@ -1900,6 +1946,33 @@ function composeDispatcher3({
         // actuator. If the canonical durable audit root is not installed, the
         // effect must not start.
         if (auditAcknowledger !== null) {
+            const replayStore = replayStoreResolver === null ? null : replayStoreResolver();
+            if (!replayStore || typeof replayStore.reserve !== "function" || typeof replayStore.transition !== "function") {
+                lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+                const refused = buildExecutionResult3({ executionRequest: request, state: RESULT_STATE3.FAILED, lifecycleTrace: lifecycle.trace, startedAtMs: dispatchStartMs, completedAtMs: canonicalClockNow3(), failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION, failureDetail: "durable replay substrate unavailable" });
+                noteCompleted(contentKey, { result: refused, request, intentId: request.intentId });
+                return refused;
+            }
+            const replayBinding = { digest: contentKey, capabilityId: request.capabilityId, operation: request.operation, principal: request.principal, scope: request.scope, authorityGeneration: request.authorityGeneration, driverId: binding.actuatorId };
+            let reservation;
+            try { reservation = await replayStore.reserve(replayBinding); } catch { reservation = null; }
+            if (!reservation || reservation.reserved !== true) {
+                lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+                const refused = buildExecutionResult3({ executionRequest: request, state: RESULT_STATE3.FAILED, lifecycleTrace: lifecycle.trace, startedAtMs: dispatchStartMs, completedAtMs: canonicalClockNow3(), failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION, failureDetail: "durable replay reservation denied" });
+                noteCompleted(contentKey, { result: refused, request, intentId: request.intentId });
+                return refused;
+            }
+            try { await replayStore.transition(contentKey, replayStore.STATES.INVOKING, replayBinding); } catch {
+                lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+                const refused = buildExecutionResult3({ executionRequest: request, state: RESULT_STATE3.FAILED, lifecycleTrace: lifecycle.trace, startedAtMs: dispatchStartMs, completedAtMs: canonicalClockNow3(), failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION, failureDetail: "durable replay invocation reservation failed" });
+                noteCompleted(contentKey, { result: refused, request, intentId: request.intentId });
+                return refused;
+            }
+            // The reservation is the duplicate barrier. The completion state
+            // is best-effort after the physical attempt; failure remains
+            // ambiguous and never re-opens the digest for execution.
+            activeReplayStore = replayStore;
+            activeReplayBinding = replayBinding;
             const prepared = prepareCanonicalExecution({
                 capabilityId: request.capabilityId,
                 operation: request.operation,
@@ -2087,6 +2160,7 @@ function composeDispatcher3({
                 noteCompleted(contentKey, { result: denied, request, intentId: request.intentId });
                 return denied;
             }
+            try { await activeReplayStore?.transition(contentKey, activeReplayStore.STATES.EXECUTED_UNVERIFIED, activeReplayBinding); } catch { /* duplicate barrier remains reserved */ }
         }
         lifecycle.advance(LIFECYCLE3.EXECUTED, canonicalClockNow3());
         const result = buildExecutionResult3({
@@ -2183,7 +2257,8 @@ function createCanonicalActuationFacade() {
             lane2Facade,
             actuatorRegistry,
             clock: { nowMs: () => Date.now() },
-            auditAcknowledger: acknowledgeCanonicalExecution
+            auditAcknowledger: acknowledgeCanonicalExecution,
+            replayStoreResolver: resolveCanonicalReplayStore
         });
         // Downstream receives ONLY execute + the two PURE brand-recognition
         // predicates. The predicates read THIS closure's brand WeakSets
