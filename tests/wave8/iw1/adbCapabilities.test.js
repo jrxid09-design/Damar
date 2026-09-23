@@ -211,6 +211,32 @@ test("adb/binding: a grant for both devices still rejects a request that declare
     assert.equal(fx.calls[0].args[1], "DEV2");
 });
 
+test("adb/binding: the driven device is always in the scope authority evaluates", async () => {
+    const fx = execDouble("ok\n");
+    const runtime = withSubstrate({
+        authorityStore: grantStore([{ capabilityId: "android.adb", scope: ["device:DEV1", "purpose:maintenance"] }]),
+        acknowledge: ack, execFileImpl: fx.exec
+    });
+    // The caller declares only the non-device part of the scope. The device the
+    // grant names must still be what is driven, and must be authorized as such.
+    const result = await runtime.execute({
+        operation: "shell", parameters: { command: "id" }, scope: ["purpose:maintenance"]
+    });
+    assert.equal(result.outcome, "EXECUTED_VERIFIED");
+    assert.equal(fx.calls.at(-1).args[1], "DEV1");
+});
+
+test("adb/binding: connect rejects an address that is not a string", async () => {
+    const fx = execDouble("connected\n");
+    const runtime = withSubstrate({ authorityStore: grantStore(GRANT), acknowledge: ack, execFileImpl: fx.exec });
+    let n = 0;
+    const address = { toString() { return ++n === 1 ? "1.2.3.4:5555" : "9.9.9.9:5555"; } };
+    const result = await runtime.execute({ operation: "connect", parameters: { address } });
+    assert.equal(result.outcome, "REFUSED");
+    assert.equal(result.reason, "ADDRESS_MALFORMED");
+    assert.equal(fx.calls.length, 0);
+});
+
 test("adb/binding: devices lists only the device the grant names", async () => {
     const fx = execDouble("List of devices attached\nDEV1 device\nDEV2 device\n");
     const runtime = withSubstrate({
