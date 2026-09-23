@@ -5,15 +5,16 @@
 const crypto = require("node:crypto");
 const path = require("node:path");
 const drivers = require("../../services/embodimentDrivers");
-const { MEDIA, DESKTOP, BACKUP, KALI, parametersDigest, remember, requireObject, stringArg, videoId, shellCommand } = drivers;
+const { MEDIA, DESKTOP, BACKUP, KALI, ML, parametersDigest, remember, requireObject, stringArg, videoId, shellCommand } = drivers;
 const TERMINAL = "damar.terminal";
 const TERMINAL_OPS = Object.freeze(["list", "run", "restart", "read", "stop"]);
 const MEDIA_OPS = Object.freeze(["resolve", "download"]);
 const DESKTOP_OPS = Object.freeze(["openApp", "fillForm", "typeText", "pressKey", "listWindows", "moveMouse", "click"]);
 const BACKUP_OPS = Object.freeze(["copy"]);
 const KALI_OPS = Object.freeze(["run", "which", "tools", "status"]);
+const ML_OPS = Object.freeze(["probe", "run"]);
 function descriptor(id, operations, description) { return Object.freeze({ schemaVersion: 1, id, kind: "system", provider: "core", operations: Object.freeze([...operations]), requirements: Object.freeze([]), effects: Object.freeze([id]), description }); }
-const DESCRIPTORS = Object.freeze([descriptor(TERMINAL, TERMINAL_OPS, "Governed persistent terminal operations."), descriptor(MEDIA, MEDIA_OPS, "Governed media resolution and download."), descriptor(DESKTOP, DESKTOP_OPS, "Governed fixed-allowlist desktop effects."), descriptor(BACKUP, BACKUP_OPS, "Governed non-destructive source-to-destination backup copy."), descriptor(KALI, KALI_OPS, "Governed caller-defined Kali shell execution with explicit binding.")]);
+const DESCRIPTORS = Object.freeze([descriptor(TERMINAL, TERMINAL_OPS, "Governed persistent terminal operations."), descriptor(MEDIA, MEDIA_OPS, "Governed media resolution and download."), descriptor(DESKTOP, DESKTOP_OPS, "Governed fixed-allowlist desktop effects."), descriptor(BACKUP, BACKUP_OPS, "Governed non-destructive source-to-destination backup copy."), descriptor(KALI, KALI_OPS, "Governed caller-defined Kali shell execution with explicit binding."), descriptor(ML, ML_OPS, "Governed ML environment probes and experiments.")]);
 
 function wireEmbodimentCapabilities({ registrar } = {}) {
     if (!registrar || typeof registrar.register !== "function") throw new TypeError("canonical capability registrar required");
@@ -30,13 +31,14 @@ function wireEmbodimentCapabilities({ registrar } = {}) {
         if (id === MEDIA) return Object.freeze([`video:${videoId(args)}`]);
         if (id === BACKUP) return Object.freeze([`source:${path.normalize(stringArg({ value: args.source }, "value", 1024))}`, `dest:${path.normalize(stringArg({ value: args.dest }, "value", 1024))}`]);
         if (id === KALI) { if (op === "status" || op === "tools") return Object.freeze([`kali:${op}`]); if (op === "which") return Object.freeze([`tool:${stringArg(args, "tool", 128).replace(/[^\w.-]/g, "")}`]); const request = shellCommand(args); return Object.freeze([`command-sha256:${crypto.createHash("sha256").update(request.command).digest("hex")}`, `cwd:${request.cwd ?? "<default>"}`, `timeout:${request.timeout}`, `runtime:${process.platform}`, `environment:${process.env.DAMAR_KALI_DISTRO || "<detected>"}`]); }
+        if (id === ML) return Object.freeze([`ml:${op}`, `parameters-sha256:${parametersDigest(args)}`]);
         return Object.freeze([`desktop:${op}`, `parameters-sha256:${parametersDigest(args)}`]);
     } });
-    const scopeBindings = { [TERMINAL]: {}, [MEDIA]: {}, [DESKTOP]: {}, [BACKUP]: {}, [KALI]: {} };
-    for (const [id, ops] of [[TERMINAL, TERMINAL_OPS], [MEDIA, MEDIA_OPS], [DESKTOP, DESKTOP_OPS], [BACKUP, BACKUP_OPS], [KALI, KALI_OPS]]) { for (const op of ops) scopeBindings[id][op] = scope(id, op).resolver; Object.freeze(scopeBindings[id]); }
-    return Object.freeze({ terminal: record[TERMINAL], media: record[MEDIA], desktop: record[DESKTOP], backup: record[BACKUP], kali: record[KALI], scopeBindings: Object.freeze(scopeBindings) });
+    const scopeBindings = { [TERMINAL]: {}, [MEDIA]: {}, [DESKTOP]: {}, [BACKUP]: {}, [KALI]: {}, [ML]: {} };
+    for (const [id, ops] of [[TERMINAL, TERMINAL_OPS], [MEDIA, MEDIA_OPS], [DESKTOP, DESKTOP_OPS], [BACKUP, BACKUP_OPS], [KALI, KALI_OPS], [ML, ML_OPS]]) { for (const op of ops) scopeBindings[id][op] = scope(id, op).resolver; Object.freeze(scopeBindings[id]); }
+    return Object.freeze({ terminal: record[TERMINAL], media: record[MEDIA], desktop: record[DESKTOP], backup: record[BACKUP], kali: record[KALI], ml: record[ML], scopeBindings: Object.freeze(scopeBindings) });
 }
-function observeEmbodimentAvailability({ registry, wiring, availability = drivers.probeEmbodimentAvailability() } = {}) { if (!registry || typeof registry.observeAvailability !== "function" || !wiring) throw new TypeError("canonical capability registrar required"); for (const entry of [wiring.terminal, wiring.media, wiring.desktop, wiring.backup, wiring.kali].filter(Boolean)) { const state = entry.id === TERMINAL ? (availability[entry.id] === "AVAILABLE" ? "AVAILABLE" : "UNKNOWN") : (availability[entry.id] === "AVAILABLE" ? "AVAILABLE" : "UNKNOWN"); registry.observeAvailability(entry.id, state, { generation: 1, incarnationId: entry.incarnationId }); } }
+function observeEmbodimentAvailability({ registry, wiring, availability = drivers.probeEmbodimentAvailability() } = {}) { if (!registry || typeof registry.observeAvailability !== "function" || !wiring) throw new TypeError("canonical capability registrar required"); for (const entry of [wiring.terminal, wiring.media, wiring.desktop, wiring.backup, wiring.kali, wiring.ml].filter(Boolean)) { const state = entry.id === TERMINAL ? (availability[entry.id] === "AVAILABLE" ? "AVAILABLE" : "UNKNOWN") : (availability[entry.id] === "AVAILABLE" ? "AVAILABLE" : "UNKNOWN"); registry.observeAvailability(entry.id, state, { generation: 1, incarnationId: entry.incarnationId }); } }
 function wireEmbodimentActuators({ actuatorRegistry, wiring } = {}) {
     if (!actuatorRegistry || typeof actuatorRegistry.register !== "function" || !wiring) throw new TypeError("canonical actuator wiring required");
     return Object.freeze([
@@ -44,7 +46,8 @@ function wireEmbodimentActuators({ actuatorRegistry, wiring } = {}) {
         actuatorRegistry.register({ capabilityId: MEDIA, operations: MEDIA_OPS, capabilityIncarnationId: wiring.media.incarnationId, actuatorId: "act-damar-media", invoke: async ({ executionId, operation, parameters }) => { const result = await drivers.mediaDriver({ operation, parameters }); remember(executionId, result); return result; } }),
         actuatorRegistry.register({ capabilityId: DESKTOP, operations: DESKTOP_OPS, capabilityIncarnationId: wiring.desktop.incarnationId, actuatorId: "act-damar-desktop", invoke: async ({ executionId, operation, parameters }) => { const result = await drivers.desktopDriver({ operation, parameters }); const bound = { ...result, binding: { ...(result.binding ?? {}), parametersDigest: parametersDigest(parameters) } }; remember(executionId, bound); return bound; } }),
         actuatorRegistry.register({ capabilityId: BACKUP, operations: BACKUP_OPS, capabilityIncarnationId: wiring.backup.incarnationId, actuatorId: "act-damar-backup", invoke: async ({ executionId, parameters }) => { const result = await drivers.backupDriver({ parameters }); remember(executionId, result); return result; } }),
-        actuatorRegistry.register({ capabilityId: KALI, operations: KALI_OPS, capabilityIncarnationId: wiring.kali.incarnationId, actuatorId: "act-damar-kali", invoke: async ({ executionId, operation, parameters }) => { const result = await drivers.kaliDriver({ operation, parameters }); remember(executionId, result); return result; } })
+        actuatorRegistry.register({ capabilityId: KALI, operations: KALI_OPS, capabilityIncarnationId: wiring.kali.incarnationId, actuatorId: "act-damar-kali", invoke: async ({ executionId, operation, parameters }) => { const result = await drivers.kaliDriver({ operation, parameters }); remember(executionId, result); return result; } }),
+        actuatorRegistry.register({ capabilityId: ML, operations: ML_OPS, capabilityIncarnationId: wiring.ml.incarnationId, actuatorId: "act-damar-ml", invoke: async ({ executionId, operation, parameters }) => { const result = await drivers.mlDriver({ operation, parameters }); remember(executionId, result); return result; } })
     ]);
 }
 function wireEmbodimentVerifiers({ wiring } = {}) {
@@ -55,7 +58,8 @@ function wireEmbodimentVerifiers({ wiring } = {}) {
         definition(MEDIA, MEDIA_OPS, wiring.media, drivers.verifyMedia),
         definition(DESKTOP, DESKTOP_OPS, wiring.desktop, drivers.verifyDesktop),
         definition(BACKUP, BACKUP_OPS, wiring.backup, drivers.verifyBackup),
-        definition(KALI, KALI_OPS, wiring.kali, drivers.verifyKali)
+        definition(KALI, KALI_OPS, wiring.kali, drivers.verifyKali),
+        definition(ML, ML_OPS, wiring.ml, (ctx) => { const result = drivers.observation(ctx.executionId); return { operation: result.operation === ctx.operation, parametersMatch: result.binding?.parametersDigest === parametersDigest(ctx.parameters ?? {}), completed: result.outcome === "EXECUTED" }; })
     ]);
 }
-module.exports = Object.freeze({ TERMINAL, MEDIA, DESKTOP, BACKUP, KALI, TERMINAL_OPS, MEDIA_OPS, DESKTOP_OPS, BACKUP_OPS, KALI_OPS, DESCRIPTORS, wireEmbodimentCapabilities, observeEmbodimentAvailability, wireEmbodimentActuators, wireEmbodimentVerifiers });
+module.exports = Object.freeze({ TERMINAL, MEDIA, DESKTOP, BACKUP, KALI, ML, TERMINAL_OPS, MEDIA_OPS, DESKTOP_OPS, BACKUP_OPS, KALI_OPS, ML_OPS, DESCRIPTORS, wireEmbodimentCapabilities, observeEmbodimentAvailability, wireEmbodimentActuators, wireEmbodimentVerifiers });
