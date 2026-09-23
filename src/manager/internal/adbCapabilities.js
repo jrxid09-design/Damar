@@ -132,7 +132,7 @@ function parameterProblem(operation, parameters) {
     }
     switch (operation) {
         case "connect":
-            if (!/^\d{1,3}(\.\d{1,3}){3}:\d{1,5}$/.test(String(p.address ?? ""))) return "ADDRESS_MALFORMED";
+            if (typeof p.address !== "string" || !/^\d{1,3}(\.\d{1,3}){3}:\d{1,5}$/.test(p.address)) return "ADDRESS_MALFORMED";
             return null;
         case "shell":
             if (typeof p.command !== "string" || p.command.trim() === "") return "COMMAND_MALFORMED";
@@ -274,7 +274,7 @@ function createAdbCapabilityRuntime({
         // scope still has to be the one it connects to.
         if (operation === "connect") {
             const named = declared.filter(s => s.startsWith("device:"));
-            const address = `device:${parameters.address}`;
+            const address = `device:${String(parameters.address)}`;
             if (named.length === 0) {
                 const granted = grantedDevices(grantedScope);
                 return granted.length === 1 && granted[0] === address ? [address] : null;
@@ -296,7 +296,9 @@ function createAdbCapabilityRuntime({
             if (named.length > 1) return null;
             if (named.length === 1 && (granted.length !== 1 || named[0] !== granted[0])) return null;
             if (granted.length !== 1) return null;
-            return declared.length === 0 ? granted : declared;
+            // The driven device is always part of the scope authority evaluates,
+            // even when the caller declared only non-device scope.
+            return declared.includes(granted[0]) ? declared : [...declared, granted[0]];
         }
         const token = `device:${serial}`;
         const named = declared.filter(s => s.startsWith("device:"));
