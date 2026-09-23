@@ -181,7 +181,8 @@ function realDrivers(exec) {
     }
 
     return {
-        devices: async () => {
+        devices: async ({ parameters }) => {
+            const wanted = typeof parameters?.serial === "string" ? parameters.serial.trim() : "";
             const { stdout } = await run(ADB_BIN, ["devices", "-l"], OPTS);
             const devices = String(stdout || "").split(/\r?\n/).slice(1)
                 .map(l => l.trim()).filter(Boolean)
@@ -190,7 +191,8 @@ function realDrivers(exec) {
                     if (!m) return null;
                     return { serial: m[1], state: m[2], model: (m[3].match(/model:(\S+)/) || [])[1] || null };
                 })
-                .filter(Boolean);
+                .filter(Boolean)
+                .filter(d => wanted === "" || d.serial === wanted);
             return { ok: true, devices, count: devices.length };
         },
         connect: async ({ parameters }) => {
@@ -275,7 +277,14 @@ function createAdbCapabilityRuntime({
             if (named.length === 0) return declared;
             return named.length === 1 && named[0] === `device:${parameters.address}` ? declared : null;
         }
-        if (operation === "devices") return declared;
+        if (operation === "devices") {
+            const named = declared.filter(s => s.startsWith("device:"));
+            if (named.length > 1) return null;
+            if (named.length === 1) return declared;
+            const granted = grantedDevices(grantedScope);
+            if (granted.length === 1) return granted;
+            return declared;
+        }
         const serial = typeof parameters?.serial === "string" ? parameters.serial.trim() : "";
         // No serial: the device is chosen later from what is plugged in, so the
         // grant must already name exactly one device and the request may not name a
@@ -339,7 +348,7 @@ function createAdbCapabilityRuntime({
             // The grant names exactly one device and the caller named none, so that
             // device is the target. Stamped in before the driver, which otherwise
             // would discover a device on its own.
-            const boundParameters = serial === "" && granted.length === 1 && operation !== "devices" && operation !== "connect"
+            const boundParameters = serial === "" && granted.length === 1 && operation !== "connect"
                 ? { ...parameters, serial: granted[0].slice("device:".length) }
                 : parameters;
             const auth = await authorize({ identity, scope: boundScope, nowMs });
