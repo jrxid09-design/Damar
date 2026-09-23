@@ -210,6 +210,17 @@ test("adb/binding: a grant for both devices still rejects a request that declare
     assert.equal(fx.calls[0].args[1], "DEV2");
 });
 
+test("adb/binding: a device token with no serial is not a device", async () => {
+    const fx = execDouble("List of devices attached\nDEV2 device\n");
+    const runtime = withSubstrate({
+        authorityStore: grantStore([{ capabilityId: "android.adb", scope: ["device:"] }]),
+        acknowledge: ack, execFileImpl: fx.exec
+    });
+    const result = await runtime.execute({ operation: "shell", parameters: { command: "id" }, scope: ["device:"] });
+    assert.notEqual(result.outcome, "EXECUTED_VERIFIED");
+    assert.equal(fx.calls.length, 0, "an empty device token must not fall through to discovery");
+});
+
 test("adb/binding: an omitted serial plus a declared device is a contradiction, not a discovery", async () => {
     const fx = execDouble("List of devices attached\nDEV2 device\n");
     const runtime = withSubstrate({ authorityStore: grantStore(GRANT), acknowledge: ack, execFileImpl: fx.exec });
