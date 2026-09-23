@@ -1,5 +1,6 @@
 const { AITool } = require("../ai/tools");
 const auditor = require("./auditor");
+const { executeCanonicalAction, contextFromExecution } = require("../services/canonicalActionClient");
 
 /**
  * Tool insinyur keamanan — audit BERBASIS BUKTI pada aset milik pemilik.
@@ -28,7 +29,7 @@ function securityTools() {
                     maxTemuan: { type: "number", description: "Batas temuan yang dikembalikan (default 50)." }
                 }
             },
-            execute: async ({ project, maxTemuan }) => auditor.scanSecrets(project, { maxTemuan })
+            execute: async ({ project, maxTemuan }, execution) => executeCanonicalAction({ context: contextFromExecution(execution), capabilityId: "damar.security", operation: "scanSecrets", arguments: { project: project ?? null, maxTemuan: maxTemuan ?? 50 }, expectedPostcondition: { expect: { operation: { op: "eq", value: "scanSecrets" }, completed: { op: "eq", value: true } } } })
         }),
 
         new AITool({
@@ -47,7 +48,7 @@ function securityTools() {
                     maxTemuan: { type: "number", description: "Batas temuan (default 60)." }
                 }
             },
-            execute: async ({ project, files, maxTemuan }) => auditor.auditCode(project, { files, maxTemuan })
+            execute: async ({ project, files, maxTemuan }, execution) => executeCanonicalAction({ context: contextFromExecution(execution), capabilityId: "damar.security", operation: "auditCode", arguments: { project: project ?? null, files: files ?? null, maxTemuan: maxTemuan ?? 60 }, expectedPostcondition: { expect: { operation: { op: "eq", value: "auditCode" }, completed: { op: "eq", value: true } } } })
         }),
 
         new AITool({
@@ -61,7 +62,7 @@ function securityTools() {
                 type: "object",
                 properties: { project: { type: "string", description: "Path root proyek (opsional)." } }
             },
-            execute: async ({ project }) => auditor.auditDeps(project)
+            execute: async ({ project }, execution) => executeCanonicalAction({ context: contextFromExecution(execution), capabilityId: "damar.security", operation: "auditDeps", arguments: { project: project ?? null }, expectedPostcondition: { expect: { operation: { op: "eq", value: "auditDeps" }, completed: { op: "eq", value: true } } } })
         })
 
     ];
