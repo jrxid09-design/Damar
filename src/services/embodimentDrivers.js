@@ -24,6 +24,7 @@ const ML = "damar.ml";
 const CHECKPOINT = "damar.checkpoint";
 const MCP = "damar.mcp";
 const OPENCODE = "damar.opencode";
+const IMMICH = "damar.immich";
 const CACHE_DIR = path.join(os.tmpdir(), "damar-media");
 const CACHE_CAP_BYTES = 500 * 1024 * 1024;
 const DESKTOP_APPS = Object.freeze({ notepad: "notepad.exe", calculator: "calc.exe", browser: "msedge.exe", edge: "msedge.exe", chrome: "chrome.exe", code: "code" });
@@ -60,6 +61,7 @@ function probeEmbodimentAvailability() {
         [KALI]: process.platform !== "win32"
             ? (executableOnPath("bash") ? "AVAILABLE" : "UNKNOWN")
             : (wsl && fs.existsSync(wsl) && typeof process.env.DAMAR_KALI_DISTRO === "string" && process.env.DAMAR_KALI_DISTRO.trim() ? "AVAILABLE" : "UNKNOWN")
+        , [IMMICH]: executableOnPath(process.platform === "win32" ? "docker.exe" : "docker") ? "AVAILABLE" : "UNKNOWN"
     });
 }
 function mediaOutput(id) { fs.mkdirSync(CACHE_DIR, { recursive: true }); return path.join(CACHE_DIR, `${id}.mp4`); }
@@ -155,6 +157,22 @@ async function opencodeDriver({ operation, parameters = {} }) {
     if (result?.ok !== true) throw new Error(result?.error || "opencode execution failed");
     return { outcome: "EXECUTED", ok: true, operation, completed: true, output: result.output, sessionId: result.sessionId, binding: { parametersDigest: parametersDigest(parameters) } };
 }
+async function immichDriver({ operation }) {
+    const deploy = require("../services/immichDeployService");
+    if (operation === "status") {
+        const result = await deploy.statusEffect({ execFile: pexec });
+        return { outcome: "EXECUTED", ok: true, operation, completed: true, ...result, binding: { operation } };
+    }
+    if (operation === "up") {
+        const result = deploy.upEffect({ spawnProcess: spawn });
+        return { outcome: "EXECUTED_UNVERIFIED", ok: true, operation, completed: false, uncertain: true, ...result, binding: { operation } };
+    }
+    if (operation === "down") {
+        const result = await deploy.downEffect({ execFile: pexec });
+        return { outcome: result.stopped === true ? "EXECUTED" : "EXECUTED_UNVERIFIED", ok: true, operation, completed: result.stopped === true, uncertain: result.stopped !== true, ...result, binding: { operation } };
+    }
+    throw new Error("unsupported Immich operation");
+}
 
 function verifyMedia(ctx) { const result = observation(ctx.executionId); if (ctx.operation === "download") { const output = typeof result.output === "string" ? result.output : ""; return { binding: result.videoId, bindingMatches: result.videoId === ctx.parameters?.videoId, exists: Boolean(output && fs.existsSync(output) && fs.statSync(output).size > 0), bytes: output && fs.existsSync(output) ? fs.statSync(output).size : 0 }; } const requestedId = typeof ctx.parameters?.videoId === "string" ? ctx.parameters.videoId : null; return { binding: result.videoId, bindingMatches: result.videoId === requestedId, url: typeof result.url === "string" && /^https?:\/\//.test(result.url) ? result.url : null }; }
 function independentlyListDesktopWindows() {
@@ -170,4 +188,4 @@ function verifyDesktop(ctx) { const result = observation(ctx.executionId); const
 function verifyBackup(ctx) { const result = observation(ctx.executionId); const source = typeof ctx.parameters?.source === "string" ? path.normalize(ctx.parameters.source) : null; const dest = typeof ctx.parameters?.dest === "string" ? path.normalize(ctx.parameters.dest) : null; return { source: result.source, dest: result.dest, sourceMatches: source !== null && result.source === source, destMatches: dest !== null && result.dest === dest, exists: Boolean(result.dest && fs.existsSync(result.dest) && fs.statSync(result.dest).isDirectory()), commandOk: result.ok === true }; }
 function verifyKali(ctx) { const result = observation(ctx.executionId); if (ctx.operation === "status" || ctx.operation === "tools") return { operation: ctx.operation, completed: result.outcome === "EXECUTED" }; if (ctx.operation === "which") return { operation: "which", toolMatches: result.tool === ctx.parameters?.tool?.replace(/[^\w.-]/g, ""), completed: result.outcome === "EXECUTED" }; const requested = shellCommand(ctx.parameters ?? {}); const digest = crypto.createHash("sha256").update(requested.command).digest("hex"); return { commandDigestMatches: result.binding?.commandDigest === digest, cwdMatches: result.cwd === requested.cwd, timeoutMatches: result.timeout === requested.timeout, runtimeMatches: result.binding?.runtime === process.platform, environmentMatches: result.binding?.environment === (process.env.DAMAR_KALI_DISTRO || "<detected>"), commandOk: result.ok === true && Number(result.code ?? 0) === 0, code: Number.isSafeInteger(result.code) ? result.code : null }; }
 
-module.exports = Object.freeze({ CACHE_DIR, TERMINAL, MEDIA, DESKTOP, BACKUP, KALI, ML, CHECKPOINT, MCP, OPENCODE, parametersDigest, remember, observation, requireObject, stringArg, videoId, shellCommand, probeEmbodimentAvailability, mediaDriver, desktopDriver, backupDriver, kaliDriver, terminalDriver, mlDriver, checkpointDriver, mcpDriver, opencodeDriver, verifyMedia, verifyDesktop, verifyBackup, verifyKali });
+module.exports = Object.freeze({ CACHE_DIR, TERMINAL, MEDIA, DESKTOP, BACKUP, KALI, ML, CHECKPOINT, MCP, OPENCODE, IMMICH, parametersDigest, remember, observation, requireObject, stringArg, videoId, shellCommand, probeEmbodimentAvailability, mediaDriver, desktopDriver, backupDriver, kaliDriver, terminalDriver, mlDriver, checkpointDriver, mcpDriver, opencodeDriver, immichDriver, verifyMedia, verifyDesktop, verifyBackup, verifyKali });

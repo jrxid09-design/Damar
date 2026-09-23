@@ -44,17 +44,17 @@ class NasController {
     // ---- Immich (app center) -------------------------------------
 
     async immichStatus(req, res, next) {
-        try { return response.success(res, "Immich status", await immichDeploy.status()); }
+        try { return response.success(res, "Immich status", await immichDeploy.status(req.authIdentity ?? null)); }
         catch (error) { next(error); }
     }
 
     async immichUp(req, res, next) {
-        try { return response.success(res, "Immich dinyalakan", immichDeploy.up()); }
+        try { return response.success(res, "Immich dinyalakan", await immichDeploy.up(req.authIdentity ?? null)); }
         catch (error) { return response.error(res, error.message, 400); }
     }
 
     async immichDown(req, res, next) {
-        try { return response.success(res, "Immich dimatikan", await immichDeploy.down()); }
+        try { return response.success(res, "Immich dimatikan", await immichDeploy.down(req.authIdentity ?? null)); }
         catch (error) { return response.error(res, error.message, 400); }
     }
 

@@ -1,11 +1,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { execFile, spawn } = require("node:child_process");
-const { promisify } = require("node:util");
 const nas = require("./nasService");
 const telemetry = require("./telemetryService");
-
-const pexec = promisify(execFile);
+const { executeCanonicalAction, contextFromExecution } = require("./canonicalActionClient");
 
 /**
  * immichDeployService — MEMASANG & mengelola Immich sebagai container
@@ -80,11 +77,12 @@ function parsePs(stdout) {
     return t.split("\n").filter(Boolean).map(l => JSON.parse(l));
 }
 
-async function status() {
+async function statusEffect({ execFile: runExecFile } = {}) {
+    if (typeof runExecFile !== "function") throw new Error("immich requires canonical process actuator");
     const root = dataRoot();
     const poolSet = Boolean(nas.config().pool);
     try {
-        const { stdout } = await pexec("docker", ["compose", "-f", COMPOSE, "ps", "--format", "json"], OPTS);
+        const { stdout } = await runExecFile("docker", ["compose", "-f", COMPOSE, "ps", "--format", "json"], OPTS);
         const services = parsePs(stdout).map(s => ({ name: s.Service || s.Name, state: s.State || s.Status || "" }));
         const running = services.filter(s => /running|up|healthy/i.test(s.state)).length;
         return { available: true, poolSet, installed: services.length > 0, running, services, url: URL, dataRoot: root, libraryRoot: libraryRoot() };
@@ -95,19 +93,52 @@ async function status() {
 }
 
 /** Pasang/nyalakan (pull + up -d) di latar; kembali segera (pull bisa lama). */
-function up() {
+function upEffect({ spawnProcess } = {}) {
+    if (typeof spawnProcess !== "function") throw new Error("immich requires canonical process actuator");
     if (!nas.config().pool) throw new Error("Pilih disk pool NAS dulu sebelum memasang Immich.");
     writeEnv();
-    const p = spawn("docker", ["compose", "-f", COMPOSE, "up", "-d"], { cwd: DIR, windowsHide: true, detached: true, stdio: "ignore" });
+    const p = spawnProcess("docker", ["compose", "-f", COMPOSE, "up", "-d"], { cwd: DIR, windowsHide: true, detached: true, stdio: "ignore" });
     p.on("error", e => telemetry.warn(`[immich] up gagal: ${e.message}`));
     p.unref();
     telemetry.info("[immich] menyalakan stack (docker compose up -d)…");
     return { starting: true, note: "Immich sedang disiapkan (unduh image bisa beberapa menit). Pantau status." };
 }
 
-async function down() {
-    await pexec("docker", ["compose", "-f", COMPOSE, "down"], { ...OPTS, timeout: 60000 });
-    return { stopped: true };
+async function downEffect({ execFile: runExecFile } = {}) {
+    if (typeof runExecFile !== "function") throw new Error("immich requires canonical process actuator");
+    await runExecFile("docker", ["compose", "-f", COMPOSE, "down"], { ...OPTS, timeout: 60000 });
+    const observed = await statusEffect({ execFile: runExecFile });
+    return { ...observed, stopped: observed.available === true && observed.running === 0 };
 }
 
-module.exports = { status, up, down, dataRoot, libraryRoot, externalRoot };
+async function status(execution = null) {
+    return executeCanonicalAction({
+        context: contextFromExecution(execution),
+        capabilityId: "damar.immich",
+        operation: "status",
+        arguments: {},
+        expectedPostcondition: { expect: { operation: { op: "eq", value: "status" }, completed: { op: "eq", value: true } } }
+    });
+}
+
+async function up(execution = null) {
+    return executeCanonicalAction({
+        context: contextFromExecution(execution),
+        capabilityId: "damar.immich",
+        operation: "up",
+        arguments: {},
+        expectedPostcondition: { expect: { operation: { op: "eq", value: "up" }, completed: { op: "eq", value: true } } }
+    });
+}
+
+async function down(execution = null) {
+    return executeCanonicalAction({
+        context: contextFromExecution(execution),
+        capabilityId: "damar.immich",
+        operation: "down",
+        arguments: {},
+        expectedPostcondition: { expect: { operation: { op: "eq", value: "down" }, completed: { op: "eq", value: true } } }
+    });
+}
+
+module.exports = { status, up, down, statusEffect, upEffect, downEffect, dataRoot, libraryRoot, externalRoot };
