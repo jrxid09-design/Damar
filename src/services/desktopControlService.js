@@ -24,8 +24,7 @@ function action(operation, parameters, context) {
 }
 
 function openApp(name, args = "", context = null) {
-    if (args !== "") return Promise.resolve({ outcome: "INVALID_REQUEST", reason: "OPEN_APP_ARGS_NOT_SUPPORTED_BY_ALLOWLIST" });
-    return action("openApp", { name }, context);
+    return action("openApp", { name, args }, context);
 }
 function typeText(text, context = null) { return action("typeText", { text }, context); }
 function pressKey(key, context = null) { return action("pressKey", { key }, context); }
