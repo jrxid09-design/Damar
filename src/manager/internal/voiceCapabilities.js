@@ -73,7 +73,8 @@ function readParameters(operation, parameters) {
             return out;
         case "play":
             out.player = p.player;
-            out.audio = isBytes(p.audio) ? Buffer.from(p.audio) : p.audio;
+            const audio = p.audio;
+            out.audio = isBytes(audio) ? Buffer.from(audio) : audio;
             if (!PLAYERS.includes(out.player)) return "PLAYER_UNKNOWN";
             if (!isBytes(out.audio) || out.audio.length === 0) return "AUDIO_MALFORMED";
             return out;
