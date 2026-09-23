@@ -235,6 +235,25 @@ test("voice/audit: acknowledgement failure cannot become success", async () => {
     assert.equal(fx.calls.length, 1);
 });
 
+test("voice/synthesis: an unratified call starts no edge-tts, and the text is one argv", async () => {
+    const calls = [];
+    const exec = async (cmd, args) => { calls.push({ cmd, args }); return { stdout: "" }; };
+    const unratified = createVoiceCapabilityRuntime({ replayStore: createRollbackResistantLedger(), execFileImpl: exec });
+    const refused = await unratified.execute({ operation: "synthesize", parameters: { text: "halo", voice: "id-ID-ArdiNeural" } });
+    assert.equal(refused.denied, true);
+    assert.equal(calls.length, 0);
+
+    const runtime = withSubstrate({ authorityStore: grantStore(GRANT), acknowledge: ack, execFileImpl: exec });
+    const bad = await runtime.execute({ operation: "synthesize", parameters: { text: "halo; id", voice: "not a voice" } });
+    assert.equal(bad.outcome, "REFUSED");
+    assert.equal(bad.reason, "VOICE_MALFORMED");
+
+    await runtime.execute({ operation: "synthesize", parameters: { text: "halo; id", voice: "id-ID-ArdiNeural" } });
+    assert.equal(calls.length, 1, "the text reached edge-tts exactly once");
+    assert.equal(calls[0].cmd, "edge-tts");
+    assert.equal(calls[0].args[3], "halo; id", "the text is one argument, not a shell command");
+});
+
 test("voice/legacy: the production adapters cannot play without a grant", async () => {
     const { AudioOutput } = require("../../../src/voice/providers/audioOutput.js");
     const output = new AudioOutput({ backend: "cli" });

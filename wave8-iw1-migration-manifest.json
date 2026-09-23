@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "sha": "4506557d50607a3eb7db3bbfa1c97cd81e456711",
-  "measured_source_sha": "4506557d50607a3eb7db3bbfa1c97cd81e456711",
-  "generator_head_sha": "4506557d50607a3eb7db3bbfa1c97cd81e456711",
+  "sha": "fe107701ebdda81249920839bdcd2a73814d8642",
+  "measured_source_sha": "fe107701ebdda81249920839bdcd2a73814d8642",
+  "generator_head_sha": "fe107701ebdda81249920839bdcd2a73814d8642",
   "sha_meaning": "measured_source_sha = the git HEAD the census read (the tree these counters describe). generator_head_sha = the HEAD the generator ran in; because the generator always writes its output, the commit carrying this file is normally the NEXT commit. `sha` is kept as an alias of measured_source_sha for older consumers.",
   "generatedFrom": "scripts/wave8-census.js",
   "counters": {
-    "LEGACY_SECOND_PATH": 120,
-    "ACTION_CAPABLE_UNGOVERNED": 37,
+    "LEGACY_SECOND_PATH": 118,
+    "ACTION_CAPABLE_UNGOVERNED": 36,
     "UNCLASSIFIED_LEGACY_REACHABILITY": 0,
     "GOVERNED_SINK_SITES": 64,
     "REACHABLE_MODULES": 758,
@@ -16,17 +16,17 @@
     "INGRESSES_WITH_UNGOVERNED_FINDINGS": 1
   },
   "reconciliation": {
-    "raw_sink_count": 120,
-    "manifest_row_count": 120,
-    "unique_module_count": 47,
-    "unique_row_id_count": 120,
+    "raw_sink_count": 118,
+    "manifest_row_count": 118,
+    "unique_module_count": 46,
+    "unique_row_id_count": 118,
     "production_ingresses_analyzed": 2,
     "ungoverned_findings_by_ingress": {
       "src/cli/index.js": 0,
-      "src/server.js": 120
+      "src/server.js": 118
     },
-    "action_capable_count": 37,
-    "advisory_count": 83,
+    "action_capable_count": 36,
+    "advisory_count": 82,
     "unclassified_count": 0,
     "census_findings_without_manifest_row": 0,
     "manifest_rows_without_census_evidence": 0
@@ -38,7 +38,7 @@
     ],
     "ungovernedByIngress": {
       "src/cli/index.js": 0,
-      "src/server.js": 120
+      "src/server.js": 118
     },
     "governedByIngress": {
       "src/cli/index.js": 64,
@@ -181,11 +181,11 @@
     },
     {
       "id": "C4-SERVICES-ACTUATION",
-      "hits": 37,
-      "action_capable": 10,
-      "files": 12,
+      "hits": 35,
+      "action_capable": 9,
+      "files": 11,
       "max_risk": "P0",
-      "priority": 37
+      "priority": 35
     },
     {
       "id": "C14-UNCLUSTERED-ADVISORY",
@@ -3763,68 +3763,6 @@
       ],
       "execution_path": "src/server.js -> src/autonomy/index.js -> src/autonomy/SkillFactory.js -> src/services/toolForge.js",
       "hops": 3,
-      "cluster": "C4-SERVICES-ACTUATION",
-      "risk": "P2",
-      "symbol": "RECON_REQUIRED",
-      "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
-      "capability_family": "RECON_REQUIRED",
-      "operation_type": "RECON_REQUIRED",
-      "authority_source": "RECON_REQUIRED",
-      "verification_mechanism": "RECON_REQUIRED",
-      "audit_mechanism": "RECON_REQUIRED",
-      "replay_durability": "RECON_REQUIRED",
-      "canonical_migration_destination": "RECON_REQUIRED",
-      "required_tests": "RECON_REQUIRED",
-      "classification": "H_UNKNOWN_REQUIRES_RECON",
-      "migration_status": "PENDING"
-    },
-    {
-      "id": "src/services/voiceService.js:4:22:process_shell",
-      "census_category": "LEGACY_SECOND_PATH",
-      "source_file": "src/services/voiceService.js",
-      "line": 4,
-      "column": 22,
-      "kind": "process_shell",
-      "snippet": "require(\"node:child_process\")",
-      "action_capable": true,
-      "consequential": "YES",
-      "entrypoint": "src/server.js",
-      "ingresses": [
-        "src/server.js"
-      ],
-      "execution_path": "src/server.js -> src/app.js -> src/routes/index.js -> src/routes/api/v1/index.js -> src/routes/api/v1/companion.js -> src/companion/deviceController.js -> src/services/voiceService.js",
-      "hops": 6,
-      "cluster": "C4-SERVICES-ACTUATION",
-      "risk": "P1",
-      "symbol": "RECON_REQUIRED",
-      "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
-      "capability_family": "RECON_REQUIRED",
-      "operation_type": "RECON_REQUIRED",
-      "authority_source": "RECON_REQUIRED",
-      "verification_mechanism": "RECON_REQUIRED",
-      "audit_mechanism": "RECON_REQUIRED",
-      "replay_durability": "RECON_REQUIRED",
-      "canonical_migration_destination": "RECON_REQUIRED",
-      "required_tests": "RECON_REQUIRED",
-      "classification": "H_UNKNOWN_REQUIRES_RECON",
-      "migration_status": "PENDING"
-    },
-    {
-      "id": "src/services/voiceService.js:50:15:filesystem_mutation",
-      "census_category": "LEGACY_SECOND_PATH",
-      "source_file": "src/services/voiceService.js",
-      "line": 50,
-      "column": 15,
-      "kind": "filesystem_mutation",
-      "snippet": "fs.rmSync(",
-      "action_capable": false,
-      "consequential": "NO",
-      "entrypoint": "src/server.js",
-      "ingresses": [
-        "src/server.js"
-      ],
-      "execution_path": "src/server.js -> src/app.js -> src/routes/index.js -> src/routes/api/v1/index.js -> src/routes/api/v1/companion.js -> src/companion/deviceController.js -> src/services/voiceService.js",
-      "hops": 6,
       "cluster": "C4-SERVICES-ACTUATION",
       "risk": "P2",
       "symbol": "RECON_REQUIRED",
