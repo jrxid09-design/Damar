@@ -12,6 +12,10 @@ const { promisify } = require("node:util");
 const kaliBridge = require("../kali/bridge");
 
 const pexec = promisify(execFile);
+const MEDIA = "damar.media";
+const DESKTOP = "damar.desktop";
+const BACKUP = "damar.backup";
+const KALI = "damar.kali";
 const CACHE_DIR = path.join(os.tmpdir(), "damar-media");
 const CACHE_CAP_BYTES = 500 * 1024 * 1024;
 const DESKTOP_APPS = Object.freeze({ notepad: "notepad.exe", calculator: "calc.exe", browser: "msedge.exe", edge: "msedge.exe", chrome: "chrome.exe", code: "code" });
@@ -26,6 +30,29 @@ function finiteCoord(parameters, key) { const value = Number(parameters?.[key]);
 function videoId(parameters) { const id = stringArg(parameters, "videoId", 32).trim(); if (!/^[A-Za-z0-9_-]{11}$/.test(id)) throw new Error("invalid videoId"); return id; }
 function shellCommand(parameters) { const command = stringArg(parameters, "command", 1024).trim(); const cwd = parameters?.cwd == null ? null : stringArg(parameters, "cwd", 1024); const timeout = parameters?.timeout == null ? 300000 : Number(parameters.timeout); if (!Number.isSafeInteger(timeout) || timeout < 1000 || timeout > 600000) throw new Error("invalid timeout"); return { command, cwd, timeout }; }
 function mediaBin() { return process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"; }
+function executableOnPath(names) {
+    const candidates = Array.isArray(names) ? names : [names];
+    const pathEntries = String(process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+    return candidates.some(name => pathEntries.some(dir => fs.existsSync(path.join(dir, name))));
+}
+function probeEmbodimentAvailability() {
+    const powershell = process.platform === "win32"
+        ? path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+        : null;
+    const wsl = process.platform === "win32"
+        ? path.join(process.env.SystemRoot || "C:\\Windows", "System32", "wsl.exe")
+        : null;
+    return Object.freeze({
+        [MEDIA]: executableOnPath([mediaBin(), "yt-dlp"]) ? "AVAILABLE" : "UNKNOWN",
+        [DESKTOP]: (powershell ? fs.existsSync(powershell) : executableOnPath("powershell")) ? "AVAILABLE" : "UNKNOWN",
+        [BACKUP]: process.platform === "win32"
+            ? (executableOnPath("robocopy.exe") || fs.existsSync(path.join(process.env.SystemRoot || "C:\\Windows", "System32", "robocopy.exe")) ? "AVAILABLE" : "UNKNOWN")
+            : (executableOnPath("rsync") ? "AVAILABLE" : "UNKNOWN"),
+        [KALI]: process.platform !== "win32"
+            ? (executableOnPath("bash") ? "AVAILABLE" : "UNKNOWN")
+            : (wsl && fs.existsSync(wsl) && typeof process.env.DAMAR_KALI_DISTRO === "string" && process.env.DAMAR_KALI_DISTRO.trim() ? "AVAILABLE" : "UNKNOWN")
+    });
+}
 function mediaOutput(id) { fs.mkdirSync(CACHE_DIR, { recursive: true }); return path.join(CACHE_DIR, `${id}.mp4`); }
 function pruneMediaCache() {
     try {
@@ -86,4 +113,4 @@ function verifyDesktop(ctx) { const result = observation(ctx.executionId); retur
 function verifyBackup(ctx) { const result = observation(ctx.executionId); const source = typeof ctx.parameters?.source === "string" ? path.normalize(ctx.parameters.source) : null; const dest = typeof ctx.parameters?.dest === "string" ? path.normalize(ctx.parameters.dest) : null; return { source: result.source, dest: result.dest, sourceMatches: source !== null && result.source === source, destMatches: dest !== null && result.dest === dest, exists: Boolean(result.dest && fs.existsSync(result.dest) && fs.statSync(result.dest).isDirectory()), commandOk: result.ok === true }; }
 function verifyKali(ctx) { const result = observation(ctx.executionId); if (ctx.operation === "status" || ctx.operation === "tools") return { operation: ctx.operation, completed: result.outcome === "EXECUTED" }; if (ctx.operation === "which") return { operation: "which", toolMatches: result.tool === ctx.parameters?.tool?.replace(/[^\w.-]/g, ""), completed: result.outcome === "EXECUTED" }; const requested = shellCommand(ctx.parameters ?? {}); const digest = crypto.createHash("sha256").update(requested.command).digest("hex"); return { commandDigestMatches: result.binding?.commandDigest === digest, cwdMatches: result.cwd === requested.cwd, timeoutMatches: result.timeout === requested.timeout, runtimeMatches: result.binding?.runtime === process.platform, environmentMatches: result.binding?.environment === (process.env.DAMAR_KALI_DISTRO || "<detected>"), commandOk: result.ok === true && Number(result.code ?? 0) === 0, code: Number.isSafeInteger(result.code) ? result.code : null }; }
 
-module.exports = Object.freeze({ CACHE_DIR, MEDIA: "damar.media", DESKTOP: "damar.desktop", BACKUP: "damar.backup", KALI: "damar.kali", parametersDigest, remember, observation, requireObject, stringArg, videoId, shellCommand, mediaDriver, desktopDriver, backupDriver, kaliDriver, verifyMedia, verifyDesktop, verifyBackup, verifyKali });
+module.exports = Object.freeze({ CACHE_DIR, MEDIA, DESKTOP, BACKUP, KALI, parametersDigest, remember, observation, requireObject, stringArg, videoId, shellCommand, probeEmbodimentAvailability, mediaDriver, desktopDriver, backupDriver, kaliDriver, verifyMedia, verifyDesktop, verifyBackup, verifyKali });

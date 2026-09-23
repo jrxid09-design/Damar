@@ -28,7 +28,7 @@ function wireEmbodimentCapabilities({ registrar } = {}) {
     for (const [id, ops] of [[MEDIA, MEDIA_OPS], [DESKTOP, DESKTOP_OPS], [BACKUP, BACKUP_OPS], [KALI, KALI_OPS]]) { for (const op of ops) scopeBindings[id][op] = scope(id, op).resolver; Object.freeze(scopeBindings[id]); }
     return Object.freeze({ media: record[MEDIA], desktop: record[DESKTOP], backup: record[BACKUP], kali: record[KALI], scopeBindings: Object.freeze(scopeBindings) });
 }
-function observeEmbodimentAvailability({ registry, wiring, availability = {} } = {}) { if (!registry || typeof registry.observeAvailability !== "function" || !wiring) throw new TypeError("canonical capability registry required"); for (const entry of [wiring.media, wiring.desktop, wiring.backup, wiring.kali]) { const state = availability[entry.id] === "AVAILABLE" ? "AVAILABLE" : "UNKNOWN"; registry.observeAvailability(entry.id, state, { generation: 1, incarnationId: entry.incarnationId }); } }
+function observeEmbodimentAvailability({ registry, wiring, availability = drivers.probeEmbodimentAvailability() } = {}) { if (!registry || typeof registry.observeAvailability !== "function" || !wiring) throw new TypeError("canonical capability registry required"); for (const entry of [wiring.media, wiring.desktop, wiring.backup, wiring.kali]) { const state = availability[entry.id] === "AVAILABLE" ? "AVAILABLE" : "UNKNOWN"; registry.observeAvailability(entry.id, state, { generation: 1, incarnationId: entry.incarnationId }); } }
 function wireEmbodimentActuators({ actuatorRegistry, wiring } = {}) {
     if (!actuatorRegistry || typeof actuatorRegistry.register !== "function" || !wiring) throw new TypeError("canonical actuator wiring required");
     return Object.freeze([

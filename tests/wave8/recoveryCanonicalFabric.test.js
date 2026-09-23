@@ -34,13 +34,14 @@ test("recovery wiring uses the existing canonical composition and has no private
     assert.doesNotMatch(wiring, /loadAndEvaluateAuthority\s*\(/);
 });
 
-test("embodiment availability never defaults to AVAILABLE without an observation", () => {
+test("embodiment availability stays unknown without an explicit probe result", () => {
     const wiring = require("../../src/action/capabilities/embodimentWiring");
     const entries = ["media", "desktop", "backup", "kali"].map((key) => ({ id: `damar.${key}`, incarnationId: `${key}-incarnation` }));
     const observed = [];
     wiring.observeEmbodimentAvailability({
         registry: { observeAvailability: (...args) => observed.push(args) },
-        wiring: Object.fromEntries(entries.map((entry, index) => [["media", "desktop", "backup", "kali"][index], entry]))
+        wiring: Object.fromEntries(entries.map((entry, index) => [["media", "desktop", "backup", "kali"][index], entry])),
+        availability: {}
     });
     assert.deepEqual(observed.map(([, state]) => state), ["UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"]);
 });
