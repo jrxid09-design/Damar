@@ -34,6 +34,17 @@ test("recovery wiring uses the existing canonical composition and has no private
     assert.doesNotMatch(wiring, /loadAndEvaluateAuthority\s*\(/);
 });
 
+test("embodiment availability never defaults to AVAILABLE without an observation", () => {
+    const wiring = require("../../src/action/capabilities/embodimentWiring");
+    const entries = ["media", "desktop", "backup", "kali"].map((key) => ({ id: `damar.${key}`, incarnationId: `${key}-incarnation` }));
+    const observed = [];
+    wiring.observeEmbodimentAvailability({
+        registry: { observeAvailability: (...args) => observed.push(args) },
+        wiring: Object.fromEntries(entries.map((entry, index) => [["media", "desktop", "backup", "kali"][index], entry]))
+    });
+    assert.deepEqual(observed.map(([, state]) => state), ["UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"]);
+});
+
 test("canonical production facades retain least-privilege surfaces after recovery wiring", () => {
     const bootstrap = require("../../src/action/bootstrap");
     assert.deepEqual(Object.keys(bootstrap.createCanonicalActuationFacade()).sort(), [
@@ -43,6 +54,13 @@ test("canonical production facades retain least-privilege surfaces after recover
         "compensate", "isCanonicalCompensationPlan", "isCanonicalVerificationRequest",
         "isCanonicalVerificationResult", "verify"
     ]);
+});
+
+test("production server composes authority before opening the listening socket", () => {
+    const source = fs.readFileSync(path.join(ROOT, "src/server.js"), "utf8");
+    assert.match(source, /async function listen\(/);
+    assert.match(source, /await require\("\.\/authority\/productionComposition"\)\.ensureProductionAuthorityComposed\(\)/);
+    assert.ok(source.indexOf("ensureProductionAuthorityComposed") < source.indexOf("server = app.listen"));
 });
 
 test("recovered service adapters fail closed without Manager context and own no process launcher", async () => {
