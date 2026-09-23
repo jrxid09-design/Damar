@@ -174,7 +174,8 @@ async function desktopDriver({ operation, parameters }) {
     const y = parameters?.y == null ? null : finiteCoord(parameters, "y");
     if ((x == null) !== (y == null)) throw new Error("mouse coordinates must be paired");
     const flags = { left: [2, 4], right: [8, 16], middle: [32, 64] }[button];
-    await psScript("$s='[DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,int e);'; Add-Type -MemberDefinition $s -Name DamarClick -Namespace Damar; [Damar.DamarClick]::mouse_event([uint32]$env:DAMAR_DOWN,0,0,0,0); [Damar.DamarClick]::mouse_event([uint32]$env:DAMAR_UP,0,0,0,0); Write-Output 'ok'", { DOWN: flags[0], UP: flags[1], X: x ?? "", Y: y ?? "" });
+    const move = x == null ? "" : "$m='[DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y);'; Add-Type -MemberDefinition $m -Name DamarClickMove -Namespace Damar; if(-not [Damar.DamarClickMove]::SetCursorPos([int]$env:DAMAR_X,[int]$env:DAMAR_Y)){throw 'SetCursorPos failed'};";
+    await psScript(`${move}$s='[DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,int e);'; Add-Type -MemberDefinition $s -Name DamarClick -Namespace Damar; [Damar.DamarClick]::mouse_event([uint32]$env:DAMAR_DOWN,0,0,0,0); [Damar.DamarClick]::mouse_event([uint32]$env:DAMAR_UP,0,0,0,0); Write-Output 'ok'`, { DOWN: flags[0], UP: flags[1], X: x ?? "", Y: y ?? "" });
     return { ok: true, operation: "click", button, x, y, verificationClass: "invocation-only" };
 }
 
