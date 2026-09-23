@@ -151,6 +151,12 @@ test("structural: gate delegates to canonical evaluator; no policy duplication",
     assert.ok(!/loadAndEvaluateAuthority\s*\(/.test(runtimeText), "runtime.js must contain no evaluation logic (vocabulary only)");
 });
 
+test("structural: AI ingress preserves opaque auth proof into canonical tool context", () => {
+    const runtimeText = fs.readFileSync(path.join(__dirname, "../../src/services/aiRuntimeService.js"), "utf8");
+    assert.match(runtimeText, /authProof:\s*exec0\?\.authProof\s*\?\?\s*baseExec\?\.authProof/,
+        "AI controller proofs must not be dropped before canonical Manager admission");
+});
+
 test("surface: no execution verbs in public API", () => {
     const api = require("../../src/action");
     const EXEC = /execute|invoke|run\b|dispatch|actuate|spawn|shell|callTool|performAction/i;

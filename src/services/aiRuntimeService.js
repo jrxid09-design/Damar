@@ -1508,6 +1508,13 @@ ${blok}` }
             channel: channel ?? baseExec?.channel ?? null,
             sessionId: sessionId ?? baseExec?.sessionId ?? `${channel ?? "local"}:${this.activePlatform?.model ?? "model"}`,
             principalId: sessionId ?? baseExec?.principalId ?? "local-owner",
+            // Preserve the opaque one-use Owner/Admin proof supplied at the
+            // authenticated ingress.  Lane 2 alone verifies it; dropping it
+            // here made canonical tool actions fail closed even when the
+            // production controller had received a valid proof.
+            ...(exec0?.authProof !== undefined || baseExec?.authProof !== undefined
+                ? { authProof: exec0?.authProof ?? baseExec?.authProof ?? null }
+                : {}),
             contextTokens: this.activeContextTokens(),
             ...(capabilitySet ? { capabilitySet } : {})
         };
