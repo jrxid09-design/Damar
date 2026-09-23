@@ -257,6 +257,19 @@ function createAdbCapabilityRuntime({
     }
     bridge.registerVerifier(capabilityId, verifier());
 
+    // The device a request actually drives must be inside the grant's scope.
+    // The caller does not get to name a scope that disagrees with parameters.serial:
+    // a grant for device:DEV1 authorizes DEV1 and nothing else.
+    function deviceScope(operation, parameters, requestedScope) {
+        const declared = Array.isArray(requestedScope) ? requestedScope.filter(s => typeof s === "string") : [];
+        if (operation === "devices" || operation === "connect") return declared;
+        const serial = typeof parameters?.serial === "string" ? parameters.serial.trim() : "";
+        if (serial === "") return declared;
+        const token = `device:${serial}`;
+        if (declared.length === 0) return [token];
+        return declared.includes(token) ? declared : [...declared, token];
+    }
+
     async function authorize({ identity = {}, scope = [], nowMs = Date.now() } = {}) {
         if (authorityStore === null || authorityStore === undefined) {
             return { allowed: false, state: STATE.OWNER_RATIFICATION_REQUIRED, reason: "AUTHORITY_UNAVAILABLE", evaluation: null };
@@ -282,7 +295,8 @@ function createAdbCapabilityRuntime({
             }
             const problem = parameterProblem(operation, parameters);
             if (problem) return { outcome: OUTCOME.REFUSED, reason: problem, capabilityId, operation };
-            const auth = await authorize({ identity, scope, nowMs });
+            const boundScope = deviceScope(operation, parameters, scope);
+            const auth = await authorize({ identity, scope: boundScope, nowMs });
             if (!auth.allowed) {
                 return {
                     ok: false, denied: true, outcome: OUTCOME.DENIED, state: auth.state,

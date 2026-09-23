@@ -159,10 +159,33 @@ test("adb/binding: principal and scope mismatch start nothing", async () => {
         authorityStore: grantStore([{ capabilityId: "android.adb", scope: ["device:DEV1"] }]),
         acknowledge: ack, execFileImpl: fx.exec
     });
-    const unscoped = await scoped.execute(shell());
-    assert.equal(unscoped.denied, true);
-    assert.equal(unscoped.reason, "CAP_SCOPE_MISMATCH");
+    // A caller-declared scope that contradicts the device it names is a mismatch,
+    // whichever of the two the grant happens to allow.
+    const contradicted = await scoped.execute({ ...shell(), scope: ["device:SOMEWHERE-ELSE"] });
+    assert.equal(contradicted.denied, true);
+    assert.equal(contradicted.reason, "CAP_SCOPE_MISMATCH");
     assert.equal(fx.calls.length, 0);
+});
+
+test("adb/binding: a grant for one device cannot drive another", async () => {
+    const fx = execDouble("ok\n");
+    const runtime = withSubstrate({
+        authorityStore: grantStore([{ capabilityId: "android.adb", scope: ["device:DEV1"] }]),
+        acknowledge: ack, execFileImpl: fx.exec
+    });
+    // The caller asserts the scope its grant satisfies while naming a different device.
+    const stolen = await runtime.execute({
+        operation: "shell", parameters: { command: "id", serial: "DEV2" }, scope: ["device:DEV1"]
+    });
+    assert.equal(stolen.denied, true);
+    assert.equal(stolen.reason, "CAP_SCOPE_MISMATCH");
+
+    const own = await runtime.execute({
+        operation: "shell", parameters: { command: "id", serial: "DEV1" }, scope: ["device:DEV1"]
+    });
+    assert.equal(own.outcome, "EXECUTED_VERIFIED");
+    assert.equal(fx.calls.length, 1);
+    assert.equal(fx.calls[0].args[1], "DEV1");
 });
 
 test("adb/binding: device identity is part of the request, so a second device is not a replay", async () => {
