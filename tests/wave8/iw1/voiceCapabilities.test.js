@@ -106,6 +106,16 @@ test("voice/authority: a ratified grant plays exactly once, with the fixed argv"
     assert.deepEqual(fx.calls[0].args.slice(0, 4), ["-nodisp", "-autoexit", "-loglevel", "quiet"]);
 });
 
+test("voice/authority: a getter cannot swap the binary between the check and the spawn", async () => {
+    const fx = spawnDouble();
+    const runtime = withSubstrate({ authorityStore: grantStore(GRANT), acknowledge: ack, spawnImpl: fx.spawn });
+    let reads = 0;
+    const parameters = { get player() { return ++reads === 1 ? "ffplay" : "sh"; }, audio: AUDIO };
+    const result = await runtime.execute({ operation: "play", parameters });
+    assert.equal(result.outcome, "EXECUTED_VERIFIED");
+    assert.equal(fx.calls[0].cmd, "ffplay", "the binary that was checked is the binary that runs");
+});
+
 test("voice/authority: a caller cannot choose the binary", async () => {
     const fx = spawnDouble();
     const runtime = withSubstrate({ authorityStore: grantStore(GRANT), acknowledge: ack, spawnImpl: fx.spawn });
