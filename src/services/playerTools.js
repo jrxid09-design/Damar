@@ -31,7 +31,7 @@ function playerTools() {
                 },
                 required: ["query"]
             },
-            execute: async ({ query, artist }) => {
+            execute: async ({ query, artist }, execution) => {
 
                 const q = artist ? `${query} ${artist}` : query;
 
@@ -52,7 +52,8 @@ function playerTools() {
                 // unduhan gagal (yt-dlp tak ada dsb), mediaId null dan
                 // Console jatuh ke embed seperti biasa.
                 const { downloadMedia } = require("./streamResolver");
-                const localPath = await downloadMedia(top.videoId);
+                const { contextFromExecution } = require("./canonicalActionClient");
+                const localPath = await downloadMedia(top.videoId, contextFromExecution(execution));
                 const mediaId = localPath ? `${top.videoId}.mp4` : null;
 
                 telemetry.publish("damar:present", {

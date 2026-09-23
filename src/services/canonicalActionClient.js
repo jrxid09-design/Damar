@@ -25,6 +25,22 @@ function contextOrNull(context) {
     return Object.freeze(out);
 }
 
+function contextFromExecution(execution = null) {
+    if (execution === null || typeof execution !== "object") return null;
+    const source = execution.ingress && typeof execution.ingress === "object"
+        ? execution.ingress : execution;
+    const channelType = source.channelType ?? source.channel ?? null;
+    const channelId = source.channelId ?? source.sessionId ?? null;
+    const sessionId = source.sessionId ?? null;
+    if (typeof channelType !== "string" || typeof channelId !== "string" || typeof sessionId !== "string") return null;
+    return contextOrNull({
+        ...source,
+        channelType,
+        channelId,
+        sessionId
+    });
+}
+
 async function executeCanonicalAction({ context, capabilityId, operation, arguments: parameters = {}, expectedPostcondition = null, signal = null } = {}) {
     const ingress = contextOrNull(context);
     if (!ingress || typeof capabilityId !== "string" || typeof operation !== "string") {
@@ -45,4 +61,4 @@ async function executeCanonicalAction({ context, capabilityId, operation, argume
     }
 }
 
-module.exports = Object.freeze({ executeCanonicalAction });
+module.exports = Object.freeze({ executeCanonicalAction, contextFromExecution });
