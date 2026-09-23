@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "sha": "1d49897fbc57a57df56a2ae960d1c5f8a1658ad0",
-  "measured_source_sha": "1d49897fbc57a57df56a2ae960d1c5f8a1658ad0",
-  "generator_head_sha": "1d49897fbc57a57df56a2ae960d1c5f8a1658ad0",
+  "sha": "812a17f484829dcf04098b39c8ea349345cdb163",
+  "measured_source_sha": "812a17f484829dcf04098b39c8ea349345cdb163",
+  "generator_head_sha": "812a17f484829dcf04098b39c8ea349345cdb163",
   "sha_meaning": "measured_source_sha = the git HEAD the census read (the tree these counters describe). generator_head_sha = the HEAD the generator ran in; because the generator always writes its output, the commit carrying this file is normally the NEXT commit. `sha` is kept as an alias of measured_source_sha for older consumers.",
   "generatedFrom": "scripts/wave8-census.js",
   "counters": {
-    "LEGACY_SECOND_PATH": 95,
-    "ACTION_CAPABLE_UNGOVERNED": 17,
+    "LEGACY_SECOND_PATH": 94,
+    "ACTION_CAPABLE_UNGOVERNED": 16,
     "UNCLASSIFIED_LEGACY_REACHABILITY": 0,
     "GOVERNED_SINK_SITES": 95,
     "REACHABLE_MODULES": 763,
@@ -16,16 +16,16 @@
     "INGRESSES_WITH_UNGOVERNED_FINDINGS": 1
   },
   "reconciliation": {
-    "raw_sink_count": 95,
-    "manifest_row_count": 95,
-    "unique_module_count": 38,
-    "unique_row_id_count": 95,
+    "raw_sink_count": 94,
+    "manifest_row_count": 94,
+    "unique_module_count": 37,
+    "unique_row_id_count": 94,
     "production_ingresses_analyzed": 2,
     "ungoverned_findings_by_ingress": {
       "src/cli/index.js": 0,
-      "src/server.js": 95
+      "src/server.js": 94
     },
-    "action_capable_count": 17,
+    "action_capable_count": 16,
     "advisory_count": 78,
     "unclassified_count": 0,
     "census_findings_without_manifest_row": 0,
@@ -38,14 +38,14 @@
     ],
     "ungovernedByIngress": {
       "src/cli/index.js": 0,
-      "src/server.js": 95
+      "src/server.js": 94
     },
     "governedByIngress": {
       "src/cli/index.js": 95,
       "src/server.js": 95
     },
     "reachableModulesByIngress": {
-      "src/cli/index.js": 293,
+      "src/cli/index.js": 294,
       "src/server.js": 760
     }
   },
@@ -123,14 +123,6 @@
     }
   ],
   "clusters": [
-    {
-      "id": "C8-DEVICE-BRIDGES",
-      "hits": 1,
-      "action_capable": 1,
-      "files": 1,
-      "max_risk": "P0",
-      "priority": 1
-    },
     {
       "id": "C10-VERIFICATION",
       "hits": 2,
@@ -2401,37 +2393,6 @@
       "hops": 2,
       "cluster": "C14-UNCLUSTERED-ADVISORY",
       "risk": "P2",
-      "symbol": "RECON_REQUIRED",
-      "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
-      "capability_family": "RECON_REQUIRED",
-      "operation_type": "RECON_REQUIRED",
-      "authority_source": "RECON_REQUIRED",
-      "verification_mechanism": "RECON_REQUIRED",
-      "audit_mechanism": "RECON_REQUIRED",
-      "replay_durability": "RECON_REQUIRED",
-      "canonical_migration_destination": "RECON_REQUIRED",
-      "required_tests": "RECON_REQUIRED",
-      "classification": "H_UNKNOWN_REQUIRES_RECON",
-      "migration_status": "PENDING"
-    },
-    {
-      "id": "src/security/auditor.js:3:22:process_shell",
-      "census_category": "LEGACY_SECOND_PATH",
-      "source_file": "src/security/auditor.js",
-      "line": 3,
-      "column": 22,
-      "kind": "process_shell",
-      "snippet": "require(\"node:child_process\")",
-      "action_capable": true,
-      "consequential": "YES",
-      "entrypoint": "src/server.js",
-      "ingresses": [
-        "src/server.js"
-      ],
-      "execution_path": "src/server.js -> src/services/aiRuntimeService.js -> src/security/tools.js -> src/security/auditor.js",
-      "hops": 3,
-      "cluster": "C8-DEVICE-BRIDGES",
-      "risk": "P0",
       "symbol": "RECON_REQUIRED",
       "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
       "capability_family": "RECON_REQUIRED",
