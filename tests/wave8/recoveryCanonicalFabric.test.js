@@ -55,6 +55,8 @@ test("recovered service adapters fail closed without Manager context and own no 
     }
     assert.match(labSource, /channelType:\s*["']console["']/);
     assert.match(labSource, /desktop\.openApp\("code", project\.dir/);
+    assert.match(labSource, /EXECUTED_UNVERIFIED/);
+    assert.doesNotMatch(labSource, /outcome\s*!==\s*["']EXECUTED["']/);
     const desktop = require("../../src/services/desktopControlService");
     const media = require("../../src/services/streamResolver");
     assert.equal((await desktop.openApp("notepad")).effectInvoked, false);
