@@ -331,6 +331,16 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
       return require("./internal/adbCapabilities").isAdbCapabilityRuntime(runtime);
   }
 
+  /** W8-IW1 — Manager-owned accessor for the voice I/O capability runtime.
+   *  Voice providers are INGRESS, NEVER AUTHORITY. This accessor grants nothing. */
+  function getVoiceCapabilityRuntime() {
+      return require("./internal/voiceCapabilities").voiceRuntime();
+  }
+
+  function installVoiceCapabilityRuntime(runtime) {
+      return require("./internal/voiceCapabilities").installVoiceCapabilityRuntime(runtime);
+  }
+
   module.exports = Object.freeze({
       createDamarManager,
       createDamarManagerIngressDomain,
@@ -343,7 +353,9 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
       isIdentityCapabilityRuntime,
       getAdbCapabilityRuntime,
       installAdbCapabilityRuntime,
-      isAdbCapabilityRuntime
+      isAdbCapabilityRuntime,
+      getVoiceCapabilityRuntime,
+      installVoiceCapabilityRuntime
       // R4-04/DB-02: no wave6 install/seam primitive is exported from the
       // public manager surface. The privileged wave6Adapter dependency is
       // captured lexically inside createDamarManager() (moved to
