@@ -1,31 +1,31 @@
 {
   "schemaVersion": 1,
-  "sha": "b60bee9b7e0cec8c41adb3e744e67099a97c19a8",
-  "measured_source_sha": "b60bee9b7e0cec8c41adb3e744e67099a97c19a8",
-  "generator_head_sha": "b60bee9b7e0cec8c41adb3e744e67099a97c19a8",
+  "sha": "dcc86750c9af8558820002abbc45cfd996c00acf",
+  "measured_source_sha": "dcc86750c9af8558820002abbc45cfd996c00acf",
+  "generator_head_sha": "dcc86750c9af8558820002abbc45cfd996c00acf",
   "sha_meaning": "measured_source_sha = the git HEAD the census read (the tree these counters describe). generator_head_sha = the HEAD the generator ran in; because the generator always writes its output, the commit carrying this file is normally the NEXT commit. `sha` is kept as an alias of measured_source_sha for older consumers.",
   "generatedFrom": "scripts/wave8-census.js",
   "counters": {
-    "LEGACY_SECOND_PATH": 100,
-    "ACTION_CAPABLE_UNGOVERNED": 22,
+    "LEGACY_SECOND_PATH": 98,
+    "ACTION_CAPABLE_UNGOVERNED": 20,
     "UNCLASSIFIED_LEGACY_REACHABILITY": 0,
-    "GOVERNED_SINK_SITES": 88,
+    "GOVERNED_SINK_SITES": 89,
     "REACHABLE_MODULES": 763,
     "LAUNCHER_SINK_SITES": 3,
     "PRODUCTION_INGRESSES_ANALYZED": 2,
     "INGRESSES_WITH_UNGOVERNED_FINDINGS": 1
   },
   "reconciliation": {
-    "raw_sink_count": 100,
-    "manifest_row_count": 100,
-    "unique_module_count": 40,
-    "unique_row_id_count": 100,
+    "raw_sink_count": 98,
+    "manifest_row_count": 98,
+    "unique_module_count": 39,
+    "unique_row_id_count": 98,
     "production_ingresses_analyzed": 2,
     "ungoverned_findings_by_ingress": {
       "src/cli/index.js": 0,
-      "src/server.js": 100
+      "src/server.js": 98
     },
-    "action_capable_count": 22,
+    "action_capable_count": 20,
     "advisory_count": 78,
     "unclassified_count": 0,
     "census_findings_without_manifest_row": 0,
@@ -38,14 +38,14 @@
     ],
     "ungovernedByIngress": {
       "src/cli/index.js": 0,
-      "src/server.js": 100
+      "src/server.js": 98
     },
     "governedByIngress": {
-      "src/cli/index.js": 88,
-      "src/server.js": 88
+      "src/cli/index.js": 89,
+      "src/server.js": 89
     },
     "reachableModulesByIngress": {
-      "src/cli/index.js": 256,
+      "src/cli/index.js": 260,
       "src/server.js": 760
     }
   },
@@ -148,20 +148,20 @@
       "priority": 4
     },
     {
+      "id": "C7-MCP-EGRESS",
+      "hits": 4,
+      "action_capable": 1,
+      "files": 3,
+      "max_risk": "P2",
+      "priority": 4
+    },
+    {
       "id": "C9-AI-TOOL-DISPATCH",
       "hits": 4,
       "action_capable": 2,
       "files": 3,
       "max_risk": "P0",
       "priority": 4
-    },
-    {
-      "id": "C7-MCP-EGRESS",
-      "hits": 6,
-      "action_capable": 3,
-      "files": 4,
-      "max_risk": "P0",
-      "priority": 6
     },
     {
       "id": "C2-TERMINAL",
@@ -1857,68 +1857,6 @@
       "migration_status": "PENDING"
     },
     {
-      "id": "src/mcp/mcpClient.js:1:19:process_shell",
-      "census_category": "LEGACY_SECOND_PATH",
-      "source_file": "src/mcp/mcpClient.js",
-      "line": 1,
-      "column": 19,
-      "kind": "process_shell",
-      "snippet": "require(\"node:child_process\")",
-      "action_capable": true,
-      "consequential": "YES",
-      "entrypoint": "src/server.js",
-      "ingresses": [
-        "src/server.js"
-      ],
-      "execution_path": "src/server.js -> src/app.js -> src/mcp/index.js -> src/mcp/mcpClient.js",
-      "hops": 3,
-      "cluster": "C7-MCP-EGRESS",
-      "risk": "P0",
-      "symbol": "RECON_REQUIRED",
-      "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
-      "capability_family": "RECON_REQUIRED",
-      "operation_type": "RECON_REQUIRED",
-      "authority_source": "RECON_REQUIRED",
-      "verification_mechanism": "RECON_REQUIRED",
-      "audit_mechanism": "RECON_REQUIRED",
-      "replay_durability": "RECON_REQUIRED",
-      "canonical_migration_destination": "RECON_REQUIRED",
-      "required_tests": "RECON_REQUIRED",
-      "classification": "H_UNKNOWN_REQUIRES_RECON",
-      "migration_status": "PENDING"
-    },
-    {
-      "id": "src/mcp/mcpClient.js:87:25:process_shell",
-      "census_category": "LEGACY_SECOND_PATH",
-      "source_file": "src/mcp/mcpClient.js",
-      "line": 87,
-      "column": 25,
-      "kind": "process_shell",
-      "snippet": "spawn(",
-      "action_capable": true,
-      "consequential": "YES",
-      "entrypoint": "src/server.js",
-      "ingresses": [
-        "src/server.js"
-      ],
-      "execution_path": "src/server.js -> src/app.js -> src/mcp/index.js -> src/mcp/mcpClient.js",
-      "hops": 3,
-      "cluster": "C7-MCP-EGRESS",
-      "risk": "P0",
-      "symbol": "RECON_REQUIRED",
-      "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
-      "capability_family": "RECON_REQUIRED",
-      "operation_type": "RECON_REQUIRED",
-      "authority_source": "RECON_REQUIRED",
-      "verification_mechanism": "RECON_REQUIRED",
-      "audit_mechanism": "RECON_REQUIRED",
-      "replay_durability": "RECON_REQUIRED",
-      "canonical_migration_destination": "RECON_REQUIRED",
-      "required_tests": "RECON_REQUIRED",
-      "classification": "H_UNKNOWN_REQUIRES_RECON",
-      "migration_status": "PENDING"
-    },
-    {
       "id": "src/memory/db/Database.js:32:13:filesystem_mutation",
       "census_category": "LEGACY_SECOND_PATH",
       "source_file": "src/memory/db/Database.js",
@@ -2508,10 +2446,10 @@
       "migration_status": "PENDING"
     },
     {
-      "id": "src/services/aiRuntimeService.js:543:46:registry_execution",
+      "id": "src/services/aiRuntimeService.js:526:46:registry_execution",
       "census_category": "LEGACY_SECOND_PATH",
       "source_file": "src/services/aiRuntimeService.js",
-      "line": 543,
+      "line": 526,
       "column": 46,
       "kind": "registry_execution",
       "snippet": "ToolRegistry.execute(",
