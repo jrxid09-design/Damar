@@ -251,7 +251,7 @@ function wireEmbodimentVerifiers({ wiring } = {}) {
         }),
         definition(DESKTOP, DESKTOP_OPS, wiring.desktop, (ctx) => {
             const result = observations.get(ctx.executionId) ?? {};
-            return { operation: ctx.operation, invoked: result.ok === true, verificationClass: result.verificationClass ?? "unknown", observed: ctx.operation === "listWindows" ? Array.isArray(result.windows) : result.ok === true };
+            return { operation: ctx.operation, invoked: result.ok === true, verificationClass: result.verificationClass ?? "unknown", windows: ctx.operation === "listWindows" && Array.isArray(result.windows) ? result.windows : undefined, observed: ctx.operation === "listWindows" ? Array.isArray(result.windows) : result.ok === true };
         }),
         definition(BACKUP, BACKUP_OPS, wiring.backup, (ctx) => {
             const result = observations.get(ctx.executionId) ?? {};
