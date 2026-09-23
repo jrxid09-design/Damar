@@ -100,7 +100,7 @@ class LabController {
                 return response.success(res, "VS Code dibuka", { dir: project.dir, result });
             }
             if (result?.outcome === "EXECUTED_UNVERIFIED") {
-                return response.success(res, "VS Code avviat; verifikasi independen belum tersedia", { dir: project.dir, result }, 202);
+                return response.success(res, "VS Code dimulai; verifikasi independen belum tersedia", { dir: project.dir, result }, 202);
             }
             return response.error(res, result?.errorReason ?? result?.detail ?? "Desktop action ditolak.", 403, result);
         }
