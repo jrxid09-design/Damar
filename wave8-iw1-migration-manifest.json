@@ -1,31 +1,31 @@
 {
   "schemaVersion": 1,
-  "sha": "a0b30df53c1c5bbdf60e814c879917da54d2a915",
-  "measured_source_sha": "a0b30df53c1c5bbdf60e814c879917da54d2a915",
-  "generator_head_sha": "a0b30df53c1c5bbdf60e814c879917da54d2a915",
+  "sha": "f5d14f65ce341d4f978dee39fd150cfa10ab40d6",
+  "measured_source_sha": "f5d14f65ce341d4f978dee39fd150cfa10ab40d6",
+  "generator_head_sha": "f5d14f65ce341d4f978dee39fd150cfa10ab40d6",
   "sha_meaning": "measured_source_sha = the git HEAD the census read (the tree these counters describe). generator_head_sha = the HEAD the generator ran in; because the generator always writes its output, the commit carrying this file is normally the NEXT commit. `sha` is kept as an alias of measured_source_sha for older consumers.",
   "generatedFrom": "scripts/wave8-census.js",
   "counters": {
-    "LEGACY_SECOND_PATH": 117,
-    "ACTION_CAPABLE_UNGOVERNED": 35,
+    "LEGACY_SECOND_PATH": 116,
+    "ACTION_CAPABLE_UNGOVERNED": 34,
     "UNCLASSIFIED_LEGACY_REACHABILITY": 0,
-    "GOVERNED_SINK_SITES": 66,
-    "REACHABLE_MODULES": 759,
+    "GOVERNED_SINK_SITES": 67,
+    "REACHABLE_MODULES": 760,
     "LAUNCHER_SINK_SITES": 3,
     "PRODUCTION_INGRESSES_ANALYZED": 2,
     "INGRESSES_WITH_UNGOVERNED_FINDINGS": 1
   },
   "reconciliation": {
-    "raw_sink_count": 117,
-    "manifest_row_count": 117,
-    "unique_module_count": 46,
-    "unique_row_id_count": 117,
+    "raw_sink_count": 116,
+    "manifest_row_count": 116,
+    "unique_module_count": 45,
+    "unique_row_id_count": 116,
     "production_ingresses_analyzed": 2,
     "ungoverned_findings_by_ingress": {
       "src/cli/index.js": 0,
-      "src/server.js": 117
+      "src/server.js": 116
     },
-    "action_capable_count": 35,
+    "action_capable_count": 34,
     "advisory_count": 82,
     "unclassified_count": 0,
     "census_findings_without_manifest_row": 0,
@@ -38,15 +38,15 @@
     ],
     "ungovernedByIngress": {
       "src/cli/index.js": 0,
-      "src/server.js": 117
+      "src/server.js": 116
     },
     "governedByIngress": {
-      "src/cli/index.js": 66,
-      "src/server.js": 66
+      "src/cli/index.js": 67,
+      "src/server.js": 67
     },
     "reachableModulesByIngress": {
-      "src/cli/index.js": 245,
-      "src/server.js": 756
+      "src/cli/index.js": 246,
+      "src/server.js": 757
     }
   },
   "unclassified": [],
@@ -181,11 +181,11 @@
     },
     {
       "id": "C4-SERVICES-ACTUATION",
-      "hits": 34,
-      "action_capable": 8,
-      "files": 11,
+      "hits": 33,
+      "action_capable": 7,
+      "files": 10,
       "max_risk": "P0",
-      "priority": 34
+      "priority": 33
     },
     {
       "id": "C14-UNCLUSTERED-ADVISORY",
@@ -3362,37 +3362,6 @@
       "hops": 5,
       "cluster": "C4-SERVICES-ACTUATION",
       "risk": "P2",
-      "symbol": "RECON_REQUIRED",
-      "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
-      "capability_family": "RECON_REQUIRED",
-      "operation_type": "RECON_REQUIRED",
-      "authority_source": "RECON_REQUIRED",
-      "verification_mechanism": "RECON_REQUIRED",
-      "audit_mechanism": "RECON_REQUIRED",
-      "replay_durability": "RECON_REQUIRED",
-      "canonical_migration_destination": "RECON_REQUIRED",
-      "required_tests": "RECON_REQUIRED",
-      "classification": "H_UNKNOWN_REQUIRES_RECON",
-      "migration_status": "PENDING"
-    },
-    {
-      "id": "src/services/desktopControlService.js:1:22:process_shell",
-      "census_category": "LEGACY_SECOND_PATH",
-      "source_file": "src/services/desktopControlService.js",
-      "line": 1,
-      "column": 22,
-      "kind": "process_shell",
-      "snippet": "require(\"node:child_process\")",
-      "action_capable": true,
-      "consequential": "YES",
-      "entrypoint": "src/server.js",
-      "ingresses": [
-        "src/server.js"
-      ],
-      "execution_path": "src/server.js -> src/services/aiRuntimeService.js -> src/services/mediaTools.js -> src/services/desktopControlService.js",
-      "hops": 3,
-      "cluster": "C4-SERVICES-ACTUATION",
-      "risk": "P0",
       "symbol": "RECON_REQUIRED",
       "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
       "capability_family": "RECON_REQUIRED",

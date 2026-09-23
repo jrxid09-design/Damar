@@ -335,6 +335,15 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
    *  Voice providers are INGRESS, NEVER AUTHORITY. This accessor grants nothing. */
   /** W8-IW1 — Manager-owned accessor for the media resolve capability.
    *  streamResolver is INGRESS, NEVER AUTHORITY. This accessor grants nothing. */
+  /** W8-IW1 — Manager-owned accessor for desktop control. Grants nothing. */
+  function getDesktopCapabilityRuntime() {
+      return require("./internal/desktopCapabilities").desktopRuntime();
+  }
+
+  function installDesktopCapabilityRuntime(runtime) {
+      return require("./internal/desktopCapabilities").installDesktopCapabilityRuntime(runtime);
+  }
+
   function getMediaCapabilityRuntime() {
       return require("./internal/mediaCapabilities").mediaRuntime();
   }
@@ -364,6 +373,8 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
       getAdbCapabilityRuntime,
       installAdbCapabilityRuntime,
       isAdbCapabilityRuntime,
+      getDesktopCapabilityRuntime,
+      installDesktopCapabilityRuntime,
       getMediaCapabilityRuntime,
       installMediaCapabilityRuntime,
       getVoiceCapabilityRuntime,
