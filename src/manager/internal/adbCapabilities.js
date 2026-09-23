@@ -315,6 +315,9 @@ function createAdbCapabilityRuntime({
 
     const runtime = {
         async execute({ operation, parameters = {}, requestId, identity = {}, scope = [], nowMs = Date.now(), signal = null } = {}) {
+            // The caller's object can be mutated while authorization awaits. One
+            // snapshot is taken before any check and is the only object used after.
+            parameters = parameters && typeof parameters === "object" ? { ...parameters } : {};
             if (!OPERATIONS.includes(operation)) {
                 return { outcome: OUTCOME.REFUSED, reason: "OPERATION_UNBOUND", capabilityId, operation };
             }
