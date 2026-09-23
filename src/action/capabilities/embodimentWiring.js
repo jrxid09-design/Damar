@@ -5,7 +5,7 @@
 const crypto = require("node:crypto");
 const path = require("node:path");
 const drivers = require("../../services/embodimentDrivers");
-const { MEDIA, DESKTOP, BACKUP, KALI, ML, CHECKPOINT, MCP, parametersDigest, remember, requireObject, stringArg, videoId, shellCommand } = drivers;
+const { MEDIA, DESKTOP, BACKUP, KALI, ML, CHECKPOINT, MCP, OPENCODE, parametersDigest, remember, requireObject, stringArg, videoId, shellCommand } = drivers;
 const TERMINAL = "damar.terminal";
 const TERMINAL_OPS = Object.freeze(["list", "run", "restart", "read", "stop"]);
 const MEDIA_OPS = Object.freeze(["resolve", "download"]);
@@ -15,8 +15,9 @@ const KALI_OPS = Object.freeze(["run", "which", "tools", "status"]);
 const ML_OPS = Object.freeze(["probe", "run"]);
 const CHECKPOINT_OPS = Object.freeze(["create"]);
 const MCP_OPS = Object.freeze(["start", "call"]);
+const OPENCODE_OPS = Object.freeze(["run"]);
 function descriptor(id, operations, description) { return Object.freeze({ schemaVersion: 1, id, kind: "system", provider: "core", operations: Object.freeze([...operations]), requirements: Object.freeze([]), effects: Object.freeze([id]), description }); }
-const DESCRIPTORS = Object.freeze([descriptor(TERMINAL, TERMINAL_OPS, "Governed persistent terminal operations."), descriptor(MEDIA, MEDIA_OPS, "Governed media resolution and download."), descriptor(DESKTOP, DESKTOP_OPS, "Governed fixed-allowlist desktop effects."), descriptor(BACKUP, BACKUP_OPS, "Governed non-destructive source-to-destination backup copy."), descriptor(KALI, KALI_OPS, "Governed caller-defined Kali shell execution with explicit binding."), descriptor(ML, ML_OPS, "Governed ML environment probes and experiments."), descriptor(CHECKPOINT, CHECKPOINT_OPS, "Governed recovery checkpoint creation."), descriptor(MCP, MCP_OPS, "Governed external MCP process and tool calls." )]);
+const DESCRIPTORS = Object.freeze([descriptor(TERMINAL, TERMINAL_OPS, "Governed persistent terminal operations."), descriptor(MEDIA, MEDIA_OPS, "Governed media resolution and download."), descriptor(DESKTOP, DESKTOP_OPS, "Governed fixed-allowlist desktop effects."), descriptor(BACKUP, BACKUP_OPS, "Governed non-destructive source-to-destination backup copy."), descriptor(KALI, KALI_OPS, "Governed caller-defined Kali shell execution with explicit binding."), descriptor(ML, ML_OPS, "Governed ML environment probes and experiments."), descriptor(CHECKPOINT, CHECKPOINT_OPS, "Governed recovery checkpoint creation."), descriptor(MCP, MCP_OPS, "Governed external MCP process and tool calls." ), descriptor(OPENCODE, OPENCODE_OPS, "Governed external coding-agent execution." )]);
 
 function wireEmbodimentCapabilities({ registrar } = {}) {
     if (!registrar || typeof registrar.register !== "function") throw new TypeError("canonical capability registrar required");
@@ -36,11 +37,12 @@ function wireEmbodimentCapabilities({ registrar } = {}) {
         if (id === ML) return Object.freeze([`ml:${op}`, `parameters-sha256:${parametersDigest(args)}`]);
         if (id === CHECKPOINT) { const scope = stringArg(args, "scope", 32); const target = stringArg(args, "target", 2048); return Object.freeze([`checkpoint-scope:${scope}`, `checkpoint-target:${target}`, `parameters-sha256:${parametersDigest(args)}`]); }
         if (id === MCP) { const serverId = op === "start" ? (args.serverId == null ? "configured" : stringArg(args, "serverId", 128)) : stringArg(args, "serverId", 128); if (op === "start") return Object.freeze([`mcp-server:${serverId}`]); const tool = stringArg(args, "tool", 256); return Object.freeze([`mcp-server:${serverId}`, `mcp-tool:${tool}`, `parameters-sha256:${parametersDigest(args.arguments ?? {})}`]); }
+        if (id === OPENCODE) { const instruction = stringArg(args, "instruction", 12000); return Object.freeze([`opencode-instruction-sha256:${crypto.createHash("sha256").update(instruction).digest("hex")}`, `opencode-dir:${String(args.dir ?? process.cwd())}`, `opencode-purpose:${String(args.purpose ?? "forge")}`]); }
         return Object.freeze([`desktop:${op}`, `parameters-sha256:${parametersDigest(args)}`]);
     } });
-    const scopeBindings = { [TERMINAL]: {}, [MEDIA]: {}, [DESKTOP]: {}, [BACKUP]: {}, [KALI]: {}, [ML]: {}, [CHECKPOINT]: {}, [MCP]: {} };
-    for (const [id, ops] of [[TERMINAL, TERMINAL_OPS], [MEDIA, MEDIA_OPS], [DESKTOP, DESKTOP_OPS], [BACKUP, BACKUP_OPS], [KALI, KALI_OPS], [ML, ML_OPS], [CHECKPOINT, CHECKPOINT_OPS], [MCP, MCP_OPS]]) { for (const op of ops) scopeBindings[id][op] = scope(id, op).resolver; Object.freeze(scopeBindings[id]); }
-    return Object.freeze({ terminal: record[TERMINAL], media: record[MEDIA], desktop: record[DESKTOP], backup: record[BACKUP], kali: record[KALI], ml: record[ML], checkpoint: record[CHECKPOINT], mcp: record[MCP], scopeBindings: Object.freeze(scopeBindings) });
+    const scopeBindings = { [TERMINAL]: {}, [MEDIA]: {}, [DESKTOP]: {}, [BACKUP]: {}, [KALI]: {}, [ML]: {}, [CHECKPOINT]: {}, [MCP]: {}, [OPENCODE]: {} };
+    for (const [id, ops] of [[TERMINAL, TERMINAL_OPS], [MEDIA, MEDIA_OPS], [DESKTOP, DESKTOP_OPS], [BACKUP, BACKUP_OPS], [KALI, KALI_OPS], [ML, ML_OPS], [CHECKPOINT, CHECKPOINT_OPS], [MCP, MCP_OPS], [OPENCODE, OPENCODE_OPS]]) { for (const op of ops) scopeBindings[id][op] = scope(id, op).resolver; Object.freeze(scopeBindings[id]); }
+    return Object.freeze({ terminal: record[TERMINAL], media: record[MEDIA], desktop: record[DESKTOP], backup: record[BACKUP], kali: record[KALI], ml: record[ML], checkpoint: record[CHECKPOINT], mcp: record[MCP], opencode: record[OPENCODE], scopeBindings: Object.freeze(scopeBindings) });
 }
 function observeEmbodimentAvailability({ registry, wiring, availability = drivers.probeEmbodimentAvailability() } = {}) { if (!registry || typeof registry.observeAvailability !== "function" || !wiring) throw new TypeError("canonical capability registrar required"); for (const entry of [wiring.terminal, wiring.media, wiring.desktop, wiring.backup, wiring.kali, wiring.ml, wiring.checkpoint].filter(Boolean)) { const state = entry.id === TERMINAL ? (availability[entry.id] === "AVAILABLE" ? "AVAILABLE" : "UNKNOWN") : (availability[entry.id] === "AVAILABLE" ? "AVAILABLE" : "UNKNOWN"); registry.observeAvailability(entry.id, state, { generation: 1, incarnationId: entry.incarnationId }); } }
 function wireEmbodimentActuators({ actuatorRegistry, wiring } = {}) {
@@ -53,7 +55,8 @@ function wireEmbodimentActuators({ actuatorRegistry, wiring } = {}) {
         actuatorRegistry.register({ capabilityId: KALI, operations: KALI_OPS, capabilityIncarnationId: wiring.kali.incarnationId, actuatorId: "act-damar-kali", invoke: async ({ executionId, operation, parameters }) => { const result = await drivers.kaliDriver({ operation, parameters }); remember(executionId, result); return result; } }),
         actuatorRegistry.register({ capabilityId: ML, operations: ML_OPS, capabilityIncarnationId: wiring.ml.incarnationId, actuatorId: "act-damar-ml", invoke: async ({ executionId, operation, parameters }) => { const result = await drivers.mlDriver({ operation, parameters }); remember(executionId, result); return result; } }),
         actuatorRegistry.register({ capabilityId: CHECKPOINT, operations: CHECKPOINT_OPS, capabilityIncarnationId: wiring.checkpoint.incarnationId, actuatorId: "act-damar-checkpoint", invoke: async ({ executionId, operation, parameters }) => { const result = await drivers.checkpointDriver({ operation, parameters }); remember(executionId, result); return result; } }),
-        actuatorRegistry.register({ capabilityId: MCP, operations: MCP_OPS, capabilityIncarnationId: wiring.mcp.incarnationId, actuatorId: "act-damar-mcp", invoke: async ({ executionId, operation, parameters }) => { const result = await drivers.mcpDriver({ operation, parameters }); remember(executionId, result); return result; } })
+        actuatorRegistry.register({ capabilityId: MCP, operations: MCP_OPS, capabilityIncarnationId: wiring.mcp.incarnationId, actuatorId: "act-damar-mcp", invoke: async ({ executionId, operation, parameters }) => { const result = await drivers.mcpDriver({ operation, parameters }); remember(executionId, result); return result; } }),
+        actuatorRegistry.register({ capabilityId: OPENCODE, operations: OPENCODE_OPS, capabilityIncarnationId: wiring.opencode.incarnationId, actuatorId: "act-damar-opencode", invoke: async ({ executionId, operation, parameters }) => { const result = await drivers.opencodeDriver({ operation, parameters }); remember(executionId, result); return result; } })
     ]);
 }
 function wireEmbodimentVerifiers({ wiring } = {}) {
@@ -67,7 +70,8 @@ function wireEmbodimentVerifiers({ wiring } = {}) {
         definition(KALI, KALI_OPS, wiring.kali, drivers.verifyKali),
         definition(ML, ML_OPS, wiring.ml, (ctx) => { const result = drivers.observation(ctx.executionId); return { operation: result.operation === ctx.operation, parametersMatch: result.binding?.parametersDigest === parametersDigest(ctx.parameters ?? {}), completed: result.outcome === "EXECUTED" }; }),
         definition(CHECKPOINT, CHECKPOINT_OPS, wiring.checkpoint, (ctx) => { const result = drivers.observation(ctx.executionId); return { operation: result.operation === ctx.operation, parametersMatch: result.binding?.parametersDigest === parametersDigest(ctx.parameters ?? {}), completed: result.outcome === "EXECUTED" }; }),
-        definition(MCP, MCP_OPS, wiring.mcp, (ctx) => { const result = drivers.observation(ctx.executionId); return { operation: result.operation === ctx.operation, completed: result.outcome === "EXECUTED" }; })
+        definition(MCP, MCP_OPS, wiring.mcp, (ctx) => { const result = drivers.observation(ctx.executionId); return { operation: result.operation === ctx.operation, completed: result.outcome === "EXECUTED" }; }),
+        definition(OPENCODE, OPENCODE_OPS, wiring.opencode, (ctx) => { const result = drivers.observation(ctx.executionId); return { operation: result.operation === ctx.operation, parametersMatch: result.binding?.parametersDigest === parametersDigest(ctx.parameters ?? {}), completed: result.outcome === "EXECUTED", outputPresent: typeof result.output === "string" }; })
     ]);
 }
-module.exports = Object.freeze({ TERMINAL, MEDIA, DESKTOP, BACKUP, KALI, ML, CHECKPOINT, MCP, TERMINAL_OPS, MEDIA_OPS, DESKTOP_OPS, BACKUP_OPS, KALI_OPS, ML_OPS, CHECKPOINT_OPS, MCP_OPS, DESCRIPTORS, wireEmbodimentCapabilities, observeEmbodimentAvailability, wireEmbodimentActuators, wireEmbodimentVerifiers });
+module.exports = Object.freeze({ TERMINAL, MEDIA, DESKTOP, BACKUP, KALI, ML, CHECKPOINT, MCP, OPENCODE, TERMINAL_OPS, MEDIA_OPS, DESKTOP_OPS, BACKUP_OPS, KALI_OPS, ML_OPS, CHECKPOINT_OPS, MCP_OPS, OPENCODE_OPS, DESCRIPTORS, wireEmbodimentCapabilities, observeEmbodimentAvailability, wireEmbodimentActuators, wireEmbodimentVerifiers });
