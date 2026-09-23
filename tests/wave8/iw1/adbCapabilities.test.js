@@ -69,7 +69,8 @@ test("adb/authority: no authority store starts zero ADB processes", async () => 
     const fx = execDouble();
     const runtime = withSubstrate({ acknowledge: ack, execFileImpl: fx.exec });
     for (const operation of ["devices", "shell", "tap", "connect", "screenshot"]) {
-        const result = await runtime.execute({ operation, parameters: { command: "id", address: "1.2.3.4:5555", x: 1, y: 1 } });
+        const target = operation === "connect" ? "1.2.3.4:5555" : "DEV1";
+        const result = await runtime.execute({ operation, parameters: { command: "id", address: "1.2.3.4:5555", x: 1, y: 1, serial: target }, scope: [`device:${target}`] });
         assert.equal(result.denied, true, operation);
         assert.equal(result.state, STATE.OWNER_RATIFICATION_REQUIRED);
         assert.notEqual(result.outcome, "EXECUTED_VERIFIED");
@@ -184,8 +185,8 @@ test("adb/binding: omitting the serial cannot widen a scoped grant", async () =>
         acknowledge: ack, execFileImpl: fx.exec
     });
     const vague = await many.execute({ operation: "shell", parameters: { command: "id" } });
-    assert.equal(vague.denied, true);
-    assert.equal(vague.reason, "CAP_SCOPE_MISMATCH");
+    assert.equal(vague.outcome, "REFUSED");
+    assert.equal(vague.reason, "DEVICE_CONTRADICTED");
     assert.equal(fx.calls.length, 1, "the ambiguous grant started nothing");
 });
 

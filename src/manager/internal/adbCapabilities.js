@@ -274,8 +274,12 @@ function createAdbCapabilityRuntime({
         // scope still has to be the one it connects to.
         if (operation === "connect") {
             const named = declared.filter(s => s.startsWith("device:"));
-            if (named.length === 0) return declared;
-            return named.length === 1 && named[0] === `device:${parameters.address}` ? declared : null;
+            const address = `device:${parameters.address}`;
+            if (named.length === 0) {
+                const granted = grantedDevices(grantedScope);
+                return granted.length === 1 && granted[0] === address ? [address] : null;
+            }
+            return named.length === 1 && named[0] === address ? declared : null;
         }
         // devices falls through to the serial binding below: a declared device
         // must be the serial it filters on.
@@ -291,7 +295,7 @@ function createAdbCapabilityRuntime({
             // refused before authority so an unscoped grant cannot skip it.
             if (named.length > 1) return null;
             if (named.length === 1 && (granted.length !== 1 || named[0] !== granted[0])) return null;
-            if (granted.length !== 1) return ["device:UNSPECIFIED"];
+            if (granted.length !== 1) return null;
             return declared.length === 0 ? granted : declared;
         }
         const token = `device:${serial}`;
