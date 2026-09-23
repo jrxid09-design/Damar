@@ -1,31 +1,31 @@
 {
   "schemaVersion": 1,
-  "sha": "075785c83b90a506dd6eb60268e80d85f0c7b908",
-  "measured_source_sha": "075785c83b90a506dd6eb60268e80d85f0c7b908",
-  "generator_head_sha": "075785c83b90a506dd6eb60268e80d85f0c7b908",
+  "sha": "1d49897fbc57a57df56a2ae960d1c5f8a1658ad0",
+  "measured_source_sha": "1d49897fbc57a57df56a2ae960d1c5f8a1658ad0",
+  "generator_head_sha": "1d49897fbc57a57df56a2ae960d1c5f8a1658ad0",
   "sha_meaning": "measured_source_sha = the git HEAD the census read (the tree these counters describe). generator_head_sha = the HEAD the generator ran in; because the generator always writes its output, the commit carrying this file is normally the NEXT commit. `sha` is kept as an alias of measured_source_sha for older consumers.",
   "generatedFrom": "scripts/wave8-census.js",
   "counters": {
-    "LEGACY_SECOND_PATH": 97,
-    "ACTION_CAPABLE_UNGOVERNED": 19,
+    "LEGACY_SECOND_PATH": 95,
+    "ACTION_CAPABLE_UNGOVERNED": 17,
     "UNCLASSIFIED_LEGACY_REACHABILITY": 0,
-    "GOVERNED_SINK_SITES": 91,
+    "GOVERNED_SINK_SITES": 95,
     "REACHABLE_MODULES": 763,
     "LAUNCHER_SINK_SITES": 3,
     "PRODUCTION_INGRESSES_ANALYZED": 2,
     "INGRESSES_WITH_UNGOVERNED_FINDINGS": 1
   },
   "reconciliation": {
-    "raw_sink_count": 97,
-    "manifest_row_count": 97,
+    "raw_sink_count": 95,
+    "manifest_row_count": 95,
     "unique_module_count": 38,
-    "unique_row_id_count": 97,
+    "unique_row_id_count": 95,
     "production_ingresses_analyzed": 2,
     "ungoverned_findings_by_ingress": {
       "src/cli/index.js": 0,
-      "src/server.js": 97
+      "src/server.js": 95
     },
-    "action_capable_count": 19,
+    "action_capable_count": 17,
     "advisory_count": 78,
     "unclassified_count": 0,
     "census_findings_without_manifest_row": 0,
@@ -38,14 +38,14 @@
     ],
     "ungovernedByIngress": {
       "src/cli/index.js": 0,
-      "src/server.js": 97
+      "src/server.js": 95
     },
     "governedByIngress": {
-      "src/cli/index.js": 91,
-      "src/server.js": 91
+      "src/cli/index.js": 95,
+      "src/server.js": 95
     },
     "reachableModulesByIngress": {
-      "src/cli/index.js": 291,
+      "src/cli/index.js": 293,
       "src/server.js": 760
     }
   },
@@ -173,11 +173,11 @@
     },
     {
       "id": "C4-SERVICES-ACTUATION",
-      "hits": 27,
-      "action_capable": 4,
+      "hits": 25,
+      "action_capable": 2,
       "files": 7,
       "max_risk": "P0",
-      "priority": 27
+      "priority": 25
     },
     {
       "id": "C14-UNCLUSTERED-ADVISORY",
@@ -2880,41 +2880,10 @@
       "migration_status": "PENDING"
     },
     {
-      "id": "src/services/immichDeployService.js:3:29:process_shell",
+      "id": "src/services/immichDeployService.js:59:5:filesystem_mutation",
       "census_category": "LEGACY_SECOND_PATH",
       "source_file": "src/services/immichDeployService.js",
-      "line": 3,
-      "column": 29,
-      "kind": "process_shell",
-      "snippet": "require(\"node:child_process\")",
-      "action_capable": true,
-      "consequential": "YES",
-      "entrypoint": "src/server.js",
-      "ingresses": [
-        "src/server.js"
-      ],
-      "execution_path": "src/server.js -> src/app.js -> src/routes/index.js -> src/routes/api/v1/index.js -> src/routes/api/v1/console.js -> src/controllers/nasController.js -> src/services/immichDeployService.js",
-      "hops": 6,
-      "cluster": "C4-SERVICES-ACTUATION",
-      "risk": "P1",
-      "symbol": "RECON_REQUIRED",
-      "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
-      "capability_family": "RECON_REQUIRED",
-      "operation_type": "RECON_REQUIRED",
-      "authority_source": "RECON_REQUIRED",
-      "verification_mechanism": "RECON_REQUIRED",
-      "audit_mechanism": "RECON_REQUIRED",
-      "replay_durability": "RECON_REQUIRED",
-      "canonical_migration_destination": "RECON_REQUIRED",
-      "required_tests": "RECON_REQUIRED",
-      "classification": "H_UNKNOWN_REQUIRES_RECON",
-      "migration_status": "PENDING"
-    },
-    {
-      "id": "src/services/immichDeployService.js:62:5:filesystem_mutation",
-      "census_category": "LEGACY_SECOND_PATH",
-      "source_file": "src/services/immichDeployService.js",
-      "line": 62,
+      "line": 59,
       "column": 5,
       "kind": "filesystem_mutation",
       "snippet": "fs.mkdirSync(",
@@ -2942,10 +2911,10 @@
       "migration_status": "PENDING"
     },
     {
-      "id": "src/services/immichDeployService.js:63:5:filesystem_mutation",
+      "id": "src/services/immichDeployService.js:60:5:filesystem_mutation",
       "census_category": "LEGACY_SECOND_PATH",
       "source_file": "src/services/immichDeployService.js",
-      "line": 63,
+      "line": 60,
       "column": 5,
       "kind": "filesystem_mutation",
       "snippet": "fs.mkdirSync(",
@@ -2973,10 +2942,10 @@
       "migration_status": "PENDING"
     },
     {
-      "id": "src/services/immichDeployService.js:64:5:filesystem_mutation",
+      "id": "src/services/immichDeployService.js:61:5:filesystem_mutation",
       "census_category": "LEGACY_SECOND_PATH",
       "source_file": "src/services/immichDeployService.js",
-      "line": 64,
+      "line": 61,
       "column": 5,
       "kind": "filesystem_mutation",
       "snippet": "fs.writeFileSync(",
@@ -2990,37 +2959,6 @@
       "hops": 6,
       "cluster": "C4-SERVICES-ACTUATION",
       "risk": "P2",
-      "symbol": "RECON_REQUIRED",
-      "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
-      "capability_family": "RECON_REQUIRED",
-      "operation_type": "RECON_REQUIRED",
-      "authority_source": "RECON_REQUIRED",
-      "verification_mechanism": "RECON_REQUIRED",
-      "audit_mechanism": "RECON_REQUIRED",
-      "replay_durability": "RECON_REQUIRED",
-      "canonical_migration_destination": "RECON_REQUIRED",
-      "required_tests": "RECON_REQUIRED",
-      "classification": "H_UNKNOWN_REQUIRES_RECON",
-      "migration_status": "PENDING"
-    },
-    {
-      "id": "src/services/immichDeployService.js:101:15:process_shell",
-      "census_category": "LEGACY_SECOND_PATH",
-      "source_file": "src/services/immichDeployService.js",
-      "line": 101,
-      "column": 15,
-      "kind": "process_shell",
-      "snippet": "spawn(",
-      "action_capable": true,
-      "consequential": "YES",
-      "entrypoint": "src/server.js",
-      "ingresses": [
-        "src/server.js"
-      ],
-      "execution_path": "src/server.js -> src/app.js -> src/routes/index.js -> src/routes/api/v1/index.js -> src/routes/api/v1/console.js -> src/controllers/nasController.js -> src/services/immichDeployService.js",
-      "hops": 6,
-      "cluster": "C4-SERVICES-ACTUATION",
-      "risk": "P1",
       "symbol": "RECON_REQUIRED",
       "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
       "capability_family": "RECON_REQUIRED",
