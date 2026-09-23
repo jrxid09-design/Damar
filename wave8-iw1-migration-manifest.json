@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
-  "sha": "9f5191b971034c21e0bc1756ff70e5df7252b6b9",
-  "measured_source_sha": "9f5191b971034c21e0bc1756ff70e5df7252b6b9",
-  "generator_head_sha": "9f5191b971034c21e0bc1756ff70e5df7252b6b9",
+  "sha": "49013ad055d27287ea7b3c1c6afda130d9575411",
+  "measured_source_sha": "49013ad055d27287ea7b3c1c6afda130d9575411",
+  "generator_head_sha": "49013ad055d27287ea7b3c1c6afda130d9575411",
   "sha_meaning": "measured_source_sha = the git HEAD the census read (the tree these counters describe). generator_head_sha = the HEAD the generator ran in; because the generator always writes its output, the commit carrying this file is normally the NEXT commit. `sha` is kept as an alias of measured_source_sha for older consumers.",
   "generatedFrom": "scripts/wave8-census.js",
   "counters": {
     "LEGACY_SECOND_PATH": 108,
     "ACTION_CAPABLE_UNGOVERNED": 29,
     "UNCLASSIFIED_LEGACY_REACHABILITY": 0,
-    "GOVERNED_SINK_SITES": 71,
+    "GOVERNED_SINK_SITES": 72,
     "REACHABLE_MODULES": 763,
     "LAUNCHER_SINK_SITES": 3,
     "PRODUCTION_INGRESSES_ANALYZED": 2,
@@ -41,8 +41,8 @@
       "src/server.js": 108
     },
     "governedByIngress": {
-      "src/cli/index.js": 71,
-      "src/server.js": 71
+      "src/cli/index.js": 72,
+      "src/server.js": 72
     },
     "reachableModulesByIngress": {
       "src/cli/index.js": 248,
