@@ -29,6 +29,16 @@ const pexec = promisify(execFile);
 const CAPABILITY_ID = "desktop.control";
 const OPERATIONS = Object.freeze(["openApp", "typeText", "pressKey", "listWindows", "moveMouse", "click"]);
 
+/** Applications the owner can ratify opening. A request names one of these,
+ *  never an executable path. */
+const APPS = Object.freeze({
+    notepad: "notepad.exe",
+    calculator: "calc.exe",
+    browser: "msedge.exe",
+    explorer: "explorer.exe",
+    terminal: "wt.exe"
+});
+
 const STATE = Object.freeze({
     AUTHORIZED: "AUTHORIZED",
     AVAILABLE_BUT_NOT_AUTHORIZED: "AVAILABLE_BUT_NOT_AUTHORIZED",
@@ -44,9 +54,9 @@ function readParameters(operation, parameters) {
     const str = (v, max) => typeof v === "string" ? v.slice(0, max) : "";
     switch (operation) {
         case "openApp": {
-            const name = str(p.name, 200).trim();
-            if (!name) return "NAME_EMPTY";
-            return { name, args: str(p.args, 500) };
+            const app = str(p.app, 40);
+            if (!Object.hasOwn(APPS, app)) return "APP_UNKNOWN";
+            return { app };
         }
         case "typeText": {
             const text = str(p.text, 2000);
@@ -74,7 +84,7 @@ function readParameters(operation, parameters) {
 /** One fixed script per operation. It reads its input from the environment, so
  *  the script text never contains a caller value. */
 const SCRIPTS = Object.freeze({
-    openApp: "Start-Process $env:DAMAR_DESKTOP_NAME -ArgumentList $env:DAMAR_DESKTOP_ARGS; 'ok'",
+    openApp: "Start-Process $env:DAMAR_DESKTOP_EXE; 'ok'",
     typeText: "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait($env:DAMAR_DESKTOP_TEXT); 'ok'",
     pressKey: "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait($env:DAMAR_DESKTOP_KEY); 'ok'",
     listWindows: "Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object -First 25 ProcessName,MainWindowTitle | ConvertTo-Json -Compress",
@@ -86,7 +96,7 @@ const CLICK = Object.freeze({ left: [0x0002, 0x0004], right: [0x0008, 0x0010], m
 
 function envFor(operation, parameters) {
     const env = { ...process.env };
-    if (operation === "openApp") { env.DAMAR_DESKTOP_NAME = parameters.name; env.DAMAR_DESKTOP_ARGS = parameters.args; }
+    if (operation === "openApp") env.DAMAR_DESKTOP_EXE = APPS[parameters.app];
     if (operation === "typeText") env.DAMAR_DESKTOP_TEXT = parameters.text;
     if (operation === "pressKey") env.DAMAR_DESKTOP_KEY = parameters.key;
     if (operation === "moveMouse" || operation === "click") { env.DAMAR_DESKTOP_X = String(parameters.x); env.DAMAR_DESKTOP_Y = String(parameters.y); }

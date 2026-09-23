@@ -20,7 +20,7 @@ async function run(operation, parameters) {
     return { ok: true, ...result.result };
 }
 
-const openApp = (name, args = "") => run("openApp", { name, args });
+const openApp = app => run("openApp", { app });
 const typeText = text => run("typeText", { text });
 const pressKey = key => run("pressKey", { key });
 const listWindows = () => run("listWindows", {});
