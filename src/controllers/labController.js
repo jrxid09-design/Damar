@@ -89,7 +89,7 @@ class LabController {
             const sessionId = req.authIdentity?.sessionId ?? `lab:${req.params.id}`;
 
             const result = await desktop.openApp("code", project.dir, {
-                channelType: "http",
+                channelType: "console",
                 channelId: sessionId,
                 sessionId,
                 authProof: req.body?.authProof ?? null,
