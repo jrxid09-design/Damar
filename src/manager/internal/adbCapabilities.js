@@ -277,14 +277,8 @@ function createAdbCapabilityRuntime({
             if (named.length === 0) return declared;
             return named.length === 1 && named[0] === `device:${parameters.address}` ? declared : null;
         }
-        if (operation === "devices") {
-            const named = declared.filter(s => s.startsWith("device:"));
-            if (named.length > 1) return null;
-            if (named.length === 1) return declared;
-            const granted = grantedDevices(grantedScope);
-            if (granted.length === 1) return granted;
-            return declared;
-        }
+        // devices falls through to the serial binding below: a declared device
+        // must be the serial it filters on.
         const serial = typeof parameters?.serial === "string" ? parameters.serial.trim() : "";
         // No serial: the device is chosen later from what is plugged in, so the
         // grant must already name exactly one device and the request may not name a

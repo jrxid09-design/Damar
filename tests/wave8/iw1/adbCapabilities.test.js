@@ -220,9 +220,12 @@ test("adb/binding: devices lists only the device the grant names", async () => {
     assert.equal(result.outcome, "EXECUTED_VERIFIED");
     assert.deepEqual(result.result.devices.map(d => d.serial), ["DEV1"]);
 
-    const both = await runtime.execute({ operation: "devices", parameters: {}, scope: ["device:DEV1", "device:DEV2"] });
-    assert.equal(both.outcome, "REFUSED");
-    assert.equal(both.reason, "DEVICE_CONTRADICTED");
+    const mismatched = await runtime.execute({
+        operation: "devices", parameters: { serial: "DEV2" }, scope: ["device:DEV1"]
+    });
+    assert.equal(mismatched.outcome, "REFUSED");
+    assert.equal(mismatched.reason, "DEVICE_CONTRADICTED");
+    assert.equal(fx.calls.length, 1, "the mismatched listing started no second process");
 });
 
 test("adb/binding: connect cannot target an address other than the device it declares", async () => {
