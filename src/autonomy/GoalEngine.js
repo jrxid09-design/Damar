@@ -5,7 +5,6 @@ const capabilities = require("./CapabilityRegistry");
 const skillFactory = require("./SkillFactory");
 const healing = require("./SelfHealingEngine");
 const modelRouter = require("./ModelRouter");
-const checkpoints = require("./CheckpointSystem");
 
 const telemetry = require("../services/telemetryService");
 

@@ -20,6 +20,7 @@ const BACKUP = "damar.backup";
 const KALI = "damar.kali";
 const TERMINAL = "damar.terminal";
 const ML = "damar.ml";
+const CHECKPOINT = "damar.checkpoint";
 const CACHE_DIR = path.join(os.tmpdir(), "damar-media");
 const CACHE_CAP_BYTES = 500 * 1024 * 1024;
 const DESKTOP_APPS = Object.freeze({ notepad: "notepad.exe", calculator: "calc.exe", browser: "msedge.exe", edge: "msedge.exe", chrome: "chrome.exe", code: "code" });
@@ -126,6 +127,11 @@ async function mlDriver({ operation, parameters = {} }) {
     const result = operation === "probe" ? await ml.probe() : await ml.run(parameters);
     return { outcome: result?.ok === true ? "EXECUTED" : "EXECUTED_UNVERIFIED", ...result, operation, binding: { parametersDigest: parametersDigest(parameters) } };
 }
+async function checkpointDriver({ operation, parameters = {} }) {
+    if (operation !== "create") throw new Error("unsupported checkpoint operation");
+    const result = await require("../autonomy/CheckpointSystem").create(parameters);
+    return { outcome: "EXECUTED", ok: true, operation, ...result, binding: { parametersDigest: parametersDigest(parameters) } };
+}
 
 function verifyMedia(ctx) { const result = observation(ctx.executionId); if (ctx.operation === "download") { const output = typeof result.output === "string" ? result.output : ""; return { binding: result.videoId, bindingMatches: result.videoId === ctx.parameters?.videoId, exists: Boolean(output && fs.existsSync(output) && fs.statSync(output).size > 0), bytes: output && fs.existsSync(output) ? fs.statSync(output).size : 0 }; } const requestedId = typeof ctx.parameters?.videoId === "string" ? ctx.parameters.videoId : null; return { binding: result.videoId, bindingMatches: result.videoId === requestedId, url: typeof result.url === "string" && /^https?:\/\//.test(result.url) ? result.url : null }; }
 function independentlyListDesktopWindows() {
@@ -141,4 +147,4 @@ function verifyDesktop(ctx) { const result = observation(ctx.executionId); const
 function verifyBackup(ctx) { const result = observation(ctx.executionId); const source = typeof ctx.parameters?.source === "string" ? path.normalize(ctx.parameters.source) : null; const dest = typeof ctx.parameters?.dest === "string" ? path.normalize(ctx.parameters.dest) : null; return { source: result.source, dest: result.dest, sourceMatches: source !== null && result.source === source, destMatches: dest !== null && result.dest === dest, exists: Boolean(result.dest && fs.existsSync(result.dest) && fs.statSync(result.dest).isDirectory()), commandOk: result.ok === true }; }
 function verifyKali(ctx) { const result = observation(ctx.executionId); if (ctx.operation === "status" || ctx.operation === "tools") return { operation: ctx.operation, completed: result.outcome === "EXECUTED" }; if (ctx.operation === "which") return { operation: "which", toolMatches: result.tool === ctx.parameters?.tool?.replace(/[^\w.-]/g, ""), completed: result.outcome === "EXECUTED" }; const requested = shellCommand(ctx.parameters ?? {}); const digest = crypto.createHash("sha256").update(requested.command).digest("hex"); return { commandDigestMatches: result.binding?.commandDigest === digest, cwdMatches: result.cwd === requested.cwd, timeoutMatches: result.timeout === requested.timeout, runtimeMatches: result.binding?.runtime === process.platform, environmentMatches: result.binding?.environment === (process.env.DAMAR_KALI_DISTRO || "<detected>"), commandOk: result.ok === true && Number(result.code ?? 0) === 0, code: Number.isSafeInteger(result.code) ? result.code : null }; }
 
-module.exports = Object.freeze({ CACHE_DIR, TERMINAL, MEDIA, DESKTOP, BACKUP, KALI, ML, parametersDigest, remember, observation, requireObject, stringArg, videoId, shellCommand, probeEmbodimentAvailability, mediaDriver, desktopDriver, backupDriver, kaliDriver, terminalDriver, mlDriver, verifyMedia, verifyDesktop, verifyBackup, verifyKali });
+module.exports = Object.freeze({ CACHE_DIR, TERMINAL, MEDIA, DESKTOP, BACKUP, KALI, ML, CHECKPOINT, parametersDigest, remember, observation, requireObject, stringArg, videoId, shellCommand, probeEmbodimentAvailability, mediaDriver, desktopDriver, backupDriver, kaliDriver, terminalDriver, mlDriver, checkpointDriver, verifyMedia, verifyDesktop, verifyBackup, verifyKali });
