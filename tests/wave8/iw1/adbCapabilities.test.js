@@ -162,8 +162,8 @@ test("adb/binding: principal and scope mismatch start nothing", async () => {
     // A caller-declared scope that contradicts the device it names is a mismatch,
     // whichever of the two the grant happens to allow.
     const contradicted = await scoped.execute({ ...shell(), scope: ["device:SOMEWHERE-ELSE"] });
-    assert.equal(contradicted.denied, true);
-    assert.equal(contradicted.reason, "CAP_SCOPE_MISMATCH");
+    assert.equal(contradicted.outcome, "REFUSED");
+    assert.equal(contradicted.reason, "DEVICE_CONTRADICTED");
     assert.equal(fx.calls.length, 0);
 });
 
@@ -198,8 +198,8 @@ test("adb/binding: a grant for both devices still rejects a request that declare
     const contradicted = await runtime.execute({
         operation: "shell", parameters: { command: "id", serial: "DEV2" }, scope: ["device:DEV1"]
     });
-    assert.equal(contradicted.denied, true);
-    assert.equal(contradicted.reason, "CAP_SCOPE_MISMATCH");
+    assert.equal(contradicted.outcome, "REFUSED");
+    assert.equal(contradicted.reason, "DEVICE_CONTRADICTED");
     assert.equal(fx.calls.length, 0);
 
     const honest = await runtime.execute({
@@ -208,6 +208,17 @@ test("adb/binding: a grant for both devices still rejects a request that declare
     assert.equal(honest.outcome, "EXECUTED_VERIFIED");
     assert.equal(fx.calls.length, 1);
     assert.equal(fx.calls[0].args[1], "DEV2");
+});
+
+test("adb/binding: an unscoped grant still cannot drive a device the caller did not declare", async () => {
+    const fx = execDouble("ok\n");
+    const runtime = withSubstrate({ authorityStore: grantStore(GRANT), acknowledge: ack, execFileImpl: fx.exec });
+    const contradicted = await runtime.execute({
+        operation: "shell", parameters: { command: "id", serial: "DEV2" }, scope: ["device:DEV1"]
+    });
+    assert.equal(contradicted.outcome, "REFUSED");
+    assert.equal(contradicted.reason, "DEVICE_CONTRADICTED");
+    assert.equal(fx.calls.length, 0, "a contradiction is refused before any process, grant or not");
 });
 
 test("adb/binding: a grant for one device cannot drive another", async () => {
@@ -220,8 +231,8 @@ test("adb/binding: a grant for one device cannot drive another", async () => {
     const stolen = await runtime.execute({
         operation: "shell", parameters: { command: "id", serial: "DEV2" }, scope: ["device:DEV1"]
     });
-    assert.equal(stolen.denied, true);
-    assert.equal(stolen.reason, "CAP_SCOPE_MISMATCH");
+    assert.equal(stolen.outcome, "REFUSED");
+    assert.equal(stolen.reason, "DEVICE_CONTRADICTED");
 
     const own = await runtime.execute({
         operation: "shell", parameters: { command: "id", serial: "DEV1" }, scope: ["device:DEV1"]
