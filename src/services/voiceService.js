@@ -1,13 +1,8 @@
 const path = require("node:path");
-const os = require("node:os");
 const fs = require("node:fs");
-const { execFile } = require("node:child_process");
-const { promisify } = require("node:util");
 
 const telemetry = require("./telemetryService");
 const JsonStore = require("../core/config/JsonStore");
-
-const pexec = promisify(execFile);
 
 /**
  * Suara ARDI (buatan Damar) memakai edge-tts (Microsoft Neural,
@@ -36,19 +31,14 @@ function isLocalEndpoint(value) {
 }
 
 async function edgeSpeak(text, voice) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "damar-edge-"));
-    const out = path.join(dir, "s.mp3");
-    try {
-        await pexec(
-            "edge-tts",
-            ["--voice", voice, "--text", String(text).slice(0, 4000), "--write-media", out],
-            { timeout: 60000, windowsHide: true }
-        );
-        return { audio: fs.readFileSync(out), contentType: "audio/mpeg" };
+    // INGRESS, NEVER AUTHORITY. The edge-tts process runs only inside the
+    // Manager-owned voice capability, and only with an owner grant.
+    const result = await require("../manager/bootstrap").getVoiceCapabilityRuntime()
+        .execute({ operation: "synthesize", parameters: { text: String(text), voice: String(voice) } });
+    if (result.outcome !== "EXECUTED_VERIFIED") {
+        throw new Error(result.reason || "voice synthesis not authorized");
     }
-    finally {
-        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* abaikan */ }
-    }
+    return { audio: Buffer.from(result.result.audioBytes, "base64"), contentType: result.result.contentType };
 }
 
 /**

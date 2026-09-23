@@ -50,7 +50,7 @@ const STATE = Object.freeze({
     OWNER_RATIFICATION_REQUIRED: "OWNER_RATIFICATION_REQUIRED"
 });
 
-const OPERATIONS = Object.freeze(["probeOutput", "play", "probeInput", "capture", "level"]);
+const OPERATIONS = Object.freeze(["probeOutput", "play", "probeInput", "capture", "level", "synthesize"]);
 
 const PLAYERS = Object.freeze(["ffplay", "aplay", "powershell"]);
 const RECORDERS = Object.freeze(["ffmpeg", "arecord"]);
@@ -93,6 +93,12 @@ function readParameters(operation, parameters) {
             out.frames = p.frames;
             if (!RECORDERS.includes(out.recorder)) return "RECORDER_UNKNOWN";
             if (!Number.isFinite(out.frames) || out.frames <= 0 || out.frames > 16000) return "FRAMES_MALFORMED";
+            return out;
+        case "synthesize":
+            out.voice = typeof p.voice === "string" ? p.voice : "";
+            out.text = typeof p.text === "string" ? p.text.slice(0, 4000) : "";
+            if (!/^[A-Za-z]{2}-[A-Za-z]{2}-\w+$/.test(out.voice)) return "VOICE_MALFORMED";
+            if (out.text.trim() === "") return "TEXT_EMPTY";
             return out;
         default:
             return "OPERATION_UNBOUND";
@@ -148,8 +154,9 @@ function run(spawnImpl, cmd, args, { timeoutMs = 30000, collect = false } = {}) 
     });
 }
 
-function realDrivers(spawnImpl) {
+function realDrivers(spawnImpl, execFileImpl) {
     const spawnFn = spawnImpl || spawn;
+    const execFn = execFileImpl || pexec;
     return {
         probeOutput: async ({ parameters }) => {
             const [cmd, args] = parameters.player === "powershell"
@@ -187,6 +194,18 @@ function realDrivers(spawnImpl) {
                 try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
             }
         },
+        synthesize: async ({ parameters }) => {
+            const dir = fs.mkdtempSync(path.join(os.tmpdir(), "damar-edge-"));
+            try {
+                const out = path.join(dir, "s.mp3");
+                await execFn("edge-tts", ["--voice", parameters.voice, "--text", parameters.text, "--write-media", out],
+                    { timeout: 60000, windowsHide: true });
+                const audio = fs.readFileSync(out);
+                return { ok: true, ...digestAudio(audio), audioBytes: audio.toString("base64"), contentType: "audio/mpeg" };
+            } finally {
+                try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+            }
+        },
         level: async ({ parameters }) => {
             const [cmd, args] = levelArgs(parameters.recorder);
             const pcm = await run(spawnFn, cmd, args, { timeoutMs: 5000, collect: true });
@@ -201,10 +220,10 @@ function realDrivers(spawnImpl) {
 
 function createVoiceCapabilityRuntime({
     authorityStore = null, acknowledge = null, driverOverrides = null,
-    replayStore = null, spawnImpl = null
+    replayStore = null, spawnImpl = null, execFileImpl = null
 } = {}) {
     const bridge = new CanonicalCapabilityExecution({ replayStore });
-    const drivers = realDrivers(spawnImpl);
+    const drivers = realDrivers(spawnImpl, execFileImpl);
     const invocations = new Map();
     bridge.installAuditAcknowledger(acknowledge ?? createCanonicalAuditAcknowledger());
 
