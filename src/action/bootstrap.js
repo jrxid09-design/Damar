@@ -1919,6 +1919,18 @@ function composeDispatcher3({
         let invocationCount = 0;
         let activeReplayStore = null;
         let activeReplayBinding = null;
+        // Orchestration identity (intentId) is intentionally distinct from
+        // physical-effect identity. A fresh intent with the same authorized
+        // capability/operation/parameters must not replay the same actuator
+        // effect after a timeout or process restart.
+        const effectDigest = crypto3.createHash("sha256").update(JSON.stringify({
+            capabilityId: request.capabilityId,
+            capabilityIncarnationId: request.capabilityIncarnationId,
+            operation: request.operation,
+            principal: request.principal,
+            scope: request.scope,
+            parameters: request.parameters
+        })).digest("hex");
 
         // The actuator receives a FROZEN, brand-recognized GATED request on its
         // first argument: it is a derived artifact of the authorized request,
@@ -1949,7 +1961,7 @@ function composeDispatcher3({
                 noteCompleted(contentKey, { result: refused, request, intentId: request.intentId });
                 return refused;
             }
-            const replayBinding = { digest: contentKey, capabilityId: request.capabilityId, operation: request.operation, principal: request.principal, scope: request.scope, authorityGeneration: request.authorityGeneration, driverId: binding.actuatorId };
+            const replayBinding = { digest: effectDigest, capabilityId: request.capabilityId, operation: request.operation, principal: request.principal, scope: request.scope, authorityGeneration: request.authorityGeneration, driverId: binding.actuatorId };
             let reservation;
             try { reservation = await replayStore.reserve(replayBinding); } catch { reservation = null; }
             if (!reservation || reservation.reserved !== true) {
@@ -1958,7 +1970,7 @@ function composeDispatcher3({
                 noteCompleted(contentKey, { result: refused, request, intentId: request.intentId });
                 return refused;
             }
-            try { await replayStore.transition(contentKey, replayStore.STATES.INVOKING, replayBinding); } catch {
+            try { await replayStore.transition(effectDigest, replayStore.STATES.INVOKING, replayBinding); } catch {
                 lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
                 const refused = buildExecutionResult3({ executionRequest: request, state: RESULT_STATE3.FAILED, lifecycleTrace: lifecycle.trace, startedAtMs: dispatchStartMs, completedAtMs: canonicalClockNow3(), failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION, failureDetail: "durable replay invocation reservation failed" });
                 noteCompleted(contentKey, { result: refused, request, intentId: request.intentId });
@@ -1974,7 +1986,7 @@ function composeDispatcher3({
                 operation: request.operation,
                 executionId: request.executionId,
                 intentId: request.intentId,
-                digest: contentKey
+                digest: effectDigest
             });
             if (!prepared || prepared.ok !== true) {
                 lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
@@ -2136,7 +2148,7 @@ function composeDispatcher3({
                     intentId: request.intentId,
                     principal: request.principal,
                     authorityGeneration: request.authorityGeneration,
-                    digest: contentKey
+                    digest: effectDigest
                 });
             } catch {
                 acknowledgement = { ok: false };
@@ -2158,7 +2170,7 @@ function composeDispatcher3({
                 noteCompleted(contentKey, { result: denied, request, intentId: request.intentId });
                 return denied;
             }
-            try { await activeReplayStore?.transition(contentKey, activeReplayStore.STATES.EXECUTED_UNVERIFIED, activeReplayBinding); } catch { /* duplicate barrier remains reserved */ }
+            try { await activeReplayStore?.transition(effectDigest, activeReplayStore.STATES.EXECUTED_UNVERIFIED, activeReplayBinding); } catch { /* duplicate barrier remains reserved */ }
         }
         lifecycle.advance(LIFECYCLE3.EXECUTED, canonicalClockNow3());
         const result = buildExecutionResult3({
