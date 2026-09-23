@@ -59,7 +59,12 @@ async function copy(source, dest, context = null) {
         capabilityId: "damar.backup",
         operation: "copy",
         arguments: { source, dest },
-        expectedPostcondition: { expect: { exists: { op: "eq", value: true }, commandOk: { op: "eq", value: true } } }
+        expectedPostcondition: { expect: {
+            sourceMatches: { op: "eq", value: true },
+            destMatches: { op: "eq", value: true },
+            exists: { op: "eq", value: true },
+            commandOk: { op: "eq", value: true }
+        } }
     });
 }
 
