@@ -262,7 +262,8 @@ function createAdbCapabilityRuntime({
     // The caller does not get to name a scope that disagrees with parameters.serial:
     // a grant for device:DEV1 authorizes DEV1 and nothing else.
     function grantedDevices(grantedScope) {
-        return (Array.isArray(grantedScope) ? grantedScope : []).filter(s => typeof s === "string" && s.startsWith("device:"));
+        return (Array.isArray(grantedScope) ? grantedScope : [])
+            .filter(s => typeof s === "string" && /^device:\S+$/.test(s));
     }
 
     function deviceScope(operation, parameters, requestedScope, grantedScope) {
