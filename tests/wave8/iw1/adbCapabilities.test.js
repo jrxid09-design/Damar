@@ -167,6 +167,28 @@ test("adb/binding: principal and scope mismatch start nothing", async () => {
     assert.equal(fx.calls.length, 0);
 });
 
+test("adb/binding: omitting the serial cannot widen a scoped grant", async () => {
+    const fx = execDouble("ok\n");
+    const one = withSubstrate({
+        authorityStore: grantStore([{ capabilityId: "android.adb", scope: ["device:DEV1"] }]),
+        acknowledge: ack, execFileImpl: fx.exec
+    });
+    // No serial and no declared scope: the grant names exactly one device, so the
+    // request is bound to it and no device discovery is consulted.
+    const implied = await one.execute({ operation: "shell", parameters: { command: "id" } });
+    assert.equal(implied.outcome, "EXECUTED_VERIFIED");
+    assert.equal(fx.calls[0].args[1], "DEV1");
+
+    const many = withSubstrate({
+        authorityStore: grantStore([{ capabilityId: "android.adb", scope: ["device:DEV1", "device:DEV2"] }]),
+        acknowledge: ack, execFileImpl: fx.exec
+    });
+    const vague = await many.execute({ operation: "shell", parameters: { command: "id" } });
+    assert.equal(vague.denied, true);
+    assert.equal(vague.reason, "CAP_SCOPE_MISMATCH");
+    assert.equal(fx.calls.length, 1, "the ambiguous grant started nothing");
+});
+
 test("adb/binding: a grant for both devices still rejects a request that declares one and drives the other", async () => {
     const fx = execDouble("ok\n");
     const runtime = withSubstrate({
