@@ -275,7 +275,7 @@ function createAdbCapabilityRuntime({
         if (serial === "") {
             const granted = grantedDevices(grantedScope);
             if (granted.length !== 1) return ["device:UNSPECIFIED"];
-            if (declared.some(s => s.startsWith("device:") && s !== granted[0])) return ["device:CONTRADICTED"];
+            if (declared.some(s => s.startsWith("device:") && s !== granted[0])) return null;
             return declared.length === 0 ? granted : declared;
         }
         const token = `device:${serial}`;
@@ -284,9 +284,9 @@ function createAdbCapabilityRuntime({
         if (named.length === 0) return [token];
         // The declared device IS the driven device: submit it unchanged.
         if (named.length === 1 && named[0] === token) return declared;
-        // Otherwise the caller named one device and drives another. No honest
-        // scope represents both, so the request carries a token no grant has.
-        return ["device:CONTRADICTED"];
+        // The caller named one device and drives another. That is a contradiction
+        // no matter what the grant says, so it is refused before authority.
+        return null;
     }
 
     async function authorize({ identity = {}, scope = [], nowMs = Date.now() } = {}) {
@@ -317,6 +317,7 @@ function createAdbCapabilityRuntime({
             let grant = null;
             if (authorityStore) { try { grant = await authorityStore.getCapability(capabilityId); } catch { grant = null; } }
             const boundScope = deviceScope(operation, parameters, scope, grant?.payload?.scope ?? []);
+            if (boundScope === null) return { outcome: OUTCOME.REFUSED, reason: "DEVICE_CONTRADICTED", capabilityId, operation };
             const granted = grantedDevices(grant?.payload?.scope ?? []);
             const serial = typeof parameters?.serial === "string" ? parameters.serial.trim() : "";
             // The grant names exactly one device and the caller named none, so that
