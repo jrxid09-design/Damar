@@ -822,7 +822,7 @@ function acknowledgeCanonicalExecution(entry = {}) {
         const port = canonicalAuditPort();
         const audit = port?.audit;
         if (typeof audit !== "function") return { ok: false, reason: "AUDIT_GATE_UNAVAILABLE" };
-        audit({
+        const record = audit({
             eventType: "action.execution.ack",
             source: "canonicalAction",
             metadata: {
@@ -835,7 +835,14 @@ function acknowledgeCanonicalExecution(entry = {}) {
                 authorityGeneration: Number.isSafeInteger(entry.authorityGeneration) ? entry.authorityGeneration : null
             }
         });
-        return { ok: true, receipt: String(entry.executionId ?? "") };
+        const metadata = record?.metadata;
+        const matches = record?.eventType === "action.execution.ack" &&
+            record?.source === "canonicalAction" &&
+            metadata?.digest === String(entry.digest ?? "") &&
+            metadata?.executionId === String(entry.executionId ?? "") &&
+            metadata?.operation === String(entry.operation ?? "");
+        if (!matches) return { ok: false, reason: "AUDIT_ACK_RECORD_MISMATCH" };
+        return { ok: true, receipt: String(record.eventId ?? entry.executionId ?? "") };
     } catch (error) {
         return { ok: false, reason: String(error?.code ?? error?.message ?? "AUDIT_ACK_FAILED").slice(0, 128) };
     }
