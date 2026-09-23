@@ -46,7 +46,8 @@ function cacheDir() { return path.join(os.tmpdir(), "damar-media"); }
  *  value that reaches yt-dlp can only ever be a watch URL we build. */
 function readParameters(operation, parameters) {
     const p = parameters && typeof parameters === "object" ? parameters : {};
-    const videoId = typeof p.videoId === "string" ? p.videoId : "";
+    const raw = p.videoId;
+    const videoId = typeof raw === "string" ? raw : "";
     if (!VIDEO_ID.test(videoId)) return "VIDEO_ID_MALFORMED";
     if (!OPERATIONS.includes(operation)) return "OPERATION_UNBOUND";
     return { videoId };
@@ -96,7 +97,11 @@ function createMediaCapabilityRuntime({
         const driver = typeof override === "function" ? override : drivers[operation];
         bridge.registerCapability({
             capabilityId, operation, consequential: true, driverId: `media.youtube.${operation}`,
-            driver: async ctx => { invocations.set(operation, (invocations.get(operation) ?? 0) + 1); return { operation, ...await driver(ctx) }; }
+            driver: async ctx => {
+                invocations.set(operation, (invocations.get(operation) ?? 0) + 1);
+                const result = await driver(ctx);
+                return result && typeof result === "object" ? { ...result, operation } : result;
+            }
         });
     }
     bridge.registerVerifier(capabilityId, async (parameters, result) => ({
