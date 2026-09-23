@@ -759,6 +759,33 @@ function resolveLane2AuthorityStore() {
     });
 }
 
+/** Canonical production audit acknowledgement for consequential Lane 3
+ * completion. Resolution is live so construction order cannot capture a
+ * pre-composition deny-only ledger. The owner-trust audit gate is the durable
+ * sink owner; a missing or failed sink is a hard failure before success. */
+function acknowledgeCanonicalExecution(entry = {}) {
+    try {
+        const composition = require("../authority/productionComposition").getProductionAuthorityComposition();
+        const audit = composition?.ownerTrust?.auditGate?.audit;
+        if (typeof audit !== "function") return { ok: false, reason: "AUDIT_GATE_UNAVAILABLE" };
+        audit({
+            eventType: "action.execution.ack",
+            source: "canonicalAction",
+            metadata: {
+                capabilityId: String(entry.capabilityId ?? "").slice(0, 256),
+                operation: String(entry.operation ?? "").slice(0, 128),
+                executionId: String(entry.executionId ?? "").slice(0, 128),
+                intentId: String(entry.intentId ?? "").slice(0, 128),
+                principal: String(entry.principal ?? "").slice(0, 256),
+                authorityGeneration: Number.isSafeInteger(entry.authorityGeneration) ? entry.authorityGeneration : null
+            }
+        });
+        return { ok: true, receipt: String(entry.executionId ?? "") };
+    } catch (error) {
+        return { ok: false, reason: String(error?.code ?? error?.message ?? "AUDIT_ACK_FAILED").slice(0, 128) };
+    }
+}
+
 /**
  * Create the canonical production Action facade. Takes NO options â€” canonical
  * authentication policy is bootstrap-owned and the fixed fail-closed adapter
@@ -1482,7 +1509,8 @@ function composeDispatcher3({
     lane2Facade,
     actuatorRegistry,
     clock = { nowMs: () => Date.now() },
-    timeoutMs = DEFAULT_TIMEOUT3
+    timeoutMs = DEFAULT_TIMEOUT3,
+    auditAcknowledger = null
 } = {}) {
     if (!lane2Facade || typeof lane2Facade.admit !== "function" || typeof lane2Facade.evaluate !== "function") {
         throw fail3(REASONS3.MALFORMED_REQUEST, "dispatcher requires the Lane 2 facade (admit + evaluate)");
@@ -1492,6 +1520,9 @@ function composeDispatcher3({
     }
     if (!clock || typeof clock.nowMs !== "function") {
         throw fail3(REASONS3.MALFORMED_REQUEST, "dispatcher requires a canonical clock");
+    }
+    if (auditAcknowledger !== null && typeof auditAcknowledger !== "function") {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "auditAcknowledger must be a function");
     }
     if (typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < MIN_TIMEOUT3 || timeoutMs > MAX_TIMEOUT3) {
         throw fail3(REASONS3.INVALID_TIMEOUT_CONFIG, `timeoutMs must be in [${MIN_TIMEOUT3}, ${MAX_TIMEOUT3}]`);
@@ -1973,6 +2004,38 @@ function composeDispatcher3({
             return result;
         }
 
+        if (auditAcknowledger !== null) {
+            let acknowledgement;
+            try {
+                acknowledgement = auditAcknowledger({
+                    capabilityId: result.capabilityId,
+                    operation: result.operation,
+                    executionId: result.executionId,
+                    intentId: result.intentId,
+                    principal: result.principal,
+                    authorityGeneration: result.authorityGeneration
+                });
+            } catch {
+                acknowledgement = { ok: false };
+            }
+            if (!acknowledgement || acknowledgement.ok !== true) {
+                lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+                const denied = buildExecutionResult3({
+                    executionRequest: request,
+                    state: RESULT_STATE3.FAILED,
+                    actuatorId: binding.actuatorId,
+                    actuatorIncarnationId: binding.actuatorIncarnationId,
+                    lifecycleTrace: lifecycle.trace,
+                    startedAtMs: dispatchStartMs,
+                    completedAtMs: canonicalClockNow3(),
+                    actuatorReport: sanitizedOutput,
+                    failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION,
+                    failureDetail: "durable audit acknowledgement failed"
+                });
+                noteCompleted(contentKey, { result: denied, request, intentId: request.intentId });
+                return denied;
+            }
+        }
         lifecycle.advance(LIFECYCLE3.EXECUTED, canonicalClockNow3());
         const result = buildExecutionResult3({
             executionRequest: request,
@@ -2067,7 +2130,8 @@ function createCanonicalActuationFacade() {
         const dispatcher = composeDispatcher3({
             lane2Facade,
             actuatorRegistry,
-            clock: { nowMs: () => Date.now() }
+            clock: { nowMs: () => Date.now() },
+            auditAcknowledger: acknowledgeCanonicalExecution
         });
         // Downstream receives ONLY execute + the two PURE brand-recognition
         // predicates. The predicates read THIS closure's brand WeakSets

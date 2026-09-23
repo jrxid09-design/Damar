@@ -107,11 +107,11 @@ async function mediaDriver({ operation, parameters }) {
         });
         const resolved = String(stdout ?? "").trim().split(/\r?\n/)[0].trim();
         if (!/^https?:\/\//.test(resolved)) throw new Error("media resolver returned no URL");
-        return { ok: true, videoId: id, url: resolved, binding: { videoId: id } };
+        return { outcome: "EXECUTED", ok: true, videoId: id, url: resolved, binding: { videoId: id } };
     }
     const output = mediaOutput(id);
     if (fs.existsSync(output) && fs.statSync(output).size > 0) {
-        return { ok: true, videoId: id, output, bytes: fs.statSync(output).size, binding: { videoId: id, output } };
+        return { outcome: "EXECUTED", ok: true, videoId: id, output, bytes: fs.statSync(output).size, binding: { videoId: id, output } };
     }
     try {
         await pexec(mediaBin(), ["--extractor-args", "youtube:player_client=mweb", "-f", "18/best[ext=mp4][acodec!=none][vcodec!=none]", "-o", output, "--retries", "3", "--fragment-retries", "3", "--no-warnings", "--no-playlist", "--no-part", url], {
@@ -122,7 +122,7 @@ async function mediaDriver({ operation, parameters }) {
         throw error;
     }
     if (!fs.existsSync(output) || fs.statSync(output).size <= 0) throw new Error("media output postcondition failed");
-    return { ok: true, videoId: id, output, bytes: fs.statSync(output).size, binding: { videoId: id, output } };
+    return { outcome: "EXECUTED", ok: true, videoId: id, output, bytes: fs.statSync(output).size, binding: { videoId: id, output } };
 }
 
 function psScript(script, env = {}) {
@@ -138,35 +138,35 @@ async function desktopDriver({ operation, parameters }) {
         const target = DESKTOP_APPS[requested];
         if (!target) throw new Error("desktop app is not allowlisted");
         await psScript("$ErrorActionPreference='Stop'; Start-Process -FilePath $env:DAMAR_TARGET; Write-Output 'ok'", { TARGET: target });
-        return { ok: true, operation, app: requested, target, verificationClass: "process-started" };
+        return { outcome: "EXECUTED", ok: true, operation, app: requested, target, verificationClass: "process-started" };
     }
     if (operation === "listWindows") {
         const { stdout } = await psScript("Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object -First 25 ProcessName,MainWindowTitle | ConvertTo-Json -Compress");
         let windows = [];
         try { const parsed = JSON.parse(String(stdout ?? "[]")); windows = (Array.isArray(parsed) ? parsed : [parsed]).map((p) => ({ app: p.ProcessName, title: p.MainWindowTitle })); } catch { windows = []; }
-        return { ok: true, operation, windows, verificationClass: "observed-list" };
+        return { outcome: "EXECUTED", ok: true, operation, windows, verificationClass: "observed-list" };
     }
     if (operation === "typeText") {
         const text = stringArg(parameters, "text", 4096);
         await psScript("Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait($env:DAMAR_TEXT); Write-Output 'ok'", { TEXT: text });
-        return { ok: true, operation, length: text.length, verificationClass: "invocation-only" };
+        return { outcome: "EXECUTED", ok: true, operation, length: text.length, verificationClass: "invocation-only" };
     }
     if (operation === "pressKey") {
         const key = stringArg(parameters, "key", 256);
         await psScript("Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait($env:DAMAR_KEY); Write-Output 'ok'", { KEY: key });
-        return { ok: true, operation, key, verificationClass: "invocation-only" };
+        return { outcome: "EXECUTED", ok: true, operation, key, verificationClass: "invocation-only" };
     }
     if (operation === "fillForm") {
         const field = stringArg(parameters, "field", 512);
         const value = stringArg(parameters, "value", 4096);
         const { stdout } = await psScript("Add-Type -AssemblyName UIAutomationClient; Add-Type -AssemblyName UIAutomationTypes; $root=[System.Windows.Automation.AutomationElement]::RootElement; $cond=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,$env:DAMAR_FIELD); $el=$root.FindFirst([System.Windows.Automation.TreeScope]::Subtree,$cond); if(-not $el){Write-Output 'not-found'; exit 0}; $vp=$el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern); $vp.SetValue($env:DAMAR_VALUE); Write-Output 'ok'", { FIELD: field, VALUE: value });
         if (String(stdout).trim() !== "ok") throw new Error("desktop field not found or not writable");
-        return { ok: true, operation, field, verificationClass: "value-pattern" };
+        return { outcome: "EXECUTED", ok: true, operation, field, verificationClass: "value-pattern" };
     }
     if (operation === "moveMouse") {
         const x = finiteCoord(parameters, "x"); const y = finiteCoord(parameters, "y");
         await psScript("$s='[DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y);'; Add-Type -MemberDefinition $s -Name DamarMove -Namespace Damar; if(-not [Damar.DamarMove]::SetCursorPos([int]$env:DAMAR_X,[int]$env:DAMAR_Y)){throw 'SetCursorPos failed'}; Write-Output 'ok'", { X: x, Y: y });
-        return { ok: true, operation, x, y, verificationClass: "cursor-position" };
+        return { outcome: "EXECUTED", ok: true, operation, x, y, verificationClass: "cursor-position" };
     }
     const button = String(parameters?.button ?? "left").toLowerCase();
     if (!["left", "right", "middle"].includes(button)) throw new Error("invalid mouse button");
@@ -176,7 +176,7 @@ async function desktopDriver({ operation, parameters }) {
     const flags = { left: [2, 4], right: [8, 16], middle: [32, 64] }[button];
     const move = x == null ? "" : "$m='[DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y);'; Add-Type -MemberDefinition $m -Name DamarClickMove -Namespace Damar; if(-not [Damar.DamarClickMove]::SetCursorPos([int]$env:DAMAR_X,[int]$env:DAMAR_Y)){throw 'SetCursorPos failed'};";
     await psScript(`${move}$s='[DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,int e);'; Add-Type -MemberDefinition $s -Name DamarClick -Namespace Damar; [Damar.DamarClick]::mouse_event([uint32]$env:DAMAR_DOWN,0,0,0,0); [Damar.DamarClick]::mouse_event([uint32]$env:DAMAR_UP,0,0,0,0); Write-Output 'ok'`, { DOWN: flags[0], UP: flags[1], X: x ?? "", Y: y ?? "" });
-    return { ok: true, operation: "click", button, x, y, verificationClass: "invocation-only" };
+    return { outcome: "EXECUTED", ok: true, operation: "click", button, x, y, verificationClass: "invocation-only" };
 }
 
 function safePath(value) {
@@ -201,7 +201,7 @@ async function backupDriver({ parameters }) {
     const ok = process.platform === "win32" ? code < 8 : code === 0;
     if (!ok) throw new Error(`backup command failed (${code})`);
     if (!fs.existsSync(dest) || !fs.statSync(dest).isDirectory()) throw new Error("backup destination postcondition failed");
-    return { ok: true, source, dest, code, binding: { source, dest }, verificationClass: "destination-exists" };
+    return { outcome: "EXECUTED", ok: true, source, dest, code, binding: { source, dest }, verificationClass: "destination-exists" };
 }
 
 function wireEmbodimentCapabilities({ registrar } = {}) {
@@ -256,9 +256,14 @@ function wireEmbodimentVerifiers({ wiring } = {}) {
             const result = observations.get(ctx.executionId) ?? {};
             if (ctx.operation === "download") {
                 const output = typeof result.output === "string" ? result.output : "";
-                return { binding: result.videoId, exists: Boolean(output && fs.existsSync(output) && fs.statSync(output).size > 0), bytes: output && fs.existsSync(output) ? fs.statSync(output).size : 0 };
+                return { binding: result.videoId, bindingMatches: result.videoId === ctx.parameters?.videoId, exists: Boolean(output && fs.existsSync(output) && fs.statSync(output).size > 0), bytes: output && fs.existsSync(output) ? fs.statSync(output).size : 0 };
             }
-            return { binding: result.videoId, url: typeof result.url === "string" && /^https?:\/\//.test(result.url) };
+            const requestedId = typeof ctx.parameters?.videoId === "string" ? ctx.parameters.videoId : null;
+            return {
+                binding: result.videoId,
+                bindingMatches: result.videoId === requestedId,
+                url: typeof result.url === "string" && /^https?:\/\//.test(result.url) ? result.url : null
+            };
         }),
         definition(DESKTOP, DESKTOP_OPS, wiring.desktop, (ctx) => {
             const result = observations.get(ctx.executionId) ?? {};
@@ -266,7 +271,16 @@ function wireEmbodimentVerifiers({ wiring } = {}) {
         }),
         definition(BACKUP, BACKUP_OPS, wiring.backup, (ctx) => {
             const result = observations.get(ctx.executionId) ?? {};
-            return { source: result.source, dest: result.dest, exists: Boolean(result.dest && fs.existsSync(result.dest) && fs.statSync(result.dest).isDirectory()), commandOk: result.ok === true };
+            const source = typeof ctx.parameters?.source === "string" ? path.normalize(ctx.parameters.source) : null;
+            const dest = typeof ctx.parameters?.dest === "string" ? path.normalize(ctx.parameters.dest) : null;
+            return {
+                source: result.source,
+                dest: result.dest,
+                sourceMatches: source !== null && result.source === source,
+                destMatches: dest !== null && result.dest === dest,
+                exists: Boolean(result.dest && fs.existsSync(result.dest) && fs.statSync(result.dest).isDirectory()),
+                commandOk: result.ok === true
+            };
         })
     ]);
 }
