@@ -74,7 +74,9 @@ class McpClientManager {
      * Nyalakan semua server yang terkonfigurasi dan kumpulkan toolnya.
      * Aman dipanggil berkali-kali.
      */
-    async start() {
+    async start({ spawnProcess = null } = {}) {
+
+        if (typeof spawnProcess !== "function") throw new Error("MCP startup requires canonical process actuator");
 
         if (this._started) return this._bridgedTools;
         this._started = true;
@@ -95,7 +97,8 @@ class McpClientManager {
                     cwd: cfg.cwd,
                     allowedTools: Array.isArray(cfg.allowedTools)
                         ? new Set(cfg.allowedTools)
-                        : null
+                        : null,
+                    spawnProcess
                 });
 
                 await client.start();
@@ -155,9 +158,15 @@ class McpClientManager {
         this._started = false;
     }
 
-    async restart() {
+    async restart(options = {}) {
         await this.stop();
-        return this.start();
+        return this.start(options);
+    }
+
+    async callTool(serverId, tool, args = {}) {
+        const client = this.clients.get(serverId);
+        if (!client) throw new Error(`MCP server '${serverId}' is not started`);
+        return client.callTool(tool, args);
     }
 
 }

@@ -1,4 +1,4 @@
-const { spawn } = require("node:child_process");
+const { executeCanonicalAction, contextFromExecution } = require("../services/canonicalActionClient");
 
 /**
  * McpClient — Damar sebagai KLIEN MCP (Model Context Protocol).
@@ -25,10 +25,11 @@ const { spawn } = require("node:child_process");
  */
 class McpClient {
 
-    constructor({ id, command, args = [], env = {}, cwd, allowedTools = null } = {}) {
+    constructor({ id, command, args = [], env = {}, cwd, allowedTools = null, spawnProcess = null } = {}) {
 
         if (!id) throw new Error("McpClient butuh id server.");
         if (!command) throw new Error(`McpClient '${id}' butuh command.`);
+        if (typeof spawnProcess !== "function") throw new Error(`McpClient '${id}' membutuhkan canonical process actuator.`);
 
         this.id = id;
         this.command = command;
@@ -36,6 +37,7 @@ class McpClient {
         this.env = env || {};
         this.cwd = cwd || null;
         this.allowedTools = allowedTools;   // null = semua; atau Set<string>
+        this.spawnProcess = spawnProcess;
 
         this.proc = null;
         this._id = 0;
@@ -84,7 +86,7 @@ class McpClient {
 
         this._initPromise = (async () => {
 
-            this.proc = spawn(this.command, this.args, {
+            this.proc = this.spawnProcess(this.command, this.args, {
                 stdio: ["pipe", "pipe", "pipe"],
                 env: { ...process.env, ...this.env },
                 ...(this.cwd ? { cwd: this.cwd } : {})
@@ -191,9 +193,15 @@ class McpClient {
                     provider: this.id,
                     external: true
                 },
-                async execute(args) {
+                async execute(args, execution) {
                     const raw = client._rawName(bridged);
-                    return client.callTool(raw, args || {});
+                    return executeCanonicalAction({
+                        context: contextFromExecution(execution),
+                        capabilityId: "damar.mcp",
+                        operation: "call",
+                        arguments: { serverId: client.id, tool: raw, arguments: args || {} },
+                        expectedPostcondition: { expect: { completed: { op: "eq", value: true } } }
+                    });
                 }
                 // TIDAK ada flag `bridged` di sini. Flag itu memberi tahu
                 // ToolExecutor "sudah dijaga registry inti" — benar untuk
