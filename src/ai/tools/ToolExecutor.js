@@ -54,7 +54,11 @@ class ToolExecutor {
         let result;
 
         try {
-            result = await tool.execute(call.arguments, { exec: identity });
+            // Preserve the already-authenticated ingress envelope for tools
+            // that are Manager adapters.  `identity` remains the normalized
+            // authorization view; the raw envelope is passed only as an
+            // opaque transport value and is still revalidated by Manager.
+            result = await tool.execute(call.arguments, { exec: identity, ingress: exec });
         }
         catch (error) {
 

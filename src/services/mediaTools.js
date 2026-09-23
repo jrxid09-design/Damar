@@ -304,11 +304,12 @@ function mediaTools() {
                 },
                 required: ["name"]
             },
-            execute: async ({ name, args }) => {
+            execute: async ({ name, args }, execution) => {
 
                 const desktop = require("./desktopControlService");
+                const { contextFromExecution } = require("./canonicalActionClient");
 
-                return desktop.openApp(name, args ?? "");
+                return desktop.openApp(name, args ?? "", contextFromExecution(execution));
 
             }
         }),
@@ -327,11 +328,12 @@ function mediaTools() {
                 },
                 required: ["field", "value"]
             },
-            execute: async ({ field, value }) => {
+            execute: async ({ field, value }, execution) => {
 
                 const desktop = require("./desktopControlService");
+                const { contextFromExecution } = require("./canonicalActionClient");
 
-                return desktop.fillForm(field, value);
+                return desktop.fillForm(field, value, contextFromExecution(execution));
 
             }
         }),
@@ -348,11 +350,12 @@ function mediaTools() {
                 },
                 required: ["text"]
             },
-            execute: async ({ text }) => {
+            execute: async ({ text }, execution) => {
 
                 const desktop = require("./desktopControlService");
+                const { contextFromExecution } = require("./canonicalActionClient");
 
-                return desktop.typeText(text);
+                return desktop.typeText(text, contextFromExecution(execution));
 
             }
         }),
@@ -369,11 +372,12 @@ function mediaTools() {
                 },
                 required: ["key"]
             },
-            execute: async ({ key }) => {
+            execute: async ({ key }, execution) => {
 
                 const desktop = require("./desktopControlService");
+                const { contextFromExecution } = require("./canonicalActionClient");
 
-                return desktop.pressKey(key);
+                return desktop.pressKey(key, contextFromExecution(execution));
 
             }
         }),
@@ -392,11 +396,12 @@ function mediaTools() {
                 },
                 required: ["x", "y"]
             },
-            execute: async ({ x, y }) => {
+            execute: async ({ x, y }, execution) => {
 
                 const desktop = require("./desktopControlService");
+                const { contextFromExecution } = require("./canonicalActionClient");
 
-                return desktop.moveMouse(x, y);
+                return desktop.moveMouse(x, y, contextFromExecution(execution));
 
             }
         }),
@@ -415,11 +420,12 @@ function mediaTools() {
                     y: { type: "number", description: "Koordinat Y opsional." }
                 }
             },
-            execute: async ({ button, x, y }) => {
+            execute: async ({ button, x, y }, execution) => {
 
                 const desktop = require("./desktopControlService");
+                const { contextFromExecution } = require("./canonicalActionClient");
 
-                return desktop.clickMouse(button ?? "left", x ?? null, y ?? null);
+                return desktop.clickMouse(button ?? "left", x ?? null, y ?? null, contextFromExecution(execution));
 
             }
         }),
@@ -430,11 +436,13 @@ function mediaTools() {
                 "Lihat daftar jendela/aplikasi yang sedang terbuka di komputer " +
                 "pengguna. Pakai untuk membidik target sebelum mengendalikan.",
             parameters: { type: "object", properties: {} },
-            execute: async () => {
+            execute: async (_, execution) => {
 
                 const desktop = require("./desktopControlService");
+                const { contextFromExecution } = require("./canonicalActionClient");
 
-                const windows = await desktop.listWindows();
+                const windowsResult = await desktop.listWindows(contextFromExecution(execution));
+                const windows = windowsResult?.evidenceSummary?.observedEvidence?.windows ?? [];
 
                 return { count: windows.length, windows };
 
