@@ -61,29 +61,38 @@ function isBytes(value) {
     return Buffer.isBuffer(value) || value instanceof Uint8Array;
 }
 
-/** Caller input is checked before authority. A player or recorder the caller
- *  names must be one this module actually ships; anything else is refused. */
-function parameterProblem(operation, parameters) {
+/** Caller input is read exactly once. A getter that answers differently on a
+ *  second read cannot swap the binary between the check and the spawn. */
+function readParameters(operation, parameters) {
     const p = parameters && typeof parameters === "object" ? parameters : {};
+    const out = {};
     switch (operation) {
         case "probeOutput":
-            if (p.player !== undefined && !PLAYERS.includes(p.player)) return "PLAYER_UNKNOWN";
-            return null;
+            out.player = p.player;
+            if (out.player !== undefined && !PLAYERS.includes(out.player)) return "PLAYER_UNKNOWN";
+            return out;
         case "play":
-            if (!PLAYERS.includes(p.player)) return "PLAYER_UNKNOWN";
-            if (!isBytes(p.audio) || p.audio.length === 0) return "AUDIO_MALFORMED";
-            return null;
+            out.player = p.player;
+            out.audio = isBytes(p.audio) ? Buffer.from(p.audio) : p.audio;
+            if (!PLAYERS.includes(out.player)) return "PLAYER_UNKNOWN";
+            if (!isBytes(out.audio) || out.audio.length === 0) return "AUDIO_MALFORMED";
+            return out;
         case "probeInput":
-            if (p.recorder !== undefined && !RECORDERS.includes(p.recorder)) return "RECORDER_UNKNOWN";
-            return null;
+            out.recorder = p.recorder;
+            if (out.recorder !== undefined && !RECORDERS.includes(out.recorder)) return "RECORDER_UNKNOWN";
+            return out;
         case "capture":
-            if (!RECORDERS.includes(p.recorder)) return "RECORDER_UNKNOWN";
-            if (!Number.isFinite(p.durationMs) || p.durationMs <= 0 || p.durationMs > 60000) return "DURATION_MALFORMED";
-            return null;
+            out.recorder = p.recorder;
+            out.durationMs = p.durationMs;
+            if (!RECORDERS.includes(out.recorder)) return "RECORDER_UNKNOWN";
+            if (!Number.isFinite(out.durationMs) || out.durationMs <= 0 || out.durationMs > 60000) return "DURATION_MALFORMED";
+            return out;
         case "level":
-            if (!RECORDERS.includes(p.recorder)) return "RECORDER_UNKNOWN";
-            if (!Number.isFinite(p.frames) || p.frames <= 0 || p.frames > 16000) return "FRAMES_MALFORMED";
-            return null;
+            out.recorder = p.recorder;
+            out.frames = p.frames;
+            if (!RECORDERS.includes(out.recorder)) return "RECORDER_UNKNOWN";
+            if (!Number.isFinite(out.frames) || out.frames <= 0 || out.frames > 16000) return "FRAMES_MALFORMED";
+            return out;
         default:
             return "OPERATION_UNBOUND";
     }
@@ -132,8 +141,8 @@ function run(spawnImpl, cmd, args, { timeoutMs = 30000, collect = false } = {}) 
         child.once("error", err => { clearTimeout(timer); reject(err); });
         child.once("exit", code => {
             clearTimeout(timer);
-            if (code && code !== 0) reject(new Error(`exit ${code}`));
-            else resolve(collect ? Buffer.concat(chunks) : Buffer.alloc(0));
+            if (code === 0) resolve(collect ? Buffer.concat(chunks) : Buffer.alloc(0));
+            else reject(new Error(code === null ? "killed" : `exit ${code}`));
         });
     });
 }
@@ -233,11 +242,11 @@ function createVoiceCapabilityRuntime({
     const runtime = {
         async execute({ operation, parameters = {}, requestId, identity = {}, scope = [], nowMs = Date.now(), signal = null } = {}) {
             if (!OPERATIONS.includes(operation)) return { outcome: OUTCOME.REFUSED, reason: "OPERATION_UNBOUND", capabilityId, operation };
-            const problem = parameterProblem(operation, parameters);
-            if (problem) return { outcome: OUTCOME.REFUSED, reason: problem, capabilityId, operation };
+            const snap = readParameters(operation, parameters);
+            if (typeof snap === "string") return { outcome: OUTCOME.REFUSED, reason: snap, capabilityId, operation };
             // The audio bytes are digested, not passed through: a buffer is not
             // inert data, and its content is bound into the request digest.
-            const bound = parameters.audio ? { ...parameters, audio: digestAudio(parameters.audio), audioBytes: Buffer.from(parameters.audio).toString("base64") } : { ...parameters };
+            const bound = snap.audio ? { ...snap, audio: digestAudio(snap.audio), audioBytes: Buffer.from(snap.audio).toString("base64") } : { ...snap };
             const auth = await authorize({ identity, scope, nowMs });
             if (!auth.allowed) {
                 return { ok: false, denied: true, outcome: OUTCOME.DENIED, state: auth.state, capabilityId, operation, reason: auth.reason };
