@@ -1,5 +1,6 @@
 const { AITool } = require("../ai/tools");
 const kali = require("./bridge");
+const { executeCanonicalAction, contextFromExecution } = require("../services/canonicalActionClient");
 
 /**
  * Tool Kali Linux — Damar menguasai arsenal Kali lewat satu jembatan.
@@ -38,7 +39,18 @@ function kaliTools() {
             // Risiko destruktif ditegakkan lewat riskCatalog.DESTRUCTIVE
             // (gerbang konfirmasi), bukan field di sini — AITool tak
             // menyimpan metadata.
-            execute: async ({ command, cwd, timeout }) => kali.run(command, { cwd, timeout })
+            execute: async ({ command, cwd, timeout }, execution) => executeCanonicalAction({
+                context: contextFromExecution(execution),
+                capabilityId: "damar.kali",
+                operation: "run",
+                arguments: { command, cwd: cwd ?? null, timeout: timeout ?? 300000 },
+                expectedPostcondition: { expect: {
+                    commandDigestMatches: { op: "eq", value: true },
+                    cwdMatches: { op: "eq", value: true },
+                    timeoutMatches: { op: "eq", value: true },
+                    commandOk: { op: "eq", value: true }
+                } }
+            })
         }),
 
         new AITool({
