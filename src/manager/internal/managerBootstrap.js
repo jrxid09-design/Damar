@@ -984,7 +984,17 @@ function composeManagerInternal({
             request, lifecycleState: lifecycleForVerification, outcome: outcomeV,
             actionIntentId: intent.intentId, authorityEvidence, executionId,
             verificationId: verification.verificationId,
-            evidenceSummary: { verificationState: verification.verificationState },
+            // Lane 4 owns sanitization and provenance of observed evidence.
+            // Preserve only that detached, declarative observation for a
+            // verified Manager outcome; never expose the raw actuator report
+            // as if it were world truth.
+            evidenceSummary: {
+                verificationState: verification.verificationState,
+                ...(verification.verificationState === VSTATE_L4.VERIFIED_SUCCESS &&
+                    verification.observedEvidence && typeof verification.observedEvidence === "object"
+                    ? { observedEvidence: verification.observedEvidence }
+                    : {})
+            },
             detail: verification.verificationState === VSTATE_L4.VERIFIED_SUCCESS
                 ? "action verified against the expected postcondition"
                 : verification.verificationState === VSTATE_L4.VERIFIED_FAILURE
