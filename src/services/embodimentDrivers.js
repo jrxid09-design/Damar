@@ -13,6 +13,7 @@ const kaliBridge = require("../kali/bridge");
 
 const pexec = promisify(execFile);
 const CACHE_DIR = path.join(os.tmpdir(), "damar-media");
+const CACHE_CAP_BYTES = 500 * 1024 * 1024;
 const DESKTOP_APPS = Object.freeze({ notepad: "notepad.exe", calculator: "calc.exe", browser: "msedge.exe", edge: "msedge.exe", chrome: "chrome.exe", code: "code" });
 const observations = new Map();
 
@@ -26,6 +27,21 @@ function videoId(parameters) { const id = stringArg(parameters, "videoId", 32).t
 function shellCommand(parameters) { const command = stringArg(parameters, "command", 1024).trim(); const cwd = parameters?.cwd == null ? null : stringArg(parameters, "cwd", 1024); const timeout = parameters?.timeout == null ? 300000 : Number(parameters.timeout); if (!Number.isSafeInteger(timeout) || timeout < 1000 || timeout > 600000) throw new Error("invalid timeout"); return { command, cwd, timeout }; }
 function mediaBin() { return process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"; }
 function mediaOutput(id) { fs.mkdirSync(CACHE_DIR, { recursive: true }); return path.join(CACHE_DIR, `${id}.mp4`); }
+function pruneMediaCache() {
+    try {
+        const files = fs.readdirSync(CACHE_DIR).map(name => {
+            const file = path.join(CACHE_DIR, name);
+            const stat = fs.statSync(file);
+            return { file, size: stat.size, mtime: stat.mtimeMs };
+        }).filter(entry => Number.isFinite(entry.size)).sort((a, b) => a.mtime - b.mtime);
+        let total = files.reduce((sum, entry) => sum + entry.size, 0);
+        for (const entry of files) {
+            if (total <= CACHE_CAP_BYTES) break;
+            try { fs.unlinkSync(entry.file); total -= entry.size; } catch { /* best effort */ }
+        }
+    }
+    catch { /* cache cleanup cannot make a successful effect fail */ }
+}
 
 async function mediaDriver({ operation, parameters }) {
     const id = videoId(parameters); const url = `https://www.youtube.com/watch?v=${id}`;
@@ -40,6 +56,7 @@ async function mediaDriver({ operation, parameters }) {
     try { await pexec(mediaBin(), ["--extractor-args", "youtube:player_client=mweb", "-f", "18/best[ext=mp4][acodec!=none][vcodec!=none]", "-o", output, "--retries", "3", "--fragment-retries", "3", "--no-warnings", "--no-playlist", "--no-part", url], { timeout: 180000, windowsHide: true, maxBuffer: 1024 * 1024 }); }
     catch (error) { try { if (fs.statSync(output).size <= 0) fs.unlinkSync(output); } catch {} throw error; }
     if (!fs.existsSync(output) || fs.statSync(output).size <= 0) throw new Error("media output postcondition failed");
+    pruneMediaCache();
     return { outcome: "EXECUTED", ok: true, videoId: id, output, bytes: fs.statSync(output).size, binding: { videoId: id, output } };
 }
 

@@ -53,6 +53,8 @@ test("recovered service adapters fail closed without Manager context and own no 
     for (const source of [desktopSource, labSource, mediaSource, backupSource]) {
         assert.doesNotMatch(source, /node:child_process|child_process|\bspawn\s*\(|\bexecFile\s*\(/);
     }
+    assert.match(labSource, /channelType:\s*["']console["']/);
+    assert.match(labSource, /desktop\.openApp\("code", project\.dir/);
     const desktop = require("../../src/services/desktopControlService");
     const media = require("../../src/services/streamResolver");
     assert.equal((await desktop.openApp("notepad")).effectInvoked, false);
