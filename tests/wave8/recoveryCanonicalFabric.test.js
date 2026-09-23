@@ -13,7 +13,8 @@ test("recovery embodiment capabilities are admitted by the canonical Lane 2 regi
     for (const [capabilityId, operation, args] of [
         ["damar.media", "download", { videoId: "dQw4w9WgXcQ" }],
         ["damar.desktop", "listWindows", {}],
-        ["damar.backup", "copy", { source: "C:/source", dest: "C:/destination" }]
+        ["damar.backup", "copy", { source: "C:/source", dest: "C:/destination" }],
+        ["damar.kali", "run", { command: "printf governed", cwd: null, timeout: 300000 }]
     ]) {
         const intent = lane2.admit(JSON.stringify({ schemaVersion: 1, capabilityId, operation, arguments: args }));
         assert.equal(intent.capabilityId, capabilityId);
