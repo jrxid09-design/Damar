@@ -1,7 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { spawn } = require("node:child_process");
 const JsonStore = require("../core/config/JsonStore");
 const telemetry = require("./telemetryService");
 
@@ -53,30 +52,13 @@ function remove(id) {
     return { removed: id };
 }
 
-function copy(source, dest) {
-    return new Promise(resolve => {
-        try { fs.mkdirSync(dest, { recursive: true }); } catch { /* biarkan spawn yang gagal */ }
-        let cmd, args;
-        if (process.platform === "win32") {
-            // /E subfolder termasuk kosong; TANPA /MIR agar tak menghapus apa pun.
-            cmd = "robocopy";
-            args = [source, dest, "/E", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NP"];
-        }
-        else {
-            cmd = "rsync";
-            args = ["-a", source.replace(/\/?$/, "/"), dest.replace(/\/?$/, "/")];
-        }
-        let out = "";
-        const p = spawn(cmd, args, { windowsHide: true });
-        p.stdout?.on("data", d => (out += d));
-        p.stderr?.on("data", d => (out += d));
-        p.on("error", e => resolve({ ok: false, code: -1, log: e.message }));
-        p.on("close", code => {
-            // robocopy: 0-7 sukses, >=8 error. rsync: 0 sukses.
-            const ok = process.platform === "win32" ? code < 8 : code === 0;
-            resolve({ ok, code, log: out.slice(-2000) });
-        });
-    });
+async function copy(source, dest) {
+    // INGRESS, NEVER AUTHORITY. robocopy/rsync runs only inside the
+    // Manager-owned backup capability, and only for absolute paths.
+    const result = await require("../manager/bootstrap").getBackupCapabilityRuntime()
+        .execute({ operation: "copy", parameters: { source, dest } });
+    if (result.outcome !== "EXECUTED_VERIFIED") return { ok: false, code: -1, log: result.reason ?? "" };
+    return { ok: true, code: result.result.code, log: "" };
 }
 
 async function run(id) {

@@ -336,6 +336,15 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
   /** W8-IW1 — Manager-owned accessor for the media resolve capability.
    *  streamResolver is INGRESS, NEVER AUTHORITY. This accessor grants nothing. */
   /** W8-IW1 — Manager-owned accessor for desktop control. Grants nothing. */
+  /** W8-IW1 — Manager-owned accessor for backup copies. Grants nothing. */
+  function getBackupCapabilityRuntime() {
+      return require("./internal/backupCapabilities").backupRuntime();
+  }
+
+  function installBackupCapabilityRuntime(runtime) {
+      return require("./internal/backupCapabilities").installBackupCapabilityRuntime(runtime);
+  }
+
   function getDesktopCapabilityRuntime() {
       return require("./internal/desktopCapabilities").desktopRuntime();
   }
@@ -373,6 +382,8 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
       getAdbCapabilityRuntime,
       installAdbCapabilityRuntime,
       isAdbCapabilityRuntime,
+      getBackupCapabilityRuntime,
+      installBackupCapabilityRuntime,
       getDesktopCapabilityRuntime,
       installDesktopCapabilityRuntime,
       getMediaCapabilityRuntime,
