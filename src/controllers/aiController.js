@@ -274,7 +274,10 @@ class AIController {
                 // Identitas BERPROVENANCE dari gerbang token (C2):
                 // role hanya superadmin bila kredensial pemilik sah.
                 role: req.authIdentity?.role ?? "user",
-                sessionId: req.authIdentity?.sessionId ?? `console:${channelOf(req)}`
+                sessionId: req.authIdentity?.sessionId ?? `console:${channelOf(req)}`,
+                // Optional one-use Owner/Admin proof.  It is forwarded as
+                // opaque ingress evidence; Lane 2 alone verifies it.
+                authProof: req.body?.authProof ?? null
             });
 
             return response.success(res, "Chat completed", result);
@@ -335,7 +338,10 @@ class AIController {
                 model,
                 temperature,
                 maxTokens,
-                channel: channelOf(req)
+                channel: channelOf(req),
+                role: req.authIdentity?.role ?? "user",
+                sessionId: req.authIdentity?.sessionId ?? `console:${channelOf(req)}`,
+                authProof: req.body?.authProof ?? null
             })) {
 
                 if (aborted) {
