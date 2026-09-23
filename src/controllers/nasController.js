@@ -78,7 +78,20 @@ class NasController {
     }
 
     async runBackup(req, res, next) {
-        try { return response.success(res, "Backup dijalankan", await backup.run(req.params.id)); }
+        try {
+            // Preserve the authenticated transport envelope.  Backup remains
+            // fail-closed when the route has no genuine Lane-2 proof; it must
+            // never manufacture a grant or fall back to the old launcher.
+            const sessionId = req.authIdentity?.sessionId ?? `nas:${req.ip ?? "unknown"}`;
+            const context = {
+                channelType: "console",
+                channelId: sessionId,
+                sessionId,
+                peer: req.ip ?? "unknown",
+                authProof: req.body?.authProof ?? null
+            };
+            return response.success(res, "Backup dijalankan", await backup.run(req.params.id, context));
+        }
         catch (error) { return response.error(res, error.message, 400); }
     }
 
