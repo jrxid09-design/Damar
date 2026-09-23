@@ -333,6 +333,16 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
 
   /** W8-IW1 — Manager-owned accessor for the voice I/O capability runtime.
    *  Voice providers are INGRESS, NEVER AUTHORITY. This accessor grants nothing. */
+  /** W8-IW1 — Manager-owned accessor for the media resolve capability.
+   *  streamResolver is INGRESS, NEVER AUTHORITY. This accessor grants nothing. */
+  function getMediaCapabilityRuntime() {
+      return require("./internal/mediaCapabilities").mediaRuntime();
+  }
+
+  function installMediaCapabilityRuntime(runtime) {
+      return require("./internal/mediaCapabilities").installMediaCapabilityRuntime(runtime);
+  }
+
   function getVoiceCapabilityRuntime() {
       return require("./internal/voiceCapabilities").voiceRuntime();
   }
@@ -354,6 +364,8 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
       getAdbCapabilityRuntime,
       installAdbCapabilityRuntime,
       isAdbCapabilityRuntime,
+      getMediaCapabilityRuntime,
+      installMediaCapabilityRuntime,
       getVoiceCapabilityRuntime,
       installVoiceCapabilityRuntime
       // R4-04/DB-02: no wave6 install/seam primitive is exported from the

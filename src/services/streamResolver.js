@@ -1,10 +1,6 @@
-const { execFile } = require("node:child_process");
-const { promisify } = require("node:util");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
-
-const pexec = promisify(execFile);
 
 /** Folder cache media terunduh. */
 const CACHE_DIR = path.join(os.tmpdir(), "damar-media");
@@ -54,48 +50,6 @@ function pruneCache() {
  * cukup untuk diputar langsung di Console (daemon & Console satu mesin).
  */
 
-let cachedBin = null;
-let cachedDeno = null;   // "" = sudah dicari, tak ada.
-
-/** Pindai folder paket WinGet untuk sebuah exe. */
-function scanWinget(exeName) {
-    try {
-        const pkgRoot = path.join(process.env.LOCALAPPDATA ?? "", "Microsoft", "WinGet", "Packages");
-        for (const dir of fs.readdirSync(pkgRoot)) {
-            const exe = path.join(pkgRoot, dir, exeName);
-            if (fs.existsSync(exe)) return exe;
-        }
-    }
-    catch { /* folder tak ada */ }
-    return null;
-}
-
-/** Temukan biner yt-dlp: PATH dulu, lalu lokasi pemasangan WinGet. */
-function resolveBin() {
-
-    if (cachedBin) return cachedBin;
-
-    const links = path.join(process.env.LOCALAPPDATA ?? "", "Microsoft", "WinGet", "Links", "yt-dlp.exe");
-
-    cachedBin = [links, scanWinget("yt-dlp.exe")].find(c => c && fs.existsSync(c)) ?? "yt-dlp";
-    return cachedBin;
-
-}
-
-/**
- * Runtime JavaScript (deno) untuk yt-dlp. Tanpa ini yt-dlp tak dapat
- * memecahkan parameter `n` YouTube dan turun ke client fallback yang
- * streamnya bisa TER-THROTTLE / tak stabil (video macet-macet). Dengan
- * deno, yt-dlp memakai web client penuh → stream lancar. Dikembalikan
- * path deno bila ada, atau null.
- */
-function resolveDeno() {
-    if (cachedDeno !== null) return cachedDeno || null;
-    const links = path.join(process.env.LOCALAPPDATA ?? "", "Microsoft", "WinGet", "Links", "deno.exe");
-    cachedDeno = [links, scanWinget("deno.exe")].find(c => c && fs.existsSync(c)) ?? "";
-    return cachedDeno || null;
-}
-
 /**
  * Kembalikan URL stream progresif untuk sebuah video YouTube.
  * @param {string} videoId  id 11-karakter, atau URL watch lengkap.
@@ -110,33 +64,13 @@ async function resolveStream(videoId) {
         ? id
         : `https://www.youtube.com/watch?v=${id}`;
 
-    const deno = resolveDeno();
-
-    try {
-        const { stdout } = await pexec(
-            resolveBin(),
-            [
-                // Pakai deno bila ada → pecahkan param `n`, stream penuh
-                // (tanpa ini video macet karena client fallback throttled).
-                ...(deno ? ["--js-runtimes", `deno:${deno}`] : []),
-                // itag 18 (mp4 360p, audio+video satu berkas) → paling
-                // kompatibel dengan <video>. Fallback: mp4 progresif apa
-                // pun yang punya audio DAN video (bukan DASH terpisah).
-                "-f", "18/best[ext=mp4][acodec!=none][vcodec!=none]",
-                "-g",
-                "--no-warnings",
-                "--no-playlist",
-                url
-            ],
-            { timeout: 20000, windowsHide: true, maxBuffer: 1024 * 1024 }
-        );
-
-        const link = String(stdout).trim().split("\n")[0].trim();
-        return link.startsWith("http") ? link : null;
-    }
-    catch {
-        return null;   // yt-dlp tak ada / video tak bisa diekstrak
-    }
+    // INGRESS, NEVER AUTHORITY. yt-dlp runs only inside the Manager-owned
+    // media capability, and only for a validated video id.
+    const id11 = id.match(/[A-Za-z0-9_-]{11}/)?.[0];
+    if (!id11) return null;
+    const result = await require("../manager/bootstrap").getMediaCapabilityRuntime()
+        .execute({ operation: "resolve", parameters: { videoId: id11 } });
+    return result.outcome === "EXECUTED_VERIFIED" ? result.result.url : null;
 
 }
 
@@ -171,34 +105,10 @@ async function downloadMedia(videoId) {
     }
     catch { /* belum ada */ }
 
-    const deno = resolveDeno();
-    const url = `https://www.youtube.com/watch?v=${id}`;
-
     try {
-        await pexec(
-            resolveBin(),
-            [
-                ...(deno ? ["--js-runtimes", `deno:${deno}`] : []),
-                // Klien mweb: itag 18 progresifnya BISA diunduh. Klien
-                // default (android_vr) memberi URL yang "403 Forbidden"
-                // saat diunduh — itu sebab video "unavailable" (unduhan
-                // gagal -> jatuh ke embed). web/tv butuh PO-token/DRM.
-                "--extractor-args", "youtube:player_client=mweb",
-                "-f", "18/best[ext=mp4][acodec!=none][vcodec!=none]",
-                "-o", out,
-                // 429 saat unduh (YouTube membatasi laju) diserap dengan
-                // retry+jeda, bukan langsung gagal. Inilah yang memunculkan
-                // pesan "429" walau video akhirnya jadi.
-                "--retries", "10",
-                "--fragment-retries", "10",
-                "--retry-sleep", "2",
-                "--no-warnings",
-                "--no-playlist",
-                "--no-part",
-                url
-            ],
-            { timeout: 180000, windowsHide: true, maxBuffer: 1024 * 1024 }
-        );
+        const result = await require("../manager/bootstrap").getMediaCapabilityRuntime()
+            .execute({ operation: "download", parameters: { videoId: id } });
+        if (result.outcome !== "EXECUTED_VERIFIED") return null;
 
         const ok = fs.existsSync(out) && fs.statSync(out).size > 0;
         if (ok) pruneCache();   // jaga total cache ≤ 500 MB
