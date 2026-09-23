@@ -1,0 +1,45 @@
+"use strict";
+
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const ROOT = path.resolve(__dirname, "../..");
+
+test("recovery embodiment capabilities are admitted by the canonical Lane 2 registry", () => {
+    const { createCanonicalActionFacade } = require("../../src/action/bootstrap");
+    const lane2 = createCanonicalActionFacade();
+    for (const [capabilityId, operation, args] of [
+        ["damar.media", "download", { videoId: "dQw4w9WgXcQ" }],
+        ["damar.desktop", "listWindows", {}],
+        ["damar.backup", "copy", { source: "C:/source", dest: "C:/destination" }]
+    ]) {
+        const intent = lane2.admit(JSON.stringify({ schemaVersion: 1, capabilityId, operation, arguments: args }));
+        assert.equal(intent.capabilityId, capabilityId);
+        assert.equal(intent.operation, operation);
+        assert.ok(Array.isArray(intent.scope) && intent.scope.length > 0);
+    }
+});
+
+test("recovery wiring uses the existing canonical composition and has no private execution runtime", () => {
+    const bootstrap = fs.readFileSync(path.join(ROOT, "src/action/bootstrap.js"), "utf8");
+    const wiring = fs.readFileSync(path.join(ROOT, "src/action/capabilities/embodimentWiring.js"), "utf8");
+    assert.match(bootstrap, /wireEmbodimentCapabilities/);
+    assert.match(bootstrap, /wireEmbodimentActuators/);
+    assert.match(bootstrap, /wireEmbodimentVerifiers/);
+    assert.doesNotMatch(wiring, /new\s+CanonicalCapabilityExecution\s*\(/);
+    assert.doesNotMatch(wiring, /createCanonicalReplayLedger\s*\(/);
+    assert.doesNotMatch(wiring, /loadAndEvaluateAuthority\s*\(/);
+});
+
+test("canonical production facades retain least-privilege surfaces after recovery wiring", () => {
+    const bootstrap = require("../../src/action/bootstrap");
+    assert.deepEqual(Object.keys(bootstrap.createCanonicalActuationFacade()).sort(), [
+        "execute", "isCanonicalExecutionRequest", "isCanonicalExecutionResult"
+    ]);
+    assert.deepEqual(Object.keys(bootstrap.createCanonicalVerificationFacade()).sort(), [
+        "compensate", "isCanonicalCompensationPlan", "isCanonicalVerificationRequest",
+        "isCanonicalVerificationResult", "verify"
+    ]);
+});

@@ -819,8 +819,22 @@ function createCanonicalActionFacade() {
                 registrar: capabilityRuntime.registrars.core
             });
 
-            canonicalTrustedScopeBindings = { ...VISUAL_MODE_SCOPE_BINDINGS, ...RF_CONTROL_SCOPE_BINDINGS, ...diagnosticProbeWiring.SCOPE_BINDINGS };
-            canonicalWiringRecord = Object.freeze({ visual: wiring, rfControl: rfWiring, diagnosticProbe: probeWiring });
+            // W8 recovery: embodiment capabilities are registered through the
+            // SAME canonical Lane 2 registrar.  Their drivers are installed
+            // later over the SAME Lane 3 registry and their verifiers over the
+            // SAME Lane 4 composition; no per-capability runtime is created.
+            const embodimentWiring = require("./capabilities/embodimentWiring");
+            const embodiment = embodimentWiring.wireEmbodimentCapabilities({
+                registrar: capabilityRuntime.registrars.core
+            });
+
+            canonicalTrustedScopeBindings = {
+                ...VISUAL_MODE_SCOPE_BINDINGS,
+                ...RF_CONTROL_SCOPE_BINDINGS,
+                ...diagnosticProbeWiring.SCOPE_BINDINGS,
+                ...embodiment.scopeBindings
+            };
+            canonicalWiringRecord = Object.freeze({ visual: wiring, rfControl: rfWiring, diagnosticProbe: probeWiring, embodiment });
 
             // DB02-D: genuine availability observation. AVAILABLE iff the
             // probe's ExternalCapabilityFederation candidate is genuinely
@@ -2042,6 +2056,10 @@ function createCanonicalActuationFacade() {
             actuatorRegistry,
             wiring: canonicalWiringRecord.diagnosticProbe
         });
+        require("./capabilities/embodimentWiring").wireEmbodimentActuators({
+            actuatorRegistry,
+            wiring: canonicalWiringRecord.embodiment
+        });
         const dispatcher = composeDispatcher3({
             lane2Facade,
             actuatorRegistry,
@@ -2128,13 +2146,15 @@ function createCanonicalVerificationFacade() {
             throw new Error("DIAGNOSTIC_PROBE_WIRING_FAILED: capability wiring record missing at verification composition time");
         }
         const diagnosticProbeWiring = require("../federation/capabilities/diagnosticProbeWiring");
+        const embodimentWiring = require("./capabilities/embodimentWiring");
         canonicalVerification = createCanonicalVerificationComposition({
             deps: {
                 createLane3Facade: createCanonicalActuationFacade,
                 createLane2Facade: createCanonicalActionFacade
             },
             trustedVerifiers: [
-                diagnosticProbeWiring.wireVerifier({ wiring: wiringRecord.diagnosticProbe })
+                diagnosticProbeWiring.wireVerifier({ wiring: wiringRecord.diagnosticProbe }),
+                ...embodimentWiring.wireEmbodimentVerifiers({ wiring: wiringRecord.embodiment })
             ]
         });
     }
