@@ -37,7 +37,12 @@ function readParameters(parameters) {
     const p = parameters && typeof parameters === "object" ? parameters : {};
     const source = typeof p.source === "string" ? p.source : "";
     const dest = typeof p.dest === "string" ? p.dest : "";
-    const ok = v => path.isAbsolute(v) && !/[\r\n]/.test(v);
+    // A drive or a UNC share only. path.isAbsolute("/MIR") is true on
+    // Windows, and robocopy would read that argument as a switch.
+    const ok = v => path.isAbsolute(v) && !/[\r\n]/.test(v)
+        && (process.platform === "win32"
+            ? /^[A-Za-z]:[\\/]/.test(v) || /^\\\\[^\\]/.test(v)
+            : v.startsWith("/") && !v.includes("\0"));
     if (!ok(source) || !ok(dest)) return "PATH_MALFORMED";
     return { source, dest };
 }
