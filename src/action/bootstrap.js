@@ -804,6 +804,7 @@ function prepareCanonicalExecution(entry = {}) {
             eventType: "action.execution.reserve",
             source: "canonicalAction",
             metadata: {
+                digest: String(entry.digest ?? "").slice(0, 128),
                 capabilityId: String(entry.capabilityId ?? "").slice(0, 256),
                 operation: String(entry.operation ?? "").slice(0, 128),
                 executionId: String(entry.executionId ?? "").slice(0, 128),
@@ -825,6 +826,7 @@ function acknowledgeCanonicalExecution(entry = {}) {
             eventType: "action.execution.ack",
             source: "canonicalAction",
             metadata: {
+                digest: String(entry.digest ?? "").slice(0, 128),
                 capabilityId: String(entry.capabilityId ?? "").slice(0, 256),
                 operation: String(entry.operation ?? "").slice(0, 128),
                 executionId: String(entry.executionId ?? "").slice(0, 128),
@@ -1964,7 +1966,8 @@ function composeDispatcher3({
                 capabilityId: request.capabilityId,
                 operation: request.operation,
                 executionId: request.executionId,
-                intentId: request.intentId
+                intentId: request.intentId,
+                digest: contentKey
             });
             if (!prepared || prepared.ok !== true) {
                 lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
@@ -2125,7 +2128,8 @@ function composeDispatcher3({
                     executionId: request.executionId,
                     intentId: request.intentId,
                     principal: request.principal,
-                    authorityGeneration: request.authorityGeneration
+                    authorityGeneration: request.authorityGeneration,
+                    digest: contentKey
                 });
             } catch {
                 acknowledgement = { ok: false };
