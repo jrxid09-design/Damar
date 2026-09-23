@@ -763,10 +763,36 @@ function resolveLane2AuthorityStore() {
  * completion. Resolution is live so construction order cannot capture a
  * pre-composition deny-only ledger. The owner-trust audit gate is the durable
  * sink owner; a missing or failed sink is a hard failure before success. */
+function canonicalAuditPort() {
+    const composition = require("../authority/productionComposition").getProductionAuthorityComposition();
+    const ownerTrust = composition?.ownerTrust;
+    if (!ownerTrust || ownerTrust.durable !== true || typeof ownerTrust.auditGate?.audit !== "function") return null;
+    return ownerTrust.auditGate.audit;
+}
+
+function prepareCanonicalExecution(entry = {}) {
+    try {
+        const audit = canonicalAuditPort();
+        if (typeof audit !== "function") return { ok: false, reason: "DURABLE_AUDIT_UNAVAILABLE" };
+        audit({
+            eventType: "action.execution.reserve",
+            source: "canonicalAction",
+            metadata: {
+                capabilityId: String(entry.capabilityId ?? "").slice(0, 256),
+                operation: String(entry.operation ?? "").slice(0, 128),
+                executionId: String(entry.executionId ?? "").slice(0, 128),
+                intentId: String(entry.intentId ?? "").slice(0, 128)
+            }
+        });
+        return { ok: true };
+    } catch (error) {
+        return { ok: false, reason: String(error?.code ?? error?.message ?? "AUDIT_RESERVE_FAILED").slice(0, 128) };
+    }
+}
+
 function acknowledgeCanonicalExecution(entry = {}) {
     try {
-        const composition = require("../authority/productionComposition").getProductionAuthorityComposition();
-        const audit = composition?.ownerTrust?.auditGate?.audit;
+        const audit = canonicalAuditPort();
         if (typeof audit !== "function") return { ok: false, reason: "AUDIT_GATE_UNAVAILABLE" };
         audit({
             eventType: "action.execution.ack",
@@ -1869,6 +1895,32 @@ function composeDispatcher3({
             parameters: request.parameters
         });
         requestBrandSet3.add(gatedRequest);
+
+        // A durable reservation is a precondition of invoking a consequential
+        // actuator. If the canonical durable audit root is not installed, the
+        // effect must not start.
+        if (auditAcknowledger !== null) {
+            const prepared = prepareCanonicalExecution({
+                capabilityId: request.capabilityId,
+                operation: request.operation,
+                executionId: request.executionId,
+                intentId: request.intentId
+            });
+            if (!prepared || prepared.ok !== true) {
+                lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+                const refused = buildExecutionResult3({
+                    executionRequest: request,
+                    state: RESULT_STATE3.FAILED,
+                    lifecycleTrace: lifecycle.trace,
+                    startedAtMs: dispatchStartMs,
+                    completedAtMs: canonicalClockNow3(),
+                    failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION,
+                    failureDetail: "durable audit reservation unavailable"
+                });
+                noteCompleted(contentKey, { result: refused, request, intentId: request.intentId });
+                return refused;
+            }
+        }
 
         const execPromise = (async () => {
             invocationCount++;
