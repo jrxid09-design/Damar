@@ -41,6 +41,10 @@ const DESKTOP_APPS = Object.freeze({
 const CACHE_DIR = path.join(os.tmpdir(), "damar-media");
 const observations = new Map();
 
+function parametersDigest(parameters) {
+    return crypto.createHash("sha256").update(JSON.stringify(parameters ?? {})).digest("hex");
+}
+
 function remember(executionId, result) {
     if (typeof executionId !== "string" || executionId.length === 0) return;
     if (observations.size >= 4096) observations.delete(observations.keys().next().value);
@@ -94,7 +98,9 @@ function videoId(parameters) {
 }
 
 function shellCommand(parameters) {
-    const command = stringArg(parameters, "command", 16384).trim();
+    // Keep the actuator contract no wider than the canonical Manager payload
+    // bound, so the authorized digest can never cover a different command.
+    const command = stringArg(parameters, "command", 1024).trim();
     const cwd = parameters?.cwd == null ? null : stringArg(parameters, "cwd", 1024);
     const timeout = parameters?.timeout == null ? 300000 : Number(parameters.timeout);
     if (!Number.isSafeInteger(timeout) || timeout < 1000 || timeout > 600000) throw new Error("invalid timeout");
@@ -239,7 +245,9 @@ async function kaliDriver({ operation, parameters }) {
         binding: {
             commandDigest: crypto.createHash("sha256").update(request.command).digest("hex"),
             cwd: request.cwd,
-            timeout: request.timeout
+            timeout: request.timeout,
+            runtime: process.platform,
+            environment: process.env.DAMAR_KALI_DISTRO || "<detected>"
         },
         verificationClass: "exit-code-and-binding"
     };
@@ -264,10 +272,12 @@ function wireEmbodimentCapabilities({ registrar } = {}) {
             return Object.freeze([
                 `command-sha256:${crypto.createHash("sha256").update(request.command).digest("hex")}`,
                 `cwd:${request.cwd ?? "<default>"}`,
-                `timeout:${request.timeout}`
+                `timeout:${request.timeout}`,
+                `runtime:${process.platform}`,
+                `environment:${process.env.DAMAR_KALI_DISTRO || "<detected>"}`
             ]);
         }
-        return Object.freeze([`desktop:${op}`]);
+        return Object.freeze([`desktop:${op}`, `parameters-sha256:${parametersDigest(args)}`]);
     } });
     const scopeBindings = { [MEDIA]: {}, [DESKTOP]: {}, [BACKUP]: {}, [KALI]: {} };
     for (const [id, ops] of [[MEDIA, MEDIA_OPS], [DESKTOP, DESKTOP_OPS], [BACKUP, BACKUP_OPS], [KALI, KALI_OPS]]) {
@@ -294,7 +304,7 @@ function wireEmbodimentActuators({ actuatorRegistry, wiring } = {}) {
     if (!actuatorRegistry || typeof actuatorRegistry.register !== "function" || !wiring) throw new TypeError("canonical actuator wiring required");
     const bindings = [];
     bindings.push(actuatorRegistry.register({ capabilityId: MEDIA, operations: MEDIA_OPS, capabilityIncarnationId: wiring.media.incarnationId, actuatorId: "act-damar-media", invoke: async ({ executionId, operation, parameters }) => { const result = await mediaDriver({ operation, parameters }); remember(executionId, result); return result; } }));
-    bindings.push(actuatorRegistry.register({ capabilityId: DESKTOP, operations: DESKTOP_OPS, capabilityIncarnationId: wiring.desktop.incarnationId, actuatorId: "act-damar-desktop", invoke: async ({ executionId, operation, parameters }) => { const result = await desktopDriver({ operation, parameters }); remember(executionId, result); return result; } }));
+    bindings.push(actuatorRegistry.register({ capabilityId: DESKTOP, operations: DESKTOP_OPS, capabilityIncarnationId: wiring.desktop.incarnationId, actuatorId: "act-damar-desktop", invoke: async ({ executionId, operation, parameters }) => { const result = await desktopDriver({ operation, parameters }); const bound = { ...result, binding: { ...(result.binding ?? {}), parametersDigest: parametersDigest(parameters) } }; remember(executionId, bound); return bound; } }));
     bindings.push(actuatorRegistry.register({ capabilityId: BACKUP, operations: BACKUP_OPS, capabilityIncarnationId: wiring.backup.incarnationId, actuatorId: "act-damar-backup", invoke: async ({ executionId, parameters }) => { const result = await backupDriver({ parameters }); remember(executionId, result); return result; } }));
     bindings.push(actuatorRegistry.register({ capabilityId: KALI, operations: KALI_OPS, capabilityIncarnationId: wiring.kali.incarnationId, actuatorId: "act-damar-kali", invoke: async ({ executionId, operation, parameters }) => { const result = await kaliDriver({ operation, parameters }); remember(executionId, result); return result; } }));
     return Object.freeze(bindings);
@@ -319,7 +329,7 @@ function wireEmbodimentVerifiers({ wiring } = {}) {
         }),
         definition(DESKTOP, DESKTOP_OPS, wiring.desktop, (ctx) => {
             const result = observations.get(ctx.executionId) ?? {};
-            return { operation: ctx.operation, invoked: result.ok === true, verificationClass: result.verificationClass ?? "unknown", windows: ctx.operation === "listWindows" && Array.isArray(result.windows) ? result.windows : undefined, observed: ctx.operation === "listWindows" ? Array.isArray(result.windows) : result.ok === true };
+            return { operation: ctx.operation, invoked: result.ok === true, parametersMatch: result.binding?.parametersDigest === parametersDigest(ctx.parameters ?? {}), verificationClass: result.verificationClass ?? "unknown", windows: ctx.operation === "listWindows" && Array.isArray(result.windows) ? result.windows : undefined, observed: ctx.operation === "listWindows" ? Array.isArray(result.windows) : false };
         }),
         definition(BACKUP, BACKUP_OPS, wiring.backup, (ctx) => {
             const result = observations.get(ctx.executionId) ?? {};
@@ -344,6 +354,8 @@ function wireEmbodimentVerifiers({ wiring } = {}) {
                 commandDigestMatches: result.binding?.commandDigest === digest,
                 cwdMatches: result.cwd === requested.cwd,
                 timeoutMatches: result.timeout === requested.timeout,
+                runtimeMatches: result.binding?.runtime === process.platform,
+                environmentMatches: result.binding?.environment === (process.env.DAMAR_KALI_DISTRO || "<detected>"),
                 commandOk: result.ok === true && Number(result.code ?? 0) === 0,
                 code: Number.isSafeInteger(result.code) ? result.code : null
             };

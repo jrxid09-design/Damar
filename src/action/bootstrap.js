@@ -777,28 +777,15 @@ function resolveCanonicalReplayStore() {
         const port = canonicalAuditPort();
         if (!port || typeof port.audit !== "function" || !port.ledger || typeof port.ledger.list !== "function") return null;
         const { createCanonicalReplayLedger } = require("../manager/internal/canonicalReplayLedger");
-        const anchor = {
-            read() {
-                const rows = port.ledger.list({ eventType: "action.replay.anchor" }, { order: "desc", limit: 1 });
-                const metadata = rows[0]?.metadata;
-                return {
-                    seq: Number.isSafeInteger(metadata?.replaySeq) ? metadata.replaySeq : 0,
-                    token: typeof metadata?.replayEventHmac === "string" ? metadata.replayEventHmac : null
-                };
-            },
-            commit(seq, eventHmac) {
-                port.audit({
-                    eventType: "action.replay.anchor",
-                    source: "canonicalAction",
-                    metadata: { replaySeq: seq, replayEventHmac: eventHmac }
-                });
-            }
-        };
+        const { createCanonicalReplayWitness } = require("../manager/internal/canonicalReplayWitness");
         const path = require("node:path");
         const os = require("node:os");
+        const witness = createCanonicalReplayWitness(
+            process.env.DAMAR_ACTION_REPLAY_WITNESS || path.join(os.homedir(), ".damar", "canonical-action-replay.witness.jsonl")
+        );
         canonicalReplayStore = createCanonicalReplayLedger({
             file: process.env.DAMAR_ACTION_REPLAY_DB || path.join(os.homedir(), ".damar", "canonical-action-replay.sqlite"),
-            rollbackAnchor: anchor
+            rollbackAnchor: witness
         });
     } catch {
         // Missing substrate/dependency remains a hard fail-closed condition;

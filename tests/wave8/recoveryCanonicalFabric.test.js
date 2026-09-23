@@ -57,3 +57,15 @@ test("recovered service adapters fail closed without Manager context and own no 
     assert.equal((await desktop.openApp("notepad")).effectInvoked, false);
     assert.equal(await media.downloadMedia("dQw4w9WgXcQ"), null);
 });
+
+test("replay rollback witness is durable and independent from the Owner Trust audit stream", () => {
+    const dir = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "damar-replay-witness-"));
+    const file = path.join(dir, "witness.jsonl");
+    const { createCanonicalReplayWitness } = require("../../src/manager/internal/canonicalReplayWitness");
+    const witness = createCanonicalReplayWitness(file);
+    assert.deepEqual(witness.read(), { seq: 0, token: null });
+    witness.commit(1, "event-hmac-1");
+    assert.deepEqual(createCanonicalReplayWitness(file).read(), { seq: 1, token: "event-hmac-1" });
+    assert.throws(() => witness.commit(0, "old"), /ROLLBACK/);
+    fs.rmSync(dir, { recursive: true, force: true });
+});
