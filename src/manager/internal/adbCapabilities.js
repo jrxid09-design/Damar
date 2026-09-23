@@ -81,8 +81,9 @@ function adbArgs(serial, rest) {
 }
 
 /** Resolve the target serial WITHOUT starting a consequential command.
- *  An explicit serial is trusted as the caller's binding; otherwise the only
- *  ready device is selected, and ambiguity fails closed. */
+ *  An explicit serial is the caller's binding. With none given, the only ready
+ *  device is selected and handed back so the caller can authorize THAT device
+ *  before anything consequential runs. Ambiguity fails closed. */
 async function resolveSerial(exec, serial) {
     if (typeof serial === "string" && serial.trim() !== "") return serial.trim();
     const { stdout } = await exec(ADB_BIN, ["devices", "-l"], OPTS);
@@ -260,11 +261,23 @@ function createAdbCapabilityRuntime({
     // The device a request actually drives must be inside the grant's scope.
     // The caller does not get to name a scope that disagrees with parameters.serial:
     // a grant for device:DEV1 authorizes DEV1 and nothing else.
-    function deviceScope(operation, parameters, requestedScope) {
+    function grantedDevices(grantedScope) {
+        return (Array.isArray(grantedScope) ? grantedScope : []).filter(s => typeof s === "string" && s.startsWith("device:"));
+    }
+
+    function deviceScope(operation, parameters, requestedScope, grantedScope) {
         const declared = Array.isArray(requestedScope) ? requestedScope.filter(s => typeof s === "string") : [];
         if (operation === "devices" || operation === "connect") return declared;
         const serial = typeof parameters?.serial === "string" ? parameters.serial.trim() : "";
-        if (serial === "") return declared;
+        // No serial: the device is chosen later from what is plugged in, so the
+        // grant must already name exactly one device and the request may not name a
+        // different one. Anything else fails closed.
+        if (serial === "") {
+            const granted = grantedDevices(grantedScope);
+            if (granted.length !== 1) return ["device:UNSPECIFIED"];
+            if (declared.some(s => s.startsWith("device:") && s !== granted[0])) return ["device:CONTRADICTED"];
+            return declared.length === 0 ? granted : declared;
+        }
         const token = `device:${serial}`;
         const named = declared.filter(s => s.startsWith("device:"));
         // No declared device: the driven device is the whole scope.
@@ -301,7 +314,17 @@ function createAdbCapabilityRuntime({
             }
             const problem = parameterProblem(operation, parameters);
             if (problem) return { outcome: OUTCOME.REFUSED, reason: problem, capabilityId, operation };
-            const boundScope = deviceScope(operation, parameters, scope);
+            let grant = null;
+            if (authorityStore) { try { grant = await authorityStore.getCapability(capabilityId); } catch { grant = null; } }
+            const boundScope = deviceScope(operation, parameters, scope, grant?.payload?.scope ?? []);
+            const granted = grantedDevices(grant?.payload?.scope ?? []);
+            const serial = typeof parameters?.serial === "string" ? parameters.serial.trim() : "";
+            // The grant names exactly one device and the caller named none, so that
+            // device is the target. Stamped in before the driver, which otherwise
+            // would discover a device on its own.
+            const boundParameters = serial === "" && granted.length === 1 && !["devices", "connect"].includes(operation)
+                ? { ...parameters, serial: granted[0].slice("device:".length) }
+                : parameters;
             const auth = await authorize({ identity, scope: boundScope, nowMs });
             if (!auth.allowed) {
                 return {
@@ -310,7 +333,7 @@ function createAdbCapabilityRuntime({
                     capabilityId, operation, reason: auth.reason, detail: auth.detail ?? null
                 };
             }
-            return bridge.execute({ capabilityId, operation, parameters, evaluation: auth.evaluation, requestId, signal });
+            return bridge.execute({ capabilityId, operation, parameters: boundParameters, evaluation: auth.evaluation, requestId, signal });
         },
         invocationCount(operation) {
             return operation ? (invocations.get(operation) ?? 0) : [...invocations.values()].reduce((n, c) => n + c, 0);
