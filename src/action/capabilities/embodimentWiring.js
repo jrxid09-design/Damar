@@ -229,6 +229,16 @@ function wireEmbodimentCapabilities({ registrar } = {}) {
     });
 }
 
+function observeEmbodimentAvailability({ registry, wiring } = {}) {
+    if (!registry || typeof registry.observeAvailability !== "function" || !wiring) throw new TypeError("canonical capability registry required");
+    // Availability here means that the canonical, fixed-argv driver binding
+    // is composed. Host-tool absence is an invocation failure and is verified
+    // as such; it is never converted into an authority grant or a success.
+    for (const entry of [wiring.media, wiring.desktop, wiring.backup]) {
+        registry.observeAvailability(entry.id, "AVAILABLE", { generation: 1, incarnationId: entry.incarnationId });
+    }
+}
+
 function wireEmbodimentActuators({ actuatorRegistry, wiring } = {}) {
     if (!actuatorRegistry || typeof actuatorRegistry.register !== "function" || !wiring) throw new TypeError("canonical actuator wiring required");
     const bindings = [];
@@ -263,5 +273,5 @@ function wireEmbodimentVerifiers({ wiring } = {}) {
 
 module.exports = Object.freeze({
     MEDIA, DESKTOP, BACKUP, MEDIA_OPS, DESKTOP_OPS, BACKUP_OPS, DESCRIPTORS,
-    wireEmbodimentCapabilities, wireEmbodimentActuators, wireEmbodimentVerifiers
+    wireEmbodimentCapabilities, observeEmbodimentAvailability, wireEmbodimentActuators, wireEmbodimentVerifiers
 });

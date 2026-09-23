@@ -861,6 +861,10 @@ function createCanonicalActionFacade() {
                     incarnationId: entry.incarnationId
                 });
             }
+            embodimentWiring.observeEmbodimentAvailability({
+                registry: capabilityRuntime.registry,
+                wiring: embodiment
+            });
         }
         catch (error) {
             throw Object.assign(
