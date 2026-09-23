@@ -16,16 +16,19 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
+const kaliBridge = require("../../kali/bridge");
 
 const pexec = promisify(execFile);
 
 const MEDIA = "damar.media";
 const DESKTOP = "damar.desktop";
 const BACKUP = "damar.backup";
+const KALI = "damar.kali";
 
 const MEDIA_OPS = Object.freeze(["resolve", "download"]);
 const DESKTOP_OPS = Object.freeze(["openApp", "fillForm", "typeText", "pressKey", "listWindows", "moveMouse", "click"]);
 const BACKUP_OPS = Object.freeze(["copy"]);
+const KALI_OPS = Object.freeze(["run"]);
 
 const DESKTOP_APPS = Object.freeze({
     notepad: "notepad.exe",
@@ -60,7 +63,8 @@ function descriptor(id, operations, description) {
 const DESCRIPTORS = Object.freeze([
     descriptor(MEDIA, MEDIA_OPS, "Governed media resolution and download."),
     descriptor(DESKTOP, DESKTOP_OPS, "Governed fixed-allowlist desktop effects."),
-    descriptor(BACKUP, BACKUP_OPS, "Governed non-destructive source-to-destination backup copy.")
+    descriptor(BACKUP, BACKUP_OPS, "Governed non-destructive source-to-destination backup copy."),
+    descriptor(KALI, KALI_OPS, "Governed caller-defined Kali shell execution with explicit binding.")
 ]);
 
 function requireObject(value, label) {
@@ -87,6 +91,14 @@ function videoId(parameters) {
     const id = stringArg(parameters, "videoId", 32).trim();
     if (!/^[A-Za-z0-9_-]{11}$/.test(id)) throw new Error("invalid videoId");
     return id;
+}
+
+function shellCommand(parameters) {
+    const command = stringArg(parameters, "command", 16384).trim();
+    const cwd = parameters?.cwd == null ? null : stringArg(parameters, "cwd", 1024);
+    const timeout = parameters?.timeout == null ? 300000 : Number(parameters.timeout);
+    if (!Number.isSafeInteger(timeout) || timeout < 1000 || timeout > 600000) throw new Error("invalid timeout");
+    return { command, cwd, timeout };
 }
 
 function mediaBin() {
@@ -204,6 +216,24 @@ async function backupDriver({ parameters }) {
     return { outcome: "EXECUTED", ok: true, source, dest, code, binding: { source, dest }, verificationClass: "destination-exists" };
 }
 
+async function kaliDriver({ parameters }) {
+    const request = shellCommand(parameters);
+    const result = await kaliBridge.run(request.command, { cwd: request.cwd, timeout: request.timeout });
+    return {
+        outcome: "EXECUTED",
+        ...result,
+        command: request.command,
+        cwd: request.cwd,
+        timeout: request.timeout,
+        binding: {
+            commandDigest: crypto.createHash("sha256").update(request.command).digest("hex"),
+            cwd: request.cwd,
+            timeout: request.timeout
+        },
+        verificationClass: "exit-code-and-binding"
+    };
+}
+
 function wireEmbodimentCapabilities({ registrar } = {}) {
     if (!registrar || typeof registrar.register !== "function") throw new TypeError("canonical capability registrar required");
     const record = {};
@@ -218,13 +248,13 @@ function wireEmbodimentCapabilities({ registrar } = {}) {
         if (id === BACKUP) return Object.freeze([`source:${safePath(args.source)}`, `dest:${safePath(args.dest)}`]);
         return Object.freeze([`desktop:${op}`]);
     } });
-    const scopeBindings = { [MEDIA]: {}, [DESKTOP]: {}, [BACKUP]: {} };
-    for (const [id, ops] of [[MEDIA, MEDIA_OPS], [DESKTOP, DESKTOP_OPS], [BACKUP, BACKUP_OPS]]) {
+    const scopeBindings = { [MEDIA]: {}, [DESKTOP]: {}, [BACKUP]: {}, [KALI]: {} };
+    for (const [id, ops] of [[MEDIA, MEDIA_OPS], [DESKTOP, DESKTOP_OPS], [BACKUP, BACKUP_OPS], [KALI, KALI_OPS]]) {
         for (const op of ops) scopeBindings[id][op] = scope(id, op).resolver;
         Object.freeze(scopeBindings[id]);
     }
     return Object.freeze({
-        media: record[MEDIA], desktop: record[DESKTOP], backup: record[BACKUP],
+        media: record[MEDIA], desktop: record[DESKTOP], backup: record[BACKUP], kali: record[KALI],
         scopeBindings: Object.freeze(scopeBindings)
     });
 }
@@ -234,7 +264,7 @@ function observeEmbodimentAvailability({ registry, wiring } = {}) {
     // Availability here means that the canonical, fixed-argv driver binding
     // is composed. Host-tool absence is an invocation failure and is verified
     // as such; it is never converted into an authority grant or a success.
-    for (const entry of [wiring.media, wiring.desktop, wiring.backup]) {
+    for (const entry of [wiring.media, wiring.desktop, wiring.backup, wiring.kali]) {
         registry.observeAvailability(entry.id, "AVAILABLE", { generation: 1, incarnationId: entry.incarnationId });
     }
 }
@@ -245,6 +275,7 @@ function wireEmbodimentActuators({ actuatorRegistry, wiring } = {}) {
     bindings.push(actuatorRegistry.register({ capabilityId: MEDIA, operations: MEDIA_OPS, capabilityIncarnationId: wiring.media.incarnationId, actuatorId: "act-damar-media", invoke: async ({ executionId, operation, parameters }) => { const result = await mediaDriver({ operation, parameters }); remember(executionId, result); return result; } }));
     bindings.push(actuatorRegistry.register({ capabilityId: DESKTOP, operations: DESKTOP_OPS, capabilityIncarnationId: wiring.desktop.incarnationId, actuatorId: "act-damar-desktop", invoke: async ({ executionId, operation, parameters }) => { const result = await desktopDriver({ operation, parameters }); remember(executionId, result); return result; } }));
     bindings.push(actuatorRegistry.register({ capabilityId: BACKUP, operations: BACKUP_OPS, capabilityIncarnationId: wiring.backup.incarnationId, actuatorId: "act-damar-backup", invoke: async ({ executionId, parameters }) => { const result = await backupDriver({ parameters }); remember(executionId, result); return result; } }));
+    bindings.push(actuatorRegistry.register({ capabilityId: KALI, operations: KALI_OPS, capabilityIncarnationId: wiring.kali.incarnationId, actuatorId: "act-damar-kali", invoke: async ({ executionId, parameters }) => { const result = await kaliDriver({ parameters }); remember(executionId, result); return result; } }));
     return Object.freeze(bindings);
 }
 
@@ -281,11 +312,23 @@ function wireEmbodimentVerifiers({ wiring } = {}) {
                 exists: Boolean(result.dest && fs.existsSync(result.dest) && fs.statSync(result.dest).isDirectory()),
                 commandOk: result.ok === true
             };
+        }),
+        definition(KALI, KALI_OPS, wiring.kali, (ctx) => {
+            const result = observations.get(ctx.executionId) ?? {};
+            const requested = shellCommand(ctx.parameters ?? {});
+            const digest = crypto.createHash("sha256").update(requested.command).digest("hex");
+            return {
+                commandDigestMatches: result.binding?.commandDigest === digest,
+                cwdMatches: result.cwd === requested.cwd,
+                timeoutMatches: result.timeout === requested.timeout,
+                commandOk: result.ok === true && Number(result.code ?? 0) === 0,
+                code: Number.isSafeInteger(result.code) ? result.code : null
+            };
         })
     ]);
 }
 
 module.exports = Object.freeze({
-    MEDIA, DESKTOP, BACKUP, MEDIA_OPS, DESKTOP_OPS, BACKUP_OPS, DESCRIPTORS,
+    MEDIA, DESKTOP, BACKUP, KALI, MEDIA_OPS, DESKTOP_OPS, BACKUP_OPS, KALI_OPS, DESCRIPTORS,
     wireEmbodimentCapabilities, observeEmbodimentAvailability, wireEmbodimentActuators, wireEmbodimentVerifiers
 });
