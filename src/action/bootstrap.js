@@ -2008,12 +2008,12 @@ function composeDispatcher3({
             let acknowledgement;
             try {
                 acknowledgement = auditAcknowledger({
-                    capabilityId: result.capabilityId,
-                    operation: result.operation,
-                    executionId: result.executionId,
-                    intentId: result.intentId,
-                    principal: result.principal,
-                    authorityGeneration: result.authorityGeneration
+                    capabilityId: request.capabilityId,
+                    operation: request.operation,
+                    executionId: request.executionId,
+                    intentId: request.intentId,
+                    principal: request.principal,
+                    authorityGeneration: request.authorityGeneration
                 });
             } catch {
                 acknowledgement = { ok: false };
