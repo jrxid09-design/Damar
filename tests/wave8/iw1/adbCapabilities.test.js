@@ -210,6 +210,21 @@ test("adb/binding: a grant for both devices still rejects a request that declare
     assert.equal(fx.calls[0].args[1], "DEV2");
 });
 
+test("adb/binding: devices lists only the device the grant names", async () => {
+    const fx = execDouble("List of devices attached\nDEV1 device\nDEV2 device\n");
+    const runtime = withSubstrate({
+        authorityStore: grantStore([{ capabilityId: "android.adb", scope: ["device:DEV1"] }]),
+        acknowledge: ack, execFileImpl: fx.exec
+    });
+    const result = await runtime.execute({ operation: "devices", parameters: {}, scope: ["device:DEV1"] });
+    assert.equal(result.outcome, "EXECUTED_VERIFIED");
+    assert.deepEqual(result.result.devices.map(d => d.serial), ["DEV1"]);
+
+    const both = await runtime.execute({ operation: "devices", parameters: {}, scope: ["device:DEV1", "device:DEV2"] });
+    assert.equal(both.outcome, "REFUSED");
+    assert.equal(both.reason, "DEVICE_CONTRADICTED");
+});
+
 test("adb/binding: connect cannot target an address other than the device it declares", async () => {
     const fx = execDouble("connected to 1.2.3.4:5555\n");
     const runtime = withSubstrate({
