@@ -1,9 +1,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { spawn } = require("node:child_process");
 const JsonStore = require("../core/config/JsonStore");
 const telemetry = require("./telemetryService");
+const { executeCanonicalAction } = require("./canonicalActionClient");
 
 /**
  * backupService — salinan terjadwal folder → NAS. NON-DESTRUKTIF:
@@ -53,52 +53,36 @@ function remove(id) {
     return { removed: id };
 }
 
-function copy(source, dest) {
-    return new Promise(resolve => {
-        try { fs.mkdirSync(dest, { recursive: true }); } catch { /* biarkan spawn yang gagal */ }
-        let cmd, args;
-        if (process.platform === "win32") {
-            // /E subfolder termasuk kosong; TANPA /MIR agar tak menghapus apa pun.
-            cmd = "robocopy";
-            args = [source, dest, "/E", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NP"];
-        }
-        else {
-            cmd = "rsync";
-            args = ["-a", source.replace(/\/?$/, "/"), dest.replace(/\/?$/, "/")];
-        }
-        let out = "";
-        const p = spawn(cmd, args, { windowsHide: true });
-        p.stdout?.on("data", d => (out += d));
-        p.stderr?.on("data", d => (out += d));
-        p.on("error", e => resolve({ ok: false, code: -1, log: e.message }));
-        p.on("close", code => {
-            // robocopy: 0-7 sukses, >=8 error. rsync: 0 sukses.
-            const ok = process.platform === "win32" ? code < 8 : code === 0;
-            resolve({ ok, code, log: out.slice(-2000) });
-        });
+async function copy(source, dest, context = null) {
+    return executeCanonicalAction({
+        context,
+        capabilityId: "damar.backup",
+        operation: "copy",
+        arguments: { source, dest },
+        expectedPostcondition: { expect: { exists: { op: "eq", value: true }, commandOk: { op: "eq", value: true } } }
     });
 }
 
-async function run(id) {
+async function run(id, context = null) {
     const list = jobs();
     const job = list.find(j => j.id === id);
     if (!job) throw new Error("Job tak ditemukan.");
     telemetry.info(`[backup] mulai '${job.name}': ${job.source} → ${job.dest}`);
-    const r = await copy(job.source, job.dest);
+    const r = await copy(job.source, job.dest, context);
     job.lastRun = new Date().toISOString();
-    job.lastStatus = r.ok ? "ok" : "gagal";
-    job.lastLog = `exit ${r.code}\n${r.log}`.slice(-2000);
+    job.lastStatus = r.outcome === "COMPLETED" ? "ok" : "gagal";
+    job.lastLog = `${r.outcome ?? "UNKNOWN"} ${r.reason ?? ""}`.slice(-2000);
     save(list);
-    telemetry[r.ok ? "info" : "warn"](`[backup] '${job.name}' ${job.lastStatus} (exit ${r.code})`);
+    telemetry[job.lastStatus === "ok" ? "info" : "warn"](`[backup] '${job.name}' ${job.lastStatus} (${r.outcome ?? "unknown"})`);
 
     if (job.notify !== false) {
-        const emoji = r.ok ? "✅" : "⚠️";
+        const emoji = job.lastStatus === "ok" ? "✅" : "⚠️";
         require("./notifyService").send(
             `${emoji} Backup "${job.name}" ${job.lastStatus}.\n` +
             `${job.source} → ${job.dest}\n${new Date().toLocaleString("id-ID")}`
         );
     }
-    return { id, status: job.lastStatus, code: r.code };
+    return { id, status: job.lastStatus, outcome: r.outcome ?? "UNKNOWN", reason: r.reason ?? null };
 }
 
 async function tick() {
