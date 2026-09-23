@@ -167,6 +167,27 @@ test("adb/binding: principal and scope mismatch start nothing", async () => {
     assert.equal(fx.calls.length, 0);
 });
 
+test("adb/binding: a grant for both devices still rejects a request that declares one and drives the other", async () => {
+    const fx = execDouble("ok\n");
+    const runtime = withSubstrate({
+        authorityStore: grantStore([{ capabilityId: "android.adb", scope: ["device:DEV1", "device:DEV2"] }]),
+        acknowledge: ack, execFileImpl: fx.exec
+    });
+    const contradicted = await runtime.execute({
+        operation: "shell", parameters: { command: "id", serial: "DEV2" }, scope: ["device:DEV1"]
+    });
+    assert.equal(contradicted.denied, true);
+    assert.equal(contradicted.reason, "CAP_SCOPE_MISMATCH");
+    assert.equal(fx.calls.length, 0);
+
+    const honest = await runtime.execute({
+        operation: "shell", parameters: { command: "id", serial: "DEV2" }, scope: ["device:DEV2"]
+    });
+    assert.equal(honest.outcome, "EXECUTED_VERIFIED");
+    assert.equal(fx.calls.length, 1);
+    assert.equal(fx.calls[0].args[1], "DEV2");
+});
+
 test("adb/binding: a grant for one device cannot drive another", async () => {
     const fx = execDouble("ok\n");
     const runtime = withSubstrate({

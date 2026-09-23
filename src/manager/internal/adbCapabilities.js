@@ -266,8 +266,14 @@ function createAdbCapabilityRuntime({
         const serial = typeof parameters?.serial === "string" ? parameters.serial.trim() : "";
         if (serial === "") return declared;
         const token = `device:${serial}`;
-        if (declared.length === 0) return [token];
-        return declared.includes(token) ? declared : [...declared, token];
+        const named = declared.filter(s => s.startsWith("device:"));
+        // No declared device: the driven device is the whole scope.
+        if (named.length === 0) return [token];
+        // The declared device IS the driven device: submit it unchanged.
+        if (named.length === 1 && named[0] === token) return declared;
+        // Otherwise the caller named one device and drives another. No honest
+        // scope represents both, so the request carries a token no grant has.
+        return ["device:CONTRADICTED"];
     }
 
     async function authorize({ identity = {}, scope = [], nowMs = Date.now() } = {}) {
