@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "sha": "8420b515ee3eab18dfd1794f1455860d381c6fc1",
-  "measured_source_sha": "8420b515ee3eab18dfd1794f1455860d381c6fc1",
-  "generator_head_sha": "8420b515ee3eab18dfd1794f1455860d381c6fc1",
+  "sha": "0b3904dc346e0d002ec4c4f9d55a1a29116e9a8a",
+  "measured_source_sha": "0b3904dc346e0d002ec4c4f9d55a1a29116e9a8a",
+  "generator_head_sha": "0b3904dc346e0d002ec4c4f9d55a1a29116e9a8a",
   "sha_meaning": "measured_source_sha = the git HEAD the census read (the tree these counters describe). generator_head_sha = the HEAD the generator ran in; because the generator always writes its output, the commit carrying this file is normally the NEXT commit. `sha` is kept as an alias of measured_source_sha for older consumers.",
   "generatedFrom": "scripts/wave8-census.js",
   "counters": {
     "LEGACY_SECOND_PATH": 132,
-    "ACTION_CAPABLE_UNGOVERNED": 47,
+    "ACTION_CAPABLE_UNGOVERNED": 46,
     "UNCLASSIFIED_LEGACY_REACHABILITY": 0,
     "GOVERNED_SINK_SITES": 62,
     "REACHABLE_MODULES": 756,
@@ -25,8 +25,8 @@
       "src/cli/index.js": 0,
       "src/server.js": 132
     },
-    "action_capable_count": 47,
-    "advisory_count": 85,
+    "action_capable_count": 46,
+    "advisory_count": 86,
     "unclassified_count": 0,
     "census_findings_without_manifest_row": 0,
     "manifest_rows_without_census_evidence": 0
@@ -124,14 +124,6 @@
   ],
   "clusters": [
     {
-      "id": "C0-UNCLUSTERED-ACTION",
-      "hits": 1,
-      "action_capable": 1,
-      "files": 1,
-      "max_risk": "P0",
-      "priority": 1
-    },
-    {
       "id": "C10-VERIFICATION",
       "hits": 2,
       "action_capable": 2,
@@ -205,11 +197,11 @@
     },
     {
       "id": "C14-UNCLUSTERED-ADVISORY",
-      "hits": 7,
+      "hits": 8,
       "action_capable": 0,
-      "files": 2,
+      "files": 3,
       "max_risk": "P2",
-      "priority": 1007
+      "priority": 1008
     },
     {
       "id": "C1-AUTHORITY-STORE",
@@ -2369,23 +2361,23 @@
       "migration_status": "PENDING"
     },
     {
-      "id": "src/runtime/interactionBus/interactionBus.js:413:31:tool_handler_invocation",
+      "id": "src/runtime/interactionBus/interactionBus.js:413:31:canonical_handler_dispatch",
       "census_category": "LEGACY_SECOND_PATH",
       "source_file": "src/runtime/interactionBus/interactionBus.js",
       "line": 413,
       "column": 31,
-      "kind": "tool_handler_invocation",
+      "kind": "canonical_handler_dispatch",
       "snippet": ".handler(",
-      "action_capable": true,
-      "consequential": "YES",
+      "action_capable": false,
+      "consequential": "NO",
       "entrypoint": "src/server.js",
       "ingresses": [
         "src/server.js"
       ],
       "execution_path": "src/server.js -> src/voice/index.js -> src/voice/voiceRuntime.js -> src/integration/canonicalRuntimeComposition.js -> src/runtime/interactionBus/index.js -> src/runtime/interactionBus/interactionBus.js",
       "hops": 5,
-      "cluster": "C0-UNCLUSTERED-ACTION",
-      "risk": "P0",
+      "cluster": "C14-UNCLUSTERED-ADVISORY",
+      "risk": "P2",
       "symbol": "RECON_REQUIRED",
       "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
       "capability_family": "RECON_REQUIRED",
