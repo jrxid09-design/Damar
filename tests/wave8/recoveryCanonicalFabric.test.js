@@ -47,14 +47,16 @@ test("canonical production facades retain least-privilege surfaces after recover
 
 test("recovered service adapters fail closed without Manager context and own no process launcher", async () => {
     const desktopSource = fs.readFileSync(path.join(ROOT, "src/services/desktopControlService.js"), "utf8");
+    const labSource = fs.readFileSync(path.join(ROOT, "src/controllers/labController.js"), "utf8");
     const mediaSource = fs.readFileSync(path.join(ROOT, "src/services/streamResolver.js"), "utf8");
     const backupSource = fs.readFileSync(path.join(ROOT, "src/services/backupService.js"), "utf8");
-    for (const source of [desktopSource, mediaSource, backupSource]) {
+    for (const source of [desktopSource, labSource, mediaSource, backupSource]) {
         assert.doesNotMatch(source, /node:child_process|child_process|\bspawn\s*\(|\bexecFile\s*\(/);
     }
     const desktop = require("../../src/services/desktopControlService");
     const media = require("../../src/services/streamResolver");
     assert.equal((await desktop.openApp("notepad")).effectInvoked, false);
+    assert.equal((await desktop.openApp("code", "C:/workspace")).effectInvoked, false);
     assert.equal(await media.downloadMedia("dQw4w9WgXcQ"), null);
 });
 
