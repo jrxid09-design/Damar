@@ -210,6 +210,26 @@ test("adb/binding: a grant for both devices still rejects a request that declare
     assert.equal(fx.calls[0].args[1], "DEV2");
 });
 
+test("adb/binding: connect cannot target an address other than the device it declares", async () => {
+    const fx = execDouble("connected to 1.2.3.4:5555\n");
+    const runtime = withSubstrate({
+        authorityStore: grantStore([{ capabilityId: "android.adb", scope: ["device:1.2.3.4:5555"] }]),
+        acknowledge: ack, execFileImpl: fx.exec
+    });
+    const lied = await runtime.execute({
+        operation: "connect", parameters: { address: "9.9.9.9:5555" }, scope: ["device:1.2.3.4:5555"]
+    });
+    assert.equal(lied.outcome, "REFUSED");
+    assert.equal(lied.reason, "DEVICE_CONTRADICTED");
+    assert.equal(fx.calls.length, 0);
+
+    const honest = await runtime.execute({
+        operation: "connect", parameters: { address: "1.2.3.4:5555" }, scope: ["device:1.2.3.4:5555"]
+    });
+    assert.equal(honest.outcome, "EXECUTED_VERIFIED");
+    assert.equal(fx.calls.at(-1).args[1], "1.2.3.4:5555");
+});
+
 test("adb/binding: mutating the request during authorization cannot retarget the device", async () => {
     const fx = execDouble("ok\n");
     const parameters = { command: "id", serial: "DEV1" };
