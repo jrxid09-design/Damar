@@ -317,7 +317,16 @@ async function bootSubsystems() {
  * tanpa penjelasan — inilah sumber utama "kadang jalan kadang
  * tidak". Sekarang error itu ditangkap dan dijelaskan.
  */
-function listen(port, attemptsLeft = autoPortAttempts()) {
+async function listen(port, attemptsLeft = autoPortAttempts()) {
+
+    // Compose authority before opening the socket. A listening server must
+    // never expose a window in which Manager requests can race composition.
+    try {
+        await require("./authority/productionComposition").ensureProductionAuthorityComposed();
+    }
+    catch (error) {
+        logger.error?.(`Komposisi otoritas awal gagal (fail-closed): ${error.message}`);
+    }
 
     server = app.listen(port, host);
 
