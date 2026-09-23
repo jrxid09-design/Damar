@@ -14,9 +14,12 @@ function action(operation, parameters, context) {
         // Invocation-only desktop effects intentionally remain inconclusive
         // unless a domain verifier supplies independent evidence. listWindows
         // has a concrete observed data contract.
+        // Invocation-only effects cannot honestly be reported as VERIFIED.
+        // Omitting a postcondition makes Lane 4 preserve that uncertainty;
+        // listWindows has an actual observed data contract.
         expectedPostcondition: operation === "listWindows"
             ? { expect: { windows: { op: "type", value: "array" } } }
-            : { expect: { invoked: { op: "eq", value: true } } }
+            : null
     });
 }
 

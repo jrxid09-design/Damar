@@ -19,7 +19,7 @@ async function resolveStream(videoId, context = null) {
     if (!id) return null;
     const result = await executeCanonicalAction({
         context, capabilityId: "damar.media", operation: "resolve", arguments: { videoId: id },
-        expectedPostcondition: { expect: { url: { op: "type", value: "string" } } }
+        expectedPostcondition: { expect: { url: { op: "type", value: "string" }, bindingMatches: { op: "eq", value: true } } }
     });
     return result.outcome === "COMPLETED"
         ? result.evidenceSummary?.observedEvidence?.url ?? null
@@ -31,7 +31,7 @@ async function downloadMedia(videoId, context = null) {
     if (!id) return null;
     const result = await executeCanonicalAction({
         context, capabilityId: "damar.media", operation: "download", arguments: { videoId: id },
-        expectedPostcondition: { expect: { exists: { op: "eq", value: true }, bytes: { op: "gt", value: 0 } } }
+        expectedPostcondition: { expect: { exists: { op: "eq", value: true }, bytes: { op: "gt", value: 0 }, bindingMatches: { op: "eq", value: true } } }
     });
     if (result.outcome !== "COMPLETED") return null;
     return path.join(CACHE_DIR, `${id}.mp4`);
