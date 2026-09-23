@@ -274,8 +274,13 @@ function createAdbCapabilityRuntime({
         // different one. Anything else fails closed.
         if (serial === "") {
             const granted = grantedDevices(grantedScope);
+            const named = declared.filter(s => s.startsWith("device:"));
+            // The caller named a device it did not pass as a serial. With one granted
+            // device that name must be it; otherwise the request is a contradiction,
+            // refused before authority so an unscoped grant cannot skip it.
+            if (named.length > 1) return null;
+            if (named.length === 1 && (granted.length !== 1 || named[0] !== granted[0])) return null;
             if (granted.length !== 1) return ["device:UNSPECIFIED"];
-            if (declared.some(s => s.startsWith("device:") && s !== granted[0])) return null;
             return declared.length === 0 ? granted : declared;
         }
         const token = `device:${serial}`;
