@@ -1,31 +1,31 @@
 {
   "schemaVersion": 1,
-  "sha": "dcc86750c9af8558820002abbc45cfd996c00acf",
-  "measured_source_sha": "dcc86750c9af8558820002abbc45cfd996c00acf",
-  "generator_head_sha": "dcc86750c9af8558820002abbc45cfd996c00acf",
+  "sha": "075785c83b90a506dd6eb60268e80d85f0c7b908",
+  "measured_source_sha": "075785c83b90a506dd6eb60268e80d85f0c7b908",
+  "generator_head_sha": "075785c83b90a506dd6eb60268e80d85f0c7b908",
   "sha_meaning": "measured_source_sha = the git HEAD the census read (the tree these counters describe). generator_head_sha = the HEAD the generator ran in; because the generator always writes its output, the commit carrying this file is normally the NEXT commit. `sha` is kept as an alias of measured_source_sha for older consumers.",
   "generatedFrom": "scripts/wave8-census.js",
   "counters": {
-    "LEGACY_SECOND_PATH": 98,
-    "ACTION_CAPABLE_UNGOVERNED": 20,
+    "LEGACY_SECOND_PATH": 97,
+    "ACTION_CAPABLE_UNGOVERNED": 19,
     "UNCLASSIFIED_LEGACY_REACHABILITY": 0,
-    "GOVERNED_SINK_SITES": 89,
+    "GOVERNED_SINK_SITES": 91,
     "REACHABLE_MODULES": 763,
     "LAUNCHER_SINK_SITES": 3,
     "PRODUCTION_INGRESSES_ANALYZED": 2,
     "INGRESSES_WITH_UNGOVERNED_FINDINGS": 1
   },
   "reconciliation": {
-    "raw_sink_count": 98,
-    "manifest_row_count": 98,
-    "unique_module_count": 39,
-    "unique_row_id_count": 98,
+    "raw_sink_count": 97,
+    "manifest_row_count": 97,
+    "unique_module_count": 38,
+    "unique_row_id_count": 97,
     "production_ingresses_analyzed": 2,
     "ungoverned_findings_by_ingress": {
       "src/cli/index.js": 0,
-      "src/server.js": 98
+      "src/server.js": 97
     },
-    "action_capable_count": 20,
+    "action_capable_count": 19,
     "advisory_count": 78,
     "unclassified_count": 0,
     "census_findings_without_manifest_row": 0,
@@ -38,14 +38,14 @@
     ],
     "ungovernedByIngress": {
       "src/cli/index.js": 0,
-      "src/server.js": 98
+      "src/server.js": 97
     },
     "governedByIngress": {
-      "src/cli/index.js": 89,
-      "src/server.js": 89
+      "src/cli/index.js": 91,
+      "src/server.js": 91
     },
     "reachableModulesByIngress": {
-      "src/cli/index.js": 260,
+      "src/cli/index.js": 291,
       "src/server.js": 760
     }
   },
@@ -173,11 +173,11 @@
     },
     {
       "id": "C4-SERVICES-ACTUATION",
-      "hits": 28,
-      "action_capable": 5,
-      "files": 8,
+      "hits": 27,
+      "action_capable": 4,
+      "files": 7,
       "max_risk": "P0",
-      "priority": 28
+      "priority": 27
     },
     {
       "id": "C14-UNCLUSTERED-ADVISORY",
@@ -3052,37 +3052,6 @@
       "hops": 6,
       "cluster": "C4-SERVICES-ACTUATION",
       "risk": "P1",
-      "symbol": "RECON_REQUIRED",
-      "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
-      "capability_family": "RECON_REQUIRED",
-      "operation_type": "RECON_REQUIRED",
-      "authority_source": "RECON_REQUIRED",
-      "verification_mechanism": "RECON_REQUIRED",
-      "audit_mechanism": "RECON_REQUIRED",
-      "replay_durability": "RECON_REQUIRED",
-      "canonical_migration_destination": "RECON_REQUIRED",
-      "required_tests": "RECON_REQUIRED",
-      "classification": "H_UNKNOWN_REQUIRES_RECON",
-      "migration_status": "PENDING"
-    },
-    {
-      "id": "src/services/opencodeTools.js:1:19:process_shell",
-      "census_category": "LEGACY_SECOND_PATH",
-      "source_file": "src/services/opencodeTools.js",
-      "line": 1,
-      "column": 19,
-      "kind": "process_shell",
-      "snippet": "require(\"node:child_process\")",
-      "action_capable": true,
-      "consequential": "YES",
-      "entrypoint": "src/server.js",
-      "ingresses": [
-        "src/server.js"
-      ],
-      "execution_path": "src/server.js -> src/autonomy/index.js -> src/autonomy/GoalEngine.js -> src/services/opencodeTools.js",
-      "hops": 3,
-      "cluster": "C4-SERVICES-ACTUATION",
-      "risk": "P0",
       "symbol": "RECON_REQUIRED",
       "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
       "capability_family": "RECON_REQUIRED",
