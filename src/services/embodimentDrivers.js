@@ -10,12 +10,14 @@ const crypto = require("node:crypto");
 const { execFile, execFileSync } = require("node:child_process");
 const { promisify } = require("node:util");
 const kaliBridge = require("../kali/bridge");
+const terminals = require("../runtime/terminal/TerminalRuntime");
 
 const pexec = promisify(execFile);
 const MEDIA = "damar.media";
 const DESKTOP = "damar.desktop";
 const BACKUP = "damar.backup";
 const KALI = "damar.kali";
+const TERMINAL = "damar.terminal";
 const CACHE_DIR = path.join(os.tmpdir(), "damar-media");
 const CACHE_CAP_BYTES = 500 * 1024 * 1024;
 const DESKTOP_APPS = Object.freeze({ notepad: "notepad.exe", calculator: "calc.exe", browser: "msedge.exe", edge: "msedge.exe", chrome: "chrome.exe", code: "code" });
@@ -43,6 +45,7 @@ function probeEmbodimentAvailability() {
         ? path.join(process.env.SystemRoot || "C:\\Windows", "System32", "wsl.exe")
         : null;
     return Object.freeze({
+        [TERMINAL]: terminals.available ? "AVAILABLE" : "UNKNOWN",
         [MEDIA]: executableOnPath([mediaBin(), "yt-dlp"]) ? "AVAILABLE" : "UNKNOWN",
         [DESKTOP]: (powershell ? fs.existsSync(powershell) : executableOnPath("powershell")) ? "AVAILABLE" : "UNKNOWN",
         [BACKUP]: process.platform === "win32"
@@ -107,6 +110,16 @@ async function desktopDriver({ operation, parameters }) {
 function safePath(value) { const p = stringArg({ value }, "value", 1024); if (!path.isAbsolute(p)) throw new Error("backup paths must be absolute"); return path.normalize(p); }
 async function backupDriver({ parameters }) { const source = safePath(parameters?.source); const dest = safePath(parameters?.dest); if (!fs.existsSync(source) || !fs.statSync(source).isDirectory()) throw new Error("backup source directory missing"); fs.mkdirSync(dest, { recursive: true }); const args = process.platform === "win32" ? [source, dest, "/E", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NP"] : ["-a", `${source.replace(/\\?$/, "/")}`, `${dest.replace(/\\?$/, "/")}`]; const cmd = process.platform === "win32" ? "robocopy" : "rsync"; let result; try { result = await pexec(cmd, args, { timeout: 120000, windowsHide: true, maxBuffer: 1024 * 1024 }); } catch (error) { if (process.platform !== "win32" || error.code === undefined) throw error; result = error; } const code = Number(result?.code ?? 0); const ok = process.platform === "win32" ? code < 8 : code === 0; if (!ok) throw new Error(`backup command failed (${code})`); if (!fs.existsSync(dest) || !fs.statSync(dest).isDirectory()) throw new Error("backup destination postcondition failed"); return { outcome: "EXECUTED", ok: true, source, dest, code, binding: { source, dest }, verificationClass: "destination-exists" }; }
 async function kaliDriver({ operation, parameters }) { if (operation === "which") { const tool = stringArg(parameters, "tool", 128).replace(/[^\w.-]/g, ""); const result = await kaliBridge.which(tool); return { outcome: "EXECUTED", ok: true, operation: "which", tool, path: result }; } if (operation === "tools") return { outcome: "EXECUTED", ...(await kaliBridge.tools()), operation: "tools" }; if (operation === "status") return { outcome: "EXECUTED", ...(await kaliBridge.status()), operation: "status" }; const request = shellCommand(parameters); const result = await kaliBridge.run(request.command, { cwd: request.cwd, timeout: request.timeout }); const commandOk = result.ok === true && Number(result.code ?? 0) === 0; return { outcome: commandOk ? "EXECUTED" : "EXECUTED_UNVERIFIED", ...result, command: request.command, cwd: request.cwd, timeout: request.timeout, binding: { commandDigest: crypto.createHash("sha256").update(request.command).digest("hex"), cwd: request.cwd, timeout: request.timeout, runtime: process.platform, environment: process.env.DAMAR_KALI_DISTRO || "<detected>" }, verificationClass: "exit-code-and-binding" }; }
+async function terminalDriver({ operation, parameters = {} }) {
+    const purpose = stringArg(parameters, "purpose", 128);
+    if (operation === "list") return { outcome: "EXECUTED_UNVERIFIED", ok: true, operation, purpose, terminals: terminals.list().map(t => ({ id: t.id, purpose: t.purpose, status: t.status })) };
+    if (operation === "read") { const session = terminals.findByPurpose(purpose); if (!session) throw new Error("terminal not found"); return { outcome: "EXECUTED_UNVERIFIED", ok: true, operation, purpose, output: session.read() }; }
+    if (operation === "stop") { const session = terminals.findByPurpose(purpose); if (!session) throw new Error("terminal not found"); terminals.signal(session.id, "SIGINT"); return { outcome: "EXECUTED_UNVERIFIED", ok: true, operation, purpose }; }
+    const meta = terminals.ensureByPurpose({ purpose, name: purpose, shell: parameters.shell, cwd: parameters.cwd });
+    if (operation === "restart") { const existing = terminals.findByPurpose(purpose); if (existing) terminals.signal(existing.id, "SIGINT"); }
+    const result = await terminals.execute(meta.id, parameters.command, { expect: parameters.expect, timeoutMs: operation === "restart" || parameters.expect ? 30000 : 12000 });
+    return { outcome: "EXECUTED_UNVERIFIED", ok: true, operation, purpose, terminal: meta.id, matched: result.matched, output: result.output };
+}
 
 function verifyMedia(ctx) { const result = observation(ctx.executionId); if (ctx.operation === "download") { const output = typeof result.output === "string" ? result.output : ""; return { binding: result.videoId, bindingMatches: result.videoId === ctx.parameters?.videoId, exists: Boolean(output && fs.existsSync(output) && fs.statSync(output).size > 0), bytes: output && fs.existsSync(output) ? fs.statSync(output).size : 0 }; } const requestedId = typeof ctx.parameters?.videoId === "string" ? ctx.parameters.videoId : null; return { binding: result.videoId, bindingMatches: result.videoId === requestedId, url: typeof result.url === "string" && /^https?:\/\//.test(result.url) ? result.url : null }; }
 function independentlyListDesktopWindows() {
@@ -122,4 +135,4 @@ function verifyDesktop(ctx) { const result = observation(ctx.executionId); const
 function verifyBackup(ctx) { const result = observation(ctx.executionId); const source = typeof ctx.parameters?.source === "string" ? path.normalize(ctx.parameters.source) : null; const dest = typeof ctx.parameters?.dest === "string" ? path.normalize(ctx.parameters.dest) : null; return { source: result.source, dest: result.dest, sourceMatches: source !== null && result.source === source, destMatches: dest !== null && result.dest === dest, exists: Boolean(result.dest && fs.existsSync(result.dest) && fs.statSync(result.dest).isDirectory()), commandOk: result.ok === true }; }
 function verifyKali(ctx) { const result = observation(ctx.executionId); if (ctx.operation === "status" || ctx.operation === "tools") return { operation: ctx.operation, completed: result.outcome === "EXECUTED" }; if (ctx.operation === "which") return { operation: "which", toolMatches: result.tool === ctx.parameters?.tool?.replace(/[^\w.-]/g, ""), completed: result.outcome === "EXECUTED" }; const requested = shellCommand(ctx.parameters ?? {}); const digest = crypto.createHash("sha256").update(requested.command).digest("hex"); return { commandDigestMatches: result.binding?.commandDigest === digest, cwdMatches: result.cwd === requested.cwd, timeoutMatches: result.timeout === requested.timeout, runtimeMatches: result.binding?.runtime === process.platform, environmentMatches: result.binding?.environment === (process.env.DAMAR_KALI_DISTRO || "<detected>"), commandOk: result.ok === true && Number(result.code ?? 0) === 0, code: Number.isSafeInteger(result.code) ? result.code : null }; }
 
-module.exports = Object.freeze({ CACHE_DIR, MEDIA, DESKTOP, BACKUP, KALI, parametersDigest, remember, observation, requireObject, stringArg, videoId, shellCommand, probeEmbodimentAvailability, mediaDriver, desktopDriver, backupDriver, kaliDriver, verifyMedia, verifyDesktop, verifyBackup, verifyKali });
+module.exports = Object.freeze({ CACHE_DIR, TERMINAL, MEDIA, DESKTOP, BACKUP, KALI, parametersDigest, remember, observation, requireObject, stringArg, videoId, shellCommand, probeEmbodimentAvailability, mediaDriver, desktopDriver, backupDriver, kaliDriver, terminalDriver, verifyMedia, verifyDesktop, verifyBackup, verifyKali });

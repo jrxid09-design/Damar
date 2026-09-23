@@ -1,6 +1,7 @@
 const { AITool } = require("../ai/tools");
 
-const terminals = require("../runtime/terminal/TerminalRuntime");
+const { executeCanonicalAction, contextFromExecution } = require("./canonicalActionClient");
+const TERMINAL = "damar.terminal";
 
 /**
  * Tool AI untuk Terminal Runtime.
@@ -24,10 +25,11 @@ function terminalTools() {
                 "Lihat terminal yang sedang berjalan (id, nama, purpose, tipe, status). " +
                 "Cek ini DULU sebelum membuat terminal baru.",
             parameters: { type: "object", properties: {} },
-            execute: async () => ({
-                terminals: terminals.list().map(t => ({
-                    id: t.id, name: t.name, purpose: t.purpose, type: t.terminalType, status: t.status
-                }))
+            execute: async (_args, exec) => executeCanonicalAction({
+                context: contextFromExecution(exec?.ingress ?? exec),
+                capabilityId: TERMINAL,
+                operation: "list",
+                arguments: { purpose: "__list__" }
             })
         }),
 
@@ -49,10 +51,8 @@ function terminalTools() {
                 },
                 required: ["purpose", "command"]
             },
-            execute: async ({ purpose, command, expect, shell, cwd }) => {
-                const meta = terminals.ensureByPurpose({ purpose, name: purpose, shell, cwd });
-                const r = await terminals.execute(meta.id, command, { expect, timeoutMs: expect ? 30000 : 12000 });
-                return { terminal: meta.id, purpose, matched: r.matched, output: tail(r.output) };
+            execute: async ({ purpose, command, expect, shell, cwd }, exec) => {
+                return executeCanonicalAction({ context: contextFromExecution(exec?.ingress ?? exec), capabilityId: TERMINAL, operation: "run", arguments: { purpose, command, expect, shell, cwd } });
             }
         }),
 
@@ -73,19 +73,8 @@ function terminalTools() {
                 },
                 required: ["purpose", "command"]
             },
-            execute: async ({ purpose, command, expect, shell, cwd }) => {
-                const existing = terminals.findByPurpose(purpose);
-                let id;
-                if (existing) {
-                    id = existing.id;
-                    terminals.signal(id, "SIGINT");
-                    await new Promise(r => setTimeout(r, 800));
-                }
-                else {
-                    id = terminals.ensureByPurpose({ purpose, name: purpose, shell, cwd }).id;
-                }
-                const r = await terminals.execute(id, command, { expect, timeoutMs: 30000 });
-                return { terminal: id, purpose, restarted: Boolean(existing), ready: r.matched, output: tail(r.output) };
+            execute: async ({ purpose, command, expect, shell, cwd }, exec) => {
+                return executeCanonicalAction({ context: contextFromExecution(exec?.ingress ?? exec), capabilityId: TERMINAL, operation: "restart", arguments: { purpose, command, expect, shell, cwd } });
             }
         }),
 
@@ -100,10 +89,8 @@ function terminalTools() {
                     tailChars: { type: "number", description: "Jumlah karakter terakhir (default 2000)." }
                 }
             },
-            execute: async ({ purpose, id, tailChars = 2000 }) => {
-                const s = id ? terminals.get(id) : terminals.findByPurpose(purpose);
-                if (!s) throw new Error("Terminal tak ditemukan (beri purpose atau id yang benar).");
-                return { terminal: s.id, output: tail(s.read(), tailChars) };
+            execute: async ({ purpose, id, tailChars = 2000 }, exec) => {
+                return executeCanonicalAction({ context: contextFromExecution(exec?.ingress ?? exec), capabilityId: TERMINAL, operation: "read", arguments: { purpose, id, tailChars } });
             }
         }),
 
@@ -116,11 +103,8 @@ function terminalTools() {
                 type: "object",
                 properties: { purpose: { type: "string" }, id: { type: "string" } }
             },
-            execute: async ({ purpose, id }) => {
-                const s = id ? terminals.get(id) : terminals.findByPurpose(purpose);
-                if (!s) throw new Error("Terminal tak ditemukan.");
-                terminals.signal(s.id, "SIGINT");
-                return { terminal: s.id, stopped: true };
+            execute: async ({ purpose, id }, exec) => {
+                return executeCanonicalAction({ context: contextFromExecution(exec?.ingress ?? exec), capabilityId: TERMINAL, operation: "stop", arguments: { purpose, id } });
             }
         })
 
