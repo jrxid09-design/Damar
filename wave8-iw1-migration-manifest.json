@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "sha": "9094adeffeab248e9b6f698666c964a2836b0e74",
-  "measured_source_sha": "9094adeffeab248e9b6f698666c964a2836b0e74",
-  "generator_head_sha": "9094adeffeab248e9b6f698666c964a2836b0e74",
+  "sha": "36fd28151d0fd87d2610b909db7fb25cef2d95a0",
+  "measured_source_sha": "36fd28151d0fd87d2610b909db7fb25cef2d95a0",
+  "generator_head_sha": "36fd28151d0fd87d2610b909db7fb25cef2d95a0",
   "sha_meaning": "measured_source_sha = the git HEAD the census read (the tree these counters describe). generator_head_sha = the HEAD the generator ran in; because the generator always writes its output, the commit carrying this file is normally the NEXT commit. `sha` is kept as an alias of measured_source_sha for older consumers.",
   "generatedFrom": "scripts/wave8-census.js",
   "counters": {
-    "LEGACY_SECOND_PATH": 108,
-    "ACTION_CAPABLE_UNGOVERNED": 29,
+    "LEGACY_SECOND_PATH": 107,
+    "ACTION_CAPABLE_UNGOVERNED": 28,
     "UNCLASSIFIED_LEGACY_REACHABILITY": 0,
     "GOVERNED_SINK_SITES": 72,
     "REACHABLE_MODULES": 763,
@@ -16,16 +16,16 @@
     "INGRESSES_WITH_UNGOVERNED_FINDINGS": 1
   },
   "reconciliation": {
-    "raw_sink_count": 108,
-    "manifest_row_count": 108,
-    "unique_module_count": 42,
-    "unique_row_id_count": 108,
+    "raw_sink_count": 107,
+    "manifest_row_count": 107,
+    "unique_module_count": 41,
+    "unique_row_id_count": 107,
     "production_ingresses_analyzed": 2,
     "ungoverned_findings_by_ingress": {
       "src/cli/index.js": 0,
-      "src/server.js": 108
+      "src/server.js": 107
     },
-    "action_capable_count": 29,
+    "action_capable_count": 28,
     "advisory_count": 79,
     "unclassified_count": 0,
     "census_findings_without_manifest_row": 0,
@@ -38,7 +38,7 @@
     ],
     "ungovernedByIngress": {
       "src/cli/index.js": 0,
-      "src/server.js": 108
+      "src/server.js": 107
     },
     "governedByIngress": {
       "src/cli/index.js": 72,
@@ -140,14 +140,6 @@
       "priority": 2
     },
     {
-      "id": "C12-HTTP-CONTROLLERS",
-      "hits": 4,
-      "action_capable": 1,
-      "files": 3,
-      "max_risk": "P0",
-      "priority": 4
-    },
-    {
       "id": "C9-AI-TOOL-DISPATCH",
       "hits": 4,
       "action_capable": 2,
@@ -186,6 +178,14 @@
       "files": 8,
       "max_risk": "P0",
       "priority": 28
+    },
+    {
+      "id": "C12-HTTP-CONTROLLERS",
+      "hits": 3,
+      "action_capable": 0,
+      "files": 2,
+      "max_risk": "P2",
+      "priority": 1003
     },
     {
       "id": "C14-UNCLUSTERED-ADVISORY",
@@ -1595,37 +1595,6 @@
       "hops": 5,
       "cluster": "C12-HTTP-CONTROLLERS",
       "risk": "P2",
-      "symbol": "RECON_REQUIRED",
-      "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
-      "capability_family": "RECON_REQUIRED",
-      "operation_type": "RECON_REQUIRED",
-      "authority_source": "RECON_REQUIRED",
-      "verification_mechanism": "RECON_REQUIRED",
-      "audit_mechanism": "RECON_REQUIRED",
-      "replay_durability": "RECON_REQUIRED",
-      "canonical_migration_destination": "RECON_REQUIRED",
-      "required_tests": "RECON_REQUIRED",
-      "classification": "H_UNKNOWN_REQUIRES_RECON",
-      "migration_status": "PENDING"
-    },
-    {
-      "id": "src/controllers/pluginController.js:65:34:registry_execution",
-      "census_category": "LEGACY_SECOND_PATH",
-      "source_file": "src/controllers/pluginController.js",
-      "line": 65,
-      "column": 34,
-      "kind": "registry_execution",
-      "snippet": "ToolRegistry.execute(",
-      "action_capable": true,
-      "consequential": "YES",
-      "entrypoint": "src/server.js",
-      "ingresses": [
-        "src/server.js"
-      ],
-      "execution_path": "src/server.js -> src/app.js -> src/routes/index.js -> src/routes/api/v1/index.js -> src/routes/api/v1/console.js -> src/controllers/pluginController.js",
-      "hops": 5,
-      "cluster": "C12-HTTP-CONTROLLERS",
-      "risk": "P0",
       "symbol": "RECON_REQUIRED",
       "production_reachability": "REACHABLE_FROM_ENTRYPOINT",
       "capability_family": "RECON_REQUIRED",
