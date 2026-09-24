@@ -4,7 +4,6 @@ const pluginRegistry = require("../plugins/pluginRegistry");
 
 const { ToolRegistry } = require("../core/tools");
 
-const telemetry = require("../services/telemetryService");
 const { rejectLegacyActionRoute } = require("../manager/legacyBoundary");
 
 class PluginController {
@@ -53,28 +52,6 @@ class PluginController {
             // The old endpoint accepts an arbitrary ToolRegistry id and
             // bypasses Manager → Lane 2 → Lane 3. Fail closed before lookup.
             rejectLegacyActionRoute("Console plugin");
-
-            const { id } = req.params;
-
-            if (!ToolRegistry.has(id)) {
-                return response.error(res, `Tool '${id}' not found.`, 404);
-            }
-
-            const started = Date.now();
-
-            const result = await ToolRegistry.execute(
-                id,
-                req.body?.args ?? {},
-                { source: "console" }
-            );
-
-            telemetry.info(`Tool "${id}" dijalankan dari Console`);
-
-            return response.success(res, "Tool executed", {
-                tool: id,
-                duration: Date.now() - started,
-                result
-            });
 
         }
         catch (error) {
