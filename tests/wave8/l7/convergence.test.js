@@ -290,6 +290,10 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // with a runtime-built entry, evading all literal-key and computed-key checks.
         assert.doesNotMatch(src, /Object\.fromEntries\s*\(/,
             `[${relPath}] must not use Object.fromEntries (can build a "dispatch" key at runtime, overwriting null)`);
+        // No String.fromCharCode — String.fromCharCode(100,105,...) constructs "dispatch" from char codes
+        // at runtime, bypassing all static string and computed-key literal checks.
+        assert.doesNotMatch(src, /String\.fromCharCode\s*\(/,
+            `[${relPath}] must not use String.fromCharCode (can construct "dispatch" from char codes at runtime)`);
         // No dynamic require() calls.
         const dynReq = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
         assert.equal(dynReq, null, `[${relPath}] perception must not use dynamic require()`);
