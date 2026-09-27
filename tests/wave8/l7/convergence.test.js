@@ -169,6 +169,10 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
         // No module["require"]() -- bracket notation evades the dot-notation check above.
         assert.doesNotMatch(src, /\bmodule\s*\[["']require["']\]\s*\(/,
             `[${relPath}] closedloop must not use module["require"]() (bracket notation bypasses dot-notation check)`);
+        // No require placed inside an array: [require][0] extracts the function and .bind(module) creates
+        // a custom loader — evades all require-aliasing and direct-call detection.
+        assert.doesNotMatch(src, /\[\s*require\s*\]/,
+            `[${relPath}] closedloop must not embed require in an array ([require][n] is a loader bypass)`);
         // No eval().
         assert.doesNotMatch(src, /\beval\s*\(/, `[${relPath}] closedloop must not use eval()`);
         // No require() aliasing — const load = require (without call parens) assigns the function itself.
@@ -270,6 +274,10 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // overwrites the null entry at runtime; not caught by the assignment or spread checks above.
         assert.doesNotMatch(rawSrc, /\[["']dispatch["']\]\s*:/,
             `[${relPath}] must not use ["dispatch"] as a computed object literal key (overwrites dispatch: null)`);
+        // No ANY computed key in object literals ([expr]:) — covers [String("dispatch")]:, [someVar]:,
+        // and any other expression that evaluates to "dispatch" at runtime.
+        assert.doesNotMatch(rawSrc, /\[[^\]]+\]\s*:/,
+            `[${relPath}] must not use any computed key in object literals ([expr]:) — any expression can yield "dispatch" at runtime`);
         // No quoted "dispatch": or 'dispatch': object literal key — { dispatch: null, "dispatch": fn }
         // keeps the last entry at runtime; the line-level null check passes because the same line
         // contains dispatch: null before the quoted override.
