@@ -269,6 +269,9 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // No template literal computed keys with interpolation — [`dis${"patch"}`]: fn creates dispatch at runtime.
         assert.doesNotMatch(rawSrc, /\[`[^`]*\$\{[^}]*\}[^`]*`\]\s*:/,
             `[${relPath}] must not use template literal computed keys with interpolation`);
+        // No object spread with computed dispatch key — ...{ ["dispatch"]: fn } overwrites dispatch: null.
+        assert.doesNotMatch(rawSrc, /\.\.\.\s*\{\s*\[["']dispatch["']\]\s*:/,
+            `[${relPath}] must not spread an object with computed "dispatch" key (overwrites null)`);
         // No dynamic require() calls.
         const dynReq = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
         assert.equal(dynReq, null, `[${relPath}] perception must not use dynamic require()`);
