@@ -199,8 +199,8 @@ function createCompletionVerifier(opts = {}) {
                 !Object.hasOwn(evObservation, "sensor") ||
                 !Object.hasOwn(evObservation, "frame") ||
                 typeof evObservation.tier !== "string" ||
-                typeof evObservation.sensor !== "object" || evObservation.sensor === null ||
-                typeof evObservation.frame !== "object" || evObservation.frame === null) {
+                typeof evObservation.sensor !== "object" || evObservation.sensor === null || Array.isArray(evObservation.sensor) ||
+                typeof evObservation.frame !== "object" || evObservation.frame === null || Array.isArray(evObservation.frame)) {
                 pending.delete(probeId); return false;
             }
             if (!deepEqual(evObservation, observation)) { pending.delete(probeId); return false; }
