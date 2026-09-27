@@ -194,9 +194,9 @@ function createCompletionVerifier(opts = {}) {
             const evObservation = safeData(evidence, "observation");
             if (evObservation == null) { pending.delete(probeId); return false; }
             if (typeof evObservation !== "object" ||
-                evObservation.tier === undefined ||
-                evObservation.sensor === undefined ||
-                evObservation.frame === undefined) { pending.delete(probeId); return false; }
+                !Object.hasOwn(evObservation, "tier") ||
+                !Object.hasOwn(evObservation, "sensor") ||
+                !Object.hasOwn(evObservation, "frame")) { pending.delete(probeId); return false; }
             if (!deepEqual(evObservation, observation)) { pending.delete(probeId); return false; }
         } else if (outcome === "DENIED") {
             if (evOutcome !== "DENIED") { pending.delete(probeId); return false; }
