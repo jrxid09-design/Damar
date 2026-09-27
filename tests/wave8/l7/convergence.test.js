@@ -292,6 +292,10 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // No spread with any computed key — ...{[expr]: fn} can produce any key at runtime.
         assert.doesNotMatch(rawSrc, /\.\.\.\s*\{[^}]*\[/,
             `[${relPath}] must not use spread with a computed key (...{[expr]:}) — can produce "dispatch" at runtime`);
+        // No object literal spread at all — ...{ dispatch: handler } with a plain (non-computed)
+        // key also overwrites dispatch: null at runtime; not caught by the computed-key guard.
+        assert.doesNotMatch(rawSrc, /\.\.\.\s*\{/,
+            `[${relPath}] must not use object literal spread (...{...}) — any property can overwrite dispatch: null`);
         // No template literal computed keys at all — [`dispatch`]: fn and [`dis${"patch"}`]: fn both
         // create runtime keys that overwrite dispatch: null without matching literal-key checks.
         assert.doesNotMatch(rawSrc, /\[`[^`]*`\]\s*:/,
