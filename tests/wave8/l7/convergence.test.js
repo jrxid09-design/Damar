@@ -467,6 +467,18 @@ test("CS-W8-07: DRIVER SUCCESS != VERIFIED POSTCONDITION — missing evidence an
         v1.verifyCompletion({ probeId: "p-drv", request: { probeId: "p-drv", questionRef: "q-1", capabilityId: "c-1" }, outcome: "SUCCESS", observation: obs }),
         false, "driver claim without evidence must fail"
     );
+    // Case 2b: degenerate observations (empty {}, primitive "x") — deepEqual({},{}) and
+    // deepEqual("x","x") would both pass the postcondition check, but neither is a
+    // canonical T4 observation shape (requires tier, sensor, frame).
+    for (const [label, badObs] of [["empty {}", {}], ["primitive string", "x"], ["missing tier", { sensor: {}, frame: {} }]]) {
+        const probeId = `p-bad-obs-${label.replace(/\s/g, "-")}`;
+        const evBad = { outcome: "VERIFIED", probeId, questionRef: "q-1", capabilityId: "c-1", observation: badObs };
+        const vBad = createCompletionVerifier({ completionEvidence: makeEvidence({ [probeId]: evBad }) });
+        assert.equal(
+            vBad.verifyCompletion({ probeId, request: { probeId, questionRef: "q-1", capabilityId: "c-1" }, outcome: "SUCCESS", observation: badObs }),
+            false, `degenerate observation (${label}) must be rejected -- not a canonical T4 shape`
+        );
+    }
     // Case 2a: null observation in evidence — deepEqual(null, null) would pass the
     // postcondition check, but null is not a canonical observation shape.
     const evNull = { outcome: "VERIFIED", probeId: "p-null-obs", questionRef: "q-1", capabilityId: "c-1", observation: null };
