@@ -192,7 +192,7 @@ function createCompletionVerifier(opts = {}) {
             // A successful result must be the SAME observation canonical
             // execution produced — a caller may not substitute its own.
             const evObservation = safeData(evidence, "observation");
-            if (evObservation === undefined) { pending.delete(probeId); return false; }
+            if (evObservation == null) { pending.delete(probeId); return false; }
             if (!deepEqual(evObservation, observation)) { pending.delete(probeId); return false; }
         } else if (outcome === "DENIED") {
             if (evOutcome !== "DENIED") { pending.delete(probeId); return false; }
