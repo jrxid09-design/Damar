@@ -141,6 +141,33 @@ test("W8-L6 loop: accessor properties in createClosedLoop options are never invo
     assert.equal(traps, 0, "accessor on options must never be invoked");
 });
 
+test("W8-L6 completion: bounds accessor on MAX_COMPLETION_RECORDS is never invoked (R6 P1)", () => {
+    let traps = 0;
+    const hostileBounds = {};
+    Object.defineProperty(hostileBounds, "MAX_COMPLETION_RECORDS", { get() { traps++; return 1024; }, configurable: true });
+    const verifier = createCompletionVerifier({ completionEvidence: () => null, bounds: hostileBounds });
+    assert.ok(verifier);
+    assert.equal(traps, 0, "bounds accessor must never be invoked");
+});
+
+test("W8-L6 completion: same-reference Date observation is rejected (R6 P2a)", () => {
+    const dateObs = new Date("2020-01-01");
+    const evidence = makeEvidence({ "p-dr": completion({ probeId: "p-dr", observation: { ts: dateObs } }) });
+    const verifier = createCompletionVerifier({ completionEvidence: evidence });
+    // Same reference — rejected because Date is non-plain; deepEqual must check proto before identity.
+    const sameRefObs = { ts: dateObs };
+    assert.equal(verifier.verifyCompletion({ probeId: "p-dr", request: { probeId: "p-dr", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: sameRefObs }), false);
+});
+
+test("W8-L6 completion: deeply nested plain observations beyond 32 levels are accepted (R6 P2b)", () => {
+    // Build a 40-deep plain object chain.
+    let deep = { leaf: true };
+    for (let i = 0; i < 40; i++) deep = { next: deep };
+    const evidence = makeEvidence({ "p-deep": completion({ probeId: "p-deep", observation: deep }) });
+    const verifier = createCompletionVerifier({ completionEvidence: evidence });
+    assert.equal(verifier.verifyCompletion({ probeId: "p-deep", request: { probeId: "p-deep", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: deep }), true);
+});
+
 test("W8-L6 completion: Date/Map/Set values in observations are rejected by deepEqual (R5 P0)", () => {
     const dateObs = { tier: "T4", sensor: { sensorId: "camera-1" }, frame: { kind: "ROOM" }, ts: new Date("2020-01-01") };
     const evidence = makeEvidence({ "p-date": completion({ probeId: "p-date", observation: dateObs }) });
