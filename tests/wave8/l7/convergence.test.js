@@ -174,6 +174,9 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
         // No createRequire — node:module createRequire creates a custom require function that evades require() checks.
         assert.doesNotMatch(src, /\bcreateRequire\b/,
             `[${relPath}] closedloop must not use createRequire (bypasses require() literal check)`);
+        // No module.constructor._load — an internal Node.js loader that bypasses require() entirely.
+        assert.doesNotMatch(src, /module\.constructor\._load/,
+            `[${relPath}] closedloop must not use module.constructor._load (internal module loader)`);
         // No Unicode escape sequences in identifier positions — require("../authority") evades require() regex.
         assert.doesNotMatch(rawSrc, /[a-zA-Z_$]\\u[0-9a-fA-F]{4}/,
             `[${relPath}] closedloop must not use Unicode escapes in identifiers (obfuscates require/other keywords)`);
