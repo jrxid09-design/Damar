@@ -162,10 +162,13 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
         const templateLitRequires = rawSrc.match(/\brequire\s*\(\s*`/g);
         assert.equal(templateLitRequires, null,
             `[${relPath}] closedloop must not use template literal require()`);
-        // No module.require().
+        // No module.require() -- dot notation.
         const moduleRequires = src.match(/\bmodule\.require\s*\(/g);
         assert.equal(moduleRequires, null,
             `[${relPath}] closedloop must not use module.require()`);
+        // No module["require"]() -- bracket notation evades the dot-notation check above.
+        assert.doesNotMatch(src, /\bmodule\s*\[["']require["']\]\s*\(/,
+            `[${relPath}] closedloop must not use module["require"]() (bracket notation bypasses dot-notation check)`);
         // No eval().
         assert.doesNotMatch(src, /\beval\s*\(/, `[${relPath}] closedloop must not use eval()`);
         // No require() aliasing — const load = require (without call parens) assigns the function itself.
@@ -263,6 +266,10 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // No array-indexed dispatch key: ["dispatch"][0] yields "dispatch" as a computed key.
         assert.doesNotMatch(rawSrc, /\[["']dispatch["']\]\s*\[/,
             `[${relPath}] must not use array-indexed dispatch key (["dispatch"][n])`);
+        // No ["dispatch"]: computed key in object literals — { dispatch: null, ["dispatch"]: fn }
+        // overwrites the null entry at runtime; not caught by the assignment or spread checks above.
+        assert.doesNotMatch(rawSrc, /\[["']dispatch["']\]\s*:/,
+            `[${relPath}] must not use ["dispatch"] as a computed object literal key (overwrites dispatch: null)`);
         // No Unicode escape sequences in string literals — dispatch decodes to "dispatch".
         assert.doesNotMatch(rawSrc, /["'][^"']*\\u[0-9a-fA-F]{4}/,
             `[${relPath}] must not use Unicode escapes in string literals (potential dispatch key bypass)`);
