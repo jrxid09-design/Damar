@@ -141,6 +141,13 @@ test("W8-L6 loop: accessor properties in createClosedLoop options are never invo
     assert.equal(traps, 0, "accessor on options must never be invoked");
 });
 
+test("W8-L6 completion: request omitting probeId is rejected even when top-level probeId matches evidence (R4 P0)", () => {
+    const evidence = makeEvidence({ "p-1": completion() });
+    const verifier = createCompletionVerifier({ completionEvidence: evidence });
+    // request has no probeId — must reject; probeId binding in request is mandatory.
+    assert.equal(verifier.verifyCompletion({ probeId: "p-1", request: { questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: completion().observation }), false);
+});
+
 test("W8-L6 completion: accessor properties in createCompletionVerifier options are never invoked (R3 P1-1)", () => {
     let traps = 0;
     const opts = {};
