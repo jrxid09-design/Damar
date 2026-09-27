@@ -148,6 +148,12 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in perception 
         assert.match(line, /\bdispatch\s*:\s*null\b/,
             `every dispatch: assignment must be null — offending line: ${line.trim()}`);
     }
+    // Also check for dynamic property dispatch assignment (obj.dispatch = fn or obj["dispatch"] = fn).
+    const dynamicDispatchLines = src.split("\n").filter(l =>
+        /\.dispatch\s*=/.test(l) && !/\.dispatch\s*=\s*null\b/.test(l)
+    );
+    assert.equal(dynamicDispatchLines.length, 0,
+        `no non-null dynamic dispatch assignment (.dispatch = ...) allowed: ${dynamicDispatchLines.join("; ")}`);
     // No dispatcher import.
     assert.doesNotMatch(src, /require\s*\(\s*["'][^"']*\/dispatch/,
         "perception module must not import a dispatcher");
@@ -207,6 +213,21 @@ test("CS-W8-06b: TIMEOUT outcome cannot upgrade to SUCCESS", () => {
     const verifier2 = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-t2": timedOut2 }) });
     const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
     assert.equal(verifier2.verifyCompletion({ probeId: "p-t2", request: { probeId: "p-t2", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: obs }), false);
+});
+
+test("CS-W8-06c: UNCERTAIN PRIOR EFFECT != SAFE TO RETRY — unknown/ambiguous outcome is rejected", () => {
+    // The verifier only accepts SUCCESS, DENIED, TIMEOUT. Any other outcome
+    // string (AMBIGUOUS, UNKNOWN, PENDING, etc.) that models an uncertain prior
+    // effect is rejected fail-closed — it cannot be treated as authorized retry.
+    const verifier = createCompletionVerifier({ completionEvidence: () => null });
+    const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
+    for (const outcome of ["AMBIGUOUS", "UNKNOWN", "PENDING", "EXECUTED_UNVERIFIED", "MAYBE", "PARTIAL"]) {
+        assert.equal(
+            verifier.verifyCompletion({ probeId: `p-unc-${outcome}`, request: { probeId: `p-unc-${outcome}`, questionRef: "q-1", capabilityId: "cap-1" }, outcome, observation: obs }),
+            false,
+            `uncertain outcome "${outcome}" must be rejected — not safe to retry as authorized`
+        );
+    }
 });
 
 // ── CS-W8-07: DRIVER SUCCESS != VERIFIED POSTCONDITION ───────────────────
@@ -527,9 +548,12 @@ test("CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE — dual-witness test asse
     // Verify REPLAY_HEAD_UNWITNESSED appears on a line that ALSO contains an assert call.
     // This proves it is a live assertion, not just a comment or string constant.
     const lines = src.split(/\r?\n/);
-    const hasLiveAssertion = lines.some(line =>
-        /assert\.\w+/.test(line) && line.includes("REPLAY_HEAD_UNWITNESSED")
+    // Verify REPLAY_HEAD_UNWITNESSED appears as a REGEX LITERAL being matched in an assert.
+    // This prevents a vacuous pass from assert.ok(true, "REPLAY_HEAD_UNWITNESSED") which
+    // would contain the string but not test the invariant.
+    const hasRegexAssertion = lines.some(line =>
+        /assert\.\w+/.test(line) && /\/REPLAY_HEAD_UNWITNESSED\//.test(line)
     );
-    assert.ok(hasLiveAssertion,
-        "dual-witness test must contain an assert(...REPLAY_HEAD_UNWITNESSED...) on the same line — live durability assertion");
+    assert.ok(hasRegexAssertion,
+        "dual-witness test must contain assert.*(/.../REPLAY_HEAD_UNWITNESSED/...) — regex-as-assertion pattern");
 });
