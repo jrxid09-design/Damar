@@ -357,6 +357,19 @@ test("CS-W8-04b: L2-L6 completion path is fail-closed without canonical executio
     assert.doesNotMatch(compositionSrc,
         /createCompletionVerifier\s*\(\s*\{[^}]*\b(?:maxCompletionRecords|MAX_COMPLETION_RECORDS)\b/,
         "canonical createCompletionVerifier must not receive a maxCompletionRecords override (injected cap weakens exactly-once contract)");
+    // trustedResultAdapter handoff proof: createPerception must receive trustedResultAdapter
+    // as a shorthand property (no colon) -- shorthand proves the variable IS the
+    // createCompletionVerifier result, not a bypassed { verifyCompletion: () => true } literal.
+    assert.match(compositionSrc,
+        /createPerception\s*\(\s*\{[\s\S]{0,500}\btrustedResultAdapter\s*[,}]/,
+        "createPerception must receive trustedResultAdapter as a shorthand property");
+    assert.doesNotMatch(compositionSrc,
+        /createPerception\s*\(\s*\{[\s\S]{0,500}\btrustedResultAdapter\s*:/,
+        "createPerception must NOT use trustedResultAdapter: expr -- shorthand only proves canonical adapter is wired");
+    // No inline verifyCompletion override inside the createPerception call.
+    assert.doesNotMatch(compositionSrc,
+        /createPerception\s*\(\s*\{[\s\S]{0,600}\bverifyCompletion\s*:/,
+        "createPerception must not receive an inline verifyCompletion override (bypasses canonical fail-closed verifier)");
     // Runtime: the null port produces fail-closed verification.
     const verifier = createCompletionVerifier({ completionEvidence: () => null });
     assert.equal(
