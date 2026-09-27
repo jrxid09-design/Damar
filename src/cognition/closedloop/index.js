@@ -69,10 +69,21 @@ function sanitizeBounds(bounds) {
 }
 
 /**
- * Defensive deep equality. A hostile observation (throwing getter, Proxy, or
- * cyclic object) never makes the verifier throw — it is simply treated as
- * "not equal", so `verifyCompletion` returns false fail-closed.
+ * Defensive deep equality. Reads every property by data descriptor only, so a
+ * hostile observation (throwing getter, accessor, Proxy, or cyclic object) is
+ * never invoked and never makes the verifier throw — it is treated as "not
+ * equal", so `verifyCompletion` returns false fail-closed. This also closes the
+ * check-then-use race: the verifier never runs a getter that could return one
+ * value here and a different value when the consumer later clones the object.
  */
+function readDataDeep(value, key) {
+    if (value === null || typeof value !== "object" || IS_PROXY(value)) return { ok: false };
+    let d;
+    try { d = Object.getOwnPropertyDescriptor(value, key); } catch { return { ok: false }; }
+    if (!d || d.get || d.set || !("value" in d)) return { ok: false };
+    return { ok: true, value: d.value };
+}
+
 function deepEqual(a, b, depth = 0) {
     if (depth > 32) return false;
     if (a === b) return true;
@@ -84,9 +95,10 @@ function deepEqual(a, b, depth = 0) {
     if (ka.length !== kb.length) return false;
     for (const k of ka) {
         if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
-        let av, bv;
-        try { av = a[k]; bv = b[k]; } catch { return false; }
-        if (!deepEqual(av, bv, depth + 1)) return false;
+        const ra = readDataDeep(a, k);
+        const rb = readDataDeep(b, k);
+        if (!ra.ok || !rb.ok) return false;
+        if (!deepEqual(ra.value, rb.value, depth + 1)) return false;
     }
     return true;
 }
@@ -149,6 +161,7 @@ function createCompletionVerifier({ completionEvidence, bounds = BOUNDS } = {}) 
 
         // The completion must be bound to the exact probe.
         if (eProbeId !== probeId) return false;
+        if (evProbeId !== undefined && evProbeId !== probeId) return false;
         if (evQuestionRef !== undefined && eQuestionRef !== evQuestionRef) return false;
         if (evCapabilityId !== undefined && eCapabilityId !== evCapabilityId) return false;
 
