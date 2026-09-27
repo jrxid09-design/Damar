@@ -279,6 +279,10 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // No object spread with computed dispatch key — ...{ ["dispatch"]: fn } overwrites dispatch: null.
         assert.doesNotMatch(rawSrc, /\.\.\.\s*\{\s*\[["']dispatch["']\]\s*:/,
             `[${relPath}] must not spread an object with computed "dispatch" key (overwrites null)`);
+        // No Object.fromEntries — ...Object.fromEntries([["dispatch", handler]]) overwrites dispatch: null
+        // with a runtime-built entry, evading all literal-key and computed-key checks.
+        assert.doesNotMatch(src, /Object\.fromEntries\s*\(/,
+            `[${relPath}] must not use Object.fromEntries (can build a "dispatch" key at runtime, overwriting null)`);
         // No dynamic require() calls.
         const dynReq = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
         assert.equal(dynReq, null, `[${relPath}] perception must not use dynamic require()`);
