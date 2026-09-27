@@ -183,7 +183,8 @@ function createCompletionVerifier(opts = {}) {
         // always does). Binding is then enforced bidirectionally.
         if (eProbeId !== probeId) { pending.delete(probeId); return false; }
         if (evProbeId === undefined || evProbeId !== probeId) { pending.delete(probeId); return false; }
-        if (eQuestionRef === undefined || eCapabilityId === undefined) { pending.delete(probeId); return false; }
+        if (typeof eQuestionRef !== "string" || !eQuestionRef ||
+            typeof eCapabilityId !== "string" || !eCapabilityId) { pending.delete(probeId); return false; }
         if (eQuestionRef !== evQuestionRef) { pending.delete(probeId); return false; }
         if (eCapabilityId !== evCapabilityId) { pending.delete(probeId); return false; }
 

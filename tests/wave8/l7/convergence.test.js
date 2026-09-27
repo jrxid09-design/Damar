@@ -750,6 +750,17 @@ test("CS-W8-16a: request without probeId field is rejected (bidirectional bindin
     );
 });
 
+test("CS-W8-16b-null: null questionRef/capabilityId fails closed (not just undefined)", () => {
+    // null values pass a === undefined check but must also be rejected.
+    const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
+    const evNull = { outcome: "VERIFIED", probeId: "p-null-ids", questionRef: null, capabilityId: null, observation: obs };
+    const vNull = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-null-ids": evNull }) });
+    assert.equal(
+        vNull.verifyCompletion({ probeId: "p-null-ids", request: { probeId: "p-null-ids", questionRef: null, capabilityId: null }, outcome: "SUCCESS", observation: obs }),
+        false, "null questionRef/capabilityId must be rejected -- canonical identifiers must be non-empty strings"
+    );
+});
+
 test("CS-W8-16b: questionRef/capabilityId mismatch fails closed", () => {
     const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
     const ev = canonicalEvidence("p-mis", obs);
