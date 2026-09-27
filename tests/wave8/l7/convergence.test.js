@@ -113,24 +113,27 @@ test("CS-W8-03a: MODEL != AUTHORITY — no public seam to mint completion eviden
 
 test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or authority (path-exhaustive)", () => {
     // Enumerate ALL require() calls and verify none resolves to an action,
-    // authority, or actuator path. This catches both absolute-style paths
-    // ("/action/", "/authority/") and relative-style paths ("../action",
-    // "../../authority/...") that a fixed-prefix regex would miss.
+    // authority, or actuator path. Normalize backslashes so Windows-style paths
+    // ("..\\action") are caught by the same regex as POSIX paths ("../action").
     const src = fs.readFileSync(path.join(ROOT, "src/cognition/closedloop/index.js"), "utf8");
     const deps = [...src.matchAll(/require\s*\(\s*["']([^"']+)["']/g)].map(m => m[1]);
     for (const dep of deps) {
-        assert.ok(!/\/action(\/|$)/.test(dep),
+        const norm = dep.replace(/\\/g, "/");
+        assert.ok(!/\/action(\/|$)/.test(norm),
             `closedloop must not require "${dep}" (action module)`);
-        assert.ok(!/\/authority(\/|$)/.test(dep),
+        assert.ok(!/\/authority(\/|$)/.test(norm),
             `closedloop must not require "${dep}" (authority module)`);
-        assert.ok(!dep.includes("actuator"),
+        assert.ok(!norm.includes("actuator"),
             `closedloop must not require "${dep}" (actuator module)`);
     }
-    // No dynamic require() calls — a dynamic require(expr) is a non-literal argument
-    // that would evade the string-enumeration check above.
+    // No dynamic require() calls (non-literal argument evades the string check above).
     const dynamicRequires = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
     assert.equal(dynamicRequires, null,
         "closedloop must not use dynamic require() calls (non-literal argument)");
+    // No module.require() calls — module.require(expr) bypasses the require() literal regex.
+    const moduleRequires = src.match(/\bmodule\.require\s*\(/g);
+    assert.equal(moduleRequires, null,
+        "closedloop must not use module.require() (bypasses literal-require check)");
 });
 
 test("CS-W8-03c: NO_SECOND_DISPATCHER — no dispatch() call inside closedloop", () => {
@@ -138,45 +141,70 @@ test("CS-W8-03c: NO_SECOND_DISPATCHER — no dispatch() call inside closedloop",
     const src = fs.readFileSync(path.join(ROOT, "src/cognition/closedloop/index.js"), "utf8");
     assert.doesNotMatch(src, /\bdispatch\s*\(/, "closedloop must not call dispatch()");
     assert.doesNotMatch(src, /createDispatch/, "closedloop must not create a dispatcher");
+    // Indirect invocation via Reflect.apply(dispatch, ...) is also prohibited.
+    assert.doesNotMatch(src, /Reflect\.apply\s*\([^,]*dispatch/,
+        "closedloop must not invoke dispatch via Reflect.apply");
 });
 
 // ── CS-W8-04: PERCEPTION != AUTHORITY — L2 probe scheduling ──────────────
 
-test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in perception module is null", () => {
-    // Line-by-line exhaustive check: every source line that contains `dispatch:`
-    // must assign null. This catches dispatch: (expr), dispatch: !0, dispatch: 1,
-    // and other non-null forms that a character-class regex would miss.
-    const src = fs.readFileSync(path.join(ROOT, "src/cognition/perception/index.js"), "utf8");
-    const dispatchLines = src.split("\n").filter(l => /\bdispatch\s*:/.test(l));
-    assert.ok(dispatchLines.length > 0, "perception/index.js must contain at least one dispatch: wiring");
-    for (const line of dispatchLines) {
-        assert.match(line, /\bdispatch\s*:\s*null\b/,
-            `every dispatch: assignment must be null — offending line: ${line.trim()}`);
+test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all perception modules is null", () => {
+    // Scan ALL perception source files, not just index.js, so a helper module
+    // cannot wire a non-null dispatcher that index.js then re-exports.
+    const perceptionDir = path.join(ROOT, "src/cognition/perception");
+    const perceptionFiles = fs.readdirSync(perceptionDir)
+        .filter(f => f.endsWith(".js"))
+        .map(f => path.join(perceptionDir, f));
+    for (const file of perceptionFiles) {
+        const src = fs.readFileSync(file, "utf8");
+        const relPath = path.relative(ROOT, file).replace(/\\/g, "/");
+        // Every dispatch: key must be null.
+        const dispatchLines = src.split("\n").filter(l => /\bdispatch\s*:/.test(l));
+        for (const line of dispatchLines) {
+            assert.match(line, /\bdispatch\s*:\s*null\b/,
+                `[${relPath}] dispatch: assignment must be null — offending line: ${line.trim()}`);
+        }
+        // No dot or bracket dynamic assignment to dispatch.
+        const dynamicDispatchLines = src.split("\n").filter(l =>
+            (/\.dispatch\s*=/.test(l) && !/\.dispatch\s*=\s*null\b/.test(l)) ||
+            (/\["dispatch"\]\s*=/.test(l) && !/\["dispatch"\]\s*=\s*null\b/.test(l))
+        );
+        assert.equal(dynamicDispatchLines.length, 0,
+            `[${relPath}] no non-null dynamic dispatch assignment: ${dynamicDispatchLines.join("; ")}`);
+        // No Object.assign spreading dispatch non-null.
+        assert.doesNotMatch(src, /Object\.assign\s*\([^)]*[{,]\s*dispatch\s*:/,
+            `[${relPath}] Object.assign must not spread a dispatch key`);
+        // No Object.defineProperties assigning dispatch.
+        assert.doesNotMatch(src, /Object\.defineProperties\s*\([^,]+,\s*\{[^}]*dispatch\s*:/,
+            `[${relPath}] Object.defineProperties must not define dispatch`);
+        // No dynamic require() calls.
+        const dynReq = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
+        assert.equal(dynReq, null, `[${relPath}] perception must not use dynamic require()`);
+        // No Object.defineProperty or Reflect.set targeting dispatch.
+        assert.doesNotMatch(src, /Object\.defineProperty\s*\([^,]+,\s*["']dispatch["']/,
+            `[${relPath}] Object.defineProperty must not define dispatch`);
+        assert.doesNotMatch(src, /Reflect\.(set|defineProperty)\s*\([^,]+,\s*["']dispatch["']/,
+            `[${relPath}] Reflect must not set dispatch`);
+        // No dispatcher import.
+        assert.doesNotMatch(src, /require\s*\(\s*["'][^"']*\/dispatch/,
+            `[${relPath}] perception module must not import a dispatcher`);
     }
-    // Also check for dynamic property dispatch assignment — both dot and bracket forms:
-    // obj.dispatch = fn AND obj["dispatch"] = fn
-    const dynamicDispatchLines = src.split("\n").filter(l =>
-        (/\.dispatch\s*=/.test(l) && !/\.dispatch\s*=\s*null\b/.test(l)) ||
-        (/\["dispatch"\]\s*=/.test(l) && !/\["dispatch"\]\s*=\s*null\b/.test(l))
-    );
-    assert.equal(dynamicDispatchLines.length, 0,
-        `no non-null dynamic dispatch assignment allowed: ${dynamicDispatchLines.join("; ")}`);
-    // No dynamic require() — same protection as CS-W8-03b for perception.
-    const dynReq = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
-    assert.equal(dynReq, null, "perception must not use dynamic require() calls");
-    // No Object.defineProperty or Reflect.set targeting 'dispatch' specifically.
-    assert.doesNotMatch(src, /Object\.defineProperty\s*\([^,]+,\s*["']dispatch["']/,
-        "perception must not use Object.defineProperty to define dispatch");
-    assert.doesNotMatch(src, /Reflect\.(set|defineProperty)\s*\([^,]+,\s*["']dispatch["']/,
-        "perception must not use Reflect to set dispatch");
-    // No dispatcher import.
-    assert.doesNotMatch(src, /require\s*\(\s*["'][^"']*\/dispatch/,
-        "perception module must not import a dispatcher");
+    // The canonical index.js must contain at least one dispatch: null wiring.
+    const indexSrc = fs.readFileSync(path.join(perceptionDir, "index.js"), "utf8");
+    const indexDispatchLines = indexSrc.split("\n").filter(l => /\bdispatch\s*:/.test(l));
+    assert.ok(indexDispatchLines.length > 0,
+        "perception/index.js must contain at least one dispatch: wiring");
 });
 
 test("CS-W8-04b: L2-L6 completion path is fail-closed without canonical execution evidence", () => {
-    // Canonical wiring: completionEvidence = () => null.
-    // Every verifyCompletion call therefore fails closed.
+    // Structural: canonicalRuntimeComposition.js must hard-wire completionEvidence = () => null.
+    // This proves the canonical runtime (not just a standalone verifier) is fail-closed.
+    const compositionSrc = fs.readFileSync(
+        path.join(ROOT, "src/integration/canonicalRuntimeComposition.js"), "utf8"
+    );
+    assert.match(compositionSrc, /completionEvidence\s*=\s*\(\s*\)\s*=>\s*null/,
+        "canonicalRuntimeComposition must hard-wire completionEvidence = () => null (fail-closed)");
+    // Runtime: the null port produces fail-closed verification.
     const verifier = createCompletionVerifier({ completionEvidence: () => null });
     assert.equal(
         verifier.verifyCompletion({
@@ -201,9 +229,10 @@ test("CS-W8-05: REPLAY CACHE != REPLAY AUTHORITY — same probeId rejected after
     assert.equal(verifier.verifyCompletion(spec), false, "replay must be rejected");
     // The verifier exposes ONLY verifyCompletion — no surface to read or mint
     // from the completed-set cache. The cache record cannot itself authorize.
-    const surface = Object.keys(verifier);
-    assert.deepEqual(surface, ["verifyCompletion"],
-        "verifier must expose exactly verifyCompletion — no cache-read or mint surface");
+    // Use getOwnPropertyNames to catch non-enumerable seams that Object.keys misses.
+    const surface = Object.getOwnPropertyNames(verifier).filter(k => k !== "__proto__");
+    assert.deepEqual(surface.sort(), ["verifyCompletion"],
+        "verifier must expose exactly verifyCompletion — no cache-read or mint surface (including non-enumerable)");
 });
 
 // ── CS-W8-06: UNCERTAIN PRIOR EFFECT != SAFE TO RETRY ───────────────────
@@ -314,16 +343,24 @@ test("CS-W8-09b: VERIFY_AUTHORIZE_NEVER_SILENTLY_SKIPPED — both phases present
 // ── CS-W8-10: fixed loop order ────────────────────────────────────────────
 
 test("CS-W8-10: canonical 9-phase loop order is enforced across a full cycle", () => {
+    // Independent canonical array from W8_EMBODIMENT_CONTRACT.md §5 — not derived
+    // from the LOOP_ORDER export, so a corrupted export does not self-certify.
+    const CANONICAL_ORDER = [
+        "OBSERVE", "INTERPRET", "PREDICT", "PLAN", "AUTHORIZE",
+        "ACT", "OBSERVE_EFFECT", "VERIFY", "UPDATE"
+    ];
     assert.equal(LOOP_ORDER.length, 9, "canonical loop must have exactly 9 phases");
+    assert.deepEqual([...LOOP_ORDER], CANONICAL_ORDER,
+        "exported LOOP_ORDER must match the frozen contract order");
     let now = 0;
     const clock = { nowMs: () => now };
     const loop = createClosedLoop({ clock });
     const phases = [];
-    for (let i = 0; i < LOOP_ORDER.length; i++) {
+    for (let i = 0; i < CANONICAL_ORDER.length; i++) {
         phases.push(loop.runCycle().phase);
         now += 100;
     }
-    assert.deepEqual(phases, LOOP_ORDER);
+    assert.deepEqual(phases, CANONICAL_ORDER);
 });
 
 // ── CS-W8-11: loop rate bound ─────────────────────────────────────────────
@@ -378,8 +415,11 @@ test("CS-W8-13: absent lanes reported as not present — no silent degradation",
     assert.equal(status.lanesPresent.effectors, false);
     assert.equal(status.lanesPresent.simulation, false);
     // Loop still advances — degraded, not dead.
-    loop.runCycle();
+    const report = loop.runCycle();
     assert.notEqual(loop.getPhase(), null);
+    // Phase report must have a boolean present field — no silent omission.
+    assert.equal(typeof report.present, "boolean",
+        "each phase report must declare present as a boolean (no silent degradation)");
 });
 
 // ── CS-W8-14: no authority escalation — governed requires ledger ──────────
@@ -571,9 +611,18 @@ test("CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE — dual-witness test asse
     // Verify REPLAY_HEAD_UNWITNESSED appears in a POSITIVE assertion (assert.match or
     // assert.rejects) as a regex literal. This excludes assert.doesNotMatch and
     // assert.ok(true, "REPLAY_HEAD_UNWITNESSED") which would vacuously pass.
-    const hasPositiveRegexAssertion = lines.some(line =>
+    const assertionLine = lines.find(line =>
         /(assert\.match|assert\.rejects)/.test(line) && /\/REPLAY_HEAD_UNWITNESSED\//.test(line)
     );
-    assert.ok(hasPositiveRegexAssertion,
+    assert.ok(assertionLine !== undefined,
         "dual-witness test must contain assert.match or assert.rejects with /REPLAY_HEAD_UNWITNESSED/ — positive durability assertion");
+    // Non-vacuous: the assertion must apply to a real system, not a self-fulfilling
+    // Promise.reject() or inline new Error() that trivially matches the pattern.
+    assert.doesNotMatch(assertionLine, /Promise\.reject\s*\(/,
+        "REPLAY_HEAD_UNWITNESSED assertion must not be self-fulfilling via Promise.reject");
+    assert.doesNotMatch(assertionLine, /new\s+Error\s*\(/,
+        "REPLAY_HEAD_UNWITNESSED assertion must not be self-fulfilling via inline new Error");
+    // File must import the real replay ledger module, not just contain error strings.
+    assert.match(src, /require\s*\([^)]*canonicalReplayLedger/,
+        "dual-witness test must import canonicalReplayLedger (the system under test)");
 });
