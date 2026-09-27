@@ -111,15 +111,21 @@ test("CS-W8-03a: MODEL != AUTHORITY — no public seam to mint completion eviden
     }
 });
 
-test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or authority", () => {
-    // Import-graph structural proof: no actuator, action, or authority imports.
+test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or authority (path-exhaustive)", () => {
+    // Enumerate ALL require() calls and verify none resolves to an action,
+    // authority, or actuator path. This catches both absolute-style paths
+    // ("/action/", "/authority/") and relative-style paths ("../action",
+    // "../../authority/...") that a fixed-prefix regex would miss.
     const src = fs.readFileSync(path.join(ROOT, "src/cognition/closedloop/index.js"), "utf8");
-    assert.doesNotMatch(src, /require\s*\(\s*["'][^"']*\/action\//,
-        "closedloop must not import from src/action");
-    assert.doesNotMatch(src, /require\s*\(\s*["'][^"']*\/authority\//,
-        "closedloop must not import from src/authority");
-    assert.doesNotMatch(src, /require\s*\(\s*["'][^"']*actuator/,
-        "closedloop must not import any actuator module");
+    const deps = [...src.matchAll(/require\s*\(\s*["']([^"']+)["']/g)].map(m => m[1]);
+    for (const dep of deps) {
+        assert.ok(!/\/action(\/|$)/.test(dep),
+            `closedloop must not require "${dep}" (action module)`);
+        assert.ok(!/\/authority(\/|$)/.test(dep),
+            `closedloop must not require "${dep}" (authority module)`);
+        assert.ok(!dep.includes("actuator"),
+            `closedloop must not require "${dep}" (actuator module)`);
+    }
 });
 
 test("CS-W8-03c: NO_SECOND_DISPATCHER — no dispatch() call inside closedloop", () => {
@@ -131,19 +137,17 @@ test("CS-W8-03c: NO_SECOND_DISPATCHER — no dispatch() call inside closedloop",
 
 // ── CS-W8-04: PERCEPTION != AUTHORITY — L2 probe scheduling ──────────────
 
-test("CS-W8-04a: PERCEPTION != AUTHORITY — no non-null dispatch in perception module (exhaustive check)", () => {
-    // Exhaustive structural proof: every `dispatch:` assignment in the
-    // perception module must be null. A single regex for one occurrence would
-    // miss a second assignment path; this test checks that NO non-null
-    // `dispatch:` exists anywhere in the file.
+test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in perception module is null", () => {
+    // Line-by-line exhaustive check: every source line that contains `dispatch:`
+    // must assign null. This catches dispatch: (expr), dispatch: !0, dispatch: 1,
+    // and other non-null forms that a character-class regex would miss.
     const src = fs.readFileSync(path.join(ROOT, "src/cognition/perception/index.js"), "utf8");
-    // All dispatch assignments must be null — zero non-null ones allowed.
-    const nonNullDispatches = src.match(/\bdispatch\s*:\s*(?!null\b)[\w"'`{[]/g);
-    assert.equal(nonNullDispatches, null,
-        "perception/index.js must have zero non-null dispatch: assignments");
-    // Confirm at least one dispatch:null exists (proves the property is set, not absent).
-    assert.match(src, /dispatch\s*:\s*null/,
-        "perception/index.js must contain at least one dispatch:null probe wiring");
+    const dispatchLines = src.split("\n").filter(l => /\bdispatch\s*:/.test(l));
+    assert.ok(dispatchLines.length > 0, "perception/index.js must contain at least one dispatch: wiring");
+    for (const line of dispatchLines) {
+        assert.match(line, /\bdispatch\s*:\s*null\b/,
+            `every dispatch: assignment must be null — offending line: ${line.trim()}`);
+    }
     // No dispatcher import.
     assert.doesNotMatch(src, /require\s*\(\s*["'][^"']*\/dispatch/,
         "perception module must not import a dispatcher");
@@ -207,13 +211,24 @@ test("CS-W8-06b: TIMEOUT outcome cannot upgrade to SUCCESS", () => {
 
 // ── CS-W8-07: DRIVER SUCCESS != VERIFIED POSTCONDITION ───────────────────
 
-test("CS-W8-07: claiming SUCCESS without canonical evidence fails — no backdoor postcondition", () => {
-    const verifier = createCompletionVerifier({ completionEvidence: () => null });
+test("CS-W8-07: DRIVER SUCCESS != VERIFIED POSTCONDITION — missing evidence and mismatched postcondition", () => {
     const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
+    // Case 1: driver claims SUCCESS with no evidence at all.
+    const v1 = createCompletionVerifier({ completionEvidence: () => null });
     assert.equal(
-        verifier.verifyCompletion({ probeId: "p-drv", request: { probeId: "p-drv", questionRef: "q-1", capabilityId: "c-1" }, outcome: "SUCCESS", observation: obs }),
-        false,
-        "driver claim without canonical evidence must fail"
+        v1.verifyCompletion({ probeId: "p-drv", request: { probeId: "p-drv", questionRef: "q-1", capabilityId: "c-1" }, outcome: "SUCCESS", observation: obs }),
+        false, "driver claim without evidence must fail"
+    );
+    // Case 2: evidence port returns VERIFIED but the observation (postcondition)
+    // does not match what canonical execution produced — driver says success but
+    // the postcondition cannot be confirmed. Must be rejected.
+    const canonObs = { tier: "T4", sensor: { sensorId: "s-canonical" }, frame: { kind: "OFFICE" }, quality: 0.9 };
+    const ev = { outcome: "VERIFIED", probeId: "p-drv2", questionRef: "q-1", capabilityId: "c-1", observation: canonObs };
+    const v2 = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-drv2": ev }) });
+    const driverObs = { tier: "T4", sensor: { sensorId: "s-driver" }, frame: { kind: "LOBBY" }, quality: 0.7 };
+    assert.equal(
+        v2.verifyCompletion({ probeId: "p-drv2", request: { probeId: "p-drv2", questionRef: "q-1", capabilityId: "c-1" }, outcome: "SUCCESS", observation: driverObs }),
+        false, "mismatched postcondition (driver obs != canonical obs) must fail"
     );
 });
 
@@ -453,21 +468,24 @@ test("CS-W8-19: CONFIDENCE != AUTHORITY — high-confidence observation without 
 
 // ── CS-W8-21: CAPABILITY AVAILABLE != AUTHORITY ──────────────────────────
 
-test("CS-W8-21: CAPABILITY AVAILABLE != AUTHORITY — available capability without evidence fails closed", () => {
-    // The capability registry may report a capability as AVAILABLE, but
-    // availability is not authority. A probe for an AVAILABLE capability still
-    // requires canonical execution evidence through the completionEvidence port.
-    const verifier = createCompletionVerifier({ completionEvidence: () => null });
-    // "cap-available" simulates a capability the registry would return AVAILABLE for.
-    assert.equal(
-        verifier.verifyCompletion({ probeId: "p-avail", request: { probeId: "p-avail", questionRef: "q-1", capabilityId: "cap-available" }, outcome: "SUCCESS", observation: { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.9 } }),
-        false, "AVAILABLE capability without canonical evidence must fail"
-    );
-    // Capability AVAILABLE does not lower the bar for DENIED outcomes either.
-    assert.equal(
-        verifier.verifyCompletion({ probeId: "p-avail2", request: { probeId: "p-avail2", questionRef: "q-1", capabilityId: "cap-available" }, outcome: "DENIED" }),
-        false, "no evidence means even DENIED path is rejected"
-    );
+test("CS-W8-21: CAPABILITY AVAILABLE != AUTHORITY — verifier accepts no capabilityRegistry, availability irrelevant", () => {
+    // Structural proof: createCompletionVerifier does NOT accept a
+    // capabilityRegistry option. Capability availability is structurally
+    // excluded from the authorization path — the verifier only accepts
+    // completionEvidence and bounds. Any capability, AVAILABLE or not,
+    // requires canonical execution evidence.
+    const verifierSrc = fs.readFileSync(path.join(ROOT, "src/cognition/closedloop/index.js"), "utf8");
+    assert.doesNotMatch(verifierSrc, /capabilityRegistry/,
+        "createCompletionVerifier must not accept a capabilityRegistry — availability is not authority");
+    // Runtime proof: probes for any capabilityId string fail when port returns null.
+    const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.9 };
+    for (const capId of ["cap-available", "cap-AVAILABLE", "CERTIFIED_CAPABILITY", "always-ready"]) {
+        const v = createCompletionVerifier({ completionEvidence: () => null });
+        assert.equal(
+            v.verifyCompletion({ probeId: `p-${capId}`, request: { probeId: `p-${capId}`, questionRef: "q-1", capabilityId: capId }, outcome: "SUCCESS", observation: obs }),
+            false, `capability "${capId}" without canonical evidence must fail regardless of availability`
+        );
+    }
 });
 
 // ── CS-W8-22: MODEL OUTPUT != AUTHORITY ──────────────────────────────────
@@ -497,20 +515,21 @@ test("CS-W8-22: MODEL OUTPUT != AUTHORITY — model-constructed evidence shape b
 
 // ── CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE ──────────────────────
 
-test("CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE — dual-witness test asserts the invariant", () => {
+test("CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE — dual-witness test asserts REPLAY_HEAD_UNWITNESSED", () => {
     // The invariant: fsyncing a file does not guarantee its directory entry
-    // survives a crash. The W8-IW1 dual-witness tests enforce this: a
-    // co-located local anchor must NOT substitute for the external witness, and
-    // the ledger must fail closed when only the local file is durable.
-    // This test proves those assertions are present; a vacuous check would
-    // let the file exist with no actual durability assertions.
+    // survives a crash. The dual-witness test enforces this: the local anchor
+    // must NOT substitute for the external witness (line: assert.match(String(...),
+    // /REPLAY_HEAD_UNWITNESSED/)).
+    // This test checks for the actual assertion call, not just the word in a comment.
     const witnessTest = path.join(ROOT, "tests/wave8/iw1/replayDualWitness.test.js");
     assert.ok(fs.existsSync(witnessTest), "replayDualWitness.test.js must exist");
     const src = fs.readFileSync(witnessTest, "utf8");
-    // Must contain the specific "local anchor must NOT substitute" assertion keyword.
-    assert.match(src, /REPLAY_HEAD_UNWITNESSED/,
-        "dual-witness test must assert REPLAY_HEAD_UNWITNESSED (local-anchor-only path fails closed)");
-    // Must contain actual assert calls — not just comments.
-    assert.match(src, /assert\.(equal|match|ok|rejects|throws)/,
-        "dual-witness test must contain live assert calls, not just documentation");
+    // Verify REPLAY_HEAD_UNWITNESSED appears on a line that ALSO contains an assert call.
+    // This proves it is a live assertion, not just a comment or string constant.
+    const lines = src.split(/\r?\n/);
+    const hasLiveAssertion = lines.some(line =>
+        /assert\.\w+/.test(line) && line.includes("REPLAY_HEAD_UNWITNESSED")
+    );
+    assert.ok(hasLiveAssertion,
+        "dual-witness test must contain an assert(...REPLAY_HEAD_UNWITNESSED...) on the same line — live durability assertion");
 });
