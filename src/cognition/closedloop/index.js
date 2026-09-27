@@ -194,7 +194,7 @@ function createCompletionVerifier(opts = {}) {
             // execution produced — a caller may not substitute its own.
             const evObservation = safeData(evidence, "observation");
             if (evObservation == null) { pending.delete(probeId); return false; }
-            if (typeof evObservation !== "object" ||
+            if (typeof evObservation !== "object" || Array.isArray(evObservation) ||
                 !Object.hasOwn(evObservation, "tier") ||
                 !Object.hasOwn(evObservation, "sensor") ||
                 !Object.hasOwn(evObservation, "frame") ||

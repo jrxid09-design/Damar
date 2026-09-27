@@ -512,7 +512,8 @@ test("CS-W8-07: DRIVER SUCCESS != VERIFIED POSTCONDITION — missing evidence an
     // Case 2b: degenerate observations (empty {}, primitive "x") — deepEqual({},{}) and
     // deepEqual("x","x") would both pass the postcondition check, but neither is a
     // canonical T4 observation shape (requires tier, sensor, frame).
-    for (const [label, badObs] of [["empty {}", {}], ["primitive string", "x"], ["missing tier", { sensor: {}, frame: {} }], ["inherited tier only", Object.create({ tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" } })], ["primitive sensor/frame", { tier: "T4", sensor: 1, frame: 1 }], ["numeric tier", { tier: 42, sensor: {}, frame: {} }], ["array sensor/frame", { tier: "T4", sensor: [], frame: [] }]]) {
+    const arrayWithProps = []; arrayWithProps.tier = "T4"; arrayWithProps.sensor = {}; arrayWithProps.frame = {};
+    for (const [label, badObs] of [["empty {}", {}], ["primitive string", "x"], ["missing tier", { sensor: {}, frame: {} }], ["inherited tier only", Object.create({ tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" } })], ["primitive sensor/frame", { tier: "T4", sensor: 1, frame: 1 }], ["numeric tier", { tier: 42, sensor: {}, frame: {} }], ["array sensor/frame", { tier: "T4", sensor: [], frame: [] }], ["array top-level with props", arrayWithProps]]) {
         const probeId = `p-bad-obs-${label.replace(/\s/g, "-")}`;
         const evBad = { outcome: "VERIFIED", probeId, questionRef: "q-1", capabilityId: "c-1", observation: badObs };
         const vBad = createCompletionVerifier({ completionEvidence: makeEvidence({ [probeId]: evBad }) });
