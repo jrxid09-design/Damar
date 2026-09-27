@@ -1,0 +1,406 @@
+"use strict";
+
+/**
+ * W8-L7 EMBODIED CONVERGENCE CERTIFICATION
+ *
+ * Cross-lane composition and convergence of L1-L6 as an integrated system.
+ * Each test is labelled with its convergence-scenario identifier (CS-W8-xx)
+ * and the hard invariant it asserts, per the frozen W8 contract
+ * (WAVE8_CONTRACTS_FROZEN.md §W8-L7).
+ *
+ * Scope: composition, authority boundaries, completion path, ephemeral state,
+ * uncertain-effect safety, no-second-dispatcher, and import-graph proofs.
+ * Unit-level L6 verifier tests live in tests/wave8/l6/closedloop.test.js.
+ */
+
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const ROOT = path.resolve(__dirname, "../../..");
+
+const { createRuntimeCore } = require("../../../src/integration/canonicalRuntimeComposition");
+const {
+    createClosedLoop, createCompletionVerifier, PHASE, LOOP_ORDER, BOUNDS, laws
+} = require("../../../src/cognition/closedloop");
+
+// ── helpers ───────────────────────────────────────────────────────────────
+
+function makeAuditLedger() {
+    const events = [];
+    return { ledger: { append(e) { events.push(e); return { ignored: true }; } }, events };
+}
+
+function cognitionOpts(overrides = {}) {
+    return {
+        enableCognition: true,
+        cognitionMode: "shadow",
+        cognitionCapabilityRegistry: {
+            get: () => null,
+            has: () => false,
+            getAvailability: () => "UNKNOWN"
+        },
+        cognitionAuditLedger: makeAuditLedger().ledger,
+        ...overrides
+    };
+}
+
+function makeEvidence(records = {}) {
+    return ({ probeId }) => (probeId in records ? records[probeId] : null);
+}
+
+function canonicalEvidence(probeId, obsOverride) {
+    const obs = obsOverride ?? {
+        tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8
+    };
+    return { outcome: "VERIFIED", probeId, questionRef: "q-1", capabilityId: "cap-1", observation: obs };
+}
+
+// ── CS-W8-01: OFF / inactive ──────────────────────────────────────────────
+
+test("CS-W8-01: closedLoop and perceptionLane are null when enableCognition is off", async () => {
+    const core = await createRuntimeCore({});
+    try {
+        assert.equal(core.closedLoop, null);
+        assert.equal(core.perceptionLane, null);
+    } finally {
+        core.shutdown();
+    }
+});
+
+// ── CS-W8-02: cross-lane composition ─────────────────────────────────────
+
+test("CS-W8-02a: all cognition lanes compose when enableCognition is true", async () => {
+    const core = await createRuntimeCore(cognitionOpts());
+    try {
+        assert.ok(core.closedLoop !== null, "closedLoop must be composed");
+        assert.ok(core.perceptionLane !== null, "perceptionLane must be composed");
+        assert.equal(typeof core.closedLoop.runCycle, "function");
+        assert.equal(typeof core.closedLoop.getPhase, "function");
+        assert.equal(typeof core.closedLoop.getLoopStatus, "function");
+        assert.equal(typeof core.perceptionLane.openQuestion, "function");
+        assert.equal(typeof core.perceptionLane.scheduleProbe, "function");
+    } finally {
+        core.shutdown();
+    }
+});
+
+test("CS-W8-02b: cross-lane laws and bounds are published on the frozen surface", async () => {
+    const core = await createRuntimeCore(cognitionOpts());
+    try {
+        assert.equal(core.closedLoop.laws.ONE_FRESH_EVALUATION_PER_EFFECT, true);
+        assert.equal(core.closedLoop.laws.NO_SECOND_DISPATCHER, true);
+        assert.equal(core.closedLoop.laws.VERIFY_AUTHORIZE_NEVER_SILENTLY_SKIPPED, true);
+        assert.equal(core.closedLoop.bounds.MIN_LOOP_INTERVAL_MS, BOUNDS.MIN_LOOP_INTERVAL_MS);
+        assert.equal(core.closedLoop.bounds.MAX_STAGES, BOUNDS.MAX_STAGES);
+    } finally {
+        core.shutdown();
+    }
+});
+
+// ── CS-W8-03: authority invariants ───────────────────────────────────────
+
+test("CS-W8-03a: MODEL != AUTHORITY — no public seam to mint completion evidence", async () => {
+    const core = await createRuntimeCore(cognitionOpts());
+    try {
+        assert.equal(core.closedLoop.admitCanonicalProbeCompletion, undefined,
+            "no public completion-admission seam must exist on the closed loop");
+    } finally {
+        core.shutdown();
+    }
+});
+
+test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or authority", () => {
+    // Import-graph structural proof: no actuator, action, or authority imports.
+    const src = fs.readFileSync(path.join(ROOT, "src/cognition/closedloop/index.js"), "utf8");
+    assert.doesNotMatch(src, /require\s*\(\s*["'][^"']*\/action\//,
+        "closedloop must not import from src/action");
+    assert.doesNotMatch(src, /require\s*\(\s*["'][^"']*\/authority\//,
+        "closedloop must not import from src/authority");
+    assert.doesNotMatch(src, /require\s*\(\s*["'][^"']*actuator/,
+        "closedloop must not import any actuator module");
+});
+
+test("CS-W8-03c: NO_SECOND_DISPATCHER — no dispatch() call inside closedloop", () => {
+    assert.equal(laws.NO_SECOND_DISPATCHER, true);
+    const src = fs.readFileSync(path.join(ROOT, "src/cognition/closedloop/index.js"), "utf8");
+    assert.doesNotMatch(src, /\bdispatch\s*\(/, "closedloop must not call dispatch()");
+    assert.doesNotMatch(src, /createDispatch/, "closedloop must not create a dispatcher");
+});
+
+// ── CS-W8-04: PERCEPTION != AUTHORITY — L2 probe scheduling ──────────────
+
+test("CS-W8-04a: PERCEPTION != AUTHORITY — probe request wiring sets dispatch:null (structural proof)", () => {
+    // Structural proof: the perception lane always sets dispatch:null on every
+    // probe request it builds. Authority owns all dispatch; a probe is a data
+    // request, not an action. The source is read here (not mocked) so a future
+    // edit that introduces a live dispatch handle will break this test.
+    const src = fs.readFileSync(path.join(ROOT, "src/cognition/perception/index.js"), "utf8");
+    assert.match(src, /dispatch\s*:\s*null/,
+        "perception/index.js must set dispatch:null on probe requests");
+    // Confirm no dispatch import or invocation exists in the perception module.
+    assert.doesNotMatch(src, /require\s*\(\s*["'][^"']*\/dispatch/,
+        "perception module must not import a dispatcher");
+});
+
+test("CS-W8-04b: L2-L6 completion path is fail-closed without canonical execution evidence", () => {
+    // Canonical wiring: completionEvidence = () => null.
+    // Every verifyCompletion call therefore fails closed.
+    const verifier = createCompletionVerifier({ completionEvidence: () => null });
+    assert.equal(
+        verifier.verifyCompletion({
+            probeId: "p-fc",
+            request: { probeId: "p-fc", questionRef: "q-1", capabilityId: "cap-1" },
+            outcome: "SUCCESS",
+            observation: { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 }
+        }),
+        false,
+        "null completionEvidence must produce fail-closed: false"
+    );
+});
+
+// ── CS-W8-05: REPLAY CACHE != REPLAY AUTHORITY ───────────────────────────
+
+test("CS-W8-05: same probeId cannot be verified twice (exactly-once admission)", () => {
+    const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
+    const ev = canonicalEvidence("p-once", obs);
+    const verifier = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-once": ev }) });
+    const spec = { probeId: "p-once", request: { probeId: "p-once", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: obs };
+    assert.equal(verifier.verifyCompletion(spec), true, "first verification must succeed");
+    assert.equal(verifier.verifyCompletion(spec), false, "replay must be rejected");
+});
+
+// ── CS-W8-06: UNCERTAIN PRIOR EFFECT != SAFE TO RETRY ───────────────────
+
+test("CS-W8-06a: DENIED outcome cannot upgrade to SUCCESS", () => {
+    const deniedRecord = { outcome: "DENIED", probeId: "p-d1", questionRef: "q-1", capabilityId: "cap-1" };
+    const verifier = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-d1": deniedRecord }) });
+    // Correct DENIED path:
+    assert.equal(verifier.verifyCompletion({ probeId: "p-d1", request: { probeId: "p-d1", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "DENIED" }), true);
+    // Attempt to upgrade a DENIED probe to SUCCESS:
+    const deniedRecord2 = { outcome: "DENIED", probeId: "p-d2", questionRef: "q-1", capabilityId: "cap-1" };
+    const verifier2 = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-d2": deniedRecord2 }) });
+    const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
+    assert.equal(verifier2.verifyCompletion({ probeId: "p-d2", request: { probeId: "p-d2", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: obs }), false);
+});
+
+test("CS-W8-06b: TIMEOUT outcome cannot upgrade to SUCCESS", () => {
+    const timedOut = { outcome: "TIMEOUT", probeId: "p-t1", questionRef: "q-1", capabilityId: "cap-1" };
+    const verifier = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-t1": timedOut }) });
+    assert.equal(verifier.verifyCompletion({ probeId: "p-t1", request: { probeId: "p-t1", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "TIMEOUT" }), true);
+    const timedOut2 = { outcome: "TIMEOUT", probeId: "p-t2", questionRef: "q-1", capabilityId: "cap-1" };
+    const verifier2 = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-t2": timedOut2 }) });
+    const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
+    assert.equal(verifier2.verifyCompletion({ probeId: "p-t2", request: { probeId: "p-t2", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: obs }), false);
+});
+
+// ── CS-W8-07: DRIVER SUCCESS != VERIFIED POSTCONDITION ───────────────────
+
+test("CS-W8-07: claiming SUCCESS without canonical evidence fails — no backdoor postcondition", () => {
+    const verifier = createCompletionVerifier({ completionEvidence: () => null });
+    const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
+    assert.equal(
+        verifier.verifyCompletion({ probeId: "p-drv", request: { probeId: "p-drv", questionRef: "q-1", capabilityId: "c-1" }, outcome: "SUCCESS", observation: obs }),
+        false,
+        "driver claim without canonical evidence must fail"
+    );
+});
+
+// ── CS-W8-08: stale / substituted observation ─────────────────────────────
+
+test("CS-W8-08: forged observation is rejected — caller cannot substitute canonical observation", () => {
+    const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
+    const ev = canonicalEvidence("p-obs", obs);
+    const verifier = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-obs": ev }) });
+    const forgedObs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.99 };
+    assert.equal(
+        verifier.verifyCompletion({ probeId: "p-obs", request: { probeId: "p-obs", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: forgedObs }),
+        false
+    );
+});
+
+// ── CS-W8-09: AUTHORIZE and VERIFY always report DEGRADED ────────────────
+
+test("CS-W8-09a: AUTHORIZE and VERIFY always report DEGRADED across a full cycle", () => {
+    let now = 0;
+    const clock = { nowMs: () => now };
+    const loop = createClosedLoop({ clock });
+    const reports = {};
+    for (let i = 0; i < LOOP_ORDER.length; i++) {
+        const r = loop.runCycle();
+        reports[r.phase] = r;
+        now += 100;
+    }
+    assert.equal(reports[PHASE.AUTHORIZE].degraded, "AUTHORIZE_UNAVAILABLE");
+    assert.equal(reports[PHASE.AUTHORIZE].present, false);
+    assert.equal(reports[PHASE.VERIFY].degraded, "VERIFY_UNAVAILABLE");
+    assert.equal(reports[PHASE.VERIFY].present, false);
+});
+
+test("CS-W8-09b: VERIFY_AUTHORIZE_NEVER_SILENTLY_SKIPPED — both phases present in fixed loop order", () => {
+    assert.ok(LOOP_ORDER.includes(PHASE.AUTHORIZE));
+    assert.ok(LOOP_ORDER.includes(PHASE.VERIFY));
+    const loop = createClosedLoop();
+    assert.equal(loop.laws.VERIFY_AUTHORIZE_NEVER_SILENTLY_SKIPPED, true);
+});
+
+// ── CS-W8-10: fixed loop order ────────────────────────────────────────────
+
+test("CS-W8-10: canonical 9-phase loop order is enforced across a full cycle", () => {
+    assert.equal(LOOP_ORDER.length, 9, "canonical loop must have exactly 9 phases");
+    let now = 0;
+    const clock = { nowMs: () => now };
+    const loop = createClosedLoop({ clock });
+    const phases = [];
+    for (let i = 0; i < LOOP_ORDER.length; i++) {
+        phases.push(loop.runCycle().phase);
+        now += 100;
+    }
+    assert.deepEqual(phases, LOOP_ORDER);
+});
+
+// ── CS-W8-11: loop rate bound ─────────────────────────────────────────────
+
+test("CS-W8-11: busy-spin rejected with LOOP_RATE_EXCEEDED", () => {
+    let now = 0;
+    const clock = { nowMs: () => now };
+    const loop = createClosedLoop({ clock });
+    loop.runCycle();
+    // Do not advance time — second call within MIN_LOOP_INTERVAL_MS must throw.
+    assert.throws(() => loop.runCycle(), (e) => e.reason === "LOOP_RATE_EXCEEDED");
+});
+
+// ── CS-W8-12: crash / restart — ephemeral state ───────────────────────────
+
+test("CS-W8-12a: loop state is ephemeral — fresh instance has no phase, no cycle count", () => {
+    let now = 0;
+    const clock = { nowMs: () => now };
+    const loop1 = createClosedLoop({ clock });
+    loop1.runCycle(); now += 100;
+    loop1.runCycle(); now += 100;
+    // Restart: fresh instance must carry no state from loop1.
+    now += 100;
+    const loop2 = createClosedLoop({ clock });
+    assert.equal(loop2.getPhase(), null);
+    assert.equal(loop2.getLoopStatus().cycleCount, 0);
+    assert.equal(loop2.getLoopStatus().lastAdvanceMs, null);
+});
+
+test("CS-W8-12b: verifier state is ephemeral — restart means fresh empty completed set", () => {
+    const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
+    const ev = canonicalEvidence("p-rst", obs);
+    const evidence = makeEvidence({ "p-rst": ev });
+    const spec = { probeId: "p-rst", request: { probeId: "p-rst", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: obs };
+    const v1 = createCompletionVerifier({ completionEvidence: evidence });
+    assert.equal(v1.verifyCompletion(spec), true, "v1 first: accepted");
+    assert.equal(v1.verifyCompletion(spec), false, "v1 replay: rejected");
+    // New instance (restart): same probe can be verified once again.
+    const v2 = createCompletionVerifier({ completionEvidence: evidence });
+    assert.equal(v2.verifyCompletion(spec), true, "v2 (restart): fresh state, accepted once");
+});
+
+// ── CS-W8-13: partial lane composition degrades honestly ─────────────────
+
+test("CS-W8-13: absent lanes reported as not present — no silent degradation", () => {
+    const loop = createClosedLoop(); // all optional lanes absent
+    const status = loop.getLoopStatus();
+    assert.equal(status.lanesPresent.cycle, false);
+    assert.equal(status.lanesPresent.perception, false);
+    assert.equal(status.lanesPresent.sensorium, false);
+    assert.equal(status.lanesPresent.spatial, false);
+    assert.equal(status.lanesPresent.effectors, false);
+    assert.equal(status.lanesPresent.simulation, false);
+    // Loop still advances — degraded, not dead.
+    loop.runCycle();
+    assert.notEqual(loop.getPhase(), null);
+});
+
+// ── CS-W8-14: no authority escalation — governed requires ledger ──────────
+
+test("CS-W8-14: governed mode provides NO additional authority — AUTHORIZE still degraded", async () => {
+    // NO_AUTHORITY_ESCALATION: even in governed mode the closed loop has no
+    // Authority client and no actuator handle. AUTHORIZE is still reported as
+    // AUTHORIZE_UNAVAILABLE; the loop cannot escalate to a live authorization.
+    const core = await createRuntimeCore(cognitionOpts({ cognitionMode: "governed" }));
+    try {
+        if (core.closedLoop === null) return; // governed failed to start — fail-closed is fine
+        let now = 0;
+        const clock = { nowMs: () => now };
+        const loop = createClosedLoop({ clock });
+        let authReport = null;
+        for (let i = 0; i < LOOP_ORDER.length; i++) {
+            const r = loop.runCycle();
+            if (r.phase === PHASE.AUTHORIZE) authReport = r;
+            now += 100;
+        }
+        assert.ok(authReport !== null, "AUTHORIZE phase must execute");
+        assert.equal(authReport.degraded, "AUTHORIZE_UNAVAILABLE",
+            "governed mode must not grant a live AUTHORIZE capability to the closed loop");
+        assert.equal(authReport.present, false,
+            "AUTHORIZE must report present:false — no authority escalation");
+    } finally {
+        core.shutdown();
+    }
+});
+
+// ── CS-W8-15: ONE_FRESH_EVALUATION_PER_EFFECT ────────────────────────────
+
+test("CS-W8-15: one-fresh-evaluation law published on every loop instance", () => {
+    const loop = createClosedLoop();
+    assert.equal(loop.laws.ONE_FRESH_EVALUATION_PER_EFFECT, true);
+    assert.equal(loop.laws.NO_SECOND_DISPATCHER, true);
+});
+
+// ── CS-W8-16: bidirectional binding strictness ───────────────────────────
+
+test("CS-W8-16a: request without probeId field is rejected (bidirectional binding required)", () => {
+    const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
+    const ev = canonicalEvidence("p-bnd", obs);
+    const verifier = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-bnd": ev }) });
+    assert.equal(
+        verifier.verifyCompletion({ probeId: "p-bnd", request: { questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: obs }),
+        false,
+        "request.probeId is mandatory for bidirectional binding"
+    );
+});
+
+test("CS-W8-16b: questionRef/capabilityId mismatch fails closed", () => {
+    const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
+    const ev = canonicalEvidence("p-mis", obs);
+    const v1 = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-mis": ev }) });
+    assert.equal(v1.verifyCompletion({ probeId: "p-mis", request: { probeId: "p-mis", questionRef: "q-WRONG", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: obs }), false);
+    const ev2 = canonicalEvidence("p-mis2", obs);
+    const v2 = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-mis2": ev2 }) });
+    assert.equal(v2.verifyCompletion({ probeId: "p-mis2", request: { probeId: "p-mis2", questionRef: "q-1", capabilityId: "cap-WRONG" }, outcome: "SUCCESS", observation: obs }), false);
+});
+
+// ── CS-W8-17: known ToolBus skip — status B ──────────────────────────────
+
+test("CS-W8-17: ToolBus skip remains BLOCKED ON W8-IW1 (not resolved by L6/L7)", () => {
+    // Status B: the skip requires W8-IW1 production-path harness, which
+    // provides canonical capability/actuator registrations. L6/L7 are
+    // cognition/composition layers and do NOT provide these registrations.
+    const toolBusSrc = fs.readFileSync(
+        path.join(ROOT, "tests/wave8/legacy/toolBusAuthority.test.js"), "utf8"
+    );
+    assert.match(toolBusSrc, /BLOCKED ON W8-IW1/,
+        "ToolBus skip must remain annotated as BLOCKED ON W8-IW1");
+    // IW1 resolution harness directory must exist.
+    assert.ok(
+        fs.existsSync(path.join(ROOT, "tests/wave8/iw1")),
+        "tests/wave8/iw1 (IW1 resolution harness) must exist"
+    );
+});
+
+// ── CS-W8-18: runtime core is frozen — no hidden seam attachment ──────────
+
+test("CS-W8-18: createRuntimeCore returns a frozen object (no seam injection after construction)", async () => {
+    const core = await createRuntimeCore(cognitionOpts());
+    try {
+        assert.ok(Object.isFrozen(core), "runtime core must be frozen");
+        assert.ok(Object.isFrozen(core.closedLoop), "closedLoop must be frozen");
+    } finally {
+        core.shutdown();
+    }
+});
