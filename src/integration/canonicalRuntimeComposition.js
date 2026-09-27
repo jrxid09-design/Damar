@@ -1244,6 +1244,8 @@ async function buildRuntimeCoreInternal({
     let cognition = null;
     let cognitionAuditLedgerResolved = null;
     let perceptionLane = null;
+    let closedLoop = null;
+    let admitCanonicalProbeCompletion = null;
     // W8-L1 (frozen contract): the bridge from Sensorium observations into
     // W7-L2 world-model ingest. Constructed ONLY when both sides of the
     // join actually exist (mirrors `enableCognition`'s own opt-in shape;
@@ -1299,12 +1301,63 @@ async function buildRuntimeCoreInternal({
         });
         if (cognition?.mode !== "off" && cognition?.lanes) {
             const { createPerception } = require("../cognition/perception");
+            const { createClosedLoop, createCompletionVerifier } = require("../cognition/closedloop");
+            const { isCanonicalCapabilityResult } = require("../manager/internal/canonicalCapabilityExecution");
             const perceptionStoreField = readDataProperty(cognitionStores, "perception");
-            // Until L6 binds its Authority + committed-sensorium result path,
-            // canonical composition deliberately has no completion proof.
-            // A future adapter is private here; public RuntimeCore options
-            // cannot claim a successful probe by returning a shaped object.
-            const trustedResultAdapter = Object.freeze({ verifyCompletion: () => false });
+
+            // W8-L6 trusted completion handoff (composition-owned, NOT a public
+            // RuntimeCore option). A probe is complete only when a canonical
+            // execution bridge produced a branded, verified result for it. The
+            // completion evidence below is grounded in `isCanonicalCapabilityResult`
+            // — a module-private WeakSet brand that a caller cannot forge — so a
+            // caller-shaped object, a callback, or a caller assertion can never
+            // count as completion. Until a perception capability is genuinely
+            // routed through canonical execution, the evidence set stays empty
+            // and `probeResult` fails closed (exactly as the handoff requires).
+            const completionRecords = new Map(); // probeId -> frozen completion
+
+            admitCanonicalProbeCompletion = (spec) => {
+                if (!spec || typeof spec !== "object" || isProxyValue(spec)) return false;
+                const probeIdField = readDataProperty(spec, "probeId");
+                const requestField = readDataProperty(spec, "request");
+                const resultField = readDataProperty(spec, "executionResult");
+                const probeId = probeIdField.ok ? probeIdField.value : null;
+                const request = requestField.ok ? requestField.value : null;
+                const executionResult = resultField.ok ? resultField.value : null;
+                if (typeof probeId !== "string" || probeId.length === 0) return false;
+                if (!request || typeof request !== "object" || isProxyValue(request)) return false;
+                // Only a genuine canonical execution bridge result is evidence.
+                if (!isCanonicalCapabilityResult(executionResult)) return false;
+                const outcome = readDataProperty(executionResult, "outcome");
+                const evOutcome = outcome.ok ? outcome.value : null;
+                if (evOutcome === "EXECUTED_VERIFIED") {
+                    const obs = readDataProperty(executionResult, "result");
+                    if (!obs.ok) return false;
+                    completionRecords.set(probeId, Object.freeze({
+                        outcome: "VERIFIED", probeId,
+                        questionRef: readDataProperty(request, "questionRef").ok ? readDataProperty(request, "questionRef").value : undefined,
+                        capabilityId: readDataProperty(request, "capabilityId").ok ? readDataProperty(request, "capabilityId").value : undefined,
+                        observation: obs.value
+                    }));
+                    return true;
+                }
+                if (evOutcome === "DENIED" || evOutcome === "REFUSED") {
+                    completionRecords.set(probeId, Object.freeze({
+                        outcome: "DENIED", probeId,
+                        questionRef: readDataProperty(request, "questionRef").ok ? readDataProperty(request, "questionRef").value : undefined,
+                        capabilityId: readDataProperty(request, "capabilityId").ok ? readDataProperty(request, "capabilityId").value : undefined
+                    }));
+                    return true;
+                }
+                return false;
+            };
+
+            const completionEvidence = ({ probeId }) => {
+                if (typeof probeId !== "string") return null;
+                return completionRecords.get(probeId) ?? null;
+            };
+
+            const trustedResultAdapter = createCompletionVerifier({ completionEvidence });
             perceptionLane = await createPerception({
                 capabilityRegistry: cognitionCapabilityRegistry,
                 selfModel: cognition.lanes.selfModel,
@@ -1314,6 +1367,7 @@ async function buildRuntimeCoreInternal({
                 store: perceptionStoreField.ok ? perceptionStoreField.value : null,
                 auditLedger: cognitionAuditLedgerResolved
             });
+
         }
         if (core?.body && cognition?.lanes?.worldModel) {
             sensoriumBridge = bridgeSensoriumToWorldModel({
@@ -1325,6 +1379,16 @@ async function buildRuntimeCoreInternal({
                 // bridge defaults the same way, rather than coupling to
                 // `presenceClock`, an unrelated subsystem's clock.
                 auditLedger: cognitionAuditLedgerResolved
+            });
+        }
+        if (perceptionLane) {
+            const { createClosedLoop } = require("../cognition/closedloop");
+            closedLoop = createClosedLoop({
+                cycle: cognition,
+                perceptionLane,
+                sensoriumBridge,
+                auditLedger: cognitionAuditLedgerResolved,
+                admitCompletion: admitCanonicalProbeCompletion
             });
         }
     }
@@ -1341,6 +1405,11 @@ async function buildRuntimeCoreInternal({
         // W8-L2 (opt-in with active cognition): the bounded question/probe
         // request lane. It emits data only; Authority owns all dispatch.
         perceptionLane,
+
+        // W8-L6 (opt-in with active cognition): the closed-loop composition.
+        // No dispatch, no Authority evaluation, no actuator handle; it supplies
+        // the grounded completion handoff that closes W8-L2's probe lifecycle.
+        closedLoop,
 
         // W8-L1 (opt-in, composition-only; null unless enableCognition AND
         // both core.body/cognition.lanes.worldModel exist): the sole join
