@@ -367,6 +367,30 @@ test("CS-W8-04b: L2-L6 completion path is fail-closed without canonical executio
     assert.doesNotMatch(compositionSrc,
         /createCompletionVerifier\s*\(\s*\{[^}]*\b(?:maxCompletionRecords|MAX_COMPLETION_RECORDS)\b/,
         "canonical createCompletionVerifier must not receive a maxCompletionRecords override (injected cap weakens exactly-once contract)");
+    // One-wiring proof: createCompletionVerifier must be called in exactly ONE src/ file
+    // (canonicalRuntimeComposition.js). A rogue second wiring elsewhere with a live evidence
+    // port would bypass the canonical fail-closed path without being caught by the checks above.
+    function findJsFilesSrc(dir) {
+        const result = [];
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) result.push(...findJsFilesSrc(full));
+            else if (entry.isFile() && entry.name.endsWith(".js")) result.push(full);
+        }
+        return result;
+    }
+    const allSrcFiles = findJsFilesSrc(path.join(ROOT, "src"));
+    const wiringFiles = allSrcFiles.filter(f => {
+        // Exclude the definition file — it contains `function createCompletionVerifier(`.
+        if (/closedloop[/\\]index\.js$/.test(f)) return false;
+        const s = fs.readFileSync(f, "utf8")
+            .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
+        return /\bcreateCompletionVerifier\s*\(/.test(s);
+    });
+    assert.equal(wiringFiles.length, 1,
+        `createCompletionVerifier must be wired in exactly one src/ file (found: ${wiringFiles.map(f => path.relative(ROOT, f).replace(/\\/g, "/")).join(", ")})`);
+    assert.ok(wiringFiles[0].replace(/\\/g, "/").includes("canonicalRuntimeComposition"),
+        `the sole createCompletionVerifier wiring must be in canonicalRuntimeComposition.js, not ${path.relative(ROOT, wiringFiles[0]).replace(/\\/g, "/")}`);
     // trustedResultAdapter handoff proof: createPerception must receive trustedResultAdapter
     // as a shorthand property (no colon) -- shorthand proves the variable IS the
     // createCompletionVerifier result, not a bypassed { verifyCompletion: () => true } literal.
