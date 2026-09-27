@@ -176,7 +176,7 @@ function createCompletionVerifier(opts = {}) {
         // explicit non-undefined questionRef/capabilityId (canonical evidence
         // always does). Binding is then enforced bidirectionally.
         if (eProbeId !== probeId) return false;
-        if (evProbeId !== undefined && evProbeId !== probeId) return false;
+        if (evProbeId === undefined || evProbeId !== probeId) return false;
         if (eQuestionRef === undefined || eCapabilityId === undefined) return false;
         if (eQuestionRef !== evQuestionRef) return false;
         if (eCapabilityId !== evCapabilityId) return false;
