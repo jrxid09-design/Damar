@@ -539,6 +539,19 @@ test("CS-W8-11: busy-spin rejected with LOOP_RATE_EXCEEDED — boundary exact", 
     // checks above pass trivially with a 1ms spin.
     assert.equal(BOUNDS.MIN_LOOP_INTERVAL_MS, 50,
         "BOUNDS.MIN_LOOP_INTERVAL_MS must be exactly 50 — weakening this bypasses all rate-bound proofs");
+    // Structural proof: canonical composition must not inject a bounds override to
+    // createClosedLoop — a {bounds:{MIN_LOOP_INTERVAL_MS:1}} injection bypasses the 50ms floor.
+    const compositionForBoundsRaw = fs.readFileSync(
+        path.join(ROOT, "src/integration/canonicalRuntimeComposition.js"), "utf8"
+    );
+    const compositionForBounds = compositionForBoundsRaw
+        .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
+    assert.doesNotMatch(compositionForBounds,
+        /createClosedLoop\s*\(\s*\{[\s\S]{0,200}\bbounds\s*:/,
+        "canonical createClosedLoop must not receive a bounds: override (weakens canonical 50ms floor)");
+    assert.doesNotMatch(compositionForBounds,
+        /createClosedLoop\s*\(\s*\{[\s\S]{0,200}\bMIN_LOOP_INTERVAL_MS\b/,
+        "canonical createClosedLoop must not receive a MIN_LOOP_INTERVAL_MS override");
 });
 
 // ── CS-W8-12: crash / restart — ephemeral state ───────────────────────────
