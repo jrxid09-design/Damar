@@ -180,6 +180,9 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
         // No Unicode escape sequences in identifier positions — require("../authority") evades require() regex.
         assert.doesNotMatch(rawSrc, /[a-zA-Z_$]\\u[0-9a-fA-F]{4}/,
             `[${relPath}] closedloop must not use Unicode escapes in identifiers (obfuscates require/other keywords)`);
+        // No Unicode escape sequences inside string literals — "../../authority" decodes to authority path.
+        assert.doesNotMatch(rawSrc, /["'][^"']*\\u[0-9a-fA-F]{4}/,
+            `[${relPath}] closedloop must not use Unicode escapes in string literals (evades path checks)`);
     }
 });
 
@@ -263,6 +266,9 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // No .join('') calls — prevents ["dis","patch"].join("") assembling "dispatch" from parts.
         assert.doesNotMatch(src, /\.join\s*\(\s*["']{2}\s*\)/,
             `[${relPath}] must not use .join('') — could assemble "dispatch" key from array parts`);
+        // No template literal computed keys with interpolation — [`dis${"patch"}`]: fn creates dispatch at runtime.
+        assert.doesNotMatch(rawSrc, /\[`[^`]*\$\{[^}]*\}[^`]*`\]\s*:/,
+            `[${relPath}] must not use template literal computed keys with interpolation`);
         // No dynamic require() calls.
         const dynReq = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
         assert.equal(dynReq, null, `[${relPath}] perception must not use dynamic require()`);
