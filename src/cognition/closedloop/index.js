@@ -69,12 +69,14 @@ function sanitizeBounds(bounds) {
 }
 
 /**
- * Defensive deep equality. Reads every property by data descriptor only, so a
- * hostile observation (throwing getter, accessor, Proxy, or cyclic object) is
- * never invoked and never makes the verifier throw — it is treated as "not
- * equal", so `verifyCompletion` returns false fail-closed. This also closes the
- * check-then-use race: the verifier never runs a getter that could return one
- * value here and a different value when the consumer later clones the object.
+ * Defensive deep equality. Reads every property by data descriptor only (all
+ * own properties, including non-enumerable), checks array/prototype identity,
+ * and rejects accessors. A hostile observation (accessor, Proxy, Symbol key,
+ * or cyclic object) never makes the verifier throw — it is treated as "not
+ * equal", so `verifyCompletion` returns false fail-closed. This closes the
+ * check-then-use race: the verifier enumerates the same properties (all own,
+ * including non-enumerable) that safeClone copies, so what the verifier checks
+ * IS what the L2 lane stores.
  */
 function readDataDeep(value, key) {
     if (value === null || typeof value !== "object" || IS_PROXY(value)) return { ok: false };
@@ -90,11 +92,19 @@ function deepEqual(a, b, depth = 0) {
     if (a === null || b === null) return false;
     if (typeof a !== "object" || typeof b !== "object") return false;
     if (IS_PROXY(a) || IS_PROXY(b)) return false;
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    let protoA, protoB;
+    try { protoA = Object.getPrototypeOf(a); protoB = Object.getPrototypeOf(b); } catch { return false; }
+    if (protoA !== protoB) return false;
     let ka, kb;
-    try { ka = Object.keys(a); kb = Object.keys(b); } catch { return false; }
+    try {
+        ka = Reflect.ownKeys(a).filter(k => typeof k === "string");
+        kb = Reflect.ownKeys(b).filter(k => typeof k === "string");
+    } catch { return false; }
     if (ka.length !== kb.length) return false;
+    const kbSet = new Set(kb);
     for (const k of ka) {
-        if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+        if (!kbSet.has(k)) return false;
         const ra = readDataDeep(a, k);
         const rb = readDataDeep(b, k);
         if (!ra.ok || !rb.ok) return false;
