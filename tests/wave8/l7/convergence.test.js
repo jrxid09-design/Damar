@@ -174,6 +174,9 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
         // No createRequire — node:module createRequire creates a custom require function that evades require() checks.
         assert.doesNotMatch(src, /\bcreateRequire\b/,
             `[${relPath}] closedloop must not use createRequire (bypasses require() literal check)`);
+        // No Unicode escape sequences in identifier positions — require("../authority") evades require() regex.
+        assert.doesNotMatch(rawSrc, /[a-zA-Z_$]\\u[0-9a-fA-F]{4}/,
+            `[${relPath}] closedloop must not use Unicode escapes in identifiers (obfuscates require/other keywords)`);
     }
 });
 
@@ -254,6 +257,9 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // No Unicode escape sequences in string literals — dispatch decodes to "dispatch".
         assert.doesNotMatch(rawSrc, /["'][^"']*\\u[0-9a-fA-F]{4}/,
             `[${relPath}] must not use Unicode escapes in string literals (potential dispatch key bypass)`);
+        // No .join('') calls — prevents ["dis","patch"].join("") assembling "dispatch" from parts.
+        assert.doesNotMatch(src, /\.join\s*\(\s*["']{2}\s*\)/,
+            `[${relPath}] must not use .join('') — could assemble "dispatch" key from array parts`);
         // No dynamic require() calls.
         const dynReq = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
         assert.equal(dynReq, null, `[${relPath}] perception must not use dynamic require()`);
@@ -335,6 +341,12 @@ test("CS-W8-05: REPLAY CACHE != REPLAY AUTHORITY — same probeId rejected after
     // No inherited symbol-keyed seams — prototype must be Object.prototype.
     assert.equal(Object.getPrototypeOf(verifier), Object.prototype,
         "verifier prototype must be Object.prototype (no custom prototype with inherited seams)");
+    // The verifyCompletion function itself must not have extra own properties.
+    // A property like verifyCompletion.reset = () => completed.clear() would expose cache mutation.
+    const verifyFnProps = Object.getOwnPropertyNames(verifier.verifyCompletion)
+        .filter(k => !["length", "name", "prototype"].includes(k));
+    assert.deepEqual(verifyFnProps, [],
+        "verifyCompletion function must not have extra own properties (no reset/clear seam on the function object)");
 });
 
 // ── CS-W8-06: UNCERTAIN PRIOR EFFECT != SAFE TO RETRY ───────────────────
