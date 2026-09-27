@@ -171,6 +171,9 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
         // No require() aliasing — const load = require (without call parens) assigns the function itself.
         assert.doesNotMatch(src, /(?:const|let|var)\s+\w+\s*=\s*\brequire\b(?!\s*\()/,
             `[${relPath}] closedloop must not alias require into another variable`);
+        // No createRequire — node:module createRequire creates a custom require function that evades require() checks.
+        assert.doesNotMatch(src, /\bcreateRequire\b/,
+            `[${relPath}] closedloop must not use createRequire (bypasses require() literal check)`);
     }
 });
 
@@ -248,6 +251,9 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // No array-indexed dispatch key: ["dispatch"][0] yields "dispatch" as a computed key.
         assert.doesNotMatch(rawSrc, /\[["']dispatch["']\]\s*\[/,
             `[${relPath}] must not use array-indexed dispatch key (["dispatch"][n])`);
+        // No Unicode escape sequences in string literals — dispatch decodes to "dispatch".
+        assert.doesNotMatch(rawSrc, /["'][^"']*\\u[0-9a-fA-F]{4}/,
+            `[${relPath}] must not use Unicode escapes in string literals (potential dispatch key bypass)`);
         // No dynamic require() calls.
         const dynReq = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
         assert.equal(dynReq, null, `[${relPath}] perception must not use dynamic require()`);
@@ -323,6 +329,9 @@ test("CS-W8-05: REPLAY CACHE != REPLAY AUTHORITY — same probeId rejected after
     const surface = Object.getOwnPropertyNames(verifier).filter(k => k !== "__proto__");
     assert.deepEqual(surface.sort(), ["verifyCompletion"],
         "verifier must expose exactly verifyCompletion — no cache-read or mint surface (including non-enumerable)");
+    // No symbol-keyed own seams — a symbol-keyed cache/mint function evades getOwnPropertyNames.
+    assert.equal(Object.getOwnPropertySymbols(verifier).length, 0,
+        "verifier must have no symbol-keyed own properties (no hidden mint seam)");
     // No inherited symbol-keyed seams — prototype must be Object.prototype.
     assert.equal(Object.getPrototypeOf(verifier), Object.prototype,
         "verifier prototype must be Object.prototype (no custom prototype with inherited seams)");
