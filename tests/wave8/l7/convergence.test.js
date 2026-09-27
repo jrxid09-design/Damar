@@ -294,6 +294,10 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // at runtime, bypassing all static string and computed-key literal checks.
         assert.doesNotMatch(src, /String\.fromCharCode\s*\(/,
             `[${relPath}] must not use String.fromCharCode (can construct "dispatch" from char codes at runtime)`);
+        // No JSON.parse — ...JSON.parse('{"dispatch":fn}') spreads a runtime-parsed object, overwriting
+        // dispatch: null without triggering any of the static computed-key or string-literal guards.
+        assert.doesNotMatch(src, /JSON\.parse\s*\(/,
+            `[${relPath}] must not use JSON.parse (can build a "dispatch" key at runtime from a JSON string)`);
         // No dynamic require() calls.
         const dynReq = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
         assert.equal(dynReq, null, `[${relPath}] perception must not use dynamic require()`);
