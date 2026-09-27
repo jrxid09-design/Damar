@@ -141,6 +141,34 @@ test("W8-L6 loop: accessor properties in createClosedLoop options are never invo
     assert.equal(traps, 0, "accessor on options must never be invoked");
 });
 
+test("W8-L6 completion: accessor properties in createCompletionVerifier options are never invoked (R3 P1-1)", () => {
+    let traps = 0;
+    const opts = {};
+    Object.defineProperty(opts, "completionEvidence", { get() { traps++; return () => null; }, configurable: true });
+    assert.throws(() => createCompletionVerifier(opts), TypeError);
+    assert.equal(traps, 0, "accessor on completionEvidence option must never be invoked");
+});
+
+test("W8-L6 completion: deepEqual rejects objects with mismatched descriptor attributes (R3 P1-3)", () => {
+    const evidence = makeEvidence({ "p-da": completion({ probeId: "p-da", observation: { x: 1 } }) });
+    const verifier = createCompletionVerifier({ completionEvidence: evidence });
+    // Non-writable property vs writable — same value, different descriptor, must reject.
+    const obs = {};
+    Object.defineProperty(obs, "x", { value: 1, writable: false, enumerable: true, configurable: true });
+    assert.equal(verifier.verifyCompletion({ probeId: "p-da", request: { probeId: "p-da", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: obs }), false);
+});
+
+test("W8-L6 loop: proxied clock nowMs function is never called (R3 P1-4)", () => {
+    let traps = 0;
+    const proxyFn = new Proxy(() => 12345, { apply() { traps++; return 12345; } });
+    const hostileClock = {};
+    Object.defineProperty(hostileClock, "nowMs", { value: proxyFn, writable: true, enumerable: true, configurable: true });
+    const loop = createClosedLoop({ clock: hostileClock });
+    // safeNowMs must detect IS_PROXY(fn) and fall back to Date.now, never calling the proxy.
+    assert.doesNotThrow(() => loop.runCycle());
+    assert.equal(traps, 0, "proxied clock function must never be called");
+});
+
 test("W8-L6 loop: caller-supplied MIN_LOOP_INTERVAL_MS=0 is rejected and default enforced", () => {
     let now = 0;
     const clock = { nowMs: () => now };
