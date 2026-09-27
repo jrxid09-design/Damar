@@ -9,9 +9,10 @@
  * dispatches, never evaluates Authority, never touches an actuator.
  *
  * The loop order is fixed (see phases.js). A missing stage SHORTENS the loop
- * honestly; AUTHORIZE and VERIFY are never silently skipped — when their
- * canonical inputs are absent the loop reports a degraded stage, never a
- * pretend authorization or a pretend verified postcondition.
+ * honestly; AUTHORIZE and VERIFY are never silently skipped — they always
+ * report DEGRADED when their canonical inputs (an authorized intent, and
+ * verification evidence) are absent, never a pretend authorization or a
+ * pretend verified postcondition.
  *
  * HARD BOUNDARY: this module imports NOTHING from src/action/** or
  * src/authority/**. The trusted completion grounding (canonical execution
@@ -67,19 +68,25 @@ function sanitizeBounds(bounds) {
     return Object.freeze(out);
 }
 
-function deepEqual(a, b) {
+/**
+ * Defensive deep equality. A hostile observation (throwing getter, Proxy, or
+ * cyclic object) never makes the verifier throw — it is simply treated as
+ * "not equal", so `verifyCompletion` returns false fail-closed.
+ */
+function deepEqual(a, b, depth = 0) {
+    if (depth > 32) return false;
     if (a === b) return true;
     if (a === null || b === null) return false;
-    if (typeof a !== typeof b) return false;
-    if (typeof a !== "object") return false;
-    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    if (typeof a !== "object" || typeof b !== "object") return false;
     if (IS_PROXY(a) || IS_PROXY(b)) return false;
-    const ka = Object.keys(a);
-    const kb = Object.keys(b);
+    let ka, kb;
+    try { ka = Object.keys(a); kb = Object.keys(b); } catch { return false; }
     if (ka.length !== kb.length) return false;
     for (const k of ka) {
         if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
-        if (!deepEqual(a[k], b[k])) return false;
+        let av, bv;
+        try { av = a[k]; bv = b[k]; } catch { return false; }
+        if (!deepEqual(av, bv, depth + 1)) return false;
     }
     return true;
 }
@@ -90,7 +97,8 @@ function deepEqual(a, b) {
  * `completionEvidence` port returns a canonical completion bound to the exact
  * probe, and the caller's observation matches that completion's observation
  * (a caller may not substitute a forged observation for the one canonical
- * execution produced).
+ * execution produced). Returns false on every hostile/forged input — it never
+ * throws to the caller.
  */
 function createCompletionVerifier({ completionEvidence, bounds = BOUNDS } = {}) {
     if (typeof completionEvidence !== "function") {
@@ -103,6 +111,14 @@ function createCompletionVerifier({ completionEvidence, bounds = BOUNDS } = {}) 
     const completed = new Set();
 
     function verifyCompletion(spec) {
+        try {
+            return verifyCompletionGuarded(spec);
+        } catch {
+            return false;
+        }
+    }
+
+    function verifyCompletionGuarded(spec) {
         if (!spec || (typeof spec !== "object") || IS_PROXY(spec)) return false;
         const probeId = safeData(spec, "probeId");
         const request = safeData(spec, "request");
@@ -114,6 +130,10 @@ function createCompletionVerifier({ completionEvidence, bounds = BOUNDS } = {}) 
         // Duplicate completion cannot charge or complete twice.
         if (completed.has(probeId)) return false;
 
+        const evProbeId = safeData(request, "probeId");
+        const evQuestionRef = safeData(request, "questionRef");
+        const evCapabilityId = safeData(request, "capabilityId");
+
         let evidence;
         try {
             evidence = completionEvidence({ probeId, request, outcome, observation });
@@ -123,14 +143,14 @@ function createCompletionVerifier({ completionEvidence, bounds = BOUNDS } = {}) 
         if (!evidence || (typeof evidence !== "object") || IS_PROXY(evidence)) return false;
 
         const evOutcome = safeData(evidence, "outcome");
-        const evProbeId = safeData(evidence, "probeId");
-        const evQuestionRef = safeData(evidence, "questionRef");
-        const evCapabilityId = safeData(evidence, "capabilityId");
+        const eProbeId = safeData(evidence, "probeId");
+        const eQuestionRef = safeData(evidence, "questionRef");
+        const eCapabilityId = safeData(evidence, "capabilityId");
 
         // The completion must be bound to the exact probe.
-        if (evProbeId !== probeId) return false;
-        if (request.questionRef !== undefined && evQuestionRef !== request.questionRef) return false;
-        if (request.capabilityId !== undefined && evCapabilityId !== request.capabilityId) return false;
+        if (eProbeId !== probeId) return false;
+        if (evQuestionRef !== undefined && eQuestionRef !== evQuestionRef) return false;
+        if (evCapabilityId !== undefined && eCapabilityId !== evCapabilityId) return false;
 
         if (outcome === "SUCCESS") {
             if (evOutcome !== "VERIFIED") return false;
@@ -169,8 +189,7 @@ function createClosedLoop({
     simulation = null,
     auditLedger = null,
     clock = { nowMs: () => Date.now() },
-    bounds = BOUNDS,
-    admitCompletion = null
+    bounds = BOUNDS
 } = {}) {
     let safeBounds;
     try { safeBounds = sanitizeBounds(bounds); } catch { safeBounds = BOUNDS; }
@@ -256,16 +275,12 @@ function createClosedLoop({
         return report;
     }
 
+    // AUTHORIZE and VERIFY are the loop's two safety-critical stages. This
+    // lane has no Authority client and no verifier of its own: it can only
+    // REPORT them as DEGRADED when no canonical authorized-intent / verification
+    // evidence is supplied — it never pretends they succeeded.
     function authorizeStage() {
-        // L6 never mints or evaluates Authority. This stage is present only
-        // when the canonical path has supplied an authorized intent; otherwise
-        // it reports DEGRADED — never a pretend authorization.
-        const report = { phase: PHASE.AUTHORIZE, present: true };
-        if (!perceptionLane && !effectors) {
-            report.present = false;
-            report.degraded = "AUTHORIZE_UNAVAILABLE";
-        }
-        return report;
+        return { phase: PHASE.AUTHORIZE, present: false, degraded: "AUTHORIZE_UNAVAILABLE" };
     }
 
     function actStage() {
@@ -281,14 +296,7 @@ function createClosedLoop({
     }
 
     function verifyStage() {
-        // VERIFY is never silently skipped: without canonical verification
-        // evidence the stage reports DEGRADED, never "verified".
-        const report = { phase: PHASE.VERIFY, present: true };
-        if (!effectors) {
-            report.present = false;
-            report.degraded = "VERIFY_UNAVAILABLE";
-        }
-        return report;
+        return { phase: PHASE.VERIFY, present: false, degraded: "VERIFY_UNAVAILABLE" };
     }
 
     function updateStage() {
@@ -366,8 +374,7 @@ function createClosedLoop({
         bounds: safeBounds,
         runCycle,
         getPhase,
-        getLoopStatus,
-        admitCanonicalProbeCompletion: typeof admitCompletion === "function" ? admitCompletion : null
+        getLoopStatus
     });
 }
 
