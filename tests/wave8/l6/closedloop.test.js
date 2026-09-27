@@ -100,6 +100,43 @@ test("W8-L6 completion: a self-redefining getter cannot race the check-then-use 
     assert.equal(verifier.verifyCompletion({ probeId: "p-1", request: REQUEST, outcome: "SUCCESS", observation: forged }), false);
 });
 
+test("W8-L6 completion: request omitting questionRef/capabilityId is rejected even when evidence has them (P0 bidirectional binding)", () => {
+    const evidence = makeEvidence({ "p-1": completion() });
+    const verifier = createCompletionVerifier({ completionEvidence: evidence });
+    // Omit questionRef and capabilityId from request — evidence has them; must still reject.
+    assert.equal(verifier.verifyCompletion({ probeId: "p-1", request: { probeId: "p-1" }, outcome: "SUCCESS", observation: completion().observation }), false);
+});
+
+test("W8-L6 completion: symbol-keyed extra properties in caller observation are rejected", () => {
+    const evidence = makeEvidence({ "p-1": completion() });
+    const verifier = createCompletionVerifier({ completionEvidence: evidence });
+    const obs = Object.assign({}, completion().observation);
+    obs[Symbol("forged")] = "extra";
+    assert.equal(verifier.verifyCompletion({ probeId: "p-1", request: REQUEST, outcome: "SUCCESS", observation: obs }), false);
+});
+
+test("W8-L6 completion: Proxy used as observation is rejected even when identical by reference", () => {
+    const proxyObs = new Proxy({}, {});
+    const verifier = createCompletionVerifier({ completionEvidence: () => ({ outcome: "VERIFIED", probeId: "p-proxy", questionRef: "q-1", capabilityId: "cap-1", observation: proxyObs }) });
+    assert.equal(verifier.verifyCompletion({ probeId: "p-proxy", request: { probeId: "p-proxy", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: proxyObs }), false);
+});
+
+test("W8-L6 loop: caller-supplied MIN_LOOP_INTERVAL_MS=0 is rejected and default enforced", () => {
+    let now = 0;
+    const clock = { nowMs: () => now };
+    const loop = createClosedLoop({ clock, bounds: { ...BOUNDS, MIN_LOOP_INTERVAL_MS: 0 } });
+    loop.runCycle();
+    assert.throws(() => loop.runCycle(), { reason: "LOOP_RATE_EXCEEDED" });
+});
+
+test("W8-L6 loop: hostile clock getter is never invoked", () => {
+    let traps = 0;
+    const hostileClock = { get nowMs() { traps++; return () => Date.now(); } };
+    const loop = createClosedLoop({ clock: hostileClock });
+    assert.doesNotThrow(() => loop.runCycle());
+    assert.equal(traps, 0, "hostile clock getter must never be invoked");
+});
+
 test("W8-L6 loop: fixed order, bounded rate, and missing-stage honesty", () => {
     let now = 0;
     const clock = { nowMs: () => now };

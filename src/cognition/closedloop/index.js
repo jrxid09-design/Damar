@@ -47,7 +47,7 @@ function resolveMethod(port, name) {
 
 function safeNowMs(clock) {
     let t;
-    try { t = typeof clock?.nowMs === "function" ? clock.nowMs() : undefined; } catch { t = undefined; }
+    try { const fn = safeData(clock, "nowMs"); t = typeof fn === "function" ? fn.call(clock) : undefined; } catch { t = undefined; }
     return Number.isFinite(t) ? t : Date.now();
 }
 
@@ -63,7 +63,7 @@ function sanitizeBounds(bounds) {
     const out = {};
     for (const key of Object.keys(BOUNDS)) {
         const v = safeData(bounds, key);
-        out[key] = typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : BOUNDS[key];
+        out[key] = typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : BOUNDS[key];
     }
     return Object.freeze(out);
 }
@@ -88,18 +88,18 @@ function readDataDeep(value, key) {
 
 function deepEqual(a, b, depth = 0) {
     if (depth > 32) return false;
+    if (IS_PROXY(a) || IS_PROXY(b)) return false;
     if (a === b) return true;
     if (a === null || b === null) return false;
     if (typeof a !== "object" || typeof b !== "object") return false;
-    if (IS_PROXY(a) || IS_PROXY(b)) return false;
     if (Array.isArray(a) !== Array.isArray(b)) return false;
     let protoA, protoB;
     try { protoA = Object.getPrototypeOf(a); protoB = Object.getPrototypeOf(b); } catch { return false; }
     if (protoA !== protoB) return false;
     let ka, kb;
     try {
-        ka = Reflect.ownKeys(a).filter(k => typeof k === "string");
-        kb = Reflect.ownKeys(b).filter(k => typeof k === "string");
+        ka = Reflect.ownKeys(a);
+        kb = Reflect.ownKeys(b);
     } catch { return false; }
     if (ka.length !== kb.length) return false;
     const kbSet = new Set(kb);
@@ -169,9 +169,13 @@ function createCompletionVerifier({ completionEvidence, bounds = BOUNDS } = {}) 
         const eQuestionRef = safeData(evidence, "questionRef");
         const eCapabilityId = safeData(evidence, "capabilityId");
 
-        // The completion must be bound to the exact probe.
+        // The completion must be bound to the exact probe. Binding is enforced
+        // in both directions: if evidence carries a field, request must match it;
+        // if request carries a field, evidence must match it.
         if (eProbeId !== probeId) return false;
         if (evProbeId !== undefined && evProbeId !== probeId) return false;
+        if (eQuestionRef !== undefined && eQuestionRef !== evQuestionRef) return false;
+        if (eCapabilityId !== undefined && eCapabilityId !== evCapabilityId) return false;
         if (evQuestionRef !== undefined && eQuestionRef !== evQuestionRef) return false;
         if (evCapabilityId !== undefined && eCapabilityId !== evCapabilityId) return false;
 
