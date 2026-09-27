@@ -104,12 +104,19 @@ test("CS-W8-02b: cross-lane laws and bounds are published on the frozen surface"
 test("CS-W8-03a: MODEL != AUTHORITY — no public seam to mint completion evidence", async () => {
     const core = await createRuntimeCore(cognitionOpts());
     try {
-        assert.equal(core.closedLoop.admitCanonicalProbeCompletion, undefined,
-            "no public completion-admission seam must exist on the closed loop");
-        // Own symbol-keyed seams are prohibited.
+        // Allowlist the COMPLETE closedLoop frozen surface — any extra property is a violation.
+        const ALLOWED_LOOP_SURFACE = new Set(["schemaVersion", "laws", "bounds", "runCycle", "getPhase", "getLoopStatus"]);
+        const actualSurface = Object.getOwnPropertyNames(core.closedLoop);
+        assert.equal(actualSurface.length, ALLOWED_LOOP_SURFACE.size,
+            `closedLoop must expose exactly ${ALLOWED_LOOP_SURFACE.size} properties (got ${actualSurface.join(", ")})`);
+        for (const prop of actualSurface) {
+            assert.ok(ALLOWED_LOOP_SURFACE.has(prop),
+                `closedLoop must not expose property "${prop}" — not on the frozen allowlist`);
+        }
+        // No symbol-keyed own seams.
         assert.equal(Object.getOwnPropertySymbols(core.closedLoop).length, 0,
-            "closedLoop must have no own symbol-keyed properties that could be admission seams");
-        // Inherited symbol-keyed seams are prohibited — prototype must be Object.prototype.
+            "closedLoop must have no own symbol-keyed properties");
+        // No inherited seams — prototype must be Object.prototype.
         assert.equal(Object.getPrototypeOf(core.closedLoop), Object.prototype,
             "closedLoop prototype must be Object.prototype (no custom prototype with inherited seams)");
     } finally {
@@ -147,6 +154,10 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
         const dynamicRequires = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
         assert.equal(dynamicRequires, null,
             `[${relPath}] closedloop must not use dynamic require() calls`);
+        // No string-concatenated require() paths: require("../" + "authority") evades literal check.
+        const concatRequires = src.match(/\brequire\s*\(\s*["'][^"']*["']\s*\+/g);
+        assert.equal(concatRequires, null,
+            `[${relPath}] closedloop must not use string-concatenated require() paths`);
         // No template literal require().
         const templateLitRequires = rawSrc.match(/\brequire\s*\(\s*`/g);
         assert.equal(templateLitRequires, null,
@@ -234,6 +245,9 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // No variable holding the string "dispatch" for use as a computed key.
         assert.doesNotMatch(src, /(?:const|let|var)\s+\w+\s*=\s*["']dispatch["']/,
             `[${relPath}] must not assign string "dispatch" to a variable (computed key bypass)`);
+        // No array-indexed dispatch key: ["dispatch"][0] yields "dispatch" as a computed key.
+        assert.doesNotMatch(rawSrc, /\[["']dispatch["']\]\s*\[/,
+            `[${relPath}] must not use array-indexed dispatch key (["dispatch"][n])`);
         // No dynamic require() calls.
         const dynReq = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
         assert.equal(dynReq, null, `[${relPath}] perception must not use dynamic require()`);
