@@ -132,6 +132,10 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
     const dynamicRequires = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
     assert.equal(dynamicRequires, null,
         "closedloop must not use dynamic require() calls (non-literal argument)");
+    // No template literal require() — template literals can embed action/authority paths.
+    const templateLitRequires = rawSrc.match(/\brequire\s*\(\s*`/g);
+    assert.equal(templateLitRequires, null,
+        "closedloop must not use template literal require() calls");
     // No module.require() calls — module.require(expr) bypasses the require() literal regex.
     const moduleRequires = src.match(/\bmodule\.require\s*\(/g);
     assert.equal(moduleRequires, null,
@@ -152,6 +156,9 @@ test("CS-W8-03c: NO_SECOND_DISPATCHER — no dispatch() call inside closedloop",
         "closedloop must not invoke dispatch via Reflect.apply");
     // No eval() — eval can alias and invoke dispatch at runtime.
     assert.doesNotMatch(src, /\beval\s*\(/, "closedloop must not use eval()");
+    // No dispatch variable aliasing — const/let/var alias = dispatch binds a callable alias.
+    assert.doesNotMatch(src, /(?:const|let|var)\s+\w+\s*=\s*\bdispatch\b/,
+        "closedloop must not alias dispatch into another variable");
 });
 
 // ── CS-W8-04: PERCEPTION != AUTHORITY — L2 probe scheduling ──────────────
@@ -193,6 +200,9 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // No Object.defineProperties assigning dispatch.
         assert.doesNotMatch(src, /Object\.defineProperties\s*\([^,]+,\s*\{[^}]*dispatch\s*:/,
             `[${relPath}] Object.defineProperties must not define dispatch`);
+        // No string concatenation constructing "dispatch" from parts.
+        assert.doesNotMatch(rawSrc, /["']dis["']\s*\+\s*["']patch["']/,
+            `[${relPath}] must not construct "dispatch" key by string concatenation`);
         // No dynamic require() calls.
         const dynReq = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
         assert.equal(dynReq, null, `[${relPath}] perception must not use dynamic require()`);
@@ -215,15 +225,22 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
 
 test("CS-W8-04b: L2-L6 completion path is fail-closed without canonical execution evidence", () => {
     // Structural: canonicalRuntimeComposition.js must hard-wire completionEvidence = () => null
-    // in the same local scope as the createCompletionVerifier call — not as a dead declaration.
+    // as a const binding AND pass it by shorthand to createCompletionVerifier — proving live wiring,
+    // not a dead declaration that precedes an unrelated call.
     const compositionRaw = fs.readFileSync(
         path.join(ROOT, "src/integration/canonicalRuntimeComposition.js"), "utf8"
     );
     const compositionSrc = compositionRaw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
-    // The null wiring must appear within 400 chars before the createCompletionVerifier call.
+    // Binding: const completionEvidence = () => null
+    assert.match(compositionSrc, /const\s+completionEvidence\s*=\s*\(\s*\)\s*=>\s*null/,
+        "completionEvidence must be declared as a const () => null binding");
+    // Shorthand passing: createCompletionVerifier({ completionEvidence ... }) — same identifier
+    assert.match(compositionSrc, /createCompletionVerifier\s*\(\s*\{[^}]*\bcompletionEvidence\b[^}]*\}/,
+        "createCompletionVerifier must receive completionEvidence by name (shorthand), proving live wiring");
+    // Proximity: null binding must appear within 400 chars before the call (same scope block)
     assert.match(compositionSrc,
         /completionEvidence\s*=\s*\(\s*\)\s*=>\s*null[\s\S]{0,400}createCompletionVerifier/,
-        "completionEvidence = () => null must appear immediately before createCompletionVerifier (live wiring, not dead decl)");
+        "completionEvidence = () => null must appear within 400 chars before createCompletionVerifier");
     // Runtime: the null port produces fail-closed verification.
     const verifier = createCompletionVerifier({ completionEvidence: () => null });
     assert.equal(
@@ -534,9 +551,17 @@ test("CS-W8-17: ToolBus skip remains BLOCKED ON W8-IW1 (not resolved by L6/L7)",
     );
     assert.match(toolBusSrc, /BLOCKED ON W8-IW1/,
         "ToolBus skip must remain annotated as BLOCKED ON W8-IW1");
-    // The annotation must appear as the value of a skip: property — not just a comment.
+    // The annotation must appear as the value of a skip: property on a test that references ToolBus.
+    // Verify: a skip: property containing BLOCKED ON W8-IW1 appears near "toolBus" or "ToolBus".
     assert.match(toolBusSrc, /skip\s*:\s*["'][^"']*BLOCKED ON W8-IW1/,
         "ToolBus skip must be a live skip: property value, not just a comment");
+    // The skipped test must reference the ToolBus domain (not an unrelated test carrying the annotation).
+    const toolBusLines = toolBusSrc.split(/\r?\n/);
+    const skipIdx = toolBusLines.findIndex(l => /skip\s*:\s*["'][^"']*BLOCKED ON W8-IW1/.test(l));
+    assert.ok(skipIdx >= 0, "skip: BLOCKED ON W8-IW1 line must exist");
+    const surroundCtx = toolBusLines.slice(Math.max(0, skipIdx - 10), skipIdx + 10).join("\n");
+    assert.match(surroundCtx, /[Tt]ool\s*[Bb]us|TOOL_BUS|toolBus/,
+        "skip: BLOCKED ON W8-IW1 must appear in the context of a ToolBus test");
     // IW1 resolution harness directory must exist.
     assert.ok(
         fs.existsSync(path.join(ROOT, "tests/wave8/iw1")),
@@ -670,11 +695,18 @@ test("CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE — dual-witness test asse
     // File must import the real replay ledger module, not just contain error strings.
     assert.match(src, /require\s*\([^)]*canonicalReplayLedger/,
         "dual-witness test must import canonicalReplayLedger (the system under test)");
-    // The assertion must appear in the context of real ledger operations — not isolated decoy.
+    // The assertion must appear after a real ledger.reserve() call that produced an error,
+    // not as an isolated decoy. Verify: a ledger.reserve call precedes it AND an error is
+    // caught/captured before the assertion.
     const assertLineIdx = lines.findIndex(line =>
         /(assert\.match|assert\.rejects)/.test(line) && /\/REPLAY_HEAD_UNWITNESSED\//.test(line)
     );
     const context = lines.slice(Math.max(0, assertLineIdx - 12), assertLineIdx + 1).join("\n");
-    assert.match(context, /ledger\.(reserve|commit|rollback)|await\s+ledger/,
-        "REPLAY_HEAD_UNWITNESSED assertion must appear after real ledger operations (not isolated decoy)");
+    assert.match(context, /ledger\.(reserve|commit|rollback)/,
+        "REPLAY_HEAD_UNWITNESSED assertion must appear after a ledger.reserve/commit/rollback call");
+    // Error must be caught and then tested — either via catch block or assert.rejects with real async call.
+    const hasCatch = /(err|e|error)\s*=\s*null|catch\s*\(/.test(context);
+    const hasSingleRejects = /assert\.rejects\s*\(\s*(?:async\s*)?\(\s*\)/.test(context);
+    assert.ok(hasCatch || hasSingleRejects,
+        "REPLAY_HEAD_UNWITNESSED must be tested via caught error or assert.rejects — not standalone");
 });
