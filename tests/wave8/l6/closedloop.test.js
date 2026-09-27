@@ -121,6 +121,26 @@ test("W8-L6 completion: Proxy used as observation is rejected even when identica
     assert.equal(verifier.verifyCompletion({ probeId: "p-proxy", request: { probeId: "p-proxy", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: proxyObs }), false);
 });
 
+test("W8-L6 completion: evidence with undefined questionRef or capabilityId is rejected", () => {
+    const evidenceNoBindings = { outcome: "VERIFIED", probeId: "p-1", questionRef: undefined, capabilityId: undefined, observation: completion().observation };
+    const verifier = createCompletionVerifier({ completionEvidence: () => evidenceNoBindings });
+    assert.equal(verifier.verifyCompletion({ probeId: "p-1", request: { probeId: "p-1" }, outcome: "SUCCESS", observation: completion().observation }), false);
+});
+
+test("W8-L6 completion: Proxy completionEvidence port is rejected at construction", () => {
+    const proxyPort = new Proxy(() => null, {});
+    assert.throws(() => createCompletionVerifier({ completionEvidence: proxyPort }), TypeError);
+});
+
+test("W8-L6 loop: accessor properties in createClosedLoop options are never invoked", () => {
+    let traps = 0;
+    const opts = {};
+    Object.defineProperty(opts, "clock", { get() { traps++; return { nowMs: () => 0 }; }, configurable: true });
+    const loop = createClosedLoop(opts);
+    assert.ok(loop);
+    assert.equal(traps, 0, "accessor on options must never be invoked");
+});
+
 test("W8-L6 loop: caller-supplied MIN_LOOP_INTERVAL_MS=0 is rejected and default enforced", () => {
     let now = 0;
     const clock = { nowMs: () => now };
