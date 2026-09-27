@@ -106,42 +106,54 @@ test("CS-W8-03a: MODEL != AUTHORITY — no public seam to mint completion eviden
     try {
         assert.equal(core.closedLoop.admitCanonicalProbeCompletion, undefined,
             "no public completion-admission seam must exist on the closed loop");
+        // Symbol-keyed seams are also prohibited — no symbol-keyed seam can serve as an admission path.
+        assert.equal(Object.getOwnPropertySymbols(core.closedLoop).length, 0,
+            "closedLoop must have no symbol-keyed properties that could be admission seams");
     } finally {
         core.shutdown();
     }
 });
 
 test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or authority (path-exhaustive)", () => {
-    // Enumerate ALL require() calls and verify none resolves to an action,
-    // authority, or actuator path. Normalize backslashes so Windows-style paths
-    // ("..\\action") are caught by the same regex as POSIX paths ("../action").
-    // Strip block comments before scanning so require /*comment*/("path") is not missed.
-    const rawSrc = fs.readFileSync(path.join(ROOT, "src/cognition/closedloop/index.js"), "utf8");
-    const src = rawSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
-    const deps = [...src.matchAll(/require\s*\(\s*["']([^"']+)["']/g)].map(m => m[1]);
-    for (const dep of deps) {
-        const norm = dep.replace(/\\/g, "/");
-        assert.ok(!/\/action(\/|$)/.test(norm),
-            `closedloop must not require "${dep}" (action module)`);
-        assert.ok(!/\/authority(\/|$)/.test(norm),
-            `closedloop must not require "${dep}" (authority module)`);
-        assert.ok(!norm.includes("actuator"),
-            `closedloop must not require "${dep}" (actuator module)`);
+    // Scan ALL closedloop source files (index.js + helpers) — a forbidden import in
+    // phases.js, laws.js, bounds.js, etc. is equally prohibited.
+    const closedloopDir = path.join(ROOT, "src/cognition/closedloop");
+    const closedloopFiles = fs.readdirSync(closedloopDir)
+        .filter(f => f.endsWith(".js"))
+        .map(f => path.join(closedloopDir, f));
+    for (const file of closedloopFiles) {
+        const rawSrc = fs.readFileSync(file, "utf8");
+        const src = rawSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
+        const relPath = path.relative(ROOT, file).replace(/\\/g, "/");
+        // Enumerate ALL string-literal require() calls; normalize backslashes.
+        const deps = [...src.matchAll(/require\s*\(\s*["']([^"']+)["']/g)].map(m => m[1]);
+        for (const dep of deps) {
+            const norm = dep.replace(/\\/g, "/");
+            assert.ok(!/\/action(\/|$)/.test(norm),
+                `[${relPath}] closedloop must not require "${dep}" (action module)`);
+            assert.ok(!/\/authority(\/|$)/.test(norm),
+                `[${relPath}] closedloop must not require "${dep}" (authority module)`);
+            assert.ok(!norm.includes("actuator"),
+                `[${relPath}] closedloop must not require "${dep}" (actuator module)`);
+        }
+        // No dynamic require() calls.
+        const dynamicRequires = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
+        assert.equal(dynamicRequires, null,
+            `[${relPath}] closedloop must not use dynamic require() calls`);
+        // No template literal require().
+        const templateLitRequires = rawSrc.match(/\brequire\s*\(\s*`/g);
+        assert.equal(templateLitRequires, null,
+            `[${relPath}] closedloop must not use template literal require()`);
+        // No module.require().
+        const moduleRequires = src.match(/\bmodule\.require\s*\(/g);
+        assert.equal(moduleRequires, null,
+            `[${relPath}] closedloop must not use module.require()`);
+        // No eval().
+        assert.doesNotMatch(src, /\beval\s*\(/, `[${relPath}] closedloop must not use eval()`);
+        // No require() aliasing — const load = require (without call parens) assigns the function itself.
+        assert.doesNotMatch(src, /(?:const|let|var)\s+\w+\s*=\s*\brequire\b(?!\s*\()/,
+            `[${relPath}] closedloop must not alias require into another variable`);
     }
-    // No dynamic require() calls (non-literal argument evades the string check above).
-    const dynamicRequires = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
-    assert.equal(dynamicRequires, null,
-        "closedloop must not use dynamic require() calls (non-literal argument)");
-    // No template literal require() — template literals can embed action/authority paths.
-    const templateLitRequires = rawSrc.match(/\brequire\s*\(\s*`/g);
-    assert.equal(templateLitRequires, null,
-        "closedloop must not use template literal require() calls");
-    // No module.require() calls — module.require(expr) bypasses the require() literal regex.
-    const moduleRequires = src.match(/\bmodule\.require\s*\(/g);
-    assert.equal(moduleRequires, null,
-        "closedloop must not use module.require() (bypasses literal-require check)");
-    // No eval() — eval can construct require paths that evade static analysis.
-    assert.doesNotMatch(src, /\beval\s*\(/, "closedloop must not use eval()");
 });
 
 test("CS-W8-03c: NO_SECOND_DISPATCHER — no dispatch() call inside closedloop", () => {
@@ -151,6 +163,13 @@ test("CS-W8-03c: NO_SECOND_DISPATCHER — no dispatch() call inside closedloop",
     const src = rawSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
     assert.doesNotMatch(src, /\bdispatch\s*\(/, "closedloop must not call dispatch()");
     assert.doesNotMatch(src, /createDispatch/, "closedloop must not create a dispatcher");
+    // Optional-chaining invocation: dispatch?.()
+    assert.doesNotMatch(src, /\bdispatch\s*\?\.\s*\(/, "closedloop must not call dispatch?.()");
+    // Method invocation forms: dispatch.call(...) and dispatch.apply(...)
+    assert.doesNotMatch(src, /\bdispatch\s*\.call\s*\(/, "closedloop must not call dispatch.call(...)");
+    assert.doesNotMatch(src, /\bdispatch\s*\.apply\s*\(/, "closedloop must not call dispatch.apply(...)");
+    // Bound call: dispatch.bind(...)(...)
+    assert.doesNotMatch(src, /\bdispatch\s*\.bind\s*\(/, "closedloop must not call dispatch.bind(...)");
     // Indirect invocation via Reflect.apply(dispatch, ...) is also prohibited.
     assert.doesNotMatch(src, /Reflect\.apply\s*\([^,]*dispatch/,
         "closedloop must not invoke dispatch via Reflect.apply");
@@ -187,10 +206,11 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
             assert.match(line, /\bdispatch\s*:\s*null\b/,
                 `[${relPath}] dispatch: assignment must be null — offending line: ${line.trim()}`);
         }
-        // No dot or bracket dynamic assignment to dispatch.
+        // No dot or bracket dynamic assignment to dispatch (double-quoted OR single-quoted key).
         const dynamicDispatchLines = src.split("\n").filter(l =>
             (/\.dispatch\s*=/.test(l) && !/\.dispatch\s*=\s*null\b/.test(l)) ||
-            (/\["dispatch"\]\s*=/.test(l) && !/\["dispatch"\]\s*=\s*null\b/.test(l))
+            (/\["dispatch"\]\s*=/.test(l) && !/\["dispatch"\]\s*=\s*null\b/.test(l)) ||
+            (/\['dispatch'\]\s*=/.test(l) && !/\['dispatch'\]\s*=\s*null\b/.test(l))
         );
         assert.equal(dynamicDispatchLines.length, 0,
             `[${relPath}] no non-null dynamic dispatch assignment: ${dynamicDispatchLines.join("; ")}`);
@@ -234,9 +254,13 @@ test("CS-W8-04b: L2-L6 completion path is fail-closed without canonical executio
     // Binding: const completionEvidence = () => null
     assert.match(compositionSrc, /const\s+completionEvidence\s*=\s*\(\s*\)\s*=>\s*null/,
         "completionEvidence must be declared as a const () => null binding");
-    // Shorthand passing: createCompletionVerifier({ completionEvidence ... }) — same identifier
-    assert.match(compositionSrc, /createCompletionVerifier\s*\(\s*\{[^}]*\bcompletionEvidence\b[^}]*\}/,
-        "createCompletionVerifier must receive completionEvidence by name (shorthand), proving live wiring");
+    // Shorthand passing: completionEvidence must appear WITHOUT a colon (shorthand property).
+    // { completionEvidence } is shorthand — proves the null binding is what's passed.
+    // { completionEvidence: expr } would bypass this by passing a different expression.
+    assert.match(compositionSrc, /createCompletionVerifier\s*\(\s*\{[^}]*\bcompletionEvidence\s*[,}]/,
+        "createCompletionVerifier must receive completionEvidence as shorthand property (no colon)");
+    assert.doesNotMatch(compositionSrc, /createCompletionVerifier\s*\(\s*\{[^}]*\bcompletionEvidence\s*:/,
+        "createCompletionVerifier must NOT use completionEvidence: expr — shorthand only proves null binding");
     // Proximity: null binding must appear within 400 chars before the call (same scope block)
     assert.match(compositionSrc,
         /completionEvidence\s*=\s*\(\s*\)\s*=>\s*null[\s\S]{0,400}createCompletionVerifier/,
@@ -704,9 +728,11 @@ test("CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE — dual-witness test asse
     const context = lines.slice(Math.max(0, assertLineIdx - 12), assertLineIdx + 1).join("\n");
     assert.match(context, /ledger\.(reserve|commit|rollback)/,
         "REPLAY_HEAD_UNWITNESSED assertion must appear after a ledger.reserve/commit/rollback call");
-    // Error must be caught and then tested — either via catch block or assert.rejects with real async call.
-    const hasCatch = /(err|e|error)\s*=\s*null|catch\s*\(/.test(context);
+    // Error must be caught and then tested — either via try/catch or assert.rejects with real async call.
+    // A pre-seeded err variable cannot satisfy both an error-init pattern AND a try block.
+    const hasTryCatch = /\btry\s*\{[\s\S]*?catch\s*\(/.test(context) ||
+        /(err|e|error)\s*=\s*null[\s\S]{0,100}try\s*\{/.test(context);
     const hasSingleRejects = /assert\.rejects\s*\(\s*(?:async\s*)?\(\s*\)/.test(context);
-    assert.ok(hasCatch || hasSingleRejects,
-        "REPLAY_HEAD_UNWITNESSED must be tested via caught error or assert.rejects — not standalone");
+    assert.ok(hasTryCatch || hasSingleRejects,
+        "REPLAY_HEAD_UNWITNESSED must be tested via try/catch or assert.rejects — not a pre-seeded error");
 });
