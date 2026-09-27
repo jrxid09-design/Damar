@@ -325,6 +325,12 @@ test("CS-W8-04b: L2-L6 completion path is fail-closed without canonical executio
     const cvCalls = (compositionSrc.match(/\bcreateCompletionVerifier\s*\(/g) ?? []).length;
     assert.equal(cvCalls, 1,
         "canonicalRuntimeComposition must call createCompletionVerifier exactly once (no decoy)");
+    // Injected-cap proof: the canonical call must not include maxCompletionRecords or
+    // MAX_COMPLETION_RECORDS — a weakened cap admits > canonical limit of probes, breaking
+    // the exactly-once admission contract.
+    assert.doesNotMatch(compositionSrc,
+        /createCompletionVerifier\s*\(\s*\{[^}]*\b(?:maxCompletionRecords|MAX_COMPLETION_RECORDS)\b/,
+        "canonical createCompletionVerifier must not receive a maxCompletionRecords override (injected cap weakens exactly-once contract)");
     // Runtime: the null port produces fail-closed verification.
     const verifier = createCompletionVerifier({ completionEvidence: () => null });
     assert.equal(
@@ -514,6 +520,10 @@ test("CS-W8-11: busy-spin rejected with LOOP_RATE_EXCEEDED — boundary exact", 
     now = BOUNDS.MIN_LOOP_INTERVAL_MS;
     assert.doesNotThrow(() => loop.runCycle(),
         "elapsed=MIN_LOOP_INTERVAL_MS must be accepted (at boundary)");
+    // Pin the canonical floor — a silently weakened constant makes all rate-bound
+    // checks above pass trivially with a 1ms spin.
+    assert.equal(BOUNDS.MIN_LOOP_INTERVAL_MS, 50,
+        "BOUNDS.MIN_LOOP_INTERVAL_MS must be exactly 50 — weakening this bypasses all rate-bound proofs");
 });
 
 // ── CS-W8-12: crash / restart — ephemeral state ───────────────────────────
