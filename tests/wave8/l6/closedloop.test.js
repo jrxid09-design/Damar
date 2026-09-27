@@ -73,6 +73,20 @@ test("W8-L6 completion: a throwing evidence port fails closed", () => {
     assert.equal(verifier.verifyCompletion({ probeId: "p-1", request: REQUEST, outcome: "SUCCESS", observation: completion().observation }), false);
 });
 
+test("W8-L6 completion: hostile observation getters never make the verifier throw", () => {
+    const evidence = makeEvidence({ "p-1": completion() });
+    const verifier = createCompletionVerifier({ completionEvidence: evidence });
+    let traps = 0;
+    const hostileObservation = {
+        tier: "T4",
+        sensor: { sensorId: "camera-1" },
+        frame: { kind: "ROOM" },
+        get quality() { traps++; throw new Error("must not inspect"); }
+    };
+    assert.equal(verifier.verifyCompletion({ probeId: "p-1", request: REQUEST, outcome: "SUCCESS", observation: hostileObservation }), false);
+    assert.ok(traps > 0, "the hostile getter was exercised, but the verifier returned false instead of throwing");
+});
+
 test("W8-L6 loop: fixed order, bounded rate, and missing-stage honesty", () => {
     let now = 0;
     const clock = { nowMs: () => now };
@@ -97,10 +111,10 @@ test("W8-L6 loop: loop rate is bounded", () => {
     assert.throws(() => loop.runCycle(), { reason: "LOOP_RATE_EXCEEDED" });
 });
 
-test("W8-L6 loop: AUTHORIZE and VERIFY report degraded, never pretend authorization or verification", () => {
+test("W8-L6 loop: AUTHORIZE and VERIFY always report degraded, never pretend authorization or verification", () => {
     let now = 0;
     const clock = { nowMs: () => now };
-    const loop = createClosedLoop({ clock }); // no perceptionLane/effectors
+    const loop = createClosedLoop({ clock }); // no canonical authorized-intent/verification evidence
     const reports = {};
     for (let i = 0; i < LOOP_ORDER.length; i++) {
         const r = loop.runCycle();
@@ -108,7 +122,9 @@ test("W8-L6 loop: AUTHORIZE and VERIFY report degraded, never pretend authorizat
         now += 100;
     }
     assert.equal(reports[PHASE.AUTHORIZE].degraded, "AUTHORIZE_UNAVAILABLE");
+    assert.equal(reports[PHASE.AUTHORIZE].present, false);
     assert.equal(reports[PHASE.VERIFY].degraded, "VERIFY_UNAVAILABLE");
+    assert.equal(reports[PHASE.VERIFY].present, false);
     // AUTHORIZE/VERIFY are present in the sequence (never skipped), just degraded.
     assert.ok(LOOP_ORDER.includes(PHASE.AUTHORIZE));
     assert.ok(LOOP_ORDER.includes(PHASE.VERIFY));
@@ -141,12 +157,10 @@ test("W8-L6 integration: closedLoop is opt-in, composition-owned, and the L2 han
         assert.equal(typeof core.closedLoop.runCycle, "function");
         assert.equal(typeof core.closedLoop.getPhase, "function");
         assert.equal(typeof core.closedLoop.getLoopStatus, "function");
-        assert.equal(typeof core.closedLoop.admitCanonicalProbeCompletion, "function");
-        // A caller-shaped object is NOT canonical execution evidence; the
-        // admission seam rejects it, so the L2 handoff remains fail-closed.
-        const forged = { outcome: "EXECUTED_VERIFIED", result: { tier: "T4" } };
-        assert.equal(core.closedLoop.admitCanonicalProbeCompletion({ probeId: "x", request: { questionRef: "q", capabilityId: "c" }, executionResult: forged }), false);
-        assert.equal(core.perceptionLane, core.closedLoop !== null ? core.perceptionLane : null);
+        // There is NO public completion-admission seam: a caller cannot mint
+        // completion evidence. The L2 handoff therefore stays fail-closed.
+        assert.equal(core.closedLoop.admitCanonicalProbeCompletion, undefined);
+        assert.equal(typeof core.perceptionLane.openQuestion, "function");
     } finally {
         core.shutdown();
     }
