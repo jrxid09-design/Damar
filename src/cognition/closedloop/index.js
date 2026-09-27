@@ -197,6 +197,7 @@ function createCompletionVerifier(opts = {}) {
                 !Object.hasOwn(evObservation, "tier") ||
                 !Object.hasOwn(evObservation, "sensor") ||
                 !Object.hasOwn(evObservation, "frame") ||
+                typeof evObservation.tier !== "string" ||
                 typeof evObservation.sensor !== "object" || evObservation.sensor === null ||
                 typeof evObservation.frame !== "object" || evObservation.frame === null) {
                 pending.delete(probeId); return false;

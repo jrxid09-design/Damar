@@ -180,12 +180,15 @@ test("W8-L6 completion: same-reference Date observation is rejected (R6 P2a)", (
 });
 
 test("W8-L6 completion: deeply nested plain observations beyond 32 levels are accepted (R6 P2b)", () => {
-    // Build a 40-deep plain object chain.
+    // Build a 40-deep plain object chain inside a canonical observation shape.
+    // The deep nesting tests deepEqual stack robustness; the canonical wrapper satisfies
+    // the required own {tier(str), sensor(obj), frame(obj)} shape invariant.
     let deep = { leaf: true };
     for (let i = 0; i < 40; i++) deep = { next: deep };
-    const evidence = makeEvidence({ "p-deep": completion({ probeId: "p-deep", observation: deep }) });
+    const deepObs = { tier: "T4", sensor: { sensorId: "camera-1", nested: deep }, frame: { kind: "ROOM" }, quality: 0.8 };
+    const evidence = makeEvidence({ "p-deep": completion({ probeId: "p-deep", observation: deepObs }) });
     const verifier = createCompletionVerifier({ completionEvidence: evidence });
-    assert.equal(verifier.verifyCompletion({ probeId: "p-deep", request: { probeId: "p-deep", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: deep }), true);
+    assert.equal(verifier.verifyCompletion({ probeId: "p-deep", request: { probeId: "p-deep", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: deepObs }), true);
 });
 
 test("W8-L6 completion: Date/Map/Set values in observations are rejected by deepEqual (R5 P0)", () => {
