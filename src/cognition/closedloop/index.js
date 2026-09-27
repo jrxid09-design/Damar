@@ -196,7 +196,11 @@ function createCompletionVerifier(opts = {}) {
             if (typeof evObservation !== "object" ||
                 !Object.hasOwn(evObservation, "tier") ||
                 !Object.hasOwn(evObservation, "sensor") ||
-                !Object.hasOwn(evObservation, "frame")) { pending.delete(probeId); return false; }
+                !Object.hasOwn(evObservation, "frame") ||
+                typeof evObservation.sensor !== "object" || evObservation.sensor === null ||
+                typeof evObservation.frame !== "object" || evObservation.frame === null) {
+                pending.delete(probeId); return false;
+            }
             if (!deepEqual(evObservation, observation)) { pending.delete(probeId); return false; }
         } else if (outcome === "DENIED") {
             if (evOutcome !== "DENIED") { pending.delete(probeId); return false; }
