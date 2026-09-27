@@ -73,7 +73,7 @@ test("W8-L6 completion: a throwing evidence port fails closed", () => {
     assert.equal(verifier.verifyCompletion({ probeId: "p-1", request: REQUEST, outcome: "SUCCESS", observation: completion().observation }), false);
 });
 
-test("W8-L6 completion: hostile observation getters never make the verifier throw", () => {
+test("W8-L6 completion: hostile observation getters are never invoked and never make the verifier throw", () => {
     const evidence = makeEvidence({ "p-1": completion() });
     const verifier = createCompletionVerifier({ completionEvidence: evidence });
     let traps = 0;
@@ -81,10 +81,23 @@ test("W8-L6 completion: hostile observation getters never make the verifier thro
         tier: "T4",
         sensor: { sensorId: "camera-1" },
         frame: { kind: "ROOM" },
-        get quality() { traps++; throw new Error("must not inspect"); }
+        get quality() { traps++; return 0.8; }
     };
+    // Accessors are rejected by descriptor read, so the getter is never run.
     assert.equal(verifier.verifyCompletion({ probeId: "p-1", request: REQUEST, outcome: "SUCCESS", observation: hostileObservation }), false);
-    assert.ok(traps > 0, "the hostile getter was exercised, but the verifier returned false instead of throwing");
+    assert.equal(traps, 0, "the hostile getter must never be invoked");
+});
+
+test("W8-L6 completion: a self-redefining getter cannot race the check-then-use path", () => {
+    const evidence = makeEvidence({ "p-1": completion() });
+    const verifier = createCompletionVerifier({ completionEvidence: evidence });
+    const forged = {
+        tier: "T4",
+        sensor: { sensorId: "camera-1" },
+        frame: { kind: "ROOM" },
+        get quality() { Object.defineProperty(this, "quality", { value: 0.99, enumerable: true, configurable: true, writable: true }); return 0.8; }
+    };
+    assert.equal(verifier.verifyCompletion({ probeId: "p-1", request: REQUEST, outcome: "SUCCESS", observation: forged }), false);
 });
 
 test("W8-L6 loop: fixed order, bounded rate, and missing-stage honesty", () => {
