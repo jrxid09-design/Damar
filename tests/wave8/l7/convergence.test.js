@@ -270,6 +270,13 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // overwrites the null entry at runtime; not caught by the assignment or spread checks above.
         assert.doesNotMatch(rawSrc, /\[["']dispatch["']\]\s*:/,
             `[${relPath}] must not use ["dispatch"] as a computed object literal key (overwrites dispatch: null)`);
+        // No quoted "dispatch": or 'dispatch': object literal key — { dispatch: null, "dispatch": fn }
+        // keeps the last entry at runtime; the line-level null check passes because the same line
+        // contains dispatch: null before the quoted override.
+        assert.doesNotMatch(rawSrc, /"dispatch"\s*:/,
+            `[${relPath}] must not use "dispatch" (double-quoted) as an object literal key`);
+        assert.doesNotMatch(rawSrc, /'dispatch'\s*:/,
+            `[${relPath}] must not use 'dispatch' (single-quoted) as an object literal key`);
         // No Unicode escape sequences in string literals — dispatch decodes to "dispatch".
         assert.doesNotMatch(rawSrc, /["'][^"']*\\u[0-9a-fA-F]{4}/,
             `[${relPath}] must not use Unicode escapes in string literals (potential dispatch key bypass)`);
