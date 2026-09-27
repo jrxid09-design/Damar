@@ -47,7 +47,7 @@ function resolveMethod(port, name) {
 
 function safeNowMs(clock) {
     let t;
-    try { const fn = safeData(clock, "nowMs"); t = typeof fn === "function" ? fn.call(clock) : undefined; } catch { t = undefined; }
+    try { const fn = safeData(clock, "nowMs"); t = typeof fn === "function" && !IS_PROXY(fn) ? fn.call(clock) : undefined; } catch { t = undefined; }
     return Number.isFinite(t) ? t : Date.now();
 }
 
@@ -83,7 +83,7 @@ function readDataDeep(value, key) {
     let d;
     try { d = Object.getOwnPropertyDescriptor(value, key); } catch { return { ok: false }; }
     if (!d || d.get || d.set || !("value" in d)) return { ok: false };
-    return { ok: true, value: d.value };
+    return { ok: true, value: d.value, writable: d.writable, enumerable: d.enumerable, configurable: d.configurable };
 }
 
 function deepEqual(a, b, depth = 0) {
@@ -108,6 +108,7 @@ function deepEqual(a, b, depth = 0) {
         const ra = readDataDeep(a, k);
         const rb = readDataDeep(b, k);
         if (!ra.ok || !rb.ok) return false;
+        if (ra.writable !== rb.writable || ra.enumerable !== rb.enumerable || ra.configurable !== rb.configurable) return false;
         if (!deepEqual(ra.value, rb.value, depth + 1)) return false;
     }
     return true;
@@ -122,12 +123,14 @@ function deepEqual(a, b, depth = 0) {
  * execution produced). Returns false on every hostile/forged input — it never
  * throws to the caller.
  */
-function createCompletionVerifier({ completionEvidence, bounds = BOUNDS } = {}) {
+function createCompletionVerifier(opts = {}) {
+    const completionEvidence = safeData(opts, "completionEvidence");
+    const boundsInput = safeData(opts, "bounds") ?? BOUNDS;
     if (typeof completionEvidence !== "function" || IS_PROXY(completionEvidence)) {
         throw new TypeError("completion verifier requires a completionEvidence port");
     }
     let maxRecords;
-    try { maxRecords = bounds && bounds.MAX_COMPLETION_RECORDS; } catch { maxRecords = null; }
+    try { maxRecords = boundsInput && boundsInput.MAX_COMPLETION_RECORDS; } catch { maxRecords = null; }
     if (!Number.isSafeInteger(maxRecords) || maxRecords <= 0) maxRecords = BOUNDS.MAX_COMPLETION_RECORDS;
 
     const completed = new Set();
