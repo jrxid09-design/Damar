@@ -283,9 +283,15 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // No hex escape sequences in string literals — "\x64ispatch" also decodes to "dispatch".
         assert.doesNotMatch(rawSrc, /["'][^"']*\\x[0-9a-fA-F]{2}/,
             `[${relPath}] must not use hex escapes in string literals (potential dispatch key bypass)`);
-        // No .join('') calls — prevents ["dis","patch"].join("") assembling "dispatch" from parts.
+        // No .join('') or .join() calls — prevents ["dis","patch"].join("") and
+        // ["dispatch"].join() assembling "dispatch" from array parts.
         assert.doesNotMatch(src, /\.join\s*\(\s*["']{2}\s*\)/,
             `[${relPath}] must not use .join('') — could assemble "dispatch" key from array parts`);
+        assert.doesNotMatch(src, /\.join\s*\(\s*\)/,
+            `[${relPath}] must not use .join() without arguments — ["dispatch"].join() produces "dispatch"`);
+        // No spread with any computed key — ...{[expr]: fn} can produce any key at runtime.
+        assert.doesNotMatch(rawSrc, /\.\.\.\s*\{[^}]*\[/,
+            `[${relPath}] must not use spread with a computed key (...{[expr]:}) — can produce "dispatch" at runtime`);
         // No template literal computed keys at all — [`dispatch`]: fn and [`dis${"patch"}`]: fn both
         // create runtime keys that overwrite dispatch: null without matching literal-key checks.
         assert.doesNotMatch(rawSrc, /\[`[^`]*`\]\s*:/,
