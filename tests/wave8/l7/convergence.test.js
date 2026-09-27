@@ -169,6 +169,13 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
         // No module["require"]() -- bracket notation evades the dot-notation check above.
         assert.doesNotMatch(src, /\bmodule\s*\[["']require["']\]\s*\(/,
             `[${relPath}] closedloop must not use module["require"]() (bracket notation bypasses dot-notation check)`);
+        // No module.parent traversal -- module.parent["require"]() or module.parent.require() walks
+        // the module graph to acquire a require function from a parent context, bypassing all direct checks.
+        assert.doesNotMatch(src, /\bmodule\.parent\b/,
+            `[${relPath}] closedloop must not traverse module.parent (parent-graph require bypass)`);
+        // No require.main.require() -- require.main is the entry module; .require() on it loads from that scope.
+        assert.doesNotMatch(src, /\brequire\.main\s*\.require\s*\(/,
+            `[${relPath}] closedloop must not use require.main.require() (entry-module scope bypass)`);
         // No require placed inside an array: [require][0] extracts the function and .bind(module) creates
         // a custom loader — evades all require-aliasing and direct-call detection.
         assert.doesNotMatch(src, /\[\s*require\s*\]/,
