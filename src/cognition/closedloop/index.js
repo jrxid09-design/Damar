@@ -86,33 +86,37 @@ function readDataDeep(value, key) {
     return { ok: true, value: d.value, writable: d.writable, enumerable: d.enumerable, configurable: d.configurable };
 }
 
-function deepEqual(a, b, depth = 0) {
-    if (depth > 32) return false;
+function deepEqual(a, b, _ancestors = null) {
     if (IS_PROXY(a) || IS_PROXY(b)) return false;
-    if (a === b) return true;
+    if (a === null && b === null) return true;
     if (a === null || b === null) return false;
-    if (typeof a !== "object" || typeof b !== "object") return false;
+    if (typeof a !== "object" || typeof b !== "object") return a === b;
     if (Array.isArray(a) !== Array.isArray(b)) return false;
     let protoA, protoB;
     try { protoA = Object.getPrototypeOf(a); protoB = Object.getPrototypeOf(b); } catch { return false; }
     if (protoA !== protoB) return false;
     if (protoA !== null && protoA !== Object.prototype && !Array.isArray(a)) return false;
-    let ka, kb;
+    if (a === b) return true;
+    const ancestors = _ancestors ?? new WeakSet();
+    if (ancestors.has(a)) return false;
+    ancestors.add(a);
     try {
-        ka = Reflect.ownKeys(a);
-        kb = Reflect.ownKeys(b);
-    } catch { return false; }
-    if (ka.length !== kb.length) return false;
-    const kbSet = new Set(kb);
-    for (const k of ka) {
-        if (!kbSet.has(k)) return false;
-        const ra = readDataDeep(a, k);
-        const rb = readDataDeep(b, k);
-        if (!ra.ok || !rb.ok) return false;
-        if (ra.writable !== rb.writable || ra.enumerable !== rb.enumerable || ra.configurable !== rb.configurable) return false;
-        if (!deepEqual(ra.value, rb.value, depth + 1)) return false;
+        let ka, kb;
+        try { ka = Reflect.ownKeys(a); kb = Reflect.ownKeys(b); } catch { return false; }
+        if (ka.length !== kb.length) return false;
+        const kbSet = new Set(kb);
+        for (const k of ka) {
+            if (!kbSet.has(k)) return false;
+            const ra = readDataDeep(a, k);
+            const rb = readDataDeep(b, k);
+            if (!ra.ok || !rb.ok) return false;
+            if (ra.writable !== rb.writable || ra.enumerable !== rb.enumerable || ra.configurable !== rb.configurable) return false;
+            if (!deepEqual(ra.value, rb.value, ancestors)) return false;
+        }
+        return true;
+    } finally {
+        ancestors.delete(a);
     }
-    return true;
 }
 
 /**
@@ -130,9 +134,8 @@ function createCompletionVerifier(opts = {}) {
     if (typeof completionEvidence !== "function" || IS_PROXY(completionEvidence)) {
         throw new TypeError("completion verifier requires a completionEvidence port");
     }
-    let maxRecords;
-    try { maxRecords = boundsInput && boundsInput.MAX_COMPLETION_RECORDS; } catch { maxRecords = null; }
-    if (!Number.isSafeInteger(maxRecords) || maxRecords <= 0) maxRecords = BOUNDS.MAX_COMPLETION_RECORDS;
+    const maxRecordsRaw = safeData(boundsInput, "MAX_COMPLETION_RECORDS");
+    const maxRecords = Number.isSafeInteger(maxRecordsRaw) && maxRecordsRaw > 0 ? maxRecordsRaw : BOUNDS.MAX_COMPLETION_RECORDS;
 
     const completed = new Set();
     const pending = new Set();
