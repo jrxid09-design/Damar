@@ -13,10 +13,21 @@ test("W7-L2 structural: createWorldModel exposes the frozen public contract", as
     const wm = await createWorldModel();
     for (const method of ["declareEntity", "declareRelation", "ingestObservation",
         "ingestDeclaration", "query", "neighbors", "subgraph", "path",
-        "entitiesByKind", "openContradictions", "resolveContradiction"]) {
+        "entitiesByKind", "openContradictions", "hypotheses", "resolveContradiction"]) {
         assert.equal(typeof wm[method], "function", `missing ${method}`);
     }
     assert.ok(wm.laws.WORLD_MODEL_NOT_GROUND_TRUTH);
+});
+
+test("W7-L2 citation API returns detached, frozen canonical hypothesis records", async () => {
+    const wm = await createWorldModel();
+    wm.declareEntity({ entityId: "e-hyp", entityKind: "device", source: "test" });
+    wm.declareHypothesis({ hypothesisId: "h-l2", subject: { entityId: "e-hyp" }, attribute: "state",
+        candidateValues: [{ value: "on", weight: 1 }], expiresAt: new Date(Date.now() + 60_000).toISOString() });
+    const values = wm.hypotheses();
+    assert.ok(Object.isFrozen(values));
+    assert.equal(values[0].hypothesisId, "h-l2");
+    assert.ok(Object.isFrozen(values[0]));
 });
 
 test("W7-L2 functional: query on never-observed subject returns unknown, not a bare value", async () => {
