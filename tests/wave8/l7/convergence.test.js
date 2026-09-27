@@ -106,9 +106,12 @@ test("CS-W8-03a: MODEL != AUTHORITY — no public seam to mint completion eviden
     try {
         assert.equal(core.closedLoop.admitCanonicalProbeCompletion, undefined,
             "no public completion-admission seam must exist on the closed loop");
-        // Symbol-keyed seams are also prohibited — no symbol-keyed seam can serve as an admission path.
+        // Own symbol-keyed seams are prohibited.
         assert.equal(Object.getOwnPropertySymbols(core.closedLoop).length, 0,
-            "closedLoop must have no symbol-keyed properties that could be admission seams");
+            "closedLoop must have no own symbol-keyed properties that could be admission seams");
+        // Inherited symbol-keyed seams are prohibited — prototype must be Object.prototype.
+        assert.equal(Object.getPrototypeOf(core.closedLoop), Object.prototype,
+            "closedLoop prototype must be Object.prototype (no custom prototype with inherited seams)");
     } finally {
         core.shutdown();
     }
@@ -118,9 +121,13 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
     // Scan ALL closedloop source files (index.js + helpers) — a forbidden import in
     // phases.js, laws.js, bounds.js, etc. is equally prohibited.
     const closedloopDir = path.join(ROOT, "src/cognition/closedloop");
-    const closedloopFiles = fs.readdirSync(closedloopDir)
-        .filter(f => f.endsWith(".js"))
-        .map(f => path.join(closedloopDir, f));
+    // No subdirectories — the flat scan is exhaustive only without nested packages.
+    const allCLEntries = fs.readdirSync(closedloopDir, { withFileTypes: true });
+    assert.equal(allCLEntries.filter(e => e.isDirectory()).length, 0,
+        "closedloop dir must have no subdirectories (scan is flat — add recursion if subdirs appear)");
+    const closedloopFiles = allCLEntries
+        .filter(e => e.isFile() && e.name.endsWith(".js"))
+        .map(e => path.join(closedloopDir, e.name));
     for (const file of closedloopFiles) {
         const rawSrc = fs.readFileSync(file, "utf8");
         const src = rawSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
@@ -156,28 +163,29 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
     }
 });
 
-test("CS-W8-03c: NO_SECOND_DISPATCHER — no dispatch() call inside closedloop", () => {
+test("CS-W8-03c: NO_SECOND_DISPATCHER — no dispatch() call in any closedloop module", () => {
     assert.equal(laws.NO_SECOND_DISPATCHER, true);
-    // Strip comments before scanning so aliased call via /* comment */ tricks are excluded.
-    const rawSrc = fs.readFileSync(path.join(ROOT, "src/cognition/closedloop/index.js"), "utf8");
-    const src = rawSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
-    assert.doesNotMatch(src, /\bdispatch\s*\(/, "closedloop must not call dispatch()");
-    assert.doesNotMatch(src, /createDispatch/, "closedloop must not create a dispatcher");
-    // Optional-chaining invocation: dispatch?.()
-    assert.doesNotMatch(src, /\bdispatch\s*\?\.\s*\(/, "closedloop must not call dispatch?.()");
-    // Method invocation forms: dispatch.call(...) and dispatch.apply(...)
-    assert.doesNotMatch(src, /\bdispatch\s*\.call\s*\(/, "closedloop must not call dispatch.call(...)");
-    assert.doesNotMatch(src, /\bdispatch\s*\.apply\s*\(/, "closedloop must not call dispatch.apply(...)");
-    // Bound call: dispatch.bind(...)(...)
-    assert.doesNotMatch(src, /\bdispatch\s*\.bind\s*\(/, "closedloop must not call dispatch.bind(...)");
-    // Indirect invocation via Reflect.apply(dispatch, ...) is also prohibited.
-    assert.doesNotMatch(src, /Reflect\.apply\s*\([^,]*dispatch/,
-        "closedloop must not invoke dispatch via Reflect.apply");
-    // No eval() — eval can alias and invoke dispatch at runtime.
-    assert.doesNotMatch(src, /\beval\s*\(/, "closedloop must not use eval()");
-    // No dispatch variable aliasing — const/let/var alias = dispatch binds a callable alias.
-    assert.doesNotMatch(src, /(?:const|let|var)\s+\w+\s*=\s*\bdispatch\b/,
-        "closedloop must not alias dispatch into another variable");
+    // Scan ALL closedloop files — a helper module containing a second dispatcher is equally prohibited.
+    const closedloopDir = path.join(ROOT, "src/cognition/closedloop");
+    const clFiles = fs.readdirSync(closedloopDir, { withFileTypes: true })
+        .filter(e => e.isFile() && e.name.endsWith(".js"))
+        .map(e => path.join(closedloopDir, e.name));
+    for (const file of clFiles) {
+        const rawSrc = fs.readFileSync(file, "utf8");
+        const src = rawSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
+        const rel = path.relative(ROOT, file).replace(/\\/g, "/");
+        assert.doesNotMatch(src, /\bdispatch\s*\(/, `[${rel}] closedloop must not call dispatch()`);
+        assert.doesNotMatch(src, /createDispatch/, `[${rel}] closedloop must not create a dispatcher`);
+        assert.doesNotMatch(src, /\bdispatch\s*\?\.\s*\(/, `[${rel}] closedloop must not call dispatch?.()`);
+        assert.doesNotMatch(src, /\bdispatch\s*\.call\s*\(/, `[${rel}] closedloop must not call dispatch.call`);
+        assert.doesNotMatch(src, /\bdispatch\s*\.apply\s*\(/, `[${rel}] closedloop must not call dispatch.apply`);
+        assert.doesNotMatch(src, /\bdispatch\s*\.bind\s*\(/, `[${rel}] closedloop must not call dispatch.bind`);
+        assert.doesNotMatch(src, /Reflect\.apply\s*\([^,]*dispatch/,
+            `[${rel}] closedloop must not invoke dispatch via Reflect.apply`);
+        assert.doesNotMatch(src, /\beval\s*\(/, `[${rel}] closedloop must not use eval()`);
+        assert.doesNotMatch(src, /(?:const|let|var)\s+\w+\s*=\s*\bdispatch\b/,
+            `[${rel}] closedloop must not alias dispatch into another variable`);
+    }
 });
 
 // ── CS-W8-04: PERCEPTION != AUTHORITY — L2 probe scheduling ──────────────
@@ -223,6 +231,9 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // No string concatenation constructing "dispatch" from parts.
         assert.doesNotMatch(rawSrc, /["']dis["']\s*\+\s*["']patch["']/,
             `[${relPath}] must not construct "dispatch" key by string concatenation`);
+        // No variable holding the string "dispatch" for use as a computed key.
+        assert.doesNotMatch(src, /(?:const|let|var)\s+\w+\s*=\s*["']dispatch["']/,
+            `[${relPath}] must not assign string "dispatch" to a variable (computed key bypass)`);
         // No dynamic require() calls.
         const dynReq = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
         assert.equal(dynReq, null, `[${relPath}] perception must not use dynamic require()`);
@@ -265,6 +276,10 @@ test("CS-W8-04b: L2-L6 completion path is fail-closed without canonical executio
     assert.match(compositionSrc,
         /completionEvidence\s*=\s*\(\s*\)\s*=>\s*null[\s\S]{0,400}createCompletionVerifier/,
         "completionEvidence = () => null must appear within 400 chars before createCompletionVerifier");
+    // Exactly ONE createCompletionVerifier call — no decoy+live pair where one is dead.
+    const cvCalls = (compositionSrc.match(/\bcreateCompletionVerifier\s*\(/g) ?? []).length;
+    assert.equal(cvCalls, 1,
+        "canonicalRuntimeComposition must call createCompletionVerifier exactly once (no decoy)");
     // Runtime: the null port produces fail-closed verification.
     const verifier = createCompletionVerifier({ completionEvidence: () => null });
     assert.equal(
@@ -294,6 +309,9 @@ test("CS-W8-05: REPLAY CACHE != REPLAY AUTHORITY — same probeId rejected after
     const surface = Object.getOwnPropertyNames(verifier).filter(k => k !== "__proto__");
     assert.deepEqual(surface.sort(), ["verifyCompletion"],
         "verifier must expose exactly verifyCompletion — no cache-read or mint surface (including non-enumerable)");
+    // No inherited symbol-keyed seams — prototype must be Object.prototype.
+    assert.equal(Object.getPrototypeOf(verifier), Object.prototype,
+        "verifier prototype must be Object.prototype (no custom prototype with inherited seams)");
 });
 
 // ── CS-W8-06: UNCERTAIN PRIOR EFFECT != SAFE TO RETRY ───────────────────
@@ -735,4 +753,15 @@ test("CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE — dual-witness test asse
     const hasSingleRejects = /assert\.rejects\s*\(\s*(?:async\s*)?\(\s*\)/.test(context);
     assert.ok(hasTryCatch || hasSingleRejects,
         "REPLAY_HEAD_UNWITNESSED must be tested via try/catch or assert.rejects — not a pre-seeded error");
+    // The test containing the assertion must not be skipped or in an unreachable conditional.
+    // Find the test(...) block that wraps the assertion line.
+    let testStartIdx = assertLineIdx;
+    while (testStartIdx > 0 && !/^\s*test\s*\(/.test(lines[testStartIdx])) testStartIdx--;
+    const testHeader = lines[testStartIdx] ?? "";
+    assert.doesNotMatch(testHeader, /skip\s*:/,
+        "the test containing REPLAY_HEAD_UNWITNESSED assertion must not have skip: property");
+    // No leading `if (false)` or `if (process.env.SKIP)` wrapping the assertion.
+    const testBody = lines.slice(testStartIdx, assertLineIdx + 1).join("\n");
+    assert.doesNotMatch(testBody, /\bif\s*\(\s*false\b/,
+        "REPLAY_HEAD_UNWITNESSED assertion must not be inside if(false) block");
 });
