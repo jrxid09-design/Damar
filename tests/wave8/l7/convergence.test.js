@@ -266,9 +266,10 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // No .join('') calls — prevents ["dis","patch"].join("") assembling "dispatch" from parts.
         assert.doesNotMatch(src, /\.join\s*\(\s*["']{2}\s*\)/,
             `[${relPath}] must not use .join('') — could assemble "dispatch" key from array parts`);
-        // No template literal computed keys with interpolation — [`dis${"patch"}`]: fn creates dispatch at runtime.
-        assert.doesNotMatch(rawSrc, /\[`[^`]*\$\{[^}]*\}[^`]*`\]\s*:/,
-            `[${relPath}] must not use template literal computed keys with interpolation`);
+        // No template literal computed keys at all — [`dispatch`]: fn and [`dis${"patch"}`]: fn both
+        // create runtime keys that overwrite dispatch: null without matching literal-key checks.
+        assert.doesNotMatch(rawSrc, /\[`[^`]*`\]\s*:/,
+            `[${relPath}] must not use template literal computed keys in object literals`);
         // No object spread with computed dispatch key — ...{ ["dispatch"]: fn } overwrites dispatch: null.
         assert.doesNotMatch(rawSrc, /\.\.\.\s*\{\s*\[["']dispatch["']\]\s*:/,
             `[${relPath}] must not spread an object with computed "dispatch" key (overwrites null)`);
