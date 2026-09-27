@@ -193,6 +193,10 @@ function createCompletionVerifier(opts = {}) {
             // execution produced — a caller may not substitute its own.
             const evObservation = safeData(evidence, "observation");
             if (evObservation == null) { pending.delete(probeId); return false; }
+            if (typeof evObservation !== "object" ||
+                evObservation.tier === undefined ||
+                evObservation.sensor === undefined ||
+                evObservation.frame === undefined) { pending.delete(probeId); return false; }
             if (!deepEqual(evObservation, observation)) { pending.delete(probeId); return false; }
         } else if (outcome === "DENIED") {
             if (evOutcome !== "DENIED") { pending.delete(probeId); return false; }
