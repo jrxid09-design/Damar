@@ -443,6 +443,14 @@ test("CS-W8-07: DRIVER SUCCESS != VERIFIED POSTCONDITION — missing evidence an
         v1.verifyCompletion({ probeId: "p-drv", request: { probeId: "p-drv", questionRef: "q-1", capabilityId: "c-1" }, outcome: "SUCCESS", observation: obs }),
         false, "driver claim without evidence must fail"
     );
+    // Case 2a: null observation in evidence — deepEqual(null, null) would pass the
+    // postcondition check, but null is not a canonical observation shape.
+    const evNull = { outcome: "VERIFIED", probeId: "p-null-obs", questionRef: "q-1", capabilityId: "c-1", observation: null };
+    const vNull = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-null-obs": evNull }) });
+    assert.equal(
+        vNull.verifyCompletion({ probeId: "p-null-obs", request: { probeId: "p-null-obs", questionRef: "q-1", capabilityId: "c-1" }, outcome: "SUCCESS", observation: null }),
+        false, "null observation must be rejected — null is not a canonical observation shape"
+    );
     // Case 2: evidence port returns VERIFIED but the observation (postcondition)
     // does not match what canonical execution produced — driver says success but
     // the postcondition cannot be confirmed. Must be rejected.
