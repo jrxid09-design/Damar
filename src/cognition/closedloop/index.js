@@ -123,7 +123,7 @@ function deepEqual(a, b, depth = 0) {
  * throws to the caller.
  */
 function createCompletionVerifier({ completionEvidence, bounds = BOUNDS } = {}) {
-    if (typeof completionEvidence !== "function") {
+    if (typeof completionEvidence !== "function" || IS_PROXY(completionEvidence)) {
         throw new TypeError("completion verifier requires a completionEvidence port");
     }
     let maxRecords;
@@ -169,15 +169,14 @@ function createCompletionVerifier({ completionEvidence, bounds = BOUNDS } = {}) 
         const eQuestionRef = safeData(evidence, "questionRef");
         const eCapabilityId = safeData(evidence, "capabilityId");
 
-        // The completion must be bound to the exact probe. Binding is enforced
-        // in both directions: if evidence carries a field, request must match it;
-        // if request carries a field, evidence must match it.
+        // The completion must be bound to the exact probe. Evidence must carry
+        // explicit non-undefined questionRef/capabilityId (canonical evidence
+        // always does). Binding is then enforced bidirectionally.
         if (eProbeId !== probeId) return false;
         if (evProbeId !== undefined && evProbeId !== probeId) return false;
-        if (eQuestionRef !== undefined && eQuestionRef !== evQuestionRef) return false;
-        if (eCapabilityId !== undefined && eCapabilityId !== evCapabilityId) return false;
-        if (evQuestionRef !== undefined && eQuestionRef !== evQuestionRef) return false;
-        if (evCapabilityId !== undefined && eCapabilityId !== evCapabilityId) return false;
+        if (eQuestionRef === undefined || eCapabilityId === undefined) return false;
+        if (eQuestionRef !== evQuestionRef) return false;
+        if (eCapabilityId !== evCapabilityId) return false;
 
         if (outcome === "SUCCESS") {
             if (evOutcome !== "VERIFIED") return false;
@@ -207,17 +206,16 @@ function createCompletionVerifier({ completionEvidence, bounds = BOUNDS } = {}) 
  * Composition only: no dispatch, no Authority evaluation, no actuator handle,
  * no domain state. Loop state is ephemeral (never recovered after restart).
  */
-function createClosedLoop({
-    cycle = null,
-    perceptionLane = null,
-    sensoriumBridge = null,
-    spatial = null,
-    effectors = null,
-    simulation = null,
-    auditLedger = null,
-    clock = { nowMs: () => Date.now() },
-    bounds = BOUNDS
-} = {}) {
+function createClosedLoop(opts = {}) {
+    const cycle = safeData(opts, "cycle") ?? null;
+    const perceptionLane = safeData(opts, "perceptionLane") ?? null;
+    const sensoriumBridge = safeData(opts, "sensoriumBridge") ?? null;
+    const spatial = safeData(opts, "spatial") ?? null;
+    const effectors = safeData(opts, "effectors") ?? null;
+    const simulation = safeData(opts, "simulation") ?? null;
+    const auditLedger = safeData(opts, "auditLedger") ?? null;
+    const clock = safeData(opts, "clock") ?? { nowMs: () => Date.now() };
+    const bounds = safeData(opts, "bounds") ?? BOUNDS;
     let safeBounds;
     try { safeBounds = sanitizeBounds(bounds); } catch { safeBounds = BOUNDS; }
 
