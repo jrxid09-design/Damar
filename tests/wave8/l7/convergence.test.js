@@ -131,15 +131,20 @@ test("CS-W8-03c: NO_SECOND_DISPATCHER — no dispatch() call inside closedloop",
 
 // ── CS-W8-04: PERCEPTION != AUTHORITY — L2 probe scheduling ──────────────
 
-test("CS-W8-04a: PERCEPTION != AUTHORITY — probe request wiring sets dispatch:null (structural proof)", () => {
-    // Structural proof: the perception lane always sets dispatch:null on every
-    // probe request it builds. Authority owns all dispatch; a probe is a data
-    // request, not an action. The source is read here (not mocked) so a future
-    // edit that introduces a live dispatch handle will break this test.
+test("CS-W8-04a: PERCEPTION != AUTHORITY — no non-null dispatch in perception module (exhaustive check)", () => {
+    // Exhaustive structural proof: every `dispatch:` assignment in the
+    // perception module must be null. A single regex for one occurrence would
+    // miss a second assignment path; this test checks that NO non-null
+    // `dispatch:` exists anywhere in the file.
     const src = fs.readFileSync(path.join(ROOT, "src/cognition/perception/index.js"), "utf8");
+    // All dispatch assignments must be null — zero non-null ones allowed.
+    const nonNullDispatches = src.match(/\bdispatch\s*:\s*(?!null\b)[\w"'`{[]/g);
+    assert.equal(nonNullDispatches, null,
+        "perception/index.js must have zero non-null dispatch: assignments");
+    // Confirm at least one dispatch:null exists (proves the property is set, not absent).
     assert.match(src, /dispatch\s*:\s*null/,
-        "perception/index.js must set dispatch:null on probe requests");
-    // Confirm no dispatch import or invocation exists in the perception module.
+        "perception/index.js must contain at least one dispatch:null probe wiring");
+    // No dispatcher import.
     assert.doesNotMatch(src, /require\s*\(\s*["'][^"']*\/dispatch/,
         "perception module must not import a dispatcher");
 });
@@ -446,20 +451,66 @@ test("CS-W8-19: CONFIDENCE != AUTHORITY — high-confidence observation without 
     );
 });
 
+// ── CS-W8-21: CAPABILITY AVAILABLE != AUTHORITY ──────────────────────────
+
+test("CS-W8-21: CAPABILITY AVAILABLE != AUTHORITY — available capability without evidence fails closed", () => {
+    // The capability registry may report a capability as AVAILABLE, but
+    // availability is not authority. A probe for an AVAILABLE capability still
+    // requires canonical execution evidence through the completionEvidence port.
+    const verifier = createCompletionVerifier({ completionEvidence: () => null });
+    // "cap-available" simulates a capability the registry would return AVAILABLE for.
+    assert.equal(
+        verifier.verifyCompletion({ probeId: "p-avail", request: { probeId: "p-avail", questionRef: "q-1", capabilityId: "cap-available" }, outcome: "SUCCESS", observation: { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.9 } }),
+        false, "AVAILABLE capability without canonical evidence must fail"
+    );
+    // Capability AVAILABLE does not lower the bar for DENIED outcomes either.
+    assert.equal(
+        verifier.verifyCompletion({ probeId: "p-avail2", request: { probeId: "p-avail2", questionRef: "q-1", capabilityId: "cap-available" }, outcome: "DENIED" }),
+        false, "no evidence means even DENIED path is rejected"
+    );
+});
+
+// ── CS-W8-22: MODEL OUTPUT != AUTHORITY ──────────────────────────────────
+
+test("CS-W8-22: MODEL OUTPUT != AUTHORITY — model-constructed evidence shape blocked by null port", () => {
+    // The canonical completionEvidence port is fixed to () => null at
+    // composition time. Even if a model could construct a perfectly-shaped
+    // evidence object (correct probeId, questionRef, capabilityId, outcome,
+    // observation), that construction cannot bypass the port. The verifier
+    // consumes ONLY what the port returns; model output has no pathway in.
+    const verifier = createCompletionVerifier({ completionEvidence: () => null });
+    const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.95 };
+    // Perfectly-shaped model-constructed "evidence" — correct in every field.
+    // The port returns null regardless, so this must fail.
+    assert.equal(
+        verifier.verifyCompletion({ probeId: "p-model", request: { probeId: "p-model", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: obs }),
+        false, "model-constructed evidence shape cannot bypass the null port"
+    );
+    // Verify the port is the sole trust input: with a real port, same shape succeeds.
+    const ev = canonicalEvidence("p-model2", obs);
+    const verifier2 = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-model2": ev }) });
+    assert.equal(
+        verifier2.verifyCompletion({ probeId: "p-model2", request: { probeId: "p-model2", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: obs }),
+        true, "canonical port producing correct evidence must be accepted — port is the only trust input"
+    );
+});
+
 // ── CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE ──────────────────────
 
-test("CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE — dual-witness durability tests are present", () => {
-    // This invariant states that writing and fsyncing a file does not guarantee
-    // its directory entry survives a crash. In this codebase the invariant is
-    // exercised by the W8-IW1 replay dual-witness tests, which require two
-    // independent durability witnesses before a completion record is treated as
-    // stable. This certification test asserts those tests exist; their removal
-    // would leave FSYNC FILE != DIRECTORY ENTRY DURABLE untested.
+test("CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE — dual-witness test asserts the invariant", () => {
+    // The invariant: fsyncing a file does not guarantee its directory entry
+    // survives a crash. The W8-IW1 dual-witness tests enforce this: a
+    // co-located local anchor must NOT substitute for the external witness, and
+    // the ledger must fail closed when only the local file is durable.
+    // This test proves those assertions are present; a vacuous check would
+    // let the file exist with no actual durability assertions.
     const witnessTest = path.join(ROOT, "tests/wave8/iw1/replayDualWitness.test.js");
-    assert.ok(fs.existsSync(witnessTest),
-        "replayDualWitness.test.js must exist (FSYNC FILE != DIRECTORY ENTRY DURABLE)");
-    // The test file must reference the dual-witness durability pattern.
+    assert.ok(fs.existsSync(witnessTest), "replayDualWitness.test.js must exist");
     const src = fs.readFileSync(witnessTest, "utf8");
-    assert.match(src, /witness|durabilit/i,
-        "dual-witness test must contain durability-witness logic");
+    // Must contain the specific "local anchor must NOT substitute" assertion keyword.
+    assert.match(src, /REPLAY_HEAD_UNWITNESSED/,
+        "dual-witness test must assert REPLAY_HEAD_UNWITNESSED (local-anchor-only path fails closed)");
+    // Must contain actual assert calls — not just comments.
+    assert.match(src, /assert\.(equal|match|ok|rejects|throws)/,
+        "dual-witness test must contain live assert calls, not just documentation");
 });
