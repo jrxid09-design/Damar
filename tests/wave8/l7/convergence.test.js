@@ -115,7 +115,9 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
     // Enumerate ALL require() calls and verify none resolves to an action,
     // authority, or actuator path. Normalize backslashes so Windows-style paths
     // ("..\\action") are caught by the same regex as POSIX paths ("../action").
-    const src = fs.readFileSync(path.join(ROOT, "src/cognition/closedloop/index.js"), "utf8");
+    // Strip block comments before scanning so require /*comment*/("path") is not missed.
+    const rawSrc = fs.readFileSync(path.join(ROOT, "src/cognition/closedloop/index.js"), "utf8");
+    const src = rawSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
     const deps = [...src.matchAll(/require\s*\(\s*["']([^"']+)["']/g)].map(m => m[1]);
     for (const dep of deps) {
         const norm = dep.replace(/\\/g, "/");
@@ -134,16 +136,22 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
     const moduleRequires = src.match(/\bmodule\.require\s*\(/g);
     assert.equal(moduleRequires, null,
         "closedloop must not use module.require() (bypasses literal-require check)");
+    // No eval() — eval can construct require paths that evade static analysis.
+    assert.doesNotMatch(src, /\beval\s*\(/, "closedloop must not use eval()");
 });
 
 test("CS-W8-03c: NO_SECOND_DISPATCHER — no dispatch() call inside closedloop", () => {
     assert.equal(laws.NO_SECOND_DISPATCHER, true);
-    const src = fs.readFileSync(path.join(ROOT, "src/cognition/closedloop/index.js"), "utf8");
+    // Strip comments before scanning so aliased call via /* comment */ tricks are excluded.
+    const rawSrc = fs.readFileSync(path.join(ROOT, "src/cognition/closedloop/index.js"), "utf8");
+    const src = rawSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
     assert.doesNotMatch(src, /\bdispatch\s*\(/, "closedloop must not call dispatch()");
     assert.doesNotMatch(src, /createDispatch/, "closedloop must not create a dispatcher");
     // Indirect invocation via Reflect.apply(dispatch, ...) is also prohibited.
     assert.doesNotMatch(src, /Reflect\.apply\s*\([^,]*dispatch/,
         "closedloop must not invoke dispatch via Reflect.apply");
+    // No eval() — eval can alias and invoke dispatch at runtime.
+    assert.doesNotMatch(src, /\beval\s*\(/, "closedloop must not use eval()");
 });
 
 // ── CS-W8-04: PERCEPTION != AUTHORITY — L2 probe scheduling ──────────────
@@ -155,8 +163,16 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
     const perceptionFiles = fs.readdirSync(perceptionDir)
         .filter(f => f.endsWith(".js"))
         .map(f => path.join(perceptionDir, f));
+    // Verify no subdirectories exist — the flat scan above is exhaustive only if
+    // the perception module has no nested sub-packages.
+    const allEntries = fs.readdirSync(perceptionDir, { withFileTypes: true });
+    const subdirs = allEntries.filter(e => e.isDirectory());
+    assert.equal(subdirs.length, 0,
+        "perception dir must have no subdirectories (scan is flat — add recursion if subdirs appear)");
     for (const file of perceptionFiles) {
-        const src = fs.readFileSync(file, "utf8");
+        // Strip comments before analysis so comment-masked patterns are not missed.
+        const rawSrc = fs.readFileSync(file, "utf8");
+        const src = rawSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
         const relPath = path.relative(ROOT, file).replace(/\\/g, "/");
         // Every dispatch: key must be null.
         const dispatchLines = src.split("\n").filter(l => /\bdispatch\s*:/.test(l));
@@ -190,20 +206,24 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
             `[${relPath}] perception module must not import a dispatcher`);
     }
     // The canonical index.js must contain at least one dispatch: null wiring.
-    const indexSrc = fs.readFileSync(path.join(perceptionDir, "index.js"), "utf8");
+    const indexRaw = fs.readFileSync(path.join(perceptionDir, "index.js"), "utf8");
+    const indexSrc = indexRaw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
     const indexDispatchLines = indexSrc.split("\n").filter(l => /\bdispatch\s*:/.test(l));
     assert.ok(indexDispatchLines.length > 0,
         "perception/index.js must contain at least one dispatch: wiring");
 });
 
 test("CS-W8-04b: L2-L6 completion path is fail-closed without canonical execution evidence", () => {
-    // Structural: canonicalRuntimeComposition.js must hard-wire completionEvidence = () => null.
-    // This proves the canonical runtime (not just a standalone verifier) is fail-closed.
-    const compositionSrc = fs.readFileSync(
+    // Structural: canonicalRuntimeComposition.js must hard-wire completionEvidence = () => null
+    // in the same local scope as the createCompletionVerifier call — not as a dead declaration.
+    const compositionRaw = fs.readFileSync(
         path.join(ROOT, "src/integration/canonicalRuntimeComposition.js"), "utf8"
     );
-    assert.match(compositionSrc, /completionEvidence\s*=\s*\(\s*\)\s*=>\s*null/,
-        "canonicalRuntimeComposition must hard-wire completionEvidence = () => null (fail-closed)");
+    const compositionSrc = compositionRaw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
+    // The null wiring must appear within 400 chars before the createCompletionVerifier call.
+    assert.match(compositionSrc,
+        /completionEvidence\s*=\s*\(\s*\)\s*=>\s*null[\s\S]{0,400}createCompletionVerifier/,
+        "completionEvidence = () => null must appear immediately before createCompletionVerifier (live wiring, not dead decl)");
     // Runtime: the null port produces fail-closed verification.
     const verifier = createCompletionVerifier({ completionEvidence: () => null });
     assert.equal(
@@ -365,13 +385,22 @@ test("CS-W8-10: canonical 9-phase loop order is enforced across a full cycle", (
 
 // ── CS-W8-11: loop rate bound ─────────────────────────────────────────────
 
-test("CS-W8-11: busy-spin rejected with LOOP_RATE_EXCEEDED", () => {
+test("CS-W8-11: busy-spin rejected with LOOP_RATE_EXCEEDED — boundary exact", () => {
     let now = 0;
     const clock = { nowMs: () => now };
     const loop = createClosedLoop({ clock });
     loop.runCycle();
-    // Do not advance time — second call within MIN_LOOP_INTERVAL_MS must throw.
-    assert.throws(() => loop.runCycle(), (e) => e.reason === "LOOP_RATE_EXCEEDED");
+    // elapsed=0: well under boundary — must reject.
+    assert.throws(() => loop.runCycle(), (e) => e.reason === "LOOP_RATE_EXCEEDED",
+        "elapsed=0 must be rejected (< MIN_LOOP_INTERVAL_MS)");
+    // elapsed = MIN_LOOP_INTERVAL_MS - 1: one tick under — must still reject.
+    now = BOUNDS.MIN_LOOP_INTERVAL_MS - 1;
+    assert.throws(() => loop.runCycle(), (e) => e.reason === "LOOP_RATE_EXCEEDED",
+        "elapsed=MIN_LOOP_INTERVAL_MS-1 must be rejected (boundary exclusive)");
+    // elapsed = MIN_LOOP_INTERVAL_MS: at boundary — must be accepted.
+    now = BOUNDS.MIN_LOOP_INTERVAL_MS;
+    assert.doesNotThrow(() => loop.runCycle(),
+        "elapsed=MIN_LOOP_INTERVAL_MS must be accepted (at boundary)");
 });
 
 // ── CS-W8-12: crash / restart — ephemeral state ───────────────────────────
@@ -424,14 +453,9 @@ test("CS-W8-13: absent lanes reported as not present — no silent degradation",
 
 // ── CS-W8-14: no authority escalation — governed requires ledger ──────────
 
-test("CS-W8-14: NO AUTHORITY ESCALATION — core.closedLoop AUTHORIZE always degraded (shadow mode proof)", async () => {
-    // Authority-escalation proof: advance the COMPOSED core.closedLoop (not a
-    // standalone loop) through all 9 phases and verify AUTHORIZE is
-    // AUTHORIZE_UNAVAILABLE. The cognition composition never wires an Authority
-    // client into the loop regardless of cognitionMode.
-    // Shadow mode is used because it produces a non-null closedLoop with the
-    // canonical composition. Governed mode with a test-only ledger may return
-    // null (fail-closed), which is separately acceptable but not testable here.
+test("CS-W8-14: NO AUTHORITY ESCALATION — core.closedLoop AUTHORIZE always degraded (shadow + governed proof)", async () => {
+    // Authority-escalation proof: advance the COMPOSED core.closedLoop through all
+    // 9 phases and verify AUTHORIZE is AUTHORIZE_UNAVAILABLE in shadow mode.
     const core = await createRuntimeCore(cognitionOpts()); // shadow mode
     try {
         assert.ok(core.closedLoop !== null, "shadow mode must produce a closedLoop");
@@ -447,6 +471,24 @@ test("CS-W8-14: NO AUTHORITY ESCALATION — core.closedLoop AUTHORIZE always deg
         assert.equal(authReport.present, false);
     } finally {
         core.shutdown();
+    }
+    // Governed mode: closedLoop must be null (fail-closed) OR also have degraded AUTHORIZE.
+    const governedCore = await createRuntimeCore(cognitionOpts({ cognitionMode: "governed" }));
+    try {
+        if (governedCore.closedLoop !== null) {
+            let govAuthReport = null;
+            for (let i = 0; i < LOOP_ORDER.length; i++) {
+                if (i > 0) await new Promise(r => setTimeout(r, 60));
+                const r = governedCore.closedLoop.runCycle();
+                if (r.phase === PHASE.AUTHORIZE) govAuthReport = r;
+            }
+            assert.ok(govAuthReport !== null, "governed AUTHORIZE phase must execute if closedLoop is non-null");
+            assert.equal(govAuthReport.degraded, "AUTHORIZE_UNAVAILABLE",
+                "governed mode must not grant a live AUTHORIZE to core.closedLoop");
+        }
+        // null closedLoop is also acceptable (fail-closed governed mode)
+    } finally {
+        governedCore.shutdown();
     }
 });
 
@@ -492,6 +534,9 @@ test("CS-W8-17: ToolBus skip remains BLOCKED ON W8-IW1 (not resolved by L6/L7)",
     );
     assert.match(toolBusSrc, /BLOCKED ON W8-IW1/,
         "ToolBus skip must remain annotated as BLOCKED ON W8-IW1");
+    // The annotation must appear as the value of a skip: property — not just a comment.
+    assert.match(toolBusSrc, /skip\s*:\s*["'][^"']*BLOCKED ON W8-IW1/,
+        "ToolBus skip must be a live skip: property value, not just a comment");
     // IW1 resolution harness directory must exist.
     assert.ok(
         fs.existsSync(path.join(ROOT, "tests/wave8/iw1")),
@@ -625,4 +670,11 @@ test("CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE — dual-witness test asse
     // File must import the real replay ledger module, not just contain error strings.
     assert.match(src, /require\s*\([^)]*canonicalReplayLedger/,
         "dual-witness test must import canonicalReplayLedger (the system under test)");
+    // The assertion must appear in the context of real ledger operations — not isolated decoy.
+    const assertLineIdx = lines.findIndex(line =>
+        /(assert\.match|assert\.rejects)/.test(line) && /\/REPLAY_HEAD_UNWITNESSED\//.test(line)
+    );
+    const context = lines.slice(Math.max(0, assertLineIdx - 12), assertLineIdx + 1).join("\n");
+    assert.match(context, /ledger\.(reserve|commit|rollback)|await\s+ledger/,
+        "REPLAY_HEAD_UNWITNESSED assertion must appear after real ledger operations (not isolated decoy)");
 });
