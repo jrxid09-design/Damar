@@ -323,6 +323,12 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // dispatch: null without triggering any of the static computed-key or string-literal guards.
         assert.doesNotMatch(src, /JSON\.parse\s*\(/,
             `[${relPath}] must not use JSON.parse (can build a "dispatch" key at runtime from a JSON string)`);
+        // No getter or setter named dispatch -- get dispatch() { return fn; } produces a non-null
+        // dispatcher at runtime while not matching any of the dispatch: or assignment patterns above.
+        assert.doesNotMatch(src, /\bget\s+dispatch\s*\(/,
+            `[${relPath}] must not define a dispatch getter (returns non-null at runtime despite dispatch: null)`);
+        assert.doesNotMatch(src, /\bset\s+dispatch\s*\(/,
+            `[${relPath}] must not define a dispatch setter`);
         // No dynamic require() calls.
         const dynReq = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
         assert.equal(dynReq, null, `[${relPath}] perception must not use dynamic require()`);
