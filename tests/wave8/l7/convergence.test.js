@@ -162,13 +162,18 @@ test("CS-W8-04b: L2-L6 completion path is fail-closed without canonical executio
 
 // ── CS-W8-05: REPLAY CACHE != REPLAY AUTHORITY ───────────────────────────
 
-test("CS-W8-05: same probeId cannot be verified twice (exactly-once admission)", () => {
+test("CS-W8-05: REPLAY CACHE != REPLAY AUTHORITY — same probeId rejected after first admission", () => {
     const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
     const ev = canonicalEvidence("p-once", obs);
     const verifier = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-once": ev }) });
     const spec = { probeId: "p-once", request: { probeId: "p-once", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: obs };
     assert.equal(verifier.verifyCompletion(spec), true, "first verification must succeed");
     assert.equal(verifier.verifyCompletion(spec), false, "replay must be rejected");
+    // The verifier exposes ONLY verifyCompletion — no surface to read or mint
+    // from the completed-set cache. The cache record cannot itself authorize.
+    const surface = Object.keys(verifier);
+    assert.deepEqual(surface, ["verifyCompletion"],
+        "verifier must expose exactly verifyCompletion — no cache-read or mint surface");
 });
 
 // ── CS-W8-06: UNCERTAIN PRIOR EFFECT != SAFE TO RETRY ───────────────────
@@ -318,27 +323,27 @@ test("CS-W8-13: absent lanes reported as not present — no silent degradation",
 
 // ── CS-W8-14: no authority escalation — governed requires ledger ──────────
 
-test("CS-W8-14: governed mode provides NO additional authority — AUTHORIZE still degraded", async () => {
-    // NO_AUTHORITY_ESCALATION: even in governed mode the closed loop has no
-    // Authority client and no actuator handle. AUTHORIZE is still reported as
-    // AUTHORIZE_UNAVAILABLE; the loop cannot escalate to a live authorization.
-    const core = await createRuntimeCore(cognitionOpts({ cognitionMode: "governed" }));
+test("CS-W8-14: NO AUTHORITY ESCALATION — core.closedLoop AUTHORIZE always degraded (shadow mode proof)", async () => {
+    // Authority-escalation proof: advance the COMPOSED core.closedLoop (not a
+    // standalone loop) through all 9 phases and verify AUTHORIZE is
+    // AUTHORIZE_UNAVAILABLE. The cognition composition never wires an Authority
+    // client into the loop regardless of cognitionMode.
+    // Shadow mode is used because it produces a non-null closedLoop with the
+    // canonical composition. Governed mode with a test-only ledger may return
+    // null (fail-closed), which is separately acceptable but not testable here.
+    const core = await createRuntimeCore(cognitionOpts()); // shadow mode
     try {
-        if (core.closedLoop === null) return; // governed failed to start — fail-closed is fine
-        let now = 0;
-        const clock = { nowMs: () => now };
-        const loop = createClosedLoop({ clock });
+        assert.ok(core.closedLoop !== null, "shadow mode must produce a closedLoop");
         let authReport = null;
         for (let i = 0; i < LOOP_ORDER.length; i++) {
-            const r = loop.runCycle();
+            if (i > 0) await new Promise(r => setTimeout(r, 60)); // ≥ MIN_LOOP_INTERVAL_MS=50
+            const r = core.closedLoop.runCycle();
             if (r.phase === PHASE.AUTHORIZE) authReport = r;
-            now += 100;
         }
         assert.ok(authReport !== null, "AUTHORIZE phase must execute");
         assert.equal(authReport.degraded, "AUTHORIZE_UNAVAILABLE",
-            "governed mode must not grant a live AUTHORIZE capability to the closed loop");
-        assert.equal(authReport.present, false,
-            "AUTHORIZE must report present:false — no authority escalation");
+            "no cognitionMode must grant a live AUTHORIZE to core.closedLoop");
+        assert.equal(authReport.present, false);
     } finally {
         core.shutdown();
     }
@@ -403,4 +408,58 @@ test("CS-W8-18: createRuntimeCore returns a frozen object (no seam injection aft
     } finally {
         core.shutdown();
     }
+});
+
+// ── CS-W8-19: CONFIDENCE != AUTHORITY ────────────────────────────────────
+
+test("CS-W8-19: CONFIDENCE != AUTHORITY — high-confidence observation without evidence fails closed", () => {
+    // A high-quality or perfectly-confident observation does not constitute
+    // authority. The verifier requires canonical execution evidence regardless
+    // of the observation's confidence/quality value.
+    const verifier = createCompletionVerifier({ completionEvidence: () => null });
+    const highConf = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 1.0 };
+    assert.equal(
+        verifier.verifyCompletion({ probeId: "p-conf-hi", request: { probeId: "p-conf-hi", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: highConf }),
+        false, "quality:1.0 without evidence must fail closed"
+    );
+    // Zero-confidence is also rejected — neither extreme grants authority.
+    const zeroConf = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.0 };
+    assert.equal(
+        verifier.verifyCompletion({ probeId: "p-conf-lo", request: { probeId: "p-conf-lo", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: zeroConf }),
+        false, "quality:0.0 without evidence must fail closed"
+    );
+    // OBSERVATION != AUTHORITY: even a maximally-structured observation with all
+    // canonical fields populated is not itself evidence of authority.
+    const maxObs = { tier: "T4", sensor: { sensorId: "s-canonical" }, frame: { kind: "ROOM" }, quality: 0.95 };
+    const ev = canonicalEvidence("p-obs-max", maxObs);
+    const verifier2 = createCompletionVerifier({ completionEvidence: makeEvidence({ "p-obs-max": ev }) });
+    // Right observation + right evidence: accepted once.
+    assert.equal(
+        verifier2.verifyCompletion({ probeId: "p-obs-max", request: { probeId: "p-obs-max", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: maxObs }),
+        true, "canonical evidence with matching observation must be accepted"
+    );
+    // Same observation + no evidence: rejected.
+    const verifier3 = createCompletionVerifier({ completionEvidence: () => null });
+    assert.equal(
+        verifier3.verifyCompletion({ probeId: "p-obs-max2", request: { probeId: "p-obs-max2", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: maxObs }),
+        false, "same observation without evidence must be rejected"
+    );
+});
+
+// ── CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE ──────────────────────
+
+test("CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE — dual-witness durability tests are present", () => {
+    // This invariant states that writing and fsyncing a file does not guarantee
+    // its directory entry survives a crash. In this codebase the invariant is
+    // exercised by the W8-IW1 replay dual-witness tests, which require two
+    // independent durability witnesses before a completion record is treated as
+    // stable. This certification test asserts those tests exist; their removal
+    // would leave FSYNC FILE != DIRECTORY ENTRY DURABLE untested.
+    const witnessTest = path.join(ROOT, "tests/wave8/iw1/replayDualWitness.test.js");
+    assert.ok(fs.existsSync(witnessTest),
+        "replayDualWitness.test.js must exist (FSYNC FILE != DIRECTORY ENTRY DURABLE)");
+    // The test file must reference the dual-witness durability pattern.
+    const src = fs.readFileSync(witnessTest, "utf8");
+    assert.match(src, /witness|durabilit/i,
+        "dual-witness test must contain durability-witness logic");
 });
