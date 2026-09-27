@@ -148,12 +148,14 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in perception 
         assert.match(line, /\bdispatch\s*:\s*null\b/,
             `every dispatch: assignment must be null — offending line: ${line.trim()}`);
     }
-    // Also check for dynamic property dispatch assignment (obj.dispatch = fn or obj["dispatch"] = fn).
+    // Also check for dynamic property dispatch assignment — both dot and bracket forms:
+    // obj.dispatch = fn AND obj["dispatch"] = fn
     const dynamicDispatchLines = src.split("\n").filter(l =>
-        /\.dispatch\s*=/.test(l) && !/\.dispatch\s*=\s*null\b/.test(l)
+        (/\.dispatch\s*=/.test(l) && !/\.dispatch\s*=\s*null\b/.test(l)) ||
+        (/\["dispatch"\]\s*=/.test(l) && !/\["dispatch"\]\s*=\s*null\b/.test(l))
     );
     assert.equal(dynamicDispatchLines.length, 0,
-        `no non-null dynamic dispatch assignment (.dispatch = ...) allowed: ${dynamicDispatchLines.join("; ")}`);
+        `no non-null dynamic dispatch assignment allowed: ${dynamicDispatchLines.join("; ")}`);
     // No dispatcher import.
     assert.doesNotMatch(src, /require\s*\(\s*["'][^"']*\/dispatch/,
         "perception module must not import a dispatcher");
@@ -215,17 +217,22 @@ test("CS-W8-06b: TIMEOUT outcome cannot upgrade to SUCCESS", () => {
     assert.equal(verifier2.verifyCompletion({ probeId: "p-t2", request: { probeId: "p-t2", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: obs }), false);
 });
 
-test("CS-W8-06c: UNCERTAIN PRIOR EFFECT != SAFE TO RETRY — unknown/ambiguous outcome is rejected", () => {
+test("CS-W8-06c: UNCERTAIN PRIOR EFFECT != SAFE TO RETRY — unknown/ambiguous outcome rejected even with evidence", () => {
     // The verifier only accepts SUCCESS, DENIED, TIMEOUT. Any other outcome
-    // string (AMBIGUOUS, UNKNOWN, PENDING, etc.) that models an uncertain prior
-    // effect is rejected fail-closed — it cannot be treated as authorized retry.
-    const verifier = createCompletionVerifier({ completionEvidence: () => null });
+    // string (AMBIGUOUS, UNKNOWN, PENDING, etc.) must be rejected even when
+    // canonical evidence IS available — the outcome-type gate must be exercised,
+    // not just the null-evidence short-circuit.
     const obs = { tier: "T4", sensor: { sensorId: "s-1" }, frame: { kind: "ROOM" }, quality: 0.8 };
     for (const outcome of ["AMBIGUOUS", "UNKNOWN", "PENDING", "EXECUTED_UNVERIFIED", "MAYBE", "PARTIAL"]) {
+        const probeId = `p-unc-${outcome}`;
+        // Provide canonical evidence that WOULD satisfy a SUCCESS probe — so
+        // rejection must come from the outcome-type check, not null evidence.
+        const ev = canonicalEvidence(probeId, obs);
+        const v = createCompletionVerifier({ completionEvidence: makeEvidence({ [probeId]: ev }) });
         assert.equal(
-            verifier.verifyCompletion({ probeId: `p-unc-${outcome}`, request: { probeId: `p-unc-${outcome}`, questionRef: "q-1", capabilityId: "cap-1" }, outcome, observation: obs }),
+            v.verifyCompletion({ probeId, request: { probeId, questionRef: "q-1", capabilityId: "cap-1" }, outcome, observation: obs }),
             false,
-            `uncertain outcome "${outcome}" must be rejected — not safe to retry as authorized`
+            `uncertain outcome "${outcome}" must be rejected by outcome-type check even when evidence is present`
         );
     }
 });
@@ -548,12 +555,12 @@ test("CS-W8-20: FSYNC FILE != DIRECTORY ENTRY DURABLE — dual-witness test asse
     // Verify REPLAY_HEAD_UNWITNESSED appears on a line that ALSO contains an assert call.
     // This proves it is a live assertion, not just a comment or string constant.
     const lines = src.split(/\r?\n/);
-    // Verify REPLAY_HEAD_UNWITNESSED appears as a REGEX LITERAL being matched in an assert.
-    // This prevents a vacuous pass from assert.ok(true, "REPLAY_HEAD_UNWITNESSED") which
-    // would contain the string but not test the invariant.
-    const hasRegexAssertion = lines.some(line =>
-        /assert\.\w+/.test(line) && /\/REPLAY_HEAD_UNWITNESSED\//.test(line)
+    // Verify REPLAY_HEAD_UNWITNESSED appears in a POSITIVE assertion (assert.match or
+    // assert.rejects) as a regex literal. This excludes assert.doesNotMatch and
+    // assert.ok(true, "REPLAY_HEAD_UNWITNESSED") which would vacuously pass.
+    const hasPositiveRegexAssertion = lines.some(line =>
+        /(assert\.match|assert\.rejects)/.test(line) && /\/REPLAY_HEAD_UNWITNESSED\//.test(line)
     );
-    assert.ok(hasRegexAssertion,
-        "dual-witness test must contain assert.*(/.../REPLAY_HEAD_UNWITNESSED/...) — regex-as-assertion pattern");
+    assert.ok(hasPositiveRegexAssertion,
+        "dual-witness test must contain assert.match or assert.rejects with /REPLAY_HEAD_UNWITNESSED/ — positive durability assertion");
 });
