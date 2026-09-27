@@ -126,6 +126,11 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
         assert.ok(!dep.includes("actuator"),
             `closedloop must not require "${dep}" (actuator module)`);
     }
+    // No dynamic require() calls — a dynamic require(expr) is a non-literal argument
+    // that would evade the string-enumeration check above.
+    const dynamicRequires = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
+    assert.equal(dynamicRequires, null,
+        "closedloop must not use dynamic require() calls (non-literal argument)");
 });
 
 test("CS-W8-03c: NO_SECOND_DISPATCHER — no dispatch() call inside closedloop", () => {
@@ -156,6 +161,14 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in perception 
     );
     assert.equal(dynamicDispatchLines.length, 0,
         `no non-null dynamic dispatch assignment allowed: ${dynamicDispatchLines.join("; ")}`);
+    // No dynamic require() — same protection as CS-W8-03b for perception.
+    const dynReq = src.match(/\brequire\s*\(\s*[^"'`\s)]/g);
+    assert.equal(dynReq, null, "perception must not use dynamic require() calls");
+    // No Object.defineProperty or Reflect.set targeting 'dispatch' specifically.
+    assert.doesNotMatch(src, /Object\.defineProperty\s*\([^,]+,\s*["']dispatch["']/,
+        "perception must not use Object.defineProperty to define dispatch");
+    assert.doesNotMatch(src, /Reflect\.(set|defineProperty)\s*\([^,]+,\s*["']dispatch["']/,
+        "perception must not use Reflect to set dispatch");
     // No dispatcher import.
     assert.doesNotMatch(src, /require\s*\(\s*["'][^"']*\/dispatch/,
         "perception module must not import a dispatcher");
