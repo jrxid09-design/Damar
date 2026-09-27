@@ -183,6 +183,9 @@ test("CS-W8-03b: TOOL != AUTHORITY — closedloop imports nothing from action or
         // No Unicode escape sequences inside string literals — "../../authority" decodes to authority path.
         assert.doesNotMatch(rawSrc, /["'][^"']*\\u[0-9a-fA-F]{4}/,
             `[${relPath}] closedloop must not use Unicode escapes in string literals (evades path checks)`);
+        // No hex escape sequences in string literals — "\x61uthority" also decodes to forbidden path.
+        assert.doesNotMatch(rawSrc, /["'][^"']*\\x[0-9a-fA-F]{2}/,
+            `[${relPath}] closedloop must not use hex escapes in string literals (evades path checks)`);
     }
 });
 
@@ -263,6 +266,9 @@ test("CS-W8-04a: PERCEPTION != AUTHORITY — every dispatch: line in all percept
         // No Unicode escape sequences in string literals — dispatch decodes to "dispatch".
         assert.doesNotMatch(rawSrc, /["'][^"']*\\u[0-9a-fA-F]{4}/,
             `[${relPath}] must not use Unicode escapes in string literals (potential dispatch key bypass)`);
+        // No hex escape sequences in string literals — "\x64ispatch" also decodes to "dispatch".
+        assert.doesNotMatch(rawSrc, /["'][^"']*\\x[0-9a-fA-F]{2}/,
+            `[${relPath}] must not use hex escapes in string literals (potential dispatch key bypass)`);
         // No .join('') calls — prevents ["dis","patch"].join("") assembling "dispatch" from parts.
         assert.doesNotMatch(src, /\.join\s*\(\s*["']{2}\s*\)/,
             `[${relPath}] must not use .join('') — could assemble "dispatch" key from array parts`);
