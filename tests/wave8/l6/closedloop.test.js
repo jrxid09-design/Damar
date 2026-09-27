@@ -141,6 +141,26 @@ test("W8-L6 loop: accessor properties in createClosedLoop options are never invo
     assert.equal(traps, 0, "accessor on options must never be invoked");
 });
 
+test("W8-L6 completion: same-reference plain object with accessor property is rejected by deepEqual (R7 P1-1)", () => {
+    const obsWithAccessor = { tier: "T4" };
+    Object.defineProperty(obsWithAccessor, "quality", { get() { return 0.8; }, configurable: true });
+    // Evidence returns this exact object reference; caller also passes same ref.
+    const evidence = makeEvidence({ "p-sr": completion({ probeId: "p-sr", observation: obsWithAccessor }) });
+    const verifier = createCompletionVerifier({ completionEvidence: evidence });
+    assert.equal(verifier.verifyCompletion({ probeId: "p-sr", request: { probeId: "p-sr", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: obsWithAccessor }), false);
+});
+
+test("W8-L6 loop: clock nowMs with overridden .call property does not execute that .call (R7 P1-2)", () => {
+    let traps = 0;
+    const fn = function() { return 42; };
+    fn.call = function() { traps++; return 9999; };
+    const hostileClock = {};
+    Object.defineProperty(hostileClock, "nowMs", { value: fn, writable: true, enumerable: true, configurable: true });
+    const loop = createClosedLoop({ clock: hostileClock });
+    assert.doesNotThrow(() => loop.runCycle());
+    assert.equal(traps, 0, "overridden .call property must never be invoked");
+});
+
 test("W8-L6 completion: bounds accessor on MAX_COMPLETION_RECORDS is never invoked (R6 P1)", () => {
     let traps = 0;
     const hostileBounds = {};

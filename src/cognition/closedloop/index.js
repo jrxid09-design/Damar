@@ -47,7 +47,7 @@ function resolveMethod(port, name) {
 
 function safeNowMs(clock) {
     let t;
-    try { const fn = safeData(clock, "nowMs"); t = typeof fn === "function" && !IS_PROXY(fn) ? fn.call(clock) : undefined; } catch { t = undefined; }
+    try { const fn = safeData(clock, "nowMs"); t = typeof fn === "function" && !IS_PROXY(fn) ? Reflect.apply(fn, clock, []) : undefined; } catch { t = undefined; }
     return Number.isFinite(t) ? t : Date.now();
 }
 
@@ -96,7 +96,6 @@ function deepEqual(a, b, _ancestors = null) {
     try { protoA = Object.getPrototypeOf(a); protoB = Object.getPrototypeOf(b); } catch { return false; }
     if (protoA !== protoB) return false;
     if (protoA !== null && protoA !== Object.prototype && !Array.isArray(a)) return false;
-    if (a === b) return true;
     const ancestors = _ancestors ?? new WeakSet();
     if (ancestors.has(a)) return false;
     ancestors.add(a);
