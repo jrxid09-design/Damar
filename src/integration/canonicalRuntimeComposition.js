@@ -1092,7 +1092,8 @@ async function buildRuntimeCoreInternal({
     enableCognition = false,
     cognitionMode = "off",
     cognitionCapabilityRegistry = null,
-    cognitionAuditLedger = null
+    cognitionAuditLedger = null,
+    cognitionStores = {}
 } = {}, onCompositionPayload = null) {
 
     if (bus !== null) {
@@ -1242,6 +1243,7 @@ async function buildRuntimeCoreInternal({
     // enableCognition=false (the default) this is simply `null`.
     let cognition = null;
     let cognitionAuditLedgerResolved = null;
+    let perceptionLane = null;
     // W8-L1 (frozen contract): the bridge from Sensorium observations into
     // W7-L2 world-model ingest. Constructed ONLY when both sides of the
     // join actually exist (mirrors `enableCognition`'s own opt-in shape;
@@ -1286,6 +1288,7 @@ async function buildRuntimeCoreInternal({
             mode: cognitionMode,
             capabilityRegistry: cognitionCapabilityRegistry,
             auditLedger: cognitionAuditLedgerResolved,
+            stores: cognitionStores,
             // Production path: refuse to start governed with no ledger at all.
             // `getProductionAuthorityComposition()` deliberately resolves
             // `ownerTrust: null` on a trust-domain failure, so leaving the
@@ -1294,6 +1297,24 @@ async function buildRuntimeCoreInternal({
             // 406553b).
             requireAudit: cognitionMode === "governed"
         });
+        if (cognition?.mode !== "off" && cognition?.lanes) {
+            const { createPerception } = require("../cognition/perception");
+            const perceptionStoreField = readDataProperty(cognitionStores, "perception");
+            // Until L6 binds its Authority + committed-sensorium result path,
+            // canonical composition deliberately has no completion proof.
+            // A future adapter is private here; public RuntimeCore options
+            // cannot claim a successful probe by returning a shaped object.
+            const trustedResultAdapter = Object.freeze({ verifyCompletion: () => false });
+            perceptionLane = await createPerception({
+                capabilityRegistry: cognitionCapabilityRegistry,
+                selfModel: cognition.lanes.selfModel,
+                worldModel: cognition.lanes.worldModel,
+                attentionPort: cognition.lanes.attention,
+                trustedResultAdapter,
+                store: perceptionStoreField.ok ? perceptionStoreField.value : null,
+                auditLedger: cognitionAuditLedgerResolved
+            });
+        }
         if (core?.body && cognition?.lanes?.worldModel) {
             sensoriumBridge = bridgeSensoriumToWorldModel({
                 body: core.body,
@@ -1316,6 +1337,10 @@ async function buildRuntimeCoreInternal({
 
         // Wave 7 (opt-in, composition-only; null unless enableCognition):
         cognition,
+
+        // W8-L2 (opt-in with active cognition): the bounded question/probe
+        // request lane. It emits data only; Authority owns all dispatch.
+        perceptionLane,
 
         // W8-L1 (opt-in, composition-only; null unless enableCognition AND
         // both core.body/cognition.lanes.worldModel exist): the sole join

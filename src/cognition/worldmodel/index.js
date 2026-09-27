@@ -765,6 +765,9 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
     }
 
     function stateView() { return { entities, relations }; }
+    // W8-L2 citations resolve hypothesis identity through the canonical
+    // world-model owner; perception keeps no duplicate hypothesis store.
+    function hypothesesView() { return Object.freeze([...hypotheses.values()]); }
     function entityCountBySourceSize() { return entityCountBySource.size; }
     function beliefsSize() { return beliefs.size; }
 
@@ -790,7 +793,7 @@ async function createWorldModel({ clock = { nowMs: () => Date.now() }, store = n
         subgraph: (seeds, depth, budget) => graphOps.subgraph(stateView(), seeds, depth, budget, bounds),
         path: (from, to, maxDepth) => graphOps.path(stateView(), from, to, maxDepth, bounds),
         entitiesByKind: (kind, limit) => graphOps.entitiesByKind(stateView(), kind, limit, bounds),
-        openContradictions, overflowedContradictions: overflowedContradictionsView, resolveContradiction, entityCountBySourceSize, beliefsSize,
+        openContradictions, hypotheses: hypothesesView, overflowedContradictions: overflowedContradictionsView, resolveContradiction, entityCountBySourceSize, beliefsSize,
         persist, laws, bounds
     });
 }
