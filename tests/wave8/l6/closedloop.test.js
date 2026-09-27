@@ -141,6 +141,31 @@ test("W8-L6 loop: accessor properties in createClosedLoop options are never invo
     assert.equal(traps, 0, "accessor on options must never be invoked");
 });
 
+test("W8-L6 completion: Date/Map/Set values in observations are rejected by deepEqual (R5 P0)", () => {
+    const dateObs = { tier: "T4", sensor: { sensorId: "camera-1" }, frame: { kind: "ROOM" }, ts: new Date("2020-01-01") };
+    const evidence = makeEvidence({ "p-date": completion({ probeId: "p-date", observation: dateObs }) });
+    const verifier = createCompletionVerifier({ completionEvidence: evidence });
+    // Different Date with same structure — deepEqual must reject non-plain objects.
+    const forgery = { ...dateObs, ts: new Date("2099-12-31") };
+    assert.equal(verifier.verifyCompletion({ probeId: "p-date", request: { probeId: "p-date", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: forgery }), false);
+});
+
+test("W8-L6 completion: re-entrant completionEvidence cannot complete the same probeId twice (R5 P1)", () => {
+    let outerVerifier;
+    let reentered = false;
+    const reentrantEvidence = ({ probeId }) => {
+        if (!reentered) {
+            reentered = true;
+            // Re-entrant call for same probeId — must return false.
+            const result = outerVerifier.verifyCompletion({ probeId, request: { probeId, questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: completion().observation });
+            assert.equal(result, false, "re-entrant call must be rejected");
+        }
+        return completion({ probeId });
+    };
+    outerVerifier = createCompletionVerifier({ completionEvidence: reentrantEvidence });
+    assert.equal(outerVerifier.verifyCompletion({ probeId: "p-re", request: { probeId: "p-re", questionRef: "q-1", capabilityId: "cap-1" }, outcome: "SUCCESS", observation: completion().observation }), true);
+});
+
 test("W8-L6 completion: request omitting probeId is rejected even when top-level probeId matches evidence (R4 P0)", () => {
     const evidence = makeEvidence({ "p-1": completion() });
     const verifier = createCompletionVerifier({ completionEvidence: evidence });

@@ -96,6 +96,7 @@ function deepEqual(a, b, depth = 0) {
     let protoA, protoB;
     try { protoA = Object.getPrototypeOf(a); protoB = Object.getPrototypeOf(b); } catch { return false; }
     if (protoA !== protoB) return false;
+    if (protoA !== null && protoA !== Object.prototype && !Array.isArray(a)) return false;
     let ka, kb;
     try {
         ka = Reflect.ownKeys(a);
@@ -134,6 +135,7 @@ function createCompletionVerifier(opts = {}) {
     if (!Number.isSafeInteger(maxRecords) || maxRecords <= 0) maxRecords = BOUNDS.MAX_COMPLETION_RECORDS;
 
     const completed = new Set();
+    const pending = new Set();
 
     function verifyCompletion(spec) {
         try {
@@ -152,20 +154,22 @@ function createCompletionVerifier(opts = {}) {
         if (typeof probeId !== "string" || probeId.length === 0) return false;
         if (!request || (typeof request !== "object") || IS_PROXY(request)) return false;
 
-        // Duplicate completion cannot charge or complete twice.
-        if (completed.has(probeId)) return false;
+        // Duplicate completion cannot charge or complete twice. Pending blocks re-entrancy.
+        if (completed.has(probeId) || pending.has(probeId)) return false;
 
         const evProbeId = safeData(request, "probeId");
         const evQuestionRef = safeData(request, "questionRef");
         const evCapabilityId = safeData(request, "capabilityId");
 
+        pending.add(probeId);
         let evidence;
         try {
             evidence = completionEvidence({ probeId, request, outcome, observation });
         } catch {
+            pending.delete(probeId);
             return false;
         }
-        if (!evidence || (typeof evidence !== "object") || IS_PROXY(evidence)) return false;
+        if (!evidence || (typeof evidence !== "object") || IS_PROXY(evidence)) { pending.delete(probeId); return false; }
 
         const evOutcome = safeData(evidence, "outcome");
         const eProbeId = safeData(evidence, "probeId");
@@ -175,28 +179,30 @@ function createCompletionVerifier(opts = {}) {
         // The completion must be bound to the exact probe. Evidence must carry
         // explicit non-undefined questionRef/capabilityId (canonical evidence
         // always does). Binding is then enforced bidirectionally.
-        if (eProbeId !== probeId) return false;
-        if (evProbeId === undefined || evProbeId !== probeId) return false;
-        if (eQuestionRef === undefined || eCapabilityId === undefined) return false;
-        if (eQuestionRef !== evQuestionRef) return false;
-        if (eCapabilityId !== evCapabilityId) return false;
+        if (eProbeId !== probeId) { pending.delete(probeId); return false; }
+        if (evProbeId === undefined || evProbeId !== probeId) { pending.delete(probeId); return false; }
+        if (eQuestionRef === undefined || eCapabilityId === undefined) { pending.delete(probeId); return false; }
+        if (eQuestionRef !== evQuestionRef) { pending.delete(probeId); return false; }
+        if (eCapabilityId !== evCapabilityId) { pending.delete(probeId); return false; }
 
         if (outcome === "SUCCESS") {
-            if (evOutcome !== "VERIFIED") return false;
+            if (evOutcome !== "VERIFIED") { pending.delete(probeId); return false; }
             // A successful result must be the SAME observation canonical
             // execution produced — a caller may not substitute its own.
             const evObservation = safeData(evidence, "observation");
-            if (evObservation === undefined) return false;
-            if (!deepEqual(evObservation, observation)) return false;
+            if (evObservation === undefined) { pending.delete(probeId); return false; }
+            if (!deepEqual(evObservation, observation)) { pending.delete(probeId); return false; }
         } else if (outcome === "DENIED") {
-            if (evOutcome !== "DENIED") return false;
+            if (evOutcome !== "DENIED") { pending.delete(probeId); return false; }
         } else if (outcome === "TIMEOUT") {
-            if (evOutcome !== "TIMEOUT") return false;
+            if (evOutcome !== "TIMEOUT") { pending.delete(probeId); return false; }
         } else {
+            pending.delete(probeId);
             return false;
         }
 
-        if (completed.size >= maxRecords) return false;
+        if (completed.size >= maxRecords) { pending.delete(probeId); return false; }
+        pending.delete(probeId);
         completed.add(probeId);
         return true;
     }
