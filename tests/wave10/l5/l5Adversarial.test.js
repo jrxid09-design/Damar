@@ -56,33 +56,48 @@ test("RT-W10-41: deliberation budget exhaustion ends in ask-or-defer", () => {
 
 test("RT-W10-42: in-flight decisions abandoned on restart", async () => {
     const acc = createMemoryAccStore();
-    // Seed a DELIBERATING decision directly in the store
+    // Seed both DELIBERATING and PENDING (invariant names both states)
     const store = makeAgencyStore(acc);
     await store.putDecision({
-        schemaVersion: 1,
-        decisionId: "dec-old-42",
-        intentionId: "i42-old",
-        subject: "restart-subject",
-        actionIntent: null,
-        alternatives: [],
-        state: "DELIBERATING",
-        resolvedAt: null,
+        schemaVersion: 1, decisionId: "dec-old-42", intentionId: "i42-old",
+        subject: "restart-subject", actionIntent: null, alternatives: [],
+        state: "DELIBERATING", resolvedAt: null,
+    });
+    await store.putDecision({
+        schemaVersion: 1, decisionId: "dec-old-42p", intentionId: "i42-old-p",
+        subject: "restart-subject-p", actionIntent: null, alternatives: [],
+        state: "PENDING", resolvedAt: null,
     });
 
-    // Creating a new agency instance triggers abandonPendingIntentions
     const agency2 = makeUnifiedAgency(acc);
-    // Wait for init to complete
     await agency2.deliberate(
         { intentionId: "i42-new", subject: "other-subject", intentText: "fresh intent" },
-        [{ id: "x", text: "option x" }],
-        [], []
+        [{ id: "x", text: "option x" }], [], []
     );
 
     const decisions = await store.getDecisions();
     const old = decisions.find(d => d.decisionId === "dec-old-42");
-    assert.ok(old, "old decision still in store");
-    assert.equal(old.state, "ABANDONED", "in-flight decision must be ABANDONED after restart");
+    assert.ok(old, "old DELIBERATING decision still in store");
+    assert.equal(old.state, "ABANDONED", "DELIBERATING decision must be ABANDONED after restart");
     assert.equal(old.abandonReason, "restart");
+    const oldP = decisions.find(d => d.decisionId === "dec-old-42p");
+    assert.ok(oldP, "old PENDING decision still in store");
+    assert.equal(oldP.state, "ABANDONED", "PENDING decision must be ABANDONED after restart");
+    assert.equal(oldP.abandonReason, "restart");
+
+    // On store failure, deliberate() must throw — not silently skip abandonment
+    const brokenAcc = {
+        getKv: async () => { throw new Error("store-fault-42"); },
+        putKv: async () => { throw new Error("store-fault-42"); },
+    };
+    const faultAgency = makeUnifiedAgency(brokenAcc);
+    await assert.rejects(
+        () => faultAgency.deliberate(
+            { intentionId: "i42-fault", subject: "fault-subject", intentText: "fault test" },
+            [], [], []
+        ),
+        /store-fault-42/
+    );
 });
 
 test("RT-W10-43: nonsense options filtered before ranking", async () => {
