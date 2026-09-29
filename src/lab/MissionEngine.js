@@ -3,6 +3,12 @@ const { database, initialize } = require("../memory/db");
 const activity = require("./ActivityLog");
 const projects = require("./ProjectEngine");
 
+// W9 BLK-02/DB-03: ISOLATED_LEGACY — HTTP execution routes are blocked by
+// legacyBoundary. W9-L1 (src/cognition/mission/) is the canonical owner;
+// this module must not run concurrently as a second mission authority
+// once W9-L1 is deployed.
+exports.ISOLATED_LEGACY = true;
+
 /**
  * MissionEngine — misi: tujuan konkret di dalam project (§6-§7).
  *
