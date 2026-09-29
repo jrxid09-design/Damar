@@ -6,9 +6,11 @@ function rankOptions(options, preferences) {
     const originalSet = new Set(options.map(o => o.id || JSON.stringify(o)));
     const sorted = [...options].sort((a, b) => {
         const pref = preferences || [];
-        const scoreA = pref.filter(p => a.tags && a.tags.includes(p.subject && p.subject.ref)).reduce((s, p) => s + (p.strength || 0), 0);
-        const scoreB = pref.filter(p => b.tags && b.tags.includes(p.subject && p.subject.ref)).reduce((s, p) => s + (p.strength || 0), 0);
-        return scoreB - scoreA;
+        const score = (opt) => pref.reduce((s, p) => {
+            const kw = (p.subject && p.subject.ref || p.statement || "").slice(0, 16).toLowerCase();
+            return s + (kw && opt.text && opt.text.toLowerCase().includes(kw) ? (p.strength || 0.5) : 0);
+        }, 0);
+        return score(b) - score(a);
     });
     return sorted.filter(o => originalSet.has(o.id || JSON.stringify(o)));
 }
