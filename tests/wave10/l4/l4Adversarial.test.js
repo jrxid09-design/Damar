@@ -112,6 +112,14 @@ test("RT-W10-37: character never expands the option set", () => {
     const resultApply = ops.applyCharacter(options, [pref], []);
     assert.ok(resultApply.every(o => options.some(orig => orig.id === o.id)), "applyCharacter must not add options outside original set");
     assert.ok(resultApply.length <= options.length, "applyCharacter must not grow option count");
+    // Preference-driven ordering: keyword match in option text must influence sort order
+    const matchOptions = [
+        { id: "x", kind: "response", text: "long elaborate explanation" },
+        { id: "y", kind: "response", text: "brief answer" },
+    ];
+    const briefPref = ops.makePreference({ preferenceId: "pref-37b", statement: "brief", subject: { kind: "STYLE", ref: null }, strength: 1.0 });
+    const ordered = ops.rankOptions(matchOptions, [briefPref]);
+    assert.equal(ordered[0].id, "y", "option matching preference keyword must rank first");
 });
 
 test("RT-W10-38: free-form instruction stored as preference rejected", () => {
