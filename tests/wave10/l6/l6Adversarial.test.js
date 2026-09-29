@@ -79,6 +79,8 @@ test("RT-W10-51: degraded mode increases reporting, not reduces it", () => {
     assert.equal(normalLevel, "NORMAL");
     assert.ok(["HIGH", "MAXIMUM"].includes(degradedLevel), "degraded reporting must be HIGH or MAXIMUM");
     assert.ok(haltedLevel === "MAXIMUM", "halted reporting must be MAXIMUM");
+    const readOnlyLevel = ops.modes.getReportingLevel(ops.MODES.READ_ONLY);
+    assert.ok(["HIGH", "MAXIMUM"].includes(readOnlyLevel), "READ_ONLY reporting must be HIGH or MAXIMUM");
 });
 
 test("RT-W10-52: mode flapping is damped and audited", async () => {

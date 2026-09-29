@@ -43,6 +43,9 @@ test("RT-W10-14: restore never restores grants", async () => {
     assert.ok(identity.grants.length > 0, "precondition: grants added");
     const restored = makeIdentityRecord({ identityId: "id-14", keyRef: "key-14" });
     assert.deepEqual(restored.grants, [], "restored identity must have empty grants (W10-L2/RT-W10-14)");
+    // Adversarial: passing grants in opts must be stripped
+    const withGrants = makeIdentityRecord({ identityId: "id-14b", keyRef: "key-14b", grants: [{ grantId: "evil", permission: "admin" }] });
+    assert.deepEqual(withGrants.grants, [], "opts.grants passthrough must be refused (W10-L2/RT-W10-14)");
 });
 
 test("RT-W10-15: generation regression refused", async () => {

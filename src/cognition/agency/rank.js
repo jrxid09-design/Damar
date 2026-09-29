@@ -14,7 +14,8 @@ function scoreOption(option, preferences) {
 }
 
 // RT-W10-44: values never expand option set — sort only, never add
-function rankOptions(options, preferences, values) {
+// _values accepted for API consistency; L5 ranking is preference-driven only
+function rankOptions(options, preferences, _values) {
     if (!Array.isArray(options)) return [];
     const originalIds = new Set(options.map(o => o.id));
     const ranked = [...options].sort((a, b) => scoreOption(b, preferences || []) - scoreOption(a, preferences || []));
