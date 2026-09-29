@@ -87,10 +87,19 @@ class ToolBusCompatibilityIngress {
     /**
      * Route a legacy ToolBus request through the canonical governance path.
      *
-     * Returns a branded canonical capability result. Only EXECUTED_VERIFIED
-     * represents completion; every other outcome fails closed. Replayed requests
-     * (same capabilityId + operation + parameters + principal + scope) are refused
-     * with outcome=REFUSED, reason=REPLAY and effectInvoked=false.
+     * Returns a canonical result object. When the request reaches the bridge
+     * (i.e. `evaluation` passes the canonical authority brand check), the result
+     * is a branded CanonicalCapabilityExecution result — checkable with
+     * `isCanonicalCapabilityResult()`. Only that branded `EXECUTED_VERIFIED`
+     * result represents completion; every other outcome fails closed.
+     *
+     * If `evaluation` is not a canonical authority evaluation, the method returns
+     * an UNBRANDED plain object with `{ outcome: DENIED, reason: AUTHORITY_FORGED,
+     * effectInvoked: false }` — a defensive pre-check before the bridge is reached.
+     * `isCanonicalCapabilityResult()` returns false for this early-return path.
+     *
+     * Replayed requests (same capabilityId + operation + parameters + principal +
+     * scope) are refused with outcome=REFUSED, reason=REPLAY, effectInvoked=false.
      *
      * @param {object}      legacyRequest  ToolBus-format ({ name, args, ... })
      * @param {*}           evaluation     must be a canonical authority evaluation
@@ -98,7 +107,7 @@ class ToolBusCompatibilityIngress {
      * @param {object}      [opts]
      * @param {AbortSignal} [opts.signal]
      * @param {string}      [opts.requestId]
-     * @returns {Promise<object>}  branded canonical capability result
+     * @returns {Promise<object>}  canonical result; branded iff evaluation is canonical
      */
     async execute(legacyRequest, evaluation, { signal, requestId } = {}) {
         // Fail closed: no canonical evaluation means no routing — never.
