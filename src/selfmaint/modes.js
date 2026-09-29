@@ -6,7 +6,7 @@ function makeModeOps(store) {
     // RT-W10-51: degraded/critical modes must increase reporting, not reduce it
     function getReportingLevel(mode) {
         if (mode === MODES.HALTED) return "MAXIMUM";
-        if (mode === MODES.DEGRADED || mode === MODES.CRITICAL) return "HIGH";
+        if (mode === MODES.DEGRADED) return "HIGH";
         if (mode === MODES.READ_ONLY) return "HIGH";
         return "NORMAL";
     }
