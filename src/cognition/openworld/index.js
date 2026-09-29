@@ -6,6 +6,7 @@ const { makeAgentFed } = require("../../agentfed");
 const { makeCollab } = require("../../collab");
 const { makeResourcePlan } = require("../../resourceplan");
 const { makeWorkflowIntelligence } = require("../../workflow");
+const { makeConvergenceProof, claimIdentityFromUi } = require("./convergence");
 
 function makeOpenWorldOps(acc) {
     const mission = makeMissionIntelligence(acc);
@@ -17,4 +18,4 @@ function makeOpenWorldOps(acc) {
     return { mission, agentFed, collab, workflow, resourcePlan, strategy };
 }
 
-module.exports = { makeOpenWorldOps };
+module.exports = { makeOpenWorldOps, makeConvergenceProof, claimIdentityFromUi };
