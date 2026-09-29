@@ -10,7 +10,7 @@ function applyCharacter(options, preferences, values) {
 
     // Values protect disclosures regardless of brevity preferences
     const hasDisclosureValue = values && values.some(v => /honest|disclose|uncertain|transparency/i.test(v.statement || ""));
-    const keptDisclosures = (disclosures.length > 0 && hasDisclosureValue) ? disclosures : disclosures;
+    const keptDisclosures = hasDisclosureValue ? disclosures : [];
 
     // Brevity preference may trim non-disclosure options only
     const brevityPref = preferences && preferences.find(p => /brief|concise|short/i.test(p.statement || ""));
