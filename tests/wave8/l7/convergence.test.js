@@ -785,33 +785,47 @@ test("CS-W8-16b: questionRef/capabilityId mismatch fails closed", () => {
     assert.equal(v2.verifyCompletion({ probeId: "p-mis2", request: { probeId: "p-mis2", questionRef: "q-1", capabilityId: "cap-WRONG" }, outcome: "SUCCESS", observation: obs }), false);
 });
 
-// ── CS-W8-17: known ToolBus skip — status B ──────────────────────────────
+// ── CS-W8-17: ToolBus skip — status C (resolved by W8-IW1) ──────────────
 
-test("CS-W8-17: ToolBus skip remains BLOCKED ON W8-IW1 (not resolved by L6/L7)", () => {
-    // Status B: the skip requires W8-IW1 production-path harness, which
-    // provides canonical capability/actuator registrations. L6/L7 are
-    // cognition/composition layers and do NOT provide these registrations.
+test("CS-W8-17: ToolBus canonical compatibility skip resolved by W8-IW1", () => {
+    // Status C: W8-IW1 provided the canonical capability/actuator registrations
+    // and manager-owned legacy ingress. The skip has been replaced with a real
+    // implementation. This test verifies the resolution is genuine.
+
     const toolBusSrc = fs.readFileSync(
         path.join(ROOT, "tests/wave8/legacy/toolBusAuthority.test.js"), "utf8"
     );
-    assert.match(toolBusSrc, /BLOCKED ON W8-IW1/,
-        "ToolBus skip must remain annotated as BLOCKED ON W8-IW1");
-    // The annotation must appear as the value of a skip: property on a test that references ToolBus.
-    // Verify: a skip: property containing BLOCKED ON W8-IW1 appears near "toolBus" or "ToolBus".
-    assert.match(toolBusSrc, /skip\s*:\s*["'][^"']*BLOCKED ON W8-IW1/,
-        "ToolBus skip must be a live skip: property value, not just a comment");
-    // The skipped test must reference the ToolBus domain (not an unrelated test carrying the annotation).
-    const toolBusLines = toolBusSrc.split(/\r?\n/);
-    const skipIdx = toolBusLines.findIndex(l => /skip\s*:\s*["'][^"']*BLOCKED ON W8-IW1/.test(l));
-    assert.ok(skipIdx >= 0, "skip: BLOCKED ON W8-IW1 line must exist");
-    const surroundCtx = toolBusLines.slice(Math.max(0, skipIdx - 10), skipIdx + 10).join("\n");
-    assert.match(surroundCtx, /[Tt]ool\s*[Bb]us|TOOL_BUS|toolBus/,
-        "skip: BLOCKED ON W8-IW1 must appear in the context of a ToolBus test");
-    // IW1 resolution harness directory must exist.
+
+    // The skip annotation must be GONE — the test is now a real implementation.
+    assert.doesNotMatch(toolBusSrc, /skip\s*:\s*["'][^"']*BLOCKED ON W8-IW1/,
+        "The BLOCKED ON W8-IW1 skip must no longer be present: IW1 resolved it");
+
+    // The canonical compatibility test must still exist by name.
+    assert.match(toolBusSrc, /canonical compatibility success path executes exactly once/,
+        "canonical compatibility test must still exist in the ToolBus test file");
+
+    // The IW1 manager-owned ingress module must exist.
+    assert.ok(
+        fs.existsSync(path.join(ROOT, "src/manager/internal/toolBusCompatibilityIngress.js")),
+        "src/manager/internal/toolBusCompatibilityIngress.js (IW1 canonical ingress) must exist"
+    );
+
+    // The IW1 resolution harness directory must still exist.
     assert.ok(
         fs.existsSync(path.join(ROOT, "tests/wave8/iw1")),
         "tests/wave8/iw1 (IW1 resolution harness) must exist"
     );
+
+    // The ingress must export the expected surface and no authority bypass.
+    const ingress = require(path.join(ROOT, "src/manager/internal/toolBusCompatibilityIngress.js"));
+    assert.ok(ingress.ToolBusCompatibilityIngress, "ToolBusCompatibilityIngress must be exported");
+    assert.ok(typeof ingress.TOOLBUS_COMPAT_CAPABILITY_ID === "string",
+        "TOOLBUS_COMPAT_CAPABILITY_ID must be exported as a string");
+    // The module must not re-export ToolBus or grant authority directly.
+    assert.equal("authority" in ingress, false,
+        "ingress must not export an authority surface");
+    assert.equal("evaluate" in ingress, false,
+        "ingress must not export an authority evaluator");
 });
 
 // ── CS-W8-18: runtime core is frozen — no hidden seam attachment ──────────

@@ -801,6 +801,85 @@ test("legacy pluginLoader: an escaping entry rejects the whole plugin, not just 
     }
 });
 
-test("legacy ToolBus: canonical compatibility success path executes exactly once through the canonical path", {
-    skip: "BLOCKED ON W8-IW1: the canonical capability/actuator registrations (and a manager-owned legacy ingress) do not exist yet, so no legacy request can reach the canonical path. This test must be implemented with the IW1 production-path harness; it is deliberately NOT faked."
-}, () => { });
+test("legacy ToolBus: canonical compatibility success path executes exactly once through the canonical path",
+    async () => {
+        const { createRollbackResistantLedger } = require("../../helpers/rollbackSubstrate");
+        const { loadAndEvaluateAuthority } = require("../../../src/authority/evaluate");
+        const {
+            ToolBusCompatibilityIngress,
+            TOOLBUS_COMPAT_CAPABILITY_ID,
+            isCanonicalCapabilityResult: isCompatResult
+        } = require("../../../src/manager/internal/toolBusCompatibilityIngress");
+
+        // Observable driver — the only state it mutates is this in-scope counter.
+        const executed = { count: 0 };
+        const driver = async ({ parameters }) => {
+            executed.count++;
+            return { ran: true, tool: parameters.tool };
+        };
+        const verifier = async (_params, result) => ({
+            checks: [{ name: "ran", passed: result?.ran === true }]
+        });
+        const acknowledger = (entry) => ({ ok: true, receipt: `ack:${entry.requestId}` });
+
+        // Build a canonical authority grant for the compatibility capability.
+        const capabilityId = TOOLBUS_COMPAT_CAPABILITY_ID;
+        const grantStore = {
+            getCapability: async (id) => id !== capabilityId ? null : ({
+                capabilityId,
+                status: "ACTIVE",
+                generation: 0,
+                payload: {
+                    subject: "owner", capabilityId, kind: "root",
+                    actions: ["execute"], scope: [], allowedPurposes: [],
+                    restrictions: { kind: "unrestricted" },
+                    maxExecutions: null, identityBinding: null,
+                    notBefore: null, expiresAt: null,
+                    issuedAt: new Date().toISOString()
+                }
+            }),
+            getGeneration: async () => 0,
+            countConsumption: async () => 0
+        };
+        const evaluation = await loadAndEvaluateAuthority(
+            grantStore, { capabilityId, action: "execute" });
+        assert.equal(evaluation.allowed, true, "the authority evaluation must be allowed");
+
+        const ingress = new ToolBusCompatibilityIngress({
+            replayStore: createRollbackResistantLedger(),
+            acknowledger,
+            driver,
+            verifier
+        });
+
+        // ---- EXACTLY-ONCE: first execution must succeed --------------------
+        const result1 = await ingress.execute(
+            { name: CANARY_ID, args: {} }, evaluation);
+
+        assert.equal(result1.outcome, "EXECUTED_VERIFIED",
+            "canonical compatibility path must succeed on first execution");
+        assert.equal(result1.effectInvoked, true,
+            "the effect must have been invoked");
+        assert.equal(executed.count, 1,
+            "driver must execute exactly once on first request");
+        assert.equal(isCompatResult(result1), true,
+            "result must be branded as a canonical capability result");
+        // The outer-scope ToolBus canary must be untouched — the compatibility
+        // path goes through the canonical bridge, never through ToolBus.execute().
+        assert.equal(canary.runs, 0,
+            "the legacy ToolBus canary must not run through the compatibility path");
+
+        // ---- EXACTLY-ONCE: duplicate request is refused (replay protection) -
+        const result2 = await ingress.execute(
+            { name: CANARY_ID, args: {} }, evaluation);
+
+        assert.equal(result2.outcome, "REFUSED",
+            "a duplicate compatibility request must be refused");
+        assert.equal(result2.reason, "REPLAY",
+            "the refusal reason must be REPLAY");
+        assert.equal(result2.effectInvoked, false,
+            "no effect may be invoked on a replay");
+        assert.equal(executed.count, 1,
+            "driver must not execute on a replay — still exactly 1 total");
+        assert.equal(canary.runs, 0, "outer canary still untouched after replay attempt");
+    });
