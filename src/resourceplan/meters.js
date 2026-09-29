@@ -21,7 +21,7 @@ function makeMeters(store) {
     }
 
     async function getReadings(kind) {
-        return store.getKv(`meter:${kind}`) || [];
+        return (await store.getKv(`meter:${kind}`)) || [];
     }
 
     async function getSummary(kind) {
