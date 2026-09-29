@@ -1,4 +1,5 @@
 const { clamp01 } = require("../core/envelope");
+const { PRIVILEGED_KINDS } = require("./laws");
 
 /**
  * GLOBAL WORKSPACE (§26–§28/§105) — kompetisi atensi deterministik.
@@ -45,6 +46,10 @@ function score(item, weights, context) {
 
 /** Tambah/kompetisi satu kandidat; kembalikan workspace baru. */
 function admit(workspace, item, config, nowMs) {
+    // W10-L1/NO_PRIVILEGED_OBJECTS: authority-kind items forbidden in workspace
+    if (item && item.kind && PRIVILEGED_KINDS.has(String(item.kind).toLowerCase())) {
+        throw new Error(`Privileged kind "${item.kind}" forbidden in workspace (W10-L1/RT-W10-02)`);
+    }
 
     const next = structured(workspace);
     const key = String(item.key ?? "").slice(0, 160);

@@ -10,8 +10,11 @@ const { makeDecide } = require("./decide");
 
 function makeUnifiedAgency(acc) {
     const store = makeAgencyStore(acc);
-    // RT-W10-42: abandon any in-flight decisions from a previous run on startup
-    const initPromise = store.abandonPendingIntentions();
+    // RT-W10-42: abandon in-flight decisions from previous run on startup
+    let initDone = false;
+    const initPromise = store.abandonPendingIntentions()
+        .then(() => { initDone = true; })
+        .catch(() => {}); // prevent unhandled rejection; initDone stays false on failure
     const decideOps = makeDecide(store);
 
     function createBudget() {
@@ -19,8 +22,14 @@ function makeUnifiedAgency(acc) {
     }
 
     async function deliberate(intentionOpts, rawOptions, preferences, values) {
-        // P1-fix: initPromise rejection (transient store error) must not permanently disable deliberation
-        try { await initPromise; } catch (_) { /* startup abandon failed; proceed */ }
+        // Await original promise (never throws — catch above); then check if it succeeded.
+        // If not, retry abandon: satisfies INTERRUPTED_INTENTIONS_ABANDONED on the failure path,
+        // and throws if the store is still unavailable (P1+P2-1 fix).
+        await initPromise;
+        if (!initDone) {
+            await store.abandonPendingIntentions();
+            initDone = true;
+        }
         const intention = makeIntention(intentionOpts);
         const budget = createBudget();
         budget.tick(); // intention formed
