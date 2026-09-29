@@ -19,11 +19,14 @@ function makeUnifiedAgency(acc) {
     }
 
     async function deliberate(intentionOpts, rawOptions, preferences, values) {
-        await initPromise;
+        // P1-fix: initPromise rejection (transient store error) must not permanently disable deliberation
+        try { await initPromise; } catch (_) { /* startup abandon failed; proceed */ }
         const intention = makeIntention(intentionOpts);
-        const coherent = filterOptions(rawOptions);
-        const ranked = rankOptions(coherent, preferences || [], values || []);
         const budget = createBudget();
+        budget.tick(); // intention formed
+        const coherent = filterOptions(rawOptions);
+        budget.tick(); // options filtered
+        const ranked = rankOptions(coherent, preferences || [], values || []);
         return decideOps.decide(intention, ranked, preferences || [], values || [], budget);
     }
 

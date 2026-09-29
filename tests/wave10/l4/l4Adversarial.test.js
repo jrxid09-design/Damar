@@ -108,6 +108,10 @@ test("RT-W10-37: character never expands the option set", () => {
     const result = ops.rankOptions(options, [pref]);
     assert.ok(result.every(o => options.some(orig => orig.id === o.id)), "all ranked options must be from original set");
     assert.ok(result.length <= options.length, "option set must not be expanded");
+    // Invariant 6 names both rankOptions and applyCharacter — verify applyCharacter also never expands
+    const resultApply = ops.applyCharacter(options, [pref], []);
+    assert.ok(resultApply.every(o => options.some(orig => orig.id === o.id)), "applyCharacter must not add options outside original set");
+    assert.ok(resultApply.length <= options.length, "applyCharacter must not grow option count");
 });
 
 test("RT-W10-38: free-form instruction stored as preference rejected", () => {

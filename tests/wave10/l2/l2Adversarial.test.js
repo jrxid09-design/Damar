@@ -57,6 +57,16 @@ test("RT-W10-15: generation regression refused", async () => {
         () => chain.advanceGeneration(identity, "regressed"),
         /monotonically increasing|regression/i
     );
+    // Equal-generation case: nextGen == last recorded gen is also refused (invariant boundary)
+    const ops2 = makeOps();
+    const identity2 = await ops2.genesis.createIdentity({ identityId: "id-15b", keyRef: "key-15b" });
+    await ops2.chain.advanceGeneration(identity2, "step-1b");
+    const lastGen = identity2.generation;
+    identity2.generation = lastGen - 1; // nextGen = lastGen == lastEntry.generation
+    await assert.rejects(
+        () => ops2.chain.advanceGeneration(identity2, "equal-advance"),
+        /monotonically increasing|regression/i
+    );
 });
 
 test("RT-W10-16: tampered identity reports DISPUTED", async () => {

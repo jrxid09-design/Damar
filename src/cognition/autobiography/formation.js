@@ -4,16 +4,15 @@ const { makeEpisode } = require("./episode");
 const { computeVerificationState } = require("./verification");
 const { BOUNDS } = require("./laws");
 
-const SECRET_PATTERN = /\b(password|secret|token|credential|api_key|apikey|private_key)\b/gi;
+// P2-fix: factory avoids lastIndex statefulness of module-level /g regex
+const secretPattern = () => /\b(password|secret|token|credential|api_key|apikey|private_key)\b/gi;
 
 function redactSecrets(narrative) {
     // RT-W10-26: redact secrets on formation
-    if (!SECRET_PATTERN.test(narrative)) {
-        SECRET_PATTERN.lastIndex = 0;
+    if (!secretPattern().test(narrative)) {
         return { narrative, secretsRedacted: false };
     }
-    SECRET_PATTERN.lastIndex = 0;
-    return { narrative: narrative.replace(SECRET_PATTERN, "[REDACTED]"), secretsRedacted: true };
+    return { narrative: narrative.replace(secretPattern(), "[REDACTED]"), secretsRedacted: true };
 }
 
 function makeFormation(store) {
