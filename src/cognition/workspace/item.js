@@ -9,7 +9,7 @@ function validateItem(item) {
     if (!item.sourceRef) {
         throw new Error(`Workspace item requires a source reference — orphan projections refused (W10-L1/RT-W10-03)`);
     }
-    if (item.kind && PRIVILEGED_KINDS.has(item.kind)) {
+    if (item.kind && PRIVILEGED_KINDS.has(String(item.kind).toLowerCase())) {
         throw new Error(`Privileged object kind '${item.kind}' cannot be admitted to workspace — authority objects forbidden (W10-L1/RT-W10-02)`);
     }
     return true;

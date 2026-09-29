@@ -23,7 +23,16 @@ test("RT-W10-02: authority object admission refused", async () => {
     const { workspace } = makeOps();
     await assert.rejects(
         () => workspace.admit({ itemId: "auth-1", sourceRef: "ref-a1", kind: "authority" }),
-        /privileged.*kind.*authority|authority.*forbidden/i
+        /privileged.*kind|authority.*forbidden/i
+    );
+    // Adversarial: uppercase and mixed-case must also be refused (NO_PRIVILEGED_OBJECTS_IN_WORKSPACE)
+    await assert.rejects(
+        () => workspace.admit({ itemId: "auth-2", sourceRef: "ref-a2", kind: "AUTHORITY" }),
+        /privileged.*kind|authority.*forbidden/i
+    );
+    await assert.rejects(
+        () => workspace.admit({ itemId: "auth-3", sourceRef: "ref-a3", kind: "Policy" }),
+        /privileged.*kind|policy.*forbidden/i
     );
 });
 
