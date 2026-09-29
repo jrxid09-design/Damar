@@ -1,5 +1,7 @@
 "use strict";
 
+const { BOUNDS } = require("./laws");
+
 // Higher rank = stronger verification guarantee; compaction may never raise rank
 const STATE_RANK = {
     SUPPORTED: 4,
@@ -20,7 +22,9 @@ function assertCompactionDoesNotRaise(before, after) {
 }
 
 function applyRetention(episodes) {
-    return episodes;
+    if (!Array.isArray(episodes) || episodes.length <= BOUNDS.MAX_EPISODES_RETAINED) return episodes;
+    // Keep the most recent MAX_EPISODES_RETAINED episodes
+    return episodes.slice(episodes.length - BOUNDS.MAX_EPISODES_RETAINED);
 }
 
 module.exports = { applyRetention, assertCompactionDoesNotRaise, STATE_RANK };
