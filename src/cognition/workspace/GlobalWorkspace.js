@@ -53,7 +53,7 @@ function admit(workspace, item, config, nowMs) {
 
     const next = structured(workspace);
     const key = String(item.key ?? "").slice(0, 160);
-    if (!key) return next;
+    if (!key) throw new Error("GlobalWorkspace item requires a key — orphan projections refused (W10-L1)");
 
     const scored = {
         ...structuredCopyItem(item),
