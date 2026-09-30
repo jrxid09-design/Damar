@@ -35,7 +35,8 @@ function createMission(params) {
 
     let envelope;
     try {
-        envelope = makeMissionEnvelope(envelopeParams || {});
+        // Bind mission_id to missionId so envelope and record are always consistent.
+        envelope = makeMissionEnvelope({ ...(envelopeParams || {}), mission_id: missionId });
     } catch (err) {
         return { ok: false, mission: null, errors: [err.message || "envelope construction failed"] };
     }

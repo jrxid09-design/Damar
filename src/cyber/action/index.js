@@ -74,6 +74,11 @@ function makeSecurityIntent(envelope, attempt, correlationId) {
     if (typeof operation !== "string" || !operation) {
         throw new Error("attempt.operation required");
     }
+    // §12 SIMULATION_NEQ_EXECUTION: an unregistered capability has unknown isSimulation —
+    // building an intent for it would silently stamp isSimulation:false (real execution).
+    if (!_actuators[capabilityId]) {
+        throw new Error(`capability '${capabilityId}' not registered in DCD actuators (register before building intent)`);
+    }
 
     return Object.freeze({
         capabilityId,
