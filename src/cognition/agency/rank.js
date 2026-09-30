@@ -4,7 +4,7 @@ function scoreOption(option, preferences) {
     let score = 0;
     for (const pref of preferences) {
         if (option.text && pref.statement) {
-            const keyword = pref.statement.slice(0, 16).toLowerCase();
+            const keyword = (pref.subject && pref.subject.ref || pref.statement || "").slice(0, 16).toLowerCase();
             if (option.text.toLowerCase().includes(keyword)) {
                 score += typeof pref.strength === "number" ? pref.strength : 0.5;
             }
