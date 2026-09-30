@@ -156,7 +156,11 @@ class SelfHealingEngine {
                         // a restriction, not an authority grant — both checks required.
                         assertExecution(canonId, delegator);
                         const result = await ToolRegistry.execute(canonId, args, { exec: delegator });
-                        outcome = { ok: true, result };
+                        // P1-E-FIX: derive ok from result — ToolRegistry can return
+                        // { ok: false } without throwing; treat that as failure.
+                        outcome = result?.ok === false
+                            ? { ok: false, error: result?.error ?? "tool returned failure", result }
+                            : { ok: true, result };
                     }
                     catch (e) { outcome = { ok: false, error: e.message }; }
                 } else {
