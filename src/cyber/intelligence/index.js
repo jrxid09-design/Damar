@@ -44,6 +44,7 @@ function createDetectionEngine() {
         if (incidents[incidentId]) throw new Error(`incident '${incidentId}' already exists`);
         if (!RISK_LEVELS.includes(riskLevel)) throw new Error(`unknown riskLevel '${riskLevel}'`);
 
+        const resolvedNow = nowMs != null ? nowMs : Date.now();
         const incident = Object.freeze({
             incidentId,
             // DC-10: initial state is HYPOTHESIS_OPEN — an alert is not a fact
@@ -56,9 +57,9 @@ function createDetectionEngine() {
             authorizedAction: null,
             evidence:   Array.isArray(evidence) ? Object.freeze([...evidence]) : Object.freeze([]),
             history:    Object.freeze([
-                { state: "HYPOTHESIS_OPEN", at: nowMs || Date.now(), reason: "created" },
+                { state: "HYPOTHESIS_OPEN", at: resolvedNow, reason: "created" },
             ]),
-            createdAt: nowMs || Date.now(),
+            createdAt: resolvedNow,
         });
 
         incidents[incidentId] = incident;
@@ -71,6 +72,7 @@ function createDetectionEngine() {
      * Returns { ok, incident, reason }.
      */
     function transition(incidentId, toState, { reason, authorizedBy, nowMs } = {}) {
+        const resolvedNow = nowMs != null ? nowMs : Date.now();
         const current = incidents[incidentId];
         if (!current) return { ok: false, reason: `incident '${incidentId}' not found`, incident: null };
 
@@ -98,7 +100,7 @@ function createDetectionEngine() {
                 ...current.history,
                 {
                     state: toState,
-                    at: nowMs || Date.now(),
+                    at: resolvedNow,
                     reason: typeof reason === "string" ? reason : "",
                     authorizedBy: typeof authorizedBy === "string" ? authorizedBy : null,
                 },
