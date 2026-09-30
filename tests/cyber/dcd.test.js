@@ -512,3 +512,18 @@ test("R4-F4-REGRESSION: makeSecurityIntent deep-freezes blastRadius — original
     assert.equal(intent.metadata.blastRadius.maxHosts, 10,
         "blastRadius inside intent must be frozen — original mutation must not affect it");
 });
+
+/* ------------------------------------------ R6 regression tests */
+
+test("R6-REGRESSION: makeSecurityIntent deep-freezes nested objects in blastRadius", () => {
+    action.registerCyberActuator({ capabilityId: "r6-nested", operations: ["scan"], isSimulation: true });
+    const env = makeEnvelope({ allowed_capabilities: ["r6-nested"] });
+    const input = { limits: { maxHosts: 1 } };
+    const intent = action.makeSecurityIntent(env, { capabilityId: "r6-nested", operation: "scan", blastRadius: input });
+    // Mutate nested object on original — must NOT affect the frozen copy in intent
+    input.limits.maxHosts = 999;
+    assert.equal(intent.metadata.blastRadius.limits.maxHosts, 1,
+        "nested blastRadius objects must be deep-frozen — mutation via original nested ref must not affect intent");
+    assert.ok(Object.isFrozen(intent.metadata.blastRadius.limits),
+        "nested limits object must be frozen");
+});
