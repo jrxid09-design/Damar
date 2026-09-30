@@ -146,11 +146,15 @@ class SelfHealingEngine {
                 // P1-3: ToolBus tidak mengeksekusi (W8). Jika tool ada di
                 // capabilitySet delegator, eksekusi langsung ke ToolRegistry.
                 const capSet = delegator?.capabilitySet ?? null;
-                const { capSetWithin, canonicalCapabilityId } = require("../ai/tools/Authorization");
+                const { capSetWithin, canonicalCapabilityId, assertExecution } = require("../ai/tools/Authorization");
                 if (Array.isArray(capSet) && capSetWithin(tool, capSet)) {
                     const canonId = canonicalCapabilityId(tool);
                     const { ToolRegistry } = require("../core/tools");
                     try {
+                        // P1-D-FIX: assertExecution enforces role + capabilitySet
+                        // authority before reaching ToolRegistry. capabilitySet is
+                        // a restriction, not an authority grant — both checks required.
+                        assertExecution(canonId, delegator);
                         const result = await ToolRegistry.execute(canonId, args, { exec: delegator });
                         outcome = { ok: true, result };
                     }
