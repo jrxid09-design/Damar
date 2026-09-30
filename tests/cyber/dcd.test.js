@@ -454,3 +454,61 @@ test("R3-F4-REGRESSION: asset-scope query does not return out-of-scope nodes", (
     assert.ok(!allNodes.includes("r3-h-out"),
         "out-of-scope node must not appear in paths when scoped query is issued");
 });
+
+/* ------------------------------------------ R4 regression tests */
+
+test("R4-F1-REGRESSION: evalDecision normalizes attempt.at to nowMs — no expiry bypass", () => {
+    const r = mission.createMission({
+        missionId: "m-expiry",
+        envelopeParams: {
+            mission_id: "m-expiry", principal: "owner", objective: "o",
+            authority_reference: "a", allowed_methods: ["GET"],
+            time_window: { start: 0, end: 100 },
+        },
+        nowMs: 0,
+    });
+    assert.equal(r.ok, true);
+    // Mission expired at t=100; nowMs=1000 is past expiry
+    // Caller backdates attempt.at=50 trying to bypass — must still DENY
+    const d = mission.evalDecision(r.mission, { method: "GET", at: 50 }, null, 1000);
+    assert.notEqual(d.decision, "FAST_PATH", "expired mission must not return FAST_PATH via backdated attempt.at");
+});
+
+test("R4-F2-REGRESSION: debitBudget returns updated ledger from result.state", () => {
+    const r = mission.createMission({
+        missionId: "m-budget",
+        envelopeParams: {
+            mission_id: "m-budget", principal: "owner", objective: "o",
+            authority_reference: "a",
+            blast_radius_budget: { max_hosts: 5, max_duration_ms: 60000 },
+        },
+        nowMs: NOW,
+    });
+    assert.equal(r.ok, true);
+    const d = mission.debitBudget(r.mission, { hosts: 1, elapsedMs: 100 });
+    assert.equal(d.ok, true);
+    assert.notEqual(d.nextBudgetState, undefined, "nextBudgetState must not be undefined after successful debit");
+    assert.equal(typeof d.nextBudgetState, "object");
+});
+
+test("R4-F3-REGRESSION: makeSecurityIntent rejects undeclared operation for registered capability", () => {
+    action.registerCyberActuator({ capabilityId: "r4-cap", operations: ["probe"], isSimulation: true });
+    const env = makeEnvelope({ allowed_capabilities: ["r4-cap"] });
+    assert.throws(
+        () => action.makeSecurityIntent(env, { capabilityId: "r4-cap", operation: "DANGEROUS_UNLISTED" }),
+        /not declared/,
+    );
+    // Declared operation succeeds
+    const intent = action.makeSecurityIntent(env, { capabilityId: "r4-cap", operation: "probe" });
+    assert.equal(intent.operation, "probe");
+});
+
+test("R4-F4-REGRESSION: makeSecurityIntent deep-freezes blastRadius — original mutation has no effect", () => {
+    action.registerCyberActuator({ capabilityId: "r4-blast", operations: ["scan"], isSimulation: false });
+    const env = makeEnvelope({ allowed_capabilities: ["r4-blast"] });
+    const br = { maxHosts: 10 };
+    const intent = action.makeSecurityIntent(env, { capabilityId: "r4-blast", operation: "scan", blastRadius: br });
+    br.maxHosts = 999; // mutate original
+    assert.equal(intent.metadata.blastRadius.maxHosts, 10,
+        "blastRadius inside intent must be frozen — original mutation must not affect it");
+});
