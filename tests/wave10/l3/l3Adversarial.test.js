@@ -85,6 +85,15 @@ test("RT-W10-28: compaction must not raise verificationState", () => {
         () => ops.assertCompactionDoesNotRaise("UNSUPPORTED", "SUPPORTED"),
         /compaction may not raise|never raises/i
     );
+    // Invariant 14: must also throw for unrecognized state strings
+    assert.throws(
+        () => ops.assertCompactionDoesNotRaise("BOGUS_STATE", "SUPPORTED"),
+        /unknown verificationState/i
+    );
+    assert.throws(
+        () => ops.assertCompactionDoesNotRaise("SUPPORTED", "BOGUS_STATE"),
+        /unknown verificationState/i
+    );
 });
 
 test("RT-W10-29: redaction preserves marker and request record", async () => {
