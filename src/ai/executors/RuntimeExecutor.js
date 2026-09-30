@@ -5,7 +5,7 @@ const Budget = require("../tools/Budget");
 const { TurnController } = require("../tools/TurnController");
 const toolStats = require("../tools/ToolStats");
 const { canonicalRequestExec } = require("../runtime/requestIdentity");
-const { createInternalGrantDomain, isCanonicalInternalGrant: isGlobalGrant, isToolAuthorizedByGrant: isGlobalToolAuth } = require("../tools/internalGrant");
+const { createInternalGrantDomain, isCanonicalInternalGrant: isGlobalGrant, isToolAuthorizedByGrant: isGlobalToolAuth, registerGrant: registerGrantGlobal } = require("../tools/internalGrant");
 const executorGrantDomains = new WeakMap();
 const executorRegistries = new WeakMap();
 const executorToolExecutors = new WeakMap();
@@ -82,7 +82,12 @@ class RuntimeExecutor {
      */
     mintGrant({ authorizedTools = [], role, provenance = "runtime" } = {}) {
         const { domain } = executorGrantDomains.get(this);
-        return domain.mintCanonicalInternalGrant({ authorizedTools, role, provenance });
+        const grant = domain.mintCanonicalInternalGrant({ authorizedTools, role, provenance });
+        // P1-H-FIX: also register with global singleton so grant survives
+        // runtime boundary crossings (AIRuntime, resolveDelegator check
+        // only the module singleton, not per-executor domains).
+        registerGrantGlobal(grant, authorizedTools);
+        return grant;
     }
 
     /**
