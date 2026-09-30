@@ -20,6 +20,15 @@
 const contracts = require("../contracts");
 const { envelopeShapeErrors } = contracts;
 
+// Recursive deep-freeze — prevents callers mutating nested objects inside a frozen intent.
+function deepFreeze(val) {
+    if (val !== null && typeof val === "object" && !Object.isFrozen(val)) {
+        Object.keys(val).forEach(k => deepFreeze(val[k]));
+        Object.freeze(val);
+    }
+    return val;
+}
+
 // Null-prototype actuator descriptor registry
 const _actuators = Object.create(null);
 
@@ -92,9 +101,10 @@ function makeSecurityIntent(envelope, attempt, correlationId) {
             envelopeRef: typeof envelope.authority_reference === "string"
                 ? envelope.authority_reference : null,
             target: typeof target === "string" ? target : null,
-            // Deep-freeze blastRadius — shallow freeze lets callers mutate via original ref.
+            // Deep-freeze blastRadius via structuredClone — eliminates all shared nested refs,
+            // then recursively freezes so callers cannot mutate any level of the copy.
             blastRadius: blastRadius && typeof blastRadius === "object"
-                ? Object.freeze({ ...blastRadius }) : null,
+                ? deepFreeze(structuredClone(blastRadius)) : null,
             // §12: SIMULATION_NEQ_EXECUTION — explicit simulation tag
             isSimulation: _actuators[capabilityId].isSimulation,
         }),
