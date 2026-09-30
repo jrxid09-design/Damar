@@ -205,14 +205,15 @@ test("N1. dev-open: Host: localhost dari remote TIDAK mendapat superadmin", () =
 test("H1. stream & non-stream identitas eksekusi identik", async () => {
 
     const seen = [];
-    const map = new Map([
-        ["probe", { name: "probe", description: "probe", parameters: {}, execute: async () => ({ ok: 1 }) }]
-    ]);
+    // Intercept via tool.execute — ToolExecutor calls tool.execute(args, { exec: identity })
+    // where identity.role reflects the canonical grant role passed through execute()/stream().
+    const probeTool = {
+        name: "probe", description: "probe", parameters: {},
+        execute: async (_args, ctx) => { seen.push(ctx?.exec?.role); return { ok: 1 }; }
+    };
+    const map = new Map([["probe", probeTool]]);
 
     const ex = executorWith(map);
-
-    const origExec = ex.toolExecutor.execute.bind(ex.toolExecutor);
-    ex.toolExecutor.execute = (c, e) => { seen.push(e?.role); return origExec(c, e); };
 
     let giliran = 0;
     ex.service = {

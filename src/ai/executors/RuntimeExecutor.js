@@ -5,7 +5,7 @@ const Budget = require("../tools/Budget");
 const { TurnController } = require("../tools/TurnController");
 const toolStats = require("../tools/ToolStats");
 const { canonicalRequestExec } = require("../runtime/requestIdentity");
-const { createInternalGrantDomain } = require("../tools/internalGrant");
+const { createInternalGrantDomain, isCanonicalInternalGrant: isGlobalGrant, isToolAuthorizedByGrant: isGlobalToolAuth } = require("../tools/internalGrant");
 const executorGrantDomains = new WeakMap();
 const executorRegistries = new WeakMap();
 const executorToolExecutors = new WeakMap();
@@ -74,10 +74,6 @@ class RuntimeExecutor {
 
         return this;
 
-    }
-
-    get toolExecutor() {
-        return executorToolExecutors.get(this) ?? null;
     }
 
     /**
@@ -224,20 +220,26 @@ class RuntimeExecutor {
             }
 
             // MODEL TOOL CALL != AUTHORITY. Provider output is untrusted.
-            // P1-2-FIX: when caller explicitly wired a grant domain
-            // (externallySelected), only a canonical grant from that domain
-            // may authorize tool calls — non-canonical exec is stripped.
-            // When using the default per-executor domain (production path via
-            // resolveDelegator), enforce scope only for canonical grants; the
-            // assertExecution capabilitySet check gates non-canonical execs.
+            // P1-2/P1-A-FIX: three-way grant check:
+            //   (a) this-domain canonical grant → enforce authorizedTools via domain
+            //   (b) global-singleton canonical grant → enforce authorizedTools via global
+            //       (P1-A: foreign grant must not bypass authorizedTools — closes the
+            //        empty-scope loophole on the default-domain lenient path)
+            //   (c) plain exec (production AIRuntime path) → pass through to ToolExecutor
+            //       so assertExecution can enforce role + capabilitySet restrictions
             const calls = response.toolCalls || [];
-            if (binding.externallySelected
-                ? (!domain.isCanonicalInternalGrant(request.exec) ||
-                   !calls.every(call => domain.isToolAuthorizedByGrant(
-                       request.exec, call.name || call.function?.name)))
-                : (domain.isCanonicalInternalGrant(request.exec) &&
-                   !calls.every(call => domain.isToolAuthorizedByGrant(
-                       request.exec, call.name || call.function?.name)))) {
+            const _isThisDomain = domain.isCanonicalInternalGrant(request.exec);
+            const _stripTools = binding.externallySelected
+                ? (!_isThisDomain || !calls.every(c => domain.isToolAuthorizedByGrant(
+                      request.exec, c.name || c.function?.name)))
+                : _isThisDomain
+                    ? !calls.every(c => domain.isToolAuthorizedByGrant(
+                          request.exec, c.name || c.function?.name))
+                    : isGlobalGrant(request.exec)
+                        ? !calls.every(c => isGlobalToolAuth(
+                              request.exec, c.name || c.function?.name))
+                        : false;
+            if (_stripTools) {
                 this.finishPlan(plan);
                 return { ...response, toolCalls: [], finishReason: response.finishReason ?? "stop" };
             }
@@ -985,16 +987,20 @@ class RuntimeExecutor {
 
             }
 
-            // Keep streaming parity with execute(): same externallySelected
-            // split as the non-streaming path.
+            // Streaming parity with execute(): same three-way grant check.
             const calls = round.toolCalls || [];
-            if (binding.externallySelected
-                ? (!domain.isCanonicalInternalGrant(request.exec) ||
-                   !calls.every(call => domain.isToolAuthorizedByGrant(
-                       request.exec, call.name || call.function?.name)))
-                : (domain.isCanonicalInternalGrant(request.exec) &&
-                   !calls.every(call => domain.isToolAuthorizedByGrant(
-                       request.exec, call.name || call.function?.name)))) {
+            const _isThisDomainS = domain.isCanonicalInternalGrant(request.exec);
+            const _stripToolsS = binding.externallySelected
+                ? (!_isThisDomainS || !calls.every(c => domain.isToolAuthorizedByGrant(
+                      request.exec, c.name || c.function?.name)))
+                : _isThisDomainS
+                    ? !calls.every(c => domain.isToolAuthorizedByGrant(
+                          request.exec, c.name || c.function?.name))
+                    : isGlobalGrant(request.exec)
+                        ? !calls.every(c => isGlobalToolAuth(
+                              request.exec, c.name || c.function?.name))
+                        : false;
+            if (_stripToolsS) {
                 this.finishPlan(plan);
                 yield new AIStreamChunk({
                     id: round.id,

@@ -262,8 +262,9 @@ test("M3-5: think_deeply nested turn membawa exec (role + capabilitySet)", async
     provider.requests.length = 0;
     provider.script = [{ content: "analisis mendalam" }];
 
-    const registry = engine.runtime.getToolRegistry();
-    const thinkDeeply = registry.get("think_deeply");
+    // get think_deeply directly from its source — avoids exposing the live registry
+    const { consciousnessTools } = require("../../src/consciousness/tools");
+    const thinkDeeply = consciousnessTools().find(t => t.name === "think_deeply");
     assert.ok(thinkDeeply, "think_deeply terdaftar");
 
     const out = await thinkDeeply.execute(
