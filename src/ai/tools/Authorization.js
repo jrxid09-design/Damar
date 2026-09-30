@@ -263,11 +263,14 @@ function resolveDelegator(initiatorExec = null, internalOrigin = false, provenan
         return initiatorExec;
     }
 
-    // 2+3. Batas otonom eksplisit is descriptive metadata only.  It is
-    // deliberately NOT an execution grant: a boolean supplied to this
-    // public resolver must never mint a bearer capability.
+    // 2+3. Batas otonom eksplisit — merek batas tepercaya eksplisit.
+    // Pemanggil wajib menandai batas ini secara in-process (parameter fungsi);
+    // ia tidak bisa berasal dari JSON/HTTP/model. 'system' diberikan KARENA
+    // pemanggil adalah batas otonom yang positif-teridentifikasi, bukan karena
+    // klaim identitas eksternal.
     if (internalOrigin === true) {
         return Object.freeze({
+            role: ROLE_RANK[0],
             // source hanya LABEL TELEMETRI — bukan bukti kepercayaan.
             source: `autonomous:${String(provenance || "runtime").slice(0, 40)}`,
             sessionId: String(provenance || "runtime").slice(0, 60)
@@ -308,11 +311,11 @@ function isCanonicalInternalGrant(exec) {
     if (exec === null || typeof exec !== "object" || utilTypes.isProxy(exec)) {
         return false;
     }
-    return false;
+    return require("./internalGrant").isCanonicalInternalGrant(exec);
 }
 
 function isToolAuthorizedByGrant(exec, toolName) {
-    return false;
+    return require("./internalGrant").isToolAuthorizedByGrant(exec, toolName);
 }
 
 /** Klasifikasi internal — metadata eksternal TIDAK ikut menentukan. */

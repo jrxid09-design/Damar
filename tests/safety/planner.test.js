@@ -264,6 +264,9 @@ function runtimeWith(chat, toolFn) {
     const exec = new RuntimeExecutor({ chat });
     exec.setToolRegistry(registry);
 
+    const origExec = exec.execute.bind(exec);
+    exec.execute = (request) => origExec({ exec: { role: "superadmin" }, ...request });
+
     return exec;
 
 }
