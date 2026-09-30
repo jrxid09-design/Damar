@@ -8,6 +8,7 @@ const ArgumentValidator = require("../../src/ai/tools/ArgumentValidator");
 const toolStats = require("../../src/ai/tools/ToolStats");
 const loopGuard = require("../../src/core/safety/loopGuard");
 const killSwitch = require("../../src/core/safety/killSwitch");
+const { createInternalGrantDomain } = require("../../src/ai/tools/internalGrant");
 
 /**
  * SUITE EKSEKUSI TOOL — validasi argumen, error terstruktur,
@@ -17,22 +18,31 @@ const killSwitch = require("../../src/core/safety/killSwitch");
 
 function makeExecutor(scripted) {
     /** RuntimeExecutor dengan service palsu: balasan diambil berurutan. */
+    const grantDomain = createInternalGrantDomain();
+    const registryMap = new Map();
+    const registry = { map: registryMap, get(name) { return registryMap.get(name); } };
     const executor = new RuntimeExecutor(
         { chat: async () => scripted.shift() ?? { content: "selesai", toolCalls: [] } },
-        { callTimeout: 5000 }
+        { callTimeout: 5000, grantDomain }
     );
+
+    executor.setToolRegistry(registry);
+    // Own-property assignment (not class getter) — keeps runtime.executor.toolRegistry === undefined
+    // in production contexts that check for it (registryOwnership.test.js:22).
+    executor.toolRegistry = registry;
 
     // Identitas eksekusi eksplisit (invariant G): unit-test mekanika
     // eksekusi berjalan sebagai superadmin; otorisasi diuji terpisah
     // di toolSecurity.test.js.
     const originalExecute = executor.execute.bind(executor);
-    executor.execute = (request) =>
-        originalExecute({ exec: { role: "superadmin", channel: "test" }, ...request });
-
-    executor.setToolRegistry({
-        map: new Map(),
-        get(name) { return this.map.get(name); }
-    });
+    executor.execute = (request) => {
+        const grant = grantDomain.mintCanonicalInternalGrant({
+            authorizedTools: [...registryMap.keys()],
+            role: "superadmin",
+            provenance: "test"
+        });
+        return originalExecute({ exec: grant, ...request });
+    };
 
     return executor;
 }
@@ -129,6 +139,10 @@ test("TOOL_NOT_FOUND mengarahkan model ke tool_search", async () => {
         { content: "", toolCalls: [call("tidak_ada_ini", {})] },
         { content: "baik", toolCalls: [] }
     ]);
+
+    // null in the map: grants the name so the gate passes,
+    // but registry.get returns null so TOOL_NOT_FOUND fires.
+    exec.toolRegistry.map.set("tidak_ada_ini", null);
 
     const captured = capture(exec);
 
@@ -267,9 +281,10 @@ test("giliran melewati batas MAX_TOOL_CALLS → jawaban penutup jujur", async ()
         // loopGuard tidak ikut mencampur; yang diuji murni anggaran.
         let n = 0;
 
+        const grantDomain = createInternalGrantDomain();
         const exec = new RuntimeExecutor(
             { chat: async () => ({ content: "", toolCalls: [call(`counter_${++n}`, {})] }) },
-            { callTimeout: 5000 }
+            { callTimeout: 5000, grantDomain }
         );
 
         exec.setToolRegistry({ get: () => ({
@@ -278,6 +293,15 @@ test("giliran melewati batas MAX_TOOL_CALLS → jawaban penutup jujur", async ()
             parameters: {},
             execute: async () => ({ n })
         }) });
+
+        // counter_1..3 covers 2 executions + the 3rd beginTool that triggers MAX_TOOL_CALLS.
+        const grant = grantDomain.mintCanonicalInternalGrant({
+            authorizedTools: ["counter_1", "counter_2", "counter_3"],
+            role: "superadmin",
+            provenance: "test"
+        });
+        const origEx = exec.execute.bind(exec);
+        exec.execute = (req) => origEx({ exec: grant, ...req });
 
         const result = await exec.execute({ messages: [{ role: "user", content: "kerjakan" }] });
 
