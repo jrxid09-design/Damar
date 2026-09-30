@@ -305,6 +305,64 @@ test("ASSURANCE: checkCleanup enforces DC-64", () => {
     assert.ok(r.missing.includes("cleanup_completed"));
 });
 
+/* ---------------------------------------- codex r2 findings regression */
+
+test("F1-REGRESSION: debitBudget passes envelope not ledger to consumeBudget", () => {
+    const r = mission.createMission({
+        missionId: "m-debit",
+        envelopeParams: {
+            mission_id: "m-debit", principal: "owner", objective: "o", authority_reference: "a",
+        },
+        nowMs: NOW,
+    });
+    assert.equal(r.ok, true);
+    // With the correct envelope arg, consumeBudget should not return MALFORMED_ENVELOPE
+    const debit = mission.debitBudget(r.mission, { hosts: 1 });
+    assert.notEqual(debit.reason, "MALFORMED_ENVELOPE", "debitBudget must pass envelope, not budgetLedger");
+});
+
+test("F2-REGRESSION: upsertEntity rejects T1/T3 tiers (DC-08/DC-61)", () => {
+    const g = state.createCyberStateProjection();
+    assert.throws(() => g.upsertEntity({ entityId: "bad-t1", kind: "Host", observedAt: NOW, tier: "T1" }),
+        /DC-08\/DC-61/);
+    assert.throws(() => g.upsertEntity({ entityId: "bad-t3", kind: "Host", observedAt: NOW, tier: "T3" }),
+        /DC-08\/DC-61/);
+    // Allowed tiers still work
+    const ok = g.upsertEntity({ entityId: "ok-t4", kind: "Host", observedAt: NOW, tier: "T4" });
+    assert.equal(ok.tier, "T4");
+});
+
+test("F3-REGRESSION: recordEvidence rejects VERIFIED epistemicClass (DC-61)", () => {
+    const r = assurance.recordEvidence({
+        evidenceId: "ev-verified", kind: "OBSERVATION",
+        sourceRef: "sensor:1", observedAt: NOW, tier: "T4", epistemicClass: "VERIFIED",
+    });
+    assert.equal(r.ok, false);
+    assert.ok(r.errors.some(e => /VERIFIED|DC-61/.test(e)));
+});
+
+test("F4-REGRESSION: createMission silently coerces invalid operationMode to DCD_DEFENSE", () => {
+    const r = mission.createMission({
+        missionId: "m-mode",
+        envelopeParams: { mission_id: "m-mode", principal: "owner", objective: "o", authority_reference: "a" },
+        operationMode: "ROOT",
+        nowMs: NOW,
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.mission.operationMode, "DCD_DEFENSE", "invalid operationMode must coerce to DCD_DEFENSE");
+    assert.notEqual(r.mission.operationMode, "ROOT");
+});
+
+test("F5-REGRESSION: nowMs=0 is preserved, not coerced to Date.now()", () => {
+    const r = mission.createMission({
+        missionId: "m-epoch0",
+        envelopeParams: { mission_id: "m-epoch0", principal: "owner", objective: "o", authority_reference: "a" },
+        nowMs: 0,
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.mission.createdAt, 0, "nowMs=0 must not be coerced to Date.now()");
+});
+
 /* -------------------------------------------- defense/offense boundary */
 
 test("BOUNDARY: detection score never confers authority (§12 invariants)", () => {

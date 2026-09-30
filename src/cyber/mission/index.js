@@ -18,7 +18,7 @@
 const contracts = require("../contracts");
 const {
     makeMissionEnvelope, localEnvelopeDecision,
-    envelopeShapeErrors, consumeBudget,
+    envelopeShapeErrors, consumeBudget, OPERATION_MODES,
 } = contracts;
 
 /**
@@ -45,12 +45,15 @@ function createMission(params) {
         return { ok: false, mission: null, errors: shapeErrors };
     }
 
+    const resolvedMode = typeof operationMode === "string" && OPERATION_MODES.includes(operationMode)
+        ? operationMode
+        : "DCD_DEFENSE";
     const mission = Object.freeze({
         missionId,
-        operationMode: typeof operationMode === "string" ? operationMode : "DCD_DEFENSE",
+        operationMode: resolvedMode,
         envelope,   // already deep-frozen by makeMissionEnvelope
         budgetLedger: Object.freeze({ hosts: 0, accounts: 0, processes: 0, elapsedMs: 0 }),
-        createdAt: nowMs || Date.now(),
+        createdAt: nowMs != null ? nowMs : Date.now(),
         closed: false,
     });
 
@@ -69,7 +72,7 @@ function evalDecision(mission, attempt, ledger, nowMs) {
     if (mission.closed) {
         return { decision: "DENY", reason: "mission is closed", detail: {} };
     }
-    return localEnvelopeDecision(mission.envelope, attempt, ledger, nowMs || Date.now());
+    return localEnvelopeDecision(mission.envelope, attempt, ledger, nowMs != null ? nowMs : Date.now());
 }
 
 /**
@@ -77,7 +80,8 @@ function evalDecision(mission, attempt, ledger, nowMs) {
  * Returns { ok, nextBudgetState, reason }.
  */
 function debitBudget(mission, usage) {
-    const result = consumeBudget(mission.budgetLedger, usage);
+    // consumeBudget(envelope, usage, state) — first arg must be the envelope, not the ledger
+    const result = consumeBudget(mission.envelope, usage, mission.budgetLedger);
     if (!result.ok) return { ok: false, nextBudgetState: mission.budgetLedger, reason: result.reason };
     return { ok: true, nextBudgetState: result.nextBudgetState, reason: null };
 }

@@ -21,7 +21,7 @@
 const contracts = require("../contracts");
 const {
     GRAPH_ENTITIES, GRAPH_RELATIONS, EDGE_STATES, edgeRank,
-    planPathQuery,
+    planPathQuery, DCD_FORBIDDEN_TIERS,
 } = contracts;
 
 const VALID_ENTITY_KINDS = Object.freeze(new Set(GRAPH_ENTITIES));
@@ -44,6 +44,8 @@ function createCyberStateProjection() {
         if (typeof entityId !== "string" || !entityId) throw new Error("entityId required");
         if (!VALID_ENTITY_KINDS.has(kind)) throw new Error(`unknown entity kind '${kind}'`);
         if (!Number.isFinite(observedAt)) throw new Error("observedAt must be finite epoch-ms");
+        // DC-08/DC-61: DCD projection cannot carry T1/T3 tiers
+        if (tier && DCD_FORBIDDEN_TIERS.includes(tier)) throw new Error(`DCD projection cannot carry tier '${tier}' (DC-08/DC-61)`);
 
         const e = Object.freeze({
             entityId,

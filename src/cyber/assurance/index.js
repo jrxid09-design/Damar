@@ -18,7 +18,7 @@
 const contracts = require("../contracts");
 const {
     verifyCompletion, verifyCleanup,
-    ALLOWED_TIERS, DCD_FORBIDDEN_TIERS,
+    ALLOWED_TIERS, DCD_FORBIDDEN_TIERS, EPISTEMIC_CLASSES,
 } = contracts;
 
 const _verifiers = Object.create(null);  // null-prototype
@@ -67,6 +67,13 @@ function recordEvidence(params) {
     }
     if (tier && !ALLOWED_TIERS.includes(tier)) {
         return { ok: false, evidenceId: null, errors: [`unknown tier '${tier}'`] };
+    }
+    // DC-61: VERIFIED is the T1 epistemic class; DCD cannot record it
+    if (epistemicClass && !EPISTEMIC_CLASSES.includes(epistemicClass)) {
+        return { ok: false, evidenceId: null, errors: [`unknown epistemicClass '${epistemicClass}'`] };
+    }
+    if (epistemicClass === "VERIFIED") {
+        return { ok: false, evidenceId: null, errors: ["DCD cannot record VERIFIED epistemicClass (DC-61: T1 belongs to verification fabric)"] };
     }
     if (!Number.isFinite(observedAt)) {
         return { ok: false, evidenceId: null, errors: ["observedAt must be finite epoch-ms"] };
