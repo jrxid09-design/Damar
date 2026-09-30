@@ -3,6 +3,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { createMemoryAccStore } = require("../../../src/cognition/persistence/AccStore");
 const { makeWorkspaceIntelligence } = require("../../../src/cognition/workspace/index");
+const { admit: gwAdmit, emptyWorkspace } = require("../../../src/cognition/workspace/GlobalWorkspace");
 
 function makeAcc() { return createMemoryAccStore(); }
 function makeOps() { return makeWorkspaceIntelligence(makeAcc()); }
@@ -33,6 +34,11 @@ test("RT-W10-02: authority object admission refused", async () => {
     await assert.rejects(
         () => workspace.admit({ itemId: "auth-3", sourceRef: "ref-a3", kind: "Policy" }),
         /privileged.*kind|policy.*forbidden/i
+    );
+    // GlobalWorkspace.admit must throw when item has no key (NO_PRIVILEGED_OBJECTS / orphan guard)
+    assert.throws(
+        () => gwAdmit(emptyWorkspace(), { kind: "ref", novelty: 0.5 }, {}, Date.now()),
+        /requires a key|orphan/i
     );
 });
 
