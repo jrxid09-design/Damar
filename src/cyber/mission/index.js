@@ -73,7 +73,11 @@ function evalDecision(mission, attempt, ledger, nowMs) {
     if (mission.closed) {
         return { decision: "DENY", reason: "mission is closed", detail: {} };
     }
-    return localEnvelopeDecision(mission.envelope, attempt, ledger, nowMs != null ? nowMs : Date.now());
+    const resolvedNow = nowMs != null ? nowMs : Date.now();
+    // Normalize attempt.at to authoritative nowMs — prevents caller from backdating
+    // attempt.at to bypass mission expiry (localEnvelopeDecision uses attempt.at for time).
+    const sanitizedAttempt = { ...(attempt || {}), at: resolvedNow };
+    return localEnvelopeDecision(mission.envelope, sanitizedAttempt, ledger, resolvedNow);
 }
 
 /**
@@ -84,7 +88,8 @@ function debitBudget(mission, usage) {
     // consumeBudget(envelope, usage, state) — first arg must be the envelope, not the ledger
     const result = consumeBudget(mission.envelope, usage, mission.budgetLedger);
     if (!result.ok) return { ok: false, nextBudgetState: mission.budgetLedger, reason: result.reason };
-    return { ok: true, nextBudgetState: result.nextBudgetState, reason: null };
+    // consumeBudget returns next state as result.state (not result.nextBudgetState)
+    return { ok: true, nextBudgetState: result.state, reason: null };
 }
 
 /**

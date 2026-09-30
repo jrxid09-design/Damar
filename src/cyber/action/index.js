@@ -79,6 +79,10 @@ function makeSecurityIntent(envelope, attempt, correlationId) {
     if (!_actuators[capabilityId]) {
         throw new Error(`capability '${capabilityId}' not registered in DCD actuators (register before building intent)`);
     }
+    // Validate operation is in the actuator's declared operations list.
+    if (!_actuators[capabilityId].operations.includes(operation)) {
+        throw new Error(`operation '${operation}' is not declared for capability '${capabilityId}'`);
+    }
 
     return Object.freeze({
         capabilityId,
@@ -88,11 +92,11 @@ function makeSecurityIntent(envelope, attempt, correlationId) {
             envelopeRef: typeof envelope.authority_reference === "string"
                 ? envelope.authority_reference : null,
             target: typeof target === "string" ? target : null,
-            blastRadius: blastRadius && typeof blastRadius === "object" ? blastRadius : null,
+            // Deep-freeze blastRadius — shallow freeze lets callers mutate via original ref.
+            blastRadius: blastRadius && typeof blastRadius === "object"
+                ? Object.freeze({ ...blastRadius }) : null,
             // §12: SIMULATION_NEQ_EXECUTION — explicit simulation tag
-            isSimulation: _actuators[capabilityId]
-                ? _actuators[capabilityId].isSimulation
-                : false,
+            isSimulation: _actuators[capabilityId].isSimulation,
         }),
     });
 }
