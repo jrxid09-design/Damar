@@ -5,7 +5,6 @@ const RuntimeExecutor = require("../../src/ai/executors/RuntimeExecutor");
 const { AIToolRegistry } = require("../../src/ai/tools");
 const AITool = require("../../src/ai/tools/AITool");
 const loopGuard = require("../../src/core/safety/loopGuard");
-
 /**
  * Batas waktu berlaku per PANGGILAN MODEL, bukan per permintaan.
  *
@@ -31,8 +30,9 @@ function buat(chat, { callTimeout } = {}) {
     const exec = new RuntimeExecutor({ chat }, { callTimeout });
     exec.setToolRegistry(registry);
 
+    const grant = exec.mintGrant({ authorizedTools: ["memory_recall"], role: "superadmin", provenance: "test" });
     const origExec = exec.execute.bind(exec);
-    exec.execute = (request) => origExec({ exec: { role: "superadmin" }, ...request });
+    exec.execute = (request) => origExec({ exec: grant, ...request });
 
     return exec;
 
