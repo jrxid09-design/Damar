@@ -339,6 +339,15 @@ function createAdbCapabilityRuntime({
             }
             const problem = parameterProblem(operation, parameters);
             if (problem) return { outcome: OUTCOME.REFUSED, reason: problem, capabilityId, operation };
+            if (!authorityStore) {
+                return {
+                    ok: false, denied: true, outcome: OUTCOME.DENIED,
+                    state: STATE.OWNER_RATIFICATION_REQUIRED,
+                    ownerRatificationRequired: true,
+                    capabilityId, operation,
+                    reason: "AUTHORITY_UNAVAILABLE", detail: null
+                };
+            }
             let grant = null;
             if (authorityStore) { try { grant = await authorityStore.getCapability(capabilityId); } catch { grant = null; } }
             const boundScope = deviceScope(operation, parameters, scope, grant?.payload?.scope ?? []);

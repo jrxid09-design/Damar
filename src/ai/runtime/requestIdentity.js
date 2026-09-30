@@ -28,17 +28,16 @@ function canonicalRequestExec(request) {
     let exec;
 
     if (request.exec && typeof request.exec === "object") {
+        // N2-FINAL: grant kanonik sudah ternormalisasi dan terdaftar
+        // di WeakSet domain — kembalikan langsung agar keanggotaan
+        // tidak hilang akibat spread (kontrak: isCanonicalInternalGrant
+        // harus tetap true setelah melewati batas runtime).
+        if (Authorization.isCanonicalInternalGrant(request.exec)) {
+            return request.exec;
+        }
         // M-1 rev4 — CABANG INI DULU BYPASS KANONISASI SEPENUHNYA:
         // capabilitySet mutable dari pemanggil lolos sampai ke tepi
         // provider. Kini jalur exec pun dinormalisasi.
-        //
-        // Salin dangkal — spread MENYALIN symbol-keyed properties,
-        // sehingga provenance/grant kanonik otonom
-        // (Authorization.INTERNAL_GRANT_TOKEN) selamat; jangan pernah
-        // membangun ulang objek ini field-per-field lewat identity()
-        // yang akan mencabut token tersebut (kontrak N2: grant kanonik
-        // = batas otonom positif-teridentifikasi ⇒ efektif 'system'
-        // di konsumen seperti ToolBus/agentHub.delegatedRoleOf).
         exec = { ...request.exec };
     }
     else {

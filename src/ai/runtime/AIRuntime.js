@@ -246,6 +246,10 @@ class AIRuntime extends BaseComponent {
 
 }
 
+    getToolRegistry() {
+        return runtimeRegistries.get(this) ?? null;
+    }
+
     async chat(request) {
 
         this.validator.validate(request);

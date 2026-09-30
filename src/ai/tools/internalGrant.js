@@ -29,7 +29,23 @@ function createInternalGrantDomain() {
             scopeByGrant.get(value)?.includes(String(toolName)) === true;
     }
 
-    return Object.freeze({ mintCanonicalInternalGrant, isCanonicalInternalGrant, isToolAuthorizedByGrant });
+    function registerExec(exec) {
+        if (exec === null || typeof exec !== "object" || utilTypes.isProxy(exec)) return null;
+        const capSet = exec.capabilitySet;
+        const scope = Array.isArray(capSet) ? Object.freeze([...capSet]) : Object.freeze([]);
+        grantSet.add(exec);
+        scopeByGrant.set(exec, scope);
+        return exec;
+    }
+
+    return Object.freeze({ mintCanonicalInternalGrant, isCanonicalInternalGrant, isToolAuthorizedByGrant, registerExec });
 }
 
-module.exports = { createInternalGrantDomain };
+const _singleton = createInternalGrantDomain();
+
+module.exports = {
+    createInternalGrantDomain,
+    mintCanonicalInternalGrant: (opts) => _singleton.mintCanonicalInternalGrant(opts),
+    isCanonicalInternalGrant: (value) => _singleton.isCanonicalInternalGrant(value),
+    isToolAuthorizedByGrant: (value, toolName) => _singleton.isToolAuthorizedByGrant(value, toolName)
+};

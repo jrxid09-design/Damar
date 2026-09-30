@@ -112,25 +112,74 @@ class ToolBus {
     }
 
     /**
-     * Legacy compatibility entry point — REFUSES, unconditionally.
+     * Legacy compatibility entry point.
      *
-     * The shape of the result is preserved for legacy callers
-     * ({ok, result, error, tool, executedTool, via, attempts, durationMs}) so
-     * callers degrade honestly instead of crashing, but NO handler is invoked
-     * and no authority is evaluated or minted here.
+     * Ketika permintaan membawa `context.exec.capabilitySet`, eksekusi
+     * terkontrol via ToolRegistry diperbolehkan — HANYA untuk tool yang
+     * berada di dalam set tersebut. Tool di luar set menerima penolakan
+     * bertipe. Permintaan tanpa capabilitySet ditolak penuh (jalur lama).
      *
-     * @returns {Promise<{ok: boolean, result: null, error: string, tool: string,
-     *   executedTool: null, via: null, attempts: Array, durationMs: number}>}
+     * @returns {Promise<{ok: boolean, result: *, error: string|null, tool: string,
+     *   executedTool: string|null, via: string|null, attempts: Array, durationMs: number}>}
      */
     async execute(request = null) {
 
         const started = Date.now();
 
-        // Permintaan dibaca DEFENSIF, tidak lewat parameter destructuring:
-        // container hostile (Proxy/getter yang melempar, thenable, primitif,
-        // null) tidak boleh membuat exception mentah keluar dari sini — yang
-        // keluar tetap penolakan bertipe, sesuai kontrak fail-closed.
+        // Permintaan dibaca DEFENSIF, tidak lewat parameter destructuring.
         const name = this.readRequestName(request);
+
+        // Baca capabilitySet dari konteks exec secara defensif.
+        let exec = null;
+        let capabilitySet = null;
+        try {
+            exec = request?.context?.exec ?? null;
+            const cs = exec?.capabilitySet;
+            if (Array.isArray(cs)) capabilitySet = cs;
+        }
+        catch { /* defensive */ }
+
+        if (capabilitySet !== null) {
+            const { capSetWithin, canonicalCapabilityId } = require("../ai/tools/Authorization");
+            const canonicalName = canonicalCapabilityId(name);
+
+            if (!capSetWithin(name, capabilitySet)) {
+                const durationMs = Date.now() - started;
+                const error = `ditolak otorisasi: '${name}' di luar capability-set delegasi`;
+                this.record(name, false, durationMs, error);
+                return {
+                    ok: false, result: null, error,
+                    tool: name, executedTool: null, via: null,
+                    attempts: [{ tool: name, ok: false, error, refused: "outside-capability-set" }],
+                    durationMs
+                };
+            }
+
+            // Tool ada di dalam set — eksekusi via ToolRegistry.
+            try {
+                const result = await ToolRegistry.execute(
+                    canonicalName, request?.args ?? {}, { exec });
+                const durationMs = Date.now() - started;
+                this.record(name, true, durationMs, null);
+                return {
+                    ok: true, result, error: null,
+                    tool: name, executedTool: canonicalName, via: "registry",
+                    attempts: [{ tool: canonicalName, ok: true }],
+                    durationMs
+                };
+            }
+            catch (err) {
+                const durationMs = Date.now() - started;
+                const error = String(err?.message ?? err);
+                this.record(name, false, durationMs, error);
+                return {
+                    ok: false, result: null, error,
+                    tool: name, executedTool: null, via: null,
+                    attempts: [{ tool: name, ok: false, error }],
+                    durationMs
+                };
+            }
+        }
 
         const refusal = this.refuse(name, Date.now() - started);
         this.record(name, false, refusal.durationMs, refusal.error);

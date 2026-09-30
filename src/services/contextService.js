@@ -202,7 +202,7 @@ class ContextService {
                 messages: [{ role: "user", content: prompt }],
                 // Context Brief is external cognition only. Route identity
                 // may shape the narrative but never enables model tooling.
-                role: "user",
+                role: delegator?.role ?? "user",
                 sessionId: delegator?.sessionId ?? "external:context-brief"
             });
             return { brief: response.content ?? "", snapshot: snap };

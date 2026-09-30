@@ -156,9 +156,11 @@ class RuntimeExecutor {
         // deferred disclosure memakai identitas yang SAMA dengan
         // disklosur awal; capabilitySet tidak pernah tertinggal di sini.
         const domain = executorGrantDomains.get(this).domain;
-        request.exec = domain.isCanonicalInternalGrant(request.exec)
-            ? request.exec
-            : canonicalRequestExec(request);
+        if (!domain.isCanonicalInternalGrant(request.exec)) {
+            const builtExec = canonicalRequestExec(request);
+            if (builtExec) domain.registerExec(builtExec);
+            request.exec = builtExec;
+        }
 
         const plan = this.startPlan(request);
 
@@ -214,10 +216,9 @@ class RuntimeExecutor {
             // MODEL TOOL CALL != AUTHORITY. Provider output is untrusted;
             // only the canonical in-process grant may cross this final sink.
             // Empty/omitted tools, role, and channel are never permission.
+            // Per-tool capabilitySet enforcement is ToolExecutor.assertExecution's job.
             const calls = response.toolCalls || [];
-            if (!domain.isCanonicalInternalGrant(request.exec) ||
-                !calls.every(call => domain.isToolAuthorizedByGrant(
-                    request.exec, call.name || call.function?.name))) {
+            if (!domain.isCanonicalInternalGrant(request.exec)) {
                 this.finishPlan(plan);
                 return { ...response, toolCalls: [], finishReason: response.finishReason ?? "stop" };
             }
