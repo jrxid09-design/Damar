@@ -38,7 +38,17 @@ function createInternalGrantDomain() {
         return exec;
     }
 
-    return Object.freeze({ mintCanonicalInternalGrant, isCanonicalInternalGrant, isToolAuthorizedByGrant, registerExec });
+    // P1-H-FIX: adopt a grant minted by another domain so cross-boundary
+    // isCanonicalInternalGrant checks pass. Grants minted by per-executor
+    // domains must also live in the global singleton WeakSet.
+    function registerGrant(grant, authorizedTools) {
+        if (grant === null || typeof grant !== "object" || utilTypes.isProxy(grant)) return;
+        const scope = Object.freeze([...new Set((authorizedTools ?? []).map(n => String(n)))]);
+        grantSet.add(grant);
+        scopeByGrant.set(grant, scope);
+    }
+
+    return Object.freeze({ mintCanonicalInternalGrant, isCanonicalInternalGrant, isToolAuthorizedByGrant, registerExec, registerGrant });
 }
 
 const _singleton = createInternalGrantDomain();
@@ -47,5 +57,6 @@ module.exports = {
     createInternalGrantDomain,
     mintCanonicalInternalGrant: (opts) => _singleton.mintCanonicalInternalGrant(opts),
     isCanonicalInternalGrant: (value) => _singleton.isCanonicalInternalGrant(value),
-    isToolAuthorizedByGrant: (value, toolName) => _singleton.isToolAuthorizedByGrant(value, toolName)
+    isToolAuthorizedByGrant: (value, toolName) => _singleton.isToolAuthorizedByGrant(value, toolName),
+    registerGrant: (grant, authorizedTools) => _singleton.registerGrant(grant, authorizedTools)
 };
