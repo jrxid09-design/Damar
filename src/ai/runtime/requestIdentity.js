@@ -35,6 +35,18 @@ function canonicalRequestExec(request) {
         if (Authorization.isCanonicalInternalGrant(request.exec)) {
             return request.exec;
         }
+        // P1-G-FIX: frozen exec with autonomous-source pattern and no
+        // capabilitySet is a foreign-domain grant (or crafted attack).
+        // Spreading it preserves role:"system" but discards scope —
+        // granting broad tool access. Return undefined so the caller
+        // gets no-identity (→ least-privilege "user" with no tools).
+        const maybeGrant = request.exec;
+        if (Object.isFrozen(maybeGrant) &&
+            !("capabilitySet" in maybeGrant) &&
+            typeof maybeGrant.source === "string" &&
+            maybeGrant.source.startsWith("autonomous:")) {
+            return undefined;
+        }
         // M-1 rev4 — CABANG INI DULU BYPASS KANONISASI SEPENUHNYA:
         // capabilitySet mutable dari pemanggil lolos sampai ke tepi
         // provider. Kini jalur exec pun dinormalisasi.

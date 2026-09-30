@@ -235,6 +235,14 @@ function isPrivileged(role) {
  */
 function resolveDelegator(initiatorExec = null, internalOrigin = false, provenance = "runtime") {
 
+    // P1-F-FIX: canonical grant must pass through intact — spreading loses
+    // WeakSet membership, discarding the authorizedTools scope. Check BEFORE
+    // role extraction so role:"system" on a grant does not trigger the spread
+    // path and silently promote it to unrestricted system-level access.
+    if (isCanonicalInternalGrant(initiatorExec)) {
+        return initiatorExec;
+    }
+
     // 1. Inisiator nyata menang. Token grant diLUCUTKAN dari identitas:
     //    spread menyalin symbol-keyed properti, jadi hapus eksplisit —
     //    identitas apa pun yang datang dengan token bukan identitas sah.
