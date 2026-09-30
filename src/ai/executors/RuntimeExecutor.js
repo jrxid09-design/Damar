@@ -76,6 +76,10 @@ class RuntimeExecutor {
 
     }
 
+    get toolExecutor() {
+        return executorToolExecutors.get(this) ?? null;
+    }
+
     /**
      * Catatan langkah yang berjalan (Â§29, Â§30).
      *
