@@ -55,6 +55,7 @@ function admit(workspace, item, config, nowMs) {
     const key = String(item.key ?? "").slice(0, 160);
     if (!key) throw new Error("GlobalWorkspace item requires a key — orphan projections refused (W10-L1)");
 
+    if (!item) throw new Error("GlobalWorkspace.admit requires a non-null item — null projection refused (W10-L1)");
     if (!config || !config.salienceWeights || !config.workspace) {
         throw new Error("GlobalWorkspace.admit requires config with salienceWeights and workspace — malformed config refused (W10-L1)");
     }
