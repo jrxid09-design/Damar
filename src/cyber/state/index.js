@@ -21,7 +21,7 @@
 const contracts = require("../contracts");
 const {
     GRAPH_ENTITIES, GRAPH_RELATIONS, EDGE_STATES, edgeRank,
-    planPathQuery, DCD_FORBIDDEN_TIERS,
+    planPathQuery, DCD_FORBIDDEN_TIERS, ALLOWED_TIERS, EPISTEMIC_CLASSES,
 } = contracts;
 
 const VALID_ENTITY_KINDS = Object.freeze(new Set(GRAPH_ENTITIES));
@@ -44,8 +44,10 @@ function createCyberStateProjection() {
         if (typeof entityId !== "string" || !entityId) throw new Error("entityId required");
         if (!VALID_ENTITY_KINDS.has(kind)) throw new Error(`unknown entity kind '${kind}'`);
         if (!Number.isFinite(observedAt)) throw new Error("observedAt must be finite epoch-ms");
-        // DC-08/DC-61: DCD projection cannot carry T1/T3 tiers
-        if (tier && DCD_FORBIDDEN_TIERS.includes(tier)) throw new Error(`DCD projection cannot carry tier '${tier}' (DC-08/DC-61)`);
+        // DC-08/DC-61: only ALLOWED_TIERS may enter the DCD projection
+        if (tier && !ALLOWED_TIERS.includes(tier)) throw new Error(`DCD projection cannot carry tier '${tier}' (not in ALLOWED_TIERS; DC-08/DC-61)`);
+        if (epistemicClass && !EPISTEMIC_CLASSES.includes(epistemicClass)) throw new Error(`unknown epistemicClass '${epistemicClass}'`);
+        if (epistemicClass === "VERIFIED") throw new Error("DCD cannot record VERIFIED epistemicClass in graph (DC-61)");
 
         const e = Object.freeze({
             entityId,
@@ -100,6 +102,7 @@ function createCyberStateProjection() {
         const { assetScope, maxDepth, topK } = qResult.plan;
         const paths = [];
         const visited = new Set();
+        const scopeSet = new Set(assetScope);
 
         for (const seed of assetScope) {
             if (paths.length >= topK) break;
@@ -114,6 +117,8 @@ function createCyberStateProjection() {
                     const edge = edges[key];
                     if (edge.src !== node) continue;
                     const next = edge.dst;
+                    // DC-58 / asset-scope: only traverse within declared scope
+                    if (!scopeSet.has(next)) continue;
                     const newPath = [...path, next];
                     paths.push(Object.freeze(newPath));
                     if (paths.length >= topK) break;

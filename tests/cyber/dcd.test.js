@@ -161,7 +161,8 @@ test("STATE: query within scope returns paths", () => {
     g.upsertEntity({ entityId: "h1", kind: "Host", observedAt: NOW });
     g.upsertEntity({ entityId: "svc1", kind: "Service", observedAt: NOW });
     g.upsertEdge("h1", "runs", "svc1", "OBSERVED", []);
-    const r = g.query({ assetScope: ["h1"] });
+    // Both nodes must be in scope for the edge between them to appear (F4 fix: scope is a filter)
+    const r = g.query({ assetScope: ["h1", "svc1"] });
     assert.equal(r.ok, true);
     assert.ok(r.paths.length > 0);
 });
@@ -249,6 +250,8 @@ test("ACTION: registerCyberActuator stores descriptor", () => {
 });
 
 test("ACTION: makeSecurityIntent builds ActionIntent without dispatch method (DC-07)", () => {
+    // http-probe must be registered before intent construction (F1 fix: unregistered = throw)
+    action.registerCyberActuator({ capabilityId: "http-probe", operations: ["GET", "HEAD"], isSimulation: false });
     const env = makeEnvelope();
     const intent = action.makeSecurityIntent(env, { capabilityId: "http-probe", operation: "GET" }, "corr-1");
     assert.equal(typeof intent.capabilityId, "string");
@@ -396,4 +399,58 @@ test("BOUNDARY: INCIDENT_CONFIRMED carries no authority grant (§12/DC-70)", () 
     const inc = engine.getIncident("inc-boundary");
     assert.equal(inc.state, "INCIDENT_CONFIRMED");
     assert.equal(inc.authorizedAction, null);
+});
+
+/* ------------------------------------------ R3 regression tests */
+
+test("R3-F1-REGRESSION: makeSecurityIntent rejects unregistered capabilityId (§12 SIMULATION_NEQ_EXECUTION)", () => {
+    const env = makeEnvelope({ allowed_capabilities: ["r3-registered"] });
+    // Unregistered capability → must throw, not silently stamp isSimulation:false
+    assert.throws(
+        () => action.makeSecurityIntent(env, { capabilityId: "r3-unknown-cap", operation: "run" }),
+        /not registered/,
+    );
+    // Registered capability → succeeds
+    action.registerCyberActuator({ capabilityId: "r3-registered", operations: ["scan"], isSimulation: true });
+    const intent = action.makeSecurityIntent(env, { capabilityId: "r3-registered", operation: "scan" });
+    assert.equal(intent.metadata.isSimulation, true);
+});
+
+test("R3-F2-REGRESSION: createMission binds envelope.mission_id to missionId", () => {
+    const r = mission.createMission({
+        missionId: "m-r3-binding",
+        envelopeParams: { mission_id: "m-DIVERGENT", principal: "owner", objective: "o", authority_reference: "a" },
+        nowMs: NOW,
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.mission.missionId, "m-r3-binding");
+    assert.equal(r.mission.envelope.mission_id, "m-r3-binding",
+        "envelope.mission_id must equal missionId — no identity divergence");
+});
+
+test("R3-F3-REGRESSION: upsertEntity rejects unknown tiers and VERIFIED epistemicClass", () => {
+    const g = state.createCyberStateProjection();
+    assert.throws(
+        () => g.upsertEntity({ entityId: "bad-t999", kind: "Host", observedAt: NOW, tier: "T999" }),
+        /ALLOWED_TIERS|not in ALLOWED/,
+    );
+    assert.throws(
+        () => g.upsertEntity({ entityId: "bad-verified-ec", kind: "Host", observedAt: NOW, tier: "T4", epistemicClass: "VERIFIED" }),
+        /VERIFIED|DC-61/,
+    );
+    const ok = g.upsertEntity({ entityId: "ok-t7-obs", kind: "Host", observedAt: NOW, tier: "T7", epistemicClass: "OBSERVED" });
+    assert.equal(ok.tier, "T7");
+    assert.equal(ok.epistemicClass, "OBSERVED");
+});
+
+test("R3-F4-REGRESSION: asset-scope query does not return out-of-scope nodes", () => {
+    const g = state.createCyberStateProjection();
+    g.upsertEntity({ entityId: "r3-h-in", kind: "Host", observedAt: NOW });
+    g.upsertEntity({ entityId: "r3-h-out", kind: "Host", observedAt: NOW });
+    g.upsertEdge("r3-h-in", "connects_to", "r3-h-out", "OBSERVED", []);
+    const r = g.query({ assetScope: ["r3-h-in"], maxDepth: 3, topK: 10 });
+    assert.equal(r.ok, true);
+    const allNodes = r.paths.flat();
+    assert.ok(!allNodes.includes("r3-h-out"),
+        "out-of-scope node must not appear in paths when scoped query is issued");
 });
