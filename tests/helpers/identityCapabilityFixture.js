@@ -17,10 +17,25 @@ function grantStore({ status = "ACTIVE", expiresAt = null, scope = [], capabilit
     };
 }
 
+function stubReplayStore() {
+    const seen = new Map();
+    return {
+        rollbackResistance: "EXTERNAL",
+        async reserve(binding) {
+            const d = binding.digest;
+            if (seen.has(d)) return { reserved: false, prior: { state: seen.get(d) } };
+            seen.set(d, "PENDING");
+            return { reserved: true };
+        },
+        async transition(digest, state) { seen.set(digest, state); }
+    };
+}
+
 function identityCapabilityRuntime(options = {}) {
     return createIdentityCapabilityRuntime({
         authorityStore: grantStore(options),
-        acknowledge: options.acknowledge ?? (() => ({ ok: true, receipt: "identity-test-ack" }))
+        acknowledge: options.acknowledge ?? (() => ({ ok: true, receipt: "identity-test-ack" })),
+        replayStore: options.replayStore ?? stubReplayStore()
     });
 }
 
