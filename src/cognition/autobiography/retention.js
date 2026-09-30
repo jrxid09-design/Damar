@@ -13,8 +13,10 @@ const STATE_RANK = {
 
 function assertCompactionDoesNotRaise(before, after) {
     // RT-W10-28: compaction never raises verificationState
-    const beforeRank = STATE_RANK[before] !== undefined ? STATE_RANK[before] : 2;
-    const afterRank = STATE_RANK[after] !== undefined ? STATE_RANK[after] : 2;
+    if (STATE_RANK[before] === undefined) throw new Error(`Unknown verificationState: "${before}" (W10-L3)`);
+    if (STATE_RANK[after] === undefined) throw new Error(`Unknown verificationState: "${after}" (W10-L3)`);
+    const beforeRank = STATE_RANK[before];
+    const afterRank = STATE_RANK[after];
     if (afterRank > beforeRank) {
         throw new Error(`Compaction may not raise verificationState from ${before} to ${after} (W10-L3/RT-W10-28)`);
     }
