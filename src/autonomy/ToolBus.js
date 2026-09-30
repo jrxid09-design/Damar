@@ -129,58 +129,9 @@ class ToolBus {
         // Permintaan dibaca DEFENSIF, tidak lewat parameter destructuring.
         const name = this.readRequestName(request);
 
-        // Baca capabilitySet dari konteks exec secara defensif.
-        let exec = null;
-        let capabilitySet = null;
-        try {
-            exec = request?.context?.exec ?? null;
-            const cs = exec?.capabilitySet;
-            if (Array.isArray(cs)) capabilitySet = cs;
-        }
-        catch { /* defensive */ }
-
-        if (capabilitySet !== null) {
-            const { capSetWithin, canonicalCapabilityId } = require("../ai/tools/Authorization");
-            const canonicalName = canonicalCapabilityId(name);
-
-            if (!capSetWithin(name, capabilitySet)) {
-                const durationMs = Date.now() - started;
-                const error = `ditolak otorisasi: '${name}' di luar capability-set delegasi`;
-                this.record(name, false, durationMs, error);
-                return {
-                    ok: false, result: null, error,
-                    tool: name, executedTool: null, via: null,
-                    attempts: [{ tool: name, ok: false, error, refused: "outside-capability-set" }],
-                    durationMs
-                };
-            }
-
-            // Tool ada di dalam set — eksekusi via ToolRegistry.
-            try {
-                const result = await ToolRegistry.execute(
-                    canonicalName, request?.args ?? {}, { exec });
-                const durationMs = Date.now() - started;
-                this.record(name, true, durationMs, null);
-                return {
-                    ok: true, result, error: null,
-                    tool: name, executedTool: canonicalName, via: "registry",
-                    attempts: [{ tool: canonicalName, ok: true }],
-                    durationMs
-                };
-            }
-            catch (err) {
-                const durationMs = Date.now() - started;
-                const error = String(err?.message ?? err);
-                this.record(name, false, durationMs, error);
-                return {
-                    ok: false, result: null, error,
-                    tool: name, executedTool: null, via: null,
-                    attempts: [{ tool: name, ok: false, error }],
-                    durationMs
-                };
-            }
-        }
-
+        // P1-3-FIX: ToolBus is NOT an execution owner. All legacy execution
+        // attempts are refused unconditionally — there is no path through
+        // ToolRegistry or any other handler from this class.
         const refusal = this.refuse(name, Date.now() - started);
         this.record(name, false, refusal.durationMs, refusal.error);
         return refusal;

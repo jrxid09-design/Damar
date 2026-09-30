@@ -143,10 +143,24 @@ class SelfHealingEngine {
                 // Retry agresif dengan backoff lebih panjang.
                 // M3/CLOSURE: identitas delegasi (exec/capabilitySet)
                 // IKUT pada pengajuan ulang — pemulihan bukan hop pelucutan.
-                outcome = await toolBus.execute({
-                    name: tool, args, timeoutMs: 90000, retries: 3,
-                    context: { goal: goalId, exec: delegator }
-                });
+                // P1-3: ToolBus tidak mengeksekusi (W8). Jika tool ada di
+                // capabilitySet delegator, eksekusi langsung ke ToolRegistry.
+                const capSet = delegator?.capabilitySet ?? null;
+                const { capSetWithin, canonicalCapabilityId } = require("../ai/tools/Authorization");
+                if (Array.isArray(capSet) && capSetWithin(tool, capSet)) {
+                    const canonId = canonicalCapabilityId(tool);
+                    const { ToolRegistry } = require("../core/tools");
+                    try {
+                        const result = await ToolRegistry.execute(canonId, args, { exec: delegator });
+                        outcome = { ok: true, result };
+                    }
+                    catch (e) { outcome = { ok: false, error: e.message }; }
+                } else {
+                    outcome = await toolBus.execute({
+                        name: tool, args, timeoutMs: 90000, retries: 3,
+                        context: { goal: goalId, exec: delegator }
+                    });
+                }
                 attempts.push({ strategy: "retry-aggressive", ok: outcome.ok });
                 break;
             }
