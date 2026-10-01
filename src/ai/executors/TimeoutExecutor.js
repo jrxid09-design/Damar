@@ -8,23 +8,34 @@ class TimeoutExecutor {
 
     async execute(callback) {
 
-        return Promise.race([
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            const timer = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                reject(new Error("Request timeout."));
+            }, this.timeout);
 
-            callback(),
-
-            new Promise((_, reject) => {
-
-                setTimeout(() => {
-
-                    reject(
-                        new Error("Request timeout.")
-                    );
-
-                }, this.timeout);
-
-            })
-
-        ]);
+            // The timeout is a guard, not an owned background task. Clear it
+            // on both callback outcomes so completed requests do not retain
+            // live timers and keep a test/runtime process open unnecessarily.
+            Promise.resolve()
+                .then(callback)
+                .then(
+                    value => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(timer);
+                        resolve(value);
+                    },
+                    error => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(timer);
+                        reject(error);
+                    }
+                );
+        });
 
     }
 

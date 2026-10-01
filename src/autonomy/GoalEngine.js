@@ -28,6 +28,34 @@ const telemetry = require("../services/telemetryService");
 const MAX_ITERATIONS = 8;          // batas adaptasi per tujuan
 const MAX_SKILL_CREATIONS = 3;     // cegah pembuatan skill liar
 
+// Timeout guards must release their timer when the operation settles. A
+// completed model call must not leave a live event-loop handle behind.
+function withTimeout(operation, timeoutMs, message) {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            reject(new Error(message));
+        }, timeoutMs);
+
+        Promise.resolve()
+            .then(operation)
+            .then(value => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                resolve(value);
+            })
+            .catch(error => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                reject(error);
+            });
+    });
+}
+
 const PROMPT_PLAN = (goal) =>
     `Kamu perencana otonom Damar. Tujuan: "${goal.title}"\n` +
     (goal.description ? `Deskripsi: ${goal.description}\n` : "") +
@@ -573,16 +601,13 @@ class GoalEngine {
 
         try {
 
-            const res = await Promise.race([
-                aiRuntime.chat({
+            const res = await withTimeout(() => aiRuntime.chat({
                     // N2-FINAL: giliran planner mewarisi otoritas inisiator.
                     role: this.turnRole(delegator),
                     ...this.turnRestrictions(delegator),
                     messages: [{ role: "user", content: PROMPT_PLAN(goal) }],
                     ...(route.model ? { model: route.model } : {})
-                }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error("plan timeout")), 60000))
-            ]);
+                }), 60000, "plan timeout");
 
             const parsed = extractJson(res.content);
 
@@ -621,15 +646,12 @@ class GoalEngine {
 
         try {
 
-            const res = await Promise.race([
-                aiRuntime.chat({
+            const res = await withTimeout(() => aiRuntime.chat({
                     // N2-FINAL: evaluator mewarisi inisiator, bukan system.
                     role: this.turnRole(delegator),
                     ...this.turnRestrictions(delegator),
                     messages: [{ role: "user", content: PROMPT_EVALUATE(goal, step, outcome) }]
-                }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error("eval timeout")), 45000))
-            ]);
+                }), 45000, "eval timeout");
 
             const parsed = extractJson(res.content);
             if (["pass", "fail", "impossible"].includes(parsed?.verdict)) {
@@ -695,15 +717,12 @@ class GoalEngine {
 
             try {
                 const aiRuntime = require("../services/aiRuntimeService");
-                const res = await Promise.race([
-                    aiRuntime.chat({
+                const res = await withTimeout(() => aiRuntime.chat({
                         // N2-FINAL: skill-spec mewarisi inisiator tujuan.
                         role: this.turnRole(delegator),
                         ...this.turnRestrictions(delegator),
                         messages: [{ role: "user", content: PROMPT_SKILL_SPEC(goal, step, gap.found[0]) }]
-                    }),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error("skill-spec timeout")), 60000))
-                ]);
+                    }), 60000, "skill-spec timeout");
                 spec = extractJson(res.content);
                 if (spec?.id) await this.log(goal.id, "create_skill", "spec via LLM langsung", spec.id, [], true);
             }
@@ -751,11 +770,11 @@ class GoalEngine {
 
             // N2 Round-3 — invarian delegasi: warisi inisiator tujuan,
             // jangan pernah menciptakan grant di jalur turunan ini.
-            const res = await Promise.race([
-                agentHub.run("damar", PROMPT_SKILL_SPEC(goal, step, null),
-                    { exec: delegator }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error("agent-spec timeout")), 90000))
-            ]);
+            const res = await withTimeout(
+                () => agentHub.run("damar", PROMPT_SKILL_SPEC(goal, step, null), { exec: delegator }),
+                90000,
+                "agent-spec timeout"
+            );
 
             if (res?.ok) {
                 const spec = extractJson(res.output);
