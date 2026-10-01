@@ -36,7 +36,7 @@ test("HOTKEY: dispatch memicu perintah semantik summon via host", async () => {
         port.close();
         assert.equal(port.dispatch(DEFAULT_SUMMON_COMBO).ok, false);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -65,7 +65,7 @@ test("TRAY: aksi tray mendelegasikan semantik host tanpa UI", async () => {
             "tray dismiss hanya DORMANT, proses tetap hidup");
         assert.equal(host.phase, "READY");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 

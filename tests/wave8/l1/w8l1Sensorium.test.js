@@ -356,7 +356,12 @@ test("W8L1-repair-17: the bridge's tracked-channel map is bounded and evicts the
     // declared entity, which is exactly the scenario the bridge's own
     // bounded tracked-channel map (not worldmodel's separate belief
     // bounds) needs to survive without growing unboundedly.
-    const MAX = 512 * 64;
+    // The contract only requires crossing the tracked-channel bound.  A
+    // 32k-observation burst creates a large real-worldmodel promise backlog
+    // without increasing the assertion's value, and can starve the next
+    // runtime-composition test.  Cross the bound with the smallest useful
+    // real-path workload instead.
+    const MAX = 512;
     for (let i = 0; i < MAX + 5; i++) {
         clock.advance(1000); // stay well above every rate cap
         bridge.applyObservationPlan({
@@ -379,13 +384,13 @@ test("W8L1-repair-18: createRuntimeCore's sensoriumBridge stays null when enable
     const core = await createRuntimeCore({});
     assert.equal(core.sensoriumBridge, null);
     assert.equal(core.cognition, null);
-    core.shutdown();
+    await core.shutdown();
 });
 
 test("W8L1-repair-19: createRuntimeCore's sensoriumBridge stays null when enableCognition is true but cognitionMode is 'off' (cognition.lanes never constructed)", async () => {
     const core = await createRuntimeCore({ enableCognition: true });
     assert.equal(core.sensoriumBridge, null);
-    core.shutdown();
+    await core.shutdown();
 });
 
 test("W8L1-repair-20: createRuntimeCore wires a live sensoriumBridge end-to-end when enableCognition is true and cognitionMode is 'shadow', with core.body and cognition.lanes.worldModel both present", async () => {
@@ -411,7 +416,7 @@ test("W8L1-repair-20: createRuntimeCore wires a live sensoriumBridge end-to-end 
     assert.equal(r.accepted, true);
     const q = wm.query({ subject: { entityId: HOST }, attribute: "sensor:vision.capture" });
     assert.equal(q.unknown, undefined);
-    core.shutdown();
+    await core.shutdown();
 });
 
 /* ---------------------------------------------------------------------- */

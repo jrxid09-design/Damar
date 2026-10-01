@@ -57,7 +57,7 @@ test("ALUR: wake → LISTENING → ASR → THINKING → SPEAKING → settle", as
             "settle dengan dismiss kembali ke DORMANT");
         assert.equal(controller.phase, VOICE_TURN_PHASE.SETTLED);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -84,7 +84,7 @@ test("BARGE-IN: hanya rekomendasi (INTERRUPTION_RECOMMENDED), bukan cancellation
         controller.settle({});
         assert.equal(controller.snapshot().hasSpeakingToken, false);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -102,7 +102,7 @@ test("VOICE != authority: input suara hanya interaksi; tanpa adapter TTS/ASR tet
         assert.equal(r.ok, false);
         assert.equal(r.code, "VOICE_TRANSCRIPT_EMPTY");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -130,7 +130,7 @@ test("ADAPTER TTS menerima identitas kanonik saat speakChunk", async () => {
         assert.equal(spoken[0].identity.rate, "-8%");
         assert.equal(spoken[0].identity.pitch, "-12Hz");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -141,6 +141,6 @@ test("GUARD: fase ilegal ditolak tertutup (speakChunk di luar SPEAKING)", async 
         assert.equal(r.ok, false);
         assert.equal(r.code, "VOICE_PHASE_ILLEGAL");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });

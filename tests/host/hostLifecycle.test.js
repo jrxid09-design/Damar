@@ -28,7 +28,7 @@ test("LIFECYCLE: BOOT→INITIALIZE→RECOVER→READY dengan Presence DORMANT", a
         assert.equal(host.status().generationHistoryCount >= 2, true,
             "clean start harus mencap generasi runtime baru di ledger");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -53,7 +53,7 @@ test("SUMMON/DISMISS: transisi kanonik via Presence, idempoten saat sudah bangun
         assert.equal(host.health().phase, HOST_PHASE.READY,
             "dismiss TIDAK mematikan host");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -65,17 +65,17 @@ test("DISMISS != SHUTDOWN: proses tetap hidup dan bisa summon ulang", async () =
         const again = host.summon({ source: "after-dismiss" });
         assert.equal(again.ok, true, "setelah dismiss host masih operasional");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
 test("SHUTDOWN idempoten + double shutdown aman; presence OFFLINE", async () => {
     const host = await makeHost();
     host.summon({});
-    const first = host.shutdown("test");
+    const first = await host.shutdown("test");
     assert.equal(first.shutDown, true);
     assert.equal(first.idempotent, false);
-    const second = host.shutdown("test");
+    const second = await host.shutdown("test");
     assert.equal(second.shutDown, true);
     assert.equal(second.idempotent, true);
     assert.equal(host.core.presence.lifecycleState, presenceMod.LIFECYCLE.OFFLINE);
@@ -110,7 +110,7 @@ test("RUNTIME API lokal: COMMAND summon/dismiss/status lewat InteractionBus", as
         });
         assert.equal(r3.accepted, true);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -125,7 +125,7 @@ test("COMMAND tak dikenal / malformed → interaksi selesai dengan penolakan juj
         // state presence tidak berubah
         assert.equal(host.health().presenceState, presenceMod.LIFECYCLE.DORMANT);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -158,7 +158,7 @@ test("FAIL/RECOVER: FAILED lalu recoverNow masuk generasi BARU tanpa resume akti
         assert.equal(endOld.ok, false,
             "token aktivitas generasi lama tidak valid di generasi baru");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -172,6 +172,6 @@ test("RECOVER ringan dari READY: generasi ledger sama, presence tetap sehat", as
             "recover ringan tidak advance ledger generation");
         assert.equal(host.health().healthy, true);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });

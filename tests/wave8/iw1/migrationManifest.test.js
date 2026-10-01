@@ -18,9 +18,15 @@ const ROOT = path.join(__dirname, "..", "..", "..");
 const census = require(path.join(ROOT, "scripts", "wave8-census.js"));
 const { build, clusterFor, riskFor } = require(path.join(ROOT, "scripts", "wave8-iw1-migration-manifest.js"));
 
+// These fixtures are deterministic repository-wide graph walks. Reuse one
+// measured report and one manifest across assertions so the suite tests the
+// contract without rerunning the same expensive census seven times.
+const CENSUS_REPORT = census.analyze({ root: ROOT });
+const MANIFEST = build(ROOT);
+
 test("manifest: every census finding is represented exactly once, and no row is stale", () => {
-    const rep = census.analyze({ root: ROOT });
-    const manifest = build(ROOT);
+    const rep = CENSUS_REPORT;
+    const manifest = MANIFEST;
 
     const censusIds = rep.findings.map(f => `${f.file}:${f.line}:${f.column}:${f.kind}`);
     const rowIds = manifest.findings.map(r => r.id);
@@ -32,8 +38,8 @@ test("manifest: every census finding is represented exactly once, and no row is 
 });
 
 test("manifest: row fields are derived from the census finding they name", () => {
-    const rep = census.analyze({ root: ROOT });
-    const manifest = build(ROOT);
+    const rep = CENSUS_REPORT;
+    const manifest = MANIFEST;
     const byId = new Map(rep.findings.map(f => [`${f.file}:${f.line}:${f.column}:${f.kind}`, f]));
 
     for (const row of manifest.findings) {
@@ -56,7 +62,7 @@ test("manifest: row fields are derived from the census finding they name", () =>
 });
 
 test("manifest: cluster totals are the sum of their own rows", () => {
-    const manifest = build(ROOT);
+    const manifest = MANIFEST;
     const recomputed = new Map();
     for (const row of manifest.findings) {
         const c = recomputed.get(row.cluster) ?? { hits: 0, action_capable: 0, files: new Set(), max_risk: "P2" };
@@ -79,8 +85,8 @@ test("manifest: cluster totals are the sum of their own rows", () => {
 });
 
 test("manifest: the reconciliation block is the census, not a claim about it", () => {
-    const rep = census.analyze({ root: ROOT });
-    const manifest = build(ROOT);
+    const rep = CENSUS_REPORT;
+    const manifest = MANIFEST;
     const r = manifest.reconciliation;
 
     assert.equal(r.raw_sink_count, rep.findings.length);
@@ -96,8 +102,8 @@ test("manifest: the reconciliation block is the census, not a claim about it", (
 });
 
 test("manifest: ingress metrics are measured per production entrypoint", () => {
-    const rep = census.analyze({ root: ROOT });
-    const manifest = build(ROOT);
+    const rep = CENSUS_REPORT;
+    const manifest = MANIFEST;
 
     assert.deepEqual(manifest.reconciliation.production_ingresses_analyzed, rep.ingress.analyzed.length);
     assert.deepEqual(manifest.reconciliation.ungoverned_findings_by_ingress, rep.ingress.ungovernedByIngress);
@@ -114,8 +120,8 @@ test("manifest: ingress metrics are measured per production entrypoint", () => {
 });
 
 test("manifest: the sha fields say what they mean without reading the generator", () => {
-    const manifest = build(ROOT);
-    assert.equal(manifest.measured_source_sha, census.analyze({ root: ROOT }).sha);
+    const manifest = MANIFEST;
+    assert.equal(manifest.measured_source_sha, CENSUS_REPORT.sha);
     assert.equal(manifest.sha, manifest.measured_source_sha, "`sha` is the documented alias");
     assert.match(manifest.generator_head_sha, /^[0-9a-f]{40}$/);
     assert.equal(manifest.sha_meaning.includes("artifact_commit_sha"), false,
@@ -127,8 +133,8 @@ test("manifest: the sha fields say what they mean without reading the generator"
 });
 
 test("manifest: an unclassified path is never resolved by assertion", () => {
-    const rep = census.analyze({ root: ROOT });
-    const manifest = build(ROOT);
+    const rep = CENSUS_REPORT;
+    const manifest = MANIFEST;
 
     const resolved = new Set(manifest.unclassified_resolutions.map(r => r.source_file));
     for (const file of rep.unclassified) {

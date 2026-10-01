@@ -36,7 +36,7 @@ test("FAIL: transport failure — disconnect bus + ingest setelahnya bersih", as
         // Adapter belum tahu; bus yang menolak/menoleransi — tidak boleh crash.
         assert.equal(typeof r.accepted, "boolean");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -54,7 +54,7 @@ test("FAIL: Presence subscriber fault tidak menghambat lifecycle host", async ()
         assert.equal(d.ok, true);
         assert.ok(calls >= 2);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -71,7 +71,7 @@ test("FAIL: recovery failure — failRecovery menghasilkan FAILED lalu recoverNo
         assert.equal(rec.ok, true);
         assert.equal(host.health().presenceState, presenceMod.LIFECYCLE.DORMANT);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -93,7 +93,7 @@ test("FAIL: Governor pressure UNKNOWN → representasi degradasi, bukan crash/pe
         assert.equal(host.summon({}).ok, true);
         assert.equal(host.dismiss({}).ok, true);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -104,13 +104,13 @@ test("FAIL: duplicate summon/dismiss & double shutdown — tanpa korupsi state",
         for (let i = 0; i < 5; i++) host.dismiss({});
         assert.equal(host.health().presenceState, presenceMod.LIFECYCLE.DORMANT);
 
-        host.shutdown("first");
+        await host.shutdown("first");
         const snapBefore = terminalSnapshot(host);
-        host.shutdown("second");
+        await host.shutdown("second");
         assert.deepEqual(terminalSnapshot(host), snapBefore,
             "status terminal stabil setelah shutdown ganda");
     } finally {
-        void host;
+        await host.shutdown("test-end");
     }
 });
 
@@ -126,7 +126,7 @@ test("FAIL: malformed interactions storm — bus menolak, host tetap sehat", asy
         assert.equal(att.adapter.snapshot().counters.accepted <= 1, true);
         assert.equal(host.health().healthy, true);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -141,7 +141,7 @@ test("FAIL: bridge listener exception tidak menjatuhkan emitter sumber", async (
         emitter.emit("telegram:message", { chatId: {}, preview: {} });
         assert.equal(host.health().healthy, true);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -164,6 +164,6 @@ test("FAIL: interupsi runtime saat WAITING_FOR_OWNER — dismiss legal, approval
             capabilityId: "owner.wait.implicit.approval", action: "use"
         })).allowed, false);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });

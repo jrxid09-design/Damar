@@ -32,7 +32,7 @@ test("HUKUM: summon != authority — summon tidak membuat/memodifikasi grant", a
         assert.equal(attempt.allowed, false,
             "summon TIDAK boleh menghasilkan capability/authority");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -51,7 +51,7 @@ test("HUKUM: voice input != authority — interaksi VOICE tidak menyentuh regist
         assert.equal(attempt.allowed, false,
             "perintah suara tidak pernah menjadi otoritas");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -73,7 +73,7 @@ test("HUKUM: Presence WAITING_FOR_OWNER != approval — owner wait bukan izin", 
         assert.equal(attempt.allowed, false,
             "menunggu owner tidak menyetujui apa pun");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -93,7 +93,7 @@ test("HUKUM: transport claim != owner — claimedIdentity hanya provenance", asy
             capabilityId: "system.owner", action: "assume"
         })).allowed, false);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -115,7 +115,7 @@ test("HUKUM: dismiss tidak mencabut Authority & tidak merusak kontinuitas", asyn
         assert.equal(host.phase, "READY", "dismiss tidak mematikan host");
         assert.ok(authority.canonical || true, "modul authority kanonik utuh");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -139,7 +139,7 @@ test("HUKUM: Governor rejection tetap memblokir admission saat AWAKE/ACTIVE", as
         assert.notEqual(extra.outcome, "ADMIT",
             "admission harus diblokir governor di bawah tekanan antrean penuh");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
