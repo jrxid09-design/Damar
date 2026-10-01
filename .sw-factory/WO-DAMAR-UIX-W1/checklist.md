@@ -8,9 +8,9 @@
 - [x] Add behavioral and authority-boundary tests
 - [x] Review changed source and artifacts
 - [x] Run three consecutive targeted suites
-- [ ] Run final whole-suite regression
-- [ ] Write final evidence report
-- [ ] Create narrow traceable commit
+- [x] Run final whole-suite regression — clean commit run completed; one unrelated pre-existing sandbox host-root failure reproduced in isolation
+- [x] Write final evidence report
+- [x] Create narrow traceable commit
 
 ## Certification
 
@@ -18,5 +18,5 @@
 - [ ] Plan approved by implementation evidence
 - [ ] Implementation complete
 - [ ] Review complete
-- [ ] Verification complete
-- [ ] Handoff complete
+- [x] Verification complete — targeted verification clean; whole-suite has one unrelated baseline/environment failure
+- [x] Handoff complete — candidate commit and evidence delivered; fresh re-audit remains required
