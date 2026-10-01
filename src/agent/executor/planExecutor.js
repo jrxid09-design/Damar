@@ -2,7 +2,7 @@ const AgentPhase = require("../runtime/agentPhase");
 const ExecutionResult = require("./executionResult");
 const Observation = require("../models/observation");
 
-const pluginManager = require("../../plugins/pluginManager");
+const { executeCanonicalAction } = require("../../services/canonicalActionClient");
 
 class PlanExecutor extends AgentPhase {
 
@@ -49,12 +49,21 @@ class PlanExecutor extends AgentPhase {
 
             try {
 
-                const output =
-                    await pluginManager.execute(
-                        toolName,
-                        state,
-                        step.arguments ?? {}
-                    );
+                const output = await executeCanonicalAction({
+                    context: state?.executionContext ?? state?.context ?? state,
+                    capabilityId: toolName,
+                    operation: step.operation ?? "execute",
+                    arguments: step.arguments ?? {},
+                    expectedPostcondition: step.expectedPostcondition ?? null
+                });
+
+                // A handler/result is never equivalent to verified effect.
+                // Plans therefore accept only the Manager's verified
+                // completion outcome; ambiguity and verification failure stay
+                // failures/observations.
+                if (output?.outcome !== "COMPLETED") {
+                    throw new Error(output?.reason ?? output?.detail ?? output?.outcome ?? "canonical action denied");
+                }
 
                 if (output === undefined) {
 

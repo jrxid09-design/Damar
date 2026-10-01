@@ -35,6 +35,7 @@ function kaliTools() {
                 },
                 required: ["command"]
             },
+            meta: { canonicalAuthority: true, sideEffects: true },
             // Risiko destruktif ditegakkan lewat riskCatalog.DESTRUCTIVE
             // (gerbang konfirmasi), bukan field di sini — AITool tak
             // menyimpan metadata.
@@ -60,6 +61,7 @@ function kaliTools() {
                 "OSINT, sniffing/MITM, Active Directory). Pakai untuk tahu apa yang tersedia " +
                 "sebelum menyusun rencana, dan tool mana yang perlu dipasang.",
             parameters: { type: "object", properties: {} },
+            meta: { canonicalAuthority: true, readOnly: true },
             execute: async (_, execution) => executeCanonicalAction({
                 context: contextFromExecution(execution), capabilityId: "damar.kali", operation: "tools", arguments: {},
                 expectedPostcondition: { expect: { completed: { op: "eq", value: true } } }
@@ -76,6 +78,7 @@ function kaliTools() {
                 properties: { tool: { type: "string", description: "Nama tool, mis. 'sqlmap'." } },
                 required: ["tool"]
             },
+            meta: { canonicalAuthority: true, readOnly: true },
             execute: async ({ tool }, execution) => executeCanonicalAction({
                 context: contextFromExecution(execution), capabilityId: "damar.kali", operation: "which", arguments: { tool },
                 expectedPostcondition: { expect: { toolMatches: { op: "eq", value: true }, completed: { op: "eq", value: true } } }
@@ -89,6 +92,7 @@ function kaliTools() {
                 "sekarang. Panggil bila kali_run gagal untuk memastikan Kali memang tersedia " +
                 "sebelum menyimpulkan sebab lain.",
             parameters: { type: "object", properties: {} },
+            meta: { canonicalAuthority: true, readOnly: true },
             execute: async (_, execution) => executeCanonicalAction({
                 context: contextFromExecution(execution), capabilityId: "damar.kali", operation: "status", arguments: {},
                 expectedPostcondition: { expect: { completed: { op: "eq", value: true } } }
