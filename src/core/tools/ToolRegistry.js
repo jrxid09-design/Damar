@@ -2,13 +2,7 @@ const { BaseRegistry } =
     require("../registry");
 
 const toolGuard = require("../safety/toolGuard");
-
-function isConsequential(tool, id) {
-    if (tool?.canonicalAuthority === true || tool?.meta?.canonicalAuthority === true) return true;
-    if (tool?.readOnly === true || tool?.metadata?.readOnly === true || tool?.meta?.readOnly === true) return false;
-    return Boolean(tool?.sideEffects || tool?.metadata?.sideEffects || tool?.meta?.sideEffects ||
-        require("../safety/riskCatalog").riskOf(id, tool));
-}
+const { classifyEffect } = require("../safety/effectClassification");
 
 /**
  * Registry tool lintas plugin.
@@ -101,10 +95,11 @@ class ToolRegistry extends BaseRegistry {
         // Rantai keselamatan bersama (§33, §34, §37, §38, §140).
         // Dijalankan setelah tool ditemukan supaya deklarasi
         // risikonya sendiri terbaca.
+        const classification = classifyEffect(id, tool);
         toolGuard.before(id, args, tool);
 
-        if (isConsequential(tool, id)) {
-            throw new Error(`CANONICAL_AUTHORITY_REQUIRED: '${id}' must execute through the Damar Manager`);
+        if (classification.consequential) {
+            throw new Error(`CANONICAL_AUTHORITY_REQUIRED: '${id}' effect=${classification.effectClass} must execute through the Damar Manager`);
         }
 
         let result;
@@ -133,7 +128,7 @@ class ToolRegistry extends BaseRegistry {
 
         }
 
-        await toolGuard.after(id, args, result);
+        await toolGuard.after(id, args, result, tool);
 
         return result;
 

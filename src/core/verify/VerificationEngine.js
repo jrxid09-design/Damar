@@ -1,5 +1,6 @@
 const { verifierFor } = require("./verifiers");
 const { riskOf } = require("../safety/riskCatalog");
+const { classifyEffect } = require("../safety/effectClassification");
 
 /**
  * Verification Engine (§46, §192, Konstitusi Pasal 5).
@@ -34,9 +35,15 @@ class VerificationEngine {
      * @param {*}      result hasil mentah dari tool
      * @returns {Promise<object>} laporan verifikasi
      */
-    async verify(toolId, args = {}, result = null) {
+    async verify(toolId, args = {}, result = null, tool = null) {
 
-        const destructive = riskOf(toolId);
+        const classified = classifyEffect(toolId, tool);
+        // Standalone verification may receive only an ID (no executable
+        // object). Unknown IDs are not evidence of an effect; registry
+        // execution, which has the object, is the fail-closed owner.
+        const destructive = (tool || String(toolId).toLowerCase().startsWith("http."))
+            ? classified.consequential || riskOf(toolId, tool)
+            : riskOf(toolId, tool);
         const risk = destructive ? "destructive" : "safe";
 
         const verifier = verifierFor(toolId);

@@ -10,6 +10,7 @@
  */
 
 const { riskOf } = require("./riskCatalog");
+const { classifyEffect } = require("./effectClassification");
 
 /**
  * Penjaga sebelum eksekusi — selalu mengizinkan.
@@ -24,7 +25,9 @@ const { riskOf } = require("./riskCatalog");
  */
 function assertAllowed(id, tool = null) {
 
-    return riskOf(id, tool);
+    // Unknown IDs without a tool object are only legacy catalog lookups;
+    // execution callers always provide the executable tool for effect proof.
+    return (tool ? classifyEffect(id, tool).consequential : false) || riskOf(id, tool);
 
 }
 
