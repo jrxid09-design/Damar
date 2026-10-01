@@ -17,7 +17,7 @@ Architecture and conventions: PASS. The new module is a read-only projection at 
 
 Security and authority boundary: PASS. The projection runs after `Authorization.disclosureFilter`, can only narrow candidates, reports `authorityGranted=false`, and no Authority/actuation module was modified.
 
-Tests and build health: PASS for syntax, 3 consecutive integration runs (4/4 each), targeted context/capability/manager suites (260/260), and frozen authority/effect/PlanExecutor/ToolRegistry/notification/DCD suites (267/267). Whole-suite verification is pending final clean-commit run.
+Tests and build health: PASS for syntax, 3 consecutive integration runs (4/4 each), targeted context/capability/manager suites (260/260), and frozen authority/effect/PlanExecutor/ToolRegistry/notification/DCD suites (267/267). Final clean-commit `npm test` completed with one unrelated sandbox host-root failure, reproduced in isolation; no changed-path failure was observed.
 
 User-facing verification: SKIP — runtime selection metadata only; no UI or user-facing surface was added.
 
