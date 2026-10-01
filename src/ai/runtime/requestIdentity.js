@@ -45,7 +45,9 @@ function canonicalRequestExec(request) {
         // the module-private canonical grant path may cross with role system;
         // otherwise a caller could supply a mutable exec object and widen a
         // capabilitySet at the runtime boundary.
-        if (String(maybeGrant.role ?? "").toLowerCase() === "system") {
+        if (String(maybeGrant.role ?? "").toLowerCase() === "system" &&
+            typeof maybeGrant.source === "string" &&
+            maybeGrant.source.startsWith("autonomous:")) {
             // Still validate malformed restrictions before failing closed so
             // invalid carriers cannot be silently reclassified as absent.
             Authorization.toCapabilitySet(maybeGrant.capabilitySet);
