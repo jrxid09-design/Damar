@@ -86,7 +86,7 @@ class RuntimeExecutor {
         // P1-H-FIX: also register with global singleton so grant survives
         // runtime boundary crossings (AIRuntime, resolveDelegator check
         // only the module singleton, not per-executor domains).
-        registerGrantGlobal(grant, authorizedTools);
+        registerGrantGlobal(grant);
         return grant;
     }
 
