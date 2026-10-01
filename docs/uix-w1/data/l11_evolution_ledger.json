@@ -1,0 +1,11 @@
+{
+  "schemaVersion":"uix-w1.l11.evolution.v1",
+  "entries":[
+    {"id":"EV-L11-001","oldCapability":"parallel V1/AITool/autonomy/legacy catalogs","disposition":"KEEP_DISTINCT","replacement":"capability.registry.v1 + explicit projections","newRelationships":["capability.registry.v1 -> context.capability.integration","context.capability.integration -> tool.selection"],"deprecatedIdentity":null,"removedIdentity":null,"compatibility":"all existing stores preserved"},
+    {"id":"EV-L11-002","oldCapability":"legacy prompt assembly switch","disposition":"REWIRE","replacement":"context.pipeline canonical owner","newRelationships":["context.pipeline -> context.capability.integration"],"deprecatedIdentity":"legacy assembly branch","removedIdentity":null,"compatibility":"compatibility helpers remain source-present but non-selectable"},
+    {"id":"EV-L11-003","oldCapability":"src/tools_old","disposition":"DEPRECATE","replacement":"tools.core / tool.selection where proven","newRelationships":[],"deprecatedIdentity":"tools.legacy_compat","removedIdentity":null,"compatibility":"caller/persistence proof remains open"},
+    {"id":"EV-L11-004","oldCapability":"pre-L11 aggregate W1 synthesis list","disposition":"REWIRE","replacement":"l11_synthesis_catalog.json","newRelationships":["canonical rationalized set -> synthesis catalog"],"deprecatedIdentity":"old aggregate proposals","removedIdentity":null,"compatibility":"design-only proposals retained and reclassified"}
+  ],
+  "removedIdentities":[],
+  "sourceDestructiveChanges":0
+}

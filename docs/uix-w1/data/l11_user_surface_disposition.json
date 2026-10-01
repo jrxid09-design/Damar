@@ -1,0 +1,7 @@
+{
+  "schemaVersion":"uix-w1.l11.user-surface.v1",
+  "source":"l11_canonical_capability_inventory.json",
+  "rule":"runtime reachability does not imply user reachability",
+  "dispositions":{"USER_VISIBLE_FEATURE":10,"ADVANCED_OR_FORENSIC":11,"BACKGROUND_ONLY":5,"INTERNAL_ONLY":16},
+  "unresolvedSurfaceClaims":["USB HID remains UNKNOWN","future Dashboard adapters are out of scope","provider/channel configuration remains environment-dependent"]
+}

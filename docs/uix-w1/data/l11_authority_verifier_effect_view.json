@@ -1,0 +1,11 @@
+{
+  "schemaVersion":"uix-w1.l11.authority-view.v1",
+  "authorityOwner":"authority.registry",
+  "verifierOwner":"verification.audit",
+  "effectEvidence":"capability.registry.v1 descriptors plus action capability wiring",
+  "selectionOwner":"tool.selection",
+  "integrationOwner":"context.capability.integration",
+  "rules":["MODEL != AUTHORITY","MODEL OUTPUT != AUTHORITY","TOOL != AUTHORITY","CAPABILITY != AUTHORITY","CONTEXT != AUTHORITY","SELECTION != AUTHORITY","SYNTHESIS != AUTHORITY","DETECTION != AUTHORITY","UNKNOWN != TRUE","UNKNOWN != FALSE"],
+  "authorityBypassIntroduced":0,
+  "verificationBypassIntroduced":0
+}

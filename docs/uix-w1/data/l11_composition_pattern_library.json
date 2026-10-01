@@ -1,0 +1,14 @@
+{
+  "schemaVersion":"uix-w1.l11.patterns.v1",
+  "patterns":[
+    {"id":"PAT-L11-001","name":"context-aware-capability-selection","steps":["fresh context","canonical capability evidence","read-only join","existing disclosure/ranking","model proposal"],"authority":"none"},
+    {"id":"PAT-L11-002","name":"verified-consequential-workflow","steps":["ingress","Manager","ActionIntent","authority","exact binding","actuation","verification","audit"],"authority":"canonical authority registry"},
+    {"id":"PAT-L11-003","name":"sensor-context-evidence","steps":["sensor/provider observation","freshness/conflict check","world/context projection","read model or prompt context"],"authority":"none; never direct actuation"},
+    {"id":"PAT-L11-004","name":"observation-to-governed-response","steps":["detect","preserve evidence","propose","authority","respond","verify"],"authority":"response requires ratification"},
+    {"id":"PAT-L11-005","name":"cross-device-continuation","steps":["paired device/session evidence","context projection","channel relay","authority if effect","verification"],"authority":"not device trust"},
+    {"id":"PAT-L11-006","name":"feedback-informed-selection","steps":["outcome observation","read-only feedback projection","selection evidence","unknown when absent"],"authority":"none; STATIC PERSISTENCE != LEARNING"},
+    {"id":"PAT-L11-007","name":"provenance-gated-extension","steps":["manifest","provenance","registry","workflow/skill descriptor","canonical ingress","verification"],"authority":"canonical gate"},
+    {"id":"PAT-L11-008","name":"provider-fallback-chain","steps":["provider observation","health evidence","role/constraint match","fallback proposal","model call"],"authority":"routing is not authority"}
+  ],
+  "count":8
+}

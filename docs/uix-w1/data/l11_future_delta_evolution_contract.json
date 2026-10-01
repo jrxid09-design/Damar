@@ -1,0 +1,9 @@
+{
+  "schemaVersion":"uix-w1.l11.delta.v1",
+  "identity":"canonical capability fingerprint plus source-backed evidence",
+  "deltaTypes":["CAPABILITY_ADDED","CAPABILITY_CHANGED","CAPABILITY_REMOVED","RELATION_ADDED","RELATION_REMOVED","OWNER_CHANGED","REACHABILITY_CHANGED","EFFECT_CHANGED","AUTHORITY_REQUIREMENT_CHANGED","VERIFIER_CHANGED","SYNTHESIS_CANDIDATE_ADDED","RATIONALIZATION_DECISION_CHANGED"],
+  "requiredFields":["deltaId","baseSha","observedSha","entityId","deltaType","oldValue","newValue","evidence","impact","compatibility","tests","ledgerEntry"],
+  "rules":["normalize before compare","UNKNOWN remains UNKNOWN","no removal without all safety gates","DESIGNED != IMPLEMENTED","CERTIFIED requires independent evidence","authority/verifier owners cannot be inferred"],
+  "fullReconstructionRequired":false,
+  "newIntelligenceSubsystem":false
+}

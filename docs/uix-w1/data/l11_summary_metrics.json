@@ -1,0 +1,13 @@
+{
+  "schemaVersion":"uix-w1.l11.metrics.v1",
+  "totalCapabilityRecordsAnalyzed":42,
+  "rationalization":{"KEEP_CANONICAL":22,"KEEP_DISTINCT":12,"MERGE":0,"GENERALIZE":1,"SPECIALIZE":1,"REPLACE":0,"DEPRECATE":1,"REMOVE":0,"REWIRE":5,"EXACT_DUPLICATES_FOUND":0,"NEAR_DUPLICATES_FOUND":3,"SEMANTIC_OVERLAPS_FOUND":7,"SHADOW_IMPLEMENTATIONS_FOUND":1,"DEAD_IMPLEMENTATIONS_FOUND":0,"ORPHANS_FOUND":3,"SUPERSEDED_FOUND":0,"UNRESOLVED_RATIONALIZATION_ITEMS":3},
+  "synthesis":{"RAW_SYNTHESIS_CANDIDATES":12,"UNIQUE":8,"MERGED_INTO_EXISTING":2,"SPECIALIZATION":1,"GENERALIZATION":1,"ALIAS_ONLY":0,"DUPLICATE":0,"REJECTED_LOW_VALUE":0,"FINAL_RETAINED_SYNTHESIS_CANDIDATES":12,"MISSING_PRIMITIVES":10},
+  "compositionPatterns":8,
+  "counterfactualRemovalUsed":true,
+  "capabilityIntelligenceUsed":true,
+  "contextIntelligenceUsed":true,
+  "contextCapabilityIntegrationUsed":true,
+  "unsafeRemovalsPerformed":0,
+  "sourceChanges":{"product":false,"tests":false,"artifacts":true}
+}
