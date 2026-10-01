@@ -82,7 +82,9 @@ test("relevance and availability remain distinct in the projection", () => {
         contextSelection: { systemContent: "microphone online", messages: [] }
     }).items[0];
     assert.equal(contextual.relevant, false);
-    assert.equal(contextual.available, true);
+    assert.equal(contextual.available, "UNKNOWN");
+    assert.equal(contextual.runtimeReachable, "UNKNOWN");
+    assert.equal(contextual.executable, "UNKNOWN");
 
     const available = capabilityRuntime("device.camera", "AVAILABLE");
     const unavailable = capabilityRuntime("device.camera", "UNAVAILABLE");
@@ -99,7 +101,11 @@ test("relevance and availability remain distinct in the projection", () => {
     }).items[0];
     assert.equal(unavailableView.relevant, true);
     assert.equal(unavailableView.available, false);
+    assert.equal(unavailableView.runtimeReachable, false);
+    assert.equal(unavailableView.executable, false);
     assert.equal(availableView.available, true);
+    assert.equal(availableView.runtimeReachable, true);
+    assert.equal(availableView.executable, true);
 });
 
 test("unknown and unregistered capability state is not silently executable", () => {
@@ -111,10 +117,39 @@ test("unknown and unregistered capability state is not silently executable", () 
         capabilityRegistry: capabilityRuntime("device.other", "AVAILABLE").registry
     }).items[0];
     assert.equal(unknownView.availability, "UNKNOWN");
-    assert.equal(unknownView.runtimeReachable, false);
-    assert.equal(unknownView.available, false);
+    assert.equal(unknownView.runtimeReachable, "UNKNOWN");
+    assert.equal(unknownView.available, "UNKNOWN");
+    assert.equal(unknownView.executable, "UNKNOWN");
     assert.equal(missingView.registered, false);
     assert.equal(missingView.available, false);
+    assert.equal(missingView.runtimeReachable, false);
+    assert.equal(missingView.executable, false);
+});
+
+test("unjoined AITool remains inspectable without becoming a ready capability", () => {
+    const source = tool("unjoined_camera");
+    const view = Integration.project({ tools: [source] });
+    assert.equal(view.items[0].availability, "UNKNOWN");
+    assert.equal(view.items[0].runtimeReachable, "UNKNOWN");
+    assert.equal(view.items[0].executable, "UNKNOWN");
+    assert.deepEqual(view.excluded, []);
+    assert.deepEqual(view.candidates.map(item => item.name), ["unjoined_camera"]);
+});
+
+test("AIRuntime exposes corrected UNKNOWN projection to its runtime consumer", () => {
+    const registry = new AIToolRegistry();
+    registry.register(tool("currentWeather"));
+    const runtime = new AIRuntime(null);
+    runtime.setToolRegistry(registry);
+    runtime.resolveTools({
+        messages: [{ role: "user", content: "capture image" }],
+        exec: { channel: "console", role: "user" },
+        contextSelection: { systemContent: "camera online", messages: [], diagnostics: { itemsSelected: 1 } }
+    });
+    const item = runtime.lastContextCapabilityIntegration.items[0];
+    assert.equal(item.available, "UNKNOWN");
+    assert.equal(item.runtimeReachable, "UNKNOWN");
+    assert.notEqual(item.executable, true);
 });
 
 test("multiple registries project without creating a second authority or registry", () => {
@@ -131,5 +166,7 @@ test("multiple registries project without creating a second authority or registr
     });
     assert.deepEqual(view.items[0].capabilityIds, ["device.camera", "provider.vision"]);
     assert.equal(view.items[0].available, true);
+    assert.equal(view.items[0].runtimeReachable, true);
+    assert.equal(view.items[0].executable, true);
     assert.equal(view.authorityGranted, false);
 });
