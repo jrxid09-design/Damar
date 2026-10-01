@@ -6,14 +6,24 @@ const orchestrator = require("../../services/orchestrator");
 const whatsapp = require("../../services/whatsappService");
 const vision = require("../../services/visionService");
 const devices = require("../../services/deviceService");
-const home = require("../../services/homeService");
 const immich = require("../../services/immichService");
 const context = require("../../services/contextService");
 const memory = require("../../memory/services/MemoryService");
+const { submitGovernedService } = require("../../services/governedServiceBoundary");
 
 // ---- Pembantu ------------------------------------------------------
 
 const jid = n => `${String(n).replace(/\D/g, "")}@s.whatsapp.net`;
+
+async function governed(ctx, capabilityId, operation, parameters, expectedPostcondition = null) {
+    const result = await submitGovernedService({ execution: ctx?.exec ?? null, capabilityId, operation, arguments: parameters, expectedPostcondition });
+    if (result?.outcome !== "COMPLETED") throw new Error(result?.detail ?? result?.reason ?? "canonical authority required");
+    return result;
+}
+
+const whatsappSend = (ctx, number, text) => governed(ctx, "messaging.whatsapp", "send", { number: jid(number), text }, { kind: "notification-delivery" });
+const whatsappBroadcast = (ctx, text) => governed(ctx, "messaging.whatsapp", "broadcast", { text }, { kind: "notification-delivery" });
+const homeControl = (ctx, entity, action, value) => governed(ctx, "home.assistant", "control", { entityId: entity, action, value }, { kind: "home-state", entityId: entity, action, value });
 
 /** Jalankan tugas di agent tertentu; lempar bila agent gagal/offline.
  *  N2 Round-2: identitas eksekusi pemanggil tool (ctx.exec) diteruskan —
@@ -84,15 +94,15 @@ const SKILLS = [
 
     // ===== WhatsApp =====
     { name: "wa_send", description: "Kirim pesan WhatsApp ke sebuah nomor.",
-      parameters: { number: P.number, text: P.text }, execute: async a => { await whatsapp.send(jid(a.number), a.text); return { sent: true }; } },
+      parameters: { number: P.number, text: P.text }, execute: async (a, ctx) => { await whatsappSend(ctx, a.number, a.text); return { sent: true, governed: true }; } },
     { name: "wa_broadcast", description: "Kirim pesan WhatsApp ke semua nomor yang diizinkan (broadcast).",
-      parameters: { text: P.text }, execute: async a => ({ recipients: await whatsapp.broadcast(a.text) }) },
+      parameters: { text: P.text }, execute: async (a, ctx) => ({ result: await whatsappBroadcast(ctx, a.text), governed: true }) },
     { name: "wa_notify_owner", description: "Beri tahu pemilik via WhatsApp (broadcast ke nomor terizin).",
-      parameters: { text: P.text }, execute: async a => ({ recipients: await whatsapp.broadcast(`🔔 ${a.text}`) }) },
+      parameters: { text: P.text }, execute: async (a, ctx) => ({ result: await whatsappBroadcast(ctx, `🔔 ${a.text}`), governed: true }) },
     { name: "wa_send_image", description: "Kirim gambar (via URL) ke nomor WhatsApp.",
-      parameters: { number: P.number, url: { type: "string", required: true }, caption: { type: "string" } }, execute: async a => { await whatsapp.sendPhoto(jid(a.number), a.url, a.caption); return { sent: true }; } },
+      parameters: { number: P.number, url: { type: "string", required: true }, caption: { type: "string" } }, execute: async (a, ctx) => { await governed(ctx, "messaging.whatsapp", "sendPhoto", { number: jid(a.number), url: a.url, caption: a.caption }, { kind: "notification-delivery" }); return { sent: true, governed: true }; } },
     { name: "wa_send_document", description: "Kirim dokumen/berkas (via URL) ke nomor WhatsApp.",
-      parameters: { number: P.number, url: { type: "string", required: true }, caption: { type: "string" } }, execute: async a => { await whatsapp.sendDocument(jid(a.number), a.url, a.caption); return { sent: true }; } },
+      parameters: { number: P.number, url: { type: "string", required: true }, caption: { type: "string" } }, execute: async (a, ctx) => { await governed(ctx, "messaging.whatsapp", "sendDocument", { number: jid(a.number), url: a.url, caption: a.caption }, { kind: "notification-delivery" }); return { sent: true, governed: true }; } },
     { name: "wa_status", description: "Status koneksi WhatsApp Damar (tersambung, nomor, dll).",
       parameters: {}, execute: () => whatsapp.status() },
 
@@ -113,29 +123,29 @@ const SKILLS = [
       parameters: {}, execute: async (a, ctx) => {
           const r = await sweep("Ada aktivitas mencurigakan/orang tak dikenal? Jawab singkat.", ctx?.exec);
           const msg = "🛡️ Laporan keamanan:\n" + r.map(x => `• ${x.camera}: ${x.seen || x.error}`).join("\n");
-          const recipients = await whatsapp.broadcast(msg);
-          return { recipients, results: r };
+          const result = await whatsappBroadcast(ctx, msg);
+          return { result, results: r, governed: true };
       } },
     { name: "watch_and_notify", description: "Lihat satu kamera lalu kirim hasilnya ke WhatsApp pemilik.",
       parameters: { camera: P.camera, question: { type: "string" } }, execute: async (a, ctx) => {
           const text = await seeCam(a.camera, a.question || "Deskripsikan yang terlihat.", ctx?.exec);
-          const recipients = await whatsapp.broadcast(`📷 ${a.camera}: ${text}`);
-          return { text, recipients };
+          const result = await whatsappBroadcast(ctx, `📷 ${a.camera}: ${text}`);
+          return { text, result, governed: true };
       } },
 
     // ===== Home automation (Home Assistant) =====
     { name: "home_control", description: "Kendali perangkat rumah: nyalakan/matikan/atur (mis. lampu, AC, saklar).",
-      parameters: { entity: { type: "string", required: true, description: "entity_id Home Assistant." }, action: { type: "string", required: true, description: "turn_on|turn_off|toggle|set_temperature|..." }, value: { type: "string" } }, execute: a => home.control(a.entity, a.action, a.value) },
+      parameters: { entity: { type: "string", required: true, description: "entity_id Home Assistant." }, action: { type: "string", required: true, description: "turn_on|turn_off|toggle|set_temperature|..." }, value: { type: "string" } }, execute: (a, ctx) => homeControl(ctx, a.entity, a.action, a.value) },
     { name: "device_on", description: "Nyalakan sebuah perangkat rumah.",
-      parameters: { entity: { type: "string", required: true } }, execute: a => home.control(a.entity, "turn_on") },
+      parameters: { entity: { type: "string", required: true } }, execute: (a, ctx) => homeControl(ctx, a.entity, "turn_on") },
     { name: "device_off", description: "Matikan sebuah perangkat rumah.",
-      parameters: { entity: { type: "string", required: true } }, execute: a => home.control(a.entity, "turn_off") },
+      parameters: { entity: { type: "string", required: true } }, execute: (a, ctx) => homeControl(ctx, a.entity, "turn_off") },
     { name: "device_toggle", description: "Balik keadaan perangkat rumah (on↔off).",
-      parameters: { entity: { type: "string", required: true } }, execute: a => home.control(a.entity, "toggle") },
+      parameters: { entity: { type: "string", required: true } }, execute: (a, ctx) => homeControl(ctx, a.entity, "toggle") },
     { name: "scene_activate", description: "Aktifkan sebuah scene Home Assistant (mis. scene.malam).",
-      parameters: { scene: { type: "string", required: true } }, execute: a => home.control(a.scene, "turn_on") },
+      parameters: { scene: { type: "string", required: true } }, execute: (a, ctx) => homeControl(ctx, a.scene, "turn_on") },
     { name: "set_temperature", description: "Atur suhu target sebuah perangkat (mis. AC/thermostat).",
-      parameters: { entity: { type: "string", required: true }, value: { type: "string", required: true } }, execute: a => home.control(a.entity, "set_temperature", a.value) },
+      parameters: { entity: { type: "string", required: true }, value: { type: "string", required: true } }, execute: (a, ctx) => homeControl(ctx, a.entity, "set_temperature", a.value) },
     { name: "home_status", description: "Ringkasan keadaan rumah (perangkat menyala, dll).",
       parameters: {}, execute: () => home.summary() },
     { name: "home_health", description: "Status koneksi ke Home Assistant.",
@@ -169,17 +179,17 @@ const SKILLS = [
 
     // ===== Komposit powerful (gabungan kemampuan) =====
     { name: "morning_briefing", description: "Susun brief keadaan rumah lalu kirim ke WhatsApp pemilik.",
-      parameters: {}, execute: async (a, ctx) => { const { brief } = await context.brief(ctx?.exec); const recipients = await whatsapp.broadcast(`☀️ ${brief}`); return { brief, recipients }; } },
+      parameters: {}, execute: async (a, ctx) => { const { brief } = await context.brief(ctx?.exec); const result = await whatsappBroadcast(ctx, `☀️ ${brief}`); return { brief, result, governed: true }; } },
     { name: "daily_report", description: "Laporan harian: konteks + kesehatan sistem, dikirim ke WhatsApp.",
-      parameters: {}, execute: async (a, ctx) => { const { brief } = await context.brief(ctx?.exec); const recipients = await whatsapp.broadcast(`📋 Laporan Damar:\n${brief}`); return { recipients }; } },
+      parameters: {}, execute: async (a, ctx) => { const { brief } = await context.brief(ctx?.exec); const result = await whatsappBroadcast(ctx, `📋 Laporan Damar:\n${brief}`); return { result, governed: true }; } },
     { name: "arrive_home", description: "Rutinitas datang: aktifkan scene (bila diberi) lalu kirim brief rumah ke WhatsApp.",
-      parameters: { scene: { type: "string", description: "scene HA opsional, mis. scene.pulang." } }, execute: async (a, ctx) => { let scene = null; if (a.scene) { await home.control(a.scene, "turn_on"); scene = a.scene; } const { brief } = await context.brief(ctx?.exec); await whatsapp.broadcast(`🏠 Selamat datang.\n${brief}`); return { scene, done: true }; } },
+      parameters: { scene: { type: "string", description: "scene HA opsional, mis. scene.pulang." } }, execute: async (a, ctx) => { let scene = null; if (a.scene) { await homeControl(ctx, a.scene, "turn_on"); scene = a.scene; } const { brief } = await context.brief(ctx?.exec); const result = await whatsappBroadcast(ctx, `🏠 Selamat datang.\n${brief}`); return { scene, result, governed: true }; } },
     { name: "leave_home", description: "Rutinitas pergi: matikan perangkat yang diberikan lalu sapu kamera & kirim ringkasan.",
-      parameters: { entities: { type: "string", description: "entity_id dipisah koma untuk dimatikan." } }, execute: async a => {
+      parameters: { entities: { type: "string", description: "entity_id dipisah koma untuk dimatikan." } }, execute: async (a, ctx) => {
           const off = [];
-          for (const e of String(a.entities || "").split(",").map(s => s.trim()).filter(Boolean)) { try { await home.control(e, "turn_off"); off.push(e); } catch { /* skip */ } }
+          for (const e of String(a.entities || "").split(",").map(s => s.trim()).filter(Boolean)) { try { await homeControl(ctx, e, "turn_off"); off.push(e); } catch { /* skip */ } }
           const r = await sweep("Pastikan aman: ada orang/aktivitas? Jawab singkat.");
-          await whatsapp.broadcast(`🚪 Rumah ditinggal. Dimatikan: ${off.join(", ") || "-"}\n` + r.map(x => `• ${x.camera}: ${x.seen || x.error}`).join("\n"));
+          await whatsappBroadcast(ctx, `🚪 Rumah ditinggal. Dimatikan: ${off.join(", ") || "-"}\n` + r.map(x => `• ${x.camera}: ${x.seen || x.error}`).join("\n"));
           return { off, cameras: r };
       } },
     { name: "ask_home", description: "Tanya apa saja tentang rumah/tugas; Damar berorkestrasi memakai semua tool & agent untuk menjawab/menuntaskan.",
@@ -189,7 +199,7 @@ const SKILLS = [
     { name: "translate", description: "Terjemahkan teks ke bahasa target.",
       parameters: { text: { type: "string", required: true }, to: { type: "string", required: true, description: "bahasa target, mis. Inggris." } }, execute: (a, ctx) => run("damar", `Terjemahkan ke ${a.to}, keluarkan terjemahannya saja:\n${a.text}`, ctx?.exec).then(t => ({ translation: t })) },
     { name: "explain_camera_to_owner", description: "Lihat kamera, jelaskan dengan bahasa manusiawi, lalu kirim ke WhatsApp pemilik.",
-      parameters: { camera: P.camera }, execute: async (a, ctx) => { const raw = await seeCam(a.camera, "Deskripsikan detail.", ctx?.exec); const nice = await run("damar", `Sampaikan ini ke pemilik rumah dengan ramah & singkat: ${raw}`, ctx?.exec); await whatsapp.broadcast(`📷 ${a.camera}: ${nice}`); return { text: nice }; } },
+      parameters: { camera: P.camera }, execute: async (a, ctx) => { const raw = await seeCam(a.camera, "Deskripsikan detail.", ctx?.exec); const nice = await run("damar", `Sampaikan ini ke pemilik rumah dengan ramah & singkat: ${raw}`, ctx?.exec); const result = await whatsappBroadcast(ctx, `📷 ${a.camera}: ${nice}`); return { text: nice, result, governed: true }; } },
     { name: "smart_reply", description: "Susun balasan yang tepat untuk sebuah pesan masuk (nada bisa diatur).",
       parameters: { message: { type: "string", required: true }, tone: { type: "string", description: "mis. sopan, santai, tegas." } }, execute: (a, ctx) => run("damar", `Buat balasan (${a.tone || "sopan"}) untuk pesan ini:\n${a.message}`, ctx?.exec).then(reply => ({ reply })) }
 

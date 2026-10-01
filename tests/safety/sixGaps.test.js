@@ -443,7 +443,7 @@ test("beberapa BACAAN dalam satu putaran berjalan bersamaan", async () => {
 
 });
 
-test("tindakan berefek samping TETAP berurutan", async () => {
+test("tindakan berefek samping tidak bypass canonical authority", async () => {
 
     // Dua tulisan atau dua pesan yang berangkat bersamaan sulit
     // ditelusuri dan bisa saling mendahului.
@@ -498,7 +498,7 @@ test("tindakan berefek samping TETAP berurutan", async () => {
         exec: grant2
     });
 
-    assert.equal(puncak, 1, "tindakan berefek samping tidak boleh tumpang tindih");
+    assert.equal(puncak, 0, "legacy consequential handlers must not run without canonical authority");
 
 });
 

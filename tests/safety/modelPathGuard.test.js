@@ -50,7 +50,7 @@ test("tool asli model dijaga rem kebuntuan", async () => {
 
 });
 
-test("tool destruktif asli model berjalan dengan identitas sah (tanpa konfirmasi manual)", async () => {
+test("tool destruktif asli model tetap ditolak di luar canonical Manager", async () => {
 
     let dijalankan = false;
 
@@ -64,12 +64,13 @@ test("tool destruktif asli model berjalan dengan identitas sah (tanpa konfirmasi
     // identitas eksplisit; tanpa identitas = 'user' fail-closed DENY.
     // Yang dikunci di sini: tool destruktif TIDAK ditahan gerbang
     // konfirmasi, tetap tercatat & terverifikasi.
-    const r = await exec.execute(
-        { id: "r1", name: "terminal_run", arguments: { command: "echo x" } },
-        { role: "superadmin", channel: "console", sessionId: "tes-owner" });
-
-    assert.equal(dijalankan, true, "tool berjalan dengan otorisasi pemilik");
-    assert.ok(r.result, "hasil dikembalikan");
+    await assert.rejects(
+        () => exec.execute(
+            { id: "r1", name: "terminal_run", arguments: { command: "echo x" } },
+            { role: "superadmin", channel: "console", sessionId: "tes-owner" }),
+        /Canonical Authority required|CANONICAL_AUTHORITY_REQUIRED|PERMISSION_DENIED/
+    );
+    assert.equal(dijalankan, false, "local identity cannot grant consequential authority");
 
 });
 
