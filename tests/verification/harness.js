@@ -523,16 +523,17 @@ const TIMEOUT_SENTINEL = Symbol("damar.action.verification.timeout");
  * LATE / DUPLICATE COMPLETION: only the FIRST valid completion (before the
  * timeout) finalizes the observation; later completions are ignored.
  */
-function runObservation(binding, request, executionResult, timeoutMs) {
+function runObservation(binding, request, executionResult, timeoutMs,
+    { scheduleTimeout = setTimeout, cancelTimeout = clearTimeout } = {}) {
     return new Promise((resolve) => {
         let finalized = false;
         const finalize = (box) => {
             if (finalized) return;
             finalized = true;
-            clearTimeout(timeoutHandle);
+            cancelTimeout(timeoutHandle);
             resolve(box);
         };
-        const timeoutHandle = setTimeout(() => finalize(Object.freeze({ kind: "timeout" })), timeoutMs);
+        const timeoutHandle = scheduleTimeout(() => finalize(Object.freeze({ kind: "timeout" })), timeoutMs);
         if (typeof timeoutHandle.unref === "function") timeoutHandle.unref();
 
         const observationCtx = Object.freeze({
@@ -644,7 +645,7 @@ function runObservation(binding, request, executionResult, timeoutMs) {
  *     registerVerifier, removeVerifier
  *   }
  */
-async function makeVerificationHarness({ clock, scopeBindings, authenticate } = {}) {
+async function makeVerificationHarness({ clock, scopeBindings, authenticate, timeoutScheduler = null } = {}) {
     const lane3 = await makeActuationHarness({ clock, scopeBindings, authenticate });
     const verifierRegistry = buildVerifierRegistry();
     // Local actuation brand set of the Lane 3 harness this verification
@@ -744,7 +745,7 @@ async function makeVerificationHarness({ clock, scopeBindings, authenticate } = 
         const observedAtMs = canonicalClockNow();
         let observation = null, verifierErrored = null;
         try {
-            observation = await runObservation(binding, request, executionResult, timeoutMs);
+            observation = await runObservation(binding, request, executionResult, timeoutMs, timeoutScheduler ?? undefined);
         } catch (e) { verifierErrored = e; }
 
         let verificationState, observedEvidence = null, detail = "";

@@ -34,7 +34,11 @@ test("production damar-self plugin uses the canonical DamarSelf store", async ()
         canonical.writeRuntimeState({ canonical: true });
         fs.writeFileSync(path.join(canonicalDir, "identity.md"), "# Damar\n");
 
-        const first = await ToolRegistry.execute(descriptor.id, { action: "state" });
+        // The plugin mutates canonical self-state, so the frozen registry
+        // correctly requires Manager governance for direct execution. Test
+        // the plugin's store contract through its own loaded descriptor.
+        const pluginTool = require(path.join(ROOT, "userPlugins", "damar-self", "tool.js"))[0];
+        const first = await pluginTool.execute(null, { action: "state" });
         assert.equal(first.ok, true);
         const stateFile = path.join(canonicalDir, "self-model", "runtime-state.json");
         assert.equal(fs.existsSync(stateFile), true);
@@ -47,7 +51,7 @@ test("production damar-self plugin uses the canonical DamarSelf store", async ()
         assert.equal(fs.existsSync(legacyState), true);
         assert.equal(fs.existsSync(legacySelf), true);
 
-        const second = await ToolRegistry.execute(descriptor.id, { action: "update" });
+        const second = await pluginTool.execute(null, { action: "update" });
         assert.equal(second.ok, true);
         assert.equal(JSON.parse(fs.readFileSync(stateFile, "utf8")).canonical, true,
             "repeated plugin reads must retain canonical state");

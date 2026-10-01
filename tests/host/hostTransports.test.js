@@ -60,7 +60,7 @@ test("ADAPTER: external event → normalize → bus; provenance tercatat sebagai
         assert.deepEqual(conversation.seen[0].claimed, { id: "user-77" },
             "identitas eksternal hanya klaim di provenance, bukan fakta");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -74,7 +74,7 @@ test("ADAPTER: event malformed ditolak tanpa menyentuh handler", async () => {
         assert.equal(conversation.seen.length, 0);
         assert.equal(att.adapter.snapshot().counters.rejected >= 3, true);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -89,7 +89,7 @@ test("ADAPTER: sessionId kanonik stabil per identitas + fallback deterministik",
         // Dua event dari user sama harus satu sesi.
         assert.notEqual(conversation.seen.length, 0);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -104,7 +104,7 @@ test("ADAPTER: detach → ingest setelah disconnect ditolak bersih", async () =>
         assert.equal(host.detachTransportAdapter("ext.det").ok, false,
             "detach ganda → ADAPTER_NOT_ATTACHED");
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -129,7 +129,7 @@ test("BRIDGE: peristiwa telemetry Telegram nyata dinormalkan ke InteractionBus",
         assert.equal(conversation.seen.length, 1, "setelah detach tidak diteruskan");
         assert.equal(bridge.snapshot().counters.forwarded, 1);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -146,7 +146,7 @@ test("BRIDGE: fail-soft — listener tidak boleh melempar ke emitter sumber", as
         emitter.emit("telegram:message", { chatId: 1, preview: "" });
         assert.equal(bridge.snapshot().counters.forwarded, 0);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });
 
@@ -157,6 +157,6 @@ test("BRIDGE: channel tak dikenal gagal tertutup saat konstruksi", async () => {
             bus: host.core.bus, channels: ["discord"]
         }), /CHANNEL_BRIDGE_UNKNOWN_CHANNEL/);
     } finally {
-        host.shutdown("test-end");
+        await host.shutdown("test-end");
     }
 });

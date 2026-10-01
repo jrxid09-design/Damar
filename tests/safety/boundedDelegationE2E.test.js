@@ -48,6 +48,7 @@ function registerProbeSkill(name, parameters, result) {
         name,
         description: `Probe uji: ${name}.`,
         parameters,
+        readOnly: name === "system_health",
         execute: async (args) => {
             executed.push({ name: `damarSkills.${name}`, args });
             return typeof result === "function" ? result(args) : result;
