@@ -777,12 +777,23 @@ class WhatsAppService {
         return this.sock?.sendMessage(jid, { react: { text: emoji, key } });
     }
 
-    async broadcast(text) {
-        if (!this.connected || this.allowed.size === 0) return 0;
-        for (const num of this.allowed) {
-            await this.send(`${num}@s.whatsapp.net`, text);
+    async broadcastWithEvidence(text) {
+        if (!this.connected || this.allowed.size === 0) {
+            return { recipients: 0, messageIds: [], errors: [] };
         }
-        return this.allowed.size;
+        const messageIds = [];
+        const errors = [];
+        for (const num of this.allowed) {
+            const result = await this.send(`${num}@s.whatsapp.net`, text);
+            messageIds.push(...(Array.isArray(result?.messageIds) ? result.messageIds : []));
+            errors.push(...(Array.isArray(result?.errors) ? result.errors : []));
+        }
+        return { recipients: this.allowed.size, messageIds, errors };
+    }
+
+    async broadcast(text) {
+        const evidence = await this.broadcastWithEvidence(text);
+        return evidence.recipients;
     }
 
     /**
@@ -876,5 +887,4 @@ class WhatsAppService {
 }
 
 module.exports = new WhatsAppService();
-
 
