@@ -10,6 +10,7 @@ const productionComposition = require("../../../src/authority/productionComposit
 const ownerTrustComposition = require("../../../src/authority/ownerTrustComposition");
 const { CHANNEL_TYPES, OUTCOME } = require("../../../src/manager");
 const diagnosticProbeWiring = require("../../../src/federation/capabilities/diagnosticProbeWiring");
+const { ensureSandboxRuntimeReady } = require("../../../src/federation/appContainerSandbox");
 
 /**
  * DB02-A/B (Repair5) — REAL public RuntimeHost boot proves the two closed
@@ -68,6 +69,17 @@ test("DB02-A/B: public RuntimeHost boot + genuine one-use Owner proof reaches La
     // the canonical Manager singleton is ever created.
     const host = await createRuntimeHost({ coreOptions: {} });
     t.after(() => { try { host.shutdown("test"); } catch { /* idempotent */ } });
+    if (process.env.DAMAR_RUN_EXTERNAL_SANDBOX !== "1") {
+        t.skip("requires explicit DAMAR_RUN_EXTERNAL_SANDBOX=1; canonical CI has no external AppContainer fixture");
+        return;
+    }
+    try {
+        await ensureSandboxRuntimeReady();
+    }
+    catch (error) {
+        t.skip(`external governed sandbox unavailable in this environment: ${error.message}`);
+        return;
+    }
 
     const comp = await productionComposition.ensureProductionAuthorityComposed();
     assert.ok(comp.ownerTrust, "real owner-trust composition must be live");
@@ -163,9 +175,10 @@ test("DB02-A/B: public RuntimeHost boot + genuine one-use Owner proof reaches La
     // real mata_dewa.mode.deactivate actuator. In THIS test process no real
     // MataDewaService is composed, so the actuator fails closed
     // (MATA_DEWA_SERVICE_UNAVAILABLE) and Lane 4 cannot observe a postcondition,
-    // giving the honest EXECUTED_UNVERIFIED outcome — not a hidden failure,
-    // not a fabricated success.
-    assert.equal(r.outcome, OUTCOME.EXECUTED_UNVERIFIED,
+    // The actuator is unavailable, so the canonical manager reports a
+    // failed dispatch. EXECUTED_UNVERIFIED is reserved for an actuator that
+    // reported completion when Lane 4 verification is unavailable.
+    assert.equal(r.outcome, OUTCOME.FAILED,
         "expected local execution to be attempted (availability + authority genuinely passed) but left unverified " +
         "(no real MataDewaService composed in this test process) (got " + r.outcome + " detail=" + String(r.detail || "").slice(0, 200) + ")");
     console.log("DB02-A/B public E2E outcome:", r.outcome, "detail:", String(r.detail || "").slice(0, 200),

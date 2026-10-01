@@ -1,5 +1,6 @@
-const test = require("node:test");
+const nodeTest = require("node:test");
 const assert = require("node:assert");
+const test = (name, fn) => nodeTest(name, { concurrency: false }, fn);
 const Authorization = require("../../src/ai/tools/Authorization");
 const { rankOf, resolveDelegator, isCanonicalInternalGrant } = Authorization;
 
@@ -50,6 +51,13 @@ require.cache[autonomyPath] = {
 const agentHub = require("../../src/services/agentHub");
 const GoalEngine = require("../../src/autonomy/GoalEngine");
 const healing = require("../../src/autonomy/SelfHealingEngine");
+const memoryDb = require("../../src/memory/db");
+
+// SelfHealingEngine imports the process-level memory database. This test
+// exercises that real lifecycle, so it owns the final close explicitly.
+nodeTest.after(async () => {
+    await memoryDb.database.close();
+});
 
 // ---- 2. Titik kanonik resolveDelegator — probe invariant --------------
 

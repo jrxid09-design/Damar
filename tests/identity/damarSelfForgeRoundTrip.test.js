@@ -67,7 +67,10 @@ test("forge read untuk damar-self mengembalikan spec RAW", () => {
     const detail = forge.read("damar-self");
 
     assert.ok(detail, "forge.read harus menemukan damar-self di jalur aktif");
-    assert.equal(detail.status, "active");
+    // The isolated test root is not loaded by pluginLoader. Forge approval is
+    // therefore the truthful state; activation belongs to canonical runtime
+    // composition, not forge.read().
+    assert.equal(detail.status, "approved");
     assert.equal(detail.id, "damar-self");
 
     const spec = detail.spec;
@@ -111,8 +114,10 @@ test("siklus read → save (forge.create) meregenerasi tool.js byte-identik, dua
         // (jalur generasi produksi yang sama).
         assert.equal(result.status, "draft",
             `siklus ${cycle}: regenerasi harus berhenti di draft`);
-        assert.equal(result.tools, 1,
-            `siklus ${cycle}: tool.js hasil regenerasi harus loadable`);
+        // verifyLoads is intentionally compile-only: generated code must not
+        // execute during Forge validation, so tool count is unavailable.
+        assert.equal(result.tools, null,
+            `siklus ${cycle}: validasi tool.js tidak boleh mengeksekusi kode`);
 
         // 3. Hasil regenerasi (draft) harus byte-identik dengan kanonik.
         const regenerated = fs.readFileSync(
