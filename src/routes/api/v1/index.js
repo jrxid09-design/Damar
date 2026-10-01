@@ -9,7 +9,8 @@ const validate = require("../../../middleware/validate");
 const sessionController = require("../../../controllers/sessionController");
 const { rejectLegacyActionMiddleware } = require("../../../manager/legacyBoundary");
 
-// Bidang kendali yang dipakai Damar Console (aplikasi desktop).
+// Canonical authenticated control/API contract. The future Web Dashboard,
+// CLI, and Companion are clients; this route is not a desktop UI dependency.
 router.use("/console", require("./console"));
 
 // Device tertaut (companion) — pakai tools/skill Damar dari device lain.

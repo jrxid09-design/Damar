@@ -4,12 +4,12 @@
 require("../src/config/envCompat");
 
 /**
- * Damar launcher — SATU perintah untuk menjalankan daemon (+ Console),
+ * Damar launcher — SATU perintah untuk menjalankan daemon,
  * dengan tampilan senada CLI dan log rinci berstempel waktu di terminal
  * sekaligus tersimpan ke logs/ untuk investigasi.
  *
- *   npm run damar          → daemon + Console desktop
- *   npm run damar:daemon   → daemon saja
+ *   npm run damar          → daemon
+ *   npm run damar:daemon   → daemon
  *
  * Ctrl+C menghentikan semuanya dengan tertib.
  */
@@ -22,7 +22,6 @@ const path = require("node:path");
 const { c, symbols, banner, hr } = require("../src/cli/theme");
 
 const ROOT = path.join(__dirname, "..");
-const withConsole = process.argv.includes("--console");
 
 // ---- Berkas log (riwayat rinci) ------------------------------------
 const logDir = path.join(ROOT, "logs");
@@ -102,13 +101,8 @@ let version = "";
 try { version = "v" + require("../package.json").version; } catch { /* opsional */ }
 
 console.log(banner(version).replace("Damar CLI", "Damar Launcher"));
-console.log(hr(withConsole ? "daemon + console" : "daemon"));
+console.log(hr("daemon"));
 console.log(`  ${symbols.dot} Log rinci     ${c.muted(path.relative(ROOT, logFile))}`);
 console.log(`  ${symbols.dot} Hentikan      ${c.muted("Ctrl+C")}\n`);
 
 launch("node", ["--use-system-ca", "src/server.js"], "daemon", c.accent);
-
-if (withConsole) {
-    // Beri daemon waktu listen dulu, lalu buka Console desktop.
-    setTimeout(() => launch("npm", ["start", "--prefix", "apps/console"], "console", c.accent3), 2500);
-}

@@ -12,10 +12,9 @@ require("dotenv").config({
 applyEnvCompat();
 
 /**
- * Port default per peran — Console & CLI boleh berjalan BERSAMAAN
+ * Port default per peran — daemon utama dan CLI boleh berjalan BERSAMAAN
  * sebagai daemon terpisah di mesin yang sama:
  *
- *   DAMAR_ROLE=console → 3000   (daemon penuh + Console desktop)
  *   DAMAR_ROLE=cli     → 3001   (daemon untuk sesi CLI)
  *   (tanpa peran)       → 3000   (perilaku lama)
  *

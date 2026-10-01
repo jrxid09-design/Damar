@@ -1,9 +1,8 @@
 const chalk = require("chalk");
 
 /**
- * Palet terminal Damar — disnap ke token KANONIK Console
- * (apps/console/renderer/styles/damar.tokens.css), bukan lagi
- * gradien cyan→ungu generik:
+ * Palet terminal Damar — token terminal kanonik, independent of any
+ * desktop or browser surface:
  *
  *   amber  #FFB84D — identitas Damar (state idle / banner)
  *   cyan   #00DFFF — aktif / sedang bekerja
