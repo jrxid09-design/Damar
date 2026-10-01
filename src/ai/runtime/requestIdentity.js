@@ -41,6 +41,16 @@ function canonicalRequestExec(request) {
         // granting broad tool access. Return undefined so the caller
         // gets no-identity (→ least-privilege "user" with no tools).
         const maybeGrant = request.exec;
+        // A plain system-shaped carrier is never sufficient authority. Only
+        // the module-private canonical grant path may cross with role system;
+        // otherwise a caller could supply a mutable exec object and widen a
+        // capabilitySet at the runtime boundary.
+        if (String(maybeGrant.role ?? "").toLowerCase() === "system") {
+            // Still validate malformed restrictions before failing closed so
+            // invalid carriers cannot be silently reclassified as absent.
+            Authorization.toCapabilitySet(maybeGrant.capabilitySet);
+            return undefined;
+        }
         if (Object.isFrozen(maybeGrant) &&
             !("capabilitySet" in maybeGrant) &&
             typeof maybeGrant.source === "string" &&
