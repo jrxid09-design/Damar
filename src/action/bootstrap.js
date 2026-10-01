@@ -2408,6 +2408,16 @@ function getCanonicalAvailableCapabilityIds() {
     );
 }
 
+/**
+ * Internal production composition seam for the canonical descriptive V1
+ * registry. This is not on the public action facade and remains
+ * non-enumerable; it is used only by the trusted same-process composition.
+ */
+function getCanonicalCapabilityRegistry() {
+    createCanonicalActionFacade();
+    return canonicalCapabilityRegistry;
+}
+
 module.exports = {
     createCanonicalActionFacade,
     createCanonicalActuationFacade,
@@ -2420,6 +2430,13 @@ module.exports = {
 // reachable by public DI, read-only (returns a detached frozen id list).
 Object.defineProperty(module.exports, "_getCanonicalAvailableCapabilityIds", {
     value: getCanonicalAvailableCapabilityIds,
+    enumerable: false,
+    writable: false,
+    configurable: false
+});
+
+Object.defineProperty(module.exports, "_getCanonicalCapabilityRegistry", {
+    value: getCanonicalCapabilityRegistry,
     enumerable: false,
     writable: false,
     configurable: false

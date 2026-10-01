@@ -4,6 +4,8 @@ const assert = require("node:assert/strict");
 const AITool = require("../../src/ai/tools/AITool");
 const AIToolRegistry = require("../../src/ai/tools/AIToolRegistry");
 const AIRuntime = require("../../src/ai/runtime/AIRuntime");
+const AIBuilder = require("../../src/ai/builder/AIBuilder");
+const RuntimeOptions = require("../../src/ai/runtime/RuntimeOptions");
 const Integration = require("../../src/ai/capability/ContextCapabilityIntegration");
 const { createCapabilityRuntime } = require("../../src/capability/registry");
 
@@ -37,6 +39,22 @@ function capabilityRuntime(id, availability = null) {
         });
     }
     return runtime;
+}
+
+function registerCapability(runtime, { id, dependencies = [] }) {
+    const result = runtime.registrars.core.register(JSON.stringify({
+        schemaVersion: 1,
+        id,
+        kind: "system",
+        provider: "core",
+        source: "core",
+        operations: ["use"],
+        requirements: [],
+        effects: [],
+        dependencies,
+        description: id
+    }));
+    return result;
 }
 
 test("context output reaches capability evaluation and changes candidates counterfactually", () => {
@@ -150,6 +168,87 @@ test("AIRuntime exposes corrected UNKNOWN projection to its runtime consumer", (
     assert.equal(item.available, "UNKNOWN");
     assert.equal(item.runtimeReachable, "UNKNOWN");
     assert.notEqual(item.executable, true);
+});
+
+test("production-like AIBuilder composition carries the canonical registry into resolveTools", () => {
+    const capability = capabilityRuntime("device.camera", "AVAILABLE");
+    const engine = new AIBuilder()
+        .withCapabilityRegistry(capability.registry)
+        .provider("llamacpp", {})
+        .registerTool(tool("currentWeather", { capabilityId: "device.camera" }))
+        .build();
+
+    assert.equal(engine.runtime.options.capabilityRegistry, capability.registry);
+    const request = {
+        messages: [{ role: "user", content: "capture image" }],
+        exec: { channel: "console", role: "user" }
+    };
+    assert.deepEqual(engine.runtime.resolveTools(request).map(item => item.name), ["currentWeather"]);
+    assert.equal(engine.runtime.lastContextCapabilityIntegration.items[0].available, true);
+
+    const record = capability.registry.get("device.camera");
+    capability.registry.observeAvailability("device.camera", "UNAVAILABLE", {
+        generation: record.generation + 1,
+        incarnationId: record.incarnationId
+    });
+    assert.deepEqual(engine.runtime.resolveTools(request), []);
+    assert.equal(engine.runtime.lastContextCapabilityIntegration.items[0].available, false);
+});
+
+test("V1 dependency truth changes the production-like model-facing candidate", () => {
+    const capability = createCapabilityRuntime({ registrars: { core: true }, clock: { nowMs: () => 1000 } });
+    registerCapability(capability, { id: "device.camera-dependency" });
+    const parent = registerCapability(capability, {
+        id: "device.camera-parent",
+        dependencies: ["device.camera-dependency"]
+    });
+    capability.registry.observeAvailability("device.camera-parent", "AVAILABLE", {
+        generation: 1,
+        incarnationId: parent.incarnationId
+    });
+
+    const engine = new AIBuilder()
+        .withCapabilityRegistry(capability.registry)
+        .provider("llamacpp", {})
+        .registerTool(tool("currentTime", { capabilityId: "device.camera-parent" }))
+        .build();
+    const request = { messages: [{ role: "user", content: "camera" }], exec: { channel: "console", role: "user" } };
+
+    assert.deepEqual(engine.runtime.resolveTools(request), [], "unsatisfied dependency must not be ready");
+    assert.equal(engine.runtime.lastContextCapabilityIntegration.items[0].dependencyStatus, "MISSING");
+
+    const dependency = capability.registry.get("device.camera-dependency");
+    capability.registry.observeAvailability("device.camera-dependency", "AVAILABLE", {
+        generation: 1,
+        incarnationId: dependency.incarnationId
+    });
+    assert.deepEqual(engine.runtime.resolveTools(request).map(item => item.name), ["currentTime"]);
+    assert.equal(engine.runtime.lastContextCapabilityIntegration.items[0].dependencyStatus, "SATISFIED");
+});
+
+test("missing production registry remains distinguishable from an empty registry", () => {
+    const missing = new RuntimeOptions();
+    const empty = capabilityRuntime("unused").registry;
+    const supplied = new RuntimeOptions({ capabilityRegistry: empty });
+    assert.equal(missing.capabilityRegistry, null);
+    assert.equal(supplied.capabilityRegistry, empty);
+});
+
+test("canonical context Pipeline remains the only runtime assembly owner", async () => {
+    const service = require("../../src/services/aiRuntimeService");
+    const previous = process.env.DAMAR_CONTEXT_PIPELINE;
+    process.env.DAMAR_CONTEXT_PIPELINE = "legacy";
+    try {
+        const assembled = await service.assemble({
+            messages: [{ role: "user", content: "hello" }],
+            channel: "console"
+        });
+        assert.equal(assembled.diagnostics.mode, "pipeline");
+    }
+    finally {
+        if (previous === undefined) delete process.env.DAMAR_CONTEXT_PIPELINE;
+        else process.env.DAMAR_CONTEXT_PIPELINE = previous;
+    }
 });
 
 test("multiple registries project without creating a second authority or registry", () => {
