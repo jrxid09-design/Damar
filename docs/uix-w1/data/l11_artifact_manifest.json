@@ -1,0 +1,7 @@
+{
+  "schemaVersion":"uix-w1.l11.artifact-manifest.v1",
+  "authoritativeL11Artifacts":["l11_canonical_capability_inventory.json","l11_capability_fingerprints.json","l11_rationalization_register.json","l11_capability_relationship_graph.json","l11_reachability_matrix.json","l11_rationalized_canonical_set.json","l11_synthesis_catalog.json","l11_synthesis_falsification.json","l11_missing_primitive_catalog.json","l11_composition_pattern_library.json","l11_evolution_ledger.json","l11_future_delta_evolution_contract.json","l11_user_surface_disposition.json","l11_authority_verifier_effect_view.json","l11_summary_metrics.json"],
+  "historicalArtifacts":["canonical_baseline.json","capability_fingerprints.json","rationalization_register.json","emergent_feature_capability_catalog.json","capability_graph.json","composition_pattern_library.json","evolution_ledger.json","future_delta_contract.json"],
+  "historicalRule":"historical artifacts remain preserved for provenance and are not current L11 truth; the l11_* artifacts supersede them",
+  "parallelTruthRootCreated":false
+}
