@@ -1,0 +1,1 @@
+{"schemaVersion":"uix-w1.tools.v1","plugins":["calculator","crypto","damarSkills","docker","filesystem","http","mataDewa","system.time","weather"],"skills":["cryptoSnapshot","dailyBrief","dockerStatus","summarizeFile","tellCurrentTime"],"legacy":["src/tools_old"],"forgePolicy":"quarantine and provenance before load"}

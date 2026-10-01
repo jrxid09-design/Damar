@@ -1,0 +1,1 @@
+{"schemaVersion":"uix-w1.authority.v1","canonicalPath":["ingress","Manager","ActionIntent","Authority evaluation","exact capability/operation","actuation","verification","audit"],"managerIsAuthority":false,"observationIsAuthority":false,"modelIsAuthority":false,"denyUntilRatified":true}

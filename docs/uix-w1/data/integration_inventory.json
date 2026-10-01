@@ -1,0 +1,1 @@
+{"schemaVersion":"uix-w1.integrations.v1","connectors":["AgentConnector","HermesConnector","OllamaConnector","OpenClawConnector"],"other":["WhatsApp","Telegram","MQTT/Home Assistant","Immich","Binance","MCP","federation","Mata Dewa providers"],"status":"configuration/network dependent"}

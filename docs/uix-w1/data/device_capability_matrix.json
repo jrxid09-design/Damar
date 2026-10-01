@@ -1,0 +1,1 @@
+{"schemaVersion":"uix-w1.devices.v1","families":["companion identity/pairing","mesh trust","local sensors","Android ADB","home MQTT"],"gaps":["unified trust/last-seen/capability read model"]}
