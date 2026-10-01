@@ -1,0 +1,10 @@
+{
+  "schemaVersion":"uix-w1.l11.canonical-set.v1",
+  "source":"l11_canonical_capability_inventory.json",
+  "barrierA":"PASSED",
+  "canonicalCapabilityCount":42,
+  "dispositionContract":"every inventory record has exactly one disposition in l11_rationalization_register.json; unresolved destructive decisions remain conservative",
+  "unsafeRemovalsPerformed":0,
+  "idsAreUnique":true,
+  "synthesisInputFrozen":true
+}

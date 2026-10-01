@@ -1,0 +1,9 @@
+{
+  "schemaVersion":"uix-w1.l11.fingerprints.v1",
+  "sourceInventory":"l11_canonical_capability_inventory.json",
+  "identityRule":"sha256(canonical JSON of source-backed identity, purpose, owner, evidence, and represented state)",
+  "dimensions":["canonicalId","kind","semanticPurpose","runtimeOwner","evidence","state","operations","effects","requirements","dependencies","provides","composes","conflicts","fallbacks","verifiedBy","availableOn","authorityRequirement","verificationRequirement","feedbackEvidence"],
+  "omissionRule":"unavailable dimensions are omitted, never inferred",
+  "canonicalIdsUnique":true,
+  "recordsAreSourceBacked":true
+}

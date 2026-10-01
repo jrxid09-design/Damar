@@ -1,0 +1,10 @@
+{
+  "schemaVersion":"uix-w1.l11.reachability.v1",
+  "source":"l11_canonical_capability_inventory.json",
+  "stateColumns":["CODE_EXISTS","REGISTERED","COMPOSED","RUNTIME_REACHABLE","USER_REACHABLE","GOVERNED","TESTED","CERTIFIED"],
+  "rule":"YES/PARTIAL/NO/UNKNOWN are evidence states; user reachability is not inferred from runtime reachability",
+  "records":"see inventory.records[*].state",
+  "unjoinedCapabilityState":"UNKNOWN",
+  "canonicalOwnerCount":{"context":1,"capabilityRegistry":1,"integration":1},
+  "retiredExternalSystemsExcluded":true
+}

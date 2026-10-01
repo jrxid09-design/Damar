@@ -1,0 +1,12 @@
+{
+  "schemaVersion":"uix-w1.l11.graph.v1",
+  "sourceSha":"ea934c6a0152c0a172af1619c4b99aa178ee1b25",
+  "nodesSource":"l11_canonical_capability_inventory.json",
+  "relationSemantics":"descriptive/read-only; relations never grant authority",
+  "edges":[
+    ["runtime.http","manager.orchestration","provides"],["runtime.host","interaction.bus","composes"],["interaction.bus","manager.orchestration","composes"],["channels.messaging","manager.orchestration","provides"],["channels.mcp","tool.selection","provides"],["manager.orchestration","action.intent","composes"],["action.intent","authority.registry","requires"],["authority.registry","capability.execution","governs"],["capability.registry.v1","context.capability.integration","provides"],["context.pipeline","context.capability.integration","composes"],["context.capability.integration","tool.selection","composes"],["capability.execution","actuation.fabric","composes"],["actuation.fabric","verification.audit","verifiedBy"],["sensorium.body_schema","cognition.world_model","provides"],["mata.providers","mata.dewa","provides"],["mata.dewa","memory.long_term","composes"],["cognition.world_model","context.pipeline","availableOn"],["experience.feedback","capability.registry.v1","provides"],["plugin.runtime","tools.core","provides"],["skills.engine","workflow.engine","composes"],["runtime.resource_governor","runtime.recovery","fallbacks"],["provider.federation","provider.openrouter","availableOn"],["devices.companion","devices.mesh","composes"],["dcd.cyber","authority.registry","conflicts"],["action.embodiment","verification.audit","verifiedBy"],["action.mata_dewa_rf","verification.audit","verifiedBy"]
+  ],
+  "authorityPath":["manager.orchestration","action.intent","authority.registry","capability.execution","actuation.fabric","verification.audit"],
+  "observationNeverActuates":true,
+  "retiredExternalSystemsNotNodes":["Ollama","OpenClaw","Hermes"]
+}
