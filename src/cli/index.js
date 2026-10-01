@@ -10,7 +10,7 @@ const { c, symbols, banner } = require("./theme");
 const commands = require("./commands");
 
 /**
- * IW1: CLI tidak lagi memegang proses apa pun. Proses (daemon/console/ssh)
+ * IW1: CLI tidak lagi memegang proses apa pun. Proses (daemon/ssh)
  * dimiliki capability runtime di balik src/manager/bootstrap.js, dan hanya
  * dibuka setelah lolos otoritas owner.
  */
@@ -18,7 +18,7 @@ const commands = require("./commands");
 /**
  * Damar CLI — antarmuka terminal untuk Damar.
  *
- * Berperan sama seperti Console desktop: klien tipis ke daemon.
+ * Berperan sebagai klien tipis ke daemon.
  * Ngobrol dengan streaming, cek status, kelola model, telusuri
  * memori, jalankan tool — semuanya dari terminal.
  */
@@ -44,7 +44,7 @@ function parseArgs(argv) {
         }
         else if (arg === "--serve") {
             // Jalankan daemon CLI sendiri di port 3001 (DAMAR_ROLE=cli)
-            // — bisa bersamaan dengan daemon Console di 3000.
+            // — bisa bersamaan dengan daemon utama di 3000.
             args.serve = true;
         }
         else if (arg === "--help" || arg === "-h") {
@@ -53,12 +53,7 @@ function parseArgs(argv) {
         else if (i === 0 && !arg.startsWith("-")) {
 
             // SUBCOMMAND global (hanya argumen pertama):
-            //   damar console → daemon + Console desktop (launcher)
             //   damar cli     → REPL interaktif (perilaku default)
-            if (arg === "console" || arg === "gui") {
-                args.mode = "console";
-                continue;
-            }
             if (arg === "cli" || arg === "repl") {
                 args.mode = "cli";
                 continue;
@@ -87,7 +82,6 @@ function usage() {
 ${c.text("Damar CLI")}
 
 ${c.muted("Pemakaian:")}
-  damar console              ${symbols.dot} daemon + Console desktop (GUI)
   damar cli                  ${symbols.dot} mode interaktif terminal
   damar "pertanyaan"         ${symbols.dot} tanya sekali lalu keluar
   echo "teks" | damar        ${symbols.dot} baca dari pipa
@@ -100,11 +94,11 @@ ${c.muted("Opsi:")}
   -s, --ssh <user@host[:port]> sambungkan lewat terowongan SSH ke daemon
                                   remote (port daemon dianggap 3000)
   --serve                      jalankan daemon CLI sendiri — bisa
-                               bersamaan dengan daemon Console (3000)
+                               bersamaan dengan daemon utama (3000)
   -h, --help                   tampilkan bantuan ini
 
 ${c.muted("Port per peran:")}
-  daemon Console  ${symbols.dot} 3000  (damar console / DAMAR_ROLE=console)
+  daemon utama    ${symbols.dot} 3000  (npm start / npm run damar)
   daemon CLI      ${symbols.dot} 3001  (damar cli --serve / DAMAR_ROLE=cli)
 
 ${c.muted("Env:")}
@@ -119,28 +113,6 @@ async function main() {
 
     if (args.help) {
         usage();
-        return;
-    }
-
-    // `damar console` — daemon + Console desktop via launcher.
-    // Bisa dipanggil dari folder mana pun: launcher dijalankan di
-    // folder instalasi Damar (src/cli → root = ../..).
-    // IW1: CLI hanyalah ingress — proses dijalankan atas capability
-    // `cli.daemon.start` yang harus lolos otoritas owner lebih dulu.
-    if (args.mode === "console") {
-        const path = require("node:path");
-        const root = path.join(__dirname, "..", "..");
-        const result = await require("../manager/bootstrap").getCliCapabilityRuntime().execute({
-            capabilityId: "cli.daemon.start",
-            operation: "console",
-            parameters: { root }
-        });
-        if (result?.outcome !== "EXECUTED_VERIFIED") {
-            console.log(`  ${symbols.err} ${c.danger("damar console ditolak: capability cli.daemon.start belum diotorisasi owner.")}`);
-            console.log(`  ${c.muted(`outcome=${result?.outcome ?? "-"} reason=${result?.reason ?? "-"}`)}`);
-            console.log(`  ${c.muted("Jalankan launcher langsung sebagai gantinya:")} ${c.amber("npm run damar")}`);
-            process.exitCode = 1;
-        }
         return;
     }
 

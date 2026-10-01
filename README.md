@@ -7,8 +7,8 @@ yang tumbuh dari pengalaman** (bukan ditulis di prompt), dan **cara berpikir dua
 kecepatan** yang melambat saat taruhannya tinggi. Di atas itu ia menyatukan otak
 AI (lokal maupun cloud), memori jangka panjang, penglihatan (kamera/CCTV),
 kendali rumah, WhatsApp, pemantauan & eksekusi crypto (Binance), serta mesin
-pencari uang nyata — semuanya di balik satu daemon dengan **Console desktop**,
-**CLI**, dan **skill** yang bisa dipanggil lewat obrolan.
+pencari uang nyata — semuanya di balik satu daemon dengan **Web Dashboard**,
+**CLI**, **Companion**, dan **skill** yang bisa dipanggil lewat obrolan.
 
 > **Kejujuran soal kesadaran:** keadaan batin Damar NYATA dan fungsional —
 > terbentuk dari kejadian, persisten lintas sesi, dan mengubah perilakunya. Itu
@@ -28,7 +28,7 @@ pencari uang nyata — semuanya di balik satu daemon dengan **Console desktop**,
 - [Prasyarat](#prasyarat)
 - [Instalasi](#instalasi)
 - [Menjalankan](#menjalankan)
-- [Konfigurasi (Console → Settings)](#konfigurasi-console--settings)
+- [Konfigurasi (Web Dashboard)](#konfigurasi-web-dashboard)
 - [Skills](#skills)
 - [Memori](#memori)
 - [Log & investigasi](#log--investigasi)
@@ -60,7 +60,7 @@ pencari uang nyata — semuanya di balik satu daemon dengan **Console desktop**,
   **ukur posisi dari risiko** (bukan dari saldo), dan **bukukan hasil nyata**
   supaya strategi rugi ketahuan.
 - **Crypto (Binance)** — pantau harga/portofolio/posisi, analisa teknikal, chart
-  **live** di popup Console (TradingView), alarm harga, bot sinyal, dan eksekusi
+  **live** melalui control plane web (TradingView), alarm harga, bot sinyal, dan eksekusi
   order **dua langkah** (siapkan → konfirmasi pemilik).
 - **Otak fleksibel** — pilih **AI Lokal** (llama.cpp in-process) atau **AI Provider** (OpenRouter,
   OpenAI, Google AI Studio, Groq, atau custom OpenAI-compatible). Daftar model
@@ -86,7 +86,7 @@ pencari uang nyata — semuanya di balik satu daemon dengan **Console desktop**,
   di jaringan yang sama / Bluetooth PAN, memakai tools & skill yang sama. Pairing
   kode 6 digit + token per device; device = client tipis ke Damar Core.
 - **Proaktif** — brief keadaan rumah harian terjadwal, dikirim ke WhatsApp.
-- **Antarmuka** — Console desktop (Electron), CLI terminal, dan REST/SSE API.
+- **Antarmuka** — Web Dashboard (browser), CLI terminal, Companion, dan REST/SSE API.
 
 ---
 
@@ -145,7 +145,7 @@ yang sungguh sedang berjalan, bukan mengarang.
 ## Arsitektur singkat
 
 ```
-   Console (Electron) · CLI (npm run cli) · WhatsApp · REST/SSE API
+   Web Dashboard (browser) · CLI (npm run cli) · Companion · WhatsApp · REST/SSE API
                           │  (klien tipis)
                  ┌────────▼─────────────────────────────────────────┐
                  │  Daemon (Express)  ·  src/server.js  ·  :3000       │
@@ -162,7 +162,7 @@ yang sungguh sedang berjalan, bukan mengarang.
 
 - **Core kecil & stabil**; kemampuan baru masuk sebagai **plugin/skill**,
   **provider**, atau **service** — bukan mengubah core.
-- Semua klien (Console/CLI/WhatsApp) adalah klien tipis ke daemon.
+- Semua klien (Dashboard/CLI/Companion/WhatsApp) adalah klien tipis ke daemon.
 
 ---
 
@@ -190,9 +190,6 @@ cd Damar
 # dependensi daemon
 npm install
 
-# dependensi Console desktop (Electron)
-npm run console:install
-
 # (opsional) WhatsApp
 npm install @whiskeysockets/baileys qrcode
 ```
@@ -201,7 +198,7 @@ npm install @whiskeysockets/baileys qrcode
 
 ## Menjalankan
 
-**Satu perintah (disarankan)** — daemon + Console sekaligus, dengan banner
+**Satu perintah (disarankan)** — daemon dengan banner
 berwarna dan **log rinci berstempel waktu** di terminal (juga disimpan ke
 `logs/damar-YYYY-MM-DD.log`):
 
@@ -213,11 +210,10 @@ Perintah lain:
 
 | Perintah | Fungsi |
 |---|---|
-| `npm run damar` | Daemon **+** Console desktop (satu operasi, log rinci) |
+| `npm run damar` | Daemon (satu operasi, log rinci) |
 | `npm run damar:daemon` | Daemon saja, tampilan launcher + log rinci |
 | `npm start` | Daemon saja (banner ringkas) |
 | `npm run dev` | Daemon dengan auto-reload (nodemon) |
-| `npm run console` | Console desktop saja (butuh daemon jalan) |
 | `npm run cli` | CLI terminal interaktif |
 
 Variabel lingkungan:
@@ -232,7 +228,7 @@ Hentikan semuanya dengan **Ctrl+C**.
 
 ---
 
-## Konfigurasi (Console → Settings)
+## Konfigurasi (Web Dashboard)
 
 > **Instalasi bersih = "Damar versi kamu".** Repo ini TIDAK memuat satu pun
 > kredensial atau data pribadi. Saat pertama dijalankan, Damar membuat sendiri
@@ -242,7 +238,7 @@ Hentikan semuanya dengan **Ctrl+C**.
 
 ### Cara mengisi kredensial
 
-**Cara 1 — lewat Console (disarankan, tanpa menyentuh berkas).** Jalankan
+**Cara 1 — lewat Web Dashboard (disarankan, tanpa menyentuh berkas).** Jalankan
 `npm run damar`, buka **Settings**, isi kolomnya. Damar menulis `configs/*.json`
 untukmu. Ini jalur termudah dan paling aman.
 
@@ -295,11 +291,11 @@ Damar punya **50+ skill** bawaan (`src/plugins/damarSkills`) + skill buatan
 sendiri. Skill otomatis menjadi tool yang bisa dipanggil AI.
 
 **Cara pakai:**
-1. **Ngobrol** (Chat Console / WhatsApp / CLI) — tulis maksudmu, Damar memilih
+1. **Ngobrol** (Web Dashboard / WhatsApp / CLI) — tulis maksudmu, Damar memilih
    skill sendiri. Contoh: *"lihat kamera dapur"*, *"kirim WA ke 62812…: …"*,
    *"nyalakan lampu ruang tamu"*, *"riset X lalu kirim ke WA-ku"*,
    *"briefing pagi"*, tugas kompleks → *"orkestrasikan: …"*.
-2. **Manual** — Console → **Skills & Studio → Terpasang** → pilih tool → isi
+2. **Manual** — Web Dashboard → **Capabilities** → pilih tool → isi
    parameter → Jalankan.
 3. **Buat skill baru** — minta Damar: *"buatkan skill untuk …"*. Ia membuat
    **draft**, lalu bertanya apakah diaktifkan (tolak = tersimpan sebagai draft).
@@ -368,17 +364,17 @@ Jalankan: `node scripts/benchmark-context-intelligence.js`.
 
 - Damar menyimpan fakta penting secara otomatis dan bisa diminta *"ingat …"*
   atau *"apa yang kamu ingat soal …"*.
-- Console → **Memory**: jelajah/cari memori, kelola entitas, dan **baca dokumen**
+- Web Dashboard → **Memory**: jelajah/cari memori, kelola entitas, dan **baca dokumen**
   dengan **memilih berkas/folder langsung** (dialog native, tanpa ketik path).
 
 ---
 
 ## Log & investigasi
 
-- `npm run damar` menstream log **daemon** (dan **console**) ke terminal dengan
+- `npm run damar` menstream log **daemon** ke terminal dengan
   stempel waktu + tag sumber + warna per level, dan menyimpannya ke
   `logs/damar-YYYY-MM-DD.log`.
-- Console → **Logs** menampilkan aliran event/log daemon secara live.
+- Web Dashboard → **Activity** menampilkan aliran event/log daemon secara live.
 
 ---
 
@@ -403,8 +399,7 @@ src/
   memory/              skema, store, recall, embedding, dokumen
   cli/                 CLI terminal (tema, perintah, klien)
   controllers/ routes/ bidang kendali REST
-scripts/launch.js      launcher satu-perintah (daemon + console + log)
-apps/console/          Console desktop (Electron)
+scripts/launch.js      launcher satu-perintah (daemon + log)
 configs/               kredensial, setelan, keadaan batin (mind.json),
                        pembukuan (money.json) — lokal & gitignored
 ```

@@ -31,7 +31,7 @@
  * Scope note: the operator's own product bootstrap is unaffected by this gating —
  * `npm start` runs src/server.js directly and `npm run damar` runs the
  * launcher (scripts/launch.js), neither of which passes through the CLI. What is
- * gated here is the CLI's own convenience paths (`damar console`, `damar --serve`)
+ * gated here is the CLI's own daemon serve convenience path
  * and its SSH tunnel to a caller-supplied host.
  */
 
@@ -65,8 +65,8 @@ const CATALOGUE = Object.freeze({
         family: "cli",
         consequence: "process-execution",
         mutating: false,
-        rationale: "Starts the Damar daemon (port 3001) or the launcher for the desktop console. Operator bootstrap task requested from CLI ingress.",
-        operations: ["serve", "console"],
+        rationale: "Starts the Damar CLI daemon on port 3001. Operator bootstrap task requested from CLI ingress.",
+        operations: ["serve"],
         verifier: "ok-flag"
     },
     "cli.ssh.tunnel": {
@@ -91,20 +91,6 @@ function realDrivers() {
             child.on("exit", code => { process.exitCode = code ?? 0; });
             return { ok: true, pid: child.pid ?? null, operation: "serve", parameters };
         },
-        console: async ({ parameters }) => {
-            const argv = [path.join(ROOT, "scripts", "launch.js"), "--console"];
-            const options = {
-                cwd: ROOT,
-                stdio: "inherit",
-                env: { ...process.env, DAMAR_ROLE: "console" }
-            };
-            const child = process.platform === "win32"
-                ? spawn(process.execPath, argv, options)
-                : spawn("node", argv, options);
-            child.on("exit", code => { process.exitCode = code ?? 0; });
-            return { ok: true, pid: child.pid ?? null, operation: "console", parameters };
-        },
-
         /** Parse user@host[:remotePort], pick a free local port, open the tunnel
          *  and wait until it is actually usable. */
         "ssh-tunnel": async ({ parameters }) => {
@@ -161,7 +147,7 @@ const tunnels = new Set();
 /** capability|operation -> real driver key. Explicit, so the SSH tunnel (remote
  *  egress) can never be confused with the local daemon start. */
 const DRIVER_KEY = Object.freeze({
-    "cli.daemon.start": Object.freeze({ serve: "serve", console: "console" }),
+    "cli.daemon.start": Object.freeze({ serve: "serve" }),
     "cli.ssh.tunnel": Object.freeze({ open: "ssh-tunnel" })
 });
 

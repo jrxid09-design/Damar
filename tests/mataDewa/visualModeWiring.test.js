@@ -360,11 +360,8 @@ test("MD-011 E2E: Manager production composition executes Mata Dewa mode change 
     assert.deepEqual(cmds.map(c => c.payload.args.mode),
         ["mata-dewa", "mata-dewa", "normal", "normal"]);
 
-    // Renderer allowlist mirror accepts exactly the canonical commands.
-    const renderer = await import("../../apps/console/renderer/views/mataDewa/uiCommands.js");
-    const applied = renderer.applyUiCommandEvent(cmds[0].payload, { navigate: () => {} });
-    assert.equal(applied.ok, true);
-    assert.equal(applied.mode, "mata-dewa");
+    // The canonical service/telemetry contract is surface-neutral; its future
+    // Idle and Dashboard consumers validate/render it in their own phases.
 });
 
 test("MD-011 E2E: forged identity in the same composition fails closed (no delivery)", async () => {
