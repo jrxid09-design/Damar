@@ -1530,7 +1530,7 @@ ${blok}` }
         }
 
         try {
-            const res = await this.ensure().chat({ messages: msgs, model: first, temperature, maxTokens, tools: effectiveTools, channel, role, signal, exec });
+            const res = await this.ensure().chat({ messages: msgs, model: first, temperature, maxTokens, tools: effectiveTools, channel, role, signal, exec, contextSelection: assembled });
             this._recordUsage(platform, res);
             return res;
         }
@@ -1542,7 +1542,7 @@ ${blok}` }
 
                 try {
                     // Retry sekali dengan model pengganti (tanpa interaksi pengguna).
-                    const res = await this.ensure().chat({ messages: msgs, model: next, temperature, maxTokens, tools: effectiveTools, channel, role, signal, exec });
+                    const res = await this.ensure().chat({ messages: msgs, model: next, temperature, maxTokens, tools: effectiveTools, channel, role, signal, exec, contextSelection: assembled });
                     this._recordUsage(this.activePlatform?.id ?? platform, res);
                     return res;
                 }
@@ -1747,7 +1747,7 @@ ${blok}` }
         if (this.modelFederation && entityId) { const modelRouter = require("../autonomy/ModelRouter"); const routed = modelRouter.routeEntity(entityId, { federation: this.modelFederation, sessionOverride: sessionModelOverride, workOverride: workModelOverride }); const explicitRoute = sessionModelOverride || workModelOverride || (routed.providerId !== this.modelFederation.wises.profile.providerId ? routed : null); const result = await this.modelFederation.invoke(entityId, { messages: msgs, role, sessionId, maxTokens, temperature, entityProjection: { ...(entityProjection ?? {}), sessionId, contextRefs }, continuation }, { sessionOverride: explicitRoute, workOverride: workModelOverride }); yield { content: result.content ?? "", entityId: result.entityId ?? entityId, provider: result.provider, model: result.model, fallback: result.fallback === true, degraded: result.degraded === true, provenance: result.provenance ?? null }; return; }
 
         const pancar = async function* (modelYangDipakai) {
-            for await (const chunk of this.ensure().stream({ messages: msgs, model: modelYangDipakai, temperature, maxTokens, tools: effectiveTools, stream: true, channel, role, signal, exec })) {
+            for await (const chunk of this.ensure().stream({ messages: msgs, model: modelYangDipakai, temperature, maxTokens, tools: effectiveTools, stream: true, channel, role, signal, exec, contextSelection: assembled })) {
                 if (chunk?.usage) {
                     usage = chunk.usage;
                     try { require("./usageService").record(platformAktif, {
