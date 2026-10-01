@@ -7,6 +7,10 @@ class PluginManager {
 
     async execute(toolName, context = {}, args = {}) {
 
+    throw new Error(
+        `PLUGIN_DIRECT_EXECUTION_DISABLED: '${toolName}' must enter the canonical Damar Manager action path`
+    );
+
     const pluginId = toolIndex.get(toolName);
 
     if (!pluginId)

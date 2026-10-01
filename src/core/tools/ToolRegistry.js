@@ -3,6 +3,13 @@ const { BaseRegistry } =
 
 const toolGuard = require("../safety/toolGuard");
 
+function isConsequential(tool, id) {
+    if (tool?.canonicalAuthority === true || tool?.meta?.canonicalAuthority === true) return true;
+    if (tool?.readOnly === true || tool?.metadata?.readOnly === true || tool?.meta?.readOnly === true) return false;
+    return Boolean(tool?.sideEffects || tool?.metadata?.sideEffects || tool?.meta?.sideEffects ||
+        require("../safety/riskCatalog").riskOf(id, tool));
+}
+
 /**
  * Registry tool lintas plugin.
  *
@@ -95,6 +102,10 @@ class ToolRegistry extends BaseRegistry {
         // Dijalankan setelah tool ditemukan supaya deklarasi
         // risikonya sendiri terbaca.
         toolGuard.before(id, args, tool);
+
+        if (isConsequential(tool, id)) {
+            throw new Error(`CANONICAL_AUTHORITY_REQUIRED: '${id}' must execute through the Damar Manager`);
+        }
 
         let result;
 

@@ -2,6 +2,16 @@ const toolGuard = require("../../core/safety/toolGuard");
 const Authorization = require("./Authorization");
 const ArgumentValidator = require("./ArgumentValidator");
 
+function isCanonicalAuthorityTool(tool) {
+    return tool?.canonicalAuthority === true || tool?.meta?.canonicalAuthority === true;
+}
+
+function isConsequentialTool(tool) {
+    if (isCanonicalAuthorityTool(tool)) return true;
+    const c = Authorization.classify(tool);
+    return c.external || c.destructive || tool?.sideEffects === true || tool?.meta?.sideEffects === true || tool?.meta?.readOnly === false;
+}
+
 /**
  * Titik tunggu eksekusi setiap pemanggilan tool oleh model.
  *
@@ -43,6 +53,14 @@ class ToolExecutor {
 
         // 1+2. Otorisasi eksekusi — SEBELUM sentuhan apa pun.
         Authorization.assertExecution(tool, identity);
+
+        if (isConsequentialTool(tool) && !isCanonicalAuthorityTool(tool)) {
+            throw ArgumentValidator.make(
+                ArgumentValidator.CODES.PERMISSION_DENIED,
+                `Canonical Authority required for consequential tool '${call.name}'.`,
+                { constraint: "canonical-authority" }
+            );
+        }
 
         // 3. ToolGuard untuk yang tak terbukti dijaga registry intinya.
         const bridged = Authorization.proveBridgedGuarded(tool);
