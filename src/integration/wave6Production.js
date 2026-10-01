@@ -126,12 +126,11 @@ function createDistributedNodeRuntime({
  * the canonical governed claim.
  */
 const { APPCONTAINER_NAME, HOST_EXE: SANDBOX_HOST_EXE, ensureSandboxRuntimeReady, sandboxProvisioningStatus } = require("../federation/appContainerSandbox");
-const { SHIM_SOURCE } = require("../federation/sandboxShim");
+const { launchGovernedSandbox } = require("../federation/governedSandboxLaunch");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { spawn } = require("node:child_process");
 
 const SANDBOX_DEFAULTS = Object.freeze({
     timeoutMs: 30_000,
@@ -155,11 +154,10 @@ function launchAppContainerTool({
     nodeExecutable = process.execPath,
     timeoutMs = 30_000
 } = {}) {
-    return new Promise((resolve, reject) => {
-        if (process.platform !== "win32") {
-            return reject(meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
-                "AppContainer sandbox requires Windows (R3-02)"));
-        }
+    return launchGovernedSandbox({
+        artifactPath, artifactDigest, executionId, toolArgs, envMaterial, nodeExecutable, timeoutMs
+    });
+    /*
         if (!fs.existsSync(SANDBOX_HOST_EXE)) {
             return reject(meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
                 "native/sandbox-host/sandbox-host.exe missing — governed external execution fails closed (R3-03)"));
@@ -247,7 +245,7 @@ function launchAppContainerTool({
             return reject(meshFailure(MESH_ERRORS.SANDBOX_VIOLATION,
                 `sandbox error: ${String((parsed && parsed.error) || "unknown").slice(0, 300)}`));
         });
-    });
+    });*/
 }
 
 /**
