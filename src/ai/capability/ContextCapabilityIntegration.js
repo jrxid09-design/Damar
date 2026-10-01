@@ -62,13 +62,14 @@ function registryEvidence(tool, capabilityRegistry) {
     if (ids.length === 0) {
         return {
             capabilityIds: [],
-            registered: true,
+            registered: UNKNOWN,
             availability: UNKNOWN,
-            runtimeReachable: true,
+            runtimeReachable: UNKNOWN,
             dependencyStatus: UNKNOWN,
-            available: true,
-            reachable: true,
-            reasons: ["aitool-registry-snapshot", "no-explicit-capability-join"]
+            available: UNKNOWN,
+            reachable: UNKNOWN,
+            executable: UNKNOWN,
+            reasons: ["aitool-registry-snapshot", "no-explicit-capability-join", "capability-state-unknown"]
         };
     }
 
@@ -79,9 +80,10 @@ function registryEvidence(tool, capabilityRegistry) {
             availability: UNKNOWN,
             runtimeReachable: UNKNOWN,
             dependencyStatus: UNKNOWN,
-            available: false,
-            reachable: false,
-            reasons: ["capability-registry-not-provided"]
+            available: UNKNOWN,
+            reachable: UNKNOWN,
+            executable: UNKNOWN,
+            reasons: ["capability-registry-not-provided", "capability-state-unknown"]
         };
     }
 
@@ -105,7 +107,11 @@ function registryEvidence(tool, capabilityRegistry) {
     if (availability === UNKNOWN) reasons.push("capability-availability-unknown");
     if (dependencyStatus === "MISSING") reasons.push("dependency-missing");
     if (dependencyStatus === UNKNOWN) reasons.push("dependency-status-unknown");
-    const available = missing.length === 0 && availability === "AVAILABLE" && dependencyStatus !== "MISSING";
+    const available = missing.length > 0 || availability === "UNAVAILABLE" || dependencyStatus === "MISSING"
+        ? false
+        : missing.length === 0 && availability === "AVAILABLE" && dependencyStatus === "SATISFIED"
+            ? true
+            : UNKNOWN;
     return {
         capabilityIds: ids,
         registered: missing.length === 0,
@@ -114,6 +120,7 @@ function registryEvidence(tool, capabilityRegistry) {
         dependencyStatus,
         available,
         reachable: available,
+        executable: available,
         reasons: reasons.length ? reasons : ["capability-available"]
     };
 }
@@ -130,7 +137,7 @@ function project({ tools = [], messages = [], contextSelection = null, capabilit
             provider: record.provider,
             codeExists: true,
             registered: evidence.registered,
-            composed: true,
+            composed: evidence.capabilityIds.length ? evidence.registered : UNKNOWN,
             runtimeReachable: evidence.runtimeReachable,
             userReachable: UNKNOWN,
             governed: UNKNOWN,
@@ -138,6 +145,7 @@ function project({ tools = [], messages = [], contextSelection = null, capabilit
             certified: UNKNOWN,
             relevant: contextual.relevant,
             available: evidence.available,
+            executable: evidence.executable,
             availability: evidence.availability,
             capabilityIds: evidence.capabilityIds,
             dependencyStatus: evidence.dependencyStatus,
@@ -147,7 +155,7 @@ function project({ tools = [], messages = [], contextSelection = null, capabilit
     });
 
     const excluded = new Set(items
-        .filter(item => !item.available || !item.relevant)
+        .filter(item => item.available === false || !item.relevant)
         .map(item => item.name));
     return Object.freeze({
         contextText,
