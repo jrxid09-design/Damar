@@ -1,0 +1,1 @@
+{"schemaVersion":"uix-w1.composition.v1","pattern":"observe -> contextualize -> propose -> authorize -> act -> verify -> remember","missingPrimitives":["unified capability metadata","approval event","context bridge","provider health routing","device trust projection","DCD response read model"],"synthesisSource":"data/emergent_feature_capability_catalog.json"}

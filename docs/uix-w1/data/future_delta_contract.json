@@ -1,0 +1,1 @@
+{"schemaVersion":"uix-w1.delta.v1","steps":["normalize","fingerprint","compare","update graph","governance review","tests","ledger delta"],"fullAuditRequired":false}

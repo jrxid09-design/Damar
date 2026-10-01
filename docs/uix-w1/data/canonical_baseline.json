@@ -1,0 +1,57 @@
+{
+  "schemaVersion":"uix-w1.v1",
+  "sourceSha":"e78b19190b1caaa8a0099eeff5519d901f82b911",
+  "statusVocabulary":["PROVEN","PARTIAL","UNKNOWN","INTENT_ONLY"],
+  "invariants":["MODEL != AUTHORITY","TOOL != AUTHORITY","CAPABILITY AVAILABLE != AUTHORITY","DETECTION != AUTHORITY","UI != AUTHORITY","DESIGNED != IMPLEMENTED","DENY UNTIL RATIFIED"],
+  "topology":{"entrypoints":[
+    {"id":"http.daemon","path":"src/server.js","status":"PROVEN"},
+    {"id":"runtime.host","path":"src/runtime/host/main.js","status":"PROVEN"},
+    {"id":"cli","path":"src/cli/index.js","status":"PROVEN"},
+    {"id":"mcp.stdio","path":"scripts/mcp-stdio.js","status":"PROVEN"}],
+    "consequentialPath":["transport/channel","RuntimeHost or Express","InteractionBus","Damar Manager","ActionIntent","Authority Gate","Capability Execution","Actuation","Verification","Audit acknowledgement","Experience"]},
+  "capabilities":[
+    {"id":"runtime.http","family":"runtime","name":"HTTP control/API","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PROVEN","userReachable":"PROVEN","governed":"PROVEN","tested":"PROVEN","certified":"PROVEN"},"disposition":"USER_VISIBLE_FEATURE","evidence":["src/server.js","src/app.js","src/routes"]},
+    {"id":"runtime.host","family":"runtime","name":"RuntimeHost","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PROVEN","userReachable":"PARTIAL","governed":"PROVEN","tested":"PROVEN","certified":"PROVEN"},"disposition":"BACKGROUND_ONLY","evidence":["src/runtime/host/main.js","src/integration/canonicalRuntimeComposition.js"]},
+    {"id":"interaction.bus","family":"orchestration","name":"InteractionBus","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PROVEN","userReachable":"PARTIAL","governed":"PROVEN","tested":"PROVEN","certified":"PROVEN"},"disposition":"INTERNAL_ONLY","evidence":["src/runtime/interactionBus"]},
+    {"id":"manager.orchestration","family":"orchestration","name":"Damar Manager","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PROVEN","userReachable":"PARTIAL","governed":"PROVEN","tested":"PROVEN","certified":"PROVEN"},"disposition":"INTERNAL_ONLY","evidence":["src/manager/bootstrap.js","src/manager/internal/managerBootstrap.js"]},
+    {"id":"authority.registry","family":"authority","name":"Authority Gate/Registry","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PROVEN","userReachable":"PARTIAL","governed":"PROVEN","tested":"PROVEN","certified":"PROVEN"},"disposition":"ADVANCED_OR_FORENSIC","evidence":["src/authority/productionComposition.js"]},
+    {"id":"capability.execution","family":"authority","name":"Canonical capability execution","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PROVEN","userReachable":"PARTIAL","governed":"PROVEN","tested":"PROVEN","certified":"PROVEN"},"disposition":"INTERNAL_ONLY","evidence":["src/manager/internal/canonicalCapabilityExecution.js"]},
+    {"id":"verification.audit","family":"governance","name":"Verification and audit","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PROVEN","userReachable":"PROVEN","governed":"PROVEN","tested":"PROVEN","certified":"PROVEN"},"disposition":"ADVANCED_OR_FORENSIC","evidence":["src/action/verification","src/runtime/auditLedger"]},
+    {"id":"memory.long_term","family":"memory","name":"Long-term memory","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PROVEN","userReachable":"PROVEN","governed":"PARTIAL","tested":"PROVEN","certified":"PROVEN"},"disposition":"USER_VISIBLE_FEATURE","evidence":["src/memory","src/routes/api/v1/console.js"]},
+    {"id":"cognition.world_model","family":"cognition","name":"World model","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PARTIAL","userReachable":"PARTIAL","governed":"PARTIAL","tested":"PROVEN","certified":"PROVEN"},"disposition":"ADVANCED_OR_FORENSIC","evidence":["src/cognition/worldmodel","src/integration/canonicalRuntimeComposition.js"]},
+    {"id":"embodiment.sensorium","family":"sensing","name":"Sensorium/body schema","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PROVEN","userReachable":"PARTIAL","governed":"PROVEN","tested":"PROVEN","certified":"PROVEN"},"disposition":"BACKGROUND_ONLY","evidence":["src/embodiment","src/integration/canonicalRuntimeComposition.js"]},
+    {"id":"voice.runtime","family":"voice","name":"Realtime voice","state":{"code":"PROVEN","registered":"PARTIAL","composed":"PARTIAL","runtimeReachable":"PARTIAL","userReachable":"PROVEN","governed":"PARTIAL","tested":"PROVEN","certified":"PROVEN"},"disposition":"USER_VISIBLE_FEATURE","evidence":["src/voice","src/integration/canonicalRuntimeComposition.js"]},
+    {"id":"plugins.tools","family":"extension","name":"Manifest/plugin tools","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PROVEN","userReachable":"PROVEN","governed":"PROVEN","tested":"PROVEN","certified":"PROVEN"},"disposition":"ADVANCED_OR_FORENSIC","evidence":["src/plugins/pluginLoader.js","src/plugins"]},
+    {"id":"skills.engine","family":"extension","name":"Skill engine","state":{"code":"PROVEN","registered":"PARTIAL","composed":"PARTIAL","runtimeReachable":"PARTIAL","userReachable":"PARTIAL","governed":"PARTIAL","tested":"PROVEN","certified":"PROVEN"},"disposition":"INTERNAL_ONLY","evidence":["src/skillEngine","src/skills"]},
+    {"id":"provider.openrouter","family":"model","name":"OpenRouter provider","state":{"code":"PROVEN","registered":"PROVEN","composed":"PARTIAL","runtimeReachable":"PARTIAL","userReachable":"PROVEN","governed":"PARTIAL","tested":"PROVEN","certified":"PROVEN"},"disposition":"USER_VISIBLE_FEATURE","evidence":["src/providers/openRouterProvider.js"]},
+    {"id":"provider.ollama","family":"model","name":"Ollama provider","state":{"code":"PROVEN","registered":"PARTIAL","composed":"PARTIAL","runtimeReachable":"PARTIAL","userReachable":"INTERNAL_ONLY","governed":"PARTIAL","tested":"PROVEN","certified":"PROVEN"},"disposition":"INTERNAL_ONLY","evidence":["src/providers/ollamaProvider.js"]},
+    {"id":"channels","family":"channel","name":"Telegram/WhatsApp channels","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PARTIAL","userReachable":"PROVEN","governed":"PROVEN","tested":"PROVEN","certified":"PROVEN"},"disposition":"USER_VISIBLE_FEATURE","evidence":["src/channels","src/server.js"]},
+    {"id":"companion","family":"device","name":"Companion pairing/device surface","state":{"code":"PROVEN","registered":"PROVEN","composed":"PARTIAL","runtimeReachable":"PARTIAL","userReachable":"PROVEN","governed":"PROVEN","tested":"PROVEN","certified":"PROVEN"},"disposition":"USER_VISIBLE_FEATURE","evidence":["src/companion","src/routes/api/v1/companion.js"]},
+    {"id":"mata.dewa","family":"sensing","name":"Mata Dewa core/watch","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PARTIAL","userReachable":"PROVEN","governed":"PARTIAL","tested":"PROVEN","certified":"PROVEN"},"disposition":"ADVANCED_OR_FORENSIC","evidence":["src/mataDewa","src/server.js"]},
+    {"id":"dcd.cyber","family":"security","name":"DCD cyber defense","state":{"code":"PROVEN","registered":"PARTIAL","composed":"PARTIAL","runtimeReachable":"PARTIAL","userReachable":"PROVEN","governed":"PARTIAL","tested":"PROVEN","certified":"PROVEN"},"disposition":"ADVANCED_OR_FORENSIC","evidence":["src/cyber","src/routes/api/v1/console.js"]},
+    {"id":"recovery.resource","family":"resilience","name":"Recovery capsule/resource governor","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PARTIAL","userReachable":"PARTIAL","governed":"PROVEN","tested":"PROVEN","certified":"PROVEN"},"disposition":"BACKGROUND_ONLY","evidence":["src/runtime/recovery","src/runtime/resourceGovernor"]},
+    {"id":"terminal","family":"runtime","name":"PTY terminal runtime","state":{"code":"PROVEN","registered":"PROVEN","composed":"PROVEN","runtimeReachable":"PROVEN","userReachable":"PROVEN","governed":"PROVEN","tested":"PROVEN","certified":"PROVEN"},"disposition":"ADVANCED_OR_FORENSIC","evidence":["src/runtime/terminal","src/routes/api/v1/console.js"]}
+  ],
+  "gaps":[
+    {"id":"GAP-001","class":"INTEGRATION_GAP","name":"multi-provider/model gateway","status":"MISSING"},
+    {"id":"GAP-002","class":"OBSERVABILITY_GAP","name":"provider health/fallback/role routing","status":"PARTIAL"},
+    {"id":"GAP-003","class":"READ_MODEL_GAP","name":"unified device trust projection","status":"MISSING"},
+    {"id":"GAP-004","class":"OBSERVABILITY_GAP","name":"realtime state/approval event contract","status":"PARTIAL"},
+    {"id":"GAP-005","class":"PRODUCT_GAP","name":"USB HID canonical capability","status":"UNKNOWN"},
+    {"id":"GAP-006","class":"READ_MODEL_GAP","name":"DCD response/control model","status":"PARTIAL"},
+    {"id":"GAP-007","class":"PRODUCT_GAP","name":"Mata Dewa intent checklist coverage","status":"PARTIAL"},
+    {"id":"GAP-008","class":"SURFACE_GAP","name":"future Dashboard adapters","status":"OUT_OF_SCOPE"},
+    {"id":"GAP-009","class":"DOCUMENTATION_GAP","name":"skill metadata/graph depth","status":"PARTIAL"}
+  ],
+  "sources":[
+    {"path":"src/server.js","claim":"boot/shutdown graph"},
+    {"path":"src/app.js","claim":"HTTP/plugin/MCP/OpenAI boundaries"},
+    {"path":"src/integration/canonicalRuntimeComposition.js","claim":"single RuntimeCore/Host/voice composition and sensor bridge"},
+    {"path":"src/manager/internal/canonicalCapabilityExecution.js","claim":"exact binding, verification, audit"},
+    {"path":"src/authority/productionComposition.js","claim":"canonical authority composition"},
+    {"path":"src/routes/api/v1/console.js","claim":"control API catalog"},
+    {"path":"src/plugins/pluginLoader.js","claim":"plugin provenance and Forge quarantine"},
+    {"path":"src/mataDewa","claim":"Mata Dewa implementation"},
+    {"path":"C:/Workspace/KemampuanMataDewa.txt","claim":"intent checklist only"}
+  ]
+}

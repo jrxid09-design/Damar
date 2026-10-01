@@ -1,0 +1,1 @@
+{"schemaVersion":"uix-w1.readmodels.v1","source":["src/routes/api/v1/console.js","src/controllers"],"families":["health","overview","context","safety","AI","plugins","runtime","channels","memory","voice","devices","integrations","Mata Dewa","OSINT","Lab","audit"]}

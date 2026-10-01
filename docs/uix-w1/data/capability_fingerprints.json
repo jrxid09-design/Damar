@@ -1,0 +1,1 @@
+{"schemaVersion":"uix-w1.fingerprints.v1","method":["purpose","trigger","inputs","outputs","sideEffects","authority","verification","persistence","runtimeOwner","dependencies","failureSemantics","value"],"source":"data/canonical_baseline.json","note":"semantic fingerprints prevent filename/name-only merges"}

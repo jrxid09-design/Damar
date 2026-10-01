@@ -1,0 +1,1 @@
+{"schemaVersion":"uix-w1.events.v1","source":["src/services/telemetryService.js","src/runtime/interactionBus","src/runtime/auditLedger"],"families":["runtime","telemetry","interaction","voice","memory","integration","device","Mata Dewa","execution/verification","authority/audit","recovery"],"emissionIsAuthority":false}

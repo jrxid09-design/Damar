@@ -1,0 +1,1 @@
+{"schemaVersion":"uix-w1.api.v1","boundaries":["src/routes/index.js","src/routes/api/v1/index.js","src/routes/api/v1/console.js","src/routes/api/v1/companion.js","src/routes/v1openai.js","src/mcp/index.js","src/ws/terminalGateway.js"],"consoleRouteIsApiNotDesktop":true}

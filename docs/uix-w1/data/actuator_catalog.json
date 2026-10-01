@@ -1,0 +1,1 @@
+{"schemaVersion":"uix-w1.actuators.v1","actuators":["action embodiment wiring","Manager capability drivers","terminal","home/MQTT","voice output","companion","Android ADB","CLI","federation/dexec","Mata Dewa"],"requirements":["authority evaluation","exact binding","verification","audit"]}
