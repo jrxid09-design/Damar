@@ -23,3 +23,15 @@ F-CAP-005 remains closed at its projection scope; F-CAP-009 and F-CTX-008 are
 candidate implemented/tested after Repair 3, pending fresh independent
 re-audit. F-CTX-003, F-CTX-004, F-CAP-006, and F-CAP-007 remain visibly
 deferred/open. This record is not certification.
+
+L11 readiness closure candidate (pending independent re-audit): the canonical
+ContextItem/Pipeline path now exposes explicit freshness/version/invalidation
+state and structured fact conflict diagnostics; stale items are excluded and
+UNKNOWN remains non-positive. The canonical V1 descriptor/registry graph now
+projects descriptive relation types (provides, composes, conflicts, fallbacks,
+verifiedBy, availableOn), reverse dependency/removal impact, effects,
+requirements, availability, and a read-only feedback view over supplied
+ToolStats/autonomy/self-model evidence. No rationalization or synthesis is
+performed here. F-CTX-003, F-CTX-004, F-CAP-006, and F-CAP-007 are candidate
+closed pending fresh independent re-audit; the certified integration and
+authority paths remain frozen.

@@ -29,7 +29,7 @@ const { parseCapabilityDescriptor, parseObservationMetadata } = require("./descr
 const { canonicalCapabilityId } = require("./ids");
 const { canonicalKind } = require("./kinds");
 const { canonicalAvailability } = require("./availability");
-const { wouldCreateCycle, collectAllCycles, resolveDependencyStatus, transitiveDependencies } = require("./graph");
+const { wouldCreateCycle, collectAllCycles, resolveDependencyStatus, transitiveDependencies, RELATION_TYPES } = require("./graph");
 const { createRegistrar, assertKindDomainCorrespondence } = require("./registrar");
 
 const DEFAULTS = Object.freeze({ maxCapabilities: 1024 });
@@ -97,7 +97,9 @@ function canonicalDescriptorKey(descriptor) {
     return JSON.stringify([
         descriptor.schemaVersion, descriptor.id, descriptor.kind, descriptor.provider,
         descriptor.source, descriptor.operations, descriptor.requirements, descriptor.effects,
-        descriptor.provenance, descriptor.dependencies, descriptor.metadata, descriptor.description
+        descriptor.provenance, descriptor.dependencies, descriptor.provides, descriptor.composes,
+        descriptor.conflicts, descriptor.fallbacks, descriptor.verifiedBy, descriptor.availableOn,
+        descriptor.metadata, descriptor.description
     ]);
 }
 
@@ -111,6 +113,7 @@ class CapabilityRegistry {
     #records = new Map();
     #edges = new Map();
     #reverseEdges = new Map();
+    #relationEdges = new Map();
     #byKind = new Map();
     #byProvenance = new Map();
     #clock;
@@ -234,6 +237,11 @@ class CapabilityRegistry {
 
     #insertIndexes(id, descriptor, deps) {
         this.#edges.set(id, new Set(deps));
+        for (const relation of RELATION_TYPES) {
+            const map = this.#relationEdges.get(relation) ?? new Map();
+            map.set(id, new Set(descriptor[relation] ?? []));
+            this.#relationEdges.set(relation, map);
+        }
         for (const depId of deps) {
             if (!this.#reverseEdges.has(depId)) this.#reverseEdges.set(depId, new Set());
             this.#reverseEdges.get(depId).add(id);
@@ -253,6 +261,7 @@ class CapabilityRegistry {
             }
         }
         this.#edges.delete(id);
+        for (const map of this.#relationEdges.values()) map.delete(id);
         const rec = this.#records.get(id);
         if (rec) {
             const kindSet = this.#byKind.get(rec.descriptor.kind);
@@ -354,6 +363,58 @@ class CapabilityRegistry {
 
     findAllDependencyCycles() {
         return collectAllCycles(this.#edges);
+    }
+
+    getRelations(idOrRaw, relation) {
+        const id = canonicalCapabilityId(idOrRaw);
+        if (!this.#records.has(id)) throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
+        if (!this.#relationEdges.has(relation)) throw new TypeError(`unknown capability relation '${relation}'`);
+        return Object.freeze([...(this.#relationEdges.get(relation).get(id) ?? new Set())].sort());
+    }
+
+    getRemovalImpact(idOrRaw) {
+        const id = canonicalCapabilityId(idOrRaw);
+        if (!this.#records.has(id)) throw fail(REASONS.UNKNOWN_CAPABILITY, `unknown capability '${id}'`, { id });
+        const impacted = new Set();
+        const queue = [...(this.#reverseEdges.get(id) ?? [])];
+        while (queue.length) {
+            const current = queue.shift();
+            if (impacted.has(current)) continue;
+            impacted.add(current);
+            for (const dependent of this.#reverseEdges.get(current) ?? []) queue.push(dependent);
+        }
+        return Object.freeze({ capability: id, dependents: Object.freeze([...impacted].sort()) });
+    }
+
+    getIntelligenceView(idOrRaw, { toolStats = null, autonomyRegistry = null, selfModel = null } = {}) {
+        const id = canonicalCapabilityId(idOrRaw);
+        const descriptor = this.get(id);
+        const name = descriptor.id.split(":").pop().split(".").pop();
+        const tool = typeof toolStats?.reliability === "function"
+            ? toolStats.reliability(name) : null;
+        const autonomy = typeof autonomyRegistry?.get === "function"
+            ? autonomyRegistry.get(id) : null;
+        const self = typeof selfModel?.getCapabilityOutcome === "function"
+            ? selfModel.getCapabilityOutcome(id)
+            : (typeof selfModel?.get === "function" ? selfModel.get(id) : null);
+        const feedback = Object.freeze({
+            toolStats: tool === null ? null : Object.freeze({ reliability: tool }),
+            autonomy: autonomy ?? null,
+            selfModel: self ?? null,
+            state: tool === null && autonomy === null && self === null ? "unknown" : "observed"
+        });
+        return Object.freeze({
+            id,
+            identity: Object.freeze({ provider: descriptor.provider, source: descriptor.source, provenance: descriptor.provenance }),
+            relations: Object.freeze(Object.fromEntries(RELATION_TYPES.map(r => [r, this.getRelations(id, r)]))),
+            dependencies: this.getDependencies(id),
+            dependents: this.getDependents(id),
+            effects: descriptor.effects,
+            requirements: descriptor.requirements,
+            availability: descriptor.availability,
+            counterfactualRemoval: this.getRemovalImpact(id),
+            feedback
+        });
     }
 
     // ------------------------------------------------- availability observe
