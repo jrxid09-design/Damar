@@ -11,3 +11,4 @@ Review result: APPROVED pending commit handoff and independent re-audit.
 - Targeted matrix: 129/129 passed in each of 3 consecutive runs.
 - Whole suite: 4606 total, 4597 passed, 0 failed, 9 skipped.
 - Existing unrelated worktree changes are excluded from the candidate commit.
+- Candidate commit: 5c40b8c9.

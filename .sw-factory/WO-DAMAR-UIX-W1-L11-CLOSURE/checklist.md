@@ -10,6 +10,6 @@
 - [x] Run targeted suites three consecutive times.
 - [x] Run final whole `npm test` from clean candidate worktree.
 - [x] Reconcile readiness artifact and write independent re-audit handoff.
-- [ ] Create narrow traceable commit without amending.
+- [x] Create narrow traceable commit without amending (5c40b8c9).
 
 Certification: candidate complete; independent re-audit pending.
