@@ -36,7 +36,11 @@ class RuntimeOptions {
 
             enabled: true
 
-        }
+        },
+
+        // Canonical descriptive V1 evidence owner. Null means no registry
+        // was composed; an empty registry remains a distinct object state.
+        capabilityRegistry = null
 
     } = {}) {
 
@@ -69,6 +73,8 @@ class RuntimeOptions {
             ...events
 
         };
+
+        this.capabilityRegistry = capabilityRegistry;
 
         // Tanpa batas iterasi tool (praktis tak terbatas) — Damar boleh
         // merangkai tool sebanyak yang dibutuhkan. Rem pengaman tetap ada:

@@ -126,6 +126,18 @@ class AIBuilder {
 
     }
 
+    withCapabilityRegistry(capabilityRegistry) {
+
+        if (!capabilityRegistry || typeof capabilityRegistry.get !== "function") {
+            throw new TypeError("capabilityRegistry must expose get()");
+        }
+
+        this._options.capabilityRegistry = capabilityRegistry;
+
+        return this;
+
+    }
+
     registerTool(tool) {
 
         this.stagedTools.push(tool);

@@ -328,6 +328,13 @@ class AIRuntimeService {
 
         const builder = new Damar.Builder();
 
+        // Production composition joins the same canonical V1 registry that
+        // owns descriptive capability evidence for the action runtime. The
+        // bootstrap seam is internal to this same-process composition root;
+        // no registry is created or copied here.
+        const { _getCanonicalCapabilityRegistry } = require("../action/bootstrap");
+        builder.withCapabilityRegistry(_getCanonicalCapabilityRegistry());
+
         // Otak lokal (node-llama-cpp) selalu terdaftar sebagai jaring
         // pengaman — bobot GGUF dimuat LAZY saat pertama dipakai, jadi
         // mendaftarkannya di sini tidak memakan RAM bila hanya memakai
@@ -1403,8 +1410,10 @@ ${blok}` }
      * anggaran model-aware, blok dinamis tetap ditempel ke pesan
      * pengguna terakhir (pola cache yang sudah terbukti).
      *
-     * Jalur LEGACY (`DAMAR_CONTEXT_PIPELINE=legacy`): rantai lama
-     * withSystemPrompt → withMemory → withMind — utuh untuk rollback.
+     * Context assembly always delegates to the canonical Pipeline. The former
+     * environment-selected legacy chain is retired from runtime composition;
+     * its helpers remain private compatibility code and are not a source of
+     * runtime context truth.
      */
     async assemble({ messages, channel = null, tools = null, contextRefs = [] }) {
 
@@ -1420,13 +1429,6 @@ ${blok}` }
                 });
             }
             catch { /* persepsi gagal: lanjut */ }
-        }
-
-        const legacy = process.env.DAMAR_CONTEXT_PIPELINE === "legacy";
-
-        if (legacy) {
-            const msgs = await this.withMind(messages, channel, tools);
-            return { messages: msgs, diagnostics: { mode: "legacy" } };
         }
 
         const Pipeline = require("../ai/context/Pipeline");

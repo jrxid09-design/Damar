@@ -100,7 +100,9 @@ function registryEvidence(tool, capabilityRegistry) {
         return capabilityRegistry.resolveDependencyStatus(record.id);
     }).filter(Boolean);
     const dependencyStatus = dependencyReports.length === 0 ? UNKNOWN
-        : dependencyReports.every(report => report.ok) ? "SATISFIED" : "MISSING";
+        : dependencyReports.every(report =>
+            report.ok && report.satisfied.every(dep => dep.availability === "AVAILABLE")
+        ) ? "SATISFIED" : "MISSING";
     const reasons = [];
     if (missing.length) reasons.push(`unregistered:${missing.join(",")}`);
     if (availability === "UNAVAILABLE") reasons.push("capability-unavailable");
