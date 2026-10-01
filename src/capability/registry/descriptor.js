@@ -69,6 +69,7 @@ const AUTHORITY_SHAPED_FIELDS = Object.freeze(new Set([
 const KNOWN_FIELDS = Object.freeze([
     "schemaVersion", "id", "kind", "provider", "source", "operations",
     "requirements", "effects", "availability", "dependencies",
+    "provides", "composes", "conflicts", "fallbacks", "verifiedBy", "availableOn",
     "metadata", "description"
 ]);
 
@@ -329,6 +330,10 @@ function parseCapabilityDescriptor(input, { source = "inline", nowMs = null } = 
     const requirements = boundedStringList(detached.requirements, "requirements", BOUNDS.MAX_REQUIREMENTS, BOUNDS.MAX_REQUIREMENT_CHARS);
     const effects = boundedStringList(detached.effects, "effects", BOUNDS.MAX_EFFECTS, BOUNDS.MAX_EFFECT_CHARS);
     const dependencies = parseDependencies(detached.dependencies);
+    const relationFields = ["provides", "composes", "conflicts", "fallbacks", "verifiedBy", "availableOn"];
+    const relations = Object.fromEntries(relationFields.map(field => [
+        field, boundedStringList(detached[field], field, BOUNDS.MAX_DEPENDENCIES, BOUNDS.MAX_OPERATION_CHARS)
+    ]));
     const metadata = parseMetadata(detached.metadata);
 
     let availability = "UNKNOWN";
@@ -351,6 +356,7 @@ function parseCapabilityDescriptor(input, { source = "inline", nowMs = null } = 
         effects: Object.freeze(effects),
         availability,
         dependencies: Object.freeze(dependencies),
+        ...Object.fromEntries(relationFields.map(field => [field, Object.freeze(relations[field])])),
         metadata: deepFreeze(metadata),
         description,
         registeredAtMs: nowMs

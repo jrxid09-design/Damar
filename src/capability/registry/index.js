@@ -22,7 +22,7 @@ const { CapabilityRegistryError, REASONS } = require("./errors");
 const { KINDS, canonicalKind } = require("./kinds");
 const { AVAILABILITY, canonicalAvailability } = require("./availability");
 const { canonicalCapabilityId, canonicalProvenance, isValidCapabilityId, isValidProvenance, AUTHORITY_VOCABULARY } = require("./ids");
-const { GRAPH_BOUNDS } = require("./graph");
+const { GRAPH_BOUNDS, RELATION_TYPES } = require("./graph");
 
 /**
  * NOTE: the registrar mint capability (`MINT_TOKEN`), the identity
@@ -41,6 +41,7 @@ module.exports = {
     DESCRIPTOR_SCHEMA_VERSION,
     DESCRIPTOR_BOUNDS,
     GRAPH_BOUNDS,
+    RELATION_TYPES,
     CapabilityRegistryError,
     REASONS,
     KINDS,

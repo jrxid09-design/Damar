@@ -23,6 +23,10 @@ const GRAPH_BOUNDS = Object.freeze({
     MAX_TRAVERSAL_STEPS: 65536
 });
 
+const RELATION_TYPES = Object.freeze([
+    "provides", "composes", "conflicts", "fallbacks", "verifiedBy", "availableOn"
+]);
+
 /**
  * Check whether adding an edge (from -> to) would create a directed cycle
  * in the existing edge map. Iterative DFS from `to` toward `from`, bounded.
@@ -156,6 +160,7 @@ function transitiveDependencies(edges, start) {
 
 module.exports = {
     GRAPH_BOUNDS,
+    RELATION_TYPES,
     wouldCreateCycle,
     collectAllCycles,
     resolveDependencyStatus,

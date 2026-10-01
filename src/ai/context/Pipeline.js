@@ -111,7 +111,13 @@ async function select({
         // Adapter hasil injeksi (benchmark/test) dinormalisasi ke
         // ContextItem — bentuk mentah {text,...} tidak boleh bocor
         // ke hilir sebagai pseudo-array.
+        const shouldRetrieveMemory = activeText.trim().length >= 4
+            && activeText.length <= 1000
+            && activeText.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).length > 1;
+
         const adaptMemoryBlock = async () => {
+
+            if (!shouldRetrieveMemory) return [];
 
             const fn = memoryFn ?? sources.memoryItems;
 
@@ -177,12 +183,33 @@ async function select({
             ...refItems
         ];
 
+        const staleCandidates = candidates.filter(item =>
+            ContextItem.freshnessState(item) === "stale");
+        const liveCandidates = candidates.filter(item =>
+            ContextItem.freshnessState(item) !== "stale");
+
+        const factGroups = new Map();
+        for (const item of liveCandidates) {
+            if (!item.fact?.key) continue;
+            const group = factGroups.get(item.fact.key) ?? [];
+            group.push(item.fact.value);
+            factGroups.set(item.fact.key, group);
+        }
+        const factTruth = [...factGroups.entries()].map(([key, values]) => {
+            const unique = [...new Set(values.map(value => JSON.stringify(value)))];
+            return {
+                key,
+                state: unique.length > 1 ? "conflicting" : (values[0] === null ? "unknown" : "known"),
+                values
+            };
+        });
+
         // ---- 3. Relevansi (non-mandatory saja yang dinilai) ----------
         const historyIndices = new Map(
             olderCandidates.map((c, i) => [c.id, i])
         );
 
-        const ranked = Relevance.rank(candidates, {
+        const ranked = Relevance.rank(liveCandidates, {
             activeText,
             historyIndices,
             threshold: 3
@@ -320,6 +347,12 @@ async function select({
                 byKind: perKind
             },
             unresolvedRefs: resolvedRefs.unresolved,
+            freshness: {
+                staleExcluded: staleCandidates.length,
+                unknown: liveCandidates.filter(i => ContextItem.freshnessState(i) === "unknown").length,
+                known: liveCandidates.filter(i => ContextItem.freshnessState(i) === "known").length
+            },
+            facts: factTruth,
             channel,
             role,
             windowHardCap: hardCapCtx,
@@ -372,4 +405,3 @@ async function select({
 }
 
 module.exports = { select, sanitize, LIMITS, refs };
-
