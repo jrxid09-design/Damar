@@ -351,7 +351,10 @@ test("kegagalan satu tool MCP tidak menjatuhkan tool lain", async () => {
 
     const byName = Object.fromEntries(captured.map(c => [c.name, c]));
 
-    assert.equal(byName["mcp__x__broken"].result.error.code, "EXECUTION_ERROR");
+    // Stale contract correction: external consequential MCP execution is
+    // denied before handler invocation; handler failure is no longer the
+    // expected route.
+    assert.equal(byName["mcp__x__broken"].result.error.code, "PERMISSION_DENIED");
     assert.ok(byName["memory_remember"].result.saved !== undefined);
 
 });
