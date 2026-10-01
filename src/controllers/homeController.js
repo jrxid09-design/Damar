@@ -2,6 +2,18 @@ const response = require("../utils/response");
 
 const home = require("../services/homeService");
 const mqtt = require("../services/mqttService");
+const { submitGovernedService } = require("../services/governedServiceBoundary");
+
+function requestContext(req) {
+    const identity = req.authIdentity ?? {};
+    return {
+        channelType: "console",
+        channelId: String(identity.channelId ?? req.ip ?? "http"),
+        sessionId: String(identity.sessionId ?? req.headers?.["x-session-id"] ?? "http-session"),
+        authProof: req.body?.authProof ?? null,
+        correlationId: req.headers?.["x-correlation-id"] ?? null
+    };
+}
 
 /** Kegagalan HA: belum dikonfigurasi = 400, selebihnya 502 (gateway). */
 function fail(res, error) {
@@ -114,25 +126,30 @@ class HomeController {
                 return response.error(res, "entity_id dan action wajib diisi.", 400);
             }
 
-            // Entitas MQTT murni (prefix mqtt:) dikendalikan langsung
-            // lewat command topic — tanpa menyentuh HA.
+            // External-device mutation is a canonical Manager action.  This
+            // controller is an ingress adapter only; it never calls HA/MQTT
+            // directly and has no local authority substitute.
             if (String(entity_id).startsWith("mqtt:")) {
-                const sent = await mqtt.control(entity_id.slice(5), action, value);
-                if (!sent) {
-                    return response.error(res, "Entitas MQTT tidak dikenal atau broker belum tersambung.", 400);
-                }
-                return response.success(res, "Perangkat dikendalikan (MQTT)", {
-                    entity_id, action, via: "mqtt"
+                const result = await submitGovernedService({
+                    context: requestContext(req),
+                    capabilityId: "home.mqtt",
+                    operation: "control",
+                    arguments: { entityId: entity_id.slice(5), action, value },
+                    expectedPostcondition: { kind: "mqtt-command-ack", entityId, action }
                 });
+                if (result?.outcome !== "COMPLETED") return response.error(res, result?.detail ?? result?.reason ?? "Canonical authority required.", 403, result);
+                return response.success(res, "Perangkat dikendalikan (MQTT)", { entity_id, action, result });
             }
 
-            await home.control(entity_id, action, value);
-
-            const state = await home.getState(entity_id).catch(() => null);
-
-            return response.success(res, "Perangkat dikendalikan", {
-                entity_id, action, state: state?.state ?? null
+            const result = await submitGovernedService({
+                context: requestContext(req),
+                capabilityId: "home.assistant",
+                operation: "control",
+                arguments: { entityId: entity_id, action, value },
+                expectedPostcondition: { kind: "home-state", entityId: entity_id, action, value }
             });
+            if (result?.outcome !== "COMPLETED") return response.error(res, result?.detail ?? result?.reason ?? "Canonical authority required.", 403, result);
+            return response.success(res, "Perangkat dikendalikan", { entity_id, action, result });
 
         }
         catch (error) {
@@ -189,8 +206,15 @@ class HomeController {
         try {
             const { topic, payload, retain } = req.body ?? {};
             if (!topic) return response.error(res, "topic wajib diisi.", 400);
-            await mqtt.publish(topic, payload ?? "", { retain: Boolean(retain) });
-            return response.success(res, "Terkirim", { topic, payload: String(payload ?? "") });
+            const result = await submitGovernedService({
+                context: requestContext(req),
+                capabilityId: "home.mqtt",
+                operation: "publish",
+                arguments: { topic, payload: String(payload ?? ""), retain: Boolean(retain) },
+                expectedPostcondition: { kind: "mqtt-publish-ack", topic }
+            });
+            if (result?.outcome !== "COMPLETED") return response.error(res, result?.detail ?? result?.reason ?? "Canonical authority required.", 403, result);
+            return response.success(res, "Terkirim", { topic, payload: String(payload ?? ""), result });
         }
         catch (error) {
             return response.error(res, error.message, error.code === "MQTT_NOT_CONNECTED" ? 400 : 502);

@@ -98,7 +98,15 @@ async function signalFor(symbol, interval) {
 
 async function announce(text) {
     try { telemetry.publish("damar:present", { kind: "text", title: "Bot Trading", text }); } catch { /* */ }
-    try { await require("./notifyService").send(text); } catch { /* */ }
+    try {
+        const { submitGovernedService } = require("./governedServiceBoundary");
+        await submitGovernedService({
+            capabilityId: "messaging.whatsapp",
+            operation: "send",
+            arguments: { text },
+            expectedPostcondition: { kind: "notification-delivery" }
+        });
+    } catch { /* fail closed; signal analysis remains local */ }
     try { telemetry.info(`[bot] ${text}`); } catch { /* */ }
 }
 

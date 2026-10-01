@@ -65,13 +65,19 @@ class AutomationService {
     /** Susun brief lalu kirim ke WhatsApp yang diizinkan. */
     async runBrief() {
         const contextService = require("./contextService");
-        const whatsapp = require("./whatsappService");
+        const { submitGovernedService } = require("./governedServiceBoundary");
 
         const { brief } = await contextService.brief();
-        const recipients = await whatsapp.broadcast(`☀️ Damar:\n\n${brief}`);
+        const result = await submitGovernedService({
+            capabilityId: "messaging.whatsapp",
+            operation: "broadcast",
+            arguments: { text: `☀️ Damar:\n\n${brief}` },
+            expectedPostcondition: { kind: "notification-delivery" }
+        });
+        const recipients = result?.outcome === "COMPLETED" ? result.recipients ?? [] : [];
 
-        telemetry.publish("automation:brief", { recipients, chars: brief.length });
-        return { brief, recipients };
+        telemetry.publish("automation:brief", { recipients, chars: brief.length, outcome: result?.outcome ?? "UNKNOWN" });
+        return { brief, recipients, outcome: result?.outcome ?? "UNKNOWN", governed: true };
     }
 
     configure({ enabled, time } = {}) {

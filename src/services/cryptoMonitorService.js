@@ -74,9 +74,17 @@ async function fire(alarm, price) {
     try { telemetry.publish("damar:present", { kind: "text", title: "Alarm Crypto", text: teks }); }
     catch { /* abaikan */ }
 
-    // Notifikasi lintas kanal (WhatsApp bila aktif).
-    try { await require("./notifyService").send(teks); }
-    catch { /* abaikan */ }
+    // Background notification is a consequential external side effect.  It
+    // submits to the canonical boundary and has no direct-service fallback.
+    try {
+        const { submitGovernedService } = require("./governedServiceBoundary");
+        await submitGovernedService({
+            capabilityId: "messaging.whatsapp",
+            operation: "send",
+            arguments: { text: teks },
+            expectedPostcondition: { kind: "notification-delivery" }
+        });
+    } catch { /* fail closed; telemetry remains observational */ }
 
     try { telemetry.info(`[crypto] ${teks}`); } catch { /* abaikan */ }
 }
