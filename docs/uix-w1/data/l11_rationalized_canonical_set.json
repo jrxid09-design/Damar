@@ -1,10 +1,276 @@
 {
-  "schemaVersion":"uix-w1.l11.canonical-set.v1",
-  "source":"l11_canonical_capability_inventory.json",
-  "barrierA":"PASSED",
-  "canonicalCapabilityCount":42,
-  "dispositionContract":"every inventory record has exactly one disposition in l11_rationalization_register.json; unresolved destructive decisions remain conservative",
-  "unsafeRemovalsPerformed":0,
-  "idsAreUnique":true,
-  "synthesisInputFrozen":true
+  "schemaVersion": "uix-w1.l11.canonical-set.v1",
+  "source": "l11_canonical_capability_inventory.json",
+  "barrierA": "REVALIDATED",
+  "canonicalCapabilityCount": 42,
+  "dispositionContract": "every inventory record has exactly one finalDisposition; actions and relationships are separate metadata; unresolved destructive decisions remain conservative",
+  "unsafeRemovalsPerformed": 0,
+  "idsAreUnique": true,
+  "synthesisInputFrozen": true,
+  "revalidatedAt": "artifact-repair",
+  "records": [
+    {
+      "id": "runtime.http",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "runtime.host",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "interaction.bus",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "manager.orchestration",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "action.intent",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "authority.registry",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "capability.registry.v1",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "capability.execution",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "actuation.fabric",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "verification.audit",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "context.pipeline",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "context.capability.integration",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [
+        "REWIRE"
+      ],
+      "sourceBacked": true
+    },
+    {
+      "id": "tool.selection",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "memory.long_term",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "experience.feedback",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [
+        "REWIRE"
+      ],
+      "sourceBacked": true
+    },
+    {
+      "id": "cognition.world_model",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "cognition.self_model",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [
+        "REWIRE"
+      ],
+      "sourceBacked": true
+    },
+    {
+      "id": "sensorium.body_schema",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "mata.dewa",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "dcd.cyber",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "devices.companion",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "devices.mesh",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "channels.messaging",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "channels.mcp",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "voice.runtime",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "plugin.runtime",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "skills.engine",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "workflow.engine",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "provider.openrouter",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "provider.federation",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [
+        "REWIRE"
+      ],
+      "sourceBacked": true
+    },
+    {
+      "id": "mata.providers",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "runtime.recovery",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "runtime.resource_governor",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "extensions.kernel",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "tools.core",
+      "finalDisposition": "KEEP_DISTINCT",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "tools.filesystem_http",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "tools.terminal",
+      "finalDisposition": "KEEP_CANONICAL",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "action.embodiment",
+      "finalDisposition": "SPECIALIZE",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "action.mata_dewa_rf",
+      "finalDisposition": "SPECIALIZE",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "events.signals",
+      "finalDisposition": "GENERALIZE",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "readmodels.console",
+      "finalDisposition": "GENERALIZE",
+      "migrationActions": [],
+      "sourceBacked": true
+    },
+    {
+      "id": "tools.legacy_compat",
+      "finalDisposition": "DEPRECATE",
+      "migrationActions": [],
+      "sourceBacked": true
+    }
+  ],
+  "canonicalRecordsWithZeroFinalDispositions": 0,
+  "canonicalRecordsWithMultipleFinalDispositions": 0,
+  "identityHash": "24988abd41381be7a6a614a7630c5e83075656f4721fb1750611addb96b6d9a7"
 }

@@ -1,30 +1,545 @@
 {
-  "schemaVersion":"uix-w1.l11.rationalization.v1",
-  "sourceSha":"ea934c6a0152c0a172af1619c4b99aa178ee1b25",
-  "canonicalSet":"l11_canonical_capability_inventory.json",
-  "dispositions":{"KEEP_CANONICAL":22,"KEEP_DISTINCT":12,"MERGE":0,"GENERALIZE":1,"SPECIALIZE":1,"REPLACE":0,"DEPRECATE":1,"REMOVE":0,"REWIRE":5},
-  "decisions":[
-    {"id":"RAT-001","targets":["manager.orchestration","authority.registry","capability.execution","verification.audit"],"disposition":"KEEP_DISTINCT","rationale":"Different ownership and authority/verifier semantics; Manager is not authority.","evidence":["src/manager","src/authority","src/manager/internal/canonicalCapabilityExecution.js","src/action/verification"],"uniqueBehavior":"YES","authorityImpact":"preserved","persistenceImpact":"none","testImpact":"existing frozen suites","confidence":"HIGH"},
-    {"id":"RAT-002","targets":["capability.registry.v1","tool.selection","tools.core","tools.legacy_compat"],"disposition":"KEEP_DISTINCT","rationale":"Descriptive V1 state, model-facing AITool selection, core tool surface, and historical compatibility have different owners and lifecycles.","evidence":["src/capability/registry","src/ai/tools","src/core/tools","src/tools_old"],"uniqueBehavior":"YES","authorityImpact":"none","persistenceImpact":"legacy compatibility remains","testImpact":"registry and tool suites","confidence":"HIGH"},
-    {"id":"RAT-003","targets":["context.pipeline","context.capability.integration"],"disposition":"KEEP_DISTINCT","rationale":"Context assembly remains the canonical prompt owner; integration is a read-only selection-boundary projection.","evidence":["src/ai/context/Pipeline.js","src/ai/capability/ContextCapabilityIntegration.js"],"uniqueBehavior":"YES","authorityImpact":"no authority","persistenceImpact":"none","testImpact":"context/integration suites","confidence":"HIGH"},
-    {"id":"RAT-004","targets":["provider.openrouter","provider.federation","mata.providers"],"disposition":"KEEP_DISTINCT","rationale":"Model providers, federation health, and Mata Dewa observation providers have materially different effects, availability, and failure semantics.","evidence":["src/ai/providers","src/services/modelFederation.js","src/mataDewa/providers"],"uniqueBehavior":"YES","authorityImpact":"none","persistenceImpact":"provider metadata","testImpact":"provider and Mata Dewa suites","confidence":"HIGH"},
-    {"id":"RAT-005","targets":["devices.companion","devices.mesh","sensorium.body_schema"],"disposition":"KEEP_DISTINCT","rationale":"Pairing, distributed trust, and body/sensor observations are not interchangeable capabilities.","evidence":["src/companion","src/mesh","src/embodiment"],"uniqueBehavior":"YES","authorityImpact":"trust is not permission","persistenceImpact":"device records preserved","testImpact":"device/embodiment suites","confidence":"HIGH"},
-    {"id":"RAT-006","targets":["channels.messaging","channels.mcp","voice.runtime"],"disposition":"KEEP_DISTINCT","rationale":"Channel transport, MCP exposure, and audio modality have distinct availability and user semantics.","evidence":["src/channels","src/mcp","src/voice"],"uniqueBehavior":"YES","authorityImpact":"preserved","persistenceImpact":"session compatibility","testImpact":"channel/voice/MCP suites","confidence":"HIGH"},
-    {"id":"RAT-007","targets":["plugin.runtime","extensions.kernel","skills.engine","workflow.engine"],"disposition":"KEEP_DISTINCT","rationale":"Extension lifecycle, manifest plugins, skills, and workflows are separate execution and provenance surfaces.","evidence":["src/plugins","src/extensions","src/skillEngine","src/workflow"],"uniqueBehavior":"YES","authorityImpact":"canonical ingress preserved","persistenceImpact":"plugin/skill metadata preserved","testImpact":"extension suites","confidence":"HIGH"},
-    {"id":"RAT-008","targets":["action.embodiment","action.mata_dewa_rf"],"disposition":"SPECIALIZE","rationale":"Both use canonical actuation, but their operation/effect/scope/verifier contracts are materially different.","evidence":["src/action/capabilities/embodimentWiring.js","src/mataDewa/capabilities/rfControlWiring.js"],"uniqueBehavior":"YES","authorityImpact":"no bypass","persistenceImpact":"incarnations preserved","testImpact":"action/RF suites","confidence":"HIGH"},
-    {"id":"RAT-009","targets":["events.signals","readmodels.console"],"disposition":"GENERALIZE","rationale":"Both are projections/transport surfaces, not authority; preserve event emission versus read-model query semantics under separate identities.","evidence":["src/events","src/core/events","src/routes/api/v1/console.js"],"uniqueBehavior":"YES","authorityImpact":"emission/read never ratify","persistenceImpact":"none","testImpact":"event/read-model suites","confidence":"MEDIUM"},
-    {"id":"RAT-010","targets":["context.capability.integration","provider.federation","experience.feedback","cognition.self_model"],"disposition":"REWIRE","rationale":"Future delta should consume canonical read projections and preserve UNKNOWN for absent evidence; no source rewrite is justified in this wave.","evidence":["src/ai/capability/ContextCapabilityIntegration.js","src/ai/tools/ToolStats.js","src/cognition/selfmodel"],"uniqueBehavior":"YES","authorityImpact":"none","persistenceImpact":"none","testImpact":"deferred implementation wave","confidence":"MEDIUM"},
-    {"id":"RAT-011","targets":["tools.legacy_compat"],"disposition":"DEPRECATE","rationale":"Legacy registry/executor remains source-present and caller/persistence compatibility is not disproven.","evidence":["src/tools_old"],"uniqueBehavior":"UNKNOWN","authorityImpact":"do not remove","persistenceImpact":"unknown","testImpact":"compatibility coverage required","confidence":"MEDIUM"},
-    {"id":"RAT-012","targets":["runtime.http","runtime.host","interaction.bus","action.intent","actuation.fabric","memory.long_term","cognition.world_model","cognition.self_model","mata.dewa","dcd.cyber","runtime.recovery","runtime.resource_governor","tools.filesystem_http","tools.terminal"],"disposition":"KEEP_CANONICAL","rationale":"Source-backed distinct owners with no safe duplicate or shadow removal proof.","evidence":"l11_canonical_capability_inventory.json","uniqueBehavior":"YES_OR_UNKNOWN","authorityImpact":"preserved","persistenceImpact":"checked conservatively","testImpact":"existing suites","confidence":"HIGH"}
+  "schemaVersion": "uix-w1.l11.rationalization.v1",
+  "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25",
+  "canonicalSet": "l11_canonical_capability_inventory.json",
+  "dispositions": {
+    "KEEP_CANONICAL": 15,
+    "KEEP_DISTINCT": 22,
+    "SPECIALIZE": 2,
+    "GENERALIZE": 2,
+    "DEPRECATE": 1,
+    "REWIRE": 0
+  },
+  "decisions": [
+    {
+      "id": "RAT-001",
+      "targets": [
+        "manager.orchestration",
+        "authority.registry",
+        "capability.execution",
+        "verification.audit"
+      ],
+      "disposition": "KEEP_DISTINCT",
+      "rationale": "Different ownership and authority/verifier semantics; Manager is not authority.",
+      "evidence": [
+        "src/manager",
+        "src/authority",
+        "src/manager/internal/canonicalCapabilityExecution.js",
+        "src/action/verification"
+      ],
+      "uniqueBehavior": "YES",
+      "authorityImpact": "preserved",
+      "persistenceImpact": "none",
+      "testImpact": "existing frozen suites",
+      "confidence": "HIGH"
+    },
+    {
+      "id": "RAT-002",
+      "targets": [
+        "capability.registry.v1",
+        "tool.selection",
+        "tools.core"
+      ],
+      "disposition": "KEEP_DISTINCT",
+      "rationale": "Descriptive V1 state, model-facing AITool selection, core tool surface, and historical compatibility have different owners and lifecycles.",
+      "evidence": [
+        "src/capability/registry",
+        "src/ai/tools",
+        "src/core/tools",
+        "src/tools_old"
+      ],
+      "uniqueBehavior": "YES",
+      "authorityImpact": "none",
+      "persistenceImpact": "legacy compatibility remains",
+      "testImpact": "registry and tool suites",
+      "confidence": "HIGH"
+    },
+    {
+      "id": "RAT-003",
+      "targets": [
+        "context.pipeline",
+        "context.capability.integration"
+      ],
+      "disposition": "KEEP_DISTINCT",
+      "rationale": "Context assembly remains the canonical prompt owner; integration is a read-only selection-boundary projection.",
+      "evidence": [
+        "src/ai/context/Pipeline.js",
+        "src/ai/capability/ContextCapabilityIntegration.js"
+      ],
+      "uniqueBehavior": "YES",
+      "authorityImpact": "no authority",
+      "persistenceImpact": "none",
+      "testImpact": "context/integration suites",
+      "confidence": "HIGH"
+    },
+    {
+      "id": "RAT-004",
+      "targets": [
+        "provider.openrouter",
+        "provider.federation",
+        "mata.providers"
+      ],
+      "disposition": "KEEP_DISTINCT",
+      "rationale": "Model providers, federation health, and Mata Dewa observation providers have materially different effects, availability, and failure semantics.",
+      "evidence": [
+        "src/ai/providers",
+        "src/services/modelFederation.js",
+        "src/mataDewa/providers"
+      ],
+      "uniqueBehavior": "YES",
+      "authorityImpact": "none",
+      "persistenceImpact": "provider metadata",
+      "testImpact": "provider and Mata Dewa suites",
+      "confidence": "HIGH"
+    },
+    {
+      "id": "RAT-005",
+      "targets": [
+        "devices.companion",
+        "devices.mesh",
+        "sensorium.body_schema"
+      ],
+      "disposition": "KEEP_DISTINCT",
+      "rationale": "Pairing, distributed trust, and body/sensor observations are not interchangeable capabilities.",
+      "evidence": [
+        "src/companion",
+        "src/mesh",
+        "src/embodiment"
+      ],
+      "uniqueBehavior": "YES",
+      "authorityImpact": "trust is not permission",
+      "persistenceImpact": "device records preserved",
+      "testImpact": "device/embodiment suites",
+      "confidence": "HIGH"
+    },
+    {
+      "id": "RAT-006",
+      "targets": [
+        "channels.messaging",
+        "channels.mcp",
+        "voice.runtime"
+      ],
+      "disposition": "KEEP_DISTINCT",
+      "rationale": "Channel transport, MCP exposure, and audio modality have distinct availability and user semantics.",
+      "evidence": [
+        "src/channels",
+        "src/mcp",
+        "src/voice"
+      ],
+      "uniqueBehavior": "YES",
+      "authorityImpact": "preserved",
+      "persistenceImpact": "session compatibility",
+      "testImpact": "channel/voice/MCP suites",
+      "confidence": "HIGH"
+    },
+    {
+      "id": "RAT-007",
+      "targets": [
+        "plugin.runtime",
+        "extensions.kernel",
+        "skills.engine",
+        "workflow.engine"
+      ],
+      "disposition": "KEEP_DISTINCT",
+      "rationale": "Extension lifecycle, manifest plugins, skills, and workflows are separate execution and provenance surfaces.",
+      "evidence": [
+        "src/plugins",
+        "src/extensions",
+        "src/skillEngine",
+        "src/workflow"
+      ],
+      "uniqueBehavior": "YES",
+      "authorityImpact": "canonical ingress preserved",
+      "persistenceImpact": "plugin/skill metadata preserved",
+      "testImpact": "extension suites",
+      "confidence": "HIGH"
+    },
+    {
+      "id": "RAT-008",
+      "targets": [
+        "action.embodiment",
+        "action.mata_dewa_rf"
+      ],
+      "disposition": "SPECIALIZE",
+      "rationale": "Both use canonical actuation, but their operation/effect/scope/verifier contracts are materially different.",
+      "evidence": [
+        "src/action/capabilities/embodimentWiring.js",
+        "src/mataDewa/capabilities/rfControlWiring.js"
+      ],
+      "uniqueBehavior": "YES",
+      "authorityImpact": "no bypass",
+      "persistenceImpact": "incarnations preserved",
+      "testImpact": "action/RF suites",
+      "confidence": "HIGH"
+    },
+    {
+      "id": "RAT-009",
+      "targets": [
+        "events.signals",
+        "readmodels.console"
+      ],
+      "disposition": "GENERALIZE",
+      "rationale": "Both are projections/transport surfaces, not authority; preserve event emission versus read-model query semantics under separate identities.",
+      "evidence": [
+        "src/events",
+        "src/core/events",
+        "src/routes/api/v1/console.js"
+      ],
+      "uniqueBehavior": "YES",
+      "authorityImpact": "emission/read never ratify",
+      "persistenceImpact": "none",
+      "testImpact": "event/read-model suites",
+      "confidence": "MEDIUM"
+    },
+    {
+      "id": "RAT-011",
+      "targets": [
+        "tools.legacy_compat"
+      ],
+      "disposition": "DEPRECATE",
+      "rationale": "Legacy registry/executor remains source-present and caller/persistence compatibility is not disproven.",
+      "evidence": [
+        "src/tools_old"
+      ],
+      "uniqueBehavior": "UNKNOWN",
+      "authorityImpact": "do not remove",
+      "persistenceImpact": "unknown",
+      "testImpact": "compatibility coverage required",
+      "confidence": "MEDIUM"
+    },
+    {
+      "id": "RAT-012",
+      "targets": [
+        "runtime.http",
+        "runtime.host",
+        "interaction.bus",
+        "action.intent",
+        "actuation.fabric",
+        "memory.long_term",
+        "cognition.world_model",
+        "cognition.self_model",
+        "mata.dewa",
+        "dcd.cyber",
+        "runtime.recovery",
+        "runtime.resource_governor",
+        "tools.filesystem_http",
+        "tools.terminal"
+      ],
+      "disposition": "KEEP_CANONICAL",
+      "rationale": "Source-backed distinct owners with no safe duplicate or shadow removal proof.",
+      "evidence": "l11_canonical_capability_inventory.json",
+      "uniqueBehavior": "YES_OR_UNKNOWN",
+      "authorityImpact": "preserved",
+      "persistenceImpact": "checked conservatively",
+      "testImpact": "existing suites",
+      "confidence": "HIGH"
+    },
+    {
+      "id": "RAT-010-ACTION",
+      "targets": [
+        "cognition.self_model",
+        "context.capability.integration",
+        "experience.feedback",
+        "provider.federation"
+      ],
+      "action": "REWIRE",
+      "rationale": "Future read-projection ownership/migration recommendation; not a final canonical disposition.",
+      "evidence": [
+        "src/ai/capability/ContextCapabilityIntegration.js",
+        "src/ai/tools/ToolStats.js",
+        "src/cognition/selfmodel",
+        "src/services/modelFederation.js"
+      ],
+      "authorityImpact": "none",
+      "persistenceImpact": "none",
+      "testImpact": "deferred implementation wave",
+      "confidence": "MEDIUM"
+    }
   ],
-  "exactDuplicatesFound":0,
-  "nearDuplicatesFound":3,
-  "semanticOverlapsFound":7,
-  "shadowImplementationsFound":1,
-  "deadImplementationsFound":0,
-  "orphansFound":3,
-  "supersededFound":0,
-  "unresolvedItems":3,
-  "unsafeRemovalsPerformed":0,
-  "unresolvedDestructiveDecisions":["tools.legacy_compat caller/persistence proof","provider health owner consolidation","cross-registry projection ownership"]
+  "exactDuplicatesFound": 0,
+  "nearDuplicatesFound": 3,
+  "semanticOverlapsFound": 7,
+  "shadowImplementationsFound": 1,
+  "deadImplementationsFound": 0,
+  "orphansFound": 3,
+  "supersededFound": 0,
+  "unresolvedItems": 3,
+  "unsafeRemovalsPerformed": 0,
+  "unresolvedDestructiveDecisions": [
+    "tools.legacy_compat caller/persistence proof",
+    "provider health owner consolidation",
+    "cross-registry projection ownership"
+  ],
+  "actions": {
+    "REWIRE": [
+      "cognition.self_model",
+      "context.capability.integration",
+      "experience.feedback",
+      "provider.federation"
+    ],
+    "REWIRE_COUNT": 4
+  },
+  "decisionContract": "finalDisposition is exactly one canonical disposition per inventory record; actions are separate migration/relationship metadata and never a second final disposition",
+  "finalDispositionByRecord": [
+    {
+      "recordId": "runtime.http",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "runtime.host",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "interaction.bus",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "manager.orchestration",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "action.intent",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "authority.registry",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "capability.registry.v1",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "capability.execution",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "actuation.fabric",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "verification.audit",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "context.pipeline",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "context.capability.integration",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [
+        "REWIRE"
+      ],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "tool.selection",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "memory.long_term",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "experience.feedback",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [
+        "REWIRE"
+      ],
+      "unresolvedDestructiveDecision": true
+    },
+    {
+      "recordId": "cognition.world_model",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "cognition.self_model",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [
+        "REWIRE"
+      ],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "sensorium.body_schema",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "mata.dewa",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "dcd.cyber",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "devices.companion",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "devices.mesh",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "channels.messaging",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "channels.mcp",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "voice.runtime",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "plugin.runtime",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "skills.engine",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "workflow.engine",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "provider.openrouter",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "provider.federation",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [
+        "REWIRE"
+      ],
+      "unresolvedDestructiveDecision": true
+    },
+    {
+      "recordId": "mata.providers",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "runtime.recovery",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "runtime.resource_governor",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "extensions.kernel",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "tools.core",
+      "finalDisposition": "KEEP_DISTINCT",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "tools.filesystem_http",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "tools.terminal",
+      "finalDisposition": "KEEP_CANONICAL",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "action.embodiment",
+      "finalDisposition": "SPECIALIZE",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "action.mata_dewa_rf",
+      "finalDisposition": "SPECIALIZE",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "events.signals",
+      "finalDisposition": "GENERALIZE",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "readmodels.console",
+      "finalDisposition": "GENERALIZE",
+      "actions": [],
+      "unresolvedDestructiveDecision": false
+    },
+    {
+      "recordId": "tools.legacy_compat",
+      "finalDisposition": "DEPRECATE",
+      "actions": [],
+      "unresolvedDestructiveDecision": true
+    }
+  ]
 }

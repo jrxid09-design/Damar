@@ -1,9 +1,1402 @@
 {
-  "schemaVersion":"uix-w1.l11.fingerprints.v1",
-  "sourceInventory":"l11_canonical_capability_inventory.json",
-  "identityRule":"sha256(canonical JSON of source-backed identity, purpose, owner, evidence, and represented state)",
-  "dimensions":["canonicalId","kind","semanticPurpose","runtimeOwner","evidence","state","operations","effects","requirements","dependencies","provides","composes","conflicts","fallbacks","verifiedBy","availableOn","authorityRequirement","verificationRequirement","feedbackEvidence"],
-  "omissionRule":"unavailable dimensions are omitted, never inferred",
-  "canonicalIdsUnique":true,
-  "recordsAreSourceBacked":true
+  "schemaVersion": "uix-w1.l11.fingerprints.v1",
+  "sourceInventory": "l11_canonical_capability_inventory.json",
+  "identityRule": "sha256(canonical JSON of source-backed identity, purpose, owner, evidence, and represented state)",
+  "dimensions": [
+    "canonicalId",
+    "kind",
+    "semanticPurpose",
+    "runtimeOwner",
+    "evidence",
+    "state",
+    "operations",
+    "effects",
+    "requirements",
+    "dependencies",
+    "provides",
+    "composes",
+    "conflicts",
+    "fallbacks",
+    "verifiedBy",
+    "availableOn",
+    "authorityRequirement",
+    "verificationRequirement",
+    "feedbackEvidence"
+  ],
+  "omissionRule": "unavailable dimensions are omitted, never inferred",
+  "canonicalIdsUnique": true,
+  "recordsAreSourceBacked": true,
+  "fingerprintVersion": "1",
+  "hashAlgorithm": "SHA-256",
+  "serialization": "RFC-8785-compatible sorted-key canonical JSON",
+  "records": [
+    {
+      "recordId": "runtime.http",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "runtime.http",
+        "kind": "USER_FEATURE",
+        "semanticPurpose": "HTTP/API ingress and read/control surface",
+        "runtimeOwner": "src/server.js + src/routes",
+        "evidence": [
+          "src/routes",
+          "src/server.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "YES",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "67af93b3639ec3e1594bd18f2e3d1332aba59c5464d821792b9800bca87d9030",
+      "sourceProvenance": {
+        "owner": "src/server.js + src/routes",
+        "evidence": [
+          "src/routes",
+          "src/server.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "runtime.host",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "runtime.host",
+        "kind": "BACKGROUND_SERVICE",
+        "semanticPurpose": "local runtime host and presence surface",
+        "runtimeOwner": "src/runtime/host",
+        "evidence": [
+          "src/integration/canonicalRuntimeComposition.js",
+          "src/runtime/host/main.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "PARTIAL",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "17094df029ac21c55dd2bf0339cbf6ef4aea42af2f7b33a536e62d3775975f81",
+      "sourceProvenance": {
+        "owner": "src/runtime/host",
+        "evidence": [
+          "src/integration/canonicalRuntimeComposition.js",
+          "src/runtime/host/main.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "interaction.bus",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "interaction.bus",
+        "kind": "INTERNAL_CAPABILITY",
+        "semanticPurpose": "interaction/event ingress transport",
+        "runtimeOwner": "src/runtime/interactionBus",
+        "evidence": [
+          "src/runtime/interactionBus"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "UNKNOWN",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "76e50c5e795fc99000c2fa888d5d449106b41ce71f798744f00cb83467be8f52",
+      "sourceProvenance": {
+        "owner": "src/runtime/interactionBus",
+        "evidence": [
+          "src/runtime/interactionBus"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "manager.orchestration",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "manager.orchestration",
+        "kind": "ORCHESTRATION_PATTERN",
+        "semanticPurpose": "route, normalize, and admit requests",
+        "runtimeOwner": "src/manager",
+        "evidence": [
+          "src/manager/bootstrap.js",
+          "src/manager/internal"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "NO_AUTHORITY",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "70b2276451a7967af19603aa298c02080118c5c94dedfab01aa2d041c0ebaca9",
+      "sourceProvenance": {
+        "owner": "src/manager",
+        "evidence": [
+          "src/manager/bootstrap.js",
+          "src/manager/internal"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "action.intent",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "action.intent",
+        "kind": "INTERNAL_CAPABILITY",
+        "semanticPurpose": "typed action intent boundary",
+        "runtimeOwner": "src/action/intent.js",
+        "evidence": [
+          "src/action/intent.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "88eaa8d81d246182d3d4695a9e23ccb8e1517ff5b42bfccb9dc58536ae4eb48f",
+      "sourceProvenance": {
+        "owner": "src/action/intent.js",
+        "evidence": [
+          "src/action/intent.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "authority.registry",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "authority.registry",
+        "kind": "SECURITY_CAPABILITY",
+        "semanticPurpose": "canonical authority evaluation and ratification",
+        "runtimeOwner": "src/authority/productionComposition.js",
+        "evidence": [
+          "src/authority/productionComposition.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "ADVANCED_OR_FORENSIC",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "6e36ea76d9edfa06e9f068e065748101eb67afae55a67a805d78aba6766e8e58",
+      "sourceProvenance": {
+        "owner": "src/authority/productionComposition.js",
+        "evidence": [
+          "src/authority/productionComposition.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "capability.registry.v1",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "capability.registry.v1",
+        "kind": "INTERNAL_CAPABILITY",
+        "semanticPurpose": "descriptive canonical capability identity, availability, relations, and feedback view",
+        "runtimeOwner": "src/capability/registry/registry.js",
+        "evidence": [
+          "src/capability/registry"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "NO_AUTHORITY",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "39b91621fad621f4947e912e4324ca11c0f7c3c75ee4e37a75e536c43f8b3fb8",
+      "sourceProvenance": {
+        "owner": "src/capability/registry/registry.js",
+        "evidence": [
+          "src/capability/registry"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "capability.execution",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "capability.execution",
+        "kind": "INTERNAL_CAPABILITY",
+        "semanticPurpose": "exact capability-operation execution boundary",
+        "runtimeOwner": "src/manager/internal/canonicalCapabilityExecution.js",
+        "evidence": [
+          "src/manager/internal/canonicalCapabilityExecution.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "83abbf6828da3eee47ecee04e56e06f30ca246c7c9418f0fc6e63eb579362d14",
+      "sourceProvenance": {
+        "owner": "src/manager/internal/canonicalCapabilityExecution.js",
+        "evidence": [
+          "src/manager/internal/canonicalCapabilityExecution.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "actuation.fabric",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "actuation.fabric",
+        "kind": "INTERNAL_CAPABILITY",
+        "semanticPurpose": "bound actuator registration and dispatch",
+        "runtimeOwner": "src/action/actuation",
+        "evidence": [
+          "src/action/actuation",
+          "src/action/capabilities/embodimentWiring.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "eea7a29a30f440c662dd162532317bcd0f8328667de098cfe2c3bbb823fc4228",
+      "sourceProvenance": {
+        "owner": "src/action/actuation",
+        "evidence": [
+          "src/action/actuation",
+          "src/action/capabilities/embodimentWiring.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "verification.audit",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "verification.audit",
+        "kind": "SECURITY_CAPABILITY",
+        "semanticPurpose": "verify effects and persist audit acknowledgement",
+        "runtimeOwner": "src/action/verification + src/runtime/auditLedger",
+        "evidence": [
+          "src/action/verification",
+          "src/runtime/auditLedger"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "ADVANCED_OR_FORENSIC",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "12964391ac5a3fb8137438e3381b6a530255fed41ecd7153eb9a1d119a2a6d09",
+      "sourceProvenance": {
+        "owner": "src/action/verification + src/runtime/auditLedger",
+        "evidence": [
+          "src/action/verification",
+          "src/runtime/auditLedger"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "context.pipeline",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "context.pipeline",
+        "kind": "INTERNAL_CAPABILITY",
+        "semanticPurpose": "freshness-aware prompt context selection, conflict diagnostics, budgeting, assembly",
+        "runtimeOwner": "src/ai/context/Pipeline.js",
+        "evidence": [
+          "src/ai/context"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "NO_AUTHORITY",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "d544739d080513173f20beb3eaba6116f595ebbe879af4c71db27c34660d1917",
+      "sourceProvenance": {
+        "owner": "src/ai/context/Pipeline.js",
+        "evidence": [
+          "src/ai/context"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "context.capability.integration",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "context.capability.integration",
+        "kind": "INTERNAL_CAPABILITY",
+        "semanticPurpose": "read-only context plus canonical V1 evidence projection at tool selection boundary",
+        "runtimeOwner": "src/ai/capability/ContextCapabilityIntegration.js",
+        "evidence": [
+          "src/ai/capability/ContextCapabilityIntegration.js",
+          "src/ai/runtime/AIRuntime.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "NO_AUTHORITY",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "08fcc5664a77c672317aeeae5efbef9f2d2a3aec35d02ba6181064ce413772b6",
+      "sourceProvenance": {
+        "owner": "src/ai/capability/ContextCapabilityIntegration.js",
+        "evidence": [
+          "src/ai/capability/ContextCapabilityIntegration.js",
+          "src/ai/runtime/AIRuntime.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "tool.selection",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "tool.selection",
+        "kind": "INTERNAL_CAPABILITY",
+        "semanticPurpose": "retrieve, rank, gate, budget, and minimize model-facing tools",
+        "runtimeOwner": "src/ai/tools/Pipeline.js",
+        "evidence": [
+          "src/ai/tools/AIToolRegistry.js",
+          "src/ai/tools/Pipeline.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "NO_AUTHORITY",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "c7ca18087fd09049a56cbee86b55a7cc7803440d3caed76f088adf8f130f144d",
+      "sourceProvenance": {
+        "owner": "src/ai/tools/Pipeline.js",
+        "evidence": [
+          "src/ai/tools/AIToolRegistry.js",
+          "src/ai/tools/Pipeline.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "memory.long_term",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "memory.long_term",
+        "kind": "MEMORY_BEHAVIOR",
+        "semanticPurpose": "persist, retrieve, govern, and expose memory context",
+        "runtimeOwner": "src/memory",
+        "evidence": [
+          "src/memory",
+          "src/services/contextService.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "YES",
+          "governed": "PARTIAL",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "b51ff6888b43d9dbe8827eb3370e978d121e4b761b45da94f7a26bbb44e26fe2",
+      "sourceProvenance": {
+        "owner": "src/memory",
+        "evidence": [
+          "src/memory",
+          "src/services/contextService.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "experience.feedback",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "experience.feedback",
+        "kind": "LEARNING_BEHAVIOR",
+        "semanticPurpose": "observe outcomes/trust/reliability without semantic learning claim",
+        "runtimeOwner": "src/cognition/selfmodel + src/ai/tools/ToolStats.js",
+        "evidence": [
+          "src/ai/tools/ToolStats.js",
+          "src/cognition/selfmodel"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "PARTIAL",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "UNKNOWN",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "fae4889e874b9bce1ba8c9e7c1dee7e390071ab2fe9d2d90322c5952690ba288",
+      "sourceProvenance": {
+        "owner": "src/cognition/selfmodel + src/ai/tools/ToolStats.js",
+        "evidence": [
+          "src/ai/tools/ToolStats.js",
+          "src/cognition/selfmodel"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "cognition.world_model",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "cognition.world_model",
+        "kind": "COGNITIVE_CAPABILITY",
+        "semanticPurpose": "bounded situation graph and belief/contradiction primitives",
+        "runtimeOwner": "src/cognition/worldmodel",
+        "evidence": [
+          "src/cognition/worldmodel"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "ADVANCED_OR_FORENSIC",
+          "governed": "PARTIAL",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "2957bd1fb03745851ffd782234856f5618ae0a646fb22b059a16d8983668bf13",
+      "sourceProvenance": {
+        "owner": "src/cognition/worldmodel",
+        "evidence": [
+          "src/cognition/worldmodel"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "cognition.self_model",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "cognition.self_model",
+        "kind": "COGNITIVE_CAPABILITY",
+        "semanticPurpose": "self-state, limitations, and capability outcome observations",
+        "runtimeOwner": "src/cognition/selfmodel",
+        "evidence": [
+          "src/cognition/selfmodel"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "UNKNOWN",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "c06beabc7469c6b101c8da0fd4ce11a65236d557c0d8831283eed58d56946da0",
+      "sourceProvenance": {
+        "owner": "src/cognition/selfmodel",
+        "evidence": [
+          "src/cognition/selfmodel"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "sensorium.body_schema",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "sensorium.body_schema",
+        "kind": "SENSOR_CAPABILITY",
+        "semanticPurpose": "sensor/body identity and observation projection",
+        "runtimeOwner": "src/embodiment",
+        "evidence": [
+          "src/embodiment",
+          "src/integration/canonicalRuntimeComposition.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "BACKGROUND_ONLY",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "b4822fbf13b41195a749297daa25f469f5b6945836f7473c3a36bb2040400fac",
+      "sourceProvenance": {
+        "owner": "src/embodiment",
+        "evidence": [
+          "src/embodiment",
+          "src/integration/canonicalRuntimeComposition.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "mata.dewa",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "mata.dewa",
+        "kind": "COGNITIVE_CAPABILITY",
+        "semanticPurpose": "observation providers, fusion, watch, RF, and visual mode surfaces",
+        "runtimeOwner": "src/mataDewa",
+        "evidence": [
+          "src/mataDewa",
+          "src/mataDewa/capabilities"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "ADVANCED_OR_FORENSIC",
+          "governed": "PARTIAL",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "7b62fa1f968954ec77e88661c1e48f085fdea83bca642e19a5a90aff920701ea",
+      "sourceProvenance": {
+        "owner": "src/mataDewa",
+        "evidence": [
+          "src/mataDewa",
+          "src/mataDewa/capabilities"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "dcd.cyber",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "dcd.cyber",
+        "kind": "SECURITY_CAPABILITY",
+        "semanticPurpose": "defensive detection and security observation",
+        "runtimeOwner": "src/cyber + src/security",
+        "evidence": [
+          "src/cyber",
+          "src/security"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "PARTIAL",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "ADVANCED_OR_FORENSIC",
+          "governed": "PARTIAL",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "061da684ea93f133212c9f8f2923a5bde8a30717083ac5727ddf5e955202d465",
+      "sourceProvenance": {
+        "owner": "src/cyber + src/security",
+        "evidence": [
+          "src/cyber",
+          "src/security"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "devices.companion",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "devices.companion",
+        "kind": "DEVICE_CAPABILITY",
+        "semanticPurpose": "pairing, device identity, and companion control surface",
+        "runtimeOwner": "src/companion",
+        "evidence": [
+          "src/companion",
+          "src/routes/api/v1/companion.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "YES",
+          "governed": "PARTIAL",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "c9f783433114102ffdd4c9e05e6f74764339108274891c4549e18e4f946f8dac",
+      "sourceProvenance": {
+        "owner": "src/companion",
+        "evidence": [
+          "src/companion",
+          "src/routes/api/v1/companion.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "devices.mesh",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "devices.mesh",
+        "kind": "CROSS_DEVICE_BEHAVIOR",
+        "semanticPurpose": "distributed identity/trust and remote execution substrate",
+        "runtimeOwner": "src/mesh",
+        "evidence": [
+          "src/mesh"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "PARTIAL",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "ADVANCED_OR_FORENSIC",
+          "governed": "PARTIAL",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "6907f8e996052b204d9a4712bd20311c4b9b0552e20d41ed253f19107636cc2a",
+      "sourceProvenance": {
+        "owner": "src/mesh",
+        "evidence": [
+          "src/mesh"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "channels.messaging",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "channels.messaging",
+        "kind": "USER_FEATURE",
+        "semanticPurpose": "Telegram/WhatsApp interaction surfaces",
+        "runtimeOwner": "src/channels + src/services/telegramService.js + src/services/whatsappService.js",
+        "evidence": [
+          "src/channels",
+          "src/services/telegramService.js",
+          "src/services/whatsappService.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "YES",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "535858df695f065e25b949e9a005bca8f945dcbaf2cf2802567d6ab53159571a",
+      "sourceProvenance": {
+        "owner": "src/channels + src/services/telegramService.js + src/services/whatsappService.js",
+        "evidence": [
+          "src/channels",
+          "src/services/telegramService.js",
+          "src/services/whatsappService.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "channels.mcp",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "channels.mcp",
+        "kind": "INTEGRATION",
+        "semanticPurpose": "MCP transport/tool exposure boundary",
+        "runtimeOwner": "src/mcp",
+        "evidence": [
+          "scripts/mcp-stdio.js",
+          "src/mcp"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "ADVANCED_OR_FORENSIC",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "05215a752daaa9d9ed23bb2445d10ac89e2fd27b8bf7695ca8d5c5fd21a28d3e",
+      "sourceProvenance": {
+        "owner": "src/mcp",
+        "evidence": [
+          "scripts/mcp-stdio.js",
+          "src/mcp"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "voice.runtime",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "voice.runtime",
+        "kind": "USER_FEATURE",
+        "semanticPurpose": "audio input, VAD/wake word, and output providers",
+        "runtimeOwner": "src/voice",
+        "evidence": [
+          "src/integration/canonicalRuntimeComposition.js",
+          "src/voice"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "PARTIAL",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "YES",
+          "governed": "PARTIAL",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "aaf85f0a93a9a17afbe69b50da678fad40cd4dfd8cea46a70c19ac32473c08f3",
+      "sourceProvenance": {
+        "owner": "src/voice",
+        "evidence": [
+          "src/integration/canonicalRuntimeComposition.js",
+          "src/voice"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "plugin.runtime",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "plugin.runtime",
+        "kind": "EXTENSION",
+        "semanticPurpose": "manifest/provenance-gated plugin load and tool exposure",
+        "runtimeOwner": "src/plugins",
+        "evidence": [
+          "src/plugins/pluginLoader.js",
+          "src/plugins/pluginValidator.js",
+          "src/plugins/system.time/manifest.json",
+          "src/plugins/weather/manifest.json"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "YES",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "5abad96beaa802100b460b512a2d4b2855966294c0dd6ceb1f6018801debc98f",
+      "sourceProvenance": {
+        "owner": "src/plugins",
+        "evidence": [
+          "src/plugins/pluginLoader.js",
+          "src/plugins/pluginValidator.js",
+          "src/plugins/system.time/manifest.json",
+          "src/plugins/weather/manifest.json"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "skills.engine",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "skills.engine",
+        "kind": "SKILL",
+        "semanticPurpose": "load, match, execute, and observe curated skills",
+        "runtimeOwner": "src/skillEngine + src/skills",
+        "evidence": [
+          "src/skillEngine",
+          "src/skills"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "PARTIAL",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "PARTIAL",
+          "governed": "PARTIAL",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "9e5bec4c02cc84a545f947353eb9070194baf21d22b0f0ba375cdfd569ab92ed",
+      "sourceProvenance": {
+        "owner": "src/skillEngine + src/skills",
+        "evidence": [
+          "src/skillEngine",
+          "src/skills"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "workflow.engine",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "workflow.engine",
+        "kind": "WORKFLOW",
+        "semanticPurpose": "bounded workflow storage/execution primitives",
+        "runtimeOwner": "src/workflow",
+        "evidence": [
+          "src/workflow"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "PARTIAL",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "PARTIAL",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "50108bf011182eade20f1bbbbd801518537242e13c8a6843e1d9ce9cca0ba083",
+      "sourceProvenance": {
+        "owner": "src/workflow",
+        "evidence": [
+          "src/workflow"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "provider.openrouter",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "provider.openrouter",
+        "kind": "MODEL_ROUTING_BEHAVIOR",
+        "semanticPurpose": "OpenRouter/OpenAI-compatible model provider",
+        "runtimeOwner": "src/ai/providers/openrouter + src/providers/openRouterProvider.js",
+        "evidence": [
+          "src/ai/providers/openrouter",
+          "src/providers/openRouterProvider.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "YES",
+          "governed": "PARTIAL",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "b88bd7aea434d9bf1e166f58e857fe2fac70bc7bc43a6b2ce6599c2a25ff2dd3",
+      "sourceProvenance": {
+        "owner": "src/ai/providers/openrouter + src/providers/openRouterProvider.js",
+        "evidence": [
+          "src/ai/providers/openrouter",
+          "src/providers/openRouterProvider.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "provider.federation",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "provider.federation",
+        "kind": "MODEL_ROUTING_BEHAVIOR",
+        "semanticPurpose": "provider registry/health/federation observations",
+        "runtimeOwner": "src/ai/providers + src/services/modelFederation.js",
+        "evidence": [
+          "src/ai/providers",
+          "src/services/modelFederation.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "UNKNOWN",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "3945e3fea7212742568f1bf4efdbda77259429b443ff4739aa105697b2387a85",
+      "sourceProvenance": {
+        "owner": "src/ai/providers + src/services/modelFederation.js",
+        "evidence": [
+          "src/ai/providers",
+          "src/services/modelFederation.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "mata.providers",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "mata.providers",
+        "kind": "SENSOR_CAPABILITY",
+        "semanticPurpose": "keyed/keyless earth, route, weather, aircraft, satellite, and RF observations",
+        "runtimeOwner": "src/mataDewa/providers + src/mataDewa/registry/providerRegistry.js",
+        "evidence": [
+          "src/mataDewa/providers",
+          "src/mataDewa/registry/providerRegistry.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "ADVANCED_OR_FORENSIC",
+          "governed": "PARTIAL",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "6c2f6580f947b06f67d6960300f85fce472fb2604999145fee0b7be1a987eb67",
+      "sourceProvenance": {
+        "owner": "src/mataDewa/providers + src/mataDewa/registry/providerRegistry.js",
+        "evidence": [
+          "src/mataDewa/providers",
+          "src/mataDewa/registry/providerRegistry.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "runtime.recovery",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "runtime.recovery",
+        "kind": "BACKGROUND_SERVICE",
+        "semanticPurpose": "recovery capsule/provider resilience",
+        "runtimeOwner": "src/runtime/recovery",
+        "evidence": [
+          "src/runtime/recovery"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "BACKGROUND_ONLY",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "5208737296d715ca9a1b8fb90b506cb58862592235e1d2cbad1f276bfdbdc02c",
+      "sourceProvenance": {
+        "owner": "src/runtime/recovery",
+        "evidence": [
+          "src/runtime/recovery"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "runtime.resource_governor",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "runtime.resource_governor",
+        "kind": "INFRASTRUCTURE_CAPABILITY",
+        "semanticPurpose": "resource pressure and execution budget observations",
+        "runtimeOwner": "src/runtime/resourceGovernor",
+        "evidence": [
+          "src/runtime/resourceGovernor"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "BACKGROUND_ONLY",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "21b3a8ad988874fcbf2a3006d6487b3d4884f5cc3698a174dfd919030e53a52b",
+      "sourceProvenance": {
+        "owner": "src/runtime/resourceGovernor",
+        "evidence": [
+          "src/runtime/resourceGovernor"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "extensions.kernel",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "extensions.kernel",
+        "kind": "EXTENSION",
+        "semanticPurpose": "extension manifest, lifecycle, health, and dependency controls",
+        "runtimeOwner": "src/extensions",
+        "evidence": [
+          "src/extensions"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "e59a1f5c457feaf9a59e3ad2bf7cdc8d1b4d15840e5c459e591d3f52d3e16048",
+      "sourceProvenance": {
+        "owner": "src/extensions",
+        "evidence": [
+          "src/extensions"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "tools.core",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "tools.core",
+        "kind": "TOOL",
+        "semanticPurpose": "tool schemas, registry, validation, execution, and statistics",
+        "runtimeOwner": "src/core/tools + src/ai/tools",
+        "evidence": [
+          "src/ai/tools",
+          "src/core/tools"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "NO_AUTHORITY",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "3c5a65220c1facf353708dfe6c94063f2f0d763cba6a63c1d57e1edffd2b6ec5",
+      "sourceProvenance": {
+        "owner": "src/core/tools + src/ai/tools",
+        "evidence": [
+          "src/ai/tools",
+          "src/core/tools"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "tools.filesystem_http",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "tools.filesystem_http",
+        "kind": "TOOL",
+        "semanticPurpose": "filesystem and HTTP tool implementations",
+        "runtimeOwner": "src/plugins/filesystem + src/plugins/http",
+        "evidence": [
+          "src/plugins/filesystem",
+          "src/plugins/http"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "PARTIAL",
+          "composed": "PARTIAL",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "ADVANCED_OR_FORENSIC",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "9514e727419f5ed9afe5af55e4bb7019c2350b114d4b8a24af178029937a74b7",
+      "sourceProvenance": {
+        "owner": "src/plugins/filesystem + src/plugins/http",
+        "evidence": [
+          "src/plugins/filesystem",
+          "src/plugins/http"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "tools.terminal",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "tools.terminal",
+        "kind": "TOOL",
+        "semanticPurpose": "terminal/PTY operations",
+        "runtimeOwner": "src/services/terminalTools.js + src/runtime/terminal",
+        "evidence": [
+          "src/runtime/terminal",
+          "src/services/terminalTools.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "ADVANCED_OR_FORENSIC",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "1a65901f633a1e066714390e6a4e6d86429bc07f3275a30b6c2d946df805ac9d",
+      "sourceProvenance": {
+        "owner": "src/services/terminalTools.js + src/runtime/terminal",
+        "evidence": [
+          "src/runtime/terminal",
+          "src/services/terminalTools.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "action.embodiment",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "action.embodiment",
+        "kind": "DEVICE_CAPABILITY",
+        "semanticPurpose": "media, desktop, backup, Kali, and notification governed capability bindings",
+        "runtimeOwner": "src/action/capabilities/embodimentWiring.js",
+        "evidence": [
+          "src/action/capabilities/embodimentWiring.js",
+          "src/services/embodimentDrivers.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "49e94728c1e0d5d1cf29faac5358b33a4cdc36808163e84cbc2b4528dfebfe25",
+      "sourceProvenance": {
+        "owner": "src/action/capabilities/embodimentWiring.js",
+        "evidence": [
+          "src/action/capabilities/embodimentWiring.js",
+          "src/services/embodimentDrivers.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "action.mata_dewa_rf",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "action.mata_dewa_rf",
+        "kind": "DEVICE_CAPABILITY",
+        "semanticPurpose": "descriptive RF listener/device trust/calibration capability bindings",
+        "runtimeOwner": "src/mataDewa/capabilities/rfControlWiring.js",
+        "evidence": [
+          "src/mataDewa/capabilities/rfControlWiring.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "PARTIAL",
+          "userReachable": "ADVANCED_OR_FORENSIC",
+          "governed": "YES",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "a4037adbbec05773f6e29f4908d5bb65ba8be7aab103e3584fc80bb8b523fa61",
+      "sourceProvenance": {
+        "owner": "src/mataDewa/capabilities/rfControlWiring.js",
+        "evidence": [
+          "src/mataDewa/capabilities/rfControlWiring.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "events.signals",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "events.signals",
+        "kind": "EVENT_OR_SIGNAL",
+        "semanticPurpose": "lifecycle, telemetry, interaction, and execution event transport",
+        "runtimeOwner": "src/events + src/core/events + src/services/telemetryService.js",
+        "evidence": [
+          "src/core/events",
+          "src/events",
+          "src/services/telemetryService.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "PARTIAL",
+          "composed": "PARTIAL",
+          "runtimeReachable": "YES",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "NO_AUTHORITY",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "127f63ec5fa23087056d5a6be0fbf6993bc489c9dfc81cad8261de3ba4fd24e6",
+      "sourceProvenance": {
+        "owner": "src/events + src/core/events + src/services/telemetryService.js",
+        "evidence": [
+          "src/core/events",
+          "src/events",
+          "src/services/telemetryService.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "readmodels.console",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "readmodels.console",
+        "kind": "READ_MODEL",
+        "semanticPurpose": "health, context, safety, provider, plugin, device, memory, and audit projections",
+        "runtimeOwner": "src/routes/api/v1/console.js + src/controllers",
+        "evidence": [
+          "src/controllers",
+          "src/routes/api/v1/console.js"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "YES",
+          "composed": "YES",
+          "runtimeReachable": "YES",
+          "userReachable": "YES",
+          "governed": "PARTIAL",
+          "tested": "YES",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "d8cef044d9338cb6aff3c370c573cf56402990a01b25f92e115a62229297a4ba",
+      "sourceProvenance": {
+        "owner": "src/routes/api/v1/console.js + src/controllers",
+        "evidence": [
+          "src/controllers",
+          "src/routes/api/v1/console.js"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    },
+    {
+      "recordId": "tools.legacy_compat",
+      "fingerprintVersion": "1",
+      "normalizedEvidence": {
+        "canonicalId": "tools.legacy_compat",
+        "kind": "TOOL",
+        "semanticPurpose": "historical compatibility tool registry and executor",
+        "runtimeOwner": "src/tools_old",
+        "evidence": [
+          "src/tools_old"
+        ],
+        "state": {
+          "code": "YES",
+          "registered": "UNKNOWN",
+          "composed": "UNKNOWN",
+          "runtimeReachable": "UNKNOWN",
+          "userReachable": "INTERNAL_ONLY",
+          "governed": "UNKNOWN",
+          "tested": "PARTIAL",
+          "certified": "UNKNOWN"
+        }
+      },
+      "fingerprintHash": "ad2202bc1f379316e5ae0126d1aaac3a78fe9d8c0f91eab92b30e695b421cfef",
+      "sourceProvenance": {
+        "owner": "src/tools_old",
+        "evidence": [
+          "src/tools_old"
+        ],
+        "sourceSha": "ea934c6a0152c0a172af1619c4b99aa178ee1b25"
+      }
+    }
+  ],
+  "perRecordFingerprintCount": 42,
+  "fingerprintRecordIdsUnique": true,
+  "missingFingerprintRecords": [],
+  "brokenFingerprintProvenance": 0
 }

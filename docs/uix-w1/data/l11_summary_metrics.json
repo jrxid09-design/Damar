@@ -1,13 +1,65 @@
 {
-  "schemaVersion":"uix-w1.l11.metrics.v1",
-  "totalCapabilityRecordsAnalyzed":42,
-  "rationalization":{"KEEP_CANONICAL":22,"KEEP_DISTINCT":12,"MERGE":0,"GENERALIZE":1,"SPECIALIZE":1,"REPLACE":0,"DEPRECATE":1,"REMOVE":0,"REWIRE":5,"EXACT_DUPLICATES_FOUND":0,"NEAR_DUPLICATES_FOUND":3,"SEMANTIC_OVERLAPS_FOUND":7,"SHADOW_IMPLEMENTATIONS_FOUND":1,"DEAD_IMPLEMENTATIONS_FOUND":0,"ORPHANS_FOUND":3,"SUPERSEDED_FOUND":0,"UNRESOLVED_RATIONALIZATION_ITEMS":3},
-  "synthesis":{"RAW_SYNTHESIS_CANDIDATES":12,"UNIQUE":8,"MERGED_INTO_EXISTING":2,"SPECIALIZATION":1,"GENERALIZATION":1,"ALIAS_ONLY":0,"DUPLICATE":0,"REJECTED_LOW_VALUE":0,"FINAL_RETAINED_SYNTHESIS_CANDIDATES":12,"MISSING_PRIMITIVES":10},
-  "compositionPatterns":8,
-  "counterfactualRemovalUsed":true,
-  "capabilityIntelligenceUsed":true,
-  "contextIntelligenceUsed":true,
-  "contextCapabilityIntegrationUsed":true,
-  "unsafeRemovalsPerformed":0,
-  "sourceChanges":{"product":false,"tests":false,"artifacts":true}
+  "schemaVersion": "uix-w1.l11.metrics.v1",
+  "totalCapabilityRecordsAnalyzed": 42,
+  "rationalization": {
+    "KEEP_CANONICAL": 15,
+    "KEEP_DISTINCT": 22,
+    "MERGE": 0,
+    "GENERALIZE": 2,
+    "SPECIALIZE": 2,
+    "REPLACE": 0,
+    "DEPRECATE": 1,
+    "REMOVE": 0,
+    "REWIRE": 0,
+    "REWIRE_ACTION_COUNT": 4,
+    "EXACT_DUPLICATES_FOUND": 0,
+    "NEAR_DUPLICATES_FOUND": 3,
+    "SEMANTIC_OVERLAPS_FOUND": 7,
+    "SHADOW_IMPLEMENTATIONS_FOUND": 1,
+    "DEAD_IMPLEMENTATIONS_FOUND": 0,
+    "ORPHANS_FOUND": 3,
+    "SUPERSEDED_FOUND": 0,
+    "UNRESOLVED_RATIONALIZATION_ITEMS": 3
+  },
+  "synthesis": {
+    "RAW_SYNTHESIS_CANDIDATES": 12,
+    "UNIQUE": 6,
+    "MERGED_INTO_EXISTING": 4,
+    "SPECIALIZATION": 1,
+    "GENERALIZATION": 1,
+    "ALIAS_ONLY": 0,
+    "DUPLICATE": 0,
+    "REJECTED_LOW_VALUE": 0,
+    "SYNTHESIS_CATALOG_RECORDS_RETAINED": 12,
+    "FINAL_DISTINCT_SYNTHESIS_DESIGNS": 8,
+    "FINAL_RETAINED_SYNTHESIS_CANDIDATES": 12,
+    "MISSING_PRIMITIVES": 9
+  },
+  "compositionPatterns": 8,
+  "counterfactualRemovalUsed": true,
+  "capabilityIntelligenceUsed": true,
+  "contextIntelligenceUsed": true,
+  "contextCapabilityIntegrationUsed": true,
+  "unsafeRemovalsPerformed": 0,
+  "sourceChanges": {
+    "product": false,
+    "tests": false,
+    "artifacts": true
+  },
+  "canonicalRationalizedCapabilityCount": 42,
+  "surface": {
+    "USER_VISIBLE_FEATURE": 10,
+    "ADVANCED_OR_FORENSIC": 11,
+    "BACKGROUND_ONLY": 3,
+    "INTERNAL_ONLY": 18
+  },
+  "surfaceCountingInvariant": "exactly one mutually exclusive surfaceDisposition per canonical inventory record; USER_VISIBLE_FEATURE combines userReachable YES and PARTIAL",
+  "barrierA": {
+    "revalidated": true,
+    "canonicalIdentityHash": "24988abd41381be7a6a614a7630c5e83075656f4721fb1750611addb96b6d9a7"
+  },
+  "barrierB": {
+    "revalidated": true,
+    "synthesisInputBoundary": "Barrier-A canonical records only"
+  }
 }

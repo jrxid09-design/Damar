@@ -1,7 +1,400 @@
 {
-  "schemaVersion":"uix-w1.l11.user-surface.v1",
-  "source":"l11_canonical_capability_inventory.json",
-  "rule":"runtime reachability does not imply user reachability",
-  "dispositions":{"USER_VISIBLE_FEATURE":10,"ADVANCED_OR_FORENSIC":11,"BACKGROUND_ONLY":5,"INTERNAL_ONLY":16},
-  "unresolvedSurfaceClaims":["USB HID remains UNKNOWN","future Dashboard adapters are out of scope","provider/channel configuration remains environment-dependent"]
+  "schemaVersion": "uix-w1.l11.user-surface.v1",
+  "source": "l11_canonical_capability_inventory.json",
+  "rule": "runtime reachability does not imply user reachability",
+  "dispositions": {
+    "USER_VISIBLE_FEATURE": 10,
+    "ADVANCED_OR_FORENSIC": 11,
+    "BACKGROUND_ONLY": 3,
+    "INTERNAL_ONLY": 18
+  },
+  "unresolvedSurfaceClaims": [
+    "USB HID remains UNKNOWN",
+    "future Dashboard adapters are out of scope",
+    "provider/channel configuration remains environment-dependent"
+  ],
+  "records": [
+    {
+      "canonicalId": "runtime.http",
+      "runtimeState": "YES",
+      "userReachability": "YES",
+      "surfaceDisposition": "USER_VISIBLE_FEATURE",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "runtime.host",
+      "runtimeState": "YES",
+      "userReachability": "PARTIAL",
+      "surfaceDisposition": "USER_VISIBLE_FEATURE",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "interaction.bus",
+      "runtimeState": "YES",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "manager.orchestration",
+      "runtimeState": "YES",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "action.intent",
+      "runtimeState": "YES",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "authority.registry",
+      "runtimeState": "YES",
+      "userReachability": "ADVANCED_OR_FORENSIC",
+      "surfaceDisposition": "ADVANCED_OR_FORENSIC",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "capability.registry.v1",
+      "runtimeState": "YES",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "capability.execution",
+      "runtimeState": "YES",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "actuation.fabric",
+      "runtimeState": "YES",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "verification.audit",
+      "runtimeState": "YES",
+      "userReachability": "ADVANCED_OR_FORENSIC",
+      "surfaceDisposition": "ADVANCED_OR_FORENSIC",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "context.pipeline",
+      "runtimeState": "YES",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "context.capability.integration",
+      "runtimeState": "YES",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "tool.selection",
+      "runtimeState": "YES",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "memory.long_term",
+      "runtimeState": "YES",
+      "userReachability": "YES",
+      "surfaceDisposition": "USER_VISIBLE_FEATURE",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "experience.feedback",
+      "runtimeState": "PARTIAL",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "cognition.world_model",
+      "runtimeState": "PARTIAL",
+      "userReachability": "ADVANCED_OR_FORENSIC",
+      "surfaceDisposition": "ADVANCED_OR_FORENSIC",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "cognition.self_model",
+      "runtimeState": "PARTIAL",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "sensorium.body_schema",
+      "runtimeState": "PARTIAL",
+      "userReachability": "BACKGROUND_ONLY",
+      "surfaceDisposition": "BACKGROUND_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "mata.dewa",
+      "runtimeState": "PARTIAL",
+      "userReachability": "ADVANCED_OR_FORENSIC",
+      "surfaceDisposition": "ADVANCED_OR_FORENSIC",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "dcd.cyber",
+      "runtimeState": "PARTIAL",
+      "userReachability": "ADVANCED_OR_FORENSIC",
+      "surfaceDisposition": "ADVANCED_OR_FORENSIC",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "devices.companion",
+      "runtimeState": "PARTIAL",
+      "userReachability": "YES",
+      "surfaceDisposition": "USER_VISIBLE_FEATURE",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "devices.mesh",
+      "runtimeState": "PARTIAL",
+      "userReachability": "ADVANCED_OR_FORENSIC",
+      "surfaceDisposition": "ADVANCED_OR_FORENSIC",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "channels.messaging",
+      "runtimeState": "PARTIAL",
+      "userReachability": "YES",
+      "surfaceDisposition": "USER_VISIBLE_FEATURE",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "channels.mcp",
+      "runtimeState": "PARTIAL",
+      "userReachability": "ADVANCED_OR_FORENSIC",
+      "surfaceDisposition": "ADVANCED_OR_FORENSIC",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "voice.runtime",
+      "runtimeState": "PARTIAL",
+      "userReachability": "YES",
+      "surfaceDisposition": "USER_VISIBLE_FEATURE",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "plugin.runtime",
+      "runtimeState": "PARTIAL",
+      "userReachability": "YES",
+      "surfaceDisposition": "USER_VISIBLE_FEATURE",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "skills.engine",
+      "runtimeState": "PARTIAL",
+      "userReachability": "PARTIAL",
+      "surfaceDisposition": "USER_VISIBLE_FEATURE",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "workflow.engine",
+      "runtimeState": "PARTIAL",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "provider.openrouter",
+      "runtimeState": "PARTIAL",
+      "userReachability": "YES",
+      "surfaceDisposition": "USER_VISIBLE_FEATURE",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "provider.federation",
+      "runtimeState": "PARTIAL",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "mata.providers",
+      "runtimeState": "PARTIAL",
+      "userReachability": "ADVANCED_OR_FORENSIC",
+      "surfaceDisposition": "ADVANCED_OR_FORENSIC",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "runtime.recovery",
+      "runtimeState": "PARTIAL",
+      "userReachability": "BACKGROUND_ONLY",
+      "surfaceDisposition": "BACKGROUND_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "runtime.resource_governor",
+      "runtimeState": "PARTIAL",
+      "userReachability": "BACKGROUND_ONLY",
+      "surfaceDisposition": "BACKGROUND_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "extensions.kernel",
+      "runtimeState": "PARTIAL",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "tools.core",
+      "runtimeState": "YES",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "tools.filesystem_http",
+      "runtimeState": "PARTIAL",
+      "userReachability": "ADVANCED_OR_FORENSIC",
+      "surfaceDisposition": "ADVANCED_OR_FORENSIC",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "tools.terminal",
+      "runtimeState": "YES",
+      "userReachability": "ADVANCED_OR_FORENSIC",
+      "surfaceDisposition": "ADVANCED_OR_FORENSIC",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "action.embodiment",
+      "runtimeState": "YES",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "action.mata_dewa_rf",
+      "runtimeState": "PARTIAL",
+      "userReachability": "ADVANCED_OR_FORENSIC",
+      "surfaceDisposition": "ADVANCED_OR_FORENSIC",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "events.signals",
+      "runtimeState": "YES",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "readmodels.console",
+      "runtimeState": "YES",
+      "userReachability": "YES",
+      "surfaceDisposition": "USER_VISIBLE_FEATURE",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    },
+    {
+      "canonicalId": "tools.legacy_compat",
+      "runtimeState": "UNKNOWN",
+      "userReachability": "INTERNAL_ONLY",
+      "surfaceDisposition": "INTERNAL_ONLY",
+      "countedInInventory": true,
+      "countedInSurfaceMatrix": true,
+      "justification": "Derived from the canonical inventory userReachable state; YES/PARTIAL map to USER_VISIBLE_FEATURE."
+    }
+  ],
+  "countingInvariant": "exactly one mutually exclusive surfaceDisposition per canonical inventory record; USER_VISIBLE_FEATURE combines userReachable YES and PARTIAL",
+  "missingSurfaceDispositions": 0,
+  "duplicateSurfaceCounts": 0,
+  "unknownSurfaceReferences": 0
 }

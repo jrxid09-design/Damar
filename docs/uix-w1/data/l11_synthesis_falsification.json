@@ -1,25 +1,101 @@
 {
-  "schemaVersion":"uix-w1.l11.falsification.v1",
-  "source":"l11_synthesis_catalog.json",
-  "results":[
-    {"id":"SYN-L11-001","outcome":"RETAIN","novelty":"UNIQUE","disproof":"Not an alias: integration consumes context selection plus V1 evidence at the existing selector boundary; it does not authorize."},
-    {"id":"SYN-L11-002","outcome":"RETAIN","novelty":"GENERALIZATION","disproof":"Existing path is concrete but not a reusable workflow descriptor; candidate preserves every authority/verifier gate."},
-    {"id":"SYN-L11-003","outcome":"RETAIN","novelty":"UNIQUE","disproof":"Not static persistence: requires freshness/conflict state and recovery event; remains design-only."},
-    {"id":"SYN-L11-004","outcome":"RETAIN","novelty":"UNIQUE","disproof":"Requires device/session evidence absent from a single channel; not a parameter-only variant."},
-    {"id":"SYN-L11-005","outcome":"RETAIN","novelty":"UNIQUE","disproof":"Detection is not authority; response is blocked until explicit authority/verifier primitives exist."},
-    {"id":"SYN-L11-006","outcome":"RETAIN","novelty":"UNIQUE","disproof":"Current provider health exists but no implemented role-aware fallback owner is proven; Ollama/OpenClaw/Hermes are not restored."},
-    {"id":"SYN-L11-007","outcome":"RETAIN","novelty":"UNIQUE","disproof":"World/sensor projection is not automatic today; candidate explicitly records missing bridge and remains designed."},
-    {"id":"SYN-L11-008","outcome":"RETAIN","novelty":"UNIQUE","disproof":"Read-only evidence view is not certification or authority; it adds no runtime source of truth in this wave."},
-    {"id":"SYN-L11-009","outcome":"RETAIN","novelty":"SPECIALIZATION","disproof":"Extension provenance and workflow verification are a materially distinct specialization."},
-    {"id":"SYN-L11-010","outcome":"RETAIN","novelty":"UNIQUE","disproof":"Combines background-only runtime signals into a recovery view; no hidden repair executor proposed."},
-    {"id":"SYN-L11-011","outcome":"RETAIN","novelty":"MERGED_INTO_EXISTING","disproof":"Approval transport is an orchestration pattern, not a new authority source; retain only as pattern."},
-    {"id":"SYN-L11-012","outcome":"RETAIN","novelty":"MERGED_INTO_EXISTING","disproof":"Product framing over existing Mata Dewa/read-model primitives; no duplicate provider or watch engine proposed."}
+  "schemaVersion": "uix-w1.l11.falsification.v1",
+  "source": "l11_synthesis_catalog.json",
+  "results": [
+    {
+      "id": "SYN-L11-001",
+      "outcome": "MERGED_INTO_EXISTING",
+      "novelty": "MERGED_INTO_EXISTING",
+      "disproof": "Existing AIRuntime.resolveTools/ContextCapabilityIntegration already provides the described joined selection-boundary projection; retain as provenance/design framing.",
+      "matchingExistingCapability": "context.capability.integration"
+    },
+    {
+      "id": "SYN-L11-002",
+      "outcome": "RETAIN",
+      "novelty": "GENERALIZATION",
+      "disproof": "Existing path is concrete but not a reusable workflow descriptor; candidate preserves every authority/verifier gate."
+    },
+    {
+      "id": "SYN-L11-003",
+      "outcome": "RETAIN",
+      "novelty": "UNIQUE",
+      "disproof": "Not static persistence: requires freshness/conflict state and recovery event; remains design-only."
+    },
+    {
+      "id": "SYN-L11-004",
+      "outcome": "RETAIN",
+      "novelty": "UNIQUE",
+      "disproof": "Requires device/session evidence absent from a single channel; not a parameter-only variant."
+    },
+    {
+      "id": "SYN-L11-005",
+      "outcome": "RETAIN",
+      "novelty": "UNIQUE",
+      "disproof": "Detection is not authority; response is blocked until explicit authority/verifier primitives exist."
+    },
+    {
+      "id": "SYN-L11-006",
+      "outcome": "RETAIN",
+      "novelty": "UNIQUE",
+      "disproof": "Current provider health exists but no implemented role-aware fallback owner is proven; Ollama/OpenClaw/Hermes are not restored."
+    },
+    {
+      "id": "SYN-L11-007",
+      "outcome": "RETAIN",
+      "novelty": "UNIQUE",
+      "disproof": "World/sensor projection is not automatic today; candidate explicitly records missing bridge and remains designed."
+    },
+    {
+      "id": "SYN-L11-008",
+      "outcome": "MERGED_INTO_EXISTING",
+      "novelty": "MERGED_INTO_EXISTING",
+      "disproof": "Existing canonical registry intelligence/read views and published evidence projections already provide the described read-only evidence surface; retain as provenance/design framing.",
+      "matchingExistingCapability": "capability.registry.v1 + readmodels.console"
+    },
+    {
+      "id": "SYN-L11-009",
+      "outcome": "RETAIN",
+      "novelty": "SPECIALIZATION",
+      "disproof": "Extension provenance and workflow verification are a materially distinct specialization."
+    },
+    {
+      "id": "SYN-L11-010",
+      "outcome": "RETAIN",
+      "novelty": "UNIQUE",
+      "disproof": "Combines background-only runtime signals into a recovery view; no hidden repair executor proposed."
+    },
+    {
+      "id": "SYN-L11-011",
+      "outcome": "RETAIN",
+      "novelty": "MERGED_INTO_EXISTING",
+      "disproof": "Approval transport is an orchestration pattern, not a new authority source; retain only as pattern."
+    },
+    {
+      "id": "SYN-L11-012",
+      "outcome": "RETAIN",
+      "novelty": "MERGED_INTO_EXISTING",
+      "disproof": "Product framing over existing Mata Dewa/read-model primitives; no duplicate provider or watch engine proposed."
+    }
   ],
-  "rawCandidates":12,
-  "retained":12,
-  "rejectedLowValue":0,
-  "duplicates":0,
-  "authorityBypassIntroduced":0,
-  "verificationBypassIntroduced":0,
-  "missingPrimitiveReferencesValidated":true
+  "rawCandidates": 12,
+  "retained": 12,
+  "rejectedLowValue": 0,
+  "duplicates": 0,
+  "authorityBypassIntroduced": 0,
+  "verificationBypassIntroduced": 0,
+  "missingPrimitiveReferencesValidated": true,
+  "falsificationPass": "focused re-falsification against the revalidated Barrier-A canonical set",
+  "remainingUniqueCandidatesVerified": [
+    "SYN-L11-003",
+    "SYN-L11-004",
+    "SYN-L11-005",
+    "SYN-L11-006",
+    "SYN-L11-007",
+    "SYN-L11-010"
+  ],
+  "falseUniqueCandidatesReclassified": [
+    "SYN-L11-001",
+    "SYN-L11-008"
+  ],
+  "staleClassifications": 0
 }
