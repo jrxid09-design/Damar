@@ -1,0 +1,14 @@
+{
+  "schemaVersion":"uix-w1.services.v1",
+  "sourceSha":"b2d098684a5e2740f1c7dc0d6692ca3033d2e216",
+  "records":[
+    {"id":"runtime-host","owner":"RuntimeHost","startOwner":"canonicalRuntimeComposition","stopOwner":"RuntimeHost.requestShutdown","purpose":"canonical host lifecycle","runtimeReachable":true,"userVisible":false,"governed":true,"tested":true},
+    {"id":"presence-runtime","owner":"PresenceRuntime","startOwner":"RuntimeHost composition","stopOwner":"RuntimeHost composition","purpose":"presence lifecycle and status","runtimeReachable":true,"userVisible":true,"governed":true,"tested":true},
+    {"id":"sensorium-lifecycle","owner":"Sensorium production lifecycle","startOwner":"canonicalRuntimeComposition","stopOwner":"canonicalRuntimeComposition","purpose":"bounded embodied discovery/sampling","runtimeReachable":true,"userVisible":false,"governed":true,"tested":true},
+    {"id":"resource-governor","owner":"ResourceGovernor","startOwner":"canonicalRuntimeComposition","stopOwner":"RuntimeCore shutdown","purpose":"resource observation/admission/degradation","runtimeReachable":true,"userVisible":false,"governed":true,"tested":true},
+    {"id":"recovery-capsule","owner":"Recovery system","startOwner":"canonicalRuntimeComposition","stopOwner":"RuntimeCore shutdown","purpose":"continuity/recovery checkpointing","runtimeReachable":true,"userVisible":false,"governed":true,"tested":true},
+    {"id":"channel-bridges","owner":"channel adapters","startOwner":"surface/runtime host","stopOwner":"surface/runtime host","purpose":"transport ingress/egress","runtimeReachable":true,"userVisible":true,"governed":true,"tested":true},
+    {"id":"audit-ledger","owner":"Audit Ledger","startOwner":"authority composition","stopOwner":"ledger lifecycle","purpose":"durable action acknowledgement/evidence","runtimeReachable":true,"userVisible":true,"governed":true,"tested":true}
+  ],
+  "orphanTimers":[],"deadDaemons":[],"duplicateServices":[],"parallelLifecycleOwners":[]
+}

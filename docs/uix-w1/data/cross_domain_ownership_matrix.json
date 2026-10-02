@@ -1,0 +1,14 @@
+{
+  "schemaVersion":"uix-w1.ownership.v1",
+  "sourceSha":"b2d098684a5e2740f1c7dc0d6692ca3033d2e216",
+  "records":[
+    {"domain":"runtime composition","canonicalOwner":"src/integration/canonicalRuntimeComposition.js","secondaryProjections":["src/runtime/host/runtimeHost.js","src/integration/runtimeCore.js"],"runtimeConsumers":["server","runtime host","CLI"],"authorityRelevance":"none","persistenceOwner":"composition-owned lifecycle stores","userSurface":"background/internal"},
+    {"domain":"orchestration","canonicalOwner":"src/manager/internal/managerBootstrap.js + src/manager/bootstrap.js","secondaryProjections":["src/runtime/interactionBus/managerIngressInternal.js"],"runtimeConsumers":["all ingress surfaces"],"authorityRelevance":"routes; does not grant","persistenceOwner":"manager-owned stores","userSurface":"internal"},
+    {"domain":"context","canonicalOwner":"src/ai/context/Pipeline.js","secondaryProjections":["src/ai/context/observationProjection.js","console context read model"],"runtimeConsumers":["AIRuntimeService","capability integration"],"authorityRelevance":"none","persistenceOwner":"per-turn/context sources","userSurface":"API/advanced"},
+    {"domain":"capability truth","canonicalOwner":"src/capability/registry","secondaryProjections":["L11 artifacts","tool selection"],"runtimeConsumers":["execution","planning","plugins"],"authorityRelevance":"permission evidence; not authority","persistenceOwner":"registry/configuration","userSurface":"internal/advanced"},
+    {"domain":"authority","canonicalOwner":"src/authority/productionComposition.js","secondaryProjections":["authority path map","owner trust APIs"],"runtimeConsumers":["ActionIntent ingress","actuation"],"authorityRelevance":"canonical grant/deny owner","persistenceOwner":"authority stores + audit ledger","userSurface":"advanced/forensic"},
+    {"domain":"awareness","canonicalOwner":"src/embodiment + src/embodiment/sensorium + observationProjection","secondaryProjections":["World Model","Context","Mata Dewa read models"],"runtimeConsumers":["World Model","AIRuntimeService"],"authorityRelevance":"observation only","persistenceOwner":"BodySchema/World Model domain stores","userSurface":"background/advanced"},
+    {"domain":"memory and experience","canonicalOwner":"src/memory + experience/evolution domains","secondaryProjections":["console read models","self-model"],"runtimeConsumers":["cognition","reflection","evolution proposals"],"authorityRelevance":"evidence/signal only","persistenceOwner":"SQLite/memory stores","userSurface":"user/API"},
+    {"domain":"channels and APIs","canonicalOwner":"src/routes + src/channels + src/runtime/host/channelBridge.js","secondaryProjections":["CLI","MCP","WebSocket terminal"],"runtimeConsumers":["InteractionBus","Manager"],"authorityRelevance":"ingress authentication/authorization context; no independent authority","persistenceOwner":"channel/session stores","userSurface":"multiple"}
+  ]
+}

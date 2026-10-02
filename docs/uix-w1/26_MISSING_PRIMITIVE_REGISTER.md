@@ -1,5 +1,11 @@
 # 26 Missing primitive register
 
+Broad reconciliation at `b2d098684a5e2740f1c7dc0d6692ca3033d2e216` changes
+MP-003 to `IMPLEMENTED_SINCE_DISCOVERY`: the bounded observation projection is
+created by the canonical composition and bound exactly once to the production
+AIRuntimeService. The remaining entries are still missing and remain future
+read-model/event work. See `data/missing_primitive_register.json`.
+
 Primary unlocks: unified capability metadata/read model; runtime/approval event contract; provider instance/health routing; canonical device trust projection; DCD response proposal/read model; durable cross-surface approval relay.
 
 W1 candidate repair added a narrow context-capability projection bridge at

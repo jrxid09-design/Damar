@@ -1,0 +1,9 @@
+{
+  "schemaVersion":"uix-w1.unresolved.v1",
+  "sourceSha":"b2d098684a5e2740f1c7dc0d6692ca3033d2e216",
+  "items":[
+    {"id":"L11-UNRESOLVED-001","domain":"rationalization","description":"safe cleanup/removal decision remains unresolved","whyUnresolved":"caller and compatibility proof are incomplete","currentSafeBehavior":"retain and mark for future audited cleanup","blocksW1Freeze":false},
+    {"id":"L11-UNRESOLVED-002","domain":"rationalization","description":"safe cleanup/removal decision remains unresolved","whyUnresolved":"caller and persistence proof are incomplete","currentSafeBehavior":"retain and mark for future audited cleanup","blocksW1Freeze":false},
+    {"id":"L11-UNRESOLVED-003","domain":"rationalization","description":"safe cleanup/removal decision remains unresolved","whyUnresolved":"cross-surface compatibility proof is incomplete","currentSafeBehavior":"retain and mark for future audited cleanup","blocksW1Freeze":false}
+  ]
+}

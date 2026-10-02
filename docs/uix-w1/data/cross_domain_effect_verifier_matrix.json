@@ -1,0 +1,19 @@
+{
+  "schemaVersion":"uix-w1.effect-verifier.v1",
+  "sourceSha":"b2d098684a5e2740f1c7dc0d6692ca3033d2e216",
+  "sourceOfEffectTruth":"capability registry descriptors plus action capability wiring",
+  "sourceOfAuthorityTruth":"src/authority/productionComposition.js",
+  "sourceOfVerificationTruth":"src/action/verification + src/runtime/auditLedger",
+  "records":[
+    {"operationFamily":"read-only query/context/status","effect":"READ_ONLY","authorityGate":"not required for effect; ingress auth may apply","verification":"not required","audit":"observability as configured"},
+    {"operationFamily":"plugin/tool execution","effect":"descriptor-defined; UNKNOWN fails closed","authorityGate":"canonical Authority Gate","verification":"required for consequential effects","audit":"durable acknowledgement where required"},
+    {"operationFamily":"device/home/terminal/OSINT mutation","effect":"CONSEQUENTIAL","authorityGate":"canonical Authority Gate + exact capability/operation","verification":"required","audit":"required"},
+    {"operationFamily":"Mata Dewa RF/actuation","effect":"CONSEQUENTIAL","authorityGate":"canonical Authority Gate","verification":"required","audit":"required"},
+    {"operationFamily":"DCD response proposal","effect":"PROPOSAL_ONLY","authorityGate":"proposal is not authority; execution requires canonical action path","verification":"required if executed","audit":"required if executed"},
+    {"operationFamily":"evolution proposal","effect":"PROPOSAL_ONLY","authorityGate":"proposal is not approved mutation","verification":"required before mutation","audit":"required before mutation"}
+  ],
+  "unknownEffectOperations":[],
+  "conflictingEffectClassifications":[],
+  "consequentialWithoutAuthorityPath":[],
+  "requiredVerificationWithoutVerifierPath":[]
+}

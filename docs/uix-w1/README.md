@@ -1,6 +1,6 @@
 # UIX-W1 Canonical Damar Audit
 
-Artifact-repair base: 2739f94d936822941e00ee0c758a872dbff71236.
+Broad product-truth reconciliation candidate: `b2d098684a5e2740f1c7dc0d6692ca3033d2e216`.
 
 This is an audit/design evidence package, not Dashboard, Idle, or feature implementation. Machine-readable truth is under data/. Evidence uses PROVEN, PARTIAL, UNKNOWN, and INTENT_ONLY; no capability is represented by one supported boolean.
 
@@ -11,4 +11,8 @@ This is an audit/design evidence package, not Dashboard, Idle, or feature implem
 | L11-B synthesis | REVALIDATED; two existing-capability matches reclassified; design records retained |
 | L10 freeze | COMPLETE |
 
-No product source or tests were changed. All generated proposals remain DESIGNED, not IMPLEMENTED or CERTIFIED. Current L11 machine truth is listed in data/l11_artifact_manifest.json. This artifact repair is pending a fresh independent L11 master re-audit.
+No product source or tests were changed by this reconciliation. Frozen L11
+machine truth remains under `data/l11_*`; cross-domain truth is consolidated in
+`data/product_truth_summary.json`, `data/product_feature_map.json`, the
+ownership/effect/service matrices, and `W2_HANDOFF.md`. This is a candidate
+artifact set for a fresh independent final W1 audit, not final certification.
