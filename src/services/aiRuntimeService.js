@@ -126,6 +126,9 @@ class AIRuntimeService {
         this.engine = null;
         this.modelFederation = null;
         this._configuredFederation = null;
+        // Bound by canonical runtime composition. This is a read-only adapter;
+        // the AI service never owns or mutates observation state.
+        this.observationProjection = null;
 
         // Kesadaran perangkat — dihitung dari OS nyata, bukan diasumsikan.
         // Tanpa ini model kerap menyarankan perintah Linux (xdotool, apt,
@@ -1440,6 +1443,7 @@ ${blok}` }
                 includeMind: true,
                 contextRefs,
                 aiRuntime: this,
+                observationProjection: this.observationProjection,
 
                 // H6: jendela konteks model AKTIF ikut ke ContextBudget —
                 // env hanya fallback di dalam pipeline, bukan satu-satunya
@@ -1457,6 +1461,16 @@ ${blok}` }
 
         return { messages: out, diagnostics: { ...diagnostics, mode: "pipeline" } };
 
+    }
+
+    /** Bind the canonical read-only observation projection for cognition. */
+    bindObservationProjection(projection) {
+        if (projection !== null &&
+            typeof projection?.toContextItems !== "function") {
+            throw new TypeError("observation projection must expose toContextItems()");
+        }
+        this.observationProjection = projection;
+        return Object.freeze({ bound: projection !== null });
     }
 
     configureModelFederation(federation) { if (!federation || typeof federation.invoke !== "function") throw new TypeError("MODEL_FEDERATION_INVALID"); this._configuredFederation = federation; this.modelFederation = federation; return Object.freeze({ configured: true }); }

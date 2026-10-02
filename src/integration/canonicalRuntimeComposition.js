@@ -80,6 +80,8 @@ function currentDeliverySequenceFor(body) {
 
 // RuntimeCore composition dependencies (moved from runtimeCore.js).
 const { createEmbodiedCore } = require("./embodiedCore");
+const embodiment = require("../embodiment");
+const { createObservationProjection } = require("../ai/context/observationProjection");
 const governorMod = require("../runtime/resourceGovernor");
 const recovery = require("../runtime/recovery");
 const ib = require("../runtime/interactionBus");
@@ -1093,7 +1095,12 @@ async function buildRuntimeCoreInternal({
     cognitionMode = "off",
     cognitionCapabilityRegistry = null,
     cognitionAuditLedger = null,
-    cognitionStores = {}
+    cognitionStores = {},
+    // Production Sensorium lifecycle is owned here; RuntimeCore remains
+    // opt-in for callers that only need the inert composition substrate.
+    enableSensoriumLifecycle = false,
+    sensoriumAdapter = null,
+    sensoriumIntervalMs = 60_000
 } = {}, onCompositionPayload = null) {
 
     if (bus !== null) {
@@ -1102,6 +1109,20 @@ async function buildRuntimeCoreInternal({
 
     // ---- Wave 1 canonical owners --------------------------------------
     const core = await createEmbodiedCore(wave1);
+
+    let sensoriumLifecycle = null;
+    if (enableSensoriumLifecycle) {
+        const adapter = sensoriumAdapter ?? embodiment.createHostSelfDiscoveryAdapter();
+        sensoriumLifecycle = embodiment.createProductionSensoriumLifecycle({
+            body: core.body,
+            adapter,
+            intervalMs: sensoriumIntervalMs
+        });
+        sensoriumLifecycle.start();
+    }
+    // A read-only view assembled from the canonical owners. It stores no
+    // mutable observations and is the only projection handed to Context.
+    const observationProjection = createObservationProjection({ body: core.body });
 
     // ---- Presence: pemilik KANONIK lifecycle representation -----------
     let rt = presenceRuntime;
@@ -1214,6 +1235,7 @@ async function buildRuntimeCoreInternal({
     let shutDown = false;
     function shutdown({ reason = "SHUTDOWN" } = {}) {
         if (!shutDown) {
+            try { sensoriumLifecycle?.stop(); } catch { /* idempotent */ }
             try {
                 rt.requestShutdown(producers.host, reason);
             } catch {
@@ -1381,6 +1403,8 @@ async function buildRuntimeCoreInternal({
         // `applyObservationPlan` for a future device-adapter loop; the
         // bridge is already live-subscribed to `core.body` regardless.
         sensoriumBridge,
+        observationProjection,
+        sensoriumLifecycle,
 
         // Wave 2 (pemilik kanonik):
         governor: gov,
@@ -1482,7 +1506,8 @@ async function buildRuntimeHostInternal({
         // the sole CONVERSATION route.
         core = await buildRuntimeCoreInternal({
             ...sanitizeCoreOptions(coreOptions),
-            enableManagerIngress: conversationHandler === null
+            enableManagerIngress: conversationHandler === null,
+            enableSensoriumLifecycle: coreOptions.enableSensoriumLifecycle ?? true
         }, onCompositionPayload);
     } else {
         // Caller-controlled factory: ALWAYS untrusted.  Pass SANITIZED

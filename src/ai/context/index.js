@@ -1,5 +1,6 @@
 module.exports = {
 
-    AIContext: require("./AIContext")
+    AIContext: require("./AIContext"),
+    observationProjection: require("./observationProjection")
 
 };

@@ -69,6 +69,7 @@ function sanitize(messages = []) {
  *   memoryFn     injeksi adapter memori (default adapter asli; dipakai
  *                benchmark/test untuk korpus deterministik)
  *   mindFn       injeksi adapter batin (idem)
+ *   observationProjection read-only canonical Sensorium/BodySchema/domain adapter
  * @returns {{messages, systemContent, diagnostics}}
  */
 async function select({
@@ -81,6 +82,7 @@ async function select({
     aiRuntime = null,
     memoryFn = null,
     mindFn = null,
+    observationProjection = null,
     contextTokens = null
 } = {}) {
 
@@ -164,6 +166,7 @@ async function select({
         ]);
 
         const mindCand = includeMind ? adaptMindBlock() : [];
+        const observationCand = sources.observationItems(observationProjection);
 
         const resolvedRefs = await refs.resolve(contextRefs);
 
@@ -180,6 +183,7 @@ async function select({
             ...olderCandidates,
             ...memoryCand,
             ...mindCand,
+            ...observationCand,
             ...refItems
         ];
 

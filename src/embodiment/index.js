@@ -24,6 +24,7 @@ const {
     PROVENANCES, CORE_SOURCE, SCHEMA_VERSION
 } = require("./sensorium/events");
 const { runDiscoveryCycle, validateAdapter } = require("./discovery/adapter");
+const { createProductionSensoriumLifecycle } = require("./sensorium/productionLifecycle");
 const { createFakeDiscoveryAdapter } = require("./discovery/FakeDiscoveryAdapter");
 const { createHostSelfDiscoveryAdapter }
     = require("./discovery/HostDiscoveryAdapter");
@@ -58,7 +59,7 @@ module.exports = {
     CORE_SOURCE, SCHEMA_VERSION,
 
     // discovery
-    runDiscoveryCycle, validateAdapter,
+    runDiscoveryCycle, validateAdapter, createProductionSensoriumLifecycle,
     createFakeDiscoveryAdapter, createHostSelfDiscoveryAdapter,
 
     // persistensi
