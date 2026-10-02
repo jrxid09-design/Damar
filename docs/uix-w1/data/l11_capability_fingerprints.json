@@ -1,7 +1,7 @@
 {
   "schemaVersion": "uix-w1.l11.fingerprints.v1",
   "sourceInventory": "l11_canonical_capability_inventory.json",
-  "identityRule": "sha256(canonical JSON of source-backed identity, purpose, owner, evidence, and represented state)",
+  "identityRule": "sha256(UTF-8 RFC 8785 / JSON Canonicalization Scheme (JCS) serialization of source-backed identity, purpose, owner, evidence, and represented state)",
   "dimensions": [
     "canonicalId",
     "kind",
@@ -28,7 +28,7 @@
   "recordsAreSourceBacked": true,
   "fingerprintVersion": "1",
   "hashAlgorithm": "SHA-256",
-  "serialization": "RFC-8785-compatible sorted-key canonical JSON",
+  "serialization": "RFC 8785 / JSON Canonicalization Scheme (JCS)",
   "records": [
     {
       "recordId": "runtime.http",
@@ -53,7 +53,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "67af93b3639ec3e1594bd18f2e3d1332aba59c5464d821792b9800bca87d9030",
+      "fingerprintHash": "88cb487918a21c564f4b15e5ac7ccf19fd146de8f2826d48140bfc722b628582",
       "sourceProvenance": {
         "owner": "src/server.js + src/routes",
         "evidence": [
@@ -86,7 +86,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "17094df029ac21c55dd2bf0339cbf6ef4aea42af2f7b33a536e62d3775975f81",
+      "fingerprintHash": "b791c7860deb6e3e33894e10914994c6407704a78f1dcb118b35488012095186",
       "sourceProvenance": {
         "owner": "src/runtime/host",
         "evidence": [
@@ -118,7 +118,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "76e50c5e795fc99000c2fa888d5d449106b41ce71f798744f00cb83467be8f52",
+      "fingerprintHash": "3d95d47f8ac1bd0e1e6a80aab6446bb8316b5584c864d75a5c6549dafddf816d",
       "sourceProvenance": {
         "owner": "src/runtime/interactionBus",
         "evidence": [
@@ -150,7 +150,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "70b2276451a7967af19603aa298c02080118c5c94dedfab01aa2d041c0ebaca9",
+      "fingerprintHash": "172b89df1153eec7ba55ca810fb9d3f9d6608f328fa7b728c4714261290e4280",
       "sourceProvenance": {
         "owner": "src/manager",
         "evidence": [
@@ -182,7 +182,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "88eaa8d81d246182d3d4695a9e23ccb8e1517ff5b42bfccb9dc58536ae4eb48f",
+      "fingerprintHash": "71a3cfca10c967a9135dfd86e59d63339a225f8a17169bdbca38d490ffd396d8",
       "sourceProvenance": {
         "owner": "src/action/intent.js",
         "evidence": [
@@ -213,7 +213,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "6e36ea76d9edfa06e9f068e065748101eb67afae55a67a805d78aba6766e8e58",
+      "fingerprintHash": "f13addf0780519d2d0152621a4ed94257a94bc5add7c84ca9481ef926de9f490",
       "sourceProvenance": {
         "owner": "src/authority/productionComposition.js",
         "evidence": [
@@ -244,7 +244,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "39b91621fad621f4947e912e4324ca11c0f7c3c75ee4e37a75e536c43f8b3fb8",
+      "fingerprintHash": "999547712853e13b61a940304ecedfeae06c6a1d41b0c392d55915f67e834681",
       "sourceProvenance": {
         "owner": "src/capability/registry/registry.js",
         "evidence": [
@@ -275,7 +275,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "83abbf6828da3eee47ecee04e56e06f30ca246c7c9418f0fc6e63eb579362d14",
+      "fingerprintHash": "dfcf0644c7a9b7fa4c9168054d2e046ec50093487cbf32c7bdf405e068460bbe",
       "sourceProvenance": {
         "owner": "src/manager/internal/canonicalCapabilityExecution.js",
         "evidence": [
@@ -307,7 +307,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "eea7a29a30f440c662dd162532317bcd0f8328667de098cfe2c3bbb823fc4228",
+      "fingerprintHash": "2440fa30bffce0e99e3845739fd1a8c5141463c1fcb069e57157a22e0daaceb0",
       "sourceProvenance": {
         "owner": "src/action/actuation",
         "evidence": [
@@ -340,7 +340,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "12964391ac5a3fb8137438e3381b6a530255fed41ecd7153eb9a1d119a2a6d09",
+      "fingerprintHash": "6d382ad104dc921a313398d1b9ca02c185af2d44490de0968617319b8bd55e90",
       "sourceProvenance": {
         "owner": "src/action/verification + src/runtime/auditLedger",
         "evidence": [
@@ -372,7 +372,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "d544739d080513173f20beb3eaba6116f595ebbe879af4c71db27c34660d1917",
+      "fingerprintHash": "4c7b04e38115ce6a875db2fdcd9d01f2b32f818d3f1bacb55489e41ed8477511",
       "sourceProvenance": {
         "owner": "src/ai/context/Pipeline.js",
         "evidence": [
@@ -404,7 +404,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "08fcc5664a77c672317aeeae5efbef9f2d2a3aec35d02ba6181064ce413772b6",
+      "fingerprintHash": "a6704547c9f7babcab071c7302529ecb62cbd41360bb2af883e37b79178107e8",
       "sourceProvenance": {
         "owner": "src/ai/capability/ContextCapabilityIntegration.js",
         "evidence": [
@@ -437,7 +437,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "c7ca18087fd09049a56cbee86b55a7cc7803440d3caed76f088adf8f130f144d",
+      "fingerprintHash": "e50fe3c9e497436654b5388e773d9b7abeeba155e3d737ed9ca846ae188457c1",
       "sourceProvenance": {
         "owner": "src/ai/tools/Pipeline.js",
         "evidence": [
@@ -470,7 +470,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "b51ff6888b43d9dbe8827eb3370e978d121e4b761b45da94f7a26bbb44e26fe2",
+      "fingerprintHash": "0787e821601ea0dd44a349fee62ca822e28984591e291025d3b92a4121280fa0",
       "sourceProvenance": {
         "owner": "src/memory",
         "evidence": [
@@ -503,7 +503,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "fae4889e874b9bce1ba8c9e7c1dee7e390071ab2fe9d2d90322c5952690ba288",
+      "fingerprintHash": "4f0e3853a3618414e5f08dbee7537dc82f80fd45dad400321131454e02f30033",
       "sourceProvenance": {
         "owner": "src/cognition/selfmodel + src/ai/tools/ToolStats.js",
         "evidence": [
@@ -535,7 +535,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "2957bd1fb03745851ffd782234856f5618ae0a646fb22b059a16d8983668bf13",
+      "fingerprintHash": "cc2c7c968e3b640cfdabe32db417f73e4b3a71b22667e33bdebaa1521e7566e5",
       "sourceProvenance": {
         "owner": "src/cognition/worldmodel",
         "evidence": [
@@ -566,7 +566,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "c06beabc7469c6b101c8da0fd4ce11a65236d557c0d8831283eed58d56946da0",
+      "fingerprintHash": "095a0c77d68c22379462abc4769788f8d8ef6e01d09a134deb1781a6d5f2dd33",
       "sourceProvenance": {
         "owner": "src/cognition/selfmodel",
         "evidence": [
@@ -598,7 +598,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "b4822fbf13b41195a749297daa25f469f5b6945836f7473c3a36bb2040400fac",
+      "fingerprintHash": "bef74e155c409a433b250a7d257f800384ca8c74b95f34cb30fed2b4807e9a5e",
       "sourceProvenance": {
         "owner": "src/embodiment",
         "evidence": [
@@ -631,7 +631,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "7b62fa1f968954ec77e88661c1e48f085fdea83bca642e19a5a90aff920701ea",
+      "fingerprintHash": "13b7804e01d554d02cb0667c58e2583748ef0bfc31aa5a367636fdaa26895aab",
       "sourceProvenance": {
         "owner": "src/mataDewa",
         "evidence": [
@@ -664,7 +664,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "061da684ea93f133212c9f8f2923a5bde8a30717083ac5727ddf5e955202d465",
+      "fingerprintHash": "e09b7b354fbfe2bfd344001b0a53b5f749efff0491beb4566269b96078b5c65d",
       "sourceProvenance": {
         "owner": "src/cyber + src/security",
         "evidence": [
@@ -697,7 +697,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "c9f783433114102ffdd4c9e05e6f74764339108274891c4549e18e4f946f8dac",
+      "fingerprintHash": "4fddde0c0adf97242fde1ef84c915ab3e329a4b01002771a5d363b4155b879a6",
       "sourceProvenance": {
         "owner": "src/companion",
         "evidence": [
@@ -729,7 +729,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "6907f8e996052b204d9a4712bd20311c4b9b0552e20d41ed253f19107636cc2a",
+      "fingerprintHash": "54bc8a188c112eb0400802fb887fb992502f0bb5d85c1fd20500ceef3f121119",
       "sourceProvenance": {
         "owner": "src/mesh",
         "evidence": [
@@ -762,7 +762,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "535858df695f065e25b949e9a005bca8f945dcbaf2cf2802567d6ab53159571a",
+      "fingerprintHash": "26ae9a387cb3e44917e7de4495369cb57ba795839786820b603faa3e6f14c402",
       "sourceProvenance": {
         "owner": "src/channels + src/services/telegramService.js + src/services/whatsappService.js",
         "evidence": [
@@ -796,7 +796,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "05215a752daaa9d9ed23bb2445d10ac89e2fd27b8bf7695ca8d5c5fd21a28d3e",
+      "fingerprintHash": "98a821f40d6c97b804a113f90a8575cec57033730973417f4a1d652fa2dd8421",
       "sourceProvenance": {
         "owner": "src/mcp",
         "evidence": [
@@ -829,7 +829,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "aaf85f0a93a9a17afbe69b50da678fad40cd4dfd8cea46a70c19ac32473c08f3",
+      "fingerprintHash": "48296813ad4c14008ebe3ed3e3c4c015e70aadeaeea581fde11294ae0a24ba04",
       "sourceProvenance": {
         "owner": "src/voice",
         "evidence": [
@@ -864,7 +864,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "5abad96beaa802100b460b512a2d4b2855966294c0dd6ceb1f6018801debc98f",
+      "fingerprintHash": "78c278e2da5c4de3e3cf5e4290559fa5c02617baca83d8ce7df678f7726b65e2",
       "sourceProvenance": {
         "owner": "src/plugins",
         "evidence": [
@@ -899,7 +899,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "9e5bec4c02cc84a545f947353eb9070194baf21d22b0f0ba375cdfd569ab92ed",
+      "fingerprintHash": "2f803e7efbd21f32207053469f3595b9d6cc457c38c161acb869401ae2a5b93c",
       "sourceProvenance": {
         "owner": "src/skillEngine + src/skills",
         "evidence": [
@@ -931,7 +931,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "50108bf011182eade20f1bbbbd801518537242e13c8a6843e1d9ce9cca0ba083",
+      "fingerprintHash": "3ae0468d00e01b7aa3cbdbe3fd9b505f686e56a39f2211d5f0ca533cc591cc2a",
       "sourceProvenance": {
         "owner": "src/workflow",
         "evidence": [
@@ -963,7 +963,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "b88bd7aea434d9bf1e166f58e857fe2fac70bc7bc43a6b2ce6599c2a25ff2dd3",
+      "fingerprintHash": "469e011ebc7d7766bb16d11cef2f9ed0323ef23f41d13b1a9371c3f235184e00",
       "sourceProvenance": {
         "owner": "src/ai/providers/openrouter + src/providers/openRouterProvider.js",
         "evidence": [
@@ -996,7 +996,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "3945e3fea7212742568f1bf4efdbda77259429b443ff4739aa105697b2387a85",
+      "fingerprintHash": "8139f113bec2cd406140ff9c0d54b93ce5e20d78e43f1f4a3be3a65d2493b898",
       "sourceProvenance": {
         "owner": "src/ai/providers + src/services/modelFederation.js",
         "evidence": [
@@ -1029,7 +1029,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "6c2f6580f947b06f67d6960300f85fce472fb2604999145fee0b7be1a987eb67",
+      "fingerprintHash": "1bad7b56ac3454de0d1abb321f82391582f1e76ba807802d967f463ce3a9ecc9",
       "sourceProvenance": {
         "owner": "src/mataDewa/providers + src/mataDewa/registry/providerRegistry.js",
         "evidence": [
@@ -1061,7 +1061,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "5208737296d715ca9a1b8fb90b506cb58862592235e1d2cbad1f276bfdbdc02c",
+      "fingerprintHash": "5e6540a687006ec9005b1d57cd63fb2955679c2c7d17ed479d0e55f4eb7eab88",
       "sourceProvenance": {
         "owner": "src/runtime/recovery",
         "evidence": [
@@ -1092,7 +1092,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "21b3a8ad988874fcbf2a3006d6487b3d4884f5cc3698a174dfd919030e53a52b",
+      "fingerprintHash": "3c0b22953b83f22581652f068e9dba134e424d8fdc81246d833c08b77e2a4c8a",
       "sourceProvenance": {
         "owner": "src/runtime/resourceGovernor",
         "evidence": [
@@ -1123,7 +1123,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "e59a1f5c457feaf9a59e3ad2bf7cdc8d1b4d15840e5c459e591d3f52d3e16048",
+      "fingerprintHash": "8d31f3f95a21c407cf22320a641766e26bb8df2fbf777eb057dd4d3f639003c9",
       "sourceProvenance": {
         "owner": "src/extensions",
         "evidence": [
@@ -1155,7 +1155,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "3c5a65220c1facf353708dfe6c94063f2f0d763cba6a63c1d57e1edffd2b6ec5",
+      "fingerprintHash": "177fce0b158541f3d24924a326f548085069b822184005ef505c75a3d35798ef",
       "sourceProvenance": {
         "owner": "src/core/tools + src/ai/tools",
         "evidence": [
@@ -1188,7 +1188,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "9514e727419f5ed9afe5af55e4bb7019c2350b114d4b8a24af178029937a74b7",
+      "fingerprintHash": "d6065b6c6ea8fe81dc71aee726d0d55ae735a5d3ee8f196ae9c3be7f7b1c6c62",
       "sourceProvenance": {
         "owner": "src/plugins/filesystem + src/plugins/http",
         "evidence": [
@@ -1221,7 +1221,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "1a65901f633a1e066714390e6a4e6d86429bc07f3275a30b6c2d946df805ac9d",
+      "fingerprintHash": "5a4c9f98ef3e67a249d65a40ef735af97a087e54ccf6c3a9c82358557ece8c63",
       "sourceProvenance": {
         "owner": "src/services/terminalTools.js + src/runtime/terminal",
         "evidence": [
@@ -1254,7 +1254,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "49e94728c1e0d5d1cf29faac5358b33a4cdc36808163e84cbc2b4528dfebfe25",
+      "fingerprintHash": "e272e2d34d647da4136a5ea1b0172734358b6cf44699a2243dc62b5d6c970293",
       "sourceProvenance": {
         "owner": "src/action/capabilities/embodimentWiring.js",
         "evidence": [
@@ -1286,7 +1286,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "a4037adbbec05773f6e29f4908d5bb65ba8be7aab103e3584fc80bb8b523fa61",
+      "fingerprintHash": "b432075f6575f91b819f60191401975b1868731dba076e5840500c9eb64a96ae",
       "sourceProvenance": {
         "owner": "src/mataDewa/capabilities/rfControlWiring.js",
         "evidence": [
@@ -1319,7 +1319,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "127f63ec5fa23087056d5a6be0fbf6993bc489c9dfc81cad8261de3ba4fd24e6",
+      "fingerprintHash": "a3e4465b7d83a023aa840b79edd6622befa7ac3fb898e3d0b8e08d093459008e",
       "sourceProvenance": {
         "owner": "src/events + src/core/events + src/services/telemetryService.js",
         "evidence": [
@@ -1353,7 +1353,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "d8cef044d9338cb6aff3c370c573cf56402990a01b25f92e115a62229297a4ba",
+      "fingerprintHash": "32ee5dded178eaf4775efcc1cb88f40a576e1f153f542214a146839f185dc33f",
       "sourceProvenance": {
         "owner": "src/routes/api/v1/console.js + src/controllers",
         "evidence": [
@@ -1385,7 +1385,7 @@
           "certified": "UNKNOWN"
         }
       },
-      "fingerprintHash": "ad2202bc1f379316e5ae0126d1aaac3a78fe9d8c0f91eab92b30e695b421cfef",
+      "fingerprintHash": "d8d4c60646eeeb4a6e999a64e3cf966b12ec3cd4fde40e63c9ea49ef6ae9a684",
       "sourceProvenance": {
         "owner": "src/tools_old",
         "evidence": [
