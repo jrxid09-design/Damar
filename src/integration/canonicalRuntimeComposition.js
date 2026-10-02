@@ -1524,6 +1524,24 @@ async function buildRuntimeHostInternal({
         }
         core = await factory(sanitized);
     }
+
+    // The canonical host owns runtime composition, so it also owns the one
+    // production binding between the read-only observation projection and the
+    // process AIRuntimeService used by normal cognition.  Keep this here,
+    // after both objects exist and before the host can become READY; callers
+    // must never have to perform this binding themselves.
+    const aiRuntime = require("../services/aiRuntimeService");
+    try {
+        const binding = aiRuntime.bindObservationProjection(core.observationProjection);
+        if (!binding?.bound) {
+            throw new Error("OBSERVATION_PROJECTION_BIND_REJECTED");
+        }
+    }
+    catch (error) {
+        try { core.shutdown({ reason: "observation-projection-bind-failed" }); } catch { /* best effort */ }
+        phaseMachine.transitionTo(HOST_PHASE.FAILED, "observation-projection-bind-failed");
+        throw error;
+    }
     const rt = core.presence;
     const producers = core.presenceProducers;
 
