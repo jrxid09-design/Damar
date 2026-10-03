@@ -9,6 +9,7 @@ function TextInput(props = {}) { return primitive('TextInput', { type: 'text', .
 function StateIndicator({ state, label = state, icon = '•', tone = 'neutral', ...props }) { return primitive('StateIndicator', { ...accessibleStatus({ label, icon, tone }), 'data-state': state, ...props }); }
 function HealthIndicator({ state = 'UNKNOWN', label = state, ...props }) { return StateIndicator({ state, label, icon: state === 'HEALTHY' ? '✓' : state === 'UNKNOWN' ? '?' : '!', tone: state === 'HEALTHY' ? 'success' : 'warning', ...props }); }
 function Stack(props = {}, children = []) { return primitive('Stack', { role: 'group', ...props }, children); }
+function Inline(props = {}, children = []) { return primitive('Inline', { role: 'group', ...props }, children); }
 function Panel(props = {}, children = []) { return primitive('Panel', { style: { background: token('surface.interaction') }, ...props }, children); }
 function Dialog(props = {}, children = []) { return primitive('Dialog', { role: 'dialog', 'aria-modal': 'true', ...props }, children); }
 function Drawer(props = {}, children = []) { return primitive('Drawer', { role: 'complementary', ...props }, children); }
@@ -42,4 +43,4 @@ function renderPrimitive(document, descriptor) {
 }
 function mountPrimitive(container, descriptor) { if (!container?.ownerDocument) throw new TypeError('container must be a DOM element'); const element = renderPrimitive(container.ownerDocument, descriptor); container.append(element); return () => element.remove(); }
 const CONTRACT_STUBS = Object.freeze(['PresenceCore', 'PresenceShell', 'MissionCard', 'ApprovalCard', 'NotificationItem', 'EntityHeader', 'CapabilityStateStack', 'ProviderCard', 'ModelCard', 'DeviceCard', 'GatewayCard', 'SecurityIncidentCard', 'ObservationCard', 'EvidencePanel', 'Timeline', 'Inspector', 'CommandPalette', 'DataTable']);
-module.exports = { primitive, Button, IconButton, TextInput, StateIndicator, HealthIndicator, Stack, Panel, Dialog, Drawer, Progress, Skeleton, EmptyState, ErrorState, DegradedState, Code, VisuallyHidden, renderPrimitive, mountPrimitive, CONTRACT_STUBS };
+module.exports = { primitive, Button, IconButton, TextInput, StateIndicator, HealthIndicator, Stack, Inline, Panel, Dialog, Drawer, Progress, Skeleton, EmptyState, ErrorState, DegradedState, Code, VisuallyHidden, renderPrimitive, mountPrimitive, CONTRACT_STUBS };
