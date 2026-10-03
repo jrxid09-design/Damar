@@ -9,5 +9,5 @@ const TOKEN_VALUES = Object.freeze({
 });
 const TOKEN_IDS = Object.freeze(contract.tokens.map((token) => token.token_id));
 function token(name) { if (!TOKEN_IDS.includes(name)) throw new Error(`unknown semantic token: ${name}`); return `var(--damar-${name.replaceAll('.', '-')})`; }
-function tokenStyle(theme = 'dark') { return Object.fromEntries(TOKEN_IDS.map((id) => [`--damar-${id.replaceAll('.', '-')}`, TOKEN_VALUES[id] ?? 'currentColor'])); }
+function tokenStyle(theme = 'dark', values = TOKEN_VALUES) { return Object.fromEntries(TOKEN_IDS.map((id) => [`--damar-${id.replaceAll('.', '-')}`, values[id] ?? TOKEN_VALUES[id] ?? 'currentColor'])); }
 module.exports = { TOKEN_IDS, TOKEN_VALUES, token, tokenStyle, contract };

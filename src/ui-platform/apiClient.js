@@ -10,9 +10,11 @@ class ApiClient {
   }
   async request(path, { method = 'GET', body, headers = {}, signal } = {}) {
     if (typeof this.fetchImpl !== 'function') throw new ApiError('fetch unavailable', { kind: 'configuration' });
-    const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    if (signal) signal.addEventListener('abort', () => controller.abort(), { once: true });
     const requestId = this.correlationId();
+    const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const forwardAbort = () => controller.abort();
+    if (signal?.aborted) forwardAbort();
+    else signal?.addEventListener('abort', forwardAbort, { once: true });
     try {
       const auth = this.session?.authorizationHeader?.() ?? {};
       const response = await this.fetchImpl(`${this.baseUrl}${path}`, { method, signal: controller.signal, headers: { accept: 'application/json', 'content-type': 'application/json', 'x-request-id': requestId, ...auth, ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -23,7 +25,7 @@ class ApiClient {
       if (error.name === 'AbortError') throw new ApiError('request cancelled or timed out', { kind: 'network', requestId, cause: error });
       if (error instanceof ApiError) throw error;
       throw new ApiError(error.message, { kind: 'network', requestId, cause: error });
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort', forwardAbort); }
   }
 }
 

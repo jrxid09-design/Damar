@@ -1,7 +1,53 @@
 'use strict';
-function semanticTokens() { return {'--damar-surface-void':'#090b10','--damar-surface-interaction':'#1b2430','--damar-surface-floating':'#222e3c','--damar-text-primary':'#f3f5f7','--damar-text-secondary':'#b8c2cc','--damar-focus-visible':'#83d7ff','--damar-interactive-primary':'#6bd6b0','--damar-status-warning':'#efc266','--damar-status-danger':'#f07878'}; }
-function route(path) { if (path === '/s/idle_presence') return { id:'idle.home', surface:'idle_presence' }; if (path === '/s/web_dashboard' || path.startsWith('/s/web_dashboard/entity/')) return { id:'dashboard.home', surface:'web_dashboard' }; return null; }
-function createRouter(window, render) { let current = null; let mounted = false; const navigate = (path, replace = false) => { const match = route(path) || route('/s/web_dashboard'); if (replace) window.history.replaceState({}, '', path); else window.history.pushState({}, '', path); current = { path, route: match }; render(current); return current; }; const handlePopState = () => navigate(window.location.pathname, true); const mount = () => { if (mounted) return; window.addEventListener('popstate', handlePopState); mounted = true; }; const unmount = () => { if (!mounted) return; window.removeEventListener('popstate', handlePopState); mounted = false; }; return { navigate, mount, unmount, get current() { return current; }, get mounted() { return mounted; } }; }
-function mountShell(document, runtime, kind) { const root = document.createElement('main'); root.className = `damar-shell damar-shell-${kind}`; root.tabIndex = -1; root.setAttribute('aria-label', kind === 'idle_presence' ? 'Damar Idle foundation' : 'Damar Dashboard foundation'); if (kind === 'idle_presence') { const presence = document.createElement('section'); presence.className = 'damar-presence-slot'; presence.setAttribute('aria-label','Presence core slot'); presence.textContent = 'Presence foundation'; const status = document.createElement('div'); status.className = 'damar-state'; status.setAttribute('role','status'); status.textContent = runtime.visualState; root.append(presence, status); } else { const nav = document.createElement('nav'); nav.setAttribute('aria-label','Dashboard navigation'); const idle = document.createElement('button'); idle.type='button'; idle.textContent='Idle'; idle.addEventListener('click',()=>runtime.router.navigate('/s/idle_presence')); const overview = document.createElement('button'); overview.type='button'; overview.textContent='Overview'; overview.addEventListener('click',()=>runtime.router.navigate('/s/web_dashboard')); nav.append(idle,overview); const outlet = document.createElement('section'); outlet.className='damar-route-outlet'; outlet.setAttribute('aria-label','Route outlet'); outlet.textContent='Dashboard foundation'; const inspector = document.createElement('aside'); inspector.className='damar-inspector'; inspector.setAttribute('aria-label','Inspector and drawer region'); root.append(nav,outlet,inspector); } return root; }
-function boot(document = globalThis.document, window = globalThis.window) { if (!document || !window) throw new Error('browser globals required'); const app = document.querySelector('#app'); if (!app) throw new Error('missing #app root'); Object.assign(document.documentElement.style, semanticTokens()); let shell = null; const runtime = { visualState:'IDLE', router:null, mounted:false, mount:null, unmount:null, setState(state) { runtime.visualState = state; const live = document.querySelector('.damar-state'); if (live) live.textContent = state; } }; const removeShell = () => { if (shell) { shell.remove(); shell = null; } }; const render = ({ route }) => { removeShell(); shell = mountShell(document, runtime, route.surface); app.replaceChildren(shell); }; runtime.router = createRouter(window, render); runtime.mount = () => { if (runtime.mounted) return; runtime.router.mount(); runtime.mounted = true; runtime.router.navigate(window.location.pathname === '/s/idle_presence' ? '/s/idle_presence' : '/s/web_dashboard', true); }; runtime.unmount = () => { if (!runtime.mounted) return; runtime.router.unmount(); removeShell(); runtime.mounted = false; }; runtime.mount(); return runtime; }
-if (typeof module !== 'undefined') module.exports = { boot, route, semanticTokens }; else globalThis.DamarBrowserRuntime = { boot, route, semanticTokens };
+const { Router, routeFor } = require('../routing');
+const { tokenStyle } = require('../tokens');
+const { bindVisualState } = require('../stateBinding');
+const { mountShell } = require('../shells');
+
+// Own only browser event attachment. Matching, registry, history and current state
+// belong to the shared Router. Public navigation after unmount is a safe no-op.
+function createRouter(window, render, options = {}) {
+  const router = new Router({ ...options, history: window.history, onNavigate: render });
+  const navigate = router.navigate.bind(router);
+  let mounted = false;
+  router.navigate = (path, options = {}) => mounted ? navigate(path, typeof options === 'boolean' ? { replace: options } : options) : router.current;
+  const handlePopState = () => router.navigate(window.location.pathname, { replace: true });
+  router.mount = () => { if (mounted) return; mounted = true; window.addEventListener('popstate', handlePopState); };
+  router.unmount = () => { if (!mounted) return; mounted = false; window.removeEventListener('popstate', handlePopState); };
+  Object.defineProperty(router, 'mounted', { get: () => mounted });
+  return router;
+}
+function boot(document = globalThis.document, window = globalThis.window, options = {}) {
+  if (!document || !window) throw new Error('browser globals required');
+  const app = document.querySelector('#app'); if (!app) throw new Error('missing #app root');
+  let shell = null; let disposeShell = null;
+  const runtime = {
+    visualState: bindVisualState({}).visualState, router: null, mounted: false,
+    applyTokens(values) {
+      if (!runtime.mounted) return;
+      for (const [name, value] of Object.entries(tokenStyle('dark', values))) document.documentElement.style.setProperty(name, value);
+    },
+    setState(projection) {
+      if (!runtime.mounted) return;
+      const binding = bindVisualState(projection);
+      runtime.visualState = binding.visualState;
+      const live = shell?.querySelector('.damar-state'); if (live) live.textContent = binding.visualState;
+      return binding;
+    }
+  };
+  const removeShell = () => { disposeShell?.(); disposeShell = null; shell = null; };
+  const render = ({ route }) => {
+    if (!runtime.mounted) return; removeShell();
+    disposeShell = mountShell(app, { kind: route.surface, router: runtime.router, route, state: { label: runtime.visualState }, onNavigate: ({ root }) => { shell = root; } });
+  };
+  runtime.router = createRouter(window, render, options);
+  runtime.mount = () => {
+    if (runtime.mounted) return;
+    runtime.mounted = true; runtime.applyTokens(options.tokenValues); runtime.router.mount();
+    const path = window.location.pathname;
+    runtime.router.navigate(routeFor(path, runtime.router.routes) ? path : '/s/web_dashboard', { replace: true });
+  };
+  runtime.unmount = () => { if (!runtime.mounted) return; runtime.mounted = false; runtime.router.unmount(); removeShell(); };
+  runtime.mount(); return runtime;
+}
+module.exports = { boot, route: routeFor, semanticTokens: tokenStyle };
