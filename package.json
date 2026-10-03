@@ -28,6 +28,9 @@
     "census:wave8:json": "node scripts/wave8-census.js --json",
     "census:clusters": "node scripts/wave8-cluster.js",
     "census:clusters:json": "node scripts/wave8-cluster.js --json"
+    ,"uix:w4:test":"node --test tests/uix-w4/*.test.js"
+    ,"uix:w4:validate":"node scripts/validate-uix-w4.js"
+    ,"uix:w4:build":"node -e \"require('./src/ui-platform'); console.log('UI platform build ok')\""
   },
   "repository": {
     "type": "git",
