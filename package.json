@@ -30,7 +30,8 @@
     "census:clusters:json": "node scripts/wave8-cluster.js --json"
     ,"uix:w4:test":"node --test tests/uix-w4/*.test.js"
     ,"uix:w4:validate":"node scripts/validate-uix-w4.js"
-    ,"uix:w4:build":"node -e \"require('./src/ui-platform'); console.log('UI platform build ok')\""
+    ,"uix:w4:build":"node scripts/build-uix-w4.js"
+    ,"uix:w4:smoke":"node scripts/smoke-uix-w4-browser.js"
   },
   "repository": {
     "type": "git",

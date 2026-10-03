@@ -19,5 +19,27 @@ function ErrorState({ kind = 'unknown', message = 'Something went wrong', ...pro
 function DegradedState(props = {}) { return primitive('DegradedState', { ...liveRegionProps('polite'), ...props }); }
 function Code(props = {}, children = []) { return primitive('Code', { ...props, 'data-monospace': 'true' }, children); }
 function VisuallyHidden(props = {}, children = []) { return primitive('VisuallyHidden', props, children); }
+function setAttributes(element, props = {}) {
+  for (const [key, value] of Object.entries(props)) {
+    if (value == null || key === 'children' || key === 'style') continue;
+    const name = key === 'className' ? 'class' : key;
+    if (name === 'onClick' || name.startsWith('on')) { element.addEventListener(name.slice(2).toLowerCase(), value); continue; }
+    if (name === 'text') { element.textContent = String(value); continue; }
+    if (name === 'message') { element.textContent = String(value); continue; }
+    if (value === true) element.setAttribute(name, ''); else if (value !== false) element.setAttribute(name, String(value));
+  }
+  if (props.style) Object.assign(element.style, props.style);
+  return element;
+}
+function renderPrimitive(document, descriptor) {
+  const tag = ({ Button: 'button', IconButton: 'button', TextInput: 'input', Dialog: 'dialog', Drawer: 'aside', Progress: 'progress', Code: 'code', VisuallyHidden: 'span', Stack: 'div', Panel: 'section', EmptyState: 'section', ErrorState: 'div', DegradedState: 'div', StateIndicator: 'span', HealthIndicator: 'span', Skeleton: 'span' })[descriptor.component] || 'div';
+  const element = document.createElement(tag); element.dataset.component = descriptor.component;
+  setAttributes(element, descriptor.props);
+  if (descriptor.component === 'TextInput') element.type = descriptor.props.type || 'text';
+  if (descriptor.component === 'Progress' && descriptor.props['aria-valuenow'] != null) element.value = descriptor.props['aria-valuenow'];
+  for (const child of descriptor.children || []) element.append(child?.component ? renderPrimitive(document, child) : document.createTextNode(String(child ?? '')));
+  return element;
+}
+function mountPrimitive(container, descriptor) { if (!container?.ownerDocument) throw new TypeError('container must be a DOM element'); const element = renderPrimitive(container.ownerDocument, descriptor); container.append(element); return () => element.remove(); }
 const CONTRACT_STUBS = Object.freeze(['PresenceCore', 'PresenceShell', 'MissionCard', 'ApprovalCard', 'NotificationItem', 'EntityHeader', 'CapabilityStateStack', 'ProviderCard', 'ModelCard', 'DeviceCard', 'GatewayCard', 'SecurityIncidentCard', 'ObservationCard', 'EvidencePanel', 'Timeline', 'Inspector', 'CommandPalette', 'DataTable']);
-module.exports = { primitive, Button, IconButton, TextInput, StateIndicator, HealthIndicator, Stack, Panel, Dialog, Drawer, Progress, Skeleton, EmptyState, ErrorState, DegradedState, Code, VisuallyHidden, CONTRACT_STUBS };
+module.exports = { primitive, Button, IconButton, TextInput, StateIndicator, HealthIndicator, Stack, Panel, Dialog, Drawer, Progress, Skeleton, EmptyState, ErrorState, DegradedState, Code, VisuallyHidden, renderPrimitive, mountPrimitive, CONTRACT_STUBS };
