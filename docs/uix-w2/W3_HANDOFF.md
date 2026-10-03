@@ -1,0 +1,3 @@
+# W3 handoff — experience system requirements
+
+Implement no runtime contract changes. Define structural hierarchy for Idle primary, Dashboard secondary, CLI, voice, chat, companion, and forensic modes. Cover projection states: presence, mission, task, approval, notification/interruption, device, security, awareness, provider/model, degraded/offline. Support NORMAL, POWER, FORENSIC density without changing truth or authority. Specify required component states, loading/stale/unknown/error/empty states, responsive transitions, keyboard/screen-reader semantics, focus and confirmation safety, redaction, quiet hours, and canonical-ID handoff. Do not finalize colors, typography, glows, animation, or 3D geometry in W2.

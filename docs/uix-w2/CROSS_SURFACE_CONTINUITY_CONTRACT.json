@@ -1,0 +1,10 @@
+{
+  "schema_version":"uix-w2.continuity.v1",
+  "one_damar":true,
+  "canonical_ids":{"damar_id":"one stable Damar identity","user_id":"owner/principal identity","session_id":"surface authentication/session lifecycle","conversation_id":"dialogue continuity","mission_id":"long-lived goal/workflow","task_id":"mission unit","approval_id":"authority decision","notification_id":"delivery-independent event notice","device_id":"paired/observed device identity","surface_instance_id":"concrete client instance"},
+  "separation":{"session":"may disappear without destroying work","conversation":"may reference many missions","mission":"outlives any surface session","task":"belongs to exactly one mission","approval":"decision record, never chat message","notification":"delivery projection of a source event"},
+  "handoff":{"contract":"pass canonical IDs, auth context, target surface, read cursor, deep-link intent, and redaction scope","copy_mutable_state":false,"examples":["voice->idle","idle->dashboard inspect mission","dashboard->companion approve","telegram->presence continue","cli->dashboard forensic"],"reconciliation":"target reloads canonical read model and resyncs stream gaps"},
+  "deep_links":{"mission":"/missions/{mission_id}","device":"/devices/{device_id}","capability":"/capabilities/{capability_id}","provider":"/providers/{provider_instance_id}","model":"/models/{model_id}","security_incident":"/security/incidents/{incident_id}","audit_event":"/audit/events/{audit_event_id}","memory_item":"/memory/{memory_id}","approval":"/approvals/{approval_id}"},
+  "streaming":{"snapshot":"required on attach","updates":"ordered event/read-model revisions","gap":"resync snapshot; no client-side invented patch","freshness":"as_of, revision, source, redaction, freshness class"},
+  "density":{"NORMAL":"current task and important state","POWER":"related tasks, routing, device and policy evidence","FORENSIC":"full provenance, authority, verification, audit, raw freshness and uncertainty; same truth and authority"}
+}
