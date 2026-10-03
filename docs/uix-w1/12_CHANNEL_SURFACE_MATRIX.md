@@ -9,7 +9,7 @@
 | Companion | pairing/device registry/routes | paired-device control |
 | RuntimeHost | host/hotkey/tray ports | local presence/commands |
 | MCP | src/mcp | external tool exposure, destructive gate |
+| Terminal WebSocket | src/ws/terminalGateway.js | code boundary exists; currently disabled before attachment and returns HTTP 503 |
 | USB HID | no canonical source proof | UNKNOWN |
 
 Full machine matrix: data/channel_surface_matrix.json.
-

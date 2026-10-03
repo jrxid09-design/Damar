@@ -1,6 +1,5 @@
 # 14 Model/provider inventory
 
-Source proves OpenRouter OpenAI-compatible provider, Ollama stub (throws not implemented yet), AI runtime/model routes, connector integrations, and Mata Dewa keyed/keyless registration.
+Source proves OpenRouter OpenAI-compatible provider, local in-process llama.cpp provider/configuration, Ollama stub (throws not implemented yet), AI runtime/model routes, connector integrations, and Mata Dewa keyed/keyless registration. The current provider inventory therefore contains five current records; `llamacpp` is the canonical local provider ID.
 
-Source does not prove future multi-instance gateway, model-role routing, key pools, quotas, or ordered fallback. OpenRouter is PARTIAL/config-dependent; Ollama is CODE_EXISTS but not runtime-ready. Machine projection: data/model_provider_inventory.json.
-
+The llama.cpp record is source-backed as: adapter YES; config schema YES; runtime reachability PARTIAL because a GGUF model and node-llama-cpp runtime are required; model discovery YES; model assignment YES; health status YES; fallback YES through provider configuration; gateway exposure YES through the existing authenticated active-provider OpenAI-compatible route; user configuration YES; in-process/local dependency mode. This does not claim provider-management UI, multi-instance gateway, role routing, key pools, quotas, or ordered fallback. OpenRouter is PARTIAL/config-dependent; Ollama is CODE_EXISTS but not runtime-ready. Machine projection: data/model_provider_inventory.json.

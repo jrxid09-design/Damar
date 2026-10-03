@@ -1,9 +1,16 @@
 # UIX-W2 handoff from W1 product truth
 
-Current W1 truth is source-backed at `b2d098684a5e2740f1c7dc0d6692ca3033d2e216`.
+Current W1 truth is source-backed at `19c3c9f543aa380d7732e9a9cdafd8179c71048b` plus the targeted artifact repair. The terminal WebSocket code boundary remains partial and is not currently user-reachable: `src/ws/terminalGateway.js` returns HTTP 503 before authentication/session attachment. Do not present terminal streaming as a current user-ready surface.
+
+The current model/provider inventory contains five records, including the
+source-backed local in-process `llamacpp` provider. Its adapter, configuration,
+GGUF model discovery, assignment, health status, fallback rule, and active
+provider gateway path exist, but runtime readiness remains configuration/model
+dependent. There is no provider-management UI, multi-instance gateway, role
+routing, key-pool, quota, or ordered-fallback surface in W1.
 
 Build against the existing HTTP/API, CLI, Telegram/WhatsApp, voice, companion,
-MCP, and terminal boundaries. Reuse `product_feature_map.json`, the L11
+MCP, and currently non-attachable terminal boundaries. Reuse `product_feature_map.json`, the L11
 reachability matrix, the API/read-model catalogs, and the canonical runtime
 composition. The Web Dashboard is not a production UI at this SHA; Idle/
 Presence is product direction, not an implemented visual surface.

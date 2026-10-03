@@ -16,3 +16,10 @@ machine truth remains under `data/l11_*`; cross-domain truth is consolidated in
 `data/product_truth_summary.json`, `data/product_feature_map.json`, the
 ownership/effect/service matrices, and `W2_HANDOFF.md`. This is a candidate
 artifact set for a fresh independent final W1 audit, not final certification.
+
+Current targeted-repair truth: the terminal WebSocket boundary is partial and
+not user-reachable because the source returns HTTP 503 before attachment; the
+provider inventory contains five current records, including source-backed
+local in-process `llamacpp` support with configuration/model-dependent runtime
+readiness. These are product projections only; no source, test, config, L11,
+awareness, authority, or W2 UI implementation was added.
