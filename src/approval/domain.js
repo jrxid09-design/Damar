@@ -13,6 +13,7 @@
 
 const crypto = require("node:crypto");
 const { makeApprovalStore } = require("./store");
+const { withSharedLock } = require("../canonical/kvIndex");
 
 const STATE = Object.freeze({
     PENDING: "PENDING",
@@ -60,20 +61,9 @@ class ApprovalError extends Error {
     }
 }
 
-// Per-approval in-process serialization: concurrent decisions on the SAME
-// approval_id run one at a time so resolution is deterministic (DP §22). The
-// returned promise carries the real result/throw; the tail never rejects.
-function makeKeyedLock() {
-    const tails = new Map();
-    return function withLock(key, fn) {
-        const prev = tails.get(key) || Promise.resolve();
-        const result = prev.then(() => fn());
-        const tail = result.then(() => {}, () => {});
-        tails.set(key, tail);
-        tail.then(() => { if (tails.get(key) === tail) tails.delete(key); });
-        return result;
-    };
-}
+const DEFAULT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const DEFAULT_LIST_LIMIT = 100;
+const MAX_LIST_LIMIT = 500;
 
 function createApprovalDomain({
     store,
@@ -82,6 +72,7 @@ function createApprovalDomain({
     manager = null,
     clock = () => Date.now(),
     audit = null,
+    retentionMs = DEFAULT_RETENTION_MS,
     idFactory = () => `apr-${crypto.randomUUID()}`
 } = {}) {
     const backing = store || (acc ? makeApprovalStore(acc) : null);
@@ -94,7 +85,10 @@ function createApprovalDomain({
     // empty, so a durable PENDING record has no live HC continuation and is
     // reconciled fail-closed (DP §32, §35, AR2/AR3).
     const liveBindings = new Map();
-    const withLock = makeKeyedLock();
+    // Storage-scoped locks (src/canonical/kvIndex): shared by every domain instance
+    // in the process, so two surfaces cannot race the same approval or requirement.
+    const withLock = withSharedLock;
+    const recKey = (approvalId) => `approval:rec:${approvalId}`;
 
     function emit(eventType, rec, outcome) {
         if (!audit || typeof audit.append !== "function") return;
@@ -173,6 +167,10 @@ function createApprovalDomain({
         if (!isCanonicalConfirmationRequirement(requirement)) {
             throw new ApprovalError(REASON.NOT_CANONICAL_REQUIREMENT, "confirmation requirement is not canonically branded");
         }
+        return withLock(`approval:req:${requirement.requirementId}`, () => createOrReuse(managerResult, requirement, { sourceRef, risk, effect }));
+    }
+
+    async function createOrReuse(managerResult, requirement, { sourceRef, risk, effect }) {
         const existing = await backing.byRequirement(requirement.requirementId);
         if (existing) {
             if (!liveBindings.has(existing.approval_id)) {
@@ -217,7 +215,7 @@ function createApprovalDomain({
             requirement, continuationId: managerResult.continuationId,
             principal: requirement.principal, sessionId: requirement.sessionId, channel: requirement.channel
         });
-        await backing.put(rec);
+        await backing.create(rec);
         emit("approval.created", rec, "ok");
         return surfaceRecord(rec);
     }
@@ -229,7 +227,7 @@ function createApprovalDomain({
     // composition and the Gate do.
     async function decide({ approvalId, decision, expectedRevision = null, actor = null,
         authenticationEvidence = null, confirmationProof = null, idempotencyKey = null } = {}) {
-        return withLock(approvalId, async () => {
+        return withLock(recKey(approvalId), async () => {
             const rec = await backing.get(approvalId);
             if (!rec) throw new ApprovalError(REASON.UNKNOWN_APPROVAL, approvalId);
 
@@ -300,7 +298,13 @@ function createApprovalDomain({
                 // the canonical Gate. Only a FRESH ALLOW there reaches execution; DP
                 // never short-circuits it (DP §23). The continuation and the evidence
                 // are both single-use, so a double decision cannot double-execute.
+                // A1: a bridge/continuation exception is NOT a Gate decision. The Gate
+                // did not necessarily return DENY, so the record says NOT_EVALUATED with
+                // BRIDGE_FAILED. The human APPROVED decision above stays as recorded
+                // (DP §16). Fail closed: no ALLOW, no execution, no automatic retry
+                // (evidence and continuation are single-use).
                 let bridge;
+                let bridgeFailed = false;
                 try {
                     const mr = await manager.resumeConfirmation({
                         continuationId: binding.continuationId,
@@ -309,12 +313,14 @@ function createApprovalDomain({
                     });
                     bridge = bridgeResult(mr);
                 } catch (e) {
+                    bridgeFailed = true;
                     bridge = Object.freeze({
-                        authority_result: "DENY",
-                        verification_result: "UNKNOWN",
+                        authority_result: "NOT_EVALUATED",
+                        verification_result: "BRIDGE_FAILED",
                         execution_id: null,
-                        manager_outcome: "AUTHORITY_DENIED",
-                        detail: String((e && (e.reasonCode || e.message)) || "continuation rejected").slice(0, 256)
+                        manager_outcome: "BRIDGE_FAILED",
+                        continuation_outcome: "CONTINUATION_FAILED",
+                        detail: String((e && (e.reasonCode || e.message)) || "continuation failed").slice(0, 256)
                     });
                 }
                 rec.authority_result = bridge.authority_result;
@@ -322,7 +328,8 @@ function createApprovalDomain({
                 rec.bridge = bridge;
                 liveBindings.delete(approvalId); // evidence consumed; no second re-evaluation (AR7)
                 await backing.put(rec);
-                emit("approval.authority.reevaluated", rec, bridge.authority_result === "ALLOW" ? "ok" : "denied");
+                emit(bridgeFailed ? "approval.bridge.failed" : "approval.authority.reevaluated",
+                    rec, bridge.authority_result === "ALLOW" ? "ok" : "denied");
                 return { approval: surfaceRecord(rec), bridge, idempotent: false };
             }
 
@@ -332,7 +339,7 @@ function createApprovalDomain({
     }
 
     function sourceTerminator(target) {
-        return (approvalId, reason = null) => withLock(approvalId, async () => {
+        return (approvalId, reason = null) => withLock(recKey(approvalId), async () => {
             const rec = await backing.get(approvalId);
             if (!rec) throw new ApprovalError(REASON.UNKNOWN_APPROVAL, approvalId);
             if (TERMINAL.has(rec.state)) return surfaceRecord(rec);
@@ -344,7 +351,7 @@ function createApprovalDomain({
     // orphaned PENDING records move to a truthful terminal state; a still-live
     // PENDING record is left untouched.
     async function reconcile(approvalId) {
-        return withLock(approvalId, async () => {
+        return withLock(recKey(approvalId), async () => {
             const rec = await backing.get(approvalId);
             if (!rec) throw new ApprovalError(REASON.UNKNOWN_APPROVAL, approvalId);
             if (TERMINAL.has(rec.state)) return surfaceRecord(rec);
@@ -363,9 +370,20 @@ function createApprovalDomain({
         markStale: (id, reason = "HC_BINDING_INVALIDATED") => sourceTerminator(STATE.STALE)(id, reason),
         reconcile,
         async get(approvalId) { const r = await backing.get(approvalId); return r ? surfaceRecord(r) : null; },
-        async list({ state = null } = {}) {
-            const recs = await backing.list();
-            return recs.filter((r) => !state || r.state === state).map(surfaceRecord);
+        // Bounded, newest-first discovery. Default and maximum page sizes are finite.
+        async list({ state = null, limit = DEFAULT_LIST_LIMIT } = {}) {
+            const cap = Math.min(Math.max(1, Math.trunc(limit)), MAX_LIST_LIMIT);
+            const recs = await backing.list({ limit: cap, predicate: (r) => !state || r.state === state });
+            return recs.map(surfaceRecord);
+        },
+        // Retention (DP-R6): removes TERMINAL approvals whose requirement window
+        // elapsed more than retentionMs ago. PENDING approvals never move. A removed
+        // approval id is unknown afterwards, so its decision cannot be re-applied.
+        async compact() {
+            const horizon = clock() - retentionMs;
+            return withLock("approval:index-retention", () => backing.compact({
+                removable: (r) => TERMINAL.has(r.state) && r.expires_at < horizon
+            }));
         }
     });
 }
