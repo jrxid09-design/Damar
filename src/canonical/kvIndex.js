@@ -1,19 +1,23 @@
 "use strict";
 
 // Storage-scoped primitives shared by the canonical DP domains (approval,
-// notification). ACC KV exposes only getKv/putKv: no compare-and-swap, no
-// transaction, no prefix listing. Two consequences drive this module:
+// notification).
 //
-//  1. Every read-modify-write on a shared key runs under withSharedLock. The lock
-//     map is MODULE scoped, so every domain instance in the process that touches
-//     the same storage key serializes, not only instances sharing a closure.
-//     ponytail: one process-wide lock map; cross-process writers need a native
-//     ACC compare-and-swap, which the substrate does not expose yet.
+// ATOMICITY (R2): every mutation of shared state goes through the ACC-level
+// `acc.transact` primitive (src/cognition/persistence/AccStore.js). A record and
+// its index entry are written in ONE transaction, so across OS processes sharing
+// one store either both commit or neither does. withSharedLock is only a
+// same-process serializer for read-decide-write sequences on one record; it is
+// NOT a correctness boundary for shared storage.
 //
-//  2. Discovery uses a PAGED index (fixed-size id pages + a head record) instead
-//     of one ever-growing array. Append writes the index entry BEFORE the record,
-//     so a crash can leave an index id with no record (skipped on read) but never
-//     a durable record that discovery cannot find.
+// DISCOVERY (R2): a paged index (fixed-size id pages + a meta record). Ids are
+// appended at the head. walk() is newest-first and resumes from an OPAQUE cursor
+// that names the last scanned id. Cursor is position, never authority.
+//
+// SNAPSHOT: a traversal is not one atomic snapshot. For a stable dataset it yields
+// every live record exactly once. Records appended mid-traversal are newer than the
+// cursor and are not returned by it. A cursor whose id was compacted away fails
+// closed with INVALID_CURSOR.
 
 const DEFAULT_PAGE_SIZE = 100;
 const locks = new Map();
@@ -27,71 +31,102 @@ function withSharedLock(key, fn) {
     return result;
 }
 
-function createPagedIndex(acc, prefix, { pageSize = DEFAULT_PAGE_SIZE } = {}) {
+class InvalidCursorError extends Error {
+    constructor() {
+        super("INVALID_CURSOR");
+        this.name = "InvalidCursorError";
+        this.code = "INVALID_CURSOR";
+    }
+}
+
+function encodeCursor(id) {
+    return Buffer.from(JSON.stringify({ v: 1, after: id }), "utf8").toString("base64url");
+}
+
+function decodeCursor(cursor) {
+    if (cursor === null || cursor === undefined) return null;
+    if (typeof cursor !== "string" || cursor.length === 0 || cursor.length > 512) throw new InvalidCursorError();
+    let parsed;
+    try { parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")); }
+    catch { throw new InvalidCursorError(); }
+    if (!parsed || parsed.v !== 1 || typeof parsed.after !== "string") throw new InvalidCursorError();
+    return parsed.after;
+}
+
+function createPagedIndex(prefix, { pageSize = DEFAULT_PAGE_SIZE } = {}) {
     const metaKey = `${prefix}idx:meta`;
     const pageKey = (n) => `${prefix}idx:p:${n}`;
-    const lockKey = `${prefix}idx`;
-
-    async function meta() { return (await acc.getKv(metaKey)) || { first: 0, last: 0 }; }
 
     return {
-        // Index-first append: see module header.
-        append(id) {
-            return withSharedLock(lockKey, async () => {
-                const m = await meta();
-                let page = (await acc.getKv(pageKey(m.last))) || [];
-                if (page.length >= pageSize) {
-                    m.last += 1;
-                    page = [];
-                }
-                page.push(id);
-                await acc.putKv(pageKey(m.last), page);
-                await acc.putKv(metaKey, m);
-            });
+        // Index entry at the head. Call inside acc.transact together with the record
+        // write so that both commit or roll back as one.
+        async appendIn(tx, id) {
+            const m = (await tx.getKv(metaKey)) || { first: 0, last: 0 };
+            let page = (await tx.getKv(pageKey(m.last))) || [];
+            if (page.length >= pageSize) {
+                m.last += 1;
+                page = [];
+            }
+            page.push(id);
+            await tx.putKv(pageKey(m.last), page);
+            await tx.putKv(metaKey, m);
         },
 
-        // Newest-first bounded walk. readRecord(id) → record | null; predicate(rec) → bool.
-        async walk({ readRecord, predicate = () => true, limit }) {
-            const m = await meta();
-            const out = [];
-            for (let p = m.last; p >= m.first && out.length < limit; p -= 1) {
+        // Bounded newest-first walk. Returns { items, nextCursor }; nextCursor is null
+        // when the index is exhausted. The cursor advances past non-matching entries,
+        // so a filtered page never repeats or skips items.
+        async walk(acc, { readRecord, predicate = () => true, limit, cursor = null }) {
+            const after = decodeCursor(cursor);
+            const m = (await acc.getKv(metaKey)) || { first: 0, last: 0 };
+            let page = m.last;
+            let at = null;
+            if (after !== null) {
+                page = -1;
+                for (let q = m.last; q >= m.first; q -= 1) {
+                    const idx = ((await acc.getKv(pageKey(q))) || []).lastIndexOf(after);
+                    if (idx >= 0) { page = q; at = idx; break; }
+                }
+                if (page < 0) throw new InvalidCursorError();
+            }
+            const items = [];
+            for (let p = page; p >= m.first; p -= 1) {
                 const ids = (await acc.getKv(pageKey(p))) || [];
-                for (let i = ids.length - 1; i >= 0 && out.length < limit; i -= 1) {
+                for (let i = (p === page && at !== null ? at - 1 : ids.length - 1); i >= 0; i -= 1) {
                     const rec = await readRecord(ids[i]);
-                    if (rec && predicate(rec)) out.push(rec);
+                    if (rec && predicate(rec)) items.push(rec);
+                    if (items.length === limit) return { items, nextCursor: encodeCursor(ids[i]) };
                 }
             }
-            return out;
+            return { items, nextCursor: null };
         },
 
-        // Drops index entries whose record satisfies removable(rec) and drops
-        // dangling ids. onRemove(rec) lets the owner delete its own keys. Terminal
-        // records are immutable, so reading them outside the record lock is safe.
-        compact({ readRecord, removable, onRemove }) {
-            return withSharedLock(lockKey, async () => {
-                const m = await meta();
-                let removed = 0;
-                for (let p = m.first; p <= m.last; p += 1) {
-                    const ids = (await acc.getKv(pageKey(p))) || [];
-                    if (ids.length === 0) continue;
-                    const keep = [];
-                    for (const id of ids) {
-                        const rec = await readRecord(id);
-                        if (!rec) continue;
-                        if (removable(rec)) { await onRemove(rec); removed += 1; }
-                        else keep.push(id);
-                    }
-                    if (keep.length !== ids.length) await acc.putKv(pageKey(p), keep.length ? keep : null);
+        // Drops index entries whose record satisfies removable(rec) and dangling ids.
+        // onRemove(rec) lets the owner delete its own keys in the same transaction.
+        async compactIn(tx, { readRecord, removable, onRemove }) {
+            const m = (await tx.getKv(metaKey)) || { first: 0, last: 0 };
+            let removed = 0;
+            for (let p = m.first; p <= m.last; p += 1) {
+                const ids = (await tx.getKv(pageKey(p))) || [];
+                if (ids.length === 0) continue;
+                const keep = [];
+                for (const id of ids) {
+                    const rec = await readRecord(id);
+                    if (!rec) continue;
+                    if (removable(rec)) { await onRemove(rec); removed += 1; }
+                    else keep.push(id);
                 }
-                while (m.first < m.last && !(await acc.getKv(pageKey(m.first)))) {
-                    await acc.putKv(pageKey(m.first), null);
-                    m.first += 1;
-                }
-                await acc.putKv(metaKey, m);
-                return removed;
-            });
+                if (keep.length !== ids.length) await tx.putKv(pageKey(p), keep.length ? keep : null);
+            }
+            while (m.first < m.last && !(await tx.getKv(pageKey(m.first)))) {
+                await tx.putKv(pageKey(m.first), null);
+                m.first += 1;
+            }
+            await tx.putKv(metaKey, m);
+            return removed;
         }
     };
 }
 
-module.exports = { withSharedLock, createPagedIndex, DEFAULT_PAGE_SIZE };
+function lockRegistrySize() { return locks.size; }
+
+module.exports = { withSharedLock, lockRegistrySize, createPagedIndex, InvalidCursorError, DEFAULT_PAGE_SIZE };

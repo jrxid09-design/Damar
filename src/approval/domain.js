@@ -1,6 +1,6 @@
 "use strict";
 
-// Canonical Approval Domain owner (DP-L1..L3).
+// Canonical Approval Domain owner (DP-L1..L3, R2).
 //
 // DOMAIN LAW (DP §6): APPROVAL != AUTHORITY, APPROVED != EXECUTED. This domain
 // owns the human-decision lifecycle ONLY. It is NOT an authority source, NOT an
@@ -10,10 +10,15 @@
 // through the sealed Owner-trust composition, and the canonical Gate RE-EVALUATES
 // every hard constraint before any ALLOW. There is no APPROVED -> ALLOW and no
 // APPROVED -> execute path here.
+//
+// R2: every persisted transition is an atomic store.mutate (one ACC transaction),
+// so a terminal decision cannot be overwritten by another process. Surface reads
+// are deep copies. purpose is redacted unless the source classified it NORMAL.
 
 const crypto = require("node:crypto");
 const { makeApprovalStore } = require("./store");
 const { withSharedLock } = require("../canonical/kvIndex");
+const { detach, surfaceText } = require("../canonical/projection");
 
 const STATE = Object.freeze({
     PENDING: "PENDING",
@@ -85,8 +90,8 @@ function createApprovalDomain({
     // empty, so a durable PENDING record has no live HC continuation and is
     // reconciled fail-closed (DP §32, §35, AR2/AR3).
     const liveBindings = new Map();
-    // Storage-scoped locks (src/canonical/kvIndex): shared by every domain instance
-    // in the process, so two surfaces cannot race the same approval or requirement.
+    // Same-process serialization of read-decide sequences per approval. Correctness
+    // across processes comes from the atomic store.mutate, not from this lock.
     const withLock = withSharedLock;
     const recKey = (approvalId) => `approval:rec:${approvalId}`;
 
@@ -109,6 +114,9 @@ function createApprovalDomain({
     // Surface-safe read model (DP §27, §28). No principal, no intent arguments,
     // no confirmation evidence, no owner proof, no raw secrets. Authority-internal
     // digests (intent/grant revision) are deliberately omitted from the surface.
+    // purpose is free text from the caller: it is redacted unless the source
+    // classified it NORMAL (missing classification = SECRET, R2-4). Every nested
+    // value is a copy, so the caller cannot reach canonical state (R2-2).
     function surfaceRecord(rec) {
         return Object.freeze({
             approval_id: rec.approval_id,
@@ -117,11 +125,11 @@ function createApprovalDomain({
             authority_result: rec.authority_result,
             verification_result: rec.verification_result,
             capability_ref: rec.capability_id,
-            scope: rec.scope ?? null,
-            purpose: rec.purpose ?? null,
-            risk: rec.risk ?? null,
-            effect: rec.effect ?? null,
-            source_ref: rec.source_ref ?? null,
+            scope: detach(rec.scope ?? null),
+            purpose: surfaceText(rec.purpose ?? null, rec.purpose_sensitivity),
+            risk: detach(rec.risk ?? null),
+            effect: detach(rec.effect ?? null),
+            source_ref: detach(rec.source_ref ?? null),
             created_at: rec.created_at,
             expires_at: rec.expires_at,
             decision_at: rec.decision_at,
@@ -142,23 +150,45 @@ function createApprovalDomain({
         });
     }
 
-    async function terminalize(rec, target, { stale_reason = null, idempotencyKey = null } = {}) {
-        rec.state = target;
-        rec.revision += 1;
-        rec.stale_reason = stale_reason;
-        if (idempotencyKey) rec.last_idempotency_key = idempotencyKey;
-        liveBindings.delete(rec.approval_id);
-        await backing.put(rec);
-        emit(`approval.${target.toLowerCase()}`, rec, target === STATE.APPROVED ? "ok" : "denied");
-        return surfaceRecord(rec);
+    // Atomic PENDING -> terminal. Returns { rec, won }: won=false means the persisted
+    // record was already terminal (another process or an earlier call resolved it), so
+    // the canonical resolution is kept and nothing is re-emitted.
+    async function terminalize(approvalId, target, { stale_reason = null, idempotencyKey = null, decision = null } = {}) {
+        const out = await backing.mutate(approvalId, (draft) => {
+            if (TERMINAL.has(draft.state)) return { rec: draft, won: false };
+            draft.state = target;
+            draft.revision += 1;
+            draft.stale_reason = stale_reason;
+            if (decision) {
+                draft.decision_at = decision.at;
+                draft.decided_by = decision.actor;
+            }
+            if (idempotencyKey) draft.last_idempotency_key = idempotencyKey;
+            return { rec: draft, won: true };
+        });
+        if (!out) throw new ApprovalError(REASON.UNKNOWN_APPROVAL, approvalId);
+        liveBindings.delete(approvalId);
+        if (out.won) emit(`approval.${target.toLowerCase()}`, out.rec, target === STATE.APPROVED ? "ok" : "denied");
+        return out;
+    }
+
+    function bind(approvalId, managerResult, requirement) {
+        if (liveBindings.has(approvalId)) return;
+        liveBindings.set(approvalId, {
+            requirement, continuationId: managerResult.continuationId,
+            principal: requirement.principal, sessionId: requirement.sessionId, channel: requirement.channel
+        });
     }
 
     // DP §11/§12: an approval may be created ONLY from a valid canonical HC
     // confirmation requirement, delivered as a frozen-HC SUSPENDED Manager
     // result. No surface, model, caller flag, tool name or risk score can mint
     // one. Identity is stable: a second call for the same requirement returns
-    // the same approval (DP §13, A2, A22).
-    async function createFromSuspension(managerResult, { sourceRef = null, risk = null, effect = null } = {}) {
+    // the same approval (DP §13, A2, A22), including across processes.
+    //
+    // purposeSensitivity is the SOURCE's classification of `purpose` (NORMAL,
+    // SENSITIVE, SECRET). Omitted = unknown = redacted on every surface read.
+    async function createFromSuspension(managerResult, { sourceRef = null, risk = null, effect = null, purposeSensitivity = null } = {}) {
         if (!managerResult || managerResult.lifecycleState !== "SUSPENDED" ||
             managerResult.outcome !== "OWNER_CONFIRMATION_REQUIRED") {
             throw new ApprovalError(REASON.NOT_SUSPENDED, "a canonical SUSPENDED/OWNER_CONFIRMATION_REQUIRED Manager result is required");
@@ -167,18 +197,13 @@ function createApprovalDomain({
         if (!isCanonicalConfirmationRequirement(requirement)) {
             throw new ApprovalError(REASON.NOT_CANONICAL_REQUIREMENT, "confirmation requirement is not canonically branded");
         }
-        return withLock(`approval:req:${requirement.requirementId}`, () => createOrReuse(managerResult, requirement, { sourceRef, risk, effect }));
+        return withLock(`approval:req:${requirement.requirementId}`, () => createOrReuse(managerResult, requirement, { sourceRef, risk, effect, purposeSensitivity }));
     }
 
-    async function createOrReuse(managerResult, requirement, { sourceRef, risk, effect }) {
+    async function createOrReuse(managerResult, requirement, { sourceRef, risk, effect, purposeSensitivity }) {
         const existing = await backing.byRequirement(requirement.requirementId);
         if (existing) {
-            if (!liveBindings.has(existing.approval_id)) {
-                liveBindings.set(existing.approval_id, {
-                    requirement, continuationId: managerResult.continuationId,
-                    principal: requirement.principal, sessionId: requirement.sessionId, channel: requirement.channel
-                });
-            }
+            bind(existing.approval_id, managerResult, requirement);
             return surfaceRecord(existing);
         }
         const approval_id = idFactory();
@@ -198,6 +223,7 @@ function createApprovalDomain({
             session_id: requirement.sessionId,
             scope: requirement.scope ?? null,
             purpose: requirement.purpose ?? null,
+            purpose_sensitivity: purposeSensitivity,
             state: STATE.PENDING,
             revision: 1,
             created_at: now,
@@ -211,11 +237,15 @@ function createApprovalDomain({
             stale_reason: null,
             last_idempotency_key: null
         };
-        liveBindings.set(approval_id, {
-            requirement, continuationId: managerResult.continuationId,
-            principal: requirement.principal, sessionId: requirement.sessionId, channel: requirement.channel
-        });
-        await backing.create(rec);
+        bind(approval_id, managerResult, requirement);
+        const created = await backing.createIfAbsent(rec);
+        if (!created.created) {
+            // Another process minted this requirement's approval first. Use it, and drop
+            // the binding for the id this call generated (it was never persisted).
+            liveBindings.delete(approval_id);
+            bind(created.id, managerResult, requirement);
+            return surfaceRecord(await backing.get(created.id));
+        }
         emit("approval.created", rec, "ok");
         return surfaceRecord(rec);
     }
@@ -247,21 +277,22 @@ function createApprovalDomain({
 
             const now = clock();
             if (now >= rec.expires_at) {
-                return { approval: await terminalize(rec, STATE.EXPIRED, { stale_reason: "REQUIREMENT_WINDOW_ELAPSED" }), bridge: null, idempotent: false };
+                const t = await terminalize(approvalId, STATE.EXPIRED, { stale_reason: "REQUIREMENT_WINDOW_ELAPSED" });
+                return { approval: surfaceRecord(t.rec), bridge: null, idempotent: false };
             }
             const binding = liveBindings.get(approvalId);
             if (!binding) {
                 // Durable record outlived its process-local HC continuation (restart /
                 // orphaned requirement). FAIL CLOSED: no execution, no fabricated
                 // continuation (DP §32, §33, §35, AR3).
-                return { approval: await terminalize(rec, STATE.STALE, { stale_reason: "ORPHANED_REQUIREMENT_NO_LIVE_HC_CONTINUATION" }), bridge: null, idempotent: false };
+                const t = await terminalize(approvalId, STATE.STALE, { stale_reason: "ORPHANED_REQUIREMENT_NO_LIVE_HC_CONTINUATION" });
+                return { approval: surfaceRecord(t.rec), bridge: null, idempotent: false };
             }
 
             if (decision === "DENY") {
                 // DENY mints no positive evidence and triggers no execution (DP §17, §24).
-                rec.decision_at = now;
-                rec.decided_by = actor;
-                return { approval: await terminalize(rec, STATE.DENIED, { idempotencyKey }), bridge: null, idempotent: false };
+                const t = await terminalize(approvalId, STATE.DENIED, { idempotencyKey, decision: { at: now, actor } });
+                return { approval: surfaceRecord(t.rec), bridge: null, idempotent: !t.won };
             }
 
             if (decision === "APPROVE") {
@@ -276,23 +307,29 @@ function createApprovalDomain({
                 const evidence = ownerTrust.humanConfirmation.confirm({ requirement: binding.requirement, proof: confirmationProof });
                 if (!evidence) {
                     if (clock() >= rec.expires_at) {
-                        return { approval: await terminalize(rec, STATE.EXPIRED, { stale_reason: "REQUIREMENT_WINDOW_ELAPSED" }), bridge: null, idempotent: false };
+                        const t = await terminalize(approvalId, STATE.EXPIRED, { stale_reason: "REQUIREMENT_WINDOW_ELAPSED" });
+                        return { approval: surfaceRecord(t.rec), bridge: null, idempotent: false };
                     }
                     // Requirement still live => the proof was invalid or already spent.
                     // The approval stays PENDING so a valid proof can still be presented.
                     throw new ApprovalError(REASON.CONFIRMATION_REJECTED, "Owner confirmation proof rejected by the sealed trust composition");
                 }
 
-                // Record APPROVED first. This means ONLY that a valid human decision was
-                // recorded — NOT that the Gate allowed, NOT that execution occurred
-                // (DP §16). authority_result is populated by the separate re-evaluation.
-                rec.state = STATE.APPROVED;
-                rec.decision_at = now;
-                rec.decided_by = actor;
-                rec.revision += 1;
-                if (idempotencyKey) rec.last_idempotency_key = idempotencyKey;
-                await backing.put(rec);
-                emit("approval.decision.accepted", rec, "ok");
+                // Record APPROVED first, atomically and only from PENDING. This means ONLY
+                // that a valid human decision was recorded — NOT that the Gate allowed, NOT
+                // that execution occurred (DP §16). authority_result is populated by the
+                // separate re-evaluation.
+                const approved = await backing.mutate(approvalId, (draft) => {
+                    if (draft.state !== STATE.PENDING) return { rec: draft, won: false };
+                    draft.state = STATE.APPROVED;
+                    draft.decision_at = now;
+                    draft.decided_by = actor;
+                    draft.revision += 1;
+                    if (idempotencyKey) draft.last_idempotency_key = idempotencyKey;
+                    return { rec: draft, won: true };
+                });
+                if (!approved.won) throw new ApprovalError(REASON.ALREADY_RESOLVED, approved.rec.state);
+                emit("approval.decision.accepted", approved.rec, "ok");
 
                 // BRIDGE: hand the evidence to the Manager continuation, which re-enters
                 // the canonical Gate. Only a FRESH ALLOW there reaches execution; DP
@@ -323,14 +360,16 @@ function createApprovalDomain({
                         detail: String((e && (e.reasonCode || e.message)) || "continuation failed").slice(0, 256)
                     });
                 }
-                rec.authority_result = bridge.authority_result;
-                rec.verification_result = bridge.verification_result;
-                rec.bridge = bridge;
+                const final = await backing.mutate(approvalId, (draft) => {
+                    draft.authority_result = bridge.authority_result;
+                    draft.verification_result = bridge.verification_result;
+                    draft.bridge = bridge;
+                    return draft;
+                });
                 liveBindings.delete(approvalId); // evidence consumed; no second re-evaluation (AR7)
-                await backing.put(rec);
                 emit(bridgeFailed ? "approval.bridge.failed" : "approval.authority.reevaluated",
-                    rec, bridge.authority_result === "ALLOW" ? "ok" : "denied");
-                return { approval: surfaceRecord(rec), bridge, idempotent: false };
+                    final, bridge.authority_result === "ALLOW" ? "ok" : "denied");
+                return { approval: surfaceRecord(final), bridge, idempotent: false };
             }
 
             // Unknown decisions fail closed (DP §21).
@@ -340,10 +379,8 @@ function createApprovalDomain({
 
     function sourceTerminator(target) {
         return (approvalId, reason = null) => withLock(recKey(approvalId), async () => {
-            const rec = await backing.get(approvalId);
-            if (!rec) throw new ApprovalError(REASON.UNKNOWN_APPROVAL, approvalId);
-            if (TERMINAL.has(rec.state)) return surfaceRecord(rec);
-            return terminalize(rec, target, { stale_reason: reason });
+            const t = await terminalize(approvalId, target, { stale_reason: reason });
+            return surfaceRecord(t.rec);
         });
     }
 
@@ -355,10 +392,18 @@ function createApprovalDomain({
             const rec = await backing.get(approvalId);
             if (!rec) throw new ApprovalError(REASON.UNKNOWN_APPROVAL, approvalId);
             if (TERMINAL.has(rec.state)) return surfaceRecord(rec);
-            if (clock() >= rec.expires_at) return terminalize(rec, STATE.EXPIRED, { stale_reason: "REQUIREMENT_WINDOW_ELAPSED" });
-            if (!liveBindings.has(approvalId)) return terminalize(rec, STATE.STALE, { stale_reason: "ORPHANED_REQUIREMENT_NO_LIVE_HC_CONTINUATION" });
+            if (clock() >= rec.expires_at) return surfaceRecord((await terminalize(approvalId, STATE.EXPIRED, { stale_reason: "REQUIREMENT_WINDOW_ELAPSED" })).rec);
+            if (!liveBindings.has(approvalId)) return surfaceRecord((await terminalize(approvalId, STATE.STALE, { stale_reason: "ORPHANED_REQUIREMENT_NO_LIVE_HC_CONTINUATION" })).rec);
             return surfaceRecord(rec);
         });
+    }
+
+    // Bounded newest-first page: { items, nextCursor }. Pass nextCursor back, unchanged,
+    // with the same filter, to continue. Cursor is position only, never authority (R2-3).
+    async function page({ state = null, limit = DEFAULT_LIST_LIMIT, cursor = null } = {}) {
+        const cap = Number.isFinite(limit) ? Math.min(Math.max(1, Math.trunc(limit)), MAX_LIST_LIMIT) : DEFAULT_LIST_LIMIT;
+        const r = await backing.page({ limit: cap, cursor, predicate: (x) => !state || x.state === state });
+        return { items: r.items.map(surfaceRecord), nextCursor: r.nextCursor };
     }
 
     return Object.freeze({
@@ -370,20 +415,15 @@ function createApprovalDomain({
         markStale: (id, reason = "HC_BINDING_INVALIDATED") => sourceTerminator(STATE.STALE)(id, reason),
         reconcile,
         async get(approvalId) { const r = await backing.get(approvalId); return r ? surfaceRecord(r) : null; },
-        // Bounded, newest-first discovery. Default and maximum page sizes are finite.
-        async list({ state = null, limit = DEFAULT_LIST_LIMIT } = {}) {
-            const cap = Math.min(Math.max(1, Math.trunc(limit)), MAX_LIST_LIMIT);
-            const recs = await backing.list({ limit: cap, predicate: (r) => !state || r.state === state });
-            return recs.map(surfaceRecord);
-        },
+        page,
+        // Backward-compatible first page. Use page() to traverse beyond the first page.
+        async list(opts = {}) { return (await page(opts)).items; },
         // Retention (DP-R6): removes TERMINAL approvals whose requirement window
         // elapsed more than retentionMs ago. PENDING approvals never move. A removed
         // approval id is unknown afterwards, so its decision cannot be re-applied.
         async compact() {
             const horizon = clock() - retentionMs;
-            return withLock("approval:index-retention", () => backing.compact({
-                removable: (r) => TERMINAL.has(r.state) && r.expires_at < horizon
-            }));
+            return withLock("approval:index-retention", () => backing.compact((r) => TERMINAL.has(r.state) && r.expires_at < horizon));
         }
     });
 }

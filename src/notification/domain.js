@@ -1,6 +1,6 @@
 "use strict";
 
-// Canonical Surface Notification Domain owner (DP-L4..L5, repaired DP-R1..R6).
+// Canonical Surface Notification Domain owner (DP-L4..L5, repaired DP-R1..R6, R2).
 //
 // DOMAIN LAW: NOTIFICATION != AUTHORITY, SALIENCE != AUTHORITY, SOURCE DOMAIN
 // != NOTIFICATION (DP §39, §40, §44). This domain owns notification identity,
@@ -10,22 +10,24 @@
 // approval, or mutates a source domain. Dismissing a notification mutates the
 // notification ONLY (DP §47).
 //
-// REPAIR CONTRACT (DP-R2/R3/R4/R6):
-//  - One mutation boundary for every notification write (emit, transition,
-//    compaction), shared across domain instances. Terminal states are final for
-//    the SAME source occurrence.
+// REPAIR CONTRACT (DP-R2/R3/R4/R6, R2):
+//  - Every write (emit, coalesce, transition, compaction) is one acc.transact
+//    read-modify-write, so it is atomic across OS processes sharing the store. Terminal
+//    states are final for the SAME source occurrence, in every process.
 //  - Dedup identity is the source OCCURRENCE: entity + event + sourceOccurrenceId.
 //    An exact replay of a known occurrence maps back to it; a new occurrence
 //    creates a new notification. Entity+event alone is never a dedup key.
 //  - Sensitivity is monotonic per notification: NORMAL < SENSITIVE < SECRET.
 //  - Occurrences older than the retention horizon are never re-created, so
 //    compaction cannot permit stale replay resurrection.
+//  - Surface reads are deep copies; list() is cursor-paged, so no record is unreachable.
 
 const crypto = require("node:crypto");
 const { makeNotificationStore } = require("./store");
 const { classify, LEVEL, rank } = require("./policy");
 const { entityRef } = require("../ui-platform/entityRefs");
 const { withSharedLock } = require("../canonical/kvIndex");
+const { maxSensitivity, surfaceText, detach, SENSITIVITY } = require("../canonical/projection");
 
 const STATE = Object.freeze({
     ACTIVE: "ACTIVE",
@@ -46,8 +48,6 @@ const TRANSITIONS = Object.freeze({
     DISMISSED: Object.freeze([]), RESOLVED: Object.freeze([]), EXPIRED: Object.freeze([])
 });
 
-const SENSITIVITY = Object.freeze(["NORMAL", "SENSITIVE", "SECRET"]);
-const SENSITIVITY_RANK = Object.freeze({ NORMAL: 0, SENSITIVE: 1, SECRET: 2 });
 const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_LIST_LIMIT = 100;
 const MAX_LIST_LIMIT = 500;
@@ -57,8 +57,6 @@ const MUTATE_LOCK = "notification:mutate";
 class NotificationError extends Error {
     constructor(code, detail) { super(detail ? `${code}: ${detail}` : code); this.name = "NotificationError"; this.code = code; }
 }
-
-function maxSensitivity(a, b) { return SENSITIVITY_RANK[b] > SENSITIVITY_RANK[a] ? b : a; }
 
 function createNotificationDomain({ store, acc, clock = () => Date.now(), audit = null,
     ttlMs = null, retentionMs = DEFAULT_RETENTION_MS,
@@ -80,14 +78,12 @@ function createNotificationDomain({ store, acc, clock = () => Date.now(), audit 
     }
 
     // Surface-safe projection (DP §55). privacy_sensitivity drives redaction; a
-    // SENSITIVE/SECRET notification exposes its summary only as redacted unless
-    // the surface is permitted — the raw detail is never placed in the summary
-    // field and no raw secret value is ever stored.
+    // SENSITIVE/SECRET summary is never exposed unless the surface reveals it. Every
+    // nested value is a copy, so the caller cannot reach canonical state (R2-2).
     function surfaceRecord(rec, { reveal = false } = {}) {
-        const redacted = rec.privacy_sensitivity !== "NORMAL" && !reveal;
         return Object.freeze({
             notification_id: rec.notification_id,
-            source_ref: rec.source_ref,
+            source_ref: detach(rec.source_ref),
             source_event: rec.source_event,
             source_occurrence_id: rec.source_occurrence_id,
             state: rec.state,
@@ -96,8 +92,8 @@ function createNotificationDomain({ store, acc, clock = () => Date.now(), audit 
             urgency: rec.level,
             severity: rec.severity,
             privacy_sensitivity: rec.privacy_sensitivity,
-            summary: redacted ? "[REDACTED]" : (rec.summary ?? null),
-            target_surfaces: rec.target_surfaces ?? [],
+            summary: surfaceText(rec.summary, rec.privacy_sensitivity, { reveal }),
+            target_surfaces: detach(rec.target_surfaces ?? []),
             coalesce_count: rec.coalesce_count,
             revision: rec.revision,
             created_at: rec.created_at,
@@ -126,77 +122,95 @@ function createNotificationDomain({ store, acc, clock = () => Date.now(), audit 
         const dedupKey = `${ref.entity_type}:${ref.entity_id}:${event ?? ""}:${sourceOccurrenceId}`;
         return withSharedLock(MUTATE_LOCK, async () => {
             const now = clock();
-            const existing = await backing.byDedup(dedupKey);
-            if (existing) {
+            let existing = await backing.byDedup(dedupKey);
+            if (!existing) {
+                // Unknown occurrence older than the retention horizon: it may have been
+                // compacted, so it is a stale replay, never a new notification.
+                if (occurredAt < now - retentionMs) return null;
+                const rec = {
+                    notification_id: idFactory(),
+                    dedup_key: dedupKey,
+                    source_ref: { entity_type: ref.entity_type, entity_id: ref.entity_id },
+                    source_event: event,
+                    source_occurrence_id: sourceOccurrenceId,
+                    occurred_at: occurredAt,
+                    severity,
+                    level,
+                    privacy_sensitivity: privacySensitivity,
+                    summary,
+                    target_surfaces: Array.isArray(targetSurfaces) ? targetSurfaces.slice() : [],
+                    state: STATE.ACTIVE,
+                    revision: 1,
+                    coalesce_count: 1,
+                    created_at: now,
+                    last_event_at: now,
+                    read_at: null, acknowledged_at: null, resolved_at: null, dismissed_at: null,
+                    expires_at: ttlMs ? now + ttlMs : null
+                };
+                const created = await backing.createIfAbsent(rec);
+                if (created.created) {
+                    emit("notification.created", rec, "ok");
+                    return surfaceRecord(rec);
+                }
+                // Another process recorded this occurrence first: coalesce into it.
+                existing = await backing.get(created.id);
+            }
+            const out = await backing.mutate(existing.notification_id, (draft) => {
                 // Terminal occurrence: an exact replay never revives it (DP §54, F2/F4).
-                if (TERMINAL.has(existing.state)) return surfaceRecord(existing);
-                existing.coalesce_count += 1;
-                existing.last_event_at = now;
+                if (TERMINAL.has(draft.state)) return { rec: draft, event: null };
+                draft.coalesce_count += 1;
+                draft.last_event_at = now;
                 // Sensitivity only ratchets up for this notification (F1).
-                const sensitivity = maxSensitivity(existing.privacy_sensitivity, privacySensitivity);
-                const sensitivityUp = sensitivity !== existing.privacy_sensitivity;
-                existing.privacy_sensitivity = sensitivity;
-                const escalated = rank(level) !== rank(existing.level) || severity !== existing.severity;
+                const sensitivity = maxSensitivity(draft.privacy_sensitivity, privacySensitivity);
+                const sensitivityUp = sensitivity !== draft.privacy_sensitivity;
+                draft.privacy_sensitivity = sensitivity;
+                const escalated = rank(level) !== rank(draft.level) || severity !== draft.severity;
                 if (escalated) {
-                    existing.level = level;
-                    existing.severity = severity;
+                    draft.level = level;
+                    draft.severity = severity;
                 }
                 if (escalated || sensitivityUp) {
-                    existing.revision += 1;
-                    if (summary !== null) existing.summary = summary;
+                    draft.revision += 1;
+                    if (summary !== null) draft.summary = summary;
                 }
-                await backing.put(existing);
-                emit(escalated ? "notification.escalated" : "notification.coalesced", existing, "ok");
-                return surfaceRecord(existing);
-            }
-            // Unknown occurrence older than the retention horizon: it may have been
-            // compacted, so it is a stale replay, never a new notification.
-            if (occurredAt < now - retentionMs) return null;
-            const rec = {
-                notification_id: idFactory(),
-                dedup_key: dedupKey,
-                source_ref: { entity_type: ref.entity_type, entity_id: ref.entity_id },
-                source_event: event,
-                source_occurrence_id: sourceOccurrenceId,
-                occurred_at: occurredAt,
-                severity,
-                level,
-                privacy_sensitivity: privacySensitivity,
-                summary,
-                target_surfaces: Array.isArray(targetSurfaces) ? targetSurfaces.slice() : [],
-                state: STATE.ACTIVE,
-                revision: 1,
-                coalesce_count: 1,
-                created_at: now,
-                last_event_at: now,
-                read_at: null, acknowledged_at: null, resolved_at: null, dismissed_at: null,
-                expires_at: ttlMs ? now + ttlMs : null
-            };
-            await backing.create(rec);
-            emit("notification.created", rec, "ok");
-            return surfaceRecord(rec);
+                return { rec: draft, event: escalated ? "notification.escalated" : "notification.coalesced" };
+            });
+            if (!out) return null; // compacted between read and write: stale replay
+            if (out.event) emit(out.event, out.rec, "ok");
+            return surfaceRecord(out.rec);
         });
     }
 
     function transition(target, stamp) {
         return (notificationId) => withSharedLock(MUTATE_LOCK, async () => {
-            const rec = await backing.get(notificationId);
-            if (!rec) throw new NotificationError("UNKNOWN_NOTIFICATION", notificationId);
-            if (TERMINAL.has(rec.state)) return surfaceRecord(rec); // terminal is idempotent
-            if (!TRANSITIONS[rec.state].includes(target)) {
-                // Non-advancing transition (e.g. READ after ACKNOWLEDGED) is a no-op read.
-                return surfaceRecord(rec);
-            }
-            rec.state = target;
-            rec.revision += 1;
-            if (stamp) rec[stamp] = clock();
-            // Dismissal/ack/read/resolve mutate ONLY the notification. This domain
-            // holds no source-domain mutator, so it structurally cannot deny an
-            // approval, close a mission or touch a DCD incident (DP §47).
-            await backing.put(rec);
-            emit(`notification.${target.toLowerCase()}`, rec, "ok");
-            return surfaceRecord(rec);
+            const out = await backing.mutate(notificationId, (draft) => {
+                // Terminal is idempotent; a non-advancing transition (e.g. READ after
+                // ACKNOWLEDGED) is a no-op read.
+                if (TERMINAL.has(draft.state) || !TRANSITIONS[draft.state].includes(target)) return { rec: draft, changed: false };
+                draft.state = target;
+                draft.revision += 1;
+                if (stamp) draft[stamp] = clock();
+                // Dismissal/ack/read/resolve mutate ONLY the notification. This domain
+                // holds no source-domain mutator, so it structurally cannot deny an
+                // approval, close a mission or touch a DCD incident (DP §47).
+                return { rec: draft, changed: true };
+            });
+            if (!out) throw new NotificationError("UNKNOWN_NOTIFICATION", notificationId);
+            if (out.changed) emit(`notification.${target.toLowerCase()}`, out.rec, "ok");
+            return surfaceRecord(out.rec);
         });
+    }
+
+    function pageLimit(limit) {
+        return Number.isFinite(limit) ? Math.min(Math.max(1, Math.trunc(limit)), MAX_LIST_LIMIT) : DEFAULT_LIST_LIMIT;
+    }
+
+    async function page({ state = null, sourceType = null, limit = DEFAULT_LIST_LIMIT, cursor = null } = {}) {
+        const r = await backing.page({
+            limit: pageLimit(limit), cursor,
+            predicate: (x) => (!state || x.state === state) && (!sourceType || x.source_ref.entity_type === sourceType)
+        });
+        return { items: r.items.map((x) => surfaceRecord(x)), nextCursor: r.nextCursor };
     }
 
     return Object.freeze({
@@ -208,22 +222,16 @@ function createNotificationDomain({ store, acc, clock = () => Date.now(), audit 
         resolve: transition(STATE.RESOLVED, "resolved_at"),
         async expire(notificationId) { return transition(STATE.EXPIRED, "expires_at")(notificationId); },
         async get(notificationId, opts = {}) { const r = await backing.get(notificationId); return r ? surfaceRecord(r, opts) : null; },
-        // Bounded, newest-first discovery. Default and maximum page sizes are finite.
-        async list({ state = null, sourceType = null, limit = DEFAULT_LIST_LIMIT } = {}) {
-            const cap = Math.min(Math.max(1, Math.trunc(limit)), MAX_LIST_LIMIT);
-            const recs = await backing.list({
-                limit: cap,
-                predicate: (r) => (!state || r.state === state) && (!sourceType || r.source_ref.entity_type === sourceType)
-            });
-            return recs.map((r) => surfaceRecord(r));
-        },
+        // Bounded newest-first page: { items, nextCursor }. Pass nextCursor back, unchanged,
+        // with the same filters, to continue. Cursor is position only, never authority.
+        page,
+        // Backward-compatible first page. Use page() to traverse beyond the first page.
+        async list(opts = {}) { return (await page(opts)).items; },
         // Retention: removes terminal notifications last touched before the
         // horizon, with their index entry and dedup key. ACTIVE records never move.
         async compact() {
             const horizon = clock() - retentionMs;
-            return withSharedLock(MUTATE_LOCK, () => backing.compact({
-                removable: (r) => TERMINAL.has(r.state) && r.last_event_at < horizon
-            }));
+            return withSharedLock(MUTATE_LOCK, () => backing.compact((r) => TERMINAL.has(r.state) && r.last_event_at < horizon));
         }
     });
 }

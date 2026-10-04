@@ -2,51 +2,72 @@
 
 // Canonical Notification Domain persistence over the repository-native ACC KV
 // store (same substrate/prefix convention as src/cognition/mission/store.js).
-// Records, the occurrence dedup key and the discovery index are separate keys.
-// Discovery goes through a paged index (src/canonical/kvIndex.js), never one
-// growing array. Dedup entries are removed together with their record when a
-// terminal notification is compacted (DP §54, bounded retention).
+// Records, the occurrence dedup key and the discovery index are separate keys
+// written in ONE acc.transact (see src/canonical/kvIndex.js), so a committed
+// notification is always discoverable and a failed create leaves nothing behind.
+// Dedup entries are removed together with their record when a terminal
+// notification is compacted (DP §54, bounded retention).
 
 const { createPagedIndex } = require("../canonical/kvIndex");
+const { detach } = require("../canonical/projection");
 
 const P = "notification:";
 
 function makeNotificationStore(acc) {
-    if (!acc || typeof acc.getKv !== "function" || typeof acc.putKv !== "function") {
-        throw new TypeError("notification store requires an ACC KV store (getKv/putKv)");
+    if (!acc || typeof acc.getKv !== "function" || typeof acc.putKv !== "function" || typeof acc.transact !== "function") {
+        throw new TypeError("notification store requires an ACC KV store with the transact primitive");
     }
-    const index = createPagedIndex(acc, P);
+    const index = createPagedIndex(P);
+    const recKey = (notificationId) => `${P}rec:${notificationId}`;
+    const dedupKey = (key) => `${P}dedup:${key}`;
+    const readIn = async (tx, notificationId) => detach(await tx.getKv(recKey(notificationId)));
+
     const store = {
         async get(notificationId) {
-            return acc.getKv(`${P}rec:${notificationId}`);
+            return detach(await acc.getKv(recKey(notificationId)));
         },
-        async put(rec) {
-            await acc.putKv(`${P}rec:${rec.notification_id}`, rec);
-            return rec;
-        },
-        // New occurrence: index entry first, then record and dedup key. See kvIndex.
-        async create(rec) {
-            await index.append(rec.notification_id);
-            await store.put(rec);
-            await acc.putKv(`${P}dedup:${rec.dedup_key}`, rec.notification_id);
-            return rec;
-        },
-        async byDedup(dedupKey) {
-            const id = await acc.getKv(`${P}dedup:${dedupKey}`);
+        async byDedup(key) {
+            const id = await acc.getKv(dedupKey(key));
             return id ? store.get(id) : null;
         },
-        async list({ limit, predicate }) {
-            return index.walk({ readRecord: (id) => store.get(id), predicate, limit });
+        // Atomic create-or-find on the occurrence key. created=false means another
+        // process (or instance) already recorded this occurrence; its id is returned so
+        // the caller coalesces instead of creating a duplicate.
+        createIfAbsent(rec) {
+            return acc.transact(async (tx) => {
+                const existingId = await tx.getKv(dedupKey(rec.dedup_key));
+                if (existingId) return { created: false, id: existingId };
+                await index.appendIn(tx, rec.notification_id);
+                await tx.putKv(recKey(rec.notification_id), detach(rec));
+                await tx.putKv(dedupKey(rec.dedup_key), rec.notification_id);
+                return { created: true, id: rec.notification_id };
+            });
         },
-        async compact({ removable }) {
-            return index.compact({
-                readRecord: (id) => store.get(id),
+        // Atomic read-modify-write of one record across processes. fn(draft) mutates a
+        // detached draft (or throws to abort); persisted in the same transaction.
+        // Resolves to fn's return value, or null when the record is absent.
+        mutate(notificationId, fn) {
+            return acc.transact(async (tx) => {
+                const draft = await readIn(tx, notificationId);
+                if (!draft) return null;
+                const out = await fn(draft);
+                await tx.putKv(recKey(notificationId), detach(draft));
+                return out;
+            });
+        },
+        // Bounded newest-first page. cursor is opaque (see kvIndex.walk).
+        page({ limit, cursor, predicate }) {
+            return index.walk(acc, { readRecord: (id) => store.get(id), predicate, limit, cursor });
+        },
+        compact(removable) {
+            return acc.transact((tx) => index.compactIn(tx, {
+                readRecord: (id) => readIn(tx, id),
                 removable,
                 onRemove: async (rec) => {
-                    await acc.putKv(`${P}rec:${rec.notification_id}`, null);
-                    await acc.putKv(`${P}dedup:${rec.dedup_key}`, null);
+                    await tx.putKv(recKey(rec.notification_id), null);
+                    await tx.putKv(dedupKey(rec.dedup_key), null);
                 }
-            });
+            }));
         }
     };
     return store;
