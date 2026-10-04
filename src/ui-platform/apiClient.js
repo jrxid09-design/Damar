@@ -5,7 +5,7 @@ class ApiError extends Error {
 }
 
 class ApiClient {
-  constructor({ baseUrl = 'http://127.0.0.1:3000', fetchImpl = globalThis.fetch, timeoutMs = 10000, session = null, correlationId = () => `ui-${Date.now()}-${Math.random().toString(16).slice(2)}` } = {}) {
+  constructor({ baseUrl = 'http://127.0.0.1:3000', fetchImpl = globalThis.fetch?.bind(globalThis), timeoutMs = 10000, session = null, correlationId = () => `ui-${Date.now()}-${Math.random().toString(16).slice(2)}` } = {}) {
     this.baseUrl = String(baseUrl).replace(/\/$/, ''); this.fetchImpl = fetchImpl; this.timeoutMs = timeoutMs; this.session = session; this.correlationId = correlationId;
   }
   async request(path, { method = 'GET', body, headers = {}, signal } = {}) {

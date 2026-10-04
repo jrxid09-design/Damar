@@ -3,6 +3,7 @@ const { Router, routeFor } = require('../routing');
 const { tokenStyle } = require('../tokens');
 const { bindVisualState } = require('../stateBinding');
 const { mountShell } = require('../shells');
+const { ApiClient } = require('../apiClient');
 
 // Own only browser event attachment. Matching, registry, history and current state
 // belong to the shared Router. Public navigation after unmount is a safe no-op.
@@ -50,4 +51,4 @@ function boot(document = globalThis.document, window = globalThis.window, option
   runtime.unmount = () => { if (!runtime.mounted) return; runtime.mounted = false; runtime.router.unmount(); removeShell(); };
   runtime.mount(); return runtime;
 }
-module.exports = { boot, route: routeFor, semanticTokens: tokenStyle };
+module.exports = { boot, route: routeFor, semanticTokens: tokenStyle, ApiClient };
