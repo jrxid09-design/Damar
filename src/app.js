@@ -47,6 +47,7 @@ app.use("/api/v1/console",
 app.use("/api/v1/console",
     tokenGuard({ roleWhenAuthenticated: "superadmin", surface: "console" }));
 
+require("./presence-ui/serve").attachPresence(app);
 app.use("/", routes);
 
 // Endpoint MCP (Model Context Protocol) — ekspos tool Damar ke klien
