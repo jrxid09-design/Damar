@@ -18,7 +18,7 @@
 const crypto = require("node:crypto");
 const { makeApprovalStore } = require("./store");
 const { withSharedLock } = require("../canonical/kvIndex");
-const { detach, surfaceText } = require("../canonical/projection");
+const { detach, surfaceText, sensitivityOf, maxSensitivity, SENSITIVITY } = require("../canonical/projection");
 
 const STATE = Object.freeze({
     PENDING: "PENDING",
@@ -70,6 +70,21 @@ const DEFAULT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_LIST_LIMIT = 100;
 const MAX_LIST_LIMIT = 500;
 
+// PURPOSE PRIVACY OWNERSHIP (R2C2). CALLER PRIVACY LABEL != CANONICAL PRIVACY TRUTH.
+// effective = max(canonical source classification, caller hint). The canonical source
+// is the trusted purposeClassifier injected at composition time, never a per-request
+// value. No classifier, a throwing classifier, or an unknown canonical value => SECRET.
+// The caller hint can only ratchet UP: missing, malformed or unknown hints => SECRET,
+// and a NORMAL hint can never lower the canonical result.
+function resolvePurposeSensitivity(requirement, callerHint, purposeClassifier = null) {
+    let canonical = "SECRET";
+    if (typeof purposeClassifier === "function") {
+        try { canonical = sensitivityOf(purposeClassifier(requirement)); } catch { canonical = "SECRET"; }
+    }
+    const hint = typeof callerHint === "string" && SENSITIVITY.includes(callerHint) ? callerHint : "SECRET";
+    return maxSensitivity(canonical, hint);
+}
+
 function createApprovalDomain({
     store,
     acc,
@@ -78,7 +93,8 @@ function createApprovalDomain({
     clock = () => Date.now(),
     audit = null,
     retentionMs = DEFAULT_RETENTION_MS,
-    idFactory = () => `apr-${crypto.randomUUID()}`
+    idFactory = () => `apr-${crypto.randomUUID()}`,
+    purposeClassifier = null
 } = {}) {
     const backing = store || (acc ? makeApprovalStore(acc) : null);
     if (!backing) throw new TypeError("approval domain requires { store } or { acc }");
@@ -198,8 +214,10 @@ function createApprovalDomain({
     // one. Identity is stable: a second call for the same requirement returns
     // the same approval (DP §13, A2, A22), including across processes.
     //
-    // purposeSensitivity is the SOURCE's classification of `purpose` (NORMAL,
-    // SENSITIVE, SECRET). Omitted = unknown = redacted on every surface read.
+    // purposeSensitivity is a caller STRICTNESS HINT only (NORMAL, SENSITIVE, SECRET).
+    // It is NOT canonical privacy truth: the stored classification is
+    // resolvePurposeSensitivity(requirement, hint, purposeClassifier), which a hint can
+    // only raise. Omitted/unknown hint => SECRET => purpose redacted on every surface read.
     async function createFromSuspension(managerResult, { sourceRef = null, risk = null, effect = null, purposeSensitivity = null } = {}) {
         if (!managerResult || managerResult.lifecycleState !== "SUSPENDED" ||
             managerResult.outcome !== "OWNER_CONFIRMATION_REQUIRED") {
@@ -235,7 +253,7 @@ function createApprovalDomain({
             session_id: requirement.sessionId,
             scope: requirement.scope ?? null,
             purpose: requirement.purpose ?? null,
-            purpose_sensitivity: purposeSensitivity,
+            purpose_sensitivity: resolvePurposeSensitivity(requirement, purposeSensitivity, purposeClassifier),
             state: STATE.PENDING,
             revision: 1,
             created_at: now,
@@ -438,4 +456,4 @@ function createApprovalDomain({
     });
 }
 
-module.exports = { createApprovalDomain, STATE, TERMINAL, TRANSITIONS, REASON, ApprovalError };
+module.exports = { createApprovalDomain, resolvePurposeSensitivity, STATE, TERMINAL, TRANSITIONS, REASON, ApprovalError };
