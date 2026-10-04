@@ -139,14 +139,26 @@ function createApprovalDomain({
         });
     }
 
+    // A1/P2-2: DENY is recorded only when the Gate actually returned a decision.
+    // A Manager result with no Gate decision (Gate fault, cancellation before
+    // evaluation) is NOT_EVALUATED / BRIDGE_FAILED, never a fabricated DENY.
     function bridgeResult(mr) {
-        const allowed = Boolean(mr && mr.authorityEvidence && mr.authorityEvidence.decision === "ALLOW");
+        const gateDecision = mr && mr.authorityEvidence ? mr.authorityEvidence.decision : null;
+        if (typeof gateDecision !== "string" || gateDecision === "") {
+            return Object.freeze({
+                authority_result: "NOT_EVALUATED",
+                verification_result: "BRIDGE_FAILED",
+                execution_id: null,
+                manager_outcome: "BRIDGE_FAILED",
+                detail: `no Gate decision (manager outcome ${mr && mr.outcome ? mr.outcome : "UNKNOWN"})`.slice(0, 256)
+            });
+        }
         return Object.freeze({
-            authority_result: allowed ? "ALLOW" : "DENY",
-            verification_result: mr ? (mr.outcome ?? "UNKNOWN") : "UNKNOWN",
-            execution_id: mr ? (mr.executionId ?? null) : null,
-            manager_outcome: mr ? (mr.outcome ?? null) : null,
-            detail: mr ? (mr.detail ?? null) : null
+            authority_result: gateDecision === "ALLOW" ? "ALLOW" : "DENY",
+            verification_result: mr.outcome ?? "UNKNOWN",
+            execution_id: mr.executionId ?? null,
+            manager_outcome: mr.outcome ?? null,
+            detail: mr.detail ?? null
         });
     }
 
@@ -341,7 +353,6 @@ function createApprovalDomain({
                 // (DP §16). Fail closed: no ALLOW, no execution, no automatic retry
                 // (evidence and continuation are single-use).
                 let bridge;
-                let bridgeFailed = false;
                 try {
                     const mr = await manager.resumeConfirmation({
                         continuationId: binding.continuationId,
@@ -350,7 +361,6 @@ function createApprovalDomain({
                     });
                     bridge = bridgeResult(mr);
                 } catch (e) {
-                    bridgeFailed = true;
                     bridge = Object.freeze({
                         authority_result: "NOT_EVALUATED",
                         verification_result: "BRIDGE_FAILED",
@@ -367,7 +377,7 @@ function createApprovalDomain({
                     return draft;
                 });
                 liveBindings.delete(approvalId); // evidence consumed; no second re-evaluation (AR7)
-                emit(bridgeFailed ? "approval.bridge.failed" : "approval.authority.reevaluated",
+                emit(bridge.authority_result === "NOT_EVALUATED" ? "approval.bridge.failed" : "approval.authority.reevaluated",
                     final, bridge.authority_result === "ALLOW" ? "ok" : "denied");
                 return { approval: surfaceRecord(final), bridge, idempotent: false };
             }
