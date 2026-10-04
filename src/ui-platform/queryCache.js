@@ -18,15 +18,35 @@ class QueryCache {
   invalidate(query) { if (query === undefined) this.records.clear(); else this.records.delete(this.key(query)); }
   async fetch(query, loader, { force = false, signal } = {}) {
     const key = this.key(query); const cached = this.get(query); if (!force && cached && !cached.stale) return { ...cached, cacheHit: true };
-    if (this.inflight.has(key)) return this.inflight.get(key);
-    const controller = new AbortController(); const forwardAbort = () => controller.abort();
-    if (signal?.aborted) forwardAbort(); else signal?.addEventListener('abort', forwardAbort, { once: true });
+    if (signal?.aborted) throw Object.assign(new Error('query cancelled'), { name: 'AbortError' });
+    if (this.inflight.has(key)) return this.consume(key, this.inflight.get(key), signal);
+    const controller = new AbortController();
+    const eligible = () => !controller.signal.aborted && this.inflight.get(key) === work;
     const work = Promise.resolve().then(() => { if (controller.signal.aborted) throw Object.assign(new Error('query cancelled'), { name: 'AbortError' }); return loader({ signal: controller.signal }); }).then((data) => {
-      if (controller.signal.aborted) throw Object.assign(new Error('query cancelled'), { name: 'AbortError' });
+      if (!eligible()) throw Object.assign(new Error('query cancelled'), { name: 'AbortError' });
       const record = { key, data, updatedAt: this.now(), stale: false }; this.store(key, record); return { ...record, cacheHit: false };
-    }).catch((error) => { if (error.name !== 'AbortError') this.store(key, { key, data: null, updatedAt: this.now(), stale: true, error }); throw error; }).finally(() => { signal?.removeEventListener('abort', forwardAbort); this.inflight.delete(key); });
-    work.controller = controller; work.cleanup = () => signal?.removeEventListener('abort', forwardAbort); this.inflight.set(key, work); return work;
+    }).catch((error) => { if (eligible() && error.name !== 'AbortError') this.store(key, { key, data: null, updatedAt: this.now(), stale: true, error }); throw error; }).finally(() => { if (this.inflight.get(key) === work) this.inflight.delete(key); });
+    work.controller = controller; work.consumers = new Set(); this.inflight.set(key, work); return this.consume(key, work, signal);
   }
-  cancel(query) { const work = this.inflight.get(this.key(query)); if (work?.controller) { work.controller.abort(); work.cleanup(); } return Boolean(work); }
+  consume(key, work, signal) {
+    // Caller cancellation releases only this consumer. The final consumer ends
+    // shared commit authority; cancel(query) explicitly ends all consumers.
+    return new Promise((resolve, reject) => {
+      let active = true;
+      const cleanup = () => { active = false; signal?.removeEventListener('abort', cancel); work.consumers.delete(cancel); };
+      const cancel = () => {
+        if (!active) return;
+        cleanup(); reject(Object.assign(new Error('query cancelled'), { name: 'AbortError' }));
+        if (!work.consumers.size) { work.controller.abort(); if (this.inflight.get(key) === work) this.inflight.delete(key); }
+      };
+      work.consumers.add(cancel); signal?.addEventListener('abort', cancel, { once: true });
+      work.then(value => { if (active) { cleanup(); resolve(value); } }, error => { if (active) { cleanup(); reject(error); } });
+    });
+  }
+  cancel(query) {
+    const key = this.key(query), work = this.inflight.get(key);
+    if (work) { work.controller.abort(); this.inflight.delete(key); for (const cancel of [...work.consumers]) cancel(); }
+    return Boolean(work);
+  }
 }
 module.exports = { QueryCache };
