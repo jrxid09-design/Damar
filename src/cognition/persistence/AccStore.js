@@ -21,6 +21,7 @@ function createMemoryAccStore() {
     const journal = [];            // baris naik sesuai seq
     const byEventId = new Map();
     const kv = new Map();
+    let memoryTxTail = Promise.resolve();
     const snapshots = [];
     const predictions = new Map();
     const experiences = new Map();
@@ -56,6 +57,24 @@ function createMemoryAccStore() {
 
         async putKv(key, value) { kv.set(key, value); },
         async getKv(key) { return kv.has(key) ? kv.get(key) : null; },
+
+        // R2 atomic primitive (contract: see transact in createSqliteAccStore).
+        // Writes are staged and applied only when work() resolves; a throw discards them.
+        transact(work) {
+            const run = async () => {
+                const staged = new Map();
+                const tx = {
+                    async getKv(key) { return staged.has(key) ? staged.get(key) : (kv.has(key) ? kv.get(key) : null); },
+                    async putKv(key, value) { staged.set(key, value); }
+                };
+                const out = await work(tx);
+                for (const [key, value] of staged) kv.set(key, value);
+                return out;
+            };
+            const next = memoryTxTail.then(run);
+            memoryTxTail = next.then(() => {}, () => {});
+            return next;
+        },
 
         async saveSnapshot(snap) {
             snapshots.push(Object.freeze({ ...snap, id: snapshots.length + 1 }));
@@ -185,6 +204,41 @@ function createSqliteAccStore(database) {
             return row ? JSON.parse(row.value) : null;
         },
 
+        // R2 atomic mutation primitive. work(tx) receives { getKv, putKv } bound to one
+        // BEGIN IMMEDIATE transaction: the write lock is taken up front, so two
+        // PROCESSES sharing this database file serialize here (busy_timeout waits;
+        // BEGIN is retried a bounded number of times). A throw in work() rolls back
+        // every write it made, so callers never leave a record without its index
+        // entry or the reverse. In-process calls on one connection are queued.
+        // ponytail: a plain database.transaction() on the same connection is not
+        // queued with this; DP never calls it.
+        transact(work) {
+            return runQueued(database, async () => {
+                await beginImmediate(database);
+                try {
+                    const out = await work({
+                        async getKv(key) {
+                            const row = await database.get("SELECT value FROM acc_kv WHERE key = ?", [key]);
+                            return row ? JSON.parse(row.value) : null;
+                        },
+                        async putKv(key, value) {
+                            await database.run(
+                                `INSERT INTO acc_kv (key, value) VALUES (?, ?)
+                                 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+                                [key, JSON.stringify(value)]);
+                        }
+                    });
+                    await database.run("COMMIT");
+                    return out;
+                }
+                catch (error) {
+                    try { await database.run("ROLLBACK"); }
+                    catch { /* keep the original error */ }
+                    throw error;
+                }
+            });
+        },
+
         async saveSnapshot(snap) {
             await database.run(
                 "INSERT INTO acc_snapshot (created_at, seq_up_to, state) VALUES (?,?,?)",
@@ -273,6 +327,34 @@ function createSqliteAccStore(database) {
             return rows.map(r => ({ epoch_id: r.epoch_id, payload: JSON.parse(r.payload) }));
         }
     };
+}
+
+// One queue per open connection: transact() calls from this process run one at a time.
+const sqliteTxQueues = new WeakMap();
+const BEGIN_ATTEMPTS = 8;
+
+function runQueued(database, work) {
+    const prev = sqliteTxQueues.get(database) || Promise.resolve();
+    const next = prev.then(work);
+    sqliteTxQueues.set(database, next.then(() => {}, () => {}));
+    return next;
+}
+
+async function beginImmediate(database) {
+    for (let attempt = 1; ; attempt += 1) {
+        try {
+            await database.run("BEGIN IMMEDIATE");
+            return;
+        }
+        catch (error) {
+            const busy = error?.code === "SQLITE_BUSY" || /SQLITE_BUSY|database is locked/i.test(String(error?.message ?? ""));
+            if (!busy) throw error;
+            if (attempt >= BEGIN_ATTEMPTS) {
+                throw Object.assign(new Error("ACC_TRANSACTION_BUSY: write lock not acquired"), { code: "ACC_TRANSACTION_BUSY" });
+            }
+            await new Promise((resolve) => setTimeout(resolve, 10 * attempt));
+        }
+    }
 }
 
 function parsePayload(row) {
