@@ -235,6 +235,7 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null } = {
     // composition's registry/verifier, never the module-global singleton).
     const authVerifier = makeAuthVerifier(registry, proofVerifier);
     const ownerRatify = makeRatifyAsOwner(registry, proofVerifier);
+    const humanConfirmation = makeHumanConfirmation(registry, proofVerifier, clock);
 
     /**
      * VAULT-MODE SELF-PROOF (canonical HTTP surface only): the daemon proves
@@ -293,7 +294,7 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null } = {
         registry, proofVerifier, firstOwnerBootstrap, authVerifier,
         ratifyAsOwner: ownerRatify, principalBindings, channelBinders,
         continuityLinker, store, vault, auditGate, ledger: effectiveLedger, ingress,
-        auditSink, selfSignOwnerProof,
+        auditSink, selfSignOwnerProof, humanConfirmation,
         testMint,
         /** Release the audit sink's single-writer lock (graceful shutdown). */
         close() {
@@ -303,6 +304,69 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null } = {
     });
     canonicalCompositions.add(comp);
     return comp;
+}
+
+// Authentication evidence lives in the existing sealed trust composition.
+// Nothing here mints a grant or an ALLOW. Restart discards all evidence.
+function makeHumanConfirmation(registry, proofVerifier, clock) {
+    const evidenceRecords = new WeakMap();
+    const decisions = new Map();
+    function live(requirement) {
+        return require("./evaluate").isCanonicalConfirmationRequirement(requirement) &&
+            clock() < requirement.expiresAtMs;
+    }
+    function activeOwner() {
+        const owner = registry.getOwner();
+        return owner && registry.getState() === "ACTIVE" &&
+            registry.principalState(owner.principalId) === "ACTIVE" ? owner : null;
+    }
+    return Object.freeze({
+        issueChallenge(requirement) {
+            if (!live(requirement)) throw new Error("HC_REQUIREMENT_INVALID");
+            const owner = activeOwner();
+            if (!owner) throw new Error("HC_OWNER_UNAVAILABLE");
+            return proofVerifier.issueChallenge({ purpose: "action-human-confirmation",
+                credentialId: owner.credentials[0], context: requirement.requirementId });
+        },
+        confirm({ requirement, proof } = {}) {
+            if (!live(requirement) || !proof || typeof proof !== "object") return null;
+            for (const [id, record] of decisions) {
+                if (clock() >= record.expiresAtMs) decisions.delete(id);
+            }
+            if (decisions.has(requirement.requirementId) || decisions.size >= 512) return null;
+            const owner = activeOwner();
+            if (!owner) return null;
+            const verdict = proofVerifier.verifyProof({ nonce: proof.nonce, signature: proof.signature,
+                expectedPurpose: "action-human-confirmation", expectedContext: requirement.requirementId });
+            if (!verdict.ok || verdict.principalId !== owner.principalId) return null;
+            const record = { requirementId: requirement.requirementId, expiresAtMs: requirement.expiresAtMs,
+                ownerId: owner.principalId, credentialId: verdict.credentialId,
+                generation: registry.getGeneration ? registry.getGeneration() : null, spent: false };
+            const evidence = Object.freeze({ schemaVersion: 1, requirementId: requirement.requirementId,
+                intentId: requirement.intentId, intentRevision: requirement.intentRevision,
+                grantRevision: requirement.grantRevision, policyId: requirement.policyId,
+                policyRevision: requirement.policyRevision, expiresAtMs: requirement.expiresAtMs });
+            evidenceRecords.set(evidence, record);
+            decisions.set(requirement.requirementId, record);
+            return evidence;
+        },
+        check({ requirement, evidence, consume = false, nowMs } = {}) {
+            // Brand first: clones, serialized records and proxies have no record.
+            const record = evidence && typeof evidence === "object" ? evidenceRecords.get(evidence) : null;
+            if (!record || !live(requirement) || record.spent ||
+                record.requirementId !== requirement.requirementId || nowMs >= record.expiresAtMs) return false;
+            const owner = activeOwner();
+            const credential = registry.getCredential(record.credentialId);
+            if (!owner || owner.principalId !== record.ownerId || !credential || credential.revokedAtMs !== null ||
+                (registry.getGeneration && registry.getGeneration() !== record.generation)) return false;
+            if (consume) record.spent = true;
+            return true;
+        }
+    });
+}
+
+function checkCanonicalHumanConfirmation(args) {
+    return canonicalComposition !== null && canonicalComposition.humanConfirmation.check(args);
 }
 
 /** Composition-bound Owner ratification gate. */
@@ -458,6 +522,7 @@ async function composeOwnerTrustForTest({ stateFile = null, ledgerOverride = nul
 module.exports = Object.freeze({
     resolveProductionOwnerTrustStore,
     resolveOwnerAuthVerifier,
+    checkCanonicalHumanConfirmation,
     composeOwnerTrustForTest,
     ensureCanonicalComposed,
     ratifyAsOwner,
