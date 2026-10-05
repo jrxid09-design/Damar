@@ -9,6 +9,7 @@ const { makeApprovalStore } = require("./store");
 
 module.exports = Object.freeze({
     createApprovalDomain: domain.createApprovalDomain,
+    approvalOccurrence: domain.approvalOccurrence,
     makeApprovalStore,
     STATE: domain.STATE,
     TERMINAL: domain.TERMINAL,

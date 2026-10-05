@@ -458,4 +458,19 @@ function createApprovalDomain({
     });
 }
 
-module.exports = { createApprovalDomain, resolvePurposeSensitivity, STATE, TERMINAL, TRANSITIONS, REASON, ApprovalError };
+// R3C source generation: the approval's own `revision` is its canonical monotonic
+// generation (1 at creation, +1 per recorded transition). Each revision is one source
+// occurrence: its id is approval:revision and its sequence is the revision, so the
+// id<->sequence mapping is one-to-one. Notification consumes this; it never derives it.
+function approvalOccurrence(surfaced) {
+    if (!surfaced || typeof surfaced.approval_id !== "string" || !Number.isSafeInteger(surfaced.revision) || surfaced.revision < 1) {
+        throw new ApprovalError(REASON.UNKNOWN_APPROVAL, "approvalOccurrence needs a surfaced approval with a revision");
+    }
+    return Object.freeze({
+        sourceOccurrenceId: `${surfaced.approval_id}:${surfaced.revision}`,
+        sourceOccurrenceSequence: surfaced.revision,
+        occurredAt: surfaced.decision_at ?? surfaced.created_at
+    });
+}
+
+module.exports = { createApprovalDomain, resolvePurposeSensitivity, approvalOccurrence, STATE, TERMINAL, TRANSITIONS, REASON, ApprovalError };
