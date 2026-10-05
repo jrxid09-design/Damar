@@ -508,6 +508,21 @@ function createSqliteAuthorityStore(database) {
     // statement lain dari registry yang berjalan konkuren.
     let txChain = Promise.resolve();
 
+    // Connection lifecycle (F3). A failed ROLLBACK cannot prove the open
+    // transaction is gone, so this connection is poisoned: the store refuses
+    // every further call on it. Keyed on the connection object, so close +
+    // reopen (which discards the open transaction) yields a clean store.
+    let poisoned = null;
+
+    function assertUsable() {
+        if (poisoned && database.db === poisoned.handle) {
+            const err = new Error("AUTHORITY_TX_POISONED: koneksi tidak terbukti bersih; buka ulang store");
+            err.code = "AUTHORITY_TX_POISONED";
+            err.cause = poisoned.cause;
+            throw err;
+        }
+    }
+
     function tx(work) {
         const run = txChain.then(() => rawTx(work));
         txChain = run.then(() => {}, () => {});
@@ -515,16 +530,28 @@ function createSqliteAuthorityStore(database) {
     }
 
     async function rawTx(work) {
+        assertUsable();
         await database.exec("BEGIN IMMEDIATE");
+        let result;
         try {
-            const result = await work();
+            result = await work();
             await database.exec("COMMIT");
-            return result;
         }
         catch (error) {
-            try { await database.exec("ROLLBACK"); } catch {}
+            try { await database.exec("ROLLBACK"); }
+            catch (rollbackError) {
+                // Never report the original error/denial as a clean outcome:
+                // the transaction is unproven closed, so fail closed.
+                poisoned = { handle: database.db, cause: rollbackError };
+                const err = new Error("AUTHORITY_TX_ROLLBACK_FAILED: ROLLBACK gagal; state transaksi tidak terbukti bersih");
+                err.code = "AUTHORITY_TX_ROLLBACK_FAILED";
+                err.cause = rollbackError;
+                err.originalError = error;
+                throw err;
+            }
             throw error;
         }
+        return result;
     }
 
     async function reservationsFor(parentCapabilityId) {
@@ -581,7 +608,7 @@ function createSqliteAuthorityStore(database) {
         return err;
     }
 
-    return {
+    const api = {
         backend: "sqlite",
 
         async upsertCapability(id, status, generation, payload) {
@@ -974,6 +1001,24 @@ function createSqliteAuthorityStore(database) {
             });
         }
     };
+
+    // Every public call checks poison first. Non-atomic mutators are routed
+    // through the same tx queue, so an acknowledged write commits on its own
+    // COMMIT and never rides on a foreign or later-rolled-back transaction.
+    // Atomic methods already open tx() internally, so they are guard-only.
+    const TX_MUTATORS = new Set(["upsertCapability", "appendEvent",
+        "upsertRatification", "upsertProposal", "bumpGeneration"]);
+    const guarded = {};
+    for (const [name, fn] of Object.entries(api)) {
+        if (typeof fn !== "function") { guarded[name] = fn; continue; }
+        guarded[name] = async (...args) => {
+            assertUsable();
+            return TX_MUTATORS.has(name)
+                ? tx(() => fn.apply(guarded, args))
+                : fn.apply(guarded, args);
+        };
+    }
+    return guarded;
 }
 
 module.exports = {

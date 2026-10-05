@@ -442,6 +442,27 @@ function createCanonicalReplayLedger({
         };
     }
 
+    // Connection lifecycle (F6, same root as authority F3). A ROLLBACK that fails
+    // leaves the write transaction open and unprovable. This instance is then
+    // poisoned: every later read or write fails closed. A new instance (reopen)
+    // starts clean. Only a ROLLBACK that actually runs can poison, so a failed
+    // COMMIT followed by a successful ROLLBACK stays a clean, truthful failure.
+    let poisoned = null;
+    function assertUsable() {
+        if (poisoned) {
+            throw Object.assign(new Error("REPLAY_TX_POISONED: koneksi tidak terbukti bersih; buka ulang ledger"),
+                { code: "REPLAY_TX_POISONED", cause: poisoned });
+        }
+    }
+    async function rollbackOrPoison(error) {
+        try { await dbCall(db, "run", "ROLLBACK"); }
+        catch (rollbackError) {
+            poisoned = rollbackError;
+            throw Object.assign(new Error("REPLAY_TX_ROLLBACK_FAILED: ROLLBACK gagal; state transaksi tidak terbukti bersih"),
+                { code: "REPLAY_TX_ROLLBACK_FAILED", cause: rollbackError, originalError: error });
+        }
+    }
+
     /** Remove a committed-but-UNWITNESSED tail so the durable store never retains an
      *  event that no trusted witness covers. Without this, an attacker who can
      *  truncate replay_events can also delete the co-located marker row, leaving a
@@ -467,7 +488,9 @@ function createCanonicalReplayLedger({
             if (ownTransaction) await dbCall(db, "run", "COMMIT");
             return removed;
         } catch {
-            if (ownTransaction) { try { await dbCall(db, "run", "ROLLBACK"); } catch { /* nothing to undo */ } }
+            // Witness failure is reported by the caller; a failed ROLLBACK here
+            // must still poison, so the next call cannot reuse the open tx.
+            if (ownTransaction) { try { await dbCall(db, "run", "ROLLBACK"); } catch (rollbackError) { poisoned = rollbackError; } }
             return false;
         }
     }
@@ -514,18 +537,22 @@ function createCanonicalReplayLedger({
 
 
         async _reserve(binding = {}) {
+            assertUsable();
             await open();
             await dbCall(db, "run", "BEGIN IMMEDIATE");
+            let txOpen = true;
             try {
                 const s = await snapshot();
                 const prior = s.latest.get(binding.digest);
                 if (prior) {
                     await dbCall(db, "run", "ROLLBACK");
+                    txOpen = false;
                     if (!sameBinding(prior, binding)) throw new Error("REPLAY_LEDGER_BINDING_MISMATCH");
                     return { reserved: false, prior };
                 }
                 const { seq, eventHmac } = await insertEvent(binding, STATES.RESERVED, s);
                 await dbCall(db, "run", "COMMIT");
+                txOpen = false;
                 // DB COMMIT != SAFE COMPLETION. The committed head is acknowledged
                 // only once a TRUSTED witness has durably advanced to it. If none
                 // has, fail closed: the durable marker keeps this fail-closed
@@ -543,19 +570,22 @@ function createCanonicalReplayLedger({
                 await markWitnessed(seq);
                 return { reserved: true };
             } catch (error) {
-                try { await dbCall(db, "run", "ROLLBACK"); } catch { /* already rolled back */ }
+                if (txOpen) await rollbackOrPoison(error);
                 throw error;
             }
         },
 
         async _transition(digest, state, binding = {}) {
+            assertUsable();
             await open();
             await dbCall(db, "run", "BEGIN IMMEDIATE");
+            let txOpen = true;
             try {
                 const s = await snapshot();
                 if (!s.latest.has(digest)) throw new Error("REPLAY_LEDGER_MISSING_RESERVATION");
                 const { seq, eventHmac } = await insertEvent({ ...binding, digest }, state, s);
                 await dbCall(db, "run", "COMMIT");
+                txOpen = false;
                 const persistence = await persistAnchors(seq, eventHmac);
                 if (!persistence.witnessOk) {
                     // Undo the append: the digest reverts to its PREVIOUS state, so
@@ -567,12 +597,13 @@ function createCanonicalReplayLedger({
                 await markWitnessed(seq);
                 return true;
             } catch (error) {
-                try { await dbCall(db, "run", "ROLLBACK"); } catch { /* already rolled back */ }
+                if (txOpen) await rollbackOrPoison(error);
                 throw error;
             }
         },
 
         async _lookup(digest) {
+            assertUsable();
             const s = await snapshot({ heal: false });
             return s.latest.get(digest) ?? null;
         },
