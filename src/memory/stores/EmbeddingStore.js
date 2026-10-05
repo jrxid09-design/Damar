@@ -44,11 +44,11 @@ class EmbeddingStore {
 
     }
 
-    async put(ownerKind, ownerId, model, vector) {
+    async put(ownerKind, ownerId, model, vector, db = database) {
 
         const norm = this.norm(vector);
 
-        await database.run(
+        await db.run(
             `INSERT INTO embeddings (owner_kind, owner_id, model, dim, vector, norm)
              VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT(owner_kind, owner_id, model) DO UPDATE SET
@@ -67,10 +67,10 @@ class EmbeddingStore {
             return 0;
         }
 
-        await database.transaction(async () => {
+        await database.transaction(async db => {
 
             for (const { id, vector } of entries) {
-                await this.put(ownerKind, id, model, vector);
+                await this.put(ownerKind, id, model, vector, db);
             }
 
         });

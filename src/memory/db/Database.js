@@ -10,11 +10,114 @@ const { AsyncLocalStorage } = require("node:async_hooks");
  * secara serial, jadi menambah koneksi tidak menambah throughput
  * tulis — yang ada malah menaikkan risiko SQLITE_BUSY.
  *
- * KEPEMILIKAN KONEKSI (R3): satu koneksi hanya boleh dimiliki satu span
- * transaksi pada satu waktu. Operasi dari luar span mengantre sampai span
- * selesai (COMMIT atau ROLLBACK), sehingga penulisan yang tidak terkait
- * tidak pernah masuk ke transaksi subsistem lain.
+ * KEPEMILIKAN TRANSAKSI (R4): keanggotaan transaksi hanya lewat capability
+ * `TransactionScope` yang diberikan ke callback `exclusive` / `transaction`.
+ * Konteks async (AsyncLocalStorage) TIDAK memberi kepemilikan. ALS hanya
+ * dipakai untuk mendeteksi panggilan tanpa capability dari dalam span yang
+ * masih hidup; panggilan itu ditolak sebelum menyentuh database. Panggilan
+ * dari luar span mengantre sampai COMMIT atau ROLLBACK selesai.
  */
+
+const UNSCOPED_CODE = "UNSCOPED_DB_CALL_DURING_ACTIVE_TRANSACTION";
+const EXPIRED_CODE = "TX_CAPABILITY_EXPIRED";
+const REENTRANT_CODE = "DB_SPAN_REENTRANT";
+
+const FINISH = Symbol("finish");
+const DRAIN = Symbol("drain");
+const SEAL = Symbol("seal");
+const IS_LIVE = Symbol("isLive");
+
+const noop = () => {};
+
+function dbError(code, message) {
+    return Object.assign(new Error(`${code}: ${message}`), { code });
+}
+
+/**
+ * Capability satu span transaksi. Opaque: tidak bisa diserialisasi dan mati
+ * setelah span selesai. Operasi di dalam span berjalan berurutan (FIFO)
+ * pada koneksi milik span.
+ */
+class TransactionScope {
+
+    #db;
+    #open = true;
+    #chain = Promise.resolve();
+
+    constructor(db) {
+        this.#db = db;
+    }
+
+    run(sql, params = []) {
+        return this.#enqueue(connection => runOn(connection, sql, params));
+    }
+
+    get(sql, params = []) {
+        return this.#enqueue(connection => getOn(connection, sql, params));
+    }
+
+    all(sql, params = []) {
+        return this.#enqueue(connection => allOn(connection, sql, params));
+    }
+
+    exec(sql) {
+        return this.#enqueue(connection => execOn(connection, sql));
+    }
+
+    toJSON() {
+        throw dbError(EXPIRED_CODE, "transaction capability is not serializable");
+    }
+
+    [IS_LIVE]() {
+        return this.#open;
+    }
+
+    /** COMMIT / ROLLBACK. Capability ditutup sebelum SQL dikirim. */
+    [FINISH](sql) {
+
+        if (!this.#open) {
+            return Promise.reject(dbError(EXPIRED_CODE, "transaction already finished"));
+        }
+
+        this.#open = false;
+
+        const run = this.#chain.then(() => runOn(this.#db.db, sql, []));
+
+        this.#chain = run.then(noop, noop);
+
+        return run.catch(error => {
+            // COMMIT gagal: transaksi masih terbuka, izinkan ROLLBACK.
+            this.#open = true;
+            throw error;
+        });
+
+    }
+
+    /** Tunggu operasi yang masih antre. */
+    async [DRAIN]() {
+        await this.#chain;
+    }
+
+    [SEAL]() {
+        this.#open = false;
+    }
+
+    #enqueue(work) {
+
+        if (!this.#open) {
+            return Promise.reject(dbError(EXPIRED_CODE, "transaction capability is no longer usable"));
+        }
+
+        const run = this.#chain.then(() => work(this.#db.db));
+
+        this.#chain = run.then(noop, noop);
+
+        return run;
+
+    }
+
+}
+
 class Database {
 
     constructor(file) {
@@ -25,36 +128,80 @@ class Database {
 
         this.ready = null;
 
+        // Hanya untuk diagnosis dan deteksi panggilan tanpa capability.
+        // Keberadaan konteks ini TIDAK berarti kepemilikan transaksi.
         this.owned = new AsyncLocalStorage();
 
         this.queue = Promise.resolve();
 
     }
 
-    /**
-     * Gerbang kepemilikan koneksi. Operasi yang berasal dari dalam span pemilik
-     * langsung dijalankan; operasi lain menunggu giliran di antrean.
-     * ponytail: konteks async turunan span dianggap bagian dari span; tidak ada
-     * pemisahan per pemanggil di dalam span yang sama.
-     */
-    ownConnection(work) {
+    /** Span yang masih hidup pada konteks async ini, atau null. */
+    liveScope() {
+        const scope = this.owned.getStore();
+        return scope && scope[IS_LIVE]() ? scope : null;
+    }
 
-        if (this.owned.getStore() === true) {
-            return work();
-        }
+    /** Antrean koneksi: satu unit kerja berjalan setelah unit sebelumnya selesai. */
+    acquire(work) {
 
-        const run = this.queue.then(() => this.owned.run(true, work));
+        const run = this.queue.then(work);
 
-        this.queue = run.then(() => {}, () => {});
+        this.queue = run.then(noop, noop);
 
         return run;
 
     }
 
-    /** Ambil kepemilikan koneksi untuk satu unit kerja. */
+    /**
+     * Operasi tanpa capability. Ditolak bila dipanggil dari konteks span yang
+     * masih hidup (sebelum menyentuh database); selain itu mengantre di
+     * belakang pemilik koneksi.
+     */
+    unscoped(work) {
+
+        if (this.liveScope()) {
+            return Promise.reject(dbError(
+                UNSCOPED_CODE,
+                "plain Database call inside an open transaction; use the transaction capability"
+            ));
+        }
+
+        return this.acquire(async () => {
+            await this.ensure();
+            return work(this.db);
+        });
+
+    }
+
+    /**
+     * Ambil kepemilikan koneksi untuk satu span. Hanya operasi lewat `tx`
+     * yang menjadi anggota span ini.
+     */
     exclusive(work) {
 
-        return this.ownConnection(work);
+        if (this.liveScope()) {
+            return Promise.reject(dbError(
+                REENTRANT_CODE,
+                "exclusive span cannot be nested inside an open transaction"
+            ));
+        }
+
+        return this.acquire(async () => {
+
+            await this.ensure();
+
+            const scope = new TransactionScope(this);
+
+            try {
+                return await this.owned.run(scope, () => work(scope));
+            }
+            finally {
+                await scope[DRAIN]();
+                scope[SEAL]();
+            }
+
+        });
 
     }
 
@@ -112,129 +259,45 @@ class Database {
     }
 
     run(sql, params = []) {
-
-        return this.ownConnection(async () => {
-
-            const db = await this.ensure();
-
-            return new Promise((resolve, reject) => {
-
-                db.run(sql, params, function (error) {
-
-                    if (error) {
-                        return reject(decorate(error, sql));
-                    }
-
-                    resolve({
-                        lastID: this.lastID,
-                        changes: this.changes
-                    });
-
-                });
-
-            });
-
-        });
-
+        return this.unscoped(db => runOn(db, sql, params));
     }
 
     get(sql, params = []) {
-
-        return this.ownConnection(async () => {
-
-            const db = await this.ensure();
-
-            return new Promise((resolve, reject) => {
-
-                db.get(sql, params, (error, row) => {
-
-                    if (error) {
-                        return reject(decorate(error, sql));
-                    }
-
-                    resolve(row ?? null);
-
-                });
-
-            });
-
-        });
-
+        return this.unscoped(db => getOn(db, sql, params));
     }
 
     all(sql, params = []) {
-
-        return this.ownConnection(async () => {
-
-            const db = await this.ensure();
-
-            return new Promise((resolve, reject) => {
-
-                db.all(sql, params, (error, rows) => {
-
-                    if (error) {
-                        return reject(decorate(error, sql));
-                    }
-
-                    resolve(rows ?? []);
-
-                });
-
-            });
-
-        });
-
+        return this.unscoped(db => allOn(db, sql, params));
     }
 
     exec(sql) {
-
-        return this.ownConnection(async () => {
-
-            await this.ensure();
-
-            return this.execRaw(sql);
-
-        });
-
+        return this.unscoped(db => execOn(db, sql));
     }
 
-    /** exec tanpa gerbang kepemilikan; hanya untuk pemanggil yang sudah memilikinya. */
+    /** exec tanpa antrean; hanya untuk pemanggil yang sudah memegang koneksi. */
     execRaw(sql) {
-
-        return new Promise((resolve, reject) => {
-
-            this.db.exec(sql, error => {
-
-                if (error) {
-                    return reject(decorate(error, sql));
-                }
-
-                resolve();
-
-            });
-
-        });
-
+        return execOn(this.db, sql);
     }
 
     /**
-     * Jalankan sekumpulan operasi dalam satu transaksi.
+     * Jalankan sekumpulan operasi dalam satu transaksi. Callback menerima `tx`;
+     * seluruh penulisan harus lewat `tx`.
      *
      * Dipakai saat menyimpan memori: baris memories, kaitan
      * entitas, dan indeks FTS harus masuk bersama-sama — memori
      * yang tersimpan tapi tidak terindeks sama saja hilang.
      */
-    transaction(work) {
+    transaction(work, { begin = tx => tx.run("BEGIN IMMEDIATE") } = {}) {
 
-        return this.exclusive(async () => {
+        return this.exclusive(async tx => {
 
-            await this.run("BEGIN IMMEDIATE");
+            await begin(tx);
 
             try {
 
-                const result = await work(this);
+                const result = await work(tx);
 
-                await this.run("COMMIT");
+                await tx[FINISH]("COMMIT");
 
                 return result;
 
@@ -243,7 +306,7 @@ class Database {
             catch (error) {
 
                 try {
-                    await this.run("ROLLBACK");
+                    await tx[FINISH]("ROLLBACK");
                 }
                 catch {
                     // Rollback bisa gagal bila koneksi sudah bermasalah;
@@ -260,7 +323,7 @@ class Database {
 
     close() {
 
-        return this.ownConnection(() => {
+        return this.unscoped(() => {
 
             if (!this.db) {
                 return;
@@ -276,6 +339,81 @@ class Database {
         });
 
     }
+
+}
+
+function runOn(db, sql, params) {
+
+    return new Promise((resolve, reject) => {
+
+        db.run(sql, params, function (error) {
+
+            if (error) {
+                return reject(decorate(error, sql));
+            }
+
+            resolve({
+                lastID: this.lastID,
+                changes: this.changes
+            });
+
+        });
+
+    });
+
+}
+
+function getOn(db, sql, params) {
+
+    return new Promise((resolve, reject) => {
+
+        db.get(sql, params, (error, row) => {
+
+            if (error) {
+                return reject(decorate(error, sql));
+            }
+
+            resolve(row ?? null);
+
+        });
+
+    });
+
+}
+
+function allOn(db, sql, params) {
+
+    return new Promise((resolve, reject) => {
+
+        db.all(sql, params, (error, rows) => {
+
+            if (error) {
+                return reject(decorate(error, sql));
+            }
+
+            resolve(rows ?? []);
+
+        });
+
+    });
+
+}
+
+function execOn(db, sql) {
+
+    return new Promise((resolve, reject) => {
+
+        db.exec(sql, error => {
+
+            if (error) {
+                return reject(decorate(error, sql));
+            }
+
+            resolve();
+
+        });
+
+    });
 
 }
 

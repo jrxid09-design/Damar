@@ -215,39 +215,28 @@ function createSqliteAccStore(database) {
         // PROCESSES sharing this database file serialize here (busy_timeout waits;
         // BEGIN is retried a bounded number of times). A throw in work() rolls back
         // every write it made, so callers never leave a record without its index
-        // entry or the reverse. R3: the whole span owns the connection (Database
-        // exclusive). Every other operation on this connection, including appendEvent
-        // and putKv from other subsystems, waits until COMMIT or ROLLBACK, so none of
-        // them can join this transaction and be rolled back with it.
+        // entry or the reverse. R4: membership is explicit. Only operations made through
+        // the transaction capability `tx` belong to this span. Async context does not
+        // confer ownership, so appendEvent and putKv from other subsystems never join it:
+        // called inside the span they fail before touching the database, and called from
+        // outside they wait until COMMIT or ROLLBACK.
         transact(work) {
-            return database.exclusive(async () => {
-                await beginImmediate(database);
-                try {
-                    const out = await work({
-                        async getKv(key) {
-                            const row = await database.get("SELECT value FROM acc_kv WHERE key = ?", [key]);
-                            return row ? JSON.parse(row.value) : null;
-                        },
-                        async putKv(key, value) {
-                            if (value === null || value === undefined) {
-                                await database.run("DELETE FROM acc_kv WHERE key = ?", [key]);
-                                return;
-                            }
-                            await database.run(
-                                `INSERT INTO acc_kv (key, value) VALUES (?, ?)
-                                 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-                                [key, JSON.stringify(value)]);
-                        }
-                    });
-                    await database.run("COMMIT");
-                    return out;
+            return database.transaction(tx => work({
+                async getKv(key) {
+                    const row = await tx.get("SELECT value FROM acc_kv WHERE key = ?", [key]);
+                    return row ? JSON.parse(row.value) : null;
+                },
+                async putKv(key, value) {
+                    if (value === null || value === undefined) {
+                        await tx.run("DELETE FROM acc_kv WHERE key = ?", [key]);
+                        return;
+                    }
+                    await tx.run(
+                        `INSERT INTO acc_kv (key, value) VALUES (?, ?)
+                         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+                        [key, JSON.stringify(value)]);
                 }
-                catch (error) {
-                    try { await database.run("ROLLBACK"); }
-                    catch { /* keep the original error */ }
-                    throw error;
-                }
-            });
+            }), { begin: beginImmediate });
         },
 
         async saveSnapshot(snap) {
@@ -342,10 +331,10 @@ function createSqliteAccStore(database) {
 
 const BEGIN_ATTEMPTS = 8;
 
-async function beginImmediate(database) {
+async function beginImmediate(tx) {
     for (let attempt = 1; ; attempt += 1) {
         try {
-            await database.run("BEGIN IMMEDIATE");
+            await tx.run("BEGIN IMMEDIATE");
             return;
         }
         catch (error) {
