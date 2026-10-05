@@ -70,17 +70,19 @@ const DEFAULT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_LIST_LIMIT = 100;
 const MAX_LIST_LIMIT = 500;
 
-// PURPOSE PRIVACY OWNERSHIP (R2C2). CALLER PRIVACY LABEL != CANONICAL PRIVACY TRUTH.
+// PURPOSE PRIVACY OWNERSHIP (R2C2, R3). CALLER PRIVACY LABEL != CANONICAL PRIVACY TRUTH.
 // effective = max(canonical source classification, caller hint). The canonical source
 // is the trusted purposeClassifier injected at composition time, never a per-request
 // value. No classifier, a throwing classifier, or an unknown canonical value => SECRET.
-// The caller hint can only ratchet UP: missing, malformed or unknown hints => SECRET,
-// and a NORMAL hint can never lower the canonical result.
+// An ABSENT caller hint (undefined/null) adds no restriction: the canonical value stands.
+// A PRESENT but malformed hint => SECRET. The caller hint can only ratchet UP, so a
+// NORMAL hint can never lower the canonical result.
 function resolvePurposeSensitivity(requirement, callerHint, purposeClassifier = null) {
     let canonical = "SECRET";
     if (typeof purposeClassifier === "function") {
         try { canonical = sensitivityOf(purposeClassifier(requirement)); } catch { canonical = "SECRET"; }
     }
+    if (callerHint === undefined || callerHint === null) return canonical;
     const hint = typeof callerHint === "string" && SENSITIVITY.includes(callerHint) ? callerHint : "SECRET";
     return maxSensitivity(canonical, hint);
 }
@@ -217,7 +219,7 @@ function createApprovalDomain({
     // purposeSensitivity is a caller STRICTNESS HINT only (NORMAL, SENSITIVE, SECRET).
     // It is NOT canonical privacy truth: the stored classification is
     // resolvePurposeSensitivity(requirement, hint, purposeClassifier), which a hint can
-    // only raise. Omitted/unknown hint => SECRET => purpose redacted on every surface read.
+    // only raise. Omitted hint => canonical value stands. Malformed hint => SECRET.
     async function createFromSuspension(managerResult, { sourceRef = null, risk = null, effect = null, purposeSensitivity = null } = {}) {
         if (!managerResult || managerResult.lifecycleState !== "SUSPENDED" ||
             managerResult.outcome !== "OWNER_CONFIRMATION_REQUIRED") {
