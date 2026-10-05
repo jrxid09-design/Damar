@@ -7,6 +7,10 @@
 // notification is always discoverable and a failed create leaves nothing behind.
 // Dedup entries are removed together with their record when a terminal
 // notification is compacted (DP §54, bounded retention).
+// REPLAY FENCE (R3): compaction leaves a bounded TOMBSTONE per occurrence key, stamped
+// with the store's clock (never the caller's occurredAt). Tombstones are pruned by the
+// same retention window, so the fence is bounded. A replay of a compacted occurrence is
+// rejected by its tombstone whatever occurredAt the replay carries.
 
 const { createPagedIndex } = require("../canonical/kvIndex");
 const { detach } = require("../canonical/projection");
@@ -18,8 +22,10 @@ function makeNotificationStore(acc) {
         throw new TypeError("notification store requires an ACC KV store with the transact primitive");
     }
     const index = createPagedIndex(P);
+    const tombIndex = createPagedIndex(`${P}tombix:`);
     const recKey = (notificationId) => `${P}rec:${notificationId}`;
     const dedupKey = (key) => `${P}dedup:${key}`;
+    const tombKey = (key) => `${P}tomb:${key}`;
     const readIn = async (tx, notificationId) => detach(await tx.getKv(recKey(notificationId)));
 
     const store = {
@@ -29,6 +35,9 @@ function makeNotificationStore(acc) {
         async byDedup(key) {
             const id = await acc.getKv(dedupKey(key));
             return id ? store.get(id) : null;
+        },
+        async tombstoned(key) {
+            return (await acc.getKv(tombKey(key))) !== null;
         },
         // Atomic create-or-find on the occurrence key. created=false means another
         // process (or instance) already recorded this occurrence; its id is returned so
@@ -59,15 +68,28 @@ function makeNotificationStore(acc) {
         page({ limit, cursor, predicate }) {
             return index.walk(acc, { readRecord: (id) => store.get(id), predicate, limit, cursor });
         },
-        compact(removable) {
-            return acc.transact((tx) => index.compactIn(tx, {
-                readRecord: (id) => readIn(tx, id),
-                removable,
-                onRemove: async (rec) => {
-                    await tx.putKv(recKey(rec.notification_id), null);
-                    await tx.putKv(dedupKey(rec.dedup_key), null);
-                }
-            }));
+        // One transaction: drop compacted records and their dedup keys, leave a
+        // tombstone stamped with compactedAt, and prune tombstones older than
+        // tombstoneHorizon. Returns the number of records compacted.
+        compact(removable, { compactedAt, tombstoneHorizon }) {
+            return acc.transact(async (tx) => {
+                const removed = await index.compactIn(tx, {
+                    readRecord: (id) => readIn(tx, id),
+                    removable,
+                    onRemove: async (rec) => {
+                        await tx.putKv(recKey(rec.notification_id), null);
+                        await tx.putKv(dedupKey(rec.dedup_key), null);
+                        await tombIndex.appendIn(tx, rec.dedup_key);
+                        await tx.putKv(tombKey(rec.dedup_key), { dedup_key: rec.dedup_key, compacted_at: compactedAt });
+                    }
+                });
+                await tombIndex.compactIn(tx, {
+                    readRecord: (key) => tx.getKv(tombKey(key)),
+                    removable: (t) => t.compacted_at < tombstoneHorizon,
+                    onRemove: (t) => tx.putKv(tombKey(t.dedup_key), null)
+                });
+                return removed;
+            });
         }
     };
     return store;

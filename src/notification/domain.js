@@ -18,8 +18,8 @@
 //    An exact replay of a known occurrence maps back to it; a new occurrence
 //    creates a new notification. Entity+event alone is never a dedup key.
 //  - Sensitivity is monotonic per notification: NORMAL < SENSITIVE < SECRET.
-//  - Occurrences older than the retention horizon are never re-created, so
-//    compaction cannot permit stale replay resurrection.
+//  - A compacted occurrence keeps a bounded tombstone (retention window, server
+//    clock). Its replay is never re-created, whatever occurredAt it carries (R3).
 //  - Surface reads are deep copies; list() is cursor-paged, so no record is unreachable.
 
 const crypto = require("node:crypto");
@@ -107,7 +107,8 @@ function createNotificationDomain({ store, acc, clock = () => Date.now(), audit 
     // caller supplies sourceOccurrenceId (the source's own identity for that
     // occurrence, e.g. approval_id) and occurredAt (when it happened). Replays of
     // a known occurrence coalesce or return the existing terminal record; a new
-    // occurrence of the same entity+event creates a new notification.
+    // occurrence of the same entity+event creates a new notification. occurredAt is
+    // METADATA: it never takes part in identity, so changing it cannot revive an occurrence.
     async function emitSource({ sourceType, sourceId, sourceOccurrenceId, occurredAt, event = null,
         severity = "normal", privacySensitivity = "NORMAL", summary = null, targetSurfaces = [] } = {}) {
         const ref = entityRef(sourceType, sourceId); // validates canonical entity reference
@@ -124,9 +125,9 @@ function createNotificationDomain({ store, acc, clock = () => Date.now(), audit 
             const now = clock();
             let existing = await backing.byDedup(dedupKey);
             if (!existing) {
-                // Unknown occurrence older than the retention horizon: it may have been
-                // compacted, so it is a stale replay, never a new notification.
-                if (occurredAt < now - retentionMs) return null;
+                // R3: a compacted occurrence keeps a bounded tombstone keyed by identity
+                // only, so its replay is suppressed whatever occurredAt it carries.
+                if (await backing.tombstoned(dedupKey)) return null;
                 const rec = {
                     notification_id: idFactory(),
                     dedup_key: dedupKey,
@@ -230,8 +231,11 @@ function createNotificationDomain({ store, acc, clock = () => Date.now(), audit 
         // Retention: removes terminal notifications last touched before the
         // horizon, with their index entry and dedup key. ACTIVE records never move.
         async compact() {
-            const horizon = clock() - retentionMs;
-            return withSharedLock(MUTATE_LOCK, () => backing.compact((r) => TERMINAL.has(r.state) && r.last_event_at < horizon));
+            const now = clock();
+            const horizon = now - retentionMs;
+            return withSharedLock(MUTATE_LOCK, () => backing.compact(
+                (r) => TERMINAL.has(r.state) && r.last_event_at < horizon,
+                { compactedAt: now, tombstoneHorizon: horizon }));
         }
     });
 }
