@@ -17,13 +17,21 @@
 //  - Dedup identity is the source OCCURRENCE: entity + event + sourceOccurrenceId.
 //    An exact replay of a known occurrence maps back to it; a new occurrence
 //    creates a new notification. Entity+event alone is never a dedup key.
+//  - ANTI-REPLAY (R3C): each canonical source stream (entity + event) has a persistent
+//    HIGH-WATER of its last accepted sourceOccurrenceSequence, written in the same ACC
+//    transaction as the notification it admits. Sequence <= high-water is rejected
+//    forever while the stream exists; sequence > high-water with a new id is accepted.
+//    The sequence is source-owned and required: missing or invalid fails closed, and
+//    Notification never synthesizes it. occurredAt is metadata and never decides identity.
+//  - Same id with another sequence, or same sequence with another id, is an identity
+//    conflict and throws SOURCE_OCCURRENCE_IDENTITY_CONFLICT (no second notification).
 //  - Sensitivity is monotonic per notification: NORMAL < SENSITIVE < SECRET.
-//  - A compacted occurrence keeps a bounded tombstone (retention window, server
-//    clock). Its replay is never re-created, whatever occurredAt it carries (R3).
+//  - A compacted occurrence keeps a short bounded tombstone for coalescing only;
+//    long-term replay safety never depends on it (the high-water is authoritative).
 //  - Surface reads are deep copies; list() is cursor-paged, so no record is unreachable.
 
 const crypto = require("node:crypto");
-const { makeNotificationStore } = require("./store");
+const { makeNotificationStore, identityKey, DECISION } = require("./store");
 const { classify, LEVEL, rank } = require("./policy");
 const { entityRef } = require("../ui-platform/entityRefs");
 const { withSharedLock } = require("../canonical/kvIndex");
@@ -109,54 +117,64 @@ function createNotificationDomain({ store, acc, clock = () => Date.now(), audit 
     // a known occurrence coalesce or return the existing terminal record; a new
     // occurrence of the same entity+event creates a new notification. occurredAt is
     // METADATA: it never takes part in identity, so changing it cannot revive an occurrence.
-    async function emitSource({ sourceType, sourceId, sourceOccurrenceId, occurredAt, event = null,
+    // R3C: sourceOccurrenceSequence is the SOURCE-owned, monotonic generation of this
+    // occurrence within its canonical stream (entity_type, entity_id, event). Notification
+    // never derives it: a missing or invalid sequence fails closed before any state is touched.
+    async function emitSource({ sourceType, sourceId, sourceOccurrenceId, sourceOccurrenceSequence, occurredAt, event = null,
         severity = "normal", privacySensitivity = "NORMAL", summary = null, targetSurfaces = [] } = {}) {
         const ref = entityRef(sourceType, sourceId); // validates canonical entity reference
         if (!SENSITIVITY.includes(privacySensitivity)) throw new NotificationError("INVALID_SENSITIVITY", privacySensitivity);
         if (typeof sourceOccurrenceId !== "string" || sourceOccurrenceId.length === 0) {
             throw new NotificationError("SOURCE_OCCURRENCE_REQUIRED", "emitSource needs the source occurrence identity");
         }
+        if (sourceOccurrenceSequence === undefined || sourceOccurrenceSequence === null) {
+            throw new NotificationError("SOURCE_OCCURRENCE_SEQUENCE_REQUIRED", "emitSource needs the source-owned occurrence sequence");
+        }
+        if (!Number.isSafeInteger(sourceOccurrenceSequence) || sourceOccurrenceSequence < 1) {
+            throw new NotificationError("INVALID_SOURCE_OCCURRENCE_SEQUENCE", String(sourceOccurrenceSequence));
+        }
         if (!Number.isFinite(occurredAt)) throw new NotificationError("SOURCE_OCCURRENCE_TIME_REQUIRED", "emitSource needs occurredAt");
         const level = classify({ sourceKind: sourceType, event, severity });
         if (level === LEVEL.NONE) return null; // policy: no notification
 
-        const dedupKey = `${ref.entity_type}:${ref.entity_id}:${event ?? ""}:${sourceOccurrenceId}`;
+        // Occurrence identity is entity + event + sourceOccurrenceId; occurredAt is metadata.
+        const streamKey = identityKey([ref.entity_type, ref.entity_id, event ?? null]);
+        const dedupKey = identityKey([ref.entity_type, ref.entity_id, event ?? null, sourceOccurrenceId]);
         return withSharedLock(MUTATE_LOCK, async () => {
             const now = clock();
-            let existing = await backing.byDedup(dedupKey);
-            if (!existing) {
-                // R3: a compacted occurrence keeps a bounded tombstone keyed by identity
-                // only, so its replay is suppressed whatever occurredAt it carries.
-                if (await backing.tombstoned(dedupKey)) return null;
-                const rec = {
-                    notification_id: idFactory(),
-                    dedup_key: dedupKey,
-                    source_ref: { entity_type: ref.entity_type, entity_id: ref.entity_id },
-                    source_event: event,
-                    source_occurrence_id: sourceOccurrenceId,
-                    occurred_at: occurredAt,
-                    severity,
-                    level,
-                    privacy_sensitivity: privacySensitivity,
-                    summary,
-                    target_surfaces: Array.isArray(targetSurfaces) ? targetSurfaces.slice() : [],
-                    state: STATE.ACTIVE,
-                    revision: 1,
-                    coalesce_count: 1,
-                    created_at: now,
-                    last_event_at: now,
-                    read_at: null, acknowledged_at: null, resolved_at: null, dismissed_at: null,
-                    expires_at: ttlMs ? now + ttlMs : null
-                };
-                const created = await backing.createIfAbsent(rec);
-                if (created.created) {
-                    emit("notification.created", rec, "ok");
-                    return surfaceRecord(rec);
-                }
-                // Another process recorded this occurrence first: coalesce into it.
-                existing = await backing.get(created.id);
+            const rec = {
+                notification_id: idFactory(),
+                dedup_key: dedupKey,
+                source_ref: { entity_type: ref.entity_type, entity_id: ref.entity_id },
+                source_event: event,
+                source_occurrence_id: sourceOccurrenceId,
+                source_occurrence_sequence: sourceOccurrenceSequence,
+                occurred_at: occurredAt,
+                severity,
+                level,
+                privacy_sensitivity: privacySensitivity,
+                summary,
+                target_surfaces: Array.isArray(targetSurfaces) ? targetSurfaces.slice() : [],
+                state: STATE.ACTIVE,
+                revision: 1,
+                coalesce_count: 1,
+                created_at: now,
+                last_event_at: now,
+                read_at: null, acknowledged_at: null, resolved_at: null, dismissed_at: null,
+                expires_at: ttlMs ? now + ttlMs : null
+            };
+            // One ACC transaction decides admission and commits the high-water with the record.
+            const adm = await backing.admit(rec, streamKey, sourceOccurrenceSequence);
+            if (adm.decision === DECISION.CONFLICT) {
+                throw new NotificationError("SOURCE_OCCURRENCE_IDENTITY_CONFLICT", "sourceOccurrenceId and sourceOccurrenceSequence disagree with the source stream");
             }
-            const out = await backing.mutate(existing.notification_id, (draft) => {
+            if (adm.decision === DECISION.STALE) return null; // stale or replayed occurrence: fenced
+            if (adm.decision === DECISION.CREATED) {
+                emit("notification.created", rec, "ok");
+                return surfaceRecord(rec);
+            }
+            // EXISTING: this occurrence already has a live record. Coalesce into it.
+            const out = await backing.mutate(adm.id, (draft) => {
                 // Terminal occurrence: an exact replay never revives it (DP §54, F2/F4).
                 if (TERMINAL.has(draft.state)) return { rec: draft, event: null };
                 draft.coalesce_count += 1;

@@ -55,7 +55,7 @@ function createMemoryAccStore() {
             return [...journal];
         },
 
-        async putKv(key, value) { kv.set(key, value); },
+        async putKv(key, value) { if (value === null || value === undefined) kv.delete(key); else kv.set(key, value); },
         async getKv(key) { return kv.has(key) ? kv.get(key) : null; },
 
         // R2 atomic primitive (contract: see transact in createSqliteAccStore).
@@ -191,7 +191,13 @@ function createSqliteAccStore(database) {
             return this.eventsAfterSeq(0);
         },
 
+        // putKv(key, null) deletes the row: a missing key and a null value read the same,
+        // so a retired key leaves no dead row behind (bounded persistent representation).
         async putKv(key, value) {
+            if (value === null || value === undefined) {
+                await database.run("DELETE FROM acc_kv WHERE key = ?", [key]);
+                return;
+            }
             await database.run(
                 `INSERT INTO acc_kv (key, value) VALUES (?, ?)
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
@@ -223,6 +229,10 @@ function createSqliteAccStore(database) {
                             return row ? JSON.parse(row.value) : null;
                         },
                         async putKv(key, value) {
+                            if (value === null || value === undefined) {
+                                await database.run("DELETE FROM acc_kv WHERE key = ?", [key]);
+                                return;
+                            }
                             await database.run(
                                 `INSERT INTO acc_kv (key, value) VALUES (?, ?)
                                  ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
