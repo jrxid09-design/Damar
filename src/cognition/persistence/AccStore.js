@@ -209,11 +209,12 @@ function createSqliteAccStore(database) {
         // PROCESSES sharing this database file serialize here (busy_timeout waits;
         // BEGIN is retried a bounded number of times). A throw in work() rolls back
         // every write it made, so callers never leave a record without its index
-        // entry or the reverse. In-process calls on one connection are queued.
-        // ponytail: a plain database.transaction() on the same connection is not
-        // queued with this; DP never calls it.
+        // entry or the reverse. R3: the whole span owns the connection (Database
+        // exclusive). Every other operation on this connection, including appendEvent
+        // and putKv from other subsystems, waits until COMMIT or ROLLBACK, so none of
+        // them can join this transaction and be rolled back with it.
         transact(work) {
-            return runQueued(database, async () => {
+            return database.exclusive(async () => {
                 await beginImmediate(database);
                 try {
                     const out = await work({
@@ -329,16 +330,7 @@ function createSqliteAccStore(database) {
     };
 }
 
-// One queue per open connection: transact() calls from this process run one at a time.
-const sqliteTxQueues = new WeakMap();
 const BEGIN_ATTEMPTS = 8;
-
-function runQueued(database, work) {
-    const prev = sqliteTxQueues.get(database) || Promise.resolve();
-    const next = prev.then(work);
-    sqliteTxQueues.set(database, next.then(() => {}, () => {}));
-    return next;
-}
 
 async function beginImmediate(database) {
     for (let attempt = 1; ; attempt += 1) {

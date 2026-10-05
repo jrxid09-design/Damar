@@ -1,6 +1,7 @@
 const sqlite3 = require("sqlite3");
 const path = require("node:path");
 const fs = require("node:fs");
+const { AsyncLocalStorage } = require("node:async_hooks");
 
 /**
  * Pembungkus Promise di atas node-sqlite3 yang berbasis callback.
@@ -8,6 +9,11 @@ const fs = require("node:fs");
  * Seluruh lapisan memori memakai satu koneksi. SQLite menulis
  * secara serial, jadi menambah koneksi tidak menambah throughput
  * tulis — yang ada malah menaikkan risiko SQLITE_BUSY.
+ *
+ * KEPEMILIKAN KONEKSI (R3): satu koneksi hanya boleh dimiliki satu span
+ * transaksi pada satu waktu. Operasi dari luar span mengantre sampai span
+ * selesai (COMMIT atau ROLLBACK), sehingga penulisan yang tidak terkait
+ * tidak pernah masuk ke transaksi subsistem lain.
  */
 class Database {
 
@@ -18,6 +24,37 @@ class Database {
         this.db = null;
 
         this.ready = null;
+
+        this.owned = new AsyncLocalStorage();
+
+        this.queue = Promise.resolve();
+
+    }
+
+    /**
+     * Gerbang kepemilikan koneksi. Operasi yang berasal dari dalam span pemilik
+     * langsung dijalankan; operasi lain menunggu giliran di antrean.
+     * ponytail: konteks async turunan span dianggap bagian dari span; tidak ada
+     * pemisahan per pemanggil di dalam span yang sama.
+     */
+    ownConnection(work) {
+
+        if (this.owned.getStore() === true) {
+            return work();
+        }
+
+        const run = this.queue.then(() => this.owned.run(true, work));
+
+        this.queue = run.then(() => {}, () => {});
+
+        return run;
+
+    }
+
+    /** Ambil kepemilikan koneksi untuk satu unit kerja. */
+    exclusive(work) {
+
+        return this.ownConnection(work);
 
     }
 
@@ -46,15 +83,15 @@ class Database {
             // WAL: pembaca tidak memblokir penulis. Penting karena
             // Console membaca memori sambil daemon terus menulis
             // observasi dari sensor/CCTV.
-            await this.exec("PRAGMA journal_mode = WAL");
+            await this.execRaw("PRAGMA journal_mode = WAL");
 
-            await this.exec("PRAGMA synchronous = NORMAL");
+            await this.execRaw("PRAGMA synchronous = NORMAL");
 
-            await this.exec("PRAGMA foreign_keys = ON");
+            await this.execRaw("PRAGMA foreign_keys = ON");
 
             // Beri kesempatan menunggu kunci alih-alih langsung
             // melempar SQLITE_BUSY.
-            await this.exec("PRAGMA busy_timeout = 5000");
+            await this.execRaw("PRAGMA busy_timeout = 5000");
 
             return this.db;
 
@@ -74,21 +111,25 @@ class Database {
 
     }
 
-    async run(sql, params = []) {
+    run(sql, params = []) {
 
-        const db = await this.ensure();
+        return this.ownConnection(async () => {
 
-        return new Promise((resolve, reject) => {
+            const db = await this.ensure();
 
-            db.run(sql, params, function (error) {
+            return new Promise((resolve, reject) => {
 
-                if (error) {
-                    return reject(decorate(error, sql));
-                }
+                db.run(sql, params, function (error) {
 
-                resolve({
-                    lastID: this.lastID,
-                    changes: this.changes
+                    if (error) {
+                        return reject(decorate(error, sql));
+                    }
+
+                    resolve({
+                        lastID: this.lastID,
+                        changes: this.changes
+                    });
+
                 });
 
             });
@@ -97,39 +138,23 @@ class Database {
 
     }
 
-    async get(sql, params = []) {
+    get(sql, params = []) {
 
-        const db = await this.ensure();
+        return this.ownConnection(async () => {
 
-        return new Promise((resolve, reject) => {
+            const db = await this.ensure();
 
-            db.get(sql, params, (error, row) => {
+            return new Promise((resolve, reject) => {
 
-                if (error) {
-                    return reject(decorate(error, sql));
-                }
+                db.get(sql, params, (error, row) => {
 
-                resolve(row ?? null);
+                    if (error) {
+                        return reject(decorate(error, sql));
+                    }
 
-            });
+                    resolve(row ?? null);
 
-        });
-
-    }
-
-    async all(sql, params = []) {
-
-        const db = await this.ensure();
-
-        return new Promise((resolve, reject) => {
-
-            db.all(sql, params, (error, rows) => {
-
-                if (error) {
-                    return reject(decorate(error, sql));
-                }
-
-                resolve(rows ?? []);
+                });
 
             });
 
@@ -137,13 +162,48 @@ class Database {
 
     }
 
-    async exec(sql) {
+    all(sql, params = []) {
 
-        const db = await this.ensure();
+        return this.ownConnection(async () => {
+
+            const db = await this.ensure();
+
+            return new Promise((resolve, reject) => {
+
+                db.all(sql, params, (error, rows) => {
+
+                    if (error) {
+                        return reject(decorate(error, sql));
+                    }
+
+                    resolve(rows ?? []);
+
+                });
+
+            });
+
+        });
+
+    }
+
+    exec(sql) {
+
+        return this.ownConnection(async () => {
+
+            await this.ensure();
+
+            return this.execRaw(sql);
+
+        });
+
+    }
+
+    /** exec tanpa gerbang kepemilikan; hanya untuk pemanggil yang sudah memilikinya. */
+    execRaw(sql) {
 
         return new Promise((resolve, reject) => {
 
-            db.exec(sql, error => {
+            this.db.exec(sql, error => {
 
                 if (error) {
                     return reject(decorate(error, sql));
@@ -164,48 +224,56 @@ class Database {
      * entitas, dan indeks FTS harus masuk bersama-sama — memori
      * yang tersimpan tapi tidak terindeks sama saja hilang.
      */
-    async transaction(work) {
+    transaction(work) {
 
-        await this.run("BEGIN IMMEDIATE");
+        return this.exclusive(async () => {
 
-        try {
-
-            const result = await work(this);
-
-            await this.run("COMMIT");
-
-            return result;
-
-        }
-
-        catch (error) {
+            await this.run("BEGIN IMMEDIATE");
 
             try {
-                await this.run("ROLLBACK");
-            }
-            catch {
-                // Rollback bisa gagal bila koneksi sudah bermasalah;
-                // error aslinya yang lebih berguna untuk dilempar.
+
+                const result = await work(this);
+
+                await this.run("COMMIT");
+
+                return result;
+
             }
 
-            throw error;
+            catch (error) {
 
-        }
+                try {
+                    await this.run("ROLLBACK");
+                }
+                catch {
+                    // Rollback bisa gagal bila koneksi sudah bermasalah;
+                    // error aslinya yang lebih berguna untuk dilempar.
+                }
+
+                throw error;
+
+            }
+
+        });
 
     }
 
-    async close() {
+    close() {
 
-        if (!this.db) {
-            return;
-        }
+        return this.ownConnection(() => {
 
-        const db = this.db;
+            if (!this.db) {
+                return;
+            }
 
-        this.db = null;
-        this.ready = null;
+            const db = this.db;
 
-        return new Promise(resolve => db.close(() => resolve()));
+            this.db = null;
+            this.ready = null;
+
+            return new Promise(resolve => db.close(() => resolve()));
+
+        });
 
     }
 
