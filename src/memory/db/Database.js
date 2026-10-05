@@ -12,20 +12,24 @@ const { AsyncLocalStorage } = require("node:async_hooks");
  *
  * KEPEMILIKAN TRANSAKSI (R4): keanggotaan transaksi hanya lewat capability
  * `TransactionScope` yang diberikan ke callback `exclusive` / `transaction`.
- * Konteks async (AsyncLocalStorage) TIDAK memberi kepemilikan.
+ * Konteks async (AsyncLocalStorage) TIDAK memberi kepemilikan; ia hanya
+ * dipakai untuk mengenali asal panggilan (provenance).
  *
- * SIKLUS HIDUP TRANSAKSI (R5): Database memiliki BEGIN/COMMIT/ROLLBACK.
+ * SIKLUS HIDUP TRANSAKSI (R5/R6): Database memiliki BEGIN/COMMIT/ROLLBACK.
  *   - capability menolak pernyataan kontrol transaksi (BEGIN, COMMIT, END,
- *     ROLLBACK, SAVEPOINT, RELEASE) dari kode pemanggil;
- *   - saat span keluar, koneksi WAJIB tanpa transaksi. Sisa transaksi di-rollback
- *     (tidak pernah di-commit diam-diam) dan dilaporkan sebagai error. Keadaan
- *     koneksi diperiksa dengan ROLLBACK: "no transaction is active" berarti bersih.
- *     node-sqlite3 tidak mengekspos status autocommit, jadi ini sumber kebenaran
- *     yang paling andal yang tersedia;
- *   - bila ROLLBACK tidak bisa dipastikan, koneksi di-poison dan operasi
- *     berikutnya ditolak sampai instance dibuka ulang;
- *   - span yang menunggu kerja di luar dirinya dibatasi `spanDeadlineMs`,
- *     sehingga antrean tidak terkunci selamanya.
+ *     ROLLBACK, SAVEPOINT, RELEASE, ABORT) pada awal pernyataan. Pemisahan
+ *     pernyataan mengikuti tokenizer SQLite: `;` dan komentar hanya bermakna di
+ *     luar literal dan identifier kutip (R6-F1). Satu capability call = satu
+ *     pernyataan;
+ *   - span berstatus ACTIVE → COMPLETED | EXPIRED | FAILED, satu transisi terminal;
+ *   - span yang EXPIRED / sudah berakhir tidak bisa lagi menyentuh database lewat
+ *     API publik (R6-F2). Konteks async hanya dipakai untuk mendeteksi asal itu;
+ *   - COMMIT atau ROLLBACK yang gagal / tidak terbukti = instance di-POISON:
+ *     handle native ditutup (transaksi tersisa dibuang SQLite), dan instance ini
+ *     tidak pernah dipakai lagi. Pemanggil membuat Database baru secara eksplisit;
+ *   - keadaan koneksi saat span keluar diperiksa dengan ROLLBACK: "no transaction
+ *     is active" berarti bersih;
+ *   - span yang menunggu kerja di luar dirinya dibatasi `spanDeadlineMs`.
  */
 
 const DEFAULT_SPAN_DEADLINE_MS = 30_000;
@@ -37,16 +41,33 @@ const CODES = Object.freeze({
     REENTRANT: "DB_SPAN_REENTRANT",
     FOREIGN: "FOREIGN_DB_TX_CAPABILITY",
     DEADLINE: "DB_SPAN_DEADLINE_EXCEEDED",
+    SPAN_EXPIRED: "DB_SPAN_EXPIRED",
+    SPAN_ENDED: "DB_SPAN_ENDED",
     DANGLING: "DB_TX_DANGLING_AT_SPAN_EXIT",
     POISONED: "DB_CONNECTION_POISONED",
+    ROLLBACK_FAILED: "DB_TX_ROLLBACK_FAILED",
+    COMMIT_FAILED: "DB_TX_COMMIT_FAILED",
     TX_CONTROL: "TX_CONTROL_NOT_ALLOWED",
+    MULTI_STATEMENT: "TX_MULTI_STATEMENT_NOT_ALLOWED",
+    MALFORMED_SQL: "TX_SQL_MALFORMED",
     BEGIN_BUSY: "TX_BEGIN_BUSY"
 });
 
-const FINISH = Symbol("finish");
+const SPAN_STATE = Object.freeze({
+    ACTIVE: "ACTIVE",
+    COMPLETED: "COMPLETED",
+    EXPIRED: "EXPIRED",
+    FAILED: "FAILED"
+});
+
+const COMMIT = Symbol("commit");
+const ROLLBACK = Symbol("rollback");
 const BEGIN = Symbol("begin");
 
 const SPAN_CONTEXT = new AsyncLocalStorage();
+
+const CONTROL_KEYWORDS = new Set(["BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE", "ABORT"]);
+const WORD = /[A-Za-z_]\w*/y;
 
 const noop = () => {};
 
@@ -54,50 +75,217 @@ function dbError(code, message, cause) {
     return Object.assign(new Error(`${code}: ${message}`, cause === undefined ? undefined : { cause }), { code });
 }
 
-/** Pernyataan kontrol transaksi pada SQL teks (dipisah per `;`, komentar dibuang). */
-function isTransactionControl(sql) {
+/* ------------------------- pemecah SQL (R6-F1) --------------------------- */
 
-    const text = String(sql ?? "")
-        .replace(/\/\*[\s\S]*?\*\//g, " ")
-        .replace(/--[^\n]*/g, " ");
+/** Lewati spasi dan komentar mulai dari `i`; kembalikan indeks token bermakna berikutnya. */
+function skipTrivia(text, i) {
+    while (i < text.length) {
+        if (/\s/.test(text[i])) {
+            i += 1;
+        }
+        else if (text.startsWith("--", i)) {
+            const newline = text.indexOf("\n", i);
+            i = newline < 0 ? text.length : newline + 1;
+        }
+        else if (text.startsWith("/*", i)) {
+            const end = text.indexOf("*/", i + 2);
+            i = end < 0 ? text.length : end + 2;
+        }
+        else {
+            break;
+        }
+    }
+    return i;
+}
 
-    return text.split(";").some(part => /^\s*(BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b/i.test(part));
-
+/** Indeks setelah penutup `quote` (kutip ganda `''` adalah escape). -1 bila tidak tertutup. */
+function closeQuote(text, from, quote) {
+    let i = from;
+    for (;;) {
+        const at = text.indexOf(quote, i);
+        if (at < 0) {
+            return -1;
+        }
+        if (text[at + 1] === quote) {
+            i = at + 2;
+            continue;
+        }
+        return at + 1;
+    }
 }
 
 /**
- * Span satu transaksi. Operasinya berurutan (FIFO). Setelah `retire` span
- * tidak pernah bisa dipakai lagi, termasuk oleh `unseal`.
+ * Pecah SQL di batas pernyataan sejati: `;` di luar literal string, identifier
+ * kutip ("…", `…`, […]), dan komentar. Tidak memotong komentar secara membabi
+ * buta dan tidak mencari substring. `malformed` bila literal/identifier tidak tertutup.
+ */
+function splitStatements(sql) {
+
+    const text = String(sql ?? "");
+    const statements = [];
+    let start = 0;
+    let i = 0;
+
+    while (i < text.length) {
+
+        const ch = text[i];
+
+        if (ch === "'" || ch === "\"" || ch === "`") {
+            const end = closeQuote(text, i + 1, ch);
+            if (end < 0) {
+                return { statements, malformed: true };
+            }
+            i = end;
+        }
+        else if (ch === "[") {
+            const end = text.indexOf("]", i + 1);
+            if (end < 0) {
+                return { statements, malformed: true };
+            }
+            i = end + 1;
+        }
+        else if (text.startsWith("--", i) || text.startsWith("/*", i)) {
+            i = skipTrivia(text, i);
+        }
+        else {
+            if (ch === ";") {
+                statements.push(text.slice(start, i));
+                start = i + 1;
+            }
+            i += 1;
+        }
+
+    }
+
+    statements.push(text.slice(start));
+
+    return { statements, malformed: false };
+
+}
+
+/** Kata kunci pertama sebuah pernyataan (huruf besar), melewati komentar dan spasi. */
+function leadingWords(statement, max) {
+
+    const words = [];
+    let i = skipTrivia(statement, 0);
+
+    while (words.length < max && i < statement.length) {
+        WORD.lastIndex = i;
+        const match = WORD.exec(statement);
+        if (!match) {
+            break;
+        }
+        words.push(match[0].toUpperCase());
+        i = skipTrivia(statement, i + match[0].length);
+    }
+
+    return words;
+
+}
+
+/** Ringkasan SQL untuk gerbang capability. */
+function inspectSql(sql) {
+
+    const { statements, malformed } = splitStatements(sql);
+    const meaningful = statements.filter(statement => skipTrivia(statement, 0) < statement.length);
+
+    const control = meaningful.some(statement => {
+        let words = leadingWords(statement, 4);
+        if (words[0] === "EXPLAIN") {
+            words = words[1] === "QUERY" && words[2] === "PLAN" ? words.slice(3) : words.slice(1);
+        }
+        return CONTROL_KEYWORDS.has(words[0]);
+    });
+
+    return { count: meaningful.length, control, malformed };
+
+}
+
+/** Pernyataan kontrol transaksi pada SQL teks. */
+function isTransactionControl(sql) {
+    return inspectSql(sql).control;
+}
+
+/** Galat bila SQL tidak boleh lewat capability; null bila boleh. */
+function refuseCapabilitySql(sql) {
+
+    const { count, control, malformed } = inspectSql(sql);
+
+    if (malformed) {
+        return dbError(CODES.MALFORMED_SQL, "unterminated string literal or identifier");
+    }
+    if (control) {
+        return dbError(CODES.TX_CONTROL, "BEGIN/COMMIT/ROLLBACK/SAVEPOINT are owned by Database.transaction, not the capability");
+    }
+    if (count > 1) {
+        return dbError(CODES.MULTI_STATEMENT, `one statement per capability call, got ${count}`);
+    }
+
+    return null;
+
+}
+
+/* ------------------------------ span (R6) -------------------------------- */
+
+/**
+ * Span satu transaksi. Operasinya berurutan (FIFO).
+ *
+ * Status hidup: ACTIVE → COMPLETED | EXPIRED | FAILED (satu transisi terminal).
+ * `sealed` menolak operasi baru tanpa membatalkan yang sudah diantre; `finishing`
+ * menandai COMMIT/ROLLBACK, yang tidak bisa lagi kedaluwarsa.
  */
 class Span {
 
     #gate;
-    #open = true;
-    #retired = false;
+    #state = SPAN_STATE.ACTIVE;
+    #sealed = false;
+    #finishing = false;
     #chain = Promise.resolve();
 
     constructor(gate) {
         this.#gate = gate;
     }
 
-    isLive() {
-        return this.#open;
+    get gate() {
+        return this.#gate;
     }
 
-    seal() {
-        this.#open = false;
+    get state() {
+        return this.#state;
     }
 
-    /** Hanya bila COMMIT gagal dan transaksi masih terbuka untuk ROLLBACK. */
-    unseal() {
-        if (!this.#retired) {
-            this.#open = true;
+    /** Sudah selesai dalam arti apa pun (COMPLETED / EXPIRED / FAILED). */
+    isEnded() {
+        return this.#state !== SPAN_STATE.ACTIVE;
+    }
+
+    /** Batas deadline. Span yang sedang COMMIT/ROLLBACK tidak bisa kedaluwarsa. */
+    expire() {
+        if (this.#state !== SPAN_STATE.ACTIVE || this.#finishing) {
+            return false;
+        }
+        this.#state = SPAN_STATE.EXPIRED;
+        return true;
+    }
+
+    /** Transisi terminal pertama yang menang. */
+    conclude(state) {
+        if (this.#state === SPAN_STATE.ACTIVE) {
+            this.#state = state;
         }
     }
 
-    retire() {
-        this.#retired = true;
-        this.#open = false;
+    seal() {
+        this.#sealed = true;
+    }
+
+    /** Hanya span ACTIVE yang belum disegel boleh mulai COMMIT/ROLLBACK. */
+    beginFinish() {
+        if (this.#state !== SPAN_STATE.ACTIVE || this.#sealed || this.#finishing) {
+            return false;
+        }
+        this.#finishing = true;
+        return true;
     }
 
     /** Antrekan operasi penyimpanan di belakang operasi span sebelumnya. */
@@ -106,12 +294,15 @@ class Span {
         const ctx = SPAN_CONTEXT.getStore();
 
         // Capability span lain yang masih hidup pada konteks ini: tolak.
-        if (ctx && ctx.span !== this && ctx.span.isLive()) {
+        if (ctx && ctx.span !== this && !ctx.span.isEnded()) {
             return Promise.reject(dbError(CODES.FOREIGN, "transaction capability belongs to another open span"));
         }
 
-        if (!closing && !this.#open) {
-            return Promise.reject(dbError(CODES.EXPIRED, "transaction capability is no longer usable"));
+        // Diperiksa saat dipanggil, bukan saat dijalankan: operasi yang sudah
+        // diterima sebelum deadline tetap jalan dan di-rollback di exit span.
+        const usable = closing ? this.#finishing : (!this.#sealed && this.#state === SPAN_STATE.ACTIVE);
+        if (!usable) {
+            return Promise.reject(dbError(CODES.EXPIRED, `transaction capability is no longer usable (span ${this.#state})`));
         }
 
         const run = this.#chain.then(async () => work(await this.#gate.ensure()));
@@ -163,11 +354,9 @@ class TransactionScope {
 
     #statement(sql, work) {
 
-        if (isTransactionControl(sql)) {
-            return Promise.reject(dbError(
-                CODES.TX_CONTROL,
-                "BEGIN/COMMIT/ROLLBACK/SAVEPOINT are owned by Database.transaction, not the capability"
-            ));
+        const refusal = refuseCapabilitySql(sql);
+        if (refusal) {
+            return Promise.reject(refusal);
         }
 
         return this.#span.enqueue(work);
@@ -203,22 +392,56 @@ class TransactionScope {
 
     }
 
-    /** COMMIT / ROLLBACK. Capability ditutup sebelum SQL dikirim. */
-    [FINISH](sql) {
+    /**
+     * COMMIT. Sukses hanya bila SQLite melaporkan COMMIT selesai. Gagal = hasil
+     * tidak terbukti, jadi instance di-poison dan pemanggil tidak menerima sukses.
+     */
+    async [COMMIT]() {
 
         const span = this.#span;
 
-        if (!span.isLive()) {
-            return Promise.reject(dbError(CODES.EXPIRED, "transaction already finished"));
+        if (!span.beginFinish()) {
+            throw dbError(CODES.EXPIRED, "span ended before COMMIT; the transaction is rolled back at span exit");
         }
 
-        span.seal();
+        try {
+            await span.enqueue(db => runOn(db, "COMMIT", []), { closing: true });
+        }
+        catch (error) {
+            await span.gate.poison(error);
+            throw dbError(CODES.COMMIT_FAILED, "COMMIT did not complete; the outcome is unverified, so the write is not acknowledged. Database instance poisoned; create a new Database instance", error);
+        }
 
-        return span.enqueue(db => runOn(db, sql, []), { closing: true }).catch(error => {
-            // COMMIT gagal: transaksi masih terbuka, izinkan ROLLBACK.
-            span.unseal();
-            throw error;
-        });
+    }
+
+    /**
+     * ROLLBACK setelah callback gagal. "no transaction is active" = sudah bersih.
+     * Kegagalan lain = hasil tidak terbukti; instance di-poison dan error asli
+     * tetap dilampirkan, tidak ditelan.
+     */
+    async [ROLLBACK](callbackError) {
+
+        const span = this.#span;
+
+        // Span sudah berakhir (mis. deadline): exit span yang melakukan ROLLBACK dan memverifikasi.
+        if (!span.beginFinish()) {
+            return;
+        }
+
+        try {
+            await span.enqueue(db => runOn(db, "ROLLBACK", []), { closing: true });
+        }
+        catch (error) {
+
+            if (/no transaction is active/i.test(String(error?.message ?? ""))) {
+                return;
+            }
+
+            await span.gate.poison(error);
+
+            throw Object.assign(dbError(CODES.ROLLBACK_FAILED, `ROLLBACK failed after callback error (${callbackError?.message ?? "unknown"}). Transaction outcome unknown, so it is not reported as rolled back. Database instance poisoned; create a new Database instance`, error), { callbackError });
+
+        }
 
     }
 
@@ -230,14 +453,17 @@ class TransactionScope {
  *
  *   - operasi unscoped mengantre FIFO; dari dalam span hidup milik gerbang ini
  *     ia DITOLAK sebelum menyentuh data;
- *   - span memegang antrean; keluar span: seal → drain → settle → retire;
+ *   - dari dalam span yang sudah berakhir (provenance) ia DITOLAK juga, sebelum
+ *     antrean: callback zombie tidak boleh menyentuh database;
+ *   - span memegang antrean; keluar span: seal → drain → settle → conclude;
  *   - kerja melebihi `spanDeadlineMs` dipaksa berakhir (antrean dilepas);
- *   - gagal settle = koneksi di-poison.
+ *   - COMMIT/ROLLBACK tidak terbukti, atau settle gagal = poison.
  */
 class TransactionGate {
 
     #open;
     #settle;
+    #release;
     #deadlineMs;
     #queue = Promise.resolve();
     #poisoned = null;
@@ -247,15 +473,45 @@ class TransactionGate {
      * @param {() => Promise<*>} hooks.open  siapkan koneksi, kembalikan handle-nya
      * @param {(connection: *) => Promise<boolean>} hooks.settle  pastikan tidak ada
      *        transaksi tersisa; true bila ada yang terbuka dan sudah di-rollback
+     * @param {() => Promise<void>} [hooks.release]  lepaskan handle native saat poison
      */
-    constructor({ open, settle, spanDeadlineMs = DEFAULT_SPAN_DEADLINE_MS }) {
+    constructor({ open, settle, release = async () => {}, spanDeadlineMs = DEFAULT_SPAN_DEADLINE_MS }) {
         this.#open = open;
         this.#settle = settle;
+        this.#release = release;
         this.#deadlineMs = spanDeadlineMs;
     }
 
+    get poisonError() {
+        return this.#poisoned;
+    }
+
     ensure() {
+        if (this.#poisoned) {
+            return Promise.reject(this.#poisoned);
+        }
         return this.#open();
+    }
+
+    /**
+     * Instance tidak terbukti bersih: tandai poisoned selamanya dan lepaskan
+     * handle. Bila pelepasan gagal, instance tetap poisoned (tanpa reuse).
+     */
+    async poison(cause) {
+
+        if (this.#poisoned) {
+            return;
+        }
+
+        this.#poisoned = dbError(CODES.POISONED, "database instance is poisoned: transaction state is unknown, so this instance is never used again; create a new Database instance", cause);
+
+        try {
+            await this.#release();
+        }
+        catch {
+            // Handle dipertahankan; close() bisa mencoba lagi. Instance tetap poisoned.
+        }
+
     }
 
     /** Antrean koneksi: satu unit kerja berjalan setelah unit sebelumnya selesai. */
@@ -263,7 +519,7 @@ class TransactionGate {
 
         const run = this.#queue.then(() => {
             if (this.#poisoned && !closing) {
-                throw dbError(CODES.POISONED, "connection is unusable after a failed rollback; reopen the database", this.#poisoned);
+                throw this.#poisoned;
             }
             return work();
         });
@@ -274,29 +530,57 @@ class TransactionGate {
 
     }
 
-    /** Span hidup milik gerbang ini pada konteks async saat ini, atau null. */
-    #liveSpan() {
+    /** Span milik gerbang ini pada konteks async saat ini (provenance), atau null. */
+    #ambient() {
         const ctx = SPAN_CONTEXT.getStore();
-        return ctx && ctx.gate === this && ctx.span.isLive() ? ctx.span : null;
+        return ctx && ctx.gate === this ? ctx.span : null;
+    }
+
+    /** Penolakan untuk panggilan dari dalam span; null bila panggilan boleh. */
+    #refusal(exclusive) {
+
+        const span = this.#ambient();
+
+        if (!span) {
+            return null;
+        }
+
+        // R6-F2: EXPIRED / FAILED span callbacks are zombies. A COMPLETED span's callback created
+        // later is an ordinary external caller (R4 contract); the residual is listed in the evidence.
+        if (span.state === SPAN_STATE.EXPIRED) {
+            return dbError(CODES.SPAN_EXPIRED, "span expired; its callbacks have no database access. The callback may still run, but it cannot reach the database");
+        }
+
+        if (span.state === SPAN_STATE.FAILED) {
+            return dbError(CODES.SPAN_ENDED, "span failed; its callbacks have no database access");
+        }
+
+        if (span.state === SPAN_STATE.COMPLETED) {
+            return null;
+        }
+
+        return exclusive
+            ? dbError(CODES.REENTRANT, "exclusive span cannot be nested inside an open transaction")
+            : dbError(CODES.UNSCOPED, "plain Database call inside an open transaction; use the transaction capability");
+
     }
 
     unscoped(work, { closing = false } = {}) {
 
-        if (this.#liveSpan()) {
-            return Promise.reject(dbError(
-                CODES.UNSCOPED,
-                "plain Database call inside an open transaction; use the transaction capability"
-            ));
+        const refusal = this.#refusal(false);
+        if (refusal) {
+            return Promise.reject(refusal);
         }
 
-        return this.acquire(async () => work(await this.ensure()), { closing });
+        return this.acquire(async () => work(closing ? null : await this.ensure()), { closing });
 
     }
 
     exclusive(work) {
 
-        if (this.#liveSpan()) {
-            return Promise.reject(dbError(CODES.REENTRANT, "exclusive span cannot be nested inside an open transaction"));
+        const refusal = this.#refusal(true);
+        if (refusal) {
+            return Promise.reject(refusal);
         }
 
         return this.acquire(() => this.#runSpan(work));
@@ -311,10 +595,14 @@ class TransactionGate {
         let timer;
 
         const deadline = new Promise((_, reject) => {
-            timer = setTimeout(() => reject(dbError(
-                CODES.DEADLINE,
-                `span exceeded ${this.#deadlineMs} ms; queued callers released`
-            )), this.#deadlineMs);
+            timer = setTimeout(() => {
+                if (span.expire()) {
+                    reject(dbError(
+                        CODES.DEADLINE,
+                        `span exceeded ${this.#deadlineMs} ms; queued callers released`
+                    ));
+                }
+            }, this.#deadlineMs);
         });
 
         // Kerja yang terlambat tidak boleh menjadi unhandled rejection setelah deadline.
@@ -338,18 +626,23 @@ class TransactionGate {
 
         await span.drain();
 
-        let dangling;
+        let dangling = false;
 
-        try {
-            dangling = await this.#settle(await this.ensure());
-        }
-        catch (error) {
-            this.#poisoned = error;
-            span.retire();
-            throw dbError(CODES.POISONED, "transaction state could not be verified closed; connection poisoned", error);
+        if (!this.#poisoned) {
+            try {
+                dangling = await this.#settle(await this.ensure());
+            }
+            catch (error) {
+                await this.poison(error);
+                failure = this.#poisoned;
+            }
         }
 
-        span.retire();
+        if (this.#poisoned) {
+            failure = failure ?? this.#poisoned;
+        }
+
+        span.conclude(failure ? SPAN_STATE.FAILED : SPAN_STATE.COMPLETED);
 
         if (failure) {
             throw failure;
@@ -378,6 +671,7 @@ class Database {
         this.gate = new TransactionGate({
             open: () => this.ensure(),
             settle: settleConnection,
+            release: () => this.#closeHandle({ keepOnError: true }),
             spanDeadlineMs
         });
 
@@ -385,8 +679,8 @@ class Database {
 
     /**
      * Operasi tanpa capability. Ditolak bila dipanggil dari konteks span yang
-     * masih hidup (sebelum menyentuh database); selain itu mengantre di
-     * belakang pemilik koneksi.
+     * masih hidup (sebelum menyentuh database) atau sudah berakhir; selain itu
+     * mengantre di belakang pemilik koneksi.
      */
     unscoped(work) {
         return this.gate.unscoped(work);
@@ -401,6 +695,10 @@ class Database {
     }
 
     open() {
+
+        if (this.gate.poisonError) {
+            return Promise.reject(this.gate.poisonError);
+        }
 
         if (this.ready) {
             return this.ready;
@@ -479,9 +777,9 @@ class Database {
      * BEGIN IMMEDIATE, COMMIT, dan ROLLBACK; callback hanya menerima `tx`.
      *
      * Sukses callback = COMMIT selesai lebih dulu, baru resolve. Callback gagal
-     * = ROLLBACK, lalu error asli dilempar. Kegagalan ROLLBACK tidak ditelan
-     * diam-diam: settle gerbang memeriksa keadaan koneksi, dan bila tidak bisa
-     * dipastikan bersih koneksi di-poison.
+     * = ROLLBACK, lalu error asli dilempar. ROLLBACK atau COMMIT yang gagal
+     * tidak pernah dilaporkan sebagai sukses: instance di-poison
+     * (DB_TX_ROLLBACK_FAILED / DB_TX_COMMIT_FAILED).
      *
      * Dipakai saat menyimpan memori: baris memories, kaitan
      * entitas, dan indeks FTS harus masuk bersama-sama — memori
@@ -496,20 +794,14 @@ class Database {
             let result;
 
             try {
-
                 result = await work(tx);
-
-                await tx[FINISH]("COMMIT");
-
             }
             catch (error) {
-
-                // Hasil ROLLBACK diverifikasi oleh settle gerbang, bukan di sini.
-                await tx[FINISH]("ROLLBACK").catch(noop);
-
+                await tx[ROLLBACK](error);
                 throw error;
-
             }
+
+            await tx[COMMIT]();
 
             return result;
 
@@ -518,21 +810,33 @@ class Database {
     }
 
     close() {
+        return this.gate.unscoped(() => this.#closeHandle({ keepOnError: this.gate.poisonError !== null }), { closing: true });
+    }
 
-        return this.gate.unscoped(() => {
+    /**
+     * Tutup handle native. Transaksi yang belum selesai dibuang SQLite saat
+     * koneksi ditutup, sehingga kunci tulis ikut lepas. Dengan keepOnError,
+     * kegagalan menutup mempertahankan handle agar bisa dicoba lagi.
+     */
+    #closeHandle({ keepOnError }) {
 
-            if (!this.db) {
-                return;
+        const handle = this.db;
+
+        if (!handle) {
+            return Promise.resolve();
+        }
+
+        return new Promise((resolve, reject) => handle.close(error => {
+
+            if (error && keepOnError) {
+                return reject(error);
             }
-
-            const db = this.db;
 
             this.db = null;
             this.ready = null;
+            resolve();
 
-            return new Promise(resolve => db.close(() => resolve()));
-
-        }, { closing: true });
+        }));
 
     }
 
@@ -647,4 +951,6 @@ function decorate(error, sql) {
 module.exports = Database;
 module.exports.CODES = CODES;
 module.exports.TransactionGate = TransactionGate;
+module.exports.dbError = dbError;
 module.exports.isTransactionControl = isTransactionControl;
+module.exports.splitStatements = splitStatements;

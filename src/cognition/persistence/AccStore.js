@@ -11,14 +11,19 @@
  * maupun level reducer (set dedupe) — §102.
  */
 
-const { TransactionGate } = require("../../memory/db/Database");
+const { TransactionGate, CODES, dbError } = require("../../memory/db/Database");
 
 const MEMORY_BACKEND = "memory";
 const SQLITE_BACKEND = "sqlite";
 
 /* ----------------------------- memory ---------------------------------- */
 
-function createMemoryAccStore({ spanDeadlineMs } = {}) {
+/**
+ * `faults` adalah seam uji (default no-op): memaksa kegagalan ROLLBACK/COMMIT
+ * agar paritas poison dengan SQLite bisa dibuktikan. Memory tidak punya
+ * ROLLBACK sungguhan; yang disimulasikan adalah langkah yang bisa gagal.
+ */
+function createMemoryAccStore({ spanDeadlineMs, faults = {} } = {}) {
 
     const journal = [];            // baris naik sesuai seq
     const byEventId = new Map();
@@ -71,6 +76,9 @@ function createMemoryAccStore({ spanDeadlineMs } = {}) {
         // R5: only operations made through `tx` belong to the span; unscoped calls inside it are
         // rejected and outside calls queue behind it, exactly as with SQLite. Writes are staged and
         // applied in one closing step after work() resolves; a throw discards them.
+        // R6: the closing step runs only while the span is still open (a span that expired during
+        // work() never applies its writes), and a failing commit or rollback poisons the instance,
+        // exactly as the SQLite Database does.
         transact(work) {
             return gate.exclusive(async span => {
                 const staged = new Map();
@@ -78,13 +86,37 @@ function createMemoryAccStore({ spanDeadlineMs } = {}) {
                     getKv: key => span.enqueue(async () => (staged.has(key) ? staged.get(key) : (kv.has(key) ? kv.get(key) : null))),
                     putKv: (key, value) => span.enqueue(async () => { staged.set(key, value ?? null); })
                 };
-                const out = await work(tx);
-                span.seal();
-                await span.enqueue(async () => {
-                    for (const [key, value] of staged) {
-                        if (value === null) kv.delete(key); else kv.set(key, value);
+                let out;
+                try {
+                    out = await work(tx);
+                }
+                catch (error) {
+                    if (span.beginFinish()) {
+                        try {
+                            if (faults.rollback) faults.rollback();
+                        }
+                        catch (rollbackError) {
+                            await gate.poison(rollbackError);
+                            throw Object.assign(dbError(CODES.ROLLBACK_FAILED, `ROLLBACK failed after callback error (${error?.message ?? "unknown"}). Transaction outcome unknown, so it is not reported as rolled back. Database instance poisoned; create a new Database instance`, rollbackError), { callbackError: error });
+                        }
                     }
-                }, { closing: true });
+                    throw error;
+                }
+                if (!span.beginFinish()) {
+                    throw dbError(CODES.EXPIRED, "span ended before COMMIT; staged writes discarded");
+                }
+                try {
+                    await span.enqueue(async () => {
+                        if (faults.commit) faults.commit();
+                        for (const [key, value] of staged) {
+                            if (value === null) kv.delete(key); else kv.set(key, value);
+                        }
+                    }, { closing: true });
+                }
+                catch (error) {
+                    await gate.poison(error);
+                    throw dbError(CODES.COMMIT_FAILED, "COMMIT did not complete; the outcome is unverified, so the write is not acknowledged. Database instance poisoned; create a new Database instance", error);
+                }
                 return out;
             });
         },
