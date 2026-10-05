@@ -11,24 +11,33 @@
  * maupun level reducer (set dedupe) — §102.
  */
 
+const { TransactionGate } = require("../../memory/db/Database");
+
 const MEMORY_BACKEND = "memory";
 const SQLITE_BACKEND = "sqlite";
 
 /* ----------------------------- memory ---------------------------------- */
 
-function createMemoryAccStore() {
+function createMemoryAccStore({ spanDeadlineMs } = {}) {
 
     const journal = [];            // baris naik sesuai seq
     const byEventId = new Map();
     const kv = new Map();
-    let memoryTxTail = Promise.resolve();
     const snapshots = [];
     const predictions = new Map();
     const experiences = new Map();
     const commitments = new Map();
     const substrateEpochs = new Map();
 
-    return {
+    // R5: kontrak kepemilikan sama dengan SQLite (lihat Database/TransactionGate).
+    // Tidak ada SQL, jadi settle tidak pernah menemukan transaksi tersisa.
+    const gate = new TransactionGate({
+        open: async () => null,
+        settle: async () => false,
+        spanDeadlineMs
+    });
+
+    const api = {
         backend: MEMORY_BACKEND,
 
         async appendEvent(row) {
@@ -59,21 +68,25 @@ function createMemoryAccStore() {
         async getKv(key) { return kv.has(key) ? kv.get(key) : null; },
 
         // R2 atomic primitive (contract: see transact in createSqliteAccStore).
-        // Writes are staged and applied only when work() resolves; a throw discards them.
+        // R5: only operations made through `tx` belong to the span; unscoped calls inside it are
+        // rejected and outside calls queue behind it, exactly as with SQLite. Writes are staged and
+        // applied in one closing step after work() resolves; a throw discards them.
         transact(work) {
-            const run = async () => {
+            return gate.exclusive(async span => {
                 const staged = new Map();
                 const tx = {
-                    async getKv(key) { return staged.has(key) ? staged.get(key) : (kv.has(key) ? kv.get(key) : null); },
-                    async putKv(key, value) { staged.set(key, value); }
+                    getKv: key => span.enqueue(async () => (staged.has(key) ? staged.get(key) : (kv.has(key) ? kv.get(key) : null))),
+                    putKv: (key, value) => span.enqueue(async () => { staged.set(key, value ?? null); })
                 };
                 const out = await work(tx);
-                for (const [key, value] of staged) kv.set(key, value);
+                span.seal();
+                await span.enqueue(async () => {
+                    for (const [key, value] of staged) {
+                        if (value === null) kv.delete(key); else kv.set(key, value);
+                    }
+                }, { closing: true });
                 return out;
-            };
-            const next = memoryTxTail.then(run);
-            memoryTxTail = next.then(() => {}, () => {});
-            return next;
+            });
         },
 
         async saveSnapshot(snap) {
@@ -122,6 +135,21 @@ function createMemoryAccStore() {
                 ({ epoch_id, payload: v }));
         }
     };
+
+    return guardUnscoped(api, gate);
+}
+
+/**
+ * R5: setiap operasi unscoped memory lewat gerbang, sama seperti `Database.run`:
+ * ditolak dari dalam span hidup, dan mengantre di belakang span lain.
+ */
+function guardUnscoped(api, gate) {
+    for (const key of Object.keys(api)) {
+        const fn = api[key];
+        if (key === "transact" || typeof fn !== "function") continue;
+        api[key] = (...args) => gate.unscoped(() => fn.apply(api, args));
+    }
+    return api;
 }
 
 /* ----------------------------- sqlite ---------------------------------- */
@@ -219,7 +247,8 @@ function createSqliteAccStore(database) {
         // the transaction capability `tx` belong to this span. Async context does not
         // confer ownership, so appendEvent and putKv from other subsystems never join it:
         // called inside the span they fail before touching the database, and called from
-        // outside they wait until COMMIT or ROLLBACK.
+        // outside they wait until COMMIT or ROLLBACK. R5: Database owns BEGIN/COMMIT/ROLLBACK
+        // and verifies no transaction survives span exit.
         transact(work) {
             return database.transaction(tx => work({
                 async getKv(key) {
@@ -236,7 +265,10 @@ function createSqliteAccStore(database) {
                          ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
                         [key, JSON.stringify(value)]);
                 }
-            }), { begin: beginImmediate });
+            })).catch(error => {
+                if (error?.code !== "TX_BEGIN_BUSY") throw error;
+                throw Object.assign(new Error("ACC_TRANSACTION_BUSY: write lock not acquired"), { code: "ACC_TRANSACTION_BUSY" });
+            });
         },
 
         async saveSnapshot(snap) {
@@ -327,25 +359,6 @@ function createSqliteAccStore(database) {
             return rows.map(r => ({ epoch_id: r.epoch_id, payload: JSON.parse(r.payload) }));
         }
     };
-}
-
-const BEGIN_ATTEMPTS = 8;
-
-async function beginImmediate(tx) {
-    for (let attempt = 1; ; attempt += 1) {
-        try {
-            await tx.run("BEGIN IMMEDIATE");
-            return;
-        }
-        catch (error) {
-            const busy = error?.code === "SQLITE_BUSY" || /SQLITE_BUSY|database is locked/i.test(String(error?.message ?? ""));
-            if (!busy) throw error;
-            if (attempt >= BEGIN_ATTEMPTS) {
-                throw Object.assign(new Error("ACC_TRANSACTION_BUSY: write lock not acquired"), { code: "ACC_TRANSACTION_BUSY" });
-            }
-            await new Promise((resolve) => setTimeout(resolve, 10 * attempt));
-        }
-    }
 }
 
 function parsePayload(row) {
