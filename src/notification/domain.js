@@ -56,6 +56,12 @@ const TRANSITIONS = Object.freeze({
     DISMISSED: Object.freeze([]), RESOLVED: Object.freeze([]), EXPIRED: Object.freeze([])
 });
 
+// R4 (P2): privacy is never inferred. Only an explicit canonical value is kept.
+// Missing, null, malformed, or unknown labels are SECRET. Omission is not a public-data assertion.
+function canonicalPrivacy(value) {
+    return typeof value === "string" && SENSITIVITY.includes(value) ? value : "SECRET";
+}
+
 const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_LIST_LIMIT = 100;
 const MAX_LIST_LIMIT = 500;
@@ -111,6 +117,8 @@ function createNotificationDomain({ store, acc, clock = () => Date.now(), audit 
         });
     }
 
+    // Source contract (R4): producers MUST classify privacySensitivity (NORMAL | SENSITIVE | SECRET)
+    // when they know it. Omission is fail-safe: it is classified SECRET, never NORMAL.
     // DP §41/§42/§53: emit a source condition for one source OCCURRENCE. The
     // caller supplies sourceOccurrenceId (the source's own identity for that
     // occurrence, e.g. approval_id) and occurredAt (when it happened). Replays of
@@ -121,9 +129,9 @@ function createNotificationDomain({ store, acc, clock = () => Date.now(), audit 
     // occurrence within its canonical stream (entity_type, entity_id, event). Notification
     // never derives it: a missing or invalid sequence fails closed before any state is touched.
     async function emitSource({ sourceType, sourceId, sourceOccurrenceId, sourceOccurrenceSequence, occurredAt, event = null,
-        severity = "normal", privacySensitivity = "NORMAL", summary = null, targetSurfaces = [] } = {}) {
+        severity = "normal", privacySensitivity, summary = null, targetSurfaces = [] } = {}) {
         const ref = entityRef(sourceType, sourceId); // validates canonical entity reference
-        if (!SENSITIVITY.includes(privacySensitivity)) throw new NotificationError("INVALID_SENSITIVITY", privacySensitivity);
+        const privacy = canonicalPrivacy(privacySensitivity);
         if (typeof sourceOccurrenceId !== "string" || sourceOccurrenceId.length === 0) {
             throw new NotificationError("SOURCE_OCCURRENCE_REQUIRED", "emitSource needs the source occurrence identity");
         }
@@ -152,7 +160,7 @@ function createNotificationDomain({ store, acc, clock = () => Date.now(), audit 
                 occurred_at: occurredAt,
                 severity,
                 level,
-                privacy_sensitivity: privacySensitivity,
+                privacy_sensitivity: privacy,
                 summary,
                 target_surfaces: Array.isArray(targetSurfaces) ? targetSurfaces.slice() : [],
                 state: STATE.ACTIVE,
@@ -180,7 +188,7 @@ function createNotificationDomain({ store, acc, clock = () => Date.now(), audit 
                 draft.coalesce_count += 1;
                 draft.last_event_at = now;
                 // Sensitivity only ratchets up for this notification (F1).
-                const sensitivity = maxSensitivity(draft.privacy_sensitivity, privacySensitivity);
+                const sensitivity = maxSensitivity(draft.privacy_sensitivity, privacy);
                 const sensitivityUp = sensitivity !== draft.privacy_sensitivity;
                 draft.privacy_sensitivity = sensitivity;
                 const escalated = rank(level) !== rank(draft.level) || severity !== draft.severity;
