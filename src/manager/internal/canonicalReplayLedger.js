@@ -1,7 +1,12 @@
 "use strict";
 
-// SQLite provides cross-process atomic reservation (BEGIN IMMEDIATE) and FULL
-// synchronous durability on both Windows and POSIX. This store is evidence only.
+// TRANSACTION OWNERSHIP (HC-TX-MIGRATION): The canonical Database class now
+// owns BEGIN IMMEDIATE / COMMIT / ROLLBACK via database.transaction(). This
+// ledger owns the transaction BODY only. Serialization, poison tracking, and
+// connection lifecycle are delegated to Database's gate queue.
+//
+// SQLite provides cross-process atomic reservation and FULL synchronous
+// durability on both Windows and POSIX. This store is evidence only.
 //
 // INTEGRITY ARCHITECTURE (after audit of f73b01b):
 // - replay_events is the ONLY replay truth. It is an append-only HMAC chain:
@@ -12,8 +17,8 @@
 // - A KEYED anchor file stores the expected head as HMAC(key, "seq:hmac"), so
 //   tampering with, mutating, reordering, injecting into, or truncating the
 //   SQLite db ALONE is detected and the store fails closed.
-// - Cross-process atomicity comes from BEGIN IMMEDIATE (a single writer at a
-//   time) plus a check-then-append inside that exclusive transaction.
+// - Cross-process atomicity comes from Database.transaction() (BEGIN IMMEDIATE
+//   under the hood) plus a check-then-append inside that exclusive transaction.
 //
 // ROLLBACK BOUNDARY (P0-2):
 // The key and the anchor are separate files but co-located, and no monotonic
@@ -31,7 +36,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const sqlite3 = require("sqlite3");
+const Database = require("../../memory/db/Database");
 const { canonicalJson } = require("../../runtime/auditLedger/canonicalJson");
 
 const STATES = Object.freeze({
@@ -41,11 +46,6 @@ const STATES = Object.freeze({
 });
 
 function hmac(key, value) { return crypto.createHmac("sha256", key).update(value).digest("hex"); }
-function dbCall(db, method, sql, params = []) {
-    return new Promise((resolve, reject) => db[method](sql, params, function (error, row) {
-        if (error) reject(error); else resolve(method === "run" ? { lastID: this.lastID, changes: this.changes } : row ?? null);
-    }));
-}
 
 function syncDirectory(dir) {
     if (process.platform === "win32") {
@@ -199,28 +199,33 @@ function createCanonicalReplayLedger({
 
     const key = ensureKey(file);
     const anchorFile = file + ".anchor";
-    const db = new sqlite3.Database(file);
+
+    // TRANSACTION OWNERSHIP (HC-TX-MIGRATION): Use canonical Database to own
+    // the transaction lifecycle. The replay ledger owns transaction body only.
+    const database = new Database(file);
     let ready = null;
     async function doOpen() {
+        await database.open();
         // busy_timeout FIRST so the remaining statements run under a real
         // timeout. The WAL-mode transition on a BRAND-NEW file can still raise
         // SQLITE_BUSY under N-way simultaneous first opens (busy_timeout does
         // not cover that schema change), so the whole sequence is retried.
         for (let attempt = 0; ; attempt++) {
             try {
-                await dbCall(db, "run", "PRAGMA busy_timeout=10000");
-                await dbCall(db, "run", "PRAGMA journal_mode=WAL");
-                await dbCall(db, "run", "PRAGMA synchronous=FULL");
-        await dbCall(db, "run", "CREATE TABLE IF NOT EXISTS replay_events (seq INTEGER PRIMARY KEY AUTOINCREMENT,digest TEXT NOT NULL,state TEXT NOT NULL,capability_id TEXT,operation TEXT,principal TEXT,scope TEXT,authority_generation INTEGER,driver_id TEXT,at_ms INTEGER NOT NULL,prev_hmac TEXT NOT NULL,event_hmac TEXT NOT NULL)");
-        await dbCall(db, "run", "CREATE INDEX IF NOT EXISTS idx_replay_digest ON replay_events(digest)");
+                // Database.open() already sets WAL/synchronous/busy_timeout,
+                // but the replay ledger requires FULL synchronous for
+                // durability guarantees.
+                await database.exec("PRAGMA synchronous=FULL");
+                await database.exec("CREATE TABLE IF NOT EXISTS replay_events (seq INTEGER PRIMARY KEY AUTOINCREMENT,digest TEXT NOT NULL,state TEXT NOT NULL,capability_id TEXT,operation TEXT,principal TEXT,scope TEXT,authority_generation INTEGER,driver_id TEXT,at_ms INTEGER NOT NULL,prev_hmac TEXT NOT NULL,event_hmac TEXT NOT NULL)");
+                await database.exec("CREATE INDEX IF NOT EXISTS idx_replay_digest ON replay_events(digest)");
         // P0-1: replay_current is no longer a trusted source. Drop any legacy
         // table so no unauthenticated cache can ever influence execution.
                 // Committed-but-UNACKNOWLEDGED heads. Written in the SAME transaction as
         // the event, so a crash after COMMIT but before any witness advances is
         // an explicit, durable recovery state rather than a silent success. This
         // is NOT a replay-authority cache: it can only ever force refusal.
-        await dbCall(db, "run", "CREATE TABLE IF NOT EXISTS replay_unwitnessed(seq INTEGER PRIMARY KEY,event_hmac TEXT NOT NULL,at_ms INTEGER NOT NULL)");
-        await dbCall(db, "run", "DROP TABLE IF EXISTS replay_current");
+                await database.exec("CREATE TABLE IF NOT EXISTS replay_unwitnessed(seq INTEGER PRIMARY KEY,event_hmac TEXT NOT NULL,at_ms INTEGER NOT NULL)");
+                await database.exec("DROP TABLE IF EXISTS replay_current");
                 return;
             } catch (error) {
                 const text = String((error && error.code) || "") + " " + String((error && error.message) || "");
@@ -237,16 +242,21 @@ function createCanonicalReplayLedger({
         return ready;
     };
 
-    async function snapshot({ heal = true } = {}) {
+    /** Build an authenticated snapshot from the HMAC chain.
+     *  @param {object} opts
+     *  @param {boolean} opts.heal - Whether to heal stale anchors
+     *  @param {object} [opts.tx] - Transaction scope (when called inside database.transaction)
+     */
+    async function snapshot({ heal = true, tx = null } = {}) {
         await open();
+        const q = tx || database;
         // A reader can straddle a concurrent writer's COMMIT + anchor-persist and
         // observe a fresh anchor over a stale row snapshot. That benign timing is
         // retried (bounded); genuine truncation never self-heals and fails closed.
         // Under BEGIN IMMEDIATE writers are excluded, so an AHEAD anchor there is
         // real tamper and simply exhausts the retries.
         for (let attempt = 0; ; attempt++) {
-            const rows = await new Promise((resolve, reject) =>
-                db.all("SELECT * FROM replay_events ORDER BY seq", [], (e, r) => e ? reject(e) : resolve(r)));
+            const rows = await q.all("SELECT * FROM replay_events ORDER BY seq", []);
 
             // Authenticated history is the ONLY source of current state.
             let previous = "GENESIS";
@@ -268,8 +278,7 @@ function createCanonicalReplayLedger({
             // TRUSTED witness has durably advanced past it. If a higher head was
             // ever committed, truncating replay_events below it is DETECTED here
             // even when every anchor still agrees with the truncated DB.
-            const pending = await new Promise((resolve, reject) =>
-                db.all("SELECT seq FROM replay_unwitnessed ORDER BY seq", [], (e, r) => (e ? reject(e) : resolve(r))));
+            const pending = await q.all("SELECT seq FROM replay_unwitnessed ORDER BY seq", []);
             if (pending.length) {
                 const highest = pending[pending.length - 1].seq;
                 if (highest > rows.length) throw new Error("REPLAY_TRUNCATION_DETECTED");
@@ -280,7 +289,7 @@ function createCanonicalReplayLedger({
                 if (heal) {
                     const status = await persistAnchors(rows.length, previous);
                     if (!status.witnessOk) throw new Error("REPLAY_HEAD_UNWITNESSED: " + describePersistence(status));
-                    for (const row of pending) await markWitnessed(row.seq);
+                    for (const row of pending) await markWitnessed(row.seq, q);
                 }
             }
 
@@ -370,8 +379,9 @@ function createCanonicalReplayLedger({
 
     /** INSERT one authenticated event. Returns its hmac. Anchors are NOT written
      *  here: they are persisted only AFTER the enclosing transaction COMMITs, so
-     *  a failed commit can never leave an anchor AHEAD of committed history. */
-    async function insertEvent(binding, state, prior) {
+     *  a failed commit can never leave an anchor AHEAD of committed history.
+     *  @param {object} tx - Transaction scope from database.transaction() */
+    async function insertEvent(binding, state, prior, tx) {
         const seq = prior.rows.length + 1;
         const atMs = Math.floor(now());
         const core = {
@@ -389,12 +399,12 @@ function createCanonicalReplayLedger({
         catch { throw new Error("REPLAY_EVENT_NOT_CANONICAL"); }
         const eventHmac = hmac(key, canonicalCore);
 
-        await dbCall(db, "run", "INSERT INTO replay_events(seq,digest,state,capability_id,operation,principal,scope,authority_generation,driver_id,at_ms,prev_hmac,event_hmac) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        await tx.run("INSERT INTO replay_events(seq,digest,state,capability_id,operation,principal,scope,authority_generation,driver_id,at_ms,prev_hmac,event_hmac) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             [seq, core.digest, core.state, core.capabilityId, core.operation, core.principal,
              JSON.stringify(core.scope), core.authorityGeneration, core.driverId, atMs, core.prev, eventHmac]);
 
         // Same transaction as the event: either both land or neither does.
-        await dbCall(db, "run", "INSERT OR REPLACE INTO replay_unwitnessed(seq,event_hmac,at_ms) VALUES(?,?,?)",
+        await tx.run("INSERT OR REPLACE INTO replay_unwitnessed(seq,event_hmac,at_ms) VALUES(?,?,?)",
             [seq, eventHmac, atMs]);
 
         return { seq, eventHmac };
@@ -442,55 +452,30 @@ function createCanonicalReplayLedger({
         };
     }
 
-    // Connection lifecycle (F6, same root as authority F3). A ROLLBACK that fails
-    // leaves the write transaction open and unprovable. This instance is then
-    // poisoned: every later read or write fails closed. A new instance (reopen)
-    // starts clean. Only a ROLLBACK that actually runs can poison, so a failed
-    // COMMIT followed by a successful ROLLBACK stays a clean, truthful failure.
-    let poisoned = null;
-    function assertUsable() {
-        if (poisoned) {
-            throw Object.assign(new Error("REPLAY_TX_POISONED: koneksi tidak terbukti bersih; buka ulang ledger"),
-                { code: "REPLAY_TX_POISONED", cause: poisoned });
-        }
-    }
-    async function rollbackOrPoison(error) {
-        try { await dbCall(db, "run", "ROLLBACK"); }
-        catch (rollbackError) {
-            poisoned = rollbackError;
-            throw Object.assign(new Error("REPLAY_TX_ROLLBACK_FAILED: ROLLBACK gagal; state transaksi tidak terbukti bersih"),
-                { code: "REPLAY_TX_ROLLBACK_FAILED", cause: rollbackError, originalError: error });
-        }
-    }
-
     /** Remove a committed-but-UNWITNESSED tail so the durable store never retains an
      *  event that no trusted witness covers. Without this, an attacker who can
      *  truncate replay_events can also delete the co-located marker row, leaving a
      *  fully self-consistent frozen store (the audit of 2de4e8e). After this the
      *  unacknowledged append simply did not happen, so nothing is resurrectable.
      *  Safe: it only removes the exact tail seq, and only while it is still the
-     *  tail; anything else is left for fail-closed recovery. */
+     *  tail; anything else is left for fail-closed recovery.
+     *
+     *  TRANSACTION OWNERSHIP: uses database.transaction() instead of raw BEGIN/COMMIT/ROLLBACK. */
     async function compensate(seq) {
-        let ownTransaction = false;
         try {
-            // Called ONLY from the two POST-COMMIT sites (_reserve/_transition), where
-            // no caller transaction is open. This guard is defensive.
-            try { await dbCall(db, "run", "BEGIN IMMEDIATE"); ownTransaction = true; }
-            catch { ownTransaction = false; }
-            const tail = await new Promise((resolve, reject) =>
-                db.get("SELECT MAX(seq) AS maxSeq FROM replay_events", [], (e, r) => (e ? reject(e) : resolve(r))));
-            let removed = false;
-            if (tail && tail.maxSeq === seq) {
-                await dbCall(db, "run", "DELETE FROM replay_events WHERE seq = ?", [seq]);
-                await dbCall(db, "run", "DELETE FROM replay_unwitnessed WHERE seq = ?", [seq]);
-                removed = true;
-            }
-            if (ownTransaction) await dbCall(db, "run", "COMMIT");
-            return removed;
+            return await database.transaction(async (tx) => {
+                const tail = await tx.get("SELECT MAX(seq) AS maxSeq FROM replay_events", []);
+                let removed = false;
+                if (tail && tail.maxSeq === seq) {
+                    await tx.run("DELETE FROM replay_events WHERE seq = ?", [seq]);
+                    await tx.run("DELETE FROM replay_unwitnessed WHERE seq = ?", [seq]);
+                    removed = true;
+                }
+                return removed;
+            });
         } catch {
-            // Witness failure is reported by the caller; a failed ROLLBACK here
-            // must still poison, so the next call cannot reuse the open tx.
-            if (ownTransaction) { try { await dbCall(db, "run", "ROLLBACK"); } catch (rollbackError) { poisoned = rollbackError; } }
+            // Witness failure is reported by the caller; a failed transaction here
+            // is tolerated. Database handles poison on ROLLBACK failure.
             return false;
         }
     }
@@ -498,9 +483,11 @@ function createCanonicalReplayLedger({
     /** Clear the durable marker only once a trusted witness has advanced. */
     /** Clear ONLY the exact seq proven witnessed. A prefix-wide clear would let
      *  an unrelated later commit silently exonerate a seq whose OWN witness
-     *  attempt failed. */
-    async function markWitnessed(seq) {
-        try { await dbCall(db, "run", "DELETE FROM replay_unwitnessed WHERE seq = ?", [seq]); }
+     *  attempt failed.
+     *  @param {object} [q] - Optional transaction scope; falls back to database */
+    async function markWitnessed(seq, q) {
+        const target = q || database;
+        try { await target.run("DELETE FROM replay_unwitnessed WHERE seq = ?", [seq]); }
         catch { /* best-effort; snapshot() reconciles on the next call */ }
     }
 
@@ -513,17 +500,29 @@ function createCanonicalReplayLedger({
             r.driver_id === (b.driverId ?? null);
     }
 
-    // In-process serialization. SQLite BEGIN IMMEDIATE is cross-process
-    // exclusive, but ONE sqlite3 connection cannot hold two write transactions
-    // at once, and concurrent callers on a single ledger instance are real
-    // (e.g. Promise.all over two bridge executions). Unserialized, the second
-    // BEGIN IMMEDIATE fails and a legitimate effect is reported UNVERIFIED.
-    // Cross-process atomicity still comes from BEGIN IMMEDIATE.
-    let chain = Promise.resolve();
-    function serialize(fn) {
-        const next = chain.then(() => fn());
-        chain = next.then(() => undefined, () => undefined);
-        return next;
+    function assertUsable() {
+        if (database.gate?.poisonError) {
+            throw Object.assign(
+                new Error("REPLAY_TX_POISONED: koneksi tidak terbukti bersih; buka ulang ledger"),
+                { code: "REPLAY_TX_POISONED", cause: database.gate.poisonError }
+            );
+        }
+    }
+
+    function mapReplayTxError(error) {
+        if (error?.code === "DB_TX_ROLLBACK_FAILED") {
+            throw Object.assign(
+                new Error("REPLAY_TX_ROLLBACK_FAILED: ROLLBACK gagal; state transaksi tidak terbukti bersih"),
+                { code: "REPLAY_TX_ROLLBACK_FAILED", cause: error.cause ?? error, originalError: error.callbackError ?? error }
+            );
+        }
+        if (error?.code === "DB_POISONED" || database.gate?.poisonError) {
+            throw Object.assign(
+                new Error("REPLAY_TX_POISONED: koneksi tidak terbukti bersih; buka ulang ledger"),
+                { code: "REPLAY_TX_POISONED", cause: database.gate?.poisonError ?? error }
+            );
+        }
+        throw error;
     }
 
     return Object.freeze({
@@ -531,61 +530,65 @@ function createCanonicalReplayLedger({
         // the rollback domain; consequential execution requires "EXTERNAL".
         rollbackResistance: rollbackAnchor ? "EXTERNAL" : "NONE",
 
-        reserve(binding = {}) { return serialize(() => this._reserve(binding)); },
-        transition(digest, state, binding = {}) { return serialize(() => this._transition(digest, state, binding)); },
-        lookup(digest) { return serialize(() => this._lookup(digest)); },
-
-
-        async _reserve(binding = {}) {
+        /**
+         * Reserve a digest for replay. Uses database.transaction() to
+         * ensure atomic check-then-append with full HMAC chain integrity.
+         */
+        async reserve(binding = {}) {
             assertUsable();
             await open();
-            await dbCall(db, "run", "BEGIN IMMEDIATE");
-            let txOpen = true;
-            try {
-                const s = await snapshot();
+            return database.transaction(async (tx) => {
+                const s = await snapshot({ tx });
                 const prior = s.latest.get(binding.digest);
                 if (prior) {
-                    await dbCall(db, "run", "ROLLBACK");
-                    txOpen = false;
+                    // Prior exists: this is a re-reservation attempt.
+                    // Database.transaction() will COMMIT (no-op write),
+                    // which is semantically correct: nothing changed.
                     if (!sameBinding(prior, binding)) throw new Error("REPLAY_LEDGER_BINDING_MISMATCH");
                     return { reserved: false, prior };
                 }
-                const { seq, eventHmac } = await insertEvent(binding, STATES.RESERVED, s);
-                await dbCall(db, "run", "COMMIT");
-                txOpen = false;
-                // DB COMMIT != SAFE COMPLETION. The committed head is acknowledged
-                // only once a TRUSTED witness has durably advanced to it. If none
-                // has, fail closed: the durable marker keeps this fail-closed
-                // across restart so a later truncation to the frozen anchor point
-                // is still detected and this digest is NOT re-executable.
-                const persistence = await persistAnchors(seq, eventHmac);
-                if (!persistence.witnessOk) {
-                    // No trusted witness advanced: undo the append entirely so the
-                    // store cannot later look self-consistent with a frozen head.
-                    // If it is no longer the tail it cannot be undone, and the
-                    // marker stays so every later writer stays fail-closed.
-                    await compensate(seq);
-                    throw new Error("REPLAY_HEAD_UNWITNESSED: " + describePersistence(persistence));
+                const { seq, eventHmac } = await insertEvent(binding, STATES.RESERVED, s, tx);
+                // The transaction will be committed by database.transaction().
+                // Post-commit anchor persistence happens after the return.
+                return { reserved: true, _postCommit: { seq, eventHmac } };
+            }).then(async (result) => {
+                if (result._postCommit) {
+                    const { seq, eventHmac } = result._postCommit;
+                    // DB COMMIT != SAFE COMPLETION. The committed head is acknowledged
+                    // only once a TRUSTED witness has durably advanced to it. If none
+                    // has, fail closed: the durable marker keeps this fail-closed
+                    // across restart so a later truncation to the frozen anchor point
+                    // is still detected and this digest is NOT re-executable.
+                    const persistence = await persistAnchors(seq, eventHmac);
+                    if (!persistence.witnessOk) {
+                        // No trusted witness advanced: undo the append entirely so the
+                        // store cannot later look self-consistent with a frozen head.
+                        // If it is no longer the tail it cannot be undone, and the
+                        // marker stays so every later writer stays fail-closed.
+                        await compensate(seq);
+                        throw new Error("REPLAY_HEAD_UNWITNESSED: " + describePersistence(persistence));
+                    }
+                    await markWitnessed(seq);
+                    return { reserved: true };
                 }
-                await markWitnessed(seq);
-                return { reserved: true };
-            } catch (error) {
-                if (txOpen) await rollbackOrPoison(error);
-                throw error;
-            }
+                return result;
+            }).catch(mapReplayTxError);
         },
 
-        async _transition(digest, state, binding = {}) {
+        /**
+         * Transition a reserved digest to a new state. Uses database.transaction()
+         * to ensure atomic check-then-append with full HMAC chain integrity.
+         */
+        async transition(digest, state, binding = {}) {
             assertUsable();
             await open();
-            await dbCall(db, "run", "BEGIN IMMEDIATE");
-            let txOpen = true;
-            try {
-                const s = await snapshot();
+            return database.transaction(async (tx) => {
+                const s = await snapshot({ tx });
                 if (!s.latest.has(digest)) throw new Error("REPLAY_LEDGER_MISSING_RESERVATION");
-                const { seq, eventHmac } = await insertEvent({ ...binding, digest }, state, s);
-                await dbCall(db, "run", "COMMIT");
-                txOpen = false;
+                const { seq, eventHmac } = await insertEvent({ ...binding, digest }, state, s, tx);
+                return { _postCommit: { seq, eventHmac } };
+            }).then(async (result) => {
+                const { seq, eventHmac } = result._postCommit;
                 const persistence = await persistAnchors(seq, eventHmac);
                 if (!persistence.witnessOk) {
                     // Undo the append: the digest reverts to its PREVIOUS state, so
@@ -596,20 +599,20 @@ function createCanonicalReplayLedger({
                 }
                 await markWitnessed(seq);
                 return true;
-            } catch (error) {
-                if (txOpen) await rollbackOrPoison(error);
-                throw error;
-            }
+            }).catch(mapReplayTxError);
         },
 
-        async _lookup(digest) {
+        async lookup(digest) {
             assertUsable();
+            await open();
             const s = await snapshot({ heal: false });
             return s.latest.get(digest) ?? null;
         },
 
         filePath: file,
-        STATES
+        STATES,
+        /** Expose the underlying Database instance for test access. */
+        get _database() { return database; }
     });
 }
 
