@@ -128,6 +128,8 @@ function splitStatements(sql) {
     let start = 0;
     let i = 0;
     let inTrigger = false;
+    let triggerBodyDepth = 0;
+    let caseDepth = 0;
 
     while (i < text.length) {
 
@@ -160,24 +162,48 @@ function splitStatements(sql) {
         else {
 
             if (!inTrigger) {
-                const words = leadingWords(text.slice(start, i + 50), 4);
-                if (words[0] === "CREATE" && words.includes("TRIGGER")) {
+                const words = leadingWords(text.slice(start), 3);
+                if (words[0] === "CREATE" && (
+                    words[1] === "TRIGGER" ||
+                    ((words[1] === "TEMP" || words[1] === "TEMPORARY") && words[2] === "TRIGGER")
+                )) {
                     inTrigger = true;
+                    triggerBodyDepth = 0;
+                    caseDepth = 0;
                 }
             }
 
             if (inTrigger) {
                 WORD.lastIndex = i;
                 const match = WORD.exec(text);
-                if (match && match[0].toUpperCase() === "END") {
-                    const afterEnd = skipTrivia(text, i + 3);
-                    if (text[afterEnd] === ";") {
-                        statements.push(text.slice(start, afterEnd));
-                        start = afterEnd + 1;
-                        i = afterEnd + 1;
-                        inTrigger = false;
-                        continue;
+                if (match) {
+                    const word = match[0].toUpperCase();
+
+                    if (word === "CASE") {
+                        caseDepth += 1;
                     }
+                    else if (word === "BEGIN" && triggerBodyDepth === 0 && caseDepth === 0) {
+                        triggerBodyDepth = 1;
+                    }
+                    else if (word === "END") {
+                        if (caseDepth > 0) {
+                            caseDepth -= 1;
+                        }
+                        else if (triggerBodyDepth === 1) {
+                            const afterEnd = skipTrivia(text, match.index + match[0].length);
+                            if (text[afterEnd] === ";") {
+                                statements.push(text.slice(start, afterEnd));
+                                start = afterEnd + 1;
+                                i = afterEnd + 1;
+                                inTrigger = false;
+                                triggerBodyDepth = 0;
+                                caseDepth = 0;
+                                continue;
+                            }
+                        }
+                    }
+                    i = match.index + match[0].length;
+                    continue;
                 }
                 i += 1;
                 continue;
