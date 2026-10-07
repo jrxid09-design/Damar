@@ -48,6 +48,7 @@ const CODES = Object.freeze({
     ROLLBACK_FAILED: "DB_TX_ROLLBACK_FAILED",
     COMMIT_FAILED: "DB_TX_COMMIT_FAILED",
     TX_CONTROL: "TX_CONTROL_NOT_ALLOWED",
+    DATABASE_TRANSACTION_CONTROL_FORBIDDEN: "TX_CONTROL_NOT_ALLOWED",
     MULTI_STATEMENT: "TX_MULTI_STATEMENT_NOT_ALLOWED",
     MALFORMED_SQL: "TX_SQL_MALFORMED",
     BEGIN_BUSY: "TX_BEGIN_BUSY"
@@ -63,6 +64,7 @@ const SPAN_STATE = Object.freeze({
 const COMMIT = Symbol("commit");
 const ROLLBACK = Symbol("rollback");
 const BEGIN = Symbol("begin");
+const INTERNAL_LIFECYCLE_BRAND = Symbol("Database.internalLifecycle");
 
 const SPAN_CONTEXT = new AsyncLocalStorage();
 
@@ -125,6 +127,7 @@ function splitStatements(sql) {
     const statements = [];
     let start = 0;
     let i = 0;
+    let inTrigger = false;
 
     while (i < text.length) {
 
@@ -144,10 +147,42 @@ function splitStatements(sql) {
             }
             i = end + 1;
         }
-        else if (text.startsWith("--", i) || text.startsWith("/*", i)) {
+        else if (text.startsWith("/*", i)) {
+            const end = text.indexOf("*/", i + 2);
+            if (end < 0) {
+                return { statements, malformed: true };
+            }
+            i = end + 2;
+        }
+        else if (text.startsWith("--", i)) {
             i = skipTrivia(text, i);
         }
         else {
+
+            if (!inTrigger) {
+                const words = leadingWords(text.slice(start, i + 50), 4);
+                if (words[0] === "CREATE" && words.includes("TRIGGER")) {
+                    inTrigger = true;
+                }
+            }
+
+            if (inTrigger) {
+                WORD.lastIndex = i;
+                const match = WORD.exec(text);
+                if (match && match[0].toUpperCase() === "END") {
+                    const afterEnd = skipTrivia(text, i + 3);
+                    if (text[afterEnd] === ";") {
+                        statements.push(text.slice(start, afterEnd));
+                        start = afterEnd + 1;
+                        i = afterEnd + 1;
+                        inTrigger = false;
+                        continue;
+                    }
+                }
+                i += 1;
+                continue;
+            }
+
             if (ch === ";") {
                 statements.push(text.slice(start, i));
                 start = i + 1;
@@ -204,6 +239,38 @@ function inspectSql(sql) {
 /** Pernyataan kontrol transaksi pada SQL teks. */
 function isTransactionControl(sql) {
     return inspectSql(sql).control;
+}
+
+/** Galat bila SQL publik memuat kontrol transaksi atau malformed; null bila boleh. */
+function refusePublicSql(sql) {
+
+    const { control, malformed } = inspectSql(sql);
+
+    if (malformed) {
+        return dbError(CODES.MALFORMED_SQL, "unterminated string literal, identifier, or comment");
+    }
+    if (control) {
+        return dbError(CODES.TX_CONTROL, "DATABASE_TRANSACTION_CONTROL_FORBIDDEN: Transaction lifecycle statements (BEGIN/COMMIT/ROLLBACK/SAVEPOINT/RELEASE) are owned by Database.transaction, not direct SQL");
+    }
+
+    return null;
+
+}
+
+/** Validasi token kepemilikan internal agar tidak bisa dipalsukan oleh pemanggil publik. */
+function assertInternalLifecycleToken(token, expectedDb) {
+
+    if (
+        !token ||
+        typeof token !== "object" ||
+        token[INTERNAL_LIFECYCLE_BRAND] !== true ||
+        token.db !== expectedDb ||
+        expectedDb.isPoisoned ||
+        expectedDb.isClosed
+    ) {
+        throw dbError(CODES.TX_CONTROL, "DATABASE_TRANSACTION_CONTROL_FORBIDDEN: internal lifecycle token is invalid, foreign, or stale");
+    }
+
 }
 
 /** Galat bila SQL tidak boleh lewat capability; null bila boleh. */
@@ -364,7 +431,9 @@ class TransactionScope {
     }
 
     /** BEGIN IMMEDIATE dengan retry terbatas bila kunci tulis sibuk. */
-    async [BEGIN]() {
+    async [BEGIN](token, dbInstance) {
+
+        assertInternalLifecycleToken(token, dbInstance);
 
         for (let attempt = 1; ; attempt += 1) {
 
@@ -396,7 +465,9 @@ class TransactionScope {
      * COMMIT. Sukses hanya bila SQLite melaporkan COMMIT selesai. Gagal = hasil
      * tidak terbukti, jadi instance di-poison dan pemanggil tidak menerima sukses.
      */
-    async [COMMIT]() {
+    async [COMMIT](token, dbInstance) {
+
+        assertInternalLifecycleToken(token, dbInstance);
 
         const span = this.#span;
 
@@ -419,7 +490,9 @@ class TransactionScope {
      * Kegagalan lain = hasil tidak terbukti; instance di-poison dan error asli
      * tetap dilampirkan, tidak ditelan.
      */
-    async [ROLLBACK](callbackError) {
+    async [ROLLBACK](token, dbInstance, callbackError) {
+
+        assertInternalLifecycleToken(token, dbInstance);
 
         const span = this.#span;
 
@@ -660,6 +733,9 @@ class TransactionGate {
 
 class Database {
 
+    #closed = false;
+    #lifecycleToken;
+
     constructor(file, { spanDeadlineMs = DEFAULT_SPAN_DEADLINE_MS } = {}) {
 
         this.file = file;
@@ -668,6 +744,11 @@ class Database {
 
         this.ready = null;
 
+        this.#lifecycleToken = Object.freeze({
+            [INTERNAL_LIFECYCLE_BRAND]: true,
+            db: this
+        });
+
         this.gate = new TransactionGate({
             open: () => this.ensure(),
             settle: settleConnection,
@@ -675,6 +756,14 @@ class Database {
             spanDeadlineMs
         });
 
+    }
+
+    get isPoisoned() {
+        return this.gate.poisonError !== null;
+    }
+
+    get isClosed() {
+        return this.#closed || (this.ready !== null && this.db === null);
     }
 
     /**
@@ -752,23 +841,43 @@ class Database {
     }
 
     run(sql, params = []) {
+        const refusal = refusePublicSql(sql);
+        if (refusal) {
+            return Promise.reject(refusal);
+        }
         return this.unscoped(db => runOn(db, sql, params));
     }
 
     get(sql, params = []) {
+        const refusal = refusePublicSql(sql);
+        if (refusal) {
+            return Promise.reject(refusal);
+        }
         return this.unscoped(db => getOn(db, sql, params));
     }
 
     all(sql, params = []) {
+        const refusal = refusePublicSql(sql);
+        if (refusal) {
+            return Promise.reject(refusal);
+        }
         return this.unscoped(db => allOn(db, sql, params));
     }
 
     exec(sql) {
+        const refusal = refusePublicSql(sql);
+        if (refusal) {
+            return Promise.reject(refusal);
+        }
         return this.unscoped(db => execOn(db, sql));
     }
 
     /** exec tanpa antrean; hanya untuk pemanggil yang sudah memegang koneksi. */
     execRaw(sql) {
+        const refusal = refusePublicSql(sql);
+        if (refusal) {
+            return Promise.reject(refusal);
+        }
         return execOn(this.db, sql);
     }
 
@@ -787,9 +896,11 @@ class Database {
      */
     transaction(work) {
 
+        const token = this.#lifecycleToken;
+
         return this.exclusive(async tx => {
 
-            await tx[BEGIN]();
+            await tx[BEGIN](token, this);
 
             let result;
 
@@ -797,11 +908,11 @@ class Database {
                 result = await work(tx);
             }
             catch (error) {
-                await tx[ROLLBACK](error);
+                await tx[ROLLBACK](token, this, error);
                 throw error;
             }
 
-            await tx[COMMIT]();
+            await tx[COMMIT](token, this);
 
             return result;
 
@@ -810,6 +921,7 @@ class Database {
     }
 
     close() {
+        this.#closed = true;
         return this.gate.unscoped(() => this.#closeHandle({ keepOnError: this.gate.poisonError !== null }), { closing: true });
     }
 
@@ -954,3 +1066,5 @@ module.exports.TransactionGate = TransactionGate;
 module.exports.dbError = dbError;
 module.exports.isTransactionControl = isTransactionControl;
 module.exports.splitStatements = splitStatements;
+module.exports.inspectSql = inspectSql;
+module.exports.refusePublicSql = refusePublicSql;
