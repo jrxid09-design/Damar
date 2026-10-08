@@ -31,8 +31,20 @@ const { manager: integrations } = require("./integrations");
 
 const host = process.env.HOST ?? "0.0.0.0";
 
+const {
+    LIFECYCLE_STATES,
+    getLifecycleState,
+    setLifecycleState,
+    resetLifecycleStateForTesting: resetLifecycleStateHelper
+} = require("./serverLifecycle");
+
 let server = null;
-let shuttingDown = false;
+let activeShutdownPromise = null;
+
+function resetLifecycleStateForTesting(state = LIFECYCLE_STATES.BOOTING) {
+    activeShutdownPromise = null;
+    resetLifecycleStateHelper(state);
+}
 
 /**
  * Menyiapkan subsistem SETELAH server berhasil listen.
@@ -332,6 +344,7 @@ async function bootSubsystems() {
     }
     catch { /* banner opsional */ }
 
+    setLifecycleState(LIFECYCLE_STATES.RUNNING);
 }
 
 /**
@@ -343,6 +356,13 @@ async function bootSubsystems() {
  * tidak". Sekarang error itu ditangkap dan dijelaskan.
  */
 async function listen(port, attemptsLeft = autoPortAttempts()) {
+
+    if (getLifecycleState() === LIFECYCLE_STATES.SHUTDOWN_FAILED_TERMINAL) {
+        throw new Error("Cannot listen: server is in terminal failed shutdown state");
+    }
+
+    activeShutdownPromise = null;
+    setLifecycleState(LIFECYCLE_STATES.BOOTING);
 
     // Compose authority before opening the socket. A listening server must
     // never expose a window in which Manager requests can race composition.
@@ -447,73 +467,200 @@ function autoPortAttempts() {
 
 }
 
-const shutdown = async (signal, { exit = true } = {}) => {
+const shutdown = (signal, { exit = true } = {}) => {
 
-    if (shuttingDown) {
-        return;
+    if (activeShutdownPromise) {
+        logger.warn?.(`[shutdown] Shutdown already in progress (${signal}), awaiting active shutdown promise...`);
+        return activeShutdownPromise;
     }
 
-    shuttingDown = true;
-
-    logger.info(`${signal} diterima, menghentikan Damar...`);
-
-    integrations.stopPolling();
-    memory.stop();
-    whatsapp.stop();
-    try { require("./services/telegramService").stop(); } catch { /* abaikan */ }
-    try { require("./channels").manager.stop(); } catch { /* abaikan */ }
-    try { require("./voice").runtime.stop(); } catch { /* abaikan */ }
-    try { require("./autonomy/pulse").stop(); } catch { /* abaikan */ }
-    try { require("./autonomy/watchdog").stop(); } catch { /* abaikan */ }
-    try { require("./autonomy/dream").stop(); } catch { /* abaikan */ }
-    automation.stop();
-    terminals.stop();
-    try { require("./services/cryptoMonitorService").stop(); } catch { /* abaikan */ }
-    try { require("./services/cryptoBotService").stop(); } catch { /* abaikan */ }
-    try { require("./services/homeService").stopWatcher(); } catch { /* abaikan */ }
-    try { require("./services/mqttService").disconnect(); } catch { /* abaikan */ }
-    try { require("./consciousness").stop(); } catch { /* abaikan */ }
-    try {
-        const mataDewa = require("./mataDewa");
-        const mdInstance = mataDewa.getService();
-        if (mdInstance) mdInstance.shutdown();
-    } catch { /* abaikan */ }
-    // R5-03: release the canonical owner-trust audit sink lock (single-writer)
-    // on graceful shutdown.
-    try {
-        const production = require("./authority/productionComposition").getProductionAuthorityComposition();
-        if (production) production.close();
-    } catch { /* abaikan */ }
-    try {
-        const ri = require("./integration/riProductionComposition").getRuntimeIntegrationComposition();
-        if (ri) ri.cleanup();
-    } catch { /* abaikan */ }
-    try {
-        const host = require("./runtime/host/runtimeHost").getCanonicalRuntimeHost();
-        if (host) await host.shutdown();
-    } catch { /* abaikan */ }
-
-    if (server) {
-        await new Promise((resolve) => server.close(resolve));
-        server = null;
+    if (getLifecycleState() === LIFECYCLE_STATES.STOPPED) {
+        return Promise.resolve({ success: true, phase: LIFECYCLE_STATES.STOPPED, errors: [] });
     }
 
-    shuttingDown = false;
-
-    if (exit) {
-        process.exit(0);
+    if (getLifecycleState() === LIFECYCLE_STATES.SHUTDOWN_FAILED_TERMINAL) {
+        const terminalError = new Error(`Server is in terminal shutdown failure state: ${LIFECYCLE_STATES.SHUTDOWN_FAILED_TERMINAL}`);
+        terminalError.code = "LIFECYCLE_TERMINAL_FAILURE";
+        if (exit) {
+            process.exit(1);
+        }
+        return Promise.reject(terminalError);
     }
 
-    // Jangan menggantung selamanya kalau ada koneksi SSE yang
-    // belum tertutup.
-    if (exit) {
-        setTimeout(() => process.exit(0), 5000).unref();
-    }
+    activeShutdownPromise = (async () => {
+        setLifecycleState(LIFECYCLE_STATES.SHUTTING_DOWN);
+        logger.info(`${signal} diterima, menghentikan Damar...`);
 
+        // Bounded termination fallback: ensure signal/exit shutdown cannot hang indefinitely
+        const SHUTDOWN_TIMEOUT_MS = Number(process.env.DAMAR_SHUTDOWN_TIMEOUT_MS) || 10000;
+        let forceExitTimer = null;
+        if (exit) {
+            forceExitTimer = setTimeout(() => {
+                logger.error(`[shutdown] Shutdown timed out after ${SHUTDOWN_TIMEOUT_MS}ms — forcing terminal exit`);
+                process.exit(2);
+            }, SHUTDOWN_TIMEOUT_MS);
+            forceExitTimer.unref?.();
+        }
+
+        const errors = [];
+        const attemptCleanup = async (name, fn) => {
+            try {
+                await fn();
+            } catch (err) {
+                const message = err?.message ?? String(err);
+                logger.error?.(`[shutdown] Cleanup failed for ${name}: ${message}`);
+                errors.push({ name, error: err });
+            }
+        };
+
+        // Phase 1: Close HTTP server listener and stop accepting new external connections immediately
+        let serverClosePromise = null;
+        if (server) {
+            try {
+                if (typeof server.closeIdleConnections === "function") {
+                    server.closeIdleConnections();
+                }
+            } catch (err) {
+                logger.error?.(`[shutdown] Error closing idle connections: ${err.message}`);
+            }
+
+            serverClosePromise = new Promise((resolve, reject) => {
+                server.close((err) => {
+                    if (err && err.code !== "ERR_SERVER_NOT_RUNNING") {
+                        return reject(err);
+                    }
+                    resolve();
+                });
+            });
+        }
+
+        // Phase 2: Teardown background workers and communication channels
+        await attemptCleanup("integrations", () => integrations.stopPolling());
+        await attemptCleanup("whatsapp", () => whatsapp.stop());
+        await attemptCleanup("telegram", () => {
+            try { require("./services/telegramService").stop(); } catch { /* abaikan */ }
+        });
+        await attemptCleanup("channels", () => {
+            try { require("./channels").manager.stop(); } catch { /* abaikan */ }
+        });
+        await attemptCleanup("voice", () => {
+            try { require("./voice").runtime.stop(); } catch { /* abaikan */ }
+        });
+        await attemptCleanup("pulse", () => {
+            try { require("./autonomy/pulse").stop(); } catch { /* abaikan */ }
+        });
+        await attemptCleanup("watchdog", () => {
+            try { require("./autonomy/watchdog").stop(); } catch { /* abaikan */ }
+        });
+        await attemptCleanup("dream", () => {
+            try { require("./autonomy/dream").stop(); } catch { /* abaikan */ }
+        });
+        await attemptCleanup("automation", () => automation.stop());
+        await attemptCleanup("terminals", () => terminals.stop());
+        await attemptCleanup("cryptoMonitor", () => {
+            try { require("./services/cryptoMonitorService").stop(); } catch { /* abaikan */ }
+        });
+        await attemptCleanup("cryptoBot", () => {
+            try { require("./services/cryptoBotService").stop(); } catch { /* abaikan */ }
+        });
+        await attemptCleanup("homeWatcher", () => {
+            try { require("./services/homeService").stopWatcher(); } catch { /* abaikan */ }
+        });
+        await attemptCleanup("mqtt", () => {
+            try { require("./services/mqttService").disconnect(); } catch { /* abaikan */ }
+        });
+        await attemptCleanup("consciousness", () => {
+            try { require("./consciousness").stop(); } catch { /* abaikan */ }
+        });
+        await attemptCleanup("mataDewa", () => {
+            try {
+                const mataDewa = require("./mataDewa");
+                const mdInstance = mataDewa.getService();
+                if (mdInstance) mdInstance.shutdown();
+            } catch { /* abaikan */ }
+        });
+        await attemptCleanup("authority", () => {
+            try {
+                const production = require("./authority/productionComposition").getProductionAuthorityComposition();
+                if (production) production.close();
+            } catch { /* abaikan */ }
+        });
+
+        // Phase 3: Runtime Integration cleanup (subscribers, SSE connections, adapters)
+        await attemptCleanup("ri", () => {
+            const ri = require("./integration/riProductionComposition").getRuntimeIntegrationComposition();
+            if (ri) ri.cleanup();
+        });
+
+        // Phase 4: Canonical RuntimeHost shutdown
+        await attemptCleanup("runtimeHost", async () => {
+            const host = require("./runtime/host/runtimeHost").getCanonicalRuntimeHost();
+            if (host) await host.shutdown();
+        });
+
+        // Phase 5: MemoryService stop
+        await attemptCleanup("memory", () => memory.stop());
+
+        // Phase 6: Finalize HTTP server drain
+        await attemptCleanup("httpServer", async () => {
+            if (serverClosePromise) {
+                if (server && typeof server.closeAllConnections === "function") {
+                    try { server.closeAllConnections(); } catch { /* abaikan */ }
+                }
+                await serverClosePromise;
+            }
+            server = null;
+        });
+
+        if (forceExitTimer) {
+            clearTimeout(forceExitTimer);
+            forceExitTimer = null;
+        }
+
+        if (errors.length > 0) {
+            setLifecycleState(LIFECYCLE_STATES.SHUTDOWN_FAILED_TERMINAL);
+            const summary = errors.map(e => `${e.name} (${e.error?.message ?? e.error})`).join("; ");
+            const aggregateError = new Error(`Shutdown failed with ${errors.length} cleanup error(s): ${summary}`);
+            aggregateError.errors = errors;
+            aggregateError.code = "SHUTDOWN_CLEANUP_FAILED";
+            logger.error?.(`[shutdown] ${aggregateError.message}`);
+
+            if (exit) {
+                process.exit(1);
+            }
+            throw aggregateError;
+        }
+
+        setLifecycleState(LIFECYCLE_STATES.STOPPED);
+        logger.info?.("[shutdown] Shutdown completed successfully.");
+
+        if (exit) {
+            process.exit(0);
+        }
+
+        return { success: true, phase: LIFECYCLE_STATES.STOPPED, errors: [] };
+    })().finally(() => {
+        activeShutdownPromise = null;
+    });
+
+    return activeShutdownPromise;
 };
 
-process.on("SIGINT", () => { void shutdown("SIGINT"); });
-process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
+const handleSignal = async (signal) => {
+    try {
+        await shutdown(signal, { exit: true });
+    } catch (error) {
+        logger.error?.(`[signal] Fatal shutdown failure handling ${signal}: ${error.message}`);
+        if (server) {
+            try { server.close(); } catch { /* abaikan */ }
+            server = null;
+        }
+        process.exit(1);
+    }
+};
+
+process.on("SIGINT", () => { void handleSignal("SIGINT"); });
+process.on("SIGTERM", () => { void handleSignal("SIGTERM"); });
 
 // Sebuah promise yang gagal tanpa .catch DULUNYA bisa menjatuhkan
 // proses di versi Node baru. Untuk daemon, lebih baik dicatat dan
@@ -559,7 +706,7 @@ process.on("uncaughtException", (error) => {
 
     }
 
-    void shutdown("uncaughtException");
+    void handleSignal("uncaughtException");
 
 });
 
@@ -572,5 +719,9 @@ module.exports = {
     get server() { return server; },
     bootSubsystems,
     shutdown,
-    listen
+    listen,
+    handleSignal,
+    getLifecycleState,
+    LIFECYCLE_STATES,
+    resetLifecycleStateForTesting
 };

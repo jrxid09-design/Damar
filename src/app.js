@@ -23,6 +23,20 @@ app.use(require("./middleware/cors"));
 // untuk keperluan vision.
 app.use(express.json({ limit: "25mb" }));
 
+// R5 Lifecycle Admission Gate: reject incoming requests once terminal teardown begins
+const { isAdmissionAllowed, getLifecycleState } = require("./serverLifecycle");
+app.use((req, res, next) => {
+    if (!isAdmissionAllowed()) {
+        res.setHeader("Connection", "close");
+        return res.status(503).json({
+            error: "Server is shutting down",
+            code: "SERVER_SHUTTING_DOWN",
+            phase: getLifecycleState()
+        });
+    }
+    next();
+});
+
 // Permukaan Console: token = kredensial pemilik → peran superadmin
 // HANYA setelah autentikasi sukses (identitas berprovenance dari
 // tokenGuard; tanpa token permukaan terkunci — fail-closed C2).
