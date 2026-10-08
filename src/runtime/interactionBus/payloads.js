@@ -271,7 +271,7 @@ function validateContextRef(value) {
 function validateMessagePayload(raw, bounds, mediaVerifier) {
   rejectForbiddenFields(
     raw,
-    ["text", "language", "attachments", "replyToInteractionId", "referenceIds"],
+    ["text", "language", "attachments", "replyToInteractionId", "referenceIds", "authProof"],
     "MESSAGE"
   );
   const text = raw.text;
@@ -313,12 +313,14 @@ function validateMessagePayload(raw, bounds, mediaVerifier) {
     }
     referenceIds = Object.freeze(mapSafeArray(referenceInput, "referenceIds", (id) => assertCanonicalId("interactionId", id)));
   }
+  const authProof = raw.authProof === undefined ? undefined : validateActionAuthProof(raw.authProof);
   return Object.freeze({
     text,
     language,
     attachments,
     replyToInteractionId,
-    referenceIds
+    referenceIds,
+    authProof
   });
 }
 

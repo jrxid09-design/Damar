@@ -22,5 +22,6 @@ router.get("/error", (req, res, next) => {
 });
 
 router.use("/api/v1", apiV1);
+router.use("/api/ui", require("./api/ui"));
 
 module.exports = router;

@@ -70,6 +70,7 @@ function safeRawEvent(raw, channel) {
   const attachments = dataField(raw, "attachments");
   const replyToInteractionId = dataField(raw, "replyToInteractionId");
   const referenceIds = dataField(raw, "referenceIds");
+  const authProof = dataField(raw, "authProof");
   // Wave 5 Lane 4: the bus session is TRANSPORT-SCOPED — the same peer
   // evidence on two different channels must NOT collide on one bus session
   // (the bus one-transport-per-session law stays intact).  Canonical
@@ -92,7 +93,8 @@ function safeRawEvent(raw, channel) {
       text: text.trim(),
       ...(attachments === undefined ? {} : { attachments }),
       ...(replyToInteractionId === undefined ? {} : { replyToInteractionId }),
-      ...(referenceIds === undefined ? {} : { referenceIds })
+      ...(referenceIds === undefined ? {} : { referenceIds }),
+      ...(authProof === undefined ? {} : { authProof })
     }
   };
 }
@@ -312,6 +314,7 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
         ...(continuityContext === null ? {} : { continuityContext }),
         correlationId: envelope.correlationId || `cor_${envelope.interactionId.slice(3)}`,
         payload: managerPayload,
+        ...(envelope.payload && envelope.payload.authProof !== undefined ? { authProof: envelope.payload.authProof } : {}),
         // Manager's hostile-input detacher correctly rejects explicit
         // undefined values.  The canonical envelope may omit metadata, so
         // preserve absence rather than manufacturing an undefined field.

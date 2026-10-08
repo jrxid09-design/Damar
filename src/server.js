@@ -57,6 +57,13 @@ async function bootSubsystems() {
         logger.error?.(`Komposisi otoritas/owner-trust gagal (fail-closed): ${error.message}`);
     }
 
+    try {
+        await require("./integration/riProductionComposition").ensureRuntimeIntegrationComposed();
+        logger.info?.("[ri] Runtime Integration (UIX-W5) siap");
+    } catch (error) {
+        logger.warn?.(`Runtime Integration composition gagal: ${error.message}`);
+    }
+
     startup(config);
 
     // R5-03: REAL PRODUCTION OWNER-TRUST PROVISIONING. Bind the canonical
@@ -451,6 +458,10 @@ const shutdown = (signal) => {
     try {
         const production = require("./authority/productionComposition").getProductionAuthorityComposition();
         if (production) production.close();
+    } catch { /* abaikan */ }
+    try {
+        const ri = require("./integration/riProductionComposition").getRuntimeIntegrationComposition();
+        if (ri) ri.cleanup();
     } catch { /* abaikan */ }
 
     if (server) {

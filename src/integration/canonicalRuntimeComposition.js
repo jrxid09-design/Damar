@@ -1568,6 +1568,10 @@ async function buildRuntimeHostInternal({
 
     phaseMachine.transitionTo(HOST_PHASE.READY, "ready-dormant");
 
+    if (core.channels && continuityLifecycleHandles && continuityLifecycleHandles.composition) {
+        try { activateCanonicalConsoleContinuity(); } catch { /* best effort */ }
+    }
+
     // ------------------------------------------------------------- BUS
     const bus = core.bus;
     bus.registerTransport({
@@ -1801,6 +1805,22 @@ async function buildRuntimeHostInternal({
         }
     }
 
+    function activateCanonicalConsoleContinuity() {
+        if (!phaseMachine.isOperational() || shutDown || phaseMachine.isTerminal()) {
+            return Object.freeze({ ok: false, code: "HOST_NOT_OPERATIONAL", terminal: true });
+        }
+        const composition = continuityLifecycleHandles ? continuityLifecycleHandles.composition : null;
+        if (!composition || typeof composition.bindCanonicalTransportPeer !== "function") {
+            return Object.freeze({ ok: false, code: "TRANSPORT_PEER_SEAM_UNAVAILABLE" });
+        }
+        try {
+            const result = composition.bindCanonicalTransportPeer("console");
+            return Object.freeze({ ok: true, ...result });
+        } catch (error) {
+            return Object.freeze({ ok: false, code: error?.code ?? "TRANSPORT_PEER_BIND_FAILED" });
+        }
+    }
+
     /** Honest per-transport continuity support verdict (safe diagnostic). */
     function transportContinuitySupport(channel) {
         const composition = continuityLifecycleHandles ? continuityLifecycleHandles.composition : null;
@@ -1982,6 +2002,7 @@ async function buildRuntimeHostInternal({
         submitLocal,
         channels: core.channels,
         transportContinuitySupport,
+        bindConsoleContinuity: activateCanonicalConsoleContinuity,
 
         health,
         status,
