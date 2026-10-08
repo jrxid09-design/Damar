@@ -734,7 +734,7 @@ function createManagerInteractionIngress({ bus, manager, mediaSubsystem = null, 
       try {
         result = await sessionContinuity.shutdown();
       } catch (error) {
-        result = Object.freeze({ shutdown: true, flushed: { failed: true, code: error?.code ?? "PERSIST_FAILURE", error, message: error?.message } });
+        result = Object.freeze({ shutdown: true, flushed: { failed: true, code: error?.code ?? "PERSIST_FAILURE" } });
       }
       // DSC-R2-002: ownership release AFTER the final flush conclusively
       // ended — success OR deterministic failure.
