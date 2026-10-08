@@ -1873,8 +1873,8 @@ async function buildRuntimeHostInternal({
             if (continuityLifecycle && typeof continuityLifecycle.shutdownContinuity === "function") {
                 try {
                     return await continuityLifecycle.shutdownContinuity();
-                } catch {
-                    return Object.freeze({ failed: true, code: "FLUSH_CONTAINED" });
+                } catch (err) {
+                    return Object.freeze({ failed: true, code: err?.code || "FLUSH_CONTAINED", error: err, message: err?.message });
                 }
             }
             return null;
@@ -1907,8 +1907,8 @@ async function buildRuntimeHostInternal({
                     let flushed = null;
                     try {
                         flushed = await completionPromise;
-                    } catch {
-                        flushed = Object.freeze({ failed: true, code: "FLUSH_CONTAINED" });
+                    } catch (err) {
+                        flushed = Object.freeze({ failed: true, code: err?.code || "FLUSH_CONTAINED", error: err, message: err?.message });
                     }
                     return Object.freeze({ ...syncShape, continuityFlush: flushed });
                 })().then(onFulfilled, onRejected);

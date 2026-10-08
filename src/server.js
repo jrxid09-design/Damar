@@ -606,7 +606,21 @@ const shutdown = (signal, { exit = true } = {}) => {
         // Phase 4: Canonical RuntimeHost shutdown
         await attemptCleanup("runtimeHost", async () => {
             const host = require("./runtime/host/runtimeHost").getCanonicalRuntimeHost();
-            if (host && typeof host.shutdown === "function") await host.shutdown();
+            if (host && typeof host.shutdown === "function") {
+                const res = await host.shutdown();
+                if (res) {
+                    const flush = res.continuityFlush;
+                    const flushRes = (flush && typeof flush.then === "function") ? await flush : flush;
+                    if (flushRes && (flushRes.failed || flushRes.flushed?.failed)) {
+                        const code = flushRes.code || flushRes.flushed?.code || "PERSIST_FAILURE";
+                        const originalErr = flushRes.error || flushRes.flushed?.error;
+                        const message = originalErr?.message || `RuntimeHost continuity flush failed: ${code}`;
+                        const err = originalErr || Object.assign(new Error(message), { code });
+                        if (!err.code) err.code = code;
+                        throw err;
+                    }
+                }
+            }
         });
 
         // Phase 5: MemoryService stop
