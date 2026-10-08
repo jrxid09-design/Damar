@@ -41,9 +41,11 @@ const { createDetectionEngine } = require("../cyber/intelligence");
 const { createMemoryAccStore, createSqliteAccStore } = require("../cognition/persistence/AccStore");
 const { createDamarManager } = require("../manager");
 const { ensureProductionAuthorityComposed, getProductionAuthorityComposition } = require("../authority/productionComposition");
+const { getCanonicalRuntimeHost } = require("../runtime/host/runtimeHost");
 
 let canonicalRiInstance = null;
 let riCompositionPromise = null;
+let boundHost = null;
 
 // Event listeners for SSE streaming / cross-surface push
 const eventSubscribers = new Set();
@@ -80,9 +82,10 @@ function clearSubscribers() {
  * @returns {Promise<object>}
  */
 async function ensureRuntimeIntegrationComposed({ host = null, acc = null, audit = null, clock = () => Date.now() } = {}) {
+    const effectiveHost = host || getCanonicalRuntimeHost();
     if (canonicalRiInstance !== null) {
-        if (host && !canonicalRiInstance.host) {
-            canonicalRiInstance.host = host;
+        if (effectiveHost && !boundHost) {
+            boundHost = effectiveHost;
         }
         return canonicalRiInstance;
     }
@@ -92,6 +95,7 @@ async function ensureRuntimeIntegrationComposed({ host = null, acc = null, audit
     }
 
     riCompositionPromise = (async () => {
+        boundHost = effectiveHost;
         // 1. Ensure Authority & OwnerTrust are composed
         let authorityComp = getProductionAuthorityComposition();
         if (!authorityComp || !authorityComp.ownerTrust) {
@@ -283,7 +287,9 @@ async function ensureRuntimeIntegrationComposed({ host = null, acc = null, audit
         }
 
         const instance = Object.freeze({
-            host,
+            get host() {
+                return boundHost || getCanonicalRuntimeHost();
+            },
             acc: resolvedAcc,
             ownerTrust,
             manager,
@@ -331,6 +337,7 @@ function resetRuntimeIntegrationCompositionForTesting() {
         }
     }
     canonicalRiInstance = null;
+    boundHost = null;
     riCompositionPromise = null;
     clearSubscribers();
 }

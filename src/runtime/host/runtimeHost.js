@@ -31,8 +31,56 @@ const {
 
 const VERSION = HOST_VERSION;
 
+let canonicalHostInstance = null;
+let canonicalHostPromise = null;
+
+async function ensureCanonicalRuntimeHost(options = {}) {
+    if (canonicalHostInstance !== null) {
+        return canonicalHostInstance;
+    }
+    if (canonicalHostPromise !== null) {
+        return canonicalHostPromise;
+    }
+    canonicalHostPromise = (async () => {
+        const mergedOpts = {
+            ...options,
+            coreOptions: {
+                enableManagerIngress: true,
+                ...(options.coreOptions || {})
+            }
+        };
+        const host = await createRuntimeHost(mergedOpts);
+        canonicalHostInstance = host;
+        return host;
+    })();
+    try {
+        return await canonicalHostPromise;
+    } finally {
+        canonicalHostPromise = null;
+    }
+}
+
+function getCanonicalRuntimeHost() {
+    return canonicalHostInstance;
+}
+
+async function resetCanonicalRuntimeHostForTesting() {
+    if (canonicalHostInstance) {
+        try {
+            await canonicalHostInstance.shutdown();
+        } catch {
+            // ignore shutdown errors in test reset
+        }
+    }
+    canonicalHostInstance = null;
+    canonicalHostPromise = null;
+}
+
 module.exports = Object.freeze({
     createRuntimeHost,
+    ensureCanonicalRuntimeHost,
+    getCanonicalRuntimeHost,
+    resetCanonicalRuntimeHostForTesting,
     VERSION,
     HOST_PHASE,
     HOST_COMMANDS,

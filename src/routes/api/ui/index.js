@@ -4,7 +4,12 @@ const express = require("express");
 const { ensureRuntimeIntegrationComposed, getRuntimeIntegrationComposition } = require("../../../integration/riProductionComposition");
 const { manager: channelManager } = require("../../../channels");
 
+const { tokenGuard } = require("../../../core/auth/tokenCompare");
+
 const router = express.Router();
+
+// Fail-closed W4 transport authentication boundary for all RI routes
+router.use(tokenGuard({ roleWhenAuthenticated: "user", surface: "ui" }));
 
 async function getComposition() {
     let comp = getRuntimeIntegrationComposition();

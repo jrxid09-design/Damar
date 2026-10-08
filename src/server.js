@@ -57,8 +57,23 @@ async function bootSubsystems() {
         logger.error?.(`Komposisi otoritas/owner-trust gagal (fail-closed): ${error.message}`);
     }
 
+    let canonicalHost = null;
     try {
-        await require("./integration/riProductionComposition").ensureRuntimeIntegrationComposed();
+        const { ensureCanonicalRuntimeHost } = require("./runtime/host/runtimeHost");
+        canonicalHost = await ensureCanonicalRuntimeHost({
+            coreOptions: {
+                enableManagerIngress: true
+            }
+        });
+        logger.info?.(`[host] RuntimeHost kanonik siap: phase=${canonicalHost.phase}`);
+    } catch (error) {
+        logger.error?.(`RuntimeHost boot gagal: ${error.message}`);
+    }
+
+    try {
+        await require("./integration/riProductionComposition").ensureRuntimeIntegrationComposed({
+            host: canonicalHost
+        });
         logger.info?.("[ri] Runtime Integration (UIX-W5) siap");
     } catch (error) {
         logger.warn?.(`Runtime Integration composition gagal: ${error.message}`);
@@ -462,6 +477,10 @@ const shutdown = (signal) => {
     try {
         const ri = require("./integration/riProductionComposition").getRuntimeIntegrationComposition();
         if (ri) ri.cleanup();
+    } catch { /* abaikan */ }
+    try {
+        const host = require("./runtime/host/runtimeHost").getCanonicalRuntimeHost();
+        if (host) await host.shutdown();
     } catch { /* abaikan */ }
 
     if (server) {
