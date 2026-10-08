@@ -310,6 +310,8 @@ async function ensureRuntimeIntegrationComposed({ host = null, acc = null, audit
             // Lifecycle cleanup
             cleanup() {
                 clearSubscribers();
+                canonicalRiInstance = null;
+                boundHost = null;
             }
         });
 

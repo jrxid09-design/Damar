@@ -36,7 +36,11 @@ let canonicalHostPromise = null;
 
 async function ensureCanonicalRuntimeHost(options = {}) {
     if (canonicalHostInstance !== null) {
-        return canonicalHostInstance;
+        if (canonicalHostInstance.phase === "TERMINATED") {
+            canonicalHostInstance = null;
+        } else {
+            return canonicalHostInstance;
+        }
     }
     if (canonicalHostPromise !== null) {
         return canonicalHostPromise;

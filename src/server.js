@@ -43,6 +43,14 @@ let shuttingDown = false;
  */
 async function bootSubsystems() {
 
+    // Initialize runtime memory DB & schema migrations first so all backing tables exist
+    try {
+        await memory.start();
+    } catch (error) {
+        telemetry.error?.(`Memori gagal disiapkan: ${error.message}`);
+        logger.error?.(`Memori gagal disiapkan: ${error.message}`);
+    }
+
     // Compose canonical authority before any lazy Manager/action client can
     // observe the production singleton.  A caller must receive either the
     // real durable composition or the already-composed fail-closed state;
@@ -91,11 +99,6 @@ async function bootSubsystems() {
     // Runtime otonom: capability sync, environment watch, housekeeping.
     require("./autonomy").init().catch(error => {
         logger.warn?.(`Autonomy runtime gagal disiapkan: ${error.message}`);
-    });
-
-    memory.start().catch(error => {
-        telemetry.error(`Memori gagal disiapkan: ${error.message}`);
-        logger.error(`Memori gagal disiapkan: ${error.message}`);
     });
 
     // Lapisan kesadaran: afek, perhatian, model-diri, metakognisi,
@@ -350,35 +353,40 @@ async function listen(port, attemptsLeft = autoPortAttempts()) {
         logger.error?.(`Komposisi otoritas awal gagal (fail-closed): ${error.message}`);
     }
 
-    server = app.listen(port, host);
+    return new Promise((resolve) => {
+        server = app.listen(port, host);
 
-    server.on("listening", () => {
-        // Jika port digeser otomatis, pakai port final di seluruh app.
-        config.port = server.address().port;
-        void bootSubsystems().catch((error) => {
-            logger.error?.(`Boot subsystems failed closed: ${error.message}`);
+        server.on("listening", () => {
+            // Jika port digeser otomatis, pakai port final di seluruh app.
+            config.port = server.address().port;
+            void bootSubsystems().catch((error) => {
+                logger.error?.(`Boot subsystems failed closed: ${error.message}`);
+            }).then(() => {
+                resolve(server);
+            });
         });
-    });
 
-    server.on("error", error => {
+        server.on("error", error => {
 
-        if (error.code === "EADDRINUSE") {
+            if (error.code === "EADDRINUSE") {
 
-            // Port dipakai proses lain. Sering kali itu justru daemon
-            // Damar yang SUDAH jalan — bukan kesalahan fatal.
-            if (attemptsLeft > 0) {
+                // Port dipakai proses lain. Sering kali itu justru daemon
+                // Damar yang SUDAH jalan — bukan kesalahan fatal.
+                if (attemptsLeft > 0) {
 
-                const next = port + 1;
+                    const next = port + 1;
 
-                logger.warn(
-                    `Port ${port} sedang dipakai — mencoba ${next}...`
-                );
+                    logger.warn(
+                        `Port ${port} sedang dipakai — mencoba ${next}...`
+                    );
 
-                setTimeout(() => listen(next, attemptsLeft - 1), 150);
+                    setTimeout(() => {
+                        listen(next, attemptsLeft - 1).then(resolve);
+                    }, 150);
 
-                return;
+                    return;
 
-            }
+                }
 
             logger.error(
                 `Port ${port} sedang dipakai dan tidak ada port pengganti.`
@@ -422,6 +430,8 @@ async function listen(port, attemptsLeft = autoPortAttempts()) {
 
     });
 
+    });
+
 }
 
 /**
@@ -437,7 +447,7 @@ function autoPortAttempts() {
 
 }
 
-const shutdown = (signal) => {
+const shutdown = async (signal, { exit = true } = {}) => {
 
     if (shuttingDown) {
         return;
@@ -484,20 +494,26 @@ const shutdown = (signal) => {
     } catch { /* abaikan */ }
 
     if (server) {
-        server.close(() => process.exit(0));
+        await new Promise((resolve) => server.close(resolve));
+        server = null;
     }
-    else {
+
+    shuttingDown = false;
+
+    if (exit) {
         process.exit(0);
     }
 
     // Jangan menggantung selamanya kalau ada koneksi SSE yang
     // belum tertutup.
-    setTimeout(() => process.exit(0), 5000).unref();
+    if (exit) {
+        setTimeout(() => process.exit(0), 5000).unref();
+    }
 
 };
 
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => { void shutdown("SIGINT"); });
+process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
 
 // Sebuah promise yang gagal tanpa .catch DULUNYA bisa menjatuhkan
 // proses di versi Node baru. Untuk daemon, lebih baik dicatat dan
@@ -543,10 +559,18 @@ process.on("uncaughtException", (error) => {
 
     }
 
-    shutdown("uncaughtException");
+    void shutdown("uncaughtException");
 
 });
 
-listen(Number(config.port) || 3000);
+if (require.main === module) {
+    listen(Number(config.port) || 3000);
+}
 
-module.exports = { app };
+module.exports = {
+    app,
+    get server() { return server; },
+    bootSubsystems,
+    shutdown,
+    listen
+};

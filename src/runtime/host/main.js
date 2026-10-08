@@ -12,13 +12,13 @@ require("../../config/envCompat");
  * bukan prasyaratnya. Belum ada packaging.
  */
 
-const { createRuntimeHost } = require("./runtimeHost");
+const { ensureCanonicalRuntimeHost } = require("./runtimeHost");
 const { createChannelBridge } = require("./channelBridge");
 const { createTrayControllerForHost } = require("./ports/trayPort");
 const { createHotkeyPort, DEFAULT_SUMMON_COMBO } = require("./ports/hotkeyPort");
 
 async function main() {
-    const host = await createRuntimeHost({
+    const host = await ensureCanonicalRuntimeHost({
         coreOptions: {
             wave1: { damarSelfDir: process.env.DAMAR_HOST_SELF_DIR ?? null }
         }
