@@ -1,5 +1,11 @@
-const test = require("node:test");
+const nodeTest = require("node:test");
 const assert = require("node:assert");
+
+// These cases share one intentionally scripted canonical AI runtime. Node's
+// default subtest scheduling can overlap them with shared provider state,
+// leaving later synchronous assertions unscheduled in the repository-wide
+// worker. Keep the shared fixture serial without changing the production path.
+const test = (name, fn) => nodeTest(name, { concurrency: false }, fn);
 
 /**
  * I — BOUNDED DELEGATION END-TO-END lewat JALUR RUNTIME NYATA.
@@ -42,6 +48,7 @@ function registerProbeSkill(name, parameters, result) {
         name,
         description: `Probe uji: ${name}.`,
         parameters,
+        readOnly: name === "system_health",
         execute: async (args) => {
             executed.push({ name: `damarSkills.${name}`, args });
             return typeof result === "function" ? result(args) : result;

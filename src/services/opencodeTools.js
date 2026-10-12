@@ -173,6 +173,17 @@ function rememberSession(key, id) {
  */
 function runOpenCode({ instruction, dir, purpose, agent, model, fresh }) {
 
+    // OpenCode is a consequential coding/terminal actuator.  It is not a
+    // second authority plane and must never spawn from a legacy service call.
+    // A future canonical coding actuator may implement this capability behind
+    // the same Manager request; this adapter deliberately fails closed today.
+    const { submitGovernedService } = require("./governedServiceBoundary");
+    return submitGovernedService({
+        capabilityId: "coding.opencode",
+        operation: "run",
+        arguments: { instruction, dir, purpose, agent: agent ?? null, model: model ?? null, fresh: Boolean(fresh) }
+    });
+
     const key = sessionKey({ purpose, dir });
 
     const prevSession = fresh ? null : sessions.get(key) ?? null;
@@ -422,4 +433,3 @@ function opencodeTools() {
 }
 
 module.exports = { opencodeTools, runOpenCode };
-

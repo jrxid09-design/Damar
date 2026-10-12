@@ -34,7 +34,7 @@ const osintController = require("../../../controllers/osintController");
 const mataDewaController = require("../../../controllers/mataDewaController");
 
 const router = express.Router();
-const managerOnly = rejectLegacyActionMiddleware("Console action");
+const managerOnly = rejectLegacyActionMiddleware("control-plane action");
 const homeManagerOnly = rejectLegacyActionMiddleware("home/device action");
 const labManagerOnly = rejectLegacyActionMiddleware("Lab action");
 const automationManagerOnly = rejectLegacyActionMiddleware("automation action");
@@ -177,7 +177,7 @@ router.post("/lab/tests", labManagerOnly);
 
 // ---- WhatsApp --------------------------------------------------
 
-// ---- Runtime API (status runtime inti utk Runtime Console) -----
+// ---- Runtime API (status runtime inti utk control plane) -----
 
 router.get("/runtime/status", runtimeController.status);
 router.post("/runtime/:key/restart", runtimeController.restart);
@@ -308,7 +308,7 @@ router.get("/crypto/config", cryptoController.config);
 router.post("/crypto/config", managerOnly);
 router.get("/crypto/status", cryptoController.status);
 
-// Sajikan media terunduh (mp4) untuk <video> Console. Auth via header
+// Sajikan media terunduh (mp4) untuk authenticated clients. Auth via header
 // atau ?token= (lihat middleware auth) sebab elemen <video> tak bisa
 // mengirim header Authorization.
 const mediaController = require("../../../controllers/mediaController");
@@ -396,7 +396,7 @@ router.get("/files", filesController.list);
 
 // ---- Mata Dewa (kecerdasan spasial tertanam) --------------------
 // Read-only: status/health/mode/providers/ask/near/surface boleh untuk
-// Console terautentikasi. Perubahan state (aktivasi mode) lewat managerOnly
+// Authenticated clients. Perubahan state (aktivasi mode) lewat managerOnly
 // supaya tetap di bawah otoritas Manager kanonik.
 const mataDewaManagerOnly = rejectLegacyActionMiddleware("Mata Dewa action");
 router.get("/matadewa/status", mataDewaController.status);

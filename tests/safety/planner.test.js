@@ -248,7 +248,6 @@ const RuntimeExecutor = require("../../src/ai/executors/RuntimeExecutor");
 const { AIToolRegistry } = require("../../src/ai/tools");
 const AITool = require("../../src/ai/tools/AITool");
 const loopGuard = require("../../src/core/safety/loopGuard");
-
 function runtimeWith(chat, toolFn) {
 
     const registry = new AIToolRegistry();
@@ -261,8 +260,12 @@ function runtimeWith(chat, toolFn) {
 
     registry.register(t);
 
-    const exec = new RuntimeExecutor({ chat });
+    const exec = new RuntimeExecutor({ chat }, {});
     exec.setToolRegistry(registry);
+
+    const grant = exec.mintGrant({ authorizedTools: ["memory_recall"], role: "superadmin", provenance: "test" });
+    const origExec = exec.execute.bind(exec);
+    exec.execute = (request) => origExec({ exec: grant, ...request });
 
     return exec;
 

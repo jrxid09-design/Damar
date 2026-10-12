@@ -1,18 +1,18 @@
-"use strict";
+﻿"use strict";
 
 /**
- * ACTION ACTUATION FABRIC V1 — TEST-ONLY ACTUATION HARNESS (FIRST targeted
+ * ACTION ACTUATION FABRIC V1 â€” TEST-ONLY ACTUATION HARNESS (FIRST targeted
  * repair: own private copies of ALL privileged actuation implementations).
  *
  * Production src/action/actuation/*.js now export ONLY inert vocabulary + pure
- * predicates — the privileged constructors live ONLY in the trusted bootstrap's
+ * predicates â€” the privileged constructors live ONLY in the trusted bootstrap's
  * private lexical closure (src/action/bootstrap.js). Tests cannot import them
  * from production; this harness owns its OWN private copies of the same
  * implementation (the test-domain analogue of the trusted bootstrap closure)
  * and is reachable ONLY under tests/ (production src/** never imports it).
  *
  * The test-domain copies use the SAME canonical brand WeakSets exposed to the
- * pure predicates in production `src/action/actuation/index.js`. Wait — NO:
+ * pure predicates in production `src/action/actuation/index.js`. Wait â€” NO:
  * the production WeakSets are bootstrap-private and not exported. To let tests
  * exercise the brand predicates against canonical request/result shapes, the
  * test harness instead verifies via the PUBLIC structural predicates in
@@ -27,7 +27,7 @@
  *   - test lifecycle tracker (private copy)
  *
  * Downstream (in tests = channel/model code analogues) receives ONLY
- * { execute } — exactly like production. Registration happens through the
+ * { execute } â€” exactly like production. Registration happens through the
  * harness's own registrar surface, mirroring how the trusted runtime layer
  * would wire real actuators in a later lane.
  */
@@ -58,6 +58,79 @@ function isPlainObject(v) {
     if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
     const proto = Object.getPrototypeOf(v);
     return proto === Object.prototype || proto === null;
+}
+
+const isProxyValue = require("node:util").types.isProxy.bind(require("node:util").types);
+
+// Mirrors the bootstrap dispatcher: the actuator's own outcome description is
+// read from the RAW report, and only an own DATA property of a non-Proxy object
+// is trusted -- an accessor, an inherited description or a Proxy fails closed
+// instead of falling through to EXECUTED.
+const NO_OUTCOME = Symbol("no-actuator-outcome");
+const UNSUPPORTED_OUTCOME = Symbol("unsupported-actuator-outcome");
+function readActuatorOutcome(value) {
+    try {
+        if (value === null || (typeof value !== "object" && typeof value !== "function")) return NO_OUTCOME;
+        if (isProxyValue(value)) return UNSUPPORTED_OUTCOME;
+        if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
+            const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
+            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return UNSUPPORTED_OUTCOME;
+            // PRESENCE matters: an own data `outcome` whose value is undefined is
+            // a described (ambiguous) token, not an absent one.
+            return descriptor.value;
+        }
+        return Reflect.has(value, "outcome") ? UNSUPPORTED_OUTCOME : NO_OUTCOME;
+    } catch {
+        return UNSUPPORTED_OUTCOME;
+    }
+}
+
+// Any `outcome` description ANYWHERE in a raw report must be the canonical
+// success token (mirrors the bootstrap dispatcher's scan): an accessor, a
+// Proxy, a callable, an exotic object, an over-budget subtree or any
+// non-EXECUTED token fails closed.
+function scanOutcomeDescriptions(value, state = { nodes: 0, path: new Set() }) {
+    try {
+        if (++state.nodes > 512) return true;
+        if (value === null) return false;
+        if (typeof value === "function") return true;
+        if (typeof value !== "object") return false;
+        if (isProxyValue(value)) return true;
+        const isArray = Array.isArray(value);
+        const proto = Object.getPrototypeOf(value);
+        if (!isArray && proto !== Object.prototype && proto !== null) return true;
+        if (state.path.has(value)) return false;
+        state.path.add(value);
+        let ambiguous = false;
+        for (const key of Reflect.ownKeys(value)) {
+            const descriptor = Object.getOwnPropertyDescriptor(value, key);
+            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) { ambiguous = true; break; }
+            if (key === "outcome" && descriptor.value !== "EXECUTED") { ambiguous = true; break; }
+            if (scanOutcomeDescriptions(descriptor.value, state)) { ambiguous = true; break; }
+        }
+        state.path.delete(value);
+        return ambiguous;
+    } catch {
+        return true;
+    }
+}
+
+// A caller-supplied AbortSignal is plumbing, not authority: a hostile signal
+// degrades to "no cancellation available" instead of rejecting execute().
+function readSignal(signal) {
+    try {
+        if (!signal || typeof signal !== "object") return null;
+        const add = signal.addEventListener;
+        if (typeof add !== "function") return null;
+        const remove = signal.removeEventListener;
+        return {
+            aborted: signal.aborted === true,
+            add: add.bind(signal),
+            remove: typeof remove === "function" ? remove.bind(signal) : null
+        };
+    } catch {
+        return null;
+    }
 }
 
 function deepFreeze(obj) {
@@ -219,6 +292,7 @@ function sanitizeActuatorOutput(value) {
         if (t === "boolean") return v;
         if (t === "number") return Number.isFinite(v) ? v : null;
         if (t === "bigint" || t === "symbol" || t === "undefined" || t === "function") return null;
+        if (isProxyValue(v)) return null;
         if (v instanceof Error) return { name: String(v.name ?? "Error").slice(0, 64), message: String(v.message ?? "").slice(0, 1024) };
         if (!isPlainObject(v) && !Array.isArray(v)) return null;
         if (state.path.has(v)) return null;
@@ -400,35 +474,61 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
 
     async function execute(p) {
         if (p === null || typeof p !== "object") throw fail(REASONS.MALFORMED_REQUEST, "execute requires a request object");
-        for (const key of CALLER_EXECUTOR_KEYS) {
-            if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
-                throw fail(REASONS.CALLER_EXECUTOR_REJECTED, `caller-executor option '${key}' is forbidden; the actuator is bootstrap-owned, never caller-selectable`);
+        // Guarded intake (mirrors the bootstrap dispatcher): a getter or Proxy
+        // trap that throws becomes a typed refusal, never a leaked exception.
+        let intent;
+        let authSession;
+        let parameters;
+        let metadata;
+        let timeoutOption;
+        let signalOption;
+        try {
+            for (const key of CALLER_EXECUTOR_KEYS) {
+                if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
+                    throw fail(REASONS.CALLER_EXECUTOR_REJECTED, `caller-executor option '${key}' is forbidden; the actuator is bootstrap-owned, never caller-selectable`);
+                }
             }
-        }
-        for (const key of BEARER_DECISION_KEYS) {
-            if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
-                throw fail(REASONS.CALLER_EXECUTOR_REJECTED, `authority-decision option '${key}' is forbidden; an AuthorityDecision is historical evidence, not a bearer execution token`);
+            for (const key of BEARER_DECISION_KEYS) {
+                if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
+                    throw fail(REASONS.CALLER_EXECUTOR_REJECTED, `authority-decision option '${key}' is forbidden; an AuthorityDecision is historical evidence, not a bearer execution token`);
+                }
             }
+            intent = p.intent;
+            authSession = p.authSession;
+            parameters = p.parameters;
+            metadata = p.metadata;
+            timeoutOption = p.timeoutMs;
+            signalOption = p.signal;
+        } catch (e) {
+            if (e && typeof e.reasonCode === "string") throw e;
+            throw fail(REASONS.MALFORMED_REQUEST, "request options are unreadable");
         }
 
-        const { intent, authSession } = p;
-        if (!intent || typeof intent !== "object" ||
-            typeof intent.intentId !== "string" ||
-            typeof intent.capabilityId !== "string" ||
-            typeof intent.operation !== "string" ||
-            typeof intent.capabilityIncarnationId !== "string") {
-            throw fail(REASONS.INVALID_INTENT, "execute requires a canonical ActionIntent");
-        }
-        if (!isValidIncarnationId(intent.capabilityIncarnationId)) {
-            throw fail(REASONS.INVALID_INTENT, "intent capabilityIncarnationId is not a valid canonical incarnation");
-        }
-        if (authSession === null || typeof authSession !== "object") {
-            throw fail(REASONS.INVALID_SESSION, "execute requires an authenticated session");
+        let admittedAtMs;
+        try {
+            if (!intent || typeof intent !== "object" ||
+                typeof intent.intentId !== "string" ||
+                typeof intent.capabilityId !== "string" ||
+                typeof intent.operation !== "string" ||
+                typeof intent.capabilityIncarnationId !== "string") {
+                throw fail(REASONS.INVALID_INTENT, "execute requires a canonical ActionIntent");
+            }
+            if (!isValidIncarnationId(intent.capabilityIncarnationId)) {
+                throw fail(REASONS.INVALID_INTENT, "intent capabilityIncarnationId is not a valid canonical incarnation");
+            }
+            if (authSession === null || typeof authSession !== "object") {
+                throw fail(REASONS.INVALID_SESSION, "execute requires an authenticated session");
+            }
+            admittedAtMs = intent.createdAtMs;
+        } catch (e) {
+            if (e && typeof e.reasonCode === "string") throw e;
+            throw fail(REASONS.INVALID_INTENT, "intent fields are unreadable");
         }
 
         const requestedAtMs = canonicalClockNow();
         const lifecycle = createLifecycleTracker(LIFECYCLE.CREATED);
-        const admittedAtMs = intent.createdAtMs;
+        // Downstream reads this sanitized bag, never the caller's object.
+        const safeP = Object.freeze({ intent, authSession, parameters, metadata, timeoutMs: timeoutOption, signal: signalOption });
 
         let provisionalRequest;
         try {
@@ -442,15 +542,15 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
                 authorityGeneration: 0,
                 admittedAtMs,
                 requestedAtMs,
-                parameters: p.parameters,
-                metadata: p.metadata
+                parameters,
+                metadata
             });
         } catch (e) {
             lifecycle.advance(LIFECYCLE.FAILED, requestedAtMs);
             throw e;
         }
 
-        const contentKey = computeContentKey(intent, authSession, p.parameters, p.metadata);
+        const contentKey = computeContentKey(intent, authSession, parameters, metadata);
         if (inFlight.has(contentKey)) return inFlight.get(contentKey).promise;
         if (completed.has(contentKey)) return completed.get(contentKey).result;
 
@@ -458,7 +558,7 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
         inFlight.set(contentKey, inFlightEntry);
         const runPromise = (async () => {
             try {
-                return await runExecutionBody(contentKey, intent, authSession, p, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs);
+                return await runExecutionBody(contentKey, intent, authSession, safeP, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs);
             } finally {
                 inFlight.delete(contentKey);
             }
@@ -467,7 +567,7 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
         return runPromise;
     }
 
-    async function runExecutionBody(contentKey, intent, authSession, p, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs) {
+    async function runExecutionBody(contentKey, intent, authSession, safeP, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs) {
         lifecycle.advance(LIFECYCLE.REVALIDATING, canonicalClockNow());
 
         let freshDecision;
@@ -549,8 +649,8 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
                 authorityGeneration: freshDecision.authorityGeneration,
                 admittedAtMs,
                 requestedAtMs,
-                parameters: p.parameters,
-                metadata: p.metadata
+                parameters: safeP.parameters,
+                metadata: safeP.metadata
             });
         } catch (e) {
             lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());
@@ -603,8 +703,8 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
 
         lifecycle.advance(LIFECYCLE.READY, canonicalClockNow());
 
-        const signal = p.signal;
-        if (signal && typeof signal.addEventListener === "function" && signal.aborted) {
+        const signal = readSignal(safeP.signal);
+        if (signal && signal.aborted) {
             lifecycle.advance(LIFECYCLE.CANCELLED, canonicalClockNow());
             const result = buildExecutionResult({
                 executionRequest: request,
@@ -623,22 +723,25 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
 
         lifecycle.advance(LIFECYCLE.DISPATCHING, canonicalClockNow());
         const dispatchStartMs = canonicalClockNow();
-        const effectiveTimeout = (typeof p.timeoutMs === "number" && Number.isSafeInteger(p.timeoutMs) && p.timeoutMs >= MIN_TIMEOUT_MS && p.timeoutMs <= MAX_TIMEOUT_MS)
-            ? p.timeoutMs : timeoutMs;
+        const effectiveTimeout = (typeof safeP.timeoutMs === "number" && Number.isSafeInteger(safeP.timeoutMs) && safeP.timeoutMs >= MIN_TIMEOUT_MS && safeP.timeoutMs <= MAX_TIMEOUT_MS)
+            ? safeP.timeoutMs : timeoutMs;
 
         let cancelledDuringDispatch = false;
         let invocationCount = 0;
+        const gatedRequest = deepFreeze({
+            executionId: request.executionId,
+            intentId: request.intentId,
+            capabilityId: request.capabilityId,
+            operation: request.operation,
+            principal: request.principal,
+            scope: request.scope,
+            parameters: request.parameters
+        });
+        testRequestBrandSet.add(gatedRequest);
+
         const execPromise = (async () => {
             invocationCount++;
-            return await binding.invoke({
-                executionId: request.executionId,
-                intentId: request.intentId,
-                capabilityId: request.capabilityId,
-                operation: request.operation,
-                principal: request.principal,
-                scope: request.scope,
-                parameters: request.parameters
-            });
+            return await binding.invoke(gatedRequest, request);
         })();
 
         let timeoutHandle = null;
@@ -649,15 +752,16 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
         });
 
         let cancelListener = null;
-        if (signal && typeof signal.addEventListener === "function") {
+        if (signal && signal.add) {
             cancelListener = () => {
                 if (lifecycle.state === LIFECYCLE.DISPATCHING && !timedOut) cancelledDuringDispatch = true;
             };
-            signal.addEventListener("abort", cancelListener);
+            try { signal.add("abort", cancelListener); } catch { cancelListener = null; }
         }
 
         let actuatorOutput = null;
         let dispatchFailed = null;
+        let dispatchThrew = false;
         try {
             actuatorOutput = await Promise.race([execPromise, timeoutPromise]);
             if (timedOut) {
@@ -677,17 +781,19 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
                 return result;
             }
         } catch (e) {
+            dispatchThrew = true;
             dispatchFailed = e;
         } finally {
             if (timeoutHandle) clearTimeout(timeoutHandle);
-            if (signal && typeof signal.removeEventListener === "function" && cancelListener) {
-                try { signal.removeEventListener("abort", cancelListener); } catch { /* best-effort */ }
+            if (cancelListener && signal && signal.remove) {
+                try { signal.remove("abort", cancelListener); } catch { /* best-effort */ }
             }
         }
 
-        if (dispatchFailed) {
+        if (dispatchThrew) {
             lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());
-            const sanitized = sanitizeActuatorOutput(dispatchFailed);
+            let sanitized = null;
+            try { sanitized = sanitizeActuatorOutput(dispatchFailed); } catch { sanitized = null; }
             const result = buildExecutionResult({
                 executionRequest: request,
                 state: RESULT_STATE.FAILED,
@@ -704,6 +810,51 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
             return result;
         }
 
+        let sanitizedOutput;
+        let outputOutcome;
+        try {
+            outputOutcome = readActuatorOutcome(actuatorOutput);
+            if (outputOutcome === UNSUPPORTED_OUTCOME) throw new Error("actuator outcome description is unsupported");
+            sanitizedOutput = sanitizeActuatorOutput(actuatorOutput);
+        } catch {
+            lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());
+            const result = buildExecutionResult({
+                executionRequest: request,
+                state: RESULT_STATE.FAILED,
+                actuatorId: binding.actuatorId,
+                actuatorIncarnationId: binding.actuatorIncarnationId,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: dispatchStartMs,
+                completedAtMs: canonicalClockNow(),
+                failureReason: REASONS.ACTUATOR_REJECTED_INVOCATION,
+                failureDetail: "actuator returned an unsupported result"
+            });
+            noteCompleted(contentKey, { result, request, intentId: request.intentId });
+            return result;
+        }
+        // Closed vocabulary: only the canonical EXECUTED token is a success
+        // claim (mirrors the bootstrap dispatcher).
+        if ((outputOutcome !== NO_OUTCOME && outputOutcome !== "EXECUTED") || scanOutcomeDescriptions(actuatorOutput)) {
+            lifecycle.advance(LIFECYCLE.FAILED, canonicalClockNow());            const result = buildExecutionResult({
+                executionRequest: request,
+                state: RESULT_STATE.FAILED,
+                actuatorId: binding.actuatorId,
+                actuatorIncarnationId: binding.actuatorIncarnationId,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: dispatchStartMs,
+                completedAtMs: canonicalClockNow(),
+                actuatorReport: sanitizedOutput,
+                failureReason: REASONS.ACTUATOR_REJECTED_INVOCATION,
+                failureDetail: outputOutcome === "UNKNOWN_OUTCOME"
+                    ? "actuator completed with ambiguous physical outcome"
+                    : typeof outputOutcome === "string"
+                        ? `actuator reported ${outputOutcome.toLowerCase()}`
+                        : "actuator reported an unsupported outcome token"
+            });
+            noteCompleted(contentKey, { result, request, intentId: request.intentId });
+            return result;
+        }
+
         lifecycle.advance(LIFECYCLE.EXECUTED, canonicalClockNow());
         const result = buildExecutionResult({
             executionRequest: request,
@@ -713,7 +864,7 @@ function composeDispatcher({ lane2Facade, actuatorRegistry, clock = { nowMs: () 
             lifecycleTrace: lifecycle.trace,
             startedAtMs: dispatchStartMs,
             completedAtMs: canonicalClockNow(),
-            actuatorReport: actuatorOutput
+            actuatorReport: sanitizedOutput
         });
         noteCompleted(contentKey, { result, request, intentId: request.intentId });
         return result;
@@ -785,7 +936,7 @@ async function makeActuationHarness({ clock, scopeBindings, authenticate } = {})
     });
     // Per-harness brand set: a separate trust domain per makeActuationHarness
     // call. Two harness instances have INDEPENDENT result brands, so a
-    // result from harness A is NOT canonical in harness B — exactly mirroring
+    // result from harness A is NOT canonical in harness B â€” exactly mirroring
     // the production closure-private brand model.
     const localRequestBrandSet = new WeakSet();
     const localResultBrandSet = new WeakSet();
@@ -820,8 +971,10 @@ async function makeActuationHarness({ clock, scopeBindings, authenticate } = {})
         execute: brandedExecute,
         isCanonicalExecutionRequest(value) {
             if (value === null || typeof value !== "object") return false;
-            if (value.schemaVersion !== 1) return false;
-            if (typeof value.executionId !== "string" || value.executionId.length === 0) return false;
+            // Brand membership ONLY, exactly like the production facade: the
+            // dispatcher brands both the canonical ExecutionRequest and the
+            // frozen gated view it hands to an actuator, so a schemaVersion
+            // pre-filter here would reject a genuine canonical artifact.
             return localRequestBrandSet.has(value) || testRequestBrandSet.has(value);
         },
         isCanonicalExecutionResult(value) {

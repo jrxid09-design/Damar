@@ -1,0 +1,13 @@
+{
+  "schema_version":"uix-w2.agent-gateway.v1",
+  "role":"future external interface for governed Damar workflows/capabilities",
+  "exposes":["mission requests","bounded capability workflows","read models","continuity handoffs"],
+  "does_not_expose":"independent orchestrator, authority, mission store, memory store, capability registry, or identity",
+  "flow":"external authenticated request -> canonical session/identity binding -> Manager -> ActionIntent -> existing authority -> capability/actuation -> verification -> Audit Ledger -> read-model/event",
+  "authn":"client credentials, scopes, expiry, network restrictions, rate/quota policy",
+  "authority":"external authentication is not action authority; consequential requests require normal authority/approval",
+  "model_boundary":"may reference Model Gateway/aliases; model selection is never action authorization",
+  "failure":"external agent/tool failure is not Damar Core failure; return explicit UNKNOWN/DEGRADED and provenance",
+  "secret_ownership":"Secret Vault references only",
+  "not_implemented_in_w2":true
+}

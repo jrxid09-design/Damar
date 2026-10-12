@@ -2,6 +2,22 @@ const { AITool } = require("../ai/tools");
 const brain = require("./CodingBrain");
 
 /**
+ * IW1: a capability denial is a truthful failure, never a payload. Denial
+ * objects are truthy, so every composing/guarding tool must check for one
+ * explicitly instead of reporting ok:true over unauthorized (empty) results.
+ */
+const isDenial = (v) => Boolean(v && typeof v === "object" && v.denied === true);
+const denialResult = (v) => ({
+    ok: false,
+    denied: true,
+    ownerRatificationRequired: Boolean(v.ownerRatificationRequired),
+    capabilityId: v.capabilityId ?? null,
+    operation: v.operation ?? null,
+    reason: v.reason ?? "NOT_AUTHORIZED",
+    note: "Kemampuan ini belum diotorisasi owner (ratification required); tidak ada efek yang dijalankan."
+});
+
+/**
  * Tool AI Coding Brain — Damar memanggil "mesin internal" lewat sini.
  *
  * Fase 1: mesin GRAF (Graphify). Aturan (ditegakkan lewat deskripsi):
@@ -219,8 +235,12 @@ function codingTools() {
                 required: ["name"]
             },
             execute: async ({ name, project }) => {
-                if (!await brain.patcher.isRepo(project)) return { ok: false, note: "Bukan repo git." };
-                return brain.patcher.createBranch(name, project);
+                const repo = await brain.patcher.isRepo(project);
+                if (isDenial(repo)) return denialResult(repo);
+                if (!repo) return { ok: false, note: "Bukan repo git." };
+                const created = await brain.patcher.createBranch(name, project);
+                if (isDenial(created)) return denialResult(created);
+                return created;
             }
         }),
 
@@ -240,12 +260,16 @@ function codingTools() {
                 }
             },
             execute: async ({ project, staged, maxChars }) => {
-                if (!await brain.patcher.isRepo(project)) return { ok: false, note: "Bukan repo git." };
+                const repo = await brain.patcher.isRepo(project);
+                if (isDenial(repo)) return denialResult(repo);
+                if (!repo) return { ok: false, note: "Bukan repo git." };
                 const limit = Number.isFinite(maxChars) && maxChars > 0 ? maxChars : 12000;
                 const [status, diff] = await Promise.all([
                     brain.patcher.status(project),
                     brain.patcher.diff(project, { staged: !!staged })
                 ]);
+                if (isDenial(status)) return denialResult(status);
+                if (isDenial(diff)) return denialResult(diff);
                 return {
                     ok: true,
                     status: status || "(bersih)",
@@ -271,11 +295,15 @@ function codingTools() {
                 }
             },
             execute: async ({ project, staged }) => {
-                if (!await brain.patcher.isRepo(project)) return { ok: false, note: "Bukan repo git." };
+                const repo = await brain.patcher.isRepo(project);
+                if (isDenial(repo)) return denialResult(repo);
+                if (!repo) return { ok: false, note: "Bukan repo git." };
                 const [diff, status] = await Promise.all([
                     brain.patcher.diff(project, { staged: !!staged }),
                     brain.patcher.status(project)
                 ]);
+                if (isDenial(diff)) return denialResult(diff);
+                if (isDenial(status)) return denialResult(status);
 
                 // Berkas baru yang belum di-'git add' TIDAK muncul di git diff.
                 // Tanpa catatan ini tinjauan bisa berkata "bersih" padahal ada

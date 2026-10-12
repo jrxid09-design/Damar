@@ -1,6 +1,7 @@
 const { AITool } = require("../ai/tools");
 
 const whatsapp = require("./whatsappService");
+const { submitGovernedService } = require("./governedServiceBoundary");
 
 /**
  * Tool agar Damar bisa mengirim media saat mengobrol via WhatsApp —
@@ -39,9 +40,10 @@ function whatsappTools() {
                 },
                 required: ["url"]
             },
-            execute: async ({ url, caption }) => {
-                await whatsapp.sendPhoto(ensureChat(), url, caption);
-                return { sent: true };
+            execute: async ({ url, caption }, ctx) => {
+                const result = await submitGovernedService({ execution: ctx?.exec ?? null, capabilityId: "messaging.whatsapp", operation: "sendPhoto", arguments: { number: ensureChat(), url, caption }, expectedPostcondition: { kind: "notification-delivery" } });
+                if (result?.outcome !== "COMPLETED") throw new Error(result?.detail ?? result?.reason ?? "canonical authority required");
+                return { sent: true, result, governed: true };
             }
         }),
 
@@ -57,9 +59,10 @@ function whatsappTools() {
                 },
                 required: ["url"]
             },
-            execute: async ({ url, caption, fileName }) => {
-                await whatsapp.sendDocument(ensureChat(), url, caption, fileName);
-                return { sent: true };
+            execute: async ({ url, caption, fileName }, ctx) => {
+                const result = await submitGovernedService({ execution: ctx?.exec ?? null, capabilityId: "messaging.whatsapp", operation: "sendDocument", arguments: { number: ensureChat(), url, caption, fileName }, expectedPostcondition: { kind: "notification-delivery" } });
+                if (result?.outcome !== "COMPLETED") throw new Error(result?.detail ?? result?.reason ?? "canonical authority required");
+                return { sent: true, result, governed: true };
             }
         }),
 
@@ -73,9 +76,10 @@ function whatsappTools() {
                 },
                 required: ["url"]
             },
-            execute: async ({ url }) => {
-                await whatsapp.sendSticker(ensureChat(), url);
-                return { sent: true };
+            execute: async ({ url }, ctx) => {
+                const result = await submitGovernedService({ execution: ctx?.exec ?? null, capabilityId: "messaging.whatsapp", operation: "sendSticker", arguments: { number: ensureChat(), url }, expectedPostcondition: { kind: "notification-delivery" } });
+                if (result?.outcome !== "COMPLETED") throw new Error(result?.detail ?? result?.reason ?? "canonical authority required");
+                return { sent: true, result, governed: true };
             }
         })
 

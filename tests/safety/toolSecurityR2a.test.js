@@ -6,6 +6,7 @@ const bus = require("../../src/autonomy/ToolBus");
 const loopGuard = require("../../src/core/safety/loopGuard");
 const RuntimeExecutor = require("../../src/ai/executors/RuntimeExecutor");
 const AIToolCall = require("../../src/ai/tools/AIToolCall");
+const { createInternalGrantDomain } = require("../../src/ai/tools/internalGrant");
 
 /** ROUND-2 SEAMS A — C1 tunnel, C2 console, stream parity, dedupe. */
 
@@ -13,17 +14,23 @@ const call = (n, a) => new AIToolCall({
     id: `r2-${Math.random().toString(36).slice(2, 7)}`, name: n, arguments: a
 });
 
-function executorWith(map, execDefaults = { role: "superadmin", channel: "test" }) {
+function executorWith(map, execOverride = null) {
+    const grantDomain = createInternalGrantDomain();
     const ex = new RuntimeExecutor(
         { chat: async () => ({ content: "done", toolCalls: [] }) },
-        { callTimeout: 5000 }
+        { callTimeout: 5000, grantDomain }
     );
     ex.setToolRegistry({ map, get(n) { return this.map.get(n); } });
+    const defaultGrant = execOverride ?? grantDomain.mintCanonicalInternalGrant({
+        authorizedTools: [...map.keys()],
+        role: "superadmin",
+        provenance: "test"
+    });
     const o = ex.execute.bind(ex);
-    ex.execute = (r) => o({ exec: r.exec ?? execDefaults, ...r });
+    ex.execute = (r) => o({ exec: r.exec ?? defaultGrant, ...r });
     const os = ex.stream.bind(ex);
     ex.stream = async function* (r) {
-        yield* os({ exec: r.exec ?? execDefaults, ...r });
+        yield* os({ exec: r.exec ?? defaultGrant, ...r });
     };
     return ex;
 }
@@ -52,7 +59,7 @@ test("C1b. admin→tool_exec(wrapper)→terminal_run DENY (tunnel tertutup)", as
             context: { exec: { role: "admin", channel: "telegram" } }
         });
         assert.equal(r.ok, false);
-        assert.match(String(r.error), /PERMISSION_DENIED|tidak diizinkan/i);
+        assert.match(String(r.error), /PERMISSION_DENIED|tidak diizinkan|ditolak otorisasi/i);
     }
     finally { bus.resolve = saved; }
 
@@ -75,7 +82,7 @@ test("C1c. tanpa identitas → DENY (bukan system)", async () => {
 
 });
 
-test("C1d. internal system eksplisit tetap sah (GoalEngine path)", async () => {
+test("C1d. ToolBus menolak semua permintaan tanpa terkecuali — termasuk system role (gunakan jalur kanonik)", async () => {
     const saved = bus.resolve;
     bus.resolve = () => ({
         kind: "ai",
@@ -87,7 +94,8 @@ test("C1d. internal system eksplisit tetap sah (GoalEngine path)", async () => {
             name: "memory_recall", args: {},
             context: { exec: { role: "system", channel: "autonomy", sessionId: "goal-1" } }
         });
-        assert.equal(r.ok, true);
+        assert.equal(r.ok, false);
+        assert.match(String(r.error), /ditolak otorisasi|PERMISSION_DENIED/i);
     }
     finally { bus.resolve = saved; }
 });
@@ -197,14 +205,15 @@ test("N1. dev-open: Host: localhost dari remote TIDAK mendapat superadmin", () =
 test("H1. stream & non-stream identitas eksekusi identik", async () => {
 
     const seen = [];
-    const map = new Map([
-        ["probe", { name: "probe", description: "probe", parameters: {}, execute: async () => ({ ok: 1 }) }]
-    ]);
+    // Intercept via tool.execute — ToolExecutor calls tool.execute(args, { exec: identity })
+    // where identity.role reflects the canonical grant role passed through execute()/stream().
+    const probeTool = {
+        name: "probe", description: "probe", parameters: {},
+        execute: async (_args, ctx) => { seen.push(ctx?.exec?.role); return { ok: 1 }; }
+    };
+    const map = new Map([["probe", probeTool]]);
 
     const ex = executorWith(map);
-
-    const origExec = ex.toolExecutor.execute.bind(ex.toolExecutor);
-    ex.toolExecutor.execute = (c, e) => { seen.push(e?.role); return origExec(c, e); };
 
     let giliran = 0;
     ex.service = {

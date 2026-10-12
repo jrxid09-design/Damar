@@ -9,10 +9,14 @@ const forge = require("./toolForge");
  *   1. create_tool  → menyimpan DRAFT, menampilkan apa yang akan
  *      dilakukan tool + peringatan risiko.
  *   2. Pengguna menyetujui (bisa lewat percakapan atau Console).
- *   3. activate_tool → tool jadi aktif dan bisa dipanggil.
+ *   3. activate_tool → mencatat PERSETUJUAN (status).
  *
- * activate_tool hanya boleh dipanggil setelah pengguna
- * mengonfirmasi secara eksplisit — ini gerbang keamanannya.
+ * Sejak remediasi jalur-kedua W8, persetujuan BUKAN aktivasi: artefak forge
+ * tetap di karantina, tidak dipindahkan ke root plugin yang bisa dimuat, dan
+ * tidak ada kode yang dijalankan. Tool hasil generate baru bisa dipanggil
+ * setelah terdaftar lewat jalur kanonik (Manager → ActionIntent → Authority →
+ * Capability). Karena itu tidak ada tool di file ini yang boleh mengklaim
+ * sebuah tool "aktif dan siap dipanggil".
  */
 function forgeTools() {
 
@@ -89,10 +93,13 @@ function forgeTools() {
                     id: result.id,
                     status: result.status,
                     risks: result.risks,
+                    activated: false,
                     note: result.status === "draft"
-                        ? "Draft tersimpan tapi BELUM aktif. Minta pengguna menyetujui, " +
-                          "lalu panggil activate_tool dengan id ini."
-                        : "Tool langsung aktif (mode auto-approve)."
+                        ? "Draft tersimpan tapi BELUM aktif. Minta pengguna menyetujui " +
+                          "(activate_tool mencatat persetujuan; eksekusi tetap menunggu " +
+                          "registrasi kanonik)."
+                        : "Draft tersimpan dengan status persetujuan; BELUM dimuat dan " +
+                          "tidak bisa dipanggil sampai terdaftar di jalur kanonik."
                 };
 
             }
@@ -104,9 +111,10 @@ function forgeTools() {
             name: "activate_tool",
 
             description:
-                "Aktifkan tool draft agar bisa dipakai. HANYA panggil ini setelah pengguna " +
-                "secara eksplisit menyetujui (mis. berkata 'ya, aktifkan'). Jangan " +
-                "mengaktifkan atas inisiatif sendiri.",
+                "Setujui tool draft (status persetujuan). Sejak remediasi jalur-kedua W8 " +
+                "persetujuan TIDAK mengaktifkan eksekusi: tool hasil generate baru benar-benar " +
+                "bisa dipanggil setelah terdaftar di jalur kanonik. HANYA panggil ini setelah " +
+                "pengguna secara eksplisit menyetujui (mis. berkata 'ya, setujui').",
 
             parameters: {
                 type: "object",
@@ -121,10 +129,14 @@ function forgeTools() {
                 const result = forge.approve(id);
 
                 return {
-                    activated: true,
+                    approved: true,
+                    activated: false,
+                    canonicalRequired: result.canonicalRequired === true,
                     id: result.id,
                     tools: result.tools,
-                    note: `Tool '${id}' aktif dan siap dipanggil sekarang.`
+                    note: `Draft '${id}' disetujui secara status, TAPI belum dimuat/dieksekusi: ` +
+                        `aktivasi menunggu registrasi kanonik (Manager -> ActionIntent -> Authority -> Capability). ` +
+                        `Jangan mengklaim tool ini bisa dipanggil sekarang.`
                 };
 
             }
@@ -136,9 +148,9 @@ function forgeTools() {
             name: "list_my_tools",
 
             description:
-                "Lihat tool buatan sendiri (yang aktif maupun masih draft). Pakai untuk " +
-                "mengecek apa yang sudah ada sebelum membuat yang baru, atau melihat draft " +
-                "yang menunggu persetujuan.",
+                "Lihat tool buatan sendiri: mana yang BENAR-BENAR aktif, mana yang baru " +
+                "disetujui tapi belum dimuat (menunggu registrasi kanonik), dan mana yang " +
+                "masih draft. Jangan menyebut sesuatu aktif kalau belum dimuat.",
 
             parameters: {
                 type: "object",
@@ -147,13 +159,33 @@ function forgeTools() {
 
             execute: async () => {
 
-                const { active, drafts } = forge.list();
+                const { active = [], drafts = [] } = forge.list();
+
+                // Hanya entri yang benar-benar dimuat (activated === true) yang
+                // boleh disebut aktif. Yang sekadar disetujui — baik yang sudah
+                // diinstal maupun yang masih di karantina forge — masuk bucket
+                // approvedNotLoaded supaya tidak pernah dilaporkan sebagai tool
+                // yang bisa dipanggil.
+                const isActivated = (t) => t?.activated === true && t?.status === "active";
+                const isApproved = (t) => !isActivated(t) && t?.status === "approved";
+                const live = active.filter(isActivated);
+                const approvedNotLoaded = [...active, ...drafts].filter(isApproved);
+                const pendingDrafts = drafts.filter(t => t?.status !== "approved");
 
                 return {
-                    active: active.map(t => ({ id: t.id, name: t.name, description: t.description })),
-                    drafts: drafts.map(t => ({
+                    active: live.map(t => ({ id: t.id, name: t.name, description: t.description })),
+                    approvedNotLoaded: approvedNotLoaded.map(t => ({
+                        id: t.id,
+                        name: t.name,
+                        status: t.status,
+                        canonicalRequired: t.canonicalRequired === true
+                    })),
+                    drafts: pendingDrafts.map(t => ({
                         id: t.id, name: t.name, risks: t.risks
-                    }))
+                    })),
+                    note: approvedNotLoaded.length > 0
+                        ? "approvedNotLoaded = disetujui tapi BELUM dimuat/dieksekusi; aktivasi menunggu registrasi kanonik."
+                        : null
                 };
 
             }

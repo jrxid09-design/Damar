@@ -56,13 +56,18 @@ function listBots() { return store.read().bots ?? []; }
 function createBot({ symbol, interval = "1h", autoExecute = false, maxQuoteUsdt = 0 }) {
     const s = normSymbol(symbol);
     if (!s) throw new Error("symbol wajib.");
-    if (autoExecute && !(Number(maxQuoteUsdt) > 0)) {
-        throw new Error("autoExecute butuh maxQuoteUsdt > 0 (batas belanja per sinyal).");
+    // ponytail: autonomous order execution blocked — financial actuation requires canonical
+    // authority governance (W9-L5, BAR-W9-34/BLK-04). Signal-only mode remains available.
+    if (autoExecute) {
+        throw new Error(
+            "autoExecute tidak tersedia: eksekusi keuangan otonom memerlukan otorisasi " +
+            "kanonik (W9-L5). Gunakan mode sinyal notifikasi saja."
+        );
     }
     const bot = {
         id: `bot_${crypto.randomBytes(3).toString("hex")}`,
-        symbol: s, interval, autoExecute: Boolean(autoExecute),
-        maxQuoteUsdt: Number(maxQuoteUsdt) || 0,
+        symbol: s, interval, autoExecute: false,
+        maxQuoteUsdt: 0,
         active: true, lastSignal: null, createdAt: new Date().toISOString()
     };
     const bots = listBots(); bots.push(bot); store.write({ bots });
@@ -93,7 +98,15 @@ async function signalFor(symbol, interval) {
 
 async function announce(text) {
     try { telemetry.publish("damar:present", { kind: "text", title: "Bot Trading", text }); } catch { /* */ }
-    try { await require("./notifyService").send(text); } catch { /* */ }
+    try {
+        const { submitGovernedService } = require("./governedServiceBoundary");
+        await submitGovernedService({
+            capabilityId: "messaging.whatsapp",
+            operation: "send",
+            arguments: { text },
+            expectedPostcondition: { kind: "notification-delivery" }
+        });
+    } catch { /* fail closed; signal analysis remains local */ }
     try { telemetry.info(`[bot] ${text}`); } catch { /* */ }
 }
 
@@ -116,20 +129,7 @@ async function tick() {
             }
             b.lastSignal = r.signal; changed = true;
 
-            let extra = "";
-            if (b.autoExecute && r.signal === "BELI" && binance.configured) {
-                try {
-                    const res = await binance.placeSpotOrder({
-                        symbol: b.symbol, side: "BUY", type: "MARKET", quoteOrderQty: b.maxQuoteUsdt
-                    });
-                    extra = ` → BELI OTOMATIS $${b.maxQuoteUsdt} (order ${res.orderId}).`;
-                } catch (e) { extra = ` → auto-beli GAGAL: ${e.message}`; }
-            }
-            else if (b.autoExecute && r.signal === "JUAL") {
-                extra = " (sinyal JUAL — tutup posisi manual bila perlu).";
-            }
-
-            await announce(`🤖 ${b.symbol} sinyal ${r.signal} @ $${r.price} (RSI ${r.rsi?.toFixed(0)}).${extra}`);
+            await announce(`🤖 ${b.symbol} sinyal ${r.signal} @ $${r.price} (RSI ${r.rsi?.toFixed(0)}).`);
         }
         catch { /* harga/analisa gagal — coba lagi berikutnya */ }
     }

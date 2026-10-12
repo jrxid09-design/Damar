@@ -28,17 +28,40 @@ function canonicalRequestExec(request) {
     let exec;
 
     if (request.exec && typeof request.exec === "object") {
+        // N2-FINAL: grant kanonik sudah ternormalisasi dan terdaftar
+        // di WeakSet domain — kembalikan langsung agar keanggotaan
+        // tidak hilang akibat spread (kontrak: isCanonicalInternalGrant
+        // harus tetap true setelah melewati batas runtime).
+        if (Authorization.isCanonicalInternalGrant(request.exec)) {
+            return request.exec;
+        }
+        // P1-G-FIX: frozen exec with autonomous-source pattern and no
+        // capabilitySet is a foreign-domain grant (or crafted attack).
+        // Spreading it preserves role:"system" but discards scope —
+        // granting broad tool access. Return undefined so the caller
+        // gets no-identity (→ least-privilege "user" with no tools).
+        const maybeGrant = request.exec;
+        // A plain system-shaped carrier is never sufficient authority. Only
+        // the module-private canonical grant path may cross with role system;
+        // otherwise a caller could supply a mutable exec object and widen a
+        // capabilitySet at the runtime boundary.
+        if (String(maybeGrant.role ?? "").toLowerCase() === "system" &&
+            typeof maybeGrant.source === "string" &&
+            maybeGrant.source.startsWith("autonomous:")) {
+            // Still validate malformed restrictions before failing closed so
+            // invalid carriers cannot be silently reclassified as absent.
+            Authorization.toCapabilitySet(maybeGrant.capabilitySet);
+            return undefined;
+        }
+        if (Object.isFrozen(maybeGrant) &&
+            !("capabilitySet" in maybeGrant) &&
+            typeof maybeGrant.source === "string" &&
+            maybeGrant.source.startsWith("autonomous:")) {
+            return undefined;
+        }
         // M-1 rev4 — CABANG INI DULU BYPASS KANONISASI SEPENUHNYA:
         // capabilitySet mutable dari pemanggil lolos sampai ke tepi
         // provider. Kini jalur exec pun dinormalisasi.
-        //
-        // Salin dangkal — spread MENYALIN symbol-keyed properties,
-        // sehingga provenance/grant kanonik otonom
-        // (Authorization.INTERNAL_GRANT_TOKEN) selamat; jangan pernah
-        // membangun ulang objek ini field-per-field lewat identity()
-        // yang akan mencabut token tersebut (kontrak N2: grant kanonik
-        // = batas otonom positif-teridentifikasi ⇒ efektif 'system'
-        // di konsumen seperti ToolBus/agentHub.delegatedRoleOf).
         exec = { ...request.exec };
     }
     else {

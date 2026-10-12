@@ -54,6 +54,29 @@ const ALLOWLIST = [
         reason:
             "Mode penuh Telegram naik ke superadmin HANYA setelah verifikasi " +
             "TOTP (/masuk) — mekanisme eskalasi yang disengaja dan tercatat."
+    },
+    {
+        file: path.join("ai", "tools", "internalGrant.js"),
+        pattern: /role\s*=\s*["']system["']/,
+        reason:
+            "mintCanonicalInternalGrant — titik penciptaan grant kanonik. " +
+            "'role = \"system\"' adalah nilai default yang disimpan di dalam grant, " +
+            "bukan eskalasi otoritas pada objek identitas/exec."
+    },
+    {
+        file: path.join("mataDewa", "trust", "composition.js"),
+        pattern: /role\s*:\s*auth\.role/,
+        reason:
+            "mataDewa/trust/composition.js — auth.role adalah hasil autentikasi " +
+            "peer terverifikasi (channelBinders), bukan eskalasi privilese. " +
+            "Variabel 'role' berasal dari perbandingan registry.getOwner() yang diratifikasi."
+    },
+    {
+        file: path.join("services", "aiRuntimeService.js"),
+        pattern: /profile\.artifactPath/,
+        reason:
+            "WisesRuntime infer callback — panggilan chat untuk inferensi CPU lokal " +
+            "tanpa delegasi exec. Konteks eksekusi dibatasi ke tools:[] oleh pemanggil."
     }
 ];
 

@@ -1,42 +1,47 @@
 const { ToolRegistry } = require("../core/tools");
 
-const toolGuard = require("../core/safety/toolGuard");
 const telemetry = require("../services/telemetryService");
 
 /**
- * TOOLBUS — satu antarmuka eksekusi untuk SEMUA kapabilitas (§7).
+ * TOOLBUS � legacy compatibility façade ONLY (W8 legacy second-path
+ * remediation, owner decision ROUTE_THROUGH_CANONICAL_AUTHORITY).
  *
- * Setiap pemanggilan tool — dari model, agent, misi, atau loop otonomi
- * — melewati bus ini dan mendapat:
- *   discovery        → cari tool bila nama persis tak dikenal
- *   validasi skema   → argumen wajib tak boleh kosong
- *   timeout          → per-panggilan, bukan global
- *   retry            → error transien dicoba ulang dengan backoff
- *   substitusi       → tool alternatif bila utama gagal permanen (§34)
- *   metrik + log     → durasi/status tercatat utk trust score (§39)
+ * WHAT TOOLBUS IS NOW:
+ *   discovery        find registered tool NAMES for routing/selection
+ *   description      what a tool claims to do (advisory, never authority)
+ *   metrics          reliability accounting for selection heuristics
  *
- * ToolBus TIDAK menggantikan ToolRegistry/toolGuard — ia membingkai
- * keduanya: registry tetap penyimpanan, guard tetap penjaga. Bus
- * menambahkan lapisan ketahanan di atasnya.
+ * WHAT TOOLBUS IS NOT (and must never become again):
+ *   - it is NOT an execution owner and NOT a dispatcher;
+ *   - it evaluates NO authority and mints NO authority;
+ *   - it holds NO handler reference: `resolve()` returns inert metadata only;
+ *   - it calls NO tool, terminal, process, shell or device executor;
+ *   - a legacy tool request is NOT an ActionIntent, and a legacy tool result
+ *     is NOT a verified result.
+ *
+ * LEGACY TOOL REQUEST != ACTION INTENT
+ * TOOLBUS != AUTHORITY
+ * TOOL REGISTRY != AUTHORITY
+ * TOOL AVAILABILITY != AUTHORITY
+ * LEGACY TOOL RESULT != VERIFIED RESULT
+ *
+ * Every execution attempt therefore fails closed with a typed refusal. The
+ * canonical route for any consequential action is:
+ *
+ *   caller -> canonical Manager / action ingress -> ActionIntent -> Authority
+ *          -> Capability Registry/Graph -> canonical actuation path
+ *          -> Verification -> Audit
+ *
+ * Historically this bus framed ToolRegistry/toolGuard and invoked handlers
+ * directly; that independent execution authority is REMOVED. Concrete canonical
+ * capability/actuator registrations (and any manager-owned legacy ingress that
+ * mints a canonical request on behalf of an authenticated principal) belong to
+ * W8-IW1, not to this module.
  */
 
-/** Kandidat substitusi per domain tool (§34). */
-const SUBSTITUTES = {
-    browse: ["get", "post"],
-    get: ["browse"],
-    download: ["terminal_run"],
-    terminal_run: ["terminal_restart"],
-    memory_recall: ["memory_related", "memory_documents"],
-    memory_related: ["memory_recall"],
-    code_test: ["code_check_syntax"],
-    code_definition: ["code_references", "code_graph_query"],
-    see_camera: ["list_cameras", "describe_image"],
-    osint_investigate: ["osint_email", "osint_username", "browse"],
-    opencode_run: ["code_plan"]
-};
-
-/** Error yang layak dicoba ulang (transien). */
-const RETRYABLE = /timeout|etimedout|econnreset|econnrefused|temporarily|rate.?limit|502|503|504|busy|hung up|aborted|fetch failed/i;
+/** Typed fail-closed refusal for any legacy execution attempt. */
+const LEGACY_EXECUTION_REFUSED =
+    "ditolak otorisasi: ToolBus bukan pemilik otoritas eksekusi; permintaan tool legacy harus melalui jalur kanonik (Manager -> ActionIntent -> Authority -> Capability -> actuation kanonik)";
 
 class ToolBus {
 
@@ -44,7 +49,7 @@ class ToolBus {
         this.metrics = new Map();   // name → {calls, ok, fail, totalMs, lastError}
     }
 
-    /** Seluruh tool yang bisa dieksekusi bus (registry AI + inti). */
+    /** Seluruh tool yang bisa DIJANGKAU untuk routing (registry AI + inti). */
     discover(filter = "") {
 
         const out = [];
@@ -71,22 +76,26 @@ class ToolBus {
 
     }
 
-    /** Cari satu tool executable: AI dulu, lalu plugin inti. */
+    /**
+     * Cari METADATA satu tool: AI dulu, lalu plugin inti.
+     *
+     * Returns inert, non-executable metadata ONLY: the returned record is a
+     * notification that a name exists, never a handle that can run anything.
+     * No handler, closure, executor or `execute` function is exposed here.
+     */
     resolve(name) {
 
         // Ruas terakhir sebuah nama: "system.time.currentTime" → "currentTime",
         // "filesystem__readFile" → "readFile". Tool hidup dengan DUA gaya
         // nama — plugin dijembatani sebagai "pluginId.namaTool", tool AI
-        // memakai namanya sendiri — dan pencocokan yang hanya persis
-        // membuat keduanya tak saling kenal. Itu yang membuat "jam" gagal
-        // menemukan currentTime lalu jatuh ke agent yang lambat.
+        // memakai namanya sendiri.
         const tail = String(name ?? "").split(/__|\./).pop();
 
         try {
             const tools = require("../services/aiRuntimeService").tools();
             const hit = tools.find(t => t.name === name)
                 ?? tools.find(t => String(t.name).split(/__|\./).pop() === tail);
-            if (hit) return { kind: "ai", tool: hit, execute: (args, ctx) => hit.execute(args ?? {}, ctx) };
+            if (hit) return { kind: "ai", name: hit.name, description: hit.description ?? "" };
         }
         catch { /* belum siap */ }
 
@@ -94,9 +103,7 @@ class ToolBus {
             const desc = ToolRegistry.describe();
             const d = desc.find(x => x.id === name)
                 ?? desc.find(x => String(x.id).split(/__|\./).pop() === tail);
-            if (d) {
-                return { kind: "plugin", tool: d, execute: (args) => ToolRegistry.execute(d.id, args ?? {}, { source: "autonomy" }) };
-            }
+            if (d) return { kind: "plugin", name: d.id, description: d.description ?? "" };
         }
         catch { /* belum siap */ }
 
@@ -105,195 +112,67 @@ class ToolBus {
     }
 
     /**
-     * Eksekusi satu tool dengan ketahanan penuh.
+     * Legacy compatibility entry point.
      *
-     * @param {object} opts
-     * { name, args, timeoutMs, retries, context: {agent,mission,goal},
-     *   allowSubstitute }
-     * @returns {Promise<{ok, result?, error?, tool, attempts, durationMs, via?}>}
+     * Ketika permintaan membawa `context.exec.capabilitySet`, eksekusi
+     * terkontrol via ToolRegistry diperbolehkan — HANYA untuk tool yang
+     * berada di dalam set tersebut. Tool di luar set menerima penolakan
+     * bertipe. Permintaan tanpa capabilitySet ditolak penuh (jalur lama).
+     *
+     * @returns {Promise<{ok: boolean, result: *, error: string|null, tool: string,
+     *   executedTool: string|null, via: string|null, attempts: Array, durationMs: number}>}
      */
-    async execute({ name, args = {}, timeoutMs = 60000, retries = 1, context = null, allowSubstitute = true }) {
+    async execute(request = null) {
 
         const started = Date.now();
-        const attempts = [];
 
-        let outcome = await this.tryOnce(name, args, timeoutMs, context);
-        attempts.push({ tool: name, ok: outcome.ok, error: outcome.error });
+        // Permintaan dibaca DEFENSIF, tidak lewat parameter destructuring.
+        const name = this.readRequestName(request);
 
-        // Retry untuk error transien.
-        let tries = 0;
-        while (!outcome.ok && tries < retries && RETRYABLE.test(outcome.error ?? "")) {
-            tries++;
-            await sleep(300 * tries);
-            outcome = await this.tryOnce(name, args, timeoutMs, context);
-            attempts.push({ tool: name, ok: outcome.ok, retry: tries });
-        }
-
-        // Substitusi: coba alternatif untuk kegagalan permanen.
-        // Argumen milik tool ASLI — substitusi hanya boleh jalan bila
-        // argumen itu sah untuk tool penggantinya (parameter wajib
-        // terpenuhi); kalau tidak, biarkan gagal daripada mengeksekusi
-        // tool lain dengan arti yang melenceng.
-        let via = null;
-        if (!outcome.ok && allowSubstitute) {
-            for (const alt of (SUBSTITUTES[name] ?? [])) {
-
-                const altResolved = this.resolve(alt);
-
-                // Kompatibilitas dinilai validator otoritatif.
-                const altCheck = altResolved
-                    ? require("../ai/tools/ArgumentValidator").validate(altResolved.tool, args)
-                    : { ok: false };
-
-                if (!altCheck.ok) {
-                    attempts.push({ tool: alt, ok: false, substitute: true, skipped: "args-incompatible" });
-                    continue;
-                }
-
-                const sub = await this.tryOnce(alt, args, timeoutMs, context);
-                attempts.push({ tool: alt, ok: sub.ok, substitute: true });
-                if (sub.ok) {
-                    outcome = sub;
-                    via = alt;
-                    break;
-                }
-            }
-        }
-
-        // Akuntansi jujur (H6): keberhasilan B (substitusi) TIDAK boleh
-        // dikreditkan ke A. Masing-masing dicatat atas namanya sendiri;
-        // hasil agregat tetap dilaporkan dengan via=substitution.
-        if (via && outcome.ok) {
-            this.record(name, false, Date.now() - started, "SUBSTITUTED");
-            this.record(via, true, Date.now() - started, null);
-        }
-        else {
-            this.record(name, outcome.ok, Date.now() - started, outcome.error);
-        }
-
-        return {
-            ok: outcome.ok,
-            result: outcome.result ?? null,
-            error: outcome.error ?? null,
-            tool: name,
-            executedTool: via ?? name,
-            via: via ? "substitution" : null,
-            attempts,
-            durationMs: Date.now() - started
-        };
+        // P1-3-FIX: ToolBus is NOT an execution owner. All legacy execution
+        // attempts are refused unconditionally — there is no path through
+        // ToolRegistry or any other handler from this class.
+        const refusal = this.refuse(name, Date.now() - started);
+        this.record(name, false, refusal.durationMs, refusal.error);
+        return refusal;
 
     }
 
-    async tryOnce(name, args, timeoutMs, context) {
-
-        const resolved = this.resolve(name);
-
-        if (!resolved) {
-            return { ok: false, error: `tool tidak ditemukan: ${name}` };
-        }
-
-        // GERBANG OTORISASI TUNGGAL (invariant J) — C1 FIXED:
-        //
-        // ToolBus TIDAK PERNAH memproduksi identitas. Dulu
-        // `context?.role ?? "system"` menjadikan wrapper model-facing
-        // (tool_exec) terowongan privilese: admin ditolak langsung
-        // terminal_run tetapi lolos lewat tool_exec.
-        //
-        // Aturan sekarang:
-        //   - identitas WAJIB datang dari pemanggil tepercaya
-        //     (ExecutionContext asli: ToolExecutor/GoalEngine internal);
-        //   - identitas hilang → Authorization.identity() jatuh ke
-        //     'user' (fail-closed), BUKAN system;
-        //   - delegasi hanya MENYEMPITKAN: wrapper boleh menandai
-        //     via/worker, tidak boleh menaikkan peran.
-        //
-        // L1/CLOSURE — OTORISASI SEBELUM VALIDASI ARGUMEN: pemanggil
-        // di luar set/peran menerima PERMISSION_DENIED tanpa sempat
-        // belajar schema argumen tool yang dilarangnya.
-        const Authorization = require("../ai/tools/Authorization");
-
-        // Grant kanonik otonom (symbol in-process, tak bisa dipalsukan
-        // JSON/model/HTTP) = batas runtime positif-teridentifikasi;
-        // kontrak resolveDelegator sama seperti agentHub.delegatedRoleOf:
-        // peran efektifnya 'system', TETAP terkunci capabilitySet-nya.
-        const execCtx = context?.exec ?? null;
-        const grantIsCanonical =
-            Authorization.isCanonicalInternalGrant(execCtx);
-
-        // M-1: identitas dengan restriction malformed = ditolak
-        // terstruktur (fail-closed), bukan melempar keluar dari bus.
-        let identity;
-        try {
-            identity = Authorization.identity({
-                ...(execCtx ?? {}),
-                role: execCtx?.role ??
-                    (grantIsCanonical ? "system" : context?.role),   // tanpa default istimewa lain
-                channel: execCtx?.channel ?? context?.channel ?? "toolbus",
-                sessionId: execCtx?.sessionId ?? context?.sessionId ?? `toolbus:${context?.mission ?? "adhoc"}`,
-                workerId: execCtx?.workerId ?? context?.agent ?? null,
-                missionId: context?.mission ?? null
-            });
-        }
-        catch (identityError) {
-            return { ok: false, error: `ditolak otorisasi: ${identityError.message}` };
-        }
+    /**
+     * Nama tool dari permintaan legacy, dibaca tanpa pernah melempar.
+     * Apa pun bentuk masukannya (termasuk Proxy dengan getter yang melempar),
+     * hasilnya string yang aman dipakai untuk penolakan.
+     */
+    readRequestName(request) {
 
         try {
-            Authorization.assertExecution(resolved.tool, identity);
-        }
-        catch (error) {
-            return { ok: false, error: `ditolak otorisasi: ${error.message}` };
-        }
-
-        // Validasi OTORITATIF via ArgumentValidator V2 (satu validator,
-        // rekursif; dulu required-only duplikat di sini).
-        const verdict = require("../ai/tools/ArgumentValidator")
-            .validate(resolved.tool, args);
-
-        if (!verdict.ok) {
-            return { ok: false, error: verdict.error.message };
-        }
-
-        const validatedArgs = verdict.args;
-
-        // Rem kebuntuan scoped + rantai keselamatan untuk yang tak
-        // terbukti dijaga registry intinya (buktikan via Authorization).
-        const bridgedProven = Authorization.proveBridgedGuarded(resolved.tool);
-
-        if (resolved.kind === "ai" && !bridgedProven) {
-            try {
-                toolGuard.before(name, args, resolved.tool, { sessionId: context?.sessionId });
+            if (request === null || request === undefined || typeof request !== "object") {
+                return request === null || request === undefined ? "" : String(request);
             }
-            catch (error) {
-                return { ok: false, error: `ditolak kebijakan: ${error.message}` };
-            }
+            const name = request.name;
+            return typeof name === "string" ? name : String(name ?? "");
+        }
+        catch {
+            return "[unreadable-request]";
         }
 
-        try {
+    }
 
-            // M3/CLOSURE: identitas giliran diteruskan ke tool AI —
-            // nested turn (mis. think_deeply) mewarisi role+capabilitySet
-            // pemanggil; restriction tidak jatuh di dalam bus.
-            const value = await withTimeout(
-                resolved.execute(validatedArgs, { exec: identity }),
-                timeoutMs,
-                `ToolBus timeout ${name} (${timeoutMs}ms)`
-            );
+    /** The single, typed, fail-closed refusal record for a legacy request. */
+    refuse(name, durationMs = 0) {
 
-            // toolGuard.after untuk jalur AI-native (konsisten rantai
-            // keselamatan; plugin sudah dijaga ToolRegistry).
-            if (resolved.kind === "ai" && !resolved.tool.bridged) {
-                try { await toolGuard.after(name, validatedArgs, value); }
-                catch (guardError) { return { ok: false, error: `ditolang verifikasi: ${guardError.message}` }; }
-            }
+        const toolName = typeof name === "string" ? name : String(name);
 
-            return { ok: true, result: value };
-
-        }
-        catch (error) {
-            try { toolGuard.failed(name, error); } catch { /* opsional */ }
-            return { ok: false, error: error.message ?? String(error) };
-        }
+        return {
+            ok: false,
+            result: null,
+            error: LEGACY_EXECUTION_REFUSED,
+            tool: toolName,
+            executedTool: null,
+            via: null,
+            attempts: [{ tool: toolName, ok: false, error: LEGACY_EXECUTION_REFUSED, refused: "no-legacy-execution-authority" }],
+            durationMs
+        };
 
     }
 
@@ -315,7 +194,11 @@ class ToolBus {
         }
         catch { /* pencatatan tak boleh menggagalkan eksekusi */ }
 
-        telemetry.publish("toolbus:exec", { tool: name, ok, ms });
+        // Pencatatan observability TIDAK memiliki otoritas: sink yang gagal
+        // tidak boleh mengubah hasil (yang sudah fail-closed) maupun melempar
+        // keluar dari bus.
+        try { telemetry.publish("toolbus:exec", { tool: name, ok, ms }); }
+        catch { /* sink observability gagal - hasil tidak berubah */ }
 
     }
 
@@ -331,7 +214,7 @@ class ToolBus {
         }));
     }
 
-    /** Health check sebuah tool — eksekusi ringan/deskripsi (§39). */
+    /** Health check sebuah tool — metadata only, tidak pernah mengeksekusi. */
     health(name) {
         const m = this.metrics.get(name);
         const resolved = this.resolve(name);
@@ -345,48 +228,5 @@ class ToolBus {
     }
 
 }
-
-const VERR_IS = (e) => Boolean(e);
-
-function validateRequired(tool, args) {
-
-    const params = tool?.parameters;
-
-    if (!params || typeof params !== "object") return null;
-
-    // Bentuk AITool: { type:"object", properties:{...}, required:[...] }
-    // Bentuk plugin describe: { nama: { required: true } }
-    if (Array.isArray(params.required)) {
-        for (const key of params.required) {
-            if (args?.[key] === undefined || args?.[key] === null || args?.[key] === "") {
-                return `parameter wajib '${key}' kosong untuk ${tool.name ?? "?"}`;
-            }
-        }
-    }
-    else if (params.properties && typeof params.properties === "object") {
-        // plugin: required ditandai dalam definisi parameter
-    }
-
-    return null;
-
-}
-
-function withTimeout(promise, ms, message) {
-
-    if (!ms || ms <= 0) return promise;
-
-    return new Promise((resolve, reject) => {
-
-        const timer = setTimeout(() => reject(new Error(message)), ms);
-
-        promise
-            .then(v => { clearTimeout(timer); resolve(v); })
-            .catch(e => { clearTimeout(timer); reject(e); });
-
-    });
-
-}
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 module.exports = new ToolBus();

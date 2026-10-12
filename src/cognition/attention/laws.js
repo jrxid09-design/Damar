@@ -1,0 +1,11 @@
+"use strict";
+
+const laws = Object.freeze({
+    HIGH_SALIENCE_NOT_HIGH_PRIVILEGE: true,
+    ATTENTION_ORDERS_COGNITION_NOT_PERMISSION: true,
+    NO_SOURCE_SETS_OWN_PRIORITY_CLASS: true,
+    SATURATION_DEFERS_NEVER_DISCARDS_SILENTLY: true,
+    NO_CLASS_TO_AUTHORITY_MAPPING: true
+});
+
+module.exports = { laws };

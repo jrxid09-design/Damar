@@ -1,4 +1,5 @@
 const { clamp01 } = require("../core/envelope");
+const { PRIVILEGED_KINDS } = require("./laws");
 
 /**
  * GLOBAL WORKSPACE (§26–§28/§105) — kompetisi atensi deterministik.
@@ -45,10 +46,19 @@ function score(item, weights, context) {
 
 /** Tambah/kompetisi satu kandidat; kembalikan workspace baru. */
 function admit(workspace, item, config, nowMs) {
+    if (!item) throw new Error("GlobalWorkspace.admit requires a non-null item — null projection refused (W10-L1)");
+    // W10-L1/NO_PRIVILEGED_OBJECTS: authority-kind items forbidden in workspace
+    if (item.kind && PRIVILEGED_KINDS.has(String(item.kind).toLowerCase())) {
+        throw new Error(`Privileged kind "${item.kind}" forbidden in workspace (W10-L1/RT-W10-02)`);
+    }
 
     const next = structured(workspace);
     const key = String(item.key ?? "").slice(0, 160);
-    if (!key) return next;
+    if (!key) throw new Error("GlobalWorkspace item requires a key — orphan projections refused (W10-L1)");
+
+    if (!config || !config.salienceWeights || !config.workspace) {
+        throw new Error("GlobalWorkspace.admit requires config with salienceWeights and workspace — malformed config refused (W10-L1)");
+    }
 
     const scored = {
         ...structuredCopyItem(item),

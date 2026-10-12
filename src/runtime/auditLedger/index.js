@@ -30,6 +30,9 @@ const { createFileAuditSink } = require("./fileSink");
 
 module.exports = Object.freeze({
     createAuditLedger: ledger.createAuditLedger,
+    // FG-03 trust boundary: lexical brand check telling a genuine canonical
+    // ledger apart from a caller-supplied look-alike (see ledger.js).
+    isAuditLedger: ledger.isAuditLedger,
     LedgerError: errors.LedgerError,
     LEDGER_ERROR_CODES: errors.CODES,
     DEFAULT_BOUNDS: config.DEFAULT_BOUNDS,

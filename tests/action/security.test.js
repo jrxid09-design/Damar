@@ -71,6 +71,7 @@ test("structural: action module imports no executors, authority mutators, fs/net
         const isActuation = file.includes(`${path.sep}actuation${path.sep}`);
         const isVerification = file.includes(`${path.sep}verification${path.sep}`);
         const isInternal = file.includes(`${path.sep}internal${path.sep}`);
+        const isEmbodimentWiring = file.endsWith(`${path.sep}capabilities${path.sep}embodimentWiring.js`);
         for (const m of text.matchAll(/require\(\s*["']([^"']+)["']\s*\)/g)) {
             const target = m[1];
             // Lane 3 actuation / Lane 4 verification subdomains may reach
@@ -81,6 +82,8 @@ test("structural: action module imports no executors, authority mutators, fs/net
                 target.startsWith("./") ||
                 target === "node:crypto" ||
                 target === "node:util" ||
+                (isBootstrap && (target === "node:path" || target === "node:os")) ||
+                (isEmbodimentWiring && target === "node:path") ||
                 target === "../capability/registry/ids" ||
                 target === "../../capability/registry/ids" ||
                 target === "../authority/evaluate" ||
@@ -93,6 +96,11 @@ test("structural: action module imports no executors, authority mutators, fs/net
                 // canonical authority truth, no second store, no bridge that
                 // could write. See resolveLane2AuthorityStore()'s own header.
                 (isBootstrap && target === "../authority/productionComposition") ||
+                // W8 recovery: the trusted bootstrap owns the single durable
+                // replay substrate and its independent rollback witness. These
+                // are canonical evidence dependencies, not action executors.
+                (isBootstrap && target === "../manager/internal/canonicalReplayLedger") ||
+                (isBootstrap && target === "../manager/internal/canonicalReplayWitness") ||
                 // MD-011: the canonical bootstrap wires the built-in Mata
                 // Dewa visual-mode capabilities + actuators. These requires
                 // pull capability metadata + a lazy read-only service getter
@@ -118,6 +126,10 @@ test("structural: action module imports no executors, authority mutators, fs/net
                 // trust domain whose whole job IS governed execution). No
                 // executor/mutator is embedded in src/action/ itself.
                 (isBootstrap && target === "../federation/capabilities/diagnosticProbeWiring") ||
+                // W8 recovery: registration glue may bind the externally-owned
+                // Lane 3 embodiment driver module; host I/O remains outside
+                // src/action and is never instantiated as an action runtime.
+                (isEmbodimentWiring && target === "../../services/embodimentDrivers") ||
                 (isActuatorRegistry && target === "../../capability/registry/ids");
             assert.ok(ok, `${file}: unexpected external require '${target}'`);
         }
@@ -137,6 +149,12 @@ test("structural: gate delegates to canonical evaluator; no policy duplication",
     // no evaluator policy duplication.
     const runtimeText = fs.readFileSync(path.join(__dirname, "../../src/action/runtime.js"), "utf8");
     assert.ok(!/loadAndEvaluateAuthority\s*\(/.test(runtimeText), "runtime.js must contain no evaluation logic (vocabulary only)");
+});
+
+test("structural: AI ingress preserves opaque auth proof into canonical tool context", () => {
+    const runtimeText = fs.readFileSync(path.join(__dirname, "../../src/services/aiRuntimeService.js"), "utf8");
+    assert.match(runtimeText, /authProof:\s*exec0\?\.authProof\s*\?\?\s*baseExec\?\.authProof/,
+        "AI controller proofs must not be dropped before canonical Manager admission");
 });
 
 test("surface: no execution verbs in public API", () => {

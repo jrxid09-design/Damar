@@ -1,0 +1,128 @@
+"use strict";
+
+/**
+ * W7-L2 WORLD MODEL — kontrak query (spec §9). Q-1: tidak ada bentuk yang
+ * mengembalikan nilai telanjang — selalu amplop epistemik. Q-2: requireFresh
+ * mengembalikan unknown, bukan nilai basi. Q-3: query tidak pernah memicu
+ * probe. Q-4: query historis tidak pernah memfabrikasi state antara —
+ * di implementasi minimal ini, `at` yang tidak didukung ditolak jujur
+ * sebagai unknown, bukan ditebak.
+ *
+ * confidence DIHITUNG DI SINI SAJA (WM-A9) — rumus provisional persis
+ * seperti disebut spec §6 sebagai provisional, bukan hasil final yang di-tuning.
+ */
+
+const { clamp01 } = require("../core/envelope");
+const { isExpired, epistemicClassOf } = require("./beliefAlgebra");
+
+function computeConfidence(belief, nowMs) {
+    if (belief.tier === "DECLARED") return clamp01(0.9);
+    const corroboration = Math.min(belief.supportedBy.length, 5) / 5; // 0..1
+    const ageMs = Math.max(0, nowMs - belief.updatedAtMs);
+    const ttlMs = belief.decayPolicy?.ttlMs ?? 30 * 60_000;
+    const recency = clamp01(1 - ageMs / Math.max(ttlMs, 1));
+    return clamp01(0.3 + 0.4 * corroboration + 0.3 * recency);
+}
+
+function subjectKeyOf(subject) {
+    // Bug review independen (audit putaran-21, AUD21-ADV-1): subject
+    // malformed (null/non-objek) meledakkan `.entityId` jadi TypeError
+    // mentah -- dijaga jadi kunci yang tidak pernah cocok dengan belief
+    // manapun (gagal aman ke NEVER_OBSERVED lewat beliefKey/query di
+    // bawah, tidak pernah memfabrikasi atau menggabungkan subject lain).
+    if (!subject || typeof subject !== "object") return "invalid:malformed-subject";
+    // Bug review independen (audit putaran-25, AUD25-P2-1): `subject.entityId`
+    // hanya dicek truthy, bukan tipenya -- entityId berupa objek hostile
+    // dengan toString tereksekusi (mengeksekusi kode pemanggil di dalam
+    // proses kognisi) tanpa pernah ditolak, mirip kelas AUD10-P2-3 yang
+    // sudah ditutup untuk attention/metacog tapi tidak untuk lane ini.
+    // Bug review independen (audit putaran-35, AUD35-P2-1): `subject.entityId`/
+    // `.relationId` dibaca DUA KALI (sekali di `typeof`, lagi di template
+    // literal) -- getter stateful bisa mengembalikan string sah pada baca
+    // pertama lalu Symbol/BigInt pada baca kedua, meledakkan TypeError
+    // mentah dari `query()` publik, DAN membuat kunci belief dibangun dari
+    // nilai yang berbeda dari yang divalidasi. Dibaca SEKALI ke lokal SAJA
+    // jika benar-benar diperlukan.
+    // Bug review independen (audit putaran-36, AUD36-P2-2, regresi
+    // diperkenalkan kandidat): perbaikan putaran-35 di atas membaca
+    // `relationId` TANPA SYARAT bahkan ketika `entityId` sudah valid --
+    // versi putaran-34 short-circuit (tidak pernah membaca relationId
+    // kalau entityId sudah cukup), versi ini mengeksekusi accessor
+    // `relationId` pemanggil yang SEBELUMNYA tidak pernah dipanggil.
+    // short-circuit dikembalikan: `relationId` hanya dibaca kalau
+    // `entityId` TERBUKTI bukan string.
+    // Bug review independen (audit putaran-47, W7R47-P2-2): `typeof subject
+    // !== "object"` di atas TIDAK menangkap Proxy yang di-revoke (tetap
+    // typeof "object") -- `subject.entityId`/`.relationId` tetap [[Get]]
+    // mentah. Fungsi ini TIDAK PERNAH melempar by design (lihat komentar
+    // putaran-21 di atas) -- kegagalan baca diperlakukan SAMA seperti
+    // subject malformed lain, jatuh ke sentinel yang sama, short-circuit
+    // entityId-dulu tetap terjaga.
+    let entityId;
+    try {
+        entityId = subject.entityId;
+    } catch {
+        return "invalid:malformed-subject";
+    }
+    if (typeof entityId === "string") return `entity:${entityId}`;
+    let relationId;
+    try {
+        relationId = subject.relationId;
+    } catch {
+        return "invalid:malformed-subject";
+    }
+    if (typeof relationId === "string") return `relation:${relationId}`;
+    return "invalid:malformed-subject";
+}
+
+function beliefKey(subject, attribute) {
+    // Bug review independen (audit putaran-25, AUD25-P2-1): `${attribute}`
+    // mentah meledakkan TypeError untuk Symbol.
+    const safeAttribute = typeof attribute === "string" ? attribute : typeof attribute;
+    return `${subjectKeyOf(subject)}::${safeAttribute}`;
+}
+
+function query(beliefs, { subject, attribute, at = null, requireFresh = false, maxStalenessMs = null }, nowMs) {
+    const belief = beliefs.get(beliefKey(subject, attribute));
+
+    if (!belief) {
+        return { unknown: true, reason: "NEVER_OBSERVED", lastKnown: null };
+    }
+
+    if (at) {
+        // Q-4: implementasi minimal ini tidak menyimpan riwayat revisi penuh
+        // per titik waktu; menjawab `at` akan memfabrikasi state antara,
+        // yang dilarang. Menolak jujur, bukan menebak.
+        return {
+            unknown: true, reason: "HISTORICAL_QUERY_NOT_SUPPORTED",
+            lastKnown: { value: belief.value, at: belief.observedAt }
+        };
+    }
+
+    const stale = isExpired(belief, nowMs);
+    if (requireFresh && stale) {
+        return { unknown: true, reason: "STALE_SOURCE", lastKnown: { value: belief.value, at: belief.observedAt } };
+    }
+    // Bug review independen (audit putaran-28, AUD28-P2-4): perbandingan
+    // relasi `>` memaksa ToNumber pada maxStalenessMs -- Symbol meledakkan
+    // TypeError mentah, objek dengan valueOf hostile tereksekusi. Nilai
+    // bukan angka valid diperlakukan sebagai "tidak ada batas staleness"
+    // (perilaku default, bukan crash).
+    const safeMaxStalenessMs = (typeof maxStalenessMs === "number" && Number.isFinite(maxStalenessMs)) ? maxStalenessMs : null;
+    if (safeMaxStalenessMs !== null && (nowMs - belief.updatedAtMs) > safeMaxStalenessMs) {
+        return { unknown: true, reason: "STALE_SOURCE", lastKnown: { value: belief.value, at: belief.observedAt } };
+    }
+
+    return {
+        value: belief.value,
+        epistemicClass: epistemicClassOf(belief, nowMs),
+        confidence: computeConfidence(belief, nowMs),
+        observedAt: belief.observedAt,
+        contested: Boolean(belief.contradictionSetId),
+        contradictionSetId: belief.contradictionSetId,
+        supportedBy: belief.supportedBy,
+        revision: belief.revision
+    };
+}
+
+module.exports = { beliefKey, subjectKeyOf, computeConfidence, query };

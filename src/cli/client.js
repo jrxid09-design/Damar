@@ -1,9 +1,7 @@
 /**
  * Klien HTTP untuk bidang kendali daemon Damar.
  *
- * Sengaja cerminan dari apps/console/renderer/lib/api.js — CLI
- * dan Console memakai kontrak yang sama, jadi keduanya bergerak
- * bersama saat API berubah.
+ * HTTP client for the canonical Damar control API.
  */
 
 const fs = require("node:fs");
@@ -29,7 +27,7 @@ class DaemonClient {
     constructor({ baseUrl, token } = {}) {
 
         // Default port mengikuti peran: sesi CLI memakai daemon CLI
-        // (3001) supaya bisa berjalan bersama daemon Console (3000).
+        // (3001) supaya bisa berjalan bersama daemon utama (3000).
         const fallback =
             process.env.DAMAR_URL
             ?? (String(process.env.DAMAR_ROLE || "").toLowerCase() === "cli"
@@ -44,7 +42,7 @@ class DaemonClient {
         this.token = token ?? process.env.DAMAR_TOKEN ?? readTokenFromInstall();
 
         // Kandidat daemon untuk auto-deteksi bila default gagal:
-        // daemon CLI dulu, lalu daemon Console. Memungkinkan `damar`
+        // daemon CLI dulu, lalu daemon utama. Memungkinkan `damar`
         // dipakai di mana saja tanpa pengaturan.
         this.fallbackUrls = [
             "http://localhost:3001",

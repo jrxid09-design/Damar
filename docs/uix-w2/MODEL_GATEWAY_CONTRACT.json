@@ -1,0 +1,11 @@
+{
+  "schema_version":"uix-w2.model-gateway.v1",
+  "role":"inference interface only; not Damar orchestration or authority",
+  "request":{"key_id":"downstream scoped key","model_id_or_alias":"allowlisted registry ID/alias","messages":"redacted according to policy","modalities":"allowlisted","limits":"quota/rate policy","correlation_ids":["damar_id","session_id","conversation_id"]},
+  "response":{"output":"inference result","model_id":"resolved canonical model","provider_instance_id":"resolved instance","usage":"token accounting","health":"routing evidence","verification":"not action verification","provenance":"model/provider/route"},
+  "key_contract":{"key_id":"stable metadata ID","secret_vault_ref":"opaque Vault ref","allowed_models":["allowlist"],"allowed_aliases":["allowlist"],"rate_limit":"policy","token_quota":"finite number or unlimited usage quota","expiry":"timestamp or none","network_restrictions":"policy","state":"ENABLED|DISABLED|REVOKED|EXPIRED","usage_accounting":"canonical meter"},
+  "auth_and_authority":"client authentication and key validity are not authority; the gateway cannot authorize Damar effects",
+  "ownership":{"gateway_contract":"future gateway service","registry":"future Model Registry","secrets":"Secret Vault","audit":"canonical Audit Ledger","authority":"existing canonical authority only for any downstream effect"},
+  "lifecycle":["create","inspect metadata","rotate","drain","revoke","disable","expire","inspect usage"],
+  "not_implemented_in_w2":true
+}

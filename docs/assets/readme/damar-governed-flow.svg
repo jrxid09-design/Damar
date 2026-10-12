@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 440" width="800" height="440" role="img" aria-labelledby="t d">
+  <title id="t">Damar governed runtime flow</title>
+  <desc id="d">Vertical flow from event and observation through the Damar Manager, action intent, the authority gate, governed actuation, and finally verification, durable audit, and experience.</desc>
+  <rect x="0" y="0" width="800" height="440" fill="#0d0d10"/>
+  <rect x="0" y="0" width="800" height="2" fill="#c9a35c"/>
+  <text x="24" y="40" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="bold" letter-spacing="4" fill="#ece7d8">GOVERNED RUNTIME FLOW</text>
+  <text x="24" y="60" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8a8578">Reasoning and permission to act are separate systems, joined at the gate.</text>
+
+  <!-- stage boxes -->
+  <g font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" text-anchor="middle">
+    <g>
+      <rect x="250" y="80" width="300" height="36" rx="3" fill="#16171b" stroke="#34353c"/>
+      <text x="400" y="103" fill="#ece7d8">Event / observation</text>
+    </g>
+    <line x1="400" y1="116" x2="400" y2="136" stroke="#5a5b63" stroke-width="2"/>
+    <polygon points="400,140 395,132 405,132" fill="#5a5b63"/>
+    <g>
+      <rect x="250" y="142" width="300" height="36" rx="3" fill="#16171b" stroke="#34353c"/>
+      <text x="400" y="165" fill="#ece7d8">Damar Manager</text>
+    </g>
+    <line x1="400" y1="178" x2="400" y2="198" stroke="#5a5b63" stroke-width="2"/>
+    <polygon points="400,202 395,194 405,194" fill="#5a5b63"/>
+    <g>
+      <rect x="250" y="204" width="300" height="36" rx="3" fill="#16171b" stroke="#34353c"/>
+      <text x="400" y="227" fill="#ece7d8">Action intent</text>
+    </g>
+    <line x1="400" y1="240" x2="400" y2="260" stroke="#c9a35c" stroke-width="2"/>
+    <polygon points="400,264 395,256 405,256" fill="#c9a35c"/>
+    <g>
+      <rect x="200" y="266" width="400" height="42" rx="3" fill="#241d0e" stroke="#c9a35c" stroke-width="2"/>
+      <text x="400" y="284" fill="#e0c07a" font-weight="bold">Authority Gate</text>
+      <text x="400" y="301" fill="#a78b4f" font-size="11" letter-spacing="2">DENY UNTIL RATIFIED</text>
+    </g>
+    <line x1="400" y1="308" x2="400" y2="328" stroke="#c9a35c" stroke-width="2"/>
+    <polygon points="400,332 395,324 405,324" fill="#c9a35c"/>
+    <g>
+      <rect x="250" y="334" width="300" height="36" rx="3" fill="#16171b" stroke="#34353c"/>
+      <text x="400" y="357" fill="#ece7d8">Governed actuation</text>
+    </g>
+    <line x1="400" y1="370" x2="400" y2="390" stroke="#5a5b63" stroke-width="2"/>
+    <polygon points="400,394 395,386 405,386" fill="#5a5b63"/>
+  </g>
+
+  <!-- final stage, wider -->
+  <g font-family="'Segoe UI', Helvetica, Arial, sans-serif">
+    <rect x="200" y="396" width="400" height="36" rx="3" fill="#101116" stroke="#2c2d33"/>
+    <text x="400" y="419" text-anchor="middle" font-size="13" fill="#c9c4b4">Verification &#8594; durable Audit &#8594; Experience</text>
+  </g>
+</svg>

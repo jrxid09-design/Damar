@@ -1,6 +1,6 @@
 const crypto = require("node:crypto");
 
-const { makeEnvelope, digest, canonicalJson } = require("../core/envelope");
+const { makeEnvelope, digest, canonicalJson, normalizeEnvelopeRecord, SCHEMA_VERSION, EPISTEMIC_CLASS } = require("../core/envelope");
 const { HANDLERS, ignored } = require("./reducers");
 const epistemics = require("../self/epistemics");
 const affectEngine = require("../affect/engine");
@@ -161,7 +161,9 @@ class ContinuityCore {
                 subject: envelope.subject,
                 sessionId: envelope.sessionId,
                 correlationId: envelope.correlationId,
-                confidence: envelope.confidence
+                confidence: envelope.confidence,
+                schemaVersion: envelope.schemaVersion,
+                epistemicClass: envelope.epistemicClass
             });
 
         if (appended.duplicate) {
@@ -190,19 +192,19 @@ class ContinuityCore {
     /**
      * Reducer bersama LIVE / REPLAY / REKONSILIASI.
      *
-     * Satu-satunya tempat handler dipilih dan appraisal dihitung, supaya
+     * Satu-satunya tempat reducer dipilih dan appraisal dihitung, supaya
      * jalur langsung dan jalur rebuild tidak pernah menyimpang (§50).
      */
     reduceFrom(baseState, env, label = "") {
 
         const working = this.preApply(env, baseState);
-        const handler = HANDLERS[env.type];
+        const reducer = HANDLERS[env.type];
 
-        if (!handler) {
+        if (!reducer) {
             // Tidak akan terjadi (makeEnvelope memfilter), tetapi tetap
             // aman: diagnostik saja — tidak mutasi otoritatif (§100).
             const next = ignored(working,
-                `tipe tanpa handler${label}: ${env.type}`);
+                `tipe tanpa reducer${label}: ${env.type}`);
             next.diagnostics.unknownEvents += 1;
             return { working, next, appraisal: null };
         }
@@ -212,7 +214,7 @@ class ContinuityCore {
             toolReliability: ctx_toolReliability
         });
 
-        const next = handler(working, env, {
+        const next = reducer(working, env, {
             config: this.config,
             nowMs: eventTimeMs(env, this.clock),
             appraisal
@@ -665,6 +667,18 @@ class ContinuityCore {
             sessionId: envelopeFields.sessionId ?? null,
             correlationId: envelopeFields.correlationId ?? null,
             confidence: envelopeFields.confidence ?? 1,
+            // schemaVersion/epistemicClass: cakupan hash §51 (lihat
+            // core/envelope.js) beda per versi -- baris v1 di-hash TANPA
+            // keduanya (kolom belum ada), baris v2 MENYERTAKAN keduanya
+            // (putaran-8; komentar ini diperbarui putaran-59, W7R59-ADV-1,
+            // setelah audit independen menemukan komentar lama salah untuk
+            // v2 -- lihat sha256Row() di bawah, bukan default di sini).
+            // Bug review independen (Codex putaran-7): default lama (1/null)
+            // membuat append() langsung (tanpa envelopeFields) menulis baris
+            // format lama walau v2 sudah jadi skema tulis saat ini, dan baris
+            // itu di-replay sebagai legacy lalu dinormalisasi ke UNKNOWN.
+            schemaVersion: envelopeFields.schemaVersion ?? SCHEMA_VERSION,
+            epistemicClass: envelopeFields.epistemicClass ?? EPISTEMIC_CLASS.UNKNOWN,
             payload,
             prevHash,
             hash: null
@@ -729,7 +743,7 @@ function setToolReliabilitySource(fn) {
 }
 
 function sha256Row(row) {
-    const material = canonicalJson({
+    const fields = {
         eventId: row.eventId, type: row.type,
         occurredAt: row.occurredAt, monotonic: row.monotonic,
         source: row.source, provenance: row.provenance,
@@ -739,7 +753,18 @@ function sha256Row(row) {
         confidence: row.confidence ?? 1,
         payload: row.payload ?? {},
         prevHash: row.prevHash ?? null
-    });
+    };
+    // Bug review independen (Codex putaran-8): field v2 (schemaVersion/
+    // epistemicClass) sebelumnya TIDAK PERNAH masuk materi hash sama sekali,
+    // jadi korupsi klasifikasi epistemik tidak terdeteksi verifyJournalIntegrity().
+    // Baris v1 lama tetap di-hash PERSIS seperti semula (kompatibilitas
+    // historis, lihat komentar di atas); hanya baris v2 baru menyertakan
+    // kedua field ini.
+    if (row.schemaVersion === 2) {
+        fields.schemaVersion = row.schemaVersion;
+        fields.epistemicClass = row.epistemicClass ?? null;
+    }
+    const material = canonicalJson(fields);
     return require("../core/envelope").sha256(material);
 }
 
@@ -751,16 +776,24 @@ function makeEnvelopeSafe(spec) {
 /** Kunci watermark projeksi di acc_kv (sama di backend memory & sqlite). */
 const PROJECTION_SEQ_KEY = "acc.projection.appliedSeq";
 
-/** Baris jurnal → envelope replay (bentuk tunggal untuk semua jalur). */
+/**
+ * Baris jurnal → envelope replay (bentuk tunggal untuk semua jalur).
+ * Baris v1 (schemaVersion hilang/1) dinormalisasi konservatif ke pandangan
+ * v2 lewat `normalizeEnvelopeRecord` — epistemicClass selalu UNKNOWN untuk
+ * baris lama, tidak pernah ditebak dari `provenance`.
+ */
 function envelopeFromRow(row) {
+    const normalized = normalizeEnvelopeRecord(row);
     return {
-        eventId: row.eventId, type: row.type,
-        timestamp: row.occurredAt, monotonic: row.monotonic,
-        source: row.source, provenance: row.provenance,
-        subject: row.subject ?? null, sessionId: row.sessionId ?? null,
-        correlationId: row.correlationId ?? null,
-        confidence: row.confidence ?? 1,
-        payload: row.payload ?? {}
+        eventId: normalized.eventId, type: normalized.type,
+        timestamp: normalized.occurredAt, monotonic: normalized.monotonic,
+        source: normalized.source, provenance: normalized.provenance,
+        subject: normalized.subject ?? null, sessionId: normalized.sessionId ?? null,
+        correlationId: normalized.correlationId ?? null,
+        confidence: normalized.confidence ?? 1,
+        schemaVersion: normalized.schemaVersion,
+        epistemicClass: normalized.epistemicClass,
+        payload: normalized.payload ?? {}
     };
 }
 

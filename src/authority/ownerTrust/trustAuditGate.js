@@ -50,7 +50,7 @@ function createTrustAuditGate({ ledger, source = "ownerTrust" } = {}) {
      */
     function audit({ eventType, source: eventSource, metadata = null } = {}) {
         try {
-            ledger.append({
+            const record = ledger.append({
                 eventType,
                 source: typeof eventSource === "string" && eventSource.length > 0
                     ? eventSource
@@ -59,6 +59,10 @@ function createTrustAuditGate({ ledger, source = "ownerTrust" } = {}) {
                 outcome: "ok"
             }, { durable: true });
             stats.appended += 1;
+            // Return the ledger-owned frozen record so callers that publish a
+            // consequential success can bind that acknowledgement to the
+            // exact durable event, rather than treating a non-throw as proof.
+            return record;
         } catch (error) {
             stats.rejected += 1;
             stats.lastError = {

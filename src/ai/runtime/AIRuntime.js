@@ -53,6 +53,13 @@ const Pipeline = require("../tools/Pipeline");
 const SchemaMinimizer = require("../tools/SchemaMinimizer");
 const RuntimeMetrics = require("./RuntimeMetrics");
 const { canonicalRequestExec } = require("./requestIdentity");
+const ContextCapabilityIntegration = require("../capability/ContextCapabilityIntegration");
+
+function contextSelectionProvenance(request) {
+    return request?.contextSelection?.diagnostics
+        ? "Context Pipeline output"
+        : "assembled runtime messages";
+}
 
 const {
     AIRequestStartedEvent,
@@ -413,7 +420,7 @@ if (request.tools === undefined) {
  * DAMAR_TOOL_PIPELINE=legacy hanya mengganti ALGORITMA seleksi;
  * gerbang otorisasi yang sama tetap dijalankan (invariant H1).
  */
-resolveTools(request) {
+    resolveTools(request) {
 
     const Authorization = require("../tools/Authorization");
 
@@ -443,9 +450,21 @@ resolveTools(request) {
 
     const eligibleUniverse = Authorization.disclosureFilter(all, exec);
 
+    // Context + capability intelligence is a read-only projection. It runs
+    // after the frozen disclosure gate and before existing retrieval/ranking;
+    // it cannot widen the universe and it never creates authority.
+    const contextCapability = ContextCapabilityIntegration.project({
+        tools: eligibleUniverse,
+        messages: request.messages,
+        contextSelection: request.contextSelection ?? null,
+        capabilityRegistry: this.options.capabilityRegistry ?? null
+    });
+    all = contextCapability.candidates;
+    this.lastContextCapabilityIntegration = contextCapability;
+
     // G1: tools eksplisit pemanggil = kandidat, bukan bypass.
     if (Array.isArray(request.tools)) {
-        const allowedNames = new Set(eligibleUniverse.map(t => t.name));
+        const allowedNames = new Set(all.map(t => t.name));
         return request.tools.filter(t => allowedNames.has(t.name));
     }
 
@@ -468,9 +487,12 @@ resolveTools(request) {
     }
 
     const { tools, diagnostics } = Pipeline.select({
-        tools: eligibleUniverse,
+        tools: all,
         message: this.lastUserText(request),
-        historyTexts: this.historyTexts(request, 2),
+        historyTexts: [
+            ...this.historyTexts(request, 2),
+            contextCapability.contextText.slice(-12000)
+        ].filter(Boolean).slice(-3),
         channel: exec.channel ?? request.channel ?? null,
         role: exec.role ?? request.role ?? null,
         // B-FINAL + M-1: himpunan kapabilitas ikut ke pipeline dalam
@@ -482,7 +504,15 @@ resolveTools(request) {
     });
 
     // Diagnostik giliran terakhir — untuk Console & pengujian.
-    this.lastSelection = diagnostics;
+    this.lastSelection = {
+        ...diagnostics,
+        contextCapability: {
+            excluded: contextCapability.excluded,
+            authorityGranted: contextCapability.authorityGranted,
+            reasons: contextCapability.reasons,
+            contextProvenance: contextSelectionProvenance(request)
+        }
+    };
 
     return tools;
 

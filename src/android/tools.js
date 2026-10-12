@@ -1,5 +1,8 @@
 const { AITool } = require("../ai/tools");
 const adb = require("./adb");
+// adb.js is an ingress adapter: it holds no child_process and routes every
+// operation through the Manager-owned android.adb capability. A tool execute
+// is therefore a capability REQUEST, never an authorization.
 
 /**
  * Tool kendali Android — Damar mengoperasikan HP pemilik lewat ADB.

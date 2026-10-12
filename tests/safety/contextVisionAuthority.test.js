@@ -27,6 +27,7 @@ const aiStub = {
     ensure() { return this; },
     stream: async function* () { yield { delta: "x", done: true }; },
     providers: async () => ({ active: "stub", providers: [] }),
+    cognition: async function(opts) { return this.chat(opts); },
     tools: () => [],
     activePlatform: { id: "stub", label: "stub" }
 };

@@ -41,7 +41,21 @@ let shuttingDown = false;
  * memori, atau integrasi tidak boleh menjatuhkan daemon —
  * bidang kendali tetap harus hidup untuk melapor apa yang rusak.
  */
-function bootSubsystems() {
+async function bootSubsystems() {
+
+    // Compose canonical authority before any lazy Manager/action client can
+    // observe the production singleton.  A caller must receive either the
+    // real durable composition or the already-composed fail-closed state;
+    // construction-order races must not create a private deny-only island.
+    try {
+        const comp = await require("./authority/productionComposition").ensureProductionAuthorityComposed();
+        const status = comp.status();
+        logger.info?.(`[authority] kanonik siap: authorityBound=${status.authorityBound} ` +
+            `ownerTrust=${status.ownerTrustComposed} owner=${status.ownerEnrolled}`);
+    }
+    catch (error) {
+        logger.error?.(`Komposisi otoritas/owner-trust gagal (fail-closed): ${error.message}`);
+    }
 
     startup(config);
 
@@ -52,16 +66,6 @@ function bootSubsystems() {
     // canonical owner instead of fail-closing on an unbound source. Boot stays
     // graceful: a composition fault is logged, fail-closed, and never crashes
     // the daemon.
-    require("./authority/productionComposition").ensureProductionAuthorityComposed()
-        .then((comp) => {
-            const status = comp.status();
-            logger.info?.(`[authority] kanonik siap: authorityBound=${status.authorityBound} ` +
-                `ownerTrust=${status.ownerTrustComposed} owner=${status.ownerEnrolled}`);
-        })
-        .catch((error) => {
-            logger.error?.(`Komposisi otoritas/owner-trust gagal (fail-closed): ${error.message}`);
-        });
-
     // Runtime otonom: capability sync, environment watch, housekeeping.
     require("./autonomy").init().catch(error => {
         logger.warn?.(`Autonomy runtime gagal disiapkan: ${error.message}`);
@@ -313,14 +317,25 @@ function bootSubsystems() {
  * tanpa penjelasan — inilah sumber utama "kadang jalan kadang
  * tidak". Sekarang error itu ditangkap dan dijelaskan.
  */
-function listen(port, attemptsLeft = autoPortAttempts()) {
+async function listen(port, attemptsLeft = autoPortAttempts()) {
+
+    // Compose authority before opening the socket. A listening server must
+    // never expose a window in which Manager requests can race composition.
+    try {
+        await require("./authority/productionComposition").ensureProductionAuthorityComposed();
+    }
+    catch (error) {
+        logger.error?.(`Komposisi otoritas awal gagal (fail-closed): ${error.message}`);
+    }
 
     server = app.listen(port, host);
 
     server.on("listening", () => {
         // Jika port digeser otomatis, pakai port final di seluruh app.
         config.port = server.address().port;
-        bootSubsystems();
+        void bootSubsystems().catch((error) => {
+            logger.error?.(`Boot subsystems failed closed: ${error.message}`);
+        });
     });
 
     server.on("error", error => {

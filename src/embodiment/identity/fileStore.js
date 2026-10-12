@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const { fail, structuredCopy } = require("../core/util");
+const CAPABILITY_ID = "embodiment.identity.snapshot.write";
 
 /**
  * DURABLE DEVICE IDENTITY FILE STORE (I§4) — production adapter for the
@@ -57,9 +58,12 @@ function createFileIdentityStore(filePath, options = {}) {
     if (typeof filePath !== "string" || filePath.length === 0) {
         throw fail("PID_NO_STORE", "file identity store memerlukan path berkas");
     }
-    const fsync = options.fsync !== false;
+    const fsync = true;
 
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const capabilityRuntime = options.capabilityRuntime;
+    if (!capabilityRuntime || typeof capabilityRuntime.execute !== "function") {
+        throw new TypeError("file identity store requires the Manager-owned capability runtime");
+    }
 
     // In-process write queue: overlapping saves never interleave.
     let writing = false;
@@ -69,43 +73,21 @@ function createFileIdentityStore(filePath, options = {}) {
      * TF-007 cleanup helper: remove a leftover tmp file on failure so a
      * failed save never leaves orphan debris behind.
      */
-    function cleanupTmp(tmp) {
-        try { fs.unlinkSync(tmp); } catch { /* best-effort cleanup */ }
-    }
-
-    function drain() {
+    async function drain() {
         if (writing) return;
         writing = true;
         try {
             while (queue.length > 0) {
                 const payload = queue.shift();
-                const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-                try {
-                    fs.writeFileSync(tmp, payload, { mode: 0o600 });
-                    if (fsync) {
-                        // TF-002 WINDOWS FSYNC: open the tmp file with a
-                        // portable read-write descriptor ("r+") so fsyncSync
-                        // succeeds on Windows (a read-only "r" descriptor
-                        // yields EPERM there).  The write is complete before
-                        // rename; atomic replacement is preserved.
-                        const fd = fs.openSync(tmp, "r+");
-                        try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-                        // TF-007 honest durability: fsync of the FILE is
-                        // best-effort power-loss durability.  We do NOT
-                        // overclaim directory-metadata durability, which is
-                        // not reliably supported across platforms.
-                    }
-                    fs.renameSync(tmp, filePath);
-                } catch (error) {
-                    // TF-007: a failed save cleans its tmp file and reports
-                    // the failure; the last committed snapshot is untouched.
-                    cleanupTmp(tmp);
-                    throw invalid(`gagal menulis snapshot identitas: ${error.message}`);
+                const result = await capabilityRuntime.execute({
+                    capabilityId: CAPABILITY_ID, operation: "save",
+                    parameters: { filePath, payload, fsync }
+                });
+                if (result?.outcome !== "EXECUTED_VERIFIED") {
+                    throw invalid(`snapshot identitas ditolak: ${result?.reason ?? result?.outcome ?? "UNKNOWN"}`);
                 }
             }
-        } finally {
-            writing = false;
-        }
+        } finally { writing = false; }
     }
 
     /** Validate the envelope shape of a loaded snapshot (content is
@@ -137,7 +119,7 @@ function createFileIdentityStore(filePath, options = {}) {
             // Copy + write atomically; tmp+rename guards against torn writes.
             const payload = JSON.stringify(structuredCopy(serialized));
             queue.push(payload);
-            drain();
+            await drain();
             return true;
         },
 

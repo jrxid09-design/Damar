@@ -20,10 +20,9 @@ function makeExecutor() {
         { chat: async () => ({ content: "selesai", toolCalls: [] }) },
         { callTimeout: 5000 }
     );
-    executor.setToolRegistry({
-        map: new Map(),
-        get(name) { return this.map.get(name); }
-    });
+    const reg = { map: new Map(), get(name) { return this.map.get(name); } };
+    executor.setToolRegistry(reg);
+    executor.toolRegistry = reg;  // own-property for test access; no class getter added
     const orig = executor.execute.bind(executor);
     executor.execute = (request) =>
         orig({ exec: request.exec ?? { role: "superadmin", channel: "test" }, ...request });

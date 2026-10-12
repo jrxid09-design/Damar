@@ -1,7 +1,7 @@
-"use strict";
+﻿"use strict";
 
 /**
- * ACTION AUTHORITY GATE V1 — CANONICAL TRUSTED BOOTSTRAP (SEVENTH targeted
+ * ACTION AUTHORITY GATE V1 â€” CANONICAL TRUSTED BOOTSTRAP (SEVENTH targeted
  * repair, Wave 4 Lane 2: first-binder trust + caller authenticator + seeding
  * on the production facade REMOVED).
  *
@@ -15,16 +15,16 @@
  *   canonical authentication policy is bootstrap-owned, not
  *   runtime-constructor-owned
  *
- * ─────────────────────────────────────────────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  * HOW PRIVILEGED CONSTRUCTION IS BOOTSTRAP-PRIVATE (seventh repair)
- * ─────────────────────────────────────────────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *
- * The privileged composition functions — the action authority runtime factory
- * and the AuthenticationDomain factory — are defined INSIDE THIS MODULE'S
+ * The privileged composition functions â€” the action authority runtime factory
+ * and the AuthenticationDomain factory â€” are defined INSIDE THIS MODULE'S
  * private closure (below). They are NOT exports of this module, NOT exports
  * of runtime.js/authDomain.js, and reachable through NO binder, NO token, NO
  * host capability, NO first-call-wins registry. Acquiring them requires
- * ALREADY executing inside this module's own closure — i.e. being the trusted
+ * ALREADY executing inside this module's own closure â€” i.e. being the trusted
  * bootstrap itself.
  *
  * runtime.js and authDomain.js are now PURE NON-PRIVILEGED modules (inert
@@ -39,9 +39,9 @@
  * the production bootstrap loaded; the later bootstrap failure was loud but
  * not sufficient. First-binder-wins trust is not trust.
  *
- * ─────────────────────────────────────────────────────────────────────────
- * BLOCKER 2 — CANONICAL AUTHENTICATION IS BOOTSTRAP-OWNED
- * ─────────────────────────────────────────────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * BLOCKER 2 â€” CANONICAL AUTHENTICATION IS BOOTSTRAP-OWNED
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *
  * The production canonical runtime is created by `createCanonicalActionFacade()`
  * which takes NO options. It does NOT accept:
@@ -52,7 +52,7 @@
  *
  * The canonical AuthenticationDomain is bound internally to the FIXED
  * bootstrap-owned authentication adapter (`canonicalAuthAdapter` below): for
- * Lane 2 — where full production owner-auth infrastructure is not yet wired —
+ * Lane 2 â€” where full production owner-auth infrastructure is not yet wired â€”
  * the adapter FAILS CLOSED unconditionally: no session is ever minted from
  * caller input, no caller-asserted principal is ever trusted. This means the
  * canonical runtime evaluates but every session is INVALID_IDENTITY until a
@@ -60,9 +60,9 @@
  * (not through any constructor option). Arbitrary caller input is never
  * silently treated as authenticated.
  *
- * ─────────────────────────────────────────────────────────────────────────
- * BLOCKER 3 — PRODUCTION FACADE IS EXACTLY LEAST PRIVILEGE
- * ─────────────────────────────────────────────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * BLOCKER 3 â€” PRODUCTION FACADE IS EXACTLY LEAST PRIVILEGE
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *
  * The production facade is EXACTLY:
  *
@@ -83,14 +83,14 @@
  * registry, registrars, AuthorityStore, CapabilityRuntime, capability
  * registrar, evaluator, verifier, AuthenticationDomain, mintSession,
  * issueIdentity, bootstrap hooks. Authority/capability seeding belongs to a
- * SEPARATE privileged bootstrap/provisioning interface — for tests that is
+ * SEPARATE privileged bootstrap/provisioning interface â€” for tests that is
  * the explicitly test-only harness (tests/action/bootstrapHarness.js); for
  * production startup it will be a trusted provisioning capability in a later
  * lane. Downstream NEVER receives it.
  *
- * ─────────────────────────────────────────────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  * PROCESS / MODULE ISOLATION LIMITATION (documented honestly)
- * ─────────────────────────────────────────────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *
  * This is a same-process CommonJS trust domain, NOT OS isolation. Node/CommonJS
  * path hiding is NOT hard sandboxing against code that already has arbitrary
@@ -118,7 +118,7 @@ const { captureClock } = require("./clock");
 const { DECISION, GATE_REASONS, ALLOW_REASON, validateAuthorityEvaluation } = require("./gate");
 
 // ---------------------------------------------------------------------------
-// PRIVILEGED COMPOSITION — PRIVATE CLOSURE (seventh repair).
+// PRIVILEGED COMPOSITION â€” PRIVATE CLOSURE (seventh repair).
 // Both factories are defined HERE, inside the trusted bootstrap module's
 // closure. They are never exported, never token-gated, never binder-gated.
 // ---------------------------------------------------------------------------
@@ -173,7 +173,7 @@ function deepFreeze(obj) {
 }
 
 /**
- * PRIVILEGED (bootstrap-private) — compose one AuthenticationDomain over a
+ * PRIVILEGED (bootstrap-private) â€” compose one AuthenticationDomain over a
  * trusted authenticate() hook. The resulting domain's closure owns the
  * session brand, the ONLY mint path, and the verifier capability.
  *
@@ -214,7 +214,7 @@ function composeAuthenticationDomain({ authenticate, clock = { nowMs: () => Date
     function mintAuthenticatedSession(authResult, evidence) {
         const principal = extractAuthenticatedPrincipal(authResult);
 
-        // Descriptive telemetry ONLY — never used as Authority identity.
+        // Descriptive telemetry ONLY â€” never used as Authority identity.
         const claimed = evidence && typeof evidence === "object"
             ? cleanToken(evidence[AUTH_TELEMETRY_KEYS.claimedPrincipal], AUTH_TELEMETRY_KEYS.claimedPrincipal, MAX_TELEMETRY_CHARS)
             : "";
@@ -241,13 +241,13 @@ function composeAuthenticationDomain({ authenticate, clock = { nowMs: () => Date
     }
 
     /**
-     * authenticate(evidence) — the domain's single public identity surface.
+     * authenticate(evidence) â€” the domain's single public identity surface.
      * Resolves external evidence through the trusted authenticate()
      * infrastructure bound by bootstrap. On ANY failure (throw, null,
-     * undefined, malformed, missing principal) returns null — fail closed,
+     * undefined, malformed, missing principal) returns null â€” fail closed,
      * nothing minted, no caller identity fallback. The returned session (if
      * any) is branded to THIS domain and carries the principal that trusted
-     * authentication established — nothing else.
+     * authentication established â€” nothing else.
      */
     function authenticateEvidence(evidence) {
         let authResult;
@@ -267,7 +267,7 @@ function composeAuthenticationDomain({ authenticate, clock = { nowMs: () => Date
     }
 
     /**
-     * VERIFIER CAPABILITY — the ONLY thing the action authority runtime
+     * VERIFIER CAPABILITY â€” the ONLY thing the action authority runtime
      * receives. Brand-first (zero property access before membership check =>
      * zero Proxy traps on rejection). Returns the authenticated principal
      * string for a session branded by THIS domain, or null for anything else.
@@ -288,7 +288,7 @@ function composeAuthenticationDomain({ authenticate, clock = { nowMs: () => Date
 }
 
 /**
- * PRIVILEGED (bootstrap-private) — compose an action authority evaluation
+ * PRIVILEGED (bootstrap-private) â€” compose an action authority evaluation
  * runtime over canonical state. Destructures its inputs ONCE into
  * closure-owned state and returns the frozen least-privilege surface
  * { admit, evaluate }.
@@ -318,7 +318,7 @@ function composeActionAuthorityRuntime({
     }
     // Trust law: identity comes ONLY from a pre-bound AuthenticationDomain
     // verifier capability. A missing or invalid authVerifier means no session
-    // can ever be trusted — reject at composition so a misconfigured runtime
+    // can ever be trusted â€” reject at composition so a misconfigured runtime
     // fails loudly rather than silently evaluating as if unauthenticated.
     if (!authVerifier || typeof authVerifier !== "object") {
         throw fail(REASONS.AUTH_VERIFIER_REQUIRED, "runtime requires a pre-bound authVerifier capability");
@@ -587,7 +587,7 @@ let ownerAuthVerifier = null;
 let ownerAuthVerifierInstalled = false;
 
 /**
- * MODULE-PRIVATE, NON-ENUMERABLE — reachable ONLY by the sealed Owner trust
+ * MODULE-PRIVATE, NON-ENUMERABLE â€” reachable ONLY by the sealed Owner trust
  * composition root (src/authority/ownerTrustComposition), never by public DI
  * or a caller-controlled callback.  First-wins: a second installation attempt
  * is ignored, so the canonical composition (which runs at startup) cannot be
@@ -671,13 +671,13 @@ let canonical = null;
 // DB02-D / AVAILABILITY-GAP (Repair5): a closure-private reference to the
 // SAME CapabilityRegistry instance captured by composeActionAuthorityRuntime
 // above, set once at canonical construction time. NOT exported as the
-// registry object itself (that stays sealed) — only read-only, detached
+// registry object itself (that stays sealed) â€” only read-only, detached
 // snapshots derived from it are ever handed out (see
 // getCanonicalAvailableCapabilityIds below).
 let canonicalCapabilityRegistry = null;
 
 // ---------------------------------------------------------------------------
-// MATA DEWA VISUAL MODE (MD-011) — built-in capability + actuator wiring.
+// MATA DEWA VISUAL MODE (MD-011) â€” built-in capability + actuator wiring.
 //
 // A3/A7: the wiring record is bound to the ACTUAL canonical Lane 2 facade
 // identity via a closure-private WeakMap (fourth repair: NO mutable
@@ -690,8 +690,8 @@ let canonicalCapabilityRegistry = null;
 const mataDewaWiringByFacade = new WeakMap();
 
 /** Production lexical resolver (A4/A5): canonical MataDewaService at invoke
- *  time — pure getter, no creation, no public DI seam. Absence is a TRANSIENT
- *  runtime condition → actuator fails closed MATA_DEWA_SERVICE_UNAVAILABLE;
+ *  time â€” pure getter, no creation, no public DI seam. Absence is a TRANSIENT
+ *  runtime condition â†’ actuator fails closed MATA_DEWA_SERVICE_UNAVAILABLE;
  *  it never crashes the runtime and never fabricates a service. */
 function resolveCanonicalMataDewaService() {
     try {
@@ -704,7 +704,7 @@ function resolveCanonicalMataDewaService() {
 }
 
 /**
- * DB02-A (Repair5 continued): ONE canonical authority truth — construction
+ * DB02-A (Repair5 continued): ONE canonical authority truth â€” construction
  * order must not split it.
  *
  * The prior fix resolved the canonical production store correctly, but
@@ -713,7 +713,7 @@ function resolveCanonicalMataDewaService() {
  * === null)`). If anything triggers canonical Lane 2 construction before
  * `ensureProductionAuthorityComposed()` finishes (boot ordering, a stray
  * early call, a race), that one eager resolution captured the ephemeral
- * fallback — and the memoized facade could never see the real canonical
+ * fallback â€” and the memoized facade could never see the real canonical
  * store for the lifetime of the process, even after production composition
  * later completed. BOOT ORDER must never decide AUTHORITY TRUTH.
  *
@@ -724,13 +724,13 @@ function resolveCanonicalMataDewaService() {
  * `createCanonicalActionFacade()` / `createDamarManager()` /
  * `ensureProductionAuthorityComposed()` run in, the very next Lane 2 read
  * after production composition completes sees the SAME store the canonical
- * AuthorityRegistry writes into — live, not a copy, not a second
+ * AuthorityRegistry writes into â€” live, not a copy, not a second
  * synchronized store: exactly one underlying store is ever read, chosen
  * fresh on each call.
  *
  * Falls back to a single lazily-created ephemeral in-memory store when no
  * production composition has run yet in this process (e.g. ordinary unit
- * tests that never call `ensureProductionAuthorityComposed()`) — IDENTICAL
+ * tests that never call `ensureProductionAuthorityComposed()`) â€” IDENTICAL
  * to prior behavior for every caller that doesn't touch the production
  * composition path.
  *
@@ -748,7 +748,7 @@ function resolveLane2AuthorityStore() {
             if (canonicalStore && typeof canonicalStore.getCapability === "function") {
                 return canonicalStore;
             }
-        } catch { /* production composition module unavailable — ephemeral fallback */ }
+        } catch { /* production composition module unavailable â€” ephemeral fallback */ }
         if (ephemeralFallback === null) ephemeralFallback = createMemoryAuthorityStore();
         return ephemeralFallback;
     }
@@ -759,8 +759,97 @@ function resolveLane2AuthorityStore() {
     });
 }
 
+/** Canonical production audit acknowledgement for consequential Lane 3
+ * completion. Resolution is live so construction order cannot capture a
+ * pre-composition deny-only ledger. The owner-trust audit gate is the durable
+ * sink owner; a missing or failed sink is a hard failure before success. */
+function canonicalAuditPort() {
+    const composition = require("../authority/productionComposition").getProductionAuthorityComposition();
+    const ownerTrust = composition?.ownerTrust;
+    if (!ownerTrust || ownerTrust.durable !== true || typeof ownerTrust.auditGate?.audit !== "function") return null;
+    return { audit: ownerTrust.auditGate.audit, ledger: ownerTrust.ledger };
+}
+
+let canonicalReplayStore = undefined;
+function resolveCanonicalReplayStore() {
+    if (canonicalReplayStore !== undefined) return canonicalReplayStore;
+    try {
+        const port = canonicalAuditPort();
+        if (!port || typeof port.audit !== "function" || !port.ledger || typeof port.ledger.list !== "function") return null;
+        const { createCanonicalReplayLedger } = require("../manager/internal/canonicalReplayLedger");
+        const { createCanonicalReplayWitness } = require("../manager/internal/canonicalReplayWitness");
+        const path = require("node:path");
+        const os = require("node:os");
+        const witness = createCanonicalReplayWitness(
+            process.env.DAMAR_ACTION_REPLAY_WITNESS || path.join(os.homedir(), ".damar", "canonical-action-replay.witness.jsonl")
+        );
+        canonicalReplayStore = createCanonicalReplayLedger({
+            file: process.env.DAMAR_ACTION_REPLAY_DB || path.join(os.homedir(), ".damar", "canonical-action-replay.sqlite"),
+            rollbackAnchor: witness
+        });
+    } catch {
+        // Missing substrate/dependency remains a hard fail-closed condition;
+        // do not replace it with an in-memory replay map.
+        return null;
+    }
+    return canonicalReplayStore;
+}
+
+function prepareCanonicalExecution(entry = {}) {
+    try {
+        const port = canonicalAuditPort();
+        const audit = port?.audit;
+        if (typeof audit !== "function") return { ok: false, reason: "DURABLE_AUDIT_UNAVAILABLE" };
+        audit({
+            eventType: "action.execution.reserve",
+            source: "canonicalAction",
+            metadata: {
+                digest: String(entry.digest ?? "").slice(0, 128),
+                capabilityId: String(entry.capabilityId ?? "").slice(0, 256),
+                operation: String(entry.operation ?? "").slice(0, 128),
+                executionId: String(entry.executionId ?? "").slice(0, 128),
+                intentId: String(entry.intentId ?? "").slice(0, 128)
+            }
+        });
+        return { ok: true };
+    } catch (error) {
+        return { ok: false, reason: String(error?.code ?? error?.message ?? "AUDIT_RESERVE_FAILED").slice(0, 128) };
+    }
+}
+
+function acknowledgeCanonicalExecution(entry = {}) {
+    try {
+        const port = canonicalAuditPort();
+        const audit = port?.audit;
+        if (typeof audit !== "function") return { ok: false, reason: "AUDIT_GATE_UNAVAILABLE" };
+        const record = audit({
+            eventType: "action.execution.ack",
+            source: "canonicalAction",
+            metadata: {
+                digest: String(entry.digest ?? "").slice(0, 128),
+                capabilityId: String(entry.capabilityId ?? "").slice(0, 256),
+                operation: String(entry.operation ?? "").slice(0, 128),
+                executionId: String(entry.executionId ?? "").slice(0, 128),
+                intentId: String(entry.intentId ?? "").slice(0, 128),
+                principal: String(entry.principal ?? "").slice(0, 256),
+                authorityGeneration: Number.isSafeInteger(entry.authorityGeneration) ? entry.authorityGeneration : null
+            }
+        });
+        const metadata = record?.metadata;
+        const matches = record?.eventType === "action.execution.ack" &&
+            record?.source === "canonicalAction" &&
+            metadata?.digest === String(entry.digest ?? "") &&
+            metadata?.executionId === String(entry.executionId ?? "") &&
+            metadata?.operation === String(entry.operation ?? "");
+        if (!matches) return { ok: false, reason: "AUDIT_ACK_RECORD_MISMATCH" };
+        return { ok: true, receipt: String(record.eventId ?? entry.executionId ?? "") };
+    } catch (error) {
+        return { ok: false, reason: String(error?.code ?? error?.message ?? "AUDIT_ACK_FAILED").slice(0, 128) };
+    }
+}
+
 /**
- * Create the canonical production Action facade. Takes NO options — canonical
+ * Create the canonical production Action facade. Takes NO options â€” canonical
  * authentication policy is bootstrap-owned and the fixed fail-closed adapter
  * is bound internally.
  *
@@ -787,7 +876,7 @@ function createCanonicalActionFacade() {
         // ---- MATA DEWA (MD-011/A7/A8): wire the built-in visual-mode
         //      capabilities + trusted scope bindings HERE, inside the
         //      canonical composition. Failure is a composition
-        //      misconfiguration → LOUD typed error (never swallowed into a
+        //      misconfiguration â†’ LOUD typed error (never swallowed into a
         //      later CAPABILITY_NOT_FOUND). No authority is granted here.
         //      Fourth repair: the wiring record is bound to THIS facade's
         //      identity in a closure-private WeakMap (no module-global). ----
@@ -801,7 +890,7 @@ function createCanonicalActionFacade() {
                 registrar: capabilityRuntime.registrars.core
             });
             // Lane 5 integrasi (post-Lane4): capability RF TERISTIMEWA
-            // didaftarkan dengan pola MD-011 yang sama — DESKRIPTIF saja
+            // didaftarkan dengan pola MD-011 yang sama â€” DESKRIPTIF saja
             // (tanpa grant). Scope bindings diperluas; record wiring RF
             // dilampirkan pada record kanonik untuk Lane 3. Kegagalan =
             // kesalahan komposisi (LOUD), bukan CAPABILITY_NOT_FOUND diam.
@@ -819,13 +908,27 @@ function createCanonicalActionFacade() {
                 registrar: capabilityRuntime.registrars.core
             });
 
-            canonicalTrustedScopeBindings = { ...VISUAL_MODE_SCOPE_BINDINGS, ...RF_CONTROL_SCOPE_BINDINGS, ...diagnosticProbeWiring.SCOPE_BINDINGS };
-            canonicalWiringRecord = Object.freeze({ visual: wiring, rfControl: rfWiring, diagnosticProbe: probeWiring });
+            // W8 recovery: embodiment capabilities are registered through the
+            // SAME canonical Lane 2 registrar.  Their drivers are installed
+            // later over the SAME Lane 3 registry and their verifiers over the
+            // SAME Lane 4 composition; no per-capability runtime is created.
+            const embodimentWiring = require("./capabilities/embodimentWiring");
+            const embodiment = embodimentWiring.wireEmbodimentCapabilities({
+                registrar: capabilityRuntime.registrars.core
+            });
+
+            canonicalTrustedScopeBindings = {
+                ...VISUAL_MODE_SCOPE_BINDINGS,
+                ...RF_CONTROL_SCOPE_BINDINGS,
+                ...diagnosticProbeWiring.SCOPE_BINDINGS,
+                ...embodiment.scopeBindings
+            };
+            canonicalWiringRecord = Object.freeze({ visual: wiring, rfControl: rfWiring, diagnosticProbe: probeWiring, embodiment });
 
             // DB02-D: genuine availability observation. AVAILABLE iff the
             // probe's ExternalCapabilityFederation candidate is genuinely
             // ENABLED (real discover->inspect->validate->enableTool
-            // lifecycle) — never a default; UNAVAILABLE if that lifecycle
+            // lifecycle) â€” never a default; UNAVAILABLE if that lifecycle
             // has not genuinely completed.
             capabilityRuntime.registry.observeAvailability(
                 probeWiring.id,
@@ -834,12 +937,12 @@ function createCanonicalActionFacade() {
             );
 
             // AVAILABILITY-GAP (Repair5): visual-mode capabilities have NO
-            // external dependency (in-process UI toggle only) — "wired" IS a
+            // external dependency (in-process UI toggle only) â€” "wired" IS a
             // true, immediate observation of "available", not a default. This
             // is the ONLY production call site for observeAvailability; RF
             // control capabilities are deliberately NOT marked here (they
             // depend on a real, not-yet-connected device-trust attach signal
-            // — see AVAILABILITY_GAP recon notes) and stay UNKNOWN, correctly
+            // â€” see AVAILABILITY_GAP recon notes) and stay UNKNOWN, correctly
             // fail-closed, until that separate signal is wired.
             for (const entry of [wiring.activate, wiring.deactivate]) {
                 capabilityRuntime.registry.observeAvailability(entry.id, "AVAILABLE", {
@@ -847,6 +950,10 @@ function createCanonicalActionFacade() {
                     incarnationId: entry.incarnationId
                 });
             }
+            embodimentWiring.observeEmbodimentAvailability({
+                registry: capabilityRuntime.registry,
+                wiring: embodiment
+            });
         }
         catch (error) {
             throw Object.assign(
@@ -883,21 +990,21 @@ function createCanonicalActionFacade() {
             session
         });
         // MD-011 (fourth repair): bind the wiring record to THIS facade's
-        // identity — closure-private WeakMap, no mutable module-global.
+        // identity â€” closure-private WeakMap, no mutable module-global.
         mataDewaWiringByFacade.set(canonical, canonicalWiringRecord);
     }
     return canonical;
 }
 
 // ---------------------------------------------------------------------------
-// LANE 3 — CANONICAL ACTUATION COMPOSITION (FIRST targeted repair: ALL
+// LANE 3 â€” CANONICAL ACTUATION COMPOSITION (FIRST targeted repair: ALL
 // privileged actuation implementation lives in THIS private lexical closure).
 //
 // The actuation submodules (actuatorRegistry.js / dispatcher.js /
 // executionRequest.js / result.js / lifecycle.js) are now PURE NON-PRIVILEGED
-// vocabulary modules. The privileged constructors — buildActuatorRegistry,
+// vocabulary modules. The privileged constructors â€” buildActuatorRegistry,
 // composeDispatcher, formExecutionRequest, createLifecycleTracker,
-// buildExecutionResult, buildExecutionEvidence, sanitizeActuatorOutput — are
+// buildExecutionResult, buildExecutionEvidence, sanitizeActuatorOutput â€” are
 // defined HERE, inside this module's own lexical scope, exactly like Lane 2's
 // composeActionAuthorityRuntime / composeAuthenticationDomain. They are
 // reachable through NO binder, NO token, NO host capability, NO first-call-
@@ -913,7 +1020,7 @@ function createCanonicalActionFacade() {
 //
 // Downstream NEVER receives the registrar: it receives only the frozen
 // { execute } capability. Fresh canonical Lane 2 revalidation happens INSIDE
-// execute() — there is no bearer-decision path and no caller-selectable
+// execute() â€” there is no bearer-decision path and no caller-selectable
 // actuator.
 //
 // LANE 2 SEMANTICS UNCHANGED: this extension adds composition only; the
@@ -921,6 +1028,10 @@ function createCanonicalActionFacade() {
 // ---------------------------------------------------------------------------
 
 const crypto3 = require("node:crypto");
+// Captured once: the outcome reader below must not consult a mutated
+// `util.types` on the dispatch path.
+const utilTypes3 = require("node:util").types;
+const isProxy3 = utilTypes3.isProxy.bind(utilTypes3);
 const {
     parseActionIntent: parseIntent3, canonicalScope: canonicalScope3,
     validateTimestamp: validateTimestamp3, isValidIncarnationId: isValidIncarnation3
@@ -1163,11 +1274,14 @@ function sanitizeActuatorOutput3(value) {
         if (t === "boolean") return v;
         if (t === "number") return Number.isFinite(v) ? v : null;
         if (t === "bigint" || t === "symbol" || t === "undefined" || t === "function") return null;
+        // A Proxy is never trustworthy actuator output: reflecting on one can
+        // run hostile traps (getPrototypeOf/getOwnPropertyNames), and such a
+        // throw must not escape the canonical failure path.
+        if (isProxy3(v)) return null;
         if (v instanceof Error) {
             return { name: String(v.name ?? "Error").slice(0, 64), message: String(v.message ?? "").slice(0, RESULT_STRING_CHARS3) };
         }
-        if (!actuationIsPlainObject3(v) && !Array.isArray(v)) return null;
-        if (state.path.has(v)) return null;
+        if (!actuationIsPlainObject3(v) && !Array.isArray(v)) return null;        if (state.path.has(v)) return null;
         state.path.add(v);
         if (Array.isArray(v)) {
             const out = v.slice(0, 256).map((x) => walk(x, depth + 1));
@@ -1188,6 +1302,89 @@ function sanitizeActuatorOutput3(value) {
         return out;
     }
     return walk(value, 0);
+}
+
+// An actuator's own outcome description, read from the RAW report BEFORE it is
+// sanitized: only an own DATA property of a non-Proxy object is trusted. An
+// accessor, an inherited description, or any Proxy (whose descriptors may lie)
+// yields UNSUPPORTED_OUTCOME3 and fails closed; `undefined` means no outcome
+// was described at all. The sanitized copy cannot be used for this -- it
+// silently drops accessor and non-plain descriptions, which would turn an
+// ambiguous physical outcome ("UNKNOWN_OUTCOME") into EXECUTED.
+const NO_OUTCOME3 = Symbol("no-actuator-outcome");
+const UNSUPPORTED_OUTCOME3 = Symbol("unsupported-actuator-outcome");
+function readActuatorOutcome3(value) {
+    try {
+        if (value === null || (typeof value !== "object" && typeof value !== "function")) return NO_OUTCOME3;
+        if (isProxy3(value)) return UNSUPPORTED_OUTCOME3;
+        if (Object.prototype.hasOwnProperty.call(value, "outcome")) {
+            const descriptor = Object.getOwnPropertyDescriptor(value, "outcome");
+            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) return UNSUPPORTED_OUTCOME3;
+            // PRESENCE matters: an own data `outcome` whose value is undefined is
+            // a described (ambiguous) token, not an absent one.
+            return descriptor.value;
+        }
+        return Reflect.has(value, "outcome") ? UNSUPPORTED_OUTCOME3 : NO_OUTCOME3;
+    } catch {
+        // A description that throws while being read (hostile prototype trap)
+        // is unsupported, never "no outcome was described".
+        return UNSUPPORTED_OUTCOME3;
+    }
+}
+
+// Any `outcome` description ANYWHERE in a raw actuator report must be the
+// canonical success token. A nested accessor, an inherited description, a
+// Proxy, a callable, an exotic object (class instance / Map / Set / Date), an
+// over-budget subtree or any non-EXECUTED token means the report describes an
+// ambiguous physical outcome, so one cannot be hidden inside a collection or
+// behind a structure whose contents sanitization would silently drop.
+// Returns true when the report must fail closed.
+function scanActuatorOutcomeDescriptions3(value, state = { nodes: 0, path: new Set() }) {
+    try {
+        if (++state.nodes > RESULT_NODES3) return true;
+        if (value === null) return false;
+        if (typeof value === "function") return true;
+        if (typeof value !== "object") return false;
+        if (isProxy3(value)) return true;
+        const isArray = Array.isArray(value);
+        const proto = Object.getPrototypeOf(value);
+        if (!isArray && proto !== Object.prototype && proto !== null) return true;
+        if (state.path.has(value)) return false;
+        state.path.add(value);
+        let ambiguous = false;
+        for (const key of Reflect.ownKeys(value)) {
+            const descriptor = Object.getOwnPropertyDescriptor(value, key);
+            // An accessor anywhere is unreadable and is dropped by
+            // sanitization: never silently ignored.
+            if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) { ambiguous = true; break; }
+            if (key === "outcome" && descriptor.value !== "EXECUTED") { ambiguous = true; break; }
+            if (scanActuatorOutcomeDescriptions3(descriptor.value, state)) { ambiguous = true; break; }
+        }
+        state.path.delete(value);
+        return ambiguous;
+    } catch {
+        // Unreadable structure: never trustworthy, always fail closed.
+        return true;
+    }
+}
+
+// A caller-supplied AbortSignal is plumbing, NOT authority: probing it must
+// never be able to reject the canonical result. A hostile signal (throwing
+// traps or getters) degrades to "no cancellation available".
+function readSignal3(signal) {
+    try {
+        if (!signal || typeof signal !== "object") return null;
+        const add = signal.addEventListener;
+        if (typeof add !== "function") return null;
+        const remove = signal.removeEventListener;
+        return {
+            aborted: signal.aborted === true,
+            add: add.bind(signal),
+            remove: typeof remove === "function" ? remove.bind(signal) : null
+        };
+    } catch {
+        return null;
+    }
 }
 
 // ---- PRIVILEGED: result/evidence builders (closure-private) ----------------
@@ -1374,7 +1571,9 @@ function composeDispatcher3({
     lane2Facade,
     actuatorRegistry,
     clock = { nowMs: () => Date.now() },
-    timeoutMs = DEFAULT_TIMEOUT3
+    timeoutMs = DEFAULT_TIMEOUT3,
+    auditAcknowledger = null,
+    replayStoreResolver = null
 } = {}) {
     if (!lane2Facade || typeof lane2Facade.admit !== "function" || typeof lane2Facade.evaluate !== "function") {
         throw fail3(REASONS3.MALFORMED_REQUEST, "dispatcher requires the Lane 2 facade (admit + evaluate)");
@@ -1384,6 +1583,12 @@ function composeDispatcher3({
     }
     if (!clock || typeof clock.nowMs !== "function") {
         throw fail3(REASONS3.MALFORMED_REQUEST, "dispatcher requires a canonical clock");
+    }
+    if (auditAcknowledger !== null && typeof auditAcknowledger !== "function") {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "auditAcknowledger must be a function");
+    }
+    if (replayStoreResolver !== null && typeof replayStoreResolver !== "function") {
+        throw fail3(REASONS3.MALFORMED_REQUEST, "replayStoreResolver must be a function");
     }
     if (typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < MIN_TIMEOUT3 || timeoutMs > MAX_TIMEOUT3) {
         throw fail3(REASONS3.INVALID_TIMEOUT_CONFIG, `timeoutMs must be in [${MIN_TIMEOUT3}, ${MAX_TIMEOUT3}]`);
@@ -1409,12 +1614,33 @@ function composeDispatcher3({
         completed.set(key, entry);
     }
 
+    // Every field read here goes through a guarded read: a hostile getter on
+    // the intent or session must never leak an arbitrary exception out of the
+    // dispatcher -- an unreadable dedup identity simply stops deduplicating.
     function computeContentKey3(intent, authSession, parameters, metadata) {
-        const paramsJson = parameters === undefined || parameters === null ? "{}" : JSON.stringify(parameters);
-        const metaJson = metadata === undefined || metadata === null ? "{}" : JSON.stringify(metadata);
-        const sessionKey = String(typeof authSession === "object" && authSession !== null ? (authSession.principal ?? "") + ":" + authSession.sessionId : "");
-        const scopeJson = JSON.stringify(intent.scope ?? []);
-        const key = `${intent.intentId}|${intent.capabilityId}|${intent.capabilityIncarnationId}|${intent.operation}|${sessionKey}|${scopeJson}|${crypto3.createHash("sha256").update(paramsJson).digest("hex").slice(0, 16)}|${crypto3.createHash("sha256").update(metaJson).digest("hex").slice(0, 16)}`;
+        const field = (source, key) => {
+            try {
+                const value = source == null ? undefined : source[key];
+                return typeof value === "string" ? value : "";
+            } catch {
+                return "";
+            }
+        };
+        const json = (value) => {
+            if (value === undefined || value === null) return "{}";
+            try { return JSON.stringify(value) ?? "{}"; } catch { return "unreadable"; }
+        };
+        const paramsJson = json(parameters);
+        const metaJson = json(metadata);
+        let sessionKey = "";
+        try {
+            sessionKey = String(typeof authSession === "object" && authSession !== null ? (authSession.principal ?? "") + ":" + authSession.sessionId : "");
+        } catch {
+            sessionKey = "unreadable";
+        }
+        let scopeJson = "[]";
+        try { scopeJson = JSON.stringify(intent.scope ?? []) ?? "[]"; } catch { scopeJson = "unreadable"; }
+        const key = `${field(intent, "intentId")}|${field(intent, "capabilityId")}|${field(intent, "capabilityIncarnationId")}|${field(intent, "operation")}|${sessionKey}|${scopeJson}|${crypto3.createHash("sha256").update(paramsJson).digest("hex").slice(0, 16)}|${crypto3.createHash("sha256").update(metaJson).digest("hex").slice(0, 16)}`;
         return crypto3.createHash("sha256").update(key).digest("hex");
     }
 
@@ -1422,37 +1648,67 @@ function composeDispatcher3({
         if (p === null || typeof p !== "object") {
             throw fail3(REASONS3.MALFORMED_REQUEST, "execute requires a request object");
         }
-        for (const key of CALLER_EXECUTOR_KEYS3) {
-            if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
-                throw fail3(REASONS3.CALLER_EXECUTOR_REJECTED,
-                    `caller-executor option '${key}' is forbidden; the actuator is bootstrap-owned, never caller-selectable`);
+
+        // Every caller field is read ONCE through this guarded intake. A getter
+        // or Proxy trap that throws must never leak an arbitrary exception out
+        // of execute(): it becomes a typed canonical refusal instead, and the
+        // caller's own error object is never used downstream.
+        let intent;
+        let authSession;
+        let parameters;
+        let metadata;
+        let timeoutOption;
+        let signalOption;
+        try {
+            for (const key of CALLER_EXECUTOR_KEYS3) {
+                if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
+                    throw fail3(REASONS3.CALLER_EXECUTOR_REJECTED,
+                        `caller-executor option '${key}' is forbidden; the actuator is bootstrap-owned, never caller-selectable`);
+                }
             }
-        }
-        for (const key of BEARER_DECISION_KEYS3) {
-            if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
-                throw fail3(REASONS3.CALLER_EXECUTOR_REJECTED,
-                    `authority-decision option '${key}' is forbidden; an AuthorityDecision is historical evidence, not a bearer execution token`);
+            for (const key of BEARER_DECISION_KEYS3) {
+                if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
+                    throw fail3(REASONS3.CALLER_EXECUTOR_REJECTED,
+                        `authority-decision option '${key}' is forbidden; an AuthorityDecision is historical evidence, not a bearer execution token`);
+                }
             }
+            intent = p.intent;
+            authSession = p.authSession;
+            parameters = p.parameters;
+            metadata = p.metadata;
+            timeoutOption = p.timeoutMs;
+            signalOption = p.signal;
+        } catch (e) {
+            if (e && typeof e.reasonCode === "string") throw e;
+            throw fail3(REASONS3.MALFORMED_REQUEST, "request options are unreadable");
         }
 
-        const { intent, authSession } = p;
-        if (!intent || typeof intent !== "object" ||
-            typeof intent.intentId !== "string" ||
-            typeof intent.capabilityId !== "string" ||
-            typeof intent.operation !== "string" ||
-            typeof intent.capabilityIncarnationId !== "string") {
-            throw fail3(REASONS3.INVALID_INTENT, "execute requires a canonical ActionIntent");
-        }
-        if (!isValidIncarnation3(intent.capabilityIncarnationId)) {
-            throw fail3(REASONS3.INVALID_INTENT, "intent capabilityIncarnationId is not a valid canonical incarnation");
-        }
-        if (authSession === null || typeof authSession !== "object") {
-            throw fail3(REASONS3.INVALID_SESSION, "execute requires an authenticated session");
+        let admittedAtMs;
+        try {
+            if (!intent || typeof intent !== "object" ||
+                typeof intent.intentId !== "string" ||
+                typeof intent.capabilityId !== "string" ||
+                typeof intent.operation !== "string" ||
+                typeof intent.capabilityIncarnationId !== "string") {
+                throw fail3(REASONS3.INVALID_INTENT, "execute requires a canonical ActionIntent");
+            }
+            if (!isValidIncarnation3(intent.capabilityIncarnationId)) {
+                throw fail3(REASONS3.INVALID_INTENT, "intent capabilityIncarnationId is not a valid canonical incarnation");
+            }
+            if (authSession === null || typeof authSession !== "object") {
+                throw fail3(REASONS3.INVALID_SESSION, "execute requires an authenticated session");
+            }
+            admittedAtMs = intent.createdAtMs;
+        } catch (e) {
+            if (e && typeof e.reasonCode === "string") throw e;
+            throw fail3(REASONS3.INVALID_INTENT, "intent fields are unreadable");
         }
 
         const requestedAtMs = canonicalClockNow3();
         const lifecycle = createLifecycleTracker3(LIFECYCLE3.CREATED);
-        const admittedAtMs = intent.createdAtMs;
+        // Downstream reads this sanitized bag, never the caller's object: a
+        // stateful getter cannot throw on a second read.
+        const safeBag = Object.freeze({ intent, authSession, parameters, metadata, timeoutMs: timeoutOption, signal: signalOption });
 
         let provisionalRequest;
         try {
@@ -1466,15 +1722,15 @@ function composeDispatcher3({
                 authorityGeneration: 0,
                 admittedAtMs,
                 requestedAtMs,
-                parameters: p.parameters,
-                metadata: p.metadata
+                parameters,
+                metadata
             });
         } catch (e) {
             lifecycle.advance(LIFECYCLE3.FAILED, requestedAtMs);
             throw e;
         }
 
-        const contentKey = computeContentKey3(intent, authSession, p.parameters, p.metadata);
+        const contentKey = computeContentKey3(intent, authSession, parameters, metadata);
         if (inFlight.has(contentKey)) {
             return inFlight.get(contentKey).promise;
         }
@@ -1486,7 +1742,7 @@ function composeDispatcher3({
         inFlight.set(contentKey, inFlightEntry);
         const runPromise = (async () => {
             try {
-                return await runExecutionBody3(contentKey, intent, authSession, p, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs);
+                return await runExecutionBody3(contentKey, intent, authSession, safeBag, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs);
             } finally {
                 inFlight.delete(contentKey);
             }
@@ -1496,7 +1752,7 @@ function composeDispatcher3({
     }
 
     async function runExecutionBody3(contentKey, intent, authSession, p, provisionalRequest, lifecycle, requestedAtMs, admittedAtMs) {
-        // ── PRE-ACTUATION REVALIDATION (the core invariant) ────────────
+        // â”€â”€ PRE-ACTUATION REVALIDATION (the core invariant) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         lifecycle.advance(LIFECYCLE3.REVALIDATING, canonicalClockNow3());
 
         let freshDecision;
@@ -1636,8 +1892,8 @@ function composeDispatcher3({
 
         lifecycle.advance(LIFECYCLE3.READY, canonicalClockNow3());
 
-        const signal = p.signal;
-        if (signal && typeof signal.addEventListener === "function" && signal.aborted) {
+        const signal = readSignal3(p.signal);
+        if (signal && signal.aborted) {
             lifecycle.advance(LIFECYCLE3.CANCELLED, canonicalClockNow3());
             const result = buildExecutionResult3({
                 executionRequest: request,
@@ -1661,18 +1917,96 @@ function composeDispatcher3({
 
         let cancelledDuringDispatch = false;
         let invocationCount = 0;
+        let activeReplayStore = null;
+        let activeReplayBinding = null;
+        // Orchestration identity (intentId) is intentionally distinct from
+        // physical-effect identity. A fresh intent with the same authorized
+        // capability/operation/parameters must not replay the same actuator
+        // effect after a timeout or process restart.
+        const effectDigest = crypto3.createHash("sha256").update(JSON.stringify({
+            capabilityId: request.capabilityId,
+            capabilityIncarnationId: request.capabilityIncarnationId,
+            operation: request.operation,
+            principal: request.principal,
+            scope: request.scope,
+            parameters: request.parameters
+        })).digest("hex");
+
+        // The actuator receives a FROZEN, brand-recognized GATED request on its
+        // first argument: it is a derived artifact of the authorized request,
+        // produced only here, and downstream can verify it the same way it
+        // verifies a canonical ExecutionRequest. The full ExecutionRequest --
+        // including capabilityIncarnationId, authorityGeneration and metadata --
+        // stays on the second argument, so an effector can bind the gated view
+        // back to the artifact the dispatcher actually authorized.
+        const gatedRequest = deepFreeze3({
+            executionId: request.executionId,
+            intentId: request.intentId,
+            capabilityId: request.capabilityId,
+            operation: request.operation,
+            principal: request.principal,
+            scope: request.scope,
+            parameters: request.parameters
+        });
+        requestBrandSet3.add(gatedRequest);
+
+        // A durable reservation is a precondition of invoking a consequential
+        // actuator. If the canonical durable audit root is not installed, the
+        // effect must not start.
+        if (auditAcknowledger !== null) {
+            const replayStore = replayStoreResolver === null ? null : replayStoreResolver();
+            if (!replayStore || typeof replayStore.reserve !== "function" || typeof replayStore.transition !== "function") {
+                lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+                const refused = buildExecutionResult3({ executionRequest: request, state: RESULT_STATE3.FAILED, lifecycleTrace: lifecycle.trace, startedAtMs: dispatchStartMs, completedAtMs: canonicalClockNow3(), failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION, failureDetail: "durable replay substrate unavailable" });
+                noteCompleted(contentKey, { result: refused, request, intentId: request.intentId });
+                return refused;
+            }
+            const replayBinding = { digest: effectDigest, capabilityId: request.capabilityId, operation: request.operation, principal: request.principal, scope: request.scope, authorityGeneration: request.authorityGeneration, driverId: binding.actuatorId };
+            let reservation;
+            try { reservation = await replayStore.reserve(replayBinding); } catch { reservation = null; }
+            if (!reservation || reservation.reserved !== true) {
+                lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+                const refused = buildExecutionResult3({ executionRequest: request, state: RESULT_STATE3.FAILED, lifecycleTrace: lifecycle.trace, startedAtMs: dispatchStartMs, completedAtMs: canonicalClockNow3(), failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION, failureDetail: "durable replay reservation denied" });
+                noteCompleted(contentKey, { result: refused, request, intentId: request.intentId });
+                return refused;
+            }
+            try { await replayStore.transition(effectDigest, replayStore.STATES.INVOKING, replayBinding); } catch {
+                lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+                const refused = buildExecutionResult3({ executionRequest: request, state: RESULT_STATE3.FAILED, lifecycleTrace: lifecycle.trace, startedAtMs: dispatchStartMs, completedAtMs: canonicalClockNow3(), failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION, failureDetail: "durable replay invocation reservation failed" });
+                noteCompleted(contentKey, { result: refused, request, intentId: request.intentId });
+                return refused;
+            }
+            // The reservation is the duplicate barrier. The completion state
+            // is best-effort after the physical attempt; failure remains
+            // ambiguous and never re-opens the digest for execution.
+            activeReplayStore = replayStore;
+            activeReplayBinding = replayBinding;
+            const prepared = prepareCanonicalExecution({
+                capabilityId: request.capabilityId,
+                operation: request.operation,
+                executionId: request.executionId,
+                intentId: request.intentId,
+                digest: effectDigest
+            });
+            if (!prepared || prepared.ok !== true) {
+                lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+                const refused = buildExecutionResult3({
+                    executionRequest: request,
+                    state: RESULT_STATE3.FAILED,
+                    lifecycleTrace: lifecycle.trace,
+                    startedAtMs: dispatchStartMs,
+                    completedAtMs: canonicalClockNow3(),
+                    failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION,
+                    failureDetail: "durable audit reservation unavailable"
+                });
+                noteCompleted(contentKey, { result: refused, request, intentId: request.intentId });
+                return refused;
+            }
+        }
 
         const execPromise = (async () => {
             invocationCount++;
-            return await binding.invoke({
-                executionId: request.executionId,
-                intentId: request.intentId,
-                capabilityId: request.capabilityId,
-                operation: request.operation,
-                principal: request.principal,
-                scope: request.scope,
-                parameters: request.parameters
-            });
+            return await binding.invoke(gatedRequest, request);
         })();
 
         let timeoutHandle = null;
@@ -1686,17 +2020,18 @@ function composeDispatcher3({
         });
 
         let cancelListener = null;
-        if (signal && typeof signal.addEventListener === "function") {
+        if (signal && signal.add) {
             cancelListener = () => {
                 if (lifecycle.state === LIFECYCLE3.DISPATCHING && !timedOut) {
                     cancelledDuringDispatch = true;
                 }
             };
-            signal.addEventListener("abort", cancelListener);
+            try { signal.add("abort", cancelListener); } catch { cancelListener = null; }
         }
 
         let actuatorOutput = null;
         let dispatchFailed = null;
+        let dispatchThrew = false;
         try {
             actuatorOutput = await Promise.race([execPromise, timeoutPromise]);
             if (timedOut) {
@@ -1716,17 +2051,22 @@ function composeDispatcher3({
                 return result;
             }
         } catch (e) {
+            dispatchThrew = true;
             dispatchFailed = e;
         } finally {
             if (timeoutHandle) clearTimeout(timeoutHandle);
-            if (signal && typeof signal.removeEventListener === "function" && cancelListener) {
-                try { signal.removeEventListener("abort", cancelListener); } catch { /* best-effort */ }
+            if (cancelListener && signal && signal.remove) {
+                try { signal.remove("abort", cancelListener); } catch { /* best-effort */ }
             }
         }
 
-        if (dispatchFailed) {
+        if (dispatchThrew) {
             lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
-            const sanitized = sanitizeActuatorOutput3(dispatchFailed);
+            // A thrown value is attacker-shaped input: it must never be able to
+            // throw again out of the canonical failure path (a rejected
+            // dispatcher would leave the caller with no canonical result).
+            let sanitized = null;
+            try { sanitized = sanitizeActuatorOutput3(dispatchFailed); } catch { sanitized = null; }
             const result = buildExecutionResult3({
                 executionRequest: request,
                 state: RESULT_STATE3.FAILED,
@@ -1743,6 +2083,95 @@ function composeDispatcher3({
             return result;
         }
 
+        let sanitizedOutput;
+        let outputOutcome;
+        try {
+            // Read the outcome from the RAW output before sanitizing: the
+            // sanitized copy silently drops accessor, inherited and non-plain
+            // descriptions, so reading the outcome back from it could turn an
+            // ambiguous ("UNKNOWN_OUTCOME") description into EXECUTED.
+            outputOutcome = readActuatorOutcome3(actuatorOutput);
+            if (outputOutcome === UNSUPPORTED_OUTCOME3) {
+                throw fail3(REASONS3.ACTUATOR_MALFORMED_RESULT, "actuator outcome description is unsupported");
+            }
+            sanitizedOutput = sanitizeActuatorOutput3(actuatorOutput);
+        } catch (e) {
+            lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+            const result = buildExecutionResult3({
+                executionRequest: request,
+                state: RESULT_STATE3.FAILED,
+                actuatorId: binding.actuatorId,
+                actuatorIncarnationId: binding.actuatorIncarnationId,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: dispatchStartMs,
+                completedAtMs: canonicalClockNow3(),
+                failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION,
+                failureDetail: "actuator returned an unsupported result"
+            });
+            noteCompleted(contentKey, { result, request, intentId: request.intentId });
+            return result;
+        }
+        // The actuator's own outcome token is a CLOSED vocabulary: only the
+        // canonical EXECUTED token is a success claim. Any other described
+        // token -- a recognized failure or an unrecognized one -- fails closed,
+        // so an unknown token can never be echoed back as EXECUTED.
+        if ((outputOutcome !== NO_OUTCOME3 && outputOutcome !== "EXECUTED") ||
+            scanActuatorOutcomeDescriptions3(actuatorOutput)) {
+            lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+            const result = buildExecutionResult3({
+                executionRequest: request,
+                state: RESULT_STATE3.FAILED,
+                actuatorId: binding.actuatorId,
+                actuatorIncarnationId: binding.actuatorIncarnationId,
+                lifecycleTrace: lifecycle.trace,
+                startedAtMs: dispatchStartMs,
+                completedAtMs: canonicalClockNow3(),
+                actuatorReport: sanitizedOutput,
+                failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION,
+                failureDetail: outputOutcome === "UNKNOWN_OUTCOME"
+                    ? "actuator completed with ambiguous physical outcome"
+                    : typeof outputOutcome === "string"
+                        ? `actuator reported ${outputOutcome.toLowerCase()}`
+                        : "actuator reported an unsupported outcome token"
+            });
+            noteCompleted(contentKey, { result, request, intentId: request.intentId });
+            return result;
+        }
+
+        if (auditAcknowledger !== null) {
+            let acknowledgement;
+            try {
+                acknowledgement = auditAcknowledger({
+                    capabilityId: request.capabilityId,
+                    operation: request.operation,
+                    executionId: request.executionId,
+                    intentId: request.intentId,
+                    principal: request.principal,
+                    authorityGeneration: request.authorityGeneration,
+                    digest: effectDigest
+                });
+            } catch {
+                acknowledgement = { ok: false };
+            }
+            if (!acknowledgement || acknowledgement.ok !== true) {
+                lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
+                const denied = buildExecutionResult3({
+                    executionRequest: request,
+                    state: RESULT_STATE3.FAILED,
+                    actuatorId: binding.actuatorId,
+                    actuatorIncarnationId: binding.actuatorIncarnationId,
+                    lifecycleTrace: lifecycle.trace,
+                    startedAtMs: dispatchStartMs,
+                    completedAtMs: canonicalClockNow3(),
+                    actuatorReport: sanitizedOutput,
+                    failureReason: REASONS3.ACTUATOR_REJECTED_INVOCATION,
+                    failureDetail: "durable audit acknowledgement failed"
+                });
+                noteCompleted(contentKey, { result: denied, request, intentId: request.intentId });
+                return denied;
+            }
+            try { await activeReplayStore?.transition(effectDigest, activeReplayStore.STATES.EXECUTED_UNVERIFIED, activeReplayBinding); } catch { /* duplicate barrier remains reserved */ }
+        }
         lifecycle.advance(LIFECYCLE3.EXECUTED, canonicalClockNow3());
         const result = buildExecutionResult3({
             executionRequest: request,
@@ -1752,7 +2181,7 @@ function composeDispatcher3({
             lifecycleTrace: lifecycle.trace,
             startedAtMs: dispatchStartMs,
             completedAtMs: canonicalClockNow3(),
-            actuatorReport: actuatorOutput
+            actuatorReport: sanitizedOutput
         });
         noteCompleted(contentKey, { result, request, intentId: request.intentId });
         return result;
@@ -1775,7 +2204,7 @@ let canonicalActuation = null;
 
 /**
  * Create the canonical Lane 3 actuation facade (trusted-bootstrap-private).
- * Takes NO options — the actuator registry, the dispatcher's clock, and the
+ * Takes NO options â€” the actuator registry, the dispatcher's clock, and the
  * Lane 2 facade it revalidates against are all owned by this closure.
  *
  * @returns {object} frozen { execute }  (least privilege: execution only)
@@ -1792,8 +2221,8 @@ function createCanonicalActuationFacade() {
         //      over the CANONICAL actuator registry, using the wiring record
         //      retrieved from the closure-private WeakMap keyed by THIS
         //      canonical Lane 2 facade's actual identity (fourth repair: no
-        //      mutable module-global; a facade without a bound record — i.e.
-        //      a foreign or recomposed one — fails LOUD here). Service
+        //      mutable module-global; a facade without a bound record â€” i.e.
+        //      a foreign or recomposed one â€” fails LOUD here). Service
         //      resolution is LAZY at invoke time (production lexical
         //      resolver); transient absence fails closed at the actuator. ----
         const canonicalWiringRecord = mataDewaWiringByFacade.get(lane2Facade);
@@ -1811,7 +2240,7 @@ function createCanonicalActuationFacade() {
             resolveService: resolveCanonicalMataDewaService
         });
         // Lane 5 integrasi (post-Lane4): actuator RF TERISTIMEWA di atas
-        // registry actuator kanonik yang SAMA — pola MD-011 identik. Tidak
+        // registry actuator kanonik yang SAMA â€” pola MD-011 identik. Tidak
         // ada otoritas yang diberikan di sini; tanpa grant ratifikasi
         // Owner, Lane 2 evaluate tetap DENY (fail closed).
         const {
@@ -1823,17 +2252,23 @@ function createCanonicalActuationFacade() {
             resolveService: resolveCanonicalMataDewaService
         });
         // DB02-D (Repair5): the diagnostic probe actuator NEVER runs the
-        // artifact directly — invoke() claims a governed execution through
+        // artifact directly â€” invoke() claims a governed execution through
         // the canonical DistributedExecutionRouter and dispatches it to the
         // governed external tool executor (real AppContainer sandbox).
         require("../federation/capabilities/diagnosticProbeWiring").wireActuator({
             actuatorRegistry,
             wiring: canonicalWiringRecord.diagnosticProbe
         });
+        require("./capabilities/embodimentWiring").wireEmbodimentActuators({
+            actuatorRegistry,
+            wiring: canonicalWiringRecord.embodiment
+        });
         const dispatcher = composeDispatcher3({
             lane2Facade,
             actuatorRegistry,
-            clock: { nowMs: () => Date.now() }
+            clock: { nowMs: () => Date.now() },
+            auditAcknowledger: acknowledgeCanonicalExecution,
+            replayStoreResolver: resolveCanonicalReplayStore
         });
         // Downstream receives ONLY execute + the two PURE brand-recognition
         // predicates. The predicates read THIS closure's brand WeakSets
@@ -1845,7 +2280,7 @@ function createCanonicalActuationFacade() {
         canonicalActuation = Object.freeze({
             execute: dispatcher.execute,
 
-            // PURE brand-recognition predicates — BRAND-FIRST: closure-only
+            // PURE brand-recognition predicates â€” BRAND-FIRST: closure-only
             // WeakSet membership decides. Downstream can ASK "is this
             // canonical?"; downstream cannot CAUSE "make this canonical" (the
             // brand WeakSets are closure-private; no export exposes them or
@@ -1866,7 +2301,7 @@ function createCanonicalActuationFacade() {
 }
 
 // ---------------------------------------------------------------------------
-// LANE 4 — CANONICAL VERIFICATION + COMPENSATION COMPOSITION (TARGETED
+// LANE 4 â€” CANONICAL VERIFICATION + COMPENSATION COMPOSITION (TARGETED
 // REPAIR 4: the production implementation now lives in the TRUSTED INTERNAL
 // module src/action/internal/verificationBootstrap.js and is extracted
 // VERBATIM. This bootstrap simply wires the production composition with NO
@@ -1888,7 +2323,7 @@ let canonicalVerification = null;
 
 /**
  * Create the canonical Lane 4 verification/compensation facade
- * (trusted-bootstrap-private). Takes NO options — the verifier registry,
+ * (trusted-bootstrap-private). Takes NO options â€” the verifier registry,
  * observation functions, postcondition evaluator, and the Lane 3 facade it
  * routes compensation through are all owned by the trusted composition.
  * Caller-selected verifiers/compensators are structurally impossible to
@@ -1906,7 +2341,7 @@ function createCanonicalVerificationFacade() {
     }
     if (canonicalVerification === null) {
         // DB02-D (Repair5): ONE real, composition-time-owned production
-        // verifier for the diagnostic probe capability — NOT a caller/test
+        // verifier for the diagnostic probe capability â€” NOT a caller/test
         // verifier (trustedVerifiers stays otherwise empty). Retrieved from
         // the SAME closure-private wiring record used by Lane 2/Lane 3
         // above (mataDewaWiringByFacade), never re-derived or guessed.
@@ -1916,13 +2351,15 @@ function createCanonicalVerificationFacade() {
             throw new Error("DIAGNOSTIC_PROBE_WIRING_FAILED: capability wiring record missing at verification composition time");
         }
         const diagnosticProbeWiring = require("../federation/capabilities/diagnosticProbeWiring");
+        const embodimentWiring = require("./capabilities/embodimentWiring");
         canonicalVerification = createCanonicalVerificationComposition({
             deps: {
                 createLane3Facade: createCanonicalActuationFacade,
                 createLane2Facade: createCanonicalActionFacade
             },
             trustedVerifiers: [
-                diagnosticProbeWiring.wireVerifier({ wiring: wiringRecord.diagnosticProbe })
+                diagnosticProbeWiring.wireVerifier({ wiring: wiringRecord.diagnosticProbe }),
+                ...embodimentWiring.wireEmbodimentVerifiers({ wiring: wiringRecord.embodiment })
             ]
         });
     }
@@ -1945,7 +2382,7 @@ const TIMEOUT_SENTINEL4 = Symbol("damar.action.verification.timeout");
 
 // The ONE canonical verification facade, created exactly once, lazily.
 function isCanonicalExecutionResult4(value) {
-    // Reuse the Lane 3 brand check through the canonical actuation facade —
+    // Reuse the Lane 3 brand check through the canonical actuation facade â€”
     // the ONLY trusted path to brand membership.
     return createCanonicalActuationFacade().isCanonicalExecutionResult(value);
 }
@@ -1953,12 +2390,12 @@ function isCanonicalExecutionResult4(value) {
 /**
  * DB02-D (Repair5): read-only view over the canonical capability registry's
  * AVAILABLE capability ids. Mirrors resolveLane2AuthorityStore's read-only
- * pattern above — exposes ids only (derived from registry.list()'s already
+ * pattern above â€” exposes ids only (derived from registry.list()'s already
  * detached/frozen snapshots), never the registry object, never a mutation
  * path. Ensures canonical composition has run first (deterministic; no
  * caller-suppliable input). The ONLY intended caller is the canonical Wave6
  * node composition (src/integration/wave6Production.js), so a real node
- * advertises the SAME capabilities Lane2 can actually authorize — never a
+ * advertises the SAME capabilities Lane2 can actually authorize â€” never a
  * caller-chosen list.
  */
 function getCanonicalAvailableCapabilityIds() {
@@ -1969,6 +2406,16 @@ function getCanonicalAvailableCapabilityIds() {
             .filter((d) => d.availability === "AVAILABLE")
             .map((d) => d.id)
     );
+}
+
+/**
+ * Internal production composition seam for the canonical descriptive V1
+ * registry. This is not on the public action facade and remains
+ * non-enumerable; it is used only by the trusted same-process composition.
+ */
+function getCanonicalCapabilityRegistry() {
+    createCanonicalActionFacade();
+    return canonicalCapabilityRegistry;
 }
 
 module.exports = {
@@ -1983,6 +2430,13 @@ module.exports = {
 // reachable by public DI, read-only (returns a detached frozen id list).
 Object.defineProperty(module.exports, "_getCanonicalAvailableCapabilityIds", {
     value: getCanonicalAvailableCapabilityIds,
+    enumerable: false,
+    writable: false,
+    configurable: false
+});
+
+Object.defineProperty(module.exports, "_getCanonicalCapabilityRegistry", {
+    value: getCanonicalCapabilityRegistry,
     enumerable: false,
     writable: false,
     configurable: false

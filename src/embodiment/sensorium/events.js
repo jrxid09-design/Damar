@@ -13,7 +13,7 @@
  */
 
 const crypto = require("node:crypto");
-const { deepFreeze, structuredCopy, clamp01, fail } = require("../core/util");
+const { deepFreeze, structuredCopy, clamp01, fail, isProxyValue } = require("../core/util");
 const { validateDeviceId } = require("../core/identity");
 
 const SCHEMA_VERSION = 1;
@@ -88,7 +88,22 @@ function buildEnvelope({
     core = false
 }) {
 
-    commonValidation({ type, source, provenance, subject, payload });
+    // SATU PEMBACAAN, SATU KEBENARAN: payload disalin secara sadar-deskriptor
+    // LEBIH DULU, lalu validasi dan amplop sama-sama memakai salinan itu.
+    //
+    // `structuredCopy` tidak dapat dipakai di sini: ia memanggil
+    // `JSON.stringify(payload)`, yang MENJALANKAN `payload.toJSON()` milik
+    // pemanggil — eksekusi kode mereka sebelum validasi apa pun. Sanitizer ini
+    // tidak pernah melakukan `[[Get]]` dan menolak accessor/Proxy.
+    let cleanPayload;
+    try {
+        cleanPayload = sanitizeDeep(payload, 0, { n: MAX_SANITIZE_NODES });
+    } catch (err) {
+        throw fail((err && err.code) || "EMB_INVALID_PAYLOAD",
+            "payload event tidak dapat disanitasi dengan aman");
+    }
+
+    commonValidation({ type, source, provenance, subject, payload: cleanPayload });
 
     if (!core && EVENT_TYPES[type].producerClass === "core") {
         // Pintu publik tidak pernah bisa menciptakan event inti.
@@ -109,16 +124,62 @@ function buildEnvelope({
         provenance,
         subject,
         confidence: clamp01(confidence),
-        payload: deepFreeze(structuredCopy(payload))
+        payload: deepFreeze(cleanPayload)
     };
 
     return Object.freeze(
         core ? { ...envelope, [CORE_TOKEN]: CORE_TOKEN } : envelope);
 }
 
+/**
+ * Baca satu field opsi konstruksi lewat DESKRIPTOR. `makeEvent()` menerima
+ * objek dari adapter/pemanggil asing, jadi destructuring biasa (`[[Get]]`)
+ * akan MENJALANKAN getter atau trap Proxy mereka.
+ */
+function readOptionField(options, key) {
+    if (options === null || (typeof options !== "object" && typeof options !== "function")) {
+        return undefined;
+    }
+    if (isProxy(options)) {
+        throw fail("EMB_INVALID_SOURCE", "opsi event tidak boleh berupa Proxy");
+    }
+    let desc;
+    try {
+        desc = Object.getOwnPropertyDescriptor(options, key);
+    } catch {
+        throw fail("EMB_INVALID_SOURCE",
+            `opsi event tidak dapat dibaca dengan aman: '${key}'`);
+    }
+    if (!desc) return undefined;
+    if (desc.get || desc.set) {
+        throw fail("EMB_INVALID_SOURCE",
+            `opsi event tidak boleh membawa accessor: '${key}'`);
+    }
+    return desc.value;
+}
+
 /** Amplop event adapter/publik. Melempar (gagal-tutup) pada input kotor. */
 function makeEvent(options) {
-    return buildEnvelope(options);
+    // BATAS KEPERCAYAAN KONSTRUKSI: `options` datang dari pemanggil asing.
+    // Setiap field dibaca via deskriptor (tidak ada `[[Get]]`), dan payload
+    // disalin lewat sanitizer sadar-deskriptor — `structuredCopy` dihindari
+    // karena `JSON.stringify` memanggil `toJSON` milik pemanggil, yang akan
+    // mengeksekusi kode mereka sebelum validasi apa pun berjalan.
+    const type = readOptionField(options, "type");
+    const source = readOptionField(options, "source");
+    const provenance = readOptionField(options, "provenance");
+    const subject = readOptionField(options, "subject");
+    const confidence = readOptionField(options, "confidence");
+    const clock = readOptionField(options, "clock");
+    const rawPayload = readOptionField(options, "payload");
+
+    return buildEnvelope({
+        type: type === undefined ? {} : type,
+        source, provenance, subject,
+        payload: rawPayload,
+        confidence: confidence === undefined ? 1 : confidence,
+        clock, core: false
+    });
 }
 
 /**
@@ -133,48 +194,233 @@ function makeCoreEvent({ type, subject, payload, clock }) {
     });
 }
 
+const ENVELOPE_FIELDS = Object.freeze([
+    "eventId", "schemaVersion", "type", "timestamp", "timestampMs",
+    "monotonic", "source", "provenance", "subject", "confidence", "payload"
+]);
+
+/**
+ * Batas biaya sanitasi input hostil (kedalaman/lebar/jumlah simpul).
+ *
+ * Nilai-nilai ini adalah PLAFON anti-DoS murni, sengaja jauh di atas
+ * apa pun yang bisa lolos batas sampel 2.048 byte yang sudah dibekukan
+ * di BodySchema — jadi tidak mungkin menolak muatan yang sah menurut
+ * kontrak. Batas kedalaman sampel yang sebenarnya ditegakkan oleh batas
+ * byte itu sendiri, bukan oleh angka di sini.
+ *
+ * Audit 636ee8d menemukan sampel SAH 64-tingkat/394-byte ikut tertolak oleh
+ * batas kedalaman sebelumnya (64). Karena batas byte-lah yang mengikat,
+ * plafon ini dinaikkan jauh melampaui kedalaman yang mungkin dibentuk oleh
+ * 2.048 byte JSON, sehingga tidak ada muatan kontrak-sah yang bisa tertolak.
+ */
+const MAX_SANITIZE_DEPTH = 1024;
+const MAX_SANITIZE_KEYS = 4096;
+const MAX_SANITIZE_NODES = 65536;
+
+/** `__proto__` tidak pernah data sah dan selalu berbahaya via assignment. */
+const FORBIDDEN_KEYS = Object.freeze(new Set(["__proto__"]));
+
+/**
+ * Pemeriksaan Proxy lewat internal slot — TIDAK memicu trap apa pun dan
+ * tetap benar untuk Proxy yang sudah dicabut. Kegagalan probe diperlakukan
+ * sebagai "proxy" (gagal-tutup).
+ */
+function isProxy(value) {
+    return isProxyValue(value);
+}
+
+/**
+ * Salinan-dalam SADAR-DESKRIPTOR untuk batas kepercayaan ingest.
+ *
+ * Event dari jurnal/antrean/pemanggil asing tidak pernah melewati
+ * `makeEvent()`, sehingga field bersarang bisa berupa accessor hidup atau
+ * `toJSON` yang dapat dieksekusi. Fungsi ini MEMBACA VIA DESKRIPTOR saja:
+ * `[[Get]]` tidak pernah dipanggil, jadi getter tidak pernah berjalan dan
+ * `toJSON` tidak pernah dipakai (kontras dengan `structuredCopy`).
+ *
+ * PROXY DITOLAK SEBELUM TRAP PERTAMA: `util.types.isProxy()` adalah
+ * pemeriksaan internal-slot yang tidak memicu trap apa pun — termasuk pada
+ * Proxy yang sudah dicabut. Tanpa ini, `ownKeys`/`getOwnPropertyDescriptor`
+ * justru MENJALANKAN kode pemanggil, yang persis berlawanan dengan tujuan
+ * fungsi ini. Pola yang sama dipakai modul ingress/otorisasi lain di repo.
+ *
+ * Properti yang diwarisi dari prototipe TIDAK disalin — field otoritas
+ * selundupan lewat rantai prototipe hilang dengan sendirinya.
+ * Accessor, simbol asing, fungsi/simbol/bigint, serta array ber-properti
+ * tambahan ditolak alih-alih disalin.
+ */
+function sanitizeDeep(value, depth, budget, inPayload = false) {
+    if (budget.n <= 0) throw fail("EMB_EVENT_TOO_COMPLEX", "amplop event terlalu kompleks");
+    budget.n -= 1;
+
+    if (value === null) return null;
+    const kind = typeof value;
+    if (kind === "string" || kind === "number" || kind === "boolean") return value;
+    if (kind === "undefined") return undefined;
+    if (kind !== "object") {
+        // fungsi/simbol/bigint: material yang tidak boleh menyeberang batas
+        throw fail("EMB_INVALID_EVENT_VALUE",
+            "nilai amplop event tidak dapat disanitasi");
+    }
+    if (isProxy(value)) {
+        throw fail("EMB_INVALID_EVENT_VALUE",
+            "amplop event tidak boleh berupa Proxy");
+    }
+    if (depth >= MAX_SANITIZE_DEPTH) {
+        throw fail("EMB_EVENT_TOO_DEEP", "kedalaman amplop event melebihi batas");
+    }
+
+    let symbols, names;
+    try {
+        symbols = Object.getOwnPropertySymbols(value);
+        names = Object.getOwnPropertyNames(value);
+    } catch {
+        throw fail("EMB_INVALID_EVENT_VALUE",
+            "amplop event tidak dapat diperiksa dengan aman");
+    }
+    for (const sym of symbols) {
+        if (sym !== CORE_TOKEN) {
+            throw fail("EMB_INVALID_EVENT_VALUE", "amplop event tidak boleh membawa simbol");
+        }
+    }
+    if (names.length > MAX_SANITIZE_KEYS) {
+        throw fail("EMB_EVENT_TOO_WIDE", "lebar amplop event melebihi batas");
+    }
+
+    const isArray = Array.isArray(value);
+    let out;
+    if (isArray) {
+        const lengthDesc = Object.getOwnPropertyDescriptor(value, "length");
+        const n = lengthDesc && "value" in lengthDesc ? lengthDesc.value : null;
+        if (!Number.isSafeInteger(n) || n < 0) {
+            throw fail("EMB_INVALID_EVENT_VALUE", "panjang array tidak sah");
+        }
+        // Indeks saja — properti tambahan pada array adalah material tersembunyi.
+        if (names.length !== n + 1) {
+            throw fail("EMB_INVALID_EVENT_VALUE",
+                "array amplop event tidak boleh membawa properti tambahan");
+        }
+        out = new Array(n);
+    } else {
+        out = {};
+    }
+
+    for (const key of names) {
+        if (key === "length") continue;
+        if (FORBIDDEN_KEYS.has(key)) {
+            throw fail("EMB_INVALID_EVENT_VALUE",
+                `field '${key}' tidak sah pada amplop event`);
+        }
+        let desc;
+        try {
+            desc = Object.getOwnPropertyDescriptor(value, key);
+        } catch {
+            throw fail("EMB_INVALID_EVENT_VALUE",
+                `field '${String(key)}' tidak dapat diperiksa dengan aman`);
+        }
+        if (!desc) continue;
+        if (desc.get || desc.set) {
+            // Kode alasan dipertahankan per-asal: accessor di dalam
+            // `payload` tetap melaporkan kode validasi payload yang sudah
+            // ada, sisanya memakai kode amplop.
+            const code = inPayload
+                ? "EMB_INVALID_OBSERVATION_PAYLOAD"
+                : "EMB_INVALID_EVENT_ACCESSOR";
+            throw fail(code,
+                `field '${String(key)}' tidak boleh berupa accessor`);
+        }
+        if (desc.enumerable === false) {
+            throw fail("EMB_INVALID_EVENT_VALUE",
+                `field '${String(key)}' wajib enumerable`);
+        }
+        const childInPayload = inPayload || (depth === 0 && key === "payload");
+        // defineProperty, bukan assignment: assignment ke nama warisan
+        // seperti `__proto__` menulis ke rantai prototipe, bukan ke objek.
+        Object.defineProperty(out, key, {
+            value: sanitizeDeep(desc.value, depth + 1, budget, childInPayload),
+            writable: true, enumerable: true, configurable: true
+        });
+    }
+
+    for (const sym of symbols) {
+        const desc = Object.getOwnPropertyDescriptor(value, sym);
+        if (desc && !desc.get && !desc.set && desc.value === CORE_TOKEN) {
+            Object.defineProperty(out, sym, {
+                value: CORE_TOKEN, writable: true, enumerable: true, configurable: true
+            });
+        }
+    }
+
+    return out;
+}
+
+/**
+ * Batas kepercayaan ingest: menyalin amplop secara aman lalu memvalidasi
+ * bentuknya. Mengembalikan salinan beku yang dapat dipakai seluruh jalur
+ * plan/commit tanpa pernah menyentuh objek pemanggil lagi.
+ */
+function sanitizeEnvelope(event) {
+    if (!event || typeof event !== "object") {
+        return { ok: false, reason: "event-bukan-objek" };
+    }
+
+    let clean;
+    try {
+        clean = sanitizeDeep(event, 0, { n: MAX_SANITIZE_NODES });
+    } catch (err) {
+        return { ok: false, reason: (err && err.code) || "event-tidak-dapat-disitir" };
+    }
+
+    const missing = ENVELOPE_FIELDS.find(
+        (field) => !Object.prototype.hasOwnProperty.call(clean, field));
+    if (missing) return { ok: false, reason: `field-hilang:${missing}` };
+
+    // Amplop bersifat TERTUTUP: field tingkat-atas di luar daftar kanonik
+    // adalah material asing, bukan data event yang sah.
+    const extra = Object.keys(clean).find((key) => !ENVELOPE_FIELDS.includes(key));
+    if (extra) return { ok: false, reason: `field-asing:${extra}` };
+
+    if (!isKnownEventType(clean.type)) {
+        return { ok: false, reason: `tipe-tak-dikenal:${String(clean.type)}` };
+    }
+    if (!PROVENANCES[clean.provenance]) {
+        return { ok: false, reason: `provenance-tak-dikenal:${String(clean.provenance)}` };
+    }
+    if (typeof clean.source !== "string" || !/^[^\s]{1,120}$/.test(clean.source)) {
+        return { ok: false, reason: "sumber-tidak-sah" };
+    }
+    if (!validateDeviceId(clean.subject)) {
+        return { ok: false, reason: "subjek-tidak-sah" };
+    }
+    if (!Number.isInteger(clean.monotonic) || !Number.isFinite(clean.timestampMs)) {
+        return { ok: false, reason: "urutan/waktu-tidak-sah" };
+    }
+    if (!Number.isFinite(Number(clean.confidence))) {
+        return { ok: false, reason: "confidence-tidak-sah" };
+    }
+    if (!clean.payload || typeof clean.payload !== "object") {
+        return { ok: false, reason: "payload-tidak-sah" };
+    }
+
+    return { ok: true, event: deepFreeze(clean) };
+}
+
 /**
  * Pemeriksaan bentuk non-meletup untuk sisi ingest. Event dari dunia
  * luar (jurnal, antrean, pemanggil asing) bisa korup/dipalsukan;
  * ingest harus bisa MENOLAK tanpa menghentikan proses.
+ *
+ * Memakai jalur sanitasi yang sama dengan `ingest()` supaya pemeriksaan
+ * bentuk maupun penerapan TIDAK PERNAH mengeksekusi kode pemanggil.
  */
 function validateEventShape(event) {
-    if (!event || typeof event !== "object") {
-        return { ok: false, reason: "event-bukan-objek" };
-    }
-    for (const field of [
-        "eventId", "schemaVersion", "type", "timestamp", "timestampMs",
-        "monotonic", "source", "provenance", "subject", "confidence", "payload"
-    ]) {
-        if (!(field in event)) return { ok: false, reason: `field-hilang:${field}` };
-    }
-    if (!isKnownEventType(event.type)) {
-        return { ok: false, reason: `tipe-tak-dikenal:${event.type}` };
-    }
-    if (!PROVENANCES[event.provenance]) {
-        return { ok: false, reason: `provenance-tak-dikenal:${String(event.provenance)}` };
-    }
-    if (typeof event.source !== "string"
-        || !/^[^\s]{1,120}$/.test(event.source)) {
-        return { ok: false, reason: "sumber-tidak-sah" };
-    }
-    if (!validateDeviceId(event.subject)) {
-        return { ok: false, reason: "subjek-tidak-sah" };
-    }
-    if (!Number.isInteger(event.monotonic) || !Number.isFinite(event.timestampMs)) {
-        return { ok: false, reason: "urutan/waktu-tidak-sah" };
-    }
-    if (!Number.isFinite(Number(event.confidence))) {
-        return { ok: false, reason: "confidence-tidak-sah" };
-    }
-    if (!event.payload || typeof event.payload !== "object") {
-        return { ok: false, reason: "payload-tidak-sah" };
-    }
-    return { ok: true };
+    const result = sanitizeEnvelope(event);
+    return result.ok ? { ok: true } : { ok: false, reason: result.reason };
 }
 
 module.exports = {
     SCHEMA_VERSION, CORE_SOURCE, PROVENANCES, RESERVED_PROVENANCES,
     EVENT_TYPES, CORE_TOKEN,
-    isKnownEventType, makeEvent, makeCoreEvent, validateEventShape
+    isKnownEventType, makeEvent, makeCoreEvent, validateEventShape,
+    sanitizeEnvelope
 };

@@ -380,7 +380,6 @@ const RuntimeExecutor = require("../../src/ai/executors/RuntimeExecutor");
 const { AIToolRegistry } = require("../../src/ai/tools");
 const AITool = require("../../src/ai/tools/AITool");
 const loopGuard = require("../../src/core/safety/loopGuard");
-
 const jeda = ms => new Promise(r => setTimeout(r, ms));
 
 test("beberapa BACAAN dalam satu putaran berjalan bersamaan", async () => {
@@ -422,17 +421,20 @@ test("beberapa BACAAN dalam satu putaran berjalan bersamaan", async () => {
                 }
                 : { content: "selesai", toolCalls: [] };
         }
-    });
+    }, {});
 
     exec.setToolRegistry(registry);
 
+    const grant1 = exec.mintGrant({
+        authorizedTools: ["memory_recall", "code_hover", "home_state"],
+        role: "superadmin",
+        provenance: "test"
+    });
+
     const mulai = Date.now();
-    // Kontrak otorisasi kini hidup: identitas eksplisit pemilik.
-    // Tanpa identitas, probe non-allowlist akan DENY fail-closed dan
-    // puncak paralel tidak pernah tercapai.
     await exec.execute({
         messages: [{ role: "user", content: "tiga bacaan" }],
-        exec: { role: "superadmin", channel: "console", sessionId: "tes-paritas-baca" }
+        exec: grant1
     });
     const durasi = Date.now() - mulai;
 
@@ -441,7 +443,7 @@ test("beberapa BACAAN dalam satu putaran berjalan bersamaan", async () => {
 
 });
 
-test("tindakan berefek samping TETAP berurutan", async () => {
+test("tindakan berefek samping tidak bypass canonical authority", async () => {
 
     // Dua tulisan atau dua pesan yang berangkat bersamaan sulit
     // ditelusuri dan bisa saling mendahului.
@@ -481,16 +483,22 @@ test("tindakan berefek samping TETAP berurutan", async () => {
                 }
                 : { content: "selesai", toolCalls: [] };
         }
-    });
+    }, {});
 
     exec.setToolRegistry(registry);
 
-    await exec.execute({
-        messages: [{ role: "user", content: "dua tindakan" }],
-        exec: { role: "superadmin", channel: "console", sessionId: "tes-paritas-tulis" }
+    const grant2 = exec.mintGrant({
+        authorizedTools: ["filesystem__writeFile", "damarSkills__device_on"],
+        role: "superadmin",
+        provenance: "test"
     });
 
-    assert.equal(puncak, 1, "tindakan berefek samping tidak boleh tumpang tindih");
+    await exec.execute({
+        messages: [{ role: "user", content: "dua tindakan" }],
+        exec: grant2
+    });
+
+    assert.equal(puncak, 0, "legacy consequential handlers must not run without canonical authority");
 
 });
 

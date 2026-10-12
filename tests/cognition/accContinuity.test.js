@@ -971,3 +971,38 @@ test("C0.1/rebuild: watermark — boot bersih tidak merekonsiliasi, boot kotor m
     assert.ok(repaired, "projeksi kotor diperbaiki saat boot");
     assert.equal(repaired.status, "ACTIVE");
 });
+
+test("C0.1-repair: a direct append() with no envelopeFields defaults to the current v2 schema (Codex P2 round 7)", async () => {
+    const store = createMemoryAccStore();
+    const core = makeCore(store, acc.manualClock(1_000_000));
+    // Bypasses feed()/makeEnvelope on purpose -- this is exactly the
+    // "direct journal append" path Codex flagged: no envelopeFields at all.
+    await core.append("TOOL_SUCCEEDED", "test", "SYSTEM_EVENT", { ok: true });
+    const row = await store.lastJournalRow();
+    assert.equal(row.schemaVersion, 2, "append() langsung tidak boleh menulis skema lama (1) secara diam-diam");
+    assert.equal(row.epistemicClass, "UNKNOWN", "default epistemicClass wajib UNKNOWN, bukan null");
+});
+
+test("C0.1-repair2: journal integrity check detects tampering of the v2 epistemicClass field (Codex P1 round 8)", async () => {
+    const store = createMemoryAccStore();
+    const core = makeCore(store, acc.manualClock(1_000_000));
+    await core.append("TOOL_SUCCEEDED", "test", "SYSTEM_EVENT", { ok: true },
+        { schemaVersion: 2, epistemicClass: "OBSERVED" });
+
+    // Simulate a corrupted read: the persisted hash never changed, but the
+    // stored epistemicClass value did.
+    const realAllEvents = store.allEvents.bind(store);
+    const tamperedStore = {
+        ...store,
+        allEvents: async () => (await realAllEvents()).map(r => ({ ...r, epistemicClass: "PREDICTED" }))
+    };
+    const tamperedCore = makeCore(tamperedStore, acc.manualClock(1_000_000));
+    const verdict = await tamperedCore.verifyJournalIntegrity();
+    assert.equal(verdict.ok, false, "mengubah epistemicClass baris v2 harus terdeteksi oleh rantai hash");
+});
+
+test("C0.1-repair3: DAMAR_ACC=governed coerces to off -- the legacy ACC core has no semantics for it (independent audit AUD-P2-2)", async () => {
+    const config = acc.createACCConfig({ DAMAR_ACC: "governed" });
+    assert.equal(config.mode, "off",
+        "'governed' bukan mode ACC core lama (itu mode siklus W7-L7 yang terpisah) -- harus jatuh ke default off, bukan lolos coercion");
+});

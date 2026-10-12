@@ -1,5 +1,9 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("node:crypto");
+
+/** Penanda internal: buku provenance ada tetapi tidak bisa dibaca (fail-closed). */
+const LEDGER_UNREADABLE = "__forge-ledger-unreadable__";
 
 const pluginRegistry = require("./pluginRegistry");
 const pluginValidator = require("./pluginValidator");
@@ -85,12 +89,220 @@ class PluginLoader {
      *
      * @returns {{ok:boolean, id?:string, tools?:number, error?:string}}
      */
+    /**
+     * Root karantina artefak forge (draft). Artefak di sini TIDAK PERNAH
+     * dimuat, dan alasan penolakannya adalah LOKASI, bukan metadata.
+     */
+    get forgeQuarantineRoot() {
+        return path.join(USER_ROOT, ".drafts");
+    }
+
+    /** Buku provenance keluaran forge (ditulis forge, di luar direktori artefak). */
+    get forgeProvenanceLedgerPath() {
+        return path.join(USER_ROOT, ".forge-provenance.json");
+    }
+
+    /** realpath bila bisa; kalau tidak (belum ada / bukan symlink), path apa adanya. */
+    realPathOrSelf(target) {
+        try {
+            return fs.realpathSync.native
+                ? fs.realpathSync.native(target)
+                : fs.realpathSync(target);
+        }
+        catch {
+            return target;
+        }
+    }
+
+    /**
+     * Apakah path ini berada di dalam karantina forge?
+     *
+     * Dua lapis: path leksikal DAN realpath-nya. Sebuah symlink/junction di
+     * root plugin (mis. `userPlugins/alias -> .drafts/x`) lolos pemeriksaan
+     * leksikal tetapi realpath-nya tetap menunjuk ke karantina, jadi jalur
+     * alias ini ikut tertutup.
+     */
+    isQuarantinedForgeArtifact(pluginPath) {
+
+        const resolved = path.resolve(pluginPath);
+        const targets = [resolved, this.realPathOrSelf(resolved)];
+        const roots = [this.forgeQuarantineRoot, this.realPathOrSelf(this.forgeQuarantineRoot)];
+
+        for (const target of targets) {
+            for (const root of roots) {
+                const rel = path.relative(root, target);
+                if (rel === "") return true;
+                if (!rel.startsWith(".." + path.sep) && rel !== ".." && !path.isAbsolute(rel)) return true;
+            }
+        }
+
+        return false;
+
+    }
+
+    /**
+     * Himpunan hash isi yang diketahui dihasilkan forge.
+     *
+     * DUA sumber, dan yang kedua tidak bisa dihapus dari dalam artefak:
+     *   1. buku provenance yang dimiliki forge (`.forge-provenance.json`);
+     *   2. hash LANGSUNG dari artefak yang masih ada di karantina.
+     *
+     * Sumber kedua menutup "salin lalu hapus buku": salinan dihapus bukunya,
+     * tetapi artefak aslinya masih ada di karantina, jadi hash-nya tetap
+     * dihitung dan salinannya tetap ditolak.
+     */
+    forgeGeneratedHashes() {
+
+        const hashes = new Set();
+
+        const ledgerPath = this.forgeProvenanceLedgerPath;
+        if (fs.existsSync(ledgerPath)) {
+            try {
+                const parsed = JSON.parse(fs.readFileSync(ledgerPath, "utf8"));
+                const obj = parsed?.hashes;
+                if (!obj || typeof obj !== "object") {
+                    hashes.add(LEDGER_UNREADABLE);
+                }
+                else {
+                    for (const key of Object.keys(obj)) hashes.add(key);
+                }
+            }
+            catch {
+                hashes.add(LEDGER_UNREADABLE);
+            }
+        }
+
+        try {
+            const root = this.forgeQuarantineRoot;
+            if (fs.existsSync(root)) {
+                for (const entry of fs.readdirSync(root)) {
+                    const dir = path.join(root, entry);
+                    let stat = null;
+                    try { stat = fs.statSync(dir); } catch { continue; }
+                    if (!stat?.isDirectory()) continue;
+                    // HANYA tool.js (muatan hasil generate). index.js forge
+                    // adalah pembungkus DETERMINISTIK yang sama untuk semua
+                    // tool; ikut menghash-nya akan menolak plugin tulisan
+                    // tangan yang kebetulan memakai pembungkus serupa, yaitu
+                    // regresi pada sistem ekstensi.
+                    const file = path.join(dir, "tool.js");
+                    try {
+                        if (fs.existsSync(file)) {
+                            hashes.add(crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"));
+                        }
+                    }
+                    catch { /* berkas tak terbaca: lewati */ }
+                }
+            }
+        }
+        catch { /* karantina tak terbaca: sumber buku tetap berlaku */ }
+
+        return hashes;
+
+    }
+
+    /**
+     * Provenance BERBASIS ISI.
+     *
+     * Metadata di dalam artefak bisa dihapus; ISI berkas tidak. Hash setiap
+     * berkas yang forge hasilkan dihitung dari buku provenance DAN dari artefak
+     * yang masih ada di karantina, jadi menyalin artefak ke luar lalu menghapus
+     * penanda — bahkan menghapus bukunya — tetap tertolak selama isinya belum
+     * diubah.
+     *
+     * Fail-closed: buku ada tetapi tidak terbaca = tolak.
+     */
+    isForgeProvenanceContent(pluginPath, manifest) {
+
+        let hashes;
+        try {
+            hashes = this.forgeGeneratedHashes();
+        }
+        catch {
+            return true;
+        }
+
+        if (hashes.size === 0) return false;
+        if (hashes.has(LEDGER_UNREADABLE)) return true;
+
+        // Hanya muatan hasil generate yang dibandingkan. `manifest.entry`
+        // sengaja TIDAK dibandingkan: entri normal adalah pembungkus
+        // deterministik yang sah dipakai plugin tulisan tangan juga.
+        const file = path.join(pluginPath, "tool.js");
+
+        try {
+            if (!fs.existsSync(file)) return false;
+            const digest = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+            return hashes.has(digest);
+        }
+        catch {
+            return false;
+        }
+
+    }
+
+    /**
+     * Provenance: artefak hasil generate forge TIDAK PERNAH dimuat.
+     *
+     * W8 legacy second-path remediation: `require()` atas modul plugin
+     * menjalankan BODY modulnya, jadi kode hasil generate forge (yang bukan
+     * kapabilitas kanonik) tidak boleh dimuat dari jalur legacy mana pun.
+     * Penanda diperiksa SEBELUM require/index.js dibaca.
+     */
+    isForgeGenerated(pluginPath) {
+
+        try {
+
+            if (fs.existsSync(path.join(pluginPath, ".forge-generated"))) return true;
+
+            const manifestPath = path.join(pluginPath, "manifest.json");
+
+            if (fs.existsSync(manifestPath)) {
+                const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+                if (manifest?.forgeGenerated === true) return true;
+                if (manifest?.forge?.generated === true) return true;
+            }
+
+        }
+        catch { /* manifest rusak bukan bukti provenance */ }
+
+        return false;
+
+    }
+
+    /** Alasan penolakan yang seragam untuk artefak forge. */
+    refuseForgeArtifact(pluginPath) {
+
+        const name = path.basename(pluginPath);
+
+        try {
+            require("../services/telemetryService").info(
+                `[pluginLoader] menolak memuat artefak forge '${name}' (menunggu jalur kanonik)`
+            );
+        }
+        catch { /* observability opsional */ }
+
+        return { ok: false, forgeGenerated: true, canonicalRequired: true, error: `artefak forge '${name}' tidak dimuat tanpa registrasi kanonik` };
+
+    }
+
     loadOne(pluginPath, source = "user") {
 
         // require/require.resolve butuh path absolut (relatifnya
         // dihitung dari lokasi modul ini, bukan cwd). Diresolve di
         // sini agar pemanggil boleh memberi path relatif.
         pluginPath = path.resolve(pluginPath);
+
+        // Guard PALING AWAL, tiga lapis: LOKASI karantina (leksikal + realpath,
+        // jadi symlink/junction tidak menembus), provenance metadata, lalu
+        // provenance ISI (menutup copy-out yang penandanya dihapus). Semuanya
+        // dijalankan sebelum manifest dibaca dan sebelum index.js/tool.js
+        // di-require.
+        if (this.isQuarantinedForgeArtifact(pluginPath) ||
+            this.isForgeGenerated(pluginPath) ||
+            this.isForgeProvenanceContent(pluginPath, null)) {
+            return this.refuseForgeArtifact(pluginPath);
+        }
 
         let manifest;
 
@@ -107,6 +319,22 @@ class PluginLoader {
         // menumpuk tool ganda di registry.
         if (this.loaded.has(manifest.id)) {
             this.unloadPlugin(manifest.id);
+        }
+
+        // Entri manifest WAJIB berada di dalam direktori plugin. Kalau tidak,
+        // plugin ditolak UTUH — bukan hanya `loadPlugin`-nya — supaya `tool.js`
+        // tidak ikut di-require lewat collectTools/loadTools.
+        if (this.resolveEntryWithin(pluginPath, manifest?.entry) === null) {
+
+            try {
+                require("../services/telemetryService").info(
+                    `[pluginLoader] menolak plugin '${manifest?.id ?? path.basename(pluginPath)}': entri di luar direktori plugin`
+                );
+            }
+            catch { /* observability opsional */ }
+
+            return { ok: false, id: manifest?.id, error: "entri plugin di luar direktori plugin" };
+
         }
 
         try {
@@ -264,10 +492,33 @@ class PluginLoader {
 
     loadPlugin(pluginPath, manifest) {
 
-        const entryPath = path.join(
-            pluginPath,
-            manifest.entry
-        );
+        // Defense-in-depth: even if a caller reaches here directly, neither a
+        // quarantined path nor a forge artifact is ever required (this is the
+        // last point before require).
+        if (this.isQuarantinedForgeArtifact(pluginPath) ||
+            this.isForgeGenerated(pluginPath) ||
+            this.isForgeProvenanceContent(pluginPath, manifest)) {
+            return {};
+        }
+
+        // Entri WAJIB berada di dalam direktori plugin. `entry` datang dari
+        // manifest yang bisa ditulis siapa saja (`../outside.js`), dan
+        // `path.join` akan dengan senang hati keluar dari direktori —
+        // menjalankan berkas di luar artefak.
+        const entryPath = this.resolveEntryWithin(pluginPath, manifest?.entry);
+
+        if (entryPath === null) {
+
+            try {
+                require("../services/telemetryService").info(
+                    `[pluginLoader] menolak entri di luar direktori plugin: ${manifest?.id ?? path.basename(pluginPath)}`
+                );
+            }
+            catch { /* observability opsional */ }
+
+            return {};
+
+        }
 
         if (!fs.existsSync(entryPath)) {
             return {};
@@ -278,6 +529,30 @@ class PluginLoader {
         ];
 
         return require(entryPath);
+
+    }
+
+    /**
+     * Resolusi `entry` yang TIDAK boleh keluar dari direktori plugin.
+     * @returns {string|null} path absolut di dalam pluginPath, atau null.
+     */
+    resolveEntryWithin(pluginPath, entry) {
+
+        if (typeof entry !== "string" || entry.trim() === "") return null;
+
+        const base = path.resolve(pluginPath);
+
+        // Realpath bila pluginPath ada, supaya symlink tidak melewati cek ini.
+        const baseReal = this.realPathOrSelf(base);
+        const candidate = path.resolve(base, entry);
+
+        for (const probe of [candidate, this.realPathOrSelf(candidate)]) {
+            const rel = path.relative(baseReal, probe);
+            if (rel === "" || path.isAbsolute(rel)) return null;
+            if (rel === ".." || rel.startsWith(".." + path.sep)) return null;
+        }
+
+        return candidate;
 
     }
 
@@ -328,6 +603,19 @@ class PluginLoader {
         );
 
         if (!fs.existsSync(toolPath)) {
+
+            return [];
+
+        }
+
+        // W8 legacy second-path remediation: kode hasil generate forge BUKAN
+        // kapabilitas kanonik, dan `require()` di bawah menjalankan body
+        // modulnya. Artefak di karantina TIDAK dimuat karena LOKASINYA, dan
+        // artefak berpenanda provenance tidak dimuat karena asal-usulnya —
+        // jadi menghapus penanda tidak membuka jalur ini.
+        if (this.isQuarantinedForgeArtifact(pluginPath) ||
+            this.isForgeGenerated(pluginPath) ||
+            this.isForgeProvenanceContent(pluginPath, { entry: "tool.js" })) {
 
             return [];
 

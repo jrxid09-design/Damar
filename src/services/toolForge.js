@@ -1,9 +1,25 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
+const crypto = require("node:crypto");
 
 const pluginLoader = require("../plugins/pluginLoader");
 const telemetry = require("./telemetryService");
+
+/**
+ * Penanda asal-usul artefak generate. pluginLoader menolak memuat direktori
+ * plugin yang memuat penanda ini (lihat pluginLoader.loadTools): kode yang
+ * dihasilkan forge bukan kapabilitas kanonik, dan `require()` atas modulnya
+ * menjalankan body modul = eksekusi kode arbitrer di luar kepemilikan kanonik.
+ */
+const FORGE_GENERATED_MARKER = ".forge-generated";
+
+/**
+ * Penanda STATUS persetujuan (bukan izin eksekusi). Sejak W8, menyetujui draft
+ * tidak memindahkannya ke root plugin yang bisa dimuat: artefak forge tetap di
+ * karantina, dan aktivasi menunggu registrasi kanonik.
+ */
+const APPROVED_MARKER = ".forge-approved";
 
 /**
  * ToolForge — tempat Damar (dan pengguna) membuat tool baru.
@@ -146,6 +162,9 @@ class ToolForge {
             entry: "index.js",
             category: spec.category ?? "user",
             description: spec.description ?? "",
+            // Provenance mesin: artefak ini dihasilkan ToolForge dan karena itu
+            // TIDAK boleh dimuat langsung oleh pluginLoader.
+            forgeGenerated: true,
             // Provenance untuk tool BARU. Manifest lama yang sudah
             // tercatat "aether-forge" DIBIARKAN apa adanya — itu
             // catatan sejarah siapa pembuatnya, bukan branding aktif.
@@ -226,6 +245,11 @@ module.exports = [ new ${className}() ];
 
         fs.mkdirSync(dir, { recursive: true });
 
+        // Jejak asal-usul: artefak hasil generate TIDAK boleh dimuat langsung
+        // oleh pluginLoader (W8 legacy second-path remediation). Penanda ini
+        // yang membuat load-time tetap fail-closed meski berkasnya ada.
+        fs.writeFileSync(path.join(dir, FORGE_GENERATED_MARKER), "1\n", "utf8");
+
         fs.writeFileSync(
             path.join(dir, "manifest.json"),
             JSON.stringify(this.manifestFor(id, spec), null, 4),
@@ -252,32 +276,35 @@ module.exports = [ new ${className}() ];
 
     }
 
-    /** Uji apakah tool.js bisa di-require tanpa error (syntax/runtime muat). */
+    /**
+     * Uji STRUKTUR tool.js TANPA menjalankannya.
+     *
+     * W8 legacy second-path remediation: versi lama `require()` berkas draf,
+     * yang berarti BODY modul hasil generate ikut berjalan di proses ini —
+     * kode arbitrer di luar kepemilikan kanonik. Kini hanya dilakukan
+     * kompilasi sintaks (`node:vm` Script = compile, bukan run), jadi kode
+     * yang tidak valid ditolak tanpa satu pun baris dieksekusi.
+     *
+     * @returns {null} jumlah tool tidak bisa diketahui tanpa menjalankan kode.
+     */
     verifyLoads(dir) {
 
         const toolPath = path.join(dir, "tool.js");
 
-        // Buang cache agar membaca berkas terbaru.
-        try {
-            delete require.cache[require.resolve(toolPath)];
-        }
-        catch { /* belum pernah di-cache */ }
-
-        const exported = require(toolPath);
-
-        const tools = Array.isArray(exported) ? exported : [];
-
-        if (tools.length === 0) {
-            throw new Error("tool.js tidak mengekspor tool apa pun.");
+        if (!fs.existsSync(toolPath)) {
+            throw new Error("tool.js tidak ditemukan.");
         }
 
-        for (const tool of tools) {
-            if (typeof tool.execute !== "function") {
-                throw new Error("Tool tidak punya method execute().");
-            }
+        const source = fs.readFileSync(toolPath, "utf8");
+
+        if (!source.trim()) {
+            throw new Error("tool.js kosong.");
         }
 
-        return tools.length;
+        // Compile-only: body modul TIDAK dijalankan.
+        new (require("node:vm").Script)(source, { filename: toolPath });
+
+        return null;
 
     }
 
@@ -294,12 +321,16 @@ module.exports = [ new ${className}() ];
 
         const { id } = this.validate(spec);
 
-        // Sumber kode berbeda antara mode formulir vs kode penuh.
+        // Bentuk kode berbeda antara mode formulir vs kode penuh.
         const risks = this.analyzeRisk(
             spec.raw ?? spec.tool?.raw ?? spec.tool?.code
         );
 
-        const goLive = activate || this.autoApprove;
+        // W8 legacy second-path remediation: `activate`/auto-approve TIDAK
+        // lagi memuat & menjalankan kode hasil generate. Artefak forge selalu
+        // tersimpan sebagai DRAFT; aktivasi menunggu registrasi kanonik
+        // (Manager -> ActionIntent -> Authority -> Capability -> actuation).
+        const requestedActivation = activate === true || this.autoApprove;
 
         // Tulis dulu ke lokasi sementara untuk verifikasi muat,
         // supaya draft/plugin rusak tidak pernah tersimpan.
@@ -310,37 +341,38 @@ module.exports = [ new ${className}() ];
             const tmpDir = this.writePlugin(tmp, id, spec);
             const toolCount = this.verifyLoads(tmpDir);
 
-            const targetRoot = goLive ? this.userRoot : this.draftsRoot;
+            const targetRoot = this.draftsRoot;
 
             // Bersihkan versi lama di target bila ada.
             this.removeDir(path.join(targetRoot, id));
 
             const dir = this.writePlugin(targetRoot, id, spec);
 
-            let loaded = null;
-
-            if (goLive) {
-                loaded = pluginLoader.loadOne(dir, "user");
-                telemetry.publish("forge:changed", { id, action: "created" });
-            }
+            // Provenance berbasis ISI dicatat di buku milik forge (di luar
+            // artefak), supaya penanda yang dihapus tidak membuka jalur muat.
+            this.recordProvenance(dir, id);
 
             telemetry.publish("forge:created", {
                 id,
                 origin: spec.origin ?? "manual",
-                draft: !goLive,
+                draft: true,
+                requestedActivation,
                 risks
             });
 
             telemetry.info(
-                `[forge] tool '${id}' ${goLive ? "dibuat & aktif" : "disimpan sebagai draft"}`
+                `[forge] tool '${id}' disimpan sebagai draft (aktivasi menunggu jalur kanonik)`
             );
 
             return {
                 id,
-                status: goLive ? "active" : "draft",
+                status: "draft",
+                activated: false,
+                canonicalRequired: true,
+                requestedActivation,
                 tools: toolCount,
                 risks,
-                loaded: loaded?.ok ?? false,
+                loaded: false,
                 dir
             };
 
@@ -352,7 +384,15 @@ module.exports = [ new ${className}() ];
 
     }
 
-    /** Setujui draft: pindahkan ke userPlugins dan load. */
+    /**
+     * Setujui draft: catat STATUS persetujuan. TIDAK memindahkan artefak ke
+     * root plugin dan TIDAK memuat/menjalankan kode.
+     *
+     * Sebelum W8, approve() me-rename draft ke userRoot lalu memuatnya. Itu
+     * membuat persetujuan sama dengan aktivasi, dan membuat artefak forge
+     * berada di root yang dimuat — sehingga menghapus penanda provenance saja
+     * sudah cukup untuk membuka eksekusi kode hasil generate.
+     */
     approve(id) {
 
         const draftDir = path.join(this.draftsRoot, id);
@@ -361,23 +401,13 @@ module.exports = [ new ${className}() ];
             throw new Error(`Draft '${id}' tidak ditemukan.`);
         }
 
-        const target = path.join(this.userRoot, id);
-
-        this.removeDir(target);
-
-        fs.renameSync(draftDir, target);
-
-        const loaded = pluginLoader.loadOne(target, "user");
-
-        if (!loaded.ok) {
-            throw new Error(`Gagal memuat setelah disetujui: ${loaded.error}`);
-        }
+        fs.writeFileSync(path.join(draftDir, APPROVED_MARKER), new Date().toISOString() + "\n", "utf8");
 
         telemetry.publish("forge:changed", { id, action: "approved" });
 
-        telemetry.info(`[forge] draft '${id}' disetujui & aktif`);
+        telemetry.info(`[forge] draft '${id}' disetujui (status); aktivasi menunggu jalur kanonik`);
 
-        return { id, status: "active", tools: loaded.tools };
+        return { id, status: "approved", activated: false, canonicalRequired: true, tools: null, dir: draftDir };
 
     }
 
@@ -423,6 +453,103 @@ module.exports = [ new ${className}() ];
 
     }
 
+    /**
+     * Buku provenance milik forge: hash isi setiap berkas yang dihasilkan.
+     *
+     * Letaknya DI LUAR direktori artefak, jadi menghapus penanda di dalam
+     * artefak tidak menghapus catatannya. Ini yang menutup jalur "salin artefak
+     * keluar karantina lalu hapus penanda": isinya tidak berubah, jadi hash-nya
+     * masih cocok dan pluginLoader tetap menolak memuatnya.
+     */
+    get ledgerPath() {
+        return path.join(this.userRoot, ".forge-provenance.json");
+    }
+
+    codeHash(file) {
+        try {
+            return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+        }
+        catch {
+            return null;
+        }
+    }
+
+    readProvenanceLedger() {
+        try {
+            const parsed = JSON.parse(fs.readFileSync(this.ledgerPath, "utf8"));
+            if (parsed && typeof parsed === "object" &&
+                parsed.hashes && typeof parsed.hashes === "object") {
+                return parsed;
+            }
+        }
+        catch { /* belum ada / rusak: dibangun ulang di bawah */ }
+        return { version: 1, hashes: {} };
+    }
+
+    recordProvenance(dir, id) {
+        try {
+            // Hanya tool.js (muatan hasil generate). index.js forge adalah
+            // pembungkus deterministik yang sama untuk semua tool — mencatat
+            // hash-nya akan menolak plugin tulisan tangan yang memakai
+            // pembungkus serupa.
+            const hash = this.codeHash(path.join(dir, "tool.js"));
+            if (!hash) return;
+            const ledger = this.readProvenanceLedger();
+            ledger.hashes[hash] = { id, at: new Date().toISOString() };
+            // Tulis atomik supaya buku tidak pernah setengah jadi.
+            const tmp = this.ledgerPath + ".tmp";
+            fs.writeFileSync(tmp, JSON.stringify(ledger, null, 2), "utf8");
+            fs.renameSync(tmp, this.ledgerPath);
+        }
+        catch { /* kegagalan buku tidak boleh membuat jalur eksekusi terbuka */ }
+    }
+
+    /**
+     * Apakah direktori ini artefak hasil generate forge? Artefak seperti itu
+     * TIDAK pernah dimuat (lihat pluginLoader), jadi statusnya tidak boleh
+     * dilaporkan sebagai "active".
+     */
+    isForgeGeneratedDir(dir) {
+        try {
+            if (fs.existsSync(path.join(dir, FORGE_GENERATED_MARKER))) return true;
+            const manifestPath = path.join(dir, "manifest.json");
+            if (fs.existsSync(manifestPath)) {
+                const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+                if (manifest?.forgeGenerated === true) return true;
+                if (manifest?.forge?.generated === true) return true;
+            }
+        }
+        catch { /* manifest rusak bukan bukti provenance */ }
+
+        return false;
+
+    }
+
+    /**
+     * Status jujur sebuah artefak.
+     *
+     * "active" HANYA bila pluginLoader benar-benar memuatnya (bukan disimpulkan
+     * dari lokasi direktori). "approved" = disetujui/diinstal tetapi belum
+     * dimuat. "draft" = belum disetujui. Status tidak pernah menyamar sebagai
+     * aktivasi, dan persetujuan tidak pernah berarti bisa dipanggil.
+     */
+    statusFor(dir, id, manifest, installed) {
+
+        const loaded = pluginLoader?.loaded;
+        const isLoaded = typeof loaded?.has === "function" &&
+            (loaded.has(id) === true ||
+                (manifest?.id !== undefined && loaded.has(manifest.id) === true));
+
+        if (isLoaded) return { status: "active", activated: true };
+
+        if (installed || fs.existsSync(path.join(dir, APPROVED_MARKER))) {
+            return { status: "approved", activated: false };
+        }
+
+        return { status: "draft", activated: false };
+
+    }
+
     /** Baca kembali spec sebuah plugin/draft untuk diedit. */
     read(id) {
 
@@ -442,9 +569,14 @@ module.exports = [ new ${className}() ];
                 path.join(dir, "tool.js"), "utf8"
             );
 
+            const forgeGenerated = this.isForgeGeneratedDir(dir);
+            const state = this.statusFor(dir, id, manifest, root === this.userRoot);
+
             return {
                 id,
-                status: root === this.userRoot ? "active" : "draft",
+                status: state.status,
+                activated: state.activated,
+                canonicalRequired: forgeGenerated,
                 manifest,
                 source,
                 spec: manifest.forge?.spec ?? null,
@@ -481,11 +613,17 @@ module.exports = [ new ${className}() ];
                     const source = fs.readFileSync(
                         path.join(root, name, "tool.js"), "utf8"
                     );
+                    // Artefak forge tidak pernah dimuat: statusnya "approved"
+                    // (persetujuan tersimpan), bukan "active".
+                    const forgeGenerated = this.isForgeGeneratedDir(path.join(root, name));
+                    const state = this.statusFor(path.join(root, name), name, manifest, status === "active");
                     return {
                         id: manifest.id,
                         name: manifest.name,
                         description: manifest.description,
-                        status,
+                        status: state.status,
+                        activated: state.activated,
+                        canonicalRequired: forgeGenerated,
                         origin: manifest.forge?.origin ?? "manual",
                         createdAt: manifest.forge?.createdAt ?? null,
                         risks: this.analyzeRisk(source)

@@ -243,21 +243,16 @@ function binanceTools() {
                 reap();
                 const o = pending.get(String(orderId));
                 if (!o) return { ok: false, error: "Order tidak ditemukan atau sudah kedaluwarsa (>5 menit). Siapkan ulang." };
+                // ponytail: order execution blocked — financial actuation must traverse canonical
+                // ActionIntent → Authority → Verification → Audit (W9-L5/BAR-W9-33/BLK-04).
+                // Will be re-enabled when W9-L5 financial governance is wired.
                 pending.delete(o.id);
-
-                try {
-                    const res = o.market === "futures"
-                        ? await binance.placeFuturesOrder(o)
-                        : await binance.placeSpotOrder(o);
-                    return {
-                        ok: true, status: "TERKIRIM", market: o.market, symbol: o.symbol, side: o.side,
-                        binanceOrderId: res.orderId, executedQty: res.executedQty, status_binance: res.status,
-                        fills: res.fills ?? undefined
-                    };
-                }
-                catch (error) {
-                    return { ok: false, error: error.message };
-                }
+                return {
+                    ok: false,
+                    code: "GOVERNANCE_REQUIRED",
+                    error: "Eksekusi order memerlukan otorisasi kanonik (W9-L5 financial governance). " +
+                        "Order dibatalkan. Hubungi administrator untuk mengaktifkan jalur kewenangan keuangan."
+                };
             }
         }),
 

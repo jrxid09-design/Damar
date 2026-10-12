@@ -1,0 +1,3 @@
+# W7 handoff — Models / Providers / Gateways
+
+Implement only after an independent contract review: provider type versus instance; multiple endpoints/accounts/keys; Secret Vault refs; Model Registry; model lifecycle states; logical aliases; role routing; health/quota/weighted/round-robin/fallback; Model Gateway inference-only separation; Agent Gateway governed workflow separation; scoped downstream keys, allowlists, rate limits, finite/unlimited quotas, expiry, network restrictions, usage, rotation/revocation. Preserve the five W1 records and `llamacpp=PARTIAL`. Routing and credentials never bypass authority.

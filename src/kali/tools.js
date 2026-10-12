@@ -1,5 +1,5 @@
 const { AITool } = require("../ai/tools");
-const kali = require("./bridge");
+const { executeCanonicalAction, contextFromExecution } = require("../services/canonicalActionClient");
 
 /**
  * Tool Kali Linux — Damar menguasai arsenal Kali lewat satu jembatan.
@@ -35,10 +35,22 @@ function kaliTools() {
                 },
                 required: ["command"]
             },
+            meta: { canonicalAuthority: true, sideEffects: true },
             // Risiko destruktif ditegakkan lewat riskCatalog.DESTRUCTIVE
             // (gerbang konfirmasi), bukan field di sini — AITool tak
             // menyimpan metadata.
-            execute: async ({ command, cwd, timeout }) => kali.run(command, { cwd, timeout })
+            execute: async ({ command, cwd, timeout }, execution) => executeCanonicalAction({
+                context: contextFromExecution(execution),
+                capabilityId: "damar.kali",
+                operation: "run",
+                arguments: { command, cwd: cwd ?? null, timeout: timeout ?? 300000 },
+                expectedPostcondition: { expect: {
+                    commandDigestMatches: { op: "eq", value: true },
+                    cwdMatches: { op: "eq", value: true },
+                    timeoutMatches: { op: "eq", value: true },
+                    commandOk: { op: "eq", value: true }
+                } }
+            })
         }),
 
         new AITool({
@@ -49,7 +61,11 @@ function kaliTools() {
                 "OSINT, sniffing/MITM, Active Directory). Pakai untuk tahu apa yang tersedia " +
                 "sebelum menyusun rencana, dan tool mana yang perlu dipasang.",
             parameters: { type: "object", properties: {} },
-            execute: async () => kali.tools()
+            meta: { canonicalAuthority: true, readOnly: true },
+            execute: async (_, execution) => executeCanonicalAction({
+                context: contextFromExecution(execution), capabilityId: "damar.kali", operation: "tools", arguments: {},
+                expectedPostcondition: { expect: { completed: { op: "eq", value: true } } }
+            })
         }),
 
         new AITool({
@@ -62,10 +78,11 @@ function kaliTools() {
                 properties: { tool: { type: "string", description: "Nama tool, mis. 'sqlmap'." } },
                 required: ["tool"]
             },
-            execute: async ({ tool }) => {
-                const path = await kali.which(tool);
-                return path ? { ok: true, tool, path } : { ok: false, tool, note: "Tak terpasang. Pasang: `sudo apt install " + String(tool).replace(/[^\w.-]/g, "") + "`." };
-            }
+            meta: { canonicalAuthority: true, readOnly: true },
+            execute: async ({ tool }, execution) => executeCanonicalAction({
+                context: contextFromExecution(execution), capabilityId: "damar.kali", operation: "which", arguments: { tool },
+                expectedPostcondition: { expect: { toolMatches: { op: "eq", value: true }, completed: { op: "eq", value: true } } }
+            })
         }),
 
         new AITool({
@@ -75,7 +92,11 @@ function kaliTools() {
                 "sekarang. Panggil bila kali_run gagal untuk memastikan Kali memang tersedia " +
                 "sebelum menyimpulkan sebab lain.",
             parameters: { type: "object", properties: {} },
-            execute: async () => kali.status()
+            meta: { canonicalAuthority: true, readOnly: true },
+            execute: async (_, execution) => executeCanonicalAction({
+                context: contextFromExecution(execution), capabilityId: "damar.kali", operation: "status", arguments: {},
+                expectedPostcondition: { expect: { completed: { op: "eq", value: true } } }
+            })
         })
 
     ];

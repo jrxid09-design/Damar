@@ -22,7 +22,7 @@
  *     explicit error codes, never silent success.
  */
 
-const { ensureCanonicalComposed } = require("../../authority/ownerTrustComposition");
+const { ensureCanonicalComposed } = require("../../../../authority/ownerTrustComposition");
 
 function fail(res, code, message, status = 400) {
     return res.status(status).json({ ok: false, code, message });

@@ -33,6 +33,11 @@ const {
 } = require("../../src/embodiment/identity/store");
 const emb = require("../../src/embodiment");
 const { createProductionCipherAdapter } = require("../../src/runtime/vaultProviders/aesGcmCipher");
+const { identityCapabilityRuntime } = require("../helpers/identityCapabilityFixture");
+
+function fileStore(file) {
+    return createFileIdentityStore(file, { capabilityRuntime: identityCapabilityRuntime() });
+}
 
 function tmpDir() {
     return fs.mkdtempSync(path.join(os.tmpdir(), "tf-repair-"));
@@ -130,7 +135,7 @@ test("TF-002: durable identity save fsyncs via a portable read-write descriptor"
     const svc = emb.createIdentityService({});
     svc.registerIdentity({ namespace: "channel", stableKey: "dev-win", displayName: "win" });
     // Must not throw EPERM on any platform (Windows semantics use "r+").
-    await persistIdentity(svc, createFileIdentityStore(file));
+    await persistIdentity(svc, fileStore(file));
     assert.equal(fs.existsSync(file), true);
     const restored = await loadIdentity({ store: createFileIdentityStore(file) });
     assert.ok(restored);
@@ -236,7 +241,7 @@ test("TF-007: failed identity save cleans its temp file; committed snapshot surv
     const file = path.join(dir, "identity.json");
     const svc = emb.createIdentityService({});
     svc.registerIdentity({ namespace: "channel", stableKey: "dev-clean", displayName: "c" });
-    await persistIdentity(svc, createFileIdentityStore(file));
+    await persistIdentity(svc, fileStore(file));
 
     // No orphan tmp files left after a successful save.
     const leftovers = fs.readdirSync(dir).filter((n) => n.includes(".tmp-"));

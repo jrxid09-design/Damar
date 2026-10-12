@@ -250,8 +250,12 @@ class AIRuntimeService {
             "tak dikenal, pakai goal_run (loop otonom: rencana→eksekusi→verifikasi→pulih→" +
             "belajar). Sebelum membuat skill baru, WAJIB capability_search dulu agar tidak " +
             "duplikat; bila ada gap, buat lewat skill_build (teruji sandbox otomatis). " +
-            "Kegagalan tool bukan akhir: tool_exec memberi retry+substitusi, dan kamu boleh " +
-            "memilih jalan lain (API → browser → terminal → skill baru). Sebelum aksi " +
+            "tool_exec adalah jalur LEGACY tanpa otoritas eksekusi: permintaannya " +
+            "ditolak fail-closed (tanpa retry/substitusi), jadi jangan andalkan itu; " +
+            "aksi berkonsekuensi harus lewat jalur kanonik. Kamu boleh " +
+            "memilih jalan lain yang tersedia (API → browser → terminal → skill baru), " +
+            "dan skill_build hanya menghasilkan draft sampai terdaftar kanonik. " +
+            "Sebelum aksi " +
             "signifikan/destruktif, buat checkpoint. Hal yang asing bukan hal yang mustahil — " +
             "asing artinya: cari atau ciptakan kapabilitasnya.\n" +
             // Daftar tool yang dilampirkan tiap giliran DIPILIH sesuai
@@ -323,6 +327,13 @@ class AIRuntimeService {
         const resolved = providerConfig.resolveActive();
 
         const builder = new Damar.Builder();
+
+        // Production composition joins the same canonical V1 registry that
+        // owns descriptive capability evidence for the action runtime. The
+        // bootstrap seam is internal to this same-process composition root;
+        // no registry is created or copied here.
+        const { _getCanonicalCapabilityRegistry } = require("../action/bootstrap");
+        builder.withCapabilityRegistry(_getCanonicalCapabilityRegistry());
 
         // Otak lokal (node-llama-cpp) selalu terdaftar sebagai jaring
         // pengaman — bobot GGUF dimuat LAZY saat pertama dipakai, jadi
@@ -1399,8 +1410,10 @@ ${blok}` }
      * anggaran model-aware, blok dinamis tetap ditempel ke pesan
      * pengguna terakhir (pola cache yang sudah terbukti).
      *
-     * Jalur LEGACY (`DAMAR_CONTEXT_PIPELINE=legacy`): rantai lama
-     * withSystemPrompt → withMemory → withMind — utuh untuk rollback.
+     * Context assembly always delegates to the canonical Pipeline. The former
+     * environment-selected legacy chain is retired from runtime composition;
+     * its helpers remain private compatibility code and are not a source of
+     * runtime context truth.
      */
     async assemble({ messages, channel = null, tools = null, contextRefs = [] }) {
 
@@ -1416,13 +1429,6 @@ ${blok}` }
                 });
             }
             catch { /* persepsi gagal: lanjut */ }
-        }
-
-        const legacy = process.env.DAMAR_CONTEXT_PIPELINE === "legacy";
-
-        if (legacy) {
-            const msgs = await this.withMind(messages, channel, tools);
-            return { messages: msgs, diagnostics: { mode: "legacy" } };
         }
 
         const Pipeline = require("../ai/context/Pipeline");
@@ -1504,6 +1510,13 @@ ${blok}` }
             channel: channel ?? baseExec?.channel ?? null,
             sessionId: sessionId ?? baseExec?.sessionId ?? `${channel ?? "local"}:${this.activePlatform?.model ?? "model"}`,
             principalId: sessionId ?? baseExec?.principalId ?? "local-owner",
+            // Preserve the opaque one-use Owner/Admin proof supplied at the
+            // authenticated ingress.  Lane 2 alone verifies it; dropping it
+            // here made canonical tool actions fail closed even when the
+            // production controller had received a valid proof.
+            ...(exec0?.authProof !== undefined || baseExec?.authProof !== undefined
+                ? { authProof: exec0?.authProof ?? baseExec?.authProof ?? null }
+                : {}),
             contextTokens: this.activeContextTokens(),
             ...(capabilitySet ? { capabilitySet } : {})
         };
@@ -1519,7 +1532,7 @@ ${blok}` }
         }
 
         try {
-            const res = await this.ensure().chat({ messages: msgs, model: first, temperature, maxTokens, tools: effectiveTools, channel, role, signal, exec });
+            const res = await this.ensure().chat({ messages: msgs, model: first, temperature, maxTokens, tools: effectiveTools, channel, role, signal, exec, contextSelection: assembled });
             this._recordUsage(platform, res);
             return res;
         }
@@ -1531,7 +1544,7 @@ ${blok}` }
 
                 try {
                     // Retry sekali dengan model pengganti (tanpa interaksi pengguna).
-                    const res = await this.ensure().chat({ messages: msgs, model: next, temperature, maxTokens, tools: effectiveTools, channel, role, signal, exec });
+                    const res = await this.ensure().chat({ messages: msgs, model: next, temperature, maxTokens, tools: effectiveTools, channel, role, signal, exec, contextSelection: assembled });
                     this._recordUsage(this.activePlatform?.id ?? platform, res);
                     return res;
                 }
@@ -1736,7 +1749,7 @@ ${blok}` }
         if (this.modelFederation && entityId) { const modelRouter = require("../autonomy/ModelRouter"); const routed = modelRouter.routeEntity(entityId, { federation: this.modelFederation, sessionOverride: sessionModelOverride, workOverride: workModelOverride }); const explicitRoute = sessionModelOverride || workModelOverride || (routed.providerId !== this.modelFederation.wises.profile.providerId ? routed : null); const result = await this.modelFederation.invoke(entityId, { messages: msgs, role, sessionId, maxTokens, temperature, entityProjection: { ...(entityProjection ?? {}), sessionId, contextRefs }, continuation }, { sessionOverride: explicitRoute, workOverride: workModelOverride }); yield { content: result.content ?? "", entityId: result.entityId ?? entityId, provider: result.provider, model: result.model, fallback: result.fallback === true, degraded: result.degraded === true, provenance: result.provenance ?? null }; return; }
 
         const pancar = async function* (modelYangDipakai) {
-            for await (const chunk of this.ensure().stream({ messages: msgs, model: modelYangDipakai, temperature, maxTokens, tools: effectiveTools, stream: true, channel, role, signal, exec })) {
+            for await (const chunk of this.ensure().stream({ messages: msgs, model: modelYangDipakai, temperature, maxTokens, tools: effectiveTools, stream: true, channel, role, signal, exec, contextSelection: assembled })) {
                 if (chunk?.usage) {
                     usage = chunk.usage;
                     try { require("./usageService").record(platformAktif, {

@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const response = require("../utils/response");
+const desktop = require("../services/desktopControlService");
 
 const pathPolicy = require("../core/safety/pathPolicy");
 const telemetry = require("../services/telemetryService");
@@ -85,45 +86,23 @@ class LabController {
             if (!project) return response.error(res, "Project tidak ditemukan.", 404);
             if (!project.dir) return response.error(res, "Project tak punya folder kerja.", 400);
 
-            const { spawn } = require("node:child_process");
-            const path = require("node:path");
-            const fs = require("node:fs");
+            const sessionId = req.authIdentity?.sessionId ?? `lab:${req.params.id}`;
 
-            let executable = "code";
-
-            if (process.platform === "win32") {
-                const localAppData = process.env.LOCALAPPDATA;
-
-                const codeExe = localAppData
-                    ? path.join(
-                        localAppData,
-                        "Programs",
-                        "Microsoft VS Code",
-                        "Code.exe"
-                    )
-                    : null;
-
-                if (!codeExe || !fs.existsSync(codeExe)) {
-                    return response.error(
-                        res,
-                        "VS Code tidak ditemukan.",
-                        500
-                    );
-                }
-
-                executable = codeExe;
-            }
-
-            const child = spawn(executable, [project.dir], {
-                detached: true,
-                stdio: "ignore",
-                shell: false,
-                windowsHide: true
+            const result = await desktop.openApp("code", project.dir, {
+                channelType: "console",
+                channelId: sessionId,
+                sessionId,
+                authProof: req.body?.authProof ?? null,
+                correlationId: req.headers?.["x-correlation-id"] ?? null
             });
-            child.on("error", () => { /* 'code' tak ada di PATH → diabaikan */ });
-            child.unref();
-
-            return response.success(res, "VS Code dibuka", { dir: project.dir });
+            // The canonical desktop action owns process startup and reports its outcome.
+            if (result?.outcome === "COMPLETED") {
+                return response.success(res, "VS Code dibuka", { dir: project.dir, result });
+            }
+            if (result?.outcome === "EXECUTED_UNVERIFIED") {
+                return response.success(res, "VS Code dimulai; verifikasi independen belum tersedia", { dir: project.dir, result }, 202);
+            }
+            return response.error(res, result?.errorReason ?? result?.detail ?? "Desktop action ditolak.", 403, result);
         }
         catch (error) { next(error); }
     }

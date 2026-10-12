@@ -7,8 +7,11 @@ const { database, initialize } = require("../memory/db");
  * SELF-HEALING ENGINE (§12 + §33) — kegagalan = input, bukan henti.
  *
  * ERROR → KLASIFIKASI → STRATEGI:
- *   transient     → retry (backoff, sudah di ToolBus) → naikkan retries
+ *   transient     → retry (backoff) → naikkan retries
  *   permission    → laporkan batas (bukan sembunyikan) → gagal jujur
+ *                   (termasuk penolakan jalur-kanonik ToolBus: batas
+ *                   otoritas TIDAK bisa dipulihkan, tidak disubstitusi,
+ *                   tidak dieskalasi ke forge)
  *   dependency    → cek capability registry → sarankan paket/install
  *   implementation→ SUBSTITUSI tool lain (§34) → jika tetap gagal:
  *                   eskalasi SkillFactory (buat kapabilitas pengganti)
@@ -21,7 +24,7 @@ const { database, initialize } = require("../memory/db");
 
 const CLASSIFIERS = [
     { id: "transient",     test: /timeout|etimedout|econnreset|rate.?limit|503|502|busy|temporarily/i },
-    { id: "permission",    test: /ditolang|forbidden|403|401|tidak diizinkan|not allowed|sandbox/i },
+    { id: "permission",    test: /ditolang|ditolak|forbidden|403|401|tidak diizinkan|not allowed|sandbox/i },
     { id: "dependency",    test: /cannot find module|module not found|command not found|missing|dependen/i },
     { id: "environment",   test: /enospc|disk|out of memory|offline|network|fetch failed|dns/i },
     { id: "implementation",test: /typeerror|referenceerror|syntax|invalid|undefined is not|crash|exception/i }
@@ -95,6 +98,22 @@ class SelfHealingEngine {
             `pulihkan ${tool} (klasifikasi: ${klass})`,
             String(error?.message ?? error).slice(0, 160), [], false);
 
+        // BATAS OTORITAS keluar LEBIH DULU: penolakan tidak boleh masuk jalur
+        // alternatif apa pun (agent-retry, retry agresif, substitusi, forge).
+        // Tanpa cabang awal ini, kegagalan `agent:*` yang ditolak otorisasi
+        // menjalankan ulang agent SEBELUM strategi permission ditegakkan.
+        if (klass === "permission") {
+            attempts.push({ strategy: "report-authority-limit" });
+            const limited = {
+                ok: false,
+                error: String(error?.message ?? error),
+                authorityLimit: true
+            };
+            await this.log(goalId, "recover-result",
+                `pemulihan ${tool} → gagal (batas otorisasi)`, "report-authority-limit", attempts, false);
+            return { klass, attempts, outcome: limited };
+        }
+
         // Jalur AGENT: gagal bukan karena tool — jalankan ulang agent
         // dengan instruksi lebih ketat (satu kali), bukan lewat ToolBus.
         if (String(tool ?? "").startsWith("agent:")) {
@@ -123,11 +142,33 @@ class SelfHealingEngine {
             case "transient": {
                 // Retry agresif dengan backoff lebih panjang.
                 // M3/CLOSURE: identitas delegasi (exec/capabilitySet)
-                // IKUT ke ToolBus — pemulihan bukan hop pelucutan.
-                outcome = await toolBus.execute({
-                    name: tool, args, timeoutMs: 90000, retries: 3,
-                    context: { goal: goalId, exec: delegator }
-                });
+                // IKUT pada pengajuan ulang — pemulihan bukan hop pelucutan.
+                // P1-3: ToolBus tidak mengeksekusi (W8). Jika tool ada di
+                // capabilitySet delegator, eksekusi langsung ke ToolRegistry.
+                const capSet = delegator?.capabilitySet ?? null;
+                const { capSetWithin, canonicalCapabilityId, assertExecution } = require("../ai/tools/Authorization");
+                if (Array.isArray(capSet) && capSetWithin(tool, capSet)) {
+                    const canonId = canonicalCapabilityId(tool);
+                    const { ToolRegistry } = require("../core/tools");
+                    try {
+                        // P1-D-FIX: assertExecution enforces role + capabilitySet
+                        // authority before reaching ToolRegistry. capabilitySet is
+                        // a restriction, not an authority grant — both checks required.
+                        assertExecution(canonId, delegator);
+                        const result = await ToolRegistry.execute(canonId, args, { exec: delegator });
+                        // P1-E-FIX: derive ok from result — ToolRegistry can return
+                        // { ok: false } without throwing; treat that as failure.
+                        outcome = result?.ok === false
+                            ? { ok: false, error: result?.error ?? "tool returned failure", result }
+                            : { ok: true, result };
+                    }
+                    catch (e) { outcome = { ok: false, error: e.message }; }
+                } else {
+                    outcome = await toolBus.execute({
+                        name: tool, args, timeoutMs: 90000, retries: 3,
+                        context: { goal: goalId, exec: delegator }
+                    });
+                }
                 attempts.push({ strategy: "retry-aggressive", ok: outcome.ok });
                 break;
             }
@@ -166,7 +207,10 @@ class SelfHealingEngine {
             case "implementation":
             case "unknown":
             default: {
-                // Substitusi ekstra (ToolBus sudah mencoba satu lapis).
+                // Substitusi ekstra. Sejak remediasi jalur-kedua W8 ToolBus
+                // tidak mengeksekusi apa pun, jadi jalur ini berakhir pada
+                // penolakan fail-closed dan indikasi kebutuhan kapabilitas
+                // kanonik — bukan eksekusi lewat jalur alternatif.
                 // M3/CLOSURE: identitas delegasi ikut juga di jalur
                 // substitusi — tool pengganti tunduk pada restriction
                 // yang sama, bukan lebih luas.
@@ -178,6 +222,9 @@ class SelfHealingEngine {
 
                 // Masih gagal → indikasikan pembuatan kapabilitas pengganti.
                 if (!outcome.ok) {
+                    // Eskalasi forge tetap ditandai, TAPI tidak ada eksekusi
+                    // jalur alternatif: probe SkillFactory fail-closed sampai
+                    // kapabilitas kanonik terdaftar (lihat SkillFactory.probe).
                     outcome.escalateToFactory = true;
                     attempts.push({ strategy: "escalate-skill-factory" });
                 }

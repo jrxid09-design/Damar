@@ -34,6 +34,49 @@
 
 const os = require("node:os");
 const path = require("node:path");
+const { types: utilTypes } = require("node:util");
+const {
+    wasCommittedByBodySchema, isEventBeingDelivered, commitSequenceOf,
+    currentDeliveryCommitSequence
+} = require("../embodiment/schema/BodySchema");
+// Oracle kepercayaan lifecycle diambil dari modul INTERNAL-nya, bukan dari
+// permukaan ekspor `BodySchema.js`: state itu memang harus dapat dibaca
+// jembatan, tapi bukan bagian dari API kelas BodySchema (audit 5520019).
+const { lifecycleTrustOf } = require("../embodiment/schema/lifecycleTrust");
+
+/**
+ * Bukti lifecycle, dibaca dari STATE PRIVAT BodySchema.
+ *
+ * Rantai dispatch penting di sini, dan urutannya sengaja:
+ *  1. Instance BodySchema ASLI (di-brand modul) -> bukti dibaca lewat
+ *     `lifecycleTrustOf`, jadi MENIMPA atau MENGHAPUS metode publik seperti
+ *     `isBeingDelivered`/`wasCommittedBy` tidak berpengaruh sama sekali. Ini
+ *     yang menutup celah "metode publik bisa ditimpa" dan celah "hapus metode
+ *     lalu jatuh ke penanda modul-global" (audit 31a8770).
+ *  2. Bukan instance (double test / objek tiruan dengan `subscribe`): tidak ada
+ *     mesin komit nyata, jadi hanya penanda modul yang tersedia. Produksi selalu
+ *     menyerahkan instance asli (`core.body`), sehingga jalur ini tidak pernah
+ *     dipakai di produksi.
+ */
+function isTrustedLifecycleEvent(body, event) {
+    const trust = lifecycleTrustOf(body, event);
+    if (trust !== null) return trust.isBeingDelivered && trust.wasCommitted;
+    return isEventBeingDelivered(event) && wasCommittedByBodySchema(event);
+}
+
+/** Urutan komit event, dari state privat instance bila body adalah instance asli. */
+function commitSequenceFor(body, event) {
+    const trust = lifecycleTrustOf(body, event);
+    if (trust !== null) return trust.commitSequence;
+    return commitSequenceOf(event);
+}
+
+/** Urutan komit peristiwa yang SEDANG dikirim, dari instance bila ada. */
+function currentDeliverySequenceFor(body) {
+    const trust = lifecycleTrustOf(body, null);
+    if (trust !== null) return trust.deliverySequence;
+    return currentDeliveryCommitSequence();
+}
 
 // RuntimeCore composition dependencies (moved from runtimeCore.js).
 const { createEmbodiedCore } = require("./embodiedCore");
@@ -145,6 +188,860 @@ function sanitizeCoreOptions(options) {
 }
 
 /* ===========================================================================
+ * W8-L1 SENSORIUM -> W7-L2 WORLD MODEL BRIDGE
+ * Frozen contract: C:\Workspace\Damar-audit-evidence\wave7-10\wave8-l1-recon\
+ * W8_L1_CONTRACT.md (see also wave8-recon\WAVE8_CONTRACTS_FROZEN.md, L1
+ * section, the full-wave-reconciled version).
+ *
+ * The ONLY write capability this function has is `worldModel.ingestObservation`
+ * (OBSERVATION != EXECUTION AUTHORITY) — it never touches actuation/dispatch.
+ * It lives here, not in a new file, because this composition function is the
+ * one place that already holds live references to both `core.body`
+ * (Wave1-certified embodiedCore's BodySchema) and `cognition.lanes.worldModel`
+ * (Wave7-certified world model) — see the contract's "Canonical owner"
+ * section for why an earlier draft's separate `sensoriumBridge.js` was
+ * rejected in adversarial review.
+ * ========================================================================= */
+
+const {
+    toSensorModality
+} = require("../embodiment/domain/modalityMap");
+
+const SENSOR_OBSERVATION_HEALTH_PRIORITY = Object.freeze({
+    OK: 3, DEGRADED: 2, SUSPECT: 1, FAILED: 0
+});
+
+// Contract "Resource/boundedness limits": modality-specific per-sensor
+// observation rate caps; unlisted modalities default to the screen tier.
+const SENSOR_OBSERVATION_RATE_CAP_PER_SEC = Object.freeze({
+    SCREEN: 5, RF: 50, IMU: 200
+});
+const SENSOR_OBSERVATION_DEFAULT_RATE_CAP_PER_SEC = 5;
+
+// Contract "Resource/boundedness limits": 512 registered sensors x 64
+// channels/device = 32768 worst case. This bounds the ONE combined
+// per-(subject, channel.id) tracking map below (dedup `monotonic` +
+// rate-limit sampling + fairness priority for shed accounting) — the
+// contract lists "dedup tracking" (32768) and "pending observations
+// (bridge queue)" (50000) as two separate bounds, but this bridge's call
+// chain is fully synchronous (no I/O, no microtask gap between "plan
+// computed" and "ingestObservation applied"), so there is no actual
+// in-flight backlog for a literal second queue to hold — the smaller,
+// binding-in-practice per-source tracking map below IS the bridge's only
+// persistent per-observation-adjacent state, and doing that job twice in
+// two structures keyed the same way would be pure duplication. If a real
+// async device-adapter loop is added later (contract checklist item 4),
+// a literal async queue becomes meaningful then and is a natural
+// extension point, not a defect in this synchronous implementation.
+const MAX_TRACKED_SENSOR_CHANNELS = 512 * 64;
+const MAX_PENDING_OBSERVATIONS = 50_000;
+// Bounded delivery window: at most this many deliveries may be ISSUED and
+// awaiting settlement at once. Without this, every admitted observation is
+// immediately in flight, the queue never forms, and capacity is consumed by
+// work that can no longer be cancelled -- which makes the contract's fair
+// shedding unreachable (independent audit of 636ee8d). With a bounded window
+// the queue is the real backlog, so overflow cancels work that has NOT been
+// issued yet.
+const MAX_IN_FLIGHT_DELIVERIES = 64;
+// Batas waktu penyelesaian satu pengiriman: slot TIDAK PERNAH dipegang
+// selamanya oleh promise yang tidak pernah selesai.
+const DELIVERY_SETTLE_TIMEOUT_MS = 30_000;
+
+/**
+ * Proxy probe via internal slot — zero traps, and correct for a revoked
+ * Proxy too. Reflection on a Proxy EXECUTES caller code, so a hostile Proxy
+ * must be refused before the first reflection, not detected by it.
+ */
+function isProxyValue(value) {
+    try {
+        return utilTypes.isProxy(value);
+    } catch {
+        return true;
+    }
+}
+
+function readDataProperty(value, key) {
+    if (!value || typeof value !== "object") return { ok: false };
+    if (isProxyValue(value)) return { ok: false };
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor && !descriptor.get && !descriptor.set && ("value" in descriptor)
+        ? { ok: true, value: descriptor.value } : { ok: false };
+}
+
+function copySensorValue(value, depth = 0, budget = { count: 0 }) {
+    if (value === null || value === undefined) return value;
+    const type = typeof value;
+    if (type !== "object") return ["string", "number", "boolean"].includes(type) && (type !== "number" || Number.isFinite(value)) ? value : undefined;
+    if (isProxyValue(value)) return undefined;
+    // Budget ini hanya plafon anti-DoS, bukan batas semantik: BodySchema
+    // sudah memvalidasi observasi ini, jadi copier di sini tidak boleh
+    // menolak sesuatu yang BodySchema terima (audit 636ee8d: sampel sah
+    // 17-tingkat ditolak di sini dan tidak pernah sampai ke world model).
+    // Batas yang mengikat tetap batas sampel 2.048 byte yang dibekukan.
+    if (depth > 1024 || ++budget.count > 65536) return undefined;
+    if (Array.isArray(value)) {
+        const length = readDataProperty(value, "length");
+        if (!length.ok || !Number.isSafeInteger(length.value) || length.value < 0 || length.value > 4096) return undefined;
+        const out = [];
+        for (let i = 0; i < length.value; i++) {
+            const item = readDataProperty(value, i);
+            if (!item.ok) return undefined;
+            const copied = copySensorValue(item.value, depth + 1, budget);
+            if (copied === undefined && item.value !== undefined) return undefined;
+            out.push(copied);
+        }
+        return out;
+    }
+    if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) return undefined;
+    const out = {};
+    for (const key of Reflect.ownKeys(value)) {
+        if (typeof key !== "string" || key === "__proto__" || key === "constructor" || key === "prototype") return undefined;
+        const item = readDataProperty(value, key);
+        if (!item.ok) return undefined;
+        const copied = copySensorValue(item.value, depth + 1, budget);
+        if (copied === undefined && item.value !== undefined) return undefined;
+        out[key] = copied;
+    }
+    return out;
+}
+
+function bridgeSensoriumPairKey(subject, channelId) {
+    return `${subject}\u0000${channelId}`;
+}
+
+function resolveSensorRateModality(raw) {
+    if (typeof raw !== "string") return "OTHER";
+    const upper = raw.toUpperCase();
+    if (Object.prototype.hasOwnProperty.call(SENSOR_OBSERVATION_RATE_CAP_PER_SEC, upper)) return upper;
+    const prefix = upper.split(/[.:/_-]/, 1)[0];
+    if (Object.prototype.hasOwnProperty.call(SENSOR_OBSERVATION_RATE_CAP_PER_SEC, prefix)) return prefix;
+    return toSensorModality(raw.toLowerCase());
+}
+
+/**
+ * bridgeSensoriumToWorldModel({ body, worldModel, clock, auditLedger })
+ * -> { applyObservationPlan(event, result) }
+ *
+ * `body.subscribe(...)` (BodySchema's existing, already-hardened hook —
+ * subscriber errors are isolated per-callback by BodySchema itself, never
+ * reach `ingest()`'s caller) drives `applyObservationPlan` for every
+ * committed SENSOR_OBSERVATION. Exposed directly too, for a future
+ * device-adapter loop that wants to call it without a live `body.ingest`
+ * round-trip (contract checklist item 4).
+ */
+function bridgeSensoriumToWorldModel({ body, worldModel, clock = null, auditLedger = null }) {
+
+    function nowMs() {
+        try {
+            const t = typeof clock?.nowMs === "function" ? clock.nowMs() : undefined;
+            return Number.isFinite(t) ? t : Date.now();
+        } catch {
+            return Date.now();
+        }
+    }
+
+    function audit(event) {
+        try {
+            if (auditLedger && typeof auditLedger.append === "function") {
+                auditLedger.append(event);
+            }
+        } catch { /* audit failure never blocks the bridge */ }
+    }
+
+    // subject|channelId -> { monotonic, lastAppliedMs, healthPriority, failed }
+    const tracked = new Map();
+
+    // Admitted-but-unsettled deliveries (W8-L1 contract,
+    // "MAX_PENDING_OBSERVATIONS"): `queue` holds entries ADMITTED but NOT YET
+    // ISSUED to the world model, `inFlight` counts entries already issued and
+    // still awaiting settlement. Overflow sheds the OLDEST LOWEST-`healthState`-
+    // priority queued entry FIRST -- and among equal priority, from the source
+    // holding the most queued entries -- so a noisy failing sensor never
+    // occupies capacity at the expense of a healthy low-traffic one.
+    //
+    // The shed has to remove work that has NOT been issued yet. Removing only
+    // the bookkeeping of an entry that was already handed to
+    // `worldModel.ingestObservation` would report a shed that never happened
+    // (independent audit of 636ee8d), so the queue is drained separately from
+    // admission and the victim is cancelled before it is ever issued.
+    const queue = [];
+    let pendingSeq = 0;
+    let shedCount = 0;
+    let inFlight = 0;
+    // Urutan tunggal milik jembatan ini, dipakai bersama oleh ADMISSION
+    // observasi dan PEMROSESAN peristiwa lifecycle. Keduanya harus dibandingkan
+    // dalam satu garis waktu: `commitSequenceOf()` BodySchema hanya mengurutkan
+    // komit, sedangkan admission terjadi belakangan, jadi membandingkan
+    // keduanya tidak bermakna (audit of dd15f44).
+    let bridgeSeq = 0;
+
+    // Per-channel admission stack. Admission writes `tracked` BEFORE the world
+    // model agrees (that is what makes dedup/rate/FAILED sequential), so the
+    // writes must be individually undoable:
+    //   frames    -- admissions not yet settled, newest last
+    //   committed -- the last SETTLED state, or null when the channel had none
+    // Rolling back one frame and re-deriving the effective state from the stack
+    // is compositional: reversing A while B is newer leaves B in force, and
+    // reversing B afterwards falls back to the pre-A committed state. The
+    // previous snapshot-based rollback could not express that and resurrected a
+    // rejected monotonic (audit of dd15f44).
+    const admissionState = new Map(); // key -> { frames: [{seq, state, evicted}], committed }
+
+    /**
+     * State yang berlaku = state dari frame dengan urutan TERBESAR.
+     *
+     * Memilih "frame terakhir yang tersisa" saja salah saat penyelesaian
+     * datang TIDAK BERURUTAN: bila B (lebih baru) sudah selesai sementara A
+     * (lebih lama) masih pending, sisa frame A membuat `tracked` mundur ke
+     * monotonic A -- sehingga monotonik 1,5 lolos padahal 2 sudah diterapkan
+     * (audit 31a8770). Karena itu `committed` (dari `settledSeq`) ikut
+     * dibandingkan, bukan hanya frame yang tersisa.
+     */
+    function effectiveStateFor(rec) {
+        const lastFrame = rec.frames.length > 0 ? rec.frames[rec.frames.length - 1] : null;
+        if (!lastFrame) return rec.committed;
+        if (rec.committed === null || rec.settledSeq === undefined) return lastFrame.state;
+        return lastFrame.seq > rec.settledSeq ? lastFrame.state : rec.committed;
+    }
+
+    /**
+     * Bereskan catatan channel ke bentuk paling ringkas, dan BUANG catatan yang
+     * tidak lagi diperlukan.
+     *
+     * `admissionState` tidak boleh tumbuh tanpa batas: sebuah channel yang
+     * sudah selesai (tanpa frame) dan state akhirnya SUDAH menjadi
+     * `tracked[key]` tidak menyimpan informasi apa pun yang tidak dimiliki
+     * `tracked`, jadi catatannya dapat dibuang. Tanpa ini, setiap channel yang
+     * pernah berubah hanya karena eviction akan meninggalkan `committed`
+     * selamanya -- dan pemulihan korban eviction kelak akan menghidupkan lagi
+     * state basi yang seharusnya sudah hilang (audit 406553b).
+     */
+    function compactAdmissionRecord(key, rec) {
+        if (rec.frames.length === 0) {
+            if (!tracked.has(key)) {
+                admissionState.delete(key);
+                return;
+            }
+            // State akhir sudah identik dengan tracked[key] -> catatan murni
+            // redundan.
+            const current = tracked.get(key);
+            if (rec.committed !== null && rec.committed === current) {
+                admissionState.delete(key);
+                return;
+            }
+        }
+        if (rec.frames.length === 0 && rec.committed === null) admissionState.delete(key);
+    }
+
+    /**
+     * Apakah `state` adalah penulis TERBARU untuk channel ini?
+     *
+     * Pada penyelesaian yang datang TIDAK BERURUTAN (B selesai sebelum A),
+     * penerapan `committed` tanpa syarat akan membuat state A menang padahal B
+     * lebih baru -- mis. observasi monotonic 1,5 lolos setelah monotonic 2
+     * sudah diterapkan (audit 406553b). Karena itu `committed` hanya boleh
+     * ditulis oleh frame dengan seq TERBESAR.
+     */
+    function isNewestSettledWriter(rec, seq) {
+        return rec.settledSeq === undefined || seq > rec.settledSeq;
+    }
+
+    function applyEffective(key, rec) {
+        const effective = effectiveStateFor(rec);
+        if (effective === null) {
+            // Hanya hapus bila TIDAK ada penulis yang lebih baru yang sudah
+            // menyelesaikan diri; kalau ada, state penulis itu yang berlaku.
+            if (rec.settledSeq === undefined) tracked.delete(key);
+        } else {
+            tracked.set(key, effective);
+        }
+    }
+
+    /**
+     * Tegakkan bound `tracked` setelah SETIAP mutasi.
+     *
+     * Sebelumnya bound hanya ditegakkan di jalur admission dan di jalur
+     * pemulihan korban, sehingga penyelesaian yang berhasil bisa mengembalikan
+     * channel ke `tracked` TANPA pemeriksaan bound: pada 32.768 entri, admission
+     * mengevict channel baru itu sendiri, lalu penyelesaian sinkronnya
+     * memasangnya kembali dan `tracked` menetap di 32.769 (audit 31a8770).
+     *
+     * `protectedKey` hanya dilindungi bila masih ada kandidat lain; kalau
+     * seluruh isi adalah entri yang dilindungi, eviction berhenti dan bound
+     * dilaporkan tidak dapat ditegakkan (lebih baik jujur daripada mengorbankan
+     * satu-satunya entri yang sedang diselamatkan).
+     */
+    function enforceTrackedBound(protectedKey = null) {
+        while (tracked.size > MAX_TRACKED_SENSOR_CHANNELS) {
+            const victimKey = pickTrackedVictim(protectedKey);
+            if (victimKey === null) break;
+            tracked.delete(victimKey);
+        }
+    }
+
+    /** Kembalikan korban eviction milik sebuah frame, tanpa menimpa state yang lebih baru. */
+    function restoreEvictedVictim(frame) {
+        const evicted = frame && frame.evicted;
+        if (!evicted) return;
+        if (tracked.has(evicted.key)) return;
+        tracked.set(evicted.key, evicted.state);
+        // Pemulihan menambah satu entri, jadi bound harus ditegakkan lagi.
+        // Korban yang baru dipulihkan DILINDUNGI: entri itu justru yang sedang
+        // diselamatkan.
+        enforceTrackedBound(evicted.key);
+    }
+
+    function settleAdmissionFrame(key, seq, committedState) {
+        const rec = admissionState.get(key);
+        if (!rec) return;
+        const frame = rec.frames.find(f => f.seq === seq);
+        rec.frames = rec.frames.filter(f => f.seq !== seq);
+        // COMMIT: the eviction this admission caused becomes permanent.
+        if (frame) frame.evicted = null;
+        if (isNewestSettledWriter(rec, seq)) {
+            rec.committed = committedState;
+            rec.settledSeq = seq;
+        }
+        applyEffective(key, rec);
+        // Bound ditegakkan SETELAH state berlaku dipasang, bukan hanya di jalur
+        // admission: penyelesaian yang berhasil tidak boleh membawa `tracked`
+        // melewati batas (audit 31a8770).
+        enforceTrackedBound();
+        compactAdmissionRecord(key, rec);
+    }
+
+    function rollbackAdmissionFrame(key, seq) {
+        const rec = admissionState.get(key);
+        if (!rec) return;
+        const frame = rec.frames.find(f => f.seq === seq);
+        rec.frames = rec.frames.filter(f => f.seq !== seq);
+        // UNDO the eviction as well, so a rejected admission cannot have
+        // permanently erased an unrelated live FAILED tombstone (audit of
+        // dd15f44).
+        restoreEvictedVictim(frame);
+        applyEffective(key, rec);
+        compactAdmissionRecord(key, rec);
+    }
+
+    // Read-only OBSERVABILITY view (contract "OBSERVABILITY": "Shed counts are
+    // exposed ... and audited"). Getters only, so a caller cannot rewrite the
+    // bridge's own counters through the exported reference.
+    const observability = {};
+    Object.defineProperties(observability, {
+        pendingObservations: { get: () => queue.length + inFlight, enumerable: true },
+        queuedObservations: { get: () => queue.length, enumerable: true },
+        inFlightObservations: { get: () => inFlight, enumerable: true },
+        shedCount: { get: () => shedCount, enumerable: true },
+        maxPending: { get: () => MAX_PENDING_OBSERVATIONS, enumerable: true }
+    });
+    Object.freeze(observability);
+
+    /** Pilih korban di antara entri yang BELUM PERNAH di-issue. */
+    function shedOneForCapacity() {
+        if (queue.length === 0) return false;
+        const perSource = new Map();
+        for (const entry of queue) {
+            perSource.set(entry.subject, (perSource.get(entry.subject) ?? 0) + 1);
+        }
+        let victimIndex = 0;
+        for (let i = 1; i < queue.length; i++) {
+            const candidate = queue[i];
+            const victim = queue[victimIndex];
+            if (candidate.healthPriority < victim.healthPriority) { victimIndex = i; continue; }
+            if (candidate.healthPriority > victim.healthPriority) continue;
+            const candidateSourceCount = perSource.get(candidate.subject) ?? 0;
+            const victimSourceCount = perSource.get(victim.subject) ?? 0;
+            if (candidateSourceCount > victimSourceCount) { victimIndex = i; continue; }
+            if (candidateSourceCount < victimSourceCount) continue;
+            if (candidate.seq < victim.seq) victimIndex = i;   // oldest last
+        }
+        const [evicted] = queue.splice(victimIndex, 1);
+        shedCount += 1;
+        // Shed work was never issued, so its admission-time state must be rolled
+        // back too -- otherwise a shed silently consumes this channel's
+        // monotonic/rate/calibration state (audit of 8d4f80c).
+        evicted.state = "shed";
+        if (typeof evicted.rollback === "function") evicted.rollback();
+        audit({ type: "W8_L1_OBSERVATION_SHED", subject: evicted.subject,
+                channelId: evicted.channelId, reason: "pending-capacity", atMs: nowMs() });
+        return true;
+    }
+
+    function issueEntry(entry) {
+        entry.state = "pending";
+        inFlight += 1;
+        let issued;
+        try {
+            issued = worldModel.ingestObservation(entry.input);
+        } catch (err) {
+            inFlight -= 1;
+            entry.state = "rejected";
+            entry.result = undefined;
+            if (typeof entry.rollback === "function") entry.rollback();
+            entry.onRejected(err);
+            drainQueue();
+            return;
+        }
+        entry.result = issued;
+        // Probes `then` INSIDE the try so a throwing `then` accessor cannot
+        // escape after `inFlight` was already incremented -- which previously
+        // leaked a delivery slot permanently (audit of 8d4f80c).
+        let isThenable = false;
+        try {
+            isThenable = !!issued && typeof issued.then === "function";
+        } catch {
+            isThenable = false;
+        }
+        if (isThenable) {
+            // A delivery that never settles must not hold its slot forever:
+            // without a deadline, unresolved promises retain every slot and
+            // queued work can never advance (independent audit of b332cf8).
+            let settled = false;
+            const finish = (fn, arg) => {
+                if (settled) return;
+                settled = true;
+                if (entry.timer) { clearTimeout(entry.timer); entry.timer = null; }
+                inFlight -= 1;
+                fn(arg);
+                drainQueue();
+            };
+            entry.timer = setTimeout(() => {
+                finish((e) => {
+                    // Sebuah delivery yang tidak pernah selesai adalah
+                    // KEHILANGAN yang jujur, bukan penerapan: state yang
+                    // sempat ditulis saat admission harus dikembalikan supaya
+                    // monotonic/rate/FAILED tidak terus dikonsumsi (audit of
+                    // 8d4f80c).
+                    e.state = "timeout";
+                    e.result = undefined;
+                    if (typeof e.rollback === "function") e.rollback();
+                }, entry);
+            }, DELIVERY_SETTLE_TIMEOUT_MS);
+            if (entry.timer && typeof entry.timer.unref === "function") entry.timer.unref();
+            Promise.resolve(issued).then(
+                (value) => finish(entry.onSettled, value),
+                (err) => finish(entry.onRejected, err));
+        } else {
+            // Selesai sinkron: settle SEKARANG, bukan lewat microtask, supaya
+            // `observability` melaporkan keadaan sebenarnya (tanpa ini sebuah
+            // world model sinkron tampak "pending" padahal sudah selesai).
+            inFlight -= 1;
+            entry.onSettled(issued);
+            drainQueue();
+        }
+        return;
+    }
+
+    function drainQueue() {
+        while (queue.length > 0 && inFlight < MAX_IN_FLIGHT_DELIVERIES) {
+            issueEntry(queue.shift());
+        }
+    }
+
+
+    /**
+     * Pilih channel terburuk untuk dievict: healthPriority terendah, lalu
+     * `lastAppliedMs` tertua. `protectedKey` (mis. korban yang sedang
+     * diselamatkan) dilewati selama masih ada kandidat lain.
+     *
+     * SATU-SATUNYA tempat aturan pemilihan korban hidup. Sebelumnya aturan yang
+     * sama ditulis dua kali (jalur admission dan jalur penegakan bound), jadi
+     * keduanya bisa menyimpang tanpa terlihat (audit 5520019).
+     */
+    function pickTrackedVictim(protectedKey = null) {
+        let victimKey = null;
+        let victimPriority = Infinity;
+        let victimAppliedMs = Infinity;
+        for (const [key, t] of tracked) {
+            if (protectedKey !== null && key === protectedKey) continue;
+            if (t.healthPriority < victimPriority
+                || (t.healthPriority === victimPriority && t.lastAppliedMs < victimAppliedMs)) {
+                victimKey = key;
+                victimPriority = t.healthPriority;
+                victimAppliedMs = t.lastAppliedMs;
+            }
+        }
+        return victimKey;
+    }
+
+    /**
+     * Evict the worst tracked channel when over `limit`, RETURNING the victim so
+     * the caller can undo it.
+     *
+     * Admission must still evict, or `tracked` grows past its bound during a
+     * large backlog -- but an admission that is later rejected must not
+     * permanently erase an unrelated live FAILED tombstone it happened to push
+     * out (audit of dd15f44). Returning the victim lets the admission frame
+     * carry it and restore it on rollback.
+     */
+    function evictTrackedIfOver(limit) {
+        if (tracked.size <= limit) return null;
+        const victimKey = pickTrackedVictim();
+        if (victimKey === null) return null;
+        const victimState = tracked.get(victimKey);
+        tracked.delete(victimKey);
+        audit({ type: "W8_L1_TRACKED_CHANNEL_EVICTED", key: victimKey, atMs: nowMs() });
+        return { key: victimKey, state: victimState };
+    }
+
+    /**
+     * Effective healthState (contract "Malformed-input behavior": never
+     * trust a producer's claimed OK verbatim) — the WORSE of the producer's
+     * claim (or OK if absent) and a calibration-derived floor: SUSPECT
+     * whenever calibration is null/expired.
+     */
+    function computeEffectiveHealthState(claimed, calibration) {
+        const claimedPriority = SENSOR_OBSERVATION_HEALTH_PRIORITY[claimed] ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK;
+        let floor = "OK";
+        if (!calibration) {
+            floor = "SUSPECT";
+        } else {
+            const validUntilMs = Date.parse(calibration.validUntil);
+            if (!Number.isFinite(validUntilMs) || validUntilMs <= nowMs()) floor = "SUSPECT";
+        }
+        const floorPriority = SENSOR_OBSERVATION_HEALTH_PRIORITY[floor];
+        return claimedPriority <= floorPriority ? (claimed ?? "OK") : floor;
+    }
+
+    function applyObservationPlan(event, result) {
+        try {
+        const type = readDataProperty(event, "type");
+        const subjectRead = readDataProperty(event, "subject");
+        const eventIdRead = readDataProperty(event, "eventId");
+        const monotonicRead = readDataProperty(event, "monotonic");
+        const timestampRead = readDataProperty(event, "timestampMs");
+        const payloadRead = readDataProperty(event, "payload");
+        if (!type.ok || !payloadRead.ok) return { applied: false, reason: "not-an-observation" };
+
+        // Trusted reconnect: ONLY a lifecycle event BodySchema is delivering
+        // from the commit running right now may reopen a channel. Merely
+        // "ever committed" is not enough -- a previously committed
+        // DEVICE_ONLINE object could be replayed after a later FAILED
+        // observation and re-open a channel that must stay closed (audit
+        // b332cf8). A forged event, a replayed one, a sample claiming
+        // healthState OK, and a caller-supplied `reconnected` flag all fail
+        // to reopen anything.
+        if (type.value === "DEVICE_ONLINE") {
+            if (!isTrustedLifecycleEvent(body, event)) {
+                audit({ type: "W8_L1_UNTRUSTED_LIFECYCLE_REJECTED", subject: subjectRead.ok ? subjectRead.value : null, atMs: nowMs() });
+                return { applied: false, reason: "untrusted-lifecycle-event" };
+            }
+            const onlineSubject = subjectRead.ok ? subjectRead.value : undefined;
+            // Dua sinyal urutan, sengaja berlapis:
+            //  - `onlineCommitSeq` (urutan komit BodySchema) TETAP pada saat
+            //    komit, jadi perbandingannya tidak bergantung pada urutan
+            //    subscriber -- inilah yang menutup celah re-entrancy.
+            //  - `onlineBridgeSeq` diambil di pintu masuk, sebagai cadangan
+            //    untuk observasi sintetis yang tidak pernah dikomit.
+            const onlineCommitSeq = commitSequenceFor(body, event);
+            const onlineDeliverySeq = currentDeliverySequenceFor(body);
+            const onlineBridgeSeq = ++bridgeSeq;
+            let cleared = 0;
+            if (typeof onlineSubject === "string") {
+                for (const [key, entry] of tracked) {
+                    // ORDERING, not merely authenticity (audits of 8d4f80c /
+                    // dd15f44): a subscriber handling this very ONLINE event can
+                    // synchronously submit a NEWER failed observation, so an
+                    // older lifecycle event must never clear state a later one
+                    // set. Three layered signals, because a synthetic
+                    // observation carries no commit sequence at all:
+                    if (entry.failed) {
+                        let blockedByOrder = false;
+                        if (Number.isFinite(onlineCommitSeq) && Number.isFinite(entry.failedAtSeq)) {
+                            // Both real commits: compare commit order.
+                            blockedByOrder = onlineCommitSeq <= entry.failedAtSeq;
+                        } else if (entry.failedAtDeliverySeq !== null && entry.failedAtDeliverySeq !== undefined) {
+                            // The failure was admitted INSIDE the delivery window
+                            // of some commit. A lifecycle event delivered in that
+                            // SAME window is not newer than it; one delivered by a
+                            // LATER commit genuinely is, and may reconnect.
+                            blockedByOrder = !Number.isFinite(onlineDeliverySeq)
+                                || onlineDeliverySeq <= entry.failedAtDeliverySeq;
+                        } else if (Number.isFinite(entry.failedAtBridgeSeq)) {
+                            blockedByOrder = onlineBridgeSeq <= entry.failedAtBridgeSeq;
+                        }
+                        if (blockedByOrder) continue;
+                    }
+                    if (entry.failed && key.startsWith(`${onlineSubject}\u0000`)) {
+                        tracked.set(key, { ...entry, failed: false });
+                        cleared++;
+                    }
+                }
+            }
+            if (cleared > 0) {
+                audit({ type: "W8_L1_SENSOR_RECONNECTED", subject: onlineSubject, cleared, atMs: nowMs() });
+            }
+            return { applied: false, reason: "not-an-observation" };
+        }
+
+        // Audit coverage for the lifecycle transitions the frozen contract
+        // requires to be observable ("Sensor registration, health transitions,
+        // calibration changes, and shed counts ... are audited"). Like
+        // DEVICE_ONLINE, these are authorized ONLY as they are delivered by a
+        // real BodySchema commit -- otherwise a forged discovery/change/health
+        // event manufactures a trusted-looking audit record (audit b332cf8).
+        if (type.value === "DEVICE_DISCOVERED" || type.value === "DEVICE_CHANGED"
+            || type.value === "DEVICE_HEALTH_CHANGED") {
+            if (!isTrustedLifecycleEvent(body, event)) {
+                audit({ type: "W8_L1_UNTRUSTED_LIFECYCLE_REJECTED", subject: subjectRead.ok ? subjectRead.value : null, atMs: nowMs() });
+                return { applied: false, reason: "untrusted-lifecycle-event" };
+            }
+            const lifecycleSubject = subjectRead.ok ? subjectRead.value : null;
+            if (type.value === "DEVICE_HEALTH_CHANGED") {
+                const health = payloadRead.ok ? readDataProperty(payloadRead.value, "health") : { ok: false };
+                const status = health.ok ? readDataProperty(health.value, "status") : { ok: false };
+                audit({ type: "W8_L1_SENSOR_HEALTH_CHANGED", subject: lifecycleSubject,
+                        status: status.ok ? status.value : null, atMs: nowMs() });
+            } else {
+                audit({ type: "W8_L1_SENSOR_REGISTERED", subject: lifecycleSubject,
+                        change: type.value, atMs: nowMs() });
+            }
+            return { applied: false, reason: "not-an-observation" };
+        }
+        if (type.value !== "SENSOR_OBSERVATION" || !result) return { applied: false, reason: "not-an-observation" };
+
+
+        const subject = subjectRead.value;
+        const payload = copySensorValue(payloadRead.value);
+        const resultModality = readDataProperty(result, "modality");
+        const resultChannel = readDataProperty(result, "channelId");
+        const channel = payload && readDataProperty(payload, "channel");
+        const channelIdRead = channel.ok ? readDataProperty(channel.value, "id") : { ok: false };
+        const channelId = channelIdRead.value;
+        const modality = resultModality.ok ? resultModality.value
+            : (resultChannel.ok ? resultChannel.value : channelId);
+        const monotonic = monotonicRead.ok ? monotonicRead.value : undefined;
+        const timestampMs = timestampRead.ok ? timestampRead.value : undefined;
+        if (!payload || !channelIdRead.ok) return { applied: false, reason: "malformed-observation" };
+        if (payload.raw && typeof payload.raw === "object" &&
+            payload.raw.storageRef !== undefined &&
+            (typeof payload.raw.storageRef !== "string" || !/^media:[A-Za-z0-9._:-]{1,128}$/.test(payload.raw.storageRef))) {
+            return { applied: false, reason: "non-canonical-media-reference" };
+        }
+        if (typeof subject !== "string" || typeof channelId !== "string") {
+            return { applied: false, reason: "missing-identity" };
+        }
+        const key = bridgeSensoriumPairKey(subject, channelId);
+        const prior = tracked.get(key);
+        // A FAILED channel stays stopped until BodySchema itself reports the
+        // device back online. `result.reconnected` is deliberately NOT
+        // honoured: it was a caller-supplied flag that bypassed the whole
+        // reconnect story (independent audit of 636ee8d).
+        if (prior?.failed) return { applied: false, reason: "sensor-failed" };
+
+
+        // Dedup: a non-increasing `monotonic` for the same (subject, channel)
+        // is a duplicate/replay — idempotent no-op, never a duplicate belief.
+        if (prior && Number.isFinite(monotonic) && monotonic <= prior.monotonic) {
+            audit({ type: "W8_L1_OBSERVATION_DUPLICATE_DROPPED", subject, channelId, monotonic, atMs: nowMs() });
+            return { applied: false, reason: "duplicate" };
+        }
+
+        // Per-sensor rate cap: sample down (drop the intermediate sample,
+        // never buffer unboundedly) rather than reject/queue.
+        const rateCap = SENSOR_OBSERVATION_RATE_CAP_PER_SEC[resolveSensorRateModality(modality)] ?? SENSOR_OBSERVATION_DEFAULT_RATE_CAP_PER_SEC;
+        const minIntervalMs = 1000 / rateCap;
+        const receivedAtMs = nowMs();
+        if (prior && (receivedAtMs - prior.lastAppliedMs) < minIntervalMs) {
+            return { applied: false, reason: "rate-limited" };
+        }
+
+        const effectiveHealthState = computeEffectiveHealthState(payload.healthState, payload.calibration);
+
+        // Timestamp/causal-order: sampledAtMs (sensor clock) when supplied,
+        // else the envelope's RECEIVE time -- `events.js` already set
+        // event.timestampMs at the sensorium boundary (contract: "If absent,
+        // the bridge uses event.timestamp (receive time) as observedAt").
+        // Reading the bridge clock here instead would let an observation's
+        // causal time drift with however late the bridge happened to run.
+        const sampledAtMs = payload.sample && typeof payload.sample === "object" && !Array.isArray(payload.sample)
+            ? payload.sample.sampledAtMs : undefined;
+        let observedAtMs = Number.isFinite(timestampMs) ? timestampMs : receivedAtMs;
+        let sampledAtMissing = true;
+        if (Number.isFinite(sampledAtMs)) {
+            observedAtMs = sampledAtMs;
+            sampledAtMissing = false;
+        }
+        const skewMs = sampledAtMissing || !Number.isFinite(timestampMs)
+            ? null : (timestampMs - sampledAtMs);
+        const skewedHealthState = (skewMs !== null && (skewMs < 0 || skewMs > 5 * 60 * 1000)
+            && SENSOR_OBSERVATION_HEALTH_PRIORITY[effectiveHealthState] > SENSOR_OBSERVATION_HEALTH_PRIORITY.SUSPECT)
+            ? "SUSPECT" : effectiveHealthState;
+
+        const value = Object.freeze({
+            sample: payload.sample ?? null,
+            calibration: payload.calibration ?? null,
+            healthState: skewedHealthState,
+            frame: payload.frame ?? null,
+            quality: Object.freeze({
+                ...(payload.quality && typeof payload.quality === "object" ? payload.quality : {}),
+                sampledAtMissing,
+                ...(skewMs !== null ? { skewMs } : {})
+            }),
+            raw: payload.raw ?? null
+        });
+
+        const input = {
+            observationId: eventIdRead.ok ? eventIdRead.value : undefined,
+            subject: { entityId: subject },
+            attribute: `sensor:${channelId}`,
+            value,
+            sensor: { sensorId: channelId },
+            tier: "T4",
+            observedAt: new Date(observedAtMs).toISOString()
+        };
+
+        // Calibration change is an audited transition (contract: "... and
+        // calibration change is audited"), compared against the last committed
+        // reference for this channel so a producer cannot swap calibration
+        // silently.
+        const calibrationRef = payload.calibration && typeof payload.calibration === "object"
+            ? payload.calibration.calibrationRef : null;
+        if (prior && prior.calibrationRef !== undefined && prior.calibrationRef !== calibrationRef) {
+            audit({ type: "W8_L1_CALIBRATION_CHANGED", subject, channelId,
+                    from: prior.calibrationRef ?? null, to: calibrationRef ?? null, atMs: nowMs() });
+        }
+
+        // Capacity spans ADMITTED-but-unsettled work (queued + issued). The
+        // victim is always a QUEUED entry, so the shed is real: it is
+        // cancelled before it is ever handed to the world model. If nothing is
+        // queued to shed (all capacity is already issued and awaiting
+        // settlement) the arrival is honestly REJECTED instead of reporting a
+        // shed that did not happen.
+        if ((queue.length + inFlight) >= MAX_PENDING_OBSERVATIONS) {
+            const shed = shedOneForCapacity();
+            if (!shed && (queue.length + inFlight) >= MAX_PENDING_OBSERVATIONS) {
+                audit({ type: "W8_L1_OBSERVATION_REJECTED", subject, channelId,
+                        reason: "pending-capacity", atMs: nowMs() });
+                return { applied: false, reason: "pending-capacity" };
+            }
+        }
+
+        // ORDERING IS DECIDED AT ADMISSION, NOT AT SETTLEMENT. Dedup, the rate
+        // cap, and the FAILED stop-forwarding check all read `tracked`, so if
+        // `tracked` were only updated once a delivery settled, two concurrently
+        // in-flight observations sharing a monotonic would BOTH pass the dedup
+        // check, and out-of-order settlement could regress monotonic, health,
+        // and calibration state (independent audit of b332cf8). Recording the
+        // decision here makes those laws sequential regardless of how the world
+        // model resolves its promises.
+        //
+        // The write is a FRAME on the channel's admission stack, so it can be
+        // undone individually and compositionally (audit of dd15f44).
+        const seq = ++pendingSeq;
+        const admissionBridgeSeq = ++bridgeSeq;
+        const admittedState = {
+            monotonic: Number.isFinite(monotonic) ? monotonic : (prior?.monotonic ?? 0),
+            lastAppliedMs: receivedAtMs,
+            healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState]
+                ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK,
+            failed: skewedHealthState === "FAILED",
+            // Urutan saat kanal ini dinyatakan FAILED. `failedAtSeq` memakai
+            // urutan KOMIT amplop (tetap, jadi perbandingannya bebas urutan
+            // subscriber); `failedAtBridgeSeq` adalah cadangan untuk observasi
+            // sintetis yang tidak pernah dikomit. Keduanya harus BENAR-BENAR
+            // ditulis -- revisi sebelumnya mendeklarasikan `failedAtSeq` tapi
+            // tidak pernah mengisinya, sehingga penjaga urutannya tidak pernah
+            // menyala (audit of dd15f44).
+            failedAtSeq: skewedHealthState === "FAILED" ? commitSequenceFor(body, event) : undefined,
+            failedAtBridgeSeq: skewedHealthState === "FAILED" ? admissionBridgeSeq : undefined,
+            // Komit yang SEDANG dikirim saat observasi ini diadmit. Sebuah
+            // peristiwa lifecycle yang dikirim dalam jendela yang SAMA bukanlah
+            // hal yang lebih baru darinya, walau jembatan memprosesnya
+            // belakangan -- inilah sinyal yang menutup celah re-entrancy tanpa
+            // bergantung pada urutan subscriber.
+            failedAtDeliverySeq: skewedHealthState === "FAILED" ? currentDeliverySequenceFor(body) : undefined,
+            // Referensi kalibrasi ikut tersimpan: perbandingan perubahan
+            // kalibrasi membaca field ini dari state sebelumnya, jadi
+            // menghilangkannya akan mematikan audit perubahan kalibrasi.
+            calibrationRef: calibrationRef ?? null
+        };
+        const frame = { seq, state: admittedState, evicted: null };
+        const existingAdmission = admissionState.get(key);
+        if (existingAdmission) {
+            existingAdmission.frames.push(frame);
+        } else {
+            const base = prior === undefined ? null : { ...prior };
+            admissionState.set(key, { frames: [frame], committed: base, settledSeq: undefined });
+        }
+        tracked.set(key, admittedState);
+        // Eviction happens at admission (so `tracked` stays bounded even during
+        // a large backlog) but its VICTIM is recorded on the frame: if this
+        // admission is later rejected or shed, rollback puts the victim back,
+        // so a failed admission can never permanently erase an unrelated live
+        // FAILED tombstone it happened to push out (audit of dd15f44).
+        frame.evicted = evictTrackedIfOver(MAX_TRACKED_SENSOR_CHANNELS);
+        if (skewedHealthState === "FAILED") {
+            audit({ type: "W8_L1_SENSOR_FAILED", subject, channelId, atMs: nowMs() });
+        }
+
+        const entry = {
+            subject, channelId, seq, input, result: undefined,
+            state: "queued",
+            // Dipakai jalur timeout dan shed untuk membatalkan frame admission
+            // tanpa menyentuh frame lain yang lebih baru (audit of dd15f44).
+            rollback: () => rollbackAdmissionFrame(key, seq),
+            healthPriority: SENSOR_OBSERVATION_HEALTH_PRIORITY[skewedHealthState]
+                ?? SENSOR_OBSERVATION_HEALTH_PRIORITY.OK,
+            onSettled: (value) => {
+                entry.state = "applied";
+                entry.result = value;
+                // COMMIT the frame: the admitted state becomes this channel's
+                // settled state, and any older frames are now moot.
+                settleAdmissionFrame(key, seq, admittedState);
+            },
+            onRejected: (err) => {
+                // Reject-closed: the world model itself refused this
+                // observation (e.g. UNKNOWN_ENTITY — the device has no
+                // corresponding world-model entity yet). The bridge's ONE write
+                // capability is ingestObservation itself (contract "Authority
+                // boundaries") — it never declares entities on the caller's
+                // behalf.
+                entry.state = "rejected";
+                // Reject-closed AND rolled back: a delivery the world model
+                // refused must not keep consuming this channel's
+                // monotonic/rate/FAILED state (audit of 8d4f80c).
+                rollbackAdmissionFrame(key, seq);
+                audit({ type: "W8_L1_OBSERVATION_REJECTED", subject, channelId,
+                        reason: err?.reason ?? err?.code ?? "ingest-failed", atMs: nowMs() });
+            }
+        };
+
+        // Deliver immediately when there is a free delivery slot, so a
+        // synchronous world model is committed before this call returns and
+        // every existing caller keeps its `applied`/`result` semantics. Only
+        // genuine backlog (the delivery window already full) queues.
+        if (inFlight < MAX_IN_FLIGHT_DELIVERIES) {
+            issueEntry(entry);
+            drainQueue();
+        } else {
+            queue.push(entry);
+        }
+
+        // HONEST `applied` (audit of b332cf8): true means the world model
+        // actually accepted this observation. Admitted-but-not-yet-delivered and
+        // issued-but-unsettled work reports false with a named reason, because
+        // downstream reads `applied` as "the world model has this".
+        if (entry.state === "applied") {
+            return { applied: true, healthState: skewedHealthState, result: entry.result };
+        }
+        if (entry.state === "rejected") {
+            return { applied: false, reason: "ingest-rejected" };
+        }
+        return { applied: false, reason: entry.state === "queued" ? "queued" : "pending" };
+        } catch {
+            return { applied: false, reason: "malformed-observation" };
+        }
+    }
+
+    if (body && typeof body.subscribe === "function") {
+        body.subscribe(applyObservationPlan);
+    }
+
+    return Object.freeze({ applyObservationPlan, observability });
+}
+
+/* ===========================================================================
  * RUNTIME CORE COMPOSITION (moved from src/integration/runtimeCore.js)
  * ========================================================================= */
 
@@ -183,10 +1080,20 @@ async function buildRuntimeCoreInternal({
     recoverySystem = null,
     generationLedger = null,
     statusTracker = null,
-     recoveryConfigOverrides = {}
+     recoveryConfigOverrides = {},
      // R5-02: the Wave 6 lane-3 distributed adapter is NOT a public option. It
      // is constructed inside the trusted runtime composition and passed to the
      // Manager as a trusted-internal dependency, never via RuntimeCore options.
+    // ---- Cognition (W7-L7, opt-in, mirrors enableManagerIngress) ----
+    // Default false => zero footprint (GATE-W7-10). Not privileged: no
+    // continuity/trust material crosses this boundary, only an ordinary
+    // mode string and optional plain dependency references, same class of
+    // option as `governor`/`presenceRuntime` above.
+    enableCognition = false,
+    cognitionMode = "off",
+    cognitionCapabilityRegistry = null,
+    cognitionAuditLedger = null,
+    cognitionStores = {}
 } = {}, onCompositionPayload = null) {
 
     if (bus !== null) {
@@ -330,11 +1237,150 @@ async function buildRuntimeCoreInternal({
         }));
     }
 
+    // ---- Cognition (W7-L7, opt-in): composition-only, read-only reference.
+    // Zero influence on any decision made above — nothing in this function
+    // reads `cognition` back. GATE-W7-10/11 hold structurally: with
+    // enableCognition=false (the default) this is simply `null`.
+    let cognition = null;
+    let cognitionAuditLedgerResolved = null;
+    let perceptionLane = null;
+    let closedLoop = null;
+    // W8-L1 (frozen contract): the bridge from Sensorium observations into
+    // W7-L2 world-model ingest. Constructed ONLY when both sides of the
+    // join actually exist (mirrors `enableCognition`'s own opt-in shape;
+    // zero footprint when disabled, same as `cognition` itself).
+    let sensoriumBridge = null;
+    if (enableCognition) {
+        const { createLongHorizonCycle } = require("../cognition/longhorizon");
+        // BIND THE CANONICAL LEDGER OWNER -- do not manufacture a second one.
+        //
+        // A previous revision called `createAuditLedger({})` here and labelled
+        // the result canonical; that is a DIFFERENT instance from the durable
+        // ledger `src/authority/ownerTrustComposition.js` already owns, and it
+        // has no persistence sink, so a "confirmed durable append" claim
+        // against it was false (audit of d409f56). Priority order:
+        //   1. an explicitly caller-supplied ledger (deployment override);
+        //   2. the canonical owner-trust ledger, via the same production
+        //      composition this file already boots for Manager ingress;
+        //   3. a local in-memory ledger ONLY as a documented fallback for the
+        //      boot path where owner-trust was never composed, so the governed
+        //      transition is still recorded rather than silently skipped.
+        cognitionAuditLedgerResolved = cognitionAuditLedger;
+        if (cognitionAuditLedgerResolved == null) {
+            try {
+                const productionComposition = require("../authority/productionComposition");
+                await productionComposition.ensureProductionAuthorityComposed();
+                const composed = productionComposition.getProductionAuthorityComposition();
+                const ownerLedger = composed && composed.ownerTrust && composed.ownerTrust.ledger;
+                if (ownerLedger && typeof ownerLedger.append === "function") {
+                    cognitionAuditLedgerResolved = ownerLedger;
+                }
+            } catch { /* owner-gated ops stay fail-closed; audit binding is best-effort */ }
+        }
+        // NO SINKLESS FALLBACK. A previous revision fell back to
+        // `createAuditLedger({})` when owner-trust was not composed -- which is
+        // exactly the state productionComposition deliberately produces on a
+        // trust-domain failure (`ownerTrust: null`). That fallback therefore
+        // recreated the duplicate-ledger defect and let governed mode start
+        // with no canonical durable record (audit of 321c7b3). Leaving the
+        // ledger null is the correct behaviour: the cognition lane then fails
+        // closed, refusing governed mode rather than proceeding unaudited.
+        cognition = await createLongHorizonCycle({
+            mode: cognitionMode,
+            capabilityRegistry: cognitionCapabilityRegistry,
+            auditLedger: cognitionAuditLedgerResolved,
+            stores: cognitionStores,
+            // Production path: refuse to start governed with no ledger at all.
+            // `getProductionAuthorityComposition()` deliberately resolves
+            // `ownerTrust: null` on a trust-domain failure, so leaving the
+            // ledger null was previously indistinguishable from success and
+            // governed could start with no canonical durable record (audit of
+            // 406553b).
+            requireAudit: cognitionMode === "governed"
+        });
+        if (cognition?.mode !== "off" && cognition?.lanes) {
+            const { createPerception } = require("../cognition/perception");
+            const { createCompletionVerifier } = require("../cognition/closedloop");
+            const perceptionStoreField = readDataProperty(cognitionStores, "perception");
+
+            // W8-L6 trusted completion handoff (composition-owned, NOT a public
+            // RuntimeCore option). The completion verifier — the mechanism that
+            // binds a probe result to canonical execution + verification evidence
+            // and rejects duplicates, wrong bindings, and caller-substituted
+            // observations — is wired here as the perception lane's
+            // `trustedResultAdapter`.
+            //
+            // Its `completionEvidence` port is deliberately fail-closed: the
+            // canonical execution path that would produce evidence for a
+            // PERCEPTION probe (an authorized, verified, sensorium-committed
+            // observation bound to the exact probe digest) does not yet exist in
+            // the Manager-owned execution layer. There is therefore NO public
+            // seam through which a caller can mint completion evidence — a
+            // caller-shaped object, a caller-constructed bridge result, or a
+            // caller assertion can never count as completion. Until that
+            // evidence source is composed, `probeResult` fails closed exactly
+            // as `W8_L2_L6_TRUSTED_RESULT_HANDOFF.md` requires.
+            const completionEvidence = () => null;
+
+            const trustedResultAdapter = createCompletionVerifier({ completionEvidence });
+            perceptionLane = await createPerception({
+                capabilityRegistry: cognitionCapabilityRegistry,
+                selfModel: cognition.lanes.selfModel,
+                worldModel: cognition.lanes.worldModel,
+                attentionPort: cognition.lanes.attention,
+                trustedResultAdapter,
+                store: perceptionStoreField.ok ? perceptionStoreField.value : null,
+                auditLedger: cognitionAuditLedgerResolved
+            });
+
+        }
+        if (core?.body && cognition?.lanes?.worldModel) {
+            sensoriumBridge = bridgeSensoriumToWorldModel({
+                body: core.body,
+                worldModel: cognition.lanes.worldModel,
+                // No dedicated cognition clock is threaded through
+                // `createLongHorizonCycle` at this call site (it defaults
+                // internally to a real Date.now()-based clock) -- the
+                // bridge defaults the same way, rather than coupling to
+                // `presenceClock`, an unrelated subsystem's clock.
+                auditLedger: cognitionAuditLedgerResolved
+            });
+        }
+        if (perceptionLane) {
+            const { createClosedLoop } = require("../cognition/closedloop");
+            closedLoop = createClosedLoop({
+                cycle: cognition,
+                perceptionLane,
+                sensoriumBridge,
+                auditLedger: cognitionAuditLedgerResolved
+            });
+        }
+    }
+
     return Object.freeze({
         version: CORE_VERSION,
 
         // Wave 1 (referensi kanonik):
         wave1: core,
+
+        // Wave 7 (opt-in, composition-only; null unless enableCognition):
+        cognition,
+
+        // W8-L2 (opt-in with active cognition): the bounded question/probe
+        // request lane. It emits data only; Authority owns all dispatch.
+        perceptionLane,
+
+        // W8-L6 (opt-in with active cognition): the closed-loop composition.
+        // No dispatch, no Authority evaluation, no actuator handle; it supplies
+        // the grounded completion handoff that closes W8-L2's probe lifecycle.
+        closedLoop,
+
+        // W8-L1 (opt-in, composition-only; null unless enableCognition AND
+        // both core.body/cognition.lanes.worldModel exist): the sole join
+        // point between the embodiment and cognition pipelines. Exposes
+        // `applyObservationPlan` for a future device-adapter loop; the
+        // bridge is already live-subscribed to `core.body` regardless.
+        sensoriumBridge,
 
         // Wave 2 (pemilik kanonik):
         governor: gov,
@@ -1740,7 +2786,29 @@ async function createRuntimeHost(options = {}) {
     return buildRuntimeHostInternal(options, null);
 }
 
-module.exports = Object.freeze({
+/**
+ * Seam TES: kunci `globalThis` yang HANYA dipasang oleh harness tes.
+ *
+ * Sebelumnya gerbang ini membaca sebuah VARIABEL LINGKUNGAN. Itu terlalu
+ * lemah: `src/config/env.js` memuat berkas `.env` lewat dotenv ke `process.env`,
+ * jadi seorang operator (atau `.env` yang bocor/diwarisi) dapat mengaktifkan
+ * ekspor tes itu TANPA menyentuh kode sama sekali -- persis keberatan audit
+ * 41a7006. Kunci `globalThis` tidak dapat dipasang oleh berkas `.env`, variabel
+ * shell, atau launcher mana pun: ia hanya muncul bila ADA KODE di proses ini
+ * yang memasangnya, dan satu-satunya kode yang melakukannya adalah
+ * `tests/helpers/testEnv.js` (dimuat lewat `--require` sebelum berkas tes).
+ *
+ * Ini tetap seam tes, bukan batas keamanan: memanggil factory itu sendiri tidak
+ * memberi wewenang apa pun (pemanggil memasok `body` dan `worldModel`-nya
+ * sendiri, dan satu-satunya kemampuan tulisnya adalah `ingestObservation`).
+ * Yang dijaga di sini adalah permukaan ekspor produksi tetap bersih sesuai
+ * kontrak beku ("Not exported outside the composition function").
+ */
+function isTestHarness() {
+    return globalThis[Symbol.for("damar.w8l1.testSeam")] === true;
+}
+
+const PUBLIC_EXPORTS = {
     createRuntimeCore,
     createRuntimeHost,
     CORE_VERSION,
@@ -1756,4 +2824,17 @@ module.exports = Object.freeze({
     // a STABLE VALUE — no dynamic getter, no public class-builder in the
     // handoff path.  voice/voiceRuntime.js re-exports it for import compat.
     VoiceRuntime
-});
+};
+
+// W8-L1: the bridge factory is PRIVATE TO THIS MODULE'S `enableCognition`
+// BLOCK. The frozen contract is explicit -- "Not exported outside the
+// composition function; the composition's returned object may optionally
+// expose the bound applyObservationPlan" -- so production exposes ONLY the
+// bound plan (`core.sensoriumBridge.applyObservationPlan`), never the factory
+// (audit of 5520019). Unit tests of the bridge's own
+// dedup/rate-limit/health-floor/shed/reverse-settlement logic still need to
+// inject a controllable world model and clock, which only the factory allows,
+// so it is reachable ONLY under the test harness's own flag.
+module.exports = Object.freeze(isTestHarness()
+    ? { ...PUBLIC_EXPORTS, bridgeSensoriumToWorldModel }
+    : PUBLIC_EXPORTS);

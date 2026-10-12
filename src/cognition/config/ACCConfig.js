@@ -12,6 +12,15 @@
  * tidak dipakai reducer inti.
  */
 
+// Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+// independen putaran-1, AUD-P2-2): "governed" ditambahkan ke sini secara
+// keliru saat prasyarat envelope v2 -- ini enum mode ACC CORE LAMA (dipakai
+// CognitiveCore.initialize()/feedShadow, yang hanya tahu off/shadow), BUKAN
+// mode siklus W7-L7 (itu enum terpisah di longhorizon/bounds.js). Dengan
+// "governed" di sini, DAMAR_ACC=governed lolos coercion off/shadow lama dan
+// diam-diam mengaktifkan CognitiveCore untuk env value yang CognitiveCore
+// sendiri tidak punya semantik untuknya -- regresi kandidat pada jalur di
+// luar cakupan Wave7. Dikembalikan ke off/shadow saja.
 const MODES = Object.freeze(["off", "shadow"]);
 
 const DEFAULTS = Object.freeze({

@@ -1,0 +1,1 @@
+{"schemaVersion":"uix-w1.commands.v1","source":["src/routes/api/v1/console.js","src/cli","src/manager"],"families":["chat/session","runtime","terminal","memory","tools","channels","voice","devices/home","companion","MCP","integrations","Mata Dewa","OSINT","Lab"],"mutationsRequire":"Manager or specific authority middleware"}

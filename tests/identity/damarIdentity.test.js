@@ -112,7 +112,7 @@ test("3: kanal aktif menyelesaikan ke identitas Damar yang sama", () => {
         "preflight harus mengizinkan header kanal kanonik");
 
     // Klien aktif MENGIRIM ejaan kanonik; ejaan lama hanya DIBACA.
-    for (const rel of ["src/cli/client.js", "apps/console/renderer/lib/api.js"]) {
+    for (const rel of ["src/cli/client.js"]) {
         const teks = fs.readFileSync(path.join(ROOT, rel), "utf8");
         assert.match(teks, /x-damar-channel/,
             `${rel} harus mengirim header kanal kanonik`);

@@ -49,6 +49,8 @@ function create({
     compressible = true,
     provenance = null,
     sensitivity = null,
+    freshness = null,
+    fact = null,
     metadata = {}
 }) {
 
@@ -57,6 +59,33 @@ function create({
     }
 
     const text = String(content);
+
+    const freshnessState = freshness?.state ?? "unknown";
+    if (!["known", "unknown", "stale"].includes(freshnessState)) {
+        throw new Error(`ContextItem freshness state tidak valid: ${freshnessState}`);
+    }
+
+    const normalizedFreshness = Object.freeze({
+        state: freshnessState,
+        version: freshness?.version ?? null,
+        observedAt: freshness?.observedAt ?? null,
+        expiresAt: freshness?.expiresAt ?? null,
+        invalidated: Boolean(freshness?.invalidated)
+    });
+
+    let normalizedFact = null;
+    if (fact !== null && fact !== undefined) {
+        if (!fact.key || !["known", "unknown", "conflicting"].includes(fact.state ?? "known")) {
+            throw new Error("ContextItem fact membutuhkan key dan state yang valid.");
+        }
+        normalizedFact = Object.freeze({
+            key: String(fact.key),
+            value: fact.value ?? null,
+            state: fact.state ?? "known",
+            source: fact.source ?? provenance ?? source,
+            observedAt: fact.observedAt ?? null
+        });
+    }
 
     return {
         id: `${kind}:${source}:${++SEQ}`,
@@ -73,10 +102,31 @@ function create({
         compressible: compressible !== false,
         provenance: provenance ?? source,
         sensitivity: sensitivity ?? null,
-        metadata
+        metadata,
+        freshness: normalizedFreshness,
+        fact: normalizedFact
     };
 
 }
 
-module.exports = { KIND, create, estimateTextTokens };
+function freshnessState(item, now = Date.now()) {
+    const f = item?.freshness ?? {};
+    if (f.invalidated || f.state === "stale") return "stale";
+    if (f.expiresAt !== null && f.expiresAt !== undefined && now >= f.expiresAt) return "stale";
+    return f.state ?? "unknown";
+}
 
+function invalidate(item, { version = null, observedAt = null } = {}) {
+    return {
+        ...item,
+        freshness: Object.freeze({
+            ...(item.freshness ?? {}),
+            state: "stale",
+            invalidated: true,
+            version,
+            observedAt
+        })
+    };
+}
+
+module.exports = { KIND, create, estimateTextTokens, freshnessState, invalidate };

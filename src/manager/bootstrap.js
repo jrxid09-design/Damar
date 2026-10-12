@@ -259,11 +259,105 @@ function createDamarManagerIngressDomain({ bus, mediaSubsystem = null, sessionCo
     }
 }
 
-module.exports = Object.freeze({
-    createDamarManager,
-    createDamarManagerIngressDomain
-    // R4-04/DB-02: no wave6 install/seam primitive is exported from the
-    // public manager surface. The privileged wave6Adapter dependency is
-    // captured lexically inside createDamarManager() (moved to
-    // src/manager/internal/managerBootstrap.js — see its own header).
-});
+  /**
+   * W8-IW1 — Manager-owned accessor for the coding capability runtime.
+   *
+   * The runtime owns the low-level coding drivers (LSP/serena/graphify/
+   * powershell/git/test/refactor). `src/coding/*` obtains capability-backed
+   * adapters through this accessor, so those drivers are reachable only on a
+   * canonical path and every call must pass authority first. This accessor
+   * grants nothing: the runtime authorizes exclusively through the canonical
+   * evaluator against owner-ratified grants, and denies otherwise.
+   */
+  function getCodingCapabilityRuntime() {
+      return require("./internal/codingCapabilities").codingRuntime();
+  }
+
+  /**
+   * Composition-time installation of a coding capability runtime that carries a
+   * real authority store. Not a bypass: it must have been created by the runtime
+   * module, it can be installed once, and it still requires owner-ratified grants.
+   */
+  function installCodingCapabilityRuntime(runtime) {
+      return require("./internal/codingCapabilities").installCodingCapabilityRuntime(runtime);
+  }
+
+  /**
+   * W8-IW1 — Manager-owned accessor for the CLI capability runtime.
+   *
+   * The CLI is INGRESS, NEVER AUTHORITY. Its consequential operations (start the
+   * daemon / open an SSH tunnel) are requested as capabilities through this
+   * accessor and must pass authority first; the CLI itself holds no spawn call.
+   * This accessor grants nothing.
+   */
+  function getCliCapabilityRuntime() {
+      return require("./internal/cliCapabilities").cliRuntime();
+  }
+
+  /**
+   * Composition-time installation of a CLI capability runtime carrying a real
+   * authority store. Not a bypass: must have been created by the runtime module,
+   * installs once, and still requires owner-ratified grants.
+   */
+  function installCliCapabilityRuntime(runtime) {
+      return require("./internal/cliCapabilities").installCliCapabilityRuntime(runtime);
+  }
+
+  /** W8-IW1 — Manager-owned embodiment identity persistence runtime. */
+  function getIdentityCapabilityRuntime() {
+      return require("./internal/identityCapabilities").identityRuntime();
+  }
+
+  function installIdentityCapabilityRuntime(runtime) {
+      return require("./internal/identityCapabilities").installIdentityCapabilityRuntime(runtime);
+  }
+
+  function isIdentityCapabilityRuntime(runtime) {
+      return require("./internal/identityCapabilities").isIdentityCapabilityRuntime(runtime);
+  }
+
+  /** W8-IW1 — Manager-owned accessor for the ADB capability runtime.
+   *  Android tools are INGRESS, NEVER AUTHORITY. This accessor grants nothing:
+   *  the runtime authorizes exclusively through the canonical evaluator. */
+  function getAdbCapabilityRuntime() {
+      return require("./internal/adbCapabilities").adbRuntime();
+  }
+
+  function installAdbCapabilityRuntime(runtime) {
+      return require("./internal/adbCapabilities").installAdbCapabilityRuntime(runtime);
+  }
+
+  function isAdbCapabilityRuntime(runtime) {
+      return require("./internal/adbCapabilities").isAdbCapabilityRuntime(runtime);
+  }
+
+  /** W8-IW1 — Manager-owned accessor for the voice I/O capability runtime.
+   *  Voice providers are INGRESS, NEVER AUTHORITY. This accessor grants nothing. */
+  function getVoiceCapabilityRuntime() {
+      return require("./internal/voiceCapabilities").voiceRuntime();
+  }
+
+  function installVoiceCapabilityRuntime(runtime) {
+      return require("./internal/voiceCapabilities").installVoiceCapabilityRuntime(runtime);
+  }
+
+  module.exports = Object.freeze({
+      createDamarManager,
+      createDamarManagerIngressDomain,
+      getCodingCapabilityRuntime,
+      installCodingCapabilityRuntime,
+      getCliCapabilityRuntime,
+      installCliCapabilityRuntime,
+      getIdentityCapabilityRuntime,
+      installIdentityCapabilityRuntime,
+      isIdentityCapabilityRuntime,
+      getAdbCapabilityRuntime,
+      installAdbCapabilityRuntime,
+      isAdbCapabilityRuntime,
+      getVoiceCapabilityRuntime,
+      installVoiceCapabilityRuntime
+      // R4-04/DB-02: no wave6 install/seam primitive is exported from the
+      // public manager surface. The privileged wave6Adapter dependency is
+      // captured lexically inside createDamarManager() (moved to
+      // src/manager/internal/managerBootstrap.js �?" see its own header).
+  });

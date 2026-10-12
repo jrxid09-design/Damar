@@ -102,11 +102,11 @@ function failed(id, error, exec = null) {
  * enginenya sendiri bermasalah, hasil tetap dikembalikan dengan
  * status "belum terverifikasi".
  */
-async function after(id, args, result) {
+async function after(id, args, result, tool = null) {
 
     try {
 
-        const report = await verifier.verify(id, args, result);
+        const report = await verifier.verify(id, args, result, tool);
 
         if (report.state !== "skipped") {
             telemetry.publish("tool:verify", {

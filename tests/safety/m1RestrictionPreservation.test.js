@@ -328,6 +328,10 @@ ToolRegistry.register("m1Skills", {
     name: "probe",
     description: "Probe M-1.",
     parameters: {},
+    // The M1-G contract exercises restriction preservation, not effect
+    // classification. Declare this fixture read-only so the frozen
+    // unknown-effect fail-closed policy does not mask that contract.
+    readOnly: true,
     execute: async () => { executed.push("m1Skills.probe"); return { ok: true }; }
 });
 aiRuntime.refreshTools();

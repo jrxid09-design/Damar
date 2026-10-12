@@ -1,0 +1,14 @@
+"use strict";
+
+const BOUNDS = Object.freeze({
+    MAX_STAGE_ASSEMBLIES: 7,
+    MAX_CONTEXT_POOL: 256,
+    MAX_PINS: 16,
+    MAX_ASSEMBLY_TOKENS: 4096,
+    FRESHNESS_TTL_MS: 5 * 60 * 1000,
+    RESERVED_SAFETY_SLOTS: 2,
+});
+
+const WORKSPACE_SCHEMA_VERSION = 1;
+
+module.exports = { BOUNDS, WORKSPACE_SCHEMA_VERSION };

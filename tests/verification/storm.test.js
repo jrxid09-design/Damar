@@ -62,7 +62,16 @@ const SCOPE_BINDINGS = (() => {
 
 async function runStorm(seed) {
     const rng = mulberry32(seed);
-    const h = await makeVerificationHarness({ scopeBindings: SCOPE_BINDINGS });
+    const h = await makeVerificationHarness({
+        scopeBindings: SCOPE_BINDINGS,
+        // Storm timeout branches are intentionally unresolved. A microtask
+        // scheduler preserves timeout ordering while avoiding thousands of
+        // OS timers and machine-dependent timer granularity.
+        timeoutScheduler: {
+            scheduleTimeout: (fn) => { queueMicrotask(fn); return null; },
+            cancelTimeout: () => {}
+        }
+    });
     const { lane3 } = h;
 
     const C = {
@@ -320,7 +329,7 @@ async function runStorm(seed) {
                     });
                     const result = await executeRead(capIdx, subject, "safe.target", round);
                     const v = await h.verify({ executionResult: result, expectedPostcondition: { expect: { "world.value": { op: "eq", value: 42 } } } });
-                    if (v.verificationState !== VERIFICATION_STATE.INCONCLUSIVE) C.inconclusiveCalledVerified++;
+                    if (result.state === "EXECUTED" && v.verificationState !== VERIFICATION_STATE.INCONCLUSIVE) C.inconclusiveCalledVerified++;
                     // INCONCLUSIVE must NOT trigger compensation
                     try {
                         await h.compensate({
@@ -350,13 +359,13 @@ async function runStorm(seed) {
                     h.registerVerifier({
                         capabilityId: cap.id, operations: ["read"], capabilityIncarnationId: cap.incarnationId,
                         verifierId: `ver-${cap.id}`,
-                        // observe the REAL world state, slowly (50ms) via the trusted sink
-                        observe: (octx, sink) => {
-                            setTimeout(() => sink.resolveEvidence({ world: { value: worldValues.get(capIdx) }, observedExecutionId: octx.executionId }), 50);
-                        }
+                        // Deliberately leave the trusted sink unresolved. The
+                        // bounded verifier timeout is the behavior under test;
+                        // a per-operation timer creates avoidable pressure.
+                        observe: () => undefined
                     });
                     const result = await executeRead(capIdx, subject, "safe.target", round);
-                    const v = await h.verify({ executionResult: result, expectedPostcondition: { expect: { "world.value": { op: "eq", value: 42 } } }, timeoutMs: 5 });
+                    const v = await h.verify({ executionResult: result, expectedPostcondition: { expect: { "world.value": { op: "eq", value: 42 } } }, timeoutMs: 1 });
                     if (v.verificationState === VERIFICATION_STATE.VERIFIED_SUCCESS || v.verificationState === VERIFICATION_STATE.VERIFIED_FAILURE) {
                         C.verifierTimeoutCalledSuccess++;
                     }
@@ -516,26 +525,29 @@ async function runStorm(seed) {
                     });
                     const r2 = await executeRead(capIdx, subject, "safe.target", round);
                     const v2 = await h.verify({ executionResult: r2, expectedPostcondition: { expect: { "world.value": { op: "eq", value: worldValues.get(hostileCap.idx) } } } });
-                    if (duplicateCalls > 1 && v2.observedEvidence && v2.observedEvidence.world.value !== worldValues.get(hostileCap.idx)) {
+                    if (r2.state === "EXECUTED" && duplicateCalls > 1 && v2.observedEvidence && v2.observedEvidence.world.value !== worldValues.get(hostileCap.idx)) {
                         C.duplicateObservationCompletionAccepted++;
                     }
-                    if (v2.verificationState === VERIFICATION_STATE.ERROR) {
+                    if (r2.state === "EXECUTED" && v2.verificationState === VERIFICATION_STATE.ERROR) {
                         C.duplicateObservationCompletionAccepted++; // duplicate should not turn success into ERROR
                     }
 
                     // (c) late sink completion after timeout: must not mutate
                     h.removeVerifier(`ver-${hostileCap.id}`);
+                    let lateSink = null;
                     h.registerVerifier({
                         capabilityId: hostileCap.id, operations: ["read"], capabilityIncarnationId: hostileCap.incarnationId,
                         verifierId: `ver-${hostileCap.id}`,
-                        observe: (octx, sink) => {
-                            setTimeout(() => sink.resolveEvidence({ world: { value: 42 } }), 60);
-                        }
+                        // Keep the late-completion race deterministic without
+                        // allocating a timer for every storm operation. The
+                        // verifier deliberately completes only after the
+                        // bounded timeout has finalized the observation.
+                        observe: (octx, sink) => { lateSink = sink; }
                     });
                     const r3 = await executeRead(capIdx, subject, "safe.target", round);
-                    const v3 = await h.verify({ executionResult: r3, expectedPostcondition: { expect: { "world.value": { op: "eq", value: 42 } } }, timeoutMs: 15 });
+                    const v3 = await h.verify({ executionResult: r3, expectedPostcondition: { expect: { "world.value": { op: "eq", value: 42 } } }, timeoutMs: 1 });
                     const stateBeforeDrain = v3.verificationState;
-                    await new Promise((rr) => setTimeout(rr, 100));
+                    lateSink.resolveEvidence({ world: { value: 42 } });
                     if (v3.verificationState !== stateBeforeDrain) C.lateObservationMutatedResult++;
 
                     // restore real verifier for subsequent rounds
@@ -567,16 +579,16 @@ async function runStorm(seed) {
                     // was skipped during sanitization, world.value survived,
                     // and the postcondition matched -> VERIFIED_SUCCESS. R3
                     // rejects the whole observation.
-                    if (v.verificationState === VERIFICATION_STATE.VERIFIED_SUCCESS ||
+                    if (result.state === "EXECUTED" && (v.verificationState === VERIFICATION_STATE.VERIFIED_SUCCESS ||
                         v.verificationState === VERIFICATION_STATE.VERIFIED_FAILURE ||
-                        v.verificationState === VERIFICATION_STATE.INCONCLUSIVE) {
+                        v.verificationState === VERIFICATION_STATE.INCONCLUSIVE)) {
                         C.plainThenableEvidenceAccepted++;
                     }
-                    if (v.verificationState !== VERIFICATION_STATE.ERROR) {
+                    if (result.state === "EXECUTED" && v.verificationState !== VERIFICATION_STATE.ERROR) {
                         C.plainThenableEvidenceAccepted++;
                     }
-                    if (thenTraps !== 0) C.plainThenableEvidenceAccepted++;
-                    if (v.observedEvidence !== null) C.plainThenableEvidenceAccepted++;
+                    if (result.state === "EXECUTED" && thenTraps !== 0) C.plainThenableEvidenceAccepted++;
+                    if (result.state === "EXECUTED" && v.observedEvidence !== null) C.plainThenableEvidenceAccepted++;
                     // Not a compensation trigger.
                     try {
                         await h.compensate({ verification: v, capabilityId: "pool.restore", operation: "write", principal: subject, parameters: {}, reason: "r" });

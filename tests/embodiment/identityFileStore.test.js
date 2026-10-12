@@ -23,6 +23,11 @@ const {
     persistIdentity,
     loadIdentity
 } = require("../../src/embodiment/identity/store");
+const { identityCapabilityRuntime } = require("../helpers/identityCapabilityFixture");
+
+function fileStore(file) {
+    return createFileIdentityStore(file, { capabilityRuntime: identityCapabilityRuntime() });
+}
 
 function tmpDir() {
     return fs.mkdtempSync(path.join(os.tmpdir(), "identity-filestore-"));
@@ -46,10 +51,10 @@ test("register → persist → restart → same identity", async () => {
     const svc = emb.createIdentityService({});
     const dev = svc.registerIdentity({ namespace: "channel", stableKey: "dev-A", displayName: "Device A" });
 
-    await persistIdentity(svc, createFileIdentityStore(file));
+    await persistIdentity(svc, fileStore(file));
     assert.equal(fs.existsSync(file), true);
 
-    const restored = await loadIdentity({ store: createFileIdentityStore(file) });
+    const restored = await loadIdentity({ store: fileStore(file) });
     const r = restored.getIdentity(dev.deviceId);
     assert.ok(r, "identity must survive restart");
     assert.equal(r.deviceId, dev.deviceId);
@@ -63,8 +68,8 @@ test("paired/trusted → persist → restart → same established state + bindin
     const svc = emb.createIdentityService({});
     const { deviceId } = pairDevice(svc, "dev-paired");
 
-    await persistIdentity(svc, createFileIdentityStore(file));
-    const restored = await loadIdentity({ store: createFileIdentityStore(file) });
+    await persistIdentity(svc, fileStore(file));
+    const restored = await loadIdentity({ store: fileStore(file) });
     const r = restored.getIdentity(deviceId);
     assert.equal(r.pairingState, "PAIRED", "paired state must persist across restart");
     const restoredRow = restored.serialize().devices.find((d) => d.deviceId === deviceId);
@@ -79,8 +84,8 @@ test("revoked → persist → restart → still revoked", async () => {
     const { deviceId } = pairDevice(svc, "dev-revoked");
     svc.revoke(deviceId);
 
-    await persistIdentity(svc, createFileIdentityStore(file));
-    const restored = await loadIdentity({ store: createFileIdentityStore(file) });
+    await persistIdentity(svc, fileStore(file));
+    const restored = await loadIdentity({ store: fileStore(file) });
     assert.equal(restored.getIdentity(deviceId).pairingState, "REVOKED",
         "a revoked device must remain revoked after restart (restore never upgrades trust)");
     fs.rmSync(dir, { recursive: true, force: true });
@@ -91,7 +96,7 @@ test("corrupt store fails closed (never silently resets to empty identity)", asy
     const file = path.join(dir, "identity.json");
     const svc = emb.createIdentityService({});
     pairDevice(svc, "dev-corrupt");
-    await persistIdentity(svc, createFileIdentityStore(file));
+    await persistIdentity(svc, fileStore(file));
 
     fs.writeFileSync(file, "CORRUPT-NOT-JSON{{{", "utf8");
     await assert.rejects(
@@ -118,7 +123,7 @@ test("partial write: previous valid state survives an interrupted later write", 
     const file = path.join(dir, "identity.json");
     const svc = emb.createIdentityService({});
     const { deviceId } = pairDevice(svc, "dev-partial");
-    await persistIdentity(svc, createFileIdentityStore(file));
+    await persistIdentity(svc, fileStore(file));
 
     // Simulate an interrupted/torn later write: a leftover tmp file must NOT
     // clobber the committed snapshot.
@@ -134,7 +139,7 @@ test("overlapping writes do not silently corrupt canonical state", async () => {
     const file = path.join(dir, "identity.json");
     const svcA = emb.createIdentityService({});
     pairDevice(svcA, "dev-a");
-    const store = createFileIdentityStore(file);
+    const store = fileStore(file);
 
     // Two near-simultaneous saves: both complete; the file stays a valid
     // snapshot (the last committed writer wins, never a torn interleave).
@@ -144,7 +149,7 @@ test("overlapping writes do not silently corrupt canonical state", async () => {
         persistIdentity(svcA, store),
         persistIdentity(svcB, store)
     ]);
-    const restored = await loadIdentity({ store: createFileIdentityStore(file) });
+    const restored = await loadIdentity({ store: fileStore(file) });
     const stats = restored.stats();
     assert.ok(stats.devices >= 1, "at least one device present after overlapping writes");
     fs.rmSync(dir, { recursive: true, force: true });
@@ -157,8 +162,8 @@ test("in-flight pairing normalizes to UNPAIRED across restart (transient not dur
     const dev = svc.registerIdentity({ namespace: "channel", stableKey: "dev-inflight", displayName: "x" });
     svc.beginPairing(dev.deviceId); // CHALLENGE_ISSUED — transient
 
-    await persistIdentity(svc, createFileIdentityStore(file));
-    const restored = await loadIdentity({ store: createFileIdentityStore(file) });
+    await persistIdentity(svc, fileStore(file));
+    const restored = await loadIdentity({ store: fileStore(file) });
     assert.equal(restored.getIdentity(dev.deviceId).pairingState, "UNPAIRED",
         "in-flight pairing must normalize to UNPAIRED across restart");
     fs.rmSync(dir, { recursive: true, force: true });

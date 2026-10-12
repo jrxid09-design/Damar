@@ -1,0 +1,11 @@
+{
+  "schema_version":"uix-w2.device-surface.v1",
+  "device_kinds":["local_host","paired_desktop","phone_companion","remote_damar_node","sensor_device","actuator_device","virtual_software_device"],
+  "canonical_owner":"frozen device identity/capability registry and canonical device adapters",
+  "experience_contract":{"identity":"device_id, name, provenance","availability":"online/offline/unknown with heartbeat age","trust":"pairing, trust, revocation","capabilities":"canonical capability references with exists/reachable/governed distinctions","sensors":"source, consent, freshness, availability","actuators":"effect, risk, authority requirement","health":"resource and adapter health","missions":"canonical mission/task references","security":"posture/incidents","activity":"redacted recent canonical events"},
+  "surface_roles":{"idle":"lightweight current device/context state and alerts","dashboard":"deep device/trust/capability/mission inspection","cli":"read, pair/administer where existing API permits, forensic","companion":"presence extension and sensor/device bridge","remote_mesh":"trusted distributed node projection","mcp":"explicitly exposed device tools only"},
+  "rules":["device UI is not device registry","sensor observation is evidence not authority","actuator request enters normal authority path","remote node is not a second Damar identity","offline is explicit and never inferred as healthy"],
+  "mata_dewa":{"surface":"bounded awareness summary, observed devices, spatial/host context, request provenance, freshness, sensor availability","current_truth":"canonical runtime subsystem; Sensorium lifecycle and Observation-to-Context implemented/verified","not_claimed":["continuous vision","OCR","window capture","continuous cockpit perception","GEV renderer"]},
+  "dcd":{"surface":["signals","detections","incidents","analysis","simulation","response proposals","posture","evidence","history"],"boundary":"DCD is not authority; detection/proposal never directly authorizes response"},
+  "not_implemented_in_w2":true
+}

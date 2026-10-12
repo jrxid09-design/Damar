@@ -11,6 +11,16 @@ const { fail, structuredCopy } = require("../core/util");
 const { DeviceIdentityService } = require("./service");
 const { createFileIdentityStore } = require("./fileStore");
 
+function createManagedFileIdentityStore(filePath, options = {}) {
+    const managerBootstrap = require("../../manager/bootstrap");
+    const capabilityRuntime = options.capabilityRuntime ??
+        managerBootstrap.getIdentityCapabilityRuntime();
+    if (!managerBootstrap.isIdentityCapabilityRuntime(capabilityRuntime)) {
+        throw new TypeError("identity store requires a Manager-composed capability runtime");
+    }
+    return createFileIdentityStore(filePath, { ...options, capabilityRuntime });
+}
+
 function createMemoryIdentityStore() {
     let saved = null;
     return {
@@ -32,4 +42,4 @@ async function loadIdentity({ store, clock, config, entropy, body } = {}) {
     return DeviceIdentityService.restore(data, { clock, config, entropy, body });
 }
 
-module.exports = { createMemoryIdentityStore, persistIdentity, loadIdentity, createFileIdentityStore };
+module.exports = { createMemoryIdentityStore, persistIdentity, loadIdentity, createFileIdentityStore: createManagedFileIdentityStore };

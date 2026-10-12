@@ -1,0 +1,1 @@
+{"schemaVersion":"uix-w1.synthesis-matrix.v1","source":"data/emergent_feature_capability_catalog.json","rules":["DESIGNED != IMPLEMENTED","COMPOSABLE != COMPOSED","POSSIBLE != CERTIFIED"]}

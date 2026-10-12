@@ -5,7 +5,7 @@ const Budget = require("../tools/Budget");
 const { TurnController } = require("../tools/TurnController");
 const toolStats = require("../tools/ToolStats");
 const { canonicalRequestExec } = require("../runtime/requestIdentity");
-const { createInternalGrantDomain } = require("../tools/internalGrant");
+const { createInternalGrantDomain, isCanonicalInternalGrant: isGlobalGrant, isToolAuthorizedByGrant: isGlobalToolAuth, registerGrant: registerGrantGlobal } = require("../tools/internalGrant");
 const executorGrantDomains = new WeakMap();
 const executorRegistries = new WeakMap();
 const executorToolExecutors = new WeakMap();
@@ -74,6 +74,20 @@ class RuntimeExecutor {
 
         return this;
 
+    }
+
+    /**
+     * Mint a canonical grant for this executor's domain.
+     * Tests and trusted callers use this instead of passing an external grantDomain.
+     */
+    mintGrant({ authorizedTools = [], role, provenance = "runtime" } = {}) {
+        const { domain } = executorGrantDomains.get(this);
+        const grant = domain.mintCanonicalInternalGrant({ authorizedTools, role, provenance });
+        // P1-H-FIX: also register with global singleton so grant survives
+        // runtime boundary crossings (AIRuntime, resolveDelegator check
+        // only the module singleton, not per-executor domains).
+        registerGrantGlobal(grant);
+        return grant;
     }
 
     /**
@@ -151,10 +165,13 @@ class RuntimeExecutor {
         // langsung — loop tool (executeTools → request.exec) dan
         // deferred disclosure memakai identitas yang SAMA dengan
         // disklosur awal; capabilitySet tidak pernah tertinggal di sini.
-        const domain = executorGrantDomains.get(this).domain;
-        request.exec = domain.isCanonicalInternalGrant(request.exec)
-            ? request.exec
-            : canonicalRequestExec(request);
+        const binding = executorGrantDomains.get(this);
+        const domain = binding.domain;
+        if (!domain.isCanonicalInternalGrant(request.exec)) {
+            // P1-1-FIX: do NOT register caller-supplied objects — only
+            // mintCanonicalInternalGrant may produce canonical grants.
+            request.exec = canonicalRequestExec(request);
+        }
 
         const plan = this.startPlan(request);
 
@@ -207,13 +224,27 @@ class RuntimeExecutor {
 
             }
 
-            // MODEL TOOL CALL != AUTHORITY. Provider output is untrusted;
-            // only the canonical in-process grant may cross this final sink.
-            // Empty/omitted tools, role, and channel are never permission.
+            // MODEL TOOL CALL != AUTHORITY. Provider output is untrusted.
+            // P1-2/P1-A-FIX: three-way grant check:
+            //   (a) this-domain canonical grant → enforce authorizedTools via domain
+            //   (b) global-singleton canonical grant → enforce authorizedTools via global
+            //       (P1-A: foreign grant must not bypass authorizedTools — closes the
+            //        empty-scope loophole on the default-domain lenient path)
+            //   (c) plain exec (production AIRuntime path) → pass through to ToolExecutor
+            //       so assertExecution can enforce role + capabilitySet restrictions
             const calls = response.toolCalls || [];
-            if (!domain.isCanonicalInternalGrant(request.exec) ||
-                !calls.every(call => domain.isToolAuthorizedByGrant(
-                    request.exec, call.name || call.function?.name))) {
+            const _isThisDomain = domain.isCanonicalInternalGrant(request.exec);
+            const _stripTools = binding.externallySelected
+                ? (!_isThisDomain || !calls.every(c => domain.isToolAuthorizedByGrant(
+                      request.exec, c.name || c.function?.name)))
+                : _isThisDomain
+                    ? !calls.every(c => domain.isToolAuthorizedByGrant(
+                          request.exec, c.name || c.function?.name))
+                    : isGlobalGrant(request.exec)
+                        ? !calls.every(c => isGlobalToolAuth(
+                              request.exec, c.name || c.function?.name))
+                        : false;
+            if (_stripTools) {
                 this.finishPlan(plan);
                 return { ...response, toolCalls: [], finishReason: response.finishReason ?? "stop" };
             }
@@ -895,7 +926,8 @@ class RuntimeExecutor {
 
         // H1/CLOSURE: paritas dengan execute() — streaming bukan hop
         // pelucutan identitas.
-        const domain = executorGrantDomains.get(this).domain;
+        const binding = executorGrantDomains.get(this);
+        const domain = binding.domain;
         request.exec = domain.isCanonicalInternalGrant(request.exec)
             ? request.exec
             : canonicalRequestExec(request);
@@ -960,12 +992,20 @@ class RuntimeExecutor {
 
             }
 
-            // Keep streaming parity with execute(): never announce or run a
-            // provider tool call without canonical trusted execution context.
+            // Streaming parity with execute(): same three-way grant check.
             const calls = round.toolCalls || [];
-            if (!domain.isCanonicalInternalGrant(request.exec) ||
-                !calls.every(call => domain.isToolAuthorizedByGrant(
-                    request.exec, call.name || call.function?.name))) {
+            const _isThisDomainS = domain.isCanonicalInternalGrant(request.exec);
+            const _stripToolsS = binding.externallySelected
+                ? (!_isThisDomainS || !calls.every(c => domain.isToolAuthorizedByGrant(
+                      request.exec, c.name || c.function?.name)))
+                : _isThisDomainS
+                    ? !calls.every(c => domain.isToolAuthorizedByGrant(
+                          request.exec, c.name || c.function?.name))
+                    : isGlobalGrant(request.exec)
+                        ? !calls.every(c => isGlobalToolAuth(
+                              request.exec, c.name || c.function?.name))
+                        : false;
+            if (_stripToolsS) {
                 this.finishPlan(plan);
                 yield new AIStreamChunk({
                     id: round.id,

@@ -46,7 +46,12 @@ async function createAccCore({
 
 }
 
-module.exports = {
+// FG-03: the public barrel is FROZEN. The governed facade was already frozen,
+// but exporting it through a mutable object left the same hole one level up:
+// `Reflect.set(cognition, "governed", permissiveFacade)` succeeded, letting a
+// caller replace a guard after the fact (independent audit of 8f78a21). Freezing
+// the barrel closes the replacement path; reading members is unaffected.
+module.exports = Object.freeze({
     createACCConfig, realClock, manualClock,
     CognitiveCore, createAccCore,
     createSqliteAccStore, createMemoryAccStore,
@@ -64,5 +69,6 @@ module.exports = {
     ExperienceEncoder: require("./autobiography/ExperienceEncoder"),
     SubstrateRouter: require("./substrate/SubstrateRouter"),
     InteroceptiveBus: require("./interoception/InteroceptiveBus"),
-    FoundationAdapter: require("./integration/FoundationEventAdapter")
-};
+    FoundationAdapter: require("./integration/FoundationEventAdapter"),
+    governed: require("./governed")
+});

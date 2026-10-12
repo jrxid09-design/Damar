@@ -1,0 +1,885 @@
+"use strict";
+
+/**
+ * W8 LEGACY SECOND-PATH REMEDIATION — ToolBus authority removal.
+ *
+ * Owner decision: ROUTE_THROUGH_CANONICAL_AUTHORITY.
+ * ToolBus is a legacy compatibility façade ONLY: no execution authority, no
+ * authority evaluation, no handler reference, no direct handler invocation.
+ *
+ * These are adversarial regression tests: each one tries to make a legacy path
+ * execute something, and every attempt must fail closed.
+ */
+
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const { ToolRegistry } = require("../../../src/core/tools");
+const toolBus = require("../../../src/autonomy/ToolBus");
+const telemetry = require("../../../src/services/telemetryService");
+const { createCanonicalActuationFacade } = require("../../../src/action/bootstrap");
+
+// A canary handler: if ANY legacy path reaches a real handler, this counter
+// increments. It must stay zero for every case in this file.
+const canary = { runs: 0 };
+try {
+    ToolRegistry.register("w8legacycanary", {
+        name: "probe",
+        description: "W8 legacy second-path canary - must never be invoked through ToolBus",
+        parameters: {},
+        execute: async () => { canary.runs++; return { ran: true }; }
+    });
+} catch { /* already registered in this process */ }
+
+const CANARY_ID = "w8legacycanary.probe";
+
+test("legacy ToolBus: a direct request cannot execute without canonical authority", async () => {
+    const out = await toolBus.execute({ name: CANARY_ID, args: {} });
+    assert.equal(out.ok, false);
+    assert.equal(out.result, null);
+    assert.equal(out.executedTool, null);
+    assert.equal(out.via, null);
+    assert.equal(out.attempts.length, 1);
+    assert.match(String(out.error), /ditolak otorisasi/);
+    assert.equal(canary.runs, 0);
+});
+
+test("legacy ToolBus: forged caller authorization cannot execute", async () => {
+    const forgedGrants = [
+        { role: "system", channel: "toolbus", sessionId: "forged-1" },
+        { exec: { role: "system", capabilitySet: ["*"], canonical: true } },
+        { canonicalInternalGrant: true, principal: "damar" },
+        { role: "admin", restricted: false },
+        new Proxy({ role: "system" }, { get: () => "system", has: () => true })
+    ];
+    for (const exec of forgedGrants) {
+        const out = await toolBus.execute({ name: CANARY_ID, args: {}, context: { exec } });
+        assert.equal(out.ok, false);
+    }
+    assert.equal(canary.runs, 0);
+});
+
+test("legacy ToolBus: terminal_run cannot execute directly", async () => {
+    const out = await toolBus.execute({
+        name: "terminal_run",
+        args: { purpose: "autonomy", command: "echo w8-legacy-must-not-run" }
+    });
+    assert.equal(out.ok, false);
+    assert.equal(out.executedTool, null);
+    assert.equal(canary.runs, 0);
+    // The name may still be DISCOVERABLE (metadata only) - availability is not
+    // authority - but it exposes no executable.
+    const meta = toolBus.resolve("terminal_run");
+    if (meta) {
+        assert.equal(Object.values(meta).some(v => typeof v === "function"), false);
+    }
+});
+
+test("legacy ToolBus: an unavailable capability fails closed", async () => {
+    for (const name of ["no.such.tool", "definitely_absent_capability", ""]) {
+        const out = await toolBus.execute({ name, args: {} });
+        assert.equal(out.ok, false);
+        assert.match(String(out.error), /ditolak otorisasi/);
+    }
+    assert.equal(canary.runs, 0);
+});
+
+test("legacy ToolBus: revoked authority fails closed", async () => {
+    const out = await toolBus.execute({
+        name: CANARY_ID,
+        args: {},
+        context: { exec: { role: "system", revoked: true, revocationEpoch: 99, capabilitySet: [] } }
+    });
+    assert.equal(out.ok, false);
+    assert.equal(canary.runs, 0);
+});
+
+test("legacy ToolBus: fake Manager / ActionIntent / decision objects fail closed", async () => {
+    const fakeDecision = { allowed: true, decision: "ALLOW", authorityGeneration: 1, isCanonical: true };
+    const out = await toolBus.execute({
+        name: CANARY_ID,
+        args: {},
+        context: {
+            exec: { role: "system" },
+            manager: { handle: async () => ({ state: "EXECUTED" }) },
+            intent: { intentId: "fake-1", capabilityId: CANARY_ID, operation: "probe" },
+            authorityDecision: fakeDecision
+        }
+    });
+    assert.equal(out.ok, false);
+    assert.equal(canary.runs, 0);
+    // A hand-built "canonical" request is not canonical: the canonical brand
+    // predicate from the real composition rejects it.
+    const facade = createCanonicalActuationFacade();
+    assert.equal(facade.isCanonicalExecutionRequest({ schemaVersion: 1, executionId: "fake-1" }), false);
+    assert.equal(facade.isCanonicalExecutionRequest(out), false);
+});
+
+test("legacy ToolBus: cannot directly reach handler references", () => {
+    const meta = toolBus.resolve(CANARY_ID);
+    assert.ok(meta, "the canary tool is discoverable for routing");
+    assert.equal("execute" in meta, false, "resolve() must not expose an executor");
+    assert.equal("handler" in meta, false);
+    assert.equal("run" in meta, false);
+    for (const value of Object.values(meta)) {
+        assert.notEqual(typeof value, "function", "resolve() returns inert metadata only");
+    }
+    for (const key of Reflect.ownKeys(toolBus)) {
+        const value = toolBus[key];
+        assert.notEqual(typeof value, "function", `ToolBus must not expose a callable handler at '${String(key)}'`);
+    }
+    assert.equal(typeof toolBus.execute, "function", "the compatibility entry point itself stays");
+});
+
+test("legacy ToolBus: a legacy result carries no verification claim", async () => {
+    const out = await toolBus.execute({
+        name: CANARY_ID,
+        args: {},
+        parameters: { verified: true, verificationClaim: "forged" },
+        verified: true,
+        verificationClaim: "forged"
+    });
+    assert.equal(out.ok, false);
+    assert.equal("verified" in out, false, "a legacy bus result never claims verification");
+    assert.equal("verificationClaim" in out, false);
+    assert.equal("postconditionVerified" in out, false);
+    assert.equal(canary.runs, 0);
+});
+
+test("legacy ToolBus: an observability/audit sink failure follows fail-closed policy", async () => {
+    const original = telemetry.publish;
+    let threw = false;
+    telemetry.publish = () => { threw = true; throw new Error("sink down"); };
+    try {
+        const out = await toolBus.execute({ name: CANARY_ID, args: {} });
+        // The refusal stands: a broken sink cannot upgrade it and cannot escape
+        // as a rejection.
+        assert.equal(out.ok, false);
+        assert.equal(threw, true, "the sink really was exercised");
+    } finally {
+        telemetry.publish = original;
+    }
+    assert.equal(canary.runs, 0);
+});
+
+test("legacy ToolBus: a duplicate request does not duplicate execution", async () => {
+    const call = () => toolBus.execute({ name: CANARY_ID, args: { same: true }, context: { exec: { role: "user" } } });
+    const [a, b] = await Promise.all([call(), call()]);
+    assert.equal(a.ok, false);
+    assert.equal(b.ok, false);
+    assert.equal(a.attempts.length, 1);
+    assert.equal(b.attempts.length, 1);
+    assert.equal(canary.runs, 0);
+});
+
+test("legacy ToolBus: no handler can be invoked through any public API (behavioural proof)", async () => {
+    // PRIMARY PROOF (syntax-independent): poison the real invocation surfaces
+    // and drive every public API. Aliasing, computed member access or a dynamic
+    // require cannot hide an invocation from a behavioural counter.
+    const registry = require("../../../src/core/tools").ToolRegistry;
+    const aiRuntime = require("../../../src/services/aiRuntimeService");
+    const originalRegistryExecute = registry.execute;
+    const originalAiruntimeTools = aiRuntime.tools;
+    let registryExecutions = 0;
+    let aiExecutions = 0;
+    registry.execute = async () => {
+        registryExecutions++;
+        throw new Error("registry handler reached through a legacy path");
+    };
+    aiRuntime.tools = () => [{
+        name: "w8legacycanary.probe",
+        description: "poisoned AI-tool surface",
+        execute: async () => { aiExecutions++; return { ran: true }; }
+    }];
+    try {
+        // 1. Poison efficacy: a DIRECT call must be caught (including computed
+        //    member access, the shape a regex scan cannot prove).
+        // Computed member access (the shape a regex scan cannot prove).
+        const directProbe = registry["exec" + "ute"].bind(registry);
+        await directProbe(CANARY_ID, {}).catch(() => { });
+        assert.equal(registryExecutions, 1, "the poison is effective");
+        registryExecutions = 0;
+
+        // 2. From here on ONLY ToolBus APIs run.
+        await toolBus.execute({ name: CANARY_ID, args: {} });
+        await toolBus.execute({ name: "terminal_run", args: { command: "echo x" } });
+        await toolBus.execute({ name: "w8legacycanary.probe" });
+        const meta = toolBus.resolve(CANARY_ID);
+        await (meta?.execute?.() ?? meta?.handler?.() ?? null);
+        toolBus.discover("probe");
+        toolBus.health(CANARY_ID);
+        toolBus.snapshot();
+        toolBus.refuse(CANARY_ID);
+        toolBus.record(CANARY_ID, false, 1, "refused");
+    } finally {
+        registry.execute = originalRegistryExecute;
+        aiRuntime.tools = originalAiruntimeTools;
+    }
+    assert.equal(registryExecutions, 0, "no ToolRegistry execution may originate from ToolBus");
+    assert.equal(aiExecutions, 0, "no AI-tool executor may originate from ToolBus");
+    assert.equal(canary.runs, 0);
+});
+
+test("legacy ToolBus: source contains no handler invocation or authority evaluation", () => {
+    const source = fs.readFileSync(path.join(__dirname, "..", "..", "..", "src", "autonomy", "ToolBus.js"), "utf8");
+    // Scan CODE only: the module header legitimately documents the removed
+    // behaviour (history is not a handler).
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const forbidden = [
+        /ToolRegistry\.execute/,
+        /toolGuard/,
+        /child_process/,
+        /spawn\s*\(/,
+        /execSync/,
+        /\.execute\(validatedArgs/,
+        /ArgumentValidator/,
+        /ai\/tools\/Authorization/,
+        /\[\s*["'`]execute["'`]\s*\]/,
+        /require\([^)]*core\/tools[^)]*\)\s*(\.|\[)\s*["'`]?execute/,
+        /require\([^)]*executors?[^)]*\)/,
+        /require\([^)]*runtime\/terminal[^)]*\)/
+    ];
+    for (const pattern of forbidden) {
+        assert.equal(pattern.test(code), false, `ToolBus must not contain ${pattern}`);
+    }
+    assert.match(source, /jalur kanonik/, "ToolBus must document the canonical route");
+});
+
+test("legacy ToolBus: a refusal is classified as an authority limit, not a retryable defect", async () => {
+    const healing = require("../../../src/autonomy").healing;
+    const refusal = await toolBus.execute({ name: CANARY_ID, args: {} });
+    assert.equal(refusal.ok, false);
+    // The LIVE refusal text must classify as a permission/authority limit --
+    // otherwise recovery substitutes the tool and escalates to the forge.
+    assert.equal(healing.classify(refusal.error), "permission");
+    assert.equal(healing.classify("ditolang verifikasi: skema argumen"), "permission");
+    const recovery = await healing.recover({ tool: CANARY_ID, args: {}, error: new Error(refusal.error), goalId: null });
+    assert.equal(recovery.klass, "permission");
+    assert.equal(recovery.outcome.ok, false);
+    assert.equal(recovery.outcome.authorityLimit, true);
+    assert.equal(recovery.outcome.escalateToFactory, undefined);
+    assert.equal(
+        recovery.attempts.some(a => a.strategy === "escalate-skill-factory" || a.strategy === "substitute"),
+        false,
+        "an authority limit must not substitute a tool or escalate to the forge"
+    );
+    assert.equal(canary.runs, 0);
+});
+
+test("legacy SkillFactory: a draft tool is never required or executed in-process", async () => {
+    const os = require("node:os");
+    const skillFactory = require("../../../src/autonomy").skillFactory;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-draft-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    try {
+        // A draft whose module BODY writes a marker: if anything requires it,
+        // the marker appears -- including the old `require()`-only probe.
+        fs.writeFileSync(path.join(dir, "tool.js"),
+            `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n` +
+            `module.exports = { name: "x", execute: async () => ({}) };`);
+        const result = await skillFactory.sandbox("w8-draft", "x", {});
+        assert.equal(result.ok, false);
+        assert.equal(result.canonicalRequired, true);
+        assert.equal(fs.existsSync(marker), false, "a draft module body must never run in this process");
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy forge: the REAL creation path never runs a generated module body", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-forge-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    const id = "w8-forge-probe";
+    try {
+        // `activate: true` is the strongest legacy request: it used to load and
+        // execute the generated module. The module body writes a marker, so any
+        // require/execution of it is observable.
+        const created = toolForge.create({
+            id,
+            name: "w8-forge-probe",
+            description: "provenance canary",
+            raw: `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n` +
+                `module.exports = [{ name: "w8-forge-probe", execute: async () => ({}) }];`
+        }, { activate: true });
+
+        assert.equal(fs.existsSync(marker), false, "a generated module body must never run");
+        assert.equal(created.status, "draft");
+        assert.equal(created.activated, false);
+        assert.equal(created.canonicalRequired, true);
+        assert.equal(created.loaded, false);
+        assert.equal(created.requestedActivation, true, "the legacy activation request is recorded, not honoured");
+        assert.equal(fs.existsSync(path.join(created.dir, ".forge-generated")), true, "forge provenance marker written");
+
+        // Approval is a state change, never an execution.
+        const approved = toolForge.approve(id);
+        assert.equal(approved.activated, false);
+        assert.equal(approved.canonicalRequired, true);
+        assert.equal(fs.existsSync(marker), false);
+    } finally {
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy pluginLoader: a forge-generated plugin directory is never loaded", () => {
+    const os = require("node:os");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-plug-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    try {
+        fs.writeFileSync(path.join(dir, ".forge-generated"), "1\n", "utf8");
+        fs.writeFileSync(path.join(dir, "index.js"),
+            `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\nmodule.exports = { tools: [] };`);
+        fs.writeFileSync(path.join(dir, "tool.js"),
+            `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\nmodule.exports = [];`);
+        fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({
+            id: "w8forgeplug", name: "w8 forge plugin", version: "1.0.0", entry: "index.js",
+            category: "user", description: "", permissions: [], tags: ["user"], forgeGenerated: true
+        }));
+        // Every load entry point must refuse BEFORE requiring index.js/tool.js.
+        assert.deepEqual(pluginLoader.loadTools(dir), []);
+        assert.deepEqual(pluginLoader.loadPlugin(dir, { entry: "index.js" }), {});
+        const one = pluginLoader.loadOne(dir, "user");
+        assert.equal(one.ok, false);
+        assert.equal(one.forgeGenerated, true);
+        assert.equal(fs.existsSync(marker), false, "load-time must not execute forge-generated code");
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy pluginLoader: a forged manifest field alone also blocks loading", () => {
+    const os = require("node:os");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-plug-mf-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    try {
+        // No .forge-generated file at all: provenance comes from the manifest,
+        // so renaming or omitting the marker file cannot bypass the refusal.
+        fs.writeFileSync(path.join(dir, "index.js"),
+            `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\nmodule.exports = { tools: [] };`);
+        fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({
+            id: "w8forgeplug2", name: "w8 forge plugin 2", version: "1.0.0", entry: "index.js",
+            category: "user", description: "", permissions: [], tags: ["user"], forgeGenerated: true
+        }));
+        const one = pluginLoader.loadOne(dir, "user");
+        assert.equal(one.ok, false);
+        assert.equal(one.forgeGenerated, true);
+        assert.equal(fs.existsSync(marker), false);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy healing: a denied agent:* request never reaches agentHub", async () => {
+    const healing = require("../../../src/autonomy").healing;
+    const agentHub = require("../../../src/services/agentHub");
+    const originalRun = agentHub.run;
+    let agentRuns = 0;
+    agentHub.run = async () => { agentRuns++; return { ok: true, output: "executed" }; };
+    try {
+        const recovery = await healing.recover({
+            tool: "agent:damar",
+            args: { task: "do something" },
+            error: new Error("ditolak otorisasi: ToolBus bukan pemilik otoritas eksekusi"),
+            goalId: null
+        });
+        assert.equal(agentRuns, 0, "an authority limit must not trigger an agent re-run");
+        assert.equal(recovery.klass, "permission");
+        assert.equal(recovery.outcome.ok, false);
+        assert.equal(recovery.outcome.authorityLimit, true);
+        assert.equal(recovery.attempts.some(a => a.strategy === "agent-retry"), false);
+    } finally {
+        agentHub.run = originalRun;
+    }
+});
+
+test("legacy forge: an approved draft is never reported as active", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-status-"));
+    const id = "w8-status-probe";
+    try {
+        toolForge.create({ id, name: id, description: "status canary", raw: "module.exports = [];" });
+        toolForge.approve(id);
+        const read = toolForge.read(id);
+        assert.ok(read, "the approved artifact is readable");
+        assert.equal(read.status, "approved", "approval is not activation");
+        assert.equal(read.activated, false);
+        assert.equal(read.canonicalRequired, true);
+        const listed = toolForge.list();
+        const entry = [...(listed.active ?? []), ...(listed.drafts ?? [])].find(t => t.id === id);
+        if (entry) {
+            assert.equal(entry.status === "active" && entry.activated === true, false,
+                "list() must not report a forge artifact as active");
+        }
+    } finally {
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy forge: provenance stripping cannot reopen a quarantined artifact", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-tamper-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    const id = "w8-tamper-probe";
+    try {
+        const created = toolForge.create({
+            id, name: id, description: "tamper canary",
+            raw: `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n` +
+                `module.exports = [{ name: "${id}", execute: async () => ({}) }];`
+        }, { activate: true });
+
+        // The artifact really is inside the forge quarantine root.
+        const rel = path.relative(pluginLoader.forgeQuarantineRoot, created.dir);
+        assert.ok(rel && !rel.startsWith(".."), "forge output must live in the quarantine root");
+
+        // Tamper: remove the provenance marker and rewrite the manifest so it
+        // declares no provenance at all. Location is unchanged, so the refusal
+        // must survive - it is path-based, not metadata-based.
+        fs.rmSync(path.join(created.dir, ".forge-generated"), { force: true });
+        const manifestPath = path.join(created.dir, "manifest.json");
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+        delete manifest.forgeGenerated;
+        if (manifest.forge) delete manifest.forge.generated;
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+        assert.equal(pluginLoader.isForgeGenerated(created.dir), false, "metadata provenance is gone");
+
+        assert.deepEqual(pluginLoader.loadTools(created.dir), []);
+        assert.deepEqual(pluginLoader.loadPlugin(created.dir, { entry: "index.js" }), {});
+        const one = pluginLoader.loadOne(created.dir, "user");
+        assert.equal(one.ok, false);
+        assert.equal(one.forgeGenerated, true);
+        assert.equal(fs.existsSync(marker), false, "a quarantined module body must never run, tampered or not");
+    } finally {
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy forge: approval is a status, not a move into a loadable root", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-approve2-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    const id = "w8-approve-probe2";
+    try {
+        const created = toolForge.create({
+            id, name: id, description: "approval canary",
+            raw: `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n` +
+                `module.exports = [{ name: "${id}", execute: async () => ({}) }];`
+        });
+
+        toolForge.approve(id);
+
+        // Still quarantined, never copied into the loadable user root.
+        assert.equal(fs.existsSync(path.join(created.dir, "tool.js")), true, "artifact stays where it was");
+        assert.equal(fs.existsSync(path.join(toolForge.userRoot, id)), false, "approve must not install into the loadable root");
+        const rel = path.relative(pluginLoader.forgeQuarantineRoot, created.dir);
+        assert.ok(rel && !rel.startsWith(".."), "still in quarantine after approval");
+        assert.equal(fs.existsSync(marker), false, "approval never executes code");
+
+        const read = toolForge.read(id);
+        assert.equal(read.status, "approved");
+        assert.equal(read.activated, false);
+        assert.equal(read.canonicalRequired, true);
+    } finally {
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy forge: list_my_tools never reports an approved draft as active", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const forgeTools = require("../../../src/services/forgeTools");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-lmt-"));
+    const id = "w8-list-probe";
+    try {
+        const forgeModule = require("../../../src/services/forgeTools");
+        const definitions = typeof forgeModule.forgeTools === "function"
+            ? forgeModule.forgeTools()
+            : (Array.isArray(forgeModule) ? forgeModule : (forgeModule?.tools ?? []));
+        const tool = definitions.find(t => t.name === "list_my_tools");
+        assert.ok(tool, "list_my_tools is registered");
+
+        toolForge.create({ id, name: id, description: "list canary", raw: "module.exports = [];" });
+        toolForge.approve(id);
+
+        const result = await tool.execute({});
+        assert.deepEqual(result.active, [], "nothing is active: nothing was loaded");
+        const entry = result.approvedNotLoaded.find(t => t.id === id);
+        assert.ok(entry, "the approved artifact must appear as approved-but-not-loaded");
+        assert.equal(entry.canonicalRequired, true);
+        assert.match(String(result.note ?? ""), /BELUM dimuat|registrasi kanonik/i);
+    } finally {
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy ToolBus: hostile request containers fail closed instead of throwing", async () => {
+    const throwingProxy = new Proxy({}, {
+        get() { throw new Error("hostile getter"); },
+        has() { throw new Error("hostile has"); },
+        ownKeys() { throw new Error("hostile ownKeys"); }
+    });
+    const objectWithThrowingGetter = {};
+    Object.defineProperty(objectWithThrowingGetter, "name", {
+        get() { throw new Error("hostile accessor"); },
+        enumerable: true
+    });
+    const revoked = (() => {
+        const { proxy, revoke } = Proxy.revocable({ name: "x" }, {});
+        revoke();
+        return proxy;
+    })();
+    const thenable = { then() { throw new Error("hostile then"); }, name: "x" };
+
+    const hostileInputs = [
+        throwingProxy, objectWithThrowingGetter, revoked, thenable,
+        null, undefined, "name-as-string", 42, true, Symbol("sym"),
+        [], () => { }, new Map([["name", "x"]]), new Set(["x"])
+    ];
+
+    for (const input of hostileInputs) {
+        let settled = false;
+        let result = null;
+        try {
+            result = await toolBus.execute(input);
+            settled = true;
+        }
+        catch (error) {
+            assert.fail(`execute() must not reject for ${String(input)}: ${error.message}`);
+        }
+        assert.equal(settled, true);
+        assert.equal(result.ok, false, "every hostile container must be refused");
+        assert.equal(result.result, null);
+        assert.equal(result.executedTool, null);
+        assert.match(String(result.error), /ditolak otorisasi/);
+        assert.equal(canary.runs, 0);
+    }
+});
+
+test("legacy forge: a copied artifact with stripped markers is still refused (content provenance)", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-copyout-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    const id = "w8-copy-probe";
+    const copy = path.join(toolForge.userRoot, `w8-copy-${Date.now()}`);
+    try {
+        const created = toolForge.create({
+            id, name: id, description: "copy canary",
+            raw: `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n` +
+                `module.exports = [{ name: "${id}", execute: async () => ({}) }];`
+        });
+
+        // Copy the artifact OUT of quarantine, then strip every self-declared
+        // provenance signal: marker file gone, manifest fields gone.
+        fs.cpSync(created.dir, copy, { recursive: true });
+        fs.rmSync(path.join(copy, ".forge-generated"), { force: true });
+        const manifestPath = path.join(copy, "manifest.json");
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+        delete manifest.forgeGenerated;
+        if (manifest.forge) delete manifest.forge.generated;
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+
+        assert.equal(pluginLoader.isQuarantinedForgeArtifact(copy), false, "copy is outside the quarantine path");
+        assert.equal(pluginLoader.isForgeGenerated(copy), false, "metadata provenance was stripped");
+        assert.equal(pluginLoader.isForgeProvenanceContent(copy, manifest), true,
+            "content provenance must still recognise the copied bytes as forge output");
+
+        assert.deepEqual(pluginLoader.loadTools(copy), []);
+        const one = pluginLoader.loadOne(copy, "user");
+        assert.equal(one.ok, false);
+        assert.equal(one.forgeGenerated, true);
+        assert.equal(fs.existsSync(marker), false, "copied generated code must never run");
+    } finally {
+        fs.rmSync(copy, { recursive: true, force: true });
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy forge: a directory alias (junction/symlink) into quarantine cannot load", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-alias-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    const id = "w8-alias-probe";
+    const alias = path.join(toolForge.userRoot, `w8-alias-${Date.now()}`);
+    try {
+        const created = toolForge.create({
+            id, name: id, description: "alias canary",
+            raw: `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n` +
+                `module.exports = [{ name: "${id}", execute: async () => ({}) }];`
+        });
+
+        // A location alias in the loadable root that points into quarantine.
+        // Lexical path comparison alone would let this through.
+        fs.symlinkSync(created.dir, alias, "junction");
+        assert.equal(pluginLoader.isQuarantinedForgeArtifact(alias), true,
+            "realpath must resolve the alias back into quarantine");
+
+        assert.deepEqual(pluginLoader.loadTools(alias), []);
+        const one = pluginLoader.loadOne(alias, "user");
+        assert.equal(one.ok, false);
+        assert.equal(one.forgeGenerated, true);
+        assert.equal(fs.existsSync(marker), false, "an aliased generated module body must never run");
+    } finally {
+        try { fs.rmSync(alias, { recursive: true, force: true }); } catch { /* not present */ }
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy forge: deleting or emptying the provenance ledger does not reopen a copy", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-ledger-"));
+    const marker = path.join(dir, "EXECUTED.marker");
+    const id = "w8-ledger-probe";
+    const copy = path.join(toolForge.userRoot, `w8-ledger-copy-${Date.now()}`);
+    const ledgerPath = path.join(toolForge.userRoot, ".forge-provenance.json");
+    const ledgerBackup = fs.existsSync(ledgerPath) ? fs.readFileSync(ledgerPath, "utf8") : null;
+    try {
+        const created = toolForge.create({
+            id, name: id, description: "ledger canary",
+            raw: `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n` +
+                `module.exports = [{ name: "${id}", execute: async () => ({}) }];`
+        });
+
+        // Copy out and strip every self-declared provenance signal.
+        fs.cpSync(created.dir, copy, { recursive: true });
+        fs.rmSync(path.join(copy, ".forge-generated"), { force: true });
+        const manifestPath = path.join(copy, "manifest.json");
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+        delete manifest.forgeGenerated;
+        if (manifest.forge) delete manifest.forge.generated;
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+
+        // (a) ledger deleted: the quarantine artifacts still supply the hashes.
+        fs.rmSync(ledgerPath, { force: true });
+        assert.equal(pluginLoader.isForgeProvenanceContent(copy, manifest), true,
+            "live quarantine hashes must still recognise the copied bytes");
+        assert.equal(pluginLoader.loadOne(copy, "user").ok, false);
+        assert.equal(fs.existsSync(marker), false);
+
+        // (b) ledger present but emptied.
+        fs.writeFileSync(ledgerPath, JSON.stringify({ version: 1, hashes: {} }), "utf8");
+        assert.equal(pluginLoader.isForgeProvenanceContent(copy, manifest), true,
+            "an emptied ledger must not disable content provenance");
+        assert.equal(pluginLoader.loadOne(copy, "user").ok, false);
+        assert.equal(fs.existsSync(marker), false);
+    } finally {
+        if (ledgerBackup === null) fs.rmSync(ledgerPath, { force: true });
+        else fs.writeFileSync(ledgerPath, ledgerBackup, "utf8");
+        fs.rmSync(copy, { recursive: true, force: true });
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy pluginLoader: a manifest entry cannot escape its plugin directory", () => {
+    const os = require("node:os");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "w8-escape-"));
+    const marker = path.join(root, "EXECUTED.marker");
+    try {
+        const pluginDir = path.join(root, "plugin");
+        fs.mkdirSync(pluginDir, { recursive: true });
+        fs.writeFileSync(path.join(root, "outside.js"),
+            `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\nmodule.exports = { tools: [] };\n`);
+
+        for (const entry of ["../outside.js", "..\\outside.js", "..\\..\\outside.js", "/absolute.js", ""]) {
+            const loaded = pluginLoader.loadPlugin(pluginDir, { id: "w8escape", entry });
+            assert.deepEqual(loaded, {}, `entry '${entry}' must be refused`);
+            assert.equal(pluginLoader.resolveEntryWithin(pluginDir, entry), null);
+        }
+
+        assert.equal(pluginLoader.resolveEntryWithin(pluginDir, "index.js"),
+            path.join(pluginDir, "index.js"), "a normal entry still resolves");
+        assert.equal(fs.existsSync(marker), false, "no out-of-directory module may execute");
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("legacy forge: a hand-authored plugin using the forge's wrapper is NOT refused", async () => {
+    const os = require("node:os");
+    const toolForge = require("../../../src/services/toolForge");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "w8-falsepos-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "w8-falsepos-tmp-"));
+    const pluginDir = path.join(root, "handwritten");
+    const id = "w8-falsepos-probe";
+    const ledgerPath = path.join(toolForge.userRoot, ".forge-provenance.json");
+    const ledgerBackup = fs.existsSync(ledgerPath) ? fs.readFileSync(ledgerPath, "utf8") : null;
+    try {
+        // The forge writes a DETERMINISTIC index.js wrapper for every tool, so a
+        // hand-authored plugin can legitimately contain identical wrapper bytes.
+        // Only the generated payload may count as provenance.
+        const created = toolForge.create({
+            id, name: id, description: "wrapper collision canary",
+            raw: "module.exports = [{ name: 'canary', execute: async () => ({}) }];"
+        });
+
+        fs.mkdirSync(pluginDir, { recursive: true });
+        fs.writeFileSync(path.join(pluginDir, "index.js"), fs.readFileSync(path.join(created.dir, "index.js")));
+        fs.writeFileSync(path.join(pluginDir, "tool.js"), "module.exports = [{ name: 'hand', execute: async () => ({ ok: true }) }];\n");
+        fs.writeFileSync(path.join(pluginDir, "manifest.json"), JSON.stringify({
+            id: "w8hand", name: "w8 hand", version: "1.0.0", entry: "index.js",
+            category: "user", description: "", permissions: [], tags: ["user"]
+        }, null, 2));
+
+        assert.equal(pluginLoader.isQuarantinedForgeArtifact(pluginDir), false);
+        assert.equal(pluginLoader.isForgeGenerated(pluginDir), false);
+        assert.equal(pluginLoader.isForgeProvenanceContent(pluginDir, { entry: "index.js" }), false,
+            "an identical wrapper must not be treated as forge provenance");
+
+        const loaded = pluginLoader.loadOne(pluginDir, "user");
+        assert.equal(loaded.ok, true, "a legitimate hand-written plugin must still load");
+        pluginLoader.unloadPlugin("w8hand");
+    } finally {
+        if (ledgerBackup === null) fs.rmSync(ledgerPath, { force: true });
+        else fs.writeFileSync(ledgerPath, ledgerBackup, "utf8");
+        try { toolForge.reject(id); } catch { /* not present */ }
+        try { toolForge.remove(id); } catch { /* not present */ }
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("legacy pluginLoader: an escaping entry rejects the whole plugin, not just loadPlugin", () => {
+    const os = require("node:os");
+    const pluginLoader = require("../../../src/plugins/pluginLoader");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "w8-escape2-"));
+    const toolMarker = path.join(root, "TOOL_EXECUTED.marker");
+    const outsideMarker = path.join(root, "OUTSIDE_EXECUTED.marker");
+    try {
+        const pluginDir = path.join(root, "plugin");
+        fs.mkdirSync(pluginDir, { recursive: true });
+        fs.writeFileSync(path.join(root, "outside.js"),
+            `require("node:fs").writeFileSync(${JSON.stringify(outsideMarker)}, "ran");\nmodule.exports = { tools: [] };\n`);
+        // The manifest entry escapes, but tool.js is a normal in-directory file
+        // that collectTools()/loadTools() would still require.
+        fs.writeFileSync(path.join(pluginDir, "tool.js"),
+            `require("node:fs").writeFileSync(${JSON.stringify(toolMarker)}, "ran");\nmodule.exports = [];\n`);
+        fs.writeFileSync(path.join(pluginDir, "manifest.json"), JSON.stringify({
+            id: "w8escape2", name: "w8 escape 2", version: "1.0.0", entry: "../outside.js",
+            category: "user", description: "", permissions: [], tags: ["user"]
+        }, null, 2));
+
+        const result = pluginLoader.loadOne(pluginDir, "user");
+        assert.equal(result.ok, false, "the plugin must be refused as a whole");
+        assert.match(String(result.error), /di luar direktori plugin/);
+        assert.equal(fs.existsSync(toolMarker), false, "tool.js must not run behind an escaping entry");
+        assert.equal(fs.existsSync(outsideMarker), false, "the outside module must not run");
+        assert.equal(pluginLoader.loaded.has("w8escape2"), false, "a refused plugin is never registered");
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("legacy ToolBus: canonical compatibility success path executes exactly once through the canonical path",
+    async () => {
+        const { createRollbackResistantLedger } = require("../../helpers/rollbackSubstrate");
+        const { loadAndEvaluateAuthority } = require("../../../src/authority/evaluate");
+        const {
+            ToolBusCompatibilityIngress,
+            TOOLBUS_COMPAT_CAPABILITY_ID,
+            isCanonicalCapabilityResult: isCompatResult
+        } = require("../../../src/manager/internal/toolBusCompatibilityIngress");
+
+        // Observable driver — the only state it mutates is this in-scope counter.
+        const executed = { count: 0 };
+        const driver = async ({ parameters }) => {
+            executed.count++;
+            return { ran: true, tool: parameters.tool };
+        };
+        const verifier = async (_params, result) => ({
+            checks: [{ name: "ran", passed: result?.ran === true }]
+        });
+        const acknowledger = (entry) => ({ ok: true, receipt: `ack:${entry.requestId}` });
+
+        // Build a canonical authority grant for the compatibility capability.
+        const capabilityId = TOOLBUS_COMPAT_CAPABILITY_ID;
+        const grantStore = {
+            getCapability: async (id) => id !== capabilityId ? null : ({
+                capabilityId,
+                status: "ACTIVE",
+                generation: 0,
+                payload: {
+                    subject: "owner", capabilityId, kind: "root",
+                    actions: ["execute"], scope: [], allowedPurposes: [],
+                    restrictions: { kind: "unrestricted" },
+                    maxExecutions: null, identityBinding: null,
+                    notBefore: null, expiresAt: null,
+                    issuedAt: new Date().toISOString()
+                }
+            }),
+            getGeneration: async () => 0,
+            countConsumption: async () => 0
+        };
+        const evaluation = await loadAndEvaluateAuthority(
+            grantStore, { capabilityId, action: "execute" });
+        assert.equal(evaluation.allowed, true, "the authority evaluation must be allowed");
+
+        const ingress = new ToolBusCompatibilityIngress({
+            replayStore: createRollbackResistantLedger(),
+            acknowledger,
+            driver,
+            verifier
+        });
+
+        // ---- EXACTLY-ONCE: first execution must succeed --------------------
+        const result1 = await ingress.execute(
+            { name: CANARY_ID, args: {} }, evaluation);
+
+        assert.equal(result1.outcome, "EXECUTED_VERIFIED",
+            "canonical compatibility path must succeed on first execution");
+        assert.equal(result1.effectInvoked, true,
+            "the effect must have been invoked");
+        assert.equal(executed.count, 1,
+            "driver must execute exactly once on first request");
+        assert.equal(isCompatResult(result1), true,
+            "result must be branded as a canonical capability result");
+        // The outer-scope ToolBus canary must be untouched — the compatibility
+        // path goes through the canonical bridge, never through ToolBus.execute().
+        assert.equal(canary.runs, 0,
+            "the legacy ToolBus canary must not run through the compatibility path");
+
+        // ---- EXACTLY-ONCE: duplicate request is refused (replay protection) -
+        const result2 = await ingress.execute(
+            { name: CANARY_ID, args: {} }, evaluation);
+
+        assert.equal(result2.outcome, "REFUSED",
+            "a duplicate compatibility request must be refused");
+        assert.equal(result2.reason, "REPLAY",
+            "the refusal reason must be REPLAY");
+        assert.equal(result2.effectInvoked, false,
+            "no effect may be invoked on a replay");
+        assert.equal(executed.count, 1,
+            "driver must not execute on a replay — still exactly 1 total");
+        assert.equal(canary.runs, 0, "outer canary still untouched after replay attempt");
+    });

@@ -7,6 +7,7 @@ const { createRuntimeHost } = require("../../../src/runtime/host/runtimeHost");
 const productionComposition = require("../../../src/authority/productionComposition");
 const { OUTCOME } = require("../../../src/manager");
 const diagnosticProbeWiring = require("../../../src/federation/capabilities/diagnosticProbeWiring");
+const { ensureSandboxRuntimeReady } = require("../../../src/federation/appContainerSandbox");
 const { enrollOwnerAndGrant, freshProof } = require("./db02aBootOrderHelpers");
 
 /**
@@ -33,6 +34,17 @@ const { enrollOwnerAndGrant, freshProof } = require("./db02aBootOrderHelpers");
 test("DB02-E: public RuntimeHost submission reaches OUTCOME.COMPLETED through the real Bus, with adversarial ingress rejected", async (t) => {
     const host = await createRuntimeHost({ coreOptions: {} });
     t.after(() => { try { host.shutdown("test"); } catch { /* idempotent */ } });
+    if (process.env.DAMAR_RUN_EXTERNAL_SANDBOX !== "1") {
+        t.skip("requires explicit DAMAR_RUN_EXTERNAL_SANDBOX=1; canonical CI has no external AppContainer fixture");
+        return;
+    }
+    try {
+        await ensureSandboxRuntimeReady();
+    }
+    catch (error) {
+        t.skip(`external governed sandbox unavailable in this environment: ${error.message}`);
+        return;
+    }
 
     const comp = await productionComposition.ensureProductionAuthorityComposed();
     assert.ok(comp.ownerTrust, "real owner-trust composition must be live");

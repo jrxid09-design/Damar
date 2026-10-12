@@ -1,6 +1,7 @@
 const { AITool } = require("../ai/tools");
 
 const home = require("./homeService");
+const { submitGovernedService } = require("./governedServiceBoundary");
 
 /**
  * Tool kendali rumah untuk Damar. Dengan ini Damar bisa
@@ -75,19 +76,17 @@ function homeTools() {
                 required: ["entity_id", "action"]
             },
 
-            execute: async ({ entity_id, action, value }) => {
+            execute: async ({ entity_id, action, value }, ctx) => {
 
-                await home.control(entity_id, action, value);
-
-                // Kembalikan state terbaru sebagai konfirmasi.
-                const state = await home.getState(entity_id).catch(() => null);
-
-                return {
-                    ok: true,
-                    entity_id,
-                    action,
-                    state: state?.state ?? null
-                };
+                const result = await submitGovernedService({
+                    execution: ctx?.exec ?? null,
+                    capabilityId: "home.assistant",
+                    operation: "control",
+                    arguments: { entityId: entity_id, action, value },
+                    expectedPostcondition: { kind: "home-state", entityId: entity_id, action, value }
+                });
+                if (result?.outcome !== "COMPLETED") throw new Error(result?.detail ?? result?.reason ?? "canonical authority required");
+                return { ok: true, entity_id, action, result, governed: true };
 
             }
 
