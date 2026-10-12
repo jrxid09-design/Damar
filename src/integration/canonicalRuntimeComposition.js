@@ -1629,8 +1629,14 @@ async function buildRuntimeHostInternal({
             case HOST_COMMANDS.DISMISS:
                 outcome = host.dismiss({ source: command.source, reason: command.reason });
                 break;
+            case HOST_COMMANDS.HOLD:
+                outcome = host.hold({ source: command.source, reason: command.reason });
+                break;
+            case HOST_COMMANDS.RESUME:
+                outcome = host.resume({ source: command.source, reason: command.reason });
+                break;
             case HOST_COMMANDS.STATUS:
-                outcome = { ok: true, status: host.status() };
+                outcome = { ok: true, status: host.status(), lifecycle: host.lifecycleStatus() };
                 break;
             case HOST_COMMANDS.SHUTDOWN:
                 outcome = host.requestShutdown({
@@ -1672,6 +1678,8 @@ async function buildRuntimeHostInternal({
             ok: outcome.ok !== false,
             code: outcome.code ?? undefined,
             state: outcome.state ?? undefined,
+            instanceId: outcome.instanceId ?? undefined,
+            lifecycle: outcome.lifecycle ?? undefined,
             status: outcome.status
         };
     }
@@ -1693,6 +1701,38 @@ async function buildRuntimeHostInternal({
         const boundedReason = `[${String(source).slice(0, 64)}] ${reason === null ? "dismiss" : String(reason)}`;
         const result = rt.dismiss(producers.host, boundedReason.slice(0, 200));
         return { ...result, source };
+    }
+
+    // ------------------------------------------------------ HOLD / RESUME
+    //
+    // Keduanya memanggil INSTANCE Presence kanonik yang sudah ada (`rt`) —
+    // tidak pernah membuat, tidak pernah mencari instance lain, dan tidak
+    // pernah menyentuh boot. `hold`/`resume` di rt adalah metode instance,
+    // jadi "tidak ada owner kedua" berlaku secara struktural, bukan lewat
+    // pemeriksaan. Gate otoritas host (phaseMachine) tetap dibaca lebih
+    // dulu, persis seperti summon/dismiss.
+
+    function hold({ source = "api", reason = null } = {}) {
+        if (!phaseMachine.isOperational()) {
+            return { ok: false, code: "HOST_NOT_READY", phase: phaseMachine.phase };
+        }
+        const boundedReason = `[${String(source).slice(0, 64)}] ${reason === null ? "hold" : String(reason)}`;
+        const result = rt.hold(producers.host, boundedReason.slice(0, 200));
+        return { ...result, source, instanceId: rt.instanceId };
+    }
+
+    function resume({ source = "api", reason = null } = {}) {
+        if (!phaseMachine.isOperational()) {
+            return { ok: false, code: "HOST_NOT_READY", phase: phaseMachine.phase };
+        }
+        const boundedReason = `[${String(source).slice(0, 64)}] ${reason === null ? "resume" : String(reason)}`;
+        const result = rt.resume(producers.host, boundedReason.slice(0, 200));
+        return { ...result, source, instanceId: rt.instanceId };
+    }
+
+    /** STATUS lifecycle yang menunjuk instance kanonik secara spesifik. */
+    function lifecycleStatus() {
+        return safe(() => rt.getLifecycleStatus()) ?? null;
     }
 
     // ------------------------------------------------------ ACTIVITIES
@@ -1741,6 +1781,7 @@ async function buildRuntimeHostInternal({
             generationId: core.recovery.ledger.current,
             generationHistoryCount: core.recovery.ledger.history.length,
             presence: safe(() => rt.getPresenceStatus()) ?? null,
+            presenceLifecycle: safe(() => rt.getLifecycleStatus()) ?? null,
             governor: safe(() => core.governor.getResourceStatus()) ?? null,
             bus: safe(() => bus.getStatus()) ?? null,
             recovery: safe(() => core.recovery.tracker.getRecoveryStatus()) ?? null,
@@ -1990,6 +2031,9 @@ async function buildRuntimeHostInternal({
 
         summon,
         dismiss,
+        hold,
+        resume,
+        lifecycleStatus,
         beginActivity,
         endActivity,
         recommendInterruption,

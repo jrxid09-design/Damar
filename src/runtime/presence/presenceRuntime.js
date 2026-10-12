@@ -32,7 +32,8 @@ const {
     PRODUCER_KIND,
     registerProducer,
     isGenuineProducer,
-    createPresenceGenerationId
+    createPresenceGenerationId,
+    createPresenceInstanceId
 } = require("./identity");
 const { ActivityToken, isGenuineActivityToken } = require("./activityToken");
 const { PresenceJournal } = require("./journal");
@@ -62,8 +63,38 @@ const DECISION_CODES = Object.freeze({
     REJECTED_DUPLICATE_FACT: "REJECTED_DUPLICATE_FACT",
     REJECTED_CONFLICTING_FACT: "REJECTED_CONFLICTING_FACT",
     REJECTED_UNKNOWN_FACT_TYPE: "REJECTED_UNKNOWN_FACT_TYPE",
-    REJECTED_INVALID_ARGUMENT: "REJECTED_INVALID_ARGUMENT"
+    REJECTED_INVALID_ARGUMENT: "REJECTED_INVALID_ARGUMENT",
+    REJECTED_NO_HELD_INSTANCE: "REJECTED_NO_HELD_INSTANCE"
 });
+
+/**
+ * Readiness yang dilaporkan STATUS. Turunan murni dari lifecycle state —
+ * held berarti pasif dan tidak siap menerima summon sampai di-RESUME.
+ */
+const READINESS = Object.freeze({
+    IDLE_READY: "IDLE_READY",
+    ACTIVE: "ACTIVE",
+    ON_HOLD: "ON_HOLD",
+    UNAVAILABLE: "UNAVAILABLE"
+});
+
+const READINESS_BY_STATE = Object.freeze({
+    [LIFECYCLE.OFFLINE]: READINESS.UNAVAILABLE,
+    [LIFECYCLE.BOOTING]: READINESS.UNAVAILABLE,
+    [LIFECYCLE.INITIALIZING]: READINESS.UNAVAILABLE,
+    [LIFECYCLE.SHUTTING_DOWN]: READINESS.UNAVAILABLE,
+    [LIFECYCLE.FAILED]: READINESS.UNAVAILABLE,
+    [LIFECYCLE.RECOVERING]: READINESS.UNAVAILABLE,
+    [LIFECYCLE.DORMANT]: READINESS.IDLE_READY,
+    [LIFECYCLE.ON_HOLD]: READINESS.ON_HOLD,
+    [LIFECYCLE.AWAKE]: READINESS.ACTIVE,
+    [LIFECYCLE.ACTIVE]: READINESS.ACTIVE,
+    [LIFECYCLE.WAITING_FOR_OWNER]: READINESS.ACTIVE,
+    [LIFECYCLE.DEGRADED]: READINESS.ACTIVE
+});
+
+/** Counter modul: id instance harus unik dalam satu proses. */
+let instanceCounter = 0;
 
 const PRECEDENCE_RANK = new Map(
     ACTIVITY_PRESENTATION_PRECEDENCE.map((mode, index) => [mode, index])
@@ -105,12 +136,16 @@ class PresenceRuntime {
             duplicatesIgnored: 0,
             conflictsDetected: 0,
             subscriberErrorsIsolated: 0,
-            interruptionRecommendations: 0
+            interruptionRecommendations: 0,
+            holdsCommitted: 0,
+            resumesCommitted: 0
         };
         this._journal = new PresenceJournal(this._config.maxHistory);
         this._ledger = new DedupeLedger(this._config.maxDedupeLedger);
         this._registeredProducerIds = new Set();
         this._coreProducer = this.registerProducer(PRODUCER_KIND.CORE, "presence-core");
+        instanceCounter += 1;
+        this._instanceId = createPresenceInstanceId(instanceCounter);
         this._destroyed = false;
         this._advanceGenerationLocked("initial");
     }
@@ -162,6 +197,12 @@ class PresenceRuntime {
 
     get generation() {
         return this._generation;
+    }
+
+    /** Identitas instance kanonik ini. Stabil selama instance hidup, jadi
+     * lifecycle STATUS bisa selalu dikaitkan ke owner yang sama. */
+    get instanceId() {
+        return this._instanceId;
     }
 
     get lifecycleState() {
@@ -405,6 +446,128 @@ class PresenceRuntime {
         }
         this._summoned = false;
         return result;
+    }
+
+    // ------------------------------------------------- lifecycle hold/resume
+
+    /**
+     * HOLD — instance kanonik yang sedang hidup -> ON_HOLD pasif.
+     *
+     * Aturan yang dipatuhi:
+     *  - Metode INSTANS, jadi tidak pernah membuat owner kedua: HOLD tidak
+     *    bisa menjadi pintu masuk bagi Presence lain.
+     *  - Idempoten: HOLD pada instance yang sudah ON_HOLD adalah OK_NOOP,
+     *    persis seperti summon pada instance yang sudah bangun.
+     *  - Live activity diinterupsi saat transisi dikommit (P26: tidak ada
+     *    resume otomatis), supaya ON_HOLD tidak pernah memegang pekerjaan
+     *    hidup dan RESUME>DORMANT selalu konsisten.
+     *  - Jalur yang DITOLAK tidak menyentuh apa pun: state, aktivitas,
+     *    dan counter transisi berubah persis seperti semula.
+     */
+    hold(producer, reason = null) {
+        this._assertNotDestroyed();
+        this._sweepExpired();
+        const rejection = this._assertTrustedProducer(producer);
+        if (rejection) return { ok: false, code: rejection };
+
+        if (this._state === LIFECYCLE.ON_HOLD) {
+            return { ok: true, code: DECISION_CODES.OK_NOOP, state: this._state };
+        }
+        const result = this._applyTransition({
+            to: LIFECYCLE.ON_HOLD,
+            cause: CAUSE.LIFECYCLE_HOLD,
+            producerId: producer.id,
+            reason: boundedText(reason)
+        });
+        if (!result.ok) return result;
+        this._counters.holdsCommitted += 1;
+        this._quiesceForHold();
+        return result;
+    }
+
+    /**
+     * RESUME — HANYA dari ON_HOLD, HANYA kembali ke DORMANT (pasif/idle siap).
+     *
+     * Tidak ada held instance => DITOLAK eksplisit. RESUME tidak pernah
+     * membangun instance, tidak pernah memanggil boot, dan tidak pernah
+     * membuat owner kedua. START/BOOT tetap perintah yang berbeda.
+     */
+    resume(producer, reason = null) {
+        this._assertNotDestroyed();
+        this._sweepExpired();
+        const rejection = this._assertTrustedProducer(producer);
+        if (rejection) return { ok: false, code: rejection };
+
+        if (this._state !== LIFECYCLE.ON_HOLD) {
+            return {
+                ok: false,
+                code: DECISION_CODES.REJECTED_NO_HELD_INSTANCE,
+                state: this._state
+            };
+        }
+        const result = this._applyTransition({
+            to: LIFECYCLE.DORMANT,
+            cause: CAUSE.LIFECYCLE_RESUME,
+            producerId: producer.id,
+            reason: boundedText(reason)
+        });
+        if (!result.ok) return result;
+        this._counters.resumesCommitted += 1;
+        return result;
+    }
+
+    /** Buat instance benar-benar pasif: tidak ada aktivitas hidup, tidak ada
+     * owner wait terbuka, dan tidak lagi ditandai summoned. Sama seperti
+     * majunya generasi, ini TIDAK menyentuh counter wait — yang diukur adalah
+     * keputusan state, bukan pembatalan. Dipanggil SETELAH transisi ke
+     * ON_HOLD ter-komit, sehingga jalur yang ditolak tidak pernah
+     * menyentuh peta mana pun. */
+    _quiesceForHold() {
+        const now = this._clock.nowMs();
+        for (const record of this._activities.values()) {
+            if (record.status !== "live") continue;
+            record.status = "interrupted";
+            record.endedAtMs = now;
+            this._counters.activitiesInterrupted += 1;
+        }
+        this._activities.clear();
+        this._ownerWaits.clear();
+        this._summoned = false;
+    }
+
+    /**
+     * STATUS lifecycle — menunjuk ke instance kanonik ini secara spesifik
+     * lewat `instanceId`, bukan ke "proses yang mana pun yang kelihatan".
+     * Membaca status TIDAK pernah membuat instance dan tidak pernah
+     * mengubah state apa pun.
+     */
+    getLifecycleStatus() {
+        const snapshot = this.getPresenceStatus();
+        const journal = this._journal.snapshot();
+        let lastLifecycleTransition = null;
+        for (let i = journal.length - 1; i >= 0; i -= 1) {
+            const cause = journal[i].cause;
+            if (cause === CAUSE.LIFECYCLE_HOLD || cause === CAUSE.LIFECYCLE_RESUME) {
+                lastLifecycleTransition = Object.freeze({
+                    from: journal[i].from,
+                    to: journal[i].to,
+                    cause,
+                    timestampMs: journal[i].timestampMs
+                });
+                break;
+            }
+        }
+        return Object.freeze({
+            instanceId: this._instanceId,
+            generation: snapshot.generation,
+            lifecycleState: snapshot.lifecycleState,
+            readiness: READINESS_BY_STATE[snapshot.lifecycleState] ?? READINESS.UNAVAILABLE,
+            held: this._state === LIFECYCLE.ON_HOLD,
+            summoned: snapshot.summoned,
+            bootedAtMs: this._bootedAtMs,
+            lastTransition: snapshot.lastTransition,
+            lastLifecycleTransition
+        });
     }
 
     // ----------------------------------------------------------- aktivitas
@@ -1247,6 +1410,7 @@ class PresenceRuntime {
 module.exports = {
     PresenceRuntime,
     DECISION_CODES,
+    READINESS,
     createPresenceRuntime(options = {}) {
         return new PresenceRuntime(options);
     }

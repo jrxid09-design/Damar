@@ -5,8 +5,10 @@
  *
  * HUKUM (load-bearing):
  *   - Perintah di sini hanya menggerakkan LIFECYCLE (summon/dismiss/
- *     status/shutdown-request). TIDAK ada yang memberi izin, autentikasi,
- *     atau mengaktifkan aktuator.
+ *     status/hold/resume/shutdown-request). TIDAK ada yang memberi izin,
+ *     autentikasi, atau mengaktifkan aktuator.
+ *   - hold/resume menggerakkan SATU instance Presence kanonik yang sudah
+ *     ada; keduanya tidak pernah membuat owner kedua.
  *   - Normalisasi murni: payload mentah dari transport mana pun dipetakan
  *     menjadi record kanonik ATAU ditolak. Tidak ada eksekusi di sini.
  */
@@ -14,6 +16,8 @@
 const HOST_COMMANDS = Object.freeze({
     SUMMON: "summon",
     DISMISS: "dismiss",
+    HOLD: "hold",
+    RESUME: "resume",
     STATUS: "status",
     SHUTDOWN: "shutdown"
 });

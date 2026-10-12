@@ -30,6 +30,12 @@
  *      DCD owner: src/cyber/intelligence (createDetectionEngine)
  *      Bridge: DCD incident -> notification.emitSource()
  *      Law: NOTIFICATION != AUTHORITY, DISMISS_MUTATES_DCD_SOURCE = NO
+ *
+ *   5. RI release identity freeze (V1):
+ *      Canonical owner: src/runtime/release/riFreeze
+ *      Record location: the composed ACC store, key `release:ri-freeze`
+ *      Consumer: verifyReleaseIdentity() below
+ *      Law: NO FREEZE APPLIED ON COMPOSITION, AUTHORITY_SOURCE_COUNT = 1
  */
 
 const { makeApprovalStore } = require("../approval/store");
@@ -42,6 +48,7 @@ const { createMemoryAccStore, createSqliteAccStore } = require("../cognition/per
 const { createDamarManager } = require("../manager");
 const { ensureProductionAuthorityComposed, getProductionAuthorityComposition } = require("../authority/productionComposition");
 const { getCanonicalRuntimeHost } = require("../runtime/host/runtimeHost");
+const riFreeze = require("../runtime/release/riFreeze");
 
 let canonicalRiInstance = null;
 let riCompositionPromise = null;
@@ -286,6 +293,27 @@ async function ensureRuntimeIntegrationComposed({ host = null, acc = null, audit
             return result;
         }
 
+        /**
+         * CANONICAL RI FREEZE CONSUMER.
+         *
+         * Satu-satunya tempat di komposisi ini yang memutuskan apakah
+         * identitas rilis RI boleh proceed. Sumber kebenaran: durable
+         * readback dari store kanonik composition ini sendiri (`acc`) —
+         * bukan argumen, bukan cache, bukan Git tag, bukan env var.
+         *
+         * Komposisi TIDAK PERNAH menerapkan freeze. Freeze adalah tindakan
+         * operasional dan harus dilakukan eksplisit oleh operator lewat
+         * `riFreeze.applyFreeze` — kalau komposisi menerapkannya sendiri,
+         * setiap proses yang start akan membekukan identitasnya diam-diam.
+         */
+        async function freezeStatus() {
+            return await riFreeze.readFreeze(resolvedAcc);
+        }
+
+        async function verifyReleaseIdentity(release) {
+            return await riFreeze.assertReleaseFrozen({ store: resolvedAcc, release });
+        }
+
         const instance = Object.freeze({
             get host() {
                 return boundHost || getCanonicalRuntimeHost();
@@ -298,6 +326,10 @@ async function ensureRuntimeIntegrationComposed({ host = null, acc = null, audit
             mission: missionIntel.mission,
             missionIntelligence: missionIntel,
             cyber,
+            // Canonical RI freeze consumer (V1). Read-only against the
+            // composed ACC; it never applies a freeze on its own.
+            freezeStatus,
+            verifyReleaseIdentity,
             // Projection bridge
             recordDcdIncident,
             transitionDcdIncident,
