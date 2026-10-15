@@ -4,9 +4,12 @@
  * HOST SEMANTIC COMMANDS — kosakata perintah semantik Runtime Host.
  *
  * HUKUM (load-bearing):
- *   - Perintah di sini hanya menggerakkan LIFECYCLE (summon/dismiss/
+ *   - Perintah di sini hanya menggerakkan LIFECYCLE (start/summon/dismiss/
  *     status/hold/resume/shutdown-request). TIDAK ada yang memberi izin,
  *     autentikasi, atau mengaktifkan aktuator.
+ *   - start HANYA memastikan SATU owner Presence kanonik lewat komposisi
+ *     runtime kanonik. Instance yang sudah hidup dikembalikan apa adanya;
+ *     start tidak pernah membangun owner kedua.
  *   - hold/resume menggerakkan SATU instance Presence kanonik yang sudah
  *     ada; keduanya tidak pernah membuat owner kedua.
  *   - Normalisasi murni: payload mentah dari transport mana pun dipetakan
@@ -14,6 +17,7 @@
  */
 
 const HOST_COMMANDS = Object.freeze({
+    START: "start",
     SUMMON: "summon",
     DISMISS: "dismiss",
     HOLD: "hold",

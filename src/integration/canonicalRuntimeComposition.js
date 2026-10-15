@@ -1623,6 +1623,9 @@ async function buildRuntimeHostInternal({
         }
         let outcome;
         switch (command.command) {
+            case HOST_COMMANDS.START:
+                outcome = await start({ source: command.source, reason: command.reason });
+                break;
             case HOST_COMMANDS.SUMMON:
                 outcome = host.summon({ source: command.source, reason: command.reason });
                 break;
@@ -1703,6 +1706,26 @@ async function buildRuntimeHostInternal({
         return { ...result, source };
     }
 
+    // ------------------------------------------------------------- START
+    //
+    // START != RESUME (lihat runtimeHost.js). Handler ini HANYA boleh
+    // memastikan owner KANONIK: bus ini milik host yang sedang melayani,
+    // jadi kalau host ini bukan owner kanonik, START menolak (fail closed)
+    // alih-alih diam-diam membangun host kanonik kedua. Instance yang
+    // sudah hidup dikembalikan apa adanya oleh startCanonicalRuntimeHost —
+    // tidak pernah ada owner kedua.
+    async function start({ source = "api", reason = null } = {}) {
+        const {
+            getCanonicalRuntimeHost,
+            startCanonicalRuntimeHost
+        } = require("../runtime/host/runtimeHost");
+        if (getCanonicalRuntimeHost() !== host) {
+            return { ok: false, code: "HOST_NOT_CANONICAL", phase: phaseMachine.phase };
+        }
+        const result = await startCanonicalRuntimeHost();
+        return { ...result, source, reason, lifecycle: lifecycleStatus() };
+    }
+
     // ------------------------------------------------------ HOLD / RESUME
     //
     // Keduanya memanggil INSTANCE Presence kanonik yang sudah ada (`rt`) —
@@ -1756,7 +1779,10 @@ async function buildRuntimeHostInternal({
     }
 
     function clearDegradation(options = {}) {
-        return rt.clearDegradation(options);
+        // Produsen kanonik di-inject di sini, persis seperti reportDegradation:
+        // jalur tanpa produsen terdaftar selalu gagal tertutup, sehingga
+        // keadaan DEGRADED tidak akan pernah bisa dibersihkan lewat host.
+        return rt.clearDegradation({ producer: producers.host, ...options });
     }
 
     // ---------------------------------------------------- HEALTH/STATUS
@@ -2029,6 +2055,7 @@ async function buildRuntimeHostInternal({
 
         get phase() { return phaseMachine.phase; },
 
+        start,
         summon,
         dismiss,
         hold,
