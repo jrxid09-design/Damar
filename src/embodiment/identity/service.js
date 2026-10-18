@@ -66,6 +66,8 @@ class DeviceIdentityService {
         this._transactions = new Map();
         /** sessionId -> session */
         this._sessions = new Map();
+        /** Canonical CLI surface registrations; never grants device trust. */
+        this._surfaces = new Map();
         this._forgedSessionCount = 0;
         this._identityConflicts = 0;
         this.challenges = new ChallengeBroker({
@@ -494,6 +496,25 @@ class DeviceIdentityService {
         return deepFreeze(structuredCopyList(rec.history));
     }
 
+    createPendingRegistration({ surfaceId, deviceId, ownerId, ownerGeneration, credentialRef, channel = "cli", sessionScope = "device" } = {}) {
+        if (typeof surfaceId !== "string" || !/^cli:[a-z0-9-]{3,80}$/i.test(surfaceId)) throw fail("PID_SURFACE_INVALID", "surfaceId invalid");
+        if (this._surfaces.has(surfaceId)) throw fail("PID_SURFACE_CONFLICT", "surface already exists");
+        const device = this._mustGet(deviceId);
+        if (device.pairingState === PAIRING_STATES.REVOKED) throw fail("PID_REVOKED", "device revoked");
+        if (typeof ownerId !== "string" || !Number.isSafeInteger(ownerGeneration) || typeof credentialRef !== "string") throw fail("PID_SURFACE_INVALID", "owner binding invalid");
+        const rec = { surfaceId, surfaceType: "CLI", deviceId, ownerId, ownerGeneration, credentialRef, pairingRef: device.bindingDigest, status: "PENDING", registrationRevision: 1, allowedChannel: channel, sessionScope, createdAtMs: this.clock(), revokedAtMs: null };
+        this._surfaces.set(surfaceId, rec); return deepFreeze({ ...rec });
+    }
+    readRegistration(surfaceId) { const r = this._surfaces.get(String(surfaceId)); return r ? deepFreeze({ ...r }) : null; }
+    listRegistrationsForDevice(deviceId) { return deepFreeze([...this._surfaces.values()].filter(r => r.deviceId === deviceId).map(r => ({ ...r }))); }
+    activateFromCanonicalPairing({ surfaceId, pairingRef, ownerId, ownerGeneration, revision } = {}) {
+        const r = this._surfaces.get(String(surfaceId)); if (!r || r.status !== "PENDING" || r.registrationRevision !== revision) throw fail("PID_SURFACE_STALE", "pending registration required");
+        const d = this._mustGet(r.deviceId); if (d.pairingState !== PAIRING_STATES.PAIRED || !d.bindingDigest || d.bindingDigest !== pairingRef || r.pairingRef !== pairingRef || r.ownerId !== ownerId || r.ownerGeneration !== ownerGeneration) throw fail("PID_SURFACE_UNVERIFIED", "canonical pairing evidence mismatch");
+        for (const x of this._surfaces.values()) if (x.status === "ACTIVE" && x.deviceId === r.deviceId && x.surfaceType === "CLI") throw fail("PID_SURFACE_CONFLICT", "active CLI surface already bound");
+        r.status = "ACTIVE"; r.registrationRevision++; return deepFreeze({ ...r });
+    }
+    revokeRegistration({ surfaceId, revision } = {}) { const r = this._surfaces.get(String(surfaceId)); if (!r || r.registrationRevision !== revision) throw fail("PID_SURFACE_STALE", "registration revision mismatch"); r.status = "REVOKED"; r.revokedAtMs = this.clock(); r.registrationRevision++; return deepFreeze({ ...r }); }
+
     /* --------------------------- persistence --------------------------- */
 
     /**
@@ -540,7 +561,8 @@ class DeviceIdentityService {
             transactions: [...this._transactions.values()]
                 .filter(t => t.state === "CONFIRMED")
                 .map(t => ({ ...t }))
-                .sort((a, b) => a.pairingId.localeCompare(b.pairingId))
+                .sort((a, b) => a.pairingId.localeCompare(b.pairingId)),
+            surfaces: [...this._surfaces.values()].map(r => ({ ...r })).sort((a,b) => a.surfaceId.localeCompare(b.surfaceId))
         });
     }
 
@@ -662,6 +684,10 @@ class DeviceIdentityService {
         }
         for (const tx of data.transactions ?? []) {
             svc._transactions.set(tx.pairingId, { ...tx });
+        }
+        for (const row of data.surfaces ?? []) {
+            if (!row || row.surfaceType !== "CLI" || !staged.has(row.deviceId) || !["PENDING", "ACTIVE", "REVOKED"].includes(row.status) || svc._surfaces.has(row.surfaceId)) throw fail("PID_INVALID_SERIALIZATION", "surface registration invalid");
+            svc._surfaces.set(row.surfaceId, { ...row });
         }
         return svc;
     }
