@@ -502,7 +502,7 @@ class DeviceIdentityService {
         const device = this._mustGet(deviceId);
         if (device.pairingState === PAIRING_STATES.REVOKED) throw fail("PID_REVOKED", "device revoked");
         if (typeof ownerId !== "string" || !Number.isSafeInteger(ownerGeneration) || typeof credentialRef !== "string") throw fail("PID_SURFACE_INVALID", "owner binding invalid");
-        const rec = { surfaceId, surfaceType: "CLI", deviceId, ownerId, ownerGeneration, credentialRef, pairingRef: device.bindingDigest, status: "PENDING", registrationRevision: 1, allowedChannel: channel, sessionScope, createdAtMs: this.clock(), revokedAtMs: null };
+        const rec = { surfaceId, surfaceType: "CLI", deviceId, ownerId, ownerGeneration, credentialRef, pairingRef: device.bindingDigest, status: "PENDING", registrationRevision: 1, allowedChannel: channel, sessionScope, createdAtMs: this.clock.nowMs(), revokedAtMs: null };
         this._surfaces.set(surfaceId, rec); return deepFreeze({ ...rec });
     }
     readRegistration(surfaceId) { const r = this._surfaces.get(String(surfaceId)); return r ? deepFreeze({ ...r }) : null; }
@@ -513,7 +513,7 @@ class DeviceIdentityService {
         for (const x of this._surfaces.values()) if (x.status === "ACTIVE" && x.deviceId === r.deviceId && x.surfaceType === "CLI") throw fail("PID_SURFACE_CONFLICT", "active CLI surface already bound");
         r.status = "ACTIVE"; r.registrationRevision++; return deepFreeze({ ...r });
     }
-    revokeRegistration({ surfaceId, revision } = {}) { const r = this._surfaces.get(String(surfaceId)); if (!r || r.registrationRevision !== revision) throw fail("PID_SURFACE_STALE", "registration revision mismatch"); r.status = "REVOKED"; r.revokedAtMs = this.clock(); r.registrationRevision++; return deepFreeze({ ...r }); }
+    revokeRegistration({ surfaceId, revision } = {}) { const r = this._surfaces.get(String(surfaceId)); if (!r || r.registrationRevision !== revision) throw fail("PID_SURFACE_STALE", "registration revision mismatch"); r.status = "REVOKED"; r.revokedAtMs = this.clock.nowMs(); r.registrationRevision++; return deepFreeze({ ...r }); }
 
     /* --------------------------- persistence --------------------------- */
 
