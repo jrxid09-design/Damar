@@ -694,7 +694,7 @@ class DeviceIdentityService {
         }
         for (const row of data.surfaces ?? []) {
             const dev = row && staged.get(row.deviceId);
-            if (!row || typeof row.surfaceId !== "string" || !/^cli:[a-z0-9-]{3,80}$/i.test(row.surfaceId) || row.surfaceType !== "CLI" || !dev || !Number.isSafeInteger(row.ownerGeneration) || !Number.isSafeInteger(row.registrationRevision) || row.registrationRevision < 1 || typeof row.ownerId !== "string" || typeof row.credentialRef !== "string" || !["PENDING", "REVOKED"].includes(row.status) || svc._surfaces.has(row.surfaceId) || dev.pairingState === PAIRING_STATES.REVOKED) throw fail("PID_INVALID_SERIALIZATION", "surface registration invalid");
+            if (!row || typeof row.surfaceId !== "string" || !/^cli:[a-z0-9-]{3,80}$/i.test(row.surfaceId) || row.surfaceType !== "CLI" || !dev || !Number.isSafeInteger(row.ownerGeneration) || !Number.isSafeInteger(row.registrationRevision) || row.registrationRevision < 1 || typeof row.ownerId !== "string" || typeof row.credentialRef !== "string" || !["PENDING", "REVOKED"].includes(row.status) || svc._surfaces.has(row.surfaceId) || (dev.pairingState === PAIRING_STATES.REVOKED && row.status !== "REVOKED")) throw fail("PID_INVALID_SERIALIZATION", "surface registration invalid");
             svc._surfaces.set(row.surfaceId, { ...row });
         }
         return svc;
