@@ -513,12 +513,12 @@ class DeviceIdentityService {
         if (this._surfaces.has(surfaceId)) throw fail("PID_SURFACE_CONFLICT", "surface already exists");
         const device = this._mustGet(deviceId);
         if (device.pairingState === PAIRING_STATES.REVOKED) throw fail("PID_REVOKED", "device revoked");
-        if (typeof ownerId !== "string" || !Number.isSafeInteger(ownerGeneration) || typeof credentialRef !== "string") throw fail("PID_SURFACE_INVALID", "owner binding invalid");
+        if (typeof ownerId !== "string" || ownerId.length < 1 || !Number.isSafeInteger(ownerGeneration) || ownerGeneration < 0 || typeof credentialRef !== "string" || !/^[^\s:]+:[^\s]+$/.test(credentialRef) || channel !== "cli" || sessionScope !== "device" || !device.bindingDigest) throw fail("PID_SURFACE_INVALID", "owner binding invalid");
         const rec = { surfaceId, surfaceType: "CLI", deviceId, ownerId, ownerGeneration, credentialRef, pairingRef: device.bindingDigest, status: "PENDING", registrationRevision: 1, allowedChannel: channel, sessionScope, createdAtMs: this.clock.nowMs(), revokedAtMs: null };
         this._surfaces.set(surfaceId, rec); return deepFreeze({ ...rec });
     }
-    readRegistration(surfaceId) { const r = this._surfaces.get(String(surfaceId)); return r ? deepFreeze({ ...r }) : null; }
-    listRegistrationsForDevice(deviceId) { return deepFreeze([...this._surfaces.values()].filter(r => r.deviceId === deviceId).map(r => ({ ...r }))); }
+    readRegistration(surfaceId) { this._assertPersistenceUsable(); const r = this._surfaces.get(String(surfaceId)); return r ? deepFreeze({ ...r }) : null; }
+    listRegistrationsForDevice(deviceId) { this._assertPersistenceUsable(); return deepFreeze([...this._surfaces.values()].filter(r => r.deviceId === deviceId).map(r => ({ ...r }))); }
     activateFromCanonicalPairing({ surfaceId, pairingRef, ownerId, ownerGeneration, revision } = {}) {
         const r = this._surfaces.get(String(surfaceId)); if (!r || r.status !== "PENDING" || r.registrationRevision !== revision) throw fail("PID_SURFACE_STALE", "pending registration required");
         const d = this._mustGet(r.deviceId); if (d.pairingState !== PAIRING_STATES.PAIRED || !d.bindingDigest || d.bindingDigest !== pairingRef || r.pairingRef !== pairingRef || r.ownerId !== ownerId || r.ownerGeneration !== ownerGeneration) throw fail("PID_SURFACE_UNVERIFIED", "canonical pairing evidence mismatch");
@@ -712,6 +712,7 @@ class DeviceIdentityService {
         }
         for (const row of data.surfaces ?? []) {
             const dev = row && staged.get(row.deviceId);
+            if (row?.status === "PENDING" && (!dev || dev.pairingState !== PAIRING_STATES.PAIRED || dev.bindingDigest !== row.pairingRef || typeof row.credentialRef !== "string" || !/^[^\s:]+:[^\s]+$/.test(row.credentialRef))) throw fail("PID_INVALID_SERIALIZATION", "surface canonical reference invalid");
             if (!row || typeof row.surfaceId !== "string" || !/^cli:[a-z0-9-]{3,80}$/i.test(row.surfaceId) || row.surfaceType !== "CLI" || !dev || !Number.isSafeInteger(row.ownerGeneration) || row.ownerGeneration < 0 || !Number.isSafeInteger(row.registrationRevision) || row.registrationRevision < 1 || typeof row.ownerId !== "string" || row.ownerId.length < 1 || typeof row.credentialRef !== "string" || row.credentialRef.length < 1 || typeof row.pairingRef !== "string" || !/^[a-f0-9]{64}$/.test(row.pairingRef) || !["PENDING", "REVOKED"].includes(row.status) || typeof row.allowedChannel !== "string" || row.allowedChannel !== "cli" || typeof row.sessionScope !== "string" || row.sessionScope !== "device" || !Number.isInteger(row.createdAtMs) || row.createdAtMs < 0 || (row.revokedAtMs !== null && (!Number.isInteger(row.revokedAtMs) || row.revokedAtMs < row.createdAtMs)) || (row.status === "PENDING" && row.revokedAtMs !== null) || (row.status === "REVOKED" && row.revokedAtMs === null) || svc._surfaces.has(row.surfaceId) || (dev.pairingState === PAIRING_STATES.REVOKED && row.status !== "REVOKED")) throw fail("PID_INVALID_SERIALIZATION", "surface registration invalid");
             svc._surfaces.set(row.surfaceId, { ...row });
         }
