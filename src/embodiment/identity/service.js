@@ -364,6 +364,11 @@ class DeviceIdentityService {
             }
         }
         this._archive(rec, { kind: "REVOKED", reason: String(reason).slice(0, 120) });
+        for (const surface of this._surfaces.values()) {
+            if (surface.deviceId === deviceId && surface.status !== "REVOKED") {
+                surface.status = "REVOKED"; surface.revokedAtMs = this.clock.nowMs(); surface.registrationRevision++;
+            }
+        }
         return { deviceId, pairingState: rec.pairingState, sessionsClosed: closed };
     }
 
@@ -510,8 +515,10 @@ class DeviceIdentityService {
     activateFromCanonicalPairing({ surfaceId, pairingRef, ownerId, ownerGeneration, revision } = {}) {
         const r = this._surfaces.get(String(surfaceId)); if (!r || r.status !== "PENDING" || r.registrationRevision !== revision) throw fail("PID_SURFACE_STALE", "pending registration required");
         const d = this._mustGet(r.deviceId); if (d.pairingState !== PAIRING_STATES.PAIRED || !d.bindingDigest || d.bindingDigest !== pairingRef || r.pairingRef !== pairingRef || r.ownerId !== ownerId || r.ownerGeneration !== ownerGeneration) throw fail("PID_SURFACE_UNVERIFIED", "canonical pairing evidence mismatch");
-        for (const x of this._surfaces.values()) if (x.status === "ACTIVE" && x.deviceId === r.deviceId && x.surfaceType === "CLI") throw fail("PID_SURFACE_CONFLICT", "active CLI surface already bound");
-        r.status = "ACTIVE"; r.registrationRevision++; return deepFreeze({ ...r });
+        // Device pairing proves only device trust. OwnerTrust is intentionally
+        // not imported into this isolated aggregate; without its canonical
+        // verifier, ACTIVE promotion must fail closed.
+        throw fail("PID_SURFACE_OWNER_UNAVAILABLE", "canonical owner verification is required for CLI activation");
     }
     revokeRegistration({ surfaceId, revision } = {}) { const r = this._surfaces.get(String(surfaceId)); if (!r || r.registrationRevision !== revision) throw fail("PID_SURFACE_STALE", "registration revision mismatch"); r.status = "REVOKED"; r.revokedAtMs = this.clock.nowMs(); r.registrationRevision++; return deepFreeze({ ...r }); }
 
@@ -686,7 +693,8 @@ class DeviceIdentityService {
             svc._transactions.set(tx.pairingId, { ...tx });
         }
         for (const row of data.surfaces ?? []) {
-            if (!row || row.surfaceType !== "CLI" || !staged.has(row.deviceId) || !["PENDING", "ACTIVE", "REVOKED"].includes(row.status) || svc._surfaces.has(row.surfaceId)) throw fail("PID_INVALID_SERIALIZATION", "surface registration invalid");
+            const dev = row && staged.get(row.deviceId);
+            if (!row || typeof row.surfaceId !== "string" || !/^cli:[a-z0-9-]{3,80}$/i.test(row.surfaceId) || row.surfaceType !== "CLI" || !dev || !Number.isSafeInteger(row.ownerGeneration) || !Number.isSafeInteger(row.registrationRevision) || row.registrationRevision < 1 || typeof row.ownerId !== "string" || typeof row.credentialRef !== "string" || !["PENDING", "REVOKED"].includes(row.status) || svc._surfaces.has(row.surfaceId) || dev.pairingState === PAIRING_STATES.REVOKED) throw fail("PID_INVALID_SERIALIZATION", "surface registration invalid");
             svc._surfaces.set(row.surfaceId, { ...row });
         }
         return svc;
