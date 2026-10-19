@@ -129,7 +129,10 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
     // Internal verifier — NOT exported, owned exclusively by this capability module.
     bridge.registerVerifier(CAPABILITY_ID, async (_parameters, result) => ({ checks: [
         { name: "driver-returned-result", passed: result !== null && typeof result === "object" },
-        { name: "snapshot-commit-succeeded", passed: result?.ok === true }
+        // The adapter uses this deterministic refusal code to report a typed
+        // commit conflict; canonical execution still cannot publish raw data
+        // on a failed verification.
+        { name: "snapshot-commit-succeeded", passed: result?.ok === true, code: result?.code ?? null }
     ] }));
 
     async function authorize({ identity = {}, scope = [], nowMs = Date.now() } = {}) {

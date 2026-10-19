@@ -45,6 +45,21 @@ function invalid(message) {
     return fail("PID_INVALID_SERIALIZATION", message);
 }
 
+function commitRefusal(result) {
+    const commit = result?.verification?.checks?.find((check) => check?.name === "snapshot-commit-succeeded");
+    const driverCode = typeof commit?.code === "string" ? commit.code : null;
+    if (driverCode === "PID_SNAPSHOT_STALE") {
+        const error = fail("PID_SNAPSHOT_CONFLICT", "snapshot identitas berubah sebelum commit; muat ulang state kanonik lalu coba lagi");
+        error.retryable = true;
+        error.causeCode = driverCode;
+        return error;
+    }
+    if (driverCode === "PID_SNAPSHOT_BUSY") {
+        return fail("PID_SNAPSHOT_BUSY", "snapshot identitas sedang dikunci oleh writer lain");
+    }
+    return invalid(`snapshot identitas ditolak: ${driverCode ?? result?.reason ?? result?.outcome ?? "UNKNOWN"}`);
+}
+
 /**
  * createFileIdentityStore(filePath, options)
  *
@@ -84,9 +99,7 @@ function createFileIdentityStore(filePath, options = {}) {
                     capabilityId: CAPABILITY_ID, operation: "save",
                     parameters: { filePath, payload, fsync }
                 });
-                if (result?.outcome !== "EXECUTED_VERIFIED") {
-                    throw invalid(`snapshot identitas ditolak: ${result?.reason ?? result?.outcome ?? "UNKNOWN"}`);
-                }
+                if (result?.outcome !== "EXECUTED_VERIFIED") throw commitRefusal(result);
                 last = result.result ?? result;
             }
         } finally { writing = false; }
