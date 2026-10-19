@@ -71,6 +71,7 @@ class DeviceIdentityService {
         this._forgedSessionCount = 0;
         this._identityConflicts = 0;
         this._snapshotRevision = 0;
+        this._persistencePoisoned = false;
         this.challenges = new ChallengeBroker({
             clock, entropy,
             config: {
@@ -89,6 +90,7 @@ class DeviceIdentityService {
      * display metadata never forks identity.
      */
     registerIdentity({ namespace, stableKey, displayName, deviceClass = "UNKNOWN", platform = null, metadata = null } = {}) {
+        this._assertPersistenceUsable();
         const deviceId = canonicalDeviceId({ namespace, stableKey });
         if (this._devices.has(deviceId)) {
             return { deviceId, created: false, identity: this.getIdentity(deviceId) };
@@ -175,6 +177,7 @@ class DeviceIdentityService {
 
     /** Step 1: owner-side intent. Issues a bound, short-lived challenge. */
     beginPairing(deviceId, { instancePublicKey = null } = {}) {
+        this._assertPersistenceUsable();
         this._sweepExpired();
         const rec = this._mustGet(deviceId);
         if (rec.pairingState === PAIRING_STATES.REVOKED) {
@@ -220,6 +223,7 @@ class DeviceIdentityService {
 
     /** Step 2: device proves possession of the challenge secret. */
     submitChallenge({ pairingId, challengeId, secret, instancePublicKey = null } = {}) {
+        this._assertPersistenceUsable();
         this._sweepExpired();
         const tx = this._mustGetTx(pairingId);
         if (tx.state !== "CHALLENGE_ISSUED") {
@@ -258,6 +262,7 @@ class DeviceIdentityService {
      * bindingDigest, history and trust state byte-identical.
      */
     ownerConfirm(pairingId, { actor = "owner" } = {}) {
+        this._assertPersistenceUsable();
         this._sweepExpired();
 
         /* ---- validation gate (read-only) ---- */
@@ -346,6 +351,7 @@ class DeviceIdentityService {
      * other subsystem (Authority policy is a future layer's job).
      */
     revoke(deviceId, { reason = "revoked" } = {}) {
+        this._assertPersistenceUsable();
         const rec = this._mustGet(deviceId);
         if (!["PAIRED", "TRUSTED", "LIMITED"].includes(rec.pairingState)) {
             throw fail("PID_NOT_PAIRED",
@@ -702,7 +708,9 @@ class DeviceIdentityService {
         }
         return svc;
     }
-    acceptSnapshotRevision(revision) { if (!Number.isSafeInteger(revision) || revision < this._snapshotRevision) throw fail("PID_SNAPSHOT_REVISION", "snapshot revision invalid"); this._snapshotRevision = revision; }
+    _assertPersistenceUsable() { if (this._persistencePoisoned) throw fail("PID_PERSISTENCE_RELOAD_REQUIRED", "state identitas belum committed; muat ulang snapshot kanonik"); }
+    invalidatePersistence() { this._persistencePoisoned = true; }
+    acceptSnapshotRevision(revision) { this._assertPersistenceUsable(); if (!Number.isSafeInteger(revision) || revision < this._snapshotRevision) throw fail("PID_SNAPSHOT_REVISION", "snapshot revision invalid"); this._snapshotRevision = revision; }
 
     /* ------------------------------ internal --------------------------- */
 

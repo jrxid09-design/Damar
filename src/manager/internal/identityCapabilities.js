@@ -12,6 +12,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const sqlite3 = require("sqlite3");
 
 const { canonicalCapabilityId } = require("../../authority/canonical");
 const { loadAndEvaluateAuthority } = require("../../authority/evaluate");
@@ -30,6 +31,29 @@ const STATE = Object.freeze({
 const runtimeGate = new WeakSet();
 
 function cleanupTmp(file) { try { fs.unlinkSync(file); } catch { /* best effort */ } }
+
+function sql(db, statement) {
+    return new Promise((resolve, reject) => db.exec(statement, (error) => error ? reject(error) : resolve()));
+}
+
+async function acquireSnapshotLock(filePath) {
+    const db = new sqlite3.Database(`${filePath}.lock.sqlite`);
+    try {
+        await sql(db, "PRAGMA busy_timeout=0; BEGIN EXCLUSIVE");
+        return db;
+    } catch (error) {
+        try { db.close(); } catch { /* best effort */ }
+        if (error && (error.code === "SQLITE_BUSY" || error.code === "SQLITE_LOCKED")) return null;
+        throw error;
+    }
+}
+
+async function releaseSnapshotLock(db) {
+    if (!db) return;
+    try { await sql(db, "COMMIT"); }
+    catch { try { await sql(db, "ROLLBACK"); } catch { /* closing releases the OS lock */ } }
+    await new Promise((resolve) => db.close(() => resolve()));
+}
 
 /**
  * The revision-less format predates the snapshot fence.  It is deliberately
@@ -90,11 +114,11 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
             const payload = parameters.payload;
             const fsync = true;
             fs.mkdirSync(path.dirname(filePath), { recursive: true });
-            const lock = `${filePath}.lock`;
             const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-            let lockFd = null;
+            let lockDb = null;
             try {
-                try { lockFd = fs.openSync(lock, "wx", 0o600); } catch (e) { return { ok: false, code: "PID_SNAPSHOT_BUSY" }; }
+                lockDb = await acquireSnapshotLock(filePath);
+                if (!lockDb) return { ok: false, code: "PID_SNAPSHOT_BUSY" };
                 const next = JSON.parse(payload);
                 if (next === null || typeof next !== "object" || Array.isArray(next)) return { ok:false, code:"PID_SNAPSHOT_CORRUPT" };
                 const durable = durableSnapshotRevision(filePath);
@@ -121,9 +145,7 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
             } catch (error) {
                 cleanupTmp(tmp);
                 return { ok: false, error: `gagal menulis snapshot identitas: ${error.message}` };
-            } finally {
-                if (lockFd !== null) { try { fs.closeSync(lockFd); } finally { try { fs.unlinkSync(lock); } catch {} } }
-            }
+            } finally { await releaseSnapshotLock(lockDb); }
         }
     });
     // Internal verifier — NOT exported, owned exclusively by this capability module.
