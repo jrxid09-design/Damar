@@ -32,6 +32,16 @@ const runtimeGate = new WeakSet();
 
 function cleanupTmp(file) { try { fs.unlinkSync(file); } catch { /* best effort */ } }
 
+async function testCrashBarrier(point) {
+    const root = process.env.DAMAR_IDENTITY_TEST_HOOK_DIR;
+    if (!root) return;
+    const enabled = process.env.DAMAR_IDENTITY_TEST_HOOK_POINT;
+    if (enabled !== point) return;
+    fs.writeFileSync(path.join(root, `ready-${point}`), String(process.pid), { flag: "wx" });
+    const release = path.join(root, `release-${point}`);
+    while (!fs.existsSync(release)) await new Promise((resolve) => setTimeout(resolve, 5));
+}
+
 function sql(db, statement) {
     return new Promise((resolve, reject) => db.exec(statement, (error) => error ? reject(error) : resolve()));
 }
@@ -119,6 +129,7 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
             try {
                 lockDb = await acquireSnapshotLock(filePath);
                 if (!lockDb) return { ok: false, code: "PID_SNAPSHOT_BUSY" };
+                await testCrashBarrier("after-lock");
                 const next = JSON.parse(payload);
                 if (next === null || typeof next !== "object" || Array.isArray(next)) return { ok:false, code:"PID_SNAPSHOT_CORRUPT" };
                 const durable = durableSnapshotRevision(filePath);
@@ -132,11 +143,14 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
                 if (!Number.isSafeInteger(next.snapshotRevision) || next.snapshotRevision !== current) return { ok:false, code:"PID_SNAPSHOT_STALE" };
                 next.snapshotRevision = current + 1;
                 fs.writeFileSync(tmp, JSON.stringify(next), { mode: 0o600 });
+                await testCrashBarrier("after-tmp");
                 if (fsync) {
                     const fd = fs.openSync(tmp, "r+");
                     try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
                 }
+                await testCrashBarrier("after-fsync");
                 fs.renameSync(tmp, filePath);
+                await testCrashBarrier("after-rename");
                 if (fsync && process.platform !== "win32") {
                     const dirFd = fs.openSync(path.dirname(filePath), "r");
                     try { fs.fsyncSync(dirFd); } finally { fs.closeSync(dirFd); }
