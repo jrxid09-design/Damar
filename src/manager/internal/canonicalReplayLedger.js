@@ -452,6 +452,25 @@ function createCanonicalReplayLedger({
         };
     }
 
+    /** Is `seq` with `eventHmac` durably covered by the TRUSTED witness? With an
+     *  EXTERNAL anchor configured only that witness counts; otherwise the local
+     *  keyed anchor is the witness. A witness head PAST `seq` transitively covers
+     *  it: no witness can advance past a seq whose row was not part of the
+     *  authenticated chain it advanced over. */
+    function witnessCoversHead(seq, eventHmac) {
+        if (rollbackAnchor) {
+            let external = null;
+            try { external = rollbackAnchor.read(); } catch { return false; }
+            const externalSeq = external && Number.isSafeInteger(external.seq) ? external.seq : 0;
+            if (externalSeq < seq) return false;
+            return externalSeq > seq || external.token === eventHmac;
+        }
+        let anchor = null;
+        try { anchor = readTrustedAnchor(anchorFile, key); } catch { return false; }
+        if (!anchor || anchor.seq < seq) return false;
+        return anchor.seq > seq || anchor.eventHmac === eventHmac;
+    }
+
     /** Remove a committed-but-UNWITNESSED tail so the durable store never retains an
      *  event that no trusted witness covers. Without this, an attacker who can
      *  truncate replay_events can also delete the co-located marker row, leaving a
@@ -460,23 +479,35 @@ function createCanonicalReplayLedger({
      *  Safe: it only removes the exact tail seq, and only while it is still the
      *  tail; anything else is left for fail-closed recovery.
      *
+     *  WITNESS RE-CHECK AT DELETION TIME: the witness is SHARED state. A peer
+     *  writer may durably advance it to this very head while OUR witness attempt
+     *  is still failing (its snapshot() heal covers the committed head). A row the
+     *  trusted witness already covers must NEVER be deleted — doing so would leave
+     *  the witness AHEAD of the chain and brick the store for canonical readers.
+     *  So the coverage is re-checked inside this transaction: a covered row is
+     *  acknowledged (marker cleared) instead of being rolled back.
+     *
      *  TRANSACTION OWNERSHIP: uses database.transaction() instead of raw BEGIN/COMMIT/ROLLBACK. */
     async function compensate(seq) {
         try {
             return await database.transaction(async (tx) => {
+                const row = await tx.get("SELECT event_hmac FROM replay_events WHERE seq = ?", [seq]);
+                if (row && witnessCoversHead(seq, row.event_hmac)) {
+                    await tx.run("DELETE FROM replay_unwitnessed WHERE seq = ?", [seq]);
+                    return { removed: false, reconciled: true };
+                }
                 const tail = await tx.get("SELECT MAX(seq) AS maxSeq FROM replay_events", []);
-                let removed = false;
                 if (tail && tail.maxSeq === seq) {
                     await tx.run("DELETE FROM replay_events WHERE seq = ?", [seq]);
                     await tx.run("DELETE FROM replay_unwitnessed WHERE seq = ?", [seq]);
-                    removed = true;
+                    return { removed: true, reconciled: false };
                 }
-                return removed;
+                return { removed: false, reconciled: false };
             });
         } catch {
             // Witness failure is reported by the caller; a failed transaction here
             // is tolerated. Database handles poison on ROLLBACK failure.
-            return false;
+            return { removed: false, reconciled: false };
         }
     }
 
@@ -561,12 +592,14 @@ function createCanonicalReplayLedger({
                     // is still detected and this digest is NOT re-executable.
                     const persistence = await persistAnchors(seq, eventHmac);
                     if (!persistence.witnessOk) {
-                        // No trusted witness advanced: undo the append entirely so the
-                        // store cannot later look self-consistent with a frozen head.
-                        // If it is no longer the tail it cannot be undone, and the
-                        // marker stays so every later writer stays fail-closed.
-                        await compensate(seq);
-                        throw new Error("REPLAY_HEAD_UNWITNESSED: " + describePersistence(persistence));
+                        // No trusted witness advanced ON OUR ATTEMPT — but a PEER may
+                        // have durably advanced the shared witness to this head while
+                        // we retried. compensate() re-checks coverage at deletion
+                        // time: a witnessed row is acknowledged, not deleted.
+                        const outcome = await compensate(seq);
+                        if (!outcome.reconciled) {
+                            throw new Error("REPLAY_HEAD_UNWITNESSED: " + describePersistence(persistence));
+                        }
                     }
                     await markWitnessed(seq);
                     return { reserved: true };
@@ -591,11 +624,13 @@ function createCanonicalReplayLedger({
                 const { seq, eventHmac } = result._postCommit;
                 const persistence = await persistAnchors(seq, eventHmac);
                 if (!persistence.witnessOk) {
-                    // Undo the append: the digest reverts to its PREVIOUS state, so
-                    // an effect that already ran stays INVOKING (ambiguous) and can
-                    // never be silently re-driven.
-                    await compensate(seq);
-                    throw new Error("REPLAY_HEAD_UNWITNESSED: " + describePersistence(persistence));
+                    // Undo the append UNLESS a peer has since durably witnessed this
+                    // exact head (see compensate()): then the transition is safe to
+                    // acknowledge and the digest keeps its new state.
+                    const outcome = await compensate(seq);
+                    if (!outcome.reconciled) {
+                        throw new Error("REPLAY_HEAD_UNWITNESSED: " + describePersistence(persistence));
+                    }
                 }
                 await markWitnessed(seq);
                 return true;
