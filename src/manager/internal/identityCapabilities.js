@@ -15,6 +15,7 @@ const crypto = require("node:crypto");
 
 const { canonicalCapabilityId } = require("../../authority/canonical");
 const { loadAndEvaluateAuthority } = require("../../authority/evaluate");
+const { DeviceIdentityService } = require("../../embodiment/identity/service");
 const { CanonicalCapabilityExecution, OUTCOME } = require("./canonicalCapabilityExecution");
 const { createCanonicalAuditAcknowledger } = require("./canonicalAuditAcknowledger");
 const { createCanonicalReplayLedger } = require("./canonicalReplayLedger");
@@ -29,6 +30,49 @@ const STATE = Object.freeze({
 const runtimeGate = new WeakSet();
 
 function cleanupTmp(file) { try { fs.unlinkSync(file); } catch { /* best effort */ } }
+
+/**
+ * The revision-less format predates the snapshot fence.  It is deliberately
+ * narrow: a missing revision is legacy only when the durable payload is an
+ * identity snapshot we would otherwise be willing to restore.  In
+ * particular, a malformed or partially-written file is never treated as a
+ * revision-zero snapshot.
+ */
+function isTrustedLegacySnapshot(snapshot) {
+    const shaped = snapshot !== null && typeof snapshot === "object" && !Array.isArray(snapshot) &&
+        snapshot.version === 1 && Array.isArray(snapshot.devices) &&
+        Array.isArray(snapshot.transactions) &&
+        !Object.prototype.hasOwnProperty.call(snapshot, "snapshotRevision");
+    if (!shaped) return false;
+    try {
+        // This is the canonical restore validator, not a writer-local guess.
+        DeviceIdentityService.restore(snapshot);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function durableSnapshotRevision(filePath) {
+    let durable;
+    try {
+        durable = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    } catch (error) {
+        if (error.code === "ENOENT") return { revision: 0, legacy: false, exists: false };
+        return { error: "PID_SNAPSHOT_CORRUPT" };
+    }
+    if (durable === null || typeof durable !== "object" || Array.isArray(durable)) {
+        return { error: "PID_SNAPSHOT_CORRUPT" };
+    }
+    if (!Object.prototype.hasOwnProperty.call(durable, "snapshotRevision")) {
+        return isTrustedLegacySnapshot(durable)
+            ? { revision: 0, legacy: true, exists: true }
+            : { error: "PID_SNAPSHOT_CORRUPT" };
+    }
+    return Number.isSafeInteger(durable.snapshotRevision) && durable.snapshotRevision >= 0
+        ? { revision: durable.snapshotRevision, legacy: false, exists: true }
+        : { error: "PID_SNAPSHOT_CORRUPT" };
+}
 
 function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = null, replayStore = null } = {}) {
     const bridge = new CanonicalCapabilityExecution({ replayStore });
@@ -52,9 +96,15 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
             try {
                 try { lockFd = fs.openSync(lock, "wx", 0o600); } catch (e) { return { ok: false, code: "PID_SNAPSHOT_BUSY" }; }
                 const next = JSON.parse(payload);
-                let current = 0;
-                try { current = JSON.parse(fs.readFileSync(filePath, "utf8")).snapshotRevision || 0; } catch (e) { if (e.code !== "ENOENT") return { ok:false, code:"PID_SNAPSHOT_CORRUPT" }; }
-                if (next.snapshotRevision === undefined && current === 0) next.snapshotRevision = 0; // legacy first write
+                if (next === null || typeof next !== "object" || Array.isArray(next)) return { ok:false, code:"PID_SNAPSHOT_CORRUPT" };
+                const durable = durableSnapshotRevision(filePath);
+                if (durable.error) return { ok:false, code:durable.error };
+                const current = durable.revision;
+                // A revision-less payload is accepted only for a genuinely new
+                // snapshot or to upgrade a validated legacy durable snapshot.
+                // Once a versioned snapshot exists, every writer must present
+                // the exact durable claim; this is the stale-write fence.
+                if (next.snapshotRevision === undefined && (!durable.exists || durable.legacy)) next.snapshotRevision = 0;
                 if (!Number.isSafeInteger(next.snapshotRevision) || next.snapshotRevision !== current) return { ok:false, code:"PID_SNAPSHOT_STALE" };
                 next.snapshotRevision = current + 1;
                 fs.writeFileSync(tmp, JSON.stringify(next), { mode: 0o600 });
