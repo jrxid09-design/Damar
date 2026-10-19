@@ -33,7 +33,7 @@ const { AsyncLocalStorage } = require("node:async_hooks");
  */
 
 const DEFAULT_SPAN_DEADLINE_MS = 30_000;
-const BEGIN_ATTEMPTS = 8;
+const BUSY_ATTEMPTS = 8;
 
 const CODES = Object.freeze({
     UNSCOPED: "UNSCOPED_DB_CALL_DURING_ACTIVE_TRANSACTION",
@@ -475,7 +475,7 @@ class TransactionScope {
                     throw error;
                 }
 
-                if (attempt >= BEGIN_ATTEMPTS) {
+                if (attempt >= BUSY_ATTEMPTS) {
                     throw dbError(CODES.BEGIN_BUSY, "write lock not acquired");
                 }
 
@@ -835,20 +835,47 @@ class Database {
 
         }).then(async () => {
 
+            // Beri kesempatan menunggu kunci alih-alih langsung
+            // melempar SQLITE_BUSY. Harus PERTAMA: pragma berikutnya
+            // berjalan di bawah timeout ini.
+            await this.execRaw("PRAGMA busy_timeout = 5000");
+
             // WAL: pembaca tidak memblokir penulis. Penting karena
             // Console membaca memori sambil daemon terus menulis
             // observasi dari sensor/CCTV.
-            await this.execRaw("PRAGMA journal_mode = WAL");
+            //
+            // A BRAND-NEW file opened by N processes at once can STILL raise
+            // SQLITE_BUSY on the WAL transition (busy_timeout does not cover
+            // every schema change), so the whole pragma sequence is retried on
+            // busy. Without this a cold-start race surfaces as a raw
+            // SQLITE_BUSY to the caller.
+            for (let attempt = 1; ; attempt += 1) {
 
-            await this.execRaw("PRAGMA synchronous = NORMAL");
+                try {
 
-            await this.execRaw("PRAGMA foreign_keys = ON");
+                    await this.execRaw("PRAGMA journal_mode = WAL");
 
-            // Beri kesempatan menunggu kunci alih-alih langsung
-            // melempar SQLITE_BUSY.
-            await this.execRaw("PRAGMA busy_timeout = 5000");
+                    await this.execRaw("PRAGMA synchronous = NORMAL");
 
-            return this.db;
+                    await this.execRaw("PRAGMA foreign_keys = ON");
+
+                    return this.db;
+
+                } catch (error) {
+
+                    const busy = error?.code === "SQLITE_BUSY" || /SQLITE_BUSY|database is locked/i.test(String(error?.message ?? ""));
+
+                    if (!busy || attempt >= BUSY_ATTEMPTS) {
+
+                        throw error;
+
+                    }
+
+                    await new Promise(resolve => setTimeout(resolve, 10 * attempt));
+
+                }
+
+            }
 
         });
 
