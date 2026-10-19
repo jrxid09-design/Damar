@@ -54,6 +54,7 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
                 const next = JSON.parse(payload);
                 let current = 0;
                 try { current = JSON.parse(fs.readFileSync(filePath, "utf8")).snapshotRevision || 0; } catch (e) { if (e.code !== "ENOENT") return { ok:false, code:"PID_SNAPSHOT_CORRUPT" }; }
+                if (next.snapshotRevision === undefined && current === 0) next.snapshotRevision = 0; // legacy first write
                 if (!Number.isSafeInteger(next.snapshotRevision) || next.snapshotRevision !== current) return { ok:false, code:"PID_SNAPSHOT_STALE" };
                 next.snapshotRevision = current + 1;
                 fs.writeFileSync(tmp, JSON.stringify(next), { mode: 0o600 });
