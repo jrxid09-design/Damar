@@ -59,6 +59,7 @@ const {
 } = require("./ownerTrust");
 
 const { createTrustAuditGate } = require("./ownerTrust/trustAuditGate");
+const { createCliSessionAuthority } = require("./ownerTrust/cliSession");
 const {
     createCanonicalIngressIssuers,
     attachTelegramIngress,
@@ -205,6 +206,9 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null } = {
 
     // ---- Bindings / binders / linker --------------------------------------
     const principalBindings = createPrincipalBindings({ registry, proofVerifier });
+    // T2: bounded CLI proof-of-possession + session issuance.  Composes the
+    // registry + sealed proof verifier; mints no grant and no Authority.
+    const cliSession = createCliSessionAuthority({ registry, proofVerifier, clock });
     const channelBinders = createChannelBinders({ registry, proofVerifier });
     const continuityLinker = createContinuityLinker({ registry, principalBindings });
 
@@ -295,6 +299,7 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null } = {
         ratifyAsOwner: ownerRatify, principalBindings, channelBinders,
         continuityLinker, store, vault, auditGate, ledger: effectiveLedger, ingress,
         auditSink, selfSignOwnerProof, humanConfirmation,
+        cliSession,
         testMint,
         /** Release the audit sink's single-writer lock (graceful shutdown). */
         close() {

@@ -26,6 +26,7 @@ const {
 const { createPrincipalBindings, normalizePeer, TRANSPORTS } = require("./bindings");
 const { createChannelBinders } = require("./binders");
 const { createContinuityLinker, LINKABLE_CHANNELS } = require("./continuity");
+const { createCliSessionAuthority, CLAIM_PURPOSE } = require("./cliSession");
 const { parseSessionKeyPart } = require("./sessionKeys");
 const { createTrustAuditGate } = require("./trustAuditGate");
 const { createTransportProvenanceIssuer, verifyTransportPeerProvenance } = require("./provenance");
@@ -43,6 +44,8 @@ module.exports = Object.freeze({
     createPrincipalBindings,
     createChannelBinders,
     createContinuityLinker,
+    createCliSessionAuthority,
+    CLI_SESSION_PURPOSE: CLAIM_PURPOSE,
     parseSessionKeyPart,
     LINKABLE_CHANNELS,
     createTrustAuditGate,
