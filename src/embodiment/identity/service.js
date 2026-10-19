@@ -595,7 +595,13 @@ class DeviceIdentityService {
                 "serialisasi tidak dikenal (version !== 1)");
         }
         const svc = new DeviceIdentityService({ clock, config, entropy, body });
-        svc._snapshotRevision = Number.isSafeInteger(data.snapshotRevision) && data.snapshotRevision >= 0 ? data.snapshotRevision : 0;
+        // Absence is the only legacy form. An explicit malformed modern value
+        // must not be silently reinterpreted as revision zero.
+        if (Object.prototype.hasOwnProperty.call(data, "snapshotRevision") &&
+            (!Number.isSafeInteger(data.snapshotRevision) || data.snapshotRevision < 0)) {
+            throw fail("PID_INVALID_SERIALIZATION", "snapshotRevision tidak sah");
+        }
+        svc._snapshotRevision = data.snapshotRevision ?? 0;
         const staged = new Map();
 
         for (const [i, row] of (Array.isArray(data.devices) ? data.devices : []).entries()) {
@@ -701,9 +707,12 @@ class DeviceIdentityService {
         for (const tx of data.transactions ?? []) {
             svc._transactions.set(tx.pairingId, { ...tx });
         }
+        if (Object.prototype.hasOwnProperty.call(data, "surfaces") && !Array.isArray(data.surfaces)) {
+            throw fail("PID_INVALID_SERIALIZATION", "surfaces bukan array");
+        }
         for (const row of data.surfaces ?? []) {
             const dev = row && staged.get(row.deviceId);
-            if (!row || typeof row.surfaceId !== "string" || !/^cli:[a-z0-9-]{3,80}$/i.test(row.surfaceId) || row.surfaceType !== "CLI" || !dev || !Number.isSafeInteger(row.ownerGeneration) || !Number.isSafeInteger(row.registrationRevision) || row.registrationRevision < 1 || typeof row.ownerId !== "string" || typeof row.credentialRef !== "string" || !["PENDING", "REVOKED"].includes(row.status) || svc._surfaces.has(row.surfaceId) || (dev.pairingState === PAIRING_STATES.REVOKED && row.status !== "REVOKED")) throw fail("PID_INVALID_SERIALIZATION", "surface registration invalid");
+            if (!row || typeof row.surfaceId !== "string" || !/^cli:[a-z0-9-]{3,80}$/i.test(row.surfaceId) || row.surfaceType !== "CLI" || !dev || !Number.isSafeInteger(row.ownerGeneration) || row.ownerGeneration < 0 || !Number.isSafeInteger(row.registrationRevision) || row.registrationRevision < 1 || typeof row.ownerId !== "string" || row.ownerId.length < 1 || typeof row.credentialRef !== "string" || row.credentialRef.length < 1 || typeof row.pairingRef !== "string" || !/^[a-f0-9]{64}$/.test(row.pairingRef) || !["PENDING", "REVOKED"].includes(row.status) || typeof row.allowedChannel !== "string" || row.allowedChannel !== "cli" || typeof row.sessionScope !== "string" || row.sessionScope !== "device" || !Number.isInteger(row.createdAtMs) || row.createdAtMs < 0 || (row.revokedAtMs !== null && (!Number.isInteger(row.revokedAtMs) || row.revokedAtMs < row.createdAtMs)) || (row.status === "PENDING" && row.revokedAtMs !== null) || (row.status === "REVOKED" && row.revokedAtMs === null) || svc._surfaces.has(row.surfaceId) || (dev.pairingState === PAIRING_STATES.REVOKED && row.status !== "REVOKED")) throw fail("PID_INVALID_SERIALIZATION", "surface registration invalid");
             svc._surfaces.set(row.surfaceId, { ...row });
         }
         return svc;
