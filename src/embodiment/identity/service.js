@@ -70,6 +70,7 @@ class DeviceIdentityService {
         this._surfaces = new Map();
         this._forgedSessionCount = 0;
         this._identityConflicts = 0;
+        this._snapshotRevision = 0;
         this.challenges = new ChallengeBroker({
             clock, entropy,
             config: {
@@ -564,6 +565,7 @@ class DeviceIdentityService {
             });
         return deepFreeze({
             version: 1,
+            snapshotRevision: this._snapshotRevision,
             devices,
             transactions: [...this._transactions.values()]
                 .filter(t => t.state === "CONFIRMED")
@@ -587,6 +589,7 @@ class DeviceIdentityService {
                 "serialisasi tidak dikenal (version !== 1)");
         }
         const svc = new DeviceIdentityService({ clock, config, entropy, body });
+        svc._snapshotRevision = Number.isSafeInteger(data.snapshotRevision) && data.snapshotRevision >= 0 ? data.snapshotRevision : 0;
         const staged = new Map();
 
         for (const [i, row] of (Array.isArray(data.devices) ? data.devices : []).entries()) {
@@ -699,6 +702,7 @@ class DeviceIdentityService {
         }
         return svc;
     }
+    acceptSnapshotRevision(revision) { if (!Number.isSafeInteger(revision) || revision < this._snapshotRevision) throw fail("PID_SNAPSHOT_REVISION", "snapshot revision invalid"); this._snapshotRevision = revision; }
 
     /* ------------------------------ internal --------------------------- */
 

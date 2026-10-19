@@ -32,7 +32,9 @@ function createMemoryIdentityStore() {
 
 async function persistIdentity(svc, store) {
     if (!store) throw fail("PID_NO_STORE", "tidak ada store terpasang");
-    return store.save(svc.serialize());
+    const result = await store.save(svc.serialize());
+    if (result && Number.isSafeInteger(result.snapshotRevision) && typeof svc.acceptSnapshotRevision === "function") svc.acceptSnapshotRevision(result.snapshotRevision);
+    return result;
 }
 
 async function loadIdentity({ store, clock, config, entropy, body } = {}) {

@@ -76,6 +76,7 @@ function createFileIdentityStore(filePath, options = {}) {
     async function drain() {
         if (writing) return;
         writing = true;
+        let last = null;
         try {
             while (queue.length > 0) {
                 const payload = queue.shift();
@@ -86,8 +87,10 @@ function createFileIdentityStore(filePath, options = {}) {
                 if (result?.outcome !== "EXECUTED_VERIFIED") {
                     throw invalid(`snapshot identitas ditolak: ${result?.reason ?? result?.outcome ?? "UNKNOWN"}`);
                 }
+                last = result.result ?? result;
             }
         } finally { writing = false; }
+        return last;
     }
 
     /** Validate the envelope shape of a loaded snapshot (content is
@@ -119,8 +122,8 @@ function createFileIdentityStore(filePath, options = {}) {
             // Copy + write atomically; tmp+rename guards against torn writes.
             const payload = JSON.stringify(structuredCopy(serialized));
             queue.push(payload);
-            await drain();
-            return true;
+            const result = await drain();
+            return { snapshotRevision: result?.snapshotRevision ?? JSON.parse(payload).snapshotRevision };
         },
 
         /** Load the last durable snapshot (deep-copied) or null if none. */

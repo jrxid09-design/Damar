@@ -46,9 +46,17 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
             const payload = parameters.payload;
             const fsync = true;
             fs.mkdirSync(path.dirname(filePath), { recursive: true });
+            const lock = `${filePath}.lock`;
             const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            let lockFd = null;
             try {
-                fs.writeFileSync(tmp, payload, { mode: 0o600 });
+                try { lockFd = fs.openSync(lock, "wx", 0o600); } catch (e) { return { ok: false, code: "PID_SNAPSHOT_BUSY" }; }
+                const next = JSON.parse(payload);
+                let current = 0;
+                try { current = JSON.parse(fs.readFileSync(filePath, "utf8")).snapshotRevision || 0; } catch (e) { if (e.code !== "ENOENT") return { ok:false, code:"PID_SNAPSHOT_CORRUPT" }; }
+                if (!Number.isSafeInteger(next.snapshotRevision) || next.snapshotRevision !== current) return { ok:false, code:"PID_SNAPSHOT_STALE" };
+                next.snapshotRevision = current + 1;
+                fs.writeFileSync(tmp, JSON.stringify(next), { mode: 0o600 });
                 if (fsync) {
                     const fd = fs.openSync(tmp, "r+");
                     try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
@@ -58,10 +66,12 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
                     const dirFd = fs.openSync(path.dirname(filePath), "r");
                     try { fs.fsyncSync(dirFd); } finally { fs.closeSync(dirFd); }
                 }
-                return { ok: true, filePath };
+                return { ok: true, filePath, snapshotRevision: current + 1 };
             } catch (error) {
                 cleanupTmp(tmp);
                 return { ok: false, error: `gagal menulis snapshot identitas: ${error.message}` };
+            } finally {
+                if (lockFd !== null) { try { fs.closeSync(lockFd); } finally { try { fs.unlinkSync(lock); } catch {} } }
             }
         }
     });
