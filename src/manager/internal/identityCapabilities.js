@@ -32,15 +32,17 @@ const runtimeGate = new WeakSet();
 
 function cleanupTmp(file) { try { fs.unlinkSync(file); } catch { /* best effort */ } }
 
-async function testCrashBarrier(point) {
-    const root = process.env.DAMAR_IDENTITY_TEST_HOOK_DIR;
-    if (!root) return;
-    const enabled = process.env.DAMAR_IDENTITY_TEST_HOOK_POINT;
-    if (enabled !== point) return;
-    fs.writeFileSync(path.join(root, `ready-${point}`), String(process.pid), { flag: "wx" });
-    const release = path.join(root, `release-${point}`);
-    while (!fs.existsSync(release)) await new Promise((resolve) => setTimeout(resolve, 5));
-}
+/**
+ * P3-1: crash injection is INJECTED, never environment-activated.
+ *
+ * A crash checkpoint exists only when a caller explicitly hands a barrier
+ * function to createIdentityCapabilityRuntime().  Nothing here reads an
+ * environment variable, a request field, or any other untrusted input to
+ * decide whether to pause inside the write driver, so a misconfigured
+ * environment cannot turn the production write path into a fault-injection
+ * surface.  Production passes no barrier; the default is inert.
+ */
+async function inertCheckpoint() { /* production: never pauses */ }
 
 function sql(db, statement) {
     return new Promise((resolve, reject) => db.exec(statement, (error) => error ? reject(error) : resolve()));
@@ -108,7 +110,11 @@ function durableSnapshotRevision(filePath) {
         : { error: "PID_SNAPSHOT_CORRUPT" };
 }
 
-function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = null, replayStore = null } = {}) {
+function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = null, replayStore = null, barrier = null } = {}) {
+    if (barrier !== null && typeof barrier !== "function") {
+        throw new TypeError("identity crash barrier must be an injected function or null");
+    }
+    const checkpoint = barrier ?? inertCheckpoint;
     const bridge = new CanonicalCapabilityExecution({ replayStore });
     bridge.installAuditAcknowledger(acknowledge ?? createCanonicalAuditAcknowledger());
     let invocations = 0;
@@ -129,7 +135,7 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
             try {
                 lockDb = await acquireSnapshotLock(filePath);
                 if (!lockDb) return { ok: false, code: "PID_SNAPSHOT_BUSY" };
-                await testCrashBarrier("after-lock");
+                await checkpoint("after-lock");
                 const next = JSON.parse(payload);
                 if (next === null || typeof next !== "object" || Array.isArray(next)) return { ok:false, code:"PID_SNAPSHOT_CORRUPT" };
                 const durable = durableSnapshotRevision(filePath);
@@ -143,14 +149,14 @@ function createIdentityCapabilityRuntime({ authorityStore = null, acknowledge = 
                 if (!Number.isSafeInteger(next.snapshotRevision) || next.snapshotRevision !== current) return { ok:false, code:"PID_SNAPSHOT_STALE" };
                 next.snapshotRevision = current + 1;
                 fs.writeFileSync(tmp, JSON.stringify(next), { mode: 0o600 });
-                await testCrashBarrier("after-tmp");
+                await checkpoint("after-tmp");
                 if (fsync) {
                     const fd = fs.openSync(tmp, "r+");
                     try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
                 }
-                await testCrashBarrier("after-fsync");
+                await checkpoint("after-fsync");
                 fs.renameSync(tmp, filePath);
-                await testCrashBarrier("after-rename");
+                await checkpoint("after-rename");
                 if (fsync && process.platform !== "win32") {
                     const dirFd = fs.openSync(path.dirname(filePath), "r");
                     try { fs.fsyncSync(dirFd); } finally { fs.closeSync(dirFd); }

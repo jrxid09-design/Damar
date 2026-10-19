@@ -877,6 +877,28 @@ class Database {
 
             }
 
+        }).catch(async error => {
+
+            // P3-2: a failed initialization must never publish a handle that
+            // looks usable. Invalidate the instance FIRST (so no observer can
+            // see a half-open handle), then close the incomplete connection
+            // best-effort. Clearing the cached open promise means a later
+            // open() starts a fresh bounded attempt; fail-loud is preserved
+            // because the error is still thrown to every caller waiting here.
+            const handle = this.db;
+
+            this.db = null;
+            this.ready = null;
+
+            if (handle) {
+                // Best-effort, non-blocking: the instance is already
+                // invalidated, so a slow or failed close must not stall the
+                // failure path (nor hide the original error).
+                try { handle.close(() => {}); } catch { /* best effort */ }
+            }
+
+            throw error;
+
         });
 
         return this.ready;
