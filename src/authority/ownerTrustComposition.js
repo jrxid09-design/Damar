@@ -139,8 +139,46 @@ function isCanonicalOwnerTrustComposition(candidate) {
 }
 
 /**
+ * Canonical device-trust reader for CLI session issuance/verification.
+ *
+ * FRESHNESS CONTRACT: every call loads the COMMITTED IdentityStore snapshot
+ * and restores it through the canonical DeviceIdentityService validator.
+ * Nothing is cached, so a revocation committed by another process is
+ * observed by the next call.  A missing snapshot means "no canonical device"
+ * (null); an unreadable/corrupt snapshot throws and the session authority
+ * fails closed.  The reader is a composition-time dependency — never a
+ * caller-supplied device status.
+ */
+function createCanonicalDeviceReader(identityStore) {
+    if (!identityStore || typeof identityStore.load !== "function") {
+        throw new TypeError("OT_IDENTITY_STORE_INVALID: identityStore requires load()");
+    }
+    return async function readCanonicalDevice(deviceId) {
+        // ponytail: full-snapshot validation per read (bounded: <=256
+        // devices). Add a revision-keyed cache only if verify throughput
+        // ever matters, and drop it on every store revision change.
+        const { loadIdentity } = require("../embodiment/identity/store");
+        const service = await loadIdentity({ store: identityStore });
+        if (!service) return null;
+        const row = service.serialize().devices.find((d) => d.deviceId === deviceId);
+        if (!row) return null;
+        return Object.freeze({
+            deviceId: row.deviceId,
+            pairingState: row.pairingState,
+            bindingDigest: row.bindingDigest
+        });
+    };
+}
+
+/**
  * Build the sealed composition.  `stateFile` is the durable ownerTrust
  * snapshot path (null => in-memory test mode).
+ *
+ * `identityStore` (IdentityStore port, optional) wires LIVE canonical device
+ * trust into `cliSession`.  Without it, CLI session issuance and verification
+ * fail closed (OT_IDENTITY_UNAVAILABLE): this composition refuses to vouch
+ * for device state it cannot authoritatively re-read.  The store is a
+ * composition-time dependency, not caller input.
  *
  * Durable mode wires, beside the snapshot:
  *   <dir>/vault/               — SecretVault file store (Owner key material)
@@ -149,7 +187,7 @@ function isCanonicalOwnerTrustComposition(candidate) {
  *   <dir>/ownertrust-initialized.json — OT-002 initialization anchor
  *   <dir>/ownertrust-bootstrap.lock   — OT-003 ceremony reservation
  */
-async function compose(stateFile, { forTest = false, ledgerOverride = null } = {}) {
+async function compose(stateFile, { forTest = false, ledgerOverride = null, identityStore = null } = {}) {
     // MD-018 test-only seam: an explicit ledger override (Mata Dewa audit
     // sink test scenarios) is honored ONLY for forTest compositions. The
     // production path never carries this option — fail loudly otherwise.
@@ -207,8 +245,14 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null } = {
     // ---- Bindings / binders / linker --------------------------------------
     const principalBindings = createPrincipalBindings({ registry, proofVerifier });
     // T2: bounded CLI proof-of-possession + session issuance.  Composes the
-    // registry + sealed proof verifier; mints no grant and no Authority.
-    const cliSession = createCliSessionAuthority({ registry, proofVerifier, clock });
+    // registry + sealed proof verifier + (when wired) a FRESH canonical
+    // device reader.  Mints no grant and no Authority.  Without an identity
+    // store the session contract fails closed rather than trusting stale or
+    // caller-supplied device state.
+    const cliSession = createCliSessionAuthority({
+        registry, proofVerifier, clock,
+        readCanonicalDevice: identityStore ? createCanonicalDeviceReader(identityStore) : null
+    });
     const channelBinders = createChannelBinders({ registry, proofVerifier });
     const continuityLinker = createContinuityLinker({ registry, principalBindings });
 
@@ -519,9 +563,9 @@ function resolveOwnerAuthVerifier() {
  * This does NOT install anything into the canonical auth adapter; it returns
  * the composition so the sealed host composition can wire it.
  */
-async function composeOwnerTrustForTest({ stateFile = null, ledgerOverride = null } = {}) {
+async function composeOwnerTrustForTest({ stateFile = null, ledgerOverride = null, identityStore = null } = {}) {
     return compose(stateFile === null ? null : path.resolve(stateFile),
-        { forTest: true, ledgerOverride });
+        { forTest: true, ledgerOverride, identityStore });
 }
 
 module.exports = Object.freeze({

@@ -43,7 +43,19 @@
  *   - Sessions are NOT durable: restart discards them and their brand, so a
  *     restored process cannot resurrect trust automatically.  Revocation
  *     intent that must survive restart lives in the canonical registry
- *     (credential/principal/binding revocation), not here.
+ *     (credential/principal/binding revocation) AND in canonical Device
+ *     Identity state, not here.
+ *   - A session is NOT a substitute for live device trust.  Issuance AND
+ *     every verification re-read the COMMITTED canonical Device Identity
+ *     state through the composition-injected `readCanonicalDevice` reader:
+ *     the device must still exist, still be PAIRED, and still carry the
+ *     SAME bindingDigest captured at issuance.  A canonical device
+ *     revocation therefore stops sessions issued BEFORE the revocation,
+ *     including revocations committed by another process.  The reader is
+ *     never cached; missing, malformed, or unreadable canonical state fails
+ *     closed (OT_IDENTITY_UNAVAILABLE / OT_DEVICE_UNKNOWN).
+ *   - `verifySession` is ASYNC because of that live read.  It returns a
+ *     Promise; a Promise is never an `ok` verdict, callers must await it.
  *   - This session is NOT an Authority grant.  Every consequential execution
  *     still passes the Manager/Authority Gate and a capability's own
  *     authority evaluation; `verifySession` only tells the caller whether the
@@ -58,6 +70,11 @@ const DEFAULT_TTL_MS = 300_000;
 const MAX_SESSIONS = 512;
 const MAX_TOKEN = 120;
 const SURFACE_PATTERN = /^cli:[A-Za-z0-9._-]{1,80}$/;
+const BINDING_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
+
+function sha256Hex(value) {
+    return crypto.createHash("sha256").update(String(value), "utf8").digest("hex");
+}
 
 function fail(code, message) {
     const error = new Error(`[${code}] ${message || code}`);
@@ -84,14 +101,29 @@ function requireTokens({ deviceId, surfaceId }) {
 }
 
 /**
- * createCliSessionAuthority({ registry, proofVerifier, clock, ttlMs })
+ * createCliSessionAuthority({
+ *   registry, proofVerifier, readCanonicalDevice, clock, ttlMs
+ * })
+ *
+ * `readCanonicalDevice` is a COMPOSITION-TIME dependency, not caller input:
+ * an async (deviceId) => { deviceId, pairingState, bindingDigest } | null
+ * that MUST read committed canonical Device Identity state on every call.
+ * When it is absent, session issuance and verification fail closed: a
+ * session can never be granted or renewed on device identity this authority
+ * cannot authoritatively re-check.
  */
-function createCliSessionAuthority({ registry, proofVerifier, clock = () => Date.now(), ttlMs = DEFAULT_TTL_MS } = {}) {
+function createCliSessionAuthority({
+    registry, proofVerifier, readCanonicalDevice = null,
+    clock = () => Date.now(), ttlMs = DEFAULT_TTL_MS
+} = {}) {
     if (!registry || typeof registry.getOwner !== "function" || typeof registry.getGeneration !== "function") {
         throw fail("OT_SESSION_INVALID", "CLI session authority requires an OwnerTrustRegistry");
     }
     if (!proofVerifier || typeof proofVerifier.issueChallenge !== "function" || typeof proofVerifier.verifyProof !== "function") {
         throw fail("OT_SESSION_INVALID", "CLI session authority requires the sealed proof verifier");
+    }
+    if (readCanonicalDevice !== null && typeof readCanonicalDevice !== "function") {
+        throw fail("OT_IDENTITY_INVALID", "readCanonicalDevice must be an async function or null (fail closed)");
     }
     if (typeof clock !== "function") {
         throw fail("OT_CLOCK_INVALID", "clock must be a function");
@@ -105,6 +137,46 @@ function createCliSessionAuthority({ registry, proofVerifier, clock = () => Date
     const sessions = new Map();          // sessionId -> frozen session
     const revokedSessions = new Set();   // explicit revocations (this process)
     const revokedDevices = new Set();
+
+    /**
+     * Authoritative live device read for ONE decision.  No cache: a
+     * revocation committed after the previous decision is visible here.
+     * Every failure path denies; there is no "unknown means trust".
+     */
+    async function canonicalDevice(deviceId) {
+        if (typeof readCanonicalDevice !== "function") {
+            return Object.freeze({ ok: false, code: "OT_IDENTITY_UNAVAILABLE" });
+        }
+        let view;
+        try {
+            view = await readCanonicalDevice(deviceId);
+        } catch {
+            return Object.freeze({ ok: false, code: "OT_IDENTITY_UNAVAILABLE" });
+        }
+        if (view === null || view === undefined) {
+            return Object.freeze({ ok: false, code: "OT_DEVICE_UNKNOWN" });
+        }
+        if (typeof view !== "object" || view.deviceId !== deviceId ||
+            typeof view.pairingState !== "string") {
+            return Object.freeze({ ok: false, code: "OT_IDENTITY_INVALID" });
+        }
+        if (view.pairingState === "REVOKED") {
+            return Object.freeze({ ok: false, code: "OT_DEVICE_REVOKED" });
+        }
+        if (view.pairingState !== "PAIRED") {
+            return Object.freeze({ ok: false, code: "OT_DEVICE_NOT_PAIRED" });
+        }
+        if (typeof view.bindingDigest !== "string" || !BINDING_DIGEST_PATTERN.test(view.bindingDigest)) {
+            return Object.freeze({ ok: false, code: "OT_IDENTITY_INVALID" });
+        }
+        return Object.freeze({ ok: true, view });
+    }
+
+    function bindingMatches(presentedSecret, canonicalDigest) {
+        const presented = Buffer.from(sha256Hex(presentedSecret), "hex");
+        const canonical = Buffer.from(canonicalDigest, "hex");
+        return presented.length === canonical.length && crypto.timingSafeEqual(presented, canonical);
+    }
 
     function activeOwnerCredential() {
         const owner = registry.getOwner();
@@ -171,7 +243,16 @@ function createCliSessionAuthority({ registry, proofVerifier, clock = () => Date
             return deny("OT_PRINCIPAL_NOT_ACTIVE");
         }
 
-        // 3) Device proof-of-possession against the canonical identity
+        // 3) LIVE canonical device trust: the COMMITTED Device Identity
+        //    snapshot — never a caller-supplied status or a stale in-memory
+        //    aggregate — must still say PAIRED and still carry the digest of
+        //    the presented binding secret.  A revocation committed by any
+        //    process is observed here before anything is minted.
+        const device = await canonicalDevice(deviceId);
+        if (!device.ok) return deny(device.code);
+        if (!bindingMatches(bindingSecret, device.view.bindingDigest)) return deny("OT_DEVICE_PROOF_FAILED");
+
+        // 4) Device proof-of-possession against the canonical identity
         //    records: openSession verifies bindingSecret against the digest
         //    minted at ownerConfirm and throws PID_SESSION_FORGED otherwise.
         let probe;
@@ -183,7 +264,7 @@ function createCliSessionAuthority({ registry, proofVerifier, clock = () => Date
         try { if (probe && identityService.closeSession) identityService.closeSession(probe.sessionId); }
         catch { /* probe cleanup best-effort; the probe is never used as a session */ }
 
-        // 4) Mint the bounded session.
+        // 5) Mint the bounded session.
         const now = clock();
         sweep(now);
         if (sessions.size >= MAX_SESSIONS) return deny("OT_SESSION_BOUND_EXCEEDED");
@@ -198,6 +279,7 @@ function createCliSessionAuthority({ registry, proofVerifier, clock = () => Date
             expiresAtMs: now + ttl,
             generation: registry.getGeneration(),
             ownerGeneration: owner.generation,
+            bindingDigest: device.view.bindingDigest,
             revision: 1
         });
         sessionBrand.add(session);
@@ -208,8 +290,12 @@ function createCliSessionAuthority({ registry, proofVerifier, clock = () => Date
     /**
      * Revalidate before a sensitive action.  Brand-first; every canonical
      * precondition is re-checked at CALL time, not cached at issuance.
+     *
+     * ASYNC: the final precondition is a fresh canonical device read, so the
+     * caller MUST await the verdict.  A device revoked (committed) after
+     * issuance — by this process or another — is refused here.
      */
-    function verifySession(session, { deviceId = null, surfaceId = null } = {}) {
+    async function verifySession(session, { deviceId = null, surfaceId = null } = {}) {
         if (session === null || typeof session !== "object") return deny("OT_SESSION_FORGED");
         if (!sessionBrand.has(session)) return deny("OT_SESSION_FORGED");
         const rec = sessions.get(session.sessionId);
@@ -236,6 +322,13 @@ function createCliSessionAuthority({ registry, proofVerifier, clock = () => Date
         }
         const credential = registry.getCredential(rec.credentialId);
         if (!credential || credential.revokedAtMs !== null) return deny("OT_CREDENTIAL_REVOKED");
+
+        // LIVE device trust, read from committed canonical state on every
+        // verification.  This is what makes a canonical revocation effective
+        // against sessions issued BEFORE it, with no cache to mask it.
+        const device = await canonicalDevice(rec.deviceId);
+        if (!device.ok) return deny(device.code);
+        if (device.view.bindingDigest !== rec.bindingDigest) return deny("OT_DEVICE_BINDING_CHANGED");
 
         return Object.freeze({
             ok: true,
