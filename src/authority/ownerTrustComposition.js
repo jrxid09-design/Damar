@@ -86,6 +86,37 @@ function resolveProductionOwnerTrustStore() {
     return path.join(os.homedir(), ".damar", "ownertrust-v1.json");
 }
 
+/**
+ * W5-CLI P3-e — resolve the canonical DURABLE Device Identity store for the
+ * production composition root.
+ *
+ * PROVENANCE, not caller input: the path is DERIVED from the already
+ * operator-controlled OwnerTrust root (`<dir>/identity-v1.json`), so the
+ * identity snapshot lives under exactly the same trusted host path as the
+ * trust snapshot.  There is deliberately NO separate env knob and NO
+ * function argument that could point identity state at an arbitrary file:
+ * a caller can never choose where canonical device truth is read from.
+ *
+ * Memory mode (DAMAR_OWNER_TRUST_STATE=memory) yields null: there is no
+ * durable canonical device state, and `cliSession` then fails closed
+ * (OT_IDENTITY_UNAVAILABLE) rather than trusting a process-local aggregate.
+ *
+ * Returns an IdentityStore port or null (fail closed).  It grants nothing:
+ * reads are unprivileged; durable WRITES still pass the Manager-owned
+ * identity capability runtime's authority evaluation.
+ */
+function resolveProductionIdentityStore(stateFile) {
+    try {
+        if (typeof stateFile !== "string" || stateFile.length === 0) return null;
+        const identityPath = path.join(path.dirname(stateFile), "identity-v1.json");
+        // The managed factory resolves the Manager-owned capability runtime
+        // and refuses a non-Manager runtime; any failure => no canonical store.
+        return require("../embodiment/identity/store").createFileIdentityStore(identityPath);
+    } catch {
+        return null;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Vault master-key provisioning (OT-005): the canonical composition owns the
 // key lifecycle.  A 32-byte random key is created ONCE, atomically, at a
@@ -344,6 +375,18 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null, iden
         continuityLinker, store, vault, auditGate, ledger: effectiveLedger, ingress,
         auditSink, selfSignOwnerProof, humanConfirmation,
         cliSession,
+        identityStore,
+        /**
+         * Load the canonical Device Identity aggregate from COMMITTED durable
+         * state (fresh every call; no cache). Returns null when no durable
+         * identity store is wired or no snapshot exists yet. Read-side only —
+         * it confers no authority; a caller still needs a live device binding.
+         */
+        async loadCanonicalIdentity() {
+            if (!identityStore) return null;
+            const { loadIdentity } = require("../embodiment/identity/store");
+            return loadIdentity({ store: identityStore });
+        },
         testMint,
         /** Release the audit sink's single-writer lock (graceful shutdown). */
         close() {
@@ -485,7 +528,12 @@ function makeAuthVerifier(registry, proofVerifier) {    return function ownerAut
 async function canonical() {
     if (canonicalComposition !== null) return canonicalComposition;
     if (compositionPromise === null) {
-        compositionPromise = compose(resolveProductionOwnerTrustStore())
+        const stateFile = resolveProductionOwnerTrustStore();
+        // P3-e: the production root wires the canonical durable identity store
+        // (derived from the trusted trust-state root).  Absent => cliSession
+        // fails closed.  No option is ever accepted from a caller.
+        const identityStore = resolveProductionIdentityStore(stateFile);
+        compositionPromise = compose(stateFile, { identityStore })
             .then((c) => {
                 canonicalComposition = c;
                 // Install the canonical Owner/Admin proof verifier into the
@@ -570,6 +618,7 @@ async function composeOwnerTrustForTest({ stateFile = null, ledgerOverride = nul
 
 module.exports = Object.freeze({
     resolveProductionOwnerTrustStore,
+    resolveProductionIdentityStore,
     resolveOwnerAuthVerifier,
     checkCanonicalHumanConfirmation,
     composeOwnerTrustForTest,
