@@ -39,18 +39,22 @@ const {
     discoveryPath,
     encodeFrame,
     hardenNamedPipe,
+    currentWindowsUserSid,
     newNonce,
     newSecret,
     randomEndpoint,
     redact,
     secretEquals,
     tokenPath,
+    verifyNamedPipeAcl,
     welcomeProof,
     writeSecret,
     verifySecretPath,
     hardenSecretPath,
     transportError
 } = require("./localIpc");
+
+const { createNativePeerTransport } = require("./nativePeerTransport");
 
 const OPS = Object.freeze([
     "status", "authBegin", "authComplete", "session",
@@ -224,6 +228,13 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null, disc
     let endpoint = null;
     let token = null;
     let aclEvidence = null;
+    /**
+     * Who this host can prove it is talking to.  On Windows the peer's real OS
+     * token SID is verified by the native peer host before a single byte is
+     * forwarded; on other platforms there is no OS peer credential check and the
+     * field says so instead of implying one.
+     */
+    let peerIdentity = null;
     let globalMints = [];
     let stopping = false;
 
@@ -323,7 +334,13 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null, disc
 
     function bindChannel(channel, result) {
         if (result && result.ok === true && typeof result.connectionId === "string") {
-            boundHandles.set(result.connectionId, channel.peerBinding);
+            // A handle belongs to (caller identity, VERIFIED OS peer SID).  The
+            // SID is never taken from the client, so a stolen handle is unusable
+            // even by another connection that claims the same identity.
+            boundHandles.set(result.connectionId, Object.freeze({
+                clientId: channel.peerBinding,
+                sid: channel.peerSid
+            }));
             if (boundHandles.size > bound.maxBoundHandles) {
                 const oldest = boundHandles.keys().next().value;
                 if (oldest !== undefined) boundHandles.delete(oldest);
@@ -359,8 +376,8 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null, disc
         }
         const owner = boundHandles.get(connectionId);
         if (owner === undefined) return { ok: true };
-        if (owner === channel.peerBinding) return { ok: true };
-        return { ok: false, code: "EPEER_CHANNEL_MISMATCH", detail: "connection handle is bound to another client identity" };
+        if (owner.clientId === channel.peerBinding && owner.sid === channel.peerSid) return { ok: true };
+        return { ok: false, code: "EPEER_CHANNEL_MISMATCH", detail: "connection handle is bound to another peer identity" };
     }
 
     // ---- request handling ------------------------------------------------
@@ -403,7 +420,16 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null, disc
         let timer = null;
         try {
             const result = await Promise.race([
-                Promise.resolve(bridge.request({ op, ...args, channelBinding: channel.peerBinding })),
+                Promise.resolve(bridge.request({
+                    op, ...args,
+                    channelBinding: channel.peerBinding,
+                    // Appended AFTER the caller's fields, and never derived from
+                    // them: a client cannot claim, override or omit the peer
+                    // identity its socket was verified with.
+                    peerIdentity: channel.peerSid === null
+                        ? undefined
+                        : Object.freeze({ mechanism: "os-token-sid", sid: channel.peerSid })
+                })),
                 new Promise((_, reject) => {
                     timer = setTimeout(() => reject(transportError("EPEER_TIMEOUT", "request timed out")), bound.requestTimeoutMs);
                     if (typeof timer.unref === "function") timer.unref();
@@ -472,7 +498,11 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null, disc
             v: PROTOCOL_VERSION,
             t: "welcome",
             snonce: serverNonce,
-            proof: welcomeProof(token, clientNonce, serverNonce)
+            // The verified peer SID the host is bound to, "" when the platform
+            // has no OS peer credential check.  It is inside the proof, so the
+            // client can detect a substituted or missing value.
+            sid: channel.peerSid ?? "",
+            proof: welcomeProof(token, clientNonce, serverNonce, channel.peerSid ?? "")
         });
     }
 
@@ -487,12 +517,29 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null, disc
         });
     }
 
-    function onConnection(socket) {
+    function onConnection(socket, verifiedPeer = null) {
         const channel = {
             id: `chan-${newNonce()}`,
             socket,
             authed: false,
             peerBinding: null,
+            /**
+             * The OS-verified SID of whoever is on this socket.  Set only from
+             * the transport's verified peer record — never from anything the
+             * client sends — and covered by the welcome proof below.
+             */
+            peerSid: typeof verifiedPeer?.sid === "string" ? verifiedPeer.sid : null,
+            /**
+             * The native connection instance this channel runs on (slot / conn
+             * id / handshake nonce).  It scopes the CHANNEL CONTEXT — it is not
+             * the handle binding, because a one-shot CLI uses a fresh connection
+             * per command under the default SURVIVE policy.
+             */
+            verifiedPeer: verifiedPeer === null ? null : Object.freeze({
+                sid: typeof verifiedPeer.sid === "string" ? verifiedPeer.sid : null,
+                conn: Number.isInteger(verifiedPeer.conn) ? verifiedPeer.conn : null,
+                nonce: typeof verifiedPeer.nonce === "string" ? verifiedPeer.nonce : null
+            }),
             clientNonce: null,
             serverNonce: null,
             inFlight: 0,
@@ -552,30 +599,83 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null, disc
         assertLocalEndpoint(endpoint, stateDir);
 
         // Order matters.  The endpoint is BOUND first, then its OS access
-        // control is rewritten and re-verified, and only then is the discovery
-        // file published.  A client can therefore never be pointed at an
-        // endpoint whose DACL has not been proven.
-        server = net.createServer(onConnection);
-        server.maxConnections = bound.maxChannels;
-        try {
-            await new Promise((resolve, reject) => {
-                const onError = (error) => reject(transportError("TRANSPORT_BIND_FAILED", error?.message ?? "bind failed"));
-                server.once("error", onError);
-                server.listen(endpoint, () => {
-                    server.removeListener("error", onError);
-                    resolve();
-                });
+        // control is proven readable, and only then is the discovery file
+        // published.  A client can therefore never be pointed at an endpoint
+        // whose access control has not been verified.
+        if (process.platform === "win32") {
+            // WINDOWS NATIVE PEER IDENTITY.  The endpoint is owned by the native
+            // peer host: it applies a restrictive DACL AT CREATION TIME, refuses
+            // remote clients, and verifies each peer's real Windows token before
+            // a single byte is forwarded to this process.  The authorized
+            // principal is the host's OWN user, resolved from the OS — never from
+            // an environment variable or anything a client supplies.  If it
+            // cannot be resolved there is no verified-SID transport, so this
+            // fails closed rather than falling back to shared-secret only.
+            const authorizedSid = currentWindowsUserSid();
+            if (typeof authorizedSid !== "string" || !/^S-1-[0-9-]{1,180}$/.test(authorizedSid)) {
+                throw transportError("TRANSPORT_PEER_VERIFICATION_UNAVAILABLE",
+                    "cannot resolve the authorized peer SID from the operating system");
+            }
+            peerIdentity = Object.freeze({ mechanism: "os-token-sid", sid: authorizedSid, verified: false, slots: bound.maxChannels });
+            server = createNativePeerTransport({
+                endpoint,
+                authorizedSid,
+                stateDir,
+                slots: bound.maxChannels,
+                // Bounded pre-authentication: a client that connects and says
+                // nothing is dropped instead of parking a worker forever.
+                preAuthMs: 5000,
+                logger: { note: (reason, detail) => note(reason, detail) },
+                events: (entry) => note(`peer.${entry.reason}`, entry)
             });
-        } catch (error) {
-            try { server.close(); } catch { /* never bound */ }
-            server = null;
-            throw error;
+            // The verified peer record is the transport's, not the client's: it
+            // is passed to the same connection handler the socket transport uses.
+            server.on("connection", (socket, verifiedPeer) => onConnection(socket, verifiedPeer));
+            try {
+                await new Promise((resolve, reject) => {
+                    const onError = (error) => reject(transportError("TRANSPORT_BIND_FAILED", error?.message ?? "bind failed"));
+                    server.once("error", onError);
+                    server.listen(() => {
+                        server.removeListener("error", onError);
+                        resolve();
+                    });
+                });
+            } catch (error) {
+                try { server.close(); } catch { /* never bound */ }
+                server = null;
+                peerIdentity = null;
+                throw error;
+            }
+            peerIdentity = Object.freeze({ mechanism: "os-token-sid", sid: authorizedSid, verified: true, slots: bound.maxChannels });
+        } else {
+            server = net.createServer(onConnection);
+            server.maxConnections = bound.maxChannels;
+            try {
+                await new Promise((resolve, reject) => {
+                    const onError = (error) => reject(transportError("TRANSPORT_BIND_FAILED", error?.message ?? "bind failed"));
+                    server.once("error", onError);
+                    server.listen(endpoint, () => {
+                        server.removeListener("error", onError);
+                        resolve();
+                    });
+                });
+            } catch (error) {
+                try { server.close(); } catch { /* never bound */ }
+                server = null;
+                throw error;
+            }
+            // Documented, permanent limit on this platform: there is no OS peer
+            // credential check here, only the channel secret.
+            peerIdentity = Object.freeze({ mechanism: "none", sid: null, verified: false, slots: bound.maxChannels });
         }
 
         let pipeAcl = null;
         let discoveryAcl = null;
         try {
-            pipeAcl = hardenNamedPipe(endpoint);
+            // On Windows the DACL was applied by the process that created the
+            // pipe; this call proves it from the serving process, and refuses an
+            // endpoint that foreign principals can reach.
+            pipeAcl = process.platform === "win32" ? verifyNamedPipeAcl(endpoint) : hardenNamedPipe(endpoint);
             fs.writeFileSync(discovery, `${JSON.stringify({
                 v: PROTOCOL_VERSION,
                 endpoint,
@@ -595,14 +695,15 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null, disc
             try { fs.unlinkSync(tokenPath(stateDir)); } catch { /* best effort */ }
             token = null;
             endpoint = null;
+            peerIdentity = null;
             throw error;
         }
         aclEvidence = Object.freeze({ token: tokenAcl, discovery: discoveryAcl, pipe: pipeAcl });
 
         ownedStateDirs.add(path.resolve(stateDir));
         server.on("error", (error) => note("server.error", { code: error?.code ?? "UNKNOWN" }));
-        note("server.listening", { endpoint, pipeAcl: pipeAcl.status });
-        return Object.freeze({ endpoint, stateDir, acl: aclEvidence });
+        note("server.listening", { endpoint, pipeAcl: pipeAcl.status, peerMechanism: peerIdentity.mechanism });
+        return Object.freeze({ endpoint, stateDir, acl: aclEvidence, peerIdentity });
     }
 
     async function stop() {
@@ -619,6 +720,7 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null, disc
         boundHandles.clear();
         revokedHandles.clear();
         mintBuckets.clear();
+        peerIdentity = null;
         note("server.stopped", {});
     }
 
@@ -631,6 +733,7 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null, disc
             boundHandles: boundHandles.size,
             revokedHandles: revokedHandles.size,
             disconnectPolicy,
+            peerIdentity,
             acl: aclEvidence,
             limits: bound
         });

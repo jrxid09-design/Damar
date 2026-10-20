@@ -152,6 +152,7 @@ async function createCliHost({ stateDir = resolveCliStateDir(), logger = null, d
             stateDir,
             endpoint: started === null ? null : started.endpoint,
             acl: started === null ? null : started.acl,
+            peerIdentity: started === null ? null : started.peerIdentity,
             disconnectPolicy,
             identityStore: ownerTrust.identityStore ? "DURABLE" : "NONE",
             ownerTrustDurable: ownerTrust.durable === true
@@ -177,6 +178,7 @@ async function main() {
         endpoint: info.endpoint,
         stateDir: info.stateDir,
         acl: info.acl,
+        peerIdentity: info.peerIdentity,
         disconnectPolicy: host.status().disconnectPolicy
     })}\n`);
 

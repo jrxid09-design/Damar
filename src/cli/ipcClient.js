@@ -17,6 +17,7 @@ const {
     PROTOCOL_VERSION,
     assertLocalEndpoint,
     createFrameReader,
+    currentWindowsUserSid,
     discoveryPath,
     encodeFrame,
     newNonce,
@@ -93,10 +94,24 @@ async function connectCliIpc({ stateDir, clientId = null, connectTimeoutMs = 5_0
         maxFrameBytes: MAX_FRAME_BYTES,
         onMessage: (frame) => {
             if (frame.t === "welcome") {
-                const ok = typeof frame.snonce === "string" && typeof frame.proof === "string"
-                    && secretEquals(frame.proof, welcomeProof(token, clientNonce, frame.snonce));
+                // The host proves it holds the channel secret AND reports the OS
+                // peer SID it verified for THIS connection.  This process knows
+                // its own SID from the OS, so a host answering for a different
+                // peer — or one that omits the SID on a platform that has one —
+                // cannot pass.  A shared secret alone proves nothing about who is
+                // on the other end.
+                const claimedSid = typeof frame.sid === "string" ? frame.sid : "";
+                const ownSid = process.platform === "win32" ? currentWindowsUserSid() : null;
+                const sidOk = ownSid === null
+                    ? claimedSid === ""
+                    : claimedSid.toLowerCase() === ownSid.toLowerCase();
+                const ok = sidOk && typeof frame.snonce === "string" && typeof frame.proof === "string"
+                    && secretEquals(frame.proof, welcomeProof(token, clientNonce, frame.snonce, claimedSid));
                 if (!ok) {
-                    fatal = transportError("TRANSPORT_PEER_UNVERIFIED", "the endpoint does not hold the channel secret");
+                    fatal = transportError("TRANSPORT_PEER_UNVERIFIED",
+                        sidOk
+                            ? "the endpoint does not hold the channel secret"
+                            : "the endpoint did not prove the peer identity of this connection");
                     welcomeResolve();
                     socket.destroy();
                     return;

@@ -703,10 +703,20 @@ function newSecret() {
     return crypto.randomBytes(SECRET_BYTES).toString("hex");
 }
 
-function welcomeProof(token, clientNonce, serverNonce) {
+/**
+ * The host's proof that it holds the channel secret AND is the process that
+ * verified this peer.  The verified OS peer SID is part of the transcript, so
+ * possession of the secret alone cannot produce a welcome proof that matches a
+ * different peer: knowing the secret does not bypass the SID check.
+ *
+ * `peerSid` defaults to "" so a platform without OS peer credentials emits the
+ * same shape (and the same digest) it always did.
+ */
+function welcomeProof(token, clientNonce, serverNonce, peerSid = "") {
+    const sid = typeof peerSid === "string" ? peerSid.toLowerCase() : "";
     return crypto
         .createHmac("sha256", Buffer.from(token, "utf8"))
-        .update(`${WELCOME_DOMAIN}|${clientNonce}|${serverNonce}`, "utf8")
+        .update(`${WELCOME_DOMAIN}|${clientNonce}|${serverNonce}|${sid}`, "utf8")
         .digest("hex");
 }
 

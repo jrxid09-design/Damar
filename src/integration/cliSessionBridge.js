@@ -127,6 +127,26 @@ function createCliSessionBridge({ manager, ownerTrust, channelId = "cli-surface"
     }
 
     /**
+     * Phase E: the OS-verified peer identity the transport established for this
+     * connection.  It is recorded WITH the session as additive evidence and is
+     * never derived from, or overridable by, anything the caller sends.
+     */
+    function readVerifiedPeer(envelope) {
+        const value = envelope.peerIdentity;
+        if (value === undefined || value === null) return null;
+        if (typeof value !== "object" || Array.isArray(value)) {
+            throw fail("OT_INGRESS_INVALID", "peerIdentity must be an object");
+        }
+        if (value.mechanism !== "os-token-sid") {
+            throw fail("OT_INGRESS_INVALID", "unsupported peer identity mechanism");
+        }
+        if (typeof value.sid !== "string" || !/^S-1-[0-9-]{1,180}$/.test(value.sid)) {
+            throw fail("OT_INGRESS_INVALID", "peerIdentity.sid must be a Windows SID");
+        }
+        return Object.freeze({ mechanism: value.mechanism, sid: value.sid });
+    }
+
+    /**
      * Resolve a connection handle, enforcing the channel binding.  The handle
      * is NEVER authorization: it only scopes which device/surface may attempt
      * an operation.
@@ -232,12 +252,14 @@ function createCliSessionBridge({ manager, ownerTrust, channelId = "cli-surface"
             if (oldest !== undefined) connections.delete(oldest);
         }
         const connectionId = `conn-${crypto.randomBytes(16).toString("hex")}`;
+        const verifiedPeer = readVerifiedPeer(envelope);
         connections.set(connectionId, Object.freeze({
             session: result.session,
             deviceId,
             surfaceId,
             peer: typeof envelope.peer === "string" && envelope.peer.length <= MAX_TOKEN ? envelope.peer : "cli",
-            channelBinding: readBinding(envelope)
+            channelBinding: readBinding(envelope),
+            verifiedPeer
         }));
         const session = result.session;
         return Object.freeze({
@@ -248,7 +270,8 @@ function createCliSessionBridge({ manager, ownerTrust, channelId = "cli-surface"
             deviceId: session.deviceId,
             surfaceId: session.surfaceId,
             scope: session.scope,
-            expiresAtMs: session.expiresAtMs
+            expiresAtMs: session.expiresAtMs,
+            verifiedPeer
         });
     }
 
