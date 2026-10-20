@@ -1,0 +1,538 @@
+"use strict";
+
+/**
+ * W5-CLI REAL CONNECTED CLI — Phase B/E: THE LOCAL IPC SERVER.
+ *
+ * Hosts the certified canonical CLI session bridge (`src/integration/
+ * cliSessionBridge.js`) behind a bounded, OS-confined local endpoint.  This
+ * file is TRANSPORT + HARDENING ONLY:
+ *
+ *   - no authority is created here; every operation is forwarded to the
+ *     bridge, which forwards consequential work to the canonical Manager;
+ *   - the bridge connection handle issued by `authComplete` is BOUND to the
+ *     verified client identity that minted it, so a handle observed by any
+ *     other local client can never be replayed (see `connectionOwned`);
+ *   - nothing is served before the channel handshake completes — including
+ *     `status` (audit P3-1);
+ *   - challenge minting is rate limited per channel AND globally (P3-2);
+ *   - every request is schema-validated against a closed allow-list before it
+ *     reaches the bridge, so caller-supplied authority / owner / privilege /
+ *     approval claims are rejected structurally (P3-7, P3-8);
+ *   - frames, pending bytes, in-flight requests, channels and idle time are
+ *     all bounded (P3-6); disconnect and shutdown revoke and clean up (P3-5).
+ */
+
+const fs = require("node:fs");
+const net = require("node:net");
+const path = require("node:path");
+
+const {
+    MAX_FRAME_BYTES,
+    MAX_MESSAGE_BYTES,
+    PROTOCOL_VERSION,
+    assertLocalEndpoint,
+    createFrameReader,
+    discoveryPath,
+    encodeFrame,
+    newNonce,
+    newSecret,
+    randomEndpoint,
+    redact,
+    secretEquals,
+    tokenPath,
+    welcomeProof,
+    writeSecret,
+    verifySecretPath,
+    hardenSecretPath,
+    transportError
+} = require("./localIpc");
+
+const OPS = Object.freeze([
+    "status", "authBegin", "authComplete", "session",
+    "actionChallenge", "capabilities", "submit", "logout"
+]);
+
+const MINTING_OPS = Object.freeze(["authBegin", "actionChallenge"]);
+
+/** Closed allow-list.  Unknown keys are a hard rejection, never ignored. */
+const ARG_SCHEMA = Object.freeze({
+    status: Object.freeze({ connectionId: "string?" }),
+    authBegin: Object.freeze({ deviceId: "string", surfaceId: "string" }),
+    authComplete: Object.freeze({
+        deviceId: "string", surfaceId: "string", nonce: "string",
+        signature: "string", bindingSecret: "string", peer: "string?"
+    }),
+    session: Object.freeze({ connectionId: "string" }),
+    actionChallenge: Object.freeze({ connectionId: "string" }),
+    capabilities: Object.freeze({ connectionId: "string" }),
+    submit: Object.freeze({
+        connectionId: "string", capabilityId: "string", operation: "string",
+        arguments: "object?", authProof: "object?"
+    }),
+    logout: Object.freeze({ connectionId: "string" })
+});
+
+const DEFAULT_LIMITS = Object.freeze({
+    maxFrameBytes: MAX_FRAME_BYTES,
+    maxMessageBytes: MAX_MESSAGE_BYTES,
+    maxChannels: 64,
+    maxInFlightPerChannel: 8,
+    maxChannelPendingBytes: 256 * 1024,
+    maxPeers: 256,
+    maxBoundHandles: 4096,
+    idleTimeoutMs: 120_000,
+    handshakeTimeoutMs: 10_000,
+    requestTimeoutMs: 60_000,
+    windowMs: 60_000,
+    challengeBurstPerChannel: 30,
+    challengeBurstGlobal: 120
+});
+
+function nowMs() {
+    return Date.now();
+}
+
+/** True when `pid` is a live process this host can observe. */
+function isProcessAlive(pid) {
+    if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (error) {
+        return error?.code === "EPERM";
+    }
+}
+
+function validateArgs(op, args) {
+    const schema = ARG_SCHEMA[op];
+    if (schema === undefined) return { ok: false, detail: "unknown operation" };
+    if (args === undefined || args === null) args = {};
+    if (typeof args !== "object" || Array.isArray(args)) {
+        return { ok: false, detail: "args must be an object" };
+    }
+    const proto = Object.getPrototypeOf(args);
+    if (proto !== Object.prototype && proto !== null) {
+        return { ok: false, detail: "args must be a plain object" };
+    }
+    for (const key of Object.keys(args)) {
+        if (!Object.prototype.hasOwnProperty.call(schema, key)) {
+            // Includes any caller-supplied principal / owner / authority /
+            // approval / grant claim: rejected, never silently dropped.
+            return { ok: false, detail: `unsupported field "${key}"` };
+        }
+    }
+    for (const [key, spec] of Object.entries(schema)) {
+        const optional = spec.endsWith("?");
+        const kind = optional ? spec.slice(0, -1) : spec;
+        const value = args[key];
+        if (value === undefined || value === null) {
+            if (!optional) return { ok: false, detail: `${key} required` };
+            continue;
+        }
+        if (kind === "string") {
+            if (typeof value !== "string" || value.length === 0 || Buffer.byteLength(value, "utf8") > 8192) {
+                return { ok: false, detail: `${key} must be a bounded non-empty string` };
+            }
+        } else if (kind === "object") {
+            if (typeof value !== "object" || Array.isArray(value)) {
+                return { ok: false, detail: `${key} must be an object` };
+            }
+        }
+    }
+    return { ok: true };
+}
+
+/** State dirs currently served by a server in THIS process (never share one). */
+const ownedStateDirs = new Set();
+
+/**
+ * Refuse to share a state directory with a LIVE CLI host, and clear a stale
+ * descriptor left by a crashed one.  Exported so the host can run this check
+ * BEFORE it composes anything: a second host must fail on the real conflict
+ * (the endpoint is taken), not on whatever composition lock it hits first.
+ */
+function clearStaleDiscovery(stateDir) {
+    const key = path.resolve(stateDir);
+    if (ownedStateDirs.has(key)) {
+        throw transportError("TRANSPORT_ENDPOINT_IN_USE", "a live Damar CLI host already owns this state dir");
+    }
+    const discovery = discoveryPath(stateDir);
+    if (!fs.existsSync(discovery)) return { replaced: false };
+    let prior = null;
+    try { prior = JSON.parse(fs.readFileSync(discovery, "utf8")); } catch { prior = null; }
+    const priorPid = prior && Number.isSafeInteger(prior.pid) ? prior.pid : null;
+    if (priorPid !== null && isProcessAlive(priorPid)) {
+        throw transportError("TRANSPORT_ENDPOINT_IN_USE", "a live Damar CLI host already owns this state dir");
+    }
+    try { fs.unlinkSync(discovery); } catch { /* already gone */ }
+    return { replaced: true };
+}
+
+/**
+ * createCliIpcServer({ bridge, stateDir, limits, logger })
+ *
+ * @param bridge   the canonical CLI session bridge (`{ request, close }`).
+ * @param stateDir the canonical Damar state dir (derived from the trusted
+ *                 OwnerTrust store path — never caller-choosable per call).
+ */
+function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null } = {}) {
+    if (!bridge || typeof bridge.request !== "function") {
+        throw transportError("TRANSPORT_CONFIG", "a canonical CLI session bridge is required");
+    }
+    if (typeof stateDir !== "string" || stateDir.trim() === "") {
+        throw transportError("TRANSPORT_CONFIG", "a state directory is required");
+    }
+    const bound = Object.freeze({ ...DEFAULT_LIMITS, ...limits });
+    const log = typeof logger === "function" ? logger : () => {};
+
+    const channels = new Map();
+    /** connectionId -> the client identity that minted it (survives a disconnect). */
+    const boundHandles = new Map();
+    /** client identity -> recent challenge-mint timestamps (PER PEER, not per socket). */
+    const mintBuckets = new Map();
+    let server = null;
+    let endpoint = null;
+    let token = null;
+    let aclEvidence = null;
+    let globalMints = [];
+    let stopping = false;
+
+    function note(event, detail) {
+        log(JSON.stringify({ at: new Date().toISOString(), event, ...redact(detail ?? {}) }));
+    }
+
+    // ---- rate limiting (P3-2) --------------------------------------------
+
+    function mintAllowed(channel) {
+        const now = nowMs();
+        const cutoff = now - bound.windowMs;
+        const peer = channel.peerBinding;
+        const bucket = (mintBuckets.get(peer) ?? []).filter((at) => at > cutoff);
+        globalMints = globalMints.filter((at) => at > cutoff);
+        if (bucket.length >= bound.challengeBurstPerChannel) {
+            mintBuckets.set(peer, bucket);
+            return { ok: false, retryAfterMs: bucket[0] + bound.windowMs - now };
+        }
+        if (globalMints.length >= bound.challengeBurstGlobal) {
+            mintBuckets.set(peer, bucket);
+            return { ok: false, retryAfterMs: globalMints[0] + bound.windowMs - now };
+        }
+        bucket.push(now);
+        mintBuckets.set(peer, bucket);
+        globalMints.push(now);
+        if (mintBuckets.size > bound.maxPeers) {
+            for (const [key, value] of mintBuckets) {
+                if (value.length === 0) mintBuckets.delete(key);
+                if (mintBuckets.size <= bound.maxPeers) break;
+            }
+        }
+        return { ok: true };
+    }
+
+    // ---- framing ---------------------------------------------------------
+
+    function send(socket, message) {
+        if (socket.destroyed || !socket.writable) return;
+        let frame;
+        try {
+            frame = encodeFrame(message);
+        } catch {
+            return;
+        }
+        try {
+            socket.write(frame);
+        } catch { /* peer gone; cleanup runs from the close handler */ }
+    }
+
+    function destroyChannel(channel, reason) {
+        if (channel.closed) return;
+        channel.closed = true;
+        channels.delete(channel.id);
+        // NOTE (deliberate): a verified peer that disconnects does NOT have its
+        // session revoked.  A one-shot CLI process connects, acts and exits;
+        // revoking on disconnect would make the connected CLI unusable.  Every
+        // consequential submit still needs a FRESH one-use Owner proof, so an
+        // abandoned handle grants nothing.  Sessions end on logout, expiry,
+        // canonical device revocation or host shutdown.
+        note("channel.closed", { channelId: channel.id, reason });
+        try { channel.socket.destroy(); } catch { /* best effort */ }
+    }
+
+    function deny(channel, id, code, detail) {
+        send(channel.socket, { v: PROTOCOL_VERSION, t: "res", id: id ?? null, ok: false, code, detail: String(detail ?? "").slice(0, 256) });
+    }
+
+    function bindChannel(channel, result) {
+        if (result && result.ok === true && typeof result.connectionId === "string") {
+            boundHandles.set(result.connectionId, channel.peerBinding);
+            if (boundHandles.size > bound.maxBoundHandles) {
+                const oldest = boundHandles.keys().next().value;
+                if (oldest !== undefined) boundHandles.delete(oldest);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * A bridge connection handle is usable only by the client identity that
+     * minted it.  Two DIFFERENT answers, deliberately:
+     *
+     *   - the handle IS known here but was minted by another client identity
+     *     => refused at the transport (`EPEER_CHANNEL_MISMATCH`), before the
+     *      bridge is entered, so a swiped handle never even reaches ingress;
+     *   - the handle is NOT known here (never minted, revoked by `logout`, or
+     *     minted in another host process) => forwarded to the bridge, which
+     *     answers with the canonical `OT_SESSION_UNKNOWN`.  That keeps the
+     *     error accurate instead of disguising an unknown handle as a
+     *     cross-client attack.
+     */
+    function checkBinding(channel, connectionId) {
+        const owner = boundHandles.get(connectionId);
+        if (owner === undefined) return { ok: true };
+        if (owner === channel.peerBinding) return { ok: true };
+        return { ok: false, code: "EPEER_CHANNEL_MISMATCH" };
+    }
+
+    // ---- request handling ------------------------------------------------
+
+    async function handleAuthedFrame(channel, frame) {
+        const id = typeof frame.id === "string" ? frame.id : null;
+        const op = frame.op;
+        if (id === null) return deny(channel, null, "EPEER_MALFORMED", "request id required");
+        if (typeof op !== "string" || !OPS.includes(op)) {
+            return deny(channel, id, "EPEER_UNKNOWN_OP", "unsupported operation");
+        }
+        const check = validateArgs(op, frame.args);
+        if (!check.ok) return deny(channel, id, "EPEER_SCHEMA", check.detail);
+        const args = frame.args ?? {};
+
+        if (MINTING_OPS.includes(op)) {
+            const allowed = mintAllowed(channel);
+            if (!allowed.ok) {
+                note("ratelimit", { channelId: channel.id, op });
+                return deny(channel, id, "EPEER_RATE_LIMITED", `retry in ${allowed.retryAfterMs}ms`);
+            }
+        }
+
+        if (args.connectionId !== undefined) {
+            const binding = checkBinding(channel, args.connectionId);
+            if (!binding.ok) {
+                return deny(channel, id, binding.code, "connection handle is bound to another client identity");
+            }
+        }
+
+        if (channel.inFlight >= bound.maxInFlightPerChannel) {
+            return deny(channel, id, "EPEER_BACKPRESSURE", "too many in-flight requests");
+        }
+        if (channel.socket.writableLength > bound.maxChannelPendingBytes) {
+            return deny(channel, id, "EPEER_BACKPRESSURE", "write queue saturated");
+        }
+
+        channel.inFlight += 1;
+        let timer = null;
+        try {
+            const result = await Promise.race([
+                Promise.resolve(bridge.request({ op, ...args, channelBinding: channel.peerBinding })),
+                new Promise((_, reject) => {
+                    timer = setTimeout(() => reject(transportError("EPEER_TIMEOUT", "request timed out")), bound.requestTimeoutMs);
+                    if (typeof timer.unref === "function") timer.unref();
+                })
+            ]);
+
+            if (op === "authComplete") bindChannel(channel, result);
+            if (op === "logout" && result && result.ok === true) {
+                boundHandles.delete(args.connectionId);
+            }
+            send(channel.socket, { v: PROTOCOL_VERSION, t: "res", id, ok: true, result });
+        } catch (error) {
+            deny(channel, id, error?.code ?? "EPEER_INTERNAL", error?.message ?? "transport failure");
+        } finally {
+            if (timer !== null) clearTimeout(timer);
+            channel.inFlight -= 1;
+        }
+    }
+
+    function handleHandshakeFrame(channel, frame) {
+        if (frame.t !== "hello" || frame.v !== PROTOCOL_VERSION) {
+            // Nothing is disclosed before authentication — not even status.
+            deny(channel, null, "EPEER_UNAUTHENTICATED", "handshake required");
+            return destroyChannel(channel, "unauthenticated");
+        }
+        const offered = frame.token;
+        if (typeof offered !== "string" || !secretEquals(offered, token)) {
+            note("handshake.rejected", { channelId: channel.id });
+            deny(channel, null, "EPEER_UNAUTHENTICATED", "handshake required");
+            return destroyChannel(channel, "bad-secret");
+        }
+        const clientNonce = typeof frame.cnonce === "string" && /^[0-9a-f]{16,64}$/.test(frame.cnonce) ? frame.cnonce : null;
+        if (clientNonce === null) {
+            deny(channel, null, "EPEER_MALFORMED", "handshake nonce required");
+            return destroyChannel(channel, "bad-nonce");
+        }
+        const clientId = typeof frame.clientId === "string" && /^[0-9a-f]{32}$/.test(frame.clientId) ? frame.clientId : null;
+        if (clientId === null) {
+            deny(channel, null, "EPEER_MALFORMED", "handshake client identity required");
+            return destroyChannel(channel, "bad-client-id");
+        }
+        if (channels.size >= bound.maxChannels) {
+            deny(channel, null, "EPEER_BACKPRESSURE", "channel limit reached");
+            return destroyChannel(channel, "channel-limit");
+        }
+        channel.authed = true;
+        channel.clientNonce = clientNonce;
+        channel.peerBinding = clientId;
+        const serverNonce = newNonce();
+        channel.serverNonce = serverNonce;
+        if (channel.handshakeTimer !== null) {
+            clearTimeout(channel.handshakeTimer);
+            channel.handshakeTimer = null;
+        }
+        channel.socket.setTimeout(bound.idleTimeoutMs);
+        note("handshake.accepted", { channelId: channel.id });
+        send(channel.socket, {
+            v: PROTOCOL_VERSION,
+            t: "welcome",
+            snonce: serverNonce,
+            proof: welcomeProof(token, clientNonce, serverNonce)
+        });
+    }
+
+    function onFrame(channel, frame) {
+        if (!channel.authed) return handleHandshakeFrame(channel, frame);
+        if (frame.t !== "req") {
+            return deny(channel, typeof frame.id === "string" ? frame.id : null, "EPEER_MALFORMED", "expected a request frame");
+        }
+        // Never let a rejection become an unhandled rejection.
+        handleAuthedFrame(channel, frame).catch((error) => {
+            deny(channel, typeof frame.id === "string" ? frame.id : null, error?.code ?? "EPEER_INTERNAL", error?.message ?? "");
+        });
+    }
+
+    function onConnection(socket) {
+        const channel = {
+            id: `chan-${newNonce()}`,
+            socket,
+            authed: false,
+            peerBinding: null,
+            clientNonce: null,
+            serverNonce: null,
+            inFlight: 0,
+            handshakeTimer: null,
+            closed: false
+        };
+        channels.set(channel.id, channel);
+        socket.setNoDelay(true);
+        socket.setTimeout(bound.handshakeTimeoutMs);
+        channel.handshakeTimer = null;
+
+        const reader = createFrameReader({
+            maxFrameBytes: bound.maxFrameBytes,
+            onMessage: (frame) => onFrame(channel, frame),
+            onViolation: (error) => {
+                note("frame.violation", { channelId: channel.id, code: error.code });
+                deny(channel, null, error.code, error.message);
+                destroyChannel(channel, error.code);
+            }
+        });
+
+        socket.on("data", (chunk) => {
+            // Bounded read side: never accumulate more than one frame bound.
+            if (chunk.length > bound.maxFrameBytes) {
+                deny(channel, null, "EPEER_FRAME_TOO_LARGE", "chunk exceeds the frame bound");
+                return destroyChannel(channel, "chunk-too-large");
+            }
+            reader.push(chunk);
+        });
+        socket.on("timeout", () => destroyChannel(channel, channel.authed ? "idle-timeout" : "handshake-timeout"));
+        socket.on("error", () => destroyChannel(channel, "socket-error"));
+        socket.on("close", () => destroyChannel(channel, "peer-closed"));
+    }
+
+    // ---- lifecycle -------------------------------------------------------
+
+    async function start() {
+        if (server !== null) throw transportError("TRANSPORT_STATE", "already started");
+        fs.mkdirSync(stateDir, { recursive: true });
+        if (!fs.statSync(stateDir).isDirectory()) {
+            throw transportError("TRANSPORT_CONFIG", "state dir is not a directory");
+        }
+
+        // A live host already owning this state dir must NOT be displaced
+        // (endpoint collision / squatted discovery file), and a client must
+        // never be pointed at a stale endpoint: fail closed, never take over.
+        clearStaleDiscovery(stateDir);
+        const discovery = discoveryPath(stateDir);
+        try { fs.unlinkSync(tokenPath(stateDir)); } catch { /* no stale secret */ }
+
+        token = newSecret();
+        const tokenAcl = writeSecret(tokenPath(stateDir), token);
+
+        endpoint = randomEndpoint();
+        assertLocalEndpoint(endpoint, stateDir);
+
+        let discoveryAcl = null;
+        fs.writeFileSync(discovery, `${JSON.stringify({
+            v: PROTOCOL_VERSION,
+            endpoint,
+            tokenFile: tokenPath(stateDir),
+            pid: process.pid,
+            platform: process.platform,
+            startedAtMs: nowMs()
+        })}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+        try {
+            hardenSecretPath(discovery);
+            discoveryAcl = verifySecretPath(discovery);
+        } catch (error) {
+            try { fs.unlinkSync(discovery); } catch { /* best effort */ }
+            throw error;
+        }
+        aclEvidence = Object.freeze({ token: tokenAcl, discovery: discoveryAcl });
+
+        server = net.createServer(onConnection);
+        server.maxConnections = bound.maxChannels;
+        await new Promise((resolve, reject) => {
+            const onError = (error) => reject(transportError("TRANSPORT_BIND_FAILED", error?.message ?? "bind failed"));
+            server.once("error", onError);
+            server.listen(endpoint, () => {
+                server.removeListener("error", onError);
+                resolve();
+            });
+        });
+        ownedStateDirs.add(path.resolve(stateDir));
+        server.on("error", (error) => note("server.error", { code: error?.code ?? "UNKNOWN" }));
+        note("server.listening", { endpoint });
+        return Object.freeze({ endpoint, stateDir, acl: aclEvidence });
+    }
+
+    async function stop() {
+        if (stopping) return;
+        stopping = true;
+        for (const channel of [...channels.values()]) destroyChannel(channel, "shutdown");
+        if (server !== null) {
+            await new Promise((resolve) => server.close(() => resolve()));
+            server = null;
+        }
+        ownedStateDirs.delete(path.resolve(stateDir));
+        try { fs.unlinkSync(discoveryPath(stateDir)); } catch { /* best effort */ }
+        try { fs.unlinkSync(tokenPath(stateDir)); } catch { /* best effort */ }
+        boundHandles.clear();
+        mintBuckets.clear();
+        note("server.stopped", {});
+    }
+
+    function info() {
+        return Object.freeze({
+            endpoint,
+            channels: channels.size,
+            authenticated: [...channels.values()].filter((c) => c.authed).length,
+            peers: mintBuckets.size,
+            boundHandles: boundHandles.size,
+            acl: aclEvidence,
+            limits: bound
+        });
+    }
+
+    return Object.freeze({ start, stop, info, ops: OPS });
+}
+
+module.exports = Object.freeze({ createCliIpcServer, clearStaleDiscovery, OPS, ARG_SCHEMA, DEFAULT_LIMITS, validateArgs });

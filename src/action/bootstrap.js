@@ -2426,6 +2426,30 @@ function getCanonicalAvailableCapabilityIds() {
 }
 
 /**
+ * W5-CLI T2 audit P3-3: the published READ-ONLY capability discovery port.
+ *
+ * Surfaces (`cliSessionBridge`, nodes) must be able to advertise what the
+ * canonical registry holds WITHOUT reaching into private registry internals.
+ * Returns a detached, deeply frozen catalogue of descriptors — no registry
+ * object, no mutation path, no caller-suppliable input; composition runs
+ * first so discovery always reflects the canonical registry.
+ */
+function getCanonicalCapabilityCatalog() {
+    createCanonicalActionFacade();
+    if (!canonicalCapabilityRegistry) return Object.freeze([]);
+    return Object.freeze(
+        canonicalCapabilityRegistry.list().map((d) => Object.freeze({
+            capabilityId: String(d.id ?? "").slice(0, 256),
+            kind: String(d.kind ?? "").slice(0, 64),
+            availability: String(d.availability ?? "UNKNOWN").slice(0, 32),
+            operations: Object.freeze(Array.isArray(d.operations)
+                ? d.operations.map((o) => String(o).slice(0, 128)).slice(0, 64)
+                : [])
+        }))
+    );
+}
+
+/**
  * Internal production composition seam for the canonical descriptive V1
  * registry. This is not on the public action facade and remains
  * non-enumerable; it is used only by the trusted same-process composition.
@@ -2439,6 +2463,7 @@ module.exports = {
     createCanonicalActionFacade,
     createCanonicalActuationFacade,
     createCanonicalVerificationFacade,
+    getCanonicalCapabilityCatalog,
     PRIVILEGED_KEYS
 };
 

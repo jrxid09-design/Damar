@@ -109,6 +109,39 @@ function createCliSessionBridge({ manager, ownerTrust, channelId = "cli-surface"
     // the value; it is never returned to a caller.
     const connections = new Map();
 
+    /**
+     * Audit P3-5/P3-8: an optional OPAQUE transport channel binding.  When a
+     * connection is minted over a verified local transport channel, the
+     * binding is recorded and every later use of the handle must present the
+     * SAME binding.  A handle stolen from another local peer therefore fails
+     * at the bridge, not merely at the transport.  Callers that supply no
+     * binding (in-process composition) keep the previous behaviour.
+     */
+    function readBinding(envelope) {
+        const value = envelope.channelBinding;
+        if (value === undefined || value === null) return null;
+        if (typeof value !== "string" || value.length === 0 || value.length > MAX_TOKEN) {
+            throw fail("OT_INGRESS_INVALID", "channelBinding must be a bounded string");
+        }
+        return value;
+    }
+
+    /**
+     * Resolve a connection handle, enforcing the channel binding.  The handle
+     * is NEVER authorization: it only scopes which device/surface may attempt
+     * an operation.
+     */
+    function resolveConnection(envelope) {
+        const connectionId = bounded(envelope.connectionId, "connectionId");
+        const record = connections.get(connectionId);
+        if (!record) return { error: deny("OT_SESSION_UNKNOWN") };
+        const binding = readBinding(envelope);
+        if (record.channelBinding !== null && record.channelBinding !== binding) {
+            return { error: deny("OT_CHANNEL_MISMATCH", "connection handle is not bound to this channel") };
+        }
+        return { connectionId, record };
+    }
+
     async function verifyConnection(record) {
         return cliSession.verifySession(record.session, {
             deviceId: record.deviceId,
@@ -118,9 +151,19 @@ function createCliSessionBridge({ manager, ownerTrust, channelId = "cli-surface"
 
     // ---- operations -------------------------------------------------------
 
-    function opStatus() {
+    function opStatus(envelope) {
+        // Audit P3-1: an UNAUTHENTICATED caller (no verified transport channel)
+        // learns only that the ingress is up.  Wiring detail, identity-store
+        // state and connection counts are disclosed only to a channel that has
+        // completed the local handshake.
+        const authenticated = typeof envelope.channelBinding === "string" && envelope.channelBinding.length > 0;
+        if (!authenticated) {
+            return Object.freeze({ ok: true, ready: true, authenticated: false });
+        }
         return Object.freeze({
             ok: true,
+            ready: true,
+            authenticated: true,
             manager: typeof manager.handle === "function" ? "READY" : "UNKNOWN",
             sessionContract: ownerTrust.identityStore ? "WIRED" : "IDENTITY_UNAVAILABLE",
             identityStore: ownerTrust.identityStore ? "DURABLE" : "NONE",
@@ -193,7 +236,8 @@ function createCliSessionBridge({ manager, ownerTrust, channelId = "cli-surface"
             session: result.session,
             deviceId,
             surfaceId,
-            peer: typeof envelope.peer === "string" && envelope.peer.length <= MAX_TOKEN ? envelope.peer : "cli"
+            peer: typeof envelope.peer === "string" && envelope.peer.length <= MAX_TOKEN ? envelope.peer : "cli",
+            channelBinding: readBinding(envelope)
         }));
         const session = result.session;
         return Object.freeze({
@@ -209,9 +253,9 @@ function createCliSessionBridge({ manager, ownerTrust, channelId = "cli-surface"
     }
 
     async function opSession(envelope) {
-        const connectionId = bounded(envelope.connectionId, "connectionId");
-        const record = connections.get(connectionId);
-        if (!record) return deny("OT_SESSION_UNKNOWN");
+        const resolved = resolveConnection(envelope);
+        if (resolved.error) return resolved.error;
+        const { connectionId, record } = resolved;
         const verdict = await verifyConnection(record);
         if (verdict.ok !== true) {
             if (["OT_SESSION_EXPIRED", "OT_SESSION_REVOKED", "OT_SESSION_UNKNOWN"].includes(verdict.code)) {
@@ -232,9 +276,9 @@ function createCliSessionBridge({ manager, ownerTrust, channelId = "cli-surface"
     }
 
     async function opActionChallenge(envelope) {
-        const connectionId = bounded(envelope.connectionId, "connectionId");
-        const record = connections.get(connectionId);
-        if (!record) return deny("OT_SESSION_UNKNOWN");
+        const resolved = resolveConnection(envelope);
+        if (resolved.error) return resolved.error;
+        const { record } = resolved;
         const verdict = await verifyConnection(record);
         if (verdict.ok !== true) return deny(verdict.code);
 
@@ -259,21 +303,23 @@ function createCliSessionBridge({ manager, ownerTrust, channelId = "cli-surface"
     }
 
     async function opCapabilities(envelope) {
-        const connectionId = bounded(envelope.connectionId, "connectionId");
-        const record = connections.get(connectionId);
-        if (!record) return deny("OT_SESSION_UNKNOWN");
+        const resolved = resolveConnection(envelope);
+        if (resolved.error) return resolved.error;
+        const { record } = resolved;
         const verdict = await verifyConnection(record);
         if (verdict.ok !== true) return deny(verdict.code);
 
+        // Audit P3-3: the published READ-ONLY discovery port, never private
+        // registry internals.
         let descriptors = [];
         try {
-            const registry = require("../action/bootstrap")._getCanonicalCapabilityRegistry();
-            if (registry && typeof registry.list === "function") descriptors = registry.list();
+            const catalog = require("../action/bootstrap").getCanonicalCapabilityCatalog();
+            if (Array.isArray(catalog)) descriptors = catalog;
         } catch {
             descriptors = [];
         }
         const capabilities = descriptors.map((d) => Object.freeze({
-            capabilityId: String(d.id ?? "").slice(0, 256),
+            capabilityId: String(d.capabilityId ?? d.id ?? "").slice(0, 256),
             kind: String(d.kind ?? "").slice(0, 64),
             availability: String(d.availability ?? "UNKNOWN").slice(0, 32),
             operations: Object.freeze(Array.isArray(d.operations)
@@ -284,9 +330,9 @@ function createCliSessionBridge({ manager, ownerTrust, channelId = "cli-surface"
     }
 
     async function opSubmit(envelope) {
-        const connectionId = bounded(envelope.connectionId, "connectionId");
-        const record = connections.get(connectionId);
-        if (!record) return deny("OT_SESSION_UNKNOWN");
+        const resolved = resolveConnection(envelope);
+        if (resolved.error) return resolved.error;
+        const { connectionId, record } = resolved;
 
         const capabilityId = bounded(envelope.capabilityId, "capabilityId");
         const operation = bounded(envelope.operation, "operation");
@@ -338,6 +384,10 @@ function createCliSessionBridge({ manager, ownerTrust, channelId = "cli-surface"
         const connectionId = bounded(envelope.connectionId, "connectionId");
         const record = connections.get(connectionId);
         if (!record) return Object.freeze({ ok: true, revoked: false });
+        const binding = readBinding(envelope);
+        if (record.channelBinding !== null && record.channelBinding !== binding) {
+            return deny("OT_CHANNEL_MISMATCH", "connection handle is not bound to this channel");
+        }
         const revoked = cliSession.revokeSession(record.session.sessionId);
         connections.delete(connectionId);
         return Object.freeze({ ok: true, revoked: revoked === true });

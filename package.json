@@ -4,7 +4,9 @@
   "description": "Damar adalah AI Assistant lokal yang dibangun untuk berjalan di server pribadi.",
   "main": "index.js",
   "bin": {
-    "damar": "src/cli/index.js"
+    "damar": "src/cli/index.js",
+    "damar-session": "src/cli/session.js",
+    "damar-session-host": "src/cli/host.js"
   },
   "directories": {
     "doc": "docs"
@@ -32,6 +34,8 @@
     ,"uix:w4:validate":"node scripts/validate-uix-w4.js"
     ,"uix:w4:build":"node scripts/build-uix-w4.js"
     ,"uix:w4:smoke":"node scripts/smoke-uix-w4-browser.js"
+    ,"cli:host":"node src/cli/host.js"
+    ,"cli:session":"node src/cli/session.js"
   },
   "repository": {
     "type": "git",
