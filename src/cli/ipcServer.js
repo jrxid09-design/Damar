@@ -9,6 +9,10 @@
  *
  *   - no authority is created here; every operation is forwarded to the
  *     bridge, which forwards consequential work to the canonical Manager;
+ *   - the endpoint's OS access control is rewritten to the owning principal /
+ *     SYSTEM / Administrators and re-verified by effective access mask BEFORE
+ *     the descriptor is published (Phase B); a failed or unverifiable ACL is a
+ *     refusal to serve, never a fallback;
  *   - the bridge connection handle issued by `authComplete` is BOUND to the
  *     verified client identity that minted it, so a handle observed by any
  *     other local client can never be replayed (see `connectionOwned`);
@@ -34,6 +38,7 @@ const {
     createFrameReader,
     discoveryPath,
     encodeFrame,
+    hardenNamedPipe,
     newNonce,
     newSecret,
     randomEndpoint,
@@ -168,19 +173,38 @@ function clearStaleDiscovery(stateDir) {
     return { replaced: true };
 }
 
+/** Disconnect policies.  `survive` is the certified, shipped behaviour. */
+const DISCONNECT_POLICIES = Object.freeze(["survive", "revoke"]);
+
 /**
- * createCliIpcServer({ bridge, stateDir, limits, logger })
+ * createCliIpcServer({ bridge, stateDir, limits, logger, disconnectPolicy })
  *
  * @param bridge   the canonical CLI session bridge (`{ request, close }`).
  * @param stateDir the canonical Damar state dir (derived from the trusted
  *                 OwnerTrust store path — never caller-choosable per call).
+ * @param disconnectPolicy
+ *                 `survive` (default) — a disconnect releases the transport
+ *                 channel but leaves the canonical session alive.  Required by
+ *                 the one-shot CLI, whose every command is a NEW process, and
+ *                 safe because every consequential submit still needs a fresh
+ *                 one-use Owner proof.
+ *                 `revoke` — a disconnect invalidates the session
+ *                 authorization context of every handle that channel used, and
+ *                 a reconnect must run a fresh ceremony.  This is the stricter
+ *                 policy the hardening mission prefers; it is NOT the default
+ *                 because it is a breaking product-contract change (a
+ *                 one-shot `submit` process would find its session already
+ *                 revoked) and flipping it needs explicit Owner approval.
  */
-function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null } = {}) {
+function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null, disconnectPolicy = "survive" } = {}) {
     if (!bridge || typeof bridge.request !== "function") {
         throw transportError("TRANSPORT_CONFIG", "a canonical CLI session bridge is required");
     }
     if (typeof stateDir !== "string" || stateDir.trim() === "") {
         throw transportError("TRANSPORT_CONFIG", "a state directory is required");
+    }
+    if (!DISCONNECT_POLICIES.includes(disconnectPolicy)) {
+        throw transportError("TRANSPORT_CONFIG", `disconnectPolicy must be one of ${DISCONNECT_POLICIES.join(", ")}`);
     }
     const bound = Object.freeze({ ...DEFAULT_LIMITS, ...limits });
     const log = typeof logger === "function" ? logger : () => {};
@@ -188,6 +212,12 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null } = {
     const channels = new Map();
     /** connectionId -> the client identity that minted it (survives a disconnect). */
     const boundHandles = new Map();
+    /**
+     * connectionIds invalidated on disconnect under `disconnectPolicy:
+     * "revoke"`.  Kept as a local tombstone so the invalidation is IMMEDIATE —
+     * a fast reconnect can never race the canonical logout call.
+     */
+    const revokedHandles = new Set();
     /** client identity -> recent challenge-mint timestamps (PER PEER, not per socket). */
     const mintBuckets = new Map();
     let server = null;
@@ -244,16 +274,45 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null } = {
         } catch { /* peer gone; cleanup runs from the close handler */ }
     }
 
+    /** Bounded insertion-ordered tombstone set. */
+    function revoke(connectionId) {
+        revokedHandles.add(connectionId);
+        while (revokedHandles.size > bound.maxBoundHandles) {
+            const oldest = revokedHandles.values().next().value;
+            if (oldest === undefined) break;
+            revokedHandles.delete(oldest);
+        }
+    }
+
     function destroyChannel(channel, reason) {
         if (channel.closed) return;
         channel.closed = true;
         channels.delete(channel.id);
-        // NOTE (deliberate): a verified peer that disconnects does NOT have its
-        // session revoked.  A one-shot CLI process connects, acts and exits;
-        // revoking on disconnect would make the connected CLI unusable.  Every
-        // consequential submit still needs a FRESH one-use Owner proof, so an
-        // abandoned handle grants nothing.  Sessions end on logout, expiry,
-        // canonical device revocation or host shutdown.
+
+        if (disconnectPolicy === "revoke" && channel.authed === true) {
+            // The channel's session authorization context dies with it.  The
+            // tombstone is applied synchronously so no request can slip
+            // through; the canonical logout is issued for the durable record.
+            for (const connectionId of channel.handles) {
+                boundHandles.delete(connectionId);
+                revoke(connectionId);
+                Promise.resolve()
+                    .then(() => bridge.request({ op: "logout", connectionId, channelBinding: channel.peerBinding }))
+                    .catch((error) => note("disconnect.revoke.failed", { code: error?.code ?? "UNKNOWN" }));
+            }
+            if (channel.handles.size > 0) {
+                note("disconnect.revoked", { channelId: channel.id, reason, handles: channel.handles.size });
+            }
+        } else {
+            // NOTE (deliberate, certified behaviour): a verified peer that
+            // disconnects does NOT have its session revoked.  A one-shot CLI
+            // process connects, acts and exits; revoking on disconnect would
+            // make the connected CLI unusable.  Every consequential submit
+            // still needs a FRESH one-use Owner proof, so an abandoned handle
+            // grants nothing.  Sessions end on logout, expiry, canonical device
+            // revocation or host shutdown.
+        }
+
         note("channel.closed", { channelId: channel.id, reason });
         try { channel.socket.destroy(); } catch { /* best effort */ }
     }
@@ -287,10 +346,21 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null } = {
      *     cross-client attack.
      */
     function checkBinding(channel, connectionId) {
+        if (revokedHandles.has(connectionId)) {
+            // A handle invalidated by the approved disconnect policy is refused
+            // IMMEDIATELY, so no request can ever race the canonical logout.
+            // The code is the canonical one; the shape is a transport refusal
+            // because the transport reached the verdict, not the bridge.
+            return {
+                ok: false,
+                code: "OT_SESSION_UNKNOWN",
+                detail: "the session authorization context ended with its connection"
+            };
+        }
         const owner = boundHandles.get(connectionId);
         if (owner === undefined) return { ok: true };
         if (owner === channel.peerBinding) return { ok: true };
-        return { ok: false, code: "EPEER_CHANNEL_MISMATCH" };
+        return { ok: false, code: "EPEER_CHANNEL_MISMATCH", detail: "connection handle is bound to another client identity" };
     }
 
     // ---- request handling ------------------------------------------------
@@ -317,8 +387,9 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null } = {
         if (args.connectionId !== undefined) {
             const binding = checkBinding(channel, args.connectionId);
             if (!binding.ok) {
-                return deny(channel, id, binding.code, "connection handle is bound to another client identity");
+                return deny(channel, id, binding.code, binding.detail);
             }
+            if (typeof args.connectionId === "string") channel.handles.add(args.connectionId);
         }
 
         if (channel.inFlight >= bound.maxInFlightPerChannel) {
@@ -339,7 +410,15 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null } = {
                 })
             ]);
 
-            if (op === "authComplete") bindChannel(channel, result);
+            if (op === "authComplete") {
+                bindChannel(channel, result);
+                // The session this channel minted belongs to this channel's
+                // authorization context: remember it so a disconnect under the
+                // `revoke` policy can invalidate it.
+                if (result && result.ok === true && typeof result.connectionId === "string") {
+                    channel.handles.add(result.connectionId);
+                }
+            }
             if (op === "logout" && result && result.ok === true) {
                 boundHandles.delete(args.connectionId);
             }
@@ -418,7 +497,9 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null } = {
             serverNonce: null,
             inFlight: 0,
             handshakeTimer: null,
-            closed: false
+            closed: false,
+            /** connectionIds this channel used (for `revoke` on disconnect). */
+            handles: new Set()
         };
         channels.set(channel.id, channel);
         socket.setNoDelay(true);
@@ -470,37 +551,57 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null } = {
         endpoint = randomEndpoint();
         assertLocalEndpoint(endpoint, stateDir);
 
-        let discoveryAcl = null;
-        fs.writeFileSync(discovery, `${JSON.stringify({
-            v: PROTOCOL_VERSION,
-            endpoint,
-            tokenFile: tokenPath(stateDir),
-            pid: process.pid,
-            platform: process.platform,
-            startedAtMs: nowMs()
-        })}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+        // Order matters.  The endpoint is BOUND first, then its OS access
+        // control is rewritten and re-verified, and only then is the discovery
+        // file published.  A client can therefore never be pointed at an
+        // endpoint whose DACL has not been proven.
+        server = net.createServer(onConnection);
+        server.maxConnections = bound.maxChannels;
         try {
+            await new Promise((resolve, reject) => {
+                const onError = (error) => reject(transportError("TRANSPORT_BIND_FAILED", error?.message ?? "bind failed"));
+                server.once("error", onError);
+                server.listen(endpoint, () => {
+                    server.removeListener("error", onError);
+                    resolve();
+                });
+            });
+        } catch (error) {
+            try { server.close(); } catch { /* never bound */ }
+            server = null;
+            throw error;
+        }
+
+        let pipeAcl = null;
+        let discoveryAcl = null;
+        try {
+            pipeAcl = hardenNamedPipe(endpoint);
+            fs.writeFileSync(discovery, `${JSON.stringify({
+                v: PROTOCOL_VERSION,
+                endpoint,
+                tokenFile: tokenPath(stateDir),
+                pid: process.pid,
+                platform: process.platform,
+                startedAtMs: nowMs()
+            })}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
             hardenSecretPath(discovery);
             discoveryAcl = verifySecretPath(discovery);
         } catch (error) {
+            // FAIL CLOSED: never serve on an endpoint whose OS access control
+            // was not proven, and never leave a descriptor behind.
             try { fs.unlinkSync(discovery); } catch { /* best effort */ }
+            await new Promise((resolve) => { try { server.close(() => resolve()); } catch { resolve(); } });
+            server = null;
+            try { fs.unlinkSync(tokenPath(stateDir)); } catch { /* best effort */ }
+            token = null;
+            endpoint = null;
             throw error;
         }
-        aclEvidence = Object.freeze({ token: tokenAcl, discovery: discoveryAcl });
+        aclEvidence = Object.freeze({ token: tokenAcl, discovery: discoveryAcl, pipe: pipeAcl });
 
-        server = net.createServer(onConnection);
-        server.maxConnections = bound.maxChannels;
-        await new Promise((resolve, reject) => {
-            const onError = (error) => reject(transportError("TRANSPORT_BIND_FAILED", error?.message ?? "bind failed"));
-            server.once("error", onError);
-            server.listen(endpoint, () => {
-                server.removeListener("error", onError);
-                resolve();
-            });
-        });
         ownedStateDirs.add(path.resolve(stateDir));
         server.on("error", (error) => note("server.error", { code: error?.code ?? "UNKNOWN" }));
-        note("server.listening", { endpoint });
+        note("server.listening", { endpoint, pipeAcl: pipeAcl.status });
         return Object.freeze({ endpoint, stateDir, acl: aclEvidence });
     }
 
@@ -516,6 +617,7 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null } = {
         try { fs.unlinkSync(discoveryPath(stateDir)); } catch { /* best effort */ }
         try { fs.unlinkSync(tokenPath(stateDir)); } catch { /* best effort */ }
         boundHandles.clear();
+        revokedHandles.clear();
         mintBuckets.clear();
         note("server.stopped", {});
     }
@@ -527,12 +629,14 @@ function createCliIpcServer({ bridge, stateDir, limits = {}, logger = null } = {
             authenticated: [...channels.values()].filter((c) => c.authed).length,
             peers: mintBuckets.size,
             boundHandles: boundHandles.size,
+            revokedHandles: revokedHandles.size,
+            disconnectPolicy,
             acl: aclEvidence,
             limits: bound
         });
     }
 
-    return Object.freeze({ start, stop, info, ops: OPS });
+    return Object.freeze({ start, stop, info, ops: OPS, disconnectPolicy });
 }
 
-module.exports = Object.freeze({ createCliIpcServer, clearStaleDiscovery, OPS, ARG_SCHEMA, DEFAULT_LIMITS, validateArgs });
+module.exports = Object.freeze({ createCliIpcServer, clearStaleDiscovery, OPS, ARG_SCHEMA, DEFAULT_LIMITS, DISCONNECT_POLICIES, validateArgs });

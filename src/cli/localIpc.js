@@ -17,14 +17,33 @@
  *   posix  — a unix-domain socket inside the state dir with mode 0600 in a
  *            0700 directory.
  *
- * PEER AUTHENTICATION (honest scope — see evidence 09-transport-design.md)
- *   Node's `net` exposes NO peer SID/UID/PID API on either platform, and the
- *   Windows named-pipe DACL is not settable from pure Node.  Therefore peer
- *   identity CANNOT be proven by the runtime library.  What this transport
- *   does instead:
+ * PEER AUTHENTICATION (honest scope — see the Phase A/B measurements in
+ * windows-peer-hardening-evidence/)
+ *   Node's `net` exposes NO peer SID/UID/PID API on either platform.  Pure
+ *   Node also cannot set the named-pipe DACL, and `CreateNamedPipe` with a
+ *   NULL descriptor — which is all libuv ever passes — grants FILE_READ to
+ *   Everyone and Anonymous.  Peer identity therefore CANNOT be proven by the
+ *   runtime library alone.  Measured (Phase A):
+ *
+ *     * `ImpersonateNamedPipeClient` DOES return the peer's user SID, but only
+ *       from the process that owns the CONNECTED server-side pipe instance,
+ *       and only after the client has written: a raw Win32 listener +
+ *       Node client returned the peer SID, whereas the same call on a
+ *       client-side handle failed with ERROR_INVALID_FUNCTION and before the
+ *       client wrote with ERROR_CANNOT_IMPERSONATE.  Node/libuv owns the
+ *       instance handle and exposes neither it nor a way to run Win32
+ *       impersonation inside the listener process, so a token-based peer-SID
+ *       gate is BLOCKED without changing who owns the listening socket.
+ *     * The named-pipe DACL IS settable and the result is stable across every
+ *       instance of the pipe name, so OS-level access to the endpoint is
+ *       confined to the owning principal (see `hardenNamedPipe`).
+ *
+ *   What the transport therefore establishes, honestly:
  *
  *     1. OS-level endpoint confinement.  The endpoint is never a network
- *        listener, so no remote principal can reach it.
+ *        listener, and its DACL is rewritten to
+ *        `D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;<owner SID>)` and re-verified by
+ *        effective access mask, so no other local principal can even open it.
  *     2. An OS-ACL-confined 256-bit channel secret.  `hardenSecretPath()`
  *        rewrites the DACL with `icacls /inheritance:r /grant:r <user>:(F)`
  *        (Windows) or chmod 0600 (posix), and `verifySecretPath()` re-reads
@@ -35,9 +54,10 @@
  *        cannot impersonate the host either.
  *
  *   A caller-supplied principal string is NEVER accepted as identity.  The
- *   verified property is "this connection proved possession of a secret that
- *   the OS confines to one local principal"; that is recorded honestly as
- *   PARTIAL peer identity, NOT a SID/UID check.
+ *   verified property is "this connection came through an OS-confined
+ *   endpoint AND proved possession of a secret the OS confines to one local
+ *   principal"; that is recorded honestly as PARTIAL peer identity, NOT an OS
+ *   token/SID check.
  */
 
 const crypto = require("node:crypto");
@@ -259,6 +279,359 @@ function writeProtected(target, content) {
 }
 
 // ---------------------------------------------------------------------------
+// OS-level DACL confinement of the named-pipe ENDPOINT.
+// ---------------------------------------------------------------------------
+//
+// `CreateNamedPipe` with a NULL security descriptor is documented to grant
+// FILE_READ to Everyone and to Anonymous.  Node/libuv never passes a security
+// descriptor, so it cannot avoid that, and pure Node exposes no way to set one
+// afterwards (there is no DACL API and `Get-Acl`/`Set-Acl` cannot address
+// NPFS).  Measured on the original build:
+//
+//   D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;<owner>)(A;;FR;;;WD)(A;;FR;;;AN)
+//
+// Phase A measured the two candidate mechanisms:
+//
+//   * the process TOKEN DEFAULT DACL is NOT consulted by NPFS — setting it
+//     changed the token and left the pipe permissive (rejected);
+//   * SetSecurityInfo on a handle that has WRITE_DAC works, and the resulting
+//     descriptor is observed on EVERY instance of the pipe name, including
+//     instances recycled by later connections (12/12 reads after 39 accepted
+//     connections, and 4/4 concurrently held instances).
+//
+// So the endpoint is hardened after `listen()` and BEFORE the discovery file
+// is published, and the applied ACL is then re-read and re-checked.  The
+// check is an EFFECTIVE ACCESS MASK check (`GetEffectiveRightsFromAcl`) for
+// Everyone / Anonymous / Users / Authenticated Users / SYSTEM / Administrators
+// / the owning SID — not a string comparison — and any unexpected grant fails
+// the host closed.  The Windows API access itself is done by the OS-provided
+// PowerShell (.NET Framework compiler); no third-party binary and no native
+// module are involved, and the helper is handed no secret material.
+
+const PIPE_ACL_SCRIPT = String.raw`
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$InformationPreference = 'SilentlyContinue'
+$endpoint = $env:DAMAR_PIPE_ACL_ENDPOINT
+$ownerSid = $env:DAMAR_PIPE_ACL_OWNER_SID
+$mode = $env:DAMAR_PIPE_ACL_MODE
+if ([string]::IsNullOrEmpty($endpoint)) {
+    Write-Output 'PIPE_ACL_RESULT ERROR=missing-endpoint'
+    exit 3
+}
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+public static class DamarPipeAcl
+{
+    const uint WRITE_DAC = 0x00040000;
+    const uint READ_CONTROL = 0x00020000;
+    const int SE_KERNEL_OBJECT = 6;
+    const int DACL_SECURITY_INFORMATION = 0x00000004;
+    const int SDDL_OWNER_GROUP_DACL = 7;
+    const uint SDDL_REVISION_1 = 1;
+    const uint OPEN_EXISTING = 3;
+    const int ERROR_PIPE_BUSY = 231;
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern IntPtr CreateFile(string name, uint access, uint share, IntPtr sa, uint disp, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr h);
+    [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr h);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern int GetSecurityInfo(IntPtr handle, int type, int info, out IntPtr owner, out IntPtr group, out IntPtr dacl, out IntPtr sacl, out IntPtr sd);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern int SetSecurityInfo(IntPtr handle, int type, int info, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(string sddl, uint rev, out IntPtr sd, out int size);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool ConvertSecurityDescriptorToStringSecurityDescriptor(IntPtr sd, uint rev, int info, out IntPtr sddl, out int size);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool GetSecurityDescriptorDacl(IntPtr sd, out bool present, out IntPtr dacl, out bool defaulted);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool ConvertStringSidToSid(string s, out IntPtr sid);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr text);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern int GetEffectiveRightsFromAcl(IntPtr pacl, ref TRUSTEE trustee, out uint mask);
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct TRUSTEE {
+        public IntPtr pMultipleTrustee;
+        public int MultipleTrusteeOperation;
+        public int TrusteeForm;
+        public int TrusteeType;
+        public IntPtr ptstrName;
+    }
+
+    static string ToSddl(IntPtr sd) {
+        IntPtr text; int len;
+        if (!ConvertSecurityDescriptorToStringSecurityDescriptor(sd, SDDL_REVISION_1, SDDL_OWNER_GROUP_DACL, out text, out len)) return "ERR" + Marshal.GetLastWin32Error();
+        string sddl = Marshal.PtrToStringUni(text);
+        LocalFree(text);
+        return sddl;
+    }
+
+    static string ToSid(IntPtr sid) {
+        if (sid == IntPtr.Zero) return "none";
+        IntPtr text;
+        if (!ConvertSidToStringSid(sid, out text)) return "ERR" + Marshal.GetLastWin32Error();
+        string value = Marshal.PtrToStringUni(text);
+        LocalFree(text);
+        return value;
+    }
+
+    static string EffectiveMask(IntPtr pacl, string sidString) {
+        IntPtr sid;
+        if (!ConvertStringSidToSid(sidString, out sid)) return "ERR" + Marshal.GetLastWin32Error();
+        try {
+            TRUSTEE trustee = new TRUSTEE();
+            trustee.TrusteeForm = 0;
+            trustee.TrusteeType = 0;
+            trustee.ptstrName = sid;
+            uint mask;
+            int rc = GetEffectiveRightsFromAcl(pacl, ref trustee, out mask);
+            if (rc != 0) return "ERR" + rc;
+            return "0x" + mask.ToString("x");
+        } finally { LocalFree(sid); }
+    }
+
+    static string MasksOf(IntPtr dacl, string ownerSid) {
+        return "maskEveryone=" + EffectiveMask(dacl, "S-1-1-0")
+             + " maskAnonymous=" + EffectiveMask(dacl, "S-1-5-7")
+             + " maskUsers=" + EffectiveMask(dacl, "S-1-5-32-545")
+             + " maskAuthenticatedUsers=" + EffectiveMask(dacl, "S-1-5-11")
+             + " maskSystem=" + EffectiveMask(dacl, "S-1-5-18")
+             + " maskAdministrators=" + EffectiveMask(dacl, "S-1-5-32-544")
+             + " maskOwner=" + EffectiveMask(dacl, ownerSid);
+    }
+
+    static IntPtr OpenPipe(string pipe, out int lastError) {
+        lastError = 0;
+        for (int attempt = 0; attempt < 60; attempt++) {
+            IntPtr candidate = CreateFile(pipe, WRITE_DAC | READ_CONTROL, 0, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+            if (candidate != (IntPtr)(-1)) return candidate;
+            lastError = Marshal.GetLastWin32Error();
+            if (lastError != ERROR_PIPE_BUSY) return IntPtr.Zero;
+            Thread.Sleep(100);
+        }
+        return IntPtr.Zero;
+    }
+
+    /// Read-only: report the live DACL and the EFFECTIVE access mask each
+    /// principal holds under it.  Changes nothing.
+    public static string Verify(string pipe) {
+        int lastError;
+        IntPtr handle = OpenPipe(pipe, out lastError);
+        if (handle == IntPtr.Zero) return "ERROR=open_failed_" + lastError;
+        try {
+            IntPtr owner, group, dacl, sacl, sd;
+            int rc = GetSecurityInfo(handle, SE_KERNEL_OBJECT, SDDL_OWNER_GROUP_DACL, out owner, out group, out dacl, out sacl, out sd);
+            if (rc != 0) return "ERROR=getsecurityinfo_" + rc;
+            string sddl = ToSddl(sd);
+            string ownerSid = ToSid(owner);
+            return "mode=verify ownerSid=" + ownerSid + " before=" + sddl + " after=" + sddl + " " + MasksOf(dacl, ownerSid);
+        } finally { CloseHandle(handle); }
+    }
+
+    public static string HardenAndVerify(string pipe, string ownerSid) {
+        string desired = "D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + ownerSid + ")";
+        int lastError;
+        IntPtr handle = OpenPipe(pipe, out lastError);
+        if (handle == IntPtr.Zero) return "ERROR=open_failed_" + lastError;
+        try {
+            IntPtr owner, group, dacl, sacl, sd;
+            int rc = GetSecurityInfo(handle, SE_KERNEL_OBJECT, SDDL_OWNER_GROUP_DACL, out owner, out group, out dacl, out sacl, out sd);
+            if (rc != 0) return "ERROR=getsecurityinfo_" + rc;
+            string before = ToSddl(sd);
+
+            IntPtr newSd; int newSize;
+            if (!ConvertStringSecurityDescriptorToSecurityDescriptor(desired, SDDL_REVISION_1, out newSd, out newSize))
+                return "ERROR=build_sd_" + Marshal.GetLastWin32Error();
+            string masks;
+            try {
+                bool present; IntPtr newDacl; bool defaulted;
+                if (!GetSecurityDescriptorDacl(newSd, out present, out newDacl, out defaulted))
+                    return "ERROR=get_dacl_" + Marshal.GetLastWin32Error();
+                rc = SetSecurityInfo(handle, SE_KERNEL_OBJECT, DACL_SECURITY_INFORMATION, IntPtr.Zero, IntPtr.Zero, newDacl, IntPtr.Zero);
+                if (rc != 0) return "ERROR=setsecurityinfo_" + rc;
+                masks = MasksOf(newDacl, ownerSid);
+            } finally { LocalFree(newSd); }
+
+            IntPtr o2, g2, d2, s2, sd2;
+            rc = GetSecurityInfo(handle, SE_KERNEL_OBJECT, SDDL_OWNER_GROUP_DACL, out o2, out g2, out d2, out s2, out sd2);
+            if (rc != 0) return "ERROR=re_getsecurityinfo_" + rc;
+            return "mode=harden ownerSid=" + ownerSid + " before=" + before + " after=" + ToSddl(sd2) + " " + masks;
+        } finally { CloseHandle(handle); }
+    }
+}
+'@
+Write-Output 'PIPE_ACL_MODULE_OK'
+if ($mode -eq 'verify') {
+    Write-Output ("PIPE_ACL_RESULT " + [DamarPipeAcl]::Verify($endpoint))
+} else {
+    if ([string]::IsNullOrEmpty($ownerSid)) {
+        Write-Output 'PIPE_ACL_RESULT ERROR=missing-owner-sid'
+        exit 3
+    }
+    Write-Output ("PIPE_ACL_RESULT " + [DamarPipeAcl]::HardenAndVerify($endpoint, $ownerSid))
+}
+`;
+
+/** The exact helper source, for evidence and for `-EncodedCommand`. */
+function namedPipeAclScript() {
+    return PIPE_ACL_SCRIPT;
+}
+
+function parseAclResult(line) {
+    const fields = {};
+    for (const token of String(line).trim().split(/\s+/)) {
+        const index = token.indexOf("=");
+        if (index <= 0) continue;
+        fields[token.slice(0, index)] = token.slice(index + 1);
+    }
+    return fields;
+}
+
+const EVERYONE_DENIED = ["maskEveryone", "maskAnonymous", "maskUsers", "maskAuthenticatedUsers"];
+const OWNER_ALLOWED = ["maskSystem", "maskAdministrators", "maskOwner"];
+
+/** Only damar endpoints may be handed to the ACL helper. */
+function assertDamarEndpoint(endpoint) {
+    const endpointRe = new RegExp(`^${ENDPOINT_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[0-9a-f]{32}$`);
+    if (typeof endpoint !== "string" || !endpointRe.test(endpoint)) {
+        throw transportError("TRANSPORT_ENDPOINT_INVALID", "refusing to touch a non-damar endpoint");
+    }
+}
+
+/**
+ * Run the OS ACL helper against a live endpoint.  `mode: "harden"` rewrites the
+ * DACL; `mode: "verify"` reads it and changes nothing.  Both report the SDDL
+ * AND the effective access mask each principal holds under the resulting ACL.
+ */
+function runPipeAclHelper(endpoint, { mode, ownerSid = null, timeoutMs = 120_000 }) {
+    const env = { ...process.env, DAMAR_PIPE_ACL_ENDPOINT: endpoint, DAMAR_PIPE_ACL_MODE: mode };
+    if (ownerSid !== null) env.DAMAR_PIPE_ACL_OWNER_SID = ownerSid;
+
+    let output;
+    let failedRun = null;
+    try {
+        output = execFileSync("powershell.exe", [
+            "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-OutputFormat", "Text",
+            "-EncodedCommand", Buffer.from(PIPE_ACL_SCRIPT, "utf16le").toString("base64")
+        ], {
+            encoding: "utf8",
+            timeout: timeoutMs,
+            windowsHide: true,
+            // Explicit pipes: the helper's stderr must never reach the host's
+            // own log, and its stdin must never be the host's.
+            stdio: ["pipe", "pipe", "pipe"],
+            env
+        });
+    } catch (error) {
+        // A non-zero exit must still be judged by the verdict it produced.
+        failedRun = typeof error?.stdout === "string" ? error.stdout : null;
+        output = failedRun;
+        if (failedRun === null) {
+            throw transportError("TRANSPORT_ACL_HARDEN_FAILED", `the OS ACL helper did not run: ${error?.message ?? error}`);
+        }
+    }
+
+    const resultLine = String(output ?? "").split(/\r?\n/).find((entry) => entry.trimStart().startsWith("PIPE_ACL_RESULT "));
+    if (resultLine === undefined) {
+        throw transportError(
+            "TRANSPORT_ACL_HARDEN_FAILED",
+            `the OS ACL helper produced no verdict${failedRun === null ? "" : " (non-zero exit)"}`
+        );
+    }
+    const fields = parseAclResult(resultLine.trimStart().slice("PIPE_ACL_RESULT ".length));
+    if (typeof fields.ERROR === "string") {
+        throw transportError("TRANSPORT_ACL_HARDEN_FAILED", `the OS ACL helper failed: ${fields.ERROR}`);
+    }
+    const foreign = EVERYONE_DENIED.filter((key) => fields[key] !== "0x0");
+    if (foreign.length > 0) {
+        throw transportError(
+            "TRANSPORT_ACL_UNSAFE",
+            `the endpoint grants effective access to ${foreign.map((k) => `${k.slice(4)}:${fields[k]}`).join(", ")}`
+        );
+    }
+    const applied = typeof fields.after === "string" ? fields.after : "";
+    return Object.freeze({
+        mode,
+        ownerSid: typeof fields.ownerSid === "string" ? fields.ownerSid : ownerSid,
+        sddl: applied.includes("D:") ? `D:${applied.slice(applied.indexOf("D:") + 2)}` : applied,
+        before: typeof fields.before === "string" ? fields.before : null,
+        effective: Object.freeze(Object.fromEntries(
+            [...EVERYONE_DENIED, ...OWNER_ALLOWED].map((key) => [key.slice(4), fields[key]])
+        ))
+    });
+}
+
+/**
+ * Harden a Windows named-pipe endpoint and PROVE the result.  Fail-closed:
+ * any helper error, any unexpected grant, or any write that did not land is a
+ * refusal to serve, never a warning.
+ */
+function hardenNamedPipe(endpoint, { timeoutMs = 120_000 } = {}) {
+    if (!isWindows()) {
+        return Object.freeze({ platform: process.platform, mechanism: "filesystem-mode", status: "NOT_APPLICABLE" });
+    }
+    assertDamarEndpoint(endpoint);
+    const ownerSid = currentWindowsUserSid();
+    if (ownerSid === null || !/^S-1-[0-9-]+$/.test(ownerSid)) {
+        throw transportError("TRANSPORT_ACL_UNVERIFIABLE", "cannot resolve the owning OS principal SID");
+    }
+
+    const observed = runPipeAclHelper(endpoint, { mode: "harden", ownerSid, timeoutMs });
+    const desired = `D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;${ownerSid})`;
+    if (observed.sddl !== desired) {
+        throw transportError("TRANSPORT_ACL_HARDEN_FAILED", `the applied DACL is not the requested DACL (${observed.sddl})`);
+    }
+    const missing = OWNER_ALLOWED.filter((key) => observed.effective[key.slice(4)] === undefined
+        || observed.effective[key.slice(4)] === "0x0");
+    if (missing.length > 0) {
+        throw transportError(
+            "TRANSPORT_ACL_HARDEN_FAILED",
+            `the endpoint does not grant the owning principal/OS service access (${missing.join(", ")})`
+        );
+    }
+
+    return Object.freeze({
+        platform: "win32",
+        mechanism: "advapi32-SetSecurityInfo+GetEffectiveRightsFromAcl",
+        status: "HARDENED_AND_VERIFIED",
+        ownerSid,
+        dacl: observed.sddl,
+        before: observed.before,
+        effective: observed.effective
+    });
+}
+
+/**
+ * READ-ONLY re-measurement of a live endpoint's access control, for evidence
+ * and for W24.  Unlike `hardenNamedPipe` it repairs nothing, so it can observe
+ * a regression: any effective access for Everyone / Anonymous / Users /
+ * Authenticated Users fails closed with TRANSPORT_ACL_UNSAFE.
+ */
+function verifyNamedPipeAcl(endpoint, { timeoutMs = 120_000 } = {}) {
+    if (!isWindows()) {
+        return Object.freeze({ platform: process.platform, mechanism: "filesystem-mode", status: "NOT_APPLICABLE" });
+    }
+    assertDamarEndpoint(endpoint);
+    const observed = runPipeAclHelper(endpoint, { mode: "verify", timeoutMs });
+    return Object.freeze({
+        platform: "win32",
+        mechanism: "advapi32-GetSecurityInfo+GetEffectiveRightsFromAcl",
+        status: "NO_FOREIGN_PRINCIPAL_HAS_ACCESS",
+        ownerSid: observed.ownerSid,
+        dacl: observed.sddl,
+        effective: observed.effective
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Framing: newline-delimited JSON with a hard bound on every frame.
 // ---------------------------------------------------------------------------
 
@@ -384,6 +757,9 @@ module.exports = Object.freeze({
     currentWindowsUserSid,
     hardenSecretPath,
     verifySecretPath,
+    hardenNamedPipe,
+    verifyNamedPipeAcl,
+    namedPipeAclScript,
     writeSecret,
     writeProtected,
     encodeFrame,

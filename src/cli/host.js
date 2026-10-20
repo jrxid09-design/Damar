@@ -71,10 +71,28 @@ function resolveIdentityReplayStore(env = process.env) {
 }
 
 /**
+ * Session/disconnect policy selection.
+ *
+ * The hardening mission prefers "a disconnect invalidates the session
+ * authorization context", but the shipped contract is the opposite: the CLI is
+ * one-shot, so every command is a new process and revoking on disconnect would
+ * break it.  The strict policy is therefore AVAILABLE and tested, selected
+ * explicitly (`DAMAR_CLI_DISCONNECT_POLICY=revoke` or the `disconnectPolicy`
+ * option) and NOT enabled by default, because flipping the default changes an
+ * established product contract and needs explicit Owner approval.
+ */
+const DISCONNECT_POLICY_ENV = "DAMAR_CLI_DISCONNECT_POLICY";
+
+function resolveDisconnectPolicy(env = process.env) {
+    const configured = env[DISCONNECT_POLICY_ENV];
+    return typeof configured === "string" && configured.trim() !== "" ? configured.trim() : "survive";
+}
+
+/**
  * Compose the CLI host.  `start()` binds the endpoint; `stop()` releases it.
  * The returned handle is the ONLY thing the process entrypoint touches.
  */
-async function createCliHost({ stateDir = resolveCliStateDir(), logger = null } = {}) {
+async function createCliHost({ stateDir = resolveCliStateDir(), logger = null, disconnectPolicy = resolveDisconnectPolicy() } = {}) {
     // 0. Endpoint pre-flight, BEFORE any composition: a second host against a
     //    live state dir must fail on the real conflict, not on a composition
     //    lock it happens to trip over first.  A stale descriptor from a crashed
@@ -113,7 +131,7 @@ async function createCliHost({ stateDir = resolveCliStateDir(), logger = null } 
 
     // 5. The certified CLI session bridge (INGRESS, never authority).
     const bridge = createCliSessionBridge({ manager, ownerTrust, channelId: "cli-surface" });
-    const server = createCliIpcServer({ bridge, stateDir, logger });
+    const server = createCliIpcServer({ bridge, stateDir, logger, disconnectPolicy });
 
     let started = null;
 
@@ -134,6 +152,7 @@ async function createCliHost({ stateDir = resolveCliStateDir(), logger = null } 
             stateDir,
             endpoint: started === null ? null : started.endpoint,
             acl: started === null ? null : started.acl,
+            disconnectPolicy,
             identityStore: ownerTrust.identityStore ? "DURABLE" : "NONE",
             ownerTrustDurable: ownerTrust.durable === true
         });
@@ -142,7 +161,7 @@ async function createCliHost({ stateDir = resolveCliStateDir(), logger = null } 
     return Object.freeze({ start, stop, status, bridge, server, manager, ownerTrust });
 }
 
-module.exports = Object.freeze({ createCliHost, lazyProductionAuthorityStore, resolveIdentityReplayStore });
+module.exports = Object.freeze({ createCliHost, lazyProductionAuthorityStore, resolveIdentityReplayStore, resolveDisconnectPolicy, DISCONNECT_POLICY_ENV });
 
 // ---------------------------------------------------------------------------
 // Process entrypoint: `node src/cli/host.js`   (bin: damar-session-host)
@@ -157,7 +176,8 @@ async function main() {
         pid: process.pid,
         endpoint: info.endpoint,
         stateDir: info.stateDir,
-        acl: info.acl
+        acl: info.acl,
+        disconnectPolicy: host.status().disconnectPolicy
     })}\n`);
 
     let stopping = false;
