@@ -8,6 +8,19 @@ Status: `R12C — RI validator/trust-boundary certified` · `R13 in progress —
 
 Damar separates *reasoning* from *permission to act*. A model can read, plan, and propose — but an action only becomes real when it passes through an explicit authority gate, is ratified, and is then verified and written to a durable audit trail. One identity persists across surfaces; nothing acts on your behalf just because a model asked nicely.
 
+## Standalone component repositories
+
+DAMAR is the host/orchestrator. The following components have their own source of truth and can be developed or evaluated independently; **availability as a standalone project does not imply live integration or production authorization in DAMAR**.
+
+| Component | Source repository | Standalone status |
+| --- | --- | --- |
+| Cognitive Runtime V3 (functional cognition, persistent memory and offline cognitive loops) | [medlest/damar-cognitive-runtime](https://github.com/medlest/damar-cognitive-runtime) | Standalone Python runtime delivered. See its [README](https://github.com/medlest/damar-cognitive-runtime/blob/standalone-v3-handoff-20261104/README.md) and [build/run guide](https://github.com/medlest/damar-cognitive-runtime/blob/standalone-v3-handoff-20261104/cognitive-runtime/BUILD_AND_RUN.md). Linux/WSL2 is the supported qualification path; integration into the canonical DAMAR runtime is a separate, gated effort. |
+| DMR-01 HID (device firmware and hardware interface) | **Official GitHub repository: pending publication/confirmation by the hardware maintainer.** | R6 firmware host-simulation candidate exists outside this main repository. Physical device validation, release, upstream pull request, and independent acceptance are not yet confirmed. Do not treat it as a flash-ready release. |
+
+**Using a component separately:** go to its linked repository and follow that repository's installation, licensing, hardware, and safety instructions. Cognitive Runtime V3 may currently require GitHub collaborator access until the repository owner changes its visibility. Do not assume cloning this main repository also installs either component.
+
+When the DMR-01 hardware maintainer provides the confirmed official GitHub URL, replace the pending entry above with the actual repository link. Do not substitute an unofficial fork or an unverified URL.
+
 ## Governed runtime flow
 
 Event and observation enter through the Damar Manager, which turns them into an action intent. Nothing executes until the Authority Gate admits it; only ratified intent proceeds to governed actuation, and every result is verified, audited, and folded back into experience.
