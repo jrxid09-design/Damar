@@ -71,3 +71,6 @@ local-data/private/
 .mata-dewa-vault/
 # State runtime Mata Dewa (watch policy, aset hasil impor privat).
 data/mataDewa/
+
+tools/staging/shadow.local.json
+tools/staging/debug_spawn.js
