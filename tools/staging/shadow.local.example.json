@@ -1,0 +1,15 @@
+{
+  "executable": "/home/YOUR_USER/Workspace/damar-cognitive-runtime/cognitive-runtime/.venv/bin/python",
+  "args": [
+    "-m", "damar_cognition.shadow_stdio",
+    "--store", "/home/YOUR_USER/Workspace/damar-cognitive-runtime/cognitive-runtime/.run/shadow-staging-01",
+    "--tenant", "damar-staging-fixture",
+    "--actor", "owner-staging-fixture"
+  ],
+  "cwd": "/home/YOUR_USER/Workspace/damar-cognitive-runtime",
+  "env": {
+    "PYTHONPATH": "/home/YOUR_USER/Workspace/damar-cognitive-runtime/cognitive-runtime/src",
+    "PATH": "/usr/local/bin:/usr/bin:/bin",
+    "HOME": "/home/YOUR_USER"
+  }
+}
