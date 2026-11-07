@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="685" viewBox="0 0 1440 685" role="img" aria-labelledby="st sd">
+<title id="st">DAMAR Control Center - illustrative design concept</title><desc id="sd">An original gold ember on charcoal interface concept showing console panel, graphical system nodes for Pandawa and schematic map for Mata Dewa. Not a screenshot or live data.</desc>
+<defs><linearGradient id="sbg" x2="1" y2="1"><stop stop-color="#0c1017"/><stop offset="1" stop-color="#13161e"/></linearGradient><linearGradient id="accent" x2="1"><stop stop-color="#a16e37"/><stop offset=".65" stop-color="#f2d295"/><stop offset="1" stop-color="#a1733c"/></linearGradient><pattern id="map" width="37" height="37" patternUnits="userSpaceOnUse"><path d="M37 0 L0 0 0 37" stroke="#a4a6a6" stroke-opacity=".1" fill="none"/></pattern><filter id="shine"><feGaussianBlur stdDeviation="14"/></filter></defs>
+<rect width="1440" height="685" rx="15" fill="url(#sbg)"/><rect x="1" y="1" width="1438" height="683" rx="14" fill="none" stroke="#59472c"/>
+<rect x="0" y="0" width="1440" height="6" fill="url(#accent)"/>
+<rect x="24" y="25" width="1392" height="56" rx="9" fill="#171b23" stroke="#333844"/>
+<circle cx="60" cy="53" r="8" fill="#d6b270"/><text x="83" y="61" font-family="Georgia,serif" font-size="24" letter-spacing="4" fill="#f1ecdf">DAMAR</text>
+<text x="282" y="59" font-family="Segoe UI,Arial,sans-serif" font-size="14" letter-spacing="3" fill="#aaa89f">CONTROL CENTER / VISUAL CONCEPT</text>
+<rect x="1154" y="39" width="236" height="28" rx="14" fill="#2d271f" stroke="#79623b"/><circle cx="1173" cy="53" r="4" fill="#e2b775"/><text x="1282" y="58" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="12" fill="#f2deb4">GOVERNANCE FIRST</text>
+<rect x="24" y="98" width="210" height="558" rx="10" fill="#141820" stroke="#333a45"/>
+<text x="48" y="136" font-family="Segoe UI,Arial,sans-serif" font-size="12" letter-spacing="2.5" fill="#7f898c">NAVIGATION</text>
+<g font-family="Segoe UI,Arial,sans-serif" font-size="17">
+<rect x="38" y="158" width="182" height="44" rx="8" fill="#30271b" stroke="#8b6f42"/><text x="56" y="186" fill="#e6cb96">◈   Overview</text>
+<text x="56" y="243" fill="#acb4ba">⌘   Runtime &amp; CLI</text>
+<text x="56" y="299" fill="#acb4ba">◇   Mata Dewa</text>
+<text x="56" y="355" fill="#acb4ba">✧   Pandawa</text>
+<text x="56" y="411" fill="#acb4ba">▣   Capabilities</text>
+<text x="56" y="467" fill="#acb4ba">◎   Authority Gate</text>
+</g>
+<path d="M47 515 H210" stroke="#353b45"/><text x="48" y="549" font-family="Segoe UI,Arial,sans-serif" font-size="12" letter-spacing="1.9" fill="#818a92">LOCAL-FIRST</text><text x="48" y="578" font-family="Segoe UI,Arial,sans-serif" font-size="14" fill="#a9b0ad">One identity</text><text x="48" y="601" font-family="Segoe UI,Arial,sans-serif" font-size="14" fill="#a9b0ad">Many surfaces</text>
+<rect x="249" y="98" width="741" height="245" rx="10" fill="#181c25" stroke="#333a45"/>
+<text x="279" y="140" font-family="Segoe UI,Arial,sans-serif" font-size="13" letter-spacing="3" fill="#a98c60">RUNTIME / AUTHORITY</text>
+<text x="279" y="185" font-family="Georgia,serif" font-size="33" fill="#f2e9d8">Intelligence with boundaries.</text>
+<text x="279" y="223" font-family="Segoe UI,Arial,sans-serif" font-size="17" fill="#aeb3b6">Reasoning is not permission. Every consequential action</text><text x="279" y="251" font-family="Segoe UI,Arial,sans-serif" font-size="17" fill="#aeb3b6">needs a decision, an effect, and independent verification.</text>
+<rect x="279" y="281" width="178" height="37" rx="18" fill="#302719" stroke="#9e7846"/><text x="368" y="305" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="14" fill="#e8c789">AUTHORITY GATE</text>
+<path d="M669 180 H732" stroke="#937647" stroke-opacity=".4" stroke-width="2"/>
+<circle cx="812" cy="216" r="81" fill="#ac7b38" opacity=".09" filter="url(#shine)"/>
+<circle cx="812" cy="216" r="84" fill="none" stroke="#846b43" stroke-width="1.8" stroke-dasharray="4 15"/>
+<circle cx="812" cy="216" r="62" fill="none" stroke="#d0a363" stroke-width="1.8"/>
+<circle cx="812" cy="216" r="38" fill="#312a21" stroke="#ecc787" stroke-width="2"/>
+<circle cx="812" cy="216" r="14" fill="#e4bd74"/><circle cx="812" cy="216" r="5" fill="#fff0c0"/>
+<circle cx="738" cy="177" r="5" fill="#ebc988"/><circle cx="882" cy="248" r="4" fill="#ebc988"/>
+<rect x="1005" y="98" width="411" height="245" rx="10" fill="#171d24" stroke="#333a45"/>
+<text x="1030" y="136" font-family="Segoe UI,Arial,sans-serif" font-size="15" fill="#e7e2d8">MATA DEWA</text>
+<text x="1390" y="136" text-anchor="end" font-family="Segoe UI,Arial,sans-serif" font-size="11" fill="#9b9f9f">SYNTHETIC GEOSPATIAL</text>
+<rect x="1028" y="152" width="365" height="165" rx="7" fill="#1a2228"/>
+<rect x="1028" y="152" width="365" height="165" rx="7" fill="url(#map)"/>
+<path d="M1038 293 C1125 229 1170 285 1252 209 S1364 180 1393 160" stroke="#526972" stroke-width="6" opacity=".45" fill="none"/>
+<path d="M1038 260 C1125 180 1207 240 1280 167" stroke="#8a754c" stroke-width="2" opacity=".6" fill="none" stroke-dasharray="8 6"/>
+<g stroke="#e7bb72" stroke-width="2" fill="#28271f"><circle cx="1100" cy="257" r="7"/><circle cx="1206" cy="222" r="7"/><circle cx="1324" cy="185" r="7"/></g>
+<g fill="#fff0bc"><circle cx="1100" cy="257" r="2.3"/><circle cx="1206" cy="222" r="2.3"/><circle cx="1324" cy="185" r="2.3"/></g>
+<rect x="249" y="358" width="741" height="298" rx="10" fill="#171b23" stroke="#333a45"/>
+<text x="279" y="397" font-family="Segoe UI,Arial,sans-serif" font-size="15" fill="#e7e2d8">PANDAWA / ORCHESTRATION GRAPH</text>
+<text x="963" y="395" text-anchor="end" font-family="Segoe UI,Arial,sans-serif" font-size="11" fill="#9b9f9f">CONCEPTUAL AGENT TOPOLOGY</text>
+<g stroke="#7d715c" stroke-width="2" opacity=".8" fill="none"><path d="M619 504 L413 459"/><path d="M619 504 L829 451"/><path d="M619 504 L829 572"/><path d="M619 504 L424 582"/></g>
+<circle cx="619" cy="504" r="48" fill="#302719" stroke="#e3b978" stroke-width="2.4"/><text x="619" y="499" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="16" fill="#f6dfa8">DAMAR</text><text x="619" y="519" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="11" fill="#a9946d">MANAGER</text>
+<g fill="#242932" stroke="#7c8382" stroke-width="1.6"><circle cx="395" cy="457" r="37"/><circle cx="842" cy="447" r="37"/><circle cx="842" cy="577" r="37"/><circle cx="400" cy="583" r="37"/></g>
+<g font-family="Segoe UI,Arial,sans-serif" font-size="13" text-anchor="middle" fill="#d4dbda"><text x="395" y="461">Reason</text><text x="842" y="451">Observe</text><text x="842" y="581">Verify</text><text x="400" y="587">Actuate</text></g>
+<rect x="1005" y="358" width="411" height="298" rx="10" fill="#171b23" stroke="#333a45"/>
+<text x="1030" y="397" font-family="Segoe UI,Arial,sans-serif" font-size="15" fill="#e7e2d8">CONTINUITY &amp; CONTROL</text>
+<g font-family="Segoe UI,Arial,sans-serif" font-size="14"><text x="1032" y="448" fill="#c5bda9">MODEL</text><text x="1391" y="448" text-anchor="end" fill="#e1bd7d">PROPOSE</text><path d="M1031 464 H1391" stroke="#343b42"/><text x="1032" y="500" fill="#c5bda9">AUTHORITY</text><text x="1391" y="500" text-anchor="end" fill="#e1bd7d">DECIDE</text><path d="M1031 516 H1391" stroke="#343b42"/><text x="1032" y="552" fill="#c5bda9">ACTUATION</text><text x="1391" y="552" text-anchor="end" fill="#e1bd7d">VERIFY</text><path d="M1031 568 H1391" stroke="#343b42"/><text x="1032" y="606" fill="#c5bda9">MEMORY</text><text x="1391" y="606" text-anchor="end" fill="#e1bd7d">PERSIST</text></g>
+<text x="720" y="674" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="11" letter-spacing="2" fill="#a4a9a7">DESIGN CONCEPT ONLY  ·  SYNTHETIC DATA  ·  NOT A LIVE PRODUCT SCREENSHOT</text>
+</svg>
