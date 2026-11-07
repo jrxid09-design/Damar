@@ -1,69 +1,57 @@
 <div align="center">
-
-<img src="docs/assets/readme/damar-hero-v3.svg" width="100%" alt="DAMAR — premium charcoal and gold identity, governed AI runtime" />
-
-### ONE IDENTITY · MANY SURFACES · AUTHORITY BEFORE ACTION
-
-**Local-first AI assistant infrastructure · Governed execution · Durable continuity**
-
-<a href="https://wisestechnology.com/"><img src="docs/assets/readme/damar-chat-wises-v3.svg" width="430" alt="Explore and chat with DAMAR via Wises Technology website" /></a>
-
-[Explore the architecture](#architecture) &nbsp;·&nbsp; [Quick start](#quick-start) &nbsp;·&nbsp; [System surfaces](#system-surfaces) &nbsp;·&nbsp; [Standalone repositories](#standalone-repositories) &nbsp;·&nbsp; [Project status](#project-status)
-
+  <img src="docs/assets/readme/damar-official-logo.png" alt="Official DAMAR logo" width="96" />
+  <h1>DAMAR</h1>
+  <p><strong>Damar - Super AI Agent</strong></p>
+  <p>A personal AI system built for continuity, coordination, and accountable action.</p>
+  <p>
+    <a href="https://wisestechnology.com/">Visit Wises Technology</a>
+    &nbsp;&nbsp;&nbsp;
+    <a href="#getting-started">Get started</a>
+    &nbsp;&nbsp;&nbsp;
+    <a href="#architecture">Architecture</a>
+  </p>
 </div>
 
-> [!IMPORTANT]
-> **Active engineering project — not a certified production release.** This repository documents a growing implementation and its research objectives. Diagrams and concept art are not evidence of a working deployment, live telemetry, or AI consciousness.
+## About DAMAR
 
-## Meet DAMAR
+DAMAR is a local-first AI assistant project that brings models, memory, tools, and user interfaces into one governed runtime. It is designed to retain context across sessions and coordinate work without treating a model's suggestion as permission to act.
 
-**DAMAR** is an extensible, local-first AI assistant runtime built around one persistent identity and a strict separation between *reasoning* and *permission to act*.
+The goal is a capable personal assistant that can grow through experience while remaining inspectable and under its owner's control.
 
-Models may reason, create plans, and propose tool calls. Consequential actions must be evaluated by the runtime's authority controls, and their effects must be independently verified. Continuity and memory support long-running interactions; they do not replace authorization or ground truth.
+DAMAR is under active development. The presence of source code or a design document does not mean a feature is deployed, independently certified, or ready for production.
 
-| **THINK** | **REMEMBER** | **ACT — WITH AUTHORITY** |
+## Explore the system
+
+| Component | Role | Explore |
 | :--- | :--- | :--- |
-| Model routing, context, planning, and action intent | Durable memory, self-models, recovery, and experience | Explicit permission checks, governed execution, and effect verification |
-| *Proposal is not permission.* | *Continuity is not infallibility.* | *An execution claim is not proof.* |
+| DAMAR Core | Runtime, model routing, capabilities, memory, and CLI | [Source](src/) and [CLI guide](docs/cli.md) |
+| Control Center | Desktop and web interaction surfaces | [Console source](apps/) and [console guide](docs/console.md) |
+| Pandawa | Coordination of agents and distributed work | [Mesh runtime](src/mesh/) |
+| Mata Dewa | Geospatial context, monitoring research, and environmental risk analysis | [Source](src/mataDewa/) and [capability map](docs/architecture/MATA-DEWA-CAPABILITY-MAP.md) |
+| DamarSelf | Identity, continuity, self-model, and experience templates | [DamarSelf](DamarSelf/) |
+| Voice and devices | Interaction channels and device integration research | [Voice runtime](docs/VOICE-RUNTIME.md) and [companion devices](docs/COMPANION-DEVICES.md) |
 
-## The visual direction
-
-<img src="docs/assets/readme/damar-interface-concept-v3.svg" width="100%" alt="Original DAMAR Control Center concept with a schematic Mata Dewa map, Pandawa orchestration graph and governance panels; illustrative, not live" />
-
-<sub>**Interface concept** — original illustrative artwork using synthetic schematics. This is not a screenshot, actual geospatial monitoring, or real-time performance data.</sub>
-
-The DAMAR experience is envisioned as a coherent control surface for conversation, model routing, devices, memory, and governed operations—not a collection of disconnected AI agents.
-
-## System surfaces
-
-| System | Scope | Source / design reference |
-| :--- | :--- | :--- |
-| **DAMAR Core &amp; CLI** | Local runtime, orchestration, providers, and command interfaces | [`src/`](src/) · [`scripts/`](scripts/) · [`docs/cli.md`](docs/cli.md) |
-| **Control Center** | Console, status, capabilities, and interaction surfaces | [`apps/`](apps/) · [`docs/console.md`](docs/console.md) |
-| **Pandawa** | Multi-agent/distributed coordination under governed runtime contracts | [`src/mesh/`](src/mesh/) · [`docs/architecture/`](docs/architecture/) |
-| **Mata Dewa** | Geospatial awareness, asset context, and risk research | [`src/mataDewa/`](src/mataDewa/) · [capability map](docs/architecture/MATA-DEWA-CAPABILITY-MAP.md) |
-| **DamarSelf &amp; memory** | Identity, continuity, experience, and non-private templates | [`DamarSelf/`](DamarSelf/) · [`src/memory/`](src/memory/) |
-| **Voice &amp; devices** | Optional interface channels, device adapters, and future hardware surfaces | [`docs/VOICE-RUNTIME.md`](docs/VOICE-RUNTIME.md) · [`docs/COMPANION-DEVICES.md`](docs/COMPANION-DEVICES.md) |
-
-*Source presence is not proof of live integration, physical-device readiness, or permission to deploy.*
+These are engineering areas, not a list of certified live services. Some paths require separate setup, approval, or hardware qualification.
 
 ## Architecture
 
-<img src="docs/assets/readme/damar-flow-v3.svg" width="100%" alt="DAMAR path from observation and proposal to owner-bound authority decision, governed action and effect verification, with a denial branch" />
+DAMAR separates the ability to reason from the authority to perform an action. Requests pass through the runtime's permission checks. Effects must be verified independently of the model's response.
 
-**The central rule: models never become authority.** Tool availability is not permission. A model's success message is not a verified effect. Denied requests must stop at the gate.
+<div align="center">
+  <img src="docs/assets/readme/damar-flow-v3.svg" alt="DAMAR execution flow from observation to governed action and verification" width="100%" />
+</div>
 
-Read the [Authority Gate contract](docs/architecture/ACTION-INTENT-AUTHORITY-GATE-V1.md), [Actuation Fabric](docs/architecture/ACTION-ACTUATION-FABRIC-V1.md), and [verification and compensation design](docs/architecture/ACTION-VERIFICATION-COMPENSATION-V1.md).
+The design follows three rules.
 
-## Explore DAMAR via Wises Technology
+1. A model can propose an action but cannot grant itself permission.
+2. A tool reporting success is not proof that the intended effect occurred.
+3. Decisions, execution, and recovery must remain auditable.
 
-**[wisestechnology.com](https://wisestechnology.com/)** is the intended **public website entry point** for exploring or chatting with DAMAR. GitHub remains the source-code and technical documentation home; the site serves the visitor-facing experience.
+Read the [Authority Gate contract](docs/architecture/ACTION-INTENT-AUTHORITY-GATE-V1.md), [Actuation Fabric](docs/architecture/ACTION-ACTUATION-FABRIC-V1.md), and [Verification and Compensation contract](docs/architecture/ACTION-VERIFICATION-COMPENSATION-V1.md).
 
-**Project boundary:** **DAMAR and Wises are distinct projects.** This website link is navigation, not a claim that Wises code is included in this repository, or that DAMAR's backend and public chat service have been production-certified together. Availability and permissions depend on the website's actual deployment.
+## Getting started
 
-## Quick start
-
-The GitHub workflow targets Node.js **22 / 24**. Development may also require native build tools and platform-specific dependencies; consult the individual integration documentation.
+The repository CI targets Node.js 22 and 24. Native dependencies and some platform-specific functions may require additional tools, especially on Windows.
 
 ```bash
 git clone https://github.com/jrxid09-design/Damar.git
@@ -72,54 +60,49 @@ npm ci
 npm run cli
 ```
 
-Other available scripts:
+Other available commands are defined in `package.json`.
 
 ```bash
-npm start       # local runtime host
-npm run damar   # console launcher
-npm test        # regression suite (includes platform-specific tests)
+npm start
+npm run damar
+npm test
 ```
 
-Use [`.env.example`](.env.example) to create your local configuration. **Protect `DAMAR_TOKEN` and API keys**, especially when binding the service to a network interface. Do not commit real credentials, private infrastructure data, user memory, or runtime state.
+Before starting the host, review [`.env.example`](.env.example) and configure your local environment. Never publish API keys, session files, personal memory, or private infrastructure data. Set an appropriate `DAMAR_TOKEN` before exposing the runtime on a network.
 
-> [!NOTE]
-> A working dependency installation is not authority to perform external actions. CI's dependency policy gate checks an approved lockfile digest before `npm ci`; the overall test suite and branch protection are separate acceptance concerns. See [GitHub Actions](https://github.com/jrxid09-design/Damar/actions).
+The dependency policy gate runs before dependency installation in GitHub Actions. This does not replace review of the full test results, branch protection, or separate deployment approval.
 
-## Standalone repositories
+## DAMAR and Wises Technology
 
-| Component | Authoritative source | Relationship to DAMAR |
+[wisestechnology.com](https://wisestechnology.com/) is the planned public entry point for exploring DAMAR and its visitor-facing experience.
+
+DAMAR and Wises Technology remain separate projects. This link does not establish that a public chatbot, shared backend, or production integration is currently available. GitHub is the source and development home for DAMAR.
+
+## Standalone projects
+
+| Project | Repository | Scope |
 | :--- | :--- | :--- |
-| **DAMAR Cognitive Runtime V3** | [medlest/damar-cognitive-runtime](https://github.com/medlest/damar-cognitive-runtime) | Standalone Python runtime and consciousness-oriented *research*; canonical host integration is a separately controlled effort. Repository access may require collaborator permission. |
-| **DAMAR HID / DMR-01** | **Official firmware repository not yet confirmed** | Hardware/firmware is treated as a separate development and qualification track. No unverified upstream URL or production-ready claim. |
+| DAMAR Cognitive Runtime V3 | [medlest/damar-cognitive-runtime](https://github.com/medlest/damar-cognitive-runtime) | Separate Python runtime and cognitive research. Access may require collaborator permission. Main runtime integration has its own acceptance process. |
+| DAMAR HID / DMR-01 | Official repository link pending confirmation | Separate firmware and hardware development. No physical readiness or production release is claimed. |
 
-Research into consciousness-like functional properties is an engineering objective, **not evidence that DAMAR has subjective awareness**.
+Research into self-models and consciousness-like functional properties is an ongoing objective. It is not a verified claim of subjective AI consciousness.
 
-## Project map
+## Repository guide
 
-```text
-DAMAR/
-├── src/                 Runtime, security, manager, memory, integrations
-├── apps/                Console and UI surfaces
-├── scripts/             CLI and supported tooling
-├── tests/               Regression and security tests
-├── DamarSelf/           Non-private identity and continuity templates
-├── docs/architecture/   Contracts and technical architecture
-├── .github/             CI / D-LOCK policy infrastructure
-└── package.json         Runtime commands and dependencies
-```
+| Location | Contents |
+| :--- | :--- |
+| [`src/`](src/) | Core runtime and integrations |
+| [`apps/`](apps/) | Console and user interfaces |
+| [`scripts/`](scripts/) | Runtime commands and supporting tools |
+| [`tests/`](tests/) | Automated tests and security regression cases |
+| [`docs/architecture/`](docs/architecture/) | System designs and retained technical contracts |
+| [`DamarSelf/`](DamarSelf/) | Public identity and continuity templates |
+| [`.github/`](.github/) | CI workflows and dependency policy controls |
 
 ## Project status
 
-| Area | State |
-| :--- | :--- |
-| Open-source code and local development | **Available** in this repository |
-| Public visual identity and interface graphics | **Illustrative design**, not a live UI capture |
-| Core integration and authority qualification | **Under active engineering / scope-dependent** |
-| Cognitive Runtime V3 &amp; HID | **Standalone workstreams**, not automatically deployed with DAMAR |
-| Public production/release readiness | **Not certified** |
-
-For the most current outcomes, inspect the actual implementation, [test suite](tests/), and [Actions runs](https://github.com/jrxid09-design/Damar/actions) rather than treating a README or a badge as certification.
+DAMAR is an active engineering project. Its public source and documentation can be explored, but full production readiness has not been certified. Some tests depend on Windows-specific runtime facilities and may not pass on Linux CI runners. Check the [latest GitHub Actions runs](https://github.com/jrxid09-design/Damar/actions) before relying on a build.
 
 ## License
 
-See [LICENSE](LICENSE). Third-party dependencies and standalone components may have their own licenses. Nothing in this repository grants permission to access external systems or operate physical devices.
+See [LICENSE](LICENSE). External dependencies and standalone components may use different licenses. Repository access does not grant permission to operate external systems or physical devices.
