@@ -27,6 +27,16 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
+    # Candidate wiring only. The value MUST come from independently protected
+    # owner approval. External required-check enforcement remains mandatory.
+    - name: Approved dependency lock and policy gate (fail-closed, pre-install)
+      env:
+        DLOCK_APPROVED_LOCK_SHA256: ${{ vars.DLOCK_APPROVED_LOCK_SHA256 }}
+        CI: 'true'
+      run: |
+        test -n "$DLOCK_APPROVED_LOCK_SHA256" || { echo "POLICY_VIOLATION: no owner-approved lock anchor"; exit 1; }
+        LOCK_SHA256="$(sha256sum package-lock.json | cut -d' ' -f1)"
+        node scripts/check-dep-policy.js package-lock.json --policy scripts/dependency-policy.json --package-json package.json --lock-sha256 "$LOCK_SHA256" --approved-lock-sha256 "$DLOCK_APPROVED_LOCK_SHA256"
     - run: npm ci
     - run: npm run build --if-present
     - run: npm test

@@ -1,0 +1,8 @@
+# Protected D-LOCK and CI trust boundary: require repository owner review.
+/.github/CODEOWNERS @jrxid09-design
+/.github/workflows/* @jrxid09-design
+/scripts/check-dep-policy.js @jrxid09-design
+/scripts/dependency-policy.json @jrxid09-design
+/scripts/dlock-verify-pr.py @jrxid09-design
+/package-lock.json @jrxid09-design
+/package.json @jrxid09-design

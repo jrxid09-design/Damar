@@ -1,0 +1,29 @@
+# Trusted base-branch check: NEVER checkout or execute pull-request head code.
+# This check is not trustworthy until develop is protected, owner review is
+# required for .github/workflows/ and scripts/, and the check is required with
+# the GitHub Actions app as its expected source.
+name: dlock-policy-gate
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  integrity:
+    name: integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted base only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: Validate approved lockfile from PR as data, never code
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DLOCK_APPROVED_LOCK_SHA256: ${{ vars.DLOCK_APPROVED_LOCK_SHA256 }}
+        run: python3 scripts/dlock-verify-pr.py

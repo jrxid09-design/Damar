@@ -1,0 +1,5 @@
+{
+  "allowedGitDeps": [
+    "git+https://github.com/whiskeysockets/libsignal-node.git#bcea72df9ec34d9d9140ab30619cf479c7c144c7"
+  ]
+}
