@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="590" viewBox="0 0 1440 590" role="img" aria-labelledby="ht hd">
+<title id="ht">DAMAR — The governed AI assistant runtime</title>
+<desc id="hd">Dark charcoal and warm gold premium DAMAR identity with a luminous abstract orbital emblem, architectural grid and the words Think, Remember, Govern, Verify.</desc>
+<defs>
+ <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#090c13"/><stop offset=".6" stop-color="#10131b"/><stop offset="1" stop-color="#080a0f"/></linearGradient>
+ <radialGradient id="halo"><stop stop-color="#c89b53" stop-opacity=".30"/><stop offset=".42" stop-color="#9b6432" stop-opacity=".11"/><stop offset="1" stop-color="#b37d35" stop-opacity="0"/></radialGradient>
+ <radialGradient id="core" cx=".35" cy=".30" r=".78"><stop stop-color="#fff2b9"/><stop offset=".19" stop-color="#f5d589"/><stop offset=".46" stop-color="#c6883c"/><stop offset=".78" stop-color="#654026"/><stop offset="1" stop-color="#151a25"/></radialGradient>
+ <linearGradient id="gold" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#a4763c"/><stop offset=".52" stop-color="#f4dca1"/><stop offset="1" stop-color="#9d7238"/></linearGradient>
+ <linearGradient id="trace" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#d1a25c" stop-opacity="0"/><stop offset=".6" stop-color="#d1a25c" stop-opacity=".4"/><stop offset="1" stop-color="#d1a25c" stop-opacity="0"/></linearGradient>
+ <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M 48 0 L 0 0 0 48" fill="none" stroke="#8e856f" stroke-opacity=".09" stroke-width="1"/></pattern>
+ <filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="8"/></filter>
+</defs>
+<rect x="1" y="1" width="1438" height="588" rx="14" fill="url(#bg)" stroke="#423626" stroke-width="2"/>
+<rect x="1" y="1" width="1438" height="588" rx="14" fill="url(#grid)"/>
+<path d="M1 6 H1439" stroke="url(#gold)" stroke-width="4"/>
+<path d="M76 93 H1364" stroke="#8a7659" stroke-opacity=".3"/>
+<text x="76" y="64" font-family="Segoe UI,Arial,sans-serif" font-size="15" letter-spacing="4" fill="#deb976">DAMAR / SYSTEM IDENTITY</text>
+<text x="1364" y="64" text-anchor="end" font-family="Segoe UI,Arial,sans-serif" font-size="14" letter-spacing="2.5" fill="#8e907f">LOCAL-FIRST  /  GOVERNED</text>
+<path d="M76 144 H156" stroke="#c6a46a" stroke-width="3"/>
+<text x="74" y="300" font-family="Georgia,Times New Roman,serif" font-size="126" letter-spacing="19" font-weight="bold" fill="#f1eadb">DAMAR</text>
+<text x="80" y="354" font-family="Segoe UI,Arial,sans-serif" font-size="26" letter-spacing="6" fill="url(#gold)">THE GOVERNED AI RUNTIME</text>
+<text x="80" y="405" font-family="Segoe UI,Arial,sans-serif" font-size="20" fill="#b9b6ad">A single identity across memory, models, tools</text>
+<text x="80" y="437" font-family="Segoe UI,Arial,sans-serif" font-size="20" fill="#b9b6ad">and interfaces. Authority always comes first.</text>
+<path d="M80 470 H610" stroke="#66543a" stroke-opacity=".55"/>
+<rect x="79" y="493" width="191" height="39" rx="19" fill="#191d22" stroke="#6f5a38"/>
+<circle cx="104" cy="512" r="5" fill="#dcb16a"/>
+<text x="119" y="518" font-family="Segoe UI,Arial,sans-serif" font-size="14" letter-spacing="1.7" fill="#ead5aa">THINK</text>
+<rect x="283" y="493" width="191" height="39" rx="19" fill="#191d22" stroke="#46433a"/>
+<circle cx="309" cy="512" r="5" fill="#dcb16a"/>
+<text x="324" y="518" font-family="Segoe UI,Arial,sans-serif" font-size="14" letter-spacing="1.7" fill="#ead5aa">REMEMBER</text>
+<rect x="487" y="493" width="191" height="39" rx="19" fill="#191d22" stroke="#46433a"/>
+<circle cx="514" cy="512" r="5" fill="#dcb16a"/>
+<text x="529" y="518" font-family="Segoe UI,Arial,sans-serif" font-size="14" letter-spacing="1.7" fill="#ead5aa">GOVERN</text>
+<g transform="translate(1060 300)">
+ <circle r="282" fill="url(#halo)"/>
+ <circle r="218" fill="none" stroke="#a68954" stroke-opacity=".13" stroke-width="2"/>
+ <circle r="191" fill="none" stroke="#d4a867" stroke-opacity=".25" stroke-width="1.5" stroke-dasharray="4 18"/>
+ <circle r="165" fill="none" stroke="#d7ac66" stroke-opacity=".65" stroke-width="1.8" stroke-dasharray="166 41 55 160" transform="rotate(-32)"/>
+ <circle r="137" fill="none" stroke="#ecbb79" stroke-opacity=".35" stroke-width="2"/>
+ <ellipse rx="195" ry="82" fill="none" stroke="#d4a460" stroke-opacity=".62" stroke-width="2.6" transform="rotate(-32)"/>
+ <ellipse rx="195" ry="82" fill="none" stroke="#d4a460" stroke-opacity=".32" stroke-width="1.2" transform="rotate(51)"/>
+ <ellipse rx="89" ry="153" fill="none" stroke="#ffd59c" stroke-opacity=".29" stroke-width="1.5" transform="rotate(37)"/>
+ <circle r="101" fill="#e1a354" opacity=".15" filter="url(#glow)"/>
+ <circle r="94" fill="url(#core)" stroke="#e5c080" stroke-opacity=".75" stroke-width="1.5"/>
+ <path d="M-54 -54 C-18 -88, 45 -66, 60 -17" fill="none" stroke="#fff2c4" stroke-opacity=".65" stroke-width="6" stroke-linecap="round" filter="url(#glow)"/>
+ <path d="M-57 -47 C-18 -82, 45 -64, 66 -15" fill="none" stroke="#fff1bf" stroke-opacity=".7" stroke-width="2.3" stroke-linecap="round"/>
+ <circle cx="-142" cy="-99" r="6" fill="#f7d99e"/>
+ <circle cx="153" cy="-111" r="4.5" fill="#e9bd76"/>
+ <circle cx="163" cy="115" r="6" fill="#ecc079"/>
+ <circle cx="-175" cy="105" r="3.5" fill="#e9bd76"/>
+ <path d="M-236 -170 H-193 M195 170 H236" stroke="#9f885d" stroke-opacity=".6" stroke-width="1.5"/>
+</g>
+<text x="1362" y="549" text-anchor="end" font-family="Segoe UI,Arial,sans-serif" font-size="14" letter-spacing="2.1" fill="#a59b86">MODEL OUTPUT IS NOT AUTHORITY</text>
+<path d="M76 560 H1364" stroke="#8a7659" stroke-opacity=".27"/>
+</svg>

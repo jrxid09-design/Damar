@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="516" height="106" viewBox="0 0 516 106" role="img" aria-labelledby="ct cd">
+<title id="ct">Open DAMAR through Wises Technology</title><desc id="cd">Gold call-to-action panel linking to Wises Technology website.</desc>
+<defs><linearGradient id="ctag" x2="1"><stop stop-color="#6a4924"/><stop offset=".55" stop-color="#c9a56a"/><stop offset="1" stop-color="#70502c"/></linearGradient></defs>
+<rect x="2" y="2" width="512" height="102" rx="13" fill="#18191f" stroke="#d1b17a" stroke-width="3"/>
+<rect x="12" y="12" width="492" height="82" rx="9" fill="url(#ctag)" opacity=".16"/>
+<path d="M35 53 h23 m-8 -8 l8 8 -8 8" fill="none" stroke="#f0d59b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="80" y="48" font-family="Segoe UI,Arial,sans-serif" font-weight="bold" font-size="21" letter-spacing="2" fill="#f5dfb4">EXPLORE / CHAT WITH DAMAR</text>
+<text x="80" y="75" font-family="Segoe UI,Arial,sans-serif" font-size="15" letter-spacing="1" fill="#c3b8a6">VIA WISESTECHNOLOGY.COM</text>
+<text x="482" y="63" text-anchor="end" font-family="Segoe UI,Arial,sans-serif" font-size="28" fill="#f2d39c">↗</text>
+</svg>
