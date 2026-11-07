@@ -1,0 +1,5 @@
+{
+  "token": "GANTI_DENGAN_TOKEN_BOT_DARI_@BotFather",
+  "allowed": ["ISI_CHAT_ID_ANDA"],
+  "groups": ["ISI_GROUP_ID_JIKA_ADA"]
+}

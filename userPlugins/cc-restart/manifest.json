@@ -1,0 +1,34 @@
+{
+    "id": "cc-restart",
+    "name": "Command Center Restart",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-18T01:24:32.780Z",
+        "spec": {
+            "toolName": "ccRestart",
+            "description": "",
+            "parameters": {
+                "port": {
+                    "description": "Port server (default 8650)",
+                    "type": "number",
+                    "required": false
+                },
+                "script": {
+                    "description": "Path server.js",
+                    "type": "string",
+                    "required": false
+                }
+            },
+            "code": "const { exec, spawn } = require('child_process');\nconst port = args.port || 8650;\nconst script = args.script || 'C:/AetherGenesis/CommandCenter/server.js';\nconst run = (cmd) => new Promise((r) => exec(cmd, { timeout: 15000, windowsHide: true }, (e, so, se) => r({ ok: !e, out: ((so||'') + (se||'')).toString() })));\nconst k = await run('powershell -NoProfile -Command \"Get-NetTCPConnection -LocalPort ' + port + ' -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force }\"');\nawait new Promise((r) => setTimeout(r, 900));\nconst child = spawn('node', [script], { detached: true, stdio: 'ignore', windowsHide: true });\nchild.unref();\nawait new Promise((r) => setTimeout(r, 2500));\nlet resp = null;\nfor (let i = 0; i < 5; i++) {\n  const chk = await run('powershell -NoProfile -Command \"(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:' + port + '/api/health).Content\"');\n  if (chk.ok && chk.out.includes('ok')) { resp = chk.out.trim().slice(0, 300); break; }\n  await new Promise((r) => setTimeout(r, 1200));\n}\nreturn { restarted: true, port: port, pid: child.pid, health: resp || 'TIDAK MERESPON SETELAH 5 PERCOBAAN', killOut: k.out.slice(0, 200) };"
+        }
+    }
+}

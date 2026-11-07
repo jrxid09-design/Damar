@@ -1,0 +1,23 @@
+{
+  "nodeRegistry": {
+    "bound": 256,
+    "live": 2
+  },
+  "trustTable": {
+    "bound": 256,
+    "live": 1
+  },
+  "replayLedger": {
+    "bound": 8192,
+    "live": 5000
+  },
+  "meshQueues": {
+    "bound": 1024,
+    "live": 1024
+  },
+  "presence": {
+    "bound": 256,
+    "live": 2
+  },
+  "conclusion": "all Wave 6 collections bounded under adversarial load; no 'GC later' dependencies"
+}

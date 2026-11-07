@@ -1,0 +1,23 @@
+{
+    "id": "patch-dashboard-live",
+    "name": "Dashboard Live Stream",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Menambahkan polling /api/colony/stream ke panel chat colony dashboard agar menampilkan percakapan otonom secara live.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-20T18:28:05.693Z",
+        "spec": {
+            "toolName": "patchDashboardLive",
+            "description": "Menambahkan polling /api/colony/stream ke panel chat colony dashboard agar menampilkan percakapan otonom secara live.",
+            "parameters": {},
+            "code": "const fs = require('fs');\nconst p = 'C:/AetherGenesis/CommandCenter/index.html';\nlet src = fs.readFileSync(p, 'utf8');\n\n// 1) Tambah seenIds setelah deklarasi var\nconst decMark = 'var fab=document.getElementById(\\'colony-fab\\'),panel=document.getElementById(\\'colony-panel\\'),';\nif (!src.includes('var seenIds')) {\n  src = src.replace(decMark, 'var seenIds = {};\\n          ' + decMark);\n}\n\n// 2) Modifikasi transcript forEach agar menandai seenIds\nconst tMark = '(j.transcript||[]).forEach(function(x){add(x.from,x.text,false)});';\nconst tRep = '(j.transcript||[]).forEach(function(x){var k=x.from+\\'|\\'+x.text;if(!seenIds[k]){seenIds[k]=true;add(x.from,x.text,false);}});';\nif (src.includes(tMark)) {\n  src = src.replace(tMark, tRep);\n}\n\n// 3) Sisipkan polling stream sebelum akhir IIFE\nconst pollMark = 'inp.addEventListener(\\'input\\',function(){inp.style.height=\\'auto\\';inp.style.height=Math.min(120,Math.max(46,inp.scrollHeight))+\\'px\\';});';\nconst pollBlock = pollMark + '\\n          function pollStream(){fetch(\\'/api/colony/stream\\').then(function(r){return r.json()}).then(function(j){(j.log||[]).forEach(function(x){var k=x.from+\\'|\\'+x.text;if(!seenIds[k]){seenIds[k]=true;add(x.from,x.text,false);}});}).catch(function(){});}\\n          setInterval(pollStream,6000);\\n          pollStream();';\nif (src.includes(pollMark) && !src.includes('pollStream')) {\n  src = src.replace(pollMark, pollBlock);\n}\n\nfs.writeFileSync(p, src);\nreturn { ok: true, bytes: src.length, hasSeen: src.includes('var seenIds'), hasPoll: src.includes('pollStream') };"
+        }
+    }
+}

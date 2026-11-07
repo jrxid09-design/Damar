@@ -1,0 +1,33 @@
+{
+    "id": "scan_cctv_network",
+    "name": "CCTV Network Scanner",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Scans a given IP network range for open ports commonly used by CCTV cameras (RTSP/ONVIF: 554, 80, 8080, 1935). Returns list of live IPs and open ports.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-01T08:38:03.859Z",
+        "spec": {
+            "toolName": "scanCctvNetwork",
+            "description": "Scans a given IP network range for open ports commonly used by CCTV cameras (RTSP/ONVIF: 554, 80, 8080, 1935). Returns list of live IPs and open ports.",
+            "parameters": {
+                "network": {
+                    "type": "string",
+                    "description": "IP network range to scan (e.g., 192.168.1.0/24)"
+                },
+                "ports": {
+                    "type": "string",
+                    "description": "Comma-separated list of ports to scan (default: 554,80,8080,1935)",
+                    "default": "554,80,8080,1935"
+                }
+            },
+            "code": "const { exec } = require('child_process');\nreturn (args) => {\n  const { network, ports } = args;\n  const cmd = `nmap -p ${ports} ${network}`;\n  return exec(cmd, (error, stdout) => {\n    if (error) return { error: error.message };\n    return { stdout: stdout.trim() };\n  });\n};"
+        }
+    }
+}

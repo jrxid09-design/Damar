@@ -1,0 +1,14 @@
+{
+  "stt": {
+    "url": "http://127.0.0.1:8000/v1/audio/transcriptions",
+    "model": "Systran/faster-whisper-base",
+    "voice": null,
+    "key": null
+  },
+  "tts": {
+    "url": "http://127.0.0.1:8880/v1/audio/speech",
+    "model": "edge-tts",
+    "voice": "id-ID-ArdiNeural",
+    "key": null
+  }
+}

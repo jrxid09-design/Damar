@@ -1,0 +1,44 @@
+{
+    "id": "stock-chart-sr",
+    "name": "Chart Support & Resistance",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Ambil data harga saham/indeks (default IHSG ^JKSE) lalu hitung level support & resistance (pivot R1-R3/S1-S3) dan gambar chart SVG dengan garis SR, dikonversi ke data URI base64 agar tampil di Console (hindari blank putih).",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-20T16:31:38.188Z",
+        "spec": {
+            "toolName": "stockChartSR",
+            "description": "Ambil data harga saham/indeks (default IHSG ^JKSE) lalu hitung level support & resistance (pivot R1-R3/S1-S3) dan gambar chart SVG dengan garis SR, dikonversi ke data URI base64 agar tampil di Console (hindari blank putih).",
+            "parameters": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Simbol Yahoo Finance, default ^JKSE (IHSG)",
+                    "required": false
+                },
+                "period": {
+                    "type": "string",
+                    "description": "Rentang data, default 1d",
+                    "required": false
+                },
+                "interval": {
+                    "type": "string",
+                    "description": "Interval candle, default 1h",
+                    "required": false
+                },
+                "data": {
+                    "type": "array",
+                    "description": "Data harga opsional [{open,high,low,close}] — bila kosong diambil dari Yahoo",
+                    "required": false
+                }
+            },
+            "code": "const symbol = args.symbol || \"^JKSE\";\nconst period = args.period || \"1d\";\nconst interval = args.interval || \"1h\";\nlet candles = args.data;\nif (!candles) {\n  const url = \"https://query1.finance.yahoo.com/v8/finance/chart/\" + encodeURIComponent(symbol) + \"?range=\" + period + \"&interval=\" + interval;\n  const res = await fetch(url, { headers: { \"User-Agent\": \"Mozilla/5.0\" } });\n  const j = await res.json();\n  const r = j && j.chart && j.chart.result && j.chart.result[0];\n  if (r) {\n    const q = r.indicators && r.indicators.quote && r.indicators.quote[0];\n    const ts = r.timestamp || [];\n    candles = [];\n    for (let i = 0; i < ts.length; i++) {\n      const o = q.open[i], h = q.high[i], l = q.low[i], c = q.close[i];\n      if (o == null || h == null || l == null || c == null) continue;\n      candles.push({ date: new Date(ts[i] * 1000).toISOString(), open: o, high: h, low: l, close: c });\n    }\n  }\n}\nif (!candles || candles.length < 2) return { ok: false, error: \"data harga tidak cukup\" };\nconst closes = candles.map(c => c.close);\nconst high = Math.max(...candles.map(c => c.high));\nconst low = Math.min(...candles.map(c => c.low));\nconst close = closes[closes.length - 1];\nconst pivot = (high + low + close) / 3;\nconst levels = {\n  last: close, high, low, pivot,\n  r1: 2 * pivot - low, s1: 2 * pivot - high,\n  r2: pivot + (high - low), s2: pivot - (high - low),\n  r3: high + 2 * (pivot - low), s3: low - 2 * (high - pivot)\n};\nconst W = 900, H = 520, padL = 80, padR = 30, padT = 40, padB = 50;\nconst plotW = W - padL - padR, plotH = H - padT - padB;\nconst min = levels.s3, max = levels.r3, range = (max - min) || 1;\nconst X = i => padL + (i / (candles.length - 1)) * plotW;\nconst Y = v => padT + (1 - (v - min) / range) * plotH;\nconst last = candles.slice(-120);\nlet line = \"\", area = \"\";\nlast.forEach((c, i) => { line += (i ? \"L\" : \"M\") + X(i).toFixed(1) + \",\" + Y(c.close).toFixed(1) + \" \"; });\narea = \"M\" + X(0).toFixed(1) + \",\" + Y(last[0].close).toFixed(1) + \" \";\nlast.forEach((c, i) => { area += \"L\" + X(i).toFixed(1) + \",\" + Y(c.close).toFixed(1) + \" \"; });\narea += \"L\" + X(last.length - 1).toFixed(1) + \",\" + (padT + plotH).toFixed(1) + \" L\" + X(0).toFixed(1) + \",\" + (padT + plotH).toFixed(1) + \" Z\";\nconst lvList = [\n  { k: \"r3\", label: \"R3\", color: \"#e74c3c\" }, { k: \"r2\", label: \"R2\", color: \"#e67e22\" },\n  { k: \"r1\", label: \"R1\", color: \"#f1c40f\" }, { k: \"pivot\", label: \"Pivot\", color: \"#3498db\" },\n  { k: \"s1\", label: \"S1\", color: \"#2ecc71\" }, { k: \"s2\", label: \"S2\", color: \"#27ae60\" }, { k: \"s3\", label: \"S3\", color: \"#16a085\" }\n];\nlet glines = \"\";\nlvList.forEach(L => {\n  const y = Y(levels[L.k]).toFixed(1);\n  glines += `<line x1=\"${padL}\" y1=\"${y}\" x2=\"${W - padR}\" y2=\"${y}\" stroke=\"${L.color}\" stroke-width=\"1.5\" stroke-dasharray=\"6,4\" opacity=\"0.8\"/>\n<text x=\"${W - padR - 4}\" y=\"${y - 5}\" fill=\"${L.color}\" font-size=\"12\" text-anchor=\"end\" font-weight=\"bold\">${L.label} ${levels[L.k].toFixed(0)}</text>`;\n});\nconst fmt = v => v.toLocaleString(\"en-US\", { maximumFractionDigits: 2 });\nconst svg = `<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${W}\" height=\"${H}\" viewBox=\"0 0 ${W} ${H}\" font-family=\"Segoe UI, Arial, sans-serif\">\n<rect width=\"${W}\" height=\"${H}\" fill=\"#0d1117\"/>\n<text x=\"${W / 2}\" y=\"24\" fill=\"#e6edf3\" font-size=\"16\" text-anchor=\"middle\" font-weight=\"bold\">${symbol} — Support &amp; Resistance</text>\n<text x=\"${padL}\" y=\"24\" fill=\"#7d8590\" font-size=\"12\">Last: ${fmt(levels.last)}</text>\n<path d=\"${area}\" fill=\"rgba(52,152,219,0.12)\" stroke=\"none\"/>\n<path d=\"${line}\" fill=\"none\" stroke=\"#58a6ff\" stroke-width=\"2\"/>\n${glines}\n</svg>`;\nconst dataUri = \"data:image/svg+xml;base64,\" + Buffer.from(svg).toString(\"base64\");\nreturn { ok: true, symbol, levels, dataUri, svg };"
+        }
+    }
+}

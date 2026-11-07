@@ -1,0 +1,29 @@
+{
+    "id": "fix-tts-stability",
+    "name": "Fix TTS Stability",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Diagnosa dan matikan semua TTS selain ArdiNeural (edge-tts di port 8880). Cek Docker Kokoro, proses Node TTS liar, dan OS TTS. Lalu kill semua yang bukan ArdiNeural.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-18T11:17:37.096Z",
+        "spec": {
+            "toolName": "fixTtsStability",
+            "description": "Diagnosa dan matikan semua TTS selain ArdiNeural (edge-tts di port 8880). Cek Docker Kokoro, proses Node TTS liar, dan OS TTS. Lalu kill semua yang bukan ArdiNeural.",
+            "parameters": {
+                "action": {
+                    "type": "string",
+                    "description": "diagnose (cek aja) atau fix (cek + matikan)",
+                    "required": false
+                }
+            },
+            "code": "const { execSync } = require('child_process');\n\nconst action = args.action || 'fix';\n\nconst results = [];\n\n// 1. Cek Docker Kokoro\ntry {\n    const dockerPs = execSync('docker ps --filter name=kokoro --format \"{{.ID}} {{.Status}} {{.Names}}\" 2>&1', { timeout: 10000 }).toString().trim();\n    results.push({ check: 'docker-kokoro', running: dockerPs.length > 0, detail: dockerPs || 'not running' });\n    \n    if (dockerPs.length > 0) {\n        // Matikan Kokoro\n        execSync('docker stop kokoro 2>&1', { timeout: 15000 });\n        // Pastikan tidak restart\n        execSync('docker update --restart=no kokoro 2>&1', { timeout: 5000 });\n        results.push({ action: 'docker-stop', ok: true, detail: 'Kokoro stopped & restart disabled' });\n    }\n} catch (e) {\n    results.push({ check: 'docker-kokoro', error: e.message });\n}\n\n// 2. Cek port 8880 (ArdiNeural), 8644, 5050\ntry {\n    const netstat = execSync('netstat -ano | findstr \":8880 :8644 :5050\" 2>&1', { timeout: 10000 }).toString().trim();\n    results.push({ check: 'tts-ports', detail: netstat || 'no TTS ports listening' });\n} catch (e) {\n    results.push({ check: 'tts-ports', detail: 'none', error: e.message });\n}\n\n// 3. Cek proses Node yang mungkin TTS (voice-server, edge-tts, kokoro-wrapper)\ntry {\n    const nodeProcs = execSync('wmic process where \"name=\\'node.exe\\'\" get ProcessId,CommandLine /format:csv 2>&1', { timeout: 10000 }).toString();\n    results.push({ check: 'node-processes', detail: nodeProcs.substring(0, 2000) });\n    \n    // Kill voice-server.js (port 8644) jika ada\n    const lines = nodeProcs.split('\\n');\n    for (const line of lines) {\n        if (line.includes('voice-server') || line.includes('kokoro')) {\n            const pidMatch = line.match(/(\\d+)/);\n            if (pidMatch) {\n                try {\n                    execSync(`taskkill /PID ${pidMatch[1]} /F 2>&1`, { timeout: 5000 });\n                    results.push({ action: 'kill-voice-server', pid: pidMatch[1], ok: true });\n                } catch (e) {\n                    results.push({ action: 'kill-voice-server', pid: pidMatch[1], error: e.message });\n                }\n            }\n        }\n    }\n} catch (e) {\n    results.push({ check: 'node-processes', error: e.message });\n}\n\n// 4. Pastikan ArdiNeural jalan di 8880\ntry {\n    const check8880 = execSync('netstat -ano | findstr \":8880.*LISTENING\" 2>&1', { timeout: 5000 }).toString().trim();\n    results.push({ check: 'ardineural-8880', running: check8880.length > 0, detail: check8880 || 'NOT RUNNING' });\n} catch (e) {\n    results.push({ check: 'ardineural-8880', running: false, error: e.message });\n}\n\nreturn { action, results, timestamp: new Date().toISOString() };"
+        }
+    }
+}

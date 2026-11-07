@@ -1,0 +1,23 @@
+{
+    "id": "docker",
+
+    "version": "0.1.0",
+
+    "name": "Docker",
+
+    "description": "Docker container management. Scaffold — tools belum diimplementasikan.",
+
+    "category": "infrastructure",
+
+    "entry": "index.js",
+
+    "permissions": [
+        "process:exec"
+    ],
+
+    "tags": [
+        "docker",
+        "container",
+        "infrastructure"
+    ]
+}

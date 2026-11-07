@@ -1,0 +1,28 @@
+{
+    "id": "patch-viel-llm",
+    "name": "Patch Viel LLM Header",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Memperbaiki bug header di fungsi call() LLM pada entity.js Viel (nodek-02) yang menghasilkan header Content-Type invalid sehingga Viel jatuh ke jawaban template.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-20T18:07:10.064Z",
+        "spec": {
+            "toolName": "patchVielLlm",
+            "description": "Memperbaiki bug header di fungsi call() LLM pada entity.js Viel (nodek-02) yang menghasilkan header Content-Type invalid sehingga Viel jatuh ke jawaban template.",
+            "parameters": {
+                "dummy": {
+                    "description": "tidak dipakai",
+                    "type": "string"
+                }
+            },
+            "code": "const fs = require('fs');\nconst p = 'C:/Users/jrxid/aether-entities/nodek-02/entity.js';\nlet c = fs.readFileSync(p, 'utf8');\nconst start = c.indexOf('const qq=String.fromCharCode(34);');\nconst end = c.indexOf('/**\\n * Otak Viel: bangun percakapan');\nif (start === -1 || end === -1) return { ok: false, start: start, end: end, hint: 'marker not found' };\nconst r1 = '    async function call(base,key,model){\\n';\nconst r2 = '        const H={ \"Content-Type\":\"application/json\", \"Authorization\":\"Bearer \"+key };\\n';\nconst r3 = '        const body=JSON.stringify({model:model,messages:messages,stream:false,temperature:0.7});\\n';\nconst r4 = '        const r=await fetch(base.replace(/\\\\/$/,\"\")+\"/chat/completions\",{method:\"POST\",headers:H,body:body,signal:AbortSignal.timeout(60000)});\\n';\nconst r5 = '        if(!r.ok)throw new Error(\"LLM HTTP \"+r.status);\\n';\nconst r6 = '        const j=await r.json(); const txt=j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content; if(!txt)throw new Error(\"LLM balasan kosong\"); return txt.trim();\\n';\nconst r7 = '    }\\n';\nconst r8 = '    try{return await call(CFG.llmUrl,CFG.llmKey,CFG.llmModel);}catch(e){log(\"LLM utama gagal: \"+e.message+\" - coba cadangan Aether\");}\\n';\nconst r9 = '    try{return await call(\"http://127.0.0.1:3000/v1\",process.env.AETHER_TOKEN||\"not-needed\",\"gemini-3.6-flash\");}catch(e){log(\"LLM cadangan gagal: \"+e.message);throw e;}\\n';\nconst r10 = '}\\n';\nconst replacement = r1 + r2 + r3 + r4 + r5 + r6 + r7 + r8 + r9 + r10;\nconst out = c.slice(0, start) + replacement + c.slice(end);\nfs.writeFileSync(p, out, 'utf8');\nreturn { ok: true, start: start, end: end };"
+        }
+    }
+}

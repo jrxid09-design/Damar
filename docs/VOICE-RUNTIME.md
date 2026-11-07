@@ -1,0 +1,135 @@
+# Voice Runtime — Always-On Assistant
+
+Damar sebagai asisten suara always-on (FRIDAY/JARVIS/Siri), dibangun sebagai
+**channel baru** menuju Damar Core — bukan otak AI kedua, bukan tool system
+duplikat.
+
+> Prinsip inti: Voice hanyalah salah satu interface (seperti Telegram/WhatsApp/
+> Console/MCP). Ia memanggil `aiRuntime.chat({ channel: "voice", tools: undefined })`
+> — jalur yang SAMA — sehingga ToolSelector, context budgeting, memory,
+> consciousness/mind, MCP tools, dan audit trail SEMUA berjalan otomatis.
+
+---
+
+## Arsitektur
+
+```
+                    DAMAR CORE (aiRuntimeService.chat)
+                         │
+        ┌────────────────┼────────────────┬───────────────┐
+     Telegram        WhatsApp        Console         VOICE
+                                                       │
+                                        src/voice/
+                                        ├─ voiceRuntime.js   orchestrator + loop
+                                        ├─ voiceSession.js   jembatan ke aiRuntime
+                                        ├─ stateMachine.js   lifecycle eksplisit
+                                        ├─ config.js         env + JsonStore
+                                        └─ providers/
+                                           ├─ wakeWord.js     WakeWordProvider
+                                           ├─ clapDetector.js deteksi "tepuk 2x"
+                                           ├─ audioInput.js   mic abstraction
+                                           ├─ audioOutput.js  speaker abstraction
+                                           └─ vad.js          VAD (silence-based)
+```
+
+## Trigger wake (dua jalur)
+
+Damar bisa "dipanggil" lewat dua trigger, keduanya lokal & tanpa LLM saat standby:
+
+1. **Wake word** — kata panggil ("Damar"), lewat `WakeWordProvider`
+   (keyword-match; engine lain bisa disisipkan).
+2. **Tepuk tangan 2x (double clap)** — `ClapDetector`: dua ledakan suara
+   pendek (transient) dalam jendela waktu singkat, diukur dari level audio
+   (RMS 0..1). Bekerja di level audio, bukan transkrip — standby tetap
+   tidak memanggil STT/LLM. Nonaktif secara default.
+
+## State machine
+
+```
+IDLE → WAKE_DETECTED → LISTENING → TRANSCRIBING → THINKING
+     → EXECUTING → SPEAKING → IDLE
+```
+- **barge-in**: `SPEAKING → LISTENING` (interupsi sah).
+- **timeout**: `maxSessionMs` membatasi total giliran.
+- **VAD**: `vadTimeoutMs` (diam = selesai bicara) + `maxListenMs` (jaring pengaman).
+
+## Prinsip yang dipatuhi
+
+1. **Damar Core independen dari UI** — Console boleh ditutup; voice daemon
+   tetap hidup (bila diaktifkan).
+2. **Standby tidak memanggil LLM/cloud** — hanya wake-word detection lokal.
+   Deteksi tepuk tangan memakai **stream level audio (RMS)** dari mic: ffmpeg/arecord
+   menulis PCM mentah ke stdout, daemon menghitung RMS per chunk (tanpa STT/LLM).
+3. **Acknowledgement deterministik** — `"Ya?"` dihasilkan lokal, tanpa LLM.
+4. **Local-first** — STT/TTS lewat `voiceService` (faster-whisper, edge-tts/Kokoro).
+5. **Graceful degradation** — mic rusak / STT mati / TTS mati / wake engine gagal
+   → daemon TETAP hidup, channel lain tetap bekerja.
+6. **Tidak ada dependency native audio** — backend audio default `none`; `cli`
+   memakai perintah OS (arecord/sox/PowerShell) bila diaktifkan eksplisit.
+7. **Safety tetap berlaku** — perintah suara masuk lewat ToolRegistry → toolGuard/
+   riskPolicy/audit yang sama. Voice bukan "trusted channel" yang bebas.
+8. **Model tidak di-hardcode** — wake word, STT, TTS semuanya lewat provider/config.
+
+## Konfigurasi (env, semua opsional)
+
+| Env | Default | Arti |
+|---|---|---|
+| `DAMAR_VOICE_ENABLED` | `false` | Aktifkan voice runtime |
+| `DAMAR_WAKE_WORD` | `damar` | Kata panggil |
+| `DAMAR_VOICE_WAKE_PROVIDER` | `local` | Engine wake-word (keyword-match) |
+| `DAMAR_VOICE_STT_PROVIDER` | `local` | STT (lewat voiceService) |
+| `DAMAR_VOICE_TTS_PROVIDER` | `local` | TTS (lewat voiceService) |
+| `DAMAR_VOICE_MAX_SESSION_MS` | `60000` | Batas total satu giliran |
+| `DAMAR_VOICE_VAD_TIMEOUT_MS` | `1200` | Diam = selesai bicara |
+| `DAMAR_VOICE_MAX_LISTEN_MS` | `10000` | Jaring pengaman rekaman |
+| `DAMAR_VOICE_AUDIO_BACKEND` | `none` | `cli` untuk mic/speaker OS |
+| `DAMAR_VOICE_ACK` | `Ya?` | Acknowledgement deterministik |
+| `DAMAR_VOICE_LANGUAGE` | `id` | Bahasa STT |
+| `DAMAR_VOICE_CLAP_ENABLED` | `false` | Aktifkan trigger tepuk 2x |
+| `DAMAR_VOICE_CLAP_THRESHOLD` | `0.6` | Level RMS (0..1) = "bunyi keras" |
+| `DAMAR_VOICE_CLAP_WINDOW_MS` | `800` | Jendela maks antar dua tepukan |
+| `DAMAR_VOICE_CLAP_MIN_CLAP_MS` | `30` | Lebar minimum satu tepukan |
+| `DAMAR_VOICE_CLAP_MIN_GAP_MS` | `100` | Jeda minimum antar tepukan |
+
+STT/TTS tetap membaca `DAMAR_STT_URL` / `DAMAR_TTS_URL` (endpoint
+OpenAI-compatible, local-first) — tidak ada konfigurasi suara baru yang
+mendobel `voiceService`.
+
+## Status / observability
+
+`GET /api/v1/console/voice/status` (rute existing, diperluas) kini mengembalikan
+`runtime`:
+
+```json
+{
+  "enabled": false, "state": "idle", "wakeWord": "damar",
+  "clapEnabled": false,
+  "clapDetector": { "provider": "local", "threshold": 0.6, "windowMs": 800 },
+  "microphone": { "backend": "none", "available": false },
+  "speaker":    { "backend": "none", "available": false },
+  "sttProvider": "local", "ttsProvider": "local",
+  "wakeWordProvider": { "provider": "local", "wakeWord": "damar" },
+  "activeSession": null
+}
+```
+
+## Test
+
+`tests/voice/voiceRuntime.test.js` — 34 test: transisi state (legal & ilegal),
+barge-in, wake word (utuh vs substring), deteksi tepuk 2x (2 dalam jendela vs
+1/terlalu jauh/bunyi panjang/noise), RMS PCM (`_rms`), argumen stream level
+(ffmpeg/arecord), wiring stream→clapDetect, VAD (diam/touch), graceful degradation
+(mic/STT/TTS/model gagal), dan **VoiceSession memakai jalur aiRuntime yang sama**
+(`tools: undefined` → ToolSelector otomatis, `channel: "voice"`).
+
+## Peta lanjutan
+
+1. **Wake-word engine sungguhan** (Porcupine/Vosk/openWakeWord) — sisipkan
+   implementasi `WakeWordProvider` baru, set `DAMAR_VOICE_WAKE_PROVIDER`.
+2. **STT streaming** + **VAD berbasis level audio** (RMS) saat backend audio
+   `cli` tersedia — RMS stream kini sudah mengalir ke ClapDetector; tinggal
+   dipakai juga oleh VAD untuk mendeteksi akhir ucapan secara akustik.
+3. **TTS streaming/chunked** — mulai bicara sebelum respons penuh selesai.
+4. **Wake-word dari mic terus-menerus** — `wakeDetect(text)` masih API; integrasi
+   mic standby untuk wake word (STT ringan periodik) bisa menyusul, atau pakai
+   engine wake-word (item 1) yang bekerja langsung pada stream audio.

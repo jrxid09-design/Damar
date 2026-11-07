@@ -1,0 +1,20 @@
+{
+    "id": "image-to-dataurl",
+    "name": "Image To Data URL",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Mengatasi bug show_image blank putih di Console: webview menolak sumber file:// dan http:// lokal, tapi menerima data URL. Skill ini membaca file gambar lokal (png/jpg/webp/gif/bmp) dan mengembalikan data URL base64 siap pakai untuk show_image.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "manual",
+        "createdAt": "2026-08-18T02:28:03.661Z",
+        "spec": {
+            "raw": "// Skill buatan Aether Skill Factory — jangan sunting manual.\nclass SkillImpl {\n\n  async execute(args){\n    const fs = require('fs');\n    const path = require('path');\n    const p = String(args.path||'').trim();\n    if(!p) throw new Error('parameter path wajib diisi');\n    if(!fs.existsSync(p)) throw new Error('file tidak ditemukan: '+p);\n    const buf = fs.readFileSync(p);\n    const ext = path.extname(p).toLowerCase().replace('.','');\n    const mimeMap = {jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif',bmp:'image/bmp'};\n    const mime = mimeMap[ext] || 'image/png';\n    const dataUrl = 'data:'+mime+';base64,'+buf.toString('base64');\n    const sizeKb = Math.round(buf.length/1024);\n    if(args.maxChars){\n      const mc = parseInt(args.maxChars,10);\n      if(dataUrl.length > mc) throw new Error('dataUrl '+dataUrl.length+' karakter melebihi maxChars '+mc+' — kecilkan gambar dulu (lebar/kompresi)');\n    }\n    return { ok:true, path:p, mime:mime, sizeKb:sizeKb, dataUrlLength:dataUrl.length, dataUrl:dataUrl };\n  }\n\n}\n\nclass Tool {\n    constructor() {\n        this._impl = new SkillImpl();\n        this.name = \"IMAGETODATAURL\";\n        this.description = \"Mengatasi bug show_image blank putih di Console: webview menolak sumber file:// dan http:// lokal, tapi menerima data URL. Skill ini membaca file gambar lokal (png/jpg/webp/gif/bmp) dan mengembalikan data URL base64 siap pakai untuk show_image.\";\n        this.parameters = {\n    path: {\"type\":\"string\",\"description\":\"Path file gambar lokal, mis. C:\\\\AetherGenesis\\\\AetherSelf\\\\shot.png\",\"required\":true},\n    maxChars: {\"type\":\"number\",\"description\":\"Batas panjang dataUrl (opsional); error bila lebih, sebagai pengaman payload\",\"required\":false}\n        };\n    }\n    // Kontrak plugin: execute(context, params).\n    // Pilih sumber args yang benar: params utama; context\n    // kadang membawa args saat pemanggil legacy.\n    async execute(context, params) {\n        const args = (params && typeof params === 'object' && !Array.isArray(params) && Object.keys(params).length)\n            ? params\n            : (context && typeof context === 'object' && !Array.isArray(context) && Object.keys(context).length)\n                ? context\n                : {};\n        return this._impl.execute(args);\n    }\n}\nmodule.exports = [new Tool()];\n"
+        }
+    }
+}

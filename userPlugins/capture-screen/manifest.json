@@ -1,0 +1,23 @@
+{
+    "id": "capture-screen",
+    "name": "Capture Screen",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Mengambil screenshot tampilan layar saat ini menggunakan scrot.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-07-31T09:24:50.523Z",
+        "spec": {
+            "toolName": "captureScreen",
+            "description": "Mengambil screenshot tampilan layar saat ini menggunakan scrot.",
+            "parameters": {},
+            "code": "const { exec } = require('child_process');\n\nreturn new Promise((resolve, reject) => {\n  exec('scrot -s -c', (error, stdout, stderr) => {\n    if (error) {\n      resolve({ error: 'Gagal mengambil screenshot', stderr });\n    } else {\n      resolve({ message: 'Screenshot berhasil diambil', stdout });\n    }\n  });\n});"
+        }
+    }
+}

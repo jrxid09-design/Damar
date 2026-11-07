@@ -1,0 +1,23 @@
+{
+    "id": "find-viel-persona",
+    "name": "Cari Persona Viel",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Menampilkan baris persona/system prompt di entity.js Viel untuk menemukan tempat menambahkan instruksi jawaban ringkas.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-20T18:25:29.743Z",
+        "spec": {
+            "toolName": "findVielPersona",
+            "description": "Menampilkan baris persona/system prompt di entity.js Viel untuk menemukan tempat menambahkan instruksi jawaban ringkas.",
+            "parameters": {},
+            "code": "const fs = require('fs');\nconst p = 'C:/Users/jrxid/aether-entities/nodek-02/entity.js';\nconst lines = fs.readFileSync(p, 'utf8').split(/\\r?\\n/);\nconst hits = [];\nfor (let i = 0; i < lines.length; i++) {\n  const l = lines[i];\n  if (/persona|system|prompt|PERSONA|identity|Identitas|kamu adalah|Kamu adalah|style|gaya|ringkas|singkat/i.test(l)) hits.push((i + 1) + ': ' + l);\n}\nreturn { total: lines.length, hits: hits.join('\\n') };"
+        }
+    }
+}

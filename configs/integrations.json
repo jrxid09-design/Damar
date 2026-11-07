@@ -1,0 +1,9 @@
+{
+  "$comment": [
+    "Konfigurasi sambungan Damar ke sistem luar.",
+    "Setiap entri bisa ditimpa lewat environment variable:",
+    "  DAMAR_<ID>_URL, DAMAR_<ID>_KEY, DAMAR_<ID>_ENABLED"
+  ],
+  "pollInterval": 15000,
+  "integrations": []
+}

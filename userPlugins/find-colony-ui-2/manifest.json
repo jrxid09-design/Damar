@@ -1,0 +1,23 @@
+{
+    "id": "find-colony-ui-2",
+    "name": "Cari UI Colony",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Menampilkan baris terkait chat colony di index.html dashboard untuk memahami dan menambahkan polling stream otonom.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-20T18:27:28.264Z",
+        "spec": {
+            "toolName": "findColonyUi2",
+            "description": "Menampilkan baris terkait chat colony di index.html dashboard untuk memahami dan menambahkan polling stream otonom.",
+            "parameters": {},
+            "code": "const fs = require('fs');\nconst p = 'C:/AetherGenesis/CommandCenter/index.html';\nconst lines = fs.readFileSync(p, 'utf8').split(/\\r?\\n/);\nconst hits = [];\nfor (let i = 0; i < lines.length; i++) {\n  const l = lines[i];\n  if (l.indexOf('colony') >= 0 || l.indexOf('COLONY') >= 0) hits.push((i + 1) + ': ' + l);\n}\nreturn { total: lines.length, hits: hits.join('\\n') };"
+        }
+    }
+}

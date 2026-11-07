@@ -1,0 +1,1539 @@
+Metadata-Version: 2.4
+Name: gemini-webapi
+Version: 2.1.0
+Summary: ✨ An elegant async Python wrapper for Google Gemini web app
+Author: UZQueen
+License:                     GNU AFFERO GENERAL PUBLIC LICENSE
+                               Version 3, 19 November 2007
+        
+         Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+         Everyone is permitted to copy and distribute verbatim copies
+         of this license document, but changing it is not allowed.
+        
+                                    Preamble
+        
+          The GNU Affero General Public License is a free, copyleft license for
+        software and other kinds of works, specifically designed to ensure
+        cooperation with the community in the case of network server software.
+        
+          The licenses for most software and other practical works are designed
+        to take away your freedom to share and change the works.  By contrast,
+        our General Public Licenses are intended to guarantee your freedom to
+        share and change all versions of a program--to make sure it remains free
+        software for all its users.
+        
+          When we speak of free software, we are referring to freedom, not
+        price.  Our General Public Licenses are designed to make sure that you
+        have the freedom to distribute copies of free software (and charge for
+        them if you wish), that you receive source code or can get it if you
+        want it, that you can change the software or use pieces of it in new
+        free programs, and that you know you can do these things.
+        
+          Developers that use our General Public Licenses protect your rights
+        with two steps: (1) assert copyright on the software, and (2) offer
+        you this License which gives you legal permission to copy, distribute
+        and/or modify the software.
+        
+          A secondary benefit of defending all users' freedom is that
+        improvements made in alternate versions of the program, if they
+        receive widespread use, become available for other developers to
+        incorporate.  Many developers of free software are heartened and
+        encouraged by the resulting cooperation.  However, in the case of
+        software used on network servers, this result may fail to come about.
+        The GNU General Public License permits making a modified version and
+        letting the public access it on a server without ever releasing its
+        source code to the public.
+        
+          The GNU Affero General Public License is designed specifically to
+        ensure that, in such cases, the modified source code becomes available
+        to the community.  It requires the operator of a network server to
+        provide the source code of the modified version running there to the
+        users of that server.  Therefore, public use of a modified version, on
+        a publicly accessible server, gives the public access to the source
+        code of the modified version.
+        
+          An older license, called the Affero General Public License and
+        published by Affero, was designed to accomplish similar goals.  This is
+        a different license, not a version of the Affero GPL, but Affero has
+        released a new version of the Affero GPL which permits relicensing under
+        this license.
+        
+          The precise terms and conditions for copying, distribution and
+        modification follow.
+        
+                               TERMS AND CONDITIONS
+        
+          0. Definitions.
+        
+          "This License" refers to version 3 of the GNU Affero General Public License.
+        
+          "Copyright" also means copyright-like laws that apply to other kinds of
+        works, such as semiconductor masks.
+        
+          "The Program" refers to any copyrightable work licensed under this
+        License.  Each licensee is addressed as "you".  "Licensees" and
+        "recipients" may be individuals or organizations.
+        
+          To "modify" a work means to copy from or adapt all or part of the work
+        in a fashion requiring copyright permission, other than the making of an
+        exact copy.  The resulting work is called a "modified version" of the
+        earlier work or a work "based on" the earlier work.
+        
+          A "covered work" means either the unmodified Program or a work based
+        on the Program.
+        
+          To "propagate" a work means to do anything with it that, without
+        permission, would make you directly or secondarily liable for
+        infringement under applicable copyright law, except executing it on a
+        computer or modifying a private copy.  Propagation includes copying,
+        distribution (with or without modification), making available to the
+        public, and in some countries other activities as well.
+        
+          To "convey" a work means any kind of propagation that enables other
+        parties to make or receive copies.  Mere interaction with a user through
+        a computer network, with no transfer of a copy, is not conveying.
+        
+          An interactive user interface displays "Appropriate Legal Notices"
+        to the extent that it includes a convenient and prominently visible
+        feature that (1) displays an appropriate copyright notice, and (2)
+        tells the user that there is no warranty for the work (except to the
+        extent that warranties are provided), that licensees may convey the
+        work under this License, and how to view a copy of this License.  If
+        the interface presents a list of user commands or options, such as a
+        menu, a prominent item in the list meets this criterion.
+        
+          1. Source Code.
+        
+          The "source code" for a work means the preferred form of the work
+        for making modifications to it.  "Object code" means any non-source
+        form of a work.
+        
+          A "Standard Interface" means an interface that either is an official
+        standard defined by a recognized standards body, or, in the case of
+        interfaces specified for a particular programming language, one that
+        is widely used among developers working in that language.
+        
+          The "System Libraries" of an executable work include anything, other
+        than the work as a whole, that (a) is included in the normal form of
+        packaging a Major Component, but which is not part of that Major
+        Component, and (b) serves only to enable use of the work with that
+        Major Component, or to implement a Standard Interface for which an
+        implementation is available to the public in source code form.  A
+        "Major Component", in this context, means a major essential component
+        (kernel, window system, and so on) of the specific operating system
+        (if any) on which the executable work runs, or a compiler used to
+        produce the work, or an object code interpreter used to run it.
+        
+          The "Corresponding Source" for a work in object code form means all
+        the source code needed to generate, install, and (for an executable
+        work) run the object code and to modify the work, including scripts to
+        control those activities.  However, it does not include the work's
+        System Libraries, or general-purpose tools or generally available free
+        programs which are used unmodified in performing those activities but
+        which are not part of the work.  For example, Corresponding Source
+        includes interface definition files associated with source files for
+        the work, and the source code for shared libraries and dynamically
+        linked subprograms that the work is specifically designed to require,
+        such as by intimate data communication or control flow between those
+        subprograms and other parts of the work.
+        
+          The Corresponding Source need not include anything that users
+        can regenerate automatically from other parts of the Corresponding
+        Source.
+        
+          The Corresponding Source for a work in source code form is that
+        same work.
+        
+          2. Basic Permissions.
+        
+          All rights granted under this License are granted for the term of
+        copyright on the Program, and are irrevocable provided the stated
+        conditions are met.  This License explicitly affirms your unlimited
+        permission to run the unmodified Program.  The output from running a
+        covered work is covered by this License only if the output, given its
+        content, constitutes a covered work.  This License acknowledges your
+        rights of fair use or other equivalent, as provided by copyright law.
+        
+          You may make, run and propagate covered works that you do not
+        convey, without conditions so long as your license otherwise remains
+        in force.  You may convey covered works to others for the sole purpose
+        of having them make modifications exclusively for you, or provide you
+        with facilities for running those works, provided that you comply with
+        the terms of this License in conveying all material for which you do
+        not control copyright.  Those thus making or running the covered works
+        for you must do so exclusively on your behalf, under your direction
+        and control, on terms that prohibit them from making any copies of
+        your copyrighted material outside their relationship with you.
+        
+          Conveying under any other circumstances is permitted solely under
+        the conditions stated below.  Sublicensing is not allowed; section 10
+        makes it unnecessary.
+        
+          3. Protecting Users' Legal Rights From Anti-Circumvention Law.
+        
+          No covered work shall be deemed part of an effective technological
+        measure under any applicable law fulfilling obligations under article
+        11 of the WIPO copyright treaty adopted on 20 December 1996, or
+        similar laws prohibiting or restricting circumvention of such
+        measures.
+        
+          When you convey a covered work, you waive any legal power to forbid
+        circumvention of technological measures to the extent such circumvention
+        is effected by exercising rights under this License with respect to
+        the covered work, and you disclaim any intention to limit operation or
+        modification of the work as a means of enforcing, against the work's
+        users, your or third parties' legal rights to forbid circumvention of
+        technological measures.
+        
+          4. Conveying Verbatim Copies.
+        
+          You may convey verbatim copies of the Program's source code as you
+        receive it, in any medium, provided that you conspicuously and
+        appropriately publish on each copy an appropriate copyright notice;
+        keep intact all notices stating that this License and any
+        non-permissive terms added in accord with section 7 apply to the code;
+        keep intact all notices of the absence of any warranty; and give all
+        recipients a copy of this License along with the Program.
+        
+          You may charge any price or no price for each copy that you convey,
+        and you may offer support or warranty protection for a fee.
+        
+          5. Conveying Modified Source Versions.
+        
+          You may convey a work based on the Program, or the modifications to
+        produce it from the Program, in the form of source code under the
+        terms of section 4, provided that you also meet all of these conditions:
+        
+            a) The work must carry prominent notices stating that you modified
+            it, and giving a relevant date.
+        
+            b) The work must carry prominent notices stating that it is
+            released under this License and any conditions added under section
+            7.  This requirement modifies the requirement in section 4 to
+            "keep intact all notices".
+        
+            c) You must license the entire work, as a whole, under this
+            License to anyone who comes into possession of a copy.  This
+            License will therefore apply, along with any applicable section 7
+            additional terms, to the whole of the work, and all its parts,
+            regardless of how they are packaged.  This License gives no
+            permission to license the work in any other way, but it does not
+            invalidate such permission if you have separately received it.
+        
+            d) If the work has interactive user interfaces, each must display
+            Appropriate Legal Notices; however, if the Program has interactive
+            interfaces that do not display Appropriate Legal Notices, your
+            work need not make them do so.
+        
+          A compilation of a covered work with other separate and independent
+        works, which are not by their nature extensions of the covered work,
+        and which are not combined with it such as to form a larger program,
+        in or on a volume of a storage or distribution medium, is called an
+        "aggregate" if the compilation and its resulting copyright are not
+        used to limit the access or legal rights of the compilation's users
+        beyond what the individual works permit.  Inclusion of a covered work
+        in an aggregate does not cause this License to apply to the other
+        parts of the aggregate.
+        
+          6. Conveying Non-Source Forms.
+        
+          You may convey a covered work in object code form under the terms
+        of sections 4 and 5, provided that you also convey the
+        machine-readable Corresponding Source under the terms of this License,
+        in one of these ways:
+        
+            a) Convey the object code in, or embodied in, a physical product
+            (including a physical distribution medium), accompanied by the
+            Corresponding Source fixed on a durable physical medium
+            customarily used for software interchange.
+        
+            b) Convey the object code in, or embodied in, a physical product
+            (including a physical distribution medium), accompanied by a
+            written offer, valid for at least three years and valid for as
+            long as you offer spare parts or customer support for that product
+            model, to give anyone who possesses the object code either (1) a
+            copy of the Corresponding Source for all the software in the
+            product that is covered by this License, on a durable physical
+            medium customarily used for software interchange, for a price no
+            more than your reasonable cost of physically performing this
+            conveying of source, or (2) access to copy the
+            Corresponding Source from a network server at no charge.
+        
+            c) Convey individual copies of the object code with a copy of the
+            written offer to provide the Corresponding Source.  This
+            alternative is allowed only occasionally and noncommercially, and
+            only if you received the object code with such an offer, in accord
+            with subsection 6b.
+        
+            d) Convey the object code by offering access from a designated
+            place (gratis or for a charge), and offer equivalent access to the
+            Corresponding Source in the same way through the same place at no
+            further charge.  You need not require recipients to copy the
+            Corresponding Source along with the object code.  If the place to
+            copy the object code is a network server, the Corresponding Source
+            may be on a different server (operated by you or a third party)
+            that supports equivalent copying facilities, provided you maintain
+            clear directions next to the object code saying where to find the
+            Corresponding Source.  Regardless of what server hosts the
+            Corresponding Source, you remain obligated to ensure that it is
+            available for as long as needed to satisfy these requirements.
+        
+            e) Convey the object code using peer-to-peer transmission, provided
+            you inform other peers where the object code and Corresponding
+            Source of the work are being offered to the general public at no
+            charge under subsection 6d.
+        
+          A separable portion of the object code, whose source code is excluded
+        from the Corresponding Source as a System Library, need not be
+        included in conveying the object code work.
+        
+          A "User Product" is either (1) a "consumer product", which means any
+        tangible personal property which is normally used for personal, family,
+        or household purposes, or (2) anything designed or sold for incorporation
+        into a dwelling.  In determining whether a product is a consumer product,
+        doubtful cases shall be resolved in favor of coverage.  For a particular
+        product received by a particular user, "normally used" refers to a
+        typical or common use of that class of product, regardless of the status
+        of the particular user or of the way in which the particular user
+        actually uses, or expects or is expected to use, the product.  A product
+        is a consumer product regardless of whether the product has substantial
+        commercial, industrial or non-consumer uses, unless such uses represent
+        the only significant mode of use of the product.
+        
+          "Installation Information" for a User Product means any methods,
+        procedures, authorization keys, or other information required to install
+        and execute modified versions of a covered work in that User Product from
+        a modified version of its Corresponding Source.  The information must
+        suffice to ensure that the continued functioning of the modified object
+        code is in no case prevented or interfered with solely because
+        modification has been made.
+        
+          If you convey an object code work under this section in, or with, or
+        specifically for use in, a User Product, and the conveying occurs as
+        part of a transaction in which the right of possession and use of the
+        User Product is transferred to the recipient in perpetuity or for a
+        fixed term (regardless of how the transaction is characterized), the
+        Corresponding Source conveyed under this section must be accompanied
+        by the Installation Information.  But this requirement does not apply
+        if neither you nor any third party retains the ability to install
+        modified object code on the User Product (for example, the work has
+        been installed in ROM).
+        
+          The requirement to provide Installation Information does not include a
+        requirement to continue to provide support service, warranty, or updates
+        for a work that has been modified or installed by the recipient, or for
+        the User Product in which it has been modified or installed.  Access to a
+        network may be denied when the modification itself materially and
+        adversely affects the operation of the network or violates the rules and
+        protocols for communication across the network.
+        
+          Corresponding Source conveyed, and Installation Information provided,
+        in accord with this section must be in a format that is publicly
+        documented (and with an implementation available to the public in
+        source code form), and must require no special password or key for
+        unpacking, reading or copying.
+        
+          7. Additional Terms.
+        
+          "Additional permissions" are terms that supplement the terms of this
+        License by making exceptions from one or more of its conditions.
+        Additional permissions that are applicable to the entire Program shall
+        be treated as though they were included in this License, to the extent
+        that they are valid under applicable law.  If additional permissions
+        apply only to part of the Program, that part may be used separately
+        under those permissions, but the entire Program remains governed by
+        this License without regard to the additional permissions.
+        
+          When you convey a copy of a covered work, you may at your option
+        remove any additional permissions from that copy, or from any part of
+        it.  (Additional permissions may be written to require their own
+        removal in certain cases when you modify the work.)  You may place
+        additional permissions on material, added by you to a covered work,
+        for which you have or can give appropriate copyright permission.
+        
+          Notwithstanding any other provision of this License, for material you
+        add to a covered work, you may (if authorized by the copyright holders of
+        that material) supplement the terms of this License with terms:
+        
+            a) Disclaiming warranty or limiting liability differently from the
+            terms of sections 15 and 16 of this License; or
+        
+            b) Requiring preservation of specified reasonable legal notices or
+            author attributions in that material or in the Appropriate Legal
+            Notices displayed by works containing it; or
+        
+            c) Prohibiting misrepresentation of the origin of that material, or
+            requiring that modified versions of such material be marked in
+            reasonable ways as different from the original version; or
+        
+            d) Limiting the use for publicity purposes of names of licensors or
+            authors of the material; or
+        
+            e) Declining to grant rights under trademark law for use of some
+            trade names, trademarks, or service marks; or
+        
+            f) Requiring indemnification of licensors and authors of that
+            material by anyone who conveys the material (or modified versions of
+            it) with contractual assumptions of liability to the recipient, for
+            any liability that these contractual assumptions directly impose on
+            those licensors and authors.
+        
+          All other non-permissive additional terms are considered "further
+        restrictions" within the meaning of section 10.  If the Program as you
+        received it, or any part of it, contains a notice stating that it is
+        governed by this License along with a term that is a further
+        restriction, you may remove that term.  If a license document contains
+        a further restriction but permits relicensing or conveying under this
+        License, you may add to a covered work material governed by the terms
+        of that license document, provided that the further restriction does
+        not survive such relicensing or conveying.
+        
+          If you add terms to a covered work in accord with this section, you
+        must place, in the relevant source files, a statement of the
+        additional terms that apply to those files, or a notice indicating
+        where to find the applicable terms.
+        
+          Additional terms, permissive or non-permissive, may be stated in the
+        form of a separately written license, or stated as exceptions;
+        the above requirements apply either way.
+        
+          8. Termination.
+        
+          You may not propagate or modify a covered work except as expressly
+        provided under this License.  Any attempt otherwise to propagate or
+        modify it is void, and will automatically terminate your rights under
+        this License (including any patent licenses granted under the third
+        paragraph of section 11).
+        
+          However, if you cease all violation of this License, then your
+        license from a particular copyright holder is reinstated (a)
+        provisionally, unless and until the copyright holder explicitly and
+        finally terminates your license, and (b) permanently, if the copyright
+        holder fails to notify you of the violation by some reasonable means
+        prior to 60 days after the cessation.
+        
+          Moreover, your license from a particular copyright holder is
+        reinstated permanently if the copyright holder notifies you of the
+        violation by some reasonable means, this is the first time you have
+        received notice of violation of this License (for any work) from that
+        copyright holder, and you cure the violation prior to 30 days after
+        your receipt of the notice.
+        
+          Termination of your rights under this section does not terminate the
+        licenses of parties who have received copies or rights from you under
+        this License.  If your rights have been terminated and not permanently
+        reinstated, you do not qualify to receive new licenses for the same
+        material under section 10.
+        
+          9. Acceptance Not Required for Having Copies.
+        
+          You are not required to accept this License in order to receive or
+        run a copy of the Program.  Ancillary propagation of a covered work
+        occurring solely as a consequence of using peer-to-peer transmission
+        to receive a copy likewise does not require acceptance.  However,
+        nothing other than this License grants you permission to propagate or
+        modify any covered work.  These actions infringe copyright if you do
+        not accept this License.  Therefore, by modifying or propagating a
+        covered work, you indicate your acceptance of this License to do so.
+        
+          10. Automatic Licensing of Downstream Recipients.
+        
+          Each time you convey a covered work, the recipient automatically
+        receives a license from the original licensors, to run, modify and
+        propagate that work, subject to this License.  You are not responsible
+        for enforcing compliance by third parties with this License.
+        
+          An "entity transaction" is a transaction transferring control of an
+        organization, or substantially all assets of one, or subdividing an
+        organization, or merging organizations.  If propagation of a covered
+        work results from an entity transaction, each party to that
+        transaction who receives a copy of the work also receives whatever
+        licenses to the work the party's predecessor in interest had or could
+        give under the previous paragraph, plus a right to possession of the
+        Corresponding Source of the work from the predecessor in interest, if
+        the predecessor has it or can get it with reasonable efforts.
+        
+          You may not impose any further restrictions on the exercise of the
+        rights granted or affirmed under this License.  For example, you may
+        not impose a license fee, royalty, or other charge for exercise of
+        rights granted under this License, and you may not initiate litigation
+        (including a cross-claim or counterclaim in a lawsuit) alleging that
+        any patent claim is infringed by making, using, selling, offering for
+        sale, or importing the Program or any portion of it.
+        
+          11. Patents.
+        
+          A "contributor" is a copyright holder who authorizes use under this
+        License of the Program or a work on which the Program is based.  The
+        work thus licensed is called the contributor's "contributor version".
+        
+          A contributor's "essential patent claims" are all patent claims
+        owned or controlled by the contributor, whether already acquired or
+        hereafter acquired, that would be infringed by some manner, permitted
+        by this License, of making, using, or selling its contributor version,
+        but do not include claims that would be infringed only as a
+        consequence of further modification of the contributor version.  For
+        purposes of this definition, "control" includes the right to grant
+        patent sublicenses in a manner consistent with the requirements of
+        this License.
+        
+          Each contributor grants you a non-exclusive, worldwide, royalty-free
+        patent license under the contributor's essential patent claims, to
+        make, use, sell, offer for sale, import and otherwise run, modify and
+        propagate the contents of its contributor version.
+        
+          In the following three paragraphs, a "patent license" is any express
+        agreement or commitment, however denominated, not to enforce a patent
+        (such as an express permission to practice a patent or covenant not to
+        sue for patent infringement).  To "grant" such a patent license to a
+        party means to make such an agreement or commitment not to enforce a
+        patent against the party.
+        
+          If you convey a covered work, knowingly relying on a patent license,
+        and the Corresponding Source of the work is not available for anyone
+        to copy, free of charge and under the terms of this License, through a
+        publicly available network server or other readily accessible means,
+        then you must either (1) cause the Corresponding Source to be so
+        available, or (2) arrange to deprive yourself of the benefit of the
+        patent license for this particular work, or (3) arrange, in a manner
+        consistent with the requirements of this License, to extend the patent
+        license to downstream recipients.  "Knowingly relying" means you have
+        actual knowledge that, but for the patent license, your conveying the
+        covered work in a country, or your recipient's use of the covered work
+        in a country, would infringe one or more identifiable patents in that
+        country that you have reason to believe are valid.
+        
+          If, pursuant to or in connection with a single transaction or
+        arrangement, you convey, or propagate by procuring conveyance of, a
+        covered work, and grant a patent license to some of the parties
+        receiving the covered work authorizing them to use, propagate, modify
+        or convey a specific copy of the covered work, then the patent license
+        you grant is automatically extended to all recipients of the covered
+        work and works based on it.
+        
+          A patent license is "discriminatory" if it does not include within
+        the scope of its coverage, prohibits the exercise of, or is
+        conditioned on the non-exercise of one or more of the rights that are
+        specifically granted under this License.  You may not convey a covered
+        work if you are a party to an arrangement with a third party that is
+        in the business of distributing software, under which you make payment
+        to the third party based on the extent of your activity of conveying
+        the work, and under which the third party grants, to any of the
+        parties who would receive the covered work from you, a discriminatory
+        patent license (a) in connection with copies of the covered work
+        conveyed by you (or copies made from those copies), or (b) primarily
+        for and in connection with specific products or compilations that
+        contain the covered work, unless you entered into that arrangement,
+        or that patent license was granted, prior to 28 March 2007.
+        
+          Nothing in this License shall be construed as excluding or limiting
+        any implied license or other defenses to infringement that may
+        otherwise be available to you under applicable patent law.
+        
+          12. No Surrender of Others' Freedom.
+        
+          If conditions are imposed on you (whether by court order, agreement or
+        otherwise) that contradict the conditions of this License, they do not
+        excuse you from the conditions of this License.  If you cannot convey a
+        covered work so as to satisfy simultaneously your obligations under this
+        License and any other pertinent obligations, then as a consequence you may
+        not convey it at all.  For example, if you agree to terms that obligate you
+        to collect a royalty for further conveying from those to whom you convey
+        the Program, the only way you could satisfy both those terms and this
+        License would be to refrain entirely from conveying the Program.
+        
+          13. Remote Network Interaction; Use with the GNU General Public License.
+        
+          Notwithstanding any other provision of this License, if you modify the
+        Program, your modified version must prominently offer all users
+        interacting with it remotely through a computer network (if your version
+        supports such interaction) an opportunity to receive the Corresponding
+        Source of your version by providing access to the Corresponding Source
+        from a network server at no charge, through some standard or customary
+        means of facilitating copying of software.  This Corresponding Source
+        shall include the Corresponding Source for any work covered by version 3
+        of the GNU General Public License that is incorporated pursuant to the
+        following paragraph.
+        
+          Notwithstanding any other provision of this License, you have
+        permission to link or combine any covered work with a work licensed
+        under version 3 of the GNU General Public License into a single
+        combined work, and to convey the resulting work.  The terms of this
+        License will continue to apply to the part which is the covered work,
+        but the work with which it is combined will remain governed by version
+        3 of the GNU General Public License.
+        
+          14. Revised Versions of this License.
+        
+          The Free Software Foundation may publish revised and/or new versions of
+        the GNU Affero General Public License from time to time.  Such new versions
+        will be similar in spirit to the present version, but may differ in detail to
+        address new problems or concerns.
+        
+          Each version is given a distinguishing version number.  If the
+        Program specifies that a certain numbered version of the GNU Affero General
+        Public License "or any later version" applies to it, you have the
+        option of following the terms and conditions either of that numbered
+        version or of any later version published by the Free Software
+        Foundation.  If the Program does not specify a version number of the
+        GNU Affero General Public License, you may choose any version ever published
+        by the Free Software Foundation.
+        
+          If the Program specifies that a proxy can decide which future
+        versions of the GNU Affero General Public License can be used, that proxy's
+        public statement of acceptance of a version permanently authorizes you
+        to choose that version for the Program.
+        
+          Later license versions may give you additional or different
+        permissions.  However, no additional obligations are imposed on any
+        author or copyright holder as a result of your choosing to follow a
+        later version.
+        
+          15. Disclaimer of Warranty.
+        
+          THERE IS NO WARRANTY FOR THE PROGRAM, TO THE EXTENT PERMITTED BY
+        APPLICABLE LAW.  EXCEPT WHEN OTHERWISE STATED IN WRITING THE COPYRIGHT
+        HOLDERS AND/OR OTHER PARTIES PROVIDE THE PROGRAM "AS IS" WITHOUT WARRANTY
+        OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO,
+        THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+        PURPOSE.  THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM
+        IS WITH YOU.  SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF
+        ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
+        
+          16. Limitation of Liability.
+        
+          IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING
+        WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MODIFIES AND/OR CONVEYS
+        THE PROGRAM AS PERMITTED ABOVE, BE LIABLE TO YOU FOR DAMAGES, INCLUDING ANY
+        GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE
+        USE OR INABILITY TO USE THE PROGRAM (INCLUDING BUT NOT LIMITED TO LOSS OF
+        DATA OR DATA BEING RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD
+        PARTIES OR A FAILURE OF THE PROGRAM TO OPERATE WITH ANY OTHER PROGRAMS),
+        EVEN IF SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF
+        SUCH DAMAGES.
+        
+          17. Interpretation of Sections 15 and 16.
+        
+          If the disclaimer of warranty and limitation of liability provided
+        above cannot be given local legal effect according to their terms,
+        reviewing courts shall apply local law that most closely approximates
+        an absolute waiver of all civil liability in connection with the
+        Program, unless a warranty or assumption of liability accompanies a
+        copy of the Program in return for a fee.
+        
+                             END OF TERMS AND CONDITIONS
+        
+                    How to Apply These Terms to Your New Programs
+        
+          If you develop a new program, and you want it to be of the greatest
+        possible use to the public, the best way to achieve this is to make it
+        free software which everyone can redistribute and change under these terms.
+        
+          To do so, attach the following notices to the program.  It is safest
+        to attach them to the start of each source file to most effectively
+        state the exclusion of warranty; and each file should have at least
+        the "copyright" line and a pointer to where the full notice is found.
+        
+            <one line to give the program's name and a brief idea of what it does.>
+            Copyright (C) <year>  <name of author>
+        
+            This program is free software: you can redistribute it and/or modify
+            it under the terms of the GNU Affero General Public License as published
+            by the Free Software Foundation, either version 3 of the License, or
+            (at your option) any later version.
+        
+            This program is distributed in the hope that it will be useful,
+            but WITHOUT ANY WARRANTY; without even the implied warranty of
+            MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+            GNU Affero General Public License for more details.
+        
+            You should have received a copy of the GNU Affero General Public License
+            along with this program.  If not, see <https://www.gnu.org/licenses/>.
+        
+        Also add information on how to contact you by electronic and paper mail.
+        
+          If your software can interact with users remotely through a computer
+        network, you should also make sure that it provides a way for users to
+        get its source.  For example, if your program is a web application, its
+        interface could display a "Source" link that leads users to an archive
+        of the code.  There are many ways you could offer source, and different
+        solutions will be better for different programs; see section 13 for the
+        specific requirements.
+        
+          You should also get your employer (if you work as a programmer) or school,
+        if any, to sign a "copyright disclaimer" for the program, if necessary.
+        For more information on this, and how to apply and follow the GNU AGPL, see
+        <https://www.gnu.org/licenses/>.
+        
+Project-URL: Repository, https://github.com/HanaokaYuzu/Gemini-API
+Project-URL: Issues, https://github.com/HanaokaYuzu/Gemini-API/issues
+Keywords: API,async,Gemini,Bard,Google,Generative AI,LLM
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: curl-cffi~=0.16.0
+Requires-Dist: loguru~=0.7.3
+Requires-Dist: orjson~=3.11.9
+Requires-Dist: pydantic~=2.12.5
+Provides-Extra: browser
+Requires-Dist: browser-cookie3; extra == "browser"
+Provides-Extra: dev
+Requires-Dist: pyright; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+Requires-Dist: ty; extra == "dev"
+Dynamic: license-file
+
+<p align="center">
+    <img src="https://raw.githubusercontent.com/HanaokaYuzu/Gemini-API/master/assets/banner.png" width="55%" alt="Gemini Banner" align="center">
+</p>
+<p align="center">
+    <a href="https://pypi.org/project/gemini-webapi">
+        <img src="https://img.shields.io/pypi/v/gemini-webapi" alt="PyPI"></a>
+    <a href="https://pepy.tech/project/gemini-webapi">
+        <img src="https://static.pepy.tech/badge/gemini-webapi" alt="Downloads"></a>
+    <a href="https://github.com/HanaokaYuzu/Gemini-API/network/dependencies">
+        <img src="https://img.shields.io/librariesio/github/HanaokaYuzu/Gemini-API" alt="Dependencies"></a>
+    <a href="https://github.com/HanaokaYuzu/Gemini-API/blob/master/LICENSE">
+        <img src="https://img.shields.io/github/license/HanaokaYuzu/Gemini-API" alt="License"></a>
+    <a href="https://github.com/psf/black">
+        <img src="https://img.shields.io/badge/code%20style-black-000000.svg" alt="Code style"></a>
+</p>
+<p align="center">
+    <a href="https://star-history.com/#HanaokaYuzu/Gemini-API">
+        <img src="https://img.shields.io/github/stars/HanaokaYuzu/Gemini-API?style=social" alt="GitHub stars"></a>
+    <a href="https://github.com/HanaokaYuzu/Gemini-API/issues">
+        <img src="https://img.shields.io/github/issues/HanaokaYuzu/Gemini-API?style=social&logo=github" alt="GitHub issues"></a>
+    <a href="https://github.com/HanaokaYuzu/Gemini-API/actions/workflows/pypi-publish.yml">
+        <img src="https://github.com/HanaokaYuzu/Gemini-API/actions/workflows/pypi-publish.yml/badge.svg" alt="CI"></a>
+</p>
+
+# <img src="https://raw.githubusercontent.com/HanaokaYuzu/Gemini-API/master/assets/logo.svg" width="35px" alt="Gemini Icon" /> Gemini-API
+
+A reverse-engineered asynchronous Python wrapper for the [Google Gemini](https://gemini.google.com) web app (formerly Bard).
+
+## Features
+
+- **Persistent Cookies** - Automatically refreshes cookies in background. Optimized for always-on services.
+- **Image Generation** - Natively supports generating and editing images with natural language.
+- **Video & Audio Generation** - Supports generating videos and audio/music content natively.
+- **Deep Research** - Full deep research workflow with plan creation, status polling, and result retrieval.
+- **System Prompt** - Supports customizing the model's system prompt with [Gemini Gems](https://gemini.google.com/gems/view).
+- **Extension Support** - Supports generating content with [Gemini extensions](https://gemini.google.com/extensions), such as YouTube and Gmail.
+- **Classified Outputs** - Categorizes text, thoughts, images, videos, and audio in the response.
+- **Streaming Mode** - Supports stream generation, yielding partial outputs as they are generated.
+- **CLI Tool** - Standalone command-line interface for quick interactions.
+- **Official Flavor** - Provides a simple and elegant interface inspired by [Google Generative AI](https://ai.google.dev/tutorials/python_quickstart)'s official API.
+- **Asynchronous** - Utilizes `asyncio` to run generation tasks and return outputs efficiently.
+
+## Table of Contents
+
+- [Features](#features)
+- [Table of Contents](#table-of-contents)
+- [Installation](#installation)
+- [Authentication](#authentication)
+- [Usage](#usage)
+  - [Initialization](#initialization)
+  - [Generate Content](#generate-content)
+  - [Generate Content with Files](#generate-content-with-files)
+  - [Conversations Across Multiple Turns](#conversations-across-multiple-turns)
+  - [Continue Previous Conversations](#continue-previous-conversations)
+  - [Read Conversation History](#read-conversation-history)
+  - [Delete Previous Conversations from Gemini History](#delete-previous-conversations-from-gemini-history)
+  - [Temporary Mode](#temporary-mode)
+  - [Streaming Mode](#streaming-mode)
+  - [Select Language Model](#select-language-model)
+  - [List Available Models](#list-available-models)
+  - [Apply System Prompt with Gemini Gems](#apply-system-prompt-with-gemini-gems)
+  - [Manage Custom Gems](#manage-custom-gems)
+    - [Create a Custom Gem](#create-a-custom-gem)
+    - [Update an Existing Gem](#update-an-existing-gem)
+    - [Delete a Custom Gem](#delete-a-custom-gem)
+  - [Retrieve Model's Thought Process](#retrieve-models-thought-process)
+  - [Retrieve Images in Response](#retrieve-images-in-response)
+  - [Generate and Edit Images](#generate-and-edit-images)
+  - [Retrieve Videos and Audio](#retrieve-videos-and-audio)
+  - [Generate Content with Gemini Extensions](#generate-content-with-gemini-extensions)
+  - [Check and Switch to Other Reply Candidates](#check-and-switch-to-other-reply-candidates)
+  - [Deep Research](#deep-research)
+  - [Logging Configuration](#logging-configuration)
+- [CLI Tool](#cli-tool)
+  - [Cookie Setup](#cookie-setup)
+  - [CLI Commands](#cli-commands)
+  - [Deep Research Workflow](#deep-research-workflow)
+- [References](#references)
+- [Stargazers](#stargazers)
+
+## Installation
+
+> [!NOTE]
+>
+> This package requires Python 3.11 or higher.
+
+Install or update the package with pip.
+
+```sh
+pip install -U gemini_webapi
+```
+
+Optionally, the package offers a way to automatically import cookies from your local browser via optional dependency `browser-cookie3`. To enable this feature, install `gemini_webapi[browser]` instead. Supported platforms and browsers can be found [here](https://github.com/borisbabic/browser_cookie3?tab=readme-ov-file#contribute).
+
+```sh
+pip install -U gemini_webapi[browser]
+```
+
+## Authentication
+
+> [!TIP]
+>
+> If `browser-cookie3` is installed, you can skip this step and go directly to the [usage](#usage) section. Just make sure you are logged in to <https://gemini.google.com> in your browser.
+
+- Go to <https://gemini.google.com> and log in with your Google account
+- Press F12 to open the web inspector, go to the `Network` tab, and refresh the page
+- Click any request and copy the cookie values of `__Secure-1PSID` and `__Secure-1PSIDTS`
+
+> [!NOTE]
+>
+> If your application is deployed in a containerized environment (e.g. Docker), you may want to persist the cookies with a volume to avoid re-authentication every time the container rebuilds. You can set `GEMINI_COOKIE_PATH` environment variable to specify the path where auto-refreshed cookies are stored. Make sure the path is writable by the application.
+>
+> Here's part of a sample `docker-compose.yml` file:
+
+```yaml
+services:
+  main:
+    environment:
+      GEMINI_COOKIE_PATH: /tmp/gemini_webapi
+    volumes:
+      - ./gemini_cookies:/tmp/gemini_webapi
+```
+
+> [!NOTE]
+>
+> The API's auto-cookie-refreshing feature doesn't require `browser-cookie3` and is enabled by default. It allows you to keep the API service running without worrying about cookie expiration.
+>
+> This feature may require you to log in to your Google account again in the browser. This is expected behavior and won't affect the API's functionality.
+>
+> To avoid this, it's recommended to get cookies from a separate browser session and close it as soon as possible for best utilization (e.g. a fresh login in the browser's private mode). More details can be found [here](https://github.com/HanaokaYuzu/Gemini-API/issues/6).
+
+## Usage
+
+### Initialization
+
+Import the required packages and initialize a client with your cookies from the previous step. After successful initialization, the API will automatically refresh `__Secure-1PSIDTS` in the background as long as the process is alive.
+
+```python
+import asyncio
+from gemini_webapi import GeminiClient
+
+# Replace "COOKIE VALUE HERE" with your actual cookie values.
+# Leave Secure_1PSIDTS empty if it's not available for your account.
+Secure_1PSID = "COOKIE VALUE HERE"
+Secure_1PSIDTS = "COOKIE VALUE HERE"
+
+
+async def main():
+    # If browser-cookie3 is installed, simply use `client = GeminiClient()`
+    client = GeminiClient(Secure_1PSID, Secure_1PSIDTS, proxy=None)
+    await client.init(timeout=30, auto_close=False, close_delay=300, auto_refresh=True)
+
+
+asyncio.run(main())
+```
+
+> [!TIP]
+>
+> `auto_close` and `close_delay` are optional arguments for automatically closing the client after a certain period of inactivity. This feature is disabled by default. In an always-on service like a chatbot, it's recommended to set `auto_close` to `True` with a reasonable `close_delay` value for better resource management.
+
+### Generate Content
+
+Ask a single-turn question by calling `GeminiClient.generate_content`, which returns a `gemini_webapi.ModelOutput` object containing the generated text, images, thoughts, and conversation metadata.
+
+```python
+async def main():
+    response = await client.generate_content("Hello World!")
+    print(response.text)
+
+
+asyncio.run(main())
+```
+
+> [!TIP]
+>
+> Simply use `print(response)` to get the same output if you just want to see the response text.
+
+### Generate Content with Files
+
+Gemini supports file input, including images and documents. Optionally, you can pass files as a list of paths in `str` or `pathlib.Path` to `GeminiClient.generate_content` together with a text prompt.
+
+```python
+async def main():
+    response = await client.generate_content(
+        "Introduce the contents of these two files. Is there any connection between them?",
+        files=["assets/sample.pdf", Path("assets/banner.png")],
+    )
+    print(response.text)
+
+
+asyncio.run(main())
+```
+
+### Conversations Across Multiple Turns
+
+If you want to keep the conversation continuous, use `GeminiClient.start_chat` to create a `gemini_webapi.ChatSession` object and send messages through it. The conversation history will be handled automatically and updated after each turn.
+
+```python
+async def main():
+    chat = client.start_chat()
+    response1 = await chat.send_message(
+        "Introduce the contents of these two files. Is there any connection between them?",
+        files=["assets/sample.pdf", Path("assets/banner.png")],
+    )
+    print(response1.text)
+    response2 = await chat.send_message(
+        "Use image generation tool to modify the banner with another font and design."
+    )
+    print(response2.text, response2.images, sep="\n\n----------------------------------\n\n")
+
+
+asyncio.run(main())
+```
+
+> [!TIP]
+>
+> Same as `GeminiClient.generate_content`, `ChatSession.send_message` also accepts `image` as an optional argument.
+
+### Continue Previous Conversations
+
+To manually retrieve previous conversations, you can pass a previous `ChatSession`'s metadata to `GeminiClient.start_chat` when creating a new `ChatSession`. Alternatively, you can persist previous metadata to a file or database if you need to access it after the current Python process has exited.
+
+```python
+async def main():
+    # Start a new chat session
+    chat = client.start_chat()
+    response = await chat.send_message("Fine weather today")
+
+    # Save chat's metadata
+    previous_session = chat.metadata
+
+    # Load the previous conversation
+    previous_chat = client.start_chat(metadata=previous_session)
+    response = await previous_chat.send_message("What was my previous message?")
+    print(response)
+
+
+asyncio.run(main())
+```
+
+### Read Conversation History
+
+You can read the conversation history of a specific chat by calling `GeminiClient.read_chat` with the chat ID. It returns a `ChatHistory` object containing a list of `ChatTurn` objects ordered from newest to oldest.
+
+```python
+async def main():
+    chat = client.start_chat()
+    await chat.send_message("What is the capital of France?")
+
+    # Read the chat history
+    history = await client.read_chat(chat.cid)
+    if history:
+        for turn in history.turns:
+            print(f"[{turn.role.upper()}] {turn.text}")
+            print("\n----------------------------------\n")
+
+
+asyncio.run(main())
+```
+
+To list all recent chats, use `GeminiClient.list_chats`:
+
+```python
+async def main():
+    chats = client.list_chats()
+    if chats:
+        for chat_info in chats:
+            print(f"{chat_info.cid}: {chat_info.title}")
+
+
+asyncio.run(main())
+```
+
+### Delete Previous Conversations from Gemini History
+
+You can delete a specific chat from Gemini history on the server by calling `GeminiClient.delete_chat` with the chat ID.
+
+```python
+async def main():
+    # Start a new chat session
+    chat = client.start_chat()
+    await chat.send_message("This is a temporary conversation.")
+
+    # Delete the chat
+    await client.delete_chat(chat.cid)
+    print(f"Chat deleted: {chat.cid}")
+
+
+asyncio.run(main())
+```
+
+### Temporary Mode
+
+You can start a temporary chat by passing `temporary=True` to `GeminiClient.generate_content` or `ChatSession.send_message`. Temporary chats won't be saved in Gemini history.
+
+```python
+async def main():
+    response = await client.generate_content("Hello World!", temporary=True)
+    print(response.text, "\n\n----------------------------------\n\n")
+
+    chat = client.start_chat()
+    await chat.send_message("Fine weather today", temporary=False)
+    response2 = await chat.send_message("What's my last message?", temporary=True)
+    print(response2.text)
+
+
+asyncio.run(main())
+```
+
+### Streaming Mode
+
+For longer responses, you can use streaming mode to receive partial outputs as they are generated. This provides a more responsive user experience, especially for real-time applications like chatbots.
+
+The `generate_content_stream` method yields `ModelOutput` objects where the `text_delta` attribute contains only the **new characters** received since the last yield, making it easy to display incremental updates.
+
+```python
+async def main():
+    async for chunk in client.generate_content_stream(
+        "What's the difference between 'await' and 'async for'?"
+    ):
+        print(chunk.text_delta, end="", flush=True)
+
+    print()
+
+
+asyncio.run(main())
+```
+
+> [!TIP]
+>
+> Streaming mode accepts the same arguments as `generate_content`. You can also use streaming mode in multi-turn conversations with `ChatSession.send_message_stream`.
+
+### Select Language Model
+
+You can specify which language model to use by passing the `model` argument to `GeminiClient.generate_content` or `GeminiClient.start_chat`. Omit it, or pass `None`, to let Google use your account's default model.
+
+Models are discovered **dynamically** at init time from your account, along with the request headers and tier capacity each one needs. Pass a name, alias, display name or id string - or an `AvailableModel` straight from `list_models()`. Names follow whatever Google publishes to your account (currently `gemini-pro`, `gemini-flash` and `gemini-flash-lite`), so run the snippet below to see your own list rather than hardcoding one.
+
+```python
+async def main():
+    for model in client.list_models() or []:
+        print(model.model_name, "|", model.display_name, "| available:", model.is_available)
+
+    response1 = await client.generate_content(
+        "What's your language model version? Reply with the version number only.",
+        model="gemini-flash",  # a name, alias, display name or id
+    )
+    print(f"Model version (gemini-flash): {response1.text}")
+
+    chat = client.start_chat(model=client.resolve_model("pro"))
+    response2 = await chat.send_message(
+        "What's your language model version? Reply with the version number only."
+    )
+    print(f"Model version ({chat.model}): {response2.text}")
+
+
+asyncio.run(main())
+```
+
+> [!WARNING]
+>
+> The `Model` enum is **deprecated and pending removal**. Its ids and headers are hardcoded, and its `PLUS_`/`ADVANCED_` variants ask you to know your own account tier - a value the client now reads from the account itself, which is why nine members collapse into six actual models.
+>
+> `Model.from_name` and `Model.from_dict` have been **removed**; use `client.resolve_model(name)` and `AvailableModel.from_dict` instead. Passing a member to `generate_content` still works for now: it is mapped onto your account's equivalent model, or to the default model if your account has no counterpart, and logs a warning. Names the enum alone knew - `gemini-pro-advanced` and friends - no longer resolve at all; ask for `gemini-pro` and the tier is filled in for you.
+
+You can also pass custom model header strings directly to access models that are not listed above.
+
+```python
+# "model_name" and "model_header" keys must be present
+custom_model = {
+    "model_name": "xxx",
+    "model_header": {
+        "x-goog-ext-525001261-jspb": '[1,null,null,null,"fbb127bbb056c959",null,null,0,[4,5,6,8],null,null,1,null,null,1,1,"EA3C5672-E422-4A5F-BE26-B5B57D3B9AC3"]',
+        "x-goog-ext-73010989-jspb": "[0]",
+        "x-goog-ext-73010990-jspb": "[0,0,0]",
+    },
+}
+
+response = await client.generate_content("What's your model version?", model=custom_model)
+```
+
+> [!NOTE]
+>
+> A dictionary is read into an `AvailableModel`: the model id is taken from the header you supply and the header is then rebuilt, so `capacity` and `model_number` come from the dictionary (or its defaults) rather than from other slots of the string. Prefer a model name; reach for this only for a model discovery does not list yet.
+
+### List Available Models
+
+The client dynamically discovers which models are available for your account at initialization. Use `GeminiClient.list_models` to see all available models and their details.
+
+```python
+async def main():
+    await client.init()  # Make sure the client is initialized first
+    models = client.list_models()
+    if models:
+        for model in models:
+            print(f"{model.display_name}: {model.model_name}")
+
+
+asyncio.run(main())
+```
+
+### Apply System Prompt with Gemini Gems
+
+System prompts can be applied to conversations via [Gemini Gems](https://gemini.google.com/gems/view). To use a gem, you can pass the `gem` argument to `GeminiClient.generate_content` or `GeminiClient.start_chat`. `gem` can be either a gem ID string or a `gemini_webapi.Gem` object. Only one gem can be applied to a single conversation.
+
+> [!TIP]
+>
+> There are some system predefined gems that are not shown to users by default (and therefore may not work properly). Use `client.fetch_gems(include_hidden=True)` to include them in the fetch result.
+
+```python
+async def main():
+    # Fetch all gems for the current account, including both predefined and user-created ones
+    await client.fetch_gems(include_hidden=False)
+
+    # Once fetched, gems will be cached in `GeminiClient.gems`
+    gems = client.gems
+
+    # Get the gem you want to use
+    system_gems = gems.filter(predefined=True)
+    coding_partner = system_gems.get(id="coding-partner")
+
+    response1 = await client.generate_content(
+        "What's your system prompt?",
+        gem=coding_partner,
+    )
+    print(response1.text)
+
+    # Another example with a user-created custom gem
+    # Gem ids are consistent strings. Store them somewhere to avoid fetching gems every time
+    your_gem = gems.get(name="Your Gem Name")
+    your_gem_id = your_gem.id
+    chat = client.start_chat(gem=your_gem_id)
+    response2 = await chat.send_message("What's your system prompt?")
+    print(response2)
+```
+
+### Manage Custom Gems
+
+You can create, update, and delete your custom gems programmatically with the API. Note that predefined system gems cannot be modified or deleted.
+
+#### Create a Custom Gem
+
+Create a new custom gem with a name, system prompt (instructions), and optional description:
+
+```python
+async def main():
+    # Create a new custom gem
+    new_gem = await client.create_gem(
+        name="Python Tutor",
+        prompt="You are a helpful Python programming tutor.",
+        description="A specialized gem for Python programming",
+    )
+
+    print(f"Custom gem created: {new_gem}")
+
+    # Use the newly created gem in a conversation
+    response = await client.generate_content(
+        "Explain how list comprehensions work in Python", gem=new_gem
+    )
+    print(response.text)
+
+
+asyncio.run(main())
+```
+
+#### Update an Existing Gem
+
+> [!NOTE]
+>
+> When updating a gem, you must provide all parameters (name, prompt, description) even if you only want to change one of them.
+
+```python
+async def main():
+    # Get a custom gem (assuming you have one named "Python Tutor")
+    await client.fetch_gems()
+    python_tutor = client.gems.get(name="Python Tutor")
+
+    # Update the gem with new instructions
+    updated_gem = await client.update_gem(
+        gem=python_tutor,  # Can also pass gem ID string
+        name="Advanced Python Tutor",
+        prompt="You are an expert Python programming tutor.",
+        description="An advanced Python programming assistant",
+    )
+
+    print(f"Custom gem updated: {updated_gem}")
+
+
+asyncio.run(main())
+```
+
+#### Delete a Custom Gem
+
+```python
+async def main():
+    # Get the gem to delete
+    await client.fetch_gems()
+    gem_to_delete = client.gems.get(name="Advanced Python Tutor")
+
+    # Delete the gem
+    await client.delete_gem(gem_to_delete)  # Can also pass gem ID string
+    print(f"Custom gem deleted: {gem_to_delete.name}")
+
+
+asyncio.run(main())
+```
+
+### Retrieve Model's Thought Process
+
+When using models with thinking capabilities, the model's thought process will be populated in `ModelOutput.thoughts`.
+
+```python
+async def main():
+    response = await client.generate_content("What's 1+1?", model="gemini-pro")
+    print(response.thoughts)
+    print(response.text)
+
+
+asyncio.run(main())
+```
+
+### Retrieve Images in Response
+
+Images in the API's output are stored as a list of `gemini_webapi.Image` objects. You can access the image title, URL, and description by calling `Image.title`, `Image.url` and `Image.alt` respectively.
+
+```python
+async def main():
+    response = await client.generate_content("Send me some pictures of cats")
+    for image in response.images:
+        print(image, "\n\n----------------------------------\n\n")
+
+
+asyncio.run(main())
+```
+
+### Generate and Edit Images
+
+You can ask Gemini to generate and edit images with Nano Banana, Google's latest image model, using natural language.
+
+> [!IMPORTANT]
+>
+> Google has some limitations on Gemini's image generation feature, so availability may vary by region/account. Here's a summary copied from [official documentation](https://support.google.com/gemini/answer/14286560) (as of Sep 10, 2025):
+>
+> > This feature's availability in any specific Gemini app is also limited to the supported languages and countries of that app.
+> >
+> > For now, this feature isn't available to users under 18.
+> >
+> > To use this feature, you must be signed in to Gemini Apps.
+
+You can save images returned from Gemini locally by calling `Image.save()`. Optionally, you can specify the file path and file name by passing `path` and `filename` arguments to the function. This works for both `WebImage` and `GeneratedImage`.
+
+```python
+async def main():
+    response = await client.generate_content("Generate some pictures of cats")
+    for i, image in enumerate(response.images):
+        await image.save(path="temp/", filename=f"cat_{i}.png", verbose=True)
+        print(image, "\n\n----------------------------------\n\n")
+
+
+asyncio.run(main())
+```
+
+> [!NOTE]
+>
+> By default, when asked to send images (like in the previous example), Gemini will send images fetched from the web instead of generating images with an AI model, unless you specifically ask it to "generate" images in your prompt. In this package, web images and generated images are treated differently as `WebImage` and `GeneratedImage`, and are automatically categorized in the output.
+
+### Retrieve Videos and Audio
+
+Gemini can generate videos and audio/music content. These are returned as `GeneratedVideo` and `GeneratedMedia` objects in `ModelOutput.videos` and `ModelOutput.media` respectively. You can save them to disk just like images.
+
+> [!NOTE]
+>
+> You may need an active subscription to access Gemini's video and audio generation features.
+
+```python
+async def main():
+    response = await client.generate_content("Generate a short video of a cat playing")
+
+    # Save generated videos
+    for video in response.videos:
+        result = await video.save(path="temp/", verbose=True)
+        print(f"Video saved: {result}")
+
+    # Save generated media (audio/music)
+    for media in response.media:
+        result = await media.save(path="temp/", verbose=True)
+        print(f"Media saved: {result}")
+
+
+asyncio.run(main())
+```
+
+> [!NOTE]
+>
+> `GeneratedMedia.save()` accepts a `download_type` parameter: `"audio"`, `"video"`, or `"both"` (default). Generated video/audio may take time to render — the save method will poll automatically until the content is ready.
+
+### Generate Content with Gemini Extensions
+
+> [!IMPORTANT]
+>
+> To access Gemini extensions in the API, you must activate them on the [Gemini website](https://gemini.google.com/extensions) first. As with image generation, Google also has limitations on the availability of Gemini extensions. Here's a summary copied from [official documentation](https://support.google.com/gemini/answer/13695044) (as of March 19, 2025):
+>
+> > To connect apps to Gemini, you must have​​​​ Gemini Apps Activity on.
+> >
+> > To use this feature, you must be signed in to Gemini Apps.
+> >
+> > Important: If you're under 18, Google Workspace and Maps apps currently only work with English prompts in Gemini.
+
+After activating extensions for your account, you can access them in your prompts either in natural language or by starting your prompt with "@" followed by the extension keyword.
+
+```python
+async def main():
+    response1 = await client.generate_content("@Gmail What's the latest message in my mailbox?")
+    print(response1, "\n\n----------------------------------\n\n")
+
+    response2 = await client.generate_content(
+        "@Youtube What's the latest activity of Taylor Swift?"
+    )
+    print(response2, "\n\n----------------------------------\n\n")
+
+
+asyncio.run(main())
+```
+
+> [!NOTE]
+>
+> For region availability, your Google account's **preferred language** only needs to be set to one of the three supported languages listed above. You can change your language settings [here](https://myaccount.google.com/language).
+
+### Check and Switch to Other Reply Candidates
+
+A response from Gemini sometimes contains multiple reply candidates with different generated content. You can check all candidates and choose one to continue the conversation. By default, the first candidate is chosen.
+
+```python
+async def main():
+    # Start a conversation and list all reply candidates
+    chat = client.start_chat()
+    response = await chat.send_message("Recommend a science fiction book for me.")
+    for candidate in response.candidates:
+        print(candidate, "\n\n----------------------------------\n\n")
+
+    if len(response.candidates) > 1:
+        # Control the ongoing conversation flow by choosing candidate manually
+        new_candidate = chat.choose_candidate(index=1)  # Choose the second candidate here
+        followup_response = await chat.send_message(
+            "Tell me more about it."
+        )  # Will generate content based on the chosen candidate
+        print(new_candidate, followup_response, sep="\n\n----------------------------------\n\n")
+    else:
+        print("Only one candidate available.")
+
+
+asyncio.run(main())
+```
+
+### Deep Research
+
+Gemini's deep research feature is an autonomous research agent that browses the web, analyzes sources, and produces a comprehensive report. You can access it programmatically through the API.
+
+Under the hood this is an ordinary chat conversation: Gemini answers the first turn with a **plan**, and a second turn **confirms** it and starts the research. The task then runs server-side, detached from the session, so polling for the report does not require holding the conversation open.
+
+The finished report is delivered as an **inline document**, not as reply text — the reply itself is only a short notice such as *"I've completed your research"*. `result.text` returns the report, and `result.document` exposes it with its id and title:
+
+```python
+result = await client.deep_research("...")
+doc = result.document
+print(doc.title)  # 'SQLite vs DuckDB for Analytics'
+print(doc.content)  # markdown report: headings, tables, links, [cite: N] markers
+print(doc.sources)  # the web sources those [cite: N] markers resolve to
+
+Path("report.md").write_text(doc.markdown, encoding="utf-8")  # body + numbered source list
+```
+
+The same document is available on any deep research turn as `output.deep_research_document`, so a report can be recovered later from the chat alone:
+
+```python
+output = await client.fetch_latest_chat_response("c_abc123")
+if (doc := output.deep_research_document) and doc.ready:
+    print(doc.content)
+```
+
+> [!NOTE]
+>
+> You may need an active subscription to access Gemini's deep research feature.
+
+**Quick one-call method:**
+
+```python
+async def main():
+    result = await client.deep_research(
+        "Compare the top 3 cloud providers and their AI offerings",
+        poll_interval=10.0,
+        timeout=600.0,
+    )
+    print(f"Done: {result.done}")
+    print(result.text)
+
+
+asyncio.run(main())
+```
+
+Both turns run in a single chat session. Pass `model` to choose one, or `chat` to supply your own session and keep a reference to the conversation after the call returns.
+
+> [!TIP]
+>
+> Reports commonly take 5-10 minutes, and longer for broad topics. Raise `timeout` past the 600 second default if `result.done` comes back `False`.
+
+**Step-by-step workflow** for more control, including reviewing the plan before committing to it:
+
+```python
+async def main():
+    # Plan and confirmation are two turns of one conversation, so share a chat session
+    chat = client.start_chat()
+
+    # Step 1: Create a research plan
+    plan = await client.create_deep_research_plan(
+        "What are the latest advancements in quantum computing?",
+        chat=chat,
+    )
+    print(f"Title: {plan.title}")
+    print(f"ETA: {plan.eta_text}")
+    for step in plan.steps:
+        print(f"  - {step}")
+
+    # Step 2 (optional): Ask for changes on the same session to get a revised plan back
+    # plan = await client.create_deep_research_plan("Focus on error correction", chat=chat)
+
+    # Step 3: Confirm the plan to start the research
+    await client.start_deep_research(plan, chat=chat)
+
+    # Step 4: Poll for completion
+    result = await client.wait_for_deep_research(
+        plan,
+        poll_interval=10.0,
+        timeout=600.0,
+    )
+
+    print(result.text)
+
+
+asyncio.run(main())
+```
+
+### Logging Configuration
+
+This package uses [loguru](https://loguru.readthedocs.io/en/stable/) for logging and exposes a function `set_log_level` to control the log level. You can set the log level to one of the following values: `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL`. The default value is `INFO`.
+
+```python
+from gemini_webapi import set_log_level
+
+set_log_level("DEBUG")
+```
+
+> [!NOTE]
+>
+> Calling `set_log_level` for the first time will **globally** remove all existing loguru handlers. You may want to configure logging directly with loguru to avoid this issue and have more advanced control over logging behaviors.
+
+## CLI Tool
+
+A standalone CLI (`cli.py`) is included for interacting with Gemini from the terminal. It supports single-turn questions, multi-turn chat, deep research, image download, and account diagnostics.
+
+### Cookie Setup
+
+Export your cookies from [gemini.google.com](https://gemini.google.com) and save them as a JSON file. The CLI supports multiple formats:
+
+```json
+{ "__Secure-1PSID": "value...", "__Secure-1PSIDTS": "value..." }
+```
+
+You can also use a browser cookie extension export (array-of-objects format is supported).
+
+> [!NOTE]
+>
+> The CLI automatically persists updated cookies back to the JSON file after each run. Use `--no-persist` to disable this behavior.
+
+### CLI Commands
+
+**Global options** (placed before the subcommand):
+
+```sh
+--cookies-json PATH    Path to cookies JSON file (required)
+--proxy URL            Proxy URL (or uses HTTPS_PROXY env)
+--model NAME           Model name, alias or id (default: your account's default model)
+--verbose              Enable debug logging
+--no-persist           Don't update cookies file after run
+--request-timeout SEC  HTTP timeout in seconds (default: 300)
+```
+
+**Available commands:**
+
+```sh
+# Ask a single question (streams by default)
+python cli.py --cookies-json cookies.json ask "What is quantum computing?"
+
+# Ask with image input
+python cli.py --cookies-json cookies.json ask --image photo.jpg "Describe this"
+
+# Non-streaming mode
+python cli.py --cookies-json cookies.json ask --no-stream "Hello"
+
+# Continue a conversation (chat ID from previous output)
+python cli.py --cookies-json cookies.json reply c_abc123 "Tell me more"
+
+# List your chat history
+python cli.py --cookies-json cookies.json list
+
+# Read a specific chat conversation
+python cli.py --cookies-json cookies.json read c_abc123
+
+# List the models your account can use
+python cli.py --cookies-json cookies.json models
+
+# Download a generated image
+python cli.py --cookies-json cookies.json download "https://..." -o output.png
+
+# Account diagnostics (status, quotas, usage limits, available models)
+python cli.py --cookies-json cookies.json inspect
+```
+
+### Deep Research Workflow
+
+The CLI supports Gemini's Deep Research feature — an autonomous research agent that browses the web, analyzes sources, and produces a comprehensive report.
+
+```sh
+# 1. Submit a research task. Prints both a chat ID and a research (task) ID
+python cli.py --cookies-json cookies.json research send --prompt "AI chip competition 2025"
+
+# 2. Check progress. Pass --research-id for the actual task state - without it the chat
+#    cannot be told apart from the plan and confirmation replies, which arrive immediately
+python cli.py --cookies-json cookies.json research check c_abc123 --research-id 0f3d...
+
+# 3. Fetch the full result
+python cli.py --cookies-json cookies.json research get c_abc123
+
+# 4. Save result to a file
+python cli.py --cookies-json cookies.json research get c_abc123 --output report.md
+```
+
+## References
+
+[Google AI Studio](https://ai.google.dev/tutorials/ai-studio_quickstart)
+
+[acheong08/Bard](https://github.com/acheong08/Bard)
+
+## Stargazers
+
+<p align="center">
+    <a href="https://star-history.com/#HanaokaYuzu/Gemini-API">
+        <img src="https://api.star-history.com/svg?repos=HanaokaYuzu/Gemini-API&type=Date" width="75%" alt="Star History Chart"></a>
+</p>

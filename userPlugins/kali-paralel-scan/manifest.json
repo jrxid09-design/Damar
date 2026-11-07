@@ -1,0 +1,23 @@
+{
+    "id": "kali-paralel-scan",
+    "name": "Kali Parallel Scanner",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Scan multiple IPs in parallel from Kali WSL with OS detection and service fingerprinting. Returns consolidated results.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-18T18:06:51.695Z",
+        "spec": {
+            "toolName": "kaliParallelScan",
+            "description": "Scan multiple IPs in parallel from Kali WSL with OS detection and service fingerprinting. Returns consolidated results.",
+            "parameters": {},
+            "code": "const { execSync } = require('child_process');\nconst ips = Array.isArray(args.ips) ? args.ips : [args.ips];\nconst results = {};\n\nfor (const ip of ips) {\n  try {\n    const cmd = `wsl -d kali-linux -u root bash -c \"nmap -sV -O --osscan-guess -T4 ${ip} 2>&1\"`;\n    const out = execSync(cmd, { timeout: 120000, encoding: 'utf8', windowsHide: true });\n    const lines = out.split('\\n');\n    results[ip] = {\n      mac: lines.find(l => l.includes('MAC Address')),\n      os: lines.find(l => l.includes('OS details') || l.includes('Running') || l.includes('Aggressive OS')),\n      ports: lines.filter(l => l.match(/^\\d+\\/\\w+\\s+open/)),\n      android: out.includes('Android') || out.includes('Samsung'),\n      full: out\n    };\n  } catch (e) {\n    results[ip] = { error: e.stderr || e.message };\n  }\n}\nreturn results;"
+        }
+    }
+}

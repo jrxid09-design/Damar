@@ -1,0 +1,54 @@
+{
+    "id": "google-maps-tools",
+    "name": "Google Maps Suite",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Layanan integrasi Google Maps untuk pencarian lokasi (searchPlace), rute perjalanan (getDirections), dan pembuatan URL gambar peta statis (showMap).",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-17T06:11:29.612Z",
+        "spec": {
+            "toolName": "googleMaps",
+            "description": "Layanan integrasi Google Maps untuk pencarian lokasi (searchPlace), rute perjalanan (getDirections), dan pembuatan URL gambar peta statis (showMap).",
+            "parameters": {
+                "action": {
+                    "type": "string",
+                    "description": "Aksi yang ingin dijalankan: 'searchPlace', 'getDirections', atau 'showMap'",
+                    "required": true
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Kata kunci/lokasi pencarian (untuk action 'searchPlace')",
+                    "required": false
+                },
+                "origin": {
+                    "type": "string",
+                    "description": "Titik keberangkatan/asal (untuk action 'getDirections')",
+                    "required": false
+                },
+                "destination": {
+                    "type": "string",
+                    "description": "Titik tujuan/destinasi (untuk action 'getDirections' dan 'showMap')",
+                    "required": false
+                },
+                "mode": {
+                    "type": "string",
+                    "description": "Moda transportasi: driving, walking, bicycling, transit (default: driving)",
+                    "required": false
+                },
+                "zoom": {
+                    "type": "number",
+                    "description": "Tingkat zoom peta statis (1-20, default: 13)",
+                    "required": false
+                }
+            },
+            "code": "const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.MAPS_API_KEY || args.apiKey;\nconst action = args.action;\n\nif (!action) {\n  return { ok: false, error: \"Parameter 'action' wajib diisi (searchPlace | getDirections | showMap).\" };\n}\n\nif (action === 'showMap') {\n  const center = encodeURIComponent(args.destination || args.query || 'Jakarta');\n  const zoom = args.zoom || 13;\n  const staticMapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${center}&zoom=${zoom}&size=600x400&maptype=roadmap${apiKey ? `&key=${apiKey}` : ''}`;\n  return {\n    ok: true,\n    action: 'showMap',\n    url: staticMapUrl,\n    note: apiKey ? \"URL Static Map Google Maps siap ditampilkan.\" : \"Peringatan: API Key belum dikonfigurasi.\"\n  };\n}\n\nif (!apiKey) {\n  return { \n    ok: false, \n    error: \"API Key Google Maps tidak ditemukan. Pastikan GOOGLE_MAPS_API_KEY telah diset di environment.\" \n  };\n}\n\ntry {\n  if (action === 'searchPlace') {\n    if (!args.query) return { ok: false, error: \"Parameter 'query' dibutuhkan untuk searchPlace.\" };\n    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(args.query)}&key=${apiKey}`;\n    const res = await fetch(url);\n    const data = await res.json();\n    \n    if (data.status !== 'OK') {\n      return { ok: false, error: `Google API Error: ${data.status}`, detail: data.error_message };\n    }\n    \n    const results = data.results.map(item => ({\n      formatted_address: item.formatted_address,\n      location: item.geometry.location,\n      place_id: item.place_id\n    }));\n    \n    return { ok: true, action: 'searchPlace', count: results.length, results };\n  }\n\n  if (action === 'getDirections') {\n    if (!args.origin || !args.destination) {\n      return { ok: false, error: \"Parameter 'origin' dan 'destination' dibutuhkan untuk getDirections.\" };\n    }\n    const mode = args.mode || 'driving';\n    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(args.origin)}&destination=${encodeURIComponent(args.destination)}&mode=${mode}&key=${apiKey}`;\n    const res = await fetch(url);\n    const data = await res.json();\n    \n    if (data.status !== 'OK') {\n      return { ok: false, error: `Google Directions API Error: ${data.status}`, detail: data.error_message };\n    }\n    \n    const route = data.routes[0];\n    const leg = route.legs[0];\n    \n    return {\n      ok: true,\n      action: 'getDirections',\n      origin: leg.start_address,\n      destination: leg.end_address,\n      distance: leg.distance.text,\n      duration: leg.duration.text,\n      steps: leg.steps.map(s => ({\n        instruction: s.html_instructions.replace(/<[^>]*>?/gm, ''),\n        distance: s.distance.text,\n        duration: s.duration.text\n      }))\n    };\n  }\n\n  return { ok: false, error: `Aksi '${action}' tidak dikenal.` };\n} catch (err) {\n  return { ok: false, error: err.message };\n}"
+        }
+    }
+}

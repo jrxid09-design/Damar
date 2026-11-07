@@ -1,0 +1,34 @@
+{
+    "id": "http-fetch-page",
+    "name": "HTTP Fetch Halaman",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Mengambil konten halaman web / API via HTTP GET dengan header browser, mengembalikan status, headers, dan body. Dipakai untuk menelusuri profil atau postingan web.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-20T19:41:13.920Z",
+        "spec": {
+            "toolName": "httpFetchPage",
+            "description": "Mengambil konten halaman web / API via HTTP GET dengan header browser, mengembalikan status, headers, dan body. Dipakai untuk menelusuri profil atau postingan web.",
+            "parameters": {
+                "url": {
+                    "type": "string",
+                    "description": "URL lengkap yang ingin diambil",
+                    "required": true
+                },
+                "method": {
+                    "type": "string",
+                    "description": "HTTP method, default GET",
+                    "required": false
+                }
+            },
+            "code": "const u = new URL(args.url);\nconst ctrl = new AbortController();\nconst t = setTimeout(() => ctrl.abort(), 20000);\ntry {\n  const r = await fetch(u.toString(), {\n    method: (args.method || 'GET').toUpperCase(),\n    signal: ctrl.signal,\n    redirect: 'follow',\n    headers: {\n      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',\n      'Accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',\n      'Accept-Language': 'en-US,en;q=0.9'\n    }\n  });\n  const body = await r.text();\n  return {\n    ok: r.ok,\n    status: r.status,\n    statusText: r.statusText,\n    finalUrl: r.url,\n    headers: Object.fromEntries(r.headers.entries()),\n    bodyLength: body.length,\n    body: body.slice(0, 5000)\n  };\n} catch (e) {\n  return { ok: false, error: String(e.message || e) };\n} finally {\n  clearTimeout(t);\n}"
+        }
+    }
+}

@@ -1,0 +1,29 @@
+{
+    "id": "kill-other-tts",
+    "name": "Kill Other TTS",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Matikan semua layanan TTS selain ArdiNeural (port 8880): stop container Docker Kokoro jika berjalan, kill proses voice-server.js di port 8644, dan kill semua proses TTS lain yang bukan di port 8880. Hanya untuk Windows dengan PowerShell.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-18T11:13:44.564Z",
+        "spec": {
+            "toolName": "killOtherTts",
+            "description": "Matikan semua layanan TTS selain ArdiNeural (port 8880): stop container Docker Kokoro jika berjalan, kill proses voice-server.js di port 8644, dan kill semua proses TTS lain yang bukan di port 8880. Hanya untuk Windows dengan PowerShell.",
+            "parameters": {
+                "dryRun": {
+                    "type": "boolean",
+                    "description": "Jika true, hanya laporkan apa yang akan dimatikan tanpa benar-benar mematikan (simulasi).",
+                    "required": false
+                }
+            },
+            "code": "const { execSync } = require('child_process');\n\nfunction ps(cmd, timeout = 8000) {\n  try {\n    return execSync(`powershell -NoProfile -Command \"${cmd.replace(/\"/g, '\\\\\"')}\"`, {\n      encoding: 'utf8', timeout, windowsHide: true\n    }).trim();\n  } catch { return ''; }\n}\n\nfunction cmd(c, timeout = 8000) {\n  try {\n    return execSync(c, { encoding: 'utf8', timeout, windowsHide: true }).trim();\n  } catch { return ''; }\n}\n\nasync function execute(args) {\n  const dry = args.dryRun === true;\n  const results = [];\n\n  // ── 1. Docker stop kokoro ──────────────────────────────────\n  try {\n    const psOut = cmd('docker ps --filter name=aether_kokoro --format \"{{.Names}}\"');\n    if (psOut && psOut.includes('aether_kokoro')) {\n      if (!dry) {\n        cmd('docker stop aether_kokoro', 12000);\n        cmd('docker update --restart=no aether_kokoro');\n      }\n      results.push({ target: 'docker_kokoro', action: dry ? 'would_stop' : 'stopped' });\n    } else {\n      results.push({ target: 'docker_kokoro', action: 'not_running' });\n    }\n  } catch (e) {\n    results.push({ target: 'docker_kokoro', action: 'error', error: e.message });\n  }\n\n  // ── 2. Kill proses di port 8644 ────────────────────────────\n  try {\n    const net = cmd('netstat -ano | findstr \":8644 \"');\n    if (net) {\n      const pids = new Set();\n      for (const line of net.split('\\r\\n')) {\n        const parts = line.trim().split(/\\s+/);\n        const pid = parts[parts.length - 1];\n        if (pid && /^\\d+$/.test(pid) && pid !== '0') pids.add(pid);\n      }\n      for (const pid of pids) {\n        if (!dry) cmd(`taskkill /PID ${pid} /F`);\n        results.push({ target: 'port_8644', pid, action: dry ? 'would_kill' : 'killed' });\n      }\n      if (pids.size === 0) {\n        results.push({ target: 'port_8644', action: 'no_pids' });\n      }\n    } else {\n      results.push({ target: 'port_8644', action: 'no_listener' });\n    }\n  } catch (e) {\n    results.push({ target: 'port_8644', action: 'error', error: e.message });\n  }\n\n  // ── 3. Kill proses TTS lain yang BUKAN port 8880 ───────────\n  try {\n    const json = ps(\n      `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'tts|voice|kokoro|aether-tts' -and $_.CommandLine -notmatch 'console' } | Select-Object ProcessId, CommandLine | ConvertTo-Json -Compress`\n    );\n    let procs = [];\n    if (json) {\n      try {\n        const parsed = JSON.parse(json);\n        procs = Array.isArray(parsed) ? parsed : [parsed];\n      } catch { /* ignore parse error */ }\n    }\n\n    if (procs.length === 0) {\n      // Fallback: coba wmic\n      const wmicOut = cmd('wmic process where \"Name=\\'node.exe\\'\" get ProcessId,CommandLine /format:csv 2>nul');\n      if (wmicOut) {\n        for (const line of wmicOut.split('\\r\\n')) {\n          const lower = line.toLowerCase();\n          if ((lower.includes('tts') || lower.includes('voice') || lower.includes('kokoro')) && !lower.includes('console')) {\n            const m = line.match(/(\\d+)\\s*$/);\n            if (m) procs.push({ ProcessId: parseInt(m[1]), CommandLine: line });\n          }\n        }\n      }\n    }\n\n    const killed = [];\n    for (const p of procs) {\n      const pid = String(p.ProcessId);\n      const cl = (p.CommandLine || '').toLowerCase();\n\n      // Skip proses yang listen di port 8880\n      try {\n        const netPid = cmd(`netstat -ano | findstr \"${pid}\"`);\n        if (netPid && netPid.includes(':8880')) {\n          results.push({ target: 'tts_process', pid, action: 'skipped_port_8880', cmdline: cl.substring(0, 120) });\n          continue;\n        }\n      } catch {}\n\n      if (!dry) cmd(`taskkill /PID ${pid} /F`);\n      killed.push(pid);\n      results.push({ target: 'tts_process', pid, action: dry ? 'would_kill' : 'killed', cmdline: cl.substring(0, 120) });\n    }\n\n    if (killed.length === 0 && results.filter(r => r.target === 'tts_process').length === 0) {\n      results.push({ target: 'tts_process', action: 'none_found' });\n    }\n  } catch (e) {\n    results.push({ target: 'tts_process', action: 'error', error: e.message });\n  }\n\n  return { ok: true, dry_run: dry, results };\n}\n\nmodule.exports = class Tool {\n  constructor() {\n    this.name = 'killOtherTts';\n    this.description = 'Matikan semua TTS selain ArdiNeural: docker stop kokoro, kill voice-server port 8644, kill proses TTS bukan port 8880.';\n    this.parameters = {\n      dryRun: { type: 'boolean', description: 'Simulasi saja, tidak benar-benar kill', required: false }\n    };\n  }\n  async execute(args) { return execute(args); }\n};"
+        }
+    }
+}

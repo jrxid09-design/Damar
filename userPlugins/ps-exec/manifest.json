@@ -1,0 +1,29 @@
+{
+    "id": "ps-exec",
+    "name": "PowerShell Exec",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Menjalankan perintah PowerShell di mesin Windows ini dan mengembalikan stdout, stderr, dan exit code. Untuk membaca/menulis file, memeriksa port, spawn proses node, dan mematikan proses.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-20T18:01:28.320Z",
+        "spec": {
+            "toolName": "psExec",
+            "description": "Menjalankan perintah PowerShell di mesin Windows ini dan mengembalikan stdout, stderr, dan exit code. Untuk membaca/menulis file, memeriksa port, spawn proses node, dan mematikan proses.",
+            "parameters": {
+                "command": {
+                    "description": "Perintah PowerShell yang dijalankan",
+                    "required": true,
+                    "type": "string"
+                }
+            },
+            "code": "const { exec } = require('child_process');\nreturn await new Promise((resolve) => {\n  exec('powershell -NoProfile -NonInteractive -Command ' + JSON.stringify(args.command), { maxBuffer: 1024*1024*8, timeout: 180000, windowsHide: true }, (err, stdout, stderr) => {\n    resolve({\n      stdout: stdout || '',\n      stderr: stderr || '',\n      exitCode: err ? (err.code ?? -1) : 0,\n      error: err ? err.message : null\n    });\n  });\n});"
+        }
+    }
+}

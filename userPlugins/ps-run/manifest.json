@@ -1,0 +1,34 @@
+{
+    "id": "ps-run",
+    "name": "PowerShell Run",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Menjalankan perintah PowerShell di mesin Windows ini, mengembalikan stdout/stderr + exit code. Untuk spawn proses node, cek status, dan membaca file.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-17T17:16:22.959Z",
+        "spec": {
+            "toolName": "psRun",
+            "description": "Menjalankan perintah PowerShell di mesin Windows ini, mengembalikan stdout/stderr + exit code. Untuk spawn proses node, cek status, dan membaca file.",
+            "parameters": {
+                "command": {
+                    "description": "Perintah PowerShell yang dijalankan",
+                    "required": true,
+                    "type": "string"
+                },
+                "timeout_ms": {
+                    "description": "Timeout dalam milidetik (default 60000)",
+                    "type": "number",
+                    "required": false
+                }
+            },
+            "code": "const { spawn } = require('child_process');\nconst c = args.command || '';\nconst t = Number(args.timeout_ms || 60000);\nconst isWin = process.platform === 'win32';\nconst cmd = isWin ? 'powershell.exe' : '/bin/sh';\nconst full = isWin ? ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', c] : ['-c', c];\nconst child = spawn(cmd, full, { windowsHide: true });\nlet out = '', err = '';\nchild.stdout.on('data', d => { out += d; });\nchild.stderr.on('data', d => { err += d; });\nconst timer = setTimeout(() => { try { child.kill(); } catch (e) {} }, t);\nconst code = await new Promise(resolve => child.on('close', resolve));\nclearTimeout(timer);\nreturn { ok: code === 0, exitCode: code, stdout: out.slice(0, 12000), stderr: err.slice(0, 4000) };"
+        }
+    }
+}

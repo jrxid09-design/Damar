@@ -1,0 +1,143 @@
+/* Mata Dewa — permukaan spasial Damar. Hemat GPU: tanpa blur/backdrop mahal. */
+
+.md-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #05080d;
+}
+
+.md-globe {
+  position: absolute;
+  inset: 0;
+}
+
+.md-globe .cesium-viewer,
+.md-globe .cesium-widget,
+.md-globe canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.md-globe-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9fb3c8;
+  padding: 24px;
+  text-align: center;
+}
+
+#md-cesium-credits {
+  position: absolute;
+  left: 6px;
+  bottom: 4px;
+  z-index: 20;
+  font-size: 10px;
+  opacity: 0.75;
+  color: #cfe3ff;
+}
+#md-cesium-credits a { color: #8ad0ff; }
+
+/* HUD */
+.md-hud-host { position: absolute; inset: 0; pointer-events: none; z-index: 15; }
+.md-hud {
+  position: absolute;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #cfe3ff;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+}
+.md-hud-tl { top: 12px; left: 50%; transform: translateX(-50%); text-align: center; }
+.md-hud-bl { left: 14px; bottom: 30px; }
+.md-hud-row { display: flex; gap: 8px; justify-content: center; line-height: 1.5; }
+.md-hud .md-k { color: #6fd0ff; letter-spacing: 0.08em; }
+.md-hud .md-v { color: #eaf4ff; }
+.md-hud .md-dim { color: #7d93ad; }
+
+/* Rails */
+.md-rail {
+  position: absolute;
+  top: 12px;
+  bottom: 40px;
+  width: 232px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 18;
+  overflow-y: auto;
+}
+.md-rail-left { left: 12px; }
+.md-rail-right { right: 12px; }
+
+.md-panel {
+  background: rgba(8, 14, 22, 0.86);
+  border: 1px solid rgba(111, 208, 255, 0.16);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #dbe9f7;
+}
+.md-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #bfe2ff;
+  margin-bottom: 8px;
+}
+.md-panel-head .icon { width: 15px; height: 15px; }
+.md-panel-sub { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #8fb0cf; }
+.md-panel-sub .icon { width: 13px; height: 13px; }
+
+.md-mode {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 1px 7px;
+  border-radius: 20px;
+  background: rgba(72, 230, 165, 0.16);
+  color: #48e6a5;
+  border: 1px solid rgba(72, 230, 165, 0.3);
+}
+
+.md-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 0;
+  cursor: pointer;
+  color: #c6dbef;
+}
+.md-toggle input { accent-color: #28afff; }
+
+.md-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.md-style, .md-stack { text-transform: capitalize; }
+.md-stack[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+/* Provider panel */
+.md-providers { display: flex; flex-direction: column; gap: 6px; }
+.md-provider {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.md-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.md-dot.md-available { background: #48e6a5; }
+.md-dot.md-degraded { background: #ffd23f; }
+.md-dot.md-unavailable { background: #ff6b4a; }
+.md-pname { color: #d6e6f5; }
+.md-pmeta { color: #7d93ad; font-size: 10px; }
+.md-pfail { color: #ff9a86; font-size: 10px; width: 100%; padding-left: 15px; }
+
+/* Responsif sempit: sembunyikan rail kanan agar globe lega */
+@media (max-width: 900px) {
+  .md-rail-right { display: none; }
+}

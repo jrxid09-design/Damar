@@ -1,0 +1,23 @@
+{
+    "id": "scan-screen",
+    "name": "Layar Scan",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Mengambil screenshot layar dan mengembalikan path file untuk analisis lebih lanjut (mis. untuk deteksi koordinat atau konten visual).",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-10T17:18:50.841Z",
+        "spec": {
+            "toolName": "scanScreen",
+            "description": "Mengambil screenshot layar dan mengembalikan path file untuk analisis lebih lanjut (mis. untuk deteksi koordinat atau konten visual).",
+            "parameters": {},
+            "code": "// Mengambil screenshot layar menggunakan tool internal capture-screen\nconst result = await global.__tools__.capture_screen__captureScreen({});\nreturn { screenshotPath: result.path };"
+        }
+    }
+}

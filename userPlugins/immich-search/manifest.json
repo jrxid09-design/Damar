@@ -1,0 +1,33 @@
+{
+    "id": "immich-search",
+    "name": "Immich Search",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Mencari foto di galeri Immich lokal berdasarkan kueri pencarian.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-16T18:47:03.708Z",
+        "spec": {
+            "toolName": "immichSearch",
+            "description": "Mencari foto di galeri Immich lokal berdasarkan kueri pencarian.",
+            "parameters": {
+                "apiUrl": {
+                    "description": "URL API Immich (default: http://127.0.0.1:2283)",
+                    "type": "string"
+                },
+                "query": {
+                    "description": "Kueri atau kata kunci pencarian (misal: 'ronny')",
+                    "required": true,
+                    "type": "string"
+                }
+            },
+            "code": "const apiUrl = args.apiUrl || 'http://127.0.0.1:2283';\nconst query = args.query;\nconst res = await fetch(`${apiUrl}/api/search/metadata`, {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },\n  body: JSON.stringify({ searchTerm: query })\n});\nif (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);\nconst data = await res.json();\nreturn { result: data };"
+        }
+    }
+}

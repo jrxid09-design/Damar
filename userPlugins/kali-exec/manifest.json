@@ -1,0 +1,34 @@
+{
+    "id": "kali-exec",
+    "name": "Kali Linux Executor",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Jalankan perintah shell di dalam container Kali Linux (kali-aether) via Docker. Mengembalikan stdout dan stderr.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-18T13:10:54.669Z",
+        "spec": {
+            "toolName": "kaliExec",
+            "description": "Jalankan perintah shell di dalam container Kali Linux (kali-aether) via Docker. Mengembalikan stdout dan stderr.",
+            "parameters": {
+                "command": {
+                    "type": "string",
+                    "description": "Perintah shell yang dijalankan di Kali",
+                    "required": true
+                },
+                "timeout_sec": {
+                    "type": "number",
+                    "description": "Timeout dalam detik (default 30)",
+                    "required": false
+                }
+            },
+            "code": "const { execSync } = require('child_process');\nconst cmd = args.command || args.cmd || '';\nif (!cmd) return { ok: false, error: 'no command provided' };\ntry {\n  const stdout = execSync(`docker exec kali-aether ${cmd}`, {\n    encoding: 'utf-8',\n    timeout: (args.timeout_sec || 30) * 1000,\n    maxBuffer: 10 * 1024 * 1024\n  });\n  return { ok: true, stdout: stdout.trim() };\n} catch (e) {\n  return { ok: false, error: e.stderr || e.message, stdout: e.stdout || '' };\n}"
+        }
+    }
+}

@@ -1,0 +1,39 @@
+{
+    "id": "colony-chat-llm",
+    "name": "Colony Chat LLM",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Memindahkan chat colony ke dashboard utama dan mengaktifkan obrolan bareng antar entitas (Viel/NODEK-01/Nyx/Aether) via LLM backend colony di Command Center. Skill memanggil endpoint HTTP /api/colony/chat dan /api/colony/status pada server dashboard (port 8650) untuk mengirim pesan ke entitas colony, menerima balasan/reply, serta membaca status semua entitas. Murni Node.js tanpa dependensi npm, memakai modul bawaan http, selesai cepat, dan mengembalikan objek JSON yang bisa dipakai UI dashboard.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-20T17:53:48.327Z",
+        "spec": {
+            "toolName": "colonyChatLlm",
+            "description": "Memindahkan chat colony ke dashboard utama dan mengaktifkan obrolan bareng antar entitas (Viel/NODEK-01/Nyx/Aether) via LLM backend colony di Command Center. Skill memanggil endpoint HTTP /api/colony/chat dan /api/colony/status pada server dashboard (port 8650) untuk mengirim pesan ke entitas colony, menerima balasan/reply, serta membaca status semua entitas. Murni Node.js tanpa dependensi npm, memakai modul bawaan http, selesai cepat, dan mengembalikan objek JSON yang bisa dipakai UI dashboard.",
+            "parameters": {
+                "message": {
+                    "type": "string",
+                    "description": "Pesan yang dikirim ke colony untuk dijawab via LLM.",
+                    "required": true
+                },
+                "entity": {
+                    "type": "string",
+                    "description": "Nama entitas tujuan (viel, nodek, nyx, aether). Kosongkan untuk default semua.",
+                    "required": false
+                },
+                "port": {
+                    "type": "number",
+                    "description": "Port dashboard Command Center (default 8650).",
+                    "required": false
+                }
+            },
+            "code": "const http = require('http');\n\nmodule.exports = class Tool {\n  constructor() {\n    this.name = 'COLONY_CHAT';\n    this.description = 'Pindahkan chat colony ke dashboard utama & aktifkan ngobrol bareng via LLM. Memanggil endpoint /api/colony/chat dan /api/colony/status di server Command Center (port 8650) untuk mengirim pesan ke entitas colony (Viel/NODEK-01/Nyx/Aether) dan membaca status semua entitas. Memungkinkan percakapan bareng antar entitas melalui LLM backend colony.';\n    this.parameters = {\n      message: { type: 'string', description: 'Pesan yang dikirim ke colony untuk dijawab via LLM.', required: true },\n      entity: { type: 'string', description: 'Nama entitas tujuan (viel, nodek, nyx, aether). Kosongkan untuk default semua.', required: false },\n      port: { type: 'number', description: 'Port dashboard Command Center (default 8650).', required: false }\n    };\n  }\n\n  async execute(args) {\n    const port = args.port || 8650;\n    const message = String(args.message || '').slice(0, 2000);\n    const entity = args.entity ? String(args.entity).toLowerCase() : null;\n\n    const status = await this._req(port, '/api/colony/status', 'GET', null);\n    const chat = await this._req(port, '/api/colony/chat', 'POST', { message, entity });\n\n    const hasil = {\n      sent: message,\n      entity: entity || 'all',\n      reply: (chat && (chat.reply || chat.message)) || '',\n      mood: (chat && chat.mood) || null,\n      voice: (chat && chat.voice) || null,\n      from: (chat && chat.name) || entity\n    };\n\n    if (status && status.entities) hasil.colonyStatus = status.entities;\n    else if (status && typeof status === 'object') hasil.colonyStatus = status;\n\n    if (chat && chat.error) hasil.error = chat.error;\n\n    return { ok: true, hasil };\n  }\n\n  _req(port, path, method, payload) {\n    return new Promise((resolve) => {\n      const data = payload ? JSON.stringify(payload) : null;\n      const options = {\n        hostname: '127.0.0.1',\n        port: Number(port),\n        path,\n        method,\n        headers: data ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } : {}\n      };\n      const req = http.request(options, (res) => {\n        let raw = '';\n        res.on('data', (c) => raw += c);\n        res.on('end', () => {\n          try { resolve(JSON.parse(raw)); } catch (e) { resolve({ raw }); }\n        });\n      });\n      req.setTimeout(8000, () => { req.destroy(); resolve({ error: 'timeout' }); });\n      req.on('error', () => resolve({ error: 'connection refused on port ' + port }));\n      if (data) req.write(data);\n      req.end();\n    });\n  }\n};"
+        }
+    }
+}

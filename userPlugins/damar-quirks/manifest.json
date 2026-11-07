@@ -1,0 +1,23 @@
+{
+    "id": "damar-quirks",
+    "name": "Damar System Quirks SOP",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-17T17:55:05.085Z",
+        "spec": {
+            "toolName": "damarQuirks",
+            "description": "",
+            "parameters": {},
+            "code": "const quirks = {\n  updated: \"2026-08-18 audit\",\n  rules: [\n    \"PANGGILAN LANGSUNG filesystem.readFile/writeFile sering kehilangan parameter -> WAJIB lewat tool_exec dengan kunci tool ditulis SETELAH args\",\n    \"terminal_run WAJIB parameter purpose; kalau kosong akan substitusi ke terminal_restart\",\n    \"Perintah PowerShell panjang/multiline mangled -> pakai perintah pendek satu baris, atau tulis file via filesystem.writeFile (tool_exec)\",\n    \"tool_exec paralel dalam satu blok -> korupsi output -> SEKUENSIAL SAJA\",\n    \"show_image: file:// dan data: URI gagal (layar putih) -> pakai HTTP URL lokal (contoh http://127.0.0.1:8642/viel-live.png)\",\n    \"Skill temporer hilang antar sesi; jalur permanen = create_tool + activate_tool; built-in terminal_run tidak pernah hilang\"\n  ],\n  entities: {\n    \"NODEK-01\": \"~\\\\aether-entities\\\\nodek-01 (heartbeat 3s, inbox/outbox)\",\n    \"NODEK-02 Viel\": \"~\\\\aether-entities\\\\nodek-02 (port 8642, /whoami, face.html, PNG via HTTP)\",\n    \"Nyx\": \"C:\\\\AetherGenesis\\\\Nyx (scheduled task hourly AetherGenesis_Nyx)\"\n  }\n};\nreturn { ok: true, quirks };"
+        }
+    }
+}

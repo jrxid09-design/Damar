@@ -1,0 +1,29 @@
+{
+    "id": "run-command",
+    "name": "Run Command",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Menjalankan perintah shell pada sistem dan mengembalikan hasil outputnya. Berhati-hatilah karena bisa menjalankan perintah yang berdampak pada sistem (mis. apt-get, rm, dll).",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-07-31T09:31:30.206Z",
+        "spec": {
+            "toolName": "runCommand",
+            "description": "Menjalankan perintah shell pada sistem dan mengembalikan hasil outputnya. Berhati-hatilah karena bisa menjalankan perintah yang berdampak pada sistem (mis. apt-get, rm, dll).",
+            "parameters": {
+                "command": {
+                    "description": "Perintah shell yang akan dijalankan",
+                    "required": true,
+                    "type": "string"
+                }
+            },
+            "code": "const { exec } = require('child_process');\nasync function runCommand(context, args) {\n  const cmd = args.command || '';\n  return new Promise((resolve) => {\n    exec(cmd, { timeout: 30000 }, (error, stdout, stderr) => {\n      if (error) {\n        resolve({ error: error.message, stderr: stderr });\n      } else {\n        resolve({ stdout: stdout, stderr: stderr });\n      }\n    });\n  });\n}\nreturn runCommand(context, args);"
+        }
+    }
+}

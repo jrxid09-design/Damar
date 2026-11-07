@@ -1,0 +1,23 @@
+{
+    "id": "crypto",
+
+    "version": "0.1.0",
+
+    "name": "Crypto",
+
+    "description": "Harga & snapshot aset kripto. Scaffold — tools belum diimplementasikan.",
+
+    "category": "data",
+
+    "entry": "index.js",
+
+    "permissions": [
+        "network"
+    ],
+
+    "tags": [
+        "crypto",
+        "market",
+        "price"
+    ]
+}

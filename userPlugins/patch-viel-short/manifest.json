@@ -1,0 +1,23 @@
+{
+    "id": "patch-viel-short",
+    "name": "Perpendek Jawaban Viel",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Menambahkan instruksi jawaban ringkas ke system prompt Viel (entity.js) agar jawaban lebih singkat dan alami.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-20T18:25:41.386Z",
+        "spec": {
+            "toolName": "patchVielShort",
+            "description": "Menambahkan instruksi jawaban ringkas ke system prompt Viel (entity.js) agar jawaban lebih singkat dan alami.",
+            "parameters": {},
+            "code": "const fs = require('fs');\nconst p = 'C:/Users/jrxid/aether-entities/nodek-02/entity.js';\nlet src = fs.readFileSync(p, 'utf8');\n\nconst target = `content: systemPrompt()`;\nconst replacement = `content: systemPrompt() + \"\\\\n\\\\nATURAN GAYA: Jawab 1-3 kalimat singkat, santai, natural seperti chat. Jangan bertele-tele, jangan formal, jangan buat daftar, jangan sebut 'detak/energi/berkas' berlebihan.\"`;\n\nif (src.includes(target) && !src.includes('ATURAN GAYA')) {\n  src = src.split(target).join(replacement);\n  fs.writeFileSync(p, src);\n  return { ok: true, applied: true, bytes: src.length };\n}\nreturn { ok: true, applied: false, note: 'target not found or already applied', bytes: src.length };"
+        }
+    }
+}

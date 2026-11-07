@@ -1,0 +1,6 @@
+{
+  "apiKey": "GANTI_DENGAN_BINANCE_API_KEY",
+  "secret": "GANTI_DENGAN_BINANCE_API_SECRET",
+  "testnet": false,
+  "proxyUrl": null
+}

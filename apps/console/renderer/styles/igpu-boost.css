@@ -1,0 +1,187 @@
+/* =========================================================
+   iGPU BOOST — override performa untuk perangkat tanpa GPU
+   Dimuat PALING AKHIR (setelah semua stylesheet lain) untuk
+   menetralkan efek komposit mahal: blur, backdrop-filter,
+   drop-shadow filter, conic-gradient, dan animasi dekoratif.
+   Tema JARVIS dipertahankan via warna solid, border, dan
+   box-shadow ringan (semuanya cheap di CPU/iGPU).
+   ========================================================= */
+
+/* ---- 1. MATIKAN body::before blur(34px) — biang utama --------- */
+body::before {
+    filter: none !important;
+    background:
+        radial-gradient(50% 45% at 18% 2%,  rgba(53, 214, 240, 0.04), transparent 60%),
+        radial-gradient(55% 50% at 50% 112%, rgba(124, 92, 255, 0.05), transparent 66%) !important;
+}
+
+/* ---- 2. HAPUS SEMUA backdrop-filter --------------------------- */
+/* backdrop-filter = GPU compositing per elemen; di iGPU tanpa
+   dedicated VRAM, ini menggeser seluruh lapisan ke software
+   pipeline. Ganti dengan background solid/semi-solid.          */
+.titlebar,
+.launcher,
+.holo-surface,
+.holo-panel,
+.holo-input,
+.holo-notif,
+.holo-prompt input,
+.card,
+.panel,
+.stat,
+.toast,
+[class*="toast"],
+.mc-float,
+.lab-rail,
+.lab-top,
+.lab-cmd,
+.lab-panel,
+.hcb,
+.ae-chat-msg .bub,
+.composer {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+/* Pulihkan kaca semi-solid (tanpa blur, cuma alpha) */
+.panel,
+.holo-surface,
+.mc-float {
+    background: rgba(10, 16, 26, 0.82) !important;
+}
+.stat {
+    background: rgba(12, 22, 34, 0.72) !important;
+}
+.card {
+    background: rgba(12, 22, 34, 0.78) !important;
+}
+.titlebar {
+    background: linear-gradient(180deg, rgba(10, 14, 28, 0.92), rgba(6, 9, 18, 0.88)) !important;
+}
+.launcher {
+    background: radial-gradient(120% 100% at 50% 0%, rgba(8, 12, 24, 0.88), rgba(4, 6, 15, 0.98)) !important;
+}
+.holo-prompt input {
+    background: rgba(8, 12, 24, 0.85) !important;
+}
+.lab-rail {
+    background: rgba(5, 9, 16, 0.82) !important;
+}
+.lab-top {
+    background: rgba(5, 9, 16, 0.72) !important;
+}
+.lab-cmd {
+    background: rgba(5, 9, 16, 0.88) !important;
+}
+.lab-panel {
+    background: rgba(8, 14, 24, 0.85) !important;
+}
+.hcb {
+    background: rgba(8, 13, 22, 0.88) !important;
+}
+.ae-chat-msg .bub {
+    background: rgba(10, 16, 26, 0.85) !important;
+}
+.ae-chat-msg.u .bub {
+    background: linear-gradient(135deg, rgba(0, 223, 255, 0.13), rgba(124, 92, 255, 0.13)) !important;
+}
+.composer {
+    background: rgba(8, 13, 22, 0.85) !important;
+}
+
+/* ---- 3. HAPUS filter: drop-shadow() di kanvas -------------- */
+/* drop-shadow pada elemen besar = compositing mahal. Ganti
+   dengan box-shadow tipis di parent atau langsung hilangkan. */
+.holo-canvas canvas,
+.holo-stage canvas,
+.mc-core-holo {
+    filter: none !important;
+}
+
+/* ---- 4. MATIKAN holo-spectrum (conic-gradient + blur(20px)) - */
+.holo-spectrum {
+    display: none !important;
+}
+
+/* ---- 5. MATIKAN cincin dekoratif berputar ------------------- */
+/* Spin = transform animation terus-menerus, kompositing tiap frame */
+.mc-core-ring,
+.holo-ring-deco,
+.holo-ring-deco.b,
+.holo-data-ring,
+.holo-data-ring.b {
+    animation: none !important;
+}
+
+/* ---- 6. MATIKAN animasi ambient/dekoratif ------------------- */
+.holo-greet,
+.holo-sub,
+.holo-sub::after {
+    animation: none !important;
+}
+.holo-sub {
+    color: var(--ae-muted, #7890A3) !important;
+    -webkit-text-fill-color: currentColor !important;
+}
+.holo-greet .caret {
+    animation: none !important;
+    opacity: 0.6 !important;
+}
+
+/* ---- 7. Ringankan grid latar + partikel -------------------- */
+/* #shell::before: grid pattern — paint cost tinggi di layar besar.
+   .stage::after: 8 radial-gradient partikel — paint berat.
+   Keduanya diganti atau dihapus. */
+#shell::before {
+    background-image:
+        linear-gradient(rgba(0, 223, 255, 0.015) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 223, 255, 0.015) 1px, transparent 1px) !important;
+    background-size: 44px 44px !important;
+    -webkit-mask-image: none !important;
+    mask-image: none !important;
+}
+.stage::after {
+    display: none !important;
+}
+
+/* ---- 8. HAPUS saturate() di backdrop yang sudah dimatikan -- */
+/* (sudah ditangani di langkah 2, tapi pastikan tidak ada sisa) */
+.lab-panel {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+.hcb {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+/* ---- 9. Transisi pendek (bukan animasi) untuk interaksi ---- */
+/* Transisi 160ms adalah paint biasa, bukan compositing — aman. */
+/* Sudah diatur oleh token --ae-motion-interaction, tidak perlu override. */
+
+/* ---- 10. will-change: cleanup ------------------------------- */
+/* Hapus will-change yang membuat browser reservasi layer GPU */
+.holo-canvas {
+    will-change: auto !important;
+}
+
+/* ---- 11. Nyalakan ulang glow tipis (box-shadow = cheap) ----- */
+/* box-shadow TANPA blur besar = hanya paint, bukan compositing.
+   Glow kecil tetap boleh untuk identitas JARVIS. */
+.holo-fab {
+    box-shadow: 0 0 12px rgba(255, 179, 0, 0.4), 0 0 28px rgba(255, 109, 0, 0.12) !important;
+}
+.holo-fab:hover {
+    box-shadow: 0 0 18px rgba(255, 179, 0, 0.55), 0 0 40px rgba(255, 109, 0, 0.2) !important;
+}
+
+/* =========================================================
+   CATATAN: File ini HANYA menetralkan efek komposit mahal.
+   Warna, border, clip-path, dan box-shadow ringan tetap utuh
+   dari stylesheet sebelumnya — tema JARVIS tidak hilang, hanya
+   tidak lagi membebani iGPU.
+   ========================================================= */
+
+/* ---- 12. HAPUS grid latar (permintaan pemilik) --------------- */
+/* Kotak grid #shell::before tak disukai — dimatikan sepenuhnya. */
+#shell::before { display: none !important; }

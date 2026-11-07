@@ -1,0 +1,44 @@
+{
+    "id": "damar-speak",
+    "name": "Damar Speak (Suara Damar)",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-17T18:07:09.047Z",
+        "spec": {
+            "toolName": "damarSpeak",
+            "description": "",
+            "parameters": {
+                "text": {
+                    "type": "string",
+                    "required": true,
+                    "description": "Teks yang diucapkan dalam Bahasa Indonesia"
+                },
+                "voice": {
+                    "type": "string",
+                    "required": false,
+                    "description": "Voice edge-tts, default id-ID-ArdiNeural"
+                },
+                "rate": {
+                    "type": "string",
+                    "required": false,
+                    "description": "Kecepatan bicara, default -8%"
+                },
+                "pitch": {
+                    "type": "string",
+                    "required": false,
+                    "description": "Pitch suara, default -12Hz"
+                }
+            },
+            "code": "const { execSync } = require('child_process');\nconst fs = require('fs');\nconst path = require('path');\nconst dir = 'C:\\\\AetherGenesis\\\\DamarSelf\\\\voice';\nfs.mkdirSync(dir, { recursive: true });\nconst text = (args.text || '').replace(/\"/g, '');\nif (!text) return { ok: false, error: 'text kosong' };\nconst voice = args.voice || 'id-ID-ArdiNeural';\nconst rate = args.rate || '-8%';\nconst pitch = args.pitch || '-12Hz';\nconst file = path.join(dir, 'speak-' + Date.now() + '.mp3');\nexecSync(`edge-tts --voice ${voice} --rate=${rate} --pitch=${pitch} --text \"${text}\" --write-media \"${file}\"`, { timeout: 60000 });\nconst size = fs.statSync(file).size;\nif (args.autoplay !== false) execSync(`start \"\" \"${file}\"`, { shell: 'cmd.exe', timeout: 10000 });\nreturn { ok: true, file, size, text, voice };"
+        }
+    }
+}

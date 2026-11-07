@@ -1,0 +1,34 @@
+{
+    "id": "read-server-chat-bloc",
+    "name": "Baca Blok server.js",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Menampilkan blok baris tertentu dari server.js Command Center untuk memeriksa struktur sebelum di-patch.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-20T18:23:26.544Z",
+        "spec": {
+            "toolName": "readServerChatBloc",
+            "description": "Menampilkan blok baris tertentu dari server.js Command Center untuk memeriksa struktur sebelum di-patch.",
+            "parameters": {
+                "start": {
+                    "type": "number",
+                    "description": "Baris awal (1-based)",
+                    "required": true
+                },
+                "end": {
+                    "type": "number",
+                    "description": "Baris akhir",
+                    "required": true
+                }
+            },
+            "code": "const fs = require('fs');\nconst p = 'C:/AetherGenesis/CommandCenter/server.js';\nconst lines = fs.readFileSync(p, 'utf8').split(/\\r?\\n/);\nconst s = Math.max(0, (args.start || 1) - 1);\nconst e = Math.min(lines.length, (args.end || args.start || 1));\nconst out = [];\nfor (let i = s; i < e; i++) out.push((i + 1) + ': ' + lines[i]);\nreturn { total: lines.length, shown: out.length, lines: out.join('\\n') };"
+        }
+    }
+}

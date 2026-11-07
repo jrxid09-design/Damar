@@ -1,0 +1,20 @@
+{
+    "id": "memory-delete-by-id",
+    "name": "Memory Delete By ID",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Menghapus satu memori jangka panjang Aether berdasarkan ID via HTTP DELETE ke backend memori lokal (mencoba beberapa port umum: env AETHER_PORT, 3210, 8650, 8080, 3000).",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "manual",
+        "createdAt": "2026-08-17T21:03:11.489Z",
+        "spec": {
+            "raw": "// Skill buatan Aether Skill Factory — jangan sunting manual.\nclass SkillImpl {\n\n  async execute(args) {\n    const http = require('http');\n    const id = args.id || '';\n    if (!id || !/^[a-zA-Z0-9]+$/.test(id)) {\n      return { ok: false, error: 'Parameter id wajib diisi (alfanumerik, tanpa spasi). Contoh: 15f68829d26b' };\n    }\n    const ports = [];\n    if (process.env.AETHER_PORT) ports.push(Number(process.env.AETHER_PORT));\n    [3210, 8650, 8080, 3000, 5000, 7777].forEach(p => { if (!ports.includes(p)) ports.push(p); });\n    const tryPort = (port) => new Promise((resolve) => {\n      const req = http.request({ hostname: '127.0.0.1', port, path: '/api/memory/' + id, method: 'DELETE', timeout: 2500 }, (res) => {\n        let body = '';\n        res.on('data', (c) => { body += c; });\n        res.on('end', () => resolve({ port, status: res.statusCode, body: body.slice(0, 400) }));\n      });\n      req.on('error', () => resolve(null));\n      req.on('timeout', () => { req.destroy(); resolve(null); });\n      req.end();\n    });\n    for (const p of ports) {\n      const r = await tryPort(p);\n      if (r && r.status >= 200 && r.status < 500 && r.status !== 404) return { ok: true, deleted: id, result: r };\n      if (r && r.status === 200) return { ok: true, deleted: id, result: r };\n    }\n    return { ok: false, error: 'Tidak ada endpoint penghapus memori yang merespons di port manapun. Perlu dukungan backend Aether.' };\n  }\n\n}\n\nclass Tool {\n    constructor() {\n        this._impl = new SkillImpl();\n        this.name = \"MEMORYDELETEBYID\";\n        this.description = \"Menghapus satu memori jangka panjang Aether berdasarkan ID via HTTP DELETE ke backend memori lokal (mencoba beberapa port umum: env AETHER_PORT, 3210, 8650, 8080, 3000).\";\n        this.parameters = {\n    id: {\"type\":\"string\",\"description\":\"ID memori yang akan dihapus, mis. 15f68829d26b\",\"required\":true}\n        };\n    }\n    // Kontrak plugin: execute(context, params).\n    // Pilih sumber args yang benar: params utama; context\n    // kadang membawa args saat pemanggil legacy.\n    async execute(context, params) {\n        const args = (params && typeof params === 'object' && !Array.isArray(params) && Object.keys(params).length)\n            ? params\n            : (context && typeof context === 'object' && !Array.isArray(context) && Object.keys(context).length)\n                ? context\n                : {};\n        return this._impl.execute(args);\n    }\n}\nmodule.exports = [new Tool()];\n"
+        }
+    }
+}

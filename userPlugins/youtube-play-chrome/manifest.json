@@ -1,0 +1,33 @@
+{
+    "id": "youtube-play-chrome",
+    "name": "Putar Musik YouTube lewat Chrome",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Membuka Chrome dengan hasil pencarian YouTube untuk lagu yang ditentukan, sehingga pengguna dapat menekan play langsung.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-10T17:06:45.777Z",
+        "spec": {
+            "toolName": "playYoutubeOnChrome",
+            "description": "Membuka Chrome dengan hasil pencarian YouTube untuk lagu yang ditentukan, sehingga pengguna dapat menekan play langsung.",
+            "parameters": {
+                "query": {
+                    "type": "string",
+                    "description": "Judul lagu atau pencarian YouTube"
+                },
+                "browser": {
+                    "type": "string",
+                    "description": "Perintah untuk membuka browser (mis. google-chrome, chromium-browser). Default: google-chrome",
+                    "default": "google-chrome"
+                }
+            },
+            "code": "const { execSync } = require('child_process');\nconst query = (args.query || '').trim();\nif (!query) {\n  return { error: 'Query pencarian YouTube tidak boleh kosong.' };\n}\nconst browser = args.browser || 'google-chrome';\nconst url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;\ntry {\n  execSync(`${browser} \"${url}\"`);\n  return { opened: true, url };\n} catch (e) {\n  return { error: `Gagal membuka browser: ${e.message}` };\n}"
+        }
+    }
+}

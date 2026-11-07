@@ -1,0 +1,32 @@
+{
+    "id": "add_hanriver_camera",
+    "name": "Tambah Kamera Hanriver",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Integrate Hanriver ID camera to Home Assistant",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-01T07:27:56.345Z",
+        "spec": {
+            "toolName": "addHanriverCamera",
+            "description": "Integrate Hanriver ID camera to Home Assistant",
+            "parameters": {
+                "id": {
+                    "type": "string",
+                    "description": "Hanriver ID kamera"
+                },
+                "url": {
+                    "type": "string",
+                    "description": "URL RTSP/HTTP/OOB cameras"
+                }
+            },
+            "code": "const r = await fetch(`https://home-assistant.local/api/v1/cameras`, { method: 'POST', headers: { 'Authorization': 'Bearer <user_token>', 'Content-Type': 'application/json' }, body: JSON.stringify({ id: args.id, name: 'Hanriver_CCTV', url: args.url }) }); return { ok: r.ok, message: 'Kamera ditambahkan' };"
+        }
+    }
+}

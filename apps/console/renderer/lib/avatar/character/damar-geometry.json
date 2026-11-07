@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "damar-geometry-v1",
+  "definitions": {
+    "interfaceHead": {
+      "type": "object",
+      "properties": {
+        "primitive": { "const": "sphere" },
+        "diameter_mm": { "const": 210 },
+        "position": { "x": 0, "y": 560, "z": 0 },
+        "surface": { "const": "dark_translucent_holographic_shell" },
+        "interior": { "const": "digital_void" },
+        "facialInterface": {
+          "type": "object",
+          "properties": {
+            "eyeCount": { "const": 2 },
+            "eyeShape": { "const": "vertical_soft_oval" },
+            "eyeWidth_mm": { "const": 15 },
+            "eyeHeight_mm": { "const": 25 },
+            "eyeSeparation_mm": { "const": 55 },
+            "eyeColor": { "const": "#00D9FF" },
+            "mouth": { "const": false },
+            "nose": { "const": false },
+            "ears": { "const": false }
+          }
+        }
+      }
+    },
+    "crownHalo": {
+      "type": "object",
+      "properties": {
+        "primitive": { "const": "elliptical_torus" },
+        "outerDiameter_mm": { "const": 240 },
+        "innerDiameter_mm": { "const": 205 },
+        "tubeThickness_mm": { "minimum": 5, "maximum": 9 },
+        "position": { "x": 0, "y": 690, "z": 0 },
+        "scale": { "x": 1.0, "y": 1.0, "z": 0.72 }
+      }
+    },
+    "orbitalShell": {
+      "type": "object",
+      "properties": {
+        "architecture": { "const": "fragmented_orbital" },
+        "solidShell": { "const": false },
+        "fragmentCount": { "minimum": 8, "maximum": 16 },
+        "fragments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "primitive": { "const": "curved_shard" },
+              "length_mm": { "minimum": 45, "maximum": 100 },
+              "width_mm": { "minimum": 12, "maximum": 30 },
+              "thickness_mm": { "minimum": 4, "maximum": 12 },
+              "curvature_degrees": { "minimum": 15, "maximum": 55 },
+              "distance_from_center_mm": { "minimum": 115, "maximum": 180 },
+              "orientation": {
+                "enum": ["upper_left","upper_right","middle_left","middle_right","lower_left","lower_right","front_left","front_right","rear_left","rear_right"]
+              },
+              "mustFloat": { "const": true },
+              "mustRemainSeparated": { "const": true }
+            }
+          }
+        }
+      }
+    },
+    "cognitiveCore": {
+      "type": "object",
+      "properties": {
+        "primitive": { "const": "elongated_octahedral_diamond" },
+        "height_mm": { "const": 145 },
+        "width_mm": { "const": 105 },
+        "depth_mm": { "const": 80 },
+        "position": { "x": 0, "y": 340, "z": 0 },
+        "verticalAlignment": { "const": true },
+        "facetStyle": { "const": "large_clean_geometric_facets" },
+        "tipStyle": { "const": "sharp" },
+        "internalEnergyCore": {
+          "type": "object",
+          "properties": {
+            "shape": { "const": "vertical_energy_column" },
+            "color": { "const": "#00D9FF" },
+            "secondaryColor": { "const": "#7C5CFF" }
+          }
+        }
+      }
+    },
+    "energySpine": {
+      "type": "object",
+      "properties": {
+        "axis": { "const": "Y" },
+        "nodeCount": { "minimum": 3, "maximum": 5 },
+        "nodeShape": { "const": "small_vertical_diamond" },
+        "nodeSize_mm": { "minimum": 15, "maximum": 35 },
+        "spacing_mm": { "minimum": 20, "maximum": 55 },
+        "connector": {
+          "type": "object",
+          "properties": {
+            "type": { "const": "energy_beam" },
+            "diameter_mm": { "minimum": 2, "maximum": 6 }
+          }
+        }
+      }
+    },
+    "terminalNode": {
+      "type": "object",
+      "properties": {
+        "primitive": { "const": "diamond" },
+        "height_mm": { "minimum": 35, "maximum": 50 },
+        "width_mm": { "minimum": 25, "maximum": 40 },
+        "position": { "x": 0, "y": 70, "z": 0 }
+      }
+    },
+    "levitationField": {
+      "type": "object",
+      "properties": {
+        "primitive": { "const": "concentric_elliptical_rings" },
+        "ringCount": { "minimum": 3, "maximum": 6 },
+        "outerDiameter_mm": { "minimum": 300, "maximum": 400 },
+        "innerDiameter_mm": { "minimum": 100, "maximum": 180 },
+        "position": { "x": 0, "y": 0, "z": 0 },
+        "orientation": { "const": "horizontal" }
+      }
+    },
+    "particles": {
+      "type": "object",
+      "properties": {
+        "shape": { "enum": ["point", "micro_diamond", "tiny_shard"] },
+        "size_mm": { "minimum": 0.5, "maximum": 3 },
+        "distribution": { "const": "radial_dynamic" },
+        "defaultDensity": { "const": "low_medium" }
+      }
+    }
+  }
+}

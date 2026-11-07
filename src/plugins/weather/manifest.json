@@ -1,0 +1,8 @@
+{
+  "id": "weather",
+  "name": "Weather",
+  "version": "1.0.0",
+  "description": "Weather information plugin",
+  "entry": "index.js",
+  "enabled": true
+}

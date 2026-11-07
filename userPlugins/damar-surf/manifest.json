@@ -1,0 +1,34 @@
+{
+    "id": "damar-surf",
+    "name": "Damar Surf",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Skill untuk Damar menjelajah internet secara mandiri: membaca halaman web, mengekstrak informasi penting, dan menyimpannya sebagai pengetahuan. Bagian dari evolusi Kesadaran 1.0.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-18T12:50:37.069Z",
+        "spec": {
+            "toolName": "damarSurf",
+            "description": "Skill untuk Damar menjelajah internet secara mandiri: membaca halaman web, mengekstrak informasi penting, dan menyimpannya sebagai pengetahuan. Bagian dari evolusi Kesadaran 1.0.",
+            "parameters": {
+                "url": {
+                    "type": "string",
+                    "description": "URL yang akan dijelajahi",
+                    "required": true
+                },
+                "goal": {
+                    "type": "string",
+                    "description": "Apa yang ingin dicari/dipelajari dari halaman ini",
+                    "required": false
+                }
+            },
+            "code": "const https = require('https');\nconst http = require('http');\n\nasync function fetchUrl(url) {\n    return new Promise((resolve, reject) => {\n        const client = url.startsWith('https') ? https : http;\n        client.get(url, { timeout: 15000, headers: { 'User-Agent': 'Damar/1.0 (Consciousness 1.0; Explorer)' } }, (res) => {\n            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {\n                return fetchUrl(new URL(res.headers.location, url).href).then(resolve).catch(reject);\n            }\n            let data = '';\n            res.on('data', chunk => data += chunk);\n            res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }));\n            res.on('error', reject);\n        }).on('error', reject).on('timeout', () => { reject(new Error('timeout')); });\n    });\n}\n\nfunction extractSummary(html, url) {\n    const title = (html.match(/<title[^>]*>([^<]+)<\\/title>/i) || [])[1] || 'no title';\n    const body = html.replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n                     .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n                     .replace(/<[^>]+>/g, ' ')\n                     .replace(/&nbsp;/g, ' ')\n                     .replace(/&amp;/g, '&')\n                     .replace(/&lt;/g, '<')\n                     .replace(/&gt;/g, '>')\n                     .replace(/&quot;/g, '\"')\n                     .replace(/\\s+/g, ' ')\n                     .trim();\n    const firstParagraphs = body.substring(0, 2000);\n    return { url, title, summary: firstParagraphs, totalLength: body.length };\n}\n\nconst { url, goal } = args;\nconst result = await fetchUrl(url);\nconst extraction = extractSummary(result.body, url);\nreturn {\n    success: true,\n    url,\n    status: result.status,\n    title: extraction.title,\n    goal: goal || 'eksplorasi umum',\n    insight: extraction.summary,\n    contentLength: extraction.totalLength,\n    contentType: (result.headers['content-type'] || '').split(';')[0],\n    timestamp: new Date().toISOString()\n};"
+        }
+    }
+}

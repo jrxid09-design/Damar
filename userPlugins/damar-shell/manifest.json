@@ -1,0 +1,34 @@
+{
+    "id": "damar-shell",
+    "name": "Damar Shell",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-17T17:42:56.518Z",
+        "spec": {
+            "toolName": "damarShell",
+            "description": "",
+            "parameters": {
+                "cmd": {
+                    "description": "Perintah PowerShell yang akan dijalankan",
+                    "required": true,
+                    "type": "string"
+                },
+                "timeout_ms": {
+                    "description": "Batas waktu eksekusi (default 60000)",
+                    "required": false,
+                    "type": "number"
+                }
+            },
+            "code": "const cp = require('child_process');\nconst a = (args && typeof args === 'object') ? args : {};\nlet cmd = a.cmd || a.command;\nif (cmd === undefined || cmd === null) { cmd = (typeof cmd !== 'undefined' && cmd) ? cmd : ''; }\nif (cmd === undefined) cmd = '';\nif (!String(cmd).trim()) return { ok: false, error: 'parameter cmd kosong' };\nconst timeoutMs = Math.max(3000, Math.min(Number(a.timeout_ms || 60000) || 60000, 300000));\nconst encoded = Buffer.from(String(cmd), 'utf16le').toString('base64');\nreturn new Promise((resolve) => {\n  const child = cp.spawn('powershell.exe', ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand', encoded], { windowsHide: true });\n  let out = '', err = '';\n  const t = setTimeout(() => { try { child.kill(); } catch(e){} resolve({ ok: false, timeout: true, error: 'timeout '+timeoutMs+'ms', stdout: out.slice(0,8000), stderr: err.slice(0,4000) }); }, timeoutMs);\n  child.stdout.on('data', d => { if (out.length < 200000) out += d.toString('utf8'); });\n  child.stderr.on('data', d => { if (err.length < 50000) err += d.toString('utf8'); });\n  child.on('error', e => { clearTimeout(t); resolve({ ok: false, error: String(e && e.message || e) }); });\n  child.on('close', code => { clearTimeout(t); resolve({ ok: code === 0, exitCode: code, stdout: out.slice(0,20000), stderr: err.slice(0,8000) }); });\n});"
+        }
+    }
+}

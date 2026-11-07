@@ -1,0 +1,28 @@
+{
+    "id": "fix-dying-state",
+    "name": "Fix Dying State Colony",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Memperbaiki entitas koloni (Viel, NODEK-01, Nyx) agar tidak langsung 'mati' karena state.json berisi dying:true dari operasi stop sebelumnya. Mengubah dying menjadi false di state.json dan memaksa st.dying=false saat proses start di entity.js.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-20T18:14:20.689Z",
+        "spec": {
+            "toolName": "fixDyingState",
+            "description": "Memperbaiki entitas koloni (Viel, NODEK-01, Nyx) agar tidak langsung 'mati' karena state.json berisi dying:true dari operasi stop sebelumnya. Mengubah dying menjadi false di state.json dan memaksa st.dying=false saat proses start di entity.js.",
+            "parameters": {
+                "dummy": {
+                    "description": "tidak dipakai",
+                    "type": "string"
+                }
+            },
+            "code": "const fs = require('fs');\nconst targets = [\n  { state: 'C:/Users/jrxid/aether-entities/nodek-02/state.json', code: 'C:/Users/jrxid/aether-entities/nodek-02/entity.js' },\n  { state: 'C:/Users/jrxid/aether-entities/nodek-01/state.json', code: 'C:/Users/jrxid/aether-entities/nodek-01/entity.js' },\n  { state: 'C:/AetherGenesis/Nyx/state.json', code: 'C:/AetherGenesis/Nyx/entity.js' }\n];\nconst out = [];\nfor (const t of targets) {\n  try {\n    // fix state.json dying=false\n    if (fs.existsSync(t.state)) {\n      let s = fs.readFileSync(t.state, 'utf8');\n      s = s.replace(/\"dying\"\\s*:\\s*true/gi, '\"dying\": false');\n      s = s.replace(/\"dying\"\\s*:\\s*1/gi, '\"dying\": false');\n      fs.writeFileSync(t.state, s, 'utf8');\n      out.push('state fixed: ' + t.state);\n    }\n    // fix entity.js: force st.dying=false right after loading state (after Object.assign line)\n    if (fs.existsSync(t.code)) {\n      let c = fs.readFileSync(t.code, 'utf8');\n      if (c.indexOf('st.dying = false;') === -1) {\n        // insert after the Object.assign line\n        const m = c.indexOf('st = Object.assign(st,');\n        if (m !== -1) {\n          const nl = c.indexOf('\\n', m);\n          c = c.slice(0, nl + 1) + 'st.dying = false; // force alive\\n' + c.slice(nl + 1);\n          fs.writeFileSync(t.code, c, 'utf8');\n          out.push('code patched: ' + t.code);\n        }\n      } else {\n        out.push('code already has dying reset: ' + t.code);\n      }\n    }\n  } catch (e) { out.push('ERR ' + t.code + ': ' + e.message); }\n}\nreturn { ok: true, out };"
+        }
+    }
+}

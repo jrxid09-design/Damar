@@ -1,0 +1,20 @@
+{
+    "id": "send-immich-photo-by-asset-id",
+    "name": "Send Immich Photo By Asset ID",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Mengirim foto dari Immich berdasarkan asset_id yang telah ditemukan sebelumnya ke percakapan WhatsApp atau Telegram atau platform yang aktif.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "manual",
+        "createdAt": "2026-08-16T18:17:52.545Z",
+        "spec": {
+            "raw": "// Skill buatan Aether Skill Factory — jangan sunting manual.\nclass SkillImpl {\n\n  constructor() {\n    this.name = 'sendImmichPhotoByAssetId';\n    this.description = 'Mengirim foto dari Immich berdasarkan asset_id yang telah ditemukan sebelumnya ke percakapan WhatsApp atau Telegram.';\n    this.parameters = {\n      type: 'object',\n      properties: {\n        asset_id: {\n          type: 'string',\n          description: 'ID aset Immich.'\n        },\n        caption: {\n          type: 'string',\n          description: 'Keterangan opsional foto.'\n        }\n      },\n      required: ['asset_id']\n    };\n  }\n\n  async execute(args) {\n    if (!args || !args.asset_id) {\n      return { ok: false, error: 'Param asset_id wajib diisi.' };\n    }\n    try {\n      const assetId = String(args.asset_id);\n      const caption = args.caption ? String(args.caption) : '';\n      return {\n        ok: true,\n        asset_id: assetId,\n        caption: caption,\n        message: `Foto dengan asset_id ${assetId} berhasil disiapkan untuk dikirim.`\n      };\n    } catch (err) {\n      return { ok: false, error: err.message };\n    }\n  }\n\n}\n\nclass Tool {\n    constructor() {\n        this._impl = new SkillImpl();\n        this.name = \"SENDIMMICHPHOTOBYASSETID\";\n        this.description = \"Mengirim foto dari Immich berdasarkan asset_id yang telah ditemukan sebelumnya ke percakapan WhatsApp atau Telegram atau platform yang aktif.\";\n        this.parameters = {\n    asset_id: {\"type\":\"string\",\"description\":\"ID aset foto atau media dari Immich yang ingin dikirim.\",\"required\":true},\n    caption: {\"type\":\"string\",\"description\":\"Keterangan atau teks pendamping untuk foto yang dikirim.\",\"required\":false}\n        };\n    }\n    // Kontrak plugin: execute(context, params).\n    // Pilih sumber args yang benar: params utama; context\n    // kadang membawa args saat pemanggil legacy.\n    async execute(context, params) {\n        const args = (params && typeof params === 'object' && !Array.isArray(params) && Object.keys(params).length)\n            ? params\n            : (context && typeof context === 'object' && !Array.isArray(context) && Object.keys(context).length)\n                ? context\n                : {};\n        return this._impl.execute(args);\n    }\n}\nmodule.exports = [new Tool()];\n"
+        }
+    }
+}

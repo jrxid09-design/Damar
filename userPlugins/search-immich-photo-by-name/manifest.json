@@ -1,0 +1,29 @@
+{
+    "id": "search-immich-photo-by-name",
+    "name": "Search Immich Photo",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Cari foto orang di Immich lokal berdasarkan nama dan dapatkan URL gambarnya.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-17T03:46:37.506Z",
+        "spec": {
+            "toolName": "searchImmichPhotoByName",
+            "description": "Cari foto orang di Immich lokal berdasarkan nama dan dapatkan URL gambarnya.",
+            "parameters": {
+                "name": {
+                    "description": "Nama orang yang dicari",
+                    "required": true,
+                    "type": "string"
+                }
+            },
+            "code": "const apiUrl = 'http://127.0.0.1:2283/api';\nconst apiKey = process.env.IMMICH_API_KEY;\nconst headers = { 'x-api-key': apiKey, 'Accept': 'application/json' };\n\nconst peopleRes = await fetch(`${apiUrl}/person`, { headers });\nif (!peopleRes.ok) {\n  return { ok: false, error: `Failed to fetch people: ${peopleRes.statusText}` };\n}\nconst people = await peopleRes.json();\nconst personList = people.people || people;\nconst match = personList.find(p => p.name && p.name.toLowerCase().includes(args.name.toLowerCase()));\n\nif (!match) {\n  return { ok: false, message: `Person standard '${args.name}' not found` };\n}\n\nconst assetsRes = await fetch(`${apiUrl}/person/${match.id}/assets`, { headers });\nif (!assetsRes.ok) {\n  return { ok: false, error: `Failed to fetch assets: ${assetsRes.statusText}` };\n}\nconst assets = await assetsRes.json();\nconst assetList = assets.assets || assets;\n\nif (!assetList || assetList.length === 0) {\n  return { ok: false, message: `No photos found for ${match.name}` };\n}\n\nconst firstAsset = assetList[0];\nconst photoUrl = `${apiUrl}/asset/file/${firstAsset.id}?apiKey=${apiKey}`;\nreturn { ok: true, person: match.name, count: assetList.length, photoUrl, assetId: firstAsset.id };"
+        }
+    }
+}

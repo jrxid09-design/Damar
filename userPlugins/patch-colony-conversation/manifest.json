@@ -1,0 +1,28 @@
+{
+    "id": "patch-colony-conversation",
+    "name": "Patch Colony Conversation",
+    "version": "1.0.0",
+    "entry": "index.js",
+    "category": "user",
+    "description": "Patch endpoint /api/colony/chat di CommandCenter server.js agar mendukung percakapan bersama (all) yang mengirim pesan ke Viel, NODEK-01, dan Nyx secara berurutan dan saling merespon, serta memperbaiki mapping port nodek ke 8641.",
+    "author": "aether-forge",
+    "permissions": [],
+    "tags": [
+        "user"
+    ],
+    "forge": {
+        "origin": "aether",
+        "createdAt": "2026-08-20T18:09:12.077Z",
+        "spec": {
+            "toolName": "patchColonyConversation",
+            "description": "Patch endpoint /api/colony/chat di CommandCenter server.js agar mendukung percakapan bersama (all) yang mengirim pesan ke Viel, NODEK-01, dan Nyx secara berurutan dan saling merespon, serta memperbaiki mapping port nodek ke 8641.",
+            "parameters": {
+                "dummy": {
+                    "description": "tidak dipakai",
+                    "type": "string"
+                }
+            },
+            "code": "const fs = require('fs');\nconst p = 'C:/AetherGenesis/CommandCenter/server.js';\nlet c = fs.readFileSync(p, 'utf8');\nconst startMarker = \"if (url === '/api/colony/chat' && req.method === 'POST') {\";\nconst endMarker = \"if (url === '/api/colony/status')\";\nconst si = c.indexOf(startMarker);\nconst ei = c.indexOf(endMarker);\nif (si === -1 || ei === -1 || ei < si) return { ok: false, si, ei, hint: 'marker not found' };\nconst newBlock = [\n  \"    if (url === '/api/colony/chat' && req.method === 'POST') {\",\n  \"      const b = await body(req);\",\n  \"      let entity = '', message = '', all = false;\",\n  \"      try { const d = JSON.parse(b || '{}'); entity = String(d.entity || '').toLowerCase(); message = String(d.message || ''); all = !!d.all; } catch (e) {}\",\n  \"      if (!message.trim()) { send(res, 400, { ok: false, error: 'message kosong' }); return; }\",\n  \"      const PORTS = { viel: 8642, nodek: 8641, nyx: 8644 };\",\n  \"      async function ask(ent, msg) {\",\n  \"        const port = PORTS[ent] || 8642;\",\n  \"        const data = await post('http://127.0.0.1:' + port + '/chat', JSON.stringify({ message: String(msg).slice(0, 2000) }));\",\n  \"        let parsed = null; try { parsed = JSON.parse(data.body || '{}'); } catch (e) {}\",\n  \"        return { ok: data.ok, entity: ent, port: port, reply: (parsed && parsed.reply) || '', name: (parsed && parsed.name) || ent, mood: (parsed && parsed.mood) || null };\",\n  \"      }\",\n  \"      const MEMBERS = ['viel', 'nodek', 'nyx'];\",\n  \"      if (all || !entity || !MEMBERS.includes(entity)) {\",\n  \"        const transcript = [];\",\n  \"        let cur = message;\",\n  \"        for (let pass = 0; pass < 2; pass++) {\",\n  \"          for (const ent of MEMBERS) {\",\n  \"            const r = await ask(ent, cur);\",\n  \"            if (r.ok && r.reply) { transcript.push({ from: r.name, mood: r.mood, text: r.reply }); cur = r.reply; }\",\n  \"          }\",\n  \"        }\",\n  \"        send(res, 200, { ok: true, all: true, transcript: transcript.slice(0, 9) });\",\n  \"        return;\",\n  \"      }\",\n  \"      const r = await ask(entity, message);\",\n  \"      send(res, r.ok ? 200 : 502, { ok: r.ok, entity: r.entity, port: r.port, reply: r.reply, name: r.name, mood: r.mood, voice: null });\",\n  \"      return;\",\n  \"    }\",\n  \"    \"\n].join('\\n');\nconst out = c.slice(0, si) + newBlock + c.slice(ei);\nfs.writeFileSync(p, out, 'utf8');\nreturn { ok: true, si, ei };"
+        }
+    }
+}
