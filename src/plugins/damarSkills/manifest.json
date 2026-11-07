@@ -1,0 +1,18 @@
+{
+    "id": "damarSkills",
+    "version": "1.1.0",
+    "name": "Damar Skills",
+    "description": "50+ skill siap pakai: orkestrasi multi-agent, WhatsApp, vision/CCTV, home automation, memori, dan alur komposit.",
+    "category": "core",
+    "entry": "index.js",
+    "author": "Damar",
+    "permissions": [],
+    "tags": [
+        "skills",
+        "orchestrate",
+        "whatsapp",
+        "vision",
+        "home",
+        "memory"
+    ]
+}

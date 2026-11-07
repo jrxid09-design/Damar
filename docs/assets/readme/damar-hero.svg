@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 240" width="800" height="240" role="img" aria-labelledby="t d">
+  <title id="t">Damar — governed personal AI runtime</title>
+  <desc id="d">Damar wordmark with a gold hairline and the premise: a governed personal AI runtime where models never become authority.</desc>
+  <rect x="0" y="0" width="800" height="240" fill="#0b0b0e"/>
+  <rect x="0" y="0" width="800" height="2" fill="#c9a35c"/>
+  <rect x="0" y="238" width="800" height="2" fill="#232428"/>
+
+  <!-- gate motif: thin bar with a sealed keyline, above the wordmark -->
+  <g>
+    <line x1="330" y1="46" x2="470" y2="46" stroke="#3a3b42" stroke-width="2"/>
+    <circle cx="400" cy="46" r="9" fill="none" stroke="#c9a35c" stroke-width="2"/>
+    <line x1="400" y1="46" x2="400" y2="52" stroke="#c9a35c" stroke-width="2"/>
+  </g>
+
+  <text x="400" y="118" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="64" letter-spacing="22" fill="#ece7d8">DAMAR</text>
+  <line x1="140" y1="148" x2="660" y2="148" stroke="#c9a35c" stroke-width="1" opacity="0.55"/>
+
+  <text x="400" y="176" text-anchor="middle" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#a7a294">A governed personal AI runtime.</text>
+  <text x="400" y="198" text-anchor="middle" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="bold" fill="#e0c07a">Models never become authority.</text>
+
+  <text x="400" y="224" text-anchor="middle" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" letter-spacing="3" fill="#6f6b60">ONE IDENTITY · DURABLE CONTINUITY · HARD AUTHORITY SEPARATION</text>
+</svg>

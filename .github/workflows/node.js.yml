@@ -1,0 +1,42 @@
+# Test DAMAR against supported Node.js LTS releases, using a clean dependency installation.
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
+
+name: Node.js CI
+
+on:
+  push:
+    branches: [ "develop" ]
+  pull_request:
+    branches: [ "develop" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22.x, 24.x]
+        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+    # Candidate wiring only. The value MUST come from independently protected
+    # owner approval. External required-check enforcement remains mandatory.
+    - name: Approved dependency lock and policy gate (fail-closed, pre-install)
+      env:
+        DLOCK_APPROVED_LOCK_SHA256: ${{ vars.DLOCK_APPROVED_LOCK_SHA256 }}
+        CI: 'true'
+      run: |
+        test -n "$DLOCK_APPROVED_LOCK_SHA256" || { echo "POLICY_VIOLATION: no owner-approved lock anchor"; exit 1; }
+        LOCK_SHA256="$(sha256sum package-lock.json | cut -d' ' -f1)"
+        node scripts/check-dep-policy.js package-lock.json --policy scripts/dependency-policy.json --package-json package.json --lock-sha256 "$LOCK_SHA256" --approved-lock-sha256 "$DLOCK_APPROVED_LOCK_SHA256"
+    - run: npm ci
+    - run: npm run build --if-present
+    - run: npm test

@@ -1,0 +1,30 @@
+{
+  "active": "openrouter",
+  "providers": {
+    "openrouter": {
+      "apiKey": "sk-or-v1-GANTI_DENGAN_KUNCI_ANDA",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "model": "deepseek/deepseek-chat-v3-0324:free"
+    },
+    "google": {
+      "apiKey": "GANTI_DENGAN_GOOGLE_AI_STUDIO_KEY",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "model": "gemini-flash-latest"
+    },
+    "openai": {
+      "apiKey": "sk-GANTI_DENGAN_KUNCI_ANDA",
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "gpt-4o-mini"
+    },
+    "groq": {
+      "apiKey": "gsk_GANTI_DENGAN_KUNCI_ANDA",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "model": "llama-3.3-70b-versatile"
+    },
+    "custom": {
+      "apiKey": "boleh-apa-saja-untuk-server-lokal",
+      "baseUrl": "http://localhost:8081/v1",
+      "model": "nama-model-lokal-anda"
+    }
+  }
+}

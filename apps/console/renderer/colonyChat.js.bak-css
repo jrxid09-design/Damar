@@ -1,0 +1,171 @@
+/* Aether Colony Chat - popup percakapan koloni di Console.
+   Menghubungkan Aether, Viel (8642), Nyx (8644), NODEK-01 via Command Center (8650). */
+(() => {
+  const CC = "http://127.0.0.1:8650";
+  let els = null;
+  let statusTimer = null;
+
+  const css = `
+#colony-fab{position:fixed;left:22px;bottom:46px;z-index:45;width:54px;height:54px;border-radius:50%;
+  border:1px solid rgba(20,230,255,.35);background:radial-gradient(circle at 30% 25%,rgba(20,230,255,.22),rgba(2,18,32,.9));
+  color:#14e6ff;font:600 13px/1 var(--font-hud,monospace);letter-spacing:.12em;cursor:pointer;
+  box-shadow:0 2px 6px rgba(0,0,0,.4);transition:transform .18s;}
+#colony-fab:hover{transform:scale(1.08);box-shadow:0 3px 8px rgba(0,0,0,.5)}
+#colony-fab .dot{position:absolute;top:7px;right:8px;width:8px;height:8px;border-radius:50%;background:#34f5a2;box-shadow:none}
+#colony-panel{position:fixed;left:22px;bottom:110px;z-index:90;width:400px;max-width:88vw;max-height:66vh;
+  display:flex;flex-direction:column;border:1px solid rgba(20,230,255,.30);border-radius:14px;overflow:hidden;
+  background:linear-gradient(160deg,rgba(4,14,26,.97),rgba(1,6,12,.98));
+  box-shadow:0 6px 18px rgba(0,0,0,.45);font-family:var(--font-hud,monospace);
+  opacity:0;transform:translateY(14px) scale(.98);pointer-events:none;transition:opacity .22s,transform .22s;}
+#colony-panel.open{opacity:1;transform:none;pointer-events:auto}
+#colony-panel .cp-head{padding:12px 14px;border-bottom:1px solid rgba(20,230,255,.18);display:flex;align-items:center;gap:10px;
+  background:linear-gradient(90deg,rgba(20,230,255,.10),transparent)}
+#colony-panel .cp-head b{font-weight:600;letter-spacing:.2em;font-size:13px;color:#14e6ff}
+#colony-panel .cp-head .cp-sub{font-size:10px;color:#5a7a99;letter-spacing:.08em}
+#colony-panel .cp-close{margin-left:auto;background:none;border:1px solid rgba(255,80,80,.4);color:#ff6060;
+  border-radius:6px;cursor:pointer;padding:2px 8px;font-size:12px}
+#colony-chips{display:flex;gap:6px;padding:8px 14px;border-bottom:1px solid rgba(20,230,255,.10);flex-wrap:wrap}
+.cp-chip{padding:3px 10px;border-radius:20px;font-size:11px;letter-spacing:.08em;cursor:pointer;
+  border:1px solid rgba(20,230,255,.28);color:#9fd8ef;background:rgba(20,230,255,.05);user-select:none}
+.cp-chip .st{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
+.cp-chip.on{border-color:#34f5a2;color:#b6ffe1;background:rgba(52,245,162,.10)}
+#colony-convo{flex:1;overflow-y:auto;padding:12px 14px;min-height:180px;max-height:40vh;display:flex;flex-direction:column;gap:10px}
+.cp-msg{max-width:88%;padding:8px 11px;border-radius:10px;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.cp-msg .cp-who{font-size:10px;letter-spacing:.1em;margin-bottom:3px;opacity:.85}
+.cp-msg.self{align-self:flex-end;background:rgba(20,230,255,.14);border:1px solid rgba(20,230,255,.30);color:#d8f6ff}
+.cp-msg.viel{align-self:flex-start;background:rgba(255,170,60,.12);border:1px solid rgba(255,170,60,.32);color:#ffe2b8}
+.cp-msg.nyx{align-self:flex-start;background:rgba(180,120,255,.12);border:1px solid rgba(180,120,255,.32);color:#e6d7ff}
+.cp-msg.nodek{align-self:flex-start;background:rgba(90,200,150,.12);border:1px solid rgba(90,200,150,.32);color:#c9f5e0}
+.cp-msg.meta{align-self:center;background:rgba(120,140,160,.12);border:1px solid rgba(120,140,160,.25);color:#aac2d6;font-size:11px}
+#colony-composer{display:flex;gap:8px;padding:10px 14px;border-top:1px solid rgba(20,230,255,.18);align-items:center}
+#colony-target{background:rgba(2,12,22,.9);color:#9fd8ef;border:1px solid rgba(20,230,255,.3);border-radius:8px;
+  padding:7px 8px;font-size:12px;font-family:inherit;outline:none}
+#colony-input{flex:1;background:rgba(2,12,22,.9);color:#e6f6ff;border:1px solid rgba(20,230,255,.28);border-radius:8px;
+  padding:8px 10px;font-size:12px;font-family:inherit;outline:none;resize:none}
+#colony-input::placeholder{color:#4a6a82}
+#colony-send{background:linear-gradient(90deg,rgba(20,230,255,.25),rgba(20,230,255,.08));color:#14e6ff;
+  border:1px solid rgba(20,230,255,.45);border-radius:8px;padding:8px 12px;font-size:12px;cursor:pointer;font-family:inherit}
+#colony-send:hover{background:rgba(20,230,255,.3)}
+.cp-busy{opacity:.4;pointer-events:none}
+`;
+
+  function addCSS() { const s = document.createElement("style"); s.id = "colony-css"; s.textContent = css; document.head.appendChild(s); }
+
+  function build() {
+    if (els) return els;
+    addCSS();
+    const fab = document.createElement("button");
+    fab.id = "colony-fab"; fab.title = "Colony Chat — ngobrol dengan Viel, Nyx, NODEK-01";
+    fab.innerHTML = `COL<br>ONY<span class="dot"></span>`;
+    const panel = document.createElement("div");
+    panel.id = "colony-panel";
+    panel.innerHTML = `
+      <div class="cp-head"><b>&#9889; COLONY CHAT</b><span class="cp-sub" id="cp-sub">menghubungkan&hellip;</span>
+        <button class="cp-close" id="cp-close" title="Tutup">&#10005;</button></div>
+      <div class="cp-chips" id="cp-chips"></div>
+      <div class="cp-convo" id="colony-convo"></div>
+      <div class="cp-composer" id="colony-composer">
+        <select id="colony-target">
+          <option value="semua">Semua</option>
+          <option value="viel">Viel</option>
+          <option value="nyx">Nyx</option>
+          <option value="nodek">NODEK-01</option>
+        </select>
+        <textarea id="colony-input" rows="1" placeholder="Tulis pesan ke koloni&hellip;"></textarea>
+        <button id="colony-send">Kirim</button>
+      </div>`;
+    document.body.appendChild(fab);
+    document.body.appendChild(panel);
+    els = {
+      fab, panel, sub: panel.querySelector("#cp-sub"),
+      chips: panel.querySelector("#cp-chips"), convo: panel.querySelector("#colony-convo"),
+      target: panel.querySelector("#colony-target"), input: panel.querySelector("#colony-input"),
+      send: panel.querySelector("#colony-send"), close: panel.querySelector("#cp-close")
+    };
+    els.fab.addEventListener("click", toggle);
+    els.close.addEventListener("click", close);
+    els.send.addEventListener("click", () => send());
+    els.input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && els.panel.classList.contains("open")) close(); });
+    renderChips();
+    return els;
+  }
+
+  const entities = {
+    viel: { color: "viel", label: "Viel" },
+    nyx: { color: "nyx", label: "Nyx" },
+    nodek: { color: "nodek", label: "NODEK-01" }
+  };
+
+  function renderChips() {
+    const s = { viel: "on", nyx: "on", nodek: "on" };
+    els.chips.innerHTML = Object.keys(entities).map(k => `
+      <div class="cp-chip ${s[k]}" data-e="${k}" title="${entities[k].label}">
+        <span class="st" style="background:${k==='viel'?'#ffaa3c':k==='nyx'?'#b478ff':'#5ac896'}"></span>${entities[k].label}
+      </div>`).join("");
+  }
+
+  function msg(who, kind, text, extra) {
+    const d = document.createElement("div");
+    d.className = "cp-msg " + kind;
+    d.innerHTML = `<div class="cp-who">${who}${extra ? " &middot; " + extra : ""}</div>` + text.replace(/</g,"&lt;").replace(/\n/g,"<br>");
+    els.convo.appendChild(d);
+    els.convo.scrollTop = els.convo.scrollHeight;
+  }
+
+  async function send() {
+    const text = els.input.value.trim();
+    if (!text) return;
+    const target = els.target.value;
+    els.input.value = "";
+    msg("AKU", "self", text);
+    if (target === "semua") {
+      for (const k of ["viel", "nyx", "nodek"]) await sendOne(k, text);
+    } else {
+      await sendOne(target, text);
+    }
+  }
+
+  async function sendOne(k, text) {
+    if (k === "nodek") { msg("NODEK-01", "nodek", "Aku mendetak di life.log — belum punya otak chat interaktif. Suaraku: " + (window.lastNodekBeat || "detak #...")); return; }
+    els.panel.classList.add("cp-busy");
+    try {
+      const r = await fetch(CC + "/api/colony/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity: k, message: text })
+      });
+      const d = await r.json();
+      const extra = d.mood ? "mood: " + d.mood : "";
+      msg((d.name || entities[k].label).toUpperCase(), entities[k].color, d.reply || "(kosong)", extra);
+    } catch (e) {
+      msg(entities[k].label.toUpperCase(), entities[k].color, "(gagal terhubung: " + e.message + ")");
+    } finally {
+      els.panel.classList.remove("cp-busy");
+    }
+  }
+
+  async function refreshStatus() {
+    try {
+      const r = await fetch(CC + "/api/colony/status");
+      const d = await r.json();
+      if (!d) return;
+      let live = [];
+      if (d.viel && d.viel.online) live.push("Viel:&nbsp;hidup");
+      if (d.nyx && d.nyx.journal && d.nyx.journal.length) live.push("Nyx:&nbsp;" + d.nyx.journal[0].slice(0, 40));
+      if (d.nodek && d.nodek.online) { live.push("NODEK-01:&nbsp;hidup"); window.lastNodekBeat = "detak #"; }
+      if (live.length) els.sub.innerHTML = live.join(" &nbsp;&middot;&nbsp; ").replace(/&lt;/g,"<");
+      if (d.aether) els.sub.innerHTML = (els.sub.innerHTML || "") + "";
+    } catch (e) {}
+  }
+
+  function open() { build(); els.panel.classList.add("open"); if (!statusTimer) { refreshStatus(); statusTimer = setInterval(refreshStatus, 5000); } msg("SISTEM", "meta", "Koloni terhubung. Pilih target lalu ketik pesan."); }
+  function close() { if (!els) return; els.panel.classList.remove("open"); }
+  function toggle() { if (els && els.panel.classList.contains("open")) close(); else open(); }
+
+  window.AetherColonyChat = { open, close, toggle, sendTo: (k, text) => { build(); msg("AKU","self",text); return sendOne(k, text); } };
+
+  // Inisialisasi FAB setelah DOM siap
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => build());
+  else build();
+})();

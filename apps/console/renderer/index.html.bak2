@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <!--
+        CSP: default-src 'none' tetap ketat, tetapi img/media/frame
+        dilonggarkan ke http(s) karena media Aether datang dari DAEMON
+        (http://<host>:3000/vision/raw dll) dan dari EMBED pihak ketiga.
+        Sebelumnya:
+          - foto dari daemon terblokir (img-src tak izinkan http:), dan
+          - pemutar media hitam kosong karena frame-src tak ada sama
+            sekali sehingga iframe YouTube/Spotify/Vimeo ditolak CSP.
+        Itu yang muncul sebagai "popup hitam" - bukan GPU.
+    -->
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'none';
+                   script-src 'self';
+                   style-src 'self' 'unsafe-inline';
+                   img-src 'self' data: blob: http: https:;
+                   media-src 'self' blob: mediastream: http: https:;
+                   font-src 'self';
+                   frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://w.soundcloud.com https://open.spotify.com https://embed.music.apple.com;
+                   connect-src http: https: ws: wss:;">
+    <title>Aether OS</title>
+    <link rel="stylesheet" href="styles/tokens.css">
+    <link rel="stylesheet" href="styles/layout.css">
+    <link rel="stylesheet" href="styles/components.css">
+    <link rel="stylesheet" href="vendor/xterm/xterm.css">
+    <link rel="stylesheet" href="styles/cyber.css">
+    <!-- Token kanonik Aether: dimuat paling akhir sebagai sumber
+         kebenaran tunggal warna & permukaan. Hapus baris ini untuk
+         mengembalikan palet lama. -->
+    <link rel="stylesheet" href="styles/aether.tokens.css">
+    <link rel="stylesheet" href="styles/holo.css">
+    <link rel="stylesheet" href="styles/aether.chrome.css">
+    <link rel="stylesheet" href="styles/jarvis-theme.css">
+</head>
+<body>
+
+<div id="shell">
+
+    <!-- ================= Titlebar ================= -->
+    <header class="titlebar">
+
+        <div class="brand">
+            <span class="mark" id="brand-mark"></span>
+            <span class="name">Aether</span>
+            <span class="sub">OS</span>
+        </div>
+
+        <div class="drag-free" id="connection-chip"></div>
+
+        <div class="spacer"></div>
+
+        <!--
+            Tombol STOP selalu terlihat (Konstitusi Pasal 2.1).
+            Hak menghentikan Aether yang butuh terminal untuk dipakai
+            bukan hak yang sesungguhnya.
+        -->
+        <div class="drag-free">
+            <button class="stop-btn" id="stop-btn" title="Hentikan Aether (semua tool & tugas otonom)">
+                <span class="ico"></span>
+                <span class="txt">STOP</span>
+            </button>
+        </div>
+
+        <div class="drag-free">
+            <button class="apps-btn" id="apps-btn" title="Semua aplikasi (Ctrl+K)">
+                <span class="dots"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                Apps
+            </button>
+        </div>
+
+        <div class="window-controls">
+            <button id="win-min" title="Minimize"></button>
+            <button id="win-max" title="Maximize"></button>
+            <button id="win-close" class="close" title="Close"></button>
+        </div>
+
+    </header>
+
+    <!-- ================= Badan: satu stage aplikasi ================= -->
+    <div class="body">
+        <main class="stage" id="stage"></main>
+    </div>
+
+    <!-- Footer statusbar dihapus: sudah terwakili chips di atas kotak
+         ketik dashboard Beranda. -->
+
+    <!-- ================= App Launcher (satu tombol → semua) ======= -->
+    <div class="launcher" id="launcher">
+        <div class="launcher-inner">
+            <div class="hub-head" id="hub-head"></div>
+            <div class="app-grid" id="app-grid"></div>
+        </div>
+        <button class="btn ghost sm launcher-close" id="launcher-close">Tutup ✕</button>
+    </div>
+
+    <!-- ================= Hologram mengambang (standby) =========== -->
+    <button class="holo-fab" id="holo-fab" title="Aether — klik atau ucapkan “Aether”"></button>
+
+    <!-- ================= Badge "mendengar" ======================= -->
+    <div class="wake-badge" id="wake-badge">
+        <span class="eq"><i></i><i></i><i></i><i></i></span>
+        <span>Mendengar…</span>
+    </div>
+
+    <!-- ================= Chat panel (sisi kanan) ================= -->
+    <!-- Dibangun oleh aetherOverlay.js — bukan overlay fullscreen -->
+
+</div>
+
+<!-- xterm.js divendor (CSP: tanpa CDN) — set global sebelum modul app.js -->
+<script src="vendor/xterm/xterm.js"></script>
+<script src="vendor/xterm/addon-fit.js"></script>
+<script src="vendor/xterm/addon-search.js"></script>
+
+<script type="module" src="app.js"></script>
+
+</body>
+</html>
