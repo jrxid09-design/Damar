@@ -1,0 +1,22 @@
+"use strict";
+
+const SCHEMA_VERSION = "resourceplan.v1";
+const PLAN_SCHEMA_VERSION = "resourceplan.plan.v1";
+const SLICE_SCHEMA_VERSION = "resourceplan.slice.v1";
+const SHORTFALL_SCHEMA_VERSION = "resourceplan.shortfall.v1";
+const METER_SCHEMA_VERSION = "resourceplan.meter.v1";
+
+const BOUNDS = Object.freeze({
+    MAX_RESOURCE_KINDS: 64,
+    MAX_SLICES_PER_PLAN: 256,
+    MAX_PLANS: 128,
+    MAX_SHORTFALL_RECORDS: 10000,
+    MAX_METER_READINGS_PER_KIND: 10000,
+    MAX_PLAN_LABEL_BYTES: 512,
+    MAX_KIND_NAME_BYTES: 128,
+    RESERVATION_TTL_MS: 24 * 60 * 60 * 1000,
+    METER_WINDOW_MS: 60 * 60 * 1000,
+    MAX_BUDGET_REPLAN_DEPTH: 10,
+});
+
+module.exports = { SCHEMA_VERSION, PLAN_SCHEMA_VERSION, SLICE_SCHEMA_VERSION, SHORTFALL_SCHEMA_VERSION, METER_SCHEMA_VERSION, BOUNDS };

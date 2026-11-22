@@ -11,7 +11,7 @@
  * authorizes motion; it only answers occupancy/reachability queries that a
  * caller (eventually L4/Authority, via L6) consults before acting.
  *
- * Contract: C:\Workspace\Damar-audit-evidence\wave7-10\wave8-recon\WAVE8_CONTRACTS_FROZEN.md
+ * Contract: the internal audit evidence (not shipped)
  * "## W8-L3 -- Spatial / Scene Model". Baseline SHA f397ce4.
  */
 

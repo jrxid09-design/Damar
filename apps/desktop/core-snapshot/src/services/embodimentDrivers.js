@@ -1,0 +1,135 @@
+"use strict";
+
+/* Canonical Lane 3 actuator implementations.  This module owns host I/O;
+ * action/bootstrap owns registration, admission, authority, replay, and
+ * verification composition.  It is never an ingress or authority runtime. */
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const crypto = require("node:crypto");
+const { execFile, execFileSync } = require("node:child_process");
+const { promisify } = require("node:util");
+const kaliBridge = require("../kali/bridge");
+
+const pexec = promisify(execFile);
+const MEDIA = "damar.media";
+const DESKTOP = "damar.desktop";
+const BACKUP = "damar.backup";
+const KALI = "damar.kali";
+const NOTIFICATION = "messaging.whatsapp";
+const CACHE_DIR = path.join(os.tmpdir(), "damar-media");
+const CACHE_CAP_BYTES = 500 * 1024 * 1024;
+const DESKTOP_APPS = Object.freeze({ notepad: "notepad.exe", calculator: "calc.exe", browser: "msedge.exe", edge: "msedge.exe", chrome: "chrome.exe", code: "code" });
+const observations = new Map();
+
+function parametersDigest(parameters) { return crypto.createHash("sha256").update(JSON.stringify(parameters ?? {})).digest("hex"); }
+function remember(executionId, result) { if (typeof executionId === "string" && executionId) { if (observations.size >= 4096) observations.delete(observations.keys().next().value); observations.set(executionId, result); } }
+function observation(executionId) { return observations.get(executionId) ?? {}; }
+function requireObject(value, label) { if (value === null || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`${label} must be an object`); }
+function stringArg(parameters, key, max = 4096) { const value = parameters?.[key]; if (typeof value !== "string" || value.trim() === "" || value.length > max) throw new Error(`invalid ${key}`); return value; }
+function finiteCoord(parameters, key) { const value = Number(parameters?.[key]); if (!Number.isFinite(value) || value < -100000 || value > 100000) throw new Error(`invalid ${key}`); return Math.round(value); }
+function videoId(parameters) { const id = stringArg(parameters, "videoId", 32).trim(); if (!/^[A-Za-z0-9_-]{11}$/.test(id)) throw new Error("invalid videoId"); return id; }
+function shellCommand(parameters) { const command = stringArg(parameters, "command", 1024).trim(); const cwd = parameters?.cwd == null ? null : stringArg(parameters, "cwd", 1024); const timeout = parameters?.timeout == null ? 300000 : Number(parameters.timeout); if (!Number.isSafeInteger(timeout) || timeout < 1000 || timeout > 600000) throw new Error("invalid timeout"); return { command, cwd, timeout }; }
+function mediaBin() { return process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"; }
+function executableOnPath(names) {
+    const candidates = Array.isArray(names) ? names : [names];
+    const pathEntries = String(process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+    return candidates.some(name => pathEntries.some(dir => fs.existsSync(path.join(dir, name))));
+}
+function probeEmbodimentAvailability() {
+    const powershell = process.platform === "win32"
+        ? path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+        : null;
+    const wsl = process.platform === "win32"
+        ? path.join(process.env.SystemRoot || "C:\\Windows", "System32", "wsl.exe")
+        : null;
+    return Object.freeze({
+        [MEDIA]: executableOnPath([mediaBin(), "yt-dlp"]) ? "AVAILABLE" : "UNKNOWN",
+        [DESKTOP]: (powershell ? fs.existsSync(powershell) : executableOnPath("powershell")) ? "AVAILABLE" : "UNKNOWN",
+        [BACKUP]: process.platform === "win32"
+            ? (executableOnPath("robocopy.exe") || fs.existsSync(path.join(process.env.SystemRoot || "C:\\Windows", "System32", "robocopy.exe")) ? "AVAILABLE" : "UNKNOWN")
+            : (executableOnPath("rsync") ? "AVAILABLE" : "UNKNOWN"),
+        [KALI]: process.platform !== "win32"
+            ? (executableOnPath("bash") ? "AVAILABLE" : "UNKNOWN")
+            : (wsl && fs.existsSync(wsl) && typeof process.env.DAMAR_KALI_DISTRO === "string" && process.env.DAMAR_KALI_DISTRO.trim() ? "AVAILABLE" : "UNKNOWN")
+    });
+}
+function mediaOutput(id) { fs.mkdirSync(CACHE_DIR, { recursive: true }); return path.join(CACHE_DIR, `${id}.mp4`); }
+function pruneMediaCache() {
+    try {
+        const files = fs.readdirSync(CACHE_DIR).map(name => {
+            const file = path.join(CACHE_DIR, name);
+            const stat = fs.statSync(file);
+            return { file, size: stat.size, mtime: stat.mtimeMs };
+        }).filter(entry => Number.isFinite(entry.size)).sort((a, b) => a.mtime - b.mtime);
+        let total = files.reduce((sum, entry) => sum + entry.size, 0);
+        for (const entry of files) {
+            if (total <= CACHE_CAP_BYTES) break;
+            try { fs.unlinkSync(entry.file); total -= entry.size; } catch { /* best effort */ }
+        }
+    }
+    catch { /* cache cleanup cannot make a successful effect fail */ }
+}
+
+async function mediaDriver({ operation, parameters }) {
+    const id = videoId(parameters); const url = `https://www.youtube.com/watch?v=${id}`;
+    if (operation === "resolve") {
+        const { stdout } = await pexec(mediaBin(), ["-f", "18/best[ext=mp4][acodec!=none][vcodec!=none]", "-g", "--no-warnings", "--no-playlist", url], { timeout: 20000, windowsHide: true, maxBuffer: 1024 * 1024 });
+        const resolved = String(stdout ?? "").trim().split(/\r?\n/)[0].trim();
+        if (!/^https?:\/\//.test(resolved)) throw new Error("media resolver returned no URL");
+        return { outcome: "EXECUTED", ok: true, videoId: id, url: resolved, binding: { videoId: id } };
+    }
+    const output = mediaOutput(id);
+    if (fs.existsSync(output) && fs.statSync(output).size > 0) return { outcome: "EXECUTED", ok: true, videoId: id, output, bytes: fs.statSync(output).size, binding: { videoId: id, output } };
+    try { await pexec(mediaBin(), ["--extractor-args", "youtube:player_client=mweb", "-f", "18/best[ext=mp4][acodec!=none][vcodec!=none]", "-o", output, "--retries", "3", "--fragment-retries", "3", "--no-warnings", "--no-playlist", "--no-part", url], { timeout: 180000, windowsHide: true, maxBuffer: 1024 * 1024 }); }
+    catch (error) { try { if (fs.statSync(output).size <= 0) fs.unlinkSync(output); } catch {} throw error; }
+    if (!fs.existsSync(output) || fs.statSync(output).size <= 0) throw new Error("media output postcondition failed");
+    pruneMediaCache();
+    return { outcome: "EXECUTED", ok: true, videoId: id, output, bytes: fs.statSync(output).size, binding: { videoId: id, output } };
+}
+
+function psScript(script, env = {}) { return pexec("powershell", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], { timeout: 15000, windowsHide: true, maxBuffer: 1024 * 1024, env: { ...process.env, ...Object.fromEntries(Object.entries(env).map(([k, v]) => [`DAMAR_${k}`, String(v)])) } }); }
+function desktopTarget(requested) {
+    if (requested !== "code" || process.platform !== "win32") return DESKTOP_APPS[requested];
+    const localAppData = process.env.LOCALAPPDATA;
+    const installed = localAppData ? path.join(localAppData, "Programs", "Microsoft VS Code", "Code.exe") : null;
+    if (installed && fs.existsSync(installed)) return installed;
+    return "code";
+}
+async function desktopDriver({ operation, parameters }) {
+    if (operation === "openApp") { const requested = stringArg(parameters, "name", 64).trim().toLowerCase(); const target = desktopTarget(requested); if (!target) throw new Error("desktop app is not allowlisted"); const args = parameters?.args == null ? "" : stringArg(parameters, "args", 1024); if (requested !== "code" && args !== "") throw new Error("desktop app arguments are not allowlisted"); if (requested === "code" && args !== "" && (!path.isAbsolute(args) || !fs.existsSync(args) || !fs.statSync(args).isDirectory())) throw new Error("code workspace must be an existing absolute directory"); const command = args === "" ? "$p=Start-Process -FilePath $env:DAMAR_TARGET -PassThru" : "$p=Start-Process -FilePath $env:DAMAR_TARGET -ArgumentList $env:DAMAR_ARGS -PassThru"; await psScript(`$ErrorActionPreference='Stop'; ${command}; if(-not $p){throw 'process start failed'}; Write-Output $p.Id`, { TARGET: target, ARGS: args }); return { outcome: "EXECUTED", ok: true, operation, app: requested, target, args, verificationClass: "process-started" }; }
+    if (operation === "listWindows") { const { stdout } = await psScript("Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object -First 25 ProcessName,MainWindowTitle | ConvertTo-Json -Compress"); let windows = []; try { const parsed = JSON.parse(String(stdout ?? "[]")); windows = (Array.isArray(parsed) ? parsed : [parsed]).map((p) => ({ app: p.ProcessName, title: p.MainWindowTitle })); } catch { windows = []; } return { outcome: "EXECUTED", ok: true, operation, windows, verificationClass: "observed-list" }; }
+    if (operation === "typeText") { const text = stringArg(parameters, "text", 4096); await psScript("Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait($env:DAMAR_TEXT); Write-Output 'ok'", { TEXT: text }); return { outcome: "EXECUTED", ok: true, operation, length: text.length, verificationClass: "invocation-only" }; }
+    if (operation === "pressKey") { const key = stringArg(parameters, "key", 256); await psScript("Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait($env:DAMAR_KEY); Write-Output 'ok'", { KEY: key }); return { outcome: "EXECUTED", ok: true, operation, key, verificationClass: "invocation-only" }; }
+    if (operation === "fillForm") { const field = stringArg(parameters, "field", 512); const value = stringArg(parameters, "value", 4096); const { stdout } = await psScript("Add-Type -AssemblyName UIAutomationClient; Add-Type -AssemblyName UIAutomationTypes; $root=[System.Windows.Automation.AutomationElement]::RootElement; $cond=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,$env:DAMAR_FIELD); $el=$root.FindFirst([System.Windows.Automation.TreeScope]::Subtree,$cond); if(-not $el){Write-Output 'not-found'; exit 0}; $vp=$el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern); $vp.SetValue($env:DAMAR_VALUE); Write-Output 'ok'", { FIELD: field, VALUE: value }); if (String(stdout).trim() !== "ok") throw new Error("desktop field not found or not writable"); return { outcome: "EXECUTED", ok: true, operation, field, verificationClass: "value-pattern" }; }
+    if (operation === "moveMouse") { const x = finiteCoord(parameters, "x"); const y = finiteCoord(parameters, "y"); await psScript("$s='[DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y);'; Add-Type -MemberDefinition $s -Name DamarMove -Namespace Damar; if(-not [Damar.DamarMove]::SetCursorPos([int]$env:DAMAR_X,[int]$env:DAMAR_Y)){throw 'SetCursorPos failed'}; Write-Output 'ok'", { X: x, Y: y }); return { outcome: "EXECUTED", ok: true, operation, x, y, verificationClass: "cursor-position" }; }
+    const button = String(parameters?.button ?? "left").toLowerCase(); if (!["left", "right", "middle"].includes(button)) throw new Error("invalid mouse button"); const x = parameters?.x == null ? null : finiteCoord(parameters, "x"); const y = parameters?.y == null ? null : finiteCoord(parameters, "y"); if ((x == null) !== (y == null)) throw new Error("mouse coordinates must be paired"); const flags = { left: [2, 4], right: [8, 16], middle: [32, 64] }[button]; const move = x == null ? "" : "$m='[DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y);'; Add-Type -MemberDefinition $m -Name DamarClickMove -Namespace Damar; if(-not [Damar.DamarClickMove]::SetCursorPos([int]$env:DAMAR_X,[int]$env:DAMAR_Y)){throw 'SetCursorPos failed'};"; await psScript(`${move}$s='[DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,int e);'; Add-Type -MemberDefinition $s -Name DamarClick -Namespace Damar; [Damar.DamarClick]::mouse_event([uint32]$env:DAMAR_DOWN,0,0,0,0); [Damar.DamarClick]::mouse_event([uint32]$env:DAMAR_UP,0,0,0,0); Write-Output 'ok'`, { DOWN: flags[0], UP: flags[1], X: x ?? "", Y: y ?? "" }); return { outcome: "EXECUTED", ok: true, operation: "click", button, x, y, verificationClass: "invocation-only" };
+}
+function safePath(value) { const p = stringArg({ value }, "value", 1024); if (!path.isAbsolute(p)) throw new Error("backup paths must be absolute"); return path.normalize(p); }
+async function backupDriver({ parameters }) { const source = safePath(parameters?.source); const dest = safePath(parameters?.dest); if (!fs.existsSync(source) || !fs.statSync(source).isDirectory()) throw new Error("backup source directory missing"); fs.mkdirSync(dest, { recursive: true }); const args = process.platform === "win32" ? [source, dest, "/E", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NP"] : ["-a", `${source.replace(/\\?$/, "/")}`, `${dest.replace(/\\?$/, "/")}`]; const cmd = process.platform === "win32" ? "robocopy" : "rsync"; let result; try { result = await pexec(cmd, args, { timeout: 120000, windowsHide: true, maxBuffer: 1024 * 1024 }); } catch (error) { if (process.platform !== "win32" || error.code === undefined) throw error; result = error; } const code = Number(result?.code ?? 0); const ok = process.platform === "win32" ? code < 8 : code === 0; if (!ok) throw new Error(`backup command failed (${code})`); if (!fs.existsSync(dest) || !fs.statSync(dest).isDirectory()) throw new Error("backup destination postcondition failed"); return { outcome: "EXECUTED", ok: true, source, dest, code, binding: { source, dest }, verificationClass: "destination-exists" }; }
+async function kaliDriver({ operation, parameters }) { if (operation === "which") { const tool = stringArg(parameters, "tool", 128).replace(/[^\w.-]/g, ""); const result = await kaliBridge.which(tool); return { outcome: "EXECUTED", ok: true, operation: "which", tool, path: result }; } if (operation === "tools") return { outcome: "EXECUTED", ...(await kaliBridge.tools()), operation: "tools" }; if (operation === "status") return { outcome: "EXECUTED", ...(await kaliBridge.status()), operation: "status" }; const request = shellCommand(parameters); const result = await kaliBridge.run(request.command, { cwd: request.cwd, timeout: request.timeout }); const commandOk = result.ok === true && Number(result.code ?? 0) === 0; return { outcome: commandOk ? "EXECUTED" : "EXECUTED_UNVERIFIED", ...result, command: request.command, cwd: request.cwd, timeout: request.timeout, binding: { commandDigest: crypto.createHash("sha256").update(request.command).digest("hex"), cwd: request.cwd, timeout: request.timeout, runtime: process.platform, environment: process.env.DAMAR_KALI_DISTRO || "<detected>" }, verificationClass: "exit-code-and-binding" }; }
+async function notificationDriver({ operation, parameters }) {
+    if (operation !== "broadcast") throw new Error("unsupported notification operation");
+    const text = stringArg(parameters, "text", 4096);
+    const whatsapp = require("./whatsappService");
+    const evidence = await whatsapp.broadcastWithEvidence(text);
+    const ok = evidence.errors.length === 0 && evidence.recipients > 0 && evidence.messageIds.length > 0;
+    return { outcome: ok ? "EXECUTED" : "EXECUTED_UNVERIFIED", channel: "whatsapp", recipients: evidence.recipients, messageIds: evidence.messageIds, errors: evidence.errors, transportAccepted: evidence.messageIds.length > 0, binding: { textDigest: parametersDigest({ text }) }, verificationClass: "message-id-per-recipient" };
+}
+
+function verifyMedia(ctx) { const result = observation(ctx.executionId); if (ctx.operation === "download") { const output = typeof result.output === "string" ? result.output : ""; return { binding: result.videoId, bindingMatches: result.videoId === ctx.parameters?.videoId, exists: Boolean(output && fs.existsSync(output) && fs.statSync(output).size > 0), bytes: output && fs.existsSync(output) ? fs.statSync(output).size : 0 }; } const requestedId = typeof ctx.parameters?.videoId === "string" ? ctx.parameters.videoId : null; return { binding: result.videoId, bindingMatches: result.videoId === requestedId, url: typeof result.url === "string" && /^https?:\/\//.test(result.url) ? result.url : null }; }
+function independentlyListDesktopWindows() {
+    if (process.platform !== "win32") return null;
+    try {
+        const stdout = execFileSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", "Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object -First 25 ProcessName,MainWindowTitle | ConvertTo-Json -Compress"], { timeout: 15000, windowsHide: true, maxBuffer: 1024 * 1024, encoding: "utf8" });
+        const parsed = JSON.parse(String(stdout ?? "[]"));
+        return (Array.isArray(parsed) ? parsed : [parsed]).map((p) => ({ app: p.ProcessName, title: p.MainWindowTitle }));
+    }
+    catch { return null; }
+}
+function verifyDesktop(ctx) { const result = observation(ctx.executionId); const windows = ctx.operation === "listWindows" ? independentlyListDesktopWindows() : null; return { operation: ctx.operation, invoked: result.ok === true, parametersMatch: result.binding?.parametersDigest === parametersDigest(ctx.parameters ?? {}), verificationClass: result.verificationClass ?? "unknown", windows: windows ?? undefined, observed: ctx.operation === "listWindows" && Array.isArray(windows) }; }
+function verifyBackup(ctx) { const result = observation(ctx.executionId); const source = typeof ctx.parameters?.source === "string" ? path.normalize(ctx.parameters.source) : null; const dest = typeof ctx.parameters?.dest === "string" ? path.normalize(ctx.parameters.dest) : null; return { source: result.source, dest: result.dest, sourceMatches: source !== null && result.source === source, destMatches: dest !== null && result.dest === dest, exists: Boolean(result.dest && fs.existsSync(result.dest) && fs.statSync(result.dest).isDirectory()), commandOk: result.ok === true }; }
+function verifyKali(ctx) { const result = observation(ctx.executionId); if (ctx.operation === "status" || ctx.operation === "tools") return { operation: ctx.operation, completed: result.outcome === "EXECUTED" }; if (ctx.operation === "which") return { operation: "which", toolMatches: result.tool === ctx.parameters?.tool?.replace(/[^\w.-]/g, ""), completed: result.outcome === "EXECUTED" }; const requested = shellCommand(ctx.parameters ?? {}); const digest = crypto.createHash("sha256").update(requested.command).digest("hex"); return { commandDigestMatches: result.binding?.commandDigest === digest, cwdMatches: result.cwd === requested.cwd, timeoutMatches: result.timeout === requested.timeout, runtimeMatches: result.binding?.runtime === process.platform, environmentMatches: result.binding?.environment === (process.env.DAMAR_KALI_DISTRO || "<detected>"), commandOk: result.ok === true && Number(result.code ?? 0) === 0, code: Number.isSafeInteger(result.code) ? result.code : null }; }
+function verifyNotification(ctx) { const result = observation(ctx.executionId); const text = typeof ctx.parameters?.text === "string" ? ctx.parameters.text : null; const ids = Array.isArray(result.messageIds) ? result.messageIds : []; const errors = Array.isArray(result.errors) ? result.errors : []; return { channel: result.channel === "whatsapp", textDigestMatches: result.binding?.textDigest === (text === null ? null : parametersDigest({ text })), recipients: Number.isSafeInteger(result.recipients) ? result.recipients : 0, messageIds: ids.length, noTransportErrors: errors.length === 0, transportAccepted: result.transportAccepted === true, verificationClass: result.verificationClass ?? "unknown" }; }
+
+module.exports = Object.freeze({ CACHE_DIR, MEDIA, DESKTOP, BACKUP, KALI, NOTIFICATION, parametersDigest, remember, observation, requireObject, stringArg, videoId, shellCommand, probeEmbodimentAvailability, mediaDriver, desktopDriver, backupDriver, kaliDriver, notificationDriver, verifyMedia, verifyDesktop, verifyBackup, verifyKali, verifyNotification });

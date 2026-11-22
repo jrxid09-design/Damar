@@ -42,7 +42,7 @@ function wslDistro() {
     return process.env.DAMAR_OPENCODE_WSL || null;
 }
 
-/** C:\Workspace\Aether → /mnt/c/Workspace/Aether (untuk opencode di WSL). */
+/** C:\Projects\Example → /mnt/c/Projects/Example (untuk opencode di WSL). */
 function toWslPath(dir) {
 
     const s = String(dir ?? "");

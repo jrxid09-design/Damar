@@ -1,0 +1,13 @@
+{
+  "name": "damar-presence",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DAMAR Idle Presence + Notch desktop surface (Windows). Reads state from the DAMAR Core; never approves or mutates.",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "30.5.1"
+  }
+}

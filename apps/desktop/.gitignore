@@ -1,0 +1,24 @@
+# Local runtime binaries and sensitive state
+*.exe
+*.dll
+*.zip
+*.node
+*.onnx
+*.pt
+**/node_modules/
+**/session/
+**/sessions/
+*.dpapi
+credentials.json
+console-credentials.json
+*.jsonl
+*.tap
+
+
+# Snapshot source directories named models contain required code.
+!core-snapshot/src/**/models/
+!core-snapshot/src/**/models/**
+
+# Test fixtures and vendored Python packages are source files.
+!tests/fixtures/**
+!python-vendor/**

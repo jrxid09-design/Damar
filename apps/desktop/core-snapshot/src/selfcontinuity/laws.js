@@ -1,0 +1,21 @@
+"use strict";
+
+const LAWS = Object.freeze({
+    IDENTITY_IS_KEY_BOUND: true,
+    RESTORE_STRIPS_GRANTS: true,
+    GENERATION_IS_MONOTONIC: true,
+    SINGLE_GENESIS: true,
+    FORK_DETECTION_REQUIRED: true,
+    SILENT_FORK_MERGE_FORBIDDEN: true,
+    PROVIDER_SWAP_PRESERVES_IDENTITY: true,
+    MIGRATION_REQUIRES_POLICY_CHECK: true,
+});
+
+const BOUNDS = Object.freeze({
+    MAX_INCARNATIONS: 64,
+    MAX_FORK_HISTORY: 32,
+});
+
+const IDENTITY_SCHEMA_VERSION = 1;
+
+module.exports = { LAWS, BOUNDS, IDENTITY_SCHEMA_VERSION };

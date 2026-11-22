@@ -1,0 +1,6 @@
+{
+  "name": "damar-gui-launch",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs"
+}

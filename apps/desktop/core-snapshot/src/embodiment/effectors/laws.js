@@ -1,0 +1,36 @@
+"use strict";
+
+const MAX_EFFECTORS = 256;
+const MAX_CONCURRENT_EFFECTOR_COMMANDS = 1;
+const MAX_ADAPTER_RATE_HZ = 20;
+const EFFECTOR_KIND = Object.freeze({
+    GUI: "GUI", KEYBOARD: "KEYBOARD", FILESYSTEM: "FILESYSTEM", NETWORK: "NETWORK",
+    PROCESS: "PROCESS", MOTOR: "MOTOR", RELAY: "RELAY", AUDIO_OUT: "AUDIO_OUT",
+    DISPLAY: "DISPLAY", OTHER: "OTHER"
+});
+const REVERSIBILITY = Object.freeze({ REVERSIBLE: "REVERSIBLE", COMPENSABLE: "COMPENSABLE", IRREVERSIBLE: "IRREVERSIBLE" });
+const HAZARD_CLASS = Object.freeze({ NONE: "NONE", DATA: "DATA", FINANCIAL: "FINANCIAL", PHYSICAL: "PHYSICAL", SAFETY_CRITICAL: "SAFETY_CRITICAL" });
+const PHYSICAL_KINDS = Object.freeze([EFFECTOR_KIND.MOTOR, EFFECTOR_KIND.RELAY]);
+function isPhysicalEffector(descriptor) {
+    return Boolean(descriptor && (PHYSICAL_KINDS.includes(descriptor.kind) ||
+        descriptor.hazardClass === HAZARD_CLASS.PHYSICAL || descriptor.hazardClass === HAZARD_CLASS.SAFETY_CRITICAL));
+}
+const OUTCOME = Object.freeze({
+    EXECUTED: "EXECUTED",
+    UNKNOWN_OUTCOME: "UNKNOWN_OUTCOME",
+    UNVERIFIED: "UNVERIFIED",
+    REFUSED: "REFUSED",
+    STOPPED: "STOPPED"
+});
+
+module.exports = Object.freeze({
+    MAX_EFFECTORS,
+    MAX_CONCURRENT_EFFECTOR_COMMANDS,
+    MAX_ADAPTER_RATE_HZ,
+    EFFECTOR_KIND,
+    PHYSICAL_KINDS,
+    isPhysicalEffector,
+    REVERSIBILITY,
+    HAZARD_CLASS,
+    OUTCOME
+});
