@@ -117,11 +117,11 @@ function createGateway({ file, registry, router, budget, now = Date.now }) {
       opencode: JSON.stringify({ $schema: 'https://opencode.ai/config.json', provider: { damar: { npm: '@ai-sdk/openai-compatible', name: 'DAMAR', options: { baseURL: base, apiKey: '{env:DAMAR_API_KEY}' }, models: { [m]: { name: m } } } }, model: 'damar/' + m }, null, 2),
       // Hermes Agent: ~/.hermes/config.yaml (or $HERMES_HOME/config.yaml), provider "custom" = any OpenAI-compatible endpoint.
       hermes: `# ~/.hermes/config.yaml  (Hermes Agent)\nmodel:\n  default: "${m}"\n  provider: "custom"\n  base_url: "${base}"\n  api_key: "<your DAMAR gateway key>"`,
-      continue: `# ~/.continue/config.yaml  (Continue.dev)\nmodels:\n  - name: DAMAR ${m}\n    provider: openai\n    model: ${m}\n    apiBase: ${base}\n    apiKey: <your DAMAR gateway key>`,
+      continue: `# ~/.continue/config.yaml  (Continue)\nname: DAMAR Gateway\nversion: 0.0.1\nschema: v1\nmodels:\n  - name: DAMAR ${m}\n    provider: openai\n    model: ${m}\n    apiBase: ${base}\n    apiKey: <your DAMAR gateway key>`,
       cline: `Cline / Roo Code: Settings > API Provider: "OpenAI Compatible"\nBase URL: ${base}\nAPI Key: <your DAMAR gateway key>\nModel ID: ${m}`,
-      aider: `aider --openai-api-base ${base} --openai-api-key <your DAMAR gateway key> --model openai/${m}`,
+      aider: `# PowerShell\n$env:AIDER_OPENAI_API_BASE = '${base}'\n$env:AIDER_OPENAI_API_KEY = '<your DAMAR gateway key>'\naider --model openai/${m}`,
       librechat: `# librechat.yaml\nendpoints:\n  custom:\n    - name: "DAMAR"\n      apiKey: "\${DAMAR_API_KEY}"\n      baseURL: "${base}"\n      models:\n        default: ["${m}"]\n        fetch: true\n      titleConvo: true\n      modelDisplayLabel: "DAMAR"`,
-      openwebui: `Open WebUI: Admin Settings > Connections > OpenAI API > +\nURL: ${base}\nKey: <your DAMAR gateway key>\n# or environment: OPENAI_API_BASE_URL=${base}  OPENAI_API_KEY=<your DAMAR gateway key>${host === '127.0.0.1' ? '\n# Open WebUI in Docker: use http://host.docker.internal:' + port + '/v1 and turn on LAN mode' : ''}`,
+      openwebui: `Open WebUI: Admin Settings > Connections > OpenAI API > +\nURL: ${base}\nKey: <your DAMAR gateway key>\n# or environment: OPENAI_API_BASE_URL=${base}  OPENAI_API_KEY=<your DAMAR gateway key>${host === '127.0.0.1' ? '\n# Open WebUI in Docker: set DAMAR Gateway bind to 0.0.0.0, then use http://host.docker.internal:' + port + '/v1. Keep the gateway key private.' : ''}`,
       generic: `curl ${base}/chat/completions -H "Authorization: Bearer $DAMAR_API_KEY" -H "Content-Type: application/json" -d '{"model":"${m}","messages":[{"role":"user","content":"hi"}]}'` };
   }
   const admin = {

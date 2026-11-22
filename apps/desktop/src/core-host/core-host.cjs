@@ -45,6 +45,10 @@ function cleanEnvironment(directory) {
     NODE_PATH: (process.env.DAMAR_REQUIRE_TRACE && process.env.DAMAR_TRACE_NODE_PATH) || path.join(SNAPSHOT, 'node_modules'), DAMAR_CORE_HOST_CHILD: '1', DAMAR_CORE_SNAPSHOT: SNAPSHOT,
   });
   if (process.env.DAMAR_CORE_TEST_FIXTURES === '1') env.DAMAR_CORE_TEST_FIXTURES = '1';
+  if (process.env.DAMAR_PANDAWA_PARALLEL !== undefined) {
+    if (!/^[1-3]$/.test(process.env.DAMAR_PANDAWA_PARALLEL)) throw Error('PANDAWA_PARALLEL_INVALID');
+    env.DAMAR_PANDAWA_PARALLEL = process.env.DAMAR_PANDAWA_PARALLEL;
+  }
   if (DATA_ROOT) env.DAMAR_DATA_ROOT = DATA_ROOT;
   // Absolute interpreter for allowlisted workspace commands (the child PATH holds System32 only).
   const python = findPython();
@@ -357,6 +361,7 @@ async function child(directory, resume, recovered = false) {
       roleOf: m => m === 'damar' ? { label: 'DAMAR (lead)', mandate: 'You lead the Pandawa team: weigh the members proposals on evidence and decide.' } : identity.roleProfile(m) });
     r9 = require('./r9-routes.cjs').createR9Routes({
       directory, credentials: runtime.credentials, hub, registry, turns, checkpoints, settings: coreSettings, modelGrants, providerAdmin, team,
+      parallelRuns: Number(process.env.DAMAR_PANDAWA_PARALLEL || 3),
       mataDewa: require('../mata-dewa/index.cjs').createMataDewa({ settings: coreSettings, keyStore, cacheFile: path.join(directory, 'mata-dewa-cache.json'), profileDir: path.join(path.dirname(settingsFile), 'mata-dewa'), python, alprDir: path.join(SCRATCH, 'alpr'), // installed: %LOCALAPPDATA%\DAMAR\alpr
         // ALPR watchlist hits join the redacted activity feed (requester: camera label only; owner: plate in `detail`).
         onAlert: a => turns.noteActivity({ kind: 'alert', source: 'mata-dewa', label: String(a.cameraName).slice(0, 40) + ' · watchlist match', detail: a.plate }) }),

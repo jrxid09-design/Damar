@@ -32,7 +32,8 @@ function readJsonl(file) {
 const tokenEq = (a, b) => typeof a === 'string' && typeof b === 'string' && crypto.timingSafeEqual(crypto.createHash('sha256').update(a).digest(), crypto.createHash('sha256').update(b).digest());
 const clean = (s, n) => String(s ?? '').replace(/[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, ' ').slice(0, n);
 
-function createR9Routes({ directory, credentials, hub, registry, canonicalUsageToday, turns = null, sandbox = () => null, checkpoints = null, memory = null, settings = null, budget = null, lifecycle = null, jobSnapshot = () => null, modelGrants = null, mataDewa = null, team = null, providerAdmin = null }) {
+function createR9Routes({ directory, credentials, hub, registry, canonicalUsageToday, turns = null, sandbox = () => null, checkpoints = null, memory = null, settings = null, budget = null, lifecycle = null, jobSnapshot = () => null, modelGrants = null, mataDewa = null, team = null, providerAdmin = null, parallelRuns = 3 }) {
+  if (!Number.isSafeInteger(parallelRuns) || parallelRuns < 1 || parallelRuns > 3) throw Error('PANDAWA_PARALLEL_INVALID');
   const runsFile = path.join(directory, 'pandawa-runs.jsonl'), receiptsFile = path.join(directory, 'usage-receipts.jsonl');
   const runs = new Map(), byRequest = new Map(), receipts = new Map();
   const apply = ev => {
@@ -53,7 +54,7 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
   // Parallel sub-agents: up to PARALLEL runs at once (bounded queue of MAX_QUEUE outstanding). Provider usage is attributed
   // per request, not by position: a Pandawa run claims the ledger entries whose request carried its task (no tools), an
   // agent turn claims its own tool-bearing entries, and a claimed entry is never counted twice.
-  const PARALLEL = 3, claimed = new Set();
+  const PARALLEL = parallelRuns, claimed = new Set();
   let running = 0, queued = 0; const waiting = [];
   const pump = () => { while (running < PARALLEL && waiting.length) { const { fn, resolve, reject } = waiting.shift(); running++; Promise.resolve().then(fn).then(resolve, reject).finally(() => { running--; queued--; pump(); }); } };
   const enqueue = fn => new Promise((resolve, reject) => { queued++; waiting.push({ fn, resolve, reject }); pump(); });
