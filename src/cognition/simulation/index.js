@@ -15,7 +15,7 @@
  * worldmodel/goals/Authority/actuation/the ACC journal -- structurally
  * incapable of writing real state, not merely policy-restricted.
  *
- * Contract: C:\Workspace\Damar-audit-evidence\wave7-10\wave8-recon\WAVE8_CONTRACTS_FROZEN.md
+ * Contract: the internal audit evidence (not shipped)
  * "## W8-L5 -- Simulation Sandbox". Baseline SHA f397ce4.
  */
 

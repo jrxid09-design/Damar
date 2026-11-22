@@ -173,7 +173,7 @@ const MAX_PAYLOAD_NODES = 512;
 /**
  * PM-1: satu lintasan yang MEMVALIDASI dan MEMBANGUN salinan aman sekaligus
  * -- bukan lagi validasi lalu JSON.stringify terpisah. Bug diketemukan
- * review independen (OpenCode/9router deepseek-v4.1-flash, audit
+ * review independen (independent model review, audit
  * putaran-3, AUD3-P1-1): bahkan setelah prototype/accessor/fungsi diperiksa
  * lewat Reflect.ownKeys/getOwnPropertyDescriptor, sebuah `Proxy` bisa
  * membuat trap `getPrototypeOf`/`ownKeys`/`getOwnPropertyDescriptor`
@@ -322,7 +322,7 @@ function buildSafePayloadRef(value, depth = 0, budget, bounds = BOUNDS) {
 }
 
 /**
- * Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+ * Bug review independen (independent model review, audit
  * putaran-3, AUD3-P1-2): versi lama berhenti rekursi begitu `Object.isFrozen`
  * true, jadi node perantara yang SUDAH beku milik pemanggil melindungi anak
  * yang masih bisa diubah; dan `Object.keys` melewati properti non-enumerable

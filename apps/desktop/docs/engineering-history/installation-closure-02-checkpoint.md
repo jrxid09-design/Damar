@@ -1,0 +1,9 @@
+# Installation closure 02: BLOCKED
+
+Direct PinDeployment test added (authority-deployment-handles.ps1): retained handle denies file write and rename, multiple hard link rejected, storage junction rejected. Test uses reflection on actual compiled implementation. Compilation/reflection fixture exposed pinning of PowerShell instead of service assembly; switched deployment executable references to typeof(AuthorityService).Assembly.Location. No claim concurrent attack stress or storage-worker race closure.
+
+Affected suite 8/8, damar-closure2-affected.tap. Exact current-source full suite 257/258, damar-closure2-full.tap. Failure computer-use.test.cjs:125, FOCUS_REFUSED with foreground title OC | Resume DAMAR Windows protected provis..., class CASCADIA_HOSTING_WINDOW_CLASS, PID 17976, target PID 35412. This establishes OpenCode Terminal foreground during refusal; why focus acquisition failed is not conclusively resolved. No retry/relaxation. Earlier negative evidence preserved.
+
+Rebuilt intermediate executable DamarProtectedAuthority-closure-02.exe SHA256 5776f1390e5337f598e33ecba7a2eee98e575f2c9c4fd40bd45871f1f01eafe1 in approved opencode temp. Not installable. Current read-only preflight: executor AETHER/jrxid non-elevated; candidate storage absent; DamarProtectedAuthority service absent. Existing host affected test validates actual C:/ and C:/ProgramData ancestor descriptors under ordinary token. No installed restricted-service identity evidence.
+
+Mandatory unresolved gates: handle-bound mutable worker storage/children, full bootstrap adversarial coverage and concurrent attack evidence; actual restricted service token/IPC test; Computer-Use foreground refusal; final immutable four-component payload and private path preflight. Not solely a privileged provisioning gate. No installer, no Owner request, no privileged host mutations, no global ACL change or active Core operations. Existing owner approval remains in force.

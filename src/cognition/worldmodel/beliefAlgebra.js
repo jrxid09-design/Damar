@@ -18,7 +18,7 @@ const TIER_RANK = Object.freeze({ T4: 1, T2: 2, T1: 3, DECLARED: 4 });
 const DANGEROUS_VALUE_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
 
 /**
- * Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+ * Bug review independen (independent model review, audit
  * putaran-4, W7R4-P1-1/W7R4-P2-1): sebelumnya `record.value` disimpan APA
  * ADANYA -- lewat referensi mentah untuk ingestDeclaration, atau lewat
  * `JSON.parse(JSON.stringify(value))` untuk ingestObservation (yang

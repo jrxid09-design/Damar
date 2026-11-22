@@ -189,7 +189,7 @@ function sanitizeCoreOptions(options) {
 
 /* ===========================================================================
  * W8-L1 SENSORIUM -> W7-L2 WORLD MODEL BRIDGE
- * Frozen contract: C:\Workspace\Damar-audit-evidence\wave7-10\wave8-l1-recon\
+ * Frozen contract: the internal audit evidence (not shipped)
  * W8_L1_CONTRACT.md (see also wave8-recon\WAVE8_CONTRACTS_FROZEN.md, L1
  * section, the full-wave-reconciled version).
  *

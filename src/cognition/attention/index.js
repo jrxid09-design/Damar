@@ -118,7 +118,7 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
         list.push(now());
         signalsBySource.set(sourceId, list);
 
-        // Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+        // Bug review independen (independent model review, audit
         // putaran-2, AUD2-P2-2): sourceId berbeda-beda tanpa batas membuat
         // signalsBySource/noisySources tumbuh selamanya -- MAX_DISTINCT_SOURCES_COUNTED
         // hanya membatasi BONUS korobrasi, bukan peta ini. Evict sumber
@@ -253,7 +253,7 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
             }
         }
 
-        // Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+        // Bug review independen (independent model review, audit
         // independen putaran-1, AUD-P1-3): demosi ke DEFERRED tidak pernah
         // MENGHAPUS entri dari targets/targetIdByKey/supportingSignals --
         // pemanggil dengan banyak subjectRef berbeda bisa menumbuhkan
@@ -451,7 +451,7 @@ async function createAttentionEconomy({ clock = { nowMs: () => Date.now() }, bou
     }
 
     /**
-     * Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+     * Bug review independen (independent model review, audit
      * putaran-3, AUD3-P2-1): GOVERNED mode diklaim "advisory-only"/read-only
      * (tidak pernah memengaruhi keputusan), tapi `buildGovernedProjection()`
      * memakai `pick()` untuk menurunkan `attentionFocus` -- itu MENGONSUMSI

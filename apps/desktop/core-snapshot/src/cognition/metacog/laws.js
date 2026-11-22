@@ -1,0 +1,13 @@
+"use strict";
+
+const laws = Object.freeze({
+    METACOGNITION_NOT_SELF_AUTHORIZATION: true,
+    CONFIDENCE_NOT_TRUTH: true,
+    SELF_CORRECTION_IS_PROPOSAL_NOT_EXEMPTION: true,
+    REFLECTION_IS_BUDGETED: true,
+    NO_CALLER_SETS_CONFIDENCE_DIRECTLY: true,
+    REVIEW_NEVER_REVIEWS_A_REVIEW: true,
+    CALIBRATION_NEVER_CHANGES_POLICY: true
+});
+
+module.exports = { laws };

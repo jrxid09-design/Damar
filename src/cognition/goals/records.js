@@ -9,7 +9,7 @@ const ORIGIN_KINDS = new Set(["OWNER", "SELF", "MISSION", "AGENT_SUGGESTION"]);
 const PRIORITY_CLASSES = new Set(["CRITICAL", "HIGH", "NORMAL", "LOW", "BACKGROUND"]);
 
 /**
- * Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+ * Bug review independen (independent model review, audit
  * independen putaran-1, AUD-P2-4): makeTask menyebar intentTemplate tanpa
  * pagar kunci terlarang -- authProof/grant/balance bisa masuk lalu
  * persisten lewat restart, melemahkan klaim struktural GOAL != AUTHORITY
@@ -94,7 +94,7 @@ const MAX_INTENT_KEYS = 256;
 const MAX_INTENT_NODES = 512;
 
 /**
- * Bug review independen (OpenCode/9router deepseek-v4.1-flash, audit
+ * Bug review independen (independent model review, audit
  * putaran-3, AUD3-P1-1/AUD3-P1-2): satu lintasan yang MEMVALIDASI dan
  * MEMBANGUN salinan aman sekaligus -- sama seperti perbaikan di
  * prospective/records.js dan core/envelope.js. Versi lama (putaran-2)

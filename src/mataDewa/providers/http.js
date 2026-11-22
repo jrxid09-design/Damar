@@ -26,7 +26,7 @@
 
 const ssrfGuard = require("../../core/safety/ssrfGuard");
 
-const USER_AGENT = "damar-mata-dewa/1.0 (+https://github.com/jrxid09-design/Aether)";
+const USER_AGENT = "DAMAR/1.0";
 const DEFAULT_TIMEOUT_MS = 12000;
 const DEFAULT_MAX_BYTES = 4 * 1024 * 1024; // 4 MB
 const DEFAULT_STALL_MS = 8000;

@@ -275,7 +275,7 @@ function validateConfidence(value) {
  * aman sekaligus, tidak pernah membaca lewat `value[key]` (itu memanggil
  * trap `get` pada Proxy) dan tidak pernah memanggil JSON.stringify pada
  * objek pemanggil yang tidak tepercaya. Bug diketemukan review independen
- * (OpenCode/9router deepseek-v4.1-flash, audit putaran-3, AUD3-P1-1): versi
+ * (independent model review, audit putaran-3, AUD3-P1-1): versi
  * lama memvalidasi lewat `walkSafe` (memeriksa descriptor via
  * `getOwnPropertyDescriptor`) lalu memanggil `structuredCopy` (JSON.stringify)
  * TERPISAH -- sebuah Proxy bisa membuat trap `getPrototypeOf`/`ownKeys`/
