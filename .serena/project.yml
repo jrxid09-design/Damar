@@ -13,8 +13,6 @@ project_name: damar
 # Note: global ignored_paths from serena_config.yml are also applied additively.
 ignored_paths:
 - node_modules
-- apps/console/node_modules
-- apps/console/renderer/vendor
 - graphify-out
 - data
 - logs

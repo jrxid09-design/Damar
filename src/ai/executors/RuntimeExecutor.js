@@ -9,6 +9,7 @@ const { createInternalGrantDomain, isCanonicalInternalGrant: isGlobalGrant, isTo
 const executorGrantDomains = new WeakMap();
 const executorRegistries = new WeakMap();
 const executorToolExecutors = new WeakMap();
+const executorShadowGuards = new WeakMap();
 
 /**
  * Menjalankan satu request AI sampai selesai, termasuk
@@ -39,6 +40,13 @@ class RuntimeExecutor {
         this.events = options.events ?? null;
 
         this.logger = options.logger ?? null;
+
+        const shadowToolGuard = options.shadowToolGuard ?? null;
+        const { isR8ShadowToolGuard } = require("../../core/safety/r8ShadowToolGuard");
+        if (shadowToolGuard !== null && !isR8ShadowToolGuard(shadowToolGuard)) {
+            throw new TypeError("invalid branded shadow ToolGuard");
+        }
+        executorShadowGuards.set(this, shadowToolGuard);
 
         const grantDomain = options.grantDomain ?? createInternalGrantDomain();
         if (!grantDomain || typeof grantDomain.isCanonicalInternalGrant !== "function" ||
@@ -105,6 +113,9 @@ class RuntimeExecutor {
      */
     startPlan(request) {
 
+        // Shadow runs must never create a production execution plan.
+        if (executorShadowGuards.get(this)) return null;
+
         try {
 
             const ExecutionPlan = require("../../agent/models/executionPlan");
@@ -126,6 +137,9 @@ class RuntimeExecutor {
     }
 
     checkpoint(plan) {
+
+        // Also suppress direct checkpoint(plan) calls from a shadow context.
+        if (executorShadowGuards.get(this)) return;
 
         if (!plan) return;
 
@@ -464,6 +478,9 @@ class RuntimeExecutor {
 
             call.arguments = verdict.args;
 
+            const shadowGuard = executorShadowGuards.get(this);
+            if (shadowGuard) shadowGuard.before(call.name, call.arguments, tool);
+
         }
         catch (error) {
 
@@ -482,13 +499,18 @@ class RuntimeExecutor {
                 call.name
             );
 
+            const shadowGuard = executorShadowGuards.get(this);
+            if (shadowGuard) shadowGuard.after(call.name, call.arguments, result?.result);
+
             this.events?.emit("tool:completed", result);
 
             this.trackDone(plan, step, result);
 
             controller?.endTool(call.name, null);
 
-            toolStats.record(call.name, true, Date.now() - started);
+            if (!executorShadowGuards.get(this)) {
+                toolStats.record(call.name, true, Date.now() - started);
+            }
 
             return result;
 
@@ -580,7 +602,7 @@ class RuntimeExecutor {
                 `${error.message}`;
         }
 
-        if (countsAgainstReliability) {
+        if (countsAgainstReliability && !executorShadowGuards.get(this)) {
             toolStats.record(call.name, false, Date.now() - started, code);
         }
 

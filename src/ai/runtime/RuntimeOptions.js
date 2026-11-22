@@ -40,7 +40,11 @@ class RuntimeOptions {
 
         // Canonical descriptive V1 evidence owner. Null means no registry
         // was composed; an empty registry remains a distinct object state.
-        capabilityRegistry = null
+        capabilityRegistry = null,
+
+        // Trusted composition-only shadow guard. RuntimeExecutor verifies its
+        // module-private brand; request data cannot select this behavior.
+        shadowToolGuard = null
 
     } = {}) {
 
@@ -75,6 +79,8 @@ class RuntimeOptions {
         };
 
         this.capabilityRegistry = capabilityRegistry;
+
+        this.shadowToolGuard = shadowToolGuard;
 
         // Tanpa batas iterasi tool (praktis tak terbatas) — Damar boleh
         // merangkai tool sebanyak yang dibutuhkan. Rem pengaman tetap ada:

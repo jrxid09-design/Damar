@@ -127,6 +127,9 @@ class AIRuntime extends BaseComponent {
                 events:
                     this.eventEmitter,
 
+                shadowToolGuard:
+                    this.options.shadowToolGuard,
+
                 logger:
                     this.logger
 

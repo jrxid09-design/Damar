@@ -1,7 +1,4 @@
-const toolBus = require("./ToolBus");
-const capabilities = require("./CapabilityRegistry");
-
-const { database, initialize } = require("../memory/db");
+const isolatedInstances = new WeakSet();
 
 /**
  * SELF-HEALING ENGINE (§12 + §33) — kegagalan = input, bukan henti.
@@ -31,6 +28,15 @@ const CLASSIFIERS = [
 ];
 
 class SelfHealingEngine {
+
+    constructor(dependencies = {}) {
+        this.dependencies = Object.freeze({ ...dependencies });
+    }
+
+    get toolBus() { return this.dependencies.toolBus ?? require("./ToolBus"); }
+    get capabilities() { return this.dependencies.capabilities ?? require("./CapabilityRegistry"); }
+    get database() { return this.dependencies.database ?? require("../memory/db").database; }
+    get initialize() { return this.dependencies.initialize ?? require("../memory/db").initialize; }
 
     /** Klasifikasi error → kelas pemulihan (§33). */
     classify(error) {
@@ -68,6 +74,7 @@ class SelfHealingEngine {
                 exec = null, internal = false, capabilitySet = null } = ctx;
 
         const { resolveDelegator } = require("../ai/tools/Authorization");
+        const signal = ctx.signal ?? null;
         let delegator = resolveDelegator(exec ?? null, internal === true, `heal:${goalId ?? "?"}`);
 
         // C-F/A-FINAL + M-1 CLOSURE: capability set terbatas menempel
@@ -112,6 +119,13 @@ class SelfHealingEngine {
             await this.log(goalId, "recover-result",
                 `pemulihan ${tool} → gagal (batas otorisasi)`, "report-authority-limit", attempts, false);
             return { klass, attempts, outcome: limited };
+        }
+
+        if (signal?.aborted) {
+            const cancelled = { ok: false, error: "recovery cancelled", cancelled: true };
+            attempts.push({ strategy: "cancelled-before-recovery", ok: false });
+            await this.log(goalId, "recover-result", `pemulihan ${tool} → batal`, "cancelled-before-recovery", attempts, false);
+            return { klass, attempts, outcome: cancelled };
         }
 
         // Jalur AGENT: gagal bukan karena tool — jalankan ulang agent
@@ -164,9 +178,9 @@ class SelfHealingEngine {
                     }
                     catch (e) { outcome = { ok: false, error: e.message }; }
                 } else {
-                    outcome = await toolBus.execute({
+                    outcome = await this.toolBus.execute({
                         name: tool, args, timeoutMs: 90000, retries: 3,
-                        context: { goal: goalId, exec: delegator }
+                        context: { goal: goalId, exec: delegator }, signal
                     });
                 }
                 attempts.push({ strategy: "retry-aggressive", ok: outcome.ok });
@@ -176,7 +190,7 @@ class SelfHealingEngine {
             case "dependency": {
                 // Sarankan paket/bahan yang kurang lewat registry.
                 const requirement = ctx.requirement ?? tool;
-                const discovery = await capabilities.discover(requirement, { limit: 5 });
+                const discovery = await this.capabilities.discover(requirement, { limit: 5 });
                 attempts.push({
                     strategy: "dependency-analysis",
                     found: discovery.capabilities ?? discovery,
@@ -214,9 +228,9 @@ class SelfHealingEngine {
                 // M3/CLOSURE: identitas delegasi ikut juga di jalur
                 // substitusi — tool pengganti tunduk pada restriction
                 // yang sama, bukan lebih luas.
-                outcome = await toolBus.execute({
+                outcome = await this.toolBus.execute({
                     name: tool, args, timeoutMs: 60000, retries: 1, allowSubstitute: true,
-                    context: { goal: goalId, exec: delegator }
+                    context: { goal: goalId, exec: delegator }, signal
                 });
                 attempts.push({ strategy: "substitute", ok: outcome.ok, via: outcome.via });
 
@@ -268,8 +282,8 @@ class SelfHealingEngine {
     }
 
     async log(goalId, action, decision, reason, evidence = [], ok = null) {
-        await initialize();
-        await database.run(
+        await this.initialize();
+        await this.database.run(
             `INSERT INTO autonomy_log (goal_id, action, decision, reason, evidence, ok)
              VALUES (?, ?, ?, ?, ?, ?)`,
             [goalId, action, decision, reason, JSON.stringify(evidence), ok === null ? null : ok ? 1 : 0]
@@ -278,4 +292,24 @@ class SelfHealingEngine {
 
 }
 
-module.exports = new SelfHealingEngine();
+function createIsolatedSelfHealingEngine(dependencies = {}) {
+    if (!dependencies.toolBus || typeof dependencies.toolBus.execute !== "function" ||
+        !dependencies.capabilities || typeof dependencies.capabilities.discover !== "function" ||
+        !dependencies.database || typeof dependencies.database.run !== "function" ||
+        typeof dependencies.initialize !== "function") {
+        throw new TypeError("isolated SelfHealingEngine requires injected ToolBus, capability, logging, and initialization adapters");
+    }
+    const engine = new SelfHealingEngine(dependencies);
+    isolatedInstances.add(engine);
+    return engine;
+}
+
+function isIsolatedSelfHealingEngine(value) {
+    return Boolean(value && typeof value === "object" && isolatedInstances.has(value));
+}
+
+const selfHealingEngine = new SelfHealingEngine();
+module.exports = selfHealingEngine;
+module.exports.SelfHealingEngine = SelfHealingEngine;
+module.exports.createIsolatedSelfHealingEngine = createIsolatedSelfHealingEngine;
+module.exports.isIsolatedSelfHealingEngine = isIsolatedSelfHealingEngine;
