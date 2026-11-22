@@ -300,7 +300,7 @@ async function child(directory, resume, recovered = false) {
     try { await gateway.start(); } catch (error) { console.error('GATEWAY_START_FAILED ' + error.code); }
     const providerAdmin = require('./provider-admin-routes.cjs').createProviderAdminRoutes({ registry, router: providerRouter, gateway, budget: liveBudget });
     // Agent turns: Core's real agent loop with host workspace tools under real Core authority grants (see workspace-*.cjs).
-    const PROTECTED = [path.resolve('C:/Workspace/Damar'), path.resolve('C:/Workspace/uix-w5-visual-prototype'), path.resolve('C:/Workspace/damar-uix-control-center-v2'),
+    const PROTECTED = [path.resolve('C:/Workspace/Damar'), path.resolve(__dirname, '../../../..') /* whole repo incl. ui-prototypes/ */, path.resolve('C:/Workspace/damar-uix-control-center-v2'),
       path.join(SCRATCH, 'fidelity-v53-20261113-204927'), path.dirname(CANDIDATE), directory, SNAPSHOT, ...(DATA_ROOT ? [DATA_ROOT] : [])];
     const { isProtected } = require('./workspace-tools.cjs');
     const settingsFile = process.env.DAMAR_CORE_SETTINGS_FILE && insideScratch(process.env.DAMAR_CORE_SETTINGS_FILE)
