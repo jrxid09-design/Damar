@@ -61,4 +61,4 @@ If `%LOCALAPPDATA%` is redirected or reached through a junction, DAMAR resolves 
 | All DAMAR data | Uninstall and answer **Yes** to "Also remove your DAMAR data?" |
 
 ## Reporting a vulnerability
-Report security issues privately through the project's GitHub repository: https://github.com/REPLACE-ME/damar/security/advisories/new. Use that private advisory form instead of a public issue. Include the DAMAR version (`damar version`) and, if you can, steps to reproduce.
+Report security issues privately through the project's GitHub repository: https://github.com/jrxid09-design/Damar/security/advisories/new. Use that private advisory form instead of a public issue. Include the DAMAR version (`damar version`) and, if you can, steps to reproduce.

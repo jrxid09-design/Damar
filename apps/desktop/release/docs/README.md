@@ -46,8 +46,8 @@ DAMAR does not ship with a model. You connect any OpenAI-compatible provider (a 
 DAMAR is free and open source under the MIT License (`LICENSE.txt`). Third-party licenses are in `THIRD_PARTY_LICENSES.txt` in the install folder.
 
 ## Support
-- Questions and ideas: GitHub Discussions at https://github.com/REPLACE-ME/damar/discussions
-- Bugs: GitHub Issues at https://github.com/REPLACE-ME/damar/issues. Include the output of `damar version` and `damar core status`.
+- Questions and ideas: GitHub Discussions at https://github.com/jrxid09-design/Damar/discussions
+- Bugs: GitHub Issues at https://github.com/jrxid09-design/Damar/issues. Include the output of `damar version` and `damar core status`.
 - Security issues: report them privately as described in [SECURITY.md](SECURITY.md).
 
 ## Known limitations (v1)

@@ -14,6 +14,8 @@ const DATA_ROOT = process.env.DAMAR_DATA_ROOT && path.isAbsolute(process.env.DAM
 const CANDIDATE = path.resolve(__dirname, '../..');
 // Development fallback: the r7r3-scratch folder two levels above the candidate checkout (no machine path in shipped code).
 const SCRATCH = DATA_ROOT || path.resolve(CANDIDATE, '../../r7r3-scratch');
+// A fresh development checkout has no scratch root yet; create it (the installed product uses DATA_ROOT).
+if (!DATA_ROOT) fs.mkdirSync(SCRATCH, { recursive: true });
 const SNAPSHOT = path.resolve(process.env.DAMAR_CORE_SNAPSHOT || path.join(CANDIDATE, 'core-snapshot'));
 const PORT = Number(process.env.DAMAR_CORE_PORT || 29623);
 if (!Number.isInteger(PORT) || PORT < 1024 || PORT > 65535) throw Error('CORE_PORT_INVALID');

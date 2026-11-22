@@ -29,4 +29,4 @@ Core's output is in `%LOCALAPPDATA%\DAMAR\logs\core.log`.
 | Disk use under `%LOCALAPPDATA%\DAMAR\sessions` | DAMAR keeps the newest 5 Core session folders (`DAMAR_KEEP_SESSIONS`). A crashed folder that has not been recovered is kept until the next start recovers it. |
 | Uninstall left `%LOCALAPPDATA%\DAMAR` | That is intended (your data is kept). Delete the folder yourself, or uninstall with `/PURGE`. |
 
-Report problems at https://github.com/REPLACE-ME/damar/issues. When reporting a problem, include the output of `damar version`, `damar core status` and the end of `core.log`. Remove any tokens before you share it.
+Report problems at https://github.com/jrxid09-design/Damar/issues. When reporting a problem, include the output of `damar version`, `damar core status` and the end of `core.log`. Remove any tokens before you share it.

@@ -22,3 +22,7 @@ console-credentials.json
 # Test fixtures and vendored Python packages are source files.
 !tests/fixtures/**
 !python-vendor/**
+
+# Release build outputs and downloaded build tools
+dist/
+.release-tools/

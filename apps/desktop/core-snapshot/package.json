@@ -31,16 +31,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/REPLACE-ME/damar"
+    "url": "https://github.com/jrxid09-design/Damar"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/REPLACE-ME/damar/issues"
+    "url": "https://github.com/jrxid09-design/Damar/issues"
   },
-  "homepage": "https://github.com/REPLACE-ME/damar#readme",
+  "homepage": "https://github.com/jrxid09-design/Damar#readme",
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.24",
     "axios": "^1.18.1",

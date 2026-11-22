@@ -2,7 +2,7 @@
 // support is via GitHub Issues and Discussions). Used by DAMAR Control (served as /control/support-links.js) and by the
 // CLI `help` command (require('../control/support-links.js')).
 (function (root) {
-  var REPO = 'https://github.com/<org>/damar';   // TODO(publish): set the real organisation before release
+  var REPO = 'https://github.com/jrxid09-design/Damar';
   var LINKS = Object.freeze({ repo: REPO, issues: REPO + '/issues', discussions: REPO + '/discussions', license: 'MIT' });
   if (typeof module !== 'undefined' && module.exports) module.exports = LINKS;
   else root.DAMAR_SUPPORT = LINKS;
