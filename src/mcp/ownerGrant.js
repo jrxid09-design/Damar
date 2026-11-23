@@ -153,4 +153,35 @@ function createGrantGate({ ownerPublicKeyPem, now = () => Date.now() } = {}) {
     return Object.freeze({ issueChallenge, authorize });
 }
 
-module.exports = { GRANT_VERSION, HARD_ALLOWLIST, MAX_TTL_MS, canonicalJson, issueOwnerGrant, verifyOwnerGrant, createGrantGate };
+/**
+ * Production verifier for the ratified 'grant-proof' evidence kind
+ * (Lane 2, ratified 2026-11-23). The grant itself is NEVER trusted from the
+ * wire: it is rehydrated from the grant store by grantId, so revocation and
+ * expiry reflect current store state. Verification = owner signature +
+ * scope + one-use PoP nonce, via the same gate the prototype proved.
+ * grantStore: { get(grantId) -> { grant, signature, revoked } | null } -
+ * SYNCHRONOUS, like the rest of the canonical verifier (the composition
+ * keeps a rehydrated snapshot). verify() never throws; any failure is
+ * null (fail-closed).
+ */
+function makeGrantVerifier({ ownerPublicKeyPem, grantStore, now = () => Date.now() } = {}) {
+    if (!grantStore || typeof grantStore.get !== "function") throw new TypeError("makeGrantVerifier requires a grantStore with get(grantId)");
+    const gate = createGrantGate({ ownerPublicKeyPem, now });
+    function verify(evidence) {
+        try {
+            if (!evidence || typeof evidence !== "object") return null;
+            if (typeof evidence.grantId !== "string" || typeof evidence.toolId !== "string") return null;
+            const rec = grantStore.get(evidence.grantId);
+            if (!rec || rec.revoked || !rec.grant || typeof rec.signature !== "string") return null;
+            const pop = { nonce: evidence.popNonce, signature: evidence.popSignature };
+            const verdict = gate.authorize({ grant: rec.grant, signature: rec.signature, toolId: evidence.toolId, pop });
+            if (!verdict.ok) return null;
+            return Object.freeze({ principal: verdict.principal, agentId: verdict.agentId, grantId: verdict.grantId, toolId: verdict.toolId, scope: Object.freeze([...rec.grant.scope]) });
+        } catch {
+            return null;
+        }
+    }
+    return Object.freeze({ verify, issueChallenge: () => gate.issueChallenge(), gate });
+}
+
+module.exports = { GRANT_VERSION, HARD_ALLOWLIST, MAX_TTL_MS, canonicalJson, issueOwnerGrant, verifyOwnerGrant, createGrantGate, makeGrantVerifier };

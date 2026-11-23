@@ -50,3 +50,25 @@ Branch: `feat/mcp-worker-bridge`. Worktree: `C:\Workspace\Damar-mcp-worker`.
   `tests/safety/mcp.test.js` + `mcpClient.test.js` tetap 19 lulus 0 gagal.
 - Status: menunggu ratifikasi owner atas rancangan (kind bukti `grant-proof`
   di verifier kanonik) sebelum A2 implementasi produksi, A3–A5, B1–B6.
+
+## 2026-11-24 - Lane 2 LANJUTAN (ratifikasi owner 2026-11-23 23:54 WIB)
+
+- [x] Verifier kanonis: kind bukti `grant-proof` (cabang aditif di
+  makeAuthVerifier; owner/admin byte-identik; tanpa grant verifier
+  terkomposisi = fail-closed). Grant di-rehydrate dari grant store
+  (revokasi langsung berlaku). makeGrantVerifier di src/mcp/ownerGrant.js.
+- [x] Former Manager menerima bentuk grant-proof (grantId/toolId/PoP).
+- [x] Adapter MCP (src/mcp/managerAdapter.js): 4 tool intent + challenge
+  lewat ManagerRequest grant-proof; attachMcp(app, { grantLane }) opsional;
+  tanpa grant lane perilaku lama persis (LEGACY_ACTION_ROUTE_DISABLED).
+- [x] agentfed bridge (src/mcp/agentfedBridge.js): B1 komposisi
+  makeAgentFed di sisi MCP, B3 binding sesi = agentId di grant bertanda
+  tangan owner, B5 scope subset allowlist keras + TTL grant, B4 egress
+  lewat redactor federasi.
+- [x] Tes: tests/safety/mcpGrantLane2.test.js (8 tes; negatif: replay,
+  scope, allowlist, revoked, expired, sig palsu, PoP key salah, tanpa
+  bukti). Suite safety penuh: 556 lulus / 0 gagal / 6 skip.
+- [ ] B2 surface Console untuk lifecycle agentfed + penerbitan/revokasi
+  grant (UI owner) - antrean; jalur data + verifier sudah hidup.
+- [ ] Komposisi daemon meneruskan grantLane ke attachMcp + Manager asli
+  (grant store persisten ACC) - antrean integrasi daemon.

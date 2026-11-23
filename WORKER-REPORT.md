@@ -62,3 +62,15 @@ Deliverable sesi ini (BUKAN perubahan produksi):
   eskalasi scope, PoP kunci salah, replay nonce). Tes MCP lama tetap
   19/19. `tools/call` tetap fail-closed; A3–A5 dan B1–B6 tetap menunggu
   ratifikasi perubahan verifier pada rancangan, BUKAN menunggu prototipe.
+
+## Lane 2 lanjutan pasca-ratifikasi (2026-11-24)
+
+Ratifikasi owner (23 Nov 23:54 WIB) membuka perubahan verifier. Yang
+diimplementasikan persis daftar desain 2.3 butir 1-3 + wiring agentfed
+B1/B3/B4/B5; butir 4 (surface Console penerbitan grant + UI lifecycle
+agentfed) dan komposisi daemon penuh tercatat sebagai antrean di
+PROGRESS.md. Bukti: tests/safety/mcpGrantLane2.test.js 8/8;
+tests/safety penuh 556/0/6 (baseline A0: 535 - tidak ada regresi).
+Hukum tetap: EXTERNAL_AGENT_OUTPUT_IS_NOT_AUTHORITY (principal grant =
+subject grant, hak sesi dibatasi scope), AGENT_SCOPE_REQUIRES_OWNER_GRANT
+(binding agentfed hanya via grant bertanda tangan owner).

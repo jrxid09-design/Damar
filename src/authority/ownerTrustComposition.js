@@ -340,11 +340,22 @@ function makeRatifyAsOwner(registry, proofVerifier) {
 
 /** Shared verifier factory (used by both the canonical singleton and
  *  per-composition roots). */
-function makeAuthVerifier(registry, proofVerifier) {    return function ownerAuthVerifier(evidence) {
+function makeAuthVerifier(registry, proofVerifier, grantVerifier = null) {    return function ownerAuthVerifier(evidence) {
         if (evidence === null || typeof evidence !== "object" || Array.isArray(evidence)) {
             return null;
         }
         const kind = evidence.kind;
+        if (kind === "grant-proof") {
+            // Ratified Lane 2 extension (owner ratification 2026-11-23):
+            // owner-grant evidence for external worker principals. Additive
+            // and fail-closed - without a composed grant verifier this kind
+            // authenticates no one. Owner/admin verification below is
+            // byte-identical to before.
+            if (!grantVerifier || typeof grantVerifier.verify !== "function") {
+                return null;
+            }
+            return grantVerifier.verify(evidence);
+        }
         if (kind !== "owner-proof" && kind !== "admin-proof") {
             return null;
         }
@@ -456,6 +467,7 @@ async function composeOwnerTrustForTest({ stateFile = null, ledgerOverride = nul
 }
 
 module.exports = Object.freeze({
+    makeAuthVerifier,
     resolveProductionOwnerTrustStore,
     resolveOwnerAuthVerifier,
     composeOwnerTrustForTest,
