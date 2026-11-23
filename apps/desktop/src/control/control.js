@@ -338,7 +338,7 @@
     return body;
   }
   var READS = {
-    provider: '/api/r9/provider', budget: '/api/r9/provider/budget', grant: '/api/r9/provider/model-grant', padmin: '/api/r9/provider-admin/state',
+    provider: '/api/r9/provider', budget: '/api/r9/provider/budget', grant: '/api/r9/provider/model-grant', padmin: '/api/r9/provider-admin/state', oauth: '/api/r9/oauth',
     lifecycle: '/api/r9/lifecycle', sandbox: '/api/r9/sandbox', runs: '/api/r9/pandawa/runs', sessions: '/api/r9/sessions',
     tools: '/api/v1/console/tools', plugins: '/api/v1/console/plugins', mcp: '/api/v1/console/mcp/servers',
     presence: '/api/r9/presence/settings', cliSettings: '/api/r9/cli/settings', discussions: '/api/r9/pandawa/discussions', agents: '/api/v1/console/agents', safety: '/api/v1/console/safety', memoryStats: '/api/v1/console/memory/stats', context: '/api/v1/console/context'
@@ -600,6 +600,10 @@
     var html = pageHeader('PROVIDER GATEWAYS', 'Providers', 'Provider configuration as reported by Core. Keys are write-only: Control can send a key to Core but never reads one back.', btn('View Model Catalog →', 'data-jump-view="models"'));
     html += '<div class="panel" style="border-left:3px solid var(--damar-accent);"><div class="panel-body" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;"><div><div style="font-weight:600;color:var(--text-ivory);">Credential &amp; Secret Protection Boundary</div><div style="font-size:12px;color:var(--text-secondary);">Core stores provider keys (DPAPI, current user). Control shows only whether a key exists.</div></div><span class="badge badge-gold">Write-only credentials</span></div></div>';
     if (!pv) return html + panel('Providers', readState('provider', 'providers'));
+    var oa = LIVE.d('oauth'), oc = oa && oa.connections ? oa.connections[0] : null;
+    html += panel('Login dengan akun (OAuth)', '<p style="font-size:12.5px;color:var(--text-secondary);">' + escapeHtml(L('Hubungkan akun tanpa menempel API key. OpenRouter menawarkan login OAuth (PKCE) resmi untuk aplikasi pihak ketiga: kunci hasil login tersimpan di vault Core (DPAPI), tidak pernah ditampilkan, dan tersambung ke koneksi OpenRouter sebagai provider yang bisa dipilih. Untuk OpenAI/Anthropic langsung, jalur resminya tetap API key.')) + '</p>' +
+      kvList([kv('OpenRouter', oc ? (oc.status === 'connected' ? 'Terhubung' : oc.status === 'invalid' ? 'Kunci tidak berlaku - login ulang' : 'Belum terhubung') : 'Belum terhubung'), kv('Akun', oc && oc.identity && oc.identity.label ? oc.identity.label : '-'), kv('Sinkronisasi provider', oc && oc.sync === 'synced' ? 'tersambung ke koneksi OpenRouter' : oc && oc.status === 'connected' ? 'kunci di vault Core (koneksi OpenRouter belum ada - tambahkan lewat Add provider)' : '-')]) +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;">' + (oc && oc.status === 'connected' ? btn('Putuskan koneksi', 'data-oauth-disconnect="openrouter"') : btn('Login dengan OpenRouter', 'data-oauth-login="openrouter"', 'btn-primary')) + '</div>');
     // Providers are the Owner's own connections; nothing is built in. Presets only prefill the Add form.
     html += '<div style="display:flex;justify-content:flex-end;margin:0 0 10px;">' + btn('+ Add provider…', 'data-add-provider="1"', 'btn-primary') + '</div>';
     if (!pv.providers.some(function (p) { return p.kind === 'live'; })) html += panel('Connect a provider', '<p style="font-size:12.5px;color:var(--text-secondary);">' + escapeHtml(L('No provider is connected. Add any OpenAI-compatible endpoint: OpenAI, OpenRouter, Groq, Ollama, LM Studio, your own router, …')) + '</p>' +
@@ -1056,6 +1060,16 @@
         document.getElementById('apBase').value = x.baseUrl || '';
       };
       if (preset) { preset.onchange = fill; fill(); }
+    },
+    'data-oauth-login': function () {
+      return core.post('/api/r9/oauth/openrouter/start', {}).then(function (r) {
+        if (r && r.ok !== false && r.data && r.data.authorizeUrl) { window.open(r.data.authorizeUrl, '_blank'); showToast(L('Selesaikan login di browser, lalu kembali ke Dashboard.')); }
+        else showToast(L('Gagal memulai login OAuth.'));
+      });
+    },
+    'data-oauth-disconnect': function () {
+      ownerAction('Putuskan koneksi OpenRouter', '<p style="font-size:12.5px;">' + escapeHtml(L('Kunci hasil login OAuth dihapus dari vault Core dan dicabut dari koneksi provider.')) + '</p>',
+        function () { return core.post('/api/r9/oauth/openrouter/disconnect', {}); });
     },
     'data-keys-import': function (id) {
       ownerAction('Import keys', field('kiText', 'API keys, one per line (duplicates are skipped; keys are never shown again)', '<textarea class="input-field" id="kiText" rows="6" style="width:100%;font-family:var(--font-mono);" autocomplete="off"></textarea>'),
