@@ -692,12 +692,22 @@ function composeManagerInternal({
                 // present, into Lane 2's own sealed verifier. Manager itself
                 // performs no cryptographic check and grants nothing — see
                 // formManagerRequest's authProof parsing above.
-                ...(request.authProof ? {
+                ...(request.authProof ? (request.authProof.kind === "grant-proof" ? {
+                    // Lane 2 grant-proof (ratified 2026-11-23): forward the
+                    // grant fields the canonical verifier rehydrates from
+                    // the grant store - dropping them would authenticate
+                    // no one, silently (found by the Fase 3c live proof).
+                    kind: request.authProof.kind,
+                    grantId: request.authProof.grantId,
+                    toolId: request.authProof.toolId,
+                    popNonce: request.authProof.popNonce,
+                    popSignature: request.authProof.popSignature
+                } : {
                     kind: request.authProof.kind,
                     credentialId: request.authProof.credentialId,
                     nonce: request.authProof.nonce,
                     signature: request.authProof.signature
-                } : {})
+                }) : {})
                 // NOTE: no caller-supplied principal field is forwarded.
             };
             session = capturedLane2.authenticate(evidence);
