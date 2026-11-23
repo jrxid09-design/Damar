@@ -149,6 +149,20 @@ class AgentHub {
 
     createPandawaSession(options) { return this.pandawaSessions().create(options); }
     resumePandawaSession(sessionId, options) { return this.pandawaSessions().resume(sessionId, options); }
+
+    /**
+     * Werkudara per-turn supervision (owner design): run a worker, then have
+     * the supervisor review the turn against the granted scope. Opt-in -
+     * run() itself is unchanged. The caller supplies the turn's toolCalls
+     * and deniedAttempts from the executor layer; the supervisor detects,
+     * records, and escalates deviations to Core. It holds no authority.
+     */
+    async runSupervised(rawAgentId, task, { signal = null, contextRefs = [], exec = null, grantedTools = null, toolCalls = [], deniedAttempts = [] } = {}) {
+        const result = await this.run(rawAgentId, task, { signal, contextRefs, exec });
+        const supervisor = require("./pandawaSupervisor").getDefaultSupervisor();
+        const supervision = supervisor.reviewTurn({ workerId: result.agent, task, sessionId: exec?.sessionId ?? null, grantedTools, toolCalls, deniedAttempts });
+        return { ...result, supervision };
+    }
     createPandawaDelegation(options) { return pandawaDelegation.createDelegation(options); }
     acceptPandawaDelegation(delegation, options) { return pandawaDelegation.acceptDelegation(delegation, options); }
     createPandawaWorkGraph(options) { return pandawaOrchestrator.createWorkGraph(options); }
