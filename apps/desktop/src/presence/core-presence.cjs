@@ -10,7 +10,7 @@ const { boundedResponse } = require('../cli/service.cjs');
 const READS = Object.freeze(['/api/r9/lifecycle', '/api/r9/sessions', '/api/r9/pandawa/runs', '/api/r9/presence/settings', '/api/r9/cli/settings', '/api/r9/activity']);
 const readAllowed = route => READS.includes(route) || /^\/api\/r9\/activity\?from=\d{1,9}$/.test(route);
 // Contract agreed with Control (presence.* namespace). Defaults equal the Owner prototype values.
-const DEFAULTS = Object.freeze({ idleToNotchMs: 10000, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, displayName: 'Maronns' });
+const DEFAULTS = Object.freeze({ idleToNotchMs: 10000, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, displayName: 'Maronns', salutation: '' });
 const KEYS = Object.freeze(Object.keys(DEFAULTS).map(k => 'presence.' + k));
 
 // Accepts {presence:{idleToNotchMs,...}} or flat {'presence.idleToNotchMs':...}; invalid values fall back per key.
@@ -31,6 +31,7 @@ function settingsFrom(data) {
     position: one(get('position'), ['top-center'], DEFAULTS.position),
     voiceEnabled: get('voiceEnabled') === true, // opt-in only: anything but literal true keeps the microphone off
     displayName: typeof get('displayName') === 'string' && get('displayName').length <= 40 && !/[\x00-\x1f\x7f]/.test(get('displayName')) ? get('displayName').trim() : DEFAULTS.displayName,
+    salutation: typeof get('salutation') === 'string' && get('salutation').length <= 40 && !/[\x00-\x1f\x7f]/.test(get('salutation')) ? get('salutation').trim() : '',
   };
 }
 

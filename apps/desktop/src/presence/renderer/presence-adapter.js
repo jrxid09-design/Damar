@@ -55,10 +55,10 @@
     renderGreeting();
     document.body.dataset.presenceConfigSource = next.source || 'unknown';
   }
-  // Greeting: time of day + optional Core presence.displayName (no personal name is shipped in the page).
+  // Greeting: time of day + the configured address (Core presence.salutation, falling back to presence.displayName).
   function renderGreeting() {
     const el = document.getElementById('greetingTitle'); if (!el) return;
-    const name = typeof config?.displayName === 'string' ? config.displayName.trim() : '';
+    const name = (typeof config?.salutation === 'string' && config.salutation.trim()) || (typeof config?.displayName === 'string' ? config.displayName.trim() : '');
     el.textContent = T('greeting', new Date().getHours(), name);
   }
   window.addEventListener('damar-presence-lang', renderGreeting);
