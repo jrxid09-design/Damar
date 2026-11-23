@@ -45,3 +45,16 @@ Hasil pascacommit vault: `6d9056bb790607ff2ecae73b38437e758816463e`; ancestry su
 - Scan index: 1 file berubah, 0 temuan; 0 JS berubah. Komposisi juga diperiksa `node --check`, lulus. Diff check lulus.
 - Tes L2+L6: 48 lulus, 0 gagal. Tes L1 import-graph terarah: 1 lulus, 0 gagal. Suite L1 penuh tidak selesai pada batas 120 detik (juga percobaan force-exit/test-timeout); output berhenti setelah repair-19 dengan 20 assertion lulus, tanpa ringkasan akhir. Tidak diklaim lulus. File tes dan komposisi identik HEAD sebelum merge; riwayat `78d90464` sudah menunjukkan stabilisasi lifecycle fixture. Ini keterbatasan verifikasi baseline, bukan kegagalan assertion akibat resolusi; perlu ditinjau owner.
 - Hash merge dan ancestry menyusul.
+
+Hasil pascacommit L2: `9c31031cb9c304068d18ac21398ecbb8ab53f618`; ancestry sukses.
+
+## feat/w8-l4-embodiment-fabric
+
+- Strategi B; kedua sisi dan riwayat keempat konflik diperiksa.
+- `src/services/backupService.js`: pertahankan jalur canonicalActionClient HEAD dari `b7e6c7d7` + binding `417291e0`, bukan runtime backup langsung sumber `6d87e2eb`; envelope autentikasi dan postcondition tetap utuh.
+- `src/services/desktopControlService.js`: pertahankan HEAD `69963003`/`1ebc16d7`, yang meneruskan context dan menjaga ketidakpastian efek; sumber `7529e520`/`4769d548` lebih lama, memakai runtime langsung dan klaim verifier berbeda.
+- `src/services/streamResolver.js`: pertahankan HEAD `97fb7ffa`/`1ebc16d7`, validasi ID ketat serta binding evidence; sumber `e91dd1fa` tidak boleh menggantikan jalur Manager kanonis dengan cache/execute langsung.
+- `wave8-iw1-migration-manifest.json`: pertahankan census HEAD `ae598e40` yang lebih baru dan sesuai jalur layanan terkini, bukan hitungan snapshot sumber yang lebih lama.
+- Non-konflik: pertahankan tambahan modul capability backup/desktop/media beserta test dan accessor bootstrap, tanpa menghubungkannya menggantikan ingress kanonis. Ini API internal legacy tambahan, bukan store konfigurasi interface. Tidak ditemukan konfigurasi silo baru pada perubahan ini.
+- Tes awal terhalang sqlite3 (0 lulus, 3 file gagal). Dependency sqlite3 dipasang hanya di direktori temporer, bukan manifest/lock/worktree lain, lalu NODE_PATH diarahkan ke sana. Tes kemudian 22 lulus, 1 gagal karena test desktop sumber masih mengharapkan bentuk respons lama. Resolusi test mempertahankan service baru dan menguji denial kanonis (`AUTHENTICATION_REQUIRED`, effectInvoked false, alasan context wajib), bukan mengubah service demi tes lama.
+- Tes final capability backup/desktop/media + L4: 58 lulus, 0 gagal. Scan sebelum commit 0 temuan pada 7 file JS; semua syntax lulus. Hash/ancestry menyusul.
