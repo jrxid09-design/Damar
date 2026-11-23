@@ -29,6 +29,28 @@ function composeMessage(signal, location, { salutation = '' } = {}) {
     return greet + 'prediksi ' + (parts.join(' dan ') || 'cuaca buruk') + ' untuk ' + phrase + ' ' + leadText(d.leadMinutes) + ' (± pukul ' + hhmm(d.at) + '). Sumber: ' + d.source + '. ' +
       (location.profile === 'asset' ? 'Saran: waspadai aktivitas di sekitar aset dan risiko sambaran petir pada jam itu.' : 'Saran: siapkan antisipasi bila ada aktivitas di luar pada jam itu.');
   }
+  if (signal.ruleId === 'bmkg-quake-near') {
+    return greet + 'gempa M' + d.magnitude + ' tercatat ' + d.distanceKm + ' km dari ' + phrase + (d.place ? ' — ' + d.place : '') +
+      ', kedalaman ' + d.depthKm + ' km, pukul ' + hhmm(d.time) + '. Sumber: BMKG. ' +
+      (location.profile === 'asset' ? 'Periksa kondisi aset dan waspadai gempa susulan.' : 'Periksa kondisi sekitar dan waspadai gempa susulan.');
+  }
+  if (signal.ruleId === 'tsunami-relay') {
+    // BMKG's wording is relayed verbatim (in quotes) with attribution;
+    // DAMAR adds only localization and a safety suggestion.
+    return greet + 'peringatan resmi BMKG: gempa M' + d.magnitude + ' ' + d.distanceKm + ' km dari ' + phrase + (d.place ? ' — ' + d.place : '') +
+      ', pukul ' + hhmm(d.time) + '. BMKG menyatakan: "' + d.potensi + '". Sumber: BMKG. ' +
+      'Saran: menjauhi pantai dan pesisir sampai ada pembaruan resmi dari BMKG.';
+  }
+  if (signal.ruleId === 'bmkg-extreme-weather') {
+    return greet + 'BMKG memprakirakan ' + (d.weatherDesc || 'cuaca ekstrem') + ' untuk ' + phrase + ' ' + leadText(d.leadMinutes) +
+      ' (± pukul ' + hhmm(d.at) + '). Sumber: BMKG. ' +
+      (location.profile === 'asset' ? 'Saran: waspadai aktivitas di sekitar aset dan risiko sambaran petir pada jam itu.' : 'Saran: siapkan antisipasi bila ada aktivitas di luar pada jam itu.');
+  }
+  if (signal.ruleId === 'volcano-status') {
+    return greet + 'status gunung ' + d.volcano + ' berada pada Level ' + d.level + (d.levelLabel ? ' (' + d.levelLabel + ')' : '') +
+      ', ' + d.distanceKm + ' km dari ' + phrase + '. Sumber: ' + d.source + '. ' +
+      'Saran: ikuti rekomendasi PVMBG dan hindari zona bahaya di sekitar gunung tersebut.';
+  }
   if (signal.ruleId === 'fire-near') {
     return greet + 'hotspot kebakaran terdeteksi ' + d.distanceKm + ' km dari ' + phrase + (Number.isFinite(d.frp) ? ' (FRP ' + d.frp + ')' : '') +
       '. Sumber: ' + d.source + '. Saran: verifikasi kondisi lapangan di sekitar titik tersebut.';

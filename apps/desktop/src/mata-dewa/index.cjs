@@ -8,6 +8,8 @@
 const fs = require('node:fs'), path = require('node:path');
 const { FEEDS, FEED_IDS, KEY_FEEDS, CCTV_SOURCES, SETTINGS_DEFAULTS } = require('./feeds.cjs');
 const { createProactiveAlerts } = require('./proactive/proactive-alerts.cjs');
+const { createBmkgProviders } = require('./proactive/bmkg-providers.cjs');
+const { createExternalChannels } = require('./proactive/alert-channels.cjs');
 const { resolveMapsLink } = require('./proactive/maps-link.cjs');
 const egress = require('./egress.cjs');
 const { createCameras, PUBLIC_SOURCES } = require('./cameras.cjs');
@@ -65,8 +67,22 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
       },
       hotspots: async (loc) => { const v = await load('fires', { lat: loc.lat, lon: loc.lon, radiusKm: loc.radiusKm }, config()).catch(() => null); return ((v && v.items) || []).map(i => ({ lat: i.lat, lon: i.lon, frp: typeof i.frp === 'number' ? i.frp : null, time: i.time || i.acqDate || null })); },
       // scenes: intentionally not wired live yet - the public STAC host is an egress-allowlist decision (see docs/proactive-alerts-design.md).
+      // BMKG (official public data): quake list incl. BMKG's own tsunami
+      // Potensi wording + village forecast for watch points carrying adm4.
+      ...createBmkgProviders({ fetchText: (url) => fetch(url, { timeoutMs, headers: { 'user-agent': egress.userAgent(config().contactUrl) }, maxBytes: 1024 * 1024 }) }),
+      // volcanoes: intentionally not wired live yet - no public machine-readable PVMBG feed could be
+      // verified (MAGMA Indonesia publishes for humans; its API guesses return 403/404). The rule,
+      // the coordinate catalog and the normalizer are implemented and fixture-tested; composing a
+      // live provider is a feed-availability decision, like scenes above.
     },
-    channels: {}, // Notch = delivery log + the proactive route below; external channels report status "ready" until DAMAR's own channel config exists.
+    // DAMAR's OWN external channels: targets from DAMAR's centralized
+    // settings, tokens from DAMAR's own vault by name. Unconfigured =
+    // status "ready" (siap diaktifkan); nothing is ever borrowed from
+    // another system's credentials or channels.
+    channels: createExternalChannels({
+      getChannelsConfig: () => config().alerts || {},
+      resolveSecret: (name) => { try { return keyStore?.load(name) || null; } catch { return null; } },
+    }),
   });
   { const ac = config().alerts; if (proactiveAutostart && ac?.enabled) proactive.start((ac.tickMinutes || 10) * 60000); }
   const cameras = camerasIn || createCameras({ profileDir, keyStore });
