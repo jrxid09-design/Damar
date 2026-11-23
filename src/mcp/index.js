@@ -28,6 +28,17 @@ function attachMcp(app, { grantLane = null } = {}) {
     const adapter = grantLane ? require("./managerAdapter").createManagerAdapter(grantLane) : null;
 
     const handler = createMcpHandler({
+        // Disclosure: registry tools pass the canonical permission-before-
+        // disclosure filter unchanged. The Lane 2 intent tools are disclosed
+        // whenever the grant lane is composed: they are inert without
+        // per-call owner-grant evidence (the adapter rejects evidence-less
+        // calls before the Manager), so listing them leaks no capability.
+        disclosureFilter: adapter ? (tools, exec) => {
+            const base = require("../ai/tools/Authorization").disclosureFilter(tools, exec);
+            const keep = new Set(base.map(t => t.name));
+            for (const t of tools) if (adapter.isAdapterTool(t.name ?? t.id)) keep.add(t.name ?? t.id);
+            return tools.filter(t => keep.has(t.name ?? t.id));
+        } : undefined,
         registry: {
             describe: () => (adapter ? [...ToolRegistry.describe(), ...adapter.descriptors] : ToolRegistry.describe()),
             has: (id) => ToolRegistry.has(id) || (adapter ? adapter.isAdapterTool(id) : false),
