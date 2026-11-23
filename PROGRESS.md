@@ -37,3 +37,16 @@ Branch: `feat/mcp-worker-bridge`. Worktree: `C:\Workspace\Damar-mcp-worker`.
 - Hash commit tahap terakhir sebelum laporan akhir: `39f5c5d7`; hash commit STOP A2: `74c61ece`. Hash commit laporan akhir tersedia lewat `git rev-parse --short HEAD` setelah laporan ini di-commit (commit tidak dapat mencantumkan hash dirinya sendiri).
 - Test suite terakhir: `npm run test:safety` 535 lulus, 0 gagal, 6 skip dari 541; `npm test` 4609 lulus, 0 gagal, 9 skip dari 4618.
 - Diserahkan ke owner: kanal/adapter MCP terautentikasi, brief dan jurnal teknis, bukti baseline serta test, dan keputusan arsitektur tentang pembentukan sesi principal MCP melalui Lane 2 kanonik. Eksekusi `tools/call` tetap fail-closed.
+
+
+## A2 Lanjutan — Desain Grant + Prototipe (2026-11-23 malam)
+
+- Perubahan: dokumen desain jalur grant Lane 2 + modul prototipe terisolasi
+  `src/mcp/ownerGrant.js` + tesnya. TIDAK ada perubahan perilaku produksi;
+  tidak ada file di `src/authority/` atau former Manager yang disentuh.
+- File: `docs/mcp-lane2-owner-grant-design.md`, `src/mcp/ownerGrant.js`,
+  `tests/safety/mcpOwnerGrant.test.js`, `WORKER-REPORT.md`, `PROGRESS.md`.
+- Tes: `node --test tests/safety/mcpOwnerGrant.test.js` 13 lulus 0 gagal;
+  `tests/safety/mcp.test.js` + `mcpClient.test.js` tetap 19 lulus 0 gagal.
+- Status: menunggu ratifikasi owner atas rancangan (kind bukti `grant-proof`
+  di verifier kanonik) sebelum A2 implementasi produksi, A3–A5, B1–B6.

@@ -31,3 +31,34 @@ Tahap selesai: A0 dan A1, termasuk perbaikan tes daftar kanal. Tahap A2 dihentik
 Hasil terakhir: `npm run test:safety` 535 lulus, 0 gagal, 6 skip dari 541; `npm test` 4609 lulus, 0 gagal, 9 skip dari 4618. Tes full pertama sempat gagal pada ekspektasi daftar kanal; diperbaiki dan diuji ulang hingga hijau. `graphify update . --no-cluster` berhasil memperbarui graf AST (42050 node, 89087 edge). Perubahan provenance plugin dari tes dipulihkan; log sesi eksekusi tidak di-commit.
 
 Diserahkan ke owner: commit tahap, kanal/adapter MCP yang mengambil konteks dari token guard, laporan dan brief, serta keputusan arsitektur yang diperlukan untuk autentikasi principal MCP berhak minimum di Lane 2 tanpa melemahkan verifikasi owner/admin. `tools/call` masih memakai stub `LEGACY_ACTION_ROUTE_DISABLED`; smoke eksekusi A5 tidak dapat dipenuhi sebelum keputusan tersebut. B1–B6 menunggu komposisi handle agentfed yang terhubung ke store ACC yang sama dan adapter MCP yang sah.
+
+
+## A2 Lanjutan — Rancangan Jalur Grant + Prototipe Terisolasi (2026-11-23 22:2x WIB)
+
+Owner memutuskan (22:08 WIB) jalur auth MCP Lane 2 dilanjutkan. Sesi ini
+meneliti ulang seluruh seam yang tersedia dan menyimpulkan: satu-satunya
+yang hilang adalah KIND BUKTI BARU di verifier autentikasi kanonik.
+Bukti penunjang (terverifikasi dari kode sesi ini):
+
+- `selfSignOwnerProof()` ada tetapi cakupannya tertulis "canonical HTTP
+  surface only" untuk caller token-authenticated di console, dan ia
+  meng-mint principal OWNER — meluaskannya ke MCP melanggar hak minimum.
+- Grant ACC (`evaluate.js`/`delegation.js`) adalah lapisan otorisasi atas
+  identitas yang sudah terautentikasi; ia tidak mengautentikasi.
+- Binding kanal tidak menjadi bukti yang diterima `authenticate` Manager.
+
+Deliverable sesi ini (BUKAN perubahan produksi):
+- `docs/mcp-lane2-owner-grant-design.md` — rancangan lengkap: bukti baru
+  `grant-proof`, grant owner bertanda tangan di store ACC (subject terikat
+  identitas token + agentId opsional, scope subset allowlist intent,
+  TTL <= 90 hari, kunci worker untuk PoP), daftar perubahan produksi
+  minimum (former whitelist, cabang verifier, adapter, surface Console),
+  dan alasan mengapa ini tetap keputusan arsitektur R12C milik owner.
+- `src/mcp/ownerGrant.js` — prototipe TERISOLASI (tidak diimpor komposisi
+  produksi): penerbitan/verifikasi grant Ed25519 + gate PoP nonce satu
+  kali pakai sebagai inti policy A3.
+- `tests/safety/mcpOwnerGrant.test.js` — 13 tes, semua lulus (termasuk
+  negatif: tanpa grant, tanda tangan palsu, payload diubah, expired,
+  eskalasi scope, PoP kunci salah, replay nonce). Tes MCP lama tetap
+  19/19. `tools/call` tetap fail-closed; A3–A5 dan B1–B6 tetap menunggu
+  ratifikasi perubahan verifier pada rancangan, BUKAN menunggu prototipe.
