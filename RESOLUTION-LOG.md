@@ -97,3 +97,7 @@ Hasil pascacommit L4: `264672367eb4bd8b8f09aa07a6f68b52c929fe7d`; ancestry sukse
 - Enam branch merged diverifikasi ancestor; empat area A identik develop. Scan file perubahan akhir dan syntax diulang sebelum commit final; tidak ada rahasia/nilai privat yang diterima. Tidak ada push, merge develop, reset, atau perubahan worktree lain.
 - Graphify: graph awal tidak ada. `graphify update .` AST-only dijalankan; percobaan foreground mencapai ekstraksi lalu timeout, pengulangan dijalankan background. Peringatan tool: SQL parser dependency tidak ada, 60 file tanpa node, dua proof.js memiliki parse error. Output graph tidak disertakan commit integrasi tanpa pemeriksaan rahasia.
 - Keputusan owner: (1) kontrak/fixture ToolBus dan penyatuan capability recovery dengan notification/governed coding; (2) arsitektur kanonis UI/presence serta kontrak read model/feed; (3) integrasi kebijakan sistem CLI ke konfigurasi Core/Dashboard; (4) investigasi hang suite L1 baseline.
+
+### Konfirmasi penyelesaian graph
+
+Pengulangan background `graphify update .` selesai sukses: 42.514 node, 80.153 edge, 1.876 komunitas. `graph.json`, `graph.html` (agregasi komunitas), dan `GRAPH_REPORT.md` diperbarui lokal di `graphify-out/`, tidak dimasukkan commit. Peringatan tetap berlaku: 60 file tanpa node, 24 SQL tidak diekstrak karena parser tidak tersedia, dan dua proof.js terurai parsial. Hasil merge dan tes tidak berubah. HEAD akhir sesi adalah commit jurnal konfirmasi ini; hash eksak dilaporkan di jawaban akhir.
