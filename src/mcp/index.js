@@ -19,13 +19,20 @@ const { rejectLegacyActionRoute } = require("../manager/legacyBoundary");
  * tool) — lihat mcpClientManager; dimulai otomatis oleh
  * aiRuntimeService saat daemon boot.
  */
-function attachMcp(app) {
+function attachMcp(app, { grantLane = null } = {}) {
+    // Lane 2 (ratified): when the composition supplies a grant lane
+    // ({ managerHandle, grantVerifier }), the four intent tools plus the
+    // challenge tool are projected through the Manager adapter. Without a
+    // grant lane, behavior is exactly as before (discovery open, execution
+    // fail-closed at the legacy boundary).
+    const adapter = grantLane ? require("./managerAdapter").createManagerAdapter(grantLane) : null;
 
     const handler = createMcpHandler({
         registry: {
-            describe: () => ToolRegistry.describe(),
-            has: (id) => ToolRegistry.has(id),
+            describe: () => (adapter ? [...ToolRegistry.describe(), ...adapter.descriptors] : ToolRegistry.describe()),
+            has: (id) => ToolRegistry.has(id) || (adapter ? adapter.isAdapterTool(id) : false),
             execute: (id, args, ctx) => {
+                if (adapter && adapter.isAdapterTool(id)) return adapter.execute(id, args, ctx);
                 // The legacy MCP tools/call contract accepts an arbitrary
                 // registry id and bypasses Manager → Lane 2 → Lane 3.
                 // Keep discovery available, but fail before authorization or
