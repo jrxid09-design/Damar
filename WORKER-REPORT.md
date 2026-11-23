@@ -23,3 +23,11 @@ Stub `LEGACY_ACTION_ROUTE_DISABLED` pada `tools/call` dipertahankan. A3–A5 ber
 ## A1 — Perbaikan tes daftar kanal (2026-11-23 20:32 WIB)
 
 Full suite pertama menemukan tes `tests/manager/channelAdapters.test.js` yang mengunci daftar enam kanal lama. Ekspektasi ditambah `CHANNEL_TYPES.MCP`; tes tersebut kini lulus 2/2. Output full suite pertama difilter hanya ke 12 baris terakhir, sehingga angka totalnya tidak tersedia; hasilnya tetap dicatat sebagai gagal. Perbaikan ini tidak membuka jalur aksi dan tidak mengubah keputusan STOP A2.
+
+## Laporan akhir (2026-11-23 20:46 WIB)
+
+Tahap selesai: A0 dan A1, termasuk perbaikan tes daftar kanal. Tahap A2 dihentikan sesuai STOP condition; A3–A5 dan B1–B6 belum dikerjakan karena bergantung pada jalur autentikasi Manager kanonik untuk principal MCP. Hash commit tahap terakhir sebelum laporan akhir: `39f5c5d7`; hash commit catatan STOP: `74c61ece`. Hash commit laporan akhir dibaca dari HEAD setelah commit laporan ini.
+
+Hasil terakhir: `npm run test:safety` 535 lulus, 0 gagal, 6 skip dari 541; `npm test` 4609 lulus, 0 gagal, 9 skip dari 4618. Tes full pertama sempat gagal pada ekspektasi daftar kanal; diperbaiki dan diuji ulang hingga hijau. `graphify update . --no-cluster` berhasil memperbarui graf AST (42050 node, 89087 edge). Perubahan provenance plugin dari tes dipulihkan; log sesi eksekusi tidak di-commit.
+
+Diserahkan ke owner: commit tahap, kanal/adapter MCP yang mengambil konteks dari token guard, laporan dan brief, serta keputusan arsitektur yang diperlukan untuk autentikasi principal MCP berhak minimum di Lane 2 tanpa melemahkan verifikasi owner/admin. `tools/call` masih memakai stub `LEGACY_ACTION_ROUTE_DISABLED`; smoke eksekusi A5 tidak dapat dipenuhi sebelum keputusan tersebut. B1–B6 menunggu komposisi handle agentfed yang terhubung ke store ACC yang sama dan adapter MCP yang sah.
