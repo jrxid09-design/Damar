@@ -1,0 +1,144 @@
+'use strict';
+// PROCEDURAL MEMORY for Computer-Use (blueprint section 9, PROCEDURAL class).
+//
+// Frontier computer-use agents are stateless per session: every task is
+// re-planned from zero. Damar instead stores each VERIFIED successful task as
+// a reusable procedure for the same app, and replays it deterministically
+// (the REFLEX layer) without calling the model at all. A procedure is a
+// template, not a transcript: the literal goal values (typed text, file
+// paths) are stored as {{slots}} and filled at replay time.
+//
+// Procedures never carry authority: replay goes through the exact same
+// authorized tool runner as the original task, so every step is re-authorized
+// and re-verified by the broker on each replay.
+const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
+
+function goalSignature(goal) {
+  return String(goal || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function slotify(text, slots) {
+  let out = String(text);
+  for (const [name, value] of Object.entries(slots || {})) {
+    if (typeof value === 'string' && value) out = out.split(value).join('{{' + name + '}}');
+  }
+  return out;
+}
+
+function fillSlots(value, slots) {
+  if (typeof value === 'string') {
+    let out = value;
+    for (const [name, replacement] of Object.entries(slots || {})) {
+      out = out.split('{{' + name + '}}').join(String(replacement));
+    }
+    return out;
+  }
+  if (Array.isArray(value)) return value.map(v => fillSlots(v, slots));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, fillSlots(v, slots)]));
+  }
+  return value;
+}
+
+function digestOf(proc) {
+  return crypto.createHash('sha256')
+    .update(JSON.stringify({ app: proc.app, goal: proc.goalSignature, steps: proc.steps, verify: proc.verify }))
+    .digest('hex').slice(0, 24);
+}
+
+function createProcedureStore({ file } = {}) {
+  if (!file || !path.isAbsolute(file)) throw Error('PROCEDURE_STORE_PATH_INVALID');
+  let records = [];
+  function load() {
+    try { records = JSON.parse(fs.readFileSync(file, 'utf8')); if (!Array.isArray(records)) records = []; }
+    catch { records = []; }
+    return records;
+  }
+  function save() {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(records, null, 2));
+  }
+  load();
+  return {
+    file,
+    list() { return records.map(r => ({ ...r })); },
+    record({ app, goal, steps, verify = null, source = 'model' } = {}) {
+      if (!app || !goal || !Array.isArray(steps) || !steps.length) throw Error('PROCEDURE_INVALID');
+      const proc = {
+        id: 'proc-' + crypto.randomUUID().slice(0, 8),
+        app: String(app), goal: String(goal), goalSignature: goalSignature(goal),
+        steps, verify, source,
+        createdAt: new Date().toISOString(), uses: 0, successes: 0,
+      };
+      proc.digest = digestOf(proc);
+      records.push(proc); save();
+      return { ...proc };
+    },
+    find(app, goal) {
+      const sig = goalSignature(goal);
+      const hit = records.find(r => r.app === app && r.goalSignature === sig);
+      return hit ? { ...hit } : null;
+    },
+    noteReplay(id, ok) {
+      const rec = records.find(r => r.id === id);
+      if (!rec) return false;
+      rec.uses += 1; if (ok) rec.successes += 1;
+      rec.lastReplayAt = new Date().toISOString();
+      save();
+      return true;
+    },
+  };
+}
+
+// Window-target remapping for reflex replay (Fase 5 fix). A recorded
+// act step carries the window identity of the RECORD session - title +
+// pid (the broker re-verifies title+pid at dispatch). Pids are per-boot
+// process ids: after the app restarts, the recorded pid matches nothing
+// (the Fase 5 baseline replay died exactly here, at step 0, before any
+// model call). Title is the stable part of the identity, so before
+// replay each step's pid/hwnd is re-resolved from the CURRENT window
+// list by exact title. A step whose title has no current window is left
+// untouched: it fails honestly at dispatch instead of acting on a guess.
+function remapWindowTargets(steps, windows) {
+  const byTitle = new Map();
+  for (const w of Array.isArray(windows) ? windows : []) {
+    if (w && typeof w.title === 'string' && w.title && !byTitle.has(w.title)) byTitle.set(w.title, w);
+  }
+  return (Array.isArray(steps) ? steps : []).map(step => {
+    const args = step && step.args;
+    if (!args || typeof args.title !== 'string') return step;
+    const cur = byTitle.get(args.title);
+    if (!cur) return step;
+    const next = { ...args };
+    if (Number.isSafeInteger(cur.pid)) next.pid = cur.pid;
+    if ('hwnd' in next && Number.isSafeInteger(cur.hwnd)) next.hwnd = cur.hwnd;
+    return { ...step, args: next };
+  });
+}
+
+// Reflex replay: run the stored steps through the caller's authorized tool
+// runner, in order, stopping at the first failed step. No model is involved;
+// the caller proves that by counting its own model calls around this function.
+// Pass { windows } (a fresh observe) to re-resolve window targets first.
+async function replayProcedure(proc, slots, runTool, { windows = null } = {}) {
+  const results = [];
+  const filled = fillSlots(proc.steps, slots);
+  const steps = windows ? remapWindowTargets(filled, windows) : filled;
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    let parsed = null;
+    try {
+      const raw = await runTool(step.tool, step.args);
+      parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch (e) {
+      results.push({ step: i, tool: step.tool, ok: false, error: String(e?.message || e).slice(0, 160) });
+      return { ok: false, failedStep: i, results };
+    }
+    const ok = parsed && parsed.ok !== false;
+    results.push({ step: i, tool: step.tool, ok });
+    if (!ok) return { ok: false, failedStep: i, results };
+  }
+  return { ok: true, results };
+}
+
+module.exports = { createProcedureStore, replayProcedure, goalSignature, slotify, fillSlots , remapWindowTargets };
