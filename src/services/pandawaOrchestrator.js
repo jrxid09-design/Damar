@@ -121,9 +121,9 @@ async function runGraph(graph, { execute, resourceGovernor = null, onEvent = () 
                 }
                 const value = await execute(Object.freeze({ ...node, dependencies: [...node.dependencies], authorityContext: null }));
                 node.resultRef = id("pres"); node.status = "VERIFIED"; node.verificationState = "UNKNOWN";
-                results.set(node.workId, Object.freeze({ workId: node.workId, producingEntity: node.ownerEntity, result: value, epistemic: "PROPOSED", authority: null }));
+                results.set(node.workId, Object.freeze({ workId: node.workId, producingEntity: node.ownerEntity, result: value, epistemic: "PROPOSED", authority: null, completeness: node.dependencies.some(d => results.get(d)?.completeness === "INCOMPLETE") ? "INCOMPLETE" : "COMPLETE" }));
             } catch (error) {
-                node.status = "FAILED"; results.set(node.workId, Object.freeze({ workId: node.workId, producingEntity: node.ownerEntity, error: String(error.message || error), epistemic: "UNKNOWN", authority: null }));
+                node.status = "FAILED"; results.set(node.workId, Object.freeze({ workId: node.workId, producingEntity: node.ownerEntity, error: String(error.message || error), epistemic: "UNKNOWN", authority: null, completeness: "INCOMPLETE" }));
             } finally { if (lease && resourceGovernor) resourceGovernor.release(lease); active--; completed++; onEvent({ type: "work:done", node: { ...node } }); }
         }));
         for (const node of nodes) if (node.status === "QUEUED" && node.dependencies.every(d => results.has(d))) node.status = "READY";
