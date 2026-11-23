@@ -49,17 +49,18 @@ function attachMcp(app) {
         });
 
     // Teruskan identitas auth ke handler (ctx.exec untuk execute).
-    app.use("/mcp", (req, _res, next) => {
+    app.use("/mcp", guard, (req, _res, next) => {
         req.mcpExec = {
-            role: req.authIdentity?.role ?? "user",
+            role: req.authIdentity.role,
+            principal: "mcp",
             channel: "mcp",
-            sessionId: req.authIdentity?.sessionId ?? "mcp:anon",
-            source: "mcp"
+            sessionId: req.authIdentity.sessionId,
+            source: req.authIdentity.source
         };
         next();
     });
 
-    app.post("/mcp", guard, async (req, res, next) => {
+    app.post("/mcp", async (req, res, next) => {
         try {
             const out = await handler.handle(req.body, { exec: req.mcpExec });
             if (out === null) return res.status(202).end();
@@ -67,7 +68,7 @@ function attachMcp(app) {
         } catch (e) { next(e); }
     });
 
-    app.get("/mcp/health", guard, (req, res) => {
+    app.get("/mcp/health", (req, res) => {
         // H9: jumlah tool kini identitas-spesifik (paritas disklosur).
         res.json({ ok: true, server: "damar-mcp", tools: handler.visibleTools(req.mcpExec).length, destructive: process.env.DAMAR_MCP_ALLOW_DESTRUCTIVE === "1" });
     });

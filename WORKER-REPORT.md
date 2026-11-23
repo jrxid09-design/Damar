@@ -9,3 +9,7 @@ Tidak ada kode yang diubah. `MCP-WORKER-TASK.md` ditambahkan sebagai dokumen tug
 Tes MCP khusus: 19 lulus, 0 gagal. `npm run test:safety`: 535 lulus, 0 gagal, 6 skip dari 541.
 
 Temuan arsitektur awal untuk tahap A2: Manager produksi memanggil autentikasi kanonik Lane 2, yang saat ini menerima hanya bukti owner/admin bertanda tangan. Token MCP tidak dapat membentuk principal Manager melalui seam tersebut. Dampak STOP condition akan dinilai pada A2.
+
+## A1 — Channel worker (2026-11-23 20:19 WIB)
+
+`src/manager/schema.js` dan `src/manager/channels.js` mendapat kanal/adapter `mcp` yang memakai normalisasi serta rendering bersama tanpa hak otorisasi. Di `src/mcp/index.js`, `tokenGuard` berjalan sebelum pembentukan `req.mcpExec`; principal `mcp`, role, source, dan sessionId berasal dari identitas autentikasi token. Tidak ada field principal yang diterima dari payload MCP. `npm run test:safety`: 535 lulus, 0 gagal, 6 skip dari 541. `graphify update .` dijalankan setelah edit kode.
