@@ -59,6 +59,7 @@ const {
 } = require("./ownerTrust");
 
 const { createTrustAuditGate } = require("./ownerTrust/trustAuditGate");
+const { createCliSessionAuthority } = require("./ownerTrust/cliSession");
 const {
     createCanonicalIngressIssuers,
     attachTelegramIngress,
@@ -83,6 +84,37 @@ function resolveProductionOwnerTrustStore() {
         return path.resolve(setting);
     }
     return path.join(os.homedir(), ".damar", "ownertrust-v1.json");
+}
+
+/**
+ * W5-CLI P3-e — resolve the canonical DURABLE Device Identity store for the
+ * production composition root.
+ *
+ * PROVENANCE, not caller input: the path is DERIVED from the already
+ * operator-controlled OwnerTrust root (`<dir>/identity-v1.json`), so the
+ * identity snapshot lives under exactly the same trusted host path as the
+ * trust snapshot.  There is deliberately NO separate env knob and NO
+ * function argument that could point identity state at an arbitrary file:
+ * a caller can never choose where canonical device truth is read from.
+ *
+ * Memory mode (DAMAR_OWNER_TRUST_STATE=memory) yields null: there is no
+ * durable canonical device state, and `cliSession` then fails closed
+ * (OT_IDENTITY_UNAVAILABLE) rather than trusting a process-local aggregate.
+ *
+ * Returns an IdentityStore port or null (fail closed).  It grants nothing:
+ * reads are unprivileged; durable WRITES still pass the Manager-owned
+ * identity capability runtime's authority evaluation.
+ */
+function resolveProductionIdentityStore(stateFile) {
+    try {
+        if (typeof stateFile !== "string" || stateFile.length === 0) return null;
+        const identityPath = path.join(path.dirname(stateFile), "identity-v1.json");
+        // The managed factory resolves the Manager-owned capability runtime
+        // and refuses a non-Manager runtime; any failure => no canonical store.
+        return require("../embodiment/identity/store").createFileIdentityStore(identityPath);
+    } catch {
+        return null;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -138,8 +170,46 @@ function isCanonicalOwnerTrustComposition(candidate) {
 }
 
 /**
+ * Canonical device-trust reader for CLI session issuance/verification.
+ *
+ * FRESHNESS CONTRACT: every call loads the COMMITTED IdentityStore snapshot
+ * and restores it through the canonical DeviceIdentityService validator.
+ * Nothing is cached, so a revocation committed by another process is
+ * observed by the next call.  A missing snapshot means "no canonical device"
+ * (null); an unreadable/corrupt snapshot throws and the session authority
+ * fails closed.  The reader is a composition-time dependency — never a
+ * caller-supplied device status.
+ */
+function createCanonicalDeviceReader(identityStore) {
+    if (!identityStore || typeof identityStore.load !== "function") {
+        throw new TypeError("OT_IDENTITY_STORE_INVALID: identityStore requires load()");
+    }
+    return async function readCanonicalDevice(deviceId) {
+        // ponytail: full-snapshot validation per read (bounded: <=256
+        // devices). Add a revision-keyed cache only if verify throughput
+        // ever matters, and drop it on every store revision change.
+        const { loadIdentity } = require("../embodiment/identity/store");
+        const service = await loadIdentity({ store: identityStore });
+        if (!service) return null;
+        const row = service.serialize().devices.find((d) => d.deviceId === deviceId);
+        if (!row) return null;
+        return Object.freeze({
+            deviceId: row.deviceId,
+            pairingState: row.pairingState,
+            bindingDigest: row.bindingDigest
+        });
+    };
+}
+
+/**
  * Build the sealed composition.  `stateFile` is the durable ownerTrust
  * snapshot path (null => in-memory test mode).
+ *
+ * `identityStore` (IdentityStore port, optional) wires LIVE canonical device
+ * trust into `cliSession`.  Without it, CLI session issuance and verification
+ * fail closed (OT_IDENTITY_UNAVAILABLE): this composition refuses to vouch
+ * for device state it cannot authoritatively re-read.  The store is a
+ * composition-time dependency, not caller input.
  *
  * Durable mode wires, beside the snapshot:
  *   <dir>/vault/               — SecretVault file store (Owner key material)
@@ -148,7 +218,7 @@ function isCanonicalOwnerTrustComposition(candidate) {
  *   <dir>/ownertrust-initialized.json — OT-002 initialization anchor
  *   <dir>/ownertrust-bootstrap.lock   — OT-003 ceremony reservation
  */
-async function compose(stateFile, { forTest = false, ledgerOverride = null } = {}) {
+async function compose(stateFile, { forTest = false, ledgerOverride = null, identityStore = null } = {}) {
     // MD-018 test-only seam: an explicit ledger override (Mata Dewa audit
     // sink test scenarios) is honored ONLY for forTest compositions. The
     // production path never carries this option — fail loudly otherwise.
@@ -205,6 +275,15 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null } = {
 
     // ---- Bindings / binders / linker --------------------------------------
     const principalBindings = createPrincipalBindings({ registry, proofVerifier });
+    // T2: bounded CLI proof-of-possession + session issuance.  Composes the
+    // registry + sealed proof verifier + (when wired) a FRESH canonical
+    // device reader.  Mints no grant and no Authority.  Without an identity
+    // store the session contract fails closed rather than trusting stale or
+    // caller-supplied device state.
+    const cliSession = createCliSessionAuthority({
+        registry, proofVerifier, clock,
+        readCanonicalDevice: identityStore ? createCanonicalDeviceReader(identityStore) : null
+    });
     const channelBinders = createChannelBinders({ registry, proofVerifier });
     const continuityLinker = createContinuityLinker({ registry, principalBindings });
 
@@ -235,6 +314,7 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null } = {
     // composition's registry/verifier, never the module-global singleton).
     const authVerifier = makeAuthVerifier(registry, proofVerifier);
     const ownerRatify = makeRatifyAsOwner(registry, proofVerifier);
+    const humanConfirmation = makeHumanConfirmation(registry, proofVerifier, clock);
 
     /**
      * VAULT-MODE SELF-PROOF (canonical HTTP surface only): the daemon proves
@@ -293,7 +373,20 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null } = {
         registry, proofVerifier, firstOwnerBootstrap, authVerifier,
         ratifyAsOwner: ownerRatify, principalBindings, channelBinders,
         continuityLinker, store, vault, auditGate, ledger: effectiveLedger, ingress,
-        auditSink, selfSignOwnerProof,
+        auditSink, selfSignOwnerProof, humanConfirmation,
+        cliSession,
+        identityStore,
+        /**
+         * Load the canonical Device Identity aggregate from COMMITTED durable
+         * state (fresh every call; no cache). Returns null when no durable
+         * identity store is wired or no snapshot exists yet. Read-side only —
+         * it confers no authority; a caller still needs a live device binding.
+         */
+        async loadCanonicalIdentity() {
+            if (!identityStore) return null;
+            const { loadIdentity } = require("../embodiment/identity/store");
+            return loadIdentity({ store: identityStore });
+        },
         testMint,
         /** Release the audit sink's single-writer lock (graceful shutdown). */
         close() {
@@ -303,6 +396,69 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null } = {
     });
     canonicalCompositions.add(comp);
     return comp;
+}
+
+// Authentication evidence lives in the existing sealed trust composition.
+// Nothing here mints a grant or an ALLOW. Restart discards all evidence.
+function makeHumanConfirmation(registry, proofVerifier, clock) {
+    const evidenceRecords = new WeakMap();
+    const decisions = new Map();
+    function live(requirement) {
+        return require("./evaluate").isCanonicalConfirmationRequirement(requirement) &&
+            clock() < requirement.expiresAtMs;
+    }
+    function activeOwner() {
+        const owner = registry.getOwner();
+        return owner && registry.getState() === "ACTIVE" &&
+            registry.principalState(owner.principalId) === "ACTIVE" ? owner : null;
+    }
+    return Object.freeze({
+        issueChallenge(requirement) {
+            if (!live(requirement)) throw new Error("HC_REQUIREMENT_INVALID");
+            const owner = activeOwner();
+            if (!owner) throw new Error("HC_OWNER_UNAVAILABLE");
+            return proofVerifier.issueChallenge({ purpose: "action-human-confirmation",
+                credentialId: owner.credentials[0], context: requirement.requirementId });
+        },
+        confirm({ requirement, proof } = {}) {
+            if (!live(requirement) || !proof || typeof proof !== "object") return null;
+            for (const [id, record] of decisions) {
+                if (clock() >= record.expiresAtMs) decisions.delete(id);
+            }
+            if (decisions.has(requirement.requirementId) || decisions.size >= 512) return null;
+            const owner = activeOwner();
+            if (!owner) return null;
+            const verdict = proofVerifier.verifyProof({ nonce: proof.nonce, signature: proof.signature,
+                expectedPurpose: "action-human-confirmation", expectedContext: requirement.requirementId });
+            if (!verdict.ok || verdict.principalId !== owner.principalId) return null;
+            const record = { requirementId: requirement.requirementId, expiresAtMs: requirement.expiresAtMs,
+                ownerId: owner.principalId, credentialId: verdict.credentialId,
+                generation: registry.getGeneration ? registry.getGeneration() : null, spent: false };
+            const evidence = Object.freeze({ schemaVersion: 1, requirementId: requirement.requirementId,
+                intentId: requirement.intentId, intentRevision: requirement.intentRevision,
+                grantRevision: requirement.grantRevision, policyId: requirement.policyId,
+                policyRevision: requirement.policyRevision, expiresAtMs: requirement.expiresAtMs });
+            evidenceRecords.set(evidence, record);
+            decisions.set(requirement.requirementId, record);
+            return evidence;
+        },
+        check({ requirement, evidence, consume = false, nowMs } = {}) {
+            // Brand first: clones, serialized records and proxies have no record.
+            const record = evidence && typeof evidence === "object" ? evidenceRecords.get(evidence) : null;
+            if (!record || !live(requirement) || record.spent ||
+                record.requirementId !== requirement.requirementId || nowMs >= record.expiresAtMs) return false;
+            const owner = activeOwner();
+            const credential = registry.getCredential(record.credentialId);
+            if (!owner || owner.principalId !== record.ownerId || !credential || credential.revokedAtMs !== null ||
+                (registry.getGeneration && registry.getGeneration() !== record.generation)) return false;
+            if (consume) record.spent = true;
+            return true;
+        }
+    });
+}
+
+function checkCanonicalHumanConfirmation(args) {
+    return canonicalComposition !== null && canonicalComposition.humanConfirmation.check(args);
 }
 
 /** Composition-bound Owner ratification gate. */
@@ -372,7 +528,12 @@ function makeAuthVerifier(registry, proofVerifier) {    return function ownerAut
 async function canonical() {
     if (canonicalComposition !== null) return canonicalComposition;
     if (compositionPromise === null) {
-        compositionPromise = compose(resolveProductionOwnerTrustStore())
+        const stateFile = resolveProductionOwnerTrustStore();
+        // P3-e: the production root wires the canonical durable identity store
+        // (derived from the trusted trust-state root).  Absent => cliSession
+        // fails closed.  No option is ever accepted from a caller.
+        const identityStore = resolveProductionIdentityStore(stateFile);
+        compositionPromise = compose(stateFile, { identityStore })
             .then((c) => {
                 canonicalComposition = c;
                 // Install the canonical Owner/Admin proof verifier into the
@@ -450,14 +611,16 @@ function resolveOwnerAuthVerifier() {
  * This does NOT install anything into the canonical auth adapter; it returns
  * the composition so the sealed host composition can wire it.
  */
-async function composeOwnerTrustForTest({ stateFile = null, ledgerOverride = null } = {}) {
+async function composeOwnerTrustForTest({ stateFile = null, ledgerOverride = null, identityStore = null } = {}) {
     return compose(stateFile === null ? null : path.resolve(stateFile),
-        { forTest: true, ledgerOverride });
+        { forTest: true, ledgerOverride, identityStore });
 }
 
 module.exports = Object.freeze({
     resolveProductionOwnerTrustStore,
+    resolveProductionIdentityStore,
     resolveOwnerAuthVerifier,
+    checkCanonicalHumanConfirmation,
     composeOwnerTrustForTest,
     ensureCanonicalComposed,
     ratifyAsOwner,

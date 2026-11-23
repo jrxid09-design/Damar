@@ -194,12 +194,23 @@ function mindItem() {
 
 }
 
+/** Read-only canonical awareness projection. The projection is injected by
+ * runtime composition; Context never discovers or owns sensor state itself. */
+function observationItems(projection) {
+    try {
+        if (!projection || typeof projection.toContextItems !== "function") return [];
+        const items = projection.toContextItems();
+        return Array.isArray(items) ? items : [];
+    }
+    catch { return []; }
+}
+
 module.exports = {
     stableParts,
     doctrine,
     channelBlock,
     olderHistory,
     memoryItems,
-    mindItem
+    mindItem,
+    observationItems
 };
-

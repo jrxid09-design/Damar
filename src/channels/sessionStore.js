@@ -59,6 +59,10 @@ class SessionStore {
                     return reject(error);
                 }
 
+                if (!this.db) {
+                    return resolve();
+                }
+
                 this.db.run("PRAGMA journal_mode = WAL", () => {});
 
                 const ddl = `

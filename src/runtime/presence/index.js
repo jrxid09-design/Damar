@@ -10,7 +10,7 @@ const states = require("./states");
 const config = require("./config");
 const clock = require("./clock");
 const identity = require("./identity");
-const { PresenceRuntime, DECISION_CODES, createPresenceRuntime } = require("./presenceRuntime");
+const { PresenceRuntime, DECISION_CODES, READINESS, createPresenceRuntime } = require("./presenceRuntime");
 const ports = require("./ports");
 const { ActivityToken, isGenuineActivityToken } = require("./activityToken");
 
@@ -18,6 +18,7 @@ module.exports = {
     createPresenceRuntime,
     PresenceRuntime,
     DECISION_CODES,
+    READINESS,
     LIFECYCLE: states.LIFECYCLE,
     ACTIVITY_MODE: states.ACTIVITY_MODE,
     ACTIVITY_PRESENTATION_PRECEDENCE: states.ACTIVITY_PRESENTATION_PRECEDENCE,

@@ -254,7 +254,7 @@ class EntityStore {
             return this.get(winnerId);
         }
 
-        return database.transaction(async db => {
+        await database.transaction(async db => {
 
             const loser = await db.get(
                 "SELECT * FROM entities WHERE id = ?",
@@ -298,9 +298,10 @@ class EntityStore {
                 [winnerId, loserId]
             );
 
-            return this.get(winnerId);
-
         });
+
+        // Baca di luar span: panggilan biasa tidak boleh dilakukan dari dalam span.
+        return this.get(winnerId);
 
     }
 

@@ -35,9 +35,18 @@ const {
     canonicalCapabilityId, canonicalTokenList,
     restoreCanonicalRestrictionSet, deepFreeze
 } = require("./canonical");
+const { canonicalJson, sha256 } = require("./canonical");
+const { readConfirmationPolicy } = require("./humanConfirmationPolicy");
+const confirmationRequirements = new WeakSet();
+function isCanonicalConfirmationRequirement(value) {
+    return value !== null && typeof value === "object" && confirmationRequirements.has(value);
+}
 
 const EVAL_REASONS = Object.freeze({
     AUTHORIZED: "AUTHORIZED",
+    OWNER_CONFIRMATION_REQUIRED: "OWNER_CONFIRMATION_REQUIRED",
+    CAP_CONFIRMATION_INVALID: "CAP_CONFIRMATION_INVALID",
+    CAP_RESTRICTION_FAILED: "CAP_RESTRICTION_FAILED",
     CAP_NOT_FOUND: "CAP_NOT_FOUND",
     CAP_GENERATION_STALE: "CAP_GENERATION_STALE",
     CAP_INACTIVE: "CAP_INACTIVE",
@@ -306,6 +315,72 @@ async function loadAndEvaluateAuthority(store, request = {}, { nowMs = null } = 
         }
     }
 
+    // Only an explicit persisted grant restriction may produce a requirement.
+    // Every existing hard constraint above has already passed. An unsupported
+    // additional restriction is not made confirmable by this contract.
+    let confirmationPolicy;
+    try { confirmationPolicy = readConfirmationPolicy(grant.restrictions); }
+    catch (error) { return deny(EVAL_REASONS.CAP_RESTRICTION_FAILED, error.message); }
+    if (confirmationPolicy) {
+        // HC cannot turn an unratified root or an unavailable lineage into a
+        // confirmable action. Bind the complete current delegation lineage.
+        const lineage = [];
+        let ancestor = grant;
+        const seen = new Set([capId]);
+        try {
+            while (ancestor.kind === "delegated") {
+                const parentId = canonicalCapabilityId(ancestor.parentCapabilityId);
+                if (seen.has(parentId) || seen.size >= 32) throw new Error("invalid lineage");
+                seen.add(parentId);
+                const parentCap = await store.getCapability(parentId);
+                if (!parentCap) throw new Error("missing parent grant");
+                ancestor = rehydrateGrant(parentCap, parentId);
+                if (ancestor.status !== "ACTIVE" ||
+                    await store.getGeneration(ancestor.subject) !== ancestor.generation ||
+                    (ancestor.notBefore && atMs < Date.parse(ancestor.notBefore)) ||
+                    (ancestor.expiresAt && atMs > Date.parse(ancestor.expiresAt))) throw new Error("inactive lineage");
+                lineage.push({ payload: parentCap.payload, status: parentCap.status, generation: parentCap.generation });
+            }
+            if (typeof ancestor.ratificationId !== "string" || !ancestor.ratificationId) throw new Error("unratified root");
+        } catch (error) { return deny(EVAL_REASONS.CAP_RESTRICTION_FAILED, error.message); }
+        const intent = request.intent;
+        if (!intent || typeof intent.intentId !== "string" || !intent.intentId ||
+            intent.capabilityId !== capId || intent.operation !== reqAction ||
+            !Number.isFinite(atMs) || !Number.isFinite(intent.createdAtMs) ||
+            intent.createdAtMs > atMs || atMs >= intent.createdAtMs + 120_000 || !principal) {
+            return deny(EVAL_REASONS.CAP_CONFIRMATION_INVALID, "live per-intent binding required");
+        }
+        let binding;
+        try {
+            binding = deepFreeze({
+                intentId: intent.intentId,
+                intentRevision: sha256(canonicalJson(intent)),
+                capabilityId: capId,
+                grantRevision: sha256(canonicalJson({ payload: cap.payload, status: cap.status, generation: cap.generation, lineage })),
+                ...confirmationPolicy,
+                principal, channel: String(identity.channel ?? ""), sessionId: String(identity.sessionId ?? ""),
+                scope: reqScope, purpose: purpose ?? null,
+                expiresAtMs: intent.createdAtMs + 120_000
+            });
+        } catch { return deny(EVAL_REASONS.CAP_CONFIRMATION_INVALID, "invalid binding"); }
+        const requirement = deepFreeze({ schemaVersion: 1,
+            requirementId: sha256(canonicalJson(binding)), ...binding });
+        confirmationRequirements.add(requirement);
+        if (request.confirmationEvidence === undefined || request.confirmationEvidence === null) {
+            return { allowed: false, reasonCode: EVAL_REASONS.OWNER_CONFIRMATION_REQUIRED,
+                snapshot: null, confirmationRequirement: requirement };
+        }
+        // The sealed existing Owner trust root authenticates evidence. It does
+        // not authorize: this evaluator has reloaded/rechecked current policy.
+        const accepted = require("./ownerTrustComposition").checkCanonicalHumanConfirmation({
+            requirement, evidence: request.confirmationEvidence,
+            consume: request.consumeConfirmation === true, nowMs: atMs
+        });
+        if (!accepted) return deny(EVAL_REASONS.CAP_CONFIRMATION_INVALID, "stale, foreign, expired or spent confirmation");
+    } else if (request.confirmationEvidence !== undefined && request.confirmationEvidence !== null) {
+        return deny(EVAL_REASONS.CAP_CONFIRMATION_INVALID, "confirmation policy removed");
+    }
+
     const snapshot = deepFreeze({
         capabilityId: capId,
         subject: grant.subject,
@@ -341,5 +416,6 @@ module.exports = {
     loadAndEvaluateAuthority,
     evaluateAuthorityReadOnly,
     isCanonicalAuthorityEvaluation,
+    isCanonicalConfirmationRequirement,
     EVAL_REASONS
 };

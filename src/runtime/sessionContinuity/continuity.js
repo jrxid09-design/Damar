@@ -334,12 +334,11 @@ function createSessionContinuity(options = {}) {
             // idle/error state.  The next mutation opens a NEW epoch.
             scheduler.lastError = {
               code: error && error.code ? String(error.code) : "PERSIST_FAILURE",
-              at: clock()
+              at: clock(),
+              error
             };
             scheduler.dirty = true;
-            const failure = new Error(`[PERSIST_FAILURE] ${scheduler.lastError.code}`);
-            failure.name = "SessionContinuityError";
-            failure.code = scheduler.lastError.code;
+            const failure = error instanceof Error ? error : Object.assign(new Error(`[PERSIST_FAILURE] ${scheduler.lastError.code}`), { code: scheduler.lastError.code, name: "SessionContinuityError" });
             settleEpochFailure(failure);
             break;
           }
@@ -372,9 +371,10 @@ function createSessionContinuity(options = {}) {
     // Never open a fresh inert epoch with no writer.
     if (scheduler.lastError !== null && !scheduler.writing &&
         scheduler.epochSettled && scheduler.dirty) {
-      const failure = new Error(`[PERSIST_FAILURE] ${scheduler.lastError.code}`);
-      failure.name = "SessionContinuityError";
-      failure.code = scheduler.lastError.code;
+      const failure = scheduler.lastError.error || Object.assign(new Error(`[PERSIST_FAILURE] ${scheduler.lastError.code}`), {
+        name: "SessionContinuityError",
+        code: scheduler.lastError.code
+      });
       return Promise.reject(failure);
     }
     if (scheduler.epochSettled && !scheduler.dirty && !scheduler.writing) {
@@ -412,9 +412,10 @@ function createSessionContinuity(options = {}) {
     ensureWriter();
     await openEpoch();
     if (scheduler.lastError !== null && scheduler.dirty) {
-      const error = new Error(`[PERSIST_FAILURE] ${scheduler.lastError.code}`);
-      error.name = "SessionContinuityError";
-      error.code = scheduler.lastError.code;
+      const error = scheduler.lastError.error || Object.assign(new Error(`[PERSIST_FAILURE] ${scheduler.lastError.code}`), {
+        name: "SessionContinuityError",
+        code: scheduler.lastError.code
+      });
       throw error;
     }
     return Object.freeze({ persisted: true, savedAt: persistedGeneration });
@@ -923,11 +924,12 @@ function createSessionContinuity(options = {}) {
           }
           flushed = Object.freeze({ persisted: true, savedAt: persistedGeneration });
         } catch (error) {
-          flushed = Object.freeze({ failed: true, code: error?.code ?? "PERSIST_FAILURE" });
+          flushed = Object.freeze({ failed: true, code: error?.code ?? "PERSIST_FAILURE", error, message: error?.message });
           // DSC-R2-003: settle any still-open epoch deterministically.
-          const failure = new Error(`[PERSIST_FAILURE] ${error?.code ?? "PERSIST_FAILURE"}`);
-          failure.name = "SessionContinuityError";
-          failure.code = error?.code ?? "PERSIST_FAILURE";
+          const failure = error instanceof Error ? error : Object.assign(new Error(`[PERSIST_FAILURE] ${error?.code ?? "PERSIST_FAILURE"}`), {
+            name: "SessionContinuityError",
+            code: error?.code ?? "PERSIST_FAILURE"
+          });
           settleEpochFailure(failure);
         }
         shutDown = true;

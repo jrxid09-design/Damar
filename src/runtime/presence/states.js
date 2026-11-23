@@ -14,6 +14,7 @@ const LIFECYCLE = Object.freeze({
     DORMANT: "DORMANT",
     AWAKE: "AWAKE",
     ACTIVE: "ACTIVE",
+    ON_HOLD: "ON_HOLD",
     WAITING_FOR_OWNER: "WAITING_FOR_OWNER",
     DEGRADED: "DEGRADED",
     RECOVERING: "RECOVERING",
@@ -93,7 +94,9 @@ const CAUSE = Object.freeze({
     SHUTDOWN_REQUEST: "SHUTDOWN_REQUEST",
     PROCESS_EXIT: "PROCESS_EXIT",
     FATAL_FAILURE: "FATAL_FAILURE",
-    GENERATION_ADVANCED: "GENERATION_ADVANCED"
+    GENERATION_ADVANCED: "GENERATION_ADVANCED",
+    LIFECYCLE_HOLD: "LIFECYCLE_HOLD",
+    LIFECYCLE_RESUME: "LIFECYCLE_RESUME"
 });
 
 /**
@@ -180,6 +183,29 @@ function buildEdges() {
     ]);
     add(LIFECYCLE.WAITING_FOR_OWNER, LIFECYCLE.RECOVERING, [CAUSE.RECOVERY_STARTED]);
     add(LIFECYCLE.WAITING_FOR_OWNER, LIFECYCLE.FAILED, [CAUSE.FATAL_FAILURE]);
+
+    // ---- ON_HOLD: instance hidup, pasif, ditahan. ----
+    // ON_HOLD sengaja TIDAK masuk ALIVE_STATES: itu himpunan state yang
+    // boleh masuk DEGRADED dan diturunkan target pulihnya secara otomatis.
+    // Instance yang ditahan bersifat pasif, jadi degradation tidak boleh
+    // menariknya keluar dari ON_HOLD di belakang perintah RESUME.
+    //
+    // HOLD hanya sah dari state hidup yang interaktif. RESUME hanya sah
+    // dari ON_HOLD dan hanya kembali ke DORMANT — keadaan pasif/idle siap,
+    // bukan AWAKE/ACTIVE. Jadi RESUME tidak pernah mengarang kehadiran,
+    // dan START/BOOT tetap berbeda dari RESUME.
+    for (const from of [
+        LIFECYCLE.DORMANT,
+        LIFECYCLE.AWAKE,
+        LIFECYCLE.ACTIVE,
+        LIFECYCLE.WAITING_FOR_OWNER
+    ]) {
+        add(from, LIFECYCLE.ON_HOLD, [CAUSE.LIFECYCLE_HOLD]);
+    }
+    add(LIFECYCLE.ON_HOLD, LIFECYCLE.DORMANT, [CAUSE.LIFECYCLE_RESUME]);
+    // Shutdown harus selalu bisa menjangkau instance yang ditahan; menahan
+    // bukan hak veto atas penghentian.
+    add(LIFECYCLE.ON_HOLD, LIFECYCLE.SHUTTING_DOWN, [CAUSE.SHUTDOWN_REQUEST]);
 
     // Degradasi dari state hidup: presence merepresentasikan kegagalan
     // tanpa menyelesaikannya. BOOTING/INITIALIZING mencatat alasan saja

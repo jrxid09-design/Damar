@@ -431,7 +431,7 @@ function composeActionAuthorityRuntime({
         ...extra
     });
 
-    async function evaluateGate(intent, authSession) {
+    async function evaluateGate(intent, authSession, { confirmationEvidence = null, consumeConfirmation = false } = {}) {
         if (!intent || typeof intent !== "object" ||
             typeof intent.intentId !== "string" ||
             typeof intent.capabilityId !== "string" ||
@@ -497,6 +497,7 @@ function composeActionAuthorityRuntime({
                 action: operation,
                 scope,
                 purpose: intent.purpose ?? null,
+                intent, confirmationEvidence, consumeConfirmation,
                 identity: { channel, sessionId, principal },
                 nowMs: evaluatedAtMs
             }, { nowMs: evaluatedAtMs });
@@ -517,7 +518,8 @@ function composeActionAuthorityRuntime({
                     capabilityId,
                     capabilityIncarnationId: currentIncarnation,
                     operation,
-                    evaluatedAtMs
+                    evaluatedAtMs,
+                    confirmationRequirement: authResult.confirmationRequirement
                 });
             }
             const reason = mapAuthorityReason(authResult.reasonCode);
@@ -555,7 +557,7 @@ function composeActionAuthorityRuntime({
     // callback, NO internals) ----
     return Object.freeze({
         admit,
-        evaluate: (intent, authSession) => evaluateGate(intent, authSession)
+        evaluate: (intent, authSession, options) => evaluateGate(intent, authSession, options)
     });
 }
 
@@ -802,7 +804,7 @@ function prepareCanonicalExecution(entry = {}) {
         if (typeof audit !== "function") return { ok: false, reason: "DURABLE_AUDIT_UNAVAILABLE" };
         audit({
             eventType: "action.execution.reserve",
-            source: "canonicalAction",
+            source: "canonical.action",
             metadata: {
                 digest: String(entry.digest ?? "").slice(0, 128),
                 capabilityId: String(entry.capabilityId ?? "").slice(0, 256),
@@ -824,7 +826,7 @@ function acknowledgeCanonicalExecution(entry = {}) {
         if (typeof audit !== "function") return { ok: false, reason: "AUDIT_GATE_UNAVAILABLE" };
         const record = audit({
             eventType: "action.execution.ack",
-            source: "canonicalAction",
+            source: "canonical.action",
             metadata: {
                 digest: String(entry.digest ?? "").slice(0, 128),
                 capabilityId: String(entry.capabilityId ?? "").slice(0, 256),
@@ -836,9 +838,13 @@ function acknowledgeCanonicalExecution(entry = {}) {
             }
         });
         const metadata = record?.metadata;
+        // The effect digest is recorded but NOT echo-verifiable: the ledger's
+        // own redaction policy replaces any bare 40+ alphanumeric metadata
+        // value (src/runtime/auditLedger/redact.js, long-base64 pattern) with
+        // "[REDACTED]", so a sha256 digest never comes back verbatim. The
+        // acknowledgement is verified on the fields the ledger preserves.
         const matches = record?.eventType === "action.execution.ack" &&
-            record?.source === "canonicalAction" &&
-            metadata?.digest === String(entry.digest ?? "") &&
+            record?.source === "canonical.action" &&
             metadata?.executionId === String(entry.executionId ?? "") &&
             metadata?.operation === String(entry.operation ?? "");
         if (!matches) return { ok: false, reason: "AUDIT_ACK_RECORD_MISMATCH" };
@@ -1659,6 +1665,7 @@ function composeDispatcher3({
         let metadata;
         let timeoutOption;
         let signalOption;
+        let confirmationEvidence;
         try {
             for (const key of CALLER_EXECUTOR_KEYS3) {
                 if (Object.prototype.hasOwnProperty.call(p, key) && p[key] !== undefined) {
@@ -1678,6 +1685,7 @@ function composeDispatcher3({
             metadata = p.metadata;
             timeoutOption = p.timeoutMs;
             signalOption = p.signal;
+            confirmationEvidence = p.confirmationEvidence ?? null;
         } catch (e) {
             if (e && typeof e.reasonCode === "string") throw e;
             throw fail3(REASONS3.MALFORMED_REQUEST, "request options are unreadable");
@@ -1708,7 +1716,8 @@ function composeDispatcher3({
         const lifecycle = createLifecycleTracker3(LIFECYCLE3.CREATED);
         // Downstream reads this sanitized bag, never the caller's object: a
         // stateful getter cannot throw on a second read.
-        const safeBag = Object.freeze({ intent, authSession, parameters, metadata, timeoutMs: timeoutOption, signal: signalOption });
+        const safeBag = Object.freeze({ intent, authSession, parameters, metadata, timeoutMs: timeoutOption, signal: signalOption,
+            confirmationEvidence });
 
         let provisionalRequest;
         try {
@@ -1731,6 +1740,12 @@ function composeDispatcher3({
         }
 
         const contentKey = computeContentKey3(intent, authSession, parameters, metadata);
+        if (safeBag.confirmationEvidence !== null) {
+            const { canonicalJson } = require("../authority/canonical");
+            if (canonicalJson(provisionalRequest.parameters) !== canonicalJson(intent.arguments)) {
+                throw fail3(REASONS3.MALFORMED_REQUEST, "HC execution parameters must match the confirmed intent exactly");
+            }
+        }
         if (inFlight.has(contentKey)) {
             return inFlight.get(contentKey).promise;
         }
@@ -1757,7 +1772,9 @@ function composeDispatcher3({
 
         let freshDecision;
         try {
-            freshDecision = await lane2Facade.evaluate(intent, authSession);
+            freshDecision = await lane2Facade.evaluate(intent, authSession, {
+                confirmationEvidence: p.confirmationEvidence, consumeConfirmation: true
+            });
         } catch (e) {
             lifecycle.advance(LIFECYCLE3.FAILED, canonicalClockNow3());
             const result = buildExecutionResult3({
@@ -2409,6 +2426,30 @@ function getCanonicalAvailableCapabilityIds() {
 }
 
 /**
+ * W5-CLI T2 audit P3-3: the published READ-ONLY capability discovery port.
+ *
+ * Surfaces (`cliSessionBridge`, nodes) must be able to advertise what the
+ * canonical registry holds WITHOUT reaching into private registry internals.
+ * Returns a detached, deeply frozen catalogue of descriptors — no registry
+ * object, no mutation path, no caller-suppliable input; composition runs
+ * first so discovery always reflects the canonical registry.
+ */
+function getCanonicalCapabilityCatalog() {
+    createCanonicalActionFacade();
+    if (!canonicalCapabilityRegistry) return Object.freeze([]);
+    return Object.freeze(
+        canonicalCapabilityRegistry.list().map((d) => Object.freeze({
+            capabilityId: String(d.id ?? "").slice(0, 256),
+            kind: String(d.kind ?? "").slice(0, 64),
+            availability: String(d.availability ?? "UNKNOWN").slice(0, 32),
+            operations: Object.freeze(Array.isArray(d.operations)
+                ? d.operations.map((o) => String(o).slice(0, 128)).slice(0, 64)
+                : [])
+        }))
+    );
+}
+
+/**
  * Internal production composition seam for the canonical descriptive V1
  * registry. This is not on the public action facade and remains
  * non-enumerable; it is used only by the trusted same-process composition.
@@ -2422,6 +2463,7 @@ module.exports = {
     createCanonicalActionFacade,
     createCanonicalActuationFacade,
     createCanonicalVerificationFacade,
+    getCanonicalCapabilityCatalog,
     PRIVILEGED_KEYS
 };
 

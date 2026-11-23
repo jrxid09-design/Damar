@@ -503,29 +503,14 @@ function createMemoryAuthorityStore() {
 
 function createSqliteAuthorityStore(database) {
 
-    // Transaksi pada SATU koneksi harus serial — antrean in-process
-    // menjamin BEGIN IMMEDIATE tidak pernah tumpang tindih dengan
-    // statement lain dari registry yang berjalan konkuren.
-    let txChain = Promise.resolve();
-
-    function tx(work) {
-        const run = txChain.then(() => rawTx(work));
-        txChain = run.then(() => {}, () => {});
-        return run;
-    }
-
-    async function rawTx(work) {
-        await database.exec("BEGIN IMMEDIATE");
-        try {
-            const result = await work();
-            await database.exec("COMMIT");
-            return result;
-        }
-        catch (error) {
-            try { await database.exec("ROLLBACK"); } catch {}
-            throw error;
-        }
-    }
+    // TRANSACTION OWNERSHIP (HC-TX-MIGRATION): Database owns
+    // BEGIN IMMEDIATE / COMMIT / ROLLBACK via database.transaction().
+    // This store owns transaction BODY only. Serialization, poison tracking,
+    // and connection lifecycle are delegated to Database's gate queue.
+    //
+    // Policy DENY uses the rollbackResult sentinel: throw inside the callback
+    // triggers Database's ROLLBACK, and the .catch() unwraps the sentinel so
+    // the caller receives a structured denial, not an infrastructure error.
 
     async function reservationsFor(parentCapabilityId) {
         const r = await database.get(
@@ -546,25 +531,30 @@ function createSqliteAuthorityStore(database) {
      * Validasi konservasi terhadap SEMUA leluhur finite sampai root
      * (lihat memori backend untuk semantik lengkap).
      */
-    async function ancestorIntegrityViolation(startCapabilityId) {
+    async function ancestorIntegrityViolation(startCapabilityId, tx) {
         let cursor = startCapabilityId;
         let hops = 0;
         while (cursor && hops++ < 64) {
-            const row = await database.get(
+            const row = await tx.get(
                 `SELECT payload FROM authority_capabilities
                   WHERE capability_id=?`, [cursor]);
             if (!row) break;
             const nodePayload = JSON.parse(row.payload);
             const max = nodePayload?.maxExecutions;
             if (typeof max === "number") {
-                const used = await usedFor(cursor);
-                const reserved = await reservationsFor(cursor);
-                if (used + reserved > max) {
+                const usedN = await tx.get(
+                    `SELECT COUNT(*) AS n FROM capability_consumption
+                      WHERE capability_id=?`, [cursor]);
+                const reserved = await tx.get(
+                    `SELECT COALESCE(SUM(amount),0) AS total
+                       FROM capability_delegations
+                      WHERE parent_capability_id=?`, [cursor]);
+                if (usedN.n + reserved.total > max) {
                     return { ok: false,
                              reasonCode: "CAP_DELEGATION_BUDGET_EXHAUSTED",
                              detail:
                                  `inkonservasi anggaran pada '${cursor}': ` +
-                                 `terpakai ${used} + reservasi ${reserved} ` +
+                                 `terpakai ${usedN.n} + reservasi ${reserved.total} ` +
                                  `> ${max}` };
                 }
             }
@@ -576,12 +566,43 @@ function createSqliteAuthorityStore(database) {
     function rollbackResult(value) {
         // Melempar sentinel internal untuk membatalkan transaksi tanpa
         // mengubah hasil jadi exception bagi pemanggil.
+        // POLICY_DENY != TX_CALLBACK_FAILURE: the sentinel is caught by
+        // the .catch() after database.transaction() and unwrapped into a
+        // structured denial result. Database sees a throw (triggers ROLLBACK)
+        // but the caller never sees an infrastructure error.
         const err = new Error("__TX_DENY__");
         err.txDeny = value;
         return err;
     }
 
-    return {
+    function mapTxError(error) {
+        if (error && error.txDeny) return error.txDeny;
+        if (error?.code === "DB_TX_ROLLBACK_FAILED") {
+            const err = new Error("AUTHORITY_TX_ROLLBACK_FAILED: ROLLBACK gagal; state transaksi tidak terbukti bersih");
+            err.code = "AUTHORITY_TX_ROLLBACK_FAILED";
+            err.cause = error.cause ?? error;
+            err.originalError = error.callbackError ?? error;
+            throw err;
+        }
+        if (error?.code === "DB_POISONED" || database.gate?.poisonError) {
+            const err = new Error("AUTHORITY_TX_POISONED: koneksi tidak terbukti bersih; buka ulang store");
+            err.code = "AUTHORITY_TX_POISONED";
+            err.cause = database.gate?.poisonError ?? error;
+            throw err;
+        }
+        throw error;
+    }
+
+    function assertUsable() {
+        if (database.gate?.poisonError) {
+            const err = new Error("AUTHORITY_TX_POISONED: koneksi tidak terbukti bersih; buka ulang store");
+            err.code = "AUTHORITY_TX_POISONED";
+            err.cause = database.gate.poisonError;
+            throw err;
+        }
+    }
+
+    const api = {
         backend: "sqlite",
 
         async upsertCapability(id, status, generation, payload) {
@@ -719,13 +740,14 @@ function createSqliteAuthorityStore(database) {
             return rows;
         },
 
-        /** ATOMIK: ratifikasi one-shot + grant + event (§E/§F/§tx). */
+        /** ATOMIK: ratifikasi one-shot + grant + event (§E/§F/§tx).
+         *  Database owns BEGIN/COMMIT/ROLLBACK via database.transaction(). */
         issueRootGrantAtomic({ capabilityId, status, generation, payload,
                                ratificationId, expectProposalDigest,
                                expectProposalRevision,
                                expectApprovedAuthorityDigest, events }) {
-            return tx(async () => {
-                const r = await database.get(
+            return database.transaction(async (tx) => {
+                const r = await tx.get(
                     `SELECT decision,payload FROM owner_ratifications
                       WHERE ratification_id=?`, [ratificationId]);
                 const rp = r ? JSON.parse(r.payload) : null;
@@ -750,7 +772,7 @@ function createSqliteAuthorityStore(database) {
                         detail: "binding ratifikasi tidak cocok (stale/tamper)" });
                 }
 
-                const existing = await database.get(
+                const existing = await tx.get(
                     `SELECT status FROM authority_capabilities
                       WHERE capability_id=?`, [capabilityId]);
                 const conflict =
@@ -758,7 +780,7 @@ function createSqliteAuthorityStore(database) {
                 if (conflict) throw rollbackResult(conflict);
 
                 const normalized = normalizeCapabilityPayload(payload);
-                await database.run(
+                await tx.run(
                     `INSERT INTO authority_capabilities
                        (capability_id,status,subject,generation,payload)
                      VALUES (?,?,?,?,?)`,
@@ -767,13 +789,13 @@ function createSqliteAuthorityStore(database) {
 
                 rp.consumedAt = new Date().toISOString();
                 rp.consumedByCapabilityId = capabilityId;
-                await database.run(
+                await tx.run(
                     `UPDATE owner_ratifications SET payload=?
                       WHERE ratification_id=?`,
                     [JSON.stringify(rp), ratificationId]);
 
                 for (const e of events ?? []) {
-                    await database.run(
+                    await tx.run(
                         `INSERT INTO capability_events
                            (event_id,type,capability_id,actor,at,payload)
                          VALUES (?,?,?,?,?,?)`,
@@ -782,10 +804,7 @@ function createSqliteAuthorityStore(database) {
                          JSON.stringify(e.payload ?? {})]);
                 }
                 return { ok: true };
-            }).catch(error => {
-                if (error && error.txDeny) return error.txDeny;
-                throw error;
-            });
+            }).catch(mapTxError);
         },
 
         /** ATOMIK: revalidasi parent + reservasi + child + event. */
@@ -794,8 +813,8 @@ function createSqliteAuthorityStore(database) {
                               parentCapabilityId,
                               expectParentGeneration,
                               reserveAmount, events }) {
-            return tx(async () => {
-                const parentRow = await database.get(
+            return database.transaction(async (tx) => {
+                const parentRow = await tx.get(
                     `SELECT status,generation,payload
                        FROM authority_capabilities WHERE capability_id=?`,
                     [parentCapabilityId]);
@@ -820,7 +839,7 @@ function createSqliteAuthorityStore(database) {
                         detail: "parent bergeneration saat commit" });
                 }
 
-                const reservedRow = await database.get(
+                const reservedRow = await tx.get(
                     `SELECT COALESCE(SUM(amount),0) AS total
                        FROM capability_delegations
                       WHERE parent_capability_id=?`,
@@ -833,8 +852,10 @@ function createSqliteAuthorityStore(database) {
                     const parentMax =
                         JSON.parse(parentRow.payload).maxExecutions;
                     if (typeof parentMax === "number") {
-                        const used = await usedFor(parentCapabilityId);
-                        const remaining = parentMax - used - reserved;
+                        const usedRow = await tx.get(
+                            `SELECT COUNT(*) AS n FROM capability_consumption
+                              WHERE capability_id=?`, [parentCapabilityId]);
+                        const remaining = parentMax - usedRow.n - reserved;
                         if (reserveAmount > remaining) {
                             throw rollbackResult({
                                 ok: false,
@@ -843,7 +864,7 @@ function createSqliteAuthorityStore(database) {
                                 detail:
                                     `delegable budget habis di ` +
                                     `'${parentCapabilityId}': terpakai ` +
-                                    `${used} + reservasi ${reserved} / ` +
+                                    `${usedRow.n} + reservasi ${reserved} / ` +
                                     `${parentMax}, diminta ` +
                                     `${reserveAmount}` });
                         }
@@ -851,11 +872,11 @@ function createSqliteAuthorityStore(database) {
                     // Invarian konservasi terhadap SEMUA leluhur finite
                     // sampai root, dalam transaksi yang sama.
                     const integ = await ancestorIntegrityViolation(
-                        parentCapabilityId);
+                        parentCapabilityId, tx);
                     if (integ) throw rollbackResult(integ);
                 }
 
-                const dup = await database.get(
+                const dup = await tx.get(
                     `SELECT capability_id FROM authority_capabilities
                       WHERE capability_id=?`, [childCapabilityId]);
                 if (dup) {
@@ -865,14 +886,14 @@ function createSqliteAuthorityStore(database) {
                 }
 
                 const normalized = normalizeCapabilityPayload(childPayload);
-                await database.run(
+                await tx.run(
                     `INSERT INTO authority_capabilities
                        (capability_id,status,subject,generation,payload)
                      VALUES (?,?,?,?,?)`,
                     [childCapabilityId, childStatus, normalized.subject,
                      childGeneration, JSON.stringify(normalized)]);
 
-                await database.run(
+                await tx.run(
                     `INSERT INTO capability_delegations
                        (child_capability_id,parent_capability_id,amount,at)
                      VALUES (?,?,?,?)`,
@@ -881,7 +902,7 @@ function createSqliteAuthorityStore(database) {
                      new Date().toISOString()]);
 
                 for (const e of events ?? []) {
-                    await database.run(
+                    await tx.run(
                         `INSERT INTO capability_events
                            (event_id,type,capability_id,actor,at,payload)
                          VALUES (?,?,?,?,?,?)`,
@@ -890,16 +911,13 @@ function createSqliteAuthorityStore(database) {
                          JSON.stringify(e.payload ?? {})]);
                 }
                 return { ok: true, reservedTotal: reserved };
-            }).catch(error => {
-                if (error && error.txDeny) return error.txDeny;
-                throw error;
-            });
+            }).catch(mapTxError);
         },
 
         /** ATOMIK anti-TOCTOU: revalidasi penuh + ledger + event. */
         consumeExecutionAtomic({ capabilityId, at, meta, nowMs }) {
-            return tx(async () => {
-                const row = await database.get(
+            return database.transaction(async (tx) => {
+                const row = await tx.get(
                     `SELECT status,generation,payload
                        FROM authority_capabilities WHERE capability_id=?`,
                     [capabilityId]);
@@ -910,17 +928,19 @@ function createSqliteAuthorityStore(database) {
 
                 let curGen;
                 if (capEntry) {
-                    const g = await database.get(
+                    const g = await tx.get(
                         `SELECT generation FROM subject_generations
                           WHERE subject=?`, [capEntry.payload?.subject]);
                     curGen = g ? g.generation : 0;
                 }
 
-                const usedRow = await database.get(
+                const usedRow = await tx.get(
                     `SELECT COUNT(*) AS n FROM capability_consumption
                       WHERE capability_id=?`, [capabilityId]);
-                const outstandingReservations =
-                    await reservationsFor(capabilityId);
+                const outstandingReservations = (await tx.get(
+                    `SELECT COALESCE(SUM(amount),0) AS total
+                       FROM capability_delegations
+                      WHERE parent_capability_id=?`, [capabilityId])).total;
 
                 const verdict = evaluateConsumption({
                     capEntry, used: usedRow.n,
@@ -933,7 +953,7 @@ function createSqliteAuthorityStore(database) {
                 }
 
                 const cid = uuid();
-                await database.run(
+                await tx.run(
                     `INSERT INTO capability_consumption
                        (consumption_id,capability_id,at,meta)
                      VALUES (?,?,?,?)`,
@@ -946,10 +966,10 @@ function createSqliteAuthorityStore(database) {
                     newUsed + Math.max(0, outstandingReservations) >= max;
 
                 if (exhausted) {
-                    await database.run(
+                    await tx.run(
                         `UPDATE authority_capabilities SET status='EXHAUSTED'
                           WHERE capability_id=?`, [capabilityId]);
-                    await database.run(
+                    await tx.run(
                         `INSERT INTO capability_events
                            (event_id,type,capability_id,actor,at,payload)
                          VALUES (?,?,?,?,?,?)`,
@@ -959,7 +979,7 @@ function createSqliteAuthorityStore(database) {
                 }
 
                 const ev = consumptionEvent(capabilityId, at, newUsed, cid);
-                await database.run(
+                await tx.run(
                     `INSERT INTO capability_events
                        (event_id,type,capability_id,actor,at,payload)
                      VALUES (?,?,?,?,?,?)`,
@@ -968,12 +988,19 @@ function createSqliteAuthorityStore(database) {
 
                 return { ok: true, used: newUsed, consumptionId: cid,
                          exhausted, maxExecutions: max };
-            }).catch(error => {
-                if (error && error.txDeny) return error.txDeny;
-                throw error;
-            });
+            }).catch(mapTxError);
         }
     };
+
+    const guarded = {};
+    for (const [name, fn] of Object.entries(api)) {
+        if (typeof fn !== "function") { guarded[name] = fn; continue; }
+        guarded[name] = async (...args) => {
+            assertUsable();
+            return fn.apply(guarded, args);
+        };
+    }
+    return guarded;
 }
 
 module.exports = {

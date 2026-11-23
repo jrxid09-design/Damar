@@ -45,6 +45,21 @@ function invalid(message) {
     return fail("PID_INVALID_SERIALIZATION", message);
 }
 
+function commitRefusal(result) {
+    const commit = result?.verification?.checks?.find((check) => check?.name === "snapshot-commit-succeeded");
+    const driverCode = typeof commit?.code === "string" ? commit.code : null;
+    if (driverCode === "PID_SNAPSHOT_STALE") {
+        const error = fail("PID_SNAPSHOT_CONFLICT", "snapshot identitas berubah sebelum commit; muat ulang state kanonik lalu coba lagi");
+        error.retryable = true;
+        error.causeCode = driverCode;
+        return error;
+    }
+    if (driverCode === "PID_SNAPSHOT_BUSY") {
+        return fail("PID_SNAPSHOT_BUSY", "snapshot identitas sedang dikunci oleh writer lain");
+    }
+    return invalid(`snapshot identitas ditolak: ${driverCode ?? result?.reason ?? result?.outcome ?? "UNKNOWN"}`);
+}
+
 /**
  * createFileIdentityStore(filePath, options)
  *
@@ -65,30 +80,12 @@ function createFileIdentityStore(filePath, options = {}) {
         throw new TypeError("file identity store requires the Manager-owned capability runtime");
     }
 
-    // In-process write queue: overlapping saves never interleave.
-    let writing = false;
-    const queue = [];
-
-    /**
-     * TF-007 cleanup helper: remove a leftover tmp file on failure so a
-     * failed save never leaves orphan debris behind.
-     */
-    async function drain() {
-        if (writing) return;
-        writing = true;
-        try {
-            while (queue.length > 0) {
-                const payload = queue.shift();
-                const result = await capabilityRuntime.execute({
-                    capabilityId: CAPABILITY_ID, operation: "save",
-                    parameters: { filePath, payload, fsync }
-                });
-                if (result?.outcome !== "EXECUTED_VERIFIED") {
-                    throw invalid(`snapshot identitas ditolak: ${result?.reason ?? result?.outcome ?? "UNKNOWN"}`);
-                }
-            }
-        } finally { writing = false; }
-    }
+    // In-process write queue: overlapping saves never interleave (FIFO), and
+    // each caller settles on ITS OWN commit (P3-3). A shared last-result slot
+    // could hand one caller another save's revision, or another save's
+    // refusal — and a refusal must poison exactly the service that issued the
+    // stale write, never a sibling writer.
+    let tail = Promise.resolve();
 
     /** Validate the envelope shape of a loaded snapshot (content is
      *  validated fail-closed by DeviceIdentityService.restore()). */
@@ -118,9 +115,19 @@ function createFileIdentityStore(filePath, options = {}) {
             }
             // Copy + write atomically; tmp+rename guards against torn writes.
             const payload = JSON.stringify(structuredCopy(serialized));
-            queue.push(payload);
-            await drain();
-            return true;
+            const commit = tail.then(async () => {
+                const result = await capabilityRuntime.execute({
+                    capabilityId: CAPABILITY_ID, operation: "save",
+                    parameters: { filePath, payload, fsync }
+                });
+                if (result?.outcome !== "EXECUTED_VERIFIED") throw commitRefusal(result);
+                return result.result ?? result;
+            });
+            // Keep the queue alive across a refusal: the next save still runs,
+            // but the refusal belongs only to the caller that issued it.
+            tail = commit.then(() => undefined, () => undefined);
+            const result = await commit;
+            return { snapshotRevision: result?.snapshotRevision ?? JSON.parse(payload).snapshotRevision };
         },
 
         /** Load the last durable snapshot (deep-copied) or null if none. */

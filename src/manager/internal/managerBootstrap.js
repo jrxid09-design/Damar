@@ -333,6 +333,17 @@ function composeManagerInternal({
     // ---- Duplicate-request orchestration guard (PROCESS-LOCAL; Lane 3
     // remains the final actuation duplicate boundary).
     const inFlightByCorrelation = new Map();
+    const suspendedByToken = new Map();
+    const suspendedByCorrelation = new Map();
+    function releaseSuspension(pending) {
+        suspendedByToken.delete(pending.continuationId);
+        suspendedByCorrelation.delete(pending.request.correlationId);
+    }
+    function sweepSuspensions() {
+        for (const pending of suspendedByToken.values()) {
+            if (canonicalNow() >= pending.requirement.expiresAtMs) releaseSuspension(pending);
+        }
+    }
     const MAX_ACTIVE = MBOUNDS.MAX_ACTIVE_REQUESTS;
 
     function canonicalNow() {
@@ -570,12 +581,14 @@ function composeManagerInternal({
         request, lifecycleState, outcome, detail = "",
         authorityEvidence = null, actionIntentId = null, executionId = null,
         verificationId = null, compensationId = null, evidenceSummary = null,
-        errorReason = "", startedAtMs, completedAtMs
+        errorReason = "", startedAtMs, completedAtMs,
+        confirmationRequirement = null, continuationId = null
     }) {
         const result = deepFreezeM({
             schemaVersion: MRES_SCHEMA,
             managerRequestId: request.requestId,
             actionIntentId,
+            ...(confirmationRequirement === null ? {} : { confirmationRequirement, continuationId }),
             authorityEvidence: authorityEvidence === null ? null : deepFreezeM({
                 decision: authorityEvidence.decision ?? null,
                 reasonCode: authorityEvidence.reasonCode ?? null,
@@ -618,6 +631,10 @@ function composeManagerInternal({
 
         // DUPLICATE ORCHESTRATION GUARD (process-local): same correlation in
         // flight reuses the SAME lifecycle promise (no duplicate dispatch).
+        sweepSuspensions();
+        if (suspendedByCorrelation.has(request.correlationId)) {
+            return suspendedByCorrelation.get(request.correlationId).result;
+        }
         if (inFlightByCorrelation.has(request.correlationId)) {
             return inFlightByCorrelation.get(request.correlationId).promise;
         }
@@ -811,6 +828,27 @@ function composeManagerInternal({
             reasonCode: decision?.reasonCode ?? null,
             evaluatedAtMs: now()
         };
+        if (decision?.decision === DECISION_L2.OWNER_CONFIRMATION_REQUIRED &&
+            require("../../authority/evaluate").isCanonicalConfirmationRequirement(decision.confirmationRequirement)) {
+            sweepSuspensions();
+            if (suspendedByToken.size >= 512) {
+                return formManagerResult({ request, lifecycleState: MLC.FAILED, outcome: MOUTCOME.FAILED,
+                    detail: "confirmation suspension capacity exhausted", startedAtMs, completedAtMs: now() });
+            }
+            const continuationId = crypto5.randomUUID();
+            entry.lifecycle = MLC.SUSPENDED;
+            const requirement = decision.confirmationRequirement;
+            const result = formManagerResult({ request, lifecycleState: MLC.SUSPENDED,
+                outcome: MOUTCOME.OWNER_CONFIRMATION_REQUIRED, actionIntentId: intent.intentId,
+                authorityEvidence, confirmationRequirement: requirement, continuationId,
+                detail: "explicit grant restriction requires per-intent Owner confirmation",
+                startedAtMs, completedAtMs: null });
+            const pending = { request, intent, proposal, entry, startedAtMs, signal,
+                principal: session.principal, requirement, continuationId, result };
+            suspendedByToken.set(continuationId, pending);
+            suspendedByCorrelation.set(request.correlationId, pending);
+            return result;
+        }
         if (!decision || decision.decision !== DECISION_L2.ALLOW) {
             // AUTHORITY DENIED: zero Lane 3 dispatch. The Manager never
             // returns ALLOW itself and never carries the decision forward as
@@ -825,6 +863,14 @@ function composeManagerInternal({
             });
         }
 
+        return executeAuthorizedAction({ request, intent, proposal, entry, startedAtMs, signal,
+            session, authorityEvidence });
+    }
+
+    async function executeAuthorizedAction({ request, intent, proposal, entry, startedAtMs, signal,
+        session, authorityEvidence, confirmationEvidence = null }) {
+        const now = () => canonicalNow();
+        const principal = session.principal;
         // ---- 7. LANE 3 ACTUATION (canonical fabric only) --------------------
         if (entry.cancelled || isAborted(signal)) {
             return formManagerResult({
@@ -845,11 +891,13 @@ function composeManagerInternal({
         // decision itself lives in dispatchActuation() (DB-02: extracted,
         // genuinely unprivileged — see its own header).
         const dispatch = await dispatchActuation({
-            wave6Adapter: capturedWave6,
+            // HC is scoped to the canonical local intent fabric. Distributed
+            // execution has no bound confirmation contract and stays closed.
+            wave6Adapter: confirmationEvidence === null ? capturedWave6 : null,
             intent,
             parameters: proposal.arguments ?? {},
             localExecute: () => capturedLane3.execute({
-                intent, authSession: session, parameters: proposal.arguments ?? {}
+                intent, authSession: session, parameters: proposal.arguments ?? {}, confirmationEvidence
             })
         });
         if (dispatch.outcome === "DISTRIBUTED_FAILED") {
@@ -1013,6 +1061,49 @@ function composeManagerInternal({
         });
     }
 
+    async function resumeConfirmation({ continuationId, authenticationEvidence, confirmationEvidence } = {}, { signal } = {}) {
+        sweepSuspensions();
+        const pending = suspendedByToken.get(continuationId);
+        if (!pending) throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "unknown, expired or consumed continuation");
+        // Token lookup is orchestration only. Fresh authentication and the
+        // canonical Gate still decide. A failed authentication cannot burn work.
+        let session = null;
+        try { session = capturedLane2.authenticate(authenticationEvidence); } catch { /* fail closed */ }
+        if (!session || session.principal !== pending.principal ||
+            session.sessionId !== pending.requirement.sessionId || session.channel !== pending.requirement.channel) {
+            throw mfail(MREASONS.AUTHENTICATION_REQUIRED, "continuation authentication binding mismatch");
+        }
+        // Claim before any await: concurrent resumes cannot both dispatch.
+        releaseSuspension(pending);
+        const { request, entry } = pending;
+        inFlightByCorrelation.set(request.correlationId, entry);
+        const promise = runConfirmationContinuation(pending, session, confirmationEvidence, signal);
+        entry.promise = promise;
+        try { return await promise; }
+        finally { inFlightByCorrelation.delete(request.correlationId); }
+    }
+
+    async function runConfirmationContinuation(pending, session, confirmationEvidence, signal) {
+        const { request, intent, proposal, entry, startedAtMs } = pending;
+        const continuationSignal = signal ?? pending.signal;
+        if (entry.cancelled || isAborted(pending.signal) || isAborted(continuationSignal)) {
+            return formManagerResult({ request, lifecycleState: MLC.CANCELLED, outcome: MOUTCOME.CANCELLED,
+                actionIntentId: intent.intentId, startedAtMs, completedAtMs: canonicalNow() });
+        }
+        let decision;
+        try { decision = await capturedLane2.evaluate(intent, session, { confirmationEvidence }); }
+        catch { decision = null; }
+        const authorityEvidence = { decision: decision?.decision ?? null,
+            reasonCode: decision?.reasonCode ?? null, evaluatedAtMs: canonicalNow() };
+        if (!decision || decision.decision !== DECISION_L2.ALLOW) {
+            return formManagerResult({ request, lifecycleState: MLC.FAILED, outcome: MOUTCOME.AUTHORITY_DENIED,
+                actionIntentId: intent.intentId, authorityEvidence, startedAtMs, completedAtMs: canonicalNow(),
+                detail: "current authority did not allow continuation", errorReason: MREASONS.AUTHORITY_DENIED });
+        }
+        return executeAuthorizedAction({ request, intent, proposal, entry, startedAtMs,
+            signal: continuationSignal, session, authorityEvidence, confirmationEvidence });
+    }
+
     function isAborted(signal) {
         return Boolean(signal && typeof signal === "object" && signal.aborted === true);
     }
@@ -1022,6 +1113,8 @@ function composeManagerInternal({
         const id = (requestOrId !== null && typeof requestOrId === "object")
             ? String(requestOrId.correlationId ?? "")
             : String(requestOrId ?? "");
+        const pending = suspendedByCorrelation.get(id);
+        if (pending) { pending.entry.cancelled = true; releaseSuspension(pending); return true; }
         const entry = inFlightByCorrelation.get(id);
         if (!entry) return false;
         entry.cancelled = true;
@@ -1032,6 +1125,7 @@ function composeManagerInternal({
         // least-privilege downstream surface
         handle,
         cancel,
+        resumeConfirmation,
 
         // PURE brand-recognition predicates — BRAND-FIRST, per-composition:
         // closure-only WeakSet membership decides before any property read.

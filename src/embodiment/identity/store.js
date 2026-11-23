@@ -32,7 +32,16 @@ function createMemoryIdentityStore() {
 
 async function persistIdentity(svc, store) {
     if (!store) throw fail("PID_NO_STORE", "tidak ada store terpasang");
-    return store.save(svc.serialize());
+    let result;
+    try { result = await store.save(svc.serialize()); }
+    catch (error) {
+        // The service has already applied its local mutation. It must not be
+        // reused for trust-sensitive work until a canonical durable reload.
+        if (typeof svc.invalidatePersistence === "function") svc.invalidatePersistence();
+        throw error;
+    }
+    if (result && Number.isSafeInteger(result.snapshotRevision) && typeof svc.acceptSnapshotRevision === "function") svc.acceptSnapshotRevision(result.snapshotRevision);
+    return result;
 }
 
 async function loadIdentity({ store, clock, config, entropy, body } = {}) {

@@ -66,8 +66,12 @@ class DeviceIdentityService {
         this._transactions = new Map();
         /** sessionId -> session */
         this._sessions = new Map();
+        /** Canonical CLI surface registrations; never grants device trust. */
+        this._surfaces = new Map();
         this._forgedSessionCount = 0;
         this._identityConflicts = 0;
+        this._snapshotRevision = 0;
+        this._persistencePoisoned = false;
         this.challenges = new ChallengeBroker({
             clock, entropy,
             config: {
@@ -86,6 +90,7 @@ class DeviceIdentityService {
      * display metadata never forks identity.
      */
     registerIdentity({ namespace, stableKey, displayName, deviceClass = "UNKNOWN", platform = null, metadata = null } = {}) {
+        this._assertPersistenceUsable();
         const deviceId = canonicalDeviceId({ namespace, stableKey });
         if (this._devices.has(deviceId)) {
             return { deviceId, created: false, identity: this.getIdentity(deviceId) };
@@ -121,6 +126,7 @@ class DeviceIdentityService {
      * Rename is metadata-only. Identity survives; duplicates allowed.
      */
     rename(deviceId, displayName) {
+        this._assertPersistenceUsable();
         const rec = this._mustGet(deviceId);
         rec.displayName = sanitizeDisplayName(displayName,
             this.config.maxDisplayNameLength);
@@ -129,6 +135,7 @@ class DeviceIdentityService {
     }
 
     setBodyRelation(deviceId, relation) {
+        this._assertPersistenceUsable();
         const rec = this._mustGet(deviceId);
         if (!BODY_RELATIONS[relation]) {
             throw fail("PID_UNKNOWN_BODY_RELATION", `relasi tubuh tak dikenal: '${relation}'`);
@@ -138,6 +145,7 @@ class DeviceIdentityService {
     }
 
     setPresence(deviceId, state) {
+        this._assertPersistenceUsable();
         const rec = this._mustGet(deviceId);
         if (!PRESENCE_STATES[state]) {
             throw fail("PID_UNKNOWN_PRESENCE", `presensi tak dikenal: '${state}'`);
@@ -153,6 +161,7 @@ class DeviceIdentityService {
      * what a device CLAIMS to have — it grants nothing.
      */
     observeCapabilities(deviceId, names) {
+        this._assertPersistenceUsable();
         const rec = this._mustGet(deviceId);
         if (!Array.isArray(names)) {
             throw fail("PID_INVALID_CAPABILITY_LIST", "daftar kemampuan wajib array");
@@ -172,6 +181,7 @@ class DeviceIdentityService {
 
     /** Step 1: owner-side intent. Issues a bound, short-lived challenge. */
     beginPairing(deviceId, { instancePublicKey = null } = {}) {
+        this._assertPersistenceUsable();
         this._sweepExpired();
         const rec = this._mustGet(deviceId);
         if (rec.pairingState === PAIRING_STATES.REVOKED) {
@@ -217,6 +227,7 @@ class DeviceIdentityService {
 
     /** Step 2: device proves possession of the challenge secret. */
     submitChallenge({ pairingId, challengeId, secret, instancePublicKey = null } = {}) {
+        this._assertPersistenceUsable();
         this._sweepExpired();
         const tx = this._mustGetTx(pairingId);
         if (tx.state !== "CHALLENGE_ISSUED") {
@@ -255,6 +266,7 @@ class DeviceIdentityService {
      * bindingDigest, history and trust state byte-identical.
      */
     ownerConfirm(pairingId, { actor = "owner" } = {}) {
+        this._assertPersistenceUsable();
         this._sweepExpired();
 
         /* ---- validation gate (read-only) ---- */
@@ -295,6 +307,7 @@ class DeviceIdentityService {
     }
 
     cancelPairing(pairingId, { reason = "cancelled" } = {}) {
+        this._assertPersistenceUsable();
         const tx = this._mustGetTx(pairingId);
         if (tx.state === "CONFIRMED") {
             throw fail("PID_ALREADY_CONFIRMED", "transaksi terkonfirmasi tidak dapat dibatalkan");
@@ -323,6 +336,7 @@ class DeviceIdentityService {
      * is zero-mutation by construction.
      */
     setTrust(deviceId, level) {
+        this._assertPersistenceUsable();
         const rec = this._mustGet(deviceId);
         if (!["PAIRED", "TRUSTED", "LIMITED"].includes(level)) {
             throw fail("PID_INVALID_TRUST_LEVEL",
@@ -343,6 +357,7 @@ class DeviceIdentityService {
      * other subsystem (Authority policy is a future layer's job).
      */
     revoke(deviceId, { reason = "revoked" } = {}) {
+        this._assertPersistenceUsable();
         const rec = this._mustGet(deviceId);
         if (!["PAIRED", "TRUSTED", "LIMITED"].includes(rec.pairingState)) {
             throw fail("PID_NOT_PAIRED",
@@ -362,6 +377,11 @@ class DeviceIdentityService {
             }
         }
         this._archive(rec, { kind: "REVOKED", reason: String(reason).slice(0, 120) });
+        for (const surface of this._surfaces.values()) {
+            if (surface.deviceId === deviceId && surface.status !== "REVOKED") {
+                surface.status = "REVOKED"; surface.revokedAtMs = this.clock.nowMs(); surface.registrationRevision++;
+            }
+        }
         return { deviceId, pairingState: rec.pairingState, sessionsClosed: closed };
     }
 
@@ -374,6 +394,7 @@ class DeviceIdentityService {
      * and never auto-bound.
      */
     openSession({ deviceId, bindingSecret, sessionId = null } = {}) {
+        this._assertPersistenceUsable();
         this._sweepExpired();
         const rec = this._mustGet(deviceId);
         if (!["PAIRED", "TRUSTED", "LIMITED"].includes(rec.pairingState)) {
@@ -408,6 +429,7 @@ class DeviceIdentityService {
     }
 
     closeSession(sessionId, { reason = "closed" } = {}) {
+        this._assertPersistenceUsable();
         const s = this._sessions.get(String(sessionId ?? ""));
         if (!s) throw fail("PID_SESSION_UNKNOWN", `sesi tidak dikenal: '${sessionId}'`);
         if (s.state === SESSION_STATES.ACTIVE) {
@@ -419,11 +441,13 @@ class DeviceIdentityService {
     }
 
     getSession(sessionId) {
+        this._assertPersistenceUsable();
         const s = this._sessions.get(String(sessionId ?? ""));
         return s ? frozenView({ ...s }) : null;
     }
 
     listSessions(deviceId) {
+        this._assertPersistenceUsable();
         return deepFreeze([...this._sessions.values()]
             .filter(s => !deviceId || s.deviceId === deviceId)
             .sort((a, b) => a.sessionId.localeCompare(b.sessionId))
@@ -433,6 +457,7 @@ class DeviceIdentityService {
     /* ------------------------------ queries ---------------------------- */
 
     getIdentity(deviceId) {
+        this._assertPersistenceUsable();
         this._sweepExpired();
         const rec = this._devices.get(deviceId);
         if (!rec) return null;
@@ -459,6 +484,7 @@ class DeviceIdentityService {
     }
 
     listIdentities(filter = {}) {
+        this._assertPersistenceUsable();
         return deepFreeze([...this._devices.keys()].sort()
             .map(id => this.getIdentity(id))
             .filter(v => v != null)
@@ -467,6 +493,7 @@ class DeviceIdentityService {
     }
 
     stats() {
+        this._assertPersistenceUsable();
         this._sweepExpired();
         const byPairingState = {};
         for (const s of Object.values(PAIRING_STATES)) byPairingState[s] = 0;
@@ -490,9 +517,33 @@ class DeviceIdentityService {
 
     /** Forensic view of a device's bounded pairing history. */
     history(deviceId) {
+        this._assertPersistenceUsable();
         const rec = this._mustGet(deviceId);
         return deepFreeze(structuredCopyList(rec.history));
     }
+
+    createPendingRegistration({ surfaceId, deviceId, ownerId, ownerGeneration, credentialRef, channel = "cli", sessionScope = "device" } = {}) {
+        this._assertPersistenceUsable();
+        if (typeof surfaceId !== "string" || !/^cli:[a-z0-9-]{3,80}$/i.test(surfaceId)) throw fail("PID_SURFACE_INVALID", "surfaceId invalid");
+        if (this._surfaces.has(surfaceId)) throw fail("PID_SURFACE_CONFLICT", "surface already exists");
+        const device = this._mustGet(deviceId);
+        if (device.pairingState === PAIRING_STATES.REVOKED) throw fail("PID_REVOKED", "device revoked");
+        if (typeof ownerId !== "string" || ownerId.length < 1 || !Number.isSafeInteger(ownerGeneration) || ownerGeneration < 0 || typeof credentialRef !== "string" || !/^[^\s:]+:[^\s]+$/.test(credentialRef) || channel !== "cli" || sessionScope !== "device" || !device.bindingDigest) throw fail("PID_SURFACE_INVALID", "owner binding invalid");
+        const rec = { surfaceId, surfaceType: "CLI", deviceId, ownerId, ownerGeneration, credentialRef, pairingRef: device.bindingDigest, status: "PENDING", registrationRevision: 1, allowedChannel: channel, sessionScope, createdAtMs: this.clock.nowMs(), revokedAtMs: null };
+        this._surfaces.set(surfaceId, rec); return deepFreeze({ ...rec });
+    }
+    readRegistration(surfaceId) { this._assertPersistenceUsable(); const r = this._surfaces.get(String(surfaceId)); return r ? deepFreeze({ ...r }) : null; }
+    listRegistrationsForDevice(deviceId) { this._assertPersistenceUsable(); return deepFreeze([...this._surfaces.values()].filter(r => r.deviceId === deviceId).map(r => ({ ...r }))); }
+    activateFromCanonicalPairing({ surfaceId, pairingRef, ownerId, ownerGeneration, revision } = {}) {
+        this._assertPersistenceUsable();
+        const r = this._surfaces.get(String(surfaceId)); if (!r || r.status !== "PENDING" || r.registrationRevision !== revision) throw fail("PID_SURFACE_STALE", "pending registration required");
+        const d = this._mustGet(r.deviceId); if (d.pairingState !== PAIRING_STATES.PAIRED || !d.bindingDigest || d.bindingDigest !== pairingRef || r.pairingRef !== pairingRef || r.ownerId !== ownerId || r.ownerGeneration !== ownerGeneration) throw fail("PID_SURFACE_UNVERIFIED", "canonical pairing evidence mismatch");
+        // Device pairing proves only device trust. OwnerTrust is intentionally
+        // not imported into this isolated aggregate; without its canonical
+        // verifier, ACTIVE promotion must fail closed.
+        throw fail("PID_SURFACE_OWNER_UNAVAILABLE", "canonical owner verification is required for CLI activation");
+    }
+    revokeRegistration({ surfaceId, revision } = {}) { this._assertPersistenceUsable(); const r = this._surfaces.get(String(surfaceId)); if (!r || r.registrationRevision !== revision) throw fail("PID_SURFACE_STALE", "registration revision mismatch"); r.status = "REVOKED"; r.revokedAtMs = this.clock.nowMs(); r.registrationRevision++; return deepFreeze({ ...r }); }
 
     /* --------------------------- persistence --------------------------- */
 
@@ -510,6 +561,10 @@ class DeviceIdentityService {
      * disagree.
      */
     serialize() {
+        // A poisoned aggregate may only be replaced by a canonical durable
+        // reload. Its in-memory rows are NOT the committed truth, so even the
+        // raw projection must never be published (or re-committed).
+        this._assertPersistenceUsable();
         const devices = [...this._devices.values()]
             .sort((a, b) => a.deviceId.localeCompare(b.deviceId))
             .map(r => {
@@ -536,11 +591,13 @@ class DeviceIdentityService {
             });
         return deepFreeze({
             version: 1,
+            snapshotRevision: this._snapshotRevision,
             devices,
             transactions: [...this._transactions.values()]
                 .filter(t => t.state === "CONFIRMED")
                 .map(t => ({ ...t }))
-                .sort((a, b) => a.pairingId.localeCompare(b.pairingId))
+                .sort((a, b) => a.pairingId.localeCompare(b.pairingId)),
+            surfaces: [...this._surfaces.values()].map(r => ({ ...r })).sort((a,b) => a.surfaceId.localeCompare(b.surfaceId))
         });
     }
 
@@ -558,6 +615,13 @@ class DeviceIdentityService {
                 "serialisasi tidak dikenal (version !== 1)");
         }
         const svc = new DeviceIdentityService({ clock, config, entropy, body });
+        // Absence is the only legacy form. An explicit malformed modern value
+        // must not be silently reinterpreted as revision zero.
+        if (Object.prototype.hasOwnProperty.call(data, "snapshotRevision") &&
+            (!Number.isSafeInteger(data.snapshotRevision) || data.snapshotRevision < 0)) {
+            throw fail("PID_INVALID_SERIALIZATION", "snapshotRevision tidak sah");
+        }
+        svc._snapshotRevision = data.snapshotRevision ?? 0;
         const staged = new Map();
 
         for (const [i, row] of (Array.isArray(data.devices) ? data.devices : []).entries()) {
@@ -663,8 +727,20 @@ class DeviceIdentityService {
         for (const tx of data.transactions ?? []) {
             svc._transactions.set(tx.pairingId, { ...tx });
         }
+        if (Object.prototype.hasOwnProperty.call(data, "surfaces") && !Array.isArray(data.surfaces)) {
+            throw fail("PID_INVALID_SERIALIZATION", "surfaces bukan array");
+        }
+        for (const row of data.surfaces ?? []) {
+            const dev = row && staged.get(row.deviceId);
+            if (row?.status === "PENDING" && (!dev || dev.pairingState !== PAIRING_STATES.PAIRED || dev.bindingDigest !== row.pairingRef || typeof row.credentialRef !== "string" || !/^[^\s:]+:[^\s]+$/.test(row.credentialRef))) throw fail("PID_INVALID_SERIALIZATION", "surface canonical reference invalid");
+            if (!row || typeof row.surfaceId !== "string" || !/^cli:[a-z0-9-]{3,80}$/i.test(row.surfaceId) || row.surfaceType !== "CLI" || !dev || !Number.isSafeInteger(row.ownerGeneration) || row.ownerGeneration < 0 || !Number.isSafeInteger(row.registrationRevision) || row.registrationRevision < 1 || typeof row.ownerId !== "string" || row.ownerId.length < 1 || typeof row.credentialRef !== "string" || row.credentialRef.length < 1 || typeof row.pairingRef !== "string" || !/^[a-f0-9]{64}$/.test(row.pairingRef) || !["PENDING", "REVOKED"].includes(row.status) || typeof row.allowedChannel !== "string" || row.allowedChannel !== "cli" || typeof row.sessionScope !== "string" || row.sessionScope !== "device" || !Number.isInteger(row.createdAtMs) || row.createdAtMs < 0 || (row.revokedAtMs !== null && (!Number.isInteger(row.revokedAtMs) || row.revokedAtMs < row.createdAtMs)) || (row.status === "PENDING" && row.revokedAtMs !== null) || (row.status === "REVOKED" && row.revokedAtMs === null) || svc._surfaces.has(row.surfaceId) || (dev.pairingState === PAIRING_STATES.REVOKED && row.status !== "REVOKED")) throw fail("PID_INVALID_SERIALIZATION", "surface registration invalid");
+            svc._surfaces.set(row.surfaceId, { ...row });
+        }
         return svc;
     }
+    _assertPersistenceUsable() { if (this._persistencePoisoned) throw fail("PID_PERSISTENCE_RELOAD_REQUIRED", "state identitas belum committed; muat ulang snapshot kanonik"); }
+    invalidatePersistence() { this._persistencePoisoned = true; }
+    acceptSnapshotRevision(revision) { this._assertPersistenceUsable(); if (!Number.isSafeInteger(revision) || revision < this._snapshotRevision) throw fail("PID_SNAPSHOT_REVISION", "snapshot revision invalid"); this._snapshotRevision = revision; }
 
     /* ------------------------------ internal --------------------------- */
 
@@ -793,6 +869,7 @@ class DeviceIdentityService {
      * auditable; never automatic, never triggered by device contact.
      */
     reEnrollAfterExpiry(deviceId) {
+        this._assertPersistenceUsable();
         const rec = this._mustGet(deviceId);
         if (rec.pairingState !== PAIRING_STATES.EXPIRED) {
             throw fail("PID_INVALID_STATE",

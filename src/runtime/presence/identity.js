@@ -54,9 +54,22 @@ function createPresenceGenerationId(counter) {
     return `presence-gen-${String(counter).padStart(6, "0")}`;
 }
 
+/**
+ * PresenceInstanceId kanon: identitas SATU instance Presence kanonik.
+ *
+ * Berbeda dari generation (yang maju setiap kali generasi baru dimulai),
+ * instance id BENAR-BENAR tetap selama instance hidup, jadi STATUS/HOLD/
+ * RESUME bisa saling-terkait dengan owner yang sama — bukan menebak
+ * proses mana yang kebetulan kelihatan.
+ */
+function createPresenceInstanceId(counter) {
+    return `presence-instance-${String(counter).padStart(6, "0")}`;
+}
+
 module.exports = {
     PRODUCER_KIND,
     registerProducer,
     isGenuineProducer,
-    createPresenceGenerationId
+    createPresenceGenerationId,
+    createPresenceInstanceId
 };

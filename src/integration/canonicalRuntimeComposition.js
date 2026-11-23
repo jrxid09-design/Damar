@@ -80,6 +80,8 @@ function currentDeliverySequenceFor(body) {
 
 // RuntimeCore composition dependencies (moved from runtimeCore.js).
 const { createEmbodiedCore } = require("./embodiedCore");
+const embodiment = require("../embodiment");
+const { createObservationProjection } = require("../ai/context/observationProjection");
 const governorMod = require("../runtime/resourceGovernor");
 const recovery = require("../runtime/recovery");
 const ib = require("../runtime/interactionBus");
@@ -1093,7 +1095,12 @@ async function buildRuntimeCoreInternal({
     cognitionMode = "off",
     cognitionCapabilityRegistry = null,
     cognitionAuditLedger = null,
-    cognitionStores = {}
+    cognitionStores = {},
+    // Production Sensorium lifecycle is owned here; RuntimeCore remains
+    // opt-in for callers that only need the inert composition substrate.
+    enableSensoriumLifecycle = false,
+    sensoriumAdapter = null,
+    sensoriumIntervalMs = 60_000
 } = {}, onCompositionPayload = null) {
 
     if (bus !== null) {
@@ -1102,6 +1109,20 @@ async function buildRuntimeCoreInternal({
 
     // ---- Wave 1 canonical owners --------------------------------------
     const core = await createEmbodiedCore(wave1);
+
+    let sensoriumLifecycle = null;
+    if (enableSensoriumLifecycle) {
+        const adapter = sensoriumAdapter ?? embodiment.createHostSelfDiscoveryAdapter();
+        sensoriumLifecycle = embodiment.createProductionSensoriumLifecycle({
+            body: core.body,
+            adapter,
+            intervalMs: sensoriumIntervalMs
+        });
+        sensoriumLifecycle.start();
+    }
+    // A read-only view assembled from the canonical owners. It stores no
+    // mutable observations and is the only projection handed to Context.
+    const observationProjection = createObservationProjection({ body: core.body });
 
     // ---- Presence: pemilik KANONIK lifecycle representation -----------
     let rt = presenceRuntime;
@@ -1214,6 +1235,7 @@ async function buildRuntimeCoreInternal({
     let shutDown = false;
     function shutdown({ reason = "SHUTDOWN" } = {}) {
         if (!shutDown) {
+            try { sensoriumLifecycle?.stop(); } catch { /* idempotent */ }
             try {
                 rt.requestShutdown(producers.host, reason);
             } catch {
@@ -1381,6 +1403,8 @@ async function buildRuntimeCoreInternal({
         // `applyObservationPlan` for a future device-adapter loop; the
         // bridge is already live-subscribed to `core.body` regardless.
         sensoriumBridge,
+        observationProjection,
+        sensoriumLifecycle,
 
         // Wave 2 (pemilik kanonik):
         governor: gov,
@@ -1482,7 +1506,8 @@ async function buildRuntimeHostInternal({
         // the sole CONVERSATION route.
         core = await buildRuntimeCoreInternal({
             ...sanitizeCoreOptions(coreOptions),
-            enableManagerIngress: conversationHandler === null
+            enableManagerIngress: conversationHandler === null,
+            enableSensoriumLifecycle: coreOptions.enableSensoriumLifecycle ?? true
         }, onCompositionPayload);
     } else {
         // Caller-controlled factory: ALWAYS untrusted.  Pass SANITIZED
@@ -1498,6 +1523,24 @@ async function buildRuntimeHostInternal({
             sanitized.enableManagerIngress = true;
         }
         core = await factory(sanitized);
+    }
+
+    // The canonical host owns runtime composition, so it also owns the one
+    // production binding between the read-only observation projection and the
+    // process AIRuntimeService used by normal cognition.  Keep this here,
+    // after both objects exist and before the host can become READY; callers
+    // must never have to perform this binding themselves.
+    const aiRuntime = require("../services/aiRuntimeService");
+    try {
+        const binding = aiRuntime.bindObservationProjection(core.observationProjection);
+        if (!binding?.bound) {
+            throw new Error("OBSERVATION_PROJECTION_BIND_REJECTED");
+        }
+    }
+    catch (error) {
+        try { core.shutdown({ reason: "observation-projection-bind-failed" }); } catch { /* best effort */ }
+        phaseMachine.transitionTo(HOST_PHASE.FAILED, "observation-projection-bind-failed");
+        throw error;
     }
     const rt = core.presence;
     const producers = core.presenceProducers;
@@ -1524,6 +1567,10 @@ async function buildRuntimeHostInternal({
     }
 
     phaseMachine.transitionTo(HOST_PHASE.READY, "ready-dormant");
+
+    if (core.channels && continuityLifecycleHandles && continuityLifecycleHandles.composition) {
+        try { activateCanonicalConsoleContinuity(); } catch { /* best effort */ }
+    }
 
     // ------------------------------------------------------------- BUS
     const bus = core.bus;
@@ -1576,14 +1623,23 @@ async function buildRuntimeHostInternal({
         }
         let outcome;
         switch (command.command) {
+            case HOST_COMMANDS.START:
+                outcome = await start({ source: command.source, reason: command.reason });
+                break;
             case HOST_COMMANDS.SUMMON:
                 outcome = host.summon({ source: command.source, reason: command.reason });
                 break;
             case HOST_COMMANDS.DISMISS:
                 outcome = host.dismiss({ source: command.source, reason: command.reason });
                 break;
+            case HOST_COMMANDS.HOLD:
+                outcome = host.hold({ source: command.source, reason: command.reason });
+                break;
+            case HOST_COMMANDS.RESUME:
+                outcome = host.resume({ source: command.source, reason: command.reason });
+                break;
             case HOST_COMMANDS.STATUS:
-                outcome = { ok: true, status: host.status() };
+                outcome = { ok: true, status: host.status(), lifecycle: host.lifecycleStatus() };
                 break;
             case HOST_COMMANDS.SHUTDOWN:
                 outcome = host.requestShutdown({
@@ -1625,6 +1681,8 @@ async function buildRuntimeHostInternal({
             ok: outcome.ok !== false,
             code: outcome.code ?? undefined,
             state: outcome.state ?? undefined,
+            instanceId: outcome.instanceId ?? undefined,
+            lifecycle: outcome.lifecycle ?? undefined,
             status: outcome.status
         };
     }
@@ -1648,6 +1706,58 @@ async function buildRuntimeHostInternal({
         return { ...result, source };
     }
 
+    // ------------------------------------------------------------- START
+    //
+    // START != RESUME (lihat runtimeHost.js). Handler ini HANYA boleh
+    // memastikan owner KANONIK: bus ini milik host yang sedang melayani,
+    // jadi kalau host ini bukan owner kanonik, START menolak (fail closed)
+    // alih-alih diam-diam membangun host kanonik kedua. Instance yang
+    // sudah hidup dikembalikan apa adanya oleh startCanonicalRuntimeHost —
+    // tidak pernah ada owner kedua.
+    async function start({ source = "api", reason = null } = {}) {
+        const {
+            getCanonicalRuntimeHost,
+            startCanonicalRuntimeHost
+        } = require("../runtime/host/runtimeHost");
+        if (getCanonicalRuntimeHost() !== host) {
+            return { ok: false, code: "HOST_NOT_CANONICAL", phase: phaseMachine.phase };
+        }
+        const result = await startCanonicalRuntimeHost();
+        return { ...result, source, reason, lifecycle: lifecycleStatus() };
+    }
+
+    // ------------------------------------------------------ HOLD / RESUME
+    //
+    // Keduanya memanggil INSTANCE Presence kanonik yang sudah ada (`rt`) —
+    // tidak pernah membuat, tidak pernah mencari instance lain, dan tidak
+    // pernah menyentuh boot. `hold`/`resume` di rt adalah metode instance,
+    // jadi "tidak ada owner kedua" berlaku secara struktural, bukan lewat
+    // pemeriksaan. Gate otoritas host (phaseMachine) tetap dibaca lebih
+    // dulu, persis seperti summon/dismiss.
+
+    function hold({ source = "api", reason = null } = {}) {
+        if (!phaseMachine.isOperational()) {
+            return { ok: false, code: "HOST_NOT_READY", phase: phaseMachine.phase };
+        }
+        const boundedReason = `[${String(source).slice(0, 64)}] ${reason === null ? "hold" : String(reason)}`;
+        const result = rt.hold(producers.host, boundedReason.slice(0, 200));
+        return { ...result, source, instanceId: rt.instanceId };
+    }
+
+    function resume({ source = "api", reason = null } = {}) {
+        if (!phaseMachine.isOperational()) {
+            return { ok: false, code: "HOST_NOT_READY", phase: phaseMachine.phase };
+        }
+        const boundedReason = `[${String(source).slice(0, 64)}] ${reason === null ? "resume" : String(reason)}`;
+        const result = rt.resume(producers.host, boundedReason.slice(0, 200));
+        return { ...result, source, instanceId: rt.instanceId };
+    }
+
+    /** STATUS lifecycle yang menunjuk instance kanonik secara spesifik. */
+    function lifecycleStatus() {
+        return safe(() => rt.getLifecycleStatus()) ?? null;
+    }
+
     // ------------------------------------------------------ ACTIVITIES
     function beginActivity(mode, options = {}) {
         if (!phaseMachine.isOperational()) {
@@ -1669,7 +1779,10 @@ async function buildRuntimeHostInternal({
     }
 
     function clearDegradation(options = {}) {
-        return rt.clearDegradation(options);
+        // Produsen kanonik di-inject di sini, persis seperti reportDegradation:
+        // jalur tanpa produsen terdaftar selalu gagal tertutup, sehingga
+        // keadaan DEGRADED tidak akan pernah bisa dibersihkan lewat host.
+        return rt.clearDegradation({ producer: producers.host, ...options });
     }
 
     // ---------------------------------------------------- HEALTH/STATUS
@@ -1694,6 +1807,7 @@ async function buildRuntimeHostInternal({
             generationId: core.recovery.ledger.current,
             generationHistoryCount: core.recovery.ledger.history.length,
             presence: safe(() => rt.getPresenceStatus()) ?? null,
+            presenceLifecycle: safe(() => rt.getLifecycleStatus()) ?? null,
             governor: safe(() => core.governor.getResourceStatus()) ?? null,
             bus: safe(() => bus.getStatus()) ?? null,
             recovery: safe(() => core.recovery.tracker.getRecoveryStatus()) ?? null,
@@ -1758,6 +1872,22 @@ async function buildRuntimeHostInternal({
         }
     }
 
+    function activateCanonicalConsoleContinuity() {
+        if (!phaseMachine.isOperational() || shutDown || phaseMachine.isTerminal()) {
+            return Object.freeze({ ok: false, code: "HOST_NOT_OPERATIONAL", terminal: true });
+        }
+        const composition = continuityLifecycleHandles ? continuityLifecycleHandles.composition : null;
+        if (!composition || typeof composition.bindCanonicalTransportPeer !== "function") {
+            return Object.freeze({ ok: false, code: "TRANSPORT_PEER_SEAM_UNAVAILABLE" });
+        }
+        try {
+            const result = composition.bindCanonicalTransportPeer("console");
+            return Object.freeze({ ok: true, ...result });
+        } catch (error) {
+            return Object.freeze({ ok: false, code: error?.code ?? "TRANSPORT_PEER_BIND_FAILED" });
+        }
+    }
+
     /** Honest per-transport continuity support verdict (safe diagnostic). */
     function transportContinuitySupport(channel) {
         const composition = continuityLifecycleHandles ? continuityLifecycleHandles.composition : null;
@@ -1810,8 +1940,8 @@ async function buildRuntimeHostInternal({
             if (continuityLifecycle && typeof continuityLifecycle.shutdownContinuity === "function") {
                 try {
                     return await continuityLifecycle.shutdownContinuity();
-                } catch {
-                    return Object.freeze({ failed: true, code: "FLUSH_CONTAINED" });
+                } catch (err) {
+                    return Object.freeze({ failed: true, code: err?.code || "FLUSH_CONTAINED", error: err, message: err?.message });
                 }
             }
             return null;
@@ -1844,8 +1974,8 @@ async function buildRuntimeHostInternal({
                     let flushed = null;
                     try {
                         flushed = await completionPromise;
-                    } catch {
-                        flushed = Object.freeze({ failed: true, code: "FLUSH_CONTAINED" });
+                    } catch (err) {
+                        flushed = Object.freeze({ failed: true, code: err?.code || "FLUSH_CONTAINED", error: err, message: err?.message });
                     }
                     return Object.freeze({ ...syncShape, continuityFlush: flushed });
                 })().then(onFulfilled, onRejected);
@@ -1925,8 +2055,12 @@ async function buildRuntimeHostInternal({
 
         get phase() { return phaseMachine.phase; },
 
+        start,
         summon,
         dismiss,
+        hold,
+        resume,
+        lifecycleStatus,
         beginActivity,
         endActivity,
         recommendInterruption,
@@ -1939,6 +2073,7 @@ async function buildRuntimeHostInternal({
         submitLocal,
         channels: core.channels,
         transportContinuitySupport,
+        bindConsoleContinuity: activateCanonicalConsoleContinuity,
 
         health,
         status,
