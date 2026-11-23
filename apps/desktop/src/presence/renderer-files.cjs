@@ -9,11 +9,11 @@ const ROOT = path.join(__dirname, 'renderer');
 const SCHEME = 'damar-presence';
 const ENTRY = `${SCHEME}://app/idle_present`;
 const OWNER_SHA256 = 'e7d6b92116d420d26cc83c5f6de073419004da78eef3c095c6c03ddb0b8bc815';
-const INJECT = ['presence-i18n.js', 'damar-island-fsm.js', 'argon-character-engine.js', 'damar-island.js', 'presence-adapter.js']
+const INJECT = ['presence-i18n.js', 'damar-island-fsm.js', 'argon-character-engine.js', 'damar-notch-character.js', 'damar-island.js', 'presence-adapter.js']
   .map(f => `<script src="/${f}" defer></script>`).join('');
 const FILES = Object.freeze({
   '/damar-island-fsm.js': 'damar-island-fsm.js', '/argon-character-engine.js': 'argon-character-engine.js',
-  '/damar-island.js': 'damar-island.js', '/presence-adapter.js': 'presence-adapter.js', '/presence-i18n.js': 'presence-i18n.js',
+  '/damar-island.js': 'damar-island.js', '/damar-notch-character.js': 'damar-notch-character.js', '/presence-adapter.js': 'presence-adapter.js', '/presence-i18n.js': 'presence-i18n.js',
   // Cinzel / Cinzel Decorative bundled locally (SIL OFL 1.1, licenses next to the fonts) instead of Google Fonts.
   '/fonts/Cinzel-VariableFont_wght.ttf': 'fonts/Cinzel-VariableFont_wght.ttf', '/fonts/CinzelDecorative-Bold.ttf': 'fonts/CinzelDecorative-Bold.ttf',
   '/damaricon-clean.PNG': 'damaricon-clean.png', '/damaricon-clean.png': 'damaricon-clean.png',

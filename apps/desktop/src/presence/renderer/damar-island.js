@@ -26,13 +26,13 @@
     #damarIsland[data-state="compact"] { transform:translateX(-50%) translateY(0); width:186px; height:34px; border-radius:0 0 20px 20px; }
     #damarIsland[data-state="expanded"] { transform:translateX(-50%) translateY(0); width:min(420px,calc(100vw - 24px)); height:158px; border-radius:0 0 22px 22px; }
     #damarIsland .di-head { height:32px; display:flex; align-items:center; justify-content:center; gap:6px; color:#f2d987; cursor:pointer; }
-    #damarIsland #damarIslandChar { width:52px; height:32px; display:block; }
-    #damarIsland[data-state="expanded"] #damarIslandChar { width:88px; height:64px; }
+    #damarIsland .dnc-slot { width:52px; height:32px; display:block; } #damarIsland .dnc-slot svg { width:100%; height:100%; display:block; }
+    #damarIsland[data-state="expanded"] .dnc-head { width:88px; height:64px; }
     /* The stage carries the character when expanded; the head canvas would duplicate it above the 70px stage. */
-    #damarIsland[data-state="expanded"] #damarIslandChar { visibility:hidden; }
+    #damarIsland[data-state="expanded"] .dnc-head { visibility:hidden; }
     #damarIsland .di-char-stage { position:relative; width:100%; height:70px; overflow:hidden; display:none; }
     #damarIsland[data-state="expanded"] .di-char-stage { display:block; }
-    #damarIsland .di-char-stage canvas { position:absolute; inset:0; margin:auto; width:100%; height:100%; object-fit:contain; }
+    #damarIsland .di-char-stage .dnc-stage { position:absolute; inset:0; margin:auto; width:100%; height:100%; }
     #damarIsland[data-state="morph"] .di-head { color:rgba(242,217,135,.55); }
     #damarIsland .di-body { display:none; padding:1px 12px 3px; }
     #damarIsland[data-state="expanded"] .di-body { display:block; }
@@ -62,7 +62,7 @@
   const wake = document.createElement('div'); wake.id = 'damarIslandWake'; wake.setAttribute('aria-hidden','true');
   const island = document.createElement('section');
   island.id = 'damarIsland'; island.dataset.state = 'hidden'; island.setAttribute('aria-label','DAMAR Companion Island');
-  island.innerHTML = `<div class="di-head" role="button" tabindex="0" aria-label="DAMAR Companion Island"><canvas id="damarIslandChar" width="176" height="112" aria-hidden="true"></canvas><span class="di-mic" role="img" aria-label="Microphone on"></span></div><div class="di-char-stage"><canvas id="damarIslandCharStage" width="396" height="240" aria-hidden="true"></canvas></div><div class="di-body"><p class="di-status" role="status" aria-live="polite">DAMAR Core not connected</p><div class="di-controls"><button type="button" data-action="presence" data-t="returnPresence">Return to Presence</button><button type="button" data-action="dashboard" data-t="dashboard">Control</button><button type="button" data-action="allow-once" data-t="allowOnce" hidden>Allow once</button><button type="button" data-action="allow-session" data-t="allowSession" hidden>Allow for session</button><button type="button" data-action="deny" data-t="deny" hidden>Deny</button></div></div>`;
+  island.innerHTML = `<div class="di-head" role="button" tabindex="0" aria-label="DAMAR Companion Island"><div class="dnc-slot dnc-head" data-dnc="head" aria-hidden="true"></div><span class="di-mic" role="img" aria-label="Microphone on"></span></div><div class="di-char-stage"><div class="dnc-slot dnc-stage" data-dnc="stage" aria-hidden="true"></div></div><div class="di-body"><p class="di-status" role="status" aria-live="polite">DAMAR Core not connected</p><div class="di-controls"><button type="button" data-action="presence" data-t="returnPresence">Return to Presence</button><button type="button" data-action="dashboard" data-t="dashboard">Control</button><button type="button" data-action="allow-once" data-t="allowOnce" hidden>Allow once</button><button type="button" data-action="allow-session" data-t="allowSession" hidden>Allow for session</button><button type="button" data-action="deny" data-t="deny" hidden>Deny</button></div></div>`;
   document.body.append(wake, island);
   const head = island.querySelector('.di-head');
   const desktop = () => window.damarDesktop;
@@ -247,9 +247,24 @@
   // Sumber: design/prototype/notch-buddy.html (aset & engine disetujui Owner),
   // dipotong ke ui-prototypes/w5/argon-character-engine.js. Emote mengikuti
   // state island; orb standby memakai drawOrbStandby60fps.
-  const charCanvas = document.getElementById('damarIslandChar');
-  const stageCanvas = document.getElementById('damarIslandCharStage');
   const orbCanvas = document.getElementById('siriGlCanvas');
+  // Layered Damar Notch character (damar-notch-character.js): two layered SVG
+  // views (compact head + expanded stage) sharing one state - gaze, blink,
+  // springs, emotes - bound to the same Core events as notchPhysics below.
+  const dnc = typeof window.DamarNotchCharacter !== 'undefined' ? window.DamarNotchCharacter.create({
+    isVisible: () => fsm.state === 'compact' || fsm.state === 'morph' || fsm.state === 'expanded',
+    reducedMotion: () => document.body.classList.contains('degraded') || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  }) : null;
+  if (dnc) {
+    dnc.attach(island.querySelector('[data-dnc="head"]'));
+    dnc.attach(island.querySelector('[data-dnc="stage"]'));
+    dnc.start();
+    dnc.greet();
+    head.addEventListener('pointermove', e => { const r = head.getBoundingClientRect(); dnc.setGaze((e.clientX - (r.left + r.width / 2)) / Math.max(1, r.width / 2), (e.clientY - (r.top + r.height / 2)) / Math.max(1, r.height / 2)); });
+    head.addEventListener('pointerenter', () => dnc.setHover(true));
+    head.addEventListener('pointerleave', () => { dnc.setHover(false); dnc.setGaze(0, 0); });
+    head.addEventListener('pointerdown', () => dnc.poke());
+  }
   let argonRaf = 0, argonStart = performance.now();
   function emoteForState(state) {
     if (state === 'orb') return 'orbStandby';
@@ -269,15 +284,8 @@
           window.drawOrbStandby60fps(octx, t);
           octx.restore();
         }
-        const compactish = fsm.state === 'compact' || fsm.state === 'morph';
-        if (compactish && charCanvas) {
-          const cctx = charCanvas.getContext('2d');
-          window.drawDamarNotch60fps(cctx, charCanvas.width, charCanvas.height, t, true);
-        }
-        if (fsm.state === 'expanded' && stageCanvas) {
-          const sctx = stageCanvas.getContext('2d');
-          window.drawDamarNotch60fps(sctx, stageCanvas.width, stageCanvas.height, t, false);
-        }
+        // The layered character renders itself from its own loop; only the
+        // orb standby (separate WebGL-style canvas) is drawn here.
       }
     } catch {}
     argonRaf = requestAnimationFrame(argonFrame);
@@ -310,6 +318,7 @@
     btn('presence').hidden = btn('dashboard').hidden = !!permission;
     island.dataset.attention = pending > 0 ? 'permission' : '';
     if (typeof notchPhysics !== 'undefined' && pending > 0) notchPhysics.emote = 'siaga';
+    if (dnc && pending > 0) dnc.setEmote('siaga');
     if (pending > lastPending && fsm.state === 'hidden' && orbPhaseDone && notchEnabled && !voiceActive) fsm.reveal();
     lastPending = pending; renderStatus();
   });
@@ -322,6 +331,13 @@
       else if (['read', 'edit', 'run', 'shell'].includes(a.kind) || (a.kind === 'discussion' && a.state === 'RUNNING')) notchPhysics.emote = 'berpikir';
       else if (a.kind === 'discussion') notchPhysics.emote = a.state === 'COMPLETED' ? 'senang' : 'pulih';
       else if (a.kind === 'alert') notchPhysics.emote = 'siaga';
+    }
+    if (dnc) {
+      if (a.kind === 'final' && a.status === 'COMPLETED') { dnc.setEmote('senang'); dnc.celebrate(); }
+      else if (a.kind === 'final') dnc.setEmote('pulih');
+      else if (['read', 'edit', 'run', 'shell'].includes(a.kind) || (a.kind === 'discussion' && a.state === 'RUNNING')) dnc.setEmote('berpikir');
+      else if (a.kind === 'discussion') dnc.setEmote(a.state === 'COMPLETED' ? 'senang' : 'pulih');
+      else if (a.kind === 'alert') dnc.setEmote('siaga');
     }
     // A watchlist alert peeks the notch out like a permission request (compact only; never auto-expands, no timer).
     if (a.kind === 'alert' && fsm.state === 'hidden' && orbPhaseDone && notchEnabled && !voiceActive) fsm.reveal();
