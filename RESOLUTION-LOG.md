@@ -28,3 +28,10 @@ Hasil pascacommit device: `4da6d10f517c3d55adad73d827935969983f9861`; ancestry s
 - Strategi A: tiga commit padanan. Konflik `docs/architecture/audit-ledger-v1.md`, `src/runtime/auditLedger/canonicalJson.js`, `src/runtime/auditLedger/index.js`, `src/runtime/auditLedger/ledger.js`: ours/develop kanonis.
 - Tidak ada file non-konflik berubah; diff area source, docs, tests terhadap develop nol. Scan 0 temuan, 0 JS berubah.
 - Tes auditLedger: 115 lulus, 1 gagal (`trustFoundationRepair.test.js`, dependency sqlite3 tidak terpasang). Tidak ada perubahan kode/tes dari baseline; bukan akibat resolusi. Hash merge/ancestry menyusul.
+
+Hasil pascacommit audit: `b7a5c890c017fac4ffc4ac2c052c5cd7b7af3fd4`; ancestry sukses.
+
+## feat/secret-vault-v1
+
+- Strategi A: tiga commit padanan. Konflik `docs/vault-credential-map.md`, `src/runtime/vault/index.js`, `src/runtime/vault/vault.js`, `tests/vault/incarnation.test.js`, `tests/vault/repair-cert.test.js`, `tests/vault/store-write-precondition.test.js`, `tests/vault/store.test.js`, `tests/vault/storm.test.js`: semuanya ours/develop kanonis.
+- Tidak ada file non-konflik berubah. Diff source, docs, tests terhadap develop nol. Scan 0 temuan; 0 JS berubah. Tes vault: 157 lulus, 0 gagal. Hash/ancestry menyusul.
