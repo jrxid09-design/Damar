@@ -1,17 +1,22 @@
 (function (root) {
   'use strict';
-  // Damar Notch character - LAYERED construction (Fase 2). The previous
-  // character was one flat PNG (damar_notch_hero_rig.png) moved as a unit,
-  // which is why it felt stiff: no per-part motion was possible. This module
-  // rebuilds the same golden-flame mascot as layered SVG parts in the
-  // renderer - body, inner flame, SEPARATE eyeball/pupil/glint per eye,
-  // lids, mouth variants, brows, celebration rays, particles - each with its
-  // own pivot (transform-box: fill-box), driven by springs, a randomized
-  // blink scheduler, and gaze that follows the cursor. Emotes bind to the
-  // island's real Core events (attention/activity), never to random timers.
-  // The repo holds no layered/vector source for the mascot (flat PNGs only);
-  // these paths follow the emblem's silhouette and palette
-  // (#F5B942 / #D97706 / #854210). Pure logic is exported for node tests.
+  // Damar Notch character - V3 SPRITE STAGE (Fase 2, owner-ACC art direction
+  // 2026-11-24). The v1 layered-SVG face and the v2 flat preview were both
+  // rejected by the Owner ("serem", "mentah"); v3 renders the approved glossy
+  // chibi art (cropped from the Owner's own concept-sheet renders, plus two
+  // costumes generated in the same style) as full-character sprites on a
+  // two-layer crossfading stage. What stays from the layered engine: springs
+  // (squash & stretch, jump), the randomized blink scheduler, poke verdicts,
+  // emote holds - all driven by the island's real Core events, never random
+  // timers. What changes honestly with full-body renders: gaze is a
+  // sprite-level parallax (stage translate + slight tilt) instead of
+  // per-pupil movement, and blink is a soft lid overlay swept over the eye
+  // line of the current sprite. The v2 spinning animation is REMOVED (Owner
+  // rejected it); "dizzy" is a decaying shake. Costume changes are a short
+  // golden-swirl SHOW (~0.75 s): the swirl covers the character, the sprite
+  // swaps at the covered midpoint with a hop, then the swirl lifts - never
+  // an uncovered instant swap, in either direction. Motion loops are pure
+  // sine cycles (breath 3.4 s, float 4.9 s) so they repeat seamlessly.
 
   const EMOTE_FACE = {
     senang: { eyes: 'open', mouth: 'smile', brows: false },
@@ -37,78 +42,77 @@
     return 'squash';
   }
 
-  const SVG = `
-<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Damar Notch">
-  <defs>
-    <linearGradient id="dncGold" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0" stop-color="#854210"/><stop offset=".55" stop-color="#D97706"/><stop offset="1" stop-color="#F5B942"/>
-    </linearGradient>
-    <radialGradient id="dncGlow" cx=".5" cy=".62" r=".55">
-      <stop offset="0" stop-color="#FDE9B8" stop-opacity=".95"/><stop offset="1" stop-color="#F5B942" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  <g class="dnc-rays" opacity="0">
-    <g stroke="#F5B942" stroke-width="3" stroke-linecap="round">
-      <path d="M60 2v10"/><path d="M22 16l6 8"/><path d="M98 16l-6 8"/><path d="M8 44h10"/><path d="M102 44h10"/>
-    </g>
-  </g>
-  <g class="dnc-body">
-    <path class="dnc-flame-outer" fill="url(#dncGold)" d="M60 4c3 14 20 22 20 44a20 22 0 1 1-40 0c0-9 4-15 8-21 1 5 3 8 6 10-1-11 2-24 6-33z"/>
-    <path class="dnc-flame-inner" fill="#FBBF24" opacity=".85" d="M60 40c2 8 10 12 10 23a10 11 0 1 1-20 0c0-6 3-10 5-13 1 3 2 5 4 6-1-6 0-12 1-16z"/>
-    <ellipse cx="60" cy="74" rx="17" ry="15" fill="url(#dncGlow)"/>
-    <g class="dnc-face">
-      <g class="dnc-brows" opacity="0" stroke="#5b2d08" stroke-width="3.4" stroke-linecap="round">
-        <path d="M36 47l14 4"/><path d="M84 47l-14 4"/>
-      </g>
-      <g class="dnc-eye dnc-eye-l">
-        <ellipse class="dnc-ball" cx="46" cy="60" rx="9.5" ry="10.5" fill="#fff7e6"/>
-        <g class="dnc-pupil"><circle cx="46" cy="61" r="4.6" fill="#2a1602"/><circle cx="47.8" cy="58.8" r="1.6" fill="#fff"/></g>
-        <path class="dnc-happy" d="M37.5 61a8.5 8.5 0 0 1 17 0" fill="none" stroke="#2a1602" stroke-width="3" stroke-linecap="round" opacity="0"/>
-        <path class="dnc-closed" d="M37.5 61h17" stroke="#2a1602" stroke-width="3" stroke-linecap="round" opacity="0"/>
-        <path class="dnc-dizzy" d="M39 54l14 14M53 54L39 68" stroke="#2a1602" stroke-width="2.8" stroke-linecap="round" opacity="0"/>
-        <rect class="dnc-lid" x="36.5" y="49" width="19" height="13" rx="9" fill="#D97706"/>
-      </g>
-      <g class="dnc-eye dnc-eye-r">
-        <ellipse class="dnc-ball" cx="74" cy="60" rx="9.5" ry="10.5" fill="#fff7e6"/>
-        <g class="dnc-pupil"><circle cx="74" cy="61" r="4.6" fill="#2a1602"/><circle cx="75.8" cy="58.8" r="1.6" fill="#fff"/></g>
-        <path class="dnc-happy" d="M65.5 61a8.5 8.5 0 0 1 17 0" fill="none" stroke="#2a1602" stroke-width="3" stroke-linecap="round" opacity="0"/>
-        <path class="dnc-closed" d="M65.5 61h17" stroke="#2a1602" stroke-width="3" stroke-linecap="round" opacity="0"/>
-        <path class="dnc-dizzy" d="M67 54l14 14M81 54L67 68" stroke="#2a1602" stroke-width="2.8" stroke-linecap="round" opacity="0"/>
-        <rect class="dnc-lid" x="64.5" y="49" width="19" height="13" rx="9" fill="#D97706"/>
-      </g>
-      <g class="dnc-mouths" fill="none" stroke="#5b2d08" stroke-width="3.2" stroke-linecap="round">
-        <path class="dnc-m-smile" d="M50 76a10 8 0 0 0 20 0"/>
-        <path class="dnc-m-think" d="M54 79h11" opacity="0"/>
-        <path class="dnc-m-flat" d="M51 78h18" opacity="0"/>
-        <path class="dnc-m-wavy" d="M50 78q5-5 10 0t10 0" opacity="0"/>
-      </g>
-    </g>
-  </g>
-  <g class="dnc-particles"></g>
-</svg>`;
+  // Sprite set: expressions cropped from the Owner-ACC expression sheet,
+  // costumes from the Owner-ACC costume sheet + engineer/artist generated
+  // in the same style. eyeY = eye line as a fraction of the source sprite,
+  // the cover-framed face of each sprite.
+  const SPRITES = {
+    happy:     { src: '/notch-v3/expr-happy.webp',        eyeY: 0.40 },
+    alert:     { src: '/notch-v3/expr-alert.webp',        eyeY: 0.40 },
+    thinking:  { src: '/notch-v3/expr-thinking.webp',     eyeY: 0.41 },
+    recovering:{ src: '/notch-v3/expr-recovering.webp',   eyeY: 0.40 },
+    surprised: { src: '/notch-v3/expr-surprised.webp',    eyeY: 0.385 },
+    chef:      { src: '/notch-v3/costume-chef.webp',      eyeY: 0.38 },
+    hacker:    { src: '/notch-v3/costume-hacker.webp',    eyeY: 0.40 },
+    engineer:  { src: '/notch-v3/costume-engineer.webp',  eyeY: 0.40 },
+    detective: { src: '/notch-v3/costume-detective.webp', eyeY: 0.42 },
+    artist:    { src: '/notch-v3/costume-artist.webp',    eyeY: 0.44 },
+    matadewa:  { src: '/notch-v3/costume-matadewa.webp',  eyeY: 0.40 },
+  };
+  // Eye centres as fractions of the SOURCE sprite (x pair, y per sprite).
+  const EYE_X = [0.36, 0.63];
+  // Lid layout from the real cover-crop geometry: object-fit cover scales
+  // the sprite by max(w/iw, h/ih) and object-position 50% 20% anchors it,
+  // so the eye line's position in the slot is computable exactly once the
+  // image's natural size is known. Until load, a static estimate is used.
+  function layoutLids(v, key) {
+    const cfg = SPRITES[key]; if (!cfg) return;
+    const img = v.front;
+    const w = v.wrap.clientWidth || 0, h = v.wrap.clientHeight || 0;
+    const iw = img.naturalWidth || 0, ih = img.naturalHeight || 0;
+    if (!w || !h || !iw || !ih) { for (const lid of v.lids) lid.style.top = '36%'; return; }
+    const scale = Math.max(w / iw, h / ih);
+    const offX = (w - iw * scale) * 0.5, offY = (h - ih * scale) * 0.2;
+    const eyeTopPct = ((offY + cfg.eyeY * ih * scale) / h) * 100;
+    v.lids[0].style.left = (((offX + EYE_X[0] * iw * scale) / w) * 100 - 9.5) + '%';
+    v.lids[1].style.left = (((offX + EYE_X[1] * iw * scale) / w) * 100 - 9.5) + '%';
+    for (const lid of v.lids) lid.style.top = (eyeTopPct - 4.5) + '%';
+  }
+  const EMOTE_SPRITE = { senang: 'happy', berpikir: 'thinking', siaga: 'alert', pulih: 'recovering', orbStandby: 'recovering', annoyed: 'alert', dizzy: 'surprised' };
+  const COSTUMES = ['chef', 'hacker', 'engineer', 'detective', 'artist', 'matadewa'];
+  // Urgent/resting emotes visually break the costume (alert must read at a
+  // glance; resting in costume makes no sense). The costume returns when
+  // the emote settles.
+  const OVERRIDE_EMOTES = new Set(['siaga', 'pulih', 'orbStandby']);
 
   const CSS = `
-.dnc-slot svg { overflow: visible; }
-.dnc-body { transform-box: fill-box; transform-origin: 50% 92%; }
-.dnc-face { transform-box: fill-box; transform-origin: 50% 55%; }
-.dnc-eye { transform-box: fill-box; transform-origin: 50% 50%; }
-.dnc-lid { transform-box: fill-box; transform-origin: 50% 0%; transform: scaleY(0); }
-.dnc-pupil { will-change: transform; }
-.dnc-rays, .dnc-brows, .dnc-mouths path, .dnc-eye .dnc-happy, .dnc-eye .dnc-closed, .dnc-eye .dnc-dizzy { transition: opacity .18s ease; }
-.dnc-particle { pointer-events: none; }`;
+.dnc-slot { position: relative; }
+.dnc3-stage { width: 100%; height: 100%; overflow: hidden; border-radius: 14px; }
+.dnc3-float { width: 100%; height: 100%; transform-origin: 50% 92%; will-change: transform; }
+.dnc3-wrap { position: relative; width: 100%; height: 100%; will-change: transform; }
+.dnc3-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 20%; transition: opacity .24s ease; pointer-events: none; }
+.dnc3-lid { position: absolute; width: 19%; height: 9%; border-radius: 50%; background: radial-gradient(ellipse at center, #14142a 58%, rgba(20,20,42,0) 76%); transform: scaleY(0); pointer-events: none; }
+.dnc3-swirl { position: absolute; inset: -14%; border-radius: 50%; pointer-events: none; opacity: 0; transition: opacity .18s ease;
+  background: conic-gradient(from 0deg, transparent 0 12%, rgba(245,185,66,.9) 22%, rgba(253,233,184,.95) 28%, transparent 40% 55%, rgba(245,185,66,.8) 66%, transparent 78%);
+  -webkit-mask: radial-gradient(circle, transparent 30%, #000 62%, transparent 79%); mask: radial-gradient(circle, transparent 30%, #000 62%, transparent 79%); }
+.dnc3-swirl.on { opacity: 1; animation: dnc3spin .62s linear infinite; }
+@keyframes dnc3spin { to { transform: rotate(360deg); } }
+.dnc3-spark { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: #F5B942; pointer-events: none; }`;
 
   function buildView(el) {
-    el.innerHTML = SVG;
-    const q = (sel) => el.querySelectorAll(sel);
-    return {
-      el,
-      body: el.querySelector('.dnc-body'), face: el.querySelector('.dnc-face'),
-      pupils: q('.dnc-pupil'), lids: q('.dnc-lid'), balls: q('.dnc-ball'),
-      happy: q('.dnc-happy'), closed: q('.dnc-closed'), dizzy: q('.dnc-dizzy'),
-      brows: el.querySelector('.dnc-brows'), rays: el.querySelector('.dnc-rays'),
-      mouths: { smile: el.querySelector('.dnc-m-smile'), think: el.querySelector('.dnc-m-think'), flat: el.querySelector('.dnc-m-flat'), wavy: el.querySelector('.dnc-m-wavy') },
-      particles: el.querySelector('.dnc-particles'),
-    };
+    el.innerHTML = '';
+    const stage = document.createElement('div'); stage.className = 'dnc3-stage';
+    const float = document.createElement('div'); float.className = 'dnc3-float';
+    const wrap = document.createElement('div'); wrap.className = 'dnc3-wrap';
+    const back = document.createElement('img'); back.className = 'dnc3-img'; back.alt = ''; back.style.opacity = '0';
+    const front = document.createElement('img'); front.className = 'dnc3-img'; front.alt = ''; front.style.opacity = '1';
+    const lidL = document.createElement('div'); lidL.className = 'dnc3-lid'; lidL.style.left = '27%';
+    const lidR = document.createElement('div'); lidR.className = 'dnc3-lid'; lidR.style.left = '54%';
+    const swirl = document.createElement('div'); swirl.className = 'dnc3-swirl';
+    const sparks = document.createElement('div'); sparks.className = 'dnc3-sparks';
+    wrap.append(back, front, lidL, lidR, swirl, sparks);
+    float.append(wrap); stage.append(float); el.append(stage);
+    return { el, body: float, face: wrap, stage, wrap, front, back, lids: [lidL, lidR], swirl, sparks, frontKey: null };
   }
 
   function create(opts = {}) {
@@ -117,47 +121,67 @@
     const rand = opts.random || Math.random;
     const views = [];
     const S = {
-      emote: 'senang', gaze: { x: 0, y: 0, tx: 0, ty: 0 }, hover: false,
+      emote: 'senang', baseEmote: 'senang', costume: null, sprite: 'happy',
+      gaze: { x: 0, y: 0, tx: 0, ty: 0 }, hover: false,
       squash: { x: 1, v: 0 }, jump: { x: 0, v: 0 },
       blinkAt: performance.now() + nextBlinkDelay(rand), blinkPhase: 0, doubleBlink: false,
-      danceUntil: 0, raysUntil: 0, emoteHoldUntil: 0, baseEmote: 'senang',
+      danceUntil: 0, emoteHoldUntil: 0, shakeUntil: 0,
+      show: null,            // { swapAt, endAt, target } costume-change show in flight
       pokes: [], particles: [], started: false, raf: 0, last: 0,
     };
-    function applyFace() {
-      const f = EMOTE_FACE[S.emote] || EMOTE_FACE.senang;
+    function resolveSprite() {
+      if (OVERRIDE_EMOTES.has(S.emote)) return EMOTE_SPRITE[S.emote];
+      if (S.costume) return S.costume;
+      return EMOTE_SPRITE[S.emote] || 'happy';
+    }
+    function showSprite(key) {
+      if (!SPRITES[key]) return;
+      S.sprite = key;
       for (const v of views) {
-        const showBall = f.eyes === 'open' || f.eyes === 'look' || f.eyes === 'half';
-        v.balls.forEach(b => { b.style.opacity = showBall ? '1' : '0'; });
-        v.pupils.forEach(p => { p.style.opacity = showBall ? '1' : '0'; });
-        v.happy.forEach(p => { p.style.opacity = f.eyes === 'happy' ? '1' : '0'; });
-        v.closed.forEach(p => { p.style.opacity = f.eyes === 'closed' ? '1' : '0'; });
-        v.dizzy.forEach(p => { p.style.opacity = f.eyes === 'dizzy' ? '1' : '0'; });
-        v.brows.style.opacity = f.brows ? '1' : '0';
-        for (const [k, m] of Object.entries(v.mouths)) m.style.opacity = k === f.mouth ? '1' : '0';
+        v.back.src = SPRITES[key].src;
+        v.back.style.opacity = '1';
+        v.front.style.opacity = '0';
+        const old = v.front; v.front = v.back; v.back = old; v.frontKey = key;
+        layoutLids(v, key);
       }
+    }
+    function syncSprite() {
+      const target = resolveSprite();
+      if (target !== S.sprite && !S.show) showSprite(target);
     }
     function setEmote(e, holdMs = 0) {
       if (!EMOTE_FACE[e]) return;
       S.baseEmote = e;
       S.emote = e;
       S.emoteHoldUntil = holdMs ? performance.now() + holdMs : 0;
-      applyFace();
+      syncSprite();
+    }
+    function setCostume(name) {
+      if (name !== null && !COSTUMES.includes(name)) return false;
+      if (name === S.costume) return true;
+      S.costume = name;
+      const target = resolveSprite();
+      if (target === S.sprite) return true;
+      if (reducedMotion()) { showSprite(target); return true; }
+      const now = performance.now();
+      S.show = { swapAt: now + 320, endAt: now + 760, target };
+      for (const v of views) v.swirl.classList.add('on');
+      return true;
     }
     function spawnParticles() {
       for (const v of views) {
         for (let i = 0; i < 7; i++) {
-          const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-          c.setAttribute('r', String(1.6 + rand() * 2.2));
-          c.setAttribute('fill', i % 2 ? '#F5B942' : '#FDE9B8');
-          c.classList.add('dnc-particle');
-          v.particles.appendChild(c);
-          S.particles.push({ el: c, x: 60 + (rand() - 0.5) * 26, y: 30, vx: (rand() - 0.5) * 46, vy: -(26 + rand() * 36), life: 1 });
+          const c = document.createElement('div');
+          c.className = 'dnc3-spark';
+          c.style.background = i % 2 ? '#F5B942' : '#FDE9B8';
+          v.sparks.appendChild(c);
+          S.particles.push({ el: c, x: 50 + (rand() - 0.5) * 22, y: 26, vx: (rand() - 0.5) * 30, vy: -(18 + rand() * 24), life: 1 });
         }
       }
     }
     function celebrate() {
       if (reducedMotion()) { setEmote('senang', 1200); return; }
-      S.jump.v = -340; S.raysUntil = performance.now() + 900;
+      S.jump.v = -340;
       setEmote('senang', 1400); spawnParticles();
     }
     function frame(now) {
@@ -165,6 +189,11 @@
       if (!isVisible() || document.hidden) { S.last = now; return; }
       const dt = Math.min(0.05, (now - S.last) / 1000 || 0.016); S.last = now;
       const rm = reducedMotion();
+      // costume-change show: swap under the swirl at the covered midpoint
+      if (S.show) {
+        if (now >= S.show.swapAt && S.sprite !== S.show.target) { showSprite(S.show.target); S.jump.v = -300; }
+        if (now >= S.show.endAt) { S.show = null; for (const v of views) v.swirl.classList.remove('on'); syncSprite(); }
+      }
       // blink: randomized schedule, 130 ms lid sweep, occasional double blink
       let lidScale = 0;
       if (now >= S.blinkAt && S.blinkPhase === 0) S.blinkPhase = now;
@@ -177,38 +206,49 @@
         } else lidScale = Math.sin(Math.min(1, p) * Math.PI);
       }
       const faceNow = EMOTE_FACE[S.emote] || EMOTE_FACE.senang;
-      if (faceNow.eyes === 'closed') lidScale = 0;   // closed-line paths carry the expression; lids are only for blinks/half
+      if (faceNow.eyes === 'closed') lidScale = 0;   // the art itself carries closed eyes there
       if (faceNow.eyes === 'half') lidScale = Math.max(lidScale, 0.55);
-      // gaze: pupils lead, face parallaxes a little, head tilts a touch
+      // gaze: sprite-level parallax (stage translate + slight tilt)
       S.gaze.x += (S.gaze.tx - S.gaze.x) * Math.min(1, dt * 10);
       S.gaze.y += (S.gaze.ty - S.gaze.y) * Math.min(1, dt * 10);
       // springs: squash & stretch + jump
       stepSpring(S.squash, 1, dt, 170, 13);
       stepSpring(S.jump, 0, dt, 120, 11);
       const dancing = now < S.danceUntil && !rm;
-      const breath = rm ? 0 : Math.sin(now / 1000 * 2.1);
+      // seamless loops: pure sine cycles, values match at cycle boundaries
+      const breath = rm ? 0 : Math.sin(now / 1000 * (Math.PI * 2 / 3.4));
+      const floatY = rm ? 0 : Math.sin(now / 1000 * (Math.PI * 2 / 4.9) + 1.3);
       const bounce = dancing ? Math.abs(Math.sin(now / 1000 * 7.5)) * -7 : 0;
       const hoverScale = S.hover && !rm ? 1.07 : 1;
+      const shake = now < S.shakeUntil && !rm ? Math.sin(now * 0.11) * 3.2 * Math.max(0, (S.shakeUntil - now) / 900) : 0;
       for (const v of views) {
         const sy = S.squash.x * (1 + breath * 0.018) * hoverScale;
         const sx = (2 - S.squash.x) * (1 - breath * 0.006) * hoverScale;
-        v.body.style.transform = `translateY(${(S.jump.x * 0.06 + bounce + breath * 0.7).toFixed(2)}px) scale(${sx.toFixed(3)}, ${sy.toFixed(3)}) rotate(${(S.gaze.x * 2.2).toFixed(2)}deg)`;
-        v.face.style.transform = `translate(${(S.gaze.x * 2.4).toFixed(2)}px, ${(S.gaze.y * 1.7).toFixed(2)}px)`;
-        v.pupils.forEach(p => { p.style.transform = `translate(${(S.gaze.x * 4.6).toFixed(2)}px, ${(S.gaze.y * 3.4).toFixed(2)}px)`; });
+        v.body.style.transform = `translateY(${(S.jump.x * 0.06 + bounce).toFixed(2)}px) scale(${sx.toFixed(3)}, ${sy.toFixed(3)})`;
+        v.face.style.transform = `translate(${(S.gaze.x * 3 + shake).toFixed(2)}px, ${(S.gaze.y * 2 + floatY * 1.6).toFixed(2)}px) rotate(${(S.gaze.x * 2).toFixed(2)}deg)`;
         v.lids.forEach(l => { l.style.transform = `scaleY(${lidScale.toFixed(3)})`; });
-        v.rays.style.opacity = now < S.raysUntil ? '1' : '0';
       }
       // particles
       for (let i = S.particles.length - 1; i >= 0; i--) {
         const p = S.particles[i];
-        p.vy += 130 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt * 1.1;
+        p.vy += 90 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt * 1.1;
         if (p.life <= 0) { p.el.remove(); S.particles.splice(i, 1); continue; }
-        p.el.setAttribute('cx', p.x.toFixed(1)); p.el.setAttribute('cy', p.y.toFixed(1)); p.el.setAttribute('opacity', Math.max(0, p.life).toFixed(2));
+        p.el.style.left = p.x.toFixed(1) + '%'; p.el.style.top = p.y.toFixed(1) + '%'; p.el.style.opacity = Math.max(0, p.life).toFixed(2);
       }
-      if (S.emoteHoldUntil && now > S.emoteHoldUntil && S.emote !== S.baseEmote) { S.emote = S.baseEmote; applyFace(); }
+      if (S.emoteHoldUntil && now > S.emoteHoldUntil && S.emote !== S.baseEmote) { S.emote = S.baseEmote; syncSprite(); }
     }
     const api = {
-      attach(el) { if (!el) return null; const v = buildView(el); views.push(v); applyFace(); return v; },
+      attach(el) {
+        if (!el) return null;
+        const v = buildView(el);
+        v.front.src = SPRITES[S.sprite].src; v.frontKey = S.sprite;
+        v.front.addEventListener?.('load', () => layoutLids(v, v.frontKey));
+        v.back.addEventListener?.('load', () => layoutLids(v, v.frontKey));
+        layoutLids(v, S.sprite);
+        if (S.show) v.swirl.classList.add('on');
+        views.push(v);
+        return v;
+      },
       start() {
         if (S.started) return; S.started = true;
         if (!document.getElementById('dnc-style')) {
@@ -219,9 +259,17 @@
       },
       stop() { S.started = false; cancelAnimationFrame(S.raf); },
       setEmote,
+      setCostume,
+      getCostume() { return S.costume; },
       celebrate,
       dance(ms = 1600) { if (!reducedMotion()) { S.danceUntil = performance.now() + ms; setEmote('senang', ms); } },
-      greet() { S.raysUntil = performance.now() + 1500; if (!reducedMotion()) S.jump.v = -300; setEmote('senang', 1600); },
+      greet() {
+        setEmote('senang', 1600);
+        if (!reducedMotion()) {
+          S.jump.v = -300;
+          for (const v of views) { v.swirl.classList.add('on'); setTimeout(() => v.swirl.classList.remove('on'), 620); }
+        }
+      },
       poke() {
         const now = performance.now();
         S.pokes = S.pokes.filter(t => now - t < 4000); S.pokes.push(now);
@@ -229,7 +277,7 @@
         if (reducedMotion()) return verdict;
         S.squash.v = -7.5;
         if (verdict === 'annoyed') setEmote('annoyed', 1100);
-        else if (verdict === 'dizzy') { setEmote('dizzy', 1500); S.pokes = []; }
+        else if (verdict === 'dizzy') { setEmote('dizzy', 1500); S.shakeUntil = now + 900; S.pokes = []; }
         return verdict;
       },
       setGaze(nx, ny) { const g = clampGaze(nx, ny); S.gaze.tx = g.x; S.gaze.ty = g.y; },
@@ -239,6 +287,6 @@
     return api;
   }
 
-  root.DamarNotchCharacter = { create, EMOTE_FACE, _pure: { clampGaze, nextBlinkDelay, blinkDuration, stepSpring, pokeVerdict } };
+  root.DamarNotchCharacter = { create, EMOTE_FACE, EMOTE_SPRITE, SPRITES, COSTUMES, _pure: { clampGaze, nextBlinkDelay, blinkDuration, stepSpring, pokeVerdict } };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.DamarNotchCharacter;
 })(typeof window !== 'undefined' ? window : globalThis);

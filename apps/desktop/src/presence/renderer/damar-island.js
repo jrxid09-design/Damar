@@ -40,6 +40,13 @@
     #damarIsland[data-attention="permission"] .di-status { color:#f2d987; }
     #damarIsland .di-mic { display:none; width:7px; height:7px; border-radius:50%; background:#e5c158; box-shadow:0 0 6px #e5c158; }
     #damarIsland[data-mic="on"] .di-mic { display:inline-block; }
+    #damarIsland .di-pills { display:flex; gap:5px; flex-wrap:wrap; margin:0 0 5px; }
+    #damarIsland .di-pill { font-size:10px; letter-spacing:.02em; color:#e8e2d2; background:rgba(245,185,66,.13); border:1px solid rgba(245,185,66,.35); border-radius:999px; padding:2px 8px; white-space:nowrap; }
+    #damarIsland .di-pill[data-state="WORKING"] { background:rgba(245,185,66,.3); color:#ffe9a8; }
+    #damarIsland .di-pill[data-state="CLOSED"] { opacity:.45; }
+    #damarIsland .di-media { display:flex; gap:8px; align-items:center; margin:0 0 5px; color:#e8e2d2; font-size:11px; }
+    #damarIsland .di-media-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:170px; }
+    #damarIsland .di-media button { background:rgba(245,185,66,.13); border:1px solid rgba(245,185,66,.35); color:#ffe9a8; border-radius:7px; font-size:10px; padding:2px 7px; cursor:pointer; }
     #damarIsland .di-controls { display:flex; gap:7px; align-items:center; flex-wrap:wrap; }
     #damarIsland button { min-height:32px; border:1px solid rgba(229,193,101,.45); border-radius:7px; padding:5px 9px; background:#151319; color:#f6f2e9; font:600 11px 'Segoe UI',sans-serif; cursor:pointer; }
     #damarIsland button:focus-visible { outline:2px solid #f7df94; outline-offset:2px; }
@@ -62,7 +69,7 @@
   const wake = document.createElement('div'); wake.id = 'damarIslandWake'; wake.setAttribute('aria-hidden','true');
   const island = document.createElement('section');
   island.id = 'damarIsland'; island.dataset.state = 'hidden'; island.setAttribute('aria-label','DAMAR Companion Island');
-  island.innerHTML = `<div class="di-head" role="button" tabindex="0" aria-label="DAMAR Companion Island"><div class="dnc-slot dnc-head" data-dnc="head" aria-hidden="true"></div><span class="di-mic" role="img" aria-label="Microphone on"></span></div><div class="di-char-stage"><div class="dnc-slot dnc-stage" data-dnc="stage" aria-hidden="true"></div></div><div class="di-body"><p class="di-status" role="status" aria-live="polite">DAMAR Core not connected</p><div class="di-controls"><button type="button" data-action="presence" data-t="returnPresence">Return to Presence</button><button type="button" data-action="dashboard" data-t="dashboard">Control</button><button type="button" data-action="allow-once" data-t="allowOnce" hidden>Allow once</button><button type="button" data-action="allow-session" data-t="allowSession" hidden>Allow for session</button><button type="button" data-action="deny" data-t="deny" hidden>Deny</button></div></div>`;
+  island.innerHTML = `<div class="di-head" role="button" tabindex="0" aria-label="DAMAR Companion Island"><div class="dnc-slot dnc-head" data-dnc="head" aria-hidden="true"></div><span class="di-mic" role="img" aria-label="Microphone on"></span></div><div class="di-char-stage"><div class="dnc-slot dnc-stage" data-dnc="stage" aria-hidden="true"></div></div><div class="di-body"><p class="di-status" role="status" aria-live="polite">DAMAR Core not connected</p><div class="di-pills" hidden></div><div class="di-media" hidden><span class="di-media-text"></span><button type="button" data-media="previous" aria-label="Previous track">&lt;&lt;</button><button type="button" data-media="toggle" aria-label="Play or pause">&#9654;</button><button type="button" data-media="next" aria-label="Next track">&gt;&gt;</button></div><div class="di-controls"><button type="button" data-action="presence" data-t="returnPresence">Return to Presence</button><button type="button" data-action="dashboard" data-t="dashboard">Control</button><button type="button" data-action="allow-once" data-t="allowOnce" hidden>Allow once</button><button type="button" data-action="allow-session" data-t="allowSession" hidden>Allow for session</button><button type="button" data-action="deny" data-t="deny" hidden>Deny</button></div></div>`;
   document.body.append(wake, island);
   const head = island.querySelector('.di-head');
   const desktop = () => window.damarDesktop;
@@ -318,6 +325,7 @@
     btn('presence').hidden = btn('dashboard').hidden = !!permission;
     island.dataset.attention = pending > 0 ? 'permission' : '';
     if (typeof notchPhysics !== 'undefined' && pending > 0) notchPhysics.emote = 'siaga';
+    sig.pending = pending;
     if (dnc && pending > 0) dnc.setEmote('siaga');
     if (pending > lastPending && fsm.state === 'hidden' && orbPhaseDone && notchEnabled && !voiceActive) fsm.reveal();
     lastPending = pending; renderStatus();
@@ -332,6 +340,10 @@
       else if (a.kind === 'discussion') notchPhysics.emote = a.state === 'COMPLETED' ? 'senang' : 'pulih';
       else if (a.kind === 'alert') notchPhysics.emote = 'siaga';
     }
+    if (a.kind === 'final' && a.status === 'COMPLETED') sig.lastFinalAt = Date.now();
+    else if (a.kind === 'final') sig.lastFailAt = Date.now();
+    else if (['read', 'edit', 'run', 'shell'].includes(a.kind) || a.kind === 'discussion') sig.workUntil = Date.now() + 6000;
+    if (a.kind === 'alert') { sig.alertUntil = Date.now() + 8000; if (a.source === 'mata-dewa') sig.matadewaUntil = Date.now() + 90000; }
     if (dnc) {
       if (a.kind === 'final' && a.status === 'COMPLETED') { dnc.setEmote('senang'); dnc.celebrate(); }
       else if (a.kind === 'final') dnc.setEmote('pulih');
@@ -343,6 +355,61 @@
     if (a.kind === 'alert' && fsm.state === 'hidden' && orbPhaseDone && notchEnabled && !voiceActive) fsm.reveal();
     window.dispatchEvent(new CustomEvent('damar-presence-motion-pulse'));
   });
+  // Session pills + now-playing (Fase 3 last mile): rendered from the Core
+  // projection the adapter forwards - Core session registry and the SMTC
+  // sense, never surface-local state, so CLI/headless work appears here.
+  const pillsEl = island.querySelector('.di-pills');
+  window.addEventListener('damar-presence-sessions', e => {
+    const pills = Array.isArray(e.detail) ? e.detail : [];
+    sig.sessionsWorking = pills.filter(p => p.state === 'WORKING').length;
+    pillsEl.hidden = pills.length === 0;
+    pillsEl.innerHTML = pills.map(p => '<span class="di-pill" data-state="' + p.state + '">' + String(p.label || 'CLI session').replace(/[<>&"]/g, '') + (p.openOperations ? ' - ' + p.openOperations : '') + '</span>').join('');
+  });
+  const mediaEl = island.querySelector('.di-media');
+  const mediaText = island.querySelector('.di-media-text');
+  const mediaToggle = island.querySelector('[data-media="toggle"]');
+  window.addEventListener('damar-presence-media', e => {
+    const m = e.detail;
+    sig.mediaPlaying = !!(m && m.playing);
+    mediaEl.hidden = !m;
+    if (m) {
+      mediaText.textContent = (m.title || 'Unknown') + (m.artist ? ' - ' + m.artist : '');
+      mediaToggle.innerHTML = m.playing ? '&#10073;&#10073;' : '&#9654;';
+      mediaToggle.dataset.action2 = m.playing ? 'pause' : 'play';
+    }
+  });
+  mediaEl.addEventListener('click', e => {
+    const b = e.target.closest('[data-media]'); if (!b) return;
+    const action = b.dataset.media === 'toggle' ? (b.dataset.action2 || 'play') : b.dataset.media;
+    window.damarDesktop?.mediaControl?.(action);
+  });
+  // Behavior engine driver (Fase 2 v3): every 1.2 s the island folds its
+  // Core-event memory + PC activity into signals and lets the engine pick
+  // the character's emote/costume. The direct event->emote calls above stay
+  // as the low-latency path; the engine owns costumes, context and idle.
+  const sig = { pending: 0, lastFinalAt: 0, lastFailAt: 0, workUntil: 0, alertUntil: 0, matadewaUntil: 0, mediaPlaying: false, sessionsWorking: 0, pc: null };
+  let behaviorPrev = null;
+  window.addEventListener('damar-presence-behavior', e => { sig.pc = e.detail?.pcActivity || null; });
+  setInterval(() => {
+    if (!dnc || typeof window.DamarNotchBehavior === 'undefined') return;
+    const now = Date.now();
+    const d = window.DamarNotchBehavior.decideBehavior({
+      alertActive: now < sig.alertUntil,
+      pendingApprovals: sig.pending,
+      recentFailure: now - sig.lastFailAt < 20000,
+      recentCompletion: now - sig.lastFinalAt < 4000,
+      missionActive: now < sig.workUntil || sig.sessionsWorking > 0,
+      mediaPlaying: sig.mediaPlaying,
+      matadewaMode: now < sig.matadewaUntil,
+      pc: sig.pc,
+    }, behaviorPrev, now);
+    if (d.changed) {
+      behaviorPrev = { emote: d.emote, costume: d.costume, since: now };
+      if (d.celebrate) dnc.celebrate();
+      dnc.setEmote(d.emote);
+      dnc.setCostume(d.costume);
+    }
+  }, 1200);
   window.addEventListener('damar-presence-mic', e => { island.dataset.mic = e.detail ? 'on' : 'off'; });
   window.addEventListener('damar-presence-lang', () => { renderLabels(); renderStatus(); });
   renderLabels();
