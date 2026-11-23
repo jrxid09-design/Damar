@@ -57,6 +57,8 @@ const {
     BOOTSTRAP_PURPOSE,
     BOOTSTRAP_CONTEXT
 } = require("./ownerTrust");
+const { makeGrantVerifier, issueOwnerGrant } = require("../mcp/ownerGrant");
+const { createFileGrantStore } = require("../mcp/grantStore");
 
 const { createTrustAuditGate } = require("./ownerTrust/trustAuditGate");
 const { createCliSessionAuthority } = require("./ownerTrust/cliSession");
@@ -218,7 +220,7 @@ function createCanonicalDeviceReader(identityStore) {
  *   <dir>/ownertrust-initialized.json — OT-002 initialization anchor
  *   <dir>/ownertrust-bootstrap.lock   — OT-003 ceremony reservation
  */
-async function compose(stateFile, { forTest = false, ledgerOverride = null, identityStore = null } = {}) {
+async function compose(stateFile, { forTest = false, ledgerOverride = null, identityStore = null, grantStore = null } = {}) {
     // MD-018 test-only seam: an explicit ledger override (Mata Dewa audit
     // sink test scenarios) is honored ONLY for forTest compositions. The
     // production path never carries this option — fail loudly otherwise.
@@ -310,9 +312,48 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null, iden
         })
         : null;
 
+    // MCP Lane 2 (ratified 2026-11-23; composition wiring 2026-11-24):
+    // when the composition root supplies a grant store, the composition
+    // carries a grant-proof verifier over the Owner credential's public
+    // key. The real verifier is built LAZILY on first use: the Owner may
+    // enroll after this composition was created, and the lane must arm
+    // without a daemon restart. Until an enrolled, unrevoked Owner
+    // credential exists, every 'grant-proof' evidence authenticates NO
+    // ONE (fail-closed, exactly as before this wiring existed).
+    let grantVerifierReal = null;
+    function liveGrantVerifier() {
+        if (grantVerifierReal) return grantVerifierReal;
+        if (!grantStore) return null;
+        try {
+            const ownerPrincipal = registry.getOwner();
+            const ownerCredId = ownerPrincipal && Array.isArray(ownerPrincipal.credentials)
+                ? ownerPrincipal.credentials[0] : null;
+            const ownerCred = ownerCredId ? registry.getCredential(ownerCredId) : null;
+            if (ownerCred && typeof ownerCred.publicKeyPem === "string" && ownerCred.revokedAtMs === null) {
+                grantVerifierReal = makeGrantVerifier({ ownerPublicKeyPem: ownerCred.publicKeyPem, grantStore, now: clock });
+            }
+        } catch { grantVerifierReal = null; }
+        return grantVerifierReal;
+    }
+    const grantVerifier = grantStore ? Object.freeze({
+        verify(evidence) {
+            const verifier = liveGrantVerifier();
+            return verifier ? verifier.verify(evidence) : null;
+        },
+        issueChallenge() {
+            const verifier = liveGrantVerifier();
+            if (!verifier) {
+                const err = new Error("MCP_GRANT_NOT_COMPOSED: no enrolled Owner credential for the grant lane");
+                err.code = "MCP_GRANT_NOT_COMPOSED";
+                throw err;
+            }
+            return verifier.issueChallenge();
+        },
+    }) : null;
+
     // The per-composition Owner/Admin auth verifier (bound to THIS
     // composition's registry/verifier, never the module-global singleton).
-    const authVerifier = makeAuthVerifier(registry, proofVerifier);
+    const authVerifier = makeAuthVerifier(registry, proofVerifier, grantVerifier);
     const ownerRatify = makeRatifyAsOwner(registry, proofVerifier);
     const humanConfirmation = makeHumanConfirmation(registry, proofVerifier, clock);
 
@@ -359,6 +400,64 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null, iden
         }
     }
 
+    /**
+     * MCP LANE 2 GRANT ISSUANCE (Console owner action): signs a Lane 2
+     * owner grant with the vault-sealed Owner root INTERNALLY - the same
+     * ceremony pattern as selfSignOwnerProof - and persists it in the
+     * composed grant store, where the canonical verifier rehydrates it.
+     * The private key never leaves the vault path. Returns the issued
+     * { grant, signature } (the owner hands these to the worker), or null
+     * when the ceremony cannot run (no lane / no active durable Owner /
+     * credential unusable). Invalid grant parameters throw from
+     * issueOwnerGrant - issuance is an owner action, not a request
+     * boundary, so bad input is loud.
+     */
+    function issueMcpGrant({ subject, workerPublicKeyPem, scope, ttlMs, agentId = null, maxExecutions = null } = {}) {
+        if (!grantStore || !liveGrantVerifier()) return null;
+        const owner = registry.getOwner();
+        if (!owner || registry.getState() !== "ACTIVE" || !durable) {
+            return null;
+        }
+        const credentialId = owner.credentials[0];
+        const cred = registry.getCredential(credentialId);
+        if (!cred || cred.vaultRef === null || cred.revokedAtMs !== null) {
+            return null;
+        }
+        const resolved = vault.resolve(`secretref:v1:${cred.vaultRef}:system`);
+        if (!resolved || resolved.ok === false || !resolved.value) {
+            return null;
+        }
+        let privatePem = null;
+        try {
+            privatePem = resolved.value.reveal();
+            const issued = issueOwnerGrant({
+                ownerPrivateKeyPem: privatePem, subject, workerPublicKeyPem,
+                scope, ttlMs, nowMs: clock(), agentId, maxExecutions
+            });
+            grantStore.put({ grant: issued.grant, signature: issued.signature, revoked: false });
+            return Object.freeze({ grant: issued.grant, signature: issued.signature });
+        } finally {
+            if (typeof privatePem === "string") privatePem = null;
+        }
+    }
+
+    /** Revoke a Lane 2 grant by id (store state is authoritative). */
+    function revokeMcpGrant(grantId) {
+        if (!grantStore || typeof grantId !== "string") return false;
+        return grantStore.markRevoked(grantId);
+    }
+
+    /** List Lane 2 grant records (metadata + status; signatures withheld). */
+    function listMcpGrants() {
+        if (!grantStore) return [];
+        return grantStore.list().map((rec) => Object.freeze({
+            grantId: rec.grant.grantId, subject: rec.grant.subject,
+            agentId: rec.grant.agentId ?? null, scope: [...rec.grant.scope],
+            issuedAtMs: rec.grant.issuedAtMs, expiresAtMs: rec.grant.expiresAtMs,
+            maxExecutions: rec.grant.maxExecutions ?? null, revoked: rec.revoked === true
+        }));
+    }
+
     // MD-018: brand the composition BEFORE it leaves this module — a sealed
     // WeakSet membership that duck-typed lookalikes (spread copies, forged
     // registries) can never obtain. Downstream trust consumers (Mata Dewa
@@ -374,6 +473,7 @@ async function compose(stateFile, { forTest = false, ledgerOverride = null, iden
         ratifyAsOwner: ownerRatify, principalBindings, channelBinders,
         continuityLinker, store, vault, auditGate, ledger: effectiveLedger, ingress,
         auditSink, selfSignOwnerProof, humanConfirmation,
+        grantVerifier, grantStore, issueMcpGrant, revokeMcpGrant, listMcpGrants,
         cliSession,
         identityStore,
         /**
@@ -544,7 +644,14 @@ async function canonical() {
         // (derived from the trusted trust-state root).  Absent => cliSession
         // fails closed.  No option is ever accepted from a caller.
         const identityStore = resolveProductionIdentityStore(stateFile);
-        compositionPromise = compose(stateFile, { identityStore })
+        // MCP Lane 2: the production grant store lives beside the trust
+        // state (derived from the same operator-controlled root, like the
+        // identity store - never a caller-chosen path). Memory mode has
+        // no durable state file, hence no grant store: lane uncomposed.
+        const grantStore = stateFile
+            ? createFileGrantStore(path.join(path.dirname(stateFile), "mcp-grants-v1.json"))
+            : null;
+        compositionPromise = compose(stateFile, { identityStore, grantStore })
             .then((c) => {
                 canonicalComposition = c;
                 // Install the canonical Owner/Admin proof verifier into the
@@ -611,7 +718,7 @@ function resolveOwnerAuthVerifier() {
     return function ownerAuthVerifier(evidence) {
         if (canonicalComposition === null) return null;
         const { registry, proofVerifier } = canonicalComposition;
-        return makeAuthVerifier(registry, proofVerifier)(evidence);
+        return makeAuthVerifier(registry, proofVerifier, canonicalComposition.grantVerifier ?? null)(evidence);
     };
 }
 
@@ -622,9 +729,9 @@ function resolveOwnerAuthVerifier() {
  * This does NOT install anything into the canonical auth adapter; it returns
  * the composition so the sealed host composition can wire it.
  */
-async function composeOwnerTrustForTest({ stateFile = null, ledgerOverride = null, identityStore = null } = {}) {
+async function composeOwnerTrustForTest({ stateFile = null, ledgerOverride = null, identityStore = null, grantStore = null } = {}) {
     return compose(stateFile === null ? null : path.resolve(stateFile),
-        { forTest: true, ledgerOverride, identityStore });
+        { forTest: true, ledgerOverride, identityStore, grantStore });
 }
 
 module.exports = Object.freeze({

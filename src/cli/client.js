@@ -140,6 +140,9 @@ class DaemonClient {
     trustBootstrapComplete(body) { return this.request("/owner-trust/bootstrap/complete", { method: "POST", body, timeout: 25000 }); }
     trustBindConsole()  { return this.request("/owner-trust/bind-console", { method: "POST", body: {} }); }
     trustLinkPolicy(enabled) { return this.request("/owner-trust/link-policy", { method: "POST", body: { enabled } }); }
+    trustListGrants()   { return this.request("/owner-trust/mcp-grants", { timeout: 25000 }); }
+    trustIssueGrant(body) { return this.request("/owner-trust/mcp-grants", { method: "POST", body, timeout: 25000 }); }
+    trustRevokeGrant(grantId) { return this.request("/owner-trust/mcp-grants/revoke", { method: "POST", body: { grantId } }); }
 
     /**
      * Chat streaming. Memanggil onChunk untuk tiap potongan SSE.
