@@ -20,3 +20,11 @@ Hasil pascacommit extension: `6f2777c4ef4e8b7a2ca0d79d6c6c17615dab3d53`; ancestr
 - Strategi A: dua commit padanan patch develop. Konflik `src/embodiment/identity/store.js`, `src/embodiment/identity/types.js`, `src/embodiment/index.js` mengambil ours, identik develop. Tidak ada file non-konflik berubah; diff seluruh area embodiment terhadap develop nol.
 - Scan: 0 temuan; 0 JS berubah. Tes `tests/embodiment/*.test.js`: 125 lulus, 1 gagal karena dependency `sqlite3` tidak terpasang (`identityFileStore.test.js` melalui helper capability). Ini hambatan lingkungan, bukan resolusi: source dan tes tidak berubah dibanding HEAD sebelumnya/develop.
 - Commit merge dan ancestry dicatat sesudah commit. Tidak membuat konfigurasi interface baru.
+
+Hasil pascacommit device: `4da6d10f517c3d55adad73d827935969983f9861`; ancestry sukses.
+
+## feat/audit-provenance-ledger-v1
+
+- Strategi A: tiga commit padanan. Konflik `docs/architecture/audit-ledger-v1.md`, `src/runtime/auditLedger/canonicalJson.js`, `src/runtime/auditLedger/index.js`, `src/runtime/auditLedger/ledger.js`: ours/develop kanonis.
+- Tidak ada file non-konflik berubah; diff area source, docs, tests terhadap develop nol. Scan 0 temuan, 0 JS berubah.
+- Tes auditLedger: 115 lulus, 1 gagal (`trustFoundationRepair.test.js`, dependency sqlite3 tidak terpasang). Tidak ada perubahan kode/tes dari baseline; bukan akibat resolusi. Hash merge/ancestry menyusul.
