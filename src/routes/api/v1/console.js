@@ -427,5 +427,8 @@ router.post("/owner-trust/bootstrap/begin", ownerTrustController.bootstrapBegin)
 router.post("/owner-trust/bootstrap/complete", ownerTrustController.bootstrapComplete);
 router.post("/owner-trust/bind-console", ownerTrustController.bindConsole);
 router.post("/owner-trust/link-policy", ownerTrustController.setLinkPolicy);
+router.get("/owner-trust/mcp-grants", ownerTrustController.listMcpGrants);
+router.post("/owner-trust/mcp-grants", ownerTrustController.issueMcpGrant);
+router.post("/owner-trust/mcp-grants/revoke", ownerTrustController.revokeMcpGrant);
 
 module.exports = router;

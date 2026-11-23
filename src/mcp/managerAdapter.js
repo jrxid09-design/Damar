@@ -50,6 +50,8 @@ function createManagerAdapter({ managerHandle, grantVerifier } = {}) {
         const { __grant, ...cleanArgs } = args;
         const request = {
             sessionId: typeof ctx?.exec?.sessionId === "string" ? ctx.exec.sessionId : "mcp",
+            channelType: "mcp",
+            channelId: "mcp",
             peer: "mcp",
             correlationId: `mcp-${Date.now()}`,
             authProof: {

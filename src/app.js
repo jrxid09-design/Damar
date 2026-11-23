@@ -67,7 +67,10 @@ app.use("/", routes);
 // Endpoint MCP (Model Context Protocol) — ekspos tool Damar ke klien
 // MCP mana pun (Claude Desktop, agen lain, penghuni koloni). Tool
 // destruktif disembunyikan kecuali DAMAR_MCP_ALLOW_DESTRUCTIVE=1.
-require("./mcp").attachMcp(app);
+// Lane 2 grant lane (wiring 2026-11-24): lazy facade - the canonical
+// composition resolves asynchronously; until it does (or when no Owner
+// grant lane exists) intent tools stay fail-closed. See mcp/grantLane.js.
+require("./mcp").attachMcp(app, { grantLane: require("./mcp/grantLane").createLazyGrantLane() });
 
 // Endpoint OpenAI-compatible (/v1/chat/completions) — jembatan otak
 // Damar untuk klien OpenAI, terutama penghuni koloni AetherGenesis
