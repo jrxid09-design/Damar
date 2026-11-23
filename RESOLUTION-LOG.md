@@ -35,3 +35,13 @@ Hasil pascacommit audit: `b7a5c890c017fac4ffc4ac2c052c5cd7b7af3fd4`; ancestry su
 
 - Strategi A: tiga commit padanan. Konflik `docs/vault-credential-map.md`, `src/runtime/vault/index.js`, `src/runtime/vault/vault.js`, `tests/vault/incarnation.test.js`, `tests/vault/repair-cert.test.js`, `tests/vault/store-write-precondition.test.js`, `tests/vault/store.test.js`, `tests/vault/storm.test.js`: semuanya ours/develop kanonis.
 - Tidak ada file non-konflik berubah. Diff source, docs, tests terhadap develop nol. Scan 0 temuan; 0 JS berubah. Tes vault: 157 lulus, 0 gagal. Hash/ancestry menyusul.
+
+Hasil pascacommit vault: `6d9056bb790607ff2ecae73b38437e758816463e`; ancestry sukses.
+
+## feat/w8-l2-active-perception
+
+- Strategi B; kedua sisi dan riwayat `canonicalRuntimeComposition.js` dibaca. Sumber `c964a8fb` memperkenalkan L2; HEAD sudah memiliki reintegrasi lebih lengkap `5430870d`, closed-loop `3b894ba4`, serta penutupan completion seam `f7dcb212`. Konflik diselesaikan per hunk secara manual: pertahankan L2 perception lane dan private trusted adapter, plus verifier L6, closedLoop construction/export yang lebih baru. Tidak membuang komposisi inti dengan checkout satu sisi. Hasil komposisi identik HEAD karena semua tambahan sumber sudah terintegrasi pada lineage baru.
+- Satu tambahan nyata non-konflik: `W8_L2_L6_TRUSTED_RESULT_HANDOFF.md` (kontrak keamanan completion). Auto-merge tes L1 tidak menghasilkan perubahan. Tidak ada konfigurasi silo baru.
+- Scan index: 1 file berubah, 0 temuan; 0 JS berubah. Komposisi juga diperiksa `node --check`, lulus. Diff check lulus.
+- Tes L2+L6: 48 lulus, 0 gagal. Tes L1 import-graph terarah: 1 lulus, 0 gagal. Suite L1 penuh tidak selesai pada batas 120 detik (juga percobaan force-exit/test-timeout); output berhenti setelah repair-19 dengan 20 assertion lulus, tanpa ringkasan akhir. Tidak diklaim lulus. File tes dan komposisi identik HEAD sebelum merge; riwayat `78d90464` sudah menunjukkan stabilisasi lifecycle fixture. Ini keterbatasan verifikasi baseline, bukan kegagalan assertion akibat resolusi; perlu ditinjau owner.
+- Hash merge dan ancestry menyusul.
