@@ -23,3 +23,10 @@ Branch: `feat/mcp-worker-bridge`. Worktree: `C:\Workspace\Damar-mcp-worker`.
 - Tes: pemeriksaan statis `src/manager/internal/managerBootstrap.js`, `src/authority/ownerTrustComposition.js`, `src/action/bootstrap.js`; tes A1 terakhir `npm run test:safety` lulus 535, gagal 0, skip 6 dari 541. Tes penuh akhir menyusul.
 - Commit: dicatat setelah commit ini terbentuk.
 - Dampak: A3–A5 bergantung pada adapter A2. B1 menuntut handle agentfed terjangkau adapter A2 dan surface owner dengan store ACC yang sama; B2–B6 bergantung pada komposisi itu. Tidak ada tahap berikutnya yang dapat diselesaikan sesuai kontrak tanpa keputusan owner atas jalur autentikasi kanonik.
+
+## A1 — Perbaikan tes daftar kanal — 2026-11-23 20:32 WIB
+
+- Perubahan: ekspektasi tes adapter bawaan ditambah kanal `mcp`; temuan berasal dari full suite setelah STOP A2. Tidak mengubah perilaku produksi.
+- File: `tests/manager/channelAdapters.test.js`, `PROGRESS.md`, `WORKER-REPORT.md`.
+- Tes: `npm test` pertama gagal pada ekspektasi daftar kanal di `tests/manager/channelAdapters.test.js` (angka total tidak tertangkap karena output difilter); `node --test --require ./tests/helpers/testEnv.js tests/manager/channelAdapters.test.js` setelah perbaikan lulus 2/2. Full suite diulang setelah commit.
+- Commit: dicatat setelah commit ini terbentuk.
