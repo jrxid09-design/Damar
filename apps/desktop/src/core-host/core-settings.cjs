@@ -17,7 +17,7 @@ const fs = require('node:fs'), path = require('node:path'), crypto = require('no
 const PROFILES = ['ask', 'workspace-auto', 'full-access', 'read-only'];
 const NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 // presence: Idle Presence / Notch surface config (read by the presence surface via GET /api/r9/presence/settings).
-const PRESENCE_DEFAULTS = () => ({ idleToNotchMs: 10000, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, displayName: '' });
+const PRESENCE_DEFAULTS = () => ({ idleToNotchMs: 10000, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, displayName: 'Maronns' });
 const PRESENCE_RULES = {
   idleToNotchMs: v => Number.isSafeInteger(v) && v >= 1000 && v <= 600000,
   morphMs: v => Number.isSafeInteger(v) && v >= 0 && v <= 5000,
@@ -27,7 +27,7 @@ const PRESENCE_RULES = {
   display: v => typeof v === 'string' && /^[A-Za-z0-9._:\\-]{1,64}$/.test(v),
   position: v => v === 'top-center',
   voiceEnabled: v => typeof v === 'boolean', // opt-in microphone for the presence surface (Electron 'media' audio only)
-  displayName: v => typeof v === 'string' && v.length <= 40 && !/[\x00-\x1f\x7f<>]/.test(v), // greeting name; '' = none
+  displayName: v => typeof v === 'string' && v.length <= 40 && !/[\x00-\x1f\x7f<>]/.test(v), // greeting name; default is the Owner's name, '' = no name in the greeting
 };
 // cli: DAMAR CLI appearance shared by the CLI Settings Center and Control (null until first set/imported, so the CLI can
 // migrate a legacy local profile once). lastSelection: provider/model last accepted by POST /api/r9/provider (recorded by
