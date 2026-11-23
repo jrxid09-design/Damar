@@ -362,7 +362,7 @@ async function child(directory, resume, recovered = false) {
     r9 = require('./r9-routes.cjs').createR9Routes({
       directory, credentials: runtime.credentials, hub, registry, turns, checkpoints, settings: coreSettings, modelGrants, providerAdmin, team,
       parallelRuns: Number(process.env.DAMAR_PANDAWA_PARALLEL || 3),
-      mataDewa: require('../mata-dewa/index.cjs').createMataDewa({ settings: coreSettings, keyStore, cacheFile: path.join(directory, 'mata-dewa-cache.json'), profileDir: path.join(path.dirname(settingsFile), 'mata-dewa'), python, alprDir: path.join(SCRATCH, 'alpr'), // installed: %LOCALAPPDATA%\DAMAR\alpr
+      mataDewa: require('../mata-dewa/index.cjs').createMataDewa({ proactiveAutostart: true, settings: coreSettings, keyStore, cacheFile: path.join(directory, 'mata-dewa-cache.json'), profileDir: path.join(path.dirname(settingsFile), 'mata-dewa'), python, alprDir: path.join(SCRATCH, 'alpr'), // installed: %LOCALAPPDATA%\DAMAR\alpr
         // ALPR watchlist hits join the redacted activity feed (requester: camera label only; owner: plate in `detail`).
         onAlert: a => turns.noteActivity({ kind: 'alert', source: 'mata-dewa', label: String(a.cameraName).slice(0, 40) + ' · watchlist match', detail: a.plate }) }),
       lifecycle: lifecycleBridge, jobSnapshot: () => {

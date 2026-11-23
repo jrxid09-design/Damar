@@ -257,11 +257,37 @@ const CCTV_SOURCES = ['tfl-london', 'fintraffic'];
 const SETTINGS_DEFAULTS = () => ({ consent: false, contactUrl: '', feeds: ['earthquakes', 'weather', 'disasters', 'satellites', 'launches'],
   areas: [{ id: 'jakarta', name: 'Jakarta', lat: -6.2, lon: 106.8, radiusKm: 150 }],
   refreshSec: Object.fromEntries(FEED_IDS.map(id => [id, FEEDS[id].defaultRefreshSec])), satelliteGroup: 'stations',
-  cctvSources: [], cctvNoticeAt: null, alprNoticeAt: null, alprRetentionDays: 30, alprIntervalSec: 15 });
+  cctvSources: [], cctvNoticeAt: null, alprNoticeAt: null, alprRetentionDays: 30, alprIntervalSec: 15, watchPoints: [], alerts: ALERTS_DEFAULTS() });
 const validArea = a => !!a && typeof a === 'object' && !Array.isArray(a) && Object.keys(a).sort().join() === 'id,lat,lon,name,radiusKm' &&
   AREA_ID.test(a.id) && typeof a.name === 'string' && AREA_NAME.test(a.name) && Number.isFinite(a.lat) && a.lat >= -90 && a.lat <= 90 &&
   Number.isFinite(a.lon) && a.lon >= -180 && a.lon <= 180 && Number.isFinite(a.radiusKm) && a.radiusKm >= 5 && a.radiusKm <= 460;
 const validStamp = v => v === null || (typeof v === 'string' && v.length <= 40 && /^\d{4}-\d\d-\d\dT/.test(v) && Number.isFinite(Date.parse(v)));
+// Proactive alerts (Fase 6): thresholds/channels/quiet hours for the Core alert engine.
+// Defaults are neutral product values; a user's own thresholds live only in their config.
+const ALERTS_DEFAULTS = () => ({ enabled: true, quakeMinMagnitude: 5, quakeMaxAgeHours: 6, quakeRadiusKm: 150,
+  weatherWindowHours: 6, stormPrecipMm: 4, stormWindKmh: 60, tickMinutes: 10, gpsEnabled: true, imageryAlerts: false,
+  quietHours: { start: '22:00', end: '06:00' }, channels: { notch: true, telegram: false, whatsapp: false } });
+function sanitizeAlerts(v) {
+  const d = ALERTS_DEFAULTS(); if (!v || typeof v !== 'object' || Array.isArray(v)) return d;
+  const num = (k, min, max) => { if (Number.isFinite(v[k]) && v[k] >= min && v[k] <= max) d[k] = v[k]; };
+  if (typeof v.enabled === 'boolean') d.enabled = v.enabled;
+  num('quakeMinMagnitude', 3, 10); num('quakeMaxAgeHours', 1, 48); num('quakeRadiusKm', 10, 1000);
+  num('weatherWindowHours', 1, 24); num('stormPrecipMm', 0.5, 50); num('stormWindKmh', 20, 200); num('tickMinutes', 1, 120);
+  if (typeof v.gpsEnabled === 'boolean') d.gpsEnabled = v.gpsEnabled;
+  if (typeof v.imageryAlerts === 'boolean') d.imageryAlerts = v.imageryAlerts;
+  if (v.quietHours && /^\d{2}:\d{2}$/.test(v.quietHours.start || '') && /^\d{2}:\d{2}$/.test(v.quietHours.end || '')) d.quietHours = { start: v.quietHours.start, end: v.quietHours.end };
+  if (v.channels && typeof v.channels === 'object') for (const k of ['notch', 'telegram', 'whatsapp']) if (typeof v.channels[k] === 'boolean') d.channels[k] = v.channels[k];
+  return d;
+}
+// Watch points: named locations for proactive alert evaluation - personal
+// locations and infrastructure assets alike (any user's towers, warehouses,
+// farms, sites). sourceUrl keeps the provenance of an imported point.
+const validWatchPoint = w => !!w && typeof w === 'object' && !Array.isArray(w) &&
+  ['id', 'lat', 'lon', 'name', 'radiusKm', 'profile'].every(k => k in w) && Object.keys(w).every(k => ['id', 'lat', 'lon', 'name', 'radiusKm', 'profile', 'sourceUrl'].includes(k)) &&
+  AREA_ID.test(w.id) && typeof w.name === 'string' && AREA_NAME.test(w.name) && Number.isFinite(w.lat) && w.lat >= -90 && w.lat <= 90 &&
+  Number.isFinite(w.lon) && w.lon >= -180 && w.lon <= 180 && Number.isFinite(w.radiusKm) && w.radiusKm >= 1 && w.radiusKm <= 460 &&
+  (w.profile === 'personal' || w.profile === 'asset') &&
+  (w.sourceUrl === undefined || (typeof w.sourceUrl === 'string' && w.sourceUrl.length <= 300 && w.sourceUrl.startsWith('https://')));
 const SETTINGS_RULES = {
   consent: v => typeof v === 'boolean',
   feeds: v => Array.isArray(v) && v.length <= FEED_IDS.length && new Set(v).size === v.length && v.every(id => FEED_IDS.includes(id)),
@@ -273,12 +299,14 @@ const SETTINGS_RULES = {
   contactUrl: v => v === '' || (typeof v === 'string' && v.length <= 200 && /^(https:\/\/[A-Za-z0-9.-]+(\/[A-Za-z0-9._~\/-]*)?|mailto:[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)$/.test(v)),
   alprRetentionDays: v => Number.isSafeInteger(v) && v >= 1 && v <= 365,
   alprIntervalSec: v => Number.isSafeInteger(v) && v >= 5 && v <= 3600,
+  watchPoints: v => Array.isArray(v) && v.length <= 200 && v.every(validWatchPoint) && new Set(v.map(w => w.id)).size === v.length,
+  alerts: v => !!v && typeof v === 'object' && !Array.isArray(v),
 };
-const copy = (k, v) => k === 'areas' ? v.map(a => ({ id: a.id, name: a.name, lat: a.lat, lon: a.lon, radiusKm: a.radiusKm })) : Array.isArray(v) ? [...v] : v;
+const copy = (k, v) => k === 'areas' ? v.map(a => ({ id: a.id, name: a.name, lat: a.lat, lon: a.lon, radiusKm: a.radiusKm })) : k === 'watchPoints' ? v.map(w => ({ ...w })) : Array.isArray(v) ? [...v] : v;
 // Stored values that no longer validate are dropped (defaults apply), like presence.*.
 function sanitizeSettings(v) {
   const d = SETTINGS_DEFAULTS(); if (!v || typeof v !== 'object' || Array.isArray(v)) return d;
-  for (const k of Object.keys(SETTINGS_RULES)) if (v[k] !== undefined && SETTINGS_RULES[k](v[k])) d[k] = k === 'refreshSec' ? { ...d.refreshSec, ...v[k] } : copy(k, v[k]);
+  for (const k of Object.keys(SETTINGS_RULES)) if (v[k] !== undefined && SETTINGS_RULES[k](v[k])) d[k] = k === 'refreshSec' ? { ...d.refreshSec, ...v[k] } : k === 'alerts' ? sanitizeAlerts(v[k]) : copy(k, v[k]);
   return d;
 }
 // Owner partial update; every key is validated before anything changes. Throws MATA_DEWA_SETTINGS_INVALID.
@@ -286,8 +314,8 @@ function mergeSettings(current, input) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(k => !SETTINGS_RULES[k] || !SETTINGS_RULES[k](input[k])))
     throw Object.assign(Error('MATA_DEWA_SETTINGS_INVALID'), { status: 400 });
   const next = sanitizeSettings(current);
-  for (const k of Object.keys(input)) next[k] = k === 'refreshSec' ? { ...next.refreshSec, ...input[k] } : copy(k, input[k]);
+  for (const k of Object.keys(input)) next[k] = k === 'refreshSec' ? { ...next.refreshSec, ...input[k] } : k === 'alerts' ? sanitizeAlerts(input[k]) : copy(k, input[k]);
   return next;
 }
 
-module.exports = { FEEDS, FEED_IDS, KEY_FEEDS, SAT_GROUPS, CCTV_SOURCES, redactAircraft, openskyState, vesselsFrom, parseTle, parseFirmsCsv, bbox, SETTINGS_DEFAULTS, SETTINGS_RULES, sanitizeSettings, mergeSettings };
+module.exports = { FEEDS, FEED_IDS, KEY_FEEDS, SAT_GROUPS, CCTV_SOURCES, redactAircraft, openskyState, vesselsFrom, parseTle, parseFirmsCsv, bbox, SETTINGS_DEFAULTS, SETTINGS_RULES, sanitizeSettings, mergeSettings, sanitizeAlerts, ALERTS_DEFAULTS, validWatchPoint };
