@@ -7,6 +7,8 @@
 // interval and persisted (bounded) to the Core session directory so a restart does not re-hit upstream quotas.
 const fs = require('node:fs'), path = require('node:path');
 const { FEEDS, FEED_IDS, KEY_FEEDS, CCTV_SOURCES, SETTINGS_DEFAULTS } = require('./feeds.cjs');
+const { createProactiveAlerts } = require('./proactive/proactive-alerts.cjs');
+const { resolveMapsLink } = require('./proactive/maps-link.cjs');
 const egress = require('./egress.cjs');
 const { createCameras, PUBLIC_SOURCES } = require('./cameras.cjs');
 const { createAlpr, pythonEngine } = require('./alpr.cjs');
@@ -45,9 +47,28 @@ function wsWindow(url, subscription, { windowMs = 8000, maxBytes = 4 * 1024 * 10
 }
 
 function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, now = Date.now, timeoutMs = 10000, keyStore = null, cacheFile = null, profileDir = null, python = null,
-  cameras: camerasIn = null, alprEngine = null, alprDir = null, onAlert = null }) {
+  cameras: camerasIn = null, alprEngine = null, alprDir = null, onAlert = null, proactiveAutostart = false }) {
   const cache = new Map(), inflight = new Map(), keys = new Map();
   const config = () => settings?.mataDewa?.()?.mataDewa || SETTINGS_DEFAULTS();
+  // ---- proactive alerts (Fase 6): autonomous Core engine over these feeds ----
+  let gpsReport = null; // latest mobile-node GPS report (in-memory; the node re-reports on its cadence)
+  const proactive = createProactiveAlerts({
+    getSettings: () => { const c = config(); return { ...c, alerts: { ...(c.alerts || {}), enabled: !!(c.alerts?.enabled && c.consent) } }; },
+    getProfile: () => { try { return settings?.presence?.()?.presence || {}; } catch { return {}; } },
+    getGps: () => gpsReport,
+    providers: {
+      quakes: async () => (await load('earthquakes', null, config())).items || [],
+      forecast: async (loc) => {
+        const text = await fetch('https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=' + loc.lat.toFixed(4) + '&lon=' + loc.lon.toFixed(4), { timeoutMs, headers: { 'user-agent': egress.userAgent(config().contactUrl) }, maxBytes: 512 * 1024 });
+        const ts = (JSON.parse(text).properties?.timeseries) || [];
+        return ts.map(e => { const n1 = e.data?.next_1_hours || {}; const inst = e.data?.instant?.details || {}; return { time: e.time, precipitationMm: typeof n1.details?.precipitation_amount === 'number' ? n1.details.precipitation_amount : null, symbol: n1.summary?.symbol_code || null, windKmh: typeof inst.wind_speed === 'number' ? Math.round(inst.wind_speed * 36) / 10 : null }; });
+      },
+      hotspots: async (loc) => { const v = await load('fires', { lat: loc.lat, lon: loc.lon, radiusKm: loc.radiusKm }, config()).catch(() => null); return ((v && v.items) || []).map(i => ({ lat: i.lat, lon: i.lon, frp: typeof i.frp === 'number' ? i.frp : null, time: i.time || i.acqDate || null })); },
+      // scenes: intentionally not wired live yet - the public STAC host is an egress-allowlist decision (see docs/proactive-alerts-design.md).
+    },
+    channels: {}, // Notch = delivery log + the proactive route below; external channels report status "ready" until DAMAR's own channel config exists.
+  });
+  { const ac = config().alerts; if (proactiveAutostart && ac?.enabled) proactive.start((ac.tickMinutes || 10) * 60000); }
   const cameras = camerasIn || createCameras({ profileDir, keyStore });
   const alpr = createAlpr({ profileDir, cameras, settings: config, engine: alprEngine || pythonEngine({ basePython: python, ...(alprDir ? { dir: alprDir } : {}) }), now, onAlert });
 
@@ -175,7 +196,41 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
       }
       if (p.startsWith('/api/r9/mata-dewa/alpr')) {
         ownerOnly(); alpr.schedule();
-        if (p === '/api/r9/mata-dewa/alpr' && !isPost) return json(200, { success: true, data: { status: alpr.status(), entries: alpr.entries(), watchlist: alpr.watchlist(), alerts: alpr.alerts().slice(0, 100) } });
+        if (p === '/api/r9/mata-dewa/proactive') {
+      if (!owner) return json(403, { success: false, error: 'OWNER_REQUIRED' });
+      if (isPost) { const summary = await proactive.tick('manual'); return json(200, { success: true, data: { summary } }); }
+      return json(200, { success: true, data: { status: proactive.status(), deliveries: proactive.recentDeliveries(50) } });
+    }
+    if (p === '/api/r9/mata-dewa/location/gps' && isPost) {
+      if (!owner) return json(403, { success: false, error: 'OWNER_REQUIRED' });
+      const b = body || {};
+      if (!Number.isFinite(b.lat) || Math.abs(b.lat) > 90 || !Number.isFinite(b.lon) || Math.abs(b.lon) > 180) return json(400, { success: false, error: 'GPS_INVALID' });
+      gpsReport = { lat: b.lat, lon: b.lon, at: Number.isFinite(b.at) ? b.at : Date.now(), ...(Number.isFinite(b.radiusKm) ? { radiusKm: Math.min(1000, Math.max(10, b.radiusKm)) } : {}) };
+      return json(200, { success: true, data: { recorded: true } });
+    }
+    if (p === '/api/r9/mata-dewa/watchpoints/import-link' && isPost) {
+      if (!owner) return json(403, { success: false, error: 'OWNER_REQUIRED' });
+      const b = body || {};
+      const httpGet = async (u) => { const r = await globalThis.fetch(u, { redirect: 'manual', signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined }); let text = ''; if (r.status === 200) text = (await r.text()).slice(0, 1024 * 1024); return { status: r.status, location: r.headers.get('location') || undefined, body: text }; };
+      const resolved = await resolveMapsLink(typeof b.url === 'string' ? b.url : '', { httpGet });
+      if (!resolved.ok) return json(400, { success: false, error: resolved.error });
+      const profile = b.profile === 'personal' ? 'personal' : 'asset';
+      const cleanName = (n) => { const c = String(n || '').replace(/[^\p{L}\p{N} .,'()_-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 40); return c || 'Titik pantau'; };
+      const cur = [...(config().watchPoints || [])];
+      let imported = 0, skipped = 0;
+      for (const pt of resolved.points) {
+        if (cur.length >= 200) { skipped++; continue; }
+        if (cur.some(w => Math.abs(w.lat - pt.lat) < 0.0001 && Math.abs(w.lon - pt.lon) < 0.0001)) { skipped++; continue; }
+        const name = cleanName(pt.name);
+        let id = 'wp-' + (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 18) || 'point'); let n = 2;
+        while (cur.some(w => w.id === id)) id = 'wp-' + (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 15) || 'point') + '-' + (n++);
+        cur.push({ id, name, lat: pt.lat, lon: pt.lon, radiusKm: profile === 'asset' ? 50 : 25, profile, sourceUrl: resolved.sourceUrl });
+        imported++;
+      }
+      if (imported) { if (typeof settings.update === 'function') settings.update({ mataDewa: { watchPoints: cur } }); else if (typeof settings.set === 'function') settings.set({ watchPoints: cur }); else return json(501, { success: false, error: 'SETTINGS_READ_ONLY' }); }
+      return json(200, { success: true, data: { kind: resolved.kind, mapTitle: resolved.mapTitle || null, imported, skipped, total: cur.length } });
+    }
+    if (p === '/api/r9/mata-dewa/alpr' && !isPost) return json(200, { success: true, data: { status: alpr.status(), entries: alpr.entries(), watchlist: alpr.watchlist(), alerts: alpr.alerts().slice(0, 100) } });
         if (p === '/api/r9/mata-dewa/alpr') {
           const input = await body(req, 2048);
           // Owner-consented engine install (venv + pinned packages + model weights; network to the disclosed hosts).
@@ -193,7 +248,7 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
     }
   }
 
-  return { handle, status, feed, setKey, cameras, alpr, wsWindow };
+  return { handle, status, feed, setKey, cameras, alpr, wsWindow, proactive };
 }
 
 module.exports = { createMataDewa, NOTICE, wsWindow };
