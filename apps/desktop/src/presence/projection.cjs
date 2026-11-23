@@ -9,7 +9,7 @@ const PRIVACY = ['redacted', 'counts-only', 'hidden'];
 const text = (v, n = 120) => (typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, ' ').slice(0, n) : null);
 const RUN_STATE = { ACCEPTED: 'ACTIVE', RUNNING: 'ACTIVE', COMPLETED: 'COMPLETED', FAILED: 'FAILED', CANCELLED: 'CANCELLED', OUTCOME_UNKNOWN: 'UNKNOWN' };
 
-// core: { reachable, lifecycle:{state,outstanding}, sessions:[...], runs:[...], asOf } from core-presence.cjs.
+// core: { reachable, lifecycle:{state,outstanding}, sessions:[...], runs:[...], media, asOf } from core-presence.cjs.
 // Pandawa task text and output previews are user content: never projected (title = worker name only).
 function project(core, { notificationPrivacy = 'redacted' } = {}) {
   const privacy = PRIVACY.includes(notificationPrivacy) ? notificationPrivacy : 'redacted';
@@ -37,14 +37,52 @@ function project(core, { notificationPrivacy = 'redacted' } = {}) {
       : x.privacy_sensitivity !== 'NORMAL' ? 'Sensitive notification' : x.summary,
   }));
   const sessions = Array.isArray(core.sessions) ? core.sessions : [];
+  const sessionPills = projectSessionPills(sessions, privacy);
+  const media = projectMedia(core.media);
   return {
     status: 'CONNECTED', reason: '',
     presence: { simulated: false, source: 'damar-core', lifecycle: lifecycleState, asOf: core.asOf || null,
       activity: { activeTurns, pendingPermissions: pending, activePandawaRuns: activeRuns, sessions: sessions.length },
+      sessionPills, media,
       // Voice state is not read from Core here, and is never used to infer health.
       voice: { available: false, state: 'Unknown' } },
     approvals, missions, notifications,
   };
+}
+
+// Per-session pills for the notch (Fase 3b): one pill per Core session, projected from the
+// Core session registry (cli-sessions summaries via core-presence) - NEVER from surface-local
+// state, so work arriving from the CLI or a headless mission shows up here exactly like work
+// started from Presence itself. Allowlist is strict: the session id is a capability key and
+// the cwd is user content, so neither is copied; the label is the session title (or a neutral
+// placeholder), stripped entirely under counts-only/hidden privacy.
+function projectSessionPills(sessions = [], privacy = 'redacted') {
+  const rows = (Array.isArray(sessions) ? sessions : []).map(s => {
+    if (!s || typeof s !== 'object') return null;
+    const openOps = Array.isArray(s.openOperations) ? s.openOperations.length : 0;
+    const activeSubs = Number.isSafeInteger(s.activeSubagentRuns) ? s.activeSubagentRuns : 0;
+    const state = s.closed ? 'CLOSED' : (openOps > 0 || activeSubs > 0 ? 'WORKING' : (s.attached ? 'ATTACHED' : 'IDLE'));
+    return {
+      label: privacy === 'redacted' ? (text(s.title, 40) || 'CLI session') : 'CLI session',
+      state,
+      model: text(s.model, 60),
+      openOperations: openOps,
+      activeSubagentRuns: activeSubs,
+      updatedAt: Number.isSafeInteger(s.updatedAt) ? s.updatedAt : null,
+      closed: s.closed === true,
+    };
+  }).filter(Boolean);
+  rows.sort((a, b) => (a.closed - b.closed) || ((b.updatedAt || 0) - (a.updatedAt || 0)));
+  return rows.slice(0, 8).map(({ closed, ...pill }) => pill);
+}
+
+// Now-playing for the music pill (Fase 3a): projected from the SMTC sense in core-host
+// (core.media). Unavailable stays null - the notch shows no pill rather than a fake track.
+function projectMedia(media) {
+  if (!media || media.available !== true) return null;
+  const status = text(media.status, 20) || 'Unknown';
+  return { title: text(media.title, 120), artist: text(media.artist, 80), sourceApp: text(media.sourceApp, 60),
+    status, playing: status === 'Playing' };
 }
 
 // One status line for the notch (counts only, no user content).
@@ -86,4 +124,4 @@ function activityRows(activity = [], privacy = 'redacted') {
     .map(a => (a.kind === 'alert' && privacy === 'counts-only' ? { ...a, label: null } : a));
 }
 
-module.exports = { project, statusLine, pendingPermission, activityRow, activityRows, PRIVACY };
+module.exports = { project, statusLine, pendingPermission, activityRow, activityRows, projectSessionPills, projectMedia, PRIVACY };

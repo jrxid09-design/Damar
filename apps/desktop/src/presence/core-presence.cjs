@@ -7,7 +7,7 @@ const fs = require('node:fs'), path = require('node:path');
 const { coreEndpoint } = require('../cli/core-endpoint.cjs');
 const { boundedResponse } = require('../cli/service.cjs');
 
-const READS = Object.freeze(['/api/r9/lifecycle', '/api/r9/sessions', '/api/r9/pandawa/runs', '/api/r9/presence/settings', '/api/r9/cli/settings', '/api/r9/activity']);
+const READS = Object.freeze(['/api/r9/lifecycle', '/api/r9/sessions', '/api/r9/pandawa/runs', '/api/r9/presence/settings', '/api/r9/cli/settings', '/api/r9/activity', '/api/r9/media']);
 const readAllowed = route => READS.includes(route) || /^\/api\/r9\/activity\?from=\d{1,9}$/.test(route);
 // Contract agreed with Control (presence.* namespace). Defaults equal the Owner prototype values.
 const DEFAULTS = Object.freeze({ idleToNotchMs: 10000, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, displayName: '' });
@@ -69,7 +69,7 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
     endpoint,
     async snapshot() {
       try {
-        const [life, sessions, runs, activity] = await Promise.all(['/api/r9/lifecycle', '/api/r9/sessions', '/api/r9/pandawa/runs', '/api/r9/activity?from=' + activityFrom].map(get));
+        const [life, sessions, runs, activity, media] = await Promise.all(['/api/r9/lifecycle', '/api/r9/sessions', '/api/r9/pandawa/runs', '/api/r9/activity?from=' + activityFrom, '/api/r9/media'].map(get));
         if (!life.ok || life.body?.success !== true) return { reachable: false, status: life.status };
         const fresh = activity.ok && activity.body?.success === true ? activity.body.data : null;
         if (fresh) {
@@ -79,6 +79,7 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
         }
         return { reachable: true, asOf: new Date().toISOString(), lifecycle: life.body.data,
           sessions: sessions.ok ? sessions.body?.data?.sessions || [] : null, runs: runs.ok ? runs.body?.data?.runs || [] : null,
+          media: media.ok && media.body?.success === true ? media.body.data : null,
           activity: [...activityLog.values()], activityAvailable: !!fresh };
       } catch { return { reachable: false, status: 0 }; }
     },
@@ -93,6 +94,15 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
       const response = await transport(`${endpoint}/api/r9/turns/${turnId}/permission`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(4000),
         headers: { accept: 'application/json', 'content-type': 'application/json', authorization: 'Bearer ' + token('owner') },
         body: JSON.stringify({ permissionId, decision, surface: 'notch' }) });
+      return { ok: response.ok, status: response.status, body: await boundedResponse(response).catch(() => null) };
+    },
+    // Owner media control from the notch (play/pause/next/previous). Main process only, owner
+    // token - the same trust posture as decide(). Action allowlist enforced again in core-host.
+    async mediaControl(action) {
+      if (!['play', 'pause', 'next', 'previous'].includes(action)) throw Error('MEDIA_ACTION_INVALID');
+      const response = await transport(endpoint + '/api/r9/media', { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
+        headers: { accept: 'application/json', 'content-type': 'application/json', authorization: 'Bearer ' + token('owner') },
+        body: JSON.stringify({ action }) });
       return { ok: response.ok, status: response.status, body: await boundedResponse(response).catch(() => null) };
     },
     // 404 (route not mounted yet) or any failure -> prototype defaults; source says which.

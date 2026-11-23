@@ -32,7 +32,7 @@ function readJsonl(file) {
 const tokenEq = (a, b) => typeof a === 'string' && typeof b === 'string' && crypto.timingSafeEqual(crypto.createHash('sha256').update(a).digest(), crypto.createHash('sha256').update(b).digest());
 const clean = (s, n) => String(s ?? '').replace(/[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, ' ').slice(0, n);
 
-function createR9Routes({ directory, credentials, hub, registry, canonicalUsageToday, turns = null, sandbox = () => null, checkpoints = null, memory = null, settings = null, budget = null, lifecycle = null, jobSnapshot = () => null, modelGrants = null, mataDewa = null, team = null, providerAdmin = null, parallelRuns = 3 }) {
+function createR9Routes({ directory, credentials, hub, registry, canonicalUsageToday, turns = null, sandbox = () => null, checkpoints = null, memory = null, settings = null, budget = null, lifecycle = null, jobSnapshot = () => null, modelGrants = null, mataDewa = null, team = null, providerAdmin = null, media = null, parallelRuns = 3 }) {
   if (!Number.isSafeInteger(parallelRuns) || parallelRuns < 1 || parallelRuns > 3) throw Error('PANDAWA_PARALLEL_INVALID');
   const runsFile = path.join(directory, 'pandawa-runs.jsonl'), receiptsFile = path.join(directory, 'usage-receipts.jsonl');
   const runs = new Map(), byRequest = new Map(), receipts = new Map();
@@ -212,6 +212,25 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
         if (!requestId) return json(429, { success: false, error: 'CORE_RESTART_RATE_LIMIT_OR_SUPERVISOR_UNAVAILABLE' });
         res.once('finish', () => lifecycle.commit(requestId));
         return json(202, { success: true, data: { state: 'RESTART_ACCEPTED' } });
+      }
+      // Windows media session (Fase 3a): SMTC now-playing for the Notch music pill. Read = any
+      // authenticated role; control = Owner only (it drives the owner's own desktop playback).
+      if (p === '/api/r9/media') {
+        if (req.method === 'GET' && !url.search) {
+          return json(200, { success: true, data: media ? await media.getSession() : { available: false, reason: 'MEDIA_NOT_COMPOSED' } });
+        }
+        if (req.method === 'POST' && !url.search) {
+          if (who !== 'owner') return json(403, { success: false, error: 'OWNER_REQUIRED' });
+          if (!media) return json(503, { success: false, error: 'MEDIA_NOT_COMPOSED' });
+          const input = await body(req, 1024);
+          try {
+            const result = await media.control(input.action);
+            return json(200, { success: true, data: result });
+          } catch (e) {
+            return json(400, { success: false, error: e && e.code ? e.code : 'MEDIA_CONTROL_FAILED' });
+          }
+        }
+        return json(405, { success: false, error: 'METHOD_NOT_ALLOWED' });
       }
       // Workspace sandbox policy for /sandbox (read-only description of the enforced boundary).
       if (req.method === 'GET' && p === '/api/r9/sandbox' && !url.search) return json(200, { success: true, data: sandbox() });
