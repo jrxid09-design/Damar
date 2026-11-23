@@ -84,7 +84,24 @@ function createWorkGraph({ type = "DIRECT", objective, members = [], steps = [],
     const nodes = [];
     if (steps.length) {
         if (!Array.isArray(steps) || steps.length > limit.maxWidth) throw new RangeError("PANDAWA_GRAPH_WIDTH_EXCEEDED");
-        steps.forEach(step => nodes.push(makeNode({ ownerEntity: step.ownerEntity || step.agent || selected[nodes.length % selected.length], objective: step.objective || step.task, dependencies: step.dependencies || step.dependsOn || [], inputRefs: step.inputRefs || [], depth: 1 })));
+        // Steps name their dependencies in step-local terms: the step's own
+        // `id` (the canonical execution-plan shape: { id: "s1", dependsOn:
+        // ["s1"] }) or a zero-based step index. Those references are remapped
+        // to the created nodes' workIds below - copying them verbatim left
+        // every chained steps-graph unbuildable (assertAcyclic rejects ids
+        // that are not workIds) or, if bypassed, never runnable (runGraph
+        // matches dependencies against completed workIds).
+        const rawDeps = steps.map(step => [...(step.dependencies || step.dependsOn || [])]);
+        steps.forEach(step => nodes.push(makeNode({ ownerEntity: step.ownerEntity || step.agent || selected[nodes.length % selected.length], objective: step.objective || step.task, dependencies: [], inputRefs: step.inputRefs || [], depth: 1 })));
+        const byStepRef = new Map();
+        steps.forEach((step, i) => { if (typeof step.id === "string" && step.id) byStepRef.set(step.id, nodes[i].workId); byStepRef.set(i, nodes[i].workId); });
+        nodes.forEach((node, i) => {
+            node.dependencies = rawDeps[i].map(dep => (byStepRef.has(dep) ? byStepRef.get(dep) : dep));
+            // SEQUENTIAL / REVIEW_CHAIN carry their chaining in the graph type
+            // (the members branch chains i -> i-1); a step that declares no
+            // dependencies in such a graph chains to the previous step.
+            if (!rawDeps[i].length && i > 0 && (type === "SEQUENTIAL" || type === "REVIEW_CHAIN")) node.dependencies = [nodes[i - 1].workId];
+        });
     } else {
         const task = text(objective, "OBJECTIVE");
         if (type === "DIRECT") nodes.push(makeNode({ ownerEntity: selected[0], objective: task }));
