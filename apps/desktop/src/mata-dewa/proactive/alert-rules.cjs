@@ -74,5 +74,83 @@ const imageryObservation = {
   },
 };
 
-const RULES = [quakeNear, weatherStorm, fireNear, imageryObservation];
+// BMKG quake list as an input equivalent to USGS for the same rule: the
+// evaluation is quake-near's, re-attributed - event ids and source say BMKG.
+const bmkgQuakeNear = {
+  id: 'bmkg-quake-near', profiles: ['personal', 'asset'], input: 'bmkgQuakes',
+  evaluate(ctx) {
+    return quakeNear.evaluate(ctx).map(s => ({ ...s, ruleId: 'bmkg-quake-near', eventId: 'bmkg-' + s.eventId,
+      data: { ...s.data, source: 'BMKG' } }));
+  },
+};
+
+// Tsunami relay (design principle): when BMKG's own published Potensi
+// wording flags tsunami potential for a relevant quake, DAMAR relays that
+// official wording verbatim with attribution and localizes it to the
+// watch point. DAMAR never issues its own tsunami assessment: a negative
+// or absent BMKG flag never fires, and the relayed text is BMKG's.
+const tsunamiRelay = {
+  id: 'tsunami-relay', profiles: ['personal', 'asset'], input: 'bmkgQuakes',
+  evaluate({ items = [], location, cfg, nowMs }) {
+    const out = [];
+    const minMag = cfg.tsunamiMinMagnitude ?? 7;
+    for (const q of items) {
+      const potensi = String(q.potensi || '').toLowerCase();
+      if (!potensi.includes('berpotensi tsunami') || potensi.includes('tidak berpotensi')) continue;
+      if (!Number.isFinite(q.magnitude) || q.magnitude < minMag) continue;
+      const at = Date.parse(q.time); if (!Number.isFinite(at) || nowMs - at > (cfg.quakeMaxAgeHours ?? 6) * hourMs || at > nowMs + 5 * 60e3) continue;
+      const distanceKm = Math.round(haversineKm(location, q));
+      if (distanceKm > location.radiusKm) continue;
+      out.push({ ruleId: 'tsunami-relay', kind: 'alert', eventId: 'tsunami:' + q.id, severity: 'critical',
+        data: { magnitude: q.magnitude, place: q.place || '', depthKm: q.depthKm, distanceKm, time: q.time, potensi: q.potensi, source: 'BMKG' } });
+    }
+    return out;
+  },
+};
+
+// BMKG extreme weather: the official village forecast (api.bmkg.go.id)
+// for watch points that carry a wilayah code (adm4). Thunderstorm codes
+// 95/97 (or a "petir" description) warn; heavy-rain code 63 (or "lebat")
+// watches. Points without adm4 receive no items from the provider.
+const bmkgExtremeWeather = {
+  id: 'bmkg-extreme-weather', profiles: ['personal', 'asset'], input: 'bmkgForecast',
+  evaluate({ items = [], location, cfg, nowMs }) {
+    const until = nowMs + (cfg.weatherWindowHours ?? 6) * hourMs;
+    const severe = items.filter(e => {
+      const at = Date.parse(e.time); if (!Number.isFinite(at) || at < nowMs - 30 * 60e3 || at > until) return false;
+      const desc = String(e.weatherDesc || '').toLowerCase();
+      e._thunder = e.weatherCode === 95 || e.weatherCode === 97 || desc.includes('petir');
+      e._heavy = e.weatherCode === 63 || desc.includes('lebat');
+      return e._thunder || e._heavy;
+    }).sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
+    if (!severe.length) return [];
+    const e = severe[0];
+    const leadMinutes = Math.max(0, Math.round((Date.parse(e.time) - nowMs) / 60000));
+    return [{ ruleId: 'bmkg-extreme-weather', kind: 'alert', eventId: 'bmkgwx:' + location.id + ':' + e.time.slice(0, 13), severity: e._thunder ? 'warning' : 'watch',
+      data: { at: e.time, leadMinutes, weatherDesc: e.weatherDesc || '', thunder: !!e._thunder, precipitationMm: e.precipitationMm ?? null, windKmh: e.windKmh ?? null, source: 'BMKG' } }];
+  },
+};
+
+// PVMBG volcano status: fires when a volcano within range stands at or
+// above the configured activity level (default III - Siaga). Status data
+// comes from PVMBG (MAGMA Indonesia) through the volcanoes provider;
+// levels are the agency's own (I Normal / II Waspada / III Siaga / IV Awas).
+const volcanoStatus = {
+  id: 'volcano-status', profiles: ['personal', 'asset'], input: 'volcanoes',
+  evaluate({ items = [], location, cfg, nowMs }) {
+    const out = [];
+    const minLevel = cfg.volcanoMinLevel ?? 3;
+    const radiusKm = cfg.volcanoRadiusKm ?? location.radiusKm;
+    for (const v of items) {
+      if (!Number.isFinite(v.lat) || !Number.isFinite(v.lon) || !Number.isSafeInteger(v.level) || v.level < minLevel) continue;
+      const distanceKm = Math.round(haversineKm(location, v));
+      if (distanceKm > radiusKm) continue;
+      out.push({ ruleId: 'volcano-status', kind: 'alert', eventId: 'volcano:' + v.name + ':' + v.level, severity: v.level >= 4 ? 'critical' : 'warning',
+        data: { volcano: v.name, level: v.level, levelLabel: v.levelLabel || '', distanceKm, source: v.source || 'PVMBG (MAGMA Indonesia)' } });
+    }
+    return out;
+  },
+};
+
+const RULES = [quakeNear, weatherStorm, fireNear, imageryObservation, bmkgQuakeNear, tsunamiRelay, bmkgExtremeWeather, volcanoStatus];
 module.exports = { RULES, SEVERITY_RANK };

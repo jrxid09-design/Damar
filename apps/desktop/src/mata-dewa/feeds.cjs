@@ -266,7 +266,9 @@ const validStamp = v => v === null || (typeof v === 'string' && v.length <= 40 &
 // Defaults are neutral product values; a user's own thresholds live only in their config.
 const ALERTS_DEFAULTS = () => ({ enabled: true, quakeMinMagnitude: 5, quakeMaxAgeHours: 6, quakeRadiusKm: 150,
   weatherWindowHours: 6, stormPrecipMm: 4, stormWindKmh: 60, tickMinutes: 10, gpsEnabled: true, imageryAlerts: false,
-  quietHours: { start: '22:00', end: '06:00' }, channels: { notch: true, telegram: false, whatsapp: false } });
+  tsunamiMinMagnitude: 7, volcanoMinLevel: 3, volcanoRadiusKm: 150,
+  quietHours: { start: '22:00', end: '06:00' }, channels: { notch: true, telegram: false, whatsapp: false },
+  channelTargets: { telegram: { chatId: '' }, whatsapp: { phoneNumberId: '', to: '' } } });
 function sanitizeAlerts(v) {
   const d = ALERTS_DEFAULTS(); if (!v || typeof v !== 'object' || Array.isArray(v)) return d;
   const num = (k, min, max) => { if (Number.isFinite(v[k]) && v[k] >= min && v[k] <= max) d[k] = v[k]; };
@@ -277,17 +279,28 @@ function sanitizeAlerts(v) {
   if (typeof v.imageryAlerts === 'boolean') d.imageryAlerts = v.imageryAlerts;
   if (v.quietHours && /^\d{2}:\d{2}$/.test(v.quietHours.start || '') && /^\d{2}:\d{2}$/.test(v.quietHours.end || '')) d.quietHours = { start: v.quietHours.start, end: v.quietHours.end };
   if (v.channels && typeof v.channels === 'object') for (const k of ['notch', 'telegram', 'whatsapp']) if (typeof v.channels[k] === 'boolean') d.channels[k] = v.channels[k];
+  num('tsunamiMinMagnitude', 5, 10); num('volcanoRadiusKm', 10, 1000);
+  if (Number.isSafeInteger(v.volcanoMinLevel) && v.volcanoMinLevel >= 2 && v.volcanoMinLevel <= 4) d.volcanoMinLevel = v.volcanoMinLevel;
+  // Channel targets are NON-SECRET routing config for DAMAR's own external
+  // channels; the tokens themselves live in DAMAR's vault, never in settings.
+  if (v.channelTargets && typeof v.channelTargets === 'object') {
+    const t = v.channelTargets.telegram, w = v.channelTargets.whatsapp;
+    if (t && typeof t.chatId === 'string' && t.chatId.length <= 64 && /^-?[0-9]*$/.test(t.chatId)) d.channelTargets.telegram.chatId = t.chatId;
+    if (w && typeof w.phoneNumberId === 'string' && w.phoneNumberId.length <= 32 && /^[0-9]*$/.test(w.phoneNumberId)) d.channelTargets.whatsapp.phoneNumberId = w.phoneNumberId;
+    if (w && typeof w.to === 'string' && w.to.length <= 32 && /^[0-9]*$/.test(w.to)) d.channelTargets.whatsapp.to = w.to;
+  }
   return d;
 }
 // Watch points: named locations for proactive alert evaluation - personal
 // locations and infrastructure assets alike (any user's towers, warehouses,
 // farms, sites). sourceUrl keeps the provenance of an imported point.
 const validWatchPoint = w => !!w && typeof w === 'object' && !Array.isArray(w) &&
-  ['id', 'lat', 'lon', 'name', 'radiusKm', 'profile'].every(k => k in w) && Object.keys(w).every(k => ['id', 'lat', 'lon', 'name', 'radiusKm', 'profile', 'sourceUrl'].includes(k)) &&
+  ['id', 'lat', 'lon', 'name', 'radiusKm', 'profile'].every(k => k in w) && Object.keys(w).every(k => ['id', 'lat', 'lon', 'name', 'radiusKm', 'profile', 'sourceUrl', 'adm4'].includes(k)) &&
   AREA_ID.test(w.id) && typeof w.name === 'string' && AREA_NAME.test(w.name) && Number.isFinite(w.lat) && w.lat >= -90 && w.lat <= 90 &&
   Number.isFinite(w.lon) && w.lon >= -180 && w.lon <= 180 && Number.isFinite(w.radiusKm) && w.radiusKm >= 1 && w.radiusKm <= 460 &&
   (w.profile === 'personal' || w.profile === 'asset') &&
-  (w.sourceUrl === undefined || (typeof w.sourceUrl === 'string' && w.sourceUrl.length <= 300 && w.sourceUrl.startsWith('https://')));
+  (w.sourceUrl === undefined || (typeof w.sourceUrl === 'string' && w.sourceUrl.length <= 300 && w.sourceUrl.startsWith('https://'))) &&
+  (w.adm4 === undefined || (typeof w.adm4 === 'string' && /^\d{2}\.\d{2}\.\d{2}\.\d{4}$/.test(w.adm4)));
 const SETTINGS_RULES = {
   consent: v => typeof v === 'boolean',
   feeds: v => Array.isArray(v) && v.length <= FEED_IDS.length && new Set(v).size === v.length && v.every(id => FEED_IDS.includes(id)),
