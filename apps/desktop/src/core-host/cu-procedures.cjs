@@ -90,12 +90,40 @@ function createProcedureStore({ file } = {}) {
   };
 }
 
+// Window-target remapping for reflex replay (Fase 5 fix). A recorded
+// act step carries the window identity of the RECORD session - title +
+// pid (the broker re-verifies title+pid at dispatch). Pids are per-boot
+// process ids: after the app restarts, the recorded pid matches nothing
+// (the Fase 5 baseline replay died exactly here, at step 0, before any
+// model call). Title is the stable part of the identity, so before
+// replay each step's pid/hwnd is re-resolved from the CURRENT window
+// list by exact title. A step whose title has no current window is left
+// untouched: it fails honestly at dispatch instead of acting on a guess.
+function remapWindowTargets(steps, windows) {
+  const byTitle = new Map();
+  for (const w of Array.isArray(windows) ? windows : []) {
+    if (w && typeof w.title === 'string' && w.title && !byTitle.has(w.title)) byTitle.set(w.title, w);
+  }
+  return (Array.isArray(steps) ? steps : []).map(step => {
+    const args = step && step.args;
+    if (!args || typeof args.title !== 'string') return step;
+    const cur = byTitle.get(args.title);
+    if (!cur) return step;
+    const next = { ...args };
+    if (Number.isSafeInteger(cur.pid)) next.pid = cur.pid;
+    if ('hwnd' in next && Number.isSafeInteger(cur.hwnd)) next.hwnd = cur.hwnd;
+    return { ...step, args: next };
+  });
+}
+
 // Reflex replay: run the stored steps through the caller's authorized tool
 // runner, in order, stopping at the first failed step. No model is involved;
 // the caller proves that by counting its own model calls around this function.
-async function replayProcedure(proc, slots, runTool) {
+// Pass { windows } (a fresh observe) to re-resolve window targets first.
+async function replayProcedure(proc, slots, runTool, { windows = null } = {}) {
   const results = [];
-  const steps = fillSlots(proc.steps, slots);
+  const filled = fillSlots(proc.steps, slots);
+  const steps = windows ? remapWindowTargets(filled, windows) : filled;
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     let parsed = null;
@@ -113,4 +141,4 @@ async function replayProcedure(proc, slots, runTool) {
   return { ok: true, results };
 }
 
-module.exports = { createProcedureStore, replayProcedure, goalSignature, slotify, fillSlots };
+module.exports = { createProcedureStore, replayProcedure, goalSignature, slotify, fillSlots , remapWindowTargets };
