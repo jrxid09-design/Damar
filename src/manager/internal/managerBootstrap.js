@@ -429,10 +429,16 @@ function composeManagerInternal({
                 throw mfail(MREASONS.SYMBOL_VALUE, "symbol keys are not permitted");
             }
             const kind = ap.kind;
-            if (kind !== "owner-proof" && kind !== "admin-proof") {
-                throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "authProof.kind must be 'owner-proof' or 'admin-proof'");
+            if (kind !== "owner-proof" && kind !== "admin-proof" && kind !== "grant-proof") {
+                throw mfail(MREASONS.INVALID_MANAGER_REQUEST, "authProof.kind must be 'owner-proof', 'admin-proof' or 'grant-proof'");
             }
-            authProof = deepFreezeM({
+            authProof = kind === "grant-proof" ? deepFreezeM({
+                kind,
+                grantId: mRequireString(ap.grantId, "authProof.grantId", 128),
+                toolId: mRequireString(ap.toolId, "authProof.toolId", 128),
+                popNonce: mRequireString(ap.popNonce, "authProof.popNonce", 256),
+                popSignature: mRequireString(ap.popSignature, "authProof.popSignature", 512)
+            }) : deepFreezeM({
                 kind,
                 credentialId: mRequireString(ap.credentialId, "authProof.credentialId", 128),
                 nonce: mRequireString(ap.nonce, "authProof.nonce", 256),

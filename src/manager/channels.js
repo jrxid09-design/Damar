@@ -107,6 +107,11 @@ const CHANNEL_ADAPTERS = Object.freeze([
         channelType: CHANNEL_TYPES.VOICE,
         normalizeInbound: normalizeCommon,
         renderOutbound: renderCommon
+    },
+    {
+        channelType: CHANNEL_TYPES.MCP,
+        normalizeInbound: normalizeCommon,
+        renderOutbound: renderCommon
     }
 ]);
 
