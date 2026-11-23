@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 300" width="800" height="300" role="img" aria-labelledby="t d">
+  <title id="t">Illustrative token allocation for one governed session</title>
+  <desc id="d">Horizontal bar chart of illustrative placeholder token counts for one sample session: observe and classify 900, reason and plan 3400, governed action preparation 700, verify and audit 1850, continuity write 600, for an illustrative total of 7450 tokens. Not live telemetry.</desc>
+  <defs>
+    <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="6" height="6" fill="#241d0e"/>
+      <line x1="0" y1="0" x2="0" y2="6" stroke="#c9a35c" stroke-width="2"/>
+    </pattern>
+  </defs>
+  <rect x="0" y="0" width="800" height="300" fill="#0d0d10"/>
+  <text x="24" y="36" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="bold" letter-spacing="3" fill="#ece7d8">TOKENS PER GOVERNED SESSION — ILLUSTRATIVE</text>
+  <text x="24" y="56" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#8a8578">Sample data, not live telemetry. Placeholder values for the future control plane.</text>
+
+  <g font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+    <!-- rows: label x=24, bar starts x=270, scale 0.11 px/token -->
+    <g>
+      <text x="24" y="92" fill="#c9c4b4">Observe &amp; classify</text>
+      <rect x="270" y="80" width="99" height="16" fill="#4a4b53"/>
+      <text x="379" y="93" fill="#a7a294">900</text>
+    </g>
+    <g>
+      <text x="24" y="127" fill="#c9c4b4">Reason &amp; plan</text>
+      <rect x="270" y="115" width="374" height="16" fill="url(#hatch)" stroke="#c9a35c" stroke-width="1"/>
+      <text x="654" y="128" fill="#e0c07a" font-weight="bold">3,400</text>
+    </g>
+    <g>
+      <text x="24" y="162" fill="#c9c4b4">Governed action preparation</text>
+      <rect x="270" y="150" width="77" height="16" fill="#4a4b53"/>
+      <text x="357" y="163" fill="#a7a294">700</text>
+    </g>
+    <g>
+      <text x="24" y="197" fill="#c9c4b4">Verify &amp; audit</text>
+      <rect x="270" y="185" width="204" height="16" fill="#7a6535"/>
+      <text x="484" y="198" fill="#c9a35c">1,850</text>
+    </g>
+    <g>
+      <text x="24" y="232" fill="#c9c4b4">Continuity write</text>
+      <rect x="270" y="220" width="66" height="16" fill="#4a4b53"/>
+      <text x="346" y="233" fill="#a7a294">600</text>
+    </g>
+    <line x1="270" y1="254" x2="644" y2="254" stroke="#2c2d33" stroke-width="1"/>
+    <text x="24" y="274" fill="#ece7d8" font-weight="bold">Total</text>
+    <text x="610" y="274" fill="#ece7d8" font-weight="bold" text-anchor="end">7,450 tokens — illustrative</text>
+  </g>
+</svg>
