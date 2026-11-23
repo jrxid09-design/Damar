@@ -304,6 +304,20 @@ async function child(directory, resume, recovered = false) {
     // DAMAR /v1 gateway: its own listener (off until the Owner enables it in Control), settings + keys beside the profile.
     const gateway = require('./gateway.cjs').createGateway({ file: path.join(grantsDir, 'gateway.json'), registry, router: providerRouter, budget: liveBudget });
     try { await gateway.start(); } catch (error) { console.error('GATEWAY_START_FAILED ' + error.code); }
+    const oauthLogin = require('./oauth-login.cjs').createOAuthLogin({ keyStore, registrySync: {
+      connect: async (key) => {
+        try {
+          if (!registry?.list().providers.some(p => p.id === 'openrouter' && p.kind === 'live')) return { synced: false, note: 'no-openrouter-connection' };
+          const added = registry.addKeys('openrouter', key);
+          const kid = added?.added?.[0]?.kid;
+          if (kid) keyStore.save('oauth-openrouter-kid', kid);
+          return { synced: !!kid, note: kid ? undefined : 'duplicate-or-invalid' };
+        } catch { return { synced: false, note: 'sync-failed' }; }
+      },
+      disconnect: async () => {
+        try { const kid = keyStore.load('oauth-openrouter-kid'); if (kid) registry.deleteKey('openrouter', kid); keyStore.forget('oauth-openrouter-kid'); } catch {}
+      },
+    } });
     const providerAdmin = require('./provider-admin-routes.cjs').createProviderAdminRoutes({ registry, router: providerRouter, gateway, budget: liveBudget });
     // Agent turns: Core's real agent loop with host workspace tools under real Core authority grants (see workspace-*.cjs).
     const PROTECTED = [path.resolve('C:/Workspace/Damar'), path.resolve(__dirname, '../../../../ui-prototypes') /* Owner-approved UI design prototypes */, path.resolve('C:/Workspace/damar-uix-control-center-v2'),
@@ -361,7 +375,7 @@ async function child(directory, resume, recovered = false) {
       roleOf: m => m === 'damar' ? { label: 'DAMAR (lead)', mandate: 'You lead the Pandawa team: weigh the members proposals on evidence and decide.' } : identity.roleProfile(m) });
     const mediaSession = require('./media-session.cjs').createMediaSession({});
     r9 = require('./r9-routes.cjs').createR9Routes({
-      directory, credentials: runtime.credentials, hub, registry, turns, checkpoints, settings: coreSettings, modelGrants, providerAdmin, team, media: mediaSession,
+      directory, credentials: runtime.credentials, hub, registry, turns, checkpoints, settings: coreSettings, modelGrants, providerAdmin, team, media: mediaSession, oauthLogin,
       parallelRuns: Number(process.env.DAMAR_PANDAWA_PARALLEL || 3),
       mataDewa: require('../mata-dewa/index.cjs').createMataDewa({ proactiveAutostart: true, settings: coreSettings, keyStore, cacheFile: path.join(directory, 'mata-dewa-cache.json'), profileDir: path.join(path.dirname(settingsFile), 'mata-dewa'), python, alprDir: path.join(SCRATCH, 'alpr'), // installed: %LOCALAPPDATA%\DAMAR\alpr
         // ALPR watchlist hits join the redacted activity feed (requester: camera label only; owner: plate in `detail`).
@@ -389,7 +403,8 @@ async function child(directory, resume, recovered = false) {
     server.removeAllListeners('request');
     server.on('request', (req, res) => {
       const url = new URL(req.url, 'http://127.0.0.1');
-      if (control.isControlPath(url.pathname)) return control.serveControl(req, res, url);
+      if (url.pathname === '/oauth/openrouter/callback') return oauthLogin.handleCallbackHttp(req, res, url);
+    if (control.isControlPath(url.pathname)) return control.serveControl(req, res, url);
       if (LEGACY_UI.test(url.pathname)) return retired(res);
       const ours = url.pathname.startsWith('/api/v1/console') || url.pathname.startsWith('/api/r9/');
       if (!ours) { for (const l of original) l.call(server, req, res); return; }
