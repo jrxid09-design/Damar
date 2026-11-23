@@ -19,13 +19,31 @@ const { rejectLegacyActionRoute } = require("../manager/legacyBoundary");
  * tool) — lihat mcpClientManager; dimulai otomatis oleh
  * aiRuntimeService saat daemon boot.
  */
-function attachMcp(app) {
+function attachMcp(app, { grantLane = null } = {}) {
+    // Lane 2 (ratified): when the composition supplies a grant lane
+    // ({ managerHandle, grantVerifier }), the four intent tools plus the
+    // challenge tool are projected through the Manager adapter. Without a
+    // grant lane, behavior is exactly as before (discovery open, execution
+    // fail-closed at the legacy boundary).
+    const adapter = grantLane ? require("./managerAdapter").createManagerAdapter(grantLane) : null;
 
     const handler = createMcpHandler({
+        // Disclosure: registry tools pass the canonical permission-before-
+        // disclosure filter unchanged. The Lane 2 intent tools are disclosed
+        // whenever the grant lane is composed: they are inert without
+        // per-call owner-grant evidence (the adapter rejects evidence-less
+        // calls before the Manager), so listing them leaks no capability.
+        disclosureFilter: adapter ? (tools, exec) => {
+            const base = require("../ai/tools/Authorization").disclosureFilter(tools, exec);
+            const keep = new Set(base.map(t => t.name));
+            for (const t of tools) if (adapter.isAdapterTool(t.name ?? t.id)) keep.add(t.name ?? t.id);
+            return tools.filter(t => keep.has(t.name ?? t.id));
+        } : undefined,
         registry: {
-            describe: () => ToolRegistry.describe(),
-            has: (id) => ToolRegistry.has(id),
+            describe: () => (adapter ? [...ToolRegistry.describe(), ...adapter.descriptors] : ToolRegistry.describe()),
+            has: (id) => ToolRegistry.has(id) || (adapter ? adapter.isAdapterTool(id) : false),
             execute: (id, args, ctx) => {
+                if (adapter && adapter.isAdapterTool(id)) return adapter.execute(id, args, ctx);
                 // The legacy MCP tools/call contract accepts an arbitrary
                 // registry id and bypasses Manager → Lane 2 → Lane 3.
                 // Keep discovery available, but fail before authorization or
@@ -49,17 +67,18 @@ function attachMcp(app) {
         });
 
     // Teruskan identitas auth ke handler (ctx.exec untuk execute).
-    app.use("/mcp", (req, _res, next) => {
+    app.use("/mcp", guard, (req, _res, next) => {
         req.mcpExec = {
-            role: req.authIdentity?.role ?? "user",
+            role: req.authIdentity.role,
+            principal: "mcp",
             channel: "mcp",
-            sessionId: req.authIdentity?.sessionId ?? "mcp:anon",
-            source: "mcp"
+            sessionId: req.authIdentity.sessionId,
+            source: req.authIdentity.source
         };
         next();
     });
 
-    app.post("/mcp", guard, async (req, res, next) => {
+    app.post("/mcp", async (req, res, next) => {
         try {
             const out = await handler.handle(req.body, { exec: req.mcpExec });
             if (out === null) return res.status(202).end();
@@ -67,7 +86,7 @@ function attachMcp(app) {
         } catch (e) { next(e); }
     });
 
-    app.get("/mcp/health", guard, (req, res) => {
+    app.get("/mcp/health", (req, res) => {
         // H9: jumlah tool kini identitas-spesifik (paritas disklosur).
         res.json({ ok: true, server: "damar-mcp", tools: handler.visibleTools(req.mcpExec).length, destructive: process.env.DAMAR_MCP_ALLOW_DESTRUCTIVE === "1" });
     });

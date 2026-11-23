@@ -23,6 +23,7 @@
  */
 
 const { ensureCanonicalComposed } = require("../../../../authority/ownerTrustComposition");
+const { STATES: AGENTFED_STATES } = require("../../../../agentfed");
 
 function fail(res, code, message, status = 400) {
     return res.status(status).json({ ok: false, code, message });
@@ -134,10 +135,84 @@ async function setLinkPolicy(req, res) {
     }
 }
 
+/**
+ * MCP LANE 2 GRANTS (B2 surface, wiring 2026-11-24). The console token
+ * authenticates the operator; issuance itself is an Owner ceremony that
+ * runs INSIDE the composition (the vault-sealed Owner root signs -
+ * comp.issueMcpGrant enforces ACTIVE + durable + usable credential and
+ * returns null otherwise). No key material is accepted or returned over
+ * HTTP except the issued grant + its owner signature, which the owner
+ * hands to the worker. Revocation is a fail-safe action: flipping store
+ * state can only ever REMOVE access, so it needs no extra ceremony.
+ */
+async function listMcpGrants(_req, res) {
+    try {
+        const comp = await ensureCanonicalComposed();
+        const grants = comp.listMcpGrants();
+        const nowMs = Date.now();
+        return res.json({
+            ok: true,
+            laneComposed: Boolean(comp.grantVerifier),
+            grants,
+            // agentfed binding view (B3): an external agent exists for
+            // Damar only through an owner grant naming it. This is that
+            // binding state, computed live from the grant store.
+            agentBindings: grants
+                .filter((g) => g.agentId !== null)
+                .map((g) => ({
+                    agentId: g.agentId, grantId: g.grantId, subject: g.subject,
+                    scope: g.scope, expiresAtMs: g.expiresAtMs,
+                    state: g.revoked ? "REVOKED" : (nowMs >= g.expiresAtMs ? "EXPIRED" : "BOUND")
+                })),
+            federationStates: AGENTFED_STATES
+        });
+    } catch (error) {
+        return fail(res, error && error.code ? error.code : "OT_INTERNAL",
+            error && error.message ? error.message : "grant list failed");
+    }
+}
+
+async function issueMcpGrant(req, res) {
+    try {
+        const comp = await ensureCanonicalComposed();
+        const { subject, workerPublicKeyPem, scope, ttlMs, agentId, maxExecutions } = req.body ?? {};
+        const issued = comp.issueMcpGrant({
+            subject, workerPublicKeyPem, scope, ttlMs,
+            agentId: agentId ?? null, maxExecutions: maxExecutions ?? null
+        });
+        if (!issued) {
+            return fail(res, "OT_GRANT_UNAVAILABLE",
+                "grant lane not composed or Owner ceremony unavailable", 409);
+        }
+        return res.json({ ok: true, grant: issued.grant, signature: issued.signature });
+    } catch (error) {
+        return fail(res, error && error.code ? error.code : "OT_GRANT_INVALID",
+            error && error.message ? error.message : "grant issuance failed");
+    }
+}
+
+async function revokeMcpGrant(req, res) {
+    try {
+        const comp = await ensureCanonicalComposed();
+        const { grantId } = req.body ?? {};
+        if (typeof grantId !== "string" || grantId.length === 0) {
+            return fail(res, "OT_GRANT_INVALID", "grantId required");
+        }
+        const revoked = comp.revokeMcpGrant(grantId);
+        return res.json({ ok: true, revoked });
+    } catch (error) {
+        return fail(res, error && error.code ? error.code : "OT_INTERNAL",
+            error && error.message ? error.message : "grant revocation failed");
+    }
+}
+
 module.exports = Object.freeze({
     trustStatus,
     bootstrapBegin,
     bootstrapComplete,
     bindConsole,
-    setLinkPolicy
+    setLinkPolicy,
+    listMcpGrants,
+    issueMcpGrant,
+    revokeMcpGrant
 });

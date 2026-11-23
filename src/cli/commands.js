@@ -382,6 +382,57 @@ const COMMANDS = {
         }
     },
 
+    grants: {
+        desc: "grant MCP Lane 2: list | issue <subject> <fileKunciPublikWorker> [scopeCsv] [ttlJam] | revoke <grantId>",
+        async run(session, arg) {
+            const fs = require("node:fs");
+            const parts = arg.trim().split(/\s+/).filter(Boolean);
+            const sub = parts[0] ?? "list";
+            if (sub === "list") {
+                const s = await session.client.trustListGrants();
+                if (!s.ok) throw new Error(s.message ?? "list grants gagal");
+                console.log("\n  " + c.muted("lane") + " " + (s.laneComposed ? "composed" : "NOT composed"));
+                if (!s.grants.length) console.log("  " + c.muted("grants") + " -");
+                for (const g of s.grants) {
+                    console.log("  " + c.text(g.grantId) + "  " + g.subject + (g.agentId ? " @" + g.agentId : "") +
+                        "  [" + g.scope.join(", ") + "]  exp " + new Date(g.expiresAtMs).toLocaleString() + (g.revoked ? "  REVOKED" : ""));
+                }
+                if (s.agentBindings && s.agentBindings.length) {
+                    for (const b of s.agentBindings) {
+                        console.log("  " + c.muted("agent") + " " + b.agentId + " -> " + b.state + " (" + b.grantId + ")");
+                    }
+                }
+                return;
+            }
+            if (sub === "revoke") {
+                const grantId = parts[1];
+                if (!grantId) throw new Error("pakai: grants revoke <grantId>");
+                const s = await session.client.trustRevokeGrant(grantId);
+                if (!s.ok) throw new Error(s.message ?? "revoke gagal");
+                console.log("  " + (s.revoked ? "revoked" : "grant tidak ditemukan") + ": " + grantId);
+                return;
+            }
+            if (sub === "issue") {
+                const subject = parts[1];
+                const keyFile = parts[2];
+                if (!subject || !keyFile) throw new Error("pakai: grants issue <subject> <fileKunciPublikWorker> [scopeCsv] [ttlJam]");
+                const workerPublicKeyPem = fs.readFileSync(keyFile, "utf8");
+                const scope = parts[3] ? parts[3].split(",").map((x) => x.trim()).filter(Boolean)
+                    : ["damar.submit_intent", "damar.get_task_status", "damar.cancel_task", "damar.list_capabilities"];
+                const ttlMs = (Number(parts[4]) > 0 ? Number(parts[4]) : 24) * 3600_000;
+                const s = await session.client.trustIssueGrant({ subject, workerPublicKeyPem, scope, ttlMs });
+                if (!s.ok) throw new Error(s.message ?? "issue grant gagal");
+                console.log("  " + c.muted("grantId") + " " + s.grant.grantId);
+                console.log("  " + c.muted("subject") + " " + s.grant.subject);
+                console.log("  " + c.muted("expires") + " " + new Date(s.grant.expiresAtMs).toLocaleString());
+                console.log("  " + c.muted("signature") + " " + s.signature);
+                console.log("  " + c.warn("Serahkan grantId + signature ke worker; kunci privat worker tidak pernah meninggalkan worker."));
+                return;
+            }
+            throw new Error("subcommand: list | issue | revoke");
+        }
+    },
+
     "owner-provision": {
         desc: "bootstrap Owner pertama (vault-mode; kunci tidak pernah keluar)",
         async run(session, arg) {
