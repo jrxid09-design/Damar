@@ -1,5 +1,6 @@
 const { AITool } = require("../ai/tools");
-const env = require("./env");
+const { executeCanonicalAction, contextFromExecution } = require("../services/canonicalActionClient");
+const ML = "damar.ml";
 
 /**
  * Tool AI/ML — Damar sebagai peneliti & insinyur ML.
@@ -24,7 +25,7 @@ function mlTools() {
                 "di GPU — jangan pernah mengarang ketersediaan GPU/CUDA. Bila Python belum ada, " +
                 "hasilnya berkata apa adanya (bukan 'torch tidak terpasang').",
             parameters: { type: "object", properties: {} },
-            execute: async () => env.probe()
+            execute: async (_, execution) => executeCanonicalAction({ context: contextFromExecution(execution), capabilityId: ML, operation: "probe", arguments: {}, expectedPostcondition: { expect: { completed: { op: "eq", value: true } } } })
         }),
 
         new AITool({
@@ -45,7 +46,7 @@ function mlTools() {
                     timeout: { type: "number", description: "Batas waktu ms (default 600000 = 10 menit)." }
                 }
             },
-            execute: async ({ code, file, cwd, timeout }) => env.run({ code, file, cwd, timeout })
+            execute: async ({ code, file, cwd, timeout }, execution) => executeCanonicalAction({ context: contextFromExecution(execution), capabilityId: ML, operation: "run", arguments: { code, file, cwd, timeout }, expectedPostcondition: { expect: { operation: { op: "eq", value: "run" }, parametersMatch: { op: "eq", value: true }, completed: { op: "eq", value: true } } } })
         })
 
     ];

@@ -1,5 +1,32 @@
 {
   "schemaVersion": 1,
+  "integrationResolution": {
+    "basis": "HEAD census preserved, including post-recovery and L2/L4 entries; counters remain the historical measured-source snapshot, not a new census.",
+    "source": "f3b04b082ff4de02154067f0e291f7540cb1da9c",
+    "sourceChangedFiles": [
+      "src/action/capabilities/embodimentWiring.js",
+      "src/autonomy/GoalEngine.js",
+      "src/autonomy/index.js",
+      "src/controllers/nasController.js",
+      "src/mcp/mcpClient.js",
+      "src/mcp/mcpClientManager.js",
+      "src/ml/tools.js",
+      "src/security/auditor.js",
+      "src/security/tools.js",
+      "src/services/aiRuntimeService.js",
+      "src/services/autonomyTools.js",
+      "src/services/embodimentDrivers.js",
+      "src/services/immichDeployService.js",
+      "src/services/opencodeTools.js",
+      "src/services/terminalTools.js",
+      "tests/safety/autonomyStack.test.js",
+      "tests/safety/mcpClient.test.js",
+      "tests/wave8/recoveryCanonicalFabric.test.js",
+      "wave8-iw1-migration-manifest.json"
+    ],
+    "migration": "Terminal, ML, checkpoint, MCP, OpenCode, Immich and security effects use canonical embodiment drivers; notification remains wired and Kali failure remains EXECUTED_UNVERIFIED.",
+    "retainedAmbiguities": "Source census removes findings in unchanged CheckpointSystem.js and ml/env.js via reachability, and shifts line-based finding IDs in changed services. Retain HEAD findings rather than silently deleting later integration evidence; see RESOLUTION-LOG.md."
+  },
   "sha": "36fd28151d0fd87d2610b909db7fb25cef2d95a0",
   "measured_source_sha": "36fd28151d0fd87d2610b909db7fb25cef2d95a0",
   "generator_head_sha": "36fd28151d0fd87d2610b909db7fb25cef2d95a0",

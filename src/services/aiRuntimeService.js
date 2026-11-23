@@ -496,24 +496,7 @@ class AIRuntimeService {
      * berjalan setelah selesai agar tool eksternal terlihat model.
      */
     _startMcpServers() {
-
-        try {
-
-            const mcp = require("../mcp/mcpClientManager");
-
-            mcp.start()
-                .then(() => {
-                    const n = this.refreshTools();
-                    telemetry.info(`[mcp] ${mcp.status().bridgedTools} tool eksternal terbridging, total ${n} tool.`);
-                })
-                .catch(err => {
-                    telemetry.warn(`[mcp] gagal memulai server eksternal: ${err.message}`);
-                });
-
-        }
-        catch {
-            /* modul MCP tak ada — lewati */
-        }
+        telemetry.info("[mcp] automatic external process startup disabled; use canonical damar.mcp admission.");
 
     }
 

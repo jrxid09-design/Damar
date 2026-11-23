@@ -1,6 +1,7 @@
 const { AITool } = require("../ai/tools");
 
 const autonomy = require("../autonomy");
+const { executeCanonicalAction, contextFromExecution } = require("./canonicalActionClient");
 
 const telemetry = require("./telemetryService");
 
@@ -207,8 +208,8 @@ function autonomyTools() {
                 },
                 required: ["scope", "target"]
             },
-            execute: async ({ scope, target, label }) =>
-                autonomy.checkpoints.create({ scope, target, label })
+            execute: async ({ scope, target, label }, execution) =>
+                executeCanonicalAction({ context: contextFromExecution(execution), capabilityId: "damar.checkpoint", operation: "create", arguments: { scope, target, label }, expectedPostcondition: { expect: { operation: { op: "eq", value: "create" }, parametersMatch: { op: "eq", value: true }, completed: { op: "eq", value: true } } } })
         })
 
     ];

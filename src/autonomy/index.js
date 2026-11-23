@@ -14,7 +14,6 @@ const skillFactory = require("./SkillFactory");
 const goals = require("./GoalEngine");
 const healing = require("./SelfHealingEngine");
 const modelRouter = require("./ModelRouter");
-const checkpoints = require("./CheckpointSystem");
 const environment = require("./EnvironmentModel");
 
 let booted = false;
@@ -41,5 +40,5 @@ async function init() {
 module.exports = {
     init,
     toolBus, capabilities, skillFactory, goals,
-    healing, modelRouter, checkpoints, environment
+    healing, modelRouter, environment
 };

@@ -8,8 +8,11 @@ const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { execFile, execFileSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
 const { promisify } = require("node:util");
 const kaliBridge = require("../kali/bridge");
+const terminals = require("../runtime/terminal/TerminalRuntime");
+const ml = require("../ml/env");
 
 const pexec = promisify(execFile);
 const MEDIA = "damar.media";
@@ -17,6 +20,13 @@ const DESKTOP = "damar.desktop";
 const BACKUP = "damar.backup";
 const KALI = "damar.kali";
 const NOTIFICATION = "messaging.whatsapp";
+const TERMINAL = "damar.terminal";
+const ML = "damar.ml";
+const CHECKPOINT = "damar.checkpoint";
+const MCP = "damar.mcp";
+const OPENCODE = "damar.opencode";
+const IMMICH = "damar.immich";
+const SECURITY = "damar.security";
 const CACHE_DIR = path.join(os.tmpdir(), "damar-media");
 const CACHE_CAP_BYTES = 500 * 1024 * 1024;
 const DESKTOP_APPS = Object.freeze({ notepad: "notepad.exe", calculator: "calc.exe", browser: "msedge.exe", edge: "msedge.exe", chrome: "chrome.exe", code: "code" });
@@ -44,6 +54,7 @@ function probeEmbodimentAvailability() {
         ? path.join(process.env.SystemRoot || "C:\\Windows", "System32", "wsl.exe")
         : null;
     return Object.freeze({
+        [TERMINAL]: terminals.available ? "AVAILABLE" : "UNKNOWN",
         [MEDIA]: executableOnPath([mediaBin(), "yt-dlp"]) ? "AVAILABLE" : "UNKNOWN",
         [DESKTOP]: (powershell ? fs.existsSync(powershell) : executableOnPath("powershell")) ? "AVAILABLE" : "UNKNOWN",
         [BACKUP]: process.platform === "win32"
@@ -52,6 +63,7 @@ function probeEmbodimentAvailability() {
         [KALI]: process.platform !== "win32"
             ? (executableOnPath("bash") ? "AVAILABLE" : "UNKNOWN")
             : (wsl && fs.existsSync(wsl) && typeof process.env.DAMAR_KALI_DISTRO === "string" && process.env.DAMAR_KALI_DISTRO.trim() ? "AVAILABLE" : "UNKNOWN")
+        , [IMMICH]: executableOnPath(process.platform === "win32" ? "docker.exe" : "docker") ? "AVAILABLE" : "UNKNOWN"
     });
 }
 function mediaOutput(id) { fs.mkdirSync(CACHE_DIR, { recursive: true }); return path.join(CACHE_DIR, `${id}.mp4`); }
@@ -116,6 +128,71 @@ async function notificationDriver({ operation, parameters }) {
     const ok = evidence.errors.length === 0 && evidence.recipients > 0 && evidence.messageIds.length > 0;
     return { outcome: ok ? "EXECUTED" : "EXECUTED_UNVERIFIED", channel: "whatsapp", recipients: evidence.recipients, messageIds: evidence.messageIds, errors: evidence.errors, transportAccepted: evidence.messageIds.length > 0, binding: { textDigest: parametersDigest({ text }) }, verificationClass: "message-id-per-recipient" };
 }
+async function terminalDriver({ operation, parameters = {} }) {
+    const purpose = stringArg(parameters, "purpose", 128);
+    if (operation === "list") return { outcome: "EXECUTED_UNVERIFIED", ok: true, operation, purpose, terminals: terminals.list().map(t => ({ id: t.id, purpose: t.purpose, status: t.status })) };
+    if (operation === "read") { const session = terminals.findByPurpose(purpose); if (!session) throw new Error("terminal not found"); return { outcome: "EXECUTED_UNVERIFIED", ok: true, operation, purpose, output: session.read() }; }
+    if (operation === "stop") { const session = terminals.findByPurpose(purpose); if (!session) throw new Error("terminal not found"); terminals.signal(session.id, "SIGINT"); return { outcome: "EXECUTED_UNVERIFIED", ok: true, operation, purpose }; }
+    const meta = terminals.ensureByPurpose({ purpose, name: purpose, shell: parameters.shell, cwd: parameters.cwd });
+    if (operation === "restart") { const existing = terminals.findByPurpose(purpose); if (existing) terminals.signal(existing.id, "SIGINT"); }
+    const result = await terminals.execute(meta.id, parameters.command, { expect: parameters.expect, timeoutMs: operation === "restart" || parameters.expect ? 30000 : 12000 });
+    return { outcome: "EXECUTED_UNVERIFIED", ok: true, operation, purpose, terminal: meta.id, matched: result.matched, output: result.output };
+}
+async function mlDriver({ operation, parameters = {} }) {
+    const result = operation === "probe" ? await ml.probe() : await ml.run(parameters);
+    return { outcome: result?.ok === true ? "EXECUTED" : "EXECUTED_UNVERIFIED", ...result, operation, binding: { parametersDigest: parametersDigest(parameters) } };
+}
+async function checkpointDriver({ operation, parameters = {} }) {
+    if (operation !== "create") throw new Error("unsupported checkpoint operation");
+    const result = await require("../autonomy/CheckpointSystem").create(parameters);
+    return { outcome: "EXECUTED", ok: true, operation, ...result, binding: { parametersDigest: parametersDigest(parameters) } };
+}
+async function mcpDriver({ operation, parameters = {} }) {
+    const manager = require("../mcp/mcpClientManager");
+    if (operation === "start") {
+        const tools = await manager.start({ spawnProcess: spawn });
+        return { outcome: "EXECUTED", ok: true, operation, completed: true, bridged: tools.length };
+    }
+    if (operation !== "call") throw new Error("unsupported MCP operation");
+    const serverId = stringArg(parameters, "serverId", 128);
+    const tool = stringArg(parameters, "tool", 256);
+    const args = parameters.arguments && typeof parameters.arguments === "object" && !Array.isArray(parameters.arguments) ? parameters.arguments : {};
+    await manager.callTool(serverId, tool, args);
+    return { outcome: "EXECUTED", ok: true, operation, completed: true, binding: { serverId, tool, parametersDigest: parametersDigest(args) } };
+}
+async function opencodeDriver({ operation, parameters = {} }) {
+    if (operation !== "run") throw new Error("unsupported OpenCode operation");
+    const { runOpenCodeEffect } = require("../services/opencodeTools");
+    const result = await runOpenCodeEffect({ ...parameters, spawnProcess: spawn });
+    if (result?.ok !== true) throw new Error(result?.error || "opencode execution failed");
+    return { outcome: "EXECUTED", ok: true, operation, completed: true, output: result.output, sessionId: result.sessionId, binding: { parametersDigest: parametersDigest(parameters) } };
+}
+async function immichDriver({ operation }) {
+    const deploy = require("../services/immichDeployService");
+    if (operation === "status") {
+        const result = await deploy.statusEffect({ execFile: pexec });
+        return { outcome: "EXECUTED", ok: true, operation, completed: true, ...result, binding: { operation } };
+    }
+    if (operation === "up") {
+        const result = deploy.upEffect({ spawnProcess: spawn });
+        return { outcome: "EXECUTED_UNVERIFIED", ok: true, operation, completed: false, uncertain: true, ...result, binding: { operation } };
+    }
+    if (operation === "down") {
+        const result = await deploy.downEffect({ execFile: pexec });
+        return { outcome: result.stopped === true ? "EXECUTED" : "EXECUTED_UNVERIFIED", ok: true, operation, completed: result.stopped === true, uncertain: result.stopped !== true, ...result, binding: { operation } };
+    }
+    throw new Error("unsupported Immich operation");
+}
+async function securityDriver({ operation, parameters = {} }) {
+    const auditor = require("../security/auditor");
+    const project = parameters.project ?? process.cwd();
+    let result;
+    if (operation === "scanSecrets") result = await auditor.scanSecrets(project, { maxTemuan: parameters.maxTemuan });
+    else if (operation === "auditCode") result = await auditor.auditCode(project, { files: parameters.files, maxTemuan: parameters.maxTemuan });
+    else if (operation === "auditDeps") result = await auditor.auditDepsEffect(project, { execFile: pexec });
+    else throw new Error("unsupported security operation");
+    return { outcome: "EXECUTED", ok: true, operation, completed: true, ...result, binding: { operation, project } };
+}
 
 function verifyMedia(ctx) { const result = observation(ctx.executionId); if (ctx.operation === "download") { const output = typeof result.output === "string" ? result.output : ""; return { binding: result.videoId, bindingMatches: result.videoId === ctx.parameters?.videoId, exists: Boolean(output && fs.existsSync(output) && fs.statSync(output).size > 0), bytes: output && fs.existsSync(output) ? fs.statSync(output).size : 0 }; } const requestedId = typeof ctx.parameters?.videoId === "string" ? ctx.parameters.videoId : null; return { binding: result.videoId, bindingMatches: result.videoId === requestedId, url: typeof result.url === "string" && /^https?:\/\//.test(result.url) ? result.url : null }; }
 function independentlyListDesktopWindows() {
@@ -132,4 +209,4 @@ function verifyBackup(ctx) { const result = observation(ctx.executionId); const 
 function verifyKali(ctx) { const result = observation(ctx.executionId); if (ctx.operation === "status" || ctx.operation === "tools") return { operation: ctx.operation, completed: result.outcome === "EXECUTED" }; if (ctx.operation === "which") return { operation: "which", toolMatches: result.tool === ctx.parameters?.tool?.replace(/[^\w.-]/g, ""), completed: result.outcome === "EXECUTED" }; const requested = shellCommand(ctx.parameters ?? {}); const digest = crypto.createHash("sha256").update(requested.command).digest("hex"); return { commandDigestMatches: result.binding?.commandDigest === digest, cwdMatches: result.cwd === requested.cwd, timeoutMatches: result.timeout === requested.timeout, runtimeMatches: result.binding?.runtime === process.platform, environmentMatches: result.binding?.environment === (process.env.DAMAR_KALI_DISTRO || "<detected>"), commandOk: result.ok === true && Number(result.code ?? 0) === 0, code: Number.isSafeInteger(result.code) ? result.code : null }; }
 function verifyNotification(ctx) { const result = observation(ctx.executionId); const text = typeof ctx.parameters?.text === "string" ? ctx.parameters.text : null; const ids = Array.isArray(result.messageIds) ? result.messageIds : []; const errors = Array.isArray(result.errors) ? result.errors : []; return { channel: result.channel === "whatsapp", textDigestMatches: result.binding?.textDigest === (text === null ? null : parametersDigest({ text })), recipients: Number.isSafeInteger(result.recipients) ? result.recipients : 0, messageIds: ids.length, noTransportErrors: errors.length === 0, transportAccepted: result.transportAccepted === true, verificationClass: result.verificationClass ?? "unknown" }; }
 
-module.exports = Object.freeze({ CACHE_DIR, MEDIA, DESKTOP, BACKUP, KALI, NOTIFICATION, parametersDigest, remember, observation, requireObject, stringArg, videoId, shellCommand, probeEmbodimentAvailability, mediaDriver, desktopDriver, backupDriver, kaliDriver, notificationDriver, verifyMedia, verifyDesktop, verifyBackup, verifyKali, verifyNotification });
+module.exports = Object.freeze({ CACHE_DIR, TERMINAL, MEDIA, DESKTOP, BACKUP, KALI, NOTIFICATION, ML, CHECKPOINT, MCP, OPENCODE, IMMICH, SECURITY, parametersDigest, remember, observation, requireObject, stringArg, videoId, shellCommand, probeEmbodimentAvailability, mediaDriver, desktopDriver, backupDriver, kaliDriver, notificationDriver, terminalDriver, mlDriver, checkpointDriver, mcpDriver, opencodeDriver, immichDriver, securityDriver, verifyMedia, verifyDesktop, verifyBackup, verifyKali, verifyNotification });

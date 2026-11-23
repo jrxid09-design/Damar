@@ -1,10 +1,9 @@
-const { spawn } = require("node:child_process");
-
 const fs = require("node:fs");
 
 const { AITool } = require("../ai/tools");
 
 const telemetry = require("./telemetryService");
+const { executeCanonicalAction, contextFromExecution } = require("./canonicalActionClient");
 
 /**
  * Jembatan Damar → opencode.
@@ -171,18 +170,9 @@ function rememberSession(key, id) {
  * sebagai SATU string perintah (supaya $HOME dan quoting dievaluasi oleh
  * bash). Di linux, spawn langsung dengan array argumen.
  */
-function runOpenCode({ instruction, dir, purpose, agent, model, fresh }) {
+async function runOpenCodeEffect({ instruction, dir, purpose, agent, model, fresh, spawnProcess }) {
 
-    // OpenCode is a consequential coding/terminal actuator.  It is not a
-    // second authority plane and must never spawn from a legacy service call.
-    // A future canonical coding actuator may implement this capability behind
-    // the same Manager request; this adapter deliberately fails closed today.
-    const { submitGovernedService } = require("./governedServiceBoundary");
-    return submitGovernedService({
-        capabilityId: "coding.opencode",
-        operation: "run",
-        arguments: { instruction, dir, purpose, agent: agent ?? null, model: model ?? null, fresh: Boolean(fresh) }
-    });
+    if (typeof spawnProcess !== "function") throw new Error("opencode requires canonical process actuator");
 
     const key = sessionKey({ purpose, dir });
 
@@ -225,7 +215,7 @@ function runOpenCode({ instruction, dir, purpose, agent, model, fresh }) {
 
         const started = Date.now();
 
-        const child = spawn(command, args, {
+        const child = spawnProcess(command, args, {
 
             cwd,
 
@@ -302,6 +292,17 @@ function runOpenCode({ instruction, dir, purpose, agent, model, fresh }) {
 
     });
 
+}
+
+function runOpenCode(options = {}, execution = null) {
+    const { instruction, purpose = "forge", dir, agent, model, fresh } = options;
+    return executeCanonicalAction({
+        context: contextFromExecution(execution),
+        capabilityId: "damar.opencode",
+        operation: "run",
+        arguments: { instruction, purpose, dir: dir ?? null, agent: agent ?? null, model: model ?? null, fresh: fresh === true },
+        expectedPostcondition: { expect: { completed: { op: "eq", value: true }, ok: { op: "eq", value: true } } }
+    });
 }
 
 /**
@@ -422,9 +423,7 @@ function opencodeTools() {
 
             },
 
-            execute: async ({ instruction, purpose = "forge", dir, agent, model, fresh }) =>
-
-                runOpenCode({ instruction, purpose, dir, agent, model, fresh })
+            execute: async (options, execution) => runOpenCode(options, execution)
 
         })
 
@@ -432,4 +431,4 @@ function opencodeTools() {
 
 }
 
-module.exports = { opencodeTools, runOpenCode };
+module.exports = { opencodeTools, runOpenCode, runOpenCodeEffect };

@@ -1,11 +1,8 @@
 const path = require("node:path");
 const fs = require("node:fs");
-const { execFile } = require("node:child_process");
-const { promisify } = require("node:util");
 
 const { SECRET_PATTERNS } = require("../coding/review/diffReviewer");
 
-const pexec = promisify(execFile);
 const OPTS = { timeout: 120000, windowsHide: true, maxBuffer: 32 * 1024 * 1024 };
 
 /**
@@ -116,15 +113,7 @@ function bolehDipindai(file) {
 }
 
 /** Daftar berkas terlacak git; jatuh ke penelusuran folder bila bukan repo. */
-async function daftarBerkas(project) {
-
-    try {
-        const { stdout } = await pexec("git", ["ls-files"], { ...OPTS, cwd: project });
-        const files = stdout.split(/\r?\n/).filter(Boolean);
-        if (files.length) return files;
-    }
-    catch { /* bukan repo git — telusuri manual */ }
-
+function daftarBerkas(project) {
     const out = [];
 
     (function walk(dir, rel = "") {
@@ -159,7 +148,7 @@ function bacaBaris(project, file) {
  */
 async function scanSecrets(project = process.cwd(), { maxTemuan = 50 } = {}) {
 
-    const files = (await daftarBerkas(project)).filter(bolehDipindai);
+    const files = daftarBerkas(project).filter(bolehDipindai);
     const findings = [];
 
     for (const file of files) {
@@ -199,7 +188,7 @@ async function scanSecrets(project = process.cwd(), { maxTemuan = 50 } = {}) {
 /** Audit pola kode berbahaya (SAST ringan, berbasis bukti baris). */
 async function auditCode(project = process.cwd(), { files, maxTemuan = 60 } = {}) {
 
-    const daftar = (files?.length ? files : await daftarBerkas(project))
+    const daftar = (files?.length ? files : daftarBerkas(project))
         .filter(bolehDipindai)
         .filter(f => /\.(js|cjs|mjs|ts|tsx|jsx)$/i.test(f));
 
@@ -257,16 +246,19 @@ async function auditDeps(project = process.cwd()) {
         return { ok: false, note: "Tak ada package.json — bukan proyek Node." };
     }
 
+    return { ok: false, note: "npm audit requires canonical process actuator" };
+}
+
+async function auditDepsEffect(project = process.cwd(), { execFile: runExecFile } = {}) {
+    if (!fs.existsSync(path.join(project, "package.json"))) return auditDeps(project);
+    if (typeof runExecFile !== "function") return { ok: false, note: "npm audit requires canonical process actuator" };
     const npm = process.platform === "win32" ? "npm.cmd" : "npm";
     let raw;
-
     try {
-        const { stdout } = await pexec(npm, ["audit", "--json"], { ...OPTS, cwd: project });
+        const { stdout } = await runExecFile(npm, ["audit", "--json"], { ...OPTS, cwd: project });
         raw = stdout;
     }
     catch (e) {
-        // npm audit keluar dengan kode ≠ 0 justru KETIKA ada kerentanan;
-        // stdout-nya tetap JSON yang sah, jadi dipakai bila ada.
         raw = e.stdout;
         if (!raw) return { ok: false, note: `npm audit gagal: ${(e.stderr || e.message || "").slice(-500)}` };
     }
@@ -298,4 +290,4 @@ async function auditDeps(project = process.cwd()) {
 
 }
 
-module.exports = { scanSecrets, auditCode, auditDeps, CODE_RULES };
+module.exports = { scanSecrets, auditCode, auditDeps, auditDepsEffect, CODE_RULES };
