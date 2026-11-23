@@ -21,7 +21,7 @@ const UIA_SCRIPT = [
   '$root = [System.Windows.Automation.AutomationElement]::RootElement',
   '$cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $env:DAMAR_UIA_TITLE)',
   '$win = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $cond)',
-  'if (-not $win) { "{\\"ok\\":false,\\"error\\":\\"WINDOW_NOT_FOUND\\"}"; exit }',
+  'if (-not $win) { @{ ok = $false; error = "WINDOW_NOT_FOUND" } | ConvertTo-Json -Compress; exit }',
   '$conds = @()',
   'if ($env:DAMAR_UIA_AID) { $conds += New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $env:DAMAR_UIA_AID) }',
   'if ($env:DAMAR_UIA_NAME) { $conds += New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $env:DAMAR_UIA_NAME) }',
@@ -29,7 +29,7 @@ const UIA_SCRIPT = [
   '  $el = $win.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $c)',
   '  if ($el) { $r = $el.Current.BoundingRectangle; @{ ok = $true; x = [int]($r.X + $r.Width / 2); y = [int]($r.Y + $r.Height / 2); name = $el.Current.Name; automationId = $el.Current.AutomationId } | ConvertTo-Json -Compress; exit }',
   '}',
-  '"{\\"ok\\":false,\\"error\\":\\"ELEMENT_NOT_FOUND\\"}"',
+  '@{ ok = $false; error = "ELEMENT_NOT_FOUND" } | ConvertTo-Json -Compress',
 ].join('\n');
 
 async function defaultRunUia({ windowTitle, elementName = null, automationId = null }) {
