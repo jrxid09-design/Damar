@@ -60,7 +60,7 @@
       permOther: tool => `${tool} needs your approval — review the full request in DAMAR CLI`,
       read: f => `Reading ${f || 'workspace'}`, edit: (f, a, r) => `Edited ${f} +${a ?? 0} −${r ?? 0}`, run: 'Running a command', shell: 'Running a shell command',
       done: 'Turn finished', failed: 'Turn ended: ', micOn: 'Microphone on', controlOpen: 'Open DAMAR Control',
-      greeting: (h, name) => `Good ${h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening'}${name ? ', ' + name : ''}.`,
+      greeting: (h, name) => `Good ${GREETING_WORDS.en[greetingBand(h)]}${name ? ', ' + name : ''}.`,
       cliOnly: 'Conversation runs in DAMAR CLI.', cuNotice: 'Computer Use runs through DAMAR CLI;',
       alert: l => `Alert: ${l}`, alertCount: n => `${n} alert${n === 1 ? '' : 's'}`,
       discussing: (r, o) => `Pandawa discussing${r ? ` (round ${r}/${o || r})` : ''}`, discussionDone: 'Pandawa synthesis done', discussionEnded: s => `Pandawa discussion ${String(s || '').toLowerCase()}`,
@@ -75,7 +75,7 @@
       permOther: tool => `${tool} perlu izinmu — tinjau lengkap di DAMAR CLI`,
       read: f => `Membaca ${f || 'workspace'}`, edit: (f, a, r) => `Mengubah ${f} +${a ?? 0} −${r ?? 0}`, run: 'Menjalankan perintah', shell: 'Menjalankan perintah shell',
       done: 'Giliran selesai', failed: 'Giliran berakhir: ', micOn: 'Mikrofon aktif', controlOpen: 'Buka DAMAR Control',
-      greeting: (h, name) => `Selamat ${h < 11 ? 'pagi' : h < 15 ? 'siang' : h < 18 ? 'sore' : 'malam'}${name ? ', ' + name : ''}.`,
+      greeting: (h, name) => `Selamat ${GREETING_WORDS.id[greetingBand(h)]}${name ? ', ' + name : ''}.`,
       cliOnly: 'Percakapan berjalan di DAMAR CLI.', cuNotice: 'Computer Use berjalan melalui DAMAR CLI;',
       alert: l => `Peringatan: ${l}`, alertCount: n => `${n} peringatan`,
       discussing: (r, o) => `Pandawa berdiskusi${r ? ` (ronde ${r}/${o || r})` : ''}`, discussionDone: 'Sintesis Pandawa selesai', discussionEnded: s => `Diskusi Pandawa ${({ FAILED: 'gagal', CANCELLED: 'dibatalkan' })[s] || String(s || '').toLowerCase()}`,
@@ -109,8 +109,12 @@
     if (root.querySelectorAll) { translateAttrs(root); root.querySelectorAll('[title],[placeholder],[aria-label]').forEach(translateAttrs); }
   }
   function setLang(next) { const l = next === 'id' ? 'id' : 'en'; if (l === lang) return; lang = l; document.documentElement.lang = l; apply(); window.dispatchEvent(new CustomEvent('damar-presence-lang', { detail: l })); }
+  // Greeting time bands (Owner spec, local machine time): morning 05:00-10:59, afternoon 11:00-14:59,
+  // evening 15:00-18:59, night 19:00-04:59. One pure helper so both languages share the same bands.
+  function greetingBand(h) { return h >= 5 && h < 11 ? 'morning' : h >= 11 && h < 15 ? 'afternoon' : h >= 15 && h < 19 ? 'evening' : 'night'; }
+  const GREETING_WORDS = { en: { morning: 'morning', afternoon: 'afternoon', evening: 'evening', night: 'night' }, id: { morning: 'pagi', afternoon: 'siang', evening: 'sore', night: 'malam' } };
   const t = (key, ...args) => { const v = UI[lang][key] ?? UI.en[key]; return typeof v === 'function' ? v(...args) : v; };
-  window.DAMAR_I18N = Object.freeze({ t, setLang, apply, repair, lang: () => lang, PAGE_EN, UI });
+  window.DAMAR_I18N = Object.freeze({ t, setLang, apply, repair, lang: () => lang, PAGE_EN, UI, greetingBand });
   document.documentElement.lang = 'en';
   const start = () => {
     apply();

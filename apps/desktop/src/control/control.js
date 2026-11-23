@@ -138,7 +138,7 @@
     'You (interjection)': 'Anda (sela)', 'did not reply': 'tidak menjawab', 'synthesis (Decision / Rationale / Dissent)': 'sintesis (Keputusan / Alasan / Perbedaan pendapat)',
     'Open a discussion to follow it live.': 'Buka diskusi untuk mengikutinya secara langsung.', 'Add your view to the discussion…': 'Tambahkan pendapat Anda…',
     'Started in a CLI window: interject or stop it there.': 'Dimulai di jendela CLI: sela atau hentikan dari sana.', 'No discussions yet. Start one here, or with /discuss in the CLI.': 'Belum ada diskusi. Mulai di sini, atau dengan /discuss di CLI.',
-    'Your name (greeting, optional)': 'Nama Anda (sapaan, opsional)', 'Memory & Context': 'Memori & Konteks', 'Long-term memory': 'Memori jangka panjang', 'Ask before remembering': 'Tanya sebelum mengingat',
+    'Your name (greeting, optional)': 'Nama Anda (sapaan, opsional)', 'How DAMAR addresses you (optional)': 'Sapaan DAMAR untuk Anda (opsional)', 'Memory & Context': 'Memori & Konteks', 'Long-term memory': 'Memori jangka panjang', 'Ask before remembering': 'Tanya sebelum mengingat',
     'Keep memories (days, 0 = forever)': 'Simpan memori (hari, 0 = selamanya)', 'Memory in context (chars, 500-20000)': 'Memori dalam konteks (karakter, 500-20000)', 'Conversation turns kept (0-50)': 'Giliran percakapan disimpan (0-50)',
     'Conversation chars kept (2000-400000)': 'Karakter percakapan disimpan (2000-400000)', 'Core mind block': 'Blok mind Core', 'Export memory…': 'Ekspor memori…', 'Clear workspace memory…': 'Hapus memori ruang kerja…',
     'Save memory settings…': 'Simpan pengaturan memori…', 'Pandawa Team': 'Tim Pandawa', 'Active provider': 'Provider aktif', "DAMAR's model": 'Model DAMAR', 'Discussion rounds (1-10)': 'Ronde diskusi (1-10)',
@@ -839,6 +839,7 @@
       field('prPosition', 'Position', sel('prPosition', ['top-center'], pr.position)) +
       field('prVoice', 'Microphone / voice (opt-in)', sel('prVoice', ['off', 'on'], pr.voiceEnabled === true ? 'on' : 'off')) +
       field('prName', 'Your name (greeting, optional)', '<input type="text" class="input-field" id="prName" maxlength="40" style="width:100%;" value="' + escapeHtml(pr.displayName || '') + '" />') +
+      field('prSalutation', 'How DAMAR addresses you (optional)', '<input type=\"text\" class=\"input-field\" id=\"prSalutation\" maxlength=\"40\" style=\"width:100%;\" value=\"' + escapeHtml(pr.salutation || '') + '\" />') +
       '</div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);">Presence reads this from Core (GET /api/r9/presence/settings) · revision ' + escapeHtml(num(d.revision)) + '</span>' + btn('Save presence…', 'data-save-presence="1"', 'btn-primary') + '</div>', { span: 12 });
     var cl = LIVE.d('cliSettings'), cv = cl ? (cl.cli || cl.defaults) : null;
     html += panel('Damar CLI', cv ? '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">' +
@@ -1217,7 +1218,7 @@
     },
     'data-save-presence': function () {
       var presence = { idleToNotchMs: Number(val('prIdle')), morphMs: Number(val('prMorph')), reducedMotion: val('prMotion'), notchEnabled: val('prNotch') === 'enabled',
-        notificationPrivacy: val('prPrivacy'), display: val('prDisplay'), position: val('prPosition'), voiceEnabled: val('prVoice') === 'on', displayName: val('prName') };
+        notificationPrivacy: val('prPrivacy'), display: val('prDisplay'), position: val('prPosition'), voiceEnabled: val('prVoice') === 'on', displayName: val('prName'), salutation: val('prSalutation') };
       ownerAction('Save presence settings', '<pre style="font-size:11px;white-space:pre-wrap;">' + escapeHtml(JSON.stringify(presence, null, 1)) + '</pre>', function () {
         return controlSession().then(function (id) { return core.post('/api/r9/settings', { action: 'update', cliSession: id, client: state.control.client, values: { presence: presence } }); }).then(function (r) { if (r.ok) loadSettings(); return r; });
       }, 'Core validates every value; the presence surface picks it up within 5 s.');

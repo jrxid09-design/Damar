@@ -30,9 +30,37 @@ const message = () => {
   const p = pending(), rows = activityRows((coreState?.activity || []).filter(a => activityBaseline !== null && a.seq >= activityBaseline), config.notificationPrivacy);
   return { config, view: { statusLine: statusLine(projection), status: projection.status, lifecycle: projection.presence?.lifecycle || null, lang,
     activity: { ...(projection.presence?.activity || {}), events: rows },
+    sessionPills: projection.presence?.sessionPills || [], media: projection.presence?.media || null, pcActivity: pcActivitySnapshot(),
     // permissionId only; turnId stays in main (the renderer cannot target another turn).
     permission: p ? { permissionId: p.permissionId, tool: p.tool, file: p.file, added: p.added, removed: p.removed, allowable: p.allowable } : null } };
 };
+
+// PC activity sense for the Notch behavior engine (Fase 2 v3): ONE fixed
+// PowerShell probe (no caller input) - foreground process, window size,
+// input idle time - categorized generically here. Failures report null and
+// the character simply receives no PC signals.
+const PC_PROBE = "Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class W{[DllImport(\"user32.dll\")]public static extern IntPtr GetForegroundWindow();[DllImport(\"user32.dll\")]public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);[DllImport(\"user32.dll\")]public static extern bool GetWindowRect(IntPtr h,out R r);public struct R{public int L;public int T;public int Rr;public int B;}[DllImport(\"user32.dll\")]public static extern bool GetLastInputInfo(ref L l);public struct L{public uint cb;public uint t;}}'; $h=[W]::GetForegroundWindow(); $fp=0; [W]::GetWindowThreadProcessId($h,[ref]$fp) | Out-Null; $pr=Get-Process -Id $fp -ErrorAction SilentlyContinue; $r=New-Object W+R; [W]::GetWindowRect($h,[ref]$r) | Out-Null; $li=New-Object W+L; $li.cb=[Runtime.InteropServices.Marshal]::SizeOf($li); [W]::GetLastInputInfo([ref]$li) | Out-Null; $idle=[Environment]::TickCount-$li.t; @{proc=$pr.ProcessName; w=$r.Rr-$r.L; h=$r.B-$r.T; idleMs=$idle} | ConvertTo-Json -Compress";
+const PC_CATEGORIES = [[/code|devenv|idea|webstorm|pycharm|sublime|notepad\+\+/i, 'code'], [/photoshop|illustrator|figma|blender|premiere|afterfx|davinci|krita|gimp/i, 'design'], [/powershell|windowsterminal|cmd|putty|mobaxterm|regedit/i, 'engineering'], [/burp|ghidra|wireshark/i, 'security'], [/spotify|vlc|wmplayer|plex/i, 'media']];
+let pcCache = { at: 0, value: null };
+function pcActivitySnapshot() {
+  const nowMs = Date.now();
+  if (nowMs - pcCache.at >= 2000) {
+    pcCache.at = nowMs;
+    try {
+      require('node:child_process').execFile('powershell.exe', ['-NoProfile', '-Command', PC_PROBE], { windowsHide: true, timeout: 4000 }, (err, stdout) => {
+        if (err) { pcCache.value = null; return; }
+        try {
+          const raw = JSON.parse(String(stdout).trim().split('\n').pop());
+          const proc = String(raw.proc || '');
+          const hit = PC_CATEGORIES.find(([re]) => re.test(proc));
+          const disp = targetDisplay().bounds;
+          pcCache.value = { category: hit ? hit[1] : 'other', idleMs: Math.max(0, Number(raw.idleMs) || 0), fullscreen: Math.abs((Number(raw.w) || 0) - disp.width) <= 2 && Math.abs((Number(raw.h) || 0) - disp.height) <= 2 };
+        } catch { pcCache.value = null; }
+      });
+    } catch { pcCache.value = null; }
+  }
+  return pcCache.value;
+}
 const push = () => { if (win && !win.isDestroyed()) win.webContents.send('damar-presence', message()); };
 
 const micAllowed = (wc, permission, mediaTypes) => policy.micAllowed({ voiceEnabled: config.voiceEnabled, permission, mediaTypes, ownWindow: !!win && wc === win.webContents });
@@ -66,6 +94,10 @@ function bindCore() {
 
 ipcMain.handle('damar-runtime-request', (event, request) => (fromMain(event) ? uiResponse(request, projection) : { ok: false, error: { kind: 'NOT_ALLOWED', message: 'Runtime bridge unavailable.' } }));
 ipcMain.handle('damar-presence-get', event => (fromMain(event) ? message() : null));
+ipcMain.handle('damar-media-control', async (event, request) => {
+  if (!fromMain(event) || !core) return { ok: false };
+  try { await core.mediaControl(String(request?.action || '')); return { ok: true }; } catch { return { ok: false }; }
+});
 // Owner decision from the notch. Accepted only for the request Core currently reports as pending; Allow only where the
 // notch shows the whole request (projection.pendingPermission.allowable). Core enforces Owner auth + first-wins.
 ipcMain.handle('permission-decision', async (event, request) => {

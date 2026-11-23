@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('damarDesktop', Object.freeze({
   getPresence: () => ipcRenderer.invoke('damar-presence-get'),
   // Names the currently pending permission + a decision; main validates it and authenticates as Owner.
   decidePermission: request => ipcRenderer.invoke('permission-decision', { permissionId: String(request?.permissionId || ''), decision: String(request?.decision || '') }),
+  // Now-playing controls from the notch media pill; main validates the action against the SMTC allowlist.
+  mediaControl: action => ipcRenderer.invoke('damar-media-control', { action: String(action || '') }),
   onPresence: listener => {
     if (typeof listener !== 'function') return () => {};
     const wrapped = (_event, message) => listener(message);
