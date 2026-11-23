@@ -69,3 +69,31 @@ Hasil pascacommit L4: `264672367eb4bd8b8f09aa07a6f68b52c929fe7d`; ancestry sukse
 - Kandidat diagnostik memakai sisi sumber untuk empat konflik (bukan resolusi yang disetujui/di-commit). Tes recovery+safety MCP+autonomy: 27 lulus, 1 gagal, 1 skip. Kegagalan `tests/safety/autonomyStack.test.js:24`: ToolBus discover kosong, assertion tools.length > 0. Bukti sumber: `git diff feat/w8-canonical-recovery -- tests/safety/autonomyStack.test.js` nol; sumber sendiri memiliki assertion itu tanpa setup registrasi. Tidak mengubah assertion untuk meloloskan merge. Kandidat juga belum mempertahankan notification HEAD, sehingga tidak layak commit.
 - Scan 15 JS non-konflik sebelum kandidat: 0 temuan, semua syntax lulus. Ancestry tidak diklaim; tidak ada commit merge. `git merge --abort` sukses; HEAD tetap `264672367eb4bd8b8f09aa07a6f68b52c929fe7d`.
 - Owner: putuskan perbaikan kontrak/fixture ToolBus branch sumber serta rekonsiliasi perluasan capability dengan notification dan governed coding HEAD. Tidak ada konfigurasi silo baru disetujui. Entri abort di-commit terpisah karena tidak ada merge commit.
+
+## feat/w5-cli-canonical-integration: ABORTED
+
+- Strategi C: merge dicoba terakhir. Git menempatkan 23 konflik lokasi dokumen secara otomatis pada `docs/history/uix-w1/` (rename develop yang harus diikuti); tidak menghidupkan ulang lokasi lama.
+- Dua belas konflik add/add: `src/presence-ui/browser/{entry.js,runtime.js}`, `src/ui-platform/{apiClient.js,entityRefs.js,index.js,projections.js,readModelClient.js,routing.js,shells.js}`, `src/ui-platform/browser/{entry.js,runtime.js,styles.css}`. Kedua varian diperiksa lewat combined diff; riwayat HEAD menyatakan `a0d8af51` sebagai owner work-in-progress UI/presence, sedangkan sumber membawa W4 resource lifecycle/fetch fixes (`1ee46cf8`, `d7adaefa`, `a72a70f6`, `15f07b7c`).
+- Keputusan produk yang tidak boleh dipaksakan: apakah runtime projection/read-only dashboard CRV3/Watchdog/SelfHealing + shadow feed/timeline milik owner tetap menjadi permukaan kanonis, atau digantikan fondasi UIX W4/W5 dan jalur presence runtime sumber? `shells.js`, browser runtime, presence runtime, routing, dan exports saling mengikat. Memilih varian sumber akan menghapus indikator/feed owner; memilih HEAD tanpa desain integrasi dapat memutus lifecycle/data baru. Owner harus menetapkan kontrak read model/feed dan peta permukaan kanonis sebelum penggabungan.
+- Scan kandidat non-konflik (249 file): 139 JS syntax lulus. Ditemukan string privat owner di tiga baris `package.json` bawaan baseline yang akan ikut sebagai file berubah; file dikeluarkan dari kandidat dengan mengembalikannya ke HEAD sebelum abort. Nilai tidak disalin ke jurnal. Pola token lainnya muncul pada validator/fixture DP, belum dipastikan nilai nyata karena merge dihentikan pada keputusan produk, sehingga tidak dinyatakan aman/di-commit.
+- Temuan arsitektur untuk owner: `src/cli/host.js` membaca kebijakan disconnect melalui environment sendiri; `src/cli/session.js` menentukan state directory dari environment/fallback home. Discovery/credential IPC bukan otomatis silo pengaturan, tetapi tidak terlihat jembatan kebijakan disconnect ke konfigurasi Core/Control Dashboard pada diff. Owner perlu memastikan kebijakan sistem CLI memakai sumber konfigurasi terpusat; tidak direfactor di luar cakupan dan tidak disetujui lewat merge ini. Presence/Notch tidak ditambahkan UI pengaturan.
+- `git merge --abort` sukses. Tidak ada commit merge; ancestry dan tes UI/CLI tidak diklaim karena kandidat ditolak sebelum resolusi. HEAD setelah abort tetap commit jurnal recovery `38aed74a`. File pengguna untracked tidak berubah.
+
+## Ringkasan akhir
+
+| Branch | Status | Commit / alasan |
+| --- | --- | --- |
+| feat/extension-kernel-v1 | merged | `6f2777c4`, develop kanonis |
+| feat/device-identity-pairing-v1 | merged | `4da6d10f`, develop kanonis |
+| feat/audit-provenance-ledger-v1 | merged | `b7a5c890`, develop kanonis |
+| feat/secret-vault-v1 | merged | `6d9056bb`, develop kanonis |
+| feat/w8-l2-active-perception | merged | `9c31031c`, komposisi L2/L6 lebih lengkap dipertahankan |
+| feat/w8-l4-embodiment-fabric | merged | `26467236`, ingress Manager kanonis dipertahankan |
+| feat/w8-canonical-recovery | aborted | fixture ToolBus gagal dan rekonsiliasi capability/notification diperlukan |
+| feat/w5-cli-canonical-integration | aborted | keputusan produk UI/presence owner diperlukan |
+
+- HEAD integrasi terakhir: `264672367eb4bd8b8f09aa07a6f68b52c929fe7d`; HEAD sebelum commit log final: `38aed74a`. HEAD akhir adalah commit berpesan `integrate: finalize resolution journal (6 merged, 2 aborted)` yang memuat bagian ini; identitas eksaknya dilaporkan di jawaban akhir (hash diri tidak dapat ditulis ke commit itu sendiri).
+- Tes terakhir pada tree final, dengan sqlite3 temporer: **589 lulus, 0 gagal, 0 skip** (extensions, embodiment, auditLedger, vault, wave8 L2/L4/L6, capability backup/desktop/media). Kegagalan dependency sebelumnya terselesaikan oleh environment temporer tanpa perubahan manifest. Suite L1 penuh tetap timeout; tidak termasuk angka 589 dan tidak diklaim hijau. Kandidat recovery yang dibatalkan: 27 lulus, 1 gagal, 1 skip.
+- Enam branch merged diverifikasi ancestor; empat area A identik develop. Scan file perubahan akhir dan syntax diulang sebelum commit final; tidak ada rahasia/nilai privat yang diterima. Tidak ada push, merge develop, reset, atau perubahan worktree lain.
+- Graphify: graph awal tidak ada. `graphify update .` AST-only dijalankan; percobaan foreground mencapai ekstraksi lalu timeout, pengulangan dijalankan background. Peringatan tool: SQL parser dependency tidak ada, 60 file tanpa node, dua proof.js memiliki parse error. Output graph tidak disertakan commit integrasi tanpa pemeriksaan rahasia.
+- Keputusan owner: (1) kontrak/fixture ToolBus dan penyatuan capability recovery dengan notification/governed coding; (2) arsitektur kanonis UI/presence serta kontrak read model/feed; (3) integrasi kebijakan sistem CLI ke konfigurasi Core/Dashboard; (4) investigasi hang suite L1 baseline.
