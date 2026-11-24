@@ -1,0 +1,135 @@
+{
+ "key": "recovering",
+ "canvas": [
+  520,
+  864
+ ],
+ "parts": {
+  "body-low": {
+   "file": "body-low.webp",
+   "pivot": [
+    0.5,
+    0.97
+   ],
+   "parent": null,
+   "z": 10
+  },
+  "body-up": {
+   "file": "body-up.webp",
+   "pivot": [
+    0.5,
+    0.739
+   ],
+   "parent": "body-low",
+   "z": 20
+  },
+  "cloak-hem": {
+   "file": "cloak-hem.webp",
+   "pivot": [
+    0.5,
+    0.86
+   ],
+   "parent": "body-low",
+   "z": 15
+  },
+  "tuft": {
+   "file": "tuft.webp",
+   "pivot": [
+    0.5775,
+    0.32
+   ],
+   "parent": "head",
+   "z": 46
+  },
+  "head": {
+   "file": "head.webp",
+   "pivot": [
+    0.515,
+    0.62
+   ],
+   "parent": "body-up",
+   "z": 30
+  },
+  "armL-up": {
+   "file": "armL-up.webp",
+   "pivot": [
+    0.255,
+    0.64
+   ],
+   "parent": "body-up",
+   "z": 24
+  },
+  "armL-fore": {
+   "file": "armL-fore.webp",
+   "pivot": [
+    0.205,
+    0.76
+   ],
+   "parent": "armL-up",
+   "z": 25
+  },
+  "armR-up": {
+   "file": "armR-up.webp",
+   "pivot": [
+    0.7,
+    0.64
+   ],
+   "parent": "body-up",
+   "z": 24
+  },
+  "armR-fore": {
+   "file": "armR-fore.webp",
+   "pivot": [
+    0.76,
+    0.755
+   ],
+   "parent": "armR-up",
+   "z": 25
+  },
+  "eyeL-line": {
+   "file": "eyeL-line.webp",
+   "pivot": [
+    0.311,
+    0.46
+   ],
+   "parent": "head",
+   "z": 40
+  },
+  "eyeR-line": {
+   "file": "eyeR-line.webp",
+   "pivot": [
+    0.685,
+    0.4685
+   ],
+   "parent": "head",
+   "z": 40
+  },
+  "mouth": {
+   "file": "mouth.webp",
+   "pivot": [
+    0.49,
+    0.545
+   ],
+   "parent": "head",
+   "z": 43
+  },
+  "jaw": {
+   "file": "jaw.webp",
+   "pivot": [
+    0.515,
+    0.528
+   ],
+   "parent": "head",
+   "z": 36
+  }
+ },
+ "mouth": {
+  "box": [
+   222.6,
+   456.2,
+   287.0,
+   485.6
+  ],
+  "jawDrop": 13.8
+ }
+}

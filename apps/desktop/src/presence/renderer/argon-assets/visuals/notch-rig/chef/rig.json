@@ -1,0 +1,247 @@
+{
+ "key": "chef",
+ "canvas": [
+  520,
+  558
+ ],
+ "parts": {
+  "body-low": {
+   "file": "body-low.webp",
+   "pivot": [
+    0.5,
+    0.97
+   ],
+   "parent": null,
+   "z": 10
+  },
+  "body-up": {
+   "file": "body-up.webp",
+   "pivot": [
+    0.5,
+    0.83
+   ],
+   "parent": "body-low",
+   "z": 20
+  },
+  "cloak-hem": {
+   "file": "cloak-hem.webp",
+   "pivot": [
+    0.5,
+    0.86
+   ],
+   "parent": "body-low",
+   "z": 15
+  },
+  "hat": {
+   "file": "hat.webp",
+   "pivot": [
+    0.395,
+    0.292
+   ],
+   "parent": "head",
+   "z": 46
+  },
+  "head": {
+   "file": "head.webp",
+   "pivot": [
+    0.5105,
+    0.62
+   ],
+   "parent": "body-up",
+   "z": 30
+  },
+  "armL-up": {
+   "file": "armL-up.webp",
+   "pivot": [
+    0.33,
+    0.69
+   ],
+   "parent": "body-up",
+   "z": 24
+  },
+  "armL-fore": {
+   "file": "armL-fore.webp",
+   "pivot": [
+    0.255,
+    0.745
+   ],
+   "parent": "armL-up",
+   "z": 25
+  },
+  "armR-up": {
+   "file": "armR-up.webp",
+   "pivot": [
+    0.66,
+    0.69
+   ],
+   "parent": "body-up",
+   "z": 24
+  },
+  "armR-fore": {
+   "file": "armR-fore.webp",
+   "pivot": [
+    0.76,
+    0.69
+   ],
+   "parent": "armR-up",
+   "z": 25
+  },
+  "eyeL-ball": {
+   "file": "eyeL-ball.webp",
+   "pivot": [
+    0.394,
+    0.4865
+   ],
+   "parent": "head",
+   "z": 38
+  },
+  "eyeL-pupil": {
+   "file": "eyeL-pupil.webp",
+   "pivot": [
+    0.3788,
+    0.4635
+   ],
+   "parent": "eyeL-ball",
+   "z": 39
+  },
+  "eyeL-lidU": {
+   "file": "eyeL-lidU.webp",
+   "pivot": [
+    0.394,
+    0.43
+   ],
+   "parent": "head",
+   "z": 41
+  },
+  "eyeL-lidD": {
+   "file": "eyeL-lidD.webp",
+   "pivot": [
+    0.394,
+    0.543
+   ],
+   "parent": "head",
+   "z": 41
+  },
+  "eyeR-ball": {
+   "file": "eyeR-ball.webp",
+   "pivot": [
+    0.6305,
+    0.458
+   ],
+   "parent": "head",
+   "z": 38
+  },
+  "eyeR-pupil": {
+   "file": "eyeR-pupil.webp",
+   "pivot": [
+    0.6381,
+    0.4369
+   ],
+   "parent": "eyeR-ball",
+   "z": 39
+  },
+  "eyeR-lidU": {
+   "file": "eyeR-lidU.webp",
+   "pivot": [
+    0.6305,
+    0.403
+   ],
+   "parent": "head",
+   "z": 41
+  },
+  "eyeR-lidD": {
+   "file": "eyeR-lidD.webp",
+   "pivot": [
+    0.6305,
+    0.513
+   ],
+   "parent": "head",
+   "z": 41
+  },
+  "browL": {
+   "file": "browL.webp",
+   "pivot": [
+    0.394,
+    0.405
+   ],
+   "parent": "head",
+   "z": 37
+  },
+  "browR": {
+   "file": "browR.webp",
+   "pivot": [
+    0.6305,
+    0.378
+   ],
+   "parent": "head",
+   "z": 37
+  },
+  "mouth": {
+   "file": "mouth.webp",
+   "pivot": [
+    0.55,
+    0.544
+   ],
+   "parent": "head",
+   "z": 43
+  },
+  "jaw": {
+   "file": "jaw.webp",
+   "pivot": [
+    0.5105,
+    0.512
+   ],
+   "parent": "head",
+   "z": 36
+  }
+ },
+ "eyes": {
+  "eyeL": {
+   "box": [
+    171.6,
+    239.9,
+    238.2,
+    303.0
+   ],
+   "pupilHome": [
+    197.0,
+    258.6
+   ],
+   "pupilR": 36.2,
+   "travel": [
+    10.6,
+    8.2
+   ],
+   "lidTravel": 37.8,
+   "lidDTravel": 10.1
+  },
+  "eyeR": {
+   "box": [
+    298.5,
+    224.9,
+    357.2,
+    286.3
+   ],
+   "pupilHome": [
+    331.8,
+    243.8
+   ],
+   "pupilR": 28.2,
+   "travel": [
+    9.4,
+    8.0
+   ],
+   "lidTravel": 36.8,
+   "lidDTravel": 9.8
+  }
+ },
+ "mouth": {
+  "box": [
+   264.2,
+   285.7,
+   307.8,
+   321.4
+  ],
+  "jawDrop": 8.9
+ }
+}
