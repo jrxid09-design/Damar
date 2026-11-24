@@ -278,7 +278,11 @@
       const headVel = dt > 0 ? (S.headRot.x - S.prevHeadRot) / dt : 0;
       S.prevHeadRot = S.headRot.x;
       stepSpring(S.tuftRot, -S.headRot.x * 0.55 - headVel * 0.055, dt, 85, 8.5);   // secondary lag + overshoot
-      stepSpring(S.hemRot, -S.headRot.x * 0.3 - S.jump.v * 0.006, dt, 70, 9);
+      // Hem lag from jump velocity, CLAMPED: unclamped, a celebrate launch
+      // (jump.v = -340) chased a ~2 rad target and tore the lower silhouette
+      // (NOTCH-RIG-HIDUP Tahap 4 QA). Lag must stay a sway, never a fling.
+      const hemLag = Math.max(-0.18, Math.min(0.18, -S.jump.v * 0.006));
+      stepSpring(S.hemRot, -S.headRot.x * 0.3 + hemLag, dt, 70, 9);
       stepSpring(S.pointAmt, S.gesture === 'point' ? 1 : 0, dt, 150, 12.5);
       stepSpring(S.waveAmt, S.gesture === 'wave' ? 1 : 0, dt, 170, 14);
       const talkTarget = S.speaking ? (now - S.speechAt < 260 ? S.speechLevel : 0.32) : 0;
