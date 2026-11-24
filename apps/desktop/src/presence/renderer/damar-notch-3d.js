@@ -180,6 +180,7 @@
         new THREE.GLTFLoader().parse(buf, '', gltf => {
           maskEmissiveWithDiffuse(gltf.scene);
           S.template = gltf.scene; S.clips = gltf.animations || [];
+          S.template.updateMatrixWorld(true); // bind-pose world matrices before measuring
           const box = new THREE.Box3().setFromObject(S.template);
           S.bbox = { size: box.getSize(new THREE.Vector3()), center: box.getCenter(new THREE.Vector3()) };
           S.modelStatus = 'ready';
