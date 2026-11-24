@@ -85,6 +85,29 @@
     dizzy: { pitch: 0.02, roll: 0.10, rate: 0.90, bob: 0.8 },
   };
   function emoteEmphasis(e) { return EMOTE_EMPHASIS[e] || EMOTE_EMPHASIS.senang; }
+  // The Owner's Blender export carries an emissive factor + strength on the
+  // outfit materials but no emissive texture (in Blender the emission is
+  // texture-masked). Unmasked, three.js glows the whole outfit orange and
+  // washes out the navy design. Masking the emission with the material's own
+  // diffuse map reproduces the Blender look: dark cloth stays dark, the gold
+  // trim glows. Materials without a diffuse map keep their flat emission.
+  function maskEmissiveWithDiffuse(rootObj) {
+    let masked = 0;
+    if (!rootObj || typeof rootObj.traverse !== 'function') return 0;
+    rootObj.traverse((obj) => {
+      if (!obj || !obj.isMesh) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach((m) => {
+        if (!m || !m.emissive || !m.map || m.emissiveMap) return;
+        const strength = typeof m.emissiveIntensity === 'number' ? m.emissiveIntensity : 1;
+        if ((m.emissive.r + m.emissive.g + m.emissive.b) * strength <= 0.01) return;
+        m.emissiveMap = m.map;
+        masked += 1;
+      });
+    });
+    return masked;
+  }
+
   // Gesture -> additive bone targets (radians at amt=1, right arm; the 2D
   // rig gestured with the same arm). waveOsc: extra forearm sway (rad)
   // while the wave spring is up, phase-lagged in the frame loop.
@@ -98,7 +121,7 @@
 
   const CSS = `
 .dnc-slot { position: relative; }
-.dn3d-view { position: absolute; inset: 0; overflow: hidden; border-radius: 14px; }
+.dn3d-view { position: absolute; inset: 0; overflow: hidden; border-radius: 14px; background: radial-gradient(ellipse 78% 62% at 50% 42%, rgba(245,185,66,.15), rgba(245,185,66,0) 68%); }
 .dn3d-view canvas { display: block; }
 .dn3d-fallback { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; }
 .dn3d-fallback.on { display: flex; }
@@ -155,6 +178,7 @@
         if (!bytes) throw new Error('empty model bytes');
         const buf = bytes.buffer ? bytes.buffer.slice(bytes.byteOffset || 0, (bytes.byteOffset || 0) + bytes.byteLength) : bytes;
         new THREE.GLTFLoader().parse(buf, '', gltf => {
+          maskEmissiveWithDiffuse(gltf.scene);
           S.template = gltf.scene; S.clips = gltf.animations || [];
           const box = new THREE.Box3().setFromObject(S.template);
           S.bbox = { size: box.getSize(new THREE.Vector3()), center: box.getCenter(new THREE.Vector3()) };
@@ -213,8 +237,8 @@
       const { size, center } = S.bbox;
       const fov = v.camera.fov * Math.PI / 180;
       let fitH, ty;
-      if (v.kind === 'head') { fitH = size.y * 0.36; ty = center.y + size.y * 0.30; }
-      else { fitH = size.y * 0.66; ty = center.y + size.y * 0.14; }
+      if (v.kind === 'head') { fitH = size.y * 0.31; ty = center.y + size.y * 0.32; }
+      else { fitH = size.y * 0.60; ty = center.y + size.y * 0.22; }
       const dist = (fitH / 2) / Math.tan(fov / 2);
       v.camera.aspect = w / h;
       v.camera.position.set(center.x, ty, center.z + dist * 1.04);
@@ -369,7 +393,7 @@
 
   root.DamarNotch3D = {
     create, EMOTES, COSTUMES, CLIP, SPEECH_BAKED_WEIGHT,
-    _pure: { clampGaze, clamp01, stepSpring, pokeVerdict, speechMorphs, emoteEmphasis, gestureTargets },
+    _pure: { clampGaze, clamp01, stepSpring, pokeVerdict, speechMorphs, emoteEmphasis, gestureTargets, maskEmissiveWithDiffuse },
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.DamarNotch3D;
 })(typeof window !== 'undefined' ? window : globalThis);
