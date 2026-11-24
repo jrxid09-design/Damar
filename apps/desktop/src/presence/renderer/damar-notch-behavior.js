@@ -14,6 +14,13 @@
   // idle default. Urgent and event decisions preempt immediately; calm
   // context changes are held by a dwell window so the character never
   // flickers between costumes while signals jitter.
+  //
+  // Speaking is a PARALLEL channel, not an emote: while the Core voice is
+  // active (sig.speaking, driven by real TTS/voice events) the decision
+  // carries talk:true and the rig lip-syncs its jaw to the voice envelope.
+  // Talk sits below alert/approval (an urgent face owns the mouth) and
+  // parallel to mission/context. It is computed fresh on every call and is
+  // never held by the dwell window: voice start/stop are events.
 
   const DWELL_MS = 2500;              // calm changes must wait out the dwell
   const PC_REST_IDLE_MS = 300000;     // 5 min of PC idle -> resting face
@@ -55,7 +62,8 @@
       kind = 'context';
     }
 
-    const decision = { emote, costume, gesture, celebrate, kind, changed: true };
+    const talk = !!sig.speaking && !sig.alertActive && !(sig.pendingApprovals > 0);
+    const decision = { emote, costume, gesture, celebrate, kind, talk, changed: true };
     if (!prev) return decision;
     const same = prev.emote === emote && (prev.costume || null) === costume && (prev.gesture || null) === gesture;
     if (same) { decision.changed = false; return decision; }
@@ -64,7 +72,7 @@
     // always preempt; a previous urgent/event decision never blocks.
     const prevKind = prev.kind || 'context';
     if (kind === 'context' && prevKind === 'context' && typeof prev.since === 'number' && now - prev.since < DWELL_MS) {
-      return { emote: prev.emote, costume: prev.costume || null, gesture: prev.gesture || null, celebrate: false, kind: prevKind, changed: false };
+      return { emote: prev.emote, costume: prev.costume || null, gesture: prev.gesture || null, celebrate: false, kind: prevKind, talk, changed: false };
     }
     return decision;
   }
