@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('damarDesktop', Object.freeze({
   launchCli: () => ipcRenderer.invoke('launch-damar-cli'),
   runtimeRequest: request => ipcRenderer.invoke('damar-runtime-request', { path: String(request?.path || ''), method: String(request?.method || 'GET') }),
   getPresence: () => ipcRenderer.invoke('damar-presence-get'),
+  // The Notch 3D stage's model bytes: one fixed asset read in main; the renderer cannot fetch (by design).
+  getNotchModel: () => ipcRenderer.invoke('damar-notch-model'),
   // Names the currently pending permission + a decision; main validates it and authenticates as Owner.
   decidePermission: request => ipcRenderer.invoke('permission-decision', { permissionId: String(request?.permissionId || ''), decision: String(request?.decision || '') }),
   // Now-playing controls from the notch media pill; main validates the action against the SMTC allowlist.

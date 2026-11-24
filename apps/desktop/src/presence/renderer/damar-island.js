@@ -259,7 +259,11 @@
   // (compact head + expanded stage) sharing one state - per-part spring rig,
   // real blink/gaze, gestures, lip-sync - bound to the same Core events as
   // notchPhysics below.
-  const dnc = typeof window.DamarNotchCharacter !== 'undefined' ? window.DamarNotchCharacter.create({
+  // Character stage: the 3D stage (damar-notch-3d.js, the Owner's base model) is the
+  // character now; the v4 2D rig module remains as a load-failure fallback only.
+  const CharacterFactory = typeof window.DamarNotch3D !== 'undefined' ? window.DamarNotch3D
+    : (typeof window.DamarNotchCharacter !== 'undefined' ? window.DamarNotchCharacter : null);
+  const dnc = CharacterFactory ? CharacterFactory.create({
     isVisible: () => fsm.state === 'compact' || fsm.state === 'morph' || fsm.state === 'expanded',
     reducedMotion: () => document.body.classList.contains('degraded') || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
   }) : null;
