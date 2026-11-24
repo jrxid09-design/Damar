@@ -237,7 +237,7 @@
       const { size, center } = S.bbox;
       const fov = v.camera.fov * Math.PI / 180;
       let fitH, ty;
-      if (v.kind === 'head') { fitH = size.y * 0.31; ty = center.y + size.y * 0.32; }
+      if (v.kind === 'head') { fitH = size.y * 0.40; ty = center.y + size.y * 0.33; }
       else { fitH = size.y * 0.60; ty = center.y + size.y * 0.22; }
       const dist = (fitH / 2) / Math.tan(fov / 2);
       v.camera.aspect = w / h;
