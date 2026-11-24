@@ -255,9 +255,10 @@
   // dipotong ke ui-prototypes/w5/argon-character-engine.js. Emote mengikuti
   // state island; orb standby memakai drawOrbStandby60fps.
   const orbCanvas = document.getElementById('siriGlCanvas');
-  // Layered Damar Notch character (damar-notch-character.js): two layered SVG
-  // views (compact head + expanded stage) sharing one state - gaze, blink,
-  // springs, emotes - bound to the same Core events as notchPhysics below.
+  // Damar Notch character (damar-notch-character.js, rig v4): two rig views
+  // (compact head + expanded stage) sharing one state - per-part spring rig,
+  // real blink/gaze, gestures, lip-sync - bound to the same Core events as
+  // notchPhysics below.
   const dnc = typeof window.DamarNotchCharacter !== 'undefined' ? window.DamarNotchCharacter.create({
     isVisible: () => fsm.state === 'compact' || fsm.state === 'morph' || fsm.state === 'expanded',
     reducedMotion: () => document.body.classList.contains('degraded') || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
@@ -390,6 +391,10 @@
   const sig = { pending: 0, lastFinalAt: 0, lastFailAt: 0, workUntil: 0, alertUntil: 0, matadewaUntil: 0, mediaPlaying: false, sessionsWorking: 0, pc: null };
   let behaviorPrev = null;
   window.addEventListener('damar-presence-behavior', e => { sig.pc = e.detail?.pcActivity || null; });
+  // The Owner page's real voice state: damarIsSpeaking flips with the actual
+  // TTS utterance (speakWithOrbReactivity) - the same signal presence-adapter
+  // polls to end voice conversations. Read as a bare global, like the adapter.
+  const coreSpeaking = () => { try { return typeof damarIsSpeaking !== 'undefined' && !!damarIsSpeaking; } catch { return false; } };
   setInterval(() => {
     if (!dnc || typeof window.DamarNotchBehavior === 'undefined') return;
     const now = Date.now();
@@ -401,8 +406,14 @@
       missionActive: now < sig.workUntil || sig.sessionsWorking > 0,
       mediaPlaying: sig.mediaPlaying,
       matadewaMode: now < sig.matadewaUntil,
+      speaking: coreSpeaking(),
       pc: sig.pc,
     }, behaviorPrev, now);
+    // Gestures and the talk channel apply EVERY tick (idempotent setters):
+    // point holds while an alert/approval decision stands, wave ends when
+    // the completion decision ends, the mouth follows the talk decision.
+    dnc.setGesture(d.gesture || null);
+    dnc.setSpeaking(!!d.talk);
     if (d.changed) {
       behaviorPrev = { emote: d.emote, costume: d.costume, since: now };
       if (d.celebrate) dnc.celebrate();
@@ -410,6 +421,23 @@
       dnc.setCostume(d.costume);
     }
   }, 1200);
+  // Lip-sync fast path (90 ms): the 1.2 s engine tick is too coarse for a
+  // mouth. Speaking state mirrors the engine's talk rule from the same
+  // island signal memory; the envelope comes from the page's voiceAmp,
+  // which the TTS onboundary handler pulses to 1.0 on every real word
+  // boundary (it decays in the page render loop). No boundary pulses ->
+  // the rig's documented steady-envelope fallback takes over.
+  setInterval(() => {
+    if (!dnc) return;
+    const now = Date.now();
+    const talkNow = coreSpeaking() && !(now < sig.alertUntil) && !(sig.pending > 0);
+    dnc.setSpeaking(talkNow);
+    if (talkNow) {
+      try {
+        if (typeof voiceAmp === 'number' && Number.isFinite(voiceAmp)) dnc.setSpeechLevel(Math.max(0, Math.min(1, voiceAmp)));
+      } catch {}
+    }
+  }, 90);
   window.addEventListener('damar-presence-mic', e => { island.dataset.mic = e.detail ? 'on' : 'off'; });
   window.addEventListener('damar-presence-lang', () => { renderLabels(); renderStatus(); });
   renderLabels();
