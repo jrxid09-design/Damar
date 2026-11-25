@@ -276,6 +276,34 @@
     head.addEventListener('pointerenter', () => dnc.setHover(true));
     head.addEventListener('pointerleave', () => { dnc.setHover(false); dnc.setGaze(0, 0); });
     head.addEventListener('pointerdown', () => dnc.poke());
+    // HIDUP overhaul: the character watches the cursor across the whole
+    // window, not only while it is over the head - the head turns toward
+    // the pointer as it approaches the notch (Coucou-parity attention).
+    // The head's own pointermove above stays the precise local driver.
+    document.addEventListener('mousemove', e => {
+      if (e.target && e.target.closest && e.target.closest('.di-head')) return;
+      const r = island.getBoundingClientRect();
+      dnc.setGaze((e.clientX - (r.left + r.width / 2)) / 340, (e.clientY - (r.top + r.height / 2)) / 260);
+    }, { passive: true });
+    // The expanded stage gets the same hover/poke life as the head.
+    const stageEl = island.querySelector('.di-char-stage');
+    if (stageEl) {
+      stageEl.addEventListener('pointerenter', () => dnc.setHover(true));
+      stageEl.addEventListener('pointerleave', () => dnc.setHover(false));
+      stageEl.addEventListener('pointerdown', () => dnc.poke());
+    }
+    // Intro show: when the notch appears (from hidden/orb) the character
+    // performs the full greeting choreography; when the expanded stage
+    // opens it performs the small greet instead.
+    window.addEventListener('damar-island-state', e => {
+      const { from, to } = e.detail || {};
+      if ((to === 'morph' || to === 'compact') && !NOTCH_STATES.has(from)) {
+        if (typeof dnc.playIntro === 'function') dnc.playIntro();
+      } else if (to === 'expanded' && from !== 'expanded') {
+        if (typeof dnc.playGreet === 'function') dnc.playGreet();
+        else if (typeof dnc.playIntro === 'function') dnc.playIntro();
+      }
+    });
   }
   let argonRaf = 0, argonStart = performance.now();
   function emoteForState(state) {
@@ -332,6 +360,8 @@
     if (typeof notchPhysics !== 'undefined' && pending > 0) notchPhysics.emote = 'siaga';
     sig.pending = pending;
     if (dnc && pending > 0) dnc.setEmote('siaga');
+    // A NEW waiting request gets the question reaction: a blink + head tilt.
+    if (dnc && pending > lastPending && typeof dnc.reactQuestion === 'function') dnc.reactQuestion();
     if (pending > lastPending && fsm.state === 'hidden' && orbPhaseDone && notchEnabled && !voiceActive) fsm.reveal();
     lastPending = pending; renderStatus();
   });
@@ -351,7 +381,7 @@
     if (a.kind === 'alert') { sig.alertUntil = Date.now() + 8000; if (a.source === 'mata-dewa') sig.matadewaUntil = Date.now() + 90000; }
     if (dnc) {
       if (a.kind === 'final' && a.status === 'COMPLETED') { dnc.setEmote('senang'); dnc.celebrate(); }
-      else if (a.kind === 'final') dnc.setEmote('pulih');
+      else if (a.kind === 'final') { dnc.setEmote('pulih'); if (typeof dnc.reactError === 'function') dnc.reactError(); }
       else if (['read', 'edit', 'run', 'shell'].includes(a.kind) || (a.kind === 'discussion' && a.state === 'RUNNING')) dnc.setEmote('berpikir');
       else if (a.kind === 'discussion') dnc.setEmote(a.state === 'COMPLETED' ? 'senang' : 'pulih');
       else if (a.kind === 'alert') dnc.setEmote('siaga');
@@ -376,6 +406,8 @@
   window.addEventListener('damar-presence-media', e => {
     const m = e.detail;
     sig.mediaPlaying = !!(m && m.playing);
+    // The character bounces along while the widget plays (real SMTC signal).
+    if (dnc && typeof dnc.setMediaPlaying === 'function') dnc.setMediaPlaying(sig.mediaPlaying);
     mediaEl.hidden = !m;
     if (m) {
       mediaText.textContent = (m.title || 'Unknown') + (m.artist ? ' - ' + m.artist : '');
