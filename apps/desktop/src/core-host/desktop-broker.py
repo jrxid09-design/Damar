@@ -377,7 +377,10 @@ def capture(path, hwnd=None, region=None, max_dim=None):
                     out_row[ch::4] = chans[ch]
                 small.append(bytes(out_row))
             png_rows = small
-            width, height = max(1, width // factor), max(1, height // factor)
+            # Declared dims must match the sliced rows exactly: slicing yields
+            # ceil(dim/factor) rows/pixels, floor division would corrupt the PNG.
+            height = len(png_rows)
+            width = (len(png_rows[0]) // 4) if png_rows else width
             scale = factor
 
     def chunk(tag, data):
