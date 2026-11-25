@@ -30,6 +30,10 @@ gdi = c.WinDLL("gdi32", use_last_error=True)
 
 user.SendInput.argtypes = [w.UINT, c.c_void_p, c.c_int]
 user.SendInput.restype = w.UINT
+user.MapVirtualKeyW.argtypes = [w.UINT, w.UINT]
+user.MapVirtualKeyW.restype = w.UINT
+user.VkKeyScanW.argtypes = [c.c_wchar]
+user.VkKeyScanW.restype = w.SHORT
 
 # Physical-pixel coordinates regardless of the python manifest: the screen math and any
 # ground-truth fixture must agree cell for cell. SetProcessDPIAware is a no-op when the
@@ -49,8 +53,15 @@ MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_ABSOLUTE = 0x8000
 MOUSEEVENTF_WHEEL = 0x0800
 MOUSEEVENTF_HWHEEL = 0x1000
+KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
+MAPVK_VK_TO_VSC = 0
+# Virtual keys Windows reports with the extended bit set (scan code is shared with a
+# numpad twin; without KEYEVENTF_EXTENDEDKEY, browsers map the event to the numpad
+# code and KeyboardEvent.code never becomes e.g. "ArrowLeft").
+EXTENDED_VKS = {0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
+                0x2C, 0x2D, 0x2E, 0x5B, 0x5C, 0x5D, 0x6F, 0x90, 0xA3, 0xA5}
 SRCCOPY = 0x00CC0020
 CAPTUREBLT = 0x40000000
 
@@ -224,15 +235,58 @@ def send_wheel(delta, horizontal=False):
     return bool(user.SendInput(1, (INPUT * 1)(rec), c.sizeof(INPUT)))
 
 
+def _key_input(vk, up=False):
+    """One KEYBDINPUT carrying the key's real scan code (MapVirtualKey) and, for
+    extended keys, KEYEVENTF_EXTENDEDKEY - the pair a physical keyboard produces,
+    which is what browsers translate into KeyboardEvent.code."""
+    rec = INPUT(); rec.type = INPUT_KEYBOARD
+    flags = KEYEVENTF_KEYUP if up else 0
+    if int(vk) in EXTENDED_VKS:
+        flags |= KEYEVENTF_EXTENDEDKEY
+    rec.union.ki = KEYBDINPUT(int(vk), int(user.MapVirtualKeyW(int(vk), MAPVK_VK_TO_VSC)), flags, 0, None)
+    return rec
+
+
+def _send_key(vk, up=False):
+    return bool(user.SendInput(1, (INPUT * 1)(_key_input(vk, up)), c.sizeof(INPUT)))
+
+
+def send_key(vk):
+    return _send_key(vk) and _send_key(vk, True)
+
+
+def _send_unicode_char(ch):
+    for down in (0, KEYEVENTF_KEYUP):
+        rec = INPUT(); rec.type = INPUT_KEYBOARD
+        rec.union.ki = KEYBDINPUT(0, ord(ch), KEYEVENTF_UNICODE | down, 0, None)
+        if not user.SendInput(1, (INPUT * 1)(rec), c.sizeof(INPUT)):
+            return False
+    return True
+
+
 def send_text(text):
+    """Type text as real key events whenever the active layout maps the character
+    to a plain or Shift-only key (VkKeyScan): browsers then see the true
+    KeyboardEvent.code ("Digit2", "KeyA") instead of a code-less Unicode event,
+    which canvas/DOM field handlers rely on. Characters needing Ctrl/Alt combos
+    or with no layout mapping keep the Unicode path."""
     sent = 0
     for ch in text:
-        for down in (0, KEYEVENTF_KEYUP):
-            rec = INPUT(); rec.type = INPUT_KEYBOARD
-            rec.union.ki = KEYBDINPUT(0, ord(ch), KEYEVENTF_UNICODE | down, 0, None)
-            arr = (INPUT * 1)(rec)
-            if not user.SendInput(1, arr, c.sizeof(INPUT)):
-                return sent
+        if ch in ("\r", "\n"):
+            ok = send_key(0x0D)
+        elif ch == "\t":
+            ok = send_key(0x09)
+        else:
+            raw = user.VkKeyScanW(ch) & 0xFFFF
+            vk, shift_state = raw & 0xFF, (raw >> 8) & 0xFF
+            if raw == 0xFFFF or vk == 0xFF or (shift_state & ~1):
+                ok = _send_unicode_char(ch)
+            elif shift_state & 1:
+                ok = _send_key(0x10) and send_key(vk) and _send_key(0x10, True)
+            else:
+                ok = send_key(vk)
+        if not ok:
+            return sent
         sent += 1
         time.sleep(0.004)
     return sent
@@ -245,25 +299,16 @@ def send_hotkey(vk, mods):
     held = []
     for name, vkmod in MODIFIERS.items():
         if mods.get(name):
-            rec = INPUT(); rec.type = INPUT_KEYBOARD
-            rec.union.ki = KEYBDINPUT(vkmod, 0, 0, 0, None)
-            user.SendInput(1, (INPUT * 1)(rec), c.sizeof(INPUT)); held.append(vkmod)
+            _send_key(vkmod); held.append(vkmod)
     time.sleep(0.03)
-    rec = INPUT(); rec.type = INPUT_KEYBOARD
-    rec.union.ki = KEYBDINPUT(int(vk), 0, 0, 0, None)
-    user.SendInput(1, (INPUT * 1)(rec), c.sizeof(INPUT))
+    send_key(int(vk))
     time.sleep(0.03)
-    rec = INPUT(); rec.type = INPUT_KEYBOARD
-    rec.union.ki = KEYBDINPUT(int(vk), 0, KEYEVENTF_KEYUP, 0, None)
-    user.SendInput(1, (INPUT * 1)(rec), c.sizeof(INPUT))
     for vkmod in reversed(held):
-        rec = INPUT(); rec.type = INPUT_KEYBOARD
-        rec.union.ki = KEYBDINPUT(vkmod, 0, KEYEVENTF_KEYUP, 0, None)
-        user.SendInput(1, (INPUT * 1)(rec), c.sizeof(INPUT))
+        _send_key(vkmod, True)
     return True
 
 
-def capture(path, hwnd=None, region=None):
+def capture(path, hwnd=None, region=None, max_dim=None):
     """Capture pixels visible on the desktop, optionally limited to one window rect.
     Some packaged/WinUI apps return black from GetWindowDC, so use the desktop DC and
     the exact authorized window bounds instead. Analysis remains a bounded luminance map."""
@@ -316,6 +361,24 @@ def capture(path, hwnd=None, region=None):
         rgba = bytearray(row_bytes)
         rgba[0::4], rgba[1::4], rgba[2::4], rgba[3::4] = row[2::4], row[1::4], row[0::4], b"\xff" * width
         png_rows.append(bytes(rgba))
+    # Optional stride downscale of the DELIVERED image only (fast perception for
+    # real-time loops): the ink grid above always comes from native-resolution
+    # pixels, so deterministic verification is unaffected. Scale is reported so
+    # callers can map image coordinates back to screen coordinates.
+    scale = 1
+    if isinstance(max_dim, int) and not isinstance(max_dim, bool) and max_dim >= 64 and max(width, height) > max_dim:
+        factor = (max(width, height) + max_dim - 1) // max_dim
+        if factor > 1:
+            small = []
+            for row in png_rows[::factor]:
+                chans = [row[ch::4][::factor] for ch in range(4)]
+                out_row = bytearray(len(chans[0]) * 4)
+                for ch in range(4):
+                    out_row[ch::4] = chans[ch]
+                small.append(bytes(out_row))
+            png_rows = small
+            width, height = max(1, width // factor), max(1, height // factor)
+            scale = factor
 
     def chunk(tag, data):
         return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
@@ -328,7 +391,7 @@ def capture(path, hwnd=None, region=None):
     digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
     flat = [value for line in ink_grid for value in line]
     return {"path": path, "width": int(width), "height": int(height), "sha256": digest,
-            "ink": flat, "mean": sum(flat) // max(1, len(flat))}
+            "ink": flat, "mean": sum(flat) // max(1, len(flat)), "scale": scale}
 
 
 def point_in_rect(rect, x, y):
@@ -488,9 +551,65 @@ def main():
                                   "foreground": foreground_info()})); return 0
             sent = send_hotkey(int(command["vk"]), command.get("modifiers") or {})
             print(json.dumps({"ok": True, "sent": bool(sent), "foreground": foreground_info()}))
+        elif op == "setfield":
+            # Composite field entry for small dialog inputs: focus the field,
+            # select its current content, type the replacement as real key
+            # events, commit the way the dialog expects, then read back a tight
+            # native-resolution crop around the field as evidence of the value
+            # that actually landed (a whole-window diff cannot see a 2-digit
+            # change in a 48x27 field).
+            expect_hwnd = command.get("expect_hwnd")
+            expect_title = command.get("expect_title")
+            x, y = command.get("x"), command.get("y")
+            if not isinstance(x, int) or isinstance(x, bool) or not isinstance(y, int) or isinstance(y, bool):
+                print(json.dumps({"ok": False, "error": "POINT_REQUIRED"})); return 0
+            if expect_hwnd is None:
+                print(json.dumps({"ok": False, "error": "POINT_OUTSIDE_TARGET"})); return 0
+            rect = window_info(int(expect_hwnd))["rect"]
+            if not point_in_rect(rect, x, y):
+                print(json.dumps({"ok": False, "error": "POINT_OUTSIDE_TARGET",
+                                  "target_rect": rect})); return 0
+            fg = verify_foreground(expect_hwnd, expect_title)
+            if fg is None:
+                print(json.dumps({"ok": False, "error": "FOREGROUND_MISMATCH",
+                                  "foreground": foreground_info()})); return 0
+            if not user.SetCursorPos(int(x), int(y)):
+                print(json.dumps({"ok": False, "error": "CURSOR_MOVE_FAILED"})); return 0
+            if not send_mouse("dblclick", x, y):
+                print(json.dumps({"ok": False, "error": "DISPATCH_FAILED"})); return 0
+            time.sleep(0.18)
+            send_hotkey(0x41, {"ctrl": True})
+            time.sleep(0.05)
+            typed = send_text(str(command.get("text", ""))[:64])
+            time.sleep(0.08)
+            commit = command.get("commit", "enter")
+            if commit == "enter":
+                send_key(0x0D)
+            elif commit == "tab":
+                send_key(0x09)
+            time.sleep(0.15)
+            win_w, win_h = rect[2] - rect[0], rect[3] - rect[1]
+            rw = command.get("region_w", 280)
+            rh = command.get("region_h", 64)
+            if not isinstance(rw, int) or isinstance(rw, bool):
+                rw = 280
+            if not isinstance(rh, int) or isinstance(rh, bool):
+                rh = 64
+            rw = max(16, min(rw, win_w)); rh = max(16, min(rh, win_h))
+            rl = max(0, min(int(x) - rect[0] - rw // 2, win_w - rw))
+            rt = max(0, min(int(y) - rect[1] - rh // 2, win_h - rh))
+            readback = capture(command["path"], int(expect_hwnd), [rl, rt, rw, rh])
+            if readback is None:
+                print(json.dumps({"ok": False, "error": "CAPTURE_FAILED"})); return 0
+            readback["region"] = [rl, rt, rw, rh]
+            cursor = POINT(); user.GetCursorPos(c.byref(cursor))
+            print(json.dumps({"ok": True, "sent": True, "typed": typed,
+                              "cursor": [cursor.x, cursor.y],
+                              "foreground": foreground_info(), "readback": readback}))
         elif op == "capture":
             hwnd = command.get("hwnd")
-            result = capture(command["path"], int(hwnd) if hwnd else None, command.get("region"))
+            result = capture(command["path"], int(hwnd) if hwnd else None, command.get("region"),
+                             command.get("max_dim"))
             if result is None:
                 print(json.dumps({"ok": False, "error": "CAPTURE_FAILED"})); return 0
             result["foreground"] = foreground_info()

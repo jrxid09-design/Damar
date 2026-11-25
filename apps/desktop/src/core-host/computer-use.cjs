@@ -123,14 +123,14 @@ function newCaptureDir() {
 }
 
 function requirePoint(action, x, y, endX, endY, points) {
-  if (['move', 'click', 'dblclick', 'right', 'wheel'].includes(action) && (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)))
+  if (['move', 'click', 'dblclick', 'right', 'wheel', 'setfield'].includes(action) && (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)))
     throw Error('POINT_REQUIRED');
   if (action === 'drag' && (![x, y, endX, endY].every(Number.isSafeInteger))) throw Error('POINT_REQUIRED');
   if (action === 'path' && (!Array.isArray(points) || points.length < 2 || points.length > 128 ||
       points.some(p => !Array.isArray(p) || p.length !== 2 || !p.every(Number.isSafeInteger)))) throw Error('PATH_INVALID');
 }
 
-async function observe({ target = 'screen', title = null, pid = null, capture: wantCapture = true } = {}, signal) {
+async function observe({ target = 'screen', title = null, pid = null, capture: wantCapture = true, region = null, maxDim = null } = {}, signal) {
   const windows = await runHelper({ op: 'windows', limit: MAX_WINDOWS }, signal);
   if (windows.ok !== true) throw Error('DESKTOP_HELPER_FAILED_' + (windows.error || 'UNKNOWN'));
   const list = windows.windows.slice(0, MAX_WINDOWS);
@@ -139,11 +139,23 @@ async function observe({ target = 'screen', title = null, pid = null, capture: w
   result.foreground = fg.ok ? fg.foreground : null;
   if (wantCapture) {
     const win = target === 'window' ? findWindow(list, { title, pid }) : null;
+    // Optional tight read-back: a window-relative region captured at native
+    // resolution, so small values (a 2-digit dialog field) stay legible instead
+    // of dissolving into a whole-window grid.
+    let reg = null;
+    if (win && region) {
+      const [l, t, r, b] = win.rect, ww = r - l, wh = b - t;
+      const w = Math.max(8, Math.min(Math.floor(region.w) || 8, ww));
+      const h = Math.max(8, Math.min(Math.floor(region.h) || 8, wh));
+      reg = [Math.max(0, Math.min(Math.floor(region.x) || 0, ww - w)),
+        Math.max(0, Math.min(Math.floor(region.y) || 0, wh - h)), w, h];
+    }
     const dir = newCaptureDir();
     const file = path.join(dir, crypto.randomUUID() + '.png');
-    const shot = await runHelper({ op: 'capture', path: file, hwnd: win ? win.hwnd : null }, signal);
+    const shot = await runHelper({ op: 'capture', path: file, hwnd: win ? win.hwnd : null, region: reg,
+      max_dim: Number.isSafeInteger(maxDim) && maxDim >= 64 ? maxDim : null }, signal);
     if (shot.ok !== true) throw Error('DESKTOP_CAPTURE_FAILED_' + (shot.error || 'UNKNOWN'));
-    result.capture = { path: file, sha256: shot.sha256, width: shot.width, height: shot.height };
+    result.capture = { path: file, sha256: shot.sha256, width: shot.width, height: shot.height, region: reg, scale: shot.scale || 1 };
     result.analysis = { ink: Array.isArray(shot.ink) ? shot.ink.slice(0, MAX_INK) : [], mean: shot.mean, width: shot.width, height: shot.height };
   }
   return result;
@@ -151,7 +163,8 @@ async function observe({ target = 'screen', title = null, pid = null, capture: w
 
 // Bring the authorized target to the front and keep re-verifying inside the helper process.
 async function act({ title, pid, action, x = null, y = null, endX = null, endY = null, points = null, durationMs = 500,
-  text = null, vk = null, modifiers = null, wheel = 1, horizontal = false } = {}, signal) {
+  text = null, vk = null, modifiers = null, wheel = 1, horizontal = false,
+  commit = 'enter', regionW = 280, regionH = 64 } = {}, signal) {
   requirePoint(action, x, y, endX, endY, points);
   if (!Number.isSafeInteger(durationMs) || durationMs < 0 || durationMs > 5000) throw Error('DURATION_INVALID');
   const windows = await runHelper({ op: 'windows', limit: MAX_WINDOWS }, signal);
@@ -165,7 +178,10 @@ async function act({ title, pid, action, x = null, y = null, endX = null, endY =
       helperSucceeded: focused.ok === true, foreground: focused.foreground || null };
     throw error;
   }
+  const readbackFile = action === 'setfield' ? path.join(newCaptureDir(), crypto.randomUUID() + '.png') : null;
   const dispatch = action === 'type' ? { op: 'type', text: String(text || ''), expect_hwnd: win.hwnd, expect_title: win.title }
+    : action === 'setfield' ? { op: 'setfield', x, y, text: String(text || ''), commit, region_w: regionW, region_h: regionH,
+        path: readbackFile, expect_hwnd: win.hwnd, expect_title: win.title }
     : action === 'hotkey' ? { op: 'hotkey', vk, modifiers: modifiers || {}, expect_hwnd: win.hwnd, expect_title: win.title }
     : action === 'wheel' ? { op: 'mouse', action: 'wheel', x, y, delta: wheel, horizontal, expect_hwnd: win.hwnd, expect_title: win.title }
     : action === 'drag' ? { op: 'mouse', action: 'drag', x, y, end_x: endX, end_y: endY, expect_hwnd: win.hwnd, expect_title: win.title }
@@ -173,7 +189,9 @@ async function act({ title, pid, action, x = null, y = null, endX = null, endY =
     : { op: 'mouse', action, x, y, expect_hwnd: win.hwnd, expect_title: win.title };
   const sent = await runHelper(dispatch, signal);
   if (sent.ok !== true) { const e = Error(sent.error || 'DISPATCH_FAILED'); e.foreground = sent.foreground; throw e; }
-  return { target: { title: win.title, pid: win.pid }, rect: win.rect, cursor: sent.cursor, foreground: sent.foreground };
+  return { target: { title: win.title, pid: win.pid }, rect: win.rect, cursor: sent.cursor, foreground: sent.foreground,
+    readback: sent.readback ? { path: readbackFile, width: sent.readback.width, height: sent.readback.height,
+      mean: sent.readback.mean, region: sent.readback.region || null } : null };
 }
 
 async function compareRegion(before, after) {
@@ -355,8 +373,9 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         return out({ ok: true, stopped: true, note: 'desktop control disabled until the Core host restarts' });
       } catch (e) { return fail(e); } } },
       { readOnly: true }),
-    tool({ name: 'computer_use_observe', description: 'Observe the desktop: list windows, optionally capture the screen or one window, and report what the active model can actually perceive. Capture requires Owner authorization; analysis is deterministic, never raw pixels.',
-      parameters: { type: 'object', properties: { target: { type: 'string', enum: ['screen', 'window'] }, title: { type: 'string' }, pid: { type: 'integer' }, capture: { type: 'boolean' } } },
+    tool({ name: 'computer_use_observe', description: 'Observe the desktop: list windows, optionally capture the screen or one window, and report what the active model can actually perceive. Capture requires Owner authorization; analysis is deterministic, never raw pixels. For a window target, regionX/regionY/regionW/regionH capture a tight window-relative region at native resolution (use it to READ small values such as dialog fields), and maxDim downscales the delivered image for fast loops (the result reports the scale; window coordinates stay authoritative).',
+      parameters: { type: 'object', properties: { target: { type: 'string', enum: ['screen', 'window'] }, title: { type: 'string' }, pid: { type: 'integer' }, capture: { type: 'boolean' },
+        regionX: { type: 'integer' }, regionY: { type: 'integer' }, regionW: { type: 'integer' }, regionH: { type: 'integer' }, maxDim: { type: 'integer' } } },
       execute: async (args, execution) => { try {
         const ctx = ctxOf(execution);
         if (state.stopped) return out({ ok: false, error: 'DESKTOP_STOPPED' });
@@ -371,7 +390,10 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
             change: 'observe the desktop for the current task', scope: target === 'window' ? 'exact window title+pid' : 'full screen (privacy-sensitive)',
             risk: 'A screen image is written to the private scratch directory; pixels are never sent to a model unless it can actually accept images' },
           parameters: { target, fingerprint },
-          driver: async () => { observed = await enqueue(ctx.signal, 'observe', signal => observe({ target, title: args?.title, pid: args?.pid, capture: wantCapture }, signal)); return { observed: true }; },
+          driver: async () => { observed = await enqueue(ctx.signal, 'observe', signal => observe({ target, title: args?.title, pid: args?.pid, capture: wantCapture,
+            region: target === 'window' && Number.isSafeInteger(args?.regionW) && Number.isSafeInteger(args?.regionH)
+              ? { x: args?.regionX || 0, y: args?.regionY || 0, w: args.regionW, h: args.regionH } : null,
+            maxDim: Number.isSafeInteger(args?.maxDim) ? args.maxDim : null }, signal)); return { observed: true }; },
           verify: async () => ({ checks: [
             { name: 'helper answered', passed: !!observed && Array.isArray(observed.windows) },
             ...(wantCapture ? [{ name: 'capture written', passed: !!observed?.capture?.path && fs.existsSync(observed.capture.path) }] : []) ] }) });
@@ -379,7 +401,8 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         if (!observed) return out({ ok: false, error: 'NOT_EXECUTED_' + (r.reason || r.outcome) });
         ctx.emit({ type: 'tool', badge: 'CU-OBSERVE', target: `${target}${args?.title ? ' ' + String(args.title).slice(0, 40) : ''} (${observed.windows.length} windows)` });
         const result = { ok: true, outcome: r.outcome, windows: observed.windows, foreground: observed.foreground,
-          capture: observed.capture ? { sha256: observed.capture.sha256, width: observed.capture.width, height: observed.capture.height, path: observed.capture.path } : null,
+          capture: observed.capture ? { sha256: observed.capture.sha256, width: observed.capture.width, height: observed.capture.height, path: observed.capture.path,
+            region: observed.capture.region || null, scale: observed.capture.scale || 1 } : null,
           analysis: observed.analysis ? { ink: observed.analysis.ink, mean: observed.analysis.mean } : null,
           visionCapability: vision() ? 'verified' : 'unverified',
           visionAvailable: vision(), visionNote: vision() ? 'selected model capability is verified' : 'selected model image input is not verified; only deterministic analysis is available' };
@@ -394,13 +417,14 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         return out(result);
       } catch (e) { return fail(e); } } },
       { canonicalAuthority: true, sideEffects: false, readOnly: true }),
-    tool({ name: 'computer_use_act', description: 'Act on one authorized desktop window: focus it, then move/click/right-click/double-click/drag/freehand-path/vertical-or-horizontal-scroll/type/hotkey. Drag and path are one bounded down-move-up helper operation; every path point must be inside the exact target window. Input is re-verified against the foreground window before dispatch, and the result reports what was actually observed.',
+    tool({ name: 'computer_use_act', description: 'Act on one authorized desktop window: focus it, then move/click/right-click/double-click/drag/freehand-path/vertical-or-horizontal-scroll/type/hotkey. Drag and path are one bounded down-move-up helper operation; every path point must be inside the exact target window. Input is re-verified against the foreground window before dispatch, and the result reports what was actually observed. For entering a value into a small dialog field, use action "setfield" with x/y at the field center and text: it focuses the field, selects its content, types as real key events, commits (commit: "enter" | "tab" | "none"), and returns a zoomed read-back image of the field so the landed value can be confirmed; verification compares that tight region, not the whole window.',
       parameters: { type: 'object', properties: { title: { type: 'string' }, pid: { type: 'integer' },
-        action: { type: 'string', enum: ['move', 'click', 'dblclick', 'right', 'drag', 'path', 'wheel', 'type', 'hotkey'] },
+        action: { type: 'string', enum: ['move', 'click', 'dblclick', 'right', 'drag', 'path', 'wheel', 'type', 'hotkey', 'setfield'] },
         x: { type: 'integer' }, y: { type: 'integer' }, endX: { type: 'integer' }, endY: { type: 'integer' },
         points: { type: 'array', maxItems: 128, items: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer' } } },
         durationMs: { type: 'integer', minimum: 0, maximum: 5000 }, horizontal: { type: 'boolean' },
         text: { type: 'string' }, vk: { type: 'integer' },
+        commit: { type: 'string', enum: ['enter', 'tab', 'none'] }, regionW: { type: 'integer' }, regionH: { type: 'integer' },
          modifiers: { type: 'object', properties: { ctrl: { type: 'boolean' }, alt: { type: 'boolean' }, shift: { type: 'boolean' }, win: { type: 'boolean' } } }, wheel: { type: 'integer' } },
         required: ['title', 'action'] },
       execute: async (args, execution) => { try {
@@ -419,16 +443,31 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
             inputDigest: args.action === 'type' ? crypto.createHash('sha256').update(String(args?.text || '')).digest('hex').slice(0, 24) : null },
           driver: async () => {
             await enqueue(ctx.signal, 'act', async signal => {
-              before = await observe({ target: 'window', title: args?.title, pid: args?.pid }, signal);
-              applied = await act(args, signal);
-              after = await observe({ target: 'window', title: args?.title, pid: args?.pid }, signal);
+              if (args.action === 'setfield') {
+                // Verify against a tight region around the field: a whole-window
+                // grid cannot see a 2-digit change, a native-res crop can.
+                const listing = await observe({ target: 'window', title: args?.title, pid: args?.pid, capture: false }, signal);
+                const win = listing.windows.find(w => w.title === String(args?.title || '') && (args?.pid == null || w.pid === args?.pid));
+                if (!win) throw Error('WINDOW_NOT_FOUND');
+                const [l, t, r, b] = win.rect, ww = r - l, wh = b - t;
+                const rw = Math.max(16, Math.min(args?.regionW || 280, ww)), rh = Math.max(16, Math.min(args?.regionH || 64, wh));
+                const region = { x: Math.max(0, Math.min((args.x - l) - Math.floor(rw / 2), ww - rw)),
+                  y: Math.max(0, Math.min((args.y - t) - Math.floor(rh / 2), wh - rh)), w: rw, h: rh };
+                before = await observe({ target: 'window', title: args?.title, pid: args?.pid, region }, signal);
+                applied = await act(args, signal);
+                after = await observe({ target: 'window', title: args?.title, pid: args?.pid, region }, signal);
+              } else {
+                before = await observe({ target: 'window', title: args?.title, pid: args?.pid }, signal);
+                applied = await act(args, signal);
+                after = await observe({ target: 'window', title: args?.title, pid: args?.pid }, signal);
+              }
             });
             return { applied: true };
           },
           verify: async () => { const region = await compareRegion(before, after); return { checks: [
             { name: 'dispatch verified in helper', passed: !!applied && !!applied.target },
             { name: 'window still exists', passed: !!after && after.windows.some(w => w.title === String(args?.title || '') && (args?.pid == null || w.pid === args.pid)) },
-            ...(args.action === 'move' || args.action === 'click' || args.action === 'dblclick' || args.action === 'right' || args.action === 'drag' || args.action === 'path' || args.action === 'wheel'
+            ...(args.action === 'move' || args.action === 'click' || args.action === 'dblclick' || args.action === 'right' || args.action === 'drag' || args.action === 'path' || args.action === 'wheel' || args.action === 'setfield'
               ? [{ name: 'cursor at the requested point (±1px)', passed: !!applied?.cursor && Math.abs(applied.cursor[0] - (args.action === 'drag' ? args?.endX : args.action === 'path' ? args.points.at(-1)?.[0] : args?.x)) <= 1 && Math.abs(applied.cursor[1] - (args.action === 'drag' ? args?.endY : args.action === 'path' ? args.points.at(-1)?.[1] : args?.y)) <= 1 }]
               : []),
             ...(!['move', 'wheel'].includes(args.action) ? [{ name: 'screen region changed (observation)', passed: region ? region.changedCells > 0 : false, observed: region }] : []),
@@ -436,8 +475,19 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         if (r.ok === false) return out(r);
         if (!applied) return out({ ok: false, error: 'NOT_EXECUTED_' + (r.reason || r.outcome) });
         ctx.emit({ type: 'tool', badge: 'CU-ACT', target: `${args.action} ${String(args?.title || '').slice(0, 40)}` });
-        return out({ ok: true, outcome: r.outcome, target: applied.target, rect: applied.rect, cursor: applied.cursor,
-          foreground: applied.foreground, region: r.checks?.find(c => c.name.startsWith('screen region'))?.observed || null });
+        const result = { ok: true, outcome: r.outcome, target: applied.target, rect: applied.rect, cursor: applied.cursor,
+          foreground: applied.foreground, region: r.checks?.find(c => c.name.startsWith('screen region'))?.observed || null,
+          readback: applied.readback ? { width: applied.readback.width, height: applied.readback.height,
+            mean: applied.readback.mean, region: applied.readback.region } : null };
+        if (vision() && applied.readback?.path && fs.existsSync(applied.readback.path)) {
+          const stat = fs.statSync(applied.readback.path);
+          if (stat.size <= 3 * 1024 * 1024) {
+            const image = fs.readFileSync(applied.readback.path);
+            if (image.subarray(0, 8).toString('hex') === '89504e470d0a1a0a')
+              result.__damarComputerUseImage = 'data:image/png;base64,' + image.toString('base64');
+          }
+        }
+        return out(result);
       } catch (e) {
         const message = String(e?.message || e);
         if (message.startsWith('FOREGROUND_MISMATCH') || message.startsWith('POINT_OUTSIDE_TARGET') || message.startsWith('WINDOW_NOT_FOUND'))
