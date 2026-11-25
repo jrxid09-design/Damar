@@ -45,30 +45,31 @@
        surface, and every island footprint here fits inside that same
        720x320 top-center region. The width/height CSS transition below
        animates every resize, so state and view changes never jump. */
-    #damarIsland { position:fixed; z-index:2147483000; top:0; left:50%; transform:translateX(-50%) translateY(0); width:184px; height:0; overflow:hidden; border:0; border-radius:0 0 14px 14px; background:#08080c; color:#f6f2e9; box-shadow:inset 0 -1px 0 rgba(229,193,101,.40); font:600 12px/1.2 'Segoe UI',sans-serif; transition:width .26s cubic-bezier(.16,1,.3,1),height .26s cubic-bezier(.16,1,.3,1),border-radius .26s ease,transform .3s cubic-bezier(.16,1,.3,1),opacity .22s ease; opacity:0; pointer-events:none; }
+    #damarIsland { position:fixed; z-index:2147483000; top:0; left:50%; transform:translateX(-50%) translateY(0); width:184px; height:0; overflow:hidden; border:0; border-radius:0 0 14px 14px; background:#08080c; color:#f5f6f8; box-shadow:0 10px 34px rgba(0,0,0,.5); font:500 13px/1.35 'Segoe UI',sans-serif; transition:width .26s cubic-bezier(.16,1,.3,1),height .26s cubic-bezier(.16,1,.3,1),border-radius .26s ease,transform .3s cubic-bezier(.16,1,.3,1),opacity .22s ease; opacity:0; pointer-events:none; }
     #damarIsland[data-state="hidden"] { width:184px; height:0; opacity:0; pointer-events:none; }
     #damarIsland[data-state="orb"] { width:184px; height:0; opacity:0; pointer-events:none; }
     #damarIsland[data-state="morph"] { width:184px; height:32px; border-radius:0 0 14px 14px; opacity:.92; pointer-events:auto; }
     #damarIsland[data-state="compact"] { width:288px; height:32px; border-radius:0 0 14px 14px; opacity:1; pointer-events:auto; }
     #damarIsland[data-state="expanded"] { width:min(640px,calc(100vw - 24px)); height:160px; border-radius:0 0 22px 22px; opacity:1; pointer-events:auto; }
     #damarIsland[data-state="expanded"][data-view="greeting"] { height:150px; }
-    #damarIsland .di-head { height:32px; display:flex; align-items:center; justify-content:center; gap:6px; color:#f2d987; cursor:pointer; }
+    #damarIsland .di-head { height:32px; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; }
     /* EMPTY-SLOT layout (Owner 2026-11-25 17:13 WIB): expanded keeps
-       Coucou's two zones - the character's stage column at the left
-       (their expanded botX 52-76 analog: a 132 px column) and the body
-       content beside it. The stage zone is the drop-in slot: present in
-       the geometry, rendered EMPTY; body content never reflows into it.
-       The head row carries the mini slot at Coucou's compact mini
-       position (slot center at (40,16) in morph/compact: the head is
-       left-aligned with padding-left:26px around the 28x28 slot); in
-       expanded the stage zone is the mount, so the head slot retires
-       (visibility:hidden - both mounts live would duplicate it). */
+       Coucou's two zones - the character's stage zone overlaid at the
+       card's left (their expanded botX 52-76 analog: a 108 px zone whose
+       center, x=64, sits in that range) and the card content indented
+       past it. The stage zone is the drop-in slot: present in the
+       geometry, rendered EMPTY while no character is registered; card
+       content never reflows into it. The head row carries the mini slot
+       at Coucou's compact mini position (slot center at (40,16) in
+       morph/compact: the head is left-aligned with padding-left:26px
+       around the 28x28 slot); in expanded the stage zone is the mount,
+       so the head slot retires (visibility:hidden - both mounts live
+       would duplicate it). */
     #damarIsland .di-head { grid-area:head; }
     #damarIsland .di-stage { grid-area:stage; }
     #damarIsland .di-body { grid-area:body; }
-    #damarIsland .di-stage { position:relative; display:none; }
-    #damarIsland[data-state="expanded"] .di-stage { display:block; }
-    #damarIsland .di-slot { display:block; }
+    #damarIsland .di-stage { display:none; }
+    #damarIsland .di-slot { display:block; position:relative; }
     #damarIsland .di-stage .di-slot { position:absolute; inset:0; }
     #damarIsland .di-head .di-slot { width:52px; height:32px; flex:none; }
     #damarIsland[data-state="expanded"] .di-head .di-slot { visibility:hidden; }
@@ -77,34 +78,72 @@
     /* CLONE layout anatomy (Coucou botPosition, Owner 2026-11-25 14:57 WIB
        - the notch is a for-now clone of Coucou's system, named Damar
        Notch): 8 px top inset + 34 px header row, so body content starts
-       at y=42; the body is Coucou's fixed 84 px card, vertically centered
-       in the space below the header exactly like their centering formula
-       (the card grows past 84 only when a content stack needs the room). */
-    #damarIsland[data-state="expanded"] { display:grid; box-sizing:border-box; padding-top:8px; grid-template-rows:34px 1fr; grid-template-columns:132px 1fr; grid-template-areas:"head head" "stage body"; align-content:start; }
+       at y=42.
+       CSS-FIDELITY pass (Owner 2026-11-25 18:52 WIB - "isi dan css beda
+       banget sama coucou, buat persis mirip"): the expanded layout now
+       carries Coucou's actual CSS system (windows/src/style.css). Shell
+       padding 8px 10px 10px; THE CARD fills the whole content area below
+       the header (background #141518, border-radius 20px, border 1px
+       solid rgba(255,255,255,.035), height 100%); the character stage is
+       an overlay zone ON the card at Coucou's bot placement (left = the
+       10 px shell pad, top 42 = 8 + 34 header, width 108, bottom = the
+       10 px shell pad); card content pads left 108px past that zone and
+       runs to the card's right edge - no dead black half, no content
+       rendered directly on the island black anymore. */
+    #damarIsland[data-state="expanded"] { display:grid; box-sizing:border-box; padding:8px 10px 10px; grid-template-rows:34px 1fr; grid-template-columns:1fr; grid-template-areas:"head" "body"; align-content:start; }
     #damarIsland[data-state="expanded"] .di-head { height:34px; }
-    #damarIsland[data-state="expanded"] .di-body { align-self:center; min-height:84px; display:flex; flex-direction:column; justify-content:center; }
+    #damarIsland[data-state="expanded"] .di-stage { display:block; position:absolute; z-index:2; left:10px; top:42px; bottom:10px; width:108px; }
+    #damarIsland .di-body { display:none; }
+    #damarIsland[data-state="expanded"] .di-body { position:relative; z-index:1; height:100%; box-sizing:border-box; display:flex; flex-direction:column; justify-content:center; gap:4px; background:#141518; border:1px solid rgba(255,255,255,.035); border-radius:20px; padding:6px 16px 6px 108px; overflow:hidden; }
     #damarIsland[data-state="expanded"][data-view="permission"] { height:200px; }
-    /* Greeting view (640x150): the stage zone takes the center (Coucou's
-       greeting botX 320 analog) and the body shrinks to its status line
-       while the greeting view holds (status text behavior unchanged). */
-    #damarIsland[data-state="expanded"][data-view="greeting"] { grid-template-rows:34px 1fr auto; grid-template-columns:1fr; grid-template-areas:"head" "stage" "body"; }
-    #damarIsland[data-state="expanded"][data-view="greeting"] .di-body { max-height:40px; min-height:0; overflow:hidden; }
-    #damarIsland[data-state="morph"] .di-head { color:rgba(242,217,135,.55); }
-    #damarIsland .di-body { display:none; padding:1px 12px 3px; }
-    #damarIsland .di-status { margin:0 0 3px; color:#c7c0b2; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    #damarIsland[data-attention="permission"] .di-status { color:#f2d987; }
+    /* Greeting view (640x150): the stage zone centers ON the card (their
+       greeting botX 320 / botY ~90 analog: the card spans y 42..140, so
+       the stage centers at island (320, 91)) and the card shows only its
+       status line, centered at the bottom, while the greeting holds. */
+    #damarIsland[data-state="expanded"][data-view="greeting"] .di-stage { left:50%; transform:translateX(-50%); width:220px; }
+    #damarIsland[data-state="expanded"][data-view="greeting"] .di-body { justify-content:flex-end; align-items:center; padding-left:16px; }
+    #damarIsland[data-state="expanded"][data-view="greeting"] .di-pills, #damarIsland[data-state="expanded"][data-view="greeting"] .di-media, #damarIsland[data-state="expanded"][data-view="greeting"] .di-controls { display:none; }
+    #damarIsland .di-status { margin:0; color:#f5f6f8; font-size:13px; font-weight:500; line-height:22px; min-height:22px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #damarIsland[data-attention="permission"] .di-status { font-size:15px; font-weight:600; }
     #damarIsland .di-mic { display:none; width:7px; height:7px; border-radius:50%; background:#e5c158; box-shadow:0 0 6px #e5c158; }
     #damarIsland[data-mic="on"] .di-mic { display:inline-block; }
-    #damarIsland .di-pills { display:flex; gap:5px; flex-wrap:wrap; margin:0 0 5px; }
-    #damarIsland .di-pill { font-size:10px; letter-spacing:.02em; color:#e8e2d2; background:rgba(245,185,66,.13); border:1px solid rgba(245,185,66,.35); border-radius:999px; padding:2px 8px; white-space:nowrap; }
-    #damarIsland .di-pill[data-state="WORKING"] { background:rgba(245,185,66,.3); color:#ffe9a8; }
+    /* Coucou pill system (style.css): activity pills are 28 px tall,
+       radius 999, card-flat #0e0f11 with a rgba(255,255,255,.14) border;
+       buttons are pill-shaped (500 12.5px, padding 7px 13px, radius
+       999, action-row gap 8px) - primary #f5f6f8 on #0b0c0e, secondary
+       rgba(255,255,255,.09) on #f1f2f4. Deny keeps the secondary surface
+       with Coucou's red detail text #ff8d97. The [hidden] guards below
+       are load-bearing: a display:flex row would otherwise override the
+       hidden attribute (the old media-row bug). */
+    #damarIsland .di-pills { display:flex; gap:6px; flex-wrap:nowrap; max-height:28px; overflow:hidden; }
+    #damarIsland .di-pills[hidden] { display:none; }
+    #damarIsland .di-pill { height:28px; display:inline-flex; align-items:center; font-size:12px; font-weight:500; letter-spacing:.02em; color:#f5f6f8; background:#0e0f11; border:1px solid rgba(255,255,255,.14); border-radius:999px; padding:0 11px; white-space:nowrap; min-width:0; flex:0 1 auto; }
+    #damarIsland .di-pill-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #damarIsland .di-pill-more { flex:none; }
+    #damarIsland .di-pill[data-state="WORKING"] { border-color:rgba(255,255,255,.38); }
     #damarIsland .di-pill[data-state="CLOSED"] { opacity:.45; }
-    #damarIsland .di-media { display:flex; gap:8px; align-items:center; margin:0 0 5px; color:#e8e2d2; font-size:11px; }
-    #damarIsland .di-media-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:170px; }
-    #damarIsland .di-media button { background:rgba(245,185,66,.13); border:1px solid rgba(245,185,66,.35); color:#ffe9a8; border-radius:7px; font-size:10px; padding:2px 7px; cursor:pointer; }
-    #damarIsland .di-controls { display:flex; gap:7px; align-items:center; flex-wrap:wrap; }
-    #damarIsland button { min-height:32px; border:1px solid rgba(229,193,101,.45); border-radius:7px; padding:5px 9px; background:#151319; color:#f6f2e9; font:600 11px 'Segoe UI',sans-serif; cursor:pointer; }
-    #damarIsland button:focus-visible { outline:2px solid #f7df94; outline-offset:2px; }
+    /* Dense stack: with a live media session AND session pills in the
+       160 px default view, the Coucou-sized stack no longer fits; the
+       pills (whose counts the status line already carries) yield until
+       the media session clears. The 200 px permission view fits all. */
+    #damarIsland[data-dense="media"] .di-pills { display:none; }
+    /* Generic now-playing (Owner 2026-11-25 18:53 WIB): whatever the OS
+       media session reports - title, subtitle (artist OR channel /
+       uploader), source app, play state, the transport actions Core
+       supports. No music-only fields or assumptions: a YouTube video
+       renders exactly like a song. */
+    #damarIsland .di-media { display:flex; align-items:center; gap:10px; }
+    #damarIsland .di-media[hidden] { display:none; }
+    #damarIsland .di-media-info { display:flex; flex-direction:column; min-width:0; flex:1; }
+    #damarIsland .di-media-title { font-size:15px; font-weight:600; color:#f5f6f8; line-height:18px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #damarIsland .di-media-sub { font-size:13px; font-weight:400; color:#9398a1; line-height:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #damarIsland .di-media-actions { display:flex; gap:8px; flex:none; }
+    #damarIsland .di-media button { padding:7px 10px; }
+    #damarIsland .di-controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    #damarIsland button { border:1px solid transparent; border-radius:999px; padding:7px 13px; background:rgba(255,255,255,.09); color:#f1f2f4; font:500 12.5px/1.25 'Segoe UI',sans-serif; cursor:pointer; }
+    #damarIsland button[data-action="allow-once"], #damarIsland button[data-action="presence"] { background:#f5f6f8; color:#0b0c0e; }
+    #damarIsland button[data-action="deny"] { color:#ff8d97; }
+    #damarIsland button:focus-visible { outline:2px solid #f5f6f8; outline-offset:2px; }
     #damarIslandWake { position:fixed; z-index:2147482999; top:0; left:50%; transform:translateX(-50%); width:240px; height:6px; pointer-events:none; }
     /* Owner directive: saat notch aktif (morph/compact/expanded), orb standby
        di bawah ikut morph-out — tidak ada state final dengan keduanya tampil. */
@@ -124,7 +163,7 @@
   const wake = document.createElement('div'); wake.id = 'damarIslandWake'; wake.setAttribute('aria-hidden','true');
   const island = document.createElement('section');
   island.id = 'damarIsland'; island.dataset.state = 'hidden'; island.setAttribute('aria-label','Damar Notch');
-  island.innerHTML = `<div class="di-head" role="button" tabindex="0" aria-label="Damar Notch"><div class="di-slot" data-slot="mini" aria-hidden="true"></div><span class="di-mic" role="img" aria-label="Microphone on"></span></div><div class="di-stage"><div class="di-slot" data-slot="stage" aria-hidden="true"></div></div><div class="di-body"><p class="di-status" role="status" aria-live="polite">DAMAR Core not connected</p><div class="di-pills" hidden></div><div class="di-media" hidden><span class="di-media-text"></span><button type="button" data-media="previous" aria-label="Previous track">&lt;&lt;</button><button type="button" data-media="toggle" aria-label="Play or pause">&#9654;</button><button type="button" data-media="next" aria-label="Next track">&gt;&gt;</button></div><div class="di-controls"><button type="button" data-action="presence" data-t="returnPresence">Return to Presence</button><button type="button" data-action="dashboard" data-t="dashboard">Control</button><button type="button" data-action="allow-once" data-t="allowOnce" hidden>Allow once</button><button type="button" data-action="allow-session" data-t="allowSession" hidden>Allow for session</button><button type="button" data-action="deny" data-t="deny" hidden>Deny</button></div></div>`;
+  island.innerHTML = `<div class="di-head" role="button" tabindex="0" aria-label="Damar Notch"><div class="di-slot" data-slot="mini" aria-hidden="true"></div><span class="di-mic" role="img" aria-label="Microphone on"></span></div><div class="di-stage"><div class="di-slot" data-slot="stage" aria-hidden="true"></div></div><div class="di-body"><p class="di-status" role="status" aria-live="polite">DAMAR Core not connected</p><div class="di-pills" hidden></div><div class="di-media" hidden><div class="di-media-info"><span class="di-media-title"></span><span class="di-media-sub"></span></div><div class="di-media-actions"><button type="button" data-media="previous" aria-label="Previous">&lt;&lt;</button><button type="button" data-media="toggle" aria-label="Play or pause">&#9654;</button><button type="button" data-media="next" aria-label="Next">&gt;&gt;</button></div></div><div class="di-controls"><button type="button" data-action="presence" data-t="returnPresence">Return to Presence</button><button type="button" data-action="dashboard" data-t="dashboard">Control</button><button type="button" data-action="allow-once" data-t="allowOnce" hidden>Allow once</button><button type="button" data-action="allow-session" data-t="allowSession" hidden>Allow for session</button><button type="button" data-action="deny" data-t="deny" hidden>Deny</button></div></div>`;
   document.body.append(wake, island);
   const head = island.querySelector('.di-head');
 
@@ -494,7 +533,7 @@
     // A NEW waiting request gets the question reaction (blink + head tilt on a mounted character).
     if (pending > lastPending) slot.invoke('reactQuestion');
     if (pending > lastPending && fsm.state === 'hidden' && orbPhaseDone && notchEnabled && !voiceActive) fsm.reveal();
-    lastPending = pending; renderStatus(); syncIslandView();
+    lastPending = pending; renderStatus(); syncDense(); syncIslandView();
   });
   // Live activity ticker (Core GET /api/r9/activity, redacted) + finished-turn emote.
   window.addEventListener('damar-presence-activity', e => {
@@ -526,24 +565,40 @@
   window.addEventListener('damar-presence-sessions', e => {
     const pills = Array.isArray(e.detail) ? e.detail : [];
     sig.sessionsWorking = pills.filter(p => p.state === 'WORKING').length;
+    pillCount = pills.length;
     pillsEl.hidden = pills.length === 0;
-    pillsEl.innerHTML = pills.map(p => '<span class="di-pill" data-state="' + p.state + '">' + String(p.label || 'CLI session').replace(/[<>&"]/g, '') + (p.openOperations ? ' - ' + p.openOperations : '') + '</span>').join('');
+    const shownPills = pills.slice(0, 4);
+    pillsEl.innerHTML = shownPills.map(p => '<span class="di-pill" data-state="' + p.state + '"><span class="di-pill-label">' + String(p.label || 'CLI session').replace(/[<>&"]/g, '') + '</span>' + (p.openOperations ? ' - ' + p.openOperations : '') + '</span>').join('') + (pills.length > shownPills.length ? '<span class="di-pill di-pill-more">+' + (pills.length - shownPills.length) + '</span>' : '');
+    syncDense();
     syncIslandView();
   });
   const mediaEl = island.querySelector('.di-media');
-  const mediaText = island.querySelector('.di-media-text');
+  const mediaTitle = island.querySelector('.di-media-title');
+  const mediaSub = island.querySelector('.di-media-sub');
   const mediaToggle = island.querySelector('[data-media="toggle"]');
+  let pillCount = 0;
+  let mediaPresent = false;
+  function syncDense() { island.dataset.dense = (!permission && mediaPresent && pillCount > 0) ? 'media' : ''; }
   window.addEventListener('damar-presence-media', e => {
     const m = e.detail;
+    mediaPresent = !!m;
     sig.mediaPlaying = !!(m && m.playing);
     // A mounted character bounces along while the widget plays (real SMTC signal, via the slot).
     slot.invoke('setMediaPlaying', sig.mediaPlaying);
     mediaEl.hidden = !m;
     if (m) {
-      mediaText.textContent = (m.title || 'Unknown') + (m.artist ? ' - ' + m.artist : '');
+      // Generic now-playing (Owner 2026-11-25 18:53 WIB): the projection
+      // already forwards the full SMTC shape - title, artist (a song's
+      // artist OR a video's channel/uploader), sourceApp, status. Render
+      // exactly that; the source app label only loses its .exe suffix.
+      mediaTitle.textContent = m.title || 'Unknown';
+      const app = String(m.sourceApp || '').replace(/\.exe$/i, '');
+      mediaSub.textContent = [m.artist, app].filter(Boolean).join(' · ');
+      mediaEl.dataset.playing = m.playing ? 'true' : 'false';
       mediaToggle.innerHTML = m.playing ? '&#10073;&#10073;' : '&#9654;';
       mediaToggle.dataset.action2 = m.playing ? 'pause' : 'play';
     }
+    syncDense();
     syncIslandView();
   });
   mediaEl.addEventListener('click', e => {

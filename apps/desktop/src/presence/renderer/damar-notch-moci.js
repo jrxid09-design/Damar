@@ -313,7 +313,7 @@
       if (holdMs) S.holdUntil = performance.now() + holdMs;
       // Particles burst in every view (stage-sized views only read well).
       for (const v of S.views) {
-        const size = Math.min(v.w, v.h);
+        const size = Math.min(v.sw || v.w, v.sh || v.h);
         if (size < 60) continue;
         if (key === 'rayakan' || key === 'ide') spawnParticles(v.w / 2, v.h / 2 - size * 0.17, size, '✦', 8);
         else if (key === 'approve') spawnParticles(v.w / 2, v.h / 2 - size * 0.11, size, '✦', 6);
@@ -398,7 +398,7 @@
       if (!ctx || w < 4 || h < 4) return;
       ctx.clearRect(0, 0, w, h);
       const t = S.time, c = cfg();
-      const size = Math.min(w, h) * 0.98, s = size / 355;
+      const size = Math.min(v.sw || w, v.sh || h) * 0.98, s = size / 355;
       const isDance = S.activity === 'dansa', isHeadbang = S.activity === 'headbang';
       let floatY = Math.sin(t * (isDance ? 9.5 : c.flame === 'dim' ? 1.8 : 3.0)) * (isDance ? 12 : 6.5) * s;
       if (isHeadbang) floatY = Math.abs(Math.sin(t * 14.5)) * 16 * s;
@@ -500,14 +500,24 @@
         if (!el || typeof document === 'undefined') return;
         const canvas = document.createElement('canvas');
         canvas.className = 'dnc-moci-canvas';
-        canvas.style.cssText = 'display:block;width:100%;height:100%;';
+        canvas.style.cssText = 'display:block;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;';
         canvas.setAttribute('aria-hidden', 'true');
         el.appendChild(canvas);
-        const view = { el, canvas, ctx: canvas.getContext('2d'), w: 0, h: 0 };
+        const view = { el, canvas, ctx: canvas.getContext('2d'), w: 0, h: 0, sw: 0, sh: 0 };
         const fit = () => {
           const r = el.getBoundingClientRect();
           const dpr = Math.min(window.devicePixelRatio || 1, 2);
-          view.w = Math.max(0, Math.round(r.width)); view.h = Math.max(0, Math.round(r.height));
+          // Coucou canvas pattern (their .mini canvas comment: "the canvas
+          // is larger and overflows it so hands, badges and particles are
+          // not cut off"): the canvas is LARGER than its slot and centered
+          // over it (see the canvas style in attach), overflow visible.
+          // The sprite keeps its slot-based size (view.sw/sh); the canvas
+          // only gains a margin on every side for the head flame, the
+          // DISETUJUI/DITOLAK seal banner and the sparkles.
+          view.sw = Math.max(0, Math.round(r.width)); view.sh = Math.max(0, Math.round(r.height));
+          const mx = Math.round(view.sw * 0.42), my = Math.round(view.sh * 0.42);
+          view.w = view.sw + mx * 2; view.h = view.sh + my * 2;
+          canvas.style.width = view.w + 'px'; canvas.style.height = view.h + 'px';
           canvas.width = Math.max(1, Math.round(view.w * dpr)); canvas.height = Math.max(1, Math.round(view.h * dpr));
           if (view.ctx) view.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
           // Resizing a canvas clears it. The Presence adapter parks
