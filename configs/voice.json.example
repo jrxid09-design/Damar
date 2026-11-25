@@ -1,1 +1,1 @@
-{"runtime":{"vadTimeoutMs":400},"stt":{"key":null,"model":"ggml-small","url":"http://127.0.0.1:8127/v1/audio/transcriptions","voice":null},"tts":{"key":null,"model":"piper-id","url":"http://127.0.0.1:8127/v1/audio/speech","voice":"id_ID-news_tts-medium"}}
+{"runtime":{"vadTimeoutMs":400},"stt":{"key":null,"model":"ggml-small","url":"http://127.0.0.1:8127/v1/audio/transcriptions","voice":null},"tts":{"key":null,"model":"supertonic-3","url":"http://127.0.0.1:8127/v1/audio/speech","voice":"supertonic-M1"}}

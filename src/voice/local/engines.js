@@ -4,7 +4,9 @@
  * engines — pembungkus tipis binary lokal voice Damar:
  *   - STT: whisper.cpp (whisper-cli) + model ggml dari HuggingFace
  *     (ggerganov/whisper.cpp) — quantized, CPU-first.
- *   - TTS: Piper (rhasspy/piper) + suara id_ID (news_tts) — ONNX, CPU.
+ *   - TTS: Piper (rhasspy/piper) + suara id_ID (news_tts)
+ *   - TTS: Supertonic 3 (Supertone/supertonic-3) — suara id_ID pria M1-M5 /
+ *     wanita F1-F5, ONNX, CPU (default sejak 2026-11-25; Piper jadi alternatif). — ONNX, CPU.
  *
  * Semua proses dijalankan dengan execFile + argv tetap (tanpa shell, tanpa
  * interpolasi string pemanggil ke perintah). Berkas model & binary tinggal
@@ -46,6 +48,48 @@ function whisperBin(root = voiceLocalRoot()) {
 
 function piperBin(root = voiceLocalRoot()) {
     return findFile(path.join(root, "bin", "piper"), process.platform === "win32" ? "piper.exe" : "piper");
+}
+
+/** Supertonic 3 — TTS lokal (ONNX, CPU) dgn 10 preset multi-bahasa. */
+const SUPERTONIC_VOICES = Object.freeze(["M1", "M2", "M3", "M4", "M5", "F1", "F2", "F3", "F4", "F5"]);
+const SUPERTONIC_PORT_DEFAULT = 8128;
+const SUPERTONIC_MODEL = "supertonic-3";
+
+function supertonicModelDir(root = voiceLocalRoot()) {
+    return path.join(root, "supertonic3");
+}
+
+/** "supertonic-M1" -> true bila preset Supertonic yang dikenal. */
+function isSupertonicVoice(voice) {
+    const v = String(voice ?? "").trim();
+    return /^supertonic-[MF][1-5]$/i.test(v);
+}
+
+/** "supertonic-M1" -> "M1" (null bila bukan suara Supertonic). */
+function supertonicPreset(voice) {
+    if (!isSupertonicVoice(voice)) return null;
+    return String(voice).trim().slice("supertonic-".length).toUpperCase();
+}
+
+function supertonicPython(root = voiceLocalRoot()) {
+    const cands = process.platform === "win32"
+        ? [path.join(root, "pyenv", "Scripts", "python.exe")]
+        : [path.join(root, "pyenv", "bin", "python")];
+    for (const c of cands) if (fs.existsSync(c)) return c;
+    return null;
+}
+
+function listSupertonicVoices(root = voiceLocalRoot()) {
+    const dir = supertonicModelDir(root);
+    // Model dianggap terpasang bila berkas ONNX terbesarnya ada.
+    if (!fs.existsSync(path.join(dir, "onnx", "vector_estimator.onnx"))) return [];
+    return SUPERTONIC_VOICES.map(p => ({
+        id: `supertonic-${p}`,
+        preset: p,
+        gender: p.startsWith("M") ? "male" : "female",
+        engine: SUPERTONIC_MODEL,
+        name: `${p} (Supertonic 3, lokal, ${p.startsWith("M") ? "pria" : "wanita"})`
+    }));
 }
 
 /** Peta nama model ramah → berkas ggml di models/. */
@@ -115,7 +159,8 @@ function probe(root = voiceLocalRoot()) {
     return {
         root,
         whisper: { bin: w, ok: Boolean(w), models: listWhisperModels(root) },
-        piper: { bin: p, ok: Boolean(p), voices: listPiperVoices(root) }
+        piper: { bin: p, ok: Boolean(p), voices: listPiperVoices(root) },
+        supertonic: { ok: listSupertonicVoices(root).length > 0, modelDir: supertonicModelDir(root), voices: listSupertonicVoices(root) }
     };
 }
 
@@ -162,6 +207,11 @@ async function synthesize(text, {
     voice = "id_ID-news_tts-medium", lengthScale = 1.0, sentenceSilence = 0.1,
     root = voiceLocalRoot(), timeoutMs = 120000
 } = {}) {
+    // Suara Supertonic ("supertonic-M1".."supertonic-F5") -> service Python
+    // resident; Piper tetap jalur suara "id_ID-*". Default parameter di sini
+    // sengaja tetap Piper: default PRODUKSI diatur di configs/voice.json +
+    // server.js; pemanggil pustaka tanpa suara tidak berubah perilaku.
+    if (isSupertonicVoice(voice)) return synthesizeSupertonic(text, { voice, root, timeoutMs });
     const bin = piperBin(root);
     if (!bin) throw new Error("piper tidak ditemukan — jalankan scripts/voice-setup.ps1 dulu");
     const v = resolvePiperVoice(voice, root);
@@ -282,6 +332,110 @@ class WarmWhisperServer {
     }
 }
 
+/**
+ * WarmSupertonicServer — service TTS Supertonic yang RESIDENT (pola
+ * WarmWhisperServer): model dimuat sekali saat start, lalu melayani
+ * banyak sintesis tanpa muat ulang. Service-nya = skrip Python
+ * src/voice/local/supertonic_service.py (stdlib http.server + paket
+ * `supertonic`), dijalankan python venv data/voice/pyenv.
+ */
+class WarmSupertonicServer {
+
+    constructor({ port = Number(process.env.DAMAR_SUPERTONIC_PORT || SUPERTONIC_PORT_DEFAULT), root = voiceLocalRoot() } = {}) {
+        this.port = port;
+        this.root = root;
+        this.proc = null;
+        this.loadMs = null;
+        this.ok = false;
+        this.lastError = null;
+        this._starting = null;
+    }
+
+    async start({ warmup = true } = {}) {
+        if (this.proc) return this;
+        if (this._starting) return this._starting;
+        this._starting = (async () => {
+            const py = supertonicPython(this.root);
+            if (!py) throw new Error("python venv supertonic tidak ditemukan \u2014 jalankan scripts/voice-setup.ps1 dulu");
+            const script = path.join(__dirname, "supertonic_service.py");
+            if (!fs.existsSync(script)) throw new Error("supertonic_service.py tidak ditemukan di src/voice/local");
+            const modelDir = supertonicModelDir(this.root);
+            if (!fs.existsSync(path.join(modelDir, "onnx", "vector_estimator.onnx"))) throw new Error("model Supertonic 3 tidak ada di data/voice/supertonic3 \u2014 jalankan scripts/voice-setup.ps1 dulu");
+            const t0 = Date.now();
+            this.proc = spawn(py, [script, modelDir, String(this.port)], { windowsHide: true, stdio: "ignore" });
+            this.proc.on("exit", () => { this.ok = false; this.proc = null; });
+            this.proc.on("error", err => { this.lastError = err.message; this.ok = false; });
+            const deadline = Date.now() + 120000;
+            for (;;) {
+                try {
+                    const res = await fetch(`http://127.0.0.1:${this.port}/health`, { signal: AbortSignal.timeout(1500) });
+                    if (res.ok) break;
+                } catch { /* belum siap */ }
+                if (Date.now() > deadline) throw new Error("supertonic service tidak siap dalam 120 dtk");
+                await new Promise(r => setTimeout(r, 250));
+            }
+            this.loadMs = Date.now() - t0;
+            this.ok = true;
+            if (warmup) {
+                try { await this.synthesize("Damar.", { voice: "supertonic-M1" }); } catch { /* abaikan */ }
+            }
+            return this;
+        })();
+        try { return await this._starting; }
+        finally { this._starting = null; }
+    }
+
+    async synthesize(text, { voice = "supertonic-M1", steps = 5, timeoutMs = 120000 } = {}) {
+        if (!this.ok) throw new Error("supertonic service belum jalan");
+        const preset = supertonicPreset(voice) || "M1";
+        const t0 = Date.now();
+        const res = await fetch(`http://127.0.0.1:${this.port}/synthesize`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: String(text), voice: preset, steps, lang: "id" }),
+            signal: AbortSignal.timeout(timeoutMs)
+        });
+        if (!res.ok) {
+            const detail = await res.text().catch(() => "");
+            throw new Error(`supertonic menolak (${res.status}): ${detail.slice(0, 200)}`);
+        }
+        const audio = Buffer.from(await res.arrayBuffer());
+        return { audio, ms: Date.now() - t0, voice: `supertonic-${preset}` };
+    }
+
+    stop() {
+        if (this.proc) { try { this.proc.kill(); } catch { /* abaikan */ } this.proc = null; }
+        this.ok = false;
+        return this;
+    }
+
+    status() {
+        return { model: SUPERTONIC_MODEL, port: this.port, ok: this.ok, loadMs: this.loadMs, lastError: this.lastError };
+    }
+}
+
+const supertonicServers = new Map();
+
+async function ensureSupertonicServer(root = voiceLocalRoot()) {
+    const key = path.resolve(root);
+    let server = supertonicServers.get(key);
+    if (server && server.ok) return server;
+    if (!server) { server = new WarmSupertonicServer({ root }); supertonicServers.set(key, server); }
+    await server.start();
+    return server;
+}
+
+async function synthesizeSupertonic(text, { voice, root = voiceLocalRoot(), timeoutMs = 120000 } = {}) {
+    const server = await ensureSupertonicServer(root);
+    return server.synthesize(text, { voice, timeoutMs });
+}
+
+/** Matikan semua service Supertonic resident (dipakai server.js close()). */
+function stopSupertonicServers() {
+    for (const server of supertonicServers.values()) server.stop();
+    supertonicServers.clear();
+}
+
 /** WAV hening (untuk pemanasan / tes). */
 function silenceWav(ms = 500, sampleRate = 16000) {
     const n = Math.floor((sampleRate * ms) / 1000);
@@ -308,6 +462,8 @@ module.exports = {
     resolveWhisperModel, listWhisperModels,
     resolvePiperVoice, listPiperVoices,
     probe, transcribeWav, synthesize,
-    WarmWhisperServer, silenceWav,
+    WarmWhisperServer, WarmSupertonicServer, silenceWav,
+    isSupertonicVoice, supertonicPreset, listSupertonicVoices, supertonicModelDir, stopSupertonicServers,
+    SUPERTONIC_VOICES, SUPERTONIC_MODEL, SUPERTONIC_PORT_DEFAULT,
     WHISPER_MODEL_FILES
 };

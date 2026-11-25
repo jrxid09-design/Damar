@@ -7,9 +7,10 @@
  * dipakai voiceService, diisi mesin yang benar-benar lokal & offline:
  *
  *   POST /v1/audio/transcriptions  → whisper.cpp (ggml, CPU)
- *   POST /v1/audio/speech          → Piper id_ID (ONNX, CPU)
+ *   POST /v1/audio/speech          → Supertonic 3 id_ID pria (ONNX, CPU;
+ *     default) atau Piper id_ID (alternatif wanita, ONNX, CPU)
  *   GET  /v1/models                → daftar model lokal (probe voiceService)
- *   GET  /v1/audio/voices          → daftar suara Piper lokal
+ *   GET  /v1/audio/voices          — daftar suara lokal (Supertonic + Piper)
  *   POST /v1/audio/envelope        → envelope amplitudo WAV (kontrak lip-sync)
  *   GET  /health                   → kesiapan mesin
  *
@@ -122,7 +123,7 @@ function createVoiceLocalServer(opts = {}) {
     const ttsQueue = serialQueue();
     const log = opts.log || (() => {});
     const defaultSttModel = opts.defaultSttModel || "ggml-small";
-    const defaultTtsVoice = opts.defaultTtsVoice || "id_ID-news_tts-medium";
+    const defaultTtsVoice = opts.defaultTtsVoice || "supertonic-M1";
     // Model resident (hangat): satu WarmWhisperServer per model yang diminta.
     // opts.warm: false = matikan; selain itu daftar {model, port}.
     // HANYA tiny yang dihangatkan: terukur di Aether (whisper-server v1.7.6),
@@ -157,11 +158,24 @@ function createVoiceLocalServer(opts = {}) {
             if (req.method === "GET" && url.pathname === "/v1/models") {
                 const data = eng.listWhisperModels().map(m => ({ id: m.id, object: "model", owned_by: "damar-local" }));
                 data.push({ id: "piper-id", object: "model", owned_by: "damar-local" });
+                // Supertonic terpasang -> cantumkan modelnya (guarded: fake
+                // engineImpl di tes tidak punya listSupertonicVoices).
+                if (typeof eng.listSupertonicVoices === "function") {
+                    try { if (eng.listSupertonicVoices().length > 0) data.push({ id: "supertonic-3", object: "model", owned_by: "damar-local" }); } catch { /* abaikan */ }
+                }
                 return json(res, 200, { object: "list", data });
             }
 
             if (req.method === "GET" && url.pathname === "/v1/audio/voices") {
                 const voices = eng.listPiperVoices().map(v => ({ id: v.id, name: `${v.id} (Piper, lokal)` }));
+                // Supertonic dulu (default ada di urutan ini); guarded agar
+                // fake engineImpl lama tetap jalan.
+                if (typeof eng.listSupertonicVoices === "function") {
+                    try {
+                        const st = eng.listSupertonicVoices().map(v => ({ id: v.id, name: v.name || `${v.id} (Supertonic 3, lokal)` }));
+                        voices.unshift(...st);
+                    } catch { /* abaikan */ }
+                }
                 return json(res, 200, { voices });
             }
 
@@ -279,6 +293,9 @@ function createVoiceLocalServer(opts = {}) {
         },
         close() {
             for (const w of warmByModel.values()) w.stop();
+            // Service Supertonic resident ikut mati (guarded: fake engineImpl
+            // di tes tidak punya stopSupertonicServers).
+            if (typeof eng.stopSupertonicServers === "function") { try { eng.stopSupertonicServers(); } catch { /* abaikan */ } }
             return new Promise(resolve => server.close(() => resolve()));
         }
     };
