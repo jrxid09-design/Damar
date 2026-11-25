@@ -9,7 +9,7 @@ const ROOT = path.join(__dirname, 'renderer');
 const SCHEME = 'damar-presence';
 const ENTRY = `${SCHEME}://app/idle_present`;
 const OWNER_SHA256 = 'e7d6b92116d420d26cc83c5f6de073419004da78eef3c095c6c03ddb0b8bc815';
-const INJECT = ['presence-i18n.js', 'damar-island-fsm.js', 'argon-character-engine.js', 'vendor/three.min.js', 'vendor/GLTFLoader.js', 'vendor/SkeletonUtils.js', 'damar-notch-3d.js', 'damar-notch-behavior.js', 'damar-island.js', 'presence-adapter.js']
+const INJECT = ['presence-i18n.js', 'damar-island-fsm.js', 'argon-character-engine.js', 'vendor/three.min.js', 'vendor/GLTFLoader.js', 'vendor/SkeletonUtils.js', 'damar-notch-3d.js', 'damar-notch-behavior.js', 'damar-island.js', 'damar-notch-moci.js', 'presence-adapter.js']
   .map(f => `<script src="/${f}" defer></script>`).join('');
 const FILES = Object.freeze({
   '/damar-island-fsm.js': 'damar-island-fsm.js', '/argon-character-engine.js': 'argon-character-engine.js',
@@ -18,6 +18,8 @@ const FILES = Object.freeze({
   // the stage module + the Owner's base model. The GLB route names the asset on the allowlist; the sandboxed
   // renderer itself receives the bytes over the IPC bridge (scheme fetch is disabled by design).
   '/vendor/three.min.js': 'vendor/three.min.js', '/vendor/GLTFLoader.js': 'vendor/GLTFLoader.js', '/vendor/SkeletonUtils.js': 'vendor/SkeletonUtils.js', '/damar-notch-3d.js': 'damar-notch-3d.js',
+  // Interim 2D character (Owner-supplied Moci, 2026-11-25): registers itself with the island slot.
+  '/damar-notch-moci.js': 'damar-notch-moci.js',
   '/notch-3d/damar-notch-base-3d.glb': 'argon-assets/visuals/notch-3d/damar-notch-base-3d.glb',
   // Damar Notch v3 sprite stage (approved glossy art, WebP).
   '/notch-v3/expr-happy.webp': 'argon-assets/visuals/notch-v3/expr-happy.webp', '/notch-v3/expr-alert.webp': 'argon-assets/visuals/notch-v3/expr-alert.webp', '/notch-v3/expr-thinking.webp': 'argon-assets/visuals/notch-v3/expr-thinking.webp', '/notch-v3/expr-recovering.webp': 'argon-assets/visuals/notch-v3/expr-recovering.webp', '/notch-v3/expr-surprised.webp': 'argon-assets/visuals/notch-v3/expr-surprised.webp',

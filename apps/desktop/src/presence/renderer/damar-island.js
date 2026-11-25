@@ -302,6 +302,10 @@
     } else if (['allow-once', 'allow-session', 'deny'].includes(action) && permission) {
       // Owner decision from the notch: main process authenticates it; the renderer only names the pending request.
       const decision = action === 'deny' ? 'deny' : action === 'allow-session' ? 'session' : 'once';
+      // The mounted character stamps the decision (its DISETUJUI / DITOLAK
+      // seal states) at click time; the decision itself still round-trips
+      // through decidePermission, unchanged.
+      slot.invoke('reactDecision', action === 'deny' ? 'deny' : 'approve');
       await desktop()?.decidePermission?.({ permissionId: permission.permissionId, decision });
     } else if (action === 'presence') {
       fsm.hide();
