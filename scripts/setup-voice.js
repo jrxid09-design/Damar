@@ -159,16 +159,35 @@ async function ensureAsset(asset) {
     }
 }
 
+/** Beberapa arsip membungkus isinya dalam satu folder atas (mis. piper_windows_amd64.zip
+ * berisi folder piper/ sehingga hasil ekstraknya bin/piper/piper/piper.exe, bukan penanda
+ * bin/piper/piper.exe). Ratakan satu tingkat agar penanda berada tepat di extractTo. */
+function flattenTopFolder(archive, out) {
+    const rel = archive.marker.slice(archive.extractTo.length + 1).split(/[\\/]/);
+    if (rel.length !== 1 || !fs.existsSync(out)) return false;
+    for (const ent of fs.readdirSync(out, { withFileTypes: true })) {
+        if (!ent.isDirectory()) continue;
+        const inner = path.join(out, ent.name);
+        if (!fs.existsSync(path.join(inner, rel[0]))) continue;
+        for (const child of fs.readdirSync(inner)) fs.renameSync(path.join(inner, child), path.join(out, child));
+        fs.rmdirSync(inner);
+        return true;
+    }
+    return false;
+}
+
 function extractArchive(archive) {
     const marker = path.join(BASE, archive.marker);
     if (fs.existsSync(marker)) { console.log(`lewati (sudah diekstrak) ${archive.extractTo}`); return true; }
     if (process.platform !== "win32") { console.error(`ekstraksi otomatis hanya di Windows: ${archive.dest}`); return false; }
     const zip = path.join(BASE, archive.dest), out = path.join(BASE, archive.extractTo);
     fs.mkdirSync(out, { recursive: true });
+    if (flattenTopFolder(archive, out) && fs.existsSync(marker)) { console.log(`ok ekstrak (diratakan) ${archive.extractTo}`); return true; }
     const r = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-Command",
         `Expand-Archive -LiteralPath $env:DAMAR_ZIP -DestinationPath $env:DAMAR_OUT -Force`],
         { stdio: "inherit", env: { ...process.env, DAMAR_ZIP: zip, DAMAR_OUT: out } });
-    const ok = r.status === 0 && fs.existsSync(marker);
+    let ok = r.status === 0 && fs.existsSync(marker);
+    if (!ok && flattenTopFolder(archive, out)) ok = fs.existsSync(marker);
     console.log(ok ? `ok ekstrak ${archive.extractTo}` : `GAGAL ekstrak ${archive.extractTo}`);
     return ok;
 }
