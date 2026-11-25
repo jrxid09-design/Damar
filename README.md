@@ -31,6 +31,34 @@ DAMAR does not ship with a model. You connect any OpenAI-compatible provider (a 
 2. Connect a provider and grant a model in DAMAR Control. See [QUICKSTART.md](apps/desktop/release/docs/QUICKSTART.md).
 3. Open a terminal in a project folder and run `damar`.
 
+### From source (git clone)
+
+Prerequisites: Windows 10 (1809) or later, x64, Git, and an internet
+connection. Nothing else â€” the setup bootstraps whatever it needs.
+
+```powershell
+git clone https://github.com/jrxid09-design/Damar.git
+cd Damar
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+```
+
+`setup.ps1` is a smart bootstrapper, not a file copier. It audits your PC
+first â€” Node.js, Python, the Visual C++ runtime, free disk space â€” and
+downloads anything missing from its official source into Damar's own
+folders (portable, hash-verified; no administrator rights, no system-wide
+installs). It then installs the app dependencies, downloads the local
+voice models (Â±1.2 GB, SHA-256 verified; a failed download never blocks
+the install â€” re-run `npm run setup:voice` to finish it), registers the
+`damar` command on your user PATH, and leaves a **Damar** shortcut on
+your desktop and in the Start menu. It ends with a preflight report â€”
+also written to `data/setup-report.json` â€” listing what was found, what
+it installed, what it skipped, and anything it could not provision with
+the manual remedy. Re-running it on a complete machine changes nothing.
+
+Afterwards, start the daemon once from the clone with `npm run damar`,
+open a new terminal, and run `damar` from any folder. Remove the command
+again with `npm uninstall -g damar`.
+
 ## Documentation
 
 | Document | Contents |

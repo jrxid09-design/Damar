@@ -71,6 +71,7 @@ Type: filesandordirs; Name: "{app}\docs"
 Name: "{userprograms}\DAMAR\DAMAR CLI"; Filename: "{app}\damar.cmd"; WorkingDir: "{%USERPROFILE}"; IconFilename: "{app}\release\damar.ico"; Comment: "DAMAR command-line agent"; Check: not IsSmoke
 Name: "{userprograms}\DAMAR\DAMAR Control"; Filename: "{app}\runtime\electron\electron.exe"; Parameters: """{app}\release\gui-launch"" control"; WorkingDir: "{app}"; IconFilename: "{app}\release\damar.ico"; Comment: "Open the DAMAR Control dashboard"; Check: not IsSmoke
 Name: "{userprograms}\DAMAR\DAMAR Presence"; Filename: "{app}\runtime\electron\electron.exe"; Parameters: """{app}\release\gui-launch"" presence"; WorkingDir: "{app}"; IconFilename: "{app}\release\damar.ico"; Comment: "Start DAMAR Idle Presence and Notch"; Check: not IsSmoke
+Name: "{autodesktop}\Damar"; Filename: "{app}\runtime\electron\electron.exe"; Parameters: """{app}\release\gui-launch"" presence"; WorkingDir: "{app}"; IconFilename: "{app}\release\damar.ico"; Comment: "Start DAMAR Idle Presence and Notch"; Check: not IsSmoke
 Name: "{userprograms}\DAMAR\DAMAR Documentation"; Filename: "{app}\docs"; Check: not IsSmoke
 
 [Registry]

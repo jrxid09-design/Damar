@@ -26,7 +26,7 @@ The Start menu gets a **DAMAR** folder containing:
 | DAMAR Presence | Starts Core if needed and starts the Presence app |
 | DAMAR Documentation | Opens this documentation folder |
 
-Open a **new** terminal after installing so it picks up the PATH change.
+The installer also puts a **Damar** shortcut on your desktop; it starts DAMAR Presence. Open a **new** terminal after installing so it picks up the PATH change.
 
 ### Silent install
 ```

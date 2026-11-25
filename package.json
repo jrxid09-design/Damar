@@ -16,6 +16,8 @@
     "damar:daemon": "node scripts/launch.js",
     "cli": "node src/cli/index.js",
     "cli:serve": "node src/cli/index.js --serve",
+    "setup:cli": "node scripts/setup-cli.js",
+    "setup:voice": "node scripts/setup-voice.js",
     "learn": "node scripts/learn.js",
     "audit": "node scripts/audit-276.js --json",
     "test": "node --test --test-concurrency=1 --require ./tests/helpers/testEnv.js \"tests/**/*.test.js\"",
