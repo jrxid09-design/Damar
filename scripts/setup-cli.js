@@ -38,6 +38,23 @@
  *                 ulang tidak mengubah apa pun dan semua hijau.
  *
  * Lepas perintah lagi dengan: npm uninstall -g damar
+ *
+ * Isolasi npm: semua pemanggilan npm oleh setup diarahkan ke berkas
+ * userconfig kosong yang dikelola setup (data/setup-npmrc). Terukur
+ * alasannya: npm >= 12 menolak nilai allow-scripts yang datang dari
+ * CLI/env pada install project-scoped (EALLOWSCRIPTS), dan nilai
+ * allow-scripts dari ~/.npmrc pengguna terbawa env ke npm nested
+ * yang dijalankan preinstall dependensi (rantai `node` ->
+ * node-bin-setup memasang node-win-x64 lewat npm kedua) — install
+ * bersih gagal di mesin yang ~/.npmrc-nya memasang allow-scripts,
+ * sebelum allowScripts package.json sempat dibaca. Dengan isolasi
+ * ini kebijakan skrip install Damar datang hanya dari allowScripts
+ * package.json repo: deterministik di semua mesin, sejalan dengan
+ * FOUNDATION PACKAGING POLICY di .npmrc. Konsekuensinya registry/
+ * auth pribadi di ~/.npmrc TIDAK dipakai selama setup; bila
+ * dependensi harus lewat registry pribadi, jalankan `npm install`
+ * manual lebih dulu (setup melewati langkah itu bila node_modules
+ * sudah ada).
  */
 
 const { spawnSync } = require("node:child_process");
@@ -53,6 +70,7 @@ const TOOLS_DIR = path.join(DATA_DIR, "tools");
 const PORTABLE_NODE_DIR = path.join(TOOLS_DIR, "node");
 const PORTABLE_NODE_EXE = path.join(PORTABLE_NODE_DIR, "node.exe");
 const PORTABLE_PY_DIR = path.join(DATA_DIR, "voice", "python");
+const NPMRC_ISOLATED = path.join(DATA_DIR, "setup-npmrc");
 const SKIP_VOICE = process.argv.includes("--skip-voice");
 
 const NODE_PIN = {
@@ -79,6 +97,11 @@ function audit(item, status, detail) {
 }
 function action(text) { report.actions.push(text); console.log(`  -> ${text}`); }
 function warn(text) { report.warnings.push(text); console.error(`  PERINGATAN: ${text}`); }
+function writeReport() {
+    report.finishedAt = new Date().toISOString();
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(path.join(DATA_DIR, "setup-report.json"), JSON.stringify(report, null, 2));
+}
 
 // ---------- util ----------
 function out(cmd, args, opts = {}) {
@@ -284,12 +307,16 @@ async function main() {
     report.nodeUsed = { kind: node.kind, version: node.version?.raw, exe: node.exe };
     console.log(`setup: memakai Node.js ${node.kind} v${node.version?.raw}`);
 
-    const npmEnv = node.kind === "portable"
-        ? { ...process.env, PATH: PORTABLE_NODE_DIR + ";" + (process.env.PATH || "") } : process.env;
+    // Isolasi userconfig npm (lihat catatan isolasi di kepala berkas).
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (!fs.existsSync(NPMRC_ISOLATED)) fs.writeFileSync(NPMRC_ISOLATED, "# Dikelola setup Damar: userconfig npm kosong untuk isolasi selama install (lihat scripts/setup-cli.js).\n");
+    const npmEnv = { ...process.env, NPM_CONFIG_USERCONFIG: NPMRC_ISOLATED };
+    if (node.kind === "portable") npmEnv.PATH = PORTABLE_NODE_DIR + ";" + (process.env.PATH || "");
+    console.log("setup: npm diisolasi ke userconfig setup (data/setup-npmrc) — kebijakan skrip hanya dari package.json repo");
     const runNpm = args => {
         const r = spawnSync(node.npm, args, { cwd: ROOT, stdio: "inherit", shell: process.platform === "win32", env: npmEnv });
-        if (r.error) { console.error(`setup: gagal menjalankan npm: ${r.error.message}`); process.exit(1); }
-        if (r.status !== 0) process.exit(r.status ?? 1);
+        if (r.error) { const e = new Error(`gagal menjalankan npm: ${r.error.message}`); e.exitCode = 1; throw e; }
+        if (r.status !== 0) { const e = new Error(`npm ${args.join(" ")} gagal (exit ${r.status ?? "?"})`); e.exitCode = r.status ?? 1; throw e; }
     };
 
     console.log("setup: fase 3 — dependensi aplikasi + perintah `damar`");
@@ -323,9 +350,7 @@ async function main() {
         }
     }
 
-    report.finishedAt = new Date().toISOString();
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(path.join(DATA_DIR, "setup-report.json"), JSON.stringify(report, null, 2));
+    writeReport();
     console.log("setup: fase 4 — laporan preflight");
     for (const e of report.audit) console.log(`  [${e.status}] ${e.item}: ${e.detail}`);
     for (const a of report.actions) console.log(`  dipasang/diubah: ${a}`);
@@ -335,4 +360,12 @@ async function main() {
     console.log("setup: lepas perintah dengan `npm uninstall -g damar`.");
 }
 
-main().catch(e => { console.error(`setup: GAGAL: ${e.message}`); process.exit(1); });
+main().catch(e => {
+    // Laporan preflight tetap ditulis walau setup berhenti di tengah:
+    // kegagalan tanpa laporan membuat diagnosis mesin pengguna buta.
+    report.error = e.message;
+    try { writeReport(); console.log(`setup: laporan (berakhir gagal) tertulis di ${path.join(DATA_DIR, "setup-report.json")}`); }
+    catch { /* laporan tidak tertulis — kegagalan utama tetap dilaporkan di bawah */ }
+    console.error(`setup: GAGAL: ${e.message}`);
+    process.exit(typeof e.exitCode === "number" ? e.exitCode : 1);
+});
