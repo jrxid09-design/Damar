@@ -133,3 +133,51 @@ barge-in, wake word (utuh vs substring), deteksi tepuk 2x (2 dalam jendela vs
 4. **Wake-word dari mic terus-menerus** — `wakeDetect(text)` masih API; integrasi
    mic standby untuk wake word (STT ringan periodik) bisa menyusul, atau pakai
    engine wake-word (item 1) yang bekerja langsung pada stream audio.
+
+---
+
+## Implementasi lokal (2026-11-25, branch feat/voice-id-local)
+
+Peta lanjutan 1–4 di atas SELESAI dikerjakan dengan mesin lokal offline
+(CPU-first, tanpa Docker, tanpa cloud):
+
+1. **Wake-word engine sungguhan** — `WhisperWakeWordProvider`
+   (`src/voice/providers/wakeWordWhisper.js`) di belakang factory
+   `createWakeWordProvider`: set `wakeProvider: "whisper"` di
+   `configs/voice.json` bagian `runtime` (atau `DAMAR_VOICE_WAKE_PROVIDER`).
+   Cara kerja: segmenter VAD RMS (`vadSegmenter.js`, frame 100 ms, pre-roll
+   300 ms) → whisper.cpp ggml-base + bias prompt "Damar" → matcher kata-utuh
+   yang sama. Terukur: **TP 10/10, FP 0/12** pada set uji (termasuk jebakan
+   "damai/kamar/Kamaruddin"). Standby mic: `scripts/voice-standby.js`
+   meneruskan wake ke `VoiceRuntime.wakeDetect(text)`.
+2. **STT streaming + VAD akustik** — `StreamingTranscriber`
+   (`src/voice/local/streaming.js`): parsial selama bicara (whisper-server
+   tiny residen), endpointing rapat 400 ms (`endpointMs` di config terpusat),
+   dan final DUA TAHAP — cepat (ggml-base CLI, ±1,4 dtk pasca-ucapan) lalu
+   otoritatif (ggml-small CLI, WER korpus 0,097). Catatan terukur:
+   whisper-server v1.7.6 melambat setelah permintaan pertama untuk model
+   ≥ small (2,3 → ±6 dtk), jadi final sengaja lewat CLI (biaya tetap
+   ±2,65 dtk, didominasi muat model); hanya tiny yang residen.
+3. **TTS streaming per kalimat** — `SentenceChunker` + `StreamingSpeaker`:
+   token model dipecah per kalimat, kalimat pertama disintesis Piper
+   (suara `id_ID-news_tts-medium`) dan diputar selagi sisa teks masih
+   digenerate. Terukur: audio pertama 674–974 ms; pada respons panjang
+   audio pertama mendahului teks lengkap ±1,1 dtk. **Barge-in**:
+   `BargeInMonitor` menghentikan playback dalam 216–221 ms setelah ucapan
+   user mulai (target <300 ms). Envelope lip-sync Presence/Notch diturunkan
+   dari audio aktual (`speechEnvelope.js`, RMS per 50 ms) lewat header
+   `X-Damar-Envelope` server lokal.
+4. **Server lokal** — `src/voice/local/server.js` menyajikan endpoint
+   kompatibel-OpenAI di `127.0.0.1:8127` (transcriptions, speech,
+   speech/stream, envelope) sehingga `voiceService` yang ada langsung
+   memakainya (`localOnly: true`). Instalasi aset:
+   `scripts/voice-setup.ps1` (whisper.cpp v1.7.6 + Piper + model ggml dari
+   sumber resmi, diverifikasi SHA256).
+
+**Pengenalan pembicara + approval suara** (keputusan owner 2026-11-25):
+`src/voice/speaker/` — embedding lokal 56-dim (MFCC + prosodi) dan vault
+profil terenkripsi AES-256-GCM (hanya embedding, tanpa audio mentah).
+`src/voice/voiceApproval.js` — gerbang approval suara: frasa keputusan +
+verifikasi owner (ambang 0,95) + tier policy (risiko tinggi tetap klik) +
+audit JSONL wajib untuk setiap percobaan. Keterbatasan terukur dan daftar
+yang masih pending ada di laporan misi `VOICE-ID.md`.

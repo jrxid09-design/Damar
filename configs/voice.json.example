@@ -1,14 +1,1 @@
-{
-  "stt": {
-    "url": "http://127.0.0.1:8000/v1/audio/transcriptions",
-    "model": "Systran/faster-whisper-base",
-    "voice": null,
-    "key": null
-  },
-  "tts": {
-    "url": "http://127.0.0.1:8880/v1/audio/speech",
-    "model": "edge-tts",
-    "voice": "id-ID-ArdiNeural",
-    "key": null
-  }
-}
+{"runtime":{"vadTimeoutMs":400},"stt":{"key":null,"model":"ggml-small","url":"http://127.0.0.1:8127/v1/audio/transcriptions","voice":null},"tts":{"key":null,"model":"piper-id","url":"http://127.0.0.1:8127/v1/audio/speech","voice":"id_ID-news_tts-medium"}}

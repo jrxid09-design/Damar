@@ -92,6 +92,16 @@ function voiceConfig() {
         ),
         // Bahasa STT (ISO, mis. "id").
         language: String(envOr("DAMAR_VOICE_LANGUAGE", "language", "id")),
+        // ---- Mesin lokal (whisper.cpp + Piper) & latensi ---------------
+        // Port server voice lokal (127.0.0.1) yang menyajikan STT/TTS
+        // kompatibel-OpenAI untuk voiceService.
+        localPort: num("DAMAR_VOICE_LOCAL_PORT", "localPort", 8127),
+        // Model whisper kecil untuk wake-word spotting (resident/hangat).
+        wakeModel: String(envOr("DAMAR_VOICE_WAKE_MODEL", "wakeModel", "ggml-base")),
+        // Prompt bias opsional untuk spotting (kosong = tanpa bias).
+        wakePrompt: String(envOr("DAMAR_VOICE_WAKE_PROMPT", "wakePrompt", "Damar")),
+        // Endpointing STT streaming: hening (ms) yang menutup ucapan.
+        endpointMs: num("DAMAR_VOICE_ENDPOINT_MS", "endpointMs", 400),
         // ---- Trigger "tepuk tangan 2x" (double clap) ----------------
         // Trigger alternatif wake word; nonaktif secara default.
         clapEnabled: bool("DAMAR_VOICE_CLAP_ENABLED", "clapEnabled", false),
