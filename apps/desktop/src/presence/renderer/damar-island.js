@@ -32,6 +32,21 @@
     #damarIsland[data-state="expanded"] .dnc-head { visibility:hidden; }
     #damarIsland .di-char-stage { position:relative; width:100%; height:70px; overflow:hidden; display:none; }
     #damarIsland[data-state="expanded"] .di-char-stage { display:block; }
+    /* Perch (Owner verdict 2026-11-25 12:59 WIB): in morph/compact the head
+       slot retires - the character stands FULL BODY in the transparent
+       apron under the bar instead of peeking out of the 34 px pill. The
+       apron is a child of the island, so the island's hover/click
+       containment (expand on entry, hide on exit, no outside-click
+       dismiss) covers the character unchanged. */
+    #damarIsland[data-state="morph"] .dnc-head, #damarIsland[data-state="compact"] .dnc-head { display:none; }
+    /* The apron may only overflow in the notch states; expanded keeps the
+       baseline clipping so tall body content never spills past the box. */
+    #damarIsland[data-state="morph"], #damarIsland[data-state="compact"] { overflow:visible; }
+    #damarIsland .di-perch { position:absolute; top:100%; left:50%; transform:translateX(-50%); width:min(384px,100vw); height:126px; display:none; pointer-events:auto; }
+    #damarIsland[data-state="morph"] .di-perch, #damarIsland[data-state="compact"] .di-perch { display:block; }
+    #damarIsland .di-perch .dnc-perch { position:absolute; inset:0; width:100%; height:100%; display:block; }
+    #damarIsland .di-perch::after { content:''; position:absolute; left:6%; right:6%; bottom:0; height:12px; border-top:1px solid rgba(229,193,101,.22); background:radial-gradient(ellipse 50% 100% at 50% 0, rgba(245,185,66,.18), rgba(245,185,66,0) 70%); pointer-events:none; }
+    #damarIsland .di-perch-hit { position:absolute; top:0; left:0; width:0; height:100%; pointer-events:auto; cursor:pointer; }
     #damarIsland .di-char-stage .dnc-stage { position:absolute; inset:0; margin:auto; width:100%; height:100%; }
     #damarIsland[data-state="morph"] .di-head { color:rgba(242,217,135,.55); }
     #damarIsland .di-body { display:none; padding:1px 12px 3px; }
@@ -69,9 +84,11 @@
   const wake = document.createElement('div'); wake.id = 'damarIslandWake'; wake.setAttribute('aria-hidden','true');
   const island = document.createElement('section');
   island.id = 'damarIsland'; island.dataset.state = 'hidden'; island.setAttribute('aria-label','DAMAR Companion Island');
-  island.innerHTML = `<div class="di-head" role="button" tabindex="0" aria-label="DAMAR Companion Island"><div class="dnc-slot dnc-head" data-dnc="head" aria-hidden="true"></div><span class="di-mic" role="img" aria-label="Microphone on"></span></div><div class="di-char-stage"><div class="dnc-slot dnc-stage" data-dnc="stage" aria-hidden="true"></div></div><div class="di-body"><p class="di-status" role="status" aria-live="polite">DAMAR Core not connected</p><div class="di-pills" hidden></div><div class="di-media" hidden><span class="di-media-text"></span><button type="button" data-media="previous" aria-label="Previous track">&lt;&lt;</button><button type="button" data-media="toggle" aria-label="Play or pause">&#9654;</button><button type="button" data-media="next" aria-label="Next track">&gt;&gt;</button></div><div class="di-controls"><button type="button" data-action="presence" data-t="returnPresence">Return to Presence</button><button type="button" data-action="dashboard" data-t="dashboard">Control</button><button type="button" data-action="allow-once" data-t="allowOnce" hidden>Allow once</button><button type="button" data-action="allow-session" data-t="allowSession" hidden>Allow for session</button><button type="button" data-action="deny" data-t="deny" hidden>Deny</button></div></div>`;
+  island.innerHTML = `<div class="di-head" role="button" tabindex="0" aria-label="DAMAR Companion Island"><div class="dnc-slot dnc-head" data-dnc="head" aria-hidden="true"></div><span class="di-mic" role="img" aria-label="Microphone on"></span></div><div class="di-perch" aria-hidden="true"><div class="dnc-slot dnc-perch" data-dnc="perch"></div><div class="di-perch-hit"></div></div><div class="di-char-stage"><div class="dnc-slot dnc-stage" data-dnc="stage" aria-hidden="true"></div></div><div class="di-body"><p class="di-status" role="status" aria-live="polite">DAMAR Core not connected</p><div class="di-pills" hidden></div><div class="di-media" hidden><span class="di-media-text"></span><button type="button" data-media="previous" aria-label="Previous track">&lt;&lt;</button><button type="button" data-media="toggle" aria-label="Play or pause">&#9654;</button><button type="button" data-media="next" aria-label="Next track">&gt;&gt;</button></div><div class="di-controls"><button type="button" data-action="presence" data-t="returnPresence">Return to Presence</button><button type="button" data-action="dashboard" data-t="dashboard">Control</button><button type="button" data-action="allow-once" data-t="allowOnce" hidden>Allow once</button><button type="button" data-action="allow-session" data-t="allowSession" hidden>Allow for session</button><button type="button" data-action="deny" data-t="deny" hidden>Deny</button></div></div>`;
   document.body.append(wake, island);
   const head = island.querySelector('.di-head');
+  const perchEl = island.querySelector('.di-perch');
+  const perchHit = island.querySelector('.di-perch-hit');
   const desktop = () => window.damarDesktop;
   let pointerInside = false;
 
@@ -165,7 +182,11 @@
       const orb = document.getElementById('siriOrbDock');
       const orbRect = orb?.getBoundingClientRect();
       const within = (r) => r && x >= r.left - 10 && x <= r.right + 10 && y >= r.top - 10 && y <= r.bottom + 10;
-      pointerInside = within(islandRect);
+      // The perched character is part of the notch's interactive area:
+      // hovering it must hold the window open exactly like hovering the
+      // bar (the rest of the transparent apron stays click-through).
+      const perchHitRect = (perchHit && (fsm.state === 'compact' || fsm.state === 'morph')) ? perchHit.getBoundingClientRect() : null;
+      pointerInside = within(islandRect) || !!(perchHitRect && perchHitRect.width > 0 && within(perchHitRect));
       const notchActive = NOTCH_STATES.has(fsm.state);
       const standbyInteractive = !notchActive && !orbPhaseDone && within(orbRect);
       setClickThrough(!(pointerInside || standbyInteractive));
@@ -181,7 +202,9 @@
       // tapi HANYA bila state compact sudah stabil (bukan sisa event mouseleave
       // yang baru saja collapse expanded->compact pada pointermove yang sama).
       const seqAtEntry = transitionSeq;
-      if (fsm.state === 'compact' && !pointerInside && y > islandRect.bottom + 24) {
+      const perchRect = perchEl ? perchEl.getBoundingClientRect() : null;
+      const nearPerch = !!(perchRect && perchRect.height > 0 && x >= perchRect.left - 6 && x <= perchRect.right + 6 && y >= perchRect.top - 6 && y <= perchRect.bottom + 6);
+      if (fsm.state === 'compact' && !pointerInside && !nearPerch && y > islandRect.bottom + 24) {
         setTimeout(() => {
           if (fsm.state === 'compact' && transitionSeq === seqAtEntry) fsm.pointerLeft();
         }, 90);
@@ -291,6 +314,28 @@
       stageEl.addEventListener('pointerenter', () => dnc.setHover(true));
       stageEl.addEventListener('pointerleave', () => dnc.setHover(false));
       stageEl.addEventListener('pointerdown', () => dnc.poke());
+    }
+    // Perch view (3D stage only - the 2D fallback keeps the head slot):
+    // the full-body character in the apron under the bar. The hit area
+    // tracks the character (it walks), and the apron itself is island
+    // hover territory, so reaching for the character behaves exactly
+    // like reaching for the bar.
+    if (perchEl && typeof window.DamarNotch3D !== 'undefined' && CharacterFactory === window.DamarNotch3D) {
+      dnc.attach(island.querySelector('[data-dnc="perch"]'));
+      if (perchHit) {
+        perchHit.addEventListener('pointerenter', () => dnc.setHover(true));
+        perchHit.addEventListener('pointerleave', () => dnc.setHover(false));
+        perchHit.addEventListener('pointerdown', () => dnc.poke());
+      }
+      const layoutPerchHit = () => {
+        if (!perchHit || typeof dnc.perchLayout !== 'function') return;
+        const L = dnc.perchLayout();
+        if (!L) { perchHit.style.width = '0px'; return; }
+        perchHit.style.left = Math.round(L.cx - L.w / 2) + 'px';
+        perchHit.style.width = Math.round(L.w) + 'px';
+      };
+      layoutPerchHit();
+      setInterval(() => { if (fsm.state === 'compact' || fsm.state === 'morph') layoutPerchHit(); }, 240);
     }
     // Intro show: when the notch appears (from hidden/orb) the character
     // performs the full greeting choreography; when the expanded stage

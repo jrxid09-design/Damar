@@ -40,6 +40,17 @@
   //   sparkles/specular > 0.72 survive, glossy roughness 0.22).
   // - Framing: stage camera fits the FULL BODY (flame tip to boots); the
   //   compact head slot keeps its peek framing (physical 186x34 pill).
+  // - PERCH (Owner verdict 2026-11-25 12:59 WIB: "Kok pas Notch biasa
+  //   kelihatan kepala doang - aku mau kelihatan full, nanti karakternya
+  //   jalan atau apalah"): in compact/morph the head slot retires and a
+  //   third view - the perch - shows the character FULL BODY in the
+  //   transparent apron under the bar (the island is flush to the top of
+  //   the screen, so the overflow can only hang below the bar, Coucou-
+  //   style: the character pops OUT of the notch and stands on its lower
+  //   rim). The perch camera frames a walking corridor; an ambient stroll
+  //   (procedural thigh/shin/foot walk cycle on the rig bones, heading
+  //   turn at the ends) joins the ambient rotation for long quiet, and
+  //   any interaction or higher-priority state preempts it.
   // - Speech stays the existing envelope path, layered UNDER the life
   //   layer; the life layer never writes mouth channels. The mouth spring
   //   uses Coucou's speech spring (response 0.25 s, damping 0.6).
@@ -284,6 +295,42 @@
     if (sec < 0.18) return 1 - 0.10 * easeInQuad(sec / 0.18);
     return 0.90 + 0.10 * easeOutBack((sec - 0.18) / 0.35);
   }
+  // ---- perch stroll: pure walk math ---------------------------------------
+  // Horizontal travel of the stroll, in world units (the model stands
+  // ~1.71 tall): +-1.35 takes the character visibly past the ends of the
+  // 186 px bar inside the perch camera's corridor.
+  const WALK_RANGE = 1.35;
+  const WALK_SPEED = 0.5; // world units / s - a stroll, not a commute
+  // One walk cycle as a pure pose function of phase (radians; 2PI = two
+  // steps). Sign convention of the rig: rotation.x negative swings a limb
+  // FORWARD (the point gesture raises the arm at x -1.32); a knee bends
+  // at positive x. Legs anti-phase, knees lift on the swing-through, arms
+  // counter-swing against their leg, the body bobs twice per cycle and
+  // leans into the walk.
+  function walkPose(phase) {
+    const s = Math.sin(phase), c = Math.cos(phase);
+    const thighL = -0.52 * s, thighR = 0.52 * s;
+    const shinL = 0.62 * Math.max(0, Math.cos(phase - 0.5));
+    const shinR = 0.62 * Math.max(0, -Math.cos(phase - 0.5));
+    return {
+      thighL, thighR, shinL, shinR,
+      footL: -(thighL + shinL) * 0.5, footR: -(thighR + shinR) * 0.5,
+      armL: 0.30 * s, armR: -0.30 * s,
+      bob: Math.abs(c) * 0.022, lean: 0.07,
+      pelvisRoll: s * 0.045, pelvisYaw: c * 0.05,
+    };
+  }
+  // Pick a stroll target: always inside the corridor, always a real walk
+  // (the longer side wins; >= 0.7 of travel whenever the corridor allows).
+  function pickWalkTarget(x, rand) {
+    const r = clamp01(rand);
+    const dir = x > 0.12 ? -1 : x < -0.12 ? 1 : (r < 0.5 ? -1 : 1);
+    const room = dir > 0 ? WALK_RANGE - x : x + WALK_RANGE;
+    const dist = Math.min(room, 0.7 + r * 0.9);
+    return x + dir * dist;
+  }
+  // Ease the stroll near its target (full speed mid-walk, gentle arrival).
+  function walkSpeedFactor(dist) { return Math.min(1, Math.max(0.3, (dist || 0) / 0.3)); }
   const seg01 = (tt, a, b) => clamp01((tt - a) / (b - a));
   const bump01 = (tt, a, b) => { const u = seg01(tt, a, b); return (tt < a || tt > b) ? 0 : Math.sin(Math.PI * u); };
   // Coucou's 4.6 s greeting choreography as a pure pose function of the
@@ -362,6 +409,7 @@
       gazeSetAt: 0, gazeChangeAt: 0,
       modelStatus: 'idle', // idle -> loading -> ready | failed
       template: null, clips: null, bbox: null, headFrame: null,
+      perchGroupX: 0, // the perch view's last composed group x (hit-area layout)
       // Procedural life layer state (S.t clock = visible seconds).
       life: {
         wanderAt: 3,
@@ -376,6 +424,7 @@
         ambientAt: 6, winkAt: -10,
         mediaPlaying: false, mediaAmt: 0, danceUntilT: -1,
         greet: { startT: -10, full: false, firedWave: false, firedBurst: false, firedBadge: false },
+        walk: { x: 0, target: 0, active: false, phase: 0, yaw: 0, amt: 0, nextAt: 30, lastPreempt: '' },
         greetWaveUntil: 0, // greeting wave lives on its own channel: the island behavior engine re-asserts setGesture every 1.2 s and would stomp it
         pokeAtMs: -1e9, errAt: -10, questionAt: -10, spinAt: -10,
         dizzyStart: -10, costumeFxAt: -10, pointSinceT: -10,
@@ -571,11 +620,14 @@
     }
     // Camera framing from the model bbox: the head slot keeps the compact
     // peek (the pill is 186x34 - a face peeking is the physical truth);
-    // the stage slot fits the FULL BODY, flame tip to boots (Owner spec).
+    // the stage slot fits the FULL BODY, flame tip to boots (Owner spec);
+    // the perch slot fits the full body standing on the notch's lower rim
+    // (feet near the frame's bottom edge, headroom for hops/greeting) and
+    // a corridor wide enough for the stroll range.
     function frameCamera(v, force) {
       if (!v.camera || !S.bbox) return;
       const w = v.el.clientWidth || 0, h = v.el.clientHeight || 0;
-      if (!w || !h) { v.hadSize = false; return; }
+      if (!w || !h) { v.hadSize = false; v.w = 0; v.h = 0; return; } // zeroed so the frame loop really skips hidden slots
       v.hadSize = true;
       if (!force && w === v.w && h === v.h) return;
       v.w = w; v.h = h;
@@ -587,6 +639,10 @@
         if (S.headFrame) { fitH = S.headFrame.fitH; ty = S.headFrame.ty; fitW = S.headFrame.fitW || 0; }
         else { fitH = size.y * 0.46; ty = center.y + size.y * 0.30; }
       }
+      else if (v.kind === 'perch') {
+        fitH = size.y * 1.16; ty = center.y + size.y * 0.045;
+        fitW = (WALK_RANGE + size.x * 0.62) * 2;
+      }
       else { fitH = size.y * 1.05; ty = center.y - size.y * 0.015; fitW = size.x * 1.15; }
       const distH = (fitH / 2) / Math.tan(fov / 2);
       const distW = fitW ? (fitW / 2) / (Math.tan(fov / 2) * (w / h)) : 0;
@@ -595,6 +651,9 @@
       v.camera.position.set(center.x, ty, center.z + dist * 1.04);
       v.camera.lookAt(center.x, ty, center.z);
       v.camera.updateProjectionMatrix();
+      // Visible world size at the model plane (perch hit-area projection).
+      v.visW = 2 * dist * 1.04 * Math.tan(fov / 2) * (w / h);
+      v.visH = 2 * dist * 1.04 * Math.tan(fov / 2);
     }
     // Additive bone rotation on top of the (bind/accent) pose (post-mixer).
     const _e = () => new THREE.Euler();
@@ -713,6 +772,38 @@
         const u = (t - L.stretchStart) / 1.9;
         if (u >= 1) L.stretchStart = -10; else stretchEnv = Math.pow(Math.sin(Math.PI * u), 1.35);
       }
+      // ---- perch stroll: an ambient act of the apron under the bar.
+      // Starts only in long quiet while the perch is on screen; any
+      // interaction or higher-priority state (gesture, greeting, speech,
+      // music, spin, dizzy) preempts it - the character stops where it
+      // stands, the legs settle, and it may stroll again later.
+      const perchView = views.find(v => v.kind === 'perch');
+      const perchLive = !!(perchView && perchView.scene && perchView.hadSize);
+      const WK = L.walk;
+      const walkBusy = !!gestureNow || greetActive || talk > 0.01 || L.mediaAmt > 0.02 || L.spinAt >= 0 || L.dizzyStart >= 0;
+      if (WK.active && (walkBusy || !perchLive || idleFor < 0.5)) { WK.active = false; WK.nextAt = t + 20 + Math.random() * 20; WK.lastPreempt = walkBusy ? 'busy' : (!perchLive ? 'gone' : 'interacted'); }
+      if (!WK.active && !rm && perchLive && !walkBusy && idleFor > 10 && t >= WK.nextAt) {
+        WK.target = pickWalkTarget(WK.x, Math.random());
+        WK.active = true;
+      }
+      if (WK.active) {
+        const distLeft = WK.target - WK.x;
+        const dir = Math.sign(distLeft);
+        if (Math.abs(distLeft) < 0.02) { WK.active = false; WK.nextAt = t + 26 + Math.random() * 30; }
+        else {
+          const stepLen = Math.min(Math.abs(distLeft), WALK_SPEED * walkSpeedFactor(Math.abs(distLeft)) * dt);
+          WK.x += dir * stepLen;
+          WK.phase += (stepLen / 0.30) * Math.PI; // ~0.30 world per half-cycle
+          WK.yaw += ((dir * 0.82) - WK.yaw) * Math.min(1, dt * 6);
+        }
+      } else {
+        WK.yaw += (0 - WK.yaw) * Math.min(1, dt * 6);
+      }
+      const amtTarget = WK.active ? 1 : 0;
+      WK.amt += Math.max(-dt / 0.3, Math.min(dt / 0.25, amtTarget - WK.amt));
+      WK.amt = Math.max(0, Math.min(1, WK.amt));
+      const wp = WK.amt > 0.003 ? walkPose(WK.phase) : null;
+      const walkBob = wp ? wp.bob * sizeY * WK.amt : 0;
       // music dance (Coucou): 112 BPM, fade-in 0.3 s / fade-out 0.5 s.
       const musicOn = (L.mediaPlaying || t < L.danceUntilT) && !rm;
       L.mediaAmt = Math.max(0, Math.min(1, L.mediaAmt + (musicOn ? dt / 0.3 : -dt / 0.5)));
@@ -810,6 +901,20 @@
           addRot(v.bones['forearm.R'], -0.25 * stretchEnv, 0, 0);
           addRot(v.bones['forearm.L'], -0.25 * stretchEnv, 0, 0);
         }
+        // ---- perch stroll limbs (the perch view only: the stroll lives
+        // in the apron; other views never inherit its offset or gait).
+        if (wp && v.kind === 'perch') {
+          const wa = WK.amt * amp;
+          addRot(v.bones['thigh.L'], wp.thighL * wa, 0, 0);
+          addRot(v.bones['thigh.R'], wp.thighR * wa, 0, 0);
+          addRot(v.bones['shin.L'], wp.shinL * wa, 0, 0);
+          addRot(v.bones['shin.R'], wp.shinR * wa, 0, 0);
+          addRot(v.bones['foot.L'], wp.footL * wa, 0, 0);
+          addRot(v.bones['foot.R'], wp.footR * wa, 0, 0);
+          addRot(v.bones['pelvis'], wp.lean * wa, wp.pelvisYaw * wa, wp.pelvisRoll * wa);
+          addRot(v.bones['upper_arm.L'], wp.armL * wa, 0, 0);
+          if (!gt || gAmt <= 0.003) addRot(v.bones['upper_arm.R'], wp.armR * wa, 0, 0);
+        }
         // ---- breath + sway into the spine chain (life layer core)
         addRot(v.bones['spine'], (Math.sin(t * 1.8) * 0.012 + swayX) * amp, 0, (swayZ + L.shift.x * 0.028) * amp);
         addRot(v.bones['chest'], Math.sin(t * 1.8) * 0.022 * amp, 0, -swayZ * 0.5 * amp);
@@ -828,13 +933,14 @@
         // ---- stage root: compose every scale/offset channel
         const waveBob = gestureNow === 'wave' ? Math.sin(t * Math.PI * 2 * 5) * 0.02 * sizeY * gAmt : 0; // Coucou wave bob 5 Hz, 2%
         const danceBounce = dancing ? Math.abs(Math.sin(t * 7.5)) * 0.022 * sizeY : 0;
-        v.group.position.y = S.hop.x * sizeY * 0.12 + danceBounce + musicY + waveBob + approvalDip + S.hoverAmt * 0.004 * sizeY + (gp ? gp.yOff * sizeY : 0);
-        v.group.position.x = L.shift.x * 0.010 * sizeY * amp + (gp ? gp.xOff * sizeY : 0);
+        v.group.position.y = S.hop.x * sizeY * 0.12 + danceBounce + musicY + waveBob + approvalDip + S.hoverAmt * 0.004 * sizeY + (gp ? gp.yOff * sizeY : 0) + (v.kind === 'perch' ? walkBob : 0);
+        v.group.position.x = L.shift.x * 0.010 * sizeY * amp + (gp ? gp.xOff * sizeY : 0) + (v.kind === 'perch' ? WK.x : 0);
+        if (v.kind === 'perch') S.perchGroupX = v.group.position.x;
         const gScale = gp ? gp.scale : 1;
         const sy = pokeFx.sy * (gp ? gp.sy : 1) * breathSy * costumeS * (1 - 0.06 * musicLand) * (1 + S.hoverAmt * 0.03);
         const sx = pokeFx.sx * (gp ? gp.sx : 1) * breathSx * costumeS * (1 + 0.045 * musicLand);
         v.group.scale.set(sx * gScale, sy * gScale, sx * gScale);
-        v.group.rotation.y = spinRot + dizzyRot;
+        v.group.rotation.y = spinRot + dizzyRot + (v.kind === 'perch' ? WK.yaw * WK.amt : 0);
         v.group.rotation.z = now < S.shakeUntil && !rm ? Math.sin(now * 0.11) * 0.03 * Math.max(0, (S.shakeUntil - now) / 900) : 0;
         // ---- particles: bursts on request, streaks during the greeting
         if (v.burstSeen !== L.burstSeq) { v.burstSeen = L.burstSeq; burst(v, L.burstKind === 'big'); }
@@ -967,6 +1073,27 @@
         touch();
       },
       relayout() { for (const v of views) { v.w = 0; frameCamera(v, true); } },
+      // Ask the character to take a stroll along the perch apron (the
+      // ambient system also starts these on its own in long quiet). The
+      // frame loop's preempt rules still apply - a stroll asked for in a
+      // busy moment settles instead of forcing its way through.
+      stroll() {
+        const pv = views.find(v => v.kind === 'perch');
+        if (!pv || !pv.hadSize) return false;
+        const WK = S.life.walk;
+        if (!WK.active) { WK.target = pickWalkTarget(WK.x, Math.random()); WK.active = true; }
+        return true;
+      },
+      // The character's current on-screen box inside the perch slot (CSS
+      // px, relative to the slot's top-left) - the island keeps the
+      // notch's pointer hit area glued to the character while it walks.
+      perchLayout() {
+        const pv = views.find(v => v.kind === 'perch');
+        if (!pv || !pv.hadSize || !pv.visW || !S.bbox) return null;
+        const wPx = Math.max(54, Math.min(pv.w, (S.bbox.size.x * 0.95 / pv.visW) * pv.w));
+        const cx = pv.w / 2 + (S.perchGroupX / pv.visW) * pv.w;
+        return { cx, w: wPx, h: pv.h };
+      },
       _state: S,
     };
     return api;
@@ -974,7 +1101,7 @@
 
   root.DamarNotch3D = {
     create, EMOTES, COSTUMES, CLIP, SPEECH_BAKED_WEIGHT,
-    _pure: { clampGaze, clamp01, stepSpring, swiftSpring, pokeVerdict, speechMorphs, emoteEmphasis, gestureTargets, maskEmissiveWithDiffuse, celShadeModel, celBandLum, celScale, eyeShadeLum, blinkWeight, blinkDelay, gazeWander, easeOutBack, greetingPose, greetPose, headShake, pokeSquash, costumeScale },
+    _pure: { clampGaze, clamp01, stepSpring, swiftSpring, pokeVerdict, speechMorphs, emoteEmphasis, gestureTargets, maskEmissiveWithDiffuse, celShadeModel, celBandLum, celScale, eyeShadeLum, blinkWeight, blinkDelay, gazeWander, easeOutBack, greetingPose, greetPose, headShake, pokeSquash, costumeScale, walkPose, pickWalkTarget, walkSpeedFactor, WALK_RANGE, WALK_SPEED },
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.DamarNotch3D;
 })(typeof window !== 'undefined' ? window : globalThis);
