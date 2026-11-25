@@ -113,4 +113,22 @@ function voiceConfig() {
 
 }
 
-module.exports = { voiceConfig, store, boolOrAuto };
+const { resolveStageConfig } = require("./providers/apiProvider");
+
+/**
+ * Config efektif satu tahap pipeline (stt|tts) untuk pemilihan
+ * provider: { provider: "local"|"remote", endpoint, model, voice,
+ * keyEnv, fallback, timeoutMs }. Section dibaca dari configs/
+ * voice.json yang sama (sumber terpusat); kunci API hanya pernah
+ * berupa RUJUKAN nama env var (keyEnv) — lihat apiProvider.js.
+ * Jalur API disediakan, belum diuji (VOICE-ID.md §13.6).
+ */
+function voiceStageConfig(stage) {
+
+    const all = store.read() ?? {};
+
+    return resolveStageConfig(stage, all[stage] ?? {});
+
+}
+
+module.exports = { voiceConfig, voiceStageConfig, store, boolOrAuto };

@@ -151,7 +151,11 @@ function createVoiceLocalServer(opts = {}) {
                 return json(res, 200, {
                     ok: true, engines: eng.probe(),
                     defaults: { sttModel: defaultSttModel, ttsVoice: defaultTtsVoice },
-                    warm: [...warmByModel.values()].map(w => w.status())
+                    warm: [...warmByModel.values()].map(w => w.status()),
+                    // Service Supertonic resident (dijaga: fake engineImpl
+                    // di tes tidak punya supertonicStatus).
+                    supertonic: typeof eng.supertonicStatus === "function"
+                        ? eng.supertonicStatus() : []
                 });
             }
 
@@ -226,20 +230,21 @@ function createVoiceLocalServer(opts = {}) {
             }
 
             if (req.method === "POST" && url.pathname === "/v1/audio/speech/stream") {
-                // TTS streaming per kalimat: NDJSON, satu baris per chunk —
-                // chunk pertama keluar begitu kalimat pertama tersintesis,
-                // tanpa menunggu seluruh teks. Konsumen memutar berurutan.
+                // TTS streaming mikro-chunk: NDJSON, satu baris per chunk —
+                // chunk pertama keluar begitu potongan kata pertama
+                // tersintesis (MicroChunker: granularitas kata, bukan
+                // kalimat utuh), tanpa menunggu seluruh teks. Konsumen
+                // memutar berurutan.
                 const body = await readBody(req);
                 let payload = {};
                 try { payload = JSON.parse(body.toString("utf8")); } catch { return json(res, 400, { error: "JSON tidak valid" }); }
                 const text = String(payload.input ?? payload.text ?? "").trim();
                 if (!text) return json(res, 400, { error: "field 'input' wajib diisi" });
                 const voice = String(payload.voice || defaultTtsVoice);
-                const { SentenceChunker } = require("./streaming");
-                const chunker = new SentenceChunker();
+                const { MicroChunker } = require("./streaming");
+                const chunker = new MicroChunker();
                 const parts = chunker.push(text);
-                const tail = chunker.flush();
-                if (tail) parts.push(tail);
+                parts.push(...chunker.flush());
                 res.writeHead(200, { "Content-Type": "application/x-ndjson" });
                 let index = 0;
                 for (const part of parts) {
@@ -272,9 +277,33 @@ function createVoiceLocalServer(opts = {}) {
         }
     });
 
+    // --- Supervisi service resident (mandat anti-crash §13) ----------
+    // Kelas Warm* sudah me-restart dirinya saat prosesnya MATI. Interval
+    // ini menutup lubang sisanya: proses yang HANG (hidup tapi health
+    // gagal 2x berturut-turut) di-restart paksa. Interval di-unref agar
+    // tidak menahan proses/tes; dimatikan di close().
+    let supervisionTimer = null;
+    const healthFails = new Map();
+    async function superviseOnce() {
+        for (const [key, w] of warmByModel) {
+            if (!w || typeof w.health !== "function") continue;
+            if (w._stopped) continue;
+            const ok = await w.health().catch(() => false);
+            if (ok) { healthFails.delete(key); continue; }
+            const fails = (healthFails.get(key) || 0) + 1;
+            healthFails.set(key, fails);
+            if (fails >= 2 && typeof w._recover === "function") {
+                healthFails.delete(key);
+                log(`[supervisi] ${key} tidak sehat ${fails}x — memulihkan service`);
+                try { await w._recover(); } catch (error) { log(`[supervisi] pemulihan ${key} gagal: ${error.message}`); }
+            }
+        }
+    }
+
     return {
         server,
         warmByModel,
+        superviseOnce,
         async startWarm() {
             for (const spec of warmSpecs) {
                 if (!eng.WarmWhisperServer) break;
@@ -289,9 +318,15 @@ function createVoiceLocalServer(opts = {}) {
             }
         },
         listen(port = DEFAULT_PORT, host = "127.0.0.1") {
+            if (!supervisionTimer && opts.supervisionMs !== 0) {
+                supervisionTimer = setInterval(() => { superviseOnce().catch(() => {}); },
+                    opts.supervisionMs || 10000);
+                if (supervisionTimer.unref) supervisionTimer.unref();
+            }
             return new Promise(resolve => server.listen(port, host, () => resolve(server.address())));
         },
         close() {
+            if (supervisionTimer) { clearInterval(supervisionTimer); supervisionTimer = null; }
             for (const w of warmByModel.values()) w.stop();
             // Service Supertonic resident ikut mati (guarded: fake engineImpl
             // di tes tidak punya stopSupertonicServers).

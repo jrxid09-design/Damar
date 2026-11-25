@@ -250,6 +250,99 @@ async function synthesize(text, {
     }
 }
 
+/** Error koneksi (service mati/direset) vs error aplikasi (HTTP !ok). */
+function isConnError(error) {
+    if (!error) return false;
+    if (error instanceof TypeError) return true;
+    const code = error.code || error.cause?.code;
+    return code === "ECONNREFUSED" || code === "ECONNRESET" || code === "EPIPE";
+}
+
+/**
+ * ResidentService — supervisi bersama untuk service resident (whisper
+ * + Supertonic), mandat anti-crash owner (VOICE-ID.md §13):
+ *  - proses yang mati TAK TERDUGA (pernah ready, bukan stop sengaja)
+ *    di-restart otomatis dengan backoff eksponensial terbatas;
+ *  - error koneksi saat request -> pulihkan (restart bila perlu) lalu
+ *    coba sekali lagi; error HTTP (service hidup, request ditolak)
+ *    TIDAK di-retry;
+ *  - service yang hang (proses hidup tapi health gagal) dipulihkan
+ *    lewat _recover() yang dipanggil jalur request / pengawas server;
+ *  - stop() bersifat final: tidak ada restart sesudahnya, tidak ada
+ *    proses yatim (timer restart dibersihkan, proses dibunuh).
+ */
+class ResidentService {
+
+    _initSupervision({ autoRestart = true, restartBaseMs = 500, maxRestarts = 10 } = {}) {
+        this.autoRestart = autoRestart;
+        this.restartBaseMs = restartBaseMs;
+        this.maxRestarts = maxRestarts;
+        this._stopped = true;
+        this._everReady = false;
+        this._restarts = 0;
+        this._consecFailures = 0;
+        this._restartTimer = null;
+    }
+
+    _watchProc(p) {
+        p.on("exit", () => {
+            if (this.proc !== p) return; // proses lama yang sudah diganti
+            this.ok = false;
+            this.proc = null;
+            if (!this._stopped && this._everReady && this.autoRestart) this._scheduleRestart();
+        });
+        p.on("error", err => { this.lastError = err.message; this.ok = false; });
+    }
+
+    _scheduleRestart() {
+        if (this._restartTimer || this._stopped) return;
+        if (this._consecFailures >= this.maxRestarts) {
+            this.lastError = `restart menyerah setelah ${this._consecFailures} kegagalan berturut-turut`;
+            return;
+        }
+        const delay = Math.min(this.restartBaseMs * (2 ** this._consecFailures), 8000);
+        this._restartTimer = setTimeout(async () => {
+            this._restartTimer = null;
+            this._consecFailures++;
+            try { await this.start(); this._restarts++; }
+            catch (err) { this.lastError = err.message; this._scheduleRestart(); }
+        }, delay);
+        if (this._restartTimer.unref) this._restartTimer.unref();
+    }
+
+    _beginStart() {
+        this._stopped = false;
+        if (this._restartTimer) { clearTimeout(this._restartTimer); this._restartTimer = null; }
+    }
+
+    _markReady() {
+        this._everReady = true;
+        this._consecFailures = 0;
+    }
+
+    _stopSupervision() {
+        this._stopped = true;
+        if (this._restartTimer) { clearTimeout(this._restartTimer); this._restartTimer = null; }
+    }
+
+    /** Pulihkan service: mati -> start; hidup tapi tak sehat -> restart. */
+    async _recover() {
+        if (this._stopped) throw new Error("service dihentikan");
+        if (!this.proc) { await this.start(); return; }
+        if (!(await this.health())) {
+            const p = this.proc;
+            this.proc = null;
+            this.ok = false;
+            try { p.kill(); } catch { /* abaikan */ }
+            await this.start();
+        }
+    }
+
+    _supervisionStatus() {
+        return { restarts: this._restarts, stopped: this._stopped, autoRestart: this.autoRestart };
+    }
+}
+
 /**
  * WarmWhisperServer — whisper-server.exe yang RESIDENT: model dimuat
  * sekali saat start (cold-load diukur terpisah sebagai loadMs) lalu
@@ -257,9 +350,10 @@ async function synthesize(text, {
  * selalu hangat di memori" untuk jalur percakapan; transcribeWav (CLI)
  * tetap ada sebagai fallback dingin.
  */
-class WarmWhisperServer {
+class WarmWhisperServer extends ResidentService {
 
-    constructor({ model = "ggml-small", port = 8181, threads = Math.min(8, os.cpus().length), root = voiceLocalRoot() } = {}) {
+    constructor({ model = "ggml-small", port = 8181, threads = Math.min(8, os.cpus().length), root = voiceLocalRoot(), autoRestart = true, restartBaseMs = 500, maxRestarts = 10 } = {}) {
+        super();
         this.model = model;
         this.port = port;
         this.threads = threads;
@@ -268,10 +362,12 @@ class WarmWhisperServer {
         this.loadMs = null;
         this.ok = false;
         this.lastError = null;
+        this._initSupervision({ autoRestart, restartBaseMs, maxRestarts });
     }
 
     async start({ warmup = true } = {}) {
         if (this.proc) return this;
+        this._beginStart();
         const bin = findFile(path.join(this.root, "bin", "whisper"),
             process.platform === "win32" ? "whisper-server.exe" : "whisper-server");
         if (!bin) throw new Error("whisper-server tidak ditemukan — jalankan scripts/voice-setup.ps1 dulu");
@@ -282,8 +378,7 @@ class WarmWhisperServer {
         const t0 = Date.now();
         this.proc = spawn(bin, ["-m", modelFile, "--host", "127.0.0.1", "--port", String(this.port),
             "-t", String(this.threads), "-l", "id"], { windowsHide: true, stdio: "ignore" });
-        this.proc.on("exit", () => { this.ok = false; this.proc = null; });
-        this.proc.on("error", err => { this.lastError = err.message; this.ok = false; });
+        this._watchProc(this.proc);
 
         // Tunggu sampai HTTP menjawab (model selesai dimuat sebelum listen).
         const deadline = Date.now() + 120000;
@@ -297,6 +392,7 @@ class WarmWhisperServer {
         }
         this.loadMs = Date.now() - t0;
         this.ok = true;
+        this._markReady();
 
         if (warmup) {
             // Satu inferensi pemanasan (hening 0,5 dtk) agar jalur benar-benar panas.
@@ -305,8 +401,16 @@ class WarmWhisperServer {
         return this;
     }
 
-    async transcribe(wavBuffer, { language = "id" } = {}) {
-        if (!this.ok) throw new Error("whisper-server belum jalan");
+    /** Cek kesehatan murah: proses hidup DAN HTTP menjawab. */
+    async health() {
+        if (!this.proc) return false;
+        try {
+            const res = await fetch(`http://127.0.0.1:${this.port}/`, { signal: AbortSignal.timeout(1500) });
+            return res.status > 0;
+        } catch { return false; }
+    }
+
+    async _transcribeOnce(wavBuffer, { language = "id" } = {}) {
         const form = new FormData();
         form.append("file", new Blob([wavBuffer], { type: "audio/wav" }), "audio.wav");
         form.append("response_format", "json");
@@ -321,14 +425,27 @@ class WarmWhisperServer {
         return { text, ms: Date.now() - t0 };
     }
 
+    async transcribe(wavBuffer, { language = "id" } = {}) {
+        if (!this.ok && !this.proc) throw new Error("whisper-server belum jalan");
+        try {
+            return await this._transcribeOnce(wavBuffer, { language });
+        } catch (error) {
+            // Service mati di tengah jalan: pulihkan lalu coba SEKALI lagi.
+            if (!isConnError(error) || this._stopped) throw error;
+            await this._recover();
+            return this._transcribeOnce(wavBuffer, { language });
+        }
+    }
+
     stop() {
+        this._stopSupervision();
         if (this.proc) { try { this.proc.kill(); } catch { /* abaikan */ } this.proc = null; }
         this.ok = false;
         return this;
     }
 
     status() {
-        return { model: this.model, port: this.port, ok: this.ok, loadMs: this.loadMs, lastError: this.lastError };
+        return { model: this.model, port: this.port, ok: this.ok, loadMs: this.loadMs, lastError: this.lastError, ...this._supervisionStatus() };
     }
 }
 
@@ -339,9 +456,10 @@ class WarmWhisperServer {
  * src/voice/local/supertonic_service.py (stdlib http.server + paket
  * `supertonic`), dijalankan python venv data/voice/pyenv.
  */
-class WarmSupertonicServer {
+class WarmSupertonicServer extends ResidentService {
 
-    constructor({ port = Number(process.env.DAMAR_SUPERTONIC_PORT || SUPERTONIC_PORT_DEFAULT), root = voiceLocalRoot() } = {}) {
+    constructor({ port = Number(process.env.DAMAR_SUPERTONIC_PORT || SUPERTONIC_PORT_DEFAULT), root = voiceLocalRoot(), autoRestart = true, restartBaseMs = 500, maxRestarts = 10 } = {}) {
+        super();
         this.port = port;
         this.root = root;
         this.proc = null;
@@ -349,11 +467,13 @@ class WarmSupertonicServer {
         this.ok = false;
         this.lastError = null;
         this._starting = null;
+        this._initSupervision({ autoRestart, restartBaseMs, maxRestarts });
     }
 
     async start({ warmup = true } = {}) {
         if (this.proc) return this;
         if (this._starting) return this._starting;
+        this._beginStart();
         this._starting = (async () => {
             const py = supertonicPython(this.root);
             if (!py) throw new Error("python venv supertonic tidak ditemukan \u2014 jalankan scripts/voice-setup.ps1 dulu");
@@ -363,8 +483,7 @@ class WarmSupertonicServer {
             if (!fs.existsSync(path.join(modelDir, "onnx", "vector_estimator.onnx"))) throw new Error("model Supertonic 3 tidak ada di data/voice/supertonic3 \u2014 jalankan scripts/voice-setup.ps1 dulu");
             const t0 = Date.now();
             this.proc = spawn(py, [script, modelDir, String(this.port)], { windowsHide: true, stdio: "ignore" });
-            this.proc.on("exit", () => { this.ok = false; this.proc = null; });
-            this.proc.on("error", err => { this.lastError = err.message; this.ok = false; });
+            this._watchProc(this.proc);
             const deadline = Date.now() + 120000;
             for (;;) {
                 try {
@@ -376,6 +495,7 @@ class WarmSupertonicServer {
             }
             this.loadMs = Date.now() - t0;
             this.ok = true;
+            this._markReady();
             if (warmup) {
                 try { await this.synthesize("Damar.", { voice: "supertonic-M1" }); } catch { /* abaikan */ }
             }
@@ -385,8 +505,16 @@ class WarmSupertonicServer {
         finally { this._starting = null; }
     }
 
-    async synthesize(text, { voice = "supertonic-M1", steps = 5, timeoutMs = 120000 } = {}) {
-        if (!this.ok) throw new Error("supertonic service belum jalan");
+    /** Cek kesehatan murah: proses hidup DAN /health menjawab ok. */
+    async health() {
+        if (!this.proc) return false;
+        try {
+            const res = await fetch(`http://127.0.0.1:${this.port}/health`, { signal: AbortSignal.timeout(1500) });
+            return res.ok;
+        } catch { return false; }
+    }
+
+    async _synthesizeOnce(text, { voice = "supertonic-M1", steps = 5, timeoutMs = 120000 } = {}) {
         const preset = supertonicPreset(voice) || "M1";
         const t0 = Date.now();
         const res = await fetch(`http://127.0.0.1:${this.port}/synthesize`, {
@@ -403,14 +531,29 @@ class WarmSupertonicServer {
         return { audio, ms: Date.now() - t0, voice: `supertonic-${preset}` };
     }
 
+    async synthesize(text, { voice = "supertonic-M1", steps = 5, timeoutMs = 120000 } = {}) {
+        if (!this.ok && !this.proc) throw new Error("supertonic service belum jalan");
+        try {
+            return await this._synthesizeOnce(text, { voice, steps, timeoutMs });
+        } catch (error) {
+            // Service mati di tengah percakapan: pulihkan (restart oleh
+            // supervisor) lalu coba SEKALI lagi — giliran tidak gugur.
+            // Error HTTP (service hidup) tidak di-retry: itu soal request.
+            if (!isConnError(error) || this._stopped) throw error;
+            await this._recover();
+            return this._synthesizeOnce(text, { voice, steps, timeoutMs });
+        }
+    }
+
     stop() {
+        this._stopSupervision();
         if (this.proc) { try { this.proc.kill(); } catch { /* abaikan */ } this.proc = null; }
         this.ok = false;
         return this;
     }
 
     status() {
-        return { model: SUPERTONIC_MODEL, port: this.port, ok: this.ok, loadMs: this.loadMs, lastError: this.lastError };
+        return { model: SUPERTONIC_MODEL, port: this.port, ok: this.ok, loadMs: this.loadMs, lastError: this.lastError, ...this._supervisionStatus() };
     }
 }
 
@@ -434,6 +577,11 @@ async function synthesizeSupertonic(text, { voice, root = voiceLocalRoot(), time
 function stopSupertonicServers() {
     for (const server of supertonicServers.values()) server.stop();
     supertonicServers.clear();
+}
+
+/** Status semua service Supertonic resident yang dikenal (untuk /health). */
+function supertonicStatus() {
+    return [...supertonicServers.values()].map(s => s.status());
 }
 
 /** WAV hening (untuk pemanasan / tes). */
@@ -463,7 +611,7 @@ module.exports = {
     resolvePiperVoice, listPiperVoices,
     probe, transcribeWav, synthesize,
     WarmWhisperServer, WarmSupertonicServer, silenceWav,
-    isSupertonicVoice, supertonicPreset, listSupertonicVoices, supertonicModelDir, stopSupertonicServers,
+    isSupertonicVoice, supertonicPreset, listSupertonicVoices, supertonicModelDir, stopSupertonicServers, supertonicStatus,
     SUPERTONIC_VOICES, SUPERTONIC_MODEL, SUPERTONIC_PORT_DEFAULT,
     WHISPER_MODEL_FILES
 };
