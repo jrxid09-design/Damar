@@ -30,6 +30,16 @@
        none of Coucou's taller view heights; see the mapping note at
        expandedView()). The character lives INSIDE the island in every
        state (Owner correction 13:56 WIB - the PERCH apron is superseded).
+       NOCHAR pass (Owner 2026-11-25 14:49 WIB: "Hapus aja karakternya"):
+       the character is REMOVED from the island - nothing is rendered for
+       it and no character factory is auto-attached. EMPTY-SLOT correction
+       (Owner 17:13/17:14 WIB: "Cuma bedanya ini karakternya kosong"): the
+       layout keeps Coucou's character zones exactly - the in-bar mini
+       position, the expanded left stage column, the greeting center
+       stage - as a BLANK drop-in slot (see DamarNotchSlot below): no
+       placeholder, no substitute graphic; the Owner's own character,
+       which he is building himself, mounts there later through the slot
+       contract without any layout rework.
        Coucou's fixed 720x320 panel
        is their window frame; Damar's window is the fullscreen Presence
        surface, and every island footprint here fits inside that same
@@ -43,39 +53,44 @@
     #damarIsland[data-state="expanded"] { width:min(640px,calc(100vw - 24px)); height:160px; border-radius:0 0 22px 22px; opacity:1; pointer-events:auto; }
     #damarIsland[data-state="expanded"][data-view="greeting"] { height:150px; }
     #damarIsland .di-head { height:32px; display:flex; align-items:center; justify-content:center; gap:6px; color:#f2d987; cursor:pointer; }
-    #damarIsland .dnc-slot { width:52px; height:32px; display:block; } #damarIsland .dnc-slot svg { width:100%; height:100%; display:block; }
-    #damarIsland[data-state="expanded"] .dnc-head { width:88px; height:64px; }
-    /* The stage carries the character when expanded; the head slot retires
-       (the stage IS the character - showing both would duplicate it). */
-    #damarIsland[data-state="expanded"] .dnc-head { visibility:hidden; }
-    #damarIsland .di-char-stage { position:relative; width:100%; height:70px; overflow:hidden; display:none; }
-    #damarIsland[data-state="expanded"] .di-char-stage { display:block; }
-    /* INSIDE layout (Owner correction 2026-11-25 13:56 WIB - the PERCH
-       apron is superseded): the character lives INSIDE the island in every
-       state, exactly like Coucou. Expanded: a grid puts the stage at the
-       LEFT inside the box (Coucou's expanded botX 52-76 analog) with the
-       body content beside it; the stage takes the full view height below
-       the 32 px head row, so the full body fits uncut at 640x160. */
+    /* EMPTY-SLOT layout (Owner 2026-11-25 17:13 WIB): expanded keeps
+       Coucou's two zones - the character's stage column at the left
+       (their expanded botX 52-76 analog: a 132 px column) and the body
+       content beside it. The stage zone is the drop-in slot: present in
+       the geometry, rendered EMPTY; body content never reflows into it.
+       The head row carries the mini slot at Coucou's compact mini
+       position (slot center at (40,16) in morph/compact: the head is
+       left-aligned with padding-left:26px around the 28x28 slot); in
+       expanded the stage zone is the mount, so the head slot retires
+       (visibility:hidden - both mounts live would duplicate it). */
     #damarIsland .di-head { grid-area:head; }
-    #damarIsland .di-char-stage { grid-area:stage; }
+    #damarIsland .di-stage { grid-area:stage; }
     #damarIsland .di-body { grid-area:body; }
-    #damarIsland[data-state="expanded"] { display:grid; grid-template-rows:32px 1fr; grid-template-columns:132px 1fr; grid-template-areas:"head head" "stage body"; align-content:start; }
-    #damarIsland[data-state="expanded"] .di-char-stage { height:auto; }
-    /* Greeting view (640x150): the character is CENTERED in the island
-       (Coucou's greeting botX 320 analog) - the grid collapses to one
-       column and the body shrinks to its status line while the greeting
-       plays. */
-    #damarIsland[data-state="expanded"][data-view="greeting"] { grid-template-rows:32px 1fr auto; grid-template-columns:1fr; grid-template-areas:"head" "stage" "body"; }
-    #damarIsland[data-state="expanded"][data-view="greeting"] .di-body { max-height:40px; overflow:hidden; }
-    /* Compact/morph: the in-bar mini - the head slot sits at the bar's
-       left with its center at (40,16), Coucou's compact mini position;
-       the character's face renders fully INSIDE the 288x32 bar. */
+    #damarIsland .di-stage { position:relative; display:none; }
+    #damarIsland[data-state="expanded"] .di-stage { display:block; }
+    #damarIsland .di-slot { display:block; }
+    #damarIsland .di-stage .di-slot { position:absolute; inset:0; }
+    #damarIsland .di-head .di-slot { width:52px; height:32px; flex:none; }
+    #damarIsland[data-state="expanded"] .di-head .di-slot { visibility:hidden; }
     #damarIsland[data-state="morph"] .di-head, #damarIsland[data-state="compact"] .di-head { justify-content:flex-start; padding-left:26px; }
-    #damarIsland[data-state="morph"] .dnc-head, #damarIsland[data-state="compact"] .dnc-head { width:28px; height:28px; }
-    #damarIsland .di-char-stage .dnc-stage { position:absolute; inset:0; margin:auto; width:100%; height:100%; }
+    #damarIsland[data-state="morph"] .di-head .di-slot, #damarIsland[data-state="compact"] .di-head .di-slot { width:28px; height:28px; }
+    /* CLONE layout anatomy (Coucou botPosition, Owner 2026-11-25 14:57 WIB
+       - the notch is a for-now clone of Coucou's system, named Damar
+       Notch): 8 px top inset + 34 px header row, so body content starts
+       at y=42; the body is Coucou's fixed 84 px card, vertically centered
+       in the space below the header exactly like their centering formula
+       (the card grows past 84 only when a content stack needs the room). */
+    #damarIsland[data-state="expanded"] { display:grid; box-sizing:border-box; padding-top:8px; grid-template-rows:34px 1fr; grid-template-columns:132px 1fr; grid-template-areas:"head head" "stage body"; align-content:start; }
+    #damarIsland[data-state="expanded"] .di-head { height:34px; }
+    #damarIsland[data-state="expanded"] .di-body { align-self:center; min-height:84px; display:flex; flex-direction:column; justify-content:center; }
+    #damarIsland[data-state="expanded"][data-view="permission"] { height:200px; }
+    /* Greeting view (640x150): the stage zone takes the center (Coucou's
+       greeting botX 320 analog) and the body shrinks to its status line
+       while the greeting view holds (status text behavior unchanged). */
+    #damarIsland[data-state="expanded"][data-view="greeting"] { grid-template-rows:34px 1fr auto; grid-template-columns:1fr; grid-template-areas:"head" "stage" "body"; }
+    #damarIsland[data-state="expanded"][data-view="greeting"] .di-body { max-height:40px; min-height:0; overflow:hidden; }
     #damarIsland[data-state="morph"] .di-head { color:rgba(242,217,135,.55); }
     #damarIsland .di-body { display:none; padding:1px 12px 3px; }
-    #damarIsland[data-state="expanded"] .di-body { display:block; }
     #damarIsland .di-status { margin:0 0 3px; color:#c7c0b2; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     #damarIsland[data-attention="permission"] .di-status { color:#f2d987; }
     #damarIsland .di-mic { display:none; width:7px; height:7px; border-radius:50%; background:#e5c158; box-shadow:0 0 6px #e5c158; }
@@ -108,8 +123,8 @@
   document.head.appendChild(style);
   const wake = document.createElement('div'); wake.id = 'damarIslandWake'; wake.setAttribute('aria-hidden','true');
   const island = document.createElement('section');
-  island.id = 'damarIsland'; island.dataset.state = 'hidden'; island.setAttribute('aria-label','DAMAR Companion Island');
-  island.innerHTML = `<div class="di-head" role="button" tabindex="0" aria-label="DAMAR Companion Island"><div class="dnc-slot dnc-head" data-dnc="head" aria-hidden="true"></div><span class="di-mic" role="img" aria-label="Microphone on"></span></div><div class="di-char-stage"><div class="dnc-slot dnc-stage" data-dnc="stage" aria-hidden="true"></div></div><div class="di-body"><p class="di-status" role="status" aria-live="polite">DAMAR Core not connected</p><div class="di-pills" hidden></div><div class="di-media" hidden><span class="di-media-text"></span><button type="button" data-media="previous" aria-label="Previous track">&lt;&lt;</button><button type="button" data-media="toggle" aria-label="Play or pause">&#9654;</button><button type="button" data-media="next" aria-label="Next track">&gt;&gt;</button></div><div class="di-controls"><button type="button" data-action="presence" data-t="returnPresence">Return to Presence</button><button type="button" data-action="dashboard" data-t="dashboard">Control</button><button type="button" data-action="allow-once" data-t="allowOnce" hidden>Allow once</button><button type="button" data-action="allow-session" data-t="allowSession" hidden>Allow for session</button><button type="button" data-action="deny" data-t="deny" hidden>Deny</button></div></div>`;
+  island.id = 'damarIsland'; island.dataset.state = 'hidden'; island.setAttribute('aria-label','Damar Notch');
+  island.innerHTML = `<div class="di-head" role="button" tabindex="0" aria-label="Damar Notch"><div class="di-slot" data-slot="mini" aria-hidden="true"></div><span class="di-mic" role="img" aria-label="Microphone on"></span></div><div class="di-stage"><div class="di-slot" data-slot="stage" aria-hidden="true"></div></div><div class="di-body"><p class="di-status" role="status" aria-live="polite">DAMAR Core not connected</p><div class="di-pills" hidden></div><div class="di-media" hidden><span class="di-media-text"></span><button type="button" data-media="previous" aria-label="Previous track">&lt;&lt;</button><button type="button" data-media="toggle" aria-label="Play or pause">&#9654;</button><button type="button" data-media="next" aria-label="Next track">&gt;&gt;</button></div><div class="di-controls"><button type="button" data-action="presence" data-t="returnPresence">Return to Presence</button><button type="button" data-action="dashboard" data-t="dashboard">Control</button><button type="button" data-action="allow-once" data-t="allowOnce" hidden>Allow once</button><button type="button" data-action="allow-session" data-t="allowSession" hidden>Allow for session</button><button type="button" data-action="deny" data-t="deny" hidden>Deny</button></div></div>`;
   document.body.append(wake, island);
   const head = island.querySelector('.di-head');
 
@@ -188,20 +203,23 @@
     setClickThrough(Boolean(standby));
     assertNoCoexistence(fsm.state);
   }
-  // Expanded per-view sizing (SIZE pass): the box height follows Coucou's
-  // per-view heights. The greeting view (640x150) holds while the expanded
-  // entry greet plays; after that the box is the standard 640x160 - in
-  // the inside layout the body content (status, session pills, media
-  // card, controls) sits BESIDE the stage instead of stacking under it,
-  // so every Damar expanded content fits 160. Coucou's taller heights
-  // (176/184/200/240/248) belong to views Damar does not have (upload,
-  // mail, recap, whatsNew, question picker); a pending permission swaps
-  // the controls row in place - a single button row, not stacked options.
-  // Reads state only, so it is safe to call from any handler.
+  // Expanded per-view sizing (SIZE pass + CLONE mapping, Owner 2026-11-25
+  // 14:57 WIB): the box height follows Coucou's per-view heights, mapped
+  // to Damar's own content types. The greeting view (640x150) holds
+  // briefly after the expanded entry; default content (status, session
+  // pills, media card, activity, error/finished status) is the standard
+  // 640x160; a pending permission/question - the view that presents
+  // option rows (Allow once / Allow for session / Deny) - takes Coucou's
+  // QUESTION_PICKER_H, 640x200. Coucou's chat/prompt growth (240 + 40 per
+  // row, capped 300) has no Damar island analog yet; this per-view hook
+  // is where it slots in. Coucou's remaining taller heights (176/184/240/
+  // 248) belong to views Damar does not have (upload, mail, recap,
+  // whatsNew). Reads state only, so it is safe to call from any handler.
   let greetingViewUntil = 0, viewTimer = 0;
   function expandedView() {
     if (fsm.state !== 'expanded') return 'default';
     if (Date.now() < greetingViewUntil) return 'greeting';
+    if (permission) return 'permission';
     return 'default';
   }
   function syncIslandView() { island.dataset.view = expandedView(); }
@@ -212,7 +230,7 @@
     assertNoCoexistence(to);
     if (to === 'expanded') {
       setClickThrough(false);
-      greetingViewUntil = Date.now() + 2100; // the small greet plays ~2 s
+      greetingViewUntil = Date.now() + 2100; // the greeting view holds ~2 s
       clearTimeout(viewTimer);
       viewTimer = setTimeout(syncIslandView, 2150);
     }
@@ -315,61 +333,13 @@
   if (document.body.classList.contains('siri-dock-active') && fsm.state === 'hidden') fsm.enterOrb();
   window.addEventListener('pagehide', () => { standbyObserver.disconnect(); setStandbyMode(false); }, { once: true });
 
-  // ===== Argon (Damar Notch) character rendering di dalam notch =====
-  // Sumber: design/prototype/notch-buddy.html (aset & engine disetujui Owner),
-  // dipotong ke ui-prototypes/w5/argon-character-engine.js. Emote mengikuti
-  // state island; orb standby memakai drawOrbStandby60fps.
+  // ===== Orb standby drawing (Idle Presence) =====
+  // The standby orb is drawn by the Argon engine (argon-character-engine.js,
+  // design/prototype/notch-buddy.html lineage) on its own canvas below.
+  // NOCHAR (Owner 2026-11-25 14:49 WIB): the notch island itself ships
+  // with NO character - nothing is auto-attached; the character lives
+  // only through the drop-in slot defined further below.
   const orbCanvas = document.getElementById('siriGlCanvas');
-  // Damar Notch character (damar-notch-character.js, rig v4): two rig views
-  // (compact head + expanded stage) sharing one state - per-part spring rig,
-  // real blink/gaze, gestures, lip-sync - bound to the same Core events as
-  // notchPhysics below.
-  // Character stage: the 3D stage (damar-notch-3d.js, the Owner's base model) is the
-  // character now; the v4 2D rig module remains as a load-failure fallback only.
-  const CharacterFactory = typeof window.DamarNotch3D !== 'undefined' ? window.DamarNotch3D
-    : (typeof window.DamarNotchCharacter !== 'undefined' ? window.DamarNotchCharacter : null);
-  const dnc = CharacterFactory ? CharacterFactory.create({
-    isVisible: () => fsm.state === 'compact' || fsm.state === 'morph' || fsm.state === 'expanded',
-    reducedMotion: () => document.body.classList.contains('degraded') || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-  }) : null;
-  if (dnc) {
-    dnc.attach(island.querySelector('[data-dnc="head"]'));
-    dnc.attach(island.querySelector('[data-dnc="stage"]'));
-    dnc.start();
-    dnc.greet();
-    head.addEventListener('pointermove', e => { const r = head.getBoundingClientRect(); dnc.setGaze((e.clientX - (r.left + r.width / 2)) / Math.max(1, r.width / 2), (e.clientY - (r.top + r.height / 2)) / Math.max(1, r.height / 2)); });
-    head.addEventListener('pointerenter', () => dnc.setHover(true));
-    head.addEventListener('pointerleave', () => { dnc.setHover(false); dnc.setGaze(0, 0); });
-    head.addEventListener('pointerdown', () => dnc.poke());
-    // HIDUP overhaul: the character watches the cursor across the whole
-    // window, not only while it is over the head - the head turns toward
-    // the pointer as it approaches the notch (Coucou-parity attention).
-    // The head's own pointermove above stays the precise local driver.
-    document.addEventListener('mousemove', e => {
-      if (e.target && e.target.closest && e.target.closest('.di-head')) return;
-      const r = island.getBoundingClientRect();
-      dnc.setGaze((e.clientX - (r.left + r.width / 2)) / 340, (e.clientY - (r.top + r.height / 2)) / 260);
-    }, { passive: true });
-    // The expanded stage gets the same hover/poke life as the head.
-    const stageEl = island.querySelector('.di-char-stage');
-    if (stageEl) {
-      stageEl.addEventListener('pointerenter', () => dnc.setHover(true));
-      stageEl.addEventListener('pointerleave', () => dnc.setHover(false));
-      stageEl.addEventListener('pointerdown', () => dnc.poke());
-    }
-    // Intro show: when the notch appears (from hidden/orb) the character
-    // performs the full greeting choreography; when the expanded stage
-    // opens it performs the small greet instead.
-    window.addEventListener('damar-island-state', e => {
-      const { from, to } = e.detail || {};
-      if ((to === 'morph' || to === 'compact') && !NOTCH_STATES.has(from)) {
-        if (typeof dnc.playIntro === 'function') dnc.playIntro();
-      } else if (to === 'expanded' && from !== 'expanded') {
-        if (typeof dnc.playGreet === 'function') dnc.playGreet();
-        else if (typeof dnc.playIntro === 'function') dnc.playIntro();
-      }
-    });
-  }
   let argonRaf = 0, argonStart = performance.now();
   function emoteForState(state) {
     if (state === 'orb') return 'orbStandby';
@@ -400,6 +370,98 @@
     window.addEventListener('pagehide', () => cancelAnimationFrame(argonRaf), { once: true });
   }
 
+  // ===== Damar Notch character slot (drop-in mount) =====
+  // EMPTY-SLOT contract (Owner 2026-11-25 17:13/17:14 WIB): the island
+  // ships with NO character. The two slot containers in the island DOM
+  // are the mount points at Coucou's character placement - "mini" in the
+  // bar head (morph/compact) and "stage" in the expanded left column /
+  // greeting center zone. A character module drops in by calling
+  // window.DamarNotchSlot.register(factory), where factory follows the
+  // repo's character factory pattern: factory.create({ isVisible,
+  // reducedMotion }) returns an instance with attach(el) (called once
+  // per slot container), start(), optional destroy(), and the emote /
+  // gesture API (setEmote, setGesture, setSpeaking, setSpeechLevel,
+  // setCostume, celebrate, poke, setGaze, setHover, playIntro, playGreet,
+  // reactQuestion, reactError, setMediaPlaying). Every character-facing
+  // call in this file routes through slot.invoke(...), which no-ops
+  // safely while no character is registered; unregister() empties the
+  // containers again. The legacy character modules in this directory are
+  // NEVER auto-attached - registration is the only way in.
+  const slotContainers = { mini: island.querySelector('[data-slot="mini"]'), stage: island.querySelector('[data-slot="stage"]') };
+  let slotCharacter = null;
+  const slot = {
+    register(factory) {
+      if (!factory || typeof factory.create !== 'function') return false;
+      slot.unregister();
+      let inst = null;
+      try {
+        inst = factory.create({
+          isVisible: () => fsm.state === 'compact' || fsm.state === 'morph' || fsm.state === 'expanded',
+          reducedMotion: () => document.body.classList.contains('degraded') || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches),
+        });
+      } catch { return false; }
+      if (!inst) return false;
+      slotCharacter = inst;
+      try {
+        if (typeof inst.attach === 'function') { inst.attach(slotContainers.mini); inst.attach(slotContainers.stage); }
+        if (typeof inst.start === 'function') inst.start();
+        if (typeof inst.greet === 'function') inst.greet();
+      } catch {}
+      island.dataset.character = 'mounted';
+      return true;
+    },
+    unregister() {
+      if (!slotCharacter) return;
+      try { slotCharacter.destroy?.(); } catch {}
+      slotCharacter = null;
+      slotContainers.mini.innerHTML = '';
+      slotContainers.stage.innerHTML = '';
+      delete island.dataset.character;
+    },
+    invoke(method, ...args) {
+      const c = slotCharacter;
+      if (c && typeof c[method] === 'function') { try { c[method](...args); } catch {} }
+    },
+    isMounted: () => !!slotCharacter,
+  };
+  window.DamarNotchSlot = Object.freeze({
+    register: factory => slot.register(factory),
+    unregister: () => slot.unregister(),
+    isMounted: () => slot.isMounted(),
+    containers: slotContainers,
+  });
+  // Character attention wiring (Coucou parity): gaze follows the pointer
+  // over the head and across the window, hover/poke land on the head and
+  // the stage zone, and island state changes fire the intro/greet hooks.
+  // All of it routes through the slot - with no character mounted these
+  // listeners are inert.
+  head.addEventListener('pointermove', e => { const r = head.getBoundingClientRect(); slot.invoke('setGaze', (e.clientX - (r.left + r.width / 2)) / Math.max(1, r.width / 2), (e.clientY - (r.top + r.height / 2)) / Math.max(1, r.height / 2)); });
+  head.addEventListener('pointerenter', () => slot.invoke('setHover', true));
+  head.addEventListener('pointerleave', () => { slot.invoke('setHover', false); slot.invoke('setGaze', 0, 0); });
+  head.addEventListener('pointerdown', () => slot.invoke('poke'));
+  document.addEventListener('mousemove', e => {
+    if (!slot.isMounted()) return;
+    if (e.target && e.target.closest && e.target.closest('.di-head')) return;
+    const r = island.getBoundingClientRect();
+    slot.invoke('setGaze', (e.clientX - (r.left + r.width / 2)) / 340, (e.clientY - (r.top + r.height / 2)) / 260);
+  }, { passive: true });
+  const stageEl = island.querySelector('.di-stage');
+  if (stageEl) {
+    stageEl.addEventListener('pointerenter', () => slot.invoke('setHover', true));
+    stageEl.addEventListener('pointerleave', () => slot.invoke('setHover', false));
+    stageEl.addEventListener('pointerdown', () => slot.invoke('poke'));
+  }
+  window.addEventListener('damar-island-state', e => {
+    const { from, to } = e.detail || {};
+    if ((to === 'morph' || to === 'compact') && !NOTCH_STATES.has(from)) slot.invoke('playIntro');
+    else if (to === 'expanded' && from !== 'expanded') slot.invoke('playGreet');
+  });
+  // Signal memory feeding the behavior engine (below): Core-event state
+  // the engine folds every 1.2 s. It exists independently of the slot;
+  // with no character mounted it simply accumulates, unused.
+  const sig = { pending: 0, lastFinalAt: 0, lastFailAt: 0, workUntil: 0, alertUntil: 0, matadewaUntil: 0, mediaPlaying: false, sessionsWorking: 0, pc: null };
+  let behaviorPrev = null;
+
   // Coucou-parity attention: a new pending permission peeks the notch out (compact; never auto-expands, no timer).
   // Allow is offered only when Core says the request is fully shown here (file write/edit with name + diff counts);
   // anything else is Deny or "Answer in CLI". Decisions go through main (Owner credential), never from this page.
@@ -424,9 +486,9 @@
     island.dataset.attention = pending > 0 ? 'permission' : '';
     if (typeof notchPhysics !== 'undefined' && pending > 0) notchPhysics.emote = 'siaga';
     sig.pending = pending;
-    if (dnc && pending > 0) dnc.setEmote('siaga');
-    // A NEW waiting request gets the question reaction: a blink + head tilt.
-    if (dnc && pending > lastPending && typeof dnc.reactQuestion === 'function') dnc.reactQuestion();
+    if (pending > 0) slot.invoke('setEmote', 'siaga');
+    // A NEW waiting request gets the question reaction (blink + head tilt on a mounted character).
+    if (pending > lastPending) slot.invoke('reactQuestion');
     if (pending > lastPending && fsm.state === 'hidden' && orbPhaseDone && notchEnabled && !voiceActive) fsm.reveal();
     lastPending = pending; renderStatus(); syncIslandView();
   });
@@ -444,13 +506,11 @@
     else if (a.kind === 'final') sig.lastFailAt = Date.now();
     else if (['read', 'edit', 'run', 'shell'].includes(a.kind) || a.kind === 'discussion') sig.workUntil = Date.now() + 6000;
     if (a.kind === 'alert') { sig.alertUntil = Date.now() + 8000; if (a.source === 'mata-dewa') sig.matadewaUntil = Date.now() + 90000; }
-    if (dnc) {
-      if (a.kind === 'final' && a.status === 'COMPLETED') { dnc.setEmote('senang'); dnc.celebrate(); }
-      else if (a.kind === 'final') { dnc.setEmote('pulih'); if (typeof dnc.reactError === 'function') dnc.reactError(); }
-      else if (['read', 'edit', 'run', 'shell'].includes(a.kind) || (a.kind === 'discussion' && a.state === 'RUNNING')) dnc.setEmote('berpikir');
-      else if (a.kind === 'discussion') dnc.setEmote(a.state === 'COMPLETED' ? 'senang' : 'pulih');
-      else if (a.kind === 'alert') dnc.setEmote('siaga');
-    }
+    if (a.kind === 'final' && a.status === 'COMPLETED') { slot.invoke('setEmote', 'senang'); slot.invoke('celebrate'); }
+    else if (a.kind === 'final') { slot.invoke('setEmote', 'pulih'); slot.invoke('reactError'); }
+    else if (['read', 'edit', 'run', 'shell'].includes(a.kind) || (a.kind === 'discussion' && a.state === 'RUNNING')) slot.invoke('setEmote', 'berpikir');
+    else if (a.kind === 'discussion') slot.invoke('setEmote', a.state === 'COMPLETED' ? 'senang' : 'pulih');
+    else if (a.kind === 'alert') slot.invoke('setEmote', 'siaga');
     // A watchlist alert peeks the notch out like a permission request (compact only; never auto-expands, no timer).
     if (a.kind === 'alert' && fsm.state === 'hidden' && orbPhaseDone && notchEnabled && !voiceActive) fsm.reveal();
     window.dispatchEvent(new CustomEvent('damar-presence-motion-pulse'));
@@ -472,8 +532,8 @@
   window.addEventListener('damar-presence-media', e => {
     const m = e.detail;
     sig.mediaPlaying = !!(m && m.playing);
-    // The character bounces along while the widget plays (real SMTC signal).
-    if (dnc && typeof dnc.setMediaPlaying === 'function') dnc.setMediaPlaying(sig.mediaPlaying);
+    // A mounted character bounces along while the widget plays (real SMTC signal, via the slot).
+    slot.invoke('setMediaPlaying', sig.mediaPlaying);
     mediaEl.hidden = !m;
     if (m) {
       mediaText.textContent = (m.title || 'Unknown') + (m.artist ? ' - ' + m.artist : '');
@@ -488,65 +548,56 @@
     window.damarDesktop?.mediaControl?.(action);
   });
   // Behavior engine driver (Fase 2 v3): every 1.2 s the island folds its
-  // Core-event memory + PC activity into signals and lets the engine pick
-  // the character's emote/costume. The direct event->emote calls above stay
-  // as the low-latency path; the engine owns costumes, context and idle.
-  const sig = { pending: 0, lastFinalAt: 0, lastFailAt: 0, workUntil: 0, alertUntil: 0, matadewaUntil: 0, mediaPlaying: false, sessionsWorking: 0, pc: null };
-  let behaviorPrev = null;
-  window.addEventListener('damar-presence-behavior', e => { sig.pc = e.detail?.pcActivity || null; });
-  // The Owner page's real voice state: damarIsSpeaking flips with the actual
-  // TTS utterance (speakWithOrbReactivity) - the same signal presence-adapter
-  // polls to end voice conversations. Read as a bare global, like the adapter.
+  // Core-event signal memory + PC activity into signals and lets the
+  // engine pick the character's emote/costume. EMPTY-SLOT: the driver and
+  // the 90 ms lip-sync fast path route every character call through the
+  // slot; with no character registered the tick exits immediately and
+  // every invoke no-ops, so the empty notch costs nothing. The event
+  // handlers above keep their island duties regardless: peek reveals,
+  // session pills, the media widget and the permission state.
   const coreSpeaking = () => { try { return typeof damarIsSpeaking !== 'undefined' && !!damarIsSpeaking; } catch { return false; } };
   setInterval(() => {
-    if (!dnc || typeof window.DamarNotchBehavior === 'undefined') return;
+    if (!slot.isMounted() || typeof window.DamarNotchBehavior === 'undefined') return;
     const now = Date.now();
     const d = window.DamarNotchBehavior.decideBehavior({
+      pendingPermissions: sig.pending,
       alertActive: now < sig.alertUntil,
-      pendingApprovals: sig.pending,
-      recentFailure: now - sig.lastFailAt < 20000,
-      recentCompletion: now - sig.lastFinalAt < 4000,
-      missionActive: now < sig.workUntil || sig.sessionsWorking > 0,
-      mediaPlaying: sig.mediaPlaying,
-      matadewaMode: now < sig.matadewaUntil,
+      mataDewaActive: now < sig.matadewaUntil,
       speaking: coreSpeaking(),
+      mediaPlaying: sig.mediaPlaying,
+      working: now < sig.workUntil || sig.sessionsWorking > 0,
+      justFinished: now - sig.lastFinalAt < 9000,
+      justFailed: now - sig.lastFailAt < 9000,
       pc: sig.pc,
     }, behaviorPrev, now);
-    // Gestures and the talk channel apply EVERY tick (idempotent setters):
-    // point holds while an alert/approval decision stands, wave ends when
-    // the completion decision ends, the mouth follows the talk decision.
-    dnc.setGesture(d.gesture || null);
-    dnc.setSpeaking(!!d.talk);
+    slot.invoke('setGesture', d.gesture || null);
+    slot.invoke('setSpeaking', !!d.talk);
     if (d.changed) {
       behaviorPrev = { emote: d.emote, costume: d.costume, since: now };
-      if (d.celebrate) dnc.celebrate();
-      dnc.setEmote(d.emote);
-      dnc.setCostume(d.costume);
+      if (d.celebrate) slot.invoke('celebrate');
+      slot.invoke('setEmote', d.emote);
+      slot.invoke('setCostume', d.costume);
     }
   }, 1200);
-  // Lip-sync fast path (90 ms): the 1.2 s engine tick is too coarse for a
-  // mouth. Speaking state mirrors the engine's talk rule from the same
-  // island signal memory; the envelope comes from the page's voiceAmp,
-  // which the TTS onboundary handler pulses to 1.0 on every real word
-  // boundary (it decays in the page render loop). No boundary pulses ->
-  // the rig's documented steady-envelope fallback takes over.
+  // Lip-sync fast path: while Damar speaks, the mouth follows the LIVE
+  // speech state (page-global damarIsSpeaking) + voice amplitude at 90 ms
+  // - the 1.2 s behavior tick is too coarse for mouth flaps. Attention and
+  // a waiting approval suppress the talk pose. Slot-routed like the rest.
   setInterval(() => {
-    if (!dnc) return;
+    if (!slot.isMounted()) return;
     const now = Date.now();
     const talkNow = coreSpeaking() && !(now < sig.alertUntil) && !(sig.pending > 0);
-    dnc.setSpeaking(talkNow);
-    if (talkNow) {
-      try {
-        if (typeof voiceAmp === 'number' && Number.isFinite(voiceAmp)) dnc.setSpeechLevel(Math.max(0, Math.min(1, voiceAmp)));
-      } catch {}
-    }
+    slot.invoke('setSpeaking', talkNow);
+    if (talkNow) { try { if (typeof voiceAmp === 'number' && Number.isFinite(voiceAmp)) slot.invoke('setSpeechLevel', Math.max(0, Math.min(1, voiceAmp))); } catch {} }
   }, 90);
+  window.addEventListener('damar-presence-behavior', e => { sig.pc = e.detail?.pcActivity || null; });
   window.addEventListener('damar-presence-mic', e => { island.dataset.mic = e.detail ? 'on' : 'off'; });
   window.addEventListener('damar-presence-lang', () => { renderLabels(); renderStatus(); });
   renderLabels();
   window.addEventListener('damar-presence-status', e => { if (typeof e.detail === 'string') { statusText = e.detail; renderStatus(); } });
   window.__DAMAR_ISLAND__ = Object.freeze({
     fsm, configure, voiceStart, voiceEnd, isVoiceActive: () => voiceActive, reveal: () => fsm.reveal(), hide: () => fsm.hide(), getState: () => fsm.state,
-    enterOrb: () => fsm.enterOrb(), wakeFromOrb: () => fsm.wakeFromOrb(), dismiss: () => fsm.dismiss()
+    enterOrb: () => fsm.enterOrb(), wakeFromOrb: () => fsm.wakeFromOrb(), dismiss: () => fsm.dismiss(),
+    slot: window.DamarNotchSlot
   });
 })();
