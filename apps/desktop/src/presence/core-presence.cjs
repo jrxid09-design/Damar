@@ -1,8 +1,9 @@
 'use strict';
 // Core binding for DAMAR Presence. Same credential source as the CLI (src/cli/service.cjs: the private Core session
 // directory's credentials.json, validated session.json address). Reads use only the least-privileged `requester`
-// token and GET routes from a fixed allowlist. The single mutation, an Owner decision on a pending permission from
-// the notch, uses the `owner` token in the main process only (decide()); nothing else is ever written to Core.
+// token and GET routes from a fixed allowlist. Mutations use the `owner` token in the main process only: an Owner
+// decision on a pending permission from the notch (decide()), media control (mediaControl()), and the first-run
+// onboarding writes (saveOnboarding(), connectProvider(), onboardingChat() - see presence-onboarding.js).
 const fs = require('node:fs'), path = require('node:path');
 const { coreEndpoint } = require('../cli/core-endpoint.cjs');
 const { boundedResponse } = require('../cli/service.cjs');
@@ -10,7 +11,7 @@ const { boundedResponse } = require('../cli/service.cjs');
 const READS = Object.freeze(['/api/r9/lifecycle', '/api/r9/sessions', '/api/r9/pandawa/runs', '/api/r9/presence/settings', '/api/r9/cli/settings', '/api/r9/activity', '/api/r9/media']);
 const readAllowed = route => READS.includes(route) || /^\/api\/r9\/activity\?from=\d{1,9}$/.test(route);
 // Contract agreed with Control (presence.* namespace). Defaults equal the Owner prototype values.
-const DEFAULTS = Object.freeze({ idleToNotchMs: 10000, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, displayName: 'Maronns', salutation: '' });
+const DEFAULTS = Object.freeze({ idleToNotchMs: 10000, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, displayName: 'Maronns', salutation: '', onboardingCompleted: false });
 const KEYS = Object.freeze(Object.keys(DEFAULTS).map(k => 'presence.' + k));
 
 // Accepts {presence:{idleToNotchMs,...}} or flat {'presence.idleToNotchMs':...}; invalid values fall back per key.
@@ -32,6 +33,7 @@ function settingsFrom(data) {
     voiceEnabled: get('voiceEnabled') === true, // opt-in only: anything but literal true keeps the microphone off
     displayName: typeof get('displayName') === 'string' && get('displayName').length <= 40 && !/[\x00-\x1f\x7f]/.test(get('displayName')) ? get('displayName').trim() : DEFAULTS.displayName,
     salutation: typeof get('salutation') === 'string' && get('salutation').length <= 40 && !/[\x00-\x1f\x7f]/.test(get('salutation')) ? get('salutation').trim() : '',
+    onboardingCompleted: get('onboardingCompleted') === true, // strict: anything but literal true keeps the first-run gate open
   };
 }
 
@@ -64,6 +66,19 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
     if (!readAllowed(route)) throw Error('PRESENCE_ROUTE_DENIED');
     const response = await transport(endpoint + route, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(4000),
       headers: { accept: 'application/json', authorization: 'Bearer ' + token() } });
+    return { ok: response.ok, status: response.status, body: await boundedResponse(response).catch(() => null) };
+  }
+  // Owner-token calls for the first-run onboarding writes (main process only; the key, when one is in flight,
+  // travels in the connect body only and is never returned, logged or stored here - Core's DPAPI store keeps it).
+  async function ownerPost(route, payload, ms = 15000) {
+    const response = await transport(endpoint + route, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(ms),
+      headers: { accept: 'application/json', 'content-type': 'application/json', authorization: 'Bearer ' + token('owner') },
+      body: JSON.stringify(payload) });
+    return { ok: response.ok, status: response.status, body: await boundedResponse(response).catch(() => null) };
+  }
+  async function ownerGet(route) {
+    const response = await transport(endpoint + route, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(8000),
+      headers: { accept: 'application/json', authorization: 'Bearer ' + token('owner') } });
     return { ok: response.ok, status: response.status, body: await boundedResponse(response).catch(() => null) };
   }
   return {
@@ -105,6 +120,49 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
         headers: { accept: 'application/json', 'content-type': 'application/json', authorization: 'Bearer ' + token('owner') },
         body: JSON.stringify({ action }) });
       return { ok: response.ok, status: response.status, body: await boundedResponse(response).catch(() => null) };
+    },
+    // First-run onboarding: save the confirmed answers. The client shapes the body to the route's allowlist;
+    // Core composes the settings update and sets presence.onboardingCompleted itself (the flag is never sent).
+    async saveOnboarding(values = {}) {
+      const payload = {};
+      if (typeof values.displayName === 'string') payload.displayName = values.displayName;
+      if (typeof values.salutation === 'string') payload.salutation = values.salutation;
+      if (typeof values.voiceEnabled === 'boolean') payload.voiceEnabled = values.voiceEnabled;
+      if (['id', 'en'].includes(values.language)) payload.language = values.language;
+      return ownerPost('/api/r9/presence/onboarding', payload);
+    },
+    // First-run onboarding, step 0: connect the Owner's own OpenAI-compatible endpoint as the 'custom'
+    // connection (key remembered in Core's DPAPI store via the existing connect route), prove the key with
+    // the router's key test (reads /models, spends no tokens), then record the Owner's model grant for the
+    // connection - the same journaled grant Control's quick action writes (approval reference
+    // 'first-run-onboarding', all models, 30 days) - and select the connection with the first model its
+    // catalog offers (Core requires an explicit, grant-covered model for a live selection; the Owner can
+    // change it any time in Control). Any stage failing leaves the flow free to fall back to the template.
+    async connectProvider({ baseUrl, apiKey } = {}) {
+      if (typeof baseUrl !== 'string' || !/^https?:\/\/\S{1,300}$/.test(baseUrl) || typeof apiKey !== 'string' || !apiKey || apiKey.length > 512) throw Error('CONNECT_INPUT_INVALID');
+      let r = await ownerPost('/api/r9/connect', { provider: 'custom', baseUrl, apiKey, remember: true }, 20000);
+      if (!r.ok || r.body?.success !== true) return { ok: false, stage: 'connect', status: r.status, error: r.body?.error || 'CONNECT_FAILED' };
+      r = await ownerPost('/api/r9/provider-admin/test', { provider: 'custom', kind: 'keys' });
+      const results = Array.isArray(r.body?.data) ? r.body.data : [];
+      if (!r.ok || !results.some(k => k && k.ok)) return { ok: false, stage: 'test', status: r.status, error: results.find(k => k && !k.ok)?.error || r.body?.error || 'PROVIDER_TEST_FAILED' };
+      const list = await ownerGet('/api/r9/provider');
+      const prov = list.body?.data?.providers?.find(p => p.id === 'custom' && p.kind === 'live');
+      if (!prov?.baseUrl || !prov.configurationVersion) return { ok: false, stage: 'state', status: list.status, error: 'PROVIDER_STATE_UNAVAILABLE' };
+      const catalog = await ownerGet('/api/r9/models?provider=custom');
+      const models = Array.isArray(catalog.body?.data?.models) ? catalog.body.data.models.filter(m => typeof m === 'string' && m) : [];
+      if (!models.length) return { ok: false, stage: 'models', status: catalog.status, error: 'NO_MODELS_OFFERED' };
+      r = await ownerPost('/api/r9/provider/model-grant', { expectedVersion: prov.configurationVersion, approval: 'first-run-onboarding', provider: 'custom', baseUrl: prov.baseUrl, model: '*', expiresAt: Date.now() + 30 * 86400000 });
+      if (!r.ok || r.body?.success !== true) return { ok: false, stage: 'grant', status: r.status, error: r.body?.error || 'MODEL_GRANT_FAILED' };
+      r = await ownerPost('/api/r9/provider', { provider: 'custom', model: models[0] });
+      if (!r.ok || r.body?.success !== true) return { ok: false, stage: 'select', status: r.status, error: r.body?.error || 'PROVIDER_SELECT_FAILED' };
+      return { ok: true, provider: 'custom', baseUrl: prov.baseUrl, model: models[0], models: models.length };
+    },
+    // First-run onboarding, branch A: one interview turn. Core holds the fixed system prompt and the model
+    // choice; the renderer sends only user/assistant turns (validated again in Core).
+    async onboardingChat(messages) {
+      if (!Array.isArray(messages)) throw Error('ONBOARDING_MESSAGES_INVALID');
+      const clean = messages.slice(-16).map(m => ({ role: m?.role === 'assistant' ? 'assistant' : 'user', content: String(m?.content ?? '') }));
+      return ownerPost('/api/r9/presence/onboarding/chat', { messages: clean }, 90000);
     },
     // 404 (route not mounted yet) or any failure -> prototype defaults; source says which.
     async settings() {

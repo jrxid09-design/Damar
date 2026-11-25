@@ -22,7 +22,7 @@ function windowOptions({ bounds, icon, show = true }) {
 
 // Renderer -> main IPC channels (everything else is ignored). Preload exposes exactly these.
 const CHANNELS = Object.freeze({
-  invoke: ['damar-runtime-request', 'damar-navigate-surface', 'launch-damar-cli', 'damar-presence-get', 'permission-decision'],
+  invoke: ['damar-runtime-request', 'damar-navigate-surface', 'launch-damar-cli', 'damar-presence-get', 'permission-decision', 'damar-onboarding-save', 'damar-onboarding-connect', 'damar-onboarding-chat'],
   send: ['set-ignore-mouse', 'set-standby-mode', 'window-control'],
   // main -> renderer
   events: ['play-outro-before-close', 'window-restored', 'toggle-standby-orb', 'damar-presence'],

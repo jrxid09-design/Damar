@@ -1,9 +1,9 @@
 'use strict';
 // DAMAR Idle Presence + Notch — Windows desktop host (Electron). Port of the Owner prototype
 // C/ui-prototypes/w5/main.js with the demo flag and fixed prototype loopback path removed: state and presence.* config come from the
-// DAMAR Core through core-presence.cjs (requester credential, GET-only allowlist). The one mutation is an Owner
-// decision on a pending permission from the notch (IPC 'permission-decision'), authenticated here in main with the
-// owner credential; the renderer never sees a credential and can only name the currently pending request.
+// DAMAR Core through core-presence.cjs (requester credential, GET-only allowlist). Mutations are Owner-authenticated
+// here in main with the owner credential: a decision on a pending permission from the notch (IPC 'permission-decision')
+// and the first-run onboarding writes (IPC 'damar-onboarding-*'); the renderer never sees a credential.
 // Usage: electron src/presence [--session "<Core session dir>"] [--profile "<CLI profile dir>"]
 const { app, BrowserWindow, ipcMain, screen, Tray, Menu, globalShortcut, nativeImage, protocol, shell, session } = require('electron');
 const path = require('node:path');
@@ -22,7 +22,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: files.SCHEME, privileges: { stan
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 let win = null, tray = null, savedBounds = null, isClosingConfirmed = false, cliFocusYielded = false, brandIcon = null;
-let sessionDirectory = null, config = { source: 'defaults-not-loaded', ...DEFAULTS }, core = null, coreState = null, projection = project(null), lang = 'en';
+let sessionDirectory = null, config = { source: 'defaults-not-loaded', ...DEFAULTS }, core = null, coreState = null, projection = project(null), lang = 'en', watcher = null;
 let activityBaseline = null; // feed rows older than the first poll are history: not replayed as live ticker/emotes
 const fromMain = event => win && !win.isDestroyed() && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame;
 const pending = () => (projection.presence?.activity.pendingPermissions ? pendingPermission(coreState?.activity || []) : null);
@@ -78,7 +78,7 @@ function bindCore() {
   const directory = resolveSessionDirectory({ session: arg('--session'), profile: arg('--profile') });
   if (!directory) return;
   try { core = createCorePresence({ sessionDirectory: directory }); sessionDirectory = directory; } catch { return; }
-  watchCore(core, {
+  watcher = watchCore(core, {
     onState: s => {
       coreState = s; projection = project(s, config);
       if (activityBaseline === null && s.reachable) activityBaseline = (s.activity || []).reduce((m, a) => Math.max(m, a.seq + 1), 0);
@@ -97,6 +97,30 @@ ipcMain.handle('damar-presence-get', event => (fromMain(event) ? message() : nul
 ipcMain.handle('damar-media-control', async (event, request) => {
   if (!fromMain(event) || !core) return { ok: false };
   try { await core.mediaControl(String(request?.action || '')); return { ok: true }; } catch { return { ok: false }; }
+});
+// First-run onboarding (presence-onboarding.js). Save: Core composes the config update + completion flag;
+// a 409 (already completed) is success-shaped here - the watcher push then closes the flow with fresh config.
+ipcMain.handle('damar-onboarding-save', async (event, values) => {
+  if (!fromMain(event) || !core) return { ok: false, error: 'NOT_ALLOWED' };
+  try {
+    const r = await core.saveOnboarding(values || {});
+    if (r.ok || r.status === 409) { try { await watcher?.pollSettings(); } catch {} }
+    return { ok: r.ok || r.status === 409, status: r.status, error: r.ok ? null : r.body?.error || 'HTTP_' + r.status, data: r.body?.data || null };
+  } catch { return { ok: false, error: 'CORE_UNAVAILABLE' }; }
+});
+// Step 0 connect: the API key passes through main to Core's secret store only; the result never contains it.
+ipcMain.handle('damar-onboarding-connect', async (event, request) => {
+  if (!fromMain(event) || !core) return { ok: false, error: 'NOT_ALLOWED' };
+  try { return await core.connectProvider({ baseUrl: String(request?.baseUrl || ''), apiKey: String(request?.apiKey || '') }); }
+  catch (e) { return { ok: false, error: e?.message || 'CONNECT_FAILED' }; }
+});
+// Branch A interview turn: Core holds the system prompt and model; main forwards only the turns.
+ipcMain.handle('damar-onboarding-chat', async (event, request) => {
+  if (!fromMain(event) || !core) return { ok: false, error: 'NOT_ALLOWED' };
+  try {
+    const r = await core.onboardingChat(Array.isArray(request?.messages) ? request.messages : []);
+    return { ok: r.ok, status: r.status, error: r.ok ? null : r.body?.error || 'HTTP_' + r.status, data: r.body?.data || null };
+  } catch { return { ok: false, error: 'CORE_UNAVAILABLE' }; }
 });
 // Owner decision from the notch. Accepted only for the request Core currently reports as pending; Allow only where the
 // notch shows the whole request (projection.pendingPermission.allowable). Core enforces Owner auth + first-wins.

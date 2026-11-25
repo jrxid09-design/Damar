@@ -15,6 +15,19 @@ contextBridge.exposeInMainWorld('damarDesktop', Object.freeze({
   decidePermission: request => ipcRenderer.invoke('permission-decision', { permissionId: String(request?.permissionId || ''), decision: String(request?.decision || '') }),
   // Now-playing controls from the notch media pill; main validates the action against the SMTC allowlist.
   mediaControl: action => ipcRenderer.invoke('damar-media-control', { action: String(action || '') }),
+  // First-run onboarding: only the allowlisted answer fields cross the bridge (the completion flag never does).
+  saveOnboarding: values => {
+    const out = {};
+    if (typeof values?.displayName === 'string') out.displayName = values.displayName;
+    if (typeof values?.salutation === 'string') out.salutation = values.salutation;
+    if (typeof values?.voiceEnabled === 'boolean') out.voiceEnabled = values.voiceEnabled;
+    if (['id', 'en'].includes(values?.language)) out.language = values.language;
+    return ipcRenderer.invoke('damar-onboarding-save', out);
+  },
+  // Step 0 provider connect: endpoint + key go to main (and on to Core's secret store); nothing comes back but status.
+  connectProvider: request => ipcRenderer.invoke('damar-onboarding-connect', { baseUrl: String(request?.baseUrl || ''), apiKey: String(request?.apiKey || '') }),
+  // Branch A interview: only user/assistant turns cross; Core owns the system prompt and the model.
+  onboardingChat: messages => ipcRenderer.invoke('damar-onboarding-chat', { messages: (Array.isArray(messages) ? messages : []).slice(-16).map(m => ({ role: m?.role === 'assistant' ? 'assistant' : 'user', content: String(m?.content ?? '').slice(0, 2000) })) }),
   onPresence: listener => {
     if (typeof listener !== 'function') return () => {};
     const wrapped = (_event, message) => listener(message);

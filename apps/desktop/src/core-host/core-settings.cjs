@@ -17,7 +17,7 @@ const fs = require('node:fs'), path = require('node:path'), crypto = require('no
 const PROFILES = ['ask', 'workspace-auto', 'full-access', 'read-only'];
 const NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 // presence: Idle Presence / Notch surface config (read by the presence surface via GET /api/r9/presence/settings).
-const PRESENCE_DEFAULTS = () => ({ idleToNotchMs: 10000, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, displayName: 'Maronns', salutation: '' });
+const PRESENCE_DEFAULTS = () => ({ idleToNotchMs: 10000, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, displayName: 'Maronns', salutation: '', onboardingCompleted: false });
 const PRESENCE_RULES = {
   idleToNotchMs: v => Number.isSafeInteger(v) && v >= 1000 && v <= 600000,
   morphMs: v => Number.isSafeInteger(v) && v >= 0 && v <= 5000,
@@ -29,6 +29,7 @@ const PRESENCE_RULES = {
   voiceEnabled: v => typeof v === 'boolean', // opt-in microphone for the presence surface (Electron 'media' audio only)
   displayName: v => typeof v === 'string' && v.length <= 40 && !/[\x00-\x1f\x7f<>]/.test(v),
   salutation: v => typeof v === 'string' && v.length <= 40 && !/[\x00-\x1f\x7f<>]/.test(v), // how DAMAR addresses the Owner (greeting, alerts); '' = use displayName // greeting name; default is the Owner's name, '' = no name in the greeting
+  onboardingCompleted: v => typeof v === 'boolean', // first-run onboarding gate: set by POST /api/r9/presence/onboarding when the first-run flow completes
 };
 // cli: DAMAR CLI appearance shared by the CLI Settings Center and Control (null until first set/imported, so the CLI can
 // migrate a legacy local profile once). lastSelection: provider/model last accepted by POST /api/r9/provider (recorded by
@@ -62,8 +63,13 @@ function frontMatter(text) {
 
 function createCoreSettings({ file, isProtected, skillsDir = path.join(path.dirname(file), 'skills') }) {
   let state = DEFAULTS();
-  try { const v = JSON.parse(fs.readFileSync(file, 'utf8')); if (v && v.version === 1) state = { ...DEFAULTS(), ...v, skills: { ...DEFAULTS().skills, ...(v.skills || {}) }, presence: { ...PRESENCE_DEFAULTS(), ...Object.fromEntries(Object.entries(v.presence || {}).filter(([k, x]) => PRESENCE_RULES[k]?.(x))) },
-    cli: v.cli && typeof v.cli === 'object' ? { ...CLI_DEFAULTS(), ...Object.fromEntries(Object.entries(v.cli).filter(([k, x]) => CLI_RULES[k]?.(x))) } : null, lastSelection: validSelection(v.lastSelection) ? { provider: v.lastSelection.provider, model: v.lastSelection.model } : null }; } catch {}
+  let loadedExisting = false, loadedPresenceHasFlag = false;
+  try { const v = JSON.parse(fs.readFileSync(file, 'utf8')); if (v && v.version === 1) { loadedExisting = true; loadedPresenceHasFlag = !!v.presence && typeof v.presence === 'object' && Object.hasOwn(v.presence, 'onboardingCompleted'); state = { ...DEFAULTS(), ...v, skills: { ...DEFAULTS().skills, ...(v.skills || {}) }, presence: { ...PRESENCE_DEFAULTS(), ...Object.fromEntries(Object.entries(v.presence || {}).filter(([k, x]) => PRESENCE_RULES[k]?.(x))) },
+    cli: v.cli && typeof v.cli === 'object' ? { ...CLI_DEFAULTS(), ...Object.fromEntries(Object.entries(v.cli).filter(([k, x]) => CLI_RULES[k]?.(x))) } : null, lastSelection: validSelection(v.lastSelection) ? { provider: v.lastSelection.provider, model: v.lastSelection.model } : null }; } } catch {}
+  // First-run gate: a settings file that predates the flag (no onboardingCompleted key) belongs to an existing
+  // install, so its onboarding must never fire; only a genuinely fresh install (no readable file -> DEFAULTS)
+  // starts uncompleted. Once any save happens the key is serialized and this inference never runs again.
+  if (loadedExisting && !loadedPresenceHasFlag) state.presence.onboardingCompleted = true;
   state.mataDewa = MATA_DEWA.sanitizeSettings(state.mataDewa);
   state.cognitive = COGNITIVE.sanitize(state.cognitive);
   state.pandawa = TEAM.sanitize(state.pandawa);
