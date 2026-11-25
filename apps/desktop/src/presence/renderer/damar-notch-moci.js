@@ -510,6 +510,11 @@
           view.w = Math.max(0, Math.round(r.width)); view.h = Math.max(0, Math.round(r.height));
           canvas.width = Math.max(1, Math.round(view.w * dpr)); canvas.height = Math.max(1, Math.round(view.h * dpr));
           if (view.ctx) view.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          // Resizing a canvas clears it. The Presence adapter parks
+          // requestAnimationFrame under reduced motion (bursts only), so
+          // a refit at geometry settle could otherwise leave the slot
+          // blank until the next event: repaint this view immediately.
+          if (view.w >= 4 && view.h >= 4) { try { drawView(view); } catch {} }
         };
         fit();
         if (typeof ResizeObserver !== 'undefined') new ResizeObserver(fit).observe(el);
