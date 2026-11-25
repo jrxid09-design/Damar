@@ -1,0 +1,52 @@
+{
+  "model": "vits16_fp32",
+  "input_size": 512,
+  "grid": 32,
+  "rows": [
+    {
+      "variant": "scene_same_jpg.png",
+      "patch_mean": 0.004,
+      "patch_p95": 0.0089,
+      "patch_max": 0.0211,
+      "max_patch_grid": {
+        "row": 20,
+        "col": 20
+      },
+      "max_patch_region": "x 640-672, y 640-672 (of 1024)"
+    },
+    {
+      "variant": "scene_near.png",
+      "patch_mean": 0.0232,
+      "patch_p95": 0.0457,
+      "patch_max": 0.0708,
+      "max_patch_grid": {
+        "row": 2,
+        "col": 23
+      },
+      "max_patch_region": "x 736-768, y 64-96 (of 1024)"
+    },
+    {
+      "variant": "scene_changed.png",
+      "patch_mean": 0.0474,
+      "patch_p95": 0.3075,
+      "patch_max": 0.5464,
+      "max_patch_grid": {
+        "row": 17,
+        "col": 27
+      },
+      "max_patch_region": "x 864-896, y 544-576 (of 1024)"
+    },
+    {
+      "variant": "scene_different.png",
+      "patch_mean": 0.3427,
+      "patch_p95": 0.5372,
+      "patch_max": 0.6259,
+      "max_patch_grid": {
+        "row": 13,
+        "col": 11
+      },
+      "max_patch_region": "x 352-384, y 416-448 (of 1024)"
+    }
+  ],
+  "note": "Scene layout (1024px): truck added at x 600-862, y 872-988; smoke plume at x ~855-1010, y ~450-610; tree removed at x ~950, y 640-940."
+}

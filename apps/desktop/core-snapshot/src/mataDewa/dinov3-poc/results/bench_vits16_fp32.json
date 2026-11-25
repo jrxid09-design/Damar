@@ -1,0 +1,64 @@
+{
+  "label": "vits16_fp32",
+  "model_path": "C:\\Workspace\\dinov3-models\\dinov3-vits16-pretrain-lvd1689m-ONNX\\onnx\\model.onnx",
+  "model_file_mb": 0.1,
+  "ort_version": "1.32.0",
+  "intra_op_threads": 0,
+  "input": {
+    "name": "pixel_values",
+    "shape": [
+      "s99",
+      "3",
+      "s100",
+      "s4"
+    ]
+  },
+  "outputs": [
+    [
+      "last_hidden_state",
+      [
+        "s99",
+        "((s100//16))*((s4//16)) + 5",
+        "384"
+      ]
+    ],
+    [
+      "pooler_output",
+      [
+        "s99",
+        "384"
+      ]
+    ]
+  ],
+  "image": "C:\\Workspace\\dinov3-work\\scenes\\scene_base.png",
+  "cpu_percent_before": 4.4,
+  "sizes": {
+    "518": {
+      "method": "direct",
+      "actual_size": 518,
+      "stats": {
+        "runs": 15,
+        "mean_ms": 348.9,
+        "median_ms": 159.4,
+        "min_ms": 150.2,
+        "max_ms": 630.2
+      }
+    },
+    "1024": {
+      "method": "direct",
+      "actual_size": 1024,
+      "stats": {
+        "runs": 6,
+        "mean_ms": 3409.8,
+        "median_ms": 3417.3,
+        "min_ms": 3375.3,
+        "max_ms": 3440.1
+      }
+    }
+  },
+  "cpu_percent_after_518": 49.4,
+  "cpu_percent_after_1024": 40.1,
+  "process_rss_mb": 805.8,
+  "process_rss_start_mb": 155.8,
+  "process_peak_wset_mb": 831.0
+}
