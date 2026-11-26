@@ -561,7 +561,7 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         return out(result);
       } catch (e) { return fail(e); } } },
       { canonicalAuthority: true, sideEffects: true, readOnly: false }),
-    tool({ name: 'computer_use_appmodel', description: 'App object-model channel (enabled only when DAMAR_CU_APPMODEL_PORT is set): sends ONE fixed-vocabulary command to the in-app bridge of the staged application (Blender bpy bridge: ping, get_objects, add_cube, add_uv_sphere, set_location, set_base_color, save, render). This reads/writes the app MODEL directly - exact object state, no pixels. The response includes the post-command object list as read-back verification. Vision stays available for visual review of renders/canvas.',
+    tool({ name: 'computer_use_appmodel', description: 'App object-model channel (enabled only when DAMAR_CU_APPMODEL_PORT is set): sends ONE fixed-vocabulary command to the in-app bridge of the staged application. Bridges: Blender bpy (ping, get_objects, add_cube, add_uv_sphere, set_location, set_base_color, save, render) and LibreOffice UNO for Calc (ping, get_cell, get_range, set_cell, set_range, fill_down, set_bold, set_number_format, insert_chart, save_as, export_pdf). This reads/writes the app MODEL directly - exact state, no pixels. Every response includes read-back verification of the affected objects/cells. Vision stays available for visual review of renders/canvas.',
       parameters: { type: 'object', properties: { command: { type: 'object' } }, required: ['command'] },
       execute: async (args, execution) => { try {
         const ctx = ctxOf(execution);
