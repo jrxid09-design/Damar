@@ -561,6 +561,44 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         return out(result);
       } catch (e) { return fail(e); } } },
       { canonicalAuthority: true, sideEffects: true, readOnly: false }),
+    tool({ name: 'computer_use_dom', description: 'DOM channel for the bench-staged Edge instance (enabled only when DAMAR_CU_DOM_PORT is set): evaluates a JavaScript expression in the current page via CDP and returns its value as JSON text. For web apps with a real DOM (e.g. 2048: tiles and score are DOM elements) this reads EXACT state with zero screenshots - prefer it for reading game/document state; keep using act for input (key presses). Canvas apps expose almost nothing here.',
+      parameters: { type: 'object', properties: { expression: { type: 'string' } }, required: ['expression'] },
+      execute: async (args, execution) => { try {
+        const ctx = ctxOf(execution);
+        if (state.stopped) return out({ ok: false, error: 'DESKTOP_STOPPED' });
+        const port = Number(process.env.DAMAR_CU_DOM_PORT || 0);
+        if (!port) return out({ ok: false, error: 'DOM_NOT_CONFIGURED', note: 'no CDP port configured for this session' });
+        const expr = String(args?.expression || '');
+        if (!expr || expr.length > 4000) return out({ ok: false, error: 'DOM_EXPR_INVALID' });
+        let value = null, evalError = null;
+        const r = await authorize(ctx, { op: 'cu-dom', scopeToken: 'cu-dom:' + port,
+          card: { tool: 'computer_use_dom', run: 'evaluate in staged page: ' + expr.slice(0, 80),
+            change: 'read page state through the DOM of the bench-staged browser', scope: 'the hermetic staged Edge instance only (debug port on localhost)',
+            risk: 'Expression evaluation inside the staged page; the bench gate scopes it to the staged browser instance' },
+          parameters: { port, expression: expr.slice(0, 200) },
+          driver: async () => {
+            const listRes = await fetch('http://127.0.0.1:' + port + '/json/list', { signal: AbortSignal.timeout(5000) });
+            const targets = await listRes.json();
+            const page = targets.find(t => t.type === 'page' && t.webSocketDebuggerUrl && !/devtools/.test(t.url || ''));
+            if (!page) throw Error('DOM_NO_PAGE_TARGET');
+            value = await new Promise((resolve, reject) => {
+              const ws = new WebSocket(page.webSocketDebuggerUrl);
+              const timer = setTimeout(() => { try { ws.close(); } catch {} reject(Error('DOM_EVAL_TIMEOUT')); }, 15000);
+              ws.onopen = () => ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: expr, returnByValue: true, awaitPromise: true } }));
+              ws.onmessage = (ev) => { try { const m = JSON.parse(ev.data); if (m.id !== 1) return; clearTimeout(timer); try { ws.close(); } catch {}
+                const res = m.result?.result;
+                if (m.result?.exceptionDetails) { evalError = String(m.result.exceptionDetails.text || 'EVAL_EXCEPTION').slice(0, 200); resolve(null); }
+                else resolve(res && 'value' in res ? res.value : (res?.description ?? null)); } catch (e) { clearTimeout(timer); reject(e); } };
+              ws.onerror = () => { clearTimeout(timer); reject(Error('DOM_WS_ERROR')); };
+            });
+            return { applied: true };
+          },
+          verify: async () => ({ checks: [ { name: 'cdp evaluate answered', passed: evalError === null } ] }) });
+        if (r.ok === false) return out(r);
+        if (evalError) return out({ ok: false, error: 'DOM_EVAL_EXCEPTION', detail: evalError });
+        return out({ ok: true, outcome: r.outcome, channel: 'dom', value: value === undefined ? null : value });
+      } catch (e) { return fail(e); } } },
+      { canonicalAuthority: true, sideEffects: true, readOnly: false }),
     tool({ name: 'computer_use_browser', description: 'Automate a real Core-owned browser window (fresh isolated profile): navigate an Owner-approved origin, click or fill a selector, read the page text, and verify the observed result with an allowlisted predicate. Other origins are refused.',
       parameters: { type: 'object', properties: { op: { type: 'string', enum: ['open', 'navigate', 'click', 'type', 'read', 'close'] },
         url: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' },
