@@ -1,3 +1,4 @@
+const fs = require("node:fs");
 const path = require("node:path");
 
 const JsonStore = require("../core/config/JsonStore");
@@ -17,6 +18,31 @@ const store = new JsonStore(
     path.join(__dirname, "..", "..", "configs", "voice.json"),
     { stt: {}, tts: {}, runtime: {} }
 );
+
+// JsonStore meng-cache isi berkas setelah bacaan pertama. Agar penulisan
+// eksternal terbaca TANPA restart proses — khususnya jembatan Core settings
+// Dashboard (core-host menyalin section `voice` ke berkas ini lewat
+// voice-runtime-config.cjs setiap owner menyimpan dari Control Dashboard) —
+// mtime berkas dicek tiap kali config dibaca dan cache di-reset bila berubah.
+// Prioritas env > berkas > default (envOr) tidak berubah.
+let configFileMtimeMs = null;
+try { configFileMtimeMs = fs.statSync(store.filePath).mtimeMs; } catch { /* berkas belum ada */ }
+
+function refreshStoreIfConfigChanged() {
+
+    let mtimeMs = null;
+
+    try { mtimeMs = fs.statSync(store.filePath).mtimeMs; } catch { /* berkas belum ada */ }
+
+    if (mtimeMs !== configFileMtimeMs) {
+
+        configFileMtimeMs = mtimeMs;
+
+        store.reset();
+
+    }
+
+}
 
 /** Baca nilai dengan prioritas: env > config runtime > default. */
 function envOr(envName, cfgKey, dflt) {
@@ -78,6 +104,8 @@ function boolOrAuto(v) {
 
 /** Konfigurasi efektif Voice Runtime. */
 function voiceConfig() {
+
+    refreshStoreIfConfigChanged();
 
     return {
         // Tri-state: true/false/"auto". "auto" = aktif bila STT terkonfigurasi
@@ -153,6 +181,8 @@ const { resolveStageConfig } = require("./providers/apiProvider");
  * Jalur API disediakan, belum diuji (VOICE-ID.md §13.6).
  */
 function voiceStageConfig(stage) {
+
+    refreshStoreIfConfigChanged();
 
     const all = store.read() ?? {};
 

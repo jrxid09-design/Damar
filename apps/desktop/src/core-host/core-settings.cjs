@@ -81,7 +81,7 @@ function frontMatter(text) {
   return { meta, body: m[2] };
 }
 
-function createCoreSettings({ file, isProtected, skillsDir = path.join(path.dirname(file), 'skills') }) {
+function createCoreSettings({ file, isProtected, skillsDir = path.join(path.dirname(file), 'skills'), onVoiceSettings = null }) {
   let state = DEFAULTS();
   try { const v = JSON.parse(fs.readFileSync(file, 'utf8')); if (v && v.version === 1) state = { ...DEFAULTS(), ...v, skills: { ...DEFAULTS().skills, ...(v.skills || {}) }, presence: { ...PRESENCE_DEFAULTS(), ...Object.fromEntries(Object.entries(v.presence || {}).filter(([k, x]) => PRESENCE_RULES[k]?.(x))) }, voice: { ...VOICE_DEFAULTS(), ...Object.fromEntries(Object.entries(v.voice || {}).filter(([k, x]) => VOICE_RULES[k]?.(x))) },
     cli: v.cli && typeof v.cli === 'object' ? { ...CLI_DEFAULTS(), ...Object.fromEntries(Object.entries(v.cli).filter(([k, x]) => CLI_RULES[k]?.(x))) } : null, lastSelection: validSelection(v.lastSelection) ? { provider: v.lastSelection.provider, model: v.lastSelection.model } : null }; } catch {}
@@ -206,7 +206,13 @@ function createCoreSettings({ file, isProtected, skillsDir = path.join(path.dirn
       if (input.mataDewa !== undefined) next.mataDewa = MATA_DEWA.mergeSettings(next.mataDewa, input.mataDewa);
       if (input.pandawa !== undefined) next.pandawa = TEAM.merge(next.pandawa, input.pandawa);
       if (input.cognitive !== undefined) next.cognitive = { ...next.cognitive, ...COGNITIVE.validate(input.cognitive) };
-      state = next; save(); return api.view();
+      state = next; save();
+      // Voice FX bridge: notify the host after a voice save so it can stage the
+      // section into the voice runtime's configs/voice.json (voice-runtime-config.cjs).
+      // Best-effort: the settings saved above stay the source of truth even if the
+      // copy fails (the host logs the failure and re-syncs at startup).
+      if (input.voice !== undefined && typeof onVoiceSettings === 'function') { try { onVoiceSettings({ ...state.voice }); } catch {} }
+      return api.view();
     },
     plugins,
     // Return the exact bounded tree only after a fresh digest/trust check. Callers stage these
