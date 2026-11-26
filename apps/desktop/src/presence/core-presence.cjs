@@ -135,9 +135,13 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
     // connection (key remembered in Core's DPAPI store via the existing connect route), prove the key with
     // the router's key test (reads /models, spends no tokens), then record the Owner's model grant for the
     // connection - the same journaled grant Control's quick action writes (approval reference
-    // 'first-run-onboarding', all models, 30 days) - and select the connection with the first model its
-    // catalog offers (Core requires an explicit, grant-covered model for a live selection; the Owner can
-    // change it any time in Control). Any stage failing leaves the flow free to fall back to the template.
+    // 'first-run-onboarding', all models, 30 days). V2: before selecting, Core probes the catalog
+    // (capability-first policy in onboarding-chat.cjs: responds / tool-calling / streaming / latency;
+    // brain = most capable at acceptable latency, token-heavy Astra class never a silent default) and the
+    // probed brain is selected explicitly (Core requires an explicit, grant-covered model for a live
+    // selection; the Owner can change it any time in Control). If the probe route is unavailable or no
+    // model answers, selection falls back to the first catalog model (v1 behavior, flagged in the result).
+    // Any stage failing leaves the flow free to fall back to the template.
     async connectProvider({ baseUrl, apiKey } = {}) {
       if (typeof baseUrl !== 'string' || !/^https?:\/\/\S{1,300}$/.test(baseUrl) || typeof apiKey !== 'string' || !apiKey || apiKey.length > 512) throw Error('CONNECT_INPUT_INVALID');
       let r = await ownerPost('/api/r9/connect', { provider: 'custom', baseUrl, apiKey, remember: true }, 20000);
@@ -153,9 +157,18 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
       if (!models.length) return { ok: false, stage: 'models', status: catalog.status, error: 'NO_MODELS_OFFERED' };
       r = await ownerPost('/api/r9/provider/model-grant', { expectedVersion: prov.configurationVersion, approval: 'first-run-onboarding', provider: 'custom', baseUrl: prov.baseUrl, model: '*', expiresAt: Date.now() + 30 * 86400000 });
       if (!r.ok || r.body?.success !== true) return { ok: false, stage: 'grant', status: r.status, error: r.body?.error || 'MODEL_GRANT_FAILED' };
-      r = await ownerPost('/api/r9/provider', { provider: 'custom', model: models[0] });
+      // V2 probing (bounded server-side; generous client timeout for a full catalog sweep).
+      let brain = models[0], reflex = models[0], probes = null, brainTokenHeavy = false, probeUnavailable = false;
+      const probe = await ownerPost('/api/r9/presence/onboarding/probe', {}, 180000);
+      if (probe.ok && probe.body?.success === true && typeof probe.body.data?.brain === 'string' && models.includes(probe.body.data.brain)) {
+        brain = probe.body.data.brain;
+        reflex = typeof probe.body.data.reflex === 'string' ? probe.body.data.reflex : brain;
+        probes = Array.isArray(probe.body.data.results) ? probe.body.data.results : null;
+        brainTokenHeavy = probe.body.data.brainTokenHeavy === true;
+      } else probeUnavailable = true;
+      r = await ownerPost('/api/r9/provider', { provider: 'custom', model: brain });
       if (!r.ok || r.body?.success !== true) return { ok: false, stage: 'select', status: r.status, error: r.body?.error || 'PROVIDER_SELECT_FAILED' };
-      return { ok: true, provider: 'custom', baseUrl: prov.baseUrl, model: models[0], models: models.length };
+      return { ok: true, provider: 'custom', baseUrl: prov.baseUrl, model: brain, reflex, models: models.length, probes, brainTokenHeavy, ...(probeUnavailable ? { probeUnavailable: true } : {}) };
     },
     // First-run onboarding, branch A: one interview turn. Core holds the fixed system prompt and the model
     // choice; the renderer sends only user/assistant turns (validated again in Core).

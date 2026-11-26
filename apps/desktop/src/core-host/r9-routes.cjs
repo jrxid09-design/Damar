@@ -245,7 +245,7 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
       // settings store Control reads; the completion flag is composed here server-side (never accepted from
       // the client) and a completed onboarding cannot be saved twice. Chat: one branch-A interview turn via
       // Core's onboarding service (fixed system prompt, granted live model only; 409 -> template fallback).
-      if (p === '/api/r9/presence/onboarding' || p === '/api/r9/presence/onboarding/chat') {
+      if (p === '/api/r9/presence/onboarding' || p === '/api/r9/presence/onboarding/chat' || p === '/api/r9/presence/onboarding/probe') {
         if (req.method !== 'POST' || url.search) return json(405, { success: false, error: 'METHOD_NOT_ALLOWED' });
         if (who !== 'owner') return json(403, { success: false, error: 'OWNER_REQUIRED' });
         if (!settings) return json(503, { success: false, error: 'SETTINGS_UNAVAILABLE' });
@@ -254,6 +254,13 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
           if (!onboardingChat) return json(503, { success: false, error: 'ONBOARDING_CHAT_UNAVAILABLE' });
           try { return json(200, { success: true, data: await onboardingChat.chat(input?.messages) }); }
           catch (e) { return json(e.status || 502, { success: false, error: e.message || 'ONBOARDING_CHAT_FAILED' }); }
+        }
+        // V2 step-0 probing: the service probes the active connection's catalog (capability-first
+        // policy) and returns the brain/reflex pair; the Presence client then selects the brain.
+        if (p.endsWith('/probe')) {
+          if (!onboardingChat?.probeAll) return json(503, { success: false, error: 'ONBOARDING_PROBE_UNAVAILABLE' });
+          try { return json(200, { success: true, data: await onboardingChat.probeAll() }); }
+          catch (e) { return json(e.status || 502, { success: false, error: e.message || 'ONBOARDING_PROBE_FAILED' }); }
         }
         const allowed = ['displayName', 'salutation', 'voiceEnabled', 'language'];
         if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(k => !allowed.includes(k))
