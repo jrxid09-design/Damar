@@ -59,6 +59,36 @@ function supertonicModelDir(root = voiceLocalRoot()) {
     return path.join(root, "supertonic3");
 }
 
+/**
+ * Voice FX efektif (pitch + gaya Jarvis) dari config voice, dibaca
+ * segar tiap panggilan agar perubahan config/Dashboard langsung
+ * berlaku tanpa restart service. null = tanpa FX (jalur lama persis).
+ * Bentuknya mengikuti payload supertonic_service.py / voice_fx.py.
+ */
+function currentVoiceFx() {
+    try {
+        const { voiceConfig } = require("../config");
+        const c = voiceConfig();
+        const pitch = Number(c.pitchSemitones) || 0;
+        const style = c.style === "jarvis" ? "jarvis" : "normal";
+        if (pitch === 0 && style === "normal") return null;
+        return {
+            pitch_semitones: pitch,
+            style,
+            fx: {
+                pitch_semitones: c.jarvisPitchSemitones,
+                ring_hz: c.jarvisRingModHz,
+                ring_depth: c.jarvisRingModDepth,
+                reverb_wet: c.jarvisReverbWet,
+                reverb_decay_ms: c.jarvisReverbDecayMs,
+                eq_low_db: c.jarvisEqLowDb,
+                eq_presence_db: c.jarvisEqPresenceDb,
+                eq_high_db: c.jarvisEqHighDb
+            }
+        };
+    } catch { return null; }
+}
+
 /** "supertonic-M1" -> true bila preset Supertonic yang dikenal. */
 function isSupertonicVoice(voice) {
     const v = String(voice ?? "").trim();
@@ -205,13 +235,14 @@ async function transcribeWav(wavBuffer, {
  */
 async function synthesize(text, {
     voice = "id_ID-news_tts-medium", lengthScale = 1.0, sentenceSilence = 0.1,
-    root = voiceLocalRoot(), timeoutMs = 120000
+    root = voiceLocalRoot(), timeoutMs = 120000, fx
 } = {}) {
     // Suara Supertonic ("supertonic-M1".."supertonic-F5") -> service Python
     // resident; Piper tetap jalur suara "id_ID-*". Default parameter di sini
     // sengaja tetap Piper: default PRODUKSI diatur di configs/voice.json +
     // server.js; pemanggil pustaka tanpa suara tidak berubah perilaku.
-    if (isSupertonicVoice(voice)) return synthesizeSupertonic(text, { voice, root, timeoutMs });
+    // fx (Voice FX pitch/Jarvis) hanya berlaku di jalur Supertonic.
+    if (isSupertonicVoice(voice)) return synthesizeSupertonic(text, { voice, root, timeoutMs, fx });
     const bin = piperBin(root);
     if (!bin) throw new Error("piper tidak ditemukan — jalankan scripts/voice-setup.ps1 dulu");
     const v = resolvePiperVoice(voice, root);
@@ -514,13 +545,16 @@ class WarmSupertonicServer extends ResidentService {
         } catch { return false; }
     }
 
-    async _synthesizeOnce(text, { voice = "supertonic-M1", steps = 5, timeoutMs = 120000 } = {}) {
+    async _synthesizeOnce(text, { voice = "supertonic-M1", steps = 5, timeoutMs = 120000, fx } = {}) {
         const preset = supertonicPreset(voice) || "M1";
+        // fx: undefined = ambil dari config voice; null = paksa tanpa FX;
+        // objek { pitch_semitones, style, fx } = override per panggilan.
+        const fxPayload = fx === undefined ? currentVoiceFx() : fx;
         const t0 = Date.now();
         const res = await fetch(`http://127.0.0.1:${this.port}/synthesize`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: String(text), voice: preset, steps, lang: "id" }),
+            body: JSON.stringify({ text: String(text), voice: preset, steps, lang: "id", ...(fxPayload || {}) }),
             signal: AbortSignal.timeout(timeoutMs)
         });
         if (!res.ok) {
@@ -528,20 +562,21 @@ class WarmSupertonicServer extends ResidentService {
             throw new Error(`supertonic menolak (${res.status}): ${detail.slice(0, 200)}`);
         }
         const audio = Buffer.from(await res.arrayBuffer());
-        return { audio, ms: Date.now() - t0, voice: `supertonic-${preset}` };
+        const fxMs = Number(res.headers.get("x-damar-fx-ms"));
+        return { audio, ms: Date.now() - t0, voice: `supertonic-${preset}`, ...(Number.isFinite(fxMs) && fxMs > 0 ? { fxMs } : {}) };
     }
 
-    async synthesize(text, { voice = "supertonic-M1", steps = 5, timeoutMs = 120000 } = {}) {
+    async synthesize(text, { voice = "supertonic-M1", steps = 5, timeoutMs = 120000, fx } = {}) {
         if (!this.ok && !this.proc) throw new Error("supertonic service belum jalan");
         try {
-            return await this._synthesizeOnce(text, { voice, steps, timeoutMs });
+            return await this._synthesizeOnce(text, { voice, steps, timeoutMs, fx });
         } catch (error) {
             // Service mati di tengah percakapan: pulihkan (restart oleh
             // supervisor) lalu coba SEKALI lagi — giliran tidak gugur.
             // Error HTTP (service hidup) tidak di-retry: itu soal request.
             if (!isConnError(error) || this._stopped) throw error;
             await this._recover();
-            return this._synthesizeOnce(text, { voice, steps, timeoutMs });
+            return this._synthesizeOnce(text, { voice, steps, timeoutMs, fx });
         }
     }
 
@@ -568,9 +603,9 @@ async function ensureSupertonicServer(root = voiceLocalRoot()) {
     return server;
 }
 
-async function synthesizeSupertonic(text, { voice, root = voiceLocalRoot(), timeoutMs = 120000 } = {}) {
+async function synthesizeSupertonic(text, { voice, root = voiceLocalRoot(), timeoutMs = 120000, fx } = {}) {
     const server = await ensureSupertonicServer(root);
-    return server.synthesize(text, { voice, timeoutMs });
+    return server.synthesize(text, { voice, timeoutMs, fx });
 }
 
 /** Matikan semua service Supertonic resident (dipakai server.js close()). */
@@ -610,7 +645,7 @@ module.exports = {
     resolveWhisperModel, listWhisperModels,
     resolvePiperVoice, listPiperVoices,
     probe, transcribeWav, synthesize,
-    WarmWhisperServer, WarmSupertonicServer, silenceWav,
+    WarmWhisperServer, WarmSupertonicServer, silenceWav, currentVoiceFx,
     isSupertonicVoice, supertonicPreset, listSupertonicVoices, supertonicModelDir, stopSupertonicServers, supertonicStatus,
     SUPERTONIC_VOICES, SUPERTONIC_MODEL, SUPERTONIC_PORT_DEFAULT,
     WHISPER_MODEL_FILES

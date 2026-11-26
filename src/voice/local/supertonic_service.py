@@ -10,6 +10,9 @@ banyak sintesis tanpa muat ulang). Dipakai lewat src/voice/local/engines.js
   GET  /health     -> {"ok": true, "model": "supertonic-3", "sampleRate": 44100, "voices": [...]}
   POST /synthesize {"text": "...", "voice": "M1"|"supertonic-M1", "steps": 8, "lang": "id"}
                    -> WAV PCM16 mono 44.1 kHz (+ header X-Damar-Duration-Ms)
+                   Opsional (Voice FX, voice_fx.py): "pitch_semitones" (-12..+12),
+                   "style": "normal"|"jarvis", "fx": {parameter preset Jarvis}.
+                   Bila dipakai, respons membawa header X-Damar-Fx-Ms/-Pitch/-Style.
 
 Hanya stdlib + paket `supertonic` (onnxruntime). Tidak ada akses jaringan.
 Model tidak diunduh di sini; pasang lewat scripts/voice-setup.ps1.
@@ -23,6 +26,17 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# Post-processing suara (pitch + preset Jarvis). Supertonic TIDAK punya
+# parameter pitch native (signature synthesize: text/voice_style/steps/
+# speed/lang), jadi pergeseran pitch + FX diterapkan di waveform hasil
+# sintesis — lihat voice_fx.py dan VOICE-FX.md.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import voice_fx as _voice_fx
+except Exception as _fx_exc:  # FX tidak boleh mematikan service TTS
+    _voice_fx = None
+    sys.stderr.write(f"[supertonic] voice_fx tidak termuat: {_fx_exc}\n")
 
 DEFAULT_PORT = 8128
 VOICES = ["M1", "M2", "M3", "M4", "M5", "F1", "F2", "F3", "F4", "F5"]
@@ -120,6 +134,20 @@ class Handler(BaseHTTPRequestHandler):
             voice = voice[len("SUPERTONIC-"):]
         steps = payload.get("steps", 5)
         lang = str(payload.get("lang") or "id").strip().lower()
+        # --- Voice FX (opsional; absen = perilaku lama persis) ----------
+        # pitch_semitones: -12..+12 (dari Dashboard voice.pitch_semitones)
+        # style: "normal" | "jarvis"; fx: parameter preset Jarvis
+        # {pitch_semitones, ring_hz, ring_depth, reverb_wet,
+        #  reverb_decay_ms, eq_low_db, eq_presence_db, eq_high_db}.
+        try:
+            fx_pitch = float(payload.get("pitch_semitones") or 0.0)
+        except (TypeError, ValueError):
+            return self._send_json(400, {"error": "field 'pitch_semitones' harus angka"})
+        fx_pitch = max(-12.0, min(12.0, fx_pitch))
+        fx_style = str(payload.get("style") or "normal").strip().lower()
+        if fx_style not in ("normal", "jarvis"):
+            return self._send_json(400, {"error": "field 'style' harus 'normal' atau 'jarvis'"})
+        fx_params = payload.get("fx") if isinstance(payload.get("fx"), dict) else None
         if not text:
             return self._send_json(400, {"error": "field 'text' wajib diisi"})
         if len(text) > MAX_TEXT_CHARS:
@@ -137,6 +165,19 @@ class Handler(BaseHTTPRequestHandler):
                                        lang=lang, total_steps=steps)
         import numpy as np
         dur_s = float(np.asarray(dur).reshape(-1)[0])
+        # Voice FX post-processing (pitch/Jarvis) — hanya bila diminta.
+        fx_info = None
+        if _voice_fx is not None and (fx_pitch != 0.0 or fx_style == "jarvis"):
+            try:
+                y = np.asarray(wav, dtype=np.float32).reshape(-1)
+                y, fx_info = _voice_fx.apply_voice_fx(
+                    y, int(_tts.sample_rate), pitch_semitones=fx_pitch,
+                    style=fx_style, params=fx_params)
+                wav = y
+            except Exception as exc:  # FX gagal -> kirim audio asli, jangan gagalkan sintesis
+                sys.stderr.write(f"[supertonic] voice_fx gagal, audio asli dipakai: {exc}\n")
+                sys.stderr.flush()
+                fx_info = None
         audio = _wav_bytes(wav, _tts.sample_rate)
         ms = round((time.time() - t0) * 1000)
         self.send_response(200)
@@ -145,6 +186,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Damar-Voice", f"supertonic-{voice}")
         self.send_header("X-Damar-Duration-Ms", str(round(dur_s * 1000)))
         self.send_header("X-Damar-Synth-Ms", str(ms))
+        if fx_info is not None:
+            self.send_header("X-Damar-Fx-Ms", str(round(fx_info["ms"])))
+            self.send_header("X-Damar-Fx-Pitch", str(fx_info["pitchApplied"]))
+            self.send_header("X-Damar-Fx-Style", fx_info["style"])
         self.end_headers()
         self.wfile.write(audio)
 

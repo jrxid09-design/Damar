@@ -30,6 +30,27 @@ const PRESENCE_RULES = {
   displayName: v => typeof v === 'string' && v.length <= 40 && !/[\x00-\x1f\x7f<>]/.test(v),
   salutation: v => typeof v === 'string' && v.length <= 40 && !/[\x00-\x1f\x7f<>]/.test(v), // how DAMAR addresses the Owner (greeting, alerts); '' = use displayName // greeting name; default is the Owner's name, '' = no name in the greeting
 };
+// voice: Voice FX for the local Supertonic TTS output (Owner request 2026-11-26). pitchSemitones is the
+// Dashboard pitch slider (spec key voice.pitch_semitones, -12..+12 in 0.5 steps, default 0); style is the
+// voice.style selector ('normal' | 'jarvis'). Jarvis is a post-processing preset over the M1 synthesis
+// (pitch offset + ring modulation + EQ + short reverb, applied in src/voice/local/voice_fx.py), so it stays
+// language-agnostic and Indonesian keeps working. The jarvis* fields are its tuning parameters.
+const VOICE_DEFAULTS = () => ({ pitchSemitones: 0, style: 'normal', jarvisPitchSemitones: -2, jarvisRingModHz: 32, jarvisRingModDepth: 0.4, jarvisReverbWet: 0.15, jarvisReverbDecayMs: 110, jarvisEqLowDb: 2, jarvisEqPresenceDb: 3, jarvisEqHighDb: 2 });
+const halfStep = (min, max) => v => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max && Math.abs(v * 2 - Math.round(v * 2)) < 1e-9;
+const numRange = (min, max) => v => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+const intRange = (min, max) => v => Number.isSafeInteger(v) && v >= min && v <= max;
+const VOICE_RULES = {
+  pitchSemitones: halfStep(-12, 12),
+  style: v => ['normal', 'jarvis'].includes(v),
+  jarvisPitchSemitones: halfStep(-6, 0),
+  jarvisRingModHz: intRange(5, 120),
+  jarvisRingModDepth: numRange(0, 0.9),
+  jarvisReverbWet: numRange(0, 0.5),
+  jarvisReverbDecayMs: intRange(40, 400),
+  jarvisEqLowDb: numRange(-6, 6),
+  jarvisEqPresenceDb: numRange(-6, 6),
+  jarvisEqHighDb: numRange(-6, 6),
+};
 // cli: DAMAR CLI appearance shared by the CLI Settings Center and Control (null until first set/imported, so the CLI can
 // migrate a legacy local profile once). lastSelection: provider/model last accepted by POST /api/r9/provider (recorded by
 // that route only; never writable through settings) so a new CLI/Core session can re-apply it through the same route.
@@ -49,7 +70,7 @@ const MATA_DEWA = require('../mata-dewa/feeds.cjs');
 const COGNITIVE = require('./cognitive.cjs');
 // pandawa: per-member models + discussion bounds (allowlist + validation in pandawa-team.cjs).
 const TEAM = require('./pandawa-team.cjs');
-const DEFAULTS = () => ({ version: 1, revision: 0, autonomy: 'ask', extraDirs: [], pluginTrust: {}, skills: { routing: 'auto', disabled: [] }, presence: PRESENCE_DEFAULTS(), cli: null, lastSelection: null, updatedAt: null });
+const DEFAULTS = () => ({ version: 1, revision: 0, autonomy: 'ask', extraDirs: [], pluginTrust: {}, skills: { routing: 'auto', disabled: [] }, presence: PRESENCE_DEFAULTS(), voice: VOICE_DEFAULTS(), cli: null, lastSelection: null, updatedAt: null });
 const fail = (status, error) => Object.assign(Error(error), { status });
 const lower = p => path.resolve(p).toLowerCase();
 const within = (p, root) => lower(p) === lower(root) || lower(p).startsWith(lower(root) + path.sep);
@@ -62,7 +83,7 @@ function frontMatter(text) {
 
 function createCoreSettings({ file, isProtected, skillsDir = path.join(path.dirname(file), 'skills') }) {
   let state = DEFAULTS();
-  try { const v = JSON.parse(fs.readFileSync(file, 'utf8')); if (v && v.version === 1) state = { ...DEFAULTS(), ...v, skills: { ...DEFAULTS().skills, ...(v.skills || {}) }, presence: { ...PRESENCE_DEFAULTS(), ...Object.fromEntries(Object.entries(v.presence || {}).filter(([k, x]) => PRESENCE_RULES[k]?.(x))) },
+  try { const v = JSON.parse(fs.readFileSync(file, 'utf8')); if (v && v.version === 1) state = { ...DEFAULTS(), ...v, skills: { ...DEFAULTS().skills, ...(v.skills || {}) }, presence: { ...PRESENCE_DEFAULTS(), ...Object.fromEntries(Object.entries(v.presence || {}).filter(([k, x]) => PRESENCE_RULES[k]?.(x))) }, voice: { ...VOICE_DEFAULTS(), ...Object.fromEntries(Object.entries(v.voice || {}).filter(([k, x]) => VOICE_RULES[k]?.(x))) },
     cli: v.cli && typeof v.cli === 'object' ? { ...CLI_DEFAULTS(), ...Object.fromEntries(Object.entries(v.cli).filter(([k, x]) => CLI_RULES[k]?.(x))) } : null, lastSelection: validSelection(v.lastSelection) ? { provider: v.lastSelection.provider, model: v.lastSelection.model } : null }; } catch {}
   state.mataDewa = MATA_DEWA.sanitizeSettings(state.mataDewa);
   state.cognitive = COGNITIVE.sanitize(state.cognitive);
@@ -142,13 +163,14 @@ function createCoreSettings({ file, isProtected, skillsDir = path.join(path.dirn
 
   const api = {
     PROFILES,
-    view: () => ({ autonomy: state.autonomy, extraDirs: [...state.extraDirs], skills: { routing: state.skills.routing, disabled: [...state.skills.disabled] }, presence: { ...state.presence }, cli: state.cli ? { ...state.cli } : null, lastSelection: state.lastSelection ? { ...state.lastSelection } : null, mataDewa: MATA_DEWA.sanitizeSettings(state.mataDewa), cognitive: { ...state.cognitive }, pandawa: TEAM.sanitize(state.pandawa), revision: state.revision, updatedAt: state.updatedAt }),
+    view: () => ({ autonomy: state.autonomy, extraDirs: [...state.extraDirs], skills: { routing: state.skills.routing, disabled: [...state.skills.disabled] }, presence: { ...state.presence }, voice: { ...state.voice }, cli: state.cli ? { ...state.cli } : null, lastSelection: state.lastSelection ? { ...state.lastSelection } : null, mataDewa: MATA_DEWA.sanitizeSettings(state.mataDewa), cognitive: { ...state.cognitive }, pandawa: TEAM.sanitize(state.pandawa), revision: state.revision, updatedAt: state.updatedAt }),
     cognitive: () => ({ ...state.cognitive }),
     pandawa: () => TEAM.sanitize(state.pandawa),
     cli: () => ({ cli: state.cli ? { ...state.cli } : null, defaults: CLI_DEFAULTS(), lastSelection: state.lastSelection ? { ...state.lastSelection } : null, revision: state.revision, updatedAt: state.updatedAt }),
     // Called by POST /api/r9/provider after Core accepted a selection (the selection itself stays in the registry).
     recordSelection(provider, model) { if (!validSelection({ provider, model })) return; if (state.lastSelection?.provider === provider && state.lastSelection?.model === model) return; state.lastSelection = { provider, model }; save(); },
     presence: () => ({ presence: { ...state.presence }, revision: state.revision, updatedAt: state.updatedAt }),
+    voice: () => ({ voice: { ...state.voice }, revision: state.revision, updatedAt: state.updatedAt }),
     mataDewa: () => ({ mataDewa: MATA_DEWA.sanitizeSettings(state.mataDewa), revision: state.revision, updatedAt: state.updatedAt }),
     autonomy: () => state.autonomy,
     extraDirs: () => state.extraDirs.filter(d => { try { return fs.statSync(d).isDirectory() && !isProtected(d); } catch { return false; } }),
@@ -170,6 +192,11 @@ function createCoreSettings({ file, isProtected, skillsDir = path.join(path.dirn
         const p = input.presence;
         if (!p || typeof p !== 'object' || Array.isArray(p) || Object.keys(p).some(k => !PRESENCE_RULES[k] || !PRESENCE_RULES[k](p[k]))) throw fail(400, 'PRESENCE_SETTINGS_INVALID');
         next.presence = { ...next.presence, ...p };
+      }
+      if (input.voice !== undefined) {
+        const vc = input.voice;
+        if (!vc || typeof vc !== 'object' || Array.isArray(vc) || Object.keys(vc).some(k => !VOICE_RULES[k] || !VOICE_RULES[k](vc[k]))) throw fail(400, 'VOICE_SETTINGS_INVALID');
+        next.voice = { ...next.voice, ...vc };
       }
       if (input.cli !== undefined) {
         const c = input.cli;
@@ -210,4 +237,4 @@ function createCoreSettings({ file, isProtected, skillsDir = path.join(path.dirn
   };
   return api;
 }
-module.exports = { createCoreSettings, PROFILES, PRESENCE_DEFAULTS, CLI_DEFAULTS };
+module.exports = { createCoreSettings, PROFILES, PRESENCE_DEFAULTS, CLI_DEFAULTS, VOICE_DEFAULTS };

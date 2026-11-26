@@ -57,6 +57,14 @@ function num(envName, cfgKey, dflt) {
 
 }
 
+function clampNum(envName, cfgKey, dflt, min, max) {
+
+    const n = num(envName, cfgKey, dflt);
+
+    return Math.min(max, Math.max(min, n));
+
+}
+
 /** "auto" → null (diputuskan runtime setelah probe STT+recorder). */
 function boolOrAuto(v) {
 
@@ -108,7 +116,28 @@ function voiceConfig() {
         clapThreshold: num("DAMAR_VOICE_CLAP_THRESHOLD", "clapThreshold", 0.6),
         clapWindowMs: num("DAMAR_VOICE_CLAP_WINDOW_MS", "clapWindowMs", 800),
         clapMinClapMs: num("DAMAR_VOICE_CLAP_MIN_CLAP_MS", "clapMinClapMs", 30),
-        clapMinGapMs: num("DAMAR_VOICE_CLAP_MIN_GAP_MS", "clapMinGapMs", 100)
+        clapMinGapMs: num("DAMAR_VOICE_CLAP_MIN_GAP_MS", "clapMinGapMs", 100),
+        // ---- Voice FX: pitch + gaya Jarvis (post-processing) --------
+        // Supertonic tidak punya parameter pitch native, jadi pitch
+        // digeser sebagai post-processing di service Python
+        // (voice_fx.py) sesudah sintesis. Diatur owner dari Control
+        // Dashboard (Core settings "voice": pitchSemitones + style —
+        // kunci spec voice.pitch_semitones / voice.style); di sini
+        // dibaca dari configs/voice.json runtime / env DAMAR_VOICE_*.
+        // pitchSemitones: -12..+12 (kelipatan 0.5 di Dashboard).
+        pitchSemitones: clampNum("DAMAR_VOICE_PITCH_SEMITONES", "pitchSemitones", 0, -12, 12),
+        // style: "normal" | "jarvis" (preset robot di atas output M1;
+        // bahasa-agnostik karena bekerja di waveform).
+        style: String(envOr("DAMAR_VOICE_STYLE", "style", "normal")).toLowerCase() === "jarvis" ? "jarvis" : "normal",
+        // Parameter preset Jarvis (bisa di-tuning tanpa ubah kode):
+        jarvisPitchSemitones: clampNum("DAMAR_VOICE_JARVIS_PITCH_SEMITONES", "jarvisPitchSemitones", -2, -6, 0),
+        jarvisRingModHz: clampNum("DAMAR_VOICE_JARVIS_RING_HZ", "jarvisRingModHz", 32, 5, 120),
+        jarvisRingModDepth: clampNum("DAMAR_VOICE_JARVIS_RING_DEPTH", "jarvisRingModDepth", 0.4, 0, 0.9),
+        jarvisReverbWet: clampNum("DAMAR_VOICE_JARVIS_REVERB_WET", "jarvisReverbWet", 0.15, 0, 0.5),
+        jarvisReverbDecayMs: clampNum("DAMAR_VOICE_JARVIS_REVERB_DECAY_MS", "jarvisReverbDecayMs", 110, 40, 400),
+        jarvisEqLowDb: clampNum("DAMAR_VOICE_JARVIS_EQ_LOW_DB", "jarvisEqLowDb", 2, -6, 6),
+        jarvisEqPresenceDb: clampNum("DAMAR_VOICE_JARVIS_EQ_PRESENCE_DB", "jarvisEqPresenceDb", 3, -6, 6),
+        jarvisEqHighDb: clampNum("DAMAR_VOICE_JARVIS_EQ_HIGH_DB", "jarvisEqHighDb", 2, -6, 6)
     };
 
 }
