@@ -123,7 +123,7 @@ function newCaptureDir() {
 }
 
 function requirePoint(action, x, y, endX, endY, points) {
-  if (['move', 'click', 'dblclick', 'right', 'wheel', 'setfield'].includes(action) && (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)))
+  if (['move', 'click', 'dblclick', 'right', 'wheel', 'setfield', 'paste'].includes(action) && (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)))
     throw Error('POINT_REQUIRED');
   if (action === 'drag' && (![x, y, endX, endY].every(Number.isSafeInteger))) throw Error('POINT_REQUIRED');
   if (action === 'path' && (!Array.isArray(points) || points.length < 2 || points.length > 128 ||
@@ -182,6 +182,7 @@ async function act({ title, pid, action, x = null, y = null, endX = null, endY =
   const dispatch = action === 'type' ? { op: 'type', text: String(text || ''), expect_hwnd: win.hwnd, expect_title: win.title }
     : action === 'setfield' ? { op: 'setfield', x, y, text: String(text || ''), commit, region_w: regionW, region_h: regionH,
         path: readbackFile, expect_hwnd: win.hwnd, expect_title: win.title }
+    : action === 'paste' ? { op: 'paste', x, y, text: String(text || ''), expect_hwnd: win.hwnd, expect_title: win.title }
     : action === 'hotkey' ? { op: 'hotkey', vk, modifiers: modifiers || {}, expect_hwnd: win.hwnd, expect_title: win.title }
     : action === 'wheel' ? { op: 'mouse', action: 'wheel', x, y, delta: wheel, horizontal, expect_hwnd: win.hwnd, expect_title: win.title }
     : action === 'drag' ? { op: 'mouse', action: 'drag', x, y, end_x: endX, end_y: endY, expect_hwnd: win.hwnd, expect_title: win.title }
@@ -417,9 +418,9 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         return out(result);
       } catch (e) { return fail(e); } } },
       { canonicalAuthority: true, sideEffects: false, readOnly: true }),
-    tool({ name: 'computer_use_act', description: 'Act on one authorized desktop window: focus it, then move/click/right-click/double-click/drag/freehand-path/vertical-or-horizontal-scroll/type/hotkey. Drag and path are one bounded down-move-up helper operation; every path point must be inside the exact target window. Input is re-verified against the foreground window before dispatch, and the result reports what was actually observed. For entering a value into a small dialog field, use action "setfield" with x/y at the field center and text: it focuses the field, selects its content, types as real key events, commits (commit: "enter" | "tab" | "none"), and returns a zoomed read-back image of the field so the landed value can be confirmed; verification compares that tight region, not the whole window.',
+    tool({ name: 'computer_use_act', description: 'Act on one authorized desktop window: focus it, then move/click/right-click/double-click/drag/freehand-path/vertical-or-horizontal-scroll/type/hotkey. Drag and path are one bounded down-move-up helper operation; every path point must be inside the exact target window. Input is re-verified against the foreground window before dispatch, and the result reports what was actually observed. For entering a value into a small dialog field, use action "setfield" with x/y at the field center and text: it focuses the field, selects its content, types as real key events, commits (commit: "enter" | "tab" | "none"), and returns a zoomed read-back image of the field so the landed value can be confirmed; verification compares that tight region, not the whole window. For filling a RANGE of cells in a spreadsheet, use action "paste" with x/y at the top-left target cell and text as a tab-separated block (rows separated by newlines): it anchor-clicks the cell, places the text on the clipboard (write-only) and pastes it in one operation.',
       parameters: { type: 'object', properties: { title: { type: 'string' }, pid: { type: 'integer' },
-        action: { type: 'string', enum: ['move', 'click', 'dblclick', 'right', 'drag', 'path', 'wheel', 'type', 'hotkey', 'setfield'] },
+        action: { type: 'string', enum: ['move', 'click', 'dblclick', 'right', 'drag', 'path', 'wheel', 'type', 'hotkey', 'setfield', 'paste'] },
         x: { type: 'integer' }, y: { type: 'integer' }, endX: { type: 'integer' }, endY: { type: 'integer' },
         points: { type: 'array', maxItems: 128, items: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer' } } },
         durationMs: { type: 'integer', minimum: 0, maximum: 5000 }, horizontal: { type: 'boolean' },
@@ -440,7 +441,7 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
             point: args.action === 'type' || args.action === 'hotkey' ? null : { x: args?.x, y: args?.y },
             endPoint: args.action === 'drag' ? { x: args?.endX, y: args?.endY } : null,
             pathPoints: args.action === 'path' ? args.points : null,
-            inputDigest: args.action === 'type' ? crypto.createHash('sha256').update(String(args?.text || '')).digest('hex').slice(0, 24) : null },
+            inputDigest: (args.action === 'type' || args.action === 'paste') ? crypto.createHash('sha256').update(String(args?.text || '')).digest('hex').slice(0, 24) : null },
           driver: async () => {
             await enqueue(ctx.signal, 'act', async signal => {
               if (args.action === 'setfield') {
@@ -467,7 +468,7 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
           verify: async () => { const region = await compareRegion(before, after); return { checks: [
             { name: 'dispatch verified in helper', passed: !!applied && !!applied.target },
             { name: 'window still exists', passed: !!after && after.windows.some(w => w.title === String(args?.title || '') && (args?.pid == null || w.pid === args.pid)) },
-            ...(args.action === 'move' || args.action === 'click' || args.action === 'dblclick' || args.action === 'right' || args.action === 'drag' || args.action === 'path' || args.action === 'wheel' || args.action === 'setfield'
+            ...(args.action === 'move' || args.action === 'click' || args.action === 'dblclick' || args.action === 'right' || args.action === 'drag' || args.action === 'path' || args.action === 'wheel' || args.action === 'setfield' || args.action === 'paste'
               ? [{ name: 'cursor at the requested point (±1px)', passed: !!applied?.cursor && Math.abs(applied.cursor[0] - (args.action === 'drag' ? args?.endX : args.action === 'path' ? args.points.at(-1)?.[0] : args?.x)) <= 1 && Math.abs(applied.cursor[1] - (args.action === 'drag' ? args?.endY : args.action === 'path' ? args.points.at(-1)?.[1] : args?.y)) <= 1 }]
               : []),
             ...(!['move', 'wheel'].includes(args.action) ? [{ name: 'screen region changed (observation)', passed: region ? region.changedCells > 0 : false, observed: region }] : []),

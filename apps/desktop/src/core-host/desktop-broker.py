@@ -10,7 +10,8 @@ Invariants (fail closed):
   - Input dispatching verifies the foreground window BEFORE any input is sent, inside this
     same short-lived process, so a focus race cannot redirect the input.
   - Click/keyboard coordinates must fall inside the authorized target window rect.
-  - No clipboard access of any kind (nothing is read or written).
+  - Clipboard is WRITE-ONLY: the paste op may place caller-supplied text on it for an
+    immediate paste into the authorized window; nothing ever reads it back.
   - No network APIs are used.
   - Unknown ops are refused.
 """
@@ -34,6 +35,14 @@ user.MapVirtualKeyW.argtypes = [w.UINT, w.UINT]
 user.MapVirtualKeyW.restype = w.UINT
 user.VkKeyScanW.argtypes = [c.c_wchar]
 user.VkKeyScanW.restype = w.SHORT
+kernel.GlobalAlloc.argtypes = [w.UINT, c.c_size_t]
+kernel.GlobalAlloc.restype = c.c_void_p
+kernel.GlobalLock.argtypes = [c.c_void_p]
+kernel.GlobalLock.restype = c.c_void_p
+kernel.GlobalUnlock.argtypes = [c.c_void_p]
+kernel.GlobalFree.argtypes = [c.c_void_p]
+user.SetClipboardData.argtypes = [w.UINT, c.c_void_p]
+user.SetClipboardData.restype = c.c_void_p
 
 # Physical-pixel coordinates regardless of the python manifest: the screen math and any
 # ground-truth fixture must agree cell for cell. SetProcessDPIAware is a no-op when the
@@ -287,6 +296,34 @@ def _send_unicode_char(ch):
         if not user.SendInput(1, (INPUT * 1)(rec), c.sizeof(INPUT)):
             return False
     return True
+
+
+def set_clipboard_text(text):
+    # WRITE-ONLY clipboard placement for the paste op: the text is supplied by
+    # the caller (never read from anywhere) and consumed immediately by a
+    # Ctrl+V into the authorized window. No code path reads the clipboard.
+    data = (text + "\0").encode("utf-16-le")
+    CF_UNICODETEXT = 13
+    GMEM_MOVEABLE = 0x0002
+    if not user.OpenClipboard(None):
+        return False
+    try:
+        user.EmptyClipboard()
+        handle = kernel.GlobalAlloc(GMEM_MOVEABLE, len(data))
+        if not handle:
+            return False
+        ptr = kernel.GlobalLock(handle)
+        if not ptr:
+            kernel.GlobalFree(handle)
+            return False
+        c.memmove(ptr, data, len(data))
+        kernel.GlobalUnlock(handle)
+        if not user.SetClipboardData(CF_UNICODETEXT, handle):
+            kernel.GlobalFree(handle)
+            return False
+        return True
+    finally:
+        user.CloseClipboard()
 
 
 def send_text(text):
@@ -572,6 +609,42 @@ def main():
                                   "foreground": foreground_info()})); return 0
             typed = send_text(str(command.get("text", ""))[:2000])
             print(json.dumps({"ok": True, "typed": typed, "foreground": foreground_info()}))
+        elif op == "paste":
+            # Composite range fill: anchor-click inside the authorized window,
+            # place caller-supplied text on the (write-only) clipboard, then
+            # Ctrl+V. One call fills a whole block (e.g. a TSV range in a
+            # spreadsheet) the way a human pasting a copied block would.
+            expect_hwnd = command.get("expect_hwnd")
+            expect_title = command.get("expect_title")
+            x, y = command.get("x"), command.get("y")
+            if not isinstance(x, int) or isinstance(x, bool) or not isinstance(y, int) or isinstance(y, bool):
+                print(json.dumps({"ok": False, "error": "POINT_REQUIRED"})); return 0
+            if expect_hwnd is None:
+                print(json.dumps({"ok": False, "error": "POINT_OUTSIDE_TARGET"})); return 0
+            rect = window_info(int(expect_hwnd))["rect"]
+            if not point_in_rect(rect, x, y):
+                print(json.dumps({"ok": False, "error": "POINT_OUTSIDE_TARGET",
+                                  "target_rect": rect})); return 0
+            fg = verify_foreground(expect_hwnd, expect_title)
+            if fg is None:
+                print(json.dumps({"ok": False, "error": "FOREGROUND_MISMATCH",
+                                  "foreground": foreground_info()})); return 0
+            text = str(command.get("text", ""))[:20000]
+            if not user.SetCursorPos(int(x), int(y)):
+                print(json.dumps({"ok": False, "error": "CURSOR_MOVE_FAILED"})); return 0
+            if not send_mouse("click", x, y):
+                print(json.dumps({"ok": False, "error": "DISPATCH_FAILED"})); return 0
+            time.sleep(0.12)
+            if not set_clipboard_text(text):
+                print(json.dumps({"ok": False, "error": "CLIPBOARD_SET_FAILED"})); return 0
+            time.sleep(0.05)
+            if not send_hotkey(0x56, {"ctrl": True}):
+                print(json.dumps({"ok": False, "error": "DISPATCH_FAILED"})); return 0
+            time.sleep(0.25)
+            cursor = POINT(); user.GetCursorPos(c.byref(cursor))
+            print(json.dumps({"ok": True, "sent": True, "pasted_chars": len(text),
+                              "cursor": [cursor.x, cursor.y],
+                              "foreground": foreground_info()}))
         elif op == "hotkey":
             fg = verify_foreground(command.get("expect_hwnd"), command.get("expect_title"))
             if fg is None:
