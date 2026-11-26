@@ -42,6 +42,7 @@ user.SetProcessDPIAware()
 
 SW_RESTORE = 9
 VK_MENU = 0x12
+VK_ESCAPE = 0x1B
 VK_CONTROL = 0x11
 INPUT_MOUSE = 0
 INPUT_KEYBOARD = 1
@@ -139,11 +140,35 @@ def same_target(info, expect_hwnd, expect_title):
     return expect_hwnd is None and expect_title is None
 
 
+SHELL_OVERLAY_TITLES = ("Start", "Search", "Windows Input Experience")
+
+
+def dismiss_shell_overlay():
+    """Transient shell overlays (Start menu, Search pane, Input Experience) are
+    full-screen CoreWindows that hold the foreground and silently swallow the
+    focus contract: SetForegroundWindow to any app window fails while one is
+    up, and they reappear whenever a stray Windows-key press lands. Dismissing
+    one with a single ESC tap is focus management aimed at the shell itself -
+    the same class as the ALT-tap fallback in bring_to_front - never input to
+    an application window. Returns True when an overlay was dismissed."""
+    fg = user.GetForegroundWindow()
+    if not fg:
+        return False
+    info = window_info(fg)
+    if info["class"] != "Windows.UI.Core.CoreWindow" or info["title"] not in SHELL_OVERLAY_TITLES:
+        return False
+    user.keybd_event(VK_ESCAPE, 0, 0, 0)
+    user.keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.18)
+    return True
+
+
 def bring_to_front(hwnd):
     """SetForegroundWindow from a non-input process is restricted. The documented unlock is
     AttachThreadInput with the current foreground thread; it injects NO synthetic keys, so
     the target never arms its menu bar and never swallows a leading keystroke. The classic
     ALT tap stays only as a fallback, with a CTRL tap to cancel any menu mode it armed."""
+    dismiss_shell_overlay()
     user.ShowWindow(hwnd, SW_RESTORE)
     time.sleep(0.04)
     fg = user.GetForegroundWindow()
