@@ -131,12 +131,15 @@ function requirePoint(action, x, y, endX, endY, points) {
 }
 
 async function observe({ target = 'screen', title = null, pid = null, capture: wantCapture = true, region = null, maxDim = null } = {}, signal) {
+  const __ow = Date.now();
   const windows = await runHelper({ op: 'windows', limit: MAX_WINDOWS }, signal);
+  const __windowsMs = Date.now() - __ow;
   if (windows.ok !== true) throw Error('DESKTOP_HELPER_FAILED_' + (windows.error || 'UNKNOWN'));
   const list = windows.windows.slice(0, MAX_WINDOWS);
   const result = { windows: list.map(w => ({ title: w.title, pid: w.pid, rect: w.rect })) };
   const fg = await runHelper({ op: 'foreground' }, signal);
   result.foreground = fg.ok ? fg.foreground : null;
+  result.phaseMs = { windows: __windowsMs, capture: 0 };
   if (wantCapture) {
     const win = target === 'window' ? findWindow(list, { title, pid }) : null;
     // Optional tight read-back: a window-relative region captured at native
@@ -152,8 +155,10 @@ async function observe({ target = 'screen', title = null, pid = null, capture: w
     }
     const dir = newCaptureDir();
     const file = path.join(dir, crypto.randomUUID() + '.png');
+    const __oc = Date.now();
     const shot = await runHelper({ op: 'capture', path: file, hwnd: win ? win.hwnd : null, region: reg,
       max_dim: Number.isSafeInteger(maxDim) && maxDim >= 64 ? maxDim : null }, signal);
+    result.phaseMs.capture = Date.now() - __oc;
     if (shot.ok !== true) throw Error('DESKTOP_CAPTURE_FAILED_' + (shot.error || 'UNKNOWN'));
     result.capture = { path: file, sha256: shot.sha256, width: shot.width, height: shot.height, region: reg, scale: shot.scale || 1 };
     result.analysis = { ink: Array.isArray(shot.ink) ? shot.ink.slice(0, MAX_INK) : [], mean: shot.mean, width: shot.width, height: shot.height };
@@ -405,6 +410,7 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
           capture: observed.capture ? { sha256: observed.capture.sha256, width: observed.capture.width, height: observed.capture.height, path: observed.capture.path,
             region: observed.capture.region || null, scale: observed.capture.scale || 1 } : null,
           analysis: observed.analysis ? { ink: observed.analysis.ink, mean: observed.analysis.mean } : null,
+          phases: observed.phaseMs || null,
           visionCapability: vision() ? 'verified' : 'unverified',
           visionAvailable: vision(), visionNote: vision() ? 'selected model capability is verified' : 'selected model image input is not verified; only deterministic analysis is available' };
         if (vision() && observed.capture?.path) {
@@ -433,6 +439,7 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         if (state.stopped) return out({ ok: false, error: 'DESKTOP_STOPPED' });
         const fingerprint = windowFingerprint({ title: String(args?.title || ''), pid: args?.pid ?? null });
         let before = null, applied = null, after = null;
+        const __t0 = Date.now(); const phases = {};
         const r = await authorize(ctx, { op: 'cu-act', scopeToken: 'cu-act:' + fingerprint,
           card: { tool: 'computer_use_act', run: `${args.action} on window "${String(args?.title || '').slice(0, 60)}"${args.action === 'type' ? ` (text ${String(args?.text || '').length} chars)` : ''}`,
             change: 'operate this exact window with mouse/keyboard', scope: 'exact window title+pid, re-verified at dispatch time',
@@ -443,6 +450,7 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
             pathPoints: args.action === 'path' ? args.points : null,
             inputDigest: (args.action === 'type' || args.action === 'paste') ? crypto.createHash('sha256').update(String(args?.text || '')).digest('hex').slice(0, 24) : null },
           driver: async () => {
+            phases.gateMs = Date.now() - __t0;
             await enqueue(ctx.signal, 'act', async signal => {
               if (args.action === 'setfield') {
                 // Verify against a tight region around the field: a whole-window
@@ -458,9 +466,15 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
                 applied = await act(args, signal);
                 after = await observe({ target: 'window', title: args?.title, pid: args?.pid, region }, signal);
               } else {
+                const __b0 = Date.now();
                 before = await observe({ target: 'window', title: args?.title, pid: args?.pid }, signal);
+                phases.beforeMs = Date.now() - __b0;
+                const __d0 = Date.now();
                 applied = await act(args, signal);
+                phases.dispatchMs = Date.now() - __d0;
+                const __a0 = Date.now();
                 after = await observe({ target: 'window', title: args?.title, pid: args?.pid }, signal);
+                phases.afterMs = Date.now() - __a0;
               }
             });
             return { applied: true };
@@ -473,10 +487,11 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
               : []),
             ...(!['move', 'wheel'].includes(args.action) ? [{ name: 'screen region changed (observation)', passed: region ? region.changedCells > 0 : false, observed: region }] : []),
           ] }; } });
+        phases.verifyResidualMs = Math.max(0, (Date.now() - __t0) - (phases.gateMs || 0) - (phases.beforeMs || 0) - (phases.dispatchMs || 0) - (phases.afterMs || 0));
         if (r.ok === false) return out(r);
         if (!applied) return out({ ok: false, error: 'NOT_EXECUTED_' + (r.reason || r.outcome) });
         ctx.emit({ type: 'tool', badge: 'CU-ACT', target: `${args.action} ${String(args?.title || '').slice(0, 40)}` });
-        const result = { ok: true, outcome: r.outcome, target: applied.target, rect: applied.rect, cursor: applied.cursor,
+        const result = { ok: true, outcome: r.outcome, phases, target: applied.target, rect: applied.rect, cursor: applied.cursor,
           foreground: applied.foreground, region: r.checks?.find(c => c.name.startsWith('screen region'))?.observed || null,
           readback: applied.readback ? { width: applied.readback.width, height: applied.readback.height,
             mean: applied.readback.mean, region: applied.readback.region } : null };
