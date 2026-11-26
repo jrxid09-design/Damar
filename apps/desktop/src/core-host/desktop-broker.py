@@ -493,7 +493,9 @@ def point_in_rect(rect, x, y):
 
 def main():
     try:
-        command = json.loads(sys.stdin.read())
+        # The Core host writes UTF-8 JSON; text-mode stdin would decode with
+        # the locale codepage and garble non-ASCII window titles / typed text.
+        command = json.loads(sys.stdin.buffer.read().decode("utf-8"))
     except Exception:
         print(json.dumps({"ok": False, "error": "COMMAND_INVALID"})); return 1
     op = command.get("op")
@@ -743,7 +745,7 @@ def main():
             if expect_hwnd is None:
                 print(json.dumps({"ok": False, "error": "WINDOW_REQUIRED"})); return 0
             info = window_info(int(expect_hwnd))
-            if not info or (expect_title is not None and info["title"] != expect_title):
+            if not info or not same_target(info, expect_hwnd, expect_title):
                 print(json.dumps({"ok": False, "error": "WINDOW_NOT_FOUND"})); return 0
             if op != "uia_tree":
                 fg = verify_foreground(expect_hwnd, expect_title)
