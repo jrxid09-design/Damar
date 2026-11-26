@@ -21,6 +21,7 @@ from ctypes import wintypes as w
 import hashlib
 import json
 import struct
+import subprocess
 import sys
 import time
 import zlib
@@ -296,6 +297,32 @@ def _send_unicode_char(ch):
         if not user.SendInput(1, (INPUT * 1)(rec), c.sizeof(INPUT)):
             return False
     return True
+
+
+
+UIA_HELPER_CANDIDATES = [
+    os.environ.get("CU_UIA_HELPER") or "",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "uia-helper", "UiaHelper.exe"),
+    r"C:\Users\jrxid\cu-l5-test\tools\UiaHelper.exe",
+]
+
+
+def run_uia(request):
+    # UI Automation channel: structured element tree + pattern actions via a
+    # small compiled helper (source: uia-helper/UiaHelper.cs in this repo).
+    # Returns the helper's parsed JSON, or an error dict.
+    exe = next((p for p in UIA_HELPER_CANDIDATES if p and os.path.exists(p)), None)
+    if exe is None:
+        return {"ok": False, "error": "UIA_HELPER_MISSING"}
+    try:
+        proc = subprocess.run([exe], input=json.dumps(request).encode("utf-8"),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        line = proc.stdout.decode("utf-8", "replace").strip().splitlines()
+        if not line:
+            return {"ok": False, "error": "UIA_HELPER_NO_OUTPUT"}
+        return json.loads(line[-1])
+    except Exception as error:
+        return {"ok": False, "error": "UIA_HELPER_FAILED:" + type(error).__name__}
 
 
 def set_clipboard_text(text):
@@ -707,6 +734,35 @@ def main():
             print(json.dumps({"ok": True, "sent": True, "typed": typed,
                               "cursor": [cursor.x, cursor.y],
                               "foreground": foreground_info(), "readback": readback}))
+        elif op in ("uia_tree", "uia_invoke", "uia_setvalue"):
+            # Structured channel. The target window must be the authorized one;
+            # actions additionally require it to be the foreground window
+            # (the Core host focuses it first, same contract as mouse input).
+            expect_hwnd = command.get("expect_hwnd")
+            expect_title = command.get("expect_title")
+            if expect_hwnd is None:
+                print(json.dumps({"ok": False, "error": "WINDOW_REQUIRED"})); return 0
+            info = window_info(int(expect_hwnd))
+            if not info or (expect_title is not None and info["title"] != expect_title):
+                print(json.dumps({"ok": False, "error": "WINDOW_NOT_FOUND"})); return 0
+            if op != "uia_tree":
+                fg = verify_foreground(expect_hwnd, expect_title)
+                if fg is None:
+                    print(json.dumps({"ok": False, "error": "FOREGROUND_MISMATCH",
+                                      "foreground": foreground_info()})); return 0
+            request = {"hwnd": int(expect_hwnd),
+                       "mode": {"uia_tree": "tree", "uia_invoke": "invoke", "uia_setvalue": "setvalue"}[op]}
+            if op == "uia_tree":
+                request["maxDepth"] = command.get("max_depth", 6)
+                request["maxNodes"] = command.get("max_nodes", 300)
+            else:
+                request["name"] = str(command.get("name", ""))
+                request["type"] = str(command.get("type", ""))
+                if op == "uia_setvalue":
+                    request["value"] = str(command.get("value", ""))
+            result = run_uia(request)
+            result["foreground"] = foreground_info()
+            print(json.dumps(result))
         elif op == "capture":
             hwnd = command.get("hwnd")
             result = capture(command["path"], int(hwnd) if hwnd else None, command.get("region"),

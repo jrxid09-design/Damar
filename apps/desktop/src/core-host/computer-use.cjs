@@ -513,6 +513,54 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         return fail(e);
       } } },
       { canonicalAuthority: true, sideEffects: true, readOnly: false }),
+    tool({ name: 'computer_use_uia', description: 'Structured UI Automation channel for one authorized window. Action "tree" returns the element tree as TEXT (control type, name, bounding rect, current value, actionable patterns) - for native apps (LibreOffice, VS Code, system dialogs) prefer this over a screenshot: it is exact and cheap. Action "invoke" activates an element by name (and optional control type) via its Invoke/Toggle/SelectionItem pattern. Action "setvalue" writes a field through the Value pattern and verifies by reading the value back from the element. Canvas surfaces (games, image-editor canvases, Blender viewport) expose almost nothing here - keep using observe/act for those.',
+      parameters: { type: 'object', properties: { title: { type: 'string' }, pid: { type: 'integer' },
+        action: { type: 'string', enum: ['tree', 'invoke', 'setvalue'] },
+        name: { type: 'string' }, type: { type: 'string' }, value: { type: 'string' },
+        maxDepth: { type: 'integer' }, maxNodes: { type: 'integer' } },
+        required: ['title', 'action'] },
+      execute: async (args, execution) => { try {
+        const ctx = ctxOf(execution);
+        if (state.stopped) return out({ ok: false, error: 'DESKTOP_STOPPED' });
+        const fingerprint = windowFingerprint({ title: String(args?.title || ''), pid: args?.pid ?? null });
+        let applied = null;
+        const r = await authorize(ctx, { op: 'cu-uia', scopeToken: 'cu-uia:' + fingerprint,
+          card: { tool: 'computer_use_uia', run: `${args.action} on window "${String(args?.title || '').slice(0, 60)}"`,
+            change: 'read or operate this exact window via UI Automation', scope: 'exact window title+pid, re-verified at dispatch time',
+            risk: 'Structured element access on the authorized window only; invoke/setvalue change app state like a user would' },
+          parameters: { title: String(args?.title || '').slice(0, 120), pid: args?.pid ?? null, action: args.action,
+            name: args?.name || null, type: args?.type || null },
+          driver: async () => {
+            await enqueue(ctx.signal, 'act', async signal => {
+              const windows = await runHelper({ op: 'windows', limit: MAX_WINDOWS }, signal);
+              if (windows.ok !== true) throw Error('DESKTOP_HELPER_FAILED_' + (windows.error || 'UNKNOWN'));
+              const win = findWindow(windows.windows, { title: args?.title, pid: args?.pid });
+              if (args.action !== 'tree') {
+                const focused = await runHelper({ op: 'focus', hwnd: win.hwnd }, signal);
+                if (focused.ok !== true || focused.foreground?.hwnd !== win.hwnd) throw Error('FOCUS_REFUSED');
+              }
+              const op = args.action === 'tree' ? 'uia_tree' : args.action === 'invoke' ? 'uia_invoke' : 'uia_setvalue';
+              applied = await runHelper({ op, expect_hwnd: win.hwnd, expect_title: win.title,
+                name: args?.name || '', type: args?.type || '', value: args?.value || '',
+                max_depth: Number.isSafeInteger(args?.maxDepth) ? args.maxDepth : 6,
+                max_nodes: Number.isSafeInteger(args?.maxNodes) ? args.maxNodes : 300 }, signal);
+              if (applied.ok !== true) { const e = Error(applied.error || 'UIA_FAILED'); e.foreground = applied.foreground; throw e; }
+              applied.__win = { title: win.title, pid: win.pid };
+            });
+            return { applied: true };
+          },
+          verify: async () => ({ checks: [
+            { name: 'uia helper answered ok', passed: !!applied && applied.ok === true },
+            ...(args.action === 'setvalue' ? [{ name: 'element value read-back matches', passed: applied?.element?.value === String(args?.value || '') }] : []),
+          ] }) });
+        if (r.ok === false) return out(r);
+        if (!applied) return out({ ok: false, error: 'NOT_EXECUTED_' + (r.reason || r.outcome) });
+        const result = { ok: true, outcome: r.outcome, channel: 'uia', target: applied.__win,
+          ...(args.action === 'tree' ? { tree: applied.tree, truncated: !!applied.truncated }
+            : { element: applied.element || null, matches: applied.matches ?? null }) };
+        return out(result);
+      } catch (e) { return fail(e); } } },
+      { canonicalAuthority: true, sideEffects: true, readOnly: false }),
     tool({ name: 'computer_use_browser', description: 'Automate a real Core-owned browser window (fresh isolated profile): navigate an Owner-approved origin, click or fill a selector, read the page text, and verify the observed result with an allowlisted predicate. Other origins are refused.',
       parameters: { type: 'object', properties: { op: { type: 'string', enum: ['open', 'navigate', 'click', 'type', 'read', 'close'] },
         url: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' },
