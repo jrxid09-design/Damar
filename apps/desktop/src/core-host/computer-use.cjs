@@ -466,14 +466,16 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
                 applied = await act(args, signal);
                 after = await observe({ target: 'window', title: args?.title, pid: args?.pid, region }, signal);
               } else {
+                // Verification captures feed only the coarse ink-grid diff,
+                // so cap them at 1024px: same checks, cheaper capture+encode.
                 const __b0 = Date.now();
-                before = await observe({ target: 'window', title: args?.title, pid: args?.pid }, signal);
+                before = await observe({ target: 'window', title: args?.title, pid: args?.pid, maxDim: 1024 }, signal);
                 phases.beforeMs = Date.now() - __b0;
                 const __d0 = Date.now();
                 applied = await act(args, signal);
                 phases.dispatchMs = Date.now() - __d0;
                 const __a0 = Date.now();
-                after = await observe({ target: 'window', title: args?.title, pid: args?.pid }, signal);
+                after = await observe({ target: 'window', title: args?.title, pid: args?.pid, maxDim: 1024 }, signal);
                 phases.afterMs = Date.now() - __a0;
               }
             });
