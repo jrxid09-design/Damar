@@ -391,8 +391,12 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
           ? windowFingerprint({ title: String(args?.title || ''), pid: args?.pid ?? null })
           : 'screen:' + crypto.createHash('sha256').update(String(process.env.COMPUTERNAME || '')).digest('hex').slice(0, 12);
         let observed = null;
+        // Card run strings carry the window title up to 200 chars (not 60):
+        // permission policies match on this string, and document apps retitle
+        // to "<file> [<full path>] - App" after Save As - a 60-char cut silently
+        // amputated the app name and flipped act grants to DENIED_BY_OWNER (R2-9).
         const r = await authorize(ctx, { op: 'cu-observe', scopeToken: 'cu-observe:' + fingerprint,
-          card: { tool: 'computer_use_observe', run: target === 'window' ? `capture window "${String(args?.title || '').slice(0, 60)}"` : 'capture the whole screen',
+          card: { tool: 'computer_use_observe', run: target === 'window' ? `capture window "${String(args?.title || '').slice(0, 200)}"` : 'capture the whole screen',
             change: 'observe the desktop for the current task', scope: target === 'window' ? 'exact window title+pid' : 'full screen (privacy-sensitive)',
             risk: 'A screen image is written to the private scratch directory; pixels are never sent to a model unless it can actually accept images' },
           parameters: { target, fingerprint },
@@ -441,7 +445,7 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         let before = null, applied = null, after = null;
         const __t0 = Date.now(); const phases = {};
         const r = await authorize(ctx, { op: 'cu-act', scopeToken: 'cu-act:' + fingerprint,
-          card: { tool: 'computer_use_act', run: `${args.action} on window "${String(args?.title || '').slice(0, 60)}"${args.action === 'type' ? ` (text ${String(args?.text || '').length} chars)` : ''}`,
+          card: { tool: 'computer_use_act', run: `${args.action} on window "${String(args?.title || '').slice(0, 200)}"${args.action === 'type' ? ` (text ${String(args?.text || '').length} chars)` : ''}`,
             change: 'operate this exact window with mouse/keyboard', scope: 'exact window title+pid, re-verified at dispatch time',
             risk: 'Real input events are sent to the desktop; serialized and immediately stoppable' },
           parameters: { title: String(args?.title || '').slice(0, 120), pid: args?.pid ?? null, action: args.action,
@@ -525,7 +529,7 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         const fingerprint = windowFingerprint({ title: String(args?.title || ''), pid: args?.pid ?? null });
         let applied = null;
         const r = await authorize(ctx, { op: 'cu-uia', scopeToken: 'cu-uia:' + fingerprint,
-          card: { tool: 'computer_use_uia', run: `${args.action} on window "${String(args?.title || '').slice(0, 60)}"`,
+          card: { tool: 'computer_use_uia', run: `${args.action} on window "${String(args?.title || '').slice(0, 200)}"`,
             change: 'read or operate this exact window via UI Automation', scope: 'exact window title+pid, re-verified at dispatch time',
             risk: 'Structured element access on the authorized window only; invoke/setvalue change app state like a user would' },
           parameters: { title: String(args?.title || '').slice(0, 120), pid: args?.pid ?? null, action: args.action,
