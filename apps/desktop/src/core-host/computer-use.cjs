@@ -561,6 +561,39 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         return out(result);
       } catch (e) { return fail(e); } } },
       { canonicalAuthority: true, sideEffects: true, readOnly: false }),
+    tool({ name: 'computer_use_appmodel', description: 'App object-model channel (enabled only when DAMAR_CU_APPMODEL_PORT is set): sends ONE fixed-vocabulary command to the in-app bridge of the staged application (Blender bpy bridge: ping, get_objects, add_cube, add_uv_sphere, set_location, set_base_color, save, render). This reads/writes the app MODEL directly - exact object state, no pixels. The response includes the post-command object list as read-back verification. Vision stays available for visual review of renders/canvas.',
+      parameters: { type: 'object', properties: { command: { type: 'object' } }, required: ['command'] },
+      execute: async (args, execution) => { try {
+        const ctx = ctxOf(execution);
+        if (state.stopped) return out({ ok: false, error: 'DESKTOP_STOPPED' });
+        const port = Number(process.env.DAMAR_CU_APPMODEL_PORT || 0);
+        if (!port) return out({ ok: false, error: 'APPMODEL_NOT_CONFIGURED' });
+        const cmd = args?.command && typeof args.command === 'object' ? args.command : null;
+        if (!cmd || typeof cmd.cmd !== 'string') return out({ ok: false, error: 'APPMODEL_CMD_INVALID' });
+        let resp = null;
+        const r = await authorize(ctx, { op: 'cu-appmodel', scopeToken: 'cu-appmodel:' + port,
+          card: { tool: 'computer_use_appmodel', run: 'appmodel ' + cmd.cmd,
+            change: 'operate the staged app through its object model', scope: 'the bench-staged app bridge on localhost only',
+            risk: 'Fixed-vocabulary model commands (no arbitrary code); effects equal the user doing it in the app' },
+          parameters: { port, cmd: cmd.cmd },
+          driver: async () => {
+            resp = await new Promise((resolve, reject) => {
+              const net = require('node:net');
+              const sock = net.connect(port, '127.0.0.1');
+              let buf = '';
+              const timer = setTimeout(() => { try { sock.destroy(); } catch {} reject(Error('APPMODEL_TIMEOUT')); }, 120000);
+              sock.on('connect', () => sock.write(JSON.stringify(cmd) + '\n'));
+              sock.on('data', d => { buf += d.toString('utf-8'); if (buf.includes('\n')) { clearTimeout(timer); try { resolve(JSON.parse(buf.trim())); } catch (e) { reject(e); } try { sock.end(); } catch {} } });
+              sock.on('error', e => { clearTimeout(timer); reject(e); });
+            });
+            if (!resp || resp.ok !== true) throw Error('APPMODEL_CMD_FAILED_' + (resp?.error || 'NORESP'));
+            return { applied: true };
+          },
+          verify: async () => ({ checks: [ { name: 'bridge answered ok', passed: !!resp && resp.ok === true } ] }) });
+        if (r.ok === false) return out(r);
+        return out({ ok: true, outcome: r.outcome, channel: 'appmodel', response: resp });
+      } catch (e) { return fail(e); } } },
+      { canonicalAuthority: true, sideEffects: true, readOnly: false }),
     tool({ name: 'computer_use_dom', description: 'DOM channel for the bench-staged Edge instance (enabled only when DAMAR_CU_DOM_PORT is set): evaluates a JavaScript expression in the current page via CDP and returns its value as JSON text. For web apps with a real DOM (e.g. 2048: tiles and score are DOM elements) this reads EXACT state with zero screenshots - prefer it for reading game/document state; keep using act for input (key presses). Canvas apps expose almost nothing here.',
       parameters: { type: 'object', properties: { expression: { type: 'string' } }, required: ['expression'] },
       execute: async (args, execution) => { try {
