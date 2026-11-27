@@ -178,6 +178,15 @@
     'Pandawa Multi-Agent System': 'Sistem Multi-Agen Pandawa', 'Delegate Pandawa run': 'Delegasikan run Pandawa', '+ Delegate Run': '+ Delegasikan Run',
     'Remove an added model (optional)': 'Hapus model tambahan (opsional)', 'Remove an alias (optional)': 'Hapus alias (opsional)',
     'Go to': 'Buka', 'Refresh from Core': 'Segarkan dari Core', 'No matching commands.': 'Tidak ada perintah yang cocok.', 'Action': 'Aksi', 'Help': 'Bantuan',
+    'Activate provider': 'Aktifkan provider', 'Activate model': 'Aktifkan model', 'Revoke provider': 'Cabut provider', 'Connect provider': 'Hubungkan provider',
+    'Grant live model': 'Beri grant model live', 'Revoke model grant': 'Cabut grant model', 'Add provider': 'Tambah provider', 'Import keys': 'Impor key',
+    'Test model': 'Uji model', 'Key rotation': 'Rotasi key', 'Connection limits': 'Batas koneksi', 'New combo': 'Combo baru', 'Create gateway key': 'Buat key gateway',
+    'Remove provider': 'Hapus provider', 'Cancel Pandawa run': 'Batalkan run Pandawa', 'Save Core settings': 'Simpan pengaturan Core', 'Save CLI settings': 'Simpan pengaturan CLI', 'Routing': 'Routing',
+    'Make %s the active provider in Core?': 'Jadikan %s provider aktif di Core?', 'Activate %s on %s?': 'Aktifkan %s di %s?',
+    'Remove the stored configuration and key for %s in Core?': 'Hapus konfigurasi dan key tersimpan untuk %s di Core?',
+    'Remove the connection %s and its remembered key from Core?': 'Hapus koneksi %s dan key yang diingatnya dari Core?',
+    'Request cancellation of %s? A running provider call finishes; its result is discarded.': 'Minta pembatalan %s? Panggilan provider yang sedang berjalan akan selesai; hasilnya dibuang.',
+    'Set autonomy %s, skill routing %s?': 'Atur otonomi %s, routing skill %s?',
     'Emergency stop': 'Henti darurat', 'Engaged': 'Aktif', 'Policy enforcement': 'Penegakan kebijakan', 'Pending permission requests': 'Permintaan izin menunggu',
     'Agent autonomy profile': 'Profil otonomi agen', 'Live model grant': 'Grant model live', 'Approvals': 'Persetujuan',
     'Memories': 'Memori', 'Entities': 'Entitas', 'Documents': 'Dokumen', 'Embeddings': 'Embedding', 'Note': 'Catatan', 'Added': 'Ditambahkan',
@@ -784,7 +793,7 @@
   function renderPandawaView() {
     var runs = LIVE.d('runs'), ag = LIVE.d('agents');
     var html = pageHeader('DAMAR INTELLIGENCE • MISSION ORCHESTRATION', 'Pandawa Multi-Agent System', 'Owner-approved runs through Core agentHub. Cancel stops queued runs; a running provider call finishes and its result is discarded.',
-      '<button type="button" class="btn btn-primary" id="pandawaCreateTaskBtn">+ Delegate Run</button>');
+      '<button type="button" class="btn btn-primary" id="pandawaCreateTaskBtn">' + escapeHtml(L('+ Delegate Run')) + '</button>');
     var workers = runs ? runs.workers : [];
     var byId = {}; (ag ? ag.agents : []).forEach(function (a) { byId[a.id] = a; });
     html += panel('Pandawa Agent Registry', runs ? table(['Agent', 'Role', 'Availability', 'Active runs', 'Completed'], workers.map(function (w) {
@@ -1114,12 +1123,12 @@
   (root.DamarControl = root.DamarControl || {}).onboarding = { connect: function () { ACTIONS['data-add-provider'](); }, grant: function () { ACTIONS['data-grant'](); } };
 
   var ACTIONS = {
-    'data-select-provider': function (id) { ownerAction('Activate provider', '<p style="font-size:12.5px;">Make <strong>' + escapeHtml(id) + '</strong> the active provider in Core?</p>', function () { return core.post('/api/r9/provider', { provider: id }); }); },
+    'data-select-provider': function (id) { ownerAction('Activate provider', '<p style="font-size:12.5px;">' + L('Make %s the active provider in Core?').replace('%s', '<strong>' + escapeHtml(id) + '</strong>') + '</p>', function () { return core.post('/api/r9/provider', { provider: id }); }); },
     'data-select-model': function (id, el) {
       var model = el.getAttribute('data-model');
-      ownerAction('Activate model', '<p style="font-size:12.5px;">Activate <strong>' + escapeHtml(model) + '</strong> on <strong>' + escapeHtml(id) + '</strong>?</p>', function () { return core.post('/api/r9/provider', { provider: id, model: model, expectedVersion: version() }); });
+      ownerAction('Activate model', '<p style="font-size:12.5px;">' + L('Activate %s on %s?').replace('%s', '<strong>' + escapeHtml(model) + '</strong>').replace('%s', '<strong>' + escapeHtml(id) + '</strong>') + '</p>', function () { return core.post('/api/r9/provider', { provider: id, model: model, expectedVersion: version() }); });
     },
-    'data-revoke-provider': function (id) { ownerAction('Revoke provider', '<p style="font-size:12.5px;">Remove the stored configuration and key for <strong>' + escapeHtml(id) + '</strong> in Core?</p>', function () { return core.post('/api/r9/provider/revoke', { provider: id }); }); },
+    'data-revoke-provider': function (id) { ownerAction('Revoke provider', '<p style="font-size:12.5px;">' + L('Remove the stored configuration and key for %s in Core?').replace('%s', '<strong>' + escapeHtml(id) + '</strong>') + '</p>', function () { return core.post('/api/r9/provider/revoke', { provider: id }); }); },
     'data-connect-provider': function (id) {
       var p = providerById(id) || {};
       ownerAction('Connect provider', field('cxLabel', 'Name', '<input type="text" class="input-field" id="cxLabel" style="width:100%;" maxlength="64" value="' + escapeHtml(p.label || '') + '" />') +
@@ -1277,8 +1286,8 @@
         }, 'The key is shown once. Clients use it as their OpenAI API key with the gateway base URL.');
     },
     'data-gw-key-revoke': function (kid) { ownerAction('Revoke gateway key', '<p style="font-size:12.5px;">' + escapeHtml(L('Clients using this key stop working immediately.')) + '</p>', function () { return core.post('/api/r9/gateway', { action: 'revoke-key', id: kid }); }); },
-    'data-remove-provider': function (id) { ownerAction('Remove provider', '<p style="font-size:12.5px;">Remove the connection <strong>' + escapeHtml(id) + '</strong> and its remembered key from Core?</p>', function () { return core.post('/api/r9/provider/remove', { provider: id, expectedVersion: version() }); }); },
-    'data-cancel-run': function (id) { ownerAction('Cancel Pandawa run', '<p style="font-size:12.5px;">Request cancellation of ' + mono(id) + '? A running provider call finishes; its result is discarded.</p>', function () { return core.post('/api/r9/pandawa/runs/' + id + '/cancel', {}); }); },
+    'data-remove-provider': function (id) { ownerAction('Remove provider', '<p style="font-size:12.5px;">' + L('Remove the connection %s and its remembered key from Core?').replace('%s', '<strong>' + escapeHtml(id) + '</strong>') + '</p>', function () { return core.post('/api/r9/provider/remove', { provider: id, expectedVersion: version() }); }); },
+    'data-cancel-run': function (id) { ownerAction('Cancel Pandawa run', '<p style="font-size:12.5px;">' + L('Request cancellation of %s? A running provider call finishes; its result is discarded.').replace('%s', mono(id)) + '</p>', function () { return core.post('/api/r9/pandawa/runs/' + id + '/cancel', {}); }); },
     'data-inspect-session': function (id) {
       core.get('/api/r9/sessions/' + id).then(function (r) {
         if (!r.ok) return showToast(describeFailure(r));
@@ -1297,7 +1306,7 @@
     'data-load-settings': function () { loadSettings(); },
     'data-save-settings': function () {
       var values = { autonomy: val('settingsAutonomy'), skills: { routing: val('settingsRouting'), disabled: state.settings.data.skills.disabled } };
-      ownerAction('Save Core settings', '<p style="font-size:12.5px;">Set autonomy <strong>' + escapeHtml(values.autonomy) + '</strong>, skill routing <strong>' + escapeHtml(values.skills.routing) + '</strong>?</p>', function () {
+      ownerAction('Save Core settings', '<p style="font-size:12.5px;">' + L('Set autonomy %s, skill routing %s?').replace('%s', '<strong>' + escapeHtml(values.autonomy) + '</strong>').replace('%s', '<strong>' + escapeHtml(values.skills.routing) + '</strong>') + '</p>', function () {
         return controlSession().then(function (id) { return core.post('/api/r9/settings', { action: 'update', cliSession: id, client: state.control.client, values: values }); }).then(function (r) { if (r.ok) loadSettings(); return r; });
       });
     },
