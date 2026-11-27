@@ -6,6 +6,7 @@
 // and the first-run onboarding writes (IPC 'damar-onboarding-*'); the renderer never sees a credential.
 // Usage: electron src/presence [--session "<Core session dir>"] [--profile "<CLI profile dir>"]
 const { app, BrowserWindow, ipcMain, screen, Tray, Menu, globalShortcut, nativeImage, protocol, shell, session } = require('electron');
+const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const files = require('./renderer-files.cjs');
@@ -17,6 +18,11 @@ const SELFTEST = process.env.DAMAR_PRESENCE_SELFTEST === '1'; // hidden window, 
 const arg = name => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : undefined; };
 const BRAND_ICON_PATH = path.join(__dirname, 'renderer', 'damaricon-clean.png');
 const DAMAR_CMD = path.join(__dirname, '..', '..', 'damar.cmd');
+// Damar Notch 3D stage model (the Owner's final base character). The renderer cannot fetch
+// (CSP connect-src 'none'; scheme registered with supportFetchAPI:false), so the bytes cross
+// on this one fixed IPC channel, read once and cached. No path input from the renderer.
+const NOTCH3D_MODEL_PATH = path.join(__dirname, 'renderer', 'argon-assets', 'visuals', 'notch-3d', 'damar-notch-base-3d.glb');
+let notch3dModelCache = null;
 
 protocol.registerSchemesAsPrivileged([{ scheme: files.SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: false } }]);
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -94,6 +100,10 @@ function bindCore() {
 
 ipcMain.handle('damar-runtime-request', (event, request) => (fromMain(event) ? uiResponse(request, projection) : { ok: false, error: { kind: 'NOT_ALLOWED', message: 'Runtime bridge unavailable.' } }));
 ipcMain.handle('damar-presence-get', event => (fromMain(event) ? message() : null));
+ipcMain.handle('damar-notch-model', event => {
+  if (!fromMain(event)) return null;
+  try { return notch3dModelCache || (notch3dModelCache = fs.readFileSync(NOTCH3D_MODEL_PATH)); } catch { return null; }
+});
 ipcMain.handle('damar-media-control', async (event, request) => {
   if (!fromMain(event) || !core) return { ok: false };
   try { await core.mediaControl(String(request?.action || '')); return { ok: true }; } catch { return { ok: false }; }

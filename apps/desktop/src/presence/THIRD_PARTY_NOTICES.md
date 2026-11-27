@@ -49,3 +49,10 @@ SOFTWARE.
 
 Electron 30.5.1 (MIT), devDependency in `package.json`; its bundled Chromium/Node licenses ship in
 `node_modules/electron/dist/LICENSES.chromium.html`.
+
+## three.js — MIT License
+
+`renderer/vendor/three.min.js`, `renderer/vendor/GLTFLoader.js` and `renderer/vendor/SkeletonUtils.js`
+are three.js **r147** (Copyright 2010-2022 Three.js Authors), unmodified, from the npm package
+`three@0.147.0`. Vendored locally so the Notch 3D stage makes no network request. License:
+https://github.com/mrdoob/three.js/blob/r147/LICENSE (MIT).
