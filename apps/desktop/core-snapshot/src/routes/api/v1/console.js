@@ -14,6 +14,7 @@ const telegramController = require("../../../controllers/telegramController");
 const channelController = require("../../../controllers/channelController");
 const companionController = require("../../../companion/deviceController");
 const mcpController = require("../../../controllers/mcpController");
+const productivityController = require("../../../controllers/productivityController");
 const pulse = require("../../../autonomy/pulse");
 const watchdog = require("../../../autonomy/watchdog");
 const dream = require("../../../autonomy/dream");
@@ -231,6 +232,22 @@ router.get("/mcp/servers", mcpController.list);
 router.post("/mcp/servers", mcpManagerOnly);
 router.delete("/mcp/servers/:id", mcpManagerOnly);
 router.post("/mcp/restart", mcpManagerOnly);
+
+// ---- MCP Produktivitas: suite connect/login (Gmail/Drive/Blender/dsb.) --
+// Baca terbuka seperti GET /mcp/servers; mutasi lewat gerbang manager
+// yang sama. Callback OAuth TANPA gerbang: browser provider yang
+// datang, state sekali pakai adalah buktinya (pola localhost OAuth).
+router.get("/mcp/productivity", productivityController.list);
+router.get("/mcp/productivity/health/:serverId", productivityController.health);
+router.post("/mcp/productivity/client/:serverId", mcpManagerOnly, productivityController.saveClient);
+router.delete("/mcp/productivity/client/:serverId", mcpManagerOnly, productivityController.forgetClient);
+router.post("/mcp/productivity/connect/:serverId", mcpManagerOnly, productivityController.startConnect);
+router.post("/mcp/productivity/disconnect/:serverId", mcpManagerOnly, productivityController.disconnect);
+router.post("/mcp/productivity/services/:serverId", mcpManagerOnly, productivityController.setService);
+router.post("/mcp/productivity/filesystem/grants", mcpManagerOnly, productivityController.setGrants);
+router.post("/mcp/productivity/blender/target", mcpManagerOnly, productivityController.setBlenderTarget);
+router.post("/mcp/productivity/seed", mcpManagerOnly, productivityController.seed);
+router.get("/mcp/oauth/:providerId/callback", productivityController.callback);
 
 // ---- Otonomi: pulse · watchdog · dream ---------------------------
 

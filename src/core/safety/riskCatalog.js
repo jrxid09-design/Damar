@@ -138,6 +138,42 @@ const DESTRUCTIVE = new Set([
     "play_youtube",
     "play_media"
 
+,
+    // ---- MCP Produktivitas (suite) --------------------------------
+    // Tool tier "write" suite produktivitas: mengubah dunia luar
+    // (kirim/unggah/hapus/buat/putar) — ditahan gerbang persetujuan
+    // pemilik persis tool destruktif lain. Nama = tail kanonik tool
+    // (nama bridge: mcp__<server>__<tool>). Tool tier "read" suite
+    // sengaja TIDAK di sini: baca berjalan langsung, tetap teraudit.
+    "gmail_send_message",
+    "gmail_trash_message",
+    "drive_upload_file",
+    "drive_create_folder",
+    "drive_delete_file",
+    "calendar_create_event",
+    "calendar_delete_event",
+    "outlook_send_message",
+    "onedrive_upload_file",
+    "ms_calendar_create_event",
+    "notion_create_page",
+    "notion_append_text",
+    "slack_post_message",
+    "github_create_issue",
+    "github_create_comment",
+    "spotify_play",
+    "spotify_pause",
+    "spotify_next",
+    "spotify_previous",
+    "spotify_create_playlist",
+    "spotify_add_to_playlist",
+    "todoist_create_task",
+    "todoist_complete_task",
+    "todoist_delete_task",
+    "blender_set_object_transform",
+    "blender_render_image",
+    "fs_write_text",
+    "fs_create_directory",
+    "fs_delete_path"
 ]);
 
 /**
