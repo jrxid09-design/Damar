@@ -374,8 +374,10 @@ async function child(directory, resume, recovered = false) {
       appendDurable: require('./r9-routes.cjs').appendDurable, readJsonl: require('./r9-routes.cjs').readJsonl, activity: a => turns.noteActivity(a),
       roleOf: m => m === 'damar' ? { label: 'DAMAR (lead)', mandate: 'You lead the Pandawa team: weigh the members proposals on evidence and decide.' } : identity.roleProfile(m) });
     const mediaSession = require('./media-session.cjs').createMediaSession({});
+    // First-run onboarding interview (branch A): bounded completions through the router; template branch needs nothing here.
+    const onboardingChat = require('./onboarding-chat.cjs').createOnboardingChat({ registry, router: providerRouter });
     r9 = require('./r9-routes.cjs').createR9Routes({
-      directory, credentials: runtime.credentials, hub, registry, turns, checkpoints, settings: coreSettings, modelGrants, providerAdmin, team, media: mediaSession, oauthLogin,
+      directory, credentials: runtime.credentials, hub, registry, turns, checkpoints, settings: coreSettings, modelGrants, providerAdmin, team, media: mediaSession, oauthLogin, onboardingChat,
       parallelRuns: Number(process.env.DAMAR_PANDAWA_PARALLEL || 3),
       mataDewa: require('../mata-dewa/index.cjs').createMataDewa({ proactiveAutostart: true, settings: coreSettings, keyStore, cacheFile: path.join(directory, 'mata-dewa-cache.json'), profileDir: path.join(path.dirname(settingsFile), 'mata-dewa'), python, alprDir: path.join(SCRATCH, 'alpr'), // installed: %LOCALAPPDATA%\DAMAR\alpr
         // ALPR watchlist hits join the redacted activity feed (requester: camera label only; owner: plate in `detail`).

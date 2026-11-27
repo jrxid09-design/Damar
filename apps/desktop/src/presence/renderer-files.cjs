@@ -9,11 +9,11 @@ const ROOT = path.join(__dirname, 'renderer');
 const SCHEME = 'damar-presence';
 const ENTRY = `${SCHEME}://app/idle_present`;
 const OWNER_SHA256 = 'e7d6b92116d420d26cc83c5f6de073419004da78eef3c095c6c03ddb0b8bc815';
-const INJECT = ['presence-i18n.js', 'damar-island-fsm.js', 'argon-character-engine.js', 'damar-notch-rig-data.js', 'damar-notch-character.js', 'damar-notch-behavior.js', 'damar-island.js', 'presence-adapter.js']
+const INJECT = ['presence-i18n.js', 'damar-island-fsm.js', 'argon-character-engine.js', 'damar-notch-rig-data.js', 'damar-notch-character.js', 'damar-notch-behavior.js', 'damar-island.js', 'presence-adapter.js', 'presence-onboarding.js']
   .map(f => `<script src="/${f}" defer></script>`).join('');
 const FILES = Object.freeze({
   '/damar-island-fsm.js': 'damar-island-fsm.js', '/argon-character-engine.js': 'argon-character-engine.js',
-  '/damar-island.js': 'damar-island.js', '/damar-notch-character.js': 'damar-notch-character.js', '/presence-adapter.js': 'presence-adapter.js', '/presence-i18n.js': 'presence-i18n.js', '/damar-notch-behavior.js': 'damar-notch-behavior.js', '/damar-notch-rig-data.js': 'damar-notch-rig-data.js',
+  '/damar-island.js': 'damar-island.js', '/damar-notch-character.js': 'damar-notch-character.js', '/presence-adapter.js': 'presence-adapter.js', '/presence-i18n.js': 'presence-i18n.js', '/damar-notch-behavior.js': 'damar-notch-behavior.js', '/damar-notch-rig-data.js': 'damar-notch-rig-data.js', '/presence-onboarding.js': 'presence-onboarding.js',
   // Damar Notch v3 sprite stage (approved glossy art, WebP).
   '/notch-v3/expr-happy.webp': 'argon-assets/visuals/notch-v3/expr-happy.webp', '/notch-v3/expr-alert.webp': 'argon-assets/visuals/notch-v3/expr-alert.webp', '/notch-v3/expr-thinking.webp': 'argon-assets/visuals/notch-v3/expr-thinking.webp', '/notch-v3/expr-recovering.webp': 'argon-assets/visuals/notch-v3/expr-recovering.webp', '/notch-v3/expr-surprised.webp': 'argon-assets/visuals/notch-v3/expr-surprised.webp',
   '/notch-v3/costume-chef.webp': 'argon-assets/visuals/notch-v3/costume-chef.webp', '/notch-v3/costume-hacker.webp': 'argon-assets/visuals/notch-v3/costume-hacker.webp', '/notch-v3/costume-engineer.webp': 'argon-assets/visuals/notch-v3/costume-engineer.webp', '/notch-v3/costume-detective.webp': 'argon-assets/visuals/notch-v3/costume-detective.webp', '/notch-v3/costume-artist.webp': 'argon-assets/visuals/notch-v3/costume-artist.webp', '/notch-v3/costume-matadewa.webp': 'argon-assets/visuals/notch-v3/costume-matadewa.webp',

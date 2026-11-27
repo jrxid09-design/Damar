@@ -32,7 +32,7 @@ function readJsonl(file) {
 const tokenEq = (a, b) => typeof a === 'string' && typeof b === 'string' && crypto.timingSafeEqual(crypto.createHash('sha256').update(a).digest(), crypto.createHash('sha256').update(b).digest());
 const clean = (s, n) => String(s ?? '').replace(/[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, ' ').slice(0, n);
 
-function createR9Routes({ directory, credentials, hub, registry, canonicalUsageToday, turns = null, sandbox = () => null, checkpoints = null, memory = null, settings = null, budget = null, lifecycle = null, jobSnapshot = () => null, modelGrants = null, mataDewa = null, team = null, providerAdmin = null, media = null, oauthLogin = null, parallelRuns = 3 }) {
+function createR9Routes({ directory, credentials, hub, registry, canonicalUsageToday, turns = null, sandbox = () => null, checkpoints = null, memory = null, settings = null, budget = null, lifecycle = null, jobSnapshot = () => null, modelGrants = null, mataDewa = null, team = null, providerAdmin = null, media = null, oauthLogin = null, onboardingChat = null, parallelRuns = 3 }) {
   if (!Number.isSafeInteger(parallelRuns) || parallelRuns < 1 || parallelRuns > 3) throw Error('PANDAWA_PARALLEL_INVALID');
   const runsFile = path.join(directory, 'pandawa-runs.jsonl'), receiptsFile = path.join(directory, 'usage-receipts.jsonl');
   const runs = new Map(), byRequest = new Map(), receipts = new Map();
@@ -240,6 +240,37 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
       if (p === '/api/r9/presence/settings' && settings?.presence) {
         if (req.method !== 'GET' || url.search) return json(405, { success: false, error: 'METHOD_NOT_ALLOWED' });
         return json(200, { success: true, data: settings.presence() });
+      }
+      // First-run onboarding (Presence, Owner only). Save: the confirmed answers land in the same centralized
+      // settings store Control reads; the completion flag is composed here server-side (never accepted from
+      // the client) and a completed onboarding cannot be saved twice. Chat: one branch-A interview turn via
+      // Core's onboarding service (fixed system prompt, granted live model only; 409 -> template fallback).
+      if (p === '/api/r9/presence/onboarding' || p === '/api/r9/presence/onboarding/chat') {
+        if (req.method !== 'POST' || url.search) return json(405, { success: false, error: 'METHOD_NOT_ALLOWED' });
+        if (who !== 'owner') return json(403, { success: false, error: 'OWNER_REQUIRED' });
+        if (!settings) return json(503, { success: false, error: 'SETTINGS_UNAVAILABLE' });
+        const input = await body(req, 16384);
+        if (p.endsWith('/chat')) {
+          if (!onboardingChat) return json(503, { success: false, error: 'ONBOARDING_CHAT_UNAVAILABLE' });
+          try { return json(200, { success: true, data: await onboardingChat.chat(input?.messages) }); }
+          catch (e) { return json(e.status || 502, { success: false, error: e.message || 'ONBOARDING_CHAT_FAILED' }); }
+        }
+        const allowed = ['displayName', 'salutation', 'voiceEnabled', 'language'];
+        if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(k => !allowed.includes(k))
+          || (input.displayName !== undefined && typeof input.displayName !== 'string')
+          || (input.salutation !== undefined && typeof input.salutation !== 'string')
+          || (input.voiceEnabled !== undefined && typeof input.voiceEnabled !== 'boolean')
+          || (input.language !== undefined && !['id', 'en'].includes(input.language)))
+          return json(400, { success: false, error: 'ONBOARDING_REQUEST_INVALID' });
+        if (settings.presence().presence.onboardingCompleted === true) return json(409, { success: false, error: 'ONBOARDING_ALREADY_COMPLETED', data: settings.presence() });
+        try {
+          const presence = { onboardingCompleted: true };
+          for (const k of ['displayName', 'salutation', 'voiceEnabled']) if (input[k] !== undefined) presence[k] = input[k];
+          const values = { presence };
+          if (input.language !== undefined) values.cli = { language: input.language };
+          settings.update(values);
+          return json(200, { success: true, data: settings.presence() });
+        } catch (e) { if (e.status) return json(e.status, { success: false, error: e.message }); throw e; }
       }
       // DAMAR CLI appearance + last accepted provider/model (read-only; requester or owner). Owner writes: /settings values.cli.
       if (p === '/api/r9/cli/settings' && settings?.cli) {
