@@ -26,3 +26,7 @@ console-credentials.json
 # Release build outputs and downloaded build tools
 dist/
 .release-tools/
+
+# Bytecode tetap artefak kompilasi: negasi sumber di atas tidak berlaku untuk .pyc.
+**/__pycache__/
+*.pyc
