@@ -595,7 +595,7 @@
     var body;
     if (tab === 'Tools') { var t = LIVE.d('tools'); body = t ? table(['Tool', 'Plugin', 'Description'], t.tools.map(function (x) { return [mono(x.id), escapeHtml(x.pluginId), '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(x.description) + '</span>']; })) : readState('tools', 'tools'); }
     else if (tab === 'Plugins') { var p = LIVE.d('plugins'); body = p ? table(['Plugin', 'Version', 'Category', 'Tools', 'Permissions', 'Description'], p.plugins.map(function (x) { return ['<span style="color:var(--text-ivory);font-weight:600;">' + escapeHtml(x.name) + '</span>', mono(x.version), escapeHtml(x.category), '<span class="td-num">' + num(x.toolCount) + '</span>', escapeHtml((x.permissions || []).join(', ') || '-'), '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(x.description) + '</span>']; })) : readState('plugins', 'plugins'); }
-    else if (tab === 'Agents') { var a = LIVE.d('agents'); body = a ? table(['Agent', 'Kind', 'Online', 'Description'], a.agents.map(function (x) { return ['<span style="color:var(--damar-gold-bright);font-weight:700;">' + escapeHtml(x.label || x.id) + '</span>', escapeHtml(x.kind), statusBadgeHtml(x.online ? 'ONLINE' : 'OFFLINE'), '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(x.description || x.role || '') + '</span>']; })) : readState('agents', 'agents'); }
+    else if (tab === 'Agents') { var a = LIVE.d('agents'); body = a ? table(['Agent', 'Kind', 'Online', 'Description'], a.agents.map(function (x) { return ['<span style="color:var(--damar-gold-bright);font-weight:700;">' + escapeHtml(x.label || x.id) + '</span>', escapeHtml(x.kind), statusBadgeHtml(x.online ? 'ONLINE' : 'OFFLINE'), '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(shortRole(x)) + '</span>']; })) : readState('agents', 'agents'); }
     else if (tab === 'MCP') {
       var m = LIVE.d('mcp');
       body = m ? kvList([kv('DAMAR MCP server', m.server ? m.server.name : '-'), kv('Exposed tools', m.server ? m.server.exposed + ' of ' + m.server.total + (m.server.destructiveHidden ? ' (destructive hidden)' : '') : '-'), kv('Client servers running', m.clients ? m.clients.running + ' running, ' + m.clients.bridged + ' bridged' : '-')]) +
@@ -760,6 +760,15 @@
       });
     });
   }
+  function shortRole(a) {
+    // Registry role/description fields carry the agent's full persona prompt;
+    // the table shows the short specialization from the label's parenthetical
+    // ("Puntadewa (strategi, sintesis & arbitrase)"), else the first sentence.
+    var m = String(a.label || '').match(/\(([^)]{3,60})\)/);
+    if (m) return m[1];
+    var s = String(a.description || a.role || '').split(/[.!?]\s/)[0].trim();
+    return s.length > 80 ? s.slice(0, 77).trimEnd() + '…' : s;
+  }
   function renderPandawaView() {
     var runs = LIVE.d('runs'), ag = LIVE.d('agents');
     var html = pageHeader('DAMAR INTELLIGENCE • MISSION ORCHESTRATION', 'Pandawa Multi-Agent System', 'Owner-approved runs through Core agentHub. Cancel stops queued runs; a running provider call finishes and its result is discarded.',
@@ -770,7 +779,7 @@
       var mine = runs.runs.filter(function (r) { return r.worker === w; });
       var a = byId[w] || {};
       return ['<div style="font-weight:700;color:var(--damar-gold-bright);">' + escapeHtml(a.label || w) + '</div><div style="font-size:10.5px;font-family:var(--font-mono);color:var(--text-muted);">pandawa:' + escapeHtml(w) + '</div>',
-        '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(String(a.role || String(a.description || '').split(/[.!?]\s/)[0]).slice(0, 100)) + '</span>', statusBadgeHtml(a.online === false ? 'OFFLINE' : 'ONLINE'),
+        '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(shortRole(a)) + '</span>', statusBadgeHtml(a.online === false ? 'OFFLINE' : 'ONLINE'),
         '<span class="td-num">' + mine.filter(function (r) { return TERMINAL.indexOf(r.state) < 0; }).length + '</span>', '<span class="td-num">' + mine.filter(function (r) { return r.state === 'COMPLETED'; }).length + '</span>'];
     })) : readState('runs', 'Pandawa runs'), { flush: true });
     html += panel('Run Ledger', runsTable(runs ? runs.runs.slice().reverse() : [], !runs), { flush: true, subtitle: runs ? runs.queued + ' queued' : '' });
