@@ -153,6 +153,49 @@
     restore() { this.hero(false); this.set('damarIsSpeaking', false); this.set('damarState', 'IDLE'); this.palette(GOLD); this.raise(false); },
   };
 
+  // ---- Gate-keeping against the page's own idle / click-through machinery (idle_present.html).
+  // Two page mechanisms collide with this gate, both proven live on the Owner's machine:
+  //  (1) Click-through: the page's mousemove engine calls setIgnoreMouse(true) unless the pointer is
+  //      over a dashboard card (.solid-card/.main-window/.settings-popover/.toast-banner) or, outside
+  //      DASHBOARD surface mode, the siri dock. #damarOnboarding matches none of those, so over these
+  //      fields the window ignores the mouse entirely - clicks fall through to the desktop and the
+  //      fields can never be focused, hence never typed into.
+  //  (2) Idle standby: after 30 s without page-recognized input the page enters STANDBY_ORB
+  //      (enterStandbyMiniOrb): animateOrb only draws in DASHBOARD surface mode, so the orb this
+  //      design promises vanishes behind the gate while its shell collapses around it.
+  // While the gate is open this module therefore: countermands the click-through over the overlay
+  // (see build()), exits standby if it already happened - restoring the approved collapsed,
+  // transparent shell afterwards, because wakeFromMiniOrb's dashboard reveal is not the onboarding
+  // look - and re-arms the page idle timer so standby cannot re-enter mid-flow. No layout or visual
+  // change: the orb keeps floating over the same transparent, darker-at-the-bottom surface. ----
+  let gateTimer = null, gateWoke = false, gateHeldShell = false;
+  function gateKeep() {
+    const body = document.body;
+    if (body.classList.contains('siri-dock-active') && typeof window.wakeFromMiniOrb === 'function') {
+      gateWoke = true;
+      try { window.wakeFromMiniOrb(); } catch {}
+      // wakeFromMiniOrb flips the surface back to DASHBOARD (which is what makes the orb render
+      // again) but also un-collapses the shell ~220 ms later; re-collapse to keep the transparent
+      // onboarding look the Owner approved.
+      setTimeout(() => { if (started && els && !els.root.hidden) body.classList.add('orb-shell-collapsed'); }, 500);
+    } else if (!body.classList.contains('orb-shell-collapsed')) {
+      // Hold the Owner-approved onboarding look for the whole gate: dashboard furniture away, the
+      // orb floating over the transparent, darker-at-the-bottom shell (restored in gateKeepStop).
+      body.classList.add('orb-shell-collapsed');
+      gateHeldShell = true;
+    }
+    try { window.resetIdleTimer?.(); } catch {}
+  }
+  function gateKeepStart() {
+    gateKeep();
+    clearInterval(gateTimer);
+    gateTimer = setInterval(() => { if (!els || els.root.hidden) { gateKeepStop(); return; } gateKeep(); }, 10000);
+  }
+  function gateKeepStop() {
+    clearInterval(gateTimer); gateTimer = null;
+    if (gateWoke || gateHeldShell) { gateWoke = false; gateHeldShell = false; document.body.classList.remove('orb-shell-collapsed'); }
+  }
+
   const STYLE = `
     #damarOnboarding { position: fixed; inset: 0; z-index: 9000; overflow: hidden; color: #f2ead8;
       font-family: "Inter","Segoe UI", system-ui, -apple-system, sans-serif; transition: opacity .8s ease; }
@@ -269,6 +312,12 @@
     document.getElementById('dobSummaryTitle').textContent = C().summaryTitle;
     els.bottomLink.textContent = C().skipConnect;
     wireConnect(); wireName(); wireChat(); wireSteps();
+    // Click-through countermand (see the gate-keeping note above): while this gate is visible the
+    // window must stay mouse-live over the overlay, or the fields can never be clicked into focus.
+    // Registered after the page's own mousemove listener, so it has the last word on each event.
+    window.addEventListener('mousemove', () => {
+      if (els && !els.root.hidden) { try { desktop.setIgnoreMouse(false); } catch {} }
+    });
     els.summary.addEventListener('click', () => { if (phase === 'summary') save(pendingSummary); });
     els.bottomLink.addEventListener('click', onBottomLink);
   }
@@ -531,7 +580,7 @@
     announce(closing);
     setTimeout(() => {
       els.root.style.opacity = '0';
-      setTimeout(() => { els.root.hidden = true; els.root.style.opacity = ''; orb.restore(); phase = 'done'; }, 850);
+      setTimeout(() => { els.root.hidden = true; els.root.style.opacity = ''; orb.restore(); gateKeepStop(); phase = 'done'; }, 850);
     }, 9000);
     phase = 'done';
   }
@@ -541,14 +590,34 @@
     if (!config) return;
     // Completed elsewhere (e.g. another surface finished it): close at once. Completed by THIS panel's
     // save: the closing line stays readable - save() already scheduled the hide.
-    if (config.source === 'core' && config.onboardingCompleted === true && started) { if (phase !== 'done') { els.root.hidden = true; orb.restore(); phase = 'done'; } return; }
+    if (config.source === 'core' && config.onboardingCompleted === true && started) { if (phase !== 'done') { els.root.hidden = true; orb.restore(); gateKeepStop(); phase = 'done'; } return; }
     if (started || config.source !== 'core' || config.onboardingCompleted !== false) return;
     started = true;
-    lang = window.DAMAR_I18N?.lang?.() === 'en' ? 'en' : 'id';
+    // First-run onboarding speaks Bahasa Indonesia, matching Damar's voice and product language:
+    // never inherit the page i18n default here (presence-i18n.js starts at 'en'), or the gate
+    // greets in English while Damar speaks Indonesian.
+    lang = 'id';
+    // The page swallows ALL clicks/keydowns until its boot cinematic reaches DASHBOARD (the
+    // capture-phase guard in idle_present.html), so a gate opened during the cinematic would show
+    // fields that ignore the first seconds of typing. Wait for the cinematic to finish first -
+    // the page mirrors its stage on body[data-startup-state]. Bounded: open anyway after ~20 s.
+    if (document.body.dataset.startupState !== 'DASHBOARD') {
+      let waits = 0;
+      const wait = setInterval(() => {
+        waits += 1;
+        if (document.body.dataset.startupState === 'DASHBOARD' || waits > 80) { clearInterval(wait); openGate(); }
+      }, 250);
+      return;
+    }
+    openGate();
+  }
+  function openGate() {
     build();
     orb.raise(true);
     show('connect');
     setBottomLink(C().skipConnect, true);
+    gateKeepStart();
+    try { els.baseUrl.focus(); } catch {}
     announce(C().step0Intro);
   }
   desktop.onPresence(msg => consider(msg?.config));
