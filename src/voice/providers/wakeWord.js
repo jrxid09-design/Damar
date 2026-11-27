@@ -52,9 +52,22 @@ class WakeWordProvider {
 /** Factory: pilih provider dari konfigurasi. */
 function createWakeWordProvider({ provider = "local", wakeWord = "damar" } = {}) {
 
-    // Saat ini hanya "local"; engine lain bisa ditambahkan di sini.
+    if (provider === "whisper") {
+        // Engine wake-word sungguhan: VAD + whisper.cpp lokal (lazy require
+        // agar jalur "local" tetap ringan). Model/prompt dari konfigurasi
+        // terpusat (configs/voice.json "runtime" / env DAMAR_VOICE_*).
+        const { WhisperWakeWordProvider } = require("./wakeWordWhisper");
+        let cfg = {};
+        try { cfg = require("../config").voiceConfig(); } catch { /* pakai default */ }
+        return new WhisperWakeWordProvider({
+            wakeWord,
+            model: cfg.wakeModel || "ggml-tiny",
+            prompt: cfg.wakePrompt ? cfg.wakePrompt : null
+        });
+    }
+
+    // Engine lain belum tersedia -> jatuh ke local + catat (jujur).
     if (provider !== "local") {
-        // Jujur: engine lain belum tersedia → jatuh ke local + catat.
         const p = new WakeWordProvider({ wakeWord });
         p.name = provider;
         p.fallback = true;
@@ -64,5 +77,4 @@ function createWakeWordProvider({ provider = "local", wakeWord = "damar" } = {})
     return new WakeWordProvider({ wakeWord });
 
 }
-
 module.exports = { WakeWordProvider, createWakeWordProvider };

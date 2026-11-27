@@ -99,7 +99,10 @@ class VoiceService {
         return this.cfg().stt?.model || process.env.DAMAR_STT_MODEL || "Systran/faster-whisper-base";
     }
     get sttKey() {
-        return this.cfg().stt?.key || process.env.DAMAR_STT_KEY || null;
+        // Rujukan rahasia: keyEnv menamai env var pemegang kunci —
+        // nilai kunci tidak pernah wajib tertulis di config.
+        const keyEnv = this.cfg().stt?.keyEnv;
+        return this.cfg().stt?.key || (keyEnv && process.env[keyEnv]) || process.env.DAMAR_STT_KEY || null;
     }
     get sttConfigured() {
         return Boolean(this.sttUrl);
@@ -115,7 +118,8 @@ class VoiceService {
         return this.cfg().tts?.voice || process.env.DAMAR_TTS_VOICE || "af_heart";
     }
     get ttsKey() {
-        return this.cfg().tts?.key || process.env.DAMAR_TTS_KEY || null;
+        const keyEnv = this.cfg().tts?.keyEnv;
+        return this.cfg().tts?.key || (keyEnv && process.env[keyEnv]) || process.env.DAMAR_TTS_KEY || null;
     }
     get ttsConfigured() {
         return Boolean(this.ttsUrl);
@@ -133,7 +137,15 @@ class VoiceService {
                 model: patch.model !== undefined ? (patch.model || null) : base.model ?? null,
                 voice: patch.voice !== undefined ? (patch.voice || null) : base.voice ?? null,
                 // key undefined = jangan ubah; "" = hapus.
-                key: patch.key === undefined ? (base.key ?? null) : (patch.key || null)
+                key: patch.key === undefined ? (base.key ?? null) : (patch.key || null),
+                // Pemilihan provider per tahap (apiProvider.js):
+                // provider "local"|"remote"; keyEnv = nama env var
+                // pemegang kunci (rujukan, bukan nilai); fallback =
+                // remote gagal -> lokal otomatis; timeoutMs per tahap.
+                provider: patch.provider !== undefined ? (patch.provider || null) : base.provider ?? null,
+                keyEnv: patch.keyEnv !== undefined ? (patch.keyEnv || null) : base.keyEnv ?? null,
+                fallback: patch.fallback !== undefined ? patch.fallback : base.fallback ?? null,
+                timeoutMs: patch.timeoutMs !== undefined ? (patch.timeoutMs || null) : base.timeoutMs ?? null
             };
         };
 
@@ -161,16 +173,22 @@ class VoiceService {
             stt: {
                 url: c.stt?.url ?? "",
                 model: c.stt?.model ?? "",
-                hasKey: Boolean(c.stt?.key),
-                keyHint: this.mask(c.stt?.key),
+                hasKey: Boolean(this.sttKey),
+                keyHint: this.mask(this.sttKey),
+                provider: c.stt?.provider ?? "",
+                keyEnv: c.stt?.keyEnv ?? "",
+                fallback: c.stt?.fallback !== false,
                 configured: this.sttConfigured
             },
             tts: {
                 url: c.tts?.url ?? "",
                 model: c.tts?.model ?? "",
                 voice: c.tts?.voice ?? "",
-                hasKey: Boolean(c.tts?.key),
-                keyHint: this.mask(c.tts?.key),
+                hasKey: Boolean(this.ttsKey),
+                keyHint: this.mask(this.ttsKey),
+                provider: c.tts?.provider ?? "",
+                keyEnv: c.tts?.keyEnv ?? "",
+                fallback: c.tts?.fallback !== false,
                 configured: this.ttsConfigured
             }
         };
