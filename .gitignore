@@ -234,3 +234,4 @@ data/uix-w4-*.json
 /src/testPrompt.js
 /tools/checkpoint.ps1
 /apps/desktop/prototype-w5-cli/
+/patches/
