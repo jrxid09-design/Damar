@@ -120,7 +120,28 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
       activePandawaRuns: [...runs.values()].filter(row => !TERMINAL.has(row.state)).length,
       queuedPandawaRuns: queued, activeDiscussions: team?.counts?.().running || 0, activeJobs, jobStateAvailable: !!snapshot && (jobs !== null || plans !== null) };
   };
-  const sessions = require('./cli-sessions.cjs').createSessionStore({ file: path.join(directory, 'cli-sessions.jsonl'), appendDurable, runsFor, usageFor });
+  // Transcript binding for surfaces whose conversation lives in the agent-turn journal (Presence): history rows
+  // carry no timestamp of their own, so each message takes the START time of its turn from agent-turns.jsonl.
+  // Cached on file mtimes; a read error yields an empty transcript rather than a failed session view.
+  const turnHistoryCache = { key: '', bySession: new Map() };
+  const turnHistoryFor = id => {
+    try {
+      const hf = path.join(directory, 'agent-turn-history.jsonl'), jf = path.join(directory, 'agent-turns.jsonl');
+      const key = [hf, jf].map(f => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } }).join(':');
+      if (turnHistoryCache.key !== key) {
+        const starts = new Map();
+        for (const r of readJsonl(jf)) if (r && r.type === 'START' && r.turnId) starts.set(r.turnId, r.t || null);
+        const bySession = new Map();
+        for (const r of readJsonl(hf)) {
+          if (!r || typeof r.session !== 'string' || !['user', 'assistant'].includes(r.role) || typeof r.content !== 'string') continue;
+          const arr = bySession.get(r.session) || []; arr.push({ t: starts.get(r.turnId) ?? null, role: r.role, text: r.content }); bySession.set(r.session, arr);
+        }
+        turnHistoryCache.key = key; turnHistoryCache.bySession = bySession;
+      }
+      return turnHistoryCache.bySession.get(id) || [];
+    } catch { return []; }
+  };
+  const sessions = require('./cli-sessions.cjs').createSessionStore({ file: path.join(directory, 'cli-sessions.jsonl'), appendDurable, runsFor, usageFor, turnHistoryFor });
 
   // Agent-turn token receipts: the provider's own ledger entries for the turn, keyed by the CLI session (same ledger).
   function recordTurnUsage({ turnId, cliSession, entries }) {
@@ -214,7 +235,10 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
           try { rows = readJsonl(path.join(directory, f)).slice(-60); } catch {}
           for (const r of rows) {
             const ts = typeof r.t === 'number' ? r.t : (r.t ? Date.parse(r.t) || 0 : 0);
-            entries.push({ file: f, t: ts, text: clean(JSON.stringify(r), 300) });
+            // A bounded structured projection rides along so Control can render a human line per record
+            // instead of raw JSON; `text` stays for older clients.
+            const row = {}; for (const [k, v] of Object.entries(r || {})) row[k] = typeof v === 'string' ? clean(v, 400) : (typeof v === 'number' || typeof v === 'boolean' || v === null ? v : undefined);
+            entries.push({ file: f, t: ts, text: clean(JSON.stringify(r), 300), row });
           }
         }
         entries.sort((a, b) => a.t - b.t);

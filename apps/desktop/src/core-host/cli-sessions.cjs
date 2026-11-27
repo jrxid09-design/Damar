@@ -31,7 +31,7 @@ function readLedger(file) {
   return { rows, corruptLines, tornTail };
 }
 
-function createSessionStore({ file, appendDurable, runsFor, usageFor, now = Date.now }) {
+function createSessionStore({ file, appendDurable, runsFor, usageFor, turnHistoryFor = null, now = Date.now }) {
   const sessions = new Map(), seen = new Set(), leases = new Map();
   const apply = ev => {
     if (ev.eventId) seen.add(ev.eventId);
@@ -57,15 +57,18 @@ function createSessionStore({ file, appendDurable, runsFor, usageFor, now = Date
     if (!OP_DONE.has(op.state)) write({ type: 'OPERATION', sessionId: s.sessionId, operationId: op.operationId, state: 'OUTCOME_UNKNOWN', reason: 'CORE_RESTARTED_DURING_OPERATION' });
 
   const leaseOf = id => { const l = leases.get(id); return l && l.until > now() ? l : null; };
+  // Surfaces that hold their conversation in the agent-turn journal (Presence) keep no MESSAGE rows in this
+  // ledger; their transcript is bound from agent-turn-history at read time so Control can show the full record.
+  const boundConversation = s => s.messages.length ? s.messages : (turnHistoryFor ? turnHistoryFor(s.sessionId) : []);
   const summary = s => {
     const ops = [...s.operations.values()].sort((a, b) => a.updatedAt - b.updatedAt), runs = runsFor(s.sessionId), usage = usageFor(s.sessionId);
     return { sessionId: s.sessionId, title: s.title, cwd: s.cwd, createdAt: s.createdAt, updatedAt: s.updatedAt, provider: s.provider, model: s.model,
-      messages: s.messages.length, closed: s.closed, attached: !!leaseOf(s.sessionId), lastOperation: ops.at(-1) || null,
+      messages: boundConversation(s).length, closed: s.closed, attached: !!leaseOf(s.sessionId), lastOperation: ops.at(-1) || null,
       openOperations: ops.filter(o => !OP_DONE.has(o.state)), unresolvedOperations: ops.filter(o => /^OUTCOME_UNKNOWN/.test(o.state)),
       subagentRuns: runs.length, activeSubagentRuns: runs.filter(r => !RUN_DONE.has(r.state)).length,
       tokens: { input: usage.inputTokens, output: usage.outputTokens, total: usage.totalTokens, complete: usage.complete } };
   };
-  const detail = s => ({ ...summary(s), conversation: s.messages, operations: [...s.operations.values()], subagents: runsFor(s.sessionId), usage: usageFor(s.sessionId) });
+  const detail = s => ({ ...summary(s), conversation: boundConversation(s), operations: [...s.operations.values()], subagents: runsFor(s.sessionId), usage: usageFor(s.sessionId) });
   const fail = (status, error) => Object.assign(Error(error), { status });
   const clientOf = input => { if (!TOKEN.test(input.client || '')) throw fail(400, 'CLIENT_ID_REQUIRED'); return input.client; };
   const own = (id, client) => {

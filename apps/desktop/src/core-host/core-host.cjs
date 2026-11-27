@@ -362,8 +362,26 @@ async function child(directory, resume, recovered = false) {
       const sel = coreSettings.view().lastSelection;
       const entry = sel ? registry.list().providers.find(p => p.id === sel.provider) : null;
       if (sel && entry && !entry.executable) {
-        registry.select(sel.provider, sel.model)
-          .catch(e => console.warn('DAMAR provider selection restore failed:', e.code || e.message));
+        // The provider behind the saved selection may still be warming up when the Core boots (a local
+        // router builds its model list inside its own process), so a single immediate select() can fail
+        // with MODEL_NOT_OFFERED_BY_PROVIDER even though the selection becomes valid seconds later.
+        // Retry with backoff; stop as soon as the selection is applied by any path, and never override
+        // a newer selection the Owner makes in the meantime.
+        const delays = [1000, 2000, 4000, 8000, 15000, 15000, 15000];
+        (async () => {
+          for (let attempt = 0; attempt <= delays.length; attempt++) {
+            const now = coreSettings.view().lastSelection;
+            if (!now || now.provider !== sel.provider || now.model !== sel.model) { console.log('DAMAR provider selection restore superseded by a newer selection; stopping.'); return; }
+            const a = registry.active();
+            if (a && a.id === sel.provider && a.model === sel.model && a.executable) { console.log('DAMAR provider selection restored:', sel.provider + '/' + sel.model); return; }
+            try { await registry.select(sel.provider, sel.model); console.log('DAMAR provider selection restored:', sel.provider + '/' + sel.model); return; }
+            catch (e) {
+              if (attempt === delays.length) { console.warn('DAMAR provider selection restore failed after retries:', e.code || e.message); return; }
+              console.warn('DAMAR provider selection restore attempt ' + (attempt + 1) + ' failed (' + (e.code || e.message) + '); retrying.');
+              await new Promise(r => setTimeout(r, delays[attempt]));
+            }
+          }
+        })().catch(() => {});
       }
     } catch (e) { console.warn('DAMAR provider selection restore skipped:', e.code || e.message); }
     syncVoiceRuntimeConfig(coreSettings.voice().voice);

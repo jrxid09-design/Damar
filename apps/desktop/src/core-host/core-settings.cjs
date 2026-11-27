@@ -63,7 +63,7 @@ const VOICE_RULES = {
 // migrate a legacy local profile once). lastSelection: provider/model last accepted by POST /api/r9/provider (recorded by
 // that route only; never writable through settings) so a new CLI/Core session can re-apply it through the same route.
 const { themes: CLI_THEMES, legacyThemes: CLI_LEGACY_THEMES } = require('../cli/appearance.cjs');
-const CLI_DEFAULTS = () => ({ theme: 'damar-ember', animateBanner: true, language: 'en', hudPosition: 'left' });  // language: interface language for the CLI and DAMAR Control (English default; 'id' optional)
+const CLI_DEFAULTS = () => ({ theme: 'damar-ember', animateBanner: true, language: 'id', hudPosition: 'left' });  // language: interface language for the CLI and DAMAR Control (Indonesian default; 'en' optional)
 const CLI_RULES = {
   theme: v => CLI_THEMES.includes(v) || CLI_LEGACY_THEMES.includes(v),
   animateBanner: v => typeof v === 'boolean',

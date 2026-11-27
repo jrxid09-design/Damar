@@ -143,6 +143,29 @@
     'Conversation chars kept (2000-400000)': 'Karakter percakapan disimpan (2000-400000)', 'Core mind block': 'Blok mind Core', 'Export memory…': 'Ekspor memori…', 'Clear workspace memory…': 'Hapus memori ruang kerja…',
     'Save memory settings…': 'Simpan pengaturan memori…', 'Pandawa Team': 'Tim Pandawa', 'Active provider': 'Provider aktif', "DAMAR's model": 'Model DAMAR', 'Discussion rounds (1-10)': 'Ronde diskusi (1-10)',
     'Token budget per discussion (1000-2000000)': 'Anggaran token per diskusi (1000-2000000)', 'Save team…': 'Simpan tim…', 'Time limit per member reply (seconds, 30-1800)': 'Batas waktu jawaban anggota (detik, 30-1800)', 'Usage by Pandawa member': 'Pemakaian per anggota Pandawa',
+    'Operations': 'Operasi', 'Conversation': 'Percakapan', 'User': 'Pengguna', 'Unavailable': 'Tidak tersedia', 'None.': 'Tidak ada.',
+    'No conversation recorded for this session.': 'Belum ada percakapan tercatat untuk sesi ini.',
+    'Tokens used': 'Token terpakai', 'Blocked': 'Diblokir', 'Yes': 'Ya', 'No': 'Tidak', 'Usage reporting': 'Pelaporan pemakaian', 'Recorded by Core': 'Tercatat di Core',
+    'Runaway guard, total tokens': 'Pengaman lonjakan, total token', 'Runaway guard, per request': 'Pengaman lonjakan, per permintaan', 'Runaway guard, requests': 'Pengaman lonjakan, jumlah permintaan',
+    'Restart Core…': 'Mulai ulang Core…', 'Restart Core': 'Mulai ulang Core', 'Reason': 'Alasan', 'Restart attempts': 'Percobaan mulai ulang', 'Active turns': 'Giliran aktif',
+    'Pending permissions': 'Izin menunggu', 'Active Pandawa runs': 'Run Pandawa aktif', 'Queued Pandawa runs': 'Run Pandawa antre', 'Active jobs': 'Tugas aktif',
+    'Job state available': 'Status tugas tersedia', 'Restart limit': 'Batas mulai ulang', 'Core uptime': 'Uptime Core', 'AI platform': 'Platform AI', 'Memory': 'Memori',
+    'Core restarts under its supervisor. Control loses its connection for a few seconds; reload the page once Core is back. Core refuses the restart while turns, permissions, runs or jobs are outstanding.': 'Core mulai ulang di bawah supervisornya. Control kehilangan koneksi beberapa detik; muat ulang halaman setelah Core kembali. Core menolak mulai ulang selama masih ada giliran, izin, run, atau tugas yang berjalan.',
+    'Core lifecycle and enforced sandbox boundary. Restart is an Owner action: Core refuses while work is outstanding.': 'Siklus hidup Core dan batas sandbox yang ditegakkan. Mulai ulang adalah aksi Owner: Core menolak selama masih ada pekerjaan berjalan.',
+    'Token usage from Core durable receipts per session. Cost is shown only when Core has rate provenance.': 'Pemakaian token dari bukti persisten Core per sesi. Biaya hanya tampil bila Core punya asal-usul tarif.',
+    'CLI and Control sessions recorded by Core (append-only ledger). Open a session to inspect its conversation, operations and usage.': 'Sesi CLI dan Control yang dicatat Core (ledger append-only). Buka sesi untuk memeriksa percakapan, operasi, dan pemakaiannya.',
+    'Project memory export / clear uses the workspace folder from Memory & Continuity.': 'Ekspor / hapus memori proyek memakai folder ruang kerja dari Memori & Kontinuitas.',
+    'In / Out tokens': 'Token masuk / keluar', 'Receipts': 'Bukti', 'Command': 'Perintah', 'No sessions recorded.': 'Belum ada sesi tercatat.',
+    "Load a session's receipts to see which Pandawa member used how many tokens.": 'Muat bukti sebuah sesi untuk melihat pemakaian token tiap anggota Pandawa.',
+    'Settings are read and written through an Owner Control session on Core.': 'Pengaturan dibaca dan ditulis lewat sesi Owner Control di Core.',
+    'Persistent Core settings (Owner). Changes take effect for every session on this Core profile.': 'Pengaturan Core persisten (Owner). Perubahan berlaku untuk semua sesi pada profil Core ini.',
+    'Emergency stop': 'Henti darurat', 'Engaged': 'Aktif', 'Policy enforcement': 'Penegakan kebijakan', 'Pending permission requests': 'Permintaan izin menunggu',
+    'Agent autonomy profile': 'Profil otonomi agen', 'Live model grant': 'Grant model live', 'Approvals': 'Persetujuan',
+    'Memories': 'Memori', 'Entities': 'Entitas', 'Documents': 'Dokumen', 'Embeddings': 'Embedding', 'Note': 'Catatan', 'Added': 'Ditambahkan',
+    'Workspace folder (absolute path)': 'Folder ruang kerja (path absolut)', 'No project memory for this workspace.': 'Belum ada memori proyek untuk ruang kerja ini.',
+    'No sessions.': 'Tidak ada sesi.', 'held by a CLI window': 'dipegang jendela CLI', 'Attach & list': 'Ambil & daftar', 'Refresh': 'Segarkan', 'Undo…': 'Urungkan…', 'Redo…': 'Ulangi…',
+    'Resume a session': 'Lanjutkan sesi', 'Core endpoint': 'Endpoint Core', 'Attached': 'Terhubung', 'Messages': 'Pesan', 'Sub-agent runs': 'Run sub-agen',
+    'Read': 'Baca', 'Route': 'Rute', 'Latency': 'Latensi',
     "Load a session's receipts to see which Pandawa member used how many tokens.": 'Muat bukti sesi untuk melihat token yang dipakai tiap anggota Pandawa.', 'Help & Support': 'Bantuan & Dukungan', 'Report a problem': 'Laporkan masalah', 'License': 'Lisensi',
     'Questions and ideas': 'Pertanyaan dan ide', 'DAMAR is free and open source.': 'DAMAR gratis dan open source.', 'Core enforces Owner authority; nothing changes until Core accepts.': 'Core menegakkan otoritas Owner; tidak ada yang berubah sebelum Core menerima.'
   };
@@ -469,8 +492,8 @@
     var tokens = ss ? ss.sessions.reduce(function (n, s) { return n + (s.tokens && s.tokens.total || 0); }, 0) : null;
     var html = '<div class="page-header"><div class="page-title-group">' +
       '<h1 class="page-title" style="display:flex;align-items:center;gap:12px;"><img src="damaricon-clean.png" alt="DAMAR" style="width:32px;height:36px;object-fit:contain;filter:drop-shadow(0 0 8px rgba(247,223,148,0.5));" /><span><span class="gold-gradient-text">DAMAR</span> Control Center</span></h1>' +
-      '<p class="page-subtitle">Manage intelligence, runtime operations, tools and system governance.</p></div>' +
-      '<div class="page-actions"><button type="button" class="btn btn-secondary" data-jump-view="activity"><span>View Sessions</span></button><button type="button" class="btn btn-primary" data-jump-view="pandawa"><span>Pandawa Runs</span></button></div></div>';
+      '<p class="page-subtitle">' + escapeHtml(L('Manage intelligence, runtime operations, tools and system governance.')) + '</p></div>' +
+      '<div class="page-actions"><button type="button" class="btn btn-secondary" data-jump-view="activity"><span>' + escapeHtml(L('View Sessions')) + '</span></button><button type="button" class="btn btn-primary" data-jump-view="pandawa"><span>' + escapeHtml(L('Pandawa Runs')) + '</span></button></div></div>';
     html += liveStrip();
     html += onboarding();
     html += '<div class="status-strip-grid">';
@@ -536,13 +559,17 @@
     var ss = LIVE.d('sessions'), bd = LIVE.d('budget');
     var html = pageHeader('WORKSPACE • TOKEN RECEIPTS', 'Usage', 'Token usage from Core durable receipts per session. Cost is shown only when Core has rate provenance.');
     html += '<div class="workspace-grid-12">';
-    html += panel('Provider Budget', readState('budget', 'budget') || kvList(Object.keys(bd).map(function (k) { return kv(k, typeof bd[k] === 'object' ? JSON.stringify(bd[k]) : String(bd[k])); })), { span: 4 });
+    var bdLimits = (bd && bd.limits) || {};
+    var bdLimit = function (v) { return v == null ? L('Tanpa batas') : num(v); };
+    html += panel('Provider Budget', readState('budget', 'budget') || kvList([kv('Attempts', num(bd.attempts)), kv('Tokens used', num(bd.totalTokens)), kv('Blocked', bd.blocked ? L('Yes') : L('No')),
+      kv('Runaway guard, total tokens', bdLimit(bdLimits.totalTokens)), kv('Runaway guard, per request', bdLimit(bdLimits.maxTokens)), kv('Runaway guard, requests', bdLimit(bdLimits.completions)),
+      kv('Usage reporting', bd.usageReporting && Object.keys(bd.usageReporting).length ? L('Recorded by Core') : '-')]), { span: 4 });
     var rows = ss ? ss.sessions.map(function (s) {
       var u = state.usage[s.sessionId];
       return ['<span style="color:var(--text-ivory);">' + escapeHtml(s.title) + '</span>', mono(s.sessionId.slice(0, 12) + '…'),
         u ? (u.ok ? '<span class="td-num">' + num(u.data.inputTokens) + ' / ' + num(u.data.outputTokens) + '</span>' : statusBadgeHtml('ERROR', u.error)) : '<span class="td-num">' + num(s.tokens.input) + ' / ' + num(s.tokens.output) + '</span>',
         u && u.ok ? escapeHtml(u.data.confirmedReceipts + ' confirmed, ' + u.data.unknownUsageReceipts + ' unknown') : '-',
-        u && u.ok ? escapeHtml(u.data.cost) : 'UNAVAILABLE', u && u.ok ? statusBadgeHtml(u.data.complete ? 'CONFIRMED' : 'PENDING', u.data.complete ? 'complete' : 'incomplete') : btn('Load receipts', 'data-load-usage="' + escapeHtml(s.sessionId) + '"')];
+        u && u.ok ? escapeHtml(typeof u.data.cost === 'number' ? num(u.data.cost) : L('Unavailable')) : 'UNAVAILABLE', u && u.ok ? statusBadgeHtml(u.data.complete ? 'CONFIRMED' : 'PENDING', u.data.complete ? 'complete' : 'incomplete') : btn('Load receipts', 'data-load-usage="' + escapeHtml(s.sessionId) + '"')];
     }) : [];
     html += panel('Per-session usage', ss ? table(['Session', 'Id', 'In / Out tokens', 'Receipts', 'Cost', 'Status'], rows, 'No sessions recorded.') : readState('sessions', 'sessions'), { span: 8, flush: true });
     // Confirmed tokens per Pandawa member (Core usage receipts, byMember) for the sessions whose receipts are loaded.
@@ -570,8 +597,9 @@
         }), 'No MCP client servers configured in Core.') + '</div>' : readState('mcp', 'MCP servers');
     } else {
       var st = state.settings;
+      if (!st) ensureSettings();
       body = st && st.ok ? table(['Skill', 'Source', 'Enabled', 'Triggers'], (st.data.availableSkills || []).map(function (x) { return [escapeHtml(x.name), escapeHtml(x.source), statusBadgeHtml(x.enabled ? 'ACTIVE' : 'DISABLED'), escapeHtml((x.triggers || []).join(', '))]; }), 'No skills installed.')
-        : '<div style="padding:14px;font-size:12px;color:var(--text-secondary);">Skills are read through the Owner Control session. ' + (st ? statusBadgeHtml('ERROR', st.error) : '') + ' ' + btn('Load from Core', 'data-load-settings="1"', 'btn-primary') + '</div>';
+        : '<div style="padding:14px;font-size:12px;color:var(--text-secondary);">' + escapeHtml(L(st ? 'Gagal membaca skill dari Core.' : 'Memuat skill dari Core…')) + ' ' + (st ? statusBadgeHtml('ERROR', st.error) : '') + '</div>';
     }
     return html + panel(tab, body, { flush: true });
   }
@@ -735,7 +763,7 @@
       var mine = runs.runs.filter(function (r) { return r.worker === w; });
       var a = byId[w] || {};
       return ['<div style="font-weight:700;color:var(--damar-gold-bright);">' + escapeHtml(a.label || w) + '</div><div style="font-size:10.5px;font-family:var(--font-mono);color:var(--text-muted);">pandawa:' + escapeHtml(w) + '</div>',
-        '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(String(a.role || a.description || '').slice(0, 140)) + '</span>', statusBadgeHtml(a.online === false ? 'OFFLINE' : 'ONLINE'),
+        '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(String(a.role || String(a.description || '').split(/[.!?]\s/)[0]).slice(0, 100)) + '</span>', statusBadgeHtml(a.online === false ? 'OFFLINE' : 'ONLINE'),
         '<span class="td-num">' + mine.filter(function (r) { return TERMINAL.indexOf(r.state) < 0; }).length + '</span>', '<span class="td-num">' + mine.filter(function (r) { return r.state === 'COMPLETED'; }).length + '</span>'];
     })) : readState('runs', 'Pandawa runs'), { flush: true });
     html += panel('Run Ledger', runsTable(runs ? runs.runs.slice().reverse() : [], !runs), { flush: true, subtitle: runs ? runs.queued + ' queued' : '' });
@@ -749,10 +777,23 @@
     state.logsLoading = true;
     core.get('/api/r9/logs').then(function (r) { state.logsLoading = false; state.logsAt = Date.now(); if (r.ok) { state.logs = (r.data && r.data.entries) || []; renderAll(); } });
   }
+  // One human line per journal record (the route's structured projection); raw JSON stays as the fallback
+  // for record shapes this formatter does not know.
+  function logLine(e) {
+    var r = e.row || {};
+    var cut = function (s, n) { s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s; };
+    if (e.file === 'agent-turn-history.jsonl') return (r.role === 'user' ? 'Pengguna: ' : r.role === 'assistant' ? 'Damar: ' : '') + cut(r.content, 260);
+    if (e.file === 'usage-receipts.jsonl') return cut([r.provider, r.model].filter(Boolean).join(' / '), 80) + (r.member ? ' · ' + cut(r.member, 24) : '') + ' · masuk ' + num(r.inputTokens) + ' · keluar ' + num(r.outputTokens) + (r.status ? ' · ' + cut(r.status, 24) : '');
+    if (e.file === 'agent-turns.jsonl') return cut(r.type || 'Giliran', 24) + (r.step ? ' · ' + cut(r.step, 200) : r.text ? ' · ' + cut(r.text, 200) : '') + (r.status ? ' · ' + cut(r.status, 24) : '');
+    if (e.file === 'cli-sessions.jsonl') return cut(r.type || 'Sesi', 24) + (r.title ? ' · ' + cut(r.title, 80) : '') + (r.role && r.text ? ' · ' + cut(r.text, 160) : '');
+    if (e.file === 'discussions.jsonl') return cut(r.type || 'Diskusi', 24) + (r.topic ? ' · ' + cut(r.topic, 160) : '');
+    return e.text;
+  }
+
   function renderLogsView() {
     loadLogs();
     var entries = state.logs || [];
-    var body = entries.length ? entries.map(function (e) { return '<div style="display:flex;gap:10px;font-family:var(--font-mono);font-size:11px;padding:3px 0;border-top:1px solid rgba(255,255,255,.05);"><span style="color:var(--text-muted);flex:none;">' + escapeHtml(e.t ? new Date(e.t).toLocaleTimeString('id-ID') : '-') + '</span><span style="color:var(--gold-champagne);flex:none;">' + escapeHtml(e.file) + '</span><span style="color:var(--text-secondary);word-break:break-all;">' + escapeHtml(e.text) + '</span></div>'; }).join('') : '<div style="font-size:12.5px;color:var(--text-secondary);">' + (state.logsAt ? 'Belum ada catatan pada sesi Core ini.' : 'Memuat log dari Core…') + '</div>';
+    var body = entries.length ? entries.map(function (e) { return '<div style="display:flex;gap:10px;font-size:11.5px;padding:4px 0;border-top:1px solid rgba(255,255,255,.05);"><span style="color:var(--text-muted);flex:none;font-family:var(--font-mono);font-size:11px;">' + escapeHtml(e.t ? new Date(e.t).toLocaleTimeString('id-ID') : '·') + '</span><span style="color:var(--gold-champagne);flex:none;font-family:var(--font-mono);font-size:11px;">' + escapeHtml(e.file.replace('.jsonl', '')) + '</span><span style="color:var(--text-secondary);word-break:break-word;">' + escapeHtml(logLine(e)) + '</span></div>'; }).join('') : '<div style="font-size:12.5px;color:var(--text-secondary);">' + (state.logsAt ? 'Belum ada catatan pada sesi Core ini.' : 'Memuat log dari Core…') + '</div>';
     return pageHeader('DEVELOPMENT • CORE LOGS', 'Log', 'Catatan jurnal sesi Core ini: giliran agen, diskusi, pemakaian, dan sesi. Data asli dari Core.') + '<section class="panel"><div class="panel-body">' + body + '</div></section>';
   }
 
@@ -797,12 +838,13 @@
 
   function renderRuntimeView() {
     var lc = LIVE.d('lifecycle'), sb = LIVE.d('sandbox'), cx = LIVE.d('context');
-    var html = pageHeader('DEVELOPMENT • CORE RUNTIME', 'Runtime', 'Core lifecycle and enforced sandbox boundary (read-only). Core restart is not offered from Control in this release.');
+    var html = pageHeader('DEVELOPMENT • CORE RUNTIME', 'Runtime', 'Core lifecycle and enforced sandbox boundary. Restart is an Owner action: Core refuses while work is outstanding.');
     html += '<div class="workspace-grid-12">';
     html += panel('Lifecycle', lc ? kvList([kv('State', lc.state.state), kv('Reason', lc.state.reason || '-'), kv('Updated', when(lc.state.updatedAt)), kv('Restart attempts', num(lc.state.attempt)),
       kv('Active turns', num(lc.outstanding.activeTurns)), kv('Pending permissions', num(lc.outstanding.pendingPermissions)), kv('Active Pandawa runs', num(lc.outstanding.activePandawaRuns)),
       kv('Queued Pandawa runs', num(lc.outstanding.queuedPandawaRuns)), kv('Active jobs', num(lc.outstanding.activeJobs)), kv('Job state available', lc.outstanding.jobStateAvailable ? 'yes' : 'no'),
-      kv('Restart limit', lc.restartLimit + ' per ' + lc.restartWindowSeconds + ' s')]) : readState('lifecycle', 'lifecycle'), { span: 6, badge: lc ? statusBadgeHtml(lc.state.state) : '' });
+      kv('Restart limit', lc.restartLimit + ' per ' + lc.restartWindowSeconds + ' s')]) +
+      '<div style="display:flex;justify-content:flex-end;margin-top:12px;">' + btn('Restart Core…', 'data-lifecycle-restart="1"', 'btn-danger') + '</div>' : readState('lifecycle', 'lifecycle'), { span: 6, badge: lc ? statusBadgeHtml(lc.state.state) : '' });
     html += panel('Host', cx ? kvList([kv('Host', cx.system.host), kv('CPU', cx.system.cpu + ' %'), kv('Memory', cx.system.memory + ' %'), kv('Core uptime', Math.round(cx.system.uptime) + ' s'), kv('AI platform', cx.ai.platform), kv('Model', cx.ai.model || '-')]) : readState('context', 'context'), { span: 6 });
     html += panel('Sandbox Boundary', sb ? kvList(Object.keys(sb).map(function (k) { return kv(k, Array.isArray(sb[k]) ? sb[k].join(' • ') : String(sb[k])); })) : readState('sandbox', 'sandbox'), { span: 12 });
     return html + '</div>';
@@ -834,6 +876,7 @@
 
   function renderSettingsView() {
     var st = state.settings;
+    if (!st) ensureSettings();
     var html = pageHeader('ADMINISTRATION • CORE SETTINGS', 'Settings', 'Persistent Core settings (Owner). Changes take effect for every session on this Core profile.');
     if (!st || !st.ok) return html + panel('Core Settings', '<div style="display:flex;flex-direction:column;gap:10px;font-size:12px;color:var(--text-secondary);"><div>Settings are read and written through an Owner Control session on Core.</div>' +
       (st ? '<div>' + statusBadgeHtml('ERROR', st.error) + '</div>' : '') + '<div>' + btn('Load settings from Core', 'data-load-settings="1"', 'btn-primary') + '</div></div>');
@@ -868,7 +911,7 @@
       field('prVoice', 'Microphone / voice (opt-in)', sel('prVoice', ['off', 'on'], pr.voiceEnabled === true ? 'on' : 'off')) +
       field('prName', 'Your name (greeting, optional)', '<input type="text" class="input-field" id="prName" maxlength="40" style="width:100%;" value="' + escapeHtml(pr.displayName || '') + '" />') +
       field('prSalutation', 'How DAMAR addresses you (optional)', '<input type=\"text\" class=\"input-field\" id=\"prSalutation\" maxlength=\"40\" style=\"width:100%;\" value=\"' + escapeHtml(pr.salutation || '') + '\" />') +
-      '</div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);">Presence reads this from Core (GET /api/r9/presence/settings) · revision ' + escapeHtml(num(d.revision)) + '</span>' + btn('Save presence…', 'data-save-presence="1"', 'btn-primary') + '</div>', { span: 12 });
+      '</div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);">Presence membaca ini dari Core (GET /api/r9/presence/settings) · revisi ' + escapeHtml(num(d.revision)) + '</span>' + btn('Save presence…', 'data-save-presence="1"', 'btn-primary') + '</div>', { span: 12 });
     var cl = LIVE.d('cliSettings'), cv = cl ? (cl.cli || cl.defaults) : null;
     html += panel('Damar CLI', cv ? '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">' +
       field('cliTheme', 'Theme', sel('cliTheme', ['damar-ember', 'damar-holo', 'cyberpunk', 'tokyonight', 'emerald'], cv.theme)) +
@@ -992,6 +1035,14 @@
   function loadSettings() {
     return controlSession().then(function (id) { return core.post('/api/r9/settings', { action: 'read', cliSession: id, client: state.control.client }); })
       .then(function (r) { state.settings = r; }, function (r) { state.settings = r && r.error ? r : { ok: false, error: 'CONTROL_SESSION_FAILED' }; }).then(renderAll);
+  }
+
+  // Settings back several pages (Pengaturan itself, the Skills tab, the Keamanan autonomy line): like every
+  // other page they load on open instead of waiting for a manual "load" click. One request in flight at most.
+  function ensureSettings() {
+    if (state.settings || state.settingsLoading) return;
+    state.settingsLoading = true;
+    loadSettings().then(function () { state.settingsLoading = false; }, function () { state.settingsLoading = false; });
   }
 
   // Confirm dialog -> Core mutation -> toast with Core's own result/error; then re-read Core.
@@ -1138,10 +1189,18 @@
         'round-robin: spread requests; fill-first: use keys in order (priority); lru: least recently used first. Failing keys cool down automatically.');
     },
     'data-catalog': function (id) {
+      var c = padminConn(id) || {};
+      var extras = c.extraModels || [], aliases = Object.keys(c.aliases || {});
+      var selOpts = function (list) { return '<option value=""></option>' + list.map(function (m) { return '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>'; }).join(''); };
       ownerAction('Model catalog', field('caAdd', 'Add a model id (optional)', '<input type="text" class="input-field" id="caAdd" style="width:100%;font-family:var(--font-mono);" />') +
         field('caAlias', 'Alias name (optional)', '<input type="text" class="input-field" id="caAlias" style="width:100%;font-family:var(--font-mono);" />') +
-        field('caTarget', 'Alias points to model', '<input type="text" class="input-field" id="caTarget" style="width:100%;font-family:var(--font-mono);" />'),
-        function () { var body = { provider: id }; if (val('caAdd')) body.addModel = val('caAdd'); if (val('caAlias')) body.alias = { name: val('caAlias'), model: val('caTarget') }; return core.post('/api/r9/provider-admin/catalog', body); });
+        field('caTarget', 'Alias points to model', '<input type="text" class="input-field" id="caTarget" style="width:100%;font-family:var(--font-mono);" />') +
+        (extras.length ? field('caRemoveModel', 'Remove an added model (optional)', '<select class="select-field" id="caRemoveModel" style="width:100%;">' + selOpts(extras) + '</select>') : '') +
+        (aliases.length ? field('caRemoveAlias', 'Remove an alias (optional)', '<select class="select-field" id="caRemoveAlias" style="width:100%;">' + selOpts(aliases) + '</select>') : ''),
+        function () { var body = { provider: id }; if (val('caAdd')) body.addModel = val('caAdd'); if (val('caAlias')) body.alias = { name: val('caAlias'), model: val('caTarget') };
+          var rm = document.getElementById('caRemoveModel'), ra = document.getElementById('caRemoveAlias');
+          if (rm && rm.value) body.removeModel = rm.value; if (ra && ra.value) body.removeAlias = ra.value;
+          return core.post('/api/r9/provider-admin/catalog', body); });
     },
     'data-conn-limits': function (id) {
       var c = padminConn(id) || {};
@@ -1196,12 +1255,17 @@
       core.get('/api/r9/sessions/' + id).then(function (r) {
         if (!r.ok) return showToast(describeFailure(r));
         var d = r.data;
-        openInspectorDrawer('SESSION', d.title, kvList([kv('Session', d.sessionId, true), kv('Workspace', d.cwd), kv('Model', (d.provider || '-') + ' / ' + (d.model || '-')), kv('Tokens', num(d.usage.totalTokens) + (d.usage.complete ? '' : ' (incomplete)')), kv('Cost', d.usage.cost)]) +
-          '<h3 style="font-size:12px;margin:14px 0 6px;color:var(--damar-accent);">Operations</h3>' + table(['Command', 'State', 'Reason'], d.operations.slice(-20).map(function (o) { return [escapeHtml(o.command || '-'), statusBadgeHtml(o.state), escapeHtml(o.reason || '')]; }), 'None.') +
-          '<h3 style="font-size:12px;margin:14px 0 6px;color:var(--damar-accent);">Conversation (last 20)</h3>' + d.conversation.slice(-20).map(function (m) { return '<div style="font-size:12px;margin-bottom:8px;"><span class="badge badge-neutral">' + escapeHtml(m.role) + '</span> <span style="color:var(--text-secondary);white-space:pre-wrap;">' + escapeHtml(String(m.text).slice(0, 2000)) + '</span></div>'; }).join(''));
+        openInspectorDrawer('SESSION', d.title, kvList([kv('Session', d.sessionId, true), kv('Workspace', d.cwd), kv('Model', (d.provider || '-') + ' / ' + (d.model || '-')), kv('Tokens', num(d.usage.totalTokens) + (d.usage.complete ? '' : ' (incomplete)')), kv('Cost', typeof d.usage.cost === 'number' ? num(d.usage.cost) : L('Unavailable'))]) +
+          '<h3 style="font-size:12px;margin:14px 0 6px;color:var(--damar-accent);">' + escapeHtml(L('Operations')) + '</h3>' + table(['Command', 'State', 'Reason'], d.operations.map(function (o) { return [escapeHtml(o.command || '-'), statusBadgeHtml(o.state), escapeHtml(o.reason || '')]; }), 'None.') +
+          '<h3 style="font-size:12px;margin:14px 0 6px;color:var(--damar-accent);">' + escapeHtml(L('Conversation')) + ' (' + d.conversation.length + ')</h3>' + (d.conversation.length ? d.conversation.map(function (m) { return '<div style="font-size:12px;margin-bottom:8px;"><span class="badge badge-neutral">' + escapeHtml(m.role === 'user' ? L('User') : m.role === 'assistant' ? 'Damar' : m.role) + '</span> ' + (m.t ? '<span style="color:var(--text-muted);font-size:11px;">' + escapeHtml(new Date(m.t).toLocaleString('id-ID')) + '</span> ' : '') + '<span style="color:var(--text-secondary);white-space:pre-wrap;">' + escapeHtml(String(m.text).slice(0, 4000)) + '</span></div>'; }).join('') : '<div style="font-size:12px;color:var(--text-muted);">' + escapeHtml(L('No conversation recorded for this session.')) + '</div>'));
       });
     },
     'data-load-usage': function (id) { core.get('/api/r9/usage?cliSession=' + id).then(function (r) { state.usage[id] = r; renderAll(); }); },
+    'data-lifecycle-restart': function () {
+      ownerAction('Restart Core', '<p style="font-size:12.5px;">' + escapeHtml(L('Core restarts under its supervisor. Control loses its connection for a few seconds; reload the page once Core is back. Core refuses the restart while turns, permissions, runs or jobs are outstanding.')) + '</p>', function () {
+        return core.post('/api/r9/lifecycle/restart', {});
+      });
+    },
     'data-load-settings': function () { loadSettings(); },
     'data-save-settings': function () {
       var values = { autonomy: val('settingsAutonomy'), skills: { routing: val('settingsRouting'), disabled: state.settings.data.skills.disabled } };
