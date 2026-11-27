@@ -157,7 +157,7 @@
     'Restart Core…': 'Mulai ulang Core…', 'Restart Core': 'Mulai ulang Core', 'Reason': 'Alasan', 'Restart attempts': 'Percobaan mulai ulang', 'Active turns': 'Giliran aktif',
     'Pending permissions': 'Izin menunggu', 'Active Pandawa runs': 'Run Pandawa aktif', 'Queued Pandawa runs': 'Run Pandawa antre', 'Active jobs': 'Tugas aktif',
     'Job state available': 'Status tugas tersedia', 'Restart limit': 'Batas mulai ulang', 'Core uptime': 'Uptime Core', 'AI platform': 'Platform AI', 'Memory': 'Memori',
-    'Core restarts under its supervisor. Control loses its connection for a few seconds; reload the page once Core is back. Core refuses the restart while turns, permissions, runs or jobs are outstanding.': 'Core mulai ulang di bawah supervisornya. Control kehilangan koneksi beberapa detik; muat ulang halaman setelah Core kembali. Core menolak mulai ulang selama masih ada giliran, izin, run, atau tugas yang berjalan.',
+    'Core restarts under its supervisor. The restart rotates this tab\'s session credential, so this tab stops working once Core is back: reopen DAMAR Control from Presence or the damar control command. Core refuses the restart while turns, permissions, runs or jobs are outstanding.': 'Core mulai ulang di bawah supervisornya. Mulai ulang mengganti kredensial sesi tab ini, jadi tab ini berhenti bekerja begitu Core kembali: buka lagi DAMAR Control dari Presence atau perintah damar control. Core menolak mulai ulang selama masih ada giliran, izin, run, atau tugas yang berjalan.',
     'Core lifecycle and enforced sandbox boundary. Restart is an Owner action: Core refuses while work is outstanding.': 'Siklus hidup Core dan batas sandbox yang ditegakkan. Mulai ulang adalah aksi Owner: Core menolak selama masih ada pekerjaan berjalan.',
     'Token usage from Core durable receipts per session. Cost is shown only when Core has rate provenance.': 'Pemakaian token dari bukti persisten Core per sesi. Biaya hanya tampil bila Core punya asal-usul tarif.',
     'CLI and Control sessions recorded by Core (append-only ledger). Open a session to inspect its conversation, operations and usage.': 'Sesi CLI dan Control yang dicatat Core (ledger append-only). Buka sesi untuk memeriksa percakapan, operasi, dan pemakaiannya.',
@@ -1278,7 +1278,7 @@
     },
     'data-load-usage': function (id) { core.get('/api/r9/usage?cliSession=' + id).then(function (r) { state.usage[id] = r; renderAll(); }); },
     'data-lifecycle-restart': function () {
-      ownerAction('Restart Core', '<p style="font-size:12.5px;">' + escapeHtml(L('Core restarts under its supervisor. Control loses its connection for a few seconds; reload the page once Core is back. Core refuses the restart while turns, permissions, runs or jobs are outstanding.')) + '</p>', function () {
+      ownerAction('Restart Core', '<p style="font-size:12.5px;">' + escapeHtml(L('Core restarts under its supervisor. The restart rotates this tab\'s session credential, so this tab stops working once Core is back: reopen DAMAR Control from Presence or the damar control command. Core refuses the restart while turns, permissions, runs or jobs are outstanding.')) + '</p>', function () {
         return core.post('/api/r9/lifecycle/restart', {});
       });
     },
