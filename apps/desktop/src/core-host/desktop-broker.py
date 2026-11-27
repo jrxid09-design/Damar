@@ -10,7 +10,8 @@ Invariants (fail closed):
   - Input dispatching verifies the foreground window BEFORE any input is sent, inside this
     same short-lived process, so a focus race cannot redirect the input.
   - Click/keyboard coordinates must fall inside the authorized target window rect.
-  - No clipboard access of any kind (nothing is read or written).
+  - Clipboard is WRITE-ONLY: the paste op may place caller-supplied text on it for an
+    immediate paste into the authorized window; nothing ever reads it back.
   - No network APIs are used.
   - Unknown ops are refused.
 """
@@ -20,6 +21,7 @@ from ctypes import wintypes as w
 import hashlib
 import json
 import struct
+import subprocess
 import sys
 import time
 import zlib
@@ -30,6 +32,18 @@ gdi = c.WinDLL("gdi32", use_last_error=True)
 
 user.SendInput.argtypes = [w.UINT, c.c_void_p, c.c_int]
 user.SendInput.restype = w.UINT
+user.MapVirtualKeyW.argtypes = [w.UINT, w.UINT]
+user.MapVirtualKeyW.restype = w.UINT
+user.VkKeyScanW.argtypes = [c.c_wchar]
+user.VkKeyScanW.restype = w.SHORT
+kernel.GlobalAlloc.argtypes = [w.UINT, c.c_size_t]
+kernel.GlobalAlloc.restype = c.c_void_p
+kernel.GlobalLock.argtypes = [c.c_void_p]
+kernel.GlobalLock.restype = c.c_void_p
+kernel.GlobalUnlock.argtypes = [c.c_void_p]
+kernel.GlobalFree.argtypes = [c.c_void_p]
+user.SetClipboardData.argtypes = [w.UINT, c.c_void_p]
+user.SetClipboardData.restype = c.c_void_p
 
 # Physical-pixel coordinates regardless of the python manifest: the screen math and any
 # ground-truth fixture must agree cell for cell. SetProcessDPIAware is a no-op when the
@@ -38,6 +52,7 @@ user.SetProcessDPIAware()
 
 SW_RESTORE = 9
 VK_MENU = 0x12
+VK_ESCAPE = 0x1B
 VK_CONTROL = 0x11
 INPUT_MOUSE = 0
 INPUT_KEYBOARD = 1
@@ -49,8 +64,15 @@ MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_ABSOLUTE = 0x8000
 MOUSEEVENTF_WHEEL = 0x0800
 MOUSEEVENTF_HWHEEL = 0x1000
+KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
+MAPVK_VK_TO_VSC = 0
+# Virtual keys Windows reports with the extended bit set (scan code is shared with a
+# numpad twin; without KEYEVENTF_EXTENDEDKEY, browsers map the event to the numpad
+# code and KeyboardEvent.code never becomes e.g. "ArrowLeft").
+EXTENDED_VKS = {0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
+                0x2C, 0x2D, 0x2E, 0x5B, 0x5C, 0x5D, 0x6F, 0x90, 0xA3, 0xA5}
 SRCCOPY = 0x00CC0020
 CAPTUREBLT = 0x40000000
 
@@ -128,11 +150,35 @@ def same_target(info, expect_hwnd, expect_title):
     return expect_hwnd is None and expect_title is None
 
 
+SHELL_OVERLAY_TITLES = ("Start", "Search", "Windows Input Experience")
+
+
+def dismiss_shell_overlay():
+    """Transient shell overlays (Start menu, Search pane, Input Experience) are
+    full-screen CoreWindows that hold the foreground and silently swallow the
+    focus contract: SetForegroundWindow to any app window fails while one is
+    up, and they reappear whenever a stray Windows-key press lands. Dismissing
+    one with a single ESC tap is focus management aimed at the shell itself -
+    the same class as the ALT-tap fallback in bring_to_front - never input to
+    an application window. Returns True when an overlay was dismissed."""
+    fg = user.GetForegroundWindow()
+    if not fg:
+        return False
+    info = window_info(fg)
+    if info["class"] != "Windows.UI.Core.CoreWindow" or info["title"] not in SHELL_OVERLAY_TITLES:
+        return False
+    user.keybd_event(VK_ESCAPE, 0, 0, 0)
+    user.keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.18)
+    return True
+
+
 def bring_to_front(hwnd):
     """SetForegroundWindow from a non-input process is restricted. The documented unlock is
     AttachThreadInput with the current foreground thread; it injects NO synthetic keys, so
     the target never arms its menu bar and never swallows a leading keystroke. The classic
     ALT tap stays only as a fallback, with a CTRL tap to cancel any menu mode it armed."""
+    dismiss_shell_overlay()
     user.ShowWindow(hwnd, SW_RESTORE)
     time.sleep(0.04)
     fg = user.GetForegroundWindow()
@@ -224,15 +270,112 @@ def send_wheel(delta, horizontal=False):
     return bool(user.SendInput(1, (INPUT * 1)(rec), c.sizeof(INPUT)))
 
 
+def _key_input(vk, up=False):
+    """One KEYBDINPUT carrying the key's real scan code (MapVirtualKey) and, for
+    extended keys, KEYEVENTF_EXTENDEDKEY - the pair a physical keyboard produces,
+    which is what browsers translate into KeyboardEvent.code."""
+    rec = INPUT(); rec.type = INPUT_KEYBOARD
+    flags = KEYEVENTF_KEYUP if up else 0
+    if int(vk) in EXTENDED_VKS:
+        flags |= KEYEVENTF_EXTENDEDKEY
+    rec.union.ki = KEYBDINPUT(int(vk), int(user.MapVirtualKeyW(int(vk), MAPVK_VK_TO_VSC)), flags, 0, None)
+    return rec
+
+
+def _send_key(vk, up=False):
+    return bool(user.SendInput(1, (INPUT * 1)(_key_input(vk, up)), c.sizeof(INPUT)))
+
+
+def send_key(vk):
+    return _send_key(vk) and _send_key(vk, True)
+
+
+def _send_unicode_char(ch):
+    for down in (0, KEYEVENTF_KEYUP):
+        rec = INPUT(); rec.type = INPUT_KEYBOARD
+        rec.union.ki = KEYBDINPUT(0, ord(ch), KEYEVENTF_UNICODE | down, 0, None)
+        if not user.SendInput(1, (INPUT * 1)(rec), c.sizeof(INPUT)):
+            return False
+    return True
+
+
+
+UIA_HELPER_CANDIDATES = [
+    os.environ.get("CU_UIA_HELPER") or "",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "uia-helper", "UiaHelper.exe"),
+    r"C:\Users\jrxid\cu-l5-test\tools\UiaHelper.exe",
+]
+
+
+def run_uia(request):
+    # UI Automation channel: structured element tree + pattern actions via a
+    # small compiled helper (source: uia-helper/UiaHelper.cs in this repo).
+    # Returns the helper's parsed JSON, or an error dict.
+    exe = next((p for p in UIA_HELPER_CANDIDATES if p and os.path.exists(p)), None)
+    if exe is None:
+        return {"ok": False, "error": "UIA_HELPER_MISSING"}
+    try:
+        proc = subprocess.run([exe], input=json.dumps(request).encode("utf-8"),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        line = proc.stdout.decode("utf-8", "replace").strip().splitlines()
+        if not line:
+            return {"ok": False, "error": "UIA_HELPER_NO_OUTPUT"}
+        return json.loads(line[-1])
+    except Exception as error:
+        return {"ok": False, "error": "UIA_HELPER_FAILED:" + type(error).__name__}
+
+
+def set_clipboard_text(text):
+    # WRITE-ONLY clipboard placement for the paste op: the text is supplied by
+    # the caller (never read from anywhere) and consumed immediately by a
+    # Ctrl+V into the authorized window. No code path reads the clipboard.
+    data = (text + "\0").encode("utf-16-le")
+    CF_UNICODETEXT = 13
+    GMEM_MOVEABLE = 0x0002
+    if not user.OpenClipboard(None):
+        return False
+    try:
+        user.EmptyClipboard()
+        handle = kernel.GlobalAlloc(GMEM_MOVEABLE, len(data))
+        if not handle:
+            return False
+        ptr = kernel.GlobalLock(handle)
+        if not ptr:
+            kernel.GlobalFree(handle)
+            return False
+        c.memmove(ptr, data, len(data))
+        kernel.GlobalUnlock(handle)
+        if not user.SetClipboardData(CF_UNICODETEXT, handle):
+            kernel.GlobalFree(handle)
+            return False
+        return True
+    finally:
+        user.CloseClipboard()
+
+
 def send_text(text):
+    """Type text as real key events whenever the active layout maps the character
+    to a plain or Shift-only key (VkKeyScan): browsers then see the true
+    KeyboardEvent.code ("Digit2", "KeyA") instead of a code-less Unicode event,
+    which canvas/DOM field handlers rely on. Characters needing Ctrl/Alt combos
+    or with no layout mapping keep the Unicode path."""
     sent = 0
     for ch in text:
-        for down in (0, KEYEVENTF_KEYUP):
-            rec = INPUT(); rec.type = INPUT_KEYBOARD
-            rec.union.ki = KEYBDINPUT(0, ord(ch), KEYEVENTF_UNICODE | down, 0, None)
-            arr = (INPUT * 1)(rec)
-            if not user.SendInput(1, arr, c.sizeof(INPUT)):
-                return sent
+        if ch in ("\r", "\n"):
+            ok = send_key(0x0D)
+        elif ch == "\t":
+            ok = send_key(0x09)
+        else:
+            raw = user.VkKeyScanW(ch) & 0xFFFF
+            vk, shift_state = raw & 0xFF, (raw >> 8) & 0xFF
+            if raw == 0xFFFF or vk == 0xFF or (shift_state & ~1):
+                ok = _send_unicode_char(ch)
+            elif shift_state & 1:
+                ok = _send_key(0x10) and send_key(vk) and _send_key(0x10, True)
+            else:
+                ok = send_key(vk)
+        if not ok:
+            return sent
         sent += 1
         time.sleep(0.004)
     return sent
@@ -245,25 +388,16 @@ def send_hotkey(vk, mods):
     held = []
     for name, vkmod in MODIFIERS.items():
         if mods.get(name):
-            rec = INPUT(); rec.type = INPUT_KEYBOARD
-            rec.union.ki = KEYBDINPUT(vkmod, 0, 0, 0, None)
-            user.SendInput(1, (INPUT * 1)(rec), c.sizeof(INPUT)); held.append(vkmod)
+            _send_key(vkmod); held.append(vkmod)
     time.sleep(0.03)
-    rec = INPUT(); rec.type = INPUT_KEYBOARD
-    rec.union.ki = KEYBDINPUT(int(vk), 0, 0, 0, None)
-    user.SendInput(1, (INPUT * 1)(rec), c.sizeof(INPUT))
+    send_key(int(vk))
     time.sleep(0.03)
-    rec = INPUT(); rec.type = INPUT_KEYBOARD
-    rec.union.ki = KEYBDINPUT(int(vk), 0, KEYEVENTF_KEYUP, 0, None)
-    user.SendInput(1, (INPUT * 1)(rec), c.sizeof(INPUT))
     for vkmod in reversed(held):
-        rec = INPUT(); rec.type = INPUT_KEYBOARD
-        rec.union.ki = KEYBDINPUT(vkmod, 0, KEYEVENTF_KEYUP, 0, None)
-        user.SendInput(1, (INPUT * 1)(rec), c.sizeof(INPUT))
+        _send_key(vkmod, True)
     return True
 
 
-def capture(path, hwnd=None, region=None):
+def capture(path, hwnd=None, region=None, max_dim=None):
     """Capture pixels visible on the desktop, optionally limited to one window rect.
     Some packaged/WinUI apps return black from GetWindowDC, so use the desktop DC and
     the exact authorized window bounds instead. Analysis remains a bounded luminance map."""
@@ -316,6 +450,27 @@ def capture(path, hwnd=None, region=None):
         rgba = bytearray(row_bytes)
         rgba[0::4], rgba[1::4], rgba[2::4], rgba[3::4] = row[2::4], row[1::4], row[0::4], b"\xff" * width
         png_rows.append(bytes(rgba))
+    # Optional stride downscale of the DELIVERED image only (fast perception for
+    # real-time loops): the ink grid above always comes from native-resolution
+    # pixels, so deterministic verification is unaffected. Scale is reported so
+    # callers can map image coordinates back to screen coordinates.
+    scale = 1
+    if isinstance(max_dim, int) and not isinstance(max_dim, bool) and max_dim >= 64 and max(width, height) > max_dim:
+        factor = (max(width, height) + max_dim - 1) // max_dim
+        if factor > 1:
+            small = []
+            for row in png_rows[::factor]:
+                chans = [row[ch::4][::factor] for ch in range(4)]
+                out_row = bytearray(len(chans[0]) * 4)
+                for ch in range(4):
+                    out_row[ch::4] = chans[ch]
+                small.append(bytes(out_row))
+            png_rows = small
+            # Declared dims must match the sliced rows exactly: slicing yields
+            # ceil(dim/factor) rows/pixels, floor division would corrupt the PNG.
+            height = len(png_rows)
+            width = (len(png_rows[0]) // 4) if png_rows else width
+            scale = factor
 
     def chunk(tag, data):
         return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
@@ -328,7 +483,7 @@ def capture(path, hwnd=None, region=None):
     digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
     flat = [value for line in ink_grid for value in line]
     return {"path": path, "width": int(width), "height": int(height), "sha256": digest,
-            "ink": flat, "mean": sum(flat) // max(1, len(flat))}
+            "ink": flat, "mean": sum(flat) // max(1, len(flat)), "scale": scale}
 
 
 def point_in_rect(rect, x, y):
@@ -338,7 +493,9 @@ def point_in_rect(rect, x, y):
 
 def main():
     try:
-        command = json.loads(sys.stdin.read())
+        # The Core host writes UTF-8 JSON; text-mode stdin would decode with
+        # the locale codepage and garble non-ASCII window titles / typed text.
+        command = json.loads(sys.stdin.buffer.read().decode("utf-8"))
     except Exception:
         print(json.dumps({"ok": False, "error": "COMMAND_INVALID"})); return 1
     op = command.get("op")
@@ -481,6 +638,42 @@ def main():
                                   "foreground": foreground_info()})); return 0
             typed = send_text(str(command.get("text", ""))[:2000])
             print(json.dumps({"ok": True, "typed": typed, "foreground": foreground_info()}))
+        elif op == "paste":
+            # Composite range fill: anchor-click inside the authorized window,
+            # place caller-supplied text on the (write-only) clipboard, then
+            # Ctrl+V. One call fills a whole block (e.g. a TSV range in a
+            # spreadsheet) the way a human pasting a copied block would.
+            expect_hwnd = command.get("expect_hwnd")
+            expect_title = command.get("expect_title")
+            x, y = command.get("x"), command.get("y")
+            if not isinstance(x, int) or isinstance(x, bool) or not isinstance(y, int) or isinstance(y, bool):
+                print(json.dumps({"ok": False, "error": "POINT_REQUIRED"})); return 0
+            if expect_hwnd is None:
+                print(json.dumps({"ok": False, "error": "POINT_OUTSIDE_TARGET"})); return 0
+            rect = window_info(int(expect_hwnd))["rect"]
+            if not point_in_rect(rect, x, y):
+                print(json.dumps({"ok": False, "error": "POINT_OUTSIDE_TARGET",
+                                  "target_rect": rect})); return 0
+            fg = verify_foreground(expect_hwnd, expect_title)
+            if fg is None:
+                print(json.dumps({"ok": False, "error": "FOREGROUND_MISMATCH",
+                                  "foreground": foreground_info()})); return 0
+            text = str(command.get("text", ""))[:20000]
+            if not user.SetCursorPos(int(x), int(y)):
+                print(json.dumps({"ok": False, "error": "CURSOR_MOVE_FAILED"})); return 0
+            if not send_mouse("click", x, y):
+                print(json.dumps({"ok": False, "error": "DISPATCH_FAILED"})); return 0
+            time.sleep(0.12)
+            if not set_clipboard_text(text):
+                print(json.dumps({"ok": False, "error": "CLIPBOARD_SET_FAILED"})); return 0
+            time.sleep(0.05)
+            if not send_hotkey(0x56, {"ctrl": True}):
+                print(json.dumps({"ok": False, "error": "DISPATCH_FAILED"})); return 0
+            time.sleep(0.25)
+            cursor = POINT(); user.GetCursorPos(c.byref(cursor))
+            print(json.dumps({"ok": True, "sent": True, "pasted_chars": len(text),
+                              "cursor": [cursor.x, cursor.y],
+                              "foreground": foreground_info()}))
         elif op == "hotkey":
             fg = verify_foreground(command.get("expect_hwnd"), command.get("expect_title"))
             if fg is None:
@@ -488,9 +681,94 @@ def main():
                                   "foreground": foreground_info()})); return 0
             sent = send_hotkey(int(command["vk"]), command.get("modifiers") or {})
             print(json.dumps({"ok": True, "sent": bool(sent), "foreground": foreground_info()}))
+        elif op == "setfield":
+            # Composite field entry for small dialog inputs: focus the field,
+            # select its current content, type the replacement as real key
+            # events, commit the way the dialog expects, then read back a tight
+            # native-resolution crop around the field as evidence of the value
+            # that actually landed (a whole-window diff cannot see a 2-digit
+            # change in a 48x27 field).
+            expect_hwnd = command.get("expect_hwnd")
+            expect_title = command.get("expect_title")
+            x, y = command.get("x"), command.get("y")
+            if not isinstance(x, int) or isinstance(x, bool) or not isinstance(y, int) or isinstance(y, bool):
+                print(json.dumps({"ok": False, "error": "POINT_REQUIRED"})); return 0
+            if expect_hwnd is None:
+                print(json.dumps({"ok": False, "error": "POINT_OUTSIDE_TARGET"})); return 0
+            rect = window_info(int(expect_hwnd))["rect"]
+            if not point_in_rect(rect, x, y):
+                print(json.dumps({"ok": False, "error": "POINT_OUTSIDE_TARGET",
+                                  "target_rect": rect})); return 0
+            fg = verify_foreground(expect_hwnd, expect_title)
+            if fg is None:
+                print(json.dumps({"ok": False, "error": "FOREGROUND_MISMATCH",
+                                  "foreground": foreground_info()})); return 0
+            if not user.SetCursorPos(int(x), int(y)):
+                print(json.dumps({"ok": False, "error": "CURSOR_MOVE_FAILED"})); return 0
+            if not send_mouse("dblclick", x, y):
+                print(json.dumps({"ok": False, "error": "DISPATCH_FAILED"})); return 0
+            time.sleep(0.18)
+            send_hotkey(0x41, {"ctrl": True})
+            time.sleep(0.05)
+            typed = send_text(str(command.get("text", ""))[:64])
+            time.sleep(0.08)
+            commit = command.get("commit", "enter")
+            if commit == "enter":
+                send_key(0x0D)
+            elif commit == "tab":
+                send_key(0x09)
+            time.sleep(0.15)
+            win_w, win_h = rect[2] - rect[0], rect[3] - rect[1]
+            rw = command.get("region_w", 280)
+            rh = command.get("region_h", 64)
+            if not isinstance(rw, int) or isinstance(rw, bool):
+                rw = 280
+            if not isinstance(rh, int) or isinstance(rh, bool):
+                rh = 64
+            rw = max(16, min(rw, win_w)); rh = max(16, min(rh, win_h))
+            rl = max(0, min(int(x) - rect[0] - rw // 2, win_w - rw))
+            rt = max(0, min(int(y) - rect[1] - rh // 2, win_h - rh))
+            readback = capture(command["path"], int(expect_hwnd), [rl, rt, rw, rh])
+            if readback is None:
+                print(json.dumps({"ok": False, "error": "CAPTURE_FAILED"})); return 0
+            readback["region"] = [rl, rt, rw, rh]
+            cursor = POINT(); user.GetCursorPos(c.byref(cursor))
+            print(json.dumps({"ok": True, "sent": True, "typed": typed,
+                              "cursor": [cursor.x, cursor.y],
+                              "foreground": foreground_info(), "readback": readback}))
+        elif op in ("uia_tree", "uia_invoke", "uia_setvalue"):
+            # Structured channel. The target window must be the authorized one;
+            # actions additionally require it to be the foreground window
+            # (the Core host focuses it first, same contract as mouse input).
+            expect_hwnd = command.get("expect_hwnd")
+            expect_title = command.get("expect_title")
+            if expect_hwnd is None:
+                print(json.dumps({"ok": False, "error": "WINDOW_REQUIRED"})); return 0
+            info = window_info(int(expect_hwnd))
+            if not info or not same_target(info, expect_hwnd, expect_title):
+                print(json.dumps({"ok": False, "error": "WINDOW_NOT_FOUND"})); return 0
+            if op != "uia_tree":
+                fg = verify_foreground(expect_hwnd, expect_title)
+                if fg is None:
+                    print(json.dumps({"ok": False, "error": "FOREGROUND_MISMATCH",
+                                      "foreground": foreground_info()})); return 0
+            request = {"hwnd": int(expect_hwnd),
+                       "mode": {"uia_tree": "tree", "uia_invoke": "invoke", "uia_setvalue": "setvalue"}[op]}
+            if op == "uia_tree":
+                request["maxDepth"] = command.get("max_depth", 6)
+                request["maxNodes"] = command.get("max_nodes", 300)
+            else:
+                request["name"] = str(command.get("name", ""))
+                request["type"] = str(command.get("type", ""))
+                if op == "uia_setvalue":
+                    request["value"] = str(command.get("value", ""))
+            result = run_uia(request)
+            result["foreground"] = foreground_info()
+            print(json.dumps(result))
         elif op == "capture":
             hwnd = command.get("hwnd")
-            result = capture(command["path"], int(hwnd) if hwnd else None, command.get("region"))
+            result = capture(command["path"], int(hwnd) if hwnd else None, command.get("region"),
+                             command.get("max_dim"))
             if result is None:
                 print(json.dumps({"ok": False, "error": "CAPTURE_FAILED"})); return 0
             result["foreground"] = foreground_info()

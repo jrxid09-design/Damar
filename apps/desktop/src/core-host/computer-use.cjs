@@ -123,27 +123,44 @@ function newCaptureDir() {
 }
 
 function requirePoint(action, x, y, endX, endY, points) {
-  if (['move', 'click', 'dblclick', 'right', 'wheel'].includes(action) && (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)))
+  if (['move', 'click', 'dblclick', 'right', 'wheel', 'setfield', 'paste'].includes(action) && (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)))
     throw Error('POINT_REQUIRED');
   if (action === 'drag' && (![x, y, endX, endY].every(Number.isSafeInteger))) throw Error('POINT_REQUIRED');
   if (action === 'path' && (!Array.isArray(points) || points.length < 2 || points.length > 128 ||
       points.some(p => !Array.isArray(p) || p.length !== 2 || !p.every(Number.isSafeInteger)))) throw Error('PATH_INVALID');
 }
 
-async function observe({ target = 'screen', title = null, pid = null, capture: wantCapture = true } = {}, signal) {
+async function observe({ target = 'screen', title = null, pid = null, capture: wantCapture = true, region = null, maxDim = null } = {}, signal) {
+  const __ow = Date.now();
   const windows = await runHelper({ op: 'windows', limit: MAX_WINDOWS }, signal);
+  const __windowsMs = Date.now() - __ow;
   if (windows.ok !== true) throw Error('DESKTOP_HELPER_FAILED_' + (windows.error || 'UNKNOWN'));
   const list = windows.windows.slice(0, MAX_WINDOWS);
   const result = { windows: list.map(w => ({ title: w.title, pid: w.pid, rect: w.rect })) };
   const fg = await runHelper({ op: 'foreground' }, signal);
   result.foreground = fg.ok ? fg.foreground : null;
+  result.phaseMs = { windows: __windowsMs, capture: 0 };
   if (wantCapture) {
     const win = target === 'window' ? findWindow(list, { title, pid }) : null;
+    // Optional tight read-back: a window-relative region captured at native
+    // resolution, so small values (a 2-digit dialog field) stay legible instead
+    // of dissolving into a whole-window grid.
+    let reg = null;
+    if (win && region) {
+      const [l, t, r, b] = win.rect, ww = r - l, wh = b - t;
+      const w = Math.max(8, Math.min(Math.floor(region.w) || 8, ww));
+      const h = Math.max(8, Math.min(Math.floor(region.h) || 8, wh));
+      reg = [Math.max(0, Math.min(Math.floor(region.x) || 0, ww - w)),
+        Math.max(0, Math.min(Math.floor(region.y) || 0, wh - h)), w, h];
+    }
     const dir = newCaptureDir();
     const file = path.join(dir, crypto.randomUUID() + '.png');
-    const shot = await runHelper({ op: 'capture', path: file, hwnd: win ? win.hwnd : null }, signal);
+    const __oc = Date.now();
+    const shot = await runHelper({ op: 'capture', path: file, hwnd: win ? win.hwnd : null, region: reg,
+      max_dim: Number.isSafeInteger(maxDim) && maxDim >= 64 ? maxDim : null }, signal);
+    result.phaseMs.capture = Date.now() - __oc;
     if (shot.ok !== true) throw Error('DESKTOP_CAPTURE_FAILED_' + (shot.error || 'UNKNOWN'));
-    result.capture = { path: file, sha256: shot.sha256, width: shot.width, height: shot.height };
+    result.capture = { path: file, sha256: shot.sha256, width: shot.width, height: shot.height, region: reg, scale: shot.scale || 1 };
     result.analysis = { ink: Array.isArray(shot.ink) ? shot.ink.slice(0, MAX_INK) : [], mean: shot.mean, width: shot.width, height: shot.height };
   }
   return result;
@@ -151,7 +168,8 @@ async function observe({ target = 'screen', title = null, pid = null, capture: w
 
 // Bring the authorized target to the front and keep re-verifying inside the helper process.
 async function act({ title, pid, action, x = null, y = null, endX = null, endY = null, points = null, durationMs = 500,
-  text = null, vk = null, modifiers = null, wheel = 1, horizontal = false } = {}, signal) {
+  text = null, vk = null, modifiers = null, wheel = 1, horizontal = false,
+  commit = 'enter', regionW = 280, regionH = 64 } = {}, signal) {
   requirePoint(action, x, y, endX, endY, points);
   if (!Number.isSafeInteger(durationMs) || durationMs < 0 || durationMs > 5000) throw Error('DURATION_INVALID');
   const windows = await runHelper({ op: 'windows', limit: MAX_WINDOWS }, signal);
@@ -165,7 +183,11 @@ async function act({ title, pid, action, x = null, y = null, endX = null, endY =
       helperSucceeded: focused.ok === true, foreground: focused.foreground || null };
     throw error;
   }
+  const readbackFile = action === 'setfield' ? path.join(newCaptureDir(), crypto.randomUUID() + '.png') : null;
   const dispatch = action === 'type' ? { op: 'type', text: String(text || ''), expect_hwnd: win.hwnd, expect_title: win.title }
+    : action === 'setfield' ? { op: 'setfield', x, y, text: String(text || ''), commit, region_w: regionW, region_h: regionH,
+        path: readbackFile, expect_hwnd: win.hwnd, expect_title: win.title }
+    : action === 'paste' ? { op: 'paste', x, y, text: String(text || ''), expect_hwnd: win.hwnd, expect_title: win.title }
     : action === 'hotkey' ? { op: 'hotkey', vk, modifiers: modifiers || {}, expect_hwnd: win.hwnd, expect_title: win.title }
     : action === 'wheel' ? { op: 'mouse', action: 'wheel', x, y, delta: wheel, horizontal, expect_hwnd: win.hwnd, expect_title: win.title }
     : action === 'drag' ? { op: 'mouse', action: 'drag', x, y, end_x: endX, end_y: endY, expect_hwnd: win.hwnd, expect_title: win.title }
@@ -173,7 +195,9 @@ async function act({ title, pid, action, x = null, y = null, endX = null, endY =
     : { op: 'mouse', action, x, y, expect_hwnd: win.hwnd, expect_title: win.title };
   const sent = await runHelper(dispatch, signal);
   if (sent.ok !== true) { const e = Error(sent.error || 'DISPATCH_FAILED'); e.foreground = sent.foreground; throw e; }
-  return { target: { title: win.title, pid: win.pid }, rect: win.rect, cursor: sent.cursor, foreground: sent.foreground };
+  return { target: { title: win.title, pid: win.pid }, rect: win.rect, cursor: sent.cursor, foreground: sent.foreground,
+    readback: sent.readback ? { path: readbackFile, width: sent.readback.width, height: sent.readback.height,
+      mean: sent.readback.mean, region: sent.readback.region || null } : null };
 }
 
 async function compareRegion(before, after) {
@@ -355,8 +379,9 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         return out({ ok: true, stopped: true, note: 'desktop control disabled until the Core host restarts' });
       } catch (e) { return fail(e); } } },
       { readOnly: true }),
-    tool({ name: 'computer_use_observe', description: 'Observe the desktop: list windows, optionally capture the screen or one window, and report what the active model can actually perceive. Capture requires Owner authorization; analysis is deterministic, never raw pixels.',
-      parameters: { type: 'object', properties: { target: { type: 'string', enum: ['screen', 'window'] }, title: { type: 'string' }, pid: { type: 'integer' }, capture: { type: 'boolean' } } },
+    tool({ name: 'computer_use_observe', description: 'Observe the desktop: list windows, optionally capture the screen or one window, and report what the active model can actually perceive. Capture requires Owner authorization; analysis is deterministic, never raw pixels. For a window target, regionX/regionY/regionW/regionH capture a tight window-relative region at native resolution (use it to READ small values such as dialog fields), and maxDim downscales the delivered image for fast loops (the result reports the scale; window coordinates stay authoritative).',
+      parameters: { type: 'object', properties: { target: { type: 'string', enum: ['screen', 'window'] }, title: { type: 'string' }, pid: { type: 'integer' }, capture: { type: 'boolean' },
+        regionX: { type: 'integer' }, regionY: { type: 'integer' }, regionW: { type: 'integer' }, regionH: { type: 'integer' }, maxDim: { type: 'integer' } } },
       execute: async (args, execution) => { try {
         const ctx = ctxOf(execution);
         if (state.stopped) return out({ ok: false, error: 'DESKTOP_STOPPED' });
@@ -366,12 +391,19 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
           ? windowFingerprint({ title: String(args?.title || ''), pid: args?.pid ?? null })
           : 'screen:' + crypto.createHash('sha256').update(String(process.env.COMPUTERNAME || '')).digest('hex').slice(0, 12);
         let observed = null;
+        // Card run strings carry the window title up to 200 chars (not 60):
+        // permission policies match on this string, and document apps retitle
+        // to "<file> [<full path>] - App" after Save As - a 60-char cut silently
+        // amputated the app name and flipped act grants to DENIED_BY_OWNER (R2-9).
         const r = await authorize(ctx, { op: 'cu-observe', scopeToken: 'cu-observe:' + fingerprint,
-          card: { tool: 'computer_use_observe', run: target === 'window' ? `capture window "${String(args?.title || '').slice(0, 60)}"` : 'capture the whole screen',
+          card: { tool: 'computer_use_observe', run: target === 'window' ? `capture window "${String(args?.title || '').slice(0, 200)}"` : 'capture the whole screen',
             change: 'observe the desktop for the current task', scope: target === 'window' ? 'exact window title+pid' : 'full screen (privacy-sensitive)',
             risk: 'A screen image is written to the private scratch directory; pixels are never sent to a model unless it can actually accept images' },
           parameters: { target, fingerprint },
-          driver: async () => { observed = await enqueue(ctx.signal, 'observe', signal => observe({ target, title: args?.title, pid: args?.pid, capture: wantCapture }, signal)); return { observed: true }; },
+          driver: async () => { observed = await enqueue(ctx.signal, 'observe', signal => observe({ target, title: args?.title, pid: args?.pid, capture: wantCapture,
+            region: target === 'window' && Number.isSafeInteger(args?.regionW) && Number.isSafeInteger(args?.regionH)
+              ? { x: args?.regionX || 0, y: args?.regionY || 0, w: args.regionW, h: args.regionH } : null,
+            maxDim: Number.isSafeInteger(args?.maxDim) ? args.maxDim : null }, signal)); return { observed: true }; },
           verify: async () => ({ checks: [
             { name: 'helper answered', passed: !!observed && Array.isArray(observed.windows) },
             ...(wantCapture ? [{ name: 'capture written', passed: !!observed?.capture?.path && fs.existsSync(observed.capture.path) }] : []) ] }) });
@@ -379,8 +411,10 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         if (!observed) return out({ ok: false, error: 'NOT_EXECUTED_' + (r.reason || r.outcome) });
         ctx.emit({ type: 'tool', badge: 'CU-OBSERVE', target: `${target}${args?.title ? ' ' + String(args.title).slice(0, 40) : ''} (${observed.windows.length} windows)` });
         const result = { ok: true, outcome: r.outcome, windows: observed.windows, foreground: observed.foreground,
-          capture: observed.capture ? { sha256: observed.capture.sha256, width: observed.capture.width, height: observed.capture.height, path: observed.capture.path } : null,
+          capture: observed.capture ? { sha256: observed.capture.sha256, width: observed.capture.width, height: observed.capture.height, path: observed.capture.path,
+            region: observed.capture.region || null, scale: observed.capture.scale || 1 } : null,
           analysis: observed.analysis ? { ink: observed.analysis.ink, mean: observed.analysis.mean } : null,
+          phases: observed.phaseMs || null,
           visionCapability: vision() ? 'verified' : 'unverified',
           visionAvailable: vision(), visionNote: vision() ? 'selected model capability is verified' : 'selected model image input is not verified; only deterministic analysis is available' };
         if (vision() && observed.capture?.path) {
@@ -394,13 +428,14 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         return out(result);
       } catch (e) { return fail(e); } } },
       { canonicalAuthority: true, sideEffects: false, readOnly: true }),
-    tool({ name: 'computer_use_act', description: 'Act on one authorized desktop window: focus it, then move/click/right-click/double-click/drag/freehand-path/vertical-or-horizontal-scroll/type/hotkey. Drag and path are one bounded down-move-up helper operation; every path point must be inside the exact target window. Input is re-verified against the foreground window before dispatch, and the result reports what was actually observed.',
+    tool({ name: 'computer_use_act', description: 'Act on one authorized desktop window: focus it, then move/click/right-click/double-click/drag/freehand-path/vertical-or-horizontal-scroll/type/hotkey. Drag and path are one bounded down-move-up helper operation; every path point must be inside the exact target window. Input is re-verified against the foreground window before dispatch, and the result reports what was actually observed. For entering a value into a small dialog field, use action "setfield" with x/y at the field center and text: it focuses the field, selects its content, types as real key events, commits (commit: "enter" | "tab" | "none"), and returns a zoomed read-back image of the field so the landed value can be confirmed; verification compares that tight region, not the whole window. For filling a RANGE of cells in a spreadsheet, use action "paste" with x/y at the top-left target cell and text as a tab-separated block (rows separated by newlines): it anchor-clicks the cell, places the text on the clipboard (write-only) and pastes it in one operation.',
       parameters: { type: 'object', properties: { title: { type: 'string' }, pid: { type: 'integer' },
-        action: { type: 'string', enum: ['move', 'click', 'dblclick', 'right', 'drag', 'path', 'wheel', 'type', 'hotkey'] },
+        action: { type: 'string', enum: ['move', 'click', 'dblclick', 'right', 'drag', 'path', 'wheel', 'type', 'hotkey', 'setfield', 'paste'] },
         x: { type: 'integer' }, y: { type: 'integer' }, endX: { type: 'integer' }, endY: { type: 'integer' },
         points: { type: 'array', maxItems: 128, items: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer' } } },
         durationMs: { type: 'integer', minimum: 0, maximum: 5000 }, horizontal: { type: 'boolean' },
         text: { type: 'string' }, vk: { type: 'integer' },
+        commit: { type: 'string', enum: ['enter', 'tab', 'none'] }, regionW: { type: 'integer' }, regionH: { type: 'integer' },
          modifiers: { type: 'object', properties: { ctrl: { type: 'boolean' }, alt: { type: 'boolean' }, shift: { type: 'boolean' }, win: { type: 'boolean' } } }, wheel: { type: 'integer' } },
         required: ['title', 'action'] },
       execute: async (args, execution) => { try {
@@ -408,42 +443,198 @@ function createComputerUseTools({ AITool, authority, broker, settings = null, vi
         if (state.stopped) return out({ ok: false, error: 'DESKTOP_STOPPED' });
         const fingerprint = windowFingerprint({ title: String(args?.title || ''), pid: args?.pid ?? null });
         let before = null, applied = null, after = null;
+        const __t0 = Date.now(); const phases = {};
         const r = await authorize(ctx, { op: 'cu-act', scopeToken: 'cu-act:' + fingerprint,
-          card: { tool: 'computer_use_act', run: `${args.action} on window "${String(args?.title || '').slice(0, 60)}"${args.action === 'type' ? ` (text ${String(args?.text || '').length} chars)` : ''}`,
+          card: { tool: 'computer_use_act', run: `${args.action} on window "${String(args?.title || '').slice(0, 200)}"${args.action === 'type' ? ` (text ${String(args?.text || '').length} chars)` : ''}`,
             change: 'operate this exact window with mouse/keyboard', scope: 'exact window title+pid, re-verified at dispatch time',
             risk: 'Real input events are sent to the desktop; serialized and immediately stoppable' },
           parameters: { title: String(args?.title || '').slice(0, 120), pid: args?.pid ?? null, action: args.action,
             point: args.action === 'type' || args.action === 'hotkey' ? null : { x: args?.x, y: args?.y },
             endPoint: args.action === 'drag' ? { x: args?.endX, y: args?.endY } : null,
             pathPoints: args.action === 'path' ? args.points : null,
-            inputDigest: args.action === 'type' ? crypto.createHash('sha256').update(String(args?.text || '')).digest('hex').slice(0, 24) : null },
+            inputDigest: (args.action === 'type' || args.action === 'paste') ? crypto.createHash('sha256').update(String(args?.text || '')).digest('hex').slice(0, 24) : null },
           driver: async () => {
+            phases.gateMs = Date.now() - __t0;
             await enqueue(ctx.signal, 'act', async signal => {
-              before = await observe({ target: 'window', title: args?.title, pid: args?.pid }, signal);
-              applied = await act(args, signal);
-              after = await observe({ target: 'window', title: args?.title, pid: args?.pid }, signal);
+              if (args.action === 'setfield') {
+                // Verify against a tight region around the field: a whole-window
+                // grid cannot see a 2-digit change, a native-res crop can.
+                const listing = await observe({ target: 'window', title: args?.title, pid: args?.pid, capture: false }, signal);
+                const win = listing.windows.find(w => w.title === String(args?.title || '') && (args?.pid == null || w.pid === args?.pid));
+                if (!win) throw Error('WINDOW_NOT_FOUND');
+                const [l, t, r, b] = win.rect, ww = r - l, wh = b - t;
+                const rw = Math.max(16, Math.min(args?.regionW || 280, ww)), rh = Math.max(16, Math.min(args?.regionH || 64, wh));
+                const region = { x: Math.max(0, Math.min((args.x - l) - Math.floor(rw / 2), ww - rw)),
+                  y: Math.max(0, Math.min((args.y - t) - Math.floor(rh / 2), wh - rh)), w: rw, h: rh };
+                before = await observe({ target: 'window', title: args?.title, pid: args?.pid, region }, signal);
+                applied = await act(args, signal);
+                after = await observe({ target: 'window', title: args?.title, pid: args?.pid, region }, signal);
+              } else {
+                // Verification captures feed only the coarse ink-grid diff,
+                // so cap them at 1024px: same checks, cheaper capture+encode.
+                const __b0 = Date.now();
+                before = await observe({ target: 'window', title: args?.title, pid: args?.pid, maxDim: 1024 }, signal);
+                phases.beforeMs = Date.now() - __b0;
+                const __d0 = Date.now();
+                applied = await act(args, signal);
+                phases.dispatchMs = Date.now() - __d0;
+                const __a0 = Date.now();
+                after = await observe({ target: 'window', title: args?.title, pid: args?.pid, maxDim: 1024 }, signal);
+                phases.afterMs = Date.now() - __a0;
+              }
             });
             return { applied: true };
           },
           verify: async () => { const region = await compareRegion(before, after); return { checks: [
             { name: 'dispatch verified in helper', passed: !!applied && !!applied.target },
             { name: 'window still exists', passed: !!after && after.windows.some(w => w.title === String(args?.title || '') && (args?.pid == null || w.pid === args.pid)) },
-            ...(args.action === 'move' || args.action === 'click' || args.action === 'dblclick' || args.action === 'right' || args.action === 'drag' || args.action === 'path' || args.action === 'wheel'
+            ...(args.action === 'move' || args.action === 'click' || args.action === 'dblclick' || args.action === 'right' || args.action === 'drag' || args.action === 'path' || args.action === 'wheel' || args.action === 'setfield' || args.action === 'paste'
               ? [{ name: 'cursor at the requested point (±1px)', passed: !!applied?.cursor && Math.abs(applied.cursor[0] - (args.action === 'drag' ? args?.endX : args.action === 'path' ? args.points.at(-1)?.[0] : args?.x)) <= 1 && Math.abs(applied.cursor[1] - (args.action === 'drag' ? args?.endY : args.action === 'path' ? args.points.at(-1)?.[1] : args?.y)) <= 1 }]
               : []),
             ...(!['move', 'wheel'].includes(args.action) ? [{ name: 'screen region changed (observation)', passed: region ? region.changedCells > 0 : false, observed: region }] : []),
           ] }; } });
+        phases.verifyResidualMs = Math.max(0, (Date.now() - __t0) - (phases.gateMs || 0) - (phases.beforeMs || 0) - (phases.dispatchMs || 0) - (phases.afterMs || 0));
         if (r.ok === false) return out(r);
         if (!applied) return out({ ok: false, error: 'NOT_EXECUTED_' + (r.reason || r.outcome) });
         ctx.emit({ type: 'tool', badge: 'CU-ACT', target: `${args.action} ${String(args?.title || '').slice(0, 40)}` });
-        return out({ ok: true, outcome: r.outcome, target: applied.target, rect: applied.rect, cursor: applied.cursor,
-          foreground: applied.foreground, region: r.checks?.find(c => c.name.startsWith('screen region'))?.observed || null });
+        const result = { ok: true, outcome: r.outcome, phases, target: applied.target, rect: applied.rect, cursor: applied.cursor,
+          foreground: applied.foreground, region: r.checks?.find(c => c.name.startsWith('screen region'))?.observed || null,
+          readback: applied.readback ? { width: applied.readback.width, height: applied.readback.height,
+            mean: applied.readback.mean, region: applied.readback.region } : null };
+        if (vision() && applied.readback?.path && fs.existsSync(applied.readback.path)) {
+          const stat = fs.statSync(applied.readback.path);
+          if (stat.size <= 3 * 1024 * 1024) {
+            const image = fs.readFileSync(applied.readback.path);
+            if (image.subarray(0, 8).toString('hex') === '89504e470d0a1a0a')
+              result.__damarComputerUseImage = 'data:image/png;base64,' + image.toString('base64');
+          }
+        }
+        return out(result);
       } catch (e) {
         const message = String(e?.message || e);
         if (message.startsWith('FOREGROUND_MISMATCH') || message.startsWith('POINT_OUTSIDE_TARGET') || message.startsWith('WINDOW_NOT_FOUND'))
           return out({ ok: false, error: message, foreground: e?.foreground || null, note: 'refused before any input was dispatched' });
         return fail(e);
       } } },
+      { canonicalAuthority: true, sideEffects: true, readOnly: false }),
+    tool({ name: 'computer_use_uia', description: 'Structured UI Automation channel for one authorized window. Action "tree" returns the element tree as TEXT (control type, name, bounding rect, current value, actionable patterns) - for native apps (LibreOffice, VS Code, system dialogs) prefer this over a screenshot: it is exact and cheap. Action "invoke" activates an element by name (and optional control type) via its Invoke/Toggle/SelectionItem pattern. Action "setvalue" writes a field through the Value pattern and verifies by reading the value back from the element. Canvas surfaces (games, image-editor canvases, Blender viewport) expose almost nothing here - keep using observe/act for those.',
+      parameters: { type: 'object', properties: { title: { type: 'string' }, pid: { type: 'integer' },
+        action: { type: 'string', enum: ['tree', 'invoke', 'setvalue'] },
+        name: { type: 'string' }, type: { type: 'string' }, value: { type: 'string' },
+        maxDepth: { type: 'integer' }, maxNodes: { type: 'integer' } },
+        required: ['title', 'action'] },
+      execute: async (args, execution) => { try {
+        const ctx = ctxOf(execution);
+        if (state.stopped) return out({ ok: false, error: 'DESKTOP_STOPPED' });
+        const fingerprint = windowFingerprint({ title: String(args?.title || ''), pid: args?.pid ?? null });
+        let applied = null;
+        const r = await authorize(ctx, { op: 'cu-uia', scopeToken: 'cu-uia:' + fingerprint,
+          card: { tool: 'computer_use_uia', run: `${args.action} on window "${String(args?.title || '').slice(0, 200)}"`,
+            change: 'read or operate this exact window via UI Automation', scope: 'exact window title+pid, re-verified at dispatch time',
+            risk: 'Structured element access on the authorized window only; invoke/setvalue change app state like a user would' },
+          parameters: { title: String(args?.title || '').slice(0, 120), pid: args?.pid ?? null, action: args.action,
+            name: args?.name || null, type: args?.type || null },
+          driver: async () => {
+            await enqueue(ctx.signal, 'act', async signal => {
+              const windows = await runHelper({ op: 'windows', limit: MAX_WINDOWS }, signal);
+              if (windows.ok !== true) throw Error('DESKTOP_HELPER_FAILED_' + (windows.error || 'UNKNOWN'));
+              const win = findWindow(windows.windows, { title: args?.title, pid: args?.pid });
+              if (args.action !== 'tree') {
+                const focused = await runHelper({ op: 'focus', hwnd: win.hwnd }, signal);
+                if (focused.ok !== true || focused.foreground?.hwnd !== win.hwnd) throw Error('FOCUS_REFUSED');
+              }
+              const op = args.action === 'tree' ? 'uia_tree' : args.action === 'invoke' ? 'uia_invoke' : 'uia_setvalue';
+              applied = await runHelper({ op, expect_hwnd: win.hwnd, expect_title: win.title,
+                name: args?.name || '', type: args?.type || '', value: args?.value || '',
+                max_depth: Number.isSafeInteger(args?.maxDepth) ? args.maxDepth : 6,
+                max_nodes: Number.isSafeInteger(args?.maxNodes) ? args.maxNodes : 300 }, signal);
+              if (applied.ok !== true) { const e = Error(applied.error || 'UIA_FAILED'); e.foreground = applied.foreground; throw e; }
+              applied.__win = { title: win.title, pid: win.pid };
+            });
+            return { applied: true };
+          },
+          verify: async () => ({ checks: [
+            { name: 'uia helper answered ok', passed: !!applied && applied.ok === true },
+            ...(args.action === 'setvalue' ? [{ name: 'element value read-back matches', passed: applied?.element?.value === String(args?.value || '') }] : []),
+          ] }) });
+        if (r.ok === false) return out(r);
+        if (!applied) return out({ ok: false, error: 'NOT_EXECUTED_' + (r.reason || r.outcome) });
+        const result = { ok: true, outcome: r.outcome, channel: 'uia', target: applied.__win,
+          ...(args.action === 'tree' ? { tree: applied.tree, truncated: !!applied.truncated }
+            : { element: applied.element || null, matches: applied.matches ?? null }) };
+        return out(result);
+      } catch (e) { return fail(e); } } },
+      { canonicalAuthority: true, sideEffects: true, readOnly: false }),
+    tool({ name: 'computer_use_appmodel', description: 'App object-model channel (enabled only when DAMAR_CU_APPMODEL_PORT is set): sends ONE fixed-vocabulary command to the in-app bridge of the staged application. Bridges: Blender bpy (ping, get_objects, add_cube, add_uv_sphere, set_location, set_base_color, save, render) and LibreOffice UNO for Calc (ping, get_cell, get_range, set_cell, set_range, fill_down, set_bold, set_number_format, insert_chart, save_as, export_pdf). This reads/writes the app MODEL directly - exact state, no pixels. Every response includes read-back verification of the affected objects/cells. Vision stays available for visual review of renders/canvas.',
+      parameters: { type: 'object', properties: { command: { type: 'object' } }, required: ['command'] },
+      execute: async (args, execution) => { try {
+        const ctx = ctxOf(execution);
+        if (state.stopped) return out({ ok: false, error: 'DESKTOP_STOPPED' });
+        const port = Number(process.env.DAMAR_CU_APPMODEL_PORT || 0);
+        if (!port) return out({ ok: false, error: 'APPMODEL_NOT_CONFIGURED' });
+        const cmd = args?.command && typeof args.command === 'object' ? args.command : null;
+        if (!cmd || typeof cmd.cmd !== 'string') return out({ ok: false, error: 'APPMODEL_CMD_INVALID' });
+        let resp = null;
+        const r = await authorize(ctx, { op: 'cu-appmodel', scopeToken: 'cu-appmodel:' + port,
+          card: { tool: 'computer_use_appmodel', run: 'appmodel ' + cmd.cmd,
+            change: 'operate the staged app through its object model', scope: 'the bench-staged app bridge on localhost only',
+            risk: 'Fixed-vocabulary model commands (no arbitrary code); effects equal the user doing it in the app' },
+          parameters: { port, cmd: cmd.cmd },
+          driver: async () => {
+            resp = await new Promise((resolve, reject) => {
+              const net = require('node:net');
+              const sock = net.connect(port, '127.0.0.1');
+              let buf = '';
+              const timer = setTimeout(() => { try { sock.destroy(); } catch {} reject(Error('APPMODEL_TIMEOUT')); }, 120000);
+              sock.on('connect', () => sock.write(JSON.stringify(cmd) + '\n'));
+              sock.on('data', d => { buf += d.toString('utf-8'); if (buf.includes('\n')) { clearTimeout(timer); try { resolve(JSON.parse(buf.trim())); } catch (e) { reject(e); } try { sock.end(); } catch {} } });
+              sock.on('error', e => { clearTimeout(timer); reject(e); });
+            });
+            if (!resp || resp.ok !== true) throw Error('APPMODEL_CMD_FAILED_' + (resp?.error || 'NORESP'));
+            return { applied: true };
+          },
+          verify: async () => ({ checks: [ { name: 'bridge answered ok', passed: !!resp && resp.ok === true } ] }) });
+        if (r.ok === false) return out(r);
+        return out({ ok: true, outcome: r.outcome, channel: 'appmodel', response: resp });
+      } catch (e) { return fail(e); } } },
+      { canonicalAuthority: true, sideEffects: true, readOnly: false }),
+    tool({ name: 'computer_use_dom', description: 'DOM channel for the bench-staged Edge instance (enabled only when DAMAR_CU_DOM_PORT is set): evaluates a JavaScript expression in the current page via CDP and returns its value as JSON text. For web apps with a real DOM (e.g. 2048: tiles and score are DOM elements) this reads EXACT state with zero screenshots - prefer it for reading game/document state; keep using act for input (key presses). Canvas apps expose almost nothing here.',
+      parameters: { type: 'object', properties: { expression: { type: 'string' } }, required: ['expression'] },
+      execute: async (args, execution) => { try {
+        const ctx = ctxOf(execution);
+        if (state.stopped) return out({ ok: false, error: 'DESKTOP_STOPPED' });
+        const port = Number(process.env.DAMAR_CU_DOM_PORT || 0);
+        if (!port) return out({ ok: false, error: 'DOM_NOT_CONFIGURED', note: 'no CDP port configured for this session' });
+        const expr = String(args?.expression || '');
+        if (!expr || expr.length > 4000) return out({ ok: false, error: 'DOM_EXPR_INVALID' });
+        let value = null, evalError = null;
+        const r = await authorize(ctx, { op: 'cu-dom', scopeToken: 'cu-dom:' + port,
+          card: { tool: 'computer_use_dom', run: 'evaluate in staged page: ' + expr.slice(0, 80),
+            change: 'read page state through the DOM of the bench-staged browser', scope: 'the hermetic staged Edge instance only (debug port on localhost)',
+            risk: 'Expression evaluation inside the staged page; the bench gate scopes it to the staged browser instance' },
+          parameters: { port, expression: expr.slice(0, 200) },
+          driver: async () => {
+            const listRes = await fetch('http://127.0.0.1:' + port + '/json/list', { signal: AbortSignal.timeout(5000) });
+            const targets = await listRes.json();
+            const page = targets.find(t => t.type === 'page' && t.webSocketDebuggerUrl && !/devtools/.test(t.url || ''));
+            if (!page) throw Error('DOM_NO_PAGE_TARGET');
+            value = await new Promise((resolve, reject) => {
+              const ws = new WebSocket(page.webSocketDebuggerUrl);
+              const timer = setTimeout(() => { try { ws.close(); } catch {} reject(Error('DOM_EVAL_TIMEOUT')); }, 15000);
+              ws.onopen = () => ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: expr, returnByValue: true, awaitPromise: true } }));
+              ws.onmessage = (ev) => { try { const m = JSON.parse(ev.data); if (m.id !== 1) return; clearTimeout(timer); try { ws.close(); } catch {}
+                const res = m.result?.result;
+                if (m.result?.exceptionDetails) { evalError = String(m.result.exceptionDetails.text || 'EVAL_EXCEPTION').slice(0, 200); resolve(null); }
+                else resolve(res && 'value' in res ? res.value : (res?.description ?? null)); } catch (e) { clearTimeout(timer); reject(e); } };
+              ws.onerror = () => { clearTimeout(timer); reject(Error('DOM_WS_ERROR')); };
+            });
+            return { applied: true };
+          },
+          verify: async () => ({ checks: [ { name: 'cdp evaluate answered', passed: evalError === null } ] }) });
+        if (r.ok === false) return out(r);
+        if (evalError) return out({ ok: false, error: 'DOM_EVAL_EXCEPTION', detail: evalError });
+        return out({ ok: true, outcome: r.outcome, channel: 'dom', value: value === undefined ? null : value });
+      } catch (e) { return fail(e); } } },
       { canonicalAuthority: true, sideEffects: true, readOnly: false }),
     tool({ name: 'computer_use_browser', description: 'Automate a real Core-owned browser window (fresh isolated profile): navigate an Owner-approved origin, click or fill a selector, read the page text, and verify the observed result with an allowlisted predicate. Other origins are refused.',
       parameters: { type: 'object', properties: { op: { type: 'string', enum: ['open', 'navigate', 'click', 'type', 'read', 'close'] },
