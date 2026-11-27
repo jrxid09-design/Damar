@@ -1,0 +1,36 @@
+{
+  "model": "vitb16_fp32",
+  "input_size": 512,
+  "rows": [
+    {
+      "pair": "scene_base vs base",
+      "cls_cosine_distance": 0.0,
+      "patchmean_cosine_distance": 0.0
+    },
+    {
+      "pair": "scene_base vs same_jpg",
+      "cls_cosine_distance": 0.0036,
+      "patchmean_cosine_distance": 0.0017
+    },
+    {
+      "pair": "scene_base vs near",
+      "cls_cosine_distance": 0.0106,
+      "patchmean_cosine_distance": 0.015
+    },
+    {
+      "pair": "scene_base vs changed",
+      "cls_cosine_distance": 0.0389,
+      "patchmean_cosine_distance": 0.0087
+    },
+    {
+      "pair": "scene_base vs different",
+      "cls_cosine_distance": 0.6382,
+      "patchmean_cosine_distance": 0.1353
+    },
+    {
+      "pair": "scene_changed vs scene_different",
+      "cls_cosine_distance": 0.6286,
+      "patchmean_cosine_distance": 0.1429
+    }
+  ]
+}
