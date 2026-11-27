@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 472" width="100%" role="img" aria-label="DAMAR CLI Showcase">
+  <defs>
+    <linearGradient id="cliBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#07070a"/>
+      <stop offset="100%" stop-color="#110e08"/>
+    </linearGradient>
+    <linearGradient id="flameGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#b45309"/>
+      <stop offset="55%" stop-color="#d4af37"/>
+      <stop offset="100%" stop-color="#fff4cc"/>
+    </linearGradient>
+  </defs>
+  <rect width="840" height="472" rx="12" fill="url(#cliBg)" stroke="#2c2414" stroke-width="1.5"/>
+
+  <!-- Top Bar -->
+  <rect x="0" y="0" width="840" height="42" rx="12" fill="#0d0c09"/>
+  <line x1="0" y1="42" x2="840" y2="42" stroke="#282112" stroke-width="1"/>
+  <text x="24" y="26" fill="#f5d78e" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13.5" font-weight="700">DAMAR</text>
+  <text x="82" y="26" fill="#7c6e4e" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">| Super AI Agent</text>
+  <circle cx="808" cy="21" r="7" fill="none" stroke="#a68a44" stroke-width="1.4"/>
+  <circle cx="808" cy="21" r="2.2" fill="#a68a44"/>
+
+  <!-- Main Terminal Area -->
+  <text x="28" y="82" fill="#8f805e" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">$ npm run cli</text>
+  <text x="28" y="114" fill="#f5d78e" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">Session ready. Loaded local memory and MCP tools.</text>
+
+  <!-- Active Task Box -->
+  <rect x="28" y="136" width="530" height="126" rx="8" fill="#0b0a08" stroke="#3c2f15" stroke-width="1.2"/>
+  <text x="44" y="162" fill="#d4af37" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="600">DIFF PREVIEW   src/runtime/router.js</text>
+  <rect x="44" y="176" width="498" height="22" rx="4" fill="#1b140d"/>
+  <text x="54" y="191" fill="#c79e65" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5">- const route = fallbackModel(input);</text>
+  <rect x="44" y="204" width="498" height="22" rx="4" fill="#182115"/>
+  <text x="54" y="219" fill="#9ee28f" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5">+ const route = await governor.resolveRoute(input, policy);</text>
+  <text x="44" y="248" fill="#8f805e" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11">Working   00:04   2 sub-agents active</text>
+
+  <!-- Sub-agent Card -->
+  <rect x="28" y="280" width="530" height="72" rx="8" fill="#120f09" stroke="#d4af37" stroke-width="1">
+    <animate attributeName="stroke-opacity" values="0.4;1;0.4" dur="2.4s" repeatCount="indefinite"/>
+  </rect>
+  <text x="44" y="306" fill="#f5d78e" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="600">SUB-AGENT   Workspace Verifier</text>
+  <text x="44" y="330" fill="#a89874" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5">Running regression checks across local modules...</text>
+  <rect x="470" y="294" width="72" height="24" rx="5" fill="#1f190d" stroke="#5c481c" stroke-width="1"/>
+  <text x="506" y="310" text-anchor="middle" fill="#f5d78e" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5">Expand</text>
+
+  <!-- Command Input Bar -->
+  <rect x="28" y="384" width="530" height="52" rx="8" fill="#090807" stroke="#473819" stroke-width="1.2"/>
+  <text x="46" y="415" fill="#f5d78e" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">/review --staged</text>
+  <rect x="180" y="401" width="8" height="17" fill="#f5d78e">
+    <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- Right Sidebar: Capabilities + Animated Flame -->
+  <rect x="582" y="64" width="230" height="372" rx="10" fill="#0c0b08" stroke="#282012" stroke-width="1"/>
+  <text x="602" y="94" fill="#d4af37" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5" letter-spacing="2">CAPABILITIES</text>
+  <line x1="602" y1="106" x2="792" y2="106" stroke="#241d10" stroke-width="1"/>
+  <text x="602" y="132" fill="#e3d5b3" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5">MCP Servers       Connected</text>
+  <text x="602" y="158" fill="#e3d5b3" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5">Checkpoints       Enabled</text>
+  <text x="602" y="184" fill="#e3d5b3" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5">Sandbox           Active</text>
+  <text x="602" y="210" fill="#e3d5b3" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5">SecretStore       Locked</text>
+
+  <!-- Animated Damar Flame Progress Indicator -->
+  <g transform="translate(697 338)">
+    <ellipse cx="0" cy="12" rx="34" ry="10" fill="#d4af37" opacity="0.16">
+      <animate attributeName="rx" values="28;38;28" dur="2.4s" repeatCount="indefinite"/>
+    </ellipse>
+    <path d="M0 -48 C18 -20, 26 -2, 16 14 C10 24, -10 24, -16 14 C-26 -2, -18 -20, 0 -48 Z" fill="url(#flameGrad)">
+      <animateTransform attributeName="transform" type="scale" values="1 0.94;1.06 1.06;1 0.94" dur="2.2s" repeatCount="indefinite"/>
+    </path>
+    <text x="0" y="54" text-anchor="middle" fill="#a89563" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" letter-spacing="1.5">TASK PROGRESS</text>
+  </g>
+</svg>

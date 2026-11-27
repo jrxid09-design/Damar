@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 96" width="100%" height="96" role="img" aria-label="DAMAR Footer">
+  <defs>
+    <linearGradient id="footBg" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#050508"/>
+      <stop offset="50%" stop-color="#141008"/>
+      <stop offset="100%" stop-color="#050508"/>
+    </linearGradient>
+    <linearGradient id="footBeam" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#d4af37" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#f5d78e" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#d4af37" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1000" height="96" rx="12" fill="url(#footBg)" stroke="#241d10" stroke-width="1"/>
+  <rect x="-240" y="0" width="240" height="2" fill="url(#footBeam)">
+    <animate attributeName="x" values="-240;1020" dur="5s" repeatCount="indefinite"/>
+  </rect>
+  <text x="500" y="44" text-anchor="middle" fill="#f5d78e" font-family="Georgia, 'Times New Roman', serif" font-size="16" letter-spacing="8">DAMAR</text>
+  <text x="500" y="68" text-anchor="middle" fill="#8e7f5b" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" letter-spacing="2">WISES TECHNOLOGY   |   MIT LICENSE</text>
+</svg>

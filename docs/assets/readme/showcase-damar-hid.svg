@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 472" width="100%" role="img" aria-label="DAMAR HID Showcase">
+  <defs>
+    <linearGradient id="hidBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#060609"/>
+      <stop offset="50%" stop-color="#110d07"/>
+      <stop offset="100%" stop-color="#060609"/>
+    </linearGradient>
+    <radialGradient id="hidGlow" cx="50%" cy="48%" r="44%">
+      <stop offset="0%" stop-color="#f5d78e" stop-opacity="0.32"/>
+      <stop offset="55%" stop-color="#d4af37" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#060609" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="840" height="472" rx="12" fill="url(#hidBg)" stroke="#2c2414" stroke-width="1.5"/>
+  <circle cx="420" cy="222" r="190" fill="url(#hidGlow)"/>
+
+  <!-- Hardware Signal Waves -->
+  <g transform="translate(420 218)">
+    <circle r="138" fill="none" stroke="#d4af37" stroke-width="0.9" stroke-dasharray="4 10" opacity="0.5">
+      <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="36s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="96" fill="none" stroke="#f5d78e" stroke-width="1.1" opacity="0.6">
+      <animate attributeName="r" values="86;114;86" dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.65;0.12;0.65" dur="4s" repeatCount="indefinite"/>
+    </circle>
+
+    <!-- Stylized DMR-01 Companion Hardware Silhouette -->
+    <rect x="-54" y="-68" width="108" height="136" rx="22" fill="#0d0b08" stroke="#d4af37" stroke-width="2"/>
+    <rect x="-40" y="-50" width="80" height="62" rx="10" fill="#17130b" stroke="#6e561d" stroke-width="1"/>
+    <!-- Animated Core Eye on Device Screen -->
+    <circle cx="0" cy="-19" r="14" fill="none" stroke="#f5d78e" stroke-width="1.6">
+      <animate attributeName="r" values="11;15;11" dur="2.6s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="0" cy="-19" r="5" fill="#f5d78e">
+      <animate attributeName="opacity" values="0.5;1;0.5" dur="2.6s" repeatCount="indefinite"/>
+    </circle>
+    <!-- Subtle Hardware Grille -->
+    <line x1="-24" y1="30" x2="24" y2="30" stroke="#7d6429" stroke-width="2" stroke-linecap="round"/>
+    <line x1="-18" y1="40" x2="18" y2="40" stroke="#59471c" stroke-width="2" stroke-linecap="round"/>
+    <line x1="-12" y1="50" x2="12" y2="50" stroke="#423414" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <text x="420" y="394" text-anchor="middle" fill="#f5d78e" font-family="Georgia, 'Times New Roman', serif" font-size="20" letter-spacing="5">DAMAR HID  /  DMR-01</text>
+  <text x="420" y="422" text-anchor="middle" fill="#9f8e64" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5" letter-spacing="2">COMPANION HARDWARE AND FIRMWARE RESEARCH</text>
+</svg>
