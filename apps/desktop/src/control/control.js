@@ -166,6 +166,18 @@
     "Load a session's receipts to see which Pandawa member used how many tokens.": 'Muat bukti sebuah sesi untuk melihat pemakaian token tiap anggota Pandawa.',
     'Settings are read and written through an Owner Control session on Core.': 'Pengaturan dibaca dan ditulis lewat sesi Owner Control di Core.',
     'Persistent Core settings (Owner). Changes take effect for every session on this Core profile.': 'Pengaturan Core persisten (Owner). Perubahan berlaku untuk semua sesi pada profil Core ini.',
+    'Tools, plugins, agents and MCP servers registered in DAMAR Core (read-only console routes; secrets redacted).': 'Tool, plugin, agen, dan server MCP yang terdaftar di DAMAR Core (rute konsol hanya-baca; rahasia disamarkan).',
+    'Models each provider offers (metadata only). Activating a model is an Owner action Core validates against the current configuration version.': 'Model yang ditawarkan tiap provider (metadata saja). Mengaktifkan model adalah aksi Owner yang divalidasi Core terhadap versi konfigurasi saat ini.',
+    'Provider configuration as reported by Core. Keys are write-only: Control can send a key to Core but never reads one back.': 'Konfigurasi provider sebagaimana dilaporkan Core. Key bersifat tulis-saja: Control bisa mengirim key ke Core tetapi tidak pernah membacanya kembali.',
+    'Team debates and delegations run by Core: each round, the model each member used, DAMAR\'s decision and per-member token usage.': 'Debat tim dan delegasi yang dijalankan Core: tiap ronde, model yang dipakai tiap anggota, keputusan DAMAR, dan pemakaian token per anggota.',
+    'Owner-approved runs through Core agentHub. Cancel stops queued runs; a running provider call finishes and its result is discarded.': 'Run yang disetujui Owner lewat agentHub Core. Batal menghentikan run yang antre; panggilan provider yang sedang berjalan selesai dan hasilnya dibuang.',
+    'Core memory statistics, Owner-approved project memory per workspace, and per-session undo/redo checkpoints.': 'Statistik memori Core, memori proyek per ruang kerja yang disetujui Owner, dan checkpoint undo/redo per sesi.',
+    'The CLI is a terminal surface on the same Core. Control lists its sessions; it does not emulate a terminal.': 'CLI adalah permukaan terminal pada Core yang sama. Control mendaftar sesinya; Control tidak mengemulasi terminal.',
+    'Measured from this browser: status and latency of every Core read Control uses.': 'Diukur dari browser ini: status dan latensi setiap pembacaan Core yang dipakai Control.',
+    'Safety state, agent permission profile and authority boundaries as Core enforces them.': 'Keadaan keselamatan, profil izin agen, dan batas otoritas sebagaimana ditegakkan Core.',
+    'Pandawa Multi-Agent System': 'Sistem Multi-Agen Pandawa', 'Delegate Pandawa run': 'Delegasikan run Pandawa', '+ Delegate Run': '+ Delegasikan Run',
+    'Remove an added model (optional)': 'Hapus model tambahan (opsional)', 'Remove an alias (optional)': 'Hapus alias (opsional)',
+    'Go to': 'Buka', 'Refresh from Core': 'Segarkan dari Core', 'No matching commands.': 'Tidak ada perintah yang cocok.', 'Action': 'Aksi', 'Help': 'Bantuan',
     'Emergency stop': 'Henti darurat', 'Engaged': 'Aktif', 'Policy enforcement': 'Penegakan kebijakan', 'Pending permission requests': 'Permintaan izin menunggu',
     'Agent autonomy profile': 'Profil otonomi agen', 'Live model grant': 'Grant model live', 'Approvals': 'Persetujuan',
     'Memories': 'Memori', 'Entities': 'Entitas', 'Documents': 'Dokumen', 'Embeddings': 'Embedding', 'Note': 'Catatan', 'Added': 'Ditambahkan',
@@ -591,7 +603,7 @@
   function renderCapabilitiesView(forced) {
     var tab = forced || state.capabilityFilter || 'Tools';
     var html = pageHeader('AI INFRASTRUCTURE • CAPABILITIES', 'Capabilities Hub', 'Tools, plugins, agents and MCP servers registered in DAMAR Core (read-only console routes; secrets redacted).',
-      '<div class="segmented-tabs">' + ['Tools', 'Plugins', 'Agents', 'Skills', 'MCP'].map(function (t) { return '<button type="button" class="seg-tab' + (t === tab ? ' active' : '') + '" data-cap-tab="' + t + '">' + t + '</button>'; }).join('') + '</div>');
+      '<div class="segmented-tabs">' + ['Tools', 'Plugins', 'Agents', 'Skills', 'MCP'].map(function (t) { return '<button type="button" class="seg-tab' + (t === tab ? ' active' : '') + '" data-cap-tab="' + t + '">' + escapeHtml(L(t)) + '</button>'; }).join('') + '</div>');
     var body;
     if (tab === 'Tools') { var t = LIVE.d('tools'); body = t ? table(['Tool', 'Plugin', 'Description'], t.tools.map(function (x) { return [mono(x.id), escapeHtml(x.pluginId), '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(x.description) + '</span>']; })) : readState('tools', 'tools'); }
     else if (tab === 'Plugins') { var p = LIVE.d('plugins'); body = p ? table(['Plugin', 'Version', 'Category', 'Tools', 'Permissions', 'Description'], p.plugins.map(function (x) { return ['<span style="color:var(--text-ivory);font-weight:600;">' + escapeHtml(x.name) + '</span>', mono(x.version), escapeHtml(x.category), '<span class="td-num">' + num(x.toolCount) + '</span>', escapeHtml((x.permissions || []).join(', ') || '-'), '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(x.description) + '</span>']; })) : readState('plugins', 'plugins'); }
@@ -1506,15 +1518,15 @@
   }
   function renderCommandPaletteResults(query) {
     var box = document.getElementById('cmdPaletteResults'), q = String(query || '').toLowerCase().trim(), entries = [];
-    NAV_GROUPS.forEach(function (g) { g.items.forEach(function (i) { entries.push({ label: 'Go to ' + i.label, cat: g.group, action: function () { navigateTo(i.id); } }); }); });
-    entries.push({ label: 'Delegate Pandawa run', cat: 'Action', action: openDelegate });
-    entries.push({ label: 'Refresh from Core', cat: 'Action', action: function () { refresh().then(renderAll); } });
+    NAV_GROUPS.forEach(function (g) { g.items.forEach(function (i) { entries.push({ label: L('Go to') + ' ' + i.label, cat: g.group, action: function () { navigateTo(i.id); } }); }); });
+    entries.push({ label: L('Delegate Pandawa run'), cat: 'Action', action: openDelegate });
+    entries.push({ label: L('Refresh from Core'), cat: 'Action', action: function () { refresh().then(renderAll); } });
     var sl = root.DAMAR_SUPPORT || {};
     if (sl.issues) entries.push({ label: 'Report a problem (GitHub Issues)', cat: 'Help', action: function () { root.open(sl.issues, '_blank', 'noopener'); } });
     if (sl.discussions) entries.push({ label: 'Ask a question (GitHub Discussions)', cat: 'Help', action: function () { root.open(sl.discussions, '_blank', 'noopener'); } });
     var matched = entries.filter(function (e) { return !q || e.label.toLowerCase().indexOf(q) !== -1 || e.cat.toLowerCase().indexOf(q) !== -1; });
-    box.innerHTML = matched.map(function (m, i) { return '<button type="button" class="nav-item" data-cmd-idx="' + i + '" style="padding:9px 12px;"><span style="color:var(--text-ivory);">' + escapeHtml(m.label) + '</span><span class="badge badge-neutral">' + escapeHtml(m.cat) + '</span></button>'; }).join('') ||
-      '<div style="padding:18px;text-align:center;color:var(--text-muted);">No matching commands.</div>';
+    box.innerHTML = matched.map(function (m, i) { return '<button type="button" class="nav-item" data-cmd-idx="' + i + '" style="padding:9px 12px;"><span style="color:var(--text-ivory);">' + escapeHtml(m.label) + '</span><span class="badge badge-neutral">' + escapeHtml(L(m.cat)) + '</span></button>'; }).join('') ||
+      '<div style="padding:18px;text-align:center;color:var(--text-muted);">' + escapeHtml(L('No matching commands.')) + '</div>';
     Array.prototype.forEach.call(box.querySelectorAll('[data-cmd-idx]'), function (b) {
       b.addEventListener('click', function () { var m = matched[parseInt(this.getAttribute('data-cmd-idx'), 10)]; closeCc2Dialog(document.getElementById('cmdPaletteBackdrop')); if (m) m.action(); });
     });
