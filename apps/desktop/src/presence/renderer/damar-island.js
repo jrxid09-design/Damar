@@ -415,7 +415,13 @@
   });
   desktop()?.on?.('toggle-standby-orb', activate);
   desktop()?.on?.('window-restored', () => { setClickThrough(false); updateHitTest(); });
-  window.addEventListener('blur', () => { if (fsm.state === 'expanded') fsm.pointerLeft(); });
+  // Blur bukan pointer pergi: jendela bisa kehilangan fokus sementara pointer
+  // tetap di atas notch (klik aplikasi lain, notifikasi sistem, Alt-Tab).
+  // Menyusutkan notch yang sedang diperluas dalam keadaan itu memanggil
+  // bentuk compact tanpa pemicu pointer apa pun, dan hover tidak bisa
+  // mengembangkannya lagi karena tidak ada mouseenter baru selama pointer
+  // tidak pernah keluar. Susutkan hanya bila pointer memang sudah di luar.
+  window.addEventListener('blur', () => { if (fsm.state === 'expanded' && !pointerInside) fsm.pointerLeft(); });
   window.addEventListener('beforeunload', () => { fsm.cancelTimers(); setClickThrough(false); });
   const standbyObserver = new MutationObserver(() => {
     const standby = document.body.classList.contains('siri-dock-active');
