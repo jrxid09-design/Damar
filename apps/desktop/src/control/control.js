@@ -869,6 +869,21 @@
       num1('pdRounds', 'Discussion rounds (1-10)', 1, 10, (tm.discussion || {}).maxRounds) + num1('pdBudget', 'Token budget per discussion (1000-2000000)', 1000, 2000000, (tm.discussion || {}).tokenBudget) +
       num1('pdTimeout', 'Time limit per member reply (seconds, 30-1800)', 30, 1800, (tm.discussion || {}).callTimeoutSec) +
       '</div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(L('Model options come from your connected providers. Empty = DAMAR\'s model (or the active provider for DAMAR).')) + '</span>' + btn('Save team…', 'data-save-team="1"', 'btn-primary') + '</div>', { span: 12 });
+    var vx = d.voice || {}, vnum = function (id, label, min, max, step, v) { return field(id, label, '<input type="number" class="input-field" id="' + id + '" min="' + min + '" max="' + max + '" step="' + step + '" style="width:100%;" value="' + escapeHtml(v) + '" />'); };
+    html += panel('Voice', '<div style="display:flex;flex-direction:column;gap:6px;">' +
+      '<label for="vcPitch" style="font-size:11.5px;color:var(--text-secondary);">Voice pitch (semitones, -12 to +12) — <span id="vcPitchVal" style="color:var(--text-primary);font-family:var(--font-mono);">' + escapeHtml(vx.pitchSemitones) + '</span></label>' +
+      '<input type="range" class="input-field" id="vcPitch" min="-12" max="12" step="0.5" style="width:100%;" value="' + escapeHtml(vx.pitchSemitones) + '" oninput="document.getElementById(\'vcPitchVal\').textContent=this.value" />' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:6px;">' +
+      field('vcStyle', 'Voice style', sel('vcStyle', ['normal', 'jarvis'], vx.style)) +
+      vnum('vcJarvisPitch', 'Jarvis pitch offset (semitones, -6 to 0)', -6, 0, 0.5, vx.jarvisPitchSemitones) +
+      vnum('vcRingHz', 'Jarvis ring modulator (Hz, 5-120)', 5, 120, 1, vx.jarvisRingModHz) +
+      vnum('vcRingDepth', 'Jarvis ring depth (0-0.9)', 0, 0.9, 0.05, vx.jarvisRingModDepth) +
+      vnum('vcReverbWet', 'Jarvis reverb wet (0-0.5)', 0, 0.5, 0.01, vx.jarvisReverbWet) +
+      vnum('vcReverbDecay', 'Jarvis reverb decay (ms, 40-400)', 40, 400, 10, vx.jarvisReverbDecayMs) +
+      vnum('vcEqLow', 'Jarvis EQ low shelf (dB, -6 to 6)', -6, 6, 0.5, vx.jarvisEqLowDb) +
+      vnum('vcEqPresence', 'Jarvis EQ presence (dB, -6 to 6)', -6, 6, 0.5, vx.jarvisEqPresenceDb) +
+      vnum('vcEqHigh', 'Jarvis EQ high shelf (dB, -6 to 6)', -6, 6, 0.5, vx.jarvisEqHighDb) +
+      '</div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);">Pitch and the Jarvis robot preset are post-processing on the local Supertonic M1 output — Indonesian synthesis is unchanged.</span>' + btn('Save voice…', 'data-save-voice="1"', 'btn-primary') + '</div></div>', { span: 12 });
     html += panel('Mobile', '<div data-unavailable="mobile" style="font-size:12px;color:var(--text-secondary);">' + statusBadgeHtml('NOT_AVAILABLE', 'Available in v1.1') + ' Mobile is a v1.1 surface; Core holds no mobile settings yet.</div>', { span: 6 });
     var pv = LIVE.d('provider');
     html += panel('Providers & Models', kvList([kv('Active provider', pv ? pv.active : '—'), kv('Active model', pv ? (pv.model || '—') : '—'), kv('Live inference', pv ? (pv.liveInference ? 'authorized' : 'not authorized') : '—')]) +
@@ -1203,6 +1218,14 @@
       ownerAction('Save Pandawa team', '<pre style="font-size:11px;white-space:pre-wrap;">' + escapeHtml(JSON.stringify(pandawa, null, 1)) + '</pre>', function () {
         return controlSession().then(function (id) { return core.post('/api/r9/settings', { action: 'update', cliSession: id, client: state.control.client, values: { pandawa: pandawa } }); }).then(function (r) { if (r.ok) loadSettings(); return r; });
       });
+    },
+    'data-save-voice': function () {
+      var voice = { pitchSemitones: Number(val('vcPitch')), style: val('vcStyle'), jarvisPitchSemitones: Number(val('vcJarvisPitch')), jarvisRingModHz: Number(val('vcRingHz')),
+        jarvisRingModDepth: Number(val('vcRingDepth')), jarvisReverbWet: Number(val('vcReverbWet')), jarvisReverbDecayMs: Number(val('vcReverbDecay')),
+        jarvisEqLowDb: Number(val('vcEqLow')), jarvisEqPresenceDb: Number(val('vcEqPresence')), jarvisEqHighDb: Number(val('vcEqHigh')) };
+      ownerAction('Save voice settings', '<pre style="font-size:11px;white-space:pre-wrap;">' + escapeHtml(JSON.stringify(voice, null, 1)) + '</pre>', function () {
+        return controlSession().then(function (id) { return core.post('/api/r9/settings', { action: 'update', cliSession: id, client: state.control.client, values: { voice: voice } }); }).then(function (r) { if (r.ok) loadSettings(); return r; });
+      }, 'Core validates every value. Applies to local Supertonic TTS output as post-processing (pitch + Jarvis preset).');
     },
     'data-memory-export': function () {
       ownerAction('Export memory', '<p style="font-size:12.5px;">' + escapeHtml(L('Download every workspace\'s project memory notes as a JSON file.')) + '</p>', function () {

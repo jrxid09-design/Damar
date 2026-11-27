@@ -325,7 +325,14 @@ async function child(directory, resume, recovered = false) {
     const { isProtected } = require('./workspace-tools.cjs');
     const settingsFile = process.env.DAMAR_CORE_SETTINGS_FILE && insideScratch(process.env.DAMAR_CORE_SETTINGS_FILE)
       ? process.env.DAMAR_CORE_SETTINGS_FILE : path.join(directory, 'core-settings.json');
-    const coreSettings = require('./core-settings.cjs').createCoreSettings({ file: settingsFile, isProtected: p => isProtected(p, PROTECTED) });
+    // Voice FX bridge: the voice runtime reads canonical/configs/voice.json (its
+    // JsonStore), staged by this host exactly like configs/providers.json above.
+    // Copy the Core settings voice section there at startup and on every voice
+    // save (core-settings onVoiceSettings hook -> voice-runtime-config.cjs).
+    const voiceRuntimeConfigFile = path.join(directory, 'canonical', 'configs', 'voice.json');
+    const syncVoiceRuntimeConfig = voice => { try { require('./voice-runtime-config.cjs').writeVoiceRuntimeConfig(voiceRuntimeConfigFile, voice); } catch (error) { console.error('VOICE_RUNTIME_CONFIG_SYNC_FAILED ' + error.message); } };
+    const coreSettings = require('./core-settings.cjs').createCoreSettings({ file: settingsFile, isProtected: p => isProtected(p, PROTECTED), onVoiceSettings: syncVoiceRuntimeConfig });
+    syncVoiceRuntimeConfig(coreSettings.voice().voice);
     const authority = require('./workspace-authority.cjs').createWorkspaceAuthority({ coreSrc: path.join(copyRoot, 'src'), dataDir: path.join(directory, 'workspace-authority') });
     let r9 = null;
     shutdownTurns = () => Promise.all([turns.shutdown(), team.shutdown()]);
