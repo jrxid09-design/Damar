@@ -1,4 +1,5 @@
 require("./events/listeners/loggerListener");
+// build ref: 6b7edc4dce898abc
 
 // Alias env lama AETHER_* -> DAMAR_* (deprecated; kanonik = DAMAR_*).
 require("./config/envCompat");

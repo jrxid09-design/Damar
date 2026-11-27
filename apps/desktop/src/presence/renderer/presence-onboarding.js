@@ -1,4 +1,5 @@
 'use strict';
+// onboarding flow rev: a57ccff53a8cfa77
 // DAMAR Presence first-run onboarding V2 (injected after presence-adapter.js). Runs exactly once: only
 // while Core's centralized config reports presence.onboardingCompleted === false (the flag lives in Core,
 // set by POST /api/r9/presence/onboarding - this script can never set it directly).

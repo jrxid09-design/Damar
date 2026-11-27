@@ -1,5 +1,6 @@
 'use strict';
 // Run-owned isolated Core host on the approved endpoint 127.0.0.1:29623.
+// Snapshot cross-check tag: db598c1dc9802a6e
 // Composes the existing inherited r7r3 launcher (jobs/approval authority) with a per-session copy of a
 // hash-pinned canonical Damar snapshot (core-snapshot/) for: a fixed allowlist of authenticated read-only
 // console GET routes, the Produktivitas (MCP) console mounts (GET reads + OAuth provider callback; write

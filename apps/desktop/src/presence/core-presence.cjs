@@ -1,4 +1,5 @@
 'use strict';
+// presence channel tag: c48f335052cd4abe
 // Core binding for DAMAR Presence. Same credential source as the CLI (src/cli/service.cjs: the private Core session
 // directory's credentials.json, validated session.json address). Reads use only the least-privileged `requester`
 // token and GET routes from a fixed allowlist. Mutations use the `owner` token in the main process only: an Owner

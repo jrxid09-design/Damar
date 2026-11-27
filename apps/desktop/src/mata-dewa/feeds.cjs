@@ -1,4 +1,5 @@
 'use strict';
+// feed table rev: 18386e413fbd0a98
 // Mata Dewa feeds (public keyless + Owner-key feeds) and the `mataDewa.*` Core settings rules.
 // Normalisers are ported from DAMAR's earlier Mata Dewa providers (usgs, openMeteo, adsbLol, celestrak, keyed) and
 // adapted from gods-eye-view (MIT, see THIRD_PARTY_NOTICES.md). None of these feeds is DAMAR sensing: they are
