@@ -22,6 +22,16 @@ DAMAR does not ship with a model. You connect any OpenAI-compatible provider (a 
 - **Model grants.** Core sends a prompt to a live model only if you have granted that model (or `*`) in Control. A grant has an expiry of 1 to 365 days and optional token limits.
 - **Usage from receipts.** Token counts come from Core's durable receipts. DAMAR never estimates cost, and unknown usage is shown as unknown.
 - **English and Indonesian** user interfaces.
+- **Presence and Notch.** Idle Presence greets you by name and shows what Core is doing; the Notch at the top of the screen carries notifications, permission requests and a generic now-playing media view.
+- **Productivity (MCP).** From Control's Produktivitas (MCP) view you can connect daily tools — Google Workspace, Microsoft 365, Notion, GitHub, Slack, Spotify, Todoist, Blender, the local filesystem and the web. The suite speaks standard MCP, so any MCP client can connect, and every write action passes through DAMAR's Authority Gate.
+
+![Idle Presence](docs/images/idle-presence.png)
+
+![Damar Notch (compact)](docs/images/damar-notch.png)
+
+![Control Center overview](docs/images/control-dashboard.png)
+
+![Produktivitas (MCP) in DAMAR Control](docs/images/control-mcp-productivity.png)
 
 ![Security and governance in Control](apps/desktop/release/docs/images/control-security.png)
 
@@ -30,6 +40,8 @@ DAMAR does not ship with a model. You connect any OpenAI-compatible provider (a 
 1. If you have the installer, run `DAMAR-Setup-<version>.exe` (per-user, no administrator rights). The current release candidate is unsigned. See [INSTALL.md](apps/desktop/release/docs/INSTALL.md).
 2. Connect a provider and grant a model in DAMAR Control. See [QUICKSTART.md](apps/desktop/release/docs/QUICKSTART.md).
 3. Open a terminal in a project folder and run `damar`.
+
+![The `damar` command](docs/images/cli-damar-help.png)
 
 ### From source (git clone)
 
