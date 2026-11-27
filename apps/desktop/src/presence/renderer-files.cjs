@@ -8,7 +8,7 @@ const fs = require('node:fs'), path = require('node:path');
 const ROOT = path.join(__dirname, 'renderer');
 const SCHEME = 'damar-presence';
 const ENTRY = `${SCHEME}://app/idle_present`;
-const OWNER_SHA256 = '4dae223892559bac988682f752c3d10e719e8b436dfe45ec3a232cd39e43063f';
+const OWNER_SHA256 = '744d2065290df2721d0f947191c5de8867f2dfdbf8eb83c3a6c9d5e595b25e5b';
 const INJECT = ['presence-i18n.js', 'damar-island-fsm.js', 'argon-character-engine.js', 'vendor/three.min.js', 'vendor/GLTFLoader.js', 'vendor/SkeletonUtils.js', 'damar-notch-3d.js', 'damar-notch-behavior.js', 'damar-island.js', 'damar-notch-moci.js', 'presence-adapter.js', 'presence-onboarding.js']
   .map(f => `<script src="/${f}" defer></script>`).join('');
 const FILES = Object.freeze({

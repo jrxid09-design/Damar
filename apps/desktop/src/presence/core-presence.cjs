@@ -184,7 +184,7 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
       const prodServers = Array.isArray(prod?.servers) ? prod.servers : [];
       const connected = prodServers.filter(x => x.connected === true || x.status === 'connected' || x.state === 'connected').length;
       const value = {
-        finance: b ? { attempts: b.attempts ?? null, totalTokens: b.totalTokens ?? null, limitTokens: b.limits?.totalTokens ?? null, blocked: !!b.blocked } : null,
+        usage: b ? { attempts: b.attempts ?? null, totalTokens: b.totalTokens ?? null, limitTokens: b.limits?.totalTokens ?? null, blocked: !!b.blocked } : null,
         devices: { gateway: g ? { enabled: !!g.settings?.enabled, port: g.settings?.port ?? null, keys: Array.isArray(g.keys) ? g.keys.length : 0 } : null },
         projects: [...cwds.values()].slice(0, 6),
         memory: memd ? { memories: memd.memories?.total ?? null, entities: memd.entities?.total ?? null, documents: memd.documents?.total ?? null, embeddings: !!memd.embeddings?.available } : null,
