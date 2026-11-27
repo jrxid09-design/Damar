@@ -17,8 +17,12 @@ const { createReasoningSplitter } = require('./reasoning-split.cjs');
 const MEMBERS = Object.freeze(['puntadewa', 'werkudara', 'janaka', 'nakula', 'sadewa']);
 const ASSIGNABLE = Object.freeze(['damar', ...MEMBERS]);
 const MODEL_REF = /^[a-z0-9][a-z0-9-]{0,31}\/[A-Za-z0-9._:\/@+-]{1,128}$/;
-const DEFAULTS = () => ({ models: Object.fromEntries(ASSIGNABLE.map(m => [m, null])), discussion: { maxRounds: 3, tokenBudget: 60000, callTimeoutSec: 300 } });
-const DISCUSSION_RULES = { maxRounds: v => Number.isSafeInteger(v) && v >= 1 && v <= 10, tokenBudget: v => Number.isSafeInteger(v) && v >= 1000 && v <= 2000000,
+const DEFAULTS = () => ({ models: Object.fromEntries(ASSIGNABLE.map(m => [m, null])), discussion: { maxRounds: 25, tokenBudget: null, callTimeoutSec: 300 } });
+// Token budget (Owner rule 2026-11-28): a user setting, default UNLIMITED
+// (null). A user may set their own cap (>= 1000, no product ceiling); null is
+// always valid and means no cap is enforced. Rounds: no product-imposed low
+// ceiling either; consensus and the Owner's stop remain the terminators.
+const DISCUSSION_RULES = { maxRounds: v => Number.isSafeInteger(v) && v >= 1 && v <= 100, tokenBudget: v => v === null || (Number.isSafeInteger(v) && v >= 1000),
   callTimeoutSec: v => Number.isSafeInteger(v) && v >= 30 && v <= 1800 };   // per member call; slow reasoning models need minutes
 const obj = v => !!v && typeof v === 'object' && !Array.isArray(v);
 function sanitize(v) {
@@ -129,7 +133,7 @@ function createPandawaTeam({ registry, settings, roleOf = () => null, projectMem
         await settle(tasks.map(t => say(t.worker, 1, `Your subtask: ${t.task}\nDo it and report the result.`)));
       } else {
         for (let round = 1; round <= d.maxRounds && !d.abort.signal.aborted; round++) {
-          if (spent(d) >= budget) { reason = 'TOKEN_BUDGET_REACHED'; break; }
+          if (budget != null && spent(d) >= budget) { reason = 'TOKEN_BUDGET_REACHED'; break; }
           write({ discussionId: d.id, type: 'round', round, of: d.maxRounds }); activity({ kind: 'discussion', discussionId: d.id, round, of: d.maxRounds, state: 'RUNNING' });
           await settle(d.members.map(m => say(m, round, round === 1 ? 'Give your proposal from your role\'s perspective, with your main reason and main risk.'
             : 'Critique the other members\' latest proposals (name who you disagree with and why), then state your revised proposal. Start with AGREE if you now support a shared proposal.')));

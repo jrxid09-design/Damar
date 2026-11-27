@@ -24,10 +24,21 @@ function readUsage(value) {
   const output = usage?.completion_tokens ?? usage?.output_tokens;
   return Number.isSafeInteger(input) && input >= 0 && Number.isSafeInteger(output) && output >= 0 ? { input, output } : null;
 }
-function createProviderBudget({ file, httpClient, turnContext, provider, ledger: sharedLedger = null, limits = {}, inputTokenBound = null }) {
+function createProviderBudget({ file, httpClient, turnContext, provider, ledger: sharedLedger = null, limits = {}, limitsFn = null, inputTokenBound = null }) {
   const maxCompletions = limits.completions ?? MAX_COMPLETIONS;
   const maxOutput = limits.maxTokens ?? MAX_OUTPUT;
   const maxTotal = limits.totalTokens ?? MAX_TOTAL;
+  // User token budget (core-settings `tokenBudget`; Owner rule 2026-11-28:
+  // token spend is the user's own affair). Read live on every reserve; a null
+  // field means UNLIMITED for that field. The constants above remain only as
+  // the fallback when no settings source is wired. Owner scoped grants
+  // (p.limits, per connection) still apply on top: they are the user's own
+  // per-connection choices, not product caps. Usage REPORTING is untouched.
+  const effLimits = () => {
+    const d = typeof limitsFn === 'function' ? (limitsFn() || {}) : {};
+    const pick = (v, fallback) => (v === null ? Infinity : (Number.isSafeInteger(v) && v > 0 ? v : fallback));
+    return { completions: pick(d.completions, maxCompletions), maxOutput: pick(d.maxOutputTokens, maxOutput), total: pick(d.totalTokens, maxTotal) };
+  };
   if (!path.isAbsolute(file) || !httpClient || !turnContext || typeof provider !== 'function') throw new TypeError('PROVIDER_BUDGET_DEPENDENCY_INVALID');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const ledger = sharedLedger || [];
@@ -78,7 +89,8 @@ function createProviderBudget({ file, httpClient, turnContext, provider, ledger:
     if (!p.executable) throw Object.assign(Error(p.reason || 'LIVE_INFERENCE_NOT_AUTHORIZED'), { code: p.reason || 'LIVE_INFERENCE_NOT_AUTHORIZED' });
     if (blocked) throw Object.assign(Error('PROVIDER_USAGE_METER_UNAVAILABLE'), { code: 'PROVIDER_USAGE_METER_UNAVAILABLE' });
     if (p.limits && attempts >= p.limits.completions) exhausted();
-    if (attempts >= maxCompletions) exhausted();
+    const eff = effLimits();
+    if (attempts >= eff.completions) exhausted();
     const u = new URL(url);
     if (!['/chat/completions', '/completions', '/embeddings'].some(x => u.origin + u.pathname === String(p.baseUrl || '').replace(/\/$/, '') + x)) throw Object.assign(Error('PROVIDER_ROUTE_MISMATCH'), { code: 'PROVIDER_ROUTE_MISMATCH' });
     let body = options?.body;
@@ -89,10 +101,23 @@ function createProviderBudget({ file, httpClient, turnContext, provider, ledger:
     // authoritative input upper bound. Unscoped requests use it when available, to reserve concurrently.
     const inputBound = typeof inputTokenBound === 'function' ? inputTokenBound(body, p) : null;
     if (p.limits && (!Number.isSafeInteger(inputBound) || inputBound < 0)) throw Error('PROVIDER_INPUT_TOKEN_BOUND_REQUIRED');
-    const outputLimit = Math.min(maxOutput, p.limits?.maxTokens ?? maxOutput);
-    body = { ...body, max_tokens: Number.isSafeInteger(requested) && requested > 0 ? Math.min(requested, outputLimit) : outputLimit };
-    const reservedTokens = (Number.isSafeInteger(inputBound) ? inputBound : 0) + body.max_tokens;
-    const totalLimit = Math.min(maxTotal, p.limits?.totalTokens ?? maxTotal);
+    // Grant limits normalize unset keys to Number.MAX_SAFE_INTEGER (the
+    // model-grants sentinel for "no limit"); that sentinel must behave as
+    // unlimited here too, never as a literal cap: as a literal it would be
+    // stamped onto max_tokens and its reservation arithmetic would overflow
+    // past the equally sentinel total, exhausting every request.
+    const grantCap = v => (Number.isSafeInteger(v) && v > 0 && v < Number.MAX_SAFE_INTEGER ? v : Infinity);
+    const outputLimit = Math.min(eff.maxOutput, grantCap(p.limits?.maxTokens));
+    // Uncapped and unrequested: max_tokens is NOT stamped on the request at
+    // all (the provider's own ceiling governs). The reservation below then
+    // uses a nominal accounting bound only; the real charge settles from
+    // provider-reported usage in finish().
+    body = { ...body, ...(Number.isFinite(outputLimit)
+      ? { max_tokens: Number.isSafeInteger(requested) && requested > 0 ? Math.min(requested, outputLimit) : outputLimit }
+      : (Number.isSafeInteger(requested) && requested > 0 ? { max_tokens: requested } : {})) };
+    const reserveOutput = Number.isSafeInteger(body.max_tokens) ? body.max_tokens : 16384;
+    const reservedTokens = (Number.isSafeInteger(inputBound) ? inputBound : 0) + reserveOutput;
+    const totalLimit = Math.min(eff.total, grantCap(p.limits?.totalTokens));
     if (total + inFlight + reservedTokens > totalLimit) exhausted();
     const turn = turnContext.getStore();
     const id = require('node:crypto').randomUUID();
@@ -101,7 +126,7 @@ function createProviderBudget({ file, httpClient, turnContext, provider, ledger:
     append({ event: 'RESERVED', reservationId: id, t: new Date().toISOString(), provider: billed.id, model: billed.model, reservedTokens });
     attempts += 1; inFlight += reservedTokens; open++;
     const row = { ...extra, responseId: id, provider: billed.id, model: billed.model, turnId: turn?.id || null, lastUser: lastUser(body.messages), tools: Array.isArray(body.tools) ? body.tools.length : 0,
-      inputBound, outputLimit: body.max_tokens, reservedTokens, totalLimit, status: 'IN_FLIGHT', usageReported: false, promptTokens: null, completionTokens: null };
+      inputBound, outputLimit: reserveOutput, reservedTokens, totalLimit, status: 'IN_FLIGHT', usageReported: false, promptTokens: null, completionTokens: null };
     ledger.push(row);
     return { body, row };
   };

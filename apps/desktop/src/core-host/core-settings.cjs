@@ -70,6 +70,12 @@ const CLI_RULES = {
   language: v => ['id', 'en'].includes(v),
   hudPosition: v => ['left', 'right', 'bottom', 'hidden'].includes(v),
 };
+// tokenBudget (Owner rule 2026-11-28): token spend is the user's own affair,
+// so this is a USER setting that ships UNLIMITED (null per field = no cap).
+// Enforcement (provider-budget) reads it live; a user may set their own caps.
+const TOKEN_BUDGET_DEFAULTS = () => ({ totalTokens: null, maxOutputTokens: null, completions: null });
+const TOKEN_BUDGET_RULES = { totalTokens: v => v === null || (Number.isSafeInteger(v) && v >= 1000), maxOutputTokens: v => v === null || (Number.isSafeInteger(v) && v >= 256), completions: v => v === null || (Number.isSafeInteger(v) && v >= 1) };
+const sanitizeTokenBudget = v => { const d = TOKEN_BUDGET_DEFAULTS(); if (v && typeof v === 'object') for (const k of Object.keys(d)) if (TOKEN_BUDGET_RULES[k](v[k])) d[k] = v[k]; return d; };
 const SELECTION = { provider: /^[a-z0-9-]{1,32}$/, model: /^[A-Za-z0-9._:\/@+-]{1,128}$/ };
 const validSelection = v => !!v && typeof v === 'object' && SELECTION.provider.test(v.provider || '') && SELECTION.model.test(v.model || '');
 // mataDewa: Mata Dewa feeds/areas/refresh/consent (allowlist + validation in src/mata-dewa/feeds.cjs; Owner writes via Control).
@@ -78,7 +84,7 @@ const MATA_DEWA = require('../mata-dewa/feeds.cjs');
 const COGNITIVE = require('./cognitive.cjs');
 // pandawa: per-member models + discussion bounds (allowlist + validation in pandawa-team.cjs).
 const TEAM = require('./pandawa-team.cjs');
-const DEFAULTS = () => ({ version: 1, revision: 0, autonomy: 'ask', extraDirs: [], pluginTrust: {}, skills: { routing: 'auto', disabled: [] }, presence: PRESENCE_DEFAULTS(), voice: VOICE_DEFAULTS(), cli: null, lastSelection: null, updatedAt: null });
+const DEFAULTS = () => ({ version: 1, revision: 0, autonomy: 'ask', extraDirs: [], pluginTrust: {}, skills: { routing: 'auto', disabled: [] }, presence: PRESENCE_DEFAULTS(), voice: VOICE_DEFAULTS(), cli: null, lastSelection: null, tokenBudget: TOKEN_BUDGET_DEFAULTS(), updatedAt: null });
 const fail = (status, error) => Object.assign(Error(error), { status });
 const lower = p => path.resolve(p).toLowerCase();
 const within = (p, root) => lower(p) === lower(root) || lower(p).startsWith(lower(root) + path.sep);
@@ -101,6 +107,7 @@ function createCoreSettings({ file, isProtected, skillsDir = path.join(path.dirn
   state.mataDewa = MATA_DEWA.sanitizeSettings(state.mataDewa);
   state.cognitive = COGNITIVE.sanitize(state.cognitive);
   state.pandawa = TEAM.sanitize(state.pandawa);
+  state.tokenBudget = sanitizeTokenBudget(state.tokenBudget);
   const save = () => { state.updatedAt = new Date().toISOString(); state.revision = (Number.isSafeInteger(state.revision) ? state.revision : 0) + 1; fs.mkdirSync(path.dirname(file), { recursive: true }); const tmp = file + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(state, null, 1)); fs.renameSync(tmp, file); };
 
   function validDir(p) {
@@ -176,9 +183,10 @@ function createCoreSettings({ file, isProtected, skillsDir = path.join(path.dirn
 
   const api = {
     PROFILES,
-    view: () => ({ autonomy: state.autonomy, extraDirs: [...state.extraDirs], skills: { routing: state.skills.routing, disabled: [...state.skills.disabled] }, presence: { ...state.presence }, voice: { ...state.voice }, cli: state.cli ? { ...state.cli } : null, lastSelection: state.lastSelection ? { ...state.lastSelection } : null, mataDewa: MATA_DEWA.sanitizeSettings(state.mataDewa), cognitive: { ...state.cognitive }, pandawa: TEAM.sanitize(state.pandawa), revision: state.revision, updatedAt: state.updatedAt }),
+    view: () => ({ autonomy: state.autonomy, extraDirs: [...state.extraDirs], skills: { routing: state.skills.routing, disabled: [...state.skills.disabled] }, presence: { ...state.presence }, voice: { ...state.voice }, cli: state.cli ? { ...state.cli } : null, lastSelection: state.lastSelection ? { ...state.lastSelection } : null, mataDewa: MATA_DEWA.sanitizeSettings(state.mataDewa), cognitive: { ...state.cognitive }, pandawa: TEAM.sanitize(state.pandawa), tokenBudget: { ...state.tokenBudget }, revision: state.revision, updatedAt: state.updatedAt }),
     cognitive: () => ({ ...state.cognitive }),
     pandawa: () => TEAM.sanitize(state.pandawa),
+    tokenBudget: () => ({ ...state.tokenBudget }),
     cli: () => ({ cli: state.cli ? { ...state.cli } : null, defaults: CLI_DEFAULTS(), lastSelection: state.lastSelection ? { ...state.lastSelection } : null, revision: state.revision, updatedAt: state.updatedAt }),
     // Called by POST /api/r9/provider after Core accepted a selection (the selection itself stays in the registry).
     recordSelection(provider, model) { if (!validSelection({ provider, model })) return; if (state.lastSelection?.provider === provider && state.lastSelection?.model === model) return; state.lastSelection = { provider, model }; save(); },
@@ -218,6 +226,11 @@ function createCoreSettings({ file, isProtected, skillsDir = path.join(path.dirn
       }
       if (input.mataDewa !== undefined) next.mataDewa = MATA_DEWA.mergeSettings(next.mataDewa, input.mataDewa);
       if (input.pandawa !== undefined) next.pandawa = TEAM.merge(next.pandawa, input.pandawa);
+      if (input.tokenBudget !== undefined) {
+        const tb = input.tokenBudget;
+        if (!tb || typeof tb !== 'object' || Array.isArray(tb) || Object.keys(tb).some(k => !TOKEN_BUDGET_RULES[k] || !TOKEN_BUDGET_RULES[k](tb[k]))) throw fail(400, 'TOKEN_BUDGET_INVALID');
+        next.tokenBudget = { ...next.tokenBudget, ...tb };
+      }
       if (input.cognitive !== undefined) next.cognitive = { ...next.cognitive, ...COGNITIVE.validate(input.cognitive) };
       state = next; save();
       // Voice FX bridge: notify the host after a voice save so it can stage the

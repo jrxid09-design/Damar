@@ -15,6 +15,15 @@ const readAllowed = route => READS.includes(route) || /^\/api\/r9\/activity\?fro
 const DEFAULTS = Object.freeze({ idleToOrbSec: 120, orbToNotchSec: 120, notchHideSec: 1800, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, characterSoundEnabled: true, characterSoundVolume: 30, displayName: 'Maronns', salutation: '', onboardingCompleted: false });
 const KEYS = Object.freeze(Object.keys(DEFAULTS).map(k => 'presence.' + k));
 
+// Snippet vocabulary (Owner 2026-11-28): friendly Indonesian labels for the
+// turn's real tool events, and plain-language provider failure kinds for the
+// failure record. Lines are built only from Core turn events; nothing here
+// invents activity.
+const TOOL_LABELS = Object.freeze({ workspace_shell: 'Shell', workspace_run: 'Perintah', workspace_write: 'Tulis berkas', workspace_edit: 'Ubah berkas', workspace_read: 'Baca berkas', workspace_list: 'Lihat isi folder', workspace_grep: 'Cari teks', plan_update: 'Rencana', project_memory_add: 'Simpan catatan', trusted_plugin_execute: 'Plugin' });
+const BADGE_LABELS = Object.freeze({ READ: 'Baca', GLOB: 'Lihat', GREP: 'Cari', RUN: 'Jalankan', VERIFY: 'Periksa', SHELL: 'Shell', PLUGIN: 'Plugin' });
+const SNIPPET_ERROR_ID = Object.freeze({ QUOTA: 'kuota provider habis', AUTH: 'kunci provider ditolak', RATE_LIMIT: 'provider membatasi laju', TIMEOUT: 'provider tidak menjawab tepat waktu', UNAVAILABLE: 'provider tidak terjangkau' });
+function clipLine(s, n) { s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
 // Accepts {presence:{idleToNotchMs,...}} or flat {'presence.idleToNotchMs':...}; invalid values fall back per key.
 function settingsFrom(data) {
   const src = data?.presence && typeof data.presence === 'object' ? data.presence : {};
@@ -150,6 +159,27 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
     // the presence-role activity feed redacts `detail`, but the owner deciding
     // in his own surface must see WHAT he is deciding (Owner 2026-11-28).
     // Returns a short plain string or null.
+    // Approval history (Owner 2026-11-28): the Authority surface shows the
+    // RECORD, not only what is pending. Pairs this Core session's permission
+    // requests with their answers from the owner activity feed: what was
+    // asked, which turn raised it, the decision, and when.
+    async approvalHistory() {
+      const r = await ownerGet('/api/r9/activity');
+      const events = r.body?.data?.events || [];
+      const answers = new Map();
+      for (const e of events) if (e.kind === 'permission_answer') answers.set(e.permissionId, e);
+      const rows = [];
+      for (const e of events) {
+        if (e.kind !== 'permission') continue;
+        const a = answers.get(e.permissionId);
+        rows.push({ permissionId: e.permissionId, turnId: e.turnId || null,
+          tool: typeof e.tool === 'string' ? e.tool.slice(0, 40) : null,
+          detail: typeof e.detail === 'string' ? e.detail.replace(/[\x00-\x1f\x7f-\x9f]/g, ' ').slice(0, 140) : null,
+          file: typeof e.file === 'string' ? e.file.slice(0, 120) : null,
+          decision: a ? a.decision : null, at: e.at ?? null, answeredAt: a ? (a.at ?? null) : null });
+      }
+      return rows.slice(-12).reverse();
+    },
     async permissionDetail(permissionId) {
       const r = await ownerGet('/api/r9/activity');
       const events = r.body?.data?.events || [];
@@ -297,7 +327,7 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
       chatState.sessionId = id;
       return id;
     },
-    async chat(text, onDelta, onPhase) {
+    async chat(text, onDelta, onPhase, onStep) {
       if (typeof text !== 'string' || !text.trim() || text.length > 8000) return { ok: false, status: 400, error: 'TEXT_REQUIRED' };
       const cwd = require('node:os').homedir();
       let cliSession = await this.ensureChatSession();
@@ -309,6 +339,23 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
       }
       if (!started.ok || typeof started.body?.data?.turnId !== 'string') return { ok: false, status: started.status, error: started.body?.error || 'TURN_START_FAILED' };
       const turnId = started.body.data.turnId;
+      // Snippet tracker (Owner 2026-11-28): compact lines built ONLY from the
+      // turn's real Core events, forwarded live via onStep so the response box
+      // shows what Damar is doing; on failure the last step feeds the failure
+      // record (essential lines, ellipsis-cut, full log in Control Diagnostik).
+      const tracker = { last: '' };
+      const emitStep = (line, key) => { if (typeof line === 'string' && line) { tracker.last = line; if (onStep) { try { onStep(line, key || null); } catch {} } } };
+      const failWith = (error, status, kind) => {
+        const code = typeof error === 'string' && error ? error : 'TURN_FAILED';
+        const lines = [];
+        if (code === 'TURN_TIMEOUT') lines.push('Sebab: melewati batas waktu pengerjaan.');
+        else {
+          if (tracker.last) lines.push('Gagal pada langkah: ' + tracker.last);
+          lines.push('Sebab: ' + (kind && SNIPPET_ERROR_ID[kind] ? SNIPPET_ERROR_ID[kind] + ' (' + code + ')' : clipLine(code, 110)));
+        }
+        lines.push('Rincian lengkap ada di Control, menu Diagnostik.');
+        return this._failTurn(text, code, status, lines);
+      };
       // Turn accepted by Core: the surface's single status statement moves
       // from Mengirim to Berpikir here (the first delta moves it to Menjawab).
       if (onPhase) { try { onPhase('berpikir'); } catch {} }
@@ -321,10 +368,10 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
       // surface renders the reply as it is produced (delta events), not only
       // when it completes. Any stream failure falls back to the status poll.
       try {
-        const streamed = await this._streamTurn(turnId, text, deadline, onDelta, cliSession, onPhase);
+        const streamed = await this._streamTurn(turnId, text, deadline, onDelta, cliSession, onPhase, emitStep);
         if (streamed) {
           if (streamed.ok) return streamed;
-          return this._failTurn(text, streamed.error, streamed.status);
+          return failWith(streamed.error, streamed.status, streamed.errorKind);
         }
       } catch {}
       let lastAttach = Date.now();
@@ -340,31 +387,31 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
             if (chatState.history.length > 40) chatState.history.splice(0, chatState.history.length - 40);
             return { ok: true, answer: fin.text, turnId };
           }
-          return this._failTurn(text, fin.error || ('TURN_' + (fin.status || 'FAILED')), 502);
+          return failWith(fin.error || ('TURN_' + (fin.status || 'FAILED')), 502, fin.errorKind);
         }
       }
-      return this._failTurn(text, 'TURN_TIMEOUT', 504);
+      return failWith('TURN_TIMEOUT', 504);
     },
     // Error containment (Owner 2026-11-28): a failed turn is answered INSIDE
     // the conversation with an honest Indonesian notice and recorded in the
     // history, so the surface never flips to UNAVAILABLE over one bad turn
     // and the next message continues on the same live session.
-    _failTurn(text, error, status) {
+    _failTurn(text, error, status, failLines) {
       const code = typeof error === 'string' && error ? error : 'TURN_FAILED';
       const notice = code === 'TURN_TIMEOUT'
         ? 'Permintaan itu kuhentikan karena melewati batas waktu pengerjaan. Percakapan tetap tersambung, silakan lanjut.'
         : 'Maaf, permintaan itu gagal dijalankan (' + code + '). Percakapan tetap tersambung, silakan lanjut.';
       chatState.history.push({ role: 'user', content: text }, { role: 'assistant', content: notice });
       if (chatState.history.length > 40) chatState.history.splice(0, chatState.history.length - 40);
-      return { ok: false, status: status || 502, error: code, notice };
+      return { ok: false, status: status || 502, error: code, notice, failLines: Array.isArray(failLines) ? failLines : [] };
     },
-    async _streamTurn(turnId, text, deadline, onDelta, cliSession, onPhase) {
+    async _streamTurn(turnId, text, deadline, onDelta, cliSession, onPhase, emitStep) {
       const response = await transport(endpoint + '/api/r9/turns/' + turnId + '/events?from=0', { method: 'GET', redirect: 'error',
         headers: { accept: 'text/event-stream', authorization: 'Bearer ' + token('owner') } });
       if (!response.ok || !response.body?.getReader) return null;
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let buf = '', acc = '', lastAttach = Date.now();
+      let buf = '', acc = '', lastAttach = Date.now(), reasonBuf = '';
       const keepAlive = async () => {
         if (Date.now() - lastAttach <= 10000) return;
         lastAttach = Date.now();
@@ -387,6 +434,17 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
           // means it is still thinking. Neither carries answer text.
           if ((ev.type === 'tool_call' || ev.type === 'tool') && onPhase) { try { onPhase('bertindak'); } catch {} }
           if (ev.type === 'reasoning' && onPhase) { try { onPhase('berpikir'); } catch {} }
+          // Snippet lines from the same real events (never decorative filler).
+          if (emitStep) {
+            if (ev.type === 'reasoning' && typeof ev.text === 'string') { reasonBuf = (reasonBuf + ' ' + ev.text).slice(-600); emitStep(clipLine(reasonBuf, 130), 'reason'); }
+            else if (ev.type === 'tool_call') emitStep(TOOL_LABELS[ev.name] || String(ev.name || 'Alat'));
+            else if (ev.type === 'tool') emitStep((BADGE_LABELS[ev.badge] || ev.badge || 'Alat') + ': ' + clipLine(ev.target, 105));
+            else if (ev.type === 'run') emitStep(ev.exitCode === 0 ? 'Selesai: ' + clipLine(ev.target, 100) : 'Gagal (kode ' + ev.exitCode + '): ' + clipLine(ev.target, 85));
+            else if (ev.type === 'diff') emitStep('Ubah ' + clipLine(ev.path, 85) + ' (+' + (ev.diff?.added || 0) + '/-' + (ev.diff?.removed || 0) + ')');
+            else if (ev.type === 'plan' && Array.isArray(ev.steps)) { const doneN = ev.steps.filter(s => s.state === 'done').length; const actS = ev.steps.find(s => s.state === 'active'); emitStep('Rencana ' + doneN + '/' + ev.steps.length + (actS ? ': ' + clipLine(actS.label, 75) : ''), 'plan'); }
+            else if (ev.type === 'permission') emitStep('Menunggu persetujuan: ' + clipLine(ev.card?.tool || 'tindakan', 35) + (ev.card?.run ? ' (' + clipLine(ev.card.run, 65) + ')' : ''));
+            else if (ev.type === 'permission_answer') emitStep(ev.decision === 'deny' ? 'Ditolak oleh pemilik' : ev.decision === 'session' ? 'Disetujui untuk sesi ini' : 'Disetujui sekali');
+          }
           if (ev.type === 'final') {
             try { reader.cancel(); } catch {}
             if (ev.status === 'COMPLETED' && typeof ev.text === 'string') {
@@ -394,7 +452,7 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
               if (chatState.history.length > 40) chatState.history.splice(0, chatState.history.length - 40);
               return { ok: true, answer: ev.text, turnId };
             }
-            return { ok: false, status: 502, error: ev.error || ('TURN_' + (ev.status || 'FAILED')) };
+            return { ok: false, status: 502, error: ev.error || ('TURN_' + (ev.status || 'FAILED')), errorKind: ev.errorKind || null };
           }
         }
         await keepAlive();

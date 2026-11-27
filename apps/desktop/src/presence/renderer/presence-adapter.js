@@ -97,7 +97,7 @@
       window.dispatchEvent(new CustomEvent('damar-presence-activity', { detail: a }));
     }
     window.dispatchEvent(new CustomEvent('damar-presence-status', { detail: statusFor(view) }));
-    window.dispatchEvent(new CustomEvent('damar-presence-attention', { detail: { pendingPermissions: view.activity?.pendingPermissions || 0, permission: view.permission || null } }));
+    window.dispatchEvent(new CustomEvent('damar-presence-attention', { detail: { pendingPermissions: view.activity?.pendingPermissions || 0, permission: view.permission || null, approvalHistory: view.approvalHistory || [] } }));
     window.dispatchEvent(new CustomEvent('damar-presence-sessions', { detail: view.sessionPills || [] }));
     window.dispatchEvent(new CustomEvent('damar-presence-media', { detail: view.media || null }));
     window.dispatchEvent(new CustomEvent('damar-presence-behavior', { detail: { pcActivity: view.pcActivity || null } }));
@@ -139,6 +139,6 @@
     };
   }
 
-  desktop.onPresence(msg => { if (msg?.kind === 'chat-delta') { window.dispatchEvent(new CustomEvent('damar-chat-delta', { detail: msg.text })); return; } if (msg?.kind === 'chat-phase') { window.dispatchEvent(new CustomEvent('damar-chat-phase', { detail: msg.phase })); return; } if (msg?.config) applyConfig(msg.config); if (msg?.view) applyState(msg.view); });
+  desktop.onPresence(msg => { if (msg?.kind === 'chat-delta') { window.dispatchEvent(new CustomEvent('damar-chat-delta', { detail: msg.text })); return; } if (msg?.kind === 'chat-phase') { window.dispatchEvent(new CustomEvent('damar-chat-phase', { detail: msg.phase })); return; } if (msg?.kind === 'chat-step') { window.dispatchEvent(new CustomEvent('damar-chat-step', { detail: { step: msg.step, key: msg.key || null } })); return; } if (msg?.config) applyConfig(msg.config); if (msg?.view) applyState(msg.view); });
   desktop.getPresence().then(msg => { applyConfig(msg?.config); applyState(msg?.view); }).catch(() => {});
 })();

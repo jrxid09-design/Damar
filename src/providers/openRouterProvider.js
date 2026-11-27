@@ -19,7 +19,7 @@ class OpenRouterProvider {
         ],
 
         temperature: aiConfig.temperature,
-        max_tokens: aiConfig.maxTokens
+        ...(aiConfig.maxTokens ? { max_tokens: aiConfig.maxTokens } : {})
       };
 
       // ===== DEBUG PAYLOAD =====

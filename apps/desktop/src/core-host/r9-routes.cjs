@@ -202,6 +202,24 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
       if (p === '/api/r9/lifecycle' && req.method === 'GET' && !url.search) {
         return json(200, { success: true, data: { state: lifecycle?.status?.() || { state: 'UNMANAGED' }, outstanding: lifecycleCounts(), restartLimit: 3, restartWindowSeconds: 600 } });
       }
+      // Core session logs for Control's Log page (Owner 2026-11-28): the data
+      // always existed as journals in this session directory; this route
+      // serves a bounded, cleaned tail of them so the page shows the real
+      // record instead of claiming logs are unavailable. Owner only.
+      if (p === '/api/r9/logs' && req.method === 'GET' && !url.search) {
+        if (who !== 'owner') return json(403, { success: false, error: 'OWNER_REQUIRED' });
+        const entries = [];
+        for (const f of ['agent-turns.jsonl', 'agent-turn-history.jsonl', 'discussions.jsonl', 'usage-receipts.jsonl', 'cli-sessions.jsonl']) {
+          let rows = [];
+          try { rows = readJsonl(path.join(directory, f)).slice(-60); } catch {}
+          for (const r of rows) {
+            const ts = typeof r.t === 'number' ? r.t : (r.t ? Date.parse(r.t) || 0 : 0);
+            entries.push({ file: f, t: ts, text: clean(JSON.stringify(r), 300) });
+          }
+        }
+        entries.sort((a, b) => a.t - b.t);
+        return json(200, { success: true, data: { entries: entries.slice(-200) } });
+      }
       if (p === '/api/r9/lifecycle/restart') {
         if (req.method !== 'POST' || url.search) return json(405, { success: false, error: 'METHOD_NOT_ALLOWED' });
         if (who !== 'owner') return json(403, { success: false, error: 'OWNER_REQUIRED' });

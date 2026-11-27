@@ -13,6 +13,21 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 // per request even when several sessions run turns at once (see installTurnFetch).
 const turnContext = new AsyncLocalStorage();
 const TURN_HEADER = 'x-damar-turn';
+// Explicit-approval classifier (Owner mandate, 2026-11-28). An owner-initiated
+// request IS the mandate for the ordinary steps it needs; the permission
+// broker stops for explicit approval ONLY for the two named categories:
+// (1) actions touching credentials, (2) deletions. Everything else resolves
+// 'once' here, while the Authority Gate inside the workspace tools still
+// evaluates and records every operation (audit trail unchanged).
+const GATE_CREDENTIAL_RE = /(credential|kredensial|password|kata\s*sandi|api[-_ ]?key|secret|vault|dpapi|cmdkey|\.ssh|credentials\.json|key[-_ ]?store|damar_token|access[-_ ]?token|refresh[-_ ]?token)/i;
+const GATE_DELETE_RE = /(remove-item|rmdir|\brm\b|\bdel\b|erase|clear-content|git\s+clean|format-(volume|disk|partition)\b|delete\s+(file|folder|directory|all|item)|menghapus)/i;
+function gateExplicit(card) {
+  const text = [card?.tool, card?.run, card?.change, card?.scope].filter(Boolean).join(' ');
+  if (GATE_CREDENTIAL_RE.test(text)) return true;
+  if (/delete|remove|erase/i.test(String(card?.tool || ''))) return true;
+  if ((card?.tool === 'workspace_shell' || card?.tool === 'workspace_run') && GATE_DELETE_RE.test(text)) return true;
+  return false;
+}
 // Host-side composition (no Core file edited): wraps globalThis.fetch once. Inside a turn the turn's abort signal is
 // linked into every request; the turn id header is added only for loopback URLs (offline fixtures / local proxies),
 // never sent to a remote provider.
@@ -116,8 +131,14 @@ function createAgentTurns({ aiRuntime, isProtectedRoot, recordUsage, activeProvi
           if (turn.abort.signal.aborted) return resolve('deny');
           const profile = settings?.autonomy() || 'ask';
           if (profile === 'read-only') return resolve('deny');
-          const consent = card.tool === 'project_memory_add' && settings?.cognitive?.()?.memoryConsent !== 'autonomy'; // persistent memory asks (cognitive.memoryConsent)
-          if (!consent && profile === 'full-access' || profile === 'workspace-auto' &&['workspace_write', 'workspace_edit', 'workspace_run'].includes(card.tool)) return resolve('once');
+          // Mandat Owner (2026-11-28): an owner-initiated request is itself
+          // the mandate for its ordinary steps, so the broker no longer stops
+          // per step. Only the two explicit categories in gateExplicit()
+          // (credentials, deletions) still raise a permission card. This
+          // supersedes the former per-profile card flow and the memory-consent
+          // card: a project memory note is neither category, so it now runs
+          // under the mandate like any other ordinary step.
+          if (!gateExplicit(card)) return resolve('once');
           const id = 'perm-' + crypto.randomUUID();
           turn.pending.set(id, resolve);
           push(turn, { type: 'permission', id, card });

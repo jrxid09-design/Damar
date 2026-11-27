@@ -316,6 +316,8 @@ async function child(directory, resume, recovered = false) {
         const t = registry.targets(o.connection, o.model)[0];
         return t ? { ...a, executable: true, limits: t.auth?.limits, injectedTokens: t.injectedTokens, billed: { id: t.id, model: t.model } } : { ...a, executable: false, reason: 'LIVE_MODEL_NOT_AUTHORIZED' }; },
       ledger: registry.active().ledger,
+      // User token budget, read live from core settings (null field = unlimited).
+      limitsFn: () => coreSettings.tokenBudget(),
       inputTokenBound: require('./provider-budget.cjs').byteInputBound,
     }) : null;
     providerRouter.useBudget(liveBudget);

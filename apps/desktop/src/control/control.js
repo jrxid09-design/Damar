@@ -120,7 +120,7 @@
     'Effective': 'Berlaku', 'Revision': 'Revisi', 'Grant': 'Grant', 'Limits': 'Batas', 'Scope': 'Cakupan', '+ Delegate Run': '+ Delegasikan Run', 'Pandawa Agent Registry': 'Registri Agen Pandawa',
     'Run Ledger': 'Ledger Run', 'Agent': 'Agen', 'Role': 'Peran', 'Availability': 'Ketersediaan', 'Active runs': 'Run aktif', 'Completed': 'Selesai', 'Run': 'Run', 'Worker': 'Worker',
     'Provider / model': 'Provider / model', 'Attempts': 'Percobaan', 'Result': 'Hasil', 'Cancel': 'Batal', 'Confirm': 'Konfirmasi', 'Not available in this release': 'Belum tersedia di rilis ini',
-    'Available in v1.1': 'Tersedia di v1.1', 'Core Memory Store': 'Penyimpanan Memori Core', 'Project Memory': 'Memori Proyek', 'List': 'Daftar', 'Add note…': 'Tambah catatan…', 'Forget': 'Lupakan',
+    'Available in v1.1': 'Belum tersedia', 'Core Memory Store': 'Penyimpanan Memori Core', 'Project Memory': 'Memori Proyek', 'List': 'Daftar', 'Add note…': 'Tambah catatan…', 'Forget': 'Lupakan',
     'Checkpoints (undo / redo)': 'Checkpoint (undo / redo)', 'Launch': 'Jalankan', 'CLI Sessions': 'Sesi CLI', 'Lifecycle': 'Siklus hidup', 'Host': 'Host', 'Sandbox Boundary': 'Batas Sandbox',
     'Re-run checks': 'Jalankan ulang', 'Core route checks': 'Pemeriksaan rute Core', 'Safety': 'Keselamatan', 'Permissions': 'Izin', 'Core Settings': 'Pengaturan Core',
     'Load settings from Core': 'Muat pengaturan dari Core', 'Agent Permissions': 'Izin Agen', 'Autonomy profile': 'Profil otonomi', 'Skill routing': 'Routing skill', 'Save…': 'Simpan…',
@@ -341,13 +341,13 @@
     provider: '/api/r9/provider', budget: '/api/r9/provider/budget', grant: '/api/r9/provider/model-grant', padmin: '/api/r9/provider-admin/state', oauth: '/api/r9/oauth',
     lifecycle: '/api/r9/lifecycle', sandbox: '/api/r9/sandbox', runs: '/api/r9/pandawa/runs', sessions: '/api/r9/sessions',
     tools: '/api/v1/console/tools', plugins: '/api/v1/console/plugins', mcp: '/api/v1/console/mcp/servers',
-    presence: '/api/r9/presence/settings', cliSettings: '/api/r9/cli/settings', discussions: '/api/r9/pandawa/discussions', agents: '/api/v1/console/agents', safety: '/api/v1/console/safety', memoryStats: '/api/v1/console/memory/stats', context: '/api/v1/console/context'
+    presence: '/api/r9/presence/settings', cliSettings: '/api/r9/cli/settings', discussions: '/api/r9/pandawa/discussions', agents: '/api/v1/console/agents', safety: '/api/v1/console/safety', memoryStats: '/api/v1/console/memory/stats', context: '/api/v1/console/context', activityFeed: '/api/r9/activity'
   };
   var UNAVAILABLE = {
-    matadewa: { title: 'Mata Dewa Observability', kicker: 'DAMAR INTELLIGENCE • SYSTEM OBSERVABILITY', why: 'Mata Dewa sensing, traces and provenance are not exposed by DAMAR Core to Control in this release (deferred to v1.1).' },
-    cyber: { title: 'Damar Cyber', kicker: 'DAMAR INTELLIGENCE • SECURITY POSTURE', why: 'Damar Cyber posture data is not exposed by DAMAR Core to Control in this release (deferred to v1.1).' },
-    automations: { title: 'Automations', kicker: 'WORKSPACE • SCHEDULED WORK', why: 'Core has no automation/scheduler route mounted for Control in this release.' },
-    logs: { title: 'Logs', kicker: 'DEVELOPMENT • CORE LOGS', why: 'Core does not serve its logs over the Control API in this release; logs stay in the Core session directory.' }
+    matadewa: { title: 'Mata Dewa', kicker: 'DAMAR INTELLIGENCE • SYSTEM OBSERVABILITY', why: 'Tampilan Mata Dewa belum termuat. Data Mata Dewa disajikan Core lewat tampilannya sendiri; muat ulang halaman ini.' },
+    cyber: { title: 'Damar Cyber', kicker: 'DAMAR INTELLIGENCE • SECURITY POSTURE', why: 'Mesin deteksi siber Damar (DCD) ada di Core, tetapi data posturnya belum terhubung ke Control. Saat ini tidak ada data insiden yang mengalir ke halaman ini.' },
+    automations: { title: 'Otomasi', kicker: 'WORKSPACE • SCHEDULED WORK', why: 'Core belum memiliki rute otomasi untuk Control. Penjadwalan yang berjalan saat ini hanya brief harian di layanan daemon, dan belum terhubung ke halaman ini.' },
+    logs: { title: 'Log', kicker: 'DEVELOPMENT • CORE LOGS', why: 'Log Core belum termuat.' }
   };
 
   // ==========================================================================
@@ -430,7 +430,7 @@
       { id: 'overview', label: 'Overview', icon: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>' },
       { id: 'activity', label: 'Sessions', icon: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>', badgeFn: function () { var d = LIVE.d('sessions'); return d ? d.sessions.length : null; } },
       { id: 'tasks', label: 'Usage', icon: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>' },
-      { id: 'automations', label: 'Automations', icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M4.93 4.93l2.12 2.12m9.9 9.9l2.12 2.12M2 12h3m14 0h3M4.93 19.07l2.12-2.12m9.9-9.9l2.12-2.12"/>', badgeFn: function () { return 'v1.1'; }, badgeClass: 'badge-warn' }
+      { id: 'automations', label: 'Automations', icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M4.93 4.93l2.12 2.12m9.9 9.9l2.12 2.12M2 12h3m14 0h3M4.93 19.07l2.12-2.12m9.9-9.9l2.12-2.12"/>' }
     ] },
     { group: 'AI Infrastructure', items: [
       { id: 'capabilities', label: 'Capabilities Hub', icon: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>', badgeFn: function () { var d = LIVE.d('tools'); return d ? d.total : null; } },
@@ -443,14 +443,14 @@
     { group: 'DAMAR Intelligence', items: [
       { id: 'discussions', label: 'Discussions', icon: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>', badgeFn: function () { var d = LIVE.d('discussions'); return d ? d.discussions.filter(function (x) { return x.state === 'RUNNING'; }).length + ' live' : null; } },
       { id: 'pandawa', label: 'Pandawa', icon: '<circle cx="12" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><line x1="10.5" y1="8.5" x2="7.5" y2="15.5"/><line x1="13.5" y1="8.5" x2="16.5" y2="15.5"/><line x1="9" y1="18" x2="15" y2="18"/>', badgeFn: function () { var d = LIVE.d('runs'); return d ? d.runs.filter(function (r) { return TERMINAL.indexOf(r.state) < 0; }).length + ' active' : null; } },
-      { id: 'matadewa', label: 'Mata Dewa', icon: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>', badgeFn: function () { return 'v1.1'; }, badgeClass: 'badge-warn' },
-      { id: 'cyber', label: 'Damar Cyber', icon: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>', badgeFn: function () { return 'v1.1'; }, badgeClass: 'badge-warn' },
+      { id: 'matadewa', label: 'Mata Dewa', icon: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>' },
+      { id: 'cyber', label: 'Damar Cyber', icon: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>' },
       { id: 'memory', label: 'Memory & Continuity', icon: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>' }
     ] },
     { group: 'Development', items: [
       { id: 'cli', label: 'Damar CLI', icon: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>' },
       { id: 'runtime', label: 'Runtime', icon: '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/>' },
-      { id: 'logs', label: 'Logs', icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>', badgeFn: function () { return 'v1.1'; }, badgeClass: 'badge-warn' },
+      { id: 'logs', label: 'Logs', icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>' },
       { id: 'diagnostics', label: 'Diagnostics', icon: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>' }
     ] },
     { group: 'Administration', items: [
@@ -742,11 +742,25 @@
     return html;
   }
 
+  // Log page (Owner 2026-11-28): bound to GET /api/r9/logs, the session
+  // journals Core always kept on disk. Real entries only; nothing simulated.
+  function loadLogs() {
+    if (state.logsLoading || (state.logsAt && Date.now() - state.logsAt < 5000)) return;
+    state.logsLoading = true;
+    core.get('/api/r9/logs').then(function (r) { state.logsLoading = false; state.logsAt = Date.now(); if (r.ok) { state.logs = (r.data && r.data.entries) || []; renderAll(); } });
+  }
+  function renderLogsView() {
+    loadLogs();
+    var entries = state.logs || [];
+    var body = entries.length ? entries.map(function (e) { return '<div style="display:flex;gap:10px;font-family:var(--font-mono);font-size:11px;padding:3px 0;border-top:1px solid rgba(255,255,255,.05);"><span style="color:var(--text-muted);flex:none;">' + escapeHtml(e.t ? new Date(e.t).toLocaleTimeString('id-ID') : '-') + '</span><span style="color:var(--gold-champagne);flex:none;">' + escapeHtml(e.file) + '</span><span style="color:var(--text-secondary);word-break:break-all;">' + escapeHtml(e.text) + '</span></div>'; }).join('') : '<div style="font-size:12.5px;color:var(--text-secondary);">' + (state.logsAt ? 'Belum ada catatan pada sesi Core ini.' : 'Memuat log dari Core…') + '</div>';
+    return pageHeader('DEVELOPMENT • CORE LOGS', 'Log', 'Catatan jurnal sesi Core ini: giliran agen, diskusi, pemakaian, dan sesi. Data asli dari Core.') + '<section class="panel"><div class="panel-body">' + body + '</div></section>';
+  }
+
   function renderUnavailableView(id) {
     var u = UNAVAILABLE[id];
     return pageHeader(u.kicker, u.title, null) + '<section class="panel" data-unavailable="' + id + '"><div class="panel-header"><div class="panel-title-wrap"><h2 class="panel-title">' + escapeHtml(u.title) + '</h2></div>' +
-      statusBadgeHtml('NOT_AVAILABLE', 'Not available in this release') + '</div><div class="panel-body" style="display:flex;flex-direction:column;gap:8px;font-size:12.5px;color:var(--text-secondary);">' +
-      '<div>' + escapeHtml(u.why) + '</div><div style="color:var(--text-muted);">Control shows nothing here rather than simulated data.</div></div></section>';
+      statusBadgeHtml('NOT_AVAILABLE', 'Belum tersedia') + '</div><div class="panel-body" style="display:flex;flex-direction:column;gap:8px;font-size:12.5px;color:var(--text-secondary);">' +
+      '<div>' + escapeHtml(u.why) + '</div><div style="color:var(--text-muted);">Halaman ini tidak menampilkan data simulasi.</div></div></section>';
   }
 
   function renderMemoryView() {
@@ -809,9 +823,12 @@
     html += '<div class="workspace-grid-12">';
     html += panel('Safety', sf ? kvList([kv('Emergency stop', sf.stopped ? 'ENGAGED' + (sf.reason ? ', ' + sf.reason : '') : 'off'), kv('Engaged', sf.engaged ? 'yes' : 'no'), kv('Tools', sf.risk.total + ' total • ' + sf.risk.destructive + ' destructive • ' + sf.risk.safe + ' safe'),
       kv('Policy enforcement', sf.policy && sf.policy.enforcement && sf.policy.enforcement.enabled ? 'enabled' : 'disabled')]) : readState('safety', 'safety'), { span: 6, badge: sf ? statusBadgeHtml(sf.stopped ? 'STOPPED' : 'READY', sf.stopped ? 'stopped' : 'running') : '' });
+    var af = LIVE.d('activityFeed'), afAnswers = {}, afHist = [];
+    if (af && af.events) { af.events.forEach(function (e) { if (e.kind === 'permission_answer') afAnswers[e.permissionId] = e; }); af.events.forEach(function (e) { if (e.kind === 'permission') afHist.push(e); }); afHist = afHist.slice(-8).reverse(); }
+    var afHistHtml = afHist.length ? '<div style="margin-top:10px;font-size:11.5px;color:var(--text-secondary);"><div style="color:var(--text-ivory);font-weight:600;margin-bottom:4px;">Riwayat persetujuan (sesi Core ini)</div>' + afHist.map(function (h) { var a = afAnswers[h.permissionId]; var dec = a ? (a.decision === 'once' ? 'Disetujui sekali' : a.decision === 'session' ? 'Disetujui untuk sesi' : 'Ditolak') : 'Tanpa jawaban'; return '<div style="padding:3px 0;border-top:1px solid rgba(255,255,255,.05);">' + escapeHtml(h.tool || 'Tindakan') + ' · ' + dec + (h.detail ? ' · ' + escapeHtml(String(h.detail).slice(0, 80)) : '') + (h.at ? ' · ' + escapeHtml(new Date(h.at).toLocaleTimeString('id-ID')) : '') + '</div>'; }).join('') + '</div>' : '';
     html += panel('Permissions', kvList([kv('Pending permission requests', lc ? String(lc.outstanding.pendingPermissions) : '-'), kv('Agent autonomy profile', st && st.ok ? st.data.autonomy : 'load in Settings'),
-      kv('Live model grant', gr ? (gr.effective ? 'effective' : 'none') : '-'), kv('Approvals', 'answered in the CLI window that owns the turn')]) +
-      '<div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;">Control has no approval queue of its own: permission prompts belong to the session that raised them.</div>', { span: 6 });
+      kv('Live model grant', gr ? (gr.effective ? 'effective' : 'none') : '-'), kv('Approvals', 'diputuskan di Presence (inline pada percakapan) atau CLI pemilik giliran')]) +
+      '<div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;">Persetujuan eksplisit hanya untuk tindakan yang menyentuh kredensial dan penghapusan; langkah biasa berjalan dengan mandat permintaan pemilik.</div>' + afHistHtml, { span: 6 });
     return html + '</div>';
   }
 
@@ -827,6 +844,13 @@
       '<label for="settingsRouting" style="font-size:11.5px;color:var(--text-secondary);">Skill routing</label><select class="select-field" id="settingsRouting">' + ['auto', 'off'].map(function (p) { return '<option value="' + p + '"' + (p === d.skills.routing ? ' selected' : '') + '>' + p + '</option>'; }).join('') + '</select>' +
       '<div style="display:flex;justify-content:flex-end;">' + btn('Save…', 'data-save-settings="1"', 'btn-primary') + '</div></div>', { span: 6 });
     html += panel('Workspace Access', kvList([kv('Extra folders', d.extraDirs.length ? d.extraDirs.join(' • ') : 'none'), kv('Updated', d.updatedAt ? when(d.updatedAt) : 'never'), kv('Control session', state.control.id ? state.control.id.slice(0, 12) + '…' : '-', true)]), { span: 6 });
+    var tb = d.tokenBudget || { totalTokens: null, maxOutputTokens: null, completions: null };
+    html += panel('Anggaran Token', '<div style="display:flex;flex-direction:column;gap:12px;">' +
+      '<div style="font-size:11.5px;color:var(--text-secondary);">Pemakaian token adalah urusan pengguna. Kosongkan untuk tanpa batas; Damar tidak memotong giliran, diskusi, atau tugas karena anggaran kecuali Anda mengisinya sendiri. Laporan pemakaian tetap tampil di Diagnostik.</div>' +
+      field('tbTotal', 'Total token per sesi Core (kosong = tanpa batas)', '<input type="number" class="input-field" id="tbTotal" min="1000" style="width:100%;" value="' + (tb.totalTokens == null ? '' : escapeHtml(tb.totalTokens)) + '" />') +
+      field('tbOutput', 'Token keluaran maksimum per permintaan (kosong = tanpa batas)', '<input type="number" class="input-field" id="tbOutput" min="256" style="width:100%;" value="' + (tb.maxOutputTokens == null ? '' : escapeHtml(tb.maxOutputTokens)) + '" />') +
+      field('tbCompletions', 'Jumlah permintaan per sesi Core (kosong = tanpa batas)', '<input type="number" class="input-field" id="tbCompletions" min="1" style="width:100%;" value="' + (tb.completions == null ? '' : escapeHtml(tb.completions)) + '" />') +
+      '<div style="display:flex;justify-content:flex-end;">' + btn('Simpan anggaran…', 'data-save-token="1"', 'btn-primary') + '</div></div>', { span: 6 });
     var pr = (LIVE.d('presence') && LIVE.d('presence').presence) || d.presence || {};
     var sel = function (id, opts, cur) { return '<select class="select-field" id="' + id + '" style="width:100%;">' + opts.map(function (o) { return '<option value="' + escapeHtml(o) + '"' + (o === cur ? ' selected' : '') + '>' + escapeHtml(o) + '</option>'; }).join('') + '</select>'; };
     html += panel('Idle Presence & Notch', '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">' +
@@ -870,7 +894,7 @@
       return '<select class="select-field" id="pm_' + m + '" style="width:100%;"><option value=""' + (cur ? '' : ' selected') + '>' + escapeHtml(L(m === 'damar' ? 'Active provider' : "DAMAR's model")) + '</option>' + opts.map(function (r) { return '<option value="' + escapeHtml(r) + '"' + (r === cur ? ' selected' : '') + '>' + escapeHtml(r) + '</option>'; }).join('') + '</select>'; };
     html += panel('Pandawa Team', '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">' +
       ['damar', 'puntadewa', 'werkudara', 'janaka', 'nakula', 'sadewa'].map(function (m) { return field('pm_' + m, m, refSel(m)); }).join('') +
-      num1('pdRounds', 'Discussion rounds (1-10)', 1, 10, (tm.discussion || {}).maxRounds) + num1('pdBudget', 'Token budget per discussion (1000-2000000)', 1000, 2000000, (tm.discussion || {}).tokenBudget) +
+      num1('pdRounds', 'Discussion rounds (1-100)', 1, 100, (tm.discussion || {}).maxRounds) + field('pdBudget', 'Anggaran token per diskusi (kosong = tanpa batas)', '<input type="number" class="input-field" id="pdBudget" min="1000" style="width:100%;" value="' + ((tm.discussion || {}).tokenBudget == null ? '' : escapeHtml((tm.discussion || {}).tokenBudget)) + '" />') +
       num1('pdTimeout', 'Time limit per member reply (seconds, 30-1800)', 30, 1800, (tm.discussion || {}).callTimeoutSec) +
       '</div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(L('Model options come from your connected providers. Empty = DAMAR\'s model (or the active provider for DAMAR).')) + '</span>' + btn('Save team…', 'data-save-team="1"', 'btn-primary') + '</div>', { span: 12 });
     var vx = d.voice || {}, vnum = function (id, label, min, max, step, v) { return field(id, label, '<input type="number" class="input-field" id="' + id + '" min="' + min + '" max="' + max + '" step="' + step + '" style="width:100%;" value="' + escapeHtml(v) + '" />'); };
@@ -888,7 +912,7 @@
       vnum('vcEqPresence', 'Jarvis EQ presence (dB, -6 to 6)', -6, 6, 0.5, vx.jarvisEqPresenceDb) +
       vnum('vcEqHigh', 'Jarvis EQ high shelf (dB, -6 to 6)', -6, 6, 0.5, vx.jarvisEqHighDb) +
       '</div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);">Pitch and the Jarvis robot preset are post-processing on the local Supertonic M1 output, Indonesian synthesis is unchanged.</span>' + btn('Save voice…', 'data-save-voice="1"', 'btn-primary') + '</div></div>', { span: 12 });
-    html += panel('Mobile', '<div data-unavailable="mobile" style="font-size:12px;color:var(--text-secondary);">' + statusBadgeHtml('NOT_AVAILABLE', 'Available in v1.1') + ' Mobile is a v1.1 surface; Core holds no mobile settings yet.</div>', { span: 6 });
+    html += panel('Mobile', '<div data-unavailable="mobile" style="font-size:12px;color:var(--text-secondary);">' + statusBadgeHtml('NOT_AVAILABLE', 'Belum tersedia') + ' Damar Mobile belum terhubung sebagai pendamping. Core saat ini tidak menyimpan pengaturan mobile; pengaturan tampil di sini saat pendamping terhubung.</div>', { span: 6 });
     var pv = LIVE.d('provider');
     html += panel('Providers & Models', kvList([kv('Active provider', pv ? pv.active : '-'), kv('Active model', pv ? (pv.model || '-') : '-'), kv('Live inference', pv ? (pv.liveInference ? 'authorized' : 'not authorized') : '-')]) +
       '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">' + btn('Providers →', 'data-jump-view="providers"') + btn('Models →', 'data-jump-view="models"') + '</div>', { span: 6 });
@@ -917,7 +941,7 @@
     models: renderModelsView, providers: renderProvidersView, pandawa: renderPandawaView, discussions: renderDiscussionsView, memory: renderMemoryView, cli: renderCliView, runtime: renderRuntimeView,
     diagnostics: renderDiagnosticsView, security: renderSecurityView, settings: renderSettingsView,
     matadewa: function () { return renderUnavailableView('matadewa'); }, cyber: function () { return renderUnavailableView('cyber'); },
-    automations: function () { return renderUnavailableView('automations'); }, logs: function () { return renderUnavailableView('logs'); }
+    automations: function () { return renderUnavailableView('automations'); }, logs: renderLogsView
   };
   function renderView(id, s) { if (s) state = s; return (VIEWS[id] || VIEWS.overview)(); }
 
@@ -1185,6 +1209,13 @@
         return controlSession().then(function (id) { return core.post('/api/r9/settings', { action: 'update', cliSession: id, client: state.control.client, values: values }); }).then(function (r) { if (r.ok) loadSettings(); return r; });
       });
     },
+    'data-save-token': function () {
+      var numOrNull = function (id) { var v = val(id); return v === '' ? null : Number(v); };
+      var tokenBudget = { totalTokens: numOrNull('tbTotal'), maxOutputTokens: numOrNull('tbOutput'), completions: numOrNull('tbCompletions') };
+      ownerAction('Simpan anggaran token', '<pre style="font-size:11px;white-space:pre-wrap;">' + escapeHtml(JSON.stringify(tokenBudget, null, 1)) + '</pre><p style="font-size:12px;">Nilai kosong berarti tanpa batas.</p>', function () {
+        return controlSession().then(function (id) { return core.post('/api/r9/settings', { action: 'update', cliSession: id, client: state.control.client, values: { tokenBudget: tokenBudget } }); }).then(function (r) { if (r.ok) loadSettings(); return r; });
+      });
+    },
     'data-save-cli': function () {
       var cli = { theme: val('cliTheme'), animateBanner: val('cliBanner') === 'flame', language: val('cliLanguage'), hudPosition: val('cliHud') };
       ownerAction('Save CLI settings', '<pre style="font-size:11px;white-space:pre-wrap;">' + escapeHtml(JSON.stringify(cli, null, 1)) + '</pre>', function () {
@@ -1218,7 +1249,7 @@
     },
     'data-save-team': function () {
       var models = {}; ['damar', 'puntadewa', 'werkudara', 'janaka', 'nakula', 'sadewa'].forEach(function (m) { models[m] = val('pm_' + m) || null; });
-      var pandawa = { models: models, discussion: { maxRounds: Number(val('pdRounds')), tokenBudget: Number(val('pdBudget')), callTimeoutSec: Number(val('pdTimeout')) } };
+      var pandawa = { models: models, discussion: { maxRounds: Number(val('pdRounds')), tokenBudget: val('pdBudget') === '' ? null : Number(val('pdBudget')), callTimeoutSec: Number(val('pdTimeout')) } };
       ownerAction('Save Pandawa team', '<pre style="font-size:11px;white-space:pre-wrap;">' + escapeHtml(JSON.stringify(pandawa, null, 1)) + '</pre>', function () {
         return controlSession().then(function (id) { return core.post('/api/r9/settings', { action: 'update', cliSession: id, client: state.control.client, values: { pandawa: pandawa } }); }).then(function (r) { if (r.ok) loadSettings(); return r; });
       });
@@ -1357,7 +1388,7 @@
     shell.classList.toggle('mobile-drawer-open', !!state.mobileDrawerOpen);
     renderSidebar(); updateHeader();
     var main = document.getElementById('mainWorkspaceContent');
-    if (!state.credentialsPresent) main.innerHTML = pageHeader('DAMAR CONTROL', 'Owner credential required', 'Open Control from the Owner launcher: node src\\control\\launch.cjs <Core session folder>. Control never asks for or stores the credential itself.');
+    if (!state.credentialsPresent) main.innerHTML = pageHeader('DAMAR CONTROL', 'Kredensial Owner diperlukan', 'Buka Control dari Presence (ikon roda gigi) atau dari launcher Owner. Sesi yang sudah masuk bertahan selama sesi browser ini; halaman ini tidak pernah meminta atau menyimpan kredensial.');
     else main.innerHTML = renderView(state.activeView);
   }
   function navigateTo(viewId) {
@@ -1468,8 +1499,17 @@
 
   function boot() {
     var creds = parseFragment(root.location.hash);
-    // Credentials live in memory only; strip them from the address bar and history entry immediately.
+    // Strip the credential from the address bar and history entry immediately.
     if (root.location.hash) root.history.replaceState(null, '', root.location.pathname);
+    // Refresh survival (Owner 2026-11-28): the launcher credential is kept in
+    // sessionStorage, scoped to this browser session, and re-presented on
+    // reload, so a refresh no longer locks the Owner out of his own
+    // dashboard. A fresh browser session holds nothing and still gets the
+    // credential requirement; the protection itself is unchanged.
+    try {
+      if (creds.owner) root.sessionStorage.setItem('damar.control.creds', JSON.stringify({ owner: creds.owner, console: creds.console }));
+      else { var savedCreds = JSON.parse(root.sessionStorage.getItem('damar.control.creds') || 'null'); if (savedCreds && savedCreds.owner) creds = { owner: savedCreds.owner, console: savedCreds.console || '', view: creds.view }; }
+    } catch (e) {}
     state.credentialsPresent = !!creds.owner;
     state.endpoint = root.location.host;
     state.activeView = (VIEWS[creds.view] && creds.view) || load('damar.control.view') || 'overview';

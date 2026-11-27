@@ -33,6 +33,7 @@ let win = null, tray = null, savedBounds = null, isClosingConfirmed = false, cli
 let sessionDirectory = null, config = { source: 'defaults-not-loaded', ...DEFAULTS }, core = null, coreState = null, projection = project(null), lang = 'en', watcher = null;
 let activityBaseline = null; // feed rows older than the first poll are history: not replayed as live ticker/emotes
 let permDetail = { id: null, detail: null }; // owner-credential command detail for the pending permission (renderer feed redacts it)
+let histCache = { at: 0, rows: [] }; // approval history for the Authority surface (owner read, 10 s cache)
 const fromMain = event => win && !win.isDestroyed() && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame;
 const pending = () => (projection.presence?.activity.pendingPermissions ? pendingPermission(coreState?.activity || []) : null);
 const message = () => {
@@ -41,7 +42,8 @@ const message = () => {
     activity: { ...(projection.presence?.activity || {}), events: rows },
     sessionPills: projection.presence?.sessionPills || [], media: projection.presence?.media || null, pcActivity: pcActivitySnapshot(),
     // permissionId only; turnId stays in main (the renderer cannot target another turn).
-    permission: p ? { permissionId: p.permissionId, tool: p.tool, file: p.file, detail: p.detail || (permDetail.id === p.permissionId ? permDetail.detail : null), added: p.added, removed: p.removed, allowable: p.allowable } : null } };
+    permission: p ? { permissionId: p.permissionId, tool: p.tool, file: p.file, detail: p.detail || (permDetail.id === p.permissionId ? permDetail.detail : null), added: p.added, removed: p.removed, allowable: p.allowable } : null,
+    approvalHistory: histCache.rows } };
 };
 
 // PC activity sense for the Notch behavior engine (Fase 2 v3): ONE fixed
@@ -94,6 +96,8 @@ function bindCore() {
       coreState = s; projection = project(s, config);
       if (activityBaseline === null && s.reachable) activityBaseline = (s.activity || []).reduce((m, a) => Math.max(m, a.seq + 1), 0);
       push();
+      // Approval history (owner read, cached): the Authority surface's record.
+      if (core && Date.now() - histCache.at > 10000) { histCache.at = Date.now(); core.approvalHistory().then(rows => { if (Array.isArray(rows)) { histCache.rows = rows; push(); } }).catch(() => {}); }
       // Enrich the pending permission with its command detail (owner read).
       const p = pending();
       if (p && !p.detail && permDetail.id !== p.permissionId) {
@@ -179,12 +183,15 @@ ipcMain.handle('damar-runtime-request', async (event, request) => {
       }, phase => {
         // Single turn-status statement: Core accepted the turn (Berpikir).
         try { event.sender.send('damar-presence', { kind: 'chat-phase', phase }); } catch {}
+      }, (step, key) => {
+        // Snippet lines: the turn's real actions/reasoning, streamed live.
+        try { event.sender.send('damar-presence', { kind: 'chat-step', step, key }); } catch {}
       });
       if (!r.ok) {
         // Error containment: a failed turn answers inside the conversation
         // (Indonesian notice from core-presence) and never flips the surface
         // to UNAVAILABLE; only transport-level failures stay errors.
-        if (typeof r.notice === 'string' && r.notice) return { ok: true, status: 200, data: { success: true, data: { answer: r.notice, sessionId: 'dsc_presence' } } };
+        if (typeof r.notice === 'string' && r.notice) return { ok: true, status: 200, data: { success: true, data: { answer: r.notice, sessionId: 'dsc_presence', turnFailed: true, failLines: Array.isArray(r.failLines) ? r.failLines : [] } } };
         return { ok: false, error: { kind: 'TURN_FAILED', status: r.status || 502, message: r.error || 'Conversation failed.' } };
       }
       return { ok: true, status: 200, data: { success: true, data: { answer: r.answer, sessionId: 'dsc_presence' } } };

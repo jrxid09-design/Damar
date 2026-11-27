@@ -104,6 +104,16 @@ class TurnController {
             this._assertNoCycle(this.sequence, "panggilan");
         }
 
+        // Penolakan kebijakan bukan kegagalan tool (Mandat Owner 2026-11-28):
+        // langkah yang ditolak kembali ke model untuk dialihkan atau
+        // disimpulkan. Kode DENIED tidak dicatat sebagai error berulang dan
+        // tidak pernah menumpuk ke MAX_SAME_ERROR / LOOP_CYCLE yang membunuh
+        // seluruh giliran; satu langkah terblokir harus menurun dengan anggun.
+        if (errorCode && /DENIED/.test(errorCode)) {
+            if (m) { m.lastError = errorCode; m.sameError = 0; }
+            return;
+        }
+
         if (errorCode) {
             this.errorSequence.push(`${name}:${errorCode}`);
             if (this.errorSequence.length > this.MAX_SEQUENCE) this.errorSequence.shift();
