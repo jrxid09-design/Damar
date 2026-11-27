@@ -16,6 +16,8 @@
     "damar:daemon": "node scripts/launch.js",
     "cli": "node src/cli/index.js",
     "cli:serve": "node src/cli/index.js --serve",
+    "setup:cli": "node scripts/setup-cli.js",
+    "setup:voice": "node scripts/setup-voice.js",
     "learn": "node scripts/learn.js",
     "audit": "node scripts/audit-276.js --json",
     "test": "node --test --test-concurrency=1 --require ./tests/helpers/testEnv.js \"tests/**/*.test.js\"",
@@ -71,6 +73,7 @@
   },
   "allowScripts": {
     "sqlite3@6.0.1": true,
-    "node-llama-cpp@3.20.0": true
+    "node-llama-cpp@3.20.0": true,
+    "node@26.5.1": true
   }
 }

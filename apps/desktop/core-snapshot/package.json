@@ -71,6 +71,7 @@
   },
   "allowScripts": {
     "sqlite3@6.0.1": true,
-    "node-llama-cpp@3.20.0": true
+    "node-llama-cpp@3.20.0": true,
+    "node@26.5.1": true
   }
 }
