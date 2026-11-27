@@ -7,7 +7,7 @@
 (function (root) {
   'use strict';
   var FEED_ORDER = ['earthquakes', 'disasters', 'cyclones', 'weather', 'openMeteo', 'openaq', 'airQuality', 'flights', 'opensky', 'military', 'vessels', 'fires', 'traffic', 'satellites', 'launches'];
-  var md = { status: null, statusError: null, feeds: {}, loading: false, lastLoad: 0, draft: null, saving: false, message: '', lang: 'en',
+  var md = { status: null, statusError: null, feeds: {}, loading: false, lastLoad: 0, draft: null, awaitingStatus: false, saving: false, message: '', lang: 'en',
     cams: {}, camPage: {}, own: [], alpr: null, filter: '', frames: {}, frameLoading: {}, camForm: { kind: 'snapshot' } };
   var H = null;
 
@@ -43,7 +43,7 @@
     if (md.loading) return; md.loading = true; md.lastLoad = Date.now();
     H.get('/api/r9/cli/settings').then(function (r) { md.lang = r.ok && r.data && r.data.cli && r.data.cli.language === 'id' ? 'id' : 'en'; });
     H.get('/api/r9/mata-dewa/status').then(function (r) {
-      md.status = r.ok ? r.data : null; md.statusError = r.ok ? null : r;
+      md.status = r.ok ? r.data : null; md.statusError = r.ok ? null : r; md.awaitingStatus = false;
       if (!r.ok) return;
       var jobs = [];
       if (r.data.consent) r.data.feeds.forEach(function (f) { if (f.enabled && (credOf(f) === 'none' || credOf(f).hasKey)) jobs.push(H.get('/api/r9/mata-dewa/feeds/' + f.id).then(function (x) { md.feeds[f.id] = x; })); });
@@ -164,6 +164,10 @@
   }
   function input(attrs, value, width) { return '<input class="input-field" ' + attrs + ' value="' + H.escapeHtml(value) + '" style="width:' + (width || '100%') + ';font-family:var(--font-mono);" />'; }
   function settingsPanel(st) {
+    // After a save the draft is dropped; until the fresh status lands, the form
+    // must not rebuild a draft from the pre-save snapshot (it would show, and a
+    // second save would silently restore, the values just changed).
+    if (md.awaitingStatus) return H.panel(T('feedsRefresh'), '<div style="font-size:12px;color:var(--text-muted);">' + esc(T('loading')) + '</div>', { span: 12, flush: true });
     var d = md.draft || (md.draft = draftFrom(st));
     var rows = st.feeds.map(function (f) {
       return ['<label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" data-md-feed="' + f.id + '"' + (d.feeds.indexOf(f.id) >= 0 ? ' checked' : '') + ' /> ' + esc(f.label) + '</label>',
@@ -242,7 +246,7 @@
     md.saving = true; md.message = ''; H.refresh();
     var c = H.state().control;
     return H.controlSession().then(function (id) { return H.post('/api/r9/settings', { action: 'update', cliSession: id, client: c.client, values: { mataDewa: values } }); })
-      .then(function (r) { md.saving = false; if (r.ok) { md.draft = null; md.feeds = {}; md.cams = {}; } after(r, 'Saved (revision ' + (r.data && r.data.revision) + ').'); },
+      .then(function (r) { md.saving = false; if (r.ok) { md.draft = null; md.awaitingStatus = true; md.feeds = {}; md.cams = {}; } after(r, 'Saved (revision ' + (r.data && r.data.revision) + ').'); },
         function (r) { md.saving = false; md.message = 'Control session failed: ' + ((r && r.error) || 'unknown'); H.refresh(); });
   }
   function val(sel) { var el = document.querySelector(sel); return el ? el.value : ''; }
