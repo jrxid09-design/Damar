@@ -33,6 +33,8 @@ $op = '__OP__'
 try {
   Add-Type -AssemblyName System.Runtime.WindowsRuntime
   $null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media, ContentType = WindowsRuntime]
+  $null = [Windows.Storage.Streams.DataReader, Windows.Storage.Streams, ContentType = WindowsRuntime]
+  $null = [Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Storage.Streams, ContentType = WindowsRuntime]
   $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -like 'IAsyncOperation*' })[0]
   function AwaitOp($asyncOp, $resultType) {
     $task = $asTaskGeneric.MakeGenericMethod($resultType).Invoke($null, @($asyncOp))
@@ -49,7 +51,38 @@ try {
   }
   $props = AwaitOp ($session.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
   $playback = $session.GetPlaybackInfo()
-  @{ available = $true; sourceApp = [string]$session.SourceAppUserModelId; title = [string]$props.Title; artist = [string]$props.Artist; album = [string]$props.AlbumTitle; status = [string]$playback.PlaybackStatus } | ConvertTo-Json -Compress
+  $tl = $session.GetTimelineProperties()
+  $posSec = 0.0; $durSec = 0.0
+  if ($null -ne $tl) {
+    $durSec = ($tl.EndTime - $tl.StartTime).TotalSeconds
+    $posSec = ($tl.Position - $tl.StartTime).TotalSeconds
+    if ($playback.PlaybackStatus -eq 'Playing' -and $null -ne $tl.LastUpdatedTime) {
+      $posSec += ([DateTimeOffset]::UtcNow - $tl.LastUpdatedTime).TotalSeconds
+    }
+    if ($posSec -lt 0) { $posSec = 0 }
+    if ($durSec -gt 0 -and $posSec -gt $durSec) { $posSec = $durSec }
+  }
+  $artB64 = ''; $artType = ''
+  if ($null -ne $props.Thumbnail) {
+    try {
+      $stream = AwaitOp ($props.Thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
+      if ($null -ne $stream) {
+        # DataReader reads an IInputStream, not the random-access stream
+        # itself; some sessions also report an unusable Size, so load a
+        # bounded chunk and read whatever actually arrived.
+        $reader = New-Object Windows.Storage.Streams.DataReader($stream.GetInputStreamAt(0))
+        $loaded = AwaitOp ($reader.LoadAsync([uint32]400000)) ([uint32])
+        if ($loaded -gt 0) {
+          $bytes = New-Object byte[] ([int]$loaded)
+          $reader.ReadBytes($bytes)
+          $artB64 = [Convert]::ToBase64String($bytes)
+          $artType = [string]$stream.ContentType
+        }
+        $reader.Dispose(); $stream.Dispose()
+      }
+    } catch { $artB64 = ''; $artType = '' }
+  }
+  @{ available = $true; sourceApp = [string]$session.SourceAppUserModelId; title = [string]$props.Title; artist = [string]$props.Artist; album = [string]$props.AlbumTitle; status = [string]$playback.PlaybackStatus; positionSec = [math]::Round($posSec, 1); durationSec = [math]::Round($durSec, 1); artwork = $artB64; artworkType = $artType } | ConvertTo-Json -Compress
 } catch {
   @{ available = $false; reason = 'SMTC_ERROR'; detail = [string]$_.Exception.Message } | ConvertTo-Json -Compress
 }`;
@@ -57,7 +90,7 @@ try {
 function defaultRunner(script) {
   return new Promise((resolve, reject) => {
     execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
-      { timeout: TIMEOUT_MS, windowsHide: true, maxBuffer: 256 * 1024 },
+      { timeout: TIMEOUT_MS, windowsHide: true, maxBuffer: 1024 * 1024 },
       (err, stdout) => (err ? reject(err) : resolve(String(stdout || ''))));
   });
 }
@@ -80,7 +113,10 @@ function createMediaSession({ runner = defaultRunner, now = Date.now, cacheMs = 
       try {
         const raw = await run('get');
         cached = raw && raw.available === true
-          ? { available: true, sourceApp: String(raw.sourceApp || ''), title: String(raw.title || ''), artist: String(raw.artist || ''), album: String(raw.album || ''), status: String(raw.status || '') }
+          ? { available: true, sourceApp: String(raw.sourceApp || ''), title: String(raw.title || ''), artist: String(raw.artist || ''), album: String(raw.album || ''), status: String(raw.status || ''),
+              positionSec: Number.isFinite(raw.positionSec) ? Math.max(0, raw.positionSec) : 0,
+              durationSec: Number.isFinite(raw.durationSec) ? Math.max(0, raw.durationSec) : 0,
+              artwork: typeof raw.artwork === 'string' && raw.artwork ? 'data:' + (raw.artwork.startsWith('/9j/') ? 'image/jpeg' : raw.artwork.startsWith('iVBOR') ? 'image/png' : raw.artwork.startsWith('UklGR') ? 'image/webp' : (typeof raw.artworkType === 'string' && raw.artworkType.startsWith('image/') ? raw.artworkType : 'image/jpeg')) + ';base64,' + raw.artwork : '' }
           : { available: false, reason: typeof raw?.reason === 'string' ? raw.reason : 'UNAVAILABLE' };
       } catch {
         cached = { available: false, reason: 'SMTC_UNREACHABLE' };

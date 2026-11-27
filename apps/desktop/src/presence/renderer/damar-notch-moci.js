@@ -104,6 +104,9 @@
     constructor() {
       this.ctx = null; this.master = null; this.delayNode = null;
       this.sfxEnabled = true; this.voiceEnergy = 0; this.loopTimer = null; this.loopStep = 0;
+      // Owner rules 2026-11-27: subtle by default (Core characterSoundVolume, 30% until configured), and a
+      // hard media gate: while the OS media session reports playing, no character sound may fire at all.
+      this.volume = 0.3; this.mediaMuted = false;
       this.onChirp = null; this.activityKey = () => 'ceria';
     }
     unlock() {
@@ -111,7 +114,7 @@
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (!AudioCtx) return;
         this.ctx = new AudioCtx();
-        this.master = this.ctx.createGain(); this.master.gain.value = 0.85; this.master.connect(this.ctx.destination);
+        this.master = this.ctx.createGain(); this.master.gain.value = this.volume; this.master.connect(this.ctx.destination);
         this.delayNode = this.ctx.createDelay(0.4); this.delayNode.delayTime.value = 0.14;
         const fb = this.ctx.createGain(); fb.gain.value = 0.22;
         const wet = this.ctx.createGain(); wet.gain.value = 0.18;
@@ -121,7 +124,7 @@
       if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
     }
     syllable({ f0Start = 520, f0End = 680, dur = 0.14, delay = 0, vowel = 'i', vol = 0.18, vibratoRate = 14, vibratoDepth = 16, wave = 'triangle', sparkle = true }) {
-      if (!this.sfxEnabled) return;
+      if (!this.sfxEnabled || this.mediaMuted) return;
       this.unlock(); if (!this.ctx) return;
       const FORMANTS = { i: [480, 2650], a: [980, 1650], u: [420, 1050], o: [620, 1200], e: [680, 2250] };
       const [f1Freq, f2Freq] = FORMANTS[vowel] || FORMANTS.i;
@@ -181,13 +184,8 @@
           this.syllable({ f0Start: 460, f0End: 430, dur: 0.16, vowel: 'u', vol: 0.18 });
           this.syllable({ f0Start: 470, f0End: 740, dur: 0.22, delay: 0.18, vowel: 'i', vol: 0.21 }); break;
         case 'typing':
-          this.loopStep = 0;
-          this.loopTimer = setInterval(() => {
-            if (!this.sfxEnabled || this.activityKey() !== 'typing') { this.stopLoop(); return; }
-            const f = 780 + (this.loopStep % 5) * 95 + Math.random() * 60;
-            this.syllable({ f0Start: f, f0End: f * 1.12, dur: 0.05, vowel: 'i', vol: 0.09 });
-            this.loopStep++;
-          }, 150); break;
+          // Owner rule 2026-11-27: no looping character sounds. Typing is an ambient work state: silent.
+          break;
         case 'stamp':
           this.syllable({ f0Start: 240, f0End: 110, dur: 0.12, vowel: 'o', wave: 'sawtooth', vol: 0.2, sparkle: false });
           this.syllable({ f0Start: 660, f0End: 1046, dur: 0.2, delay: 0.12, vowel: 'i', vol: 0.23 }); break;
@@ -226,26 +224,11 @@
           this.syllable({ f0Start: 680, f0End: 540, dur: 0.08, delay: 0.085, vowel: 'u', vol: 0.17 }); break;
         case 'feed':
           [523, 659, 784, 1046].forEach((f, idx) => this.syllable({ f0Start: f, f0End: f * 1.08, dur: 0.12, delay: idx * 0.07, vowel: ['i', 'e', 'a', 'i'][idx], vol: 0.19 })); break;
-        case 'dance': {
-          const melody = [523, 659, 784, 659, 880, 784, 659, 587], vowels = ['i', 'a', 'o', 'i', 'a', 'u', 'o', 'e'];
-          this.loopStep = 0;
-          this.loopTimer = setInterval(() => {
-            if (!this.sfxEnabled || this.activityKey() !== 'dansa') { this.stopLoop(); return; }
-            const i = this.loopStep % melody.length;
-            this.syllable({ f0Start: melody[i], f0End: melody[i] * 1.07, dur: 0.13, vowel: vowels[i], vol: 0.15 });
-            this.loopStep++;
-          }, 265); break;
-        }
-        case 'headbang': {
-          const riff = [220, 220, 262, 294, 220, 220, 330, 294];
-          this.loopStep = 0;
-          this.loopTimer = setInterval(() => {
-            if (!this.sfxEnabled || this.activityKey() !== 'headbang') { this.stopLoop(); return; }
-            const f = riff[this.loopStep % riff.length];
-            this.syllable({ f0Start: f, f0End: f * 0.96, dur: 0.12, vowel: 'a', wave: 'sawtooth', vol: 0.14, sparkle: false });
-            this.loopStep++;
-          }, 210); break;
-        }
+        case 'dance':
+        case 'headbang':
+          // Owner rule 2026-11-27: no looping character sounds, and never any character sound while the
+          // user's media plays (the dance is a visual bounce only). Both loops are removed by design.
+          break;
       }
     }
     playDamarSpeak(syllables = 4) {
@@ -318,7 +301,7 @@
         if (key === 'rayakan' || key === 'ide') spawnParticles(v.w / 2, v.h / 2 - size * 0.17, size, '✦', 8);
         else if (key === 'approve') spawnParticles(v.w / 2, v.h / 2 - size * 0.11, size, '✦', 6);
         else if (key === 'reject') spawnParticles(v.w / 2, v.h / 2 - size * 0.11, size, '✖', 6);
-        else if (key === 'sayang') spawnParticles(v.w / 2, v.h / 2 - size * 0.18, size, '💛', 6);
+        else if (key === 'sayang') spawnParticles(v.w / 2, v.h / 2 - size * 0.18, size, '✦', 6);
       }
     }
     const held = () => performance.now() < S.holdUntil;
@@ -538,15 +521,17 @@
         for (const v of S.views) { try { v.canvas.remove(); } catch {} }
         S.views = [];
       },
-      greet() { setActivity('ceria'); S.waveTimer = 1.4; voice.playSound('wave'); },
+      greet() { setActivity('ceria', { sound: false }); S.waveTimer = 1.4; },
       playGreet() { api.greet(); },
-      playIntro() { S.introActive = true; S.introTime = 0; S.holdUntil = performance.now() + 2700; voice.playSound('intro'); },
+      playIntro() { S.introActive = true; S.introTime = 0; S.holdUntil = performance.now() + 2700; },
       setEmote(name) {
+        // Ambient behavior-engine states are visual only (Owner 2026-11-27: sounds only on significant
+        // events - permission question, decision, error, celebration, and the user's own poke).
         if (held() || S.mediaLock) return;
         const key = EMOTE_TO_ACTIVITY[name];
-        if (key && key !== S.activity) setActivity(key);
+        if (key && key !== S.activity) setActivity(key, { sound: false });
       },
-      setGesture(g) { if (g === 'typing' && !held() && !S.mediaLock && S.activity !== 'typing') setActivity('typing'); },
+      setGesture(g) { if (g === 'typing' && !held() && !S.mediaLock && S.activity !== 'typing') setActivity('typing', { sound: false }); },
       setSpeaking(b) { S.speaking = !!b; },
       setSpeechLevel(v) { S.speechLevel = Math.max(0, Math.min(1, Number(v) || 0)); },
       setCostume() { /* The 2D interim has one gold theme; 3D costume names do not map. No-op by design. */ },
@@ -559,15 +544,20 @@
         voice.playSound('poke'); squish(0.92, 1.1);
       },
       setGaze(x, y) { S.gazeX = Number(x) || 0; S.gazeY = Number(y) || 0; },
-      setHover(b) { S.isHovering = !!b; if (b) voice.playSound('hover'); },
+      setHover(b) { S.isHovering = !!b; },
       setMediaPlaying(playing) {
-        if (playing) { S.mediaLock = true; if (S.activity !== 'dansa') setActivity('dansa'); }
-        else if (S.mediaLock) { S.mediaLock = false; if (S.activity === 'dansa') setActivity('ceria'); }
+        // The automatic media gate (Owner 2026-11-27): media playing -> character sound disappears on its
+        // own (synth hard-muted + any loop stopped; the dance stays visual). Media stops -> the gate lifts
+        // and significant-event sounds may play again at the configured subtle volume.
+        voice.mediaMuted = !!playing;
+        if (playing) { voice.stopLoop(); S.mediaLock = true; if (S.activity !== 'dansa') setActivity('dansa', { sound: false }); }
+        else if (S.mediaLock) { S.mediaLock = false; if (S.activity === 'dansa') setActivity('ceria', { sound: false }); }
       },
       reactQuestion() { setActivity('mikir', { holdMs: 2000 }); },
       reactError() { setActivity('error', { holdMs: 2600 }); },
       reactDecision(kind) { setActivity(kind === 'deny' ? 'reject' : 'approve', { holdMs: 2800 }); },
       setSfxEnabled(b) { voice.sfxEnabled = !!b; if (!b) voice.stopLoop(); },
+      setSoundVolume(v) { const x = Math.max(0, Math.min(1, Number(v) || 0)); voice.volume = x; if (voice.master) voice.master.gain.value = x; },
       // Introspection for tests/harness: current catalog state + sprite.
       getState() { return { activity: S.activity, sprite: S.activeSprite, sound: (CATALOG[S.activity] || {}).sound || null, mounted: S.views.length }; },
     };

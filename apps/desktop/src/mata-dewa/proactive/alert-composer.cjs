@@ -17,7 +17,7 @@ function composeMessage(signal, location, { salutation = '' } = {}) {
   const phrase = locationPhrase(location);
   const d = signal.data || {};
   if (signal.ruleId === 'quake-near') {
-    return greet + 'gempa M' + d.magnitude + ' tercatat ' + d.distanceKm + ' km dari ' + phrase + (d.place ? ' — ' + d.place : '') +
+    return greet + 'gempa M' + d.magnitude + ' tercatat ' + d.distanceKm + ' km dari ' + phrase + (d.place ? ', ' + d.place : '') +
       ', kedalaman ' + d.depthKm + ' km, pukul ' + hhmm(d.time) + '. Sumber: ' + d.source + '. ' +
       (location.profile === 'asset' ? 'Periksa kondisi aset dan waspadai gempa susulan.' : 'Periksa kondisi sekitar dan waspadai gempa susulan.');
   }
@@ -30,14 +30,14 @@ function composeMessage(signal, location, { salutation = '' } = {}) {
       (location.profile === 'asset' ? 'Saran: waspadai aktivitas di sekitar aset dan risiko sambaran petir pada jam itu.' : 'Saran: siapkan antisipasi bila ada aktivitas di luar pada jam itu.');
   }
   if (signal.ruleId === 'bmkg-quake-near') {
-    return greet + 'gempa M' + d.magnitude + ' tercatat ' + d.distanceKm + ' km dari ' + phrase + (d.place ? ' — ' + d.place : '') +
+    return greet + 'gempa M' + d.magnitude + ' tercatat ' + d.distanceKm + ' km dari ' + phrase + (d.place ? ', ' + d.place : '') +
       ', kedalaman ' + d.depthKm + ' km, pukul ' + hhmm(d.time) + '. Sumber: BMKG. ' +
       (location.profile === 'asset' ? 'Periksa kondisi aset dan waspadai gempa susulan.' : 'Periksa kondisi sekitar dan waspadai gempa susulan.');
   }
   if (signal.ruleId === 'tsunami-relay') {
     // BMKG's wording is relayed verbatim (in quotes) with attribution;
     // DAMAR adds only localization and a safety suggestion.
-    return greet + 'peringatan resmi BMKG: gempa M' + d.magnitude + ' ' + d.distanceKm + ' km dari ' + phrase + (d.place ? ' — ' + d.place : '') +
+    return greet + 'peringatan resmi BMKG: gempa M' + d.magnitude + ' ' + d.distanceKm + ' km dari ' + phrase + (d.place ? ', ' + d.place : '') +
       ', pukul ' + hhmm(d.time) + '. BMKG menyatakan: "' + d.potensi + '". Sumber: BMKG. ' +
       'Saran: menjauhi pantai dan pesisir sampai ada pembaruan resmi dari BMKG.';
   }

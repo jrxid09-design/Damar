@@ -49,7 +49,9 @@
   function applyConfig(next) {
     if (!next) return;
     config = next;
-    island()?.configure({ idleToNotchMs: next.idleToNotchMs, morphMs: next.morphMs, notchEnabled: next.notchEnabled });
+    island()?.configure({ orbToNotchSec: next.orbToNotchSec, notchHideSec: next.notchHideSec, morphMs: next.morphMs, notchEnabled: next.notchEnabled, characterSoundEnabled: next.characterSoundEnabled, characterSoundVolume: next.characterSoundVolume });
+    // The page's own idle timer (Presence -> standby orb) reads the same Core setting, in seconds.
+    window.dispatchEvent(new CustomEvent('damar-presence-idle', { detail: { idleToOrbSec: next.idleToOrbSec } }));
     applyMotion();
     window.dispatchEvent(new CustomEvent('damar-presence-mic', { detail: next.voiceEnabled === true }));
     renderGreeting();
@@ -109,14 +111,10 @@
   }
   window.addEventListener('damar-presence-lang', () => window.dispatchEvent(new CustomEvent('damar-presence-status', { detail: statusFor(lastView) })));
 
-  // Owner: no settings UI in Presence/Notch. The prototype's settings panel stays in the DOM (the Owner page's own code
-  // references it) but hidden; its gear entry point only opens DAMAR Control (the single configuration surface).
-  const gear = document.getElementById('settingsGearBtn');
-  if (gear) {
-    const label = () => { gear.title = T('controlOpen'); gear.setAttribute('aria-label', T('controlOpen')); };
-    label(); window.addEventListener('damar-presence-lang', label);
-    gear.addEventListener('click', e => { e.preventDefault(); e.stopImmediatePropagation(); desktop.navigateSurface('dashboard'); }, true);
-  }
+  // Owner: no settings UI in Presence/Notch, and (2026-11-27) no settings gear in the header either: it
+  // duplicated the Control button (both opened the Dashboard). The gear element is removed from the page;
+  // Control is the single configuration entry point. The prototype's settings panel stays in the DOM (the
+  // page's own code references it) but hidden.
 
   // No simulated Computer Use in the product: the prototype's scripted walkthrough is replaced by a truthful notice.
   if (typeof window.startComputerUseMode === 'function') {
@@ -141,6 +139,6 @@
     };
   }
 
-  desktop.onPresence(msg => { if (msg?.config) applyConfig(msg.config); if (msg?.view) applyState(msg.view); });
+  desktop.onPresence(msg => { if (msg?.kind === 'chat-delta') { window.dispatchEvent(new CustomEvent('damar-chat-delta', { detail: msg.text })); return; } if (msg?.kind === 'chat-phase') { window.dispatchEvent(new CustomEvent('damar-chat-phase', { detail: msg.phase })); return; } if (msg?.config) applyConfig(msg.config); if (msg?.view) applyState(msg.view); });
   desktop.getPresence().then(msg => { applyConfig(msg?.config); applyState(msg?.view); }).catch(() => {});
 })();

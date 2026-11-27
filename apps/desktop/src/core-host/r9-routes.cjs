@@ -165,6 +165,7 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
   }
   function cancelRun(runId) { const r = runs.get(runId); if (r && !TERMINAL.has(r.state) && !r.cancelRequested) record(runId, { cancelRequested: true }); }
 
+  let lastRaiseSpawnAt = 0;
   async function handle(req, res, url) {
     if (!url.pathname.startsWith('/api/r9/')) return false;
     const json = (status, value) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(value)); return true; };
@@ -240,6 +241,22 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
       if (p === '/api/r9/presence/settings' && settings?.presence) {
         if (req.method !== 'GET' || url.search) return json(405, { success: false, error: 'METHOD_NOT_ALLOWED' });
         return json(200, { success: true, data: settings.presence() });
+      }
+      // Show/focus Idle Presence (Control's surface button): drop a raise signal into the session directory -
+      // the Presence main process watches it and brings its window forward - and, when no Presence is running,
+      // start it through the canonical launcher (which itself refuses to spawn a second one). Owner only,
+      // bound to the caller's attached session like every other Control action.
+      if (p === '/api/r9/presence/raise') {
+        if (req.method !== 'POST' || url.search) return json(405, { success: false, error: 'METHOD_NOT_ALLOWED' });
+        if (who !== 'owner') return json(403, { success: false, error: 'OWNER_REQUIRED' });
+        const input = await body(req, 1024);
+        sessions.requireAttached(input.cliSession, input.client);
+        try { fs.writeFileSync(path.join(directory, 'presence-raise.json'), JSON.stringify({ at: Date.now() })); } catch {}
+        if (Date.now() - lastRaiseSpawnAt > 10000) {
+          lastRaiseSpawnAt = Date.now();
+          try { require('node:child_process').spawn(process.execPath, [path.resolve(__dirname, '..', '..', 'release', 'damar.cjs'), 'presence'], { detached: true, stdio: 'ignore' }).unref(); } catch {}
+        }
+        return json(200, { success: true, data: { raised: true } });
       }
       // First-run onboarding (Presence, Owner only). Save: the confirmed answers land in the same centralized
       // settings store Control reads; the completion flag is composed here server-side (never accepted from

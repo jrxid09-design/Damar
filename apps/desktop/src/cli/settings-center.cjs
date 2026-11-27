@@ -73,7 +73,7 @@ class SettingsCenter {
       // 2. Permission & Sandbox
       { id: 'autonomy', card: 1, kind: 'select', label: t('Profil Otonomi', 'Autonomy Profile'), value: d.autonomy || 'ask', disabled: !core?.settings,
         options: ['ask', 'workspace-auto', 'full-access', 'read-only'].map(value => ({ value, label: value })) },
-      { id: 'sandbox', card: 1, kind: 'info', label: 'Sandbox', value: sandbox ? `${t('tulis', 'writes')}: ${sandbox.writes} · ${t('jaringan', 'network')}: ${sandbox.network}` : '—',
+      { id: 'sandbox', card: 1, kind: 'info', label: 'Sandbox', value: sandbox ? `${t('tulis', 'writes')}: ${sandbox.writes} · ${t('jaringan', 'network')}: ${sandbox.network}` : '-',
         reason: sandbox ? `${t('isolasi', 'containment')}: ${sandbox.containment}` : null },
       core?.settings ? { id: 'extraDir', card: 1, kind: 'text', label: t('Direktori Tambahan (; pemisah)', 'Extra Allowed Dirs (; separated)'), value: d.extraDirsText || '', disabled: false } : unavailable('extraDir', 1, t('Direktori Tambahan', 'Extra Allowed Dirs'), t('Core settings unavailable', 'Core settings unavailable')),
       core?.settings?.plugins?.some(p => p.key) ? { id: 'pluginKey', card: 1, kind: 'select', label: t('Plugin Proyek', 'Project Plugin'), value: d.pluginKey,

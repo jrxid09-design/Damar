@@ -17,9 +17,16 @@ const fs = require('node:fs'), path = require('node:path'), crypto = require('no
 const PROFILES = ['ask', 'workspace-auto', 'full-access', 'read-only'];
 const NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 // presence: Idle Presence / Notch surface config (read by the presence surface via GET /api/r9/presence/settings).
-const PRESENCE_DEFAULTS = () => ({ idleToNotchMs: 10000, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, displayName: 'Maronns', salutation: '', onboardingCompleted: false });
+const PRESENCE_DEFAULTS = () => ({ idleToOrbSec: 120, orbToNotchSec: 120, notchHideSec: 1800, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, characterSoundEnabled: true, characterSoundVolume: 30, displayName: 'Maronns', salutation: '', onboardingCompleted: false });
 const PRESENCE_RULES = {
-  idleToNotchMs: v => Number.isSafeInteger(v) && v >= 1000 && v <= 600000,
+  // Inactivity timers are stored and shown in SECONDS (Owner rule 2026-11-27: no ms in settings);
+  // consumers convert to ms at their own boundary. Defaults: Presence 120 s -> orb, orb 120 s -> Notch,
+  // Notch 1800 s -> hidden (hover hot zone brings it back).
+  idleToOrbSec: v => Number.isSafeInteger(v) && v >= 5 && v <= 3600,
+  orbToNotchSec: v => Number.isSafeInteger(v) && v >= 5 && v <= 3600,
+  notchHideSec: v => Number.isSafeInteger(v) && v >= 10 && v <= 86400,
+  characterSoundEnabled: v => typeof v === 'boolean', // interim character (Moci) synth sounds: manual override; the media-playing gate still applies on top
+  characterSoundVolume: v => Number.isSafeInteger(v) && v >= 0 && v <= 100, // percent; 30 = subtle default
   morphMs: v => Number.isSafeInteger(v) && v >= 0 && v <= 5000,
   reducedMotion: v => ['system', 'on', 'off'].includes(v),
   notchEnabled: v => typeof v === 'boolean',

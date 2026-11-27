@@ -509,6 +509,59 @@
     .module-stage { display: none; flex-direction: column; justify-content: space-between; flex: 1; width: 100%; margin: 10px 0 12px; padding: 13px 16px; background: rgba(7, 7, 10, 0.93); border: 1px solid rgba(212, 175, 55, 0.28); border-radius: 14px; box-shadow: inset 0 2px 18px rgba(0, 0, 0, 0.9); overflow: hidden; z-index: 4; }
     .module-stage.active { display: flex; }
     .mod-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; border-bottom: 1px solid rgba(212, 175, 55, 0.16); flex-shrink: 0; }
+    .mod-content { position: relative; }
+    .mod-content::before { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(560px 200px at 28% 0%, rgba(245, 197, 88, .08), transparent 62%), radial-gradient(480px 240px at 82% 100%, rgba(245, 197, 88, .055), transparent 62%); animation: portalEmber 26s ease-in-out infinite alternate; }
+    .mod-content > * { position: relative; }
+    /* Scrollbars hidden across the Presence surface (Owner 2026-11-28):
+       scrolling keeps working via wheel/touch; no visible bars anywhere. */
+    * { scrollbar-width: none; }
+    *::-webkit-scrollbar { width: 0; height: 0; }
+    /* Portal widgets (Owner 2026-11-28): data portals render as compact
+       Home Assistant-style widget cards in a grid - one visual card per data
+       type - never as a raw paragraph dumped into an empty panel. */
+    .mdw-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(230px, 100%), 1fr)); grid-auto-rows:1fr; gap:12px; width:100%; flex:1; min-height:0; align-content:stretch; }
+    .mdw-widget { position:relative; min-width:0; border:1px solid rgba(245,197,88,.16); border-radius:16px; background:linear-gradient(120deg, rgba(251,146,60,.07), rgba(255,255,255,.02) 55%); padding:14px 16px; display:flex; flex-direction:column; gap:8px; min-height:104px; }
+    .mdw-wtitle { font-family:var(--font-cinzel); font-size:10.5px; letter-spacing:.14em; color:var(--gold-bright); text-transform:uppercase; }
+    .mdw-hero { font-size:19px; font-weight:650; color:var(--text-ivory); line-height:1.25; }
+    .mdw-note { font-size:12.5px; color:var(--text-muted); line-height:1.55; }
+    .mdw-weather-main { display:flex; align-items:center; gap:16px; }
+    .mdw-weather-icon { flex:none; width:54px; height:54px; color:#f5c158; filter:drop-shadow(0 0 10px rgba(251,146,60,.35)); }
+    .mdw-weather-icon svg { width:100%; height:100%; }
+    .mdw-temp { font-family:var(--font-cinzel); font-size:42px; font-weight:700; color:#fbeecb; line-height:1; }
+    .mdw-loc { font-size:14.5px; font-weight:600; color:var(--text-ivory); }
+    .mdw-cond { font-size:12.5px; color:var(--text-muted); text-transform:capitalize; }
+    .mdw-fc { display:flex; justify-content:space-between; border-top:1px solid rgba(255,255,255,.06); padding-top:6px; font-size:12px; color:var(--text-muted); }
+    .mdw-fc b { color:var(--text-ivory); font-weight:600; }
+    .mdw-row { display:flex; align-items:center; gap:11px; padding:7px 0; border-top:1px solid rgba(255,255,255,.05); }
+    .mdw-row:first-of-type { border-top:0; }
+    .mdw-chip { flex:none; min-width:48px; text-align:center; font-family:var(--font-cinzel); font-weight:700; font-size:12.5px; color:#fbeecb; border:1px solid rgba(245,197,88,.42); border-radius:9px; padding:4px 6px; background:rgba(251,146,60,.10); }
+    .mdw-row-main { flex:1; min-width:0; font-size:13px; color:var(--text-ivory); line-height:1.35; }
+    .mdw-row-sub { font-size:11.5px; color:var(--text-muted); white-space:nowrap; }
+    .mdw-kv { display:flex; justify-content:space-between; gap:16px; padding:7px 0; border-top:1px solid rgba(255,255,255,.05); font-size:13px; }
+    .mdw-kv:first-of-type { border-top:0; }
+    .mdw-kv span { color:var(--text-muted); }
+    .mdw-kv b { color:var(--text-ivory); font-weight:600; text-align:right; max-width:62%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .mdw-stat { min-width:0; }
+    .mdw-stat-num, .mdw-stat-label { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .mdw-grid.graf { gap:22px 28px; }
+    .graf .mdw-widget { background:transparent; border:none; box-shadow:none; border-radius:0; padding:2px 0 12px; border-bottom:1px solid rgba(212,175,55,.12); }
+    .graf .mdw-stat { background:transparent; border:none; box-shadow:none; }
+    .graf canvas.spark { width:100%; height:46px; display:block; margin-top:6px; }
+    .graf .mdw-bar { height:4px; background:rgba(255,255,255,.08); margin-top:8px; }
+    .graf .mdw-bar i { display:block; height:100%; background:linear-gradient(90deg,#8a6420,#e5c158); }
+    .graf .mdw-big { font-family:'Cinzel', serif; font-size:34px; color:var(--text-ivory); line-height:1.05; }
+    .graf .mdw-sub { font-size:11px; color:var(--text-muted); margin-top:2px; }
+    .sim-wrap { position:relative; }
+    .sim-badge { position:absolute; top:2px; right:2px; z-index:2; font-size:10px; letter-spacing:.22em; color:#0b0c0e; background:linear-gradient(180deg,#f0d488,#c9a13f); padding:3px 9px; border-radius:99px; font-weight:700; }
+    canvas.sim-flow { width:100%; height:300px; display:block; }
+    .mdw-stat { border:1px solid rgba(255,255,255,.06); border-radius:12px; background:rgba(255,255,255,.02); padding:10px 12px; }
+    .mdw-stat-num { font-family:var(--font-cinzel); font-size:20px; font-weight:700; color:#fbeecb; }
+    .mdw-stat-label { font-size:11px; color:var(--text-muted); margin-top:2px; }
+    .mdw-attr { grid-column:1 / -1; font-size:10.5px; color:var(--text-muted); }
+    .mdw-row-stack { flex-direction:column; align-items:stretch; gap:1px; }
+    .mdw-row-stack .mdw-row-main { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.3; }
+    .mdw-row-stack .mdw-row-sub { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.3; }
+    @keyframes portalEmber { from { opacity: .55; } to { opacity: 1; } }
     .mod-title-group h2 { font-family: var(--font-cinzel); font-size: 15px; font-weight: 700; letter-spacing: 0.8px; color: var(--gold-bright); }
     .mod-title-group p { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin-top: 2px; }
     .mod-btn-row { display: flex; gap: 7px; flex-wrap: wrap; }
@@ -518,7 +571,7 @@
     .gold-btn.danger { background: rgba(220, 38, 38, 0.16); border-color: rgba(248, 113, 113, 0.5); color: #fca5a5; }
     .gold-btn.danger:hover { background: #ef4444; color: #ffffff; }
 
-    .mod-content { flex: 1; display: flex; flex-direction: column; justify-content: space-between; margin-top: 8px; min-height: 0; overflow-y: auto; gap: 8px; }
+    .mod-content { flex: 1; display: flex; flex-direction: column; justify-content: space-between; margin-top: 8px; min-height: 0; overflow-y: auto; overflow-x: hidden; gap: 8px; }
     .grid-3col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 
     .sub-panel { background: rgba(14, 13, 18, 0.92); border: 1px solid rgba(212, 175, 55, 0.16); border-radius: 9px; padding: 9px 11px; display: flex; flex-direction: column; justify-content: space-between; min-height: 0; overflow: hidden; }
@@ -559,6 +612,12 @@
     .bottom-hint { font-family: var(--font-cinzel); line-height: 16px; letter-spacing: 0.8px; margin-top: 14px; text-align: center; font-size: 11px; color: #d6cbb9; display: flex; flex-direction: column; align-items: center; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95); transition: opacity 0.5s ease; pointer-events: none; }
     .anamorphic-flare { margin-top: 8px; position: relative; width: clamp(280px, 34vw, 450px); height: 2px; background: linear-gradient(90deg, transparent 0%, #8a641b 20%, #d4af37 44%, #ffffff 50%, #d4af37 56%, #8a641b 80%, transparent 100%); box-shadow: 0 0 18px 2px rgba(212, 175, 55, 0.85); display: flex; justify-content: center; align-items: center; }
     .flare-diamond { width: 8px; height: 8px; background: #fffdf5; transform: rotate(45deg); box-shadow: 0 0 14px 4px #d4af37, 0 0 28px 8px #b38728; }
+    .anamorphic-flare { animation: flareBreath 7s ease-in-out infinite; }
+    .anamorphic-flare::after { content: ''; position: absolute; top: -1px; bottom: -1px; width: 64px; background: linear-gradient(90deg, transparent, rgba(255, 246, 214, .55), transparent); animation: flareTravel 9s ease-in-out infinite; pointer-events: none; }
+    .flare-diamond { animation: diamondPulse 7s ease-in-out infinite; }
+    @keyframes flareBreath { 0%, 100% { opacity: .78; } 50% { opacity: 1; } }
+    @keyframes flareTravel { 0% { transform: translateX(-190px); opacity: 0; } 18% { opacity: .85; } 82% { opacity: .85; } 100% { transform: translateX(190px); opacity: 0; } }
+    @keyframes diamondPulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.4); } }
 
     .toast-banner { position: fixed; bottom: 22px; right: 26px; background: #121016; border: 1px solid var(--gold-metallic); color: var(--text-ivory); font-family: var(--font-cinzel); font-size: 10.5px; letter-spacing: 0.7px; padding: 8px 14px; border-radius: 8px; box-shadow: 0 14px 32px rgba(0, 0, 0, 0.92), 0 0 16px rgba(212, 175, 55, 0.25); opacity: 0; transform: translateY(10px); transition: all 0.22s ease; pointer-events: none; z-index: 500; }
     .toast-banner.show { opacity: 1; transform: translateY(0); }
@@ -573,7 +632,7 @@
   <canvas id="computerUseCanvas"></canvas>
 
   <!-- WEBGL SIRI STANDBY/MICRO-ORB DOCK (DENGAN SPEKTRUM SUARA HALUS SAAT DAMAR BICARA) -->
-  <div class="siri-orb-dock" id="siriOrbDock" title="Klik untuk membuka dashboard. Klik kanan untuk uji suara atau pindah jendela.">
+  <div class="siri-orb-dock" id="siriOrbDock" title="Klik: bicara dengan Damar. Klik kanan: Idle Presence. Klik kanan 2x: Notch.">
     <canvas id="siriGlCanvas" width="200" height="200"></canvas>
   </div>
 
@@ -668,7 +727,6 @@
           <div class="brand" id="brandHomeBtn" title="Kembali ke Ruang Presence (Orb)">
             <img src="damaricon-clean.PNG" width="25" height="25" alt="" style="display:block;object-fit:contain;flex-shrink:0" onerror="this.style.visibility='hidden';console.error('DAMAR header icon could not be loaded.')">
             DAMAR
-            <button class="back-orb-btn" id="backOrbBtn">â† Presence [ESC]</button>
             <span class="brand-sub" id="modeBadge">Super AI Agent</span>
           </div>
 
@@ -684,19 +742,18 @@
             <button class="ctrl-btn" onclick="enterStandbyMiniOrb()" title="Masuk ke Mode Standby Siri-Orb di Tengah Bawah Layar">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
             </button>
-            <button class="ctrl-btn" id="settingsGearBtn" title="Pengaturan Ukuran Standby Orb, Timer Idle &amp; Simulator Status">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <button class="ctrl-btn" id="btnCli" type="button" title="Buka DAMAR CLI" aria-label="Buka DAMAR CLI" onclick="launchCliTerminal()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
             </button>
-            <button class="ctrl-btn" id="btnMax" title="Maximize / Perluas Ukuran Workspace">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
-            </button>
+            <button class="ctrl-btn" id="btnControlCenter" type="button" title="Buka Control Dashboard" aria-label="Buka Control Dashboard" onclick="openControlCenter()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
             <button class="ctrl-btn" id="btnMin" title="Minimize ke Taskbar (Klik Taskbar atau Alt+D untuk buka kembali)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button><button class="ctrl-btn" id="btnMax" title="Maximize / Perluas Ukuran Workspace">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
             </button>
             <button class="ctrl-btn" id="btnClose" title="Tutup dengan Animasi Orb Outro">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
-            <button class="ctrl-btn" id="btnControlCenter" type="button" title="Open DAMAR Control" onclick="openControlCenter()">Control</button>
           </div>
         </div>
 
@@ -757,9 +814,9 @@
             <canvas id="presenceVoiceCanvas" width="600" height="40"></canvas>
             <div class="presence-transcript" id="presenceTranscript">â€œSilakan bicara â€” Damar siap mengeksekusi melalui Computer Use...â€</div>
             <div class="presence-quick-prompts">
-              <button class="gold-btn" onclick="startComputerUseMode('Membuka Visual Studio Code, memeriksa repository Damar, dan menjalankan pengujian')">ðŸ–¥ â€œOperasikan Komputer &amp; Kerjakan Proyekâ€</button>
-              <button class="gold-btn" onclick="simulateVoiceUtterance('Damar, pagi. Ada yang perlu aku perhatikan hari ini?')">ðŸŽ™ â€œDamar, pagi. Ada yang perlu diperhatikan?â€</button>
-              <button class="gold-btn danger" onclick="simulateVoiceUtterance('Hapus seluruh cadangan tanpa verifikasi')">ðŸŽ™ â€œUji Aksi Destruktif / Errorâ€</button>
+              <button class="gold-btn" onclick="startComputerUseMode('Membuka Visual Studio Code, memeriksa repository Damar, dan menjalankan pengujian')">â€œOperasikan Komputer &amp; Kerjakan Proyekâ€</button>
+              <button class="gold-btn" onclick="simulateVoiceUtterance('Damar, pagi. Ada yang perlu aku perhatikan hari ini?')">â€œDamar, pagi. Ada yang perlu diperhatikan?â€</button>
+              <button class="gold-btn danger" onclick="simulateVoiceUtterance('Hapus seluruh cadangan tanpa verifikasi')">â€œUji Aksi Destruktif / Errorâ€</button>
             </div>
           </div>
 
@@ -779,40 +836,16 @@
             <button class="mic-orb-btn" id="micBtn" title="Klik untuk Interaksi Suara Presence Langsung">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#08080a" stroke-width="2.2"><rect x="9" y="2" width="6" height="11" rx="3" fill="#fff6d6"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3" stroke="#fff6d6"/></svg>
             </button>
-            <input type="text" id="promptInput" placeholder="Conversation unavailable: canonical DAMAR runtime seam is not connected." />
+            <input type="text" id="promptInput" placeholder="Menghubungkan ke DAMAR Core..." />
             <button class="send-btn" id="sendBtn" title="Kirim Instruksi (Enter)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
             </button>
           </div>
 
-          <div class="action-bar">
-            <div class="action-item active" onclick="triggerCycleAction('OBSERVE', null, this)">
-              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>
-              Observe
-            </div>
-            <div class="action-item" onclick="startComputerUseMode('Mengoperasikan komputer: Membuka editor, membangun komponen UI, dan memverifikasi browser QA')">
-              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-              Computer Use
-            </div>
-            <button class="action-item cli-action" type="button" id="cliActionButton" onclick="launchCliTerminal()">CLI</button>
-            <div class="action-item" onclick="triggerCycleAction('PLAN', 'missions', this)">
-              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"/><path d="M21 3l-9 9M15 3h6v6"/></svg>
-              Plan Mission
-            </div>
-            <div class="action-item" onclick="triggerCycleAction('AUTHORIZE', 'authority', this)">
-              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              Authorize
-            </div>
-            <div class="action-item" onclick="enterStandbyMiniOrb()">
-              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-              Standby
-            </div>
-          </div>
         </div>
       </div>
 
-      <div class="bottom-hint">
-        Presence prototype. Runtime data and governed actions require a canonical DAMAR connection.
+      <div class="bottom-hint" aria-hidden="true">
         <div class="anamorphic-flare"><div class="flare-diamond"></div></div>
       </div>
     </div>
@@ -897,6 +930,7 @@
     // UI-only launch choreography; never canonical Presence/runtime state.
     let startupState = 'BOOT', startupController = null, introSettled = null;
     let idleTimeoutSeconds = 30;
+    let turnInFlight = false;
     let idleTimerHandle = null;
 
     let standbyOrbSize = 48;
@@ -921,7 +955,7 @@
     let micStream = null, micAnalyser = null, micDataArray = null, liveMicActive = false;
     // One narrow bridge: renderer -> authenticated Electron main process -> canonical /api/ui.
     // It has no local store, no retry loop, and no authority/grant logic.
-    const presenceTruth = { status: 'NOT_CONNECTED', reason: 'Canonical DAMAR runtime is not connected.', timeoutMs: 8000, conversationId: null, approvals: null, missions: null, notifications: null };
+    const presenceTruth = { status: 'NOT_CONNECTED', reason: 'Canonical DAMAR runtime is not connected.', timeoutMs: 8000, conversationId: null, approvals: null, missions: null, notifications: null, providers: null, presence: null, matadewa: null, host: null };
     const canonicalAdapter = Object.freeze({
       async request(path, method = 'GET', body) {
         if (!window.damarDesktop?.runtimeRequest) return { ok: false, error: { kind: 'NOT_CONNECTED', message: 'Secure desktop bridge unavailable.' } };
@@ -934,10 +968,24 @@
           this.request('/api/ui/presence/state'), this.request('/api/ui/approvals'), this.request('/api/ui/missions'), this.request('/api/ui/notifications')
         ]);
         const failed = [presence, approvals, missions, notifications].find(r => !r.ok);
-        if (failed) { presenceTruth.reason = failed.error?.message || 'Canonical DAMAR runtime is unavailable.'; return false; }
+        if (failed) { presenceTruth.reason = failed.error?.message || 'Canonical DAMAR runtime is unavailable.'; if (!this._retry) this._retry = setTimeout(() => { this._retry = null; this.refresh(); }, 5000); return false; }
         presenceTruth.status = presence.data?.data?.simulated === true ? 'SIMULATED' : 'CONNECTED'; presenceTruth.reason = '';
+        presenceTruth.presence = presence.data?.data || null;
+        const prov = await this.request('/api/ui/presence/providers');
+        if (prov.ok) presenceTruth.providers = prov.data?.data || null;
+        const mdw = await this.request('/api/ui/presence/matadewa');
+        if (mdw.ok) presenceTruth.matadewa = mdw.data?.data || null;
+        const host = await this.request('/api/ui/presence/host');
+        if (host.ok) presenceTruth.host = host.data?.data || null;
+        const ex = await this.request('/api/ui/presence/extras');
+        if (ex.ok) presenceTruth.extras = ex.data?.data || null;
+        if (presenceTruth.host?.host) { const hg = window.__hostHist || (window.__hostHist = []); hg.push({ cpu: presenceTruth.host.host.cpuLoadPct ?? null, ram: presenceTruth.host.host.ramUsedPct ?? null }); if (hg.length > 24) hg.shift(); }
         presenceTruth.approvals = approvals.data?.data || []; presenceTruth.missions = missions.data?.data || []; presenceTruth.notifications = notifications.data?.data || [];
-        document.getElementById('promptInput').placeholder = 'Message DAMAR';
+        document.getElementById('promptInput').placeholder = 'Ketik pesan untuk DAMAR';
+        // An open portal re-renders from the fresh snapshot (Owner
+        // 2026-11-28): a portal must never sit on a stale first paint
+        // (e.g. the Mata Dewa weather widget) while new data has arrived.
+        if (typeof currentWorkspace === 'string' && currentWorkspace) renderWorkspaceContent(currentWorkspace);
         return true;
       },
       async history(sessionId) {
@@ -1016,12 +1064,21 @@
       clearTimeout(idleTimerHandle);
       if (startupState === 'DASHBOARD' && uiSurfaceMode === 'DASHBOARD' && !isShuttingDown && !damarIsSpeaking) {
         idleTimerHandle = setTimeout(() => {
+          // Timer tidak berlaku selama turn masih jalan (Owner 2026-11-28):
+          // turn aktif menangguhkan transisi; hitungan dimulai lagi dari
+          // selesainya turn atau interaksi terakhir.
+          if (turnInFlight) { resetIdleTimer(); return; }
           if (uiSurfaceMode === 'DASHBOARD' && !damarIsSpeaking) {
             enterStandbyMiniOrb(true);
           }
         }, idleTimeoutSeconds * 1000);
       }
     }
+
+    window.addEventListener('damar-presence-idle', e => {
+      const sec = Number(e.detail?.idleToOrbSec);
+      if (Number.isFinite(sec) && sec >= 5 && sec <= 3600 && sec !== idleTimeoutSeconds) { idleTimeoutSeconds = sec; resetIdleTimer(); }
+    });
 
     function setIdleTimeoutSec(sec) {
       playAcoustic('click');
@@ -1202,15 +1259,26 @@
     }
 
     const siriOrbDock = document.getElementById('siriOrbDock');
+    // Orb gesture map (Owner spec 2026-11-28): klik kiri = mode suara Damar;
+    // klik kanan 1x = Idle Presence; klik kanan 2x = Notch. Klik kanan tunggal
+    // menunggu jendela disambiguasi singkat agar tidak tembak sebelum waktunya.
+    // (Jalur template suara dummy pada klik kanan sudah dihapus.)
     siriOrbDock.addEventListener('click', (e) => {
       e.stopPropagation();
-      stopComputerUseAndExpand();
+      if (uiSurfaceMode === 'COMPUTER_USE') { stopComputerUseAndExpand(); return; }
+      toggleLiveVoicePresence();
     });
+    let orbRightClickTimer = null;
     siriOrbDock.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (uiSurfaceMode === 'COMPUTER_USE') cycleComputerUseTargetWindow();
-      else triggerWakeWordResponse('Damar');
+      if (orbRightClickTimer) {
+        clearTimeout(orbRightClickTimer);
+        orbRightClickTimer = null;
+        window.__DAMAR_ISLAND__?.reveal();
+        return;
+      }
+      orbRightClickTimer = setTimeout(() => { orbRightClickTimer = null; wakeFromMiniOrb(); }, 340);
     });
 
     // ============================================================================
@@ -1436,13 +1504,13 @@
     // ============================================================================
     // 4. INTRO, OUTRO & VOCAL REACTIVITY (PERSIS SEPERTI v12/v14.0!)
     // ============================================================================
-    function speakWithOrbReactivity(textToSpeak) {
+    function speakWithOrbReactivity(textToSpeak, verbatim) {
       damarIsSpeaking = true;
-      setDamarState('EXECUTING', 'Responding...');
+      setDamarState('EXECUTING', 'Menjawab');
 
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
-        const cleanSpeech = textToSpeak.replace(/\[.*?\]/g, '').replace(/[â€¢â‰ ]/g, ' ');
+        const cleanSpeech = verbatim ? textToSpeak : textToSpeak.replace(/\[.*?\]/g, '').replace(/[â€¢â‰ ]/g, ' ');
         const u = new SpeechSynthesisUtterance(cleanSpeech);
         u.lang = 'id-ID';
         u.rate = 1.02;
@@ -1739,25 +1807,27 @@
         badge.classList.remove('visible'); statusText.textContent = ''; targetEnergy = 1.0; targetVoiceAmp = 0.0;
         targetPalDeep = [0.45, 0.28, 0.05]; targetPalMid = [0.86, 0.68, 0.22]; targetPalHigh = [1.00, 0.95, 0.78];
       } else if (state === 'LISTENING') {
-        badge.classList.add('visible'); statusText.textContent = customText || 'Listening...'; targetEnergy = 1.6;
+        badge.classList.add('visible'); statusText.textContent = customText || 'Mendengarkan...'; targetEnergy = 1.6;
         targetPalDeep = [0.52, 0.34, 0.06]; targetPalMid = [0.95, 0.78, 0.28]; targetPalHigh = [1.00, 0.98, 0.88];
       } else if (state === 'PLANNING') {
-        badge.classList.add('visible'); statusText.textContent = customText || 'Planning...'; targetEnergy = 2.15; pulseWave = 0.85;
+        badge.classList.add('visible'); statusText.textContent = customText || 'Berpikir'; targetEnergy = 2.15; pulseWave = 0.85;
         targetPalDeep = [0.52, 0.32, 0.10]; targetPalMid = [0.92, 0.80, 0.45]; targetPalHigh = [1.00, 1.00, 0.96];
       } else if (state === 'EXECUTING') {
-        badge.classList.add('visible'); statusText.textContent = customText || 'Responding...'; targetEnergy = 1.95;
+        badge.classList.add('visible'); statusText.textContent = customText || 'Menjawab'; targetEnergy = 1.95;
         targetPalDeep = [0.48, 0.32, 0.06]; targetPalMid = [0.94, 0.76, 0.28]; targetPalHigh = [1.00, 0.98, 0.86];
       } else if (state === 'APPROVAL') {
         badge.classList.add('visible', 'warn-badge'); mainWin.classList.add('warn-state');
-        statusText.textContent = customText || 'Approval Required'; targetEnergy = 1.5; pulseWave = 1.0;
+        statusText.textContent = customText || 'Perlu Persetujuan'; targetEnergy = 1.5; pulseWave = 1.0;
         targetPalDeep = [0.55, 0.24, 0.02]; targetPalMid = [0.96, 0.58, 0.08]; targetPalHigh = [1.00, 0.90, 0.65];
       } else if (state === 'DEGRADED') {
         badge.classList.add('visible', 'warn-badge');
-        statusText.textContent = customText || 'Fallback'; targetEnergy = 0.75;
+        statusText.textContent = customText || 'Mode Cadangan'; targetEnergy = 0.75;
         targetPalDeep = [0.35, 0.20, 0.05]; targetPalMid = [0.70, 0.48, 0.16]; targetPalHigh = [0.90, 0.78, 0.55];
+      } else if (state === 'DONE') {
+        badge.classList.add('visible'); statusText.textContent = customText || 'Selesai'; targetEnergy = 1.0;
       } else if (state === 'ERROR') {
         playAcoustic('error'); badge.classList.add('visible', 'error-badge'); mainWin.classList.add('error-state');
-        statusText.textContent = customText || 'Action unavailable'; targetEnergy = 2.6; pulseWave = 1.35;
+        statusText.textContent = customText || 'Tindakan tidak tersedia'; targetEnergy = 2.6; pulseWave = 1.35;
         targetPalDeep = [0.48, 0.04, 0.06]; targetPalMid = [0.92, 0.16, 0.20]; targetPalHigh = [1.00, 0.72, 0.72];
       }
       syncGreetingVisibility();
@@ -1765,7 +1835,7 @@
 
     function triggerSystemError(reason) {
       if (uiSurfaceMode !== 'DASHBOARD') wakeFromMiniOrb();
-      returnToOrb(); setDamarState('ERROR', 'Action unavailable'); showToast('âš  ' + reason);
+      returnToOrb(); setDamarState('ERROR', 'Tindakan tidak tersedia'); showToast('âš  ' + reason);
       presentAdaptiveResponse(['OBSERVE', 'AUTHORIZE', 'FAIL-CLOSED GUARD'], `[TINDAKAN DITOLAK / SYSTEM ERROR]: ${reason}.\nSesuai prinsip Damar, tindakan destruktif atau tanpa bukti verifikasi dihentikan secara otomatis (Fail-Closed).`, true);
       clearTimeout(window._errTimer); window._errTimer = setTimeout(() => { if (damarState === 'ERROR') setDamarState('IDLE'); }, 7000);
     }
@@ -2071,6 +2141,9 @@
 
     function dismissDialogueCapsule(silent) {
       if (!silent) playAcoustic('click');
+      // The x on a live turn cancels the UI turn back to idle (Owner
+      // 2026-11-28); the Core turn itself is never killed from here.
+      if (window.__damarCancelTurn) { try { window.__damarCancelTurn(); } catch {} }
       damarIsSpeaking = false;
       targetVoiceAmp = 0.0;
       targetSiriSpectrumAmp = 0.0;
@@ -2087,13 +2160,13 @@
       clearTimeout(responseDismissTimer); clearTimeout(responseStartTimer); clearInterval(window._streamInt);
 
       const isErr = damarState === 'ERROR';
-      if (!isErr) setDamarState('PLANNING', 'Responding');
+      if (!isErr) setDamarState('PLANNING', 'Menjawab');
       capsule.classList.add('visible'); syncGreetingVisibility();
       // Simulation steps stay internal; ordinary conversation exposes only the answer.
       textEl.textContent = '';
 
       responseStartTimer = setTimeout(() => {
-        if (!isErr) setDamarState('EXECUTING', 'Responding');
+        if (!isErr) setDamarState('EXECUTING', 'Menjawab');
         damarIsSpeaking = true;
         textEl.textContent = ''; let i = 0;
 
@@ -2127,7 +2200,7 @@
       returnToOrb();
       dismissDialogueCapsule(true);
       const capsule = document.getElementById('aiDialogueCapsule');
-      document.getElementById('aiStreamText').textContent = `${subject} unavailable. ${presenceTruth.reason}`;
+      document.getElementById('aiStreamText').textContent = `${subject} tidak tersedia. ${presenceTruth.reason}`;
       capsule.classList.add('visible');
       start60sCountdown();
       syncGreetingVisibility();
@@ -2141,17 +2214,55 @@
         enterStandbyMiniOrb();
         return;
       }
-      sendCanonicalConversation(value);
+      sendCanonicalConversation(value, arguments[1] === true);
     }
     function canonicalDisplayText(result) {
       const data = result?.data?.data;
       const candidates = [data?.answer, data?.response, data?.text, data?.message, data?.content, data?.result?.answer];
-      return candidates.find(value => typeof value === 'string' && value.trim()) || 'Canonical runtime accepted the message; no displayable response was returned.';
+      return candidates.find(value => typeof value === 'string' && value.trim()) || 'Pesan diterima DAMAR Core, tetapi tidak ada jawaban yang bisa ditampilkan.';
     }
-    async function sendCanonicalConversation(text) {
-      dismissDialogueCapsule(true); setDamarState('PLANNING', 'Sending');
-      const result = await canonicalAdapter.request('/api/ui/conversations/messages', 'POST', { text, channel: 'console' });
-      if (!result.ok) { setDamarState('ERROR', 'Unavailable'); presentTruthUnavailable('Conversation'); return; }
+    async function sendCanonicalConversation(text, viaVoice) {
+      // SATU statement status turn (Owner 2026-11-28): badge statusText adalah
+      // satu-satunya pembaca fase turn, dengan kata yang sama di mana pun:
+      // Mengirim -> Berpikir -> Menjawab -> Selesai. Badan percakapan hanya
+      // membawa isi (titik tunggu tanpa kata, lalu teks jawaban yang mengalir),
+      // tidak ada pembaca status kedua yang bisa berbeda pendapat.
+      turnInFlight = true;
+      dismissDialogueCapsule(true); setDamarState('PLANNING', 'Mengirim');
+      returnToOrb();
+      const capsule0 = document.getElementById('aiDialogueCapsule');
+      const streamEl = document.getElementById('aiStreamText');
+      streamEl.textContent = '\u2026';
+      capsule0.classList.add('visible'); syncGreetingVisibility();
+      const onDelta = e => { if (turnClosed) return; if (typeof e.detail === 'string' && e.detail) { streamEl.textContent = e.detail; setDamarState('EXECUTING', 'Menjawab'); armSilence(); } };
+      const onPhase = e => { if (turnClosed) return; if (e.detail === 'berpikir') { setDamarState('PLANNING', 'Berpikir'); armSilence(); } else if (e.detail === 'bertindak') { setDamarState('EXECUTING', 'Bertindak'); armSilence(); } };
+      // Bounded turn watchdog (Owner 2026-11-28): 180 s without ANY progress
+      // signal ends the UI turn with an honest in-conversation note; the x on
+      // the capsule clears it to idle at once. The Core turn is never killed
+      // from the surface; a late answer lands in Core history.
+      let turnClosed = false, silenceTimer = 0;
+      function armSilence() { clearTimeout(silenceTimer); silenceTimer = setTimeout(() => closeTurn('timeout'), 180000); }
+      function closeTurn(kind) {
+        if (turnClosed) return; turnClosed = true;
+        clearTimeout(silenceTimer);
+        window.removeEventListener('damar-chat-delta', onDelta); window.removeEventListener('damar-chat-phase', onPhase);
+        window.__damarCancelTurn = null; turnInFlight = false;
+        if (kind === 'timeout') {
+          streamEl.textContent = 'Belum ada respons setelah 3 menit. Permintaan mungkin masih diproses di latar dan jawaban akhirnya tercatat di riwayat percakapan. Kamu bisa mengirim pesan baru.';
+          capsule0.classList.add('visible'); setDamarState('DONE', 'Selesai'); syncGreetingVisibility();
+          clearTimeout(window._doneTimer); window._doneTimer = setTimeout(() => { if (damarState === 'DONE') setDamarState('IDLE'); }, 2400);
+        } else { dismissDialogueCapsule(true); setDamarState('IDLE'); }
+        resetIdleTimer();
+      }
+      window.__damarCancelTurn = () => closeTurn('cancel');
+      armSilence();
+      window.addEventListener('damar-chat-delta', onDelta);
+      window.addEventListener('damar-chat-phase', onPhase);
+      let result;
+      try { result = await canonicalAdapter.request('/api/ui/conversations/messages', 'POST', { text, channel: 'console' }); }
+      finally { window.removeEventListener('damar-chat-delta', onDelta); window.removeEventListener('damar-chat-phase', onPhase); clearTimeout(silenceTimer); window.__damarCancelTurn = null; turnInFlight = false; }
+      if (turnClosed) return; // watchdog/cancel closed the UI turn; a late answer stays in Core history
+      if (!result.ok) { setDamarState('ERROR', 'Tidak tersedia'); presentTruthUnavailable('Percakapan'); resetIdleTimer(); return; }
       const runtime = result.data?.data;
       const id = runtime?.sessionId || runtime?.session_id || runtime?.canonicalSessionId || null;
       if (typeof id === 'string' && id.startsWith('dsc_')) presenceTruth.conversationId = id;
@@ -2163,9 +2274,25 @@
       const lastAssistant = Array.isArray(turns) ? [...turns].reverse().find(turn => turn?.role === 'assistant' && typeof turn.content === 'string') : null;
       if (lastAssistant) answer = lastAssistant.content;
       document.getElementById('aiStreamText').textContent = answer;
-      capsule.classList.add('visible'); setDamarState('IDLE'); start60sCountdown(); syncGreetingVisibility();
+      capsule.classList.add('visible'); setDamarState('DONE', 'Selesai'); start60sCountdown(); syncGreetingVisibility();
+      clearTimeout(window._doneTimer); window._doneTimer = setTimeout(() => { if (damarState === 'DONE') setDamarState('IDLE'); }, 1600);
+      resetIdleTimer();
+      // 1:1 text:suara: a voice-initiated turn speaks exactly the displayed
+      // answer, word for word (verbatim, no summary, no stripped segments).
+      if (viaVoice) speakWithOrbReactivity(answer, true);
       canonicalAdapter.refresh();
     }
+    // The Authority portal decides in place (Owner 2026-11-28): track the live
+    // pending permission from the same attention feed the Notch uses.
+    setTimeout(() => {
+      if (!turnInFlight && !window.__damarCancelTurn && (damarState === 'PLANNING' || damarState === 'EXECUTING')) { dismissDialogueCapsule(true); setDamarState('IDLE'); }
+    }, 20000);
+    window.addEventListener('damar-presence-attention', e => {
+      const np = e.detail?.permission || null;
+      const changed = (np?.permissionId || null) !== (window.__permNow?.permissionId || null);
+      window.__permNow = np;
+      if (changed && typeof currentWorkspace !== 'undefined' && currentWorkspace === 'authority') renderWorkspaceContent('authority');
+    });
     function triggerCycleAction(stepName, targetCard, el) {
       playAcoustic('click');
       document.querySelectorAll('.action-item').forEach(i => i.classList.remove('active'));
@@ -2180,15 +2307,15 @@
         if (!window.damarDesktop) throw new Error('Electron launcher unavailable');
         await window.damarDesktop.launchCli();
       } catch (error) {
-        showToast('DAMAR CLI could not open. ' + error.message);
+        showToast('DAMAR CLI tidak bisa dibuka. ' + error.message);
       }
     }
     function openControlCenter() {
       if (window.damarDesktop?.navigateSurface) {
-        window.damarDesktop.navigateSurface('dashboard').then(ok => { if (!ok) showToast('DAMAR Control is unavailable.'); }, () => showToast('DAMAR Control is unavailable.'));
+        window.damarDesktop.navigateSurface('dashboard').then(ok => { if (!ok) showToast('DAMAR Control tidak tersedia.'); }, () => showToast('DAMAR Control tidak tersedia.'));
         return;
       }
-      showToast('DAMAR Control is unavailable.');
+      showToast('DAMAR Control tidak tersedia.');
     }
 
     function openWorkspace(key, cardEl) {
@@ -2198,12 +2325,13 @@
       document.getElementById('settingsPopover').classList.remove('open');
       if (currentWorkspace === key) { returnToOrb(); return; }
       currentWorkspace = key;
+      canonicalAdapter.refresh();
       document.querySelectorAll('.interactive-card').forEach(c => c.classList.remove('active-card'));
       if (cardEl) cardEl.classList.add('active-card');
       else { const found = document.querySelector(`.interactive-card[data-card="${key}"]`); if (found) found.classList.add('active-card'); }
       document.getElementById('orbSection').classList.add('hidden');
       document.getElementById('moduleStage').classList.add('active');
-      document.getElementById('backOrbBtn').classList.add('visible');
+      document.getElementById('backOrbBtn')?.classList.add('visible');
       document.getElementById('modeBadge').textContent = 'Super AI Agent';
       renderWorkspaceContent(key);
     }
@@ -2212,53 +2340,249 @@
       document.querySelectorAll('.interactive-card').forEach(c => c.classList.remove('active-card'));
       document.getElementById('moduleStage').classList.remove('active');
       document.getElementById('orbSection').classList.remove('hidden');
-      document.getElementById('backOrbBtn').classList.remove('visible');
+      document.getElementById('backOrbBtn')?.classList.remove('visible');
       document.getElementById('modeBadge').textContent = 'Super AI Agent';
       pulseWave = 0.9; syncGreetingVisibility();
     }
 
+    // Missions empty-state SIMULATION (Owner 2026-11-28): an animated preview
+    // of a real Damar mission lifecycle in the gold-stream language: mission
+    // received, planned by Puntadewa, worked in parallel by the Pandawa
+    // (Werkudara supervising), through the Authority Gate, verified complete.
+    // Clearly badged SIMULASI; a real mission replaces it. Cheap canvas only,
+    // and the loop stops itself when the portal re-renders.
+    let missionSimRun = 0;
+    function startMissionSim() {
+      const c = document.getElementById('missionSim'); if (!c) return;
+      const run = ++missionSimRun;
+      const ctx = c.getContext('2d');
+      const N = {
+        terima: { x: 48, y: 160, label: 'MISI DITERIMA', sub: 'dari pemilik' },
+        rencana: { x: 182, y: 160, label: 'RENCANA', sub: 'Puntadewa · strategi' },
+        hub: { x: 296, y: 160 },
+        werkudara: { x: 430, y: 42, label: 'WERKUDARA', sub: 'keamanan · supervisi' },
+        sadewa: { x: 430, y: 116, label: 'SADEWA', sub: 'riset · verifikasi' },
+        nakula: { x: 430, y: 190, label: 'NAKULA', sub: 'data · spasial' },
+        janaka: { x: 430, y: 264, label: 'JANAKA', sub: 'rekayasa' },
+        gabung: { x: 542, y: 160 },
+        gerbang: { x: 626, y: 160, label: 'GERBANG OTORITAS', sub: 'persetujuan pemilik' },
+        selesai: { x: 714, y: 160, label: 'SELESAI', sub: 'hasil terverifikasi' },
+        antrean: { x: 296, y: 268, label: 'ANTREAN', sub: 'menunggu giliran' },
+      };
+      const P = (a, b, bend) => ({ a: N[a], b: N[b], bend: bend || 0 });
+      const paths = [P('terima', 'rencana'), P('rencana', 'hub'), P('hub', 'werkudara', -30), P('hub', 'sadewa', -12), P('hub', 'nakula', 12), P('hub', 'janaka', 30), P('werkudara', 'gabung', -30), P('sadewa', 'gabung', -12), P('nakula', 'gabung', 12), P('janaka', 'gabung', 30), P('gabung', 'gerbang'), P('gerbang', 'selesai'), P('hub', 'antrean', 10), P('antrean', 'gabung', 40)];
+      const pathPhase = i => [0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 3, 4, 2, 3][i];
+      const nodePhase = { terima: 0, rencana: 1, werkudara: 2, sadewa: 2, nakula: 2, janaka: 2, antrean: 2, gerbang: 3, selesai: 4 };
+      const mid = p => [(p.a.x + p.b.x) / 2, (p.a.y + p.b.y) / 2 + p.bend];
+      const pt = (p, u) => { const [mx, my] = mid(p); return [(1 - u) * (1 - u) * p.a.x + 2 * (1 - u) * u * mx + u * u * p.b.x, (1 - u) * (1 - u) * p.a.y + 2 * (1 - u) * u * my + u * u * p.b.y]; };
+      const t0 = performance.now();
+      const frame = now => {
+        if (run !== missionSimRun || !document.contains(c)) return;
+        const t = now - t0, ph = Math.floor(t / 2600) % 5;
+        const W = c.clientWidth, H = c.clientHeight;
+        if (!W || !H) { requestAnimationFrame(frame); return; }
+        if (c.width !== W * 2) { c.width = W * 2; c.height = H * 2; }
+        ctx.setTransform(c.width / 760, 0, 0, c.height / 320, 0, 0);
+        ctx.clearRect(0, 0, 760, 320);
+        paths.forEach((p, i) => { const [mx, my] = mid(p); ctx.beginPath(); ctx.moveTo(p.a.x, p.a.y); ctx.quadraticCurveTo(mx, my, p.b.x, p.b.y); ctx.strokeStyle = pathPhase(i) <= ph ? 'rgba(229,193,88,.34)' : 'rgba(229,193,88,.13)'; ctx.lineWidth = 1.4; ctx.stroke(); });
+        paths.forEach((p, i) => { if (pathPhase(i) > ph) return; for (let k = 0; k < 3; k++) { const u = ((t / 2600) + k / 3 + i * 0.13) % 1; const [x, y] = pt(p, u); const g = ctx.createRadialGradient(x, y, 0, x, y, 7); g.addColorStop(0, 'rgba(255,226,150,.95)'); g.addColorStop(1, 'rgba(255,226,150,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 7, 0, 7); ctx.fill(); ctx.fillStyle = '#ffe9a8'; ctx.beginPath(); ctx.arc(x, y, 2.1, 0, 7); ctx.fill(); } });
+        for (const [k2, nd] of Object.entries(N)) {
+          if (!nd.label) continue;
+          const active = nodePhase[k2] === ph, done = nodePhase[k2] < ph;
+          const pulse = active ? 1 + 0.25 * Math.sin(t / 300) : 1;
+          ctx.beginPath(); ctx.arc(nd.x, nd.y, 5.2 * pulse, 0, 7); ctx.fillStyle = active ? '#ffd970' : done ? 'rgba(229,193,88,.75)' : 'rgba(229,193,88,.35)'; ctx.fill();
+          ctx.beginPath(); ctx.arc(nd.x, nd.y, 10.5 * pulse, 0, 7); ctx.strokeStyle = active ? 'rgba(255,217,112,.8)' : 'rgba(229,193,88,.25)'; ctx.lineWidth = 1.2; ctx.stroke();
+          ctx.fillStyle = active || done ? '#f3e5bb' : 'rgba(243,229,187,.55)';
+          ctx.font = '600 10.5px Inter, sans-serif'; ctx.textAlign = 'center';
+          ctx.fillText(nd.label, nd.x, nd.y - 16);
+          ctx.fillStyle = 'rgba(200,185,150,.62)'; ctx.font = '9.5px Inter, sans-serif';
+          ctx.fillText(nd.sub, nd.x, nd.y + 24);
+        }
+        requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    }
     function renderWorkspaceContent(key) {
+      const esc = v => String(v ?? '').replace(/[<>&"]/g, '');
       const stage = document.getElementById('moduleStage');
-      if (key === 'missions' && ['CONNECTED', 'SIMULATED'].includes(presenceTruth.status)) {
+      if (key === 'missions' && presenceTruth.missions != null) {
         const active = (presenceTruth.missions || []).find(m => ['DRAFT', 'ACTIVE', 'PAUSED', 'COMPLETED'].includes(m.state));
-        const detail = active ? `${active.state}${active.label ? ` — ${active.label}` : ''}` : 'No active mission';
-        const sourceLabel = presenceTruth.status === 'SIMULATED' ? 'SIMULATED • SHADOW' : 'CANONICAL';
-        stage.innerHTML = `<div class="mod-header"><div class="mod-title-group"><h2>Missions</h2><p>${sourceLabel} W5 projection</p></div></div><div class="mod-content"><div class="sub-panel" style="flex:1;"><div class="sub-panel-title"><span>Mission</span><span>${sourceLabel}</span></div><p id="canonicalMissionText" style="font-size:12px;color:var(--text-ivory);"></p></div></div>`;
-        document.getElementById('canonicalMissionText').textContent = detail; return;
-      }
-      if (key === 'authority' && ['CONNECTED', 'SIMULATED'].includes(presenceTruth.status)) {
-        const pending = (presenceTruth.approvals || []).filter(a => a.state === 'PENDING');
-        const detail = pending.length ? `${pending.length} pending owner decision${pending.length === 1 ? '' : 's'}. Review is read-only in Presence.` : 'No approval required';
-        const sourceLabel = presenceTruth.status === 'SIMULATED' ? 'SIMULATED • SHADOW' : 'CANONICAL';
-        stage.innerHTML = `<div class="mod-header"><div class="mod-title-group"><h2>Authority</h2><p>${sourceLabel} authority projection; read-only</p></div></div><div class="mod-content"><div class="sub-panel" style="flex:1;"><div class="sub-panel-title"><span>Authority</span><span>${sourceLabel}</span></div><p id="canonicalAuthorityText" style="font-size:12px;color:var(--text-ivory);"></p></div></div>`;
-        document.getElementById('canonicalAuthorityText').textContent = detail; return;
-      }
-      if (key === 'dcd' && ['CONNECTED', 'SIMULATED'].includes(presenceTruth.status)) {
-        const relevant = (presenceTruth.notifications || []).find(n => n.source_ref?.entity_type === 'security_incident');
-        const detail = relevant?.summary || 'No canonical security notification is currently surfaced.';
-        const sourceLabel = presenceTruth.status === 'SIMULATED' ? 'SIMULATED • SHADOW' : 'CANONICAL';
-        stage.innerHTML = `<div class="mod-header"><div class="mod-title-group"><h2>Cyber Defense</h2><p>${sourceLabel} notification projection</p></div></div><div class="mod-content"><div class="sub-panel" style="flex:1;"><div class="sub-panel-title"><span>Notification</span><span>${sourceLabel}</span></div><p id="canonicalNotificationText" style="font-size:12px;color:var(--text-ivory);"></p><button id="dismissCanonicalNotification" class="toggle-pill">Dismiss notification</button></div></div>`;
-        document.getElementById('canonicalNotificationText').textContent = detail;
-        const dismiss = document.getElementById('dismissCanonicalNotification');
-        if (!relevant?.notification_id) dismiss.disabled = true;
-        else dismiss.addEventListener('click', async () => { const outcome = await canonicalAdapter.request(`/api/ui/notifications/${relevant.notification_id}/dismiss`, 'POST'); if (outcome.ok) { await canonicalAdapter.refresh(); renderWorkspaceContent('dcd'); } else showToast(`Notification: ${outcome.error.message}`); });
+        stage.innerHTML = `<div class=\"mod-header\"><div class=\"mod-title-group\"><h2>Missions</h2></div></div><div class=\"mod-content\"><div class=\"mdw-grid\"><div class=\"mdw-widget\" style=\"grid-column:1/-1;\"><div class=\"mdw-wtitle\">Misi aktif</div>${active ? `<div class=\"mdw-hero\">${esc(active.state)}</div><div class=\"mdw-note\">${esc(active.label || 'Misi berjalan di DAMAR Core.')}</div>` : `<div class=\"sim-wrap\"><span class=\"sim-badge\">SIMULASI</span><canvas class=\"sim-flow\" id=\"missionSim\"></canvas><div class=\"mdw-note\">Contoh alur misi Damar: diterima, direncanakan Puntadewa, dikerjakan Pandawa, lewat Gerbang Otoritas, selesai terverifikasi. Misi nyata menggantikan simulasi ini saat berjalan.</div></div>`}</div></div></div>`;
+        if (!active) startMissionSim();
         return;
       }
+      if (key === 'authority' && presenceTruth.approvals != null) {
+        const pending = (presenceTruth.approvals || []).filter(a => a.state === 'PENDING');
+        const perm = window.__permNow;
+        let permCard = '';
+        if (perm && pending.length) {
+          const ctx = perm.file ? esc(perm.file) : esc(perm.detail || '');
+          permCard = `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Permintaan izin</div><div class=\"mdw-note\" style=\"color:var(--text-ivory);font-size:13px;\">${esc(perm.tool || '')}${ctx ? ': ' + ctx : ''}</div><div style=\"display:flex;gap:8px;flex-wrap:wrap;\"><button class=\"toggle-pill\" data-decision=\"once\">Setujui sekali</button><button class=\"toggle-pill\" data-decision=\"session\">Setujui untuk sesi</button><button class=\"toggle-pill\" data-decision=\"deny\">Tolak</button></div><div class=\"mdw-note\" id=\"permDecisionResult\"></div></div>`;
+        }
+        stage.innerHTML = `<div class=\"mod-header\"><div class=\"mod-title-group\"><h2>Authority</h2></div></div><div class=\"mod-content\"><div class=\"mdw-grid\"><div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Persetujuan menunggu</div><div class=\"mdw-hero\">${pending.length}</div><div class=\"mdw-note\">${pending.length ? 'Putuskan langsung di sini.' : 'Tidak ada persetujuan yang menunggu.'}</div></div>${permCard}</div></div>`;
+        if (perm) stage.querySelectorAll('[data-decision]').forEach(b => b.addEventListener('click', async () => {
+          const out = document.getElementById('permDecisionResult');
+          try { const r = await window.damarDesktop?.decidePermission?.({ permissionId: perm.permissionId, decision: b.dataset.decision }); if (out) out.textContent = r && r.ok ? 'Keputusan terkirim.' : 'Keputusan gagal terkirim. Coba lagi.'; if (r && r.ok) setTimeout(() => window.canonicalAdapter?.refresh?.(), 600); }
+          catch { if (out) out.textContent = 'Keputusan gagal terkirim. Coba lagi.'; }
+        }));
+        return;
+      }
+      if (key === 'dcd' && presenceTruth.notifications != null) {
+        const relevant = (presenceTruth.notifications || []).find(n => n.source_ref?.entity_type === 'security_incident');
+        stage.innerHTML = `<div class=\"mod-header\"><div class=\"mod-title-group\"><h2>Cyber Defense</h2></div></div><div class=\"mod-content\"><div class=\"mdw-grid\"><div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Notifikasi keamanan</div><div class=\"mdw-note\" style=\"color:var(--text-ivory);font-size:13px;\">${esc(relevant?.summary || 'Tidak ada notifikasi keamanan dari Core saat ini.')}</div><button id=\"dismissCanonicalNotification\" class=\"toggle-pill\" style=\"align-self:flex-start;\">Tutup notifikasi</button></div></div></div>`;
+        const dismiss = document.getElementById('dismissCanonicalNotification');
+        if (!relevant?.notification_id) dismiss.disabled = true;
+        else dismiss.addEventListener('click', async () => { const outcome = await canonicalAdapter.request(`/api/ui/notifications/${relevant.notification_id}/dismiss`, 'POST'); if (outcome.ok) { await canonicalAdapter.refresh(); renderWorkspaceContent('dcd'); } else showToast(`Notifikasi: ${outcome.error.message}`); });
+        return;
+      }
+      if (key === 'models' && presenceTruth.providers != null) {
+        const pv = presenceTruth.providers;
+        const act = pv && Array.isArray(pv.providers) ? pv.providers.find(p => p.id === pv.active) || null : null;
+        let body;
+        if (!pv) body = `<div class=\"mdw-note\">Status provider belum terbaca dari Core.</div>`;
+        else if (!pv.providers.length) body = `<div class=\"mdw-hero\">Belum ada provider</div><div class=\"mdw-note\">Tambahkan dari Control, bagian Provider.</div>`;
+        else body = [['Provider', (act?.label || pv.active || '-') + ' (' + (pv.active || '-') + ')'], ['Endpoint', act?.baseUrl || '-'], ['Model aktif', pv.model || act?.model || '-'], ['Status koneksi', pv.executable ? 'Terhubung, grant aktif' : 'Belum siap, grant: ' + (act?.grantStatus || 'belum ada')], ['Inferensi langsung', pv.liveInference ? 'Aktif' : 'Nonaktif']].map(r => `<div class=\"mdw-kv\"><span>${r[0]}</span><b>${esc(r[1])}</b></div>`).join('');
+        stage.innerHTML = `<div class=\"mod-header\"><div class=\"mod-title-group\"><h2>Models</h2></div></div><div class=\"mod-content\"><div class=\"mdw-grid\"><div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Provider dan model</div>${body}</div></div></div>`;
+        return;
+      }
+      const drawSpark = (id, arr, fixedMax) => {
+        const c = document.getElementById(id); if (!c || !arr || arr.length < 2) return;
+        const W = Math.max(60, c.clientWidth) * 2, H = 92;
+        c.width = W; c.height = H;
+        const ctx = c.getContext('2d');
+        let lo = 0, hi = fixedMax || Math.max(...arr);
+        if (!fixedMax) { lo = Math.min(...arr); hi = Math.max(...arr); if (hi - lo < 1) { hi = lo + 1; } lo = Math.max(0, lo - (hi - lo) * 0.15); hi = hi + (hi - lo) * 0.1; }
+        const px = i => (i / (arr.length - 1)) * (W - 8) + 4, py = v => H - 6 - ((v - lo) / (hi - lo)) * (H - 14);
+        ctx.beginPath();
+        arr.forEach((v, i) => { i ? ctx.lineTo(px(i), py(v)) : ctx.moveTo(px(i), py(v)); });
+        ctx.strokeStyle = '#e5c158'; ctx.lineWidth = 2.4; ctx.stroke();
+        ctx.lineTo(px(arr.length - 1), H); ctx.lineTo(px(0), H); ctx.closePath();
+        ctx.fillStyle = 'rgba(229,193,88,.13)'; ctx.fill();
+      };
+      const kvx = rows => rows.map(r => `<div class=\"mdw-kv\"><span>${r[0]}</span><b>${esc(r[1])}</b></div>`).join('');
+      if (key === 'devices' && presenceTruth.extras) {
+        const gw = presenceTruth.extras.devices?.gateway, hh = presenceTruth.host?.host;
+        const pcBody = hh ? kvx([['Nama', hh.hostname || '-'], ['Sistem', hh.osText || '-'], ['Status', 'Aktif']]) : `<div class=\"mdw-note\">Metrik komputer belum terbaca.</div>`;
+        const gwBody = gw ? kvx([['Status', gw.enabled ? 'Aktif' : 'Nonaktif'], ['Port', gw.port ?? '-'], ['Kunci akses', gw.keys ?? 0]]) : `<div class=\"mdw-note\">Gateway belum terbaca dari Core.</div>`;
+        stage.innerHTML = `<div class=\"mod-header\"><div class=\"mod-title-group\"><h2>Devices</h2></div></div><div class=\"mod-content\"><div class=\"mdw-grid\"><div class=\"mdw-widget\"><div class=\"mdw-wtitle\">PC ini</div>${pcBody}</div><div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Gateway DAMAR</div>${gwBody}</div></div></div>`;
+        return;
+      }
+      if (key === 'capabilities' && presenceTruth.extras) {
+        const cp = presenceTruth.extras.capabilities;
+        const body = cp ? [['Tool terpapar', (cp.toolsExposed ?? '-') + ' / ' + (cp.toolsTotal ?? '-')], ['Plugin terpasang', cp.plugins ?? '-'], ['Server MCP produktivitas', cp.mcpServers ?? '-'], ['MCP terhubung', cp.mcpConnected ?? '-'], ['Klien MCP berjalan', cp.clientsRunning ?? '-']].map(x => `<div class=\"mdw-stat\"><div class=\"mdw-stat-num\">${esc(x[1])}</div><div class=\"mdw-stat-label\">${x[0]}</div></div>`).join('') : `<div class=\"mdw-widget\"><div class=\"mdw-note\">Data kapabilitas belum terbaca dari Core.</div></div>`;
+        stage.innerHTML = `<div class=\"mod-header\"><div class=\"mod-title-group\"><h2>Capabilities</h2></div></div><div class=\"mod-content\"><div class=\"mdw-grid\">${body}</div></div>`;
+        return;
+      }
+      if (key === 'memory' && presenceTruth.extras) {
+        const mm = presenceTruth.extras.memory;
+        const body = mm ? [['Memori tersimpan', mm.memories ?? '-'], ['Entitas', mm.entities ?? '-'], ['Dokumen', mm.documents ?? '-']].map(x => `<div class=\"mdw-stat\"><div class=\"mdw-stat-num\">${esc(x[1])}</div><div class=\"mdw-stat-label\">${x[0]}</div></div>`).join('') + `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Embedding</div><div class=\"mdw-note\">${mm.embeddings ? 'Tersedia.' : 'Belum dikonfigurasi.'}</div></div>` : `<div class=\"mdw-widget\"><div class=\"mdw-note\">Data memori belum terbaca dari Core.</div></div>`;
+        stage.innerHTML = `<div class=\"mod-header\"><div class=\"mod-title-group\"><h2>Memory</h2></div></div><div class=\"mod-content\"><div class=\"mdw-grid\">${body}</div></div>`;
+        return;
+      }
+      if (key === 'developer' && presenceTruth.extras) {
+        const pr = presenceTruth.extras.projects || [];
+        const rowsHtml = pr.length ? pr.map(x => `<div class=\"mdw-row mdw-row-stack\"><div class=\"mdw-row-main\">${esc(String(x.cwd).split('\\').pop() || x.cwd)}</div><div class=\"mdw-row-sub\">${esc(x.cwd)} · ${x.sessions} sesi, ${x.open} terbuka</div></div>`).join('') : `<div class=\"mdw-note\">Belum ada ruang kerja yang dikenal Core.</div>`;
+        stage.innerHTML = `<div class=\"mod-header\"><div class=\"mod-title-group\"><h2>Projects</h2></div></div><div class=\"mod-content\"><div class=\"mdw-grid\"><div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Ruang kerja Core</div>${rowsHtml}</div></div></div>`;
+        return;
+      }
+      if (key === 'money' && presenceTruth.extras) {
+        const fn = presenceTruth.extras.finance;
+        const fmt = v => v == null ? '-' : Number(v).toLocaleString('id-ID');
+        const body = fn ? kvx([['Token terpakai', fmt(fn.totalTokens)], ['Batas token', fmt(fn.limitTokens)], ['Percobaan model', fmt(fn.attempts)], ['Status anggaran', fn.blocked ? 'Terblokir' : 'Aman']]) : `<div class=\"mdw-note\">Data pemakaian belum terbaca dari Core.</div>`;
+        stage.innerHTML = `<div class=\"mod-header\"><div class=\"mod-title-group\"><h2>Finance</h2></div></div><div class=\"mod-content\"><div class=\"mdw-grid\"><div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Pemakaian provider</div>${body}</div></div></div>`;
+        return;
+      }
+      if (key === 'diagnostics' && presenceTruth.presence != null) {
+        const pr = presenceTruth.presence, a = pr?.activity || {};
+        const h = presenceTruth.host?.host, dm = presenceTruth.host?.damar;
+        const pv = presenceTruth.providers;
+        const act = pv && Array.isArray(pv.providers) ? pv.providers.find(p => p.id === pv.active) || null : null;
+        const kv = rows => rows.map(r => `<div class=\"mdw-kv\"><span>${r[0]}</span><b>${esc(r[1])}</b></div>`).join('');
+        const hist = window.__hostHist || [];
+        const hostBody = h ? `
+          <div class=\"mdw-widget\"><div class=\"mdw-wtitle\">CPU</div><div class=\"mdw-big\">${h.cpuLoadPct ?? '-'}<span style=\"font-size:16px;\"> %</span></div><div class=\"mdw-sub\">${h.cpuCores ?? '-'} inti</div><canvas class=\"spark\" id=\"dgCpuSpark\"></canvas></div>
+          <div class=\"mdw-widget\"><div class=\"mdw-wtitle\">RAM</div><div class=\"mdw-big\">${h.ramUsedPct ?? '-'}<span style=\"font-size:16px;\"> %</span></div><div class=\"mdw-sub\">${h.ramUsedGb ?? '-'} dari ${h.ramTotalGb ?? '-'} GB</div><canvas class=\"spark\" id=\"dgRamSpark\"></canvas></div>
+          <div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Disk C</div><div class=\"mdw-big\">${h.disk ? h.disk.usedPct : '-'}<span style=\"font-size:16px;\"> %</span></div><div class=\"mdw-bar\"><i style=\"width:${h.disk ? h.disk.usedPct : 0}%\"></i></div><div class=\"mdw-sub\">sisa ${h.disk ? h.disk.freeGb : '-'} dari ${h.disk ? h.disk.totalGb : '-'} GB</div></div>
+          <div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Sistem</div>${kv([['Sistem', h.osText || '-'], ['Uptime', h.uptimeText || '-']])}</div>`
+        : `<div class=\"mdw-widget\"><div class=\"mdw-note\">Metrik komputer belum terbaca dari aplikasi desktop.</div></div>`;
+        const damarBody = kv([
+          ['Status Core', pr?.lifecycle || '-'],
+          ['Port Core', dm?.corePort ? '127.0.0.1:' + dm.corePort : '-'],
+          ['Daemon utama (port 3000)', dm ? (dm.daemon3000 ? 'Aktif' : 'Tidak terjangkau') : '-'],
+          ['Provider', pv ? (act?.label || pv.active || '-') : '-'],
+          ['Model aktif', pv ? (pv.model || '-') : '-'],
+          ['Inferensi langsung', pv ? (pv.liveInference ? 'Aktif' : 'Nonaktif') : '-'],
+        ]);
+        const stats = [['Sesi', a.sessions ?? 0], ['Giliran aktif', a.activeTurns ?? 0], ['Persetujuan menunggu', a.pendingPermissions ?? 0], ['Run Pandawa aktif', a.activePandawaRuns ?? 0]].map(x => `<div class=\"mdw-stat\"><div class=\"mdw-stat-num\">${esc(x[1])}</div><div class=\"mdw-stat-label\">${x[0]}</div></div>`).join('');
+        stage.innerHTML = `<div class=\"mod-header\"><div class=\"mod-title-group\"><h2>Diagnostics</h2></div></div><div class=\"mod-content\"><div class=\"mdw-grid graf\">${hostBody}<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Kesehatan Damar</div>${damarBody}</div>${stats}</div></div>`;
+        drawSpark('dgCpuSpark', hist.map(x => x.cpu).filter(v => v != null), 100);
+        drawSpark('dgRamSpark', hist.map(x => x.ram).filter(v => v != null), 100);
+        clearInterval(window.__diagTimer);
+        window.__diagTimer = setInterval(async () => {
+          if (currentWorkspace !== 'diagnostics') { clearInterval(window.__diagTimer); return; }
+          const hh2 = await canonicalAdapter.request('/api/ui/presence/host').catch(() => null);
+          if (hh2 && hh2.ok) { presenceTruth.host = hh2.data?.data || presenceTruth.host; const hg = window.__hostHist || (window.__hostHist = []); hg.push({ cpu: presenceTruth.host?.host?.cpuLoadPct ?? null, ram: presenceTruth.host?.host?.ramUsedPct ?? null }); if (hg.length > 24) hg.shift(); renderWorkspaceContent('diagnostics'); }
+        }, 5000);
+        return;
+      }
+      if (key === 'matadewa') {
+        const md = presenceTruth.matadewa;
+        const icons = {
+          sun: '<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\"><circle cx=\"12\" cy=\"12\" r=\"4.2\"/><path d=\"M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7\"/></svg>',
+          part: '<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\"><circle cx=\"8\" cy=\"8\" r=\"3\"/><path d=\"M8 2.8v1.6M2.8 8h1.6M4.3 4.3l1.1 1.1M11.7 4.3l-1.1 1.1\"/><path d=\"M10 20h8.2a3.4 3.4 0 0 0 .6-6.7 5 5 0 0 0-9.6 1A3.2 3.2 0 0 0 10 20z\"/></svg>',
+          cloud: '<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\"><path d=\"M7 18.5h9.5a4 4 0 0 0 .7-7.9 5.6 5.6 0 0 0-10.9 1A3.6 3.6 0 0 0 7 18.5z\"/></svg>',
+          rain: '<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\"><path d=\"M7 15h9.5a4 4 0 0 0 .7-7.9 5.6 5.6 0 0 0-10.9 1A3.6 3.6 0 0 0 7 15z\"/><path d=\"M8.5 18l-.8 2.2M12.5 18l-.8 2.2M16.5 18l-.8 2.2\"/></svg>',
+          snow: '<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\"><path d=\"M7 15h9.5a4 4 0 0 0 .7-7.9 5.6 5.6 0 0 0-10.9 1A3.6 3.6 0 0 0 7 15z\"/><circle cx=\"9\" cy=\"19\" r=\".9\" fill=\"currentColor\"/><circle cx=\"13\" cy=\"20.4\" r=\".9\" fill=\"currentColor\"/><circle cx=\"16.5\" cy=\"19\" r=\".9\" fill=\"currentColor\"/></svg>',
+          fog: '<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\"><path d=\"M7 13.5h9.5a4 4 0 0 0 .7-7.9 5.6 5.6 0 0 0-10.9 1A3.6 3.6 0 0 0 7 13.5z\"/><path d=\"M5 17.5h14M7 21h10\"/></svg>',
+          storm: '<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\"><path d=\"M7 14h9.5a4 4 0 0 0 .7-7.9 5.6 5.6 0 0 0-10.9 1A3.6 3.6 0 0 0 7 14z\"/><path d=\"M12.4 14.5l-2 3h2.6l-1.8 3.4\" stroke-linejoin=\"round\"/></svg>'
+        };
+        const iconFor = sky => { const t = String(sky || '').toLowerCase(); if (t.includes('thunder') || t.includes('storm')) return icons.storm; if (t.includes('rain') || t.includes('drizzle') || t.includes('shower')) return icons.rain; if (t.includes('snow') || t.includes('sleet')) return icons.snow; if (t.includes('fog') || t.includes('mist')) return icons.fog; if (t.includes('partly') || t.includes('fair')) return icons.part; if (t.includes('clear')) return icons.sun; return icons.cloud; };
+        let widgets = '', attrs = [];
+        if (!md) widgets = `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Mata Dewa</div><div class=\"mdw-note\">Data Mata Dewa belum terbaca dari Core.</div></div>`;
+        else if (!md.consent) widgets = `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Mata Dewa</div><div class=\"mdw-note\">Umpan publik belum aktif. Aktifkan di Control, menu Mata Dewa.</div></div>`;
+        else {
+          const w = md.weather?.items?.[0];
+          if (w) {
+            const fc = (md.weather.items || []).slice(1, 4).map(x => `<div class=\"mdw-fc\"><span style=\"text-transform:capitalize;\">${esc(x.sky || 'Cuaca')}</span><b>${x.temperatureC != null ? x.temperatureC + '°C' : '-'}</b></div>`).join('');
+            widgets += `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Cuaca titik pantau</div>${(md.weather.items || []).filter(x => x.temperatureC != null).length > 1 ? '<canvas class="spark" id="mdTempSpark"></canvas>' : ''}<div class=\"mdw-weather-main\"><div class=\"mdw-weather-icon\">${iconFor(w.sky)}</div><div><div class=\"mdw-temp\">${w.temperatureC != null ? w.temperatureC + '°' : '-'}</div><div class=\"mdw-loc\">${esc(md.areas[0]?.name || 'Titik pantau')}</div><div class=\"mdw-cond\">${esc(w.sky || '')}</div>${md.areas[0]?.seeded ? `<div class=\"mdw-cond\">Titik bawaan Damar. Atur atau ganti di Control, menu Mata Dewa.</div>` : ''}</div></div>${fc}</div>`;
+            if (md.weather.attribution) attrs.push(md.weather.attribution);
+          } else if (md.areas.length) {
+            widgets += `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Titik pantau</div>${md.areas.map(a => `<div class=\"mdw-row\"><div class=\"mdw-row-main\">${esc(a.name)}</div></div>`).join('')}<div class=\"mdw-note\">Cuaca belum termuat.</div></div>`;
+          } else {
+            widgets += `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Informasi umum</div><div class=\"mdw-note\">Belum ada titik pantau. Tambah dari Control, menu Mata Dewa.</div></div>`;
+          }
+          if (md.earthquakes?.items?.length) {
+            widgets += `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Gempa terbaru</div>${md.earthquakes.items.map(q => `<div class=\"mdw-row\"><span class=\"mdw-chip\">M${q.mag ?? '-'}</span><div class=\"mdw-row-main\">${esc(q.place || '-')}</div><div class=\"mdw-row-sub\">${q.depthKm != null ? q.depthKm + ' km' : ''}</div></div>`).join('')}</div>`;
+            if (md.earthquakes.attribution) attrs.push(md.earthquakes.attribution);
+          }
+          if (md.disasters?.items?.length) {
+            widgets += `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Peringatan bencana</div>${md.disasters.items.map(d => `<div class=\"mdw-row mdw-row-stack\"><div class=\"mdw-row-main\">${esc(d.event || '-')}</div><div class=\"mdw-row-sub\">${esc([d.country, d.severity].filter(Boolean).join(' · '))}</div></div>`).join('')}</div>`;
+            if (md.disasters.attribution) attrs.push(md.disasters.attribution);
+          }
+          if (!widgets) widgets = `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Mata Dewa</div><div class=\"mdw-note\">Umpan umum belum memuat data terbaru saat ini.</div></div>`;
+        }
+        const shortAttr = a => { const t = String(a || ''); if (/usgs/i.test(t)) return 'USGS'; if (/gdacs/i.test(t)) return 'GDACS'; if (/bmkg/i.test(t)) return 'BMKG'; if (/met|yr\.no|norweg/i.test(t)) return 'MET Norway'; if (/open-meteo/i.test(t)) return 'Open-Meteo'; return t.split(/[·,]/)[0].trim().slice(0, 24); };
+        const attrLine = attrs.length ? `<div class=\"mdw-attr\">Sumber: ${esc([...new Set(attrs.map(shortAttr))].join(' · '))}</div>` : '';
+        stage.innerHTML = `<div class=\"mod-header\"><div class=\"mod-title-group\"><h2>Mata Dewa</h2></div></div><div class=\"mod-content\"><div class=\"mdw-grid graf\">${widgets}${attrLine}</div></div>`;
+        if (md?.weather?.items?.length > 1) drawSpark('mdTempSpark', md.weather.items.map(x => x.temperatureC).filter(v => v != null));
+        return;
+      }
+      const connectedNow = presenceTruth.presence != null || presenceTruth.providers != null;
       const portals = {
-        matadewa: { title: 'Mata Dewa', detail: 'No current perception source is connected to Presence.' },
-        missions: { title: 'Missions', detail: 'Mission read data is unavailable. The detailed Mission Center is deferred to Dashboard.' },
-        dcd: { title: 'Cyber Defense', detail: 'Security notification data is unavailable. No incident, risk, or containment status is claimed.' },
-        money: { title: 'Finance', detail: 'Finance data is not connected to Presence.' },
-        developer: { title: 'Projects', detail: 'Project data is not connected to Presence.' },
-        authority: { title: 'Authority', detail: 'Approval status is unavailable. No owner decision or scoped grant is claimed.' },
-        memory: { title: 'Memory', detail: 'Memory read data is unavailable in this Presence surface.' },
-        models: { title: 'Models', detail: 'Model and provider status is unavailable in this Presence surface.' },
-        capabilities: { title: 'Capabilities', detail: 'Capability readiness data is unavailable in this Presence surface.' },
-        devices: { title: 'Devices', detail: 'No registered device data is connected to Presence.' },
-        diagnostics: { title: 'Diagnostics', detail: 'Diagnostics data is unavailable in this Presence surface.' }
+        matadewa: { title: 'Mata Dewa', detail: 'Belum ada sumber persepsi yang terhubung ke Presence.' },
+        missions: { title: 'Missions', detail: 'Data misi belum terbaca dari Core.' },
+        dcd: { title: 'Cyber Defense', detail: 'Belum ada notifikasi keamanan dari Core.' },
+        money: { title: 'Finance', detail: 'Data pemakaian provider belum termuat dari Core.' },
+        developer: { title: 'Projects', detail: 'Data ruang kerja belum termuat dari Core.' },
+        authority: { title: 'Authority', detail: 'Status persetujuan belum terbaca dari Core.' },
+        memory: { title: 'Memory', detail: 'Data memori belum termuat dari Core.' },
+        models: { title: 'Models', detail: 'Status model dan provider belum terbaca dari Core.' },
+        capabilities: { title: 'Capabilities', detail: 'Data kapabilitas belum termuat dari Core.' },
+        devices: { title: 'Devices', detail: 'Belum ada data perangkat yang terhubung ke Presence.' },
+        diagnostics: { title: 'Diagnostics', detail: 'Data diagnostik belum terbaca dari Core.' }
       };
       const portal = portals[key] || { title: 'DAMAR', detail: presenceTruth.reason };
-      stage.innerHTML = `<div class="mod-header"><div class="mod-title-group"><h2>${portal.title}</h2><p>Truthful Presence portal</p></div></div><div class="mod-content"><div class="sub-panel" style="flex:1;"><div class="sub-panel-title"><span>Not connected</span><span>RUNTIME UNAVAILABLE</span></div><p style="font-size:12px;color:var(--text-ivory);">${portal.detail}</p><p style="font-size:10px;color:var(--text-muted);margin-top:8px;">${presenceTruth.reason}</p></div></div>`;
+      stage.innerHTML = `<div class="mod-header"><div class="mod-title-group"><h2>${portal.title}</h2></div></div><div class="mod-content"><div class="sub-panel" style="flex:1;"><div class="sub-panel-title"><span>${connectedNow ? 'Terhubung' : 'Tidak terhubung'}</span><span>${connectedNow ? 'CANONICAL' : 'RUNTIME UNAVAILABLE'}</span></div><p style="font-size:12px;color:var(--text-ivory);">${portal.detail}</p>${connectedNow ? '' : `<p style="font-size:10px;color:var(--text-muted);margin-top:8px;">${presenceTruth.reason}</p>`}</div></div>`;
     }
     document.querySelectorAll('.solid-card').forEach(card => {
       card.addEventListener('mousemove', e => {
@@ -2294,11 +2618,7 @@
     });
 
     document.getElementById('brandHomeBtn').addEventListener('click', () => returnToOrb());
-    document.getElementById('backOrbBtn').addEventListener('click', e => { e.stopPropagation(); returnToOrb(); });
-    document.getElementById('settingsGearBtn').addEventListener('click', function() {
-      playAcoustic('click'); const pop = document.getElementById('settingsPopover');
-      pop.classList.toggle('open'); this.classList.toggle('active', pop.classList.contains('open'));
-    });
+    document.getElementById('backOrbBtn')?.addEventListener('click', e => { e.stopPropagation(); returnToOrb(); });
     document.getElementById('btnMax').addEventListener('click', () => winCtrl('maximize'));
     document.getElementById('btnMin').addEventListener('click', () => winCtrl('minimize'));
     document.getElementById('btnClose').addEventListener('click', () => winCtrl('close'));

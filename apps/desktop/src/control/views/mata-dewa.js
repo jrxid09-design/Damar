@@ -1,4 +1,4 @@
-// DAMAR Control — Mata Dewa view. Public world feeds, Owner-key feeds, camera grid (official public cameras + the
+// DAMAR Control, Mata Dewa view. Public world feeds, Owner-key feeds, camera grid (official public cameras + the
 // Owner's own cameras) and ALPR on own cameras, all served by Core at /api/r9/mata-dewa/*. Capabilities adapted from
 // gods-eye-view (MIT, see src/mata-dewa/THIRD_PARTY_NOTICES.md). Control's CSP is same-origin only: no external tiles
 // or images; the map is inline SVG and camera frames arrive as JSON and are drawn on <canvas> via createImageBitmap.
@@ -13,8 +13,8 @@
 
   // ---- i18n (English first; Indonesian when cli.language === 'id') ---------------------------------------------------
   var STR = {
-    en: { subtitle: 'Public world feeds — earthquakes, cyclones, weather, air quality, aircraft, vessels, fires, satellites and launches — plus your own cameras.',
-      consentTitle: 'Consent & egress disclosure', consentOn: 'I consent — enable public feeds', consentOff: 'Withdraw consent (stop all feeds)', hosts: 'Hosts',
+    en: { subtitle: 'Public world feeds, earthquakes, cyclones, weather, air quality, aircraft, vessels, fires, satellites and launches, plus your own cameras.',
+      consentTitle: 'Consent & egress disclosure', consentOn: 'I consent, enable public feeds', consentOff: 'Withdraw consent (stop all feeds)', hosts: 'Hosts',
       given: 'consent given', none: 'no consent · nothing fetched', loading: 'Loading from Core…', plot: 'World plot', noBasemap: 'No basemap: coordinates on a plain grid.',
       addKey: 'Add your key', getKey: 'Get a free key', saveKey: 'Save key (encrypted)', forgetKey: 'Forget key', keyStored: 'Key stored (never shown again)',
       attribution: 'Attribution & licences', commercial: 'Commercial use', feedsRefresh: 'Feeds & refresh (Owner)', areas: 'Areas of interest (max 4)', addArea: 'Add area', remove: 'Remove',
@@ -23,8 +23,8 @@
       alerts: 'Watchlist alerts', ack: 'Acknowledge all', log: 'Vehicle log', watchlist: 'Watchlist', export: 'Export JSON', deleteAll: 'Delete all entries', retention: 'Retention (days)', interval: 'Scan every (s)',
       engineMissing: 'ALPR engine not installed. Plates are read locally; nothing is sent to any service.', ffmpegMissing: 'ffmpeg not found: RTSP cameras need ffmpeg on PATH (optional, not bundled).',
       sources: 'Public camera sources', search: 'Search', contact: 'Contact URL for data providers (optional)', installEngine: 'Install ALPR engine', installing: 'Installing ALPR engine…', installHosts: 'The install downloads about 150 MB from:', alprOnly: 'ALPR runs only on your own cameras.', disabledAll: 'All feeds are disabled.' },
-    id: { subtitle: 'Umpan dunia publik — gempa, siklon, cuaca, kualitas udara, pesawat, kapal, kebakaran, satelit dan peluncuran — serta kamera Anda sendiri.',
-      consentTitle: 'Persetujuan & pengungkapan koneksi keluar', consentOn: 'Saya setuju — aktifkan umpan publik', consentOff: 'Cabut persetujuan (hentikan semua umpan)', hosts: 'Host',
+    id: { subtitle: 'Umpan dunia publik, gempa, siklon, cuaca, kualitas udara, pesawat, kapal, kebakaran, satelit dan peluncuran, serta kamera Anda sendiri.',
+      consentTitle: 'Persetujuan & pengungkapan koneksi keluar', consentOn: 'Saya setuju, aktifkan umpan publik', consentOff: 'Cabut persetujuan (hentikan semua umpan)', hosts: 'Host',
       given: 'persetujuan diberikan', none: 'belum ada persetujuan · tidak ada yang diambil', loading: 'Memuat dari Core…', plot: 'Peta dunia', noBasemap: 'Tanpa peta dasar: koordinat pada grid polos.',
       addKey: 'Tambahkan kunci Anda', getKey: 'Dapatkan kunci gratis', saveKey: 'Simpan kunci (terenkripsi)', forgetKey: 'Hapus kunci', keyStored: 'Kunci tersimpan (tidak ditampilkan lagi)',
       attribution: 'Atribusi & lisensi', commercial: 'Penggunaan komersial', feedsRefresh: 'Umpan & penyegaran (Pemilik)', areas: 'Area pantauan (maks 4)', addArea: 'Tambah area', remove: 'Hapus',
@@ -35,8 +35,8 @@
       sources: 'Sumber kamera publik', search: 'Cari', contact: 'URL kontak untuk penyedia data (opsional)', installEngine: 'Pasang mesin ALPR', installing: 'Memasang mesin ALPR…', installHosts: 'Pemasangan mengunduh sekitar 150 MB dari:', alprOnly: 'ALPR hanya berjalan pada kamera Anda sendiri.', disabledAll: 'Semua umpan dinonaktifkan.' }
   };
   function T(k) { return (STR[md.lang] && STR[md.lang][k]) || STR.en[k] || k; }
-  function esc(v) { return H.escapeHtml(v == null ? '—' : v); }
-  function fmt(v, unit) { return v === null || v === undefined ? '—' : String(v) + (unit || ''); }
+  function esc(v) { return H.escapeHtml(v == null ? '-' : v); }
+  function fmt(v, unit) { return v === null || v === undefined ? '-' : String(v) + (unit || ''); }
   function owner() { return !!(md.status && md.status.alpr && md.status.alpr.engine !== undefined); }
 
   function load() {
@@ -116,24 +116,24 @@
     return s.indexOf('ERROR') >= 0 ? H.statusBadgeHtml('ERROR', 'upstream') : s.indexOf('STALE') >= 0 ? H.statusBadgeHtml('WARN', 'stale') : H.statusBadgeHtml('OK', 'live');
   }
   function note(res) {
-    return '<div style="font-size:11px;color:var(--text-muted);padding:6px 12px;">' + (res.area ? esc(res.area.name) + ' · ' : '') + (res.fetchedAt ? esc(new Date(res.fetchedAt).toLocaleString()) : '—') +
+    return '<div style="font-size:11px;color:var(--text-muted);padding:6px 12px;">' + (res.area ? esc(res.area.name) + ' · ' : '') + (res.fetchedAt ? esc(new Date(res.fetchedAt).toLocaleString()) : '-') +
       (res.error ? ' · <span style="color:var(--status-critical);">' + esc(res.error) + '</span>' : '') + (res.withheld ? ' · ' + res.withheld + ' withheld (LADD/PIA)' : '') + (res.anonymous ? ' · ' + res.anonymous + ' anonymous' : '') + '</div>';
   }
-  function aircraftTable(res) { return '<div style="font-size:12px;padding:8px 12px;">' + res.count + ' aircraft</div>' + H.table(['Callsign', 'Hex', 'Reg', 'Type', 'Alt ft', 'GS kt', 'Trk'], res.items.slice(0, 15).map(function (f) { return [H.mono(f.callsign || '—'), H.mono(f.hex || '—'), esc(f.registration), esc(f.type) + (f.military ? ' ' + H.statusBadgeHtml('WARN', 'MIL') : ''), fmt(f.altitudeFt), fmt(f.groundSpeedKt), fmt(f.trackDeg, '°')]; }), '—'); }
+  function aircraftTable(res) { return '<div style="font-size:12px;padding:8px 12px;">' + res.count + ' aircraft</div>' + H.table(['Callsign', 'Hex', 'Reg', 'Type', 'Alt ft', 'GS kt', 'Trk'], res.items.slice(0, 15).map(function (f) { return [H.mono(f.callsign || '-'), H.mono(f.hex || '-'), esc(f.registration), esc(f.type) + (f.military ? ' ' + H.statusBadgeHtml('WARN', 'MIL') : ''), fmt(f.altitudeFt), fmt(f.groundSpeedKt), fmt(f.trackDeg, '°')]; }), '-'); }
   var BODIES = {
-    earthquakes: function (res) { return H.table(['Mag', 'Place', 'Depth', 'Time'], res.items.slice(0, 12).map(function (q) { return [H.mono(fmt(q.magnitude)), esc(q.place), fmt(q.depthKm, ' km'), esc(new Date(q.time).toLocaleString())]; }), '—'); },
+    earthquakes: function (res) { return H.table(['Mag', 'Place', 'Depth', 'Time'], res.items.slice(0, 12).map(function (q) { return [H.mono(fmt(q.magnitude)), esc(q.place), fmt(q.depthKm, ' km'), esc(new Date(q.time).toLocaleString())]; }), '-'); },
     cyclones: function (res) { return H.table(['Storm', 'Class', 'Wind kt', 'Pressure', 'Moving', 'Updated'], res.items.map(function (c) { return [esc(c.name), esc(c.classification), fmt(c.intensityKt), fmt(c.pressureMb, ' mb'), fmt(c.movementDir, '°') + ' ' + fmt(c.movementKt, ' kt'), esc(c.updated)]; }), 'No active storms.'); },
-    weather: function (res) { var w = res.items[0]; return w ? H.kvList([H.kv('Temperature', fmt(w.temperatureC, ' °C')), H.kv('Sky', fmt(w.symbol)), H.kv('Humidity', fmt(w.humidityPct, ' %')), H.kv('Precipitation (1 h)', fmt(w.precipitationMm, ' mm')), H.kv('Cloud cover', fmt(w.cloudCoverPct, ' %')), H.kv('Wind', fmt(w.windKmh, ' km/h') + ' · ' + fmt(w.windDirDeg, '°'))]) : '—'; },
-    disasters: function (res) { return H.table(['Alert', 'Type', 'Event', 'Country', 'Severity', 'From'], res.items.slice(0, 15).map(function (e) { return [H.statusBadgeHtml(e.alert === 'Red' ? 'ERROR' : e.alert === 'Orange' ? 'WARN' : 'OK', e.alert), esc(e.type), esc(e.name), esc(e.country), esc(e.severity), esc(e.from)]; }), '—'); },
-    openaq: function (res) { var s = res.items[0]; return s ? '<div style="font-size:12px;padding:8px 12px;">' + esc(s.station) + ' · ' + esc(s.locality) + '</div>' + H.table(['Parameter', 'Value', 'Time'], s.readings.map(function (r) { return [esc(r.parameter), fmt(r.value, ' ' + (r.units || '')), esc(r.time)]; }), '—') : '—'; },
-    openMeteo: function (res) { var w = res.items[0]; return w ? H.kvList([H.kv('Temperature', fmt(w.temperatureC, ' °C') + ' (feels ' + fmt(w.apparentC, ' °C') + ')'), H.kv('Precipitation', fmt(w.precipitationMm, ' mm')), H.kv('Cloud cover', fmt(w.cloudCoverPct, ' %')), H.kv('Wind', fmt(w.windKmh, ' km/h') + ' · ' + fmt(w.windDirDeg, '°'))]) : '—'; },
-    airQuality: function (res) { var a = res.items[0]; return a ? H.kvList([H.kv('European AQI', fmt(a.europeanAqi)), H.kv('US AQI', fmt(a.usAqi)), H.kv('PM2.5', fmt(a.pm25, ' µg/m³')), H.kv('PM10', fmt(a.pm10, ' µg/m³'))]) : '—'; },
+    weather: function (res) { var w = res.items[0]; return w ? H.kvList([H.kv('Temperature', fmt(w.temperatureC, ' °C')), H.kv('Sky', fmt(w.symbol)), H.kv('Humidity', fmt(w.humidityPct, ' %')), H.kv('Precipitation (1 h)', fmt(w.precipitationMm, ' mm')), H.kv('Cloud cover', fmt(w.cloudCoverPct, ' %')), H.kv('Wind', fmt(w.windKmh, ' km/h') + ' · ' + fmt(w.windDirDeg, '°'))]) : '-'; },
+    disasters: function (res) { return H.table(['Alert', 'Type', 'Event', 'Country', 'Severity', 'From'], res.items.slice(0, 15).map(function (e) { return [H.statusBadgeHtml(e.alert === 'Red' ? 'ERROR' : e.alert === 'Orange' ? 'WARN' : 'OK', e.alert), esc(e.type), esc(e.name), esc(e.country), esc(e.severity), esc(e.from)]; }), '-'); },
+    openaq: function (res) { var s = res.items[0]; return s ? '<div style="font-size:12px;padding:8px 12px;">' + esc(s.station) + ' · ' + esc(s.locality) + '</div>' + H.table(['Parameter', 'Value', 'Time'], s.readings.map(function (r) { return [esc(r.parameter), fmt(r.value, ' ' + (r.units || '')), esc(r.time)]; }), '-') : '-'; },
+    openMeteo: function (res) { var w = res.items[0]; return w ? H.kvList([H.kv('Temperature', fmt(w.temperatureC, ' °C') + ' (feels ' + fmt(w.apparentC, ' °C') + ')'), H.kv('Precipitation', fmt(w.precipitationMm, ' mm')), H.kv('Cloud cover', fmt(w.cloudCoverPct, ' %')), H.kv('Wind', fmt(w.windKmh, ' km/h') + ' · ' + fmt(w.windDirDeg, '°'))]) : '-'; },
+    airQuality: function (res) { var a = res.items[0]; return a ? H.kvList([H.kv('European AQI', fmt(a.europeanAqi)), H.kv('US AQI', fmt(a.usAqi)), H.kv('PM2.5', fmt(a.pm25, ' µg/m³')), H.kv('PM10', fmt(a.pm10, ' µg/m³'))]) : '-'; },
     flights: aircraftTable, opensky: aircraftTable, military: aircraftTable,
-    vessels: function (res) { return '<div style="font-size:12px;padding:8px 12px;">' + res.count + ' vessels</div>' + H.table(['Name', 'MMSI', 'IMO', 'Type', 'Speed', 'Dest.'], res.items.slice(0, 15).map(function (v) { return [esc(v.name || 'anonymous'), H.mono(v.mmsi || '—'), H.mono(v.imo || '—'), fmt(v.shipType), fmt(v.speedKt, ' kt'), esc(v.destination)]; }), '—'); },
-    fires: function (res) { return '<div style="font-size:12px;padding:8px 12px;">' + res.count + ' detections</div>' + H.table(['Lat', 'Lon', 'Acquired', 'FRP MW', 'Conf.'], res.items.slice(0, 12).map(function (f) { return [fmt(f.lat), fmt(f.lon), esc(f.acquired), fmt(f.frpMw), esc(f.confidence)]; }), '—'); },
-    traffic: function (res) { var t = res.items[0]; return t ? H.kvList([H.kv('Current speed', fmt(t.currentKmh, ' km/h')), H.kv('Free-flow speed', fmt(t.freeFlowKmh, ' km/h')), H.kv('Congestion', fmt(t.congestionPct, ' %')), H.kv('Road closed', t.closed ? 'yes' : 'no')]) : '—'; },
-    satellites: function (res) { return H.table(['Name', 'NORAD', 'Incl.', 'Period', 'Perigee–Apogee'], res.items.slice(0, 15).map(function (s) { return [esc(s.name), H.mono(s.noradId), fmt(s.inclinationDeg, '°'), fmt(s.periodMin, ' min'), s.perigeeKm + '–' + s.apogeeKm + ' km']; }), '—'); },
-    launches: function (res) { return H.table(['NET', 'Mission', 'Provider', 'Status', 'Pad'], res.items.map(function (l) { return [esc(new Date(l.net).toLocaleString()), esc(l.name), esc(l.provider), esc(l.status), esc(l.location)]; }), '—'); }
+    vessels: function (res) { return '<div style="font-size:12px;padding:8px 12px;">' + res.count + ' vessels</div>' + H.table(['Name', 'MMSI', 'IMO', 'Type', 'Speed', 'Dest.'], res.items.slice(0, 15).map(function (v) { return [esc(v.name || 'anonymous'), H.mono(v.mmsi || '-'), H.mono(v.imo || '-'), fmt(v.shipType), fmt(v.speedKt, ' kt'), esc(v.destination)]; }), '-'); },
+    fires: function (res) { return '<div style="font-size:12px;padding:8px 12px;">' + res.count + ' detections</div>' + H.table(['Lat', 'Lon', 'Acquired', 'FRP MW', 'Conf.'], res.items.slice(0, 12).map(function (f) { return [fmt(f.lat), fmt(f.lon), esc(f.acquired), fmt(f.frpMw), esc(f.confidence)]; }), '-'); },
+    traffic: function (res) { var t = res.items[0]; return t ? H.kvList([H.kv('Current speed', fmt(t.currentKmh, ' km/h')), H.kv('Free-flow speed', fmt(t.freeFlowKmh, ' km/h')), H.kv('Congestion', fmt(t.congestionPct, ' %')), H.kv('Road closed', t.closed ? 'yes' : 'no')]) : '-'; },
+    satellites: function (res) { return H.table(['Name', 'NORAD', 'Incl.', 'Period', 'Perigee–Apogee'], res.items.slice(0, 15).map(function (s) { return [esc(s.name), H.mono(s.noradId), fmt(s.inclinationDeg, '°'), fmt(s.periodMin, ' min'), s.perigeeKm + '–' + s.apogeeKm + ' km']; }), '-'); },
+    launches: function (res) { return H.table(['NET', 'Mission', 'Provider', 'Status', 'Pad'], res.items.map(function (l) { return [esc(new Date(l.net).toLocaleString()), esc(l.name), esc(l.provider), esc(l.status), esc(l.location)]; }), '-'); }
   };
   function keyForm(f) {
     var inputs = f.credential.fields.map(function (k) { return '<input class="input-field" type="password" autocomplete="off" data-md-key="' + f.id + '" data-k="' + k + '" placeholder="' + k + '" style="width:200px;font-family:var(--font-mono);" />'; }).join(' ');
@@ -170,9 +170,9 @@
         H.btn(T('remove'), 'data-md-action="remove-area" data-i="' + i + '"')];
     });
     var groups = ['stations', 'visual', 'weather', 'gps-ops', 'science', 'geo'].map(function (g) { return '<option' + (g === d.satelliteGroup ? ' selected' : '') + '>' + g + '</option>'; }).join('');
-    var srcs = st.cctv.available.map(function (s) { return '<label style="display:flex;gap:8px;align-items:center;font-size:12px;"><input type="checkbox" data-md-cctv="' + s.id + '"' + (d.cctvSources.indexOf(s.id) >= 0 ? ' checked' : '') + ' /> ' + esc(s.label) + ' — ' + esc(s.license) + '</label>'; }).join('');
+    var srcs = st.cctv.available.map(function (s) { return '<label style="display:flex;gap:8px;align-items:center;font-size:12px;"><input type="checkbox" data-md-cctv="' + s.id + '"' + (d.cctvSources.indexOf(s.id) >= 0 ? ' checked' : '') + ' /> ' + esc(s.label) + ', ' + esc(s.license) + '</label>'; }).join('');
     return H.panel(T('feedsRefresh'), H.table(['Feed', 'Host', 'Refresh (s)', 'Limits'], rows), { span: 12, flush: true }) +
-      H.panel(T('areas'), H.table(['Name', 'Lat', 'Lon', 'Radius km', ''], areas, '—') +
+      H.panel(T('areas'), H.table(['Name', 'Lat', 'Lon', 'Radius km', ''], areas, '-') +
         '<div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;"><div style="font-size:12px;font-weight:600;">' + esc(T('sources')) + '</div>' + srcs +
         '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:12px;">' + (d.areas.length < 4 ? H.btn(T('addArea'), 'data-md-action="add-area"') : '') +
         '<label>' + esc(T('group')) + ' <select class="input-field" data-md-group style="width:auto;">' + groups + '</select></label>' +
@@ -222,9 +222,9 @@
     var head = '<div style="font-size:12px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;"><div>' + esc(T('alprOnly')) + ' ' + esc(s.engine || '') + ' · ' + s.enabledCameras + ' cameras · ' + s.entries + ' entries · retention ' + s.retentionDays + ' d' + (s.lastError ? ' · <span style="color:var(--status-critical);">' + esc(s.lastError) + '</span>' : '') + '</div>' +
       (s.engineState && !s.engineState.installed ? '<div style="color:var(--status-warning);">' + esc(T('engineMissing')) + ' ' + esc(T('installHosts')) + ' ' + (s.installHosts || []).map(function (h) { return H.mono(h); }).join(' · ') +
         (s.engineState.error ? ' · ' + esc(s.engineState.error) : '') + '</div><div>' + (s.engineState.installing ? H.statusBadgeHtml('RUNNING', T('installing')) : H.btn(T('installEngine'), 'data-md-action="install-engine"', 'btn-primary')) + '</div>' : '') + '</div>';
-    var alerts = a ? H.table(['Time', 'Plate', 'Camera', 'Note', ''], a.alerts.slice(0, 20).map(function (x) { return [esc(new Date(x.t).toLocaleString()), H.mono(x.plate), esc(x.cameraName), esc(x.note), x.acknowledged ? '' : H.statusBadgeHtml('WARN', 'new')]; }), '—') : '';
-    var logT = a ? H.table(['Time', 'Plate', 'Camera', 'Conf.', 'Crop', ''], a.entries.slice(0, 30).map(function (e) { return [esc(new Date(e.t).toLocaleString()), H.mono(e.plate), esc(e.cameraName), fmt(e.confidence), e.crop ? '<div style="width:120px;">' + canvas('crop|' + e.id, e.plate) + '</div>' : '—', H.btn(T('remove'), 'data-md-action="alpr-delete" data-id="' + e.id + '"')]; }), '—') : '';
-    var wl = a ? H.table(['Plate', 'Note', ''], a.watchlist.map(function (w) { return [H.mono(w.plate), esc(w.note), H.btn(T('remove'), 'data-md-action="wl-remove" data-plate="' + H.escapeHtml(w.plate) + '"')]; }), '—') +
+    var alerts = a ? H.table(['Time', 'Plate', 'Camera', 'Note', ''], a.alerts.slice(0, 20).map(function (x) { return [esc(new Date(x.t).toLocaleString()), H.mono(x.plate), esc(x.cameraName), esc(x.note), x.acknowledged ? '' : H.statusBadgeHtml('WARN', 'new')]; }), '-') : '';
+    var logT = a ? H.table(['Time', 'Plate', 'Camera', 'Conf.', 'Crop', ''], a.entries.slice(0, 30).map(function (e) { return [esc(new Date(e.t).toLocaleString()), H.mono(e.plate), esc(e.cameraName), fmt(e.confidence), e.crop ? '<div style="width:120px;">' + canvas('crop|' + e.id, e.plate) + '</div>' : '-', H.btn(T('remove'), 'data-md-action="alpr-delete" data-id="' + e.id + '"')]; }), '-') : '';
+    var wl = a ? H.table(['Plate', 'Note', ''], a.watchlist.map(function (w) { return [H.mono(w.plate), esc(w.note), H.btn(T('remove'), 'data-md-action="wl-remove" data-plate="' + H.escapeHtml(w.plate) + '"')]; }), '-') +
       '<div style="display:flex;gap:8px;padding:10px 12px;"><input class="input-field" data-md-wl="plate" placeholder="B1234XYZ" maxlength="16" style="width:140px;font-family:var(--font-mono);" /><input class="input-field" data-md-wl="note" placeholder="note" maxlength="80" style="width:200px;" />' + H.btn('+', 'data-md-action="wl-add"', 'btn-primary') + '</div>' : '';
     html += H.panel(T('alpr'), head + '<div style="display:flex;gap:8px;padding:0 12px 10px;">' + H.btn(T('ack'), 'data-md-action="alpr-ack"') + H.btn(T('export'), 'data-md-action="alpr-export"') + H.btn(T('deleteAll'), 'data-md-action="alpr-delete-all"') + '</div>', { span: 12, flush: true, badge: s.unacknowledgedAlerts ? H.statusBadgeHtml('WARN', s.unacknowledgedAlerts + ' alerts') : '' });
     html += H.panel(T('alerts'), alerts, { span: 6, flush: true }) + H.panel(T('watchlist'), wl, { span: 6, flush: true }) + H.panel(T('log'), logT, { span: 12, flush: true });

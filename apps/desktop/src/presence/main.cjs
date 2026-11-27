@@ -8,6 +8,8 @@
 const { app, BrowserWindow, ipcMain, screen, Tray, Menu, globalShortcut, nativeImage, protocol, shell, session } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
+const { coreEndpoint } = require('../cli/core-endpoint.cjs');
 const { spawn } = require('node:child_process');
 const files = require('./renderer-files.cjs');
 const policy = require('./host-policy.cjs'), { windowOptions, uiResponse } = policy;
@@ -30,6 +32,7 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 let win = null, tray = null, savedBounds = null, isClosingConfirmed = false, cliFocusYielded = false, brandIcon = null;
 let sessionDirectory = null, config = { source: 'defaults-not-loaded', ...DEFAULTS }, core = null, coreState = null, projection = project(null), lang = 'en', watcher = null;
 let activityBaseline = null; // feed rows older than the first poll are history: not replayed as live ticker/emotes
+let permDetail = { id: null, detail: null }; // owner-credential command detail for the pending permission (renderer feed redacts it)
 const fromMain = event => win && !win.isDestroyed() && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame;
 const pending = () => (projection.presence?.activity.pendingPermissions ? pendingPermission(coreState?.activity || []) : null);
 const message = () => {
@@ -38,7 +41,7 @@ const message = () => {
     activity: { ...(projection.presence?.activity || {}), events: rows },
     sessionPills: projection.presence?.sessionPills || [], media: projection.presence?.media || null, pcActivity: pcActivitySnapshot(),
     // permissionId only; turnId stays in main (the renderer cannot target another turn).
-    permission: p ? { permissionId: p.permissionId, tool: p.tool, file: p.file, added: p.added, removed: p.removed, allowable: p.allowable } : null } };
+    permission: p ? { permissionId: p.permissionId, tool: p.tool, file: p.file, detail: p.detail || (permDetail.id === p.permissionId ? permDetail.detail : null), added: p.added, removed: p.removed, allowable: p.allowable } : null } };
 };
 
 // PC activity sense for the Notch behavior engine (Fase 2 v3): ONE fixed
@@ -76,7 +79,9 @@ function targetDisplay() {
 }
 function fitToDisplay() {
   if (!win || win.isDestroyed() || win.isMinimized()) return;
-  const { x, y, width, height } = targetDisplay().bounds;
+  // Work area, not full bounds (Owner 2026-11-27): bottom-anchored Presence elements (the standby orb)
+  // must sit fully above the Windows taskbar, never cropped by it.
+  const { x, y, width, height } = targetDisplay().workArea;
   savedBounds = { x, y, width, height }; win.setBounds(savedBounds);
 }
 
@@ -89,6 +94,12 @@ function bindCore() {
       coreState = s; projection = project(s, config);
       if (activityBaseline === null && s.reachable) activityBaseline = (s.activity || []).reduce((m, a) => Math.max(m, a.seq + 1), 0);
       push();
+      // Enrich the pending permission with its command detail (owner read).
+      const p = pending();
+      if (p && !p.detail && permDetail.id !== p.permissionId) {
+        permDetail = { id: p.permissionId, detail: null };
+        core.permissionDetail(p.permissionId).then(d => { if (d && permDetail.id === p.permissionId) { permDetail.detail = d; push(); } }).catch(() => {});
+      } else if (!p && permDetail.id) permDetail = { id: null, detail: null };
     },
     onSettings: s => { const moved = s.display !== config.display; config = s; projection = project(coreState, config); push(); if (moved) fitToDisplay(); },
     stateMs: 1000,
@@ -96,9 +107,95 @@ function bindCore() {
   // UI language follows Core's shared cli.language (polled with the settings cadence; change-only push).
   const syncLang = () => core.language().then(l => { if (l !== lang) { lang = l; push(); } }).catch(() => {});
   syncLang(); setInterval(syncLang, 5000).unref?.();
+  // Control's "show Idle Presence" signal (POST /api/r9/presence/raise writes presence-raise.json into the
+  // session directory): consume it and bring this window forward. A stale signal from before this process
+  // started is dropped, not acted on.
+  const raiseFile = path.join(directory, 'presence-raise.json');
+  try { fs.unlinkSync(raiseFile); } catch {}
+  try {
+    fs.watch(directory, (eventType, name) => {
+      if (name !== 'presence-raise.json') return;
+      try { fs.unlinkSync(raiseFile); } catch { return; }
+      bringWindowToFront();
+    });
+  } catch {}
 }
 
-ipcMain.handle('damar-runtime-request', (event, request) => (fromMain(event) ? uiResponse(request, projection) : { ok: false, error: { kind: 'NOT_ALLOWED', message: 'Runtime bridge unavailable.' } }));
+// Host + Damar health for the Diagnostics portal (Owner 2026-11-28): real
+// readings from this machine via node:os/fs, sampled lightly (one 500 ms CPU
+// sample per request; the surface polls on a 60 s cadence, never a hot loop).
+function cpuSample() { let idle = 0, total = 0; for (const c of os.cpus()) { for (const k in c.times) total += c.times[k]; idle += c.times.idle; } return { idle, total }; }
+async function hostMetrics() {
+  const a = cpuSample();
+  await new Promise(r => setTimeout(r, 500));
+  const b = cpuSample();
+  const cpuLoadPct = b.total > a.total ? Math.max(0, Math.min(100, Math.round(100 - (100 * (b.idle - a.idle)) / (b.total - a.total)))) : 0;
+  const totalMem = os.totalmem(), freeMem = os.freemem();
+  let disk = null;
+  try {
+    const st = await fs.promises.statfs('C:\\');
+    const totalGb = (st.blocks * st.bsize) / 1e9, freeGb = (st.bfree * st.bsize) / 1e9;
+    disk = { usedPct: totalGb > 0 ? Math.round((100 * (totalGb - freeGb)) / totalGb) : 0, freeGb: Math.round(freeGb), totalGb: Math.round(totalGb) };
+  } catch {}
+  let corePort = null;
+  try { corePort = new URL(coreEndpoint()).port || null; } catch {}
+  let daemon = false;
+  try { const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 1500); const r = await fetch('http://127.0.0.1:3000/', { signal: ctl.signal }); clearTimeout(t); daemon = r.status > 0; } catch {}
+  const upSec = Math.floor(os.uptime());
+  const upText = Math.floor(upSec / 86400) + ' hari ' + Math.floor((upSec % 86400) / 3600) + ' jam ' + Math.floor((upSec % 3600) / 60) + ' menit';
+  return {
+    host: {
+      hostname: os.hostname(),
+      cpuLoadPct, cpuCores: os.cpus().length,
+      ramUsedPct: totalMem > 0 ? Math.round((100 * (totalMem - freeMem)) / totalMem) : 0,
+      ramUsedGb: Math.round(((totalMem - freeMem) / 1e9) * 10) / 10, ramTotalGb: Math.round((totalMem / 1e9) * 10) / 10,
+      disk, uptimeText: upText, osText: (typeof os.version === 'function' ? os.version() : os.type()) + ' ' + os.arch(),
+    },
+    damar: { corePort, coreBound: !!core, daemon3000: daemon },
+  };
+}
+
+ipcMain.handle('damar-runtime-request', async (event, request) => {
+  if (!fromMain(event)) return { ok: false, error: { kind: 'NOT_ALLOWED', message: 'Runtime bridge unavailable.' } };
+  const method = String(request?.method || 'GET').toUpperCase(), route = String(request?.path || '');
+  if (method === 'GET' && route === '/api/ui/presence/extras') {
+    if (!core) return { ok: false, error: { kind: 'UNAVAILABLE', status: 503, message: 'DAMAR Core tidak terjangkau.' } };
+    try { const x = await core.extras(); return { ok: true, status: 200, data: { success: true, data: x } }; }
+    catch { return { ok: false, error: { kind: 'UNAVAILABLE', status: 503, message: 'Data portal tidak terbaca.' } }; }
+  }
+  if (method === 'GET' && route === '/api/ui/presence/host') {
+    try { const m = await hostMetrics(); return { ok: true, status: 200, data: { success: true, data: m } }; }
+    catch { return { ok: false, error: { kind: 'UNAVAILABLE', status: 503, message: 'Metrik host tidak terbaca.' } }; }
+  }
+  // Conversation is brokered to Core's agent turns (core-presence.chat): the page's one conversation lives on
+  // Presence's own attached Core session. Everything else stays on the read-only projection policy.
+  if (method === 'POST' && route === '/api/ui/conversations/messages') {
+    if (!core) return { ok: false, error: { kind: 'UNAVAILABLE', status: 503, message: 'DAMAR Core tidak terjangkau.' } };
+    try {
+      const r = await core.chat(String(request?.body?.text ?? ''), delta => {
+        // Progressive reply: partial text is pushed on the presence channel;
+        // the final answer still returns with this request (identical text).
+        try { event.sender.send('damar-presence', { kind: 'chat-delta', text: delta }); } catch {}
+      }, phase => {
+        // Single turn-status statement: Core accepted the turn (Berpikir).
+        try { event.sender.send('damar-presence', { kind: 'chat-phase', phase }); } catch {}
+      });
+      if (!r.ok) {
+        // Error containment: a failed turn answers inside the conversation
+        // (Indonesian notice from core-presence) and never flips the surface
+        // to UNAVAILABLE; only transport-level failures stay errors.
+        if (typeof r.notice === 'string' && r.notice) return { ok: true, status: 200, data: { success: true, data: { answer: r.notice, sessionId: 'dsc_presence' } } };
+        return { ok: false, error: { kind: 'TURN_FAILED', status: r.status || 502, message: r.error || 'Conversation failed.' } };
+      }
+      return { ok: true, status: 200, data: { success: true, data: { answer: r.answer, sessionId: 'dsc_presence' } } };
+    } catch (e) { return { ok: false, error: { kind: 'UNAVAILABLE', status: 503, message: 'DAMAR Core tidak terjangkau.' } }; }
+  }
+  if (method === 'GET' && /^\/api\/ui\/conversations\/[A-Za-z0-9_-]+$/.test(route)) {
+    if (!core) return { ok: false, error: { kind: 'UNAVAILABLE', status: 503, message: 'DAMAR Core tidak terjangkau.' } };
+    return { ok: true, status: 200, data: { success: true, data: { turns: core.conversationHistory() } } };
+  }
+  return uiResponse(request, projection);
+});
 ipcMain.handle('damar-presence-get', event => (fromMain(event) ? message() : null));
 ipcMain.handle('damar-notch-model', event => {
   if (!fromMain(event)) return null;
@@ -180,7 +277,7 @@ function bringWindowToFront() {
 }
 
 function createWindow() {
-  const { x, y, width, height } = targetDisplay().bounds;
+  const { x, y, width, height } = targetDisplay().workArea;
   savedBounds = { x, y, width, height };
   win = new BrowserWindow(windowOptions({ bounds: savedBounds, icon: brandIcon, show: !SELFTEST }));
   win.setAlwaysOnTop(true, 'screen-saver');
@@ -250,6 +347,16 @@ async function selfTest() {
     window: { alwaysOnTop: win.isAlwaysOnTop() }, probe, island, projectionStatus: projection.status, configSource: config.source,
     mic: { audio: micAllowed(wc, 'media', ['audio']), video: micAllowed(wc, 'media', ['video']), audioVideo: micAllowed(wc, 'media', ['audio', 'video']), notifications: micAllowed(wc, 'notifications', []), voiceEnabled: config.voiceEnabled } }) + '\n');
   isClosingConfirmed = true; app.exit(0);
+}
+
+// Single instance: Presence is one surface with one Notch state machine. A
+// second process renders a second, independent notch (Owner report
+// 2026-11-28: an expanded notch plus a small collapsed one above it, each
+// expandable). The launcher's own refusal only covers its path, so the app
+// enforces it here. Selftest probes are exempt (headless, short-lived).
+if (!SELFTEST) {
+  if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
+  app.on('second-instance', () => { bringWindowToFront(); });
 }
 
 app.whenReady().then(() => {

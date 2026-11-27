@@ -9,7 +9,16 @@ contextBridge.exposeInMainWorld('damarDesktop', Object.freeze({
   windowControl: action => ipcRenderer.send('window-control', String(action)),
   navigateSurface: surface => ipcRenderer.invoke('damar-navigate-surface', String(surface)),
   launchCli: () => ipcRenderer.invoke('launch-damar-cli'),
-  runtimeRequest: request => ipcRenderer.invoke('damar-runtime-request', { path: String(request?.path || ''), method: String(request?.method || 'GET') }),
+  // The body is allowlisted like every other channel: only the conversation
+  // fields the main broker accepts may cross (the read-only era forwarded no
+  // body at all, which silently starved Presence chat of its text).
+  runtimeRequest: request => ipcRenderer.invoke('damar-runtime-request', {
+    path: String(request?.path || ''), method: String(request?.method || 'GET'),
+    body: request?.body && typeof request.body === 'object' ? {
+      text: typeof request.body.text === 'string' ? request.body.text.slice(0, 8000) : undefined,
+      channel: typeof request.body.channel === 'string' ? request.body.channel.slice(0, 40) : undefined,
+    } : undefined,
+  }),
   getPresence: () => ipcRenderer.invoke('damar-presence-get'),
   // The Notch 3D stage's model bytes: one fixed asset read in main; the renderer cannot fetch (by design).
   getNotchModel: () => ipcRenderer.invoke('damar-notch-model'),

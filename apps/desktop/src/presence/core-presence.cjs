@@ -9,10 +9,10 @@ const fs = require('node:fs'), path = require('node:path');
 const { coreEndpoint } = require('../cli/core-endpoint.cjs');
 const { boundedResponse } = require('../cli/service.cjs');
 
-const READS = Object.freeze(['/api/r9/lifecycle', '/api/r9/sessions', '/api/r9/pandawa/runs', '/api/r9/presence/settings', '/api/r9/cli/settings', '/api/r9/activity', '/api/r9/media']);
-const readAllowed = route => READS.includes(route) || /^\/api\/r9\/activity\?from=\d{1,9}$/.test(route);
+const READS = Object.freeze(['/api/r9/lifecycle', '/api/r9/sessions', '/api/r9/pandawa/runs', '/api/r9/presence/settings', '/api/r9/cli/settings', '/api/r9/activity', '/api/r9/media', '/api/r9/provider', '/api/r9/mata-dewa/status']);
+const readAllowed = route => READS.includes(route) || /^\/api\/r9\/activity\?from=\d{1,9}$/.test(route) || /^\/api\/r9\/mata-dewa\/feeds\/[a-z]+$/.test(route);
 // Contract agreed with Control (presence.* namespace). Defaults equal the Owner prototype values.
-const DEFAULTS = Object.freeze({ idleToNotchMs: 10000, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, displayName: 'Maronns', salutation: '', onboardingCompleted: false });
+const DEFAULTS = Object.freeze({ idleToOrbSec: 120, orbToNotchSec: 120, notchHideSec: 1800, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, characterSoundEnabled: true, characterSoundVolume: 30, displayName: 'Maronns', salutation: '', onboardingCompleted: false });
 const KEYS = Object.freeze(Object.keys(DEFAULTS).map(k => 'presence.' + k));
 
 // Accepts {presence:{idleToNotchMs,...}} or flat {'presence.idleToNotchMs':...}; invalid values fall back per key.
@@ -23,7 +23,11 @@ function settingsFrom(data) {
   const one = (v, list, d) => (list.includes(v) ? v : d);
   const display = get('display');
   return {
-    idleToNotchMs: int(get('idleToNotchMs'), 1000, 600000, DEFAULTS.idleToNotchMs),
+    idleToOrbSec: int(get('idleToOrbSec'), 5, 3600, DEFAULTS.idleToOrbSec),
+    orbToNotchSec: int(get('orbToNotchSec'), 5, 3600, DEFAULTS.orbToNotchSec),
+    notchHideSec: int(get('notchHideSec'), 10, 86400, DEFAULTS.notchHideSec),
+    characterSoundEnabled: typeof get('characterSoundEnabled') === 'boolean' ? get('characterSoundEnabled') : DEFAULTS.characterSoundEnabled,
+    characterSoundVolume: int(get('characterSoundVolume'), 0, 100, DEFAULTS.characterSoundVolume),
     morphMs: int(get('morphMs'), 0, 5000, DEFAULTS.morphMs),
     reducedMotion: one(get('reducedMotion'), ['system', 'on', 'off'], DEFAULTS.reducedMotion),
     notchEnabled: typeof get('notchEnabled') === 'boolean' ? get('notchEnabled') : DEFAULTS.notchEnabled,
@@ -43,13 +47,22 @@ function dataRoot(env = process.env) {
   if (env.DAMAR_DATA_ROOT && path.isAbsolute(env.DAMAR_DATA_ROOT)) return path.resolve(env.DAMAR_DATA_ROOT);
   return path.join(env.LOCALAPPDATA || path.join(require('node:os').homedir(), 'AppData', 'Local'), 'DAMAR');
 }
-// Lookup order: explicit --session; the CLI profile's remembered core_session (src/cli/main.cjs:78-80; profile default
-// <data root>\profile); the launcher's <data root>\state\last-core.json.
+// Lookup order: explicit --session; the launcher's <data root>\state\last-core.json (the most recent Core the
+// launcher started); the CLI profile's remembered core_session (src/cli/main.cjs:78-80; profile default
+// <data root>\profile). Candidates are VALIDATED: the remembered profile session can be days stale - its
+// directory deleted or its Core long gone - and binding to it silently left Presence "not connected" forever
+// while the real Core was healthy (Owner report 2026-11-27). A candidate wins only if its session.json exists
+// and names this endpoint; if none matches the endpoint, the first candidate that exists at all is used.
 function resolveSessionDirectory({ session, profile, env = process.env } = {}) {
   if (session) return session;
   const root = dataRoot(env);
-  try { const { UISettings } = require('../cli/ui-settings.cjs'); const s = new UISettings(profile || path.join(root, 'profile')).load().core_session; if (s) return s; } catch {}
-  try { const s = JSON.parse(fs.readFileSync(path.join(root, 'state', 'last-core.json'), 'utf8')).session; if (typeof s === 'string' && path.isAbsolute(s)) return s; } catch {}
+  const candidates = [];
+  try { const s = JSON.parse(fs.readFileSync(path.join(root, 'state', 'last-core.json'), 'utf8')).session; if (typeof s === 'string' && path.isAbsolute(s)) candidates.push(s); } catch {}
+  try { const { UISettings } = require('../cli/ui-settings.cjs'); const s = new UISettings(profile || path.join(root, 'profile')).load().core_session; if (s) candidates.push(s); } catch {}
+  const read = dir => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'session.json'), 'utf8')); } catch { return null; } };
+  let endpoint = null; try { endpoint = coreEndpoint(env); } catch {}
+  for (const dir of candidates) { const d = read(dir); if (d && endpoint && d.address === endpoint) return dir; }
+  for (const dir of candidates) { if (read(dir)) return dir; }
   return null;
 }
 
@@ -63,6 +76,10 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
     return t;
   };
   const activityLog = new Map(); let activityFrom = 0;
+  // Presence conversation state: its own attached CLI session (client 'damar-presence') + the turns brokered
+  // through it. Core owns the turns; this cache only lets the page re-read what it already sent and received.
+  const CHAT_CLIENT = 'damar-presence';
+  const chatState = { sessionId: null, history: [] };
   async function get(route) {
     if (!readAllowed(route)) throw Error('PRESENCE_ROUTE_DENIED');
     const response = await transport(endpoint + route, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(4000),
@@ -82,11 +99,24 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
       headers: { accept: 'application/json', authorization: 'Bearer ' + token('owner') } });
     return { ok: response.ok, status: response.status, body: await boundedResponse(response).catch(() => null) };
   }
+  // The v1 console API on the same Core authenticates with the console
+  // credential (console-credentials.json); used server-side only.
+  const consoleToken = () => {
+    const t = JSON.parse(fs.readFileSync(path.join(sessionDirectory, 'console-credentials.json'), 'utf8'))['console'];
+    if (typeof t !== 'string' || !t || t.length > 4096 || /[\r\n]/.test(t)) throw Error('INVALID_PRIVATE_CREDENTIAL');
+    return t;
+  };
+  async function consoleGet(route) {
+    const response = await transport(endpoint + route, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(6000),
+      headers: { accept: 'application/json', authorization: 'Bearer ' + consoleToken() } });
+    return { ok: response.ok, status: response.status, body: await boundedResponse(response).catch(() => null) };
+  }
+  let extrasCache = { at: 0, value: null };
   return {
     endpoint,
     async snapshot() {
       try {
-        const [life, sessions, runs, activity, media] = await Promise.all(['/api/r9/lifecycle', '/api/r9/sessions', '/api/r9/pandawa/runs', '/api/r9/activity?from=' + activityFrom, '/api/r9/media'].map(get));
+        const [life, sessions, runs, activity, media, provider] = await Promise.all(['/api/r9/lifecycle', '/api/r9/sessions', '/api/r9/pandawa/runs', '/api/r9/activity?from=' + activityFrom, '/api/r9/media', '/api/r9/provider'].map(get));
         if (!life.ok || life.body?.success !== true) return { reachable: false, status: life.status };
         const fresh = activity.ok && activity.body?.success === true ? activity.body.data : null;
         if (fresh) {
@@ -94,15 +124,74 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
           for (const k of [...activityLog.keys()].sort((a, b) => a - b).slice(0, Math.max(0, activityLog.size - 200))) activityLog.delete(k);
           activityFrom = Number.isSafeInteger(fresh.next) ? fresh.next : activityFrom;
         }
-        return { reachable: true, asOf: new Date().toISOString(), lifecycle: life.body.data,
+        let mataDewa = null;
+        try {
+          const st = await get('/api/r9/mata-dewa/status');
+          if (st.ok && st.body?.success === true) {
+            mataDewa = { status: st.body.data, feeds: {} };
+            const want = mataDewa.status.consent ? (mataDewa.status.areas?.length ? ['weather', 'earthquakes', 'disasters'] : ['earthquakes', 'disasters']) : [];
+            for (const fid of want) {
+              try { const fr = await get('/api/r9/mata-dewa/feeds/' + fid); if (fr.ok && fr.body?.success === true) mataDewa.feeds[fid] = fr.body.data; } catch {}
+            }
+          }
+        } catch {}
+        return { reachable: true, asOf: new Date().toISOString(), lifecycle: life.body.data, mataDewa,
           sessions: sessions.ok ? sessions.body?.data?.sessions || [] : null, runs: runs.ok ? runs.body?.data?.runs || [] : null,
           media: media.ok && media.body?.success === true ? media.body.data : null,
+          providers: provider.ok && provider.body?.success === true ? provider.body.data : null,
           activity: [...activityLog.values()], activityAvailable: !!fresh };
       } catch { return { reachable: false, status: 0 }; }
     },
     // UI language: Core's shared CLI appearance key cli.language ('en'|'id'); unset or unavailable -> English.
     async language() {
       try { const r = await get('/api/r9/cli/settings'); return r.ok && r.body?.data?.cli?.language === 'id' ? 'id' : 'en'; } catch { return 'en'; }
+    },
+    // The pending permission's command detail, read with the OWNER credential:
+    // the presence-role activity feed redacts `detail`, but the owner deciding
+    // in his own surface must see WHAT he is deciding (Owner 2026-11-28).
+    // Returns a short plain string or null.
+    async permissionDetail(permissionId) {
+      const r = await ownerGet('/api/r9/activity');
+      const events = r.body?.data?.events || [];
+      const ev = events.find(e => e.kind === 'permission' && e.permissionId === permissionId);
+      return ev && typeof ev.detail === 'string' ? ev.detail.replace(/[\x00-\x1f\x7f-\x9f]/g, ' ').slice(0, 140) : null;
+    },
+    // Key-point extras for the Presence portals (Owner 2026-11-28): Devices,
+    // Capabilities, Memory, Projects and Finance render REAL Core data, never
+    // a bounce placeholder. Same stores Control reads. Cached 20 s.
+    async extras() {
+      if (extrasCache.value && Date.now() - extrasCache.at < 20000) return extrasCache.value;
+      const [budget, gateway, sessionsR, mem, mcp, plugins, productivity] = await Promise.all([
+        ownerGet('/api/r9/provider/budget').catch(() => null),
+        ownerGet('/api/r9/gateway').catch(() => null),
+        ownerGet('/api/r9/sessions').catch(() => null),
+        consoleGet('/api/v1/console/memory/stats').catch(() => null),
+        consoleGet('/api/v1/console/mcp/servers').catch(() => null),
+        consoleGet('/api/v1/console/plugins').catch(() => null),
+        consoleGet('/api/v1/console/mcp/productivity').catch(() => null),
+      ]);
+      const d = r => (r && r.ok && r.body?.success === true ? r.body.data : null);
+      const b = d(budget), g = d(gateway), memd = d(mem), mcpd = d(mcp), plugd = d(plugins), prod = d(productivity);
+      const sessions = d(sessionsR)?.sessions || [];
+      const cwds = new Map();
+      for (const s2 of sessions) {
+        const c = typeof s2.cwd === 'string' ? s2.cwd : '';
+        if (!c) continue;
+        const e = cwds.get(c) || { cwd: c, sessions: 0, open: 0 };
+        e.sessions++; if (!s2.closed) e.open++;
+        cwds.set(c, e);
+      }
+      const prodServers = Array.isArray(prod?.servers) ? prod.servers : [];
+      const connected = prodServers.filter(x => x.connected === true || x.status === 'connected' || x.state === 'connected').length;
+      const value = {
+        finance: b ? { attempts: b.attempts ?? null, totalTokens: b.totalTokens ?? null, limitTokens: b.limits?.totalTokens ?? null, blocked: !!b.blocked } : null,
+        devices: { gateway: g ? { enabled: !!g.settings?.enabled, port: g.settings?.port ?? null, keys: Array.isArray(g.keys) ? g.keys.length : 0 } : null },
+        projects: [...cwds.values()].slice(0, 6),
+        memory: memd ? { memories: memd.memories?.total ?? null, entities: memd.entities?.total ?? null, documents: memd.documents?.total ?? null, embeddings: !!memd.embeddings?.available } : null,
+        capabilities: (mcpd || plugd || prod) ? { toolsExposed: mcpd?.server?.exposed ?? null, toolsTotal: mcpd?.server?.total ?? null, clientsRunning: mcpd?.clients?.running ?? null, plugins: plugd?.total ?? null, mcpServers: prodServers.length || null, mcpConnected: connected } : null,
+      };
+      extrasCache = { at: Date.now(), value };
+      return value;
     },
     // Owner decision on a pending permission (main process only). permissionId/turnId come from Core's own activity
     // feed, never from the renderer; decision is one of once|session|deny.
@@ -178,6 +267,142 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
       const clean = messages.slice(-16).map(m => ({ role: m?.role === 'assistant' ? 'assistant' : 'user', content: String(m?.content ?? '') }));
       return ownerPost('/api/r9/presence/onboarding/chat', { messages: clean }, 90000);
     },
+    // Presence conversation: a real Core agent turn (turns.start) on Presence's own attached session - the same
+    // machinery the CLI uses, with the Owner-configured provider. The session lease is refreshed while a turn
+    // runs (Core stops work whose lease lapses). Permission pauses surface in the notch/CLI as usual; this call
+    // simply waits for the final event, bounded to 4 minutes.
+    async ensureChatSession() {
+      const cwd = require('node:os').homedir();
+      if (chatState.sessionId) {
+        const attached = await ownerPost('/api/r9/sessions/' + chatState.sessionId + '/attach', { client: CHAT_CLIENT });
+        if (attached.ok) return chatState.sessionId;
+        chatState.sessionId = null;
+      }
+      // Reuse an existing session for this client when Core still knows one
+      // (e.g. after a Presence relaunch): creating a fresh session on every
+      // launch piled up identical 'Damar Presence' sessions in the registry.
+      try {
+        const list = await ownerGet('/api/r9/sessions');
+        const rows = Array.isArray(list.body?.data?.sessions) ? list.body.data.sessions : [];
+        const prior = rows.find(s => s && s.client === CHAT_CLIENT && !s.closed && typeof (s.sessionId || s.id) === 'string');
+        const priorId = prior && (prior.sessionId || prior.id);
+        if (priorId) {
+          const re = await ownerPost('/api/r9/sessions/' + priorId + '/attach', { client: CHAT_CLIENT });
+          if (re.ok) { chatState.sessionId = priorId; return priorId; }
+        }
+      } catch {}
+      const created = await ownerPost('/api/r9/sessions', { client: CHAT_CLIENT, cwd, title: 'Damar Presence' });
+      const id = created.body?.data?.sessionId;
+      if (!created.ok || typeof id !== 'string') throw Error('PRESENCE_SESSION_CREATE_FAILED');
+      chatState.sessionId = id;
+      return id;
+    },
+    async chat(text, onDelta, onPhase) {
+      if (typeof text !== 'string' || !text.trim() || text.length > 8000) return { ok: false, status: 400, error: 'TEXT_REQUIRED' };
+      const cwd = require('node:os').homedir();
+      let cliSession = await this.ensureChatSession();
+      let started = await ownerPost('/api/r9/turns', { cliSession, client: CHAT_CLIENT, text, cwd }, 30000);
+      if (!started.ok && ['SESSION_NOT_ATTACHED', 'SESSION_NOT_FOUND', 'SESSION_CLOSED'].includes(started.body?.error)) {
+        chatState.sessionId = null;
+        cliSession = await this.ensureChatSession();
+        started = await ownerPost('/api/r9/turns', { cliSession, client: CHAT_CLIENT, text, cwd }, 30000);
+      }
+      if (!started.ok || typeof started.body?.data?.turnId !== 'string') return { ok: false, status: started.status, error: started.body?.error || 'TURN_START_FAILED' };
+      const turnId = started.body.data.turnId;
+      // Turn accepted by Core: the surface's single status statement moves
+      // from Mengirim to Berpikir here (the first delta moves it to Menjawab).
+      if (onPhase) { try { onPhase('berpikir'); } catch {} }
+      // Action/tool turns legitimately run for minutes (shell steps, media
+      // actions). The deadline must outlast them: expiring it cancels the
+      // SSE stream, which Core reads as CLIENT_DISCONNECTED and kills the
+      // turn - a Presence-side timeout must never poison a working turn.
+      const deadline = Date.now() + 900000;
+      // Progressive path first: consume the turn's SSE event stream so the
+      // surface renders the reply as it is produced (delta events), not only
+      // when it completes. Any stream failure falls back to the status poll.
+      try {
+        const streamed = await this._streamTurn(turnId, text, deadline, onDelta, cliSession, onPhase);
+        if (streamed) {
+          if (streamed.ok) return streamed;
+          return this._failTurn(text, streamed.error, streamed.status);
+        }
+      } catch {}
+      let lastAttach = Date.now();
+      const pollDeadline = Date.now() + 300000;
+      while (Date.now() < pollDeadline) {
+        await new Promise(r => setTimeout(r, 800));
+        if (Date.now() - lastAttach > 10000) { lastAttach = Date.now(); try { await ownerPost('/api/r9/sessions/' + cliSession + '/attach', { client: CHAT_CLIENT }); } catch {} }
+        const st = await ownerGet('/api/r9/turns/' + turnId);
+        const fin = st.body?.data?.final;
+        if (fin) {
+          if (fin.status === 'COMPLETED' && typeof fin.text === 'string') {
+            chatState.history.push({ role: 'user', content: text }, { role: 'assistant', content: fin.text });
+            if (chatState.history.length > 40) chatState.history.splice(0, chatState.history.length - 40);
+            return { ok: true, answer: fin.text, turnId };
+          }
+          return this._failTurn(text, fin.error || ('TURN_' + (fin.status || 'FAILED')), 502);
+        }
+      }
+      return this._failTurn(text, 'TURN_TIMEOUT', 504);
+    },
+    // Error containment (Owner 2026-11-28): a failed turn is answered INSIDE
+    // the conversation with an honest Indonesian notice and recorded in the
+    // history, so the surface never flips to UNAVAILABLE over one bad turn
+    // and the next message continues on the same live session.
+    _failTurn(text, error, status) {
+      const code = typeof error === 'string' && error ? error : 'TURN_FAILED';
+      const notice = code === 'TURN_TIMEOUT'
+        ? 'Permintaan itu kuhentikan karena melewati batas waktu pengerjaan. Percakapan tetap tersambung, silakan lanjut.'
+        : 'Maaf, permintaan itu gagal dijalankan (' + code + '). Percakapan tetap tersambung, silakan lanjut.';
+      chatState.history.push({ role: 'user', content: text }, { role: 'assistant', content: notice });
+      if (chatState.history.length > 40) chatState.history.splice(0, chatState.history.length - 40);
+      return { ok: false, status: status || 502, error: code, notice };
+    },
+    async _streamTurn(turnId, text, deadline, onDelta, cliSession, onPhase) {
+      const response = await transport(endpoint + '/api/r9/turns/' + turnId + '/events?from=0', { method: 'GET', redirect: 'error',
+        headers: { accept: 'text/event-stream', authorization: 'Bearer ' + token('owner') } });
+      if (!response.ok || !response.body?.getReader) return null;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '', acc = '', lastAttach = Date.now();
+      const keepAlive = async () => {
+        if (Date.now() - lastAttach <= 10000) return;
+        lastAttach = Date.now();
+        try { await ownerPost('/api/r9/sessions/' + cliSession + '/attach', { client: CHAT_CLIENT }); } catch {}
+      };
+      while (Date.now() < deadline) {
+        const chunk = await Promise.race([reader.read(), new Promise(r => setTimeout(() => r(null), 5000))]);
+        if (!chunk) { await keepAlive(); continue; }
+        if (chunk.done) break;
+        buf += decoder.decode(chunk.value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const rawEv = buf.slice(0, idx); buf = buf.slice(idx + 2);
+          const line = rawEv.split('\n').find(l => l.startsWith('data:'));
+          if (!line) continue;
+          let ev; try { ev = JSON.parse(line.slice(5).trim()); } catch { continue; }
+          if (ev.type === 'delta' && typeof ev.text === 'string') { acc += ev.text; if (onDelta) { try { onDelta(acc); } catch {} } }
+          // Progress phases for the surface's single status statement and its
+          // silence watchdog: tool steps mean the turn is acting, reasoning
+          // means it is still thinking. Neither carries answer text.
+          if ((ev.type === 'tool_call' || ev.type === 'tool') && onPhase) { try { onPhase('bertindak'); } catch {} }
+          if (ev.type === 'reasoning' && onPhase) { try { onPhase('berpikir'); } catch {} }
+          if (ev.type === 'final') {
+            try { reader.cancel(); } catch {}
+            if (ev.status === 'COMPLETED' && typeof ev.text === 'string') {
+              chatState.history.push({ role: 'user', content: text }, { role: 'assistant', content: ev.text });
+              if (chatState.history.length > 40) chatState.history.splice(0, chatState.history.length - 40);
+              return { ok: true, answer: ev.text, turnId };
+            }
+            return { ok: false, status: 502, error: ev.error || ('TURN_' + (ev.status || 'FAILED')) };
+          }
+        }
+        await keepAlive();
+      }
+      try { reader.cancel(); } catch {}
+      return null;
+    },
+    conversationHistory() { return chatState.history.slice(); },
     // 404 (route not mounted yet) or any failure -> prototype defaults; source says which.
     async settings() {
       try {

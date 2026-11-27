@@ -94,7 +94,7 @@
     #damarIsland[data-state="expanded"] .di-head { height:34px; }
     #damarIsland[data-state="expanded"] .di-stage { display:block; position:absolute; z-index:2; left:10px; top:42px; bottom:10px; width:108px; }
     #damarIsland .di-body { display:none; }
-    #damarIsland[data-state="expanded"] .di-body { position:relative; z-index:1; height:100%; box-sizing:border-box; display:flex; flex-direction:column; justify-content:center; gap:4px; background:#141518; border:1px solid rgba(255,255,255,.035); border-radius:20px; padding:6px 16px 6px 108px; overflow:hidden; }
+    #damarIsland[data-state="expanded"] .di-body { position:relative; z-index:1; height:100%; box-sizing:border-box; display:flex; flex-direction:column; justify-content:center; gap:6px; background:#141518; border:1px solid rgba(255,255,255,.035); border-radius:20px; padding:6px 16px 6px 108px; overflow:hidden; }
     #damarIsland[data-state="expanded"][data-view="permission"] { height:200px; }
     /* Greeting view (640x150): the stage zone centers ON the card (their
        greeting botX 320 / botY ~90 analog: the card spans y 42..140, so
@@ -105,8 +105,9 @@
     #damarIsland[data-state="expanded"][data-view="greeting"] .di-pills, #damarIsland[data-state="expanded"][data-view="greeting"] .di-media, #damarIsland[data-state="expanded"][data-view="greeting"] .di-controls { display:none; }
     #damarIsland .di-status { margin:0; color:#f5f6f8; font-size:13px; font-weight:500; line-height:22px; min-height:22px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     #damarIsland[data-attention="permission"] .di-status { font-size:15px; font-weight:600; }
-    #damarIsland .di-mic { display:none; width:7px; height:7px; border-radius:50%; background:#e5c158; box-shadow:0 0 6px #e5c158; }
-    #damarIsland[data-mic="on"] .di-mic { display:inline-block; }
+    /* Owner 2026-11-27: garis status ("Core READY ...") tidak tampil di Notch yang mengembang -
+       konten (media, peringatan, persetujuan) langsung tampil tanpa header status. */
+    #damarIsland[data-state="expanded"] .di-status { display:none; }
     /* Coucou pill system (style.css): activity pills are 28 px tall,
        radius 999, card-flat #0e0f11 with a rgba(255,255,255,.14) border;
        buttons are pill-shaped (500 12.5px, padding 7px 13px, radius
@@ -115,7 +116,7 @@
        with Coucou's red detail text #ff8d97. The [hidden] guards below
        are load-bearing: a display:flex row would otherwise override the
        hidden attribute (the old media-row bug). */
-    #damarIsland .di-pills { display:flex; gap:6px; flex-wrap:nowrap; max-height:28px; overflow:hidden; }
+    #damarIsland .di-pills { display:flex; gap:6px; flex-wrap:nowrap; max-height:28px; overflow:hidden; justify-content:center; }
     #damarIsland .di-pills[hidden] { display:none; }
     #damarIsland .di-pill { height:28px; display:inline-flex; align-items:center; font-size:12px; font-weight:500; letter-spacing:.02em; color:#f5f6f8; background:#0e0f11; border:1px solid rgba(255,255,255,.14); border-radius:999px; padding:0 11px; white-space:nowrap; min-width:0; flex:0 1 auto; }
     #damarIsland .di-pill-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -132,14 +133,53 @@
        uploader), source app, play state, the transport actions Core
        supports. No music-only fields or assumptions: a YouTube video
        renders exactly like a song. */
-    #damarIsland .di-media { display:flex; align-items:center; gap:10px; }
+    #damarIsland .di-media { display:flex; flex-direction:column; gap:8px; }
+    #damarIsland .di-media-main { display:flex; align-items:center; gap:12px; }
     #damarIsland .di-media[hidden] { display:none; }
     #damarIsland .di-media-info { display:flex; flex-direction:column; min-width:0; flex:1; }
-    #damarIsland .di-media-title { font-size:15px; font-weight:600; color:#f5f6f8; line-height:18px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #damarIsland .di-media-title { font-size:15px; font-weight:600; letter-spacing:.01em; color:#f5f6f8; line-height:19px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; white-space:normal; overflow:hidden; max-height:38px; }
     #damarIsland .di-media-sub { font-size:13px; font-weight:400; color:#9398a1; line-height:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     #damarIsland .di-media-actions { display:flex; gap:8px; flex:none; }
+    /* Ambience (Owner 2026-11-27): the Notch borrows Idle Presence's gold-ember warmth. A soft ember wash
+       on the media card and the expanded card, breathing very slowly, fully calm while media plays, and
+       the surface stays semi-transparent: no opaque panel is added anywhere. */
+    #damarIsland .di-media { background:linear-gradient(100deg, rgba(251,146,60,.17), rgba(251,146,60,.05) 62%, rgba(251,146,60,.02)); border:1px solid rgba(245,197,88,.24); border-radius:14px; padding:10px 12px; animation:diEmberPulse 7s ease-in-out infinite; }
+    #damarIsland .di-media-title { color:#fbeecb; }
+    #damarIsland[data-state="expanded"] .di-body { background:radial-gradient(130% 100% at 16% 0%, rgba(251,146,60,.13), rgba(20,21,24,0) 55%), #141518; }
+    #damarIsland[data-state="compact"] { box-shadow:0 10px 34px rgba(0,0,0,.5), 0 4px 22px rgba(251,146,60,.10); }
+    @keyframes diEmberPulse { 0%,100% { box-shadow:inset 0 1px 0 rgba(255,255,255,.06), inset 0 0 16px rgba(251,146,60,.07), 0 2px 14px rgba(0,0,0,.25); } 50% { box-shadow:inset 0 1px 0 rgba(255,255,255,.06), inset 0 0 26px rgba(251,146,60,.13), 0 2px 14px rgba(0,0,0,.25); } }
+    #damarIsland[data-media="playing"] .di-media { animation:none; box-shadow:inset 0 1px 0 rgba(255,255,255,.06), inset 0 0 18px rgba(251,146,60,.09), 0 2px 14px rgba(0,0,0,.25); }
+    /* Media cover (Owner 2026-11-28): the Core media feed carries no artwork
+       (title/artist/source only), so the card gives the track a designed
+       ember cover tile: a vinyl-toned disc keyed to the source app's initial,
+       with a tiny ember equalizer that only moves while playback is live.
+       Compact and restrained; no extra render loop (pure CSS). */
+    #damarIsland .di-media-cover { position:relative; flex:none; width:52px; height:52px; border-radius:12px; overflow:hidden; background:radial-gradient(circle at 50% 50%, rgba(251,146,60,.32) 0 24%, rgba(16,17,20,.94) 25% 45%, rgba(251,146,60,.15) 46% 61%, rgba(16,17,20,.95) 62%); border:1px solid rgba(245,197,88,.38); box-shadow:inset 0 0 14px rgba(251,146,60,.22), 0 2px 10px rgba(0,0,0,.35); display:flex; align-items:center; justify-content:center; }
+    #damarIsland .di-media-art { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+    /* Player finish (Owner 2026-11-28): real SMTC artwork when the session
+       provides it, timeline progress from the session, round SVG transport
+       controls, and a dedicated media view height in the per-view system. */
+    #damarIsland .di-media-progress { display:flex; flex-direction:column; gap:4px; }
+    #damarIsland .di-media-bar { height:3px; border-radius:2px; background:rgba(245,197,88,.18); overflow:hidden; }
+    #damarIsland .di-media[data-timeline="none"] .di-media-bar { display:none; }
+    #damarIsland .di-media-fill { height:100%; width:0%; border-radius:2px; background:linear-gradient(90deg, rgba(251,146,60,.75), rgba(245,197,88,.95)); transition:width .6s linear; }
+    #damarIsland .di-media-times { display:flex; justify-content:space-between; font-size:10.5px; color:rgba(245,238,203,.55); font-variant-numeric:tabular-nums; }
+    #damarIsland .di-media-actions button { width:32px; height:32px; padding:0; display:inline-flex; align-items:center; justify-content:center; border-radius:50%; }
+    #damarIsland .di-media-actions svg { width:15px; height:15px; }
+    #damarIsland .di-media .di-ic-pause { display:none; }
+    #damarIsland .di-media[data-playing="true"] .di-ic-pause { display:block; }
+    #damarIsland .di-media[data-playing="true"] .di-ic-play { display:none; }
+    #damarIsland[data-state="expanded"][data-view="media"] { height:196px; }
+    #damarIsland .di-media-cover-letter { font-family:'Cinzel',serif; font-size:19px; font-weight:700; color:#fbeecb; text-shadow:0 0 10px rgba(251,146,60,.55); }
+    #damarIsland .di-media-eq { position:absolute; right:5px; bottom:5px; display:none; align-items:flex-end; gap:2px; height:10px; }
+    #damarIsland[data-media="playing"] .di-media-eq { display:flex; }
+    #damarIsland .di-media-eq i { width:3px; height:10px; border-radius:2px; background:rgba(251,190,90,.92); transform-origin:bottom; animation:diEq 1.15s ease-in-out infinite alternate; }
+    #damarIsland .di-media-eq i:nth-child(2) { animation-delay:.28s; }
+    #damarIsland .di-media-eq i:nth-child(3) { animation-delay:.57s; }
+    @keyframes diEq { from { transform:scaleY(.3); } to { transform:scaleY(1); } }
+    #damarIsland .di-media button:hover { border-color:rgba(245,197,88,.45); color:#fbeecb; }
     #damarIsland .di-media button { padding:7px 10px; }
-    #damarIsland .di-controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    #damarIsland .di-controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; }
     #damarIsland button { border:1px solid transparent; border-radius:999px; padding:7px 13px; background:rgba(255,255,255,.09); color:#f1f2f4; font:500 12.5px/1.25 'Segoe UI',sans-serif; cursor:pointer; }
     #damarIsland button[data-action="allow-once"], #damarIsland button[data-action="presence"] { background:#f5f6f8; color:#0b0c0e; }
     #damarIsland button[data-action="deny"] { color:#ff8d97; }
@@ -163,7 +203,7 @@
   const wake = document.createElement('div'); wake.id = 'damarIslandWake'; wake.setAttribute('aria-hidden','true');
   const island = document.createElement('section');
   island.id = 'damarIsland'; island.dataset.state = 'hidden'; island.setAttribute('aria-label','Damar Notch');
-  island.innerHTML = `<div class="di-head" role="button" tabindex="0" aria-label="Damar Notch"><div class="di-slot" data-slot="mini" aria-hidden="true"></div><span class="di-mic" role="img" aria-label="Microphone on"></span></div><div class="di-stage"><div class="di-slot" data-slot="stage" aria-hidden="true"></div></div><div class="di-body"><p class="di-status" role="status" aria-live="polite">DAMAR Core not connected</p><div class="di-pills" hidden></div><div class="di-media" hidden><div class="di-media-info"><span class="di-media-title"></span><span class="di-media-sub"></span></div><div class="di-media-actions"><button type="button" data-media="previous" aria-label="Previous">&lt;&lt;</button><button type="button" data-media="toggle" aria-label="Play or pause">&#9654;</button><button type="button" data-media="next" aria-label="Next">&gt;&gt;</button></div></div><div class="di-controls"><button type="button" data-action="presence" data-t="returnPresence">Return to Presence</button><button type="button" data-action="dashboard" data-t="dashboard">Control</button><button type="button" data-action="allow-once" data-t="allowOnce" hidden>Allow once</button><button type="button" data-action="allow-session" data-t="allowSession" hidden>Allow for session</button><button type="button" data-action="deny" data-t="deny" hidden>Deny</button></div></div>`;
+  island.innerHTML = `<div class="di-head" role="button" tabindex="0" aria-label="Damar Notch"><div class="di-slot" data-slot="mini" aria-hidden="true"></div></div><div class="di-stage"><div class="di-slot" data-slot="stage" aria-hidden="true"></div></div><div class="di-body"><p class="di-status" role="status" aria-live="polite">DAMAR Core not connected</p><div class="di-pills" hidden></div><div class="di-media" hidden><div class="di-media-main"><div class="di-media-cover" aria-hidden="true"><img class="di-media-art" alt="" hidden><span class="di-media-cover-letter"></span><span class="di-media-eq"><i></i><i></i><i></i></span></div><div class="di-media-info"><span class="di-media-title"></span><span class="di-media-sub"></span></div><div class="di-media-actions"><button type="button" data-media="previous" aria-label="Sebelumnya"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9.5 12z"/></svg></button><button type="button" data-media="toggle" aria-label="Putar atau jeda"><svg class="di-ic-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><svg class="di-ic-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg></button><button type="button" data-media="next" aria-label="Berikutnya"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l10.5-7z"/></svg></button></div></div><div class="di-media-progress"><div class="di-media-bar"><div class="di-media-fill"></div></div><div class="di-media-times"><span class="di-media-pos">0:00</span><span class="di-media-dur">0:00</span></div></div></div><div class="di-controls"><button type="button" data-action="presence" data-t="returnPresence">Return to Presence</button><button type="button" data-action="dashboard" data-t="dashboard">Control</button><button type="button" data-action="allow-once" data-t="allowOnce" hidden>Allow once</button><button type="button" data-action="allow-session" data-t="allowSession" hidden>Allow for session</button><button type="button" data-action="deny" data-t="deny" hidden>Deny</button></div></div>`;
   document.body.append(wake, island);
   const head = island.querySelector('.di-head');
 
@@ -196,14 +236,21 @@
     if (fsm.state === 'orb' && notchEnabled) fsm.scheduleOrbMorph();
   }
   let configKey = '';
-  function configure({ idleToNotchMs, morphMs, notchEnabled: enabled } = {}) {
-    const key = JSON.stringify([idleToNotchMs, morphMs, enabled]);
+  function configure({ orbToNotchSec, notchHideSec, idleToNotchMs, morphMs, notchEnabled: enabled, characterSoundEnabled, characterSoundVolume } = {}) {
+    // Core settings arrive in SECONDS (store rule); the FSM runs on ms - the conversion lives at this boundary.
+    // idleToNotchMs is still accepted for older callers, seconds win when both are present.
+    const orbMs = Number.isFinite(orbToNotchSec) ? orbToNotchSec * 1000 : idleToNotchMs;
+    const hideMs = Number.isFinite(notchHideSec) ? notchHideSec * 1000 : undefined;
+    const key = JSON.stringify([orbMs, hideMs, morphMs, enabled, characterSoundEnabled, characterSoundVolume]);
     if (key === configKey) return; // identical pushes (every Core state change carries the config) change nothing
     configKey = key;
     if (typeof enabled === 'boolean') notchEnabled = enabled;
     // Only a real change reschedules the running orb window (repeated identical config must not reset it).
-    if ((Number.isFinite(idleToNotchMs) && idleToNotchMs !== fsm.orbMorphAfterMs) || (Number.isFinite(morphMs) && morphMs !== fsm.morphMs))
-      fsm.setIntervals({ orbMorphAfterMs: idleToNotchMs, morphMs });
+    if ((Number.isFinite(orbMs) && orbMs !== fsm.orbMorphAfterMs) || (Number.isFinite(morphMs) && morphMs !== fsm.morphMs) || (Number.isFinite(hideMs) && hideMs !== fsm.notchHideAfterMs))
+      fsm.setIntervals({ orbMorphAfterMs: orbMs, morphMs, notchHideAfterMs: hideMs });
+    // Character sound: Core-owned mute + volume (the character gates itself further on media playback).
+    if (typeof characterSoundEnabled === 'boolean') slot.invoke('setSfxEnabled', characterSoundEnabled);
+    if (Number.isFinite(characterSoundVolume)) slot.invoke('setSoundVolume', Math.max(0, Math.min(100, characterSoundVolume)) / 100);
     if (voiceActive && fsm.state === 'orb') fsm.cancelTimers();
     else if (!notchEnabled) {
       fsm.cancelTimers();
@@ -255,10 +302,16 @@
   // 248) belong to views Damar does not have (upload, mail, recap,
   // whatsNew). Reads state only, so it is safe to call from any handler.
   let greetingViewUntil = 0, viewTimer = 0;
+  // Intro gating (Owner 2026-11-28): the greeting/intro view belongs ONLY to
+  // the orb -> Notch arrival (orb -> morph -> expand with intro -> settle to
+  // compact standby). Expanding from standby at any other time shows content
+  // immediately, no intro.
+  let orbArrivalPending = false, orbIntro = false;
   function expandedView() {
     if (fsm.state !== 'expanded') return 'default';
     if (Date.now() < greetingViewUntil) return 'greeting';
     if (permission) return 'permission';
+    if (mediaPresent) return 'media';
     return 'default';
   }
   function syncIslandView() { island.dataset.view = expandedView(); }
@@ -267,11 +320,20 @@
     island.setAttribute('aria-expanded', String(to === 'expanded'));
     syncOrbMorph(to);
     assertNoCoexistence(to);
+    if (to === 'morph') orbArrivalPending = true;
+    if (to === 'hidden') { orbArrivalPending = false; orbIntro = false; }
+    if (to === 'compact' && orbArrivalPending) {
+      orbArrivalPending = false; orbIntro = true;
+      setTimeout(() => { if (fsm.state === 'compact' && orbIntro) fsm.transition('expanded'); }, 40);
+    }
     if (to === 'expanded') {
       setClickThrough(false);
-      greetingViewUntil = Date.now() + 2100; // the greeting view holds ~2 s
-      clearTimeout(viewTimer);
-      viewTimer = setTimeout(syncIslandView, 2150);
+      if (orbIntro) {
+        orbIntro = false;
+        greetingViewUntil = Date.now() + 2100; // the greeting view holds ~2 s
+        clearTimeout(viewTimer);
+        viewTimer = setTimeout(() => { syncIslandView(); if (fsm.state === 'expanded' && !pointerInside) fsm.transition('compact'); }, 2150);
+      } else greetingViewUntil = 0;
     }
     syncIslandView();
     if (to === 'hidden' || to === 'compact') updateHitTest();
@@ -299,15 +361,11 @@
         fsm.reveal();
         return; // jangan jalankan compact-check dengan rect/pointerInside lama pada event yang sama
       }
-      // Mouse-only close: pointer terlacak jauh dari notch saat compact -> hidden,
-      // tapi HANYA bila state compact sudah stabil (bukan sisa event mouseleave
-      // yang baru saja collapse expanded->compact pada pointermove yang sama).
-      const seqAtEntry = transitionSeq;
-      if (fsm.state === 'compact' && !pointerInside && y > islandRect.bottom + 24) {
-        setTimeout(() => {
-          if (fsm.state === 'compact' && transitionSeq === seqAtEntry) fsm.pointerLeft();
-        }, 90);
-      }
+      // (Dulu: compact + pointer jauh + mousemove -> pointerLeft -> hidden
+      // dalam ~90 ms. Itu membunuh notch beberapa detik setelah morph dari
+      // orb dan menabrak aturan Owner notchHideSec 1800 detik; dihapus.
+      // Notch compact kini hanya hilang lewat timer notchHideSec atau
+      // dismiss eksplisit.)
     }
   }
   let transitionSeq = 0;
@@ -323,12 +381,9 @@
     if (event.target.closest('#siriOrbDock')) return;
     if (!island.contains(event.target)) fsm.dismiss();
   }, true);
-  // Klik orb standby: morph orb -> notch (bukan coexistence).
-  document.addEventListener('click', event => {
-    if (!document.body.classList.contains('siri-dock-active') || !event.target.closest('#siriOrbDock')) return;
-    event.preventDefault(); event.stopImmediatePropagation();
-    fsm.reveal();
-  }, true);
+  // Klik orb standby TIDAK lagi memicu morph: peta gestur orb (Owner
+  // 2026-11-28) hidup di halaman: kiri = suara, kanan 1x = Presence,
+  // kanan 2x = Notch (reveal lewat __DAMAR_ISLAND__).
   const activate = () => { if (fsm.state === 'hidden' || fsm.state === 'orb') fsm.reveal(); else fsm.toggle(); };
   head.addEventListener('click', activate);
   head.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); } });
@@ -345,7 +400,10 @@
       // seal states) at click time; the decision itself still round-trips
       // through decidePermission, unchanged.
       slot.invoke('reactDecision', action === 'deny' ? 'deny' : 'approve');
-      await desktop()?.decidePermission?.({ permissionId: permission.permissionId, decision });
+      const res = await desktop()?.decidePermission?.({ permissionId: permission.permissionId, decision });
+      // A failed delivery must not look like a decision: say so on the status
+      // line; the next Core snapshot re-renders the still-pending request.
+      if (res && res.ok === false) { const el = island.querySelector('.di-status'); if (el) el.textContent = 'Keputusan gagal terkirim. Coba lagi.'; }
     } else if (action === 'presence') {
       fsm.hide();
       if (typeof window.wakeFromMiniOrb === 'function') window.wakeFromMiniOrb();
@@ -511,12 +569,14 @@
   let lastPending = 0, permission = null, statusText = '';
   const T = (k, ...a) => window.DAMAR_I18N?.t(k, ...a) ?? k;
   const btn = a => island.querySelector(`[data-action="${a}"]`);
-  function renderLabels() { island.querySelectorAll('[data-t]').forEach(b => { b.textContent = T(b.dataset.t); }); island.querySelector('.di-mic').setAttribute('aria-label', T('micOn')); }
+  function renderLabels() { island.querySelectorAll('[data-t]').forEach(b => { b.textContent = T(b.dataset.t); }); }
   function renderStatus() {
     const el = island.querySelector('.di-status');
     if (!permission) { el.textContent = statusText; return; }
     const p = permission;
-    el.textContent = p.allowable ? (p.tool === 'workspace_edit' ? T('permEdit', p.file, p.added, p.removed) : T('permWrite', p.file, p.added, p.removed)) : T('permOther', T('tool', p.tool));
+    el.textContent = (p.file && (p.tool === 'workspace_write' || p.tool === 'workspace_edit'))
+      ? (p.tool === 'workspace_edit' ? T('permEdit', p.file, p.added, p.removed) : T('permWrite', p.file, p.added, p.removed))
+      : (p.detail ? T('permAsk', T('tool', p.tool), p.detail) : T('permOther', T('tool', p.tool)));
   }
   window.addEventListener('damar-presence-attention', e => {
     const pending = Number(e.detail?.pendingPermissions) || 0;
@@ -532,6 +592,10 @@
     if (pending > 0) slot.invoke('setEmote', 'siaga');
     // A NEW waiting request gets the question reaction (blink + head tilt on a mounted character).
     if (pending > lastPending) slot.invoke('reactQuestion');
+    // A new request presents itself: a compact notch expands into the
+    // permission view (context + full decision set), never a lone button
+    // leaked under another view (Owner 2026-11-28).
+    if (pending > lastPending && fsm.state === 'compact') fsm.transition('expanded');
     if (pending > lastPending && fsm.state === 'hidden' && orbPhaseDone && notchEnabled && !voiceActive) fsm.reveal();
     lastPending = pending; renderStatus(); syncDense(); syncIslandView();
   });
@@ -573,6 +637,25 @@
     syncIslandView();
   });
   const mediaEl = island.querySelector('.di-media');
+  const mediaCoverLetter = island.querySelector('.di-media-cover-letter');
+  const mediaArt = island.querySelector('.di-media-art');
+  const mediaFill = island.querySelector('.di-media-fill');
+  const mediaPosEl = island.querySelector('.di-media-pos');
+  const mediaDurEl = island.querySelector('.di-media-dur');
+  const mediaProg = { pos: 0, dur: 0, at: 0, playing: false };
+  const fmtMediaTime = sec => { const t = Math.max(0, Math.floor(Number(sec) || 0)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
+  function drawMediaProgress(pos) {
+    const dur = mediaProg.dur;
+    mediaEl.dataset.timeline = dur > 0 ? 'bar' : 'none';
+    if (mediaFill) mediaFill.style.width = dur > 0 ? Math.min(100, (pos / dur) * 100) + '%' : '0%';
+    if (mediaPosEl) mediaPosEl.textContent = fmtMediaTime(pos);
+    if (mediaDurEl) mediaDurEl.textContent = dur > 0 ? fmtMediaTime(dur) : '';
+  }
+  setInterval(() => {
+    if (mediaPresent && mediaProg.playing && mediaProg.dur > 0) {
+      drawMediaProgress(Math.min(mediaProg.dur, mediaProg.pos + (Date.now() - mediaProg.at) / 1000));
+    }
+  }, 1000);
   const mediaTitle = island.querySelector('.di-media-title');
   const mediaSub = island.querySelector('.di-media-sub');
   const mediaToggle = island.querySelector('[data-media="toggle"]');
@@ -582,6 +665,7 @@
   window.addEventListener('damar-presence-media', e => {
     const m = e.detail;
     mediaPresent = !!m;
+    island.dataset.media = m ? (m.playing ? 'playing' : 'paused') : 'none';
     sig.mediaPlaying = !!(m && m.playing);
     // A mounted character bounces along while the widget plays (real SMTC signal, via the slot).
     slot.invoke('setMediaPlaying', sig.mediaPlaying);
@@ -593,9 +677,20 @@
       // exactly that; the source app label only loses its .exe suffix.
       mediaTitle.textContent = m.title || 'Unknown';
       const app = String(m.sourceApp || '').replace(/\.exe$/i, '');
+      if (mediaCoverLetter) mediaCoverLetter.textContent = (app || m.title || 'D').trim().charAt(0).toUpperCase();
+      // Real artwork only when the projection sends it (track change); an
+      // omitted field means "unchanged", an empty string means "none".
+      if (m.artwork !== undefined && mediaArt) {
+        if (m.artwork) { mediaArt.src = m.artwork; mediaArt.hidden = false; if (mediaCoverLetter) mediaCoverLetter.style.display = 'none'; }
+        else { mediaArt.hidden = true; mediaArt.removeAttribute('src'); if (mediaCoverLetter) mediaCoverLetter.style.display = ''; }
+      }
+      mediaProg.pos = Number(m.positionSec) || 0;
+      mediaProg.dur = Number(m.durationSec) || 0;
+      mediaProg.at = Date.now();
+      mediaProg.playing = !!m.playing;
+      drawMediaProgress(mediaProg.pos);
       mediaSub.textContent = [m.artist, app].filter(Boolean).join(' · ');
       mediaEl.dataset.playing = m.playing ? 'true' : 'false';
-      mediaToggle.innerHTML = m.playing ? '&#10073;&#10073;' : '&#9654;';
       mediaToggle.dataset.action2 = m.playing ? 'pause' : 'play';
     }
     syncDense();

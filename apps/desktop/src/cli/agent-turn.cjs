@@ -96,7 +96,7 @@ async function runTurn({ client, clientId, rl, text, cwd, signal, tr }) {
   for (const card of cards.values()) { card.settled = true; rl.dismissPermission?.(); }   // turn ended: no card stays open
   signal?.removeEventListener('abort', cancel);
   rl.interrupted = final.status === 'CANCELLED'; rl.doneAt = final.status === 'COMPLETED' ? Date.now() : null;
-  if (final.status === 'CANCELLED') add({ role: 'assistant', kind: 'notice', text: tr('! dihentikan — giliran dibatalkan oleh pengguna.', '! interrupted — the turn was cancelled by the user.') });
+  if (final.status === 'CANCELLED') add({ role: 'assistant', kind: 'notice', text: tr('! dihentikan, giliran dibatalkan oleh pengguna.', '! interrupted, the turn was cancelled by the user.') });
   if (final.status === 'FAILED') add({ role: 'assistant', kind: 'notice', text: '! ' + (PROVIDER_ERRORS[final.errorKind]?.(tr) || tr('Giliran gagal.', 'The turn failed.')) + ' (' + String(final.error || 'UNKNOWN').slice(0, 120) + ')' });
   return final;
 }

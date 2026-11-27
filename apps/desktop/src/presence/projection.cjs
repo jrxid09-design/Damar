@@ -14,7 +14,7 @@ const RUN_STATE = { ACCEPTED: 'ACTIVE', RUNNING: 'ACTIVE', COMPLETED: 'COMPLETED
 function project(core, { notificationPrivacy = 'redacted' } = {}) {
   const privacy = PRIVACY.includes(notificationPrivacy) ? notificationPrivacy : 'redacted';
   if (!core || core.reachable !== true) {
-    return { status: 'NOT_CONNECTED', reason: 'DAMAR Core is not reachable.', presence: null, approvals: null, missions: null, notifications: null };
+    return { status: 'NOT_CONNECTED', reason: 'DAMAR Core tidak terjangkau.', presence: null, approvals: null, missions: null, notifications: null };
   }
   const o = core.lifecycle?.outstanding || {};
   const n = k => (Number.isSafeInteger(o[k]) && o[k] >= 0 ? o[k] : 0);
@@ -28,7 +28,7 @@ function project(core, { notificationPrivacy = 'redacted' } = {}) {
   const raw = [];
   if (pending) raw.push({ kind: 'permission_request', summary: `${pending} permission request${pending === 1 ? '' : 's'} waiting. Answer in DAMAR CLI.`, privacy_sensitivity: 'NORMAL', urgency: 'HIGH' });
   for (const r of (core.runs || []).slice(-8)) if (r.state === 'FAILED' || r.state === 'OUTCOME_UNKNOWN')
-    raw.push({ kind: 'pandawa_run', summary: `Pandawa ${text(r.worker, 20)} ${r.state === 'FAILED' ? 'failed' : 'outcome unknown'}: ${text(r.error || r.reason, 80) || ''}`.trim(), privacy_sensitivity: 'SENSITIVE', urgency: 'NORMAL' });
+    raw.push({ kind: 'pandawa_run', summary: `Pandawa ${text(r.worker, 20)} ${r.state === 'FAILED' ? 'gagal' : 'hasil belum diketahui'}: ${text(r.error || r.reason, 80) || ''}`.trim(), privacy_sensitivity: 'SENSITIVE', urgency: 'NORMAL' });
   const notifications = privacy === 'hidden' ? [] : raw.map((x, i) => ({
     notification_id: null, // no Core dismiss route: Presence cannot dismiss
     source_ref: { entity_type: x.kind, entity_id: String(i) },
@@ -41,12 +41,48 @@ function project(core, { notificationPrivacy = 'redacted' } = {}) {
   const media = projectMedia(core.media);
   return {
     status: 'CONNECTED', reason: '',
+    providers: projectProviders(core.providers),
+    matadewa: projectMataDewa(core.mataDewa),
     presence: { simulated: false, source: 'damar-core', lifecycle: lifecycleState, asOf: core.asOf || null,
       activity: { activeTurns, pendingPermissions: pending, activePandawaRuns: activeRuns, sessions: sessions.length },
       sessionPills, media,
       // Voice state is not read from Core here, and is never used to infer health.
       voice: { available: false, state: 'Unknown' } },
     approvals, missions, notifications,
+  };
+}
+
+// Provider/model status for the page's Models portal: the registry's own view (GET /api/r9/provider),
+// allowlisted to status fields only - no base URLs and no key material ever cross into the surface.
+function projectProviders(data) {
+  if (!data || typeof data !== 'object') return null;
+  const rows = (Array.isArray(data.providers) ? data.providers : []).map(p => ({
+    id: text(p.id, 40), label: text(p.label, 60), kind: text(p.kind, 20),
+    baseUrl: text(p.baseUrl, 120),
+    model: text(p.model, 80), executable: p.executable === true,
+    grantStatus: text(p.grantStatus, 20), grantModel: text(p.grant?.model, 80),
+    authorizedModels: (Array.isArray(p.authorizedModels) ? p.authorizedModels : []).map(m => text(m, 80)).filter(Boolean).slice(0, 8),
+  }));
+  const activeId = text(data.active, 40);
+  const activeRow = rows.find(r => r.id === activeId) || null;
+  return { active: activeId, model: activeRow?.model || '', executable: activeRow?.executable === true,
+    liveInference: data.liveInferenceAuthorized === true, providers: rows };
+}
+
+// Mata Dewa for the Presence portal: watch points + general public feeds
+// (global feeds when no watch point exists), allowlisted display fields only.
+function projectMataDewa(m) {
+  if (!m || typeof m !== 'object') return null;
+  const feedItems = (feed, pick) => {
+    const items = feed?.results?.[0]?.items;
+    return Array.isArray(items) ? items.slice(0, 4).map(pick).filter(Boolean) : [];
+  };
+  return {
+    consent: m.status?.consent === true,
+    areas: (Array.isArray(m.status?.areas) ? m.status.areas : []).map(a => ({ name: text(a.name, 60), seeded: a.id === 'jakarta' })).filter(a => a.name),
+    earthquakes: m.feeds?.earthquakes ? { attribution: text(m.feeds.earthquakes.attribution, 90), items: feedItems(m.feeds.earthquakes, q => ({ mag: typeof q.magnitude === 'number' ? q.magnitude : null, place: text(q.place, 90), depthKm: typeof q.depthKm === 'number' ? q.depthKm : null })) } : null,
+    disasters: m.feeds?.disasters ? { attribution: text(m.feeds.disasters.attribution, 90), items: feedItems(m.feeds.disasters, d => ({ event: text(d.name || d.type, 90), country: text(d.country, 60), severity: text(d.severity, 30) })) } : null,
+    weather: m.feeds?.weather ? { attribution: text(m.feeds.weather.attribution, 90), items: feedItems(m.feeds.weather, w => ({ temperatureC: typeof w.temperatureC === 'number' ? w.temperatureC : null, sky: text(w.sky || w.symbol, 40) })) } : null,
   };
 }
 
@@ -73,16 +109,35 @@ function projectSessionPills(sessions = [], privacy = 'redacted') {
     };
   }).filter(Boolean);
   rows.sort((a, b) => (a.closed - b.closed) || ((b.updatedAt || 0) - (a.updatedAt || 0)));
-  return rows.slice(0, 8).map(({ closed, ...pill }) => pill);
+  // Identical pills carry no information (several Core sessions share the
+  // title 'Damar Presence' after relaunches): collapse repeats by label,
+  // keeping the most alive state (WORKING > ATTACHED > IDLE > CLOSED).
+  const rank = { WORKING: 3, ATTACHED: 2, IDLE: 1, CLOSED: 0 };
+  const byLabel = new Map();
+  for (const row of rows) {
+    const prev = byLabel.get(row.label);
+    if (!prev || (rank[row.state] || 0) > (rank[prev.state] || 0)) byLabel.set(row.label, row);
+  }
+  return [...byLabel.values()].slice(0, 8).map(({ closed, ...pill }) => pill);
 }
 
 // Now-playing for the music pill (Fase 3a): projected from the SMTC sense in core-host
 // (core.media). Unavailable stays null - the notch shows no pill rather than a fake track.
+// Artwork (the session's real SMTC thumbnail, a data URL from core-host) is only
+// re-sent when the track identity changes; on repeats the field is omitted and
+// the surface keeps the artwork it already shows (the string is heavy).
+let lastArtKey = null;
 function projectMedia(media) {
-  if (!media || media.available !== true) return null;
+  if (!media || media.available !== true) { lastArtKey = null; return null; }
   const status = text(media.status, 20) || 'Unknown';
+  const artKey = [media.title, media.artist, media.sourceApp].join('|');
+  const artChanged = artKey !== lastArtKey;
+  if (artChanged) lastArtKey = artKey;
   return { title: text(media.title, 120), artist: text(media.artist, 80), sourceApp: text(media.sourceApp, 60),
-    status, playing: status === 'Playing' };
+    status, playing: status === 'Playing',
+    positionSec: Number.isFinite(media.positionSec) ? media.positionSec : 0,
+    durationSec: Number.isFinite(media.durationSec) ? media.durationSec : 0,
+    ...(artChanged ? { artwork: typeof media.artwork === 'string' && media.artwork.length < 600000 ? media.artwork : '' } : {}) };
 }
 
 // One status line for the notch (counts only, no user content).
@@ -97,9 +152,9 @@ function statusLine(p) {
 }
 
 // The newest still-pending permission from Core's redacted activity feed (no answer and its turn not final).
-// `allowable`: the notch may offer Allow only when the whole request is visible there — a workspace file write/edit
-// with its file name (and diff counts). Commands, shell, memory, delegation, plugins and Computer Use are Deny-or-CLI.
-const NOTCH_ALLOW = new Set(['workspace_write', 'workspace_edit']);
+// `allowable`: since the Owner ruling of 2026-11-28 the full decision set is
+// offered wherever the request is presented with its key points; the
+// Authority Gate remains the enforcing layer server-side.
 function pendingPermission(activity = []) {
   const answered = new Set(), ended = new Set();
   for (const a of activity) { if (a.kind === 'permission_answer') answered.add(a.permissionId); if (a.kind === 'final') ended.add(a.turnId); }
@@ -107,8 +162,12 @@ function pendingPermission(activity = []) {
   const p = open[open.length - 1];
   if (!p) return null;
   return { turnId: p.turnId, permissionId: p.permissionId, tool: text(p.tool, 40), file: text(p.file, 120),
+    detail: text(p.detail, 140),
     added: Number.isSafeInteger(p.added) ? p.added : null, removed: Number.isSafeInteger(p.removed) ? p.removed : null,
-    allowable: NOTCH_ALLOW.has(p.tool) && !!p.file };
+    // Owner ruling 2026-11-28: wherever a request is presented WITH its key
+    // points (tool, file or command detail), the full decision set is offered
+    // (once / session / deny). The Authority Gate still enforces server-side.
+    allowable: true };
 }
 // Renderer copy of activity rows: allowlisted fields only (the feed is already redacted for the requester role).
 const int = v => (Number.isSafeInteger(v) ? v : null);

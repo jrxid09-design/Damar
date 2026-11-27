@@ -29,16 +29,17 @@ const CHANNELS = Object.freeze({
 });
 
 // The Owner page's read models (prototype main.js:39-43 allowlist), now answered from the cached Core projection.
-// Every mutation the page could ask for is refused: conversation runs in the CLI, notifications have no Core dismiss
-// route, and permission decisions need Owner auth in CLI/Control. Presence never approves anything.
-const UI_READS = Object.freeze({ '/api/ui/presence/state': 'presence', '/api/ui/approvals': 'approvals', '/api/ui/missions': 'missions', '/api/ui/notifications': 'notifications' });
+// Conversation is brokered separately by main.cjs to Core's agent turns; every other mutation the page could
+// ask for is refused: notifications have no Core dismiss route, and permission decisions need Owner auth in
+// CLI/Control. Presence never approves anything.
+const UI_READS = Object.freeze({ '/api/ui/presence/state': 'presence', '/api/ui/approvals': 'approvals', '/api/ui/missions': 'missions', '/api/ui/notifications': 'notifications', '/api/ui/presence/providers': 'providers', '/api/ui/presence/matadewa': 'matadewa' });
 function uiResponse(request, projection) {
   const method = String(request?.method || 'GET').toUpperCase(), route = String(request?.path || '');
   const fail = (kind, status, message) => ({ ok: false, error: { kind, status, message } });
   if (method !== 'GET' || !Object.hasOwn(UI_READS, route)) {
-    if (method === 'POST' && route === '/api/ui/conversations/messages') return fail('NOT_AVAILABLE', 409, 'Conversation runs in DAMAR CLI.');
+    // Conversation routes never reach this policy: main.cjs brokers them to Core's agent turns
+    // (core-presence.chat) before uiResponse is consulted.
     if (method === 'POST' && /^\/api\/ui\/notifications\/[A-Za-z0-9_-]+\/dismiss$/.test(route)) return fail('NOT_AVAILABLE', 409, 'Dismiss notifications in DAMAR Control.');
-    if (method === 'GET' && /^\/api\/ui\/conversations\/dsc_[A-Za-z0-9_-]+$/.test(route)) return fail('NOT_AVAILABLE', 404, 'Conversation history is in DAMAR CLI.');
     return fail('NOT_ALLOWED', 403, 'Runtime operation is not allowed.');
   }
   if (!projection || projection.status !== 'CONNECTED') return fail('UNAVAILABLE', 503, projection?.reason || 'DAMAR Core is not reachable.');

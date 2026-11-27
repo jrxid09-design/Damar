@@ -1,10 +1,10 @@
-// DAMAR Control — Produktivitas (MCP) view. Connect cards for the
+// DAMAR Control, Produktivitas (MCP) view. Connect cards for the
 // productivity MCP suite (src/mcp/productivity): one-click OAuth connect
 // per service, per-service toggles, filesystem folder grants and the
 // Blender bridge target. All state lives in Core; this view only calls
 // /api/v1/console/mcp/productivity/*. Client secrets are write-only:
 // they are sent to Core once and stored in the secret vault, never read
-// back. Tokens never appear here — Core reports connection metadata
+// back. Tokens never appear here, Core reports connection metadata
 // only.
 (function (root) {
   'use strict';
@@ -75,14 +75,14 @@
       H.post('/api/v1/console/mcp/productivity/blender/target', body).then(function (r) { after(r, 'Target Blender disimpan.'); });
     },
     'seed': function () {
-      H.post('/api/v1/console/mcp/productivity/seed', {}).then(function (r) { after(r, 'Server MCP terdaftar di configs/mcp.json — muat ulang Core agar tool tampil.'); });
+      H.post('/api/v1/console/mcp/productivity/seed', {}).then(function (r) { after(r, 'Server MCP terdaftar di configs/mcp.json, muat ulang Core agar tool tampil.'); });
     }
   };
 
   function stateBadge(s) {
     if (s.authType === 'oauth2') {
       if (s.connected) return H.statusBadgeHtml('CONNECTED', s.account && s.account.label ? s.account.label : 'terhubung');
-      if (s.clientConfigured) return H.statusBadgeHtml('READY', 'client tersimpan — siap connect');
+      if (s.clientConfigured) return H.statusBadgeHtml('READY', 'client tersimpan, siap connect');
       return H.statusBadgeHtml('NOT CONFIGURED', 'client OAuth belum diatur');
     }
     if (s.id === 'filesystem') return H.statusBadgeHtml(s.grants && s.grants.length ? 'ACTIVE' : 'IDLE', s.grants && s.grants.length ? s.grants.length + ' folder diizinkan' : 'belum ada folder izin');
@@ -94,13 +94,13 @@
     var reads = s.tools.filter(function (t) { return t.tier === 'read'; }).length;
     var writes = s.tools.length - reads;
     var rows = [
-      H.kv('Autentikasi', s.authType === 'oauth2' ? 'OAuth 2.0 (satu kali login)' : s.authType === 'local' ? 'Lokal — tanpa login' : 'Tanpa login'),
+      H.kv('Autentikasi', s.authType === 'oauth2' ? 'OAuth 2.0 (satu kali login)' : s.authType === 'local' ? 'Lokal, tanpa login' : 'Tanpa login'),
       H.kv('Tool', s.tools.length + ' (' + reads + ' baca · ' + writes + ' tulis/approval)'),
       H.kv('Status', '')
     ];
     var body = H.kvList(rows.slice(0, 2)) + '<div style="margin:6px 0;">' + stateBadge(s) + '</div>';
     body += '<div style="font-size:11.5px;color:var(--text-secondary);">' + s.tools.map(function (t) { return esc(t.name) + (t.tier === 'write' ? ' †' : ''); }).join(' · ') + '</div>';
-    body += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:4px;">† tulis — selalu lewat Authority Gate (approval pemilik).</div>';
+    body += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:4px;">† tulis, selalu lewat Authority Gate (approval pemilik).</div>';
 
     if (s.authType === 'oauth2') {
       if (s.services) {
@@ -135,7 +135,7 @@
         H.btn('Cek bridge', 'data-mp-action="health" data-id="blender"') + '</div>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Pasang addon tools/blender-mcp/damar_blender_addon.py di Blender, lalu Start Server di panel DAMAR MCP (sidebar 3D View).</div>';
       var hb = mp.health.blender;
-      if (hb) body += '<div style="font-size:11.5px;margin-top:6px;">Bridge: ' + (hb.ok ? esc('terhubung — ' + (hb.scene || '') + ', ' + (hb.objects != null ? hb.objects : '?') + ' objek') : esc('tidak terjangkau (' + (hb.error || 'gagal') + ')')) + '</div>';
+      if (hb) body += '<div style="font-size:11.5px;margin-top:6px;">Bridge: ' + (hb.ok ? esc('terhubung, ' + (hb.scene || '') + ', ' + (hb.objects != null ? hb.objects : '?') + ' objek') : esc('tidak terjangkau (' + (hb.error || 'gagal') + ')')) + '</div>';
     }
     if (s.id === 'web') {
       body += '<div style="font-size:11.5px;color:var(--text-secondary);margin-top:8px;">Fetch URL publik menjadi teks terbaca + pencarian web. Target privat/loopback ditolak (anti-SSRF).</div>';
@@ -147,7 +147,7 @@
     H = helpers;
     if (Date.now() - mp.lastLoad > 15000) load();
     var head = H.pageHeader('AI INFRASTRUCTURE • MCP PRODUKTIVITAS', 'Produktivitas (MCP)',
-      'Hubungkan layanan produktivitas sekali — setelah itu tool-nya hidup di Damar dan setiap aksi tulis lewat Authority Gate. Damar bersifat lokal: tidak ada server cloud Damar, jadi setiap pengguna memakai client OAuth miliknya sendiri (dibuat sekali di konsol penyedia, ditempel di sini, tersimpan terenkripsi di vault).',
+      'Hubungkan layanan produktivitas sekali, setelah itu tool-nya hidup di Damar dan setiap aksi tulis lewat Authority Gate. Damar bersifat lokal: tidak ada server cloud Damar, jadi setiap pengguna memakai client OAuth miliknya sendiri (dibuat sekali di konsol penyedia, ditempel di sini, tersimpan terenkripsi di vault).',
       H.btn('Daftarkan semua server ke MCP', 'data-mp-action="seed"', 'btn-primary'));
     if (mp.message) head += '<div class="panel" style="border-left:3px solid var(--damar-accent);"><div class="panel-body" style="font-size:12.5px;">' + esc(mp.message) + '</div></div>';
     if (!mp.data) return head + H.panel('Produktivitas (MCP)', mp.error ? H.statusBadgeHtml('UNAVAILABLE', 'Core ' + mp.error.status + ' · ' + mp.error.error) : '<div style="font-size:12px;color:var(--text-muted);">Memuat dari Core…</div>', { span: 12 });
@@ -165,7 +165,7 @@
       var t = e.target; if (!t.getAttribute || !H) return;
       var sid = t.getAttribute('data-mp-service'); if (!sid) return;
       var body = {}; body[t.getAttribute('data-service')] = t.checked;
-      H.post('/api/v1/console/mcp/productivity/services/' + sid, body).then(function (r) { after(r, 'Layanan diperbarui — scope & tool mengikuti saat connect berikutnya.'); });
+      H.post('/api/v1/console/mcp/productivity/services/' + sid, body).then(function (r) { after(r, 'Layanan diperbarui, scope & tool mengikuti saat connect berikutnya.'); });
     });
   }
 

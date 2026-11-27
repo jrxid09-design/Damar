@@ -1,4 +1,4 @@
-// DAMAR Control — product surface bound to the R9 Core API (no fixtures, no mock approvals).
+// DAMAR Control, product surface bound to the R9 Core API (no fixtures, no mock approvals).
 // Shell, navigation, command palette, drawer and keyboard behaviour follow the accepted CC2-M2 prototype;
 // every datum comes from Core over the same loopback origin with the Owner credential the launcher put in
 // the URL fragment (kept in memory only). Panels Core does not serve say so instead of showing data.
@@ -374,7 +374,7 @@
     return '<span class="badge ' + cls + '"><span class="status-dot ' + dot + '" aria-hidden="true"></span>' + escapeHtml(L(customLabel || s)) + '</span>';
   }
   function pageHeader(kicker, title, subtitle, actions) {
-    return '<div class="page-header"><div class="page-title-group"><span class="page-kicker">' + escapeHtml(kicker) + '</span><h1 class="page-title">' + escapeHtml(L(title)) + '</h1>' +
+    return '<div class="page-header"><div class="page-title-group"><h1 class="page-title">' + escapeHtml(L(title)) + '</h1>' +
       (subtitle ? '<p class="page-subtitle">' + escapeHtml(L(subtitle)) + '</p>' : '') + '</div>' + (actions ? '<div class="page-actions">' + actions + '</div>' : '') + '</div>';
   }
   function panel(title, body, opts) {
@@ -406,8 +406,8 @@
     if (!r.ok) return '<div style="padding:14px;font-size:12px;">' + statusBadgeHtml('UNAVAILABLE', 'Core ' + (r.status || 'offline')) + ' <span style="color:var(--text-secondary);">' + escapeHtml(label) + ': ' + escapeHtml(r.error) + '</span></div>';
     return null;
   }
-  function when(ms) { if (!ms) return '—'; var d = new Date(typeof ms === 'number' ? ms : Date.parse(ms)); return isNaN(d) ? '—' : d.toLocaleString(); }
-  function num(v) { return v === null || v === undefined ? '—' : String(v); }
+  function when(ms) { if (!ms) return '-'; var d = new Date(typeof ms === 'number' ? ms : Date.parse(ms)); return isNaN(d) ? '-' : d.toLocaleString(); }
+  function num(v) { return v === null || v === undefined ? '-' : String(v); }
   function btn(label, attrs, kind) { return '<button type="button" class="btn ' + (kind || 'btn-secondary') + ' btn-sm" ' + attrs + '>' + escapeHtml(L(label)) + '</button>'; }
 
   function liveStrip() {
@@ -416,9 +416,9 @@
     return '<div class="governance-strip" role="region" aria-label="Live Core status"><div class="gov-strip-items">' +
       '<span class="badge badge-gold">Live DAMAR Core · ' + escapeHtml(state.endpoint || 'same origin') + '</span>' +
       '<span class="gov-kv"><span class="gov-k">Lifecycle:</span><span class="gov-v">' + escapeHtml(st) + '</span></span>' +
-      '<span class="gov-kv"><span class="gov-k">Active provider:</span><span class="gov-v">' + escapeHtml(pv ? pv.active + ' / ' + (pv.model || 'no model') : '—') + '</span></span>' +
-      '<span class="gov-kv"><span class="gov-k">Live inference:</span><span class="gov-v" style="color:' + (pv && pv.liveInference ? 'var(--status-success)' : 'var(--status-critical)') + ';">' + (pv ? (pv.liveInference ? 'AUTHORIZED' : 'NOT AUTHORIZED') : '—') + '</span></span>' +
-      '<span class="gov-kv"><span class="gov-k">Emergency stop:</span><span class="gov-v">' + (sf ? (sf.stopped ? 'ENGAGED' : 'OFF') : '—') + '</span></span>' +
+      '<span class="gov-kv"><span class="gov-k">Active provider:</span><span class="gov-v">' + escapeHtml(pv ? pv.active + ' / ' + (pv.model || 'no model') : '-') + '</span></span>' +
+      '<span class="gov-kv"><span class="gov-k">Live inference:</span><span class="gov-v" style="color:' + (pv && pv.liveInference ? 'var(--status-success)' : 'var(--status-critical)') + ';">' + (pv ? (pv.liveInference ? 'AUTHORIZED' : 'NOT AUTHORIZED') : '-') + '</span></span>' +
+      '<span class="gov-kv"><span class="gov-k">Emergency stop:</span><span class="gov-v">' + (sf ? (sf.stopped ? 'ENGAGED' : 'OFF') : '-') + '</span></span>' +
       '</div><button type="button" class="btn btn-ghost btn-sm" data-jump-view="runtime">Inspect Runtime →</button></div>';
   }
 
@@ -467,19 +467,19 @@
     var out = lc ? lc.outstanding : null;
     var active = runs ? runs.runs.filter(function (r) { return TERMINAL.indexOf(r.state) < 0; }).length : null;
     var tokens = ss ? ss.sessions.reduce(function (n, s) { return n + (s.tokens && s.tokens.total || 0); }, 0) : null;
-    var html = '<div class="page-header"><div class="page-title-group"><span class="page-kicker">ONE DAMAR IDENTITY • LIVE CORE CONTROL PLANE</span>' +
+    var html = '<div class="page-header"><div class="page-title-group">' +
       '<h1 class="page-title" style="display:flex;align-items:center;gap:12px;"><img src="damaricon-clean.png" alt="DAMAR" style="width:32px;height:36px;object-fit:contain;filter:drop-shadow(0 0 8px rgba(247,223,148,0.5));" /><span><span class="gold-gradient-text">DAMAR</span> Control Center</span></h1>' +
       '<p class="page-subtitle">Manage intelligence, runtime operations, tools and system governance.</p></div>' +
       '<div class="page-actions"><button type="button" class="btn btn-secondary" data-jump-view="activity"><span>View Sessions</span></button><button type="button" class="btn btn-primary" data-jump-view="pandawa"><span>Pandawa Runs</span></button></div></div>';
     html += liveStrip();
     html += onboarding();
     html += '<div class="status-strip-grid">';
-    html += tile('Runtime State', statusBadgeHtml(lc ? lc.state.state : 'UNREACHABLE'), lc ? lc.state.state : '—', 'SYS-01', lc ? 'Updated ' + when(lc.state.updatedAt) : readErr('lifecycle'), 'runtime');
-    html += tile('Outstanding Work', statusBadgeHtml(out && (out.activeTurns || out.activePandawaRuns || out.activeJobs) ? 'RUNNING' : 'IDLE'), out ? String(out.activeTurns + out.activePandawaRuns + out.activeJobs) : '—', 'SYS-02', out ? out.activeTurns + ' turns • ' + out.activePandawaRuns + ' runs • ' + out.activeJobs + ' jobs' : readErr('lifecycle'), 'runtime');
-    html += tile('Active Provider', statusBadgeHtml(pv ? (pv.executable ? 'EXECUTABLE' : 'BLOCKED') : 'UNAVAILABLE'), pv ? pv.active : '—', 'SYS-03', pv ? (pv.model || 'no model') : readErr('provider'), 'providers');
-    html += tile('Pandawa Runs', statusBadgeHtml(active ? 'RUNNING' : 'IDLE', active === null ? '—' : active + ' active'), runs ? String(runs.runs.length) : '—', 'SYS-04', runs ? runs.queued + ' queued (last 32 shown)' : readErr('runs'), 'pandawa');
-    html += tile('Session Tokens', statusBadgeHtml(ss ? 'CONFIRMED' : 'UNAVAILABLE', 'Core receipts'), tokens === null ? '—' : String(tokens), 'SYS-05', ss ? ss.sessions.length + ' sessions • cost unavailable' : readErr('sessions'), 'tasks');
-    html += tile('Capabilities', statusBadgeHtml(tl ? 'READY' : 'UNAVAILABLE'), tl ? String(tl.total) : '—', 'SYS-06', tl ? 'tools registered in Core' : readErr('tools'), 'capabilities');
+    html += tile('Runtime State', statusBadgeHtml(lc ? lc.state.state : 'UNREACHABLE'), lc ? lc.state.state : '-', 'SYS-01', lc ? 'Updated ' + when(lc.state.updatedAt) : readErr('lifecycle'), 'runtime');
+    html += tile('Outstanding Work', statusBadgeHtml(out && (out.activeTurns || out.activePandawaRuns || out.activeJobs) ? 'RUNNING' : 'IDLE'), out ? String(out.activeTurns + out.activePandawaRuns + out.activeJobs) : '-', 'SYS-02', out ? out.activeTurns + ' turns • ' + out.activePandawaRuns + ' runs • ' + out.activeJobs + ' jobs' : readErr('lifecycle'), 'runtime');
+    html += tile('Active Provider', statusBadgeHtml(pv ? (pv.executable ? 'EXECUTABLE' : 'BLOCKED') : 'UNAVAILABLE'), pv ? pv.active : '-', 'SYS-03', pv ? (pv.model || 'no model') : readErr('provider'), 'providers');
+    html += tile('Pandawa Runs', statusBadgeHtml(active ? 'RUNNING' : 'IDLE', active === null ? '-' : active + ' active'), runs ? String(runs.runs.length) : '-', 'SYS-04', runs ? runs.queued + ' queued (last 32 shown)' : readErr('runs'), 'pandawa');
+    html += tile('Session Tokens', statusBadgeHtml(ss ? 'CONFIRMED' : 'UNAVAILABLE', 'Core receipts'), tokens === null ? '-' : String(tokens), 'SYS-05', ss ? ss.sessions.length + ' sessions • cost unavailable' : readErr('sessions'), 'tasks');
+    html += tile('Capabilities', statusBadgeHtml(tl ? 'READY' : 'UNAVAILABLE'), tl ? String(tl.total) : '-', 'SYS-06', tl ? 'tools registered in Core' : readErr('tools'), 'capabilities');
     html += '</div>';
     html += '<div class="workspace-grid-12">';
     html += panel('Recent Pandawa Runs', runsTable(runs ? runs.runs.slice(-6).reverse() : [], !runs), { span: 7, flush: true, subtitle: 'From Core run ledger' });
@@ -512,7 +512,7 @@
     if (loading) return readState('runs', 'Pandawa runs') || '';
     return table(['Run', 'Worker', 'State', 'Provider / model', 'Attempts', 'Result', ''], list.map(function (r) {
       return [mono(r.runId), '<span style="font-weight:700;color:var(--damar-gold-bright);">' + escapeHtml(r.worker) + '</span>', statusBadgeHtml(r.state) + (r.cancelRequested ? ' <span class="badge badge-review">cancel requested</span>' : ''),
-        escapeHtml((r.provider || '—') + ' / ' + (r.model || '—')), '<span class="td-num">' + num(r.attempts) + '</span>',
+        escapeHtml((r.provider || '-') + ' / ' + (r.model || '-')), '<span class="td-num">' + num(r.attempts) + '</span>',
         '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(r.error || r.reason || r.outputPreview || '') + '</span>',
         TERMINAL.indexOf(r.state) < 0 && !r.cancelRequested ? btn('Cancel', 'data-cancel-run="' + escapeHtml(r.runId) + '"', 'btn-danger') : ''];
     }), 'No Pandawa runs recorded in this Core session.');
@@ -525,7 +525,7 @@
     if (ss.ledger && (ss.ledger.corruptLines.length || ss.ledger.tornTail)) html += '<div class="governance-strip"><div class="gov-strip-items">' + statusBadgeHtml('WARN', 'Ledger disclosure') + '<span class="gov-kv"><span class="gov-k">Corrupt lines:</span><span class="gov-v">' + escapeHtml(ss.ledger.corruptLines.join(', ') || 'none') + '</span></span><span class="gov-kv"><span class="gov-k">Torn tail:</span><span class="gov-v">' + (ss.ledger.tornTail ? 'yes' : 'no') + '</span></span></div></div>';
     html += panel('Session Ledger', table(['Title', 'Session', 'Workspace', 'Model', 'State', 'Tokens', 'Updated', ''], ss.sessions.map(function (s) {
       return ['<span style="color:var(--text-ivory);font-weight:600;">' + escapeHtml(s.title) + '</span>', mono(s.sessionId.slice(0, 12) + '…'), '<span style="font-size:11.5px;">' + escapeHtml(s.cwd) + '</span>',
-        escapeHtml((s.provider || '—') + ' / ' + (s.model || '—')), statusBadgeHtml(s.closed ? 'CLOSED' : s.attached ? 'ATTACHED' : 'IDLE') + (s.unresolvedOperations.length ? ' ' + statusBadgeHtml('OUTCOME_UNKNOWN', s.unresolvedOperations.length + ' unknown') : ''),
+        escapeHtml((s.provider || '-') + ' / ' + (s.model || '-')), statusBadgeHtml(s.closed ? 'CLOSED' : s.attached ? 'ATTACHED' : 'IDLE') + (s.unresolvedOperations.length ? ' ' + statusBadgeHtml('OUTCOME_UNKNOWN', s.unresolvedOperations.length + ' unknown') : ''),
         '<span class="td-num">' + num(s.tokens.total) + (s.tokens.complete ? '' : ' <span style="color:var(--text-muted);">(incomplete)</span>') + '</span>', escapeHtml(when(s.updatedAt)),
         btn('Inspect', 'data-inspect-session="' + escapeHtml(s.sessionId) + '"')];
     }), 'No sessions yet. Sessions are created by the DAMAR CLI.'), { flush: true, subtitle: ss.sessions.length + ' sessions' });
@@ -541,7 +541,7 @@
       var u = state.usage[s.sessionId];
       return ['<span style="color:var(--text-ivory);">' + escapeHtml(s.title) + '</span>', mono(s.sessionId.slice(0, 12) + '…'),
         u ? (u.ok ? '<span class="td-num">' + num(u.data.inputTokens) + ' / ' + num(u.data.outputTokens) + '</span>' : statusBadgeHtml('ERROR', u.error)) : '<span class="td-num">' + num(s.tokens.input) + ' / ' + num(s.tokens.output) + '</span>',
-        u && u.ok ? escapeHtml(u.data.confirmedReceipts + ' confirmed, ' + u.data.unknownUsageReceipts + ' unknown') : '—',
+        u && u.ok ? escapeHtml(u.data.confirmedReceipts + ' confirmed, ' + u.data.unknownUsageReceipts + ' unknown') : '-',
         u && u.ok ? escapeHtml(u.data.cost) : 'UNAVAILABLE', u && u.ok ? statusBadgeHtml(u.data.complete ? 'CONFIRMED' : 'PENDING', u.data.complete ? 'complete' : 'incomplete') : btn('Load receipts', 'data-load-usage="' + escapeHtml(s.sessionId) + '"')];
     }) : [];
     html += panel('Per-session usage', ss ? table(['Session', 'Id', 'In / Out tokens', 'Receipts', 'Cost', 'Status'], rows, 'No sessions recorded.') : readState('sessions', 'sessions'), { span: 8, flush: true });
@@ -560,13 +560,13 @@
       '<div class="segmented-tabs">' + ['Tools', 'Plugins', 'Agents', 'Skills', 'MCP'].map(function (t) { return '<button type="button" class="seg-tab' + (t === tab ? ' active' : '') + '" data-cap-tab="' + t + '">' + t + '</button>'; }).join('') + '</div>');
     var body;
     if (tab === 'Tools') { var t = LIVE.d('tools'); body = t ? table(['Tool', 'Plugin', 'Description'], t.tools.map(function (x) { return [mono(x.id), escapeHtml(x.pluginId), '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(x.description) + '</span>']; })) : readState('tools', 'tools'); }
-    else if (tab === 'Plugins') { var p = LIVE.d('plugins'); body = p ? table(['Plugin', 'Version', 'Category', 'Tools', 'Permissions', 'Description'], p.plugins.map(function (x) { return ['<span style="color:var(--text-ivory);font-weight:600;">' + escapeHtml(x.name) + '</span>', mono(x.version), escapeHtml(x.category), '<span class="td-num">' + num(x.toolCount) + '</span>', escapeHtml((x.permissions || []).join(', ') || '—'), '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(x.description) + '</span>']; })) : readState('plugins', 'plugins'); }
+    else if (tab === 'Plugins') { var p = LIVE.d('plugins'); body = p ? table(['Plugin', 'Version', 'Category', 'Tools', 'Permissions', 'Description'], p.plugins.map(function (x) { return ['<span style="color:var(--text-ivory);font-weight:600;">' + escapeHtml(x.name) + '</span>', mono(x.version), escapeHtml(x.category), '<span class="td-num">' + num(x.toolCount) + '</span>', escapeHtml((x.permissions || []).join(', ') || '-'), '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(x.description) + '</span>']; })) : readState('plugins', 'plugins'); }
     else if (tab === 'Agents') { var a = LIVE.d('agents'); body = a ? table(['Agent', 'Kind', 'Online', 'Description'], a.agents.map(function (x) { return ['<span style="color:var(--damar-gold-bright);font-weight:700;">' + escapeHtml(x.label || x.id) + '</span>', escapeHtml(x.kind), statusBadgeHtml(x.online ? 'ONLINE' : 'OFFLINE'), '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(x.description || x.role || '') + '</span>']; })) : readState('agents', 'agents'); }
     else if (tab === 'MCP') {
       var m = LIVE.d('mcp');
-      body = m ? kvList([kv('DAMAR MCP server', m.server ? m.server.name : '—'), kv('Exposed tools', m.server ? m.server.exposed + ' of ' + m.server.total + (m.server.destructiveHidden ? ' (destructive hidden)' : '') : '—'), kv('Client servers running', m.clients ? m.clients.running + ' running, ' + m.clients.bridged + ' bridged' : '—')]) +
+      body = m ? kvList([kv('DAMAR MCP server', m.server ? m.server.name : '-'), kv('Exposed tools', m.server ? m.server.exposed + ' of ' + m.server.total + (m.server.destructiveHidden ? ' (destructive hidden)' : '') : '-'), kv('Client servers running', m.clients ? m.clients.running + ' running, ' + m.clients.bridged + ' bridged' : '-')]) +
         '<div style="margin-top:12px;">' + table(['Server', 'Transport / command', 'State', 'Environment'], (m.servers || []).map(function (x) {
-          return [escapeHtml(x.name || x.id), mono(x.command || x.url || x.transport || '—'), statusBadgeHtml(x.running ? 'RUNNING' : x.enabled === false ? 'DISABLED' : 'IDLE'), escapeHtml(x.env ? Object.keys(x.env).map(function (k) { return k + '=' + REDACTED; }).join(', ') : '—')];
+          return [escapeHtml(x.name || x.id), mono(x.command || x.url || x.transport || '-'), statusBadgeHtml(x.running ? 'RUNNING' : x.enabled === false ? 'DISABLED' : 'IDLE'), escapeHtml(x.env ? Object.keys(x.env).map(function (k) { return k + '=' + REDACTED; }).join(', ') : '-')];
         }), 'No MCP client servers configured in Core.') + '</div>' : readState('mcp', 'MCP servers');
     } else {
       var st = state.settings;
@@ -615,7 +615,7 @@
         kv('Provider id', p.id, true), kv('Kind', p.kind === 'live' ? 'OpenAI-compatible' : p.kind), kv('Endpoint', p.baseUrl || 'not configured', true), kv('Configured', p.configured ? 'yes' : 'no'),
         kv('Model grant', p.grantStatus === 'granted' ? p.grant.model + ' until ' + when(p.grant.expiresAt) : p.grantStatus === 'needs-new-grant' ? 'needs a new grant (endpoint changed or expired)' : p.grantStatus === 'none' ? 'none' : 'not required'),
         kv('Key stored', p.hasKey ? (p.keyRemembered ? 'yes (remembered)' : 'yes (this session)') : 'no'), kv('Dispatch', p.executable ? 'executable' : (p.reason || 'not executable')),
-        kv('Model', p.model || '—'), kv('Image input', p.capabilities ? p.capabilities.imageInput : '—'), kv('Configuration version', p.configurationVersion, true)
+        kv('Model', p.model || '-'), kv('Image input', p.capabilities ? p.capabilities.imageInput : '-'), kv('Configuration version', p.configurationVersion, true)
       ]) + '<div style="display:flex;justify-content:flex-end;gap:8px;padding-top:10px;margin-top:10px;border-top:1px solid var(--border-subtle);flex-wrap:wrap;">' +
         (isActive ? '' : btn('Activate', 'data-select-provider="' + escapeHtml(p.id) + '"')) + btn('Connect…', 'data-connect-provider="' + escapeHtml(p.id) + '"') +
         (p.kind === 'live' && p.hasKey ? btn('Forget key', 'data-revoke-provider="' + escapeHtml(p.id) + '"', 'btn-danger') : '') +
@@ -624,7 +624,7 @@
     });
     html += panel('Model Grant (live dispatch authority)', gr ? kvList([kv('Effective', gr.effective ? 'YES' : 'no'), kv('Revision', num(gr.revision)),
       kv('Grants', (gr.grants || []).length ? gr.grants.map(function (g) { return g.provider + ' / ' + g.model + (g.effective ? ' until ' + when(g.expiresAt) : ' (expired)'); }).join('; ') : 'none'),
-      kv('Limits', (gr.grants || []).length ? gr.grants.map(function (g) { return g.provider + ': ' + JSON.stringify(g.limits); }).join('; ') : '—'), kv('Scope', gr.scopeId ? gr.scopeId.slice(0, 16) + '…' : '—', true)]) +
+      kv('Limits', (gr.grants || []).length ? gr.grants.map(function (g) { return g.provider + ': ' + JSON.stringify(g.limits); }).join('; ') : '-'), kv('Scope', gr.scopeId ? gr.scopeId.slice(0, 16) + '…' : '-', true)]) +
       '<div style="display:flex;justify-content:flex-end;gap:8px;padding-top:10px;margin-top:10px;border-top:1px solid var(--border-subtle);">' + btn('Grant…', 'data-grant="1"') + ((gr.grants || []).length ? btn('Revoke grant…', 'data-revoke-grant="1"', 'btn-danger') : '') + '</div>'
       : readState('grant', 'model grant'), { span: 6 });
     html += panel('Budget', bd ? kvList(Object.keys(bd).map(function (k) { return kv(k, typeof bd[k] === 'object' ? JSON.stringify(bd[k]) : String(bd[k])); })) : readState('budget', 'budget'), { span: 6 });
@@ -637,12 +637,12 @@
     var c = padminConn(p.id); if (!c) return '';
     var id = escapeHtml(p.id), rows = (c.keys || []).map(function (k) {
       var kid = escapeHtml(k.kid);
-      return [mono(k.suffix), statusBadgeHtml(k.status === 'ok' ? 'COMPLETED' : k.status === 'disabled' ? 'BLOCKED' : k.status === 'untested' ? 'PENDING' : 'FAILED', L(k.status)), escapeHtml(k.lastOk ? when(k.lastOk) : '—'),
-        escapeHtml(k.lastError || '—') + (k.cooldownUntil && k.cooldownUntil > Date.now() ? ' · ' + escapeHtml(L('cooldown until')) + ' ' + escapeHtml(when(k.cooldownUntil)) : ''),
+      return [mono(k.suffix), statusBadgeHtml(k.status === 'ok' ? 'COMPLETED' : k.status === 'disabled' ? 'BLOCKED' : k.status === 'untested' ? 'PENDING' : 'FAILED', L(k.status)), escapeHtml(k.lastOk ? when(k.lastOk) : '-'),
+        escapeHtml(k.lastError || '-') + (k.cooldownUntil && k.cooldownUntil > Date.now() ? ' · ' + escapeHtml(L('cooldown until')) + ' ' + escapeHtml(when(k.cooldownUntil)) : ''),
         btn('Test', 'data-key-test="' + id + '" data-kid="' + kid + '"') + (k.kid === 'primary' ? '' : ' ' + btn(k.enabled ? 'Disable' : 'Enable', 'data-key-toggle="' + id + '" data-kid="' + kid + '" data-enabled="' + (!k.enabled) + '"')) + ' ' + btn('Delete', 'data-key-delete="' + id + '" data-kid="' + kid + '"', 'btn-danger')];
     });
     return '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border-subtle);">' +
-      kvList([kv('Key rotation', L(c.strategy)), kv('Injected-token allowance', num(c.injectedTokens)), kv('Max parallel requests', num(c.maxConcurrency)), kv('Models added / aliases', (c.extraModels || []).join(', ') + (Object.keys(c.aliases || {}).length ? ' · ' + Object.keys(c.aliases).map(function (a) { return a + '→' + c.aliases[a]; }).join(', ') : '') || '—')]) +
+      kvList([kv('Key rotation', L(c.strategy)), kv('Injected-token allowance', num(c.injectedTokens)), kv('Max parallel requests', num(c.maxConcurrency)), kv('Models added / aliases', (c.extraModels || []).join(', ') + (Object.keys(c.aliases || {}).length ? ' · ' + Object.keys(c.aliases).map(function (a) { return a + '→' + c.aliases[a]; }).join(', ') : '') || '-')]) +
       table(['Key', 'Status', 'Last OK', 'Last error', ''], rows, 'No keys yet.') +
       '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;flex-wrap:wrap;">' + btn('Import keys…', 'data-keys-import="' + id + '"') + btn('Test all keys', 'data-keys-test-all="' + id + '"') +
       btn('Test model… (spends tokens)', 'data-model-test="' + id + '"') + btn('Rotation…', 'data-key-strategy="' + id + '"') + btn('Limits…', 'data-conn-limits="' + id + '"') + btn('Catalog…', 'data-catalog="' + id + '"') + '</div></div>';
@@ -658,7 +658,7 @@
     var m = a.meter;
     if (m) html += panel('Usage meter', kvList([kv('In flight', num(m.inFlight) + ' (' + num(m.reservedTokens) + ' tok ' + L('reserved') + ')'), kv('Total tokens', num(m.totalTokens)),
       kv('Estimated (model reports no usage)', num(m.estimated)), kv('Uncertain (usage lost; charged upper bound)', num(m.uncertain)), kv('Over the input bound', num(m.boundExceeded)),
-      kv('Models without usage reports', Object.keys(m.usageReporting || {}).filter(function (k) { return m.usageReporting[k] === 'missing'; }).join(', ') || '—')]) +
+      kv('Models without usage reports', Object.keys(m.usageReporting || {}).filter(function (k) { return m.usageReporting[k] === 'missing'; }).join(', ') || '-')]) +
       table(['When', 'Provider / model', 'Status', 'Charged'], (m.recentUncertain || []).slice().reverse().map(function (u) { return [escapeHtml(when(u.t)), escapeHtml(u.provider + ' / ' + u.model + (u.gatewayKey ? ' · ' + u.gatewayKey : '')), escapeHtml(u.status), num(u.chargedTokens)]; }), 'No uncertain requests.'), { span: 6 });
     var g = a.gateway;
     if (!g) return html;
@@ -690,7 +690,7 @@
     if (!dl) return html + panel('Discussions', readState('discussions', 'discussions'), { flush: true });
     html += '<div class="workspace-grid-12">';
     html += panel('Discussions', table(['Topic', 'Mode', 'State', 'Round', 'Tokens', ''], dl.discussions.slice().reverse().map(function (d) {
-      return ['<span style="color:var(--text-ivory);">' + escapeHtml(String(d.topic || '—').slice(0, 80)) + '</span>', escapeHtml(d.mode), statusBadgeHtml(d.state), '<span class="td-num">' + d.round + '/' + d.maxRounds + '</span>', '<span class="td-num">' + num(d.tokens) + '</span>', btn('Open', 'data-open-discussion="' + escapeHtml(d.discussionId) + '"')];
+      return ['<span style="color:var(--text-ivory);">' + escapeHtml(String(d.topic || '-').slice(0, 80)) + '</span>', escapeHtml(d.mode), statusBadgeHtml(d.state), '<span class="td-num">' + d.round + '/' + d.maxRounds + '</span>', '<span class="td-num">' + num(d.tokens) + '</span>', btn('Open', 'data-open-discussion="' + escapeHtml(d.discussionId) + '"')];
     }), 'No discussions yet. Start one here, or with /discuss in the CLI.'), { span: 5, flush: true });
     if (!x || !x.data) html += panel('Discussion', '<div style="font-size:12px;color:var(--text-muted);">' + escapeHtml(L(x && x.error ? x.error : 'Open a discussion to follow it live.')) + '</div>', { span: 7 });
     else {
@@ -754,7 +754,7 @@
     var html = pageHeader('DAMAR INTELLIGENCE • MEMORY & CONTINUITY', 'Memory & Continuity', 'Core memory statistics, Owner-approved project memory per workspace, and per-session undo/redo checkpoints.');
     html += '<div class="workspace-grid-12">';
     html += panel('Core Memory Store', ms ? kvList([kv('Memories', ms.memories.total + ' (' + ms.memories.pinned + ' pinned, ' + ms.memories.sensitive + ' sensitive)'), kv('Entities', num(ms.entities.total)),
-      kv('Documents', ms.documents.total + ' (' + ms.documents.chunks + ' chunks)'), kv('Embeddings', ms.embeddings.available ? 'available (' + ms.embeddings.vectors + ' vectors)' : 'unavailable' + (ms.embeddings.lastError ? ' — ' + ms.embeddings.lastError : ''))]) : readState('memoryStats', 'memory stats'), { span: 5 });
+      kv('Documents', ms.documents.total + ' (' + ms.documents.chunks + ' chunks)'), kv('Embeddings', ms.embeddings.available ? 'available (' + ms.embeddings.vectors + ' vectors)' : 'unavailable' + (ms.embeddings.lastError ? ', ' + ms.embeddings.lastError : ''))]) : readState('memoryStats', 'memory stats'), { span: 5 });
     var listing = '';
     if (pm && pm.ok) listing = table(['Note', 'Added', ''], (Array.isArray(pm.data) ? pm.data : []).map(function (n) { return [escapeHtml(n.text), escapeHtml(when(n.t || n.createdAt)), btn('Forget', 'data-forget-memory="' + escapeHtml(n.id) + '"', 'btn-danger')]; }), 'No project memory for this workspace.');
     else if (pm) listing = '<div style="font-size:12px;">' + statusBadgeHtml('ERROR', pm.error) + '</div>';
@@ -764,7 +764,7 @@
     var ss = LIVE.d('sessions');
     html += panel('Checkpoints (undo / redo)', ss ? table(['Session', 'State', 'Checkpoints', ''], ss.sessions.map(function (s) {
       var c = state.checkpoints[s.sessionId];
-      var info = !c ? '—' : c.ok ? escapeHtml(JSON.stringify(c.data).slice(0, 160)) : statusBadgeHtml('ERROR', c.error);
+      var info = !c ? '-' : c.ok ? escapeHtml(JSON.stringify(c.data).slice(0, 160)) : statusBadgeHtml('ERROR', c.error);
       var held = state.control.held[s.sessionId];
       return [escapeHtml(s.title) + ' ' + mono(s.sessionId.slice(0, 8)), statusBadgeHtml(s.closed ? 'CLOSED' : s.attached ? 'ATTACHED' : 'IDLE'), '<span style="font-size:11.5px;">' + info + '</span>',
         s.closed ? '' : (s.attached && !held ? '<span style="font-size:11px;color:var(--text-muted);">held by a CLI window</span>' : btn(held ? 'Refresh' : 'Attach & list', 'data-checkpoints="' + escapeHtml(s.sessionId) + '"') + (held ? ' ' + btn('Undo…', 'data-undo="' + escapeHtml(s.sessionId) + '"') + ' ' + btn('Redo…', 'data-redo="' + escapeHtml(s.sessionId) + '"') : ''))];
@@ -785,11 +785,11 @@
     var lc = LIVE.d('lifecycle'), sb = LIVE.d('sandbox'), cx = LIVE.d('context');
     var html = pageHeader('DEVELOPMENT • CORE RUNTIME', 'Runtime', 'Core lifecycle and enforced sandbox boundary (read-only). Core restart is not offered from Control in this release.');
     html += '<div class="workspace-grid-12">';
-    html += panel('Lifecycle', lc ? kvList([kv('State', lc.state.state), kv('Reason', lc.state.reason || '—'), kv('Updated', when(lc.state.updatedAt)), kv('Restart attempts', num(lc.state.attempt)),
+    html += panel('Lifecycle', lc ? kvList([kv('State', lc.state.state), kv('Reason', lc.state.reason || '-'), kv('Updated', when(lc.state.updatedAt)), kv('Restart attempts', num(lc.state.attempt)),
       kv('Active turns', num(lc.outstanding.activeTurns)), kv('Pending permissions', num(lc.outstanding.pendingPermissions)), kv('Active Pandawa runs', num(lc.outstanding.activePandawaRuns)),
       kv('Queued Pandawa runs', num(lc.outstanding.queuedPandawaRuns)), kv('Active jobs', num(lc.outstanding.activeJobs)), kv('Job state available', lc.outstanding.jobStateAvailable ? 'yes' : 'no'),
       kv('Restart limit', lc.restartLimit + ' per ' + lc.restartWindowSeconds + ' s')]) : readState('lifecycle', 'lifecycle'), { span: 6, badge: lc ? statusBadgeHtml(lc.state.state) : '' });
-    html += panel('Host', cx ? kvList([kv('Host', cx.system.host), kv('CPU', cx.system.cpu + ' %'), kv('Memory', cx.system.memory + ' %'), kv('Core uptime', Math.round(cx.system.uptime) + ' s'), kv('AI platform', cx.ai.platform), kv('Model', cx.ai.model || '—')]) : readState('context', 'context'), { span: 6 });
+    html += panel('Host', cx ? kvList([kv('Host', cx.system.host), kv('CPU', cx.system.cpu + ' %'), kv('Memory', cx.system.memory + ' %'), kv('Core uptime', Math.round(cx.system.uptime) + ' s'), kv('AI platform', cx.ai.platform), kv('Model', cx.ai.model || '-')]) : readState('context', 'context'), { span: 6 });
     html += panel('Sandbox Boundary', sb ? kvList(Object.keys(sb).map(function (k) { return kv(k, Array.isArray(sb[k]) ? sb[k].join(' • ') : String(sb[k])); })) : readState('sandbox', 'sandbox'), { span: 12 });
     return html + '</div>';
   }
@@ -799,7 +799,7 @@
     var keys = Object.keys(READS);
     return html + panel('Core route checks', table(['Read', 'Route', 'Status', 'Latency'], keys.map(function (k) {
       var r = state.core[k];
-      return [escapeHtml(k), mono(READS[k]), r ? statusBadgeHtml(r.ok ? 'OK' : 'ERROR', r.ok ? String(r.status) : (r.status || 'offline') + ' ' + r.error) : '—', '<span class="td-num">' + (r && r.ms !== undefined ? r.ms + ' ms' : '—') + '</span>'];
+      return [escapeHtml(k), mono(READS[k]), r ? statusBadgeHtml(r.ok ? 'OK' : 'ERROR', r.ok ? String(r.status) : (r.status || 'offline') + ' ' + r.error) : '-', '<span class="td-num">' + (r && r.ms !== undefined ? r.ms + ' ms' : '-') + '</span>'];
     })), { flush: true });
   }
 
@@ -807,10 +807,10 @@
     var sf = LIVE.d('safety'), lc = LIVE.d('lifecycle'), gr = LIVE.d('grant'), st = state.settings;
     var html = pageHeader('ADMINISTRATION • SECURITY & GOVERNANCE', 'Security & Governance', 'Safety state, agent permission profile and authority boundaries as Core enforces them.');
     html += '<div class="workspace-grid-12">';
-    html += panel('Safety', sf ? kvList([kv('Emergency stop', sf.stopped ? 'ENGAGED' + (sf.reason ? ' — ' + sf.reason : '') : 'off'), kv('Engaged', sf.engaged ? 'yes' : 'no'), kv('Tools', sf.risk.total + ' total • ' + sf.risk.destructive + ' destructive • ' + sf.risk.safe + ' safe'),
+    html += panel('Safety', sf ? kvList([kv('Emergency stop', sf.stopped ? 'ENGAGED' + (sf.reason ? ', ' + sf.reason : '') : 'off'), kv('Engaged', sf.engaged ? 'yes' : 'no'), kv('Tools', sf.risk.total + ' total • ' + sf.risk.destructive + ' destructive • ' + sf.risk.safe + ' safe'),
       kv('Policy enforcement', sf.policy && sf.policy.enforcement && sf.policy.enforcement.enabled ? 'enabled' : 'disabled')]) : readState('safety', 'safety'), { span: 6, badge: sf ? statusBadgeHtml(sf.stopped ? 'STOPPED' : 'READY', sf.stopped ? 'stopped' : 'running') : '' });
-    html += panel('Permissions', kvList([kv('Pending permission requests', lc ? String(lc.outstanding.pendingPermissions) : '—'), kv('Agent autonomy profile', st && st.ok ? st.data.autonomy : 'load in Settings'),
-      kv('Live model grant', gr ? (gr.effective ? 'effective' : 'none') : '—'), kv('Approvals', 'answered in the CLI window that owns the turn')]) +
+    html += panel('Permissions', kvList([kv('Pending permission requests', lc ? String(lc.outstanding.pendingPermissions) : '-'), kv('Agent autonomy profile', st && st.ok ? st.data.autonomy : 'load in Settings'),
+      kv('Live model grant', gr ? (gr.effective ? 'effective' : 'none') : '-'), kv('Approvals', 'answered in the CLI window that owns the turn')]) +
       '<div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;">Control has no approval queue of its own: permission prompts belong to the session that raised them.</div>', { span: 6 });
     return html + '</div>';
   }
@@ -826,11 +826,15 @@
       profiles.map(function (p) { return '<option value="' + p + '"' + (p === d.autonomy ? ' selected' : '') + '>' + p + '</option>'; }).join('') + '</select>' +
       '<label for="settingsRouting" style="font-size:11.5px;color:var(--text-secondary);">Skill routing</label><select class="select-field" id="settingsRouting">' + ['auto', 'off'].map(function (p) { return '<option value="' + p + '"' + (p === d.skills.routing ? ' selected' : '') + '>' + p + '</option>'; }).join('') + '</select>' +
       '<div style="display:flex;justify-content:flex-end;">' + btn('Save…', 'data-save-settings="1"', 'btn-primary') + '</div></div>', { span: 6 });
-    html += panel('Workspace Access', kvList([kv('Extra folders', d.extraDirs.length ? d.extraDirs.join(' • ') : 'none'), kv('Updated', d.updatedAt ? when(d.updatedAt) : 'never'), kv('Control session', state.control.id ? state.control.id.slice(0, 12) + '…' : '—', true)]), { span: 6 });
+    html += panel('Workspace Access', kvList([kv('Extra folders', d.extraDirs.length ? d.extraDirs.join(' • ') : 'none'), kv('Updated', d.updatedAt ? when(d.updatedAt) : 'never'), kv('Control session', state.control.id ? state.control.id.slice(0, 12) + '…' : '-', true)]), { span: 6 });
     var pr = (LIVE.d('presence') && LIVE.d('presence').presence) || d.presence || {};
     var sel = function (id, opts, cur) { return '<select class="select-field" id="' + id + '" style="width:100%;">' + opts.map(function (o) { return '<option value="' + escapeHtml(o) + '"' + (o === cur ? ' selected' : '') + '>' + escapeHtml(o) + '</option>'; }).join('') + '</select>'; };
     html += panel('Idle Presence & Notch', '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">' +
-      field('prIdle', 'Idle → notch delay (ms, 1000–600000)', '<input type="number" class="input-field" id="prIdle" min="1000" max="600000" style="width:100%;" value="' + escapeHtml(pr.idleToNotchMs) + '" />') +
+      field('prIdleOrb', 'Presence → orb (detik, 5–3600)', '<input type="number" class="input-field" id="prIdleOrb" min="5" max="3600" style="width:100%;" value="' + escapeHtml(pr.idleToOrbSec) + '" />') +
+      field('prOrbNotch', 'Orb → Notch (detik, 5–3600)', '<input type="number" class="input-field" id="prOrbNotch" min="5" max="3600" style="width:100%;" value="' + escapeHtml(pr.orbToNotchSec) + '" />') +
+      field('prNotchHide', 'Notch sembunyi (detik, 10–86400)', '<input type="number" class="input-field" id="prNotchHide" min="10" max="86400" style="width:100%;" value="' + escapeHtml(pr.notchHideSec) + '" />') +
+      field('prCharSound', 'Suara karakter', sel('prCharSound', ['enabled', 'disabled'], pr.characterSoundEnabled === false ? 'disabled' : 'enabled')) +
+      field('prCharVol', 'Volume suara karakter (%, 0–100)', '<input type="number" class="input-field" id="prCharVol" min="0" max="100" style="width:100%;" value="' + escapeHtml(pr.characterSoundVolume) + '" />') +
       field('prMorph', 'Morph duration (ms, 0–5000)', '<input type="number" class="input-field" id="prMorph" min="0" max="5000" style="width:100%;" value="' + escapeHtml(pr.morphMs) + '" />') +
       field('prMotion', 'Reduced motion', sel('prMotion', ['system', 'on', 'off'], pr.reducedMotion)) +
       field('prNotch', 'Notch', sel('prNotch', ['enabled', 'disabled'], pr.notchEnabled === false ? 'disabled' : 'enabled')) +
@@ -871,7 +875,7 @@
       '</div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(L('Model options come from your connected providers. Empty = DAMAR\'s model (or the active provider for DAMAR).')) + '</span>' + btn('Save team…', 'data-save-team="1"', 'btn-primary') + '</div>', { span: 12 });
     var vx = d.voice || {}, vnum = function (id, label, min, max, step, v) { return field(id, label, '<input type="number" class="input-field" id="' + id + '" min="' + min + '" max="' + max + '" step="' + step + '" style="width:100%;" value="' + escapeHtml(v) + '" />'); };
     html += panel('Voice', '<div style="display:flex;flex-direction:column;gap:6px;">' +
-      '<label for="vcPitch" style="font-size:11.5px;color:var(--text-secondary);">Voice pitch (semitones, -12 to +12) — <span id="vcPitchVal" style="color:var(--text-primary);font-family:var(--font-mono);">' + escapeHtml(vx.pitchSemitones) + '</span></label>' +
+      '<label for="vcPitch" style="font-size:11.5px;color:var(--text-secondary);">Voice pitch (semitones, -12 to +12), <span id="vcPitchVal" style="color:var(--text-primary);font-family:var(--font-mono);">' + escapeHtml(vx.pitchSemitones) + '</span></label>' +
       '<input type="range" class="input-field" id="vcPitch" min="-12" max="12" step="0.5" style="width:100%;" value="' + escapeHtml(vx.pitchSemitones) + '" oninput="document.getElementById(\'vcPitchVal\').textContent=this.value" />' +
       '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:6px;">' +
       field('vcStyle', 'Voice style', sel('vcStyle', ['normal', 'jarvis'], vx.style)) +
@@ -883,10 +887,10 @@
       vnum('vcEqLow', 'Jarvis EQ low shelf (dB, -6 to 6)', -6, 6, 0.5, vx.jarvisEqLowDb) +
       vnum('vcEqPresence', 'Jarvis EQ presence (dB, -6 to 6)', -6, 6, 0.5, vx.jarvisEqPresenceDb) +
       vnum('vcEqHigh', 'Jarvis EQ high shelf (dB, -6 to 6)', -6, 6, 0.5, vx.jarvisEqHighDb) +
-      '</div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);">Pitch and the Jarvis robot preset are post-processing on the local Supertonic M1 output — Indonesian synthesis is unchanged.</span>' + btn('Save voice…', 'data-save-voice="1"', 'btn-primary') + '</div></div>', { span: 12 });
+      '</div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);">Pitch and the Jarvis robot preset are post-processing on the local Supertonic M1 output, Indonesian synthesis is unchanged.</span>' + btn('Save voice…', 'data-save-voice="1"', 'btn-primary') + '</div></div>', { span: 12 });
     html += panel('Mobile', '<div data-unavailable="mobile" style="font-size:12px;color:var(--text-secondary);">' + statusBadgeHtml('NOT_AVAILABLE', 'Available in v1.1') + ' Mobile is a v1.1 surface; Core holds no mobile settings yet.</div>', { span: 6 });
     var pv = LIVE.d('provider');
-    html += panel('Providers & Models', kvList([kv('Active provider', pv ? pv.active : '—'), kv('Active model', pv ? (pv.model || '—') : '—'), kv('Live inference', pv ? (pv.liveInference ? 'authorized' : 'not authorized') : '—')]) +
+    html += panel('Providers & Models', kvList([kv('Active provider', pv ? pv.active : '-'), kv('Active model', pv ? (pv.model || '-') : '-'), kv('Live inference', pv ? (pv.liveInference ? 'authorized' : 'not authorized') : '-')]) +
       '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">' + btn('Providers →', 'data-jump-view="providers"') + btn('Models →', 'data-jump-view="models"') + '</div>', { span: 6 });
     html += helpPanel();
     html += panel('Project Plugins', table(['Plugin', 'Trusted', ''], (d.plugins || []).map(function (p) { return [escapeHtml(p.name), statusBadgeHtml(p.trusted ? 'TRUSTED' : p.error ? 'ERROR' : 'DISABLED', p.trusted ? 'trusted' : p.error || (p.changedSinceTrust ? 'changed since trust' : 'untrusted')), p.key ? btn(p.trusted ? 'Untrust…' : 'Trust…', 'data-trust-plugin="' + escapeHtml(p.key) + '" data-trusted="' + (!p.trusted) + '"') : '']; }), 'No project plugins in the Control session workspace.'), { span: 12, flush: true });
@@ -990,8 +994,8 @@
   function providerById(id) { var pv = LIVE.d('provider'); return pv ? pv.providers.filter(function (p) { return p.id === id; })[0] : null; }
   function showTestResult(title, data) {
     var list = Array.isArray(data) ? data : [data];
-    openInspectorDrawer('TEST', L(title), list.map(function (r) { return kvList([kv('Result', r.ok ? 'OK' : 'FAILED'), kv('Key', r.kid || '—'), kv('Model', r.model || '—'), kv('Latency', r.latencyMs !== undefined ? r.latencyMs + ' ms' : '—'),
-      kv('Tokens', r.tokens ? (r.tokens.input + ' in / ' + r.tokens.output + ' out') : r.spendsTokens ? '—' : L('none (metadata only)')), kv('Error', r.error || (r.completion && r.completion.error) || '—')]) + calibrationHtml(r.calibration || (r.completion && r.completion.calibration), r.provider); }).join('<hr style="border:none;border-top:1px solid var(--border-subtle);" />'));
+    openInspectorDrawer('TEST', L(title), list.map(function (r) { return kvList([kv('Result', r.ok ? 'OK' : 'FAILED'), kv('Key', r.kid || '-'), kv('Model', r.model || '-'), kv('Latency', r.latencyMs !== undefined ? r.latencyMs + ' ms' : '-'),
+      kv('Tokens', r.tokens ? (r.tokens.input + ' in / ' + r.tokens.output + ' out') : r.spendsTokens ? '-' : L('none (metadata only)')), kv('Error', r.error || (r.completion && r.completion.error) || '-')]) + calibrationHtml(r.calibration || (r.completion && r.completion.calibration), r.provider); }).join('<hr style="border:none;border-top:1px solid var(--border-subtle);" />'));
   }
   // The provider reported more prompt tokens than Core's bound: offer the suggested per-connection allowance (Owner confirms).
   function calibrationHtml(c, provider) {
@@ -1168,8 +1172,8 @@
       core.get('/api/r9/sessions/' + id).then(function (r) {
         if (!r.ok) return showToast(describeFailure(r));
         var d = r.data;
-        openInspectorDrawer('SESSION', d.title, kvList([kv('Session', d.sessionId, true), kv('Workspace', d.cwd), kv('Model', (d.provider || '—') + ' / ' + (d.model || '—')), kv('Tokens', num(d.usage.totalTokens) + (d.usage.complete ? '' : ' (incomplete)')), kv('Cost', d.usage.cost)]) +
-          '<h3 style="font-size:12px;margin:14px 0 6px;color:var(--damar-accent);">Operations</h3>' + table(['Command', 'State', 'Reason'], d.operations.slice(-20).map(function (o) { return [escapeHtml(o.command || '—'), statusBadgeHtml(o.state), escapeHtml(o.reason || '')]; }), 'None.') +
+        openInspectorDrawer('SESSION', d.title, kvList([kv('Session', d.sessionId, true), kv('Workspace', d.cwd), kv('Model', (d.provider || '-') + ' / ' + (d.model || '-')), kv('Tokens', num(d.usage.totalTokens) + (d.usage.complete ? '' : ' (incomplete)')), kv('Cost', d.usage.cost)]) +
+          '<h3 style="font-size:12px;margin:14px 0 6px;color:var(--damar-accent);">Operations</h3>' + table(['Command', 'State', 'Reason'], d.operations.slice(-20).map(function (o) { return [escapeHtml(o.command || '-'), statusBadgeHtml(o.state), escapeHtml(o.reason || '')]; }), 'None.') +
           '<h3 style="font-size:12px;margin:14px 0 6px;color:var(--damar-accent);">Conversation (last 20)</h3>' + d.conversation.slice(-20).map(function (m) { return '<div style="font-size:12px;margin-bottom:8px;"><span class="badge badge-neutral">' + escapeHtml(m.role) + '</span> <span style="color:var(--text-secondary);white-space:pre-wrap;">' + escapeHtml(String(m.text).slice(0, 2000)) + '</span></div>'; }).join(''));
       });
     },
@@ -1235,12 +1239,12 @@
       }, 'Needs a workspace folder (Memory & Continuity). The file stays on this PC.');
     },
     'data-memory-clear': function () {
-      ownerAction('Clear workspace memory', '<p style="font-size:12.5px;">' + escapeHtml(L('Delete every project memory note of this workspace:')) + ' ' + mono(state.workspace || '—') + '</p>', function () {
+      ownerAction('Clear workspace memory', '<p style="font-size:12.5px;">' + escapeHtml(L('Delete every project memory note of this workspace:')) + ' ' + mono(state.workspace || '-') + '</p>', function () {
         return controlSession().then(function (id) { return core.post('/api/r9/memory', { action: 'clear', cliSession: id, client: state.control.client, root: state.workspace }); });
       }, 'This cannot be undone.');
     },
     'data-save-presence': function () {
-      var presence = { idleToNotchMs: Number(val('prIdle')), morphMs: Number(val('prMorph')), reducedMotion: val('prMotion'), notchEnabled: val('prNotch') === 'enabled',
+      var presence = { idleToOrbSec: Number(val('prIdleOrb')), orbToNotchSec: Number(val('prOrbNotch')), notchHideSec: Number(val('prNotchHide')), characterSoundEnabled: val('prCharSound') === 'enabled', characterSoundVolume: Number(val('prCharVol')), morphMs: Number(val('prMorph')), reducedMotion: val('prMotion'), notchEnabled: val('prNotch') === 'enabled',
         notificationPrivacy: val('prPrivacy'), display: val('prDisplay'), position: val('prPosition'), voiceEnabled: val('prVoice') === 'on', displayName: val('prName'), salutation: val('prSalutation') };
       ownerAction('Save presence settings', '<pre style="font-size:11px;white-space:pre-wrap;">' + escapeHtml(JSON.stringify(presence, null, 1)) + '</pre>', function () {
         return controlSession().then(function (id) { return core.post('/api/r9/settings', { action: 'update', cliSession: id, client: state.control.client, values: { presence: presence } }); }).then(function (r) { if (r.ok) loadSettings(); return r; });
@@ -1307,6 +1311,8 @@
   var activeCc2Dialog = null, cc2DialogReturnFocus = null;
   function showToast(message) {
     var container = document.getElementById('toastContainer'); if (!container) return;
+    var existing = container.querySelectorAll('.toast-item span');
+    for (var i = 0; i < existing.length; i++) if (existing[i].textContent === String(message)) return;
     var el = document.createElement('div'); el.className = 'toast-item';
     el.innerHTML = '<span>' + escapeHtml(message) + '</span><button type="button" class="btn btn-ghost btn-sm" style="height:20px;padding:0 5px;" aria-label="Dismiss">✕</button>';
     el.querySelector('button').addEventListener('click', function () { if (el.parentNode) el.parentNode.removeChild(el); });
@@ -1343,9 +1349,7 @@
     document.getElementById('runtimeTruthDot').className = 'status-dot ' + (st === 'READY' ? 'dot-healthy' : lc ? 'dot-simulated' : r ? 'dot-blocked' : 'dot-neutral');
     document.getElementById('runtimeTruthDetail').textContent = '• Owner session';
     document.getElementById('topbarPendingCount').textContent = lc ? String(lc.outstanding.pendingPermissions) : '–';
-    document.getElementById('sidebarEndpointLabel').textContent = state.endpoint || '—';
-    var prov = document.getElementById('cc2Provenance');
-    prov.textContent = lc ? 'DAMAR CONTROL · LIVE CORE ' + state.endpoint + ' · OWNER' : r ? 'DAMAR CONTROL · CORE ' + (r.status === 401 || r.status === 401 ? 'REJECTED CREDENTIAL' : 'UNREACHABLE') + ' · NO DATA SHOWN' : 'DAMAR CONTROL · CONNECTING TO CORE…';
+    document.getElementById('sidebarEndpointLabel').textContent = state.endpoint || '-';
   }
   function renderAll() {
     var shell = document.getElementById('dashboardShell');
@@ -1385,7 +1389,7 @@
     }
   }
   function openInspectorDrawer(kicker, title, bodyHtml) {
-    document.getElementById('drawerKicker').textContent = kicker; document.getElementById('drawerTitle').textContent = title;
+    var dk = document.getElementById('drawerKicker'); if (dk) dk.style.display = 'none'; document.getElementById('drawerTitle').textContent = title;
     document.getElementById('drawerBodyContent').innerHTML = bodyHtml;
     openCc2Dialog(document.getElementById('detailDrawerBackdrop'), document.getElementById('closeDetailDrawerBtn'));
   }
@@ -1415,7 +1419,10 @@
       state.mobileDrawerOpen = !state.mobileDrawerOpen; this.setAttribute('aria-expanded', String(state.mobileDrawerOpen)); renderAll(); updateMobileSidebarInert();
       if (state.mobileDrawerOpen) { var f = document.querySelector('#appSidebar .nav-item'); if (f) f.focus(); }
     });
-    document.getElementById('openIdlePresenceSidebarBtn').addEventListener('click', function () { showToast('Idle Presence runs as its own desktop surface, separate from Control.'); });
+    document.getElementById('openIdlePresenceSidebarBtn').addEventListener('click', function () {
+      controlSession().then(function (id) { return core.post('/api/r9/presence/raise', { cliSession: id, client: state.control.client }); })
+        .then(function (r) { showToast(r && r.ok ? 'Idle Presence ditampilkan.' : describeFailure(r)); }, function (r) { showToast(describeFailure(r)); });
+    });
     document.getElementById('runtimeTruthBadgeBtn').addEventListener('click', function () { navigateTo('runtime'); });
     document.getElementById('topbarNotifBtn').addEventListener('click', function () { navigateTo('security'); });
     document.getElementById('topbarSettingsBtn').addEventListener('click', function () { navigateTo('settings'); });

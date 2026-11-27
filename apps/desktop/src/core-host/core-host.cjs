@@ -350,6 +350,20 @@ async function child(directory, resume, recovered = false) {
     const voiceRuntimeConfigFile = path.join(directory, 'canonical', 'configs', 'voice.json');
     const syncVoiceRuntimeConfig = voice => { try { require('./voice-runtime-config.cjs').writeVoiceRuntimeConfig(voiceRuntimeConfigFile, voice); } catch (error) { console.error('VOICE_RUNTIME_CONFIG_SYNC_FAILED ' + error.message); } };
     const coreSettings = require('./core-settings.cjs').createCoreSettings({ file: settingsFile, isProtected: p => isProtected(p, PROTECTED), onVoiceSettings: syncVoiceRuntimeConfig });
+    // Restore the Owner's persisted provider selection (core-settings
+    // lastSelection) so a Core restart does not silently disable live
+    // inference: connections and grants are durable, but the registry's
+    // executable selection is per-process. select() re-verifies the grant
+    // for the exact model; failure leaves the provider non-executable
+    // (reported honestly) and never blocks boot.
+    try {
+      const sel = coreSettings.view().lastSelection;
+      const entry = sel ? registry.list().providers.find(p => p.id === sel.provider) : null;
+      if (sel && entry && !entry.executable) {
+        registry.select(sel.provider, sel.model)
+          .catch(e => console.warn('DAMAR provider selection restore failed:', e.code || e.message));
+      }
+    } catch (e) { console.warn('DAMAR provider selection restore skipped:', e.code || e.message); }
     syncVoiceRuntimeConfig(coreSettings.voice().voice);
     const authority = require('./workspace-authority.cjs').createWorkspaceAuthority({ coreSrc: path.join(copyRoot, 'src'), dataDir: path.join(directory, 'workspace-authority') });
     let r9 = null;

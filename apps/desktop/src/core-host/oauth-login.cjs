@@ -143,7 +143,7 @@ function createOAuthLogin({ keyStore, fetch, now = Date.now, registrySync = null
     try { result = await handleCallback({ code: q.get('code') || undefined, state: q.get('state') || undefined, error: q.get('error') || undefined }); }
     catch (e) { result = { ok: false, error: e.message || 'OAUTH_FAILED' }; }
     const msg = result.ok
-      ? 'Terhubung. Akun OpenRouter sekarang terhubung ke DAMAR — kembali ke Control Dashboard.'
+      ? 'Terhubung. Akun OpenRouter sekarang terhubung ke DAMAR. Kembali ke Control Dashboard.'
       : 'Login tidak selesai (' + result.error + '). Kembali ke Control Dashboard dan coba lagi.';
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end('<!doctype html><meta charset="utf-8"><title>DAMAR OAuth</title><body style="font-family:system-ui;background:#0b0b0d;color:#e8e3d8;display:grid;place-items:center;height:100vh;margin:0"><div style="text-align:center;max-width:420px;padding:20px"><h2>DAMAR</h2><p>' + msg + '</p></div>');
