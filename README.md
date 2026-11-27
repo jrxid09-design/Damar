@@ -85,6 +85,10 @@ again with `npm uninstall -g damar`.
 
 DAMAR is free and open source under the [MIT License](LICENSE). Third-party licenses are in `THIRD_PARTY_LICENSES.txt` in the install folder.
 
+## Contributors
+
+- **Maronns** — creator and lead developer of DAMAR.
+
 ## Support
 - Questions and ideas: GitHub Discussions at https://github.com/jrxid09-design/Damar/discussions
 - Bugs: GitHub Issues at https://github.com/jrxid09-design/Damar/issues. Include the output of `damar version` and `damar core status`.
