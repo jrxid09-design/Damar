@@ -9,7 +9,7 @@ const ROOT = path.join(__dirname, 'renderer');
 const SCHEME = 'damar-presence';
 const ENTRY = `${SCHEME}://app/idle_present`;
 const OWNER_SHA256 = 'e7d6b92116d420d26cc83c5f6de073419004da78eef3c095c6c03ddb0b8bc815';
-const INJECT = ['presence-i18n.js', 'damar-island-fsm.js', 'argon-character-engine.js', 'damar-notch-rig-data.js', 'damar-notch-character.js', 'vendor/three.min.js', 'vendor/GLTFLoader.js', 'vendor/SkeletonUtils.js', 'damar-notch-3d.js', 'damar-notch-behavior.js', 'damar-island.js', 'damar-notch-moci.js', 'presence-adapter.js', 'presence-onboarding.js']
+const INJECT = ['presence-i18n.js', 'damar-island-fsm.js', 'argon-character-engine.js', 'vendor/three.min.js', 'vendor/GLTFLoader.js', 'vendor/SkeletonUtils.js', 'damar-notch-3d.js', 'damar-notch-behavior.js', 'damar-island.js', 'damar-notch-moci.js', 'presence-adapter.js', 'presence-onboarding.js']
   .map(f => `<script src="/${f}" defer></script>`).join('');
 const FILES = Object.freeze({
   '/damar-island-fsm.js': 'damar-island-fsm.js', '/argon-character-engine.js': 'argon-character-engine.js',
