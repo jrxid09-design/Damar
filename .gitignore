@@ -80,3 +80,22 @@ graphify-out/
 # --- Python bytecode: artefak kompilasi, jangan terlacak -------------
 __pycache__/
 *.pyc
+
+# Non-publish material (working files, agent tooling config, build output) - archived out of tree
+/apps/desktop/core-snapshot/
+/dist/
+data/uix-w4-*.json
+/.claude/
+/.opencode/
+/.serena/
+/CLAUDE.md
+/AGENTS.md
+/.mcp.json
+/MCP-WORKER-TASK.md
+/PROGRESS.md
+/RESOLUTION-LOG.md
+/WORKER-REPORT.md
+/W8_L2_L6_TRUSTED_RESULT_HANDOFF.md
+/wave8-iw1-migration-manifest.json
+/.sw-factory/
+/apps/desktop/docs/engineering-history/

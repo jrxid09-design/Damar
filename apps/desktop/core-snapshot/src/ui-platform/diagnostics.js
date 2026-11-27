@@ -1,3 +1,0 @@
-'use strict';
-function forensicMetadata(record = {}, density = 'NORMAL') { if (density === 'NORMAL') return {}; return Object.freeze({ canonicalId: record.canonicalId ?? null, timestamp: record.timestamp ?? null, provenance: record.provenance ?? null, freshness: record.freshness ?? null, requestId: record.requestId ?? null, eventId: density === 'FORENSIC' ? record.eventId ?? null : undefined, authorityRef: density === 'FORENSIC' ? record.authorityRef ?? null : undefined, verificationRef: density === 'FORENSIC' ? record.verificationRef ?? null : undefined }); }
-module.exports = { forensicMetadata };

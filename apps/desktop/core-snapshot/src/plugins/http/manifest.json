@@ -1,8 +1,0 @@
-{
-    "id": "http",
-    "name": "HTTP",
-    "version": "1.0.0",
-    "description": "HTTP client plugin",
-    "entry": "index.js",
-    "enabled": true
-}
