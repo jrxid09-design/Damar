@@ -1,0 +1,12 @@
+{
+  "name": "damar-personal-ai-os",
+  "version": "14.2.0",
+  "description": "DAMAR — Super AI Agent with DAMAR Orb and DAMAR Notch presence transitions",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^30.0.0"
+  }
+}

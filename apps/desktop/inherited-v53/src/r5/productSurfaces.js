@@ -6,10 +6,10 @@ const { projectControl } = require('./controlProjection');
 function createProductSurfaces({ root, snapshot }) {
   const files = new Map([
     ['/cc2', ['cc2/output/damar_control_center.html', 'control']],
-    ['/s/idle_presence', ['ui-prototypes/w5/idle_present.html', 'presence']],
-    ['/mobile', ['ui-prototypes/mobile/mobile.html', 'mobile']],
-    ['/__preview-adapters/damar-island-fsm.js', ['ui-prototypes/w5/damar-island-fsm.js']],
-    ['/__preview-adapters/argon-character-engine.js', ['ui-prototypes/w5/argon-character-engine.js']],
+    ['/s/idle_presence', ['ui-surfaces/w5/idle_present.html', 'presence']],
+    ['/mobile', ['ui-surfaces/mobile/mobile.html', 'mobile']],
+    ['/__preview-adapters/damar-island-fsm.js', ['ui-surfaces/w5/damar-island-fsm.js']],
+    ['/__preview-adapters/argon-character-engine.js', ['ui-surfaces/w5/argon-character-engine.js']],
     ['/__preview-adapters/r5-control.js', ['scripts/preview-adapters/r5-control.js']],
     ...['damar-island.js', 'mobile-island.js', 'idle-presence.js', 'mobile.js'].map(name => [`/__preview-adapters/${name}`, [`scripts/preview-adapters/${name}`]])
   ]);
@@ -27,9 +27,9 @@ function createProductSurfaces({ root, snapshot }) {
     if (!entry && url.pathname.startsWith('/__preview-adapters/argon-assets/')) {
       const relative = url.pathname.slice('/__preview-adapters/argon-assets/'.length);
       if (relative.split('/').some(part => part === '..' || part.includes('\\'))) return false;
-      entry = [`ui-prototypes/w5/third_party/argon-damar/${relative}`];
+      entry = [`ui-surfaces/w5/third_party/argon-damar/${relative}`];
     }
-    if (url.pathname === '/s/damaricon-clean.PNG') entry = ['ui-prototypes/w5/damaricon-clean.png'];
+    if (url.pathname === '/s/damaricon-clean.PNG') entry = ['ui-surfaces/w5/damaricon-clean.png'];
     if (!entry) return false;
     const file = path.resolve(root, entry[0]);
     if (!file.startsWith(path.resolve(root) + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return false;

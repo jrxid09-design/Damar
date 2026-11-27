@@ -26,7 +26,7 @@ module.exports=starting.then(runtime=>{
     event.preventDefault(); closing=true;
     runtime.stop().finally(()=>app.quit());
   });
-  const shell=require('../ui-prototypes/w5/main.js');
+  const shell=require('../ui-surfaces/w5/main.js');
   return {runtime,shell};
 }).catch(error=>{
   console.error('DESKTOP_START_FAILED',error.code || error.message);

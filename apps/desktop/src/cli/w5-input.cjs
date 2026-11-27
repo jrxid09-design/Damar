@@ -18,7 +18,7 @@ class W5Input extends TerminalInput{
  constructor(options={}){
   super(options);this.suppressLineEcho=true;this.messages=[];this.frameBusy=false;this.framePending=false;this.scroll=0;this.activity=false;this.details=false;this.blockExpanded={};this.animationFrame=0;
   const root=path.resolve(__dirname,'../..');
-   this.renderer=spawn('python',['-u',path.join(__dirname,'w5-renderer.py'),'--prototype',path.join(root,'prototype-w5-cli/20261114-000108')],{stdio:['pipe','pipe','pipe'],windowsHide:true,env:restrictedChildEnvironment()});
+   this.renderer=spawn('python',['-u',path.join(__dirname,'w5-renderer.py'),'--prototype',path.join(root,'w5-cli')],{stdio:['pipe','pipe','pipe'],windowsHide:true,env:restrictedChildEnvironment()});
   // End any synchronized-output frame a killed earlier run may have left open (the terminal would hold its display).
   this.output.write('\x1b[?2026l\x1b[?1049h\x1b[?25l');
   this.rendererLines=boundedLines();

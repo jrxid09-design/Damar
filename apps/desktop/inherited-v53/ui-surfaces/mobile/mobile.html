@@ -1,0 +1,1513 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>DAMAR MOBILE — Control &amp; DAMAR Notch</title>
+  <style>
+    :root {
+      --bg-amoled: #060608;
+      --bg-surface: #0d0c10;
+      --bg-card-top: #17151c;
+      --bg-card-bot: #09090c;
+      --gold-bright: #f9e498;
+      --gold-champagne: #e5c158;
+      --gold-metallic: #d4af37;
+      --gold-amber: #b38728;
+      --crimson-core: #ef4444;
+      --emerald-ok: #4ade80;
+      --text-ivory: #faf6ee;
+      --text-muted: #a69d8e;
+      --text-dim: #6e6659;
+      --font-cinzel: 'Cinzel', 'Cinzel Decorative', 'Trajan Pro', 'Palatino Linotype', Georgia, serif;
+      --font-body: 'Segoe UI Variable Display', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'Cascadia Code', 'Consolas', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: transparent;
+      color: var(--text-ivory);
+      font-family: var(--font-body);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    /* ================= 100% SOLID AMOLED TITANIUM-GOLD PHONE CHASSIS ================= */
+    .phone-chassis {
+      position: relative;
+      width: 398px;
+      height: 852px;
+      max-height: 98vh;
+      border-radius: 50px;
+      /* Latar Belakang 100% SOLID (Tidak Pernah Transparan!) */
+      background-color: #060608;
+      background-image:
+        radial-gradient(circle at 50% 24%, #21190c 0%, #0d0b0e 48%, #060608 100%);
+      border: 2.5px solid #c59b27;
+      box-shadow:
+        0 30px 80px rgba(0, 0, 0, 0.98),
+        inset 0 0 0 4px #040406,
+        inset 0 1px 2px rgba(255, 246, 214, 0.45);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
+      transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.45s ease;
+    }
+
+    @media (max-width: 450px) {
+      .phone-chassis {
+        width: 100vw;
+        height: 100vh;
+        max-height: 100vh;
+        border-radius: 0;
+        border: none;
+      }
+    }
+
+    .phone-chassis.boot-collapsed {
+      opacity: 0;
+      transform: scale(0.88);
+    }
+
+    /* Corner Rim Highlights */
+    .corner-rim-tl {
+      position: absolute;
+      top: 0; left: 0; width: 110px; height: 110px;
+      border-top: 2px solid #fff6d6; border-left: 2px solid #fff6d6;
+      border-top-left-radius: 48px; pointer-events: none; z-index: 25;
+      mask-image: radial-gradient(circle at top left, black 15%, transparent 70%);
+      -webkit-mask-image: radial-gradient(circle at top left, black 15%, transparent 70%);
+    }
+
+    /* KANVAS EFEK TEPI LAYAR TIPIS SAAT DAMAR MENJALANKAN PHONE USE */
+    #phoneUseCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 95;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+    }
+    body.phone-use-active #phoneUseCanvas {
+      opacity: 1;
+    }
+
+    /* ================= SOLID ALWAYS-ON DISPLAY (AoD) STANDBY SCREEN ================= */
+    .aod-standby-screen {
+      position: absolute;
+      inset: 0;
+      z-index: 150;
+      background: radial-gradient(circle at 50% 48%, #141008 0%, #050507 62%, #030304 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      padding: 68px 24px 44px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+      cursor: pointer;
+    }
+
+    body.aod-standby-active .aod-standby-screen {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .aod-clock-block {
+      text-align: center;
+    }
+    .aod-time {
+      font-family: var(--font-cinzel);
+      font-size: 54px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      background: linear-gradient(180deg, #fff6d6 0%, #d4af37 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      line-height: 1;
+    }
+    .aod-date {
+      font-family: var(--font-cinzel);
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: var(--gold-champagne);
+      margin-top: 8px;
+      text-transform: uppercase;
+    }
+
+    .aod-orb-center {
+      position: relative;
+      width: 190px;
+      height: 190px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      transition: opacity 0.3s ease;
+    }
+    body[data-mobile-orb="hidden"] .aod-orb-center { opacity: 0; pointer-events: none; }
+    #aodSiriGlCanvas {
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+    }
+
+    .aod-bottom-info {
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    .aod-wake-pill {
+      font-family: var(--font-cinzel);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      color: var(--gold-bright);
+      background: rgba(212, 175, 55, 0.12);
+      border: 1px solid rgba(212, 175, 55, 0.38);
+      padding: 6px 16px;
+      border-radius: 20px;
+    }
+    .aod-hint {
+      font-size: 10.5px;
+      color: var(--text-muted);
+    }
+
+    /* ================= STATUS BAR & DYNAMIC ISLAND ================= */
+    .status-bar {
+      position: relative;
+      z-index: 160;
+      height: 44px;
+      padding: 12px 24px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--text-ivory);
+      -webkit-app-region: drag;
+    }
+
+    .dynamic-island {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      min-width: 124px;
+      height: 28px;
+      padding: 0 11px;
+      border-radius: 0 0 18px 18px;
+      background: #020203;
+      border: 0;
+      border-bottom: 1px solid rgba(249, 228, 152, 0.28);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 7px;
+      z-index: 170;
+      cursor: pointer;
+      -webkit-app-region: no-drag;
+      transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .dynamic-island:hover {
+      border-bottom-color: var(--gold-bright);
+    }
+    .dynamic-island[data-state="hidden"] { opacity: 0; pointer-events: none; }
+    .dynamic-island[data-state="orb"] { opacity: 0; pointer-events: none; }
+    .dynamic-island[data-state="morph"] { opacity: 0.9; }
+    .dynamic-island.island-expanded {
+      height: 120px;
+      min-width: 260px;
+      border-radius: 0 0 22px 22px;
+      transform: translateX(-50%);
+    }
+
+    .island-char { flex: none; display: block; }
+    .island-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--gold-bright);
+      box-shadow: 0 0 8px var(--gold-metallic);
+    }
+    .island-label {
+      font-family: var(--font-cinzel);
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 0.9px;
+      color: var(--gold-bright);
+      white-space: nowrap;
+    }
+    .island-eq {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      height: 9px;
+    }
+    .island-eq span {
+      width: 1.5px;
+      height: 4px;
+      background: var(--gold-bright);
+      border-radius: 1px;
+      animation: eqBounce 0.9s infinite ease-in-out;
+    }
+    .island-eq span:nth-child(2) { height: 8px; animation-delay: 0.2s; }
+    .island-eq span:nth-child(3) { height: 5px; animation-delay: 0.4s; }
+    @keyframes eqBounce {
+      0%, 100% { transform: scaleY(0.45); opacity: 0.5; }
+      50% { transform: scaleY(1.25); opacity: 1; }
+    }
+
+    /* ================= TOP HEADER DAMAR ================= */
+    .top-app-header {
+      position: relative;
+      z-index: 30;
+      padding: 6px 20px 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(212, 175, 55, 0.14);
+    }
+
+    .mobile-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-cinzel);
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 2.2px;
+      color: var(--text-ivory);
+      cursor: pointer;
+    }
+
+    .surface-mesh-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      border-radius: 14px;
+      background: #121015;
+      border: 1px solid rgba(212, 175, 55, 0.35);
+      font-family: var(--font-cinzel);
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 0.7px;
+      color: var(--gold-champagne);
+      cursor: pointer;
+    }
+    .mesh-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--emerald-ok);
+      box-shadow: 0 0 8px var(--emerald-ok);
+    }
+
+    .top-icon-btns {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      -webkit-app-region: no-drag;
+    }
+
+    .icon-btn-sm {
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      background: #121116;
+      border: 1px solid rgba(212, 175, 55, 0.28);
+      color: var(--gold-champagne);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .icon-btn-sm:hover {
+      background: var(--gold-metallic);
+      color: #060608;
+    }
+
+    /* ================= MOBILE STAGE ================= */
+    .mobile-stage {
+      position: relative;
+      z-index: 15;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 6px 18px 8px;
+    }
+
+    .view-pane {
+      display: none;
+      flex-direction: column;
+      justify-content: space-between;
+      width: 100%;
+      height: 100%;
+      animation: paneAppear 0.28s ease;
+    }
+    .view-pane.active {
+      display: flex;
+    }
+    @keyframes paneAppear {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ================= PURE SPHERICAL LIQUID-GOLD ORB STAGE (TANPA EKOR!) ================= */
+    .grand-orb-sanctuary {
+      position: relative;
+      width: 100%;
+      height: 268px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      cursor: grab;
+    }
+    .grand-orb-sanctuary:active {
+      cursor: grabbing;
+    }
+
+    .orb-ambient-halo {
+      position: absolute;
+      width: 230px;
+      height: 230px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(212, 175, 55, 0.22) 0%, rgba(179, 135, 40, 0.06) 52%, transparent 72%);
+      pointer-events: none;
+    }
+
+    #mobileOrbGlCanvas, #mobileOrbSparksCanvas {
+      position: absolute;
+      width: 340px;
+      height: 268px;
+      pointer-events: none;
+    }
+
+    .mobile-greeting {
+      text-align: center;
+      margin-top: -6px;
+      z-index: 5;
+    }
+    .mobile-greeting.auto-hidden {
+      display: none;
+    }
+    .mobile-greeting h1 {
+      font-family: var(--font-cinzel);
+      font-size: 21px;
+      font-weight: 700;
+      letter-spacing: 1.6px;
+      background: linear-gradient(90deg, #d4af37 0%, #fff6d6 50%, #e5c158 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .mobile-greeting p {
+      font-family: var(--font-cinzel);
+      font-size: 9.5px;
+      color: var(--text-muted);
+      letter-spacing: 0.9px;
+      margin-top: 3px;
+    }
+
+    /* ================= 100% SOLID BLACK-GOLD CARDS (DENGAN CURSOR GLOW v3) ================= */
+    .sovereign-card {
+      position: relative;
+      background: linear-gradient(160deg, var(--bg-card-top) 0%, var(--bg-card-bot) 100%);
+      border: 1px solid rgba(212, 175, 55, 0.32);
+      border-radius: 14px;
+      padding: 11px 13px;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.95), inset 0 1px 0 rgba(249, 228, 152, 0.18);
+      overflow: hidden;
+      transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+      --mx: 50%;
+      --my: 50%;
+    }
+    .sovereign-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(200px circle at var(--mx) var(--my), rgba(249, 228, 152, 0.20), transparent 70%);
+      opacity: 0;
+      transition: opacity 0.25s ease;
+      pointer-events: none;
+    }
+    .sovereign-card:hover::before {
+      opacity: 1;
+    }
+    .sovereign-card:hover {
+      border-color: rgba(249, 228, 152, 0.68);
+      transform: translateY(-1.5px);
+      box-shadow: 0 16px 32px rgba(0, 0, 0, 0.98), 0 0 20px rgba(212, 175, 55, 0.18);
+    }
+
+    .resp-trace-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: var(--font-cinzel);
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      color: var(--gold-champagne);
+      margin-bottom: 5px;
+    }
+    .resp-body-text {
+      font-size: 11.5px;
+      line-height: 1.45;
+      color: var(--text-ivory);
+      max-height: 92px;
+      overflow-y: auto;
+      white-space: pre-line;
+    }
+
+    .agent-deck-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .deck-card-inner {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      cursor: pointer;
+    }
+    .deck-icon-box {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(145deg, #211c12 0%, #0c0a08 100%);
+      border: 1px solid rgba(212, 175, 55, 0.42);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: var(--gold-bright);
+    }
+    .deck-title {
+      font-family: var(--font-cinzel);
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--text-ivory);
+      letter-spacing: 0.5px;
+    }
+    .deck-sub {
+      font-size: 9.5px;
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+
+    .constellation-box {
+      position: relative;
+      width: 100%;
+      height: 235px;
+      border-radius: 16px;
+      background: #09080c;
+      border: 1px solid rgba(212, 175, 55, 0.36);
+      overflow: hidden;
+    }
+    #constellationCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .bento-grid-12 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      overflow-y: auto;
+      max-height: 450px;
+      padding-right: 2px;
+    }
+
+    /* ================= BOTTOM THUMB-ZONE COMMAND BAR & 4-TAB DOCK ================= */
+    .bottom-command-zone {
+      position: relative;
+      z-index: 30;
+      padding: 6px 16px 16px;
+      background: #060608;
+      border-top: 1px solid rgba(212, 175, 55, 0.14);
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+    }
+
+    .mobile-input-pill {
+      width: 100%;
+      height: 46px;
+      border-radius: 23px;
+      background: #0c0b10;
+      border: 1px solid rgba(212, 175, 55, 0.42);
+      display: flex;
+      align-items: center;
+      padding: 0 7px;
+      box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.95);
+    }
+
+    .mobile-mic-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 1px solid var(--gold-bright);
+      background: radial-gradient(circle at 50% 35%, #f9e498, #b38728 65%, #090806 100%);
+      color: #050507;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 0 14px rgba(212, 175, 55, 0.75);
+      flex-shrink: 0;
+    }
+
+    .mobile-input-pill input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text-ivory);
+      font-size: 12px;
+      padding: 0 11px;
+    }
+    .mobile-input-pill input::placeholder {
+      color: var(--text-dim);
+    }
+
+    .mobile-send-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 1px solid rgba(212, 175, 55, 0.4);
+      background: #19150e;
+      color: var(--gold-bright);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .mobile-nav-dock {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      background: #0d0c12;
+      border: 1px solid rgba(212, 175, 55, 0.28);
+      border-radius: 18px;
+      padding: 5px;
+    }
+
+    .nav-tab {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      padding: 6px 2px;
+      border-radius: 13px;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-family: var(--font-cinzel);
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      transition: all 0.2s;
+    }
+    .nav-tab svg {
+      width: 15px;
+      height: 15px;
+      stroke: currentColor;
+    }
+    .nav-tab.active {
+      background: linear-gradient(180deg, rgba(212, 175, 55, 0.26) 0%, rgba(212, 175, 55, 0.08) 100%);
+      border: 1px solid rgba(249, 228, 152, 0.48);
+      color: var(--gold-bright);
+    }
+
+    .gold-btn {
+      font-family: var(--font-cinzel);
+      background: linear-gradient(180deg, rgba(212, 175, 55, 0.25) 0%, rgba(212, 175, 55, 0.09) 100%);
+      border: 1px solid rgba(249, 228, 152, 0.45);
+      color: var(--gold-bright);
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      padding: 5px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .gold-btn.danger {
+      background: rgba(220, 38, 38, 0.18);
+      border-color: rgba(248, 113, 113, 0.55);
+      color: #fca5a5;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="phone-chassis" id="phoneChassis">
+    <div class="corner-rim-tl"></div>
+
+    <!-- KANVAS OTOMASI PHONE USE -->
+    <canvas id="phoneUseCanvas" width="398" height="852"></canvas>
+
+    <!-- SOLID ALWAYS-ON DISPLAY (AoD) STANDBY SCREEN (TIDAK TRANSPARAN!) -->
+    <div class="aod-standby-screen" id="aodStandbyScreen" onclick="toggleAodStandbyMode()">
+      <div class="aod-clock-block">
+        <div class="aod-time" id="aodBigClock">14:22</div>
+        <div class="aod-date">JUMAT, 16 OKTOBER • KOTA HUJAN</div>
+      </div>
+
+      <div class="aod-orb-center" onclick="event.stopPropagation(); triggerAodVoiceTest();" title="Ketuk Orb untuk tes respons suara spektrum">
+        <canvas id="aodSiriGlCanvas" width="220" height="220"></canvas>
+      </div>
+
+      <div class="aod-bottom-info">
+        <div class="aod-wake-pill">● WAKE WORD "DAMAR" ACTIVE</div>
+        <div class="aod-hint">Ketuk DAMAR Orb untuk tes suara • Ketuk layar untuk kembali ke Control</div>
+      </div>
+    </div>
+
+    <!-- DYNAMIC ISLAND CLASSIC NOTCH (KLIK UNTUK MASUK/KELUAR MODE AoD STANDBY) -->
+    <div class="dynamic-island" id="dynamicIsland" role="button" tabindex="0" aria-label="DAMAR Notch" onclick="toggleAodStandbyMode()" title="DAMAR Notch · ketuk untuk Mode Always-On Standby (Alt+M)">
+      <!-- Damar Notch character, mobile form: the SAME layered character as the
+           desktop Damar Notch (Fase 2) - layered flame body, separate eyes/pupils,
+           gold flame tokens; one character, one name, two body sizes. Canonical
+           construction lives in the desktop renderer (damar-notch-character.js);
+           this inline SVG is its compact mobile adaptation. -->
+      <svg class="island-char" width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="dncFlame" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#854210"/><stop offset="0.55" stop-color="#D97706"/><stop offset="1" stop-color="#F5B942"/></linearGradient></defs><path d="M24 3c3 6 9 9.5 9 17a9 9 0 1 1-18 0c0-4 2-7 4-9.5.6 1.7 1.7 3 3.5 3.7C21.6 11 22.4 6.8 24 3z" fill="url(#dncFlame)"/><circle cx="19.5" cy="22" r="2.6" fill="#1a1206"/><circle cx="28.5" cy="22" r="2.6" fill="#1a1206"/><circle cx="20.3" cy="21.2" r="0.9" fill="#ffe9b0"/><circle cx="29.3" cy="21.2" r="0.9" fill="#ffe9b0"/><path d="M20.5 28.5c1.2 1.3 5.8 1.3 7 0" stroke="#1a1206" stroke-width="1.7" fill="none" stroke-linecap="round"/></svg>
+      <span class="island-label" id="islandStatusText">DAMAR NOTCH</span>
+      <div class="island-eq">
+        <span></span><span></span><span></span>
+      </div>
+    </div>
+
+    <!-- STATUS BAR HP -->
+    <div class="status-bar">
+      <span id="mobileClock">14:22</span>
+      <span style="color:var(--gold-champagne);">5G • 98%</span>
+    </div>
+
+    <!-- TOP HEADER DAMAR -->
+    <div class="top-app-header">
+      <div class="mobile-brand" onclick="switchMobileTab('presence')">
+        <img src="damaricon-clean.png" alt="DAMAR" width="22" height="22" style="border-radius:5px;" />
+        DAMAR
+      </div>
+
+      <div class="surface-mesh-pill" onclick="handoffToPcWorkstation()" title="Klik untuk Handoff Misi ke Workstation Windows">
+        <div class="mesh-dot"></div>
+        <span id="meshPillText">PC &amp; SERVER LINKED</span>
+      </div>
+
+      <div class="top-icon-btns">
+        <button class="icon-btn-sm" onclick="switchMobileTab('settings')" title="Control Dashboard (konfigurasi Core)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><circle cx="9" cy="7" r="2.2" fill="#050507"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="15" cy="17" r="2.2" fill="#050507"/></svg></button>
+        <button class="icon-btn-sm" onclick="toggleAodStandbyMode()" title="Always-On Standby Screen (Alt+M)"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+        <button class="icon-btn-sm" onclick="mobileWinCtrl('minimize')" title="Minimize">—</button>
+        <button class="icon-btn-sm" onclick="mobileWinCtrl('close')" title="Tutup">✕</button>
+      </div>
+    </div>
+
+    <!-- ================= MOBILE VIEWPORT STAGE ================= -->
+    <div class="mobile-stage">
+
+      <!-- TAB 1: PURE SPHERICAL LIQUID-GOLD ORB CORE (TANPA EKOR!) -->
+      <div class="view-pane active" id="pane-presence">
+        <div class="grand-orb-sanctuary" id="mobileOrbSanctuary" onclick="pulseMobileOrb()">
+          <div class="orb-ambient-halo"></div>
+          <canvas id="mobileOrbGlCanvas" width="380" height="280"></canvas>
+          <canvas id="mobileOrbSparksCanvas" width="380" height="280"></canvas>
+        </div>
+
+        <div class="mobile-greeting" id="mobileGreetingBlock">
+          <h1>Good morning, Maronns.</h1>
+          <p>One Damar • One Identity • One Continuity • One Authority</p>
+        </div>
+
+        <!-- Kapsul Kontinuitas & Respons Adaptif (100% Solid Card) -->
+        <div class="sovereign-card" id="mobileResponseCard">
+          <div class="resp-trace-bar">
+            <span id="mobileTraceSteps">OBSERVE → UNDERSTAND → PLAN → VERIFY</span>
+            <span id="mobileRespTimer">CONTINUITY ACTIVE</span>
+          </div>
+          <div class="resp-body-text" id="mobileRespText">• <b>Workstation Windows &amp; Server:</b> Terhubung (1.1ms).
+• <b>Misi Berlanjut:</b> Website Katalog siap dilanjutkan dari HP atau di-handoff ke PC.
+• <b>Authority Gate:</b> 2 tindakan menunggu ratifikasi.</div>
+        </div>
+
+        <!-- 4 Kartu Aksi Super-Agent (100% Solid Black-Gold Cards) -->
+        <div class="agent-deck-grid">
+          <div class="sovereign-card deck-card-inner" onclick="runMobileCommand('Damar, pagi. Rangkum hal penting hari ini')">
+            <div class="deck-icon-box"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></div>
+            <div>
+              <div class="deck-title">Daily Brief</div>
+              <div class="deck-sub">Konteks &amp; Misi Pagi</div>
+            </div>
+          </div>
+
+          <div class="sovereign-card deck-card-inner" onclick="switchMobileTab('phoneuse'); startMobilePhoneUse('Menjalankan otomasi lintas aplikasi di HP & sinkronisasi ke PC')">
+            <div class="deck-icon-box"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></div>
+            <div>
+              <div class="deck-title">Phone Use</div>
+              <div class="deck-sub">Eksekusi Layar Otonom</div>
+            </div>
+          </div>
+
+          <div class="sovereign-card deck-card-inner" onclick="handoffToPcWorkstation()">
+            <div class="deck-icon-box">⤢</div>
+            <div>
+              <div class="deck-title">PC Handoff</div>
+              <div class="deck-sub">Lempar Kerja ke PC</div>
+            </div>
+          </div>
+
+          <div class="sovereign-card deck-card-inner" onclick="switchMobileTab('matrix')">
+            <div class="deck-icon-box"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5l8-3z"/><path d="M8.5 12l2.5 2.5 4.5-4.5"/></svg></div>
+            <div>
+              <div class="deck-title">Authority Gate</div>
+              <div class="deck-sub">2 Menunggu Izin</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: MATA DEWA — SOVEREIGN SPATIAL CONSTELLATION -->
+      <div class="view-pane" id="pane-edith">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <h3 style="font-family:var(--font-cinzel);font-size:13.5px;color:var(--gold-bright);">Mata Dewa · Spatial Constellation</h3>
+            <p style="font-size:10px;color:var(--text-muted);">Persepsi Dunia Fisik &amp; Sensor Fusion Jujur</p>
+          </div>
+          <button class="gold-btn" onclick="toggleEdithCamera()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 6l1.5-2.5h5L16 6"/></svg> Optical Lens</button>
+        </div>
+
+        <div class="constellation-box">
+          <video id="edithCamVideo" autoplay playsinline muted style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.55;"></video>
+          <canvas id="constellationCanvas" width="360" height="235"></canvas>
+        </div>
+
+        <div class="sovereign-card">
+          <div class="resp-trace-bar"><span>SENSOR FUSION TELEMETRY</span><span>KORELASI ≠ KEPASTIAN</span></div>
+          <div class="resp-body-text">• <b>Ruang Keluarga (PIR • Conf 0.72):</b> Terindikasi aktivitas pukul 06:40; pandangan kamera terbatas; sumber belum dapat dipastikan.
+• <b>Pintu Utama (Reed • Conf 0.99):</b> Terkunci &amp; state tidak berubah.
+• <b>RF / Wi-Fi Sensing:</b> Ditandai EXPERIMENTAL hingga tervalidasi.</div>
+        </div>
+
+        <div style="display:flex;gap:8px;">
+          <button class="gold-btn" style="flex:1;justify-content:center;" onclick="runMobileCommand('Periksa kamera depan dan sensor ruang keluarga')"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg> Verifikasi Ulang Sensor</button>
+          <button class="gold-btn" style="flex:1;justify-content:center;" onclick="switchMobileTab('presence')">← Kembali ke Orb</button>
+        </div>
+      </div>
+
+      <!-- TAB 3: AUTONOMOUS PHONE USE & MULTI-DEVICE EXECUTION -->
+      <div class="view-pane" id="pane-phoneuse">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <h3 style="font-family:var(--font-cinzel);font-size:13.5px;color:var(--gold-bright);">Autonomous Phone &amp; Device Use</h3>
+            <p style="font-size:10px;color:var(--text-muted);">Observe → Interact → Workflow → Governed Autonomy</p>
+          </div>
+          <button class="gold-btn danger" onclick="stopMobilePhoneUse()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg> Stop</button>
+        </div>
+
+        <div class="sovereign-card" style="flex:1;display:flex;flex-direction:column;justify-content:space-between;margin:6px 0;">
+          <div class="resp-trace-bar">
+            <span id="puStageLabel">LIVE WORK VIEW · MULTI-SURFACE</span>
+            <span>CHECKPOINT #4</span>
+          </div>
+          <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-ivory);line-height:1.52;background:#050507;padding:10px;border-radius:10px;border:1px solid rgba(212,175,55,0.18);" id="puLiveLog">
+[1. OBSERVE] Membaca struktur layar aplikasi &amp; pesan masuk...
+[2. PLAN] Menyusun langkah kerja dengan batas izin sah...
+[3. EXECUTE] Menggerakkan titik sentuh otonom di layar HP...
+[4. HANDOFF] Merutekan build berat ke Workstation Windows (1.1ms).</div>
+          <div style="display:flex;gap:7px;">
+            <button class="gold-btn" style="flex:1;justify-content:center;" onclick="startMobilePhoneUse('Merapikan pesan penting & menjadwalkan agenda hari ini di HP')"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg> Jalankan di HP</button>
+            <button class="gold-btn" style="flex:1;justify-content:center;" onclick="handoffToPcWorkstation()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg> Rute ke PC Utama</button>
+          </div>
+        </div>
+
+        <div class="sovereign-card">
+          <div class="resp-trace-bar"><span>MULTI-DEVICE ROUTING</span><span>OFFLINE ≠ BERHASIL</span></div>
+          <div class="resp-body-text">• <b>Android Maronns:</b> ONLINE (Surface Aktif).
+• <b>Windows 11 Workstation:</b> ONLINE (1.1ms • Rute Coding &amp; QA).
+• <b>Linux Host:</b> OFFLINE (Status backup: UNKNOWN, dialihkan ke Windows).</div>
+        </div>
+      </div>
+
+      <!-- TAB 4: AUTHORITY GATE & 12 CANONICAL DOMAINS -->
+      <div class="view-pane" id="pane-matrix">
+        <div>
+          <h3 style="font-family:var(--font-cinzel);font-size:13.5px;color:var(--gold-bright);">Authority Gate &amp; 12 Ruang Damar</h3>
+          <p style="font-size:10px;color:var(--text-muted);">Satu Otoritas Kanonis • Deny Until Ratified</p>
+        </div>
+
+        <div class="sovereign-card" style="margin:4px 0;">
+          <div class="resp-trace-bar">
+            <span>APR-101 · WORKSTATION WINDOWS</span>
+            <span id="mobAprStatus" style="color:#fbbf24;">HELD AT GATE</span>
+          </div>
+          <div style="font-size:11px;font-weight:600;color:var(--text-ivory);margin-bottom:2px;">
+            Hapus 14 berkas duplikat (420 MB) di C:\Workspace\Damar
+          </div>
+          <div style="font-size:9.5px;color:var(--text-muted);margin-bottom:7px;">
+            Scope: fs.delete (Destruktif) • Reversibilitas: Tidak Bisa Rollback
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button class="gold-btn danger" style="flex:1;justify-content:center;" onclick="decideMobileApproval('DENIED')">✕ Deny</button>
+            <button class="gold-btn" style="flex:1;justify-content:center;" onclick="decideMobileApproval('REVIEWING')"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg> Review</button>
+            <button class="gold-btn" style="flex:1.2;justify-content:center;" onclick="decideMobileApproval('APPROVED ONCE')">✓ Approve Once</button>
+          </div>
+        </div>
+
+        <div class="bento-grid-12">
+          <div class="sovereign-card" onclick="inspectMobileModule('Missions · Closed-Loop', 'Website Katalog sedang berjalan (Checkpoint #4). Backup Linux berstatus UNKNOWN karena host offline.')">
+            <div class="deck-title">Missions</div><div class="deck-sub">Closed-Loop &amp; Bukti</div>
+          </div>
+          <div class="sovereign-card" onclick="inspectMobileModule('DCD · Cyber Defense', 'Data Teramati: Port 4444 terbuka di Local Server. Inferensi: Sisa sesi uji (Conf 0.84). Risiko lockout: 0%.')">
+            <div class="deck-title">DCD Security</div><div class="deck-sub">Teramati vs Inferensi</div>
+          </div>
+          <div class="sovereign-card" onclick="inspectMobileModule('Money · DFI', 'Cashflow +Rp 14,85 Jt. Membaca & analisis diizinkan; pemindahan dana wajib otorisasi eksplisit.')">
+            <div class="deck-title">Money / DFI</div><div class="deck-sub">Cashflow &amp; Scoped Izin</div>
+          </div>
+          <div class="sovereign-card" onclick="inspectMobileModule('Memory · 7 Lapisan', 'Working, Episodic, Semantic, Preference, Procedural, Spatial, dan Mission Memory tersinkronisasi.')">
+            <div class="deck-title">7-Layer Memory</div><div class="deck-sub">Kontinuitas &amp; Koreksi</div>
+          </div>
+          <div class="sovereign-card" onclick="inspectMobileModule('Models & Resource Governor', '9router Dahl (Unlimited) & Radox (1B). Resource Governor membatasi CPU 35% & RAM 512MB.')">
+            <div class="deck-title">Models &amp; Quota</div><div class="deck-sub">Provider-Agnostic</div>
+          </div>
+          <div class="sovereign-card" onclick="inspectMobileModule('Developer & Bridge V2R3', 'PR #2 merged (c8cfe005). Control Bridge V2R3 lulus 150/150 pengujian.')">
+            <div class="deck-title">Developer V2R3</div><div class="deck-sub">Executor ≠ Auditor</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 5: CONTROL DASHBOARD - jendela mobile ke konfigurasi terpusat Core.
+           Bukan store terpisah: perubahan di sini tertulis ke Core, teraudit,
+           dan berlaku ke semua permukaan (desktop, Notch, HP). -->
+      <div class="view-pane" id="pane-settings">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <h3 style="font-family:var(--font-cinzel);font-size:13.5px;color:var(--gold-bright);">Control Dashboard</h3>
+            <p style="font-size:10px;color:var(--text-muted);">Satu konfigurasi di Core · berlaku ke semua permukaan</p>
+          </div>
+          <span style="font-size:9.5px;color:var(--gold-bright);border:1px solid rgba(212,175,55,0.35);border-radius:999px;padding:3px 8px;">CORE · TERSAMBUNG</span>
+        </div>
+<div class="sovereign-card"><div class="resp-trace-bar"><span>PROFIL PENGGUNA</span><span>TERPUSAT</span></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;"><span style="font-size:11px;color:var(--text-muted);">Nama tampilan</span><input type="text" placeholder="Nama tampilan" style="width:132px;background:#0a0a0c;border:1px solid rgba(212,175,55,0.25);border-radius:8px;color:var(--text-ivory);font-size:11.5px;padding:5px 8px;" /></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;"><span style="font-size:11px;color:var(--text-muted);">Sapaan Damar</span><input type="text" placeholder="Sapaan" style="width:132px;background:#0a0a0c;border:1px solid rgba(212,175,55,0.25);border-radius:8px;color:var(--text-ivory);font-size:11.5px;padding:5px 8px;" /></div><div style="font-size:9.5px;color:var(--text-muted);padding-top:2px;">Sapaan dipakai di Presence &amp; alert. Kosong = pakai nama tampilan.</div></div><div class="sovereign-card"><div class="resp-trace-bar"><span>SALURAN ALERT</span><span>MATA DEWA</span></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;"><span style="font-size:11px;color:var(--text-muted);">Telegram</span><span style="font-size:10.5px;color:var(--gold-bright);border:1px solid rgba(212,175,55,0.35);border-radius:999px;padding:3px 9px;">Terhubung</span></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;"><span style="font-size:11px;color:var(--text-muted);">WhatsApp</span><span style="font-size:10.5px;color:var(--gold-bright);border:1px solid rgba(212,175,55,0.35);border-radius:999px;padding:3px 9px;">Siap diaktifkan</span></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;"><span style="font-size:11px;color:var(--text-muted);">Jam tenang</span><span style="font-size:10.5px;color:var(--gold-bright);border:1px solid rgba(212,175,55,0.35);border-radius:999px;padding:3px 9px;">22.00 - 06.00</span></div></div><div class="sovereign-card"><div class="resp-trace-bar"><span>PRESENCE &amp; NOTCH</span><span>AMBANG</span></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;"><span style="font-size:11px;color:var(--text-muted);">Presence ke Orb</span><span style="font-size:10.5px;color:var(--gold-bright);border:1px solid rgba(212,175,55,0.35);border-radius:999px;padding:3px 9px;">10 detik</span></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;"><span style="font-size:11px;color:var(--text-muted);">Orb ke Notch</span><span style="font-size:10.5px;color:var(--gold-bright);border:1px solid rgba(212,175,55,0.35);border-radius:999px;padding:3px 9px;">10 detik</span></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;"><span style="font-size:11px;color:var(--text-muted);">Damar Notch</span><span style="font-size:10.5px;color:var(--gold-bright);border:1px solid rgba(212,175,55,0.35);border-radius:999px;padding:3px 9px;">Aktif</span></div></div><div class="sovereign-card"><div class="resp-trace-bar"><span>PROVIDER &amp; MODEL</span><span>AGNOSTIK</span></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;"><span style="font-size:11px;color:var(--text-muted);">Provider aktif</span><span style="font-size:10.5px;color:var(--gold-bright);border:1px solid rgba(212,175,55,0.35);border-radius:999px;padding:3px 9px;">Core</span></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;"><span style="font-size:11px;color:var(--text-muted);">Model default</span><span style="font-size:10.5px;color:var(--gold-bright);border:1px solid rgba(212,175,55,0.35);border-radius:999px;padding:3px 9px;">Otomatis</span></div></div><div class="sovereign-card"><div class="resp-trace-bar"><span>PERANGKAT &amp; NODE</span><span>PAIRING</span></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;"><span style="font-size:11px;color:var(--text-muted);">Workstation Windows</span><span style="font-size:10.5px;color:var(--gold-bright);border:1px solid rgba(212,175,55,0.35);border-radius:999px;padding:3px 9px;">Node utama · Aktif</span></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;"><span style="font-size:11px;color:var(--text-muted);">Android (HP ini)</span><span style="font-size:10.5px;color:var(--gold-bright);border:1px solid rgba(212,175,55,0.35);border-radius:999px;padding:3px 9px;">Node · Aktif</span></div><div style="font-size:9.5px;color:var(--text-muted);padding-top:2px;">Node terdaftar di Core dan bisa dicabut dari Core. Perubahan sensitif tetap lewat Authority Gate; sesi dashboard terkunci otomatis.</div></div>        <button class="gold-btn" style="width:100%;justify-content:center;" onclick="inspectMobileModule('Control Dashboard', 'Perubahan tersimpan ke Core (satu-satunya sumber konfigurasi), teraudit, dan langsung berlaku di desktop, Notch, dan HP.')">Simpan ke Core</button>
+      </div>
+
+    </div>
+
+    <!-- ================= BOTTOM THUMB-ZONE COMMAND BAR & 4-TAB DOCK ================= -->
+    <div class="bottom-command-zone">
+      <div class="mobile-input-pill">
+        <button class="mobile-mic-btn" onclick="triggerMobileVoice()" title="Bicara ke Damar">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#050507" stroke-width="2.2">
+            <rect x="9" y="2" width="6" height="11" rx="3" fill="#fff6d6"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/>
+          </svg>
+        </button>
+        <input type="text" id="mobilePromptInput" placeholder="Perintahkan Damar (mis: 'lanjutkan kemarin', 'operasikan hp')..." />
+        <button class="mobile-send-btn" onclick="submitMobilePrompt()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="mobile-nav-dock">
+        <div class="nav-tab active" data-tab="presence" onclick="switchMobileTab('presence')">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>
+          PRESENCE
+        </div>
+        <div class="nav-tab" data-tab="edith" onclick="switchMobileTab('edith')">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+          MATA DEWA
+        </div>
+        <div class="nav-tab" data-tab="phoneuse" onclick="switchMobileTab('phoneuse')">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+          PHONE USE
+        </div>
+        <div class="nav-tab" data-tab="matrix" onclick="switchMobileTab('matrix')">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+          DOMAINS
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function loadCinzel() {
+      const l = document.createElement('link');
+      l.rel = 'stylesheet';
+      l.href = 'https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Cinzel:wght@500;600;700&display=swap';
+      document.head.appendChild(l);
+    })();
+
+    let audioCtx = null;
+    let voiceAmp = 0.0, targetVoiceAmp = 0.0;
+    let orbEnergy = 1.0, targetEnergy = 1.0, pulseWave = 0.0;
+    let mouseX = 0.0, mouseY = 0.0, targetMouseX = 0.0, targetMouseY = 0.0;
+    let damarSpeaking = false;
+    let phoneUseActive = false;
+
+    document.querySelectorAll('.sovereign-card').forEach(card => {
+      card.addEventListener('mousemove', e => {
+        const r = card.getBoundingClientRect();
+        card.style.setProperty('--mx', `${e.clientX - r.left}px`); card.style.setProperty('--my', `${e.clientY - r.top}px`);
+      });
+    });
+
+    const orbSanctuary = document.getElementById('mobileOrbSanctuary');
+    orbSanctuary.addEventListener('mousemove', e => {
+      const r = orbSanctuary.getBoundingClientRect();
+      targetMouseX = ((e.clientX - r.left) / r.width - 0.5) * 2.0;
+      targetMouseY = -((e.clientY - r.top) / r.height - 0.5) * 2.0;
+    });
+    orbSanctuary.addEventListener('mouseleave', () => {
+      targetMouseX = 0.0;
+      targetMouseY = 0.0;
+    });
+
+    function playMobileTone(type) {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const now = audioCtx.currentTime;
+        const freqs = type === 'chime' ? [528, 660, 880] : [720];
+        freqs.forEach((f, i) => {
+          const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+          o.type = 'sine';
+          o.frequency.setValueAtTime(f, now + i * 0.035);
+          g.gain.setValueAtTime(0.035, now + i * 0.035);
+          g.gain.exponentialRampToValueAtTime(0.0005, now + 0.25 + i * 0.035);
+          o.connect(g); g.connect(audioCtx.destination);
+          o.start(now + i * 0.035); o.stop(now + 0.28 + i * 0.035);
+        });
+      } catch (e) {}
+    }
+
+    function updateMobileClock() {
+      const d = new Date();
+      const tStr = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      document.getElementById('mobileClock').textContent = tStr;
+      document.getElementById('aodBigClock').textContent = tStr;
+    }
+    setInterval(updateMobileClock, 1000);
+    updateMobileClock();
+
+    function mobileWinCtrl(action) {
+      playMobileTone('click');
+      window.damarMobile?.windowControl(action);
+    }
+
+    function switchMobileTab(tabKey) {
+      playMobileTone('click');
+      document.body.classList.remove('aod-standby-active');
+      document.querySelectorAll('.view-pane').forEach(p => p.classList.remove('active'));
+      const target = document.getElementById('pane-' + tabKey);
+      if (target) target.classList.add('active');
+
+      document.querySelectorAll('.nav-tab').forEach(t => {
+        t.classList.toggle('active', t.getAttribute('data-tab') === tabKey);
+      });
+    }
+
+    // Mode Standby HP = Layar Kunci Always-On Display (AoD) Hitam Pekat (Tidak Transparan!)
+    function toggleAodStandbyMode() {
+      playMobileTone('chime');
+      document.body.classList.toggle('aod-standby-active');
+      const isAod = document.body.classList.contains('aod-standby-active');
+      document.getElementById('islandStatusText').textContent = isAod
+        ? 'DAMAR NOTCH · AOD STANDBY · TAP TO WAKE'
+        : 'DAMAR NOTCH';
+      window.dispatchEvent(new CustomEvent('damar-mobile-aod-change', { detail: { active: isAod } }));
+    }
+
+    function triggerAodVoiceTest() {
+      playMobileTone('chime');
+      window.dispatchEvent(new CustomEvent('damar-mobile-orb-activity'));
+      speakMobile('Ya, Maronns. Damar aktif menjaga perangkatmu dalam mode Always-On Standby.');
+    }
+
+    window.damarMobile?.on('toggle-aod-standby', () => toggleAodStandbyMode());
+    window.damarMobile?.on('mobile-outro-close', () => {
+      document.getElementById('phoneChassis').classList.add('boot-collapsed');
+      setTimeout(() => window.damarMobile?.windowControl('close'), 450);
+    });
+
+    function speakMobile(text) {
+      damarSpeaking = true;
+      document.getElementById('islandStatusText').textContent = 'DAMAR NOTCH · SPEAKING...';
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text.replace(/[•≠]/g, ' '));
+        u.lang = 'id-ID';
+        u.rate = 1.02;
+        u.onboundary = () => {
+          pulseWave = 0.85;
+          targetVoiceAmp = 0.85;
+        };
+        u.onend = () => {
+          damarSpeaking = false;
+          targetVoiceAmp = 0.0;
+          document.getElementById('islandStatusText').textContent = 'DAMAR NOTCH';
+        };
+        window.speechSynthesis.speak(u);
+      } else {
+        setTimeout(() => {
+          damarSpeaking = false;
+          targetVoiceAmp = 0.0;
+          document.getElementById('islandStatusText').textContent = 'DAMAR NOTCH';
+        }, 3000);
+      }
+    }
+
+    function handoffToPcWorkstation() {
+      playMobileTone('chime');
+      pulseWave = 1.25;
+      targetEnergy = 2.1;
+      setTimeout(() => { targetEnergy = 1.0; }, 700);
+      document.getElementById('meshPillText').textContent = 'HANDOFF -> WINDOWS PC';
+      const msg = 'Meneruskan konteks misi dan checkpoint aktif dari HP ke Workstation Windows utama Maronns. Eksekusi berlanjut tanpa terputus.';
+      document.getElementById('mobileTraceSteps').textContent = 'CONTINUITY HANDOFF · ANDROID → PC';
+      document.getElementById('mobileRespText').textContent = '• ' + msg;
+      speakMobile(msg);
+    }
+
+    function runMobileCommand(cmdText) {
+      playMobileTone('chime');
+      document.getElementById('mobileGreetingBlock').classList.add('auto-hidden');
+      const low = cmdText.toLowerCase();
+
+      if (low.includes('operasikan') || low.includes('phone use')) {
+        switchMobileTab('phoneuse');
+        startMobilePhoneUse(cmdText);
+        return;
+      }
+
+      let reply = '';
+      if (low.includes('pagi') || low.includes('rangkum')) {
+        reply = `• Misi Aktif: Website Katalog di Workstation Windows (Checkpoint #4).\n• Approval Pending: 2 tindakan menunggu di Authority Gate.\n• Mata Dewa: Indikasi aktivitas ruang keluarga pukul 06:40 (Confidence 0.72).`;
+      } else if (low.includes('lanjutkan') || low.includes('kemarin')) {
+        reply = `• Rekonsiliasi Misi: Checkpoint #4 ditemukan. 2 berkas berubah di PC utama; host Linux offline sehingga verifikasi dialihkan ke Windows.`;
+      } else if (low.includes('kamera') || low.includes('sensor')) {
+        switchMobileTab('edith');
+        reply = 'Menampilkan Konstelasi Spasial Mata Dewa. Sensor pintu utama terkunci; sumber gerakan ruang keluarga belum dapat dipastikan.';
+      } else {
+        reply = `Instruksi "${cmdText}" telah diterima oleh Damar Mobile dan disinkronkan ke otoritas kanonis.`;
+      }
+
+      document.getElementById('mobileRespText').textContent = reply;
+      document.getElementById('mobileRespTimer').textContent = '60s';
+      speakMobile(reply);
+
+      clearTimeout(window._mobHideT);
+      window._mobHideT = setTimeout(() => {
+        document.getElementById('mobileGreetingBlock').classList.remove('auto-hidden');
+      }, 60000);
+    }
+
+    function submitMobilePrompt() {
+      const inp = document.getElementById('mobilePromptInput');
+      const val = inp.value.trim();
+      if (!val) return;
+      inp.value = '';
+      runMobileCommand(val);
+    }
+
+    document.getElementById('mobilePromptInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') submitMobilePrompt();
+    });
+
+    function triggerMobileVoice() {
+      playMobileTone('chime');
+      document.getElementById('islandStatusText').textContent = 'DAMAR NOTCH · LISTENING...';
+      pulseWave = 1.15;
+      targetVoiceAmp = 0.75;
+      setTimeout(() => {
+        runMobileCommand('Damar, pagi. Rangkum hal penting hari ini');
+      }, 1300);
+    }
+
+    function inspectMobileModule(title, desc) {
+      playMobileTone('click');
+      switchMobileTab('presence');
+      document.getElementById('mobileTraceSteps').textContent = title.toUpperCase();
+      document.getElementById('mobileRespText').textContent = desc;
+      speakMobile(desc);
+    }
+
+    function decideMobileApproval(verdict) {
+      playMobileTone('chime');
+      const el = document.getElementById('mobAprStatus');
+      el.textContent = verdict;
+      el.style.color = verdict.includes('APPROVED') ? '#4ade80' : '#f87171';
+      speakMobile(`Keputusan otoritas ${verdict} telah dicatat pada Audit Ledger.`);
+    }
+
+    // ============================================================================
+    // 1. PURE SPHERICAL LIQUID-GOLD WEBGL ORB (TANPA EKOR BAWAH & TANPA SAYAP!)
+    // ============================================================================
+    const glCanvas = document.getElementById('mobileOrbGlCanvas');
+    const sCanvas = document.getElementById('mobileOrbSparksCanvas');
+    const sCtx = sCanvas.getContext('2d');
+    let gl = null, glProg = null, uTime, uRes, uMouse, uEnergy, uPulse, uVoice;
+    try { gl = glCanvas.getContext('webgl', { alpha: true, antialias: true, premultipliedAlpha: false }); } catch (e) {}
+
+    if (gl) {
+      const vs = `attribute vec2 a_p; varying vec2 v_uv; void main(){ v_uv = a_p; gl_Position = vec4(a_p,0.0,1.0); }`;
+      const fs = `
+        precision highp float; varying vec2 v_uv;
+        uniform float u_t, u_e, u_p, u_v;
+        uniform vec2 u_r, u_m;
+        mat2 rot(float a){ float s=sin(a), c=cos(a); return mat2(c,-s,s,c); }
+
+        float silkField(vec3 p, float t){
+          p.xz *= rot(t * 0.22 + u_m.x * 0.55);
+          p.yz *= rot(sin(t * 0.18) * 0.25 + u_m.y * 0.45);
+          float d = 0.0; vec3 q = p;
+          for(int i=0; i<4; i++){
+            float vHarm = 1.0 + u_v * 0.28 * sin(t * 8.0 + float(i)*2.0);
+            q += (0.38 * vHarm) * sin(q.yzx * 2.15 + t * 0.62 + float(i)*1.4);
+            float ribbon = abs(dot(sin(q * 1.68), cos(q.zxy * 1.95))) - 0.11;
+            d += exp(-abs(ribbon) * 7.4) * (0.66 / float(i+1));
+            q *= 1.32;
+          }
+          return d;
+        }
+
+        void main(){
+          vec2 uv = v_uv * 0.96;
+          uv.x *= u_r.x / u_r.y;
+          float rad2D = length(uv);
+
+          // Batas Bola Murni (Tanpa Ekor Bawah & Tanpa Sayap Samping!)
+          if (rad2D > 1.08) {
+            gl_FragColor = vec4(0.0);
+            return;
+          }
+
+          vec3 ro = vec3(0.0, 0.0, 2.30), rd = normalize(vec3(uv * 1.12, -1.5));
+          float t = 0.90, alpha = 0.0; vec3 col = vec3(0.0);
+          vec3 cDeep = vec3(0.45, 0.28, 0.05), cMid = vec3(0.88, 0.70, 0.24), cHigh = vec3(1.0, 0.96, 0.84);
+          vec3 warmRose = vec3(0.74, 0.45, 0.22);
+
+          for(int i=0; i<24; i++){
+            vec3 p = ro + rd * t;
+            // Murni simetris bulat sempurna 3D (vec3(1.0, 1.0, 1.0))
+            float r3 = length(p) / (1.0 + u_v * 0.08);
+            float organicRipple = 0.05 * sin(p.x * 3.5 + u_t * 0.5) * cos(p.y * 3.5 - u_t * 0.4);
+            float mask = smoothstep(0.96 + organicRipple, 0.28, r3);
+
+            if(mask > 0.005){
+              float f = silkField(p * 1.38, u_t);
+              float rim = pow(clamp(r3 / 0.92, 0.0, 1.0), 1.65);
+              float dens = f * mask * (0.56 + 0.82 * rim) * (1.0 + u_v * 0.35);
+              vec3 sCol = mix(cDeep, cMid, clamp(f * 0.85, 0.0, 1.0));
+              sCol = mix(sCol, warmRose, 0.22 * sin(p.y * 3.0 + p.x * 2.0));
+              sCol += cHigh * pow(max(f - 0.52, 0.0), 2.4) * (1.65 + u_v * 0.7);
+              col += sCol * dens * 0.098;
+              alpha += dens * 0.068;
+            }
+            t += 0.068;
+          }
+
+          if (u_p > 0.01) {
+            float ring = exp(-abs(rad2D - (1.0 - u_p) * 0.88) * 20.0) * u_p;
+            col += cHigh * ring * 0.9;
+            alpha += ring * 0.45;
+          }
+
+          // Pendaran Halo Bulat Halus di Sekeliling Bola
+          float sphereHalo = exp(-rad2D * 2.8) * 0.26;
+          col += cMid * sphereHalo;
+          alpha = clamp(alpha + sphereHalo * 0.6, 0.0, 1.0);
+
+          float sphereEdge = smoothstep(1.05, 0.68, rad2D);
+          gl_FragColor = vec4(pow(col * sphereEdge, vec3(0.92)), clamp(alpha * sphereEdge, 0.0, 1.0));
+        }
+      `;
+      const comp = (tp, sr) => { const s = gl.createShader(tp); gl.shaderSource(s, sr); gl.compileShader(s); return s; };
+      glProg = gl.createProgram();
+      gl.attachShader(glProg, comp(gl.VERTEX_SHADER, vs));
+      gl.attachShader(glProg, comp(gl.FRAGMENT_SHADER, fs));
+      gl.linkProgram(glProg); gl.useProgram(glProg);
+      const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+      const loc = gl.getAttribLocation(glProg, 'a_p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      uTime = gl.getUniformLocation(glProg, 'u_t'); uRes = gl.getUniformLocation(glProg, 'u_r');
+      uMouse = gl.getUniformLocation(glProg, 'u_m'); uEnergy = gl.getUniformLocation(glProg, 'u_e');
+      uPulse = gl.getUniformLocation(glProg, 'u_p'); uVoice = gl.getUniformLocation(glProg, 'u_v');
+    }
+
+    // ============================================================================
+    // 2. WEBGL SIRI-ORB KHUSUS LAYAR ALWAYS-ON STANDBY (#aodSiriGlCanvas)
+    // ============================================================================
+    const aodCanvas = document.getElementById('aodSiriGlCanvas');
+    let aodGl = null, aodProg = null, aTimeLoc, aVoiceLoc;
+    try { aodGl = aodCanvas.getContext('webgl', { alpha: true, antialias: true, premultipliedAlpha: false }); } catch (e) {}
+
+    if (aodGl) {
+      const vs = `attribute vec2 a_p; varying vec2 v_uv; void main(){ v_uv = a_p; gl_Position = vec4(a_p, 0.0, 1.0); }`;
+      const fs = `
+        precision highp float; varying vec2 v_uv;
+        uniform float u_t, u_v;
+        mat2 rot(float a){ float s=sin(a), c=cos(a); return mat2(c,-s,s,c); }
+        void main(){
+          vec2 uv = v_uv * 1.25;
+          float d = length(uv);
+          float angle = atan(uv.y, uv.x);
+          float specWave = u_v * (0.05 * sin(angle * 4.0 + u_t * 6.0) + 0.04 * cos(angle * 7.0 - u_t * 8.0));
+          float rad = 0.80 + u_v * 0.05 + specWave;
+          float outerRing = exp(-abs(d - (rad + 0.08 * u_v)) * 26.0) * u_v * 0.85;
+          if (d > rad && outerRing < 0.005) { gl_FragColor = vec4(0.0); return; }
+
+          vec3 cGold = vec3(0.96, 0.78, 0.28), cIvory = vec3(1.0, 0.97, 0.88), cAmber = vec3(0.85, 0.45, 0.12);
+          vec3 col = vec3(0.0); float alpha = 0.0;
+          if (d <= rad) {
+            vec2 sUv = uv / rad; float sd = length(sUv);
+            vec3 n = normalize(vec3(sUv, sqrt(max(0.0, 1.0 - sd*sd))));
+            col = vec3(0.04, 0.03, 0.02);
+            vec3 p1 = n; p1.xz *= rot(u_t * 0.55); p1.yz *= rot(0.45);
+            float w1 = exp(-abs(p1.y + (0.24 + u_v*0.25)*sin(p1.x*3.8 + u_t*1.4)) * (6.0 - u_v*2.0));
+            vec3 p2 = n; p2.xy *= rot(-u_t * 0.62); p2.xz *= rot(0.85);
+            float w2 = exp(-abs(p2.y + (0.25 + u_v*0.25)*cos(p2.z*3.6 - u_t*1.3)) * (5.8 - u_v*2.0));
+            float eqLine = exp(-abs(sUv.y - u_v*0.14*sin(sUv.x*8.0 + u_t*6.0)) * 16.0) * u_v;
+            col += cGold * w1 + cAmber * w2 + cIvory * eqLine;
+            col += cIvory * exp(-sd * 3.0) * (0.45 + u_v * 0.5);
+            col += cGold * pow(clamp(sd, 0.0, 1.0), 3.0) * 0.65;
+            alpha = smoothstep(1.0, 0.88, sd);
+          }
+          col += cIvory * outerRing;
+          alpha = clamp(alpha + outerRing, 0.0, 1.0);
+          gl_FragColor = vec4(col, alpha);
+        }
+      `;
+      const comp = (tp, sr) => { const s = aodGl.createShader(tp); aodGl.shaderSource(s, sr); aodGl.compileShader(s); return s; };
+      aodProg = aodGl.createProgram();
+      aodGl.attachShader(aodProg, comp(aodGl.VERTEX_SHADER, vs));
+      aodGl.attachShader(aodProg, comp(aodGl.FRAGMENT_SHADER, fs));
+      aodGl.linkProgram(aodProg); aodGl.useProgram(aodProg);
+      const b = aodGl.createBuffer(); aodGl.bindBuffer(aodGl.ARRAY_BUFFER, b);
+      aodGl.bufferData(aodGl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), aodGl.STATIC_DRAW);
+      const loc = aodGl.getAttribLocation(aodProg, 'a_p'); aodGl.enableVertexAttribArray(loc); aodGl.vertexAttribPointer(loc, 2, aodGl.FLOAT, false, 0, 0);
+      aTimeLoc = aodGl.getUniformLocation(aodProg, 'u_t');
+      aVoiceLoc = aodGl.getUniformLocation(aodProg, 'u_v');
+    }
+
+    const mobileSparks = Array.from({ length: 75 }, () => ({
+      angle: Math.random() * Math.PI * 2,
+      elev: (Math.random() - 0.5) * Math.PI,
+      r: 45 + Math.random() * 90,
+      speed: (0.002 + Math.random() * 0.005) * (Math.random() > 0.5 ? 1 : -1),
+      size: 0.6 + Math.random() * 1.5,
+      phase: Math.random() * Math.PI * 2,
+      bright: Math.random() > 0.35
+    }));
+
+    let orbT = 0, aodT = 0;
+
+    function pulseMobileOrb() {
+      playMobileTone('chime');
+      pulseWave = 1.0;
+      targetEnergy = 2.0;
+      setTimeout(() => { targetEnergy = 1.0; }, 650);
+    }
+
+    function renderMobileLoops() {
+      requestAnimationFrame(renderMobileLoops);
+      if (damarSpeaking) {
+        const now = performance.now() * 0.007;
+        targetVoiceAmp = 0.38 + 0.38 * Math.sin(now * 2.1) * Math.cos(now * 0.9);
+      }
+      voiceAmp += (targetVoiceAmp - voiceAmp) * 0.1;
+      orbEnergy += (targetEnergy - orbEnergy) * 0.08;
+      mouseX += (targetMouseX - mouseX) * 0.08;
+      mouseY += (targetMouseY - mouseY) * 0.08;
+      pulseWave *= 0.93;
+      orbT += 0.015 * orbEnergy;
+      aodT += 0.006;
+
+      if (gl && glProg) {
+        gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+        gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.uniform1f(uTime, orbT);
+        gl.uniform2f(uRes, glCanvas.width, glCanvas.height);
+        gl.uniform2f(uMouse, mouseX, mouseY);
+        gl.uniform1f(uEnergy, orbEnergy);
+        gl.uniform1f(uPulse, pulseWave);
+        gl.uniform1f(uVoice, voiceAmp);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
+
+      if (aodGl && aodProg && document.body.classList.contains('aod-standby-active')) {
+        aodGl.viewport(0, 0, aodCanvas.width, aodCanvas.height);
+        aodGl.clearColor(0, 0, 0, 0); aodGl.clear(aodGl.COLOR_BUFFER_BIT);
+        aodGl.uniform1f(aTimeLoc, aodT);
+        aodGl.uniform1f(aVoiceLoc, voiceAmp);
+        aodGl.drawArrays(aodGl.TRIANGLES, 0, 6);
+      }
+
+      // Render Partikel Emas Mengorbit Bulat di Sekeliling Bola
+      sCtx.clearRect(0, 0, sCanvas.width, sCanvas.height);
+      const cx = sCanvas.width / 2, cy = sCanvas.height / 2;
+      mobileSparks.forEach(s => {
+        s.angle += s.speed * orbEnergy;
+        const x = cx + Math.cos(s.angle) * Math.cos(s.elev) * s.r + mouseX * 8;
+        const y = cy + Math.sin(s.elev) * s.r + Math.sin(s.angle * 2) * 5 - mouseY * 8;
+        const twinkle = 0.35 + 0.65 * Math.sin(orbT * 2.8 + s.phase);
+        sCtx.beginPath();
+        sCtx.arc(x, y, s.size, 0, Math.PI * 2);
+        sCtx.fillStyle = s.bright ? `rgba(255, 246, 214, ${twinkle * 0.9})` : `rgba(212, 175, 55, ${twinkle * 0.75})`;
+        sCtx.shadowColor = '#d4af37';
+        sCtx.shadowBlur = 5;
+        sCtx.fill();
+      });
+      sCtx.shadowBlur = 0;
+    }
+    renderMobileLoops();
+
+    // ============================================================================
+    // 3. MATA DEWA SPATIAL CONSTELLATION & PHONE USE SILK THREADS
+    // ============================================================================
+    const cCanvas = document.getElementById('constellationCanvas');
+    const cCtx = cCanvas.getContext('2d');
+    const puCanvas = document.getElementById('phoneUseCanvas');
+    const puCtx = puCanvas.getContext('2d');
+    let consT = 0, puTick = 0;
+    let touchNode = { x: 199, y: 420, tx: 270, ty: 340 };
+
+    const spatialNodes = [
+      { id: 'DAMAR CORE (BOGOR)', x: 180, y: 118, conf: 'CANONICAL', main: true },
+      { id: 'PIR RUANG KELUARGA', x: 74,  y: 58,  conf: 'CONF: 0.72', warn: true },
+      { id: 'KAMERA DEPAN 1080P', x: 286, y: 62,  conf: 'TERBATAS' },
+      { id: 'SENSOR PINTU UTAMA', x: 82,  y: 182, conf: 'LOCKED (0.99)' },
+      { id: 'RF / WI-FI SENSING', x: 282, y: 180, conf: 'EXPERIMENTAL' }
+    ];
+
+    function toggleEdithCamera() {
+      const vid = document.getElementById('edithCamVideo');
+      if (vid.style.display === 'none') {
+        navigator.mediaDevices?.getUserMedia({ video: true }).then(st => {
+          vid.srcObject = st;
+          vid.style.display = 'block';
+        }).catch(() => {});
+      } else {
+        if (vid.srcObject) vid.srcObject.getTracks().forEach(t => t.stop());
+        vid.style.display = 'none';
+      }
+    }
+
+    function startMobilePhoneUse(taskDesc) {
+      phoneUseActive = true;
+      document.body.classList.add('phone-use-active');
+      speakMobile(`Menjalankan Phone Use: ${taskDesc}`);
+    }
+
+    function stopMobilePhoneUse() {
+      phoneUseActive = false;
+      document.body.classList.remove('phone-use-active');
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    }
+
+    function renderSpatialAndPhoneUse() {
+      requestAnimationFrame(renderSpatialAndPhoneUse);
+      consT += 0.025;
+
+      cCtx.clearRect(0, 0, cCanvas.width, cCanvas.height);
+      const center = spatialNodes[0];
+
+      for (let i = 1; i < spatialNodes.length; i++) {
+        const nd = spatialNodes[i];
+        cCtx.beginPath();
+        cCtx.moveTo(center.x, center.y);
+        cCtx.quadraticCurveTo((center.x + nd.x) / 2, center.y + Math.sin(consT + i) * 14, nd.x, nd.y);
+        cCtx.strokeStyle = nd.warn ? 'rgba(251, 191, 36, 0.55)' : 'rgba(212, 175, 55, 0.35)';
+        cCtx.lineWidth = 1.2;
+        cCtx.stroke();
+
+        const p = ((consT * 0.4 + i * 0.25) % 1);
+        const px = nd.x + (center.x - nd.x) * p;
+        const py = nd.y + (center.y - nd.y) * p;
+        cCtx.beginPath();
+        cCtx.arc(px, py, 2.2, 0, Math.PI * 2);
+        cCtx.fillStyle = '#fff6d6';
+        cCtx.fill();
+      }
+
+      spatialNodes.forEach((nd, idx) => {
+        const pulse = Math.sin(consT * 2 + idx) * 2;
+        cCtx.beginPath();
+        cCtx.arc(nd.x, nd.y, (nd.main ? 8 : 5) + pulse * 0.4, 0, Math.PI * 2);
+        cCtx.fillStyle = nd.main ? '#fff6d6' : (nd.warn ? '#fbbf24' : '#d4af37');
+        cCtx.shadowColor = '#d4af37';
+        cCtx.shadowBlur = 10;
+        cCtx.fill();
+        cCtx.shadowBlur = 0;
+
+        cCtx.fillStyle = '#faf6ee';
+        cCtx.font = '700 8.5px Cinzel, serif';
+        cCtx.textAlign = 'center';
+        cCtx.fillText(nd.id, nd.x, nd.y - 12);
+        cCtx.fillStyle = nd.warn ? '#fbbf24' : '#e5c158';
+        cCtx.font = '9px Consolas, monospace';
+        cCtx.fillText(nd.conf, nd.x, nd.y + 18);
+      });
+
+      puCtx.clearRect(0, 0, puCanvas.width, puCanvas.height);
+      if (phoneUseActive) {
+        puTick += 0.035;
+        if (Math.random() < 0.025) {
+          touchNode.tx = 65 + Math.random() * 265;
+          touchNode.ty = 160 + Math.random() * 520;
+        }
+        touchNode.x += (touchNode.tx - touchNode.x) * 0.06;
+        touchNode.y += (touchNode.ty - touchNode.y) * 0.06;
+
+        puCtx.save();
+        puCtx.globalCompositeOperation = 'lighter';
+        puCtx.strokeStyle = 'rgba(249, 228, 152, 0.45)';
+        puCtx.lineWidth = 1.2;
+        puCtx.beginPath();
+        puCtx.roundRect(10, 10, puCanvas.width - 20, puCanvas.height - 20, 42);
+        puCtx.stroke();
+
+        puCtx.beginPath();
+        puCtx.arc(touchNode.x, touchNode.y, 12 + Math.sin(puTick * 3) * 3, 0, Math.PI * 2);
+        puCtx.strokeStyle = 'rgba(249, 228, 152, 0.75)';
+        puCtx.lineWidth = 1.2;
+        puCtx.stroke();
+
+        puCtx.beginPath();
+        puCtx.arc(touchNode.x, touchNode.y, 3.5, 0, Math.PI * 2);
+        puCtx.fillStyle = '#fff6d6';
+        puCtx.fill();
+        puCtx.restore();
+      }
+    }
+    renderSpatialAndPhoneUse();
+  </script>
+</body>
+</html>

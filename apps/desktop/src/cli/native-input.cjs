@@ -18,7 +18,7 @@ function nativeKey(event){
 class NativeInput{
  constructor({onKey,onEvent,onFailure}){
    this.stoppedPromise=new Promise(resolve=>{this.resolveStopped=resolve;});
-  const prototype=path.resolve(__dirname,'../../prototype-w5-cli/20261114-000108');
+  const prototype=path.resolve(__dirname,'../../w5-cli');
   this.child=spawn('python',['-B','-u',path.join(__dirname,'native-input.py'),'--prototype',prototype],{stdio:['pipe','pipe','pipe'],windowsHide:false,env:restrictedChildEnvironment()});
   this.lines=boundedLines();this.child.stdout.pipe(this.lines);this.protocol=readline.createInterface({input:this.lines});
   const fail=()=>{if(!this.closing&&!this.failed){this.failed=true;onFailure('NATIVE_INPUT_FAILED');}};
