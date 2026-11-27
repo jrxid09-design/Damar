@@ -28,9 +28,16 @@
       var out = {};
       Object.keys(value).forEach(function (k) {
         var v = value[k];
-        if ((SECRET_KEY.test(k) || SECRET_EXACT.test(k)) && v !== null && typeof v !== 'boolean' && typeof v !== 'number') {
-          // Keep only the *names* of env/header maps, never their values.
-          out[k] = (v && typeof v === 'object' && !Array.isArray(v)) ? Object.keys(v).reduce(function (o, n) { o[n] = REDACTED; return o; }, {}) : REDACTED;
+        if ((SECRET_KEY.test(k) || SECRET_EXACT.test(k)) && v !== null && typeof v === 'object' && !Array.isArray(v)) {
+          // A secret-named container (env map, headers, a credential descriptor): keep its shape and
+          // recurse per key. Real secret values sit under secret-named leaves of their own (env var
+          // names, header names, password fields) and are still scrubbed by this same rule one level
+          // down; descriptor objects that carry no secrets (Mata Dewa's feed credential descriptor:
+          // field names, a public signup URL, a hasKey flag) survive intact instead of being flattened
+          // into a shape that crashes its consumer.
+          out[k] = redact(v, known, depth + 1);
+        } else if ((SECRET_KEY.test(k) || SECRET_EXACT.test(k)) && v !== null && typeof v !== 'boolean' && typeof v !== 'number') {
+          out[k] = REDACTED;
         } else out[k] = redact(v, known, depth + 1);
       });
       return out;

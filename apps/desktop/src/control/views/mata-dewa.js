@@ -46,7 +46,7 @@
       md.status = r.ok ? r.data : null; md.statusError = r.ok ? null : r;
       if (!r.ok) return;
       var jobs = [];
-      if (r.data.consent) r.data.feeds.forEach(function (f) { if (f.enabled && (f.credential === 'none' || f.credential.hasKey)) jobs.push(H.get('/api/r9/mata-dewa/feeds/' + f.id).then(function (x) { md.feeds[f.id] = x; })); });
+      if (r.data.consent) r.data.feeds.forEach(function (f) { if (f.enabled && (credOf(f) === 'none' || credOf(f).hasKey)) jobs.push(H.get('/api/r9/mata-dewa/feeds/' + f.id).then(function (x) { md.feeds[f.id] = x; })); });
       if (r.data.consent) r.data.cctv.sources.forEach(function (s) { jobs.push(loadCams(s)); });
       if (owner()) {
         jobs.push(H.get('/api/r9/mata-dewa/cameras').then(function (x) { md.own = x.ok ? x.data.own : []; }));
@@ -135,19 +135,24 @@
     satellites: function (res) { return H.table(['Name', 'NORAD', 'Incl.', 'Period', 'Perigee–Apogee'], res.items.slice(0, 15).map(function (s) { return [esc(s.name), H.mono(s.noradId), fmt(s.inclinationDeg, '°'), fmt(s.periodMin, ' min'), s.perigeeKm + '–' + s.apogeeKm + ' km']; }), '-'); },
     launches: function (res) { return H.table(['NET', 'Mission', 'Provider', 'Status', 'Pad'], res.items.map(function (l) { return [esc(new Date(l.net).toLocaleString()), esc(l.name), esc(l.provider), esc(l.status), esc(l.location)]; }), '-'); }
   };
+  // Control's client redactor masks plain strings held under a `credential` key; Core's only string
+  // value for that field is 'none', so a redacted string means "no credential". Anything else that is
+  // not a descriptor object is treated the same, so a shape surprise degrades instead of crashing.
+  function credOf(f) { return f.credential && typeof f.credential === 'object' ? f.credential : 'none'; }
   function keyForm(f) {
-    var inputs = f.credential.fields.map(function (k) { return '<input class="input-field" type="password" autocomplete="off" data-md-key="' + f.id + '" data-k="' + k + '" placeholder="' + k + '" style="width:200px;font-family:var(--font-mono);" />'; }).join(' ');
+    var cred = credOf(f), fields = Array.isArray(cred.fields) ? cred.fields : [];
+    var inputs = fields.map(function (k) { return '<input class="input-field" type="password" autocomplete="off" data-md-key="' + f.id + '" data-k="' + k + '" placeholder="' + k + '" style="width:200px;font-family:var(--font-mono);" />'; }).join(' ');
     return '<div style="display:flex;flex-direction:column;gap:8px;padding:12px;font-size:12px;">' +
-      (f.credential.hasKey ? '<div>' + H.statusBadgeHtml('OK', T('keyStored')) + ' ' + H.btn(T('forgetKey'), 'data-md-action="forget-key" data-feed="' + f.id + '"') + '</div>'
-        : '<div><strong>' + esc(T('addKey')) + '</strong> · ' + esc(T('getKey')) + ': ' + H.mono(f.credential.signupUrl) + '</div><div style="display:flex;gap:8px;flex-wrap:wrap;">' + inputs + H.btn(T('saveKey'), 'data-md-action="save-key" data-feed="' + f.id + '"', 'btn-primary') + '</div>') + '</div>';
+      (cred.hasKey ? '<div>' + H.statusBadgeHtml('OK', T('keyStored')) + ' ' + H.btn(T('forgetKey'), 'data-md-action="forget-key" data-feed="' + f.id + '"') + '</div>'
+        : '<div><strong>' + esc(T('addKey')) + '</strong> · ' + esc(T('getKey')) + ': ' + H.mono(cred.signupUrl) + '</div><div style="display:flex;gap:8px;flex-wrap:wrap;">' + inputs + H.btn(T('saveKey'), 'data-md-action="save-key" data-feed="' + f.id + '"', 'btn-primary') + '</div>') + '</div>';
   }
   function feedPanel(f) {
-    var r = md.feeds[f.id], body;
-    if (f.credential !== 'none' && !f.credential.hasKey) return H.panel(f.label, keyForm(f) + src(f), { span: 6, flush: true, badge: H.statusBadgeHtml('NOT_CONFIGURED', T('addKey')) });
+    var r = md.feeds[f.id], body, cred = credOf(f);
+    if (cred !== 'none' && !cred.hasKey) return H.panel(f.label, keyForm(f) + src(f), { span: 6, flush: true, badge: H.statusBadgeHtml('NOT_CONFIGURED', T('addKey')) });
     if (!r) body = '<div style="padding:14px;color:var(--text-muted);font-size:12px;">' + esc(T('loading')) + '</div>';
     else if (!r.ok) body = '<div style="padding:14px;font-size:12px;">' + esc(r.error) + '</div>';
     else body = r.data.results.map(function (res) { return note(res) + (res.items.length ? BODIES[f.id](res) : ''); }).join('');
-    return H.panel(f.label, body + (f.credential !== 'none' ? keyForm(f) : '') + src(f), { span: f.perArea ? 6 : 12, flush: true, badge: feedBadge(f.id) });
+    return H.panel(f.label, body + (cred !== 'none' ? keyForm(f) : '') + src(f), { span: f.perArea ? 6 : 12, flush: true, badge: feedBadge(f.id) });
   }
   function src(f) { return '<div style="font-size:10.5px;color:var(--text-muted);padding:6px 12px;">' + esc(f.attribution) + ' · ' + esc(f.license) + '</div>'; }
 
