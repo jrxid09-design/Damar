@@ -2,7 +2,9 @@
 // Run-owned isolated Core host on the approved endpoint 127.0.0.1:29623.
 // Composes the existing inherited r7r3 launcher (jobs/approval authority) with a per-session copy of a
 // hash-pinned canonical Damar snapshot (core-snapshot/) for: a fixed allowlist of authenticated read-only
-// console GET routes, and Owner-gated Pandawa runs through canonical agentHub against an OFFLINE fixture
+// console GET routes, the Produktivitas (MCP) console mounts (GET reads + OAuth provider callback; write
+// paths are forwarded untouched so the canonical manager gate decides them — this host never bypasses
+// that gate), and Owner-gated Pandawa runs through canonical agentHub against an OFFLINE fixture
 // provider. Outbound network is restricted to loopback. No other canonical route is reachable.
 const fs = require('node:fs');
 const path = require('node:path');
@@ -22,7 +24,22 @@ if (!Number.isInteger(PORT) || PORT < 1024 || PORT > 65535) throw Error('CORE_PO
 // Retired inherited UI surfaces (old control centre, previews, mobile/presence prototypes). DAMAR Control is /control/.
 const LEGACY_UI = /^\/(cc2|uix|__r6|__preview-adapters|s|mobile)(\/|$|\?)/;
 const retired = res => { res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ success: false, error: 'LEGACY_SURFACE_RETIRED' })); };
-const READ_ROUTES = Object.freeze(['/api/v1/console/tools', '/api/v1/console/plugins', '/api/v1/console/mcp/servers', '/api/v1/console/agents', '/api/v1/console/safety', '/api/v1/console/memory/stats', '/api/v1/console/context']);
+const READ_ROUTES = Object.freeze(['/api/v1/console/tools', '/api/v1/console/plugins', '/api/v1/console/mcp/servers', '/api/v1/console/agents', '/api/v1/console/safety', '/api/v1/console/memory/stats', '/api/v1/console/context', '/api/v1/console/mcp/productivity']);
+// Parameterized Produktivitas (MCP) mounts. GET entries are reads like READ_ROUTES. Write entries are
+// forwarded untouched: the canonical app applies its own MCP-administration gate (managerOnly legacy
+// boundary in src/routes/api/v1/console.js), so a mounted write still cannot execute from this surface.
+// The OAuth callback is the one mount that accepts a query string: the provider browser returns with
+// ?code&state and the canonical handler verifies the single-use state (see productivityController).
+const MOUNT_PATTERNS = Object.freeze([
+  { method: 'GET', pattern: /^\/api\/v1\/console\/mcp\/productivity\/health\/[A-Za-z0-9_-]+$/ },
+  { method: 'POST', pattern: /^\/api\/v1\/console\/mcp\/productivity\/client\/[A-Za-z0-9_-]+$/ },
+  { method: 'DELETE', pattern: /^\/api\/v1\/console\/mcp\/productivity\/client\/[A-Za-z0-9_-]+$/ },
+  { method: 'POST', pattern: /^\/api\/v1\/console\/mcp\/productivity\/(?:connect|disconnect|services)\/[A-Za-z0-9_-]+$/ },
+  { method: 'POST', pattern: /^\/api\/v1\/console\/mcp\/productivity\/filesystem\/grants$/ },
+  { method: 'POST', pattern: /^\/api\/v1\/console\/mcp\/productivity\/blender\/target$/ },
+  { method: 'POST', pattern: /^\/api\/v1\/console\/mcp\/productivity\/seed$/ },
+  { method: 'GET', pattern: /^\/api\/v1\/console\/mcp\/oauth\/[A-Za-z0-9_-]+\/callback$/, query: true },
+]);
 
 function insideScratch(target) {
   const t = path.resolve(target).toLowerCase();
@@ -412,8 +429,11 @@ async function child(directory, resume, recovered = false) {
       const send = (status, error) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ success: false, error })); };
       if (req.socket.localAddress !== '127.0.0.1' || req.headers.host !== host || (req.headers.origin && req.headers.origin !== `http://${host}`) || req.headers['sec-fetch-site'] === 'cross-site') return send(403, 'ORIGIN_DENIED');
       if (url.pathname.startsWith('/api/r9/')) { r9(req, res, url).catch(() => { if (!res.headersSent) send(503, 'R9_UNAVAILABLE'); }); return; }
-      if (!READ_ROUTES.includes(url.pathname) || url.search) return send(404, 'ROUTE_NOT_MOUNTED_IN_ISOLATED_CORE');
-      if (req.method !== 'GET') return send(405, 'READ_ONLY_ROUTE');
+      const pathMounts = MOUNT_PATTERNS.filter(m => m.pattern.test(url.pathname));
+      const patternMount = pathMounts.find(m => m.method === req.method);
+      if ((!READ_ROUTES.includes(url.pathname) && !pathMounts.length) || (url.search && !(patternMount && patternMount.query))) return send(404, 'ROUTE_NOT_MOUNTED_IN_ISOLATED_CORE');
+      if (!pathMounts.length && req.method !== 'GET') return send(405, 'READ_ONLY_ROUTE');
+      if (pathMounts.length && !patternMount) return send(404, 'ROUTE_NOT_MOUNTED_IN_ISOLATED_CORE');
       app(req, res);
     });
     const info = { address: runtime.address, readRoutes: READ_ROUTES, canonicalFiles: copy.length, snapshotAggregate: snapshotManifest.src.aggregate, providers: Object.keys(providers), pid: process.pid, resumed: resume, recovered };
@@ -441,4 +461,4 @@ if (require.main === module) {
   const run = process.env.DAMAR_CORE_HOST_CHILD === '1' ? child(directory, resume, process.argv.includes('--recovered')) : Promise.resolve().then(() => parent(directory, resume, recoverFrom));
   run.catch(error => { console.error(error.code === 'EADDRINUSE' ? 'CORE_ENDPOINT_IN_USE_NOT_TOUCHED' : (error.code || error.message)); process.exitCode = 1; if (process.connected) process.disconnect(); }); // startup failure: release the IPC channel so the process exits
 }
-module.exports = { READ_ROUTES, cleanEnvironment, insideScratch, hashTree, installEgressGuard };
+module.exports = { READ_ROUTES, MOUNT_PATTERNS, cleanEnvironment, insideScratch, hashTree, installEgressGuard };

@@ -6,8 +6,8 @@
  },
  "packageLockSha256": "22299cd66d36130b622256c0c8965ca8e038e217813351867ec51ce24329feaa",
  "src": {
-  "count": 1197,
-  "aggregate": "0d8f34d6c9f968788387cc7a60d1277ac0ed9dda97a504bb0b93e67c56033da2",
+  "count": 1216,
+  "aggregate": "00ecd5ae3cbb6cb358a93a8b5ecbc1978fe2b5e64d48ab32b8a26bfaa34f902a",
   "files": [
    {
     "path": "action/actuation/actuatorRegistry.js",
@@ -2230,6 +2230,11 @@
     "sha256": "f959bf7eef01242584809860591ca7bb1600ccff23664a417f0bb0ccc1cf01de"
    },
    {
+    "path": "controllers/productivityController.js",
+    "bytes": 7411,
+    "sha256": "e1461e6b8e4f049a522f4075217488ca90e16d4d8e620dc7e08626c4b8e0ebbf"
+   },
+   {
     "path": "controllers/roleController.js",
     "bytes": 673,
     "sha256": "a8e356107b68f115c6373ba38c756aa0a1b606f672c441ee929a9fe6e3a2aa35"
@@ -3625,6 +3630,96 @@
     "sha256": "aae85dadbe0025343350fae08f57f78854a3e7a10dc045864990b2a095debaf9"
    },
    {
+    "path": "mcp/productivity/connectService.js",
+    "bytes": 10860,
+    "sha256": "014574d3ec42d46255d8e09c42f8b3456ac31df70a04b039e4b9f891bbf883ce"
+   },
+   {
+    "path": "mcp/productivity/index.js",
+    "bytes": 5981,
+    "sha256": "703803fdb41c82d2777860daaf5d116d4d47d956fbdd321885442810b48920e8"
+   },
+   {
+    "path": "mcp/productivity/oauth.js",
+    "bytes": 8019,
+    "sha256": "a4d27391f2b777f3782f0204e7a7863e5d245fa58005d05a38bdc5352f8b0280"
+   },
+   {
+    "path": "mcp/productivity/registry.js",
+    "bytes": 22525,
+    "sha256": "458d5bc05f8702e4b66ee6ead061e1af9fec09679d303d24eb9d8c4bf9d5ab4e"
+   },
+   {
+    "path": "mcp/productivity/serverRuntime.js",
+    "bytes": 5082,
+    "sha256": "e956e97ea924c26e197e37e38fcb27eaa8cf5409f53842fd0dfeab57d5b5a5bb"
+   },
+   {
+    "path": "mcp/productivity/servers/blender.js",
+    "bytes": 4481,
+    "sha256": "4f07fb668ad2c2f2f7ae52b2794852b8b05b89ba74da181a9a12f2eabb3bff0a"
+   },
+   {
+    "path": "mcp/productivity/servers/filesystem.js",
+    "bytes": 5354,
+    "sha256": "2ceb09bc7d78372cb578d4f4d82eb04f9c4ec671dd583d370995a95ee01858ea"
+   },
+   {
+    "path": "mcp/productivity/servers/github.js",
+    "bytes": 4758,
+    "sha256": "b58b51a8583b7041c8f5946b563bfcf0de86ad9b8ade8c0a9845b8336e264412"
+   },
+   {
+    "path": "mcp/productivity/servers/google.js",
+    "bytes": 10952,
+    "sha256": "b84061a954be9440d8a0b99701aefdbf17aa1931976f8c66e94b738b69bc279e"
+   },
+   {
+    "path": "mcp/productivity/servers/microsoft.js",
+    "bytes": 7593,
+    "sha256": "c8da62547bc2c57e8e63c4e632b6d5f1281854f3ce284f6707f9778ed202abc9"
+   },
+   {
+    "path": "mcp/productivity/servers/notion.js",
+    "bytes": 4997,
+    "sha256": "bc6dd3f353f017e64514a1ffb83895be5a20b2182ae13816ea8d64e5ab92bd1b"
+   },
+   {
+    "path": "mcp/productivity/servers/slack.js",
+    "bytes": 3304,
+    "sha256": "10b4e273ff54c758371cf96b507f644180485b8caeb1b060ab603bab2c5cf79f"
+   },
+   {
+    "path": "mcp/productivity/servers/spotify.js",
+    "bytes": 5890,
+    "sha256": "c5f8d87c793fb97153b226f957eb1652ee8851ab0ad2d75c834f72652c54c756"
+   },
+   {
+    "path": "mcp/productivity/servers/todoist.js",
+    "bytes": 3161,
+    "sha256": "59ec788d8436c4bcc4fb2fee0953245724353fb65cb25850aa18e1fc7909a883"
+   },
+   {
+    "path": "mcp/productivity/servers/web.js",
+    "bytes": 6888,
+    "sha256": "a8093b933daa456297e3c8f2a26365401ba79340f36ca8bf3d23a19c5b6afefc"
+   },
+   {
+    "path": "mcp/productivity/stateStore.js",
+    "bytes": 4579,
+    "sha256": "4e1a03850feea93053b12ad23442c0c81ad21a0bca3cb42202d1bfe3fab4a050"
+   },
+   {
+    "path": "mcp/productivity/tokenProvider.js",
+    "bytes": 4095,
+    "sha256": "20e47044a64996696c71e23e675ffab05d47c3df01841fe5d661c546e67d1743"
+   },
+   {
+    "path": "mcp/productivity/tokenStore.js",
+    "bytes": 7957,
+    "sha256": "0f1109f51a2297cce9eeed0e2d62216b889570d1871acbc22fa129299f45cb2d"
+   },
+   {
     "path": "memory/buildMemory.js",
     "bytes": 6532,
     "sha256": "fb9b49a7bb4aa73e4b09994487a32325749ec5298dc88b81a32dffc84254ba35"
@@ -4521,8 +4616,8 @@
    },
    {
     "path": "routes/api/v1/console.js",
-    "bytes": 20716,
-    "sha256": "d3613d8de45fa690208ce267dcf24645a1c2ea6cdc4e5b1787b25705dabd380d"
+    "bytes": 22126,
+    "sha256": "adf4fc521290f74ef8dc666f8eafed689c191972d3e5d09948c511b2a3d906ee"
    },
    {
     "path": "routes/api/v1/controllers/ownerTrustController.js",
@@ -20677,5 +20772,33 @@
    "canonicalSha256": "2c0f2ef1db4d1a931a338dd4a00cafcaa407c0a729c4003bc59f523a1c9e1f80",
    "sha256": "9b6dc07646c3fc9299f135b9b64b0efce4e48be2c57a7923716e020f883bc0df"
   }
- ]
+ ],
+ "partialSync": {
+  "atUtc": "2026-11-27T01:16:51.870Z",
+  "scope": "MCP Productivity console wiring: routes/api/v1/console.js + controllers/productivityController.js + src/mcp/productivity/** (require closure; vault/configStore/utils already identical)",
+  "files": [
+   "routes/api/v1/console.js",
+   "controllers/productivityController.js",
+   "mcp/productivity/connectService.js",
+   "mcp/productivity/index.js",
+   "mcp/productivity/oauth.js",
+   "mcp/productivity/registry.js",
+   "mcp/productivity/serverRuntime.js",
+   "mcp/productivity/servers/blender.js",
+   "mcp/productivity/servers/filesystem.js",
+   "mcp/productivity/servers/github.js",
+   "mcp/productivity/servers/google.js",
+   "mcp/productivity/servers/microsoft.js",
+   "mcp/productivity/servers/notion.js",
+   "mcp/productivity/servers/slack.js",
+   "mcp/productivity/servers/spotify.js",
+   "mcp/productivity/servers/todoist.js",
+   "mcp/productivity/servers/web.js",
+   "mcp/productivity/stateStore.js",
+   "mcp/productivity/tokenProvider.js",
+   "mcp/productivity/tokenStore.js"
+  ],
+  "branch": "feat/mcp-productivity",
+  "note": "Partial pin only: the remaining canonical drift (unrelated subsystems) is NOT synced; a full snapshot re-pin stays a release-stage act."
+ }
 }
