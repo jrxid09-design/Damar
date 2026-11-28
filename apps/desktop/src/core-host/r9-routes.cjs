@@ -304,16 +304,33 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
       // last processed day, and the brief outcomes the service published to
       // the daemon's telemetry buffer. One genuine source only: the
       // canonical daemon's own projection, read through the Core binding.
-      // The desktop Core composes no second service and writes nothing:
-      // config changes have no gated route yet (the daemon console rejects
-      // legacy action ingress for automation), so this surface is a read
-      // projection and the views say so. Owner only, like the other
-      // posture reads.
+      // The desktop Core composes no second service. Reads project the
+      // daemon's record; writes (config save + run-now, directly below)
+      // forward to the daemon's token-guarded write seam through the same
+      // binding. Owner only, like the other posture reads and every other
+      // configuration write in this layer.
       if (p === '/api/r9/otomasi' && req.method === 'GET' && !url.search) {
         if (who !== 'owner') return json(403, { success: false, error: 'OWNER_REQUIRED' });
         const data = otomasi ? await otomasi.daemonStatus().catch(() => ({ available: false, reason: 'DAEMON_TIDAK_TERJANGKAU' }))
           : { available: false, reason: 'BINDING_TIDAK_TERSEDIA' };
         return json(200, { success: true, data: { ...data, generatedAt: Date.now() } });
+      }
+      // Otomasi writes: saving the brief schedule and running the brief are
+      // ordinary Owner configuration steps, so these routes add no approval
+      // prompt; they forward to the daemon's token-guarded write seam
+      // through the Core binding, and the install token never leaves the
+      // Core process. A caller who is not the Owner is refused before
+      // anything is forwarded, so a denied attempt changes nothing.
+      if ((p === '/api/r9/otomasi/config' || p === '/api/r9/otomasi/run') && req.method === 'POST' && !url.search) {
+        if (who !== 'owner') return json(403, { success: false, error: 'OWNER_REQUIRED' });
+        if (!otomasi) return json(503, { success: false, error: 'OTOMASI_BINDING_UNAVAILABLE' });
+        try {
+          const input = await body(req, 1024);
+          const data = p === '/api/r9/otomasi/config'
+            ? await otomasi.daemonConfigure({ enabled: input.enabled, time: input.time }).catch(() => ({ available: false, reason: 'DAEMON_TIDAK_TERJANGKAU' }))
+            : await otomasi.daemonRunNow().catch(() => ({ available: false, reason: 'DAEMON_TIDAK_TERJANGKAU' }));
+          return json(200, { success: true, data: { ...data, generatedAt: Date.now() } });
+        } catch (e) { if (e.status) return json(e.status, { success: false, error: e.message }); throw e; }
       }
       // Pusat Kapabilitas (Owner order 2026-11-27: the capability center must
       // not stay read-only): guided Add flows for MCP client servers, plugins

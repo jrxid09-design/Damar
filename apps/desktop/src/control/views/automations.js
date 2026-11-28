@@ -2,17 +2,21 @@
 // served by Core at GET /api/r9/otomasi (Owner only): the daily WhatsApp
 // brief's config state, the scheduler's running state, the last processed
 // day, and the brief outcomes the service published to the daemon's
-// telemetry buffer. The service lives exactly once in the canonical daemon;
-// this page is a read projection. Changing the schedule or running a brief
-// from Control is not wired: the daemon console rejects legacy action
-// ingress for automation and no gated write route exists yet, and the page
-// says so instead of offering controls that do nothing. Categories without
+// telemetry buffer. The service lives exactly once in the canonical daemon.
+// This page also writes: the schedule form and the run-now button post to
+// Core's owner-only Otomasi write routes, which bind the daemon's
+// token-guarded write seam; the daemon applies a saved config through the
+// service singleton, so the scheduler picks it up on its next tick with no
+// daemon restart. Saving and running are ordinary Owner steps here: no
+// approval prompt stands in front of them, and the brief's send keeps
+// flowing through the service's own governed submit in the daemon.
+// Categories without
 // real records render their honest empty state; nothing here is simulated.
 // UI language follows the shared CLI language setting
 // (GET /api/r9/cli/settings, cli.language; null -> English).
 (function (root) {
   'use strict';
-  var ot = { data: null, error: null, loading: false, lastLoad: 0, lang: 'en' };
+  var ot = { data: null, error: null, loading: false, lastLoad: 0, lang: 'en', busy: false, notice: null, noticeOk: false };
   var H = null;
 
   var STR = {
@@ -29,7 +33,7 @@
       historyWaiting: 'Waiting for the daemon projection to be readable.',
       when: 'Time', outcome: 'Outcome', recipients: 'Recipients', size: 'Brief size', chars: '%s characters',
       ocCompleted: 'Delivered', ocUnknown: 'Unknown',
-      writePanel: 'Changing automations', writeNote: 'This page reads the automation state. Changing the schedule or running a brief from Control is not connected yet: the write path for automations in the daemon is still closed to legacy action ingress and waits for the canonical Manager path.' },
+      writePanel: 'Brief settings', enabledLabel: 'Daily brief active', timeLabel: 'Brief time', save: 'Save', runNow: 'Run now', savedOk: 'Saved. The daemon scheduler applies the new schedule from its next tick, with no daemon restart.', runOk: 'Brief run finished with governed outcome %s. Its record is in the brief history below.', writeDown: 'Settings cannot be changed right now: ', actionFailed: 'The action did not complete.' },
     id: { subtitle: 'Brief harian terjadwal di daemon kanonis, dibaca langsung dari Core.',
       loading: 'Memuat dari Core…', briefPanel: 'Brief harian WhatsApp', status: 'Status', active: 'Aktif', inactive: 'Nonaktif',
       schedule: 'Jadwal harian', atTime: 'pukul %s', lastProcessed: 'Hari brief terakhir diproses', never: 'Belum pernah',
@@ -43,7 +47,7 @@
       historyWaiting: 'Menunggu proyeksi daemon terbaca.',
       when: 'Waktu', outcome: 'Hasil', recipients: 'Penerima', size: 'Ukuran brief', chars: '%s karakter',
       ocCompleted: 'Terkirim', ocUnknown: 'Tidak diketahui',
-      writePanel: 'Mengubah otomasi', writeNote: 'Halaman ini membaca keadaan otomasi. Mengubah jadwal atau menjalankan brief dari Control belum terhubung: jalur tulis otomasi di daemon masih ditutup untuk ingress tindakan lama dan menunggu jalur Manager kanonis.' }
+      writePanel: 'Pengaturan brief', enabledLabel: 'Brief harian aktif', timeLabel: 'Waktu brief', save: 'Simpan', runNow: 'Jalankan sekarang', savedOk: 'Tersimpan. Penjadwal daemon memakai jadwal baru mulai tick berikutnya, tanpa memuat ulang daemon.', runOk: 'Lari brief selesai dengan hasil governed %s. Catatannya ada di riwayat brief di bawah.', writeDown: 'Pengaturan belum bisa diubah saat ini: ', actionFailed: 'Tindakan tidak selesai.' }
   };
   function T(k) { return (STR[ot.lang] || STR.en)[k] || STR.en[k] || k; }
   function esc(v) { return H.escapeHtml(v == null ? '' : String(v)); }
@@ -67,8 +71,63 @@
     return T('reasonUnreachable');
   }
 
+  var otoBound = false;
+  function bindActions() {
+    if (otoBound || typeof document === 'undefined') return;
+    otoBound = true;
+    document.addEventListener('click', function (ev) {
+      var el = ev.target && ev.target.closest ? ev.target.closest('[data-oto-action]') : null;
+      if (!el) return;
+      var action = el.getAttribute('data-oto-action');
+      if (action === 'save') saveConfig();
+      else if (action === 'run') runNow();
+    });
+  }
+
+  function failNotice(r) {
+    if (r && r.data && r.data.reason === 'VALIDASI_DITOLAK' && r.data.detail) return r.data.detail;
+    if (r && r.data && r.data.reason) return T('writeDown') + reasonText(r.data.reason);
+    return (r && r.error) || T('actionFailed');
+  }
+  function saveConfig() {
+    if (!H || ot.busy) return;
+    var en = document.getElementById('otoEnabled');
+    var tm = document.getElementById('otoTime');
+    if (!en || !tm) return;
+    ot.busy = true; ot.notice = null;
+    H.post('/api/r9/otomasi/config', { enabled: en.checked === true, time: tm.value }).then(function (r) {
+      ot.busy = false;
+      if (r.ok && r.data && r.data.available) { ot.notice = T('savedOk'); ot.noticeOk = true; }
+      else { ot.notice = failNotice(r); ot.noticeOk = false; }
+      ot.lastLoad = 0; load();
+      if (H) H.refresh();
+    });
+  }
+
+  function runNow() {
+    if (!H || ot.busy) return;
+    ot.busy = true; ot.notice = null;
+    H.post('/api/r9/otomasi/run', {}).then(function (r) {
+      ot.busy = false;
+      if (r.ok && r.data && r.data.available && r.data.run) { ot.notice = T('runOk').replace('%s', outcomeLabel(r.data.run.outcome)); ot.noticeOk = true; }
+      else { ot.notice = failNotice(r); ot.noticeOk = false; }
+      ot.lastLoad = 0; load();
+      if (H) H.refresh();
+    });
+  }
+  function writePanelHtml(d) {
+    if (!d.available) return '<div style="font-size:12.5px;color:var(--text-secondary);">' + esc(reasonText(d.reason)) + '</div>';
+    var st = d.status || {};
+    return '<div style="display:flex;flex-direction:column;gap:10px;font-size:12.5px;">'
+      + '<label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" id="otoEnabled"' + (st.enabled ? ' checked' : '') + '> ' + esc(T('enabledLabel')) + '</label>'
+      + '<label style="display:flex;gap:8px;align-items:center;">' + esc(T('timeLabel')) + ' <input type="time" id="otoTime" class="input-field" style="width:auto;" value="' + esc(st.time || '07:00') + '"></label>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;">' + H.btn(T('save'), 'data-oto-action="save"', 'btn-primary') + H.btn(T('runNow'), 'data-oto-action="run"') + '</div>'
+      + (ot.notice ? '<div style="font-size:12px;color:' + (ot.noticeOk ? 'var(--text-secondary)' : 'var(--danger, #c0392b)') + ';">' + esc(ot.notice) + '</div>' : '')
+      + '</div>';
+  }
   function render(helpers) {
     H = helpers;
+    bindActions();
     if (Date.now() - ot.lastLoad > 15000) load();
     var head = H.pageHeader('WORKSPACE • SCHEDULED WORK', 'Otomasi', T('subtitle'));
     if (!ot.data) return head + H.panel('Otomasi', ot.error ? H.statusBadgeHtml('UNAVAILABLE', 'Core · ' + ot.error) : '<div style="font-size:12px;color:var(--text-muted);">' + esc(T('loading')) + '</div>', { span: 12 });
@@ -88,7 +147,7 @@
       html += H.panel(T('briefPanel'), '<div style="font-size:12.5px;color:var(--text-secondary);">' + esc(reasonText(d.reason)) + '</div>',
         { span: 5, badge: H.statusBadgeHtml('UNAVAILABLE', 'Otomasi') });
     }
-    html += H.panel(T('writePanel'), '<div style="font-size:12.5px;color:var(--text-secondary);">' + esc(T('writeNote')) + '</div>', { span: 7 });
+    html += H.panel(T('writePanel'), writePanelHtml(d), { span: 7 });
     var histBody;
     if (!d.available) histBody = '<div style="padding:18px;text-align:center;color:var(--text-muted);font-size:12px;">' + esc(T('historyWaiting')) + '</div>';
     else histBody = H.table([T('when'), T('outcome'), T('recipients'), T('size')], (d.briefs || []).map(function (b) {

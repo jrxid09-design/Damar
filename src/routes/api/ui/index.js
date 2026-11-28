@@ -443,10 +443,10 @@ router.get("/cyber/posture", async (req, res, next) => {
 // WhatsApp brief, src/services/automationService): its live status from the
 // service singleton this process started at boot, plus the brief outcomes
 // the service published to the telemetry ring buffer (automation:brief).
-// Recipient identities never cross this seam; only their count does. No
-// mutation route exists here by design: the console's legacy action ingress
-// for automation stays disabled (LEGACY_ACTION_ROUTE_DISABLED) and config
-// changes belong to the canonical Manager path, so this seam reads only.
+// Recipient identities never cross this seam; only their count does. The
+// write companion lives directly below (section 6D) on this same
+// token-guarded router; the console's legacy action ingress for automation
+// stays disabled (LEGACY_ACTION_ROUTE_DISABLED) and is not revived.
 
 router.get("/automation/status", async (req, res, next) => {
     try {
@@ -480,6 +480,81 @@ router.get("/automation/status", async (req, res, next) => {
     }
 });
 
+// ---------------------------------------------------------------------------
+// 6D. AUTOMATION WRITE SEAM (config save + run-now)
+// ---------------------------------------------------------------------------
+// The write companion of the status seam above, on the same token-guarded
+// router: this is the surface the desktop Core's owner-only Otomasi routes
+// bind. Saving the schedule and running the brief are ordinary owner
+// configuration steps, so this seam adds no approval prompt of its own: the
+// router's token guard is the authentication boundary (an unauthenticated
+// attempt is rejected before anything changes), the Core layer above it is
+// owner-only, and the brief's send keeps flowing through the service's own
+// governed submit (capability "messaging.whatsapp"), exactly as the
+// scheduler's automatic cycle does. Config writes go through the service
+// singleton's configure(), which writes the same JsonStore whose in-process
+// cache the 60-second scheduler tick reads, so a saved config is observed
+// on the next tick with no daemon restart and no external file write.
+// Validation mirrors the store schema: enabled is a boolean, time is a
+// 24-hour "HH:MM" string (the form the scheduler's due() compares against).
+// Config saves leave the same telemetry trail the brief history uses.
+
+router.post("/automation/config", async (req, res, next) => {
+    try {
+        const automation = require("../../../services/automationService");
+        const telemetry = require("../../../services/telemetryService");
+        const clean = (v, n) => (typeof v === "string" ? v.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").slice(0, n) : null);
+        const invalid = (message) => res.status(400).json({ success: false, code: "AUTOMATION_CONFIG_INVALID", message });
+        const body = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : null;
+        if (!body) return invalid("Isi permintaan harus berupa objek JSON.");
+        const hasEnabled = Object.prototype.hasOwnProperty.call(body, "enabled");
+        const hasTime = Object.prototype.hasOwnProperty.call(body, "time");
+        if (!hasEnabled && !hasTime) return invalid("Tidak ada perubahan: kirim enabled dan/atau time.");
+        if (hasEnabled && typeof body.enabled !== "boolean") return invalid("enabled harus berupa boolean.");
+        if (hasTime && (typeof body.time !== "string" || !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(body.time))) return invalid("time harus berupa jam 24 jam format HH:MM.");
+        const patch = {};
+        if (hasEnabled) patch.enabled = body.enabled;
+        if (hasTime) patch.time = body.time;
+        const st = automation.configure(patch);
+        telemetry.publish("automation:config", { enabled: st.enabled === true, time: clean(st.time, 5) });
+        res.json({
+            data: {
+                service: "automation",
+                status: {
+                    enabled: st.enabled === true,
+                    time: clean(st.time, 5),
+                    lastSent: clean(st.lastSent, 10),
+                    running: st.running === true
+                },
+                generatedAt: Date.now()
+            }
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+router.post("/automation/run", async (req, res, next) => {
+    try {
+        const automation = require("../../../services/automationService");
+        const clean = (v, n) => (typeof v === "string" ? v.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").slice(0, n) : null);
+        const result = await automation.runBrief();
+        res.json({
+            data: {
+                service: "automation",
+                run: {
+                    outcome: clean(result?.outcome, 40) || "UNKNOWN",
+                    recipients: Array.isArray(result?.recipients) ? result.recipients.length : 0,
+                    chars: typeof result?.brief === "string" ? result.brief.length : null,
+                    governed: result?.governed === true
+                },
+                generatedAt: Date.now()
+            }
+        });
+    } catch (err) {
+        next(err);
+    }
+});
 // ---------------------------------------------------------------------------
 // 7. REAL-TIME EVENT STREAM (SSE) SEAM
 // ---------------------------------------------------------------------------
