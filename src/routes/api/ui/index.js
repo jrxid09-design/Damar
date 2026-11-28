@@ -334,10 +334,13 @@ router.get("/presence/state", async (req, res, next) => {
 // ---------------------------------------------------------------------------
 // Read-only projection of the single composed detection engine (comp.cyber)
 // plus its security_incident notification records, for the desktop Core's
-// Cyber binding (GET /api/r9/cyber there). No mutation route exists here by
-// design: incident intake stays with the composition's own bridges
-// (recordDcdIncident / transitionDcdIncident) and every cyber action stays
-// behind the Authority Gate as designed.
+// Cyber binding (GET /api/r9/cyber there). It also carries the Werkudara
+// patrol loop's genuine records and live state (comp.patrol, composed in
+// riProductionComposition): the surfaces derive the patrol mode from that
+// state, never from a label hardcoded on their side. No mutation route
+// exists here by design: incident intake stays with the composition's own
+// bridges (recordDcdIncident / transitionDcdIncident) and every cyber
+// action stays behind the Authority Gate as designed.
 
 router.get("/cyber/posture", async (req, res, next) => {
     try {
@@ -367,12 +370,50 @@ router.get("/cyber/posture", async (req, res, next) => {
                 occurredAt: Number.isSafeInteger(n.occurredAt) ? n.occurredAt : (Number.isSafeInteger(n.createdAt) ? n.createdAt : null)
             }));
         } catch {}
+        let patroli = [];
+        let patrolLoop = null;
+        try {
+            if (comp.patrol && typeof comp.patrol.recent === "function") {
+                patroli = comp.patrol.recent(12).map(r => ({
+                    runId: clean(r.patrolId, 48),
+                    requestId: null,
+                    worker: "werkudara",
+                    kind: clean(r.kind, 12),
+                    state: clean(r.state, 20),
+                    task: clean(r.task, 120),
+                    outputPreview: clean(r.summary, 300),
+                    error: clean(r.error, 80),
+                    provider: null,
+                    model: null,
+                    createdAt: Number.isSafeInteger(r.startedAt) ? r.startedAt : null,
+                    updatedAt: Number.isSafeInteger(r.finishedAt) ? r.finishedAt : null,
+                    source: "daemon-otomatis"
+                }));
+            }
+            if (comp.patrol && typeof comp.patrol.state === "function") {
+                const st = comp.patrol.state();
+                const kindView = k => (k && typeof k === "object" ? {
+                    intervalMs: Number.isSafeInteger(k.intervalMs) ? k.intervalMs : null,
+                    lastRunAt: Number.isSafeInteger(k.lastRunAt) ? k.lastRunAt : null,
+                    lastState: clean(k.lastState, 20),
+                    nextRunAt: Number.isSafeInteger(k.nextRunAt) ? k.nextRunAt : null
+                } : null);
+                patrolLoop = {
+                    mode: clean(st.mode, 20) || "nonaktif",
+                    startedAt: Number.isSafeInteger(st.startedAt) ? st.startedAt : null,
+                    sistem: kindView(st.sistem),
+                    jaringan: kindView(st.jaringan)
+                };
+            }
+        } catch {}
         res.json({
             data: {
                 engine: "dcd",
                 incidents,
                 counts: { total: incidents.length, active, byState },
                 notifications,
+                patroli,
+                patrolLoop,
                 generatedAt: Date.now()
             }
         });

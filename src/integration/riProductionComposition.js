@@ -36,6 +36,13 @@
  *      Record location: the composed ACC store, key `release:ri-freeze`
  *      Consumer: verifyReleaseIdentity() below
  *      Law: NO FREEZE APPLIED ON COMPOSITION, AUTHORITY_SOURCE_COUNT = 1
+ *
+ *   6. Werkudara patrol loop (owner direction 2026-11-28: patrols are
+ *      continuous, not on-demand):
+ *      Owner: src/integration/cyberPatrolLoop, wired here at composition
+ *      Records: durable journal in the composed ACC store (`cyber:patrol:*`)
+ *      Read seam: GET /api/ui/cyber/posture (patroli + patrolLoop)
+ *      Law: assessments are read-only; action stays behind the Gate
  */
 
 const { makeApprovalStore } = require("../approval/store");
@@ -44,6 +51,7 @@ const { makeNotificationStore } = require("../notification/store");
 const { createNotificationDomain } = require("../notification");
 const { makeMissionIntelligence } = require("../cognition/mission");
 const { createDetectionEngine } = require("../cyber/intelligence");
+const { createCyberPatrolLoop } = require("./cyberPatrolLoop");
 const { createMemoryAccStore, createSqliteAccStore } = require("../cognition/persistence/AccStore");
 const { createDamarManager } = require("../manager");
 const { ensureProductionAuthorityComposed, getProductionAuthorityComposition } = require("../authority/productionComposition");
@@ -159,6 +167,19 @@ async function ensureRuntimeIntegrationComposed({ host = null, acc = null, audit
 
         // 7. Compose Cyber Detection Engine (DCD)
         const cyber = createDetectionEngine();
+
+        // 7B. Werkudara patrol loop: continuous read-only SISTEM and
+        // JARINGAN patrols on engine-level timers in this composition
+        // (never an external cron or watchdog). Starting it must never
+        // break the composition: a patrol fault degrades the loop, not
+        // the daemon.
+        let patrol = null;
+        try {
+            patrol = createCyberPatrolLoop({ acc: resolvedAcc, clock, broadcast: broadcastEvent });
+            patrol.start();
+        } catch {
+            patrol = null;
+        }
 
         // 8. Bridge helpers for DCD incidents -> Notification projection
         async function recordDcdIncident(params) {
@@ -326,6 +347,7 @@ async function ensureRuntimeIntegrationComposed({ host = null, acc = null, audit
             mission: missionIntel.mission,
             missionIntelligence: missionIntel,
             cyber,
+            patrol,
             // Canonical RI freeze consumer (V1). Read-only against the
             // composed ACC; it never applies a freeze on its own.
             freezeStatus,
@@ -341,6 +363,9 @@ async function ensureRuntimeIntegrationComposed({ host = null, acc = null, audit
             clearSubscribers,
             // Lifecycle cleanup
             cleanup() {
+                if (patrol) {
+                    try { patrol.stop(); } catch { /* ignore cleanup faults */ }
+                }
                 clearSubscribers();
                 canonicalRiInstance = null;
                 boundHost = null;
