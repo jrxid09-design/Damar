@@ -55,7 +55,55 @@ jobs:
           if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
         }
 
-    # EXTENSION POINT (installer mission, INSTALLER-FIRST-RUN-FIXES):
-    # extend this gate to the full first-run flow here — after setup, invoke
-    # the `damar` command and require an answer from the daemon, so the gate
-    # covers clone -> setup -> CLI -> daemon response end to end.
+    # First-run flow extension (installer mission): after setup and boot
+    # smoke, prove the setup-seeded token actually opens the console API and
+    # that the `damar` CLI reaches the daemon and receives the daemon's own
+    # answer. The final model-answer step (a real model replying to "halo")
+    # stays LOCAL-ONLY: GitHub CI holds no provider secret, so no provider
+    # can be configured here. Without a provider the daemon honestly answers
+    # with its no-model response ("Berkas model tidak ditemukan"), which is
+    # what the CLI assertion keys on: it proves CLI -> daemon reachability
+    # plus token auth without any provider. The assertion keys on output
+    # content; the CLI's exit code is not reliable for this.
+    - name: First-run flow (stats auth probe + CLI reaches daemon)
+      shell: pwsh
+      run: |
+        $log = Join-Path $env:RUNNER_TEMP 'damar-flow.log'
+        $err = Join-Path $env:RUNNER_TEMP 'damar-flow.err.log'
+        $proc = Start-Process node -ArgumentList 'scripts/launch.js' -WorkingDirectory $PWD `
+          -RedirectStandardOutput $log -RedirectStandardError $err -PassThru -NoNewWindow
+        try {
+          $deadline = (Get-Date).AddSeconds(120)
+          $port = $null
+          while ((Get-Date) -lt $deadline) {
+            if ($proc.HasExited) { break }
+            if (Test-Path $log) {
+              $m = Select-String -Path $log -Pattern 'Server listening on http://localhost:(\d+)' | Select-Object -First 1
+              if ($m) { $port = [int]$m.Matches[0].Groups[1].Value; break }
+            }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $port) {
+            Get-Content $log -ErrorAction SilentlyContinue
+            Get-Content $err -ErrorAction SilentlyContinue
+            throw 'Daemon did not reach the listening banner in time.'
+          }
+          $base = "http://localhost:$port"
+          $envLine = Get-Content .\.env | Where-Object { $_ -match '^DAMAR_TOKEN=' } | Select-Object -First 1
+          if (-not $envLine) { throw 'setup did not seed DAMAR_TOKEN into .env' }
+          $token = $envLine.Substring('DAMAR_TOKEN='.Length).Trim()
+          $okResp = Invoke-WebRequest -Uri "$base/api/v1/console/stats" -Headers @{ Authorization = "Bearer $token" } -UseBasicParsing -TimeoutSec 20
+          if ([int]$okResp.StatusCode -ne 200) { throw "stats with the setup-seeded token returned $([int]$okResp.StatusCode), expected 200" }
+          $noAuth = $null
+          try { Invoke-WebRequest -Uri "$base/api/v1/console/stats" -UseBasicParsing -TimeoutSec 20 | Out-Null; $noAuth = 200 }
+          catch { $noAuth = [int]$_.Exception.Response.StatusCode }
+          if ($noAuth -ne 401) { throw "stats without a token returned $noAuth, expected 401" }
+          $env:DAMAR_URL = $base
+          $cliOut = ("halo" | damar 2>&1 | Out-String)
+          Write-Host $cliOut
+          if ($cliOut -match 'Unauthorized') { throw 'CLI was rejected as Unauthorized: the setup-seeded token did not carry through to the CLI.' }
+          if ($cliOut -notmatch 'Berkas model tidak ditemukan') { throw 'CLI did not receive the daemon no-model response; it may not have reached the daemon.' }
+          Write-Host 'First-run flow OK: stats 200 with the seeded token, 401 without, CLI reached the daemon.'
+        } finally {
+          if (-not $proc.HasExited) { taskkill /PID $proc.Id /T /F | Out-Null }
+        }
