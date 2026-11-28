@@ -12,6 +12,7 @@ const { createBmkgProviders } = require('./proactive/bmkg-providers.cjs');
 const { createExternalChannels } = require('./proactive/alert-channels.cjs');
 const { resolveMapsLink } = require('./proactive/maps-link.cjs');
 const egress = require('./egress.cjs');
+const imagery = require('./imagery.cjs');
 const { createCameras, PUBLIC_SOURCES } = require('./cameras.cjs');
 const { createAlpr, pythonEngine } = require('./alpr.cjs');
 
@@ -49,7 +50,7 @@ function wsWindow(url, subscription, { windowMs = 8000, maxBytes = 4 * 1024 * 10
 }
 
 function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, now = Date.now, timeoutMs = 10000, keyStore = null, cacheFile = null, profileDir = null, python = null,
-  cameras: camerasIn = null, alprEngine = null, alprDir = null, onAlert = null, proactiveAutostart = false }) {
+  cameras: camerasIn = null, alprEngine = null, alprDir = null, onAlert = null, proactiveAutostart = false, notchChannel = null }) {
   const cache = new Map(), inflight = new Map(), keys = new Map();
   const config = () => settings?.mataDewa?.()?.mataDewa || SETTINGS_DEFAULTS();
   // ---- proactive alerts (Fase 6): autonomous Core engine over these feeds ----
@@ -66,7 +67,11 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
         return ts.map(e => { const n1 = e.data?.next_1_hours || {}; const inst = e.data?.instant?.details || {}; return { time: e.time, precipitationMm: typeof n1.details?.precipitation_amount === 'number' ? n1.details.precipitation_amount : null, symbol: n1.summary?.symbol_code || null, windKmh: typeof inst.wind_speed === 'number' ? Math.round(inst.wind_speed * 36) / 10 : null }; });
       },
       hotspots: async (loc) => { const v = await load('fires', { lat: loc.lat, lon: loc.lon, radiusKm: loc.radiusKm }, config()).catch(() => null); return ((v && v.items) || []).map(i => ({ lat: i.lat, lon: i.lon, frp: typeof i.frp === 'number' ? i.frp : null, time: i.time || i.acqDate || null })); },
-      // scenes: intentionally not wired live yet - the public STAC host is an egress-allowlist decision (see docs/proactive-alerts-design.md).
+      // scenes: live since the God's Eye parity build (Owner order 2026-11-28): the
+      // NASA CMR HLS granule catalog (keyless, egress-allowlisted) feeds the
+      // imagery-observation rule - a new dated Sentinel-2 / Landsat pass over an
+      // asset point is recorded as an observation, never a damage claim.
+      scenes: async (loc) => { if (!config().alerts?.imageryAlerts) return []; return imagery.latestScenes(loc, { fetch: (url, o = {}) => fetch(url, { timeoutMs: 20000, ...o, headers: { 'user-agent': egress.userAgent(config().contactUrl), ...(o.headers || {}) } }) }); },
       // BMKG (official public data): quake list incl. BMKG's own tsunami
       // Potensi wording + village forecast for watch points carrying adm4.
       ...createBmkgProviders({ fetchText: (url) => fetch(url, { timeoutMs, headers: { 'user-agent': egress.userAgent(config().contactUrl) }, maxBytes: 1024 * 1024 }) }),
@@ -79,10 +84,10 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
     // settings, tokens from DAMAR's own vault by name. Unconfigured =
     // status "ready" (siap diaktifkan); nothing is ever borrowed from
     // another system's credentials or channels.
-    channels: createExternalChannels({
+    channels: { ...createExternalChannels({
       getChannelsConfig: () => config().alerts || {},
       resolveSecret: (name) => { try { return keyStore?.load(name) || null; } catch { return null; } },
-    }),
+    }), ...(notchChannel && typeof notchChannel.send === 'function' ? { notch: notchChannel } : {}) },
   });
   { const ac = config().alerts; if (proactiveAutostart && ac?.enabled) proactive.start((ac.tickMinutes || 10) * 60000); }
   const cameras = camerasIn || createCameras({ profileDir, keyStore });
@@ -133,7 +138,8 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
   function status(who) {
     const cfg = config();
     alpr.schedule();
-    return { consent: cfg.consent, satelliteGroup: cfg.satelliteGroup, areas: cfg.areas, notice: NOTICE, egressHosts: [...egress.HOSTS], contactUrl: cfg.contactUrl, userAgent: egress.userAgent(cfg.contactUrl),
+    return { consent: cfg.consent, satelliteGroup: cfg.satelliteGroup, areas: cfg.areas, watchPoints: cfg.watchPoints, notice: NOTICE, egressHosts: [...egress.HOSTS], contactUrl: cfg.contactUrl, userAgent: egress.userAgent(cfg.contactUrl),
+      ...(who === 'owner' ? { alertsCfg: cfg.alerts } : {}),
       cctv: { sources: cfg.cctvSources, noticeAt: cfg.cctvNoticeAt, available: Object.entries(PUBLIC_SOURCES).map(([id, s]) => ({ id, label: s.label, region: s.region, attribution: s.attribution, license: s.license, terms: s.terms })), ffmpeg: cameras.ffmpeg() },
       alpr: { noticeAt: cfg.alprNoticeAt, retentionDays: cfg.alprRetentionDays, intervalSec: cfg.alprIntervalSec, ...(who === 'owner' ? { ...alpr.status(), installHosts: alpr.engine?.INSTALL_HOSTS || [] } : { unacknowledgedAlerts: alpr.status().unacknowledgedAlerts }) },
       feeds: FEED_IDS.map(id => { const f = FEEDS[id];
@@ -177,10 +183,15 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
     const isPost = req.method === 'POST';
     // Only the public camera list takes a query (?q=<text>&page=<n>, server-side search + pagination).
     const listRoute = /^\/api\/r9\/mata-dewa\/cameras\/public\/[a-z-]{1,24}$/.test(p);
-    if ((url.search && !listRoute) || !allowed.includes(req.method)) return json(405, { success: false, error: 'METHOD_NOT_ALLOWED' });
+    // The imagery chip takes exactly ?point=<area-or-watchpoint-id>&day=<YYYY-MM-DD>&product=<S30|L30>.
+    const chipRoute = /^\/api\/r9\/mata-dewa\/imagery\/chip(\/frame)?$/.test(p);
+    if ((url.search && !listRoute && !chipRoute) || !allowed.includes(req.method)) return json(405, { success: false, error: 'METHOD_NOT_ALLOWED' });
     const qp = url.searchParams, q = qp.get('q') || '', page = Number(qp.get('page') || 1);
     if (listRoute && ([...qp.keys()].some(k => k !== 'q' && k !== 'page') || q.length > 60 || /[\x00-\x1f\x7f]/.test(q) || !Number.isSafeInteger(page) || page < 1 || page > 1000))
       return json(400, { success: false, error: 'CAMERA_QUERY_INVALID' });
+    if (chipRoute && ([...qp.keys()].some(k => !['point', 'day', 'product'].includes(k)) || !/^[a-z0-9-]{1,24}$/.test(qp.get('point') || '') ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(qp.get('day') || '') || !Number.isFinite(Date.parse(qp.get('day'))) || Date.parse(qp.get('day')) > now() || !imagery.PRODUCTS[qp.get('product') || '']))
+      return json(400, { success: false, error: 'IMAGERY_QUERY_INVALID' });
     if (!isPost && (Number(req.headers['content-length']) > 0 || req.headers['transfer-encoding'])) return json(413, { success: false, error: 'BODY_NOT_ALLOWED' });
     const ownerOnly = () => { if (!owner) throw fail('OWNER_REQUIRED', 403); };
     const consent = () => { if (!cfg.consent) throw fail('MATA_DEWA_CONSENT_REQUIRED', 409); };
@@ -188,6 +199,14 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
     try {
       if (p === '/api/r9/mata-dewa/status') return json(200, { success: true, data: status(who) });
       if ((m = /^\/api\/r9\/mata-dewa\/feeds\/([A-Za-z]{1,24})$/.exec(p)) && Object.prototype.hasOwnProperty.call(FEEDS, m[1])) return json(200, { success: true, data: await feed(m[1]) });
+      if (chipRoute) {
+        consent();
+        const loc = (cfg.areas || []).map(a => ({ id: a.id, lat: a.lat, lon: a.lon })).concat((cfg.watchPoints || []).map(w => ({ id: w.id, lat: w.lat, lon: w.lon }))).find(x => x.id === qp.get('point'));
+        if (!loc) throw fail('IMAGERY_POINT_NOT_FOUND', 404);
+        const buf = await imagery.fetchChip(loc, { day: qp.get('day'), product: qp.get('product') },
+          { fetch: (url, o = {}) => fetch(url, { timeoutMs: 30000, ...o, headers: { 'user-agent': egress.userAgent(cfg.contactUrl), ...(o.headers || {}) } }) });
+        return p.endsWith('/frame') ? frame(json, buf) : sendJpeg(res, buf);
+      }
       if ((m = /^\/api\/r9\/mata-dewa\/keys\/([A-Za-z]{1,24})$/.exec(p))) { ownerOnly(); if (!body) throw fail('BODY_UNAVAILABLE', 503); return json(200, { success: true, data: setKey(m[1], await body(req, 2048)) }); }
       if (p === '/api/r9/mata-dewa/cameras' && !isPost)
         return json(200, { success: true, data: { sources: cfg.cctvSources, own: owner ? cameras.own() : [], ffmpeg: cameras.ffmpeg() } });

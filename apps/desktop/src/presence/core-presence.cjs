@@ -10,7 +10,7 @@ const { coreEndpoint } = require('../cli/core-endpoint.cjs');
 const { boundedResponse } = require('../cli/service.cjs');
 
 const READS = Object.freeze(['/api/r9/lifecycle', '/api/r9/sessions', '/api/r9/pandawa/runs', '/api/r9/presence/settings', '/api/r9/cli/settings', '/api/r9/activity', '/api/r9/media', '/api/r9/provider', '/api/r9/mata-dewa/status']);
-const readAllowed = route => READS.includes(route) || /^\/api\/r9\/activity\?from=\d{1,9}$/.test(route) || /^\/api\/r9\/mata-dewa\/feeds\/[a-z]+$/.test(route);
+const readAllowed = route => READS.includes(route) || /^\/api\/r9\/activity\?from=\d{1,9}$/.test(route) || /^\/api\/r9\/mata-dewa\/feeds\/[a-z]+$/.test(route) || /^\/api\/r9\/mata-dewa\/imagery\/chip\?point=[a-z0-9-]{1,24}&day=\d{4}-\d{2}-\d{2}&product=(?:S30|L30)$/.test(route);
 // Contract agreed with Control (presence.* namespace). Defaults equal the Owner prototype values.
 const DEFAULTS = Object.freeze({ idleToOrbSec: 120, orbToNotchSec: 120, notchHideSec: 1800, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, characterSoundEnabled: true, characterSoundVolume: 30, displayName: 'Maronns', salutation: '', onboardingCompleted: false });
 const KEYS = Object.freeze(Object.keys(DEFAULTS).map(k => 'presence.' + k));
@@ -95,6 +95,15 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
       headers: { accept: 'application/json', authorization: 'Bearer ' + token() } });
     return { ok: response.ok, status: response.status, body: await boundedResponse(response).catch(() => null) };
   }
+  // Binary read for the dated satellite chip (JPEG); same allowlist + requester token.
+  async function getBinary(route) {
+    if (!readAllowed(route)) throw Error('PRESENCE_ROUTE_DENIED');
+    const response = await transport(endpoint + route, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(20000),
+      headers: { accept: 'image/jpeg', authorization: 'Bearer ' + token() } });
+    if (!response.ok) return null;
+    const buf = Buffer.from(await response.arrayBuffer());
+    return buf.length >= 1024 && buf.length <= 2 * 1024 * 1024 ? buf : null;
+  }
   // Owner-token calls for the first-run onboarding writes (main process only; the key, when one is in flight,
   // travels in the connect body only and is never returned, logged or stored here - Core's DPAPI store keeps it).
   async function ownerPost(route, payload, ms = 15000) {
@@ -138,9 +147,19 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
           const st = await get('/api/r9/mata-dewa/status');
           if (st.ok && st.body?.success === true) {
             mataDewa = { status: st.body.data, feeds: {} };
-            const want = mataDewa.status.consent ? (mataDewa.status.areas?.length ? ['weather', 'earthquakes', 'disasters'] : ['earthquakes', 'disasters']) : [];
-            for (const fid of want) {
+            const enabledFeeds = new Set((mataDewa.status.feeds || []).filter(f => f.enabled).map(f => f.id));
+            const want = mataDewa.status.consent ? ['weather', 'earthquakes', 'disasters', 'cyclones', 'airQuality', 'launches', 'satellites', 'flights', 'imagery'].filter(id => enabledFeeds.has(id)) : [];
+            await Promise.all(want.map(async fid => {
               try { const fr = await get('/api/r9/mata-dewa/feeds/' + fid); if (fr.ok && fr.body?.success === true) mataDewa.feeds[fid] = fr.body.data; } catch {}
+            }));
+            try { const pv = await ownerGet('/api/r9/mata-dewa/proactive'); if (pv.ok && pv.body?.success === true) mataDewa.proactive = pv.body.data; } catch {}
+            // Dated chip for the first location with a scene; the projection
+            // re-ships the pixels only when the scene key changes.
+            const img0 = mataDewa.feeds.imagery?.results?.[0]?.items?.[0];
+            if (img0) {
+              const point = String(img0.locationId || '').replace(/^(area|wp):/, '');
+              try { const chip = await getBinary('/api/r9/mata-dewa/imagery/chip?point=' + point + '&day=' + img0.day + '&product=' + img0.product);
+                if (chip) mataDewa.chip = { sceneKey: point + '|' + img0.day + '|' + img0.product, jpeg: chip.toString('base64') }; } catch {}
             }
           }
         } catch {}

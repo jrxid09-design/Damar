@@ -7,6 +7,7 @@
 // A feed has either url()+parse() (one GET through egress.fetchPublic) or load(area, cfg, ctx) for multi-step sources
 // (OAuth token, WebSocket window). ctx = { fetch, key, ws, now }.
 
+const imagery = require('./imagery.cjs');
 const num = v => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 const str = (v, n = 120) => (typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, n) || null : null);
 const round = (v, d) => (v === null ? null : Number(v.toFixed(d)));
@@ -183,6 +184,28 @@ const FEEDS = Object.freeze({
         url: typeof p.url?.report === 'string' && p.url.report.startsWith('https://www.gdacs.org/') ? p.url.report.slice(0, 200) : null }; })
       .filter(Boolean).sort((a, b) => ({ Red: 0, Orange: 1, Green: 2 }[a.alert] ?? 3) - ({ Red: 0, Orange: 1, Green: 2 }[b.alert] ?? 3)).slice(0, 300),
   },
+  imagery: {
+    label: 'Satellite imagery (latest dated pass)', host: 'cmr.earthdata.nasa.gov', perArea: false, minRefreshSec: 900, defaultRefreshSec: 3600, maxBytes: 2 * 1024 * 1024,
+    attribution: 'NASA EOSDIS HLS (GIBS / Worldview); contains modified Copernicus Sentinel data', license: 'NASA open data; Sentinel-2 data via ESA/Copernicus (free, full and open access)', commercial: 'yes',
+    limits: 'No key. One latest dated pass per watch location (Sentinel-2 / Landsat via HLS, 30 m). Revisit is days, not a live feed; the acquisition date is always shown.',
+    async load(_a, cfg, ctx) {
+      const locations = [
+        ...(cfg.areas || []).map(a => ({ locationId: 'area:' + a.id, name: a.name, profile: 'personal', lat: a.lat, lon: a.lon })),
+        ...(cfg.watchPoints || []).map(w => ({ locationId: 'wp:' + w.id, name: w.name, profile: w.profile, lat: w.lat, lon: w.lon })),
+      ];
+      const items = [];
+      for (const loc of locations) {
+        try {
+          const scenes = await imagery.latestScenes(loc, ctx);
+          const s = scenes[0];
+          if (s) items.push({ locationId: loc.locationId, name: loc.name, profile: loc.profile, lat: loc.lat, lon: loc.lon,
+            product: s.product, productLabel: s.label, sceneId: s.id, datetime: s.datetime, day: s.day, cloudCoverPct: s.cloudCoverPct });
+        } catch {}
+      }
+      if (!items.length && locations.length) throw fail('IMAGERY_NO_SCENES');
+      return items;
+    },
+  },
   // ---- Owner-key feeds (key stored DPAPI as matadewa-<feed>, never returned) ----
   openaq: {
     label: 'Air quality, measured (OpenAQ)', host: 'api.openaq.org', perArea: true, minRefreshSec: 900, defaultRefreshSec: 1800, maxBytes: 2 * 1024 * 1024,
@@ -255,7 +278,7 @@ const AREA_ID = /^[a-z0-9-]{1,24}$/, AREA_NAME = /^[\p{L}\p{N} .,'()_-]{1,40}$/u
 const CCTV_SOURCES = ['tfl-london', 'fintraffic'];
 // Default feeds are the commercially usable keyless ones; Open-Meteo/OpenSky stay optional and labelled non-commercial.
 // contactUrl: optional https:// or mailto: contact appended to the User-Agent (MET Norway asks for one); empty by default.
-const SETTINGS_DEFAULTS = () => ({ consent: false, contactUrl: '', feeds: ['earthquakes', 'weather', 'disasters', 'satellites', 'launches'],
+const SETTINGS_DEFAULTS = () => ({ consent: false, contactUrl: '', feeds: ['earthquakes', 'weather', 'disasters', 'satellites', 'launches', 'imagery'],
   areas: [{ id: 'jakarta', name: 'Jakarta', lat: -6.2, lon: 106.8, radiusKm: 150 }],
   refreshSec: Object.fromEntries(FEED_IDS.map(id => [id, FEEDS[id].defaultRefreshSec])), satelliteGroup: 'stations',
   cctvSources: [], cctvNoticeAt: null, alprNoticeAt: null, alprRetentionDays: 30, alprIntervalSec: 15, watchPoints: [], alerts: ALERTS_DEFAULTS() });
@@ -296,7 +319,8 @@ function sanitizeAlerts(v) {
 // locations and infrastructure assets alike (any user's towers, warehouses,
 // farms, sites). sourceUrl keeps the provenance of an imported point.
 const validWatchPoint = w => !!w && typeof w === 'object' && !Array.isArray(w) &&
-  ['id', 'lat', 'lon', 'name', 'radiusKm', 'profile'].every(k => k in w) && Object.keys(w).every(k => ['id', 'lat', 'lon', 'name', 'radiusKm', 'profile', 'sourceUrl', 'adm4'].includes(k)) &&
+  ['id', 'lat', 'lon', 'name', 'radiusKm', 'profile'].every(k => k in w) && Object.keys(w).every(k => ['id', 'lat', 'lon', 'name', 'radiusKm', 'profile', 'sourceUrl', 'adm4', 'rules'].includes(k)) &&
+  (w.rules === undefined || (!!w.rules && typeof w.rules === 'object' && !Array.isArray(w.rules) && Object.keys(w.rules).every(k => ['quake', 'storm', 'fire', 'imagery'].includes(k) && typeof w.rules[k] === 'boolean'))) &&
   AREA_ID.test(w.id) && typeof w.name === 'string' && AREA_NAME.test(w.name) && Number.isFinite(w.lat) && w.lat >= -90 && w.lat <= 90 &&
   Number.isFinite(w.lon) && w.lon >= -180 && w.lon <= 180 && Number.isFinite(w.radiusKm) && w.radiusKm >= 1 && w.radiusKm <= 460 &&
   (w.profile === 'personal' || w.profile === 'asset') &&
@@ -316,7 +340,7 @@ const SETTINGS_RULES = {
   watchPoints: v => Array.isArray(v) && v.length <= 200 && v.every(validWatchPoint) && new Set(v.map(w => w.id)).size === v.length,
   alerts: v => !!v && typeof v === 'object' && !Array.isArray(v),
 };
-const copy = (k, v) => k === 'areas' ? v.map(a => ({ id: a.id, name: a.name, lat: a.lat, lon: a.lon, radiusKm: a.radiusKm })) : k === 'watchPoints' ? v.map(w => ({ ...w })) : Array.isArray(v) ? [...v] : v;
+const copy = (k, v) => k === 'areas' ? v.map(a => ({ id: a.id, name: a.name, lat: a.lat, lon: a.lon, radiusKm: a.radiusKm })) : k === 'watchPoints' ? v.map(w => ({ ...w, ...(w.rules ? { rules: { ...w.rules } } : {}) })) : Array.isArray(v) ? [...v] : v;
 // Stored values that no longer validate are dropped (defaults apply), like presence.*.
 function sanitizeSettings(v) {
   const d = SETTINGS_DEFAULTS(); if (!v || typeof v !== 'object' || Array.isArray(v)) return d;

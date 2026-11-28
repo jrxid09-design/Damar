@@ -42,7 +42,8 @@ function resolveLocations({ areas = [], watchPoints = [], gps = null, gpsEnabled
     locations.push({ kind: 'watchpoint', id: 'area:' + a.id, label: a.name, profile: 'personal', lat: a.lat, lon: a.lon, radiusKm: a.radiusKm, stale: false, sourceUrl: a.sourceUrl || null });
   }
   for (const w of Array.isArray(watchPoints) ? watchPoints : []) {
-    locations.push({ kind: 'watchpoint', id: 'wp:' + w.id, label: w.name, profile: w.profile === 'asset' ? 'asset' : 'personal', lat: w.lat, lon: w.lon, radiusKm: w.radiusKm, stale: false, sourceUrl: w.sourceUrl || null, adm4: typeof w.adm4 === 'string' ? w.adm4 : null });
+    locations.push({ kind: 'watchpoint', id: 'wp:' + w.id, label: w.name, profile: w.profile === 'asset' ? 'asset' : 'personal', lat: w.lat, lon: w.lon, radiusKm: w.radiusKm, stale: false, sourceUrl: w.sourceUrl || null, adm4: typeof w.adm4 === 'string' ? w.adm4 : null,
+      rules: (w.rules && typeof w.rules === 'object' && !Array.isArray(w.rules)) ? { quake: w.rules.quake !== false, storm: w.rules.storm !== false, fire: w.rules.fire !== false, imagery: w.rules.imagery !== false } : null });
   }
   return { locations, notes, hasLocation: locations.length > 0 };
 }

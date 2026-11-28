@@ -71,18 +71,35 @@ function projectProviders(data) {
 
 // Mata Dewa for the Presence portal: watch points + general public feeds
 // (global feeds when no watch point exists), allowlisted display fields only.
+let lastChipKey = null;
 function projectMataDewa(m) {
-  if (!m || typeof m !== 'object') return null;
+  if (!m || typeof m !== 'object') { lastChipKey = null; return null; }
   const feedItems = (feed, pick) => {
     const items = feed?.results?.[0]?.items;
     return Array.isArray(items) ? items.slice(0, 4).map(pick).filter(Boolean) : [];
   };
+  const feedCount = feed => { const r = feed?.results?.[0]; return typeof r?.count === 'number' ? r.count : (Array.isArray(r?.items) ? r.items.length : 0); };
+  // Dated satellite imagery: one latest scene per configured location; the
+  // chip pixels ride along only when the scene changes (same discipline as
+  // the media artwork), so the poll never re-ships the image.
+  const imageryItems = feedItems(m.feeds?.imagery, it => ({ name: text(it.name, 60), profile: text(it.profile, 12), product: text(it.productLabel, 40), day: text(it.day, 10), datetime: text(it.datetime, 30), cloudCoverPct: typeof it.cloudCoverPct === 'number' ? it.cloudCoverPct : null }));
+  const chip = m.chip && typeof m.chip.jpeg === 'string' && m.chip.jpeg.length < 600000 ? m.chip : null;
+  const chipChanged = !!chip && chip.sceneKey !== lastChipKey;
+  if (chip) lastChipKey = chip.sceneKey; else if (!m.feeds?.imagery) lastChipKey = null;
   return {
     consent: m.status?.consent === true,
     areas: (Array.isArray(m.status?.areas) ? m.status.areas : []).map(a => ({ name: text(a.name, 60), seeded: a.id === 'jakarta' })).filter(a => a.name),
+    watchPoints: (Array.isArray(m.status?.watchPoints) ? m.status.watchPoints : []).map(w => ({ name: text(w.name, 60), profile: text(w.profile, 12), lat: typeof w.lat === 'number' ? w.lat : null, lon: typeof w.lon === 'number' ? w.lon : null })).filter(w => w.name),
     earthquakes: m.feeds?.earthquakes ? { attribution: text(m.feeds.earthquakes.attribution, 90), items: feedItems(m.feeds.earthquakes, q => ({ mag: typeof q.magnitude === 'number' ? q.magnitude : null, place: text(q.place, 90), depthKm: typeof q.depthKm === 'number' ? q.depthKm : null })) } : null,
     disasters: m.feeds?.disasters ? { attribution: text(m.feeds.disasters.attribution, 90), items: feedItems(m.feeds.disasters, d => ({ event: text(d.name || d.type, 90), country: text(d.country, 60), severity: text(d.severity, 30) })) } : null,
     weather: m.feeds?.weather ? { attribution: text(m.feeds.weather.attribution, 90), items: feedItems(m.feeds.weather, w => ({ temperatureC: typeof w.temperatureC === 'number' ? w.temperatureC : null, sky: text(w.sky || w.symbol, 40) })) } : null,
+    cyclones: m.feeds?.cyclones ? { attribution: text(m.feeds.cyclones.attribution, 90), items: feedItems(m.feeds.cyclones, c => ({ name: text(c.name, 60), classification: text(c.classification, 20), intensityKt: typeof c.intensityKt === 'number' ? c.intensityKt : null })) } : null,
+    airQuality: m.feeds?.airQuality ? { attribution: text(m.feeds.airQuality.attribution, 90), items: feedItems(m.feeds.airQuality, a => ({ europeanAqi: typeof a.europeanAqi === 'number' ? a.europeanAqi : null, pm25: typeof a.pm25 === 'number' ? a.pm25 : null })) } : null,
+    launches: m.feeds?.launches ? { attribution: text(m.feeds.launches.attribution, 90), items: (Array.isArray(m.feeds.launches.results?.[0]?.items) ? m.feeds.launches.results[0].items : []).slice(0, 3).map(l => ({ name: text(l.name, 80), net: text(l.net, 30), provider: text(l.provider, 40) })) } : null,
+    satellites: m.feeds?.satellites ? { count: feedCount(m.feeds.satellites) } : null,
+    flights: m.feeds?.flights ? { count: feedCount(m.feeds.flights) } : null,
+    imagery: m.feeds?.imagery ? { attribution: text(m.feeds.imagery.attribution, 90), items: imageryItems, ...(chipChanged ? { chip: 'data:image/jpeg;base64,' + chip.jpeg, chipFor: imageryItems[0]?.name || '' } : {}) } : null,
+    alerts: m.proactive ? { enabled: m.proactive.status?.enabled === true, items: (Array.isArray(m.proactive.recent) ? m.proactive.recent : []).slice(0, 5).map(x => ({ at: text(x.at, 30), severity: text(x.severity, 12), location: text(x.location, 60), message: text(x.message, 140) })) } : null,
   };
 }
 

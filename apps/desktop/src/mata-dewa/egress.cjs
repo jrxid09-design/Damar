@@ -11,6 +11,7 @@ const HOSTS = Object.freeze([
   'www.nhc.noaa.gov', 'opensky-network.org', 'auth.opensky-network.org', 'stream.aisstream.io', 'firms.modaps.eosdis.nasa.gov', 'api.tomtom.com',
   'api.tfl.gov.uk', 's3-eu-west-1.amazonaws.com', 'tie.digitraffic.fi', 'weathercam.digitraffic.fi',
   'api.met.no', 'www.gdacs.org', 'api.openaq.org',
+  'cmr.earthdata.nasa.gov', 'wvs.earthdata.nasa.gov',
 ]);
 // Shared hosts are narrowed to the publisher's own path.
 const PATH_PREFIX = Object.freeze({ 's3-eu-west-1.amazonaws.com': '/jamcams.tfl.gov.uk/' });

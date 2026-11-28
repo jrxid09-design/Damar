@@ -440,7 +440,11 @@ async function child(directory, resume, recovered = false) {
       parallelRuns: Number(process.env.DAMAR_PANDAWA_PARALLEL || 3),
       mataDewa: require('../mata-dewa/index.cjs').createMataDewa({ proactiveAutostart: true, settings: coreSettings, keyStore, cacheFile: path.join(directory, 'mata-dewa-cache.json'), profileDir: path.join(path.dirname(settingsFile), 'mata-dewa'), python, alprDir: path.join(SCRATCH, 'alpr'), // installed: %LOCALAPPDATA%\DAMAR\alpr
         // ALPR watchlist hits join the redacted activity feed (requester: camera label only; owner: plate in `detail`).
-        onAlert: a => turns.noteActivity({ kind: 'alert', source: 'mata-dewa', label: String(a.cameraName).slice(0, 40) + ' · watchlist match', detail: a.plate }) }),
+        onAlert: a => turns.noteActivity({ kind: 'alert', source: 'mata-dewa', label: String(a.cameraName).slice(0, 40) + ' · watchlist match', detail: a.plate }),
+        // Proactive Mata Dewa alerts join the same activity feed, so the Notch
+        // reacts to them exactly like ALPR hits (label carries the key point;
+        // the full composed message rides in `detail` for the Owner surfaces).
+        notchChannel: { send: async (alert) => { turns.noteActivity({ kind: 'alert', source: 'mata-dewa', label: String(alert.message || 'Peringatan Mata Dewa').slice(0, 80), detail: String(alert.message || '').slice(0, 300) }); } } }),
       lifecycle: lifecycleBridge, jobSnapshot: () => {
         try {
           const state = JSON.parse(fs.readFileSync(path.join(directory, 'jobs.json'), 'utf8'));

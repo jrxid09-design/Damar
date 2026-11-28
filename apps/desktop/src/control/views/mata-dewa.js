@@ -6,9 +6,9 @@
 // UI language follows the shared CLI language setting (GET /api/r9/cli/settings, cli.language; null -> English).
 (function (root) {
   'use strict';
-  var FEED_ORDER = ['earthquakes', 'disasters', 'cyclones', 'weather', 'openMeteo', 'openaq', 'airQuality', 'flights', 'opensky', 'military', 'vessels', 'fires', 'traffic', 'satellites', 'launches'];
+  var FEED_ORDER = ['earthquakes', 'disasters', 'cyclones', 'weather', 'openMeteo', 'openaq', 'airQuality', 'flights', 'opensky', 'military', 'vessels', 'fires', 'traffic', 'satellites', 'launches', 'imagery'];
   var md = { status: null, statusError: null, feeds: {}, loading: false, lastLoad: 0, draft: null, awaitingStatus: false, saving: false, message: '', lang: 'en',
-    cams: {}, camPage: {}, own: [], alpr: null, filter: '', frames: {}, frameLoading: {}, camForm: { kind: 'snapshot' } };
+    cams: {}, camPage: {}, own: [], alpr: null, filter: '', frames: {}, frameLoading: {}, camForm: { kind: 'snapshot' }, proactive: null, importUrl: '', importProfile: 'asset' };
   var H = null;
 
   // ---- i18n (English first; Indonesian when cli.language === 'id') ---------------------------------------------------
@@ -22,7 +22,13 @@
       cctvNotice: 'Camera privacy & legal notice', accept: 'I understand and accept', filter: 'Filter by name', addCamera: 'Add camera', alpr: 'Licence-plate recognition (ALPR)', alprNotice: 'ALPR legal notice',
       alerts: 'Watchlist alerts', ack: 'Acknowledge all', log: 'Vehicle log', watchlist: 'Watchlist', export: 'Export JSON', deleteAll: 'Delete all entries', retention: 'Retention (days)', interval: 'Scan every (s)',
       engineMissing: 'ALPR engine not installed. Plates are read locally; nothing is sent to any service.', ffmpegMissing: 'ffmpeg not found: RTSP cameras need ffmpeg on PATH (optional, not bundled).',
-      sources: 'Public camera sources', search: 'Search', contact: 'Contact URL for data providers (optional)', installEngine: 'Install ALPR engine', installing: 'Installing ALPR engine…', installHosts: 'The install downloads about 150 MB from:', alprOnly: 'ALPR runs only on your own cameras.', disabledAll: 'All feeds are disabled.' },
+      sources: 'Public camera sources', search: 'Search', contact: 'Contact URL for data providers (optional)', installEngine: 'Install ALPR engine', installing: 'Installing ALPR engine…', installHosts: 'The install downloads about 150 MB from:', alprOnly: 'ALPR runs only on your own cameras.', disabledAll: 'All feeds are disabled.',
+      watchPoints: 'Watch points', addPoint: 'Add point', profile: 'Profile', personal: 'Personal', asset: 'Asset', pointRules: 'Rules', ruleQuake: 'Quakes', ruleStorm: 'Storms', ruleFire: 'Fire', ruleImagery: 'Imagery',
+      importLink: 'Import from a Google Maps link', importBtn: 'Import', importHint: 'A pin or coordinate link adds one point; a shared My Maps link adds every placemark as a point.',
+      alertsTitle: 'Proactive alerts', alertEnabled: 'Alerts on', tickMinutes: 'Check every (min)', quietHours: 'Quiet hours', gpsEnabled: 'Use mobile GPS', imageryAlertsOpt: 'Satellite imagery observations',
+      channels: 'Channels', chNotch: 'Notch', deliveries: 'Recent deliveries', checkNow: 'Check now', lastTick: 'Last check', noDeliveries: 'No alerts delivered yet.',
+      quakeMin: 'Quake min. magnitude', quakeRadius: 'Quake radius (km)', stormRain: 'Storm rain (mm/h)', stormWind: 'Storm wind (km/h)', chatId: 'Telegram chat ID', waPhone: 'WhatsApp phone number ID', waTo: 'WhatsApp destination',
+      cloud: 'cloud', passDate: 'Pass', notLive: 'Dated satellite pass, not a live view.', noScenes: 'No dated pass found for the configured locations yet.' },
     id: { subtitle: 'Umpan dunia publik, gempa, siklon, cuaca, kualitas udara, pesawat, kapal, kebakaran, satelit dan peluncuran, serta kamera Anda sendiri.',
       consentTitle: 'Persetujuan & pengungkapan koneksi keluar', consentOn: 'Saya setuju, aktifkan umpan publik', consentOff: 'Cabut persetujuan (hentikan semua umpan)', hosts: 'Host',
       given: 'persetujuan diberikan', none: 'belum ada persetujuan · tidak ada yang diambil', loading: 'Memuat dari Core…', plot: 'Peta dunia', noBasemap: 'Tanpa peta dasar: koordinat pada grid polos.',
@@ -32,7 +38,13 @@
       cctvNotice: 'Pemberitahuan privasi & hukum kamera', accept: 'Saya mengerti dan setuju', filter: 'Saring nama', addCamera: 'Tambah kamera', alpr: 'Pengenalan pelat nomor (ALPR)', alprNotice: 'Pemberitahuan hukum ALPR',
       alerts: 'Peringatan daftar pantau', ack: 'Tandai semua dibaca', log: 'Log kendaraan', watchlist: 'Daftar pantau', export: 'Ekspor JSON', deleteAll: 'Hapus semua entri', retention: 'Retensi (hari)', interval: 'Pindai tiap (dtk)',
       engineMissing: 'Mesin ALPR belum terpasang. Pelat dibaca secara lokal; tidak ada data yang dikirim ke layanan mana pun.', ffmpegMissing: 'ffmpeg tidak ditemukan: kamera RTSP memerlukan ffmpeg di PATH (opsional, tidak dibundel).',
-      sources: 'Sumber kamera publik', search: 'Cari', contact: 'URL kontak untuk penyedia data (opsional)', installEngine: 'Pasang mesin ALPR', installing: 'Memasang mesin ALPR…', installHosts: 'Pemasangan mengunduh sekitar 150 MB dari:', alprOnly: 'ALPR hanya berjalan pada kamera Anda sendiri.', disabledAll: 'Semua umpan dinonaktifkan.' }
+      sources: 'Sumber kamera publik', search: 'Cari', contact: 'URL kontak untuk penyedia data (opsional)', installEngine: 'Pasang mesin ALPR', installing: 'Memasang mesin ALPR…', installHosts: 'Pemasangan mengunduh sekitar 150 MB dari:', alprOnly: 'ALPR hanya berjalan pada kamera Anda sendiri.', disabledAll: 'Semua umpan dinonaktifkan.',
+      watchPoints: 'Titik Pantau', addPoint: 'Tambah titik', profile: 'Profil', personal: 'Personal', asset: 'Aset', pointRules: 'Aturan', ruleQuake: 'Gempa', ruleStorm: 'Badai', ruleFire: 'Api', ruleImagery: 'Citra',
+      importLink: 'Impor dari tautan Google Maps', importBtn: 'Impor', importHint: 'Tautan pin atau koordinat menambah satu titik; tautan My Maps yang dibagikan menambah setiap penanda sebagai titik.',
+      alertsTitle: 'Peringatan proaktif', alertEnabled: 'Peringatan aktif', tickMinutes: 'Periksa tiap (menit)', quietHours: 'Jam tenang', gpsEnabled: 'Pakai GPS ponsel', imageryAlertsOpt: 'Observasi citra satelit',
+      channels: 'Saluran', chNotch: 'Notch', deliveries: 'Pengiriman terakhir', checkNow: 'Periksa sekarang', lastTick: 'Pemeriksaan terakhir', noDeliveries: 'Belum ada peringatan terkirim.',
+      quakeMin: 'Magnitudo gempa min.', quakeRadius: 'Radius gempa (km)', stormRain: 'Hujan badai (mm/jam)', stormWind: 'Angin badai (km/jam)', chatId: 'ID chat Telegram', waPhone: 'ID nomor WhatsApp', waTo: 'Tujuan WhatsApp',
+      cloud: 'awan', passDate: 'Lintasan', notLive: 'Citra satelit bertanggal, bukan pantauan langsung.', noScenes: 'Belum ada lintasan bertanggal untuk lokasi yang diatur.' }
   };
   function T(k) { return (STR[md.lang] && STR[md.lang][k]) || STR.en[k] || k; }
   function esc(v) { return H.escapeHtml(v == null ? '-' : v); }
@@ -51,6 +63,7 @@
       if (owner()) {
         jobs.push(H.get('/api/r9/mata-dewa/cameras').then(function (x) { md.own = x.ok ? x.data.own : []; }));
         jobs.push(H.get('/api/r9/mata-dewa/alpr').then(function (x) { md.alpr = x.ok ? x.data : null; }));
+        jobs.push(H.get('/api/r9/mata-dewa/proactive').then(function (x) { md.proactive = x.ok ? x.data : null; }));
       }
       return Promise.all(jobs);
     }).then(function () { md.loading = false; H.refresh(); }, function () { md.loading = false; });
@@ -61,8 +74,8 @@
     return H.get('/api/r9/mata-dewa/cameras/public/' + s + '?q=' + encodeURIComponent(md.filter) + '&page=' + pg).then(function (x) { md.cams[s] = x; });
   }
   // ---- camera frames (JSON base64 -> ImageBitmap -> canvas) --------------------------------------------------------
-  function frameRoute(key) { var p = key.split('|'); return p[0] === 'pub' ? '/api/r9/mata-dewa/cameras/public/' + p[1] + '/' + p[2] + '/frame' : p[0] === 'own' ? '/api/r9/mata-dewa/cameras/own/' + p[1] + '/frame' : '/api/r9/mata-dewa/alpr/crops/' + p[1] + '/frame'; }
-  function frameTtl(key) { return key.indexOf('own|') === 0 ? 5000 : key.indexOf('crop|') === 0 ? 3600000 : 60000; }
+  function frameRoute(key) { var p = key.split('|'); return p[0] === 'img' ? '/api/r9/mata-dewa/imagery/chip/frame?point=' + encodeURIComponent(p[1]) + '&day=' + encodeURIComponent(p[2]) + '&product=' + encodeURIComponent(p[3]) : p[0] === 'pub' ? '/api/r9/mata-dewa/cameras/public/' + p[1] + '/' + p[2] + '/frame' : p[0] === 'own' ? '/api/r9/mata-dewa/cameras/own/' + p[1] + '/frame' : '/api/r9/mata-dewa/alpr/crops/' + p[1] + '/frame'; }
+  function frameTtl(key) { return key.indexOf('own|') === 0 ? 5000 : key.indexOf('crop|') === 0 || key.indexOf('img|') === 0 ? 3600000 : 60000; }
   function drawFrames() {
     if (typeof document === 'undefined') return;
     Array.prototype.forEach.call(document.querySelectorAll('canvas[data-md-frame]'), function (cv) {
@@ -95,6 +108,7 @@
     for (lat = -60; lat <= 60; lat += 30) g += '<line x1="0" y1="' + xy(lat, 0)[1] + '" x2="720" y2="' + xy(lat, 0)[1] + '" />';
     var pts = '';
     st.areas.forEach(function (a) { var p = xy(a.lat, a.lon), r = Math.max(2, a.radiusKm / 111 * 2); pts += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="' + r.toFixed(1) + '" fill="none" stroke="var(--damar-gold-bright)" stroke-dasharray="2 2"><title>' + esc(a.name) + '</title></circle>'; });
+    (st.watchPoints || []).forEach(function (w) { var p = xy(w.lat, w.lon); pts += '<rect x="' + (p[0] - 3.5).toFixed(1) + '" y="' + (p[1] - 3.5).toFixed(1) + '" width="7" height="7" transform="rotate(45 ' + p[0] + ' ' + p[1] + ')" fill="var(--damar-gold-bright)"><title>' + esc(w.name) + '</title></rect>'; });
     pts += dots('earthquakes', 'var(--status-critical)', function (q) { return Math.max(1.2, (q.magnitude || 0) * 0.9).toFixed(1); }, function (q) { return 'M' + q.magnitude + ' ' + q.place; });
     pts += dots('disasters', 'var(--status-warning)', 3, function (e) { return e.alert + ' ' + e.type + ' ' + e.name; });
     pts += dots('cyclones', 'var(--status-warning)', 5, function (c) { return c.name + ' ' + c.classification + ' ' + c.intensityKt + ' kt'; });
@@ -104,7 +118,7 @@
     ['flights', 'opensky'].forEach(function (id) { pts += dots(id, 'var(--status-success)', 0.9, function (f) { return f.callsign || f.hex || 'aircraft'; }); });
     pts += dots('vessels', 'var(--status-info)', 0.9, function (v) { return v.name || 'vessel'; });
     return '<svg viewBox="0 0 720 360" role="img" aria-label="World plot" style="width:100%;height:auto;background:var(--bg-void);border-radius:8px;"><g stroke="var(--border-subtle)" stroke-width="0.5">' + g + '</g>' + pts + '</svg>' +
-      '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--text-muted);margin-top:8px;"><span style="color:var(--status-critical);">● quakes</span><span style="color:var(--status-warning);">● cyclones / fires</span><span style="color:var(--status-info);">● launches / vessels</span><span style="color:var(--status-success);">• aircraft</span><span style="color:var(--damar-accent);">• military</span><span>' + esc(T('noBasemap')) + '</span></div>';
+      '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--text-muted);margin-top:8px;"><span style="color:var(--status-critical);">● quakes</span><span style="color:var(--status-warning);">● cyclones / fires</span><span style="color:var(--status-info);">● launches / vessels</span><span style="color:var(--status-success);">• aircraft</span><span style="color:var(--damar-accent);">• military</span><span style="color:var(--damar-gold-bright);">◆ ' + esc(T('watchPoints')) + '</span><span>' + esc(T('noBasemap')) + '</span></div>';
   }
 
   // ---- feed panels --------------------------------------------------------------------------------------------------
@@ -133,7 +147,15 @@
     fires: function (res) { return '<div style="font-size:12px;padding:8px 12px;">' + res.count + ' detections</div>' + H.table(['Lat', 'Lon', 'Acquired', 'FRP MW', 'Conf.'], res.items.slice(0, 12).map(function (f) { return [fmt(f.lat), fmt(f.lon), esc(f.acquired), fmt(f.frpMw), esc(f.confidence)]; }), '-'); },
     traffic: function (res) { var t = res.items[0]; return t ? H.kvList([H.kv('Current speed', fmt(t.currentKmh, ' km/h')), H.kv('Free-flow speed', fmt(t.freeFlowKmh, ' km/h')), H.kv('Congestion', fmt(t.congestionPct, ' %')), H.kv('Road closed', t.closed ? 'yes' : 'no')]) : '-'; },
     satellites: function (res) { return H.table(['Name', 'NORAD', 'Incl.', 'Period', 'Perigee–Apogee'], res.items.slice(0, 15).map(function (s) { return [esc(s.name), H.mono(s.noradId), fmt(s.inclinationDeg, '°'), fmt(s.periodMin, ' min'), s.perigeeKm + '–' + s.apogeeKm + ' km']; }), '-'); },
-    launches: function (res) { return H.table(['NET', 'Mission', 'Provider', 'Status', 'Pad'], res.items.map(function (l) { return [esc(new Date(l.net).toLocaleString()), esc(l.name), esc(l.provider), esc(l.status), esc(l.location)]; }), '-'); }
+    launches: function (res) { return H.table(['NET', 'Mission', 'Provider', 'Status', 'Pad'], res.items.map(function (l) { return [esc(new Date(l.net).toLocaleString()), esc(l.name), esc(l.provider), esc(l.status), esc(l.location)]; }), '-'); },
+    imagery: function (res) {
+      if (!res.items.length) return '<div style="padding:12px;font-size:12px;color:var(--text-muted);">' + esc(T('noScenes')) + '</div>';
+      return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;padding:12px;">' + res.items.map(function (it) {
+        var rawId = String(it.locationId || '').replace(/^(area|wp):/, ''), key = 'img|' + rawId + '|' + it.day + '|' + it.product, f = md.frames[key];
+        return '<figure style="margin:0;display:flex;flex-direction:column;gap:4px;"><canvas data-md-frame="' + H.escapeHtml(key) + '" role="img" aria-label="' + H.escapeHtml(it.name) + '" style="width:100%;aspect-ratio:1/1;background:var(--bg-void);border-radius:6px;"></canvas>' +
+          '<figcaption style="font-size:11px;color:var(--text-muted);">' + esc(it.name) + ' · ' + esc(it.productLabel) + '<br>' + esc(T('passDate')) + ' ' + esc(new Date(it.datetime).toLocaleString()) + (it.cloudCoverPct != null ? ' · ' + esc(T('cloud')) + ' ' + it.cloudCoverPct + '%' : '') + '<br>' + esc(T('notLive')) + (f && f.error ? ' · <span style="color:var(--status-critical);">' + esc(f.error) + '</span>' : '') + '</figcaption></figure>';
+      }).join('') + '</div>';
+    }
   };
   // Control's client redactor masks plain strings held under a `credential` key; Core's only string
   // value for that field is 'none', so a redacted string means "no credential". Anything else that is
@@ -160,7 +182,9 @@
   function draftFrom(st) {
     var refresh = {}; st.feeds.forEach(function (f) { refresh[f.id] = f.refreshSec; });
     return { feeds: st.feeds.filter(function (f) { return f.enabled; }).map(function (f) { return f.id; }), areas: st.areas.map(function (a) { return { id: a.id, name: a.name, lat: a.lat, lon: a.lon, radiusKm: a.radiusKm }; }),
-      refreshSec: refresh, satelliteGroup: st.satelliteGroup, contactUrl: st.contactUrl || '', cctvSources: st.cctv.sources.slice(), alprRetentionDays: st.alpr.retentionDays, alprIntervalSec: st.alpr.intervalSec };
+      refreshSec: refresh, satelliteGroup: st.satelliteGroup, contactUrl: st.contactUrl || '', cctvSources: st.cctv.sources.slice(), alprRetentionDays: st.alpr.retentionDays, alprIntervalSec: st.alpr.intervalSec,
+      watchPoints: (st.watchPoints || []).map(function (w) { var o = { id: w.id, name: w.name, lat: w.lat, lon: w.lon, radiusKm: w.radiusKm, profile: w.profile }; if (w.adm4) o.adm4 = w.adm4; if (w.sourceUrl) o.sourceUrl = w.sourceUrl; if (w.rules) o.rules = Object.assign({}, w.rules); return o; }),
+      alerts: st.alertsCfg ? JSON.parse(JSON.stringify(st.alertsCfg)) : null };
   }
   function input(attrs, value, width) { return '<input class="input-field" ' + attrs + ' value="' + H.escapeHtml(value) + '" style="width:' + (width || '100%') + ';font-family:var(--font-mono);" />'; }
   function settingsPanel(st) {
@@ -189,7 +213,48 @@
         '<label>' + esc(T('retention')) + ' ' + input('type="number" min="1" max="365" data-md-num="alprRetentionDays"', d.alprRetentionDays, '80px') + '</label>' +
         '<label>' + esc(T('interval')) + ' ' + input('type="number" min="5" max="3600" data-md-num="alprIntervalSec"', d.alprIntervalSec, '80px') + '</label>' +
         '<span style="flex:1"></span>' + H.btn(T('discard'), 'data-md-action="discard"') + H.btn(md.saving ? T('saving') : T('save'), 'data-md-action="save"', 'btn-primary') + '</div>' +
-        (md.message ? '<div style="font-size:12px;color:var(--text-secondary);">' + esc(md.message) + '</div>' : '') + '</div>', { span: 12, flush: true });
+        (md.message ? '<div style="font-size:12px;color:var(--text-secondary);">' + esc(md.message) + '</div>' : '') + '</div>', { span: 12, flush: true }) +
+      watchPointsPanel(d) + alertsPanel(d);
+  }
+  function watchPointsPanel(d) {
+    var rows = d.watchPoints.map(function (w, i) {
+      var rules = w.rules || {};
+      var ruleCell = ['quake', 'storm', 'fire', 'imagery'].map(function (k) {
+        return '<label style="display:inline-flex;gap:4px;align-items:center;margin-right:8px;"><input type="checkbox" data-md-wp-rule="' + i + '" data-k="' + k + '"' + (rules[k] === false ? '' : ' checked') + ' /> ' + esc(T('rule' + k.charAt(0).toUpperCase() + k.slice(1))) + '</label>';
+      }).join('');
+      return [input('data-md-wp="' + i + '" data-k="name" maxlength="40"', w.name), input('type="number" step="0.0001" data-md-wp="' + i + '" data-k="lat"', w.lat, '110px'),
+        input('type="number" step="0.0001" data-md-wp="' + i + '" data-k="lon"', w.lon, '110px'), input('type="number" data-md-wp="' + i + '" data-k="radiusKm" min="5" max="460"', w.radiusKm, '90px'),
+        '<select class="input-field" data-md-wp-profile="' + i + '" style="width:auto;"><option value="personal"' + (w.profile === 'personal' ? ' selected' : '') + '>' + esc(T('personal')) + '</option><option value="asset"' + (w.profile === 'asset' ? ' selected' : '') + '>' + esc(T('asset')) + '</option></select>',
+        ruleCell, H.btn(T('remove'), 'data-md-action="remove-point" data-i="' + i + '"')];
+    });
+    return H.panel(T('watchPoints'), H.table(['Name', 'Lat', 'Lon', 'Radius km', T('profile'), T('pointRules'), ''], rows, '-') +
+      '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 12px;font-size:12px;">' + (d.watchPoints.length < 200 ? H.btn(T('addPoint'), 'data-md-action="add-point"') : '') +
+      '<span style="flex:1"></span><label>' + esc(T('importLink')) + ' ' + input('data-md-import-url placeholder="https://www.google.com/maps/…" maxlength="2000"', md.importUrl, '300px') + '</label>' +
+      '<select class="input-field" data-md-import-profile style="width:auto;"><option value="asset"' + (md.importProfile === 'asset' ? ' selected' : '') + '>' + esc(T('asset')) + '</option><option value="personal"' + (md.importProfile === 'personal' ? ' selected' : '') + '>' + esc(T('personal')) + '</option></select>' +
+      H.btn(T('importBtn'), 'data-md-action="import-link"') + '</div><div style="font-size:11px;color:var(--text-muted);padding:0 12px 10px;">' + esc(T('importHint')) + '</div>', { span: 12, flush: true });
+  }
+  function alertsPanel(d) {
+    var a = d.alerts; if (!a) return '';
+    var ch = a.channels || {}, tg = (a.channelTargets && a.channelTargets.telegram) || {}, wa = (a.channelTargets && a.channelTargets.whatsapp) || {}, qh = a.quietHours || {};
+    function bool(attr, label, on) { return '<label style="display:inline-flex;gap:6px;align-items:center;"><input type="checkbox" ' + attr + (on ? ' checked' : '') + ' /> ' + esc(label) + '</label>'; }
+    function num(attr, label, v, min, max) { return '<label>' + esc(label) + ' ' + input('type="number" ' + attr + ' min="' + min + '" max="' + max + '"', v, '90px') + '</label>'; }
+    return H.panel(T('alertsTitle'),
+      '<div style="display:flex;flex-direction:column;gap:10px;padding:12px;font-size:12px;">' +
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;">' + bool('data-md-alert-bool="enabled"', T('alertEnabled'), a.enabled) + bool('data-md-alert-bool="imageryAlerts"', T('imageryAlertsOpt'), a.imageryAlerts) + bool('data-md-alert-bool="gpsEnabled"', T('gpsEnabled'), a.gpsEnabled) +
+      num('data-md-alert-num="tickMinutes"', T('tickMinutes'), a.tickMinutes, 1, 60) + num('data-md-alert-num="quakeMinMagnitude"', T('quakeMin'), a.quakeMinMagnitude, 0, 10) + num('data-md-alert-num="quakeRadiusKm"', T('quakeRadius'), a.quakeRadiusKm, 10, 2000) +
+      num('data-md-alert-num="stormPrecipMm"', T('stormRain'), a.stormPrecipMm, 0, 200) + num('data-md-alert-num="stormWindKmh"', T('stormWind'), a.stormWindKmh, 10, 300) + '</div>' +
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;"><span style="font-weight:600;">' + esc(T('quietHours')) + '</span>' +
+      '<input class="input-field" type="time" data-md-alert-qh="start" value="' + H.escapeHtml(qh.start || '22:00') + '" style="width:auto;" /><input class="input-field" type="time" data-md-alert-qh="end" value="' + H.escapeHtml(qh.end || '06:00') + '" style="width:auto;" />' +
+      '<span style="font-weight:600;">' + esc(T('channels')) + '</span>' + bool('data-md-alert-ch="notch"', T('chNotch'), ch.notch) + bool('data-md-alert-ch="telegram"', 'Telegram', ch.telegram) + bool('data-md-alert-ch="whatsapp"', 'WhatsApp', ch.whatsapp) + '</div>' +
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;"><label>' + esc(T('chatId')) + ' ' + input('data-md-alert-tg="chatId" maxlength="40"', tg.chatId || '', '140px') + '</label>' +
+      '<label>' + esc(T('waPhone')) + ' ' + input('data-md-alert-wa="phoneNumberId" maxlength="40"', wa.phoneNumberId || '', '140px') + '</label>' +
+      '<label>' + esc(T('waTo')) + ' ' + input('data-md-alert-wa="to" maxlength="40"', wa.to || '', '140px') + '</label></div></div>', { span: 12, flush: true });
+  }
+  function deliveriesPanel() {
+    if (!owner() || !md.proactive) return '';
+    var p = md.proactive, rows = (p.recent || []).map(function (x) { return [esc(new Date(x.at).toLocaleString()), esc(x.ruleId || ''), esc(x.location || ''), esc(x.severity || ''), esc(String(x.message || '').slice(0, 140))]; });
+    var head = '<div style="font-size:12px;padding:10px 12px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;"><span>' + esc(T('lastTick')) + ': ' + (p.status && p.status.lastTickAt ? esc(new Date(p.status.lastTickAt).toLocaleString()) : '-') + '</span>' + H.btn(T('checkNow'), 'data-md-action="check-now"') + '</div>';
+    return H.panel(T('deliveries'), head + (rows.length ? H.table(['Time', 'Rule', 'Location', 'Severity', 'Message'], rows, '-') : '<div style="padding:0 12px 10px;font-size:12px;color:var(--text-muted);">' + esc(T('noDeliveries')) + '</div>'), { span: 12, flush: true });
   }
 
   // ---- cameras & ALPR -------------------------------------------------------------------------------------------------
@@ -274,6 +339,10 @@
       var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(r.data, null, 1)], { type: 'application/json' })); a.download = 'damar-alpr-export.json'; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }); },
     'add-area': function () { var d = md.draft; if (!d || d.areas.length >= 4) return; var n = 1; while (d.areas.some(function (a) { return a.id === 'area-' + n; })) n++; d.areas.push({ id: 'area-' + n, name: 'Area ' + n, lat: 0, lon: 0, radiusKm: 100 }); H.refresh(); },
     'remove-area': function (b) { if (md.draft) { md.draft.areas.splice(+b.getAttribute('data-i'), 1); H.refresh(); } },
+    'add-point': function () { var d = md.draft; if (!d || d.watchPoints.length >= 200) return; var n = 1; while (d.watchPoints.some(function (w) { return w.id === 'titik-' + n; })) n++; d.watchPoints.push({ id: 'titik-' + n, name: 'Titik ' + n, lat: 0, lon: 0, radiusKm: 25, profile: 'asset' }); H.refresh(); },
+    'remove-point': function (b) { if (md.draft) { md.draft.watchPoints.splice(+b.getAttribute('data-i'), 1); H.refresh(); } },
+    'import-link': function () { var url = md.importUrl; if (!url) return; H.post('/api/r9/mata-dewa/watchpoints/import-link', { url: url, profile: md.importProfile }).then(function (r) { if (r.ok) { md.importUrl = ''; md.draft = null; } after(r, r.ok ? 'Imported ' + (r.data && r.data.added) + ' point(s).' : ''); }); },
+    'check-now': function () { H.post('/api/r9/mata-dewa/proactive', { action: 'tick' }).then(function (r) { md.proactive = r.ok ? { status: r.data.status, recent: r.data.recent } : md.proactive; after(r, 'OK'); }); },
     'discard': function () { md.draft = null; md.message = ''; H.refresh(); },
     'save': function () { if (md.draft) saveSettings(md.draft); }
   };
@@ -302,6 +371,7 @@
       .concat(st.cctv.available.map(function (s) { return [esc(s.label), esc(s.attribution), esc(s.license), 'see terms']; }))) +
       '<div style="font-size:10.5px;color:var(--text-muted);padding:6px 12px;">Capabilities adapted from God\'s Eye View by Bilawal Sidhu (MIT).</div>', { span: 12, flush: true });
     if (owner()) html += settingsPanel(st);
+    html += deliveriesPanel();
     return html + '</div>';
   }
 
@@ -311,20 +381,31 @@
       var t = e.target; if (!t.getAttribute) return;
       if (t.hasAttribute('data-md-filter')) { md.filter = t.value.slice(0, 60); return; }
       if (t.getAttribute('data-md-cam') === 'name' || t.getAttribute('data-md-cam') === 'url') { md.camForm[t.getAttribute('data-md-cam')] = t.value; return; }
+      if (t.hasAttribute('data-md-import-url')) { md.importUrl = t.value; return; }
       if (!md.draft) return;
       if (t.hasAttribute('data-md-refresh')) md.draft.refreshSec[t.getAttribute('data-md-refresh')] = parseInt(t.value, 10);
       else if (t.hasAttribute('data-md-num')) md.draft[t.getAttribute('data-md-num')] = parseInt(t.value, 10);
       else if (t.hasAttribute('data-md-text')) md.draft[t.getAttribute('data-md-text')] = t.value.trim();
       else if (t.hasAttribute('data-md-area')) { var a = md.draft.areas[+t.getAttribute('data-md-area')], k = t.getAttribute('data-k'); if (a) a[k] = k === 'name' ? t.value : Number(t.value); }
+      else if (t.hasAttribute('data-md-wp')) { var w = md.draft.watchPoints[+t.getAttribute('data-md-wp')], kw = t.getAttribute('data-k'); if (w) w[kw] = kw === 'name' ? t.value : Number(t.value); }
+      else if (t.hasAttribute('data-md-alert-num')) { if (md.draft.alerts) md.draft.alerts[t.getAttribute('data-md-alert-num')] = parseInt(t.value, 10); }
+      else if (t.hasAttribute('data-md-alert-tg')) { if (md.draft.alerts) { md.draft.alerts.channelTargets = md.draft.alerts.channelTargets || {}; md.draft.alerts.channelTargets.telegram = md.draft.alerts.channelTargets.telegram || {}; md.draft.alerts.channelTargets.telegram[t.getAttribute('data-md-alert-tg')] = t.value.trim(); } }
+      else if (t.hasAttribute('data-md-alert-wa')) { if (md.draft.alerts) { md.draft.alerts.channelTargets = md.draft.alerts.channelTargets || {}; md.draft.alerts.channelTargets.whatsapp = md.draft.alerts.channelTargets.whatsapp || {}; md.draft.alerts.channelTargets.whatsapp[t.getAttribute('data-md-alert-wa')] = t.value.trim(); } }
     });
     document.addEventListener('change', function (e) {
       var t = e.target; if (!t.getAttribute) return;
       if (t.getAttribute('data-md-cam') === 'kind') md.camForm.kind = t.value;
       if (t.hasAttribute('data-md-cam-alpr')) md.camForm.alpr = t.checked;
+      if (t.hasAttribute('data-md-import-profile')) md.importProfile = t.value;
       if (!md.draft) return;
       if (t.hasAttribute('data-md-feed')) { var id = t.getAttribute('data-md-feed'), i = md.draft.feeds.indexOf(id); if (t.checked && i < 0) md.draft.feeds.push(id); if (!t.checked && i >= 0) md.draft.feeds.splice(i, 1); }
       if (t.hasAttribute('data-md-cctv')) { var s = t.getAttribute('data-md-cctv'), j = md.draft.cctvSources.indexOf(s); if (t.checked && j < 0) md.draft.cctvSources.push(s); if (!t.checked && j >= 0) md.draft.cctvSources.splice(j, 1); }
       if (t.hasAttribute('data-md-group')) md.draft.satelliteGroup = t.value;
+      if (t.hasAttribute('data-md-wp-profile')) { var wp = md.draft.watchPoints[+t.getAttribute('data-md-wp-profile')]; if (wp) wp.profile = t.value; }
+      if (t.hasAttribute('data-md-wp-rule')) { var wr = md.draft.watchPoints[+t.getAttribute('data-md-wp-rule')]; if (wr) { wr.rules = wr.rules || {}; wr.rules[t.getAttribute('data-k')] = t.checked; } }
+      if (t.hasAttribute('data-md-alert-bool')) { if (md.draft.alerts) md.draft.alerts[t.getAttribute('data-md-alert-bool')] = t.checked; }
+      if (t.hasAttribute('data-md-alert-ch')) { if (md.draft.alerts) { md.draft.alerts.channels = md.draft.alerts.channels || {}; md.draft.alerts.channels[t.getAttribute('data-md-alert-ch')] = t.checked; } }
+      if (t.hasAttribute('data-md-alert-qh')) { if (md.draft.alerts) { md.draft.alerts.quietHours = md.draft.alerts.quietHours || {}; md.draft.alerts.quietHours[t.getAttribute('data-md-alert-qh')] = t.value; } }
     });
     document.addEventListener('click', function (e) {
       var b = e.target.closest && e.target.closest('[data-md-action]'); if (!b || !H) return;

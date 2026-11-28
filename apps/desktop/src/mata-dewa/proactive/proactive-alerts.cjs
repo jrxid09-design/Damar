@@ -26,6 +26,11 @@ const { RULES, SEVERITY_RANK } = require('./alert-rules.cjs');
 const { composeMessage } = require('./alert-composer.cjs');
 
 const rank = s => SEVERITY_RANK[s] || 0;
+// Per-point rule switches (watch point `rules`): a rule belongs to one family;
+// a family switched off for a point silences only that family for that point.
+// Imagery observations additionally honour the global imageryAlerts switch.
+const RULE_FAMILY = Object.freeze({ 'quake-near': 'quake', 'bmkg-quake-near': 'quake', 'tsunami-relay': 'quake',
+  'weather-storm': 'storm', 'bmkg-extreme-weather': 'storm', 'volcano-status': 'storm', 'fire-near': 'fire', 'imagery-observation': 'imagery' });
 function inQuietHours(nowMs, qh) {
   if (!qh || !/^\d{2}:\d{2}$/.test(qh.start || '') || !/^\d{2}:\d{2}$/.test(qh.end || '')) return false;
   const d = new Date(nowMs), mins = d.getHours() * 60 + d.getMinutes();
@@ -72,6 +77,8 @@ function createProactiveAlerts({ getSettings, getProfile, getGps, providers = {}
     for (const location of locations) {
       for (const rule of rules) {
         if (!rule.profiles.includes(location.profile)) continue;
+        const family = RULE_FAMILY[rule.id];
+        if (family && location.rules && location.rules[family] === false) continue;
         const items = await inputFor(rule.input, location, cache);
         let signals = [];
         try { signals = rule.evaluate({ items, location, cfg: a, nowMs, knownScenes }) || []; } catch { signals = []; }
