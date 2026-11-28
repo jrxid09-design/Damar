@@ -10,7 +10,7 @@ const { coreEndpoint } = require('../cli/core-endpoint.cjs');
 const { boundedResponse } = require('../cli/service.cjs');
 
 const READS = Object.freeze(['/api/r9/lifecycle', '/api/r9/sessions', '/api/r9/pandawa/runs', '/api/r9/presence/settings', '/api/r9/cli/settings', '/api/r9/activity', '/api/r9/media', '/api/r9/provider', '/api/r9/mata-dewa/status']);
-const readAllowed = route => READS.includes(route) || /^\/api\/r9\/activity\?from=\d{1,9}$/.test(route) || /^\/api\/r9\/mata-dewa\/feeds\/[a-z]+$/.test(route) || /^\/api\/r9\/mata-dewa\/imagery\/chip\?point=[a-z0-9-]{1,24}&day=\d{4}-\d{2}-\d{2}&product=(?:S30|L30)$/.test(route);
+const readAllowed = route => READS.includes(route) || /^\/api\/r9\/activity\?from=\d{1,9}$/.test(route) || /^\/api\/r9\/mata-dewa\/feeds\/[a-zA-Z]{1,32}$/.test(route) || /^\/api\/r9\/mata-dewa\/imagery\/chip\?point=[a-z0-9-]{1,24}&day=\d{4}-\d{2}-\d{2}&product=(?:S30|L30)$/.test(route);
 // Contract agreed with Control (presence.* namespace). Defaults equal the Owner prototype values.
 const DEFAULTS = Object.freeze({ idleToOrbSec: 120, orbToNotchSec: 120, notchHideSec: 1800, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, characterSoundEnabled: true, characterSoundVolume: 30, displayName: 'Maronns', salutation: '', onboardingCompleted: false });
 const KEYS = Object.freeze(Object.keys(DEFAULTS).map(k => 'presence.' + k));
