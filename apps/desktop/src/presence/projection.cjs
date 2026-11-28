@@ -217,6 +217,9 @@ function projectCyber(c) {
     patroli: (Array.isArray(c.patroli) ? c.patroli : []).slice(0, 6).map(r => ({ ...runRow(r), kind: text(r.kind, 12) })),
     patroliTerbaru: { sistem: latestRow(c.patroliTerbaru?.sistem), jaringan: latestRow(c.patroliTerbaru?.jaringan), umum: latestRow(c.patroliTerbaru?.umum) },
     modePatroli: text(c.modePatroli, 24) || 'atas-permintaan',
+    jadwalPatroli: c.jadwalPatroli && typeof c.jadwalPatroli === 'object' ? {
+      sistemMenit: Number.isSafeInteger(c.jadwalPatroli.sistemMenit) ? c.jadwalPatroli.sistemMenit : null,
+      jaringanMenit: Number.isSafeInteger(c.jadwalPatroli.jaringanMenit) ? c.jadwalPatroli.jaringanMenit : null } : null,
     dcd,
     generatedAt: Number.isSafeInteger(c.generatedAt) ? c.generatedAt : null,
   };

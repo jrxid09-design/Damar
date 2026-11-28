@@ -20,6 +20,8 @@
       patrol: 'Werkudara patrols', patrolEmpty: 'No Werkudara patrol recorded on this Core session yet. Patrols run through Damar appear here with their real results.',
       latestPatrol: 'Latest patrols', kindSistem: 'System', kindJaringan: 'Network', kindUmum: 'General', noKind: 'No patrol of this kind recorded yet.',
       modeNote: 'Patrols run on demand; there is no periodic patrol schedule in the backend at this time.',
+      modeNoteBerkala: 'Patrols run periodically from the daemon: System every %s min, Network every %s min.',
+      modeNoteBerkalaPlain: 'Patrols run periodically from the daemon.',
       incidents: 'Defence events', incidentsEmpty: 'No incidents recorded in the detection engine at this time.', incidentsWaiting: 'Waiting for the daemon projection to be readable.',
       activity: 'Werkudara activity', totalRuns: 'Recorded tasks', completed: 'Completed', failed: 'Failed', lastRun: 'Most recent',
       activityEmpty: 'No Werkudara task recorded on this Core session yet.',
@@ -35,6 +37,8 @@
       patrol: 'Patroli Werkudara', patrolEmpty: 'Belum ada patroli Werkudara tercatat pada sesi Core ini. Patroli yang dijalankan lewat Damar tampil di sini dengan hasil aslinya.',
       latestPatrol: 'Patroli terakhir', kindSistem: 'Sistem', kindJaringan: 'Jaringan', kindUmum: 'Umum', noKind: 'Belum ada patroli jenis ini tercatat.',
       modeNote: 'Patroli berjalan atas permintaan; belum ada jadwal berkala di backend saat ini.',
+      modeNoteBerkala: 'Patroli berjalan berkala dari daemon: Sistem tiap %s menit, Jaringan tiap %s menit.',
+      modeNoteBerkalaPlain: 'Patroli berjalan berkala dari daemon.',
       incidents: 'Kejadian pertahanan', incidentsEmpty: 'Tidak ada insiden tercatat di mesin deteksi saat ini.', incidentsWaiting: 'Menunggu proyeksi daemon terbaca.',
       activity: 'Aktivitas Werkudara', totalRuns: 'Tugas tercatat', completed: 'Selesai', failed: 'Gagal', lastRun: 'Terakhir',
       activityEmpty: 'Belum ada tugas Werkudara tercatat pada sesi Core ini.',
@@ -89,8 +93,15 @@
       var r = pair[1];
       return [esc(T(pair[0])), r ? H.statusBadgeHtml(r.state, stateLabel(r.state)) : esc(T('noKind')), r ? esc(when(r.createdAt)) : '-', r ? esc(cut(r.outputPreview || r.error || r.task, 160)) : '-'];
     });
+    var modeNote = T('modeNote');
+    if (d.modePatroli === 'berkala') {
+      var jp = d.jadwalPatroli || {};
+      modeNote = (jp.sistemMenit || jp.jaringanMenit)
+        ? T('modeNoteBerkala').replace('%s', jp.sistemMenit || '-').replace('%s', jp.jaringanMenit || '-')
+        : T('modeNoteBerkalaPlain');
+    }
     html += H.panel(T('latestPatrol'), H.table([T('kind'), T('state'), T('when'), T('result')], latestRows) +
-      '<div style="font-size:11.5px;color:var(--text-muted);padding:8px 12px;">' + esc(T('modeNote')) + '</div>', { span: 12, flush: true });
+      '<div style="font-size:11.5px;color:var(--text-muted);padding:8px 12px;">' + esc(modeNote) + '</div>', { span: 12, flush: true });
     html += H.panel(T('patrol'), H.table([T('when'), T('state'), T('task'), T('result')], (d.patroli || []).map(runRow), T('patrolEmpty')), { span: 12, flush: true });
     var incBody;
     if (!dcd.available) incBody = '<div style="padding:18px;text-align:center;color:var(--text-muted);font-size:12px;">' + esc(T('incidentsWaiting')) + '</div>';
