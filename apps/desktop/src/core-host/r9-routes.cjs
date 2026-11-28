@@ -32,7 +32,7 @@ function readJsonl(file) {
 const tokenEq = (a, b) => typeof a === 'string' && typeof b === 'string' && crypto.timingSafeEqual(crypto.createHash('sha256').update(a).digest(), crypto.createHash('sha256').update(b).digest());
 const clean = (s, n) => String(s ?? '').replace(/[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, ' ').slice(0, n);
 
-function createR9Routes({ directory, credentials, hub, registry, canonicalUsageToday, turns = null, sandbox = () => null, checkpoints = null, memory = null, settings = null, budget = null, lifecycle = null, jobSnapshot = () => null, modelGrants = null, mataDewa = null, team = null, providerAdmin = null, media = null, oauthLogin = null, onboardingChat = null, cyber = null, parallelRuns = 3 }) {
+function createR9Routes({ directory, credentials, hub, registry, canonicalUsageToday, turns = null, sandbox = () => null, checkpoints = null, memory = null, settings = null, budget = null, lifecycle = null, jobSnapshot = () => null, modelGrants = null, mataDewa = null, team = null, providerAdmin = null, media = null, oauthLogin = null, onboardingChat = null, cyber = null, otomasi = null, parallelRuns = 3 }) {
   if (!Number.isSafeInteger(parallelRuns) || parallelRuns < 1 || parallelRuns > 3) throw Error('PANDAWA_PARALLEL_INVALID');
   const runsFile = path.join(directory, 'pandawa-runs.jsonl'), receiptsFile = path.join(directory, 'usage-receipts.jsonl');
   const runs = new Map(), byRequest = new Map(), receipts = new Map();
@@ -296,6 +296,23 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
           modePatroli,
           jadwalPatroli,
           dcd, generatedAt: Date.now() } });
+      }
+      // Otomasi (F10): the daemon automation service's real record for the
+      // Presence portal and the Control Otomasi page: the daily brief's
+      // config state (enabled, time), the scheduler's running state, the
+      // last processed day, and the brief outcomes the service published to
+      // the daemon's telemetry buffer. One genuine source only: the
+      // canonical daemon's own projection, read through the Core binding.
+      // The desktop Core composes no second service and writes nothing:
+      // config changes have no gated route yet (the daemon console rejects
+      // legacy action ingress for automation), so this surface is a read
+      // projection and the views say so. Owner only, like the other
+      // posture reads.
+      if (p === '/api/r9/otomasi' && req.method === 'GET' && !url.search) {
+        if (who !== 'owner') return json(403, { success: false, error: 'OWNER_REQUIRED' });
+        const data = otomasi ? await otomasi.daemonStatus().catch(() => ({ available: false, reason: 'DAEMON_TIDAK_TERJANGKAU' }))
+          : { available: false, reason: 'BINDING_TIDAK_TERSEDIA' };
+        return json(200, { success: true, data: { ...data, generatedAt: Date.now() } });
       }
       if (p === '/api/r9/lifecycle/restart') {
         if (req.method !== 'POST' || url.search) return json(405, { success: false, error: 'METHOD_NOT_ALLOWED' });

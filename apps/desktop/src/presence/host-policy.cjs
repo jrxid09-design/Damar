@@ -32,7 +32,7 @@ const CHANNELS = Object.freeze({
 // Conversation is brokered separately by main.cjs to Core's agent turns; every other mutation the page could
 // ask for is refused: notifications have no Core dismiss route, and permission decisions need Owner auth in
 // CLI/Control. Presence never approves anything.
-const UI_READS = Object.freeze({ '/api/ui/presence/state': 'presence', '/api/ui/approvals': 'approvals', '/api/ui/missions': 'missions', '/api/ui/notifications': 'notifications', '/api/ui/presence/providers': 'providers', '/api/ui/presence/matadewa': 'matadewa', '/api/ui/presence/cyber': 'cyber' });
+const UI_READS = Object.freeze({ '/api/ui/presence/state': 'presence', '/api/ui/approvals': 'approvals', '/api/ui/missions': 'missions', '/api/ui/notifications': 'notifications', '/api/ui/presence/providers': 'providers', '/api/ui/presence/matadewa': 'matadewa', '/api/ui/presence/cyber': 'cyber', '/api/ui/presence/otomasi': 'otomasi' });
 function uiResponse(request, projection) {
   const method = String(request?.method || 'GET').toUpperCase(), route = String(request?.path || '');
   const fail = (kind, status, message) => ({ ok: false, error: { kind, status, message } });

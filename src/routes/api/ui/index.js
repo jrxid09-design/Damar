@@ -423,6 +423,50 @@ router.get("/cyber/posture", async (req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
+// 6C. AUTOMATION STATUS SEAM (scheduled brief read projection)
+// ---------------------------------------------------------------------------
+// Read-only projection of the daemon's one automation service (the daily
+// WhatsApp brief, src/services/automationService): its live status from the
+// service singleton this process started at boot, plus the brief outcomes
+// the service published to the telemetry ring buffer (automation:brief).
+// Recipient identities never cross this seam; only their count does. No
+// mutation route exists here by design: the console's legacy action ingress
+// for automation stays disabled (LEGACY_ACTION_ROUTE_DISABLED) and config
+// changes belong to the canonical Manager path, so this seam reads only.
+
+router.get("/automation/status", async (req, res, next) => {
+    try {
+        const automation = require("../../../services/automationService");
+        const telemetry = require("../../../services/telemetryService");
+        const clean = (v, n) => (typeof v === "string" ? v.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").slice(0, n) : null);
+        const st = automation.status();
+        const briefs = telemetry.events({})
+            .filter(e => e && e.type === "automation:brief")
+            .slice(-12).reverse().map(e => ({
+                at: Number.isSafeInteger(Date.parse(e.time)) ? Date.parse(e.time) : null,
+                outcome: clean(e.payload?.outcome, 40) || "UNKNOWN",
+                recipients: Array.isArray(e.payload?.recipients) ? e.payload.recipients.length : 0,
+                chars: Number.isSafeInteger(e.payload?.chars) ? e.payload.chars : null
+            }));
+        res.json({
+            data: {
+                service: "automation",
+                status: {
+                    enabled: st.enabled === true,
+                    time: clean(st.time, 5),
+                    lastSent: clean(st.lastSent, 10),
+                    running: st.running === true
+                },
+                briefs,
+                generatedAt: Date.now()
+            }
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+// ---------------------------------------------------------------------------
 // 7. REAL-TIME EVENT STREAM (SSE) SEAM
 // ---------------------------------------------------------------------------
 

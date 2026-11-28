@@ -709,6 +709,17 @@
           </div>
         </div>
 
+        <div class="solid-card widget-card interactive-card" data-card="otomasi">
+          <div class="widget-left-inner">
+            <div class="icon-tile">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f9e498" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M4.93 4.93l2.12 2.12m9.9 9.9l2.12 2.12M2 12h3m14 0h3M4.93 19.07l2.12-2.12m9.9-9.9l2.12 2.12"/></svg>
+            </div>
+            <div class="widget-info">
+              <h4>Otomasi</h4>
+            </div>
+          </div>
+        </div>
+
         <div class="solid-card widget-card interactive-card" data-card="money">
           <div class="widget-left-inner">
             <div class="icon-tile">
@@ -995,6 +1006,8 @@
         if (mdw.ok) presenceTruth.matadewa = mdw.data?.data || null;
         const cyb = await this.request('/api/ui/presence/cyber');
         if (cyb.ok) presenceTruth.cyber = cyb.data?.data || null;
+        const oto = await this.request('/api/ui/presence/otomasi');
+        if (oto.ok) presenceTruth.otomasi = oto.data?.data || null;
         const host = await this.request('/api/ui/presence/host');
         if (host.ok) presenceTruth.host = host.data?.data || null;
         const ex = await this.request('/api/ui/presence/extras');
@@ -2602,6 +2615,16 @@
         stage.innerHTML = `<div class="mod-header"><div class="mod-title-group"><h2>Cyber Defense</h2></div></div><div class="mod-content"><div class="mdw-grid"><div class="mdw-widget"><div class="mdw-wtitle">Status DCD</div><div class="mdw-hero">${dcd.available ? (dcd.counts?.active ?? 0) + ' insiden aktif' : 'Belum terbaca'}</div><div class="mdw-note">${dcdNote}</div></div><div class="mdw-widget"><div class="mdw-wtitle">Patroli terakhir</div>${latestHtml}</div><div class="mdw-widget"><div class="mdw-wtitle">Patroli Werkudara</div>${patrolHtml}</div><div class="mdw-widget"><div class="mdw-wtitle">Kejadian pertahanan</div>${incidentHtml}</div><div class="mdw-widget"><div class="mdw-wtitle">Aktivitas Werkudara</div>${wkHtml}</div></div></div>`;
         return;
       }
+      if (key === 'otomasi' && presenceTruth.otomasi != null) {
+        const ot = presenceTruth.otomasi, st = ot.status || {};
+        const whenO = ts => ts ? new Date(ts).toLocaleString('id-ID') : '';
+        const otoNote = ot.reason === 'PROYEKSI_BELUM_AKTIF' ? 'Proyeksi otomasi belum aktif pada daemon yang berjalan. Proyeksi aktif setelah daemon dimuat ulang; tidak ada data yang ditampilkan sebelum itu.' : ot.reason === 'KREDENSIAL_TIDAK_TERSEDIA' ? 'Kredensial daemon tidak tersedia pada instalasi ini, jadi keadaan otomasi tidak terbaca.' : 'Daemon Damar tidak terjangkau dari Core, jadi keadaan otomasi tidak terbaca.';
+        const statusHtml = !ot.available ? `<div class="mdw-note">${otoNote}</div>` : `<div class="mdw-hero">${st.enabled ? 'Aktif' : 'Nonaktif'}</div><div class="mdw-note">Brief harian WhatsApp, pukul ${esc(st.time || '-')}. Penjadwal daemon ${st.running ? 'berjalan' : 'tidak berjalan'}.</div>`;
+        const lastHtml = !ot.available ? '<div class="mdw-note">Menunggu proyeksi daemon terbaca.</div>' : st.lastSent ? `<div class="mdw-row mdw-row-stack"><div class="mdw-row-main">${esc(st.lastSent)}</div><div class="mdw-row-sub">Hari brief terakhir diproses penjadwal.</div></div>` : '<div class="mdw-note">Belum ada brief diproses pada daemon ini.</div>';
+        const briefHtml = !ot.available ? '<div class="mdw-note">Menunggu proyeksi daemon terbaca.</div>' : ot.briefs?.length ? ot.briefs.map(b => `<div class="mdw-row mdw-row-stack"><div class="mdw-row-main">${esc(b.outcome === 'COMPLETED' ? 'Terkirim' : b.outcome || '')}${b.at ? ' · ' + whenO(b.at) : ''}</div><div class="mdw-row-sub">${b.recipients} penerima${b.chars != null ? ' · ' + b.chars + ' karakter' : ''}</div></div>`).join('') : '<div class="mdw-note">Belum ada brief tercatat pada daemon saat ini. Brief yang diproses penjadwal tampil di sini dengan hasil aslinya.</div>';
+        stage.innerHTML = `<div class="mod-header"><div class="mod-title-group"><h2>Otomasi</h2></div></div><div class="mod-content"><div class="mdw-grid"><div class="mdw-widget"><div class="mdw-wtitle">Brief harian</div>${statusHtml}</div><div class="mdw-widget"><div class="mdw-wtitle">Brief terakhir</div>${lastHtml}</div><div class="mdw-widget"><div class="mdw-wtitle">Riwayat brief</div>${briefHtml}</div></div></div>`;
+        return;
+      }
       if (key === 'dcd' && presenceTruth.notifications != null) {
         const relevant = (presenceTruth.notifications || []).find(n => n.source_ref?.entity_type === 'security_incident');
         stage.innerHTML = relevant
@@ -2792,6 +2815,7 @@
         matadewa: { title: 'Mata Dewa', detail: 'Belum ada sumber persepsi yang terhubung ke Presence.' },
         missions: { title: 'Missions', detail: 'Data misi belum terbaca dari Core.' },
         dcd: { title: 'Cyber Defense', detail: 'Belum ada notifikasi keamanan dari Core.' },
+        otomasi: { title: 'Otomasi', detail: 'Keadaan otomasi belum terbaca dari Core.' },
         money: { title: 'Finance', detail: 'Data pemakaian provider belum termuat dari Core.' },
         developer: { title: 'Projects', detail: 'Data ruang kerja belum termuat dari Core.' },
         authority: { title: 'Authority', detail: 'Status persetujuan belum terbaca dari Core.' },

@@ -44,6 +44,7 @@ function project(core, { notificationPrivacy = 'redacted' } = {}) {
     providers: projectProviders(core.providers),
     matadewa: projectMataDewa(core.mataDewa),
     cyber: projectCyber(core.cyber),
+    otomasi: projectOtomasi(core.otomasi),
     presence: { simulated: false, source: 'damar-core', lifecycle: lifecycleState, asOf: core.asOf || null,
       activity: { activeTurns, pendingPermissions: pending, activePandawaRuns: activeRuns, sessions: sessions.length },
       sessionPills, media,
@@ -225,6 +226,27 @@ function projectCyber(c) {
   };
 }
 
+// Otomasi for the Presence portal (F10): the daemon brief service's real
+// state (config enabled/time, scheduler running, last processed day) plus
+// its recent brief outcomes from the daemon's telemetry buffer, read
+// through the Core's Otomasi binding. Allowlisted display fields only;
+// recipient identities never entered the projection (counts only). The
+// block carries the daemon's own availability verdict, so an unreachable
+// projection is shown as such, never as "no automation".
+function projectOtomasi(o) {
+  if (!o || typeof o !== 'object') return null;
+  if (o.available !== true) return { available: false, reason: text(o.reason, 40) || 'DAEMON_TIDAK_TERJANGKAU' };
+  const st = o.status && typeof o.status === 'object' ? o.status : {};
+  return {
+    available: true,
+    status: { enabled: st.enabled === true, time: text(st.time, 5), lastSent: text(st.lastSent, 10), running: st.running === true },
+    briefs: (Array.isArray(o.briefs) ? o.briefs : []).slice(0, 6).map(b => ({ at: Number.isSafeInteger(b.at) ? b.at : null,
+      outcome: text(b.outcome, 40) || 'UNKNOWN', recipients: Number.isSafeInteger(b.recipients) ? b.recipients : 0,
+      chars: Number.isSafeInteger(b.chars) ? b.chars : null })),
+    generatedAt: Number.isSafeInteger(o.generatedAt) ? o.generatedAt : null,
+  };
+}
+
 // Now-playing for the music pill (Fase 3a): projected from the SMTC sense in core-host
 // (core.media). Unavailable stays null - the notch shows no pill rather than a fake track.
 // Artwork (the session's real SMTC thumbnail, a data URL from core-host) is only
@@ -287,4 +309,4 @@ function activityRows(activity = [], privacy = 'redacted') {
     .map(a => (a.kind === 'alert' && privacy === 'counts-only' ? { ...a, label: null } : a));
 }
 
-module.exports = { project, statusLine, pendingPermission, activityRow, activityRows, projectSessionPills, projectMedia, projectWorkers, projectCyber, PRIVACY };
+module.exports = { project, statusLine, pendingPermission, activityRow, activityRows, projectSessionPills, projectMedia, projectWorkers, projectCyber, projectOtomasi, PRIVACY };
