@@ -332,7 +332,7 @@ const validStamp = v => v === null || (typeof v === 'string' && v.length <= 40 &
 // Proactive alerts (Fase 6): thresholds/channels/quiet hours for the Core alert engine.
 // Defaults are neutral product values; a user's own thresholds live only in their config.
 const ALERTS_DEFAULTS = () => ({ enabled: true, quakeMinMagnitude: 5, quakeMaxAgeHours: 6, quakeRadiusKm: 150,
-  weatherWindowHours: 6, stormPrecipMm: 4, stormWindKmh: 60, tickMinutes: 10, gpsEnabled: true, imageryAlerts: false,
+  weatherWindowHours: 6, stormPrecipMm: 4, stormWindKmh: 60, tickMinutes: 10, gpsEnabled: true, imageryAlerts: false, imageryChangeThreshold: 0.18, imageryChangeModel: 'vits16',
   tsunamiMinMagnitude: 7, volcanoMinLevel: 3, volcanoRadiusKm: 150,
   quietHours: { start: '22:00', end: '06:00' }, channels: { notch: true, telegram: false, whatsapp: false },
   channelTargets: { telegram: { chatId: '' }, whatsapp: { phoneNumberId: '', to: '' } } });
@@ -344,6 +344,8 @@ function sanitizeAlerts(v) {
   num('weatherWindowHours', 1, 24); num('stormPrecipMm', 0.5, 50); num('stormWindKmh', 20, 200); num('tickMinutes', 1, 120);
   if (typeof v.gpsEnabled === 'boolean') d.gpsEnabled = v.gpsEnabled;
   if (typeof v.imageryAlerts === 'boolean') d.imageryAlerts = v.imageryAlerts;
+  num('imageryChangeThreshold', 0.05, 0.6);
+  if (v.imageryChangeModel === 'vits16' || v.imageryChangeModel === 'vitb16') d.imageryChangeModel = v.imageryChangeModel;
   if (v.quietHours && /^\d{2}:\d{2}$/.test(v.quietHours.start || '') && /^\d{2}:\d{2}$/.test(v.quietHours.end || '')) d.quietHours = { start: v.quietHours.start, end: v.quietHours.end };
   if (v.channels && typeof v.channels === 'object') for (const k of ['notch', 'telegram', 'whatsapp']) if (typeof v.channels[k] === 'boolean') d.channels[k] = v.channels[k];
   num('tsunamiMinMagnitude', 5, 10); num('volcanoRadiusKm', 10, 1000);

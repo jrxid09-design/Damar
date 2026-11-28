@@ -59,6 +59,15 @@ function composeMessage(signal, location, { salutation = '' } = {}) {
     return greet + 'hotspot kebakaran terdeteksi ' + d.distanceKm + ' km dari ' + phrase + (Number.isFinite(d.frp) ? ' (FRP ' + d.frp + ')' : '') +
       '. Sumber: ' + d.source + '. Saran: verifikasi kondisi lapangan di sekitar titik tersebut.';
   }
+  if (signal.ruleId === 'imagery-change') {
+    if (signal.kind === 'alert') {
+      return greet + 'perubahan permukaan terdeteksi dari citra satelit untuk ' + phrase + ': skor perubahan ' + d.score + ' (ambang ' + d.threshold + ') antara citra ' + d.baselineDay + ' dan ' + d.latestDay +
+        '. Verifikasi Damar: ' + (d.verification?.note || 'perubahan material terkonfirmasi') + '. Sumber: citra NASA HLS via Worldview, fitur DINOv3 (Built with DINOv3). Saran: periksa kondisi lapangan di sekitar titik tersebut.';
+    }
+    return 'Observasi perubahan citra: skor ' + (d.score === null || d.score === undefined ? 'tidak terhitung (daratan jernih tidak cukup)' : d.score) + ' untuk ' + phrase + ' (citra ' + d.latestDay + ' vs ' + d.baselineDay + ')' +
+      (d.score !== null && d.score !== undefined && d.score >= d.threshold ? ', di atas ambang tetapi ' + (d.verification?.status === 'rejected' ? 'verifikasi Damar menilai bukan perubahan material' : 'belum terverifikasi') : ', di bawah ambang ' + d.threshold) +
+      '. Dicatat sebagai observasi, bukan klaim perubahan. Sumber: NASA HLS, fitur DINOv3 (Built with DINOv3).';
+  }
   if (signal.ruleId === 'imagery-observation') {
     return 'Observasi citra: citra satelit baru (' + d.source + ', ' + String(d.datetime).slice(0, 10) + (Number.isFinite(d.cloudCoverPct) ? ', tutupan awan ' + d.cloudCoverPct + '%' : '') +
       ') tercatat untuk ' + phrase + '. Ini catatan observasi berkala, bukan klaim perubahan atau kerusakan.';

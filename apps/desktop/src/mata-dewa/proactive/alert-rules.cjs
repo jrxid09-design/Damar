@@ -175,5 +175,33 @@ const lightningNear = {
   },
 };
 
-const RULES = [quakeNear, weatherStorm, fireNear, imageryObservation, bmkgQuakeNear, tsunamiRelay, bmkgExtremeWeather, volcanoStatus, lightningNear];
+// DINOv3 change detection (local engine; Owner vision decision 2026-11-25):
+// the provider (dinov3.cjs) compares the newest HLS scene chip of an asset
+// point against a baseline chip and scores localized change on clear land.
+// At/above the configured threshold the pair has already gone through
+// DAMAR's VLM verification inside the provider; ONLY a confirmed verdict
+// becomes an alert here. Everything else - below threshold, rejected,
+// unverifiable, too little clear land - is recorded as an observation,
+// never a change claim. The engine says "something changed", never what.
+const imageryChange = {
+  id: 'imagery-change', profiles: ['asset'], input: 'imageryChanges',
+  evaluate({ items = [], location, cfg }) {
+    const out = [];
+    for (const it of items) {
+      const threshold = Number.isFinite(cfg.imageryChangeThreshold) ? cfg.imageryChangeThreshold : (Number.isFinite(it.threshold) ? it.threshold : 0.18);
+      const data = { score: it.score ?? null, threshold, baselineDay: it.baseline?.day || null, latestDay: it.latest?.day || null,
+        baselineProduct: it.baseline?.product || null, latestProduct: it.latest?.product || null,
+        clsDistance: it.clsDistance ?? null, clearFraction: it.clearFraction ?? null, hottestPatch: it.hottestPatch ?? null,
+        model: it.model || null, verification: it.verification || null, note: it.note || null, source: 'DINOv3 + NASA HLS' };
+      const eventId = 'change:' + location.id + ':' + (it.baseline?.sceneId || '?') + '>' + (it.latest?.sceneId || '?');
+      if (it.score !== null && it.score !== undefined && it.score >= threshold && it.verification?.status === 'confirmed')
+        out.push({ ruleId: 'imagery-change', kind: 'alert', eventId, severity: 'warning', data: { ...data, verified: true } });
+      else
+        out.push({ ruleId: 'imagery-change', kind: 'observation', eventId, severity: 'watch', data });
+    }
+    return out;
+  },
+};
+
+const RULES = [quakeNear, weatherStorm, fireNear, imageryObservation, bmkgQuakeNear, tsunamiRelay, bmkgExtremeWeather, volcanoStatus, lightningNear, imageryChange];
 module.exports = { RULES, SEVERITY_RANK };

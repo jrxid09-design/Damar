@@ -38,6 +38,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## DINOv3 (local change-detection engine)
+
+- Source: facebook/dinov3 (Meta AI); ONNX conversions by the onnx-community project on Hugging Face.
+- License: the DINOv3 License (Meta). The weights are NOT MIT and are never bundled with or redistributed by DAMAR: the Owner installs them locally, on demand like the ALPR engine, into %LOCALAPPDATA%\DAMAR\dinov3, and DAMAR loads them at runtime.
+- Attribution: Built with DINOv3.
+- What DAMAR does with it: extracts image features locally (ONNX Runtime, CPU) to score change between dated satellite chips of the Owner's watch points; the scores and chip dates are recorded with the NASA source attribution, and no alert is raised without DAMAR's own VLM verification.
 ## Runtime data sources
 
 These sources are fetched at runtime and never bundled. Each keeps its own terms. Control shows each source's attribution and a commercial-use note.

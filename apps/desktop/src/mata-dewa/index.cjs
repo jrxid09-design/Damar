@@ -15,6 +15,8 @@ const egress = require('./egress.cjs');
 const imagery = require('./imagery.cjs');
 const { createCameras, PUBLIC_SOURCES } = require('./cameras.cjs');
 const { createAlpr, pythonEngine } = require('./alpr.cjs');
+const { createDinov3Engine } = require('./dinov3-engine.cjs');
+const { createDinov3Changes } = require('./dinov3.cjs');
 
 const NOTICE = Object.freeze({
   privacy: 'Public feeds only. Aircraft are shown as broadcast on public ADS-B, except aircraft in the FAA LADD/PIA privacy programs, which are withheld. Private and unidentified vessels are anonymous. Only the latest snapshot is kept: no tracks or history.',
@@ -50,7 +52,7 @@ function wsWindow(url, subscription, { windowMs = 8000, maxBytes = 4 * 1024 * 10
 }
 
 function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, now = Date.now, timeoutMs = 10000, keyStore = null, cacheFile = null, profileDir = null, python = null,
-  cameras: camerasIn = null, alprEngine = null, alprDir = null, onAlert = null, proactiveAutostart = false, notchChannel = null }) {
+  cameras: camerasIn = null, alprEngine = null, alprDir = null, onAlert = null, proactiveAutostart = false, notchChannel = null, dinov3Engine = null, dinov3Dir = null, imageryVerifier = null }) {
   const cache = new Map(), inflight = new Map(), keys = new Map();
   const config = () => settings?.mataDewa?.()?.mataDewa || SETTINGS_DEFAULTS();
   // ---- proactive alerts (Fase 6): autonomous Core engine over these feeds ----
@@ -106,6 +108,12 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
       // imagery-observation rule - a new dated Sentinel-2 / Landsat pass over an
       // asset point is recorded as an observation, never a damage claim.
       scenes: async (loc) => { if (!config().alerts?.imageryAlerts) return []; return imagery.latestScenes(loc, { fetch: (url, o = {}) => fetch(url, { timeoutMs: 20000, ...o, headers: { 'user-agent': egress.userAgent(config().contactUrl), ...(o.headers || {}) } }) }); },
+      // DINOv3 change detection (Owner vision decision 2026-11-25): chip-pair
+      // feature comparison per asset point via the local engine; gated by the
+      // same imageryAlerts switch as the scenes provider. The provider owns
+      // pair bookkeeping, the durable score record and VLM verification of
+      // above-threshold candidates; the imagery-change rule decides.
+      imageryChanges: async (loc) => { if (!config().alerts?.imageryAlerts) return []; return dinov3Changes.provider(loc); },
       // BMKG (official public data): quake list incl. BMKG's own tsunami
       // Potensi wording + village forecast for watch points carrying adm4.
       ...bmkgProviders,
@@ -130,6 +138,12 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
   { const ac = config().alerts; if (proactiveAutostart && ac?.enabled) proactive.start((ac.tickMinutes || 10) * 60000); }
   const cameras = camerasIn || createCameras({ profileDir, keyStore });
   const alpr = createAlpr({ profileDir, cameras, settings: config, engine: alprEngine || pythonEngine({ basePython: python, ...(alprDir ? { dir: alprDir } : {}) }), now, onAlert });
+  const dinov3EngineInst = dinov3Engine || createDinov3Engine({ basePython: python, ...(dinov3Dir ? { dir: dinov3Dir } : {}) });
+  const dinov3Changes = createDinov3Changes({ engine: dinov3EngineInst,
+    latestScenes: (loc) => imagery.latestScenes(loc, { fetch: (url, o = {}) => fetch(url, { timeoutMs: 20000, ...o, headers: { 'user-agent': egress.userAgent(config().contactUrl), ...(o.headers || {}) } }) }),
+    fetchChip: (loc, o) => imagery.fetchChip(loc, o, { fetch: (url, oo = {}) => fetch(url, { timeoutMs: 30000, ...oo, headers: { 'user-agent': egress.userAgent(config().contactUrl), ...(oo.headers || {}) } }) }),
+    verify: imageryVerifier, storeDir: profileDir ? path.join(profileDir, 'dinov3') : null, now,
+    getConfig: () => ({ threshold: config().alerts?.imageryChangeThreshold, model: config().alerts?.imageryChangeModel }) });
 
   // ---- persisted cache (latest snapshot + timestamps), bounded ----
   try { const v = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); if (v?.version === 1) for (const [k, e] of Object.entries(v.entries || {})) if (e && Number.isFinite(e.at) && FEEDS[k.split('|')[0]]) cache.set(k, e); } catch {}
@@ -180,6 +194,8 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
       ...(who === 'owner' ? { alertsCfg: cfg.alerts } : {}),
       cctv: { sources: cfg.cctvSources, noticeAt: cfg.cctvNoticeAt, available: Object.entries(PUBLIC_SOURCES).map(([id, s]) => ({ id, label: s.label, region: s.region, attribution: s.attribution, license: s.license, terms: s.terms })), ffmpeg: cameras.ffmpeg() },
       alpr: { noticeAt: cfg.alprNoticeAt, retentionDays: cfg.alprRetentionDays, intervalSec: cfg.alprIntervalSec, ...(who === 'owner' ? { ...alpr.status(), installHosts: alpr.engine?.INSTALL_HOSTS || [] } : { unacknowledgedAlerts: alpr.status().unacknowledgedAlerts }) },
+      dinov3: { model: cfg.alerts?.imageryChangeModel || 'vits16', threshold: cfg.alerts?.imageryChangeThreshold ?? 0.18, scores: dinov3Changes.status().scores, attribution: 'Built with DINOv3',
+        ...(who === 'owner' ? { engine: dinov3EngineInst.status(), installHosts: dinov3EngineInst.INSTALL_HOSTS || [] } : {}) },
       feeds: FEED_IDS.map(id => { const f = FEEDS[id];
         return { id, label: f.label, enabled: cfg.feeds.includes(id), perArea: f.perArea, host: f.host, attribution: f.attribution, license: f.license, commercial: f.commercial, limits: f.limits,
           refreshSec: cfg.refreshSec[id] || f.defaultRefreshSec, minRefreshSec: f.minRefreshSec,
@@ -261,7 +277,7 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
   async function handle(req, res, url, json, { who = 'requester', body = null } = {}) {
     const p = url.pathname, owner = who === 'owner', cfg = config();
     // keys/<feed>: POST only. cameras, alpr: GET (read) or POST (Owner change). Everything else: GET only.
-    const allowed = /^\/api\/r9\/mata-dewa\/keys\/[A-Za-z]{1,24}(\/test)?$/.test(p) ? ['POST'] : /^\/api\/r9\/mata-dewa\/(cameras|alpr|proactive|location\/gps|watchpoints\/import-link|watchpoints\/resolve)$/.test(p) ? ['GET', 'POST'] : ['GET'];
+    const allowed = /^\/api\/r9\/mata-dewa\/keys\/[A-Za-z]{1,24}(\/test)?$/.test(p) ? ['POST'] : /^\/api\/r9\/mata-dewa\/(cameras|alpr|proactive|dinov3|location\/gps|watchpoints\/import-link|watchpoints\/resolve)$/.test(p) ? ['GET', 'POST'] : ['GET'];
     const isPost = req.method === 'POST';
     // Only the public camera list takes a query (?q=<text>&page=<n>, server-side search + pagination).
     const listRoute = /^\/api\/r9\/mata-dewa\/cameras\/public\/[a-z-]{1,24}$/.test(p);
@@ -358,6 +374,11 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
     if (imported) { if (typeof settings.update === 'function') settings.update({ mataDewa: { watchPoints: cur } }); else if (typeof settings.set === 'function') settings.set({ watchPoints: cur }); else return json(501, { success: false, error: 'SETTINGS_READ_ONLY' }); }
     return json(200, { success: true, data: { kind: resolved.kind, mapTitle: resolved.mapTitle || null, imported, skipped, total: cur.length } });
   }
+      if (p === '/api/r9/mata-dewa/dinov3') {
+        ownerOnly();
+        if (isPost) { const input = await body(req, 2048); if (input.action === 'install-engine') return json(202, { success: true, data: await dinov3EngineInst.install() }); throw fail('ACTION_UNKNOWN', 400); }
+        return json(200, { success: true, data: { engine: dinov3EngineInst.status(), scores: dinov3Changes.recentScores(50), model: cfg.alerts?.imageryChangeModel || 'vits16', threshold: cfg.alerts?.imageryChangeThreshold ?? 0.18, attribution: 'Built with DINOv3' } });
+      }
       if (p.startsWith('/api/r9/mata-dewa/alpr')) {
         ownerOnly(); alpr.schedule();
     if (p === '/api/r9/mata-dewa/alpr' && !isPost) return json(200, { success: true, data: { status: alpr.status(), entries: alpr.entries(), watchlist: alpr.watchlist(), alerts: alpr.alerts().slice(0, 100) } });
@@ -378,7 +399,7 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
     }
   }
 
-  return { handle, status, feed, setKey, testKey, cameras, alpr, wsWindow, proactive };
+  return { handle, status, feed, setKey, testKey, cameras, alpr, wsWindow, proactive, dinov3: { engine: dinov3EngineInst, changes: dinov3Changes } };
 }
 
 module.exports = { createMataDewa, NOTICE, wsWindow };

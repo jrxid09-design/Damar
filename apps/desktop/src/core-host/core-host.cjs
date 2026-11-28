@@ -456,6 +456,10 @@ async function child(directory, resume, recovered = false) {
       // only; the service itself is never composed here.
       otomasi: require('./otomasi.cjs').createOtomasiBinding({ installRoot: path.resolve(CANDIDATE, '..', '..') }),
       mataDewa: require('../mata-dewa/index.cjs').createMataDewa({ proactiveAutostart: true, settings: coreSettings, keyStore, cacheFile: path.join(directory, 'mata-dewa-cache.json'), profileDir: path.join(path.dirname(settingsFile), 'mata-dewa'), python, alprDir: path.join(SCRATCH, 'alpr'), // installed: %LOCALAPPDATA%\DAMAR\alpr
+        dinov3Dir: path.join(SCRATCH, 'dinov3'), // installed: %LOCALAPPDATA%\DAMAR\dinov3 (DINOv3 change-detection engine, ALPR pattern)
+        // VLM verification for DINOv3 change candidates: bounded vision completions through the provider router;
+        // only a confirmed verdict lets an imagery-change alert fire (the engine proposes, DAMAR disposes).
+        imageryVerifier: require('./imagery-verify.cjs').createImageryVerifier({ registry, router: providerRouter }).verify,
         // ALPR watchlist hits join the redacted activity feed (requester: camera label only; owner: plate in `detail`).
         onAlert: a => turns.noteActivity({ kind: 'alert', source: 'mata-dewa', label: String(a.cameraName).slice(0, 40) + ' · watchlist match', detail: a.plate }),
         // Proactive Mata Dewa alerts join the same activity feed, so the Notch
