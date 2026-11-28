@@ -1,10 +1,16 @@
 'use strict';
 // Core-owned, persistent agent settings (per selected settings file; production launcher shares one file across
 // new Core sessions, while isolated tests may inject a per-run file; Owner credential required to change):
-//  - autonomy: 'ask' (card for every consequential call) | 'workspace-auto' (file writes, edits and allowlisted
-//    commands inside the workspace / extra directories run without a card; delegation, memory and plugins still ask) |
-//    'full-access' (every consequential call runs without a card, still through Core grants, the sandbox and the
-//    protected-path rules) | 'read-only' (consequential calls are refused without asking).
+//  - autonomy: the Authority Gate mode (ONE setting, resolved to a broker mode by gateMode in agent-turns.cjs).
+//    Canonical values: 'mandat' (an owner-initiated request is itself the mandate for its ordinary steps; the
+//    permission broker raises a card ONLY for actions touching credentials and for deletions) | 'tanya' (the
+//    broker raises a card for every consequential call) | 'nonaktif' (the prompt card is disabled: every call
+//    resolves 'once' at once, still recorded in the approval history marked with the mode; in-tool Authority
+//    evaluation, audit, the sandbox and the protected-path rules are NOT affected) | 'read-only' (consequential
+//    calls are refused without asking). Legacy stored values stay valid and resolve to 'mandat' at the broker:
+//    'ask', 'workspace-auto' and 'full-access' (their historical per-profile card flows were superseded by the
+//    Owner mandate, 2026-11-28), so an existing profile never silently changes behavior when the canonical
+//    values are introduced; the Control surfaces write only the canonical values.
 //  - extraDirs: additional authorized roots (absolute, existing, never protected, never a drive root; max 8). Agent
 //    file tools may read and change files in them (absolute paths); commands still run in the workspace only.
 //  - pluginTrust: project plugins (<workspace>/.damar/plugins/<name>/plugin.json + entry file) trusted by digest;
@@ -14,7 +20,7 @@
 // Stored as one JSON document, written atomically (temp + rename). This file contains policy and paths, never secrets.
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 
-const PROFILES = ['ask', 'workspace-auto', 'full-access', 'read-only'];
+const PROFILES = ['mandat', 'tanya', 'nonaktif', 'ask', 'workspace-auto', 'full-access', 'read-only'];
 const NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 // presence: Idle Presence / Notch surface config (read by the presence surface via GET /api/r9/presence/settings).
 const PRESENCE_DEFAULTS = () => ({ idleToOrbSec: 120, orbToNotchSec: 120, notchHideSec: 1800, morphMs: 620, reducedMotion: 'system', notchEnabled: true, notificationPrivacy: 'redacted', display: 'primary', position: 'top-center', voiceEnabled: false, characterSoundEnabled: true, characterSoundVolume: 30, displayName: 'Maronns', salutation: '', onboardingCompleted: false });

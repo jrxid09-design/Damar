@@ -1074,16 +1074,47 @@
     })), { flush: true });
   }
 
+  // Authority Gate mode: the single autonomy setting resolved the same way the broker resolves it
+  // (gateMode in agent-turns.cjs). Legacy stored profiles resolve to Mandat; the surfaces write only
+  // the canonical values.
+  function gateModeOf(profile) { return profile === 'read-only' ? 'read-only' : profile === 'tanya' ? 'tanya' : profile === 'nonaktif' ? 'nonaktif' : 'mandat'; }
+  function gateModeLabel(mode) { return mode === 'tanya' ? 'Tanya dulu' : mode === 'nonaktif' ? 'Nonaktif' : mode === 'read-only' ? 'Hanya baca' : 'Mandat'; }
+  var GATE_MODE_INFO = {
+    mandat: 'Permintaan Anda adalah mandatnya. Kartu izin hanya muncul untuk tindakan yang menyentuh kredensial dan penghapusan; langkah biasa berjalan tanpa kartu.',
+    tanya: 'Setiap tindakan berdampak meminta persetujuan Anda lebih dulu lewat kartu izin, termasuk langkah biasa.',
+    nonaktif: 'Kartu izin dimatikan. Semua tindakan berjalan langsung dan tetap tercatat di riwayat persetujuan dengan tanda mode Nonaktif. Evaluasi Authority dan audit di dalam tool tetap berjalan.',
+    'read-only': 'Semua tindakan berdampak ditolak tanpa bertanya.'
+  };
+  function gateModePanel(st) {
+    if (!st || !st.ok) return panel('Mode Authority Gate', '<div style="font-size:12px;color:var(--text-secondary);">Pengaturan Core belum termuat. Buka halaman Pengaturan atau muat ulang halaman ini.</div>', { span: 12 });
+    var mode = gateModeOf(st.data.autonomy);
+    var opts = ['mandat', 'tanya', 'nonaktif']; if (mode === 'read-only') opts.push('read-only');
+    var body = '<div style="display:flex;flex-direction:column;gap:12px;">' +
+      '<div><div style="font-size:11.5px;color:var(--text-secondary);">Mode yang berlaku sekarang</div>' +
+      '<div style="font-size:20px;font-weight:700;color:var(--text-ivory);">' + escapeHtml(gateModeLabel(mode)) + '</div>' +
+      '<div style="font-size:12px;color:var(--text-secondary);">' + escapeHtml(GATE_MODE_INFO[mode]) + '</div></div>' +
+      '<div><label for="gateMode" style="display:block;font-size:11.5px;color:var(--text-secondary);margin-bottom:5px;">Ubah mode</label>' +
+      '<select class="select-field" id="gateMode">' + opts.map(function (m) { return '<option value="' + m + '"' + (m === mode ? ' selected' : '') + '>' + gateModeLabel(m) + '</option>'; }).join('') + '</select></div>' +
+      '<div style="font-size:11.5px;color:var(--text-muted);display:flex;flex-direction:column;gap:3px;">' +
+      '<div><strong style="color:var(--text-secondary);">Mandat</strong>: ' + escapeHtml(GATE_MODE_INFO.mandat) + '</div>' +
+      '<div><strong style="color:var(--text-secondary);">Tanya dulu</strong>: ' + escapeHtml(GATE_MODE_INFO.tanya) + '</div>' +
+      '<div><strong style="color:var(--text-secondary);">Nonaktif</strong>: ' + escapeHtml(GATE_MODE_INFO.nonaktif) + '</div></div>' +
+      '<div style="display:flex;justify-content:flex-end;">' + btn('Simpan mode…', 'data-save-gate-mode="1"', 'btn-primary') + '</div></div>';
+    return panel('Mode Authority Gate', body, { span: 12 });
+  }
+
   function renderSecurityView() {
     var sf = LIVE.d('safety'), lc = LIVE.d('lifecycle'), gr = LIVE.d('grant'), st = state.settings;
+    if (!st) ensureSettings();
     var html = pageHeader('ADMINISTRATION • SECURITY & GOVERNANCE', 'Security & Governance', 'Safety state, agent permission profile and authority boundaries as Core enforces them.');
     html += '<div class="workspace-grid-12">';
+    html += gateModePanel(st);
     html += panel('Safety', sf ? kvList([kv('Emergency stop', sf.stopped ? 'ENGAGED' + (sf.reason ? ', ' + sf.reason : '') : 'off'), kv('Engaged', sf.engaged ? 'yes' : 'no'), kv('Tools', sf.risk.total + ' total • ' + sf.risk.destructive + ' destructive • ' + sf.risk.safe + ' safe'),
       kv('Policy enforcement', sf.policy && sf.policy.enforcement && sf.policy.enforcement.enabled ? 'enabled' : 'disabled')]) : readState('safety', 'safety'), { span: 6, badge: sf ? statusBadgeHtml(sf.stopped ? 'STOPPED' : 'READY', sf.stopped ? 'stopped' : 'running') : '' });
     var af = LIVE.d('activityFeed'), afAnswers = {}, afHist = [];
     if (af && af.events) { af.events.forEach(function (e) { if (e.kind === 'permission_answer') afAnswers[e.permissionId] = e; }); af.events.forEach(function (e) { if (e.kind === 'permission') afHist.push(e); }); afHist = afHist.slice(-8).reverse(); }
-    var afHistHtml = afHist.length ? '<div style="margin-top:10px;font-size:11.5px;color:var(--text-secondary);"><div style="color:var(--text-ivory);font-weight:600;margin-bottom:4px;">Riwayat persetujuan (sesi Core ini)</div>' + afHist.map(function (h) { var a = afAnswers[h.permissionId]; var dec = a ? (a.decision === 'once' ? 'Disetujui sekali' : a.decision === 'session' ? 'Disetujui untuk sesi' : 'Ditolak') : 'Tanpa jawaban'; return '<div style="padding:3px 0;border-top:1px solid rgba(255,255,255,.05);">' + escapeHtml(h.tool || 'Tindakan') + ' · ' + dec + (h.detail ? ' · ' + escapeHtml(String(h.detail).slice(0, 80)) : '') + (h.at ? ' · ' + escapeHtml(new Date(h.at).toLocaleTimeString('id-ID')) : '') + '</div>'; }).join('') + '</div>' : '';
-    html += panel('Permissions', kvList([kv('Pending permission requests', lc ? String(lc.outstanding.pendingPermissions) : '-'), kv('Agent autonomy profile', st && st.ok ? st.data.autonomy : 'load in Settings'),
+    var afHistHtml = afHist.length ? '<div style="margin-top:10px;font-size:11.5px;color:var(--text-secondary);"><div style="color:var(--text-ivory);font-weight:600;margin-bottom:4px;">Riwayat persetujuan (sesi Core ini)</div>' + afHist.map(function (h) { var a = afAnswers[h.permissionId]; var dec = a ? (a.decision === 'once' && a.mode === 'nonaktif' ? 'Disetujui otomatis (Gate Nonaktif)' : a.decision === 'once' ? 'Disetujui sekali' : a.decision === 'session' ? 'Disetujui untuk sesi' : 'Ditolak') : 'Tanpa jawaban'; return '<div style="padding:3px 0;border-top:1px solid rgba(255,255,255,.05);">' + escapeHtml(h.tool || 'Tindakan') + ' · ' + dec + (h.detail ? ' · ' + escapeHtml(String(h.detail).slice(0, 80)) : '') + (h.at ? ' · ' + escapeHtml(new Date(h.at).toLocaleTimeString('id-ID')) : '') + '</div>'; }).join('') + '</div>' : '';
+    html += panel('Permissions', kvList([kv('Pending permission requests', lc ? String(lc.outstanding.pendingPermissions) : '-'), kv('Agent autonomy profile', st && st.ok ? gateModeLabel(gateModeOf(st.data.autonomy)) : 'load in Settings'),
       kv('Live model grant', gr ? (gr.effective ? 'effective' : 'none') : '-'), kv('Approvals', 'diputuskan di Presence (inline pada percakapan) atau CLI pemilik giliran')]) +
       '<div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;">Persetujuan eksplisit hanya untuk tindakan yang menyentuh kredensial dan penghapusan; langkah biasa berjalan dengan mandat permintaan pemilik.</div>' + afHistHtml, { span: 6 });
     return html + '</div>';
@@ -1095,10 +1126,11 @@
     var html = pageHeader('ADMINISTRATION • CORE SETTINGS', 'Settings', 'Persistent Core settings (Owner). Changes take effect for every session on this Core profile.');
     if (!st || !st.ok) return html + panel('Core Settings', '<div style="display:flex;flex-direction:column;gap:10px;font-size:12px;color:var(--text-secondary);"><div>Settings are read and written through an Owner Control session on Core.</div>' +
       (st ? '<div>' + statusBadgeHtml('ERROR', st.error) + '</div>' : '') + '<div>' + btn('Load settings from Core', 'data-load-settings="1"', 'btn-primary') + '</div></div>');
-    var d = st.data, profiles = ['ask', 'workspace-auto', 'full-access', 'read-only'];
+    var d = st.data, profiles = [['mandat', 'Mandat'], ['tanya', 'Tanya dulu'], ['nonaktif', 'Nonaktif'], ['read-only', 'Hanya baca (read-only)']];
+    var curGateMode = gateModeOf(d.autonomy);
     html += '<div class="workspace-grid-12">';
-    html += panel('Agent Permissions', '<div style="display:flex;flex-direction:column;gap:12px;"><label for="settingsAutonomy" style="font-size:11.5px;color:var(--text-secondary);">Autonomy profile</label><select class="select-field" id="settingsAutonomy">' +
-      profiles.map(function (p) { return '<option value="' + p + '"' + (p === d.autonomy ? ' selected' : '') + '>' + p + '</option>'; }).join('') + '</select>' +
+    html += panel('Agent Permissions', '<div style="display:flex;flex-direction:column;gap:12px;"><label for="settingsAutonomy" style="font-size:11.5px;color:var(--text-secondary);">Mode Authority Gate</label><select class="select-field" id="settingsAutonomy">' +
+      profiles.map(function (p) { return '<option value="' + p[0] + '"' + (p[0] === curGateMode ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') + '</select>' +
       '<label for="settingsRouting" style="font-size:11.5px;color:var(--text-secondary);">Skill routing</label><select class="select-field" id="settingsRouting">' + ['auto', 'off'].map(function (p) { return '<option value="' + p + '"' + (p === d.skills.routing ? ' selected' : '') + '>' + p + '</option>'; }).join('') + '</select>' +
       '<div style="display:flex;justify-content:flex-end;">' + btn('Save…', 'data-save-settings="1"', 'btn-primary') + '</div></div>', { span: 6 });
     html += panel('Workspace Access', kvList([kv('Extra folders', d.extraDirs.length ? d.extraDirs.join(' • ') : 'none'), kv('Updated', d.updatedAt ? when(d.updatedAt) : 'never'), kv('Control session', state.control.id ? state.control.id.slice(0, 12) + '…' : '-', true)]), { span: 6 });
@@ -1562,6 +1594,12 @@
       });
     },
     'data-load-settings': function () { loadSettings(); },
+    'data-save-gate-mode': function () {
+      var mode = val('gateMode');
+      ownerAction('Simpan mode Authority Gate', '<p style="font-size:12.5px;">Atur mode Authority Gate menjadi <strong>' + escapeHtml(gateModeLabel(mode)) + '</strong>?</p><p style="font-size:12px;color:var(--text-secondary);">' + escapeHtml(GATE_MODE_INFO[mode] || '') + '</p>', function () {
+        return controlSession().then(function (id) { return core.post('/api/r9/settings', { action: 'update', cliSession: id, client: state.control.client, values: { autonomy: mode } }); }).then(function (r) { if (r.ok) loadSettings(); return r; });
+      });
+    },
     'data-save-settings': function () {
       var values = { autonomy: val('settingsAutonomy'), skills: { routing: val('settingsRouting'), disabled: state.settings.data.skills.disabled } };
       ownerAction('Save Core settings', '<p style="font-size:12.5px;">' + L('Set autonomy %s, skill routing %s?').replace('%s', '<strong>' + escapeHtml(values.autonomy) + '</strong>').replace('%s', '<strong>' + escapeHtml(values.skills.routing) + '</strong>') + '</p>', function () {

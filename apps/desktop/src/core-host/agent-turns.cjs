@@ -28,6 +28,17 @@ function gateExplicit(card) {
   if ((card?.tool === 'workspace_shell' || card?.tool === 'workspace_run') && GATE_DELETE_RE.test(text)) return true;
   return false;
 }
+// Authority Gate mode (Owner 2026-11-28): the single autonomy setting resolves to one broker mode.
+// 'read-only' stays read-only; 'tanya' raises a card for every consequential call; 'nonaktif' disables
+// the prompt card only (never the in-tool Authority evaluation or the audit trail); every other stored
+// value, including the legacy profiles 'ask', 'workspace-auto' and 'full-access', resolves to 'mandat',
+// so the Owner's effective behavior never silently flips when the setting gains its canonical values.
+function gateMode(profile) {
+  if (profile === 'read-only') return 'read-only';
+  if (profile === 'tanya') return 'tanya';
+  if (profile === 'nonaktif') return 'nonaktif';
+  return 'mandat';
+}
 // Host-side composition (no Core file edited): wraps globalThis.fetch once. Inside a turn the turn's abort signal is
 // linked into every request; the turn id header is added only for loopback URLs (offline fixtures / local proxies),
 // never sent to a remote provider.
@@ -102,8 +113,8 @@ function createAgentTurns({ aiRuntime, isProtectedRoot, recordUsage, activeProvi
     else if (e.type === 'tool' && ['RUN', 'VERIFY'].includes(e.badge)) a = { kind: 'run', detail: e.target };
     else if (e.type === 'tool' && e.badge === 'SHELL') a = { kind: 'shell', detail: e.target };
     else if (e.type === 'diff') a = { kind: 'edit', file: base(e.path), added: e.diff?.added ?? null, removed: e.diff?.removed ?? null, detail: e.path };
-    else if (e.type === 'permission') a = { kind: 'permission', permissionId: e.id, tool: e.card?.tool || null, file: ['workspace_write', 'workspace_edit'].includes(e.card?.tool) ? base(e.card.run) : null, added: e.card?.diff?.added ?? null, removed: e.card?.diff?.removed ?? null, detail: e.card?.run };
-    else if (e.type === 'permission_answer') a = { kind: 'permission_answer', permissionId: e.id, decision: e.decision, surface: e.surface || 'cli' };
+    else if (e.type === 'permission') a = { kind: 'permission', permissionId: e.id, tool: e.card?.tool || null, mode: e.mode || null, file: ['workspace_write', 'workspace_edit'].includes(e.card?.tool) ? base(e.card.run) : null, added: e.card?.diff?.added ?? null, removed: e.card?.diff?.removed ?? null, detail: e.card?.run };
+    else if (e.type === 'permission_answer') a = { kind: 'permission_answer', permissionId: e.id, decision: e.decision, mode: e.mode || null, surface: e.surface || 'cli' };
     else if (e.type === 'final') a = { kind: 'final', status: e.status };
     if (!a) return;
     activityLog.push({ seq: activitySeq++, turnId: turn.id, file: null, added: null, removed: null, at: e.t, ...a, detail: typeof a.detail === 'string' ? a.detail.slice(0, 200) : null });
@@ -129,20 +140,31 @@ function createAgentTurns({ aiRuntime, isProtectedRoot, recordUsage, activeProvi
         emit: event => push(turn, event),
         requestPermission: card => new Promise(resolve => {
           if (turn.abort.signal.aborted) return resolve('deny');
-          const profile = settings?.autonomy() || 'ask';
-          if (profile === 'read-only') return resolve('deny');
+          const mode = gateMode(settings?.autonomy() || 'ask');
+          if (mode === 'read-only') return resolve('deny');
+          if (mode === 'nonaktif') {
+            // Gate Nonaktif (Owner 2026-11-28): the prompt card is disabled, the record is not.
+            // The request and its automatic answer are both written to the approval history,
+            // marked with the mode, so nothing the agent does under Nonaktif is invisible.
+            const id = 'perm-' + crypto.randomUUID();
+            push(turn, { type: 'permission', id, card, mode });
+            push(turn, { type: 'permission_answer', id, decision: 'once', mode });
+            return resolve('once');
+          }
           // Mandat Owner (2026-11-28): an owner-initiated request is itself
           // the mandate for its ordinary steps, so the broker no longer stops
           // per step. Only the two explicit categories in gateExplicit()
           // (credentials, deletions) still raise a permission card. This
           // supersedes the former per-profile card flow and the memory-consent
           // card: a project memory note is neither category, so it now runs
-          // under the mandate like any other ordinary step.
-          if (!gateExplicit(card)) return resolve('once');
+          // under the mandate like any other ordinary step. In 'tanya' mode
+          // every consequential call raises the card instead.
+          if (mode === 'mandat' && !gateExplicit(card)) return resolve('once');
           const id = 'perm-' + crypto.randomUUID();
           turn.pending.set(id, resolve);
-          push(turn, { type: 'permission', id, card });
-          turn.abort.signal.addEventListener('abort', () => { if (turn.pending.delete(id)) resolve('deny'); }, { once: true });
+          turn.cardModes.set(id, mode);
+          push(turn, { type: 'permission', id, card, mode });
+          turn.abort.signal.addEventListener('abort', () => { if (turn.pending.delete(id)) { turn.cardModes.delete(id); resolve('deny'); } }, { once: true });
         }),
       };
     },
@@ -238,7 +260,7 @@ function createAgentTurns({ aiRuntime, isProtectedRoot, recordUsage, activeProvi
       const key = keyOf(cliSession);
       if (bySession.has(key)) throw Object.assign(Error('TURN_ALREADY_RUNNING'), { status: 409 });
       const turn = { id: 'turn-' + crypto.randomUUID(), cliSession, client, key, text, root: fs.realpathSync.native(cwd), role: owner ? 'superadmin' : 'user',
-        status: 'RUNNING', events: [], listeners: new Set(), pending: new Map(), abort: new AbortController(), sessionEndsAt: Date.now() + 12 * 3600 * 1000, error: null };
+        status: 'RUNNING', events: [], listeners: new Set(), pending: new Map(), cardModes: new Map(), abort: new AbortController(), sessionEndsAt: Date.now() + 12 * 3600 * 1000, error: null };
       turns.set(turn.id, turn); bySession.set(key, turn.id);
       note({ type: 'START', turnId: turn.id, session: cliSession, text: text.slice(0, 2000) });
       setImmediate(() => run(turn));
@@ -272,7 +294,8 @@ function createAgentTurns({ aiRuntime, isProtectedRoot, recordUsage, activeProvi
       const resolve = turn.pending.get(permissionId); if (!resolve) throw Object.assign(Error('PERMISSION_NOT_PENDING'), { status: 409 });
       if (!['once', 'session', 'deny'].includes(decision)) throw Object.assign(Error('DECISION_INVALID'), { status: 400 });
       turn.pending.delete(permissionId); resolve(decision);
-      push(turn, { type: 'permission_answer', id: permissionId, decision, ...(surface === 'notch' ? { surface } : {}) });
+      const cardMode = turn.cardModes.get(permissionId) || null; turn.cardModes.delete(permissionId);
+      push(turn, { type: 'permission_answer', id: permissionId, decision, ...(cardMode ? { mode: cardMode } : {}), ...(surface === 'notch' ? { surface } : {}) });
       return { decision };
     },
     cancel(id, reason = null) {
@@ -310,4 +333,4 @@ function createAgentTurns({ aiRuntime, isProtectedRoot, recordUsage, activeProvi
   };
   return api;
 }
-module.exports = { providerErrorKind, createAgentTurns, installTurnFetch, turnContext, TURN_HEADER };
+module.exports = { providerErrorKind, createAgentTurns, installTurnFetch, turnContext, TURN_HEADER, gateMode, gateExplicit };

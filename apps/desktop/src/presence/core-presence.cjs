@@ -203,6 +203,7 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
         if (e.kind !== 'permission') continue;
         const a = answers.get(e.permissionId);
         rows.push({ permissionId: e.permissionId, turnId: e.turnId || null,
+          mode: a && typeof a.mode === 'string' ? a.mode : (typeof e.mode === 'string' ? e.mode : null),
           tool: typeof e.tool === 'string' ? e.tool.slice(0, 40) : null,
           detail: typeof e.detail === 'string' ? e.detail.replace(/[\x00-\x1f\x7f-\x9f]/g, ' ').slice(0, 140) : null,
           file: typeof e.file === 'string' ? e.file.slice(0, 120) : null,
