@@ -6,6 +6,7 @@ require("../config/envCompat");
 const readline = require("node:readline");
 
 const DaemonClient = require("./client");
+const { readTokenFromInstall } = require("./client");
 const { c, symbols, banner } = require("./theme");
 const commands = require("./commands");
 
@@ -130,6 +131,11 @@ async function main() {
         if (result?.outcome !== "EXECUTED_VERIFIED") {
             console.log(`  ${symbols.err} ${c.danger("daemon CLI ditolak: capability cli.daemon.start belum diotorisasi owner.")}`);
             console.log(`  ${c.muted(`outcome=${result?.outcome ?? "-"} reason=${result?.reason ?? "-"}`)}`);
+            // Tanpa konfigurasi, akar penolakannya adalah setup yang
+            // belum pernah jalan — arahkan ke sana, bukan berhenti di sini.
+            if (!args.token && !process.env.DAMAR_TOKEN && !readTokenFromInstall()) {
+                printSetupGuidance();
+            }
             process.exitCode = 1;
             return;
         }
@@ -169,6 +175,20 @@ async function main() {
     if (!(await ensureDaemon(client, { quiet: Boolean(oneShot) }))) {
         process.exitCode = 1;
         return;
+    }
+
+    // Tanpa token, ping() bisa "berhasil" lewat daemon lain di mesin
+    // ini yang hidup tetapi menuntut autentikasi — sesi lalu mati di
+    // panggilan pertama dengan pesan Unauthorized mentah dari daemon.
+    // Uji satu panggilan; bila ditolak dan instalasi memang belum
+    // dikonfigurasi, arahkan ke setup (akar masalahnya di sana).
+    if (!client.token) {
+        try { await client.stats(); }
+        catch {
+            printSetupGuidance();
+            process.exitCode = 1;
+            return;
+        }
     }
 
     // Ambil provider/model aktif untuk ditampilkan & dipakai.
@@ -323,10 +343,44 @@ async function openSshTunnel(target) {
 
 }
 
+/**
+ * Arahan first-run saat instalasi belum dikonfigurasi. Tanpa
+ * DAMAR_TOKEN, daemon mengunci API-nya (fail-closed) dan
+ * `damar --serve` PASTI ditolak Authority karena Core belum hidup —
+ * menyarankan --serve pada titik ini menyesatkan (insiden
+ * 2026-11-27: pengguna baru menabrak dua dinding berurutan).
+ * Satu-satunya jalan yang benar: jalankan setup lebih dulu.
+ */
+function printSetupGuidance() {
+
+    console.log(
+        `  ${symbols.err} ${c.danger("Instalasi Damar ini belum dikonfigurasi")} ${c.muted("(DAMAR_TOKEN belum ada).")}
+`
+    );
+    console.log(`  ${c.muted("Jalankan setup lebih dulu dari folder instalasi Damar:")}`);
+    console.log(`     ${c.amber("powershell -ExecutionPolicy Bypass -File scripts\\setup.ps1")}
+`);
+    console.log(`  ${c.muted("atau nyalakan Damar dari shortcut desktop. Sesudah setup, nyalakan daemon dari folder instalasi:")}`);
+    console.log(`     ${c.amber("npm run damar")}
+`);
+
+}
+
 async function ensureDaemon(client, { quiet = false } = {}) {
 
     if (await client.ping()) {
         return true;
+    }
+
+    // Token tidak ditemukan di mana pun = setup belum pernah men-seed
+    // konfigurasi. Daemon yang terkunci token tampak "tidak terjangkau"
+    // dari sini; saran --serve akan ditolak Authority. Arahkan ke setup.
+    if (!client.token) {
+        if (!quiet) {
+            console.log(banner());
+        }
+        printSetupGuidance();
+        return false;
     }
 
     if (!quiet) {

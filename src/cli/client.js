@@ -245,3 +245,6 @@ class DaemonClient {
 }
 
 module.exports = DaemonClient;
+// Diekspor agar CLI bisa membedakan "instalasi belum dikonfigurasi"
+// (token tidak ditemukan di mana pun) dari "daemon sedang mati".
+module.exports.readTokenFromInstall = readTokenFromInstall;

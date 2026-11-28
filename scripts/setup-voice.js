@@ -77,25 +77,37 @@ function sha256File(file) {
     });
 }
 
-/** Unduh dengan pengalihan + lanjutan .part; selesai hanya bila utuh. */
-function download(asset, destAbs) {
+const STALL_MS = 60000;   // soket diam lebih lama dari ini = unduhan macet
+const MAX_ATTEMPTS = 3;   // percobaan per berkas; berikutnya melanjutkan .part
+
+/** Satu percobaan unduh. Watchdog kemacetan: permintaan dihancurkan
+ * bila tidak ada byte baru selama STALL_MS. Insiden 2026-11-27:
+ * unduhan ggml-small membeku ±35 menit tanpa progres dan tanpa
+ * timeout — setup menggantung diam selamanya karena tidak ada batas
+ * diam sama sekali pada soketnya. */
+function downloadOnce(asset, destAbs) {
     return new Promise((resolve, reject) => {
         const part = destAbs + ".part";
         fs.mkdirSync(path.dirname(destAbs), { recursive: true });
         let have = fs.existsSync(part) ? fs.statSync(part).size : 0;
         if (have > asset.size) { fs.rmSync(part); have = 0; }
         const headers = have > 0 ? { Range: `bytes=${have}-` } : {};
+        let settled = false;
+        const done = (fn, v) => { if (!settled) { settled = true; fn(v); } };
         const attempt = (url, redirects) => {
-            https.get(url, { headers }, res => {
+            const req = https.get(url, { headers }, res => {
+                req.setTimeout(STALL_MS, () => {
+                    req.destroy(new Error(`unduhan macet: tidak ada data selama ${Math.round(STALL_MS / 1000)} detik`));
+                });
                 if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
                     res.resume();
-                    if (redirects <= 0) return reject(new Error("terlalu banyak pengalihan"));
+                    if (redirects <= 0) return done(reject, new Error("terlalu banyak pengalihan"));
                     return attempt(new URL(res.headers.location, url).href, redirects - 1);
                 }
                 let flags = "w";
                 if (res.statusCode === 206 && have > 0) flags = "a";
                 else if (res.statusCode === 200) have = 0;
-                else { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+                else { res.resume(); return done(reject, new Error(`HTTP ${res.statusCode}`)); }
                 const out = fs.createWriteStream(part, { flags });
                 let got = have, lastPct = -1;
                 res.on("data", chunk => {
@@ -104,20 +116,47 @@ function download(asset, destAbs) {
                     if (pct >= lastPct + 10) { lastPct = pct; console.log(`  ${path.basename(asset.dest)}: ${pct}% (${mb(got)} / ${mb(asset.size)})`); }
                 });
                 res.pipe(out);
-                out.on("finish", () => out.close(() => resolve(got)));
-                out.on("error", reject);
-                res.on("error", reject);
-            }).on("error", reject);
+                out.on("finish", () => out.close(() => done(resolve, got)));
+                out.on("error", e => done(reject, e));
+                res.on("error", e => done(reject, e));
+            });
+            req.on("error", e => done(reject, e));
         };
         attempt(asset.url, 5);
     });
 }
 
-/** Unduh polos tanpa manifest (khusus bootstrap pip resmi). */
+/** Unduh dengan pengalihan + lanjutan .part; selesai hanya bila utuh.
+ * Percobaan yang gagal (termasuk macet) TIDAK membuang progres —
+ * percobaan berikutnya melanjutkan dari berkas .part yang sama.
+ * Sesudah MAX_ATTEMPTS gagal, berkas dinyatakan gagal dan pemanggil
+ * melanjutkan berkas berikutnya; kegagalan voice tidak menggantung
+ * dan tidak menggagalkan install Damar. */
+async function download(asset, destAbs) {
+    let lastErr = null;
+    for (let i = 1; i <= MAX_ATTEMPTS; i++) {
+        try { return await downloadOnce(asset, destAbs); }
+        catch (e) {
+            lastErr = e;
+            if (i < MAX_ATTEMPTS) {
+                console.log(`  percobaan ${i} untuk ${path.basename(asset.dest)} gagal (${e.message}) — melanjutkan dari .part`);
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        }
+    }
+    throw lastErr;
+}
+
+// Unduh polos tanpa manifest (khusus bootstrap pip resmi).
+// Watchdog kemacetan yang sama dengan download(): bootstrap pip
+// tidak boleh menggantung setup tanpa batas.
 function downloadRaw(url, dest) {
     return new Promise((resolve, reject) => {
         const attempt = (u, redirects) => {
-            https.get(u, res => {
+            const req = https.get(u, res => {
+                req.setTimeout(STALL_MS, () => {
+                    req.destroy(new Error(`unduhan macet: tidak ada data selama ${Math.round(STALL_MS / 1000)} detik`));
+                });
                 if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
                     res.resume();
                     if (redirects <= 0) return reject(new Error("terlalu banyak pengalihan"));
@@ -128,7 +167,8 @@ function downloadRaw(url, dest) {
                 res.pipe(out);
                 out.on("finish", () => out.close(resolve));
                 out.on("error", reject);
-            }).on("error", reject);
+            });
+            req.on("error", reject);
         };
         attempt(url, 5);
     });

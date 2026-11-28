@@ -26,11 +26,15 @@
  *                 redistributable resmi Microsoft butuh installer
  *                 sistem tersendiri).
  *   3. APLIKASI — npm install (bila perlu), npm link (mendaftarkan
- *                 perintah global `damar` dari bin package.json),
+ *                 perintah global `damar` dari bin package.json;
+ *                 idempotent — link yang sudah benar dianggap sukses),
+ *                 seed `.env` (DAMAR_TOKEN digenerate lokal bila belum
+ *                 ada; tanpa ini daemon mengunci API-nya fail-closed),
  *                 model voice (scripts/setup-voice.js; gagalnya TIDAK
  *                 menggagalkan install — ulangi dengan
  *                 `npm run setup:voice`), lalu shortcut desktop +
- *                 Start Menu "Damar".
+ *                 Start Menu "Damar" (menjalankan aplikasi desktop
+ *                 Damar lewat peluncur produk, sama seperti installer).
  *   4. LAPORAN  — ringkasan preflight di terminal + berkas
  *                 data/setup-report.json: yang ditemukan, yang
  *                 dipasang, yang dilewati, yang gagal + remedinya.
@@ -267,16 +271,23 @@ function writeBrandIcon(destPng, destIco) {
     fs.mkdirSync(path.dirname(destIco), { recursive: true });
     fs.writeFileSync(destIco, Buffer.concat([head, png]));
 }
-function createShortcuts(iconPath) {
+function createShortcuts(iconPath, nodeExe) {
+    // Shortcut "Damar" menjalankan APLIKASI DESKTOP Damar (Presence)
+    // lewat peluncur produk apps/desktop/release/damar.cjs — target
+    // yang sama dengan shortcut desktop installer produk (INSTALL.md:
+    // "The installer also puts a Damar shortcut on your desktop; it
+    // starts DAMAR Presence"). Sebelumnya shortcut membuka terminal
+    // CLI mentah, yang pada instalasi belum terkonfigurasi berhenti di
+    // dinding token/Authority (insiden first-run 2026-11-27).
+    const appEntry = path.join(ROOT, "apps", "desktop", "release", "damar.cjs");
     const ps = [
         "$ErrorActionPreference = 'Stop'",
         "$ws = New-Object -ComObject WScript.Shell",
-        "$cmd = Join-Path $env:SystemRoot 'System32\\cmd.exe'",
         "foreach ($dir in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {",
         "  $lnk = $ws.CreateShortcut((Join-Path $dir 'Damar.lnk'))",
-        "  $lnk.TargetPath = $cmd",
-        "  $lnk.Arguments = '/k damar'",
-        "  $lnk.WorkingDirectory = $env:USERPROFILE",
+        "  $lnk.TargetPath = $env:DAMAR_SHORTCUT_NODE",
+        "  $lnk.Arguments = '\"' + $env:DAMAR_SHORTCUT_APP + '\" presence'",
+        "  $lnk.WorkingDirectory = $env:DAMAR_SHORTCUT_WD",
         "  $lnk.IconLocation = $env:DAMAR_SHORTCUT_ICON + ',0'",
         "  $lnk.Description = 'DAMAR'",
         "  $lnk.Save()",
@@ -284,9 +295,85 @@ function createShortcuts(iconPath) {
         "}",
     ].join("; ");
     const r = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-Command", ps],
-        { encoding: "utf8", env: { ...process.env, DAMAR_SHORTCUT_ICON: iconPath } });
+        { encoding: "utf8", env: { ...process.env, DAMAR_SHORTCUT_ICON: iconPath, DAMAR_SHORTCUT_NODE: nodeExe, DAMAR_SHORTCUT_APP: appEntry, DAMAR_SHORTCUT_WD: path.join(ROOT, "apps", "desktop") } });
     if (r.status !== 0) throw new Error((r.stderr || "powershell gagal").trim());
     return r.stdout.trim().split(/\r?\n/).filter(Boolean);
+}
+
+// ---------- seed .env (token daemon lokal) ----------
+// Akar insiden first-run 2026-11-27: TIDAK ADA langkah mana pun yang
+// membuat .env / men-seed DAMAR_TOKEN, jadi guard fail-closed daemon
+// mengunci API (503 "DAMAR_TOKEN belum diset") dan CLI tidak punya
+// apa-apa untuk autentikasi — install "selesai" tetapi tidak bisa
+// dipakai. Setup kini men-seed-nya: token digenerate lokal (acak
+// kriptografis), ditulis ke .env instalasi (ter-gitignore oleh pola
+// `.env*`), dan TIDAK PERNAH ditampilkan / dicatat di laporan.
+// Idempotent: .env yang sudah punya DAMAR_TOKEN terisi tidak diubah.
+function seedEnvToken() {
+    const envPath = path.join(ROOT, ".env");
+    let body = "";
+    try { body = fs.readFileSync(envPath, "utf8"); } catch { /* belum ada — dibuat di bawah */ }
+    if (/^DAMAR_TOKEN=\S+/m.test(body)) {
+        console.log("  .env: DAMAR_TOKEN sudah terisi — tidak diubah");
+        return;
+    }
+    const token = crypto.randomBytes(32).toString("hex");
+    if (!body) {
+        body = "# Konfigurasi lokal Damar — dibuat oleh setup. JANGAN dibagikan dan jangan di-commit.\n"
+            + "# Token bidang kendali daemon; dipakai CLI dan Console di mesin ini.\n";
+    }
+    if (!body.endsWith("\n")) body += "\n";
+    // Baris DAMAR_TOKEN kosong (mis. sisa salinan .env.example) DIGANTI,
+    // bukan diduplikasi — pembaca .env dan CLI mengambil baris pertama.
+    if (/^DAMAR_TOKEN=.*$/m.test(body)) body = body.replace(/^DAMAR_TOKEN=.*$/m, `DAMAR_TOKEN=${token}`);
+    else body += `DAMAR_TOKEN=${token}\n`;
+    fs.writeFileSync(envPath, body);
+    action(".env dibuat/dilengkapi: DAMAR_TOKEN lokal di-seed (nilai tidak ditampilkan)");
+}
+
+// ---------- pendaftaran perintah global (idempotent) ----------
+// Insiden 2026-11-27: `npm link` gagal EEXIST karena shim `damar`
+// yatim dari registrasi lama tertinggal di prefix global, dan setup
+// berhenti total. Aturan installer: link yang sudah ada dan BENAR
+// (menunjuk folder ini) dianggap sukses; sisa link/shim salah target
+// dibersihkan lalu dibuat ulang; kegagalan link pertama dibersihkan
+// dan dicoba tepat satu kali lagi sebelum menyerah.
+function globalLinkState(prefix) {
+    const linkDir = path.join(prefix, "node_modules", "damar");
+    let target = null, exists = false;
+    try {
+        const st = fs.lstatSync(linkDir);
+        exists = true;
+        if (st.isSymbolicLink()) target = path.resolve(path.dirname(linkDir), fs.readlinkSync(linkDir));
+    } catch { /* belum terdaftar */ }
+    return { linkDir, exists, target };
+}
+function cleanGlobalLink(prefix, linkDir) {
+    try { fs.rmSync(linkDir, { recursive: true, force: true }); } catch { /* npm link akan melaporkan bila tetap terhalang */ }
+    const shims = process.platform === "win32" ? ["damar", "damar.cmd", "damar.ps1"] : ["damar"];
+    for (const shim of shims) {
+        try { fs.rmSync(path.join(prefix, shim), { force: true }); } catch { /* sama */ }
+    }
+}
+function registerGlobalCommand(runNpm, prefix) {
+    if (!prefix || !fs.existsSync(prefix)) { runNpm(["link"]); action("perintah global `damar` terdaftar (npm link)"); return; }
+    const before = globalLinkState(prefix);
+    if (before.target && path.resolve(before.target) === path.resolve(ROOT)) {
+        console.log("  perintah global `damar` sudah terdaftar ke folder ini — dilewati");
+        return;
+    }
+    if (before.exists) cleanGlobalLink(prefix, before.linkDir);
+    try {
+        runNpm(["link"]);
+    } catch {
+        cleanGlobalLink(prefix, before.linkDir);
+        runNpm(["link"]);
+    }
+    const after = globalLinkState(prefix);
+    if (after.target && path.resolve(after.target) !== path.resolve(ROOT)) {
+        warn(`perintah global \`damar\` terdaftar tetapi menunjuk ${after.target}, bukan folder ini — jalankan \`npm link\` manual dari folder Damar bila perintah tidak menjawab.`);
+    }
+    action("perintah global `damar` terdaftar (npm link)");
 }
 
 // ---------- fase 3 + 4 ----------
@@ -322,11 +409,11 @@ async function main() {
     console.log("setup: fase 3 — dependensi aplikasi + perintah `damar`");
     if (!fs.existsSync(path.join(ROOT, "node_modules"))) { runNpm(["install"]); action("dependensi aplikasi terpasang (npm install)"); }
     else console.log("  dependensi sudah ada (node_modules) — dilewati");
-    runNpm(["link"]);
-    action("perintah global `damar` terdaftar (npm link)");
-
     const prefix = out(node.npm, ["prefix", "-g"], { env: npmEnv }).text.split(/\r?\n/)[0];
+    registerGlobalCommand(runNpm, prefix);
     if (prefix && fs.existsSync(prefix)) ensureOnUserPath(prefix);
+
+    seedEnvToken();
 
     if (!SKIP_VOICE) {
         if (freeGB !== null && freeGB < DISK_WARN_GB) {
@@ -344,7 +431,8 @@ async function main() {
             const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
             const iconPath = path.join(localAppData, "DAMAR", "damar.ico");
             writeBrandIcon(path.join(ROOT, "apps", "desktop", "src", "control", "damaricon-clean.png"), iconPath);
-            for (const lnk of createShortcuts(iconPath)) action(`shortcut dibuat: ${lnk}`);
+            const nodeExe = node.kind === "portable" ? node.exe : (out("where", ["node"]).text.split(/\r?\n/)[0] || node.exe);
+            for (const lnk of createShortcuts(iconPath, nodeExe)) action(`shortcut dibuat: ${lnk}`);
         } catch (e) {
             warn(`shortcut tidak dibuat (${e.message}). Perintah \`damar\` tetap terdaftar.`);
         }
