@@ -163,7 +163,12 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
             }
           }
         } catch {}
-        return { reachable: true, asOf: new Date().toISOString(), lifecycle: life.body.data, mataDewa,
+        // Damar Cyber (F9): Werkudara patrol record + DCD posture, an Owner
+        // read like the Mata Dewa proactive view above; null when Core does
+        // not serve it, and the portal then keeps its honest empty state.
+        let cyber = null;
+        try { const cy = await ownerGet('/api/r9/cyber'); if (cy.ok && cy.body?.success === true) cyber = cy.body.data; } catch {}
+        return { reachable: true, asOf: new Date().toISOString(), lifecycle: life.body.data, mataDewa, cyber,
           sessions: sessions.ok ? sessions.body?.data?.sessions || [] : null, runs: runs.ok ? runs.body?.data?.runs || [] : null,
           media: media.ok && media.body?.success === true ? media.body.data : null,
           providers: provider.ok && provider.body?.success === true ? provider.body.data : null,

@@ -330,6 +330,58 @@ router.get("/presence/state", async (req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
+// 6B. CYBER POSTURE SEAM (DCD read projection)
+// ---------------------------------------------------------------------------
+// Read-only projection of the single composed detection engine (comp.cyber)
+// plus its security_incident notification records, for the desktop Core's
+// Cyber binding (GET /api/r9/cyber there). No mutation route exists here by
+// design: incident intake stays with the composition's own bridges
+// (recordDcdIncident / transitionDcdIncident) and every cyber action stays
+// behind the Authority Gate as designed.
+
+router.get("/cyber/posture", async (req, res, next) => {
+    try {
+        const comp = await getComposition();
+        const clean = (v, n) => (typeof v === "string" ? v.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").slice(0, n) : null);
+        const incidents = (typeof comp.cyber?.listIncidents === "function" ? comp.cyber.listIncidents() : []).map(i => ({
+            incidentId: clean(i.incidentId, 80),
+            state: clean(i.state, 40),
+            sourceKind: clean(i.sourceKind, 40),
+            riskLevel: clean(i.riskLevel, 20),
+            summary: clean(i.summary, 300),
+            createdAt: Number.isSafeInteger(i.createdAt) ? i.createdAt : null,
+            historyCount: Array.isArray(i.history) ? i.history.length : 0
+        })).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 32);
+        const byState = {};
+        for (const i of incidents) byState[i.state || "UNKNOWN"] = (byState[i.state || "UNKNOWN"] || 0) + 1;
+        const active = incidents.filter(i => !["RESOLVED", "CLOSED", "DISMISSED"].includes(i.state)).length;
+        let notifications = [];
+        try {
+            const pageResult = await comp.notification.page({ sourceType: "security_incident", limit: 20 });
+            notifications = (pageResult.items || []).map(n => ({
+                id: clean(n.notification_id || n.id || n.sourceId, 80),
+                state: clean(n.state, 40),
+                event: clean(n.event, 40),
+                severity: clean(n.severity, 20),
+                summary: clean(n.summary, 300),
+                occurredAt: Number.isSafeInteger(n.occurredAt) ? n.occurredAt : (Number.isSafeInteger(n.createdAt) ? n.createdAt : null)
+            }));
+        } catch {}
+        res.json({
+            data: {
+                engine: "dcd",
+                incidents,
+                counts: { total: incidents.length, active, byState },
+                notifications,
+                generatedAt: Date.now()
+            }
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+// ---------------------------------------------------------------------------
 // 7. REAL-TIME EVENT STREAM (SSE) SEAM
 // ---------------------------------------------------------------------------
 

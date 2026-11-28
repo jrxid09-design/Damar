@@ -43,6 +43,7 @@ function project(core, { notificationPrivacy = 'redacted' } = {}) {
     status: 'CONNECTED', reason: '',
     providers: projectProviders(core.providers),
     matadewa: projectMataDewa(core.mataDewa),
+    cyber: projectCyber(core.cyber),
     presence: { simulated: false, source: 'damar-core', lifecycle: lifecycleState, asOf: core.asOf || null,
       activity: { activeTurns, pendingPermissions: pending, activePandawaRuns: activeRuns, sessions: sessions.length },
       sessionPills, media,
@@ -184,6 +185,40 @@ function projectWorkers(runs = [], gateway = null, privacy = 'redacted', now = D
   return rows.slice(0, 6);
 }
 
+// Damar Cyber for the Presence portal (F9): Werkudara's patrol record from
+// Core's durable Pandawa registry plus the DCD posture the Core read from
+// the canonical daemon. Allowlisted display fields only; a category with no
+// real records stays an empty list here and an honest empty state on the
+// surface. The DCD block carries the daemon's own availability verdict, so
+// an unreachable projection is shown as such, never as "no incidents".
+function projectCyber(c) {
+  if (!c || typeof c !== 'object') return null;
+  const runRow = r => ({ state: text(r.state, 20), task: text(r.task, 300), outputPreview: text(r.outputPreview, 240),
+    error: text(r.error, 120), provider: text(r.provider, 40), model: text(r.model, 60),
+    createdAt: Number.isSafeInteger(r.createdAt) ? r.createdAt : null, updatedAt: Number.isSafeInteger(r.updatedAt) ? r.updatedAt : null });
+  const wk = c.werkudara && typeof c.werkudara === 'object' ? c.werkudara : {};
+  const d = c.dcd && typeof c.dcd === 'object' ? c.dcd : { available: false, reason: 'BINDING_TIDAK_TERSEDIA' };
+  const dcd = d.available === true
+    ? { available: true, engine: text(d.engine, 20) || 'dcd',
+        counts: { total: Number.isSafeInteger(d.counts?.total) ? d.counts.total : 0, active: Number.isSafeInteger(d.counts?.active) ? d.counts.active : 0 },
+        incidents: (Array.isArray(d.incidents) ? d.incidents : []).slice(0, 8).map(i => ({ state: text(i.state, 40), riskLevel: text(i.riskLevel, 20),
+          sourceKind: text(i.sourceKind, 40), summary: text(i.summary, 300), createdAt: Number.isSafeInteger(i.createdAt) ? i.createdAt : null })),
+        notifications: (Array.isArray(d.notifications) ? d.notifications : []).slice(0, 8).map(n => ({ state: text(n.state, 40), severity: text(n.severity, 20),
+          summary: text(n.summary, 300), occurredAt: Number.isSafeInteger(n.occurredAt) ? n.occurredAt : null })),
+        generatedAt: Number.isSafeInteger(d.generatedAt) ? d.generatedAt : null }
+    : { available: false, reason: text(d.reason, 40) || 'DAEMON_TIDAK_TERJANGKAU' };
+  return {
+    werkudara: { totalRuns: Number.isSafeInteger(wk.totalRuns) ? wk.totalRuns : 0,
+      completed: Number.isSafeInteger(wk.completed) ? wk.completed : 0,
+      failed: Number.isSafeInteger(wk.failed) ? wk.failed : 0,
+      lastRunAt: Number.isSafeInteger(wk.lastRunAt) ? wk.lastRunAt : null,
+      runs: (Array.isArray(wk.runs) ? wk.runs : []).slice(0, 8).map(runRow) },
+    patroli: (Array.isArray(c.patroli) ? c.patroli : []).slice(0, 6).map(runRow),
+    dcd,
+    generatedAt: Number.isSafeInteger(c.generatedAt) ? c.generatedAt : null,
+  };
+}
+
 // Now-playing for the music pill (Fase 3a): projected from the SMTC sense in core-host
 // (core.media). Unavailable stays null - the notch shows no pill rather than a fake track.
 // Artwork (the session's real SMTC thumbnail, a data URL from core-host) is only
@@ -246,4 +281,4 @@ function activityRows(activity = [], privacy = 'redacted') {
     .map(a => (a.kind === 'alert' && privacy === 'counts-only' ? { ...a, label: null } : a));
 }
 
-module.exports = { project, statusLine, pendingPermission, activityRow, activityRows, projectSessionPills, projectMedia, projectWorkers, PRIVACY };
+module.exports = { project, statusLine, pendingPermission, activityRow, activityRows, projectSessionPills, projectMedia, projectWorkers, projectCyber, PRIVACY };

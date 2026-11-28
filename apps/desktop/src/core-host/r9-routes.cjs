@@ -32,7 +32,7 @@ function readJsonl(file) {
 const tokenEq = (a, b) => typeof a === 'string' && typeof b === 'string' && crypto.timingSafeEqual(crypto.createHash('sha256').update(a).digest(), crypto.createHash('sha256').update(b).digest());
 const clean = (s, n) => String(s ?? '').replace(/[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, ' ').slice(0, n);
 
-function createR9Routes({ directory, credentials, hub, registry, canonicalUsageToday, turns = null, sandbox = () => null, checkpoints = null, memory = null, settings = null, budget = null, lifecycle = null, jobSnapshot = () => null, modelGrants = null, mataDewa = null, team = null, providerAdmin = null, media = null, oauthLogin = null, onboardingChat = null, parallelRuns = 3 }) {
+function createR9Routes({ directory, credentials, hub, registry, canonicalUsageToday, turns = null, sandbox = () => null, checkpoints = null, memory = null, settings = null, budget = null, lifecycle = null, jobSnapshot = () => null, modelGrants = null, mataDewa = null, team = null, providerAdmin = null, media = null, oauthLogin = null, onboardingChat = null, cyber = null, parallelRuns = 3 }) {
   if (!Number.isSafeInteger(parallelRuns) || parallelRuns < 1 || parallelRuns > 3) throw Error('PANDAWA_PARALLEL_INVALID');
   const runsFile = path.join(directory, 'pandawa-runs.jsonl'), receiptsFile = path.join(directory, 'usage-receipts.jsonl');
   const runs = new Map(), byRequest = new Map(), receipts = new Map();
@@ -243,6 +243,29 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
         }
         entries.sort((a, b) => a.t - b.t);
         return json(200, { success: true, data: { entries: entries.slice(-200) } });
+      }
+      // Damar Cyber (F9): Werkudara's real defensive record for the Presence
+      // portal and the Control Cyber page. Two genuine sources only: this
+      // Core's durable Pandawa run registry (Werkudara runs; a run whose
+      // task carries the PATROLI marker is a patrol) and the DCD posture
+      // projection read from the canonical daemon, which owns the single
+      // detection engine. The desktop Core composes no second engine.
+      // Owner only, like the other posture reads. Categories without real
+      // records stay empty here and render as honest empty states.
+      if (p === '/api/r9/cyber' && req.method === 'GET' && !url.search) {
+        if (who !== 'owner') return json(403, { success: false, error: 'OWNER_REQUIRED' });
+        const wk = [...runs.values()].filter(r => r.worker === 'werkudara')
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        const row = r => ({ ...view(r), task: clean(r.task, 300) });
+        const dcd = cyber ? await cyber.daemonPosture().catch(() => ({ available: false, reason: 'DAEMON_TIDAK_TERJANGKAU' }))
+          : { available: false, reason: 'BINDING_TIDAK_TERSEDIA' };
+        return json(200, { success: true, data: {
+          werkudara: { runs: wk.slice(0, 20).map(row), totalRuns: wk.length,
+            completed: wk.filter(r => r.state === 'COMPLETED').length,
+            failed: wk.filter(r => r.state === 'FAILED').length,
+            lastRunAt: wk.length ? wk[0].createdAt : null },
+          patroli: wk.filter(r => /^\s*PATROLI\b/i.test(String(r.task || ''))).slice(0, 12).map(row),
+          dcd, generatedAt: Date.now() } });
       }
       if (p === '/api/r9/lifecycle/restart') {
         if (req.method !== 'POST' || url.search) return json(405, { success: false, error: 'METHOD_NOT_ALLOWED' });

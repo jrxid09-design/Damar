@@ -75,6 +75,11 @@ function cleanEnvironment(directory) {
   env.DAMAR_KEY_STORE = process.env.DAMAR_KEY_STORE && path.isAbsolute(process.env.DAMAR_KEY_STORE) ? process.env.DAMAR_KEY_STORE
     : path.join(process.env.LOCALAPPDATA || path.join(require('node:os').homedir(), 'AppData', 'Local'), 'DAMAR', 'provider-keys');
   if (process.env.DAMAR_EGRESS === 'loopback') env.DAMAR_EGRESS = 'loopback';
+  // Cyber binding target override (loopback only): the desktop Core reads the
+  // DCD posture projection from the canonical daemon at 127.0.0.1:3000 by
+  // default; this exists so a verification harness can point at a scratch
+  // daemon instance instead of the Owner's running one.
+  if (process.env.DAMAR_CYBER_DAEMON_URL && /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(process.env.DAMAR_CYBER_DAEMON_URL)) env.DAMAR_CYBER_DAEMON_URL = process.env.DAMAR_CYBER_DAEMON_URL;
   // The Owner-approved workspace_shell tool runs with the user's real PATH and profile, not the session home.
   for (const [k, v] of Object.entries({ PATH: process.env.PATH, USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME || process.env.USERPROFILE, APPDATA: process.env.APPDATA, LOCALAPPDATA: process.env.LOCALAPPDATA, TEMP: process.env.TEMP, TMP: process.env.TMP })) if (v) env['DAMAR_USER_' + k] = v;
   // Model-grant rollback witness also lives in the real profile, outside every session directory.
@@ -438,6 +443,10 @@ async function child(directory, resume, recovered = false) {
     r9 = require('./r9-routes.cjs').createR9Routes({
       directory, credentials: runtime.credentials, hub, registry, turns, checkpoints, settings: coreSettings, modelGrants, providerAdmin, team, media: mediaSession, oauthLogin, onboardingChat,
       parallelRuns: Number(process.env.DAMAR_PANDAWA_PARALLEL || 3),
+      // Damar Cyber binding (F9): read-only DCD posture projection from the
+      // canonical daemon (the single detection-engine owner). Composition
+      // only; the engine itself is never composed here.
+      cyber: require('./cyber.cjs').createCyberBinding({ installRoot: path.resolve(CANDIDATE, '..', '..') }),
       mataDewa: require('../mata-dewa/index.cjs').createMataDewa({ proactiveAutostart: true, settings: coreSettings, keyStore, cacheFile: path.join(directory, 'mata-dewa-cache.json'), profileDir: path.join(path.dirname(settingsFile), 'mata-dewa'), python, alprDir: path.join(SCRATCH, 'alpr'), // installed: %LOCALAPPDATA%\DAMAR\alpr
         // ALPR watchlist hits join the redacted activity feed (requester: camera label only; owner: plate in `detail`).
         onAlert: a => turns.noteActivity({ kind: 'alert', source: 'mata-dewa', label: String(a.cameraName).slice(0, 40) + ' · watchlist match', detail: a.plate }),

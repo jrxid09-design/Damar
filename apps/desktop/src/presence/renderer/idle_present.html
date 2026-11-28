@@ -973,7 +973,7 @@
     let micStream = null, micAnalyser = null, micDataArray = null, liveMicActive = false;
     // One narrow bridge: renderer -> authenticated Electron main process -> canonical /api/ui.
     // It has no local store, no retry loop, and no authority/grant logic.
-    const presenceTruth = { status: 'NOT_CONNECTED', reason: 'Canonical DAMAR runtime is not connected.', timeoutMs: 8000, conversationId: null, approvals: null, missions: null, notifications: null, providers: null, presence: null, matadewa: null, host: null };
+    const presenceTruth = { status: 'NOT_CONNECTED', reason: 'Canonical DAMAR runtime is not connected.', timeoutMs: 8000, conversationId: null, approvals: null, missions: null, notifications: null, providers: null, presence: null, matadewa: null, cyber: null, host: null };
     const canonicalAdapter = Object.freeze({
       async request(path, method = 'GET', body) {
         if (!window.damarDesktop?.runtimeRequest) return { ok: false, error: { kind: 'NOT_CONNECTED', message: 'Secure desktop bridge unavailable.' } };
@@ -993,6 +993,8 @@
         if (prov.ok) presenceTruth.providers = prov.data?.data || null;
         const mdw = await this.request('/api/ui/presence/matadewa');
         if (mdw.ok) presenceTruth.matadewa = mdw.data?.data || null;
+        const cyb = await this.request('/api/ui/presence/cyber');
+        if (cyb.ok) presenceTruth.cyber = cyb.data?.data || null;
         const host = await this.request('/api/ui/presence/host');
         if (host.ok) presenceTruth.host = host.data?.data || null;
         const ex = await this.request('/api/ui/presence/extras');
@@ -2579,6 +2581,18 @@
           try { const r = await window.damarDesktop?.decidePermission?.({ permissionId: perm.permissionId, decision: b.dataset.decision }); if (out) out.textContent = r && r.ok ? 'Keputusan terkirim.' : 'Keputusan gagal terkirim. Coba lagi.'; if (r && r.ok) setTimeout(() => window.canonicalAdapter?.refresh?.(), 600); }
           catch { if (out) out.textContent = 'Keputusan gagal terkirim. Coba lagi.'; }
         }));
+        return;
+      }
+      if (key === 'dcd' && presenceTruth.cyber != null) {
+        const cy = presenceTruth.cyber, wk = cy.werkudara || { runs: [], totalRuns: 0, completed: 0, failed: 0 }, dcd = cy.dcd || { available: false };
+        const runState = st => st === 'COMPLETED' ? 'Selesai' : st === 'FAILED' ? 'Gagal' : st === 'RUNNING' ? 'Berjalan' : st === 'ACCEPTED' ? 'Menunggu' : st === 'CANCELLED' ? 'Dibatalkan' : 'Hasil belum diketahui';
+        const when = ts => ts ? new Date(ts).toLocaleString('id-ID') : '';
+        const runRows = rows => rows.map(r => `<div class="mdw-row mdw-row-stack"><div class="mdw-row-main">${esc(runState(r.state))}${r.createdAt ? ' · ' + when(r.createdAt) : ''}</div><div class="mdw-row-sub">${esc(r.task || '')}</div>${r.outputPreview ? `<div class="mdw-row-sub">${esc(r.outputPreview)}</div>` : ''}${r.error ? `<div class="mdw-row-sub">${esc(r.error)}</div>` : ''}</div>`).join('');
+        const dcdNote = dcd.available ? `Mesin deteksi DCD di daemon mencatat ${dcd.counts?.total ?? 0} insiden.` : dcd.reason === 'PROYEKSI_BELUM_AKTIF' ? 'Proyeksi DCD belum aktif pada daemon yang berjalan. Proyeksi aktif setelah daemon dimuat ulang; tidak ada data yang ditampilkan sebelum itu.' : dcd.reason === 'KREDENSIAL_TIDAK_TERSEDIA' ? 'Kredensial daemon tidak tersedia pada instalasi ini, jadi postur DCD tidak terbaca.' : 'Daemon Damar tidak terjangkau dari Core, jadi postur DCD tidak terbaca.';
+        const patrolHtml = cy.patroli?.length ? runRows(cy.patroli) : '<div class="mdw-note">Belum ada patroli Werkudara tercatat pada sesi Core ini. Patroli yang dijalankan lewat Damar tampil di sini dengan hasil aslinya.</div>';
+        const incidentHtml = !dcd.available ? '<div class="mdw-note">Menunggu proyeksi daemon terbaca.</div>' : dcd.incidents?.length ? dcd.incidents.map(i => `<div class="mdw-row mdw-row-stack"><div class="mdw-row-main">${esc(i.riskLevel || 'INFO')} · ${esc(i.state || '')}${i.createdAt ? ' · ' + when(i.createdAt) : ''}</div><div class="mdw-row-sub">${esc(i.summary || '')}</div></div>`).join('') : '<div class="mdw-note">Tidak ada insiden tercatat di mesin deteksi saat ini.</div>';
+        const wkHtml = wk.totalRuns ? `<div class="mdw-row mdw-row-stack"><div class="mdw-row-main">${wk.totalRuns} tugas tercatat · ${wk.completed} selesai · ${wk.failed} gagal</div><div class="mdw-row-sub">Terakhir: ${when(wk.lastRunAt)}</div></div>` + runRows((wk.runs || []).slice(0, 4)) : '<div class="mdw-note">Belum ada tugas Werkudara tercatat pada sesi Core ini.</div>';
+        stage.innerHTML = `<div class="mod-header"><div class="mod-title-group"><h2>Cyber Defense</h2></div></div><div class="mod-content"><div class="mdw-grid"><div class="mdw-widget"><div class="mdw-wtitle">Status DCD</div><div class="mdw-hero">${dcd.available ? (dcd.counts?.active ?? 0) + ' insiden aktif' : 'Belum terbaca'}</div><div class="mdw-note">${dcdNote}</div></div><div class="mdw-widget"><div class="mdw-wtitle">Patroli Werkudara</div>${patrolHtml}</div><div class="mdw-widget"><div class="mdw-wtitle">Kejadian pertahanan</div>${incidentHtml}</div><div class="mdw-widget"><div class="mdw-wtitle">Aktivitas Werkudara</div>${wkHtml}</div></div></div>`;
         return;
       }
       if (key === 'dcd' && presenceTruth.notifications != null) {
