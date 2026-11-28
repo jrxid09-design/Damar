@@ -145,6 +145,10 @@
     'You (interjection)': 'Anda (sela)', 'did not reply': 'tidak menjawab', 'synthesis (Decision / Rationale / Dissent)': 'sintesis (Keputusan / Alasan / Perbedaan pendapat)',
     'Open a discussion to follow it live.': 'Buka diskusi untuk mengikutinya secara langsung.', 'Add your view to the discussion…': 'Tambahkan pendapat Anda…',
     'Started in a CLI window: interject or stop it there.': 'Dimulai di jendela CLI: sela atau hentikan dari sana.', 'No discussions yet. Start one here, or with /discuss in the CLI.': 'Belum ada diskusi. Mulai di sini, atau dengan /discuss di CLI.',
+    'Cycle': 'Siklus', 'Turn': 'Giliran', 'Cycle / Turn': 'Siklus / Giliran', 'Extend discussion': 'Lanjutkan diskusi', 'Discussion continued by the Owner': 'Diskusi dilanjutkan oleh Owner',
+    'Reopens the debate chain from the last decision.': 'Membuka lagi rantai debat dari keputusan terakhir.', 'Members (debate)': 'Anggota (debat)', "DAMAR's decision": 'Keputusan DAMAR',
+    'The debate chain resumes from the full transcript, including DAMAR\'s decision. Members answer it turn by turn until they converge or DAMAR rules a deadlock.': 'Rantai debat berlanjut dari transkrip penuh, termasuk keputusan DAMAR. Anggota menjawabnya giliran demi giliran sampai konvergen atau DAMAR memutuskan buntu.',
+    'Debate cycle safety limit (1-100)': 'Batas pengaman siklus debat (1-100)', 'Inherit the main model': 'Warisi model utama', 'Save Pandawa models…': 'Simpan model Pandawa…',
     'Your name (greeting, optional)': 'Nama Anda (sapaan, opsional)', 'How DAMAR addresses you (optional)': 'Sapaan DAMAR untuk Anda (opsional)', 'Memory & Context': 'Memori & Konteks', 'Long-term memory': 'Memori jangka panjang', 'Ask before remembering': 'Tanya sebelum mengingat',
     'Keep memories (days, 0 = forever)': 'Simpan memori (hari, 0 = selamanya)', 'Memory in context (chars, 500-20000)': 'Memori dalam konteks (karakter, 500-20000)', 'Conversation turns kept (0-50)': 'Giliran percakapan disimpan (0-50)',
     'Conversation chars kept (2000-400000)': 'Karakter percakapan disimpan (2000-400000)', 'Core mind block': 'Blok mind Core', 'Export memory…': 'Ekspor memori…', 'Clear workspace memory…': 'Hapus memori ruang kerja…',
@@ -731,32 +735,43 @@
 
   // ---- Pandawa team discussions (Core: /api/r9/pandawa/discussions) ----
   function discussionEvent(e, of) {
-    var box = function (who, text, accent) { return '<div style="border-left:3px solid ' + (accent || 'var(--border-subtle)') + ';padding:6px 10px;margin:6px 0;"><div style="font-size:11px;color:var(--damar-accent);font-family:var(--font-mono);">' + escapeHtml(who) + '</div><div style="font-size:12.5px;color:var(--text-secondary);white-space:pre-wrap;">' + escapeHtml(String(text || '')) + '</div></div>'; };
-    if (e.type === 'round') return '<div class="page-kicker" style="margin-top:10px;">' + escapeHtml(L('Round') + ' ' + e.round + '/' + (e.of || of)) + '</div>';
-    if (e.type === 'message') return box(e.member + ' · ' + L('round') + ' ' + e.round + (e.model ? ' · ' + e.model : ''), e.text);
-    if (e.type === 'owner') return box(L('You (interjection)'), e.text, 'var(--gold-champagne)');
-    if (e.type === 'member_error') return box(String(e.member || '?'), L('did not reply') + ' (' + e.error + ')', 'var(--status-critical)');
-    if (e.type === 'synthesis') return box('DAMAR · ' + L('synthesis (Decision / Rationale / Dissent)'), e.text, 'var(--gold-bright)');
-    if (e.type === 'final') return '<div style="margin-top:8px;">' + statusBadgeHtml(e.status) + (e.reason ? ' <span style="font-size:11.5px;color:var(--text-muted);">' + escapeHtml(e.reason) + '</span>' : '') + (Number.isSafeInteger(e.tokens) ? ' <span style="font-size:11.5px;color:var(--text-muted);">' + e.tokens + ' tokens</span>' : '') + '</div>';
+    // Conversation-style transcript: each turn is a bubble in chain order (member name, turn, model),
+    // Owner interjections sit on the right in gold, and DAMAR's closing decision is its own gold card.
+    if (e.type === 'round') return '<div class="page-kicker" style="margin-top:10px;">' + escapeHtml(L('Cycle') + ' ' + e.round) + '</div>';
+    if (e.type === 'continued') return '<div style="text-align:center;font-size:11px;color:var(--text-muted);margin:10px 0;">' + escapeHtml(L('Discussion continued by the Owner')) + '</div>';
+    if (e.type === 'message' || e.type === 'owner') {
+      var own = e.type === 'owner';
+      var who = own ? L('You (interjection)') : e.member;
+      var meta = (e.turn ? L('Turn') + ' ' + e.turn : L('round') + ' ' + e.round) + (e.model ? ' · ' + e.model : '');
+      return '<div style="display:flex;flex-direction:column;' + (own ? 'align-items:flex-end;' : '') + 'margin:8px 0;">' +
+        '<div style="font-size:11px;color:var(--damar-accent);font-family:var(--font-mono);">' + escapeHtml(who) + ' · ' + escapeHtml(meta) + '</div>' +
+        '<div style="max-width:94%;border:1px solid ' + (own ? 'var(--gold-champagne)' : 'var(--border-subtle)') + ';border-radius:10px;padding:8px 12px;margin-top:3px;font-size:12.5px;color:var(--text-secondary);white-space:pre-wrap;">' + escapeHtml(String(e.text || '')) + '</div></div>';
+    }
+    if (e.type === 'member_error') return '<div style="font-size:11.5px;color:var(--status-critical);margin:6px 0;">' + escapeHtml(String(e.member || '?')) + ' ' + escapeHtml(L('did not reply')) + ' (' + escapeHtml(e.error || '') + ')</div>';
+    if (e.type === 'synthesis') return '<div style="border:1px solid var(--gold-bright);border-radius:10px;padding:10px 14px;margin:12px 0;"><div style="font-size:11px;color:var(--gold-bright);font-family:var(--font-mono);">DAMAR · ' + escapeHtml(L("DAMAR's decision")) + '</div><div style="font-size:12.5px;color:var(--text-secondary);white-space:pre-wrap;margin-top:4px;">' + escapeHtml(String(e.text || '')) + '</div></div>';
+    if (e.type === 'final') { var reasons = { CONSENSUS: 'Konvergen', DEADLOCK: 'Buntu substantif', SAFETY_CEILING: 'Batas pengaman siklus tercapai', TOKEN_BUDGET_REACHED: 'Anggaran token tercapai', NO_MEMBER_REPLIED: 'Tidak ada anggota yang menjawab', MEMBERS_UNREACHABLE: 'Anggota tidak terjangkau', CORE_RESTARTED: 'Core dimulai ulang' };
+      return '<div style="margin-top:8px;">' + statusBadgeHtml(e.status) + (e.reason ? ' <span style="font-size:11.5px;color:var(--text-muted);">' + escapeHtml(reasons[e.reason] || e.reason) + '</span>' : '') + (Number.isSafeInteger(e.tokens) ? ' <span style="font-size:11.5px;color:var(--text-muted);">' + e.tokens + ' tokens</span>' : '') + '</div>'; }
     return '';
   }
   function renderDiscussionsView() {
     var dl = LIVE.d('discussions'), x = state.discussion;
-    var html = pageHeader('DAMAR INTELLIGENCE • PANDAWA TEAM', 'Discussions', 'Team debates and delegations run by Core: each round, the model each member used, DAMAR\'s decision and per-member token usage.', btn('+ New discussion', 'data-new-discussion="1"', 'btn-primary'));
+    var html = pageHeader('DAMAR INTELLIGENCE • PANDAWA TEAM', 'Discussions', 'Team debates run as a sequential chain: each member answers the previous speaker, short and sharp, until they converge or DAMAR rules a deadlock and closes with a decision. Delegations run in parallel.', btn('+ New discussion', 'data-new-discussion="1"', 'btn-primary'));
     if (!dl) return html + panel('Discussions', readState('discussions', 'discussions'), { flush: true });
     html += '<div class="workspace-grid-12">';
-    html += panel('Discussions', table(['Topic', 'Mode', 'State', 'Round', 'Tokens', ''], dl.discussions.slice().reverse().map(function (d) {
-      return ['<span style="color:var(--text-ivory);">' + escapeHtml(String(d.topic || '-').slice(0, 80)) + '</span>', escapeHtml(d.mode), statusBadgeHtml(d.state), '<span class="td-num">' + d.round + '/' + d.maxRounds + '</span>', '<span class="td-num">' + num(d.tokens) + '</span>', btn('Open', 'data-open-discussion="' + escapeHtml(d.discussionId) + '"')];
+    html += panel('Discussions', table(['Topic', 'Mode', 'State', 'Cycle / Turn', 'Tokens', ''], dl.discussions.slice().reverse().map(function (d) {
+      return ['<span style="color:var(--text-ivory);">' + escapeHtml(String(d.topic || '-').slice(0, 80)) + '</span>', escapeHtml(d.mode), statusBadgeHtml(d.state), '<span class="td-num">' + d.round + ' / ' + (d.turns != null ? d.turns : '-') + '</span>', '<span class="td-num">' + num(d.tokens) + '</span>', btn('Open', 'data-open-discussion="' + escapeHtml(d.discussionId) + '"')];
     }), 'No discussions yet. Start one here, or with /discuss in the CLI.'), { span: 5, flush: true });
     if (!x || !x.data) html += panel('Discussion', '<div style="font-size:12px;color:var(--text-muted);">' + escapeHtml(L(x && x.error ? x.error : 'Open a discussion to follow it live.')) + '</div>', { span: 7 });
     else {
       var d = x.data, mine = d.cliSession && d.cliSession === state.control.id, of = d.maxRounds;
-      var head = kvList([kv('Mode', d.mode), kv('State', d.state), kv('Round', d.round + '/' + d.maxRounds),
+      var head = kvList([kv('Mode', d.mode), kv('State', d.state), kv('Cycle', d.round), kv('Turn', d.turns != null ? d.turns : '-'),
         kv('Team', Object.keys(d.models || {}).map(function (m) { var r = d.models[m]; return m + ' → ' + (r ? r.connection + '/' + r.model + (r.assigned ? '' : ' (active)') : '?'); }).join(' · '))]);
       var usage = table(['Member', 'Model', 'Calls', 'In', 'Out'], (d.receipts || []).map(function (r) { return [escapeHtml(r.member), mono(r.connection + '/' + r.model), '<span class="td-num">' + r.calls + '</span>', '<span class="td-num">' + r.inputTokens + '</span>', '<span class="td-num">' + r.outputTokens + (r.estimated ? ' ~' : '') + '</span>']; }), 'No provider calls yet.');
-      var controls = d.state !== 'RUNNING' ? '' : mine
+      var controls = '';
+      if (d.state === 'RUNNING') controls = mine
         ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;"><label for="discInterject" class="skip-link" style="position:absolute;left:-9999px;">' + escapeHtml(L('Interjection')) + '</label><input type="text" class="input-field" id="discInterject" maxlength="2000" style="flex:1;min-width:200px;" placeholder="' + escapeHtml(L('Add your view to the discussion…')) + '" />' + btn('Send', 'data-interject="1"', 'btn-primary') + btn('Stop', 'data-stop-discussion="1"', 'btn-danger') + '</div>'
         : '<div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;">' + escapeHtml(L('Started in a CLI window: interject or stop it there.')) + '</div>';
+      else if (d.mode === 'debate' && mine) controls = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">' + btn('Extend discussion', 'data-extend-discussion="1"', 'btn-primary') + '<span style="font-size:11.5px;color:var(--text-muted);">' + escapeHtml(L('Reopens the debate chain from the last decision.')) + '</span></div>';
       html += panel(String(d.topic || L('Discussion')).slice(0, 90), head + controls + '<h3 style="font-size:12px;margin:14px 0 6px;color:var(--damar-accent);">' + escapeHtml(L('Per-member usage')) + '</h3>' + usage +
         '<h3 style="font-size:12px;margin:14px 0 6px;color:var(--damar-accent);">' + escapeHtml(L('Transcript')) + '</h3><div aria-live="polite">' + (d.events || []).map(function (e) { if (e.type === 'round') of = e.of || of; return discussionEvent(e, of); }).join('') + '</div>', { span: 7, badge: statusBadgeHtml(d.state) });
     }
@@ -792,17 +807,28 @@
   }
   function renderPandawaView() {
     var runs = LIVE.d('runs'), ag = LIVE.d('agents');
+    var st = state.settings; if (!st) ensureSettings();
+    var tmModels = (st && st.ok && st.data.pandawa && st.data.pandawa.models) || {};
+    var pv = LIVE.d('provider');
     var html = pageHeader('DAMAR INTELLIGENCE • MISSION ORCHESTRATION', 'Pandawa Multi-Agent System', 'Owner-approved runs through Core agentHub. Cancel stops queued runs; a running provider call finishes and its result is discarded.',
       '<button type="button" class="btn btn-primary" id="pandawaCreateTaskBtn">' + escapeHtml(L('+ Delegate Run')) + '</button>');
     var workers = runs ? runs.workers : [];
     var byId = {}; (ag ? ag.agents : []).forEach(function (a) { byId[a.id] = a; });
-    html += panel('Pandawa Agent Registry', runs ? table(['Agent', 'Role', 'Availability', 'Active runs', 'Completed'], workers.map(function (w) {
+    var effModel = function (w) { return tmModels[w] ? escapeHtml(tmModels[w]) + ' <span style="color:var(--text-muted);">(diatur)</span>' : escapeHtml(pv ? pv.active + '/' + (pv.model || '-') : '-') + ' <span style="color:var(--text-muted);">(waris)</span>'; };
+    html += panel('Pandawa Agent Registry', runs ? table(['Agent', 'Role', 'Model', 'Availability', 'Active runs', 'Completed'], workers.map(function (w) {
       var mine = runs.runs.filter(function (r) { return r.worker === w; });
       var a = byId[w] || {};
       return ['<div style="font-weight:700;color:var(--damar-gold-bright);">' + escapeHtml(a.label || w) + '</div><div style="font-size:10.5px;font-family:var(--font-mono);color:var(--text-muted);">pandawa:' + escapeHtml(w) + '</div>',
-        '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(shortRole(a)) + '</span>', statusBadgeHtml(a.online === false ? 'OFFLINE' : 'ONLINE'),
+        '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(shortRole(a)) + '</span>',
+        '<span style="font-size:11.5px;font-family:var(--font-mono);color:var(--text-secondary);">' + effModel(w) + '</span>', statusBadgeHtml(a.online === false ? 'OFFLINE' : 'ONLINE'),
         '<span class="td-num">' + mine.filter(function (r) { return TERMINAL.indexOf(r.state) < 0; }).length + '</span>', '<span class="td-num">' + mine.filter(function (r) { return r.state === 'COMPLETED'; }).length + '</span>'];
     })) : readState('runs', 'Pandawa runs'), { flush: true });
+    var refs = modelRefs();
+    var ppSel = function (m) { var cur = tmModels[m] || ''; var opts = cur && refs.indexOf(cur) < 0 ? refs.concat([cur]) : refs;
+      return '<select class="select-field" id="pp_' + m + '" style="width:100%;"><option value=""' + (cur ? '' : ' selected') + '>' + escapeHtml(L('Inherit the main model')) + '</option>' + opts.map(function (r) { return '<option value="' + escapeHtml(r) + '"' + (r === cur ? ' selected' : '') + '>' + escapeHtml(r) + '</option>'; }).join('') + '</select>'; };
+    html += panel('Model per Pandawa', '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">' +
+      ['werkudara', 'sadewa', 'puntadewa', 'nakula', 'janaka'].map(function (m) { return field('pp_' + m, m, ppSel(m)); }).join('') +
+      '</div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);">Kosong berarti anggota itu mewarisi model utama DAMAR. Pilihan berlaku untuk run dan diskusi anggota tersebut, dan tersimpan di pengaturan Core.</span>' + btn('Save Pandawa models…', 'data-save-pandawa-models="1"', 'btn-primary') + '</div>', { span: 12 });
     html += panel('Run Ledger', runsTable(runs ? runs.runs.slice().reverse() : [], !runs), { flush: true, subtitle: runs ? runs.queued + ' queued' : '' });
     return html;
   }
@@ -974,7 +1000,7 @@
       return '<select class="select-field" id="pm_' + m + '" style="width:100%;"><option value=""' + (cur ? '' : ' selected') + '>' + escapeHtml(L(m === 'damar' ? 'Active provider' : "DAMAR's model")) + '</option>' + opts.map(function (r) { return '<option value="' + escapeHtml(r) + '"' + (r === cur ? ' selected' : '') + '>' + escapeHtml(r) + '</option>'; }).join('') + '</select>'; };
     html += panel('Pandawa Team', '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">' +
       ['damar', 'puntadewa', 'werkudara', 'janaka', 'nakula', 'sadewa'].map(function (m) { return field('pm_' + m, m, refSel(m)); }).join('') +
-      num1('pdRounds', 'Discussion rounds (1-100)', 1, 100, (tm.discussion || {}).maxRounds) + field('pdBudget', 'Anggaran token per diskusi (kosong = tanpa batas)', '<input type="number" class="input-field" id="pdBudget" min="1000" style="width:100%;" value="' + ((tm.discussion || {}).tokenBudget == null ? '' : escapeHtml((tm.discussion || {}).tokenBudget)) + '" />') +
+      num1('pdRounds', 'Debate cycle safety limit (1-100)', 1, 100, (tm.discussion || {}).maxRounds) + field('pdBudget', 'Anggaran token per diskusi (kosong = tanpa batas)', '<input type="number" class="input-field" id="pdBudget" min="1000" style="width:100%;" value="' + ((tm.discussion || {}).tokenBudget == null ? '' : escapeHtml((tm.discussion || {}).tokenBudget)) + '" />') +
       num1('pdTimeout', 'Time limit per member reply (seconds, 30-1800)', 30, 1800, (tm.discussion || {}).callTimeoutSec) +
       '</div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(L('Model options come from your connected providers. Empty = DAMAR\'s model (or the active provider for DAMAR).')) + '</span>' + btn('Save team…', 'data-save-team="1"', 'btn-primary') + '</div>', { span: 12 });
     var vx = d.voice || {}, vnum = function (id, label, min, max, step, v) { return field(id, label, '<input type="number" class="input-field" id="' + id + '" min="' + min + '" max="' + max + '" step="' + step + '" style="width:100%;" value="' + escapeHtml(v) + '" />'); };
@@ -1331,11 +1357,25 @@
     },
     'data-stop-discussion': function () { var x = state.discussion; if (!x) return;
       ownerAction('Stop discussion', '<p style="font-size:12.5px;">' + escapeHtml(L('Members finish their current reply; nothing further is sent.')) + '</p>', function () { return core.post('/api/r9/pandawa/discussions/' + x.id + '/cancel', { cliSession: state.control.id, client: state.control.client }); }); },
+    'data-extend-discussion': function () { var x = state.discussion; if (!x) return;
+      ownerAction('Extend discussion', '<p style="font-size:12.5px;">' + escapeHtml(L('The debate chain resumes from the full transcript, including DAMAR\'s decision. Members answer it turn by turn until they converge or DAMAR rules a deadlock.')) + '</p>', function () {
+        return core.post('/api/r9/pandawa/discussions/' + x.id + '/extend', { cliSession: state.control.id, client: state.control.client }).then(function (r) { if (r.ok) openDiscussion(x.id); return r; });
+      }); },
+    'data-save-pandawa-models': function () {
+      var models = {}; ['werkudara', 'sadewa', 'puntadewa', 'nakula', 'janaka'].forEach(function (m) { models[m] = val('pp_' + m) || null; });
+      ownerAction('Save Pandawa models…', '<pre style="font-size:11px;white-space:pre-wrap;">' + escapeHtml(JSON.stringify(models, null, 1)) + '</pre><p style="font-size:12px;">Null berarti anggota itu mewarisi model utama DAMAR.</p>', function () {
+        return controlSession().then(function (id) { return core.post('/api/r9/settings', { action: 'update', cliSession: id, client: state.control.client, values: { pandawa: { models: models } } }); }).then(function (r) { if (r.ok) loadSettings(); return r; });
+      });
+    },
     'data-new-discussion': function () {
       ownerAction('New discussion', field('ndMode', 'Mode', '<select class="select-field" id="ndMode" style="width:100%;"><option value="debate">debate</option><option value="delegate">delegate</option></select>') +
-        field('ndTopic', 'Topic (debate) or one "member: task" per line (delegate)', '<textarea class="input-field" id="ndTopic" maxlength="4000" style="width:100%;min-height:90px;"></textarea>'),
+        field('ndTopic', 'Topic (debate) or one "member: task" per line (delegate)', '<textarea class="input-field" id="ndTopic" maxlength="4000" style="width:100%;min-height:90px;"></textarea>') +
+        '<div style="margin-top:10px;"><div style="font-size:11.5px;color:var(--text-secondary);margin-bottom:5px;">' + escapeHtml(L('Members (debate)')) + '</div><div style="display:flex;gap:10px;flex-wrap:wrap;">' +
+        ['puntadewa', 'werkudara', 'janaka', 'nakula', 'sadewa'].map(function (m) { return '<label style="font-size:12px;display:flex;gap:5px;align-items:center;"><input type="checkbox" id="ndm_' + m + '" checked /> ' + m + '</label>'; }).join('') + '</div></div>',
       function () {
         var mode = val('ndMode'), text = val('ndTopic'), body = { mode: mode, topic: text };
+        if (mode === 'debate') { body.members = ['puntadewa', 'werkudara', 'janaka', 'nakula', 'sadewa'].filter(function (m) { var el = document.getElementById('ndm_' + m); return el && el.checked; });
+          if (body.members.length < 2) { showToast('Pilih minimal dua anggota untuk debat.'); return Promise.reject({ error: 'MEMBERS_MIN_2' }); } }
         if (mode === 'delegate') body.tasks = text.split(/\n|;/).map(function (l) { var i = l.indexOf(':'); return { worker: l.slice(0, i).trim().toLowerCase(), task: l.slice(i + 1).trim() }; }).filter(function (t) { return t.worker && t.task; });
         return controlSession().then(function (id) { body.cliSession = id; body.client = state.control.client; return core.post('/api/r9/pandawa/discussions', body); })
           .then(function (r) { if (r.ok) { navigateTo('discussions'); openDiscussion(r.data.discussionId); } return r; });
