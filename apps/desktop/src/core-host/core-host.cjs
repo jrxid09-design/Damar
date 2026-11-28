@@ -367,9 +367,66 @@ async function child(directory, resume, recovered = false) {
     // executable selection is per-process. select() re-verifies the grant
     // for the exact model; failure leaves the provider non-executable
     // (reported honestly) and never blocks boot.
+    // Boot provider-restore notice: set by the restore fallback below when it
+    // fires (applied or impossible); surfaced on GET /api/r9/provider and in
+    // Control under the provider picker's health strip.
+    const restoreNotice = { current: null };
+    // Fallback for a STALE stored selection: its provider id resolves to no
+    // registry connection, or its model is no longer offered, so the primary
+    // restore below can never succeed. The fallback re-applies an EXISTING
+    // granted selection (never invents a provider, never creates a grant),
+    // then heals the stored selection through recordSelection (the same
+    // writer the Owner route uses). Every outcome is boot-logged and noted.
+    const runRestoreFallback = (sel, trigger) => {
+      (async () => {
+        const note = (restored, reason) => { restoreNotice.current = { at: new Date().toISOString(), stored: { provider: sel.provider, model: sel.model }, restored, reason }; };
+        const stale = now => !!now && now.provider === sel.provider && now.model === sel.model;
+        try {
+          const candidates = registry.list().providers.filter(p => p.kind === 'live' && !p.virtual && p.configured && p.grantStatus === 'granted');
+          let chosen = null;
+          if (candidates.length === 1) chosen = candidates[0];
+          else if (candidates.length > 1) chosen = candidates.find(p => p.id === sel.provider) || null;
+          if (!chosen) {
+            const reason = candidates.length === 0 ? 'NO_GRANTED_CONNECTION' : 'AMBIGUOUS_GRANTED_CONNECTIONS';
+            console.warn('DAMAR provider selection restore fallback impossible:', reason, '(stored ' + sel.provider + '/' + sel.model + ')');
+            note(null, reason); return;
+          }
+          // Deterministic model choice for the fallback connection: the
+          // grant's own model when it names one; else the most recent SETTLED
+          // usage-ledger model this connection actually offers (the product's
+          // own record of what the Owner dispatched); else the stored model
+          // when this connection offers it; else refuse to guess.
+          let model = null;
+          if (chosen.grant && chosen.grant.model && chosen.grant.model !== '*') model = chosen.grant.model;
+          if (!model) {
+            let offered = null;
+            try { offered = await registry.models(chosen.id); } catch { offered = null; }
+            if (!offered) { console.warn('DAMAR provider selection restore fallback impossible: MODEL_LIST_UNAVAILABLE (stored ' + sel.provider + '/' + sel.model + ')'); note(null, 'MODEL_LIST_UNAVAILABLE'); return; }
+            try { const rows = require('./r9-routes.cjs').readJsonl(usageLedgerFile); for (let i = rows.length - 1; i >= 0 && !model; i--) { const r = rows[i]; if (r && r.event === 'SETTLED' && r.provider === chosen.id && offered.includes(r.model)) model = r.model; } } catch {}
+            if (!model && sel.model && offered.includes(sel.model)) model = sel.model;
+          }
+          if (!model) { console.warn('DAMAR provider selection restore fallback impossible: NO_MODEL_DETERMINED (stored ' + sel.provider + '/' + sel.model + ')'); note(null, 'NO_MODEL_DETERMINED'); return; }
+          const delays = [1000, 2000, 4000, 8000, 15000, 15000, 15000];
+          for (let attempt = 0; attempt <= delays.length; attempt++) {
+            if (!stale(coreSettings.view().lastSelection)) { console.log('DAMAR provider selection restore fallback superseded by a newer selection; stopping.'); return; }
+            const a = registry.active();
+            if (a && a.id === chosen.id && a.model === model && a.executable) { console.log('DAMAR provider selection restored by fallback:', chosen.id + '/' + model, '(stored was ' + sel.provider + '/' + sel.model + ')'); break; }
+            try { await registry.select(chosen.id, model); console.log('DAMAR provider selection restored by fallback:', chosen.id + '/' + model, '(stored was ' + sel.provider + '/' + sel.model + ')'); break; }
+            catch (e) {
+              if (attempt === delays.length) { console.warn('DAMAR provider selection restore fallback failed after retries:', e.code || e.message); note(null, 'FALLBACK_SELECT_FAILED'); return; }
+              console.warn('DAMAR provider selection restore fallback attempt ' + (attempt + 1) + ' failed (' + (e.code || e.message) + '); retrying.');
+              await new Promise(r => setTimeout(r, delays[attempt]));
+            }
+          }
+          try { if (stale(coreSettings.view().lastSelection)) coreSettings.recordSelection(chosen.id, model); } catch {}
+          note({ provider: chosen.id, model }, trigger);
+        } catch (e) { console.warn('DAMAR provider selection restore fallback skipped:', e.code || e.message); }
+      })().catch(() => {});
+    };
     try {
       const sel = coreSettings.view().lastSelection;
       const entry = sel ? registry.list().providers.find(p => p.id === sel.provider) : null;
+      if (sel && !entry) runRestoreFallback(sel, 'PROVIDER_NOT_IN_REGISTRY');
       if (sel && entry && !entry.executable) {
         // The provider behind the saved selection may still be warming up when the Core boots (a local
         // router builds its model list inside its own process), so a single immediate select() can fail
@@ -385,7 +442,7 @@ async function child(directory, resume, recovered = false) {
             if (a && a.id === sel.provider && a.model === sel.model && a.executable) { console.log('DAMAR provider selection restored:', sel.provider + '/' + sel.model); return; }
             try { await registry.select(sel.provider, sel.model); console.log('DAMAR provider selection restored:', sel.provider + '/' + sel.model); return; }
             catch (e) {
-              if (attempt === delays.length) { console.warn('DAMAR provider selection restore failed after retries:', e.code || e.message); return; }
+              if (attempt === delays.length) { console.warn('DAMAR provider selection restore failed after retries:', e.code || e.message); if ((e.code || e.message || '') === 'MODEL_NOT_OFFERED_BY_PROVIDER') runRestoreFallback(sel, 'MODEL_NOT_OFFERED_BY_PROVIDER'); return; }
               console.warn('DAMAR provider selection restore attempt ' + (attempt + 1) + ' failed (' + (e.code || e.message) + '); retrying.');
               await new Promise(r => setTimeout(r, delays[attempt]));
             }
@@ -445,7 +502,7 @@ async function child(directory, resume, recovered = false) {
     // First-run onboarding interview (branch A): bounded completions through the router; template branch needs nothing here.
     const onboardingChat = require('./onboarding-chat.cjs').createOnboardingChat({ registry, router: providerRouter });
     r9 = require('./r9-routes.cjs').createR9Routes({
-      directory, credentials: runtime.credentials, hub, registry, turns, checkpoints, settings: coreSettings, modelGrants, providerAdmin, team, media: mediaSession, oauthLogin, onboardingChat,
+      directory, credentials: runtime.credentials, hub, registry, turns, checkpoints, settings: coreSettings, restoreNotice, modelGrants, providerAdmin, team, media: mediaSession, oauthLogin, onboardingChat,
       parallelRuns: Number(process.env.DAMAR_PANDAWA_PARALLEL || 3),
       // Damar Cyber binding (F9): read-only DCD posture projection from the
       // canonical daemon (the single detection-engine owner). Composition

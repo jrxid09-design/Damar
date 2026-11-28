@@ -764,6 +764,22 @@
       '<span><strong style="color:var(--text-ivory);">' + errCount + '</strong> ' + escapeHtml(L('bermasalah')) + '</span>' +
       '<span>' + escapeHtml(L('Model aktif')) + ': <strong style="color:var(--text-ivory);">' + escapeHtml(pv.active || '-') + ' / ' + escapeHtml(pv.model || '-') + '</strong></span>' +
       '<span style="color:var(--text-muted);">' + escapeHtml(L('Tidak ada provider bawaan dan tidak ada default. Semua koneksi adalah milikmu.')) + '</span></div></div>';
+    if (pv.restoreNotice) {
+      var rn = pv.restoreNotice, rnWhy = {
+        PROVIDER_NOT_IN_REGISTRY: 'provider tersimpan sudah tidak ada lagi di daftar koneksi',
+        MODEL_NOT_OFFERED_BY_PROVIDER: 'model tersimpan tidak lagi ditawarkan oleh providernya',
+        NO_GRANTED_CONNECTION: 'tidak ada koneksi terhubung yang modelnya sudah diizinkan',
+        AMBIGUOUS_GRANTED_CONNECTIONS: 'ada beberapa koneksi yang sudah diizinkan dan tidak satu pun cocok dengan provider tersimpan',
+        MODEL_LIST_UNAVAILABLE: 'daftar model koneksi pengganti tidak bisa dibaca',
+        NO_MODEL_DETERMINED: 'tidak ada model pengganti yang bisa ditentukan dengan pasti',
+        FALLBACK_SELECT_FAILED: 'pemilihan koneksi pengganti tetap gagal setelah dicoba berulang'
+      }[rn.reason] || rn.reason;
+      html += '<div class="panel"><div class="panel-body" style="font-size:12.5px;color:var(--text-secondary);">' +
+        (rn.restored
+          ? 'Saat Core menyala, pilihan provider tersimpan <strong style="color:var(--text-ivory);">' + escapeHtml((rn.stored || {}).provider || '-') + ' / ' + escapeHtml((rn.stored || {}).model || '-') + '</strong> tidak bisa dipakai karena ' + escapeHtml(rnWhy) + '. Core memulihkannya ke <strong style="color:var(--text-ivory);">' + escapeHtml(rn.restored.provider) + ' / ' + escapeHtml(rn.restored.model) + '</strong> dari koneksi yang sudah kamu izinkan, dan pilihan tersimpan sudah diperbarui.'
+          : 'Saat Core menyala, pilihan provider tersimpan <strong style="color:var(--text-ivory);">' + escapeHtml((rn.stored || {}).provider || '-') + ' / ' + escapeHtml((rn.stored || {}).model || '-') + '</strong> tidak bisa dipakai dan tidak bisa dipulihkan otomatis karena ' + escapeHtml(rnWhy) + '. Live inference belum aktif; pilih provider dan model secara manual di halaman ini.') +
+        '</div></div>';
+    }
     html += panel('Tersambung (' + live.length + ')', ppGroupBar('connected', 'Koneksi yang sudah tersimpan di Core. Pilih model dari daftar hasil penemuan, lalu jadikan aktif.') +
       (live.length ? live.map(function (p) { return ppRowConn(p, pv); }).join('') : '<div style="padding:12px 0;font-size:12.5px;color:var(--text-muted);">' + escapeHtml(L('Belum ada koneksi. Pilih provider di grup di bawah untuk menghubungkan.')) + '</div>'));
     var oa = LIVE.d('oauth'), oc = oa && oa.connections ? oa.connections[0] : null;

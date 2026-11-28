@@ -67,7 +67,8 @@ const VOICE_RULES = {
 };
 // cli: DAMAR CLI appearance shared by the CLI Settings Center and Control (null until first set/imported, so the CLI can
 // migrate a legacy local profile once). lastSelection: provider/model last accepted by POST /api/r9/provider (recorded by
-// that route only; never writable through settings) so a new CLI/Core session can re-apply it through the same route.
+// that route, and re-recorded by the Core boot restore when its fallback self-heals a stale value; never writable
+// through settings) so a new CLI/Core session can re-apply it through the same route.
 const { themes: CLI_THEMES, legacyThemes: CLI_LEGACY_THEMES } = require('../cli/appearance.cjs');
 const CLI_DEFAULTS = () => ({ theme: 'damar-ember', animateBanner: true, language: 'id', hudPosition: 'left' });  // language: interface language for the CLI and DAMAR Control (Indonesian default; 'en' optional)
 const CLI_RULES = {

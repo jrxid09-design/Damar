@@ -32,7 +32,7 @@ function readJsonl(file) {
 const tokenEq = (a, b) => typeof a === 'string' && typeof b === 'string' && crypto.timingSafeEqual(crypto.createHash('sha256').update(a).digest(), crypto.createHash('sha256').update(b).digest());
 const clean = (s, n) => String(s ?? '').replace(/[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, ' ').slice(0, n);
 
-function createR9Routes({ directory, credentials, hub, registry, canonicalUsageToday, turns = null, sandbox = () => null, checkpoints = null, memory = null, settings = null, budget = null, lifecycle = null, jobSnapshot = () => null, modelGrants = null, mataDewa = null, team = null, providerAdmin = null, media = null, oauthLogin = null, onboardingChat = null, cyber = null, otomasi = null, kapabilitas = null, parallelRuns = 3 }) {
+function createR9Routes({ directory, credentials, hub, registry, canonicalUsageToday, turns = null, sandbox = () => null, checkpoints = null, memory = null, settings = null, budget = null, lifecycle = null, jobSnapshot = () => null, modelGrants = null, mataDewa = null, team = null, providerAdmin = null, media = null, oauthLogin = null, onboardingChat = null, cyber = null, otomasi = null, kapabilitas = null, restoreNotice = null, parallelRuns = 3 }) {
   if (!Number.isSafeInteger(parallelRuns) || parallelRuns < 1 || parallelRuns > 3) throw Error('PANDAWA_PARALLEL_INVALID');
   const runsFile = path.join(directory, 'pandawa-runs.jsonl'), receiptsFile = path.join(directory, 'usage-receipts.jsonl');
   const runs = new Map(), byRequest = new Map(), receipts = new Map();
@@ -493,7 +493,7 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
         if (!/^[a-f0-9]{64}$/.test(s || '') || [...url.searchParams.keys()].length !== 1) return json(400, { success: false, error: 'CLI_SESSION_REQUIRED' });
         return json(200, { success: true, data: { ...usageFor(s), canonicalUsageToday: canonicalUsageToday() } });
       }
-      if (req.method === 'GET' && p === '/api/r9/provider' && !url.search) { const l = registry.list(), a = registry.active(); return json(200, { success: true, data: { ...l, model: a.model, executable: a.executable, liveInference: l.liveInferenceAuthorized } }); }
+      if (req.method === 'GET' && p === '/api/r9/provider' && !url.search) { const l = registry.list(), a = registry.active(); return json(200, { success: true, data: { ...l, model: a.model, executable: a.executable, liveInference: l.liveInferenceAuthorized, restoreNotice: restoreNotice?.current ?? null } }); }
       if (req.method === 'GET' && p === '/api/r9/provider/budget' && !url.search) return json(200, { success: true, data: budget?.view() || { mode: 'offline-test-fixture', attempts: 0, totalTokens: 0, blocked: false } });
       if (req.method === 'GET' && p === '/api/r9/models') {
         const id = url.searchParams.get('provider');
