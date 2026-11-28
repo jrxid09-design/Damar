@@ -1,8 +1,7 @@
 {
-  "active": "openrouter",
   "providers": {
     "openrouter": {
-      "apiKey": "sk-or-v1-GANTI_DENGAN_KUNCI_ANDA",
+      "apiKey": "GANTI_DENGAN_GOOGLE_AI_STUDIO_KEY",
       "baseUrl": "https://openrouter.ai/api/v1",
       "model": "deepseek/deepseek-chat-v3-0324:free"
     },
@@ -12,12 +11,12 @@
       "model": "gemini-flash-latest"
     },
     "openai": {
-      "apiKey": "sk-GANTI_DENGAN_KUNCI_ANDA",
+      "apiKey": "GANTI_DENGAN_GOOGLE_AI_STUDIO_KEY",
       "baseUrl": "https://api.openai.com/v1",
       "model": "gpt-4o-mini"
     },
     "groq": {
-      "apiKey": "gsk_GANTI_DENGAN_KUNCI_ANDA",
+      "apiKey": "GANTI_DENGAN_GOOGLE_AI_STUDIO_KEY",
       "baseUrl": "https://api.groq.com/openai/v1",
       "model": "llama-3.3-70b-versatile"
     },

@@ -44,8 +44,13 @@ contextBridge.exposeInMainWorld('damarDesktop', Object.freeze({
     if (['id', 'en'].includes(values?.language)) out.language = values.language;
     return ipcRenderer.invoke('damar-onboarding-save', out);
   },
-  // Step 0 provider connect: endpoint + key go to main (and on to Core's secret store); nothing comes back but status.
-  connectProvider: request => ipcRenderer.invoke('damar-onboarding-connect', { baseUrl: String(request?.baseUrl || ''), apiKey: String(request?.apiKey || '') }),
+  // Step 0 provider connect: provider id + endpoint + key go to main (and on to Core's secret store); nothing comes back but status.
+  connectProvider: request => ipcRenderer.invoke('damar-onboarding-connect', { provider: String(request?.provider || 'custom'), baseUrl: String(request?.baseUrl || ''), apiKey: String(request?.apiKey || '') }),
+  // Step 0 provider picker: Core's preset list, live connections and OAuth status (no secrets cross).
+  providerPicker: () => ipcRenderer.invoke('damar-onboarding-picker'),
+  // Step 0 OAuth (OpenRouter PKCE): main opens the authorize URL in the Owner's browser, then waits for Core to report the login.
+  oauthStart: () => ipcRenderer.invoke('damar-onboarding-oauth-start'),
+  oauthWait: () => ipcRenderer.invoke('damar-onboarding-oauth-wait'),
   // Branch A interview: only user/assistant turns cross; Core owns the system prompt and the model.
   onboardingChat: messages => ipcRenderer.invoke('damar-onboarding-chat', { messages: (Array.isArray(messages) ? messages : []).slice(-16).map(m => ({ role: m?.role === 'assistant' ? 'assistant' : 'user', content: String(m?.content ?? '').slice(0, 2000) })) }),
   onPresence: listener => {

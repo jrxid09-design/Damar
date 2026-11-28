@@ -324,31 +324,52 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
       if (['id', 'en'].includes(values.language)) payload.language = values.language;
       return ownerPost('/api/r9/presence/onboarding', payload);
     },
-    // First-run onboarding, step 0: connect the Owner's own OpenAI-compatible endpoint as the 'custom'
-    // connection (key remembered in Core's DPAPI store via the existing connect route), prove the key with
-    // the router's key test (reads /models, spends no tokens), then record the Owner's model grant for the
-    // connection - the same journaled grant Control's quick action writes (approval reference
-    // 'first-run-onboarding', all models, 30 days). V2: before selecting, Core probes the catalog
-    // (capability-first policy in onboarding-chat.cjs: responds / tool-calling / streaming / latency;
-    // brain = most capable at acceptable latency, token-heavy Astra class never a silent default) and the
-    // probed brain is selected explicitly (Core requires an explicit, grant-covered model for a live
-    // selection; the Owner can change it any time in Control). If the probe route is unavailable or no
-    // model answers, selection falls back to the first catalog model (v1 behavior, flagged in the result).
-    // Any stage failing leaves the flow free to fall back to the template.
-    async connectProvider({ baseUrl, apiKey } = {}) {
-      if (typeof baseUrl !== 'string' || !/^https?:\/\/\S{1,300}$/.test(baseUrl) || typeof apiKey !== 'string' || !apiKey || apiKey.length > 512) throw Error('CONNECT_INPUT_INVALID');
-      let r = await ownerPost('/api/r9/connect', { provider: 'custom', baseUrl, apiKey, remember: true }, 20000);
+    // First-run onboarding, step 0 (provider picker): connect the Owner's chosen provider through the
+    // existing registry routes. 'custom' is the manual endpoint+key route; any other id is one of Core's
+    // own presets (endpoint and key requirement resolved from the registry's preset list, never invented
+    // here). The key is remembered in Core's DPAPI store via the existing connect route, proven with the
+    // router's key test (reads /models, spends no tokens), then the Owner's model grant is recorded - the
+    // same journaled grant Control's quick action writes (approval reference 'first-run-onboarding', all
+    // models, 30 days). V2: before selecting, Core probes the catalog (capability-first policy in
+    // onboarding-chat.cjs: responds / tool-calling / streaming / latency; brain = most capable at
+    // acceptable latency, token-heavy Astra class never a silent default) and the probed brain is selected
+    // explicitly (Core requires an explicit, grant-covered model for a live selection; the Owner can
+    // change it any time in Control). If the probe route is unavailable or no model answers, selection
+    // falls back to the first catalog model (v1 behavior, flagged in the result). Any stage failing
+    // leaves the flow free to fall back to the template.
+    async connectProvider({ provider = 'custom', baseUrl, apiKey } = {}) {
+      if (typeof provider !== 'string' || !/^[a-z0-9][a-z0-9-]{0,31}$/.test(provider) || provider.includes('--')) throw Error('CONNECT_PROVIDER_INVALID');
+      let preset = null;
+      if (provider !== 'custom' || typeof baseUrl !== 'string' || !baseUrl) {
+        const st = await ownerGet('/api/r9/provider');
+        const presets = Array.isArray(st.body?.data?.presets) ? st.body.data.presets : [];
+        preset = presets.find(x => x && x.id === provider) || null;
+        if ((typeof baseUrl !== 'string' || !baseUrl) && preset && typeof preset.baseUrl === 'string' && preset.baseUrl) baseUrl = preset.baseUrl;
+      }
+      const keyRequired = provider === 'custom' ? true : (preset ? preset.keyRequired !== false : true);
+      if (typeof baseUrl !== 'string' || !/^https?:\/\/\S{1,300}$/.test(baseUrl)) throw Error('CONNECT_INPUT_INVALID');
+      if (keyRequired && (typeof apiKey !== 'string' || !apiKey || apiKey.length > 512)) throw Error('CONNECT_INPUT_INVALID');
+      if (!keyRequired && typeof apiKey !== 'string') apiKey = '';
+      if (apiKey && apiKey.length > 512) throw Error('CONNECT_INPUT_INVALID');
+      const body = { provider, baseUrl, remember: true };
+      if (apiKey) body.apiKey = apiKey;
+      const r = await ownerPost('/api/r9/connect', body, 20000);
       if (!r.ok || r.body?.success !== true) return { ok: false, stage: 'connect', status: r.status, error: r.body?.error || 'CONNECT_FAILED' };
-      r = await ownerPost('/api/r9/provider-admin/test', { provider: 'custom', kind: 'keys' });
+      return this.finishOnboardingConnect(provider);
+    },
+    // The shared tail of every onboarding connect path (API key, local, OAuth): prove the stored key,
+    // read the discovered catalog, grant, probe, and select the probed brain on this connection.
+    async finishOnboardingConnect(provider) {
+      let r = await ownerPost('/api/r9/provider-admin/test', { provider, kind: 'keys' });
       const results = Array.isArray(r.body?.data) ? r.body.data : [];
       if (!r.ok || !results.some(k => k && k.ok)) return { ok: false, stage: 'test', status: r.status, error: results.find(k => k && !k.ok)?.error || r.body?.error || 'PROVIDER_TEST_FAILED' };
       const list = await ownerGet('/api/r9/provider');
-      const prov = list.body?.data?.providers?.find(p => p.id === 'custom' && p.kind === 'live');
+      const prov = list.body?.data?.providers?.find(p => p.id === provider && p.kind === 'live');
       if (!prov?.baseUrl || !prov.configurationVersion) return { ok: false, stage: 'state', status: list.status, error: 'PROVIDER_STATE_UNAVAILABLE' };
-      const catalog = await ownerGet('/api/r9/models?provider=custom');
+      const catalog = await ownerGet('/api/r9/models?provider=' + encodeURIComponent(provider));
       const models = Array.isArray(catalog.body?.data?.models) ? catalog.body.data.models.filter(m => typeof m === 'string' && m) : [];
       if (!models.length) return { ok: false, stage: 'models', status: catalog.status, error: 'NO_MODELS_OFFERED' };
-      r = await ownerPost('/api/r9/provider/model-grant', { expectedVersion: prov.configurationVersion, approval: 'first-run-onboarding', provider: 'custom', baseUrl: prov.baseUrl, model: '*', expiresAt: Date.now() + 30 * 86400000 });
+      r = await ownerPost('/api/r9/provider/model-grant', { expectedVersion: prov.configurationVersion, approval: 'first-run-onboarding', provider, baseUrl: prov.baseUrl, model: '*', expiresAt: Date.now() + 30 * 86400000 });
       if (!r.ok || r.body?.success !== true) return { ok: false, stage: 'grant', status: r.status, error: r.body?.error || 'MODEL_GRANT_FAILED' };
       // V2 probing (bounded server-side; generous client timeout for a full catalog sweep).
       let brain = models[0], reflex = models[0], probes = null, brainTokenHeavy = false, probeUnavailable = false;
@@ -359,9 +380,43 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
         probes = Array.isArray(probe.body.data.results) ? probe.body.data.results : null;
         brainTokenHeavy = probe.body.data.brainTokenHeavy === true;
       } else probeUnavailable = true;
-      r = await ownerPost('/api/r9/provider', { provider: 'custom', model: brain });
+      r = await ownerPost('/api/r9/provider', { provider, model: brain });
       if (!r.ok || r.body?.success !== true) return { ok: false, stage: 'select', status: r.status, error: r.body?.error || 'PROVIDER_SELECT_FAILED' };
-      return { ok: true, provider: 'custom', baseUrl: prov.baseUrl, model: brain, reflex, models: models.length, probes, brainTokenHeavy, ...(probeUnavailable ? { probeUnavailable: true } : {}) };
+      return { ok: true, provider, baseUrl: prov.baseUrl, model: brain, reflex, models: models.length, probes, brainTokenHeavy, ...(probeUnavailable ? { probeUnavailable: true } : {}) };
+    },
+    // Step 0 picker state: Core's own preset list + live connections + the OpenRouter OAuth status,
+    // trimmed to what the picker renders (no keys, no secrets - the routes never return any).
+    async providerPickerState() {
+      const st = await ownerGet('/api/r9/provider');
+      if (!st.ok) return { ok: false, status: st.status, error: st.body?.error || 'PROVIDER_STATE_UNAVAILABLE' };
+      const d = st.body?.data || {};
+      let oauth = null;
+      const oa = await ownerGet('/api/r9/oauth');
+      if (oa.ok) { const c = Array.isArray(oa.body?.data?.connections) ? oa.body.data.connections.find(x => x && x.id === 'openrouter') : null; if (c) oauth = { status: c.status, label: c.identity?.label || null }; }
+      return { ok: true, active: d.active || null, model: d.model || null,
+        presets: (Array.isArray(d.presets) ? d.presets : []).map(x => ({ id: x.id, label: x.label, baseUrl: x.baseUrl, keyRequired: x.keyRequired !== false })),
+        providers: (Array.isArray(d.providers) ? d.providers : []).filter(p => p && p.kind === 'live' && !p.virtual).map(p => ({ id: p.id, label: p.label, baseUrl: p.baseUrl, configured: !!p.configured })),
+        oauth };
+    },
+    // Step 0 OAuth: start the one officially offered third-party login (OpenRouter PKCE). Main opens the
+    // authorize URL in the Owner's browser; the callback lands on Core itself (state is the CSRF proof).
+    async oauthStart() {
+      const r = await ownerPost('/api/r9/oauth/openrouter/start', {});
+      if (!r.ok || typeof r.body?.data?.authorizeUrl !== 'string') return { ok: false, status: r.status, error: r.body?.error || 'OAUTH_START_FAILED' };
+      return { ok: true, authorizeUrl: r.body.data.authorizeUrl };
+    },
+    // Poll the OAuth status until the browser login lands (bounded), then run the same connect tail as
+    // the key path on the synced OpenRouter connection.
+    async oauthWaitAndFinish() {
+      const deadline = Date.now() + 150000;
+      for (;;) {
+        const r = await ownerGet('/api/r9/oauth');
+        const c = r.ok && Array.isArray(r.body?.data?.connections) ? r.body.data.connections.find(x => x && x.id === 'openrouter') : null;
+        if (c && c.status === 'connected') return this.finishOnboardingConnect('openrouter');
+        if (c && c.status === 'invalid') return { ok: false, stage: 'oauth', status: r.status, error: 'OAUTH_KEY_INVALID' };
+        if (Date.now() > deadline) return { ok: false, stage: 'oauth', error: 'OAUTH_TIMEOUT' };
+        await new Promise(res => setTimeout(res, 2500));
+      }
     },
     // First-run onboarding, branch A: one interview turn. Core holds the fixed system prompt and the model
     // choice; the renderer sends only user/assistant turns (validated again in Core).

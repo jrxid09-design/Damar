@@ -25,9 +25,19 @@
   const COPY = {
     id: {
       title: 'Perkenalan Damar',
-      step0Intro: 'Halo, aku Damar, asisten AI pribadi di komputer ini. Sebelum mulai, kamu bisa menghubungkan layanan model AI (endpoint + API key) supaya aku bisa bercakap-cakap langsung denganmu. Kalau dilewati, kita tetap lanjut dengan perkenalan singkat tanpa model.',
+      step0Intro: 'Halo, aku Damar, asisten AI pribadi di komputer ini. Sebelum mulai, kamu bisa menghubungkan layanan model AI supaya aku bisa bercakap-cakap langsung denganmu. Kalau dilewati, kita tetap lanjut dengan perkenalan singkat tanpa model.',
       connectQ: 'Hubungkan <b>aku</b>',
-      connectSub: 'Tempel endpoint provider dan API key-mu di bawah ini, begitu keduanya terisi, aku langsung mencoba terhubung. Tanpa tombol, tanpa ribet.',
+      connectSub: 'Pilih layanan model AI di bawah ini, atau tempel endpoint dan API key secara manual. Begitu terisi, aku langsung mencoba terhubung.',
+      pickerLogin: 'Login akun', pickerApi: 'Kunci API', pickerLocal: 'Lokal, tanpa kunci',
+      pickerRisk: 'Login langganan di luar aplikasi resmi bisa membahayakan akunmu, dan risikonya tanggung jawabmu sendiri. OpenAI dan Anthropic tidak menyediakan login untuk aplikasi pihak ketiga; jalur resminya adalah kunci API.',
+      oauthNote: 'Login OAuth resmi (PKCE) dari OpenRouter untuk aplikasi pihak ketiga.',
+      oauthOpening: 'Membuka login OpenRouter di browser…', oauthWaiting: 'Selesaikan login di browser, aku menunggu di sini…',
+      presetChosen: 'Endpoint {label} terisi. Tempel kunci API-nya, aku langsung mencoba terhubung.',
+      localChosen: 'Menghubungi {label} di komputer ini…',
+      manualLabel: 'Endpoint manual (lanjutan)',
+      noteOpenai: 'Tidak ada login pihak ketiga. Pakai kunci API.',
+      noteAnthropic: 'Login Claude.ai dilarang untuk aplikasi pihak ketiga. Pakai kunci API.',
+      noteAntigravity: 'Belum bisa dihubungkan: tidak ada login pihak ketiga dan tidak ada endpoint kunci API resmi.',
       endpointPlaceholder: 'https://… /v1', apiKeyPlaceholder: 'API key',
       connecting: 'Menghubungi endpoint…',
       connectedDisclosure: 'Terhubung. Aku memakai {model}, paling seimbang di endpoint ini.',
@@ -63,9 +73,19 @@
     },
     en: {
       title: 'Meet Damar',
-      step0Intro: 'Hi, I am Damar, a personal AI assistant on this computer. Before we start, you can connect an AI model service (endpoint + API key) so I can talk with you directly. If you skip it, we will simply continue with a short introduction without a model.',
+      step0Intro: 'Hi, I am Damar, a personal AI assistant on this computer. Before we start, you can connect an AI model service so I can talk with you directly. If you skip it, we will simply continue with a short introduction without a model.',
       connectQ: 'Connect <b>me</b>',
-      connectSub: 'Paste your provider endpoint and API key below, as soon as both are filled, I will try to connect on my own. No buttons, no fuss.',
+      connectSub: 'Pick an AI model service below, or paste an endpoint and API key manually. As soon as both are filled, I will try to connect on my own.',
+      pickerLogin: 'Account login', pickerApi: 'API key', pickerLocal: 'Local, no key',
+      pickerRisk: 'Signing in with a subscription outside the official app can put your account at risk, and that risk is yours. OpenAI and Anthropic offer no third-party sign-in; their official route is an API key.',
+      oauthNote: 'Official OpenRouter OAuth (PKCE) login for third-party apps.',
+      oauthOpening: 'Opening the OpenRouter login in your browser…', oauthWaiting: 'Finish the login in your browser, I will wait here…',
+      presetChosen: 'The {label} endpoint is filled in. Paste its API key and I will try to connect right away.',
+      localChosen: 'Contacting {label} on this computer…',
+      manualLabel: 'Manual endpoint (advanced)',
+      noteOpenai: 'No third-party login. Use an API key.',
+      noteAnthropic: 'Claude.ai login is prohibited for third-party apps. Use an API key.',
+      noteAntigravity: 'Cannot be connected yet: no third-party login and no official API-key endpoint.',
       endpointPlaceholder: 'https://… /v1', apiKeyPlaceholder: 'API key',
       connecting: 'Contacting the endpoint…',
       connectedDisclosure: 'Connected. I am using {model}, the most balanced on this endpoint.',
@@ -244,7 +264,24 @@
     .dob2-msg.user { background: rgba(255,196,86,.18); align-self: flex-end; }
     .dob2-sum { margin-top: 8px; display: flex; flex-direction: column; gap: 10px; align-items: center; cursor: pointer; }
     .dob2-sumrow { font-size: clamp(17px, 1.7vw, 22px); font-weight: 300; color: #f7f1e3; }
-    .dob2-sumrow span { color: rgba(240,232,214,.45); font-size: .72em; letter-spacing: .14em; text-transform: uppercase; margin-right: 12px; }`;
+    .dob2-sumrow span { color: rgba(240,232,214,.45); font-size: .72em; letter-spacing: .14em; text-transform: uppercase; margin-right: 12px; }
+    .dob2-picker { width: min(640px, 92vw); max-height: 32vh; overflow-y: auto; margin-top: 20px;
+      display: flex; flex-direction: column; align-items: stretch; scrollbar-width: thin; }
+    .dob2-pgroup { margin: 12px 0 2px; font-size: 11px; font-weight: 400; letter-spacing: .22em;
+      text-transform: uppercase; color: rgba(240,232,214,.38); text-align: left; }
+    .dob2-prisk { font-size: 12.5px; font-weight: 300; line-height: 1.5; color: rgba(250,214,150,.72);
+      text-align: left; margin-top: 4px; }
+    .dob2-prow { display: flex; align-items: center; gap: 12px; padding: 7px 10px; border-radius: 12px;
+      cursor: pointer; text-align: left; }
+    .dob2-prow:hover { background: rgba(255,255,255,.055); }
+    .dob2-prow.static { cursor: default; }
+    .dob2-prow.static:hover { background: transparent; }
+    .dob2-prow.sel { background: rgba(255,196,86,.10); }
+    .dob2-ptile { width: 30px; height: 30px; border-radius: 9px; flex: none; display: flex;
+      align-items: center; justify-content: center; font-size: 11.5px; font-weight: 600; color: #fff; }
+    .dob2-pname { font-size: 15.5px; font-weight: 300; color: #f7f1e3; }
+    .dob2-pnote { font-size: 12px; font-weight: 300; color: rgba(240,232,214,.45); }
+    .dob2-pbadge { margin-left: auto; font-size: 11px; letter-spacing: .08em; color: rgba(255,217,138,.8); white-space: nowrap; }`;
 
   let els = null;
   const field = (id, type, placeholder) => `<div class="dob2-field"><input type="${type}" id="${id}" placeholder="${placeholder}" autocomplete="off" spellcheck="false"><div class="dob2-line"></div></div>`;
@@ -257,7 +294,9 @@
         <div class="dob2-spoken" id="dobConnectSpoken"></div>
         <div class="dob2-q" id="dobConnectQ"></div>
         <div class="dob2-sub" id="dobConnectSub"></div>
-        <div class="dob2-fields">
+        <div class="dob2-picker" id="dobPicker"></div>
+        <div class="dob2-pgroup" id="dobManualLabel" style="text-align:center;margin-top:20px;"></div>
+        <div class="dob2-fields" style="margin-top:10px;">
           ${field('dobBaseUrl', 'text', '')}
           ${field('dobApiKey', 'password', '')}
         </div>
@@ -295,6 +334,7 @@
       root, status: document.getElementById('dobStatus'), bottomLink: document.getElementById('dobBottomLink'),
       views: Object.fromEntries([...root.querySelectorAll('.dob2-view')].map(v => [v.dataset.view, v])),
       baseUrl: document.getElementById('dobBaseUrl'), apiKey: document.getElementById('dobApiKey'),
+      picker: document.getElementById('dobPicker'),
       nameInput: document.getElementById('dobNameInput'), oke: document.getElementById('dobOke'),
       log: document.getElementById('dobLog'), chatInput: document.getElementById('dobChatInput'),
       stepInput: document.getElementById('dobStepInput'), stepSkip: document.getElementById('dobStepSkip'),
@@ -304,6 +344,7 @@
     document.getElementById('dobConnectQ').innerHTML = C().connectQ;
     document.getElementById('dobConnectSub').textContent = C().connectSub;
     els.baseUrl.placeholder = C().endpointPlaceholder; els.apiKey.placeholder = C().apiKeyPlaceholder;
+    document.getElementById('dobManualLabel').textContent = C().manualLabel;
     document.getElementById('dobNameQ').innerHTML = C().nameQ;
     document.getElementById('dobNameSub').textContent = C().nameSub;
     els.nameInput.placeholder = C().namePlaceholder;
@@ -311,7 +352,7 @@
     els.stepSkip.textContent = C().stepSkip;
     document.getElementById('dobSummaryTitle').textContent = C().summaryTitle;
     els.bottomLink.textContent = C().skipConnect;
-    wireConnect(); wireName(); wireChat(); wireSteps();
+    wireConnect(); wireName(); wireChat(); wireSteps(); loadPicker();
     // Click-through countermand (see the gate-keeping note above): while this gate is visible the
     // window must stay mouse-live over the overlay, or the fields can never be clicked into focus.
     // Registered after the page's own mousemove listener, so it has the last word on each event.
@@ -375,17 +416,112 @@
     if (connState === 'connecting' || connState === 'connected' || connState === 'hero') return;
     if (els.baseUrl.value.trim() && els.apiKey.value.trim() && settled.endpoint && settled.key) startConnect();
   }
-  async function startConnect() {
+  // ---- Step 0 provider picker: grouped rows over Core's own preset list (via the desktop bridge).
+  // Picking an API-key preset fills the endpoint field and arms the auto-connect below; picking a
+  // local preset connects keylessly at once; OpenRouter can also connect through its official OAuth
+  // (PKCE) login. The two fields stay as the manual (advanced) route, provider 'custom'. No provider
+  // is a default: without a pick, the fields behave exactly as before. ----
+  let selectedProvider = 'custom', pickerData = null;
+  function ppTile(label, id) {
+    let h = 0; const s = String(id || label || '?'); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+    const w = String(label || '?').split(/\s+/).filter(Boolean);
+    const ini = ((w[0] || '?').charAt(0) + (w.length > 1 ? w[1].charAt(0) : (w[0] || '?').charAt(1) || '')).toUpperCase();
+    return `<span class="dob2-ptile" style="background:hsl(${h},42%,34%)">${ini.replace(/</g, '')}</span>`;
+  }
+  async function loadPicker() {
+    if (!desktop.providerPicker) return;
+    try { pickerData = await desktop.providerPicker(); } catch { pickerData = null; }
+    renderPicker();
+  }
+  function renderPicker() {
+    const host = els.picker; if (!host) return;
+    if (!pickerData?.ok) { host.innerHTML = ''; return; }
+    const presets = pickerData.presets || [];
+    const connected = new Set((pickerData.providers || []).map(p => p.id));
+    const clean = v => String(v ?? '').replace(/</g, '');
+    const row = (x, note, badge, fn, isStatic) => {
+      const d = document.createElement('div');
+      d.className = 'dob2-prow' + (isStatic ? ' static' : '') + (selectedProvider === x.id ? ' sel' : '');
+      d.innerHTML = `${ppTile(x.label, x.id)}<span><span class="dob2-pname">${clean(x.label)}</span><br><span class="dob2-pnote">${clean(note || '')}</span></span>${badge ? `<span class="dob2-pbadge">${clean(badge)}</span>` : ''}`;
+      if (fn) d.addEventListener('click', fn);
+      return d;
+    };
+    const group = t => { const g = document.createElement('div'); g.className = 'dob2-pgroup'; g.textContent = t; return g; };
+    host.innerHTML = '';
+    host.appendChild(group(C().pickerLogin));
+    const risk = document.createElement('div'); risk.className = 'dob2-prisk'; risk.textContent = C().pickerRisk; host.appendChild(risk);
+    const oa = pickerData.oauth;
+    host.appendChild(row({ id: 'openrouter', label: 'OpenRouter' }, C().oauthNote + (oa?.label ? ' · ' + oa.label : ''), oa?.status === 'connected' ? 'Terhubung' : '', () => startOAuth()));
+    host.appendChild(row({ id: 'openai', label: 'OpenAI' }, C().noteOpenai, '', () => choosePreset('openai')));
+    host.appendChild(row({ id: 'anthropic', label: 'Anthropic' }, C().noteAnthropic, '', () => choosePreset('anthropic')));
+    host.appendChild(row({ id: 'antigravity', label: 'Antigravity' }, C().noteAntigravity, '', null, true));
+    const apiPresets = presets.filter(x => x.keyRequired !== false && x.id !== 'custom' && !connected.has(x.id));
+    if (apiPresets.length) {
+      host.appendChild(group(C().pickerApi));
+      apiPresets.forEach(x => host.appendChild(row(x, x.baseUrl, '', () => choosePreset(x.id))));
+    }
+    const locals = presets.filter(x => x.keyRequired === false && !connected.has(x.id));
+    if (locals.length) {
+      host.appendChild(group(C().pickerLocal));
+      locals.forEach(x => host.appendChild(row(x, x.baseUrl, '', () => startLocal(x))));
+    }
+  }
+  function choosePreset(id) {
+    const x = (pickerData?.presets || []).find(p => p.id === id); if (!x) return;
+    if (connState === 'connecting' || connState === 'connected' || connState === 'hero') return;
+    if (connState === 'failed') clearFailure();
+    selectedProvider = id;
+    els.baseUrl.value = x.baseUrl || '';
+    settled.endpoint = true;
+    renderPicker();
+    setStatus(C().presetChosen.replace('{label}', x.label));
+    try { els.apiKey.focus(); } catch {}
+  }
+  function startLocal(x) {
+    if (connState === 'connecting' || connState === 'connected' || connState === 'hero') return;
+    if (connState === 'failed') clearFailure();
+    selectedProvider = x.id;
+    renderPicker();
+    startConnectWith(x.id, x.baseUrl || '', '', C().localChosen.replace('{label}', x.label));
+  }
+  async function startOAuth() {
+    if (!desktop.oauthStart || !desktop.oauthWait) return;
+    if (connState === 'connecting' || connState === 'connected' || connState === 'hero') return;
+    if (connState === 'failed') clearFailure();
     connState = 'connecting'; phase = 'connect';
-    setStatus(C().connecting);
+    setStatus(C().oauthOpening);
+    orb.set('damarIsSpeaking', true); orb.set('pulseWave', 0.75);
+    setBottomLink('', false);
+    let s;
+    try { s = await desktop.oauthStart(); } catch (e) { s = { ok: false, error: e?.message || 'OAUTH_START_FAILED' }; }
+    if (!s?.ok) { handleConnectResult({ ok: false, error: s?.error || 'OAUTH_START_FAILED' }); return; }
+    setStatus(C().oauthWaiting);
+    let r;
+    try { r = await desktop.oauthWait(); } catch (e) { r = { ok: false, error: e?.message || 'OAUTH_WAIT_FAILED' }; }
+    els.apiKey.value = '';
+    handleConnectResult(r);
+  }
+  // The fields carry a preset's endpoint after a pick; if the Owner edited the endpoint by hand the
+  // manual route ('custom') owns the attempt again.
+  function resolveFieldProvider() {
+    if (selectedProvider === 'custom') return 'custom';
+    const x = (pickerData?.presets || []).find(p => p.id === selectedProvider);
+    return x && els.baseUrl.value.trim() === (x.baseUrl || '') ? selectedProvider : 'custom';
+  }
+  async function startConnect() { startConnectWith(resolveFieldProvider(), els.baseUrl.value.trim(), els.apiKey.value, null); }
+  async function startConnectWith(provider, baseUrl, apiKey, statusText) {
+    connState = 'connecting'; phase = 'connect';
+    setStatus(statusText || C().connecting);
     orb.set('damarIsSpeaking', true); orb.set('pulseWave', 0.75);
     els.baseUrl.readOnly = true; els.apiKey.readOnly = true;
     els.baseUrl.blur(); els.apiKey.blur();
     setBottomLink('', false);
-    const baseUrl = els.baseUrl.value.trim(), apiKey = els.apiKey.value;
     let r;
-    try { r = await desktop.connectProvider({ baseUrl, apiKey }); } catch (e) { r = { ok: false, error: e?.message || 'CONNECT_FAILED' }; }
+    try { r = await desktop.connectProvider({ provider, baseUrl, apiKey }); } catch (e) { r = { ok: false, error: e?.message || 'CONNECT_FAILED' }; }
     els.apiKey.value = '';
+    handleConnectResult(r);
+  }
+  function handleConnectResult(r) {
     if (!r?.ok) {
       connState = 'failed';
       setStatus(C().connectFail.replace('{error}', String(r?.error || 'CONNECT_FAILED')), true);

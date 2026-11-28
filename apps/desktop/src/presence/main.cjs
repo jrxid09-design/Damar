@@ -250,8 +250,30 @@ ipcMain.handle('damar-onboarding-save', async (event, values) => {
 // Step 0 connect: the API key passes through main to Core's secret store only; the result never contains it.
 ipcMain.handle('damar-onboarding-connect', async (event, request) => {
   if (!fromMain(event) || !core) return { ok: false, error: 'NOT_ALLOWED' };
-  try { return await core.connectProvider({ baseUrl: String(request?.baseUrl || ''), apiKey: String(request?.apiKey || '') }); }
+  try { return await core.connectProvider({ provider: String(request?.provider || 'custom'), baseUrl: String(request?.baseUrl || ''), apiKey: String(request?.apiKey || '') }); }
   catch (e) { return { ok: false, error: e?.message || 'CONNECT_FAILED' }; }
+});
+// Step 0 picker state: presets + live connections + OAuth status from Core (the routes return no secrets).
+ipcMain.handle('damar-onboarding-picker', async (event) => {
+  if (!fromMain(event) || !core) return { ok: false, error: 'NOT_ALLOWED' };
+  try { return await core.providerPickerState(); }
+  catch (e) { return { ok: false, error: e?.message || 'PICKER_STATE_FAILED' }; }
+});
+// Step 0 OAuth start: Core mints the PKCE authorize URL; main opens it in the Owner's default browser.
+ipcMain.handle('damar-onboarding-oauth-start', async (event) => {
+  if (!fromMain(event) || !core) return { ok: false, error: 'NOT_ALLOWED' };
+  try {
+    const r = await core.oauthStart();
+    if (!r.ok || !/^https:\/\//.test(r.authorizeUrl || '')) return { ok: false, error: r.error || 'OAUTH_START_FAILED' };
+    await shell.openExternal(r.authorizeUrl);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e?.message || 'OAUTH_START_FAILED' }; }
+});
+// Step 0 OAuth wait: main polls Core until the browser login lands, then Core's connect tail runs there.
+ipcMain.handle('damar-onboarding-oauth-wait', async (event) => {
+  if (!fromMain(event) || !core) return { ok: false, error: 'NOT_ALLOWED' };
+  try { return await core.oauthWaitAndFinish(); }
+  catch (e) { return { ok: false, error: e?.message || 'OAUTH_WAIT_FAILED' }; }
 });
 // Branch A interview turn: Core holds the system prompt and model; main forwards only the turns.
 ipcMain.handle('damar-onboarding-chat', async (event, request) => {

@@ -411,6 +411,7 @@
   var state = {
     activeView: 'overview', sidebarCollapsed: false, mobileDrawerOpen: false, capabilityFilter: 'Tools',
     core: {}, models: {}, loaded: false, endpoint: '', usage: {}, checkpoints: {}, memory: null, settings: null, diagnostics: null, kapabilitas: null,
+    picker: { open: {}, tests: {}, groupMsg: {}, advanced: false },
     control: { id: null, client: null, held: {} }, workspace: ''
   };
   var core = null;
@@ -676,19 +677,149 @@
     return html + panel('Catalog', table(['Provider', 'Model', 'Dispatch', 'State', ''], rows), { flush: true });
   }
 
+  // ---- Visual provider picker -------------------------------------------------------------
+  // Grouped like a router UI (connected / account login / API key / local), one row per provider
+  // with a status badge, per-group Test All, inline connect forms and discovered-model activation.
+  // Bindings only: the existing registry routes (/api/r9/connect, /api/r9/provider,
+  // /api/r9/models), provider-admin test, the model-grant route and the OAuth routes. Nothing is
+  // built in and nothing is a default: rows come from Core's own preset list and live connections.
+  var PP_OAUTH_STATIC = [
+    { id: 'openai', label: 'OpenAI', preset: 'openai', note: 'OpenAI tidak menerbitkan login langganan untuk aplikasi pihak ketiga. Jalur resmi di Damar adalah kunci API OpenAI.' },
+    { id: 'anthropic', label: 'Anthropic', preset: 'anthropic', note: 'Anthropic melarang login Claude.ai lewat aplikasi pihak ketiga. Jalur resmi di Damar adalah kunci API Anthropic.' },
+    { id: 'antigravity', label: 'Antigravity', preset: null, note: 'Tidak ada login pihak ketiga dan tidak ada endpoint kunci API resmi untuk Antigravity, jadi Damar belum bisa menghubungkannya.' }
+  ];
+  var PP_RISK = 'Menghubungkan akun lewat login berlangganan bisa membahayakan langgananmu: penyedia dapat membatasi atau menghentikan akun yang dipakai di luar aplikasi resminya. Pastikan kamu memahami risikonya sebelum menghubungkan akun; risiko itu sepenuhnya tanggung jawabmu.';
+  function ppTile(id, label) {
+    var h = 0; for (var i = 0; i < String(id).length; i++) h = (h * 31 + String(id).charCodeAt(i)) % 360;
+    var words = String(label || id).split(/\s+/).filter(Boolean);
+    var ini = ((words[0] || '?').charAt(0) + (words.length > 1 ? words[1].charAt(0) : (words[0] || '?').charAt(1) || '')).toUpperCase();
+    return '<span aria-hidden="true" style="width:34px;height:34px;border-radius:9px;flex:none;display:inline-flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;color:#fff;background:hsl(' + h + ',42%,34%);">' + escapeHtml(ini) + '</span>';
+  }
+  function ppHumanError(e) {
+    var s = String(e || '');
+    if (/401|AUTH_REQUIRED|AUTH_FAILED|INVALID_KEY|KEY_INVALID|UNAUTHORIZED/i.test(s)) return 'Kunci ditolak penyedia (401). Periksa kunci, atau buat kunci baru di penyedia.';
+    if (/429|RATE_LIMIT|QUOTA/i.test(s)) return 'Batas pemakaian penyedia tercapai (429). Tunggu sebentar, atau naikkan batas di penyedia.';
+    if (/UNREACHABLE|ECONN|NETWORK|FETCH_FAILED|ENOTFOUND/i.test(s)) return 'Endpoint tidak terjangkau. Periksa alamat endpoint dan koneksi internet.';
+    if (/TIMEOUT|TIMED_OUT|ABORT/i.test(s)) return 'Waktu habis saat menghubungi penyedia. Coba lagi.';
+    if (/MODEL_NOT_FOUND|NO_MODELS/i.test(s)) return 'Model tidak ditemukan di penyedia ini.';
+    if (/404/.test(s)) return 'Alamat tidak ditemukan di penyedia (404). Periksa endpoint.';
+    return s || 'Gagal';
+  }
+  function ppConnBadge(p, pv) {
+    if (pv.active === p.id) return statusBadgeHtml('ACTIVE', 'Aktif · ' + (pv.model || p.model || ''));
+    if (!p.configured) return statusBadgeHtml('BLOCKED', 'Belum lengkap');
+    if (p.grantStatus === 'needs-new-grant') return statusBadgeHtml('PENDING', 'Perlu izin model');
+    if (!p.executable) return statusBadgeHtml('BLOCKED', p.reason || 'Tidak bisa dipakai');
+    return statusBadgeHtml('READY', 'Terhubung');
+  }
+  function ppTestChip(id) {
+    var t = state.picker.tests[id]; if (!t) return '';
+    return ' <span style="font-size:11px;' + (t.ok ? 'color:var(--text-secondary);' : 'color:#e88;') + '">' + (t.ok ? 'Lolos uji ' + new Date(t.at).toLocaleTimeString() : 'Uji gagal: ' + escapeHtml(t.error)) + '</span>';
+  }
+  function ppRowConn(p, pv) {
+    var m = state.models[p.id], models = m && m.ok ? m.data.models : (p.model ? [p.model] : []);
+    var cur = pv.active === p.id ? (pv.model || p.model || '') : (p.model || '');
+    var sel = '<select class="select-field" id="ppModel_' + escapeHtml(p.id) + '" style="min-width:170px;max-width:260px;">' +
+      (models.length ? models.map(function (x) { return '<option value="' + escapeHtml(x) + '"' + (x === cur ? ' selected' : '') + '>' + escapeHtml(x) + '</option>'; }).join('') : '<option value="">' + (m ? 'Tidak ada model' : 'Memuat model…') + '</option>') + '</select>';
+    return '<div style="display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--border-subtle);flex-wrap:wrap;">' + ppTile(p.id, p.label) +
+      '<div style="flex:1;min-width:180px;"><div style="font-weight:600;color:var(--text-ivory);">' + escapeHtml(p.label) + ppTestChip(p.id) + '</div>' +
+      '<div style="font-size:11.5px;color:var(--text-muted);font-family:var(--font-mono);overflow-wrap:anywhere;">' + escapeHtml(p.baseUrl || '-') + '</div></div>' +
+      ppConnBadge(p, pv) + sel +
+      '<span style="display:flex;gap:6px;flex-wrap:wrap;">' + btn('Uji', 'data-pp-test="' + escapeHtml(p.id) + '"') +
+      btn(pv.active === p.id ? 'Terapkan model' : p.grantStatus === 'granted' ? 'Jadikan aktif' : 'Izinkan & aktifkan', 'data-pp-activate="' + escapeHtml(p.id) + '"', 'btn-primary') +
+      btn('Putuskan', 'data-remove-provider="' + escapeHtml(p.id) + '"', 'btn-danger') + '</span></div>';
+  }
+  function ppRowPreset(x, groupKey) {
+    var open = !!state.picker.open[x.id];
+    var html = '<div id="ppRow_' + escapeHtml(x.id) + '" style="display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--border-subtle);flex-wrap:wrap;">' + ppTile(x.id, x.label) +
+      '<div style="flex:1;min-width:180px;"><div style="font-weight:600;color:var(--text-ivory);">' + escapeHtml(x.label) + '</div>' +
+      '<div style="font-size:11.5px;color:var(--text-muted);font-family:var(--font-mono);overflow-wrap:anywhere;">' + escapeHtml(x.baseUrl || '') + '</div></div>' +
+      statusBadgeHtml('NOT_CONFIGURED', 'Belum terhubung') +
+      (open ? btn('Batal', 'data-pp-toggle="' + escapeHtml(x.id) + '"') : btn('Hubungkan', 'data-pp-toggle="' + escapeHtml(x.id) + '"', 'btn-primary')) + '</div>';
+    if (open) {
+      html += '<div style="padding:4px 0 12px 46px;display:flex;flex-direction:column;gap:8px;">' +
+        (x.keyRequired !== false
+          ? field('ppKey_' + x.id, 'API key (dikirim ke Core sekali; tidak pernah ditampilkan lagi)', '<input type="password" class="input-field" id="ppKey_' + escapeHtml(x.id) + '" style="width:100%;" autocomplete="off" />') +
+            '<label style="font-size:12px;display:flex;gap:8px;align-items:center;"><input type="checkbox" id="ppRemember_' + escapeHtml(x.id) + '" checked /> ' + escapeHtml(L('Ingat kunci di PC ini (Windows DPAPI)')) + '</label>' +
+            '<div style="font-size:11.5px;color:var(--text-muted);">' + escapeHtml(L('Kuncimu terenkripsi dan tersimpan aman di Core. Setelah terhubung, daftar model penyedia terisi otomatis dan semua model diizinkan selama 30 hari (bisa diubah di panel Model Grant).')) + '</div>'
+          : '<div style="font-size:12px;color:var(--text-secondary);">' + escapeHtml(L('Provider lokal ini berjalan di komputermu sendiri dan tidak membutuhkan kunci API.')) + '</div>') +
+        '<div style="display:flex;justify-content:flex-end;">' + btn('Sambungkan', 'data-pp-connect="' + escapeHtml(x.id) + '"', 'btn-primary') + '</div></div>';
+    }
+    return html;
+  }
+  function ppGroupBar(groupKey, hint) {
+    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><span style="font-size:12px;color:var(--text-secondary);">' + escapeHtml(L(hint)) + '</span>' +
+      btn('Uji semua', 'data-pp-test-all="' + groupKey + '"') + '</div>' +
+      (state.picker.groupMsg[groupKey] ? '<div style="font-size:12px;color:var(--text-secondary);margin-top:6px;">' + escapeHtml(state.picker.groupMsg[groupKey]) + '</div>' : '');
+  }
+  function renderProviderPicker(pv) {
+    var presets = pv.presets || [];
+    var live = pv.providers.filter(function (p) { return p.kind === 'live' && !p.virtual; });
+    var liveIds = {}; live.forEach(function (p) { liveIds[p.id] = true; });
+    var keyPresets = presets.filter(function (x) { return x.keyRequired !== false && x.id !== 'custom' && !liveIds[x.id]; });
+    var localPresets = presets.filter(function (x) { return x.keyRequired === false && !liveIds[x.id]; });
+    var errCount = live.filter(function (p) { return !p.executable; }).length;
+    var html = '<div class="panel" style="border-left:3px solid var(--damar-accent);"><div class="panel-body" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--text-secondary);">' +
+      '<span><strong style="color:var(--text-ivory);">' + live.length + '</strong> ' + escapeHtml(L('terhubung')) + '</span>' +
+      '<span><strong style="color:var(--text-ivory);">' + errCount + '</strong> ' + escapeHtml(L('bermasalah')) + '</span>' +
+      '<span>' + escapeHtml(L('Model aktif')) + ': <strong style="color:var(--text-ivory);">' + escapeHtml(pv.active || '-') + ' / ' + escapeHtml(pv.model || '-') + '</strong></span>' +
+      '<span style="color:var(--text-muted);">' + escapeHtml(L('Tidak ada provider bawaan dan tidak ada default. Semua koneksi adalah milikmu.')) + '</span></div></div>';
+    html += panel('Tersambung (' + live.length + ')', ppGroupBar('connected', 'Koneksi yang sudah tersimpan di Core. Pilih model dari daftar hasil penemuan, lalu jadikan aktif.') +
+      (live.length ? live.map(function (p) { return ppRowConn(p, pv); }).join('') : '<div style="padding:12px 0;font-size:12.5px;color:var(--text-muted);">' + escapeHtml(L('Belum ada koneksi. Pilih provider di grup di bawah untuk menghubungkan.')) + '</div>'));
+    var oa = LIVE.d('oauth'), oc = oa && oa.connections ? oa.connections[0] : null;
+    var orow = '<div style="display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--border-subtle);flex-wrap:wrap;">' + ppTile('openrouter', 'OpenRouter') +
+      '<div style="flex:1;min-width:180px;"><div style="font-weight:600;color:var(--text-ivory);">OpenRouter</div>' +
+      '<div style="font-size:11.5px;color:var(--text-muted);">' + escapeHtml(L('Login OAuth (PKCE) resmi untuk aplikasi pihak ketiga. Kunci hasil login tersimpan di vault Core (DPAPI) dan tersambung ke koneksi OpenRouter.')) +
+      (oc && oc.identity && oc.identity.label ? ' ' + escapeHtml(L('Akun')) + ': ' + escapeHtml(oc.identity.label) + '.' : '') +
+      (oc && oc.status === 'connected' && oc.sync !== 'synced' ? ' ' + escapeHtml(L('Koneksi OpenRouter belum ada: sambungkan dari grup Kunci API atau Lanjutan agar bisa dipilih.')) : '') + '</div></div>' +
+      (oc && oc.status === 'connected' ? statusBadgeHtml('READY', 'Terhubung') : oc && oc.status === 'invalid' ? statusBadgeHtml('BLOCKED', 'Kunci tidak berlaku, login ulang') : statusBadgeHtml('NOT_CONFIGURED', 'Belum terhubung')) +
+      '<span style="display:flex;gap:6px;flex-wrap:wrap;">' + (oc && oc.status === 'connected' ? btn('Uji', 'data-pp-oauth-check="1"') + btn('Putuskan koneksi', 'data-oauth-disconnect="openrouter"') : btn('Login dengan OpenRouter', 'data-oauth-login="openrouter"', 'btn-primary')) + '</span></div>';
+    PP_OAUTH_STATIC.forEach(function (x) {
+      orow += '<div style="display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--border-subtle);flex-wrap:wrap;">' + ppTile(x.id, x.label) +
+        '<div style="flex:1;min-width:180px;"><div style="font-weight:600;color:var(--text-ivory);">' + escapeHtml(x.label) + '</div>' +
+        '<div style="font-size:11.5px;color:var(--text-muted);">' + escapeHtml(L(x.note)) + '</div></div>' +
+        statusBadgeHtml('NOT_CONFIGURED', 'Login tidak tersedia') +
+        (x.preset ? btn('Gunakan kunci API', 'data-pp-apikey="' + escapeHtml(x.preset) + '"') : '') + '</div>';
+    });
+    html += panel('Login akun (OAuth)', ppGroupBar('oauth', 'Hubungkan akun tanpa menempel API key, hanya lewat jalur yang benar-benar diterbitkan penyedia.') +
+      '<div style="margin-top:8px;padding:9px 11px;border:1px solid var(--border-subtle);border-radius:6px;font-size:12px;color:var(--text-secondary);">' + escapeHtml(L(PP_RISK)) + '</div>' + orow);
+    html += panel('Kunci API (' + keyPresets.length + ')', ppGroupBar('apikey', 'Ketuk provider untuk menghubungkannya dengan kunci API.') +
+      (keyPresets.length ? keyPresets.map(function (x) { return ppRowPreset(x, 'apikey'); }).join('') : '<div style="padding:12px 0;font-size:12.5px;color:var(--text-muted);">' + escapeHtml(L('Semua provider kunci API sudah terhubung.')) + '</div>'));
+    html += panel('Lokal, tanpa kunci (' + localPresets.length + ')', ppGroupBar('local', 'Berjalan di komputermu sendiri, tanpa kunci API.') +
+      (localPresets.length ? localPresets.map(function (x) { return ppRowPreset(x, 'local'); }).join('') : '<div style="padding:12px 0;font-size:12.5px;color:var(--text-muted);">' + escapeHtml(L('Semua provider lokal sudah terhubung.')) + '</div>'));
+    html += panel('Lanjutan', state.picker.advanced
+      ? '<p style="font-size:12.5px;color:var(--text-secondary);">' + escapeHtml(L('Formulir lengkap endpoint + kunci manual: id koneksi khusus, endpoint apa pun yang kompatibel dengan OpenAI, dan tunjangan token sisipan. Untuk koneksi yang sudah ada, tombol Connect di panel detail di bawah membuka formulir yang sama.')) + '</p>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">' + btn('Sembunyikan', 'data-pp-advanced="1"') + btn('+ Add provider…', 'data-add-provider="1"', 'btn-primary') + '</div>'
+      : '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><span style="font-size:12.5px;color:var(--text-secondary);">' + escapeHtml(L('Endpoint + kunci manual, id koneksi khusus, dan opsi lanjutan lain.')) + '</span>' + btn('Buka lanjutan', 'data-pp-advanced="1"') + '</div>');
+    return html;
+  }
+  // Picker Test All: run the router key test (metadata only, no tokens) per connection, record the
+  // per-row outcome for the inline chip, and summarize the group in plain language.
+  function ppTestIds(ids, groupKey) {
+    if (!ids.length) { if (groupKey) { state.picker.groupMsg[groupKey] = 'Belum ada koneksi di grup ini.'; renderAll(); } return; }
+    var chain = Promise.resolve(), okCount = 0, fails = [];
+    ids.forEach(function (id) {
+      chain = chain.then(function () {
+        return core.post('/api/r9/provider-admin/test', { provider: id, kind: 'keys' }).then(function (r) {
+          var results = Array.isArray(r.data) ? r.data : [];
+          var ok = r.ok && results.some(function (x) { return x && x.ok; });
+          var bad = results.find(function (x) { return x && !x.ok; });
+          state.picker.tests[id] = { ok: ok, error: ok ? '' : ppHumanError((bad && bad.error) || r.error), at: Date.now() };
+          if (ok) okCount++; else fails.push(id + ': ' + state.picker.tests[id].error);
+        });
+      });
+    });
+    chain.then(function () {
+      if (groupKey) state.picker.groupMsg[groupKey] = okCount + ' lolos · ' + (ids.length - okCount) + ' gagal' + (fails.length ? ' — ' + fails.join('; ') : '');
+      refresh().then(renderAll);
+    });
+  }
   function renderProvidersView() {
     var pv = LIVE.d('provider'), gr = LIVE.d('grant'), bd = LIVE.d('budget');
     var html = pageHeader('PROVIDER GATEWAYS', 'Providers', 'Provider configuration as reported by Core. Keys are write-only: Control can send a key to Core but never reads one back.', btn('View Model Catalog →', 'data-jump-view="models"'));
     html += '<div class="panel" style="border-left:3px solid var(--damar-accent);"><div class="panel-body" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;"><div><div style="font-weight:600;color:var(--text-ivory);">Credential &amp; Secret Protection Boundary</div><div style="font-size:12px;color:var(--text-secondary);">Core stores provider keys (DPAPI, current user). Control shows only whether a key exists.</div></div><span class="badge badge-gold">Write-only credentials</span></div></div>';
     if (!pv) return html + panel('Providers', readState('provider', 'providers'));
-    var oa = LIVE.d('oauth'), oc = oa && oa.connections ? oa.connections[0] : null;
-    html += panel('Login dengan akun (OAuth)', '<p style="font-size:12.5px;color:var(--text-secondary);">' + escapeHtml(L('Hubungkan akun tanpa menempel API key. OpenRouter menawarkan login OAuth (PKCE) resmi untuk aplikasi pihak ketiga: kunci hasil login tersimpan di vault Core (DPAPI), tidak pernah ditampilkan, dan tersambung ke koneksi OpenRouter sebagai provider yang bisa dipilih. Untuk OpenAI/Anthropic langsung, jalur resminya tetap API key.')) + '</p>' +
-      kvList([kv('OpenRouter', oc ? (oc.status === 'connected' ? 'Terhubung' : oc.status === 'invalid' ? 'Kunci tidak berlaku - login ulang' : 'Belum terhubung') : 'Belum terhubung'), kv('Akun', oc && oc.identity && oc.identity.label ? oc.identity.label : '-'), kv('Sinkronisasi provider', oc && oc.sync === 'synced' ? 'tersambung ke koneksi OpenRouter' : oc && oc.status === 'connected' ? 'kunci di vault Core (koneksi OpenRouter belum ada - tambahkan lewat Add provider)' : '-')]) +
-      '<div style="display:flex;gap:8px;justify-content:flex-end;">' + (oc && oc.status === 'connected' ? btn('Putuskan koneksi', 'data-oauth-disconnect="openrouter"') : btn('Login dengan OpenRouter', 'data-oauth-login="openrouter"', 'btn-primary')) + '</div>');
-    // Providers are the Owner's own connections; nothing is built in. Presets only prefill the Add form.
-    html += '<div style="display:flex;justify-content:flex-end;margin:0 0 10px;">' + btn('+ Add provider…', 'data-add-provider="1"', 'btn-primary') + '</div>';
-    if (!pv.providers.some(function (p) { return p.kind === 'live'; })) html += panel('Connect a provider', '<p style="font-size:12.5px;color:var(--text-secondary);">' + escapeHtml(L('No provider is connected. Add any OpenAI-compatible endpoint: OpenAI, OpenRouter, Groq, Ollama, LM Studio, your own router, …')) + '</p>' +
-      '<div style="display:flex;justify-content:flex-end;">' + btn('Connect a provider…', 'data-add-provider="1"', 'btn-primary') + '</div>');
+    html += renderProviderPicker(pv);
     html += '<div class="workspace-grid-12">';
     pv.providers.forEach(function (p) {
       var isActive = pv.active === p.id;
@@ -1041,7 +1172,11 @@
       '</div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);">Pitch and the Jarvis robot preset are post-processing on the local Supertonic M1 output, Indonesian synthesis is unchanged.</span>' + btn('Save voice…', 'data-save-voice="1"', 'btn-primary') + '</div></div>', { span: 12 });
     html += panel('Mobile', '<div data-unavailable="mobile" style="font-size:12px;color:var(--text-secondary);">' + statusBadgeHtml('NOT_AVAILABLE', 'Belum tersedia') + ' Damar Mobile belum terhubung sebagai pendamping. Core saat ini tidak menyimpan pengaturan mobile; pengaturan tampil di sini saat pendamping terhubung.</div>', { span: 6 });
     var pv = LIVE.d('provider');
-    html += panel('Providers & Models', kvList([kv('Active provider', pv ? pv.active : '-'), kv('Active model', pv ? (pv.model || '-') : '-'), kv('Live inference', pv ? (pv.liveInference ? 'authorized' : 'not authorized') : '-')]) +
+    var pvRows = pv ? pv.providers.filter(function (p) { return p.kind === 'live' && !p.virtual; }).map(function (p) {
+      return '<div style="display:flex;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--border-subtle);">' + ppTile(p.id, p.label) +
+        '<span style="flex:1;font-size:12.5px;color:var(--text-ivory);">' + escapeHtml(p.label) + '<br /><span style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);">' + escapeHtml(p.model || '') + '</span></span>' + ppConnBadge(p, pv) + '</div>';
+    }).join('') : '';
+    html += panel('Providers & Models', kvList([kv('Active provider', pv ? pv.active : '-'), kv('Active model', pv ? (pv.model || '-') : '-'), kv('Live inference', pv ? (pv.liveInference ? 'authorized' : 'not authorized') : '-')]) + pvRows +
       '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">' + btn('Providers →', 'data-jump-view="providers"') + btn('Models →', 'data-jump-view="models"') + '</div>', { span: 6 });
     html += helpPanel();
     html += panel('Project Plugins', table(['Plugin', 'Trusted', ''], (d.plugins || []).map(function (p) { return [escapeHtml(p.name), statusBadgeHtml(p.trusted ? 'TRUSTED' : p.error ? 'ERROR' : 'DISABLED', p.trusted ? 'trusted' : p.error || (p.changedSinceTrust ? 'changed since trust' : 'untrusted')), p.key ? btn(p.trusted ? 'Untrust…' : 'Trust…', 'data-trust-plugin="' + escapeHtml(p.key) + '" data-trusted="' + (!p.trusted) + '"') : '']; }), 'No project plugins in the Control session workspace.'), { span: 12, flush: true });
@@ -1272,6 +1407,59 @@
     'data-oauth-disconnect': function () {
       ownerAction('Putuskan koneksi OpenRouter', '<p style="font-size:12.5px;">' + escapeHtml(L('Kunci hasil login OAuth dihapus dari vault Core dan dicabut dari koneksi provider.')) + '</p>',
         function () { return core.post('/api/r9/oauth/openrouter/disconnect', {}); });
+    },
+    // ---- Provider picker actions (bind to the same routes as the detail panels) ----
+    'data-pp-toggle': function (id) { state.picker.open[id] = !state.picker.open[id]; renderAll(); },
+    'data-pp-advanced': function () { state.picker.advanced = !state.picker.advanced; renderAll(); },
+    'data-pp-apikey': function (id) {
+      state.picker.open[id] = true; renderAll();
+      setTimeout(function () { var el = document.getElementById('ppRow_' + id); if (el) el.scrollIntoView({ block: 'center' }); var k = document.getElementById('ppKey_' + id); if (k) k.focus(); }, 30);
+    },
+    'data-pp-connect': function (id) {
+      var pv = LIVE.d('provider'), preset = (pv && pv.presets || []).filter(function (x) { return x.id === id; })[0] || {};
+      var keyEl = document.getElementById('ppKey_' + id), remEl = document.getElementById('ppRemember_' + id);
+      var body = { provider: id, label: preset.label || id, baseUrl: preset.baseUrl || '' };
+      if (keyEl && keyEl.value) body.apiKey = keyEl.value;
+      if (!remEl || remEl.checked) body.remember = true;
+      if (keyEl) keyEl.value = '';
+      core.post('/api/r9/connect', body).then(function (r) {
+        if (!r.ok) { showToast(describeFailure(r)); return; }
+        return core.post('/api/r9/provider/model-grant', Object.assign(grantRequest(id, r.data.baseUrl, 'control-owner-' + Date.now(), '*', 30, '', Date.now()), { expectedVersion: r.data.configurationVersion }))
+          .then(function (g) {
+            state.picker.open[id] = false;
+            showToast(g.ok ? L('Terhubung: ') + id + ' — ' + L('model ditemukan otomatis, semua model diizinkan 30 hari.') : describeFailure(g));
+            refresh().then(renderAll);
+          });
+      });
+    },
+    'data-pp-test': function (id) { ppTestIds([id], null); },
+    'data-pp-oauth-check': function () {
+      core.post('/api/r9/oauth/openrouter/check', {}).then(function (r) {
+        state.picker.groupMsg.oauth = r.ok ? 'OpenRouter: status login diperiksa ulang dari Core.' : ppHumanError(r.error);
+        refresh().then(renderAll);
+      });
+    },
+    'data-pp-test-all': function (group) {
+      var pv = LIVE.d('provider'); if (!pv) return;
+      if (group === 'oauth') { ACTIONS['data-pp-oauth-check'](); return; }
+      var live = pv.providers.filter(function (p) { return p.kind === 'live' && !p.virtual; });
+      var ids;
+      if (group === 'connected') ids = live.map(function (p) { return p.id; });
+      else {
+        var want = {}; (pv.presets || []).forEach(function (x) { if ((group === 'local') === (x.keyRequired === false)) want[x.id] = true; });
+        ids = live.filter(function (p) { return want[p.id]; }).map(function (p) { return p.id; });
+      }
+      ppTestIds(ids, group);
+    },
+    'data-pp-activate': function (id) {
+      var sel = document.getElementById('ppModel_' + id), model = sel ? sel.value : '';
+      var p = providerById(id) || {};
+      ownerAction('Aktifkan model', '<p style="font-size:12.5px;">' + escapeHtml(L('Jadikan')) + ' <strong>' + escapeHtml(model || id) + '</strong> ' + escapeHtml(L('di')) + ' <strong>' + escapeHtml(id) + '</strong> ' + escapeHtml(L('sebagai model aktif Damar?')) + '</p>', function () {
+        var doSelect = function () { return core.post('/api/r9/provider', { provider: id, model: model || undefined, expectedVersion: version() }); };
+        if (p.grantStatus === 'granted') return doSelect();
+        return core.post('/api/r9/provider/model-grant', Object.assign(grantRequest(id, p.baseUrl, 'control-owner-' + Date.now(), '*', 30, '', Date.now()), { expectedVersion: version() }))
+          .then(function (g) { if (!g.ok) return g; return refresh().then(function () { return doSelect(); }); });
+      }, 'Model aktif dipakai semua permukaan Damar. Izin model memberi wewenang inferensi langsung berbayar di koneksi ini.');
     },
     'data-keys-import': function (id) {
       ownerAction('Import keys', field('kiText', 'API keys, one per line (duplicates are skipped; keys are never shown again)', '<textarea class="input-field" id="kiText" rows="6" style="width:100%;font-family:var(--font-mono);" autocomplete="off"></textarea>'),
