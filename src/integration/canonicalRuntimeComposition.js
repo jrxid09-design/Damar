@@ -2764,29 +2764,51 @@ class VoiceRuntime extends EventEmitter {
 
     /**
      * Ucapkan teks lewat TTS (voiceService) lalu putar lewat AudioOutput.
+     * PIPELINE (Owner 2026-11-28: suara terlambat terhadap teks): jawaban
+     * dipecah MicroChunker dan disintesis per potongan; playback potongan
+     * pertama dimulai begitu siap, sintesis potongan berikut berjalan
+     * sambil potongan berjalan diputar. Envelope lip-sync diterbitkan
+     * per potongan dari audio yang benar-benar diputar (bukan dari teks).
      * Graceful: kegagalan TTS/speaker TIDAK melempar ke pemanggil loop.
      */
     async speak(text, { signal = null, generation = this._turnGeneration } = {}) {
 
         this._speaking = true;
         this._cancelled = false;
+        const speakerRef = { current: null };
+        this._activeSpeakerRef = speakerRef;
 
         try {
 
             const voice = require("../services/voiceService");
 
-            // TTS streaming/chunked: voiceService.speak menghasilkan audio
-            // utuh; di masa depan bisa di-chunk. Untuk sekarang, kita
-            // putar hasilnya — dan barge-in bisa membatalkan pemutaran.
-            const { audio } = await voice.speak(text, {
+            const result = await voice.speakPipelined(text, {
                 voice: voice.ttsVoice,
                 localOnly: true,
-                signal
+                signal,
+                speakerRef,
+                play: audio => this.output.play(audio),
+                onChunk: info => {
+                    if (info?.envelope) {
+                        telemetry.publish("voice:chunk", {
+                            chars: info.text.length,
+                            durationMs: info.durationMs,
+                            playStartMs: info.playStartMs,
+                            envelope: { frameMs: info.envelope.frameMs, frames: info.envelope.frames }
+                        });
+                    }
+                }
             });
 
             if (this._cancelled || signal?.aborted || generation !== this._turnGeneration) return;
 
-            await this.output.play(audio);
+            // Kegagalan playback / sintesis total tetap tercatat seperti dulu
+            // (speak() utuh dulu melempar di titik yang sama).
+            if (result?.playError) throw new Error(result.playError);
+            if (!result?.interrupted && result?.stats?.playedChunks === 0 && result?.stats?.synthErrors > 0) {
+                const first = (result.chunks || []).find(c => c.error);
+                throw new Error(first?.error || "sintesis gagal");
+            }
 
         }
         catch (error) {
@@ -2795,6 +2817,7 @@ class VoiceRuntime extends EventEmitter {
             telemetry.warn(`[voice] TTS/putar gagal: ${error.message}`);
         }
         finally {
+            this._activeSpeakerRef = null;
             this._speaking = false;
         }
 
@@ -2806,6 +2829,11 @@ class VoiceRuntime extends EventEmitter {
     async interrupt() {
 
         this._cancelled = true;
+        // Barge-in juga memotong pipeline TTS (bukan hanya playback): antrean
+        // sintesis dibuang agar giliran tidak menyusul setelah interupsi.
+        if (this._activeSpeakerRef?.current) {
+            try { this._activeSpeakerRef.current.interrupt(); } catch { /* abaikan */ }
+        }
         this._cancelActiveTurn();
         await this._finalizeCapture(this._activeCapture);
 

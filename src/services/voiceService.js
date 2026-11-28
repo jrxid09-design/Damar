@@ -473,6 +473,67 @@ class VoiceService {
 
     }
 
+    /**
+     * Ucapkan teks secara PIPELINE (chunked): MicroChunker memecah teks
+     * menjadi potongan kata/klausa, tiap potongan disintesis lewat rantai
+     * mesin yang sama dengan speak() (format WAV agar envelope lip-sync
+     * dihitung dari audio asli), dan playback tiap potongan dimulai begitu
+     * potongannya siap — sintesis potongan berikut berjalan sambil potongan
+     * berjalan diputar. Audio PERTAMA tidak lagi menunggu sintesis seluruh
+     * jawaban, dan audio tidak lagi menumpuk di akhir: celah teks-selesai
+     * ke audio-selesai tinggal ekor potongan terakhir.
+     *
+     * @param {string} text jawaban (hari ini think() mengembalikannya
+     *   sekaligus; pipeline tetap memotongnya secara progresif)
+     * @param {object} opts
+     * @param {string} [opts.voice]
+     * @param {boolean} [opts.localOnly]
+     * @param {AbortSignal} [opts.signal]
+     * @param {Function} opts.play async (audio, { durationMs }) => void —
+     *   dipanggil per potongan, berurutan; durationMs dari envelope WAV
+     *   (null bila audio bukan WAV)
+     * @param {Function} [opts.onChunk] (info) => void — per potongan yang
+     *   diputar: { text, synthMs, durationMs, playStartMs, envelope }
+     * @param {Function} [opts.onEvent] (ev) => void — coalesce/retry/error
+     * @param {object} [opts.speakerRef] { current } — diisi speaker aktif
+     *   agar pemanggil bisa interrupt() dari luar
+     * @returns {Promise<{ interrupted, firstAudioMs, textCompleteMs,
+     *   totalMs, chunks, stats, playError? }>} hasil StreamingSpeaker;
+     *   playError terisi bila playback sempat gagal (speak() tidak pernah
+     *   melempar atas kegagalan play — pemanggil yang memutuskan)
+     */
+    async speakPipelined(text, { voice = null, localOnly = false, signal = null, play, onChunk = null, onEvent = null, speakerRef = null } = {}) {
+        if (typeof play !== "function") throw new Error("speakPipelined butuh play(audio, info)");
+        const { StreamingSpeaker } = require("../voice/local/streaming");
+        const { computeEnvelope } = require("../voice/providers/speechEnvelope");
+        let playError = null;
+        const speaker = new StreamingSpeaker({
+            synthesize: async chunkText => {
+                const out = await this.speak(chunkText, { voice, format: "wav", localOnly, signal });
+                return { audio: out.audio };
+            },
+            play: async audio => {
+                let durationMs = null;
+                try { durationMs = computeEnvelope(audio, { frameMs: 50 }).durationMs; } catch { /* bukan WAV: pemanggil tetap memutar */ }
+                try {
+                    await play(audio, { durationMs });
+                } catch (error) {
+                    if (!playError) playError = error;
+                    throw error; // StreamingSpeaker menelan error play; dicatat di sini
+                }
+            },
+            onChunk, onEvent
+        });
+        if (speakerRef && typeof speakerRef === "object") speakerRef.current = speaker;
+        try {
+            const result = await speaker.speak([String(text ?? "")], { signal });
+            if (playError) result.playError = playError.message;
+            return result;
+        } finally {
+            if (speakerRef && typeof speakerRef === "object" && speakerRef.current === speaker) speakerRef.current = null;
+        }
+    }
+
 
     /**
      * Transkripsi audio menjadi teks.
