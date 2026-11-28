@@ -205,6 +205,49 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
       const ev = events.find(e => e.kind === 'permission' && e.permissionId === permissionId);
       return ev && typeof ev.detail === 'string' ? ev.detail.replace(/[\x00-\x1f\x7f-\x9f]/g, ' ').slice(0, 140) : null;
     },
+    // DAMAR gateway admin view (owner read): settings + key metadata and
+    // usage. The notch's worker rows project from this (agents connected
+    // to Damar's gateway); the view never carries a key, by Core's design.
+    async gatewayView() {
+      const r = await ownerGet('/api/r9/gateway');
+      return r.ok && r.body?.success === true ? r.body.data : null;
+    },
+    // Notch file drop intake (Owner 2026-11-28, Coucou drop parity): the
+    // main process reads the dropped files over its fixed IPC (validated,
+    // size-capped) and hands them here. They are stored under the Owner's
+    // home - the Presence chat session's workspace root - in 'Damar
+    // Drop', recorded in a manifest in this Core session directory, and
+    // the next chat turn carries them as context (see chat()).
+    dropFiles(entries) {
+      const dir = path.join(require('node:os').homedir(), 'Damar Drop');
+      fs.mkdirSync(dir, { recursive: true });
+      const manifest = path.join(sessionDirectory, 'dropped-files.jsonl');
+      const saved = [];
+      for (const e of Array.isArray(entries) ? entries.slice(0, 5) : []) {
+        const base = path.basename(String(e?.name || 'berkas')).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 120) || 'berkas';
+        const data = Buffer.from(String(e?.dataBase64 || ''), 'base64');
+        if (!data.length || data.length > 25 * 1024 * 1024) continue;
+        let target = path.join(dir, base);
+        if (fs.existsSync(target)) { const ext = path.extname(base), stem = base.slice(0, base.length - ext.length); target = path.join(dir, stem + ' ' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + ext); }
+        fs.writeFileSync(target, data, { flag: 'wx' });
+        fs.appendFileSync(manifest, JSON.stringify({ name: base, stored: target, size: data.length, at: new Date().toISOString(), consumed: false }) + '\n');
+        saved.push({ name: base, stored: target, size: data.length });
+      }
+      return { ok: saved.length > 0, saved };
+    },
+    // The attachment note for the next chat turn, built from unconsumed
+    // drops; consuming marks the manifest rows so a file is announced
+    // exactly once. Returns '' when nothing is pending.
+    _consumeDropNote() {
+      const manifest = path.join(sessionDirectory, 'dropped-files.jsonl');
+      let rows = [];
+      try { rows = fs.readFileSync(manifest, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return ''; }
+      const pending = rows.filter(r => r && r.consumed !== true && typeof r.stored === 'string');
+      if (!pending.length) return '';
+      for (const r of pending) r.consumed = true;
+      try { fs.writeFileSync(manifest, rows.map(r => JSON.stringify(r)).join('\n') + '\n'); } catch {}
+      return '[Lampiran dari Notch: ' + pending.map(r => 'berkas "' + r.name + '" tersimpan di ' + r.stored).join('; ') + '. Berkas ini diberikan pemilik lewat Notch untuk tugas ini.]';
+    },
     // Key-point extras for the Presence portals (Owner 2026-11-28): Devices,
     // Capabilities, Memory, Projects and Finance render REAL Core data, never
     // a bounce placeholder. Same stores Control reads. Cached 20 s.
@@ -349,12 +392,17 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
     async chat(text, onDelta, onPhase, onStep) {
       if (typeof text !== 'string' || !text.trim() || text.length > 8000) return { ok: false, status: 400, error: 'TEXT_REQUIRED' };
       const cwd = require('node:os').homedir();
+      // Files dropped on the Notch since the last turn ride along as
+      // context: the note names them and where they were stored. The
+      // surface's own history keeps the Owner's raw text (below).
+      let turnText = text;
+      try { const note = this._consumeDropNote(); if (note) turnText = note + '\n\n' + text; } catch {}
       let cliSession = await this.ensureChatSession();
-      let started = await ownerPost('/api/r9/turns', { cliSession, client: CHAT_CLIENT, text, cwd }, 30000);
+      let started = await ownerPost('/api/r9/turns', { cliSession, client: CHAT_CLIENT, text: turnText, cwd }, 30000);
       if (!started.ok && ['SESSION_NOT_ATTACHED', 'SESSION_NOT_FOUND', 'SESSION_CLOSED'].includes(started.body?.error)) {
         chatState.sessionId = null;
         cliSession = await this.ensureChatSession();
-        started = await ownerPost('/api/r9/turns', { cliSession, client: CHAT_CLIENT, text, cwd }, 30000);
+        started = await ownerPost('/api/r9/turns', { cliSession, client: CHAT_CLIENT, text: turnText, cwd }, 30000);
       }
       if (!started.ok || typeof started.body?.data?.turnId !== 'string') return { ok: false, status: started.status, error: started.body?.error || 'TURN_START_FAILED' };
       const turnId = started.body.data.turnId;

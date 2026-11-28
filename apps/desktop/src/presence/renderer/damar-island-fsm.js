@@ -31,6 +31,15 @@ class DamarIslandFSM {
     this.notchHideAfterMs = notchHideAfterMs;
     this.onTransition = null;
     this.timers = new Map();
+    // Coucou alert parity: an unanswered permission PINS the island open -
+    // the hide timer must not take it away before the Owner decides.
+    this.pinned = false;
+  }
+
+  setPinned(v) {
+    this.pinned = !!v;
+    if (this.pinned) this.clear('notchHide');
+    else if (this.state === 'compact' || this.state === 'expanded') this.scheduleNotchHide();
   }
 
   setIntervals({ orbMorphAfterMs, morphMs, notchHideAfterMs } = {}) {
@@ -45,6 +54,8 @@ class DamarIslandFSM {
   scheduleNotchHide() {
     // Notch yang terus tampil tanpa aktivitas pointer akhirnya sembunyi penuh;
     // aktivitas pointer (notchActivity) mengulang jendelanya. <= 0 = nonaktif.
+    // Terkunci oleh izin yang belum dijawab: timer tidak berjalan sama sekali.
+    if (this.pinned) { this.clear('notchHide'); return; }
     if (!Number.isFinite(this.notchHideAfterMs) || this.notchHideAfterMs <= 0) { this.clear('notchHide'); return; }
     this.schedule('notchHide', this.notchHideAfterMs, () => this.hide());
   }

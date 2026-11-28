@@ -139,6 +139,44 @@ function projectSessionPills(sessions = [], privacy = 'redacted') {
   return [...byLabel.values()].slice(0, 8).map(({ closed, ...pill }) => pill);
 }
 
+// Worker rows for the notch (Coucou agent-parity pass, Owner 2026-11-28):
+// the agents Damar is connected to, projected from Core's own registries -
+// NEVER from surface-local state. Two real sources exist in the desktop
+// Core today: (1) Pandawa runs (Core's worker registry: ACCEPTED waits,
+// RUNNING runs, terminal states land as done/failed and age out after
+// 15 minutes so a finished worker is seen landing, not kept forever);
+// (2) DAMAR gateway keys (external agents and harnesses connected to
+// Damar's OpenAI-compatible gateway; a live key is a connection, not a
+// task, so its state is 'connected' with its real usage count). External
+// MCP worker sessions (agentfed Lane 2) are composed in the daemon, not
+// in this Core, so they cannot appear here - no row is ever invented.
+const WORKER_STATE = { ACCEPTED: 'waiting', RUNNING: 'running', COMPLETED: 'done', FAILED: 'failed', CANCELLED: 'done', OUTCOME_UNKNOWN: 'failed' };
+const WORKER_RANK = { running: 0, waiting: 1, failed: 2, done: 3, connected: 4 };
+function projectWorkers(runs = [], gateway = null, privacy = 'redacted', now = Date.now()) {
+  const rows = [];
+  for (const r of Array.isArray(runs) ? runs : []) {
+    if (!r || typeof r !== 'object') continue;
+    const state = WORKER_STATE[r.state];
+    if (!state) continue;
+    const updatedAt = Number.isSafeInteger(r.updatedAt) ? r.updatedAt : null;
+    if ((state === 'done' || state === 'failed') && (updatedAt === null || now - updatedAt > 900000)) continue;
+    const w = text(r.worker, 20);
+    rows.push({ kind: 'pandawa', name: privacy === 'redacted' ? (w ? 'Pandawa ' + w.charAt(0).toUpperCase() + w.slice(1) : 'Pandawa') : 'Pekerja Damar',
+      state, detail: privacy === 'redacted' ? text(r.model, 60) : null, at: updatedAt });
+  }
+  if (gateway && gateway.settings?.enabled === true && Array.isArray(gateway.keys)) {
+    for (const k of gateway.keys) {
+      if (!k || k.revokedAt) continue;
+      const requests = Number.isSafeInteger(k.usage?.requests) ? k.usage.requests : 0;
+      rows.push({ kind: 'gateway', name: privacy === 'redacted' ? (text(k.label, 40) || 'Agen gateway') : 'Agen terhubung',
+        state: 'connected', detail: requests > 0 ? requests + ' permintaan' : null,
+        at: typeof k.usage?.lastUsed === 'string' ? Date.parse(k.usage.lastUsed) || null : null });
+    }
+  }
+  rows.sort((a, b) => (WORKER_RANK[a.state] - WORKER_RANK[b.state]) || ((b.at || 0) - (a.at || 0)));
+  return rows.slice(0, 6);
+}
+
 // Now-playing for the music pill (Fase 3a): projected from the SMTC sense in core-host
 // (core.media). Unavailable stays null - the notch shows no pill rather than a fake track.
 // Artwork (the session's real SMTC thumbnail, a data URL from core-host) is only
@@ -201,4 +239,4 @@ function activityRows(activity = [], privacy = 'redacted') {
     .map(a => (a.kind === 'alert' && privacy === 'counts-only' ? { ...a, label: null } : a));
 }
 
-module.exports = { project, statusLine, pendingPermission, activityRow, activityRows, projectSessionPills, projectMedia, PRIVACY };
+module.exports = { project, statusLine, pendingPermission, activityRow, activityRows, projectSessionPills, projectMedia, projectWorkers, PRIVACY };

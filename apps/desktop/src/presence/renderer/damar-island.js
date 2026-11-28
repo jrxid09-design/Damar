@@ -102,7 +102,7 @@
        status line, centered at the bottom, while the greeting holds. */
     #damarIsland[data-state="expanded"][data-view="greeting"] .di-stage { left:50%; transform:translateX(-50%); width:220px; }
     #damarIsland[data-state="expanded"][data-view="greeting"] .di-body { justify-content:flex-end; align-items:center; padding-left:16px; }
-    #damarIsland[data-state="expanded"][data-view="greeting"] .di-pills, #damarIsland[data-state="expanded"][data-view="greeting"] .di-media, #damarIsland[data-state="expanded"][data-view="greeting"] .di-controls { display:none; }
+    #damarIsland[data-state="expanded"][data-view="greeting"] .di-pills, #damarIsland[data-state="expanded"][data-view="greeting"] .di-media, #damarIsland[data-state="expanded"][data-view="greeting"] .di-controls, #damarIsland[data-state="expanded"][data-view="greeting"] .di-workers, #damarIsland[data-state="expanded"][data-view="greeting"] .di-dropped { display:none; }
     #damarIsland .di-status { margin:0; color:#f5f6f8; font-size:13px; font-weight:500; line-height:22px; min-height:22px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     #damarIsland[data-attention="permission"] .di-status { font-size:15px; font-weight:600; }
     /* Owner 2026-11-27: garis status ("Core READY ...") tidak tampil di Notch yang mengembang -
@@ -180,6 +180,37 @@
     #damarIsland .di-media button:hover { border-color:rgba(245,197,88,.45); color:#fbeecb; }
     #damarIsland .di-media button { padding:7px 10px; }
     #damarIsland .di-controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; }
+    /* Worker rows + compact minis + drop view (Coucou agent/drop parity,
+       Owner 2026-11-28). Same card language as the rest of the island:
+       #141518 stage, gold-ember accents, no new animation variables - the
+       only keyframe is the running dot's state pulse, like diEq/diEmberPulse. */
+    #damarIsland .di-head { position:relative; }
+    #damarIsland .di-minis { display:none; position:absolute; right:16px; top:50%; transform:translateY(-50%); gap:5px; align-items:center; }
+    #damarIsland[data-state="compact"] .di-minis, #damarIsland[data-state="morph"] .di-minis { display:flex; }
+    #damarIsland .di-mini { width:8px; height:8px; border-radius:50%; background:#8a8f98; flex:none; }
+    #damarIsland .di-mini[data-state="running"] { background:#f5c558; box-shadow:0 0 8px rgba(245,197,88,.8); animation:diDotPulse 1.6s ease-in-out infinite; }
+    #damarIsland .di-mini[data-state="waiting"], #damarIsland .di-worker-dot[data-state="waiting"] { background:#d9a441; }
+    #damarIsland .di-mini[data-state="done"], #damarIsland .di-worker-dot[data-state="done"] { background:#7bc47f; }
+    #damarIsland .di-mini[data-state="failed"], #damarIsland .di-worker-dot[data-state="failed"] { background:#ff8d97; }
+    #damarIsland .di-mini[data-state="connected"], #damarIsland .di-worker-dot[data-state="connected"] { background:#9db4c8; }
+    #damarIsland .di-workers { display:flex; flex-direction:column; gap:5px; }
+    #damarIsland .di-workers[hidden] { display:none; }
+    #damarIsland .di-worker { display:flex; align-items:center; gap:8px; font-size:12.5px; color:#e8e9ec; min-width:0; }
+    #damarIsland .di-worker-dot { width:8px; height:8px; border-radius:50%; flex:none; background:#8a8f98; }
+    #damarIsland .di-worker-dot[data-state="running"] { background:#f5c558; box-shadow:0 0 8px rgba(245,197,88,.8); animation:diDotPulse 1.6s ease-in-out infinite; }
+    #damarIsland .di-worker-name { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #damarIsland .di-worker-state { color:#9398a1; font-size:11.5px; white-space:nowrap; }
+    #damarIsland .di-worker-detail { color:#6f747e; font-size:11px; margin-left:auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:150px; }
+    @keyframes diDotPulse { 0%,100% { opacity:1; } 50% { opacity:.45; } }
+    #damarIsland[data-state="expanded"][data-view="workers"] { height:196px; }
+    #damarIsland[data-view="workers"] .di-pills, #damarIsland[data-view="workers"] .di-status { display:none; }
+    #damarIsland[data-dense="media"] .di-workers { display:none; }
+    #damarIsland[data-state="expanded"][data-view="drop"] { height:176px; }
+    #damarIsland .di-drop { display:none; border:1.5px dashed rgba(245,197,88,.55); border-radius:14px; padding:18px 12px; text-align:center; color:#fbeecb; font-size:13px; background:rgba(251,146,60,.07); }
+    #damarIsland[data-view="drop"] .di-drop { display:block; }
+    #damarIsland[data-view="drop"] .di-pills, #damarIsland[data-view="drop"] .di-media, #damarIsland[data-view="drop"] .di-controls, #damarIsland[data-view="drop"] .di-workers, #damarIsland[data-view="drop"] .di-status, #damarIsland[data-view="drop"] .di-dropped { display:none; }
+    #damarIsland .di-dropped { margin:0; font-size:12px; color:#f5c558; text-align:center; }
+    #damarIsland .di-dropped[hidden] { display:none; }
     #damarIsland button { border:1px solid transparent; border-radius:999px; padding:7px 13px; background:rgba(255,255,255,.09); color:#f1f2f4; font:500 12.5px/1.25 'Segoe UI',sans-serif; cursor:pointer; }
     #damarIsland button[data-action="allow-once"], #damarIsland button[data-action="presence"] { background:#f5f6f8; color:#0b0c0e; }
     #damarIsland button[data-action="deny"] { color:#ff8d97; }
@@ -203,7 +234,7 @@
   const wake = document.createElement('div'); wake.id = 'damarIslandWake'; wake.setAttribute('aria-hidden','true');
   const island = document.createElement('section');
   island.id = 'damarIsland'; island.dataset.state = 'hidden'; island.setAttribute('aria-label','Damar Notch');
-  island.innerHTML = `<div class="di-head" role="button" tabindex="0" aria-label="Damar Notch"><div class="di-slot" data-slot="mini" aria-hidden="true"></div></div><div class="di-stage"><div class="di-slot" data-slot="stage" aria-hidden="true"></div></div><div class="di-body"><p class="di-status" role="status" aria-live="polite">DAMAR Core not connected</p><div class="di-pills" hidden></div><div class="di-media" hidden><div class="di-media-main"><div class="di-media-cover" aria-hidden="true"><img class="di-media-art" alt="" hidden><span class="di-media-cover-letter"></span><span class="di-media-eq"><i></i><i></i><i></i></span></div><div class="di-media-info"><span class="di-media-title"></span><span class="di-media-sub"></span></div><div class="di-media-actions"><button type="button" data-media="previous" aria-label="Sebelumnya"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9.5 12z"/></svg></button><button type="button" data-media="toggle" aria-label="Putar atau jeda"><svg class="di-ic-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><svg class="di-ic-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg></button><button type="button" data-media="next" aria-label="Berikutnya"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l10.5-7z"/></svg></button></div></div><div class="di-media-progress"><div class="di-media-bar"><div class="di-media-fill"></div></div><div class="di-media-times"><span class="di-media-pos">0:00</span><span class="di-media-dur">0:00</span></div></div></div><div class="di-controls"><button type="button" data-action="presence" data-t="returnPresence">Return to Presence</button><button type="button" data-action="dashboard" data-t="dashboard">Control</button><button type="button" data-action="allow-once" data-t="allowOnce" hidden>Allow once</button><button type="button" data-action="allow-session" data-t="allowSession" hidden>Allow for session</button><button type="button" data-action="deny" data-t="deny" hidden>Deny</button></div></div>`;
+  island.innerHTML = `<div class="di-head" role="button" tabindex="0" aria-label="Damar Notch"><div class="di-slot" data-slot="mini" aria-hidden="true"></div><div class="di-minis" aria-hidden="true"></div></div><div class="di-stage"><div class="di-slot" data-slot="stage" aria-hidden="true"></div></div><div class="di-body"><p class="di-status" role="status" aria-live="polite">DAMAR Core not connected</p><div class="di-pills" hidden></div><div class="di-media" hidden><div class="di-media-main"><div class="di-media-cover" aria-hidden="true"><img class="di-media-art" alt="" hidden><span class="di-media-cover-letter"></span><span class="di-media-eq"><i></i><i></i><i></i></span></div><div class="di-media-info"><span class="di-media-title"></span><span class="di-media-sub"></span></div><div class="di-media-actions"><button type="button" data-media="previous" aria-label="Sebelumnya"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9.5 12z"/></svg></button><button type="button" data-media="toggle" aria-label="Putar atau jeda"><svg class="di-ic-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><svg class="di-ic-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg></button><button type="button" data-media="next" aria-label="Berikutnya"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l10.5-7z"/></svg></button></div></div><div class="di-media-progress"><div class="di-media-bar"><div class="di-media-fill"></div></div><div class="di-media-times"><span class="di-media-pos">0:00</span><span class="di-media-dur">0:00</span></div></div></div><div class="di-workers" hidden></div><div class="di-drop"><span data-t="dropHint">Lepaskan berkas di sini</span></div><p class="di-dropped" hidden></p><div class="di-controls"><button type="button" data-action="presence" data-t="returnPresence">Return to Presence</button><button type="button" data-action="dashboard" data-t="dashboard">Control</button><button type="button" data-action="allow-once" data-t="allowOnce" hidden>Allow once</button><button type="button" data-action="allow-session" data-t="allowSession" hidden>Allow for session</button><button type="button" data-action="deny" data-t="deny" hidden>Deny</button></div></div>`;
   document.body.append(wake, island);
   const head = island.querySelector('.di-head');
 
@@ -298,9 +329,10 @@
   // option rows (Allow once / Allow for session / Deny) - takes Coucou's
   // QUESTION_PICKER_H, 640x200. Coucou's chat/prompt growth (240 + 40 per
   // row, capped 300) has no Damar island analog yet; this per-view hook
-  // is where it slots in. Coucou's remaining taller heights (176/184/240/
-  // 248) belong to views Damar does not have (upload, mail, recap,
-  // whatsNew). Reads state only, so it is safe to call from any handler.
+  // is where it slots in. The drop view takes Coucou's upload height,
+  // 640x176; Coucou's remaining taller heights (184/240/248) belong to
+  // views Damar does not have (mail, recap, whatsNew). Reads state only,
+  // so it is safe to call from any handler.
   let greetingViewUntil = 0, viewTimer = 0;
   // Intro gating (Owner 2026-11-28): the greeting/intro view belongs ONLY to
   // the orb -> Notch arrival (orb -> morph -> expand with intro -> settle to
@@ -309,9 +341,11 @@
   let orbArrivalPending = false, orbIntro = false;
   function expandedView() {
     if (fsm.state !== 'expanded') return 'default';
+    if (dropActive) return 'drop';
     if (Date.now() < greetingViewUntil) return 'greeting';
     if (permission) return 'permission';
     if (mediaPresent) return 'media';
+    if (workers.length) return 'workers';
     return 'default';
   }
   function syncIslandView() { island.dataset.view = expandedView(); }
@@ -566,7 +600,7 @@
   // Signal memory feeding the behavior engine (below): Core-event state
   // the engine folds every 1.2 s. It exists independently of the slot;
   // with no character mounted it simply accumulates, unused.
-  const sig = { pending: 0, lastFinalAt: 0, lastFailAt: 0, workUntil: 0, alertUntil: 0, matadewaUntil: 0, mediaPlaying: false, sessionsWorking: 0, pc: null };
+  const sig = { pending: 0, lastFinalAt: 0, lastFailAt: 0, workUntil: 0, alertUntil: 0, matadewaUntil: 0, mediaPlaying: false, sessionsWorking: 0, workersWorking: 0, pc: null };
   let behaviorPrev = null;
 
   // Coucou-parity attention: a new pending permission peeks the notch out (compact; never auto-expands, no timer).
@@ -595,6 +629,9 @@
     island.dataset.attention = pending > 0 ? 'permission' : '';
     if (typeof notchPhysics !== 'undefined' && pending > 0) notchPhysics.emote = 'siaga';
     sig.pending = pending;
+    // Coucou alert parity: an unanswered request pins the island open -
+    // the hide timer must not take it away before the Owner decides.
+    fsm.setPinned(pending > 0);
     if (pending > 0) slot.invoke('setEmote', 'siaga');
     // A NEW waiting request gets the question reaction (blink + head tilt on a mounted character).
     if (pending > lastPending) slot.invoke('reactQuestion');
@@ -626,6 +663,9 @@
     else if (a.kind === 'alert') slot.invoke('setEmote', 'siaga');
     // A watchlist alert peeks the notch out like a permission request (compact only; never auto-expands, no timer).
     if (a.kind === 'alert' && fsm.state === 'hidden' && orbPhaseDone && notchEnabled && !voiceActive) fsm.reveal();
+    // A finished turn peeks out the same way (Coucou finished parity): the
+    // Owner sees work land in compact without opening anything.
+    if (a.kind === 'final' && fsm.state === 'hidden' && orbPhaseDone && notchEnabled && !voiceActive) fsm.reveal();
     window.dispatchEvent(new CustomEvent('damar-presence-motion-pulse'));
   });
   // Session pills + now-playing (Fase 3 last mile): rendered from the Core
@@ -641,6 +681,61 @@
     pillsEl.innerHTML = shownPills.map(p => '<span class="di-pill" data-state="' + p.state + '"><span class="di-pill-label">' + String(p.label || 'CLI session').replace(/[<>&"]/g, '') + '</span>' + (p.openOperations ? ' - ' + p.openOperations : '') + '</span>').join('') + (pills.length > shownPills.length ? '<span class="di-pill di-pill-more">+' + (pills.length - shownPills.length) + '</span>' : '');
     syncDense();
     syncIslandView();
+  });
+  // Worker connections (Coucou agent parity, Owner 2026-11-28): rows and
+  // compact minis projected in main from Core's own registries (Pandawa
+  // runs + DAMAR gateway connections) - the island renders, never invents.
+  // Expanded shows the rows with running/waiting/done states; compact
+  // shows Coucou's mini dots in the head's right ear.
+  const workersEl = island.querySelector('.di-workers');
+  const minisEl = island.querySelector('.di-minis');
+  const escHtml = s => String(s ?? '').replace(/[<>&"]/g, '');
+  const WORKER_LABEL = { running: 'wRunning', waiting: 'wWaiting', done: 'wDone', failed: 'wFailed', connected: 'wConnected' };
+  let workers = [];
+  function renderWorkers() {
+    sig.workersWorking = workers.filter(w => w.state === 'running').length;
+    workersEl.hidden = workers.length === 0;
+    workersEl.innerHTML = workers.slice(0, 5).map(w => '<div class="di-worker"><span class="di-worker-dot" data-state="' + w.state + '"></span><span class="di-worker-name">' + escHtml(w.name) + '</span><span class="di-worker-state">' + T(WORKER_LABEL[w.state] || 'wConnected') + '</span>' + (w.detail ? '<span class="di-worker-detail">' + escHtml(w.detail) + '</span>' : '') + '</div>').join('');
+    minisEl.innerHTML = workers.slice(0, 4).map(w => '<span class="di-mini" data-state="' + w.state + '" title="' + escHtml(w.name + ' · ' + T(WORKER_LABEL[w.state] || 'wConnected')) + '"></span>').join('');
+    syncIslandView();
+  }
+  window.addEventListener('damar-presence-workers', e => { workers = Array.isArray(e.detail) ? e.detail : []; renderWorkers(); });
+  // File drop (Coucou drop parity, Owner 2026-11-28): dragging files over
+  // the standby surface wakes the notch into its drop view; dropping hands
+  // the files to main, which stores them in Core as task attachments; the
+  // next Presence chat turn carries them as context. Standby only - the
+  // full Presence page keeps its own surface. Exclusivity holds: the drop
+  // view only ever switches the expanded view flag or reveals from hidden
+  // through the normal path, exactly like an alert.
+  let dropActive = false, dragDepth = 0, dropNoteTimer = 0;
+  const droppedEl = island.querySelector('.di-dropped');
+  function setDropActive(v) { if (dropActive === v) return; dropActive = v; syncIslandView(); }
+  function dragHasFiles(e) { return !!(e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')); }
+  document.addEventListener('dragenter', e => {
+    if (!dragHasFiles(e) || !document.body.classList.contains('siri-dock-active')) return;
+    e.preventDefault(); dragDepth++;
+    if (fsm.state === 'hidden' && orbPhaseDone && notchEnabled && !voiceActive) fsm.reveal();
+    if (fsm.state === 'compact') fsm.transition('expanded');
+    if (fsm.state === 'expanded') setDropActive(true);
+  });
+  document.addEventListener('dragover', e => { if (dragHasFiles(e)) e.preventDefault(); });
+  document.addEventListener('dragleave', () => { if (dragDepth > 0) dragDepth--; if (dragDepth === 0) setDropActive(false); });
+  document.addEventListener('drop', e => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault(); dragDepth = 0; setDropActive(false);
+    const files = e.dataTransfer?.files;
+    if (!files || !files.length) return;
+    const pending = desktop()?.dropFiles?.(files);
+    if (!pending || typeof pending.then !== 'function') return;
+    pending.then(res => {
+      const saved = res?.saved || [];
+      droppedEl.hidden = false;
+      droppedEl.textContent = res?.ok ? (saved.length > 1 ? T('dropReceivedMany', saved.length) : T('dropReceived', saved[0]?.name || '')) : T('dropFailed');
+      if (res?.ok) { slot.invoke('setEmote', 'senang'); slot.invoke('celebrate'); }
+      clearTimeout(dropNoteTimer);
+      dropNoteTimer = setTimeout(() => { droppedEl.hidden = true; if (fsm.state === 'expanded' && !pointerInside) fsm.transition('compact'); }, 2600);
+      syncIslandView();
+    }).catch(() => { droppedEl.hidden = false; droppedEl.textContent = T('dropFailed'); });
   });
   const mediaEl = island.querySelector('.di-media');
   const mediaCoverLetter = island.querySelector('.di-media-cover-letter');
@@ -725,7 +820,7 @@
       mataDewaActive: now < sig.matadewaUntil,
       speaking: coreSpeaking(),
       mediaPlaying: sig.mediaPlaying,
-      working: now < sig.workUntil || sig.sessionsWorking > 0,
+      working: now < sig.workUntil || sig.sessionsWorking > 0 || sig.workersWorking > 0,
       justFinished: now - sig.lastFinalAt < 9000,
       justFailed: now - sig.lastFailAt < 9000,
       pc: sig.pc,
@@ -752,7 +847,7 @@
   }, 90);
   window.addEventListener('damar-presence-behavior', e => { sig.pc = e.detail?.pcActivity || null; });
   window.addEventListener('damar-presence-mic', e => { island.dataset.mic = e.detail ? 'on' : 'off'; });
-  window.addEventListener('damar-presence-lang', () => { renderLabels(); renderStatus(); });
+  window.addEventListener('damar-presence-lang', () => { renderLabels(); renderStatus(); renderWorkers(); });
   renderLabels();
   window.addEventListener('damar-presence-status', e => { if (typeof e.detail === 'string') { statusText = e.detail; renderStatus(); } });
   window.__DAMAR_ISLAND__ = Object.freeze({

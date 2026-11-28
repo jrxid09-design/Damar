@@ -1,6 +1,6 @@
 'use strict';
 // Sandboxed preload (prototype preload.js shape). Only fixed channels; no Node, no Core URL, no credential.
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const EVENTS = new Set(['play-outro-before-close', 'window-restored', 'toggle-standby-orb']);
 contextBridge.exposeInMainWorld('damarDesktop', Object.freeze({
@@ -26,6 +26,15 @@ contextBridge.exposeInMainWorld('damarDesktop', Object.freeze({
   decidePermission: request => ipcRenderer.invoke('permission-decision', { permissionId: String(request?.permissionId || ''), decision: String(request?.decision || '') }),
   // Now-playing controls from the notch media pill; main validates the action against the SMTC allowlist.
   mediaControl: action => ipcRenderer.invoke('damar-media-control', { action: String(action || '') }),
+  // Notch file drop: resolves the page's File objects to real paths here
+  // (the documented Electron pattern); main validates and reads them.
+  dropFiles: files => {
+    const out = [];
+    for (const f of Array.from(files || []).slice(0, 5)) {
+      try { const p = webUtils.getPathForFile(f); if (p) out.push({ path: p, name: String(f.name || ''), size: Number(f.size) || 0 }); } catch {}
+    }
+    return ipcRenderer.invoke('damar-drop-files', out);
+  },
   // First-run onboarding: only the allowlisted answer fields cross the bridge (the completion flag never does).
   saveOnboarding: values => {
     const out = {};

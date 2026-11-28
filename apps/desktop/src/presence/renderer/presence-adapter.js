@@ -99,6 +99,7 @@
     window.dispatchEvent(new CustomEvent('damar-presence-status', { detail: statusFor(view) }));
     window.dispatchEvent(new CustomEvent('damar-presence-attention', { detail: { pendingPermissions: view.activity?.pendingPermissions || 0, permission: view.permission || null, approvalHistory: view.approvalHistory || [] } }));
     window.dispatchEvent(new CustomEvent('damar-presence-sessions', { detail: view.sessionPills || [] }));
+    window.dispatchEvent(new CustomEvent('damar-presence-workers', { detail: view.workers || [] }));
     window.dispatchEvent(new CustomEvent('damar-presence-media', { detail: view.media || null }));
     window.dispatchEvent(new CustomEvent('damar-presence-behavior', { detail: { pcActivity: view.pcActivity || null } }));
     if (view.lang) I18N?.setLang(view.lang);

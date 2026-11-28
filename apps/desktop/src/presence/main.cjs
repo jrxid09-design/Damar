@@ -14,7 +14,7 @@ const { spawn } = require('node:child_process');
 const files = require('./renderer-files.cjs');
 const policy = require('./host-policy.cjs'), { windowOptions, uiResponse } = policy;
 const { createCorePresence, watchCore, resolveSessionDirectory, DEFAULTS } = require('./core-presence.cjs');
-const { project, statusLine, pendingPermission, activityRows } = require('./projection.cjs');
+const { project, statusLine, pendingPermission, activityRows, projectWorkers } = require('./projection.cjs');
 
 const SELFTEST = process.env.DAMAR_PRESENCE_SELFTEST === '1'; // hidden window, prints security probe, exits
 const arg = name => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : undefined; };
@@ -34,13 +34,14 @@ let sessionDirectory = null, config = { source: 'defaults-not-loaded', ...DEFAUL
 let activityBaseline = null; // feed rows older than the first poll are history: not replayed as live ticker/emotes
 let permDetail = { id: null, detail: null }; // owner-credential command detail for the pending permission (renderer feed redacts it)
 let histCache = { at: 0, rows: [] }; // approval history for the Authority surface (owner read, 10 s cache)
+let workersCache = { at: 0, rows: [] }; // notch worker rows: Pandawa runs (snapshot) + gateway agents (owner read, 5 s cache)
 const fromMain = event => win && !win.isDestroyed() && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame;
 const pending = () => (projection.presence?.activity.pendingPermissions ? pendingPermission(coreState?.activity || []) : null);
 const message = () => {
   const p = pending(), rows = activityRows((coreState?.activity || []).filter(a => activityBaseline !== null && a.seq >= activityBaseline), config.notificationPrivacy);
   return { config, view: { statusLine: statusLine(projection), status: projection.status, lifecycle: projection.presence?.lifecycle || null, lang,
     activity: { ...(projection.presence?.activity || {}), events: rows },
-    sessionPills: projection.presence?.sessionPills || [], media: projection.presence?.media || null, pcActivity: pcActivitySnapshot(),
+    sessionPills: projection.presence?.sessionPills || [], workers: workersCache.rows, media: projection.presence?.media || null, pcActivity: pcActivitySnapshot(),
     // permissionId only; turnId stays in main (the renderer cannot target another turn).
     permission: p ? { permissionId: p.permissionId, tool: p.tool, file: p.file, detail: p.detail || (permDetail.id === p.permissionId ? permDetail.detail : null), added: p.added, removed: p.removed, allowable: p.allowable } : null,
     approvalHistory: histCache.rows } };
@@ -98,6 +99,10 @@ function bindCore() {
       push();
       // Approval history (owner read, cached): the Authority surface's record.
       if (core && Date.now() - histCache.at > 10000) { histCache.at = Date.now(); core.approvalHistory().then(rows => { if (Array.isArray(rows)) { histCache.rows = rows; push(); } }).catch(() => {}); }
+      // Notch worker rows (Coucou agent parity): Pandawa runs come from the
+      // snapshot already in hand; gateway-connected agents need the owner
+      // read, cached at 5 s like the approval history at 10 s.
+      if (core && Date.now() - workersCache.at > 5000) { workersCache.at = Date.now(); core.gatewayView().then(gw => { workersCache.rows = projectWorkers(coreState?.runs || [], gw, config.notificationPrivacy); push(); }).catch(() => {}); }
       // Enrich the pending permission with its command detail (owner read).
       const p = pending();
       if (p && !p.detail && permDetail.id !== p.permissionId) {
@@ -207,6 +212,26 @@ ipcMain.handle('damar-presence-get', event => (fromMain(event) ? message() : nul
 ipcMain.handle('damar-notch-model', event => {
   if (!fromMain(event)) return null;
   try { return notch3dModelCache || (notch3dModelCache = fs.readFileSync(NOTCH3D_MODEL_PATH)); } catch { return null; }
+});
+// Notch file drop (Coucou drop parity): the preload resolves the dropped
+// files to real paths (webUtils); main validates each one (exists, regular
+// file, size cap) and reads it, then Core's binding stores it as a task
+// attachment (core-presence.dropFiles). The renderer never sends bytes and
+// never names a destination.
+ipcMain.handle('damar-drop-files', async (event, entries) => {
+  if (!fromMain(event) || !core) return { ok: false, error: 'NOT_ALLOWED' };
+  try {
+    const list = [];
+    for (const e of Array.isArray(entries) ? entries.slice(0, 5) : []) {
+      const p = String(e?.path || '');
+      if (!p || !path.isAbsolute(p)) continue;
+      const st = fs.statSync(p);
+      if (!st.isFile() || st.size <= 0 || st.size > 25 * 1024 * 1024) continue;
+      list.push({ name: path.basename(p), dataBase64: fs.readFileSync(p).toString('base64') });
+    }
+    if (!list.length) return { ok: false, error: 'NO_VALID_FILES' };
+    return core.dropFiles(list);
+  } catch { return { ok: false, error: 'DROP_FAILED' }; }
 });
 ipcMain.handle('damar-media-control', async (event, request) => {
   if (!fromMain(event) || !core) return { ok: false };
