@@ -14,7 +14,7 @@ const RUN_STATE = { ACCEPTED: 'ACTIVE', RUNNING: 'ACTIVE', COMPLETED: 'COMPLETED
 function project(core, { notificationPrivacy = 'redacted' } = {}) {
   const privacy = PRIVACY.includes(notificationPrivacy) ? notificationPrivacy : 'redacted';
   if (!core || core.reachable !== true) {
-    return { status: 'NOT_CONNECTED', reason: 'DAMAR Core tidak terjangkau.', presence: null, approvals: null, missions: null, notifications: null };
+    return { status: 'NOT_CONNECTED', reason: 'DAMAR Core tidak terjangkau.', presence: null, approvals: null, missions: null, missionsLive: null, notifications: null };
   }
   const o = core.lifecycle?.outstanding || {};
   const n = k => (Number.isSafeInteger(o[k]) && o[k] >= 0 ? o[k] : 0);
@@ -45,6 +45,7 @@ function project(core, { notificationPrivacy = 'redacted' } = {}) {
     matadewa: projectMataDewa(core.mataDewa),
     cyber: projectCyber(core.cyber),
     otomasi: projectOtomasi(core.otomasi),
+    missionsLive: projectMissions(core, privacy),
     presence: { simulated: false, source: 'damar-core', lifecycle: lifecycleState, asOf: core.asOf || null,
       activity: { activeTurns, pendingPermissions: pending, activePandawaRuns: activeRuns, sessions: sessions.length },
       sessionPills, media,
@@ -247,6 +248,58 @@ function projectOtomasi(o) {
   };
 }
 
+// Missions for the Presence portal (Owner 2026-11-28, bind-or-dark): the
+// desktop Core has no separate mission registry - a mission on this surface
+// IS a Pandawa run in Core's durable run registry, the same registry the
+// notch worker rows and the Cyber patrol view read (Werkudara patrol runs
+// are runs in it too). This projection shapes that registry for the
+// Missions surface: runs still in flight, runs that recently landed, the
+// approvals waiting at the Gate, Pandawa discussions still open (newest
+// activity event per discussion), and Mata Dewa alert deliveries (the same
+// records the Mata Dewa projection serves). Nothing is synthesized: a
+// category with no real records stays empty and the surface rests calm.
+// Pandawa task text and output previews are user content and never cross
+// into this projection - worker, state, model and times only.
+const TERMINAL_RUN_STATES = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'OUTCOME_UNKNOWN']);
+const MISSION_RECENT_MS = 30 * 60 * 1000;
+function projectMissions(core, privacy = 'redacted', now = Date.now()) {
+  if (!core || core.reachable !== true) return null;
+  const runs = Array.isArray(core.runs) ? core.runs : [];
+  const intOrNull = v => (Number.isSafeInteger(v) ? v : null);
+  const nameOf = r => { const w = text(r.worker, 20); return privacy === 'redacted' ? (w ? 'Pandawa ' + w.charAt(0).toUpperCase() + w.slice(1) : 'Pandawa') : 'Pekerja Damar'; };
+  const baseRow = r => ({ id: text(r.runId, 40), worker: text(r.worker, 20), name: nameOf(r),
+    model: privacy === 'redacted' ? text(r.model, 60) : null,
+    createdAt: intOrNull(r.createdAt), updatedAt: intOrNull(r.updatedAt) });
+  const active = runs.filter(r => r && typeof r === 'object' && !TERMINAL_RUN_STATES.has(r.state))
+    .map(r => ({ ...baseRow(r), phase: r.state === 'RUNNING' ? 'RUNNING' : 'ACCEPTED' }));
+  const recent = runs.filter(r => r && typeof r === 'object' && TERMINAL_RUN_STATES.has(r.state) && intOrNull(r.updatedAt) !== null && now - r.updatedAt <= MISSION_RECENT_MS)
+    .map(r => ({ ...baseRow(r), state: r.state, error: privacy === 'redacted' ? text(r.error, 120) : null }))
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 6);
+  const o = core.lifecycle?.outstanding || {};
+  const n = k => (Number.isSafeInteger(o[k]) && o[k] >= 0 ? o[k] : 0);
+  const byDiscussion = new Map();
+  for (const a of Array.isArray(core.activity) ? core.activity : []) {
+    if (!a || a.kind !== 'discussion' || typeof a.discussionId !== 'string') continue;
+    const prev = byDiscussion.get(a.discussionId);
+    if (!prev || (a.seq || 0) >= (prev.seq || 0)) byDiscussion.set(a.discussionId, a);
+  }
+  const discussions = [...byDiscussion.values()]
+    .filter(a => !TERMINAL_RUN_STATES.has(a.state))
+    .map(a => ({ id: text(a.discussionId, 60), round: intOrNull(a.round), of: intOrNull(a.of), state: text(a.state, 20) }))
+    .slice(-3).reverse();
+  const alerts = privacy === 'hidden' ? [] : (Array.isArray(core.mataDewa?.proactive?.recent) ? core.mataDewa.proactive.recent : []).slice(0, 4)
+    .map(x => privacy === 'counts-only'
+      ? { at: text(x.at, 30), severity: text(x.severity, 12), location: null, message: null }
+      : { at: text(x.at, 30), severity: text(x.severity, 12), location: text(x.location, 60), message: text(x.message, 140) });
+  return {
+    active, recent, discussions, alerts,
+    counts: { running: active.filter(r => r.phase === 'RUNNING').length, queued: active.filter(r => r.phase === 'ACCEPTED').length,
+      activeTurns: n('activeTurns'), activeDiscussions: n('activeDiscussions') },
+    pendingApprovals: n('pendingPermissions'),
+    asOf: core.asOf || null,
+  };
+}
+
 // Now-playing for the music pill (Fase 3a): projected from the SMTC sense in core-host
 // (core.media). Unavailable stays null - the notch shows no pill rather than a fake track.
 // Artwork (the session's real SMTC thumbnail, a data URL from core-host) is only
@@ -309,4 +362,4 @@ function activityRows(activity = [], privacy = 'redacted') {
     .map(a => (a.kind === 'alert' && privacy === 'counts-only' ? { ...a, label: null } : a));
 }
 
-module.exports = { project, statusLine, pendingPermission, activityRow, activityRows, projectSessionPills, projectMedia, projectWorkers, projectCyber, projectOtomasi, PRIVACY };
+module.exports = { project, statusLine, pendingPermission, activityRow, activityRows, projectSessionPills, projectMedia, projectWorkers, projectCyber, projectOtomasi, projectMissions, PRIVACY };

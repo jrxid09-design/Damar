@@ -984,7 +984,7 @@
     let micStream = null, micAnalyser = null, micDataArray = null, liveMicActive = false;
     // One narrow bridge: renderer -> authenticated Electron main process -> canonical /api/ui.
     // It has no local store, no retry loop, and no authority/grant logic.
-    const presenceTruth = { status: 'NOT_CONNECTED', reason: 'Canonical DAMAR runtime is not connected.', timeoutMs: 8000, conversationId: null, approvals: null, missions: null, notifications: null, providers: null, presence: null, matadewa: null, cyber: null, host: null };
+    const presenceTruth = { status: 'NOT_CONNECTED', reason: 'Canonical DAMAR runtime is not connected.', timeoutMs: 8000, conversationId: null, approvals: null, missions: null, missionsLive: null, notifications: null, providers: null, presence: null, matadewa: null, cyber: null, host: null };
     const canonicalAdapter = Object.freeze({
       async request(path, method = 'GET', body) {
         if (!window.damarDesktop?.runtimeRequest) return { ok: false, error: { kind: 'NOT_CONNECTED', message: 'Secure desktop bridge unavailable.' } };
@@ -1008,6 +1008,8 @@
         if (cyb.ok) presenceTruth.cyber = cyb.data?.data || null;
         const oto = await this.request('/api/ui/presence/otomasi');
         if (oto.ok) presenceTruth.otomasi = oto.data?.data || null;
+        const msl = await this.request('/api/ui/presence/missions');
+        if (msl.ok) presenceTruth.missionsLive = msl.data?.data || null;
         const host = await this.request('/api/ui/presence/host');
         if (host.ok) presenceTruth.host = host.data?.data || null;
         const ex = await this.request('/api/ui/presence/extras');
@@ -2434,8 +2436,8 @@
 
     // SIMULASI engine (Owner 2026-11-28, hardened): a card is REAL or it is
     // SIMULATION, never both in one view. Simulation remains only where a
-    // card has genuinely nothing real to show (Missions with no mission,
-    // Finance with no portfolio module); cards with real content, including
+    // card has genuinely nothing real to show (Finance with no portfolio
+    // module); cards with real content, including
     // honest zeros, render that real state cleanly with missing pieces as
     // key points. The animation is the ONE product vocabulary, the Idle
     // Presence gold filament streams of the main window. Badged SIMULASI;
@@ -2525,28 +2527,30 @@
       };
       requestAnimationFrame(frame);
     }
-    function startMissionSim() {
-      const N = {
-        terima: { x: 70, y: 160, label: 'MISI DITERIMA', sub: 'dari pemilik' },
-        rencana: { x: 215, y: 160, label: 'RENCANA', sub: 'Puntadewa, strategi' },
-        hub: { x: 330, y: 160 },
-        werkudara: { x: 470, y: 52, label: 'WERKUDARA', sub: 'keamanan, supervisi' },
-        sadewa: { x: 470, y: 126, label: 'SADEWA', sub: 'riset, verifikasi' },
-        nakula: { x: 470, y: 200, label: 'NAKULA', sub: 'data, spasial' },
-        janaka: { x: 470, y: 274, label: 'JANAKA', sub: 'rekayasa' },
-        antre: { x: 330, y: 274, label: 'ANTREAN', sub: 'menunggu giliran' },
-        join: { x: 580, y: 160 },
-        gerbang: { x: 648, y: 160, label: 'GERBANG OTORITAS', sub: 'persetujuan pemilik' },
-        selesai: { x: 716, y: 160, label: 'SELESAI', sub: 'hasil terverifikasi' }
-      };
-      const P = (a, b, bend) => ({ a: N[a], b: N[b], bend: bend || 0 });
-      const paths = [P('terima', 'rencana'), P('rencana', 'hub'), P('hub', 'werkudara', -26), P('hub', 'sadewa', -8), P('hub', 'nakula', 8), P('hub', 'janaka', 26), P('antre', 'janaka', -14), P('werkudara', 'join', -26), P('sadewa', 'join', -8), P('nakula', 'join', 8), P('janaka', 'join', 26), P('join', 'gerbang'), P('antre', 'hub', 30), P('gerbang', 'selesai')];
-      const pathPhase = [0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 4];
-      const nodePhase = { terima: 0, rencana: 1, hub: 2, werkudara: 2, sadewa: 2, nakula: 2, janaka: 2, antre: 2, join: 3, gerbang: 3, selesai: 4 };
-      startSim('missionSim', 320, ({ t, cluster, stream }) => {
-        const ph = Math.floor(t / 2600) % 5;
-        paths.forEach((p, i) => stream(p, t, 4, 0.00045, pathPhase[i] <= ph));
-        for (const [k, nd] of Object.entries(N)) if (nd.label) cluster(nd, t, nodePhase[k] === ph, nodePhase[k] < ph);
+    function startMissionLive(ml) {
+      // Missions scene (Owner 2026-11-28, bind-or-dark): every element is a
+      // real record from Core's Pandawa run registry. The Core node is the
+      // registry itself; one strand per run still in flight, its pulse pace
+      // set by the run's real phase (Berjalan at the engine's standard pace,
+      // Menunggu slow and sparse). A run that lands leaves the scene at the
+      // next snapshot and is listed under Baru selesai. The Gate node exists
+      // only while approvals genuinely wait and carries their real count;
+      // no strand routes through it, because a waiting approval belongs to
+      // a turn, not to these runs. With no run in flight this is never
+      // called: the surface rests calm instead of performing a fake flow.
+      const act = (ml.active || []).slice(0, 4);
+      const coreNode = { x: 84, y: 160, label: 'DAMAR CORE', sub: 'registri run Pandawa' };
+      const nodes = act.map((r, i) => ({
+        x: 612, y: act.length === 1 ? 160 : 52 + i * (216 / (act.length - 1)),
+        label: (r.worker || 'pandawa').toUpperCase(), sub: r.phase === 'RUNNING' ? 'berjalan' : 'menunggu giliran',
+        phase: r.phase, bend: (i - (act.length - 1) / 2) * 12,
+      }));
+      const gate = ml.pendingApprovals > 0 ? { x: 348, y: 282, label: 'GERBANG OTORITAS', sub: ml.pendingApprovals + ' menunggu keputusan' } : null;
+      startSim('missionLive', 320, ({ t, cluster, stream }) => {
+        for (const nd of nodes) stream({ a: coreNode, b: nd, bend: nd.bend }, t, nd.phase === 'RUNNING' ? 4 : 2, nd.phase === 'RUNNING' ? 0.00045 : 0.00012, true);
+        cluster(coreNode, t, nodes.some(nd => nd.phase === 'RUNNING'), false);
+        for (const nd of nodes) cluster(nd, t, nd.phase === 'RUNNING', false);
+        if (gate) cluster(gate, t, true, false);
       });
     }
     function startFinSim() {
@@ -2569,10 +2573,24 @@
     function renderWorkspaceContent(key) {
       const esc = v => String(v ?? '').replace(/[<>&"]/g, '');
       const stage = document.getElementById('moduleStage');
-      if (key === 'missions' && presenceTruth.missions != null) {
-        const active = (presenceTruth.missions || []).find(m => ['DRAFT', 'ACTIVE', 'PAUSED', 'COMPLETED'].includes(m.state));
-        stage.innerHTML = `<div class=\"mod-header\"><div class=\"mod-title-group\"><h2>Missions</h2></div></div><div class=\"mod-content\"><div class=\"mdw-grid\"><div class=\"mdw-widget\" style=\"grid-column:1/-1;\"><div class=\"mdw-wtitle\">Misi aktif</div>${active ? `<div class=\"mdw-hero\">${esc(active.state)}</div><div class=\"mdw-note\">${esc(active.label || 'Misi berjalan di DAMAR Core.')}</div>` : `<div class=\"sim-wrap\"><span class=\"sim-badge\">SIMULASI</span><canvas class=\"sim-flow\" id=\"missionSim\"></canvas><div class=\"mdw-note\">Contoh alur misi Damar: diterima, direncanakan Puntadewa, dikerjakan Pandawa, lewat Gerbang Otoritas, selesai terverifikasi. Misi nyata menggantikan simulasi ini saat berjalan.</div></div>`}</div></div></div>`;
-        if (!active) startMissionSim();
+      if (key === 'missions' && presenceTruth.missionsLive != null) {
+        const ml = presenceTruth.missionsLive;
+        const mState = st => st === 'COMPLETED' ? 'Selesai' : st === 'FAILED' ? 'Gagal' : st === 'CANCELLED' ? 'Dibatalkan' : 'Hasil belum diketahui';
+        const when = ts => ts ? new Date(ts).toLocaleString('id-ID') : '';
+        const activeRows = ml.active.map(r => `<div class="mdw-row mdw-row-stack"><div class="mdw-row-main">${esc(r.name)} \u00b7 ${r.phase === 'RUNNING' ? 'Berjalan' : 'Menunggu'}</div><div class="mdw-row-sub">${esc(r.model || '')}${r.createdAt ? ' \u00b7 sejak ' + when(r.createdAt) : ''}</div></div>`).join('');
+        const recentRows = ml.recent.map(r => `<div class="mdw-row mdw-row-stack"><div class="mdw-row-main">${esc(r.name)} \u00b7 ${mState(r.state)}${r.updatedAt ? ' \u00b7 ' + when(r.updatedAt) : ''}</div>${r.error ? `<div class="mdw-row-sub">${esc(r.error)}</div>` : ''}</div>`).join('');
+        const alertRows = ml.alerts.map(a => `<div class="mdw-row mdw-row-stack"><div class="mdw-row-main">${esc(a.message || a.severity || 'Peringatan')}</div><div class="mdw-row-sub">${esc(a.location || '')}${a.at ? ' \u00b7 ' + esc(new Date(a.at).toLocaleString('id-ID')) : ''}</div></div>`).join('');
+        const discRows = ml.discussions.map(d => `<div class="mdw-row mdw-row-stack"><div class="mdw-row-main">Diskusi Pandawa${d.round ? ' \u00b7 ronde ' + d.round + (d.of ? ' dari ' + d.of : '') : ''}</div><div class="mdw-row-sub">${esc(d.state || '')}</div></div>`).join('');
+        const sceneHtml = ml.active.length ? `<canvas class="sim-flow" id="missionLive"></canvas><div class="mdw-note">Tiap aliran adalah satu run Pandawa yang sedang berjalan di Core dan denyutnya mengikuti keadaan run itu. Run yang selesai keluar dari visualisasi dan tercatat di daftar Baru selesai.</div>` : '';
+        const calmNote = ml.active.length ? '' : `<div class="mdw-note">${(ml.recent.length || ml.discussions.length || ml.alerts.length) ? 'Tidak ada misi yang sedang berjalan saat ini.' : 'Tidak ada misi berjalan. Misi tampil di sini saat Pandawa bekerja di Core.'}</div>`;
+        stage.innerHTML = `<div class="mod-header"><div class="mod-title-group"><h2>Missions</h2></div></div><div class="mod-content"><div class="mdw-grid">`
+          + `<div class="mdw-widget" style="grid-column:1/-1;"><div class="mdw-wtitle">Aktivitas misi</div>${sceneHtml}${activeRows}${calmNote}`
+          + (ml.pendingApprovals ? `<div class="mdw-wtitle" style="margin-top:6px;">Persetujuan menunggu</div><div class="mdw-hero">${ml.pendingApprovals}</div><div class="mdw-note">Menunggu keputusan pemilik di Gerbang Otoritas. Putuskan di portal Authority.</div>` : '')
+          + (ml.discussions.length ? `<div class="mdw-wtitle" style="margin-top:6px;">Diskusi Pandawa</div>${discRows}` : '')
+          + (ml.recent.length ? `<div class="mdw-wtitle" style="margin-top:6px;">Baru selesai</div>${recentRows}` : '')
+          + (ml.alerts.length ? `<div class="mdw-wtitle" style="margin-top:6px;">Peringatan masuk</div>${alertRows}` : '')
+          + `<div class="mdw-note">Sumber: Registri run Pandawa di Core.</div></div></div></div>`;
+        if (ml.active.length) startMissionLive(ml);
         return;
       }
       if (key === 'authority' && presenceTruth.approvals != null) {
