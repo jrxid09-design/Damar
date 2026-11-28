@@ -49,11 +49,19 @@ function isCameraAddress(ip) {
 
 const lookupWith = accept => (hostname, options, callback) => {
   if (typeof options === 'function') { callback = options; options = {}; }
-  dns.lookup(hostname, options, (err, address, family) => {
+  // Resolve every address and check them all (anti-rebinding), then prefer
+  // IPv4 when the host has it: several Indonesian ISPs route IPv6 poorly or
+  // not at all (observed 2026-11-28: firms.modaps.eosdis.nasa.gov answers on
+  // IPv4 while its IPv6 route times out, which surfaced as a misleading
+  // EGRESS_NETWORK_ERROR for the FIRMS layer only).
+  dns.lookup(hostname, { ...options, all: true }, (err, addresses) => {
     if (err) return callback(err);
-    const list = Array.isArray(address) ? address : [{ address, family }];
+    const list = (Array.isArray(addresses) ? addresses : []).filter(a => a && typeof a.address === 'string');
     if (!list.length || list.some(a => !accept(a.address))) return callback(fail('EGRESS_PRIVATE_ADDRESS'));
-    callback(null, address, family);
+    const v4 = list.filter(a => a.family === 4);
+    const chosen = v4.length ? v4 : list;
+    if (options.all) return callback(null, chosen);
+    callback(null, chosen[0].address, chosen[0].family);
   });
 };
 const guardedLookup = lookupWith(isPublicAddress);
