@@ -71,7 +71,7 @@ function projectProviders(data) {
 
 // Mata Dewa for the Presence portal: watch points + general public feeds
 // (global feeds when no watch point exists), allowlisted display fields only.
-let lastChipKey = null;
+let lastChipKey = null; let lastChipShipAt = 0;
 function projectMataDewa(m) {
   if (!m || typeof m !== 'object') { lastChipKey = null; return null; }
   const feedItems = (feed, pick) => {
@@ -84,8 +84,9 @@ function projectMataDewa(m) {
   // the media artwork), so the poll never re-ships the image.
   const imageryItems = feedItems(m.feeds?.imagery, it => ({ name: text(it.name, 60), profile: text(it.profile, 12), product: text(it.productLabel, 40), day: text(it.day, 10), datetime: text(it.datetime, 30), cloudCoverPct: typeof it.cloudCoverPct === 'number' ? it.cloudCoverPct : null }));
   const chip = m.chip && typeof m.chip.jpeg === 'string' && m.chip.jpeg.length < 600000 ? m.chip : null;
-  const chipChanged = !!chip && chip.sceneKey !== lastChipKey;
-  if (chip) lastChipKey = chip.sceneKey; else if (!m.feeds?.imagery) lastChipKey = null;
+  const chipChanged = !!chip && (chip.sceneKey !== lastChipKey || Date.now() - lastChipShipAt > 60000);
+  if (chipChanged) { lastChipKey = chip.sceneKey; lastChipShipAt = Date.now(); }
+  if (!chip && !m.feeds?.imagery) lastChipKey = null;
   return {
     consent: m.status?.consent === true,
     areas: (Array.isArray(m.status?.areas) ? m.status.areas : []).map(a => ({ name: text(a.name, 60), seeded: a.id === 'jakarta' })).filter(a => a.name),
