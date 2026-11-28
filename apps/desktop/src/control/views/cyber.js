@@ -18,10 +18,12 @@
       reasonNoCred: 'The daemon credential is not available in this installation, so the posture cannot be read.',
       reasonUnreachable: 'The Damar daemon is unreachable from Core, so the posture cannot be read.',
       patrol: 'Werkudara patrols', patrolEmpty: 'No Werkudara patrol recorded on this Core session yet. Patrols run through Damar appear here with their real results.',
+      latestPatrol: 'Latest patrols', kindSistem: 'System', kindJaringan: 'Network', kindUmum: 'General', noKind: 'No patrol of this kind recorded yet.',
+      modeNote: 'Patrols run on demand; there is no periodic patrol schedule in the backend at this time.',
       incidents: 'Defence events', incidentsEmpty: 'No incidents recorded in the detection engine at this time.', incidentsWaiting: 'Waiting for the daemon projection to be readable.',
       activity: 'Werkudara activity', totalRuns: 'Recorded tasks', completed: 'Completed', failed: 'Failed', lastRun: 'Most recent',
       activityEmpty: 'No Werkudara task recorded on this Core session yet.',
-      when: 'Time', state: 'Status', task: 'Task', result: 'Result', risk: 'Risk', summary: 'Summary', source: 'Source',
+      kind: 'Kind', when: 'Time', state: 'Status', task: 'Task', result: 'Result', risk: 'Risk', summary: 'Summary', source: 'Source',
       srcPatrol: 'Core Pandawa registry (Werkudara runs)', srcDcd: 'DCD engine in the canonical daemon, via Core',
       stCOMPLETED: 'Completed', stFAILED: 'Failed', stRUNNING: 'Running', stACCEPTED: 'Waiting', stCANCELLED: 'Cancelled', stOUTCOME_UNKNOWN: 'Outcome unknown' },
     id: { subtitle: 'Catatan patroli Werkudara dan postur deteksi DCD, dibaca langsung dari Core.',
@@ -31,10 +33,12 @@
       reasonNoCred: 'Kredensial daemon tidak tersedia pada instalasi ini, jadi postur tidak terbaca.',
       reasonUnreachable: 'Daemon Damar tidak terjangkau dari Core, jadi postur tidak terbaca.',
       patrol: 'Patroli Werkudara', patrolEmpty: 'Belum ada patroli Werkudara tercatat pada sesi Core ini. Patroli yang dijalankan lewat Damar tampil di sini dengan hasil aslinya.',
+      latestPatrol: 'Patroli terakhir', kindSistem: 'Sistem', kindJaringan: 'Jaringan', kindUmum: 'Umum', noKind: 'Belum ada patroli jenis ini tercatat.',
+      modeNote: 'Patroli berjalan atas permintaan; belum ada jadwal berkala di backend saat ini.',
       incidents: 'Kejadian pertahanan', incidentsEmpty: 'Tidak ada insiden tercatat di mesin deteksi saat ini.', incidentsWaiting: 'Menunggu proyeksi daemon terbaca.',
       activity: 'Aktivitas Werkudara', totalRuns: 'Tugas tercatat', completed: 'Selesai', failed: 'Gagal', lastRun: 'Terakhir',
       activityEmpty: 'Belum ada tugas Werkudara tercatat pada sesi Core ini.',
-      when: 'Waktu', state: 'Status', task: 'Tugas', result: 'Hasil', risk: 'Risiko', summary: 'Ringkasan', source: 'Sumber',
+      kind: 'Jenis', when: 'Waktu', state: 'Status', task: 'Tugas', result: 'Hasil', risk: 'Risiko', summary: 'Ringkasan', source: 'Sumber',
       srcPatrol: 'Registri Pandawa Core (tugas Werkudara)', srcDcd: 'Mesin DCD di daemon kanonis, lewat Core',
       stCOMPLETED: 'Selesai', stFAILED: 'Gagal', stRUNNING: 'Berjalan', stACCEPTED: 'Menunggu', stCANCELLED: 'Dibatalkan', stOUTCOME_UNKNOWN: 'Hasil belum diketahui' }
   };
@@ -80,6 +84,13 @@
       H.kv(T('failed'), String(wk.failed)), H.kv(T('lastRun'), when(wk.lastRunAt)), H.kv(T('source'), T('srcPatrol'))])
       : '<div style="font-size:12.5px;color:var(--text-secondary);">' + esc(T('activityEmpty')) + '</div>', { span: 7 });
     var runRow = function (r) { return [esc(when(r.createdAt)), H.statusBadgeHtml(r.state, stateLabel(r.state)), esc(cut(r.task, 140)), esc(cut(r.outputPreview || r.error || '', 160))]; };
+    var lt = d.patroliTerbaru || {};
+    var latestRows = [['kindSistem', lt.sistem], ['kindJaringan', lt.jaringan], ['kindUmum', lt.umum]].map(function (pair) {
+      var r = pair[1];
+      return [esc(T(pair[0])), r ? H.statusBadgeHtml(r.state, stateLabel(r.state)) : esc(T('noKind')), r ? esc(when(r.createdAt)) : '-', r ? esc(cut(r.outputPreview || r.error || r.task, 160)) : '-'];
+    });
+    html += H.panel(T('latestPatrol'), H.table([T('kind'), T('state'), T('when'), T('result')], latestRows) +
+      '<div style="font-size:11.5px;color:var(--text-muted);padding:8px 12px;">' + esc(T('modeNote')) + '</div>', { span: 12, flush: true });
     html += H.panel(T('patrol'), H.table([T('when'), T('state'), T('task'), T('result')], (d.patroli || []).map(runRow), T('patrolEmpty')), { span: 12, flush: true });
     var incBody;
     if (!dcd.available) incBody = '<div style="padding:18px;text-align:center;color:var(--text-muted);font-size:12px;">' + esc(T('incidentsWaiting')) + '</div>';

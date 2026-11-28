@@ -207,13 +207,16 @@ function projectCyber(c) {
           summary: text(n.summary, 300), occurredAt: Number.isSafeInteger(n.occurredAt) ? n.occurredAt : null })),
         generatedAt: Number.isSafeInteger(d.generatedAt) ? d.generatedAt : null }
     : { available: false, reason: text(d.reason, 40) || 'DAEMON_TIDAK_TERJANGKAU' };
+  const latestRow = r => (r && typeof r === 'object' ? runRow(r) : null);
   return {
     werkudara: { totalRuns: Number.isSafeInteger(wk.totalRuns) ? wk.totalRuns : 0,
       completed: Number.isSafeInteger(wk.completed) ? wk.completed : 0,
       failed: Number.isSafeInteger(wk.failed) ? wk.failed : 0,
       lastRunAt: Number.isSafeInteger(wk.lastRunAt) ? wk.lastRunAt : null,
       runs: (Array.isArray(wk.runs) ? wk.runs : []).slice(0, 8).map(runRow) },
-    patroli: (Array.isArray(c.patroli) ? c.patroli : []).slice(0, 6).map(runRow),
+    patroli: (Array.isArray(c.patroli) ? c.patroli : []).slice(0, 6).map(r => ({ ...runRow(r), kind: text(r.kind, 12) })),
+    patroliTerbaru: { sistem: latestRow(c.patroliTerbaru?.sistem), jaringan: latestRow(c.patroliTerbaru?.jaringan), umum: latestRow(c.patroliTerbaru?.umum) },
+    modePatroli: text(c.modePatroli, 24) || 'atas-permintaan',
     dcd,
     generatedAt: Number.isSafeInteger(c.generatedAt) ? c.generatedAt : null,
   };

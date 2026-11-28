@@ -257,6 +257,15 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
         const wk = [...runs.values()].filter(r => r.worker === 'werkudara')
           .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         const row = r => ({ ...view(r), task: clean(r.task, 300) });
+        // Patrols are the continuous activity of this surface (Owner
+        // 2026-11-28): a run whose task opens with the PATROLI marker is a
+        // patrol; PATROLI SISTEM / PATROLI JARINGAN classify the kind from
+        // the task text itself. Patrols run on demand in the current
+        // design; there is no patrol scheduler in the backend, so the mode
+        // is reported as such and no cadence is invented.
+        const patrolKind = r => { const m = /^\s*PATROLI\s+(SISTEM|JARINGAN)\b/i.exec(String(r.task || '')); return m ? m[1].toLowerCase() : (/^\s*PATROLI\b/i.test(String(r.task || '')) ? 'umum' : null); };
+        const patrols = wk.filter(r => patrolKind(r));
+        const latestOf = kind => { const hit = patrols.find(r => patrolKind(r) === kind); return hit ? row(hit) : null; };
         const dcd = cyber ? await cyber.daemonPosture().catch(() => ({ available: false, reason: 'DAEMON_TIDAK_TERJANGKAU' }))
           : { available: false, reason: 'BINDING_TIDAK_TERSEDIA' };
         return json(200, { success: true, data: {
@@ -264,7 +273,9 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
             completed: wk.filter(r => r.state === 'COMPLETED').length,
             failed: wk.filter(r => r.state === 'FAILED').length,
             lastRunAt: wk.length ? wk[0].createdAt : null },
-          patroli: wk.filter(r => /^\s*PATROLI\b/i.test(String(r.task || ''))).slice(0, 12).map(row),
+          patroli: patrols.slice(0, 12).map(r => ({ ...row(r), kind: patrolKind(r) })),
+          patroliTerbaru: { sistem: latestOf('sistem'), jaringan: latestOf('jaringan'), umum: latestOf('umum') },
+          modePatroli: 'atas-permintaan',
           dcd, generatedAt: Date.now() } });
       }
       if (p === '/api/r9/lifecycle/restart') {
